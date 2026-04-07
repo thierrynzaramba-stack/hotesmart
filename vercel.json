@@ -1,12 +1,11 @@
 {
   "version": 2,
-  "outputDirectory": ".",
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/login", "dest": "/pages/login.html" },
     { "src": "/apps", "dest": "/pages/apps.html" },
     { "src": "/settings", "dest": "/pages/settings.html" },
     { "src": "/abonnement", "dest": "/pages/abonnement.html" },
-    { "src": "/", "dest": "/index.html" }
+    { "src": "/", "dest": "/pages/login.html" }
   ]
 }
