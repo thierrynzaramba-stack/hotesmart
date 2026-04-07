@@ -2,10 +2,10 @@
   "version": 2,
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/login", "dest": "/pages/login.html" },
-    { "src": "/apps", "dest": "/pages/apps.html" },
-    { "src": "/settings", "dest": "/pages/settings.html" },
-    { "src": "/abonnement", "dest": "/pages/abonnement.html" },
-    { "src": "/", "dest": "/pages/login.html" }
+    { "src": "/dashboard", "dest": "/dashboard.html" },
+    { "src": "/apps", "dest": "/apps.html" },
+    { "src": "/settings", "dest": "/settings.html" },
+    { "src": "/abonnement", "dest": "/abonnement.html" },
+    { "src": "/", "dest": "/login.html" }
   ]
 }
