@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/login", "dest": "/pages/login.html" },
-    { "src": "/apps", "dest": "/pages/apps.html" },
-    { "src": "/settings", "dest": "/pages/settings.html" },
-    { "src": "/abonnement", "dest": "/pages/abonnement.html" },
-    { "src": "/", "dest": "/pages/index.html" }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/login", "destination": "/pages/login.html" },
+    { "source": "/apps", "destination": "/pages/apps.html" },
+    { "source": "/settings", "destination": "/pages/settings.html" },
+    { "source": "/abonnement", "destination": "/pages/abonnement.html" },
+    { "source": "/", "destination": "/pages/index.html" }
   ]
 }
