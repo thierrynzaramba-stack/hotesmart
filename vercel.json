@@ -1,11 +1,3 @@
 {
-  "version": 2,
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/dashboard", "dest": "/dashboard.html" },
-    { "src": "/apps", "dest": "/apps.html" },
-    { "src": "/settings", "dest": "/settings.html" },
-    { "src": "/abonnement", "dest": "/abonnement.html" },
-    { "src": "/", "dest": "/login.html" }
-  ]
+  "version": 2
 }
