@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="supabase-url" content="TON_SUPABASE_URL">
-  <meta name="supabase-key" content="TA_SUPABASE_ANON_KEY">
+  <meta name="supabase-url" content="https://xxxx.supabase.co">
+  <meta name="supabase-key" content="eyJxxx...">
   <title>HôteSmart — Connexion</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
@@ -25,8 +25,8 @@
   <div class="login-sub">Gérez votre location courte durée</div>
 
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('login')">Connexion</div>
-    <div class="tab" onclick="switchTab('register')">Inscription</div>
+    <div class="tab active">Connexion</div>
+    <div class="tab">Inscription</div>
   </div>
 
   <div id="form-login">
@@ -38,7 +38,7 @@
       <label class="form-label">Mot de passe</label>
       <input class="form-input" type="password" id="login-password" placeholder="••••••••">
     </div>
-    <button class="btn btn-primary" style="width:100%" onclick="handleLogin()">Se connecter</button>
+    <button class="btn btn-primary" style="width:100%" id="btn-login">Se connecter</button>
     <div class="error" id="login-error"></div>
   </div>
 
@@ -55,7 +55,7 @@
       <label class="form-label">Mot de passe</label>
       <input class="form-input" type="password" id="reg-password" placeholder="••••••••">
     </div>
-    <button class="btn btn-primary" style="width:100%" onclick="handleRegister()">Créer mon compte</button>
+    <button class="btn btn-primary" style="width:100%" id="btn-register">Créer mon compte</button>
     <div class="error" id="reg-error"></div>
   </div>
 </div>
@@ -63,14 +63,20 @@
 <script type="module">
   import { supabase, getSession } from '/shared/supabase.js'
 
-  window.switchTab = function(tab) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
-    event.target.classList.add('active')
-    document.getElementById('form-login').style.display = tab === 'login' ? 'block' : 'none'
-    document.getElementById('form-register').style.display = tab === 'register' ? 'block' : 'none'
-  }
+  const session = await getSession()
+  if (session) window.location.href = '/pages/index.html'
 
-  window.handleLogin = async function() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+      this.classList.add('active')
+      const isLogin = this.textContent.trim() === 'Connexion'
+      document.getElementById('form-login').style.display = isLogin ? 'block' : 'none'
+      document.getElementById('form-register').style.display = isLogin ? 'none' : 'block'
+    })
+  })
+
+  document.getElementById('btn-login').addEventListener('click', async () => {
     const email = document.getElementById('login-email').value
     const password = document.getElementById('login-password').value
     const err = document.getElementById('login-error')
@@ -81,9 +87,9 @@
     } else {
       window.location.href = '/pages/index.html'
     }
-  }
+  })
 
-  window.handleRegister = async function() {
+  document.getElementById('btn-register').addEventListener('click', async () => {
     const name = document.getElementById('reg-name').value
     const email = document.getElementById('reg-email').value
     const password = document.getElementById('reg-password').value
@@ -98,10 +104,7 @@
     } else {
       window.location.href = '/pages/index.html'
     }
-  }
-
-  const session = await getSession()
-  if (session) window.location.href = '/pages/index.html'
+  })
 </script>
 
 </body>
