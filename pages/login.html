@@ -6,7 +6,7 @@
   <meta name="supabase-url" content="TON_SUPABASE_URL">
   <meta name="supabase-key" content="TA_SUPABASE_ANON_KEY">
   <title>HôteSmart — Connexion</title>
-  <link rel="stylesheet" href="../public/style.css">
+  <link rel="stylesheet" href="/public/style.css">
   <style>
     body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg2); }
     .login-box { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 32px; width: 100%; max-width: 380px; }
@@ -61,7 +61,7 @@
 </div>
 
 <script type="module">
-  import { supabase } from '../shared/supabase.js'
+  import { supabase, getSession } from '/shared/supabase.js'
 
   window.switchTab = function(tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
@@ -74,13 +74,12 @@
     const email = document.getElementById('login-email').value
     const password = document.getElementById('login-password').value
     const err = document.getElementById('login-error')
-
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
       err.textContent = 'Email ou mot de passe incorrect'
       err.style.display = 'block'
     } else {
-      window.location.href = '/'
+      window.location.href = '/pages/index.html'
     }
   }
 
@@ -89,24 +88,20 @@
     const email = document.getElementById('reg-email').value
     const password = document.getElementById('reg-password').value
     const err = document.getElementById('reg-error')
-
     const { error } = await supabase.auth.signUp({
       email, password,
       options: { data: { full_name: name } }
     })
-
     if (error) {
       err.textContent = error.message
       err.style.display = 'block'
     } else {
-      window.location.href = '/'
+      window.location.href = '/pages/index.html'
     }
   }
 
-  // Si déjà connecté → dashboard
-  import { getSession } from '../shared/supabase.js'
   const session = await getSession()
-  if (session) window.location.href = '/'
+  if (session) window.location.href = '/pages/index.html'
 </script>
 
 </body>
