@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="supabase-url" content="https://xxxx.supabase.co">
-  <meta name="supabase-key" content="eyJxxx...">
+  <meta name="supabase-url" content="https://cjmrizpdyhrcurmgyrhs.supabase.co">
+  <meta name="supabase-key" content="sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD>
   <title>HôteSmart — Dashboard</title>
-  <link rel="stylesheet" href="../public/style.css">
+  <link rel="stylesheet" href="/public/style.css">
 </head>
 <body>
 
@@ -23,41 +23,38 @@
 
     <div class="content">
 
-      <!-- Métriques -->
       <div class="metrics">
         <div class="metric">
           <div class="metric-label">Revenus ce mois</div>
           <div class="metric-value" id="stat-revenus">—</div>
-          <div class="metric-delta" id="stat-revenus-delta"></div>
+          <div class="metric-delta"></div>
         </div>
         <div class="metric">
           <div class="metric-label">Taux d'occupation</div>
           <div class="metric-value" id="stat-occupation">—</div>
-          <div class="metric-delta" id="stat-occupation-delta"></div>
+          <div class="metric-delta"></div>
         </div>
         <div class="metric">
           <div class="metric-label">Messages traités</div>
-          <div class="metric-value" id="stat-messages">—</div>
+          <div class="metric-value" id="stat-messages">0</div>
           <div class="metric-delta">par l'Agent AI</div>
         </div>
         <div class="metric">
           <div class="metric-label">Note moyenne</div>
           <div class="metric-value" id="stat-note">—</div>
-          <div class="metric-delta" id="stat-note-delta"></div>
+          <div class="metric-delta"></div>
         </div>
       </div>
 
-      <!-- Apps -->
       <div class="section-title">Mes apps</div>
       <div class="apps-grid" id="apps-grid">
         <div class="app-card">Chargement...</div>
       </div>
 
-      <!-- Messages récents -->
       <div class="section-title">Derniers messages traités</div>
       <div class="card" id="messages-list">
         <div class="msg-row">
-          <div style="font-size:12px;color:var(--text2)">Chargement des messages...</div>
+          <div style="font-size:12px;color:var(--text2)">Aucun message pour l'instant</div>
         </div>
       </div>
 
@@ -66,10 +63,10 @@
 </div>
 
 <script type="module">
-  import { requireAuth } from '../components/auth-guard.js'
-  import { renderSidebar } from '../components/sidebar.js'
-  import { getUser } from '../shared/supabase.js'
-  import CONFIG from '../shared/config.js'
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { getUser } from '/shared/supabase.js'
+  import CONFIG from '/shared/config.js'
 
   async function init() {
     const session = await requireAuth()
@@ -77,22 +74,13 @@
 
     const user = await getUser()
 
-    // Sidebar
     await renderSidebar('accueil')
 
-    // Bienvenue
     const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'là'
     document.getElementById('welcome').textContent = `Bonjour ${name} !`
-    document.getElementById('status').textContent = 'Beds24 connecté · Dashboard en direct'
+    document.getElementById('status').textContent = 'Bienvenue sur HôteSmart'
 
-    // Apps grid
     renderApps()
-
-    // Stats (placeholder — sera remplacé par vraies données Beds24)
-    document.getElementById('stat-revenus').textContent = '—'
-    document.getElementById('stat-occupation').textContent = '—'
-    document.getElementById('stat-messages').textContent = '0'
-    document.getElementById('stat-note').textContent = '—'
   }
 
   function renderApps() {
