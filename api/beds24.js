@@ -14,16 +14,17 @@ module.exports = async function handler(req, res) {
     const token = req.headers.authorization?.replace('Bearer ', '')
     if (!token) return res.status(401).json({ error: 'Non autorisé' })
 
-    // Nouvelle méthode compatible nouveau Supabase
     const { data: userData, error: authError } = await supabase.auth.getUser(token)
-    
+
     if (authError) {
       console.error('[Beds24] Auth error:', authError)
       return res.status(401).json({ error: 'Session invalide', detail: authError.message })
     }
-    
+
     const user = userData?.user
     if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' })
+
+    console.log('[Beds24] User ID:', user.id)
 
     const { data: keyData, error: keyError } = await supabase
       .from('api_keys')
@@ -32,9 +33,14 @@ module.exports = async function handler(req, res) {
       .eq('service', 'beds24')
       .single()
 
+    console.log('[Beds24] keyData:', keyData, 'keyError:', keyError)
+
     if (keyError || !keyData) {
-      console.error('[Beds24] Key error:', keyError)
-      return res.status(400).json({ error: 'Clé Beds24 non configurée' })
+      return res.status(400).json({ 
+        error: 'Clé Beds24 non configurée',
+        detail: keyError?.message,
+        userId: user.id
+      })
     }
 
     const beds24Key = keyData.api_key
