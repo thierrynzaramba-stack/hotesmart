@@ -1,24 +1,22 @@
-import { createClient } from '@supabase/supabase-js'
+const { createClient } = require('@supabase/supabase-js')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Méthode non autorisée' })
   }
 
   try {
-    // 1. Vérifier l'auth
     const token = req.headers.authorization?.replace('Bearer ', '')
     if (!token) return res.status(401).json({ error: 'Non autorisé' })
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
     if (authError || !user) return res.status(401).json({ error: 'Session invalide' })
 
-    // 2. Récupérer la clé Beds24 du client
     const { data: keyData, error: keyError } = await supabase
       .from('api_keys')
       .select('api_key')
@@ -33,7 +31,6 @@ export default async function handler(req, res) {
     const beds24Key = keyData.api_key
     const { action, propertyId, bookingId, message } = req.body
 
-    // 3. Router vers la bonne action
     switch (action) {
 
       case 'getProperties': {
