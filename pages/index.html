@@ -23,14 +23,14 @@
 
       <div class="metrics">
         <div class="metric">
-          <div class="metric-label">Revenus ce mois</div>
-          <div class="metric-value" id="stat-revenus">—</div>
-          <div class="metric-delta"></div>
+          <div class="metric-label">Biens connectés</div>
+          <div class="metric-value" id="stat-biens">—</div>
+          <div class="metric-delta" id="stat-biens-delta"></div>
         </div>
         <div class="metric">
-          <div class="metric-label">Taux d'occupation</div>
-          <div class="metric-value" id="stat-occupation">—</div>
-          <div class="metric-delta"></div>
+          <div class="metric-label">Réservations actives</div>
+          <div class="metric-value" id="stat-resa">—</div>
+          <div class="metric-delta">ce mois</div>
         </div>
         <div class="metric">
           <div class="metric-label">Messages traités</div>
@@ -38,22 +38,20 @@
           <div class="metric-delta">par l'Agent AI</div>
         </div>
         <div class="metric">
-          <div class="metric-label">Note moyenne</div>
-          <div class="metric-value" id="stat-note">—</div>
+          <div class="metric-label">Apps actives</div>
+          <div class="metric-value" id="stat-apps">—</div>
           <div class="metric-delta"></div>
         </div>
+      </div>
+
+      <div class="section-title">Mes biens</div>
+      <div class="apps-grid" id="properties-grid">
+        <div class="app-card">Chargement...</div>
       </div>
 
       <div class="section-title">Mes apps</div>
       <div class="apps-grid" id="apps-grid">
         <div class="app-card">Chargement...</div>
-      </div>
-
-      <div class="section-title">Derniers messages traités</div>
-      <div class="card" id="messages-list">
-        <div class="msg-row">
-          <div style="font-size:12px;color:var(--text2)">Aucun message pour l'instant</div>
-        </div>
       </div>
 
     </div>
@@ -63,7 +61,7 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-  import { getUser } from '/shared/supabase.js'
+  import { getUser, supabase } from '/shared/supabase.js'
   import CONFIG from '/shared/config.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { logger } from '/shared/logger.js'
@@ -76,24 +74,65 @@
       if (!session) return
 
       const user = await getUser()
-      logger.info('Dashboard', 'Utilisateur connecté', { email: user?.email })
+      logger.info('Dashboard', 'Connecté', { email: user?.email })
 
       await renderSidebar('accueil')
 
       const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'là'
       document.getElementById('welcome').textContent = `Bonjour ${name} !`
-      document.getElementById('status').textContent = 'Bienvenue sur HôteSmart'
 
+      // Charge les propriétés Beds24
+      await loadProperties(session)
+
+      // Charge les apps
       renderApps()
-      logger.info('Dashboard', 'Apps chargées')
 
     } catch (err) {
       logger.error('Dashboard', err.message, err)
     }
   }
 
+  async function loadProperties(session) {
+    try {
+      const res = await fetch('/api/beds24', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ action: 'getProperties' })
+      })
+
+      const data = await res.json()
+
+      if (data.properties && data.properties.length > 0) {
+        document.getElementById('stat-biens').textContent = data.properties.length
+        document.getElementById('status').textContent = `${data.properties.length} bien(s) connecté(s) via Beds24`
+
+        const grid = document.getElementById('properties-grid')
+        grid.innerHTML = data.properties.map(p => `
+          <div class="app-card">
+            <div class="app-icon" style="background:#E1F5EE">🏠</div>
+            <div class="app-name">${p.name}</div>
+            <div class="app-desc">${p.address}, ${p.city}</div>
+            <div class="app-desc" style="margin-top:4px">Check-in : ${p.checkInStart} · Check-out : ${p.checkOutEnd}</div>
+            <div class="app-status status-on">● Connecté</div>
+          </div>
+        `).join('')
+
+        logger.info('Dashboard', `${data.properties.length} propriétés chargées`)
+      } else {
+        document.getElementById('properties-grid').innerHTML = '<div class="app-card"><div class="app-desc">Aucun bien trouvé — configurez votre clé Beds24</div></div>'
+        document.getElementById('status').textContent = 'Beds24 non configuré'
+      }
+    } catch (err) {
+      logger.error('Dashboard', 'Erreur chargement propriétés', err)
+    }
+  }
+
   function renderApps() {
     const grid = document.getElementById('apps-grid')
+    document.getElementById('stat-apps').textContent = CONFIG.apps.length
     grid.innerHTML = CONFIG.apps.map(app => `
       <a class="app-card" href="/apps/${app.id}">
         <div class="app-icon" style="background:${app.color}">${app.icon}</div>
