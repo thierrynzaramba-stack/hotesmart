@@ -1,6 +1,6 @@
 export const ENV = {
   supabaseUrl: 'https://cjmrizpdyhrcurmgyrhs.supabase.co',
-  supabaseKey: 'TA_PUBLISHABLE_KEY'
+  supabaseKey: 'sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD'
 }
 
 const CONFIG = {
