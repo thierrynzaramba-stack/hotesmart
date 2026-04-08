@@ -14,8 +14,16 @@ module.exports = async function handler(req, res) {
     const token = req.headers.authorization?.replace('Bearer ', '')
     if (!token) return res.status(401).json({ error: 'Non autorisé' })
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    if (authError || !user) return res.status(401).json({ error: 'Session invalide' })
+    // Nouvelle méthode compatible nouveau Supabase
+    const { data: userData, error: authError } = await supabase.auth.getUser(token)
+    
+    if (authError) {
+      console.error('[Beds24] Auth error:', authError)
+      return res.status(401).json({ error: 'Session invalide', detail: authError.message })
+    }
+    
+    const user = userData?.user
+    if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' })
 
     const { data: keyData, error: keyError } = await supabase
       .from('api_keys')
@@ -25,6 +33,7 @@ module.exports = async function handler(req, res) {
       .single()
 
     if (keyError || !keyData) {
+      console.error('[Beds24] Key error:', keyError)
       return res.status(400).json({ error: 'Clé Beds24 non configurée' })
     }
 
@@ -32,7 +41,6 @@ module.exports = async function handler(req, res) {
     const { action, propertyId, bookingId, message } = req.body
 
     switch (action) {
-
       case 'getProperties': {
         const r = await fetch('https://beds24.com/api/v2/properties', {
           headers: { token: beds24Key }
@@ -40,7 +48,6 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ properties: d.data || [] })
       }
-
       case 'getBookings': {
         const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, {
           headers: { token: beds24Key }
@@ -48,7 +55,6 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ bookings: d.data || [] })
       }
-
       case 'getMessages': {
         const r = await fetch(`https://beds24.com/api/v2/inbox?propId=${propertyId}`, {
           headers: { token: beds24Key }
@@ -56,7 +62,6 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ messages: d.data || [] })
       }
-
       case 'sendMessage': {
         const r = await fetch('https://beds24.com/api/v2/inbox', {
           method: 'POST',
@@ -66,7 +71,6 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ success: true, data: d })
       }
-
       default:
         return res.status(400).json({ error: `Action inconnue : ${action}` })
     }
