@@ -7,31 +7,43 @@
 </head>
 <body style="padding:24px">
   <h2 style="margin-bottom:16px">Test connexion Beds24</h2>
+  <div id="session-info" style="font-size:12px;color:var(--text2);margin-bottom:16px"></div>
   <button class="btn btn-primary" id="btn-test">Tester getProperties</button>
   <pre id="result" style="margin-top:16px;padding:16px;background:var(--bg2);border-radius:8px;font-size:12px"></pre>
 
 <script type="module">
   import { supabase } from '/shared/supabase.js'
-  import { requireAuth } from '/components/auth-guard.js'
 
-  const session = await requireAuth()
-  if (!session) throw new Error('Non connecté')
+  const { data: { session } } = await supabase.auth.getSession()
+  
+  if (!session) {
+    document.getElementById('session-info').textContent = 'Non connecté — redirecting...'
+    window.location.href = '/pages/login.html'
+  } else {
+    document.getElementById('session-info').textContent = `Connecté : ${session.user.email} | Token : ${session.access_token.substring(0, 20)}...`
+  }
 
   document.getElementById('btn-test').addEventListener('click', async () => {
     const result = document.getElementById('result')
     result.textContent = 'Chargement...'
 
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`
-      },
-      body: JSON.stringify({ action: 'getProperties' })
-    })
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession()
+      
+      const res = await fetch('/api/beds24', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentSession.access_token}`
+        },
+        body: JSON.stringify({ action: 'getProperties' })
+      })
 
-    const data = await res.json()
-    result.textContent = JSON.stringify(data, null, 2)
+      const data = await res.json()
+      result.textContent = JSON.stringify(data, null, 2)
+    } catch (err) {
+      result.textContent = 'Erreur : ' + err.message
+    }
   })
 </script>
 </body>
