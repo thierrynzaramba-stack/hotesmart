@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Beds24</title>
+  <link rel="stylesheet" href="/public/style.css">
+</head>
+<body style="padding:24px">
+  <h2 style="margin-bottom:16px">Test connexion Beds24</h2>
+  <button class="btn btn-primary" id="btn-test">Tester getProperties</button>
+  <pre id="result" style="margin-top:16px;padding:16px;background:var(--bg2);border-radius:8px;font-size:12px"></pre>
+
+<script type="module">
+  import { supabase } from '/shared/supabase.js'
+  import { requireAuth } from '/components/auth-guard.js'
+
+  const session = await requireAuth()
+  if (!session) throw new Error('Non connecté')
+
+  document.getElementById('btn-test').addEventListener('click', async () => {
+    const result = document.getElementById('result')
+    result.textContent = 'Chargement...'
+
+    const res = await fetch('/api/beds24', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ action: 'getProperties' })
+    })
+
+    const data = await res.json()
+    result.textContent = JSON.stringify(data, null, 2)
+  })
+</script>
+</body>
+</html>
