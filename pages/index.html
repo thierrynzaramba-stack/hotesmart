@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="supabase-url" content="https://cjmrizpdyhrcurmgyrhs.supabase.co">
-  <meta name="supabase-key" content="sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD">
+  <meta name="supabase-key" content="TA_PUBLISHABLE_KEY">
   <title>HôteSmart — Dashboard</title>
   <link rel="stylesheet" href="/public/style.css">
 </head>
@@ -67,20 +67,31 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { getUser } from '/shared/supabase.js'
   import CONFIG from '/shared/config.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { logger } from '/shared/logger.js'
+
+  initErrorHandler()
 
   async function init() {
-    const session = await requireAuth()
-    if (!session) return
+    try {
+      const session = await requireAuth()
+      if (!session) return
 
-    const user = await getUser()
+      const user = await getUser()
+      logger.info('Dashboard', 'Utilisateur connecté', { email: user?.email })
 
-    await renderSidebar('accueil')
+      await renderSidebar('accueil')
 
-    const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'là'
-    document.getElementById('welcome').textContent = `Bonjour ${name} !`
-    document.getElementById('status').textContent = 'Bienvenue sur HôteSmart'
+      const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'là'
+      document.getElementById('welcome').textContent = `Bonjour ${name} !`
+      document.getElementById('status').textContent = 'Bienvenue sur HôteSmart'
 
-    renderApps()
+      renderApps()
+      logger.info('Dashboard', 'Apps chargées')
+
+    } catch (err) {
+      logger.error('Dashboard', err.message, err)
+    }
   }
 
   function renderApps() {
