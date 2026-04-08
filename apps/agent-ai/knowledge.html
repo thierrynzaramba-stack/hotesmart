@@ -187,4 +187,96 @@
     }
 
     // Sépare les infos fixes des FAQ
-    const fixed = da
+    const fixed = data.filter(d => d.type === 'fixed')
+    const faqs = data.filter(d => d.type === 'faq')
+
+    const map = {
+      'wifi-name': 'wifi_name', 'wifi-pass': 'wifi_pass',
+      'entry-code': 'entry_code', 'parking': 'parking',
+      'transport': 'transport', 'emergency': 'emergency',
+      'rules': 'rules', 'recommendations': 'recommendations'
+    }
+    fixed.forEach(row => {
+      const id = Object.keys(map).find(k => map[k] === row.key)
+      if (id) document.getElementById(id).value = row.value || ''
+    })
+
+    const tbody = document.getElementById('faq-body')
+    tbody.innerHTML = ''
+    if (faqs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text2);font-size:12px">Aucune FAQ — ajoutez une ligne</td></tr>'
+    } else {
+      faqs.forEach(row => addFaqRow(row))
+    }
+
+    document.getElementById('save-status').textContent = 'Chargé'
+  }
+
+  function addFaqRow(row = {}) {
+    const tbody = document.getElementById('faq-body')
+    const empty = tbody.querySelector('td[colspan]')
+    if (empty) empty.parentElement.remove()
+
+    const tr = document.createElement('tr')
+    tr.dataset.id = row.id || ''
+    tr.innerHTML = `
+      <td><input type="text" placeholder="ex: Horaires check-out" value="${row.key || ''}"></td>
+      <td><textarea placeholder="ex: Départ avant 11h">${row.value || ''}</textarea></td>
+      <td><button class="btn-delete" onclick="this.closest('tr').remove()">×</button></td>
+    `
+    tbody.appendChild(tr)
+  }
+
+  async function save() {
+    if (!currentPropertyId) return alert('Sélectionnez un bien')
+    const btn = document.getElementById('btn-save')
+    btn.textContent = 'Sauvegarde...'
+    btn.disabled = true
+
+    const map = {
+      'wifi-name': 'wifi_name', 'wifi-pass': 'wifi_pass',
+      'entry-code': 'entry_code', 'parking': 'parking',
+      'transport': 'transport', 'emergency': 'emergency',
+      'rules': 'rules', 'recommendations': 'recommendations'
+    }
+
+    const fixedRows = Object.entries(map).map(([id, key]) => ({
+      user_id: currentSession.user.id,
+      property_id: currentPropertyId,
+      type: 'fixed',
+      key,
+      value: document.getElementById(id)?.value || ''
+    }))
+
+    const faqRows = [...document.querySelectorAll('#faq-body tr[data-id]')].map(tr => ({
+      user_id: currentSession.user.id,
+      property_id: currentPropertyId,
+      type: 'faq',
+      key: tr.querySelector('input').value,
+      value: tr.querySelector('textarea').value
+    })).filter(r => r.key.trim())
+
+    const allRows = [...fixedRows, ...faqRows]
+
+    await supabase.from('knowledge')
+      .delete()
+      .eq('user_id', currentSession.user.id)
+      .eq('property_id', currentPropertyId)
+
+    const { error } = await supabase.from('knowledge').insert(allRows)
+
+    btn.textContent = 'Sauvegarder'
+    btn.disabled = false
+
+    if (error) {
+      logger.error('Knowledge', 'Erreur sauvegarde', error)
+      document.getElementById('save-status').textContent = '❌ Erreur sauvegarde'
+    } else {
+      document.getElementById('save-status').textContent = '✅ Sauvegardé'
+    }
+  }
+
+  init()
+</script>
+</body>
+</html>
