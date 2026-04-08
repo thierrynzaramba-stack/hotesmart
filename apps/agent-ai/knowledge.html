@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Base de connaissance</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
+    .faq-table { width: 100%; border-collapse: collapse; }
+    .faq-table th { font-size: 11px; font-weight: 500; color: var(--text2); padding: 8px 12px; border-bottom: 0.5px solid var(--border); text-align: left; }
+    .faq-table td { padding: 10px 12px; border-bottom: 0.5px solid var(--border); font-size: 13px; vertical-align: top; }
+    .faq-table tr:last-child td { border-bottom: none; }
+    .faq-table td input, .faq-table td textarea { width: 100%; border: none; background: transparent; font-size: 13px; color: var(--text); resize: none; font-family: inherit; }
+    .faq-table td textarea { min-height: 40px; }
+    .faq-table tr:hover { background: var(--bg2); }
+    .btn-add-row { margin-top: 12px; }
+    .btn-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0 4px; }
+    .btn-delete:hover { color: #E24B4A; }
+    .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+    .fixed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .fixed-field { display: flex; flex-direction: column; gap: 4px; }
+    .fixed-label { font-size: 11px; color: var(--text2); font-weight: 500; }
+    .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; }
+    .save-status { font-size: 12px; color: var(--text2); }
+    .badge-auto { background: #EEEDFE; color: #3C3489; font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: 6px; }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">Base de connaissance</div>
+        <div class="page-sub">Informations utilisées par l'Agent AI pour répondre</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="property-select">
+        <label class="form-label" style="margin:0">Bien :</label>
+        <select class="form-input" id="property-select" style="width:auto;min-width:200px">
+          <option value="">Chargement...</option>
+        </select>
+      </div>
+
+      <!-- Infos fixes -->
+      <div class="section-card">
+        <div class="section-title">Infos pratiques</div>
+        <div class="fixed-grid" id="fixed-fields">
+          <div class="fixed-field">
+            <label class="fixed-label">Code WiFi (réseau)</label>
+            <input class="form-input" id="wifi-name" placeholder="ex: HosteSmart_5G">
+          </div>
+          <div class="fixed-field">
+            <label class="fixed-label">Code WiFi (mot de passe)</label>
+            <input class="form-input" id="wifi-pass" placeholder="ex: monmotdepasse123">
+          </div>
+          <div class="fixed-field">
+            <label class="fixed-label">Code d'entrée / digicode</label>
+            <input class="form-input" id="entry-code" placeholder="ex: 1234A">
+          </div>
+          <div class="fixed-field">
+            <label class="fixed-label">Parking</label>
+            <input class="form-input" id="parking" placeholder="ex: Gratuit rue de l'Horloge, 50m">
+          </div>
+          <div class="fixed-field">
+            <label class="fixed-label">Transports proches</label>
+            <input class="form-input" id="transport" placeholder="ex: Bus ligne 3, arrêt Mairie">
+          </div>
+          <div class="fixed-field">
+            <label class="fixed-label">Contact urgence</label>
+            <input class="form-input" id="emergency" placeholder="ex: 06 XX XX XX XX">
+          </div>
+          <div class="fixed-field" style="grid-column: span 2">
+            <label class="fixed-label">Règles de la maison</label>
+            <textarea class="form-input" id="rules" rows="3" placeholder="ex: Pas de fête, silence après 22h, animaux acceptés sur demande..."></textarea>
+          </div>
+          <div class="fixed-field" style="grid-column: span 2">
+            <label class="fixed-label">Restaurants & activités recommandés</label>
+            <textarea class="form-input" id="recommendations" rows="3" placeholder="ex: Restaurant Le Bigourdan (5 min à pied), Thermes de Bagnères..."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- FAQ dynamique -->
+      <div class="section-card">
+        <div class="section-title">
+          FAQ dynamique
+          <span class="badge-auto" id="auto-badge" style="display:none">✨ Suggestions auto disponibles</span>
+        </div>
+        <table class="faq-table">
+          <thead>
+            <tr>
+              <th style="width:35%">Sujet / Question</th>
+              <th>Réponse de l'agent</th>
+              <th style="width:40px"></th>
+            </tr>
+          </thead>
+          <tbody id="faq-body">
+            <tr>
+              <td colspan="3" style="text-align:center;color:var(--text2);font-size:12px">Sélectionnez un bien pour charger la FAQ</td>
+            </tr>
+          </tbody>
+        </table>
+        <button class="btn btn-add-row" id="btn-add-row">+ Ajouter une ligne</button>
+      </div>
+
+      <div class="save-bar">
+        <span class="save-status" id="save-status">Non sauvegardé</span>
+        <div style="display:flex;gap:8px">
+          <a class="btn" href="/apps/agent-ai/analyze.html">✨ Analyser l'historique</a>
+          <button class="btn btn-primary" id="btn-save">Sauvegarder</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { logger } from '/shared/logger.js'
+
+  initErrorHandler()
+
+  let currentSession = null
+  let currentPropertyId = null
+  let properties = []
+
+  async function init() {
+    currentSession = await requireAuth()
+    if (!currentSession) return
+
+    await renderSidebar('agent-ai')
+    await loadProperties()
+
+    document.getElementById('btn-add-row').addEventListener('click', addFaqRow)
+    document.getElementById('btn-save').addEventListener('click', save)
+    document.getElementById('property-select').addEventListener('change', (e) => {
+      currentPropertyId = e.target.value
+      if (currentPropertyId) loadKnowledge()
+    })
+  }
+
+  async function loadProperties() {
+    const res = await fetch('/api/beds24', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${currentSession.access_token}`
+      },
+      body: JSON.stringify({ action: 'getProperties' })
+    })
+    const data = await res.json()
+    properties = data.properties || []
+
+    const select = document.getElementById('property-select')
+    select.innerHTML = '<option value="">Choisir un bien...</option>' +
+      properties.map(p => `<option value="${p.id}">${p.name}</option>`).join('')
+
+    if (properties.length === 1) {
+      select.value = properties[0].id
+      currentPropertyId = properties[0].id
+      loadKnowledge()
+    }
+  }
+
+  async function loadKnowledge() {
+    const { data, error } = await supabase
+      .from('knowledge')
+      .select('*')
+      .eq('user_id', currentSession.user.id)
+      .eq('property_id', currentPropertyId)
+      .order('created_at')
+
+    if (error) {
+      logger.error('Knowledge', 'Erreur chargement', error)
+      return
+    }
+
+    // Sépare les infos fixes des FAQ
+    const fixed = da

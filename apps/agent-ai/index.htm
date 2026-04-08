@@ -169,7 +169,7 @@
               data-prop-id="${propId}">
               ✨ Générer
             </button>
-            <button class="btn btn-send" style="display:none"
+            <button class="btn btn-send" style="display:none;background:#fff3cd;color:#856404;border-color:#ffc107"
               data-msg-id="${msg.bookId || msg.id}"
               data-prop-id="${propId}">
               ✓ Envoyer
@@ -227,15 +227,16 @@ Réponds en français, de façon chaleureuse et professionnelle. Sois concis (2-
   }
 
   async function sendReply(msgId, propId) {
-    const replyBox = document.getElementById(`reply-${msgId}`)
-    const message = replyBox.textContent
-
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${currentSession.access_token}`
-      },
+  const replyBox = document.getElementById(`reply-${msgId}`)
+  
+  // MODE TEST — ne pas envoyer pour l'instant
+  alert('⚠️ MODE TEST — La réponse ne sera pas envoyée.\n\nEn production, ce message sera envoyé via Beds24.')
+  
+  const card = document.getElementById(`card-${msgId}`)
+  card.querySelector('.badge-pending').className = 'badge-sent'
+  card.querySelector('.badge-sent').textContent = '✓ Simulé'
+  logger.info('Agent AI', 'SIMULATION — message non envoyé', { msgId })
+},
       body: JSON.stringify({
         action: 'sendMessage',
         bookingId: msgId,
