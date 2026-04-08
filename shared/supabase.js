@@ -1,9 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+import { ENV } from '/shared/config.js'
 
-const supabaseUrl = document.querySelector('meta[name="supabase-url"]')?.content
-const supabaseKey = document.querySelector('meta[name="supabase-key"]')?.content
-
-export const supabase = createClient(supabaseUrl, supabaseKey)
+export const supabase = createClient(ENV.supabaseUrl, ENV.supabaseKey)
 
 export async function getSession() {
   const { data: { session } } = await supabase.auth.getSession()
@@ -17,5 +15,5 @@ export async function getUser() {
 
 export async function signOut() {
   await supabase.auth.signOut()
-  window.location.href = '/login.html'
+  window.location.href = '/pages/login.html'
 }
