@@ -79,8 +79,16 @@ async function renderActiveApps(user, activePage = '') {
   if (!user) return ''
   return CONFIG.apps.map(app => {
     const isAgentAI = app.id === 'agent-ai'
+    const isMenages = app.id === 'menages'
     const isActiveApp = activePage === app.id || activePage.startsWith(app.id)
-    const subMenu = isAgentAI ? `
+    const subMenu = isMenages ? `
+      <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
+        <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Planning
+      </a>
+      <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">
+        <div class="sub-dot ${activePage === 'menages-prestataires' ? 'green' : 'gray'}"></div>Prestataires
+      </a>
+    ` : isAgentAI ? `
       <a class="nav-sub ${activePage === 'agent-ai' ? 'connected' : ''}" href="/apps/agent-ai">
         <div class="sub-dot ${activePage === 'agent-ai' ? 'green' : 'gray'}"></div>Messages
       </a>
