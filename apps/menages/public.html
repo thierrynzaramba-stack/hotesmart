@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Planning ménages</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f8f9fa;
+      --bg2: #ffffff;
+      --text: #1a1a2e;
+      --text2: #6b7280;
+      --border: #e5e7eb;
+      --primary: #4F46E5;
+      --green: #10B981;
+      --green-bg: #D1FAE5;
+      --amber: #F59E0B;
+      --amber-bg: #FEF3C7;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .app-header {
+      background: var(--primary);
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .app-logo { font-size: 16px; font-weight: 700; }
+    .app-date { font-size: 12px; opacity: 0.8; }
+    .week-nav-bar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 56px;
+      z-index: 9;
+    }
+    .week-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+    .week-btn:active { background: var(--border); }
+    .week-title { font-size: 13px; font-weight: 600; }
+
+    /* Stats bar */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 12px 16px;
+    }
+    .stat-pill {
+      background: white;
+      border-radius: var(--radius);
+      padding: 10px;
+      text-align: center;
+      border: 1px solid var(--border);
+    }
+    .stat-pill strong { font-size: 22px; font-weight: 700; display: block; }
+    .stat-pill span { font-size: 11px; color: var(--text2); }
+
+    /* Liste ménages */
+    .menages-list { padding: 0 16px 100px; }
+    .day-section { margin-bottom: 16px; }
+    .day-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 0 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .day-title .day-badge {
+      background: var(--primary);
+      color: white;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+    .day-title .day-badge.today { background: var(--amber); }
+
+    /* Carte ménage */
+    .menage-item {
+      background: white;
+      border-radius: var(--radius);
+      border: 1.5px solid var(--border);
+      margin-bottom: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .menage-item.done { border-color: var(--green); opacity: 0.7; }
+    .menage-item-header {
+      padding: 14px 16px 10px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .menage-prop { font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 2px; }
+    .menage-guest { font-size: 15px; font-weight: 600; }
+    .menage-info { font-size: 12px; color: var(--text2); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .menage-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--amber-bg);
+      color: #92400E;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    .menage-badge.done-badge {
+      background: var(--green-bg);
+      color: #065F46;
+    }
+
+    /* Bouton fait */
+    .btn-done {
+      width: 100%;
+      border: none;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      padding: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+    .btn-done:active { background: var(--border); }
+    .menage-item.done .btn-done {
+      color: var(--text2);
+      font-weight: 400;
+    }
+
+    /* Empty */
+    .empty-day { font-size: 13px; color: var(--text2); padding: 12px 0; text-align: center; }
+    .no-menages {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text2);
+    }
+    .no-menages .icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text2);
+      font-size: 14px;
+    }
+
+    /* Error */
+    .error-box {
+      margin: 20px;
+      background: #FEE2E2;
+      color: #991B1B;
+      border-radius: var(--radius);
+      padding: 16px;
+      font-size: 13px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="app-logo">🧹 Planning ménages</div>
+  <div class="app-date" id="header-date"></div>
+</div>
+
+<div class="week-nav-bar">
+  <button class="week-btn" id="btn-prev">← Préc.</button>
+  <div class="week-title" id="week-title"></div>
+  <button class="week-btn" id="btn-next">Suiv. →</button>
+</div>
+
+<div class="stats-bar" id="stats-bar"></div>
+
+<div class="menages-list" id="menages-list">
+  <div class="loading">⏳ Chargement...</div>
+</div>
+
+<script>
+  const JOURS_LONG = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi']
+  const JOURS_COURT = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam']
+  const MOIS = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc']
+
+  let token = null
+  let bookings = []
+  let doneSet = new Set()
+  let currentWeekStart = getMonday(new Date())
+
+  function getToken() {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('token')
+  }
+
+  async function init() {
+    token = getToken()
+    if (!token) {
+      document.getElementById('menages-list').innerHTML =
+        '<div class="error-box">❌ Lien invalide — contactez votre employeur</div>'
+      return
+    }
+
+    loadDoneSet()
+    updateHeaderDate()
+    renderWeekTitle()
+
+    document.getElementById('btn-prev').addEventListener('click', () => {
+      currentWeekStart = addDays(currentWeekStart, -7)
+      renderWeekTitle()
+      render()
+    })
+    document.getElementById('btn-next').addEventListener('click', () => {
+      currentWeekStart = addDays(currentWeekStart, 7)
+      renderWeekTitle()
+      render()
+    })
+
+    await loadBookings()
+    render()
+  }
+
+  async function loadBookings() {
+    try {
+      const res = await fetch(`/api/menages-public?token=${token}`)
+      if (!res.ok) throw new Error('Token invalide')
+      const data = await res.json()
+      bookings = data.bookings || []
+    } catch (err) {
+      document.getElementById('menages-list').innerHTML =
+        `<div class="error-box">❌ ${err.message}<br>Contactez votre employeur</div>`
+    }
+  }
+
+  function getMenages() {
+    return bookings.map(b => {
+      const dep = new Date(b.departure)
+      const id = `${b.id}-${b.departure}`
+      return {
+        id,
+        date: dep,
+        dateStr: b.departure,
+        propName: b.propName,
+        guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
+        numAdult: b.numAdult || 0,
+        numChild: b.numChild || 0,
+        arrival: b.arrival,
+        departure: b.departure,
+        done: doneSet.has(id)
+      }
+    }).filter(m => m.dateStr)
+      .sort((a, b) => a.date - b.date)
+  }
+
+  function render() {
+    const today = new Date()
+    today.setHours(0,0,0,0)
+    const weekEnd = addDays(currentWeekStart, 6)
+    const menages = getMenages()
+    const weekMenages = menages.filter(m => {
+      const d = new Date(m.date)
+      d.setHours(0,0,0,0)
+      return d >= currentWeekStart && d <= weekEnd
+    })
+
+    // Stats
+    const done = weekMenages.filter(m => m.done).length
+    document.getElementById('stats-bar').innerHTML = `
+      <div class="stat-pill"><strong>${weekMenages.length}</strong><span>Total</span></div>
+      <div class="stat-pill"><strong style="color:var(--green)">${done}</strong><span>Faits</span></div>
+      <div class="stat-pill"><strong style="color:var(--amber)">${weekMenages.length - done}</strong><span>Restants</span></div>
+    `
+
+    if (weekMenages.length === 0) {
+      document.getElementById('menages-list').innerHTML = `
+        <div class="no-menages">
+          <div class="icon">✨</div>
+          <div>Aucun ménage cette semaine</div>
+        </div>
+      `
+      return
+    }
+
+    // Grouper par jour
+    const byDay = new Map()
+    for (let i = 0; i < 7; i++) {
+      const day = addDays(currentWeekStart, i)
+      day.setHours(0,0,0,0)
+      byDay.set(day.toISOString().split('T')[0], { date: new Date(day), items: [] })
+    }
+    weekMenages.forEach(m => {
+      const key = m.dateStr
+      if (byDay.has(key)) byDay.get(key).items.push(m)
+    })
+
+    let html = ''
+    byDay.forEach(({ date, items }) => {
+      if (items.length === 0) return
+      date.setHours(0,0,0,0)
+      const isToday = date.getTime() === today.getTime()
+      const dayStr = `${JOURS_LONG[date.getDay()]} ${date.getDate()} ${MOIS[date.getMonth()]}`
+
+      html += `
+        <div class="day-section">
+          <div class="day-title">
+            ${dayStr}
+            ${isToday ? '<span class="day-badge today">Aujourd\'hui</span>' : ''}
+          </div>
+          ${items.map(m => `
+            <div class="menage-item ${m.done ? 'done' : ''}" id="item-${m.id}">
+              <div class="menage-item-header">
+                <div>
+                  <div class="menage-prop">${m.propName}</div>
+                  <div class="menage-guest">${m.guestName}</div>
+                  <div class="menage-info">
+                    <span>👥 ${m.numAdult} adulte${m.numAdult > 1 ? 's' : ''}${m.numChild > 0 ? ` · 👶 ${m.numChild} enfant${m.numChild > 1 ? 's' : ''}` : ''}</span>
+                    <span>📅 Départ ${m.departure}</span>
+                  </div>
+                </div>
+                <div class="menage-badge ${m.done ? 'done-badge' : ''}">
+                  ${m.done ? '✓ Fait' : '⏳ À faire'}
+                </div>
+              </div>
+              <button class="btn-done" data-id="${m.id}">
+                ${m.done ? '↩ Marquer non fait' : '✓ Marquer comme fait'}
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      `
+    })
+
+    document.getElementById('menages-list').innerHTML = html
+
+    document.querySelectorAll('.btn-done').forEach(btn => {
+      btn.addEventListener('click', () => toggleDone(btn.dataset.id))
+    })
+  }
+
+  function toggleDone(id) {
+    if (doneSet.has(id)) doneSet.delete(id)
+    else doneSet.add(id)
+    saveDoneSet()
+    render()
+  }
+
+  function updateHeaderDate() {
+    const now = new Date()
+    document.getElementById('header-date').textContent =
+      `${JOURS_LONG[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()]}`
+  }
+
+  function renderWeekTitle() {
+    const weekEnd = addDays(currentWeekStart, 6)
+    document.getElementById('week-title').textContent =
+      `${currentWeekStart.getDate()} ${MOIS[currentWeekStart.getMonth()]} — ${weekEnd.getDate()} ${MOIS[weekEnd.getMonth()]}`
+  }
+
+  function getMonday(date) {
+    const d = new Date(date)
+    d.setHours(0,0,0,0)
+    const day = d.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    d.setDate(d.getDate() + diff)
+    return d
+  }
+
+  function addDays(date, n) {
+    const d = new Date(date)
+    d.setDate(d.getDate() + n)
+    return d
+  }
+
+  function loadDoneSet() {
+    const raw = localStorage.getItem('menages-done-public')
+    if (raw) doneSet = new Set(JSON.parse(raw))
+  }
+
+  function saveDoneSet() {
+    localStorage.setItem('menages-done-public', JSON.stringify([...doneSet]))
+  }
+
+  init()
+</script>
+</body>
+</html>
