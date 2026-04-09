@@ -2,403 +2,478 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Planning ménages</title>
-  <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#1a1a2e">
+  <link rel="stylesheet" href="/public/style.css">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.json">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #f8f9fa;
-      --bg2: #ffffff;
-      --text: #1a1a2e;
-      --text2: #6b7280;
-      --border: #e5e7eb;
-      --primary: #4F46E5;
-      --green: #10B981;
-      --green-bg: #D1FAE5;
-      --amber: #F59E0B;
-      --amber-bg: #FEF3C7;
-      --radius: 12px;
-    }
+    /* Layout */
+    .menage-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
+    /* Sidebar mini calendrier */
+    .mini-cal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; position: sticky; top: 0; }
+    .mini-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .mini-cal-title { font-size: 13px; font-weight: 500; }
+    .mini-cal-nav { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 14px; padding: 2px 6px; border-radius: var(--radius); }
+    .mini-cal-nav:hover { background: var(--bg2); }
+    .mini-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .mini-cal-day-label { font-size: 9px; color: var(--text3); text-align: center; padding: 2px 0; font-weight: 500; }
+    .mini-cal-day { font-size: 10px; text-align: center; padding: 3px 0; border-radius: 4px; cursor: pointer; color: var(--text2); }
+    .mini-cal-day:hover { background: var(--bg2); }
+    .mini-cal-day.today { background: var(--primary); color: white; font-weight: 600; }
+    .mini-cal-day.has-menage { background: #FFF3CD; color: #856404; font-weight: 500; }
+    .mini-cal-day.has-menage.done { background: #D1FAE5; color: #065F46; }
+    .mini-cal-day.selected-week { background: var(--bg2); border: 0.5px solid var(--border2); }
+    .mini-cal-day.other-month { opacity: 0.3; }
 
-    /* Header */
-    .app-header {
-      background: var(--primary);
-      color: white;
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    .app-logo { font-size: 16px; font-weight: 700; }
-    .app-date { font-size: 12px; opacity: 0.8; }
-    .week-nav-bar {
-      background: white;
-      border-bottom: 1px solid var(--border);
-      padding: 10px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 56px;
-      z-index: 9;
-    }
-    .week-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
-    .week-btn:active { background: var(--border); }
-    .week-title { font-size: 13px; font-weight: 600; }
+    /* Filtres biens */
+    .filter-section { margin-top: 16px; border-top: 0.5px solid var(--border); padding-top: 12px; }
+    .filter-title { font-size: 10px; color: var(--text2); font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .filter-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+    .filter-item input { cursor: pointer; accent-color: var(--primary); }
+    .filter-label { font-size: 12px; color: var(--text); }
+    .filter-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
-    /* Stats bar */
-    .stats-bar {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      padding: 12px 16px;
-    }
-    .stat-pill {
-      background: white;
-      border-radius: var(--radius);
-      padding: 10px;
-      text-align: center;
-      border: 1px solid var(--border);
-    }
-    .stat-pill strong { font-size: 22px; font-weight: 700; display: block; }
-    .stat-pill span { font-size: 11px; color: var(--text2); }
+    /* Planning semaine */
+    .planning-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .week-nav { display: flex; align-items: center; gap: 8px; }
+    .week-nav button { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 6px 10px; cursor: pointer; font-size: 13px; color: var(--text); }
+    .week-nav button:hover { background: var(--bg2); }
+    .week-label { font-size: 14px; font-weight: 500; min-width: 200px; text-align: center; }
+    .btn-today { font-size: 12px; }
 
-    /* Liste ménages */
-    .menages-list { padding: 0 16px 100px; }
-    .day-section { margin-bottom: 16px; }
-    .day-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text2);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      padding: 8px 0 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .day-title .day-badge {
-      background: var(--primary);
-      color: white;
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 20px;
-    }
-    .day-title .day-badge.today { background: var(--amber); }
+    /* Grille semaine */
+    .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+    .day-col { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; min-height: 200px; }
+    .day-col.today { border-color: var(--primary); }
+    .day-header { padding: 8px 10px; border-bottom: 0.5px solid var(--border); background: var(--bg2); }
+    .day-name { font-size: 10px; color: var(--text2); font-weight: 500; text-transform: uppercase; }
+    .day-number { font-size: 18px; font-weight: 600; color: var(--text); line-height: 1.2; }
+    .day-col.today .day-number { color: var(--primary); }
+    .day-body { padding: 6px; display: flex; flex-direction: column; gap: 4px; }
 
-    /* Carte ménage */
-    .menage-item {
-      background: white;
-      border-radius: var(--radius);
-      border: 1.5px solid var(--border);
-      margin-bottom: 8px;
-      overflow: hidden;
-      transition: border-color 0.2s;
-    }
-    .menage-item.done { border-color: var(--green); opacity: 0.7; }
-    .menage-item-header {
-      padding: 14px 16px 10px;
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .menage-prop { font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 2px; }
-    .menage-guest { font-size: 15px; font-weight: 600; }
-    .menage-info { font-size: 12px; color: var(--text2); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
-    .menage-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: var(--amber-bg);
-      color: #92400E;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 20px;
-      white-space: nowrap;
-    }
-    .menage-badge.done-badge {
-      background: var(--green-bg);
-      color: #065F46;
-    }
+    /* Cartes ménage */
+    .menage-card { border-radius: var(--radius); padding: 6px 8px; font-size: 11px; cursor: pointer; transition: opacity 0.15s; position: relative; }
+    .menage-card:hover { opacity: 0.85; }
+    .menage-card.done { opacity: 0.6; }
+    .menage-card.done .menage-card-title { text-decoration: line-through; }
+    .menage-card-prop { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; opacity: 0.8; margin-bottom: 2px; }
+    .menage-card-title { font-weight: 500; line-height: 1.3; }
+    .menage-card-time { font-size: 9px; opacity: 0.7; margin-top: 2px; }
+    .menage-card-check { position: absolute; top: 4px; right: 4px; font-size: 10px; }
 
-    /* Bouton fait */
-    .btn-done {
-      width: 100%;
-      border: none;
-      border-top: 1px solid var(--border);
-      background: var(--bg);
-      padding: 14px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      color: var(--primary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: background 0.15s;
-    }
-    .btn-done:active { background: var(--border); }
-    .menage-item.done .btn-done {
-      color: var(--text2);
-      font-weight: 400;
-    }
+    /* Couleurs par bien */
+    .prop-color-0 { background: #DBEAFE; color: #1E40AF; }
+    .prop-color-1 { background: #D1FAE5; color: #065F46; }
+    .prop-color-2 { background: #FEF3C7; color: #92400E; }
+    .prop-color-3 { background: #FCE7F3; color: #9D174D; }
+    .prop-color-0.done { background: #EFF6FF; }
+    .prop-color-1.done { background: #ECFDF5; }
 
-    /* Empty */
-    .empty-day { font-size: 13px; color: var(--text2); padding: 12px 0; text-align: center; }
-    .no-menages {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--text2);
-    }
-    .no-menages .icon { font-size: 48px; margin-bottom: 12px; }
+    /* Empty day */
+    .day-empty { font-size: 11px; color: var(--text3); text-align: center; padding: 20px 8px; }
 
-    /* Loading */
-    .loading {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--text2);
-      font-size: 14px;
-    }
+    /* Stats semaine */
+    .week-stats { display: flex; gap: 12px; margin-bottom: 16px; }
+    .week-stat { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; }
+    .week-stat strong { font-size: 18px; font-weight: 600; display: block; }
 
-    /* Error */
-    .error-box {
-      margin: 20px;
-      background: #FEE2E2;
-      color: #991B1B;
-      border-radius: var(--radius);
-      padding: 16px;
-      font-size: 13px;
-      text-align: center;
-    }
+    /* Modal détail */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; display: flex; align-items: center; justify-content: center; }
+    .modal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 24px; width: 360px; max-width: 90vw; }
+    .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .modal-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
+    .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
+    .modal-row:last-of-type { border-bottom: none; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
   </style>
 </head>
 <body>
 
-<div class="app-header">
-  <div class="app-logo">🧹 Planning ménages</div>
-  <div class="app-date" id="header-date"></div>
+<div class="layout">
+  <div class="main" style="margin-left:0">
+    <div class="topbar">
+      <div>
+        <div class="page-title">🧹 Planning ménages</div>
+        <div class="page-sub" id="presta-label">Chargement...</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="menage-layout">
+
+        <!-- Colonne gauche : mini cal + filtres -->
+        <div>
+          <!-- Mini calendrier -->
+          <div class="mini-cal">
+            <div class="mini-cal-header">
+              <button class="mini-cal-nav" id="mini-prev">‹</button>
+              <div class="mini-cal-title" id="mini-cal-title"></div>
+              <button class="mini-cal-nav" id="mini-next">›</button>
+            </div>
+            <div class="mini-cal-grid" id="mini-cal-grid">
+              <div class="mini-cal-day-label">L</div>
+              <div class="mini-cal-day-label">M</div>
+              <div class="mini-cal-day-label">M</div>
+              <div class="mini-cal-day-label">J</div>
+              <div class="mini-cal-day-label">V</div>
+              <div class="mini-cal-day-label">S</div>
+              <div class="mini-cal-day-label">D</div>
+            </div>
+          </div>
+
+          <!-- Filtres biens -->
+          <div class="mini-cal" style="margin-top:12px">
+            <div class="filter-title">Biens affichés</div>
+            <div id="filter-list">
+              <div style="font-size:11px;color:var(--text2)">Chargement...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Colonne droite : planning semaine -->
+        <div>
+          <div class="planning-header">
+            <div class="week-nav">
+              <button id="btn-prev-week">← Semaine préc.</button>
+              <div class="week-label" id="week-label"></div>
+              <button id="btn-next-week">Semaine suiv. →</button>
+            </div>
+            <button class="btn btn-today" id="btn-today">Aujourd'hui</button>
+          </div>
+
+          <div class="week-stats" id="week-stats"></div>
+
+          <div class="week-grid" id="week-grid">
+            <div style="grid-column:span 7;text-align:center;padding:40px;color:var(--text2)">Chargement...</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
 </div>
 
-<div class="week-nav-bar">
-  <button class="week-btn" id="btn-prev">← Préc.</button>
-  <div class="week-title" id="week-title"></div>
-  <button class="week-btn" id="btn-next">Suiv. →</button>
+<!-- Modal -->
+<div class="modal-overlay" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-sub" id="modal-sub"></div>
+    <div id="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="modal-done">✓ Marquer fait</button>
+      <button class="btn" id="modal-close">Fermer</button>
+    </div>
+  </div>
 </div>
 
-<div class="stats-bar" id="stats-bar"></div>
+<script type="module">
+  import { initErrorHandler } from '/shared/error-handler.js'
 
-<div class="menages-list" id="menages-list">
-  <div class="loading">⏳ Chargement...</div>
-</div>
+  initErrorHandler()
 
-<script>
-  const JOURS_LONG = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi']
-  const JOURS_COURT = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam']
-  const MOIS = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc']
+  const PROP_COLORS = ['prop-color-0', 'prop-color-1', 'prop-color-2', 'prop-color-3']
+  const JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
+  const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
 
-  let token = null
+  let properties = []
   let bookings = []
   let doneSet = new Set()
   let currentWeekStart = getMonday(new Date())
+  let miniCalDate = new Date()
+  let activeProps = new Set()
+  let selectedMenage = null
 
   function getToken() {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('token')
+    return new URLSearchParams(window.location.search).get('token')
   }
 
   async function init() {
-    token = getToken()
+    const token = getToken()
     if (!token) {
-      document.getElementById('menages-list').innerHTML =
-        '<div class="error-box">❌ Lien invalide — contactez votre employeur</div>'
+      document.querySelector('.content').innerHTML =
+        '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Lien invalide — contactez votre employeur</div>'
       return
     }
 
     loadDoneSet()
-    updateHeaderDate()
-    renderWeekTitle()
+    await loadData(token)
+    renderFilters()
+    renderMiniCal()
+    renderWeek()
 
-    document.getElementById('btn-prev').addEventListener('click', () => {
+    document.getElementById('btn-prev-week').addEventListener('click', () => {
       currentWeekStart = addDays(currentWeekStart, -7)
-      renderWeekTitle()
-      render()
+      renderWeek()
+      renderMiniCal()
     })
-    document.getElementById('btn-next').addEventListener('click', () => {
+    document.getElementById('btn-next-week').addEventListener('click', () => {
       currentWeekStart = addDays(currentWeekStart, 7)
-      renderWeekTitle()
-      render()
+      renderWeek()
+      renderMiniCal()
     })
-
-    await loadBookings()
-    render()
+    document.getElementById('btn-today').addEventListener('click', () => {
+      currentWeekStart = getMonday(new Date())
+      miniCalDate = new Date()
+      renderWeek()
+      renderMiniCal()
+    })
+    document.getElementById('mini-prev').addEventListener('click', () => {
+      miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() - 1, 1)
+      renderMiniCal()
+    })
+    document.getElementById('mini-next').addEventListener('click', () => {
+      miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1)
+      renderMiniCal()
+    })
+    document.getElementById('modal-close').addEventListener('click', closeModal)
+    document.getElementById('modal-done').addEventListener('click', markDone)
+    document.getElementById('modal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('modal')) closeModal()
+    })
   }
 
-  async function loadBookings() {
-    try {
-      const res = await fetch(`/api/menages-public?token=${token}`)
-      if (!res.ok) throw new Error('Token invalide')
-      const data = await res.json()
-      bookings = data.bookings || []
-    } catch (err) {
-      document.getElementById('menages-list').innerHTML =
-        `<div class="error-box">❌ ${err.message}<br>Contactez votre employeur</div>`
+  async function loadData(token) {
+    const res = await fetch(`/api/menages-public?token=${token}`)
+    if (!res.ok) {
+      document.querySelector('.content').innerHTML =
+        '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Token invalide</div>'
+      return
     }
+    const data = await res.json()
+
+    // Label prestataire
+    document.getElementById('presta-label').textContent = data.label || 'Planning ménages'
+
+    // Extraire les propriétés uniques
+    const propMap = new Map()
+    ;(data.bookings || []).forEach(b => {
+      if (!propMap.has(b.propId)) propMap.set(b.propId, { id: b.propId, name: b.propName })
+    })
+    properties = [...propMap.values()]
+    activeProps = new Set(properties.map(p => p.id))
+
+    // Stocker les bookings
+    bookings = data.bookings || []
   }
 
   function getMenages() {
-    return bookings.map(b => {
+    const menages = []
+    for (const b of bookings) {
+      if (!activeProps.has(b.propId)) continue
+      if (!b.departure) continue
       const dep = new Date(b.departure)
+      const propIdx = properties.findIndex(p => p.id === b.propId)
       const id = `${b.id}-${b.departure}`
-      return {
+      menages.push({
         id,
         date: dep,
         dateStr: b.departure,
+        propId: b.propId,
         propName: b.propName,
+        propIdx,
         guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
-        numAdult: b.numAdult || 0,
-        numChild: b.numChild || 0,
         arrival: b.arrival,
         departure: b.departure,
+        numAdult: b.numAdult || 0,
+        numChild: b.numChild || 0,
+        bookId: b.id,
         done: doneSet.has(id)
-      }
-    }).filter(m => m.dateStr)
-      .sort((a, b) => a.date - b.date)
+      })
+    }
+    return menages
   }
 
-  function render() {
+  function renderFilters() {
+    const list = document.getElementById('filter-list')
+    list.innerHTML = properties.map((p, i) => `
+      <div class="filter-item">
+        <input type="checkbox" id="filter-${p.id}" ${activeProps.has(p.id) ? 'checked' : ''}>
+        <div class="filter-dot" style="background:${getDotColor(i)}"></div>
+        <label class="filter-label" for="filter-${p.id}">${p.name}</label>
+      </div>
+    `).join('')
+
+    properties.forEach(p => {
+      document.getElementById(`filter-${p.id}`).addEventListener('change', (e) => {
+        if (e.target.checked) activeProps.add(p.id)
+        else activeProps.delete(p.id)
+        renderWeek()
+        renderMiniCal()
+      })
+    })
+  }
+
+  function renderWeek() {
     const today = new Date()
     today.setHours(0,0,0,0)
     const weekEnd = addDays(currentWeekStart, 6)
     const menages = getMenages()
-    const weekMenages = menages.filter(m => {
-      const d = new Date(m.date)
-      d.setHours(0,0,0,0)
-      return d >= currentWeekStart && d <= weekEnd
-    })
+
+    // Label semaine
+    document.getElementById('week-label').textContent =
+      `${formatDate(currentWeekStart)} — ${formatDate(weekEnd)}`
 
     // Stats
+    const weekMenages = menages.filter(m => m.date >= currentWeekStart && m.date <= weekEnd)
     const done = weekMenages.filter(m => m.done).length
-    document.getElementById('stats-bar').innerHTML = `
-      <div class="stat-pill"><strong>${weekMenages.length}</strong><span>Total</span></div>
-      <div class="stat-pill"><strong style="color:var(--green)">${done}</strong><span>Faits</span></div>
-      <div class="stat-pill"><strong style="color:var(--amber)">${weekMenages.length - done}</strong><span>Restants</span></div>
+    document.getElementById('week-stats').innerHTML = `
+      <div class="week-stat"><strong>${weekMenages.length}</strong>ménages cette semaine</div>
+      <div class="week-stat"><strong>${done}</strong>effectués</div>
+      <div class="week-stat"><strong>${weekMenages.length - done}</strong>restants</div>
     `
 
-    if (weekMenages.length === 0) {
-      document.getElementById('menages-list').innerHTML = `
-        <div class="no-menages">
-          <div class="icon">✨</div>
-          <div>Aucun ménage cette semaine</div>
-        </div>
-      `
-      return
-    }
+    // Grille
+    const grid = document.getElementById('week-grid')
+    grid.innerHTML = ''
 
-    // Grouper par jour
-    const byDay = new Map()
     for (let i = 0; i < 7; i++) {
       const day = addDays(currentWeekStart, i)
       day.setHours(0,0,0,0)
-      byDay.set(day.toISOString().split('T')[0], { date: new Date(day), items: [] })
-    }
-    weekMenages.forEach(m => {
-      const key = m.dateStr
-      if (byDay.has(key)) byDay.get(key).items.push(m)
-    })
+      const isToday = day.getTime() === today.getTime()
 
-    let html = ''
-    byDay.forEach(({ date, items }) => {
-      if (items.length === 0) return
-      date.setHours(0,0,0,0)
-      const isToday = date.getTime() === today.getTime()
-      const dayStr = `${JOURS_LONG[date.getDay()]} ${date.getDate()} ${MOIS[date.getMonth()]}`
+      const dayMenages = menages.filter(m => {
+        const md = new Date(m.date)
+        md.setHours(0,0,0,0)
+        return md.getTime() === day.getTime()
+      })
 
-      html += `
-        <div class="day-section">
-          <div class="day-title">
-            ${dayStr}
-            ${isToday ? '<span class="day-badge today">Aujourd\'hui</span>' : ''}
-          </div>
-          ${items.map(m => `
-            <div class="menage-item ${m.done ? 'done' : ''}" id="item-${m.id}">
-              <div class="menage-item-header">
-                <div>
-                  <div class="menage-prop">${m.propName}</div>
-                  <div class="menage-guest">${m.guestName}</div>
-                  <div class="menage-info">
-                    <span>👥 ${m.numAdult} adulte${m.numAdult > 1 ? 's' : ''}${m.numChild > 0 ? ` · 👶 ${m.numChild} enfant${m.numChild > 1 ? 's' : ''}` : ''}</span>
-                    <span>📅 Départ ${m.departure}</span>
-                  </div>
-                </div>
-                <div class="menage-badge ${m.done ? 'done-badge' : ''}">
-                  ${m.done ? '✓ Fait' : '⏳ À faire'}
-                </div>
+      const col = document.createElement('div')
+      col.className = `day-col${isToday ? ' today' : ''}`
+      col.innerHTML = `
+        <div class="day-header">
+          <div class="day-name">${JOURS[i]}</div>
+          <div class="day-number">${day.getDate()}</div>
+        </div>
+        <div class="day-body">
+          ${dayMenages.length === 0
+            ? '<div class="day-empty">—</div>'
+            : dayMenages.map(m => `
+              <div class="menage-card ${PROP_COLORS[m.propIdx % 4]} ${m.done ? 'done' : ''}"
+                   data-id="${m.id}" style="cursor:pointer">
+                <div class="menage-card-prop">${m.propName}</div>
+                <div class="menage-card-title">Ménage départ</div>
+                <div class="menage-card-time">${m.guestName}</div>
+                ${m.done ? '<div class="menage-card-check">✓</div>' : ''}
               </div>
-              <button class="btn-done" data-id="${m.id}">
-                ${m.done ? '↩ Marquer non fait' : '✓ Marquer comme fait'}
-              </button>
-            </div>
-          `).join('')}
+            `).join('')
+          }
         </div>
       `
-    })
+      grid.appendChild(col)
+    }
 
-    document.getElementById('menages-list').innerHTML = html
-
-    document.querySelectorAll('.btn-done').forEach(btn => {
-      btn.addEventListener('click', () => toggleDone(btn.dataset.id))
+    // Clics sur les cartes
+    grid.querySelectorAll('.menage-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const id = card.dataset.id
+        selectedMenage = menages.find(m => m.id === id)
+        openModal(selectedMenage)
+      })
     })
   }
 
-  function toggleDone(id) {
-    if (doneSet.has(id)) doneSet.delete(id)
-    else doneSet.add(id)
+  function renderMiniCal() {
+    const menages = getMenages()
+    const menageDates = new Map()
+    menages.forEach(m => {
+      const key = m.dateStr
+      menageDates.set(key, { done: m.done })
+    })
+
+    const title = document.getElementById('mini-cal-title')
+    title.textContent = `${MOIS[miniCalDate.getMonth()]} ${miniCalDate.getFullYear()}`
+
+    const grid = document.getElementById('mini-cal-grid')
+    // Garde les headers
+    const headers = Array.from(grid.children).slice(0, 7)
+    grid.innerHTML = ''
+    headers.forEach(h => grid.appendChild(h))
+
+    const firstDay = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth(), 1)
+    const lastDay = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 0)
+    const today = new Date()
+    today.setHours(0,0,0,0)
+
+    // Décalage lundi = 0
+    let startOffset = (firstDay.getDay() + 6) % 7
+    for (let i = 0; i < startOffset; i++) {
+      const prev = new Date(firstDay)
+      prev.setDate(prev.getDate() - (startOffset - i))
+      const d = document.createElement('div')
+      d.className = 'mini-cal-day other-month'
+      d.textContent = prev.getDate()
+      grid.appendChild(d)
+    }
+
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      const date = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth(), d)
+      date.setHours(0,0,0,0)
+      const dateStr = toDateStr(date)
+      const hasMenage = menageDates.has(dateStr)
+      const isDone = hasMenage && menageDates.get(dateStr).done
+      const isToday = date.getTime() === today.getTime()
+
+      // Dans la semaine affichée ?
+      const weekEnd = addDays(currentWeekStart, 6)
+      const inWeek = date >= currentWeekStart && date <= weekEnd
+
+      const el = document.createElement('div')
+      el.className = [
+        'mini-cal-day',
+        isToday ? 'today' : '',
+        hasMenage && !isToday ? (isDone ? 'has-menage done' : 'has-menage') : '',
+        inWeek && !isToday ? 'selected-week' : ''
+      ].filter(Boolean).join(' ')
+      el.textContent = d
+      el.addEventListener('click', () => {
+        currentWeekStart = getMonday(date)
+        renderWeek()
+        renderMiniCal()
+      })
+      grid.appendChild(el)
+    }
+  }
+
+  function openModal(m) {
+    document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
+    document.getElementById('modal-sub').textContent = `${formatDate(m.date)}`
+    document.getElementById('modal-body').innerHTML = `
+      <div class="modal-row"><span>Voyageur</span><span>${m.guestName}</span></div>
+      <div class="modal-row"><span>Adultes</span><span>${m.numAdult || '—'}</span></div>
+      <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? m.numChild + ' enfant(s) 👶' : 'Aucun'}</span></div>
+      <div class="modal-row"><span>Arrivée</span><span>${m.arrival || '—'}</span></div>
+      <div class="modal-row"><span>Départ</span><span>${m.departure || '—'}</span></div>
+      <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : '⏳ À faire'}</span></div>
+    `
+    const btn = document.getElementById('modal-done')
+    if (m.done) {
+      btn.textContent = '↩ Marquer non fait'
+      btn.className = 'btn'
+    } else {
+      btn.textContent = '✓ Marquer fait'
+      btn.className = 'btn btn-primary'
+    }
+    document.getElementById('modal').style.display = 'flex'
+  }
+
+  function closeModal() {
+    document.getElementById('modal').style.display = 'none'
+    selectedMenage = null
+  }
+
+  function markDone() {
+    if (!selectedMenage) return
+    if (doneSet.has(selectedMenage.id)) {
+      doneSet.delete(selectedMenage.id)
+    } else {
+      doneSet.add(selectedMenage.id)
+    }
     saveDoneSet()
-    render()
-  }
-
-  function updateHeaderDate() {
-    const now = new Date()
-    document.getElementById('header-date').textContent =
-      `${JOURS_LONG[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()]}`
-  }
-
-  function renderWeekTitle() {
-    const weekEnd = addDays(currentWeekStart, 6)
-    document.getElementById('week-title').textContent =
-      `${currentWeekStart.getDate()} ${MOIS[currentWeekStart.getMonth()]} — ${weekEnd.getDate()} ${MOIS[weekEnd.getMonth()]}`
-  }
-
-  function getMonday(date) {
-    const d = new Date(date)
-    d.setHours(0,0,0,0)
-    const day = d.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    d.setDate(d.getDate() + diff)
-    return d
-  }
-
-  function addDays(date, n) {
-    const d = new Date(date)
-    d.setDate(d.getDate() + n)
-    return d
+    closeModal()
+    renderWeek()
+    renderMiniCal()
   }
 
   function loadDoneSet() {
@@ -410,7 +485,37 @@
     localStorage.setItem('menages-done-public', JSON.stringify([...doneSet]))
   }
 
+  // Helpers
+  function getMonday(date) {
+    const d = new Date(date)
+    d.setHours(0,0,0,0)
+    const day = d.getDay()
+    const diff = (day === 0) ? -6 : 1 - day
+    d.setDate(d.getDate() + diff)
+    return d
+  }
+
+  function addDays(date, n) {
+    const d = new Date(date)
+    d.setDate(d.getDate() + n)
+    return d
+  }
+
+  function formatDate(date) {
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+  }
+
+  function toDateStr(date) {
+    return date.toISOString().split('T')[0]
+  }
+
+  function getDotColor(i) {
+    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EC4899']
+    return colors[i % 4]
+  }
+
   init()
 </script>
+
 </body>
 </html>
