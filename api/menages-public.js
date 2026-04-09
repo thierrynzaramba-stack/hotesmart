@@ -15,12 +15,12 @@ module.exports = async function handler(req, res) {
     // Valide le token et récupère le user_id
     const { data: tokenData, error: tokenError } = await supabase
       .from('public_tokens')
-      .select('user_id, label')
+      .select('user_id, label, property_ids')
       .eq('token', token)
       .maybeSingle()
 
     if (tokenError || !tokenData) {
-      return res.status(401).json({ error: "Token invalide", detail: tokenError?.message, tokenReceived: token })
+      return res.status(401).json({ error: 'Token invalide' })
     }
 
     const userId = tokenData.user_id
@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
       .select('api_key')
       .eq('user_id', userId)
       .eq('service', 'beds24')
-      .maybeSingle()
+      .single()
 
     if (keyError || !keyData) {
       return res.status(400).json({ error: 'Beds24 non configuré' })
@@ -44,9 +44,15 @@ module.exports = async function handler(req, res) {
       headers: { token: beds24Key }
     })
     const propsData = await propsRes.json()
-    const properties = propsData.data || []
+    const allProperties = propsData.data || []
 
-    // Récupère les réservations de tous les biens
+    // Filtre les propriétés selon les property_ids du token
+    const allowedIds = tokenData.property_ids || []
+    const properties = allowedIds.length
+      ? allProperties.filter(p => allowedIds.includes(String(p.id)))
+      : allProperties
+
+    // Récupère les réservations des biens autorisés uniquement
     const allBookings = []
     for (const prop of properties) {
       const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${prop.id}`, {
@@ -59,7 +65,7 @@ module.exports = async function handler(req, res) {
       allBookings.push(...propBookings)
     }
 
-    return res.json({ bookings: allBookings, label: tokenData.label })
+    return res.json({ bookings: allBookings, label: tokenData.label, property_ids: allowedIds })
 
   } catch (err) {
     console.error('[MenagesPublic]', err)
