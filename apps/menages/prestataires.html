@@ -171,6 +171,7 @@
             <div class="presta-name">🧹 ${p.label || 'Sans nom'}</div>
             <div class="presta-actions">
               <a class="btn" href="${url}" target="_blank">👁 Voir</a>
+              <button class="btn btn-edit" data-id="${p.id}">✏️ Modifier</button>
               <button class="btn btn-danger btn-delete" data-id="${p.id}">Supprimer</button>
             </div>
           </div>
@@ -190,6 +191,11 @@
         navigator.clipboard.writeText(btn.dataset.url)
         showToast()
       })
+    })
+
+    // Modifier
+    list.querySelectorAll('.btn-edit').forEach(btn => {
+      btn.addEventListener('click', () => editPrestataire(btn.dataset.id))
     })
 
     // Supprimer
@@ -256,6 +262,61 @@
     }
 
     await loadPrestataires()
+  }
+
+  function editPrestataire(id) {
+    const p = prestataires.find(p => p.id === id)
+    if (!p) return
+
+    // Pré-remplir le formulaire
+    document.getElementById('presta-name').value = p.label || ''
+    document.getElementById('form-section').style.display = 'block'
+    document.getElementById('btn-show-form').style.display = 'none'
+
+    // Cocher les biens assignés
+    properties.forEach(prop => {
+      const cb = document.getElementById(`prop-${prop.id}`)
+      if (cb) {
+        cb.checked = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
+      }
+    })
+
+    // Changer le bouton créer en sauvegarder
+    const btn = document.getElementById('btn-create')
+    btn.textContent = 'Sauvegarder les modifications'
+    btn.dataset.editId = id
+    btn.onclick = () => saveEdit(id)
+  }
+
+  async function saveEdit(id) {
+    const name = document.getElementById('presta-name').value.trim()
+    if (!name) return alert('Entrez un nom pour le prestataire')
+
+    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')]
+      .map(cb => cb.value)
+
+    const { error } = await supabase
+      .from('public_tokens')
+      .update({ label: name, property_ids: selectedProps })
+      .eq('id', id)
+      .eq('user_id', currentSession.user.id)
+
+    if (error) {
+      alert('Erreur modification : ' + error.message)
+      return
+    }
+
+    // Remettre le formulaire en mode création
+    const btn = document.getElementById('btn-create')
+    btn.textContent = 'Créer et générer le lien'
+    btn.onclick = createPrestataire
+
+    document.getElementById('presta-name').value = ''
+    document.getElementById('form-section').style.display = 'none'
+    document.getElementById('btn-show-form').style.display = 'inline-flex'
+
+    await loadPrestataires()
+    showToast('✓ Prestataire modifié !')
   }
 
   function generateToken(name) {
