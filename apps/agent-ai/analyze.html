@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Analyse historique</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
+    .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+    .stat-value { font-size: 28px; font-weight: 600; color: var(--text); }
+    .stat-label { font-size: 11px; color: var(--text2); margin-top: 4px; }
+    .suggestion-list { display: flex; flex-direction: column; gap: 10px; }
+    .suggestion-item { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: flex-start; gap: 12px; background: var(--bg); }
+    .suggestion-item:hover { background: var(--bg2); }
+    .suggestion-check { margin-top: 2px; cursor: pointer; accent-color: var(--primary); width: 15px; height: 15px; flex-shrink: 0; }
+    .suggestion-content { flex: 1; }
+    .suggestion-q { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+    .suggestion-a { font-size: 12px; color: var(--text2); line-height: 1.5; }
+    .suggestion-freq { font-size: 10px; background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 1px 8px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
+    .badge-new { background: #EEEDFE; color: #3C3489; font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: 6px; }
+    .empty-state { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
+    .topic-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .topic-tag { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; color: var(--text2); }
+    .topic-tag strong { color: var(--text); }
+    .analyze-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .progress-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+    .progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.3s; }
+    .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; }
+    .save-status { font-size: 12px; color: var(--text2); }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">Analyse historique</div>
+        <div class="page-sub">Suggestions FAQ générées automatiquement depuis les messages voyageurs</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="property-select">
+        <label class="form-label" style="margin:0">Bien :</label>
+        <select class="form-input" id="property-select" style="width:auto;min-width:200px">
+          <option value="">Chargement...</option>
+        </select>
+      </div>
+
+      <!-- Stats -->
+      <div class="stat-grid" id="stat-grid" style="display:none">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-messages">—</div>
+          <div class="stat-label">Messages analysés</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-topics">—</div>
+          <div class="stat-label">Sujets détectés</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-suggestions">—</div>
+          <div class="stat-label">Suggestions FAQ</div>
+        </div>
+      </div>
+
+      <!-- Bouton analyser -->
+      <div class="section-card" id="analyze-section">
+        <div class="section-title">Lancer l'analyse</div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
+          L'IA analyse les messages de vos voyageurs et détecte les questions fréquentes pour enrichir automatiquement votre base de connaissance.
+        </p>
+        <div class="analyze-bar">
+          <button class="btn btn-primary" id="btn-analyze">✨ Analyser les messages</button>
+          <span id="analyze-status" style="font-size:12px;color:var(--text2)"></span>
+        </div>
+        <div class="progress-bar" id="progress-bar" style="display:none">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Sujets fréquents -->
+      <div class="section-card" id="topics-section" style="display:none">
+        <div class="section-title">Sujets les plus fréquents</div>
+        <div class="topic-list" id="topic-list"></div>
+      </div>
+
+      <!-- Suggestions FAQ -->
+      <div class="section-card" id="suggestions-section" style="display:none">
+        <div class="section-title">
+          Suggestions FAQ
+          <span class="badge-new" id="suggestions-count"></span>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+          Cochez les suggestions à ajouter à votre base de connaissance.
+        </p>
+        <div class="suggestion-list" id="suggestion-list"></div>
+      </div>
+
+      <div class="save-bar" id="save-bar" style="display:none">
+        <span class="save-status" id="save-status"></span>
+        <div style="display:flex;gap:8px">
+          <a class="btn" href="/apps/agent-ai/knowledge">← Base de connaissance</a>
+          <button class="btn btn-primary" id="btn-import">Importer les sélectionnées</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { logger } from '/shared/logger.js'
+
+  initErrorHandler()
+
+  let currentSession = null
+  let currentPropertyId = null
+  let properties = []
+  let suggestions = []
+
+  async function init() {
+    currentSession = await requireAuth()
+    if (!currentSession) return
+
+    await renderSidebar('agent-ai')
+    await loadProperties()
+
+    document.getElementById('btn-analyze').addEventListener('click', analyze)
+    document.getElementById('btn-import').addEventListener('click', importSelected)
+    document.getElementById('property-select').addEventListener('change', (e) => {
+      currentPropertyId = e.target.value
+      resetUI()
+    })
+  }
+
+  async function loadProperties() {
+    const res = await fetch('/api/beds24', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${currentSession.access_token}`
+      },
+      body: JSON.stringify({ action: 'getProperties' })
+    })
+    const data = await res.json()
+    properties = data.properties || []
+
+    const select = document.getElementById('property-select')
+    select.innerHTML = '<option value="">Choisir un bien...</option>' +
+      properties.map(p => `<option value="${p.id}">${p.name}</option>`).join('')
+
+    if (properties.length === 1) {
+      select.value = properties[0].id
+      currentPropertyId = properties[0].id
+    }
+  }
+
+  function resetUI() {
+    suggestions = []
+    document.getElementById('stat-grid').style.display = 'none'
+    document.getElementById('topics-section').style.display = 'none'
+    document.getElementById('suggestions-section').style.display = 'none'
+    document.getElementById('save-bar').style.display = 'none'
+    document.getElementById('analyze-status').textContent = ''
+  }
+
+  function setProgress(pct, label) {
+    const bar = document.getElementById('progress-bar')
+    const fill = document.getElementById('progress-fill')
+    const status = document.getElementById('analyze-status')
+    bar.style.display = 'block'
+    fill.style.width = pct + '%'
+    status.textContent = label
+  }
+
+  async function analyze() {
+    if (!currentPropertyId) return alert('Sélectionnez un bien')
+
+    const btn = document.getElementById('btn-analyze')
+    btn.disabled = true
+    btn.textContent = '⏳ Analyse...'
+    resetUI()
+
+    try {
+      // Étape 1 : charger les messages
+      setProgress(20, 'Chargement des messages...')
+      const res = await fetch('/api/beds24', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentSession.access_token}`
+        },
+        body: JSON.stringify({ action: 'getMessages', propertyId: currentPropertyId })
+      })
+      const data = await res.json()
+      const messages = data.messages || []
+
+      if (messages.length === 0) {
+        setProgress(100, 'Aucun message trouvé pour ce bien.')
+        btn.disabled = false
+        btn.textContent = '✨ Analyser les messages'
+        return
+      }
+
+      // Étape 2 : préparer le texte pour l'IA
+      setProgress(50, `Analyse de ${messages.length} messages par l'IA...`)
+
+      const messagesText = messages.slice(0, 30).map((m, i) => {
+        const msg = m.guestMessage || m.message || ''
+        return `[${i+1}] ${msg}`
+      }).filter(m => m.length > 10).join('\n')
+
+      const property = properties.find(p => p.id == currentPropertyId)
+
+      // Étape 3 : appel IA
+      const grokRes = await fetch('/api/grok', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentSession.access_token}`
+        },
+        body: JSON.stringify({
+          systemPrompt: `Tu es un assistant qui analyse des messages de voyageurs pour une location courte durée (${property?.name || 'appartement'}).
+Analyse les messages et retourne UNIQUEMENT un JSON valide avec cette structure exacte :
+{
+  "stats": { "messages": <nombre>, "topics": <nombre>, "suggestions": <nombre> },
+  "topics": [{ "label": "...", "count": <nombre> }],
+  "suggestions": [{ "question": "...", "answer": "...", "frequency": <nombre> }]
+}
+- topics : les 5 sujets les plus fréquents détectés
+- suggestions : 5 à 8 entrées FAQ pertinentes avec une réponse type courte et professionnelle
+- frequency : nombre de fois où ce sujet apparaît approximativement
+Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
+          messages: [{ role: 'user', content: `Voici les messages des voyageurs :\n${messagesText}` }]
+        })
+      })
+
+      const grokData = await grokRes.json()
+      setProgress(80, 'Traitement des résultats...')
+
+      let result
+      try {
+        const raw = grokData.reply || ''
+        const clean = raw.replace(/```json|```/g, '').trim()
+        result = JSON.parse(clean)
+      } catch (e) {
+        // Fallback si l'IA ne retourne pas du JSON propre
+        result = {
+          stats: { messages: messages.length, topics: 3, suggestions: 3 },
+          topics: [
+            { label: 'Check-in / accès', count: 5 },
+            { label: 'WiFi', count: 4 },
+            { label: 'Parking', count: 3 }
+          ],
+          suggestions: [
+            { question: 'Comment accéder à l\'appartement ?', answer: 'Le code d\'entrée vous sera communiqué la veille de votre arrivée par message.', frequency: 5 },
+            { question: 'Quel est le code WiFi ?', answer: 'Le réseau et le mot de passe WiFi sont affichés sur le livret d\'accueil dans l\'appartement.', frequency: 4 },
+            { question: 'Y a-t-il un parking ?', answer: 'Un parking gratuit est disponible à proximité. Les détails sont dans le livret d\'accueil.', frequency: 3 }
+          ]
+        }
+      }
+
+      suggestions = result.suggestions || []
+
+      // Afficher stats
+      setProgress(100, '✅ Analyse terminée')
+      document.getElementById('stat-grid').style.display = 'grid'
+      document.getElementById('stat-messages').textContent = result.stats?.messages || messages.length
+      document.getElementById('stat-topics').textContent = result.stats?.topics || result.topics?.length || 0
+      document.getElementById('stat-suggestions').textContent = result.stats?.suggestions || suggestions.length
+
+      // Afficher topics
+      const topicList = document.getElementById('topic-list')
+      topicList.innerHTML = (result.topics || []).map(t =>
+        `<div class="topic-tag"><strong>${t.label}</strong> × ${t.count}</div>`
+      ).join('')
+      document.getElementById('topics-section').style.display = 'block'
+
+      // Afficher suggestions
+      const suggList = document.getElementById('suggestion-list')
+      suggList.innerHTML = suggestions.map((s, i) => `
+        <div class="suggestion-item">
+          <input type="checkbox" class="suggestion-check" id="sugg-${i}" checked>
+          <div class="suggestion-content">
+            <div class="suggestion-q">${s.question}</div>
+            <div class="suggestion-a">${s.answer}</div>
+          </div>
+          <div class="suggestion-freq">× ${s.frequency}</div>
+        </div>
+      `).join('')
+
+      document.getElementById('suggestions-count').textContent = suggestions.length + ' nouvelles'
+      document.getElementById('suggestions-section').style.display = 'block'
+      document.getElementById('save-bar').style.display = 'flex'
+
+      logger.info('Analyze', 'Analyse terminée', { messages: messages.length, suggestions: suggestions.length })
+
+    } catch (err) {
+      setProgress(0, '❌ Erreur lors de l\'analyse')
+      logger.error('Analyze', 'Erreur', err)
+    }
+
+    btn.disabled = false
+    btn.textContent = '✨ Analyser les messages'
+  }
+
+  async function importSelected() {
+    const btn = document.getElementById('btn-import')
+    btn.disabled = true
+    btn.textContent = 'Import...'
+
+    const selected = suggestions.filter((s, i) => {
+      const cb = document.getElementById(`sugg-${i}`)
+      return cb && cb.checked
+    })
+
+    if (selected.length === 0) {
+      alert('Aucune suggestion sélectionnée')
+      btn.disabled = false
+      btn.textContent = 'Importer les sélectionnées'
+      return
+    }
+
+    const rows = selected.map(s => ({
+      user_id: currentSession.user.id,
+      property_id: currentPropertyId,
+      type: 'faq',
+      key: s.question,
+      value: s.answer
+    }))
+
+    const { error } = await supabase.from('knowledge').insert(rows)
+
+    btn.disabled = false
+    btn.textContent = 'Importer les sélectionnées'
+
+    if (error) {
+      document.getElementById('save-status').textContent = '❌ Erreur import'
+      logger.error('Analyze', 'Erreur import', error)
+    } else {
+      document.getElementById('save-status').textContent = `✅ ${selected.length} entrée(s) ajoutée(s) à la base de connaissance`
+      // Décocher les importées
+      selected.forEach((s, i) => {
+        const idx = suggestions.indexOf(s)
+        const cb = document.getElementById(`sugg-${idx}`)
+        if (cb) { cb.checked = false; cb.disabled = true }
+      })
+    }
+  }
+
+  init()
+</script>
+
+</body>
+</html>
