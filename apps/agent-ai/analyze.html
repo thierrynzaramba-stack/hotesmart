@@ -21,15 +21,15 @@
     .suggestion-a { font-size: 12px; color: var(--text2); line-height: 1.5; }
     .suggestion-freq { font-size: 10px; background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 1px 8px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
     .badge-new { background: #EEEDFE; color: #3C3489; font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: 6px; }
-    .empty-state { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
     .topic-list { display: flex; flex-wrap: wrap; gap: 8px; }
     .topic-tag { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; color: var(--text2); }
     .topic-tag strong { color: var(--text); }
-    .analyze-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .analyze-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
     .progress-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; }
-    .progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.3s; }
+    .progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.4s; }
     .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; }
     .save-status { font-size: 12px; color: var(--text2); }
+    .info-box { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 12px; color: var(--text2); line-height: 1.6; margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -41,7 +41,7 @@
     <div class="topbar">
       <div>
         <div class="page-title">Analyse historique</div>
-        <div class="page-sub">Suggestions FAQ générées automatiquement depuis les messages voyageurs</div>
+        <div class="page-sub">Suggestions FAQ générées depuis vos conversations voyageurs</div>
       </div>
     </div>
 
@@ -58,7 +58,7 @@
       <div class="stat-grid" id="stat-grid" style="display:none">
         <div class="stat-card">
           <div class="stat-value" id="stat-messages">—</div>
-          <div class="stat-label">Messages analysés</div>
+          <div class="stat-label">Conversations analysées</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" id="stat-topics">—</div>
@@ -71,13 +71,13 @@
       </div>
 
       <!-- Bouton analyser -->
-      <div class="section-card" id="analyze-section">
+      <div class="section-card">
         <div class="section-title">Lancer l'analyse</div>
-        <p style="font-size:13px;color:var(--text2);margin-bottom:16px">
-          L'IA analyse les messages de vos voyageurs et détecte les questions fréquentes pour enrichir automatiquement votre base de connaissance.
-        </p>
+        <div class="info-box">
+          💡 L'analyse se base sur les conversations générées par l'Agent AI. Plus vous utilisez l'Agent AI pour répondre aux voyageurs, plus les suggestions seront pertinentes.
+        </div>
         <div class="analyze-bar">
-          <button class="btn btn-primary" id="btn-analyze">✨ Analyser les messages</button>
+          <button class="btn btn-primary" id="btn-analyze">✨ Analyser les conversations</button>
           <span id="analyze-status" style="font-size:12px;color:var(--text2)"></span>
         </div>
         <div class="progress-bar" id="progress-bar" style="display:none">
@@ -173,15 +173,13 @@
     document.getElementById('suggestions-section').style.display = 'none'
     document.getElementById('save-bar').style.display = 'none'
     document.getElementById('analyze-status').textContent = ''
+    document.getElementById('progress-bar').style.display = 'none'
   }
 
   function setProgress(pct, label) {
-    const bar = document.getElementById('progress-bar')
-    const fill = document.getElementById('progress-fill')
-    const status = document.getElementById('analyze-status')
-    bar.style.display = 'block'
-    fill.style.width = pct + '%'
-    status.textContent = label
+    document.getElementById('progress-bar').style.display = 'block'
+    document.getElementById('progress-fill').style.width = pct + '%'
+    document.getElementById('analyze-status').textContent = label
   }
 
   async function analyze() {
@@ -193,35 +191,39 @@
     resetUI()
 
     try {
-      // Étape 1 : charger les messages
-      setProgress(20, 'Chargement des messages...')
-      const res = await fetch('/api/beds24', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentSession.access_token}`
-        },
-        body: JSON.stringify({ action: 'getHistory', propertyId: currentPropertyId })
-      })
-      const data = await res.json()
-      const messages = data.messages || []
+      // Étape 1 : charger les conversations depuis Supabase
+      setProgress(20, 'Chargement des conversations...')
 
-      if (messages.length === 0) {
-        setProgress(100, 'Aucun message trouvé pour ce bien.')
+      const { data: convs, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('user_id', currentSession.user.id)
+        .eq('property_id', String(currentPropertyId))
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (error) {
+        setProgress(0, '❌ Erreur chargement conversations')
+        logger.error('Analyze', 'Erreur Supabase', error)
         btn.disabled = false
-        btn.textContent = '✨ Analyser les messages'
+        btn.textContent = '✨ Analyser les conversations'
         return
       }
 
-      // Étape 2 : préparer le texte pour l'IA
-      setProgress(50, `Analyse de ${messages.length} messages par l'IA...`)
+      if (!convs || convs.length === 0) {
+        setProgress(100, 'Aucune conversation trouvée. Utilisez l\'Agent AI pour répondre aux voyageurs.')
+        btn.disabled = false
+        btn.textContent = '✨ Analyser les conversations'
+        return
+      }
 
-      const messagesText = messages.slice(0, 30).map((m, i) => {
-        const msg = m.guestMessage || m.message || ''
-        return `[${i+1}] ${msg}`
-      }).filter(m => m.length > 10).join('\n')
+      // Étape 2 : préparer pour l'IA
+      setProgress(50, `Analyse de ${convs.length} conversations par l'IA...`)
 
       const property = properties.find(p => p.id == currentPropertyId)
+      const convText = convs.map((c, i) =>
+        `[${i+1}] Voyageur: "${c.guest_message}" → Agent: "${c.agent_reply || ''}"`
+      ).join('\n')
 
       // Étape 3 : appel IA
       const grokRes = await fetch('/api/grok', {
@@ -231,18 +233,18 @@
           'Authorization': `Bearer ${currentSession.access_token}`
         },
         body: JSON.stringify({
-          systemPrompt: `Tu es un assistant qui analyse des messages de voyageurs pour une location courte durée (${property?.name || 'appartement'}).
-Analyse les messages et retourne UNIQUEMENT un JSON valide avec cette structure exacte :
+          systemPrompt: `Tu es un assistant qui analyse des conversations entre voyageurs et un agent AI pour une location courte durée (${property?.name || 'appartement'}).
+Analyse les échanges et retourne UNIQUEMENT un JSON valide sans backticks :
 {
-  "stats": { "messages": <nombre>, "topics": <nombre>, "suggestions": <nombre> },
-  "topics": [{ "label": "...", "count": <nombre> }],
-  "suggestions": [{ "question": "...", "answer": "...", "frequency": <nombre> }]
+  "stats": { "messages": <nombre analysés>, "topics": <nombre de sujets>, "suggestions": <nombre de suggestions> },
+  "topics": [{ "label": "sujet court", "count": <fréquence> }],
+  "suggestions": [{ "question": "question type du voyageur", "answer": "meilleure réponse type courte et professionnelle", "frequency": <nombre> }]
 }
-- topics : les 5 sujets les plus fréquents détectés
-- suggestions : 5 à 8 entrées FAQ pertinentes avec une réponse type courte et professionnelle
-- frequency : nombre de fois où ce sujet apparaît approximativement
-Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
-          messages: [{ role: 'user', content: `Voici les messages des voyageurs :\n${messagesText}` }]
+Règles :
+- topics : les 5 sujets les plus fréquents détectés dans les questions voyageurs
+- suggestions : 5 à 8 entrées FAQ avec la meilleure réponse possible (1-2 phrases, ton professionnel et chaleureux)
+- frequency : nombre de conversations sur ce sujet`,
+          messages: [{ role: 'user', content: `Conversations à analyser :\n${convText}` }]
         })
       })
 
@@ -255,20 +257,11 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
         const clean = raw.replace(/```json|```/g, '').trim()
         result = JSON.parse(clean)
       } catch (e) {
-        // Fallback si l'IA ne retourne pas du JSON propre
-        result = {
-          stats: { messages: messages.length, topics: 3, suggestions: 3 },
-          topics: [
-            { label: 'Check-in / accès', count: 5 },
-            { label: 'WiFi', count: 4 },
-            { label: 'Parking', count: 3 }
-          ],
-          suggestions: [
-            { question: 'Comment accéder à l\'appartement ?', answer: 'Le code d\'entrée vous sera communiqué la veille de votre arrivée par message.', frequency: 5 },
-            { question: 'Quel est le code WiFi ?', answer: 'Le réseau et le mot de passe WiFi sont affichés sur le livret d\'accueil dans l\'appartement.', frequency: 4 },
-            { question: 'Y a-t-il un parking ?', answer: 'Un parking gratuit est disponible à proximité. Les détails sont dans le livret d\'accueil.', frequency: 3 }
-          ]
-        }
+        logger.error('Analyze', 'JSON parse failed', e)
+        setProgress(0, '❌ Erreur traitement IA — réessayez')
+        btn.disabled = false
+        btn.textContent = '✨ Analyser les conversations'
+        return
       }
 
       suggestions = result.suggestions || []
@@ -276,20 +269,18 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
       // Afficher stats
       setProgress(100, '✅ Analyse terminée')
       document.getElementById('stat-grid').style.display = 'grid'
-      document.getElementById('stat-messages').textContent = result.stats?.messages || messages.length
+      document.getElementById('stat-messages').textContent = result.stats?.messages || convs.length
       document.getElementById('stat-topics').textContent = result.stats?.topics || result.topics?.length || 0
       document.getElementById('stat-suggestions').textContent = result.stats?.suggestions || suggestions.length
 
       // Afficher topics
-      const topicList = document.getElementById('topic-list')
-      topicList.innerHTML = (result.topics || []).map(t =>
+      document.getElementById('topic-list').innerHTML = (result.topics || []).map(t =>
         `<div class="topic-tag"><strong>${t.label}</strong> × ${t.count}</div>`
       ).join('')
       document.getElementById('topics-section').style.display = 'block'
 
       // Afficher suggestions
-      const suggList = document.getElementById('suggestion-list')
-      suggList.innerHTML = suggestions.map((s, i) => `
+      document.getElementById('suggestion-list').innerHTML = suggestions.map((s, i) => `
         <div class="suggestion-item">
           <input type="checkbox" class="suggestion-check" id="sugg-${i}" checked>
           <div class="suggestion-content">
@@ -304,15 +295,16 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
       document.getElementById('suggestions-section').style.display = 'block'
       document.getElementById('save-bar').style.display = 'flex'
 
-      logger.info('Analyze', 'Analyse terminée', { messages: messages.length, suggestions: suggestions.length })
+      logger.info('Analyze', 'Analyse terminée', { convs: convs.length, suggestions: suggestions.length })
 
     } catch (err) {
       setProgress(0, '❌ Erreur lors de l\'analyse')
       logger.error('Analyze', 'Erreur', err)
+      console.error('[Analyze]', err)
     }
 
     btn.disabled = false
-    btn.textContent = '✨ Analyser les messages'
+    btn.textContent = '✨ Analyser les conversations'
   }
 
   async function importSelected() {
@@ -334,7 +326,7 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
 
     const rows = selected.map(s => ({
       user_id: currentSession.user.id,
-      property_id: currentPropertyId,
+      property_id: String(currentPropertyId),
       type: 'faq',
       key: s.question,
       value: s.answer
@@ -346,12 +338,11 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`,
     btn.textContent = 'Importer les sélectionnées'
 
     if (error) {
-      document.getElementById('save-status').textContent = '❌ Erreur import'
+      document.getElementById('save-status').textContent = '❌ Erreur import : ' + error.message
       logger.error('Analyze', 'Erreur import', error)
     } else {
       document.getElementById('save-status').textContent = `✅ ${selected.length} entrée(s) ajoutée(s) à la base de connaissance`
-      // Décocher les importées
-      selected.forEach((s, i) => {
+      selected.forEach(s => {
         const idx = suggestions.indexOf(s)
         const cb = document.getElementById(`sugg-${idx}`)
         if (cb) { cb.checked = false; cb.disabled = true }
