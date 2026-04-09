@@ -25,7 +25,7 @@ export async function renderSidebar(activePage = '') {
       </a>
 
       <div class="nav-section-label">Apps actives</div>
-      ${await renderActiveApps(user)}
+      ${await renderActiveApps(user, activePage)}
 
       <div class="nav-section-label">Mes API</div>
       <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/api">
@@ -75,14 +75,33 @@ export async function renderSidebar(activePage = '') {
   `
 }
 
-async function renderActiveApps(user) {
+async function renderActiveApps(user, activePage = '') {
   if (!user) return ''
-  return CONFIG.apps.map(app => `
-    <a class="nav-item" href="/apps/${app.id}">
-      <span class="nav-icon" style="font-size:14px">${app.icon}</span>
-      <span class="nav-label">${app.name}</span>
-    </a>
-  `).join('')
+  return CONFIG.apps.map(app => {
+    const isAgentAI = app.id === 'agent-ai'
+    const isActiveApp = activePage === app.id || activePage.startsWith(app.id)
+    const subMenu = isAgentAI ? `
+      <a class="nav-sub ${activePage === 'agent-ai' ? 'connected' : ''}" href="/apps/agent-ai">
+        <div class="sub-dot ${activePage === 'agent-ai' ? 'green' : 'gray'}"></div>Messages
+      </a>
+      <a class="nav-sub ${activePage === 'agent-ai-knowledge' ? 'connected' : ''}" href="/apps/agent-ai/knowledge">
+        <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
+      </a>
+      <a class="nav-sub ${activePage === 'agent-ai-test' ? 'connected' : ''}" href="/apps/agent-ai/test">
+        <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
+      </a>
+      <a class="nav-sub ${activePage === 'agent-ai-analyze' ? 'connected' : ''}" href="/apps/agent-ai/analyze">
+        <div class="sub-dot ${activePage === 'agent-ai-analyze' ? 'green' : 'gray'}"></div>Analyse
+      </a>
+    ` : ''
+    return `
+      <a class="nav-item ${isActiveApp ? 'active' : ''}" href="/apps/${app.id}">
+        <span class="nav-icon" style="font-size:14px">${app.icon}</span>
+        <span class="nav-label">${app.name}</span>
+      </a>
+      ${subMenu}
+    `
+  }).join('')
 }
 
 function getInitials(email = '') {
