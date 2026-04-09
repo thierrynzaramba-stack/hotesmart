@@ -10,5 +10,8 @@
     { "source": "/apps", "destination": "/pages/apps.html" },
     { "source": "/settings", "destination": "/pages/settings.html" },
     { "source": "/abonnement", "destination": "/pages/abonnement.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron", "schedule": "*/5 * * * *" }
   ]
 }
