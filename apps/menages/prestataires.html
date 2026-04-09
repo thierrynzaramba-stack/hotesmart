@@ -120,7 +120,7 @@
       document.getElementById('presta-name').value = ''
     })
 
-    document.getElementById('btn-create').addEventListener('click', createPrestataire)
+    document.getElementById('btn-create').onclick = createPrestataire
   }
 
   async function loadProperties() {
