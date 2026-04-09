@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
       .single()
 
     if (tokenError || !tokenData) {
-      return res.status(401).json({ error: 'Token invalide' })
+      return res.status(401).json({ error: "Token invalide", detail: tokenError?.message, tokenReceived: token })
     }
 
     const userId = tokenData.user_id
