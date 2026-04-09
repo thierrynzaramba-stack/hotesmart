@@ -276,6 +276,8 @@
         guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
         arrival: b.arrival,
         departure: b.departure,
+        numAdult: b.numAdult || 0,
+        numChild: b.numChild || 0,
         bookId: b.id,
         done: doneSet.has(id)
       })
@@ -439,6 +441,8 @@
     document.getElementById('modal-sub').textContent = `${formatDate(m.date)}`
     document.getElementById('modal-body').innerHTML = `
       <div class="modal-row"><span>Voyageur</span><span>${m.guestName}</span></div>
+      <div class="modal-row"><span>Adultes</span><span>${m.numAdult || '—'}</span></div>
+      <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? m.numChild + ' enfant(s) 👶' : 'Aucun'}</span></div>
       <div class="modal-row"><span>Arrivée</span><span>${m.arrival || '—'}</span></div>
       <div class="modal-row"><span>Départ</span><span>${m.departure || '—'}</span></div>
       <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : '⏳ À faire'}</span></div>
