@@ -17,7 +17,7 @@ module.exports = async function handler(req, res) {
       .from('public_tokens')
       .select('user_id, label')
       .eq('token', token)
-      .single()
+      .maybeSingle()
 
     if (tokenError || !tokenData) {
       return res.status(401).json({ error: "Token invalide", detail: tokenError?.message, tokenReceived: token })
@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
       .select('api_key')
       .eq('user_id', userId)
       .eq('service', 'beds24')
-      .single()
+      .maybeSingle()
 
     if (keyError || !keyData) {
       return res.status(400).json({ error: 'Beds24 non configuré' })
