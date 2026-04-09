@@ -36,7 +36,7 @@ module.exports = async function handler(req, res) {
     console.log('[Beds24] keyData:', keyData, 'keyError:', keyError)
 
     if (keyError || !keyData) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Clé Beds24 non configurée',
         detail: keyError?.message,
         userId: user.id
@@ -47,6 +47,7 @@ module.exports = async function handler(req, res) {
     const { action, propertyId, bookingId, message } = req.body
 
     switch (action) {
+
       case 'getProperties': {
         const r = await fetch('https://beds24.com/api/v2/properties', {
           headers: { token: beds24Key }
@@ -54,6 +55,7 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ properties: d.data || [] })
       }
+
       case 'getBookings': {
         const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, {
           headers: { token: beds24Key }
@@ -61,6 +63,7 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ bookings: d.data || [] })
       }
+
       case 'getMessages': {
         const r = await fetch(`https://beds24.com/api/v2/inbox?propId=${propertyId}`, {
           headers: { token: beds24Key }
@@ -68,6 +71,64 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ messages: d.data || [] })
       }
+
+      case 'getHistory': {
+        // Récupère les réservations des 12 derniers mois avec leurs messages
+        const today = new Date()
+        const oneYearAgo = new Date(today)
+        oneYearAgo.setFullYear(today.getFullYear() - 1)
+        const dateFrom = oneYearAgo.toISOString().split('T')[0]
+
+        const r = await fetch(
+          `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom}&includeInfoItems=true`,
+          { headers: { token: beds24Key } }
+        )
+        const d = await r.json()
+        const bookings = d.data || []
+
+        console.log('[Beds24] getHistory bookings:', bookings.length)
+
+        // Extraire tous les messages voyageurs
+        const messages = bookings.flatMap(b => {
+          const msgs = b.messages || b.guestNotes ? [] : []
+
+          // Messages dans le champ messages[]
+          if (Array.isArray(b.messages)) {
+            b.messages.forEach(m => {
+              if (m.message?.trim()) {
+                msgs.push({
+                  bookId: b.bookId,
+                  guestFirstName: b.guestFirstName || '',
+                  guestName: b.guestName || '',
+                  message: m.message,
+                  guestMessage: m.message,
+                  firstNight: b.firstNight,
+                  lastNight: b.lastNight
+                })
+              }
+            })
+          }
+
+          // Notes voyageur dans guestNotes
+          if (b.guestNotes?.trim()) {
+            msgs.push({
+              bookId: b.bookId,
+              guestFirstName: b.guestFirstName || '',
+              guestName: b.guestName || '',
+              message: b.guestNotes,
+              guestMessage: b.guestNotes,
+              firstNight: b.firstNight,
+              lastNight: b.lastNight
+            })
+          }
+
+          return msgs
+        })
+
+        console.log('[Beds24] getHistory messages extraits:', messages.length)
+        return res.json({ messages, totalBookings: bookings.length })
+      }
+
       case 'sendMessage': {
         const r = await fetch('https://beds24.com/api/v2/inbox', {
           method: 'POST',
@@ -77,6 +138,7 @@ module.exports = async function handler(req, res) {
         const d = await r.json()
         return res.json({ success: true, data: d })
       }
+
       default:
         return res.status(400).json({ error: `Action inconnue : ${action}` })
     }
