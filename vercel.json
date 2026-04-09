@@ -10,6 +10,6 @@
     { "source": "/apps", "destination": "/pages/apps.html" },
     { "source": "/settings", "destination": "/pages/settings.html" },
     { "source": "/abonnement", "destination": "/pages/abonnement.html" },
-    { "source": "/api-connections", "destination": "/pages/api.html" }
+    { "source": "/connexions", "destination": "/pages/api.html" }
   ]
 }

@@ -28,7 +28,7 @@ export async function renderSidebar(activePage = '') {
       ${await renderActiveApps(user, activePage)}
 
       <div class="nav-section-label">Mes API</div>
-      <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/api-connections">
+      <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/connexions">
         <span class="nav-icon">⚡</span>
         <span class="nav-label">Connexions</span>
         <span class="nav-badge" id="api-badge">...</span>
