@@ -61,7 +61,8 @@ module.exports = async function handler(req, res) {
           headers: { token: beds24Key }
         })
         const d = await r.json()
-        return res.json({ bookings: d.data || [] })
+        const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propertyId))
+        return res.json({ bookings })
       }
 
       case 'getMessages': {
