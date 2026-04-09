@@ -1,0 +1,16 @@
+name: Agent AI Cron
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Appeler Agent AI cron
+        run: |
+          curl -X GET https://hotesmart.vercel.app/api/cron \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -f --max-time 30
