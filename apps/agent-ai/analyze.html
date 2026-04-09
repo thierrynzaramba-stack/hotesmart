@@ -201,7 +201,7 @@
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${currentSession.access_token}`
         },
-        body: JSON.stringify({ action: 'getMessages', propertyId: currentPropertyId })
+        body: JSON.stringify({ action: 'getHistory', propertyId: currentPropertyId })
       })
       const data = await res.json()
       const messages = data.messages || []
