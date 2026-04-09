@@ -88,38 +88,31 @@ module.exports = async function handler(req, res) {
 
         console.log('[Beds24] getHistory bookings:', bookings.length)
 
-        // Extraire tous les messages voyageurs
+        // Extraire tous les messages voyageurs depuis comments et apiMessage
         const messages = bookings.flatMap(b => {
-          const msgs = b.messages || b.guestNotes ? [] : []
-
-          // Messages dans le champ messages[]
-          if (Array.isArray(b.messages)) {
-            b.messages.forEach(m => {
-              if (m.message?.trim()) {
-                msgs.push({
-                  bookId: b.bookId,
-                  guestFirstName: b.guestFirstName || '',
-                  guestName: b.guestName || '',
-                  message: m.message,
-                  guestMessage: m.message,
-                  firstNight: b.firstNight,
-                  lastNight: b.lastNight
-                })
-              }
-            })
+          const msgs = []
+          const base = {
+            bookId: b.id,
+            guestFirstName: b.firstName || '',
+            guestName: b.lastName || '',
+            firstNight: b.arrival,
+            lastNight: b.departure
           }
 
-          // Notes voyageur dans guestNotes
-          if (b.guestNotes?.trim()) {
-            msgs.push({
-              bookId: b.bookId,
-              guestFirstName: b.guestFirstName || '',
-              guestName: b.guestName || '',
-              message: b.guestNotes,
-              guestMessage: b.guestNotes,
-              firstNight: b.firstNight,
-              lastNight: b.lastNight
-            })
+          if (b.comments?.trim()) {
+            msgs.push({ ...base, message: b.comments, guestMessage: b.comments })
+          }
+
+          if (b.apiMessage?.trim()) {
+            msgs.push({ ...base, message: b.apiMessage, guestMessage: b.apiMessage })
+          }
+
+          if (b.message?.trim()) {
+            msgs.push({ ...base, message: b.message, guestMessage: b.message })
+          }
+
+          if (b.notes?.trim()) {
+            msgs.push({ ...base, message: b.notes, guestMessage: b.notes })
           }
 
           return msgs
