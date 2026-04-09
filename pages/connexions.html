@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Mes API</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .api-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px; }
+    .api-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .api-name { font-size: 14px; font-weight: 500; }
+    .api-status { font-size: 11px; padding: 2px 8px; border-radius: 20px; }
+    .api-connected { background: var(--green-bg); color: #085041; }
+    .api-disconnected { background: var(--bg2); color: var(--text3); }
+    .api-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; }
+    .api-input-row { display: flex; gap: 8px; }
+    .api-input-row .form-input { flex: 1; }
+    .success { font-size: 12px; color: var(--green); margin-top: 8px; display: none; }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">Mes API</div>
+        <div class="page-sub">Connectez vos services externes</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- Beds24 -->
+      <div class="api-card" id="card-beds24">
+        <div class="api-header">
+          <div class="api-name">🏨 Beds24</div>
+          <div class="api-status api-disconnected" id="status-beds24">Non connecté</div>
+        </div>
+        <div class="api-desc">Connectez votre compte Beds24 pour accéder à vos réservations, messages et biens.</div>
+        <div class="api-input-row">
+          <input class="form-input" type="password" id="key-beds24" placeholder="Votre token Beds24 v2">
+          <button class="btn btn-primary" id="btn-beds24">Connecter</button>
+        </div>
+        <div class="success" id="ok-beds24">✓ Clé enregistrée avec succès</div>
+      </div>
+
+      <!-- Stripe -->
+      <div class="api-card">
+        <div class="api-header">
+          <div class="api-name">💳 Stripe</div>
+          <div class="api-status api-disconnected">Bientôt disponible</div>
+        </div>
+        <div class="api-desc">Connectez Stripe pour gérer vos abonnements et paiements.</div>
+      </div>
+
+      <!-- Airbnb -->
+      <div class="api-card">
+        <div class="api-header">
+          <div class="api-name">🏠 Airbnb</div>
+          <div class="api-status api-disconnected">Bientôt disponible</div>
+        </div>
+        <div class="api-desc">Synchronisez vos annonces et avis Airbnb.</div>
+      </div>
+
+      <!-- Booking.com -->
+      <div class="api-card">
+        <div class="api-header">
+          <div class="api-name">📅 Booking.com</div>
+          <div class="api-status api-disconnected">Bientôt disponible</div>
+        </div>
+        <div class="api-desc">Synchronisez vos réservations Booking.com.</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { logger } from '/shared/logger.js'
+
+  initErrorHandler()
+
+  async function init() {
+    const session = await requireAuth()
+    if (!session) return
+
+    await renderSidebar('api')
+
+    // Vérifie si Beds24 est déjà connecté
+    const { data } = await supabase
+      .from('api_keys')
+      .select('api_key')
+      .eq('user_id', session.user.id)
+      .eq('service', 'beds24')
+      .single()
+
+    if (data) {
+      document.getElementById('status-beds24').textContent = 'Connecté'
+      document.getElementById('status-beds24').className = 'api-status api-connected'
+      document.getElementById('key-beds24').placeholder = '••••••••••••••••'
+      logger.info('API Page', 'Beds24 déjà connecté')
+    }
+
+    // Bouton Beds24
+    document.getElementById('btn-beds24').addEventListener('click', async () => {
+      const key = document.getElementById('key-beds24').value.trim()
+      if (!key) return
+
+      const { error } = await supabase
+        .from('api_keys')
+        .upsert({
+          user_id: session.user.id,
+          service: 'beds24',
+          api_key: key
+        }, { onConflict: 'user_id,service' })
+
+      if (error) {
+        logger.error('API Page', 'Erreur sauvegarde Beds24', error)
+      } else {
+        document.getElementById('ok-beds24').style.display = 'block'
+        document.getElementById('status-beds24').textContent = 'Connecté'
+        document.getElementById('status-beds24').className = 'api-status api-connected'
+        logger.info('API Page', 'Clé Beds24 sauvegardée')
+      }
+    })
+  }
+
+  init()
+</script>
+
+</body>
+</html>
