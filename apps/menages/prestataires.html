@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Prestataires ménages</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
+    .presta-list { display: flex; flex-direction: column; gap: 12px; }
+    .presta-card { border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; background: var(--bg); }
+    .presta-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .presta-name { font-size: 14px; font-weight: 600; }
+    .presta-actions { display: flex; gap: 8px; }
+    .presta-link { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 11px; color: var(--text2); font-family: monospace; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .presta-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn-copy { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px; flex-shrink: 0; }
+    .presta-props { display: flex; flex-wrap: wrap; gap: 6px; }
+    .prop-tag { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--text2); }
+    .prop-tag.active { background: #EEEDFE; color: #3C3489; border-color: #C4B5FD; }
+
+    /* Form nouveau prestataire */
+    .form-section { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+    .form-row { display: flex; gap: 12px; margin-bottom: 12px; }
+    .form-row .form-input { flex: 1; }
+    .prop-checkboxes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+    .prop-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .prop-checkbox input { cursor: pointer; accent-color: var(--primary); }
+    .prop-checkbox label { font-size: 13px; cursor: pointer; }
+
+    /* Badge token copié */
+    .copy-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: white; padding: 8px 16px; border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
+    .copy-toast.show { opacity: 1; }
+
+    .empty-state { text-align: center; padding: 30px; color: var(--text2); font-size: 13px; }
+    .btn-danger { background: none; border: 0.5px solid #E24B4A; color: #E24B4A; }
+    .btn-danger:hover { background: #FEE2E2; }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">Prestataires ménages</div>
+        <div class="page-sub">Gérez les accès de vos intervenants</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- Liste prestataires -->
+      <div class="section-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="section-title" style="margin:0">Mes prestataires</div>
+          <button class="btn btn-primary" id="btn-show-form">+ Nouveau prestataire</button>
+        </div>
+        <div id="presta-list">
+          <div class="empty-state">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- Formulaire nouveau prestataire -->
+      <div class="section-card" id="form-section" style="display:none">
+        <div class="section-title">Nouveau prestataire</div>
+        <div class="form-section">
+          <div class="form-row">
+            <input class="form-input" id="presta-name" placeholder="Nom (ex: Marie, Société Propre+)">
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:8px;font-weight:500">BIENS ACCESSIBLES</div>
+          <div class="prop-checkboxes" id="prop-checkboxes">
+            <div style="font-size:12px;color:var(--text2)">Chargement...</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" id="btn-create">Créer et générer le lien</button>
+            <button class="btn" id="btn-cancel">Annuler</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="copy-toast" id="copy-toast">✓ Lien copié !</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+
+  let currentSession = null
+  let properties = []
+  let prestataires = []
+
+  async function init() {
+    currentSession = await requireAuth()
+    if (!currentSession) return
+
+    await renderSidebar('menages')
+    await loadProperties()
+    await loadPrestataires()
+    renderPropCheckboxes()
+
+    document.getElementById('btn-show-form').addEventListener('click', () => {
+      document.getElementById('form-section').style.display = 'block'
+      document.getElementById('btn-show-form').style.display = 'none'
+      document.getElementById('presta-name').focus()
+    })
+
+    document.getElementById('btn-cancel').addEventListener('click', () => {
+      document.getElementById('form-section').style.display = 'none'
+      document.getElementById('btn-show-form').style.display = 'inline-flex'
+      document.getElementById('presta-name').value = ''
+    })
+
+    document.getElementById('btn-create').addEventListener('click', createPrestataire)
+  }
+
+  async function loadProperties() {
+    const res = await fetch('/api/beds24', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
+      body: JSON.stringify({ action: 'getProperties' })
+    })
+    const data = await res.json()
+    properties = data.properties || []
+  }
+
+  async function loadPrestataires() {
+    const { data, error } = await supabase
+      .from('public_tokens')
+      .select('*')
+      .eq('user_id', currentSession.user.id)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      document.getElementById('presta-list').innerHTML =
+        '<div class="empty-state">Erreur chargement</div>'
+      return
+    }
+
+    prestataires = data || []
+    renderPrestataires()
+  }
+
+  function renderPrestataires() {
+    const list = document.getElementById('presta-list')
+
+    if (prestataires.length === 0) {
+      list.innerHTML = '<div class="empty-state">Aucun prestataire — créez-en un ci-dessous</div>'
+      return
+    }
+
+    list.innerHTML = `<div class="presta-list">${prestataires.map(p => {
+      const url = `${window.location.origin}/apps/menages/public?token=${p.token}`
+      const propTags = properties.map(prop => {
+        const active = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
+        return `<span class="prop-tag ${active ? 'active' : ''}">${prop.name}</span>`
+      }).join('')
+
+      return `
+        <div class="presta-card">
+          <div class="presta-card-header">
+            <div class="presta-name">🧹 ${p.label || 'Sans nom'}</div>
+            <div class="presta-actions">
+              <a class="btn" href="${url}" target="_blank">👁 Voir</a>
+              <button class="btn btn-danger btn-delete" data-id="${p.id}">Supprimer</button>
+            </div>
+          </div>
+          <div class="presta-link">
+            <span>${url}</span>
+            <button class="btn-copy" data-url="${url}" title="Copier le lien">📋</button>
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:500">BIENS ASSIGNÉS</div>
+          <div class="presta-props">${propTags}</div>
+        </div>
+      `
+    }).join('')}</div>`
+
+    // Copier lien
+    list.querySelectorAll('.btn-copy').forEach(btn => {
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.url)
+        showToast()
+      })
+    })
+
+    // Supprimer
+    list.querySelectorAll('.btn-delete').forEach(btn => {
+      btn.addEventListener('click', () => deletePrestataire(btn.dataset.id))
+    })
+  }
+
+  function renderPropCheckboxes() {
+    const container = document.getElementById('prop-checkboxes')
+    if (properties.length === 0) {
+      container.innerHTML = '<div style="font-size:12px;color:var(--text2)">Aucun bien trouvé</div>'
+      return
+    }
+    container.innerHTML = properties.map(p => `
+      <div class="prop-checkbox">
+        <input type="checkbox" id="prop-${p.id}" value="${p.id}" checked>
+        <label for="prop-${p.id}">${p.name}</label>
+      </div>
+    `).join('')
+  }
+
+  async function createPrestataire() {
+    const name = document.getElementById('presta-name').value.trim()
+    if (!name) return alert('Entrez un nom pour le prestataire')
+
+    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')]
+      .map(cb => cb.value)
+
+    const token = generateToken(name)
+
+    const { error } = await supabase.from('public_tokens').insert({
+      user_id: currentSession.user.id,
+      token,
+      label: name,
+      property_ids: selectedProps
+    })
+
+    if (error) {
+      alert('Erreur création : ' + error.message)
+      return
+    }
+
+    document.getElementById('presta-name').value = ''
+    document.getElementById('form-section').style.display = 'none'
+    document.getElementById('btn-show-form').style.display = 'inline-flex'
+
+    await loadPrestataires()
+    showToast('✓ Prestataire créé !')
+  }
+
+  async function deletePrestataire(id) {
+    if (!confirm('Supprimer ce prestataire ? Le lien ne fonctionnera plus.')) return
+
+    const { error } = await supabase
+      .from('public_tokens')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', currentSession.user.id)
+
+    if (error) {
+      alert('Erreur suppression : ' + error.message)
+      return
+    }
+
+    await loadPrestataires()
+  }
+
+  function generateToken(name) {
+    const slug = name.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .slice(0, 20)
+    const rand = Math.random().toString(36).slice(2, 8)
+    return `${slug}-${rand}`
+  }
+
+  function showToast(msg = '✓ Lien copié !') {
+    const toast = document.getElementById('copy-toast')
+    toast.textContent = msg
+    toast.classList.add('show')
+    setTimeout(() => toast.classList.remove('show'), 2000)
+  }
+
+  init()
+</script>
+
+</body>
+</html>
