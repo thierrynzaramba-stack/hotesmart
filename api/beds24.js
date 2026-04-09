@@ -84,7 +84,7 @@ module.exports = async function handler(req, res) {
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
-        const bookings = d.data || []
+        const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propertyId))
 
         console.log('[Beds24] getHistory bookings:', bookings.length)
 
