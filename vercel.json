@@ -5,6 +5,7 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
+    { "source": "/", "destination": "/pages/index.html" },
     { "source": "/login", "destination": "/pages/login.html" },
     { "source": "/dashboard", "destination": "/pages/index.html" },
     { "source": "/apps", "destination": "/pages/apps.html" },
