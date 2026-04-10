@@ -14,6 +14,7 @@ const CONFIG = {
     { id: 'livret',         name: "Livret d'accueil",      icon: '📖', color: '#FAECE7' },
     { id: 'menages',        name: 'Gestion ménages',       icon: '🧹', color: '#EAF3DE' },
     { id: 'reporting',      name: 'Reporting revenus',     icon: '📊', color: '#E6F1FB' },
+    { id: 'sms', name: 'SMS', icon: '💬', color: '#E1F5EE' },
     { id: 'tarification',   name: 'Tarification dynamique',icon: '💰', color: '#FBF0FF' }
   ]
 }
