@@ -7,6 +7,7 @@
   "rewrites": [
     { "source": "/login", "destination": "/pages/login.html" },
     { "source": "/dashboard", "destination": "/pages/index.html" },
+    { "source": "/apps/sms", "destination": "/apps/sms/index.html" },
     { "source": "/apps", "destination": "/pages/apps.html" },
     { "source": "/settings", "destination": "/pages/settings.html" },
     { "source": "/abonnement", "destination": "/pages/abonnement.html" },
