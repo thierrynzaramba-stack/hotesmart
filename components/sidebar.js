@@ -41,6 +41,10 @@ export async function renderSidebar(activePage = '') {
         <div class="sub-dot green"></div>Stripe
         <span class="sub-check">✓</span>
       </div>
+      <a class="nav-sub ${activePage === 'sms' ? 'connected' : ''}" href="/apps/sms" style="text-decoration:none;color:inherit">
+        <div class="sub-dot green"></div>Brevo SMS
+        <span class="sub-check">✓</span>
+      </a>
       <div class="nav-sub">
         <div class="sub-dot gray"></div>Airbnb
         <span class="sub-soon">bientôt</span>
@@ -80,7 +84,6 @@ async function renderActiveApps(user, activePage = '') {
   return CONFIG.apps.map(app => {
     const isAgentAI = app.id === 'agent-ai'
     const isMenages = app.id === 'menages'
-    const isSms     = app.id === 'sms'
     const isActiveApp = activePage === app.id || activePage.startsWith(app.id)
     const subMenu = isMenages ? `
       <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
@@ -101,10 +104,6 @@ async function renderActiveApps(user, activePage = '') {
       </a>
       <a class="nav-sub ${activePage === 'agent-ai-analyze' ? 'connected' : ''}" href="/apps/agent-ai/analyze">
         <div class="sub-dot ${activePage === 'agent-ai-analyze' ? 'green' : 'gray'}"></div>Analyse
-      </a>
-    ` : isSms ? `
-      <a class="nav-sub ${activePage === 'sms' ? 'connected' : ''}" href="/apps/sms">
-        <div class="sub-dot ${activePage === 'sms' ? 'green' : 'gray'}"></div>Envoi SMS
       </a>
     ` : ''
     return `
