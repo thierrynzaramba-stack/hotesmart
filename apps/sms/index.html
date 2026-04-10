@@ -6,167 +6,77 @@
   <title>HôteSmart — SMS</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .sms-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
+    .tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
+    .tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; }
+    .tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
 
-    .sms-card {
-      background: var(--bg);
-      border: 0.5px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 24px;
-    }
+    .config-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; max-width:560px; margin-bottom:16px; }
+    .config-card-title { font-size:13px; font-weight:500; margin-bottom:16px; }
 
-    .sms-card-title {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text);
-      margin-bottom: 18px;
-    }
+    .notice { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; margin-bottom:20px; }
+    .notice a { color:var(--green); text-decoration:none; }
+    .notice a:hover { text-decoration:underline; }
+    .notice ol { margin:8px 0 0 16px; }
 
-    .templates {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 16px;
-    }
+    .status-banner { display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:20px; }
+    .status-banner.on  { background:#E1F5EE; border:0.5px solid var(--green); color:#1a6644; }
+    .status-banner.off { background:var(--bg2); border:0.5px solid var(--border); color:var(--text2); }
+    .sdot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .sdot.green { background:var(--green); }
+    .sdot.gray  { background:#ccc; }
 
-    .template-btn {
-      background: var(--bg2);
-      border: 0.5px solid var(--border);
-      border-radius: var(--radius);
-      padding: 5px 10px;
-      font-size: 12px;
-      color: var(--text2);
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: inherit;
-    }
+    .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border); }
+    .toggle-label { font-size:13px; color:var(--text2); }
+    .toggle { position:relative; width:44px; height:24px; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
+    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
+    input:checked + .toggle-slider { background:var(--green); }
+    input:checked + .toggle-slider:before { transform:translateX(20px); }
 
-    .template-btn:hover {
-      border-color: var(--green);
-      color: var(--green);
-    }
+    .key-row { display:flex; gap:8px; }
+    .key-row input { flex:1; }
 
-    .char-count {
-      text-align: right;
-      font-size: 11px;
-      color: var(--text2);
-      margin-top: 4px;
-    }
+    .toast { padding:10px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
+    .toast.success { background:#E1F5EE; color:var(--green); border:0.5px solid var(--green); }
+    .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
 
-    .char-count.warn { color: orange; }
-    .char-count.over { color: #E24B4A; }
+    .sms-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .sms-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; }
+    .sms-card-title { font-size:13px; font-weight:500; margin-bottom:18px; }
 
-    .toast {
-      padding: 10px 14px;
-      border-radius: var(--radius);
-      font-size: 12px;
-      margin-top: 12px;
-      display: none;
-    }
+    .templates { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+    .template-btn { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:5px 10px; font-size:12px; color:var(--text2); cursor:pointer; transition:all 0.15s; font-family:inherit; }
+    .template-btn:hover { border-color:var(--green); color:var(--green); }
 
-    .toast.success { background: #E1F5EE; color: var(--green); border: 0.5px solid var(--green); }
-    .toast.error   { background: #fdecea; color: #E24B4A; border: 0.5px solid #E24B4A; }
+    .char-count { text-align:right; font-size:11px; color:var(--text2); margin-top:4px; }
+    .char-count.warn { color:orange; }
+    .char-count.over { color:#E24B4A; }
 
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-bottom: 16px;
-    }
+    .stats-row { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+    .stat-mini { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px; text-align:center; }
+    .stat-mini-value { font-size:20px; font-weight:500; color:var(--green); }
+    .stat-mini-value.danger { color:#E24B4A; }
+    .stat-mini-label { font-size:11px; color:var(--text2); margin-top:2px; }
 
-    .stat-mini {
-      background: var(--bg2);
-      border: 0.5px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px;
-      text-align: center;
-    }
-
-    .stat-mini-value { font-size: 20px; font-weight: 500; color: var(--green); }
-    .stat-mini-label { font-size: 11px; color: var(--text2); margin-top: 2px; }
-    .stat-mini-value.danger { color: #E24B4A; }
-
-    .filter-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .filter-row select { flex: 1; }
-
-    .sms-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      max-height: 420px;
-      overflow-y: auto;
-    }
-
-    .sms-item {
-      background: var(--bg2);
-      border: 0.5px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-    }
-
-    .sms-item-header {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 5px;
-    }
-
-    .sms-to {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--green);
-      font-family: monospace;
-    }
-
-    .sms-time { font-size: 11px; color: var(--text2); }
-
-    .sms-message {
-      font-size: 13px;
-      color: var(--text);
-      line-height: 1.4;
-      margin-bottom: 6px;
-    }
-
-    .sms-footer {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    .badge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
-    .badge-ok      { background: #E1F5EE; color: var(--green); }
-    .badge-error   { background: #fdecea; color: #E24B4A; }
-    .badge-context { background: var(--bg2); border: 0.5px solid var(--border); color: var(--text2); }
-
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text2);
-      font-size: 13px;
-    }
-
-    .refresh-btn {
-      background: none;
-      border: 0.5px solid var(--border);
-      border-radius: var(--radius);
-      padding: 5px 10px;
-      color: var(--text2);
-      font-size: 12px;
-      cursor: pointer;
-      font-family: inherit;
-      transition: all 0.15s;
-    }
-
-    .refresh-btn:hover { border-color: var(--green); color: var(--green); }
+    .filter-row { display:flex; gap:8px; margin-bottom:12px; }
+    .filter-row select { flex:1; }
+    .sms-list { display:flex; flex-direction:column; gap:8px; max-height:460px; overflow-y:auto; }
+    .sms-item { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
+    .sms-item-header { display:flex; justify-content:space-between; margin-bottom:5px; }
+    .sms-to { font-size:12px; font-weight:500; color:var(--green); font-family:monospace; }
+    .sms-time { font-size:11px; color:var(--text2); }
+    .sms-message { font-size:13px; color:var(--text); line-height:1.4; margin-bottom:6px; }
+    .sms-footer { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .badge { padding:2px 7px; border-radius:10px; font-size:11px; }
+    .badge-ok      { background:#E1F5EE; color:var(--green); }
+    .badge-error   { background:#fdecea; color:#E24B4A; }
+    .badge-ctx     { background:var(--bg2); border:0.5px solid var(--border); color:var(--text2); }
+    .empty-state   { text-align:center; padding:40px 20px; color:var(--text2); font-size:13px; }
+    .refresh-btn   { background:none; border:0.5px solid var(--border); border-radius:var(--radius); padding:5px 10px; color:var(--text2); font-size:12px; cursor:pointer; font-family:inherit; transition:all 0.15s; }
+    .refresh-btn:hover { border-color:var(--green); color:var(--green); }
   </style>
 </head>
 <body>
@@ -178,85 +88,136 @@
     <div class="topbar">
       <div>
         <div class="page-title">💬 SMS</div>
-        <div class="page-sub" id="status">Module Twilio · Prêt à envoyer</div>
+        <div class="page-sub" id="topStatus">Brevo · Chargement…</div>
       </div>
     </div>
 
     <div class="content">
-      <div class="sms-grid">
 
-        <!-- Panneau envoi -->
-        <div class="sms-card">
-          <div class="sms-card-title">✉️ Nouveau SMS</div>
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('config')">⚙️ Configuration</div>
+        <div class="tab" onclick="switchTab('test')">🧪 Test & Envoi</div>
+        <div class="tab" onclick="switchTab('history')">📋 Historique</div>
+      </div>
 
-          <div class="form-group">
-            <label class="form-label">Destinataire</label>
-            <input class="form-input" type="tel" id="to" placeholder="+33 6 12 34 56 78">
+      <!-- Configuration -->
+      <div class="tab-content active" id="tab-config">
+        <div class="config-card">
+          <div class="config-card-title">📡 Statut Brevo SMS</div>
+
+          <div class="status-banner off" id="statusBanner">
+            <div class="sdot gray" id="statusDot"></div>
+            <span id="statusText">Non configuré</span>
+          </div>
+
+          <div class="notice">
+            <strong>Comment obtenir votre clé API Brevo ?</strong>
+            <ol>
+              <li>Créez un compte sur <a href="https://www.brevo.com/fr/" target="_blank">brevo.com</a></li>
+              <li>Allez dans <strong>Mon compte → Clés API</strong> ou <a href="https://app.brevo.com/settings/keys/api" target="_blank">cliquez ici</a></li>
+              <li>Cliquez <strong>"Créer une nouvelle clé API"</strong></li>
+              <li>Copiez la clé (commence par <code>xkeysib-</code>)</li>
+              <li>Achetez des crédits SMS : <a href="https://app.brevo.com/billing/addon/customize/sms" target="_blank">app.brevo.com/billing</a> (~0.06€/SMS)</li>
+            </ol>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Bien concerné (optionnel)</label>
-            <select class="form-input" id="property_id">
-              <option value="">— Aucun —</option>
-              <option value="169567">Cœur de vie 23</option>
-              <option value="209413">La bulle</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Contexte</label>
-            <select class="form-input" id="context">
-              <option value="manuel">Manuel</option>
-              <option value="agent-ai">Agent AI</option>
-              <option value="menages">Ménages</option>
-              <option value="cron">Automatique</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Templates rapides</label>
-            <div class="templates">
-              <button class="template-btn" onclick="useTemplate('checkin')">🔑 Check-in</button>
-              <button class="template-btn" onclick="useTemplate('checkout')">👋 Check-out</button>
-              <button class="template-btn" onclick="useTemplate('menage')">🧹 Ménage</button>
-              <button class="template-btn" onclick="useTemplate('bienvenue')">🏠 Bienvenue</button>
-              <button class="template-btn" onclick="useTemplate('incident')">⚠️ Incident</button>
+            <label class="form-label">Clé API Brevo</label>
+            <div class="key-row">
+              <input class="form-input" type="password" id="apiKey" placeholder="xkeysib-xxxxxxxxxxxxxxxxxxxxxxxx">
+              <button class="btn btn-primary" onclick="saveConfig()">Enregistrer</button>
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">Message</label>
-            <textarea class="form-input" id="message" rows="4" placeholder="Votre message…" oninput="updateCount()" style="resize:vertical"></textarea>
-            <div class="char-count" id="charCount">0 / 160</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Activer l'envoi SMS</span>
+            <label class="toggle">
+              <input type="checkbox" id="smsEnabled" onchange="toggleSms()">
+              <span class="toggle-slider"></span>
+            </label>
           </div>
 
-          <button class="btn btn-primary" id="sendBtn" onclick="sendSms()" style="width:100%">
-            Envoyer le SMS
-          </button>
-
-          <div class="toast" id="toast"></div>
+          <div class="toast" id="configToast"></div>
         </div>
+      </div>
 
-        <!-- Historique -->
+      <!-- Test & Envoi -->
+      <div class="tab-content" id="tab-test">
+        <div class="sms-grid">
+          <div class="sms-card">
+            <div class="sms-card-title">✉️ Envoyer un SMS</div>
+
+            <div class="form-group">
+              <label class="form-label">Destinataire</label>
+              <input class="form-input" type="tel" id="to" placeholder="+33 6 12 34 56 78">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Bien concerné (optionnel)</label>
+              <select class="form-input" id="property_id">
+                <option value="">— Aucun —</option>
+                <option value="169567">Cœur de vie 23</option>
+                <option value="209413">La bulle</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Contexte</label>
+              <select class="form-input" id="context">
+                <option value="manuel">Manuel</option>
+                <option value="agent-ai">Agent AI</option>
+                <option value="menages">Ménages</option>
+                <option value="cron">Automatique</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Templates rapides</label>
+              <div class="templates">
+                <button class="template-btn" onclick="useTemplate('checkin')">🔑 Check-in</button>
+                <button class="template-btn" onclick="useTemplate('checkout')">👋 Check-out</button>
+                <button class="template-btn" onclick="useTemplate('menage')">🧹 Ménage</button>
+                <button class="template-btn" onclick="useTemplate('bienvenue')">🏠 Bienvenue</button>
+                <button class="template-btn" onclick="useTemplate('incident')">⚠️ Incident</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Message</label>
+              <textarea class="form-input" id="message" rows="4" placeholder="Votre message…" oninput="updateCount()" style="resize:vertical"></textarea>
+              <div class="char-count" id="charCount">0 / 160</div>
+            </div>
+
+            <button class="btn btn-primary" id="sendBtn" onclick="sendSms()" style="width:100%">Envoyer le SMS</button>
+            <div class="toast" id="sendToast"></div>
+          </div>
+
+          <div class="sms-card">
+            <div class="sms-card-title">ℹ️ Informations</div>
+            <div class="notice">
+              <strong>Mode test</strong><br>
+              Utilisez cet onglet pour tester l'envoi de SMS manuellement.<br><br>
+              Les SMS sont envoyés via votre compte Brevo et décomptés de vos crédits.<br><br>
+              <strong>Expéditeur :</strong> HoteSmart<br>
+              <strong>Format numéro :</strong> +33XXXXXXXXX ou 06XXXXXXXX<br><br>
+              Une fois validé, ce module sera utilisé automatiquement par l'Agent AI, les Ménages et le Cron.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Historique -->
+      <div class="tab-content" id="tab-history">
         <div class="sms-card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <div class="sms-card-title" style="margin-bottom:0">📋 Historique</div>
+            <div class="sms-card-title" style="margin-bottom:0">📋 Historique des SMS</div>
             <button class="refresh-btn" onclick="loadHistory()">↻ Actualiser</button>
           </div>
 
           <div class="stats-row">
-            <div class="stat-mini">
-              <div class="stat-mini-value" id="statTotal">—</div>
-              <div class="stat-mini-label">Total</div>
-            </div>
-            <div class="stat-mini">
-              <div class="stat-mini-value" id="statSuccess">—</div>
-              <div class="stat-mini-label">Réussis</div>
-            </div>
-            <div class="stat-mini">
-              <div class="stat-mini-value danger" id="statError">—</div>
-              <div class="stat-mini-label">Erreurs</div>
-            </div>
+            <div class="stat-mini"><div class="stat-mini-value" id="statTotal">—</div><div class="stat-mini-label">Total</div></div>
+            <div class="stat-mini"><div class="stat-mini-value" id="statSuccess">—</div><div class="stat-mini-label">Réussis</div></div>
+            <div class="stat-mini"><div class="stat-mini-value danger" id="statError">—</div><div class="stat-mini-label">Erreurs</div></div>
           </div>
 
           <div class="filter-row">
@@ -267,12 +228,10 @@
             </select>
           </div>
 
-          <div class="sms-list" id="smsList">
-            <div class="empty-state">Chargement…</div>
-          </div>
+          <div class="sms-list" id="smsList"><div class="empty-state">Chargement…</div></div>
         </div>
-
       </div>
+
     </div>
   </div>
 </div>
@@ -283,30 +242,80 @@
   import { initErrorHandler } from '/shared/error-handler.js'
 
   initErrorHandler()
-
   const session = await requireAuth()
   if (!session) throw new Error('Non authentifié')
-
   await renderSidebar('sms')
-
   window._session = session
-  window.loadHistory()
+  window.loadConfig()
 </script>
 
 <script>
-  const templates = {
+  // Onglets
+  window.switchTab = name => {
+    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['config','test','history'][i] === name))
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'))
+    document.getElementById('tab-' + name).classList.add('active')
+    if (name === 'history') loadHistory()
+  }
+
+  // Config
+  window.loadConfig = async () => {
+    try {
+      const res  = await fetch('/api/sms?action=config', { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
+      const data = await res.json()
+      if (data.configured) {
+        document.getElementById('apiKey').value = '••••••••••••••••••••••••'
+        document.getElementById('smsEnabled').checked = data.enabled
+        updateBanner(data.enabled)
+      }
+    } catch {}
+  }
+
+  window.saveConfig = async () => {
+    const key = document.getElementById('apiKey').value.trim()
+    if (!key || key.startsWith('•')) return toast('configToast', 'Saisissez une clé API valide', 'error')
+    try {
+      const res  = await fetch('/api/sms', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'saveConfig', apiKey: key }) })
+      const data = await res.json()
+      if (data.success) {
+        toast('configToast', '✅ Clé enregistrée avec succès', 'success')
+        document.getElementById('apiKey').value = '••••••••••••••••••••••••'
+        document.getElementById('smsEnabled').checked = true
+        updateBanner(true)
+      } else {
+        toast('configToast', `❌ ${data.error}`, 'error')
+      }
+    } catch (err) { toast('configToast', `❌ ${err.message}`, 'error') }
+  }
+
+  window.toggleSms = async () => {
+    const enabled = document.getElementById('smsEnabled').checked
+    try {
+      await fetch('/api/sms', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'toggleConfig', enabled }) })
+      updateBanner(enabled)
+      toast('configToast', enabled ? '✅ SMS activé' : '⏸ SMS désactivé', 'success')
+    } catch {}
+  }
+
+  function updateBanner(on) {
+    const b = document.getElementById('statusBanner')
+    const d = document.getElementById('statusDot')
+    const t = document.getElementById('statusText')
+    b.className = 'status-banner ' + (on ? 'on' : 'off')
+    d.className = 'sdot ' + (on ? 'green' : 'gray')
+    t.textContent = on ? 'Brevo SMS connecté et actif' : 'SMS désactivé ou non configuré'
+    document.getElementById('topStatus').textContent = on ? 'Brevo · ✓ Actif' : 'Brevo · Inactif'
+  }
+
+  // Templates
+  const TEMPLATES = {
     checkin:   "Bonjour, voici vos informations d'arrivée : le code de la boîte à clés est [CODE]. Bon séjour ! 🏠",
     checkout:  "Bonjour, c'est l'heure du départ. Merci de laisser les clés dans la boîte et de bien fermer la porte. À bientôt ! 👋",
     menage:    "Bonjour, un ménage est prévu aujourd'hui au logement. Merci de vous y rendre à [HEURE]. 🧹",
     bienvenue: "Bienvenue dans votre logement ! N'hésitez pas à nous contacter si vous avez besoin de quoi que ce soit. Bon séjour ! 🏠✨",
     incident:  "Bonjour, nous avons signalé un incident dans votre logement. Notre équipe va vous contacter rapidement. Merci. ⚠️"
   }
-
-  window.useTemplate = key => {
-    document.getElementById('message').value = templates[key]
-    updateCount()
-  }
-
+  window.useTemplate = k => { document.getElementById('message').value = TEMPLATES[k]; updateCount() }
   window.updateCount = () => {
     const len = document.getElementById('message').value.length
     const el  = document.getElementById('charCount')
@@ -314,102 +323,54 @@
     el.className = 'char-count' + (len > 320 ? ' over' : len > 160 ? ' warn' : '')
   }
 
+  // Envoi
   window.sendSms = async () => {
-    const to          = document.getElementById('to').value.trim()
-    const message     = document.getElementById('message').value.trim()
-    const property_id = document.getElementById('property_id').value
-    const context     = document.getElementById('context').value
-
-    if (!to || !message) return showToast('Numéro et message requis.', 'error')
-
+    const to = document.getElementById('to').value.trim()
+    const message = document.getElementById('message').value.trim()
+    if (!to || !message) return toast('sendToast', 'Numéro et message requis.', 'error')
     const btn = document.getElementById('sendBtn')
-    btn.disabled = true
-    btn.textContent = 'Envoi en cours…'
-
+    btn.disabled = true; btn.textContent = 'Envoi en cours…'
     try {
-      const res  = await fetch('/api/sms', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${window._session?.access_token}`
-        },
-        body: JSON.stringify({ to, message, property_id: property_id || null, context })
-      })
+      const res  = await fetch('/api/sms', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'send', to, message, property_id: document.getElementById('property_id').value || null, context: document.getElementById('context').value }) })
       const data = await res.json()
-
       if (data.success) {
-        showToast(`✅ SMS envoyé ! SID : ${data.sid}`, 'success')
+        toast('sendToast', '✅ SMS envoyé !', 'success')
         document.getElementById('message').value = ''
         document.getElementById('to').value = ''
         updateCount()
-        setTimeout(window.loadHistory, 1000)
-      } else {
-        showToast(`❌ ${data.error}`, 'error')
-      }
-    } catch (err) {
-      showToast(`❌ Erreur réseau : ${err.message}`, 'error')
-    } finally {
-      btn.disabled = false
-      btn.textContent = 'Envoyer le SMS'
-    }
+      } else { toast('sendToast', `❌ ${data.error}`, 'error') }
+    } catch (err) { toast('sendToast', `❌ ${err.message}`, 'error') }
+    finally { btn.disabled = false; btn.textContent = 'Envoyer le SMS' }
   }
 
-  function showToast(msg, type) {
-    const t = document.getElementById('toast')
-    t.textContent = msg
-    t.className = `toast ${type}`
-    t.style.display = 'block'
-    setTimeout(() => { t.style.display = 'none' }, 5000)
-  }
-
+  // Historique
   window.loadHistory = async () => {
-    const property_id = document.getElementById('filterProperty').value
-    const url = '/api/sms' + (property_id ? `?property_id=${property_id}` : '?limit=50')
-
+    const pid = document.getElementById('filterProperty')?.value
     try {
-      const res  = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${window._session?.access_token}` }
-      })
+      const res  = await fetch('/api/sms?action=logs' + (pid ? `&property_id=${pid}` : ''), { headers:{ 'Authorization':`Bearer ${window._session?.access_token}` } })
       const data = await res.json()
       renderHistory(data.logs || [])
-    } catch {
-      document.getElementById('smsList').innerHTML = '<div class="empty-state">Erreur de chargement</div>'
-    }
+    } catch { document.getElementById('smsList').innerHTML = '<div class="empty-state">Erreur de chargement</div>' }
   }
 
   function renderHistory(logs) {
     document.getElementById('statTotal').textContent   = logs.length
     document.getElementById('statSuccess').textContent = logs.filter(l => l.status !== 'error').length
     document.getElementById('statError').textContent   = logs.filter(l => l.status === 'error').length
-
-    if (!logs.length) {
-      document.getElementById('smsList').innerHTML = "<div class='empty-state'>Aucun SMS envoyé pour l'instant</div>"
-      return
-    }
-
-    const propName = id => id === '169567' ? 'Cœur de vie 23' : id === '209413' ? 'La bulle' : ''
-
+    const pn = id => id === '169567' ? 'Cœur de vie 23' : id === '209413' ? 'La bulle' : ''
+    if (!logs.length) { document.getElementById('smsList').innerHTML = "<div class='empty-state'>Aucun SMS envoyé pour l'instant</div>"; return }
     document.getElementById('smsList').innerHTML = logs.map(log => {
       const d = new Date(log.created_at)
-      const t = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' })
-              + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
-
-      return `
-        <div class="sms-item">
-          <div class="sms-item-header">
-            <span class="sms-to">${log.to_number}</span>
-            <span class="sms-time">${t}</span>
-          </div>
-          <div class="sms-message">${log.message}</div>
-          <div class="sms-footer">
-            <span class="badge ${log.status === 'error' ? 'badge-error' : 'badge-ok'}">${log.status === 'error' ? '❌ Erreur' : '✅ Envoyé'}</span>
-            ${log.context ? `<span class="badge badge-context">${log.context}</span>` : ''}
-            ${log.property_id ? `<span class="badge badge-context">${propName(log.property_id)}</span>` : ''}
-            ${log.error ? `<span style="font-size:11px;color:#E24B4A">${log.error}</span>` : ''}
-          </div>
-        </div>
-      `
+      const t = d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
+      return `<div class="sms-item"><div class="sms-item-header"><span class="sms-to">${log.to_number}</span><span class="sms-time">${t}</span></div><div class="sms-message">${log.message}</div><div class="sms-footer"><span class="badge ${log.status==='error'?'badge-error':'badge-ok'}">${log.status==='error'?'❌ Erreur':'✅ Envoyé'}</span>${log.context?`<span class="badge badge-ctx">${log.context}</span>`:''} ${log.property_id?`<span class="badge badge-ctx">${pn(log.property_id)}</span>`:''} ${log.error?`<span style="font-size:11px;color:#E24B4A">${log.error}</span>`:''}</div></div>`
     }).join('')
+  }
+
+  // Toast
+  function toast(id, msg, type) {
+    const t = document.getElementById(id)
+    t.textContent = msg; t.className = `toast ${type}`; t.style.display = 'block'
+    setTimeout(() => { t.style.display = 'none' }, 4000)
   }
 </script>
 
