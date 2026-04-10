@@ -1,4 +1,4 @@
-// api/sms.js — Module SMS Twilio centralisé HôteSmart
+// api/sms.js — Module SMS Brevo centralisé HôteSmart
 // Usage : POST /api/sms { to, message, property_id, context }
 
 const { createClient } = require('@supabase/supabase-js');
@@ -9,20 +9,18 @@ const supabase = createClient(
 );
 
 /**
- * Envoie un SMS via Twilio et log dans Supabase
- * @param {string} to         - Numéro destinataire (+33XXXXXXXXX)
- * @param {string} message    - Texte du SMS (max 160 caractères)
+ * Envoie un SMS via Brevo et log dans Supabase
+ * @param {string} to          - Numéro destinataire (+33XXXXXXXXX)
+ * @param {string} message     - Texte du SMS (max 160 caractères)
  * @param {string} property_id - ID du bien concerné (optionnel)
- * @param {string} context    - Contexte d'envoi (ex: "agent-ai", "menages", "cron")
- * @returns {object}          - { success, sid, error }
+ * @param {string} context     - Contexte d'envoi (ex: "agent-ai", "menages", "cron")
+ * @returns {object}           - { success, sid, error }
  */
 async function sendSms(to, message, property_id = null, context = null) {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken  = process.env.TWILIO_AUTH_TOKEN;
-  const from       = process.env.TWILIO_FROM_NUMBER;
+  const apiKey = process.env.BREVO_API_KEY;
 
-  if (!accountSid || !authToken || !from) {
-    throw new Error('Variables Twilio manquantes (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)');
+  if (!apiKey) {
+    throw new Error('Variable BREVO_API_KEY manquante');
   }
 
   // Normalisation du numéro (accepte 06, 07, +336, +337)
@@ -31,39 +29,33 @@ async function sendSms(to, message, property_id = null, context = null) {
     return { success: false, error: `Numéro invalide : ${to}` };
   }
 
-  let twilioSid = null;
+  let messageId = null;
   let status    = 'sent';
   let errorMsg  = null;
 
   try {
-    // Appel API Twilio REST (sans SDK pour garder les deps légères)
-    const credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
-    const body = new URLSearchParams({
-      To:   normalized,
-      From: from,
-      Body: message
+    const response = await fetch('https://api.brevo.com/v3/transactionalSMS/sms', {
+      method: 'POST',
+      headers: {
+        'api-key':     apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sender:    'HoteSmart',
+        recipient: normalized,
+        content:   message,
+        type:      'transactional'
+      })
     });
-
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${credentials}`,
-          'Content-Type':  'application/x-www-form-urlencoded'
-        },
-        body: body.toString()
-      }
-    );
 
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || `Twilio erreur ${response.status}`);
+      throw new Error(data.message || `Brevo erreur ${response.status}`);
     }
 
-    twilioSid = data.sid;
-    status    = data.status; // queued, sent, delivered...
+    messageId = data.messageId || data.reference || null;
+    status    = 'sent';
 
   } catch (err) {
     status   = 'error';
@@ -74,9 +66,9 @@ async function sendSms(to, message, property_id = null, context = null) {
   await supabase.from('sms_logs').insert({
     to_number:   normalized,
     message:     message,
-    sender:      from,
+    sender:      'HoteSmart',
     status:      status,
-    twilio_sid:  twilioSid,
+    twilio_sid:  messageId,
     property_id: property_id,
     context:     context,
     error:       errorMsg
@@ -86,7 +78,7 @@ async function sendSms(to, message, property_id = null, context = null) {
     return { success: false, error: errorMsg };
   }
 
-  return { success: true, sid: twilioSid, status };
+  return { success: true, sid: messageId, status };
 }
 
 /**
