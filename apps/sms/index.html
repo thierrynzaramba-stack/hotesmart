@@ -1,628 +1,417 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SMS — HôteSmart</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — SMS</title>
+  <link rel="stylesheet" href="/public/style.css">
   <style>
-    :root {
-      --bg:        #0f1117;
-      --surface:   #1a1d27;
-      --border:    #2a2d3a;
-      --accent:    #6c63ff;
-      --accent2:   #00d4aa;
-      --text:      #e8e9f0;
-      --muted:     #6b6f80;
-      --danger:    #ff5c7a;
-      --success:   #00d4aa;
-      --warning:   #ffb547;
-      --radius:    12px;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: 'DM Sans', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-    }
-
-    /* ── Sidebar ── */
-    .sidebar {
-      width: 220px;
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      padding: 24px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      flex-shrink: 0;
-    }
-
-    .sidebar-logo {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--accent);
-      padding: 8px 12px 20px;
-      letter-spacing: -0.3px;
-    }
-
-    .sidebar-section {
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 1.2px;
-      text-transform: uppercase;
-      color: var(--muted);
-      padding: 12px 12px 6px;
-    }
-
-    .sidebar-link {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 12px;
-      border-radius: 8px;
-      font-size: 14px;
-      color: var(--muted);
-      text-decoration: none;
-      transition: all 0.15s;
-      cursor: pointer;
-    }
-
-    .sidebar-link:hover { background: var(--border); color: var(--text); }
-    .sidebar-link.active { background: rgba(108,99,255,0.15); color: var(--accent); }
-    .sidebar-link .icon { width: 16px; text-align: center; }
-
-    /* ── Main ── */
-    .main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .topbar {
-      padding: 20px 32px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .topbar h1 { font-size: 20px; font-weight: 600; }
-    .topbar .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
-
-    .status-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--success);
-      display: inline-block;
-      margin-right: 6px;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    .content {
-      flex: 1;
+    .sms-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0;
-      overflow: hidden;
+      gap: 20px;
     }
 
-    /* ── Panneau envoi ── */
-    .panel {
-      padding: 28px 32px;
-      border-right: 1px solid var(--border);
-      overflow-y: auto;
+    .sms-card {
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
     }
 
-    .panel-title {
+    .sms-card-title {
       font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 20px;
-    }
-
-    .form-group { margin-bottom: 18px; }
-
-    label {
-      display: block;
-      font-size: 12px;
       font-weight: 500;
-      color: var(--muted);
-      margin-bottom: 6px;
-      letter-spacing: 0.3px;
-    }
-
-    input, select, textarea {
-      width: 100%;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 10px 14px;
       color: var(--text);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 14px;
-      transition: border-color 0.2s;
-      outline: none;
+      margin-bottom: 18px;
     }
 
-    input:focus, select:focus, textarea:focus {
-      border-color: var(--accent);
+    .templates {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 16px;
     }
 
-    textarea {
-      resize: vertical;
-      min-height: 100px;
-      line-height: 1.5;
+    .template-btn {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 5px 10px;
+      font-size: 12px;
+      color: var(--text2);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+
+    .template-btn:hover {
+      border-color: var(--green);
+      color: var(--green);
     }
 
     .char-count {
       text-align: right;
       font-size: 11px;
-      color: var(--muted);
+      color: var(--text2);
       margin-top: 4px;
-      font-family: 'DM Mono', monospace;
     }
 
-    .char-count.warn { color: var(--warning); }
-    .char-count.over { color: var(--danger); }
-
-    /* Templates */
-    .templates {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 18px;
-    }
-
-    .template-btn {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 5px 12px;
-      font-size: 12px;
-      color: var(--muted);
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: 'DM Sans', sans-serif;
-    }
-
-    .template-btn:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .btn {
-      width: 100%;
-      padding: 12px;
-      border-radius: var(--radius);
-      border: none;
-      font-family: 'DM Sans', sans-serif;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      color: white;
-    }
-
-    .btn-primary:hover { background: #5a52e0; transform: translateY(-1px); }
-    .btn-primary:active { transform: translateY(0); }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .char-count.warn { color: orange; }
+    .char-count.over { color: #E24B4A; }
 
     .toast {
       padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 13px;
+      border-radius: var(--radius);
+      font-size: 12px;
       margin-top: 12px;
       display: none;
     }
 
-    .toast.success { background: rgba(0,212,170,0.1); border: 1px solid var(--success); color: var(--success); }
-    .toast.error   { background: rgba(255,92,122,0.1); border: 1px solid var(--danger);  color: var(--danger); }
-
-    /* ── Historique ── */
-    .history-panel {
-      padding: 28px 32px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .history-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-
-    .filter-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-
-    .filter-row select, .filter-row input {
-      flex: 1;
-      padding: 8px 12px;
-      font-size: 13px;
-    }
-
-    .sms-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      flex: 1;
-    }
-
-    .sms-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-      transition: border-color 0.15s;
-    }
-
-    .sms-item:hover { border-color: var(--accent); }
-
-    .sms-item-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 6px;
-    }
-
-    .sms-to {
-      font-family: 'DM Mono', monospace;
-      font-size: 13px;
-      color: var(--accent2);
-    }
-
-    .sms-time {
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .sms-message {
-      font-size: 13px;
-      color: var(--text);
-      line-height: 1.4;
-      margin-bottom: 8px;
-    }
-
-    .sms-footer {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .badge {
-      padding: 2px 8px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 500;
-    }
-
-    .badge-sent     { background: rgba(0,212,170,0.1); color: var(--success); }
-    .badge-error    { background: rgba(255,92,122,0.1); color: var(--danger); }
-    .badge-queued   { background: rgba(255,181,71,0.1); color: var(--warning); }
-    .badge-context  { background: rgba(108,99,255,0.1); color: var(--accent); }
-
-    .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--muted);
-    }
-
-    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-    .empty-state p { font-size: 14px; }
-
-    .refresh-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px 12px;
-      color: var(--muted);
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.15s;
-      font-family: 'DM Sans', sans-serif;
-    }
-
-    .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .toast.success { background: #E1F5EE; color: var(--green); border: 0.5px solid var(--green); }
+    .toast.error   { background: #fdecea; color: #E24B4A; border: 0.5px solid #E24B4A; }
 
     .stats-row {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 10px;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
 
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
+    .stat-mini {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
       border-radius: var(--radius);
-      padding: 14px;
+      padding: 12px;
       text-align: center;
     }
 
-    .stat-value { font-size: 22px; font-weight: 600; color: var(--accent); }
-    .stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .stat-mini-value { font-size: 20px; font-weight: 500; color: var(--green); }
+    .stat-mini-label { font-size: 11px; color: var(--text2); margin-top: 2px; }
+    .stat-mini-value.danger { color: #E24B4A; }
+
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .filter-row select { flex: 1; }
+
+    .sms-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+
+    .sms-item {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+
+    .sms-item-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 5px;
+    }
+
+    .sms-to {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--green);
+      font-family: monospace;
+    }
+
+    .sms-time { font-size: 11px; color: var(--text2); }
+
+    .sms-message {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.4;
+      margin-bottom: 6px;
+    }
+
+    .sms-footer {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .badge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
+    .badge-ok      { background: #E1F5EE; color: var(--green); }
+    .badge-error   { background: #fdecea; color: #E24B4A; }
+    .badge-context { background: var(--bg2); border: 0.5px solid var(--border); color: var(--text2); }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text2);
+      font-size: 13px;
+    }
+
+    .refresh-btn {
+      background: none;
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 5px 10px;
+      color: var(--text2);
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+
+    .refresh-btn:hover { border-color: var(--green); color: var(--green); }
   </style>
 </head>
 <body>
 
-<!-- Sidebar -->
-<nav class="sidebar">
-  <div class="sidebar-logo">🏠 HôteSmart</div>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
 
-  <div class="sidebar-section">Navigation</div>
-  <a class="sidebar-link" href="/apps/agent-ai"><span class="icon">🤖</span> Agent AI</a>
-  <a class="sidebar-link" href="/apps/menages"><span class="icon">🧹</span> Ménages</a>
-  <a class="sidebar-link active" href="/apps/sms"><span class="icon">💬</span> SMS</a>
-
-  <div class="sidebar-section">Compte</div>
-  <a class="sidebar-link" href="/pages/login.html"><span class="icon">🚪</span> Déconnexion</a>
-</nav>
-
-<!-- Main -->
-<div class="main">
-  <div class="topbar">
-    <div>
-      <h1>💬 Module SMS</h1>
-      <div class="sub"><span class="status-dot"></span>Twilio connecté · Envoi activé</div>
-    </div>
-  </div>
-
-  <div class="content">
-
-    <!-- Panneau envoi -->
-    <div class="panel">
-      <div class="panel-title">✉️ Nouveau SMS</div>
-
-      <div class="form-group">
-        <label>DESTINATAIRE</label>
-        <input type="tel" id="to" placeholder="+33 6 12 34 56 78" />
-      </div>
-
-      <div class="form-group">
-        <label>BIEN CONCERNÉ (optionnel)</label>
-        <select id="property_id">
-          <option value="">— Aucun —</option>
-          <option value="169567">Cœur de vie 23</option>
-          <option value="209413">La bulle</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label>CONTEXTE</label>
-        <select id="context">
-          <option value="manuel">Manuel</option>
-          <option value="agent-ai">Agent AI</option>
-          <option value="menages">Ménages</option>
-          <option value="cron">Automatique</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label>TEMPLATES RAPIDES</label>
-        <div class="templates">
-          <button class="template-btn" onclick="useTemplate('checkin')">🔑 Check-in</button>
-          <button class="template-btn" onclick="useTemplate('checkout')">👋 Check-out</button>
-          <button class="template-btn" onclick="useTemplate('menage')">🧹 Ménage</button>
-          <button class="template-btn" onclick="useTemplate('bienvenue')">🏠 Bienvenue</button>
-          <button class="template-btn" onclick="useTemplate('incident')">⚠️ Incident</button>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label>MESSAGE</label>
-        <textarea id="message" placeholder="Votre message…" oninput="updateCount()"></textarea>
-        <div class="char-count" id="charCount">0 / 160</div>
-      </div>
-
-      <button class="btn btn-primary" id="sendBtn" onclick="sendSms()">
-        Envoyer le SMS →
-      </button>
-
-      <div class="toast" id="toast"></div>
-    </div>
-
-    <!-- Historique -->
-    <div class="history-panel">
-      <div class="history-header">
-        <div class="panel-title">📋 Historique</div>
-        <button class="refresh-btn" onclick="loadHistory()">↻ Actualiser</button>
-      </div>
-
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value" id="statTotal">—</div>
-          <div class="stat-label">Total envoyés</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="statSuccess" style="color:var(--success)">—</div>
-          <div class="stat-label">Réussis</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="statError" style="color:var(--danger)">—</div>
-          <div class="stat-label">Erreurs</div>
-        </div>
-      </div>
-
-      <div class="filter-row">
-        <select id="filterProperty" onchange="loadHistory()">
-          <option value="">Tous les biens</option>
-          <option value="169567">Cœur de vie 23</option>
-          <option value="209413">La bulle</option>
-        </select>
-      </div>
-
-      <div class="sms-list" id="smsList">
-        <div class="empty-state">
-          <div class="icon">💬</div>
-          <p>Chargement de l'historique…</p>
-        </div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">💬 SMS</div>
+        <div class="page-sub" id="status">Module Twilio · Prêt à envoyer</div>
       </div>
     </div>
 
+    <div class="content">
+      <div class="sms-grid">
+
+        <!-- Panneau envoi -->
+        <div class="sms-card">
+          <div class="sms-card-title">✉️ Nouveau SMS</div>
+
+          <div class="form-group">
+            <label class="form-label">Destinataire</label>
+            <input class="form-input" type="tel" id="to" placeholder="+33 6 12 34 56 78">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Bien concerné (optionnel)</label>
+            <select class="form-input" id="property_id">
+              <option value="">— Aucun —</option>
+              <option value="169567">Cœur de vie 23</option>
+              <option value="209413">La bulle</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Contexte</label>
+            <select class="form-input" id="context">
+              <option value="manuel">Manuel</option>
+              <option value="agent-ai">Agent AI</option>
+              <option value="menages">Ménages</option>
+              <option value="cron">Automatique</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Templates rapides</label>
+            <div class="templates">
+              <button class="template-btn" onclick="useTemplate('checkin')">🔑 Check-in</button>
+              <button class="template-btn" onclick="useTemplate('checkout')">👋 Check-out</button>
+              <button class="template-btn" onclick="useTemplate('menage')">🧹 Ménage</button>
+              <button class="template-btn" onclick="useTemplate('bienvenue')">🏠 Bienvenue</button>
+              <button class="template-btn" onclick="useTemplate('incident')">⚠️ Incident</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Message</label>
+            <textarea class="form-input" id="message" rows="4" placeholder="Votre message…" oninput="updateCount()" style="resize:vertical"></textarea>
+            <div class="char-count" id="charCount">0 / 160</div>
+          </div>
+
+          <button class="btn btn-primary" id="sendBtn" onclick="sendSms()" style="width:100%">
+            Envoyer le SMS
+          </button>
+
+          <div class="toast" id="toast"></div>
+        </div>
+
+        <!-- Historique -->
+        <div class="sms-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div class="sms-card-title" style="margin-bottom:0">📋 Historique</div>
+            <button class="refresh-btn" onclick="loadHistory()">↻ Actualiser</button>
+          </div>
+
+          <div class="stats-row">
+            <div class="stat-mini">
+              <div class="stat-mini-value" id="statTotal">—</div>
+              <div class="stat-mini-label">Total</div>
+            </div>
+            <div class="stat-mini">
+              <div class="stat-mini-value" id="statSuccess">—</div>
+              <div class="stat-mini-label">Réussis</div>
+            </div>
+            <div class="stat-mini">
+              <div class="stat-mini-value danger" id="statError">—</div>
+              <div class="stat-mini-label">Erreurs</div>
+            </div>
+          </div>
+
+          <div class="filter-row">
+            <select class="form-input" id="filterProperty" onchange="loadHistory()">
+              <option value="">Tous les biens</option>
+              <option value="169567">Cœur de vie 23</option>
+              <option value="209413">La bulle</option>
+            </select>
+          </div>
+
+          <div class="sms-list" id="smsList">
+            <div class="empty-state">Chargement…</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
   </div>
 </div>
 
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+
+  await renderSidebar('sms')
+
+  window._session = session
+  window.loadHistory()
+</script>
+
 <script>
-  // ── Templates ─────────────────────────────────────────────────────────────
   const templates = {
     checkin:   "Bonjour, voici vos informations d'arrivée : le code de la boîte à clés est [CODE]. Bon séjour ! 🏠",
     checkout:  "Bonjour, c'est l'heure du départ. Merci de laisser les clés dans la boîte et de bien fermer la porte. À bientôt ! 👋",
-    menage:    "Bonjour, un ménage est prévu aujourd'hui au logement. Merci de bien vouloir vous y rendre à [HEURE]. 🧹",
+    menage:    "Bonjour, un ménage est prévu aujourd'hui au logement. Merci de vous y rendre à [HEURE]. 🧹",
     bienvenue: "Bienvenue dans votre logement ! N'hésitez pas à nous contacter si vous avez besoin de quoi que ce soit. Bon séjour ! 🏠✨",
     incident:  "Bonjour, nous avons signalé un incident dans votre logement. Notre équipe va vous contacter rapidement. Merci. ⚠️"
-  };
-
-  function useTemplate(key) {
-    document.getElementById('message').value = templates[key];
-    updateCount();
   }
 
-  // ── Compteur caractères ───────────────────────────────────────────────────
-  function updateCount() {
-    const len = document.getElementById('message').value.length;
-    const el  = document.getElementById('charCount');
-    el.textContent = `${len} / 160`;
-    el.className = 'char-count' + (len > 320 ? ' over' : len > 160 ? ' warn' : '');
+  window.useTemplate = key => {
+    document.getElementById('message').value = templates[key]
+    updateCount()
   }
 
-  // ── Envoi SMS ─────────────────────────────────────────────────────────────
-  async function sendSms() {
-    const to          = document.getElementById('to').value.trim();
-    const message     = document.getElementById('message').value.trim();
-    const property_id = document.getElementById('property_id').value;
-    const context     = document.getElementById('context').value;
+  window.updateCount = () => {
+    const len = document.getElementById('message').value.length
+    const el  = document.getElementById('charCount')
+    el.textContent = `${len} / 160`
+    el.className = 'char-count' + (len > 320 ? ' over' : len > 160 ? ' warn' : '')
+  }
 
-    if (!to || !message) {
-      showToast('Numéro et message requis.', 'error');
-      return;
-    }
+  window.sendSms = async () => {
+    const to          = document.getElementById('to').value.trim()
+    const message     = document.getElementById('message').value.trim()
+    const property_id = document.getElementById('property_id').value
+    const context     = document.getElementById('context').value
 
-    const btn = document.getElementById('sendBtn');
-    btn.disabled = true;
-    btn.textContent = 'Envoi en cours…';
+    if (!to || !message) return showToast('Numéro et message requis.', 'error')
+
+    const btn = document.getElementById('sendBtn')
+    btn.disabled = true
+    btn.textContent = 'Envoi en cours…'
 
     try {
       const res  = await fetch('/api/sms', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ to, message, property_id: property_id || null, context })
-      });
-      const data = await res.json();
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${window._session?.access_token}`
+        },
+        body: JSON.stringify({ to, message, property_id: property_id || null, context })
+      })
+      const data = await res.json()
 
       if (data.success) {
-        showToast(`✅ SMS envoyé ! SID : ${data.sid}`, 'success');
-        document.getElementById('message').value = '';
-        document.getElementById('to').value = '';
-        updateCount();
-        setTimeout(loadHistory, 1000);
+        showToast(`✅ SMS envoyé ! SID : ${data.sid}`, 'success')
+        document.getElementById('message').value = ''
+        document.getElementById('to').value = ''
+        updateCount()
+        setTimeout(window.loadHistory, 1000)
       } else {
-        showToast(`❌ Erreur : ${data.error}`, 'error');
+        showToast(`❌ ${data.error}`, 'error')
       }
     } catch (err) {
-      showToast(`❌ Erreur réseau : ${err.message}`, 'error');
+      showToast(`❌ Erreur réseau : ${err.message}`, 'error')
     } finally {
-      btn.disabled = false;
-      btn.textContent = 'Envoyer le SMS →';
+      btn.disabled = false
+      btn.textContent = 'Envoyer le SMS'
     }
   }
 
   function showToast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className   = `toast ${type}`;
-    t.style.display = 'block';
-    setTimeout(() => { t.style.display = 'none'; }, 5000);
+    const t = document.getElementById('toast')
+    t.textContent = msg
+    t.className = `toast ${type}`
+    t.style.display = 'block'
+    setTimeout(() => { t.style.display = 'none' }, 5000)
   }
 
-  // ── Historique ────────────────────────────────────────────────────────────
-  async function loadHistory() {
-    const property_id = document.getElementById('filterProperty').value;
-    const url = '/api/sms' + (property_id ? `?property_id=${property_id}` : '?limit=50');
+  window.loadHistory = async () => {
+    const property_id = document.getElementById('filterProperty').value
+    const url = '/api/sms' + (property_id ? `?property_id=${property_id}` : '?limit=50')
 
     try {
-      const res  = await fetch(url);
-      const data = await res.json();
-      renderHistory(data.logs || []);
-    } catch (err) {
-      document.getElementById('smsList').innerHTML =
-        `<div class="empty-state"><div class="icon">⚠️</div><p>Erreur de chargement</p></div>`;
+      const res  = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${window._session?.access_token}` }
+      })
+      const data = await res.json()
+      renderHistory(data.logs || [])
+    } catch {
+      document.getElementById('smsList').innerHTML = '<div class="empty-state">Erreur de chargement</div>'
     }
   }
 
   function renderHistory(logs) {
-    const list = document.getElementById('smsList');
-
-    // Stats
-    const total   = logs.length;
-    const success = logs.filter(l => l.status !== 'error').length;
-    const errors  = logs.filter(l => l.status === 'error').length;
-    document.getElementById('statTotal').textContent   = total;
-    document.getElementById('statSuccess').textContent = success;
-    document.getElementById('statError').textContent   = errors;
+    document.getElementById('statTotal').textContent   = logs.length
+    document.getElementById('statSuccess').textContent = logs.filter(l => l.status !== 'error').length
+    document.getElementById('statError').textContent   = logs.filter(l => l.status === 'error').length
 
     if (!logs.length) {
-      list.innerHTML = `<div class="empty-state"><div class="icon">💬</div><p>Aucun SMS envoyé pour l'instant</p></div>`;
-      return;
+      document.getElementById('smsList').innerHTML = "<div class='empty-state'>Aucun SMS envoyé pour l'instant</div>"
+      return
     }
 
-    list.innerHTML = logs.map(log => {
-      const date    = new Date(log.created_at);
-      const timeStr = date.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' })
-                    + ' ' + date.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+    const propName = id => id === '169567' ? 'Cœur de vie 23' : id === '209413' ? 'La bulle' : ''
 
-      const statusBadge = log.status === 'error'
-        ? `<span class="badge badge-error">❌ Erreur</span>`
-        : `<span class="badge badge-sent">✅ Envoyé</span>`;
-
-      const contextBadge = log.context
-        ? `<span class="badge badge-context">${log.context}</span>`
-        : '';
-
-      const propertyName = log.property_id === '169567' ? 'Cœur de vie 23'
-                         : log.property_id === '209413' ? 'La bulle' : '';
+    document.getElementById('smsList').innerHTML = logs.map(log => {
+      const d = new Date(log.created_at)
+      const t = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' })
+              + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
 
       return `
         <div class="sms-item">
           <div class="sms-item-header">
             <span class="sms-to">${log.to_number}</span>
-            <span class="sms-time">${timeStr}</span>
+            <span class="sms-time">${t}</span>
           </div>
           <div class="sms-message">${log.message}</div>
           <div class="sms-footer">
-            ${statusBadge}
-            ${contextBadge}
-            ${propertyName ? `<span class="badge" style="background:rgba(255,255,255,0.05);color:var(--muted)">${propertyName}</span>` : ''}
-            ${log.error ? `<span style="font-size:11px;color:var(--danger)">${log.error}</span>` : ''}
+            <span class="badge ${log.status === 'error' ? 'badge-error' : 'badge-ok'}">${log.status === 'error' ? '❌ Erreur' : '✅ Envoyé'}</span>
+            ${log.context ? `<span class="badge badge-context">${log.context}</span>` : ''}
+            ${log.property_id ? `<span class="badge badge-context">${propName(log.property_id)}</span>` : ''}
+            ${log.error ? `<span style="font-size:11px;color:#E24B4A">${log.error}</span>` : ''}
           </div>
         </div>
-      `;
-    }).join('');
+      `
+    }).join('')
   }
-
-  // Init
-  loadHistory();
 </script>
+
 </body>
 </html>
