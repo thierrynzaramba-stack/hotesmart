@@ -306,7 +306,8 @@
     const count  = document.getElementById('news-count')
     const list   = document.getElementById('news-list')
 
-    if (newsItems.length === 0) { panel.style.display = 'none'; return }
+    const visibleItems = newsItems.filter(n => !n.read)
+if (visibleItems.length === 0) { panel.style.display = 'none'; return }
     panel.style.display = 'block'
     count.textContent = unread.length
     count.style.display = unread.length === 0 ? 'none' : 'inline'
@@ -314,7 +315,7 @@
     const icons  = { new: '🆕', modified: '✏️', cancelled: '❌', note: '📝' }
     const labels = { new: 'Nouvelle réservation', modified: 'Réservation modifiée', cancelled: 'Annulation', note: "Note de l'employeur" }
 
-    list.innerHTML = newsItems.map(n => {
+    list.innerHTML = visibleItems.map(n => {
       const d = new Date(n.created_at)
       const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
 
