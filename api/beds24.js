@@ -66,15 +66,36 @@ module.exports = async function handler(req, res) {
       }
 
       case 'getMessages': {
+        // Essai 1 : endpoint inbox avec propId
         const r = await fetch(`https://beds24.com/api/v2/inbox?propId=${propertyId}`, {
           headers: { token: beds24Key }
         })
         const d = await r.json()
-        return res.json({ messages: d.data || [] })
+        console.log('[Beds24] inbox status:', r.status)
+        console.log('[Beds24] inbox raw:', JSON.stringify(d).substring(0, 1000))
+
+        // Si l'inbox retourne des données, on les utilise
+        if (d.data && d.data.length > 0) {
+          return res.json({ messages: d.data })
+        }
+
+        // Essai 2 : inbox sans filtre propId
+        const r2 = await fetch(`https://beds24.com/api/v2/inbox`, {
+          headers: { token: beds24Key }
+        })
+        const d2 = await r2.json()
+        console.log('[Beds24] inbox (sans propId) raw:', JSON.stringify(d2).substring(0, 1000))
+
+        // Filtrer par propertyId si possible
+        const allMessages = d2.data || []
+        const filtered = allMessages.filter(m =>
+          !propertyId || String(m.propId || m.propertyId) === String(propertyId)
+        )
+
+        return res.json({ messages: filtered, debug: { total: allMessages.length, filtered: filtered.length } })
       }
 
       case 'getHistory': {
-        // Récupère les réservations des 12 derniers mois avec leurs messages
         const today = new Date()
         const oneYearAgo = new Date(today)
         oneYearAgo.setFullYear(today.getFullYear() - 1)
@@ -89,7 +110,6 @@ module.exports = async function handler(req, res) {
 
         console.log('[Beds24] getHistory bookings:', bookings.length)
 
-        // Extraire tous les messages voyageurs depuis comments et apiMessage
         const messages = bookings.flatMap(b => {
           const msgs = []
           const base = {
@@ -100,21 +120,10 @@ module.exports = async function handler(req, res) {
             lastNight: b.departure
           }
 
-          if (b.comments?.trim()) {
-            msgs.push({ ...base, message: b.comments, guestMessage: b.comments })
-          }
-
-          if (b.apiMessage?.trim()) {
-            msgs.push({ ...base, message: b.apiMessage, guestMessage: b.apiMessage })
-          }
-
-          if (b.message?.trim()) {
-            msgs.push({ ...base, message: b.message, guestMessage: b.message })
-          }
-
-          if (b.notes?.trim()) {
-            msgs.push({ ...base, message: b.notes, guestMessage: b.notes })
-          }
+          if (b.comments?.trim()) msgs.push({ ...base, message: b.comments, guestMessage: b.comments })
+          if (b.apiMessage?.trim()) msgs.push({ ...base, message: b.apiMessage, guestMessage: b.apiMessage })
+          if (b.message?.trim()) msgs.push({ ...base, message: b.message, guestMessage: b.message })
+          if (b.notes?.trim()) msgs.push({ ...base, message: b.notes, guestMessage: b.notes })
 
           return msgs
         })
