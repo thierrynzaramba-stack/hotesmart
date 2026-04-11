@@ -107,6 +107,7 @@ module.exports = async function handler(req, res) {
       .from('menage_events')
       .select('*')
       .eq('token', token)
+      .eq('read', false)
       .gte('created_at', new Date(Date.now() - visibilityDays * 24 * 60 * 60 * 1000).toISOString())
       .order('created_at', { ascending: false })
       .limit(50)
