@@ -19,7 +19,6 @@
     .prop-tag { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--text2); }
     .prop-tag.active { background: #EEEDFE; color: #3C3489; border-color: #C4B5FD; }
 
-    /* Form nouveau prestataire */
     .form-section { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
     .form-row { display: flex; gap: 12px; margin-bottom: 12px; }
     .form-row .form-input { flex: 1; }
@@ -28,7 +27,16 @@
     .prop-checkbox input { cursor: pointer; accent-color: var(--primary); }
     .prop-checkbox label { font-size: 13px; cursor: pointer; }
 
-    /* Badge token copié */
+    /* Visibilité jours */
+    .visibility-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); }
+    .visibility-label { font-size: 13px; color: var(--text); flex: 1; }
+    .visibility-label small { display: block; font-size: 11px; color: var(--text2); margin-top: 2px; }
+    .visibility-select { width: auto; min-width: 120px; }
+
+    .presta-meta { display: flex; gap: 12px; margin-bottom: 10px; }
+    .presta-meta-item { font-size: 11px; color: var(--text2); background: var(--bg2); border: 0.5px solid var(--border); border-radius: 20px; padding: 2px 10px; }
+    .presta-meta-item.highlight { background: #EEEDFE; color: #3C3489; border-color: #C4B5FD; }
+
     .copy-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: white; padding: 8px 16px; border-radius: 20px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
     .copy-toast.show { opacity: 1; }
 
@@ -52,7 +60,6 @@
 
     <div class="content">
 
-      <!-- Liste prestataires -->
       <div class="section-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <div class="section-title" style="margin:0">Mes prestataires</div>
@@ -63,17 +70,33 @@
         </div>
       </div>
 
-      <!-- Formulaire nouveau prestataire -->
       <div class="section-card" id="form-section" style="display:none">
-        <div class="section-title">Nouveau prestataire</div>
+        <div class="section-title" id="form-title">Nouveau prestataire</div>
         <div class="form-section">
           <div class="form-row">
             <input class="form-input" id="presta-name" placeholder="Nom (ex: Marie, Société Propre+)">
           </div>
+
           <div style="font-size:11px;color:var(--text2);margin-bottom:8px;font-weight:500">BIENS ACCESSIBLES</div>
           <div class="prop-checkboxes" id="prop-checkboxes">
             <div style="font-size:12px;color:var(--text2)">Chargement...</div>
           </div>
+
+          <!-- Visibilité calendrier -->
+          <div class="visibility-row">
+            <div class="visibility-label">
+              Visibilité du calendrier
+              <small>Nombre de jours visibles par la femme de ménage à partir d'aujourd'hui</small>
+            </div>
+            <select class="form-input visibility-select" id="visibility-days">
+              <option value="7">7 jours</option>
+              <option value="14">14 jours</option>
+              <option value="30" selected>30 jours</option>
+              <option value="60">60 jours</option>
+              <option value="90">90 jours</option>
+            </select>
+          </div>
+
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" id="btn-create">Créer et générer le lien</button>
             <button class="btn" id="btn-cancel">Annuler</button>
@@ -103,7 +126,7 @@
     currentSession = await requireAuth()
     if (!currentSession) return
 
-    await renderSidebar('menages')
+    await renderSidebar('menages-prestataires')
     await loadProperties()
     await loadPrestataires()
     renderPropCheckboxes()
@@ -111,15 +134,11 @@
     document.getElementById('btn-show-form').addEventListener('click', () => {
       document.getElementById('form-section').style.display = 'block'
       document.getElementById('btn-show-form').style.display = 'none'
+      document.getElementById('form-title').textContent = 'Nouveau prestataire'
       document.getElementById('presta-name').focus()
     })
 
-    document.getElementById('btn-cancel').addEventListener('click', () => {
-      document.getElementById('form-section').style.display = 'none'
-      document.getElementById('btn-show-form').style.display = 'inline-flex'
-      document.getElementById('presta-name').value = ''
-    })
-
+    document.getElementById('btn-cancel').addEventListener('click', resetForm)
     document.getElementById('btn-create').onclick = createPrestataire
   }
 
@@ -141,8 +160,7 @@
       .order('created_at', { ascending: false })
 
     if (error) {
-      document.getElementById('presta-list').innerHTML =
-        '<div class="empty-state">Erreur chargement</div>'
+      document.getElementById('presta-list').innerHTML = '<div class="empty-state">Erreur chargement</div>'
       return
     }
 
@@ -160,6 +178,7 @@
 
     list.innerHTML = `<div class="presta-list">${prestataires.map(p => {
       const url = `${window.location.origin}/apps/menages/public?token=${p.token}`
+      const visibilityDays = p.visibility_days || 30
       const propTags = properties.map(prop => {
         const active = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
         return `<span class="prop-tag ${active ? 'active' : ''}">${prop.name}</span>`
@@ -175,6 +194,9 @@
               <button class="btn btn-danger btn-delete" data-id="${p.id}">Supprimer</button>
             </div>
           </div>
+          <div class="presta-meta">
+            <span class="presta-meta-item highlight">📅 ${visibilityDays} jours visibles</span>
+          </div>
           <div class="presta-link">
             <span>${url}</span>
             <button class="btn-copy" data-url="${url}" title="Copier le lien">📋</button>
@@ -185,20 +207,12 @@
       `
     }).join('')}</div>`
 
-    // Copier lien
     list.querySelectorAll('.btn-copy').forEach(btn => {
-      btn.addEventListener('click', () => {
-        navigator.clipboard.writeText(btn.dataset.url)
-        showToast()
-      })
+      btn.addEventListener('click', () => { navigator.clipboard.writeText(btn.dataset.url); showToast() })
     })
-
-    // Modifier
     list.querySelectorAll('.btn-edit').forEach(btn => {
       btn.addEventListener('click', () => editPrestataire(btn.dataset.id))
     })
-
-    // Supprimer
     list.querySelectorAll('.btn-delete').forEach(btn => {
       btn.addEventListener('click', () => deletePrestataire(btn.dataset.id))
     })
@@ -222,45 +236,29 @@
     const name = document.getElementById('presta-name').value.trim()
     if (!name) return alert('Entrez un nom pour le prestataire')
 
-    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')]
-      .map(cb => cb.value)
-
+    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')].map(cb => cb.value)
+    const visibilityDays = parseInt(document.getElementById('visibility-days').value)
     const token = generateToken(name)
 
     const { error } = await supabase.from('public_tokens').insert({
       user_id: currentSession.user.id,
       token,
       label: name,
-      property_ids: selectedProps
+      property_ids: selectedProps,
+      visibility_days: visibilityDays
     })
 
-    if (error) {
-      alert('Erreur création : ' + error.message)
-      return
-    }
+    if (error) { alert('Erreur création : ' + error.message); return }
 
-    document.getElementById('presta-name').value = ''
-    document.getElementById('form-section').style.display = 'none'
-    document.getElementById('btn-show-form').style.display = 'inline-flex'
-
+    resetForm()
     await loadPrestataires()
     showToast('✓ Prestataire créé !')
   }
 
   async function deletePrestataire(id) {
     if (!confirm('Supprimer ce prestataire ? Le lien ne fonctionnera plus.')) return
-
-    const { error } = await supabase
-      .from('public_tokens')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', currentSession.user.id)
-
-    if (error) {
-      alert('Erreur suppression : ' + error.message)
-      return
-    }
-
+    const { error } = await supabase.from('public_tokens').delete().eq('id', id).eq('user_id', currentSession.user.id)
+    if (error) { alert('Erreur suppression : ' + error.message); return }
     await loadPrestataires()
   }
 
@@ -268,23 +266,19 @@
     const p = prestataires.find(p => p.id === id)
     if (!p) return
 
-    // Pré-remplir le formulaire
     document.getElementById('presta-name').value = p.label || ''
+    document.getElementById('visibility-days').value = p.visibility_days || 30
     document.getElementById('form-section').style.display = 'block'
     document.getElementById('btn-show-form').style.display = 'none'
+    document.getElementById('form-title').textContent = 'Modifier le prestataire'
 
-    // Cocher les biens assignés
     properties.forEach(prop => {
       const cb = document.getElementById(`prop-${prop.id}`)
-      if (cb) {
-        cb.checked = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
-      }
+      if (cb) cb.checked = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
     })
 
-    // Changer le bouton créer en sauvegarder
     const btn = document.getElementById('btn-create')
     btn.textContent = 'Sauvegarder les modifications'
-    btn.dataset.editId = id
     btn.onclick = () => saveEdit(id)
   }
 
@@ -292,47 +286,40 @@
     const name = document.getElementById('presta-name').value.trim()
     if (!name) return alert('Entrez un nom pour le prestataire')
 
-    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')]
-      .map(cb => cb.value)
+    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')].map(cb => cb.value)
+    const visibilityDays = parseInt(document.getElementById('visibility-days').value)
 
-    const { error } = await supabase
-      .from('public_tokens')
-      .update({ label: name, property_ids: selectedProps })
+    const { error } = await supabase.from('public_tokens')
+      .update({ label: name, property_ids: selectedProps, visibility_days: visibilityDays })
       .eq('id', id)
       .eq('user_id', currentSession.user.id)
 
-    if (error) {
-      alert('Erreur modification : ' + error.message)
-      return
-    }
+    if (error) { alert('Erreur modification : ' + error.message); return }
 
-    // Remettre le formulaire en mode création
-    const btn = document.getElementById('btn-create')
-    btn.textContent = 'Créer et générer le lien'
-    btn.onclick = createPrestataire
-
-    document.getElementById('presta-name').value = ''
-    document.getElementById('form-section').style.display = 'none'
-    document.getElementById('btn-show-form').style.display = 'inline-flex'
-
+    resetForm()
     await loadPrestataires()
     showToast('✓ Prestataire modifié !')
   }
 
+  function resetForm() {
+    document.getElementById('presta-name').value = ''
+    document.getElementById('visibility-days').value = '30'
+    document.getElementById('form-section').style.display = 'none'
+    document.getElementById('btn-show-form').style.display = 'inline-flex'
+    const btn = document.getElementById('btn-create')
+    btn.textContent = 'Créer et générer le lien'
+    btn.onclick = createPrestataire
+    renderPropCheckboxes()
+  }
+
   function generateToken(name) {
-    const slug = name.toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]/g, '-')
-      .replace(/-+/g, '-')
-      .slice(0, 20)
-    const rand = Math.random().toString(36).slice(2, 8)
-    return `${slug}-${rand}`
+    const slug = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20)
+    return `${slug}-${Math.random().toString(36).slice(2, 8)}`
   }
 
   function showToast(msg = '✓ Lien copié !') {
     const toast = document.getElementById('copy-toast')
-    toast.textContent = msg
-    toast.classList.add('show')
+    toast.textContent = msg; toast.classList.add('show')
     setTimeout(() => toast.classList.remove('show'), 2000)
   }
 

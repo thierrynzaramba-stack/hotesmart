@@ -12,10 +12,10 @@ module.exports = async function handler(req, res) {
   if (!token) return res.status(401).json({ error: 'Token manquant' })
 
   try {
-    // Valide le token et récupère le user_id
+    // Valide le token
     const { data: tokenData, error: tokenError } = await supabase
       .from('public_tokens')
-      .select('user_id, label, property_ids')
+      .select('user_id, label, property_ids, visibility_days')
       .eq('token', token)
       .maybeSingle()
 
@@ -23,9 +23,10 @@ module.exports = async function handler(req, res) {
       return res.status(401).json({ error: 'Token invalide' })
     }
 
-    const userId = tokenData.user_id
+    const userId        = tokenData.user_id
+    const visibilityDays = tokenData.visibility_days || 30
 
-    // Récupère la clé Beds24 de l'utilisateur
+    // Clé Beds24
     const { data: keyData, error: keyError } = await supabase
       .from('api_keys')
       .select('api_key')
@@ -39,25 +40,32 @@ module.exports = async function handler(req, res) {
 
     const beds24Key = keyData.api_key
 
-    // Récupère les propriétés
+    // Propriétés
     const propsRes = await fetch('https://beds24.com/api/v2/properties', {
       headers: { token: beds24Key }
     })
     const propsData = await propsRes.json()
     const allProperties = propsData.data || []
 
-    // Filtre les propriétés selon les property_ids du token
     const allowedIds = tokenData.property_ids || []
     const properties = allowedIds.length
       ? allProperties.filter(p => allowedIds.includes(String(p.id)))
       : allProperties
 
-    // Récupère les réservations des biens autorisés uniquement
+    // Réservations (fenêtre visibilityDays)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const maxDate = new Date(today)
+    maxDate.setDate(maxDate.getDate() + visibilityDays)
+    const dateFrom = today.toISOString().split('T')[0]
+    const dateTo   = maxDate.toISOString().split('T')[0]
+
     const allBookings = []
     for (const prop of properties) {
-      const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${prop.id}`, {
-        headers: { token: beds24Key }
-      })
+      const r = await fetch(
+        `https://beds24.com/api/v2/bookings?propId=${prop.id}&arrivalFrom=${dateFrom}&arrivalTo=${dateTo}`,
+        { headers: { token: beds24Key } }
+      )
       const d = await r.json()
       const propBookings = (d.data || [])
         .filter(b => String(b.propertyId) === String(prop.id))
@@ -65,7 +73,35 @@ module.exports = async function handler(req, res) {
       allBookings.push(...propBookings)
     }
 
-    return res.json({ bookings: allBookings, label: tokenData.label, property_ids: allowedIds })
+    // Commentaires admin pour ces réservations
+    const bookingIds = allBookings.map(b => String(b.id))
+    let comments = []
+    if (bookingIds.length > 0) {
+      const { data: commentsData } = await supabase
+        .from('menage_comments')
+        .select('booking_id, departure_date, comment, property_id')
+        .eq('user_id', userId)
+        .in('booking_id', bookingIds)
+      comments = commentsData || []
+    }
+
+    // Événements (fil d'actualités) dans la fenêtre de visibilité
+    const { data: eventsData } = await supabase
+      .from('menage_events')
+      .select('*')
+      .eq('token', token)
+      .gte('created_at', new Date(Date.now() - visibilityDays * 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    return res.json({
+      bookings:        allBookings,
+      label:           tokenData.label,
+      property_ids:    allowedIds,
+      visibility_days: visibilityDays,
+      comments:        comments,
+      events:          eventsData || []
+    })
 
   } catch (err) {
     console.error('[MenagesPublic]', err)
