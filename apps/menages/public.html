@@ -8,7 +8,6 @@
   <style>
     .menage-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
 
-    /* Mini cal */
     .mini-cal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; position: sticky; top: 0; }
     .mini-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
     .mini-cal-title { font-size: 13px; font-weight: 500; }
@@ -24,7 +23,6 @@
     .mini-cal-day.selected-week { background: var(--bg2); border: 0.5px solid var(--border2); }
     .mini-cal-day.other-month { opacity: 0.3; }
 
-    /* Tooltip mini-cal */
     .cal-tooltip { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--text); color: white; font-size: 10px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; z-index: 200; pointer-events: none; display: none; line-height: 1.5; text-align: left; }
     .mini-cal-day:hover .cal-tooltip { display: block; }
 
@@ -72,7 +70,6 @@
     .week-stat { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; }
     .week-stat strong { font-size: 18px; font-weight: 600; display: block; }
 
-    /* Modal */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; display: flex; align-items: center; justify-content: center; }
     .modal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 24px; width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
     .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
@@ -80,27 +77,26 @@
     .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
     .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 
-    /* Note admin dans modal */
     .admin-note { background: #FFF3CD; border: 0.5px solid #F59E0B; border-radius: var(--radius); padding: 10px 12px; margin-top: 14px; font-size: 12px; color: #92400E; line-height: 1.5; }
     .admin-note-title { font-weight: 600; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-
-    /* Bouton fait désactivé si pas aujourd'hui */
-    .btn-disabled { opacity: 0.4; cursor: not-allowed !important; }
 
     /* Fil d'actualités */
     .news-panel { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
     .news-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
     .news-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
     .news-badge { background: #E24B4A; color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; }
-    .news-close { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 16px; padding: 0; }
+    .news-close { background: none; border: 0.5px solid var(--border); border-radius: var(--radius); cursor: pointer; color: var(--text2); font-size: 12px; padding: 4px 10px; font-family: inherit; transition: all 0.15s; }
+    .news-close:hover { border-color: var(--green); color: var(--green); }
     .news-list { display: flex; flex-direction: column; gap: 8px; }
-    .news-item { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: flex; align-items: flex-start; gap: 10px; }
+    .news-item { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
+    .news-item:hover { opacity: 0.85; }
     .news-item.unread { border-left: 3px solid var(--primary); }
+    .news-item.read { opacity: 0.6; }
     .news-icon { font-size: 16px; flex-shrink: 0; }
     .news-content { flex: 1; }
     .news-content-title { font-size: 12px; font-weight: 500; }
-    .news-content-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
-    .news-time { font-size: 10px; color: var(--text2); flex-shrink: 0; }
+    .news-content-sub { font-size: 11px; color: var(--text2); margin-top: 2px; line-height: 1.4; }
+    .news-time { font-size: 10px; color: var(--text2); flex-shrink: 0; white-space: nowrap; }
     .news-empty { font-size: 12px; color: var(--text2); text-align: center; padding: 16px; }
   </style>
 </head>
@@ -118,7 +114,6 @@
     <div class="content">
       <div class="menage-layout">
 
-        <!-- Colonne gauche -->
         <div>
           <div class="mini-cal">
             <div class="mini-cal-header">
@@ -145,16 +140,15 @@
           </div>
         </div>
 
-        <!-- Colonne droite -->
         <div>
           <!-- Fil d'actualités -->
           <div class="news-panel" id="news-panel" style="display:none">
             <div class="news-header">
               <div class="news-title">
                 🔔 Nouveautés
-                <span class="news-badge" id="news-count">0</span>
+                <span class="news-badge" id="news-count" style="display:none">0</span>
               </div>
-              <button class="news-close" id="news-close" title="Tout marquer comme lu">✕</button>
+              <button class="news-close" id="news-close">✓ Tout marquer lu</button>
             </div>
             <div class="news-list" id="news-list"></div>
           </div>
@@ -212,20 +206,19 @@
   let activeProps = new Set()
   let selectedMenage = null
   let newsItems = []
-  let readNewsIds = new Set()
+  let currentToken = null
 
   function getToken() { return new URLSearchParams(window.location.search).get('token') }
 
   async function init() {
-    const token = getToken()
-    if (!token) {
-      document.querySelector('.content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Lien invalide — contactez votre employeur</div>'
+    currentToken = getToken()
+    if (!currentToken) {
+      document.querySelector('.content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Lien invalide</div>'
       return
     }
 
     loadDoneSet()
-    loadReadNews()
-    await loadData(token)
+    await loadData(currentToken)
     renderFilters()
     renderNews()
     renderMiniCal()
@@ -259,26 +252,13 @@
     })
     properties = [...propMap.values()]
     activeProps = new Set(properties.map(p => p.id))
+    bookings = data.bookings || []
 
-    // Filtrer les bookings selon visibilityDays
-    const today = new Date(); today.setHours(0,0,0,0)
-    const maxDate = addDays(today, visibilityDays)
-    bookings = (data.bookings || []).filter(b => {
-      if (!b.departure) return false
-      const dep = new Date(b.departure)
-      return dep >= today && dep <= maxDate
-    })
-
-    // Commentaires admin
+    // Commentaires
     ;(data.comments || []).forEach(c => { commentsMap[`${c.booking_id}-${c.departure_date}`] = c.comment })
 
-    // Événements (nouveautés)
-    newsItems = (data.events || []).filter(e => {
-      if (!e.created_at) return false
-      const d = new Date(e.created_at)
-      const maxD = addDays(today, visibilityDays)
-      return d >= addDays(today, -visibilityDays) && (e.event_data?.departure ? new Date(e.event_data.departure) <= maxD : true)
-    })
+    // Événements
+    newsItems = data.events || []
   }
 
   function getMenages() {
@@ -321,55 +301,79 @@
   }
 
   function renderNews() {
-    const unread = newsItems.filter(n => !readNewsIds.has(n.id))
-    const panel = document.getElementById('news-panel')
-    const count = document.getElementById('news-count')
-    const list = document.getElementById('news-list')
+    const unread = newsItems.filter(n => !n.read)
+    const panel  = document.getElementById('news-panel')
+    const count  = document.getElementById('news-count')
+    const list   = document.getElementById('news-list')
 
     if (newsItems.length === 0) { panel.style.display = 'none'; return }
     panel.style.display = 'block'
     count.textContent = unread.length
     count.style.display = unread.length === 0 ? 'none' : 'inline'
 
-    if (newsItems.length === 0) {
-      list.innerHTML = '<div class="news-empty">Aucune nouveauté</div>'
-      return
-    }
-
-    const icons = { new: '🆕', modified: '✏️', cancelled: '❌' }
-    const labels = { new: 'Nouvelle réservation', modified: 'Réservation modifiée', cancelled: 'Annulation' }
+    const icons  = { new: '🆕', modified: '✏️', cancelled: '❌', note: '📝' }
+    const labels = { new: 'Nouvelle réservation', modified: 'Réservation modifiée', cancelled: 'Annulation', note: "Note de l'employeur" }
 
     list.innerHTML = newsItems.map(n => {
-      const isUnread = !readNewsIds.has(n.id)
       const d = new Date(n.created_at)
-      const timeStr = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-      const detail = n.event_data ? `${n.property_name || ''} · ${n.event_data.guestName || ''} · ${n.event_data.arrival || ''} → ${n.event_data.departure || ''}` : n.property_name || ''
+      const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
+
+      let detail = n.property_name || ''
+      if (n.event_data) {
+        if (n.event_type === 'note') {
+          detail = `${n.property_name} · ${n.event_data.guestName || ''} · ${n.event_data.comment || ''}`
+        } else {
+          detail = `${n.property_name} · ${n.event_data.guestName || ''} · ${n.event_data.arrival || ''} → ${n.event_data.departure || ''}`
+          if (n.event_type === 'modified' && n.event_data.changes) {
+            const changes = []
+            if (n.event_data.changes.arrival)   changes.push(`arrivée : ${n.event_data.changes.arrival.before} → ${n.event_data.changes.arrival.after}`)
+            if (n.event_data.changes.departure)  changes.push(`départ : ${n.event_data.changes.departure.before} → ${n.event_data.changes.departure.after}`)
+            if (n.event_data.changes.numAdult)   changes.push(`adultes : ${n.event_data.changes.numAdult.before} → ${n.event_data.changes.numAdult.after}`)
+            if (n.event_data.changes.numChild)   changes.push(`enfants : ${n.event_data.changes.numChild.before} → ${n.event_data.changes.numChild.after}`)
+            if (changes.length) detail += `\n${changes.join(', ')}`
+          }
+        }
+      }
 
       return `
-        <div class="news-item ${isUnread ? 'unread' : ''}" data-id="${n.id}">
+        <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}">
           <div class="news-icon">${icons[n.event_type] || '📋'}</div>
           <div class="news-content">
             <div class="news-content-title">${labels[n.event_type] || n.event_type}</div>
-            <div class="news-content-sub">${detail}</div>
+            <div class="news-content-sub">${detail.replace(/\n/g, '<br>')}</div>
           </div>
           <div class="news-time">${timeStr}</div>
         </div>
       `
     }).join('')
 
-    // Marquer comme lu au clic
+    // Clic sur un item → marquer comme lu
     list.querySelectorAll('.news-item').forEach(item => {
-      item.addEventListener('click', () => {
-        readNewsIds.add(item.dataset.id)
-        saveReadNews()
-        renderNews()
+      item.addEventListener('click', async () => {
+        const id = item.dataset.id
+        const n = newsItems.find(n => String(n.id) === String(id))
+        if (n && !n.read) {
+          n.read = true
+          await fetch(`/api/menages-public?token=${currentToken}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'markRead', event_ids: [id] })
+          })
+          renderNews()
+        }
       })
     })
   }
 
-  function markAllNewsRead() {
-    newsItems.forEach(n => readNewsIds.add(n.id))
-    saveReadNews()
+  async function markAllNewsRead() {
+    const unreadIds = newsItems.filter(n => !n.read).map(n => n.id)
+    if (unreadIds.length === 0) return
+    newsItems.forEach(n => { n.read = true })
+    await fetch(`/api/menages-public?token=${currentToken}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'markRead', event_ids: unreadIds })
+    })
     renderNews()
   }
 
@@ -395,11 +399,7 @@
       const day = addDays(currentWeekStart, i)
       day.setHours(0,0,0,0)
       const isToday = day.getTime() === today.getTime()
-
-      const dayMenages = menages.filter(m => {
-        const md = new Date(m.date); md.setHours(0,0,0,0)
-        return md.getTime() === day.getTime()
-      })
+      const dayMenages = menages.filter(m => { const md = new Date(m.date); md.setHours(0,0,0,0); return md.getTime() === day.getTime() })
 
       const col = document.createElement('div')
       col.className = `day-col${isToday ? ' today' : ''}`
@@ -427,8 +427,7 @@
 
     grid.querySelectorAll('.menage-card').forEach(card => {
       card.addEventListener('click', () => {
-        const id = card.dataset.id
-        selectedMenage = menages.find(m => m.id === id)
+        selectedMenage = getMenages().find(m => m.id === card.dataset.id)
         openModal(selectedMenage)
       })
     })
@@ -446,12 +445,11 @@
 
     const grid = document.getElementById('mini-cal-grid')
     const headers = Array.from(grid.children).slice(0, 7)
-    grid.innerHTML = ''
-    headers.forEach(h => grid.appendChild(h))
+    grid.innerHTML = ''; headers.forEach(h => grid.appendChild(h))
 
     const firstDay = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth(), 1)
-    const lastDay = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 0)
-    const today = new Date(); today.setHours(0,0,0,0)
+    const lastDay  = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 0)
+    const today    = new Date(); today.setHours(0,0,0,0)
 
     let startOffset = (firstDay.getDay() + 6) % 7
     for (let i = 0; i < startOffset; i++) {
@@ -464,19 +462,18 @@
     for (let d = 1; d <= lastDay.getDate(); d++) {
       const date = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth(), d)
       date.setHours(0,0,0,0)
-      const dateStr = toDateStr(date)
+      const dateStr    = toDateStr(date)
       const dayMenages = menageDates.get(dateStr) || []
-      const hasMenage = dayMenages.length > 0
-      const isDone = hasMenage && dayMenages.every(m => m.done)
-      const isToday = date.getTime() === today.getTime()
-      const weekEnd = addDays(currentWeekStart, 6)
-      const inWeek = date >= currentWeekStart && date <= weekEnd
+      const hasMenage  = dayMenages.length > 0
+      const isDone     = hasMenage && dayMenages.every(m => m.done)
+      const isToday    = date.getTime() === today.getTime()
+      const weekEnd    = addDays(currentWeekStart, 6)
+      const inWeek     = date >= currentWeekStart && date <= weekEnd
 
       const el = document.createElement('div')
       el.className = ['mini-cal-day', isToday ? 'today' : '', hasMenage && !isToday ? (isDone ? 'has-menage done' : 'has-menage') : '', inWeek && !isToday ? 'selected-week' : ''].filter(Boolean).join(' ')
       el.textContent = d
 
-      // Tooltip
       if (hasMenage) {
         const tooltip = document.createElement('div')
         tooltip.className = 'cal-tooltip'
@@ -505,15 +502,11 @@
       <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : '⏳ À faire'}</span></div>
     `
 
-    // Note admin
     const noteEl = document.getElementById('modal-note')
-    if (m.comment) {
-      noteEl.innerHTML = `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
-    } else {
-      noteEl.innerHTML = ''
-    }
+    noteEl.innerHTML = m.comment
+      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
+      : ''
 
-    // Bouton fait — actif seulement aujourd'hui
     const btn = document.getElementById('modal-done')
     if (m.done) {
       btn.textContent = '↩ Marquer non fait'
@@ -524,9 +517,10 @@
       btn.className = 'btn btn-primary'
       btn.disabled = false
     } else {
-      btn.textContent = '✓ Marquer fait (disponible le jour J)'
-      btn.className = 'btn btn-primary btn-disabled'
+      btn.textContent = `✓ Disponible le ${formatDate(m.date)}`
+      btn.className = 'btn'
       btn.disabled = true
+      btn.style.opacity = '0.4'
     }
 
     document.getElementById('modal').style.display = 'flex'
@@ -543,8 +537,6 @@
 
   function loadDoneSet() { const raw = localStorage.getItem('menages-done-public'); if (raw) doneSet = new Set(JSON.parse(raw)) }
   function saveDoneSet() { localStorage.setItem('menages-done-public', JSON.stringify([...doneSet])) }
-  function loadReadNews() { const raw = localStorage.getItem('menages-read-news'); if (raw) readNewsIds = new Set(JSON.parse(raw)) }
-  function saveReadNews() { localStorage.setItem('menages-read-news', JSON.stringify([...readNewsIds])) }
 
   function getMonday(date) { const d = new Date(date); d.setHours(0,0,0,0); const day = d.getDay(); d.setDate(d.getDate() + ((day === 0) ? -6 : 1 - day)); return d }
   function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }

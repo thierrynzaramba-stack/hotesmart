@@ -7,9 +7,26 @@ const supabase = createClient(
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  if (req.method === 'OPTIONS') return res.status(200).end()
 
   const { token } = req.query
   if (!token) return res.status(401).json({ error: 'Token manquant' })
+
+  // POST → marquer événements comme lus
+  if (req.method === 'POST') {
+    const { action, event_ids } = req.body || {}
+    if (action === 'markRead' && event_ids?.length) {
+      await supabase
+        .from('menage_events')
+        .update({ read: true })
+        .in('id', event_ids)
+        .eq('token', token)
+      return res.json({ success: true })
+    }
+    return res.status(400).json({ error: 'Action inconnue' })
+  }
 
   try {
     // Valide le token
@@ -23,7 +40,7 @@ module.exports = async function handler(req, res) {
       return res.status(401).json({ error: 'Token invalide' })
     }
 
-    const userId        = tokenData.user_id
+    const userId         = tokenData.user_id
     const visibilityDays = tokenData.visibility_days || 30
 
     // Clé Beds24
@@ -52,7 +69,7 @@ module.exports = async function handler(req, res) {
       ? allProperties.filter(p => allowedIds.includes(String(p.id)))
       : allProperties
 
-    // Réservations (fenêtre visibilityDays)
+    // Réservations filtrées par DEPARTURE (ménage = jour de départ)
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const maxDate = new Date(today)
@@ -63,7 +80,7 @@ module.exports = async function handler(req, res) {
     const allBookings = []
     for (const prop of properties) {
       const r = await fetch(
-        `https://beds24.com/api/v2/bookings?propId=${prop.id}&arrivalFrom=${dateFrom}&arrivalTo=${dateTo}`,
+        `https://beds24.com/api/v2/bookings?propId=${prop.id}&departureFrom=${dateFrom}&departureTo=${dateTo}`,
         { headers: { token: beds24Key } }
       )
       const d = await r.json()
@@ -73,7 +90,7 @@ module.exports = async function handler(req, res) {
       allBookings.push(...propBookings)
     }
 
-    // Commentaires admin pour ces réservations
+    // Commentaires admin
     const bookingIds = allBookings.map(b => String(b.id))
     let comments = []
     if (bookingIds.length > 0) {
@@ -85,7 +102,7 @@ module.exports = async function handler(req, res) {
       comments = commentsData || []
     }
 
-    // Événements (fil d'actualités) dans la fenêtre de visibilité
+    // Événements fil d'actualités
     const { data: eventsData } = await supabase
       .from('menage_events')
       .select('*')
