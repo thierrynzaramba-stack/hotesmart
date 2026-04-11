@@ -306,8 +306,7 @@
     const count  = document.getElementById('news-count')
     const list   = document.getElementById('news-list')
 
-    const visibleItems = newsItems.filter(n => !n.read)
-if (visibleItems.length === 0) { panel.style.display = 'none'; return }
+    if (newsItems.length === 0) { panel.style.display = 'none'; return }
     panel.style.display = 'block'
     count.textContent = unread.length
     count.style.display = unread.length === 0 ? 'none' : 'inline'
@@ -315,14 +314,14 @@ if (visibleItems.length === 0) { panel.style.display = 'none'; return }
     const icons  = { new: '🆕', modified: '✏️', cancelled: '❌', note: '📝' }
     const labels = { new: 'Nouvelle réservation', modified: 'Réservation modifiée', cancelled: 'Annulation', note: "Note de l'employeur" }
 
-    list.innerHTML = visibleItems.map(n => {
+    list.innerHTML = newsItems.map(n => {
       const d = new Date(n.created_at)
       const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
 
       let detail = n.property_name || ''
       if (n.event_data) {
         if (n.event_type === 'note') {
-          detail = `${n.property_name} · ${n.event_data.guestName || ''} · ${n.event_data.comment || ''}`
+          detail = `${n.property_name} · ${n.event_data.guestName || ''}\nArrivée : ${n.event_data.arrival || '—'} · Départ : ${n.event_data.departure || '—'}\n📝 ${n.event_data.comment || ''}`
         } else {
           detail = `${n.property_name} · ${n.event_data.guestName || ''} · ${n.event_data.arrival || ''} → ${n.event_data.departure || ''}`
           if (n.event_type === 'modified' && n.event_data.changes) {
