@@ -270,27 +270,55 @@
   }
 
   async function saveComment() {
-    if (!selectedMenage) return
-    const comment = document.getElementById('modal-comment').value.trim()
-    const key = `${selectedMenage.bookId}-${selectedMenage.departure}`
+  if (!selectedMenage) return
+  const comment = document.getElementById('modal-comment').value.trim()
+  const key = `${selectedMenage.bookId}-${selectedMenage.departure}`
 
-    const { error } = await supabase.from('menage_comments').upsert({
-      user_id:        currentSession.user.id,
-      booking_id:     String(selectedMenage.bookId),
-      departure_date: selectedMenage.departure,
-      property_id:    String(selectedMenage.propId),
-      comment,
-      updated_at:     new Date().toISOString()
-    }, { onConflict: 'user_id,booking_id,departure_date' })
+  const { error } = await supabase.from('menage_comments').upsert({
+    user_id:        currentSession.user.id,
+    booking_id:     String(selectedMenage.bookId),
+    departure_date: selectedMenage.departure,
+    property_id:    String(selectedMenage.propId),
+    comment,
+    updated_at:     new Date().toISOString()
+  }, { onConflict: 'user_id,booking_id,departure_date' })
 
-    if (!error) {
-      commentsMap[key] = comment
-      document.getElementById('comment-saved').style.display = 'block'
-      setTimeout(() => { document.getElementById('comment-saved').style.display = 'none' }, 2000)
-      renderWeek()
-      renderMiniCal()
+  if (!error) {
+    commentsMap[key] = comment
+
+    // Créer événement fil d'actualités pour tous les tokens du bien
+    const { data: tokens } = await supabase
+      .from('public_tokens')
+      .select('token, property_ids')
+      .eq('user_id', currentSession.user.id)
+
+    const relevantTokens = (tokens || []).filter(t =>
+      !t.property_ids?.length || t.property_ids.includes(String(selectedMenage.propId))
+    )
+
+    for (const t of relevantTokens) {
+      await supabase.from('menage_events').insert({
+        user_id:       currentSession.user.id,
+        booking_id:    String(selectedMenage.bookId),
+        property_id:   String(selectedMenage.propId),
+        property_name: selectedMenage.propName,
+        event_type:    'note',
+        event_data: {
+          guestName:  selectedMenage.guestName,
+          arrival:    selectedMenage.arrival,
+          departure:  selectedMenage.departure,
+          comment:    comment
+        },
+        token: t.token
+      })
     }
+
+    document.getElementById('comment-saved').style.display = 'block'
+    setTimeout(() => { document.getElementById('comment-saved').style.display = 'none' }, 2000)
+    renderWeek()
+    renderMiniCal()
   }
+}
 
   function getMenages() {
     const menages = []
