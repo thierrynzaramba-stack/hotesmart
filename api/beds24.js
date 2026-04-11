@@ -24,16 +24,12 @@ module.exports = async function handler(req, res) {
     const user = userData?.user
     if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' })
 
-    console.log('[Beds24] User ID:', user.id)
-
     const { data: keyData, error: keyError } = await supabase
       .from('api_keys')
       .select('api_key')
       .eq('user_id', user.id)
       .eq('service', 'beds24')
       .single()
-
-    console.log('[Beds24] keyData:', keyData, 'keyError:', keyError)
 
     if (keyError || !keyData) {
       return res.status(400).json({
@@ -66,46 +62,65 @@ module.exports = async function handler(req, res) {
       }
 
       case 'getMessages': {
-        // Beds24 v2 : pas d'endpoint /inbox — on récupère via les réservations récentes
-        const today = new Date()
-        const past60 = new Date()
-        past60.setDate(today.getDate() - 60)
-        const future60 = new Date()
-        future60.setDate(today.getDate() + 60)
-
-        const dateFrom = past60.toISOString().split('T')[0]
-        const dateTo   = future60.toISOString().split('T')[0]
-
+        // ✅ Bon endpoint Beds24 v2 pour les messages de la messagerie
         const r = await fetch(
-          `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom}&arrivalTo=${dateTo}`,
+          `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=50`,
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
-        console.log('[Beds24] getMessages bookings count:', (d.data || []).length)
-        console.log('[Beds24] getMessages sample:', JSON.stringify((d.data || [])[0]).substring(0, 500))
+        console.log('[Beds24] getMessages count:', (d.data || []).length)
 
-        const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propertyId))
+        // On ne garde que les messages des voyageurs (source: "guest") non lus ou récents
+        const allMessages = d.data || []
 
-        // Extraire les messages voyageurs non vides
-        const messages = bookings.flatMap(b => {
-          const msgs = []
-          const base = {
-            bookId:         b.id,
-            guestFirstName: b.firstName || '',
-            guestName:      b.lastName  || '',
-            firstNight:     b.arrival,
-            lastNight:      b.departure
-          }
-
-          if (b.apiMessage?.trim()) msgs.push({ ...base, message: b.apiMessage, guestMessage: b.apiMessage, source: 'apiMessage' })
-          if (b.comments?.trim())   msgs.push({ ...base, message: b.comments,   guestMessage: b.comments,   source: 'comments' })
-          if (b.message?.trim())    msgs.push({ ...base, message: b.message,    guestMessage: b.message,    source: 'message' })
-          if (b.notes?.trim())      msgs.push({ ...base, message: b.notes,      guestMessage: b.notes,      source: 'notes' })
-
-          return msgs
+        // Grouper par bookingId pour avoir le dernier message voyageur par réservation
+        const byBooking = {}
+        allMessages.forEach(msg => {
+          if (!byBooking[msg.bookingId]) byBooking[msg.bookingId] = []
+          byBooking[msg.bookingId].push(msg)
         })
 
-        console.log('[Beds24] getMessages extraits:', messages.length)
+        // Récupérer les réservations pour avoir les infos voyageur (nom, dates)
+        const bookingIds = Object.keys(byBooking)
+        let bookingsMap = {}
+
+        if (bookingIds.length > 0) {
+          const rb = await fetch(
+            `https://beds24.com/api/v2/bookings?propId=${propertyId}`,
+            { headers: { token: beds24Key } }
+          )
+          const db = await rb.json()
+          ;(db.data || []).forEach(b => { bookingsMap[b.id] = b })
+        }
+
+        // Construire les messages avec infos voyageur
+        const messages = bookingIds.map(bookId => {
+          const msgs = byBooking[bookId]
+          const lastGuestMsg = msgs.filter(m => m.source === 'guest').sort((a, b) => new Date(b.time) - new Date(a.time))[0]
+          if (!lastGuestMsg) return null
+
+          const booking = bookingsMap[bookId] || {}
+          return {
+            bookId:         parseInt(bookId),
+            guestFirstName: booking.firstName || '',
+            guestName:      booking.lastName  || '',
+            firstNight:     booking.arrival   || '',
+            lastNight:      booking.departure || '',
+            guestMessage:   lastGuestMsg.message,
+            message:        lastGuestMsg.message,
+            messageId:      lastGuestMsg.id,
+            messageTime:    lastGuestMsg.time,
+            read:           lastGuestMsg.read,
+            thread:         msgs.map(m => ({
+              id:      m.id,
+              time:    m.time,
+              message: m.message,
+              source:  m.source
+            })).sort((a, b) => new Date(a.time) - new Date(b.time))
+          }
+        }).filter(Boolean)
+
+        console.log('[Beds24] messages voyageurs:', messages.length)
         return res.json({ messages })
       }
 
@@ -116,42 +131,27 @@ module.exports = async function handler(req, res) {
         const dateFrom = oneYearAgo.toISOString().split('T')[0]
 
         const r = await fetch(
-          `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom}&includeInfoItems=true`,
+          `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=200`,
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
-        const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propertyId))
+        const messages = (d.data || []).map(m => ({
+          bookId:      m.bookingId,
+          message:     m.message,
+          guestMessage: m.message,
+          source:      m.source,
+          time:        m.time
+        }))
 
-        console.log('[Beds24] getHistory bookings:', bookings.length)
-
-        const messages = bookings.flatMap(b => {
-          const msgs = []
-          const base = {
-            bookId:         b.id,
-            guestFirstName: b.firstName || '',
-            guestName:      b.lastName  || '',
-            firstNight:     b.arrival,
-            lastNight:      b.departure
-          }
-
-          if (b.comments?.trim())   msgs.push({ ...base, message: b.comments,   guestMessage: b.comments })
-          if (b.apiMessage?.trim()) msgs.push({ ...base, message: b.apiMessage, guestMessage: b.apiMessage })
-          if (b.message?.trim())    msgs.push({ ...base, message: b.message,    guestMessage: b.message })
-          if (b.notes?.trim())      msgs.push({ ...base, message: b.notes,      guestMessage: b.notes })
-
-          return msgs
-        })
-
-        console.log('[Beds24] getHistory messages extraits:', messages.length)
-        return res.json({ messages, totalBookings: bookings.length })
+        return res.json({ messages, totalBookings: messages.length })
       }
 
       case 'sendMessage': {
-        // Beds24 v2 : envoi via /bookings/{id} PATCH ou via l'API messages
-        const r = await fetch(`https://beds24.com/api/v2/bookings/${bookingId}`, {
-          method: 'PATCH',
+        // Beds24 v2 : envoi via POST /bookings/messages
+        const r = await fetch('https://beds24.com/api/v2/bookings/messages', {
+          method: 'POST',
           headers: { token: beds24Key, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message })
+          body: JSON.stringify({ bookingId, message })
         })
         const d = await r.json()
         console.log('[Beds24] sendMessage response:', JSON.stringify(d))
