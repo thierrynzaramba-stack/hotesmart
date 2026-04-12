@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Serrures</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
+    .tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; }
+    .tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+
+    .config-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; max-width:560px; margin-bottom:16px; }
+    .config-card-title { font-size:13px; font-weight:500; margin-bottom:16px; }
+
+    .notice { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; margin-bottom:20px; }
+    .notice a { color:var(--green); text-decoration:none; }
+    .notice a:hover { text-decoration:underline; }
+    .notice ol { margin:8px 0 0 16px; }
+
+    .status-banner { display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:var(--radius); font-size:13px; margin-bottom:20px; }
+    .status-banner.on  { background:#E1F5EE; border:0.5px solid var(--green); color:#1a6644; }
+    .status-banner.off { background:var(--bg2); border:0.5px solid var(--border); color:var(--text2); }
+    .sdot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .sdot.green { background:var(--green); }
+    .sdot.gray  { background:#ccc; }
+
+    .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border); }
+    .toggle-label { font-size:13px; color:var(--text2); }
+    .toggle { position:relative; width:44px; height:24px; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
+    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
+    input:checked + .toggle-slider { background:var(--green); }
+    input:checked + .toggle-slider:before { transform:translateX(20px); }
+
+    .key-row { display:flex; gap:8px; }
+    .key-row input { flex:1; }
+
+    .toast { padding:10px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
+    .toast.success { background:#E1F5EE; color:var(--green); border:0.5px solid var(--green); }
+    .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
+
+    /* Serrures */
+    .locks-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; }
+    .lock-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
+    .lock-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .lock-name { font-size:14px; font-weight:500; }
+    .lock-status { font-size:11px; padding:3px 8px; border-radius:20px; }
+    .lock-status.locked   { background:#fdecea; color:#E24B4A; }
+    .lock-status.unlocked { background:#E1F5EE; color:var(--green); }
+    .lock-meta { font-size:12px; color:var(--text2); margin-bottom:14px; line-height:1.5; }
+    .lock-actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+    /* Codes */
+    .codes-list { display:flex; flex-direction:column; gap:8px; margin-top:16px; }
+    .code-item { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:10px 14px; display:flex; align-items:center; justify-content:space-between; }
+    .code-pin { font-family:monospace; font-size:18px; font-weight:600; color:var(--green); letter-spacing:2px; }
+    .code-info { font-size:11px; color:var(--text2); margin-top:2px; }
+    .code-name { font-size:13px; font-weight:500; }
+
+    /* Modal génération code */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:100; display:flex; align-items:center; justify-content:center; }
+    .modal { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:400px; max-width:90vw; }
+    .modal-title { font-size:15px; font-weight:600; margin-bottom:16px; }
+    .modal-actions { display:flex; gap:8px; margin-top:16px; }
+
+    .empty-state { text-align:center; padding:40px; color:var(--text2); font-size:13px; }
+    .refresh-btn { background:none; border:0.5px solid var(--border); border-radius:var(--radius); padding:5px 10px; color:var(--text2); font-size:12px; cursor:pointer; font-family:inherit; transition:all 0.15s; }
+    .refresh-btn:hover { border-color:var(--green); color:var(--green); }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">🔐 Serrures connectées</div>
+        <div class="page-sub" id="topStatus">Seam · Chargement…</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('config')">⚙️ Configuration</div>
+        <div class="tab" onclick="switchTab('locks')">🔐 Mes serrures</div>
+      </div>
+
+      <!-- Configuration -->
+      <div class="tab-content active" id="tab-config">
+        <div class="config-card">
+          <div class="config-card-title">🔗 Statut Seam</div>
+
+          <div class="status-banner off" id="statusBanner">
+            <div class="sdot gray" id="statusDot"></div>
+            <span id="statusText">Non configuré</span>
+          </div>
+
+          <div class="notice">
+            <strong>Comment obtenir votre clé API Seam ?</strong>
+            <ol>
+              <li>Créez un compte sur <a href="https://console.seam.co" target="_blank">console.seam.co</a></li>
+              <li>Connectez vos serrures (Igloo Home, Nuki, Yale…)</li>
+              <li>Allez dans <strong>API Keys</strong></li>
+              <li>Créez une clé et copiez-la (commence par <code>seam_</code>)</li>
+            </ol>
+            <br>
+            <strong>Serrures supportées :</strong> Igloo Home, Nuki, Yale, August, Schlage, Tedee et bien d'autres via Seam.<br>
+            <strong>Tarif Seam :</strong> Gratuit jusqu'à 1000 appels/mois.
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Clé API Seam</label>
+            <div class="key-row">
+              <input class="form-input" type="password" id="apiKey" placeholder="seam_xxxxxxxxxxxxxxxx">
+              <button class="btn btn-primary" onclick="saveConfig()">Enregistrer</button>
+            </div>
+          </div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">Activer les serrures connectées</span>
+            <label class="toggle">
+              <input type="checkbox" id="seamEnabled" onchange="toggleSeam()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toast" id="configToast"></div>
+        </div>
+      </div>
+
+      <!-- Serrures -->
+      <div class="tab-content" id="tab-locks">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:500">Mes serrures connectées</div>
+          <button class="refresh-btn" onclick="loadLocks()">↻ Actualiser</button>
+        </div>
+        <div id="locks-container">
+          <div class="empty-state">Chargement…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Modal génération code -->
+<div class="modal-overlay" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modal-title">🔑 Générer un code d'accès</div>
+    <input type="hidden" id="modal-lock-id">
+    <div class="form-group">
+      <label class="form-label">Nom du voyageur</label>
+      <input class="form-input" id="modal-guest" placeholder="Ex: Marie Dupont">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Début d'accès</label>
+      <input class="form-input" type="datetime-local" id="modal-start">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fin d'accès</label>
+      <input class="form-input" type="datetime-local" id="modal-end">
+    </div>
+    <div class="toast" id="modalToast"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="modal-generate" onclick="generateCode()">Générer le code</button>
+      <button class="btn" onclick="closeModal()">Annuler</button>
+    </div>
+    <!-- Résultat -->
+    <div id="code-result" style="display:none;margin-top:16px;text-align:center">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">Code généré ✅</div>
+      <div class="code-pin" id="code-pin-display" style="font-size:32px;display:block;margin:8px 0"></div>
+      <div style="font-size:11px;color:var(--text2)" id="code-validity"></div>
+      <button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="copyCode()">📋 Copier le code</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('serrures')
+  window._session = session
+  window.loadConfig()
+</script>
+
+<script>
+  window.switchTab = name => {
+    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['config','locks'][i] === name))
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'))
+    document.getElementById('tab-' + name).classList.add('active')
+    if (name === 'locks') loadLocks()
+  }
+
+  // ── Config ────────────────────────────────────────────────────────────────
+  window.loadConfig = async () => {
+    try {
+      const res  = await fetch('/api/serrures?action=config', { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
+      const data = await res.json()
+      if (data.configured) {
+        document.getElementById('apiKey').value = '••••••••••••••••••••'
+        document.getElementById('seamEnabled').checked = data.enabled
+        updateBanner(data.enabled)
+      }
+    } catch {}
+  }
+
+  window.saveConfig = async () => {
+    const key = document.getElementById('apiKey').value.trim()
+    if (!key || key.startsWith('•')) return toast('configToast', 'Saisissez une clé API valide', 'error')
+    try {
+      const res  = await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'saveConfig', apiKey: key }) })
+      const data = await res.json()
+      if (data.success) {
+        toast('configToast', '✅ Clé enregistrée', 'success')
+        document.getElementById('apiKey').value = '••••••••••••••••••••'
+        document.getElementById('seamEnabled').checked = true
+        updateBanner(true)
+      } else { toast('configToast', `❌ ${data.error}`, 'error') }
+    } catch (err) { toast('configToast', `❌ ${err.message}`, 'error') }
+  }
+
+  window.toggleSeam = async () => {
+    const enabled = document.getElementById('seamEnabled').checked
+    await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'toggleConfig', enabled }) })
+    updateBanner(enabled)
+    toast('configToast', enabled ? '✅ Serrures activées' : '⏸ Serrures désactivées', 'success')
+  }
+
+  function updateBanner(on) {
+    const b = document.getElementById('statusBanner')
+    const d = document.getElementById('statusDot')
+    const t = document.getElementById('statusText')
+    b.className = 'status-banner ' + (on ? 'on' : 'off')
+    d.className = 'sdot ' + (on ? 'green' : 'gray')
+    t.textContent = on ? 'Seam connecté et actif' : 'Non configuré ou désactivé'
+    document.getElementById('topStatus').textContent = on ? 'Seam · ✓ Actif' : 'Seam · Inactif'
+  }
+
+  // ── Serrures ──────────────────────────────────────────────────────────────
+  window.loadLocks = async () => {
+    const container = document.getElementById('locks-container')
+    container.innerHTML = '<div class="empty-state">Chargement…</div>'
+    try {
+      const res  = await fetch('/api/serrures?action=locks', { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
+      const data = await res.json()
+      renderLocks(data.locks || [])
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state">❌ ${err.message}</div>`
+    }
+  }
+
+  function renderLocks(locks) {
+    const container = document.getElementById('locks-container')
+    if (!locks.length) {
+      container.innerHTML = '<div class="empty-state">Aucune serrure connectée — configurez vos serrures dans la console Seam</div>'
+      return
+    }
+
+    container.innerHTML = `<div class="locks-grid">${locks.map(lock => {
+      const isLocked = lock.properties?.locked
+      const battery  = lock.properties?.battery_level ? `🔋 ${Math.round(lock.properties.battery_level * 100)}%` : ''
+      return `
+        <div class="lock-card">
+          <div class="lock-header">
+            <div class="lock-name">🔐 ${lock.properties?.name || lock.display_name || 'Serrure'}</div>
+            <span class="lock-status ${isLocked ? 'locked' : 'unlocked'}">${isLocked ? '🔒 Verrouillée' : '🔓 Ouverte'}</span>
+          </div>
+          <div class="lock-meta">
+            ${lock.properties?.manufacturer ? `Marque : ${lock.properties.manufacturer}<br>` : ''}
+            ${battery ? `${battery}<br>` : ''}
+            <span style="font-size:10px;color:var(--text2);font-family:monospace">${lock.device_id}</span>
+          </div>
+          <div class="lock-actions">
+            <button class="btn btn-primary" onclick="openModal('${lock.device_id}', '${(lock.properties?.name || '').replace(/'/g, '')}')">🔑 Générer code</button>
+            <button class="btn" onclick="loadCodes('${lock.device_id}', this)">📋 Voir codes</button>
+          </div>
+          <div class="codes-list" id="codes-${lock.device_id}" style="display:none"></div>
+        </div>
+      `
+    }).join('')}</div>`
+  }
+
+  window.loadCodes = async (lockId, btn) => {
+    const list = document.getElementById(`codes-${lockId}`)
+    if (list.style.display === 'flex' || list.style.display === 'block') {
+      list.style.display = 'none'
+      btn.textContent = '📋 Voir codes'
+      return
+    }
+    btn.textContent = '⏳ Chargement…'
+    try {
+      const res  = await fetch(`/api/serrures?action=codes&lock_id=${lockId}`, { headers: { 'Authorization': `Bearer ${window._session?.access_token}` } })
+      const data = await res.json()
+      const codes = data.codes || []
+      if (!codes.length) {
+        list.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:8px 0">Aucun code actif</div>'
+      } else {
+        list.innerHTML = codes.map(c => `
+          <div class="code-item">
+            <div>
+              <div class="code-name">${c.name || 'Code'}</div>
+              <div class="code-pin">${c.code || '——'}</div>
+              <div class="code-info">
+                ${c.starts_at ? `Du ${new Date(c.starts_at).toLocaleDateString('fr-FR')}` : ''}
+                ${c.ends_at   ? ` au ${new Date(c.ends_at).toLocaleDateString('fr-FR')}` : ''}
+              </div>
+            </div>
+            <button class="btn" style="font-size:11px" onclick="deleteCode('${c.access_code_id}', '${lockId}')">🗑</button>
+          </div>
+        `).join('')
+      }
+      list.style.display = 'flex'
+      list.style.flexDirection = 'column'
+      btn.textContent = '📋 Masquer codes'
+    } catch (err) {
+      list.innerHTML = `<div style="font-size:12px;color:#E24B4A;padding:8px 0">Erreur : ${err.message}</div>`
+      list.style.display = 'block'
+      btn.textContent = '📋 Voir codes'
+    }
+  }
+
+  window.deleteCode = async (codeId, lockId) => {
+    if (!confirm('Supprimer ce code d\'accès ?')) return
+    try {
+      await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'deleteCode', code_id: codeId }) })
+      document.getElementById(`codes-${lockId}`).style.display = 'none'
+    } catch {}
+  }
+
+  // ── Modal ─────────────────────────────────────────────────────────────────
+  window.openModal = (lockId, lockName) => {
+    document.getElementById('modal-lock-id').value = lockId
+    document.getElementById('modal-guest').value = ''
+    document.getElementById('code-result').style.display = 'none'
+    document.getElementById('modal-generate').style.display = 'inline-flex'
+
+    // Dates par défaut : aujourd'hui → dans 7 jours
+    const now  = new Date()
+    const end  = new Date(now)
+    end.setDate(end.getDate() + 7)
+    document.getElementById('modal-start').value = toDateTimeLocal(now)
+    document.getElementById('modal-end').value   = toDateTimeLocal(end)
+
+    document.getElementById('modal').style.display = 'flex'
+  }
+
+  window.closeModal = () => { document.getElementById('modal').style.display = 'none' }
+
+  window.generateCode = async () => {
+    const lockId    = document.getElementById('modal-lock-id').value
+    const guestName = document.getElementById('modal-guest').value.trim() || 'Voyageur'
+    const startsAt  = new Date(document.getElementById('modal-start').value).toISOString()
+    const endsAt    = new Date(document.getElementById('modal-end').value).toISOString()
+
+    const btn = document.getElementById('modal-generate')
+    btn.textContent = 'Génération…'
+    btn.disabled = true
+
+    try {
+      const res  = await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'generateCode', lock_id: lockId, guest_name: guestName, starts_at: startsAt, ends_at: endsAt }) })
+      const data = await res.json()
+
+      if (data.success && data.code) {
+        document.getElementById('code-pin-display').textContent = data.code.code
+        document.getElementById('code-validity').textContent = `Valide du ${new Date(data.code.starts_at).toLocaleDateString('fr-FR')} au ${new Date(data.code.ends_at).toLocaleDateString('fr-FR')}`
+        document.getElementById('code-result').style.display = 'block'
+        btn.style.display = 'none'
+        window._lastCode = data.code.code
+      } else {
+        toast('modalToast', `❌ ${data.error}`, 'error')
+        btn.textContent = 'Générer le code'
+        btn.disabled = false
+      }
+    } catch (err) {
+      toast('modalToast', `❌ ${err.message}`, 'error')
+      btn.textContent = 'Générer le code'
+      btn.disabled = false
+    }
+  }
+
+  window.copyCode = () => {
+    if (window._lastCode) {
+      navigator.clipboard.writeText(window._lastCode)
+      toast('modalToast', '✅ Code copié !', 'success')
+    }
+  }
+
+  function toDateTimeLocal(date) {
+    return date.toISOString().slice(0, 16)
+  }
+
+  function toast(id, msg, type) {
+    const t = document.getElementById(id)
+    t.textContent = msg; t.className = `toast ${type}`; t.style.display = 'block'
+    setTimeout(() => { t.style.display = 'none' }, 4000)
+  }
+</script>
+
+</body>
+</html>
