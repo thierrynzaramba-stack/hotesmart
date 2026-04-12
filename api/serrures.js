@@ -39,7 +39,7 @@ async function getSeamKey(userId) {
     .from('api_keys')
     .select('seam_api_key, seam_enabled')
     .eq('user_id', userId)
-    .single()
+    .maybeSingle()
   if (data?.seam_enabled === false) return null
   return data?.seam_api_key || process.env.SEAM_API_KEY || null
 }
@@ -74,7 +74,7 @@ module.exports = async (req, res) => {
         .from('api_keys')
         .select('seam_api_key, seam_enabled')
         .eq('user_id', user.id)
-        .single()
+        .maybeSingle()
       return res.status(200).json({
         configured: !!data?.seam_api_key,
         enabled:    data?.seam_enabled !== false
@@ -122,11 +122,9 @@ module.exports = async (req, res) => {
       const { apiKey } = body
       if (!apiKey) return res.status(400).json({ error: 'Clé API requise' })
 
-      const { error } = await supabase.from('api_keys').upsert({
-        user_id:      user.id,
-        seam_api_key: apiKey,
-        seam_enabled: true
-      }, { onConflict: 'user_id' })
+      const { error } = await supabase.from('api_keys')
+        .update({ seam_api_key: apiKey, seam_enabled: true })
+        .eq('user_id', user.id)
 
       if (error) return res.status(500).json({ error: error.message })
       return res.status(200).json({ success: true })
@@ -136,10 +134,9 @@ module.exports = async (req, res) => {
     if (action === 'toggleConfig') {
       if (!user) return res.status(401).json({ error: 'Non autorisé' })
       const { enabled } = body
-      const { error } = await supabase.from('api_keys').upsert({
-        user_id:      user.id,
-        seam_enabled: enabled
-      }, { onConflict: 'user_id' })
+      const { error } = await supabase.from('api_keys')
+        .update({ seam_enabled: enabled })
+        .eq('user_id', user.id)
       if (error) return res.status(500).json({ error: error.message })
       return res.status(200).json({ success: true })
     }
