@@ -48,6 +48,8 @@ async function generateAccessCode(lockId, guestName, startsAt, endsAt, userId) {
 
   return { ...data.access_code, code }
 }
+
+async function getSeamKey(userId) {
   if (!userId) return process.env.SEAM_API_KEY || null
   const { data } = await supabase
     .from('api_keys')
