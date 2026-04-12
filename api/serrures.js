@@ -13,6 +13,7 @@ async function generateAccessCode(lockId, guestName, startsAt, endsAt, userId) {
   const apiKey = await getSeamKey(userId)
   if (!apiKey) throw new Error('Clé Seam non configurée')
 
+  // Création du code offline (Algopin — fonctionne sans bridge)
   const response = await fetch('https://connect.getseam.com/access_codes/create', {
     method: 'POST',
     headers: {
@@ -20,20 +21,33 @@ async function generateAccessCode(lockId, guestName, startsAt, endsAt, userId) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      device_id: lockId,
-      name:       `${guestName} - HôteSmart`,
-      starts_at:  startsAt,
-      ends_at:    endsAt,
-      code:       generatePin()
+      device_id:             lockId,
+      name:                  `${guestName} - HôteSmart`,
+      starts_at:             startsAt,
+      ends_at:               endsAt,
+      is_offline_access_code: true
     })
   })
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || `Seam erreur ${response.status}`)
-  return data.access_code
-}
 
-async function getSeamKey(userId) {
+  const accessCodeId = data.access_code?.access_code_id
+  if (!accessCodeId) throw new Error('Code non créé')
+
+  // Attendre que le code Algopin soit calculé (max 5 secondes)
+  let code = data.access_code?.code
+  if (!code) {
+    await new Promise(r => setTimeout(r, 2000))
+    const r2 = await fetch(`https://connect.getseam.com/access_codes/get?access_code_id=${accessCodeId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    })
+    const d2 = await r2.json()
+    code = d2.access_code?.code
+  }
+
+  return { ...data.access_code, code }
+}
   if (!userId) return process.env.SEAM_API_KEY || null
   const { data } = await supabase
     .from('api_keys')
@@ -42,10 +56,6 @@ async function getSeamKey(userId) {
     .maybeSingle()
   if (data?.seam_enabled === false) return null
   return data?.seam_api_key || process.env.SEAM_API_KEY || null
-}
-
-function generatePin() {
-  return Math.floor(100000 + Math.random() * 900000).toString()
 }
 
 // ─── Handler Vercel ───────────────────────────────────────────────────────────
