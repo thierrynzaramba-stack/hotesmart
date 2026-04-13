@@ -13,55 +13,46 @@
     .tab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 500; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-
-    .sim-input { width: 100%; min-height: 80px; resize: vertical; }
-    .sim-output { background: var(--bg2); border-radius: var(--radius); padding: 14px 16px; font-size: 13px; line-height: 1.6; color: var(--text); min-height: 80px; margin-top: 12px; white-space: pre-wrap; }
-    .sim-meta { font-size: 11px; color: var(--text2); margin-top: 6px; }
-
     .msg-card { border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg); margin-bottom: 12px; }
+    .msg-card.intervention { border-left: 3px solid #E24B4A; }
+    .msg-card.info_unknown { border-left: 3px solid #F59E0B; }
+    .msg-card.info_known, .msg-card.sympathy { border-left: 3px solid var(--green); }
     .msg-card-header { padding: 10px 14px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--bg2); }
     .msg-card-guest { font-size: 13px; font-weight: 500; }
     .msg-card-meta { font-size: 11px; color: var(--text2); }
     .msg-card-body { padding: 14px 16px; }
-    .msg-guest { font-size: 12px; color: var(--text2); margin-bottom: 8px; line-height: 1.5; }
-    .msg-reply { background: var(--bg2); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.5; min-height: 50px; white-space: pre-wrap; }
+    .msg-guest { font-size: 12px; color: var(--text2); line-height: 1.5; }
+    .msg-reply { background: var(--bg2); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.5; min-height: 40px; white-space: pre-wrap; }
     .msg-reply.ai-reply { border: 0.5px solid var(--green); background: #E1F5EE; }
     .badge-pending { background: var(--amber-bg); color: var(--amber); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-generated { background: #EEEDFE; color: #3C3489; font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-ai { background: #E1F5EE; color: var(--green); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-test { background: var(--bg2); color: var(--text2); font-size: 10px; padding: 2px 8px; border-radius: 20px; border: 0.5px solid var(--border); }
-
+    .badge-ai     { background: #E1F5EE; color: var(--green); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
+    .badge-task   { background: #FFF3CD; color: #856404; font-size: 10px; padding: 2px 8px; border-radius: 20px; }
+    .badge-urgent { background: #fdecea; color: #E24B4A; font-size: 10px; padding: 2px 8px; border-radius: 20px; }
+    .badge-test   { background: var(--bg2); color: var(--text2); font-size: 10px; padding: 2px 8px; border-radius: 20px; border: 0.5px solid var(--border); }
+    .reply-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 6px; }
+    .subtask-item { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; margin-bottom: 6px; }
+    .subtask-item strong { display: block; margin-bottom: 4px; }
+    .sim-input { width: 100%; min-height: 80px; resize: vertical; }
+    .no-data { text-align: center; padding: 30px; color: var(--text2); font-size: 13px; }
     .conv-card { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
     .conv-card:hover { background: var(--bg2); }
     .conv-question { font-size: 12px; color: var(--text2); margin-bottom: 6px; line-height: 1.5; }
     .conv-question strong { color: var(--text); }
     .conv-answer { font-size: 12px; color: var(--text); line-height: 1.5; padding-top: 8px; border-top: 0.5px solid var(--border); }
     .conv-meta { font-size: 10px; color: var(--text2); margin-top: 6px; }
-    .no-data { text-align: center; padding: 30px; color: var(--text2); font-size: 13px; }
-
-    .cron-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-    .cron-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
-    .cron-dot.active { background: var(--green); }
-
-    .reply-section { margin-top: 10px; }
-    .reply-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
   </style>
 </head>
 <body>
-
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
-
   <div class="main">
     <div class="topbar">
       <div>
         <div class="page-title">Agent AI — Mode Test</div>
-        <div class="page-sub">Simulateur, messages réels et historique des conversations</div>
+        <div class="page-sub">Simulateur et messages réels</div>
       </div>
     </div>
-
     <div class="content">
-
       <div class="property-select">
         <label class="form-label" style="margin:0">Bien :</label>
         <select class="form-input" id="property-select" style="width:auto;min-width:200px">
@@ -81,25 +72,19 @@
         <div class="section-card">
           <div class="section-title">Simuler un message voyageur</div>
           <p style="font-size:12px;color:var(--text2);margin-bottom:12px">
-            Écrivez un faux message comme si vous étiez un voyageur. L'agent répondra en utilisant votre base de connaissance.
+            Le message est traité exactement comme en production — classification intelligente, réponse automatique ou tâche To-do.
           </p>
           <div style="display:flex;flex-direction:column;gap:8px">
-            <input class="form-input" id="sim-guest-name" placeholder="Nom du voyageur (ex: Marie D.)" style="width:200px">
+            <input class="form-input" id="sim-guest-name" placeholder="Nom du voyageur (ex: Marie D.)" style="width:220px">
             <textarea class="form-input sim-input" id="sim-message" placeholder="Ex: Bonjour, à quelle heure puis-je arriver ? Y a-t-il un parking ?"></textarea>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
-            <button class="btn btn-primary" id="btn-simulate">✨ Générer la réponse</button>
-            <button class="btn" id="btn-clear-sim">Effacer</button>
+            <button class="btn btn-primary" id="btn-simulate">▶ Simuler</button>
+            <button class="btn" id="btn-clear-sim">✕ Effacer</button>
             <span id="sim-status" style="font-size:12px;color:var(--text2)"></span>
           </div>
-          <div id="sim-output" style="display:none">
-            <div class="sim-output" id="sim-reply"></div>
-            <div class="sim-meta" id="sim-meta"></div>
-            <div style="display:flex;gap:8px;margin-top:10px">
-              <button class="btn" id="btn-save-sim">💾 Sauvegarder dans l'historique</button>
-            </div>
-          </div>
         </div>
+        <div id="sim-result" style="display:none"></div>
       </div>
 
       <!-- TAB 2 : Messages réels -->
@@ -127,7 +112,6 @@
           </div>
         </div>
       </div>
-
     </div>
   </div>
 </div>
@@ -137,21 +121,16 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { logger } from '/shared/logger.js'
 
   initErrorHandler()
 
-  let currentSession = null
+  let session = null
   let currentPropertyId = null
   let properties = []
-  let lastSimReply = null
-  let lastSimMessage = null
-  let lastSimGuest = null
 
   async function init() {
-    currentSession = await requireAuth()
-    if (!currentSession) return
-
+    session = await requireAuth()
+    if (!session) return
     await renderSidebar('agent-ai-test')
     await loadProperties()
 
@@ -170,14 +149,12 @@
     document.getElementById('btn-clear-sim').addEventListener('click', () => {
       document.getElementById('sim-message').value = ''
       document.getElementById('sim-guest-name').value = ''
-      document.getElementById('sim-output').style.display = 'none'
+      document.getElementById('sim-result').style.display = 'none'
       document.getElementById('sim-status').textContent = ''
     })
-    document.getElementById('btn-save-sim').addEventListener('click', saveSimulation)
     document.getElementById('btn-refresh-real').addEventListener('click', loadRealMessages)
     document.getElementById('btn-refresh-history').addEventListener('click', loadHistory)
-
-    document.getElementById('property-select').addEventListener('change', (e) => {
+    document.getElementById('property-select').addEventListener('change', e => {
       currentPropertyId = e.target.value
       if (currentPropertyId) { loadRealMessages(); loadHistory() }
     })
@@ -186,203 +163,222 @@
   async function loadProperties() {
     const res = await fetch('/api/beds24', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
       body: JSON.stringify({ action: 'getProperties' })
     })
     const data = await res.json()
     properties = data.properties || []
-
     const select = document.getElementById('property-select')
     select.innerHTML = '<option value="">Choisir un bien...</option>' +
       properties.map(p => `<option value="${p.id}">${p.name}</option>`).join('')
-
     if (properties.length === 1) {
       select.value = properties[0].id
       currentPropertyId = properties[0].id
-      loadRealMessages()
-      loadHistory()
+      loadRealMessages(); loadHistory()
     }
   }
 
   async function getKnowledge() {
     if (!currentPropertyId) return ''
-    const { data } = await supabase
-      .from('knowledge')
-      .select('*')
-      .eq('user_id', currentSession.user.id)
+    const { data } = await supabase.from('knowledge').select('*')
+      .eq('user_id', session.user.id)
       .eq('property_id', String(currentPropertyId))
-
-    if (!data || data.length === 0) return ''
-    const fixed = data.filter(d => d.type === 'fixed')
-    const faqs  = data.filter(d => d.type === 'faq')
-    let kb = 'Informations du logement :\n'
-    fixed.forEach(f => { if (f.value) kb += `- ${f.key} : ${f.value}\n` })
-    if (faqs.length > 0) {
-      kb += '\nFAQ :\n'
-      faqs.forEach(f => { kb += `Q: ${f.key}\nR: ${f.value}\n\n` })
-    }
+    if (!data?.length) return ''
+    let kb = 'FAQ :\n'
+    data.filter(d => d.type === 'faq').forEach(f => { kb += `Q: ${f.key}\nR: ${f.value}\n\n` })
     return kb
   }
 
+  // ── Simulateur avec moteur de classification ──────────────────────────────
   async function simulate() {
-    const message    = document.getElementById('sim-message').value.trim()
-    const guestName  = document.getElementById('sim-guest-name').value.trim() || 'Voyageur'
+    const message   = document.getElementById('sim-message').value.trim()
+    const guestName = document.getElementById('sim-guest-name').value.trim() || 'Voyageur Test'
     if (!message) return alert('Écrivez un message')
     if (!currentPropertyId) return alert('Sélectionnez un bien')
 
     const btn = document.getElementById('btn-simulate')
-    btn.disabled = true; btn.textContent = '⏳ Génération...'
+    btn.disabled = true; btn.textContent = '⏳ Classification...'
     document.getElementById('sim-status').textContent = ''
-    document.getElementById('sim-output').style.display = 'none'
+    document.getElementById('sim-result').style.display = 'none'
 
-    const property  = properties.find(p => p.id == currentPropertyId)
+    const property  = properties.find(p => String(p.id) === String(currentPropertyId))
     const knowledge = await getKnowledge()
 
-    const systemPrompt = `Tu es un assistant de conciergerie pour la location courte durée.
-Tu réponds aux messages des voyageurs au nom de l'hôte, de façon chaleureuse et professionnelle.
-Bien : ${property?.name || 'appartement'}
-Adresse : ${property?.address || ''} ${property?.city || ''}
-${knowledge ? '\n' + knowledge : ''}
-Réponds en français. Sois concis (2-4 phrases max). Si tu ne sais pas, dis que tu vas vérifier.`
+    const prompt = `Tu es un assistant de conciergerie pour location courte durée.
+Analyse ce message d'un voyageur et classe-le PRÉCISÉMENT.
 
-    const res = await fetch('/api/grok', {
+BASE DE CONNAISSANCE :
+${knowledge || 'Aucune information disponible'}
+
+BIEN : ${property?.name || ''}
+
+MESSAGE DU VOYAGEUR (${guestName}) :
+"${message}"
+
+RÈGLES :
+1. "sympathy" : remerciement, bonjour, au revoir, confirmation simple → auto_reply chaleureuse
+2. "info_known" : question dont la réponse EST dans la base → auto_reply avec l'info
+3. "info_unknown" : question dont la réponse N'EST PAS dans la base → sub_tasks
+4. "intervention" : problème, incident, demande d'action concrète → sub_tasks
+
+Réponds UNIQUEMENT en JSON :
+{"type":"...","reason":"...","auto_reply":"... ou null","sub_tasks":[{"question":"...","summary":"...","suggested_reply":"..."}]}`
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
-      body: JSON.stringify({ systemPrompt, messages: [{ role: 'user', content: `Message de ${guestName} : "${message}"` }] })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }]
+      })
     })
-    const data = await res.json()
-    btn.disabled = false; btn.textContent = '✨ Générer la réponse'
+    const aiData = await res.json()
+    btn.disabled = false; btn.textContent = '▶ Simuler'
 
-    if (data.reply) {
-      lastSimReply = data.reply; lastSimMessage = message; lastSimGuest = guestName
-      document.getElementById('sim-reply').textContent = data.reply
-      document.getElementById('sim-meta').textContent = `Réponse générée pour ${guestName} • Base de connaissance : ${knowledge ? 'utilisée' : 'vide'}`
-      document.getElementById('sim-output').style.display = 'block'
-      document.getElementById('sim-status').textContent = '✅ Réponse générée'
-    } else {
-      document.getElementById('sim-status').textContent = '❌ Erreur génération'
+    let c
+    try {
+      const text = aiData.content?.[0]?.text || ''
+      c = JSON.parse(text.replace(/```json|```/g, '').trim())
+    } catch {
+      document.getElementById('sim-status').textContent = '❌ Erreur classification'
+      return
     }
+
+    renderSimResult(message, guestName, c)
+    document.getElementById('sim-status').textContent = '✅ Simulation terminée'
   }
 
-  async function saveSimulation() {
-    if (!lastSimReply) return
-    const { error } = await supabase.from('conversations').insert({
-      user_id: currentSession.user.id, property_id: String(currentPropertyId),
-      guest_name: lastSimGuest || 'Simulation', guest_message: lastSimMessage,
-      agent_reply: lastSimReply, book_id: 'SIMULATION'
-    })
-    if (error) { alert('Erreur sauvegarde : ' + error.message) } else {
-      document.getElementById('sim-status').textContent = '✅ Sauvegardé'
-      document.getElementById('btn-save-sim').disabled = true
-      document.getElementById('btn-save-sim').textContent = '✓ Sauvegardé'
+  function renderSimResult(message, guestName, c) {
+    const types = {
+      sympathy:     { label: '💬 Sympathie → réponse auto', badge: 'badge-ai' },
+      info_known:   { label: '✅ Info connue → réponse auto', badge: 'badge-ai' },
+      info_unknown: { label: '❓ Info manquante → To-do', badge: 'badge-task' },
+      intervention: { label: '🚨 Intervention → To-do', badge: 'badge-urgent' }
     }
+    const t = types[c.type] || { label: c.type, badge: 'badge-pending' }
+
+    let bodyHtml = ''
+    if (c.auto_reply) {
+      bodyHtml = `
+        <div class="reply-label">🤖 Réponse automatique</div>
+        <div class="msg-reply ai-reply">${escHtml(c.auto_reply)}</div>`
+    } else if (c.sub_tasks?.length) {
+      bodyHtml = `
+        <div class="reply-label">📋 Tâches To-do</div>
+        ${c.sub_tasks.map((st, i) => `
+          <div class="subtask-item">
+            <strong>${i+1}. ${escHtml(st.question || st.summary || '')}</strong>
+            <span style="color:var(--text2)">${st.suggested_reply ? escHtml(st.suggested_reply) : '<em>Aucune suggestion</em>'}</span>
+          </div>`).join('')}`
+    }
+
+    document.getElementById('sim-result').innerHTML = `
+      <div class="msg-card ${c.type}">
+        <div class="msg-card-header">
+          <div>
+            <div class="msg-card-guest">👤 ${escHtml(guestName)}</div>
+            <div class="msg-card-meta">${escHtml(c.reason || '')}</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="${t.badge}">${t.label}</span>
+            <button onclick="document.getElementById('sim-result').style.display='none';document.getElementById('sim-status').textContent=''"
+              style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:18px;line-height:1">×</button>
+          </div>
+        </div>
+        <div class="msg-card-body">
+          <div class="reply-label">💬 Message simulé</div>
+          <div class="msg-guest">${escHtml(message)}</div>
+          ${bodyHtml}
+        </div>
+      </div>`
+    document.getElementById('sim-result').style.display = 'block'
   }
 
+  // ── Messages réels ────────────────────────────────────────────────────────
   async function loadRealMessages() {
     const container = document.getElementById('real-messages-container')
     if (!currentPropertyId) return
     container.innerHTML = '<div class="no-data">Chargement...</div>'
 
-    // Charger messages Beds24 et réponses AI en parallèle
     const [msgRes, convRes] = await Promise.all([
       fetch('/api/beds24', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ action: 'getMessages', propertyId: currentPropertyId })
       }),
-      supabase.from('conversations')
-        .select('book_id, agent_reply, created_at')
-        .eq('user_id', currentSession.user.id)
+      supabase.from('conversations').select('book_id, agent_reply')
+        .eq('user_id', session.user.id)
         .eq('property_id', String(currentPropertyId))
         .order('created_at', { ascending: false })
     ])
 
-    const msgData  = await msgRes.json()
-    const messages = msgData.messages || []
+    const messages = (await msgRes.json()).messages || []
+    const convMap  = {}
+    ;(convRes.data || []).forEach(c => { if (!convMap[c.book_id]) convMap[c.book_id] = c.agent_reply })
 
-    // Map bookId → réponse AI
-    const convMap = {}
-    ;(convRes.data || []).forEach(c => {
-      if (!convMap[c.book_id]) convMap[c.book_id] = c.agent_reply
-    })
-
-    if (messages.length === 0) {
-      container.innerHTML = '<div class="no-data">✓ Aucun message en attente sur Beds24</div>'
+    if (!messages.length) {
+      container.innerHTML = '<div class="no-data">✓ Aucun message en attente</div>'
       return
     }
 
     container.innerHTML = messages.map(msg => {
-      const guestMsg   = msg.guestMessage || msg.message || '(vide)'
-      const guestName  = msg.guestFirstName ? `${msg.guestFirstName} ${msg.guestName || ''}` : 'Voyageur'
-      const bookId     = String(msg.bookId || msg.id)
-      const aiReply    = convMap[bookId]
-
+      const guestMsg  = msg.guestMessage || msg.message || '(vide)'
+      const guestName = msg.guestFirstName ? `${msg.guestFirstName} ${msg.guestName || ''}` : 'Voyageur'
+      const bookId    = String(msg.bookId || msg.id)
+      const aiReply   = convMap[bookId]
       return `
         <div class="msg-card">
           <div class="msg-card-header">
             <div>
-              <div class="msg-card-guest">${guestName}</div>
+              <div class="msg-card-guest">${escHtml(guestName)}</div>
               <div class="msg-card-meta">Réservation #${bookId} · ${msg.firstNight || ''} → ${msg.lastNight || ''}</div>
             </div>
-            <span class="${aiReply ? 'badge-ai' : 'badge-pending'}">
-              ${aiReply ? '🤖 Répondu par AI' : '⏳ En attente'}
-            </span>
+            <span class="${aiReply ? 'badge-ai' : 'badge-pending'}">${aiReply ? '🤖 Répondu par AI' : '⏳ En attente'}</span>
           </div>
           <div class="msg-card-body">
             <div class="reply-label">💬 Message voyageur</div>
-            <div class="msg-guest">${guestMsg}</div>
-
-            <div class="reply-section">
-              <div class="reply-label">🤖 Réponse AI</div>
-              <div class="msg-reply ${aiReply ? 'ai-reply' : ''}">
-                ${aiReply || '<span style="color:var(--text2);font-style:italic">Pas encore traitée par le cron — le prochain passage générera une réponse automatiquement</span>'}
-              </div>
+            <div class="msg-guest">${escHtml(guestMsg)}</div>
+            <div class="reply-label">🤖 Réponse AI</div>
+            <div class="msg-reply ${aiReply ? 'ai-reply' : ''}">
+              ${aiReply ? escHtml(aiReply) : '<span style="color:var(--text2);font-style:italic">Pas encore traitée par le cron</span>'}
             </div>
           </div>
-        </div>
-      `
+        </div>`
     }).join('')
   }
 
+  // ── Historique ────────────────────────────────────────────────────────────
   async function loadHistory() {
     const container = document.getElementById('history-container')
     if (!currentPropertyId) return
     container.innerHTML = '<div class="no-data">Chargement...</div>'
 
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', currentSession.user.id)
+    const { data } = await supabase.from('conversations').select('*')
+      .eq('user_id', session.user.id)
       .eq('property_id', String(currentPropertyId))
       .order('created_at', { ascending: false })
       .limit(30)
 
-    if (error || !data || data.length === 0) {
-      container.innerHTML = '<div class="no-data">Aucune conversation sauvegardée pour ce bien</div>'
+    if (!data?.length) {
+      container.innerHTML = '<div class="no-data">Aucune conversation sauvegardée</div>'
       return
     }
 
     container.innerHTML = data.map(c => {
-      const date = new Date(c.created_at).toLocaleDateString('fr-FR', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      })
-      const isSimulation = c.book_id === 'SIMULATION'
+      const date = new Date(c.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
       return `
         <div class="conv-card">
-          <div class="conv-question">
-            <strong>💬 ${c.guest_name || 'Voyageur'}${isSimulation ? ' <span style="color:var(--text2)">(simulation)</span>' : ''} :</strong><br>
-            ${c.guest_message}
-          </div>
-          <div class="conv-answer">🤖 ${c.agent_reply || '—'}</div>
-          <div class="conv-meta">${date}${!isSimulation ? ` · Réservation #${c.book_id}` : ''}</div>
-        </div>
-      `
+          <div class="conv-question"><strong>💬 ${escHtml(c.guest_name || 'Voyageur')} :</strong><br>${escHtml(c.guest_message)}</div>
+          <div class="conv-answer">🤖 ${escHtml(c.agent_reply || '—')}</div>
+          <div class="conv-meta">${date} · Réservation #${c.book_id}</div>
+        </div>`
     }).join('')
   }
 
+  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
   init()
 </script>
-
 </body>
 </html>
