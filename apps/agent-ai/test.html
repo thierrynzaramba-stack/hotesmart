@@ -224,12 +224,11 @@ RÈGLES :
 Réponds UNIQUEMENT en JSON :
 {"type":"...","reason":"...","auto_reply":"... ou null","sub_tasks":[{"question":"...","summary":"...","suggested_reply":"..."}]}`
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('/api/grok', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 800,
+        systemPrompt: 'Réponds UNIQUEMENT en JSON valide sans markdown.',
         messages: [{ role: 'user', content: prompt }]
       })
     })
@@ -238,7 +237,7 @@ Réponds UNIQUEMENT en JSON :
 
     let c
     try {
-      const text = aiData.content?.[0]?.text || ''
+      const text = aiData.reply || ''
       c = JSON.parse(text.replace(/```json|```/g, '').trim())
     } catch {
       document.getElementById('sim-status').textContent = '❌ Erreur classification'
