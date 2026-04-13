@@ -6,122 +6,67 @@
   <title>HôteSmart — Base de connaissance</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
-    .faq-table { width: 100%; border-collapse: collapse; }
-    .faq-table th { font-size: 11px; font-weight: 500; color: var(--text2); padding: 8px 12px; border-bottom: 0.5px solid var(--border); text-align: left; }
-    .faq-table td { padding: 10px 12px; border-bottom: 0.5px solid var(--border); font-size: 13px; vertical-align: top; }
-    .faq-table tr:last-child td { border-bottom: none; }
-    .faq-table td input, .faq-table td textarea { width: 100%; border: none; background: transparent; font-size: 13px; color: var(--text); resize: none; font-family: inherit; }
-    .faq-table td textarea { min-height: 40px; }
-    .faq-table tr:hover { background: var(--bg2); }
-    .btn-add-row { margin-top: 12px; }
-    .btn-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0 4px; }
-    .btn-delete:hover { color: #E24B4A; }
     .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .fixed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .fixed-field { display: flex; flex-direction: column; gap: 4px; }
-    .fixed-label { font-size: 11px; color: var(--text2); font-weight: 500; }
+    .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
+
+    .faq-list { display: flex; flex-direction: column; gap: 8px; }
+    .faq-row { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; }
+    .faq-row:hover { border-color: var(--green); }
+    .faq-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .faq-input-key { font-size: 13px; font-weight: 500; border: none; background: transparent; color: var(--text); width: 100%; font-family: inherit; border-bottom: 0.5px solid var(--border); padding-bottom: 6px; }
+    .faq-input-key:focus { outline: none; border-bottom-color: var(--green); }
+    .faq-input-value { font-size: 12px; color: var(--text2); border: none; background: transparent; width: 100%; font-family: inherit; resize: none; min-height: 50px; line-height: 1.6; }
+    .faq-input-value:focus { outline: none; color: var(--text); }
+    .faq-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; padding: 0; flex-shrink: 0; line-height: 1; margin-top: 2px; }
+    .faq-delete:hover { color: #E24B4A; }
+    .badge-beds24 { background: #E1F5EE; color: var(--green); font-size: 10px; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; margin-top: 4px; }
+
     .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; }
     .save-status { font-size: 12px; color: var(--text2); }
-    .badge-auto { background: #EEEDFE; color: #3C3489; font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: 6px; }
-    .import-notice { background: #E1F5EE; border: 0.5px solid var(--green); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; color: #1a6644; margin-bottom: 16px; display: none; }
+    .notice { background: #E1F5EE; border: 0.5px solid var(--green); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; color: #1a6644; margin-bottom: 16px; display: none; }
+    .empty-state { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .count-badge { font-size: 11px; color: var(--text2); background: var(--bg2); border: 0.5px solid var(--border); padding: 2px 8px; border-radius: 20px; }
   </style>
 </head>
 <body>
 
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
-
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">Base de connaissance</div>
-        <div class="page-sub">Informations utilisées par l'Agent AI pour répondre</div>
+        <div class="page-title">📚 Base de connaissance</div>
+        <div class="page-sub" id="topStatus">Informations utilisées par l'Agent AI</div>
       </div>
     </div>
 
     <div class="content">
-
       <div class="property-select">
         <label class="form-label" style="margin:0">Bien :</label>
         <select class="form-input" id="property-select" style="width:auto;min-width:200px">
           <option value="">Chargement...</option>
         </select>
-        <button class="btn" id="btn-import-beds24" style="display:none">⬇️ Importer depuis Beds24</button>
+        <button class="btn" id="btn-import" style="display:none">⬇️ Importer depuis Beds24</button>
+        <button class="btn" id="btn-add" style="display:none">+ Ajouter</button>
       </div>
 
-      <div class="import-notice" id="import-notice"></div>
+      <div class="notice" id="notice"></div>
 
-      <!-- Infos fixes -->
       <div class="section-card">
-        <div class="section-title">Infos pratiques</div>
-        <div class="fixed-grid" id="fixed-fields">
-          <div class="fixed-field">
-            <label class="fixed-label">Code WiFi (réseau)</label>
-            <input class="form-input" id="wifi-name" placeholder="ex: HosteSmart_5G">
-          </div>
-          <div class="fixed-field">
-            <label class="fixed-label">Code WiFi (mot de passe)</label>
-            <input class="form-input" id="wifi-pass" placeholder="ex: monmotdepasse123">
-          </div>
-          <div class="fixed-field">
-            <label class="fixed-label">Code d'entrée / digicode</label>
-            <input class="form-input" id="entry-code" placeholder="ex: 1234A">
-          </div>
-          <div class="fixed-field">
-            <label class="fixed-label">Parking</label>
-            <input class="form-input" id="parking" placeholder="ex: Gratuit rue de l'Horloge, 50m">
-          </div>
-          <div class="fixed-field">
-            <label class="fixed-label">Transports proches</label>
-            <input class="form-input" id="transport" placeholder="ex: Bus ligne 3, arrêt Mairie">
-          </div>
-          <div class="fixed-field">
-            <label class="fixed-label">Contact urgence</label>
-            <input class="form-input" id="emergency" placeholder="ex: 06 XX XX XX XX">
-          </div>
-          <div class="fixed-field" style="grid-column: span 2">
-            <label class="fixed-label">Règles de la maison</label>
-            <textarea class="form-input" id="rules" rows="3" placeholder="ex: Pas de fête, silence après 22h, animaux acceptés sur demande..."></textarea>
-          </div>
-          <div class="fixed-field" style="grid-column: span 2">
-            <label class="fixed-label">Restaurants & activités recommandés</label>
-            <textarea class="form-input" id="recommendations" rows="3" placeholder="ex: Restaurant Le Bigourdan (5 min à pied), Thermes de Bagnères..."></textarea>
-          </div>
+        <div class="section-header">
+          <div class="section-title" style="margin:0">FAQ</div>
+          <span class="count-badge" id="count-badge">0 entrées</span>
         </div>
-      </div>
-
-      <!-- FAQ dynamique -->
-      <div class="section-card">
-        <div class="section-title">
-          FAQ dynamique
-          <span class="badge-auto" id="auto-badge" style="display:none">✨ Suggestions auto disponibles</span>
+        <div class="faq-list" id="faq-list">
+          <div class="empty-state">Sélectionnez un bien pour charger la base de connaissance</div>
         </div>
-        <table class="faq-table">
-          <thead>
-            <tr>
-              <th style="width:35%">Sujet / Question</th>
-              <th>Réponse de l'agent</th>
-              <th style="width:40px"></th>
-            </tr>
-          </thead>
-          <tbody id="faq-body">
-            <tr>
-              <td colspan="3" style="text-align:center;color:var(--text2);font-size:12px">Sélectionnez un bien pour charger la FAQ</td>
-            </tr>
-          </tbody>
-        </table>
-        <button class="btn btn-add-row" id="btn-add-row">+ Ajouter une ligne</button>
       </div>
 
       <div class="save-bar">
-        <span class="save-status" id="save-status">Non sauvegardé</span>
-        <div style="display:flex;gap:8px">
-          <a class="btn" href="/apps/agent-ai/analyze.html">✨ Analyser l'historique</a>
-          <button class="btn btn-primary" id="btn-save">Sauvegarder</button>
-        </div>
+        <span class="save-status" id="save-status">—</span>
+        <button class="btn btn-primary" id="btn-save">Sauvegarder</button>
       </div>
-
     </div>
   </div>
 </div>
@@ -131,37 +76,36 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { logger } from '/shared/logger.js'
 
   initErrorHandler()
 
-  let currentSession = null
-  let currentPropertyId = null
+  let session = null
+  let currentPropId = null
   let properties = []
 
   async function init() {
-    currentSession = await requireAuth()
-    if (!currentSession) return
-
+    session = await requireAuth()
+    if (!session) return
     await renderSidebar('agent-ai-knowledge')
     await loadProperties()
 
-    document.getElementById('btn-add-row').addEventListener('click', () => addFaqRow())
-    document.getElementById('btn-save').addEventListener('click', save)
-    document.getElementById('btn-import-beds24').addEventListener('click', importFromBeds24)
-    document.getElementById('property-select').addEventListener('change', (e) => {
-      currentPropertyId = e.target.value
-      if (currentPropertyId) {
-        document.getElementById('btn-import-beds24').style.display = 'inline-flex'
-        loadKnowledge()
+    document.getElementById('property-select').addEventListener('change', e => {
+      currentPropId = e.target.value
+      if (currentPropId) {
+        document.getElementById('btn-import').style.display = 'inline-flex'
+        document.getElementById('btn-add').style.display = 'inline-flex'
+        loadFaq()
       }
     })
+    document.getElementById('btn-import').addEventListener('click', importFromBeds24)
+    document.getElementById('btn-add').addEventListener('click', () => addRow('', ''))
+    document.getElementById('btn-save').addEventListener('click', save)
   }
 
   async function loadProperties() {
     const res = await fetch('/api/beds24', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
       body: JSON.stringify({ action: 'getProperties' })
     })
     const data = await res.json()
@@ -173,181 +117,197 @@
 
     if (properties.length === 1) {
       select.value = properties[0].id
-      currentPropertyId = properties[0].id
-      document.getElementById('btn-import-beds24').style.display = 'inline-flex'
-      loadKnowledge()
+      currentPropId = properties[0].id
+      document.getElementById('btn-import').style.display = 'inline-flex'
+      document.getElementById('btn-add').style.display = 'inline-flex'
+      loadFaq()
     }
   }
 
-  async function loadKnowledge() {
+  async function loadFaq() {
+    const list = document.getElementById('faq-list')
+    list.innerHTML = '<div class="empty-state">Chargement…</div>'
+
     const { data, error } = await supabase
       .from('knowledge')
       .select('*')
-      .eq('user_id', currentSession.user.id)
-      .eq('property_id', currentPropertyId)
+      .eq('user_id', session.user.id)
+      .eq('property_id', String(currentPropId))
       .order('created_at')
 
-    if (error) { logger.error('Knowledge', 'Erreur chargement', error); return }
+    if (error) { list.innerHTML = `<div class="empty-state">❌ ${error.message}</div>`; return }
 
-    const fixed = data.filter(d => d.type === 'fixed')
-    const faqs  = data.filter(d => d.type === 'faq')
+    list.innerHTML = ''
+    const faqs = data || []
 
-    const map = {
-      'wifi-name': 'wifi_name', 'wifi-pass': 'wifi_pass',
-      'entry-code': 'entry_code', 'parking': 'parking',
-      'transport': 'transport', 'emergency': 'emergency',
-      'rules': 'rules', 'recommendations': 'recommendations'
-    }
-    fixed.forEach(row => {
-      const id = Object.keys(map).find(k => map[k] === row.key)
-      if (id) document.getElementById(id).value = row.value || ''
-    })
-
-    const tbody = document.getElementById('faq-body')
-    tbody.innerHTML = ''
     if (faqs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text2);font-size:12px">Aucune FAQ — ajoutez une ligne</td></tr>'
+      list.innerHTML = '<div class="empty-state">Aucune entrée — cliquez sur "⬇️ Importer depuis Beds24" ou "+ Ajouter"</div>'
     } else {
-      faqs.forEach(row => addFaqRow(row))
+      faqs.forEach(row => addRow(row.key, row.value))
     }
 
-    document.getElementById('save-status').textContent = 'Chargé'
+    updateCount()
+    const propName = properties.find(p => String(p.id) === String(currentPropId))?.name || ''
+    document.getElementById('save-status').textContent = `${faqs.length} entrée(s) chargée(s)`
+    document.getElementById('topStatus').textContent = `${faqs.length} entrée(s) · ${propName}`
+  }
+
+  function addRow(key = '', value = '', fromBeds24 = false) {
+    const list = document.getElementById('faq-list')
+    const empty = list.querySelector('.empty-state')
+    if (empty) empty.remove()
+
+    const div = document.createElement('div')
+    div.className = 'faq-row'
+    div.innerHTML = `
+      <div class="faq-fields">
+        <input class="faq-input-key" type="text" placeholder="Sujet ou question (ex: Heure d'arrivée)" value="${escAttr(key)}">
+        <textarea class="faq-input-value" placeholder="Réponse de l'agent AI…" rows="2">${escHtml(value)}</textarea>
+      </div>
+      ${fromBeds24 ? '<span class="badge-beds24">Beds24</span>' : ''}
+      <button class="faq-delete" title="Supprimer">×</button>
+    `
+    div.querySelector('.faq-delete').addEventListener('click', () => {
+      div.remove(); updateCount(); markUnsaved()
+    })
+    div.querySelector('.faq-input-key').addEventListener('input', markUnsaved)
+    div.querySelector('.faq-input-value').addEventListener('input', markUnsaved)
+    list.appendChild(div)
+    updateCount()
   }
 
   async function importFromBeds24() {
-    const property = properties.find(p => String(p.id) === String(currentPropertyId))
+    const property = properties.find(p => String(p.id) === String(currentPropId))
     if (!property) return
 
-    const btn = document.getElementById('btn-import-beds24')
+    const btn = document.getElementById('btn-import')
     btn.disabled = true; btn.textContent = '⏳ Import...'
 
-    let imported = []
+    const existing = [...document.querySelectorAll('.faq-input-key')].map(i => i.value.toLowerCase())
 
-    // Remplir les champs fixes si vides
-    const emergency = document.getElementById('emergency')
-    if (!emergency.value && property.phone) {
-      emergency.value = property.phone
-      imported.push('Contact urgence')
-    }
+    const faqs = []
 
-    const rules = document.getElementById('rules')
-    if (!rules.value) {
-      const parts = []
-      if (property.checkInStart) parts.push(`Arrivée à partir de ${property.checkInStart}`)
-      if (property.checkOutEnd)   parts.push(`Départ avant ${property.checkOutEnd}`)
-      if (parts.length) { rules.value = parts.join('\n'); imported.push('Règles (check-in/out)') }
-    }
-
-    // FAQ auto depuis Beds24
-    const autoFaqs = []
-
-    if (property.checkInStart && property.checkOutEnd) {
-      autoFaqs.push({
-        key: 'Heure d\'arrivée et départ',
-        value: `L'arrivée se fait à partir de ${property.checkInStart}. Le départ est avant ${property.checkOutEnd}.`
-      })
-    }
-
+    // Infos de base
     if (property.address && property.city) {
-      autoFaqs.push({
-        key: 'Adresse du logement',
-        value: `${property.address}, ${property.city} ${property.postcode || ''}`.trim()
-      })
+      faqs.push({ key: 'Adresse du logement', value: `${property.address}, ${property.city} ${property.postcode || ''}`.trim() })
+    }
+    if (property.checkInStart) {
+      faqs.push({ key: 'Heure d\'arrivée', value: `L'arrivée se fait à partir de ${property.checkInStart}${property.checkInEnd && property.checkInEnd !== '00:00' ? ` et au plus tard à ${property.checkInEnd}` : ''}.` })
+    }
+    if (property.checkOutEnd) {
+      faqs.push({ key: 'Heure de départ', value: `Le départ doit se faire avant ${property.checkOutEnd}.` })
+    }
+    if (property.phone || property.contactLastName) {
+      const tel1 = property.phone || ''
+      const tel2 = property.contactLastName?.startsWith('0') ? property.contactLastName : ''
+      const prenom = property.contactFirstName ? `${property.contactFirstName} : ` : ''
+      faqs.push({ key: 'Contact hôte', value: `${prenom}${[tel1, tel2].filter(Boolean).join(' / ')}` })
+    }
+    if (property.email) {
+      faqs.push({ key: 'Email hôte', value: property.email })
     }
 
-    if (property.phone) {
-      autoFaqs.push({
-        key: 'Contact hôte',
-        value: `Vous pouvez nous contacter au ${property.phone}${property.contactFirstName ? ` (${property.contactFirstName})` : ''}.`
-      })
+    // Type de logement
+    const types = { townhome: 'maison de ville', apartment: 'appartement', house: 'maison', villa: 'villa' }
+    if (property.propertyType && types[property.propertyType]) {
+      faqs.push({ key: 'Type de logement', value: `Vous séjournez dans une ${types[property.propertyType]} à ${property.city}.` })
     }
 
-    if (property.propertyType) {
-      const types = { townhome: 'maison de ville', apartment: 'appartement', house: 'maison', villa: 'villa' }
-      autoFaqs.push({
-        key: 'Type de logement',
-        value: `Vous séjournez dans ${types[property.propertyType] || property.propertyType} situé à ${property.city}.`
-      })
+    // Équipements
+    const features = (property.featureCodes || []).flat()
+    const equipMap = {
+      'WIFI':             'WiFi disponible dans le logement.',
+      'PARKING_POSSIBLE': 'Parking possible à proximité.',
+      'WASHER':           'Lave-linge disponible.',
+      'DRYER':            'Sèche-linge disponible.',
+      'DISHWASHER':       'Lave-vaisselle disponible.',
+      'KITCHEN':          'Cuisine équipée disponible.',
+      'COFFEE_MAKER':     'Cafetière disponible.',
+      'IRON_BOARD':       'Fer à repasser et planche disponibles.',
+      'HAIR_DRYER':       'Sèche-cheveux disponible.',
+      'LINENS':           'Linge de lit fourni.',
+      'TOWELS':           'Serviettes de bain fournies.',
+      'TOILETRIES':       'Articles de toilette fournis.',
+      'TV':               'Télévision disponible.',
+      'GAME_ROOM':        'Salle de jeux disponible (billard, babyfoot...).',
+      'FOOSBALL':         'Babyfoot disponible.',
+      'PRIVATE_ENTRANCE': 'Entrée privée.',
+      'HEATING':          'Chauffage disponible.',
+      'WOOD_STOVE':       'Poêle à bois disponible.',
+    }
+    const equipList = features.filter(f => equipMap[f]).map(f => equipMap[f])
+    if (equipList.length > 0) {
+      faqs.push({ key: 'Équipements disponibles', value: equipList.join('\n') })
     }
 
-    // Ajouter les FAQ qui n'existent pas déjà
-    const tbody = document.getElementById('faq-body')
-    const existingKeys = [...tbody.querySelectorAll('input[type=text]')].map(i => i.value.toLowerCase())
+    // Règles
+    const regles = []
+    if (!features.includes('SMOKING_ALLOWED')) regles.push('Interdiction de fumer dans le logement.')
+    if (features.includes('PETS_CONSIDERED')) regles.push('Animaux acceptés sur demande — contactez-nous avant réservation.')
+    else regles.push('Les animaux de compagnie ne sont pas autorisés.')
+    if (features.includes('CHILDREN_WELCOME')) regles.push('Les enfants sont les bienvenus.')
+    if (regles.length > 0) {
+      faqs.push({ key: 'Règles du logement', value: regles.join('\n') })
+    }
 
-    autoFaqs.forEach(faq => {
-      const alreadyExists = existingKeys.some(k => k.includes(faq.key.toLowerCase().substring(0, 10)))
-      if (!alreadyExists) {
-        addFaqRow({ key: faq.key, value: faq.value })
-        imported.push(faq.key)
-      }
+    // Ajouter uniquement les nouvelles entrées
+    let added = 0
+    faqs.forEach(faq => {
+      const alreadyExists = existing.some(k => k.includes(faq.key.toLowerCase().substring(0, 8)))
+      if (!alreadyExists) { addRow(faq.key, faq.value, true); added++ }
     })
 
-    // Afficher notice
-    const notice = document.getElementById('import-notice')
-    if (imported.length > 0) {
-      notice.textContent = `✅ ${imported.length} champ(s) importé(s) depuis Beds24 : ${imported.join(', ')}. Pensez à sauvegarder !`
-      notice.style.display = 'block'
-      document.getElementById('save-status').textContent = '⚠️ Import non sauvegardé'
+    const notice = document.getElementById('notice')
+    notice.style.display = 'block'
+    if (added > 0) {
+      notice.textContent = `✅ ${added} entrée(s) importée(s) depuis Beds24. Pensez à sauvegarder !`
+      markUnsaved()
       setTimeout(() => { notice.style.display = 'none' }, 8000)
     } else {
-      notice.textContent = 'ℹ️ Tous les champs sont déjà remplis — rien à importer.'
-      notice.style.display = 'block'
+      notice.textContent = 'ℹ️ Tout est déjà importé — rien à ajouter.'
       setTimeout(() => { notice.style.display = 'none' }, 4000)
     }
 
     btn.disabled = false; btn.textContent = '⬇️ Importer depuis Beds24'
   }
 
-  function addFaqRow(row = {}) {
-    const tbody = document.getElementById('faq-body')
-    const empty = tbody.querySelector('td[colspan]')
-    if (empty) empty.parentElement.remove()
-
-    const tr = document.createElement('tr')
-    tr.dataset.id = row.id || ''
-    tr.innerHTML = `
-      <td><input type="text" placeholder="ex: Horaires check-out" value="${(row.key || '').replace(/"/g, '&quot;')}"></td>
-      <td><textarea placeholder="ex: Départ avant 11h">${row.value || ''}</textarea></td>
-      <td><button class="btn-delete" onclick="this.closest('tr').remove()">×</button></td>
-    `
-    tbody.appendChild(tr)
-  }
-
   async function save() {
-    if (!currentPropertyId) return alert('Sélectionnez un bien')
+    if (!currentPropId) return alert('Sélectionnez un bien')
     const btn = document.getElementById('btn-save')
     btn.textContent = 'Sauvegarde...'; btn.disabled = true
 
-    const map = {
-      'wifi-name': 'wifi_name', 'wifi-pass': 'wifi_pass',
-      'entry-code': 'entry_code', 'parking': 'parking',
-      'transport': 'transport', 'emergency': 'emergency',
-      'rules': 'rules', 'recommendations': 'recommendations'
-    }
+    const rows = [...document.querySelectorAll('.faq-row')].map(row => ({
+      user_id:     session.user.id,
+      property_id: String(currentPropId),
+      type:        'faq',
+      key:         row.querySelector('.faq-input-key').value.trim(),
+      value:       row.querySelector('.faq-input-value').value.trim()
+    })).filter(r => r.key)
 
-    const fixedRows = Object.entries(map).map(([id, key]) => ({
-      user_id: currentSession.user.id, property_id: currentPropertyId,
-      type: 'fixed', key, value: document.getElementById(id)?.value || ''
-    }))
+    await supabase.from('knowledge').delete()
+      .eq('user_id', session.user.id)
+      .eq('property_id', String(currentPropId))
 
-    const faqRows = [...document.querySelectorAll('#faq-body tr[data-id]')].map(tr => ({
-      user_id: currentSession.user.id, property_id: currentPropertyId,
-      type: 'faq',
-      key:   tr.querySelector('input').value,
-      value: tr.querySelector('textarea').value
-    })).filter(r => r.key.trim())
-
-    await supabase.from('knowledge')
-      .delete()
-      .eq('user_id', currentSession.user.id)
-      .eq('property_id', currentPropertyId)
-
-    const { error } = await supabase.from('knowledge').insert([...fixedRows, ...faqRows])
+    const { error } = await supabase.from('knowledge').insert(rows)
 
     btn.textContent = 'Sauvegarder'; btn.disabled = false
-    document.getElementById('save-status').textContent = error ? '❌ Erreur sauvegarde' : '✅ Sauvegardé'
-    if (error) logger.error('Knowledge', 'Erreur sauvegarde', error)
+    document.getElementById('save-status').textContent = error
+      ? '❌ Erreur : ' + error.message
+      : `✅ ${rows.length} entrée(s) sauvegardée(s)`
+    updateCount()
   }
+
+  function updateCount() {
+    const n = document.querySelectorAll('.faq-row').length
+    document.getElementById('count-badge').textContent = `${n} entrée${n > 1 ? 's' : ''}`
+  }
+
+  function markUnsaved() {
+    document.getElementById('save-status').textContent = '⚠️ Modifications non sauvegardées'
+  }
+
+  function escAttr(s) { return (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;') }
+  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 
   init()
 </script>
