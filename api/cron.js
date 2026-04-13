@@ -256,9 +256,9 @@ async function classifyAndHandle(userId, beds24Key, property, bookingId, guestNa
   console.log(`[Cron] Classification message booking ${bookingId}: "${message.substring(0, 80)}..."`)
 
   const classificationPrompt = `Tu es un assistant de conciergerie pour location courte durée.
-Analyse ce message d'un voyageur et classe-le dans une des 3 catégories.
+Analyse ce message d'un voyageur et classe-le PRÉCISÉMENT dans une catégorie.
 
-BASE DE CONNAISSANCE DU LOGEMENT :
+BASE DE CONNAISSANCE DU LOGEMENT (LIS ATTENTIVEMENT) :
 ${knowledgeText || 'Aucune information disponible'}
 
 BIEN : ${property.name}
@@ -266,29 +266,35 @@ BIEN : ${property.name}
 MESSAGE DU VOYAGEUR (${guestName}) :
 "${message}"
 
-Réponds UNIQUEMENT en JSON valide avec cette structure exacte :
+INSTRUCTIONS DE CLASSIFICATION (dans cet ordre de priorité) :
+
+1. "sympathy" : message de remerciement, bonjour, au revoir, avis positif, confirmation simple sans question.
+   → auto_reply : réponse chaleureuse courte (2-3 phrases) en français.
+
+2. "info_known" : le message contient UNE OU PLUSIEURS questions ET toutes les réponses se trouvent dans la base de connaissance ci-dessus.
+   IMPORTANT : Si la FAQ contient une entrée qui traite du sujet demandé (même partiellement), c'est "info_known".
+   Exemple : si quelqu'un demande une arrivée anticipée et que la FAQ parle d'arrivée anticipée → info_known.
+   → auto_reply : réponse complète basée UNIQUEMENT sur la base de connaissance, en français, chaleureuse.
+
+3. "info_unknown" : le message pose des questions dont les réponses NE SONT PAS dans la base de connaissance.
+   → sub_tasks : une entrée par question distincte avec suggested_reply null.
+
+4. "intervention" : problème physique dans le logement, incident, réclamation, demande qui nécessite une action concrète de l'hôte (ex: clé perdue, appareil cassé, manque de fournitures).
+   → sub_tasks : une entrée par problème avec suggested_reply suggérant une action.
+
+Réponds UNIQUEMENT en JSON valide :
 {
   "type": "sympathy" | "info_known" | "info_unknown" | "intervention",
-  "reason": "explication courte en français",
-  "auto_reply": "réponse à envoyer si type=sympathy ou info_known (null sinon)",
+  "reason": "explication courte en français de pourquoi ce type",
+  "auto_reply": "réponse complète si sympathy ou info_known, sinon null",
   "sub_tasks": [
     {
-      "question": "question extraite du message",
-      "summary": "résumé synthétique de la demande",
-      "suggested_reply": "réponse suggérée ou null si inconnue"
+      "question": "question ou problème extrait du message",
+      "summary": "résumé synthétique",
+      "suggested_reply": "réponse suggérée ou null"
     }
   ]
-}
-
-RÈGLES DE CLASSIFICATION :
-- "sympathy" : message de remerciement, bonjour, au revoir, avis positif, confirmation simple
-- "info_known" : demande d'info dont la réponse est dans la base de connaissance
-- "info_unknown" : demande d'info dont la réponse N'EST PAS dans la base de connaissance
-- "intervention" : problème, incident, réclamation, demande spéciale qui nécessite action humaine
-
-Pour "sympathy" : rédige une réponse chaleureuse courte (2-3 phrases max) en français.
-Pour "info_known" : rédige la réponse avec les infos de la base de connaissance.
-Pour "info_unknown" et "intervention" : sub_tasks doit contenir une entrée par question/problème distinct.`
+}`
 
   const response = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
