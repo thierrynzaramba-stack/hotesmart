@@ -17,13 +17,14 @@
     .btn-add-row { margin-top: 12px; }
     .btn-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0 4px; }
     .btn-delete:hover { color: #E24B4A; }
-    .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+    .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .fixed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .fixed-field { display: flex; flex-direction: column; gap: 4px; }
     .fixed-label { font-size: 11px; color: var(--text2); font-weight: 500; }
     .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; }
     .save-status { font-size: 12px; color: var(--text2); }
     .badge-auto { background: #EEEDFE; color: #3C3489; font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: 6px; }
+    .import-notice { background: #E1F5EE; border: 0.5px solid var(--green); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; color: #1a6644; margin-bottom: 16px; display: none; }
   </style>
 </head>
 <body>
@@ -46,7 +47,10 @@
         <select class="form-input" id="property-select" style="width:auto;min-width:200px">
           <option value="">Chargement...</option>
         </select>
+        <button class="btn" id="btn-import-beds24" style="display:none">⬇️ Importer depuis Beds24</button>
       </div>
+
+      <div class="import-notice" id="import-notice"></div>
 
       <!-- Infos fixes -->
       <div class="section-card">
@@ -139,24 +143,25 @@
     currentSession = await requireAuth()
     if (!currentSession) return
 
-    await renderSidebar('agent-ai')
+    await renderSidebar('agent-ai-knowledge')
     await loadProperties()
 
-    document.getElementById('btn-add-row').addEventListener('click', addFaqRow)
+    document.getElementById('btn-add-row').addEventListener('click', () => addFaqRow())
     document.getElementById('btn-save').addEventListener('click', save)
+    document.getElementById('btn-import-beds24').addEventListener('click', importFromBeds24)
     document.getElementById('property-select').addEventListener('change', (e) => {
       currentPropertyId = e.target.value
-      if (currentPropertyId) loadKnowledge()
+      if (currentPropertyId) {
+        document.getElementById('btn-import-beds24').style.display = 'inline-flex'
+        loadKnowledge()
+      }
     })
   }
 
   async function loadProperties() {
     const res = await fetch('/api/beds24', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${currentSession.access_token}`
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
       body: JSON.stringify({ action: 'getProperties' })
     })
     const data = await res.json()
@@ -169,6 +174,7 @@
     if (properties.length === 1) {
       select.value = properties[0].id
       currentPropertyId = properties[0].id
+      document.getElementById('btn-import-beds24').style.display = 'inline-flex'
       loadKnowledge()
     }
   }
@@ -181,14 +187,10 @@
       .eq('property_id', currentPropertyId)
       .order('created_at')
 
-    if (error) {
-      logger.error('Knowledge', 'Erreur chargement', error)
-      return
-    }
+    if (error) { logger.error('Knowledge', 'Erreur chargement', error); return }
 
-    // Sépare les infos fixes des FAQ
     const fixed = data.filter(d => d.type === 'fixed')
-    const faqs = data.filter(d => d.type === 'faq')
+    const faqs  = data.filter(d => d.type === 'faq')
 
     const map = {
       'wifi-name': 'wifi_name', 'wifi-pass': 'wifi_pass',
@@ -212,6 +214,90 @@
     document.getElementById('save-status').textContent = 'Chargé'
   }
 
+  async function importFromBeds24() {
+    const property = properties.find(p => String(p.id) === String(currentPropertyId))
+    if (!property) return
+
+    const btn = document.getElementById('btn-import-beds24')
+    btn.disabled = true; btn.textContent = '⏳ Import...'
+
+    let imported = []
+
+    // Remplir les champs fixes si vides
+    const emergency = document.getElementById('emergency')
+    if (!emergency.value && property.phone) {
+      emergency.value = property.phone
+      imported.push('Contact urgence')
+    }
+
+    const rules = document.getElementById('rules')
+    if (!rules.value) {
+      const parts = []
+      if (property.checkInStart) parts.push(`Arrivée à partir de ${property.checkInStart}`)
+      if (property.checkOutEnd)   parts.push(`Départ avant ${property.checkOutEnd}`)
+      if (parts.length) { rules.value = parts.join('\n'); imported.push('Règles (check-in/out)') }
+    }
+
+    // FAQ auto depuis Beds24
+    const autoFaqs = []
+
+    if (property.checkInStart && property.checkOutEnd) {
+      autoFaqs.push({
+        key: 'Heure d\'arrivée et départ',
+        value: `L'arrivée se fait à partir de ${property.checkInStart}. Le départ est avant ${property.checkOutEnd}.`
+      })
+    }
+
+    if (property.address && property.city) {
+      autoFaqs.push({
+        key: 'Adresse du logement',
+        value: `${property.address}, ${property.city} ${property.postcode || ''}`.trim()
+      })
+    }
+
+    if (property.phone) {
+      autoFaqs.push({
+        key: 'Contact hôte',
+        value: `Vous pouvez nous contacter au ${property.phone}${property.contactFirstName ? ` (${property.contactFirstName})` : ''}.`
+      })
+    }
+
+    if (property.propertyType) {
+      const types = { townhome: 'maison de ville', apartment: 'appartement', house: 'maison', villa: 'villa' }
+      autoFaqs.push({
+        key: 'Type de logement',
+        value: `Vous séjournez dans ${types[property.propertyType] || property.propertyType} situé à ${property.city}.`
+      })
+    }
+
+    // Ajouter les FAQ qui n'existent pas déjà
+    const tbody = document.getElementById('faq-body')
+    const existingKeys = [...tbody.querySelectorAll('input[type=text]')].map(i => i.value.toLowerCase())
+
+    autoFaqs.forEach(faq => {
+      const alreadyExists = existingKeys.some(k => k.includes(faq.key.toLowerCase().substring(0, 10)))
+      if (!alreadyExists) {
+        addFaqRow({ key: faq.key, value: faq.value })
+        imported.push(faq.key)
+      }
+    })
+
+    // Afficher notice
+    const notice = document.getElementById('import-notice')
+    if (imported.length > 0) {
+      notice.textContent = `✅ ${imported.length} champ(s) importé(s) depuis Beds24 : ${imported.join(', ')}. Pensez à sauvegarder !`
+      notice.style.display = 'block'
+      document.getElementById('save-status').textContent = '⚠️ Import non sauvegardé'
+      setTimeout(() => { notice.style.display = 'none' }, 8000)
+    } else {
+      notice.textContent = 'ℹ️ Tous les champs sont déjà remplis — rien à importer.'
+      notice.style.display = 'block'
+      setTimeout(() => { notice.style.display = 'none' }, 4000)
+    }
+
+    btn.disabled = false; btn.textContent = '⬇️ Importer depuis Beds24'
+  }
+
   function addFaqRow(row = {}) {
     const tbody = document.getElementById('faq-body')
     const empty = tbody.querySelector('td[colspan]')
@@ -220,7 +306,7 @@
     const tr = document.createElement('tr')
     tr.dataset.id = row.id || ''
     tr.innerHTML = `
-      <td><input type="text" placeholder="ex: Horaires check-out" value="${row.key || ''}"></td>
+      <td><input type="text" placeholder="ex: Horaires check-out" value="${(row.key || '').replace(/"/g, '&quot;')}"></td>
       <td><textarea placeholder="ex: Départ avant 11h">${row.value || ''}</textarea></td>
       <td><button class="btn-delete" onclick="this.closest('tr').remove()">×</button></td>
     `
@@ -230,8 +316,7 @@
   async function save() {
     if (!currentPropertyId) return alert('Sélectionnez un bien')
     const btn = document.getElementById('btn-save')
-    btn.textContent = 'Sauvegarde...'
-    btn.disabled = true
+    btn.textContent = 'Sauvegarde...'; btn.disabled = true
 
     const map = {
       'wifi-name': 'wifi_name', 'wifi-pass': 'wifi_pass',
@@ -241,39 +326,27 @@
     }
 
     const fixedRows = Object.entries(map).map(([id, key]) => ({
-      user_id: currentSession.user.id,
-      property_id: currentPropertyId,
-      type: 'fixed',
-      key,
-      value: document.getElementById(id)?.value || ''
+      user_id: currentSession.user.id, property_id: currentPropertyId,
+      type: 'fixed', key, value: document.getElementById(id)?.value || ''
     }))
 
     const faqRows = [...document.querySelectorAll('#faq-body tr[data-id]')].map(tr => ({
-      user_id: currentSession.user.id,
-      property_id: currentPropertyId,
+      user_id: currentSession.user.id, property_id: currentPropertyId,
       type: 'faq',
-      key: tr.querySelector('input').value,
+      key:   tr.querySelector('input').value,
       value: tr.querySelector('textarea').value
     })).filter(r => r.key.trim())
-
-    const allRows = [...fixedRows, ...faqRows]
 
     await supabase.from('knowledge')
       .delete()
       .eq('user_id', currentSession.user.id)
       .eq('property_id', currentPropertyId)
 
-    const { error } = await supabase.from('knowledge').insert(allRows)
+    const { error } = await supabase.from('knowledge').insert([...fixedRows, ...faqRows])
 
-    btn.textContent = 'Sauvegarder'
-    btn.disabled = false
-
-    if (error) {
-      logger.error('Knowledge', 'Erreur sauvegarde', error)
-      document.getElementById('save-status').textContent = '❌ Erreur sauvegarde'
-    } else {
-      document.getElementById('save-status').textContent = '✅ Sauvegardé'
-    }
+    btn.textContent = 'Sauvegarder'; btn.disabled = false
+    document.getElementById('save-status').textContent = error ? '❌ Erreur sauvegarde' : '✅ Sauvegardé'
+    if (error) logger.error('Knowledge', 'Erreur sauvegarde', error)
   }
 
   init()
