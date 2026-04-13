@@ -94,7 +94,7 @@ module.exports = async function handler(req, res) {
         }
 
         // Construire les messages avec infos voyageur
-        const messages = bookingIds.map(bookId => {
+        const messages = bookingIds.filter(bookId => bookingsMap[bookId]).map(bookId => {
           const msgs = byBooking[bookId]
           const lastGuestMsg = msgs.filter(m => m.source === 'guest').sort((a, b) => new Date(b.time) - new Date(a.time))[0]
           if (!lastGuestMsg) return null
