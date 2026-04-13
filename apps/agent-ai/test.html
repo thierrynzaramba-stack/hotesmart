@@ -343,12 +343,19 @@
     }
 
     container.innerHTML = data.map(c => {
-      const date = new Date(c.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+      const date  = new Date(c.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+      const isSim = c.book_id?.startsWith('SIM_')
       return `
-        <div class="conv-card">
-          <div class="conv-question"><strong>💬 ${escHtml(c.guest_name || 'Voyageur')} :</strong><br>${escHtml(c.guest_message)}</div>
+        <div class="conv-card" style="${isSim ? 'border-left:3px solid var(--amber)' : ''}">
+          <div class="conv-question">
+            <strong>💬 ${escHtml(c.guest_name || 'Voyageur')}${isSim ? ' <span style="color:var(--text2);font-size:10px">(simulation)</span>' : ''} :</strong><br>
+            ${escHtml(c.guest_message)}
+          </div>
           <div class="conv-answer">🤖 ${escHtml(c.agent_reply || '—')}</div>
-          <div class="conv-meta">${date} · Réservation #${c.book_id}</div>
+          <div class="conv-meta" style="display:flex;align-items:center;justify-content:space-between">
+            <span>${date}${isSim ? ' · Test' : ' · Réservation #' + c.book_id}</span>
+            ${isSim ? `<button onclick="deleteConv('${c.id}')" style="background:none;border:0.5px solid #E24B4A;border-radius:4px;color:#E24B4A;font-size:11px;padding:2px 8px;cursor:pointer;font-family:inherit">🗑 Supprimer</button>` : ''}
+          </div>
         </div>`
     }).join('')
   }
@@ -364,6 +371,12 @@
     })
     document.getElementById('sim-result').style.display = 'none'
     document.getElementById('sim-status').textContent = '🗑 Résultat supprimé'
+    loadHistory()
+  }
+
+  async function deleteConv(convId) {
+    if (!confirm('Supprimer cette conversation de test ?')) return
+    await supabase.from('conversations').delete().eq('id', convId).eq('user_id', session.user.id)
     loadHistory()
   }
 

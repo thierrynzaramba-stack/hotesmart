@@ -272,13 +272,49 @@
       const reply    = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
       if (!reply) return alert('Entrez une réponse avant d\'enregistrer dans la FAQ')
       faqBtn.disabled = true; faqBtn.textContent = '⏳...'
+
+      // 1. Sauvegarder dans la FAQ
       const { error } = await window._supabase.from('knowledge').insert({
         user_id: window._session.user.id, property_id: String(propId),
         type: 'faq', key: question, value: reply
       })
       if (error) { faqBtn.disabled = false; faqBtn.textContent = '📚 Enregistrer dans la FAQ'; alert(error.message); return }
+
+      // 2. Récupérer la tâche pour avoir le message voyageur et book_id
+      const task = allTasks.find(t => t.id === taskId)
+      if (task) {
+        // 3. Générer une réponse pour le voyageur via grok
+        try {
+          const grokRes = await fetch('/api/grok', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+            body: JSON.stringify({
+              systemPrompt: 'Tu es un assistant de conciergerie pour location courte durée. Réponds au voyageur de façon chaleureuse et concise (2-3 phrases max) en utilisant la réponse fournie.',
+              messages: [{ role: 'user', content: `Question du voyageur : "${task.guest_message}"\n\nRéponse à utiliser : "${reply}"\n\nRédige une réponse chaleureuse pour le voyageur.` }]
+            })
+          })
+          const grokData = await grokRes.json()
+          if (grokData.reply) {
+            // 4. Sauvegarder dans conversations
+            // Si simulation → visible dans historique page test avec option suppression
+            // Si message réel → visible dans messages réels + historique
+            await window._supabase.from('conversations').insert({
+              user_id:       window._session.user.id,
+              property_id:   String(propId),
+              guest_name:    task.guest_name || 'Voyageur',
+              guest_message: task.guest_message,
+              agent_reply:   grokData.reply,
+              book_id:       task.book_id
+            })
+            const isSimulation = task.book_id?.startsWith('SIM_')
+            toast(isSimulation
+              ? '📚 FAQ mise à jour — réponse visible dans l\'historique de la page test !'
+              : '📚 FAQ mise à jour — réponse générée pour le voyageur !')
+          }
+        } catch (e) { console.error('Erreur génération réponse:', e) }
+      }
+
       faqBtn.textContent = '✅ Enregistré !'
-      toast('📚 Ajouté à la base de connaissance !')
       await markDone(taskId)
     }
 
