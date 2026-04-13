@@ -45,6 +45,10 @@ export async function renderSidebar(activePage = '') {
         <div class="sub-dot green"></div>Brevo SMS
         <span class="sub-check">✓</span>
       </a>
+      <a class="nav-sub ${activePage === 'serrures' ? 'connected' : ''}" href="/apps/serrures" style="text-decoration:none;color:inherit">
+  <div class="sub-dot green"></div>Seam Serrures
+  <span class="sub-check">✓</span>
+</a>
       <div class="nav-sub">
         <div class="sub-dot gray"></div>Airbnb
         <span class="sub-soon">bientôt</span>
@@ -101,10 +105,6 @@ async function renderActiveApps(user, activePage = '') {
       </a>
       <a class="nav-sub ${activePage === 'agent-ai-test' ? 'connected' : ''}" href="/apps/agent-ai/test">
         <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
-      </a>
-      <a class="nav-sub ${activePage === 'agent-ai-analyze' ? 'connected' : ''}" href="/apps/agent-ai/analyze">
-        <div class="sub-dot ${activePage === 'agent-ai-analyze' ? 'green' : 'gray'}"></div>Analyse
-      </a>
     ` : ''
     return `
       <a class="nav-item ${isActiveApp ? 'active' : ''}" href="/apps/${app.id}">
