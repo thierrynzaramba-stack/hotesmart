@@ -185,7 +185,7 @@ async function processProperty(userId, beds24Key, property, results) {
     .eq('user_id', userId)
     .eq('property_id', String(property.id))
 
-  console.log('[Cron] Knowledge pour', property.id, ':', knowledge?.length, 'entrées')
+  console.log('[Cron] Knowledge pour', property.id, 'userId:', userId, ':', knowledge?.length, 'entrées')
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
   let processed = 0
