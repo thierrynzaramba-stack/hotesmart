@@ -11,75 +11,55 @@
     .filter-btn:hover { border-color: var(--green); color: var(--green); }
     .filter-btn.active { background: var(--green); color: white; border-color: var(--green); }
     .filter-count { background: rgba(0,0,0,0.15); border-radius: 20px; padding: 0 6px; font-size: 10px; margin-left: 4px; }
-
     .tasks-list { display: flex; flex-direction: column; gap: 10px; }
-
     .task-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: border-color 0.15s; }
     .task-card:hover { border-color: var(--green); }
-    .task-card.done { opacity: 0.5; }
+    .task-card.done, .task-card.ignored { opacity: 0.5; }
     .task-card.intervention { border-left: 3px solid #E24B4A; }
     .task-card.info_unknown { border-left: 3px solid #F59E0B; }
-
     .task-header { padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-    .task-checkbox { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
-    .task-checkbox:hover { border-color: var(--green); }
-    .task-checkbox.checked { background: var(--green); border-color: var(--green); color: white; font-size: 10px; }
-
     .task-info { flex: 1; min-width: 0; }
     .task-guest { font-size: 13px; font-weight: 500; }
     .task-summary { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .task-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     .task-time { font-size: 11px; color: var(--text2); }
-
+    .task-expand { font-size: 12px; color: var(--text2); flex-shrink: 0; }
     .badge { padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 500; }
     .badge-intervention { background: #fdecea; color: #E24B4A; }
     .badge-info { background: #FFF3CD; color: #856404; }
+    .badge-done { background: #E1F5EE; color: var(--green); }
+    .badge-ignored { background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border); }
     .badge-property { background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border); }
-
-    .task-expand { font-size: 12px; color: var(--text2); flex-shrink: 0; }
-
-    /* Contenu expandé */
-    .task-body { padding: 0 16px 16px; display: none; border-top: 0.5px solid var(--border); margin-top: 0; }
+    .task-body { padding: 0 16px 16px; display: none; border-top: 0.5px solid var(--border); }
     .task-body.open { display: block; }
-
     .task-section { margin-top: 14px; }
     .task-section-title { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-
-    /* Message source */
     .thread { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
-    .thread-msg { padding: 8px 12px; border-radius: var(--radius); font-size: 12px; line-height: 1.5; max-width: 85%; }
+    .thread-msg { padding: 8px 12px; border-radius: var(--radius); font-size: 12px; line-height: 1.5; max-width: 85%; white-space: pre-wrap; }
     .thread-msg.guest { background: var(--bg2); border: 0.5px solid var(--border); align-self: flex-start; }
     .thread-msg.host  { background: #E1F5EE; color: #1a6644; align-self: flex-end; }
-    .thread-msg.system { background: #f0f0f0; color: var(--text2); align-self: center; font-size: 11px; font-style: italic; }
     .thread-source { font-size: 10px; color: var(--text2); margin-bottom: 2px; }
-
-    /* Sous-tâches */
     .subtask { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
     .subtask-question { font-size: 13px; font-weight: 500; margin-bottom: 8px; }
     .subtask-reply { width: 100%; min-height: 60px; resize: vertical; font-size: 12px; }
-    .subtask-actions { display: flex; gap: 8px; margin-top: 8px; }
-    .subtask-done { opacity: 0.5; }
-    .subtask-done .subtask-question { text-decoration: line-through; }
-
+    .subtask-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .btn-faq { background: #EEEDFE; color: #3C3489; border-color: #c5c3f5; }
+    .btn-faq:hover { background: #d8d6fc; }
     .task-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-
     .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
     .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-
     .stats-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
     .stat-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 12px; }
     .stat-card strong { font-size: 20px; font-weight: 600; display: block; }
     .stat-card.urgent strong { color: #E24B4A; }
     .stat-card.info strong { color: #F59E0B; }
-
     .prop-select-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .toast-msg { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: white; padding: 10px 18px; border-radius: var(--radius); font-size: 13px; z-index: 999; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
   </style>
 </head>
 <body>
-
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
-
   <div class="main">
     <div class="topbar">
       <div>
@@ -88,40 +68,27 @@
       </div>
       <button class="btn" onclick="loadTasks()">↻ Actualiser</button>
     </div>
-
     <div class="content">
-
       <div class="prop-select-row">
         <label class="form-label" style="margin:0;flex-shrink:0">Bien :</label>
         <select class="form-input" id="prop-select" style="width:auto;min-width:200px" onchange="loadTasks()">
           <option value="">Tous les biens</option>
         </select>
       </div>
-
       <div class="stats-row" id="stats-row"></div>
-
-      <div class="filters" id="filters">
-        <button class="filter-btn active" data-filter="pending" onclick="setFilter('pending', this)">
-          En attente <span class="filter-count" id="count-pending">0</span>
-        </button>
-        <button class="filter-btn" data-filter="intervention" onclick="setFilter('intervention', this)">
-          🚨 Intervention <span class="filter-count" id="count-intervention">0</span>
-        </button>
-        <button class="filter-btn" data-filter="info_unknown" onclick="setFilter('info_unknown', this)">
-          ❓ Info manquante <span class="filter-count" id="count-info">0</span>
-        </button>
-        <button class="filter-btn" data-filter="done" onclick="setFilter('done', this)">
-          ✓ Traités <span class="filter-count" id="count-done">0</span>
-        </button>
+      <div class="filters">
+        <button class="filter-btn active" onclick="setFilter('pending', this)">En attente <span class="filter-count" id="count-pending">0</span></button>
+        <button class="filter-btn" onclick="setFilter('intervention', this)">🚨 Intervention <span class="filter-count" id="count-intervention">0</span></button>
+        <button class="filter-btn" onclick="setFilter('info_unknown', this)">❓ Info manquante <span class="filter-count" id="count-info">0</span></button>
+        <button class="filter-btn" onclick="setFilter('done', this)">✓ Traités <span class="filter-count" id="count-done">0</span></button>
       </div>
-
       <div class="tasks-list" id="tasks-list">
         <div class="empty-state"><div class="icon">⏳</div><p>Chargement…</p></div>
       </div>
-
     </div>
   </div>
 </div>
+<div class="toast-msg" id="toast"></div>
 
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
@@ -136,27 +103,29 @@
   window._session = session
   window._supabase = supabase
 
-  // Charger les propriétés
-  const res = await fetch('/api/beds24', {
+  const res  = await fetch('/api/beds24', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
     body: JSON.stringify({ action: 'getProperties' })
   })
   const data = await res.json()
-  const props = data.properties || []
-  const select = document.getElementById('prop-select')
-  props.forEach(p => {
+  ;(data.properties || []).forEach(p => {
     const opt = document.createElement('option')
     opt.value = p.id; opt.textContent = p.name
-    select.appendChild(opt)
+    document.getElementById('prop-select').appendChild(opt)
   })
-
   window.loadTasks()
 </script>
 
 <script>
   let allTasks = []
   let currentFilter = 'pending'
+
+  function toast(msg, duration = 3000) {
+    const t = document.getElementById('toast')
+    t.textContent = msg; t.style.display = 'block'
+    setTimeout(() => { t.style.display = 'none' }, duration)
+  }
 
   window.setFilter = (filter, btn) => {
     currentFilter = filter
@@ -168,27 +137,17 @@
   window.loadTasks = async () => {
     const propId = document.getElementById('prop-select').value
     document.getElementById('topStatus').textContent = 'Chargement…'
-
     try {
-      let query = window._supabase
-        .from('agent_tasks')
-        .select('*')
+      let query = window._supabase.from('agent_tasks').select('*')
         .eq('user_id', window._session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(100)
-
+        .order('created_at', { ascending: false }).limit(100)
       if (propId) query = query.eq('property_id', propId)
-
       const { data, error } = await query
       if (error) throw error
-
       allTasks = data || []
-      updateStats()
-      renderTasks()
-
+      updateStats(); renderTasks()
       const pending = allTasks.filter(t => t.status === 'pending').length
-      document.getElementById('topStatus').textContent = `${pending} tâche${pending > 1 ? 's' : ''} en attente`
-
+      document.getElementById('topStatus').textContent = `${pending} tâche${pending !== 1 ? 's' : ''} en attente`
     } catch (err) {
       document.getElementById('tasks-list').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${err.message}</p></div>`
     }
@@ -197,29 +156,25 @@
   function updateStats() {
     const interventions = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending').length
     const infos         = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending').length
-    const done          = allTasks.filter(t => t.status === 'done').length
+    const done          = allTasks.filter(t => t.status === 'done' || t.status === 'ignored').length
     const total         = allTasks.filter(t => t.status === 'pending').length
-
     document.getElementById('count-pending').textContent      = total
     document.getElementById('count-intervention').textContent = interventions
     document.getElementById('count-info').textContent         = infos
     document.getElementById('count-done').textContent         = done
-
     document.getElementById('stats-row').innerHTML = `
       <div class="stat-card urgent"><strong>${interventions}</strong>Interventions</div>
       <div class="stat-card info"><strong>${infos}</strong>Infos manquantes</div>
-      <div class="stat-card"><strong>${done}</strong>Traitées</div>
-    `
+      <div class="stat-card"><strong>${done}</strong>Traitées</div>`
   }
 
   function renderTasks() {
     const list = document.getElementById('tasks-list')
     let filtered = allTasks
-
-    if (currentFilter === 'pending')       filtered = allTasks.filter(t => t.status === 'pending')
-    if (currentFilter === 'intervention')  filtered = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending')
-    if (currentFilter === 'info_unknown')  filtered = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending')
-    if (currentFilter === 'done')          filtered = allTasks.filter(t => t.status === 'done')
+    if (currentFilter === 'pending')      filtered = allTasks.filter(t => t.status === 'pending')
+    if (currentFilter === 'intervention') filtered = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending')
+    if (currentFilter === 'info_unknown') filtered = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending')
+    if (currentFilter === 'done')         filtered = allTasks.filter(t => t.status === 'done' || t.status === 'ignored')
 
     if (!filtered.length) {
       const msg = currentFilter === 'done' ? 'Aucune tâche traitée' : '✅ Aucune tâche en attente !'
@@ -229,173 +184,153 @@
 
     list.innerHTML = filtered.map(task => renderTask(task)).join('')
 
-    // Clics header pour expand
     list.querySelectorAll('.task-header').forEach(h => {
-      h.addEventListener('click', (e) => {
-        if (e.target.closest('.task-checkbox')) return
+      h.addEventListener('click', () => {
         const body = h.nextElementSibling
         const expand = h.querySelector('.task-expand')
         body.classList.toggle('open')
         expand.textContent = body.classList.contains('open') ? '▲' : '▼'
       })
     })
-
-    // Checkboxes
-    list.querySelectorAll('.task-checkbox').forEach(cb => {
-      cb.addEventListener('click', (e) => {
-        e.stopPropagation()
-        toggleTask(cb.dataset.id, cb.dataset.status)
-      })
-    })
   }
 
   function renderTask(task) {
-    const isDone   = task.status === 'done'
-    const typeLabel = task.task_type === 'intervention' ? '🚨 Intervention' : '❓ Info manquante'
-    const badgeClass = task.task_type === 'intervention' ? 'badge-intervention' : 'badge-info'
+    const isInfo = task.task_type === 'info_unknown'
+    const isDone = task.status === 'done' || task.status === 'ignored'
     const d = new Date(task.created_at)
     const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
-
     const subTasks = task.sub_tasks || []
     const thread   = task.source_thread || []
 
+    let statusBadge = ''
+    if (task.status === 'done')    statusBadge = '<span class="badge badge-done">✓ Fait</span>'
+    if (task.status === 'ignored') statusBadge = '<span class="badge badge-ignored">Ignoré</span>'
+    if (task.status === 'pending') statusBadge = `<span class="badge ${isInfo ? 'badge-info' : 'badge-intervention'}">${isInfo ? '❓ Info manquante' : '🚨 Intervention'}</span>`
+
+    const actionButtons = task.status === 'pending'
+      ? `<button class="btn btn-primary" onclick="markDone('${task.id}')">✓ Fait</button>
+         <button class="btn" onclick="markIgnored('${task.id}')">🚫 Ignorer</button>`
+      : `<button class="btn" onclick="markPending('${task.id}')">↩ Remettre en attente</button>`
+
+    const subTasksHtml = subTasks.length ? `
+      <div class="task-section">
+        <div class="task-section-title">📋 Points à traiter</div>
+        ${subTasks.map((st, i) => `
+          <div class="subtask" id="subtask-${task.id}-${i}">
+            <div class="subtask-question">${i+1}. ${escHtml(st.question || st.summary || '')}</div>
+            <textarea class="form-input subtask-reply" id="reply-${task.id}-${i}"
+              placeholder="${isInfo ? 'Réponse à ajouter dans la FAQ…' : 'Votre réponse…'}">${escHtml(st.suggested_reply || '')}</textarea>
+            <div class="subtask-actions">
+              ${isInfo ? `<button class="btn btn-faq" data-task="${task.id}" data-idx="${i}" data-prop="${task.property_id}" data-question="${escAttr(st.question || st.summary || '')}">📚 Enregistrer dans la FAQ</button>` : ''}
+              <button class="btn btn-primary" data-send-task="${task.id}" data-send-idx="${i}" data-send-book="${task.book_id}">✉️ Envoyer au voyageur</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''
+
     return `
-      <div class="task-card ${task.task_type} ${isDone ? 'done' : ''}" id="task-${task.id}">
+      <div class="task-card ${task.task_type} ${isDone ? task.status : ''}" id="task-${task.id}">
         <div class="task-header">
-          <div class="task-checkbox ${isDone ? 'checked' : ''}" data-id="${task.id}" data-status="${task.status}">
-            ${isDone ? '✓' : ''}
-          </div>
           <div class="task-info">
-            <div class="task-guest">👤 ${task.guest_name || 'Voyageur'}</div>
-            <div class="task-summary">${task.summary || task.guest_message?.substring(0, 80) || ''}</div>
+            <div class="task-guest">👤 ${escHtml(task.guest_name || 'Voyageur')}</div>
+            <div class="task-summary">${escHtml(task.summary || task.guest_message?.substring(0, 80) || '')}</div>
           </div>
           <div class="task-meta">
-            <span class="badge ${badgeClass}">${typeLabel}</span>
+            ${statusBadge}
             <span class="badge badge-property">${getPropName(task.property_id)}</span>
             <span class="task-time">${timeStr}</span>
             <span class="task-expand">▼</span>
           </div>
         </div>
-
         <div class="task-body">
-
           ${thread.length ? `
           <div class="task-section">
             <div class="task-section-title">💬 Fil de conversation</div>
             <div class="thread">
               ${thread.map(m => `
                 <div>
-                  <div class="thread-source">${m.source === 'guest' ? '👤 Voyageur' : m.source === 'host' ? '🏠 Hôte' : '⚙️ Système'}</div>
+                  <div class="thread-source">${m.source === 'guest' ? '👤 Voyageur' : '🏠 Hôte'}</div>
                   <div class="thread-msg ${m.source}">${escHtml(m.message)}</div>
-                </div>
-              `).join('')}
+                </div>`).join('')}
             </div>
           </div>` : ''}
-
-          ${subTasks.length ? `
-          <div class="task-section">
-            <div class="task-section-title">📋 Points à traiter</div>
-            ${subTasks.map((st, i) => `
-              <div class="subtask" id="subtask-${task.id}-${i}">
-                <div class="subtask-question">${i+1}. ${escHtml(st.question || st.summary || '')}</div>
-                <textarea class="form-input subtask-reply" id="reply-${task.id}-${i}"
-                  placeholder="Votre réponse…">${escHtml(st.suggested_reply || '')}</textarea>
-                <div class="subtask-actions">
-                  <button class="btn btn-primary" onclick="sendSubtaskReply('${task.id}', ${i}, '${task.book_id}', '${task.property_id}')">
-                    ✉️ Envoyer
-                  </button>
-                  <button class="btn" onclick="markSubtaskDone('${task.id}', ${i})">
-                    ✓ Marquer fait
-                  </button>
-                </div>
-              </div>
-            `).join('')}
-          </div>` : `
-          <div class="task-section">
-            <div class="task-section-title">✏️ Réponse</div>
-            <textarea class="form-input subtask-reply" id="reply-${task.id}-0"
-              placeholder="Votre réponse…">${escHtml(task.suggested_reply || '')}</textarea>
-            <div class="subtask-actions" style="margin-top:8px">
-              <button class="btn btn-primary" onclick="sendSubtaskReply('${task.id}', 0, '${task.book_id}', '${task.property_id}')">
-                ✉️ Envoyer via Beds24
-              </button>
-            </div>
-          </div>`}
-
-          <div class="task-actions">
-            <button class="btn" onclick="ignoreTask('${task.id}')">🚫 Ignorer</button>
-          </div>
-
+          ${subTasksHtml}
+          <div class="task-actions">${actionButtons}</div>
         </div>
-      </div>
-    `
+      </div>`
   }
 
-  window.toggleTask = async (id, status) => {
-    const newStatus = status === 'done' ? 'pending' : 'done'
-    await window._supabase.from('agent_tasks').update({ status: newStatus }).eq('id', id)
-    const task = allTasks.find(t => t.id === id)
-    if (task) task.status = newStatus
-    updateStats(); renderTasks()
-  }
+  // Délégation d'événements pour les boutons dynamiques
+  document.getElementById('tasks-list').addEventListener('click', async (e) => {
+    const faqBtn  = e.target.closest('[data-task]')
+    const sendBtn = e.target.closest('[data-send-task]')
 
-  window.ignoreTask = async (id) => {
-    await window._supabase.from('agent_tasks').update({ status: 'ignored' }).eq('id', id)
-    allTasks = allTasks.filter(t => t.id !== id)
-    updateStats(); renderTasks()
-  }
+    if (faqBtn) {
+      const taskId   = faqBtn.dataset.task
+      const idx      = faqBtn.dataset.idx
+      const propId   = faqBtn.dataset.prop
+      const question = faqBtn.dataset.question
+      const reply    = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
+      if (!reply) return alert('Entrez une réponse avant d\'enregistrer dans la FAQ')
+      faqBtn.disabled = true; faqBtn.textContent = '⏳...'
+      const { error } = await window._supabase.from('knowledge').insert({
+        user_id: window._session.user.id, property_id: String(propId),
+        type: 'faq', key: question, value: reply
+      })
+      if (error) { faqBtn.disabled = false; faqBtn.textContent = '📚 Enregistrer dans la FAQ'; alert(error.message); return }
+      faqBtn.textContent = '✅ Enregistré !'
+      toast('📚 Ajouté à la base de connaissance !')
+      await markDone(taskId)
+    }
 
-  window.markSubtaskDone = (taskId, index) => {
-    const el = document.getElementById(`subtask-${taskId}-${index}`)
-    if (el) el.classList.toggle('subtask-done')
-  }
-
-  window.sendSubtaskReply = async (taskId, index, bookId, propId) => {
-    const reply = document.getElementById(`reply-${taskId}-${index}`)?.value?.trim()
-    if (!reply) return alert('Entrez une réponse')
-
-    const btn = event.target
-    btn.disabled = true; btn.textContent = 'Envoi…'
-
-    try {
+    if (sendBtn) {
+      const taskId = sendBtn.dataset.sendTask
+      const idx    = sendBtn.dataset.sendIdx
+      const bookId = sendBtn.dataset.sendBook
+      const reply  = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
+      if (!reply) return alert('Entrez une réponse')
+      sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi...'
       const res = await fetch('/api/beds24', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
         body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
       })
       const data = await res.json()
-
       if (data.success) {
-        btn.textContent = '✅ Envoyé'
-        btn.style.background = 'var(--green)'
-        document.getElementById(`subtask-${taskId}-${index}`)?.classList.add('subtask-done')
-
-        // Marquer la tâche comme done si tous les sous-tâches sont traités
-        await window._supabase.from('agent_tasks').update({ status: 'done' }).eq('id', taskId)
-        const task = allTasks.find(t => t.id === taskId)
-        if (task) task.status = 'done'
-        updateStats()
+        sendBtn.textContent = '✅ Envoyé'
+        toast('✉️ Message envoyé au voyageur !')
+        await markDone(taskId)
       } else {
-        btn.textContent = '❌ Erreur'
-        btn.disabled = false
+        sendBtn.disabled = false; sendBtn.textContent = '✉️ Envoyer au voyageur'
         alert('Erreur : ' + (data.error || 'Inconnu'))
       }
-    } catch (err) {
-      btn.textContent = '❌ Erreur'
-      btn.disabled = false
     }
+  })
+
+  window.markDone = async (id) => {
+    await window._supabase.from('agent_tasks').update({ status: 'done' }).eq('id', id)
+    const t = allTasks.find(t => t.id === id); if (t) t.status = 'done'
+    updateStats(); renderTasks(); toast('✅ Tâche marquée comme faite')
+  }
+
+  window.markIgnored = async (id) => {
+    await window._supabase.from('agent_tasks').update({ status: 'ignored' }).eq('id', id)
+    const t = allTasks.find(t => t.id === id); if (t) t.status = 'ignored'
+    updateStats(); renderTasks(); toast('🚫 Tâche ignorée')
+  }
+
+  window.markPending = async (id) => {
+    await window._supabase.from('agent_tasks').update({ status: 'pending' }).eq('id', id)
+    const t = allTasks.find(t => t.id === id); if (t) t.status = 'pending'
+    updateStats(); renderTasks(); toast('↩ Remise en attente')
   }
 
   function getPropName(propId) {
-    const select = document.getElementById('prop-select')
-    const opt = select.querySelector(`option[value="${propId}"]`)
+    const opt = document.querySelector(`#prop-select option[value="${propId}"]`)
     return opt?.textContent || propId || '—'
   }
 
-  function escHtml(str) {
-    return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-  }
+  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+  function escAttr(s) { return (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;') }
 </script>
-
 </body>
 </html>
