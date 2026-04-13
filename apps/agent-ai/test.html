@@ -256,7 +256,8 @@
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <span class="${t.badge}">${t.label}</span>
-            <button onclick="deleteSimResult('${convId}','${taskId}')"
+            <button onclick="deleteSimResult(this)"
+              data-conv-id="${convId || ''}" data-task-id="${taskId || ''}"
               style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:12px;font-family:inherit;padding:2px 8px;border:0.5px solid #E24B4A;border-radius:4px">🗑 Supprimer</button>
             <button onclick="document.getElementById('sim-result').style.display='none';document.getElementById('sim-status').textContent=''"
               style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:18px;line-height:1">×</button>
@@ -352,12 +353,14 @@
     }).join('')
   }
 
-  async function deleteSimResult(convId, taskId) {
+  async function deleteSimResult(btn) {
     if (!confirm('Supprimer ce résultat de test ?')) return
+    const convId = btn.dataset.convId || null
+    const taskId = btn.dataset.taskId || null
     await fetch('/api/simulate', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ conv_id: convId || null, task_id: taskId || null })
+      body: JSON.stringify({ conv_id: convId, task_id: taskId })
     })
     document.getElementById('sim-result').style.display = 'none'
     document.getElementById('sim-status').textContent = '🗑 Résultat supprimé'
