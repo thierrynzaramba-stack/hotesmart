@@ -6,19 +6,73 @@
   <title>HôteSmart — Agent AI</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .msg-container { display: flex; flex-direction: column; gap: 12px; }
-    .msg-card { border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg); }
-    .msg-card-header { padding: 12px 16px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--bg2); }
-    .msg-card-guest { font-size: 13px; font-weight: 500; }
-    .msg-card-meta { font-size: 11px; color: var(--text2); }
-    .msg-card-body { padding: 14px 16px; }
-    .msg-guest { font-size: 12px; color: var(--text2); margin-bottom: 8px; line-height: 1.5; }
-    .msg-reply-box { background: var(--bg2); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.5; margin-top: 8px; min-height: 60px; }
-    .msg-actions { display: flex; gap: 8px; margin-top: 10px; }
-    .badge-pending { background: var(--amber-bg); color: var(--amber); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-sent { background: var(--green-bg); color: var(--green); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
-    .no-messages { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
+    .filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+    .filter-btn { background: var(--bg); border: 0.5px solid var(--border); border-radius: 20px; padding: 5px 14px; font-size: 12px; cursor: pointer; color: var(--text2); font-family: inherit; transition: all 0.15s; }
+    .filter-btn:hover { border-color: var(--green); color: var(--green); }
+    .filter-btn.active { background: var(--green); color: white; border-color: var(--green); }
+    .filter-count { background: rgba(0,0,0,0.15); border-radius: 20px; padding: 0 6px; font-size: 10px; margin-left: 4px; }
+
+    .tasks-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .task-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: border-color 0.15s; }
+    .task-card:hover { border-color: var(--green); }
+    .task-card.done { opacity: 0.5; }
+    .task-card.intervention { border-left: 3px solid #E24B4A; }
+    .task-card.info_unknown { border-left: 3px solid #F59E0B; }
+
+    .task-header { padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .task-checkbox { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+    .task-checkbox:hover { border-color: var(--green); }
+    .task-checkbox.checked { background: var(--green); border-color: var(--green); color: white; font-size: 10px; }
+
+    .task-info { flex: 1; min-width: 0; }
+    .task-guest { font-size: 13px; font-weight: 500; }
+    .task-summary { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .task-time { font-size: 11px; color: var(--text2); }
+
+    .badge { padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 500; }
+    .badge-intervention { background: #fdecea; color: #E24B4A; }
+    .badge-info { background: #FFF3CD; color: #856404; }
+    .badge-property { background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border); }
+
+    .task-expand { font-size: 12px; color: var(--text2); flex-shrink: 0; }
+
+    /* Contenu expandé */
+    .task-body { padding: 0 16px 16px; display: none; border-top: 0.5px solid var(--border); margin-top: 0; }
+    .task-body.open { display: block; }
+
+    .task-section { margin-top: 14px; }
+    .task-section-title { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+
+    /* Message source */
+    .thread { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+    .thread-msg { padding: 8px 12px; border-radius: var(--radius); font-size: 12px; line-height: 1.5; max-width: 85%; }
+    .thread-msg.guest { background: var(--bg2); border: 0.5px solid var(--border); align-self: flex-start; }
+    .thread-msg.host  { background: #E1F5EE; color: #1a6644; align-self: flex-end; }
+    .thread-msg.system { background: #f0f0f0; color: var(--text2); align-self: center; font-size: 11px; font-style: italic; }
+    .thread-source { font-size: 10px; color: var(--text2); margin-bottom: 2px; }
+
+    /* Sous-tâches */
+    .subtask { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
+    .subtask-question { font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+    .subtask-reply { width: 100%; min-height: 60px; resize: vertical; font-size: 12px; }
+    .subtask-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .subtask-done { opacity: 0.5; }
+    .subtask-done .subtask-question { text-decoration: line-through; }
+
+    .task-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+    .stats-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 12px; }
+    .stat-card strong { font-size: 20px; font-weight: 600; display: block; }
+    .stat-card.urgent strong { color: #E24B4A; }
+    .stat-card.info strong { color: #F59E0B; }
+
+    .prop-select-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -29,24 +83,40 @@
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">Agent AI voyageurs</div>
-        <div class="page-sub">Réponses automatiques aux messages</div>
+        <div class="page-title">🤖 Agent AI — To-do</div>
+        <div class="page-sub" id="topStatus">Chargement…</div>
       </div>
+      <button class="btn" onclick="loadTasks()">↻ Actualiser</button>
     </div>
 
     <div class="content">
 
-      <div class="property-select">
-        <label class="form-label" style="margin:0">Bien :</label>
-        <select class="form-input" id="property-select" style="width:auto;min-width:200px">
-          <option value="">Chargement...</option>
+      <div class="prop-select-row">
+        <label class="form-label" style="margin:0;flex-shrink:0">Bien :</label>
+        <select class="form-input" id="prop-select" style="width:auto;min-width:200px" onchange="loadTasks()">
+          <option value="">Tous les biens</option>
         </select>
-        <button class="btn" id="btn-refresh">↻ Actualiser</button>
       </div>
 
-      <div class="section-title">Messages en attente</div>
-      <div id="messages-container">
-        <div class="no-messages">Sélectionnez un bien pour voir les messages</div>
+      <div class="stats-row" id="stats-row"></div>
+
+      <div class="filters" id="filters">
+        <button class="filter-btn active" data-filter="pending" onclick="setFilter('pending', this)">
+          En attente <span class="filter-count" id="count-pending">0</span>
+        </button>
+        <button class="filter-btn" data-filter="intervention" onclick="setFilter('intervention', this)">
+          🚨 Intervention <span class="filter-count" id="count-intervention">0</span>
+        </button>
+        <button class="filter-btn" data-filter="info_unknown" onclick="setFilter('info_unknown', this)">
+          ❓ Info manquante <span class="filter-count" id="count-info">0</span>
+        </button>
+        <button class="filter-btn" data-filter="done" onclick="setFilter('done', this)">
+          ✓ Traités <span class="filter-count" id="count-done">0</span>
+        </button>
+      </div>
+
+      <div class="tasks-list" id="tasks-list">
+        <div class="empty-state"><div class="icon">⏳</div><p>Chargement…</p></div>
       </div>
 
     </div>
@@ -58,207 +128,273 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { logger } from '/shared/logger.js'
 
   initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('agent-ai')
+  window._session = session
+  window._supabase = supabase
 
-  let currentSession = null
-  let properties = []
+  // Charger les propriétés
+  const res = await fetch('/api/beds24', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'getProperties' })
+  })
+  const data = await res.json()
+  const props = data.properties || []
+  const select = document.getElementById('prop-select')
+  props.forEach(p => {
+    const opt = document.createElement('option')
+    opt.value = p.id; opt.textContent = p.name
+    select.appendChild(opt)
+  })
 
-  async function init() {
-    currentSession = await requireAuth()
-    if (!currentSession) return
+  window.loadTasks()
+</script>
 
-    await renderSidebar('agent-ai')
-    await loadProperties()
+<script>
+  let allTasks = []
+  let currentFilter = 'pending'
 
-    document.getElementById('btn-refresh').addEventListener('click', () => {
-      const propId = document.getElementById('property-select').value
-      if (propId) loadMessages(propId)
-    })
-
-    document.getElementById('property-select').addEventListener('change', (e) => {
-      if (e.target.value) loadMessages(e.target.value)
-    })
+  window.setFilter = (filter, btn) => {
+    currentFilter = filter
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'))
+    btn.classList.add('active')
+    renderTasks()
   }
 
-  async function loadProperties() {
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${currentSession.access_token}`
-      },
-      body: JSON.stringify({ action: 'getProperties' })
-    })
-    const data = await res.json()
-    properties = data.properties || []
+  window.loadTasks = async () => {
+    const propId = document.getElementById('prop-select').value
+    document.getElementById('topStatus').textContent = 'Chargement…'
 
-    const select = document.getElementById('property-select')
-    select.innerHTML = '<option value="">Choisir un bien...</option>' +
-      properties.map(p => `<option value="${p.id}">${p.name}</option>`).join('')
+    try {
+      let query = window._supabase
+        .from('agent_tasks')
+        .select('*')
+        .eq('user_id', window._session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(100)
 
-    if (properties.length === 1) {
-      select.value = properties[0].id
-      loadMessages(properties[0].id)
+      if (propId) query = query.eq('property_id', propId)
+
+      const { data, error } = await query
+      if (error) throw error
+
+      allTasks = data || []
+      updateStats()
+      renderTasks()
+
+      const pending = allTasks.filter(t => t.status === 'pending').length
+      document.getElementById('topStatus').textContent = `${pending} tâche${pending > 1 ? 's' : ''} en attente`
+
+    } catch (err) {
+      document.getElementById('tasks-list').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${err.message}</p></div>`
     }
-
-    logger.info('Agent AI', `${properties.length} biens chargés`)
   }
 
-  async function loadMessages(propertyId) {
-    const container = document.getElementById('messages-container')
-    container.innerHTML = '<div class="no-messages">Chargement des messages...</div>'
+  function updateStats() {
+    const interventions = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending').length
+    const infos         = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending').length
+    const done          = allTasks.filter(t => t.status === 'done').length
+    const total         = allTasks.filter(t => t.status === 'pending').length
 
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${currentSession.access_token}`
-      },
-      body: JSON.stringify({ action: 'getMessages', propertyId })
-    })
+    document.getElementById('count-pending').textContent      = total
+    document.getElementById('count-intervention').textContent = interventions
+    document.getElementById('count-info').textContent         = infos
+    document.getElementById('count-done').textContent         = done
 
-    const data = await res.json()
-    const messages = data.messages || []
+    document.getElementById('stats-row').innerHTML = `
+      <div class="stat-card urgent"><strong>${interventions}</strong>Interventions</div>
+      <div class="stat-card info"><strong>${infos}</strong>Infos manquantes</div>
+      <div class="stat-card"><strong>${done}</strong>Traitées</div>
+    `
+  }
 
-    logger.info('Agent AI', `${messages.length} messages chargés`)
+  function renderTasks() {
+    const list = document.getElementById('tasks-list')
+    let filtered = allTasks
 
-    if (messages.length === 0) {
-      container.innerHTML = '<div class="no-messages">✓ Aucun message en attente</div>'
+    if (currentFilter === 'pending')       filtered = allTasks.filter(t => t.status === 'pending')
+    if (currentFilter === 'intervention')  filtered = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending')
+    if (currentFilter === 'info_unknown')  filtered = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending')
+    if (currentFilter === 'done')          filtered = allTasks.filter(t => t.status === 'done')
+
+    if (!filtered.length) {
+      const msg = currentFilter === 'done' ? 'Aucune tâche traitée' : '✅ Aucune tâche en attente !'
+      list.innerHTML = `<div class="empty-state"><div class="icon">${currentFilter === 'done' ? '📋' : '✅'}</div><p>${msg}</p></div>`
       return
     }
 
-    container.innerHTML = '<div class="msg-container">' +
-      messages.map(msg => renderMessageCard(msg)).join('') +
-      '</div>'
+    list.innerHTML = filtered.map(task => renderTask(task)).join('')
 
-    document.querySelectorAll('.btn-generate').forEach(btn => {
-      btn.addEventListener('click', () => generateReply(
-        btn.dataset.msgId,
-        btn.dataset.guestMsg,
-        btn.dataset.guestName,
-        btn.dataset.propId
-      ))
+    // Clics header pour expand
+    list.querySelectorAll('.task-header').forEach(h => {
+      h.addEventListener('click', (e) => {
+        if (e.target.closest('.task-checkbox')) return
+        const body = h.nextElementSibling
+        const expand = h.querySelector('.task-expand')
+        body.classList.toggle('open')
+        expand.textContent = body.classList.contains('open') ? '▲' : '▼'
+      })
     })
 
-    document.querySelectorAll('.btn-send').forEach(btn => {
-      btn.addEventListener('click', () => sendReply(btn.dataset.msgId, btn.dataset.propId))
+    // Checkboxes
+    list.querySelectorAll('.task-checkbox').forEach(cb => {
+      cb.addEventListener('click', (e) => {
+        e.stopPropagation()
+        toggleTask(cb.dataset.id, cb.dataset.status)
+      })
     })
   }
 
-  function renderMessageCard(msg) {
-    const guestMsg = msg.guestMessage || msg.message || '(message vide)'
-    const guestName = msg.guestFirstName ? `${msg.guestFirstName} ${msg.guestName || ''}` : 'Voyageur'
-    const propId = document.getElementById('property-select').value
+  function renderTask(task) {
+    const isDone   = task.status === 'done'
+    const typeLabel = task.task_type === 'intervention' ? '🚨 Intervention' : '❓ Info manquante'
+    const badgeClass = task.task_type === 'intervention' ? 'badge-intervention' : 'badge-info'
+    const d = new Date(task.created_at)
+    const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
+
+    const subTasks = task.sub_tasks || []
+    const thread   = task.source_thread || []
 
     return `
-      <div class="msg-card" id="card-${msg.bookId || msg.id}">
-        <div class="msg-card-header">
-          <div>
-            <div class="msg-card-guest">${guestName}</div>
-            <div class="msg-card-meta">Réservation #${msg.bookId || msg.id} · ${msg.firstNight || ''} → ${msg.lastNight || ''}</div>
+      <div class="task-card ${task.task_type} ${isDone ? 'done' : ''}" id="task-${task.id}">
+        <div class="task-header">
+          <div class="task-checkbox ${isDone ? 'checked' : ''}" data-id="${task.id}" data-status="${task.status}">
+            ${isDone ? '✓' : ''}
           </div>
-          <span class="badge-pending">En attente</span>
+          <div class="task-info">
+            <div class="task-guest">👤 ${task.guest_name || 'Voyageur'}</div>
+            <div class="task-summary">${task.summary || task.guest_message?.substring(0, 80) || ''}</div>
+          </div>
+          <div class="task-meta">
+            <span class="badge ${badgeClass}">${typeLabel}</span>
+            <span class="badge badge-property">${getPropName(task.property_id)}</span>
+            <span class="task-time">${timeStr}</span>
+            <span class="task-expand">▼</span>
+          </div>
         </div>
-        <div class="msg-card-body">
-          <div class="msg-guest">💬 ${guestMsg}</div>
-          <div class="msg-reply-box" id="reply-${msg.bookId || msg.id}">
-            Cliquez sur "Générer" pour créer une réponse automatique...
+
+        <div class="task-body">
+
+          ${thread.length ? `
+          <div class="task-section">
+            <div class="task-section-title">💬 Fil de conversation</div>
+            <div class="thread">
+              ${thread.map(m => `
+                <div>
+                  <div class="thread-source">${m.source === 'guest' ? '👤 Voyageur' : m.source === 'host' ? '🏠 Hôte' : '⚙️ Système'}</div>
+                  <div class="thread-msg ${m.source}">${escHtml(m.message)}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>` : ''}
+
+          ${subTasks.length ? `
+          <div class="task-section">
+            <div class="task-section-title">📋 Points à traiter</div>
+            ${subTasks.map((st, i) => `
+              <div class="subtask" id="subtask-${task.id}-${i}">
+                <div class="subtask-question">${i+1}. ${escHtml(st.question || st.summary || '')}</div>
+                <textarea class="form-input subtask-reply" id="reply-${task.id}-${i}"
+                  placeholder="Votre réponse…">${escHtml(st.suggested_reply || '')}</textarea>
+                <div class="subtask-actions">
+                  <button class="btn btn-primary" onclick="sendSubtaskReply('${task.id}', ${i}, '${task.book_id}', '${task.property_id}')">
+                    ✉️ Envoyer
+                  </button>
+                  <button class="btn" onclick="markSubtaskDone('${task.id}', ${i})">
+                    ✓ Marquer fait
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>` : `
+          <div class="task-section">
+            <div class="task-section-title">✏️ Réponse</div>
+            <textarea class="form-input subtask-reply" id="reply-${task.id}-0"
+              placeholder="Votre réponse…">${escHtml(task.suggested_reply || '')}</textarea>
+            <div class="subtask-actions" style="margin-top:8px">
+              <button class="btn btn-primary" onclick="sendSubtaskReply('${task.id}', 0, '${task.book_id}', '${task.property_id}')">
+                ✉️ Envoyer via Beds24
+              </button>
+            </div>
+          </div>`}
+
+          <div class="task-actions">
+            <button class="btn" onclick="ignoreTask('${task.id}')">🚫 Ignorer</button>
           </div>
-          <div class="msg-actions">
-            <button class="btn btn-primary btn-generate"
-              data-msg-id="${msg.bookId || msg.id}"
-              data-guest-msg="${encodeURIComponent(guestMsg)}"
-              data-guest-name="${guestName}"
-              data-prop-id="${propId}">
-              ✨ Générer
-            </button>
-            <button class="btn btn-send" style="display:none;background:#fff3cd;color:#856404;border-color:#ffc107"
-              data-msg-id="${msg.bookId || msg.id}"
-              data-prop-id="${propId}">
-              ✓ Envoyer
-            </button>
-            <button class="btn" onclick="this.closest('.msg-card').style.display='none'">
-              Ignorer
-            </button>
-          </div>
+
         </div>
       </div>
     `
   }
 
-  async function generateReply(msgId, guestMsgEncoded, guestName, propId) {
-    const guestMsg = decodeURIComponent(guestMsgEncoded)
-    const replyBox = document.getElementById(`reply-${msgId}`)
-    const property = properties.find(p => p.id == propId)
+  window.toggleTask = async (id, status) => {
+    const newStatus = status === 'done' ? 'pending' : 'done'
+    await window._supabase.from('agent_tasks').update({ status: newStatus }).eq('id', id)
+    const task = allTasks.find(t => t.id === id)
+    if (task) task.status = newStatus
+    updateStats(); renderTasks()
+  }
 
-    replyBox.textContent = '⏳ Génération en cours...'
+  window.ignoreTask = async (id) => {
+    await window._supabase.from('agent_tasks').update({ status: 'ignored' }).eq('id', id)
+    allTasks = allTasks.filter(t => t.id !== id)
+    updateStats(); renderTasks()
+  }
 
-    const systemPrompt = `Tu es un assistant de conciergerie pour la location courte durée.
-Tu réponds aux messages des voyageurs au nom de l'hôte.
-Bien : ${property?.name || 'appartement'}
-Adresse : ${property?.address || ''}, ${property?.city || ''}
-Check-in : ${property?.checkInStart || '16h'} - Check-out : ${property?.checkOutEnd || '10h'}
-Réponds en français, de façon chaleureuse et professionnelle. Sois concis (2-3 phrases max).`
+  window.markSubtaskDone = (taskId, index) => {
+    const el = document.getElementById(`subtask-${taskId}-${index}`)
+    if (el) el.classList.toggle('subtask-done')
+  }
 
-    const res = await fetch('/api/grok', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${currentSession.access_token}`
-      },
-      body: JSON.stringify({
-        systemPrompt,
-        messages: [{ role: 'user', content: `Message du voyageur ${guestName} : "${guestMsg}"` }]
+  window.sendSubtaskReply = async (taskId, index, bookId, propId) => {
+    const reply = document.getElementById(`reply-${taskId}-${index}`)?.value?.trim()
+    if (!reply) return alert('Entrez une réponse')
+
+    const btn = event.target
+    btn.disabled = true; btn.textContent = 'Envoi…'
+
+    try {
+      const res = await fetch('/api/beds24', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
       })
-    })
+      const data = await res.json()
 
-    const data = await res.json()
+      if (data.success) {
+        btn.textContent = '✅ Envoyé'
+        btn.style.background = 'var(--green)'
+        document.getElementById(`subtask-${taskId}-${index}`)?.classList.add('subtask-done')
 
-    if (data.reply) {
-      replyBox.textContent = data.reply
-      replyBox.contentEditable = true
-      replyBox.style.border = '0.5px solid var(--green)'
-
-      const sendBtn = document.querySelector(`[data-msg-id="${msgId}"].btn-send`)
-      if (sendBtn) sendBtn.style.display = 'inline-flex'
-
-      // Sauvegarder la conversation dans Supabase
-      const { error } = await supabase.from('conversations').insert({
-        user_id: currentSession.user.id,
-        property_id: String(propId),
-        guest_name: guestName,
-        guest_message: guestMsg,
-        agent_reply: data.reply,
-        book_id: String(msgId)
-      })
-
-      if (error) {
-        logger.error('Agent AI', 'Erreur sauvegarde conversation', error)
+        // Marquer la tâche comme done si tous les sous-tâches sont traités
+        await window._supabase.from('agent_tasks').update({ status: 'done' }).eq('id', taskId)
+        const task = allTasks.find(t => t.id === taskId)
+        if (task) task.status = 'done'
+        updateStats()
       } else {
-        logger.info('Agent AI', 'Conversation sauvegardée', { msgId })
+        btn.textContent = '❌ Erreur'
+        btn.disabled = false
+        alert('Erreur : ' + (data.error || 'Inconnu'))
       }
-
-    } else {
-      replyBox.textContent = 'Erreur lors de la génération — réessayez'
-      logger.error('Agent AI', 'Erreur génération', data)
+    } catch (err) {
+      btn.textContent = '❌ Erreur'
+      btn.disabled = false
     }
   }
 
-  async function sendReply(msgId, propId) {
-    const replyBox = document.getElementById(`reply-${msgId}`)
-
-    // MODE TEST — ne pas envoyer pour l'instant
-    alert('⚠️ MODE TEST — La réponse ne sera pas envoyée.\n\nEn production, ce message sera envoyé via Beds24.')
-
-    const card = document.getElementById(`card-${msgId}`)
-    card.querySelector('.badge-pending').className = 'badge-sent'
-    card.querySelector('.badge-sent').textContent = '✓ Simulé'
-    logger.info('Agent AI', 'SIMULATION — message non envoyé', { msgId })
+  function getPropName(propId) {
+    const select = document.getElementById('prop-select')
+    const opt = select.querySelector(`option[value="${propId}"]`)
+    return opt?.textContent || propId || '—'
   }
 
-  init()
+  function escHtml(str) {
+    return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
 </script>
 
 </body>
