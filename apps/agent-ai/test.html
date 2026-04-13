@@ -189,7 +189,7 @@
     return kb
   }
 
-  // ── Simulateur avec moteur de classification ──────────────────────────────
+  // ── Simulateur avec moteur de classification (identique au cron) ────────────
   async function simulate() {
     const message   = document.getElementById('sim-message').value.trim()
     const guestName = document.getElementById('sim-guest-name').value.trim() || 'Voyageur Test'
@@ -197,58 +197,33 @@
     if (!currentPropertyId) return alert('Sélectionnez un bien')
 
     const btn = document.getElementById('btn-simulate')
-    btn.disabled = true; btn.textContent = '⏳ Classification...'
+    btn.disabled = true; btn.textContent = '⏳ Traitement...'
     document.getElementById('sim-status').textContent = ''
     document.getElementById('sim-result').style.display = 'none'
 
-    const property  = properties.find(p => String(p.id) === String(currentPropertyId))
-    const knowledge = await getKnowledge()
-
-    const prompt = `Tu es un assistant de conciergerie pour location courte durée.
-Analyse ce message d'un voyageur et classe-le PRÉCISÉMENT.
-
-BASE DE CONNAISSANCE :
-${knowledge || 'Aucune information disponible'}
-
-BIEN : ${property?.name || ''}
-
-MESSAGE DU VOYAGEUR (${guestName}) :
-"${message}"
-
-RÈGLES :
-1. "sympathy" : remerciement, bonjour, au revoir, confirmation simple → auto_reply chaleureuse
-2. "info_known" : question dont la réponse EST dans la base → auto_reply avec l'info
-3. "info_unknown" : question dont la réponse N'EST PAS dans la base → sub_tasks
-4. "intervention" : problème, incident, demande d'action concrète → sub_tasks
-
-Réponds UNIQUEMENT en JSON :
-{"type":"...","reason":"...","auto_reply":"... ou null","sub_tasks":[{"question":"...","summary":"...","suggested_reply":"..."}]}`
-
-    const res = await fetch('/api/grok', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({
-        systemPrompt: 'Réponds UNIQUEMENT en JSON valide sans markdown.',
-        messages: [{ role: 'user', content: prompt }]
-      })
-    })
-    const aiData = await res.json()
-    btn.disabled = false; btn.textContent = '▶ Simuler'
-
-    let c
     try {
-      const text = aiData.reply || ''
-      c = JSON.parse(text.replace(/```json|```/g, '').trim())
-    } catch {
-      document.getElementById('sim-status').textContent = '❌ Erreur classification'
-      return
-    }
+      const res  = await fetch('/api/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization':  },
+        body: JSON.stringify({ message, guestName, propertyId: currentPropertyId })
+      })
+      const data = await res.json()
+      btn.disabled = false; btn.textContent = '▶ Simuler'
 
-    renderSimResult(message, guestName, c)
-    document.getElementById('sim-status').textContent = '✅ Simulation terminée'
+      if (!data.success) {
+        document.getElementById('sim-status').textContent = '❌ ' + (data.error || 'Erreur')
+        return
+      }
+
+      renderSimResult(message, guestName, data.classification, data.saved_conv_id, data.saved_task_id)
+      document.getElementById('sim-status').textContent = '✅ Traitement terminé — résultat enregistré'
+    } catch (err) {
+      btn.disabled = false; btn.textContent = '▶ Simuler'
+      document.getElementById('sim-status').textContent = '❌ ' + err.message
+    }
   }
 
-  function renderSimResult(message, guestName, c) {
+  function renderSimResult(message, guestName, c, convId, taskId) {
     const types = {
       sympathy:     { label: '💬 Sympathie → réponse auto', badge: 'badge-ai' },
       info_known:   { label: '✅ Info connue → réponse auto', badge: 'badge-ai' },
@@ -281,6 +256,8 @@ Réponds UNIQUEMENT en JSON :
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <span class="${t.badge}">${t.label}</span>
+            <button onclick="deleteSimResult('${convId}','${taskId}')"
+              style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:12px;font-family:inherit;padding:2px 8px;border:0.5px solid #E24B4A;border-radius:4px">🗑 Supprimer</button>
             <button onclick="document.getElementById('sim-result').style.display='none';document.getElementById('sim-status').textContent=''"
               style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:18px;line-height:1">×</button>
           </div>
@@ -373,6 +350,18 @@ Réponds UNIQUEMENT en JSON :
           <div class="conv-meta">${date} · Réservation #${c.book_id}</div>
         </div>`
     }).join('')
+  }
+
+  async function deleteSimResult(convId, taskId) {
+    if (!confirm('Supprimer ce résultat de test ?')) return
+    await fetch('/api/simulate', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ conv_id: convId || null, task_id: taskId || null })
+    })
+    document.getElementById('sim-result').style.display = 'none'
+    document.getElementById('sim-status').textContent = '🗑 Résultat supprimé'
+    loadHistory()
   }
 
   function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
