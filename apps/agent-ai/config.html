@@ -181,6 +181,22 @@
   function renderPanel() {
     document.getElementById('configPanel').innerHTML =
       ALERT_TYPES.map(type => buildSection(type)).join('')
+    document.querySelectorAll('.tags-input').forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        const typeKey = input.dataset.typekey
+        const channel = input.dataset.channel
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault()
+          const val = input.value.trim().replace(/,$/,'')
+          if (val) addTag(typeKey, channel, val, input)
+        } else if (e.key === 'Backspace' && input.value === '') {
+          const list = channel === 'sms'
+            ? config[currentProp][typeKey].sms_numbers
+            : config[currentProp][typeKey].email_addresses
+          if (list.length) removeTag(typeKey, channel, list[list.length - 1])
+        }
+      })
+    })
   }
 
   function buildSection(type) {
@@ -249,24 +265,6 @@
       <button class="tag-remove" onclick="removeTag('${typeKey}','${channel}','${escAttr(value)}')" title="Supprimer">×</button>
     </span>`
   }
-
-  // ── Délégation keydown sur les inputs tags ────
-  document.addEventListener('keydown', (e) => {
-    if (!e.target.classList.contains('tags-input')) return
-    const typeKey = e.target.dataset.typekey
-    const channel = e.target.dataset.channel
-    if (!typeKey || !channel) return
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault()
-      const val = e.target.value.trim().replace(/,$/, '')
-      if (val) addTag(typeKey, channel, val, e.target)
-    } else if (e.key === 'Backspace' && e.target.value === '') {
-      const list = channel === 'sms'
-        ? config[currentProp][typeKey].sms_numbers
-        : config[currentProp][typeKey].email_addresses
-      if (list.length) removeTag(typeKey, channel, list[list.length - 1])
-    }
-  })
 
   // ── Interactions ──────────────────────────────
   window.toggleChannel = (typeKey, channel, enabled) => {
