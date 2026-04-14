@@ -528,12 +528,30 @@
 
   function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null }
 
-  function markDone() {
-    if (!selectedMenage) return
-    if (doneSet.has(selectedMenage.id)) doneSet.delete(selectedMenage.id)
-    else doneSet.add(selectedMenage.id)
-    saveDoneSet(); closeModal(); renderWeek(); renderMiniCal()
+  async function markDone() {
+  if (!selectedMenage) return
+  const wasAlreadyDone = doneSet.has(selectedMenage.id)
+  if (wasAlreadyDone) {
+    doneSet.delete(selectedMenage.id)
+  } else {
+    doneSet.add(selectedMenage.id)
+    // Déclencher les templates "ménage terminé"
+    if (selectedMenage.bookingId && selectedMenage.propId) {
+      fetch(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'markDone',
+          booking_id: selectedMenage.bookingId,
+          property_id: selectedMenage.propId
+        })
+      }).then(r => r.json()).then(d => {
+        if (d.messagesSent > 0) console.log(`[Ménage] ${d.messagesSent} message(s) envoyé(s)`)
+      }).catch(err => console.error('[Ménage] Erreur markDone:', err))
+    }
   }
+  saveDoneSet(); closeModal(); renderWeek(); renderMiniCal()
+}
 
   function loadDoneSet() { const raw = localStorage.getItem('menages-done-public'); if (raw) doneSet = new Set(JSON.parse(raw)) }
   function saveDoneSet() { localStorage.setItem('menages-done-public', JSON.stringify([...doneSet])) }
