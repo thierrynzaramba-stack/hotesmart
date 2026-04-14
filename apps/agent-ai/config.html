@@ -214,7 +214,7 @@
            onclick="document.getElementById('sms-input-${typeKey}').focus()">
         ${(cfg.sms_numbers||[]).map(n => buildTag(typeKey,'sms',n)).join('')}
         <input class="tags-input" id="sms-input-${typeKey}" placeholder="+33612345678"
-               onkeydown="handleTagKey(event,'${typeKey}','sms')">
+               data-typekey="${typeKey}" data-channel="sms">
       </div>
       <div class="field-hint">Entrée ou , pour ajouter · Format international</div>
     </div>`
@@ -236,7 +236,7 @@
            onclick="document.getElementById('email-input-${typeKey}').focus()">
         ${(cfg.email_addresses||[]).map(e => buildTag(typeKey,'email',e)).join('')}
         <input class="tags-input" id="email-input-${typeKey}" placeholder="proprietaire@mail.com"
-               onkeydown="handleTagKey(event,'${typeKey}','email')">
+               data-typekey="${typeKey}" data-channel="email">
       </div>
       <div class="field-hint">Entrée ou , pour ajouter plusieurs destinataires</div>
     </div>`
@@ -250,13 +250,12 @@
     </span>`
   }
 
-  // ── Interactions ──────────────────────────────
-  window.toggleChannel = (typeKey, channel, enabled) => {
-    config[currentProp][typeKey][channel === 'sms' ? 'sms_enabled' : 'email_enabled'] = enabled
-    document.getElementById(`${channel}-block-${typeKey}`).classList.toggle('disabled', !enabled)
-  }
-
-  window.handleTagKey = (e, typeKey, channel) => {
+  // ── Délégation keydown sur les inputs tags ────
+  document.getElementById('configPanel').addEventListener('keydown', (e) => {
+    if (!e.target.classList.contains('tags-input')) return
+    const typeKey = e.target.dataset.typekey
+    const channel = e.target.dataset.channel
+    if (!typeKey || !channel) return
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault()
       const val = e.target.value.trim().replace(/,$/, '')
@@ -267,7 +266,15 @@
         : config[currentProp][typeKey].email_addresses
       if (list.length) removeTag(typeKey, channel, list[list.length - 1])
     }
+  })
+
+  // ── Interactions ──────────────────────────────
+  window.toggleChannel = (typeKey, channel, enabled) => {
+    config[currentProp][typeKey][channel === 'sms' ? 'sms_enabled' : 'email_enabled'] = enabled
+    document.getElementById(`${channel}-block-${typeKey}`).classList.toggle('disabled', !enabled)
   }
+
+
 
   function addTag(typeKey, channel, value, inputEl) {
     const list = channel === 'sms'
