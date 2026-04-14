@@ -220,8 +220,7 @@
     if (task.status === 'pending') statusBadge = `<span class="badge ${isInfo ? 'badge-info' : 'badge-intervention'}">${isInfo ? '❓ Info manquante' : '🚨 Intervention'}</span>`
 
     const actionButtons = task.status === 'pending'
-      ? `<button class="btn btn-primary" onclick="markDone('${task.id}')">✓ Fait</button>
-         <button class="btn" onclick="markIgnored('${task.id}')">🚫 Ignorer</button>`
+      ? `<button class="btn" onclick="markIgnored('${task.id}')">🚫 Ignorer</button>`
       : `<button class="btn" onclick="markPending('${task.id}')">↩ Remettre en attente</button>`
 
     const subTasksHtml = subTasks.length ? `

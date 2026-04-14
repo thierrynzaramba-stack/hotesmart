@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
 
       case 'getMessages': {
         const r = await fetch(
-          `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=50`,
+          `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=200`,
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
@@ -95,8 +95,12 @@ module.exports = async function handler(req, res) {
         // Construire les messages avec infos voyageur
         const messages = bookingIds.filter(bookId => bookingsMap[bookId]).map(bookId => {
           const msgs = byBooking[bookId]
-          const lastGuestMsg = msgs.filter(m => m.source === 'guest').sort((a, b) => new Date(b.time) - new Date(a.time))[0]
-          if (!lastGuestMsg) return null
+          const guestMsgs = msgs.filter(m => m.source === 'guest')
+          if (!guestMsgs.length) return null
+
+          const lastGuestMsg = guestMsgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
+          const lastMsg = msgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
+          const waitingReply = lastMsg?.source === 'guest' // dernier message = voyageur = en attente
 
           const booking = bookingsMap[bookId] || {}
           return {
@@ -110,6 +114,7 @@ module.exports = async function handler(req, res) {
             messageId:      lastGuestMsg.id,
             messageTime:    lastGuestMsg.time,
             read:           lastGuestMsg.read,
+            waitingReply,
             thread:         msgs.map(m => ({
               id:      m.id,
               time:    m.time,
@@ -147,7 +152,7 @@ module.exports = async function handler(req, res) {
         const r = await fetch('https://beds24.com/api/v2/bookings/messages', {
           method: 'POST',
           headers: { token: beds24Key, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookingId, message })
+          body: JSON.stringify([{ bookingId, message }])
         })
         const d = await r.json()
         console.log('[Beds24] sendMessage response:', JSON.stringify(d))
