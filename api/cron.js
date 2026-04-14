@@ -183,9 +183,10 @@ async function processProperty(userId, beds24Key, property, results) {
 
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
-  // Charger toutes les réservations en une seule requête
+  // Charger les réservations depuis 6 mois (pour avoir les séjours récents)
+  const dateFrom6m = new Date(); dateFrom6m.setMonth(dateFrom6m.getMonth() - 6)
   const bookingRes = await fetch(
-    `https://beds24.com/api/v2/bookings?propId=${property.id}`,
+    `https://beds24.com/api/v2/bookings?propId=${property.id}&arrivalFrom=${dateFrom6m.toISOString().split('T')[0]}`,
     { headers: { token: beds24Key } }
   )
   const bookingData = await bookingRes.json()
