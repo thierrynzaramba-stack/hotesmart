@@ -8,7 +8,6 @@ export async function renderSidebar(activePage = '') {
   if (!sidebar) return
 
   sidebar.innerHTML = `
-    <div class="toggle-btn" onclick="toggleSidebar()">☰</div>
     <div class="nav">
       <div class="nav-section-label">Principal</div>
       <a class="nav-item ${activePage === 'accueil' ? 'active' : ''}" href="/">
@@ -46,9 +45,9 @@ export async function renderSidebar(activePage = '') {
         <span class="sub-check">✓</span>
       </a>
       <a class="nav-sub ${activePage === 'serrures' ? 'connected' : ''}" href="/apps/serrures" style="text-decoration:none;color:inherit">
-  <div class="sub-dot green"></div>Seam Serrures
-  <span class="sub-check">✓</span>
-</a>
+        <div class="sub-dot green"></div>Seam Serrures
+        <span class="sub-check">✓</span>
+      </a>
       <div class="nav-sub">
         <div class="sub-dot gray"></div>Airbnb
         <span class="sub-soon">bientôt</span>
@@ -103,12 +102,15 @@ async function renderActiveApps(user, activePage = '') {
       <a class="nav-sub ${activePage === 'agent-ai-knowledge' ? 'connected' : ''}" href="/apps/agent-ai/knowledge">
         <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
       </a>
+      <a class="nav-sub ${activePage === 'agent-ai-messages' ? 'connected' : ''}" href="/apps/agent-ai/messages">
+        <div class="sub-dot ${activePage === 'agent-ai-messages' ? 'green' : 'gray'}"></div>Messages auto
+      </a>
       <a class="nav-sub ${activePage === 'agent-ai-test' ? 'connected' : ''}" href="/apps/agent-ai/test">
-  <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
-  </a>
-  <a class="nav-sub ${activePage === 'agent-ai-config' ? 'connected' : ''}" href="/apps/agent-ai/config">
-    <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Config alertes
-  </a>
+        <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
+      </a>
+      <a class="nav-sub ${activePage === 'agent-ai-config' ? 'connected' : ''}" href="/apps/agent-ai/config">
+        <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Config alertes
+      </a>
     ` : ''
     return `
       <a class="nav-item ${isActiveApp ? 'active' : ''}" href="/apps/${app.id}">
@@ -122,10 +124,6 @@ async function renderActiveApps(user, activePage = '') {
 
 function getInitials(email = '') {
   return email.substring(0, 2).toUpperCase()
-}
-
-window.toggleSidebar = function() {
-  document.getElementById('sidebar').classList.toggle('open')
 }
 
 window.handleSignOut = async function() {

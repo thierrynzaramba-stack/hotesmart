@@ -61,25 +61,13 @@ body {
   z-index: 10;
 }
 
+.sidebar:hover,
 .sidebar.open {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
 }
 
-.toggle-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border-bottom: 0.5px solid var(--border);
-  font-size: 16px;
-  color: var(--text2);
-  flex-shrink: 0;
-}
-
-.toggle-btn:hover { background: var(--bg2); color: var(--text); }
+.toggle-btn { display: none; }
 
 .nav { padding: 8px 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
 
@@ -94,6 +82,7 @@ body {
   transition: opacity 0.2s;
 }
 
+.sidebar:hover .nav-section-label,
 .sidebar.open .nav-section-label { opacity: 1; }
 
 .nav-item {
@@ -129,6 +118,7 @@ body {
 .nav-icon { width: 22px; min-width: 22px; text-align: center; font-size: 14px; }
 
 .nav-label { opacity: 0; transition: opacity 0.15s; font-size: 13px; }
+.sidebar:hover .nav-label,
 .sidebar.open .nav-label { opacity: 1; }
 
 .nav-badge {
@@ -139,6 +129,7 @@ body {
   opacity: 0; transition: opacity 0.15s;
 }
 
+.sidebar:hover .nav-badge,
 .sidebar.open .nav-badge { opacity: 1; }
 
 .nav-sub {
@@ -151,6 +142,7 @@ body {
   transition: max-height 0.2s ease, opacity 0.2s;
 }
 
+.sidebar:hover .nav-sub,
 .sidebar.open .nav-sub { max-height: 32px; opacity: 1; }
 .nav-sub:hover { background: var(--bg2); color: var(--text); }
 .nav-sub.connected { color: var(--text); }
@@ -182,6 +174,7 @@ body {
 }
 
 .user-info { opacity: 0; transition: opacity 0.15s; }
+.sidebar:hover .user-info,
 .sidebar.open .user-info { opacity: 1; }
 .user-name { font-size: 12px; font-weight: 500; white-space: nowrap; }
 .user-plan { font-size: 10px; color: var(--green); }
@@ -305,6 +298,9 @@ body {
   border: 0.5px solid var(--border2);
   background: var(--bg);
   color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .btn:hover { background: var(--bg2); }
@@ -320,5 +316,6 @@ body {
   border-radius: var(--radius);
   font-size: 13px; color: var(--text);
   background: var(--bg);
+  font-family: inherit;
 }
 .form-input:focus { outline: none; border-color: var(--green); }

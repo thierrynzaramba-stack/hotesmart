@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Messages automatiques</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .prop-tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
+    .prop-tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; font-family:inherit; background:none; border-top:none; border-left:none; border-right:none; }
+    .prop-tab:hover { color:var(--text); }
+    .prop-tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
+
+    .templates-list { display:flex; flex-direction:column; gap:12px; }
+
+    .template-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; }
+    .template-card.inactive { opacity:0.6; }
+    .template-header { padding:12px 16px; background:var(--bg2); border-bottom:0.5px solid var(--border); display:flex; align-items:center; gap:12px; }
+    .template-event { font-size:13px; font-weight:500; flex:1; }
+    .template-timing { font-size:11px; color:var(--text2); background:var(--bg); border:0.5px solid var(--border); padding:2px 8px; border-radius:20px; }
+    .template-body { padding:16px; }
+
+    .timing-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+    .timing-row label { font-size:12px; color:var(--text2); }
+    .timing-row select, .timing-row input[type=time] { font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg2); color:var(--text); font-family:inherit; }
+
+    .template-text { width:100%; min-height:100px; resize:vertical; font-size:13px; line-height:1.6; }
+    .template-hint { font-size:11px; color:var(--text2); margin-top:6px; line-height:1.6; }
+    .template-actions { display:flex; gap:8px; margin-top:12px; align-items:center; }
+
+    .toggle { position:relative; width:44px; height:24px; flex-shrink:0; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
+    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
+    input:checked + .toggle-slider { background:var(--green); }
+    input:checked + .toggle-slider:before { transform:translateX(20px); }
+
+    .badge-event { font-size:10px; padding:2px 8px; border-radius:20px; font-weight:500; }
+    .badge-arrival  { background:#E1F5EE; color:var(--green); }
+    .badge-departure { background:#EEEDFE; color:#3C3489; }
+    .badge-booking  { background:#FFF3CD; color:#856404; }
+    .badge-menage   { background:#fdecea; color:#E24B4A; }
+
+    .send-anyway-row { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; color:var(--text2); }
+
+    .empty-state { text-align:center; padding:40px; color:var(--text2); font-size:13px; }
+    .toast-msg { position:fixed; bottom:24px; right:24px; background:var(--green); color:white; padding:10px 18px; border-radius:var(--radius); font-size:13px; z-index:999; display:none; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
+
+    .add-btn-row { margin-bottom:20px; }
+    .variables-box { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:10px 14px; font-size:11px; color:var(--text2); margin-bottom:20px; line-height:1.8; }
+    .variables-box strong { color:var(--text); }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">📨 Messages automatiques</div>
+        <div class="page-sub">Templates envoyés automatiquement selon les événements</div>
+      </div>
+      <button class="btn btn-primary" onclick="addTemplate()">+ Nouveau template</button>
+    </div>
+
+    <div class="content">
+      <div class="prop-tabs" id="propTabs"></div>
+
+      <div class="variables-box">
+        <strong>Variables disponibles dans les templates :</strong><br>
+        <code>{prenom}</code> · <code>{nom}</code> · <code>{arrivee}</code> · <code>{depart}</code> · <code>{logement}</code> · <code>{adresse}</code> · <code>{code_acces}</code> · <code>{checkin}</code> · <code>{checkout}</code>
+      </div>
+
+      <div class="templates-list" id="templatesList">
+        <div class="empty-state">Chargement…</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-msg" id="toast"></div>
+
+<script type="module">
+  import { requireAuth }      from '/components/auth-guard.js'
+  import { renderSidebar }    from '/components/sidebar.js'
+  import { supabase }         from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('agent-ai-messages')
+  window._session  = session
+  window._supabase = supabase
+  window.init()
+</script>
+
+<script>
+  const PROPERTIES = [
+    { id: '169567', name: 'Cœur de vie 23' },
+    { id: '209413', name: 'La bulle' }
+  ]
+
+  const EVENTS = [
+    { key: 'new_booking',   label: '📅 Nouvelle réservation', badge: 'badge-booking',   ref: 'booking' },
+    { key: 'before_arrival',label: '🕐 Avant arrivée',        badge: 'badge-arrival',   ref: 'arrival' },
+    { key: 'arrival_day',   label: '🏠 Jour d\'arrivée',      badge: 'badge-arrival',   ref: 'arrival' },
+    { key: 'menage_done',   label: '🧹 Ménage terminé',       badge: 'badge-menage',    ref: 'arrival' },
+    { key: 'before_depart', label: '📤 Avant départ',         badge: 'badge-departure', ref: 'departure' },
+    { key: 'after_depart',  label: '⭐ Après départ',         badge: 'badge-departure', ref: 'departure' },
+  ]
+
+  let currentProp = PROPERTIES[0].id
+  let templates   = []
+
+  window.init = async () => {
+    renderTabs()
+    await loadTemplates()
+  }
+
+  function renderTabs() {
+    document.getElementById('propTabs').innerHTML = PROPERTIES.map(p => `
+      <button class="prop-tab ${p.id === currentProp ? 'active' : ''}"
+              onclick="selectProp('${p.id}')">${p.name}</button>
+    `).join('')
+  }
+
+  window.selectProp = async id => {
+    currentProp = id
+    renderTabs()
+    await loadTemplates()
+  }
+
+  async function loadTemplates() {
+    const { data, error } = await window._supabase
+      .from('message_templates')
+      .select('*')
+      .eq('user_id', window._session.user.id)
+      .eq('property_id', currentProp)
+      .order('created_at')
+
+    if (error) { console.error(error); return }
+    templates = data || []
+    renderTemplates()
+  }
+
+  function renderTemplates() {
+    const list = document.getElementById('templatesList')
+    if (!templates.length) {
+      list.innerHTML = '<div class="empty-state">Aucun template — cliquez sur "+ Nouveau template"</div>'
+      return
+    }
+    list.innerHTML = templates.map(t => renderTemplate(t)).join('')
+  }
+
+  function renderTemplate(t) {
+    const event    = EVENTS.find(e => e.key === t.event_type) || { label: t.event_type, badge: 'badge-booking' }
+    const timingStr = formatTiming(t)
+
+    return `
+      <div class="template-card ${t.active ? '' : 'inactive'}" id="tpl-${t.id}">
+        <div class="template-header">
+          <span class="badge-event ${event.badge}">${event.label}</span>
+          <span class="template-timing">⏰ ${timingStr}</span>
+          <label class="toggle" title="${t.active ? 'Actif' : 'Inactif'}">
+            <input type="checkbox" ${t.active ? 'checked' : ''}
+                   onchange="toggleActive('${t.id}', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="deleteTemplate('${t.id}')">🗑</button>
+        </div>
+        <div class="template-body">
+          <div class="timing-row">
+            <label>Événement :</label>
+            <select onchange="updateField('${t.id}', 'event_type', this.value)">
+              ${EVENTS.map(e => `<option value="${e.key}" ${t.event_type === e.key ? 'selected' : ''}>${e.label}</option>`).join('')}
+            </select>
+            <label>Référence :</label>
+            <select onchange="updateField('${t.id}', 'reference', this.value)">
+              <option value="arrival"  ${t.reference === 'arrival'  ? 'selected' : ''}>Arrivée</option>
+              <option value="departure"${t.reference === 'departure'? 'selected' : ''}>Départ</option>
+              <option value="booking"  ${t.reference === 'booking'  ? 'selected' : ''}>Réservation</option>
+            </select>
+            <label>Jour :</label>
+            <select onchange="updateField('${t.id}', 'offset_days', parseInt(this.value))">
+              ${[-3,-2,-1,0,1,2,3].map(d => `<option value="${d}" ${t.offset_days === d ? 'selected' : ''}>${d === 0 ? 'J0' : d > 0 ? 'J+'+d : 'J'+d}</option>`).join('')}
+            </select>
+            <label>Heure :</label>
+            <input type="time" value="${t.send_time || '10:00'}"
+                   onchange="updateField('${t.id}', 'send_time', this.value)">
+          </div>
+
+          <div class="send-anyway-row">
+            <label class="toggle" style="width:36px;height:20px">
+              <input type="checkbox" ${t.send_anyway ? 'checked' : ''}
+                     onchange="updateField('${t.id}', 'send_anyway', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Envoyer quand même si le délai est dépassé (ex: réservation faite le jour J)</span>
+          </div>
+
+          <textarea class="form-input template-text" id="text-${t.id}"
+            placeholder="Bonjour {prenom}, votre réservation au {logement} est confirmée..."
+            onchange="updateField('${t.id}', 'template_text', this.value)">${escHtml(t.template_text || '')}</textarea>
+
+          <div class="template-hint">
+            💡 Utilisez les variables entre accolades : <code>{prenom}</code>, <code>{arrivee}</code>, <code>{code_acces}</code>...
+            L'AI personnalisera légèrement le message selon le contexte du voyageur.
+          </div>
+
+          <div class="template-actions">
+            <button class="btn btn-primary" onclick="saveTemplate('${t.id}')">💾 Sauvegarder</button>
+            <button class="btn" onclick="previewTemplate('${t.id}')">👁 Aperçu AI</button>
+          </div>
+        </div>
+      </div>`
+  }
+
+  function formatTiming(t) {
+    const refLabel = t.reference === 'arrival' ? 'arrivée' : t.reference === 'departure' ? 'départ' : 'réservation'
+    const dayLabel = t.offset_days === 0 ? 'Jour J' : t.offset_days > 0 ? `J+${t.offset_days}` : `J${t.offset_days}`
+    return `${dayLabel} ${t.reference !== 'booking' ? refLabel : ''} à ${t.send_time || '10:00'}`
+  }
+
+  window.addTemplate = async () => {
+    const { data, error } = await window._supabase
+      .from('message_templates')
+      .insert({
+        user_id:       window._session.user.id,
+        property_id:   currentProp,
+        event_type:    'before_arrival',
+        reference:     'arrival',
+        offset_days:   -1,
+        send_time:     '10:00',
+        send_anyway:   true,
+        active:        true,
+        template_text: ''
+      })
+      .select().single()
+
+    if (error) { showToast('❌ Erreur : ' + error.message, true); return }
+    templates.push(data)
+    renderTemplates()
+    document.getElementById(`tpl-${data.id}`)?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  window.updateField = (id, field, value) => {
+    const t = templates.find(t => t.id === id)
+    if (t) t[field] = value
+  }
+
+  window.saveTemplate = async (id) => {
+    const t = templates.find(t => t.id === id)
+    if (!t) return
+    t.template_text = document.getElementById(`text-${id}`)?.value || t.template_text
+
+    const { error } = await window._supabase
+      .from('message_templates')
+      .update({
+        event_type:    t.event_type,
+        reference:     t.reference,
+        offset_days:   t.offset_days,
+        send_time:     t.send_time,
+        send_anyway:   t.send_anyway,
+        active:        t.active,
+        template_text: t.template_text
+      })
+      .eq('id', id)
+
+    if (error) { showToast('❌ ' + error.message, true); return }
+    showToast('✅ Template sauvegardé !')
+    renderTemplates()
+  }
+
+  window.toggleActive = async (id, active) => {
+    const t = templates.find(t => t.id === id)
+    if (t) t.active = active
+    await window._supabase.from('message_templates').update({ active }).eq('id', id)
+    document.getElementById(`tpl-${id}`)?.classList.toggle('inactive', !active)
+    showToast(active ? '✅ Template activé' : '⏸ Template désactivé')
+  }
+
+  window.deleteTemplate = async (id) => {
+    if (!confirm('Supprimer ce template ?')) return
+    await window._supabase.from('message_templates').delete().eq('id', id)
+    templates = templates.filter(t => t.id !== id)
+    renderTemplates()
+    showToast('🗑 Template supprimé')
+  }
+
+  window.previewTemplate = async (id) => {
+    const t = templates.find(t => t.id === id)
+    if (!t) return
+    const text = document.getElementById(`text-${id}`)?.value || t.template_text
+    if (!text) { showToast('Rédigez d\'abord le template', true); return }
+
+    const btn = document.querySelector(`#tpl-${id} .template-actions .btn:last-child`)
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...' }
+
+    const res = await fetch('/api/grok', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+      body: JSON.stringify({
+        systemPrompt: 'Tu es un assistant de conciergerie. Personnalise légèrement ce template de message pour un voyageur fictif. Remplace les variables {prenom} par "Marie", {nom} par "Dupont", {arrivee} par "15 avril", {depart} par "17 avril", {logement} par le logement indiqué, {code_acces} par "123456", {checkin} par "18h", {checkout} par "10h". Garde le ton et le contenu du template, améliore légèrement la formulation.',
+        messages: [{ role: 'user', content: `Template : "${text}"` }]
+      })
+    })
+    const data = await res.json()
+    if (btn) { btn.disabled = false; btn.textContent = '👁 Aperçu AI' }
+
+    if (data.reply) {
+      alert('📨 Aperçu du message :\n\n' + data.reply)
+    }
+  }
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast')
+    t.textContent = msg
+    t.style.background = isError ? '#E24B4A' : 'var(--green)'
+    t.style.display = 'block'
+    setTimeout(() => { t.style.display = 'none' }, 3500)
+  }
+
+  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+</script>
+</body>
+</html>
