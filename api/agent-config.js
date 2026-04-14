@@ -9,20 +9,26 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+// Décode le user_id depuis le JWT sans vérification (même pattern que cron.js)
+function getUserIdFromToken(req) {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return null;
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+    return payload.sub || null;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // Récupérer le user depuis le token de session
-  const token = (req.headers.authorization || '').replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Non authentifié' });
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !user) return res.status(401).json({ error: 'Token invalide' });
-
-  const userId = user.id;
+  const userId = getUserIdFromToken(req);
+  if (!userId) return res.status(401).json({ error: 'Non authentifié' });
 
   // ── GET : charger la config ──────────────────
   if (req.method === 'GET') {
