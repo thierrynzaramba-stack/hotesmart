@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const Anthropic = require('@anthropic-ai/sdk')
+const { sendAlertNotifications } = require('../lib/alert-notify')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -183,7 +184,6 @@ async function processProperty(userId, beds24Key, property, results) {
 
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
-  // Charger les réservations depuis 6 mois (pour avoir les séjours récents)
   const dateFrom6m = new Date(); dateFrom6m.setMonth(dateFrom6m.getMonth() - 6)
   const bookingRes = await fetch(
     `https://beds24.com/api/v2/bookings?propId=${property.id}&arrivalFrom=${dateFrom6m.toISOString().split('T')[0]}`,
@@ -212,9 +212,7 @@ async function processProperty(userId, beds24Key, property, results) {
         .eq('property_id', String(property.id))
         .limit(1)
 
-      if (existing || (existingConv && existingConv.length > 0)) {
-        continue
-      }
+      if (existing || (existingConv && existingConv.length > 0)) continue
 
       const guestMsgs = msgs.filter(m => m.source === 'guest')
       if (!guestMsgs.length) continue
@@ -222,7 +220,7 @@ async function processProperty(userId, beds24Key, property, results) {
       const lastMsg = [...msgs].sort((a, b) => new Date(b.time) - new Date(a.time))[0]
       if (lastMsg.source === 'host') continue
 
-      const booking = bookingsMap[String(bookingId)]
+      const booking    = bookingsMap[String(bookingId)]
       const guestName  = booking ? `${booking.firstName || ''} ${booking.lastName || ''}`.trim() : 'Voyageur'
       const guestPhone = booking?.phone || booking?.mobile || ''
       const arrival    = booking?.arrival || ''
@@ -249,7 +247,6 @@ async function processProperty(userId, beds24Key, property, results) {
 // ─── Classification et traitement intelligent ─────────────────────────────────
 async function classifyAndHandle(userId, beds24Key, property, bookingId, guestName, guestPhone, arrival, departure, thread, knowledgeText, results) {
 
-  // Construire le fil de conversation formaté pour Claude
   const sortedThread = [...thread].sort((a, b) => new Date(a.time) - new Date(b.time))
   const threadFormatted = sortedThread.map(m => {
     const source = m.source === 'guest' ? `👤 ${guestName}` : m.source === 'host' ? '🏠 Hôte' : '⚙️ Système'
@@ -257,13 +254,11 @@ async function classifyAndHandle(userId, beds24Key, property, bookingId, guestNa
     return `[${time}] ${source} : "${m.message}"`
   }).join('\n')
 
-  // Dernier message voyageur
   const lastGuestMsg = [...thread].filter(m => m.source === 'guest').sort((a, b) => new Date(b.time) - new Date(a.time))[0]
   const message = lastGuestMsg?.message || ''
 
   console.log(`[Cron] Classification booking ${bookingId}: "${message.substring(0, 60)}..."`)
 
-  // Infos séjour pour contexte
   const today     = new Date().toISOString().split('T')[0]
   const arrDate   = new Date(arrival)
   const depDate   = new Date(departure)
@@ -357,7 +352,7 @@ Réponds UNIQUEMENT en JSON valide :
       suggested_reply: null
     }]
 
-    await supabase.from('agent_tasks').insert({
+    const { data: newTask, error: taskError } = await supabase.from('agent_tasks').insert({
       user_id:         userId,
       property_id:     String(property.id),
       book_id:         String(bookingId),
@@ -372,10 +367,23 @@ Réponds UNIQUEMENT en JSON valide :
       status:          'pending',
       source_thread:   threadJson,
       sub_tasks:       subTasks
-    })
+    }).select().single()
 
     results.totalTasks++
     console.log(`[Cron] Tâche créée: ${classification.type} pour booking ${bookingId}`)
+
+    // 🔔 Envoyer les alertes notifications
+    if (!taskError && newTask) {
+      try {
+        await sendAlertNotifications({
+          type:       classification.type,
+          task:       newTask,
+          propertyId: String(property.id)
+        })
+      } catch (alertErr) {
+        console.error('[Cron] Erreur alert-notify:', alertErr.message)
+      }
+    }
   }
 
   return true
