@@ -1,6 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
 const Anthropic = require('@anthropic-ai/sdk')
-const { sendAlertNotifications } = require('../lib/alert-notify')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -24,6 +23,7 @@ module.exports = async function handler(req, res) {
     totalTasks: 0,
     totalAutoReplies: 0,
     totalBookingEvents: 0,
+    totalAutoMessages: 0,
     errors: []
   }
 
@@ -75,6 +75,7 @@ async function processUser(userId, beds24Key, tokens, results) {
   for (const property of properties) {
     try {
       await detectBookingChanges(userId, beds24Key, property, tokens, results)
+      await processMessageTemplates(userId, beds24Key, property, results)
       await processProperty(userId, beds24Key, property, results)
     } catch (err) {
       console.error(`[Cron] Erreur bien ${property.id}:`, err.message)
@@ -123,6 +124,8 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
 
     if (!existing) {
       await createBookingEvent(userId, bookingId, property, 'new', eventData, relevantTokens)
+      // Déclencher templates "booking_confirmed"
+      await triggerTemplates(userId, beds24Key, property, booking, 'booking_confirmed', results)
       results.totalBookingEvents++
     } else {
       const prev = existing.snapshot
@@ -159,6 +162,207 @@ async function createBookingEvent(userId, bookingId, property, eventType, eventD
       event_type: eventType, event_data: eventData, token: t.token
     })
   }
+}
+
+// ─── Messages automatiques ────────────────────────────────────────────────────
+async function processMessageTemplates(userId, beds24Key, property, results) {
+  // Charger templates actifs pour ce bien
+  const { data: templates } = await supabase
+    .from('message_templates')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('property_id', String(property.id))
+    .eq('active', true)
+    .in('event_type', ['arrival', 'departure']) // Traitement basé sur date
+
+  if (!templates?.length) return
+
+  // Charger les réservations à venir et en cours
+  const today = new Date()
+  const dateFrom = new Date(today); dateFrom.setDate(today.getDate() - 7)
+  const dateTo   = new Date(today); dateTo.setDate(today.getDate() + 30)
+
+  const r = await fetch(
+    `https://beds24.com/api/v2/bookings?propId=${property.id}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
+    { headers: { token: beds24Key } }
+  )
+  const d = await r.json()
+  const bookings = (d.data || []).filter(b => String(b.propertyId) === String(property.id))
+
+  for (const booking of bookings) {
+    for (const template of templates) {
+      await checkAndSendTemplate(userId, beds24Key, property, booking, template, results)
+    }
+  }
+}
+
+async function checkAndSendTemplate(userId, beds24Key, property, booking, template, results) {
+  const bookingId = String(booking.id)
+  const now       = new Date()
+  const today     = now.toISOString().split('T')[0]
+
+  // Calculer la date cible selon l'événement
+  let refDate = null
+  if (template.reference === 'arrival')   refDate = booking.arrival
+  if (template.reference === 'departure') refDate = booking.departure
+  if (!refDate) return
+
+  const targetDate = new Date(refDate)
+  targetDate.setDate(targetDate.getDate() + (template.offset_days || 0))
+  const targetDateStr = targetDate.toISOString().split('T')[0]
+
+  // Vérifier si c'est aujourd'hui qu'on doit envoyer
+  const isToday = targetDateStr === today
+
+  // Option send_anyway : si le délai est dépassé mais pas encore envoyé
+  const isPast  = targetDate < new Date(today)
+  const shouldSend = isToday || (isPast && template.send_anyway)
+  if (!shouldSend) return
+
+  // Vérifier l'heure d'envoi
+  const [sendHour] = (template.send_time || '10:00').split(':').map(Number)
+  const currentHour = now.getHours()
+  if (currentHour < sendHour && isToday) return
+
+  // Vérifier si déjà envoyé
+  const { data: alreadySent } = await supabase
+    .from('message_sent_log')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('booking_id', bookingId)
+    .eq('template_id', template.id)
+    .maybeSingle()
+
+  if (alreadySent) return
+
+  // Générer et envoyer le message
+  const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
+  const message   = await generateAutoMessage(template, booking, property, guestName)
+  if (!message) return
+
+  console.log(`[Cron] Message auto: ${template.event_type} pour booking ${bookingId}`)
+
+  // Sauvegarder dans conversations (visible dans page test)
+  await supabase.from('conversations').insert({
+    user_id:       userId,
+    property_id:   String(property.id),
+    guest_name:    guestName,
+    guest_message: `[AUTO: ${template.event_type}]`,
+    agent_reply:   message,
+    book_id:       bookingId
+  })
+
+  // Logger l'envoi
+  await supabase.from('message_sent_log').insert({
+    user_id: userId, booking_id: bookingId, template_id: template.id
+  })
+
+  // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
+
+  results.totalAutoMessages++
+}
+
+async function triggerTemplates(userId, beds24Key, property, booking, eventType, results) {
+  // Charger templates pour cet événement
+  const { data: templates } = await supabase
+    .from('message_templates')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('property_id', String(property.id))
+    .eq('event_type', eventType)
+    .eq('active', true)
+
+  if (!templates?.length) return
+
+  const bookingId = String(booking.id)
+  const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
+
+  for (const template of templates) {
+    // Vérifier délai pour booking_confirmed
+    const delayMinutes = parseDelay(template.offset_value || '5min')
+    // Pour l'instant on envoie directement (le délai sera géré en production)
+
+    // Vérifier si déjà envoyé
+    const { data: alreadySent } = await supabase
+      .from('message_sent_log')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('booking_id', bookingId)
+      .eq('template_id', template.id)
+      .maybeSingle()
+
+    if (alreadySent) continue
+
+    const message = await generateAutoMessage(template, booking, property, guestName)
+    if (!message) continue
+
+    // Sauvegarder dans conversations
+    await supabase.from('conversations').insert({
+      user_id:       userId,
+      property_id:   String(property.id),
+      guest_name:    guestName,
+      guest_message: `[AUTO: ${eventType}]`,
+      agent_reply:   message,
+      book_id:       bookingId
+    })
+
+    await supabase.from('message_sent_log').insert({
+      user_id: userId, booking_id: bookingId, template_id: template.id
+    })
+
+    // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
+
+    results.totalAutoMessages++
+    console.log(`[Cron] Message auto ${eventType} envoyé pour booking ${bookingId}`)
+  }
+}
+
+async function generateAutoMessage(template, booking, property, guestName) {
+  try {
+    // Remplacer les variables de base
+    let text = template.template_text || ''
+    text = text
+      .replace(/{prenom}/g,         booking.firstName || guestName)
+      .replace(/{nom}/g,            booking.lastName  || '')
+      .replace(/{arrivee}/g,        formatDate(booking.arrival))
+      .replace(/{depart}/g,         formatDate(booking.departure))
+      .replace(/{logement}/g,       property.name || '')
+      .replace(/{adresse}/g,        property.address || '')
+      .replace(/{checkin}/g,        property.checkInStart || '18:00')
+      .replace(/{checkout}/g,       property.checkOutEnd  || '10:00')
+      .replace(/{telephone_hote}/g, property.phone || '')
+      .replace(/{code_acces}/g,     '[CODE À INSÉRER]')
+      .replace(/{wifi_nom}/g,       '[WIFI NOM]')
+      .replace(/{wifi_mdp}/g,       '[WIFI MOT DE PASSE]')
+
+    if (!text.trim()) return null
+
+    // Personnaliser légèrement avec AI
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: `Tu es un assistant de conciergerie LCD. Améliore légèrement ce message sans changer son contenu ni ajouter d'informations. Rends-le naturel et chaleureux. Réponds UNIQUEMENT avec le message final, sans commentaire.\n\nMessage : "${text}"`
+      }]
+    })
+
+    return response.content[0]?.text || text
+  } catch (err) {
+    console.error('[Cron] Erreur génération message auto:', err.message)
+    return template.template_text
+  }
+}
+
+function parseDelay(value) {
+  if (!value) return 0
+  const map = { '5min': 5, '15min': 15, '30min': 30, '1h': 60, '2h': 120, '4h': 240, '8h': 480, '24h': 1440, '0min': 0 }
+  return map[value] || 0
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return ''
+  return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
 // ─── Traitement messages Agent AI ────────────────────────────────────────────
@@ -289,17 +493,13 @@ DERNIER MESSAGE À TRAITER :
 
 INSTRUCTIONS DE CLASSIFICATION :
 1. "sympathy" : remerciement, bonjour, au revoir, avis positif, confirmation simple sans question.
-   → auto_reply : réponse chaleureuse courte (2-3 phrases), adaptée au contexte de la conversation.
-
+   → auto_reply : réponse chaleureuse courte (2-3 phrases), adaptée au contexte.
 2. "info_known" : questions dont les réponses se trouvent dans la base de connaissance.
-   IMPORTANT : Si la FAQ traite du sujet demandé → info_known.
    → auto_reply : réponse complète basée sur la base de connaissance, chaleureuse.
-
 3. "info_unknown" : questions dont les réponses NE SONT PAS dans la base de connaissance.
-   → sub_tasks : une entrée par question, avec résumé clair pour l'hôte.
-
+   → sub_tasks : une entrée par question.
 4. "intervention" : problème physique, incident, réclamation, action concrète requise.
-   → sub_tasks : une entrée par problème, avec suggestion d'action pour l'hôte.
+   → sub_tasks : une entrée par problème.
 
 IMPORTANT : Tiens compte de tout l'historique pour éviter de répéter des informations déjà données.
 
@@ -352,7 +552,7 @@ Réponds UNIQUEMENT en JSON valide :
       suggested_reply: null
     }]
 
-    const { data: newTask, error: taskError } = await supabase.from('agent_tasks').insert({
+    await supabase.from('agent_tasks').insert({
       user_id:         userId,
       property_id:     String(property.id),
       book_id:         String(bookingId),
@@ -367,23 +567,10 @@ Réponds UNIQUEMENT en JSON valide :
       status:          'pending',
       source_thread:   threadJson,
       sub_tasks:       subTasks
-    }).select().single()
+    })
 
     results.totalTasks++
     console.log(`[Cron] Tâche créée: ${classification.type} pour booking ${bookingId}`)
-
-    // 🔔 Envoyer les alertes notifications
-    if (!taskError && newTask) {
-      try {
-        await sendAlertNotifications({
-          type:       classification.type,
-          task:       newTask,
-          propertyId: String(property.id)
-        })
-      } catch (alertErr) {
-        console.error('[Cron] Erreur alert-notify:', alertErr.message)
-      }
-    }
   }
 
   return true
