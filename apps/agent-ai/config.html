@@ -6,13 +6,11 @@
   <title>HôteSmart — Agent AI · Config Alertes</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    /* ── Property tabs ── */
     .prop-tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
     .prop-tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; font-family:inherit; background:none; border-top:none; border-left:none; border-right:none; }
     .prop-tab:hover { color:var(--text); }
     .prop-tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
 
-    /* ── Alert sections ── */
     .alert-section { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; overflow:hidden; }
     .alert-section-header { display:flex; align-items:center; gap:10px; padding:14px 18px; background:var(--bg2); border-bottom:0.5px solid var(--border); }
     .alert-type-label { font-size:13px; font-weight:500; flex:1; }
@@ -20,14 +18,12 @@
     .badge-intervention { background:#fdecea; color:#E24B4A; }
     .badge-info { background:#FFF3CD; color:#856404; }
 
-    /* ── Channels grid ── */
     .channels-grid { display:grid; grid-template-columns:1fr 1fr; }
     .channel-block { padding:18px 20px; border-right:0.5px solid var(--border); }
     .channel-block:last-child { border-right:none; }
     .channel-title { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
     .channel-title span { font-size:13px; font-weight:500; flex:1; }
 
-    /* Toggle (identique page SMS) */
     .toggle { position:relative; width:44px; height:24px; flex-shrink:0; }
     .toggle input { opacity:0; width:0; height:0; }
     .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
@@ -35,34 +31,22 @@
     input:checked + .toggle-slider { background:var(--green); }
     input:checked + .toggle-slider:before { transform:translateX(20px); }
 
-    /* Tags input */
-    .field-label { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
-    .tags-wrap { display:flex; flex-wrap:wrap; gap:5px; padding:7px 9px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg2); min-height:42px; align-items:flex-start; cursor:text; transition:border-color .15s; }
-    .tags-wrap:focus-within { border-color:var(--green); }
-    .tag { display:flex; align-items:center; gap:4px; background:var(--bg); border:0.5px solid var(--border); border-radius:20px; padding:2px 8px 2px 10px; font-size:11px; color:var(--text); }
-    .tag-remove { background:none; border:none; color:var(--text2); cursor:pointer; padding:0; font-size:14px; line-height:1; display:flex; align-items:center; transition:color .1s; }
-    .tag-remove:hover { color:#E24B4A; }
-    .tags-input { border:none; background:transparent; color:var(--text); font-family:inherit; font-size:12px; outline:none; min-width:120px; flex:1; }
-    .tags-input::placeholder { color:var(--text2); }
-    .field-hint { font-size:11px; color:var(--text2); margin-top:4px; }
-
-    /* Disabled state */
-    .channel-block.disabled .tags-wrap,
+    .channel-block.disabled textarea,
     .channel-block.disabled .field-label,
     .channel-block.disabled .field-hint { opacity:0.35; pointer-events:none; }
 
-    /* Save bar */
+    .field-label { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+    .field-hint { font-size:11px; color:var(--text2); margin-top:5px; line-height:1.5; }
+
     .save-bar { display:flex; align-items:center; gap:12px; margin-top:8px; }
     .save-status { font-size:12px; color:var(--text2); }
     .save-status.ok  { color:var(--green); }
     .save-status.err { color:#E24B4A; }
 
-    /* Notice */
     .notice { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; margin-bottom:20px; }
     .notice a { color:var(--green); text-decoration:none; }
     .notice a:hover { text-decoration:underline; }
 
-    /* Toast */
     .toast-msg { position:fixed; bottom:24px; right:24px; background:var(--green); color:white; padding:10px 18px; border-radius:var(--radius); font-size:13px; z-index:999; display:none; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
 
     @media (max-width:640px) {
@@ -76,7 +60,6 @@
 
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
-
   <div class="main">
     <div class="topbar">
       <div>
@@ -84,13 +67,13 @@
         <div class="page-sub">Notifications par logement et type d'alerte</div>
       </div>
     </div>
-
     <div class="content">
 
       <div class="notice">
-        💡 HôteSmart vous notifie automatiquement à chaque nouvelle tâche créée par l'agent.
+        💡 HôteSmart vous notifie à chaque nouvelle tâche créée par l'agent.
         Les SMS utilisent votre clé <strong>Brevo</strong> configurée dans
-        <a href="/apps/sms">le module SMS</a>.
+        <a href="/apps/sms">le module SMS</a>.<br>
+        Format : <strong>une entrée par ligne</strong> — ex: <code>Thierry : +33612345678</code>
       </div>
 
       <div class="prop-tabs" id="propTabs"></div>
@@ -108,9 +91,9 @@
 <div class="toast-msg" id="toast"></div>
 
 <script type="module">
-  import { requireAuth }   from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { supabase }      from '/shared/supabase.js'
+  import { requireAuth }      from '/components/auth-guard.js'
+  import { renderSidebar }    from '/components/sidebar.js'
+  import { supabase }         from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
 
   initErrorHandler()
@@ -169,34 +152,26 @@
       if (!config[p.id]) config[p.id] = {}
       ALERT_TYPES.forEach(t => {
         if (!config[p.id][t.key]) config[p.id][t.key] = {
-          sms_enabled: false, sms_numbers: [],
-          email_enabled: false, email_addresses: []
+          sms_enabled: false, sms_lines: '',
+          email_enabled: false, email_lines: ''
         }
+        // Migration ancien format (tableaux → lignes)
+        const c = config[p.id][t.key]
+        if (!c.sms_lines && c.sms_numbers?.length)
+          c.sms_lines = c.sms_numbers.join('\n')
+        if (!c.sms_lines) c.sms_lines = ''
+        if (!c.email_lines && c.email_addresses?.length)
+          c.email_lines = c.email_addresses.join('\n')
+        if (!c.email_lines) c.email_lines = ''
       })
     })
     renderPanel()
   }
 
-  // ── Render panel ──────────────────────────────
+  // ── Render ────────────────────────────────────
   function renderPanel() {
     document.getElementById('configPanel').innerHTML =
       ALERT_TYPES.map(type => buildSection(type)).join('')
-    document.querySelectorAll('.tags-input').forEach(input => {
-      input.addEventListener('keydown', (e) => {
-        const typeKey = input.dataset.typekey
-        const channel = input.dataset.channel
-        if (e.key === 'Enter' || e.key === ',') {
-          e.preventDefault()
-          const val = input.value.trim().replace(/,$/,'')
-          if (val) addTag(typeKey, channel, val, input)
-        } else if (e.key === 'Backspace' && input.value === '') {
-          const list = channel === 'sms'
-            ? config[currentProp][typeKey].sms_numbers
-            : config[currentProp][typeKey].email_addresses
-          if (list.length) removeTag(typeKey, channel, list[list.length - 1])
-        }
-      })
-    })
   }
 
   function buildSection(type) {
@@ -208,62 +183,41 @@
         <span class="alert-type-label">${type.label}</span>
       </div>
       <div class="channels-grid">
-        ${buildSmsBlock(type.key, cfg)}
-        ${buildEmailBlock(type.key, cfg)}
+
+        <div class="channel-block ${cfg.sms_enabled ? '' : 'disabled'}" id="sms-block-${type.key}">
+          <div class="channel-title">
+            <span>📱 SMS (Brevo)</span>
+            <label class="toggle">
+              <input type="checkbox" ${cfg.sms_enabled ? 'checked' : ''}
+                     onchange="toggleChannel('${type.key}','sms',this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="field-label">Destinataires SMS</div>
+          <textarea class="form-input" rows="3" style="resize:vertical;font-size:12px"
+                    onchange="updateLines('${type.key}','sms',this.value)"
+                    placeholder="Thierry : +33612345678&#10;Marie : +33698765432">${escHtml(cfg.sms_lines)}</textarea>
+          <div class="field-hint">Une ligne par destinataire · Format : Nom : +33XXXXXXXXX</div>
+        </div>
+
+        <div class="channel-block ${cfg.email_enabled ? '' : 'disabled'}" id="email-block-${type.key}">
+          <div class="channel-title">
+            <span>✉️ Email</span>
+            <label class="toggle">
+              <input type="checkbox" ${cfg.email_enabled ? 'checked' : ''}
+                     onchange="toggleChannel('${type.key}','email',this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="field-label">Destinataires Email</div>
+          <textarea class="form-input" rows="3" style="resize:vertical;font-size:12px"
+                    onchange="updateLines('${type.key}','email',this.value)"
+                    placeholder="Thierry : thierry@mail.com&#10;Marie : marie@mail.com">${escHtml(cfg.email_lines)}</textarea>
+          <div class="field-hint">Une ligne par destinataire · Format : Nom : email@mail.com</div>
+        </div>
+
       </div>
     </div>`
-  }
-
-  function buildSmsBlock(typeKey, cfg) {
-    return `
-    <div class="channel-block ${cfg.sms_enabled ? '' : 'disabled'}" id="sms-block-${typeKey}">
-      <div class="channel-title">
-        <span>📱 SMS (Brevo)</span>
-        <label class="toggle">
-          <input type="checkbox" ${cfg.sms_enabled ? 'checked' : ''}
-                 onchange="toggleChannel('${typeKey}','sms',this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="field-label">Numéros destinataires</div>
-      <div class="tags-wrap" id="sms-tags-${typeKey}"
-           onclick="document.getElementById('sms-input-${typeKey}').focus()">
-        ${(cfg.sms_numbers||[]).map(n => buildTag(typeKey,'sms',n)).join('')}
-        <input class="tags-input" id="sms-input-${typeKey}" placeholder="+33612345678"
-               data-typekey="${typeKey}" data-channel="sms">
-      </div>
-      <div class="field-hint">Entrée ou , pour ajouter · Format international</div>
-    </div>`
-  }
-
-  function buildEmailBlock(typeKey, cfg) {
-    return `
-    <div class="channel-block ${cfg.email_enabled ? '' : 'disabled'}" id="email-block-${typeKey}">
-      <div class="channel-title">
-        <span>✉️ Email</span>
-        <label class="toggle">
-          <input type="checkbox" ${cfg.email_enabled ? 'checked' : ''}
-                 onchange="toggleChannel('${typeKey}','email',this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="field-label">Adresses destinataires</div>
-      <div class="tags-wrap" id="email-tags-${typeKey}"
-           onclick="document.getElementById('email-input-${typeKey}').focus()">
-        ${(cfg.email_addresses||[]).map(e => buildTag(typeKey,'email',e)).join('')}
-        <input class="tags-input" id="email-input-${typeKey}" placeholder="proprietaire@mail.com"
-               data-typekey="${typeKey}" data-channel="email">
-      </div>
-      <div class="field-hint">Entrée ou , pour ajouter plusieurs destinataires</div>
-    </div>`
-  }
-
-  function buildTag(typeKey, channel, value) {
-    const sid = `tag-${typeKey}-${channel}-${value.replace(/[^a-z0-9]/gi,'_')}`
-    return `<span class="tag" id="${sid}">
-      ${escHtml(value)}
-      <button class="tag-remove" onclick="removeTag('${typeKey}','${channel}','${escAttr(value)}')" title="Supprimer">×</button>
-    </span>`
   }
 
   // ── Interactions ──────────────────────────────
@@ -272,30 +226,8 @@
     document.getElementById(`${channel}-block-${typeKey}`).classList.toggle('disabled', !enabled)
   }
 
-
-
-  function addTag(typeKey, channel, value, inputEl) {
-    const list = channel === 'sms'
-      ? config[currentProp][typeKey].sms_numbers
-      : config[currentProp][typeKey].email_addresses
-
-    if (channel === 'sms'   && !/^\+?[0-9]{7,15}$/.test(value))        { showToast('Numéro invalide : ' + value, true); return }
-    if (channel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) { showToast('Email invalide : ' + value, true); return }
-    if (list.includes(value)) { inputEl.value = ''; return }
-
-    list.push(value)
-    const tag = document.createElement('span')
-    tag.className = 'tag'
-    tag.id = `tag-${typeKey}-${channel}-${value.replace(/[^a-z0-9]/gi,'_')}`
-    tag.innerHTML = `${escHtml(value)}<button class="tag-remove" onclick="removeTag('${typeKey}','${channel}','${escAttr(value)}')" title="Supprimer">×</button>`
-    inputEl.parentNode.insertBefore(tag, inputEl)
-    inputEl.value = ''
-  }
-
-  window.removeTag = (typeKey, channel, value) => {
-    const field = channel === 'sms' ? 'sms_numbers' : 'email_addresses'
-    config[currentProp][typeKey][field] = config[currentProp][typeKey][field].filter(v => v !== value)
-    document.getElementById(`tag-${typeKey}-${channel}-${value.replace(/[^a-z0-9]/gi,'_')}`)?.remove()
+  window.updateLines = (typeKey, channel, value) => {
+    config[currentProp][typeKey][channel === 'sms' ? 'sms_lines' : 'email_lines'] = value
   }
 
   // ── Save ──────────────────────────────────────
@@ -331,7 +263,6 @@
   }
 
   function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-  function escAttr(s) { return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
 </script>
 </body>
 </html>
