@@ -202,6 +202,18 @@
     const subTasks = task.sub_tasks || []
     const thread   = task.source_thread || []
 
+    // Indicateur séjour
+    let sejourBadge = ''
+    if (task.arrival && task.departure) {
+      const today    = new Date(); today.setHours(0,0,0,0)
+      const arrDate  = new Date(task.arrival)
+      const depDate  = new Date(task.departure)
+      const daysDiff = Math.ceil((arrDate - today) / (1000 * 60 * 60 * 24))
+      if (today < arrDate)       sejourBadge = `<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:2px 8px;border-radius:20px">🟡 Arrive dans ${daysDiff}j</span>`
+      else if (today <= depDate) sejourBadge = `<span style="background:#E1F5EE;color:var(--green);font-size:10px;padding:2px 8px;border-radius:20px">🟢 Séjour en cours</span>`
+      else                       sejourBadge = `<span style="background:var(--bg2);color:var(--text2);font-size:10px;padding:2px 8px;border-radius:20px;border:0.5px solid var(--border)">⚫ Séjour passé</span>`
+    }
+
     let statusBadge = ''
     if (task.status === 'done')    statusBadge = '<span class="badge badge-done">✓ Fait</span>'
     if (task.status === 'ignored') statusBadge = '<span class="badge badge-ignored">Ignoré</span>'
@@ -231,7 +243,11 @@
       <div class="task-card ${task.task_type} ${isDone ? task.status : ''}" id="task-${task.id}">
         <div class="task-header">
           <div class="task-info">
-            <div class="task-guest">👤 ${escHtml(task.guest_name || 'Voyageur')}</div>
+            <div class="task-guest" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              👤 ${escHtml(task.guest_name || 'Voyageur')}
+              ${task.guest_phone ? `<a href="tel:${escHtml(task.guest_phone)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--green);text-decoration:none;background:#E1F5EE;padding:1px 8px;border-radius:20px">📞 ${escHtml(task.guest_phone)}</a>` : ''}
+              ${sejourBadge}
+            </div>
             <div class="task-summary">${escHtml(task.summary || task.guest_message?.substring(0, 80) || '')}</div>
           </div>
           <div class="task-meta">

@@ -73,9 +73,7 @@ async function processUser(userId, beds24Key, tokens, results) {
 
   for (const property of properties) {
     try {
-      // 1. Détection changements réservations
       await detectBookingChanges(userId, beds24Key, property, tokens, results)
-      // 2. Traitement messages Agent AI
       await processProperty(userId, beds24Key, property, results)
     } catch (err) {
       console.error(`[Cron] Erreur bien ${property.id}:`, err.message)
@@ -171,27 +169,32 @@ async function processProperty(userId, beds24Key, property, results) {
   const msgData = await msgRes.json()
   const allMessages = (msgData.data || []).filter(m => String(m.propertyId) === String(property.id))
 
-  // Grouper par booking, garder dernier message voyageur
   const byBooking = {}
   allMessages.forEach(msg => {
     if (!byBooking[msg.bookingId]) byBooking[msg.bookingId] = []
     byBooking[msg.bookingId].push(msg)
   })
 
-  // Récupérer la base de connaissance
   const { data: knowledge } = await supabase
     .from('knowledge')
     .select('*')
     .eq('user_id', userId)
     .eq('property_id', String(property.id))
 
-  console.log('[Cron] Knowledge pour', property.id, 'userId:', userId, ':', knowledge?.length, 'entrées')
   const knowledgeText = buildKnowledgeText(knowledge || [])
+
+  // Charger toutes les réservations en une seule requête
+  const bookingRes = await fetch(
+    `https://beds24.com/api/v2/bookings?propId=${property.id}`,
+    { headers: { token: beds24Key } }
+  )
+  const bookingData = await bookingRes.json()
+  const bookingsMap = {}
+  ;(bookingData.data || []).forEach(b => { bookingsMap[String(b.id)] = b })
 
   let processed = 0
   for (const [bookingId, msgs] of Object.entries(byBooking)) {
     try {
-      // Vérifier si déjà traité
       const { data: existing } = await supabase
         .from('agent_tasks')
         .select('id')
@@ -200,7 +203,6 @@ async function processProperty(userId, beds24Key, property, results) {
         .eq('property_id', String(property.id))
         .maybeSingle()
 
-      // Vérifier aussi dans conversations (ancien système)
       const { data: existingConv } = await supabase
         .from('conversations')
         .select('id')
@@ -210,34 +212,25 @@ async function processProperty(userId, beds24Key, property, results) {
         .limit(1)
 
       if (existing || (existingConv && existingConv.length > 0)) {
-        console.log(`[Cron] Booking ${bookingId} déjà traité, skip`)
         continue
       }
 
-      // Dernier message voyageur
       const guestMsgs = msgs.filter(m => m.source === 'guest')
       if (!guestMsgs.length) continue
 
-      const lastGuestMsg = guestMsgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
-      const lastMsg = msgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
-
-      // Si le dernier message est de l'hôte, pas besoin de répondre
+      const lastMsg = [...msgs].sort((a, b) => new Date(b.time) - new Date(a.time))[0]
       if (lastMsg.source === 'host') continue
 
-      // Récupérer infos booking
-      const bookingRes = await fetch(
-        `https://beds24.com/api/v2/bookings?propId=${property.id}`,
-        { headers: { token: beds24Key } }
-      )
-      const bookingData = await bookingRes.json()
-      const booking = (bookingData.data || []).find(b => String(b.id) === String(bookingId))
+      const booking = bookingsMap[String(bookingId)]
+      const guestName  = booking ? `${booking.firstName || ''} ${booking.lastName || ''}`.trim() : 'Voyageur'
+      const guestPhone = booking?.phone || booking?.mobile || ''
+      const arrival    = booking?.arrival || ''
+      const departure  = booking?.departure || ''
 
-      const guestName = booking ? `${booking.firstName || ''} ${booking.lastName || ''}`.trim() : 'Voyageur'
-
-      // Classifier et traiter le message
       const handled = await classifyAndHandle(
-        userId, beds24Key, property, bookingId, guestName,
-        lastGuestMsg.message, msgs, knowledgeText, results
+        userId, beds24Key, property, bookingId,
+        guestName, guestPhone, arrival, departure,
+        msgs, knowledgeText, results
       )
 
       if (handled) processed++
@@ -253,48 +246,73 @@ async function processProperty(userId, beds24Key, property, results) {
 }
 
 // ─── Classification et traitement intelligent ─────────────────────────────────
-async function classifyAndHandle(userId, beds24Key, property, bookingId, guestName, message, thread, knowledgeText, results) {
-  console.log(`[Cron] Classification message booking ${bookingId}: "${message.substring(0, 80)}..."`)
+async function classifyAndHandle(userId, beds24Key, property, bookingId, guestName, guestPhone, arrival, departure, thread, knowledgeText, results) {
+
+  // Construire le fil de conversation formaté pour Claude
+  const sortedThread = [...thread].sort((a, b) => new Date(a.time) - new Date(b.time))
+  const threadFormatted = sortedThread.map(m => {
+    const source = m.source === 'guest' ? `👤 ${guestName}` : m.source === 'host' ? '🏠 Hôte' : '⚙️ Système'
+    const time   = new Date(m.time).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+    return `[${time}] ${source} : "${m.message}"`
+  }).join('\n')
+
+  // Dernier message voyageur
+  const lastGuestMsg = [...thread].filter(m => m.source === 'guest').sort((a, b) => new Date(b.time) - new Date(a.time))[0]
+  const message = lastGuestMsg?.message || ''
+
+  console.log(`[Cron] Classification booking ${bookingId}: "${message.substring(0, 60)}..."`)
+
+  // Infos séjour pour contexte
+  const today     = new Date().toISOString().split('T')[0]
+  const arrDate   = new Date(arrival)
+  const depDate   = new Date(departure)
+  const todayDate = new Date(today)
+  let sejourStatus = ''
+  if (arrival && departure) {
+    const daysToArrival = Math.ceil((arrDate - todayDate) / (1000 * 60 * 60 * 24))
+    if (todayDate < arrDate)       sejourStatus = `Arrive dans ${daysToArrival} jour(s) (${arrival})`
+    else if (todayDate <= depDate) sejourStatus = `Séjour en cours (${arrival} → ${departure})`
+    else                           sejourStatus = `Séjour terminé (${arrival} → ${departure})`
+  }
 
   const classificationPrompt = `Tu es un assistant de conciergerie pour location courte durée.
-Analyse ce message d'un voyageur et classe-le PRÉCISÉMENT dans une catégorie.
+Analyse cette conversation complète et classe le DERNIER message du voyageur.
 
-BASE DE CONNAISSANCE DU LOGEMENT (LIS ATTENTIVEMENT) :
+BASE DE CONNAISSANCE DU LOGEMENT :
 ${knowledgeText || 'Aucune information disponible'}
 
 BIEN : ${property.name}
+VOYAGEUR : ${guestName}${guestPhone ? ` · Tél: ${guestPhone}` : ''}
+${sejourStatus ? `SÉJOUR : ${sejourStatus}` : ''}
 
-MESSAGE DU VOYAGEUR (${guestName}) :
+HISTORIQUE COMPLET DE LA CONVERSATION :
+${threadFormatted}
+
+DERNIER MESSAGE À TRAITER :
 "${message}"
 
-INSTRUCTIONS DE CLASSIFICATION (dans cet ordre de priorité) :
+INSTRUCTIONS DE CLASSIFICATION :
+1. "sympathy" : remerciement, bonjour, au revoir, avis positif, confirmation simple sans question.
+   → auto_reply : réponse chaleureuse courte (2-3 phrases), adaptée au contexte de la conversation.
 
-1. "sympathy" : message de remerciement, bonjour, au revoir, avis positif, confirmation simple sans question.
-   → auto_reply : réponse chaleureuse courte (2-3 phrases) en français.
+2. "info_known" : questions dont les réponses se trouvent dans la base de connaissance.
+   IMPORTANT : Si la FAQ traite du sujet demandé → info_known.
+   → auto_reply : réponse complète basée sur la base de connaissance, chaleureuse.
 
-2. "info_known" : le message contient UNE OU PLUSIEURS questions ET toutes les réponses se trouvent dans la base de connaissance ci-dessus.
-   IMPORTANT : Si la FAQ contient une entrée qui traite du sujet demandé (même partiellement), c'est "info_known".
-   Exemple : si quelqu'un demande une arrivée anticipée et que la FAQ parle d'arrivée anticipée → info_known.
-   → auto_reply : réponse complète basée UNIQUEMENT sur la base de connaissance, en français, chaleureuse.
+3. "info_unknown" : questions dont les réponses NE SONT PAS dans la base de connaissance.
+   → sub_tasks : une entrée par question, avec résumé clair pour l'hôte.
 
-3. "info_unknown" : le message pose des questions dont les réponses NE SONT PAS dans la base de connaissance.
-   → sub_tasks : une entrée par question distincte avec suggested_reply null.
+4. "intervention" : problème physique, incident, réclamation, action concrète requise.
+   → sub_tasks : une entrée par problème, avec suggestion d'action pour l'hôte.
 
-4. "intervention" : problème physique dans le logement, incident, réclamation, demande qui nécessite une action concrète de l'hôte (ex: clé perdue, appareil cassé, manque de fournitures).
-   → sub_tasks : une entrée par problème avec suggested_reply suggérant une action.
+IMPORTANT : Tiens compte de tout l'historique pour éviter de répéter des informations déjà données.
 
 Réponds UNIQUEMENT en JSON valide :
 {
   "type": "sympathy" | "info_known" | "info_unknown" | "intervention",
-  "reason": "explication courte en français de pourquoi ce type",
-  "auto_reply": "réponse complète si sympathy ou info_known, sinon null",
-  "sub_tasks": [
-    {
-      "question": "question ou problème extrait du message",
-      "summary": "résumé synthétique",
-      "suggested_reply": "réponse suggérée ou null"
-    }
-  ]
+  "reason": "explication courte en français",
+  "auto_reply": "réponse si sympathy ou info_known, sinon null",
+  "sub_tasks": [{"question": "...", "summary": "...", "suggested_reply": "..."}]
 }`
 
   const response = await anthropic.messages.create({
@@ -305,7 +323,7 @@ Réponds UNIQUEMENT en JSON valide :
 
   let classification
   try {
-    const text = response.content[0]?.text || ''
+    const text  = response.content[0]?.text || ''
     const clean = text.replace(/```json|```/g, '').trim()
     classification = JSON.parse(clean)
   } catch (err) {
@@ -315,13 +333,10 @@ Réponds UNIQUEMENT en JSON valide :
 
   console.log(`[Cron] Classification: ${classification.type} pour booking ${bookingId}`)
 
-  const threadJson = thread.map(m => ({ source: m.source, message: m.message, time: m.time }))
+  const threadJson = sortedThread.map(m => ({ source: m.source, message: m.message, time: m.time }))
 
-  // Traitement selon le type
   if (classification.type === 'sympathy' || classification.type === 'info_known') {
-    // Réponse automatique
     if (classification.auto_reply) {
-      // Sauvegarder dans conversations
       await supabase.from('conversations').insert({
         user_id:       userId,
         property_id:   String(property.id),
@@ -330,38 +345,36 @@ Réponds UNIQUEMENT en JSON valide :
         agent_reply:   classification.auto_reply,
         book_id:       String(bookingId)
       })
-
-      // TODO production : envoyer via Beds24
-      // await sendViaBeds24(beds24Key, bookingId, classification.auto_reply)
-
+      // TODO production : await sendViaBeds24(beds24Key, bookingId, classification.auto_reply)
       results.totalAutoReplies++
-      console.log(`[Cron] Réponse auto envoyée pour booking ${bookingId}`)
     }
 
   } else if (classification.type === 'info_unknown' || classification.type === 'intervention') {
-    // Créer tâches To-do
     const subTasks = classification.sub_tasks || [{
       question: message,
-      summary: classification.reason,
+      summary:  classification.reason,
       suggested_reply: null
     }]
 
     await supabase.from('agent_tasks').insert({
-      user_id:        userId,
-      property_id:    String(property.id),
-      book_id:        String(bookingId),
-      guest_name:     guestName,
-      guest_message:  message,
-      task_type:      classification.type,
-      summary:        classification.reason,
+      user_id:         userId,
+      property_id:     String(property.id),
+      book_id:         String(bookingId),
+      guest_name:      guestName,
+      guest_message:   message,
+      guest_phone:     guestPhone,
+      arrival:         arrival || null,
+      departure:       departure || null,
+      task_type:       classification.type,
+      summary:         classification.reason,
       suggested_reply: subTasks[0]?.suggested_reply || null,
-      status:         'pending',
-      source_thread:  threadJson,
-      sub_tasks:      subTasks
+      status:          'pending',
+      source_thread:   threadJson,
+      sub_tasks:       subTasks
     })
 
     results.totalTasks++
-    console.log(`[Cron] Tâche créée pour booking ${bookingId}: ${classification.type}`)
+    console.log(`[Cron] Tâche créée: ${classification.type} pour booking ${bookingId}`)
   }
 
   return true
@@ -372,10 +385,14 @@ function buildKnowledgeText(knowledge) {
   if (!knowledge.length) return ''
   const fixed = knowledge.filter(k => k.type === 'fixed' && k.value)
   const faqs  = knowledge.filter(k => k.type === 'faq')
-  let text = 'Informations fixes :\n'
-  fixed.forEach(f => { text += `- ${f.key} : ${f.value}\n` })
+  let text = ''
+  if (fixed.length) {
+    text += 'Informations fixes :\n'
+    fixed.forEach(f => { text += `- ${f.key} : ${f.value}\n` })
+    text += '\n'
+  }
   if (faqs.length > 0) {
-    text += '\nFAQ :\n'
+    text += 'FAQ :\n'
     faqs.forEach(f => { text += `Q: ${f.key}\nR: ${f.value}\n\n` })
   }
   return text
