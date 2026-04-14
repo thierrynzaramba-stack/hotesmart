@@ -251,7 +251,7 @@
   }
 
   // ── Délégation keydown sur les inputs tags ────
-  document.getElementById('configPanel').addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', (e) => {
     if (!e.target.classList.contains('tags-input')) return
     const typeKey = e.target.dataset.typekey
     const channel = e.target.dataset.channel
