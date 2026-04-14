@@ -65,7 +65,7 @@
         <div class="page-title">📨 Messages automatiques</div>
         <div class="page-sub">Templates envoyés selon les événements du séjour</div>
       </div>
-      <button class="btn btn-primary" onclick="addTemplate()">+ Nouveau template</button>
+      <button class="btn btn-primary" id="btn-add-template">+ Nouveau template</button>
     </div>
     <div class="content">
       <div class="prop-tabs" id="propTabs"></div>
@@ -106,6 +106,7 @@
   window._seamActive = !!(apiKey?.seam_api_key && apiKey?.seam_enabled)
 
   window.init()
+  document.getElementById('btn-add-template').addEventListener('click', () => window.addTemplate())
 </script>
 
 <script>
