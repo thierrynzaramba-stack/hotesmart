@@ -1,6 +1,7 @@
 // api/simulate.js — Simule le traitement d'un message exactement comme le cron
 const { createClient } = require('@supabase/supabase-js')
 const Anthropic = require('@anthropic-ai/sdk')
+const { sendAlertNotifications } = require('../lib/alert-notify')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -24,15 +25,8 @@ module.exports = async function handler(req, res) {
   // ── DELETE : supprimer un résultat de simulation ──────────────────────────
   if (req.method === 'DELETE') {
     const { task_id, conv_id } = req.body || {}
-
-    if (task_id) {
-      await supabase.from('agent_tasks').delete()
-        .eq('id', task_id).eq('user_id', user.id)
-    }
-    if (conv_id) {
-      await supabase.from('conversations').delete()
-        .eq('id', conv_id).eq('user_id', user.id)
-    }
+    if (task_id) await supabase.from('agent_tasks').delete().eq('id', task_id).eq('user_id', user.id)
+    if (conv_id) await supabase.from('conversations').delete().eq('id', conv_id).eq('user_id', user.id)
     return res.status(200).json({ success: true })
   }
 
@@ -50,7 +44,6 @@ module.exports = async function handler(req, res) {
 
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
-  // Classification (même prompt que le cron)
   const classificationPrompt = `Tu es un assistant de conciergerie pour location courte durée.
 Analyse ce message d'un voyageur et classe-le PRÉCISÉMENT dans une catégorie.
 
@@ -98,7 +91,6 @@ Réponds UNIQUEMENT en JSON valide :
   let savedConvId = null
   let savedTaskId = null
 
-  // Enregistrer selon le type (identique au cron)
   if (classification.type === 'sympathy' || classification.type === 'info_known') {
     if (classification.auto_reply) {
       const { data: conv } = await supabase.from('conversations').insert({
@@ -113,7 +105,8 @@ Réponds UNIQUEMENT en JSON valide :
     }
   } else {
     const subTasks = classification.sub_tasks || [{ question: message, summary: classification.reason, suggested_reply: null }]
-    const { data: task } = await supabase.from('agent_tasks').insert({
+
+    const { data: newTask, error: taskError } = await supabase.from('agent_tasks').insert({
       user_id:         user.id,
       property_id:     String(propertyId),
       book_id:         bookId,
@@ -125,8 +118,22 @@ Réponds UNIQUEMENT en JSON valide :
       status:          'pending',
       source_thread:   [{ source: 'guest', message, time: new Date().toISOString() }],
       sub_tasks:       subTasks
-    }).select('id').single()
-    savedTaskId = task?.id
+    }).select().single()
+
+    savedTaskId = newTask?.id
+
+    // 🔔 Envoyer les alertes notifications
+    if (!taskError && newTask) {
+      try {
+        await sendAlertNotifications({
+          type:       classification.type,
+          task:       newTask,
+          propertyId: String(propertyId)
+        })
+      } catch (alertErr) {
+        console.error('[Simulate] Erreur alert-notify:', alertErr.message)
+      }
+    }
   }
 
   return res.status(200).json({
@@ -140,7 +147,7 @@ Réponds UNIQUEMENT en JSON valide :
 
 function buildKnowledgeText(knowledge) {
   if (!knowledge.length) return ''
-  const faqs = knowledge.filter(k => k.type === 'faq')
+  const faqs  = knowledge.filter(k => k.type === 'faq')
   const fixed = knowledge.filter(k => k.type === 'fixed' && k.value)
   let text = ''
   if (fixed.length) {
