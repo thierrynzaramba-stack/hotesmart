@@ -104,7 +104,11 @@ async function renderActiveApps(user, activePage = '') {
         <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
       </a>
       <a class="nav-sub ${activePage === 'agent-ai-test' ? 'connected' : ''}" href="/apps/agent-ai/test">
-        <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
+  <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
+  </a>
+  <a class="nav-sub ${activePage === 'agent-ai-config' ? 'connected' : ''}" href="/apps/agent-ai/config">
+    <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Config alertes
+  </a>
     ` : ''
     return `
       <a class="nav-item ${isActiveApp ? 'active' : ''}" href="/apps/${app.id}">
