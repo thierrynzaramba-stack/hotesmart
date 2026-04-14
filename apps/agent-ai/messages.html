@@ -208,13 +208,13 @@
       delayHtml = `
         <label>Délai :</label>
         <select class="config-select" onchange="updateField('${t.id}','offset_value',this.value)">
-          ${ev.delays.map(d => `<option value="${d.value}" ${t.offset_value === d.value ? 'selected':''>${d.label}</option>`).join('')}
+          ${ev.delays.map(d => `<option value="${d.value}" ${t.offset_value === d.value ? 'selected':''}>${d.label}</option>`).join('')}
         </select>`
     } else {
       delayHtml = `
         <label>Jour :</label>
         <select class="config-select" onchange="updateField('${t.id}','offset_days',parseInt(this.value))">
-          ${DAY_OPTIONS.map(d => `<option value="${d}" ${t.offset_days === d ? 'selected':''>${d===0?'Jour J':d>0?'J+'+d:'J'+d}</option>`).join('')}
+          ${DAY_OPTIONS.map(d => `<option value="${d}" ${t.offset_days === d ? 'selected':''}>${d===0?'Jour J':d>0?'J+'+d:'J'+d}</option>`).join('')}
         </select>
         <label>Heure :</label>
         <input type="time" class="config-select" value="${t.send_time||'10:00'}"
