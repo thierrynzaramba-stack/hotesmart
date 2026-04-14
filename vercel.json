@@ -12,6 +12,11 @@
     { "source": "/apps", "destination": "/pages/apps.html" },
     { "source": "/settings", "destination": "/pages/settings.html" },
     { "source": "/abonnement", "destination": "/pages/abonnement.html" },
-    { "source": "/connexions", "destination": "/pages/api.html" }
+    { "source": "/connexions", "destination": "/pages/api.html" },
+    { "source": "/apps/agent-ai", "destination": "/apps/agent-ai/index.html" },
+    { "source": "/apps/agent-ai/knowledge", "destination": "/apps/agent-ai/knowledge.html" },
+    { "source": "/apps/agent-ai/test", "destination": "/apps/agent-ai/test.html" },
+    { "source": "/apps/agent-ai/config", "destination": "/apps/agent-ai/config.html" }
+  
   ]
 }
