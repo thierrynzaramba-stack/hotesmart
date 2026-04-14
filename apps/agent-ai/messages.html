@@ -217,8 +217,9 @@
           ${DAY_OPTIONS.map(d => `<option value="${d}" ${t.offset_days === d ? 'selected':''}>${d===0?'Jour J':d>0?'J+'+d:'J'+d}</option>`).join('')}
         </select>
         <label>Heure :</label>
-        <input type="time" class="config-select" value="${t.send_time||'10:00'}"
-               onchange="updateField('${t.id}','send_time',this.value)">`
+        <select class="config-select" onchange="updateField('${t.id}','send_time',this.value)">
+          ${Array.from({length:24},(_,h)=>h).map(h=>`<option value="${String(h).padStart(2,'0')}:00" ${(t.send_time||'10:00').startsWith(String(h).padStart(2,'0'))?'selected':''}>${String(h).padStart(2,'0')}h</option>`).join('')}
+        </select>`
     }
 
     // Option send_anyway (seulement pour arrivée/départ)
@@ -331,7 +332,13 @@
 
   window.updateField = (id, field, value) => {
     const t = templates.find(t => t.id === id)
-    if (t) { t[field] = value; renderTemplates() }
+    if (!t) return
+    t[field] = value
+    // Ne pas rerendre pour éviter de perdre le texte du textarea
+    // Juste mettre à jour le résumé timing
+    const timingEl = document.querySelector(`#tpl-${id} .timing-summary`)
+    const ev = EVENTS[t.event_type] || EVENTS.arrival
+    if (timingEl) timingEl.textContent = '⏰ ' + formatTiming(t, ev)
   }
 
   window.updateEventType = (id, value) => {
