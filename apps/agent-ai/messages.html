@@ -45,6 +45,7 @@
     .seam-option { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; margin-bottom:14px; }
     .seam-option-title { font-size:12px; font-weight:500; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
     .seam-option select { font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; }
+    .seam-earliest { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; color:var(--text2); }
 
     .variables-hint { font-size:11px; color:var(--text2); margin-top:6px; line-height:1.8; }
     .template-actions { display:flex; gap:8px; margin-top:12px; align-items:center; }
@@ -98,7 +99,6 @@
   window._session  = session
   window._supabase = supabase
 
-  // Vérifier si Seam est configuré
   const { data: apiKey } = await supabase.from('api_keys')
     .select('seam_api_key, seam_enabled')
     .eq('user_id', session.user.id)
@@ -115,7 +115,6 @@
     { id: '209413', name: 'La bulle' }
   ]
 
-  // Événements et leurs délais possibles
   const EVENTS = {
     booking_confirmed: {
       label: '📅 Réservation validée',
@@ -147,18 +146,13 @@
     menage_done: {
       label: '🧹 Ménage terminé',
       badge: 'badge-menage',
-      delayType: 'after',
-      delays: [
-        { value: '0min',  label: 'Immédiatement' },
-        { value: '15min', label: '15 min après' },
-        { value: '30min', label: '30 min après' },
-        { value: '1h',    label: '1h après' },
-      ],
+      delayType: 'earliest',
       send_anyway: false
     }
   }
 
   const DAY_OPTIONS = [-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7]
+  const HOURS = Array.from({length:24}, (_,h) => String(h).padStart(2,'0') + ':00')
 
   let currentProp = PROPERTIES[0].id
   let templates   = []
@@ -202,7 +196,7 @@
     const ev = EVENTS[t.event_type] || EVENTS.arrival
     const timingStr = formatTiming(t, ev)
 
-    // Délai selector
+    // Sélecteur délai
     let delayHtml = ''
     if (ev.delayType === 'after') {
       delayHtml = `
@@ -210,7 +204,7 @@
         <select class="config-select" onchange="updateField('${t.id}','offset_value',this.value)">
           ${ev.delays.map(d => `<option value="${d.value}" ${t.offset_value === d.value ? 'selected':''}>${d.label}</option>`).join('')}
         </select>`
-    } else {
+    } else if (ev.delayType === 'days') {
       delayHtml = `
         <label>Jour :</label>
         <select class="config-select" onchange="updateField('${t.id}','offset_days',parseInt(this.value))">
@@ -218,11 +212,18 @@
         </select>
         <label>Heure :</label>
         <select class="config-select" onchange="updateField('${t.id}','send_time',this.value)">
-          ${Array.from({length:24},(_,h)=>h).map(h=>`<option value="${String(h).padStart(2,'0')}:00" ${(t.send_time||'10:00').startsWith(String(h).padStart(2,'0'))?'selected':''}>${String(h).padStart(2,'0')}h</option>`).join('')}
+          ${HOURS.map(h => `<option value="${h}" ${(t.send_time||'10:00') === h ? 'selected':''}>${h.replace(':00','h')}</option>`).join('')}
+        </select>`
+    } else if (ev.delayType === 'earliest') {
+      // menage_done : envoi dès que ménage terminé, mais pas avant Xh
+      delayHtml = `
+        <label>Pas avant :</label>
+        <select class="config-select" onchange="updateField('${t.id}','earliest_send_time',this.value)">
+          ${HOURS.map(h => `<option value="${h}" ${(t.earliest_send_time||'15:00') === h ? 'selected':''}>${h.replace(':00','h')}</option>`).join('')}
         </select>`
     }
 
-    // Option send_anyway (seulement pour arrivée/départ)
+    // Option send_anyway
     const sendAnywayHtml = ev.delayType === 'days' ? `
       <div class="send-anyway-row">
         <label class="toggle" style="width:36px;height:20px">
@@ -230,34 +231,45 @@
                  onchange="updateField('${t.id}','send_anyway',this.checked)">
           <span class="toggle-slider"></span>
         </label>
-        <span>Envoyer quand même si le délai est dépassé (ex: résa faite le jour J)</span>
+        <span>Envoyer quand même si le délai est dépassé</span>
       </div>` : ''
 
-    // Option Seam pour ménage terminé
-    const seamHtml = (t.event_type === 'menage_done' && window._seamActive) ? `
-      <div class="seam-option">
-        <div class="seam-option-title">
-          🔐 Code d'accès
-          <label class="toggle" style="width:36px;height:20px">
-            <input type="checkbox" ${t.include_seam_code ? 'checked':''}
-                   onchange="updateField('${t.id}','include_seam_code',this.checked)">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        ${t.include_seam_code ? `
-          <div style="font-size:12px;color:var(--text2)">
-            Un code Seam sera généré automatiquement pour la période du séjour et inclus dans le message via la variable <code>{code_acces}</code>.
-          </div>` : `
-          <div style="font-size:12px;color:var(--text2)">
-            Utilisez <code>{code_acces}</code> dans votre template pour indiquer manuellement le code (boîte à clé, digicode, etc.)
-          </div>`}
-      </div>` : t.event_type === 'menage_done' ? `
-      <div class="seam-option">
-        <div class="seam-option-title">🔑 Code d'accès</div>
-        <div style="font-size:12px;color:var(--text2)">
-          Utilisez <code>{code_acces}</code> dans votre template pour le code de la boîte à clé ou autre système d'accès.
-        </div>
-      </div>` : ''
+    // Option code Seam (menage_done uniquement)
+    let seamHtml = ''
+    if (t.event_type === 'menage_done') {
+      if (window._seamActive) {
+        seamHtml = `
+          <div class="seam-option">
+            <div class="seam-option-title">
+              🔐 Générer et envoyer le code d'accès
+              <label class="toggle" style="width:36px;height:20px">
+                <input type="checkbox" id="seam-${t.id}" ${t.include_seam_code ? 'checked':''}
+                       onchange="toggleSeamCode('${t.id}',this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            ${t.include_seam_code ? `
+              <div style="font-size:12px;color:var(--text2);line-height:1.7">
+                Un code Seam sera généré automatiquement pour la période du séjour
+                et inséré via <code>{code_acces}</code> dans le message.
+                <br>Valide du check-in au check-out de la réservation.
+              </div>` : `
+              <div style="font-size:12px;color:var(--text2)">
+                Activez pour générer automatiquement un code Seam après le ménage.
+                Utilisez <code>{code_acces}</code> dans votre template.
+              </div>`}
+          </div>`
+      } else {
+        seamHtml = `
+          <div class="seam-option">
+            <div class="seam-option-title">🔑 Code d'accès</div>
+            <div style="font-size:12px;color:var(--text2)">
+              Utilisez <code>{code_acces}</code> pour indiquer manuellement le code.
+              <br><a href="/apps/serrures" style="color:var(--green)">Configurer Seam →</a>
+            </div>
+          </div>`
+      }
+    }
 
     return `
       <div class="template-card ${t.active ? '' : 'inactive'}" id="tpl-${t.id}">
@@ -304,6 +316,9 @@
       const d = ev.delays?.find(d => d.value === t.offset_value)
       return d ? d.label : t.offset_value || 'immédiatement'
     }
+    if (ev.delayType === 'earliest') {
+      return `Dès ménage terminé, pas avant ${t.earliest_send_time || '15:00'}`
+    }
     const day = t.offset_days === 0 ? 'Jour J' : t.offset_days > 0 ? `J+${t.offset_days}` : `J${t.offset_days}`
     return `${day} à ${t.send_time || '10:00'}`
   }
@@ -311,17 +326,18 @@
   window.addTemplate = async () => {
     const { data, error } = await window._supabase
       .from('message_templates').insert({
-        user_id:       window._session.user.id,
-        property_id:   currentProp,
-        event_type:    'arrival',
-        reference:     'arrival',
-        offset_days:   -1,
-        offset_value:  null,
-        send_time:     '10:00',
-        send_anyway:   true,
-        active:        true,
-        template_text: '',
-        include_seam_code: false
+        user_id:            window._session.user.id,
+        property_id:        currentProp,
+        event_type:         'arrival',
+        reference:          'arrival',
+        offset_days:        -1,
+        offset_value:       null,
+        send_time:          '10:00',
+        earliest_send_time: '15:00',
+        send_anyway:        true,
+        active:             true,
+        template_text:      '',
+        include_seam_code:  false
       }).select().single()
 
     if (error) { showToast('❌ ' + error.message, true); return }
@@ -334,23 +350,36 @@
     const t = templates.find(t => t.id === id)
     if (!t) return
     t[field] = value
-    // Ne pas rerendre pour éviter de perdre le texte du textarea
-    // Juste mettre à jour le résumé timing
     const timingEl = document.querySelector(`#tpl-${id} .timing-summary`)
     const ev = EVENTS[t.event_type] || EVENTS.arrival
     if (timingEl) timingEl.textContent = '⏰ ' + formatTiming(t, ev)
+  }
+
+  window.toggleSeamCode = (id, checked) => {
+    const t = templates.find(t => t.id === id)
+    if (!t) return
+    t.include_seam_code = checked
+    // Re-render juste le bloc seam sans toucher au textarea
+    const card = document.getElementById(`tpl-${id}`)
+    const textarea = document.getElementById(`text-${id}`)
+    const savedText = textarea?.value
+    renderTemplates()
+    // Restaurer le texte après re-render
+    const newTextarea = document.getElementById(`text-${id}`)
+    if (newTextarea && savedText !== undefined) newTextarea.value = savedText
   }
 
   window.updateEventType = (id, value) => {
     const t = templates.find(t => t.id === id)
     if (!t) return
     const ev = EVENTS[value]
-    t.event_type = value
-    t.reference  = value === 'departure' ? 'departure' : value === 'booking_confirmed' ? 'booking' : 'arrival'
-    t.offset_days  = 0
-    t.offset_value = ev.delays?.[0]?.value || null
-    t.send_time    = '10:00'
-    t.send_anyway  = ev.send_anyway
+    t.event_type        = value
+    t.reference         = value === 'departure' ? 'departure' : value === 'booking_confirmed' ? 'booking' : 'arrival'
+    t.offset_days       = 0
+    t.offset_value      = ev.delays?.[0]?.value || null
+    t.send_time         = '10:00'
+    t.earliest_send_time = '15:00'
+    t.send_anyway       = ev.send_anyway
     renderTemplates()
   }
 
@@ -360,15 +389,16 @@
     t.template_text = document.getElementById(`text-${id}`)?.value || t.template_text
 
     const { error } = await window._supabase.from('message_templates').update({
-      event_type:   t.event_type,
-      reference:    t.reference,
-      offset_days:  t.offset_days,
-      offset_value: t.offset_value,
-      send_time:    t.send_time,
-      send_anyway:  t.send_anyway,
-      active:       t.active,
-      template_text: t.template_text,
-      include_seam_code: t.include_seam_code || false
+      event_type:         t.event_type,
+      reference:          t.reference,
+      offset_days:        t.offset_days,
+      offset_value:       t.offset_value,
+      send_time:          t.send_time,
+      earliest_send_time: t.earliest_send_time || '15:00',
+      send_anyway:        t.send_anyway,
+      active:             t.active,
+      template_text:      t.template_text,
+      include_seam_code:  t.include_seam_code || false
     }).eq('id', id)
 
     if (error) { showToast('❌ ' + error.message, true); return }
