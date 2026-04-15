@@ -7,8 +7,7 @@ const supabase = createClient(
 )
 
 const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY })
-const { getStatusAll } = require('../lib/providers/seam')
-const { getSeamKey }   = require('./serrures')
+const { getStatusAll, getSeamKey } = require('../lib/providers/seam')
 
 module.exports = async function handler(req, res) {
   const authHeader = req.headers.authorization
