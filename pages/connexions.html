@@ -3,75 +3,184 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Mes API</title>
+  <title>HôteSmart — Connexions API</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .api-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px; }
-    .api-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .api-name { font-size: 14px; font-weight: 500; }
-    .api-status { font-size: 11px; padding: 2px 8px; border-radius: 20px; }
-    .api-connected { background: var(--green-bg); color: #085041; }
-    .api-disconnected { background: var(--bg2); color: var(--text3); }
-    .api-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; }
-    .api-input-row { display: flex; gap: 8px; }
-    .api-input-row .form-input { flex: 1; }
-    .success { font-size: 12px; color: var(--green); margin-top: 8px; display: none; }
+    .api-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; margin-bottom:16px; }
+    .api-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    .api-name { font-size:15px; font-weight:500; display:flex; align-items:center; gap:10px; }
+    .api-status { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:500; }
+    .status-ok  { background:#E1F5EE; color:#085041; }
+    .status-off { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
+    .status-soon { background:#FAEEDA; color:#633806; }
+
+    .steps { display:flex; flex-direction:column; gap:12px; margin-bottom:20px; }
+    .step { display:flex; gap:12px; align-items:flex-start; }
+    .step-num { width:24px; height:24px; border-radius:50%; background:var(--green); color:white; font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+    .step-body { font-size:13px; color:var(--text2); line-height:1.6; flex:1; }
+    .step-body strong { color:var(--text); }
+    .step-body a { color:var(--green); text-decoration:none; }
+    .step-body a:hover { text-decoration:underline; }
+    .step-body code { background:var(--bg2); padding:1px 6px; border-radius:4px; font-size:12px; border:0.5px solid var(--border); }
+
+    .invite-row { display:flex; gap:8px; margin-top:12px; }
+    .invite-row input { flex:1; font-family:var(--font-mono, monospace); font-size:12px; }
+
+    .token-info { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; font-size:12px; color:var(--text2); margin-top:12px; display:none; }
+    .token-info.show { display:block; }
+
+    .toast { padding:8px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
+    .toast.success { background:#E1F5EE; color:#085041; border:0.5px solid var(--green); }
+    .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
+
+    .divider { border:none; border-top:0.5px solid var(--border); margin:20px 0; }
+
+    .coming-soon { opacity:0.5; pointer-events:none; }
+    .api-actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
   </style>
 </head>
 <body>
-
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
-
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">Mes API</div>
+        <div class="page-title">⚡ Connexions API</div>
         <div class="page-sub">Connectez vos services externes</div>
       </div>
     </div>
-
     <div class="content">
 
       <!-- Beds24 -->
       <div class="api-card" id="card-beds24">
         <div class="api-header">
           <div class="api-name">🏨 Beds24</div>
-          <div class="api-status api-disconnected" id="status-beds24">Non connecté</div>
+          <div class="api-status status-off" id="status-beds24">Vérification…</div>
         </div>
-        <div class="api-desc">Connectez votre compte Beds24 pour accéder à vos réservations, messages et biens.</div>
-        <div class="api-input-row">
-          <input class="form-input" type="password" id="key-beds24" placeholder="Votre token Beds24 v2">
-          <button class="btn btn-primary" id="btn-beds24">Connecter</button>
+
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              Connectez-vous à Beds24 et allez dans
+              <a href="https://beds24.com/control3.php?pagetype=apiv2" target="_blank">
+                Paramètres → Marketplace → API
+              </a>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              Cliquez sur <strong>Generate invite code</strong>.
+              Cochez <strong>READ + WRITE</strong> sur <code>bookings</code> et <code>properties</code>.
+              Sélectionnez <strong>All properties</strong>.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              Copiez l'invite code généré et collez-le ci-dessous.
+              <strong>Attention : l'invite code est à usage unique.</strong>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              Cliquez sur <strong>Connecter</strong> — HôteSmart récupère et sauvegarde automatiquement le token.
+            </div>
+          </div>
         </div>
-        <div class="success" id="ok-beds24">✓ Clé enregistrée avec succès</div>
+
+        <div class="invite-row">
+          <input class="form-input" type="text" id="invite-code"
+            placeholder="Collez votre invite code Beds24 ici…">
+          <button class="btn btn-primary" id="btn-connect-beds24">Connecter</button>
+        </div>
+
+        <div class="token-info" id="token-info-beds24"></div>
+        <div class="toast" id="toast-beds24"></div>
+
+        <hr class="divider">
+
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+          Le token Beds24 expire après <strong>24h</strong>.
+          HôteSmart renouvelle automatiquement via le refresh token.
+          Si la connexion échoue, générez un nouvel invite code.
+        </div>
+
+        <div class="api-actions">
+          <button class="btn" id="btn-refresh-beds24">🔄 Renouveler le token</button>
+          <a class="btn" href="https://beds24.com/control3.php?pagetype=apiv2" target="_blank">
+            🔗 Ouvrir Beds24 API
+          </a>
+        </div>
+      </div>
+
+      <!-- Seam -->
+      <div class="api-card">
+        <div class="api-header">
+          <div class="api-name">🔐 Seam — Serrures connectées</div>
+          <div class="api-status status-off" id="status-seam">Vérification…</div>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              Créez un compte sur <a href="https://console.seam.co" target="_blank">console.seam.co</a>
+              et connectez vos serrures.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              Allez dans <strong>API Keys</strong>, créez une clé (commence par <code>seam_</code>).
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              Enregistrez-la dans
+              <a href="/apps/serrures">Paramètres → Serrures connectées</a>.
+            </div>
+          </div>
+        </div>
+        <div class="api-actions">
+          <a class="btn btn-primary" href="/apps/serrures">⚙️ Configurer Seam</a>
+        </div>
+      </div>
+
+      <!-- Brevo -->
+      <div class="api-card">
+        <div class="api-header">
+          <div class="api-name">💬 Brevo SMS</div>
+          <div class="api-status status-ok">Actif</div>
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          Brevo est configuré au niveau serveur. Les SMS sont envoyés automatiquement
+          pour les alertes agent et les notifications. Aucune configuration requise.
+        </div>
       </div>
 
       <!-- Stripe -->
-      <div class="api-card">
+      <div class="api-card coming-soon">
         <div class="api-header">
           <div class="api-name">💳 Stripe</div>
-          <div class="api-status api-disconnected">Bientôt disponible</div>
+          <div class="api-status status-soon">Bientôt</div>
         </div>
-        <div class="api-desc">Connectez Stripe pour gérer vos abonnements et paiements.</div>
+        <div style="font-size:13px;color:var(--text2)">
+          Intégration Stripe pour les abonnements et paiements — disponible prochainement.
+        </div>
       </div>
 
       <!-- Airbnb -->
-      <div class="api-card">
+      <div class="api-card coming-soon">
         <div class="api-header">
           <div class="api-name">🏠 Airbnb</div>
-          <div class="api-status api-disconnected">Bientôt disponible</div>
+          <div class="api-status status-soon">Bientôt</div>
         </div>
-        <div class="api-desc">Synchronisez vos annonces et avis Airbnb.</div>
-      </div>
-
-      <!-- Booking.com -->
-      <div class="api-card">
-        <div class="api-header">
-          <div class="api-name">📅 Booking.com</div>
-          <div class="api-status api-disconnected">Bientôt disponible</div>
+        <div style="font-size:13px;color:var(--text2)">
+          Synchronisation des annonces et avis Airbnb — disponible prochainement.
         </div>
-        <div class="api-desc">Synchronisez vos réservations Booking.com.</div>
       </div>
 
     </div>
@@ -83,57 +192,105 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { logger } from '/shared/logger.js'
 
   initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('api')
+  window._session  = session
+  window._supabase = supabase
 
-  async function init() {
-    const session = await requireAuth()
-    if (!session) return
+  // Vérifier statut Beds24
+  await checkBeds24Status()
 
-    await renderSidebar('api')
+  // Vérifier statut Seam
+  const { data: seamData } = await supabase.from('api_keys')
+    .select('seam_api_key, seam_enabled').eq('user_id', session.user.id).maybeSingle()
+  const seamOk = !!(seamData?.seam_api_key && seamData?.seam_enabled !== false)
+  setStatus('seam', seamOk ? 'ok' : 'off', seamOk ? 'Connecté ✓' : 'Non connecté')
 
-    // Vérifie si Beds24 est déjà connecté
-    const { data } = await supabase
-      .from('api_keys')
-      .select('api_key')
-      .eq('user_id', session.user.id)
-      .eq('service', 'beds24')
-      .single()
+  // Bouton connecter Beds24
+  document.getElementById('btn-connect-beds24').addEventListener('click', async () => {
+    const code = document.getElementById('invite-code').value.trim()
+    if (!code) return showToast('beds24', 'Collez d\'abord votre invite code', 'error')
 
-    if (data) {
-      document.getElementById('status-beds24').textContent = 'Connecté'
-      document.getElementById('status-beds24').className = 'api-status api-connected'
-      document.getElementById('key-beds24').placeholder = '••••••••••••••••'
-      logger.info('API Page', 'Beds24 déjà connecté')
-    }
+    const btn = document.getElementById('btn-connect-beds24')
+    btn.disabled = true; btn.textContent = '⏳ Connexion…'
 
-    // Bouton Beds24
-    document.getElementById('btn-beds24').addEventListener('click', async () => {
-      const key = document.getElementById('key-beds24').value.trim()
-      if (!key) return
-
-      const { error } = await supabase
-        .from('api_keys')
-        .upsert({
-          user_id: session.user.id,
-          service: 'beds24',
-          api_key: key
-        }, { onConflict: 'user_id,service' })
-
-      if (error) {
-        logger.error('API Page', 'Erreur sauvegarde Beds24', error)
-      } else {
-        document.getElementById('ok-beds24').style.display = 'block'
-        document.getElementById('status-beds24').textContent = 'Connecté'
-        document.getElementById('status-beds24').className = 'api-status api-connected'
-        logger.info('API Page', 'Clé Beds24 sauvegardée')
-      }
+    const res = await fetch('/api/beds24-setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'setup', inviteCode: code })
     })
+    const data = await res.json()
+    btn.disabled = false; btn.textContent = 'Connecter'
+
+    if (data.success) {
+      document.getElementById('invite-code').value = ''
+      showToast('beds24', '✅ Beds24 connecté avec succès !', 'success')
+      await checkBeds24Status()
+    } else {
+      showToast('beds24', '❌ ' + (data.error || 'Erreur inconnue'), 'error')
+    }
+  })
+
+  // Bouton refresh Beds24
+  document.getElementById('btn-refresh-beds24').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-refresh-beds24')
+    btn.disabled = true; btn.textContent = '⏳ Renouvellement…'
+
+    const res = await fetch('/api/beds24-setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'refresh' })
+    })
+    const data = await res.json()
+    btn.disabled = false; btn.textContent = '🔄 Renouveler le token'
+
+    if (data.success) {
+      showToast('beds24', `✅ Token renouvelé — expire dans ${Math.round(data.expiresIn / 3600)}h`, 'success')
+      await checkBeds24Status()
+    } else {
+      showToast('beds24', '❌ ' + (data.error || 'Erreur'), 'error')
+    }
+  })
+
+  async function checkBeds24Status() {
+    const res = await fetch('/api/beds24-setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'status' })
+    })
+    const data = await res.json()
+    const ok = data.connected
+
+    setStatus('beds24', ok ? 'ok' : 'off', ok ? 'Connecté ✓' : 'Non connecté')
+
+    const info = document.getElementById('token-info-beds24')
+    if (ok && data.hasRefresh) {
+      info.textContent = '🔄 Refresh token disponible — renouvellement automatique actif'
+      info.classList.add('show')
+    } else if (ok) {
+      info.textContent = '⚠️ Pas de refresh token — reconnectez avec un invite code pour activer le renouvellement auto'
+      info.classList.add('show')
+    } else {
+      info.classList.remove('show')
+    }
   }
 
-  init()
-</script>
+  function setStatus(id, type, label) {
+    const el = document.getElementById(`status-${id}`)
+    if (!el) return
+    el.textContent = label
+    el.className = `api-status status-${type}`
+  }
 
+  function showToast(id, msg, type) {
+    const t = document.getElementById(`toast-${id}`)
+    if (!t) return
+    t.textContent = msg; t.className = `toast ${type}`; t.style.display = 'block'
+    setTimeout(() => { t.style.display = 'none' }, 5000)
+  }
+</script>
 </body>
 </html>
