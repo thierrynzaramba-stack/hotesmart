@@ -56,7 +56,7 @@
       <div class="property-select">
         <label class="form-label" style="margin:0">Bien :</label>
         <select class="form-input" id="property-select" style="width:auto;min-width:200px">
-          <option value="">Chargement...</option>
+          <option value="">Choisir un bien...</option>
         </select>
         <span class="badge-test">⚠️ MODE TEST — aucun message envoyé</span>
       </div>
@@ -178,18 +178,6 @@
     }
   }
 
-  async function getKnowledge() {
-    if (!currentPropertyId) return ''
-    const { data } = await supabase.from('knowledge').select('*')
-      .eq('user_id', session.user.id)
-      .eq('property_id', String(currentPropertyId))
-    if (!data?.length) return ''
-    let kb = 'FAQ :\n'
-    data.filter(d => d.type === 'faq').forEach(f => { kb += `Q: ${f.key}\nR: ${f.value}\n\n` })
-    return kb
-  }
-
-  // ── Simulateur avec moteur de classification (identique au cron) ────────────
   async function simulate() {
     const message   = document.getElementById('sim-message').value.trim()
     const guestName = document.getElementById('sim-guest-name').value.trim() || 'Voyageur Test'
@@ -272,7 +260,6 @@
     document.getElementById('sim-result').style.display = 'block'
   }
 
-  // ── Messages réels ────────────────────────────────────────────────────────
   async function loadRealMessages() {
     const container = document.getElementById('real-messages-container')
     if (!currentPropertyId) return
@@ -325,7 +312,6 @@
     }).join('')
   }
 
-  // ── Historique ────────────────────────────────────────────────────────────
   async function loadHistory() {
     const container = document.getElementById('history-container')
     if (!currentPropertyId) return
@@ -382,6 +368,7 @@
 
   function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 
+  // Appel init
   init()
 </script>
 </body>
