@@ -42,10 +42,12 @@
 
     .send-anyway-row { display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12px; color:var(--text2); }
 
-    .seam-option { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; margin-bottom:14px; }
-    .seam-option-title { font-size:12px; font-weight:500; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
-    .seam-option select { font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; }
-    .seam-earliest { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; color:var(--text2); }
+    .access-option { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; margin-bottom:14px; }
+    .access-option-title { font-size:12px; font-weight:500; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+    .access-rows { display:flex; flex-direction:column; gap:8px; }
+    .access-row { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); }
+    .access-row select { font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; flex:1; max-width:260px; }
+    .access-hint { font-size:11px; color:var(--text2); margin-top:8px; line-height:1.6; }
 
     .variables-hint { font-size:11px; color:var(--text2); margin-top:6px; line-height:1.8; }
     .template-actions { display:flex; gap:8px; margin-top:12px; align-items:center; }
@@ -99,11 +101,12 @@
   window._session  = session
   window._supabase = supabase
 
-  const { data: apiKey } = await supabase.from('api_keys')
-    .select('seam_api_key, seam_enabled')
-    .eq('user_id', session.user.id)
-    .maybeSingle()
-  window._seamActive = !!(apiKey?.seam_api_key && apiKey?.seam_enabled)
+  // Charger les serrures disponibles
+  const { data: locks } = await supabase
+    .from('locks')
+    .select('id, label, brand')
+    .order('label')
+  window._locks = locks || []
 
   window.init()
   document.getElementById('btn-add-template').addEventListener('click', () => window.addTemplate())
@@ -156,10 +159,21 @@
 
   let currentProp = PROPERTIES[0].id
   let templates   = []
+  let propLocks   = []
 
   window.init = async () => {
     renderTabs()
+    await loadPropLocks()
     await loadTemplates()
+  }
+
+  async function loadPropLocks() {
+    // Serrures associées au logement courant
+    const { data } = await window._supabase
+      .from('property_locks')
+      .select('lock_id, role, locks(id, label, brand)')
+      .eq('property_id', currentProp)
+    propLocks = (data || []).map(pl => pl.locks).filter(Boolean)
   }
 
   function renderTabs() {
@@ -170,7 +184,10 @@
   }
 
   window.selectProp = async id => {
-    currentProp = id; renderTabs(); await loadTemplates()
+    currentProp = id
+    renderTabs()
+    await loadPropLocks()
+    await loadTemplates()
   }
 
   async function loadTemplates() {
@@ -215,7 +232,6 @@
           ${HOURS.map(h => `<option value="${h}" ${(t.send_time||'10:00') === h ? 'selected':''}>${h.replace(':00','h')}</option>`).join('')}
         </select>`
     } else if (ev.delayType === 'earliest') {
-      // menage_done : envoi dès que ménage terminé, mais pas avant Xh
       delayHtml = `
         <label>Pas avant :</label>
         <select class="config-select" onchange="updateField('${t.id}','earliest_send_time',this.value)">
@@ -234,42 +250,36 @@
         <span>Envoyer quand même si le délai est dépassé</span>
       </div>` : ''
 
-    // Option code Seam (menage_done uniquement)
-    let seamHtml = ''
-    if (t.event_type === 'menage_done') {
-      if (window._seamActive) {
-        seamHtml = `
-          <div class="seam-option">
-            <div class="seam-option-title">
-              🔐 Générer et envoyer le code d'accès
-              <label class="toggle" style="width:36px;height:20px">
-                <input type="checkbox" id="seam-${t.id}" ${t.include_seam_code ? 'checked':''}
-                       onchange="toggleSeamCode('${t.id}',this.checked)">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            ${t.include_seam_code ? `
-              <div style="font-size:12px;color:var(--text2);line-height:1.7">
-                Un code Seam sera généré automatiquement pour la période du séjour
-                et inséré via <code>{code_acces}</code> dans le message.
-                <br>Valide du check-in au check-out de la réservation.
-              </div>` : `
-              <div style="font-size:12px;color:var(--text2)">
-                Activez pour générer automatiquement un code Seam après le ménage.
-                Utilisez <code>{code_acces}</code> dans votre template.
-              </div>`}
-          </div>`
-      } else {
-        seamHtml = `
-          <div class="seam-option">
-            <div class="seam-option-title">🔑 Code d'accès</div>
-            <div style="font-size:12px;color:var(--text2)">
-              Utilisez <code>{code_acces}</code> pour indiquer manuellement le code.
-              <br><a href="/apps/serrures" style="color:var(--green)">Configurer Seam →</a>
-            </div>
-          </div>`
-      }
-    }
+    // Section Accès — disponible sur tous les événements
+    const lockOptions = propLocks.length
+      ? propLocks.map(l => `<option value="${l.id}" ${t.lock_id === l.id ? 'selected':''}>${l.label}</option>`).join('')
+      : '<option value="">Aucune serrure configurée</option>'
+
+    const accessHtml = `
+      <div class="access-option">
+        <div class="access-option-title">🔐 Accès (optionnel)</div>
+        <div class="access-rows">
+          <div class="access-row">
+            <label style="white-space:nowrap">Serrure :</label>
+            <select onchange="updateLock('${t.id}',this.value)">
+              <option value="">— Aucune —</option>
+              ${lockOptions}
+            </select>
+          </div>
+          ${t.lock_id ? `
+          <div class="access-row">
+            <label style="white-space:nowrap">Pas avant :</label>
+            <select onchange="updateField('${t.id}','earliest_send_time',this.value)">
+              ${HOURS.map(h => `<option value="${h}" ${(t.earliest_send_time||'15:00') === h ? 'selected':''}>${h.replace(':00','h')}</option>`).join('')}
+            </select>
+          </div>` : ''}
+        </div>
+        <div class="access-hint">
+          ${t.lock_id
+            ? `Un code sera généré automatiquement pour la durée du séjour et inséré via <code>{code_acces}</code>.`
+            : `Sélectionnez une serrure pour générer un code automatiquement, ou utilisez <code>{code_acces}</code> pour un code manuel.`}
+        </div>
+      </div>`
 
     return `
       <div class="template-card ${t.active ? '' : 'inactive'}" id="tpl-${t.id}">
@@ -293,14 +303,15 @@
           </div>
 
           ${sendAnywayHtml}
-          ${seamHtml}
+          ${accessHtml}
 
           <textarea class="form-input template-text" id="text-${t.id}"
             placeholder="Bonjour {prenom}, votre séjour au {logement} commence le {arrivee}..."
             >${escHtml(t.template_text||'')}</textarea>
 
           <div class="variables-hint">
-            💡 Variables : <code>{prenom}</code> <code>{arrivee}</code> <code>{depart}</code> <code>{code_acces}</code> <code>{checkin}</code> <code>{checkout}</code> <code>{logement}</code>
+            💡 Variables : <code>{prenom}</code> <code>{arrivee}</code> <code>{depart}</code>
+            <code>{code_acces}</code> <code>{checkin}</code> <code>{checkout}</code> <code>{logement}</code>
           </div>
 
           <div class="template-actions">
@@ -337,7 +348,7 @@
         send_anyway:        true,
         active:             true,
         template_text:      '',
-        include_seam_code:  false
+        lock_id:            null
       }).select().single()
 
     if (error) { showToast('❌ ' + error.message, true); return }
@@ -355,16 +366,13 @@
     if (timingEl) timingEl.textContent = '⏰ ' + formatTiming(t, ev)
   }
 
-  window.toggleSeamCode = (id, checked) => {
+  window.updateLock = (id, lockId) => {
     const t = templates.find(t => t.id === id)
     if (!t) return
-    t.include_seam_code = checked
-    // Re-render juste le bloc seam sans toucher au textarea
-    const card = document.getElementById(`tpl-${id}`)
     const textarea = document.getElementById(`text-${id}`)
     const savedText = textarea?.value
+    t.lock_id = lockId || null
     renderTemplates()
-    // Restaurer le texte après re-render
     const newTextarea = document.getElementById(`text-${id}`)
     if (newTextarea && savedText !== undefined) newTextarea.value = savedText
   }
@@ -373,13 +381,13 @@
     const t = templates.find(t => t.id === id)
     if (!t) return
     const ev = EVENTS[value]
-    t.event_type        = value
-    t.reference         = value === 'departure' ? 'departure' : value === 'booking_confirmed' ? 'booking' : 'arrival'
-    t.offset_days       = 0
-    t.offset_value      = ev.delays?.[0]?.value || null
-    t.send_time         = '10:00'
+    t.event_type         = value
+    t.reference          = value === 'departure' ? 'departure' : value === 'booking_confirmed' ? 'booking' : 'arrival'
+    t.offset_days        = 0
+    t.offset_value       = ev.delays?.[0]?.value || null
+    t.send_time          = '10:00'
     t.earliest_send_time = '15:00'
-    t.send_anyway       = ev.send_anyway
+    t.send_anyway        = ev.send_anyway
     renderTemplates()
   }
 
@@ -398,7 +406,7 @@
       send_anyway:        t.send_anyway,
       active:             t.active,
       template_text:      t.template_text,
-      include_seam_code:  t.include_seam_code || false
+      lock_id:            t.lock_id || null
     }).eq('id', id)
 
     if (error) { showToast('❌ ' + error.message, true); return }
