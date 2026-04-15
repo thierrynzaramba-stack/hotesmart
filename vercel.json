@@ -5,19 +5,18 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/login", "destination": "/pages/login.html" },
-    { "source": "/dashboard", "destination": "/pages/index.html" },
-    { "source": "/apps/serrures", "destination": "/apps/serrures/index.html" },
-    { "source": "/apps/sms", "destination": "/apps/sms/index.html" },
-    { "source": "/apps", "destination": "/pages/apps.html" },
-    { "source": "/settings", "destination": "/pages/settings.html" },
-    { "source": "/abonnement", "destination": "/pages/abonnement.html" },
-    { "source": "/connexions", "destination": "/pages/connexions" },
-    { "source": "/apps/agent-ai", "destination": "/apps/agent-ai/index.html" },
-    { "source": "/apps/agent-ai/knowledge", "destination": "/apps/agent-ai/knowledge.html" },
-    { "source": "/apps/agent-ai/test", "destination": "/apps/agent-ai/test.html" },
-    { "source": "/apps/agent-ai/config", "destination": "/apps/agent-ai/config.html" },
-    { "source": "/apps/agent-ai/messages", "destination": "/apps/agent-ai/messages.html" }
-  
+    { "source": "/login",                    "destination": "/pages/login" },
+    { "source": "/dashboard",                "destination": "/pages/index" },
+    { "source": "/apps/serrures",            "destination": "/apps/serrures/index" },
+    { "source": "/apps/sms",                 "destination": "/apps/sms/index" },
+    { "source": "/apps",                     "destination": "/pages/apps" },
+    { "source": "/settings",                 "destination": "/pages/settings" },
+    { "source": "/abonnement",               "destination": "/pages/abonnement" },
+    { "source": "/connexions",               "destination": "/pages/connexions" },
+    { "source": "/apps/agent-ai",            "destination": "/apps/agent-ai/index" },
+    { "source": "/apps/agent-ai/knowledge",  "destination": "/apps/agent-ai/knowledge" },
+    { "source": "/apps/agent-ai/test",       "destination": "/apps/agent-ai/test" },
+    { "source": "/apps/agent-ai/config",     "destination": "/apps/agent-ai/config" },
+    { "source": "/apps/agent-ai/messages",   "destination": "/apps/agent-ai/messages" }
   ]
 }
