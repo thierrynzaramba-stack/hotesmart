@@ -584,14 +584,7 @@ function buildKnowledgeText(knowledge) {
 
 // ─── Vérification batterie serrures ──────────────────────────────────────────
 async function checkBatteries(results) {
-const { data: seamKeyRow } = await supabase
-    .from('api_keys')
-    .select('seam_api_key, seam_enabled, user_id')
-    .eq('seam_enabled', true)
-    .not('seam_api_key', 'is', null)
-    .maybeSingle()
-
-  const apiKey = seamKeyRow?.seam_api_key || process.env.SEAM_API_KEY || null
+  const apiKey = await getSeamKey(null)
   if (!apiKey) {
     console.log('[Cron] Batterie: pas de clé Seam, skip')
     return
@@ -621,6 +614,7 @@ const { data: seamKeyRow } = await supabase
 
   for (const lock of locks) {
     const status = statusMap[lock.seam_device_id]
+    console.log(`[Cron] Batterie raw ${lock.label}:`, JSON.stringify(status?.raw?.properties?.battery))
     if (!status) {
       console.log(`[Cron] Batterie: serrure ${lock.label} introuvable dans Seam`)
       continue
