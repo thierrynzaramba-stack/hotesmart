@@ -29,6 +29,13 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    // Refresh automatique des tokens Beds24 expirés
+    try {
+      await refreshBeds24Tokens()
+    } catch (err) {
+      console.error('[Cron] Erreur refresh tokens:', err.message)
+    }
+
     const { data: apiKeys } = await supabase
       .from('api_keys')
       .select('user_id, api_key')
@@ -734,6 +741,43 @@ async function checkPendingMessages(results) {
     } catch (err) {
       console.error(`[Cron] Erreur envoi pending ${log.id}:`, err.message)
       await supabase.from('message_sent_log').update({ status: 'error' }).eq('id', log.id)
+    }
+  }
+}
+
+
+// ─── Refresh automatique tokens Beds24 ───────────────────────────────────────
+async function refreshBeds24Tokens() {
+  const { data: keys } = await supabase
+    .from('api_keys')
+    .select('user_id, refresh_token')
+    .eq('service', 'beds24')
+    .not('refresh_token', 'is', null)
+
+  if (!keys?.length) return
+
+  for (const key of keys) {
+    try {
+      const r = await fetch('https://beds24.com/api/v2/authentication/token', {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'refreshToken': key.refresh_token
+        }
+      })
+      const d = await r.json()
+
+      if (d.token) {
+        await supabase.from('api_keys')
+          .update({ api_key: d.token })
+          .eq('user_id', key.user_id)
+          .eq('service', 'beds24')
+        console.log(`[Cron] Token Beds24 rafraîchi pour user ${key.user_id}`)
+      } else {
+        console.error(`[Cron] Refresh Beds24 échoué user ${key.user_id}:`, d.error)
+      }
+    } catch (err) {
+      console.error(`[Cron] Erreur refresh Beds24 user ${key.user_id}:`, err.message)
     }
   }
 }
