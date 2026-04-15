@@ -24,11 +24,13 @@ module.exports = async function handler(req, res) {
   if (!inviteCode) return res.status(400).json({ error: 'inviteCode requis' })
 
   try {
-    // Étape 1 : échanger l'invite code contre un token
+    // GET avec l'invite code dans le header 'code'
     const r = await fetch('https://beds24.com/api/v2/authentication/setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inviteCode })
+      method: 'GET',
+      headers: {
+        'accept': 'application/json',
+        'code': inviteCode
+      }
     })
     const d = await r.json()
     console.log('[Beds24Setup] response:', JSON.stringify(d))
@@ -37,17 +39,22 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: d.error || 'Token non reçu', detail: d })
     }
 
-    // Étape 2 : sauvegarder le token dans api_keys
+    // Sauvegarder token + refreshToken dans api_keys
     const { error } = await supabase.from('api_keys').upsert({
-      user_id: user.id,
-      service: 'beds24',
-      api_key: d.token,
+      user_id:       user.id,
+      service:       'beds24',
+      api_key:       d.token,
       refresh_token: d.refreshToken || null
     }, { onConflict: 'user_id,service' })
 
     if (error) return res.status(500).json({ error: error.message })
 
-    return res.json({ success: true, token: d.token })
+    return res.json({
+      success:      true,
+      token:        d.token,
+      refreshToken: d.refreshToken,
+      expiresIn:    d.expiresIn
+    })
 
   } catch (err) {
     console.error('[Beds24Setup]', err)
