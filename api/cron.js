@@ -7,6 +7,8 @@ const supabase = createClient(
 )
 
 const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY })
+const { getStatusAll } = require('../lib/providers/seam')
+const { getSeamKey }   = require('./serrures')
 
 module.exports = async function handler(req, res) {
   const authHeader = req.headers.authorization
@@ -45,6 +47,14 @@ module.exports = async function handler(req, res) {
         console.error(`[Cron] Erreur user ${user_id}:`, err.message)
         results.errors.push({ user_id, error: err.message })
       }
+    }
+
+    // Vérification batterie serrures
+    try {
+      await checkBatteries(results)
+    } catch (err) {
+      console.error('[Cron] Erreur batterie:', err.message)
+      results.errors.push({ context: 'battery_check', error: err.message })
     }
 
     await supabase.from('cron_logs').upsert({
@@ -124,7 +134,6 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
 
     if (!existing) {
       await createBookingEvent(userId, bookingId, property, 'new', eventData, relevantTokens)
-      // Déclencher templates "booking_confirmed"
       await triggerTemplates(userId, beds24Key, property, booking, 'booking_confirmed', results)
       results.totalBookingEvents++
     } else {
@@ -166,18 +175,16 @@ async function createBookingEvent(userId, bookingId, property, eventType, eventD
 
 // ─── Messages automatiques ────────────────────────────────────────────────────
 async function processMessageTemplates(userId, beds24Key, property, results) {
-  // Charger templates actifs pour ce bien
   const { data: templates } = await supabase
     .from('message_templates')
     .select('*')
     .eq('user_id', userId)
     .eq('property_id', String(property.id))
     .eq('active', true)
-    .in('event_type', ['arrival', 'departure']) // Traitement basé sur date
+    .in('event_type', ['arrival', 'departure'])
 
   if (!templates?.length) return
 
-  // Charger les réservations à venir et en cours
   const today = new Date()
   const dateFrom = new Date(today); dateFrom.setDate(today.getDate() - 7)
   const dateTo   = new Date(today); dateTo.setDate(today.getDate() + 30)
@@ -201,7 +208,6 @@ async function checkAndSendTemplate(userId, beds24Key, property, booking, templa
   const now       = new Date()
   const today     = now.toISOString().split('T')[0]
 
-  // Calculer la date cible selon l'événement
   let refDate = null
   if (template.reference === 'arrival')   refDate = booking.arrival
   if (template.reference === 'departure') refDate = booking.departure
@@ -211,20 +217,15 @@ async function checkAndSendTemplate(userId, beds24Key, property, booking, templa
   targetDate.setDate(targetDate.getDate() + (template.offset_days || 0))
   const targetDateStr = targetDate.toISOString().split('T')[0]
 
-  // Vérifier si c'est aujourd'hui qu'on doit envoyer
   const isToday = targetDateStr === today
-
-  // Option send_anyway : si le délai est dépassé mais pas encore envoyé
   const isPast  = targetDate < new Date(today)
   const shouldSend = isToday || (isPast && template.send_anyway)
   if (!shouldSend) return
 
-  // Vérifier l'heure d'envoi
   const [sendHour] = (template.send_time || '10:00').split(':').map(Number)
   const currentHour = now.getHours()
   if (currentHour < sendHour && isToday) return
 
-  // Vérifier si déjà envoyé
   const { data: alreadySent } = await supabase
     .from('message_sent_log')
     .select('id')
@@ -235,14 +236,12 @@ async function checkAndSendTemplate(userId, beds24Key, property, booking, templa
 
   if (alreadySent) return
 
-  // Générer et envoyer le message
   const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
   const message   = await generateAutoMessage(template, booking, property, guestName)
   if (!message) return
 
   console.log(`[Cron] Message auto: ${template.event_type} pour booking ${bookingId}`)
 
-  // Sauvegarder dans conversations (visible dans page test)
   await supabase.from('conversations').insert({
     user_id:       userId,
     property_id:   String(property.id),
@@ -252,7 +251,6 @@ async function checkAndSendTemplate(userId, beds24Key, property, booking, templa
     book_id:       bookingId
   })
 
-  // Logger l'envoi
   await supabase.from('message_sent_log').insert({
     user_id: userId, booking_id: bookingId, template_id: template.id
   })
@@ -263,7 +261,6 @@ async function checkAndSendTemplate(userId, beds24Key, property, booking, templa
 }
 
 async function triggerTemplates(userId, beds24Key, property, booking, eventType, results) {
-  // Charger templates pour cet événement
   const { data: templates } = await supabase
     .from('message_templates')
     .select('*')
@@ -278,11 +275,6 @@ async function triggerTemplates(userId, beds24Key, property, booking, eventType,
   const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
 
   for (const template of templates) {
-    // Vérifier délai pour booking_confirmed
-    const delayMinutes = parseDelay(template.offset_value || '5min')
-    // Pour l'instant on envoie directement (le délai sera géré en production)
-
-    // Vérifier si déjà envoyé
     const { data: alreadySent } = await supabase
       .from('message_sent_log')
       .select('id')
@@ -296,7 +288,6 @@ async function triggerTemplates(userId, beds24Key, property, booking, eventType,
     const message = await generateAutoMessage(template, booking, property, guestName)
     if (!message) continue
 
-    // Sauvegarder dans conversations
     await supabase.from('conversations').insert({
       user_id:       userId,
       property_id:   String(property.id),
@@ -319,7 +310,6 @@ async function triggerTemplates(userId, beds24Key, property, booking, eventType,
 
 async function generateAutoMessage(template, booking, property, guestName) {
   try {
-    // Remplacer les variables de base
     let text = template.template_text || ''
     text = text
       .replace(/{prenom}/g,         booking.firstName || guestName)
@@ -337,7 +327,6 @@ async function generateAutoMessage(template, booking, property, guestName) {
 
     if (!text.trim()) return null
 
-    // Personnaliser légèrement avec AI
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 500,
@@ -592,4 +581,119 @@ function buildKnowledgeText(knowledge) {
     faqs.forEach(f => { text += `Q: ${f.key}\nR: ${f.value}\n\n` })
   }
   return text
+}
+
+// ─── Vérification batterie serrures ──────────────────────────────────────────
+async function checkBatteries(results) {
+  const apiKey = await getSeamKey(null)
+  if (!apiKey) {
+    console.log('[Cron] Batterie: pas de clé Seam, skip')
+    return
+  }
+
+  const { data: locks, error } = await supabase
+    .from('locks_with_alert_config')
+    .select('*')
+
+  if (error || !locks?.length) {
+    console.log('[Cron] Batterie: aucune serrure configurée')
+    return
+  }
+
+  let statuses = []
+  try {
+    statuses = await getStatusAll({ apiKey })
+  } catch (err) {
+    console.error('[Cron] Batterie: erreur Seam getStatusAll:', err.message)
+    return
+  }
+
+  const statusMap = {}
+  statuses.forEach(s => { statusMap[s.seam_device_id] = s })
+
+  const now = new Date()
+
+  for (const lock of locks) {
+    const status = statusMap[lock.seam_device_id]
+    if (!status) {
+      console.log(`[Cron] Batterie: serrure ${lock.label} introuvable dans Seam`)
+      continue
+    }
+
+    const batteryLevel = status.battery_level
+    const threshold    = lock.threshold || 15
+
+    console.log(`[Cron] Batterie: ${lock.label} → ${batteryLevel}% (seuil: ${threshold}%)`)
+
+    if (batteryLevel === null || batteryLevel > threshold) continue
+
+    if (lock.open_task_id) {
+      const reminderDays = lock.reminder_days || 0
+      if (reminderDays === 0) continue
+
+      const nextReminder = lock.next_reminder_at ? new Date(lock.next_reminder_at) : null
+      if (nextReminder && nextReminder > now) continue
+
+      const nextReminderAt = new Date(now)
+      nextReminderAt.setDate(nextReminderAt.getDate() + reminderDays)
+
+      await supabase
+        .from('agent_tasks')
+        .update({
+          battery_level:    batteryLevel,
+          next_reminder_at: nextReminderAt.toISOString(),
+          updated_at:       now.toISOString()
+        })
+        .eq('id', lock.open_task_id)
+
+      await sendBatteryAlert(lock, batteryLevel, 'rappel')
+      console.log(`[Cron] Batterie: rappel envoyé pour ${lock.label}`)
+      continue
+    }
+
+    const nextReminderAt = lock.reminder_days
+      ? new Date(now.getTime() + lock.reminder_days * 24 * 60 * 60 * 1000)
+      : null
+
+    await supabase
+      .from('agent_tasks')
+      .insert({
+        user_id:          null,
+        property_id:      null,
+        book_id:          null,
+        guest_name:       null,
+        guest_message:    null,
+        lock_id:          lock.id,
+        battery_level:    batteryLevel,
+        task_type:        'battery_low',
+        summary:          `Batterie faible sur la serrure "${lock.label}" : ${batteryLevel}%`,
+        status:           'open',
+        next_reminder_at: nextReminderAt?.toISOString() || null
+      })
+
+    await sendBatteryAlert(lock, batteryLevel, 'premiere_alerte')
+    console.log(`[Cron] Batterie: tâche créée pour ${lock.label} (${batteryLevel}%)`)
+
+    results.totalTasks++
+  }
+}
+
+// ─── Envoi alerte SMS batterie ────────────────────────────────────────────────
+async function sendBatteryAlert(lock, batteryLevel, type) {
+  const phone = lock.phone
+  if (!phone) {
+    console.log(`[Cron] Batterie: pas de numéro SMS configuré pour ${lock.label}`)
+    return
+  }
+
+  const { sendSms } = require('./sms')
+  const prefix  = type === 'rappel' ? '🔔 Rappel — ' : '⚠️ '
+  const message = `${prefix}Serrure "${lock.label}" : batterie à ${batteryLevel}%. Pensez à changer les piles.`
+
+  try {
+    await sendSms(phone, message, null, 'battery-alert')
+    console.log(`[Cron] Batterie: SMS envoyé → ${phone}`)
+  } catch (err) {
+    console.error(`[Cron] Batterie: erreur SMS:`, err.message)
+  }
 }
