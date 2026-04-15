@@ -584,7 +584,14 @@ function buildKnowledgeText(knowledge) {
 
 // ─── Vérification batterie serrures ──────────────────────────────────────────
 async function checkBatteries(results) {
-  const apiKey = await getSeamKey(null)
+const { data: seamKeyRow } = await supabase
+    .from('api_keys')
+    .select('seam_api_key, seam_enabled, user_id')
+    .eq('seam_enabled', true)
+    .not('seam_api_key', 'is', null)
+    .maybeSingle()
+
+  const apiKey = seamKeyRow?.seam_api_key || process.env.SEAM_API_KEY || null
   if (!apiKey) {
     console.log('[Cron] Batterie: pas de clé Seam, skip')
     return
