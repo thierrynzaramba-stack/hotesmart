@@ -24,11 +24,10 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-icon">⚡</span>
         <span class="nav-label">Connexions</span>
       </a>
-
-      ${renderApiItem('Beds24',        apiStatus.beds24,  null)}
-      ${renderApiItem('Seam Serrures', apiStatus.seam,    '/apps/serrures')}
-      ${renderApiItem('Brevo SMS',     apiStatus.brevo,   null)}
-      ${renderApiItem('Stripe',        apiStatus.stripe,  null)}
+      ${renderApiItem('Beds24',        apiStatus.beds24, null)}
+      ${renderApiItem('Seam Serrures', apiStatus.seam,   '/apps/serrures')}
+      ${renderApiItem('Brevo SMS',     apiStatus.brevo,  null)}
+      ${renderApiItem('Stripe',        apiStatus.stripe, null)}
       <div class="nav-sub" style="opacity:0.4">
         <div class="sub-dot gray"></div>Airbnb
         <span class="sub-soon">bientôt</span>
@@ -105,12 +104,6 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">
           <div class="sub-dot ${activePage === 'menages-prestataires' ? 'green' : 'gray'}"></div>Prestataires
         </a>`
-    " href="/apps/serrures">
-          <div class="sub-dot ${activePage === 'serrures' ? 'green' : 'gray'}"></div>Mes serrures
-        </a>
-        <a class="nav-sub ${activePage === 'serrures-config' ? 'connected' : ''}" href="/apps/serrures/config">
-          <div class="sub-dot ${activePage === 'serrures-config' ? 'green' : 'gray'}"></div>Configuration
-        </a>`
     }
 
     return `
@@ -150,7 +143,7 @@ async function getApiStatus(user) {
     return {
       beds24: !!data?.api_key,
       seam:   !!(data?.seam_api_key && data?.seam_enabled !== false),
-      brevo:  true, // clé serveur uniquement, toujours affiché actif
+      brevo:  true,
       stripe: false
     }
   } catch {
