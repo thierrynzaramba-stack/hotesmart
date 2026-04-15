@@ -14,117 +14,100 @@ module.exports = async function handler(req, res) {
   const { token } = req.query
   if (!token) return res.status(401).json({ error: 'Token manquant' })
 
-  // POST
   if (req.method === 'POST') {
     const { action, event_ids, booking_id, property_id } = req.body || {}
 
-    // Marquer comme lu
     if (action === 'markRead' && event_ids?.length) {
-      await supabase
-        .from('menage_events')
-        .update({ read: true })
-        .in('id', event_ids)
-        .eq('token', token)
+      await supabase.from('menage_events').update({ read: true })
+        .in('id', event_ids).eq('token', token)
       return res.json({ success: true })
     }
 
-    // Ménage terminé
     if (action === 'markDone' && booking_id && property_id) {
       try {
-        // Valider le token
         const { data: tokenData } = await supabase
-          .from('public_tokens')
-          .select('user_id')
-          .eq('token', token)
-          .maybeSingle()
+          .from('public_tokens').select('user_id').eq('token', token).maybeSingle()
         if (!tokenData) return res.status(401).json({ error: 'Token invalide' })
 
         const userId = tokenData.user_id
 
-        // Récupérer les templates menage_done actifs pour ce logement
         const { data: templates } = await supabase
-          .from('message_templates')
-          .select('*')
+          .from('message_templates').select('*')
           .eq('user_id', userId)
           .eq('property_id', String(property_id))
           .eq('event_type', 'menage_done')
           .eq('active', true)
 
-        if (!templates?.length) {
-          return res.json({ success: true, message: 'Ménage marqué, aucun template actif' })
-        }
+        if (!templates?.length) return res.json({ success: true, message: 'Aucun template actif' })
 
-        // Récupérer les infos de la réservation depuis Beds24
         const { data: keyData } = await supabase
-          .from('api_keys')
-          .select('api_key')
-          .eq('user_id', userId)
-          .eq('service', 'beds24')
-          .single()
+          .from('api_keys').select('api_key').eq('user_id', userId).eq('service', 'beds24').single()
 
-        let booking = null
-        if (keyData?.api_key) {
-          const r = await fetch(
-            `https://beds24.com/api/v2/bookings?bookingId=${booking_id}`,
-            { headers: { token: keyData.api_key } }
-          )
-          const d = await r.json()
-          booking = (d.data || [])[0] || null
+        if (!keyData?.api_key) return res.status(400).json({ error: 'Beds24 non configuré' })
+
+        // Chercher la PROCHAINE réservation du logement (pas la résa du ménage)
+        const today = new Date().toISOString().split('T')[0]
+        const futureRes = await fetch(
+          `https://beds24.com/api/v2/bookings?propId=${property_id}&arrivalFrom=${today}`,
+          { headers: { token: keyData.api_key } }
+        )
+        const futureData = await futureRes.json()
+        const nextBookings = (futureData.data || [])
+          .filter(b => String(b.propertyId) === String(property_id) && String(b.id) !== String(booking_id))
+          .sort((a, b) => new Date(a.arrival) - new Date(b.arrival))
+
+        const nextBooking = nextBookings[0]
+        if (!nextBooking) {
+          console.log(`[Menage] Pas de prochaine réservation pour logement ${property_id}`)
+          return res.json({ success: true, message: 'Ménage marqué, aucune prochaine réservation' })
         }
 
-        if (!booking) {
-          return res.status(404).json({ error: 'Réservation introuvable' })
-        }
+        console.log(`[Menage] Prochaine résa : ${nextBooking.id} arrivée ${nextBooking.arrival}`)
 
-        const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
+        const guestName = `${nextBooking.firstName || ''} ${nextBooking.lastName || ''}`.trim() || 'Voyageur'
         const now = new Date()
-        const nowHour = now.getHours()
 
         for (const template of templates) {
-          // Vérifier si déjà envoyé
           const { data: alreadySent } = await supabase
-            .from('message_sent_log')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('booking_id', String(booking_id))
-            .eq('template_id', template.id)
-            .maybeSingle()
+            .from('message_sent_log').select('id')
+            .eq('user_id', userId).eq('booking_id', String(nextBooking.id))
+            .eq('template_id', template.id).maybeSingle()
           if (alreadySent) continue
 
-          // Générer le code Seam si demandé
+          // Générer le code si une serrure est configurée
           let seamCode = null
-          if (template.include_seam_code) {
-            seamCode = await generateSeamCodeForBooking(userId, property_id, booking)
+          if (template.lock_id) {
+            seamCode = await generateSeamCode(userId, template.lock_id, nextBooking)
           }
 
-          // Construire le message
-          const message = buildMessage(template, booking, guestName, seamCode)
+          // Calcul de l'heure d'envoi
+          const delayMs   = parseDelayMs(template.offset_value || '0min')
+          const sendAt    = new Date(now.getTime() + delayMs)
+          const earliest  = template.lock_id ? (template.earliest_send_time || '15:00') : null
+          const finalSendAt = earliest ? applyEarliestHour(sendAt, earliest) : sendAt
+          const canSendNow  = finalSendAt <= now || (finalSendAt - now) < 60000 // marge 1min
+
+          const message = buildMessage(template, nextBooking, guestName, seamCode)
           if (!message) continue
 
-          // Heure minimale d'envoi
-          const earliestHour = parseInt((template.earliest_send_time || '15:00').split(':')[0])
-          const canSendNow = nowHour >= earliestHour
-
           if (canSendNow) {
-            // Envoyer immédiatement
-            console.log(`[Menage] Envoi immédiat template ${template.id} pour booking ${booking_id}`)
-            await saveAndSend(userId, property_id, booking_id, template, guestName, message, seamCode)
+            await saveAndSend(userId, property_id, nextBooking.id, template, guestName, message)
+            console.log(`[Menage] Envoi immédiat booking ${nextBooking.id}`)
           } else {
-            // Mettre en file d'attente — le cron enverra à l'heure minimale
-            console.log(`[Menage] File d'attente template ${template.id}, envoi à ${template.earliest_send_time}`)
             await supabase.from('message_sent_log').insert({
-              user_id:      userId,
-              booking_id:   String(booking_id),
-              template_id:  template.id,
-              status:       'pending',
-              scheduled_at: buildScheduledAt(now, earliestHour),
-              payload:      JSON.stringify({ message, seam_code: seamCode, guest_name: guestName })
+              user_id: userId, booking_id: String(nextBooking.id),
+              template_id: template.id, status: 'pending',
+              scheduled_at: finalSendAt.toISOString(),
+              payload: JSON.stringify({
+                message, seam_code: seamCode, guest_name: guestName,
+                property_id: String(property_id), lock_id: template.lock_id
+              })
             })
+            console.log(`[Menage] En attente jusqu'à ${finalSendAt.toISOString()} booking ${nextBooking.id}`)
           }
         }
 
         return res.json({ success: true })
-
       } catch (err) {
         console.error('[Menage] markDone erreur:', err.message)
         return res.status(500).json({ error: err.message })
@@ -137,44 +120,29 @@ module.exports = async function handler(req, res) {
   // GET — planning public
   try {
     const { data: tokenData, error: tokenError } = await supabase
-      .from('public_tokens')
-      .select('user_id, label, property_ids, visibility_days')
-      .eq('token', token)
-      .maybeSingle()
+      .from('public_tokens').select('user_id, label, property_ids, visibility_days')
+      .eq('token', token).maybeSingle()
 
-    if (tokenError || !tokenData) {
-      return res.status(401).json({ error: 'Token invalide' })
-    }
+    if (tokenError || !tokenData) return res.status(401).json({ error: 'Token invalide' })
 
     const userId         = tokenData.user_id
     const visibilityDays = tokenData.visibility_days || 30
 
     const { data: keyData } = await supabase
-      .from('api_keys')
-      .select('api_key')
-      .eq('user_id', userId)
-      .eq('service', 'beds24')
-      .single()
-
+      .from('api_keys').select('api_key').eq('user_id', userId).eq('service', 'beds24').single()
     if (!keyData) return res.status(400).json({ error: 'Beds24 non configuré' })
 
     const beds24Key = keyData.api_key
-
-    const propsRes = await fetch('https://beds24.com/api/v2/properties', {
-      headers: { token: beds24Key }
-    })
+    const propsRes  = await fetch('https://beds24.com/api/v2/properties', { headers: { token: beds24Key } })
     const propsData = await propsRes.json()
     const allProperties = propsData.data || []
 
     const allowedIds = tokenData.property_ids || []
     const properties = allowedIds.length
-      ? allProperties.filter(p => allowedIds.includes(String(p.id)))
-      : allProperties
+      ? allProperties.filter(p => allowedIds.includes(String(p.id))) : allProperties
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const maxDate = new Date(today)
-    maxDate.setDate(maxDate.getDate() + visibilityDays)
+    const today   = new Date(); today.setHours(0,0,0,0)
+    const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + visibilityDays)
     const dateFrom = today.toISOString().split('T')[0]
     const dateTo   = maxDate.toISOString().split('T')[0]
 
@@ -193,31 +161,22 @@ module.exports = async function handler(req, res) {
 
     const bookingIds = allBookings.map(b => String(b.id))
     let comments = []
-    if (bookingIds.length > 0) {
-      const { data: commentsData } = await supabase
-        .from('menage_comments')
+    if (bookingIds.length) {
+      const { data: cd } = await supabase.from('menage_comments')
         .select('booking_id, departure_date, comment, property_id')
-        .eq('user_id', userId)
-        .in('booking_id', bookingIds)
-      comments = commentsData || []
+        .eq('user_id', userId).in('booking_id', bookingIds)
+      comments = cd || []
     }
 
-    const { data: eventsData } = await supabase
-      .from('menage_events')
-      .select('*')
-      .eq('token', token)
-      .eq('read', false)
-      .gte('created_at', new Date(Date.now() - visibilityDays * 24 * 60 * 60 * 1000).toISOString())
-      .order('created_at', { ascending: false })
-      .limit(50)
+    const { data: eventsData } = await supabase.from('menage_events').select('*')
+      .eq('token', token).eq('read', false)
+      .gte('created_at', new Date(Date.now() - visibilityDays * 86400000).toISOString())
+      .order('created_at', { ascending: false }).limit(50)
 
     return res.json({
-      bookings:        allBookings,
-      label:           tokenData.label,
-      property_ids:    allowedIds,
-      visibility_days: visibilityDays,
-      comments:        comments,
-      events:          eventsData || []
+      bookings: allBookings, label: tokenData.label,
+      property_ids: allowedIds, visibility_days: visibilityDays,
+      comments, events: eventsData || []
     })
 
   } catch (err) {
@@ -226,49 +185,26 @@ module.exports = async function handler(req, res) {
   }
 }
 
-// ─── Génération code Seam pour une réservation ────────────────────────────────
-async function generateSeamCodeForBooking(userId, propertyId, booking) {
+// ─── Génération code Seam ─────────────────────────────────────────────────────
+async function generateSeamCode(userId, lockId, booking) {
   try {
-    // Récupérer la serrure associée au logement
-    const { data: pl } = await supabase
-      .from('property_locks')
-      .select('lock_id, locks(seam_device_id, brand, label)')
-      .eq('property_id', String(propertyId))
-      .eq('role', 'main')
-      .maybeSingle()
-
-    if (!pl?.lock_id) {
-      console.log(`[Menage] Pas de serrure associée au logement ${propertyId}`)
-      return null
-    }
-
-    const lock = pl.locks
+    const { data: lock } = await supabase
+      .from('locks').select('seam_device_id, brand, label').eq('id', lockId).single()
     if (!lock?.seam_device_id) return null
 
-    // Récupérer la clé Seam
     const { data: keyRow } = await supabase
-      .from('api_keys')
-      .select('seam_api_key, seam_enabled')
-      .eq('user_id', userId)
-      .maybeSingle()
-
+      .from('api_keys').select('seam_api_key').eq('user_id', userId).maybeSingle()
     const apiKey = keyRow?.seam_api_key || process.env.SEAM_API_KEY
     if (!apiKey) return null
 
-    // Vérifier si un code existe déjà pour cette réservation
-    const { data: existing } = await supabase
-      .from('access_codes')
-      .select('code, seam_code_id')
-      .eq('booking_id', String(booking.id))
-      .eq('lock_id', pl.lock_id)
-      .maybeSingle()
-
-    if (existing?.code) {
-      console.log(`[Menage] Code existant réutilisé pour booking ${booking.id}`)
+    // Réutiliser un code existant pending (pas encore envoyé)
+    const { data: existing } = await supabase.from('access_codes').select('code, seam_code_id, status')
+      .eq('booking_id', String(booking.id)).eq('lock_id', lockId).maybeSingle()
+    if (existing?.code && existing.status !== 'deleted') {
+      console.log(`[Menage] Code existant réutilisé booking ${booking.id}: ${existing.code}`)
       return existing.code
     }
 
-    // Générer le code via Seam
     const { generateCode } = require('../lib/providers/seam')
     const result = await generateCode({
       seamDeviceId: lock.seam_device_id,
@@ -278,33 +214,26 @@ async function generateSeamCodeForBooking(userId, propertyId, booking) {
       apiKey
     })
 
-    // Sauvegarder dans access_codes
     await supabase.from('access_codes').insert({
-      lock_id:      pl.lock_id,
-      booking_id:   String(booking.id),
-      property_id:  String(propertyId),
-      seam_code_id: result.seam_code_id,
-      code:         result.code,
-      starts_at:    result.starts_at,
-      ends_at:      result.ends_at,
-      status:       'active'
+      lock_id: lockId, booking_id: String(booking.id),
+      property_id: String(booking.propertyId || booking.propId),
+      seam_code_id: result.seam_code_id, code: result.code,
+      starts_at: result.starts_at, ends_at: result.ends_at, status: 'active'
     })
 
-    console.log(`[Menage] Code généré pour booking ${booking.id}: ${result.code}`)
+    console.log(`[Menage] Code généré booking ${booking.id}: ${result.code}`)
     return result.code
-
   } catch (err) {
-    console.error('[Menage] Erreur génération code Seam:', err.message)
+    console.error('[Menage] Erreur generateSeamCode:', err.message)
     return null
   }
 }
 
-// ─── Construction du message ──────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function buildMessage(template, booking, guestName, seamCode) {
   let text = template.template_text || ''
   if (!text.trim()) return null
-
-  text = text
+  return text
     .replace(/{prenom}/g,         booking.firstName || guestName)
     .replace(/{nom}/g,            booking.lastName  || '')
     .replace(/{arrivee}/g,        formatDate(booking.arrival))
@@ -316,41 +245,37 @@ function buildMessage(template, booking, guestName, seamCode) {
     .replace(/{wifi_nom}/g,       '[WIFI NOM]')
     .replace(/{wifi_mdp}/g,       '[WIFI MOT DE PASSE]')
     .replace(/{telephone_hote}/g, '[TÉLÉPHONE HÔTE]')
-
-  return text
 }
 
-// ─── Sauvegarde et envoi ──────────────────────────────────────────────────────
-async function saveAndSend(userId, propertyId, bookingId, template, guestName, message, seamCode) {
+async function saveAndSend(userId, propertyId, bookingId, template, guestName, message) {
   await supabase.from('conversations').insert({
-    user_id:       userId,
-    property_id:   String(propertyId),
-    guest_name:    guestName,
-    guest_message: '[AUTO: menage_done]',
-    agent_reply:   message,
-    book_id:       String(bookingId)
+    user_id: userId, property_id: String(propertyId),
+    guest_name: guestName, guest_message: '[AUTO: menage_done]',
+    agent_reply: message, book_id: String(bookingId)
   })
-
   await supabase.from('message_sent_log').insert({
-    user_id:    userId,
-    booking_id: String(bookingId),
-    template_id: template.id,
-    status:     'sent'
+    user_id: userId, booking_id: String(bookingId),
+    template_id: template.id, status: 'sent'
   })
-
   // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
-  console.log(`[Menage] Message envoyé booking ${bookingId}`)
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function buildScheduledAt(now, earliestHour) {
-  const scheduled = new Date(now)
-  scheduled.setHours(earliestHour, 0, 0, 0)
-  if (scheduled <= now) scheduled.setDate(scheduled.getDate() + 1)
-  return scheduled.toISOString()
+function applyEarliestHour(date, earliestTime) {
+  const [h, m] = earliestTime.split(':').map(Number)
+  const earliest = new Date(date)
+  earliest.setHours(h, m, 0, 0)
+  // Si l'heure calculée est avant l'heure min → reporter à l'heure min
+  if (date < earliest) return earliest
+  // Si l'heure min est déjà passée aujourd'hui → date inchangée
+  return date
+}
+
+function parseDelayMs(value) {
+  const map = { '0min':0, '10min':600000, '15min':900000, '30min':1800000, '1h':3600000, '2h':7200000 }
+  return map[value] || 0
 }
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
+  return new Date(dateStr).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })
 }

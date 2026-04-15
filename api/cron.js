@@ -56,6 +56,14 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'battery_check', error: err.message })
     }
 
+    // Envoi messages en attente (codes accès)
+    try {
+      await checkPendingMessages(results)
+    } catch (err) {
+      console.error('[Cron] Erreur pending messages:', err.message)
+      results.errors.push({ context: 'pending_messages', error: err.message })
+    }
+
     await supabase.from('cron_logs').upsert({
       id: 'agent-ai',
       last_run: new Date().toISOString(),
@@ -139,6 +147,8 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
       const prev = existing.snapshot
       if (booking.status === 'cancelled' && prev.status !== 'cancelled') {
         await createBookingEvent(userId, bookingId, property, 'cancelled', eventData, relevantTokens)
+        // Annulation → supprimer code pending + access_code
+        await cancelAccessCode(bookingId)
         results.totalBookingEvents++
       } else if (prev.arrival !== currentSnapshot.arrival || prev.departure !== currentSnapshot.departure ||
                  prev.numAdult !== currentSnapshot.numAdult || prev.numChild !== currentSnapshot.numChild) {
@@ -151,6 +161,10 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
             numChild:  prev.numChild  !== currentSnapshot.numChild  ? { before: prev.numChild,  after: currentSnapshot.numChild }  : null,
           }
         }, relevantTokens)
+        // Dates modifiées → recréer le code si un code existait
+        if (prev.arrival !== currentSnapshot.arrival || prev.departure !== currentSnapshot.departure) {
+          await refreshAccessCode(bookingId, booking)
+        }
         results.totalBookingEvents++
       }
     }
@@ -580,6 +594,139 @@ function buildKnowledgeText(knowledge) {
     faqs.forEach(f => { text += `Q: ${f.key}\nR: ${f.value}\n\n` })
   }
   return text
+}
+
+
+// ─── Gestion codes accès (annulation / modification) ─────────────────────────
+
+async function cancelAccessCode(bookingId) {
+  // Supprimer le code dans access_codes (le code algoPIN reste valide physiquement
+  // mais n'a pas été envoyé donc pas de risque)
+  await supabase.from('access_codes')
+    .update({ status: 'deleted' })
+    .eq('booking_id', bookingId)
+    .neq('status', 'deleted')
+
+  // Supprimer les messages pending liés à cette résa
+  await supabase.from('message_sent_log')
+    .delete()
+    .eq('booking_id', bookingId)
+    .eq('status', 'pending')
+
+  console.log(`[Cron] Code annulé pour booking ${bookingId}`)
+}
+
+async function refreshAccessCode(bookingId, booking) {
+  // Récupérer le code existant non supprimé
+  const { data: existing } = await supabase.from('access_codes')
+    .select('id, lock_id, seam_code_id, status')
+    .eq('booking_id', bookingId)
+    .neq('status', 'deleted')
+    .maybeSingle()
+
+  if (!existing) return // Pas de code à rafraîchir
+
+  // Marquer l'ancien comme supprimé
+  await supabase.from('access_codes')
+    .update({ status: 'deleted' })
+    .eq('id', existing.id)
+
+  // Récupérer la clé Seam
+  const { data: keyRow } = await supabase.from('api_keys')
+    .select('seam_api_key, user_id').not('seam_api_key', 'is', null).maybeSingle()
+  if (!keyRow?.seam_api_key) return
+
+  // Récupérer la serrure
+  const { data: lock } = await supabase.from('locks')
+    .select('seam_device_id, label').eq('id', existing.lock_id).single()
+  if (!lock) return
+
+  // Générer un nouveau code avec les nouvelles dates
+  const { generateCode } = require('../lib/providers/seam')
+  try {
+    const result = await generateCode({
+      seamDeviceId: lock.seam_device_id,
+      guestName:    `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur',
+      startsAt:     new Date(booking.arrival).toISOString(),
+      endsAt:       new Date(booking.departure + 'T23:59:59').toISOString(),
+      apiKey:       keyRow.seam_api_key
+    })
+
+    await supabase.from('access_codes').insert({
+      lock_id: existing.lock_id, booking_id: bookingId,
+      property_id: String(booking.propertyId),
+      seam_code_id: result.seam_code_id, code: result.code,
+      starts_at: result.starts_at, ends_at: result.ends_at, status: 'active'
+    })
+
+    // Mettre à jour le payload du message pending avec le nouveau code
+    const { data: pending } = await supabase.from('message_sent_log')
+      .select('id, payload').eq('booking_id', bookingId).eq('status', 'pending').maybeSingle()
+
+    if (pending?.payload) {
+      const pl = JSON.parse(pending.payload)
+      pl.seam_code  = result.code
+      pl.message    = pl.message?.replace(/\d{4,8}/g, result.code) || pl.message
+      await supabase.from('message_sent_log')
+        .update({ payload: JSON.stringify(pl) }).eq('id', pending.id)
+    }
+
+    console.log(`[Cron] Code rafraîchi booking ${bookingId}: ${result.code}`)
+  } catch (err) {
+    console.error(`[Cron] Erreur refresh code booking ${bookingId}:`, err.message)
+  }
+}
+
+// ─── Envoi messages en attente ────────────────────────────────────────────────
+async function checkPendingMessages(results) {
+  const now = new Date()
+
+  const { data: pending } = await supabase.from('message_sent_log')
+    .select('*')
+    .eq('status', 'pending')
+    .lte('scheduled_at', now.toISOString())
+
+  if (!pending?.length) return
+
+  console.log(`[Cron] ${pending.length} message(s) en attente à envoyer`)
+
+  for (const log of pending) {
+    try {
+      const pl = log.payload ? JSON.parse(log.payload) : {}
+      const message   = pl.message
+      const guestName = pl.guest_name || 'Voyageur'
+      const propId    = pl.property_id
+
+      if (!message) {
+        await supabase.from('message_sent_log').update({ status: 'error' }).eq('id', log.id)
+        continue
+      }
+
+      // Sauvegarder dans conversations
+      await supabase.from('conversations').insert({
+        user_id:       log.user_id,
+        property_id:   propId,
+        guest_name:    guestName,
+        guest_message: '[AUTO: menage_done]',
+        agent_reply:   message,
+        book_id:       log.booking_id
+      })
+
+      // Marquer comme envoyé
+      await supabase.from('message_sent_log')
+        .update({ status: 'sent', payload: null })
+        .eq('id', log.id)
+
+      // TODO production : await sendViaBeds24(beds24Key, log.booking_id, message)
+
+      results.totalAutoMessages++
+      console.log(`[Cron] Message pending envoyé booking ${log.booking_id}`)
+
+    } catch (err) {
+      console.error(`[Cron] Erreur envoi pending ${log.id}:`, err.message)
+      await supabase.from('message_sent_log').update({ status: 'error' }).eq('id', log.id)
+    }
+  }
 }
 
 // ─── Vérification batterie serrures ──────────────────────────────────────────
