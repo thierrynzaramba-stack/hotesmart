@@ -535,16 +535,25 @@ Réponds UNIQUEMENT en JSON valide :
 
   if (classification.type === 'sympathy' || classification.type === 'info_known') {
     if (classification.auto_reply) {
-      await supabase.from('conversations').insert({
-        user_id:       userId,
-        property_id:   String(property.id),
-        guest_name:    guestName,
-        guest_message: message,
-        agent_reply:   classification.auto_reply,
-        book_id:       String(bookingId)
+      // Mode production : en attente de validation par l'hôte avant envoi
+      await supabase.from('agent_tasks').insert({
+        user_id:         userId,
+        property_id:     String(property.id),
+        book_id:         String(bookingId),
+        guest_name:      guestName,
+        guest_message:   message,
+        guest_phone:     guestPhone,
+        arrival:         arrival || null,
+        departure:       departure || null,
+        task_type:       classification.type,
+        summary:         classification.reason,
+        suggested_reply: classification.auto_reply,
+        status:          'pending_validation',
+        source_thread:   threadJson,
+        sub_tasks:       []
       })
-      // TODO production : await sendViaBeds24(beds24Key, bookingId, classification.auto_reply)
       results.totalAutoReplies++
+      console.log(`[Cron] Réponse en attente validation: ${classification.type} booking ${bookingId}`)
     }
 
   } else if (classification.type === 'info_unknown' || classification.type === 'intervention') {

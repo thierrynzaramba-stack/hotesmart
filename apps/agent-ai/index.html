@@ -3,58 +3,68 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Agent AI</title>
+  <title>HôteSmart — GuestFlow AI</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
-    .filter-btn { background: var(--bg); border: 0.5px solid var(--border); border-radius: 20px; padding: 5px 14px; font-size: 12px; cursor: pointer; color: var(--text2); font-family: inherit; transition: all 0.15s; }
-    .filter-btn:hover { border-color: var(--green); color: var(--green); }
-    .filter-btn.active { background: var(--green); color: white; border-color: var(--green); }
-    .filter-count { background: rgba(0,0,0,0.15); border-radius: 20px; padding: 0 6px; font-size: 10px; margin-left: 4px; }
-    .tasks-list { display: flex; flex-direction: column; gap: 10px; }
-    .task-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: border-color 0.15s; }
-    .task-card:hover { border-color: var(--green); }
-    .task-card.done, .task-card.ignored { opacity: 0.5; }
-    .task-card.intervention { border-left: 3px solid #E24B4A; }
-    .task-card.info_unknown { border-left: 3px solid #F59E0B; }
-    .task-header { padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-    .task-info { flex: 1; min-width: 0; }
-    .task-guest { font-size: 13px; font-weight: 500; }
-    .task-summary { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .task-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-    .task-time { font-size: 11px; color: var(--text2); }
-    .task-expand { font-size: 12px; color: var(--text2); flex-shrink: 0; }
-    .badge { padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 500; }
-    .badge-intervention { background: #fdecea; color: #E24B4A; }
-    .badge-info { background: #FFF3CD; color: #856404; }
-    .badge-done { background: #E1F5EE; color: var(--green); }
-    .badge-ignored { background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border); }
-    .badge-property { background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border); }
-    .task-body { padding: 0 16px 16px; display: none; border-top: 0.5px solid var(--border); }
-    .task-body.open { display: block; }
-    .task-section { margin-top: 14px; }
-    .task-section-title { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-    .thread { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
-    .thread-msg { padding: 8px 12px; border-radius: var(--radius); font-size: 12px; line-height: 1.5; max-width: 85%; white-space: pre-wrap; }
-    .thread-msg.guest { background: var(--bg2); border: 0.5px solid var(--border); align-self: flex-start; }
-    .thread-msg.host  { background: #E1F5EE; color: #1a6644; align-self: flex-end; }
-    .thread-source { font-size: 10px; color: var(--text2); margin-bottom: 2px; }
-    .subtask { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
-    .subtask-question { font-size: 13px; font-weight: 500; margin-bottom: 8px; }
-    .subtask-reply { width: 100%; min-height: 60px; resize: vertical; font-size: 12px; }
-    .subtask-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-    .btn-faq { background: #EEEDFE; color: #3C3489; border-color: #c5c3f5; }
-    .btn-faq:hover { background: #d8d6fc; }
-    .task-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-    .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
-    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-    .stats-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .stat-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 12px; }
-    .stat-card strong { font-size: 20px; font-weight: 600; display: block; }
-    .stat-card.urgent strong { color: #E24B4A; }
-    .stat-card.info strong { color: #F59E0B; }
-    .prop-select-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .toast-msg { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: white; padding: 10px 18px; border-radius: var(--radius); font-size: 13px; z-index: 999; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .filters { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
+    .filter-btn { background:var(--bg); border:0.5px solid var(--border); border-radius:20px; padding:5px 14px; font-size:12px; cursor:pointer; color:var(--text2); font-family:inherit; transition:all 0.15s; }
+    .filter-btn:hover { border-color:var(--green); color:var(--green); }
+    .filter-btn.active { background:var(--green); color:white; border-color:var(--green); }
+    .filter-count { background:rgba(0,0,0,0.15); border-radius:20px; padding:0 6px; font-size:10px; margin-left:4px; }
+    .tasks-list { display:flex; flex-direction:column; gap:10px; }
+    .task-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; transition:border-color 0.15s; }
+    .task-card:hover { border-color:var(--green); }
+    .task-card.done, .task-card.ignored { opacity:0.5; }
+    .task-card.intervention { border-left:3px solid #E24B4A; }
+    .task-card.info_unknown { border-left:3px solid #F59E0B; }
+    .task-card.pending_validation { border-left:3px solid #378ADD; }
+    .task-card.sympathy { border-left:3px solid #1D9E75; }
+    .task-card.info_known { border-left:3px solid #1D9E75; }
+    .task-header { padding:12px 16px; display:flex; align-items:center; gap:12px; cursor:pointer; }
+    .task-info { flex:1; min-width:0; }
+    .task-guest { font-size:13px; font-weight:500; }
+    .task-summary { font-size:12px; color:var(--text2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .task-meta { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+    .task-time { font-size:11px; color:var(--text2); }
+    .task-expand { font-size:12px; color:var(--text2); flex-shrink:0; }
+    .badge { padding:2px 8px; border-radius:20px; font-size:10px; font-weight:500; }
+    .badge-intervention { background:#fdecea; color:#E24B4A; }
+    .badge-info { background:#FFF3CD; color:#856404; }
+    .badge-validation { background:#E6F1FB; color:#0C447C; }
+    .badge-done { background:#E1F5EE; color:var(--green); }
+    .badge-ignored { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
+    .badge-property { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
+    .task-body { padding:0 16px 16px; display:none; border-top:0.5px solid var(--border); }
+    .task-body.open { display:block; }
+    .task-section { margin-top:14px; }
+    .task-section-title { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+    .thread { display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; }
+    .thread-msg { padding:8px 12px; border-radius:var(--radius); font-size:12px; line-height:1.5; max-width:85%; white-space:pre-wrap; }
+    .thread-msg.guest { background:var(--bg2); border:0.5px solid var(--border); align-self:flex-start; }
+    .thread-msg.host  { background:#E1F5EE; color:#1a6644; align-self:flex-end; }
+    .thread-source { font-size:10px; color:var(--text2); margin-bottom:2px; }
+    .subtask { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; }
+    .subtask-question { font-size:13px; font-weight:500; margin-bottom:8px; }
+    .subtask-reply { width:100%; min-height:60px; resize:vertical; font-size:12px; }
+    .subtask-actions { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+    .btn-faq { background:#EEEDFE; color:#3C3489; border-color:#c5c3f5; }
+    .btn-faq:hover { background:#d8d6fc; }
+    .btn-validate { background:#E1F5EE; color:#085041; border-color:#9FE1CB; }
+    .btn-validate:hover { background:#9FE1CB; }
+    .validation-box { background:#E6F1FB; border:0.5px solid #B5D4F4; border-radius:var(--radius); padding:12px 14px; margin-top:14px; }
+    .validation-box-title { font-size:11px; font-weight:600; color:#0C447C; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+    .validation-reply { width:100%; min-height:80px; resize:vertical; font-size:13px; line-height:1.6; border-color:#B5D4F4; }
+    .task-actions { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+    .empty-state { text-align:center; padding:60px 20px; color:var(--text2); }
+    .empty-state .icon { font-size:48px; margin-bottom:12px; }
+    .stats-row { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+    .stat-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 16px; font-size:12px; }
+    .stat-card strong { font-size:20px; font-weight:600; display:block; }
+    .stat-card.urgent strong { color:#E24B4A; }
+    .stat-card.info strong { color:#F59E0B; }
+    .stat-card.validation strong { color:#185FA5; }
+    .prop-select-row { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+    .toast-msg { position:fixed; bottom:24px; right:24px; background:var(--green); color:white; padding:10px 18px; border-radius:var(--radius); font-size:13px; z-index:999; display:none; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
   </style>
 </head>
 <body>
@@ -63,7 +73,7 @@
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">🤖 Agent AI — To-do</div>
+        <div class="page-title">🤖 GuestFlow AI — To-do</div>
         <div class="page-sub" id="topStatus">Chargement…</div>
       </div>
       <button class="btn" onclick="loadTasks()">↻ Actualiser</button>
@@ -77,7 +87,8 @@
       </div>
       <div class="stats-row" id="stats-row"></div>
       <div class="filters">
-        <button class="filter-btn active" onclick="setFilter('pending', this)">En attente <span class="filter-count" id="count-pending">0</span></button>
+        <button class="filter-btn active" onclick="setFilter('all_pending', this)">En attente <span class="filter-count" id="count-pending">0</span></button>
+        <button class="filter-btn" onclick="setFilter('pending_validation', this)">✉️ À valider <span class="filter-count" id="count-validation">0</span></button>
         <button class="filter-btn" onclick="setFilter('intervention', this)">🚨 Intervention <span class="filter-count" id="count-intervention">0</span></button>
         <button class="filter-btn" onclick="setFilter('info_unknown', this)">❓ Info manquante <span class="filter-count" id="count-info">0</span></button>
         <button class="filter-btn" onclick="setFilter('done', this)">✓ Traités <span class="filter-count" id="count-done">0</span></button>
@@ -100,7 +111,7 @@
   const session = await requireAuth()
   if (!session) throw new Error('Non authentifié')
   await renderSidebar('agent-ai')
-  window._session = session
+  window._session  = session
   window._supabase = supabase
 
   const res  = await fetch('/api/beds24', {
@@ -119,7 +130,7 @@
 
 <script>
   let allTasks = []
-  let currentFilter = 'pending'
+  let currentFilter = 'all_pending'
 
   function toast(msg, duration = 3000) {
     const t = document.getElementById('toast')
@@ -140,13 +151,13 @@
     try {
       let query = window._supabase.from('agent_tasks').select('*')
         .eq('user_id', window._session.user.id)
-        .order('created_at', { ascending: false }).limit(100)
+        .order('created_at', { ascending: false }).limit(200)
       if (propId) query = query.eq('property_id', propId)
       const { data, error } = await query
       if (error) throw error
       allTasks = data || []
       updateStats(); renderTasks()
-      const pending = allTasks.filter(t => t.status === 'pending').length
+      const pending = allTasks.filter(t => ['pending','pending_validation'].includes(t.status)).length
       document.getElementById('topStatus').textContent = `${pending} tâche${pending !== 1 ? 's' : ''} en attente`
     } catch (err) {
       document.getElementById('tasks-list').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${err.message}</p></div>`
@@ -154,15 +165,20 @@
   }
 
   function updateStats() {
+    const validation    = allTasks.filter(t => t.status === 'pending_validation').length
     const interventions = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending').length
     const infos         = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending').length
-    const done          = allTasks.filter(t => t.status === 'done' || t.status === 'ignored').length
-    const total         = allTasks.filter(t => t.status === 'pending').length
+    const done          = allTasks.filter(t => ['done','ignored'].includes(t.status)).length
+    const total         = allTasks.filter(t => ['pending','pending_validation'].includes(t.status)).length
+
     document.getElementById('count-pending').textContent      = total
+    document.getElementById('count-validation').textContent   = validation
     document.getElementById('count-intervention').textContent = interventions
     document.getElementById('count-info').textContent         = infos
     document.getElementById('count-done').textContent         = done
+
     document.getElementById('stats-row').innerHTML = `
+      <div class="stat-card validation"><strong>${validation}</strong>À valider</div>
       <div class="stat-card urgent"><strong>${interventions}</strong>Interventions</div>
       <div class="stat-card info"><strong>${infos}</strong>Infos manquantes</div>
       <div class="stat-card"><strong>${done}</strong>Traitées</div>`
@@ -171,22 +187,22 @@
   function renderTasks() {
     const list = document.getElementById('tasks-list')
     let filtered = allTasks
-    if (currentFilter === 'pending')      filtered = allTasks.filter(t => t.status === 'pending')
-    if (currentFilter === 'intervention') filtered = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending')
-    if (currentFilter === 'info_unknown') filtered = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending')
-    if (currentFilter === 'done')         filtered = allTasks.filter(t => t.status === 'done' || t.status === 'ignored')
+
+    if (currentFilter === 'all_pending')       filtered = allTasks.filter(t => ['pending','pending_validation'].includes(t.status))
+    if (currentFilter === 'pending_validation') filtered = allTasks.filter(t => t.status === 'pending_validation')
+    if (currentFilter === 'intervention')       filtered = allTasks.filter(t => t.task_type === 'intervention' && t.status === 'pending')
+    if (currentFilter === 'info_unknown')       filtered = allTasks.filter(t => t.task_type === 'info_unknown' && t.status === 'pending')
+    if (currentFilter === 'done')               filtered = allTasks.filter(t => ['done','ignored'].includes(t.status))
 
     if (!filtered.length) {
       const msg = currentFilter === 'done' ? 'Aucune tâche traitée' : '✅ Aucune tâche en attente !'
       list.innerHTML = `<div class="empty-state"><div class="icon">${currentFilter === 'done' ? '📋' : '✅'}</div><p>${msg}</p></div>`
       return
     }
-
     list.innerHTML = filtered.map(task => renderTask(task)).join('')
-
     list.querySelectorAll('.task-header').forEach(h => {
       h.addEventListener('click', () => {
-        const body = h.nextElementSibling
+        const body   = h.nextElementSibling
         const expand = h.querySelector('.task-expand')
         body.classList.toggle('open')
         expand.textContent = body.classList.contains('open') ? '▲' : '▼'
@@ -195,34 +211,44 @@
   }
 
   function renderTask(task) {
-    const isInfo = task.task_type === 'info_unknown'
-    const isDone = task.status === 'done' || task.status === 'ignored'
+    const isValidation = task.status === 'pending_validation'
+    const isInfo       = task.task_type === 'info_unknown'
+    const isDone       = ['done','ignored'].includes(task.status)
     const d = new Date(task.created_at)
     const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
     const subTasks = task.sub_tasks || []
     const thread   = task.source_thread || []
 
-    // Indicateur séjour
     let sejourBadge = ''
     if (task.arrival && task.departure) {
-      const today    = new Date(); today.setHours(0,0,0,0)
-      const arrDate  = new Date(task.arrival)
-      const depDate  = new Date(task.departure)
-      const daysDiff = Math.ceil((arrDate - today) / (1000 * 60 * 60 * 24))
-      if (today < arrDate)       sejourBadge = `<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:2px 8px;border-radius:20px">🟡 Arrive dans ${daysDiff}j</span>`
+      const today   = new Date(); today.setHours(0,0,0,0)
+      const arrDate = new Date(task.arrival)
+      const depDate = new Date(task.departure)
+      const diff    = Math.ceil((arrDate - today) / 86400000)
+      if (today < arrDate)       sejourBadge = `<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:2px 8px;border-radius:20px">🟡 Arrive dans ${diff}j</span>`
       else if (today <= depDate) sejourBadge = `<span style="background:#E1F5EE;color:var(--green);font-size:10px;padding:2px 8px;border-radius:20px">🟢 Séjour en cours</span>`
       else                       sejourBadge = `<span style="background:var(--bg2);color:var(--text2);font-size:10px;padding:2px 8px;border-radius:20px;border:0.5px solid var(--border)">⚫ Séjour passé</span>`
     }
 
     let statusBadge = ''
-    if (task.status === 'done')    statusBadge = '<span class="badge badge-done">✓ Fait</span>'
-    if (task.status === 'ignored') statusBadge = '<span class="badge badge-ignored">Ignoré</span>'
-    if (task.status === 'pending') statusBadge = `<span class="badge ${isInfo ? 'badge-info' : 'badge-intervention'}">${isInfo ? '❓ Info manquante' : '🚨 Intervention'}</span>`
+    if (task.status === 'done')               statusBadge = '<span class="badge badge-done">✓ Fait</span>'
+    else if (task.status === 'ignored')       statusBadge = '<span class="badge badge-ignored">Ignoré</span>'
+    else if (task.status === 'pending_validation') statusBadge = '<span class="badge badge-validation">✉️ À valider</span>'
+    else if (isInfo)                          statusBadge = '<span class="badge badge-info">❓ Info manquante</span>'
+    else                                      statusBadge = '<span class="badge badge-intervention">🚨 Intervention</span>'
 
-    const actionButtons = task.status === 'pending'
-      ? `<button class="btn" onclick="markIgnored('${task.id}')">🚫 Ignorer</button>`
-      : `<button class="btn" onclick="markPending('${task.id}')">↩ Remettre en attente</button>`
+    // Boîte de validation pour sympathy / info_known
+    const validationHtml = isValidation ? `
+      <div class="validation-box">
+        <div class="validation-box-title">✉️ Réponse générée — à valider avant envoi</div>
+        <textarea class="form-input validation-reply" id="val-${task.id}">${escHtml(task.suggested_reply || '')}</textarea>
+        <div class="task-actions" style="margin-top:10px">
+          <button class="btn btn-validate" data-validate="${task.id}" data-book="${task.book_id}">✉️ Valider et envoyer</button>
+          <button class="btn" onclick="markIgnored('${task.id}')">🚫 Ignorer</button>
+        </div>
+      </div>` : ''
 
+    // Sous-tâches pour info_unknown / intervention
     const subTasksHtml = subTasks.length ? `
       <div class="task-section">
         <div class="task-section-title">📋 Points à traiter</div>
@@ -238,8 +264,16 @@
           </div>`).join('')}
       </div>` : ''
 
+    const actionButtons = !isValidation && !isDone
+      ? `<button class="btn" onclick="markIgnored('${task.id}')">🚫 Ignorer</button>`
+      : isDone ? `<button class="btn" onclick="markPending('${task.id}')">↩ Remettre en attente</button>` : ''
+
+    const cardClass = isValidation
+      ? `pending_validation ${task.task_type}`
+      : `${task.task_type} ${isDone ? task.status : ''}`
+
     return `
-      <div class="task-card ${task.task_type} ${isDone ? task.status : ''}" id="task-${task.id}">
+      <div class="task-card ${cardClass}" id="task-${task.id}">
         <div class="task-header">
           <div class="task-info">
             <div class="task-guest" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -247,7 +281,7 @@
               ${task.guest_phone ? `<a href="tel:${escHtml(task.guest_phone)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--green);text-decoration:none;background:#E1F5EE;padding:1px 8px;border-radius:20px">📞 ${escHtml(task.guest_phone)}</a>` : ''}
               ${sejourBadge}
             </div>
-            <div class="task-summary">${escHtml(task.summary || task.guest_message?.substring(0, 80) || '')}</div>
+            <div class="task-summary">${escHtml(task.summary || task.guest_message?.substring(0,80) || '')}</div>
           </div>
           <div class="task-meta">
             ${statusBadge}
@@ -268,17 +302,56 @@
                 </div>`).join('')}
             </div>
           </div>` : ''}
+          ${validationHtml}
           ${subTasksHtml}
-          <div class="task-actions">${actionButtons}</div>
+          ${actionButtons ? `<div class="task-actions">${actionButtons}</div>` : ''}
         </div>
       </div>`
   }
 
-  // Délégation d'événements pour les boutons dynamiques
+  // Délégation d'événements
   document.getElementById('tasks-list').addEventListener('click', async (e) => {
-    const faqBtn  = e.target.closest('[data-task]')
-    const sendBtn = e.target.closest('[data-send-task]')
+    const validateBtn = e.target.closest('[data-validate]')
+    const faqBtn      = e.target.closest('[data-task]')
+    const sendBtn     = e.target.closest('[data-send-task]')
 
+    // Valider et envoyer une réponse AI
+    if (validateBtn) {
+      const taskId = validateBtn.dataset.validate
+      const bookId = validateBtn.dataset.book
+      const reply  = document.getElementById(`val-${taskId}`)?.value?.trim()
+      if (!reply) return alert('La réponse est vide')
+      validateBtn.disabled = true; validateBtn.textContent = '⏳ Envoi...'
+
+      const res = await fetch('/api/beds24', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        // Sauvegarder dans conversations
+        const task = allTasks.find(t => t.id === taskId)
+        if (task) {
+          await window._supabase.from('conversations').insert({
+            user_id:       window._session.user.id,
+            property_id:   task.property_id,
+            guest_name:    task.guest_name,
+            guest_message: task.guest_message,
+            agent_reply:   reply,
+            book_id:       bookId
+          })
+        }
+        await markDone(taskId)
+        toast('✉️ Message envoyé et validé !')
+      } else {
+        validateBtn.disabled = false; validateBtn.textContent = '✉️ Valider et envoyer'
+        alert('Erreur : ' + (data.error || 'Inconnu'))
+      }
+    }
+
+    // Enregistrer dans FAQ
     if (faqBtn) {
       const taskId   = faqBtn.dataset.task
       const idx      = faqBtn.dataset.idx
@@ -288,51 +361,39 @@
       if (!reply) return alert('Entrez une réponse avant d\'enregistrer dans la FAQ')
       faqBtn.disabled = true; faqBtn.textContent = '⏳...'
 
-      // 1. Sauvegarder dans la FAQ
       const { error } = await window._supabase.from('knowledge').insert({
         user_id: window._session.user.id, property_id: String(propId),
         type: 'faq', key: question, value: reply
       })
       if (error) { faqBtn.disabled = false; faqBtn.textContent = '📚 Enregistrer dans la FAQ'; alert(error.message); return }
 
-      // 2. Récupérer la tâche pour avoir le message voyageur et book_id
       const task = allTasks.find(t => t.id === taskId)
       if (task) {
-        // 3. Générer une réponse pour le voyageur via grok
         try {
           const grokRes = await fetch('/api/grok', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
             body: JSON.stringify({
-              systemPrompt: 'Tu es un assistant de conciergerie pour location courte durée. Réponds au voyageur de façon chaleureuse et concise (2-3 phrases max) en utilisant la réponse fournie.',
-              messages: [{ role: 'user', content: `Question du voyageur : "${task.guest_message}"\n\nRéponse à utiliser : "${reply}"\n\nRédige une réponse chaleureuse pour le voyageur.` }]
+              systemPrompt: 'Tu es un assistant de conciergerie LCD. Réponds au voyageur de façon chaleureuse et concise en utilisant la réponse fournie.',
+              messages: [{ role: 'user', content: `Question : "${task.guest_message}"\nRéponse : "${reply}"\nRédige une réponse chaleureuse.` }]
             })
           })
-          const grokData = await grokRes.json()
-          if (grokData.reply) {
-            // 4. Sauvegarder dans conversations
-            // Si simulation → visible dans historique page test avec option suppression
-            // Si message réel → visible dans messages réels + historique
+          const gd = await grokRes.json()
+          if (gd.reply) {
             await window._supabase.from('conversations').insert({
-              user_id:       window._session.user.id,
-              property_id:   String(propId),
-              guest_name:    task.guest_name || 'Voyageur',
-              guest_message: task.guest_message,
-              agent_reply:   grokData.reply,
-              book_id:       task.book_id
+              user_id: window._session.user.id, property_id: String(propId),
+              guest_name: task.guest_name, guest_message: task.guest_message,
+              agent_reply: gd.reply, book_id: task.book_id
             })
-            const isSimulation = task.book_id?.startsWith('SIM_')
-            toast(isSimulation
-              ? '📚 FAQ mise à jour — réponse visible dans l\'historique de la page test !'
-              : '📚 FAQ mise à jour — réponse générée pour le voyageur !')
           }
-        } catch (e) { console.error('Erreur génération réponse:', e) }
+        } catch {}
       }
-
       faqBtn.textContent = '✅ Enregistré !'
       await markDone(taskId)
+      toast('📚 FAQ mise à jour !')
     }
 
+    // Envoyer réponse manuelle
     if (sendBtn) {
       const taskId = sendBtn.dataset.sendTask
       const idx    = sendBtn.dataset.sendIdx
@@ -340,6 +401,7 @@
       const reply  = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
       if (!reply) return alert('Entrez une réponse')
       sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi...'
+
       const res = await fetch('/api/beds24', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
@@ -348,7 +410,7 @@
       const data = await res.json()
       if (data.success) {
         sendBtn.textContent = '✅ Envoyé'
-        toast('✉️ Message envoyé au voyageur !')
+        toast('✉️ Message envoyé !')
         await markDone(taskId)
       } else {
         sendBtn.disabled = false; sendBtn.textContent = '✉️ Envoyer au voyageur'
@@ -380,8 +442,8 @@
     return opt?.textContent || propId || '—'
   }
 
-  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-  function escAttr(s) { return (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;') }
+  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+  function escAttr(s) { return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
 </script>
 </body>
 </html>
