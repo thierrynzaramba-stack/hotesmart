@@ -105,9 +105,7 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">
           <div class="sub-dot ${activePage === 'menages-prestataires' ? 'green' : 'gray'}"></div>Prestataires
         </a>`
-    } else if (app.id === 'serrures') {
-      subMenu = `
-        <a class="nav-sub ${activePage === 'serrures' ? 'connected' : ''}" href="/apps/serrures">
+    " href="/apps/serrures">
           <div class="sub-dot ${activePage === 'serrures' ? 'green' : 'gray'}"></div>Mes serrures
         </a>
         <a class="nav-sub ${activePage === 'serrures-config' ? 'connected' : ''}" href="/apps/serrures/config">
