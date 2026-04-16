@@ -325,11 +325,13 @@
   window.updateEventType = (id, value) => {
     const t = templates.find(t => t.id === id)
     if (!t) return
+    const savedText = document.getElementById(`text-${id}`)?.value
     const ev = EVENTS[value]
     t.event_type = value
     t.reference  = value === 'departure' ? 'departure' : value === 'booking_confirmed' ? 'booking' : 'arrival'
     t.offset_days = 0; t.offset_value = ev.delays?.[0]?.value || null
     t.send_time = '10:00'; t.earliest_send_time = '15:00'; t.send_anyway = ev.send_anyway
+    if (savedText !== undefined) t.template_text = savedText
     renderTemplates()
   }
 
