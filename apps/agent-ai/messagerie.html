@@ -23,6 +23,7 @@
     .platform-airbnb  { background:#FF5A5F22; color:#FF5A5F; }
     .platform-booking { background:#003B9522; color:#003B95; }
     .platform-direct  { background:#E1F5EE; color:var(--green); }
+    .platform-ota     { background:#EEEDFE; color:#3C3489; }
     .unread-dot { width:7px; height:7px; border-radius:50%; background:var(--green); flex-shrink:0; }
 
     /* Vue conversation */
@@ -210,16 +211,20 @@
   }
 
   function detectPlatform(msg) {
-    const channel = (msg.channel || '').toLowerCase()
     const referer = (msg.referer || '').toLowerCase()
-    const apiRef  = (msg.apiReference || '').toLowerCase()
-    const combined = channel + ' ' + referer + ' ' + apiRef
+    const apiRef  = (msg.apiReference || '')
 
-    if (combined.includes('airbnb'))               return 'airbnb'
-    if (combined.includes('booking'))              return 'booking'
-    if (combined.includes('vrbo') || combined.includes('homeaway')) return 'vrbo'
-    if (combined.includes('expedia'))              return 'expedia'
-    return 'direct'
+    // Si pas de référence OTA → réservation directe
+    if (!apiRef) return 'direct'
+
+    // Identifier la plateforme via le référent
+    if (referer.includes('airbnb'))  return 'airbnb'
+    if (referer.includes('booking')) return 'booking'
+    if (referer.includes('vrbo') || referer.includes('homeaway')) return 'vrbo'
+    if (referer.includes('expedia')) return 'expedia'
+
+    // OTA inconnue mais référence présente
+    return 'ota'
   }
 
   function renderConvList() {
@@ -235,7 +240,7 @@
       const preview   = lastMsg?.message?.substring(0, 55) || lastReply?.agent_reply?.substring(0, 55) || '—'
       const hasUnread = lastMsg?.source === 'guest'
       const platform  = conv.platform
-      const platformLabel = platform === 'airbnb' ? 'Airbnb' : platform === 'booking' ? 'Booking' : 'Direct'
+      const platformLabel = platform === 'airbnb' ? 'Airbnb' : platform === 'booking' ? 'Booking' : platform === 'vrbo' ? 'Vrbo' : platform === 'expedia' ? 'Expedia' : platform === 'ota' ? 'OTA' : 'Direct'
       const date = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : ''
 
       return `
@@ -280,7 +285,7 @@
 
     allMessages.sort((a, b) => new Date(a.time) - new Date(b.time))
 
-    const platformLabel = conv.platform === 'airbnb' ? 'Airbnb' : conv.platform === 'booking' ? 'Booking.com' : 'Direct'
+    const platformLabel = conv.platform === 'airbnb' ? 'Airbnb' : conv.platform === 'booking' ? 'Booking.com' : conv.platform === 'vrbo' ? 'Vrbo' : conv.platform === 'expedia' ? 'Expedia' : conv.platform === 'ota' ? 'OTA' : 'Direct'
 
     document.getElementById('conv-view').innerHTML = `
       <div class="conv-view-header">
