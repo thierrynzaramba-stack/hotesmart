@@ -99,9 +99,11 @@ module.exports = async function handler(req, res) {
             guestName:      booking.lastName   || '',
             firstNight:     booking.arrival    || '',
             lastNight:      booking.departure  || '',
-            channel:        booking.channel    || '',   // ← plateforme OTA
-            agent:          booking.agent      || '',   // ← agent/source
-            referer:        booking.referer    || '',   // ← référent
+            channel:        booking.channel      || '',
+            referer:        booking.referer      || '',
+            apiSource:      booking.apiSource    || '',
+            apiSourceId:    booking.apiSourceId  || null,
+            apiReference:   booking.apiReference || '',
             guestMessage:   lastGuestMsg.message,
             message:        lastGuestMsg.message,
             messageId:      lastGuestMsg.id,

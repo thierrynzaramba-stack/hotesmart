@@ -211,20 +211,16 @@
   }
 
   function detectPlatform(msg) {
-    const referer = (msg.referer || '').toLowerCase()
-    const apiRef  = (msg.apiReference || '')
+    const apiSource  = (msg.apiSource  || '').toLowerCase()
+    const referer    = (msg.referer    || '').toLowerCase()
+    const apiRef     = (msg.apiReference || '')
 
-    // Si pas de référence OTA → réservation directe
-    if (!apiRef) return 'direct'
-
-    // Identifier la plateforme via le référent
-    if (referer.includes('airbnb'))  return 'airbnb'
-    if (referer.includes('booking')) return 'booking'
-    if (referer.includes('vrbo') || referer.includes('homeaway')) return 'vrbo'
-    if (referer.includes('expedia')) return 'expedia'
-
-    // OTA inconnue mais référence présente
-    return 'ota'
+    if (apiSource.includes('airbnb') || referer.includes('airbnb'))           return 'airbnb'
+    if (apiSource.includes('booking') || referer.includes('booking'))         return 'booking'
+    if (apiSource.includes('vrbo') || apiSource.includes('homeaway') || referer.includes('vrbo')) return 'vrbo'
+    if (apiSource.includes('expedia') || referer.includes('expedia'))         return 'expedia'
+    if (apiSource || apiRef)                                                   return 'ota'
+    return 'direct'
   }
 
   function renderConvList() {
