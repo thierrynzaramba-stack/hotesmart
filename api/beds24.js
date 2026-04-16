@@ -80,10 +80,7 @@ module.exports = async function handler(req, res) {
           )
           const db = await rb.json()
           ;(db.data || []).forEach(b => { bookingsMap[b.id] = b })
-          console.log('[Beds24] bookingIds from messages:', bookingIds.length, '| bookings fetched:', (db.data||[]).length, '| matched:', bookingIds.filter(id => bookingsMap[id]).length)
-          if (db.data?.[0]) console.log('[Beds24] booking keys:', JSON.stringify(Object.keys(db.data[0])))
-          const sampleBooking = db.data?.find(b => b.id == 85446867)
-          if (sampleBooking) console.log('[Beds24] booking 85446867:', JSON.stringify({channel: sampleBooking.channel, agent: sampleBooking.agent, referer: sampleBooking.referer, referrer: sampleBooking.referrer, source: sampleBooking.source, origin: sampleBooking.origin, apiReference: sampleBooking.apiReference}))
+          console.log('[Beds24] messages fetched:', (db.data||[]).length)
         }
 
         const messages = bookingIds.filter(bookId => bookingsMap[bookId]).map(bookId => {
