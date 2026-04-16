@@ -146,42 +146,54 @@
     try {
       const props = propId ? [propId] : ['169567', '209413']
 
+      // Fetch conversations Beds24 + réponses AI Supabase en parallèle
       const [beds24Results, convRes] = await Promise.all([
         Promise.all(props.map(pid =>
           fetch('/api/beds24', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-            body: JSON.stringify({ action: 'getMessages', propertyId: pid })
-          }).then(r => r.json()).then(d => d.messages || [])
+            body: JSON.stringify({ action: 'getConversations', propertyId: pid })
+          }).then(r => r.json()).then(d => d.conversations || [])
         )),
         window._supabase.from('conversations').select('*')
           .eq('user_id', window._session.user.id)
           .not('book_id', 'like', 'SIM_%')
           .order('created_at', { ascending: false })
-          .limit(100)
+          .limit(200)
       ])
 
-      const beds24Messages = beds24Results.flat()
-      const supaConvs      = convRes.data || []
+      const beds24Convs = beds24Results.flat()
+      const supaConvs   = convRes.data || []
 
+      // Indexer les réponses AI par book_id
+      const aiByBooking = {}
+      supaConvs.forEach(c => {
+        const bookId = String(c.book_id)
+        if (!aiByBooking[bookId]) aiByBooking[bookId] = []
+        aiByBooking[bookId].push(c)
+      })
+
+      // Construire la map finale
       const convMap = {}
 
-      beds24Messages.forEach(msg => {
-        const bookId = String(msg.bookId)
-        if (!convMap[bookId]) {
-          convMap[bookId] = {
-            bookId,
-            guestName:  msg.guestFirstName ? `${msg.guestFirstName} ${msg.guestName || ''}`.trim() : 'Voyageur',
-            firstNight: msg.firstNight,
-            lastNight:  msg.lastNight,
-            platform:   detectPlatform(msg),
-            thread:     msg.thread || [],
-            aiReplies:  [],
-            lastTime:   msg.thread?.[msg.thread.length - 1]?.time || msg.messageTime || new Date().toISOString()
-          }
+      beds24Convs.forEach(conv => {
+        const bookId = String(conv.bookId)
+        convMap[bookId] = {
+          bookId,
+          guestName:  conv.guestFirstName ? `${conv.guestFirstName} ${conv.guestName || ''}`.trim() : 'Voyageur',
+          firstNight: conv.firstNight,
+          lastNight:  conv.lastNight,
+          platform:   detectPlatform(conv),
+          status:     conv.status,
+          thread:     conv.thread || [],
+          aiReplies:  aiByBooking[bookId] || [],
+          hasMessages: conv.hasMessages,
+          waitingReply: conv.waitingReply,
+          lastTime:   conv.lastTime || conv.firstNight
         }
       })
 
+      // Ajouter les convs Supabase sans booking Beds24 (ex: anciennes)
       supaConvs.forEach(c => {
         const bookId = String(c.book_id)
         if (!convMap[bookId]) {
@@ -190,18 +202,20 @@
             guestName:  c.guest_name || 'Voyageur',
             firstNight: null, lastNight: null,
             platform:   'direct',
+            status:     '',
             thread:     [],
-            aiReplies:  [],
+            aiReplies:  [c],
+            hasMessages: false,
+            waitingReply: false,
             lastTime:   c.created_at
           }
         }
-        convMap[bookId].aiReplies.push(c)
-        if (new Date(c.created_at) > new Date(convMap[bookId].lastTime)) {
-          convMap[bookId].lastTime = c.created_at
-        }
       })
 
-      conversations = Object.values(convMap).sort((a, b) => new Date(b.lastTime) - new Date(a.lastTime))
+      conversations = Object.values(convMap)
+        .filter(c => c.hasMessages || c.aiReplies.length > 0)
+        .sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
+
       document.getElementById('topStatus').textContent = `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}`
       renderConvList()
 

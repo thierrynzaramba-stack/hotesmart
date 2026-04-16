@@ -145,6 +145,77 @@ module.exports = async function handler(req, res) {
         return res.json({ success: r.ok, data: d })
       }
 
+      case 'getConversations': {
+        // Fetch toutes les réservations récentes avec messages et infos plateforme
+        const dateFrom = new Date(); dateFrom.setMonth(dateFrom.getMonth() - 3)
+        const dateTo   = new Date(); dateTo.setMonth(dateTo.getMonth() + 6)
+
+        const [bookingsRes, messagesRes] = await Promise.all([
+          fetch(
+            `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
+            { headers: { token: beds24Key } }
+          ),
+          fetch(
+            `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=200`,
+            { headers: { token: beds24Key } }
+          )
+        ])
+
+        const bookingsData = await bookingsRes.json()
+        const messagesData = await messagesRes.json()
+
+        const bookings = (bookingsData.data || []).filter(b => String(b.propertyId) === String(propertyId))
+        const messages = (messagesData.data || []).filter(m => String(m.propertyId) === String(propertyId))
+
+        // Grouper les messages par bookingId
+        const messagesByBooking = {}
+        messages.forEach(m => {
+          if (!messagesByBooking[m.bookingId]) messagesByBooking[m.bookingId] = []
+          messagesByBooking[m.bookingId].push(m)
+        })
+
+        // Construire la liste des conversations
+        const conversations = bookings.map(booking => {
+          const bookId  = String(booking.id)
+          const msgs    = messagesByBooking[bookId] || []
+          const thread  = msgs.map(m => ({
+            id:      m.id,
+            time:    m.time,
+            message: m.message,
+            source:  m.source
+          })).sort((a, b) => new Date(a.time) - new Date(b.time))
+
+          const lastMsg    = thread[thread.length - 1]
+          const hasGuest   = msgs.some(m => m.source === 'guest')
+          const waitingReply = lastMsg?.source === 'guest'
+
+          return {
+            bookId:        bookId,
+            guestFirstName: booking.firstName  || '',
+            guestName:     booking.lastName   || '',
+            firstNight:    booking.arrival    || '',
+            lastNight:     booking.departure  || '',
+            channel:       booking.channel    || '',
+            apiSource:     booking.apiSource  || '',
+            apiSourceId:   booking.apiSourceId || null,
+            apiReference:  booking.apiReference || '',
+            referer:       booking.referer    || '',
+            status:        booking.status     || '',
+            hasMessages:   msgs.length > 0,
+            hasGuest,
+            waitingReply,
+            lastTime:      lastMsg?.time || booking.bookingTime || booking.arrival,
+            thread
+          }
+        })
+
+        // Trier par date du dernier message ou date de réservation
+        conversations.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
+
+        console.log('[Beds24] getConversations:', conversations.length, 'réservations dont', conversations.filter(c => c.hasMessages).length, 'avec messages')
+        return res.json({ conversations })
+      }
+
       default:
         return res.status(400).json({ error: `Action inconnue : ${action}` })
     }
