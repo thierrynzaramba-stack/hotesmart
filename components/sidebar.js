@@ -20,7 +20,7 @@ export async function renderSidebar(activePage = '') {
       ${renderApps(activePage)}
 
       <div class="nav-section-label">API connectées</div>
-      <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/pages/connexions">
+      <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/connexions">
         <span class="nav-icon">⚡</span>
         <span class="nav-label">Connexions</span>
       </a>
@@ -61,6 +61,91 @@ export async function renderSidebar(activePage = '') {
       </div>
     </div>
   `
+
+  initMobileSidebar(sidebar)
+}
+
+function initMobileSidebar(sidebar) {
+  if (document.getElementById('sidebar-toggle')) return
+
+  const toggle = document.createElement('button')
+  toggle.id = 'sidebar-toggle'
+  toggle.innerHTML = '☰'
+  toggle.style.cssText = `
+    display: none;
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 1000;
+    background: var(--bg);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: 18px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  `
+  document.body.appendChild(toggle)
+
+  const overlay = document.createElement('div')
+  overlay.id = 'sidebar-overlay'
+  overlay.style.cssText = `
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 99;
+  `
+  document.body.appendChild(overlay)
+
+  const style = document.createElement('style')
+  style.textContent = `
+    @media (max-width: 768px) {
+      #sidebar-toggle { display: block !important; }
+      .sidebar {
+        position: fixed !important;
+        left: -260px !important;
+        top: 0 !important;
+        height: 100vh !important;
+        z-index: 100 !important;
+        transition: left 0.25s ease !important;
+        box-shadow: none !important;
+      }
+      .sidebar.open {
+        left: 0 !important;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.15) !important;
+      }
+      .sidebar:hover { left: -260px !important; }
+      .sidebar.open:hover { left: 0 !important; }
+      #sidebar-overlay.open { display: block !important; }
+      .main { margin-left: 0 !important; }
+      .layout { grid-template-columns: 1fr !important; }
+    }
+  `
+  document.head.appendChild(style)
+
+  toggle.addEventListener('click', () => {
+    const isOpen = sidebar.classList.contains('open')
+    sidebar.classList.toggle('open', !isOpen)
+    overlay.classList.toggle('open', !isOpen)
+    toggle.innerHTML = isOpen ? '☰' : '✕'
+  })
+
+  overlay.addEventListener('click', () => {
+    sidebar.classList.remove('open')
+    overlay.classList.remove('open')
+    toggle.innerHTML = '☰'
+  })
+
+  sidebar.querySelectorAll('a').forEach(link => {
+    link.addEventListener('click', () => {
+      if (window.innerWidth <= 768) {
+        sidebar.classList.remove('open')
+        overlay.classList.remove('open')
+        toggle.innerHTML = '☰'
+      }
+    })
+  })
 }
 
 function renderApps(activePage) {
@@ -84,6 +169,9 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'agent-ai' ? 'connected' : ''}" href="/apps/agent-ai">
           <div class="sub-dot ${activePage === 'agent-ai' ? 'green' : 'gray'}"></div>Signature Humaine
         </a>
+        <a class="nav-sub ${activePage === 'agent-ai-messagerie' ? 'connected' : ''}" href="/apps/agent-ai/messagerie">
+          <div class="sub-dot ${activePage === 'agent-ai-messagerie' ? 'green' : 'gray'}"></div>Messagerie
+        </a>
         <a class="nav-sub ${activePage === 'agent-ai-knowledge' ? 'connected' : ''}" href="/apps/agent-ai/knowledge">
           <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
         </a>
@@ -94,7 +182,7 @@ function renderApps(activePage) {
           <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Configuration
         </a>
         <a class="nav-sub ${activePage === 'agent-ai-test' ? 'connected' : ''}" href="/apps/agent-ai/test">
-          <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Mode test
+          <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Simulateur
         </a>`
     } else if (app.id === 'menages') {
       subMenu = `
