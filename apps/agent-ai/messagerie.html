@@ -210,10 +210,21 @@
   }
 
   function detectPlatform(msg) {
-    const thread = msg.thread || []
-    const text = thread.map(t => (t.source || '') + (t.message || '')).join(' ').toLowerCase()
-    if (text.includes('airbnb')) return 'airbnb'
+    // Utiliser les champs Beds24 en priorité
+    const channel = (msg.channel || '').toLowerCase()
+    const agent   = (msg.agent   || '').toLowerCase()
+    const referer = (msg.referer || '').toLowerCase()
+    const combined = channel + ' ' + agent + ' ' + referer
+
+    if (combined.includes('airbnb'))  return 'airbnb'
+    if (combined.includes('booking')) return 'booking'
+    if (combined.includes('vrbo') || combined.includes('homeaway')) return 'vrbo'
+
+    // Fallback : analyser les messages
+    const text = (msg.thread || []).map(t => (t.message || '')).join(' ').toLowerCase()
+    if (text.includes('airbnb'))  return 'airbnb'
     if (text.includes('booking')) return 'booking'
+
     return 'direct'
   }
 

@@ -15,7 +15,6 @@ module.exports = async function handler(req, res) {
     if (!token) return res.status(401).json({ error: 'Non autorisé' })
 
     const { data: userData, error: authError } = await supabase.auth.getUser(token)
-
     if (authError) {
       console.error('[Beds24] Auth error:', authError)
       return res.status(401).json({ error: 'Session invalide', detail: authError.message })
@@ -32,11 +31,7 @@ module.exports = async function handler(req, res) {
       .single()
 
     if (keyError || !keyData) {
-      return res.status(400).json({
-        error: 'Clé Beds24 non configurée',
-        detail: keyError?.message,
-        userId: user.id
-      })
+      return res.status(400).json({ error: 'Clé Beds24 non configurée', detail: keyError?.message, userId: user.id })
     }
 
     const beds24Key = keyData.api_key
@@ -45,17 +40,13 @@ module.exports = async function handler(req, res) {
     switch (action) {
 
       case 'getProperties': {
-        const r = await fetch('https://beds24.com/api/v2/properties', {
-          headers: { token: beds24Key }
-        })
+        const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: beds24Key } })
         const d = await r.json()
         return res.json({ properties: d.data || [] })
       }
 
       case 'getBookings': {
-        const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, {
-          headers: { token: beds24Key }
-        })
+        const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, { headers: { token: beds24Key } })
         const d = await r.json()
         const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propertyId))
         return res.json({ bookings })
@@ -67,32 +58,24 @@ module.exports = async function handler(req, res) {
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
-
-        // ✅ Filtrer par propertyId — Beds24 ignore parfois le filtre propId
         const allMessages = (d.data || []).filter(m => String(m.propertyId) === String(propertyId))
-        console.log('[Beds24] getMessages count total:', (d.data || []).length, '→ filtrés:', allMessages.length)
+        console.log('[Beds24] getMessages total:', (d.data || []).length, '→ filtrés:', allMessages.length)
 
-        // Grouper par bookingId
         const byBooking = {}
         allMessages.forEach(msg => {
           if (!byBooking[msg.bookingId]) byBooking[msg.bookingId] = []
           byBooking[msg.bookingId].push(msg)
         })
 
-        // Récupérer les réservations pour avoir les infos voyageur
         const bookingIds = Object.keys(byBooking)
         let bookingsMap = {}
 
         if (bookingIds.length > 0) {
-          const rb = await fetch(
-            `https://beds24.com/api/v2/bookings?propId=${propertyId}`,
-            { headers: { token: beds24Key } }
-          )
+          const rb = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, { headers: { token: beds24Key } })
           const db = await rb.json()
           ;(db.data || []).forEach(b => { bookingsMap[b.id] = b })
         }
 
-        // Construire les messages avec infos voyageur
         const messages = bookingIds.filter(bookId => bookingsMap[bookId]).map(bookId => {
           const msgs = byBooking[bookId]
           const guestMsgs = msgs.filter(m => m.source === 'guest')
@@ -100,22 +83,25 @@ module.exports = async function handler(req, res) {
 
           const lastGuestMsg = guestMsgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
           const lastMsg = msgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
-          const waitingReply = lastMsg?.source === 'guest' // dernier message = voyageur = en attente
-
+          const waitingReply = lastMsg?.source === 'guest'
           const booking = bookingsMap[bookId] || {}
+
           return {
             bookId:         parseInt(bookId),
-            guestFirstName: booking.firstName || '',
-            guestName:      booking.lastName  || '',
-            firstNight:     booking.arrival   || '',
-            lastNight:      booking.departure || '',
+            guestFirstName: booking.firstName  || '',
+            guestName:      booking.lastName   || '',
+            firstNight:     booking.arrival    || '',
+            lastNight:      booking.departure  || '',
+            channel:        booking.channel    || '',   // ← plateforme OTA
+            agent:          booking.agent      || '',   // ← agent/source
+            referer:        booking.referer    || '',   // ← référent
             guestMessage:   lastGuestMsg.message,
             message:        lastGuestMsg.message,
             messageId:      lastGuestMsg.id,
             messageTime:    lastGuestMsg.time,
             read:           lastGuestMsg.read,
             waitingReply,
-            thread:         msgs.map(m => ({
+            thread: msgs.map(m => ({
               id:      m.id,
               time:    m.time,
               message: m.message,
@@ -134,17 +120,9 @@ module.exports = async function handler(req, res) {
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
-        // Filtrer par propertyId
         const messages = (d.data || [])
           .filter(m => String(m.propertyId) === String(propertyId))
-          .map(m => ({
-            bookId:       m.bookingId,
-            message:      m.message,
-            guestMessage: m.message,
-            source:       m.source,
-            time:         m.time
-          }))
-
+          .map(m => ({ bookId: m.bookingId, message: m.message, guestMessage: m.message, source: m.source, time: m.time }))
         return res.json({ messages, totalBookings: messages.length })
       }
 
