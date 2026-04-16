@@ -71,9 +71,16 @@ module.exports = async function handler(req, res) {
         let bookingsMap = {}
 
         if (bookingIds.length > 0) {
-          const rb = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, { headers: { token: beds24Key } })
+          // Fetch bookings avec fenêtre large pour couvrir toutes les réservations
+          const dateFrom = new Date(); dateFrom.setFullYear(dateFrom.getFullYear() - 1)
+          const dateTo   = new Date(); dateTo.setFullYear(dateTo.getFullYear() + 1)
+          const rb = await fetch(
+            `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
+            { headers: { token: beds24Key } }
+          )
           const db = await rb.json()
           ;(db.data || []).forEach(b => { bookingsMap[b.id] = b })
+          console.log('[Beds24] bookingIds from messages:', bookingIds.length, '| bookings fetched:', (db.data||[]).length, '| matched:', bookingIds.filter(id => bookingsMap[id]).length)
         }
 
         const messages = bookingIds.filter(bookId => bookingsMap[bookId]).map(bookId => {
