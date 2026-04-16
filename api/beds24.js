@@ -92,8 +92,6 @@ module.exports = async function handler(req, res) {
           const lastMsg = msgs.sort((a, b) => new Date(b.time) - new Date(a.time))[0]
           const waitingReply = lastMsg?.source === 'guest'
           const booking = bookingsMap[bookId] || {}
-          console.log(`[Beds24] platform booking ${bookId}:`, JSON.stringify({ apiSource: booking.apiSource, apiSourceId: booking.apiSourceId, referer: booking.referer, apiReference: booking.apiReference, channel: booking.channel }))
-
           return {
             bookId:         parseInt(bookId),
             guestFirstName: booking.firstName  || '',
