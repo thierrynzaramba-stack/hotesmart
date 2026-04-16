@@ -29,18 +29,11 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Refresh automatique des tokens Beds24 expirés
-    try {
-      await refreshBeds24Tokens()
-    } catch (err) {
+    try { await refreshBeds24Tokens() } catch (err) {
       console.error('[Cron] Erreur refresh tokens:', err.message)
     }
 
-    const { data: apiKeys } = await supabase
-      .from('api_keys')
-      .select('user_id, api_key')
-      .eq('service', 'beds24')
-
+    const { data: apiKeys } = await supabase.from('api_keys').select('user_id, api_key').eq('service', 'beds24')
     if (!apiKeys?.length) return res.json({ ...results, message: 'Aucune clé Beds24' })
 
     const { data: tokens } = await supabase.from('public_tokens').select('token, property_ids, user_id')
@@ -55,27 +48,19 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // Vérification batterie serrures
-    try {
-      await checkBatteries(results)
-    } catch (err) {
+    try { await checkBatteries(results) } catch (err) {
       console.error('[Cron] Erreur batterie:', err.message)
       results.errors.push({ context: 'battery_check', error: err.message })
     }
 
-    // Envoi messages en attente (codes accès)
-    try {
-      await checkPendingMessages(results)
-    } catch (err) {
+    try { await checkPendingMessages(results) } catch (err) {
       console.error('[Cron] Erreur pending messages:', err.message)
       results.errors.push({ context: 'pending_messages', error: err.message })
     }
 
     await supabase.from('cron_logs').upsert({
-      id: 'agent-ai',
-      last_run: new Date().toISOString(),
-      total_messages: results.totalMessages,
-      total_replies: results.totalAutoReplies,
+      id: 'agent-ai', last_run: new Date().toISOString(),
+      total_messages: results.totalMessages, total_replies: results.totalAutoReplies,
       errors: results.errors
     })
 
@@ -90,9 +75,7 @@ module.exports = async function handler(req, res) {
 
 // ─── Traitement par utilisateur ───────────────────────────────────────────────
 async function processUser(userId, beds24Key, tokens, results) {
-  const propsRes = await fetch('https://beds24.com/api/v2/properties', {
-    headers: { token: beds24Key }
-  })
+  const propsRes  = await fetch('https://beds24.com/api/v2/properties', { headers: { token: beds24Key } })
   const propsData = await propsRes.json()
   const properties = propsData.data || []
 
@@ -120,26 +103,18 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
   )
   const d = await r.json()
   const bookings = (d.data || []).filter(b => String(b.propertyId) === String(property.id))
-
-  const relevantTokens = tokens.filter(t =>
-    !t.property_ids?.length || t.property_ids.includes(String(property.id))
-  )
+  const relevantTokens = tokens.filter(t => !t.property_ids?.length || t.property_ids.includes(String(property.id)))
 
   for (const booking of bookings) {
     const bookingId = String(booking.id)
-    const { data: existing } = await supabase
-      .from('bookings_snapshot')
-      .select('snapshot')
-      .eq('user_id', userId)
-      .eq('booking_id', bookingId)
-      .maybeSingle()
+    const { data: existing } = await supabase.from('bookings_snapshot').select('snapshot')
+      .eq('user_id', userId).eq('booking_id', bookingId).maybeSingle()
 
     const currentSnapshot = {
       status: booking.status, arrival: booking.arrival, departure: booking.departure,
       numAdult: booking.numAdult, numChild: booking.numChild,
       firstName: booking.firstName, lastName: booking.lastName
     }
-
     const eventData = {
       guestName: `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur',
       arrival: booking.arrival, departure: booking.departure,
@@ -154,7 +129,6 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
       const prev = existing.snapshot
       if (booking.status === 'cancelled' && prev.status !== 'cancelled') {
         await createBookingEvent(userId, bookingId, property, 'cancelled', eventData, relevantTokens)
-        // Annulation → supprimer code pending + access_code
         await cancelAccessCode(bookingId)
         results.totalBookingEvents++
       } else if (prev.arrival !== currentSnapshot.arrival || prev.departure !== currentSnapshot.departure ||
@@ -168,7 +142,6 @@ async function detectBookingChanges(userId, beds24Key, property, tokens, results
             numChild:  prev.numChild  !== currentSnapshot.numChild  ? { before: prev.numChild,  after: currentSnapshot.numChild }  : null,
           }
         }, relevantTokens)
-        // Dates modifiées → recréer le code si un code existait
         if (prev.arrival !== currentSnapshot.arrival || prev.departure !== currentSnapshot.departure) {
           await refreshAccessCode(bookingId, booking)
         }
@@ -195,14 +168,9 @@ async function createBookingEvent(userId, bookingId, property, eventType, eventD
 
 // ─── Messages automatiques ────────────────────────────────────────────────────
 async function processMessageTemplates(userId, beds24Key, property, results) {
-  const { data: templates } = await supabase
-    .from('message_templates')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('property_id', String(property.id))
-    .eq('active', true)
+  const { data: templates } = await supabase.from('message_templates').select('*')
+    .eq('user_id', userId).eq('property_id', String(property.id)).eq('active', true)
     .in('event_type', ['arrival', 'departure'])
-
   if (!templates?.length) return
 
   const today = new Date()
@@ -237,114 +205,89 @@ async function checkAndSendTemplate(userId, beds24Key, property, booking, templa
   targetDate.setDate(targetDate.getDate() + (template.offset_days || 0))
   const targetDateStr = targetDate.toISOString().split('T')[0]
 
-  const isToday = targetDateStr === today
-  const isPast  = targetDate < new Date(today)
+  const isToday    = targetDateStr === today
+  const isPast     = targetDate < new Date(today)
   const shouldSend = isToday || (isPast && template.send_anyway)
   if (!shouldSend) return
 
   const [sendHour] = (template.send_time || '10:00').split(':').map(Number)
-  const currentHour = now.getHours()
-  if (currentHour < sendHour && isToday) return
+  if (now.getHours() < sendHour && isToday) return
 
-  const { data: alreadySent } = await supabase
-    .from('message_sent_log')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('booking_id', bookingId)
-    .eq('template_id', template.id)
-    .maybeSingle()
-
+  const { data: alreadySent } = await supabase.from('message_sent_log').select('id')
+    .eq('user_id', userId).eq('booking_id', bookingId).eq('template_id', template.id).maybeSingle()
   if (alreadySent) return
 
   const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
   const message   = await generateAutoMessage(template, booking, property, guestName)
   if (!message) return
 
-  console.log(`[Cron] Message auto: ${template.event_type} pour booking ${bookingId}`)
+  // Vérifier le mode AVANT de sauvegarder
+  const propMode = await getPropertyMode(userId, String(property.id))
 
-  await supabase.from('conversations').insert({
-    user_id:       userId,
-    property_id:   String(property.id),
-    guest_name:    guestName,
-    guest_message: `[AUTO: ${template.event_type}]`,
-    agent_reply:   message,
-    book_id:       bookingId
-  })
-
-  await supabase.from('message_sent_log').insert({
-    user_id: userId, booking_id: bookingId, template_id: template.id
-  })
-
-  // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
+  if (propMode === 'auto') {
+    await supabase.from('conversations').insert({
+      user_id: userId, property_id: String(property.id), guest_name: guestName,
+      guest_message: `[AUTO: ${template.event_type}]`, agent_reply: message, book_id: bookingId
+    })
+    await supabase.from('message_sent_log').insert({ user_id: userId, booking_id: bookingId, template_id: template.id })
+    // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
+    console.log(`[Cron] Mode Auto — message ${template.event_type} envoyé booking ${bookingId}`)
+  } else {
+    await supabase.from('agent_tasks').insert({
+      user_id: userId, property_id: String(property.id), book_id: String(bookingId),
+      guest_name: guestName, guest_message: `[AUTO: ${template.event_type}]`,
+      task_type: 'auto_message',
+      summary: `Message automatique "${template.event_type}" à valider avant envoi`,
+      suggested_reply: message, status: 'pending_validation', sub_tasks: []
+    })
+    await supabase.from('message_sent_log').insert({ user_id: userId, booking_id: bookingId, template_id: template.id })
+    console.log(`[Cron] Mode Test — message ${template.event_type} en attente validation booking ${bookingId}`)
+  }
 
   results.totalAutoMessages++
 }
 
 async function triggerTemplates(userId, beds24Key, property, booking, eventType, results) {
-  const { data: templates } = await supabase
-    .from('message_templates')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('property_id', String(property.id))
-    .eq('event_type', eventType)
-    .eq('active', true)
-
+  const { data: templates } = await supabase.from('message_templates').select('*')
+    .eq('user_id', userId).eq('property_id', String(property.id))
+    .eq('event_type', eventType).eq('active', true)
   if (!templates?.length) return
 
   const bookingId = String(booking.id)
   const guestName = `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur'
 
   for (const template of templates) {
-    const { data: alreadySent } = await supabase
-      .from('message_sent_log')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('booking_id', bookingId)
-      .eq('template_id', template.id)
-      .maybeSingle()
-
+    const { data: alreadySent } = await supabase.from('message_sent_log').select('id')
+      .eq('user_id', userId).eq('booking_id', bookingId).eq('template_id', template.id).maybeSingle()
     if (alreadySent) continue
 
     const message = await generateAutoMessage(template, booking, property, guestName)
     if (!message) continue
 
-    await supabase.from('conversations').insert({
-      user_id:       userId,
-      property_id:   String(property.id),
-      guest_name:    guestName,
-      guest_message: `[AUTO: ${eventType}]`,
-      agent_reply:   message,
-      book_id:       bookingId
-    })
-
-    await supabase.from('message_sent_log').insert({
-      user_id: userId, booking_id: bookingId, template_id: template.id
-    })
-
-    // Respecter le mode test/auto
+    // Vérifier le mode AVANT de sauvegarder
     const propMode = await getPropertyMode(userId, String(property.id))
+
     if (propMode === 'auto') {
+      await supabase.from('conversations').insert({
+        user_id: userId, property_id: String(property.id), guest_name: guestName,
+        guest_message: `[AUTO: ${eventType}]`, agent_reply: message, book_id: bookingId
+      })
+      await supabase.from('message_sent_log').insert({ user_id: userId, booking_id: bookingId, template_id: template.id })
       // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
       console.log(`[Cron] Mode Auto — message ${eventType} envoyé booking ${bookingId}`)
     } else {
-      // Mode Test : créer tâche pending_validation
       await supabase.from('agent_tasks').insert({
-        user_id:         userId,
-        property_id:     String(property.id),
-        book_id:         String(bookingId),
-        guest_name:      guestName,
-        guest_message:   `[AUTO: ${eventType}]`,
-        task_type:       'auto_message',
-        summary:         `Message automatique "${eventType}" à valider`,
-        suggested_reply: message,
-        status:          'pending_validation',
-        sub_tasks:       []
+        user_id: userId, property_id: String(property.id), book_id: String(bookingId),
+        guest_name: guestName, guest_message: `[AUTO: ${eventType}]`,
+        task_type: 'auto_message',
+        summary: `Message automatique "${eventType}" à valider avant envoi`,
+        suggested_reply: message, status: 'pending_validation', sub_tasks: []
       })
+      await supabase.from('message_sent_log').insert({ user_id: userId, booking_id: bookingId, template_id: template.id })
       console.log(`[Cron] Mode Test — message ${eventType} en attente validation booking ${bookingId}`)
     }
 
     results.totalAutoMessages++
-    console.log(`[Cron] Message auto ${eventType} traité pour booking ${bookingId}`)
   }
 }
 
@@ -375,7 +318,6 @@ async function generateAutoMessage(template, booking, property, guestName) {
         content: `Tu es un assistant de conciergerie LCD. Améliore légèrement ce message sans changer son contenu ni ajouter d'informations. Rends-le naturel et chaleureux. Réponds UNIQUEMENT avec le message final, sans commentaire.\n\nMessage : "${text}"`
       }]
     })
-
     return response.content[0]?.text || text
   } catch (err) {
     console.error('[Cron] Erreur génération message auto:', err.message)
@@ -396,10 +338,7 @@ function formatDate(dateStr) {
 
 // ─── Traitement messages Agent AI ────────────────────────────────────────────
 async function processProperty(userId, beds24Key, property, results) {
-  const msgRes = await fetch(
-    `https://beds24.com/api/v2/bookings/messages?propId=${property.id}&limit=100`,
-    { headers: { token: beds24Key } }
-  )
+  const msgRes  = await fetch(`https://beds24.com/api/v2/bookings/messages?propId=${property.id}&limit=100`, { headers: { token: beds24Key } })
   const msgData = await msgRes.json()
   const allMessages = (msgData.data || []).filter(m => String(m.propertyId) === String(property.id))
 
@@ -409,19 +348,12 @@ async function processProperty(userId, beds24Key, property, results) {
     byBooking[msg.bookingId].push(msg)
   })
 
-  const { data: knowledge } = await supabase
-    .from('knowledge')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('property_id', String(property.id))
-
+  const { data: knowledge } = await supabase.from('knowledge').select('*')
+    .eq('user_id', userId).eq('property_id', String(property.id))
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
   const dateFrom6m = new Date(); dateFrom6m.setMonth(dateFrom6m.getMonth() - 6)
-  const bookingRes = await fetch(
-    `https://beds24.com/api/v2/bookings?propId=${property.id}&arrivalFrom=${dateFrom6m.toISOString().split('T')[0]}`,
-    { headers: { token: beds24Key } }
-  )
+  const bookingRes  = await fetch(`https://beds24.com/api/v2/bookings?propId=${property.id}&arrivalFrom=${dateFrom6m.toISOString().split('T')[0]}`, { headers: { token: beds24Key } })
   const bookingData = await bookingRes.json()
   const bookingsMap = {}
   ;(bookingData.data || []).forEach(b => { bookingsMap[String(b.id)] = b })
@@ -429,21 +361,10 @@ async function processProperty(userId, beds24Key, property, results) {
   let processed = 0
   for (const [bookingId, msgs] of Object.entries(byBooking)) {
     try {
-      const { data: existing } = await supabase
-        .from('agent_tasks')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('book_id', String(bookingId))
-        .eq('property_id', String(property.id))
-        .maybeSingle()
-
-      const { data: existingConv } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('book_id', String(bookingId))
-        .eq('property_id', String(property.id))
-        .limit(1)
+      const { data: existing } = await supabase.from('agent_tasks').select('id')
+        .eq('user_id', userId).eq('book_id', String(bookingId)).eq('property_id', String(property.id)).maybeSingle()
+      const { data: existingConv } = await supabase.from('conversations').select('id')
+        .eq('user_id', userId).eq('book_id', String(bookingId)).eq('property_id', String(property.id)).limit(1)
 
       if (existing || (existingConv && existingConv.length > 0)) continue
 
@@ -464,7 +385,6 @@ async function processProperty(userId, beds24Key, property, results) {
         guestName, guestPhone, arrival, departure,
         msgs, knowledgeText, results
       )
-
       if (handled) processed++
 
     } catch (err) {
@@ -479,7 +399,6 @@ async function processProperty(userId, beds24Key, property, results) {
 
 // ─── Classification et traitement intelligent ─────────────────────────────────
 async function classifyAndHandle(userId, beds24Key, property, bookingId, guestName, guestPhone, arrival, departure, thread, knowledgeText, results) {
-
   const sortedThread = [...thread].sort((a, b) => new Date(a.time) - new Date(b.time))
   const threadFormatted = sortedThread.map(m => {
     const source = m.source === 'guest' ? `👤 ${guestName}` : m.source === 'host' ? '🏠 Hôte' : '⚙️ Système'
@@ -493,11 +412,11 @@ async function classifyAndHandle(userId, beds24Key, property, bookingId, guestNa
   console.log(`[Cron] Classification booking ${bookingId}: "${message.substring(0, 60)}..."`)
 
   const today     = new Date().toISOString().split('T')[0]
-  const arrDate   = new Date(arrival)
-  const depDate   = new Date(departure)
   const todayDate = new Date(today)
   let sejourStatus = ''
   if (arrival && departure) {
+    const arrDate = new Date(arrival)
+    const depDate = new Date(departure)
     const daysToArrival = Math.ceil((arrDate - todayDate) / (1000 * 60 * 60 * 24))
     if (todayDate < arrDate)       sejourStatus = `Arrive dans ${daysToArrival} jour(s) (${arrival})`
     else if (todayDate <= depDate) sejourStatus = `Séjour en cours (${arrival} → ${departure})`
@@ -562,38 +481,22 @@ Réponds UNIQUEMENT en JSON valide :
 
   if (classification.type === 'sympathy' || classification.type === 'info_known') {
     if (classification.auto_reply) {
-      // Lire le mode depuis la config du logement
       const propMode = await getPropertyMode(userId, String(property.id))
-      const isTestMode = propMode === 'test'
 
-      if (isTestMode) {
-        // Mode Test : en attente de validation
+      if (propMode === 'test') {
         await supabase.from('agent_tasks').insert({
-          user_id:         userId,
-          property_id:     String(property.id),
-          book_id:         String(bookingId),
-          guest_name:      guestName,
-          guest_message:   message,
-          guest_phone:     guestPhone,
-          arrival:         arrival || null,
-          departure:       departure || null,
-          task_type:       classification.type,
-          summary:         classification.reason,
+          user_id: userId, property_id: String(property.id), book_id: String(bookingId),
+          guest_name: guestName, guest_message: message, guest_phone: guestPhone,
+          arrival: arrival || null, departure: departure || null,
+          task_type: classification.type, summary: classification.reason,
           suggested_reply: classification.auto_reply,
-          status:          'pending_validation',
-          source_thread:   threadJson,
-          sub_tasks:       []
+          status: 'pending_validation', source_thread: threadJson, sub_tasks: []
         })
         console.log(`[Cron] Mode Test — réponse en attente validation: ${classification.type} booking ${bookingId}`)
       } else {
-        // Mode Auto : envoi direct
         await supabase.from('conversations').insert({
-          user_id:       userId,
-          property_id:   String(property.id),
-          guest_name:    guestName,
-          guest_message: message,
-          agent_reply:   classification.auto_reply,
-          book_id:       String(bookingId)
+          user_id: userId, property_id: String(property.id), guest_name: guestName,
+          guest_message: message, agent_reply: classification.auto_reply, book_id: String(bookingId)
         })
         // TODO production : await sendViaBeds24(beds24Key, bookingId, classification.auto_reply)
         console.log(`[Cron] Mode Auto — réponse envoyée: ${classification.type} booking ${bookingId}`)
@@ -602,27 +505,15 @@ Réponds UNIQUEMENT en JSON valide :
     }
 
   } else if (classification.type === 'info_unknown' || classification.type === 'intervention') {
-    const subTasks = classification.sub_tasks || [{
-      question: message,
-      summary:  classification.reason,
-      suggested_reply: null
-    }]
+    const subTasks = classification.sub_tasks || [{ question: message, summary: classification.reason, suggested_reply: null }]
 
     await supabase.from('agent_tasks').insert({
-      user_id:         userId,
-      property_id:     String(property.id),
-      book_id:         String(bookingId),
-      guest_name:      guestName,
-      guest_message:   message,
-      guest_phone:     guestPhone,
-      arrival:         arrival || null,
-      departure:       departure || null,
-      task_type:       classification.type,
-      summary:         classification.reason,
+      user_id: userId, property_id: String(property.id), book_id: String(bookingId),
+      guest_name: guestName, guest_message: message, guest_phone: guestPhone,
+      arrival: arrival || null, departure: departure || null,
+      task_type: classification.type, summary: classification.reason,
       suggested_reply: subTasks[0]?.suggested_reply || null,
-      status:          'pending',
-      source_thread:   threadJson,
-      sub_tasks:       subTasks
+      status: 'pending', source_thread: threadJson, sub_tasks: subTasks
     })
 
     results.totalTasks++
@@ -643,74 +534,43 @@ function buildKnowledgeText(knowledge) {
     fixed.forEach(f => { text += `- ${f.key} : ${f.value}\n` })
     text += '\n'
   }
-  if (faqs.length > 0) {
+  if (faqs.length) {
     text += 'FAQ :\n'
     faqs.forEach(f => { text += `Q: ${f.key}\nR: ${f.value}\n\n` })
   }
   return text
 }
 
-
-
 // ─── Lecture mode test/auto par logement ─────────────────────────────────────
 async function getPropertyMode(userId, propertyId) {
   try {
-    const { data } = await supabase
-      .from('agent_alert_config')
-      .select('config')
-      .eq('user_id', userId)
-      .single()
+    const { data } = await supabase.from('agent_alert_config').select('config').eq('user_id', userId).single()
     return data?.config?.[propertyId]?.mode || 'test'
   } catch {
-    return 'test' // Par défaut : mode test
+    return 'test'
   }
 }
 
-// ─── Gestion codes accès (annulation / modification) ─────────────────────────
-
+// ─── Gestion codes accès ──────────────────────────────────────────────────────
 async function cancelAccessCode(bookingId) {
-  // Supprimer le code dans access_codes (le code algoPIN reste valide physiquement
-  // mais n'a pas été envoyé donc pas de risque)
-  await supabase.from('access_codes')
-    .update({ status: 'deleted' })
-    .eq('booking_id', bookingId)
-    .neq('status', 'deleted')
-
-  // Supprimer les messages pending liés à cette résa
-  await supabase.from('message_sent_log')
-    .delete()
-    .eq('booking_id', bookingId)
-    .eq('status', 'pending')
-
+  await supabase.from('access_codes').update({ status: 'deleted' }).eq('booking_id', bookingId).neq('status', 'deleted')
+  await supabase.from('message_sent_log').delete().eq('booking_id', bookingId).eq('status', 'pending')
   console.log(`[Cron] Code annulé pour booking ${bookingId}`)
 }
 
 async function refreshAccessCode(bookingId, booking) {
-  // Récupérer le code existant non supprimé
-  const { data: existing } = await supabase.from('access_codes')
-    .select('id, lock_id, seam_code_id, status')
-    .eq('booking_id', bookingId)
-    .neq('status', 'deleted')
-    .maybeSingle()
+  const { data: existing } = await supabase.from('access_codes').select('id, lock_id, seam_code_id, status')
+    .eq('booking_id', bookingId).neq('status', 'deleted').maybeSingle()
+  if (!existing) return
 
-  if (!existing) return // Pas de code à rafraîchir
+  await supabase.from('access_codes').update({ status: 'deleted' }).eq('id', existing.id)
 
-  // Marquer l'ancien comme supprimé
-  await supabase.from('access_codes')
-    .update({ status: 'deleted' })
-    .eq('id', existing.id)
-
-  // Récupérer la clé Seam
-  const { data: keyRow } = await supabase.from('api_keys')
-    .select('seam_api_key, user_id').not('seam_api_key', 'is', null).maybeSingle()
+  const { data: keyRow } = await supabase.from('api_keys').select('seam_api_key, user_id').not('seam_api_key', 'is', null).maybeSingle()
   if (!keyRow?.seam_api_key) return
 
-  // Récupérer la serrure
-  const { data: lock } = await supabase.from('locks')
-    .select('seam_device_id, label').eq('id', existing.lock_id).single()
+  const { data: lock } = await supabase.from('locks').select('seam_device_id, label').eq('id', existing.lock_id).single()
   if (!lock) return
 
-  // Générer un nouveau code avec les nouvelles dates
   const { generateCode } = require('../lib/providers/seam')
   try {
     const result = await generateCode({
@@ -722,22 +582,18 @@ async function refreshAccessCode(bookingId, booking) {
     })
 
     await supabase.from('access_codes').insert({
-      lock_id: existing.lock_id, booking_id: bookingId,
-      property_id: String(booking.propertyId),
+      lock_id: existing.lock_id, booking_id: bookingId, property_id: String(booking.propertyId),
       seam_code_id: result.seam_code_id, code: result.code,
       starts_at: result.starts_at, ends_at: result.ends_at, status: 'active'
     })
 
-    // Mettre à jour le payload du message pending avec le nouveau code
-    const { data: pending } = await supabase.from('message_sent_log')
-      .select('id, payload').eq('booking_id', bookingId).eq('status', 'pending').maybeSingle()
-
+    const { data: pending } = await supabase.from('message_sent_log').select('id, payload')
+      .eq('booking_id', bookingId).eq('status', 'pending').maybeSingle()
     if (pending?.payload) {
       const pl = JSON.parse(pending.payload)
-      pl.seam_code  = result.code
-      pl.message    = pl.message?.replace(/\d{4,8}/g, result.code) || pl.message
-      await supabase.from('message_sent_log')
-        .update({ payload: JSON.stringify(pl) }).eq('id', pending.id)
+      pl.seam_code = result.code
+      pl.message   = pl.message?.replace(/\d{4,8}/g, result.code) || pl.message
+      await supabase.from('message_sent_log').update({ payload: JSON.stringify(pl) }).eq('id', pending.id)
     }
 
     console.log(`[Cron] Code rafraîchi booking ${bookingId}: ${result.code}`)
@@ -749,12 +605,8 @@ async function refreshAccessCode(bookingId, booking) {
 // ─── Envoi messages en attente ────────────────────────────────────────────────
 async function checkPendingMessages(results) {
   const now = new Date()
-
-  const { data: pending } = await supabase.from('message_sent_log')
-    .select('*')
-    .eq('status', 'pending')
-    .lte('scheduled_at', now.toISOString())
-
+  const { data: pending } = await supabase.from('message_sent_log').select('*')
+    .eq('status', 'pending').lte('scheduled_at', now.toISOString())
   if (!pending?.length) return
 
   console.log(`[Cron] ${pending.length} message(s) en attente à envoyer`)
@@ -762,35 +614,17 @@ async function checkPendingMessages(results) {
   for (const log of pending) {
     try {
       const pl = log.payload ? JSON.parse(log.payload) : {}
-      const message   = pl.message
-      const guestName = pl.guest_name || 'Voyageur'
-      const propId    = pl.property_id
+      if (!pl.message) { await supabase.from('message_sent_log').update({ status: 'error' }).eq('id', log.id); continue }
 
-      if (!message) {
-        await supabase.from('message_sent_log').update({ status: 'error' }).eq('id', log.id)
-        continue
-      }
-
-      // Sauvegarder dans conversations
       await supabase.from('conversations').insert({
-        user_id:       log.user_id,
-        property_id:   propId,
-        guest_name:    guestName,
-        guest_message: '[AUTO: menage_done]',
-        agent_reply:   message,
-        book_id:       log.booking_id
+        user_id: log.user_id, property_id: pl.property_id, guest_name: pl.guest_name || 'Voyageur',
+        guest_message: '[AUTO: menage_done]', agent_reply: pl.message, book_id: log.booking_id
       })
-
-      // Marquer comme envoyé
-      await supabase.from('message_sent_log')
-        .update({ status: 'sent', payload: null })
-        .eq('id', log.id)
-
-      // TODO production : await sendViaBeds24(beds24Key, log.booking_id, message)
+      await supabase.from('message_sent_log').update({ status: 'sent', payload: null }).eq('id', log.id)
+      // TODO production : await sendViaBeds24(beds24Key, log.booking_id, pl.message)
 
       results.totalAutoMessages++
       console.log(`[Cron] Message pending envoyé booking ${log.booking_id}`)
-
     } catch (err) {
       console.error(`[Cron] Erreur envoi pending ${log.id}:`, err.message)
       await supabase.from('message_sent_log').update({ status: 'error' }).eq('id', log.id)
@@ -798,33 +632,20 @@ async function checkPendingMessages(results) {
   }
 }
 
-
 // ─── Refresh automatique tokens Beds24 ───────────────────────────────────────
 async function refreshBeds24Tokens() {
-  const { data: keys } = await supabase
-    .from('api_keys')
-    .select('user_id, refresh_token')
-    .eq('service', 'beds24')
-    .not('refresh_token', 'is', null)
-
+  const { data: keys } = await supabase.from('api_keys').select('user_id, refresh_token')
+    .eq('service', 'beds24').not('refresh_token', 'is', null)
   if (!keys?.length) return
 
   for (const key of keys) {
     try {
       const r = await fetch('https://beds24.com/api/v2/authentication/token', {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'refreshToken': key.refresh_token
-        }
+        method: 'GET', headers: { 'accept': 'application/json', 'refreshToken': key.refresh_token }
       })
       const d = await r.json()
-
       if (d.token) {
-        await supabase.from('api_keys')
-          .update({ api_key: d.token })
-          .eq('user_id', key.user_id)
-          .eq('service', 'beds24')
+        await supabase.from('api_keys').update({ api_key: d.token }).eq('user_id', key.user_id).eq('service', 'beds24')
         console.log(`[Cron] Token Beds24 rafraîchi pour user ${key.user_id}`)
       } else {
         console.error(`[Cron] Refresh Beds24 échoué user ${key.user_id}:`, d.error)
@@ -838,5 +659,4 @@ async function refreshBeds24Tokens() {
 // ─── Vérification batterie serrures ──────────────────────────────────────────
 async function checkBatteries(results) {
   // TODO: lecture batterie igloohome nécessite un bridge ou l'API igloohome directement
-  // À implémenter quand bridge disponible ou intégration API igloohome cloud
 }
