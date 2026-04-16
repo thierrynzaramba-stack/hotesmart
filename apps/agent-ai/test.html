@@ -3,43 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Agent AI Test</title>
+  <title>HôteSmart — Simulateur AI</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
-    .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 0.5px solid var(--border); }
-    .tab { padding: 8px 16px; font-size: 13px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-    .tab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 500; }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    .msg-card { border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg); margin-bottom: 12px; }
-    .msg-card.intervention { border-left: 3px solid #E24B4A; }
-    .msg-card.info_unknown { border-left: 3px solid #F59E0B; }
-    .msg-card.info_known, .msg-card.sympathy { border-left: 3px solid var(--green); }
-    .msg-card-header { padding: 10px 14px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--bg2); }
-    .msg-card-guest { font-size: 13px; font-weight: 500; }
-    .msg-card-meta { font-size: 11px; color: var(--text2); }
-    .msg-card-body { padding: 14px 16px; }
-    .msg-guest { font-size: 12px; color: var(--text2); line-height: 1.5; }
-    .msg-reply { background: var(--bg2); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.5; min-height: 40px; white-space: pre-wrap; }
-    .msg-reply.ai-reply { border: 0.5px solid var(--green); background: #E1F5EE; }
-    .badge-pending { background: var(--amber-bg); color: var(--amber); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-ai     { background: #E1F5EE; color: var(--green); font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-task   { background: #FFF3CD; color: #856404; font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-urgent { background: #fdecea; color: #E24B4A; font-size: 10px; padding: 2px 8px; border-radius: 20px; }
-    .badge-test   { background: var(--bg2); color: var(--text2); font-size: 10px; padding: 2px 8px; border-radius: 20px; border: 0.5px solid var(--border); }
-    .reply-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 6px; }
-    .subtask-item { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; margin-bottom: 6px; }
-    .subtask-item strong { display: block; margin-bottom: 4px; }
-    .sim-input { width: 100%; min-height: 80px; resize: vertical; }
-    .no-data { text-align: center; padding: 30px; color: var(--text2); font-size: 13px; }
-    .conv-card { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
-    .conv-card:hover { background: var(--bg2); }
-    .conv-question { font-size: 12px; color: var(--text2); margin-bottom: 6px; line-height: 1.5; }
-    .conv-question strong { color: var(--text); }
-    .conv-answer { font-size: 12px; color: var(--text); line-height: 1.5; padding-top: 8px; border-top: 0.5px solid var(--border); }
-    .conv-meta { font-size: 10px; color: var(--text2); margin-top: 6px; }
+    .section-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; margin-bottom:20px; }
+    .property-select { margin-bottom:20px; display:flex; align-items:center; gap:12px; }
+    .msg-card { border:0.5px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; background:var(--bg); margin-bottom:12px; }
+    .msg-card.intervention { border-left:3px solid #E24B4A; }
+    .msg-card.info_unknown { border-left:3px solid #F59E0B; }
+    .msg-card.info_known, .msg-card.sympathy { border-left:3px solid var(--green); }
+    .msg-card-header { padding:10px 14px; border-bottom:0.5px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--bg2); }
+    .msg-card-guest { font-size:13px; font-weight:500; }
+    .msg-card-meta { font-size:11px; color:var(--text2); }
+    .msg-card-body { padding:14px 16px; }
+    .msg-guest { font-size:12px; color:var(--text2); line-height:1.5; }
+    .msg-reply { background:var(--bg2); border-radius:var(--radius); padding:10px 12px; font-size:12px; color:var(--text); line-height:1.5; min-height:40px; white-space:pre-wrap; }
+    .msg-reply.ai-reply { border:0.5px solid var(--green); background:#E1F5EE; }
+    .badge-ai     { background:#E1F5EE; color:var(--green); font-size:10px; padding:2px 8px; border-radius:20px; }
+    .badge-task   { background:#FFF3CD; color:#856404; font-size:10px; padding:2px 8px; border-radius:20px; }
+    .badge-urgent { background:#fdecea; color:#E24B4A; font-size:10px; padding:2px 8px; border-radius:20px; }
+    .badge-test   { background:var(--bg2); color:var(--text2); font-size:10px; padding:2px 8px; border-radius:20px; border:0.5px solid var(--border); }
+    .reply-label { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin:10px 0 6px; }
+    .subtask-item { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius); padding:8px 12px; font-size:12px; margin-bottom:6px; }
+    .subtask-item strong { display:block; margin-bottom:4px; }
+    .sim-input { width:100%; min-height:80px; resize:vertical; }
   </style>
 </head>
 <body>
@@ -48,144 +35,87 @@
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">Agent AI — Mode Test</div>
-        <div class="page-sub">Simulateur et messages réels</div>
+        <div class="page-title">🧪 Simulateur AI</div>
+        <div class="page-sub">Testez la classification et les réponses de GuestFlow AI</div>
       </div>
     </div>
     <div class="content">
       <div class="property-select">
         <label class="form-label" style="margin:0">Bien :</label>
         <select class="form-input" id="property-select" style="width:auto;min-width:200px">
-          <option value="">Choisir un bien...</option>
+          <option value="">Choisir un bien…</option>
         </select>
-        <span class="badge-test">⚠️ MODE TEST — aucun message envoyé</span>
+        <span class="badge-test">⚠️ Simulation — aucun message envoyé</span>
       </div>
 
-      <div class="tabs">
-        <div class="tab active" data-tab="simulator">💬 Simulateur</div>
-        <div class="tab" data-tab="real">📥 Messages réels</div>
-        <div class="tab" data-tab="history">📋 Historique</div>
-      </div>
-
-      <!-- TAB 1 : Simulateur -->
-      <div class="tab-content active" id="tab-simulator">
-        <div class="section-card">
-          <div class="section-title">Simuler un message voyageur</div>
-          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">
-            Le message est traité exactement comme en production — classification intelligente, réponse automatique ou tâche To-do.
-          </p>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <input class="form-input" id="sim-guest-name" placeholder="Nom du voyageur (ex: Marie D.)" style="width:220px">
-            <textarea class="form-input sim-input" id="sim-message" placeholder="Ex: Bonjour, à quelle heure puis-je arriver ? Y a-t-il un parking ?"></textarea>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
-            <button class="btn btn-primary" id="btn-simulate">▶ Simuler</button>
-            <button class="btn" id="btn-clear-sim">✕ Effacer</button>
-            <span id="sim-status" style="font-size:12px;color:var(--text2)"></span>
-          </div>
+      <div class="section-card">
+        <div class="section-title" style="font-size:14px;font-weight:500;margin-bottom:8px">Simuler un message voyageur</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.6">
+          Le message est traité exactement comme en production — classification intelligente, réponse automatique ou tâche To-do. Aucun message n'est envoyé au vrai voyageur.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input class="form-input" id="sim-guest-name" placeholder="Nom du voyageur (ex: Marie D.)" style="width:240px">
+          <textarea class="form-input sim-input" id="sim-message" placeholder="Ex: Bonjour, à quelle heure puis-je arriver ? Y a-t-il un parking ?"></textarea>
         </div>
-        <div id="sim-result" style="display:none"></div>
-      </div>
-
-      <!-- TAB 2 : Messages réels -->
-      <div class="tab-content" id="tab-real">
-        <div class="section-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-            <div class="section-title" style="margin:0">Messages Beds24 avec réponses AI</div>
-            <button class="btn" id="btn-refresh-real">↻ Actualiser</button>
-          </div>
-          <div id="real-messages-container">
-            <div class="no-data">Sélectionnez un bien pour charger les messages</div>
-          </div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+          <button class="btn btn-primary" id="btn-simulate">▶ Simuler</button>
+          <button class="btn" id="btn-clear-sim">✕ Effacer</button>
+          <span id="sim-status" style="font-size:12px;color:var(--text2)"></span>
         </div>
       </div>
 
-      <!-- TAB 3 : Historique -->
-      <div class="tab-content" id="tab-history">
-        <div class="section-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-            <div class="section-title" style="margin:0">Conversations sauvegardées</div>
-            <button class="btn" id="btn-refresh-history">↻ Actualiser</button>
-          </div>
-          <div id="history-container">
-            <div class="no-data">Sélectionnez un bien pour voir l'historique</div>
-          </div>
-        </div>
-      </div>
+      <div id="sim-result" style="display:none"></div>
     </div>
   </div>
 </div>
 
 <script type="module">
-  import { requireAuth } from '/components/auth-guard.js'
-  import { renderSidebar } from '/components/sidebar.js'
-  import { supabase } from '/shared/supabase.js'
+  import { requireAuth }      from '/components/auth-guard.js'
+  import { renderSidebar }    from '/components/sidebar.js'
+  import { supabase }         from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
 
   initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('agent-ai-test')
+  window._session  = session
+  window._supabase = supabase
 
-  let session = null
-  let currentPropertyId = null
-  let properties = []
-
-  async function init() {
-    session = await requireAuth()
-    if (!session) return
-    await renderSidebar('agent-ai-test')
-    await loadProperties()
-
-    document.querySelectorAll('.tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'))
-        tab.classList.add('active')
-        document.getElementById('tab-' + tab.dataset.tab).classList.add('active')
-        if (tab.dataset.tab === 'real' && currentPropertyId) loadRealMessages()
-        if (tab.dataset.tab === 'history' && currentPropertyId) loadHistory()
-      })
-    })
-
-    document.getElementById('btn-simulate').addEventListener('click', simulate)
-    document.getElementById('btn-clear-sim').addEventListener('click', () => {
-      document.getElementById('sim-message').value = ''
-      document.getElementById('sim-guest-name').value = ''
-      document.getElementById('sim-result').style.display = 'none'
-      document.getElementById('sim-status').textContent = ''
-    })
-    document.getElementById('btn-refresh-real').addEventListener('click', loadRealMessages)
-    document.getElementById('btn-refresh-history').addEventListener('click', loadHistory)
-    document.getElementById('property-select').addEventListener('change', e => {
-      currentPropertyId = e.target.value
-      if (currentPropertyId) { loadRealMessages(); loadHistory() }
-    })
+  // Charger les propriétés
+  const res  = await fetch('/api/beds24', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'getProperties' })
+  })
+  const data = await res.json()
+  const select = document.getElementById('property-select')
+  ;(data.properties || []).forEach(p => {
+    const opt = document.createElement('option')
+    opt.value = p.id; opt.textContent = p.name
+    select.appendChild(opt)
+  })
+  if (data.properties?.length === 1) {
+    select.value = data.properties[0].id
   }
 
-  async function loadProperties() {
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ action: 'getProperties' })
-    })
-    const data = await res.json()
-    properties = data.properties || []
-    const select = document.getElementById('property-select')
-    select.innerHTML = '<option value="">Choisir un bien...</option>' +
-      properties.map(p => `<option value="${p.id}">${p.name}</option>`).join('')
-    if (properties.length === 1) {
-      select.value = properties[0].id
-      currentPropertyId = properties[0].id
-      loadRealMessages(); loadHistory()
-    }
-  }
+  document.getElementById('btn-simulate').addEventListener('click', simulate)
+  document.getElementById('btn-clear-sim').addEventListener('click', () => {
+    document.getElementById('sim-message').value = ''
+    document.getElementById('sim-guest-name').value = ''
+    document.getElementById('sim-result').style.display = 'none'
+    document.getElementById('sim-status').textContent = ''
+  })
 
   async function simulate() {
     const message   = document.getElementById('sim-message').value.trim()
     const guestName = document.getElementById('sim-guest-name').value.trim() || 'Voyageur Test'
+    const propId    = document.getElementById('property-select').value
     if (!message) return alert('Écrivez un message')
-    if (!currentPropertyId) return alert('Sélectionnez un bien')
+    if (!propId)  return alert('Sélectionnez un bien')
 
     const btn = document.getElementById('btn-simulate')
-    btn.disabled = true; btn.textContent = '⏳ Traitement...'
+    btn.disabled = true; btn.textContent = '⏳ Traitement…'
     document.getElementById('sim-status').textContent = ''
     document.getElementById('sim-result').style.display = 'none'
 
@@ -193,7 +123,7 @@
       const res  = await fetch('/api/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ message, guestName, propertyId: currentPropertyId })
+        body: JSON.stringify({ message, guestName, propertyId: propId })
       })
       const data = await res.json()
       btn.disabled = false; btn.textContent = '▶ Simuler'
@@ -204,7 +134,7 @@
       }
 
       renderSimResult(message, guestName, data.classification, data.saved_conv_id, data.saved_task_id)
-      document.getElementById('sim-status').textContent = '✅ Traitement terminé — résultat enregistré'
+      document.getElementById('sim-status').textContent = '✅ Traitement terminé'
     } catch (err) {
       btn.disabled = false; btn.textContent = '▶ Simuler'
       document.getElementById('sim-status').textContent = '❌ ' + err.message
@@ -213,17 +143,17 @@
 
   function renderSimResult(message, guestName, c, convId, taskId) {
     const types = {
-      sympathy:     { label: '💬 Sympathie → réponse auto', badge: 'badge-ai' },
+      sympathy:     { label: '💬 Sympathie → réponse auto',  badge: 'badge-ai' },
       info_known:   { label: '✅ Info connue → réponse auto', badge: 'badge-ai' },
-      info_unknown: { label: '❓ Info manquante → To-do', badge: 'badge-task' },
-      intervention: { label: '🚨 Intervention → To-do', badge: 'badge-urgent' }
+      info_unknown: { label: '❓ Info manquante → To-do',     badge: 'badge-task' },
+      intervention: { label: '🚨 Intervention → To-do',       badge: 'badge-urgent' }
     }
-    const t = types[c.type] || { label: c.type, badge: 'badge-pending' }
+    const t = types[c.type] || { label: c.type, badge: 'badge-test' }
 
     let bodyHtml = ''
     if (c.auto_reply) {
       bodyHtml = `
-        <div class="reply-label">🤖 Réponse automatique</div>
+        <div class="reply-label">🤖 Réponse générée</div>
         <div class="msg-reply ai-reply">${escHtml(c.auto_reply)}</div>`
     } else if (c.sub_tasks?.length) {
       bodyHtml = `
@@ -246,8 +176,8 @@
             <span class="${t.badge}">${t.label}</span>
             <button onclick="deleteSimResult(this)"
               data-conv-id="${convId || ''}" data-task-id="${taskId || ''}"
-              style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:12px;font-family:inherit;padding:2px 8px;border:0.5px solid #E24B4A;border-radius:4px">🗑 Supprimer</button>
-            <button onclick="document.getElementById('sim-result').style.display='none';document.getElementById('sim-status').textContent=''"
+              style="font-size:11px;padding:2px 8px;border:0.5px solid #E24B4A;border-radius:4px;color:#E24B4A;background:none;cursor:pointer;font-family:inherit">🗑 Supprimer</button>
+            <button onclick="document.getElementById('sim-result').style.display='none'"
               style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:18px;line-height:1">×</button>
           </div>
         </div>
@@ -260,116 +190,18 @@
     document.getElementById('sim-result').style.display = 'block'
   }
 
-  async function loadRealMessages() {
-    const container = document.getElementById('real-messages-container')
-    if (!currentPropertyId) return
-    container.innerHTML = '<div class="no-data">Chargement...</div>'
-
-    const [msgRes, convRes] = await Promise.all([
-      fetch('/api/beds24', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ action: 'getMessages', propertyId: currentPropertyId })
-      }),
-      supabase.from('conversations').select('book_id, agent_reply')
-        .eq('user_id', session.user.id)
-        .eq('property_id', String(currentPropertyId))
-        .order('created_at', { ascending: false })
-    ])
-
-    const messages = (await msgRes.json()).messages || []
-    const convMap  = {}
-    ;(convRes.data || []).forEach(c => { if (!convMap[c.book_id]) convMap[c.book_id] = c.agent_reply })
-
-    if (!messages.length) {
-      container.innerHTML = '<div class="no-data">✓ Aucun message en attente</div>'
-      return
-    }
-
-    container.innerHTML = messages.map(msg => {
-      const guestMsg  = msg.guestMessage || msg.message || '(vide)'
-      const guestName = msg.guestFirstName ? `${msg.guestFirstName} ${msg.guestName || ''}` : 'Voyageur'
-      const bookId    = String(msg.bookId || msg.id)
-      const aiReply   = convMap[bookId]
-      return `
-        <div class="msg-card">
-          <div class="msg-card-header">
-            <div>
-              <div class="msg-card-guest">${escHtml(guestName)}</div>
-              <div class="msg-card-meta">Réservation #${bookId} · ${msg.firstNight || ''} → ${msg.lastNight || ''}</div>
-            </div>
-            <span class="${aiReply ? 'badge-ai' : 'badge-pending'}">${aiReply ? '🤖 Répondu par AI' : '⏳ En attente'}</span>
-          </div>
-          <div class="msg-card-body">
-            <div class="reply-label">💬 Message voyageur</div>
-            <div class="msg-guest">${escHtml(guestMsg)}</div>
-            <div class="reply-label">🤖 Réponse AI</div>
-            <div class="msg-reply ${aiReply ? 'ai-reply' : ''}">
-              ${aiReply ? escHtml(aiReply) : '<span style="color:var(--text2);font-style:italic">Pas encore traitée par le cron</span>'}
-            </div>
-          </div>
-        </div>`
-    }).join('')
-  }
-
-  async function loadHistory() {
-    const container = document.getElementById('history-container')
-    if (!currentPropertyId) return
-    container.innerHTML = '<div class="no-data">Chargement...</div>'
-
-    const { data } = await supabase.from('conversations').select('*')
-      .eq('user_id', session.user.id)
-      .eq('property_id', String(currentPropertyId))
-      .order('created_at', { ascending: false })
-      .limit(30)
-
-    if (!data?.length) {
-      container.innerHTML = '<div class="no-data">Aucune conversation sauvegardée</div>'
-      return
-    }
-
-    container.innerHTML = data.map(c => {
-      const date  = new Date(c.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
-      const isSim = c.book_id?.startsWith('SIM_')
-      return `
-        <div class="conv-card" style="${isSim ? 'border-left:3px solid var(--amber)' : ''}">
-          <div class="conv-question">
-            <strong>💬 ${escHtml(c.guest_name || 'Voyageur')}${isSim ? ' <span style="color:var(--text2);font-size:10px">(simulation)</span>' : ''} :</strong><br>
-            ${escHtml(c.guest_message)}
-          </div>
-          <div class="conv-answer">🤖 ${escHtml(c.agent_reply || '—')}</div>
-          <div class="conv-meta" style="display:flex;align-items:center;justify-content:space-between">
-            <span>${date}${isSim ? ' · Test' : ' · Réservation #' + c.book_id}</span>
-            ${isSim ? `<button onclick="deleteConv('${c.id}')" style="background:none;border:0.5px solid #E24B4A;border-radius:4px;color:#E24B4A;font-size:11px;padding:2px 8px;cursor:pointer;font-family:inherit">🗑 Supprimer</button>` : ''}
-          </div>
-        </div>`
-    }).join('')
-  }
-
   async function deleteSimResult(btn) {
-    if (!confirm('Supprimer ce résultat de test ?')) return
-    const convId = btn.dataset.convId || null
-    const taskId = btn.dataset.taskId || null
+    if (!confirm('Supprimer ce résultat ?')) return
     await fetch('/api/simulate', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ conv_id: convId, task_id: taskId })
+      body: JSON.stringify({ conv_id: btn.dataset.convId, task_id: btn.dataset.taskId })
     })
     document.getElementById('sim-result').style.display = 'none'
     document.getElementById('sim-status').textContent = '🗑 Résultat supprimé'
-    loadHistory()
   }
 
-  async function deleteConv(convId) {
-    if (!confirm('Supprimer cette conversation de test ?')) return
-    await supabase.from('conversations').delete().eq('id', convId).eq('user_id', session.user.id)
-    loadHistory()
-  }
-
-  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-
-  // Appel init
-  init()
+  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 </script>
 </body>
 </html>

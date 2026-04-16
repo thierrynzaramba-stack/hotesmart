@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Messagerie</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    /* Layout messagerie 2 colonnes */
+    .msg-layout { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 120px); gap:0; border:0.5px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; background:var(--bg); }
+
+    /* Colonne gauche — liste conversations */
+    .conv-list { border-right:0.5px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+    .conv-list-header { padding:14px 16px; border-bottom:0.5px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:8px; }
+    .conv-list-header select { flex:1; font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; }
+    .conv-items { flex:1; overflow-y:auto; }
+    .conv-item { padding:12px 16px; border-bottom:0.5px solid var(--border); cursor:pointer; transition:background 0.1s; }
+    .conv-item:hover { background:var(--bg2); }
+    .conv-item.active { background:#E1F5EE; border-left:3px solid var(--green); }
+    .conv-item-name { font-size:13px; font-weight:500; margin-bottom:3px; display:flex; align-items:center; gap:6px; }
+    .conv-item-meta { font-size:11px; color:var(--text2); line-height:1.5; }
+    .conv-item-preview { font-size:11px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:3px; }
+    .platform-badge { font-size:9px; padding:1px 6px; border-radius:10px; font-weight:500; }
+    .platform-airbnb  { background:#FF5A5F22; color:#FF5A5F; }
+    .platform-booking { background:#003B9522; color:#003B95; }
+    .platform-direct  { background:#E1F5EE; color:var(--green); }
+    .unread-dot { width:7px; height:7px; border-radius:50%; background:var(--green); flex-shrink:0; }
+
+    /* Colonne droite — conversation */
+    .conv-view { display:flex; flex-direction:column; overflow:hidden; }
+    .conv-view-header { padding:14px 18px; border-bottom:0.5px solid var(--border); background:var(--bg2); }
+    .conv-view-title { font-size:14px; font-weight:500; }
+    .conv-view-meta { font-size:11px; color:var(--text2); margin-top:2px; }
+
+    .conv-messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+
+    /* Bulles de messages */
+    .msg-bubble-wrap { display:flex; flex-direction:column; }
+    .msg-bubble-wrap.guest  { align-items:flex-start; }
+    .msg-bubble-wrap.host   { align-items:flex-end; }
+    .msg-bubble-wrap.ai     { align-items:flex-end; }
+    .msg-bubble-wrap.auto   { align-items:center; }
+    .msg-bubble-wrap.system { align-items:center; }
+
+    .msg-source { font-size:10px; color:var(--text2); margin-bottom:3px; display:flex; align-items:center; gap:4px; }
+
+    .msg-bubble { padding:9px 13px; border-radius:14px; font-size:13px; line-height:1.6; max-width:70%; white-space:pre-wrap; word-break:break-word; }
+    .msg-bubble.guest  { background:var(--bg2); border:0.5px solid var(--border); border-bottom-left-radius:4px; }
+    .msg-bubble.host   { background:#E6F1FB; color:#0C447C; border-bottom-right-radius:4px; }
+    .msg-bubble.ai     { background:#E1F5EE; color:#085041; border:0.5px solid #9FE1CB; border-bottom-right-radius:4px; }
+    .msg-bubble.auto   { background:#FAEEDA; color:#633806; border:0.5px solid #FAC775; border-radius:10px; font-size:12px; max-width:90%; text-align:center; }
+    .msg-bubble.system { background:var(--bg2); color:var(--text2); border-radius:10px; font-size:11px; max-width:90%; text-align:center; font-style:italic; }
+
+    .msg-time { font-size:10px; color:var(--text2); margin-top:3px; }
+
+    /* Zone de rédaction */
+    .conv-compose { border-top:0.5px solid var(--border); padding:14px 16px; background:var(--bg); }
+    .compose-textarea { width:100%; min-height:70px; max-height:160px; resize:vertical; font-size:13px; line-height:1.6; font-family:inherit; border:0.5px solid var(--border); border-radius:var(--radius); padding:10px 12px; background:var(--bg2); color:var(--text); }
+    .compose-textarea:focus { outline:none; border-color:var(--green); background:var(--bg); }
+    .compose-actions { display:flex; gap:8px; margin-top:8px; align-items:center; }
+    .btn-improve { background:#EEEDFE; color:#3C3489; border-color:#AFA9EC; }
+    .btn-improve:hover { background:#d8d6fc; }
+    .compose-status { font-size:11px; color:var(--text2); flex:1; }
+
+    /* États vides */
+    .empty-conv { flex:1; display:flex; align-items:center; justify-content:center; color:var(--text2); font-size:13px; flex-direction:column; gap:8px; }
+    .empty-conv .icon { font-size:40px; }
+
+    .loading { text-align:center; padding:20px; color:var(--text2); font-size:13px; }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">💬 Messagerie</div>
+        <div class="page-sub" id="topStatus">Chargement…</div>
+      </div>
+      <button class="btn" onclick="loadConversations()">↻ Actualiser</button>
+    </div>
+    <div class="content" style="padding:0;height:calc(100vh - 120px)">
+      <div class="msg-layout">
+
+        <!-- Liste conversations -->
+        <div class="conv-list">
+          <div class="conv-list-header">
+            <select id="prop-select" onchange="loadConversations()">
+              <option value="">Tous les biens</option>
+            </select>
+          </div>
+          <div class="conv-items" id="conv-items">
+            <div class="loading">Chargement…</div>
+          </div>
+        </div>
+
+        <!-- Vue conversation -->
+        <div class="conv-view" id="conv-view">
+          <div class="empty-conv">
+            <div class="icon">💬</div>
+            <p>Sélectionnez une conversation</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth }      from '/components/auth-guard.js'
+  import { renderSidebar }    from '/components/sidebar.js'
+  import { supabase }         from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('agent-ai-messagerie')
+  window._session  = session
+  window._supabase = supabase
+
+  // Charger les propriétés
+  const res  = await fetch('/api/beds24', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ action: 'getProperties' })
+  })
+  const data = await res.json()
+  const select = document.getElementById('prop-select')
+  ;(data.properties || []).forEach(p => {
+    const opt = document.createElement('option')
+    opt.value = p.id; opt.textContent = p.name
+    select.appendChild(opt)
+  })
+
+  window.loadConversations()
+</script>
+
+<script>
+  let conversations = []
+  let currentConvId = null
+  let allBookings   = {}
+
+  // ── Chargement conversations ──────────────────────────────────────────────
+  window.loadConversations = async () => {
+    const propId = document.getElementById('prop-select').value
+    document.getElementById('topStatus').textContent = 'Chargement…'
+    document.getElementById('conv-items').innerHTML = '<div class="loading">Chargement…</div>'
+
+    try {
+      // Récupérer les conversations groupées par booking_id depuis Beds24 + conversations Supabase
+      const [beds24Res, convRes] = await Promise.all([
+        fetch('/api/beds24', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+          body: JSON.stringify({ action: 'getMessages', propertyId: propId || '209413' })
+        }),
+        window._supabase.from('conversations').select('*')
+          .eq('user_id', window._session.user.id)
+          .not('book_id', 'like', 'SIM_%')
+          .order('created_at', { ascending: false })
+          .limit(50)
+      ])
+
+      const beds24Messages = (await beds24Res.json()).messages || []
+      const supaConvs      = convRes.data || []
+
+      // Fusionner : beds24 = source de vérité pour les messages voyageurs
+      // Supabase = réponses AI/auto sauvegardées
+      const convMap = {}
+
+      // Depuis Beds24
+      beds24Messages.forEach(msg => {
+        const bookId = String(msg.bookId)
+        if (!convMap[bookId]) {
+          convMap[bookId] = {
+            bookId,
+            guestName:  msg.guestFirstName ? `${msg.guestFirstName} ${msg.guestName || ''}`.trim() : 'Voyageur',
+            firstNight: msg.firstNight,
+            lastNight:  msg.lastNight,
+            platform:   detectPlatform(msg),
+            thread:     msg.thread || [],
+            aiReplies:  [],
+            lastTime:   msg.thread?.[msg.thread.length - 1]?.time || msg.messageTime
+          }
+        }
+      })
+
+      // Depuis Supabase — ajouter les réponses AI/auto
+      supaConvs.forEach(c => {
+        const bookId = String(c.book_id)
+        if (!convMap[bookId]) {
+          convMap[bookId] = {
+            bookId,
+            guestName:  c.guest_name || 'Voyageur',
+            firstNight: null, lastNight: null,
+            platform:   'direct',
+            thread:     [],
+            aiReplies:  [],
+            lastTime:   c.created_at
+          }
+        }
+        convMap[bookId].aiReplies.push(c)
+      })
+
+      conversations = Object.values(convMap)
+        .sort((a, b) => new Date(b.lastTime) - new Date(a.lastTime))
+
+      document.getElementById('topStatus').textContent = `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}`
+      renderConvList()
+
+    } catch (err) {
+      document.getElementById('conv-items').innerHTML = `<div class="loading">❌ ${err.message}</div>`
+    }
+  }
+
+  function detectPlatform(msg) {
+    const thread = msg.thread || []
+    const sources = thread.map(t => t.source).join(',')
+    if (sources.includes('airbnb')) return 'airbnb'
+    if (sources.includes('booking')) return 'booking'
+    return 'direct'
+  }
+
+  function renderConvList() {
+    const items = document.getElementById('conv-items')
+    if (!conversations.length) {
+      items.innerHTML = '<div class="loading">Aucune conversation récente</div>'
+      return
+    }
+
+    items.innerHTML = conversations.map(conv => {
+      const isActive  = conv.bookId === currentConvId
+      const lastMsg   = conv.thread[conv.thread.length - 1]
+      const preview   = lastMsg?.message?.substring(0, 60) || conv.aiReplies[0]?.agent_reply?.substring(0, 60) || '—'
+      const platform  = conv.platform
+      const platformLabel = platform === 'airbnb' ? 'Airbnb' : platform === 'booking' ? 'Booking' : 'Direct'
+      const date      = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : '—'
+      const hasUnread = lastMsg?.source === 'guest'
+
+      return `
+        <div class="conv-item ${isActive ? 'active' : ''}" onclick="selectConv('${conv.bookId}')">
+          <div class="conv-item-name">
+            ${hasUnread ? '<span class="unread-dot"></span>' : ''}
+            ${escHtml(conv.guestName)}
+            <span class="platform-badge platform-${platform}">${platformLabel}</span>
+          </div>
+          <div class="conv-item-meta">
+            ${date}
+          </div>
+          <div class="conv-item-preview">${escHtml(preview)}</div>
+        </div>`
+    }).join('')
+  }
+
+  // ── Sélection conversation ────────────────────────────────────────────────
+  window.selectConv = (bookId) => {
+    currentConvId = bookId
+    renderConvList()
+    renderConvView(bookId)
+  }
+
+  function renderConvView(bookId) {
+    const conv = conversations.find(c => c.bookId === bookId)
+    if (!conv) return
+
+    const view = document.getElementById('conv-view')
+
+    // Construire le fil complet
+    const allMessages = []
+
+    // Messages Beds24 (voyageur + hôte)
+    conv.thread.forEach(m => {
+      allMessages.push({
+        type:    m.source === 'guest' ? 'guest' : 'host',
+        content: m.message,
+        time:    m.time
+      })
+    })
+
+    // Réponses AI/auto depuis Supabase
+    conv.aiReplies.forEach(c => {
+      const isAuto = c.guest_message?.startsWith('[AUTO:')
+      allMessages.push({
+        type:    isAuto ? 'auto' : 'ai',
+        content: c.agent_reply,
+        label:   isAuto ? c.guest_message : null,
+        time:    c.created_at
+      })
+    })
+
+    // Trier par date
+    allMessages.sort((a, b) => new Date(a.time) - new Date(b.time))
+
+    const platform = conv.platform
+    const platformLabel = platform === 'airbnb' ? 'Airbnb' : platform === 'booking' ? 'Booking.com' : 'Direct'
+
+    view.innerHTML = `
+      <div class="conv-view-header">
+        <div class="conv-view-title">👤 ${escHtml(conv.guestName)}</div>
+        <div class="conv-view-meta">
+          ${platformLabel} · Réservation #${bookId}
+          ${conv.firstNight ? ` · ${formatDateShort(conv.firstNight)} → ${formatDateShort(conv.lastNight)}` : ''}
+        </div>
+      </div>
+
+      <div class="conv-messages" id="conv-messages-${bookId}">
+        ${allMessages.length ? allMessages.map(m => renderBubble(m)).join('') : '<div class="empty-conv"><p>Aucun message</p></div>'}
+      </div>
+
+      <div class="conv-compose">
+        <textarea class="compose-textarea" id="compose-text" placeholder="Écrivez votre message…"></textarea>
+        <div class="compose-actions">
+          <button class="btn btn-improve" onclick="improveMessage('${bookId}')">✨ Améliorer</button>
+          <button class="btn btn-primary" onclick="sendMessage('${bookId}')">✉️ Envoyer</button>
+          <span class="compose-status" id="compose-status"></span>
+        </div>
+      </div>
+    `
+
+    // Scroll bas
+    const msgContainer = document.getElementById(`conv-messages-${bookId}`)
+    if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight
+  }
+
+  function renderBubble(m) {
+    const time = m.time ? new Date(m.time).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short' }) : ''
+    const sourceLabel = {
+      guest:  '👤 Voyageur',
+      host:   '🏠 Hôte',
+      ai:     '🤖 GuestFlow AI',
+      auto:   '⚙️ Message automatique',
+      system: '⚙️ Système'
+    }[m.type] || m.type
+
+    return `
+      <div class="msg-bubble-wrap ${m.type}">
+        <div class="msg-source">${sourceLabel}${m.label ? ` <span style="opacity:0.7">${escHtml(m.label)}</span>` : ''}</div>
+        <div class="msg-bubble ${m.type}">${escHtml(m.content)}</div>
+        <div class="msg-time">${time}</div>
+      </div>`
+  }
+
+  // ── Améliorer le message ──────────────────────────────────────────────────
+  window.improveMessage = async (bookId) => {
+    const text = document.getElementById('compose-text')?.value?.trim()
+    if (!text) return setStatus('Écrivez d\'abord un message')
+
+    const btn = document.querySelector('.btn-improve')
+    btn.disabled = true; btn.textContent = '⏳…'
+    setStatus('Amélioration en cours…')
+
+    try {
+      const conv = conversations.find(c => c.bookId === bookId)
+      const guestName = conv?.guestName || 'le voyageur'
+
+      const res = await fetch('/api/grok', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({
+          systemPrompt: `Tu es un assistant de conciergerie LCD. Reformule et améliore ce message pour qu'il soit chaleureux, professionnel et naturel. Adresse-toi à ${guestName}. Réponds UNIQUEMENT avec le message amélioré, sans commentaire ni explication.`,
+          messages: [{ role: 'user', content: `Message à améliorer : "${text}"` }]
+        })
+      })
+      const data = await res.json()
+      if (data.reply) {
+        document.getElementById('compose-text').value = data.reply
+        setStatus('✅ Message amélioré')
+      }
+    } catch (err) {
+      setStatus('❌ ' + err.message)
+    } finally {
+      btn.disabled = false; btn.textContent = '✨ Améliorer'
+    }
+  }
+
+  // ── Envoyer le message ────────────────────────────────────────────────────
+  window.sendMessage = async (bookId) => {
+    const text = document.getElementById('compose-text')?.value?.trim()
+    if (!text) return setStatus('Écrivez un message')
+
+    const btn = document.querySelector('.btn-primary')
+    btn.disabled = true; btn.textContent = '⏳ Envoi…'
+    setStatus('Envoi en cours…')
+
+    try {
+      const res = await fetch('/api/beds24', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: text })
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        // Sauvegarder dans conversations
+        const conv = conversations.find(c => c.bookId === bookId)
+        await window._supabase.from('conversations').insert({
+          user_id:       window._session.user.id,
+          property_id:   conv?.property_id || null,
+          guest_name:    conv?.guestName || 'Voyageur',
+          guest_message: '[Envoi manuel hôte]',
+          agent_reply:   text,
+          book_id:       bookId
+        })
+
+        document.getElementById('compose-text').value = ''
+        setStatus('✅ Message envoyé')
+
+        // Rafraîchir la conversation
+        await loadConversations()
+        selectConv(bookId)
+      } else {
+        setStatus('❌ ' + (data.error || 'Erreur inconnue'))
+      }
+    } catch (err) {
+      setStatus('❌ ' + err.message)
+    } finally {
+      btn.disabled = false; btn.textContent = '✉️ Envoyer'
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function setStatus(msg) {
+    const el = document.getElementById('compose-status')
+    if (el) el.textContent = msg
+    setTimeout(() => { if (el) el.textContent = '' }, 4000)
+  }
+
+  function formatDateShort(dateStr) {
+    if (!dateStr) return '—'
+    return new Date(dateStr).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' })
+  }
+
+  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+</script>
+</body>
+</html>
