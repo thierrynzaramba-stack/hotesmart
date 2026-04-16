@@ -3,13 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Agent AI · Config Alertes</title>
+  <title>HôteSmart — GuestFlow AI · Configuration</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
     .prop-tabs { display:flex; gap:0; border-bottom:0.5px solid var(--border); margin-bottom:24px; }
     .prop-tab { padding:10px 20px; font-size:13px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.15s; font-family:inherit; background:none; border-top:none; border-left:none; border-right:none; }
     .prop-tab:hover { color:var(--text); }
     .prop-tab.active { color:var(--text); border-bottom-color:var(--green); font-weight:500; }
+
+    .mode-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:20px 24px; margin-bottom:20px; display:flex; align-items:center; gap:16px; }
+    .mode-card.test-mode { border-color:#F59E0B; background:#FFFBEB; }
+    .mode-card.auto-mode { border-color:var(--green); background:#E1F5EE; }
+    .mode-info { flex:1; }
+    .mode-title { font-size:14px; font-weight:500; margin-bottom:4px; }
+    .mode-desc { font-size:12px; color:var(--text2); line-height:1.6; }
+    .mode-badge { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:500; flex-shrink:0; }
+    .badge-test { background:#FFF3CD; color:#856404; border:0.5px solid #F59E0B; }
+    .badge-auto { background:#E1F5EE; color:#085041; border:0.5px solid var(--green); }
+
+    .toggle { position:relative; width:44px; height:24px; flex-shrink:0; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
+    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
+    input:checked + .toggle-slider { background:var(--green); }
+    input:checked + .toggle-slider:before { transform:translateX(20px); }
 
     .alert-section { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; overflow:hidden; }
     .alert-section-header { display:flex; align-items:center; gap:10px; padding:14px 18px; background:var(--bg2); border-bottom:0.5px solid var(--border); }
@@ -23,14 +40,6 @@
     .channel-block:last-child { border-right:none; }
     .channel-title { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
     .channel-title span { font-size:13px; font-weight:500; flex:1; }
-
-    .toggle { position:relative; width:44px; height:24px; flex-shrink:0; }
-    .toggle input { opacity:0; width:0; height:0; }
-    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
-    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
-    input:checked + .toggle-slider { background:var(--green); }
-    input:checked + .toggle-slider:before { transform:translateX(20px); }
-
     .channel-block.disabled textarea,
     .channel-block.disabled .field-label,
     .channel-block.disabled .field-hint { opacity:0.35; pointer-events:none; }
@@ -44,10 +53,8 @@
     .save-status.err { color:#E24B4A; }
 
     .notice { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; margin-bottom:20px; }
-    .notice a { color:var(--green); text-decoration:none; }
-    .notice a:hover { text-decoration:underline; }
-
-    .toast-msg { position:fixed; bottom:24px; right:24px; background:var(--green); color:white; padding:10px 18px; border-radius:var(--radius); font-size:13px; z-index:999; display:none; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
+    .section-label { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin:24px 0 12px; }
+    .toast-msg { position:fixed; bottom:24px; right:24px; background:var(--green); color:white; padding:10px 18px; border-radius:var(--radius); font-size:13px; z-index:999; display:none; }
 
     @media (max-width:640px) {
       .channels-grid { grid-template-columns:1fr; }
@@ -57,23 +64,21 @@
   </style>
 </head>
 <body>
-
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">🤖 Agent AI — Alertes</div>
-        <div class="page-sub">Notifications par logement et type d'alerte</div>
+        <div class="page-title">🤖 GuestFlow AI — Configuration</div>
+        <div class="page-sub">Mode d'envoi et alertes par logement</div>
       </div>
     </div>
     <div class="content">
 
       <div class="notice">
-        💡 HôteSmart vous notifie à chaque nouvelle tâche créée par l'agent.
-        Les SMS utilisent votre clé <strong>Brevo</strong> configurée dans
-        <a href="/apps/sms">le module SMS</a>.<br>
-        Format : <strong>une entrée par ligne</strong> — ex: <code>Thierry : +33612345678</code>
+        💡 En <strong>Mode Test</strong> tous les messages passent par validation avant envoi.
+        En <strong>Mode Auto</strong> les réponses connues sont envoyées automatiquement —
+        seules les interventions et infos manquantes restent dans la To-do.
       </div>
 
       <div class="prop-tabs" id="propTabs"></div>
@@ -87,7 +92,6 @@
     </div>
   </div>
 </div>
-
 <div class="toast-msg" id="toast"></div>
 
 <script type="module">
@@ -118,13 +122,11 @@
   let currentProp = PROPERTIES[0].id
   let config = {}
 
-  // ── Init ──────────────────────────────────────
   window.init = async () => {
     renderTabs()
     await loadConfig()
   }
 
-  // ── Tabs ──────────────────────────────────────
   function renderTabs() {
     document.getElementById('propTabs').innerHTML = PROPERTIES.map(p => `
       <button class="prop-tab ${p.id === currentProp ? 'active' : ''}"
@@ -133,12 +135,9 @@
   }
 
   window.selectProp = id => {
-    currentProp = id
-    renderTabs()
-    renderPanel()
+    currentProp = id; renderTabs(); renderPanel()
   }
 
-  // ── Load config ───────────────────────────────
   async function loadConfig() {
     try {
       const res = await fetch('/api/agent-config', {
@@ -147,31 +146,50 @@
       if (res.ok) config = (await res.json()).config || {}
     } catch(e) { console.warn('[agent-config] load error:', e) }
 
-    // Valeurs par défaut
     PROPERTIES.forEach(p => {
       if (!config[p.id]) config[p.id] = {}
+      // Mode par défaut : test
+      if (!config[p.id].mode) config[p.id].mode = 'test'
       ALERT_TYPES.forEach(t => {
         if (!config[p.id][t.key]) config[p.id][t.key] = {
           sms_enabled: false, sms_lines: '',
           email_enabled: false, email_lines: ''
         }
-        // Migration ancien format (tableaux → lignes)
         const c = config[p.id][t.key]
-        if (!c.sms_lines && c.sms_numbers?.length)
-          c.sms_lines = c.sms_numbers.join('\n')
+        if (!c.sms_lines && c.sms_numbers?.length) c.sms_lines = c.sms_numbers.join('\n')
         if (!c.sms_lines) c.sms_lines = ''
-        if (!c.email_lines && c.email_addresses?.length)
-          c.email_lines = c.email_addresses.join('\n')
+        if (!c.email_lines && c.email_addresses?.length) c.email_lines = c.email_addresses.join('\n')
         if (!c.email_lines) c.email_lines = ''
       })
     })
     renderPanel()
   }
 
-  // ── Render ────────────────────────────────────
   function renderPanel() {
-    document.getElementById('configPanel').innerHTML =
-      ALERT_TYPES.map(type => buildSection(type)).join('')
+    const isAuto = config[currentProp].mode === 'auto'
+    document.getElementById('configPanel').innerHTML = `
+
+      <!-- Mode d'envoi -->
+      <div class="mode-card ${isAuto ? 'auto-mode' : 'test-mode'}" id="mode-card">
+        <div class="mode-info">
+          <div class="mode-title">${isAuto ? '🚀 Mode Auto' : '🧪 Mode Test'}</div>
+          <div class="mode-desc">
+            ${isAuto
+              ? 'Les réponses connues (sympathie, info FAQ) sont envoyées automatiquement. Seules les interventions et infos manquantes restent dans la To-do.'
+              : 'Tous les messages générés par l\'IA passent par la To-do list pour validation avant d\'être envoyés au voyageur.'}
+          </div>
+        </div>
+        <span class="mode-badge ${isAuto ? 'badge-auto' : 'badge-test'}">${isAuto ? 'Auto' : 'Test'}</span>
+        <label class="toggle">
+          <input type="checkbox" ${isAuto ? 'checked' : ''} onchange="toggleMode(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- Alertes -->
+      <div class="section-label">Alertes notifications</div>
+      ${ALERT_TYPES.map(type => buildSection(type)).join('')}
+    `
   }
 
   function buildSection(type) {
@@ -183,7 +201,6 @@
         <span class="alert-type-label">${type.label}</span>
       </div>
       <div class="channels-grid">
-
         <div class="channel-block ${cfg.sms_enabled ? '' : 'disabled'}" id="sms-block-${type.key}">
           <div class="channel-title">
             <span>📱 SMS (Brevo)</span>
@@ -199,7 +216,6 @@
                     placeholder="Thierry : +33612345678&#10;Marie : +33698765432">${escHtml(cfg.sms_lines)}</textarea>
           <div class="field-hint">Une ligne par destinataire · Format : Nom : +33XXXXXXXXX</div>
         </div>
-
         <div class="channel-block ${cfg.email_enabled ? '' : 'disabled'}" id="email-block-${type.key}">
           <div class="channel-title">
             <span>✉️ Email</span>
@@ -215,12 +231,15 @@
                     placeholder="Thierry : thierry@mail.com&#10;Marie : marie@mail.com">${escHtml(cfg.email_lines)}</textarea>
           <div class="field-hint">Une ligne par destinataire · Format : Nom : email@mail.com</div>
         </div>
-
       </div>
     </div>`
   }
 
-  // ── Interactions ──────────────────────────────
+  window.toggleMode = (isAuto) => {
+    config[currentProp].mode = isAuto ? 'auto' : 'test'
+    renderPanel()
+  }
+
   window.toggleChannel = (typeKey, channel, enabled) => {
     config[currentProp][typeKey][channel === 'sms' ? 'sms_enabled' : 'email_enabled'] = enabled
     document.getElementById(`${channel}-block-${typeKey}`).classList.toggle('disabled', !enabled)
@@ -230,7 +249,6 @@
     config[currentProp][typeKey][channel === 'sms' ? 'sms_lines' : 'email_lines'] = value
   }
 
-  // ── Save ──────────────────────────────────────
   window.saveConfig = async () => {
     const btn    = document.getElementById('btnSave')
     const status = document.getElementById('saveStatus')
@@ -253,7 +271,6 @@
     }
   }
 
-  // ── Toast ─────────────────────────────────────
   function showToast(msg, isError = false) {
     const t = document.getElementById('toast')
     t.textContent = msg
