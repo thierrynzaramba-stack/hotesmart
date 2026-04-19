@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
+const { sendViaBeds24 } = require('../lib/cron-beds24')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -91,7 +92,7 @@ module.exports = async function handler(req, res) {
           if (!message) continue
 
           if (canSendNow) {
-            await saveAndSend(userId, property_id, nextBooking.id, template, guestName, message)
+            await saveAndSend(userId, property_id, nextBooking.id, template, guestName, message, keyData.api_key)
             console.log(`[Menage] Envoi immédiat booking ${nextBooking.id}`)
           } else {
             await supabase.from('message_sent_log').insert({
@@ -247,7 +248,7 @@ function buildMessage(template, booking, guestName, seamCode) {
     .replace(/{telephone_hote}/g, '[TÉLÉPHONE HÔTE]')
 }
 
-async function saveAndSend(userId, propertyId, bookingId, template, guestName, message) {
+async function saveAndSend(userId, propertyId, bookingId, template, guestName, message, beds24Key) {
   await supabase.from('conversations').insert({
     user_id: userId, property_id: String(propertyId),
     guest_name: guestName, guest_message: '[AUTO: menage_done]',
@@ -257,7 +258,9 @@ async function saveAndSend(userId, propertyId, bookingId, template, guestName, m
     user_id: userId, booking_id: String(bookingId),
     template_id: template.id, status: 'sent'
   })
-  // TODO production : await sendViaBeds24(beds24Key, bookingId, message)
+  // Envoi reel au voyageur via Beds24 (controle par SENDVIABEDS24_ENABLED).
+  // Tant que le flag est false (defaut), on reste en DRY RUN : log + pas d'envoi.
+  await sendViaBeds24(beds24Key, bookingId, message)
 }
 
 function applyEarliestHour(date, earliestTime) {
