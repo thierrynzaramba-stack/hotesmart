@@ -66,6 +66,47 @@
     .empty-conv { flex:1; display:flex; align-items:center; justify-content:center; color:var(--text2); font-size:13px; flex-direction:column; gap:8px; }
     .empty-conv .icon { font-size:40px; }
     .loading { text-align:center; padding:20px; color:var(--text2); font-size:13px; }
+
+    /* Bouton retour mobile (cache en desktop) */
+    .btn-back-mobile { display:none; background:none; border:none; font-size:22px; cursor:pointer; color:var(--text); padding:0 10px 0 0; line-height:1; }
+
+    /* ========== MOBILE : pattern WhatsApp (liste OU conversation) ========== */
+    @media (max-width: 768px) {
+      .msg-layout {
+        grid-template-columns: 1fr;
+        height: calc(100vh - 80px);
+        border: none;
+        border-radius: 0;
+      }
+
+      .conv-list {
+        border-right: none;
+      }
+
+      /* Par defaut en mobile : liste visible, vue conversation cachee */
+      .conv-view { display: none; }
+
+      /* Quand une conversation est ouverte : inverse */
+      .msg-layout.mobile-conv-open .conv-list { display: none; }
+      .msg-layout.mobile-conv-open .conv-view { display: flex; }
+
+      /* Bouton retour visible uniquement en mobile */
+      .btn-back-mobile { display: inline-block; }
+
+      /* Header de la vue conversation : fleche retour + titre */
+      .conv-view-header { display: flex; align-items: center; gap: 8px; }
+      .conv-view-header-content { flex: 1; min-width: 0; }
+
+      /* Tailles adaptees au pouce */
+      .conv-item { padding: 14px 16px; }
+      .conv-item-name { font-size: 14px; }
+      .conv-item-meta { font-size: 12px; }
+      .conv-item-preview { font-size: 12px; }
+      .msg-bubble { font-size: 14px; max-width: 85%; }
+      .compose-textarea { font-size: 16px; min-height: 80px; } /* 16px = pas de zoom iOS */
+      .compose-actions { flex-wrap: wrap; }
+      .compose-actions .btn { flex: 1; min-width: 120px; }
+    }
   </style>
 </head>
 <body>
@@ -270,6 +311,14 @@
     currentConvId = bookId
     renderConvList()
     renderConvView(bookId)
+    // Mode mobile : bascule vers la vue conversation (pattern WhatsApp)
+    document.querySelector('.msg-layout')?.classList.add('mobile-conv-open')
+  }
+
+  window.backToList = () => {
+    currentConvId = null
+    document.querySelector('.msg-layout')?.classList.remove('mobile-conv-open')
+    renderConvList()
   }
 
   function renderConvView(bookId) {
@@ -299,9 +348,12 @@
 
     document.getElementById('conv-view').innerHTML = `
       <div class="conv-view-header">
+        <button class="btn-back-mobile" onclick="backToList()" aria-label="Retour">←</button>
+        <div class="conv-view-header-content">
         <div class="conv-view-title">👤 ${escHtml(conv.guestName)}</div>
         <div class="conv-view-meta">
           ${platformLabel} · #${bookId}${conv.firstNight ? ` · ${formatDateShort(conv.firstNight)} → ${formatDateShort(conv.lastNight)}` : ''}
+        </div>
         </div>
       </div>
 
