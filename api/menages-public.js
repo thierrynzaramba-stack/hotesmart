@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendViaBeds24 } = require('../lib/cron-beds24')
+const { markReady } = require('../lib/cron-property-status')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -31,6 +32,14 @@ module.exports = async function handler(req, res) {
         if (!tokenData) return res.status(401).json({ error: 'Token invalide' })
 
         const userId = tokenData.user_id
+
+        // Passage du logement en statut 'ready' (independant de l'envoi de
+        // templates : meme sans template menage_done actif, le statut change).
+        try {
+          await markReady(userId, property_id)
+        } catch (err) {
+          console.error('[Menage] Erreur markReady:', err.message)
+        }
 
         const { data: templates } = await supabase
           .from('message_templates').select('*')
