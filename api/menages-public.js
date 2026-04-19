@@ -46,6 +46,20 @@ module.exports = async function handler(req, res) {
 
         if (!keyData?.api_key) return res.status(400).json({ error: 'Beds24 non configuré' })
 
+        // Charger la base de connaissance (type='fixed') pour remplir les
+        // placeholders {wifi_nom}, {telephone_hote}, {adresse}, etc. dans les
+        // templates. Si une cle manque, buildMessage laisse un placeholder
+        // pour que l'hote voie qu'il doit completer sa base.
+        const { data: knowledgeRows } = await supabase
+          .from('knowledge')
+          .select('key, value')
+          .eq('user_id', userId)
+          .eq('property_id', String(property_id))
+          .eq('type', 'fixed')
+
+        const knowledge = {}
+        ;(knowledgeRows || []).forEach(r => { knowledge[r.key] = r.value })
+
         // Chercher la PROCHAINE réservation du logement (pas la résa du ménage)
         const today = new Date().toISOString().split('T')[0]
         const futureRes = await fetch(
@@ -88,7 +102,7 @@ module.exports = async function handler(req, res) {
           const finalSendAt = earliest ? applyEarliestHour(sendAt, earliest) : sendAt
           const canSendNow  = finalSendAt <= now || (finalSendAt - now) < 60000 // marge 1min
 
-          const message = buildMessage(template, nextBooking, guestName, seamCode)
+          const message = buildMessage(template, nextBooking, guestName, seamCode, knowledge)
           if (!message) continue
 
           if (canSendNow) {
@@ -231,21 +245,30 @@ async function generateSeamCode(userId, lockId, booking) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function buildMessage(template, booking, guestName, seamCode) {
+function buildMessage(template, booking, guestName, seamCode, knowledge = {}) {
   let text = template.template_text || ''
   if (!text.trim()) return null
+
+  // knowledge contient les valeurs fixed depuis la table knowledge.
+  // Si une cle est absente/vide, on laisse le placeholder pour que l'hote
+  // voie qu'il manque une info dans sa base de connaissance.
+  const k = knowledge || {}
+  const val = (key, fallback) => (k[key] && String(k[key]).trim()) ? k[key] : fallback
+
   return text
     .replace(/{prenom}/g,         booking.firstName || guestName)
     .replace(/{nom}/g,            booking.lastName  || '')
     .replace(/{arrivee}/g,        formatDate(booking.arrival))
     .replace(/{depart}/g,         formatDate(booking.departure))
     .replace(/{logement}/g,       booking.propName  || '')
-    .replace(/{checkin}/g,        booking.checkInStart || '18:00')
-    .replace(/{checkout}/g,       booking.checkOutEnd  || '10:00')
+    .replace(/{adresse}/g,        val('adresse', '[ADRESSE]'))
+    .replace(/{checkin}/g,        val('checkin', booking.checkInStart || '18:00'))
+    .replace(/{checkout}/g,       val('checkout', booking.checkOutEnd || '10:00'))
     .replace(/{code_acces}/g,     seamCode || '[CODE À INSÉRER]')
-    .replace(/{wifi_nom}/g,       '[WIFI NOM]')
-    .replace(/{wifi_mdp}/g,       '[WIFI MOT DE PASSE]')
-    .replace(/{telephone_hote}/g, '[TÉLÉPHONE HÔTE]')
+    .replace(/{code_immeuble}/g,  val('code_immeuble', '[CODE IMMEUBLE]'))
+    .replace(/{wifi_nom}/g,       val('wifi_nom', '[WIFI NOM]'))
+    .replace(/{wifi_mdp}/g,       val('wifi_mdp', '[WIFI MOT DE PASSE]'))
+    .replace(/{telephone_hote}/g, val('telephone_hote', '[TÉLÉPHONE HÔTE]'))
 }
 
 async function saveAndSend(userId, propertyId, bookingId, template, guestName, message, beds24Key) {
