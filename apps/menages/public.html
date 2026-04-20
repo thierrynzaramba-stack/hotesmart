@@ -536,13 +536,13 @@
   } else {
     doneSet.add(selectedMenage.id)
     // Déclencher les templates "ménage terminé"
-    if (selectedMenage.bookingId && selectedMenage.propId) {
+    if (selectedMenage.bookId && selectedMenage.propId) {
       fetch(`/api/menages-public?token=${currentToken}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'markDone',
-          booking_id: selectedMenage.bookingId,
+          booking_id: selectedMenage.bookId,
           property_id: selectedMenage.propId
         })
       }).then(r => r.json()).then(d => {
