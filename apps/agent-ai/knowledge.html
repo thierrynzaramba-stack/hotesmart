@@ -9,24 +9,62 @@
     .property-select { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .section-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
 
+    /* ========== Section champs fixes (Informations du logement) ========== */
+    .fixed-hint { font-size: 12px; color: var(--text2); margin-bottom: 16px; line-height: 1.6; }
+    .fixed-hint code { background: var(--bg2); border: 0.5px solid var(--border); padding: 1px 6px; border-radius: 4px; font-size: 11px; color: #3C3489; }
+    .fixed-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 18px; }
+    .fixed-field { display: flex; flex-direction: column; gap: 6px; }
+    .fixed-field label { font-size: 12px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; }
+    .fixed-field label code { background: var(--bg2); border: 0.5px solid var(--border); padding: 1px 6px; border-radius: 4px; font-size: 10px; color: var(--text2); font-weight: 400; }
+    .fixed-field input,
+    .fixed-field textarea { font-size: 16px; padding: 10px 12px; border: 0.5px solid var(--border); border-radius: var(--radius); background: var(--bg2); color: var(--text); font-family: inherit; width: 100%; }
+    .fixed-field input:focus,
+    .fixed-field textarea:focus { outline: none; border-color: var(--green); background: var(--bg); }
+    .fixed-field textarea { resize: vertical; min-height: 44px; line-height: 1.5; }
+    .fixed-field .hint { font-size: 10px; color: var(--text3); }
+
+    /* ========== Section FAQ ========== */
     .faq-list { display: flex; flex-direction: column; gap: 8px; }
     .faq-row { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; }
     .faq-row:hover { border-color: var(--green); }
     .faq-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-    .faq-input-key { font-size: 13px; font-weight: 500; border: none; background: transparent; color: var(--text); width: 100%; font-family: inherit; border-bottom: 0.5px solid var(--border); padding-bottom: 6px; }
+    .faq-input-key { font-size: 14px; font-weight: 500; border: none; background: transparent; color: var(--text); width: 100%; font-family: inherit; border-bottom: 0.5px solid var(--border); padding-bottom: 6px; }
     .faq-input-key:focus { outline: none; border-bottom-color: var(--green); }
-    .faq-input-value { font-size: 12px; color: var(--text2); border: none; background: transparent; width: 100%; font-family: inherit; resize: none; min-height: 50px; line-height: 1.6; }
+    .faq-input-value { font-size: 14px; color: var(--text2); border: none; background: transparent; width: 100%; font-family: inherit; resize: none; min-height: 50px; line-height: 1.6; }
     .faq-input-value:focus { outline: none; color: var(--text); }
-    .faq-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; padding: 0; flex-shrink: 0; line-height: 1; margin-top: 2px; }
+    .faq-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 20px; padding: 0; flex-shrink: 0; line-height: 1; margin-top: 2px; min-width: 28px; min-height: 28px; }
     .faq-delete:hover { color: #E24B4A; }
     .badge-beds24 { background: #E1F5EE; color: var(--green); font-size: 10px; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; margin-top: 4px; }
 
-    .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; }
-    .save-status { font-size: 12px; color: var(--text2); }
+    /* ========== Save bar et utilitaires ========== */
+    .save-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; margin: 0 -24px; gap: 12px; z-index: 10; }
+    .save-status { font-size: 12px; color: var(--text2); flex: 1; min-width: 0; }
     .notice { background: #E1F5EE; border: 0.5px solid var(--green); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; color: #1a6644; margin-bottom: 16px; display: none; }
     .empty-state { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
-    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
     .count-badge { font-size: 11px; color: var(--text2); background: var(--bg2); border: 0.5px solid var(--border); padding: 2px 8px; border-radius: 20px; }
+
+    /* ========== RESPONSIVE MOBILE ========== */
+    @media (max-width: 768px) {
+      .property-select { gap: 8px; }
+      .property-select .form-input { flex: 1; min-width: 0 !important; }
+      .property-select .btn { min-height: 44px; }
+
+      .section-card { padding: 16px 14px; margin-bottom: 14px; }
+
+      /* Champs fixed : une colonne en mobile */
+      .fixed-grid { grid-template-columns: 1fr; gap: 14px; }
+
+      /* FAQ : tailles adaptées au pouce */
+      .faq-row { padding: 14px 12px; }
+      .faq-input-key { font-size: 16px; }
+      .faq-input-value { font-size: 16px; }
+
+      /* Save bar sticky bottom, boutons pleine largeur */
+      .save-bar { padding: 10px 16px; margin: 0 -14px; flex-direction: column; align-items: stretch; }
+      .save-bar .btn { width: 100%; min-height: 44px; }
+      .save-status { text-align: center; }
+    }
   </style>
 </head>
 <body>
@@ -48,15 +86,59 @@
           <option value="">Chargement...</option>
         </select>
         <button class="btn" id="btn-import" style="display:none">⬇️ Importer depuis Beds24</button>
-        <button class="btn" id="btn-add" style="display:none">+ Ajouter</button>
+        <button class="btn" id="btn-add" style="display:none">+ Ajouter une FAQ</button>
       </div>
 
       <div class="notice" id="notice"></div>
 
+      <!-- Section 1 : Informations du logement (variables fixes) -->
+      <div class="section-card" id="fixed-card" style="display:none">
+        <div class="section-header">
+          <div class="section-title" style="margin:0">🏠 Informations du logement</div>
+        </div>
+        <div class="fixed-hint">
+          Ces champs remplissent les variables utilisables dans les messages automatiques :
+          <code>{adresse}</code>, <code>{checkin}</code>, <code>{checkout}</code>,
+          <code>{wifi_nom}</code>, <code>{wifi_mdp}</code>, <code>{telephone_hote}</code>.
+          Laissez vide pour qu'un placeholder apparaisse à la place (ex: <code>[WIFI NOM]</code>).
+        </div>
+        <div class="fixed-grid">
+          <div class="fixed-field">
+            <label>Adresse complète <code>{adresse}</code></label>
+            <textarea id="fx-adresse" rows="2" placeholder="Ex: 4 rue du bourg vieux, 65200 Bagnères-de-Bigorre"></textarea>
+          </div>
+          <div class="fixed-field">
+            <label>Téléphone hôte <code>{telephone_hote}</code></label>
+            <input type="text" id="fx-telephone_hote" placeholder="Ex: 06 66 52 44 24 / 06 60 34 67 60">
+          </div>
+          <div class="fixed-field">
+            <label>Heure de check-in <code>{checkin}</code></label>
+            <input type="text" id="fx-checkin" placeholder="Ex: 18:00">
+          </div>
+          <div class="fixed-field">
+            <label>Heure de check-out <code>{checkout}</code></label>
+            <input type="text" id="fx-checkout" placeholder="Ex: 10:00">
+          </div>
+          <div class="fixed-field">
+            <label>Nom du WiFi <code>{wifi_nom}</code></label>
+            <input type="text" id="fx-wifi_nom" placeholder="Ex: Livebox-A1B2">
+          </div>
+          <div class="fixed-field">
+            <label>Mot de passe WiFi <code>{wifi_mdp}</code></label>
+            <input type="text" id="fx-wifi_mdp" placeholder="Ex: mittitur6-resonatio8">
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2 : FAQ (réponses contextuelles de l'Agent AI) -->
       <div class="section-card">
         <div class="section-header">
-          <div class="section-title" style="margin:0">FAQ</div>
+          <div class="section-title" style="margin:0">💬 FAQ</div>
           <span class="count-badge" id="count-badge">0 entrées</span>
+        </div>
+        <div class="fixed-hint">
+          Questions/réponses libres utilisées par l'Agent AI pour répondre aux voyageurs
+          (équipements, règles, conseils, etc.).
         </div>
         <div class="faq-list" id="faq-list">
           <div class="empty-state">Sélectionnez un bien pour charger la base de connaissance</div>
@@ -79,6 +161,9 @@
 
   initErrorHandler()
 
+  // Liste des 6 clés fixed. Garder synchronisé avec api/menages-public.js buildMessage.
+  const FIXED_KEYS = ['adresse', 'telephone_hote', 'checkin', 'checkout', 'wifi_nom', 'wifi_mdp']
+
   let session = null
   let currentPropId = null
   let properties = []
@@ -94,12 +179,21 @@
       if (currentPropId) {
         document.getElementById('btn-import').style.display = 'inline-flex'
         document.getElementById('btn-add').style.display = 'inline-flex'
-        loadFaq()
+        document.getElementById('fixed-card').style.display = 'block'
+        loadKnowledge()
+      } else {
+        document.getElementById('fixed-card').style.display = 'none'
       }
     })
     document.getElementById('btn-import').addEventListener('click', importFromBeds24)
     document.getElementById('btn-add').addEventListener('click', () => addRow('', ''))
     document.getElementById('btn-save').addEventListener('click', save)
+
+    // Marquer non sauvegardé dès qu'un champ fixed change
+    FIXED_KEYS.forEach(key => {
+      const input = document.getElementById('fx-' + key)
+      if (input) input.addEventListener('input', markUnsaved)
+    })
   }
 
   async function loadProperties() {
@@ -120,13 +214,20 @@
       currentPropId = properties[0].id
       document.getElementById('btn-import').style.display = 'inline-flex'
       document.getElementById('btn-add').style.display = 'inline-flex'
-      loadFaq()
+      document.getElementById('fixed-card').style.display = 'block'
+      loadKnowledge()
     }
   }
 
-  async function loadFaq() {
+  async function loadKnowledge() {
     const list = document.getElementById('faq-list')
     list.innerHTML = '<div class="empty-state">Chargement…</div>'
+
+    // Reset des champs fixed
+    FIXED_KEYS.forEach(key => {
+      const input = document.getElementById('fx-' + key)
+      if (input) input.value = ''
+    })
 
     const { data, error } = await supabase
       .from('knowledge')
@@ -137,19 +238,30 @@
 
     if (error) { list.innerHTML = `<div class="empty-state">❌ ${error.message}</div>`; return }
 
-    list.innerHTML = ''
-    const faqs = data || []
+    const rows = data || []
 
-    if (faqs.length === 0) {
-      list.innerHTML = '<div class="empty-state">Aucune entrée — cliquez sur "⬇️ Importer depuis Beds24" ou "+ Ajouter"</div>'
+    // Dispatch par type
+    const fixedRows = rows.filter(r => r.type === 'fixed')
+    const faqRows   = rows.filter(r => r.type === 'faq')
+
+    // Remplir les 6 champs fixed
+    fixedRows.forEach(r => {
+      const input = document.getElementById('fx-' + r.key)
+      if (input) input.value = r.value || ''
+    })
+
+    // Remplir la liste FAQ
+    list.innerHTML = ''
+    if (faqRows.length === 0) {
+      list.innerHTML = '<div class="empty-state">Aucune FAQ — cliquez sur "⬇️ Importer depuis Beds24" ou "+ Ajouter"</div>'
     } else {
-      faqs.forEach(row => addRow(row.key, row.value))
+      faqRows.forEach(row => addRow(row.key, row.value))
     }
 
     updateCount()
     const propName = properties.find(p => String(p.id) === String(currentPropId))?.name || ''
-    document.getElementById('save-status').textContent = `${faqs.length} entrée(s) chargée(s)`
-    document.getElementById('topStatus').textContent = `${faqs.length} entrée(s) · ${propName}`
+    document.getElementById('save-status').textContent = `${faqRows.length} FAQ · ${fixedRows.length}/6 champs remplis`
+    document.getElementById('topStatus').textContent = `${rows.length} entrée(s) · ${propName}`
   }
 
   function addRow(key = '', value = '', fromBeds24 = false) {
@@ -161,7 +273,7 @@
     div.className = 'faq-row'
     div.innerHTML = `
       <div class="faq-fields">
-        <input class="faq-input-key" type="text" placeholder="Sujet ou question (ex: Heure d'arrivée)" value="${escAttr(key)}">
+        <input class="faq-input-key" type="text" placeholder="Sujet ou question (ex: Règles du logement)" value="${escAttr(key)}">
         <textarea class="faq-input-value" placeholder="Réponse de l'agent AI…" rows="2">${escHtml(value)}</textarea>
       </div>
       ${fromBeds24 ? '<span class="badge-beds24">Beds24</span>' : ''}
@@ -183,26 +295,36 @@
     const btn = document.getElementById('btn-import')
     btn.disabled = true; btn.textContent = '⏳ Import...'
 
-    const existing = [...document.querySelectorAll('.faq-input-key')].map(i => i.value.toLowerCase())
+    let fixedFilled = 0
 
+    // ─── Import des 6 champs fixed (seulement si vides) ─────────────────────
+    const setFixedIfEmpty = (key, value) => {
+      if (!value) return
+      const input = document.getElementById('fx-' + key)
+      if (input && !input.value.trim()) {
+        input.value = value
+        fixedFilled++
+      }
+    }
+
+    // Adresse
+    if (property.address) {
+      const parts = [property.address, property.city, property.postcode].filter(Boolean)
+      setFixedIfEmpty('adresse', parts.join(', '))
+    }
+    // Horaires
+    setFixedIfEmpty('checkin',  property.checkInStart)
+    setFixedIfEmpty('checkout', property.checkOutEnd)
+    // Téléphone hôte
+    const tels = []
+    if (property.phone) tels.push(property.phone)
+    if (property.contactLastName?.startsWith('0')) tels.push(property.contactLastName)
+    if (tels.length) setFixedIfEmpty('telephone_hote', tels.join(' / '))
+
+    // ─── Import des FAQ (comportement existant) ─────────────────────────────
+    const existing = [...document.querySelectorAll('.faq-input-key')].map(i => i.value.toLowerCase())
     const faqs = []
 
-    // Infos de base
-    if (property.address && property.city) {
-      faqs.push({ key: 'Adresse du logement', value: `${property.address}, ${property.city} ${property.postcode || ''}`.trim() })
-    }
-    if (property.checkInStart) {
-      faqs.push({ key: 'Heure d\'arrivée', value: `L'arrivée se fait à partir de ${property.checkInStart}${property.checkInEnd && property.checkInEnd !== '00:00' ? ` et au plus tard à ${property.checkInEnd}` : ''}.` })
-    }
-    if (property.checkOutEnd) {
-      faqs.push({ key: 'Heure de départ', value: `Le départ doit se faire avant ${property.checkOutEnd}.` })
-    }
-    if (property.phone || property.contactLastName) {
-      const tel1 = property.phone || ''
-      const tel2 = property.contactLastName?.startsWith('0') ? property.contactLastName : ''
-      const prenom = property.contactFirstName ? `${property.contactFirstName} : ` : ''
-      faqs.push({ key: 'Contact hôte', value: `${prenom}${[tel1, tel2].filter(Boolean).join(' / ')}` })
-    }
     if (property.email) {
       faqs.push({ key: 'Email hôte', value: property.email })
     }
@@ -250,17 +372,20 @@
       faqs.push({ key: 'Règles du logement', value: regles.join('\n') })
     }
 
-    // Ajouter uniquement les nouvelles entrées
-    let added = 0
+    // Ajouter uniquement les nouvelles FAQ
+    let faqAdded = 0
     faqs.forEach(faq => {
       const alreadyExists = existing.some(k => k.includes(faq.key.toLowerCase().substring(0, 8)))
-      if (!alreadyExists) { addRow(faq.key, faq.value, true); added++ }
+      if (!alreadyExists) { addRow(faq.key, faq.value, true); faqAdded++ }
     })
 
     const notice = document.getElementById('notice')
     notice.style.display = 'block'
-    if (added > 0) {
-      notice.textContent = `✅ ${added} entrée(s) importée(s) depuis Beds24. Pensez à sauvegarder !`
+    if (fixedFilled > 0 || faqAdded > 0) {
+      const parts = []
+      if (fixedFilled > 0) parts.push(`${fixedFilled} champ(s) du logement rempli(s)`)
+      if (faqAdded > 0)    parts.push(`${faqAdded} FAQ ajoutée(s)`)
+      notice.textContent = `✅ ${parts.join(' · ')}. Pensez à sauvegarder !`
       markUnsaved()
       setTimeout(() => { notice.style.display = 'none' }, 8000)
     } else {
@@ -276,7 +401,21 @@
     const btn = document.getElementById('btn-save')
     btn.textContent = 'Sauvegarde...'; btn.disabled = true
 
-    const rows = [...document.querySelectorAll('.faq-row')].map(row => ({
+    // Collecter les rows fixed (seulement celles avec valeur non vide)
+    const fixedRows = FIXED_KEYS.map(key => {
+      const input = document.getElementById('fx-' + key)
+      const value = input ? input.value.trim() : ''
+      return {
+        user_id:     session.user.id,
+        property_id: String(currentPropId),
+        type:        'fixed',
+        key,
+        value
+      }
+    }).filter(r => r.value)
+
+    // Collecter les rows FAQ
+    const faqRows = [...document.querySelectorAll('.faq-row')].map(row => ({
       user_id:     session.user.id,
       property_id: String(currentPropId),
       type:        'faq',
@@ -284,16 +423,21 @@
       value:       row.querySelector('.faq-input-value').value.trim()
     })).filter(r => r.key)
 
+    const allRows = [...fixedRows, ...faqRows]
+
+    // Stratégie : delete all pour cette propriété puis insert (simple et atomique côté UX)
     await supabase.from('knowledge').delete()
       .eq('user_id', session.user.id)
       .eq('property_id', String(currentPropId))
 
-    const { error } = await supabase.from('knowledge').insert(rows)
+    const { error } = allRows.length
+      ? await supabase.from('knowledge').insert(allRows)
+      : { error: null }
 
     btn.textContent = 'Sauvegarder'; btn.disabled = false
     document.getElementById('save-status').textContent = error
       ? '❌ Erreur : ' + error.message
-      : `✅ ${rows.length} entrée(s) sauvegardée(s)`
+      : `✅ ${fixedRows.length}/6 champs + ${faqRows.length} FAQ sauvegardés`
     updateCount()
   }
 
