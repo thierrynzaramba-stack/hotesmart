@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendViaBeds24 } = require('../lib/cron-beds24')
 const { markReady } = require('../lib/cron-property-status')
+const { buildMessage } = require('../lib/message-builder')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -177,32 +178,6 @@ async function generateSeamCode(userId, lockId, booking) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function buildMessage(template, booking, guestName, seamCode, knowledge = {}) {
-  let text = template.template_text || ''
-  if (!text.trim()) return null
-
-  // knowledge contient les valeurs fixed depuis la table knowledge.
-  // Si une cle est absente/vide, on laisse le placeholder pour que l'hote
-  // voie qu'il manque une info dans sa base de connaissance.
-  const k = knowledge || {}
-  const val = (key, fallback) => (k[key] && String(k[key]).trim()) ? k[key] : fallback
-
-  return text
-    .replace(/{prenom}/g,         booking.firstName || guestName)
-    .replace(/{nom}/g,            booking.lastName  || '')
-    .replace(/{arrivee}/g,        formatDate(booking.arrival))
-    .replace(/{depart}/g,         formatDate(booking.departure))
-    .replace(/{logement}/g,       booking.propName  || '')
-    .replace(/{adresse}/g,        val('adresse', '[ADRESSE]'))
-    .replace(/{checkin}/g,        val('checkin', booking.checkInStart || '18:00'))
-    .replace(/{checkout}/g,       val('checkout', booking.checkOutEnd || '10:00'))
-    .replace(/{code_acces}/g,     seamCode || '[CODE À INSÉRER]')
-    .replace(/{code_immeuble}/g,  val('code_immeuble', '[CODE IMMEUBLE]'))
-    .replace(/{wifi_nom}/g,       val('wifi_nom', '[WIFI NOM]'))
-    .replace(/{wifi_mdp}/g,       val('wifi_mdp', '[WIFI MOT DE PASSE]'))
-    .replace(/{telephone_hote}/g, val('telephone_hote', '[TÉLÉPHONE HÔTE]'))
-}
-
 async function saveAndSend(userId, propertyId, bookingId, template, guestName, message, beds24Key) {
   await supabase.from('conversations').insert({
     user_id: userId, property_id: String(propertyId),

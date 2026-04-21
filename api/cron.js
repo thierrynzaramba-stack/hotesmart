@@ -9,6 +9,8 @@ const { detectBookingChanges } = require('../lib/cron-bookings')
 const { processMessageTemplates } = require('../lib/cron-messages')
 const { processProperty } = require('../lib/cron-classify')
 const { checkPendingMessages, checkBatteries } = require('../lib/cron-access')
+const { processArrivalCodes } = require('../lib/cron-arrival-code')
+const { fetchBookings } = require('../lib/cron-beds24')
 
 module.exports = async function handler(req, res) {
   const authHeader = req.headers.authorization
@@ -96,6 +98,16 @@ async function processUser(userId, beds24Key, tokens, results) {
       await detectBookingChanges(userId, beds24Key, property, tokens, results)
       await processMessageTemplates(userId, beds24Key, property, results)
       await processProperty(userId, beds24Key, property, results)
+
+      // Generation juste-a-temps du code d'acces + envoi du message
+      // d'arrivee pour les voyageurs dont arrival = aujourd'hui et dont
+      // le logement est en statut 'ready' (menage valide).
+      try {
+        const bookings = await fetchBookings(beds24Key, property.id, { daysBefore: 0, daysAfter: 2 })
+        await processArrivalCodes(userId, beds24Key, property, bookings, results)
+      } catch (err) {
+        console.error(`[Cron] Erreur processArrivalCodes ${property.id}:`, err.message)
+      }
     } catch (err) {
       console.error(`[Cron] Erreur bien ${property.id}:`, err.message)
       results.errors.push({ property_id: property.id, error: err.message })
