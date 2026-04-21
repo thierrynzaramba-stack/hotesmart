@@ -26,6 +26,14 @@ module.exports = async function handler(req, res) {
     }
 
     if (action === 'markDone' && booking_id && property_id) {
+      // Le clic "Marquer fait" de la femme de menage fait UNIQUEMENT basculer
+      // le statut du logement en 'ready' (contrat locatif cloture, voyageur
+      // detache). La generation du code Seam et l'envoi du message au prochain
+      // voyageur sont deleguees au cron, qui les declenchera le JOUR meme de
+      // l'arrivee du voyageur suivant. Cela evite les problemes lies a :
+      //   - modifications d'arrival/departure entre le menage et l'arrivee
+      //   - annulations apres le menage (code cree pour rien)
+      //   - codes crees trop en avance avec dates obsoletes
       try {
         const { data: tokenData } = await supabase
           .from('public_tokens').select('user_id').eq('token', token).maybeSingle()
@@ -33,105 +41,15 @@ module.exports = async function handler(req, res) {
 
         const userId = tokenData.user_id
 
-        // Passage du logement en statut 'ready' (independant de l'envoi de
-        // templates : meme sans template menage_done actif, le statut change).
         try {
           await markReady(userId, property_id)
+          console.log(`[Menage] Logement ${property_id} : statut -> ready`)
         } catch (err) {
           console.error('[Menage] Erreur markReady:', err.message)
+          return res.status(500).json({ error: 'Erreur changement de statut' })
         }
 
-        const { data: templates } = await supabase
-          .from('message_templates').select('*')
-          .eq('user_id', userId)
-          .eq('property_id', String(property_id))
-          .eq('event_type', 'menage_done')
-          .eq('active', true)
-
-        if (!templates?.length) return res.json({ success: true, message: 'Aucun template actif' })
-
-        const { data: keyData } = await supabase
-          .from('api_keys').select('api_key').eq('user_id', userId).eq('service', 'beds24').single()
-
-        if (!keyData?.api_key) return res.status(400).json({ error: 'Beds24 non configuré' })
-
-        // Charger la base de connaissance (type='fixed') pour remplir les
-        // placeholders {wifi_nom}, {telephone_hote}, {adresse}, etc. dans les
-        // templates. Si une cle manque, buildMessage laisse un placeholder
-        // pour que l'hote voie qu'il doit completer sa base.
-        const { data: knowledgeRows } = await supabase
-          .from('knowledge')
-          .select('key, value')
-          .eq('user_id', userId)
-          .eq('property_id', String(property_id))
-          .eq('type', 'fixed')
-
-        const knowledge = {}
-        ;(knowledgeRows || []).forEach(r => { knowledge[r.key] = r.value })
-
-        // Chercher la PROCHAINE réservation du logement (pas la résa du ménage)
-        const today = new Date().toISOString().split('T')[0]
-        const futureRes = await fetch(
-          `https://beds24.com/api/v2/bookings?propId=${property_id}&arrivalFrom=${today}`,
-          { headers: { token: keyData.api_key } }
-        )
-        const futureData = await futureRes.json()
-        const nextBookings = (futureData.data || [])
-          .filter(b => String(b.propertyId) === String(property_id) && String(b.id) !== String(booking_id))
-          .sort((a, b) => new Date(a.arrival) - new Date(b.arrival))
-
-        const nextBooking = nextBookings[0]
-        if (!nextBooking) {
-          console.log(`[Menage] Pas de prochaine réservation pour logement ${property_id}`)
-          return res.json({ success: true, message: 'Ménage marqué, aucune prochaine réservation' })
-        }
-
-        console.log(`[Menage] Prochaine résa : ${nextBooking.id} arrivée ${nextBooking.arrival}`)
-
-        const guestName = `${nextBooking.firstName || ''} ${nextBooking.lastName || ''}`.trim() || 'Voyageur'
-        const now = new Date()
-
-        for (const template of templates) {
-          const { data: alreadySent } = await supabase
-            .from('message_sent_log').select('id')
-            .eq('user_id', userId).eq('booking_id', String(nextBooking.id))
-            .eq('template_id', template.id).maybeSingle()
-          if (alreadySent) continue
-
-          // Générer le code si une serrure est configurée
-          let seamCode = null
-          if (template.lock_id) {
-            seamCode = await generateSeamCode(userId, template.lock_id, nextBooking)
-          }
-
-          // Calcul de l'heure d'envoi
-          const delayMs   = parseDelayMs(template.offset_value || '0min')
-          const sendAt    = new Date(now.getTime() + delayMs)
-          const earliest  = template.lock_id ? (template.earliest_send_time || '15:00') : null
-          const finalSendAt = earliest ? applyEarliestHour(sendAt, earliest) : sendAt
-          const canSendNow  = finalSendAt <= now || (finalSendAt - now) < 60000 // marge 1min
-
-          const message = buildMessage(template, nextBooking, guestName, seamCode, knowledge)
-          if (!message) continue
-
-          if (canSendNow) {
-            await saveAndSend(userId, property_id, nextBooking.id, template, guestName, message, keyData.api_key)
-            console.log(`[Menage] Envoi immédiat booking ${nextBooking.id}`)
-          } else {
-            await supabase.from('message_sent_log').insert({
-              user_id: userId, booking_id: String(nextBooking.id),
-              template_id: template.id, status: 'pending',
-              scheduled_at: finalSendAt.toISOString(),
-              payload: JSON.stringify({
-                message, seam_code: seamCode, guest_name: guestName,
-                property_id: String(property_id), lock_id: template.lock_id
-              })
-            })
-            console.log(`[Menage] En attente jusqu'à ${finalSendAt.toISOString()} booking ${nextBooking.id}`)
-          }
-        }
-
-        return res.json({ success: true })
+        return res.json({ success: true, message: 'Menage marque, logement pret' })
       } catch (err) {
         console.error('[Menage] markDone erreur:', err.message)
         return res.status(500).json({ error: err.message })
