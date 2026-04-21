@@ -51,6 +51,9 @@
     .menage-card:hover { opacity: 0.85; }
     .menage-card.done { opacity: 0.6; }
     .menage-card.done .menage-card-title { text-decoration: line-through; }
+    .menage-card.obsolete { opacity: 0.4; background: #E5E7EB !important; color: #6B7280 !important; cursor: not-allowed; }
+    .menage-card.obsolete .menage-card-title { text-decoration: line-through; }
+    .menage-card.obsolete::after { content: "⏭"; position: absolute; top: 4px; right: 4px; font-size: 10px; }
     .menage-card-prop { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; opacity: 0.8; margin-bottom: 2px; }
     .menage-card-title { font-weight: 500; line-height: 1.3; }
     .menage-card-time { font-size: 9px; opacity: 0.7; margin-top: 2px; }
@@ -410,15 +413,18 @@
         </div>
         <div class="day-body">
           ${dayMenages.length === 0 ? '<div class="day-empty">—</div>' :
-            dayMenages.map(m => `
-              <div class="menage-card ${PROP_COLORS[m.propIdx % 4]} ${m.done ? 'done' : ''}" data-id="${m.id}" style="cursor:pointer">
+            dayMenages.map(m => {
+              const obs = isMenageObsolete(m, menages)
+              return `
+              <div class="menage-card ${PROP_COLORS[m.propIdx % 4]} ${m.done ? 'done' : ''} ${obs ? 'obsolete' : ''}" data-id="${m.id}" style="cursor:pointer">
                 <div class="menage-card-prop">${m.propName}</div>
                 <div class="menage-card-title">Ménage départ</div>
                 <div class="menage-card-time">${m.guestName}</div>
                 ${m.done ? '<div class="menage-card-check">✓</div>' : ''}
                 ${m.comment ? '<div class="menage-card-comment">📝</div>' : ''}
               </div>
-            `).join('')
+            `
+            }).join('')
           }
         </div>
       `
@@ -486,6 +492,42 @@
     }
   }
 
+  // Regle metier : un menage est rendu obsolete si l'une de ces 3 conditions :
+  //   1. Un menage POSTERIEUR sur la meme propriete a deja ete marque fait
+  //   2. Un voyageur POSTERIEUR est deja arrive (arrival <= aujourd'hui) :
+  //      il n'aurait pas pu dormir dans du sale, donc le menage a eu lieu
+  //   3. Un voyageur POSTERIEUR est actuellement en sejour (cas special de 2)
+  // Si obsolete : on ne propose plus de marquer "fait", la carte est grisee.
+  function isMenageObsolete(m, allMenages) {
+    if (m.done) return false
+
+    const today = new Date(); today.setHours(0,0,0,0)
+    const menageDate = new Date(m.date); menageDate.setHours(0,0,0,0)
+
+    // Cas 1 : menage posterieur deja fait
+    const laterDone = allMenages.some(other =>
+      other.propId === m.propId &&
+      other.id !== m.id &&
+      other.done &&
+      new Date(other.date) > menageDate
+    )
+    if (laterDone) return true
+
+    // Cas 2 & 3 : voyageur posterieur deja arrive
+    // On regarde dans la liste des bookings bruts (pas menages) car un voyageur
+    // peut etre arrive sans qu'il y ait encore un menage planifie pour son
+    // propre depart. On detecte toute arrival posterieure a la date de depart
+    // du menage courant et <= aujourd'hui.
+    const laterArrived = bookings.some(b =>
+      b.propId === m.propId &&
+      b.id !== m.bookId &&
+      b.arrival &&
+      new Date(b.arrival) > menageDate &&
+      new Date(b.arrival) <= today
+    )
+    return laterArrived
+  }
+
   function openModal(m) {
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
@@ -503,15 +545,7 @@
       ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
       : ''
 
-    // Regle metier : un menage est rendu obsolete si un menage POSTERIEUR
-    // sur la meme propriete a deja ete marque fait. Dans ce cas inutile de
-    // revenir dessus, le logement a ete nettoye pour la resa suivante.
-    const laterMenageDone = getMenages().some(other =>
-      other.propId === m.propId &&
-      other.id !== m.id &&
-      other.done &&
-      new Date(other.date) > new Date(m.date)
-    )
+    const obsolete = isMenageObsolete(m, getMenages())
 
     const btn = document.getElementById('modal-done')
     btn.style.opacity = ''
@@ -520,8 +554,8 @@
       btn.textContent = '↩ Marquer non fait'
       btn.className = 'btn'
       btn.disabled = false
-    } else if (laterMenageDone) {
-      btn.textContent = '⏭ Obsolète (ménage suivant déjà fait)'
+    } else if (obsolete) {
+      btn.textContent = '⏭ Obsolète (un voyageur suivant est déjà arrivé)'
       btn.className = 'btn'
       btn.disabled = true
       btn.style.opacity = '0.4'
