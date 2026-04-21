@@ -167,7 +167,12 @@ module.exports = async function handler(req, res) {
 
     const today   = new Date(); today.setHours(0,0,0,0)
     const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + visibilityDays)
-    const dateFrom = today.toISOString().split('T')[0]
+    // On remonte aussi les 14 derniers jours pour que la femme de menage
+    // puisse marquer des menages en retard (ex: depart hier, menage fait
+    // le lendemain). Au-dela de 14 jours on considere que le menage est
+    // perdu et ne fait plus partie du planning actif.
+    const minDate  = new Date(today); minDate.setDate(minDate.getDate() - 14)
+    const dateFrom = minDate.toISOString().split('T')[0]
     const dateTo   = maxDate.toISOString().split('T')[0]
 
     const allBookings = []
