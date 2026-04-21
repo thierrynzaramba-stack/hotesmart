@@ -487,10 +487,6 @@
   }
 
   function openModal(m) {
-    const today = new Date(); today.setHours(0,0,0,0)
-    const menageDate = new Date(m.date); menageDate.setHours(0,0,0,0)
-    const isToday = menageDate.getTime() === today.getTime()
-
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
     document.getElementById('modal-body').innerHTML = `
@@ -507,20 +503,32 @@
       ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
       : ''
 
+    // Regle metier : un menage est rendu obsolete si un menage POSTERIEUR
+    // sur la meme propriete a deja ete marque fait. Dans ce cas inutile de
+    // revenir dessus, le logement a ete nettoye pour la resa suivante.
+    const laterMenageDone = getMenages().some(other =>
+      other.propId === m.propId &&
+      other.id !== m.id &&
+      other.done &&
+      new Date(other.date) > new Date(m.date)
+    )
+
     const btn = document.getElementById('modal-done')
+    btn.style.opacity = ''
+
     if (m.done) {
       btn.textContent = '↩ Marquer non fait'
       btn.className = 'btn'
       btn.disabled = false
-    } else if (isToday) {
-      btn.textContent = '✓ Marquer fait'
-      btn.className = 'btn btn-primary'
-      btn.disabled = false
-    } else {
-      btn.textContent = `✓ Disponible le ${formatDate(m.date)}`
+    } else if (laterMenageDone) {
+      btn.textContent = '⏭ Obsolète (ménage suivant déjà fait)'
       btn.className = 'btn'
       btn.disabled = true
       btn.style.opacity = '0.4'
+    } else {
+      btn.textContent = '✓ Marquer fait'
+      btn.className = 'btn btn-primary'
+      btn.disabled = false
     }
 
     document.getElementById('modal').style.display = 'flex'
