@@ -48,6 +48,30 @@
     .field-hint { font-size:11px; color:var(--text2); margin-top:5px; line-height:1.5; }
 
     .save-bar { display:flex; align-items:center; gap:12px; margin-top:8px; }
+
+    /* Bloc consignes Agent AI */
+    .prompting-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:20px 24px; margin-bottom:20px; }
+    .prompting-title { font-size:14px; font-weight:500; margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+    .prompting-intro { font-size:12px; color:var(--text2); line-height:1.6; margin-bottom:16px; }
+    .prompting-block { margin-bottom:16px; }
+    .prompting-block:last-child { margin-bottom:12px; }
+    .prompting-block-title { font-size:12px; font-weight:500; color:var(--text); margin-bottom:4px; }
+    .prompting-block-desc { font-size:11px; color:var(--text2); margin-bottom:8px; line-height:1.5; }
+    .prompting-textarea { width:100%; font-family:inherit; font-size:13px; padding:10px 12px; border:0.5px solid var(--border); border-radius:var(--radius); resize:vertical; min-height:100px; background:var(--bg2); color:var(--text); line-height:1.5; box-sizing:border-box; }
+    .prompting-textarea:focus { outline:none; border-color:var(--green); background:var(--bg); }
+    .prompting-save-bar { display:flex; align-items:center; gap:12px; margin-top:10px; }
+    .prompting-save-bar button { padding:8px 16px; }
+    .prompting-status { font-size:11px; color:var(--text2); }
+    .prompting-status.ok { color:var(--green); }
+    .prompting-status.error { color:#E24B4A; }
+
+    /* Responsive mobile */
+    @media (max-width: 768px) {
+      .prompting-card { padding:16px 14px; }
+      .prompting-textarea { font-size:16px; }
+      .prompting-save-bar { flex-direction:column; align-items:stretch; }
+      .prompting-save-bar button { width:100%; min-height:44px; }
+    }
     .save-status { font-size:12px; color:var(--text2); }
     .save-status.ok  { color:var(--green); }
     .save-status.err { color:#E24B4A; }
@@ -121,10 +145,93 @@
 
   let currentProp = PROPERTIES[0].id
   let config = {}
+  let promptingConfig = { global: '', overrides: {} }
 
   window.init = async () => {
     renderTabs()
     await loadConfig()
+    await loadPrompting()
+    renderPanel()
+  }
+
+  async function loadPrompting() {
+    try {
+      const { data, error } = await window._supabase
+        .from('agent_prompting')
+        .select('property_id, instructions')
+        .eq('user_id', window._session.user.id)
+      if (error) throw error
+      promptingConfig = { global: '', overrides: {} }
+      ;(data || []).forEach(row => {
+        if (row.property_id === null) promptingConfig.global = row.instructions || ''
+        else promptingConfig.overrides[row.property_id] = row.instructions || ''
+      })
+    } catch (err) {
+      console.warn('[Prompting] load error:', err.message)
+    }
+  }
+
+  window.savePrompting = async () => {
+    const statusEl = document.getElementById('prompting-status')
+    statusEl.textContent = 'Enregistrement...'
+    statusEl.className = 'prompting-status'
+
+    const globalText = document.getElementById('prompting-global').value.trim()
+    const overrideText = document.getElementById('prompting-override').value.trim()
+    const userId = window._session.user.id
+
+    try {
+      // Global : upsert ou delete si vide
+      if (globalText) {
+        // upsert manuel : on tente delete + insert (pas d unique sur NULL dans PG)
+        await window._supabase
+          .from('agent_prompting')
+          .delete()
+          .eq('user_id', userId)
+          .is('property_id', null)
+        const { error: err1 } = await window._supabase
+          .from('agent_prompting')
+          .insert({ user_id: userId, property_id: null, instructions: globalText })
+        if (err1) throw err1
+        promptingConfig.global = globalText
+      } else {
+        await window._supabase
+          .from('agent_prompting')
+          .delete()
+          .eq('user_id', userId)
+          .is('property_id', null)
+        promptingConfig.global = ''
+      }
+
+      // Override du logement courant
+      if (overrideText) {
+        await window._supabase
+          .from('agent_prompting')
+          .delete()
+          .eq('user_id', userId)
+          .eq('property_id', currentProp)
+        const { error: err2 } = await window._supabase
+          .from('agent_prompting')
+          .insert({ user_id: userId, property_id: currentProp, instructions: overrideText })
+        if (err2) throw err2
+        promptingConfig.overrides[currentProp] = overrideText
+      } else {
+        await window._supabase
+          .from('agent_prompting')
+          .delete()
+          .eq('user_id', userId)
+          .eq('property_id', currentProp)
+        delete promptingConfig.overrides[currentProp]
+      }
+
+      statusEl.textContent = '✓ Consignes enregistrées'
+      statusEl.className = 'prompting-status ok'
+      setTimeout(() => { statusEl.textContent = '' }, 3000)
+    } catch (err) {
+      console.error('[Prompting] save error:', err)
+      statusEl.textContent = '❌ Erreur : ' + err.message
+      statusEl.className = 'prompting-status error'
+    }
   }
 
   function renderTabs() {
@@ -189,6 +296,39 @@
       <!-- Alertes -->
       <div class="section-label">Alertes notifications</div>
       ${ALERT_TYPES.map(type => buildSection(type)).join('')}
+
+      <!-- Consignes de l'Agent AI -->
+      <div class="prompting-card">
+        <div class="prompting-title">🤖 Consignes de l'Agent AI</div>
+        <div class="prompting-intro">
+          Définissez le ton, la longueur des réponses et les règles de style de votre Agent AI.
+          Les consignes générales s'appliquent à tous vos logements. Vous pouvez ensuite affiner
+          pour ce logement spécifique — l'override prime en cas de conflit.
+        </div>
+
+        <div class="prompting-block">
+          <div class="prompting-block-title">Consignes générales <span style="color:var(--text2);font-weight:normal;font-size:11px">— tous logements</span></div>
+          <div class="prompting-block-desc">
+            Exemples : ton, longueur, tutoiement, règles de style.
+          </div>
+          <textarea class="prompting-textarea" id="prompting-global" rows="6"
+                    placeholder="Ex :&#10;- Réponds en français avec un ton chaleureux et direct.&#10;- Si le voyageur pose une question, réponds avec la longueur nécessaire sans remplissage.&#10;- Si le voyageur confirme ou remercie, réponds très court (1 phrase max).&#10;- Ne reprends jamais le message du voyageur dans ta réponse.&#10;- Tutoie par défaut sauf si le voyageur vouvoie.">${escHtml(promptingConfig.global || '')}</textarea>
+        </div>
+
+        <div class="prompting-block">
+          <div class="prompting-block-title">Consignes spécifiques pour ce logement <span style="color:var(--text2);font-weight:normal;font-size:11px">— optionnel</span></div>
+          <div class="prompting-block-desc">
+            S'ajoute aux consignes générales. Prime en cas de conflit.
+          </div>
+          <textarea class="prompting-textarea" id="prompting-override" rows="4"
+                    placeholder="Ex : Pour ce studio centre-ville, mentionner le parking Place des Thermes (2 min à pied). Préciser qu'il n'y a pas d'ascenseur, 3e étage.">${escHtml(promptingConfig.overrides[currentProp] || '')}</textarea>
+        </div>
+
+        <div class="prompting-save-bar">
+          <button class="btn btn-primary" onclick="savePrompting()">Enregistrer les consignes</button>
+          <span class="prompting-status" id="prompting-status"></span>
+        </div>
+      </div>
     `
   }
 
