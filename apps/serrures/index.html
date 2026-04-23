@@ -45,6 +45,28 @@
 
     /* Serrures */
     .locks-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px; }
+
+    /* Badges mode offline/online */
+    .mode-badge { display:inline-flex; align-items:center; gap:4px; font-size:10px; padding:2px 8px; border-radius:20px; font-weight:500; margin-left:4px; }
+    .mode-badge.offline { background:#FEF3C7; color:#92400E; }
+    .mode-badge.online  { background:#D1FAE5; color:#065F46; }
+
+    .mode-info { background:#FEF9E7; border:0.5px solid #F59E0B; border-radius:var(--radius); padding:10px 12px; font-size:11px; color:#92400E; margin-top:10px; line-height:1.6; }
+    .mode-info.online { background:#ECFDF5; border-color:var(--green); color:#065F46; }
+    .mode-info-title { font-weight:600; margin-bottom:4px; }
+
+    /* Bouton corbeille désactivé pour codes immuables */
+    .btn-trash-disabled { opacity:0.3; cursor:not-allowed; position:relative; }
+    .btn-trash-disabled:hover::after {
+      content:"Code immuable (mode offline)"; position:absolute; right:0; top:calc(100% + 4px);
+      background:var(--text); color:white; font-size:10px; padding:4px 8px; border-radius:4px; white-space:nowrap; z-index:10;
+    }
+
+    /* Bloc pédagogique en haut de la section serrures */
+    .lock-modes-doc { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:16px 20px; margin-bottom:20px; font-size:13px; color:var(--text2); line-height:1.7; }
+    .lock-modes-doc h4 { font-size:13px; font-weight:600; color:var(--text); margin:0 0 10px 0; }
+    .lock-modes-doc .mode-row { display:flex; gap:10px; align-items:flex-start; padding:6px 0; }
+    .lock-modes-doc .mode-row span:first-child { flex-shrink:0; font-size:14px; }
     .lock-card { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
     .lock-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
     .lock-name { font-size:14px; font-weight:500; }
@@ -141,6 +163,18 @@
           <div style="font-size:13px;font-weight:500">Mes serrures connectées</div>
           <button class="refresh-btn" onclick="loadLocks()">↻ Actualiser</button>
         </div>
+        <div class="lock-modes-doc">
+          <h4>ℹ️ Modes de fonctionnement des serrures</h4>
+          <div class="mode-row">
+            <span>🟡</span>
+            <div><strong>Mode offline</strong> — sans bridge/hub. Les codes d'accès sont calculés par la serrure à partir d'un algorithme interne. Ils sont <strong>immuables</strong> : une fois créés, ils ne peuvent ni être modifiés, ni être supprimés. Ils expirent automatiquement à leur date de fin. Pas d'unlock à distance ni de logs d'accès.</div>
+          </div>
+          <div class="mode-row">
+            <span>🟢</span>
+            <div><strong>Mode connecté (avec bridge)</strong> — en ajoutant un IglooHome Bridge, vous débloquez la gestion dynamique : codes révocables à tout moment, unlock à distance depuis l'application, logs d'accès en temps réel, statut de la serrure live. Un bridge coûte environ 80-100€ et se connecte à votre WiFi.</div>
+          </div>
+        </div>
+
         <div id="locks-container">
           <div class="empty-state">Chargement…</div>
         </div>
@@ -271,10 +305,19 @@
     container.innerHTML = `<div class="locks-grid">${locks.map(lock => {
       const isLocked = lock.properties?.locked
       const battery  = lock.properties?.battery_level ? `🔋 ${Math.round(lock.properties.battery_level * 100)}%` : ''
+      // Détecte le mode offline : pas de capability 'online_access_codes'
+      const caps = lock.capabilities_supported || []
+      const isOffline = !caps.includes('online_access_codes')
+      const modeBadge = isOffline
+        ? '<span class="mode-badge offline">🟡 Offline</span>'
+        : '<span class="mode-badge online">🟢 Connecté</span>'
+      const modeInfo = isOffline
+        ? '<div class="mode-info"><div class="mode-info-title">Mode offline (codes immuables)</div>Les codes d\'accès générés ici ne peuvent plus être modifiés ni supprimés. Ils expirent automatiquement à leur date de fin.</div>'
+        : '<div class="mode-info online"><div class="mode-info-title">Mode connecté</div>Les codes peuvent être révoqués à tout moment et la serrure peut être déverrouillée à distance.</div>'
       return `
-        <div class="lock-card">
+        <div class="lock-card" data-offline="${isOffline}">
           <div class="lock-header">
-            <div class="lock-name">🔐 ${lock.properties?.name || lock.display_name || 'Serrure'}</div>
+            <div class="lock-name">🔐 ${lock.properties?.name || lock.display_name || 'Serrure'}${modeBadge}</div>
             <span class="lock-status ${isLocked ? 'locked' : 'unlocked'}">${isLocked ? '🔒 Verrouillée' : '🔓 Ouverte'}</span>
           </div>
           <div class="lock-meta">
@@ -282,9 +325,10 @@
             ${battery ? `${battery}<br>` : ''}
             <span style="font-size:10px;color:var(--text2);font-family:monospace">${lock.device_id}</span>
           </div>
-          <div class="lock-actions">
+          ${modeInfo}
+          <div class="lock-actions" style="margin-top:12px">
             <button class="btn btn-primary" onclick="openModal('${lock.device_id}', '${(lock.properties?.name || '').replace(/'/g, '')}')">🔑 Générer code</button>
-            <button class="btn" onclick="loadCodes('${lock.device_id}', this)">📋 Voir codes</button>
+            <button class="btn" onclick="loadCodes('${lock.device_id}', this, ${isOffline})">📋 Voir codes</button>
           </div>
           <div class="codes-list" id="codes-${lock.device_id}" style="display:none"></div>
         </div>
@@ -292,7 +336,7 @@
     }).join('')}</div>`
   }
 
-  window.loadCodes = async (lockId, btn) => {
+  window.loadCodes = async (lockId, btn, isOffline = false) => {
     const list = document.getElementById(`codes-${lockId}`)
     if (list.style.display === 'flex' || list.style.display === 'block') {
       list.style.display = 'none'
@@ -317,7 +361,9 @@
                 ${c.ends_at   ? ` au ${new Date(c.ends_at).toLocaleDateString('fr-FR')}` : ''}
               </div>
             </div>
-            <button class="btn" style="font-size:11px" onclick="deleteCode('${c.access_code_id}', '${lockId}')">🗑</button>
+            ${isOffline || c.is_offline_access_code
+              ? '<button class="btn btn-trash-disabled" style="font-size:11px" title="Code immuable (mode offline)" onclick="return false">🗑</button>'
+              : `<button class="btn" style="font-size:11px" onclick="deleteCode('${c.access_code_id}', '${lockId}')">🗑</button>`}
           </div>
         `).join('')
       }
