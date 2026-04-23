@@ -221,13 +221,22 @@
 
     let sejourBadge = ''
     if (task.arrival && task.departure) {
-      const today   = new Date(); today.setHours(0,0,0,0)
-      const arrDate = new Date(task.arrival)
-      const depDate = new Date(task.departure)
-      const diff    = Math.ceil((arrDate - today) / 86400000)
-      if (today < arrDate)       sejourBadge = `<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:2px 8px;border-radius:20px">🟡 Arrive dans ${diff}j</span>`
-      else if (today <= depDate) sejourBadge = `<span style="background:#E1F5EE;color:var(--green);font-size:10px;padding:2px 8px;border-radius:20px">🟢 Séjour en cours</span>`
-      else                       sejourBadge = `<span style="background:var(--bg2);color:var(--text2);font-size:10px;padding:2px 8px;border-radius:20px;border:0.5px solid var(--border)">⚫ Séjour passé</span>`
+      // Comparaison en string YYYY-MM-DD (evite les pieges de timezone).
+      // Le jour de l'arrivee, on affiche "Arrive aujourd'hui" (pas "1j").
+      const today   = new Date().toISOString().split('T')[0]
+      const arrival = task.arrival
+      const departure = task.departure
+      if (today < arrival) {
+        const diff = Math.round((new Date(arrival) - new Date(today)) / 86400000)
+        const label = diff === 1 ? 'demain' : `dans ${diff}j`
+        sejourBadge = `<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:2px 8px;border-radius:20px">🟡 Arrive ${label}</span>`
+      } else if (today === arrival) {
+        sejourBadge = `<span style="background:#FFF3CD;color:#856404;font-size:10px;padding:2px 8px;border-radius:20px">🟡 Arrive aujourd'hui</span>`
+      } else if (today <= departure) {
+        sejourBadge = `<span style="background:#E1F5EE;color:var(--green);font-size:10px;padding:2px 8px;border-radius:20px">🟢 Séjour en cours</span>`
+      } else {
+        sejourBadge = `<span style="background:var(--bg2);color:var(--text2);font-size:10px;padding:2px 8px;border-radius:20px;border:0.5px solid var(--border)">⚫ Séjour passé</span>`
+      }
     }
 
     let statusBadge = ''
