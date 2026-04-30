@@ -59,6 +59,7 @@
     .menage-card-time { font-size: 9px; opacity: 0.7; margin-top: 2px; }
     .menage-card-check { position: absolute; top: 4px; right: 4px; font-size: 10px; }
     .menage-card-comment { position: absolute; bottom: 4px; right: 4px; font-size: 9px; }
+    .menage-card-pending { position: absolute; top: 4px; left: 4px; font-size: 9px; opacity: 0.8; }
 
     .prop-color-0 { background: #DBEAFE; color: #1E40AF; }
     .prop-color-1 { background: #D1FAE5; color: #065F46; }
@@ -80,13 +81,21 @@
     .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
     .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 
-    .modal-error { background: #FEE2E2; border: 0.5px solid #DC2626; color: #991B1B; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+    .modal-error   { background: #FEE2E2; border: 0.5px solid #DC2626; color: #991B1B; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
     .modal-error.visible { display: block; }
     .modal-success { background: #D1FAE5; border: 0.5px solid #059669; color: #065F46; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
     .modal-success.visible { display: block; }
+    .modal-warning { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+    .modal-warning.visible { display: block; }
 
     .admin-note { background: #FFF3CD; border: 0.5px solid #F59E0B; border-radius: var(--radius); padding: 10px 12px; margin-top: 14px; font-size: 12px; color: #92400E; line-height: 1.5; }
     .admin-note-title { font-weight: 600; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* Bandeau global "actions en attente" */
+    .sync-banner { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E; border-radius: var(--radius); padding: 8px 12px; margin-bottom: 12px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+    .sync-banner.offline { background: #FEE2E2; border-color: #DC2626; color: #991B1B; }
+    .sync-banner-spinner { animation: spin 1s linear infinite; display: inline-block; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
     /* Fil d'actualités */
     .news-panel { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
@@ -149,6 +158,9 @@
         </div>
 
         <div>
+          <!-- Bandeau sync (cache si rien a syncer) -->
+          <div class="sync-banner" id="sync-banner" style="display:none"></div>
+
           <!-- Fil d'actualités -->
           <div class="news-panel" id="news-panel" style="display:none">
             <div class="news-header">
@@ -189,8 +201,9 @@
     <div class="modal-sub" id="modal-sub"></div>
     <div id="modal-body"></div>
     <div id="modal-note"></div>
-    <div class="modal-error" id="modal-error"></div>
+    <div class="modal-error"   id="modal-error"></div>
     <div class="modal-success" id="modal-success"></div>
+    <div class="modal-warning" id="modal-warning"></div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="modal-done">✓ Marquer fait</button>
       <button class="btn" id="modal-close">Fermer</button>
@@ -206,9 +219,16 @@
   const JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
   const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
 
+  // Cles localStorage. v2 pour ne pas etre pollue par l ancienne clef qui
+  // melangeait verite serveur et clic visuel.
+  const LS_DONE_SERVER = 'menages-done-server-v2'   // miroir verite serveur, format `${booking_id}|${departure_date}`
+  const LS_PENDING     = 'menages-pending-v2'       // file [{action, booking_id, property_id, departure_date, ts}]
+
   let properties = []
   let bookings = []
-  let doneSet = new Set()
+  let doneSet = new Set()              // ids menage afficheS comme fait (= union miroir + pending)
+  let serverDoneSet = new Set()        // miroir serveur
+  let pendingQueue = []                // file actions en attente
   let commentsMap = {}
   let visibilityDays = 30
   let currentWeekStart = getMonday(new Date())
@@ -217,6 +237,7 @@
   let selectedMenage = null
   let newsItems = []
   let currentToken = null
+  let isFlushingQueue = false
 
   function getToken() { return new URLSearchParams(window.location.search).get('token') }
 
@@ -227,12 +248,14 @@
       return
     }
 
-    loadDoneSet()
+    loadLocalState()
     await loadData(currentToken)
+    rebuildDoneSet()
     renderFilters()
     renderNews()
     renderMiniCal()
     renderWeek()
+    renderSyncBanner()
 
     document.getElementById('btn-prev-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, -7); renderWeek(); renderMiniCal() })
     document.getElementById('btn-next-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, 7); renderWeek(); renderMiniCal() })
@@ -240,13 +263,137 @@
     document.getElementById('mini-prev').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() - 1, 1); renderMiniCal() })
     document.getElementById('mini-next').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1); renderMiniCal() })
     document.getElementById('modal-close').addEventListener('click', closeModal)
-    document.getElementById('modal-done').addEventListener('click', markDone)
+    document.getElementById('modal-done').addEventListener('click', onModalDoneClick)
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
     document.getElementById('news-close').addEventListener('click', markAllNewsRead)
+
+    // Sync au retour de connexion
+    window.addEventListener('online',  () => { console.log('[Sync] Online');  flushPendingQueue() })
+    window.addEventListener('offline', () => { console.log('[Sync] Offline'); renderSyncBanner() })
+
+    // Tentative de flush au demarrage si on a des actions en attente
+    if (pendingQueue.length > 0) flushPendingQueue()
   }
 
+  // ─── Local storage : chargement / persistance ──────────────────────────────
+  function loadLocalState() {
+    try { const raw = localStorage.getItem(LS_DONE_SERVER); if (raw) serverDoneSet = new Set(JSON.parse(raw)) } catch(e) {}
+    try { const raw = localStorage.getItem(LS_PENDING);     if (raw) pendingQueue  = JSON.parse(raw)         } catch(e) {}
+  }
+  function saveServerDoneSet() { localStorage.setItem(LS_DONE_SERVER, JSON.stringify([...serverDoneSet])) }
+  function savePendingQueue()  { localStorage.setItem(LS_PENDING,     JSON.stringify(pendingQueue))       }
+
+  // doneSet (le visuel) = (serverDoneSet + pending markDone) - (pending markUndone)
+  function rebuildDoneSet() {
+    const s = new Set()
+    for (const key of serverDoneSet) {
+      const [bookingId, departureDate] = key.split('|')
+      s.add(`${bookingId}-${departureDate}`)
+    }
+    for (const action of pendingQueue) {
+      const id = `${action.booking_id}-${action.departure_date}`
+      if (action.action === 'markDone')   s.add(id)
+      if (action.action === 'markUndone') s.delete(id)
+    }
+    doneSet = s
+  }
+
+  // ─── Bandeau de sync ────────────────────────────────────────────────────────
+  function renderSyncBanner() {
+    const el = document.getElementById('sync-banner')
+    if (!navigator.onLine) {
+      el.className = 'sync-banner offline'
+      el.innerHTML = '📡 Hors ligne. Vos actions seront envoyees au retour de la connexion.'
+      el.style.display = 'flex'
+      return
+    }
+    if (pendingQueue.length > 0) {
+      el.className = 'sync-banner'
+      el.innerHTML = `<span class="sync-banner-spinner">⏳</span> ${pendingQueue.length} action(s) en attente d envoi...`
+      el.style.display = 'flex'
+      return
+    }
+    el.style.display = 'none'
+  }
+
+  // ─── Flush de la file d actions ────────────────────────────────────────────
+  async function flushPendingQueue() {
+    if (isFlushingQueue) return
+    if (!navigator.onLine) { renderSyncBanner(); return }
+    if (pendingQueue.length === 0) { renderSyncBanner(); return }
+
+    isFlushingQueue = true
+    renderSyncBanner()
+
+    const queue = [...pendingQueue]
+    for (const action of queue) {
+      try {
+        const res = await fetch(`/api/menages-public?token=${currentToken}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action)
+        })
+
+        if (res.ok) {
+          const payload = await res.json().catch(() => ({}))
+          if (!payload.error) {
+            const key = `${action.booking_id}|${action.departure_date}`
+            if (action.action === 'markDone')   serverDoneSet.add(key)
+            if (action.action === 'markUndone') serverDoneSet.delete(key)
+            saveServerDoneSet()
+            removeFromPending(action)
+          } else {
+            console.error('[Sync] Erreur metier, action retiree:', action, payload.error)
+            removeFromPending(action)
+            rebuildDoneSet()
+          }
+        } else if (res.status >= 400 && res.status < 500) {
+          // Erreur 4xx : pas la peine de retenter (token, garde-fou departure futur...)
+          const payload = await res.json().catch(() => ({}))
+          console.error('[Sync] Erreur 4xx, action abandonnee:', action, payload.error)
+          removeFromPending(action)
+          rebuildDoneSet()
+        }
+        // 5xx ou autre : on garde dans la file pour retry plus tard
+      } catch (err) {
+        console.error('[Sync] Erreur reseau pendant flush:', err)
+        break  // inutile de continuer si on a perdu la connexion en cours
+      }
+    }
+
+    isFlushingQueue = false
+    renderSyncBanner()
+    renderWeek()
+    renderMiniCal()
+  }
+
+  function removeFromPending(action) {
+    pendingQueue = pendingQueue.filter(a =>
+      !(a.action === action.action && a.booking_id === action.booking_id && a.departure_date === action.departure_date)
+    )
+    savePendingQueue()
+  }
+
+  function enqueuePending(action) {
+    // On retire d abord toute action conflictuelle pour le meme menage
+    pendingQueue = pendingQueue.filter(a =>
+      !(a.booking_id === action.booking_id && a.departure_date === action.departure_date)
+    )
+    pendingQueue.push({ ...action, ts: Date.now() })
+    savePendingQueue()
+  }
+
+  // ─── Chargement initial ────────────────────────────────────────────────────
   async function loadData(token) {
-    const res = await fetch(`/api/menages-public?token=${token}`)
+    let res
+    try {
+      res = await fetch(`/api/menages-public?token=${token}`)
+    } catch (err) {
+      // Pas de reseau au demarrage : mode degraded, on reste avec le cache
+      console.warn('[Init] Hors ligne, mode degraded')
+      document.getElementById('presta-label').textContent = '(Hors ligne — donnees en cache)'
+      return
+    }
     if (!res.ok) {
       document.querySelector('.content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Token invalide</div>'
       return
@@ -264,11 +411,15 @@
     activeProps = new Set(properties.map(p => p.id))
     bookings = data.bookings || []
 
-    // Commentaires
     ;(data.comments || []).forEach(c => { commentsMap[`${c.booking_id}-${c.departure_date}`] = c.comment })
 
-    // Événements
     newsItems = data.events || []
+
+    // Verite serveur : on remplace le miroir local
+    if (Array.isArray(data.done)) {
+      serverDoneSet = new Set(data.done.map(d => `${d.booking_id}|${d.departure_date}`))
+      saveServerDoneSet()
+    }
   }
 
   function getMenages() {
@@ -279,13 +430,14 @@
       const dep = new Date(b.departure)
       const propIdx = properties.findIndex(p => p.id === b.propId)
       const id = `${b.id}-${b.departure}`
+      const isPending = pendingQueue.some(a => a.booking_id === String(b.id) && a.departure_date === b.departure)
       menages.push({
         id, date: dep, dateStr: b.departure,
         propId: b.propId, propName: b.propName, propIdx,
         guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
         arrival: b.arrival, departure: b.departure,
         numAdult: b.numAdult || 0, numChild: b.numChild || 0,
-        bookId: b.id, done: doneSet.has(id),
+        bookId: b.id, done: doneSet.has(id), pending: isPending,
         comment: commentsMap[`${b.id}-${b.departure}`] || ''
       })
     }
@@ -357,7 +509,6 @@
       `
     }).join('')
 
-    // Clic sur un item → marquer comme lu
     list.querySelectorAll('.news-item').forEach(item => {
       item.addEventListener('click', async () => {
         const id = item.dataset.id
@@ -368,7 +519,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'markRead', event_ids: [id] })
-          })
+          }).catch(() => {})
           renderNews()
         }
       })
@@ -383,7 +534,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'markRead', event_ids: unreadIds })
-    })
+    }).catch(() => {})
     renderNews()
   }
 
@@ -428,6 +579,7 @@
                 <div class="menage-card-title">Ménage départ</div>
                 <div class="menage-card-time">${m.guestName}</div>
                 ${m.done ? '<div class="menage-card-check">✓</div>' : ''}
+                ${m.pending ? '<div class="menage-card-pending">⏳</div>' : ''}
                 ${m.comment ? '<div class="menage-card-comment">📝</div>' : ''}
               </div>
             `
@@ -499,40 +651,26 @@
     }
   }
 
-  // Regle metier : un menage est rendu obsolete si l'une de ces 3 conditions :
-  //   1. Un menage POSTERIEUR sur la meme propriete a deja ete marque fait
-  //   2. Un voyageur POSTERIEUR est deja arrive (arrival <= aujourd'hui) :
-  //      il n'aurait pas pu dormir dans du sale, donc le menage a eu lieu
-  //   3. Un voyageur POSTERIEUR est actuellement en sejour (cas special de 2)
-  // Si obsolete : on ne propose plus de marquer "fait", la carte est grisee.
   function isMenageObsolete(m, allMenages) {
     if (m.done) return false
-
     const today = new Date(); today.setHours(0,0,0,0)
     const menageDate = new Date(m.date); menageDate.setHours(0,0,0,0)
-
-    // Cas 1 : menage posterieur deja fait
     const laterDone = allMenages.some(other =>
-      other.propId === m.propId &&
-      other.id !== m.id &&
-      other.done &&
+      other.propId === m.propId && other.id !== m.id && other.done &&
       new Date(other.date) > menageDate
     )
     if (laterDone) return true
-
-    // Cas 2 & 3 : voyageur posterieur deja arrive
-    // On regarde dans la liste des bookings bruts (pas menages) car un voyageur
-    // peut etre arrive sans qu'il y ait encore un menage planifie pour son
-    // propre depart. On detecte toute arrival posterieure a la date de depart
-    // du menage courant et <= aujourd'hui.
     const laterArrived = bookings.some(b =>
-      b.propId === m.propId &&
-      b.id !== m.bookId &&
-      b.arrival &&
-      new Date(b.arrival) > menageDate &&
-      new Date(b.arrival) <= today
+      b.propId === m.propId && b.id !== m.bookId && b.arrival &&
+      new Date(b.arrival) > menageDate && new Date(b.arrival) <= today
     )
     return laterArrived
+  }
+
+  // Garde-fou cote front : on bloque le clic markDone sur un menage futur.
+  // Comparaison string YYYY-MM-DD (cf. convention dates pures du projet).
+  function isMenageFuture(m) {
+    return m.dateStr > toDateStr(new Date())
   }
 
   function openModal(m) {
@@ -544,7 +682,7 @@
       <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? m.numChild + ' enfant(s) 👶' : 'Aucun'}</span></div>
       <div class="modal-row"><span>Arrivée</span><span>${m.arrival || '—'}</span></div>
       <div class="modal-row"><span>Départ</span><span>${m.departure || '—'}</span></div>
-      <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : '⏳ À faire'}</span></div>
+      <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : (m.pending ? '⏳ En attente d envoi' : '⏳ À faire')}</span></div>
     `
 
     const noteEl = document.getElementById('modal-note')
@@ -552,10 +690,10 @@
       ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
       : ''
 
-    // Reset messages d'erreur / succes
     hideModalMessages()
 
     const obsolete = isMenageObsolete(m, getMenages())
+    const future   = isMenageFuture(m)
 
     const btn = document.getElementById('modal-done')
     btn.style.opacity = ''
@@ -566,6 +704,11 @@
       btn.disabled = false
     } else if (obsolete) {
       btn.textContent = '⏭ Obsolète (un voyageur suivant est déjà arrivé)'
+      btn.className = 'btn'
+      btn.disabled = true
+      btn.style.opacity = '0.4'
+    } else if (future) {
+      btn.textContent = '🔒 Le voyageur n est pas encore parti'
       btn.className = 'btn'
       btn.disabled = true
       btn.style.opacity = '0.4'
@@ -580,32 +723,157 @@
 
   function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null; hideModalMessages() }
 
-  // Helpers messages modal
-  function showModalError(msg) {
-    const el = document.getElementById('modal-error')
-    const ok = document.getElementById('modal-success')
-    el.textContent = msg
-    el.classList.add('visible')
-    ok.classList.remove('visible')
-  }
-  function showModalSuccess(msg) {
-    const el = document.getElementById('modal-success')
-    const er = document.getElementById('modal-error')
-    el.textContent = msg
-    el.classList.add('visible')
-    er.classList.remove('visible')
+  // ─── Helpers messages modal ────────────────────────────────────────────────
+  function showModalError(msg)   { setModalMessage('error',   msg) }
+  function showModalSuccess(msg) { setModalMessage('success', msg) }
+  function showModalWarning(msg) { setModalMessage('warning', msg) }
+  function setModalMessage(type, msg) {
+    ;['error','success','warning'].forEach(t => {
+      const el = document.getElementById(`modal-${t}`)
+      if (t === type) { el.textContent = msg; el.classList.add('visible') }
+      else { el.classList.remove('visible') }
+    })
   }
   function hideModalMessages() {
-    document.getElementById('modal-error').classList.remove('visible')
-    document.getElementById('modal-success').classList.remove('visible')
+    ;['error','success','warning'].forEach(t => document.getElementById(`modal-${t}`).classList.remove('visible'))
   }
 
-  // Fetch avec retry simple sur erreur reseau (1 retry apres 1.5s)
-  async function fetchWithRetry(url, options, retries = 1) {
+  // ─── Routage du clic du bouton modal-done ──────────────────────────────────
+  async function onModalDoneClick() {
+    if (!selectedMenage) return
+    if (selectedMenage.done) await doMarkUndone()
+    else await doMarkDone()
+  }
+
+  // ─── markDone : tente serveur, sinon enqueue offline ───────────────────────
+  async function doMarkDone() {
+    const menage = selectedMenage
+    const btn = document.getElementById('modal-done')
+    const originalText = btn.textContent
+
+    if (!menage.bookId || !menage.propId || !menage.dateStr) {
+      showModalError('Donnees manquantes (booking_id, property_id ou departure_date).')
+      return
+    }
+    if (isMenageFuture(menage)) {
+      showModalError('Le voyageur n est pas encore parti. Impossible de marquer fait.')
+      return
+    }
+
+    btn.disabled = true
+    btn.textContent = '⏳ Envoi en cours...'
+    hideModalMessages()
+
+    const action = {
+      action: 'markDone',
+      booking_id: String(menage.bookId),
+      property_id: String(menage.propId),
+      departure_date: menage.dateStr
+    }
+
     try {
-      const res = await fetch(url, options)
-      return res
+      const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action)
+      }, 1)
+
+      if (!res.ok) {
+        let serverMsg = ''
+        try { const errBody = await res.json(); serverMsg = errBody.error || '' } catch(e) {}
+        showModalError(serverMsg || `Erreur serveur ${res.status}`)
+        btn.disabled = false
+        btn.textContent = originalText
+        return
+      }
+
+      const payload = await res.json().catch(() => ({}))
+      if (payload.error) {
+        showModalError(`Erreur : ${payload.error}`)
+        btn.disabled = false
+        btn.textContent = originalText
+        return
+      }
+
+      // Succes serveur : on met a jour le miroir
+      const key = `${action.booking_id}|${action.departure_date}`
+      serverDoneSet.add(key)
+      saveServerDoneSet()
+      rebuildDoneSet()
+      showModalSuccess('Menage marque comme fait')
+      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 800)
+
     } catch (err) {
+      // Erreur reseau : on enqueue pour envoi differe
+      console.warn('[markDone] Reseau KO, mise en file:', err)
+      enqueuePending(action)
+      rebuildDoneSet()
+      showModalWarning('Hors ligne : action enregistree, sera envoyee au retour de la connexion.')
+      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 1200)
+    }
+  }
+
+  // ─── markUndone : tente serveur, sinon enqueue ─────────────────────────────
+  async function doMarkUndone() {
+    const menage = selectedMenage
+    const btn = document.getElementById('modal-done')
+    const originalText = btn.textContent
+
+    btn.disabled = true
+    btn.textContent = '⏳ Envoi en cours...'
+    hideModalMessages()
+
+    const action = {
+      action: 'markUndone',
+      booking_id: String(menage.bookId),
+      property_id: String(menage.propId),
+      departure_date: menage.dateStr
+    }
+
+    try {
+      const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action)
+      }, 1)
+
+      if (!res.ok) {
+        let serverMsg = ''
+        try { const errBody = await res.json(); serverMsg = errBody.error || '' } catch(e) {}
+        showModalError(serverMsg || `Erreur serveur ${res.status}`)
+        btn.disabled = false
+        btn.textContent = originalText
+        return
+      }
+
+      const payload = await res.json().catch(() => ({}))
+      if (payload.error) {
+        showModalError(`Erreur : ${payload.error}`)
+        btn.disabled = false
+        btn.textContent = originalText
+        return
+      }
+
+      const key = `${action.booking_id}|${action.departure_date}`
+      serverDoneSet.delete(key)
+      saveServerDoneSet()
+      rebuildDoneSet()
+      showModalSuccess('Menage decoche')
+      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 800)
+
+    } catch (err) {
+      console.warn('[markUndone] Reseau KO, mise en file:', err)
+      enqueuePending(action)
+      rebuildDoneSet()
+      showModalWarning('Hors ligne : action enregistree, sera envoyee au retour de la connexion.')
+      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 1200)
+    }
+  }
+
+  // ─── Fetch avec retry simple ───────────────────────────────────────────────
+  async function fetchWithRetry(url, options, retries = 1) {
+    try { return await fetch(url, options) }
+    catch (err) {
       if (retries > 0) {
         await new Promise(r => setTimeout(r, 1500))
         return fetchWithRetry(url, options, retries - 1)
@@ -614,103 +882,19 @@
     }
   }
 
-  // markDone blinde : await + check response.ok + check payload + rollback en cas d echec
-  async function markDone() {
-    if (!selectedMenage) return
-
-    const wasAlreadyDone = doneSet.has(selectedMenage.id)
-    const btn = document.getElementById('modal-done')
-    const originalText = btn.textContent
-    const menage = selectedMenage  // capture local pour eviter race condition si modal se ferme
-
-    // Annulation cote front uniquement (pas d'appel backend pour l'instant)
-    if (wasAlreadyDone) {
-      doneSet.delete(menage.id)
-      saveDoneSet()
-      closeModal()
-      renderWeek()
-      renderMiniCal()
-      return
-    }
-
-    // Marquer fait : on doit attendre la confirmation backend avant tout affichage
-    if (!menage.bookId || !menage.propId) {
-      showModalError('Donnees manquantes (booking_id ou property_id). Impossible de marquer fait.')
-      return
-    }
-
-    // UI : bouton desactive pendant l'appel
-    btn.disabled = true
-    btn.textContent = '⏳ Envoi en cours...'
-    hideModalMessages()
-
-    try {
-      const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'markDone',
-          booking_id: menage.bookId,
-          property_id: menage.propId
-        })
-      }, 1)
-
-      if (!res.ok) {
-        // Le serveur a repondu avec une erreur HTTP
-        let serverMsg = ''
-        try { const errBody = await res.json(); serverMsg = errBody.error || '' } catch(e) {}
-        showModalError(`Erreur serveur (${res.status}). ${serverMsg || 'Reessayez.'}`)
-        btn.disabled = false
-        btn.textContent = originalText
-        return
-      }
-
-      // Parse payload pour validation cote serveur
-      let payload = {}
-      try {
-        payload = await res.json()
-      } catch (e) {
-        showModalError('Reponse serveur invalide. Reessayez.')
-        btn.disabled = false
-        btn.textContent = originalText
-        return
-      }
-
-      // On considere succes si le serveur n a pas renvoye d erreur explicite
-      if (payload.error) {
-        showModalError(`Erreur : ${payload.error}`)
-        btn.disabled = false
-        btn.textContent = originalText
-        return
-      }
-
-      // Tout est OK : on persiste cote front
-      doneSet.add(menage.id)
-      saveDoneSet()
-
-      const sentMsg = payload.messagesSent > 0 ? ` (${payload.messagesSent} message envoye)` : ''
-      showModalSuccess(`Menage marque comme fait${sentMsg}`)
-      console.log('[Menage] Backend confirme markDone', payload)
-
-      // Fermer la modal apres un court delai pour que la femme de menage voie le succes
-      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal() }, 800)
-
-    } catch (err) {
-      // Erreur reseau (timeout, offline, fetch avorte)
-      console.error('[Menage] Erreur reseau markDone:', err)
-      showModalError('Pas de connexion. Verifiez votre reseau et reessayez.')
-      btn.disabled = false
-      btn.textContent = originalText
-    }
-  }
-
-  function loadDoneSet() { const raw = localStorage.getItem('menages-done-public'); if (raw) doneSet = new Set(JSON.parse(raw)) }
-  function saveDoneSet() { localStorage.setItem('menages-done-public', JSON.stringify([...doneSet])) }
-
+  // ─── Helpers dates ─────────────────────────────────────────────────────────
   function getMonday(date) { const d = new Date(date); d.setHours(0,0,0,0); const day = d.getDay(); d.setDate(d.getDate() + ((day === 0) ? -6 : 1 - day)); return d }
   function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }
   function formatDate(date) { return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) }
-  function toDateStr(date) { return date.toISOString().split('T')[0] }
+  function toDateStr(date) {
+    // YYYY-MM-DD en heure locale (pas UTC, pour rester coherent avec departure
+    // de Beds24 qui est en heure locale du bien). On evite toISOString() qui
+    // shifte en UTC et peut faire passer la date du jour au lendemain.
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
   function getDotColor(i) { return ['#3B82F6', '#10B981', '#F59E0B', '#EC4899'][i % 4] }
 
   init()
