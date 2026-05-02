@@ -658,7 +658,7 @@ if ("serviceWorker" in navigator) {
       if (day) day.style.display = 'none'
       if (planningHeader) planningHeader.style.display = ''
       if (weekStats) weekStats.style.display = ''
-      routeRender()
+      renderWeek(); renderMiniCal()
       return
     }
     // Mobile : on affiche selon currentView
@@ -683,7 +683,7 @@ if ("serviceWorker" in navigator) {
       if (day) day.style.display = 'none'
       if (planningHeader) planningHeader.style.display = ''
       if (weekStats) weekStats.style.display = ''
-      routeRender()
+      renderWeek(); renderMiniCal()
     }
   }
 
