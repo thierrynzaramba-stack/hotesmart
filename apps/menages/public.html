@@ -121,6 +121,134 @@
     .news-content-sub { font-size: 11px; color: var(--text2); margin-top: 2px; line-height: 1.4; }
     .news-time { font-size: 10px; color: var(--text2); flex-shrink: 0; white-space: nowrap; }
     .news-empty { font-size: 12px; color: var(--text2); text-align: center; padding: 16px; }
+
+    /* ============================================ */
+    /* RESPONSIVE MOBILE - breakpoint 900px         */
+    /* ============================================ */
+    @media (max-width: 900px) {
+      /* Layout principal en colonne unique */
+      .menage-layout { grid-template-columns: 1fr; gap: 12px; }
+
+      /* Sidebar (mini-cal + filtres) masquee sur mobile */
+      .menage-layout > div:first-child { display: none; }
+
+      /* Header planning : stack vertical */
+      .planning-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .week-nav {
+        justify-content: space-between;
+        width: 100%;
+      }
+      .week-nav button {
+        font-size: 12px;
+        padding: 8px 10px;
+        flex-shrink: 0;
+      }
+      .week-label {
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+      }
+      .planning-header > .btn {
+        width: 100%;
+      }
+
+      /* Stats semaine : passe en wrap */
+      .week-stats {
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .week-stat {
+        flex: 1;
+        min-width: 100px;
+        font-size: 11px;
+        padding: 8px 10px;
+      }
+      .week-stat strong { font-size: 16px; }
+
+      /* Grille semaine : 1 colonne, jours empiles */
+      .week-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      /* Cartes jour adaptees mobile */
+      .day-col {
+        min-height: auto;
+        border-radius: var(--radius-lg);
+      }
+      .day-col.day-empty-mobile {
+        opacity: 0.5;
+      }
+      .day-header {
+        padding: 10px 14px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .day-name {
+        font-size: 12px;
+      }
+      .day-number {
+        font-size: 16px;
+      }
+      .day-body {
+        padding: 8px;
+        gap: 6px;
+      }
+
+      /* Cartes menage : taille tactile minimale */
+      .menage-card {
+        padding: 10px 12px;
+        font-size: 13px;
+        min-height: 44px;
+      }
+      .menage-card-prop {
+        font-size: 10px;
+      }
+      .menage-card-time {
+        font-size: 10px;
+      }
+
+      /* News panel : compact mobile */
+      .news-panel {
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+
+      /* Sync banner : compact */
+      .sync-banner {
+        font-size: 11px;
+        padding: 8px 10px;
+      }
+
+      /* Modal : presque plein ecran */
+      .modal {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        max-height: 85vh;
+      }
+      .modal-overlay {
+        align-items: flex-end;
+      }
+
+      /* Topbar plus compacte */
+      .topbar {
+        padding: 12px 16px;
+      }
+      .page-title {
+        font-size: 16px;
+      }
+      .page-sub {
+        font-size: 11px;
+      }
+    }
   </style>
 </head>
 <body>
