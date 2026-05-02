@@ -15,6 +15,15 @@
     /* Toggle 3 vues - cache par defaut (visible seulement sur mobile) */
     .view-toggle { display: none; }
 
+    /* Vues Mois et Jour - cachees sur desktop */
+    .month-view, .day-view { display: none; }
+
+    /* Bouton flottant Filtres - cache sur desktop */
+    .fab-filters { display: none; }
+
+    /* Bottom sheet - cache sur desktop */
+    .bottom-sheet, .bottom-sheet-overlay { display: none; }
+
     .menage-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
 
     .mini-cal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; position: sticky; top: 0; }
@@ -284,6 +293,163 @@
       .page-sub {
         font-size: 11px;
       }
+
+      /* ======= VUE MOIS ======= */
+      .month-view {
+        background: var(--bg);
+        border: 0.5px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 12px;
+      }
+      .month-grid-header {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+        margin-bottom: 6px;
+      }
+      .month-grid-header > div {
+        font-size: 11px;
+        color: var(--text2);
+        text-align: center;
+        padding: 4px 0;
+        font-weight: 500;
+      }
+      .month-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+      }
+      .month-cell {
+        aspect-ratio: 1;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        position: relative;
+        font-size: 11px;
+        color: var(--text2);
+        background: transparent;
+        border: none;
+        font-family: inherit;
+        padding: 0;
+      }
+      .month-cell.other-month { opacity: 0.25; }
+      .month-cell.has-todo { background: #FFF3CD; color: #856404; }
+      .month-cell.all-done { background: #D1FAE5; color: #065F46; }
+      .month-cell.today { background: var(--primary); color: white; }
+      .month-cell.today.has-todo,
+      .month-cell.today.all-done { background: var(--primary); color: white; }
+      .month-cell-num { font-size: 11px; line-height: 1.1; opacity: 0.75; }
+      .month-cell-count { font-size: 16px; font-weight: 600; line-height: 1.1; }
+      .month-legend {
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+        margin-top: 12px;
+        font-size: 11px;
+        color: var(--text2);
+      }
+      .month-legend span { display: flex; align-items: center; gap: 4px; }
+      .legend-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+      .legend-todo { background: #FFF3CD; }
+      .legend-done { background: #D1FAE5; }
+      .legend-today { background: var(--primary); }
+
+      /* ======= VUE JOUR ======= */
+      .day-view-list { display: flex; flex-direction: column; gap: 12px; }
+      .day-card {
+        background: var(--bg);
+        border: 0.5px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 14px;
+      }
+      .day-card.is-done { background: #F0FDF4; border-color: #BBF7D0; }
+      .day-card-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+      .day-card-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+      .day-card.is-done .day-card-dot {
+        width: 24px; height: 24px;
+        background: #5DCAA5 !important;
+        margin-top: 0;
+        display: flex; align-items: center; justify-content: center;
+        color: white; font-size: 13px;
+      }
+      .day-card-info { flex: 1; min-width: 0; }
+      .day-card-title { font-size: 15px; font-weight: 500; line-height: 1.3; }
+      .day-card.is-done .day-card-title { text-decoration: line-through; color: var(--text2); }
+      .day-card-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+      .day-card-meta { font-size: 11px; color: var(--text2); margin-top: 6px; }
+      .day-card.is-done .day-card-meta { color: #0F6E56; }
+      .day-card-action {
+        width: 100%; padding: 12px; border-radius: 10px;
+        border: none; background: var(--primary); color: white;
+        font-weight: 500; font-size: 14px;
+        cursor: pointer; font-family: inherit;
+      }
+      .day-card-undo {
+        border: none; background: transparent; color: var(--text2);
+        font-size: 11px; padding: 4px 8px;
+        cursor: pointer; font-family: inherit;
+      }
+      .day-view-empty { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; }
+      .day-view-nav {
+        display: flex; align-items: center; justify-content: space-between;
+        background: var(--bg); border: 0.5px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 8px 12px; margin-bottom: 12px;
+      }
+      .day-view-nav button {
+        background: var(--bg); border: 0.5px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 10px; cursor: pointer;
+        font-size: 14px; font-family: inherit;
+      }
+      .day-view-nav-label { text-align: center; flex: 1; }
+      .day-view-nav-day { font-size: 11px; color: var(--text2); text-transform: uppercase; }
+      .day-view-nav-date { font-size: 14px; font-weight: 500; }
+
+      /* ======= BOUTON FLOTTANT FILTRES ======= */
+      .fab-filters {
+        display: flex;
+        position: fixed; bottom: 20px; right: 16px;
+        width: 52px; height: 52px;
+        border-radius: 50%;
+        background: var(--primary); color: white;
+        border: none; font-size: 22px; cursor: pointer;
+        box-shadow: 0 4px 12px rgba(201, 123, 92, 0.4);
+        z-index: 50;
+        align-items: center; justify-content: center;
+        font-family: inherit;
+      }
+
+      /* ======= BOTTOM SHEET ======= */
+      .bottom-sheet-overlay {
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 99;
+      }
+      .bottom-sheet-overlay.visible { display: block; }
+      .bottom-sheet {
+        display: none;
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: var(--bg);
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        padding: 16px;
+        z-index: 100;
+        max-height: 70vh; overflow-y: auto;
+      }
+      .bottom-sheet.visible { display: flex; flex-direction: column; gap: 12px; }
+      .bottom-sheet-handle {
+        width: 36px; height: 4px;
+        background: var(--border2);
+        border-radius: 2px;
+        margin: 0 auto 8px;
+      }
+      .bottom-sheet-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+      .bottom-sheet-content { display: flex; flex-direction: column; gap: 4px; }
+      .bottom-sheet-close { margin-top: 8px; width: 100%; }
     }
   </style>
 </head>
@@ -363,6 +529,36 @@
 
           <div class="week-grid" id="week-grid">
             <div style="grid-column:span 7;text-align:center;padding:40px;color:var(--text2)">Chargement...</div>
+          </div>
+
+          <!-- Vue Mois (mobile only) -->
+          <div class="month-view" id="month-view" style="display:none">
+            <div class="month-grid-header">
+              <div>L</div><div>M</div><div>M</div><div>J</div><div>V</div><div>S</div><div>D</div>
+            </div>
+            <div class="month-grid" id="month-grid"></div>
+            <div class="month-legend">
+              <span><span class="legend-dot legend-todo"></span>À faire</span>
+              <span><span class="legend-dot legend-done"></span>Tout fait</span>
+              <span><span class="legend-dot legend-today"></span>Aujourd'hui</span>
+            </div>
+          </div>
+
+          <!-- Vue Jour (mobile only) -->
+          <div class="day-view" id="day-view" style="display:none">
+            <div class="day-view-list" id="day-view-list"></div>
+          </div>
+
+          <!-- Bouton flottant Filtres (mobile only) -->
+          <button class="fab-filters" id="fab-filters" type="button" aria-label="Filtres">⚙</button>
+
+          <!-- Bottom sheet Filtres (mobile only) -->
+          <div class="bottom-sheet-overlay" id="filters-overlay" style="display:none"></div>
+          <div class="bottom-sheet" id="filters-sheet" style="display:none">
+            <div class="bottom-sheet-handle"></div>
+            <div class="bottom-sheet-title">Biens affichés</div>
+            <div class="bottom-sheet-content" id="filter-list-mobile"></div>
+            <button class="btn btn-primary bottom-sheet-close" id="filters-close-btn">Fermer</button>
           </div>
         </div>
 
