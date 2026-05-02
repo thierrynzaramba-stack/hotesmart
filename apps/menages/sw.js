@@ -1,10 +1,9 @@
 // HôteSmart Clean - Service Worker
 // Strategie: network-first avec fallback cache
 // Bumper CACHE_VERSION a chaque deploiement majeur force le refresh
-const CACHE_VERSION = 'hotesmart-clean-v1';
+const CACHE_VERSION = 'hotesmart-clean-v2';
 const OFFLINE_URLS = [
   './public.html',
-  './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
