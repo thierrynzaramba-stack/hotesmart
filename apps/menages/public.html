@@ -809,7 +809,7 @@ if ("serviceWorker" in navigator) {
     list.querySelectorAll('[data-done]').forEach(btn => {
       btn.addEventListener('click', () => {
         const m = allMenages.find(x => x.id === btn.dataset.done)
-        if (m) openMenageModal(m)
+        if (m) openModal(m)
       })
     })
     list.querySelectorAll('[data-undo]').forEach(btn => {
