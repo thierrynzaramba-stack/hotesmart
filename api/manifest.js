@@ -1,9 +1,9 @@
 // /api/manifest?token=XXX — manifest PWA dynamique scope par prestataire
-import { createClient } from '@supabase/supabase-js'
+const { createClient } = require('@supabase/supabase-js')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_KEY
 )
 
 const TERRACOTTA = '#C97B5C'
@@ -29,13 +29,12 @@ function buildManifest({ name, shortName, token, idSuffix }) {
   }
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8')
-  res.setHeader('Cache-Control', 'public, max-age=300') // 5 min
+  res.setHeader('Cache-Control', 'public, max-age=300')
 
   const token = (req.query.token || '').toString().trim()
 
-  // Pas de token : manifest generique
   if (!token) {
     return res.status(200).json(buildManifest({
       name: 'HôteSmart Clean',
@@ -45,7 +44,6 @@ export default async function handler(req, res) {
     }))
   }
 
-  // Token fourni : on cherche le label
   try {
     const { data, error } = await supabase
       .from('public_tokens')
@@ -54,7 +52,6 @@ export default async function handler(req, res) {
       .maybeSingle()
 
     if (error || !data) {
-      // Token inconnu : manifest generique mais on garde le start_url avec token (laisse le backend rejeter)
       return res.status(200).json(buildManifest({
         name: 'HôteSmart Clean',
         shortName: 'Clean',
