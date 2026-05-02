@@ -632,7 +632,215 @@ if ("serviceWorker" in navigator) {
     document.querySelectorAll('#view-toggle button').forEach(b => {
       b.classList.toggle('active', b.dataset.view === v)
     })
-    // En Étape 3 et 4 on branchera ici le re-render selon la vue.
+    // re-rendu route selon la vue active (branche en Patch 9b)
+    if (typeof routeRender === 'function') routeRender()
+  }
+
+  // Jour selectionne en vue Jour mobile (default = aujourd hui)
+  let selectedDay = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
+
+  function routeRender() {
+    const week = document.getElementById('week-grid')
+    const month = document.getElementById('month-view')
+    const day = document.getElementById('day-view')
+    const planningHeader = document.querySelector('.planning-header')
+    const weekStats = document.getElementById('week-stats')
+    const isMobile = window.matchMedia('(max-width: 900px)').matches
+    if (!isMobile) {
+      // Desktop : seule la vue Semaine est utilisee
+      if (week) week.style.display = ''
+      if (month) month.style.display = 'none'
+      if (day) day.style.display = 'none'
+      if (planningHeader) planningHeader.style.display = ''
+      if (weekStats) weekStats.style.display = ''
+      routeRender()
+      return
+    }
+    // Mobile : on affiche selon currentView
+    if (currentView === 'mois') {
+      if (week) week.style.display = 'none'
+      if (month) month.style.display = 'block'
+      if (day) day.style.display = 'none'
+      if (planningHeader) planningHeader.style.display = 'none'
+      if (weekStats) weekStats.style.display = 'none'
+      renderMonth()
+    } else if (currentView === 'jour') {
+      if (week) week.style.display = 'none'
+      if (month) month.style.display = 'none'
+      if (day) day.style.display = 'block'
+      if (planningHeader) planningHeader.style.display = 'none'
+      if (weekStats) weekStats.style.display = 'none'
+      renderDay()
+    } else {
+      // Semaine (default)
+      if (week) week.style.display = ''
+      if (month) month.style.display = 'none'
+      if (day) day.style.display = 'none'
+      if (planningHeader) planningHeader.style.display = ''
+      if (weekStats) weekStats.style.display = ''
+      routeRender()
+    }
+  }
+
+  // ======= VUE MOIS =======
+  function renderMonth() {
+    const grid = document.getElementById('month-grid')
+    if (!grid) return
+    const today = new Date(); today.setHours(0,0,0,0)
+    const ref = new Date(miniCalDate); ref.setDate(1); ref.setHours(0,0,0,0)
+    const monthIdx = ref.getMonth(); const yearIdx = ref.getFullYear()
+    // Premier lundi affiche : on recule jusqu au lundi precedent
+    const start = new Date(ref)
+    const dow = (start.getDay() + 6) % 7  // 0 = lundi
+    start.setDate(start.getDate() - dow)
+    // 6 lignes x 7 jours = 42 cellules
+    const allMenages = getMenages()
+    const cells = []
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i); d.setHours(0,0,0,0)
+      cells.push(d)
+    }
+    // Ajout d un header de navigation mois
+    const monthLabel = MOIS[monthIdx] + ' ' + yearIdx
+    const navHtml = '<div class="day-view-nav"><button id="month-prev">‹</button>'
+      + '<div class="day-view-nav-label"><div class="day-view-nav-date">' + monthLabel + '</div></div>'
+      + '<button id="month-next">›</button></div>'
+    grid.parentElement.querySelector('.month-grid-nav-wrap')?.remove()
+    const wrap = document.createElement('div'); wrap.className = 'month-grid-nav-wrap'; wrap.innerHTML = navHtml
+    grid.parentElement.insertBefore(wrap, grid.parentElement.firstChild)
+    grid.innerHTML = cells.map(d => {
+      const dayMenages = allMenages.filter(m => {
+        const md = new Date(m.date); md.setHours(0,0,0,0)
+        return md.getTime() === d.getTime()
+      })
+      const total = dayMenages.length
+      const allDone = total > 0 && dayMenages.every(m => m.done)
+      const isToday = d.getTime() === today.getTime()
+      const otherMonth = d.getMonth() !== monthIdx
+      const classes = ['month-cell']
+      if (otherMonth) classes.push('other-month')
+      if (total > 0 && !allDone) classes.push('has-todo')
+      if (total > 0 && allDone) classes.push('all-done')
+      if (isToday) classes.push('today')
+      const dStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0')
+      return '<button type="button" class="' + classes.join(' ') + '" data-date="' + dStr + '">'
+        + (total > 0 ? '<div class="month-cell-num">' + d.getDate() + '</div><div class="month-cell-count">' + total + '</div>' : '<div>' + d.getDate() + '</div>')
+        + '</button>'
+    }).join('')
+    grid.querySelectorAll('.month-cell[data-date]').forEach(el => {
+      el.addEventListener('click', () => {
+        const [y,m,dy] = el.dataset.date.split('-').map(Number)
+        selectedDay = new Date(y, m-1, dy); selectedDay.setHours(0,0,0,0)
+        setCurrentView('jour')
+      })
+    })
+    document.getElementById('month-prev')?.addEventListener('click', () => {
+      miniCalDate = new Date(yearIdx, monthIdx - 1, 1); renderMonth()
+    })
+    document.getElementById('month-next')?.addEventListener('click', () => {
+      miniCalDate = new Date(yearIdx, monthIdx + 1, 1); renderMonth()
+    })
+  }
+
+  // ======= VUE JOUR =======
+  function renderDay() {
+    const list = document.getElementById('day-view-list')
+    if (!list) return
+    const allMenages = getMenages()
+    const dayMenages = allMenages.filter(m => {
+      const md = new Date(m.date); md.setHours(0,0,0,0)
+      return md.getTime() === selectedDay.getTime()
+    })
+    const dateStr = JOURS[(selectedDay.getDay()+6)%7] + 'di'
+    const fullLabel = selectedDay.getDate() + ' ' + MOIS[selectedDay.getMonth()].toLowerCase() + ' ' + selectedDay.getFullYear()
+    const today = new Date(); today.setHours(0,0,0,0)
+    const isFuture = selectedDay > today
+    const navHtml = '<div class="day-view-nav"><button id="day-prev">‹</button>'
+      + '<div class="day-view-nav-label"><div class="day-view-nav-day">' + dateStr + '</div><div class="day-view-nav-date">' + fullLabel + '</div></div>'
+      + '<button id="day-next">›</button></div>'
+    let body = ''
+    if (dayMenages.length === 0) {
+      body = '<div class="day-view-empty">Aucun ménage ce jour</div>'
+    } else {
+      body = dayMenages.map(m => {
+        const obs = isMenageObsolete(m, allMenages)
+        const guests = (m.numAdult || 0) + (m.numChild || 0)
+        if (m.done) {
+          return '<div class="day-card is-done">'
+            + '<div class="day-card-header">'
+            + '<div class="day-card-dot">✓</div>'
+            + '<div class="day-card-info">'
+            + '<div class="day-card-title">' + m.propName + '</div>'
+            + '<div class="day-card-meta">' + m.guestName + (guests > 0 ? ' (' + guests + ' voyageur' + (guests > 1 ? 's' : '') + ')' : '') + '</div>'
+            + '</div>'
+            + '<button class="day-card-undo" data-undo="' + m.id + '">Annuler</button>'
+            + '</div>'
+            + '</div>'
+        }
+        const dotColor = ['#3B82F6','#10B981','#F59E0B','#EC4899'][m.propIdx % 4] || 'var(--primary)'
+        const obsBadge = obs ? '<div class="day-card-meta" style="color:#6B7280">⏭ Obsolete</div>' : ''
+        const action = (obs || isFuture) ? '' : '<button class="day-card-action" data-done="' + m.id + '">Marquer fait</button>'
+        return '<div class="day-card">'
+          + '<div class="day-card-header">'
+          + '<div class="day-card-dot" style="background:' + dotColor + '"></div>'
+          + '<div class="day-card-info">'
+          + '<div class="day-card-title">' + m.propName + '</div>'
+          + '<div class="day-card-meta">' + m.guestName + (guests > 0 ? ' (' + guests + ' voyageur' + (guests > 1 ? 's' : '') + ')' : '') + '</div>'
+          + obsBadge
+          + '</div>'
+          + '</div>'
+          + action
+          + '</div>'
+      }).join('')
+    }
+    list.innerHTML = navHtml + body
+    document.getElementById('day-prev')?.addEventListener('click', () => {
+      selectedDay = new Date(selectedDay); selectedDay.setDate(selectedDay.getDate() - 1); renderDay()
+    })
+    document.getElementById('day-next')?.addEventListener('click', () => {
+      selectedDay = new Date(selectedDay); selectedDay.setDate(selectedDay.getDate() + 1); renderDay()
+    })
+    list.querySelectorAll('[data-done]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const m = allMenages.find(x => x.id === btn.dataset.done)
+        if (m) openMenageModal(m)
+      })
+    })
+    list.querySelectorAll('[data-undo]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const m = allMenages.find(x => x.id === btn.dataset.undo)
+        if (m && typeof markUndone === 'function') markUndone(m)
+      })
+    })
+  }
+
+  // ======= FILTRES MOBILE (bottom sheet) =======
+  function renderFiltersMobile() {
+    const list = document.getElementById('filter-list-mobile')
+    if (!list) return
+    list.innerHTML = properties.map((p, i) => '<div class="filter-item">'
+      + '<input type="checkbox" id="filter-mob-' + p.id + '" ' + (activeProps.has(p.id) ? 'checked' : '') + '>'
+      + '<div class="filter-dot" style="background:' + getDotColor(i) + '"></div>'
+      + '<label class="filter-label" for="filter-mob-' + p.id + '">' + p.name + '</label>'
+      + '</div>').join('')
+    properties.forEach(p => {
+      const el = document.getElementById('filter-mob-' + p.id)
+      if (!el) return
+      el.addEventListener('change', (e) => {
+        if (e.target.checked) activeProps.add(p.id); else activeProps.delete(p.id)
+        if (typeof routeRender === 'function') routeRender()
+        renderFilters()  // garde aussi la version desktop synchro
+      })
+    })
+  }
+  function openFilters() {
+    renderFiltersMobile()
+    document.getElementById('filters-overlay').classList.add('visible')
+    document.getElementById('filters-sheet').classList.add('visible')
+  }
+  function closeFilters() {
+    document.getElementById('filters-overlay').classList.remove('visible')
+    document.getElementById('filters-sheet').classList.remove('visible')
   }
 
   function getToken() {
@@ -656,6 +864,13 @@ if ("serviceWorker" in navigator) {
       b.addEventListener('click', () => setCurrentView(b.dataset.view))
     })
     setCurrentView(currentView)
+    // FAB filtres + bottom sheet
+    document.getElementById('fab-filters')?.addEventListener('click', openFilters)
+    document.getElementById('filters-overlay')?.addEventListener('click', closeFilters)
+    document.getElementById('filters-close-btn')?.addEventListener('click', closeFilters)
+    // Re-render au resize (passage mobile <-> desktop)
+    let resizeT
+    window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(routeRender, 150) })
 
     currentToken = getToken()
     if (!currentToken) {
@@ -672,9 +887,9 @@ if ("serviceWorker" in navigator) {
     renderWeek()
     renderSyncBanner()
 
-    document.getElementById('btn-prev-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, -7); renderWeek(); renderMiniCal() })
-    document.getElementById('btn-next-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, 7); renderWeek(); renderMiniCal() })
-    document.getElementById('btn-today').addEventListener('click', () => { currentWeekStart = getMonday(new Date()); miniCalDate = new Date(); renderWeek(); renderMiniCal() })
+    document.getElementById('btn-prev-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, -7); routeRender() })
+    document.getElementById('btn-next-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, 7); routeRender() })
+    document.getElementById('btn-today').addEventListener('click', () => { currentWeekStart = getMonday(new Date()); miniCalDate = new Date(); routeRender() })
     document.getElementById('mini-prev').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() - 1, 1); renderMiniCal() })
     document.getElementById('mini-next').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1); renderMiniCal() })
     document.getElementById('modal-close').addEventListener('click', closeModal)
@@ -778,8 +993,7 @@ if ("serviceWorker" in navigator) {
 
     isFlushingQueue = false
     renderSyncBanner()
-    renderWeek()
-    renderMiniCal()
+    routeRender()
   }
 
   function removeFromPending(action) {
@@ -872,7 +1086,7 @@ if ("serviceWorker" in navigator) {
       document.getElementById(`filter-${p.id}`).addEventListener('change', (e) => {
         if (e.target.checked) activeProps.add(p.id)
         else activeProps.delete(p.id)
-        renderWeek(); renderMiniCal()
+        routeRender()
       })
     })
   }
@@ -1061,7 +1275,7 @@ if ("serviceWorker" in navigator) {
         el.appendChild(tooltip)
       }
 
-      el.addEventListener('click', () => { currentWeekStart = getMonday(date); renderWeek(); renderMiniCal() })
+      el.addEventListener('click', () => { currentWeekStart = getMonday(date); routeRender() })
       grid.appendChild(el)
     }
   }
@@ -1216,7 +1430,7 @@ if ("serviceWorker" in navigator) {
       saveServerDoneSet()
       rebuildDoneSet()
       showModalSuccess('Menage marque comme fait')
-      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 800)
+      setTimeout(() => { closeModal(); routeRender(); renderSyncBanner() }, 800)
 
     } catch (err) {
       // Erreur reseau : on enqueue pour envoi differe
@@ -1224,7 +1438,7 @@ if ("serviceWorker" in navigator) {
       enqueuePending(action)
       rebuildDoneSet()
       showModalWarning('Hors ligne : action enregistree, sera envoyee au retour de la connexion.')
-      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 1200)
+      setTimeout(() => { closeModal(); routeRender(); renderSyncBanner() }, 1200)
     }
   }
 
@@ -1274,14 +1488,14 @@ if ("serviceWorker" in navigator) {
       saveServerDoneSet()
       rebuildDoneSet()
       showModalSuccess('Menage decoche')
-      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 800)
+      setTimeout(() => { closeModal(); routeRender(); renderSyncBanner() }, 800)
 
     } catch (err) {
       console.warn('[markUndone] Reseau KO, mise en file:', err)
       enqueuePending(action)
       rebuildDoneSet()
       showModalWarning('Hors ligne : action enregistree, sera envoyee au retour de la connexion.')
-      setTimeout(() => { closeModal(); renderWeek(); renderMiniCal(); renderSyncBanner() }, 1200)
+      setTimeout(() => { closeModal(); routeRender(); renderSyncBanner() }, 1200)
     }
   }
 
