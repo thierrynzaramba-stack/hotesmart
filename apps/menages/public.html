@@ -250,10 +250,15 @@
         font-weight: 500;
         transition: all 0.15s;
       }
-      .view-toggle button.active {
+      .view-toggle button.active,
+      .view-toggle button.active:hover,
+      .view-toggle button.active:focus,
+      .view-toggle button.active:active {
         background: var(--primary);
-        color: white;
+        color: white !important;
+        outline: none;
       }
+      .view-toggle button:focus { outline: none; }
       .view-toggle button:not(.active):hover {
         background: var(--bg2);
         color: var(--text);
