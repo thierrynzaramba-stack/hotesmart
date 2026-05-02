@@ -757,47 +757,29 @@ if ("serviceWorker" in navigator) {
       const md = new Date(m.date); md.setHours(0,0,0,0)
       return md.getTime() === selectedDay.getTime()
     })
-    const dateStr = JOURS[(selectedDay.getDay()+6)%7] + 'di'
+    const dayLabel = JOURS[(selectedDay.getDay()+6)%7] + (selectedDay.getDay() === 0 ? 'anche' : 'di')
     const fullLabel = selectedDay.getDate() + ' ' + MOIS[selectedDay.getMonth()].toLowerCase() + ' ' + selectedDay.getFullYear()
-    const today = new Date(); today.setHours(0,0,0,0)
-    const isFuture = selectedDay > today
-    const navHtml = '<div class="day-view-nav"><button id="day-prev">‹</button>'
-      + '<div class="day-view-nav-label"><div class="day-view-nav-day">' + dateStr + '</div><div class="day-view-nav-date">' + fullLabel + '</div></div>'
-      + '<button id="day-next">›</button></div>'
+    const navHtml = '<div class="day-view-nav"><button id="day-prev">\u2039</button>'
+      + '<div class="day-view-nav-label"><div class="day-view-nav-day">' + dayLabel + '</div><div class="day-view-nav-date">' + fullLabel + '</div></div>'
+      + '<button id="day-next">\u203a</button></div>'
     let body = ''
     if (dayMenages.length === 0) {
-      body = '<div class="day-view-empty">Aucun ménage ce jour</div>'
+      body = '<div class="day-view-empty">Aucun m\u00e9nage ce jour</div>'
     } else {
-      body = dayMenages.map(m => {
+      body = '<div class="day-body" style="padding:0;gap:8px">' + dayMenages.map(m => {
         const obs = isMenageObsolete(m, allMenages)
-        const guests = (m.numAdult || 0) + (m.numChild || 0)
-        if (m.done) {
-          return '<div class="day-card is-done">'
-            + '<div class="day-card-header">'
-            + '<div class="day-card-dot">✓</div>'
-            + '<div class="day-card-info">'
-            + '<div class="day-card-title">' + m.propName + '</div>'
-            + '<div class="day-card-meta">' + m.guestName + (guests > 0 ? ' (' + guests + ' voyageur' + (guests > 1 ? 's' : '') + ')' : '') + '</div>'
-            + '</div>'
-            + '<button class="day-card-undo" data-undo="' + m.id + '">Annuler</button>'
-            + '</div>'
-            + '</div>'
-        }
-        const dotColor = ['#3B82F6','#10B981','#F59E0B','#EC4899'][m.propIdx % 4] || 'var(--primary)'
-        const obsBadge = obs ? '<div class="day-card-meta" style="color:#6B7280">⏭ Obsolete</div>' : ''
-        const action = (obs || isFuture) ? '' : '<button class="day-card-action" data-done="' + m.id + '">Marquer fait</button>'
-        return '<div class="day-card">'
-          + '<div class="day-card-header">'
-          + '<div class="day-card-dot" style="background:' + dotColor + '"></div>'
-          + '<div class="day-card-info">'
-          + '<div class="day-card-title">' + m.propName + '</div>'
-          + '<div class="day-card-meta">' + m.guestName + (guests > 0 ? ' (' + guests + ' voyageur' + (guests > 1 ? 's' : '') + ')' : '') + '</div>'
-          + obsBadge
+        const propClass = PROP_COLORS[m.propIdx % 4]
+        const doneClass = m.done ? ' done' : ''
+        const obsClass = obs ? ' obsolete' : ''
+        return '<div class="menage-card ' + propClass + doneClass + obsClass + '" data-id="' + m.id + '" style="cursor:pointer;font-size:13px;padding:10px 12px">'
+          + '<div class="menage-card-prop">' + m.propName + '</div>'
+          + '<div class="menage-card-title">M\u00e9nage d\u00e9part</div>'
+          + '<div class="menage-card-time">' + m.guestName + '</div>'
+          + (m.done ? '<div class="menage-card-check">\u2713</div>' : '')
+          + (m.pending ? '<div class="menage-card-pending">\u23f3</div>' : '')
+          + (m.comment ? '<div class="menage-card-comment">\ud83d\udcac</div>' : '')
           + '</div>'
-          + '</div>'
-          + action
-          + '</div>'
-      }).join('')
+      }).join('') + '</div>'
     }
     list.innerHTML = navHtml + body
     document.getElementById('day-prev')?.addEventListener('click', () => {
@@ -806,16 +788,11 @@ if ("serviceWorker" in navigator) {
     document.getElementById('day-next')?.addEventListener('click', () => {
       selectedDay = new Date(selectedDay); selectedDay.setDate(selectedDay.getDate() + 1); renderDay()
     })
-    list.querySelectorAll('[data-done]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const m = allMenages.find(x => x.id === btn.dataset.done)
-        if (m) openModal(m)
-      })
-    })
-    list.querySelectorAll('[data-undo]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const m = allMenages.find(x => x.id === btn.dataset.undo)
-        if (m && typeof markUndone === 'function') markUndone(m)
+    // Reutilise le meme mecanisme que la vue Semaine : clic sur carte = ouverture modal
+    list.querySelectorAll('.menage-card').forEach(card => {
+      card.addEventListener('click', () => {
+        selectedMenage = getMenages().find(m => m.id === card.dataset.id)
+        openModal(selectedMenage)
       })
     })
   }
