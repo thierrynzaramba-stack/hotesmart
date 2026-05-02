@@ -3,7 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Planning ménages</title>
+  <title>HôteSmart Clean</title>
+  <meta name="theme-color" content="#C97B5C">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Clean">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="stylesheet" href="/public/style.css">
   <style>
     .menage-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
@@ -212,6 +218,13 @@
 </div>
 
 <script type="module">
+// PWA: enregistrement service worker
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch((err) => console.warn("SW registration failed:", err));
+  });
+}
+
   import { initErrorHandler } from '/shared/error-handler.js'
   initErrorHandler()
 

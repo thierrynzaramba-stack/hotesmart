@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#C97B5C"/>
+  <!-- Maison stylisee -->
+  <g transform="translate(256 280)">
+    <!-- Toit -->
+    <path d="M -110 -10 L 0 -110 L 110 -10 Z" fill="#FAF3E7" stroke="#FAF3E7" stroke-width="6" stroke-linejoin="round"/>
+    <!-- Corps -->
+    <rect x="-90" y="-10" width="180" height="120" rx="8" fill="#FAF3E7"/>
+    <!-- Porte -->
+    <rect x="-22" y="40" width="44" height="70" rx="4" fill="#C97B5C"/>
+    <circle cx="14" cy="76" r="3" fill="#FAF3E7"/>
+    <!-- Fenetres -->
+    <rect x="-66" y="14" width="32" height="28" rx="3" fill="#C97B5C"/>
+    <rect x="34" y="14" width="32" height="28" rx="3" fill="#C97B5C"/>
+  </g>
+  <!-- Etincelles dorees -->
+  <g fill="#F4D58D">
+    <!-- Grande etincelle haut-droite -->
+    <g transform="translate(380 130)">
+      <path d="M 0 -28 L 6 -6 L 28 0 L 6 6 L 0 28 L -6 6 L -28 0 L -6 -6 Z"/>
+    </g>
+    <!-- Moyenne etincelle haut-gauche -->
+    <g transform="translate(120 100)">
+      <path d="M 0 -18 L 4 -4 L 18 0 L 4 4 L 0 18 L -4 4 L -18 0 L -4 -4 Z"/>
+    </g>
+    <!-- Petite etincelle bas-gauche -->
+    <g transform="translate(95 410)">
+      <path d="M 0 -12 L 3 -3 L 12 0 L 3 3 L 0 12 L -3 3 L -12 0 L -3 -3 Z"/>
+    </g>
+    <!-- Petite etincelle haut-centre -->
+    <g transform="translate(256 80)">
+      <path d="M 0 -10 L 2 -2 L 10 0 L 2 2 L 0 10 L -2 2 L -10 0 L -2 -2 Z"/>
+    </g>
+  </g>
+</svg>
