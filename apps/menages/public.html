@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Clean">
-  <link rel="manifest" href="./manifest.json">
+  <link rel="manifest" id="dynamic-manifest">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="stylesheet" href="/public/style.css">
   <style>
@@ -252,7 +252,20 @@ if ("serviceWorker" in navigator) {
   let currentToken = null
   let isFlushingQueue = false
 
-  function getToken() { return new URLSearchParams(window.location.search).get('token') }
+  function getToken() {
+    const fromUrl = new URLSearchParams(window.location.search).get('token');
+    if (fromUrl) {
+      try { localStorage.setItem('hotesmart-clean-token', fromUrl); } catch(e) {}
+      return fromUrl;
+    }
+    try { return localStorage.getItem('hotesmart-clean-token'); } catch(e) { return null; }
+  }
+  // PWA: injection du manifest dynamique selon le token courant
+  (function injectManifest() {
+    const t = getToken();
+    const link = document.getElementById('dynamic-manifest');
+    if (link) link.href = t ? '/api/manifest?token=' + encodeURIComponent(t) : '/api/manifest';
+  })();
 
   async function init() {
     currentToken = getToken()
