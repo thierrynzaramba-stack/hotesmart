@@ -184,8 +184,9 @@
         min-height: auto;
         border-radius: var(--radius-lg);
       }
-      .day-col.day-empty-mobile {
-        opacity: 0.5;
+      /* Jours vides masques en mobile vue Semaine */
+      .day-col.is-empty {
+        display: none;
       }
       .day-header {
         padding: 10px 14px;
@@ -781,7 +782,7 @@ if ("serviceWorker" in navigator) {
       const dayMenages = menages.filter(m => { const md = new Date(m.date); md.setHours(0,0,0,0); return md.getTime() === day.getTime() })
 
       const col = document.createElement('div')
-      col.className = `day-col${isToday ? ' today' : ''}`
+      col.className = `day-col${isToday ? ' today' : ''}${dayMenages.length === 0 ? ' is-empty' : ''}`
       col.innerHTML = `
         <div class="day-header">
           <div class="day-name">${JOURS[i]}</div>
