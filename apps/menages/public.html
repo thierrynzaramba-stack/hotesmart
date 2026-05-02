@@ -871,8 +871,7 @@ if ("serviceWorker" in navigator) {
     rebuildDoneSet()
     renderFilters()
     renderNews()
-    renderMiniCal()
-    renderWeek()
+    routeRender()
     renderSyncBanner()
 
     document.getElementById('btn-prev-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, -7); routeRender() })
