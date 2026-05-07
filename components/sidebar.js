@@ -38,6 +38,10 @@ export async function renderSidebar(activePage = '') {
       </div>
 
       <div class="nav-section-label">Compte</div>
+      <a class="nav-item ${activePage === 'compte' ? 'active' : ''}" href="/pages/compte.html">
+        <span class="nav-icon">👤</span>
+        <span class="nav-label">Mon compte</span>
+      </a>
       <a class="nav-item ${activePage === 'abonnement' ? 'active' : ''}" href="/abonnement">
         <span class="nav-icon">◈</span>
         <span class="nav-label">Abonnement</span>
