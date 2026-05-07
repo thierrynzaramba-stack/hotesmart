@@ -79,6 +79,30 @@
   <div class="compte-card" style="text-align: center;">
     <button class="danger-btn" id="btn-logout">Se déconnecter</button>
   </div>
+
+  <!-- Zone dangereuse : suppression du compte -->
+  <div class="compte-card" style="border-color: #FCA5A5;">
+    <div class="compte-section-title" style="color: #991B1B;">Supprimer mon compte</div>
+    <div class="compte-section-sub">
+      Cette action est <strong>définitive</strong>. Toutes vos données (réservations, messages, configurations, ménages) seront supprimées. Aucune récupération possible.
+    </div>
+    <div id="del-step1">
+      <button class="btn" id="btn-show-delete" style="border: 0.5px solid #FCA5A5; color: #991B1B; background: white;">Je veux supprimer mon compte</button>
+    </div>
+    <div id="del-step2" style="display:none">
+      <div class="form-group">
+        <label class="form-label">Mot de passe actuel</label>
+        <input class="form-input" type="password" id="del-password" placeholder="">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tapez <strong>SUPPRIMER</strong> en majuscules pour confirmer</label>
+        <input class="form-input" type="text" id="del-confirm" placeholder="SUPPRIMER" autocomplete="off">
+      </div>
+      <button class="btn" id="btn-delete-final" style="background: #DC2626; color: white; border: none;">Supprimer définitivement</button>
+      <button class="btn" id="btn-delete-cancel" style="margin-left: 8px;">Annuler</button>
+      <div class="error" id="del-error"></div>
+    </div>
+  </div>
 </div>
 
 <script type="module">
@@ -171,6 +195,72 @@
   })
 
   document.getElementById('btn-logout').addEventListener('click', signOut)
+
+  // Suppression de compte
+  const SUPABASE_URL = document.querySelector('meta[name="supabase-url"]').content
+  const btnShowDelete = document.getElementById('btn-show-delete')
+  const btnDeleteFinal = document.getElementById('btn-delete-final')
+  const btnDeleteCancel = document.getElementById('btn-delete-cancel')
+  const delStep1 = document.getElementById('del-step1')
+  const delStep2 = document.getElementById('del-step2')
+  const delErr = document.getElementById('del-error')
+
+  btnShowDelete.addEventListener('click', () => {
+    delStep1.style.display = 'none'
+    delStep2.style.display = 'block'
+  })
+
+  btnDeleteCancel.addEventListener('click', () => {
+    delStep1.style.display = 'block'
+    delStep2.style.display = 'none'
+    document.getElementById('del-password').value = ''
+    document.getElementById('del-confirm').value = ''
+    delErr.style.display = 'none'
+  })
+
+  btnDeleteFinal.addEventListener('click', async () => {
+    const password = document.getElementById('del-password').value
+    const confirm = document.getElementById('del-confirm').value
+    delErr.style.display = 'none'
+
+    if (!password) { delErr.textContent = 'Mot de passe requis'; delErr.style.display = 'block'; return }
+    if (confirm !== 'SUPPRIMER') { delErr.textContent = 'Vous devez taper SUPPRIMER en majuscules pour confirmer'; delErr.style.display = 'block'; return }
+
+    btnDeleteFinal.disabled = true
+    btnDeleteFinal.textContent = 'Suppression...'
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      delErr.textContent = 'Session expiree. Reconnectez-vous.'
+      delErr.style.display = 'block'
+      btnDeleteFinal.disabled = false; btnDeleteFinal.textContent = 'Supprimer definitivement'
+      return
+    }
+
+    try {
+      const res = await fetch(SUPABASE_URL + '/functions/v1/delete-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + session.access_token,
+        },
+        body: JSON.stringify({ password }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        delErr.textContent = payload.error || ('Erreur serveur ' + res.status)
+        delErr.style.display = 'block'
+        btnDeleteFinal.disabled = false; btnDeleteFinal.textContent = 'Supprimer definitivement'
+        return
+      }
+      await supabase.auth.signOut()
+      window.location.href = '/pages/login.html?deleted=1'
+    } catch (err) {
+      delErr.textContent = 'Erreur reseau : ' + err.message
+      delErr.style.display = 'block'
+      btnDeleteFinal.disabled = false; btnDeleteFinal.textContent = 'Supprimer definitivement'
+    }
+  })
 </script>
 
 </body>
