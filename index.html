@@ -205,81 +205,6 @@
       font-size: 13px; color: var(--text2);
     }
 
-    /* === MOCKUPS === */
-    .mockups {
-      padding: 80px 24px;
-      background: var(--primary-bg);
-    }
-    .mockups-inner {
-      max-width: 1000px; margin: 0 auto;
-      display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
-    }
-    .mockup-card {
-      background: var(--bg);
-      border-radius: var(--radius-xl);
-      padding: 20px;
-      box-shadow: 0 12px 40px rgba(201,123,92,0.15);
-    }
-    .mockup-title {
-      font-size: 13px;
-      color: var(--text3);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-      font-weight: 500;
-    }
-    /* Conversation mockup */
-    .msg { padding: 10px 14px; border-radius: 14px; margin-bottom: 8px; max-width: 80%; font-size: 13px; line-height: 1.4; }
-    .msg-guest {
-      background: #f0f0f0; color: var(--text);
-      border-bottom-left-radius: 4px;
-    }
-    .msg-host {
-      background: var(--primary); color: white;
-      margin-left: auto;
-      border-bottom-right-radius: 4px;
-    }
-    .msg-time { font-size: 10px; color: var(--text3); margin-bottom: 4px; }
-    .msg-time.right { text-align: right; }
-    .msg-tag-ai {
-      display: inline-block;
-      font-size: 10px;
-      background: rgba(255,255,255,0.25);
-      padding: 1px 6px;
-      border-radius: 4px;
-      margin-bottom: 4px;
-      font-weight: 500;
-    }
-    /* Calendar mockup */
-    .cal-grid {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap: 4px;
-    }
-    .cal-day {
-      aspect-ratio: 1;
-      border-radius: 6px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      color: var(--text3);
-    }
-    .cal-day.has { background: #FFF3CD; color: #856404; }
-    .cal-day.has strong { font-size: 14px; }
-    .cal-day.done { background: #D1FAE5; color: #065F46; }
-    .cal-day.done strong { font-size: 14px; }
-    .cal-day.today { background: var(--primary); color: white; }
-    .cal-day.today strong { font-size: 14px; }
-    .cal-headers {
-      display: grid; grid-template-columns: repeat(7, 1fr);
-      gap: 4px; margin-bottom: 6px;
-    }
-    .cal-headers span {
-      text-align: center; font-size: 10px; color: var(--text3); font-weight: 500;
-    }
-
     /* === TARIFS === */
     .pricing {
       padding: 80px 24px;
@@ -1021,51 +946,7 @@
   </div>
 </section>
 
-<!-- MOCKUPS -->
-<section class="mockups">
-  <div class="mockups-inner">
-    <div class="mockup-card">
-      <div class="mockup-title">Conversation voyageur</div>
-      <div class="msg-time">Voyageur · 23:42</div>
-      <div class="msg msg-guest">Bonsoir, c'est quoi le wifi déjà ? J'ai oublié 😅</div>
-      <div class="msg-time right">HôteSmart AI · 23:42</div>
-      <div class="msg msg-host">
-        <span class="msg-tag-ai">IA · auto</span><br>
-        Bonsoir ! Le wifi s'appelle <strong>BB-Cœur23</strong> et le mot de passe est <strong>vacances2026</strong>. Bonne soirée 🙂<br><br>
-        — Tiphaine & Thierry
-      </div>
-    </div>
-    <div class="mockup-card">
-      <div class="mockup-title">Planning ménages — Mai</div>
-      <div class="cal-headers">
-        <span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span>
-      </div>
-      <div class="cal-grid">
-        <div class="cal-day">28</div>
-        <div class="cal-day">29</div>
-        <div class="cal-day">30</div>
-        <div class="cal-day">1</div>
-        <div class="cal-day has"><span>2</span><strong>1</strong></div>
-        <div class="cal-day">3</div>
-        <div class="cal-day today"><span>4</span><strong>1</strong></div>
-        <div class="cal-day">5</div>
-        <div class="cal-day has"><span>6</span><strong>2</strong></div>
-        <div class="cal-day">7</div>
-        <div class="cal-day">8</div>
-        <div class="cal-day done"><span>9</span><strong>1</strong></div>
-        <div class="cal-day">10</div>
-        <div class="cal-day">11</div>
-        <div class="cal-day">12</div>
-        <div class="cal-day">13</div>
-        <div class="cal-day has"><span>14</span><strong>3</strong></div>
-        <div class="cal-day">15</div>
-        <div class="cal-day">16</div>
-        <div class="cal-day">17</div>
-        <div class="cal-day">18</div>
-      </div>
-    </div>
-  </div>
-</section>
+
 
 <!-- TARIFS -->
 <section class="pricing" id="tarifs">
