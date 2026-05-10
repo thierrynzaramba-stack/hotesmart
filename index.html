@@ -580,6 +580,59 @@
       line-height: 1.55;
     }
 
+    /* === LOCKS SECTION === */
+    .locks-section {
+      padding: 80px 24px;
+      background: var(--bg2);
+    }
+    .locks-inner { max-width: 1000px; margin: 0 auto; }
+    .locks-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 40px;
+    }
+    .lock-card {
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+    }
+    .lock-icon {
+      width: 44px; height: 44px;
+      background: var(--primary-bg);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+    .lock-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .lock-card p {
+      color: var(--text2);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .lock-card .brands {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 0.5px solid var(--border);
+      font-size: 12px;
+      color: var(--text3);
+    }
+    .lock-card .brand-tag {
+      display: inline-block;
+      background: var(--bg2);
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin: 2px 4px 2px 0;
+      color: var(--text2);
+      font-weight: 500;
+    }
+
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
       .hero h1 { font-size: 32px; }
@@ -722,6 +775,39 @@
         <div class="learning-dot red"></div>
         <h3>Urgence</h3>
         <p>Vous êtes alerté par SMS. L'IA ne joue pas au pompier à votre place.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- LOCKS SECTION : codes acces -->
+<section class="locks-section">
+  <div class="locks-inner">
+    <h2 class="section-title">Un code unique par voyageur, envoyé automatiquement au moment voulu.</h2>
+    <p class="section-sub">Compatible avec les serrures connectées les plus utilisées. Avec ou sans internet.</p>
+    <div class="locks-grid">
+      <div class="lock-card">
+        <div class="lock-icon">🔐</div>
+        <h3>Sécurisé</h3>
+        <p>Chaque voyageur reçoit son propre code. À son départ, le code expire. Le voyageur suivant ne pourra jamais entrer avec l\u2019ancien.</p>
+      </div>
+      <div class="lock-card">
+        <div class="lock-icon">🧹</div>
+        <h3>Conditionné au ménage</h3>
+        <p>Le code n\u2019est envoyé qu\u2019après validation du ménage par votre prestataire. Plus jamais un voyageur qui arrive dans un logement pas prêt.</p>
+      </div>
+      <div class="lock-card">
+        <div class="lock-icon">📡</div>
+        <h3>Offline ou connecté</h3>
+        <p><strong>Igloohome</strong> : codes générés sans internet, totalement autonome. Intégration temps réel pour les serrures connectées :</p>
+        <div class="brands">
+          <span class="brand-tag">Nuki</span>
+          <span class="brand-tag">Yale</span>
+          <span class="brand-tag">August</span>
+          <span class="brand-tag">Schlage</span>
+          <span class="brand-tag">Salto</span>
+          <span class="brand-tag">+ autres à la demande</span>
+        </div>
       </div>
     </div>
   </div>
