@@ -424,19 +424,55 @@
     .demo-act:first-child .demo-act-time {
       margin-top: 0;
     }
+    /* Rangée message style Airbnb */
+    .demo-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      align-items: flex-end;
+    }
+    .demo-row.host { flex-direction: row-reverse; }
+    .demo-avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background-size: cover;
+      background-position: center;
+      background-color: #ECECEC;
+      border: 1px solid rgba(0,0,0,0.05);
+    }
+    .demo-avatar.melanie { background-image: url('/public/avatars/melanie.jpg'); }
+    .demo-avatar.sophie { background-image: url('/public/avatars/sophie.jpg'); }
+    .demo-avatar.host {
+      background: var(--primary);
+      color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 600; letter-spacing: -0.5px;
+    }
+    .demo-bubble-group {
+      max-width: 75%;
+      display: flex; flex-direction: column;
+    }
+    .demo-row.host .demo-bubble-group { align-items: flex-end; }
+    .demo-sender-name {
+      font-size: 12px; color: var(--text2); font-weight: 500;
+      margin-bottom: 4px; margin-left: 14px;
+    }
+    .demo-row.host .demo-sender-name {
+      margin-left: 0; margin-right: 14px;
+    }
     .demo-msg {
-      padding: 11px 14px; border-radius: 14px;
-      margin-bottom: 8px; max-width: 80%;
+      padding: 11px 16px; border-radius: 18px;
       font-size: 14px; line-height: 1.45;
+      word-wrap: break-word;
     }
     .demo-msg-guest {
-      background: #F2F2F0; color: var(--text);
-      border-bottom-left-radius: 4px;
+      background: #F7F7F7; color: var(--text);
+      border-bottom-left-radius: 6px;
     }
     .demo-msg-host {
       background: var(--primary); color: white;
-      margin-left: auto;
-      border-bottom-right-radius: 4px;
+      border-bottom-right-radius: 6px;
     }
     .demo-msg-host .ai-tag {
       display: inline-block;
@@ -445,11 +481,13 @@
       padding: 2px 7px; border-radius: 4px;
       margin-bottom: 6px; font-weight: 500;
     }
-    .demo-msg-sender {
+    .demo-msg-time {
       font-size: 11px; color: var(--text3);
-      margin-bottom: 4px;
+      margin-top: 4px; margin-left: 14px;
     }
-    .demo-msg-sender.right { text-align: right; }
+    .demo-row.host .demo-msg-time {
+      margin-left: 0; margin-right: 14px;
+    }
     .demo-alert {
       background: #FFF5E5;
       border: 0.5px solid #F59E0B;
@@ -833,73 +871,57 @@
     });
   }
 
+  // --- HELPER row : style Airbnb avec avatar ---
+  function row(opts) {
+    const isHost = opts.who === 'host';
+    const avatarClass = isHost ? 'host' : opts.who;
+    const avatarContent = isHost ? 'HS' : '';
+    const aiTag = opts.aiTag ? '<span class="ai-tag">IA · auto</span><br>' : '';
+    const bubbleClass = isHost ? 'demo-msg-host' : 'demo-msg-guest';
+    const rowClass = isHost ? 'demo-row host' : 'demo-row';
+    return '<div class="' + rowClass + '">' +
+      '<div class="demo-avatar ' + avatarClass + '">' + avatarContent + '</div>' +
+      '<div class="demo-bubble-group">' +
+        '<div class="demo-sender-name">' + opts.name + '</div>' +
+        '<div class="demo-msg ' + bubbleClass + '">' + aiTag + opts.text + '</div>' +
+        '<div class="demo-msg-time">' + opts.time + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   // --- ACTES ---
   const ACTS = [
-    // Acte 1 : 22h17, arrivee anticipee
-    {
-      time: "22:17 — Mardi soir",
-      blocks: [
-        '<div class="demo-msg-sender">Mélanie K. · 22:17</div>',
-        '<div class="demo-msg demo-msg-guest">Bonsoir, est-ce que je peux arriver plus tôt demain ? Vers 13h ?</div>',
-        '<div class="demo-msg-sender right">HôteSmart · 22:17</div>',
-        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Bonsoir ! Le check-in est normalement à 16h car nous devons faire le ménage. Si vous arrivez à 13h, vous pouvez déposer vos bagages dans l\u2019entrée, l\u2019accès complet sera possible à 16h. Bonne fin de journée 🙂<br><br>— Tiphaine &amp; Thierry</div>',
-        '<div class="demo-badge">✓ Réponse automatique. Vous dormez.</div>'
-      ]
-    },
-    // Acte 2 : 7h42, parking
-    {
-      time: "07:42 — Mercredi matin",
-      blocks: [
-        '<div class="demo-msg-sender">Mélanie K. · 07:42</div>',
-        '<div class="demo-msg demo-msg-guest">Bonjour, est-ce qu\u2019il y a des places de parking à proximité ?</div>',
-        '<div class="demo-msg-sender right">HôteSmart · 07:42</div>',
-        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Bonjour ! Il y a un parking gratuit place du Foirail à 3 minutes à pied, et plusieurs places en zone bleue rue de l\u2019Horloge (gratuit le dimanche, 2h max en semaine). Bon séjour à Bagnères 🙂<br><br>— Tiphaine &amp; Thierry</div>',
-        '<div class="demo-badge">✓ Réponse automatique. Vous prenez votre café.</div>'
-      ]
-    },
-    // Acte 3 : 12h05, recos
-    {
-      time: "12:05 — Vendredi midi",
-      blocks: [
-        '<div class="demo-msg-sender">Mélanie K. · 12:05</div>',
-        '<div class="demo-msg demo-msg-guest">On cherche un bon resto pour ce soir et des idées de visites pour demain. Vous avez des suggestions ?</div>',
-        '<div class="demo-msg-sender right">HôteSmart · 12:05</div>',
-        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Avec plaisir ! Côté restos je recommande <strong>L\u2019Oncle Pierre</strong> (cuisine bistronomique, à 5 min) et <strong>La Mounjetado</strong> (cuisine bigourdane authentique). Pour demain : la grotte de Médous, le Pic du Midi par téléphérique de La Mongie, ou une balade au lac de Payolle si beau temps. Bonne aprèm 🙂<br><br>— Tiphaine &amp; Thierry</div>',
-        '<div class="demo-badge">✓ Réponse automatique. Vous mangez avec votre famille.</div>'
-      ]
-    },
-    // Acte 4 : 14h17, urgence
-    {
-      time: "14:17 — Samedi après-midi",
-      blocks: [
-        '<div class="demo-msg-sender">Mélanie K. · 14:17</div>',
-        '<div class="demo-msg demo-msg-guest">Il y a une fuite d\u2019eau dans la salle de bain !!</div>',
-        '<div class="demo-alert urgent"><span class="demo-alert-icon">📱</span><div><strong>SMS reçu</strong><br>⚠️ Cœur de vie 23 — Mélanie K. signale une fuite d\u2019eau salle de bain. Voir messages.</div></div>',
-        '<div class="demo-badge urgent">🚨 Alerte SMS en temps réel. Vous décidez.</div>'
-      ]
-    },
-    // Acte 5 : ce soir, spatules raclette - apprentissage
-    {
-      time: "20:34 — Samedi soir",
-      blocks: [
-        '<div class="demo-msg-sender">Mélanie K. · 20:34</div>',
-        '<div class="demo-msg demo-msg-guest">On voulait faire une raclette ce soir mais on trouve pas les spatules ! 😅</div>',
-        '<div class="demo-alert"><span class="demo-alert-icon">📋</span><div><strong>Notification hôte</strong><br>Mélanie K. cherche les spatules de raclette. Vous voulez répondre quoi ?</div></div>',
-        '<div class="demo-host-input">Dans le tiroir de la table de cuisine</div>',
-        '<div class="demo-badge learn">✨ L\u2019IA apprend. Cette question ne reviendra jamais sur vous.</div>'
-      ]
-    },
-    // Time skip + replay 3 mois plus tard
-    {
-      time: "3 mois plus tard...",
-      blocks: [
-        '<div class="demo-msg-sender">Sophie B. · 19:12</div>',
-        '<div class="demo-msg demo-msg-guest">Bonsoir, on cherche les spatules pour la raclette, vous savez où elles sont ?</div>',
-        '<div class="demo-msg-sender right">HôteSmart · 19:12</div>',
-        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Bonsoir ! Elles sont dans le tiroir de la table de cuisine. Bonne raclette 🙂<br><br>— Tiphaine &amp; Thierry</div>',
-        '<div class="demo-badge">✓ Répondu automatiquement. Vous étiez au cinéma.</div>'
-      ]
-    }
+    { time: '22:17 — Mardi soir', blocks: [
+      row({ who: 'melanie', name: 'Mélanie K.', time: '22:17', text: 'Bonsoir, est-ce que je peux arriver plus tôt demain ? Vers 13h ?' }),
+      row({ who: 'host', name: 'HôteSmart', time: '22:17', aiTag: true, text: 'Bonsoir ! Le check-in est normalement à 16h car nous devons faire le ménage. Si vous arrivez à 13h, vous pouvez déposer vos bagages dans l\u2019entrée, l\u2019accès complet sera possible à 16h. Bonne fin de journée 🙂<br><br>— Tiphaine &amp; Thierry' }),
+      '<div class="demo-badge">✓ Réponse automatique. Vous dormez.</div>'
+    ]},
+    { time: '07:42 — Mercredi matin', blocks: [
+      row({ who: 'melanie', name: 'Mélanie K.', time: '07:42', text: 'Bonjour, est-ce qu\u2019il y a des places de parking à proximité ?' }),
+      row({ who: 'host', name: 'HôteSmart', time: '07:42', aiTag: true, text: 'Bonjour ! Il y a un parking gratuit place du Foirail à 3 minutes à pied, et plusieurs places en zone bleue rue de l\u2019Horloge (gratuit le dimanche, 2h max en semaine). Bon séjour à Bagnères 🙂<br><br>— Tiphaine &amp; Thierry' }),
+      '<div class="demo-badge">✓ Réponse automatique. Vous prenez votre café.</div>'
+    ]},
+    { time: '12:05 — Vendredi midi', blocks: [
+      row({ who: 'melanie', name: 'Mélanie K.', time: '12:05', text: 'On cherche un bon resto pour ce soir et des idées de visites pour demain. Vous avez des suggestions ?' }),
+      row({ who: 'host', name: 'HôteSmart', time: '12:05', aiTag: true, text: 'Avec plaisir ! Côté restos je recommande <strong>L\u2019Oncle Pierre</strong> (cuisine bistronomique, à 5 min) et <strong>La Mounjetado</strong> (cuisine bigourdane authentique). Pour demain : la grotte de Médous, le Pic du Midi par téléphérique de La Mongie, ou une balade au lac de Payolle si beau temps. Bonne aprèm 🙂<br><br>— Tiphaine &amp; Thierry' }),
+      '<div class="demo-badge">✓ Réponse automatique. Vous mangez avec votre famille.</div>'
+    ]},
+    { time: '14:17 — Samedi après-midi', blocks: [
+      row({ who: 'melanie', name: 'Mélanie K.', time: '14:17', text: 'Il y a une fuite d\u2019eau dans la salle de bain !!' }),
+      '<div class="demo-alert urgent"><span class="demo-alert-icon">📱</span><div><strong>SMS reçu</strong><br>⚠️ Cœur de vie 23 — Mélanie K. signale une fuite d\u2019eau salle de bain. Voir messages.</div></div>',
+      '<div class="demo-badge urgent">🚨 Alerte SMS en temps réel. Vous décidez.</div>'
+    ]},
+    { time: '20:34 — Samedi soir', blocks: [
+      row({ who: 'melanie', name: 'Mélanie K.', time: '20:34', text: 'On voulait faire une raclette ce soir mais on trouve pas les spatules ! 😅' }),
+      '<div class="demo-alert"><span class="demo-alert-icon">📋</span><div><strong>Notification hôte</strong><br>Mélanie K. cherche les spatules de raclette. Vous voulez répondre quoi ?</div></div>',
+      '<div class="demo-host-input">Dans le tiroir de la table de cuisine</div>',
+      '<div class="demo-badge learn">✨ L\u2019IA apprend. Cette question ne reviendra jamais sur vous.</div>'
+    ]},
+    { time: '3 mois plus tard...', blocks: [
+      row({ who: 'sophie', name: 'Sophie B.', time: '19:12', text: 'Bonsoir, on cherche les spatules pour la raclette, vous savez où elles sont ?' }),
+      row({ who: 'host', name: 'HôteSmart', time: '19:12', aiTag: true, text: 'Bonsoir ! Elles sont dans le tiroir de la table de cuisine. Bonne raclette 🙂<br><br>— Tiphaine &amp; Thierry' }),
+      '<div class="demo-badge">✓ Répondu automatiquement. Vous étiez au cinéma.</div>'
+    ]}
   ];
 
   async function playAct(act) {
