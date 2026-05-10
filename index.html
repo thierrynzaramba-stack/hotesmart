@@ -373,6 +373,162 @@
     .footer a:hover { color: var(--primary); }
     .footer-links { display: flex; gap: 20px; flex-wrap: wrap; }
 
+    /* === DEMO SECTION === */
+    .demo-section {
+      padding: 80px 24px;
+      background: var(--bg2);
+    }
+    .demo-inner { max-width: 720px; margin: 0 auto; }
+    .demo-stage {
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 28px;
+      min-height: 380px;
+      margin-top: 30px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.04);
+      display: flex; flex-direction: column;
+    }
+    .demo-empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      min-height: 320px;
+    }
+    .demo-act {
+      opacity: 0; transform: translateY(8px);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+      margin-bottom: 16px;
+    }
+    .demo-act.show { opacity: 1; transform: translateY(0); }
+    .demo-act-time {
+      font-size: 11px; color: var(--text3);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 12px; font-weight: 500;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .demo-act-time::before {
+      content: ""; flex: 1; height: 0.5px; background: var(--border);
+    }
+    .demo-act-time::after {
+      content: ""; flex: 1; height: 0.5px; background: var(--border);
+    }
+    .demo-msg {
+      padding: 11px 14px; border-radius: 14px;
+      margin-bottom: 8px; max-width: 80%;
+      font-size: 14px; line-height: 1.45;
+    }
+    .demo-msg-guest {
+      background: #F2F2F0; color: var(--text);
+      border-bottom-left-radius: 4px;
+    }
+    .demo-msg-host {
+      background: var(--primary); color: white;
+      margin-left: auto;
+      border-bottom-right-radius: 4px;
+    }
+    .demo-msg-host .ai-tag {
+      display: inline-block;
+      font-size: 10px;
+      background: rgba(255,255,255,0.25);
+      padding: 2px 7px; border-radius: 4px;
+      margin-bottom: 6px; font-weight: 500;
+    }
+    .demo-msg-sender {
+      font-size: 11px; color: var(--text3);
+      margin-bottom: 4px;
+    }
+    .demo-msg-sender.right { text-align: right; }
+    .demo-alert {
+      background: #FFF5E5;
+      border: 0.5px solid #F59E0B;
+      border-radius: var(--radius);
+      padding: 10px 13px;
+      font-size: 13px;
+      color: #92400E;
+      margin: 4px 0 8px;
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+    .demo-alert.urgent {
+      background: #FEF2F2;
+      border-color: #DC2626;
+      color: #991B1B;
+    }
+    .demo-alert-icon { font-size: 16px; flex-shrink: 0; }
+    .demo-host-input {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 12px;
+      font-size: 13px;
+      color: var(--text);
+      max-width: 80%; margin-left: auto;
+      font-style: italic;
+    }
+    .demo-host-input::before {
+      content: "✏️ "; font-style: normal;
+    }
+    .demo-badge {
+      display: inline-block;
+      background: #ECFDF5; color: #065F46;
+      padding: 6px 12px; border-radius: 12px;
+      font-size: 12px; font-weight: 500;
+      margin-top: 6px;
+    }
+    .demo-badge.urgent { background: #FEE2E2; color: #991B1B; }
+    .demo-badge.learn { background: #FEF3C7; color: #92400E; }
+    .demo-divider {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text3);
+      margin: 20px 0 16px;
+      font-style: italic;
+      position: relative;
+    }
+    .demo-divider::before, .demo-divider::after {
+      content: ""; display: inline-block;
+      width: 40px; height: 0.5px; background: var(--border);
+      vertical-align: middle; margin: 0 12px;
+    }
+    .demo-controls {
+      text-align: center; margin-top: 24px;
+    }
+
+    /* === LEARNING SECTION === */
+    .learning-section {
+      padding: 80px 24px;
+      background: var(--bg);
+    }
+    .learning-inner { max-width: 1000px; margin: 0 auto; }
+    .learning-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 40px;
+    }
+    .learning-card {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      text-align: center;
+    }
+    .learning-dot {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      margin: 0 auto 14px;
+    }
+    .learning-dot.green { background: #10B981; }
+    .learning-dot.amber { background: #F59E0B; }
+    .learning-dot.red   { background: #DC2626; }
+    .learning-card h3 {
+      font-size: 17px; font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .learning-card p {
+      color: var(--text2);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
       .hero h1 { font-size: 32px; }
@@ -472,6 +628,49 @@
         <div class="step-num">3</div>
         <div class="step-title">Dormez tranquille</div>
         <div class="step-text">L'IA répond, les codes partent, le ménage suit.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO IA - Mini film 5 actes -->
+<section class="demo-section">
+  <div class="demo-inner">
+    <h2 class="section-title">Voyez l'IA en action</h2>
+    <p class="section-sub">Une journée typique. 5 messages reçus. Vous, vous viviez votre vie.</p>
+
+    <div class="demo-stage" id="demo-stage">
+      <div class="demo-empty" id="demo-empty">
+        <button class="btn-primary btn-large" id="demo-start">▶ Lancer la démo</button>
+      </div>
+    </div>
+
+    <div class="demo-controls" id="demo-controls" style="display:none">
+      <button class="btn-secondary" id="demo-replay">↻ Rejouer</button>
+    </div>
+  </div>
+</section>
+
+<!-- LEARNING - 3 categories -->
+<section class="learning-section">
+  <div class="learning-inner">
+    <h2 class="section-title">L'IA n'invente pas. Elle répond à partir de votre base.</h2>
+    <p class="section-sub">Trois catégories. Trois comportements. Aucune surprise.</p>
+    <div class="learning-grid">
+      <div class="learning-card">
+        <div class="learning-dot green"></div>
+        <h3>Info connue</h3>
+        <p>Réponse automatique signée à votre nom, à toute heure du jour ou de la nuit.</p>
+      </div>
+      <div class="learning-card">
+        <div class="learning-dot amber"></div>
+        <h3>Info inconnue</h3>
+        <p>L'IA vous demande la réponse. <strong>Une seule fois.</strong> Elle l'apprend pour toujours.</p>
+      </div>
+      <div class="learning-card">
+        <div class="learning-dot red"></div>
+        <h3>Urgence</h3>
+        <p>Vous êtes alerté par SMS. L'IA ne joue pas au pompier à votre place.</p>
       </div>
     </div>
   </div>
@@ -594,6 +793,125 @@
     </div>
   </div>
 </footer>
+
+<!-- Demo IA - mini film 5 actes -->
+<script>
+(function() {
+  const stage = document.getElementById("demo-stage");
+  const empty = document.getElementById("demo-empty");
+  const startBtn = document.getElementById("demo-start");
+  const replayBtn = document.getElementById("demo-replay");
+  const controls = document.getElementById("demo-controls");
+  if (!stage) return;
+
+  function html(s) {
+    const div = document.createElement("div");
+    div.innerHTML = s.trim();
+    return div.firstChild;
+  }
+
+  function append(node, delay) {
+    return new Promise(resolve => {
+      stage.appendChild(node);
+      requestAnimationFrame(() => {
+        setTimeout(() => node.classList.add("show"), 30);
+        setTimeout(resolve, delay);
+      });
+    });
+  }
+
+  // --- ACTES ---
+  const ACTS = [
+    // Acte 1 : 22h17, arrivee anticipee
+    {
+      time: "22:17 — Mardi soir",
+      blocks: [
+        '<div class="demo-msg-sender">Mélanie K. · 22:17</div>',
+        '<div class="demo-msg demo-msg-guest">Bonsoir, est-ce que je peux arriver plus tôt demain ? Vers 13h ?</div>',
+        '<div class="demo-msg-sender right">HôteSmart · 22:17</div>',
+        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Bonsoir ! Le check-in est normalement à 16h car nous devons faire le ménage. Si vous arrivez à 13h, vous pouvez déposer vos bagages dans l\u2019entrée, l\u2019accès complet sera possible à 16h. Bonne fin de journée 🙂<br><br>— Tiphaine &amp; Thierry</div>',
+        '<div class="demo-badge">✓ Réponse automatique. Vous dormez.</div>'
+      ]
+    },
+    // Acte 2 : 7h42, parking
+    {
+      time: "07:42 — Mercredi matin",
+      blocks: [
+        '<div class="demo-msg-sender">Mélanie K. · 07:42</div>',
+        '<div class="demo-msg demo-msg-guest">Bonjour, est-ce qu\u2019il y a des places de parking à proximité ?</div>',
+        '<div class="demo-msg-sender right">HôteSmart · 07:42</div>',
+        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Bonjour ! Il y a un parking gratuit place du Foirail à 3 minutes à pied, et plusieurs places en zone bleue rue de l\u2019Horloge (gratuit le dimanche, 2h max en semaine). Bon séjour à Bagnères 🙂<br><br>— Tiphaine &amp; Thierry</div>',
+        '<div class="demo-badge">✓ Réponse automatique. Vous prenez votre café.</div>'
+      ]
+    },
+    // Acte 3 : 12h05, recos
+    {
+      time: "12:05 — Vendredi midi",
+      blocks: [
+        '<div class="demo-msg-sender">Mélanie K. · 12:05</div>',
+        '<div class="demo-msg demo-msg-guest">On cherche un bon resto pour ce soir et des idées de visites pour demain. Vous avez des suggestions ?</div>',
+        '<div class="demo-msg-sender right">HôteSmart · 12:05</div>',
+        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Avec plaisir ! Côté restos je recommande <strong>L\u2019Oncle Pierre</strong> (cuisine bistronomique, à 5 min) et <strong>La Mounjetado</strong> (cuisine bigourdane authentique). Pour demain : la grotte de Médous, le Pic du Midi par téléphérique de La Mongie, ou une balade au lac de Payolle si beau temps. Bonne aprèm 🙂<br><br>— Tiphaine &amp; Thierry</div>',
+        '<div class="demo-badge">✓ Réponse automatique. Vous mangez avec votre famille.</div>'
+      ]
+    },
+    // Acte 4 : 14h17, urgence
+    {
+      time: "14:17 — Samedi après-midi",
+      blocks: [
+        '<div class="demo-msg-sender">Mélanie K. · 14:17</div>',
+        '<div class="demo-msg demo-msg-guest">Il y a une fuite d\u2019eau dans la salle de bain !!</div>',
+        '<div class="demo-alert urgent"><span class="demo-alert-icon">📱</span><div><strong>SMS reçu</strong><br>⚠️ Cœur de vie 23 — Mélanie K. signale une fuite d\u2019eau salle de bain. Voir messages.</div></div>',
+        '<div class="demo-badge urgent">🚨 Alerte SMS en temps réel. Vous décidez.</div>'
+      ]
+    },
+    // Acte 5 : ce soir, spatules raclette - apprentissage
+    {
+      time: "20:34 — Samedi soir",
+      blocks: [
+        '<div class="demo-msg-sender">Mélanie K. · 20:34</div>',
+        '<div class="demo-msg demo-msg-guest">On voulait faire une raclette ce soir mais on trouve pas les spatules ! 😅</div>',
+        '<div class="demo-alert"><span class="demo-alert-icon">📋</span><div><strong>Notification hôte</strong><br>Mélanie K. cherche les spatules de raclette. Vous voulez répondre quoi ?</div></div>',
+        '<div class="demo-host-input">Dans le tiroir de la table de cuisine</div>',
+        '<div class="demo-badge learn">✨ L\u2019IA apprend. Cette question ne reviendra jamais sur vous.</div>'
+      ]
+    },
+    // Time skip + replay 3 mois plus tard
+    {
+      time: "3 mois plus tard...",
+      blocks: [
+        '<div class="demo-msg-sender">Sophie B. · 19:12</div>',
+        '<div class="demo-msg demo-msg-guest">Bonsoir, on cherche les spatules pour la raclette, vous savez où elles sont ?</div>',
+        '<div class="demo-msg-sender right">HôteSmart · 19:12</div>',
+        '<div class="demo-msg demo-msg-host"><span class="ai-tag">IA · auto</span><br>Bonsoir ! Elles sont dans le tiroir de la table de cuisine. Bonne raclette 🙂<br><br>— Tiphaine &amp; Thierry</div>',
+        '<div class="demo-badge">✓ Répondu automatiquement. Vous étiez au cinéma.</div>'
+      ]
+    }
+  ];
+
+  async function playAct(act) {
+    const time = html('<div class="demo-act demo-act-time">' + act.time + '</div>');
+    await append(time, 600);
+    for (const block of act.blocks) {
+      const node = html('<div class="demo-act">' + block + '</div>');
+      await append(node, 850);
+    }
+    await new Promise(r => setTimeout(r, 1100));
+  }
+
+  async function play() {
+    stage.innerHTML = "";
+    controls.style.display = "none";
+    for (const act of ACTS) {
+      await playAct(act);
+    }
+    controls.style.display = "block";
+  }
+
+  if (startBtn) startBtn.addEventListener("click", play);
+  if (replayBtn) replayBtn.addEventListener("click", play);
+})();
+</script>
 
 <!-- Redirect vers app si déjà connecté -->
 <script type="module">
