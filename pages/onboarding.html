@@ -394,7 +394,156 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     };
   }
   function renderStep2Placeholder(c) { return placeholder(2, 'Connexion Beds24', 'Saisissez vos clés API Beds24 pour récupérer vos biens.', false)(c); }
-  function renderStep3Placeholder(c) { return placeholder(3, 'Serrures connectées', 'Quelle marque de serrures utilisez-vous ? (optionnel)', true)(c); }
+  function renderStep3Placeholder(c) {
+    const brands = [
+      { id: 'none',      label: 'Aucune / Pas encore' },
+      { id: 'igloohome', label: 'Igloohome' },
+      { id: 'nuki',      label: 'Nuki' },
+      { id: 'yale',      label: 'Yale' },
+      { id: 'august',    label: 'August' },
+      { id: 'schlage',   label: 'Schlage' },
+      { id: 'salto',     label: 'Salto' },
+      { id: 'autre',     label: 'Autre' }
+    ];
+
+    let selected = stepData.smart_lock || null;
+    let customName = stepData.smart_lock_custom || '';
+
+    const cm = stepData.channel_manager;
+    const isLastInPath = (cm && cm !== 'beds24'); // étape 3 = dernière du path non-Beds24
+
+    function render() {
+      const optionsHtml = brands.map(function (b) {
+        const isSel = selected === b.id;
+        return '<div class="ob-option' + (isSel ? ' selected' : '') + '" data-id="' + b.id + '">' + b.label + '</div>';
+      }).join('');
+
+      const customField = (selected === 'autre')
+        ? '<div class="ob-field" style="margin-top:20px;"><label>Précisez la marque de votre serrure</label><input type="text" id="lock-custom" placeholder="Ex: Welock, TTLock..." value="' + customName.replace(/"/g, '&quot;') + '"></div>'
+        : '';
+
+      const nextDisabled = !selected || (selected === 'autre' && !customName.trim());
+      const nextLabel = isLastInPath ? 'Terminer' : 'Suivant →';
+
+      c.innerHTML = [
+        '<h2>Serrures connectées</h2>',
+        '<p class="lead">Quelle marque de serrures utilisez-vous pour vos biens ?</p>',
+        '<div class="ob-options">', optionsHtml, '</div>',
+        customField,
+        '<div class="ob-actions">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        '<div style="display:flex; gap:16px; align-items:center;">',
+        '<button class="ob-skip" id="btn-skip">Passer cette étape</button>',
+        '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>' + nextLabel + '</button>',
+        '</div></div>'
+      ].join('');
+
+      // Click sur option
+      c.querySelectorAll('.ob-option').forEach(function (el) {
+        el.onclick = function () {
+          selected = el.getAttribute('data-id');
+          render();
+        };
+      });
+
+      // Input custom
+      const customInput = document.getElementById('lock-custom');
+      if (customInput) {
+        customInput.oninput = function () {
+          customName = customInput.value;
+          document.getElementById('btn-next').disabled = !customName.trim();
+        };
+      }
+
+      // Bouton Retour : étape précédente dans le path
+      document.getElementById('btn-back').onclick = function () {
+        const p = getPath();
+        const idx = p.indexOf(currentStep);
+        if (idx > 0) goToStep(p[idx - 1]);
+      };
+
+      // Bouton Passer : équivalent à "Aucune", on enregistre et on continue
+      document.getElementById('btn-skip').onclick = async function () {
+        await saveState({ smart_lock: 'none', smart_lock_custom: '' });
+        await proceedFromStep3();
+      };
+
+      // Bouton Suivant / Terminer
+      document.getElementById('btn-next').onclick = async function () {
+        if (!selected) return;
+        if (selected === 'autre' && !customName.trim()) return;
+
+        const btn = document.getElementById('btn-next');
+        btn.disabled = true;
+        btn.textContent = 'Enregistrement…';
+
+        // Si "Autre" : INSERT integration_request smart_lock
+        if (selected === 'autre') {
+          const providerName = customName.trim();
+          let requestId = stepData.lock_request_id;
+          if (requestId) {
+            await supabase
+              .from('integration_requests')
+              .update({ provider_name: providerName })
+              .eq('id', requestId)
+              .eq('user_id', user.id);
+          } else {
+            const { data: inserted, error: insErr } = await supabase
+              .from('integration_requests')
+              .insert({
+                user_id: user.id,
+                type: 'smart_lock',
+                provider_name: providerName,
+                status: 'pending'
+              })
+              .select()
+              .single();
+            if (insErr) {
+              console.error('[onboarding] smart_lock integration_request insert failed:', insErr);
+              btn.disabled = false;
+              btn.textContent = nextLabel;
+              return;
+            }
+            requestId = inserted.id;
+          }
+          await saveState({
+            smart_lock: selected,
+            smart_lock_custom: customName,
+            lock_request_id: requestId
+          });
+        } else {
+          await saveState({
+            smart_lock: selected,
+            smart_lock_custom: ''
+          });
+        }
+
+        await proceedFromStep3();
+      };
+    }
+
+    // Fonction commune : décide la suite selon CM
+    async function proceedFromStep3() {
+      if (isLastInPath) {
+        // Non-Beds24 : on termine ici en pending_integration
+        await supabase
+          .from('onboarding_state')
+          .update({
+            status: 'pending_integration',
+            completed: true,
+            completed_at: new Date().toISOString()
+          })
+          .eq('user_id', user.id);
+        markOnboardingCompleted();
+        renderWaitingScreen();
+      } else {
+        // Beds24 : on continue vers étape 4 (Agent IA)
+        goToStep(getNextStep(currentStep));
+      }
+    }
+
+    render();
+  }
   function renderStep4Placeholder(c) { return placeholder(4, 'Agent IA', 'Renseignez l\'adresse, le wifi et les horaires de check-in.', true)(c); }
   function renderStep5Placeholder(c) { return placeholder(5, 'SMS d\'alerte', 'Activez les SMS pour être prévenu en cas d\'urgence.', true)(c); }
   function renderStep6Placeholder(c) { return placeholder(6, 'Base de connaissances ✨', 'L\'IA analyse vos anciennes conversations et génère automatiquement les réponses aux 50 questions les plus posées.', true)(c); }
