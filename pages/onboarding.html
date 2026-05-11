@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Configuration</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root {
+      --primary: #C97B5C;
+      --primary-dark: #A85F44;
+      --primary-light: #F4E4DC;
+      --text: #1a1a1a;
+      --text-muted: #6b6b6b;
+      --border: #e5e5e5;
+      --bg: #fafaf7;
+      --bg-card: #ffffff;
+      --success: #4a9d6e;
+      --shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .ob-shell { max-width: 880px; margin: 0 auto; padding: 32px 24px 64px; }
+    .ob-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
+    .ob-logo { font-weight: 700; font-size: 20px; color: var(--primary); letter-spacing: -0.02em; }
+    .ob-logout { font-size: 14px; color: var(--text-muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; }
+    .ob-logout:hover { background: var(--border); }
+    .ob-stepper { display: flex; gap: 6px; margin-bottom: 32px; flex-wrap: wrap; }
+    .ob-step-dot { flex: 1; min-width: 32px; height: 4px; background: var(--border); border-radius: 2px; transition: background 0.2s; }
+    .ob-step-dot.done, .ob-step-dot.active { background: var(--primary); }
+    .ob-step-label { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
+    .ob-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 40px; box-shadow: var(--shadow); }
+    .ob-card h1 { font-size: 28px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.02em; }
+    .ob-card h2 { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
+    .ob-card p { color: var(--text-muted); margin-bottom: 16px; font-size: 15px; }
+    .ob-card .lead { font-size: 17px; color: var(--text); margin-bottom: 24px; }
+    .ob-field { margin-bottom: 18px; }
+    .ob-field label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+    .ob-field input, .ob-field textarea, .ob-field select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; font-family: inherit; background: #fff; transition: border 0.15s; }
+    .ob-field input:focus, .ob-field textarea:focus, .ob-field select:focus { outline: none; border-color: var(--primary); }
+    .ob-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin: 20px 0; }
+    .ob-option { border: 2px solid var(--border); border-radius: 10px; padding: 16px; cursor: pointer; transition: all 0.15s; background: #fff; text-align: center; font-weight: 500; font-size: 15px; }
+    .ob-option:hover { border-color: var(--primary-light); background: var(--primary-light); }
+    .ob-option.selected { border-color: var(--primary); background: var(--primary-light); color: var(--primary-dark); }
+    .ob-option .badge { display: inline-block; font-size: 11px; padding: 2px 6px; background: var(--success); color: #fff; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+    .ob-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .ob-btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .ob-btn-primary { background: var(--primary); color: #fff; }
+    .ob-btn-primary:hover { background: var(--primary-dark); }
+    .ob-btn-primary:disabled { background: var(--border); cursor: not-allowed; }
+    .ob-btn-ghost { background: transparent; color: var(--text-muted); }
+    .ob-btn-ghost:hover { color: var(--text); }
+    .ob-skip { font-size: 14px; color: var(--text-muted); background: none; border: none; cursor: pointer; text-decoration: underline; font-family: inherit; }
+    .ob-skip:hover { color: var(--text); }
+    .ob-error { background: #fee; color: #c0392b; padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+    .ob-empty { padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 14px; font-style: italic; }
+    @media (max-width: 640px) {
+      .ob-shell { padding: 20px 16px 48px; }
+      .ob-card { padding: 24px 20px; }
+      .ob-card h1 { font-size: 24px; }
+      .ob-options { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="ob-shell">
+  <header class="ob-header">
+    <div class="ob-logo">HôteSmart</div>
+    <a href="#" class="ob-logout" id="logout-link">Se déconnecter</a>
+  </header>
+
+  <div class="ob-step-label" id="step-label">Étape 1 sur 8</div>
+  <div class="ob-stepper" id="stepper"></div>
+
+  <div class="ob-card" id="ob-content">
+    <div class="ob-empty">Chargement…</div>
+  </div>
+</div>
+
+<script src="/components/auth-guard.js"></script>
+<script>
+(async function onboardingApp() {
+  const TOTAL_STEPS = 8;
+  const content = document.getElementById('ob-content');
+  const stepper = document.getElementById('stepper');
+  const stepLabel = document.getElementById('step-label');
+
+  let tries = 0;
+  while (!window.supabaseClient && tries < 50) {
+    await new Promise(r => setTimeout(r, 50));
+    tries++;
+  }
+  const supabase = window.supabaseClient;
+  if (!supabase) {
+    content.innerHTML = '<div class="ob-error">Erreur d\'initialisation. Rechargez la page.</div>';
+    return;
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) { window.location.replace('/pages/login.html'); return; }
+
+  let { data: state } = await supabase
+    .from('onboarding_state')
+    .select('*')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (!state) {
+    const { data: created } = await supabase
+      .from('onboarding_state')
+      .insert({ user_id: user.id, current_step: 0, completed: false })
+      .select()
+      .single();
+    state = created;
+  }
+
+  if (state.completed) {
+    window.markOnboardingCompleted && window.markOnboardingCompleted();
+    window.location.replace('/pages/index.html');
+    return;
+  }
+
+  let currentStep = state.current_step || 0;
+  let stepData = state.data || {};
+
+  function renderStepper() {
+    stepper.innerHTML = '';
+    for (let i = 0; i < TOTAL_STEPS; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'ob-step-dot';
+      if (i < currentStep) dot.classList.add('done');
+      if (i === currentStep) dot.classList.add('active');
+      stepper.appendChild(dot);
+    }
+    stepLabel.textContent = 'Étape ' + (currentStep + 1) + ' sur ' + TOTAL_STEPS;
+  }
+
+  async function saveState(patch) {
+    const next = Object.assign({}, stepData, patch || {});
+    stepData = next;
+    const { error } = await supabase
+      .from('onboarding_state')
+      .update({ current_step: currentStep, data: next })
+      .eq('user_id', user.id);
+    if (error) console.error('[onboarding] save failed:', error);
+  }
+
+  async function goToStep(n) {
+    if (n < 0 || n > TOTAL_STEPS - 1) return;
+    currentStep = n;
+    await saveState();
+    renderStep();
+  }
+
+  async function finishOnboarding() {
+    await supabase
+      .from('onboarding_state')
+      .update({
+        current_step: TOTAL_STEPS - 1,
+        completed: true,
+        completed_at: new Date().toISOString()
+      })
+      .eq('user_id', user.id);
+    window.markOnboardingCompleted && window.markOnboardingCompleted();
+    window.location.replace('/pages/index.html');
+  }
+
+  const steps = {
+    0: renderStep0,
+    1: renderStep1Placeholder,
+    2: renderStep2Placeholder,
+    3: renderStep3Placeholder,
+    4: renderStep4Placeholder,
+    5: renderStep5Placeholder,
+    6: renderStep6Placeholder,
+    7: renderStep7Placeholder
+  };
+
+  function renderStep() {
+    renderStepper();
+    content.innerHTML = '';
+    const fn = steps[currentStep] || renderUnknown;
+    fn(content);
+  }
+
+  function renderStep0(c) {
+    c.innerHTML = [
+      '<h1>Bienvenue sur HôteSmart 👋</h1>',
+      '<p class="lead">En 5 minutes, on configure tout pour que vos voyageurs reçoivent des réponses automatiques 24h/24, même à 23h quand vous dormez.</p>',
+      '<p>Vous allez connecter :</p>',
+      '<ul style="margin: 12px 0 24px 20px; color: var(--text-muted);">',
+      '<li>Votre channel manager (Beds24 ou autre)</li>',
+      '<li>Vos serrures connectées (optionnel)</li>',
+      '<li>L\'agent IA qui répond aux voyageurs</li>',
+      '<li>Les SMS d\'alerte (optionnel)</li>',
+      '</ul>',
+      '<p>La plupart des étapes sont skippables. Vous pourrez tout reconfigurer plus tard.</p>',
+      '<div class="ob-actions"><span></span><button class="ob-btn ob-btn-primary" id="btn-start">Commencer →</button></div>'
+    ].join('');
+    document.getElementById('btn-start').onclick = function () { goToStep(1); };
+  }
+
+  function placeholder(stepNum, title, description, skippable) {
+    return function (c) {
+      const skipBtn = skippable ? '<button class="ob-skip" id="btn-skip">Passer cette étape</button>' : '';
+      const nextLabel = (stepNum === TOTAL_STEPS - 1) ? 'Terminer' : 'Suivant →';
+      c.innerHTML = [
+        '<h2>' + title + '</h2>',
+        '<p class="lead">' + description + '</p>',
+        '<div class="ob-empty">Cette étape sera implémentée au prochain commit.</div>',
+        '<div class="ob-actions">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        '<div style="display:flex; gap:16px; align-items:center;">',
+        skipBtn,
+        '<button class="ob-btn ob-btn-primary" id="btn-next">' + nextLabel + '</button>',
+        '</div></div>'
+      ].join('');
+      document.getElementById('btn-back').onclick = function () { goToStep(currentStep - 1); };
+      const bs = document.getElementById('btn-skip');
+      if (bs) bs.onclick = function () { goToStep(currentStep + 1); };
+      document.getElementById('btn-next').onclick = function () {
+        if (stepNum === TOTAL_STEPS - 1) finishOnboarding();
+        else goToStep(currentStep + 1);
+      };
+    };
+  }
+
+  function renderStep1Placeholder(c) { return placeholder(1, 'Votre channel manager', 'Sur quelle plateforme gérez-vous vos réservations ?', false)(c); }
+  function renderStep2Placeholder(c) { return placeholder(2, 'Connexion Beds24', 'Saisissez vos clés API Beds24 pour récupérer vos biens.', false)(c); }
+  function renderStep3Placeholder(c) { return placeholder(3, 'Serrures connectées', 'Quelle marque de serrures utilisez-vous ? (optionnel)', true)(c); }
+  function renderStep4Placeholder(c) { return placeholder(4, 'Agent IA', 'Renseignez l\'adresse, le wifi et les horaires de check-in.', true)(c); }
+  function renderStep5Placeholder(c) { return placeholder(5, 'SMS d\'alerte', 'Activez les SMS pour être prévenu en cas d\'urgence.', true)(c); }
+  function renderStep6Placeholder(c) { return placeholder(6, 'Base de connaissances ✨', 'L\'IA analyse vos anciennes conversations et génère automatiquement les réponses aux 50 questions les plus posées.', true)(c); }
+  function renderStep7Placeholder(c) {
+    c.innerHTML = [
+      '<h1>C\'est prêt 🎉</h1>',
+      '<p class="lead">Votre agent IA est configuré et opérationnel. Vous pouvez maintenant accéder à votre tableau de bord.</p>',
+      '<div class="ob-actions">',
+      '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+      '<button class="ob-btn ob-btn-primary" id="btn-finish">Accéder au tableau de bord</button>',
+      '</div>'
+    ].join('');
+    document.getElementById('btn-back').onclick = function () { goToStep(currentStep - 1); };
+    document.getElementById('btn-finish').onclick = function () { finishOnboarding(); };
+  }
+
+  function renderUnknown(c) {
+    c.innerHTML = '<div class="ob-error">Étape inconnue. Retour au début.</div>';
+    setTimeout(function () { goToStep(0); }, 1500);
+  }
+
+  document.getElementById('logout-link').onclick = async function (e) {
+    e.preventDefault();
+    await supabase.auth.signOut();
+    sessionStorage.clear();
+    window.location.replace('/pages/login.html');
+  };
+
+  renderStep();
+})();
+</script>
+
+</body>
+</html>
