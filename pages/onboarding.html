@@ -223,7 +223,151 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     };
   }
 
-  function renderStep1Placeholder(c) { return placeholder(1, 'Votre channel manager', 'Sur quelle plateforme gérez-vous vos réservations ?', false)(c); }
+  function renderStep1Placeholder(c) {
+    const providers = [
+      { id: 'beds24',    label: 'Beds24',    supported: true },
+      { id: 'smoobu',    label: 'Smoobu',    supported: false },
+      { id: 'hostaway',  label: 'Hostaway',  supported: false },
+      { id: 'lodgify',   label: 'Lodgify',   supported: false },
+      { id: 'superhote', label: 'SuperHote', supported: false },
+      { id: 'autre',     label: 'Autre',     supported: false }
+    ];
+
+    let selected = stepData.channel_manager || null;
+    let customName = stepData.channel_manager_custom || '';
+
+    function render() {
+      const optionsHtml = providers.map(function (p) {
+        const isSel = selected === p.id;
+        const badge = p.supported ? '<span class="badge">Supporté</span>' : '';
+        return '<div class="ob-option' + (isSel ? ' selected' : '') + '" data-id="' + p.id + '">' + p.label + badge + '</div>';
+      }).join('');
+
+      const customField = (selected === 'autre')
+        ? '<div class="ob-field" style="margin-top:20px;"><label>Précisez le nom de votre channel manager</label><input type="text" id="cm-custom" placeholder="Ex: Hostify, Guesty..." value="' + customName.replace(/"/g, '&quot;') + '"></div>'
+        : '';
+
+      const nextDisabled = !selected || (selected === 'autre' && !customName.trim());
+
+      c.innerHTML = [
+        '<h2>Votre channel manager</h2>',
+        '<p class="lead">Sur quelle plateforme gérez-vous vos réservations ?</p>',
+        '<div class="ob-options">', optionsHtml, '</div>',
+        customField,
+        '<div class="ob-actions">',
+        '<span></span>',
+        '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>Suivant →</button>',
+        '</div>'
+      ].join('');
+
+      // Click sur option
+      c.querySelectorAll('.ob-option').forEach(function (el) {
+        el.onclick = function () {
+          selected = el.getAttribute('data-id');
+          render();
+        };
+      });
+
+      // Input custom
+      const customInput = document.getElementById('cm-custom');
+      if (customInput) {
+        customInput.oninput = function () {
+          customName = customInput.value;
+          // Mettre à jour l'état disabled sans tout re-rendre (perdre le focus)
+          document.getElementById('btn-next').disabled = !customName.trim();
+        };
+      }
+
+      // Bouton Suivant
+      document.getElementById('btn-next').onclick = async function () {
+        if (!selected) return;
+        if (selected === 'autre' && !customName.trim()) return;
+
+        const btn = document.getElementById('btn-next');
+        btn.disabled = true;
+        btn.textContent = 'Enregistrement…';
+
+        // Cas Beds24 : on passe à l'étape 2 classique
+        if (selected === 'beds24') {
+          await saveState({ channel_manager: 'beds24' });
+          goToStep(2);
+          return;
+        }
+
+        // Cas autre CM : insertion integration_request + completed
+        const providerName = (selected === 'autre') ? customName.trim() : providers.find(function (p) { return p.id === selected; }).label;
+
+        // Anti-doublon si user repasse plusieurs fois
+        let requestId = stepData.cm_request_id;
+        if (requestId) {
+          await supabase
+            .from('integration_requests')
+            .update({ provider_name: providerName })
+            .eq('id', requestId)
+            .eq('user_id', user.id);
+        } else {
+          const { data: inserted, error: insErr } = await supabase
+            .from('integration_requests')
+            .insert({
+              user_id: user.id,
+              type: 'channel_manager',
+              provider_name: providerName,
+              status: 'pending'
+            })
+            .select()
+            .single();
+          if (insErr) {
+            console.error('[onboarding] integration_request insert failed:', insErr);
+            btn.disabled = false;
+            btn.textContent = 'Suivant →';
+            return;
+          }
+          requestId = inserted.id;
+        }
+
+        await saveState({
+          channel_manager: selected,
+          channel_manager_custom: customName,
+          cm_request_id: requestId
+        });
+
+        // Marquer pending_integration et completed
+        await supabase
+          .from('onboarding_state')
+          .update({
+            status: 'pending_integration',
+            completed: true,
+            completed_at: new Date().toISOString()
+          })
+          .eq('user_id', user.id);
+
+        markOnboardingCompleted();
+        renderWaitingScreen();
+      };
+    }
+
+    render();
+  }
+
+  function renderWaitingScreen() {
+    // Vide le stepper visuel
+    stepper.innerHTML = '';
+    stepLabel.textContent = 'Demande enregistrée';
+
+    content.innerHTML = [
+      '<h1>Merci, on s\'occupe de vous</h1>',
+      '<p class="lead">Votre demande d\'intégration a bien été enregistrée. Un développeur va la traiter rapidement.</p>',
+      '<p>Vous recevrez un email dès que votre channel manager sera disponible sur HôteSmart. En attendant, vous pouvez fermer cette fenêtre.</p>',
+      '<div class="ob-actions"><span></span>',
+      '<button class="ob-btn ob-btn-ghost" id="btn-logout-waiting">Se déconnecter</button>',
+      '</div>'
+    ].join('');
+
+    document.getElementById('btn-logout-waiting').onclick = async function () {
+      sessionStorage.clear();
+      await signOut();
+    };
+  }
   function renderStep2Placeholder(c) { return placeholder(2, 'Connexion Beds24', 'Saisissez vos clés API Beds24 pour récupérer vos biens.', false)(c); }
   function renderStep3Placeholder(c) { return placeholder(3, 'Serrures connectées', 'Quelle marque de serrures utilisez-vous ? (optionnel)', true)(c); }
   function renderStep4Placeholder(c) { return placeholder(4, 'Agent IA', 'Renseignez l\'adresse, le wifi et les horaires de check-in.', true)(c); }
