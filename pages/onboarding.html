@@ -122,15 +122,23 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   let stepData = state.data || {};
 
   function renderStepper() {
+    const path = getPath();
+    const currentIdx = path.indexOf(currentStep);
     stepper.innerHTML = '';
-    for (let i = 0; i < TOTAL_STEPS; i++) {
+    for (let i = 0; i < path.length; i++) {
       const dot = document.createElement('div');
       dot.className = 'ob-step-dot';
-      if (i < currentStep) dot.classList.add('done');
-      if (i === currentStep) dot.classList.add('active');
+      if (currentIdx === -1) {
+        // étape hors path : tout en done sauf la dernière
+        if (i < path.length - 1) dot.classList.add('done');
+      } else {
+        if (i < currentIdx) dot.classList.add('done');
+        if (i === currentIdx) dot.classList.add('active');
+      }
       stepper.appendChild(dot);
     }
-    stepLabel.textContent = 'Étape ' + (currentStep + 1) + ' sur ' + TOTAL_STEPS;
+    const displayIdx = currentIdx === -1 ? path.length : currentIdx + 1;
+    stepLabel.textContent = 'Étape ' + displayIdx + ' sur ' + path.length;
   }
 
   async function saveState(patch) {
@@ -143,25 +151,30 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     if (error) console.error('[onboarding] save failed:', error);
   }
 
+  // Renvoie le tableau ordonné des étapes du parcours actuel
+  // selon stepData.channel_manager. Sert pour stepper + label.
+  function getPath() {
+    const cm = stepData.channel_manager;
+    if (cm && cm !== 'beds24') {
+      // Parcours non-Beds24 : Bienvenue, CM, Serrures (puis waiting)
+      return [0, 1, 3];
+    }
+    // Parcours Beds24 ou CM pas encore choisi (assume parcours complet)
+    return [0, 1, 2, 3, 4, 5, 6, 7];
+  }
+
   // Routage conditionnel centralisé.
   // Lit stepData.channel_manager et décide la prochaine étape.
   function getNextStep(current) {
-    const cm = stepData.channel_manager;
-    if (current === 1) {
-      return (cm === 'beds24') ? 2 : 3; // non-Beds24 : skip clés API
-    }
-    if (current === 3) {
-      // Si CM non supporté, on s'arrête ici (l'étape 3 affichera le waiting screen).
-      // Sinon, on continue vers Agent IA.
-      return (cm === 'beds24') ? 4 : null;
-    }
-    // Par défaut : étape suivante linéaire
-    return current + 1;
+    const path = getPath();
+    const idx = path.indexOf(current);
+    if (idx === -1 || idx === path.length - 1) return null; // hors path ou dernière étape
+    return path[idx + 1];
   }
 
   async function goToStep(n) {
     if (n === null || n === undefined) return; // signal "on reste où on est"
-    if (n < 0 || n > TOTAL_STEPS - 1) return;
+    if (n < 0 || n > 7) return;
     currentStep = n;
     await saveState();
     renderStep();
@@ -171,7 +184,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     await supabase
       .from('onboarding_state')
       .update({
-        current_step: TOTAL_STEPS - 1,
+        current_step: 7,
         completed: true,
         completed_at: new Date().toISOString()
       })
@@ -218,7 +231,9 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   function placeholder(stepNum, title, description, skippable) {
     return function (c) {
       const skipBtn = skippable ? '<button class="ob-skip" id="btn-skip">Passer cette étape</button>' : '';
-      const nextLabel = (stepNum === TOTAL_STEPS - 1) ? 'Terminer' : 'Suivant →';
+      const path = getPath();
+      const isLast = (path.indexOf(stepNum) === path.length - 1);
+      const nextLabel = isLast ? 'Terminer' : 'Suivant →';
       c.innerHTML = [
         '<h2>' + title + '</h2>',
         '<p class="lead">' + description + '</p>',
@@ -230,12 +245,16 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         '<button class="ob-btn ob-btn-primary" id="btn-next">' + nextLabel + '</button>',
         '</div></div>'
       ].join('');
-      document.getElementById('btn-back').onclick = function () { goToStep(currentStep - 1); };
+      document.getElementById('btn-back').onclick = function () {
+        const p = getPath();
+        const idx = p.indexOf(currentStep);
+        if (idx > 0) goToStep(p[idx - 1]);
+      };
       const bs = document.getElementById('btn-skip');
-      if (bs) bs.onclick = function () { goToStep(currentStep + 1); };
+      if (bs) bs.onclick = function () { goToStep(getNextStep(currentStep)); };
       document.getElementById('btn-next').onclick = function () {
-        if (stepNum === TOTAL_STEPS - 1) finishOnboarding();
-        else goToStep(currentStep + 1);
+        if (isLast) finishOnboarding();
+        else goToStep(getNextStep(currentStep));
       };
     };
   }
@@ -388,7 +407,11 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       '<button class="ob-btn ob-btn-primary" id="btn-finish">Accéder au tableau de bord</button>',
       '</div>'
     ].join('');
-    document.getElementById('btn-back').onclick = function () { goToStep(currentStep - 1); };
+    document.getElementById('btn-back').onclick = function () {
+      const p = getPath();
+      const idx = p.indexOf(currentStep);
+      if (idx > 0) goToStep(p[idx - 1]);
+    };
     document.getElementById('btn-finish').onclick = function () { finishOnboarding(); };
   }
 
