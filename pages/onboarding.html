@@ -156,8 +156,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   function getPath() {
     const cm = stepData.channel_manager;
     if (cm && cm !== 'beds24') {
-      // Parcours non-Beds24 : Bienvenue, CM, Serrures (puis waiting)
-      return [0, 1, 3];
+      // Parcours non-Beds24 : Bienvenue, CM, Mes biens, Serrures, Contact
+      return [0, 1, 8, 3, 9];
     }
     // Parcours Beds24 ou CM pas encore choisi (assume parcours complet)
     return [0, 1, 2, 3, 4, 5, 6, 7];
@@ -174,7 +174,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
   async function goToStep(n) {
     if (n === null || n === undefined) return; // signal "on reste où on est"
-    if (n < 0 || n > 7) return;
+    if (n < 0 || n > 9) return;
     currentStep = n;
     await saveState();
     renderStep();
@@ -201,7 +201,9 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     4: renderStep4Placeholder,
     5: renderStep5Placeholder,
     6: renderStep6Placeholder,
-    7: renderStep7Placeholder
+    7: renderStep7Placeholder,
+    8: renderStep8MesBiens,
+    9: renderStep9Contact
   };
 
   function renderStep() {
@@ -410,7 +412,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     let customName = stepData.smart_lock_custom || '';
 
     const cm = stepData.channel_manager;
-    const isLastInPath = (cm && cm !== 'beds24'); // étape 3 = dernière du path non-Beds24
+    // L'étape 3 n'est jamais la dernière du path (Beds24: suivi par 4, non-Beds24: suivi par 9)
+    const isLastInPath = false;
 
     function render() {
       const optionsHtml = brands.map(function (b) {
@@ -433,7 +436,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         '<div class="ob-actions">',
         '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
         '<div style="display:flex; gap:16px; align-items:center;">',
-        '<button class="ob-skip" id="btn-skip">Passer cette étape</button>',
+        (cm === 'beds24' ? '<button class="ob-skip" id="btn-skip">Passer cette étape</button>' : ''),
         '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>' + nextLabel + '</button>',
         '</div></div>'
       ].join('');
@@ -462,11 +465,14 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         if (idx > 0) goToStep(p[idx - 1]);
       };
 
-      // Bouton Passer : équivalent à "Aucune", on enregistre et on continue
-      document.getElementById('btn-skip').onclick = async function () {
-        await saveState({ smart_lock: 'none', smart_lock_custom: '' });
-        await proceedFromStep3();
-      };
+      // Bouton Passer : équivalent à "Aucune", seulement présent si Beds24
+      const skipBtn = document.getElementById('btn-skip');
+      if (skipBtn) {
+        skipBtn.onclick = async function () {
+          await saveState({ smart_lock: 'none', smart_lock_custom: '' });
+          await proceedFromStep3();
+        };
+      }
 
       // Bouton Suivant / Terminer
       document.getElementById('btn-next').onclick = async function () {
@@ -522,24 +528,11 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       };
     }
 
-    // Fonction commune : décide la suite selon CM
+    // Fonction commune : décide la suite selon le path actuel
+    // - Beds24 : étape 4 (Agent IA)
+    // - non-Beds24 : étape 9 (Contact), c'est elle qui terminera l'onboarding
     async function proceedFromStep3() {
-      if (isLastInPath) {
-        // Non-Beds24 : on termine ici en pending_integration
-        await supabase
-          .from('onboarding_state')
-          .update({
-            status: 'pending_integration',
-            completed: true,
-            completed_at: new Date().toISOString()
-          })
-          .eq('user_id', user.id);
-        markOnboardingCompleted();
-        renderWaitingScreen();
-      } else {
-        // Beds24 : on continue vers étape 4 (Agent IA)
-        goToStep(getNextStep(currentStep));
-      }
+      goToStep(getNextStep(currentStep));
     }
 
     render();
@@ -562,6 +555,198 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       if (idx > 0) goToStep(p[idx - 1]);
     };
     document.getElementById('btn-finish').onclick = function () { finishOnboarding(); };
+  }
+
+  // ====================================================================
+  // Étape 8 — Mes biens (parcours non-Beds24 uniquement)
+  // ====================================================================
+  function renderStep8MesBiens(c) {
+    let count = Number(stepData.properties_count) || 1;
+    let urls = Array.isArray(stepData.properties_urls) ? stepData.properties_urls.slice() : [];
+    // Aligner urls.length sur count
+    while (urls.length < count) urls.push('');
+    if (urls.length > count) urls = urls.slice(0, count);
+
+    function render() {
+      const urlInputs = urls.map(function (u, i) {
+        return [
+          '<div class="ob-field" style="margin-bottom:12px;">',
+          '<label>Lien de l\'annonce du bien ' + (i + 1) + '</label>',
+          '<input type="url" class="prop-url" data-idx="' + i + '" placeholder="https://www.airbnb.fr/rooms/..." value="' + (u || '').replace(/"/g, '&quot;') + '">',
+          '</div>'
+        ].join('');
+      }).join('');
+
+      const allFilled = urls.every(function (u) { return u && u.trim().length > 0; });
+      const validCount = count >= 1 && count <= 20;
+      const nextDisabled = !allFilled || !validCount;
+
+      c.innerHTML = [
+        '<h2>Vos biens</h2>',
+        '<p class="lead">Combien de biens en location courte durée gérez-vous ?</p>',
+        '<div class="ob-field">',
+        '<label>Nombre de biens</label>',
+        '<input type="number" id="prop-count" min="1" max="20" value="' + count + '" style="max-width:120px;">',
+        '</div>',
+        '<div style="margin-top:24px;">',
+        urlInputs,
+        '</div>',
+        '<div class="ob-actions">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>Suivant →</button>',
+        '</div>'
+      ].join('');
+
+      const countInput = document.getElementById('prop-count');
+      countInput.oninput = function () {
+        const newCount = Math.max(1, Math.min(20, Number(countInput.value) || 1));
+        if (newCount !== count) {
+          count = newCount;
+          while (urls.length < count) urls.push('');
+          if (urls.length > count) urls = urls.slice(0, count);
+          render();
+        }
+      };
+
+      c.querySelectorAll('.prop-url').forEach(function (input) {
+        input.oninput = function () {
+          const idx = Number(input.getAttribute('data-idx'));
+          urls[idx] = input.value;
+          // Recalcul disabled sans tout re-rendre
+          const ok = urls.every(function (u) { return u && u.trim().length > 0; });
+          document.getElementById('btn-next').disabled = !ok;
+        };
+      });
+
+      document.getElementById('btn-back').onclick = function () {
+        const p = getPath();
+        const idx = p.indexOf(currentStep);
+        if (idx > 0) goToStep(p[idx - 1]);
+      };
+
+      document.getElementById('btn-next').onclick = async function () {
+        if (!urls.every(function (u) { return u && u.trim().length > 0; })) return;
+        await saveState({
+          properties_count: count,
+          properties_urls: urls.map(function (u) { return u.trim(); })
+        });
+        goToStep(getNextStep(currentStep));
+      };
+    }
+
+    render();
+  }
+
+  // ====================================================================
+  // Étape 9 — Contact (parcours non-Beds24, finalise l'onboarding)
+  // ====================================================================
+  function renderStep9Contact(c) {
+    let firstName = stepData.contact_first_name || '';
+    let lastName  = stepData.contact_last_name  || '';
+    let phone     = stepData.contact_phone      || '';
+    const email   = user.email || '';
+
+    function render() {
+      const valid = firstName.trim() && lastName.trim() && phone.trim().length >= 6;
+
+      c.innerHTML = [
+        '<h2>Comment vous contacter ?</h2>',
+        '<p class="lead">Pour finaliser votre demande d\'intégration, on a besoin de pouvoir vous joindre rapidement.</p>',
+        '<div class="ob-field">',
+        '<label>Prénom</label>',
+        '<input type="text" id="ct-first" value="' + firstName.replace(/"/g, '&quot;') + '" autocomplete="given-name">',
+        '</div>',
+        '<div class="ob-field">',
+        '<label>Nom</label>',
+        '<input type="text" id="ct-last" value="' + lastName.replace(/"/g, '&quot;') + '" autocomplete="family-name">',
+        '</div>',
+        '<div class="ob-field">',
+        '<label>Téléphone</label>',
+        '<input type="tel" id="ct-phone" value="' + phone.replace(/"/g, '&quot;') + '" placeholder="06 12 34 56 78" autocomplete="tel">',
+        '</div>',
+        '<div class="ob-field">',
+        '<label>Email (du compte)</label>',
+        '<input type="email" value="' + email + '" disabled style="background:#f4f4f0;color:var(--text-muted);">',
+        '</div>',
+        '<div class="ob-actions">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        '<button class="ob-btn ob-btn-primary" id="btn-finish"' + (valid ? '' : ' disabled') + '>Terminer</button>',
+        '</div>'
+      ].join('');
+
+      document.getElementById('ct-first').oninput = function (e) {
+        firstName = e.target.value;
+        document.getElementById('btn-finish').disabled = !(firstName.trim() && lastName.trim() && phone.trim().length >= 6);
+      };
+      document.getElementById('ct-last').oninput = function (e) {
+        lastName = e.target.value;
+        document.getElementById('btn-finish').disabled = !(firstName.trim() && lastName.trim() && phone.trim().length >= 6);
+      };
+      document.getElementById('ct-phone').oninput = function (e) {
+        phone = e.target.value;
+        document.getElementById('btn-finish').disabled = !(firstName.trim() && lastName.trim() && phone.trim().length >= 6);
+      };
+
+      document.getElementById('btn-back').onclick = function () {
+        const p = getPath();
+        const idx = p.indexOf(currentStep);
+        if (idx > 0) goToStep(p[idx - 1]);
+      };
+
+      document.getElementById('btn-finish').onclick = async function () {
+        if (!(firstName.trim() && lastName.trim() && phone.trim().length >= 6)) return;
+        const btn = document.getElementById('btn-finish');
+        btn.disabled = true;
+        btn.textContent = 'Enregistrement…';
+
+        // Sauvegarder en local d'abord
+        await saveState({
+          contact_first_name: firstName.trim(),
+          contact_last_name: lastName.trim(),
+          contact_phone: phone.trim()
+        });
+
+        // UPDATE de la ligne integration_requests créée à l'étape 1 avec les colonnes contact + biens
+        const requestId = stepData.cm_request_id;
+        if (requestId) {
+          const { error: updErr } = await supabase
+            .from('integration_requests')
+            .update({
+              contact_first_name: firstName.trim(),
+              contact_last_name: lastName.trim(),
+              contact_phone: phone.trim(),
+              contact_email: email,
+              properties_count: stepData.properties_count || null,
+              properties_urls: stepData.properties_urls || null
+            })
+            .eq('id', requestId)
+            .eq('user_id', user.id);
+          if (updErr) {
+            console.error('[onboarding] contact update failed:', updErr);
+            btn.disabled = false;
+            btn.textContent = 'Terminer';
+            return;
+          }
+        } else {
+          console.warn('[onboarding] cm_request_id manquant, contact non rattaché');
+        }
+
+        // Marquer pending_integration et completed
+        await supabase
+          .from('onboarding_state')
+          .update({
+            status: 'pending_integration',
+            completed: true,
+            completed_at: new Date().toISOString()
+          })
+          .eq('user_id', user.id);
+
+        markOnboardingCompleted();
+        renderWaitingScreen();
+      };
+    }
+
+    render();
   }
 
   function renderUnknown(c) {
