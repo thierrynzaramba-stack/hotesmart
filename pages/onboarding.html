@@ -84,26 +84,17 @@
   </div>
 </div>
 
-<script src="/components/auth-guard.js"></script>
-<script>
+<script type="module">
+import { supabase, getUser, signOut } from '/shared/supabase.js';
+import { markOnboardingCompleted } from '/components/auth-guard.js';
+
 (async function onboardingApp() {
   const TOTAL_STEPS = 8;
   const content = document.getElementById('ob-content');
   const stepper = document.getElementById('stepper');
   const stepLabel = document.getElementById('step-label');
 
-  let tries = 0;
-  while (!window.supabaseClient && tries < 50) {
-    await new Promise(r => setTimeout(r, 50));
-    tries++;
-  }
-  const supabase = window.supabaseClient;
-  if (!supabase) {
-    content.innerHTML = '<div class="ob-error">Erreur d\'initialisation. Rechargez la page.</div>';
-    return;
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) { window.location.replace('/pages/login.html'); return; }
 
   let { data: state } = await supabase
@@ -122,7 +113,7 @@
   }
 
   if (state.completed) {
-    window.markOnboardingCompleted && window.markOnboardingCompleted();
+    markOnboardingCompleted();
     window.location.replace('/pages/index.html');
     return;
   }
@@ -168,7 +159,7 @@
         completed_at: new Date().toISOString()
       })
       .eq('user_id', user.id);
-    window.markOnboardingCompleted && window.markOnboardingCompleted();
+    markOnboardingCompleted();
     window.location.replace('/pages/index.html');
   }
 
@@ -258,9 +249,8 @@
 
   document.getElementById('logout-link').onclick = async function (e) {
     e.preventDefault();
-    await supabase.auth.signOut();
     sessionStorage.clear();
-    window.location.replace('/pages/login.html');
+    await signOut();
   };
 
   renderStep();
