@@ -143,7 +143,24 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     if (error) console.error('[onboarding] save failed:', error);
   }
 
+  // Routage conditionnel centralisé.
+  // Lit stepData.channel_manager et décide la prochaine étape.
+  function getNextStep(current) {
+    const cm = stepData.channel_manager;
+    if (current === 1) {
+      return (cm === 'beds24') ? 2 : 3; // non-Beds24 : skip clés API
+    }
+    if (current === 3) {
+      // Si CM non supporté, on s'arrête ici (l'étape 3 affichera le waiting screen).
+      // Sinon, on continue vers Agent IA.
+      return (cm === 'beds24') ? 4 : null;
+    }
+    // Par défaut : étape suivante linéaire
+    return current + 1;
+  }
+
   async function goToStep(n) {
+    if (n === null || n === undefined) return; // signal "on reste où on est"
     if (n < 0 || n > TOTAL_STEPS - 1) return;
     currentStep = n;
     await saveState();
@@ -225,12 +242,12 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
   function renderStep1Placeholder(c) {
     const providers = [
-      { id: 'beds24',    label: 'Beds24',    supported: true },
-      { id: 'smoobu',    label: 'Smoobu',    supported: false },
-      { id: 'hostaway',  label: 'Hostaway',  supported: false },
-      { id: 'lodgify',   label: 'Lodgify',   supported: false },
-      { id: 'superhote', label: 'SuperHote', supported: false },
-      { id: 'autre',     label: 'Autre',     supported: false }
+      { id: 'beds24',    label: 'Beds24'    },
+      { id: 'smoobu',    label: 'Smoobu'    },
+      { id: 'hostaway',  label: 'Hostaway'  },
+      { id: 'lodgify',   label: 'Lodgify'   },
+      { id: 'superhote', label: 'SuperHote' },
+      { id: 'autre',     label: 'Autre'     }
     ];
 
     let selected = stepData.channel_manager || null;
@@ -239,8 +256,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     function render() {
       const optionsHtml = providers.map(function (p) {
         const isSel = selected === p.id;
-        const badge = p.supported ? '<span class="badge">Supporté</span>' : '';
-        return '<div class="ob-option' + (isSel ? ' selected' : '') + '" data-id="' + p.id + '">' + p.label + badge + '</div>';
+        return '<div class="ob-option' + (isSel ? ' selected' : '') + '" data-id="' + p.id + '">' + p.label + '</div>';
       }).join('');
 
       const customField = (selected === 'autre')
@@ -287,17 +303,18 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         btn.disabled = true;
         btn.textContent = 'Enregistrement…';
 
-        // Cas Beds24 : on passe à l'étape 2 classique
+        // Cas Beds24 : parcours complet, on passe à l'étape 2 (clés API)
         if (selected === 'beds24') {
           await saveState({ channel_manager: 'beds24' });
-          goToStep(2);
+          goToStep(getNextStep(1));
           return;
         }
 
-        // Cas autre CM : insertion integration_request + completed
+        // Cas autre CM : on enregistre la demande d'intégration et on continue
+        // vers l'étape serrures (3) pour collecter aussi la marque de serrures.
+        // L'écran "merci" sera affiché par l'étape 3 quand CM ≠ beds24.
         const providerName = (selected === 'autre') ? customName.trim() : providers.find(function (p) { return p.id === selected; }).label;
 
-        // Anti-doublon si user repasse plusieurs fois
         let requestId = stepData.cm_request_id;
         if (requestId) {
           await supabase
@@ -331,18 +348,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
           cm_request_id: requestId
         });
 
-        // Marquer pending_integration et completed
-        await supabase
-          .from('onboarding_state')
-          .update({
-            status: 'pending_integration',
-            completed: true,
-            completed_at: new Date().toISOString()
-          })
-          .eq('user_id', user.id);
-
-        markOnboardingCompleted();
-        renderWaitingScreen();
+        goToStep(getNextStep(1));
       };
     }
 
