@@ -567,19 +567,39 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     while (urls.length < count) urls.push('');
     if (urls.length > count) urls = urls.slice(0, count);
 
+    // Regex URL stricte : http(s)://domaine.tld[/...]
+    function isValidUrl(u) {
+      if (!u || typeof u !== 'string') return false;
+      try {
+        const parsed = new URL(u.trim());
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+        if (!parsed.hostname || parsed.hostname.indexOf('.') === -1) return false;
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
     function render() {
       const urlInputs = urls.map(function (u, i) {
+        const trimmed = (u || '').trim();
+        const hasContent = trimmed.length > 0;
+        const valid = isValidUrl(trimmed);
+        const errMsg = (hasContent && !valid)
+          ? '<div style="color:#c0392b; font-size:13px; margin-top:4px;">URL invalide. Format attendu : https://...</div>'
+          : '';
         return [
           '<div class="ob-field" style="margin-bottom:12px;">',
           '<label>Lien de l\'annonce du bien ' + (i + 1) + '</label>',
-          '<input type="url" class="prop-url" data-idx="' + i + '" placeholder="https://www.airbnb.fr/rooms/..." value="' + (u || '').replace(/"/g, '&quot;') + '">',
+          '<input type="url" class="prop-url" data-idx="' + i + '" placeholder="https://www.airbnb.fr/rooms/..." value="' + trimmed.replace(/"/g, '&quot;') + '">',
+          errMsg,
           '</div>'
         ].join('');
       }).join('');
 
-      const allFilled = urls.every(function (u) { return u && u.trim().length > 0; });
+      const allValid = urls.every(function (u) { return isValidUrl(u); });
       const validCount = count >= 1 && count <= 20;
-      const nextDisabled = !allFilled || !validCount;
+      const nextDisabled = !allValid || !validCount;
 
       c.innerHTML = [
         '<h2>Vos biens</h2>',
@@ -612,9 +632,12 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         input.oninput = function () {
           const idx = Number(input.getAttribute('data-idx'));
           urls[idx] = input.value;
-          // Recalcul disabled sans tout re-rendre
-          const ok = urls.every(function (u) { return u && u.trim().length > 0; });
+          const ok = urls.every(function (u) { return isValidUrl(u); });
           document.getElementById('btn-next').disabled = !ok;
+        };
+        // Au blur, re-render pour afficher/cacher l'erreur sous le champ
+        input.onblur = function () {
+          render();
         };
       });
 
@@ -625,7 +648,10 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       };
 
       document.getElementById('btn-next').onclick = async function () {
-        if (!urls.every(function (u) { return u && u.trim().length > 0; })) return;
+        if (!urls.every(function (u) { return isValidUrl(u); })) {
+          render();
+          return;
+        }
         await saveState({
           properties_count: count,
           properties_urls: urls.map(function (u) { return u.trim(); })
