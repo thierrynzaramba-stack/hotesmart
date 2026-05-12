@@ -66,6 +66,89 @@
       .ob-card h1 { font-size: 24px; }
       .ob-options { grid-template-columns: 1fr 1fr; }
     }
+
+    /* Chat IA étape 2 Beds24 */
+    .ob-chat {
+      margin-top: 28px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+    }
+    .ob-chat-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ob-chat-log {
+      background: #fafaf7;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      max-height: 320px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .ob-chat-msg {
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .ob-chat-msg.assistant {
+      background: var(--primary-light);
+      color: var(--text);
+    }
+    .ob-chat-msg.user {
+      background: #fff;
+      border: 1px solid var(--border);
+      margin-left: 32px;
+    }
+    .ob-chat-input-row {
+      display: flex;
+      gap: 8px;
+    }
+    .ob-chat-input-row input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .ob-chat-input-row input:focus { outline: none; border-color: var(--primary); }
+    .ob-chat-send {
+      padding: 10px 16px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .ob-chat-send:hover { background: var(--primary-dark); }
+    .ob-chat-send:disabled { background: var(--border); cursor: not-allowed; }
+    .ob-chat-counter {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      text-align: right;
+    }
+    .ob-success {
+      background: #e8f5ec;
+      color: #2d6a4f;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      border: 1px solid #b7dfc2;
+    }
   </style>
 </head>
 <body>
@@ -395,7 +478,272 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       await signOut();
     };
   }
-  function renderStep2Placeholder(c) { return placeholder(2, 'Connexion Beds24', 'Saisissez vos clés API Beds24 pour récupérer vos biens.', false)(c); }
+  function renderStep2Placeholder(c) {
+    let inviteCode = stepData.beds24_invite_code_attempt || '';
+    let chatLog = Array.isArray(stepData.beds24_chat) ? stepData.beds24_chat.slice() : [];
+    let userMsgCount = chatLog.filter(function (m) { return m.role === 'user'; }).length;
+    let connecting = false;
+    let connectError = '';
+    let connectSuccess = false;
+    let chatInput = '';
+    let chatSending = false;
+
+    const MAX_USER_MSGS = 20;
+
+    // 1er message statique (instructions doc Beds24)
+    if (chatLog.length === 0) {
+      chatLog.push({
+        role: 'assistant',
+        content: 'Bonjour 👋 Pour connecter Beds24 à HôteSmart :\n\n1. Connectez-vous sur beds24.com\n2. Allez dans Settings → Apps & Integrations → API\n   (raccourci : https://beds24.com/control3.php?pagetype=apiv2)\n3. Cochez les scopes nécessaires : read+write pour bookings, messages, properties\n4. Cliquez sur "Generate invite code"\n5. Le code apparaît dans la liste, cliquez sur l\'icône copie\n6. Collez le code dans le champ ci-dessus et cliquez "Connecter"\n\n⚠️ Le code expire 24h après génération, ne traînez pas.\n\nUne question ? Tapez-la ci-dessous.'
+      });
+    }
+
+    function render() {
+      const successBlock = connectSuccess
+        ? '<div class="ob-success">✓ Compte Beds24 connecté avec succès. Vos biens seront synchronisés dans les prochaines minutes.</div>'
+        : '';
+      const errorBlock = connectError
+        ? '<div class="ob-error">' + escHtml(connectError) + '</div>'
+        : '';
+
+      const chatHtml = chatLog.map(function (m) {
+        return '<div class="ob-chat-msg ' + m.role + '">' + escHtml(m.content) + '</div>';
+      }).join('');
+
+      const chatLimitReached = userMsgCount >= MAX_USER_MSGS;
+      const chatCounter = chatLimitReached
+        ? '<div class="ob-chat-counter" style="color:#c0392b;">Limite de ' + MAX_USER_MSGS + ' questions atteinte. Contactez le support si besoin.</div>'
+        : '<div class="ob-chat-counter">' + userMsgCount + ' / ' + MAX_USER_MSGS + ' questions</div>';
+
+      c.innerHTML = [
+        '<h2>Connectez votre compte Beds24</h2>',
+        '<p class="lead">Collez ci-dessous le code d\'invitation généré depuis Beds24.</p>',
+        successBlock,
+        errorBlock,
+        '<div class="ob-field">',
+        '<label>Code d\'invitation Beds24</label>',
+        '<input type="text" id="invite-code" placeholder="Ex: xY9kL8Pq..." value="' + inviteCode.replace(/"/g, '&quot;') + '"' + (connectSuccess ? ' disabled' : '') + '>',
+        '</div>',
+        '<div class="ob-actions" style="margin-top:20px; padding-top:0; border-top:none;">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        connectSuccess
+          ? '<button class="ob-btn ob-btn-primary" id="btn-next">Suivant →</button>'
+          : '<button class="ob-btn ob-btn-primary" id="btn-connect"' + (connecting || !inviteCode.trim() ? ' disabled' : '') + '>' + (connecting ? 'Connexion…' : 'Connecter') + '</button>',
+        '</div>',
+        // Chat IA
+        '<div class="ob-chat">',
+        '<div class="ob-chat-title">🤖 Assistant Beds24</div>',
+        '<div class="ob-chat-log" id="chat-log">', chatHtml, '</div>',
+        '<div class="ob-chat-input-row">',
+        '<input type="text" id="chat-input" placeholder="Votre question..." value="' + chatInput.replace(/"/g, '&quot;') + '"' + (chatLimitReached || chatSending ? ' disabled' : '') + '>',
+        '<button class="ob-chat-send" id="chat-send"' + (chatLimitReached || chatSending || !chatInput.trim() ? ' disabled' : '') + '>' + (chatSending ? '…' : 'Envoyer') + '</button>',
+        '</div>',
+        chatCounter,
+        '</div>'
+      ].join('');
+
+      // Scroll chat en bas
+      const logEl = document.getElementById('chat-log');
+      if (logEl) logEl.scrollTop = logEl.scrollHeight;
+
+      // Input invite code
+      const codeInput = document.getElementById('invite-code');
+      if (codeInput) {
+        codeInput.oninput = function () {
+          inviteCode = codeInput.value;
+          const btn = document.getElementById('btn-connect');
+          if (btn) btn.disabled = connecting || !inviteCode.trim();
+        };
+      }
+
+      // Bouton Retour
+      document.getElementById('btn-back').onclick = function () {
+        const p = getPath();
+        const idx = p.indexOf(currentStep);
+        if (idx > 0) goToStep(p[idx - 1]);
+      };
+
+      // Bouton Connecter
+      const connectBtn = document.getElementById('btn-connect');
+      if (connectBtn) {
+        connectBtn.onclick = async function () {
+          if (!inviteCode.trim() || connecting) return;
+          connecting = true;
+          connectError = '';
+          render();
+
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+              connectError = 'Session expirée. Reconnectez-vous.';
+              connecting = false;
+              render();
+              return;
+            }
+
+            const r = await fetch('/api/beds24-setup', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + session.access_token
+              },
+              body: JSON.stringify({ action: 'setup', inviteCode: inviteCode.trim() })
+            });
+            const d = await r.json();
+            connecting = false;
+
+            if (!r.ok || !d.success) {
+              connectError = d.error || 'Échec de la connexion. Vérifiez le code et réessayez.';
+              render();
+              return;
+            }
+
+            connectSuccess = true;
+            await saveState({ beds24_invite_code_attempt: '', beds24_connected: true });
+            render();
+          } catch (err) {
+            console.error('[onboarding] beds24-setup error:', err);
+            connecting = false;
+            connectError = 'Erreur réseau. Réessayez dans un instant.';
+            render();
+          }
+        };
+      }
+
+      // Bouton Suivant (après succès)
+      const nextBtn = document.getElementById('btn-next');
+      if (nextBtn) {
+        nextBtn.onclick = function () {
+          goToStep(getNextStep(currentStep));
+        };
+      }
+
+      // Chat input
+      const chatInputEl = document.getElementById('chat-input');
+      if (chatInputEl) {
+        chatInputEl.oninput = function () {
+          chatInput = chatInputEl.value;
+          const btn = document.getElementById('chat-send');
+          if (btn) btn.disabled = chatLimitReached || chatSending || !chatInput.trim();
+        };
+        chatInputEl.onkeydown = function (e) {
+          if (e.key === 'Enter' && !e.shiftKey && chatInput.trim() && !chatSending && !chatLimitReached) {
+            e.preventDefault();
+            document.getElementById('chat-send').click();
+          }
+        };
+      }
+
+      // Chat send
+      const chatSendBtn = document.getElementById('chat-send');
+      if (chatSendBtn) {
+        chatSendBtn.onclick = async function () {
+          if (!chatInput.trim() || chatSending || chatLimitReached) return;
+          const userMsg = chatInput.trim();
+          chatLog.push({ role: 'user', content: userMsg });
+          userMsgCount = chatLog.filter(function (m) { return m.role === 'user'; }).length;
+          chatInput = '';
+          chatSending = true;
+          render();
+
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+              chatLog.push({ role: 'assistant', content: 'Session expirée. Rechargez la page.' });
+              chatSending = false;
+              render();
+              return;
+            }
+
+            const systemPrompt = [
+              'Tu es un assistant qui aide UNIQUEMENT à obtenir et coller un code d\'invitation Beds24 dans HôteSmart.',
+              '',
+              'Tu réponds STRICTEMENT aux questions liées à :',
+              '- Trouver le menu API dans Beds24',
+              '- Générer un invite code',
+              '- Choisir les scopes nécessaires',
+              '- Copier et coller le code',
+              '- Résoudre une erreur de code refusé ou expiré',
+              '',
+              'Si la question sort de ce périmètre, réponds UNE SEULE phrase :',
+              '"Je suis ici uniquement pour vous aider à connecter votre compte Beds24. Pour les autres questions, contactez le support à thierrynzaramba@gmail.com."',
+              '',
+              'Tes réponses sont courtes (2 à 4 phrases max), directes, en français, étapes numérotées si pertinent. Objectif : que l\'utilisateur colle son code et clique Connecter rapidement.',
+              '',
+              'DOCUMENTATION OFFICIELLE BEDS24 V2 :',
+              '',
+              'Chemin pour générer un invite code :',
+              '1. Connexion sur beds24.com',
+              '2. Settings → Apps & Integrations → API (anciens comptes voient parfois "Settings → MARKETPLACE → API")',
+              '3. URL directe : https://beds24.com/control3.php?pagetype=apiv2',
+              '',
+              'Scopes (cocher au minimum) :',
+              '- bookings : read + write',
+              '- bookings-messages : read + write (pour la messagerie voyageurs)',
+              '- properties : read',
+              '- accounts : read',
+              '',
+              'Durée de vie :',
+              '- Invite code : expire après 24h s\'il n\'est pas utilisé',
+              '- Refresh token (généré par HôteSmart) : illimité tant qu\'utilisé au moins une fois par 30 jours',
+              '- Access token : 24h (auto-renouvelé par HôteSmart toutes les 5 min)',
+              '',
+              'Erreurs fréquentes :',
+              '- "Token non reçu" : invite code mal copié (espaces) ou expiré → regénérer',
+              '- "Invalid invite code" : code utilisé déjà ou expiré → regénérer',
+              '- IP whitelisting actif côté Beds24 → désactiver pour HôteSmart, ou whitelister les IPs Vercel (à éviter en MVP)',
+              '',
+              'Si une question dépasse ce cadre (tarification HôteSmart, autres CM, etc.), reste sur ta réponse cadrée.'
+            ].join('\n');
+
+            // Construire l'historique pour l'API (max 12 derniers messages pour limiter coût)
+            const apiMessages = chatLog
+              .slice(-12)
+              .filter(function (m) { return m.role === 'user' || m.role === 'assistant'; });
+
+            const r = await fetch('/api/grok', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + session.access_token
+              },
+              body: JSON.stringify({
+                systemPrompt: systemPrompt,
+                messages: apiMessages
+              })
+            });
+            const d = await r.json();
+
+            if (d.reply) {
+              chatLog.push({ role: 'assistant', content: d.reply });
+            } else {
+              chatLog.push({ role: 'assistant', content: 'Désolé, je n\'ai pas pu répondre. Réessayez ou contactez le support.' });
+            }
+          } catch (err) {
+            console.error('[onboarding] chat IA error:', err);
+            chatLog.push({ role: 'assistant', content: 'Erreur réseau. Réessayez dans un instant.' });
+          }
+
+          chatSending = false;
+          // Persister la conversation dans onboarding_state.data
+          await saveState({ beds24_chat: chatLog });
+          render();
+        };
+      }
+    }
+
+    // Helper d'échappement HTML local
+    function escHtml(t) {
+      return String(t || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    render();
+  }
   function renderStep3Placeholder(c) {
     const brands = [
       { id: 'none',      label: 'Aucune / Pas encore' },
