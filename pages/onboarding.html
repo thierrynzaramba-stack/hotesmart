@@ -900,7 +900,184 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
     render();
   }
-  function renderStep4Placeholder(c) { return placeholder(4, 'Agent IA', 'Renseignez l\'adresse, le wifi et les horaires de check-in.', true)(c); }
+  function renderStep4Placeholder(c) {
+    // État local de l'étape 4 (3 sous-écrans : consent, loader, validate)
+    let subStep = stepData.kb_consent_given !== undefined
+      ? (stepData.kb_extracted ? 'validate' : (stepData.kb_consent_given ? 'loader' : 'validate'))
+      : 'consent';
+    let loaderError = '';
+    let extractionData = stepData.kb_extracted || null;
+
+    function render() {
+      if (subStep === 'consent')  return renderConsent();
+      if (subStep === 'loader')   return renderLoader();
+      if (subStep === 'validate') return renderValidate();
+    }
+
+    // ── 4.a — Consentement RGPD ─────────────────────────────────────────────
+    function renderConsent() {
+      c.innerHTML = [
+        '<h2>Configurer votre agent IA</h2>',
+        '<p class="lead">Pour répondre intelligemment aux voyageurs, votre agent IA a besoin de connaître votre bien.</p>',
+        '<div style="background:#fafaf7; border:1px solid var(--border); border-radius:10px; padding:20px; margin:24px 0;">',
+        '<p style="margin-bottom:12px;"><strong>Avec votre permission</strong>, nous allons analyser vos anciennes conversations voyageurs sur Beds24 pour pré-remplir automatiquement les informations de votre bien (check-in, équipements, recommandations locales...).</p>',
+        '<p style="margin-bottom:12px; color:var(--text-muted); font-size:14px;">Vos données restent privées : elles servent uniquement à configurer votre agent IA. Aucun message n\'est partagé avec un tiers, et vous pourrez les modifier ou supprimer à tout moment depuis vos paramètres.</p>',
+        '</div>',
+        '<div class="ob-actions">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        '<div style="display:flex; gap:12px;">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-refuse">Refuser, je remplirai à la main</button>',
+        '<button class="ob-btn ob-btn-primary" id="btn-analyze">Analyser mes conversations →</button>',
+        '</div></div>'
+      ].join('');
+
+      document.getElementById('btn-back').onclick = function () {
+        const p = getPath();
+        const idx = p.indexOf(currentStep);
+        if (idx > 0) goToStep(p[idx - 1]);
+      };
+
+      document.getElementById('btn-refuse').onclick = async function () {
+        await saveState({
+          kb_consent_given: false,
+          kb_consent_at: new Date().toISOString(),
+          kb_extracted: null
+        });
+        extractionData = { properties: [], templates: [], extracted: {}, total_messages: 0, case: 'A' };
+        // On va quand même charger les templates pour permettre le remplissage manuel.
+        // Fait dans renderValidate (patch 18b).
+        subStep = 'validate';
+        render();
+      };
+
+      document.getElementById('btn-analyze').onclick = async function () {
+        await saveState({
+          kb_consent_given: true,
+          kb_consent_at: new Date().toISOString()
+        });
+        subStep = 'loader';
+        render();
+        // Lancer l'extraction immédiatement
+        runExtraction();
+      };
+    }
+
+    // ── 4.b — Loader d'extraction ───────────────────────────────────────────
+    function renderLoader() {
+      const errBlock = loaderError
+        ? '<div class="ob-error" style="margin-top:24px;">' + escHtmlSafe(loaderError) + '<br><button class="ob-btn ob-btn-ghost" id="btn-retry" style="margin-top:12px;">Réessayer</button> <button class="ob-btn ob-btn-ghost" id="btn-skip-manual">Passer en saisie manuelle</button></div>'
+        : '';
+
+      c.innerHTML = [
+        '<h2>Configurer votre agent IA</h2>',
+        '<div style="text-align:center; padding:40px 20px;">',
+        '<div style="display:inline-block; width:48px; height:48px; border:4px solid var(--primary-light); border-top-color:var(--primary); border-radius:50%; animation:ob-spin 0.9s linear infinite; margin-bottom:20px;"></div>',
+        '<p style="font-size:17px; margin-bottom:8px;">Notre IA analyse vos conversations Beds24...</p>',
+        '<p style="color:var(--text-muted); font-size:14px;">Cela peut prendre 30 secondes à 2 minutes selon votre historique.</p>',
+        '</div>',
+        errBlock,
+        '<style>@keyframes ob-spin{to{transform:rotate(360deg)}}</style>'
+      ].join('');
+
+      const retryBtn = document.getElementById('btn-retry');
+      if (retryBtn) {
+        retryBtn.onclick = function () {
+          loaderError = '';
+          render();
+          runExtraction();
+        };
+      }
+      const skipBtn = document.getElementById('btn-skip-manual');
+      if (skipBtn) {
+        skipBtn.onclick = function () {
+          loaderError = '';
+          extractionData = { properties: [], templates: [], extracted: {}, total_messages: 0, case: 'A' };
+          subStep = 'validate';
+          render();
+        };
+      }
+    }
+
+    async function runExtraction() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          loaderError = 'Session expirée. Reconnectez-vous.';
+          render();
+          return;
+        }
+
+        const r = await fetch('/api/extract-kb', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + session.access_token
+          },
+          body: JSON.stringify({})
+        });
+
+        if (!r.ok) {
+          const errData = await r.json().catch(function () { return {}; });
+          loaderError = errData.error || ('Erreur HTTP ' + r.status);
+          render();
+          return;
+        }
+
+        const data = await r.json();
+        extractionData = data;
+        await saveState({ kb_extracted: data });
+        subStep = 'validate';
+        render();
+      } catch (err) {
+        console.error('[onboarding] extract-kb error:', err);
+        loaderError = 'Erreur réseau. Réessayez ou passez en saisie manuelle.';
+        render();
+      }
+    }
+
+    // ── 4.c — Validation (placeholder pour patch 18b) ───────────────────────
+    function renderValidate() {
+      const caseLabel = extractionData && extractionData.case
+        ? (extractionData.case === 'A' ? 'Aucune conversation trouvée'
+          : extractionData.case === 'B' ? 'Peu d\'historique disponible'
+          : 'Analyse réussie')
+        : '';
+      const propsCount = extractionData && extractionData.properties ? extractionData.properties.length : 0;
+      const msgsCount = extractionData && extractionData.total_messages ? extractionData.total_messages : 0;
+
+      c.innerHTML = [
+        '<h2>Configurer votre agent IA</h2>',
+        '<p class="lead">' + caseLabel + (propsCount ? ' — ' + propsCount + ' bien' + (propsCount > 1 ? 's' : '') + ', ' + msgsCount + ' message' + (msgsCount > 1 ? 's' : '') + ' analysé' + (msgsCount > 1 ? 's' : '') : '') + '</p>',
+        '<div class="ob-empty">L\'interface de validation des 50 questions sera ajoutée au prochain commit. Pour l\'instant, vous pouvez passer à l\'étape suivante.</div>',
+        '<div class="ob-actions">',
+        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+        '<button class="ob-btn ob-btn-primary" id="btn-next">Suivant →</button>',
+        '</div>'
+      ].join('');
+
+      document.getElementById('btn-back').onclick = function () {
+        // Permettre de revenir au consentement si besoin
+        subStep = 'consent';
+        render();
+      };
+
+      document.getElementById('btn-next').onclick = function () {
+        goToStep(getNextStep(currentStep));
+      };
+    }
+
+    // Helper local d'échappement HTML
+    function escHtmlSafe(t) {
+      return String(t || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    render();
+  }
   function renderStep5Placeholder(c) { return placeholder(5, 'SMS d\'alerte', 'Activez les SMS pour être prévenu en cas d\'urgence.', true)(c); }
   function renderStep6Placeholder(c) { return placeholder(6, 'Base de connaissances ✨', 'L\'IA analyse vos anciennes conversations et génère automatiquement les réponses aux 50 questions les plus posées.', true)(c); }
   function renderStep7Placeholder(c) {
