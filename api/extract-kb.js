@@ -183,11 +183,10 @@ module.exports = async function handler(req, res) {
     const extractionCase = determineCase(propertyMessages)
 
     // 4. Charger les 50 questions templates
-    const { data: templates, error: tplErr } = await supabase
+    const { data: templates } = await supabase
       .from('kb_question_templates')
       .select('code, question_fr, priority, category, sort_order')
       .order('sort_order')
-    console.log('[extract-kb] templates count:', (templates || []).length, 'error:', tplErr ? JSON.stringify(tplErr) : 'none')
 
     // 5. Si volume insuffisant (cas A), pas d'extraction IA
     let extracted = {}
