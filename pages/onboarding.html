@@ -242,8 +242,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       // Parcours non-Beds24 : Bienvenue, CM, Mes biens, Serrures, Contact
       return [0, 1, 8, 3, 9];
     }
-    // Parcours Beds24 ou CM pas encore choisi (assume parcours complet)
-    return [0, 1, 2, 3, 4, 5, 6, 7];
+    // Parcours Beds24 (Agent IA avant Serrures) ou CM pas encore choisi (assume parcours complet)
+    return [0, 1, 2, 4, 3, 5, 6, 7];
   }
 
   // Routage conditionnel centralisé.
@@ -1035,35 +1035,379 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       }
     }
 
-    // ── 4.c — Validation (placeholder pour patch 18b) ───────────────────────
+    // ── 4.c — Validation des 50 questions ──────────────────────────────────
     function renderValidate() {
-      const caseLabel = extractionData && extractionData.case
-        ? (extractionData.case === 'A' ? 'Aucune conversation trouvée'
-          : extractionData.case === 'B' ? 'Peu d\'historique disponible'
-          : 'Analyse réussie')
-        : '';
-      const propsCount = extractionData && extractionData.properties ? extractionData.properties.length : 0;
-      const msgsCount = extractionData && extractionData.total_messages ? extractionData.total_messages : 0;
+      const data = extractionData || { properties: [], templates: [], extracted: {}, total_messages: 0, case: 'A' };
+      const properties = Array.isArray(data.properties) ? data.properties : [];
+      const templates  = Array.isArray(data.templates)  ? data.templates  : [];
+      const extracted  = data.extracted || {};
+      const totalMsgs  = data.total_messages || 0;
 
-      c.innerHTML = [
-        '<h2>Configurer votre agent IA</h2>',
-        '<p class="lead">' + caseLabel + (propsCount ? ' — ' + propsCount + ' bien' + (propsCount > 1 ? 's' : '') + ', ' + msgsCount + ' message' + (msgsCount > 1 ? 's' : '') + ' analysé' + (msgsCount > 1 ? 's' : '') : '') + '</p>',
-        '<div class="ob-empty">L\'interface de validation des 50 questions sera ajoutée au prochain commit. Pour l\'instant, vous pouvez passer à l\'étape suivante.</div>',
-        '<div class="ob-actions">',
-        '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
-        '<button class="ob-btn ob-btn-primary" id="btn-next">Suivant →</button>',
-        '</div>'
-      ].join('');
+      // Si pas de biens (cas où user a refusé ou Beds24 a renvoyé vide),
+      // on n'a pas d'UI possible : on laisse passer directement.
+      if (properties.length === 0 || templates.length === 0) {
+        c.innerHTML = [
+          '<h2>Configurer votre agent IA</h2>',
+          '<p class="lead">Pas d\'historique exploitable pour le moment. Vous pourrez configurer votre agent IA en détail depuis votre tableau de bord après l\'onboarding.</p>',
+          '<div class="ob-actions">',
+          '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+          '<button class="ob-btn ob-btn-primary" id="btn-next">Suivant →</button>',
+          '</div>'
+        ].join('');
+        document.getElementById('btn-back').onclick = function () { subStep = 'consent'; render(); };
+        document.getElementById('btn-next').onclick = function () { goToStep(getNextStep(currentStep)); };
+        return;
+      }
 
-      document.getElementById('btn-back').onclick = function () {
-        // Permettre de revenir au consentement si besoin
-        subStep = 'consent';
-        render();
+      // État local
+      const drafts = stepData.kb_drafts || {}; // { propId: { code: value } }
+      let currentPropIdx = 0;
+
+      // Index templates par catégorie
+      const templatesByCat = {};
+      const templatesByCode = {};
+      templates.forEach(function (t) {
+        templatesByCode[t.code] = t;
+        if (!templatesByCat[t.category]) templatesByCat[t.category] = [];
+        templatesByCat[t.category].push(t);
+      });
+
+      // Pré-remplir les drafts depuis extracted (uniquement si pas déjà draft saisi)
+      properties.forEach(function (p) {
+        if (!drafts[p.id]) drafts[p.id] = {};
+        const propExtracted = extracted[p.id] || {};
+        Object.keys(propExtracted).forEach(function (code) {
+          const tpl = templatesByCode[code];
+          if (!tpl) return; // ignorer si code inventé par l'IA hors templates
+          const minConf = tpl.priority === 1 ? 0.75 : 0.6;
+          const item = propExtracted[code];
+          if (item && typeof item.value === 'string' && item.confidence >= minConf) {
+            if (drafts[p.id][code] === undefined) {
+              drafts[p.id][code] = item.value;
+            }
+          }
+        });
+      });
+
+      const CATEGORY_LABELS = {
+        acces_arrivee: 'Accès & Arrivée',
+        localisation: 'Localisation & Transport',
+        connectivite: 'Connectivité',
+        cuisine: 'Cuisine',
+        equipement: 'Équipement',
+        multimedia: 'Multimédia',
+        famille_animaux: 'Famille & Animaux',
+        regles_maison: 'Règles maison',
+        recommandations: 'Recommandations',
+        urgences: 'Urgences'
       };
 
-      document.getElementById('btn-next').onclick = function () {
-        goToStep(getNextStep(currentStep));
-      };
+      function valueOf(propId, code) {
+        return (drafts[propId] && drafts[propId][code] !== undefined) ? drafts[propId][code] : '';
+      }
+      function setValue(propId, code, val) {
+        if (!drafts[propId]) drafts[propId] = {};
+        drafts[propId][code] = val;
+      }
+      function isFromAI(propId, code) {
+        const tpl = templatesByCode[code];
+        if (!tpl) return false;
+        const minConf = tpl.priority === 1 ? 0.75 : 0.6;
+        const item = (extracted[propId] || {})[code];
+        const draftVal = drafts[propId] && drafts[propId][code];
+        return !!(item && item.confidence >= minConf && draftVal === item.value);
+      }
+      function priorityOneRemaining(propId) {
+        return templates.filter(function (t) {
+          return t.priority === 1 && !(drafts[propId] && drafts[propId][t.code] && String(drafts[propId][t.code]).trim());
+        }).length;
+      }
+
+      function render() {
+        const prop = properties[currentPropIdx];
+        const propId = String(prop.id);
+        const isLastProp = currentPropIdx === properties.length - 1;
+        const remaining = priorityOneRemaining(propId);
+        const total1 = templates.filter(function (t) { return t.priority === 1; }).length;
+        const filled1 = total1 - remaining;
+
+        const caseLabel = data.case === 'A' ? 'Aucune conversation trouvée'
+          : data.case === 'B' ? 'Peu d\'historique disponible'
+          : 'Analyse réussie';
+
+        // Tabs ou dropdown bien
+        let propSelector = '';
+        if (properties.length > 1 && properties.length <= 4) {
+          propSelector = '<div style="display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap;">' +
+            properties.map(function (p, i) {
+              const sel = i === currentPropIdx;
+              return '<button class="prop-tab" data-idx="' + i + '" style="padding:8px 14px; border-radius:8px; border:1px solid ' + (sel ? 'var(--primary)' : 'var(--border)') + '; background:' + (sel ? 'var(--primary-light)' : '#fff') + '; color:' + (sel ? 'var(--primary-dark)' : 'var(--text)') + '; cursor:pointer; font-weight:500; font-size:14px;">' + escHtmlSafe(p.name) + '</button>';
+            }).join('') + '</div>';
+        } else if (properties.length > 4) {
+          propSelector = '<div class="ob-field" style="margin-bottom:20px;"><label>Bien à configurer</label><select id="prop-dropdown" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; width:100%;">' +
+            properties.map(function (p, i) {
+              return '<option value="' + i + '"' + (i === currentPropIdx ? ' selected' : '') + '>' + escHtmlSafe(p.name) + '</option>';
+            }).join('') + '</select></div>';
+        }
+
+        // Section indispensables
+        const p1Tpls = templates.filter(function (t) { return t.priority === 1; }).sort(function (a, b) {
+          if (a.category !== b.category) return a.category.localeCompare(b.category);
+          return a.sort_order - b.sort_order;
+        });
+        const p1Html = p1Tpls.map(function (t) {
+          return renderField(propId, t);
+        }).join('');
+
+        // Section optionnelle (accordéons par catégorie)
+        const p2ByCat = {};
+        templates.filter(function (t) { return t.priority === 2; }).forEach(function (t) {
+          if (!p2ByCat[t.category]) p2ByCat[t.category] = [];
+          p2ByCat[t.category].push(t);
+        });
+        const p2Html = Object.keys(p2ByCat).map(function (cat) {
+          const tpls = p2ByCat[cat].sort(function (a, b) { return a.sort_order - b.sort_order; });
+          const filledInCat = tpls.filter(function (t) { return valueOf(propId, t.code) && String(valueOf(propId, t.code)).trim(); }).length;
+          const fields = tpls.map(function (t) { return renderField(propId, t); }).join('');
+          return [
+            '<details class="ob-cat" style="border:1px solid var(--border); border-radius:8px; margin-bottom:10px;">',
+            '<summary style="padding:12px 16px; cursor:pointer; font-weight:500; user-select:none;">',
+            escHtmlSafe(CATEGORY_LABELS[cat] || cat) + ' <span style="color:var(--text-muted); font-weight:400; font-size:13px;">(' + filledInCat + '/' + tpls.length + ')</span>',
+            '</summary>',
+            '<div style="padding:0 16px 16px;">', fields, '</div>',
+            '</details>'
+          ].join('');
+        }).join('');
+
+        const nextBtnLabel = isLastProp ? 'Enregistrer et continuer →' : 'Bien suivant →';
+        const nextBtnDisabled = remaining > 0;
+
+        c.innerHTML = [
+          '<h2>Configurer votre agent IA</h2>',
+          '<p class="lead">' + caseLabel + ' — ' + properties.length + ' bien' + (properties.length > 1 ? 's' : '') + ', ' + totalMsgs + ' message' + (totalMsgs > 1 ? 's' : '') + ' analysé' + (totalMsgs > 1 ? 's' : '') + '.</p>',
+          propSelector,
+          '<div style="background:#fafaf7; padding:10px 14px; border-radius:8px; margin-bottom:20px; font-size:14px; color:var(--text-muted);">',
+          'Bien <strong>' + (currentPropIdx + 1) + '/' + properties.length + '</strong> · ',
+          '<strong>' + filled1 + '/' + total1 + '</strong> indispensables remplies',
+          '</div>',
+          '<h3 style="font-size:17px; font-weight:600; margin:24px 0 12px;">Indispensables (à valider)</h3>',
+          '<div>', p1Html, '</div>',
+          '<h3 style="font-size:17px; font-weight:600; margin:32px 0 12px;">Détails (optionnel)</h3>',
+          '<p style="color:var(--text-muted); font-size:14px; margin-bottom:16px;">Plus vous remplissez, plus votre agent IA répondra précisément aux voyageurs. Vous pourrez compléter plus tard.</p>',
+          '<div>', p2Html, '</div>',
+          '<div id="apply-modal" style="display:none;"></div>',
+          '<div class="ob-actions">',
+          '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+          '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextBtnDisabled ? ' disabled title="Remplissez les indispensables pour continuer"' : '') + '>' + nextBtnLabel + '</button>',
+          '</div>'
+        ].join('');
+
+        // Bind tabs ou dropdown
+        c.querySelectorAll('.prop-tab').forEach(function (el) {
+          el.onclick = async function () {
+            // Save draft state avant changement
+            await saveState({ kb_drafts: drafts });
+            currentPropIdx = Number(el.getAttribute('data-idx'));
+            render();
+          };
+        });
+        const dd = document.getElementById('prop-dropdown');
+        if (dd) {
+          dd.onchange = async function () {
+            await saveState({ kb_drafts: drafts });
+            currentPropIdx = Number(dd.value);
+            render();
+          };
+        }
+
+        // Bind inputs des champs
+        c.querySelectorAll('.kb-field-input').forEach(function (input) {
+          input.oninput = function () {
+            const code = input.getAttribute('data-code');
+            setValue(propId, code, input.value);
+            // Update counter sans tout re-render (perte focus)
+            const newRem = priorityOneRemaining(propId);
+            const btn = document.getElementById('btn-next');
+            if (btn) btn.disabled = newRem > 0;
+          };
+          input.onblur = async function () {
+            await saveState({ kb_drafts: drafts });
+          };
+        });
+
+        // Bind boutons "Appliquer à..."
+        c.querySelectorAll('.kb-apply-btn').forEach(function (btn) {
+          btn.onclick = function () {
+            const code = btn.getAttribute('data-code');
+            openApplyModal(propId, code);
+          };
+        });
+
+        // Boutons footer
+        document.getElementById('btn-back').onclick = function () {
+          subStep = 'consent';
+          // Sauvegarder l'état avant
+          saveState({ kb_drafts: drafts });
+          // Reset stepData côté local
+          stepData.kb_drafts = drafts;
+          render = function () {
+            if (subStep === 'consent') return renderConsent();
+            if (subStep === 'loader') return renderLoader();
+            if (subStep === 'validate') return renderValidate();
+          };
+          render();
+        };
+
+        document.getElementById('btn-next').onclick = async function () {
+          if (remaining > 0) return;
+          const btn = document.getElementById('btn-next');
+          btn.disabled = true;
+          btn.textContent = 'Enregistrement…';
+
+          // UPSERT dans knowledge pour le bien courant
+          const ok = await upsertKnowledgeForProperty(propId, drafts[propId] || {});
+          if (!ok) {
+            btn.disabled = false;
+            btn.textContent = nextBtnLabel;
+            alert('Erreur lors de l\'enregistrement. Réessayez.');
+            return;
+          }
+
+          // Sauvegarder draft global
+          await saveState({ kb_drafts: drafts });
+
+          if (isLastProp) {
+            // Tous les biens traités, passer à étape suivante
+            await saveState({ kb_completed: true });
+            goToStep(getNextStep(currentStep));
+          } else {
+            // Passer au bien suivant
+            currentPropIdx += 1;
+            // Re-render via function reassignment (subStep reste 'validate')
+            const fnRender = render;
+            fnRender();
+          }
+        };
+      }
+
+      function renderField(propId, tpl) {
+        const val = valueOf(propId, tpl.code);
+        const fromAI = isFromAI(propId, tpl.code);
+        const aiBadge = fromAI ? ' <span style="display:inline-block; background:var(--primary-light); color:var(--primary-dark); padding:2px 8px; border-radius:4px; font-size:11px; font-weight:500; margin-left:6px; vertical-align:middle;">✨ IA</span>' : '';
+        const applyBtn = (properties.length > 1)
+          ? '<button type="button" class="kb-apply-btn" data-code="' + tpl.code + '" style="padding:6px 10px; background:transparent; border:1px solid var(--border); border-radius:6px; cursor:pointer; font-size:12px; color:var(--text-muted); margin-left:8px; white-space:nowrap;" title="Appliquer cette réponse à d\'autres biens">📋 Appliquer à...</button>'
+          : '';
+        return [
+          '<div class="ob-field" style="margin-bottom:14px;">',
+          '<label>' + escHtmlSafe(tpl.question_fr) + aiBadge + '</label>',
+          '<div style="display:flex; gap:0; align-items:flex-start;">',
+          '<input type="text" class="kb-field-input" data-code="' + tpl.code + '" value="' + escHtmlSafe(val) + '" placeholder="Votre réponse..." style="flex:1;">',
+          applyBtn,
+          '</div>',
+          '</div>'
+        ].join('');
+      }
+
+      function openApplyModal(srcPropId, code) {
+        const srcVal = valueOf(srcPropId, code);
+        if (!srcVal || !String(srcVal).trim()) {
+          alert('Remplissez d\'abord ce champ avant de l\'appliquer aux autres biens.');
+          return;
+        }
+        const otherProps = properties.filter(function (p) { return String(p.id) !== String(srcPropId); });
+        if (otherProps.length === 0) return;
+
+        const modal = document.getElementById('apply-modal');
+        const checkboxes = otherProps.map(function (p, i) {
+          return [
+            '<label style="display:block; padding:8px 0; cursor:pointer;">',
+            '<input type="checkbox" class="apply-cb" value="' + escHtmlSafe(String(p.id)) + '" style="margin-right:8px;">',
+            escHtmlSafe(p.name),
+            '</label>'
+          ].join('');
+        }).join('');
+
+        modal.style.display = 'block';
+        modal.innerHTML = [
+          '<div style="position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:1000;" id="apply-overlay">',
+          '<div style="background:#fff; padding:24px; border-radius:12px; max-width:420px; width:90%; max-height:80vh; overflow:auto;" onclick="event.stopPropagation()">',
+          '<h3 style="font-size:18px; margin-bottom:12px;">Appliquer à...</h3>',
+          '<p style="color:var(--text-muted); font-size:14px; margin-bottom:16px;">Valeur : <strong>' + escHtmlSafe(srcVal) + '</strong></p>',
+          '<label style="display:block; padding:8px 0; border-bottom:1px solid var(--border); margin-bottom:8px; cursor:pointer;"><input type="checkbox" id="apply-all" style="margin-right:8px;"><strong>Tout cocher</strong></label>',
+          checkboxes,
+          '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:20px;">',
+          '<button class="ob-btn ob-btn-ghost" id="apply-cancel">Annuler</button>',
+          '<button class="ob-btn ob-btn-primary" id="apply-confirm">Appliquer</button>',
+          '</div>',
+          '</div></div>'
+        ].join('');
+
+        document.getElementById('apply-overlay').onclick = function () {
+          modal.style.display = 'none';
+          modal.innerHTML = '';
+        };
+        document.getElementById('apply-cancel').onclick = function () {
+          modal.style.display = 'none';
+          modal.innerHTML = '';
+        };
+        document.getElementById('apply-all').onchange = function (e) {
+          modal.querySelectorAll('.apply-cb').forEach(function (cb) { cb.checked = e.target.checked; });
+        };
+        document.getElementById('apply-confirm').onclick = async function () {
+          const targets = Array.from(modal.querySelectorAll('.apply-cb:checked')).map(function (cb) { return cb.value; });
+          if (targets.length === 0) {
+            modal.style.display = 'none';
+            modal.innerHTML = '';
+            return;
+          }
+          // Écrasement silencieux (option a validée)
+          targets.forEach(function (tid) {
+            setValue(tid, code, srcVal);
+          });
+          await saveState({ kb_drafts: drafts });
+          modal.style.display = 'none';
+          modal.innerHTML = '';
+          // Toast simple
+          const toast = document.createElement('div');
+          toast.textContent = '✓ Appliqué à ' + targets.length + ' bien' + (targets.length > 1 ? 's' : '');
+          toast.style.cssText = 'position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#2d6a4f; color:#fff; padding:12px 20px; border-radius:8px; z-index:2000; font-size:14px; box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+          document.body.appendChild(toast);
+          setTimeout(function () { toast.remove(); }, 2500);
+          render();
+        };
+      }
+
+      render();
+    }
+
+    // UPSERT bulk dans la table knowledge pour un bien donné
+    async function upsertKnowledgeForProperty(propertyId, codeValueMap) {
+      const rows = Object.keys(codeValueMap)
+        .filter(function (code) {
+          const v = codeValueMap[code];
+          return v && String(v).trim().length > 0;
+        })
+        .map(function (code) {
+          return {
+            user_id: user.id,
+            property_id: String(propertyId),
+            type: 'fixed',
+            key: code,
+            value: String(codeValueMap[code]).trim()
+          };
+        });
+
+      if (rows.length === 0) return true; // rien à enregistrer
+
+      const { error } = await supabase
+        .from('knowledge')
+        .upsert(rows, { onConflict: 'user_id,property_id,type,key' });
+
+      if (error) {
+        console.error('[onboarding] upsert knowledge failed:', error);
+        return false;
+      }
+      return true;
     }
 
     // Helper local d'échappement HTML
