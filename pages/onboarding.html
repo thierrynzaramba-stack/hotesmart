@@ -242,8 +242,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       // Parcours non-Beds24 : Bienvenue, CM, Mes biens, Serrures, Contact
       return [0, 1, 8, 3, 9];
     }
-    // Parcours Beds24 (Agent IA avant Serrures) ou CM pas encore choisi (assume parcours complet)
-    return [0, 1, 2, 4, 3, 5, 6, 7];
+    // Parcours Beds24 (Agent IA avant Serrures, étape 6 fusionnée dans étape 4, SMS skip pur en attente Stripe)
+    return [0, 1, 2, 4, 3, 5, 7];
   }
 
   // Routage conditionnel centralisé.
@@ -1422,7 +1422,29 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
     render();
   }
-  function renderStep5Placeholder(c) { return placeholder(5, 'SMS d\'alerte', 'Activez les SMS pour être prévenu en cas d\'urgence.', true)(c); }
+  function renderStep5Placeholder(c) {
+    c.innerHTML = [
+      '<h2>SMS d\'alerte</h2>',
+      '<p class="lead">Recevez des SMS instantanés quand un voyageur signale une urgence (panne, problème grave, demande urgente).</p>',
+      '<div style="background:#fafaf7; border:1px solid var(--border); border-radius:10px; padding:20px; margin:24px 0;">',
+      '<p style="margin-bottom:8px;"><strong>📱 Les SMS sont inclus dans les offres Pro et Premium.</strong></p>',
+      '<p style="color:var(--text-muted); font-size:14px; margin:0;">Vous activerez cette fonctionnalité depuis votre tableau de bord après avoir souscrit à un abonnement payant. En attendant, les alertes urgentes restent disponibles dans la messagerie HôteSmart.</p>',
+      '</div>',
+      '<div class="ob-actions">',
+      '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
+      '<button class="ob-btn ob-btn-primary" id="btn-next">Suivant →</button>',
+      '</div>'
+    ].join('');
+
+    document.getElementById('btn-back').onclick = function () {
+      const p = getPath();
+      const idx = p.indexOf(currentStep);
+      if (idx > 0) goToStep(p[idx - 1]);
+    };
+    document.getElementById('btn-next').onclick = function () {
+      goToStep(getNextStep(currentStep));
+    };
+  }
   function renderStep6Placeholder(c) { return placeholder(6, 'Base de connaissances ✨', 'L\'IA analyse vos anciennes conversations et génère automatiquement les réponses aux 50 questions les plus posées.', true)(c); }
   function renderStep7Placeholder(c) {
     c.innerHTML = [
