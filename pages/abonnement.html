@@ -212,7 +212,7 @@ if (params.get('canceled') === 'true') {
 }
 
 const user = await getUser();
-if (!user) { window.location.replace('/pages/login.html'); return; }
+if (!user) { window.location.replace('/pages/login.html'); throw new Error('not authenticated'); }
 
 await loadAndRender();
 
