@@ -1,11 +1,22 @@
 import { supabase, getSession } from '/shared/supabase.js'
 
 const CACHE_KEY = 'hs_onboarding_completed'
+const GF_CACHE_KEY = 'hs_guestflow_active'
 const SESSION_USER_KEY = 'hs_auth_user_id'
 
 // Pages où on autorise l'accès même si onboarding incomplet.
 // Le check est fait sur le pathname normalisé (sans .html, sans trailing slash).
 const ONBOARDING_EXEMPT_PATHS = [
+  '/pages/onboarding',
+  '/pages/compte',
+  '/pages/abonnement'
+]
+
+// Pages où on autorise l'accès même sans GuestFlow actif (trialing/active).
+// L'user doit pouvoir aller sur abonnement.html pour activer GuestFlow,
+// et sur compte.html pour gérer son compte (changer mot de passe, supprimer compte).
+// onboarding.html reste accessible pendant la transition onboarding -> abonnement.
+const SUBSCRIPTION_EXEMPT_PATHS = [
   '/pages/onboarding',
   '/pages/compte',
   '/pages/abonnement'
@@ -18,6 +29,11 @@ function normalizePath(p) {
 function isExemptFromOnboarding() {
   const here = normalizePath(window.location.pathname)
   return ONBOARDING_EXEMPT_PATHS.some(p => here === p)
+}
+
+function isExemptFromSubscription() {
+  const here = normalizePath(window.location.pathname)
+  return SUBSCRIPTION_EXEMPT_PATHS.some(p => here === p)
 }
 
 /**
@@ -37,6 +53,7 @@ export async function requireAuth() {
   const cachedUserId = sessionStorage.getItem(SESSION_USER_KEY)
   if (cachedUserId && cachedUserId !== userId) {
     sessionStorage.removeItem(CACHE_KEY)
+    sessionStorage.removeItem(GF_CACHE_KEY)
   }
   sessionStorage.setItem(SESSION_USER_KEY, userId)
 
@@ -77,6 +94,33 @@ export async function requireAuth() {
 
   // Onboarding fini → cache pour le reste de la session
   sessionStorage.setItem(CACHE_KEY, 'true')
+
+  // ── Check GuestFlow subscription active ─────────────────────────────────
+  // Si on est sur une page exemptée, on ne check pas l'abonnement
+  if (isExemptFromSubscription()) return session
+
+  // Cache hit GuestFlow ?
+  if (sessionStorage.getItem(GF_CACHE_KEY) === 'true') return session
+
+  const { data: gfSub, error: gfErr } = await supabase
+    .from('subscriptions')
+    .select('status')
+    .eq('user_id', userId)
+    .eq('module', 'guestflow')
+    .maybeSingle()
+
+  if (gfErr) {
+    console.error('[auth-guard] guestflow check failed:', gfErr)
+    return session
+  }
+
+  const gfActive = gfSub && (gfSub.status === 'trialing' || gfSub.status === 'active' || gfSub.status === 'past_due')
+  if (!gfActive) {
+    window.location.replace('/pages/abonnement.html')
+    return null
+  }
+
+  sessionStorage.setItem(GF_CACHE_KEY, 'true')
   return session
 }
 
@@ -86,4 +130,12 @@ export async function requireAuth() {
  */
 export function markOnboardingCompleted() {
   sessionStorage.setItem(CACHE_KEY, 'true')
+}
+
+export function markGuestflowActive() {
+  sessionStorage.setItem(GF_CACHE_KEY, 'true')
+}
+
+export function invalidateGuestflowCache() {
+  sessionStorage.removeItem(GF_CACHE_KEY)
 }

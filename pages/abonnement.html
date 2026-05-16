@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Mon abonnement</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root {
+      --primary: #C97B5C;
+      --primary-dark: #A85F44;
+      --primary-light: #F4E4DC;
+      --text: #1a1a1a;
+      --text-muted: #6b6b6b;
+      --border: #e5e5e5;
+      --bg: #fafaf7;
+      --bg-card: #ffffff;
+      --success: #4a9d6e;
+      --success-bg: #e8f5ec;
+      --warning: #d97706;
+      --warning-bg: #fff7ed;
+      --danger: #c0392b;
+      --shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .ab-shell { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
+    .ab-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
+    .ab-logo { font-weight: 700; font-size: 20px; color: var(--primary); letter-spacing: -0.02em; text-decoration: none; }
+    .ab-nav { display: flex; gap: 16px; align-items: center; }
+    .ab-nav a { font-size: 14px; color: var(--text-muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; }
+    .ab-nav a:hover { background: var(--border); }
+    .ab-title { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
+    .ab-subtitle { color: var(--text-muted); margin-bottom: 32px; }
+    .ab-banner {
+      background: var(--success-bg); color: var(--success); border: 1px solid #b7dfc2;
+      padding: 12px 16px; border-radius: 8px; margin-bottom: 24px; font-size: 14px;
+    }
+    .ab-banner.warning { background: var(--warning-bg); color: var(--warning); border-color: #fed7aa; }
+    .ab-banner.error { background: #fee; color: var(--danger); border-color: #fbb; }
+
+    .ab-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (min-width: 720px) { .ab-grid { grid-template-columns: 1fr 1fr; } }
+
+    .ab-card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 24px; box-shadow: var(--shadow);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .ab-card.required { border: 2px solid var(--primary); }
+    .ab-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .ab-card-title { font-size: 18px; font-weight: 700; }
+    .ab-card-required-tag {
+      font-size: 11px; background: var(--primary); color: #fff;
+      padding: 2px 8px; border-radius: 4px; font-weight: 500; white-space: nowrap;
+    }
+    .ab-card-status {
+      font-size: 13px; padding: 4px 10px; border-radius: 4px; display: inline-block; align-self: flex-start;
+    }
+    .ab-status-trialing { background: var(--success-bg); color: var(--success); }
+    .ab-status-active   { background: var(--success-bg); color: var(--success); }
+    .ab-status-past_due { background: var(--warning-bg); color: var(--warning); }
+    .ab-status-canceled { background: #f4f4f0; color: var(--text-muted); }
+    .ab-status-none     { background: #f4f4f0; color: var(--text-muted); }
+
+    .ab-price { font-size: 24px; font-weight: 700; color: var(--text); }
+    .ab-price small { font-size: 14px; font-weight: 400; color: var(--text-muted); }
+    .ab-desc { color: var(--text-muted); font-size: 14px; flex: 1; }
+    .ab-meta { font-size: 13px; color: var(--text-muted); }
+
+    .ab-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .ab-btn {
+      padding: 10px 16px; border: none; border-radius: 8px; font-size: 14px;
+      font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.15s;
+    }
+    .ab-btn-primary { background: var(--primary); color: #fff; }
+    .ab-btn-primary:hover { background: var(--primary-dark); }
+    .ab-btn-primary:disabled { background: var(--border); cursor: not-allowed; }
+    .ab-btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+    .ab-btn-ghost:hover { color: var(--text); }
+    .ab-btn-danger { background: transparent; color: var(--danger); border: 1px solid #fbb; }
+    .ab-btn-danger:hover { background: #fee; }
+
+    /* Modal quantité */
+    .ab-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .ab-modal.open { display: flex; }
+    .ab-modal-box { background: #fff; padding: 28px; border-radius: 12px; max-width: 420px; width: 90%; }
+    .ab-modal-box h3 { font-size: 20px; margin-bottom: 8px; }
+    .ab-modal-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
+    .ab-modal-box label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+    .ab-modal-box input[type="number"] {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 15px; font-family: inherit;
+    }
+    .ab-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+    .ab-loading { text-align: center; padding: 40px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<div class="ab-shell">
+  <header class="ab-header">
+    <a href="/pages/index.html" class="ab-logo">HôteSmart</a>
+    <nav class="ab-nav">
+      <a href="/pages/compte.html">Mon compte</a>
+      <a href="#" id="logout-link">Se déconnecter</a>
+    </nav>
+  </header>
+
+  <h1 class="ab-title">Mon abonnement</h1>
+  <p class="ab-subtitle">Activez les modules dont vous avez besoin. Essai gratuit de 15 jours sur tous les modules.</p>
+
+  <div id="banners"></div>
+  <div id="content" class="ab-loading">Chargement…</div>
+</div>
+
+<!-- Modal quantité -->
+<div class="ab-modal" id="qty-modal">
+  <div class="ab-modal-box">
+    <h3 id="qty-title">Combien de biens ?</h3>
+    <p id="qty-desc">Indiquez le nombre de biens à couvrir par ce module.</p>
+    <label for="qty-input">Nombre</label>
+    <input type="number" id="qty-input" min="1" max="50" value="1">
+    <div class="ab-modal-actions">
+      <button class="ab-btn ab-btn-ghost" id="qty-cancel">Annuler</button>
+      <button class="ab-btn ab-btn-primary" id="qty-confirm">Démarrer mon essai →</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { supabase, getUser, signOut } from '/shared/supabase.js';
+import { markOnboardingCompleted } from '/components/auth-guard.js';
+
+const MODULES = [
+  {
+    id: 'guestflow',
+    title: 'GuestFlow AI',
+    required: true,
+    price: '19,99 €',
+    priceDetail: '/mois (1er bien) + 9,90 €/mois par bien supplémentaire',
+    desc: 'Agent IA qui répond automatiquement aux voyageurs, messagerie unifiée Airbnb+Booking, codes d\'accès auto.',
+    qtyLabel: 'biens'
+  },
+  {
+    id: 'menage',
+    title: 'Ménages',
+    required: false,
+    price: '6,90 €',
+    priceDetail: '/mois par bien',
+    desc: 'Planning multi-prestataires, PWA Clean pour les agents de ménage, validation photo.',
+    qtyLabel: 'biens'
+  },
+  {
+    id: 'serrure',
+    title: 'Serrures connectées',
+    required: false,
+    price: '9,99 €',
+    priceDetail: '/mois jusqu\'à 5 serrures (+2,99 €/mois au-delà)',
+    desc: 'Génération auto de codes voyageur via Seam, expiration au check-out.',
+    qtyLabel: 'serrures'
+  },
+  {
+    id: 'caution',
+    title: 'Caution CB voyageur',
+    required: false,
+    price: '9,99 €',
+    priceDetail: '/mois par bien',
+    desc: 'Pre-autorisation automatique de caution Stripe au check-in, libération à check-out + 7 jours.',
+    qtyLabel: 'biens',
+    comingSoon: true
+  }
+];
+
+const STATUS_LABELS = {
+  trialing: 'Essai gratuit',
+  active: 'Actif',
+  past_due: '⚠️ Paiement en échec',
+  canceled: 'Annulé',
+  incomplete: 'Incomplet',
+  incomplete_expired: 'Expiré',
+  unpaid: 'Impayé'
+};
+
+const content = document.getElementById('content');
+const banners = document.getElementById('banners');
+
+// ── Logout
+document.getElementById('logout-link').onclick = async (e) => {
+  e.preventDefault();
+  sessionStorage.clear();
+  await signOut();
+};
+
+// ── Bannières success/canceled (URL params depuis redirect Stripe)
+const params = new URLSearchParams(window.location.search);
+if (params.get('success') === 'true') {
+  const mod = params.get('module') || '';
+  banners.innerHTML = '<div class="ab-banner">✓ Votre essai gratuit a démarré' + (mod ? ' pour ' + escHtml(mod) : '') + '. Vous pouvez gérer vos abonnements ci-dessous.</div>';
+  history.replaceState({}, '', '/pages/abonnement.html');
+}
+if (params.get('canceled') === 'true') {
+  banners.innerHTML = '<div class="ab-banner warning">Vous avez annulé le processus de paiement. Vous pouvez réessayer à tout moment.</div>';
+  history.replaceState({}, '', '/pages/abonnement.html');
+}
+
+const user = await getUser();
+if (!user) { window.location.replace('/pages/login.html'); return; }
+
+await loadAndRender();
+
+async function loadAndRender() {
+  // Charger les subs de l'user
+  const { data: subs, error } = await supabase
+    .from('subscriptions')
+    .select('module, status, trial_ends_at, current_period_end, cancel_at_period_end, quantity')
+    .eq('user_id', user.id);
+
+  if (error) {
+    content.innerHTML = '<div class="ab-banner error">Erreur de chargement : ' + escHtml(error.message) + '</div>';
+    return;
+  }
+
+  const subByModule = {};
+  (subs || []).forEach(s => { subByModule[s.module] = s; });
+
+  render(subByModule);
+}
+
+function render(subByModule) {
+  const cards = MODULES.map(m => renderCard(m, subByModule[m.id])).join('');
+  content.innerHTML = '<div class="ab-grid">' + cards + '</div>';
+
+  // Bind boutons
+  document.querySelectorAll('[data-action="start"]').forEach(btn => {
+    btn.onclick = () => openQtyModal(btn.dataset.module);
+  });
+  document.querySelectorAll('[data-action="cancel"]').forEach(btn => {
+    btn.onclick = () => cancelSub(btn.dataset.module);
+  });
+  document.querySelectorAll('[data-action="portal"]').forEach(btn => {
+    btn.onclick = () => openPortal();
+  });
+}
+
+function renderCard(mod, sub) {
+  const status = sub ? sub.status : 'none';
+  const statusLabel = sub ? STATUS_LABELS[status] || status : 'Non activé';
+  const requiredTag = mod.required ? '<span class="ab-card-required-tag">Requis</span>' : '';
+  const comingSoonTag = mod.comingSoon ? '<span class="ab-card-required-tag" style="background:var(--text-muted);">Bientôt</span>' : '';
+
+  let meta = '';
+  if (sub) {
+    if (status === 'trialing' && sub.trial_ends_at) {
+      const dt = new Date(sub.trial_ends_at);
+      meta = '<div class="ab-meta">Essai jusqu\'au ' + dt.toLocaleDateString('fr-FR') + '</div>';
+    } else if (status === 'active' && sub.current_period_end) {
+      const dt = new Date(sub.current_period_end);
+      const label = sub.cancel_at_period_end
+        ? 'Se termine le ' + dt.toLocaleDateString('fr-FR')
+        : 'Prochain renouvellement le ' + dt.toLocaleDateString('fr-FR');
+      meta = '<div class="ab-meta">' + label + '</div>';
+    } else if (status === 'past_due') {
+      meta = '<div class="ab-meta">Mettez à jour votre moyen de paiement pour réactiver le service.</div>';
+    }
+    if (sub.quantity) {
+      meta += '<div class="ab-meta">Quantité : ' + sub.quantity + ' ' + mod.qtyLabel + '</div>';
+    }
+  }
+
+  let actions = '';
+  if (mod.comingSoon) {
+    actions = '<button class="ab-btn ab-btn-ghost" disabled>Bientôt disponible</button>';
+  } else if (!sub || status === 'canceled' || status === 'incomplete_expired') {
+    actions = '<button class="ab-btn ab-btn-primary" data-action="start" data-module="' + mod.id + '">Démarrer mon essai gratuit</button>';
+  } else if (status === 'trialing' || status === 'active') {
+    if (sub.cancel_at_period_end) {
+      actions = '<button class="ab-btn ab-btn-ghost" data-action="portal">Gérer le paiement</button>';
+    } else {
+      actions = '<button class="ab-btn ab-btn-ghost" data-action="portal">Gérer le paiement</button>'
+              + '<button class="ab-btn ab-btn-danger" data-action="cancel" data-module="' + mod.id + '">Annuler</button>';
+    }
+  } else if (status === 'past_due' || status === 'unpaid') {
+    actions = '<button class="ab-btn ab-btn-primary" data-action="portal">Mettre à jour la CB</button>';
+  } else {
+    actions = '<button class="ab-btn ab-btn-ghost" data-action="portal">Gérer le paiement</button>';
+  }
+
+  return [
+    '<div class="ab-card' + (mod.required ? ' required' : '') + '">',
+    '<div class="ab-card-head">',
+    '<div class="ab-card-title">' + escHtml(mod.title) + '</div>',
+    requiredTag || comingSoonTag,
+    '</div>',
+    '<div class="ab-card-status ab-status-' + status + '">' + escHtml(statusLabel) + '</div>',
+    '<div class="ab-price">' + mod.price + ' <small>' + escHtml(mod.priceDetail) + '</small></div>',
+    '<div class="ab-desc">' + escHtml(mod.desc) + '</div>',
+    meta,
+    '<div class="ab-actions">' + actions + '</div>',
+    '</div>'
+  ].join('');
+}
+
+// ── Modal quantité
+let currentModule = null;
+const qtyModal = document.getElementById('qty-modal');
+const qtyTitle = document.getElementById('qty-title');
+const qtyDesc = document.getElementById('qty-desc');
+const qtyInput = document.getElementById('qty-input');
+
+function openQtyModal(moduleId) {
+  const mod = MODULES.find(m => m.id === moduleId);
+  if (!mod) return;
+  currentModule = mod;
+  qtyTitle.textContent = 'Combien de ' + mod.qtyLabel + ' ?';
+  qtyDesc.textContent = mod.id === 'guestflow'
+    ? '19,99 € pour le 1er bien, 9,90 € par bien supplémentaire. Essai gratuit 15 jours.'
+    : mod.id === 'serrure'
+    ? 'Forfait 9,99 € pour les 5 premières serrures, 2,99 € par serrure au-delà. Essai 15 jours.'
+    : 'Indiquez le nombre de ' + mod.qtyLabel + '. Essai gratuit 15 jours.';
+  qtyInput.value = '1';
+  qtyInput.min = '1';
+  qtyInput.max = '50';
+  qtyModal.classList.add('open');
+}
+function closeQtyModal() { qtyModal.classList.remove('open'); currentModule = null; }
+document.getElementById('qty-cancel').onclick = closeQtyModal;
+qtyModal.onclick = (e) => { if (e.target === qtyModal) closeQtyModal(); };
+
+document.getElementById('qty-confirm').onclick = async () => {
+  if (!currentModule) return;
+  const qty = Math.max(1, Math.min(50, Number(qtyInput.value) || 1));
+  const btn = document.getElementById('qty-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Redirection vers Stripe…';
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const r = await fetch('/api/stripe?action=create_checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token
+      },
+      body: JSON.stringify({ action: 'create_checkout', module: currentModule.id, quantity: qty })
+    });
+    const data = await r.json();
+    if (!r.ok || !data.url) {
+      banners.innerHTML = '<div class="ab-banner error">' + escHtml(data.error || 'Erreur de création du paiement') + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Démarrer mon essai →';
+      closeQtyModal();
+      return;
+    }
+    window.location.href = data.url;
+  } catch (err) {
+    console.error('[abonnement] checkout error:', err);
+    banners.innerHTML = '<div class="ab-banner error">Erreur réseau. Réessayez.</div>';
+    btn.disabled = false;
+    btn.textContent = 'Démarrer mon essai →';
+    closeQtyModal();
+  }
+};
+
+async function cancelSub(moduleId) {
+  if (!confirm('Êtes-vous sûr de vouloir annuler cet abonnement ? Vous conserverez l\'accès jusqu\'à la fin de la période en cours.')) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const r = await fetch('/api/stripe?action=cancel_subscription', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token
+      },
+      body: JSON.stringify({ action: 'cancel_subscription', module: moduleId })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      banners.innerHTML = '<div class="ab-banner error">' + escHtml(data.error || 'Erreur') + '</div>';
+      return;
+    }
+    banners.innerHTML = '<div class="ab-banner">✓ Annulation enregistrée. Vous conservez l\'accès jusqu\'à la fin de la période.</div>';
+    await loadAndRender();
+  } catch (err) {
+    banners.innerHTML = '<div class="ab-banner error">Erreur réseau. Réessayez.</div>';
+  }
+}
+
+async function openPortal() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const r = await fetch('/api/stripe?action=portal', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token
+      },
+      body: JSON.stringify({ action: 'portal' })
+    });
+    const data = await r.json();
+    if (!r.ok || !data.url) {
+      banners.innerHTML = '<div class="ab-banner error">' + escHtml(data.error || 'Erreur Portal') + '</div>';
+      return;
+    }
+    window.location.href = data.url;
+  } catch (err) {
+    banners.innerHTML = '<div class="ab-banner error">Erreur réseau. Réessayez.</div>';
+  }
+}
+
+function escHtml(t) {
+  return String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+</script>
+
+</body>
+</html>

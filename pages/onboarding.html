@@ -197,7 +197,9 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
   if (state.completed) {
     markOnboardingCompleted();
-    window.location.replace('/pages/index.html');
+    // On laisse l'auth-guard décider : il enverra vers index.html si GuestFlow est actif,
+    // ou vers abonnement.html sinon. Le plus simple: aller à abonnement.html directement.
+    window.location.replace('/pages/abonnement.html');
     return;
   }
 
@@ -273,7 +275,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       })
       .eq('user_id', user.id);
     markOnboardingCompleted();
-    window.location.replace('/pages/index.html');
+    // Redirect vers /pages/abonnement.html (GuestFlow doit être activé avant accès dashboard).
+    window.location.replace('/pages/abonnement.html');
   }
 
   const steps = {
@@ -1449,10 +1452,10 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   function renderStep7Placeholder(c) {
     c.innerHTML = [
       '<h1>C\'est prêt 🎉</h1>',
-      '<p class="lead">Votre agent IA est configuré et opérationnel. Vous pouvez maintenant accéder à votre tableau de bord.</p>',
+      '<p class="lead">Votre configuration est terminée. Dernière étape : activez votre essai gratuit GuestFlow AI (15 jours, sans engagement) pour accéder à votre tableau de bord.</p>',
       '<div class="ob-actions">',
       '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
-      '<button class="ob-btn ob-btn-primary" id="btn-finish">Accéder au tableau de bord</button>',
+      '<button class="ob-btn ob-btn-primary" id="btn-finish">Activer mon essai →</button>',
       '</div>'
     ].join('');
     document.getElementById('btn-back').onclick = function () {
