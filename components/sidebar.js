@@ -46,10 +46,6 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-icon">◈</span>
         <span class="nav-label">Abonnement</span>
       </a>
-      <a class="nav-item ${activePage === 'settings' ? 'active' : ''}" href="/settings">
-        <span class="nav-icon">⚙</span>
-        <span class="nav-label">Paramètres</span>
-      </a>
       <div class="nav-item" onclick="handleSignOut()" style="cursor:pointer">
         <span class="nav-icon">↩</span>
         <span class="nav-label">Déconnexion</span>
