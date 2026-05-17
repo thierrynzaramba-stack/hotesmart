@@ -57,7 +57,7 @@ export async function renderSidebar(activePage = '') {
       <div class="avatar">${getInitials(user?.email)}</div>
       <div class="user-info">
         <div class="user-name">${user?.user_metadata?.full_name || user?.email || ''}</div>
-        <div class="user-plan">Plan Pro</div>
+        <div class="user-plan">${apiStatus.plan || ''}</div>
       </div>
     </div>
   `
@@ -221,21 +221,42 @@ function renderApiItem(label, active, href) {
 }
 
 async function getApiStatus(user) {
-  if (!user) return { beds24: false, seam: false, brevo: false, stripe: false }
+  if (!user) return { beds24: false, seam: false, brevo: false, stripe: false, plan: null }
   try {
     const { data } = await supabase
       .from('api_keys')
       .select('api_key, seam_api_key, seam_enabled')
       .eq('user_id', user.id)
       .maybeSingle()
+
+    let stripeActive = false
+    let plan = null
+    try {
+      const { data: gf } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', user.id)
+        .eq('module', 'guestflow')
+        .maybeSingle()
+      if (gf) {
+        if (gf.status === 'trialing') { stripeActive = true; plan = 'Essai gratuit' }
+        else if (gf.status === 'active') { stripeActive = true; plan = 'Abonné' }
+        else if (gf.status === 'past_due') { stripeActive = true; plan = 'Paiement en attente' }
+        else { plan = 'Aucun abonnement' }
+      } else {
+        plan = 'Aucun abonnement'
+      }
+    } catch { plan = null }
+
     return {
       beds24: !!data?.api_key,
       seam:   !!(data?.seam_api_key && data?.seam_enabled !== false),
       brevo:  true,
-      stripe: false
+      stripe: stripeActive,
+      plan:   plan
     }
   } catch {
-    return { beds24: false, seam: false, brevo: false, stripe: false }
+    return { beds24: false, seam: false, brevo: false, stripe: false, plan: null }
   }
 }
 
