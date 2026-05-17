@@ -108,7 +108,7 @@
 
   function renderApps() {
     const grid = document.getElementById('apps-grid')
-    grid.innerHTML = CONFIG.apps.map(app => `
+    grid.innerHTML = CONFIG.apps.filter(app => app.active !== false).map(app => `
       <a class="app-card" href="/apps/${app.id}">
         <div class="app-icon" style="background:${app.color}">${app.icon}</div>
         <div class="app-name">${app.name}</div>
