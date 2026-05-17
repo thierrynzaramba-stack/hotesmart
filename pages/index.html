@@ -21,29 +21,6 @@
 
     <div class="content">
 
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-label">Biens connectés</div>
-          <div class="metric-value" id="stat-biens">—</div>
-          <div class="metric-delta" id="stat-biens-delta"></div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Réservations actives</div>
-          <div class="metric-value" id="stat-resa">—</div>
-          <div class="metric-delta">ce mois</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Messages traités</div>
-          <div class="metric-value" id="stat-messages">0</div>
-          <div class="metric-delta">par l'Agent AI</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Apps actives</div>
-          <div class="metric-value" id="stat-apps">—</div>
-          <div class="metric-delta"></div>
-        </div>
-      </div>
-
       <div class="section-title">Mes biens</div>
       <div class="apps-grid" id="properties-grid">
         <div class="app-card">Chargement...</div>
@@ -106,7 +83,6 @@
       const data = await res.json()
 
       if (data.properties && data.properties.length > 0) {
-        document.getElementById('stat-biens').textContent = data.properties.length
         document.getElementById('status').textContent = `${data.properties.length} bien(s) connecté(s) via Beds24`
 
         const grid = document.getElementById('properties-grid')
@@ -132,7 +108,6 @@
 
   function renderApps() {
     const grid = document.getElementById('apps-grid')
-    document.getElementById('stat-apps').textContent = CONFIG.apps.length
     grid.innerHTML = CONFIG.apps.map(app => `
       <a class="app-card" href="/apps/${app.id}">
         <div class="app-icon" style="background:${app.color}">${app.icon}</div>
