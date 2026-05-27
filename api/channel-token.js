@@ -45,7 +45,7 @@ export default async function handler(req, res) {
     const token = data?.data?.attributes?.token;
 
     if (!token) {
-      console.error('No token in response', { dataShape: Object.keys(data || {}) });
+      console.error('No token in response', { dataShape: Object.keys(data || {}), fullData: JSON.stringify(data) });
       return res.status(500).json({ error: 'Invalid response' });
     }
 
