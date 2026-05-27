@@ -46,5 +46,10 @@ export const api = {
   auth: {
     saveKey: (service, key) => apiCall('auth', 'POST', { action: 'saveKey', service, key }),
     getKey: (service) => apiCall('auth', 'POST', { action: 'getKey', service })
+  },
+  channel: {
+    listProperties: () => apiCall('channel-property', 'GET'),
+    createProperty: (data) => apiCall('channel-property', 'POST', data),
+    getToken: () => apiCall('channel-token', 'POST')
   }
 }

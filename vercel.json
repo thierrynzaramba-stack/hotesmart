@@ -47,6 +47,14 @@
       "destination": "/pages/channels-test"
     },
     {
+      "source": "/biens",
+      "destination": "/pages/biens"
+    },
+    {
+      "source": "/biens/nouveau",
+      "destination": "/pages/biens-nouveau"
+    },
+    {
       "source": "/apps/agent-ai",
       "destination": "/apps/agent-ai/index"
     },
