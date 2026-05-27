@@ -131,7 +131,7 @@ module.exports = async function handler(req, res) {
         }
       })
       if (!rateRes.ok) {
-        console.error('[channel-property] POST rate_plan failed', rateRes.status, rateRes.json)
+        console.error('[channel-property] POST rate_plan failed', rateRes.status, JSON.stringify(rateRes.json))
         await channelDelete(`/room_types/${providerRoomTypeId}`)
         await channelDelete(`/properties/${providerPropertyId}`)
         return res.status(502).json({ error: 'Creation rate_plan echouee' })
