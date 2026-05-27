@@ -50,6 +50,6 @@ export const api = {
   channel: {
     listProperties: () => apiCall('channel-property', 'GET'),
     createProperty: (data) => apiCall('channel-property', 'POST', data),
-    getToken: () => apiCall('channel-token', 'POST')
+    getToken: (propertyId) => apiCall('channel-token', 'POST', { property_id: propertyId })
   }
 }
