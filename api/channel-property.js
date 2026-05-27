@@ -65,7 +65,7 @@ module.exports = async function handler(req, res) {
 
   // ===== POST : creation d'un bien complet =====
   if (req.method === 'POST') {
-    const { name, capacity, currency, address, city, country } = req.body || {}
+    const { name, capacity, currency, address, city, country, zip_code } = req.body || {}
 
     // Validation minimale
     if (!name || typeof name !== 'string' || name.length < 1 || name.length > 100) {
@@ -89,7 +89,8 @@ module.exports = async function handler(req, res) {
           title: name,
           currency: cur,
           property_type: 'apartment',
-          country: cnt
+          country: cnt,
+          zip_code: zip_code || undefined
         }
       })
       if (!propRes.ok) {
@@ -121,17 +122,26 @@ module.exports = async function handler(req, res) {
       }
       providerRoomTypeId = roomRes.json?.data?.id
 
-      // Etape 3 : creer rate_plan (defaults Channex)
+      // Etape 3 : creer rate_plan (defaults Channex + options requises)
+      const options = []
+      for (let i = 1; i <= cap; i++) {
+        options.push({
+          occupancy: i,
+          rate: 80,
+          is_primary: (i === cap)
+        })
+      }
       const rateRes = await channelCall('POST', '/rate_plans', {
         rate_plan: {
           property_id: providerPropertyId,
           room_type_id: providerRoomTypeId,
           title: 'Tarif Standard',
-          currency: cur
+          currency: cur,
+          options
         }
       })
       if (!rateRes.ok) {
-        console.error('[channel-property] POST rate_plan failed', rateRes.status, JSON.stringify(rateRes.json))
+        console.error('[channel-property] POST rate_plan failed', rateRes.status, rateRes.json)
         await channelDelete(`/room_types/${providerRoomTypeId}`)
         await channelDelete(`/properties/${providerPropertyId}`)
         return res.status(502).json({ error: 'Creation rate_plan echouee' })
@@ -152,6 +162,7 @@ module.exports = async function handler(req, res) {
           address: address || null,
           city: city || null,
           country: cnt,
+          zip_code: zip_code || null,
           capacity: cap
         })
         .select()

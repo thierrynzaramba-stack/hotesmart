@@ -154,9 +154,17 @@
 
         <div class="row">
           <div class="field">
+            <label for="zip_code">Code postal (optionnel)</label>
+            <input type="text" id="zip_code" name="zip_code" maxlength="20" placeholder="31000" />
+          </div>
+          <div class="field">
             <label for="city">Ville (optionnel)</label>
             <input type="text" id="city" name="city" maxlength="100" placeholder="Toulouse" />
           </div>
+        </div>
+
+        <div class="row">
+          <div class="field"></div>
           <div class="field">
             <label for="country">Pays</label>
             <select id="country" name="country">
@@ -207,7 +215,8 @@
         currency: form.currency.value,
         country: form.country.value,
         address: form.address.value.trim() || null,
-        city: form.city.value.trim() || null
+        city: form.city.value.trim() || null,
+        zip_code: form.zip_code.value.trim() || null
       }
 
       btn.disabled = true
