@@ -146,3 +146,4 @@ vite.config.ts.timestamp-*
 
 # VS Code local
 .vscode/
+.env*
