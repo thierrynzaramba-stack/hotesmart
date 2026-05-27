@@ -43,6 +43,10 @@
       "destination": "/pages/connexions"
     },
     {
+      "source": "/channels-test",
+      "destination": "/pages/channels-test"
+    },
+    {
       "source": "/apps/agent-ai",
       "destination": "/apps/agent-ai/index"
     },
