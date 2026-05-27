@@ -148,6 +148,23 @@
         </div>
 
         <div class="field">
+          <label for="base_price">Prix de base par nuit</label>
+          <input type="number" id="base_price" name="base_price" required min="1" max="100000" step="1" placeholder="80" />
+          <span class="hint">Vous pourrez ajuster les tarifs par date ensuite (saisons, weekends, evenements).</span>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="included_guests">Voyageurs inclus dans le prix (optionnel)</label>
+            <input type="number" id="included_guests" name="included_guests" min="1" max="20" placeholder="Tous" />
+          </div>
+          <div class="field">
+            <label for="extra_guest_fee">Supplement par voyageur additionnel (optionnel)</label>
+            <input type="number" id="extra_guest_fee" name="extra_guest_fee" min="0" max="100000" step="1" placeholder="0" />
+          </div>
+        </div>
+
+        <div class="field">
           <label for="address">Adresse (optionnel)</label>
           <input type="text" id="address" name="address" maxlength="200" placeholder="12 rue de la Republique" />
         </div>
@@ -216,7 +233,10 @@
         country: form.country.value,
         address: form.address.value.trim() || null,
         city: form.city.value.trim() || null,
-        zip_code: form.zip_code.value.trim() || null
+        zip_code: form.zip_code.value.trim() || null,
+        base_price: parseFloat(form.base_price.value),
+        included_guests: form.included_guests.value ? parseInt(form.included_guests.value, 10) : null,
+        extra_guest_fee: form.extra_guest_fee.value !== '' ? parseFloat(form.extra_guest_fee.value) : null
       }
 
       btn.disabled = true

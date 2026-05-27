@@ -65,7 +65,7 @@ module.exports = async function handler(req, res) {
 
   // ===== POST : creation d'un bien complet =====
   if (req.method === 'POST') {
-    const { name, capacity, currency, address, city, country, zip_code } = req.body || {}
+    const { name, capacity, currency, address, city, country, zip_code, base_price, included_guests, extra_guest_fee } = req.body || {}
 
     // Validation minimale
     if (!name || typeof name !== 'string' || name.length < 1 || name.length > 100) {
@@ -77,6 +77,22 @@ module.exports = async function handler(req, res) {
     }
     const cur = (currency || 'EUR').toUpperCase()
     const cnt = (country || 'FR').toUpperCase()
+
+    // Prix de base requis
+    const basePrice = parseFloat(base_price)
+    if (!basePrice || basePrice <= 0 || basePrice > 100000) {
+      return res.status(400).json({ error: 'Prix de base requis (>0)' })
+    }
+    // Voyageurs inclus : optionnel, defaut = capacity
+    const incGuests = parseInt(included_guests, 10) || cap
+    if (incGuests < 1 || incGuests > cap) {
+      return res.status(400).json({ error: 'Voyageurs inclus invalide (1 a capacite)' })
+    }
+    // Supplement par voyageur additionnel : optionnel
+    const extraFee = extra_guest_fee != null && extra_guest_fee !== '' ? parseFloat(extra_guest_fee) : null
+    if (extraFee != null && (extraFee < 0 || extraFee > 100000)) {
+      return res.status(400).json({ error: 'Supplement invalide' })
+    }
 
     let providerPropertyId = null
     let providerRoomTypeId = null
@@ -122,24 +138,43 @@ module.exports = async function handler(req, res) {
       }
       providerRoomTypeId = roomRes.json?.data?.id
 
-      // Etape 3 : creer rate_plan (defaults Channex + options requises)
-      const options = []
-      for (let i = 1; i <= cap; i++) {
-        options.push({
-          occupancy: i,
-          rate: 80,
-          is_primary: (i === cap)
-        })
-      }
-      const rateRes = await channelCall('POST', '/rate_plans', {
-        rate_plan: {
-          property_id: providerPropertyId,
-          room_type_id: providerRoomTypeId,
-          title: 'Tarif Standard',
-          currency: cur,
-          options
+      // Etape 3 : creer rate_plan
+      // Si extraFee defini et > 0 : Per Person avec progression Airbnb-like
+      // Sinon : Per Room avec prix unique
+      let ratePlanPayload
+      if (extraFee != null && extraFee > 0) {
+        const options = []
+        for (let i = 1; i <= cap; i++) {
+          const additional = Math.max(0, i - incGuests)
+          options.push({
+            occupancy: i,
+            rate: basePrice + (additional * extraFee),
+            is_primary: (i === cap)
+          })
         }
-      })
+        ratePlanPayload = {
+          rate_plan: {
+            property_id: providerPropertyId,
+            room_type_id: providerRoomTypeId,
+            title: 'Tarif Standard',
+            currency: cur,
+            sell_mode: 'per_person',
+            options
+          }
+        }
+      } else {
+        ratePlanPayload = {
+          rate_plan: {
+            property_id: providerPropertyId,
+            room_type_id: providerRoomTypeId,
+            title: 'Tarif Standard',
+            currency: cur,
+            sell_mode: 'per_room',
+            options: [{ occupancy: cap, rate: basePrice, is_primary: true }]
+          }
+        }
+      }
+      const rateRes = await channelCall('POST', '/rate_plans', ratePlanPayload)
       if (!rateRes.ok) {
         console.error('[channel-property] POST rate_plan failed', rateRes.status, rateRes.json)
         await channelDelete(`/room_types/${providerRoomTypeId}`)
@@ -163,7 +198,10 @@ module.exports = async function handler(req, res) {
           city: city || null,
           country: cnt,
           zip_code: zip_code || null,
-          capacity: cap
+          capacity: cap,
+          base_price: basePrice,
+          included_guests: incGuests,
+          extra_guest_fee: extraFee
         })
         .select()
         .single()
