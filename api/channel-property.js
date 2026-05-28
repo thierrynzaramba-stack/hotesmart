@@ -148,7 +148,7 @@ module.exports = async function handler(req, res) {
           const additional = Math.max(0, i - incGuests)
           options.push({
             occupancy: i,
-            rate: basePrice + (additional * extraFee),
+            rate: Math.round((basePrice + (additional * extraFee)) * 100),
             is_primary: (i === cap)
           })
         }
@@ -170,7 +170,7 @@ module.exports = async function handler(req, res) {
             title: 'Tarif Standard',
             currency: cur,
             sell_mode: 'per_room',
-            options: [{ occupancy: cap, rate: basePrice, is_primary: true }]
+            options: [{ occupancy: cap, rate: Math.round(basePrice * 100), is_primary: true }]
           }
         }
       }
