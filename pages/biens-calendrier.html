@@ -109,9 +109,6 @@
     }
     .float-bar .btn-params { background: #007aff; color: #fff; }
     .float-bar .btn-clear { background: transparent; color: #a1a1a6; }
-    .quick-price { display: flex; align-items: center; gap: 6px; }
-    .quick-price input { width: 80px; padding: 7px 10px; border: none; border-radius: 8px; font-size: 14px; font-family: inherit; }
-    .quick-price .btn-quick-apply { background: #1f6f23; color: #fff; }
     /* Popup */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
     .overlay.visible { display: flex; }
@@ -168,7 +165,7 @@
       </div>
 
       <p style="font-size:12px;color:#86868b;margin-bottom:12px">
-        Astuce : cliquez sur un jour pour le configurer finement, ou glissez sur plusieurs jours pour leur appliquer un meme tarif.
+        Astuce : cliquez sur un jour pour modifier son tarif, ou glissez sur plusieurs jours puis validez pour leur appliquer le meme tarif. Bouton "Plus de parametres" pour les options avancees.
       </p>
 
       <div class="cal-wrapper">
@@ -191,10 +188,6 @@
   <!-- Barre d'action flottante -->
   <div class="float-bar" id="float-bar">
     <span class="sel-info"><strong id="sel-count">0</strong> jour(s)</span>
-    <div class="quick-price" id="quick-price">
-      <input type="number" id="quick-rate" placeholder="Prix" />
-      <button class="btn-quick-apply" id="btn-quick-apply">Appliquer</button>
-    </div>
     <button class="btn-params" id="btn-open-popup">Plus de parametres</button>
     <button class="btn-clear" id="btn-clear-sel">Annuler</button>
   </div>
@@ -449,8 +442,12 @@
     document.addEventListener('mouseup', () => {
       if (!isDragging) return
       isDragging = false
-      // Clic simple (1 jour) ou glisser (plusieurs) : on garde la selection + barre flottante
+      if (selected.size === 0) return
       showFloatBar()
+      // La 1ere case de la selection passe automatiquement en edition
+      const firstIdx = Math.min(...selected)
+      const cell = body.querySelector('.rate-cell[data-idx="' + firstIdx + '"]')
+      startInlineEdit(cell, firstIdx)
     })
 
     function updateSelectionUI() {
@@ -462,35 +459,52 @@
       if (selected.size > 1) showFloatBar()
     }
 
+    // ===================== EDITION INLINE =====================
+    // Edite la case ; sur validation, applique le prix a TOUTES les cases selectionnees
+    function startInlineEdit(cell, idx) {
+      if (!cell) return
+      const current = state[idx].rate
+      cell.innerHTML = '<input class="rate-input" type="number" value="' + current + '" />'
+      const input = cell.querySelector('input')
+      input.focus()
+      input.select()
+      let done = false
+      const commit = (apply) => {
+        if (done) return
+        done = true
+        if (apply) {
+          const v = parseFloat(input.value)
+          if (!isNaN(v) && v > 0) {
+            pushUndo()
+            // Applique a toutes les cases selectionnees (ou juste celle-ci si selection vide)
+            const targets = selected.size > 0 ? [...selected] : [idx]
+            targets.forEach(i => { state[i].rate = v; state[i].modified = true })
+            selected.clear()
+            hideFloatBar()
+            renderBody()
+            showToast(targets.length > 1 ? 'Tarif applique a ' + targets.length + ' jours' : 'Tarif enregistre')
+            return
+          }
+        }
+        renderBody()
+      }
+      input.addEventListener('blur', () => commit(true))
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(true) }
+        else if (e.key === 'Escape') { commit(false) }
+      })
+    }
+
     // ===================== FLOAT BAR =====================
     const floatBar = document.getElementById('float-bar')
     function showFloatBar() {
       if (selected.size === 0) { hideFloatBar(); return }
       document.getElementById('sel-count').textContent = selected.size
-      // Champ prix rapide visible seulement si plusieurs dates
-      const qp = document.getElementById('quick-price')
-      qp.style.display = selected.size > 1 ? 'flex' : 'none'
-      document.getElementById('quick-rate').value = ''
       floatBar.classList.add('visible')
     }
     function hideFloatBar() { floatBar.classList.remove('visible') }
     document.getElementById('btn-clear-sel').addEventListener('click', () => {
       selected.clear(); updateSelectionUI(); hideFloatBar()
-    })
-
-    // Application rapide d'un prix unique a toutes les dates selectionnees
-    document.getElementById('btn-quick-apply').addEventListener('click', () => {
-      const v = parseFloat(document.getElementById('quick-rate').value)
-      if (isNaN(v) || v <= 0) { showToast('Prix invalide'); return }
-      pushUndo()
-      ;[...selected].forEach(i => { state[i].rate = v; state[i].modified = true })
-      selected.clear()
-      hideFloatBar()
-      renderBody()
-      showToast('Tarif applique')
-    })
-    document.getElementById('quick-rate').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') document.getElementById('btn-quick-apply').click()
     })
 
     // ===================== POPUP =====================
