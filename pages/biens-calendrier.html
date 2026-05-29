@@ -109,6 +109,9 @@
     }
     .float-bar .btn-params { background: #007aff; color: #fff; }
     .float-bar .btn-clear { background: transparent; color: #a1a1a6; }
+    .quick-price { display: flex; align-items: center; gap: 6px; }
+    .quick-price input { width: 80px; padding: 7px 10px; border: none; border-radius: 8px; font-size: 14px; font-family: inherit; }
+    .quick-price .btn-quick-apply { background: #1f6f23; color: #fff; }
     /* Popup */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
     .overlay.visible { display: flex; }
@@ -155,11 +158,6 @@
 
   <main>
     <div class="card">
-      <h2>Reservations a venir <span class="badge-count" id="resa-count">3</span></h2>
-      <div class="resa-list" id="resa-list"></div>
-    </div>
-
-    <div class="card">
       <div class="calendar-header">
         <h2 style="margin-bottom:0">Calendrier - 30 prochains jours</h2>
         <div style="display:flex;gap:8px;align-items:center">
@@ -170,7 +168,7 @@
       </div>
 
       <p style="font-size:12px;color:#86868b;margin-bottom:12px">
-        Astuce : cliquez sur un tarif pour le modifier directement, ou glissez sur plusieurs jours pour les configurer ensemble.
+        Astuce : cliquez sur un jour pour le configurer finement, ou glissez sur plusieurs jours pour leur appliquer un meme tarif.
       </p>
 
       <div class="cal-wrapper">
@@ -192,7 +190,11 @@
 
   <!-- Barre d'action flottante -->
   <div class="float-bar" id="float-bar">
-    <span class="sel-info"><strong id="sel-count">0</strong> jour(s) selectionne(s)</span>
+    <span class="sel-info"><strong id="sel-count">0</strong> jour(s)</span>
+    <div class="quick-price" id="quick-price">
+      <input type="number" id="quick-rate" placeholder="Prix" />
+      <button class="btn-quick-apply" id="btn-quick-apply">Appliquer</button>
+    </div>
     <button class="btn-params" id="btn-open-popup">Plus de parametres</button>
     <button class="btn-clear" id="btn-clear-sel">Annuler</button>
   </div>
@@ -301,11 +303,6 @@
     const bookings = [
       { dayStart: 18, dayEnd: 21, name: 'Jean Dupont', color: 'red' },
       { dayStart: 25, dayEnd: 28, name: 'Marie M.', color: 'blue' }
-    ]
-    const upcomingResa = [
-      { name: 'Jean Dupont', persons: 4, dates: '18 -> 21 juin', nights: 3, source: 'airbnb', color: '#d52a44' },
-      { name: 'Marie Martin', persons: 2, dates: '25 -> 28 juin', nights: 3, source: 'booking', color: '#0d4ea6' },
-      { name: 'Sophie Bernard', persons: 6, dates: '28 juin -> 5 juil', nights: 7, source: 'direct', color: '#1f6f23' }
     ]
 
     // Undo stack : on empile des snapshots de state
@@ -422,23 +419,6 @@
       attachRateCellEvents()
     }
 
-    // ===================== RESA PANEL =====================
-    function renderResaPanel() {
-      const list = document.getElementById('resa-list')
-      list.innerHTML = ''
-      upcomingResa.forEach(r => {
-        const item = document.createElement('div')
-        item.className = 'resa-item'
-        item.innerHTML =
-          '<div class="resa-bar-left" style="background:' + r.color + '"></div>' +
-          '<div class="resa-info"><div class="name">' + r.name + ' - ' + r.persons + ' personnes</div>' +
-          '<div class="dates">' + r.dates + ' - ' + r.nights + ' nuits</div></div>' +
-          '<span class="resa-source src-' + r.source + '">' + r.source.charAt(0).toUpperCase() + r.source.slice(1) + '</span>'
-        list.appendChild(item)
-      })
-      document.getElementById('resa-count').textContent = upcomingResa.length
-    }
-
     // ===================== SELECTION (glisser) =====================
     let isDragging = false
     let dragStart = null
@@ -463,27 +443,14 @@
           for (let i = lo; i <= hi; i++) selected.add(i)
           updateSelectionUI()
         })
-        // double-clic = edition inline
-        cell.addEventListener('dblclick', (e) => {
-          e.preventDefault()
-          startInlineEdit(cell, idx)
-        })
       })
     }
 
     document.addEventListener('mouseup', () => {
       if (!isDragging) return
       isDragging = false
-      // Si un seul jour selectionne par simple clic (pas de vrai glisser), edition inline
-      if (selected.size === 1) {
-        const idx = [...selected][0]
-        const cell = body.querySelector('.rate-cell[data-idx="' + idx + '"]')
-        selected.clear()
-        updateSelectionUI()
-        startInlineEdit(cell, idx)
-      } else {
-        showFloatBar()
-      }
+      // Clic simple (1 jour) ou glisser (plusieurs) : on garde la selection + barre flottante
+      showFloatBar()
     })
 
     function updateSelectionUI() {
@@ -495,43 +462,35 @@
       if (selected.size > 1) showFloatBar()
     }
 
-    // ===================== EDITION INLINE =====================
-    function startInlineEdit(cell, idx) {
-      if (!cell) return
-      const current = state[idx].rate
-      cell.innerHTML = '<input class="rate-input" type="number" value="' + current + '" />'
-      const input = cell.querySelector('input')
-      input.focus()
-      input.select()
-      const commit = () => {
-        const v = parseFloat(input.value)
-        if (!isNaN(v) && v > 0 && v !== current) {
-          pushUndo()
-          state[idx].rate = v
-          state[idx].modified = true
-          renderBody()
-          showToast('Tarif enregistre')
-        } else {
-          renderBody()
-        }
-      }
-      input.addEventListener('blur', commit)
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { input.blur() }
-        else if (e.key === 'Escape') { renderBody() }
-      })
-    }
-
     // ===================== FLOAT BAR =====================
     const floatBar = document.getElementById('float-bar')
     function showFloatBar() {
       if (selected.size === 0) { hideFloatBar(); return }
       document.getElementById('sel-count').textContent = selected.size
+      // Champ prix rapide visible seulement si plusieurs dates
+      const qp = document.getElementById('quick-price')
+      qp.style.display = selected.size > 1 ? 'flex' : 'none'
+      document.getElementById('quick-rate').value = ''
       floatBar.classList.add('visible')
     }
     function hideFloatBar() { floatBar.classList.remove('visible') }
     document.getElementById('btn-clear-sel').addEventListener('click', () => {
       selected.clear(); updateSelectionUI(); hideFloatBar()
+    })
+
+    // Application rapide d'un prix unique a toutes les dates selectionnees
+    document.getElementById('btn-quick-apply').addEventListener('click', () => {
+      const v = parseFloat(document.getElementById('quick-rate').value)
+      if (isNaN(v) || v <= 0) { showToast('Prix invalide'); return }
+      pushUndo()
+      ;[...selected].forEach(i => { state[i].rate = v; state[i].modified = true })
+      selected.clear()
+      hideFloatBar()
+      renderBody()
+      showToast('Tarif applique')
+    })
+    document.getElementById('quick-rate').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('btn-quick-apply').click()
     })
 
     // ===================== POPUP =====================
@@ -645,7 +604,6 @@
     // ===================== INIT =====================
     renderHeader()
     renderBody()
-    renderResaPanel()
   </script>
 </body>
 </html>
