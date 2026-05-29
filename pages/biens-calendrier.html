@@ -25,19 +25,21 @@
     .multi-select .ms-option input { width: 16px; height: 16px; }
     .period-select { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; font-family: inherit; }
     main { max-width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 100px; }
-    /* Pastilles de mois */
     .month-pills { display: flex; gap: 6px; flex-wrap: wrap; }
     .month-pill { background: #fff; border: 1px solid #d2d2d7; border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; color: #1d1d1f; font-weight: 500; text-transform: capitalize; }
     .month-pill:hover { background: #eef4ff; border-color: #007aff; }
     .month-pill.active { background: #007aff; color: #fff; border-color: #007aff; }
-    /* Conteneur scroll unique partage */
     .scroll-shell { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; }
     .scroll-area { overflow-x: auto; }
+    /* Bandeau mois */
+    table.month-band { border-collapse: collapse; table-layout: fixed; }
+    table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; }
+    table.month-band td.month-start { border-left: 2px solid #007aff; }
+    table.month-band .corner { width: 96px; min-width: 96px; position: sticky; left: 0; background: #fff; z-index: 5; border-bottom: 1px solid #e5e5e7; }
     .bien-section { padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
     .bien-section:last-child { border-bottom: none; }
     .bien-title { font-size: 15px; font-weight: 600; margin: 0 14px 10px; display: flex; align-items: center; gap: 10px; position: sticky; left: 0; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
-    .btn-rateplan { background: #eef4ff; color: #007aff; border: none; border-radius: 7px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     table.cal th, table.cal td { padding: 5px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
     table.cal thead th { border-bottom: 1px solid #e5e5e7; }
@@ -45,15 +47,17 @@
     table.cal thead .row-label { z-index: 4; }
     table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
     table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
-    table.cal .day-month { font-size: 8px; color: #007aff; font-weight: 600; text-transform: uppercase; }
     table.cal .weekend { background: rgba(0,0,0,0.022); }
+    table.cal .month-start { border-left: 2px solid #007aff; }
     table.cal .today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
-    table.cal thead th.today { box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff, inset 0 2px 0 #007aff; }
     table.cal td.rate-cell { cursor: pointer; font-weight: 600; position: relative; }
     table.cal td.rate-cell:hover { background: #eef4ff; }
     table.cal td.rate-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
     table.cal td.rate-cell.modified { color: #b45309; }
     table.cal td.rate-cell.modified::after { content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; background: #f59e0b; border-radius: 50%; }
+    table.cal td.maxrate-cell { cursor: pointer; font-weight: 500; color: #6e6e73; position: relative; }
+    table.cal td.maxrate-cell:hover { background: #eef4ff; }
+    table.cal td.maxrate-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
     .rate-input { width: 100%; border: none; background: #fff; text-align: center; font-size: 12px; font-weight: 600; font-family: inherit; padding: 3px 0; outline: 2px solid #007aff; border-radius: 3px; }
     table.cal .resa-cell { position: relative; padding: 0 !important; height: 24px; }
     .resa-bar { position: absolute; top: 3px; bottom: 3px; color: white; font-size: 10px; font-weight: 500; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: hidden; border-radius: 3px; }
@@ -62,8 +66,7 @@
     .bien-section.show-complete .hidden-when-simple { display: table-row; }
     .float-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(140%); background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px); }
     .float-bar.visible { transform: translateX(-50%) translateY(0); }
-    .float-bar .sel-info { font-size: 13px; }
-    .float-bar .sel-info strong { font-weight: 600; }
+    .float-bar .sel-info { font-size: 13px; } .float-bar .sel-info strong { font-weight: 600; }
     .float-bar button { border: none; border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .float-bar .btn-params { background: #007aff; color: #fff; }
     .float-bar .btn-clear { background: transparent; color: #a1a1a6; }
@@ -98,18 +101,12 @@
         <div class="ms-panel" id="ms-panel"></div>
       </div>
       <select class="period-select" id="period-select">
-        <option value="1">1 mois</option>
-        <option value="3">3 mois</option>
-        <option value="6">6 mois</option>
-        <option value="12">1 an</option>
+        <option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">1 an</option>
       </select>
     </div>
     <div class="header-actions">
-      <button class="icon-btn" id="btn-undo" title="Annuler la derniere action" disabled>&#8634;</button>
-      <div class="toggle">
-        <button id="btn-simple" class="active">Simplifiee</button>
-        <button id="btn-complete">Complete</button>
-      </div>
+      <button class="icon-btn" id="btn-undo" title="Annuler" disabled>&#8634;</button>
+      <div class="toggle"><button id="btn-simple" class="active">Simplifiee</button><button id="btn-complete">Complete</button></div>
     </div>
   </header>
 
@@ -117,6 +114,7 @@
     <div class="month-pills" id="month-pills"></div>
     <div class="scroll-shell">
       <div class="scroll-area" id="scroll-area">
+        <div id="month-band-wrap"></div>
         <div id="blocks"></div>
       </div>
     </div>
@@ -128,7 +126,6 @@
     <button class="btn-clear" id="btn-clear-sel">Annuler</button>
   </div>
 
-  <!-- Popup config dates -->
   <div class="overlay" id="overlay">
     <div class="popup">
       <h3>Configurer les dates</h3>
@@ -136,15 +133,8 @@
       <div class="field">
         <label>Tarif</label>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <div class="seg" id="seg-mode">
-            <button data-mode="set" class="active">Definir</button>
-            <button data-mode="inc">+</button>
-            <button data-mode="dec">-</button>
-          </div>
-          <div class="seg" id="seg-unit">
-            <button data-unit="eur" class="active">EUR</button>
-            <button data-unit="pct">%</button>
-          </div>
+          <div class="seg" id="seg-mode"><button data-mode="set" class="active">Definir</button><button data-mode="inc">+</button><button data-mode="dec">-</button></div>
+          <div class="seg" id="seg-unit"><button data-unit="eur" class="active">EUR</button><button data-unit="pct">%</button></div>
           <input type="number" id="rate-value" placeholder="Valeur" style="flex:1;min-width:90px" />
         </div>
         <div class="preview-box" id="rate-preview" style="margin-top:10px">Saisissez une valeur</div>
@@ -158,27 +148,7 @@
         <div class="field"><label>Arrivee</label><select id="sel-cta"><option value="keep">Ne pas changer</option><option value="open">Autorisee</option><option value="closed">Bloquee</option></select></div>
         <div class="field"><label>Depart</label><select id="sel-ctd"><option value="keep">Ne pas changer</option><option value="open">Autorise</option><option value="closed">Bloque</option></select></div>
       </div>
-      <div class="popup-actions">
-        <button class="btn-cancel" id="btn-cancel">Annuler</button>
-        <button class="btn-apply" id="btn-apply">Appliquer</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Popup rate plan par personne -->
-  <div class="overlay" id="overlay-rp">
-    <div class="popup">
-      <h3>Tarif par personne</h3>
-      <div class="sub" id="rp-bien-name">-</div>
-      <div class="row2">
-        <div class="field"><label>Voyageurs inclus dans le prix</label><input type="number" id="rp-included" min="1" /></div>
-        <div class="field"><label>Supplement / voyageur sup. (EUR)</label><input type="number" id="rp-extra" min="0" /></div>
-      </div>
-      <div class="preview-box" id="rp-preview">-</div>
-      <div class="popup-actions">
-        <button class="btn-cancel" id="rp-cancel">Annuler</button>
-        <button class="btn-apply" id="rp-apply">Enregistrer</button>
-      </div>
+      <div class="popup-actions"><button class="btn-cancel" id="btn-cancel">Annuler</button><button class="btn-apply" id="btn-apply">Appliquer</button></div>
     </div>
   </div>
 
@@ -204,7 +174,7 @@
     const monthShort = ['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
     const monthFull = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
     const fmtShort = (d) => d.getDate() + ' ' + monthShort[d.getMonth()]
-    const CELL_W = 34, LABEL_W = 96
+    const CELL_W = 34
 
     function buildDays() {
       const today = new Date(); today.setHours(0,0,0,0)
@@ -212,9 +182,11 @@
       days = []
       for (let i = 0; i < total; i++) { const d = new Date(today); d.setDate(today.getDate()+i); days.push(d) }
     }
+    function isMonthStart(i) { return i === 0 || days[i].getDate() === 1 }
 
     const states = {}
     function initState(bien) {
+      const extraGuests = Math.max(0, bien.capacity - bien.included)
       states[bien.id] = days.map(d => {
         const dow = d.getDay()
         let rate = bien.base
@@ -223,15 +195,12 @@
         let minStay = 0
         if (dow === 5 || dow === 6) minStay = 3
         else if (dow === 1) minStay = 2
-        return { rate, avail: 'open', minStay, cta: 'open', ctd: 'open' }
+        const maxRate = rate + extraGuests * bien.extraFee
+        return { rate, maxRate, avail: 'open', minStay, cta: 'open', ctd: 'open' }
       })
     }
 
-    // rate plan config par bien (modifiable via popup)
-    const rpConfig = {}
-    BIENS.forEach(b => { rpConfig[b.id] = { included: b.included, extraFee: b.extraFee } })
-
-    let sel = { bienId: null, idx: new Set() }
+    let sel = { bienId: null, idx: new Set(), row: 'rate' } // row = 'rate' ou 'maxrate'
 
     const undoStack = []
     function pushUndo(bienId) { undoStack.push({ bienId, snap: JSON.stringify(states[bienId]) }); document.getElementById('btn-undo').disabled = false }
@@ -244,18 +213,14 @@
     }
 
     let selectedBiens = [BIENS[0].id]
-
     function renderMultiSelect() {
-      const panel = document.getElementById('ms-panel')
-      panel.innerHTML = ''
+      const panel = document.getElementById('ms-panel'); panel.innerHTML = ''
       BIENS.forEach(b => {
-        const opt = document.createElement('label')
-        opt.className = 'ms-option'
+        const opt = document.createElement('label'); opt.className = 'ms-option'
         const checked = selectedBiens.includes(b.id) ? 'checked' : ''
         opt.innerHTML = '<input type="checkbox" value="' + b.id + '" ' + checked + '/> ' + b.name + ' <span style="color:#86868b;font-size:12px">(cap. ' + b.capacity + ')</span>'
         opt.querySelector('input').addEventListener('change', (e) => {
-          if (e.target.checked) { if (!selectedBiens.includes(b.id)) selectedBiens.push(b.id) }
-          else { selectedBiens = selectedBiens.filter(x => x !== b.id) }
+          if (e.target.checked) { if (!selectedBiens.includes(b.id)) selectedBiens.push(b.id) } else { selectedBiens = selectedBiens.filter(x => x !== b.id) }
           updateMsLabel(); renderBlocks()
         })
         panel.appendChild(opt)
@@ -271,30 +236,39 @@
     document.getElementById('ms-trigger').addEventListener('click', () => document.getElementById('multi-select').classList.toggle('open'))
     document.addEventListener('click', (e) => { const ms = document.getElementById('multi-select'); if (!ms.contains(e.target)) ms.classList.remove('open') })
 
-    // Pastilles de mois
     function renderMonthPills() {
-      const wrap = document.getElementById('month-pills')
-      wrap.innerHTML = ''
+      const wrap = document.getElementById('month-pills'); wrap.innerHTML = ''
       const seen = new Set()
       days.forEach((d, idx) => {
         const key = d.getFullYear() + '-' + d.getMonth()
         if (!seen.has(key)) {
           seen.add(key)
-          const pill = document.createElement('button')
-          pill.className = 'month-pill'
-          pill.textContent = monthFull[d.getMonth()]
-          pill.dataset.idx = idx
+          const pill = document.createElement('button'); pill.className = 'month-pill'; pill.textContent = monthFull[d.getMonth()]; pill.dataset.idx = idx
           pill.addEventListener('click', () => {
-            const scrollArea = document.getElementById('scroll-area')
-            scrollArea.scrollTo({ left: idx * CELL_W, behavior: 'smooth' })
-            wrap.querySelectorAll('.month-pill').forEach(p => p.classList.remove('active'))
-            pill.classList.add('active')
+            document.getElementById('scroll-area').scrollTo({ left: idx * CELL_W, behavior: 'smooth' })
+            wrap.querySelectorAll('.month-pill').forEach(p => p.classList.remove('active')); pill.classList.add('active')
           })
           wrap.appendChild(pill)
         }
       })
-      const first = wrap.querySelector('.month-pill')
-      if (first) first.classList.add('active')
+      const first = wrap.querySelector('.month-pill'); if (first) first.classList.add('active')
+    }
+
+    // Bandeau de mois aligne sur les colonnes
+    function renderMonthBand() {
+      const wrap = document.getElementById('month-band-wrap')
+      let html = '<table class="month-band"><tr><td class="corner"></td>'
+      // grouper les jours par mois et faire un colspan
+      let i = 0
+      while (i < days.length) {
+        const m = days[i].getMonth()
+        let span = 0
+        while (i + span < days.length && days[i+span].getMonth() === m) span++
+        html += '<td colspan="' + span + '" class="month-start" style="width:' + (span*CELL_W) + 'px;min-width:' + (span*CELL_W) + 'px">' + monthFull[m] + ' ' + days[i].getFullYear() + '</td>'
+        i += span
+      }
+      html += '</tr></table>'
+      wrap.innerHTML = html
     }
 
     const blocksEl = document.getElementById('blocks')
@@ -319,18 +293,13 @@
       section.className = 'bien-section' + (showComplete ? ' show-complete' : '')
       section.dataset.bienId = bien.id
 
-      let html = '<div class="bien-title">' + bien.name + ' <span class="cap">capacite ' + bien.capacity + '</span>'
-      html += ' <button class="btn-rateplan" data-bien="' + bien.id + '">Tarif par personne</button></div>'
+      let html = '<div class="bien-title">' + bien.name + ' <span class="cap">capacite ' + bien.capacity + '</span></div>'
       html += '<table class="cal"><thead><tr><th class="row-label"></th>'
       days.forEach((d, idx) => {
         const we = d.getDay() === 0 || d.getDay() === 6
-        const showMonth = idx === 0 || d.getDate() === 1
-        const cls = (we ? 'weekend' : '') + (isToday(idx) ? ' today' : '')
-        html += '<th class="' + cls + '">'
-        html += '<div class="day-name">' + dayNames[d.getDay()] + '</div>'
-        html += '<div class="day-num">' + d.getDate() + '</div>'
-        if (showMonth) html += '<div class="day-month">' + monthShort[d.getMonth()] + '</div>'
-        html += '</th>'
+        const ms = isMonthStart(idx) ? ' month-start' : ''
+        const cls = (we ? 'weekend' : '') + (isToday(idx) ? ' today' : '') + ms
+        html += '<th class="' + cls + '"><div class="day-name">' + dayNames[d.getDay()] + '</div><div class="day-num">' + d.getDate() + '</div></th>'
       })
       html += '</tr></thead><tbody>'
 
@@ -338,20 +307,33 @@
       html += '<tr><td class="row-label">Reservations</td>'
       days.forEach((d, i) => {
         const we = d.getDay() === 0 || d.getDay() === 6
-        html += '<td class="resa-cell ' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        html += '<td class="resa-cell ' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + ms + '">'
         bien.resa.forEach(bk => { if (i === bk.start) { const w = bk.span*100; html += '<div class="resa-bar ' + bk.color + '" style="left:50%;width:calc(' + w + '% - 1px);z-index:2">' + bk.name + '</div>' } })
         html += '</td>'
       })
       html += '</tr>'
 
-      // Tarif
+      // Tarif (base)
       html += '<tr><td class="row-label">Tarif</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        const cls = ['rate-cell']; if (we) cls.push('weekend'); if (isToday(i)) cls.push('today')
-        if (sel.bienId === bien.id && sel.idx.has(i)) cls.push('selected')
-        if (s.modified) cls.push('modified')
-        html += '<td class="' + cls.join(' ') + '" data-idx="' + i + '">' + s.rate + '&euro;</td>'
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        const c = ['rate-cell']; if (we) c.push('weekend'); if (isToday(i)) c.push('today'); if (ms) c.push('month-start')
+        if (sel.bienId === bien.id && sel.row === 'rate' && sel.idx.has(i)) c.push('selected')
+        if (s.modified) c.push('modified')
+        html += '<td class="' + c.join(' ') + '" data-idx="' + i + '" data-row="rate">' + s.rate + '&euro;</td>'
+      })
+      html += '</tr>'
+
+      // Tarif max (vue complete, editable)
+      html += '<tr class="hidden-when-simple"><td class="row-label">Tarif max</td>'
+      st.forEach((s, i) => {
+        const we = days[i].getDay() === 0 || days[i].getDay() === 6
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        const c = ['maxrate-cell']; if (we) c.push('weekend'); if (isToday(i)) c.push('today'); if (ms) c.push('month-start')
+        if (sel.bienId === bien.id && sel.row === 'maxrate' && sel.idx.has(i)) c.push('selected')
+        html += '<td class="' + c.join(' ') + '" data-idx="' + i + '" data-row="maxrate">' + s.maxRate + '&euro;</td>'
       })
       html += '</tr>'
 
@@ -359,9 +341,8 @@
       html += '<tr class="hidden-when-simple"><td class="row-label">Min nuits</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
-        html += s.minStay > 0 ? '<span style="color:#6e6e73">&#127769;' + s.minStay + '</span>' : '<span style="color:#d2d2d7">.</span>'
-        html += '</td>'
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + ms + '">' + (s.minStay > 0 ? '<span style="color:#6e6e73">&#127769;' + s.minStay + '</span>' : '<span style="color:#d2d2d7">.</span>') + '</td>'
       })
       html += '</tr>'
 
@@ -369,9 +350,8 @@
       html += '<tr class="hidden-when-simple"><td class="row-label">Disponibilite</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
-        html += s.avail === 'closed' ? '<span style="color:#d52a44">Ferme</span>' : '<span style="color:#1f6f23">.</span>'
-        html += '</td>'
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + ms + '">' + (s.avail === 'closed' ? '<span style="color:#d52a44">Ferme</span>' : '<span style="color:#1f6f23">.</span>') + '</td>'
       })
       html += '</tr>'
 
@@ -379,9 +359,8 @@
       html += '<tr class="hidden-when-simple"><td class="row-label">Arrivee</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
-        html += s.cta === 'closed' ? '<span style="color:#d52a44;font-size:13px">&#10060;</span>' : '<span style="color:#d2d2d7">.</span>'
-        html += '</td>'
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + ms + '">' + (s.cta === 'closed' ? '<span style="color:#d52a44;font-size:13px">&#10060;</span>' : '<span style="color:#d2d2d7">.</span>') + '</td>'
       })
       html += '</tr>'
 
@@ -389,9 +368,8 @@
       html += '<tr class="hidden-when-simple"><td class="row-label">Depart</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
-        html += s.ctd === 'closed' ? '<span style="color:#ff9500;font-size:13px">&#9938;</span>' : '<span style="color:#d2d2d7">.</span>'
-        html += '</td>'
+        const ms = isMonthStart(i) ? ' month-start' : ''
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + ms + '">' + (s.ctd === 'closed' ? '<span style="color:#ff9500;font-size:13px">&#9938;</span>' : '<span style="color:#d2d2d7">.</span>') + '</td>'
       })
       html += '</tr>'
 
@@ -400,19 +378,16 @@
       return section
     }
 
-    // Selection glisser
-    let isDragging = false, dragStart = null, dragBien = null
+    let isDragging = false, dragStart = null, dragBien = null, dragRow = null
     function attachEvents() {
       blocksEl.querySelectorAll('.bien-section').forEach(section => {
         const bienId = section.dataset.bienId
-        section.querySelectorAll('.rate-cell').forEach(cell => {
+        section.querySelectorAll('.rate-cell, .maxrate-cell').forEach(cell => {
           const idx = parseInt(cell.dataset.idx, 10)
-          cell.addEventListener('mousedown', (e) => { e.preventDefault(); isDragging = true; dragStart = idx; dragBien = bienId; sel = { bienId, idx: new Set([idx]) }; updateSelectionUI() })
-          cell.addEventListener('mouseenter', () => { if (!isDragging || dragBien !== bienId) return; const lo = Math.min(dragStart, idx), hi = Math.max(dragStart, idx); sel.idx = new Set(); for (let i=lo;i<=hi;i++) sel.idx.add(i); updateSelectionUI() })
+          const row = cell.dataset.row
+          cell.addEventListener('mousedown', (e) => { e.preventDefault(); isDragging = true; dragStart = idx; dragBien = bienId; dragRow = row; sel = { bienId, idx: new Set([idx]), row }; updateSelectionUI() })
+          cell.addEventListener('mouseenter', () => { if (!isDragging || dragBien !== bienId || dragRow !== row) return; const lo = Math.min(dragStart, idx), hi = Math.max(dragStart, idx); sel.idx = new Set(); for (let i=lo;i<=hi;i++) sel.idx.add(i); updateSelectionUI() })
         })
-      })
-      blocksEl.querySelectorAll('.btn-rateplan').forEach(btn => {
-        btn.addEventListener('click', (e) => { e.stopPropagation(); openRatePlanPopup(btn.dataset.bien) })
       })
     }
 
@@ -423,16 +398,17 @@
       showFloatBar()
       const firstIdx = Math.min(...sel.idx)
       const section = blocksEl.querySelector('.bien-section[data-bien-id="' + sel.bienId + '"]')
-      const cell = section ? section.querySelector('.rate-cell[data-idx="' + firstIdx + '"]') : null
+      const cell = section ? section.querySelector('.' + (sel.row === 'maxrate' ? 'maxrate-cell' : 'rate-cell') + '[data-idx="' + firstIdx + '"]') : null
       startInlineEdit(cell, firstIdx)
     })
 
     function updateSelectionUI() {
       blocksEl.querySelectorAll('.bien-section').forEach(section => {
         const bienId = section.dataset.bienId
-        section.querySelectorAll('.rate-cell').forEach(cell => {
+        section.querySelectorAll('.rate-cell, .maxrate-cell').forEach(cell => {
           const idx = parseInt(cell.dataset.idx, 10)
-          if (sel.bienId === bienId && sel.idx.has(idx)) cell.classList.add('selected')
+          const row = cell.dataset.row
+          if (sel.bienId === bienId && sel.row === row && sel.idx.has(idx)) cell.classList.add('selected')
           else cell.classList.remove('selected')
         })
       })
@@ -442,7 +418,8 @@
     function startInlineEdit(cell, idx) {
       if (!cell || !sel.bienId) return
       const st = states[sel.bienId]
-      const current = st[idx].rate
+      const field = sel.row === 'maxrate' ? 'maxRate' : 'rate'
+      const current = st[idx][field]
       cell.innerHTML = '<input class="rate-input" type="number" value="' + current + '" />'
       const input = cell.querySelector('input'); input.focus(); input.select()
       let done = false
@@ -453,11 +430,16 @@
           if (!isNaN(v) && v > 0) {
             pushUndo(sel.bienId)
             const targets = sel.idx.size > 0 ? [...sel.idx] : [idx]
-            targets.forEach(i => { st[i].rate = v; st[i].modified = true })
+            targets.forEach(i => {
+              st[i][field] = v; st[i].modified = true
+              // garder coherence base <= max
+              if (field === 'rate' && st[i].maxRate < v) st[i].maxRate = v
+              if (field === 'maxRate' && v < st[i].rate) st[i].rate = v
+            })
             const n = targets.length
-            sel = { bienId: null, idx: new Set() }
+            sel = { bienId: null, idx: new Set(), row: 'rate' }
             hideFloatBar(); renderBlocks()
-            showToast(n > 1 ? 'Tarif applique a ' + n + ' jours' : 'Tarif enregistre')
+            showToast(n > 1 ? 'Applique a ' + n + ' jours' : 'Enregistre')
             return
           }
         }
@@ -470,9 +452,8 @@
     const floatBar = document.getElementById('float-bar')
     function showFloatBar() { if (sel.idx.size === 0) { hideFloatBar(); return } document.getElementById('sel-count').textContent = sel.idx.size; floatBar.classList.add('visible') }
     function hideFloatBar() { floatBar.classList.remove('visible') }
-    document.getElementById('btn-clear-sel').addEventListener('click', () => { sel = { bienId: null, idx: new Set() }; updateSelectionUI(); hideFloatBar() })
+    document.getElementById('btn-clear-sel').addEventListener('click', () => { sel = { bienId: null, idx: new Set(), row: 'rate' }; updateSelectionUI(); hideFloatBar() })
 
-    // Popup config dates
     const overlay = document.getElementById('overlay')
     let popupMode = 'set', popupUnit = 'eur'
     document.getElementById('btn-open-popup').addEventListener('click', () => {
@@ -480,10 +461,8 @@
       const idxs = [...sel.idx].sort((a,b)=>a-b)
       document.getElementById('popup-range').textContent = idxs.length + ' jour(s) : du ' + fmtShort(days[idxs[0]]) + ' au ' + fmtShort(days[idxs[idxs.length-1]])
       document.getElementById('rate-value').value = ''
-      document.getElementById('sel-avail').value = 'keep'
-      document.getElementById('min-stay').value = ''
-      document.getElementById('sel-cta').value = 'keep'
-      document.getElementById('sel-ctd').value = 'keep'
+      document.getElementById('sel-avail').value = 'keep'; document.getElementById('min-stay').value = ''
+      document.getElementById('sel-cta').value = 'keep'; document.getElementById('sel-ctd').value = 'keep'
       popupMode = 'set'; popupUnit = 'eur'
       document.querySelectorAll('#seg-mode button').forEach(b => b.classList.toggle('active', b.dataset.mode==='set'))
       document.querySelectorAll('#seg-unit button').forEach(b => b.classList.toggle('active', b.dataset.unit==='eur'))
@@ -502,7 +481,8 @@
       const val = parseFloat(document.getElementById('rate-value').value)
       const box = document.getElementById('rate-preview')
       if (isNaN(val) || sel.idx.size === 0 || !sel.bienId) { box.textContent = 'Saisissez une valeur'; return }
-      const sample = states[sel.bienId][[...sel.idx][0]].rate
+      const field = sel.row === 'maxrate' ? 'maxRate' : 'rate'
+      const sample = states[sel.bienId][[...sel.idx][0]][field]
       const result = computeNewRate(sample, val)
       const verb = popupMode === 'set' ? 'defini a' : (popupMode === 'inc' ? 'augmente a' : 'reduit a')
       box.textContent = 'Exemple : ' + sample + ' EUR -> ' + verb + ' ' + result + ' EUR'
@@ -513,60 +493,20 @@
       if (sel.idx.size === 0 || !sel.bienId) { overlay.classList.remove('visible'); return }
       pushUndo(sel.bienId)
       const st = states[sel.bienId]
+      const field = sel.row === 'maxrate' ? 'maxRate' : 'rate'
       const rateVal = parseFloat(document.getElementById('rate-value').value)
       const avail = document.getElementById('sel-avail').value
       const minStayVal = document.getElementById('min-stay').value
       const cta = document.getElementById('sel-cta').value
       const ctd = document.getElementById('sel-ctd').value
       ;[...sel.idx].forEach(i => {
-        if (!isNaN(rateVal)) { st[i].rate = computeNewRate(st[i].rate, rateVal); st[i].modified = true }
+        if (!isNaN(rateVal)) { st[i][field] = computeNewRate(st[i][field], rateVal); st[i].modified = true; if (field==='rate' && st[i].maxRate < st[i].rate) st[i].maxRate = st[i].rate; if (field==='maxRate' && st[i].maxRate < st[i].rate) st[i].rate = st[i].maxRate }
         if (avail !== 'keep') { st[i].avail = avail; st[i].modified = true }
         if (minStayVal !== '') { st[i].minStay = parseInt(minStayVal,10); st[i].modified = true }
         if (cta !== 'keep') { st[i].cta = cta; st[i].modified = true }
         if (ctd !== 'keep') { st[i].ctd = ctd; st[i].modified = true }
       })
-      overlay.classList.remove('visible'); sel = { bienId: null, idx: new Set() }; hideFloatBar(); renderBlocks(); showToast('Modifications enregistrees')
-    })
-
-    // Popup rate plan par personne
-    const overlayRp = document.getElementById('overlay-rp')
-    let rpBienId = null
-    function openRatePlanPopup(bienId) {
-      rpBienId = bienId
-      const bien = BIENS.find(b => b.id === bienId)
-      const cfg = rpConfig[bienId]
-      document.getElementById('rp-bien-name').textContent = bien.name + ' (capacite ' + bien.capacity + ')'
-      document.getElementById('rp-included').value = cfg.included
-      document.getElementById('rp-extra').value = cfg.extraFee
-      document.getElementById('rp-included').max = bien.capacity
-      updateRpPreview()
-      overlayRp.classList.add('visible')
-    }
-    function updateRpPreview() {
-      const bien = BIENS.find(b => b.id === rpBienId)
-      const inc = parseInt(document.getElementById('rp-included').value, 10) || bien.capacity
-      const extra = parseFloat(document.getElementById('rp-extra').value) || 0
-      const baseSample = bien.base
-      let lines = 'Sur la base d\'un tarif de ' + baseSample + ' EUR :<br>'
-      lines += 'Jusqu\'a ' + inc + ' pers. : ' + baseSample + ' EUR<br>'
-      for (let p = inc + 1; p <= bien.capacity; p++) {
-        const price = baseSample + (p - inc) * extra
-        lines += p + 'e pers. : ' + price + ' EUR<br>'
-      }
-      if (extra === 0) lines += '(aucun supplement)'
-      document.getElementById('rp-preview').innerHTML = lines
-    }
-    document.getElementById('rp-included').addEventListener('input', updateRpPreview)
-    document.getElementById('rp-extra').addEventListener('input', updateRpPreview)
-    document.getElementById('rp-cancel').addEventListener('click', () => overlayRp.classList.remove('visible'))
-    overlayRp.addEventListener('click', (e) => { if (e.target === overlayRp) overlayRp.classList.remove('visible') })
-    document.getElementById('rp-apply').addEventListener('click', () => {
-      const bien = BIENS.find(b => b.id === rpBienId)
-      const inc = parseInt(document.getElementById('rp-included').value, 10) || bien.capacity
-      const extra = parseFloat(document.getElementById('rp-extra').value) || 0
-      rpConfig[rpBienId] = { included: inc, extraFee: extra }
-      overlayRp.classList.remove('visible')
-      showToast('Tarif par personne enregistre')
+      overlay.classList.remove('visible'); sel = { bienId: null, idx: new Set(), row: 'rate' }; hideFloatBar(); renderBlocks(); showToast('Modifications enregistrees')
     })
 
     document.getElementById('btn-undo').addEventListener('click', doUndo)
@@ -574,17 +514,16 @@
     btnS.addEventListener('click', () => { showComplete = false; btnS.classList.add('active'); btnC.classList.remove('active'); renderBlocks() })
     btnC.addEventListener('click', () => { showComplete = true; btnC.classList.add('active'); btnS.classList.remove('active'); renderBlocks() })
     document.getElementById('period-select').addEventListener('change', (e) => {
-      MONTHS = parseInt(e.target.value, 10)
-      buildDays()
+      MONTHS = parseInt(e.target.value, 10); buildDays()
       Object.keys(states).forEach(k => delete states[k])
-      sel = { bienId: null, idx: new Set() }; hideFloatBar()
-      renderMonthPills(); renderBlocks()
+      sel = { bienId: null, idx: new Set(), row: 'rate' }; hideFloatBar()
+      renderMonthPills(); renderMonthBand(); renderBlocks()
     })
 
     let toastTimer = null
     function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('visible'), 1800) }
 
-    buildDays(); renderMultiSelect(); renderMonthPills(); renderBlocks()
+    buildDays(); renderMultiSelect(); renderMonthPills(); renderMonthBand(); renderBlocks()
   </script>
 </body>
 </html>
