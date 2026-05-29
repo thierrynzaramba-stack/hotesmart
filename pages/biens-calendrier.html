@@ -278,7 +278,36 @@
 
     let isDragging=false, dragStart=null, dragBien=null, dragRow=null
     function attachEvents(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx);sel.idx=new Set();for(let i=lo;i<=hi;i++)sel.idx.add(i);updateSelectionUI()})})}) }
-    document.addEventListener('mouseup',()=>{ if(!isDragging)return; isDragging=false; if(sel.idx.size===0)return; showFloatBar() })
+    // Auto-scroll pendant le drag quand on approche des bords
+    let lastMouseX=0, autoScrollRAF=null
+    function colIndexUnderX(clientX){
+      const area=document.getElementById('scroll-area')
+      const rect=area.getBoundingClientRect()
+      const xInContent = (clientX - rect.left) + area.scrollLeft - 120 // 120 = largeur colonne label sticky
+      let idx = Math.floor(xInContent / CELL_W)
+      if(idx<0) idx=0; if(idx>days.length-1) idx=days.length-1
+      return idx
+    }
+    function extendSelTo(idx){ const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx); sel.idx=new Set(); for(let i=lo;i<=hi;i++)sel.idx.add(i); updateSelectionUI() }
+    function autoScrollStep(){
+      if(!isDragging){ autoScrollRAF=null; return }
+      const area=document.getElementById('scroll-area')
+      const rect=area.getBoundingClientRect()
+      const EDGE=60, SPEED=18
+      let scrolled=false
+      if(lastMouseX > rect.right - EDGE){ area.scrollLeft += SPEED; scrolled=true }
+      else if(lastMouseX < rect.left + 120 + EDGE){ area.scrollLeft -= SPEED; scrolled=true }
+      if(scrolled){ extendSelTo(colIndexUnderX(lastMouseX)) }
+      autoScrollRAF=requestAnimationFrame(autoScrollStep)
+    }
+    document.addEventListener('mousemove',e=>{
+      if(!isDragging)return
+      lastMouseX=e.clientX
+      // etendre la selection a la colonne sous le curseur (drag normal)
+      extendSelTo(colIndexUnderX(e.clientX))
+      if(!autoScrollRAF) autoScrollRAF=requestAnimationFrame(autoScrollStep)
+    })
+    document.addEventListener('mouseup',()=>{ if(!isDragging)return; isDragging=false; if(autoScrollRAF){cancelAnimationFrame(autoScrollRAF);autoScrollRAF=null} if(sel.idx.size===0)return; showFloatBar() })
     document.addEventListener('keydown',e=>{ if(!sel.bienId||sel.idx.size===0)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return; if(document.getElementById('overlay').classList.contains('visible'))return; const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; if(!cell)return; if(e.key==='Enter'||e.key==='F2'){e.preventDefault();startInlineEdit(cell,f,'')}else if(/^[0-9]$/.test(e.key)){e.preventDefault();startInlineEdit(cell,f,e.key)} })
     function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected');else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
 
