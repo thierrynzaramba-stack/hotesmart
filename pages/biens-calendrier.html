@@ -33,15 +33,17 @@
     table.month-band { border-collapse: collapse; table-layout: fixed; }
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
-    table.month-band .corner { width: 110px; min-width: 110px; position: sticky; left: 0; background: #fff; z-index: 5; border-bottom: 1px solid #e5e5e7; }
-    .bien-section { padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
-    .bien-section:last-child { border-bottom: none; }
-    .bien-title { font-size: 15px; font-weight: 600; margin: 0 14px 10px; display: flex; align-items: center; gap: 10px; position: sticky; left: 0; }
+    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 5; border-bottom: 1px solid #e5e5e7; }
+    /* Separation logements renforcee */
+    .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
+    .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
+    .bien-title { font-size: 18px; font-weight: 700; margin: 16px 14px 12px; display: flex; align-items: center; gap: 10px; position: sticky; left: 0; }
+    .bien-title::before { content: ''; width: 5px; height: 22px; background: #007aff; border-radius: 3px; display: inline-block; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     table.cal th, table.cal td { padding: 5px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
     table.cal thead th { border-bottom: 1px solid #e5e5e7; }
-    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 110px; min-width: 110px; background: #fff; position: sticky; left: 0; z-index: 2; border-right: 1px solid #e5e5e7; font-weight: 500; }
+    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 2; border-right: 1px solid #e5e5e7; font-weight: 500; }
     table.cal thead .row-label { z-index: 4; }
     table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
     table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
@@ -64,19 +66,15 @@
     .float-bar button { border: none; border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .float-bar .btn-params { background: #007aff; color: #fff; }
     .float-bar .btn-clear { background: transparent; color: #a1a1a6; }
-    /* Popup a menu */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
     .overlay.visible { display: flex; }
-    .popup-lg { background: #fff; border-radius: 16px; width: 100%; max-width: 720px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+    .popup-lg { background: #fff; border-radius: 16px; width: 100%; max-width: 740px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
     .popup-head { padding: 20px 24px 14px; border-bottom: 1px solid #f0f0f0; }
     .popup-head h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
     .range-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; }
     .range-row input[type=date] { padding: 7px 10px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 13px; font-family: inherit; }
-    .dow-row { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
-    .dow-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 12px; cursor: pointer; }
-    .dow-chip input { margin: 0; }
-    .popup-body { display: flex; flex: 1; min-height: 260px; overflow: hidden; }
-    .popup-menu { width: 180px; min-width: 180px; border-right: 1px solid #f0f0f0; overflow-y: auto; padding: 8px; }
+    .popup-body { display: flex; flex: 1; min-height: 300px; overflow: hidden; }
+    .popup-menu { width: 185px; min-width: 185px; border-right: 1px solid #f0f0f0; overflow-y: auto; padding: 8px; }
     .popup-menu .mi { padding: 9px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; color: #1d1d1f; margin-bottom: 2px; }
     .popup-menu .mi:hover { background: #f5f5f7; }
     .popup-menu .mi.active { background: #007aff; color: #fff; font-weight: 600; }
@@ -85,7 +83,10 @@
     .popup-menu .mi-sep { border-top: 1px solid #f0f0f0; margin: 8px 4px; }
     .popup-content { flex: 1; padding: 20px 24px; overflow-y: auto; }
     .popup-content h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-    .popup-content .desc { font-size: 12px; color: #86868b; margin-bottom: 18px; line-height: 1.5; }
+    .popup-content .desc { font-size: 12px; color: #86868b; margin-bottom: 16px; line-height: 1.5; }
+    .dow-row { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .dow-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 12px; cursor: pointer; }
+    .dow-chip input { margin: 0; }
     .field { margin-bottom: 16px; }
     .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
     .field input[type=number], .field select { width: 100%; padding: 10px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 15px; font-family: inherit; }
@@ -97,7 +98,8 @@
     .display-list { display: flex; flex-direction: column; gap: 4px; }
     .display-list label { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-size: 14px; cursor: pointer; }
     .display-list label:hover { background: #f5f5f7; }
-    .popup-foot { padding: 14px 24px; border-top: 1px solid #f0f0f0; display: flex; justify-content: flex-end; gap: 10px; }
+    .popup-foot { padding: 14px 24px; border-top: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .popup-foot .hint { font-size: 12px; color: #86868b; }
     .btn-cancel { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 9px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .btn-apply { background: #007aff; color: #fff; border: none; border-radius: 9px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .toast { position: fixed; bottom: 24px; right: 24px; background: #1f6f23; color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.2); opacity: 0; transform: translateY(20px); transition: all 0.25s; z-index: 200; }
@@ -112,9 +114,7 @@
         <div class="ms-trigger" id="ms-trigger"><span id="ms-label">Choisir des biens</span><span>&#9662;</span></div>
         <div class="ms-panel" id="ms-panel"></div>
       </div>
-      <select class="period-select" id="period-select">
-        <option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">1 an</option>
-      </select>
+      <select class="period-select" id="period-select"><option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">1 an</option></select>
     </div>
     <div class="header-actions">
       <button class="icon-btn" id="btn-undo" title="Annuler" disabled>&#8634;</button>
@@ -124,12 +124,7 @@
 
   <main id="main">
     <div class="month-pills" id="month-pills"></div>
-    <div class="scroll-shell">
-      <div class="scroll-area" id="scroll-area">
-        <div id="month-band-wrap"></div>
-        <div id="blocks"></div>
-      </div>
-    </div>
+    <div class="scroll-shell"><div class="scroll-area" id="scroll-area"><div id="month-band-wrap"></div><div id="blocks"></div></div></div>
   </main>
 
   <div class="float-bar" id="float-bar">
@@ -142,19 +137,15 @@
     <div class="popup-lg">
       <div class="popup-head">
         <h3 id="popup-title">Configurer les dates</h3>
-        <div class="range-row">
-          <span>Du</span><input type="date" id="range-start" />
-          <span>au</span><input type="date" id="range-end" />
-        </div>
-        <div class="dow-row" id="dow-row"></div>
+        <div class="range-row"><span>Du</span><input type="date" id="range-start" /><span>au</span><input type="date" id="range-end" /></div>
       </div>
       <div class="popup-body">
         <div class="popup-menu" id="popup-menu"></div>
         <div class="popup-content" id="popup-content"></div>
       </div>
       <div class="popup-foot">
-        <button class="btn-cancel" id="btn-cancel">Annuler</button>
-        <button class="btn-apply" id="btn-apply">Appliquer</button>
+        <span class="hint">Chaque rubrique a ses propres jours. Enregistrer applique tout.</span>
+        <div style="display:flex;gap:10px"><button class="btn-cancel" id="btn-cancel">Annuler</button><button class="btn-apply" id="btn-apply">Enregistrer</button></div>
       </div>
     </div>
   </div>
@@ -166,127 +157,75 @@
     const user = await getUser()
     if (!user) { window.location.href = '/pages/login.html' }
 
-    // ===== Definition des parametres (menu popup) =====
-    // key, label, type, description
+    // Parametres du popup (chacun avec ses propres jours, sauf perPerson)
     const PARAMS = [
-      { key: 'rate',           label: 'Prix de base',     type: 'price',  desc: 'Tarif par nuit pour le nombre de voyageurs inclus.' },
-      { key: 'maxRate',        label: 'Tarif max',        type: 'price',  desc: 'Tarif a pleine capacite. Le supplement par personne se deduit de l\u0027ecart avec le prix de base.' },
-      { key: 'avail',          label: 'Disponibilite',    type: 'openclosed', optOpen: 'Ouvert', optClosed: 'Ferme', desc: 'Ouvre ou ferme la date a la reservation.' },
-      { key: 'minStayArr',     label: 'Min nuits (arrivee)', type: 'num', desc: 'Nombre minimum de nuits si le voyageur arrive ce jour-la.' },
-      { key: 'minStayThrough', label: 'Min nuits (sejour)',  type: 'num', desc: 'Nombre minimum de nuits pour tout sejour couvrant cette date.' },
-      { key: 'maxStay',        label: 'Max nuits',        type: 'num',    desc: 'Nombre maximum de nuits pour un sejour incluant cette date.' },
-      { key: 'cta',            label: 'Arrivee',          type: 'openclosed', optOpen: 'Autorisee', optClosed: 'Bloquee', desc: 'Autorise ou bloque les arrivees ce jour-la.' },
-      { key: 'ctd',            label: 'Depart',           type: 'openclosed', optOpen: 'Autorise', optClosed: 'Bloque', desc: 'Autorise ou bloque les departs ce jour-la.' },
-      { key: 'stopSell',       label: 'Stop vente',       type: 'openclosed', optOpen: 'En vente', optClosed: 'Stoppe', desc: 'Arrete la vente sur tous les canaux sans modifier la disponibilite reelle.' }
+      { key:'rate',           label:'Prix de base',   type:'price', desc:'Tarif par nuit pour le nombre de voyageurs inclus.' },
+      { key:'perPerson',      label:'Prix par personne', type:'perperson', desc:'Configuration globale du bien. Le prix de base couvre un nombre de voyageurs inclus ; au-dela, un supplement par personne s\u0027applique.' },
+      { key:'avail',          label:'Disponibilite',  type:'openclosed', optOpen:'Ouvert', optClosed:'Ferme', desc:'Ouvre ou ferme la date a la reservation.' },
+      { key:'minStayArr',     label:'Min nuits (arrivee)', type:'num', desc:'Nombre minimum de nuits si le voyageur arrive ce jour-la.' },
+      { key:'minStayThrough', label:'Min nuits (sejour)',  type:'num', desc:'Nombre minimum de nuits pour tout sejour couvrant cette date.' },
+      { key:'maxStay',        label:'Max nuits',      type:'num', desc:'Nombre maximum de nuits pour un sejour incluant cette date.' },
+      { key:'cta',            label:'Arrivee',        type:'openclosed', optOpen:'Autorisee', optClosed:'Bloquee', desc:'Autorise ou bloque les arrivees ce jour-la.' },
+      { key:'ctd',            label:'Depart',         type:'openclosed', optOpen:'Autorise', optClosed:'Bloque', desc:'Autorise ou bloque les departs ce jour-la.' },
+      { key:'stopSell',       label:'Stop vente',     type:'openclosed', optOpen:'En vente', optClosed:'Stoppe', desc:'Arrete la vente sur tous les canaux sans modifier la disponibilite reelle.' }
     ]
-    // Etat par defaut d'une date
-    function defaultDay(rate, maxRate, minStayArr) {
-      return { rate, maxRate, avail: 'open', minStayArr: minStayArr||0, minStayThrough: 0, maxStay: 0, cta: 'open', ctd: 'open', stopSell: 'open' }
-    }
-    // Quels params sont "configures" (au moins une date differente du defaut) -> pour vue complete
-    const CONFIG_DEFAULTS = { avail:'open', minStayArr:0, minStayThrough:0, maxStay:0, cta:'open', ctd:'open', stopSell:'open' }
-    // Lignes epinglees en vue simplifiee (toujours rate; le reste selon cases)
-    let pinnedSimple = new Set(['rate'])  // rate toujours; resa gere a part
+    // params affichables en lignes calendrier (perPerson -> ligne 'Prix max' calculee)
+    const ROW_DEFAULTS = { avail:'open', minStayArr:0, minStayThrough:0, maxStay:0, cta:'open', ctd:'open', stopSell:'open' }
+    let pinnedSimple = new Set()  // rate + maxRate geres a part (toujours visibles selon vue)
 
-    let MONTHS = 1, days = []
-    const dayNames = ['DIM','LUN','MAR','MER','JEU','VEN','SAM']
-    const dowOrder = [1,2,3,4,5,6,0] // Lun..Dim pour les chips
-    const dowLabels = { 1:'Lun',2:'Mar',3:'Mer',4:'Jeu',5:'Ven',6:'Sam',0:'Dim' }
-    const monthShort = ['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
-    const monthFull = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
-    const fmtShort = (d) => d.getDate() + ' ' + monthShort[d.getMonth()]
-    const toISO = (d) => d.toISOString().slice(0,10)
-    const CELL_W = 34
+    let MONTHS=1, days=[]
+    const dayNames=['DIM','LUN','MAR','MER','JEU','VEN','SAM']
+    const dowOrder=[1,2,3,4,5,6,0]
+    const dowLabels={1:'Lun',2:'Mar',3:'Mer',4:'Jeu',5:'Ven',6:'Sam',0:'Dim'}
+    const monthShort=['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
+    const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
+    const fmtShort=(d)=>d.getDate()+' '+monthShort[d.getMonth()]
+    const toISO=(d)=>d.toISOString().slice(0,10)
+    const CELL_W=34
 
-    function buildDays() {
-      const today = new Date(); today.setHours(0,0,0,0)
-      const total = Math.round(MONTHS*30); days = []
-      for (let i=0;i<total;i++){ const d=new Date(today); d.setDate(today.getDate()+i); days.push(d) }
-    }
-    function isMonthStart(i){ return i===0 || days[i].getDate()===1 }
+    function buildDays(){ const t=new Date(); t.setHours(0,0,0,0); const n=Math.round(MONTHS*30); days=[]; for(let i=0;i<n;i++){const d=new Date(t);d.setDate(t.getDate()+i);days.push(d)} }
+    function isMonthStart(i){ return i===0||days[i].getDate()===1 }
     function isToday(i){ return i===0 }
 
-    const BIENS = [
+    const BIENS=[
       { id:'bellevue', name:'Bellevue', capacity:8, base:80, we:100, sun:90, included:4, extraFee:15, resa:[{start:8,span:4,name:'Jean Dupont',color:'red'},{start:17,span:3,name:'Marie M.',color:'blue'}] },
       { id:'mauchevue', name:'Mauche vue', capacity:4, base:65, we:80, sun:70, included:2, extraFee:12, resa:[{start:3,span:5,name:'Famille Leroy',color:'green'},{start:22,span:2,name:'P. Costa',color:'blue'}] },
       { id:'test', name:'Test', capacity:7, base:90, we:120, sun:100, included:2, extraFee:10, resa:[{start:12,span:6,name:'Sophie B.',color:'red'}] }
     ]
+    // config par personne par bien (modifiable popup)
+    const ppConfig={}
+    BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
 
-    const states = {}
-    function initState(bien) {
-      const extra = Math.max(0, bien.capacity-bien.included)
-      states[bien.id] = days.map(d => {
-        const dow=d.getDay(); let rate=bien.base
-        if(dow===5||dow===6) rate=bien.we; else if(dow===0) rate=bien.sun
-        let ms=0; if(dow===5||dow===6) ms=3; else if(dow===1) ms=2
-        return defaultDay(rate, rate+extra*bien.extraFee, ms)
-      })
-    }
+    const states={}
+    function initState(b){ states[b.id]=days.map(d=>{ const dow=d.getDay(); let rate=b.base; if(dow===5||dow===6)rate=b.we; else if(dow===0)rate=b.sun; let ms=0; if(dow===5||dow===6)ms=3; else if(dow===1)ms=2; return {rate, avail:'open', minStayArr:ms, minStayThrough:0, maxStay:0, cta:'open', ctd:'open', stopSell:'open'} }) }
 
-    // Quels params ont au moins une config (sur tous les biens affiches)
-    function configuredParams() {
-      const setp = new Set()
-      selectedBiens.forEach(bid => {
-        const st = states[bid]; if(!st) return
-        st.forEach(s => {
-          for (const k in CONFIG_DEFAULTS) { if (s[k] !== CONFIG_DEFAULTS[k]) setp.add(k) }
-          // minStayArr par defaut peut etre >0 a l'init (weekends), on le compte comme configure si >0
-        })
-      })
-      return setp
-    }
+    // Prix max calcule = rate + (capacite - included) * extraFee
+    function maxRateOf(bien, dayRate){ const cfg=ppConfig[bien.id]; const extra=Math.max(0, bien.capacity-cfg.included); return dayRate + extra*cfg.extraFee }
 
-    // Lignes a afficher selon vue
-    function visibleParams() {
-      // toujours: resa + rate. maxRate et autres selon regles
-      const result = ['rate']
-      const configured = configuredParams()
-      PARAMS.forEach(p => {
-        if (p.key === 'rate') return
-        const show = showComplete ? (configured.has(p.key) || pinnedSimple.has(p.key)) : pinnedSimple.has(p.key)
-        if (show) result.push(p.key)
-      })
-      return result
-    }
+    function configuredRowParams(){ const setp=new Set(); selectedBiens.forEach(bid=>{const st=states[bid]; if(!st)return; st.forEach(s=>{for(const k in ROW_DEFAULTS){if(s[k]!==ROW_DEFAULTS[k])setp.add(k)}})}); return setp }
 
-    let sel = { bienId:null, idx:new Set(), row:'rate' }
-    const undoStack = []
-    function pushUndo(bid){ undoStack.push({bid, snap:JSON.stringify(states[bid])}); document.getElementById('btn-undo').disabled=false }
-    function doUndo(){ if(!undoStack.length) return; const {bid,snap}=undoStack.pop(); states[bid]=JSON.parse(snap); if(!undoStack.length) document.getElementById('btn-undo').disabled=true; renderBlocks(); showToast('Action annulee') }
+    let sel={bienId:null, idx:new Set(), row:'rate'}
+    const undoStack=[]
+    function pushUndo(bid){ undoStack.push({bid,snap:JSON.stringify(states[bid]),pp:JSON.stringify(ppConfig[bid])}); document.getElementById('btn-undo').disabled=false }
+    function doUndo(){ if(!undoStack.length)return; const u=undoStack.pop(); states[u.bid]=JSON.parse(u.snap); ppConfig[u.bid]=JSON.parse(u.pp); if(!undoStack.length)document.getElementById('btn-undo').disabled=true; renderBlocks(); showToast('Action annulee') }
 
-    let selectedBiens = [BIENS[0].id]
-    function renderMultiSelect(){
-      const panel=document.getElementById('ms-panel'); panel.innerHTML=''
-      BIENS.forEach(b=>{
-        const opt=document.createElement('label'); opt.className='ms-option'
-        opt.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>'
-        opt.querySelector('input').addEventListener('change',e=>{ if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)} updateMsLabel(); renderBlocks() })
-        panel.appendChild(opt)
-      })
-      updateMsLabel()
-    }
+    let selectedBiens=[BIENS[0].id]
+    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();renderBlocks()});p.appendChild(o)});updateMsLabel() }
     function updateMsLabel(){ const l=document.getElementById('ms-label'); if(!selectedBiens.length)l.textContent='Choisir des biens'; else if(selectedBiens.length===1){const b=BIENS.find(x=>x.id===selectedBiens[0]);l.textContent=b?b.name:'1 bien'}else l.textContent=selectedBiens.length+' biens' }
     document.getElementById('ms-trigger').addEventListener('click',()=>document.getElementById('multi-select').classList.toggle('open'))
-    document.addEventListener('click',e=>{const ms=document.getElementById('multi-select'); if(!ms.contains(e.target))ms.classList.remove('open')})
+    document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
 
-    function renderMonthPills(){
-      const wrap=document.getElementById('month-pills'); wrap.innerHTML=''; const seen=new Set()
-      days.forEach((d,idx)=>{ const k=d.getFullYear()+'-'+d.getMonth(); if(!seen.has(k)){seen.add(k); const p=document.createElement('button'); p.className='month-pill'; p.textContent=monthFull[d.getMonth()]; p.addEventListener('click',()=>{document.getElementById('scroll-area').scrollTo({left:idx*CELL_W,behavior:'smooth'}); wrap.querySelectorAll('.month-pill').forEach(x=>x.classList.remove('active')); p.classList.add('active')}); wrap.appendChild(p)} })
-      const f=wrap.querySelector('.month-pill'); if(f)f.classList.add('active')
-    }
-    function renderMonthBand(){
-      const wrap=document.getElementById('month-band-wrap'); let html='<table class="month-band"><tr><td class="corner"></td>'; let i=0
-      while(i<days.length){ const m=days[i].getMonth(); let span=0; while(i+span<days.length&&days[i+span].getMonth()===m)span++; html+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>'; i+=span }
-      html+='</tr></table>'; wrap.innerHTML=html
-    }
+    function renderMonthPills(){ const w=document.getElementById('month-pills');w.innerHTML='';const seen=new Set();days.forEach((d,idx)=>{const k=d.getFullYear()+'-'+d.getMonth();if(!seen.has(k)){seen.add(k);const p=document.createElement('button');p.className='month-pill';p.textContent=monthFull[d.getMonth()];p.addEventListener('click',()=>{document.getElementById('scroll-area').scrollTo({left:idx*CELL_W,behavior:'smooth'});w.querySelectorAll('.month-pill').forEach(x=>x.classList.remove('active'));p.classList.add('active')});w.appendChild(p)}});const f=w.querySelector('.month-pill');if(f)f.classList.add('active') }
+    function renderMonthBand(){ const w=document.getElementById('month-band-wrap');let h='<table class="month-band"><tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr></table>';w.innerHTML=h }
 
     const blocksEl=document.getElementById('blocks')
     let showComplete=false
+    const paramLabel=(k)=>(PARAMS.find(p=>p.key===k)||{}).label||k
 
-    function cellDisplay(param, s) {
+    function cellDisplay(param,s,bien){
       switch(param){
         case 'rate': return s.rate+'&euro;'
-        case 'maxRate': return s.maxRate+'&euro;'
+        case 'maxRate': return maxRateOf(bien,s.rate)+'&euro;'
         case 'avail': return s.avail==='closed'?'<span style="color:#d52a44">Ferme</span>':'<span style="color:#d2d2d7">.</span>'
         case 'minStayArr': return s.minStayArr>0?'<span style="color:#6e6e73">&#127769;'+s.minStayArr+'</span>':'<span style="color:#d2d2d7">.</span>'
         case 'minStayThrough': return s.minStayThrough>0?'<span style="color:#6e6e73">'+s.minStayThrough+'</span>':'<span style="color:#d2d2d7">.</span>'
@@ -294,41 +233,42 @@
         case 'cta': return s.cta==='closed'?'<span style="color:#d52a44;font-size:13px">&#10060;</span>':'<span style="color:#d2d2d7">.</span>'
         case 'ctd': return s.ctd==='closed'?'<span style="color:#ff9500;font-size:13px">&#9938;</span>':'<span style="color:#d2d2d7">.</span>'
         case 'stopSell': return s.stopSell==='closed'?'<span style="color:#d52a44">Stop</span>':'<span style="color:#d2d2d7">.</span>'
-      }
-      return ''
+      } return ''
     }
-    const paramLabel = (k) => (PARAMS.find(p=>p.key===k)||{}).label || k
 
-    function renderBlocks(){
-      blocksEl.innerHTML=''
-      selectedBiens.forEach(bid=>{ const b=BIENS.find(x=>x.id===bid); if(!b)return; if(!states[bid]||states[bid].length!==days.length)initState(b); blocksEl.appendChild(renderBienBlock(b)) })
-      attachEvents()
+    // Lignes visibles. rate toujours. maxRate visible si pp configure(extra>0) OU complete. autres selon regle.
+    function visibleRows(bien){
+      const rows=['rate']
+      const configured=configuredRowParams()
+      // maxRate (prix max) : en complete toujours ; en simple si epingle
+      if(showComplete || pinnedSimple.has('maxRate')) rows.push('maxRate')
+      PARAMS.forEach(p=>{
+        if(p.key==='rate'||p.key==='perPerson')return
+        const show = showComplete ? (configured.has(p.key)||pinnedSimple.has(p.key)) : pinnedSimple.has(p.key)
+        if(show)rows.push(p.key)
+      })
+      return rows
     }
+
+    function renderBlocks(){ blocksEl.innerHTML=''; selectedBiens.forEach(bid=>{const b=BIENS.find(x=>x.id===bid);if(!b)return;if(!states[bid]||states[bid].length!==days.length)initState(b);blocksEl.appendChild(renderBienBlock(b))}); attachEvents() }
 
     function renderBienBlock(bien){
       const st=states[bien.id]
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
       let html='<div class="bien-title">'+bien.name+' <span class="cap">capacite '+bien.capacity+'</span></div>'
       html+='<table class="cal"><thead><tr><th class="row-label"></th>'
-      days.forEach((d,idx)=>{ const we=d.getDay()===0||d.getDay()===6; const ms=isMonthStart(idx)?' month-start':''; html+='<th class="'+(we?'weekend':'')+(isToday(idx)?' today':'')+ms+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>' })
+      days.forEach((d,idx)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(idx)?' month-start':'';html+='<th class="'+(we?'weekend':'')+(isToday(idx)?' today':'')+ms+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
       html+='</tr></thead><tbody>'
-      // Reservations (toujours)
+      // Reservations
       html+='<tr><td class="row-label">Reservations</td>'
-      days.forEach((d,i)=>{ const we=d.getDay()===0||d.getDay()===6; const ms=isMonthStart(i)?' month-start':''; html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">'; bien.resa.forEach(bk=>{if(i===bk.start){const w=bk.span*100; html+='<div class="resa-bar '+bk.color+'" style="left:50%;width:calc('+w+'% - 1px);z-index:2">'+bk.name+'</div>'}}); html+='</td>' })
+      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';bien.resa.forEach(bk=>{if(i===bk.start){const w=bk.span*100;html+='<div class="resa-bar '+bk.color+'" style="left:50%;width:calc('+w+'% - 1px);z-index:2">'+bk.name+'</div>'}});html+='</td>'})
       html+='</tr>'
-      // Lignes parametres visibles
-      const vis = visibleParams()
-      vis.forEach(pk=>{
-        const editable = (pk==='rate'||pk==='maxRate')
-        html+='<tr><td class="row-label">'+paramLabel(pk)+'</td>'
-        st.forEach((s,i)=>{
-          const we=days[i].getDay()===0||days[i].getDay()===6; const ms=isMonthStart(i)?' month-start':''
-          const c=[]; if(editable)c.push('edit-cell'); if(pk==='rate')c.push('rate-cell'); if(pk==='maxRate')c.push('maxrate-cell')
-          if(we)c.push('weekend'); if(isToday(i))c.push('today'); if(ms)c.push('month-start')
-          if(editable && sel.bienId===bien.id && sel.row===pk && sel.idx.has(i)) c.push('selected')
-          const dataAttr = editable ? ' data-idx="'+i+'" data-row="'+pk+'"' : ''
-          html+='<td class="'+c.join(' ')+'"'+dataAttr+'>'+cellDisplay(pk,s)+'</td>'
-        })
+      const rows=visibleRows(bien)
+      rows.forEach(pk=>{
+        const editable=(pk==='rate') // maxRate = calcule, non editable case par case
+        const lbl = pk==='maxRate' ? 'Prix max' : paramLabel(pk)
+        html+='<tr><td class="row-label">'+lbl+'</td>'
+        st.forEach((s,i)=>{const we=days[i].getDay()===0||days[i].getDay()===6;const ms=isMonthStart(i)?' month-start':'';const c=[];if(editable)c.push('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');if(we)c.push('weekend');if(isToday(i))c.push('today');if(ms)c.push('month-start');if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
         html+='</tr>'
       })
       html+='</tbody></table>'
@@ -336,132 +276,91 @@
       return section
     }
 
-    // Selection glisser (uniquement lignes editables rate/maxRate)
     let isDragging=false, dragStart=null, dragBien=null, dragRow=null
-    function attachEvents(){
-      blocksEl.querySelectorAll('.bien-section').forEach(section=>{
-        const bid=section.dataset.bienId
-        section.querySelectorAll('.edit-cell').forEach(cell=>{
-          const idx=parseInt(cell.dataset.idx,10); const row=cell.dataset.row
-          cell.addEventListener('mousedown',e=>{e.preventDefault(); isDragging=true; dragStart=idx; dragBien=bid; dragRow=row; sel={bienId:bid,idx:new Set([idx]),row}; updateSelectionUI()})
-          cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return; const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx); sel.idx=new Set(); for(let i=lo;i<=hi;i++)sel.idx.add(i); updateSelectionUI()})
-        })
-      })
-    }
+    function attachEvents(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx);sel.idx=new Set();for(let i=lo;i<=hi;i++)sel.idx.add(i);updateSelectionUI()})})}) }
     document.addEventListener('mouseup',()=>{ if(!isDragging)return; isDragging=false; if(sel.idx.size===0)return; showFloatBar() })
+    document.addEventListener('keydown',e=>{ if(!sel.bienId||sel.idx.size===0)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return; if(document.getElementById('overlay').classList.contains('visible'))return; const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; if(!cell)return; if(e.key==='Enter'||e.key==='F2'){e.preventDefault();startInlineEdit(cell,f,'')}else if(/^[0-9]$/.test(e.key)){e.preventDefault();startInlineEdit(cell,f,e.key)} })
+    function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected');else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
 
-    // Edition facon Excel : taper un chiffre (ou Entree/F2) sur une case selectionnee lance l'edition inline
-    document.addEventListener('keydown',(e)=>{
-      if(!sel.bienId || sel.idx.size===0) return
-      const tag=(e.target.tagName||'').toLowerCase()
-      if(tag==='input'||tag==='select'||tag==='textarea') return
-      if(overlay.classList.contains('visible')) return
-      const f=Math.min(...sel.idx)
-      const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]')
-      const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null
-      if(!cell) return
-      if(e.key==='Enter' || e.key==='F2'){ e.preventDefault(); startInlineEdit(cell,f,'') }
-      else if(/^[0-9]$/.test(e.key)){ e.preventDefault(); startInlineEdit(cell,f,e.key) }
-    })
-    function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId; section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10); const row=cell.dataset.row; if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected'); else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
-
-    function startInlineEdit(cell,idx,initial){
-      if(!cell||!sel.bienId)return; const st=states[sel.bienId]; const field=sel.row; const current=st[idx][field]
-      const startVal = (initial!==undefined && initial!=='') ? initial : current
-      cell.innerHTML='<input class="rate-input" type="number" value="'+startVal+'" />'; const input=cell.querySelector('input'); input.focus()
-      if(initial!==undefined && initial!=='') { const len=input.value.length; input.setSelectionRange(len,len) } else { input.select() }
-      let done=false
-      const commit=(apply)=>{ if(done)return; done=true
-        if(apply){ const v=parseFloat(input.value); if(!isNaN(v)&&v>0){ pushUndo(sel.bienId); const targets=sel.idx.size>0?[...sel.idx]:[idx]; targets.forEach(i=>{ st[i][field]=v; st[i].modified=true; if(field==='rate'&&st[i].maxRate<v)st[i].maxRate=v; if(field==='maxRate'&&v<st[i].rate)st[i].rate=v }); const n=targets.length; sel={bienId:null,idx:new Set(),row:'rate'}; hideFloatBar(); renderBlocks(); showToast(n>1?'Applique a '+n+' jours':'Enregistre'); return } }
-        renderBlocks()
-      }
-      input.addEventListener('blur',()=>commit(true))
-      input.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();commit(true)} else if(e.key==='Escape'){commit(false)} })
-    }
+    function startInlineEdit(cell,idx,initial){ if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="number" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){const l=input.value.length;input.setSelectionRange(l,l)}else input.select();let done=false;const commit=(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Applique a '+n+' jours':'Enregistre');return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
 
     const floatBar=document.getElementById('float-bar')
-    function showFloatBar(){ if(sel.idx.size===0){hideFloatBar();return} document.getElementById('sel-count').textContent=sel.idx.size; floatBar.classList.add('visible') }
+    function showFloatBar(){ if(sel.idx.size===0){hideFloatBar();return}document.getElementById('sel-count').textContent=sel.idx.size;floatBar.classList.add('visible') }
     function hideFloatBar(){ floatBar.classList.remove('visible') }
-    document.getElementById('btn-clear-sel').addEventListener('click',()=>{ sel={bienId:null,idx:new Set(),row:'rate'}; updateSelectionUI(); hideFloatBar() })
+    document.getElementById('btn-clear-sel').addEventListener('click',()=>{sel={bienId:null,idx:new Set(),row:'rate'};updateSelectionUI();hideFloatBar()})
 
-    // ===== POPUP A MENU =====
+    // ===== POPUP =====
     const overlay=document.getElementById('overlay')
-    let activeParam='rate'
-    let dowChecked={1:true,2:true,3:true,4:true,5:true,6:true,0:true}
-    let popupBienId=null, popupIdxs=[]
-    // valeurs temporaires saisies par param avant Appliquer
-    let pendingValues={}
-
-    function renderDowChips(){
-      const row=document.getElementById('dow-row'); row.innerHTML=''
-      dowOrder.forEach(dow=>{ const chip=document.createElement('label'); chip.className='dow-chip'; chip.innerHTML='<input type="checkbox" '+(dowChecked[dow]?'checked':'')+'/> '+dowLabels[dow]; chip.querySelector('input').addEventListener('change',e=>{dowChecked[dow]=e.target.checked}); row.appendChild(chip) })
-    }
+    let activeParam='rate', popupBienId=null, popupIdxs=[]
+    // pending par param : price -> {mode,unit,value,dow}, num -> {value,dow}, openclosed -> {value,dow}, perPerson -> {included,extraFee}
+    let pending={}
 
     function openPopup(startParam){
-      if(!sel.bienId || sel.idx.size===0){ // si pas de selection, on prend le 1er bien et tout le mois ? on exige une selection
-        return
-      }
+      if(!sel.bienId||sel.idx.size===0)return
       popupBienId=sel.bienId; popupIdxs=[...sel.idx].sort((a,b)=>a-b)
-      activeParam=startParam||'rate'
-      dowChecked={1:true,2:true,3:true,4:true,5:true,6:true,0:true}
-      pendingValues={}
-      // range
+      activeParam=(startParam==='maxRate')?'perPerson':(startParam||'rate')
+      pending={}
       document.getElementById('range-start').value=toISO(days[popupIdxs[0]])
       document.getElementById('range-end').value=toISO(days[popupIdxs[popupIdxs.length-1]])
-      renderDowChips(); renderPopupMenu(); renderPopupContent()
-      overlay.classList.add('visible')
+      renderPopupMenu(); renderPopupContent(); overlay.classList.add('visible')
     }
+    function defaultDow(){ return {1:true,2:true,3:true,4:true,5:true,6:true,0:true} }
 
     function renderPopupMenu(){
       const menu=document.getElementById('popup-menu'); menu.innerHTML=''
-      const configured=configuredParams()
-      PARAMS.forEach(p=>{
-        const mi=document.createElement('div'); mi.className='mi'+(p.key===activeParam?' active':'')+(configured.has(p.key)?' config-dot':'')
-        mi.textContent=p.label; mi.addEventListener('click',()=>{activeParam=p.key; renderPopupMenu(); renderPopupContent()}); menu.appendChild(mi)
-      })
+      const configured=configuredRowParams()
+      PARAMS.forEach(p=>{ const mi=document.createElement('div'); const isConf=(p.key!=='rate'&&p.key!=='perPerson'&&configured.has(p.key)); mi.className='mi'+(p.key===activeParam?' active':'')+(isConf?' config-dot':''); mi.textContent=p.label; mi.addEventListener('click',()=>{activeParam=p.key;renderPopupMenu();renderPopupContent()}); menu.appendChild(mi) })
       const sep=document.createElement('div'); sep.className='mi-sep'; menu.appendChild(sep)
-      const af=document.createElement('div'); af.className='mi'+(activeParam==='__display'?' active':''); af.textContent='Affichage'; af.addEventListener('click',()=>{activeParam='__display'; renderPopupMenu(); renderPopupContent()}); menu.appendChild(af)
+      const af=document.createElement('div'); af.className='mi'+(activeParam==='__display'?' active':''); af.textContent='Affichage'; af.addEventListener('click',()=>{activeParam='__display';renderPopupMenu();renderPopupContent()}); menu.appendChild(af)
     }
+
+    function dowChipsHtml(dow){ let h='<div class="dow-row">'; dowOrder.forEach(d=>{h+='<label class="dow-chip"><input type="checkbox" data-dow="'+d+'" '+(dow[d]?'checked':'')+'/> '+dowLabels[d]+'</label>'}); h+='</div>'; return h }
 
     function renderPopupContent(){
       const c=document.getElementById('popup-content')
       if(activeParam==='__display'){
-        let h='<h4>Affichage</h4><div class="desc">Choisissez les lignes a afficher en vue simplifiee. Le tarif et les reservations sont toujours visibles.</div><div class="display-list">'
-        PARAMS.forEach(p=>{ if(p.key==='rate')return; h+='<label><input type="checkbox" data-pin="'+p.key+'" '+(pinnedSimple.has(p.key)?'checked':'')+'/> '+p.label+'</label>' })
+        let h='<h4>Affichage</h4><div class="desc">Lignes a afficher en vue simplifiee. Reservations et Prix de base sont toujours visibles.</div><div class="display-list">'
+        h+='<label><input type="checkbox" data-pin="maxRate" '+(pinnedSimple.has('maxRate')?'checked':'')+'/> Prix max</label>'
+        PARAMS.forEach(p=>{if(p.key==='rate'||p.key==='perPerson')return;h+='<label><input type="checkbox" data-pin="'+p.key+'" '+(pinnedSimple.has(p.key)?'checked':'')+'/> '+p.label+'</label>'})
         h+='</div>'; c.innerHTML=h
-        c.querySelectorAll('input[data-pin]').forEach(inp=>inp.addEventListener('change',e=>{ const k=e.target.dataset.pin; if(e.target.checked)pinnedSimple.add(k); else pinnedSimple.delete(k) }))
+        c.querySelectorAll('input[data-pin]').forEach(inp=>inp.addEventListener('change',e=>{const k=e.target.dataset.pin;if(e.target.checked)pinnedSimple.add(k);else pinnedSimple.delete(k)}))
         return
       }
       const p=PARAMS.find(x=>x.key===activeParam)
       let h='<h4>'+p.label+'</h4><div class="desc">'+p.desc+'</div>'
-      if(p.type==='price'){
-        h+='<div class="field"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
-        h+='<div class="seg" id="seg-mode"><button data-mode="set" class="active">Definir</button><button data-mode="inc">+</button><button data-mode="dec">-</button></div>'
-        h+='<div class="seg" id="seg-unit"><button data-unit="eur" class="active">EUR</button><button data-unit="pct">%</button></div>'
-        h+='<input type="number" id="pv-value" placeholder="Valeur" style="flex:1;min-width:90px" value="'+(pendingValues[p.key]!=null?pendingValues[p.key].value:'')+'" /></div>'
-        h+='<div class="preview-box" id="pv-preview">Saisissez une valeur</div></div>'
+      if(p.type==='perperson'){
+        const cfg=ppConfig[popupBienId]; const bien=BIENS.find(b=>b.id===popupBienId)
+        if(!pending.perPerson)pending.perPerson={included:cfg.included,extraFee:cfg.extraFee}
+        h+='<div class="field"><label>Voyageurs inclus dans le prix de base</label><input type="number" id="pp-inc" min="1" max="'+bien.capacity+'" value="'+pending.perPerson.included+'" /></div>'
+        h+='<div class="field"><label>Supplement par voyageur supplementaire (EUR)</label><input type="number" id="pp-extra" min="0" value="'+pending.perPerson.extraFee+'" /></div>'
+        h+='<div class="preview-box" id="pp-preview"></div>'
         c.innerHTML=h
-        if(!pendingValues[p.key]) pendingValues[p.key]={mode:'set',unit:'eur',value:''}
-        const pv=pendingValues[p.key]
-        c.querySelectorAll('#seg-mode button').forEach(b=>b.addEventListener('click',()=>{pv.mode=b.dataset.mode;c.querySelectorAll('#seg-mode button').forEach(x=>x.classList.toggle('active',x===b));updatePvPreview()}))
-        c.querySelectorAll('#seg-unit button').forEach(b=>b.addEventListener('click',()=>{pv.unit=b.dataset.unit;c.querySelectorAll('#seg-unit button').forEach(x=>x.classList.toggle('active',x===b));updatePvPreview()}))
-        c.querySelector('#seg-mode').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.mode===pv.mode))
-        c.querySelector('#seg-unit').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.unit===pv.unit))
-        const inp=c.querySelector('#pv-value'); inp.addEventListener('input',()=>{pv.value=inp.value;updatePvPreview()}); updatePvPreview()
-      } else if(p.type==='num'){
-        h+='<div class="field"><label>Nombre de nuits (0 = aucune limite)</label><input type="number" id="pv-num" min="0" value="'+(pendingValues[p.key]!=null?pendingValues[p.key]:'')+'" /></div>'
-        c.innerHTML=h
-        c.querySelector('#pv-num').addEventListener('input',e=>{pendingValues[p.key]=e.target.value})
-      } else if(p.type==='openclosed'){
-        const cur=pendingValues[p.key]||'keep'
-        h+='<div class="field"><select id="pv-oc"><option value="keep"'+(cur==='keep'?' selected':'')+'>Ne pas changer</option><option value="open"'+(cur==='open'?' selected':'')+'>'+p.optOpen+'</option><option value="closed"'+(cur==='closed'?' selected':'')+'>'+p.optClosed+'</option></select></div>'
-        c.innerHTML=h
-        c.querySelector('#pv-oc').addEventListener('change',e=>{pendingValues[p.key]=e.target.value})
+        const upd=()=>{const inc=parseInt(document.getElementById('pp-inc').value,10)||bien.capacity;const ex=parseFloat(document.getElementById('pp-extra').value)||0;pending.perPerson={included:inc,extraFee:ex};let l='Sur la base de '+bien.base+' EUR :<br>Jusqu\u0027a '+inc+' pers. : '+bien.base+' EUR<br>';for(let pr=inc+1;pr<=bien.capacity;pr++){l+=pr+'e pers. : '+(bien.base+(pr-inc)*ex)+' EUR<br>'}if(ex===0)l+='(aucun supplement)';document.getElementById('pp-preview').innerHTML=l}
+        document.getElementById('pp-inc').addEventListener('input',upd);document.getElementById('pp-extra').addEventListener('input',upd);upd()
+        return
       }
+      if(!pending[p.key]){ if(p.type==='price')pending[p.key]={mode:'set',unit:'eur',value:'',dow:defaultDow()};else pending[p.key]={value:(p.type==='openclosed'?'keep':''),dow:defaultDow()} }
+      const pv=pending[p.key]
+      h+=dowChipsHtml(pv.dow)
+      if(p.type==='price'){
+        h+='<div class="field"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div class="seg" id="seg-mode"><button data-mode="set">Definir</button><button data-mode="inc">+</button><button data-mode="dec">-</button></div><div class="seg" id="seg-unit"><button data-unit="eur">EUR</button><button data-unit="pct">%</button></div><input type="number" id="pv-value" placeholder="Valeur" style="flex:1;min-width:90px" value="'+pv.value+'" /></div><div class="preview-box" id="pv-preview">Saisissez une valeur</div></div>'
+        c.innerHTML=h
+        c.querySelector('#seg-mode').querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.dataset.mode===pv.mode);b.addEventListener('click',()=>{pv.mode=b.dataset.mode;c.querySelector('#seg-mode').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));updatePvPreview()})})
+        c.querySelector('#seg-unit').querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.dataset.unit===pv.unit);b.addEventListener('click',()=>{pv.unit=b.dataset.unit;c.querySelector('#seg-unit').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));updatePvPreview()})})
+        const inp=c.querySelector('#pv-value');inp.addEventListener('input',()=>{pv.value=inp.value;updatePvPreview()})
+      } else if(p.type==='num'){
+        h+='<div class="field"><label>Nombre de nuits (0 = aucune limite)</label><input type="number" id="pv-num" min="0" value="'+pv.value+'" /></div>'; c.innerHTML=h
+        c.querySelector('#pv-num').addEventListener('input',e=>{pv.value=e.target.value})
+      } else if(p.type==='openclosed'){
+        h+='<div class="field"><select id="pv-oc"><option value="keep"'+(pv.value==='keep'?' selected':'')+'>Ne pas changer</option><option value="open"'+(pv.value==='open'?' selected':'')+'>'+p.optOpen+'</option><option value="closed"'+(pv.value==='closed'?' selected':'')+'>'+p.optClosed+'</option></select></div>'; c.innerHTML=h
+        c.querySelector('#pv-oc').addEventListener('change',e=>{pv.value=e.target.value})
+      }
+      // rebrancher les chips jours (apres innerHTML)
+      c.querySelectorAll('input[data-dow]').forEach(inp=>inp.addEventListener('change',e=>{pv.dow[parseInt(e.target.dataset.dow,10)]=e.target.checked}))
+      if(p.type==='price')updatePvPreview()
     }
-
-    function computeNewRate(current,mode,unit,val){ if(isNaN(val))return current; if(mode==='set')return unit==='pct'?Math.round(current*(1+val/100)):val; if(mode==='inc')return unit==='pct'?Math.round(current*(1+val/100)):current+val; return unit==='pct'?Math.round(current*(1-val/100)):current-val }
-    function updatePvPreview(){ const pv=pendingValues[activeParam]; const box=document.getElementById('pv-preview'); if(!box)return; const val=parseFloat(pv.value); if(isNaN(val)){box.textContent='Saisissez une valeur';return} const sample=states[popupBienId][popupIdxs[0]][activeParam]; const r=computeNewRate(sample,pv.mode,pv.unit,val); const verb=pv.mode==='set'?'defini a':(pv.mode==='inc'?'augmente a':'reduit a'); box.textContent='Exemple : '+sample+' EUR -> '+verb+' '+r+' EUR' }
+    function computeNewRate(cur,mode,unit,val){if(isNaN(val))return cur;if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val;if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val;return unit==='pct'?Math.round(cur*(1-val/100)):cur-val}
+    function updatePvPreview(){const pv=pending[activeParam];const box=document.getElementById('pv-preview');if(!box||!pv)return;const val=parseFloat(pv.value);if(isNaN(val)){box.textContent='Saisissez une valeur';return}const sample=states[popupBienId][popupIdxs[0]].rate;const r=computeNewRate(sample,pv.mode,pv.unit,val);const verb=pv.mode==='set'?'defini a':(pv.mode==='inc'?'augmente a':'reduit a');box.textContent='Exemple : '+sample+' EUR -> '+verb+' '+r+' EUR'}
 
     document.getElementById('btn-open-popup').addEventListener('click',()=>openPopup(sel.row||'rate'))
     document.getElementById('btn-cancel').addEventListener('click',()=>overlay.classList.remove('visible'))
@@ -469,27 +368,27 @@
 
     document.getElementById('btn-apply').addEventListener('click',()=>{
       if(!popupBienId){overlay.classList.remove('visible');return}
-      const st=states[popupBienId]
-      // recalcule la liste d'index selon range + jours coches
-      const sISO=document.getElementById('range-start').value, eISO=document.getElementById('range-end').value
-      let idxs=[]
-      days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&dowChecked[d.getDay()]) idxs.push(i) })
-      if(idxs.length===0){ showToast('Aucune date concernee'); return }
+      const st=states[popupBienId];const bien=BIENS.find(b=>b.id===popupBienId)
+      const sISO=document.getElementById('range-start').value,eISO=document.getElementById('range-end').value
       pushUndo(popupBienId)
-      idxs.forEach(i=>{
-        PARAMS.forEach(p=>{
-          const pv=pendingValues[p.key]
-          if(pv==null) return
-          if(p.type==='price'){ if(pv.value!==''&&!isNaN(parseFloat(pv.value))){ st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value)); st[i].modified=true; if(p.key==='rate'&&st[i].maxRate<st[i].rate)st[i].maxRate=st[i].rate; if(p.key==='maxRate'&&st[i].maxRate<st[i].rate)st[i].rate=st[i].maxRate } }
-          else if(p.type==='num'){ if(pv!==''){ st[i][p.key]=parseInt(pv,10)||0; st[i].modified=true } }
-          else if(p.type==='openclosed'){ if(pv!=='keep'){ st[i][p.key]=pv; st[i].modified=true } }
-        })
+      let touched=0
+      // perPerson (global, sans jours)
+      if(pending.perPerson){ ppConfig[popupBienId]={included:pending.perPerson.included,extraFee:pending.perPerson.extraFee}; touched++ }
+      // params avec jours
+      PARAMS.forEach(p=>{
+        if(p.type==='perperson')return
+        const pv=pending[p.key]; if(!pv)return
+        const hasVal = p.type==='price' ? (pv.value!==''&&!isNaN(parseFloat(pv.value))) : (p.type==='num' ? pv.value!=='' : pv.value!=='keep')
+        if(!hasVal)return
+        days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&pv.dow[d.getDay()]){ if(p.type==='price'){st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value));st[i].modified=true}else if(p.type==='num'){st[i][p.key]=parseInt(pv.value,10)||0;st[i].modified=true}else{st[i][p.key]=pv.value;st[i].modified=true} } })
+        touched++
       })
-      overlay.classList.remove('visible'); sel={bienId:null,idx:new Set(),row:'rate'}; hideFloatBar(); renderBlocks(); showToast('Applique a '+idxs.length+' date(s)')
+      overlay.classList.remove('visible');sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks()
+      showToast(touched>0?'Modifications enregistrees':'Aucune modification')
     })
 
     document.getElementById('btn-undo').addEventListener('click',doUndo)
-    const btnS=document.getElementById('btn-simple'), btnC=document.getElementById('btn-complete')
+    const btnS=document.getElementById('btn-simple'),btnC=document.getElementById('btn-complete')
     btnS.addEventListener('click',()=>{showComplete=false;btnS.classList.add('active');btnC.classList.remove('active');renderBlocks()})
     btnC.addEventListener('click',()=>{showComplete=true;btnC.classList.add('active');btnS.classList.remove('active');renderBlocks()})
     document.getElementById('period-select').addEventListener('change',e=>{MONTHS=parseInt(e.target.value,10);buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();renderBlocks()})
@@ -497,7 +396,7 @@
     let toastTimer=null
     function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('visible'),1800)}
 
-    buildDays(); renderMultiSelect(); renderMonthPills(); renderMonthBand(); renderBlocks()
+    buildDays();renderMultiSelect();renderMonthPills();renderMonthBand();renderBlocks()
   </script>
 </body>
 </html>
