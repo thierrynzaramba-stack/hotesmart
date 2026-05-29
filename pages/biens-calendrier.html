@@ -348,12 +348,28 @@
         })
       })
     }
-    document.addEventListener('mouseup',()=>{ if(!isDragging)return; isDragging=false; if(sel.idx.size===0)return; showFloatBar(); const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; startInlineEdit(cell,f) })
+    document.addEventListener('mouseup',()=>{ if(!isDragging)return; isDragging=false; if(sel.idx.size===0)return; showFloatBar() })
+
+    // Edition facon Excel : taper un chiffre (ou Entree/F2) sur une case selectionnee lance l'edition inline
+    document.addEventListener('keydown',(e)=>{
+      if(!sel.bienId || sel.idx.size===0) return
+      const tag=(e.target.tagName||'').toLowerCase()
+      if(tag==='input'||tag==='select'||tag==='textarea') return
+      if(overlay.classList.contains('visible')) return
+      const f=Math.min(...sel.idx)
+      const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]')
+      const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null
+      if(!cell) return
+      if(e.key==='Enter' || e.key==='F2'){ e.preventDefault(); startInlineEdit(cell,f,'') }
+      else if(/^[0-9]$/.test(e.key)){ e.preventDefault(); startInlineEdit(cell,f,e.key) }
+    })
     function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId; section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10); const row=cell.dataset.row; if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected'); else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
 
-    function startInlineEdit(cell,idx){
+    function startInlineEdit(cell,idx,initial){
       if(!cell||!sel.bienId)return; const st=states[sel.bienId]; const field=sel.row; const current=st[idx][field]
-      cell.innerHTML='<input class="rate-input" type="number" value="'+current+'" />'; const input=cell.querySelector('input'); input.focus(); input.select()
+      const startVal = (initial!==undefined && initial!=='') ? initial : current
+      cell.innerHTML='<input class="rate-input" type="number" value="'+startVal+'" />'; const input=cell.querySelector('input'); input.focus()
+      if(initial!==undefined && initial!=='') { const len=input.value.length; input.setSelectionRange(len,len) } else { input.select() }
       let done=false
       const commit=(apply)=>{ if(done)return; done=true
         if(apply){ const v=parseFloat(input.value); if(!isNaN(v)&&v>0){ pushUndo(sel.bienId); const targets=sel.idx.size>0?[...sel.idx]:[idx]; targets.forEach(i=>{ st[i][field]=v; st[i].modified=true; if(field==='rate'&&st[i].maxRate<v)st[i].maxRate=v; if(field==='maxRate'&&v<st[i].rate)st[i].rate=v }); const n=targets.length; sel={bienId:null,idx:new Set(),row:'rate'}; hideFloatBar(); renderBlocks(); showToast(n>1?'Applique a '+n+' jours':'Enregistre'); return } }
