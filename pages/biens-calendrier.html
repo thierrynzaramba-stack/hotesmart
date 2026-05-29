@@ -6,64 +6,49 @@
   <title>Calendrier - HoteSmart</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f5f5f7; min-height: 100vh; color: #1d1d1f;
-      -webkit-user-select: none; user-select: none;
-    }
-    header {
-      background: #fff; padding: 14px 20px; border-bottom: 1px solid #e5e5e7;
-      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
-      position: sticky; top: 0; z-index: 20;
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; min-height: 100vh; color: #1d1d1f; -webkit-user-select: none; user-select: none; }
+    header { background: #fff; padding: 14px 20px; border-bottom: 1px solid #e5e5e7; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; position: sticky; top: 0; z-index: 20; }
     header .left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     header a.back { color: #007aff; text-decoration: none; font-size: 14px; white-space: nowrap; }
     .header-actions { display: flex; align-items: center; gap: 10px; }
-    .icon-btn {
-      background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 8px;
-      width: 36px; height: 36px; cursor: pointer; font-size: 16px;
-      display: inline-flex; align-items: center; justify-content: center; color: #1d1d1f;
-    }
+    .icon-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 8px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; color: #1d1d1f; }
     .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .toggle { display: inline-flex; background: #f0f0f0; border-radius: 8px; padding: 3px; }
-    .toggle button {
-      background: transparent; border: none; padding: 6px 12px; font-size: 13px;
-      cursor: pointer; border-radius: 6px; color: #6e6e73; font-weight: 500;
-    }
+    .toggle button { background: transparent; border: none; padding: 6px 12px; font-size: 13px; cursor: pointer; border-radius: 6px; color: #6e6e73; font-weight: 500; }
     .toggle button.active { background: #fff; color: #1d1d1f; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
     .multi-select { position: relative; }
-    .multi-select .ms-trigger {
-      padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px;
-      background: #fff; cursor: pointer; min-width: 200px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
-    }
-    .multi-select .ms-panel {
-      display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #fff;
-      border: 1px solid #d2d2d7; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-      min-width: 260px; max-height: 320px; overflow-y: auto; z-index: 30; padding: 6px;
-    }
+    .multi-select .ms-trigger { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; cursor: pointer; min-width: 200px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .multi-select .ms-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #fff; border: 1px solid #d2d2d7; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 260px; max-height: 320px; overflow-y: auto; z-index: 30; padding: 6px; }
     .multi-select.open .ms-panel { display: block; }
     .multi-select .ms-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 14px; }
     .multi-select .ms-option:hover { background: #f5f5f7; }
     .multi-select .ms-option input { width: 16px; height: 16px; }
     .period-select { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; font-family: inherit; }
-    main { max-width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; gap: 16px; padding-bottom: 100px; }
-    .bien-block { background: #fff; border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-    .bien-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    main { max-width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 100px; }
+    /* Pastilles de mois */
+    .month-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .month-pill { background: #fff; border: 1px solid #d2d2d7; border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; color: #1d1d1f; font-weight: 500; text-transform: capitalize; }
+    .month-pill:hover { background: #eef4ff; border-color: #007aff; }
+    .month-pill.active { background: #007aff; color: #fff; border-color: #007aff; }
+    /* Conteneur scroll unique partage */
+    .scroll-shell { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; }
+    .scroll-area { overflow-x: auto; }
+    .bien-section { padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+    .bien-section:last-child { border-bottom: none; }
+    .bien-title { font-size: 15px; font-weight: 600; margin: 0 14px 10px; display: flex; align-items: center; gap: 10px; position: sticky; left: 0; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
-    .cal-wrapper { overflow-x: auto; }
+    .btn-rateplan { background: #eef4ff; color: #007aff; border: none; border-radius: 7px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     table.cal th, table.cal td { padding: 5px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
     table.cal thead th { border-bottom: 1px solid #e5e5e7; }
-    table.cal .row-label {
-      text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73;
-      width: 96px; min-width: 96px; background: #fff; position: sticky; left: 0; z-index: 2;
-      border-right: 1px solid #e5e5e7; font-weight: 500;
-    }
+    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 96px; min-width: 96px; background: #fff; position: sticky; left: 0; z-index: 2; border-right: 1px solid #e5e5e7; font-weight: 500; }
     table.cal thead .row-label { z-index: 4; }
     table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
     table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
     table.cal .day-month { font-size: 8px; color: #007aff; font-weight: 600; text-transform: uppercase; }
     table.cal .weekend { background: rgba(0,0,0,0.022); }
+    table.cal .today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
+    table.cal thead th.today { box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff, inset 0 2px 0 #007aff; }
     table.cal td.rate-cell { cursor: pointer; font-weight: 600; position: relative; }
     table.cal td.rate-cell:hover { background: #eef4ff; }
     table.cal td.rate-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
@@ -74,13 +59,8 @@
     .resa-bar { position: absolute; top: 3px; bottom: 3px; color: white; font-size: 10px; font-weight: 500; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: hidden; border-radius: 3px; }
     .resa-bar.blue { background: #0d4ea6; } .resa-bar.green { background: #1f6f23; } .resa-bar.red { background: #d52a44; }
     .hidden-when-simple { display: none; }
-    .bien-block.show-complete .hidden-when-simple { display: table-row; }
-    .float-bar {
-      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(140%);
-      background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px;
-      display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25);
-      transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px);
-    }
+    .bien-section.show-complete .hidden-when-simple { display: table-row; }
+    .float-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(140%); background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px); }
     .float-bar.visible { transform: translateX(-50%) translateY(0); }
     .float-bar .sel-info { font-size: 13px; }
     .float-bar .sel-info strong { font-weight: 600; }
@@ -94,15 +74,13 @@
     .popup .sub { font-size: 13px; color: #6e6e73; margin-bottom: 20px; }
     .field { margin-bottom: 18px; }
     .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-    .field input[type=number], .field select {
-      width: 100%; padding: 10px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 15px; font-family: inherit;
-    }
+    .field input[type=number], .field select { width: 100%; padding: 10px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 15px; font-family: inherit; }
     .seg { display: inline-flex; border: 1px solid #d2d2d7; border-radius: 8px; overflow: hidden; }
     .seg button { background: #fff; border: none; padding: 8px 16px; font-size: 14px; cursor: pointer; border-right: 1px solid #d2d2d7; font-weight: 500; color: #6e6e73; }
     .seg button:last-child { border-right: none; }
     .seg button.active { background: #007aff; color: #fff; }
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .preview-box { background: #f0f9ff; border: 1px solid #cce4ff; border-radius: 8px; padding: 12px; font-size: 14px; color: #0d4ea6; }
+    .preview-box { background: #f0f9ff; border: 1px solid #cce4ff; border-radius: 8px; padding: 12px; font-size: 13px; color: #0d4ea6; line-height: 1.6; }
     .popup-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
     .btn-cancel { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 9px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .btn-apply { background: #007aff; color: #fff; border: none; border-radius: 9px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
@@ -136,7 +114,12 @@
   </header>
 
   <main id="main">
-    <div id="blocks"></div>
+    <div class="month-pills" id="month-pills"></div>
+    <div class="scroll-shell">
+      <div class="scroll-area" id="scroll-area">
+        <div id="blocks"></div>
+      </div>
+    </div>
   </main>
 
   <div class="float-bar" id="float-bar">
@@ -145,6 +128,7 @@
     <button class="btn-clear" id="btn-clear-sel">Annuler</button>
   </div>
 
+  <!-- Popup config dates -->
   <div class="overlay" id="overlay">
     <div class="popup">
       <h3>Configurer les dates</h3>
@@ -167,28 +151,33 @@
       </div>
       <div class="section-divider"></div>
       <div class="row2">
-        <div class="field">
-          <label>Disponibilite</label>
-          <select id="sel-avail"><option value="keep">Ne pas changer</option><option value="open">Ouvert</option><option value="closed">Ferme</option></select>
-        </div>
-        <div class="field">
-          <label>Nuits minimum</label>
-          <input type="number" id="min-stay" min="0" placeholder="Ne pas changer" />
-        </div>
+        <div class="field"><label>Disponibilite</label><select id="sel-avail"><option value="keep">Ne pas changer</option><option value="open">Ouvert</option><option value="closed">Ferme</option></select></div>
+        <div class="field"><label>Nuits minimum</label><input type="number" id="min-stay" min="0" placeholder="Ne pas changer" /></div>
       </div>
       <div class="row2">
-        <div class="field">
-          <label>Arrivee</label>
-          <select id="sel-cta"><option value="keep">Ne pas changer</option><option value="open">Autorisee</option><option value="closed">Bloquee</option></select>
-        </div>
-        <div class="field">
-          <label>Depart</label>
-          <select id="sel-ctd"><option value="keep">Ne pas changer</option><option value="open">Autorise</option><option value="closed">Bloque</option></select>
-        </div>
+        <div class="field"><label>Arrivee</label><select id="sel-cta"><option value="keep">Ne pas changer</option><option value="open">Autorisee</option><option value="closed">Bloquee</option></select></div>
+        <div class="field"><label>Depart</label><select id="sel-ctd"><option value="keep">Ne pas changer</option><option value="open">Autorise</option><option value="closed">Bloque</option></select></div>
       </div>
       <div class="popup-actions">
         <button class="btn-cancel" id="btn-cancel">Annuler</button>
         <button class="btn-apply" id="btn-apply">Appliquer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Popup rate plan par personne -->
+  <div class="overlay" id="overlay-rp">
+    <div class="popup">
+      <h3>Tarif par personne</h3>
+      <div class="sub" id="rp-bien-name">-</div>
+      <div class="row2">
+        <div class="field"><label>Voyageurs inclus dans le prix</label><input type="number" id="rp-included" min="1" /></div>
+        <div class="field"><label>Supplement / voyageur sup. (EUR)</label><input type="number" id="rp-extra" min="0" /></div>
+      </div>
+      <div class="preview-box" id="rp-preview">-</div>
+      <div class="popup-actions">
+        <button class="btn-cancel" id="rp-cancel">Annuler</button>
+        <button class="btn-apply" id="rp-apply">Enregistrer</button>
       </div>
     </div>
   </div>
@@ -213,7 +202,9 @@
     let days = []
     const dayNames = ['DIM','LUN','MAR','MER','JEU','VEN','SAM']
     const monthShort = ['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
+    const monthFull = ['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
     const fmtShort = (d) => d.getDate() + ' ' + monthShort[d.getMonth()]
+    const CELL_W = 34, LABEL_W = 96
 
     function buildDays() {
       const today = new Date(); today.setHours(0,0,0,0)
@@ -236,27 +227,20 @@
       })
     }
 
+    // rate plan config par bien (modifiable via popup)
+    const rpConfig = {}
+    BIENS.forEach(b => { rpConfig[b.id] = { included: b.included, extraFee: b.extraFee } })
+
     let sel = { bienId: null, idx: new Set() }
 
     const undoStack = []
-    function pushUndo(bienId) {
-      undoStack.push({ bienId, snap: JSON.stringify(states[bienId]) })
-      document.getElementById('btn-undo').disabled = false
-    }
+    function pushUndo(bienId) { undoStack.push({ bienId, snap: JSON.stringify(states[bienId]) }); document.getElementById('btn-undo').disabled = false }
     function doUndo() {
       if (!undoStack.length) return
       const { bienId, snap } = undoStack.pop()
       states[bienId] = JSON.parse(snap)
       if (!undoStack.length) document.getElementById('btn-undo').disabled = true
-      renderBlocks()
-      showToast('Action annulee')
-    }
-
-    function rateRange(bien, baseRate) {
-      const min = baseRate
-      const extraGuests = Math.max(0, bien.capacity - bien.included)
-      const max = baseRate + extraGuests * bien.extraFee
-      return min === max ? (min + ' EUR') : (min + '->' + max)
+      renderBlocks(); showToast('Action annulee')
     }
 
     let selectedBiens = [BIENS[0].id]
@@ -282,15 +266,36 @@
       const label = document.getElementById('ms-label')
       if (selectedBiens.length === 0) label.textContent = 'Choisir des biens'
       else if (selectedBiens.length === 1) { const b = BIENS.find(x=>x.id===selectedBiens[0]); label.textContent = b ? b.name : '1 bien' }
-      else label.textContent = selectedBiens.length + ' biens selectionnes'
+      else label.textContent = selectedBiens.length + ' biens'
     }
-    document.getElementById('ms-trigger').addEventListener('click', () => {
-      document.getElementById('multi-select').classList.toggle('open')
-    })
-    document.addEventListener('click', (e) => {
-      const ms = document.getElementById('multi-select')
-      if (!ms.contains(e.target)) ms.classList.remove('open')
-    })
+    document.getElementById('ms-trigger').addEventListener('click', () => document.getElementById('multi-select').classList.toggle('open'))
+    document.addEventListener('click', (e) => { const ms = document.getElementById('multi-select'); if (!ms.contains(e.target)) ms.classList.remove('open') })
+
+    // Pastilles de mois
+    function renderMonthPills() {
+      const wrap = document.getElementById('month-pills')
+      wrap.innerHTML = ''
+      const seen = new Set()
+      days.forEach((d, idx) => {
+        const key = d.getFullYear() + '-' + d.getMonth()
+        if (!seen.has(key)) {
+          seen.add(key)
+          const pill = document.createElement('button')
+          pill.className = 'month-pill'
+          pill.textContent = monthFull[d.getMonth()]
+          pill.dataset.idx = idx
+          pill.addEventListener('click', () => {
+            const scrollArea = document.getElementById('scroll-area')
+            scrollArea.scrollTo({ left: idx * CELL_W, behavior: 'smooth' })
+            wrap.querySelectorAll('.month-pill').forEach(p => p.classList.remove('active'))
+            pill.classList.add('active')
+          })
+          wrap.appendChild(pill)
+        }
+      })
+      const first = wrap.querySelector('.month-pill')
+      if (first) first.classList.add('active')
+    }
 
     const blocksEl = document.getElementById('blocks')
     let showComplete = false
@@ -306,18 +311,22 @@
       attachEvents()
     }
 
+    function isToday(i) { return i === 0 }
+
     function renderBienBlock(bien) {
       const st = states[bien.id]
-      const block = document.createElement('div')
-      block.className = 'bien-block' + (showComplete ? ' show-complete' : '')
-      block.dataset.bienId = bien.id
+      const section = document.createElement('div')
+      section.className = 'bien-section' + (showComplete ? ' show-complete' : '')
+      section.dataset.bienId = bien.id
 
-      let html = '<div class="bien-title">' + bien.name + ' <span class="cap">capacite ' + bien.capacity + '</span></div>'
-      html += '<div class="cal-wrapper"><table class="cal"><thead><tr><th class="row-label"></th>'
+      let html = '<div class="bien-title">' + bien.name + ' <span class="cap">capacite ' + bien.capacity + '</span>'
+      html += ' <button class="btn-rateplan" data-bien="' + bien.id + '">Tarif par personne</button></div>'
+      html += '<table class="cal"><thead><tr><th class="row-label"></th>'
       days.forEach((d, idx) => {
         const we = d.getDay() === 0 || d.getDay() === 6
         const showMonth = idx === 0 || d.getDate() === 1
-        html += '<th class="' + (we ? 'weekend' : '') + '">'
+        const cls = (we ? 'weekend' : '') + (isToday(idx) ? ' today' : '')
+        html += '<th class="' + cls + '">'
         html += '<div class="day-name">' + dayNames[d.getDay()] + '</div>'
         html += '<div class="day-num">' + d.getDate() + '</div>'
         if (showMonth) html += '<div class="day-month">' + monthShort[d.getMonth()] + '</div>'
@@ -325,100 +334,85 @@
       })
       html += '</tr></thead><tbody>'
 
+      // Reservations
       html += '<tr><td class="row-label">Reservations</td>'
       days.forEach((d, i) => {
         const we = d.getDay() === 0 || d.getDay() === 6
-        html += '<td class="resa-cell ' + (we ? 'weekend' : '') + '">'
-        bien.resa.forEach(bk => {
-          if (i === bk.start) {
-            const widthPct = bk.span * 100
-            html += '<div class="resa-bar ' + bk.color + '" style="left:50%;width:calc(' + widthPct + '% - 1px);z-index:2">' + bk.name + '</div>'
-          }
-        })
+        html += '<td class="resa-cell ' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
+        bien.resa.forEach(bk => { if (i === bk.start) { const w = bk.span*100; html += '<div class="resa-bar ' + bk.color + '" style="left:50%;width:calc(' + w + '% - 1px);z-index:2">' + bk.name + '</div>' } })
         html += '</td>'
       })
       html += '</tr>'
 
+      // Tarif
       html += '<tr><td class="row-label">Tarif</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        const cls = ['rate-cell']
-        if (we) cls.push('weekend')
+        const cls = ['rate-cell']; if (we) cls.push('weekend'); if (isToday(i)) cls.push('today')
         if (sel.bienId === bien.id && sel.idx.has(i)) cls.push('selected')
         if (s.modified) cls.push('modified')
         html += '<td class="' + cls.join(' ') + '" data-idx="' + i + '">' + s.rate + '&euro;</td>'
       })
       html += '</tr>'
 
-      html += '<tr><td class="row-label">Min nuits</td>'
+      // Min nuits (vue complete)
+      html += '<tr class="hidden-when-simple"><td class="row-label">Min nuits</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + '">'
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
         html += s.minStay > 0 ? '<span style="color:#6e6e73">&#127769;' + s.minStay + '</span>' : '<span style="color:#d2d2d7">.</span>'
         html += '</td>'
       })
       html += '</tr>'
 
-      html += '<tr class="hidden-when-simple"><td class="row-label">Tarif / pers.</td>'
-      st.forEach((s, i) => {
-        const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + '" style="font-size:8px;color:#86868b">' + rateRange(bien, s.rate) + '</td>'
-      })
-      html += '</tr>'
-
+      // Disponibilite (vue complete)
       html += '<tr class="hidden-when-simple"><td class="row-label">Disponibilite</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + '">'
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
         html += s.avail === 'closed' ? '<span style="color:#d52a44">Ferme</span>' : '<span style="color:#1f6f23">.</span>'
         html += '</td>'
       })
       html += '</tr>'
 
+      // Arrivee (vue complete)
       html += '<tr class="hidden-when-simple"><td class="row-label">Arrivee</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + '">'
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
         html += s.cta === 'closed' ? '<span style="color:#d52a44;font-size:13px">&#10060;</span>' : '<span style="color:#d2d2d7">.</span>'
         html += '</td>'
       })
       html += '</tr>'
 
+      // Depart (vue complete)
       html += '<tr class="hidden-when-simple"><td class="row-label">Depart</td>'
       st.forEach((s, i) => {
         const we = days[i].getDay() === 0 || days[i].getDay() === 6
-        html += '<td class="' + (we ? 'weekend' : '') + '">'
+        html += '<td class="' + (we ? 'weekend' : '') + (isToday(i) ? ' today' : '') + '">'
         html += s.ctd === 'closed' ? '<span style="color:#ff9500;font-size:13px">&#9938;</span>' : '<span style="color:#d2d2d7">.</span>'
         html += '</td>'
       })
       html += '</tr>'
 
-      html += '</tbody></table></div>'
-      block.innerHTML = html
-      return block
+      html += '</tbody></table>'
+      section.innerHTML = html
+      return section
     }
 
+    // Selection glisser
     let isDragging = false, dragStart = null, dragBien = null
-
     function attachEvents() {
-      blocksEl.querySelectorAll('.bien-block').forEach(block => {
-        const bienId = block.dataset.bienId
-        block.querySelectorAll('.rate-cell').forEach(cell => {
+      blocksEl.querySelectorAll('.bien-section').forEach(section => {
+        const bienId = section.dataset.bienId
+        section.querySelectorAll('.rate-cell').forEach(cell => {
           const idx = parseInt(cell.dataset.idx, 10)
-          cell.addEventListener('mousedown', (e) => {
-            e.preventDefault()
-            isDragging = true; dragStart = idx; dragBien = bienId
-            sel = { bienId, idx: new Set([idx]) }
-            updateSelectionUI()
-          })
-          cell.addEventListener('mouseenter', () => {
-            if (!isDragging || dragBien !== bienId) return
-            const lo = Math.min(dragStart, idx), hi = Math.max(dragStart, idx)
-            sel.idx = new Set()
-            for (let i = lo; i <= hi; i++) sel.idx.add(i)
-            updateSelectionUI()
-          })
+          cell.addEventListener('mousedown', (e) => { e.preventDefault(); isDragging = true; dragStart = idx; dragBien = bienId; sel = { bienId, idx: new Set([idx]) }; updateSelectionUI() })
+          cell.addEventListener('mouseenter', () => { if (!isDragging || dragBien !== bienId) return; const lo = Math.min(dragStart, idx), hi = Math.max(dragStart, idx); sel.idx = new Set(); for (let i=lo;i<=hi;i++) sel.idx.add(i); updateSelectionUI() })
         })
+      })
+      blocksEl.querySelectorAll('.btn-rateplan').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.stopPropagation(); openRatePlanPopup(btn.dataset.bien) })
       })
     }
 
@@ -428,15 +422,15 @@
       if (sel.idx.size === 0) return
       showFloatBar()
       const firstIdx = Math.min(...sel.idx)
-      const block = blocksEl.querySelector('.bien-block[data-bien-id="' + sel.bienId + '"]')
-      const cell = block ? block.querySelector('.rate-cell[data-idx="' + firstIdx + '"]') : null
+      const section = blocksEl.querySelector('.bien-section[data-bien-id="' + sel.bienId + '"]')
+      const cell = section ? section.querySelector('.rate-cell[data-idx="' + firstIdx + '"]') : null
       startInlineEdit(cell, firstIdx)
     })
 
     function updateSelectionUI() {
-      blocksEl.querySelectorAll('.bien-block').forEach(block => {
-        const bienId = block.dataset.bienId
-        block.querySelectorAll('.rate-cell').forEach(cell => {
+      blocksEl.querySelectorAll('.bien-section').forEach(section => {
+        const bienId = section.dataset.bienId
+        section.querySelectorAll('.rate-cell').forEach(cell => {
           const idx = parseInt(cell.dataset.idx, 10)
           if (sel.bienId === bienId && sel.idx.has(idx)) cell.classList.add('selected')
           else cell.classList.remove('selected')
@@ -450,8 +444,7 @@
       const st = states[sel.bienId]
       const current = st[idx].rate
       cell.innerHTML = '<input class="rate-input" type="number" value="' + current + '" />'
-      const input = cell.querySelector('input')
-      input.focus(); input.select()
+      const input = cell.querySelector('input'); input.focus(); input.select()
       let done = false
       const commit = (apply) => {
         if (done) return; done = true
@@ -471,23 +464,15 @@
         renderBlocks()
       }
       input.addEventListener('blur', () => commit(true))
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); commit(true) }
-        else if (e.key === 'Escape') { commit(false) }
-      })
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(true) } else if (e.key === 'Escape') { commit(false) } })
     }
 
     const floatBar = document.getElementById('float-bar')
-    function showFloatBar() {
-      if (sel.idx.size === 0) { hideFloatBar(); return }
-      document.getElementById('sel-count').textContent = sel.idx.size
-      floatBar.classList.add('visible')
-    }
+    function showFloatBar() { if (sel.idx.size === 0) { hideFloatBar(); return } document.getElementById('sel-count').textContent = sel.idx.size; floatBar.classList.add('visible') }
     function hideFloatBar() { floatBar.classList.remove('visible') }
-    document.getElementById('btn-clear-sel').addEventListener('click', () => {
-      sel = { bienId: null, idx: new Set() }; updateSelectionUI(); hideFloatBar()
-    })
+    document.getElementById('btn-clear-sel').addEventListener('click', () => { sel = { bienId: null, idx: new Set() }; updateSelectionUI(); hideFloatBar() })
 
+    // Popup config dates
     const overlay = document.getElementById('overlay')
     let popupMode = 'set', popupUnit = 'eur'
     document.getElementById('btn-open-popup').addEventListener('click', () => {
@@ -502,19 +487,11 @@
       popupMode = 'set'; popupUnit = 'eur'
       document.querySelectorAll('#seg-mode button').forEach(b => b.classList.toggle('active', b.dataset.mode==='set'))
       document.querySelectorAll('#seg-unit button').forEach(b => b.classList.toggle('active', b.dataset.unit==='eur'))
-      updatePreview()
-      overlay.classList.add('visible')
+      updatePreview(); overlay.classList.add('visible')
     })
-    document.querySelectorAll('#seg-mode button').forEach(b => b.addEventListener('click', () => {
-      popupMode = b.dataset.mode
-      document.querySelectorAll('#seg-mode button').forEach(x => x.classList.toggle('active', x===b)); updatePreview()
-    }))
-    document.querySelectorAll('#seg-unit button').forEach(b => b.addEventListener('click', () => {
-      popupUnit = b.dataset.unit
-      document.querySelectorAll('#seg-unit button').forEach(x => x.classList.toggle('active', x===b)); updatePreview()
-    }))
+    document.querySelectorAll('#seg-mode button').forEach(b => b.addEventListener('click', () => { popupMode = b.dataset.mode; document.querySelectorAll('#seg-mode button').forEach(x => x.classList.toggle('active', x===b)); updatePreview() }))
+    document.querySelectorAll('#seg-unit button').forEach(b => b.addEventListener('click', () => { popupUnit = b.dataset.unit; document.querySelectorAll('#seg-unit button').forEach(x => x.classList.toggle('active', x===b)); updatePreview() }))
     document.getElementById('rate-value').addEventListener('input', updatePreview)
-
     function computeNewRate(current, val) {
       if (isNaN(val)) return current
       if (popupMode === 'set') return popupUnit === 'pct' ? Math.round(current*(1+val/100)) : val
@@ -548,10 +525,48 @@
         if (cta !== 'keep') { st[i].cta = cta; st[i].modified = true }
         if (ctd !== 'keep') { st[i].ctd = ctd; st[i].modified = true }
       })
-      overlay.classList.remove('visible')
-      sel = { bienId: null, idx: new Set() }
-      hideFloatBar(); renderBlocks()
-      showToast('Modifications enregistrees')
+      overlay.classList.remove('visible'); sel = { bienId: null, idx: new Set() }; hideFloatBar(); renderBlocks(); showToast('Modifications enregistrees')
+    })
+
+    // Popup rate plan par personne
+    const overlayRp = document.getElementById('overlay-rp')
+    let rpBienId = null
+    function openRatePlanPopup(bienId) {
+      rpBienId = bienId
+      const bien = BIENS.find(b => b.id === bienId)
+      const cfg = rpConfig[bienId]
+      document.getElementById('rp-bien-name').textContent = bien.name + ' (capacite ' + bien.capacity + ')'
+      document.getElementById('rp-included').value = cfg.included
+      document.getElementById('rp-extra').value = cfg.extraFee
+      document.getElementById('rp-included').max = bien.capacity
+      updateRpPreview()
+      overlayRp.classList.add('visible')
+    }
+    function updateRpPreview() {
+      const bien = BIENS.find(b => b.id === rpBienId)
+      const inc = parseInt(document.getElementById('rp-included').value, 10) || bien.capacity
+      const extra = parseFloat(document.getElementById('rp-extra').value) || 0
+      const baseSample = bien.base
+      let lines = 'Sur la base d\'un tarif de ' + baseSample + ' EUR :<br>'
+      lines += 'Jusqu\'a ' + inc + ' pers. : ' + baseSample + ' EUR<br>'
+      for (let p = inc + 1; p <= bien.capacity; p++) {
+        const price = baseSample + (p - inc) * extra
+        lines += p + 'e pers. : ' + price + ' EUR<br>'
+      }
+      if (extra === 0) lines += '(aucun supplement)'
+      document.getElementById('rp-preview').innerHTML = lines
+    }
+    document.getElementById('rp-included').addEventListener('input', updateRpPreview)
+    document.getElementById('rp-extra').addEventListener('input', updateRpPreview)
+    document.getElementById('rp-cancel').addEventListener('click', () => overlayRp.classList.remove('visible'))
+    overlayRp.addEventListener('click', (e) => { if (e.target === overlayRp) overlayRp.classList.remove('visible') })
+    document.getElementById('rp-apply').addEventListener('click', () => {
+      const bien = BIENS.find(b => b.id === rpBienId)
+      const inc = parseInt(document.getElementById('rp-included').value, 10) || bien.capacity
+      const extra = parseFloat(document.getElementById('rp-extra').value) || 0
+      rpConfig[rpBienId] = { included: inc, extraFee: extra }
+      overlayRp.classList.remove('visible')
+      showToast('Tarif par personne enregistre')
     })
 
     document.getElementById('btn-undo').addEventListener('click', doUndo)
@@ -563,18 +578,13 @@
       buildDays()
       Object.keys(states).forEach(k => delete states[k])
       sel = { bienId: null, idx: new Set() }; hideFloatBar()
-      renderBlocks()
+      renderMonthPills(); renderBlocks()
     })
 
     let toastTimer = null
-    function showToast(msg) {
-      const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('visible')
-      clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('visible'), 1800)
-    }
+    function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('visible'), 1800) }
 
-    buildDays()
-    renderMultiSelect()
-    renderBlocks()
+    buildDays(); renderMultiSelect(); renderMonthPills(); renderBlocks()
   </script>
 </body>
 </html>
