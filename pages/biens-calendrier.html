@@ -11,6 +11,8 @@
       background: #f5f5f7;
       min-height: 100vh;
       color: #1d1d1f;
+      -webkit-user-select: none;
+      user-select: none;
     }
     header {
       background: #fff;
@@ -23,189 +25,113 @@
       gap: 12px;
     }
     header .left { display: flex; align-items: center; gap: 16px; }
-    header a.back {
-      color: #007aff;
-      text-decoration: none;
-      font-size: 14px;
-    }
+    header a.back { color: #007aff; text-decoration: none; font-size: 14px; }
     header h1 { font-size: 18px; font-weight: 600; }
-    .toggle {
-      display: inline-flex;
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .icon-btn {
       background: #f0f0f0;
+      border: 1px solid #e5e5e7;
       border-radius: 8px;
-      padding: 3px;
-    }
-    .toggle button {
-      background: transparent;
-      border: none;
-      padding: 6px 14px;
-      font-size: 13px;
+      width: 36px; height: 36px;
       cursor: pointer;
-      border-radius: 6px;
-      color: #6e6e73;
-      font-weight: 500;
-    }
-    .toggle button.active {
-      background: #fff;
+      font-size: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: #1d1d1f;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
     }
-    main {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
+    .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .toggle { display: inline-flex; background: #f0f0f0; border-radius: 8px; padding: 3px; }
+    .toggle button {
+      background: transparent; border: none; padding: 6px 14px;
+      font-size: 13px; cursor: pointer; border-radius: 6px;
+      color: #6e6e73; font-weight: 500;
     }
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 16px 20px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    }
-    .card h2 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .badge-count {
-      background: #f0f0f0;
-      color: #6e6e73;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 500;
-    }
+    .toggle button.active { background: #fff; color: #1d1d1f; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    main { max-width: 1200px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; padding-bottom: 100px; }
+    .card { background: #fff; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .badge-count { background: #f0f0f0; color: #6e6e73; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
     .resa-list { display: grid; gap: 8px; }
-    .resa-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      background: #f7f7f9;
-      border-radius: 8px;
-      font-size: 13px;
-    }
-    .resa-bar-left {
-      width: 4px;
-      height: 36px;
-      border-radius: 2px;
-    }
+    .resa-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: #f7f7f9; border-radius: 8px; font-size: 13px; }
+    .resa-bar-left { width: 4px; height: 36px; border-radius: 2px; }
     .resa-info { flex: 1; }
     .resa-info .name { font-weight: 600; }
     .resa-info .dates { color: #6e6e73; font-size: 12px; }
-    .resa-source {
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 500;
-    }
+    .resa-source { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
     .src-airbnb { background: #ffe5e8; color: #d52a44; }
     .src-booking { background: #e6f0ff; color: #0d4ea6; }
     .src-direct { background: #e8f5e9; color: #1f6f23; }
-    .calendar-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .nav-btn {
-      background: #f0f0f0;
-      border: none;
-      border-radius: 6px;
-      padding: 4px 10px;
-      cursor: pointer;
-      font-size: 13px;
-    }
+    .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .nav-btn { background: #f0f0f0; border: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
     .nav-range { font-size: 12px; color: #6e6e73; }
-    .cal-wrapper {
-      overflow-x: auto;
-      border: 1px solid #e5e5e7;
-      border-radius: 8px;
-    }
-    table.cal {
-      border-collapse: collapse;
-      font-size: 12px;
-      width: 100%;
-      table-layout: fixed;
-    }
-    table.cal th, table.cal td {
-      padding: 6px 2px;
-      text-align: center;
-      border-right: 1px solid #f0f0f0;
-      white-space: nowrap;
-      width: 36px;
-      min-width: 36px;
-    }
+    .cal-wrapper { overflow-x: auto; border: 1px solid #e5e5e7; border-radius: 8px; }
+    table.cal { border-collapse: collapse; font-size: 12px; width: 100%; table-layout: fixed; }
+    table.cal th, table.cal td { padding: 6px 2px; text-align: center; border-right: 1px solid #f0f0f0; white-space: nowrap; width: 38px; min-width: 38px; }
     table.cal th:last-child, table.cal td:last-child { border-right: none; }
     table.cal thead tr { background: #fafafa; }
     table.cal tbody tr { border-top: 1px solid #f0f0f0; }
     table.cal .row-label {
-      text-align: left;
-      padding-left: 10px;
-      font-size: 11px;
-      color: #6e6e73;
-      width: 100px;
-      min-width: 100px;
-      background: #fafafa;
-      position: sticky;
-      left: 0;
-      z-index: 1;
-      border-right: 1px solid #e5e5e7;
-      font-weight: 500;
+      text-align: left; padding-left: 10px; font-size: 11px; color: #6e6e73;
+      width: 110px; min-width: 110px; background: #fafafa; position: sticky; left: 0; z-index: 3;
+      border-right: 1px solid #e5e5e7; font-weight: 500;
     }
     table.cal .day-num { font-weight: 600; font-size: 13px; color: #1d1d1f; }
     table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; letter-spacing: 0.3px; }
     table.cal .day-month { font-size: 9px; color: #86868b; }
     table.cal .weekend { background: rgba(0,0,0,0.025); }
+    table.cal td.rate-cell { cursor: pointer; font-weight: 600; position: relative; }
+    table.cal td.rate-cell:hover { background: #eef4ff; }
+    table.cal td.rate-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
+    table.cal td.rate-cell.modified { color: #b45309; }
+    table.cal td.rate-cell.modified::after { content: ''; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; background: #f59e0b; border-radius: 50%; }
+    .rate-input { width: 100%; border: none; background: #fff; text-align: center; font-size: 12px; font-weight: 600; font-family: inherit; padding: 4px 0; outline: 2px solid #007aff; border-radius: 3px; }
     table.cal .resa-cell { position: relative; padding: 0 !important; height: 28px; }
-    .resa-bar {
-      position: absolute;
-      top: 4px;
-      bottom: 4px;
-      color: white;
-      font-size: 10px;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      padding: 0 6px;
-      white-space: nowrap;
-      overflow: hidden;
-    }
-    .resa-bar.blue { background: #0d4ea6; }
-    .resa-bar.green { background: #1f6f23; }
-    .resa-bar.red { background: #d52a44; }
-    .legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid #f0f0f0;
-      font-size: 11px;
-      color: #6e6e73;
-    }
-    .legend-item { display: flex; align-items: center; gap: 6px; }
-    .legend-square {
-      display: inline-block;
-      width: 14px;
-      height: 8px;
-      border-radius: 2px;
-    }
+    .resa-bar { position: absolute; top: 4px; bottom: 4px; color: white; font-size: 10px; font-weight: 500; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: hidden; border-radius: 3px; }
+    .resa-bar.blue { background: #0d4ea6; } .resa-bar.green { background: #1f6f23; } .resa-bar.red { background: #d52a44; }
+    .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #6e6e73; }
+    .legend-square { display: inline-block; width: 14px; height: 8px; border-radius: 2px; }
     .hidden-when-simple { display: none; }
     table.cal.show-complete .hidden-when-simple { display: table-row; }
-    .sel-bien {
-      padding: 6px 10px;
-      border: 1px solid #d2d2d7;
-      border-radius: 8px;
-      font-size: 14px;
-      background: #fff;
-      font-family: inherit;
+    .sel-bien { padding: 6px 10px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; font-family: inherit; }
+    /* Barre d'action flottante */
+    .float-bar {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120%);
+      background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px;
+      display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+      transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px);
     }
+    .float-bar.visible { transform: translateX(-50%) translateY(0); }
+    .float-bar .sel-info { font-size: 13px; }
+    .float-bar .sel-info strong { font-weight: 600; }
+    .float-bar button {
+      border: none; border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .float-bar .btn-params { background: #007aff; color: #fff; }
+    .float-bar .btn-clear { background: transparent; color: #a1a1a6; }
+    /* Popup */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+    .overlay.visible { display: flex; }
+    .popup { background: #fff; border-radius: 16px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; padding: 24px; }
+    .popup h3 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+    .popup .sub { font-size: 13px; color: #6e6e73; margin-bottom: 20px; }
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+    .field input[type=text], .field input[type=number], .field input[type=date], .field select {
+      width: 100%; padding: 10px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 15px; font-family: inherit;
+    }
+    .seg { display: inline-flex; border: 1px solid #d2d2d7; border-radius: 8px; overflow: hidden; }
+    .seg button { background: #fff; border: none; padding: 8px 16px; font-size: 14px; cursor: pointer; border-right: 1px solid #d2d2d7; font-weight: 500; color: #6e6e73; }
+    .seg button:last-child { border-right: none; }
+    .seg button.active { background: #007aff; color: #fff; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .preview-box { background: #f0f9ff; border: 1px solid #cce4ff; border-radius: 8px; padding: 12px; font-size: 14px; color: #0d4ea6; margin-bottom: 18px; }
+    .popup-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+    .btn-cancel { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 9px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-apply { background: #007aff; color: #fff; border: none; border-radius: 9px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .section-divider { border-top: 1px solid #f0f0f0; margin: 18px 0; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1f6f23; color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.2); opacity: 0; transform: translateY(20px); transition: all 0.25s; z-index: 200; }
+    .toast.visible { opacity: 1; transform: translateY(0); }
   </style>
 </head>
 <body>
@@ -218,9 +144,12 @@
         <option>Test (capacite 7)</option>
       </select>
     </div>
-    <div class="toggle">
-      <button id="btn-simple" class="active">Simplifiee</button>
-      <button id="btn-complete">Complete</button>
+    <div class="header-actions">
+      <button class="icon-btn" id="btn-undo" title="Annuler la derniere action" disabled>&#8634;</button>
+      <div class="toggle">
+        <button id="btn-simple" class="active">Simplifiee</button>
+        <button id="btn-complete">Complete</button>
+      </div>
     </div>
   </header>
 
@@ -235,10 +164,14 @@
         <h2 style="margin-bottom:0">Calendrier - 30 prochains jours</h2>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="nav-btn">&larr;</button>
-          <span class="nav-range" id="nav-range">28 mai - 26 juin</span>
+          <span class="nav-range" id="nav-range"></span>
           <button class="nav-btn">&rarr;</button>
         </div>
       </div>
+
+      <p style="font-size:12px;color:#86868b;margin-bottom:12px">
+        Astuce : cliquez sur un tarif pour le modifier directement, ou glissez sur plusieurs jours pour les configurer ensemble.
+      </p>
 
       <div class="cal-wrapper">
         <table class="cal" id="cal-table">
@@ -252,173 +185,467 @@
         <div class="legend-item">&#10060; Arrivee bloquee</div>
         <div class="legend-item">&#9938; Depart bloque</div>
         <div class="legend-item"><span class="legend-square" style="background:#0d4ea6"></span>Reserve</div>
+        <div class="legend-item"><span class="legend-square" style="background:#f59e0b"></span>Modifie</div>
       </div>
     </div>
   </main>
 
+  <!-- Barre d'action flottante -->
+  <div class="float-bar" id="float-bar">
+    <span class="sel-info"><strong id="sel-count">0</strong> jour(s) selectionne(s)</span>
+    <button class="btn-params" id="btn-open-popup">Plus de parametres</button>
+    <button class="btn-clear" id="btn-clear-sel">Annuler</button>
+  </div>
+
+  <!-- Popup type Channex -->
+  <div class="overlay" id="overlay">
+    <div class="popup">
+      <h3>Configurer les dates</h3>
+      <div class="sub" id="popup-range">-</div>
+
+      <div class="field">
+        <label>Tarif</label>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="seg" id="seg-mode">
+            <button data-mode="set" class="active">Definir</button>
+            <button data-mode="inc">+</button>
+            <button data-mode="dec">-</button>
+          </div>
+          <div class="seg" id="seg-unit">
+            <button data-unit="eur" class="active">EUR</button>
+            <button data-unit="pct">%</button>
+          </div>
+          <input type="number" id="rate-value" placeholder="Valeur" style="flex:1;min-width:90px" />
+        </div>
+        <div class="preview-box" id="rate-preview" style="margin-top:10px;margin-bottom:0">Saisissez une valeur</div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Disponibilite</label>
+          <select id="sel-avail">
+            <option value="keep">Ne pas changer</option>
+            <option value="open">Ouvert</option>
+            <option value="closed">Ferme</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Nuits minimum</label>
+          <input type="number" id="min-stay" min="0" placeholder="Ne pas changer" />
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Arrivee</label>
+          <select id="sel-cta">
+            <option value="keep">Ne pas changer</option>
+            <option value="open">Autorisee</option>
+            <option value="closed">Bloquee</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Depart</label>
+          <select id="sel-ctd">
+            <option value="keep">Ne pas changer</option>
+            <option value="open">Autorise</option>
+            <option value="closed">Bloque</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="popup-actions">
+        <button class="btn-cancel" id="btn-cancel">Annuler</button>
+        <button class="btn-apply" id="btn-apply">Appliquer</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Modifications enregistrees</div>
+
   <script type="module">
     import { getUser } from '/shared/supabase.js'
-
     const user = await getUser()
-    if (!user) {
-      window.location.href = '/pages/login.html'
-    }
+    if (!user) { window.location.href = '/pages/login.html' }
 
-    // ========= Donnees factices V1 =========
-    const FAKE_BOOKINGS = [
-      { dayStart: 18, dayEnd: 21, name: 'Jean Dupont', persons: 4, source: 'airbnb', color: 'red', label: 'Airbnb' },
-      { dayStart: 25, dayEnd: 28, name: 'Marie Martin', persons: 2, source: 'booking', color: 'blue', label: 'Booking' }
-    ]
-    const FAKE_LONG_RESA = { dayStart: -1, name: 'Sophie Bernard', persons: 6, source: 'direct', label: 'Direct', dates: '28 juin -> 5 juillet', nights: 7 }
-
-    // ========= Encart "Reservations a venir" =========
-    const resaList = document.getElementById('resa-list')
-    const allResa = [
-      { name: 'Jean Dupont', persons: 4, dates: '15 -> 18 juin', nights: 3, source: 'airbnb', color: '#d52a44' },
-      { name: 'Marie Martin', persons: 2, dates: '22 -> 25 juin', nights: 3, source: 'booking', color: '#0d4ea6' },
-      { name: 'Sophie Bernard', persons: 6, dates: '28 juin -> 5 juillet', nights: 7, source: 'direct', color: '#1f6f23' }
-    ]
-    allResa.forEach(r => {
-      const item = document.createElement('div')
-      item.className = 'resa-item'
-      item.innerHTML = `
-        <div class="resa-bar-left" style="background:${r.color}"></div>
-        <div class="resa-info">
-          <div class="name">${r.name} - ${r.persons} personnes</div>
-          <div class="dates">${r.dates} - ${r.nights} nuits</div>
-        </div>
-        <span class="resa-source src-${r.source}">${r.source.charAt(0).toUpperCase() + r.source.slice(1)}</span>
-      `
-      resaList.appendChild(item)
-    })
-
-    // ========= Calendrier 30 jours =========
+    // ===================== DONNEES =====================
+    const CAPACITY = 8
     const today = new Date()
+    today.setHours(0,0,0,0)
     const days = []
     for (let i = 0; i < 30; i++) {
       const d = new Date(today)
       d.setDate(today.getDate() + i)
       days.push(d)
     }
-    const dayNames = ['DIM', 'LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM']
+    const dayNames = ['DIM','LUN','MAR','MER','JEU','VEN','SAM']
     const monthShort = ['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
+    const fmtShort = (d) => d.getDate() + ' ' + monthShort[d.getMonth()]
 
-    // En-tete dates
+    // Etat du calendrier (donnees factices initiales)
+    // Chaque jour : { rate, avail, minStay, cta, ctd }
+    const state = days.map((d) => {
+      const dow = d.getDay()
+      let rate = 80
+      if (dow === 5 || dow === 6) rate = 100
+      else if (dow === 0) rate = 90
+      let minStay = 0
+      if (dow === 5 || dow === 6) minStay = 3
+      else if (dow === 1) minStay = 2
+      return { rate, avail: 'open', minStay, cta: 'open', ctd: 'open' }
+    })
+
+    // Reservations factices (dayStart inclus, dayEnd exclus = jour de depart)
+    const bookings = [
+      { dayStart: 18, dayEnd: 21, name: 'Jean Dupont', color: 'red' },
+      { dayStart: 25, dayEnd: 28, name: 'Marie M.', color: 'blue' }
+    ]
+    const upcomingResa = [
+      { name: 'Jean Dupont', persons: 4, dates: '18 -> 21 juin', nights: 3, source: 'airbnb', color: '#d52a44' },
+      { name: 'Marie Martin', persons: 2, dates: '25 -> 28 juin', nights: 3, source: 'booking', color: '#0d4ea6' },
+      { name: 'Sophie Bernard', persons: 6, dates: '28 juin -> 5 juil', nights: 7, source: 'direct', color: '#1f6f23' }
+    ]
+
+    // Undo stack : on empile des snapshots de state
+    const undoStack = []
+    function pushUndo() {
+      undoStack.push(JSON.stringify(state))
+      document.getElementById('btn-undo').disabled = false
+    }
+    function doUndo() {
+      if (undoStack.length === 0) return
+      const snap = undoStack.pop()
+      const restored = JSON.parse(snap)
+      restored.forEach((s, i) => { state[i] = s })
+      if (undoStack.length === 0) document.getElementById('btn-undo').disabled = true
+      renderBody()
+      showToast('Action annulee')
+    }
+
+    // ===================== RENDER =====================
     const header = document.getElementById('cal-header')
-    let h = '<th class="row-label"></th>'
-    days.forEach((d, idx) => {
-      const we = d.getDay() === 0 || d.getDay() === 6
-      const showMonth = idx === 0 || d.getDate() === 1
-      h += `<th class="${we ? 'weekend' : ''}">`
-      h += `<div class="day-name">${dayNames[d.getDay()]}</div>`
-      h += `<div class="day-num">${d.getDate()}</div>`
-      if (showMonth) h += `<div class="day-month">${monthShort[d.getMonth()]}</div>`
-      h += '</th>'
-    })
-    header.innerHTML = h
-
-    // Donnees factices pour le calendrier
-    const rates = days.map((d) => {
-      const dow = d.getDay()
-      if (dow === 5 || dow === 6) return 100
-      if (dow === 0) return 90
-      return 80
-    })
-    const minStays = {}
-    days.forEach((d, i) => {
-      const dow = d.getDay()
-      if (dow === 5 || dow === 6) minStays[i] = 3
-      else if (dow === 1) minStays[i] = 2
-    })
-    const closedArrival = [10]
-    const closedDeparture = [17]
-
-    // Corps du tableau
-    const body = document.getElementById('cal-body')
-    let b = ''
-
-    // Ligne Tarif
-    b += '<tr><td class="row-label">Tarif</td>'
-    rates.forEach((r, i) => {
-      const we = days[i].getDay() === 0 || days[i].getDay() === 6
-      b += `<td class="${we ? 'weekend' : ''}" style="font-weight:600">${r}&euro;</td>`
-    })
-    b += '</tr>'
-
-    // Ligne Personnes max (vue complete uniquement)
-    b += '<tr class="hidden-when-simple"><td class="row-label">Personnes max</td>'
-    days.forEach((d, i) => {
-      const we = d.getDay() === 0 || d.getDay() === 6
-      b += `<td class="${we ? 'weekend' : ''}" style="color:#86868b">8</td>`
-    })
-    b += '</tr>'
-
-    // Ligne Min nuits
-    b += '<tr><td class="row-label">Min nuits</td>'
-    days.forEach((d, i) => {
-      const we = d.getDay() === 0 || d.getDay() === 6
-      const ms = minStays[i]
-      b += `<td class="${we ? 'weekend' : ''}">`
-      if (ms) b += `<span style="color:#6e6e73">&#127769;${ms}</span>`
-      else b += `<span style="color:#d2d2d7">.</span>`
-      b += '</td>'
-    })
-    b += '</tr>'
-
-    // Ligne Arrivee (vue complete)
-    b += '<tr class="hidden-when-simple"><td class="row-label">Arrivee</td>'
-    days.forEach((d, i) => {
-      const we = d.getDay() === 0 || d.getDay() === 6
-      b += `<td class="${we ? 'weekend' : ''}">`
-      if (closedArrival.indexOf(i) !== -1) b += '<span style="color:#d52a44;font-size:14px">&#10060;</span>'
-      else b += '<span style="color:#d2d2d7">.</span>'
-      b += '</td>'
-    })
-    b += '</tr>'
-
-    // Ligne Depart (vue complete)
-    b += '<tr class="hidden-when-simple"><td class="row-label">Depart</td>'
-    days.forEach((d, i) => {
-      const we = d.getDay() === 0 || d.getDay() === 6
-      b += `<td class="${we ? 'weekend' : ''}">`
-      if (closedDeparture.indexOf(i) !== -1) b += '<span style="color:#ff9500;font-size:14px">&#9938;</span>'
-      else b += '<span style="color:#d2d2d7">.</span>'
-      b += '</td>'
-    })
-    b += '</tr>'
-
-    // Ligne Reservations (barres a cheval)
-    b += '<tr><td class="row-label">Reservations</td>'
-    days.forEach((d, i) => {
-      const we = d.getDay() === 0 || d.getDay() === 6
-      b += `<td class="resa-cell ${we ? 'weekend' : ''}">`
-      FAKE_BOOKINGS.forEach(bk => {
-        if (i === bk.dayStart) {
-          const span = bk.dayEnd - bk.dayStart
-          const widthPct = (span * 100)
-          b += `<div class="resa-bar ${bk.color}" style="left:50%;width:calc(${widthPct}% - 1px);z-index:2">${bk.name}</div>`
-        }
+    function renderHeader() {
+      let h = '<th class="row-label"></th>'
+      days.forEach((d, idx) => {
+        const we = d.getDay() === 0 || d.getDay() === 6
+        const showMonth = idx === 0 || d.getDate() === 1
+        h += '<th class="' + (we ? 'weekend' : '') + '">'
+        h += '<div class="day-name">' + dayNames[d.getDay()] + '</div>'
+        h += '<div class="day-num">' + d.getDate() + '</div>'
+        if (showMonth) h += '<div class="day-month">' + monthShort[d.getMonth()] + '</div>'
+        h += '</th>'
       })
-      b += '</td>'
+      header.innerHTML = h
+    }
+
+    const body = document.getElementById('cal-body')
+    const selected = new Set()
+
+    function renderBody() {
+      let b = ''
+      // Tarif
+      b += '<tr><td class="row-label">Tarif</td>'
+      state.forEach((s, i) => {
+        const we = days[i].getDay() === 0 || days[i].getDay() === 6
+        const cls = ['rate-cell']
+        if (we) cls.push('weekend')
+        if (selected.has(i)) cls.push('selected')
+        if (s.modified) cls.push('modified')
+        b += '<td class="' + cls.join(' ') + '" data-idx="' + i + '">' + s.rate + '&euro;</td>'
+      })
+      b += '</tr>'
+      // Personnes max (complete)
+      b += '<tr class="hidden-when-simple"><td class="row-label">Personnes max</td>'
+      days.forEach((d, i) => {
+        const we = d.getDay() === 0 || d.getDay() === 6
+        b += '<td class="' + (we ? 'weekend' : '') + '" style="color:#86868b">' + CAPACITY + '</td>'
+      })
+      b += '</tr>'
+      // Min nuits
+      b += '<tr><td class="row-label">Min nuits</td>'
+      state.forEach((s, i) => {
+        const we = days[i].getDay() === 0 || days[i].getDay() === 6
+        b += '<td class="' + (we ? 'weekend' : '') + '">'
+        if (s.minStay > 0) b += '<span style="color:#6e6e73">&#127769;' + s.minStay + '</span>'
+        else b += '<span style="color:#d2d2d7">.</span>'
+        b += '</td>'
+      })
+      b += '</tr>'
+      // Arrivee (complete)
+      b += '<tr class="hidden-when-simple"><td class="row-label">Arrivee</td>'
+      state.forEach((s, i) => {
+        const we = days[i].getDay() === 0 || days[i].getDay() === 6
+        b += '<td class="' + (we ? 'weekend' : '') + '">'
+        if (s.cta === 'closed') b += '<span style="color:#d52a44;font-size:14px">&#10060;</span>'
+        else b += '<span style="color:#d2d2d7">.</span>'
+        b += '</td>'
+      })
+      b += '</tr>'
+      // Depart (complete)
+      b += '<tr class="hidden-when-simple"><td class="row-label">Depart</td>'
+      state.forEach((s, i) => {
+        const we = days[i].getDay() === 0 || days[i].getDay() === 6
+        b += '<td class="' + (we ? 'weekend' : '') + '">'
+        if (s.ctd === 'closed') b += '<span style="color:#ff9500;font-size:14px">&#9938;</span>'
+        else b += '<span style="color:#d2d2d7">.</span>'
+        b += '</td>'
+      })
+      b += '</tr>'
+      // Disponibilite (complete)
+      b += '<tr class="hidden-when-simple"><td class="row-label">Disponibilite</td>'
+      state.forEach((s, i) => {
+        const we = days[i].getDay() === 0 || days[i].getDay() === 6
+        b += '<td class="' + (we ? 'weekend' : '') + '">'
+        if (s.avail === 'closed') b += '<span style="color:#d52a44">Ferme</span>'
+        else b += '<span style="color:#1f6f23">.</span>'
+        b += '</td>'
+      })
+      b += '</tr>'
+      // Reservations
+      b += '<tr><td class="row-label">Reservations</td>'
+      days.forEach((d, i) => {
+        const we = d.getDay() === 0 || d.getDay() === 6
+        b += '<td class="resa-cell ' + (we ? 'weekend' : '') + '">'
+        bookings.forEach(bk => {
+          if (i === bk.dayStart) {
+            const span = bk.dayEnd - bk.dayStart
+            const widthPct = span * 100
+            b += '<div class="resa-bar ' + bk.color + '" style="left:50%;width:calc(' + widthPct + '% - 1px);z-index:2">' + bk.name + '</div>'
+          }
+        })
+        b += '</td>'
+      })
+      b += '</tr>'
+      body.innerHTML = b
+      attachRateCellEvents()
+    }
+
+    // ===================== RESA PANEL =====================
+    function renderResaPanel() {
+      const list = document.getElementById('resa-list')
+      list.innerHTML = ''
+      upcomingResa.forEach(r => {
+        const item = document.createElement('div')
+        item.className = 'resa-item'
+        item.innerHTML =
+          '<div class="resa-bar-left" style="background:' + r.color + '"></div>' +
+          '<div class="resa-info"><div class="name">' + r.name + ' - ' + r.persons + ' personnes</div>' +
+          '<div class="dates">' + r.dates + ' - ' + r.nights + ' nuits</div></div>' +
+          '<span class="resa-source src-' + r.source + '">' + r.source.charAt(0).toUpperCase() + r.source.slice(1) + '</span>'
+        list.appendChild(item)
+      })
+      document.getElementById('resa-count').textContent = upcomingResa.length
+    }
+
+    // ===================== SELECTION (glisser) =====================
+    let isDragging = false
+    let dragStart = null
+
+    function attachRateCellEvents() {
+      const cells = body.querySelectorAll('.rate-cell')
+      cells.forEach(cell => {
+        const idx = parseInt(cell.dataset.idx, 10)
+        cell.addEventListener('mousedown', (e) => {
+          e.preventDefault()
+          isDragging = true
+          dragStart = idx
+          selected.clear()
+          selected.add(idx)
+          updateSelectionUI()
+        })
+        cell.addEventListener('mouseenter', () => {
+          if (!isDragging) return
+          selected.clear()
+          const lo = Math.min(dragStart, idx)
+          const hi = Math.max(dragStart, idx)
+          for (let i = lo; i <= hi; i++) selected.add(i)
+          updateSelectionUI()
+        })
+        // double-clic = edition inline
+        cell.addEventListener('dblclick', (e) => {
+          e.preventDefault()
+          startInlineEdit(cell, idx)
+        })
+      })
+    }
+
+    document.addEventListener('mouseup', () => {
+      if (!isDragging) return
+      isDragging = false
+      // Si un seul jour selectionne par simple clic (pas de vrai glisser), edition inline
+      if (selected.size === 1) {
+        const idx = [...selected][0]
+        const cell = body.querySelector('.rate-cell[data-idx="' + idx + '"]')
+        selected.clear()
+        updateSelectionUI()
+        startInlineEdit(cell, idx)
+      } else {
+        showFloatBar()
+      }
     })
-    b += '</tr>'
 
-    body.innerHTML = b
+    function updateSelectionUI() {
+      body.querySelectorAll('.rate-cell').forEach(cell => {
+        const idx = parseInt(cell.dataset.idx, 10)
+        if (selected.has(idx)) cell.classList.add('selected')
+        else cell.classList.remove('selected')
+      })
+      if (selected.size > 1) showFloatBar()
+    }
 
-    // ========= Toggle Simplifiee / Complete =========
+    // ===================== EDITION INLINE =====================
+    function startInlineEdit(cell, idx) {
+      if (!cell) return
+      const current = state[idx].rate
+      cell.innerHTML = '<input class="rate-input" type="number" value="' + current + '" />'
+      const input = cell.querySelector('input')
+      input.focus()
+      input.select()
+      const commit = () => {
+        const v = parseFloat(input.value)
+        if (!isNaN(v) && v > 0 && v !== current) {
+          pushUndo()
+          state[idx].rate = v
+          state[idx].modified = true
+          renderBody()
+          showToast('Tarif enregistre')
+        } else {
+          renderBody()
+        }
+      }
+      input.addEventListener('blur', commit)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { input.blur() }
+        else if (e.key === 'Escape') { renderBody() }
+      })
+    }
+
+    // ===================== FLOAT BAR =====================
+    const floatBar = document.getElementById('float-bar')
+    function showFloatBar() {
+      if (selected.size === 0) { hideFloatBar(); return }
+      document.getElementById('sel-count').textContent = selected.size
+      floatBar.classList.add('visible')
+    }
+    function hideFloatBar() { floatBar.classList.remove('visible') }
+    document.getElementById('btn-clear-sel').addEventListener('click', () => {
+      selected.clear(); updateSelectionUI(); hideFloatBar()
+    })
+
+    // ===================== POPUP =====================
+    const overlay = document.getElementById('overlay')
+    let popupMode = 'set', popupUnit = 'eur'
+
+    document.getElementById('btn-open-popup').addEventListener('click', () => {
+      if (selected.size === 0) return
+      const idxs = [...selected].sort((a,b)=>a-b)
+      const first = days[idxs[0]], last = days[idxs[idxs.length-1]]
+      document.getElementById('popup-range').textContent =
+        idxs.length + ' jour(s) : du ' + fmtShort(first) + ' au ' + fmtShort(last)
+      // reset
+      document.getElementById('rate-value').value = ''
+      document.getElementById('sel-avail').value = 'keep'
+      document.getElementById('min-stay').value = ''
+      document.getElementById('sel-cta').value = 'keep'
+      document.getElementById('sel-ctd').value = 'keep'
+      popupMode = 'set'; popupUnit = 'eur'
+      document.querySelectorAll('#seg-mode button').forEach(b => b.classList.toggle('active', b.dataset.mode==='set'))
+      document.querySelectorAll('#seg-unit button').forEach(b => b.classList.toggle('active', b.dataset.unit==='eur'))
+      updatePreview()
+      overlay.classList.add('visible')
+    })
+
+    document.querySelectorAll('#seg-mode button').forEach(b => {
+      b.addEventListener('click', () => {
+        popupMode = b.dataset.mode
+        document.querySelectorAll('#seg-mode button').forEach(x => x.classList.toggle('active', x===b))
+        updatePreview()
+      })
+    })
+    document.querySelectorAll('#seg-unit button').forEach(b => {
+      b.addEventListener('click', () => {
+        popupUnit = b.dataset.unit
+        document.querySelectorAll('#seg-unit button').forEach(x => x.classList.toggle('active', x===b))
+        updatePreview()
+      })
+    })
+    document.getElementById('rate-value').addEventListener('input', updatePreview)
+
+    function computeNewRate(current, val) {
+      if (isNaN(val)) return current
+      if (popupMode === 'set') {
+        return popupUnit === 'pct' ? Math.round(current * (1 + val/100)) : val
+      } else if (popupMode === 'inc') {
+        return popupUnit === 'pct' ? Math.round(current * (1 + val/100)) : current + val
+      } else {
+        return popupUnit === 'pct' ? Math.round(current * (1 - val/100)) : current - val
+      }
+    }
+
+    function updatePreview() {
+      const val = parseFloat(document.getElementById('rate-value').value)
+      const box = document.getElementById('rate-preview')
+      if (isNaN(val) || selected.size === 0) { box.textContent = 'Saisissez une valeur'; return }
+      const idxs = [...selected]
+      const sample = state[idxs[0]].rate
+      const result = computeNewRate(sample, val)
+      const verb = popupMode === 'set' ? 'defini a' : (popupMode === 'inc' ? 'augmente a' : 'reduit a')
+      box.textContent = 'Exemple : ' + sample + ' EUR -> tarif ' + verb + ' ' + result + ' EUR'
+    }
+
+    document.getElementById('btn-cancel').addEventListener('click', () => overlay.classList.remove('visible'))
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('visible') })
+
+    document.getElementById('btn-apply').addEventListener('click', () => {
+      const idxs = [...selected]
+      if (idxs.length === 0) { overlay.classList.remove('visible'); return }
+      pushUndo()
+      const rateVal = parseFloat(document.getElementById('rate-value').value)
+      const avail = document.getElementById('sel-avail').value
+      const minStayVal = document.getElementById('min-stay').value
+      const cta = document.getElementById('sel-cta').value
+      const ctd = document.getElementById('sel-ctd').value
+      idxs.forEach(i => {
+        if (!isNaN(rateVal)) { state[i].rate = computeNewRate(state[i].rate, rateVal); state[i].modified = true }
+        if (avail !== 'keep') { state[i].avail = avail; state[i].modified = true }
+        if (minStayVal !== '') { state[i].minStay = parseInt(minStayVal,10); state[i].modified = true }
+        if (cta !== 'keep') { state[i].cta = cta; state[i].modified = true }
+        if (ctd !== 'keep') { state[i].ctd = ctd; state[i].modified = true }
+      })
+      overlay.classList.remove('visible')
+      selected.clear()
+      hideFloatBar()
+      renderBody()
+      showToast('Modifications enregistrees')
+    })
+
+    // ===================== UNDO + TOGGLE + TOAST =====================
+    document.getElementById('btn-undo').addEventListener('click', doUndo)
+
     const btnS = document.getElementById('btn-simple')
     const btnC = document.getElementById('btn-complete')
     const calTable = document.getElementById('cal-table')
-    btnS.addEventListener('click', () => {
-      calTable.classList.remove('show-complete')
-      btnS.classList.add('active')
-      btnC.classList.remove('active')
-    })
-    btnC.addEventListener('click', () => {
-      calTable.classList.add('show-complete')
-      btnC.classList.add('active')
-      btnS.classList.remove('active')
-    })
+    btnS.addEventListener('click', () => { calTable.classList.remove('show-complete'); btnS.classList.add('active'); btnC.classList.remove('active') })
+    btnC.addEventListener('click', () => { calTable.classList.add('show-complete'); btnC.classList.add('active'); btnS.classList.remove('active') })
+
+    let toastTimer = null
+    function showToast(msg) {
+      const t = document.getElementById('toast')
+      t.textContent = msg
+      t.classList.add('visible')
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => t.classList.remove('visible'), 1800)
+    }
+
+    // ===================== NAV RANGE =====================
+    document.getElementById('nav-range').textContent = fmtShort(days[0]) + ' - ' + fmtShort(days[29])
+
+    // ===================== INIT =====================
+    renderHeader()
+    renderBody()
+    renderResaPanel()
   </script>
 </body>
 </html>
