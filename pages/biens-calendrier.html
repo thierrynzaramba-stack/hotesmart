@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendrier - HoteSmart</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f7;
+      min-height: 100vh;
+      color: #1d1d1f;
+    }
+    header {
+      background: #fff;
+      padding: 16px 24px;
+      border-bottom: 1px solid #e5e5e7;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header .left { display: flex; align-items: center; gap: 16px; }
+    header a.back {
+      color: #007aff;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    .toggle {
+      display: inline-flex;
+      background: #f0f0f0;
+      border-radius: 8px;
+      padding: 3px;
+    }
+    .toggle button {
+      background: transparent;
+      border: none;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 6px;
+      color: #6e6e73;
+      font-weight: 500;
+    }
+    .toggle button.active {
+      background: #fff;
+      color: #1d1d1f;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .card h2 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge-count {
+      background: #f0f0f0;
+      color: #6e6e73;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .resa-list { display: grid; gap: 8px; }
+    .resa-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      background: #f7f7f9;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .resa-bar-left {
+      width: 4px;
+      height: 36px;
+      border-radius: 2px;
+    }
+    .resa-info { flex: 1; }
+    .resa-info .name { font-weight: 600; }
+    .resa-info .dates { color: #6e6e73; font-size: 12px; }
+    .resa-source {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .src-airbnb { background: #ffe5e8; color: #d52a44; }
+    .src-booking { background: #e6f0ff; color: #0d4ea6; }
+    .src-direct { background: #e8f5e9; color: #1f6f23; }
+    .calendar-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .nav-btn {
+      background: #f0f0f0;
+      border: none;
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .nav-range { font-size: 12px; color: #6e6e73; }
+    .cal-wrapper {
+      overflow-x: auto;
+      border: 1px solid #e5e5e7;
+      border-radius: 8px;
+    }
+    table.cal {
+      border-collapse: collapse;
+      font-size: 12px;
+      width: 100%;
+      table-layout: fixed;
+    }
+    table.cal th, table.cal td {
+      padding: 6px 2px;
+      text-align: center;
+      border-right: 1px solid #f0f0f0;
+      white-space: nowrap;
+      width: 36px;
+      min-width: 36px;
+    }
+    table.cal th:last-child, table.cal td:last-child { border-right: none; }
+    table.cal thead tr { background: #fafafa; }
+    table.cal tbody tr { border-top: 1px solid #f0f0f0; }
+    table.cal .row-label {
+      text-align: left;
+      padding-left: 10px;
+      font-size: 11px;
+      color: #6e6e73;
+      width: 100px;
+      min-width: 100px;
+      background: #fafafa;
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      border-right: 1px solid #e5e5e7;
+      font-weight: 500;
+    }
+    table.cal .day-num { font-weight: 600; font-size: 13px; color: #1d1d1f; }
+    table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; letter-spacing: 0.3px; }
+    table.cal .day-month { font-size: 9px; color: #86868b; }
+    table.cal .weekend { background: rgba(0,0,0,0.025); }
+    table.cal .resa-cell { position: relative; padding: 0 !important; height: 28px; }
+    .resa-bar {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      color: white;
+      font-size: 10px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .resa-bar.blue { background: #0d4ea6; }
+    .resa-bar.green { background: #1f6f23; }
+    .resa-bar.red { background: #d52a44; }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #f0f0f0;
+      font-size: 11px;
+      color: #6e6e73;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-square {
+      display: inline-block;
+      width: 14px;
+      height: 8px;
+      border-radius: 2px;
+    }
+    .hidden-when-simple { display: none; }
+    table.cal.show-complete .hidden-when-simple { display: table-row; }
+    .sel-bien {
+      padding: 6px 10px;
+      border: 1px solid #d2d2d7;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #fff;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="left">
+      <a href="/biens" class="back">&larr; Mes biens</a>
+      <select class="sel-bien" id="sel-bien">
+        <option>Bellevue (capacite 8)</option>
+        <option>Mauche vue (capacite 4)</option>
+        <option>Test (capacite 7)</option>
+      </select>
+    </div>
+    <div class="toggle">
+      <button id="btn-simple" class="active">Simplifiee</button>
+      <button id="btn-complete">Complete</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>Reservations a venir <span class="badge-count" id="resa-count">3</span></h2>
+      <div class="resa-list" id="resa-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="calendar-header">
+        <h2 style="margin-bottom:0">Calendrier - 30 prochains jours</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="nav-btn">&larr;</button>
+          <span class="nav-range" id="nav-range">28 mai - 26 juin</span>
+          <button class="nav-btn">&rarr;</button>
+        </div>
+      </div>
+
+      <div class="cal-wrapper">
+        <table class="cal" id="cal-table">
+          <thead><tr id="cal-header"></tr></thead>
+          <tbody id="cal-body"></tbody>
+        </table>
+      </div>
+
+      <div class="legend">
+        <div class="legend-item">&#127769; Nuits minimum</div>
+        <div class="legend-item">&#10060; Arrivee bloquee</div>
+        <div class="legend-item">&#9938; Depart bloque</div>
+        <div class="legend-item"><span class="legend-square" style="background:#0d4ea6"></span>Reserve</div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { getUser } from '/shared/supabase.js'
+
+    const user = await getUser()
+    if (!user) {
+      window.location.href = '/pages/login.html'
+    }
+
+    // ========= Donnees factices V1 =========
+    const FAKE_BOOKINGS = [
+      { dayStart: 18, dayEnd: 21, name: 'Jean Dupont', persons: 4, source: 'airbnb', color: 'red', label: 'Airbnb' },
+      { dayStart: 25, dayEnd: 28, name: 'Marie Martin', persons: 2, source: 'booking', color: 'blue', label: 'Booking' }
+    ]
+    const FAKE_LONG_RESA = { dayStart: -1, name: 'Sophie Bernard', persons: 6, source: 'direct', label: 'Direct', dates: '28 juin -> 5 juillet', nights: 7 }
+
+    // ========= Encart "Reservations a venir" =========
+    const resaList = document.getElementById('resa-list')
+    const allResa = [
+      { name: 'Jean Dupont', persons: 4, dates: '15 -> 18 juin', nights: 3, source: 'airbnb', color: '#d52a44' },
+      { name: 'Marie Martin', persons: 2, dates: '22 -> 25 juin', nights: 3, source: 'booking', color: '#0d4ea6' },
+      { name: 'Sophie Bernard', persons: 6, dates: '28 juin -> 5 juillet', nights: 7, source: 'direct', color: '#1f6f23' }
+    ]
+    allResa.forEach(r => {
+      const item = document.createElement('div')
+      item.className = 'resa-item'
+      item.innerHTML = `
+        <div class="resa-bar-left" style="background:${r.color}"></div>
+        <div class="resa-info">
+          <div class="name">${r.name} - ${r.persons} personnes</div>
+          <div class="dates">${r.dates} - ${r.nights} nuits</div>
+        </div>
+        <span class="resa-source src-${r.source}">${r.source.charAt(0).toUpperCase() + r.source.slice(1)}</span>
+      `
+      resaList.appendChild(item)
+    })
+
+    // ========= Calendrier 30 jours =========
+    const today = new Date()
+    const days = []
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(today)
+      d.setDate(today.getDate() + i)
+      days.push(d)
+    }
+    const dayNames = ['DIM', 'LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM']
+    const monthShort = ['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
+
+    // En-tete dates
+    const header = document.getElementById('cal-header')
+    let h = '<th class="row-label"></th>'
+    days.forEach((d, idx) => {
+      const we = d.getDay() === 0 || d.getDay() === 6
+      const showMonth = idx === 0 || d.getDate() === 1
+      h += `<th class="${we ? 'weekend' : ''}">`
+      h += `<div class="day-name">${dayNames[d.getDay()]}</div>`
+      h += `<div class="day-num">${d.getDate()}</div>`
+      if (showMonth) h += `<div class="day-month">${monthShort[d.getMonth()]}</div>`
+      h += '</th>'
+    })
+    header.innerHTML = h
+
+    // Donnees factices pour le calendrier
+    const rates = days.map((d) => {
+      const dow = d.getDay()
+      if (dow === 5 || dow === 6) return 100
+      if (dow === 0) return 90
+      return 80
+    })
+    const minStays = {}
+    days.forEach((d, i) => {
+      const dow = d.getDay()
+      if (dow === 5 || dow === 6) minStays[i] = 3
+      else if (dow === 1) minStays[i] = 2
+    })
+    const closedArrival = [10]
+    const closedDeparture = [17]
+
+    // Corps du tableau
+    const body = document.getElementById('cal-body')
+    let b = ''
+
+    // Ligne Tarif
+    b += '<tr><td class="row-label">Tarif</td>'
+    rates.forEach((r, i) => {
+      const we = days[i].getDay() === 0 || days[i].getDay() === 6
+      b += `<td class="${we ? 'weekend' : ''}" style="font-weight:600">${r}&euro;</td>`
+    })
+    b += '</tr>'
+
+    // Ligne Personnes max (vue complete uniquement)
+    b += '<tr class="hidden-when-simple"><td class="row-label">Personnes max</td>'
+    days.forEach((d, i) => {
+      const we = d.getDay() === 0 || d.getDay() === 6
+      b += `<td class="${we ? 'weekend' : ''}" style="color:#86868b">8</td>`
+    })
+    b += '</tr>'
+
+    // Ligne Min nuits
+    b += '<tr><td class="row-label">Min nuits</td>'
+    days.forEach((d, i) => {
+      const we = d.getDay() === 0 || d.getDay() === 6
+      const ms = minStays[i]
+      b += `<td class="${we ? 'weekend' : ''}">`
+      if (ms) b += `<span style="color:#6e6e73">&#127769;${ms}</span>`
+      else b += `<span style="color:#d2d2d7">.</span>`
+      b += '</td>'
+    })
+    b += '</tr>'
+
+    // Ligne Arrivee (vue complete)
+    b += '<tr class="hidden-when-simple"><td class="row-label">Arrivee</td>'
+    days.forEach((d, i) => {
+      const we = d.getDay() === 0 || d.getDay() === 6
+      b += `<td class="${we ? 'weekend' : ''}">`
+      if (closedArrival.indexOf(i) !== -1) b += '<span style="color:#d52a44;font-size:14px">&#10060;</span>'
+      else b += '<span style="color:#d2d2d7">.</span>'
+      b += '</td>'
+    })
+    b += '</tr>'
+
+    // Ligne Depart (vue complete)
+    b += '<tr class="hidden-when-simple"><td class="row-label">Depart</td>'
+    days.forEach((d, i) => {
+      const we = d.getDay() === 0 || d.getDay() === 6
+      b += `<td class="${we ? 'weekend' : ''}">`
+      if (closedDeparture.indexOf(i) !== -1) b += '<span style="color:#ff9500;font-size:14px">&#9938;</span>'
+      else b += '<span style="color:#d2d2d7">.</span>'
+      b += '</td>'
+    })
+    b += '</tr>'
+
+    // Ligne Reservations (barres a cheval)
+    b += '<tr><td class="row-label">Reservations</td>'
+    days.forEach((d, i) => {
+      const we = d.getDay() === 0 || d.getDay() === 6
+      b += `<td class="resa-cell ${we ? 'weekend' : ''}">`
+      FAKE_BOOKINGS.forEach(bk => {
+        if (i === bk.dayStart) {
+          const span = bk.dayEnd - bk.dayStart
+          const widthPct = (span * 100)
+          b += `<div class="resa-bar ${bk.color}" style="left:50%;width:calc(${widthPct}% - 1px);z-index:2">${bk.name}</div>`
+        }
+      })
+      b += '</td>'
+    })
+    b += '</tr>'
+
+    body.innerHTML = b
+
+    // ========= Toggle Simplifiee / Complete =========
+    const btnS = document.getElementById('btn-simple')
+    const btnC = document.getElementById('btn-complete')
+    const calTable = document.getElementById('cal-table')
+    btnS.addEventListener('click', () => {
+      calTable.classList.remove('show-complete')
+      btnS.classList.add('active')
+      btnC.classList.remove('active')
+    })
+    btnC.addEventListener('click', () => {
+      calTable.classList.add('show-complete')
+      btnC.classList.add('active')
+      btnS.classList.remove('active')
+    })
+  </script>
+</body>
+</html>

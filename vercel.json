@@ -55,6 +55,10 @@
       "destination": "/pages/biens-nouveau"
     },
     {
+      "source": "/biens/:id/calendrier",
+      "destination": "/pages/biens-calendrier"
+    },
+    {
       "source": "/biens/:id",
       "destination": "/pages/biens-detail"
     },
