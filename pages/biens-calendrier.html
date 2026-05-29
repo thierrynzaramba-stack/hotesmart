@@ -154,8 +154,16 @@
 
   <script type="module">
     import { getUser } from '/shared/supabase.js'
+    import { api } from '/shared/api-client.js'
     const user = await getUser()
     if (!user) { window.location.href = '/pages/login.html' }
+
+    // id du bien depuis l'URL /biens/:id/calendrier
+    function bienIdFromUrl(){
+      const m = window.location.pathname.match(/\/biens\/([^/]+)\/calendrier/)
+      return m ? decodeURIComponent(m[1]) : null
+    }
+    const URL_BIEN_ID = bienIdFromUrl()
 
     // Parametres du popup (chacun avec ses propres jours, sauf perPerson)
     const PARAMS = [
@@ -187,20 +195,36 @@
     function isMonthStart(i){ return i===0||days[i].getDate()===1 }
     function isToday(i){ return i===0 }
 
-    const BIENS=[
-      { id:'bellevue', name:'Bellevue', capacity:8, base:80, we:100, sun:90, included:4, extraFee:15, resa:[{start:8,span:4,name:'Jean Dupont',color:'red'},{start:17,span:3,name:'Marie M.',color:'blue'}] },
-      { id:'mauchevue', name:'Mauche vue', capacity:4, base:65, we:80, sun:70, included:2, extraFee:12, resa:[{start:3,span:5,name:'Famille Leroy',color:'green'},{start:22,span:2,name:'P. Costa',color:'blue'}] },
-      { id:'test', name:'Test', capacity:7, base:90, we:120, sun:100, included:2, extraFee:10, resa:[{start:12,span:6,name:'Sophie B.',color:'red'}] }
-    ]
-    // config par personne par bien (modifiable popup)
-    const ppConfig={}
-    BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
+    // BIENS charges depuis Supabase. Structure runtime :
+    // { id, name, capacity, base, included, extraFee, currency, resa:[{startISO,endISO,name,color}] }
+    let BIENS=[]
+    const ppConfig={}   // { bienId: {included, extraFee} }
+    const invByBien={}  // { bienId: { 'YYYY-MM-DD': {rate,avail,stop_sell,min_stay_arrival,...} } }  donnees serveur brutes
 
     const states={}
-    function initState(b){ states[b.id]=days.map(d=>{ const dow=d.getDay(); let rate=b.base; if(dow===5||dow===6)rate=b.we; else if(dow===0)rate=b.sun; let ms=0; if(dow===5||dow===6)ms=3; else if(dow===1)ms=2; return {rate, avail:'open', minStayArr:ms, minStayThrough:0, maxStay:0, cta:'open', ctd:'open', stopSell:'open'} }) }
+    // Pour une date : si inventory configure -> valeurs ; sinon defaut (prix de base partout)
+    function initState(b){
+      const inv = invByBien[b.id] || {}
+      states[b.id]=days.map(d=>{
+        const iso=toISO(d)
+        const r=inv[iso]
+        const rate = (r && r.rate!=null) ? Number(r.rate) : b.base
+        return {
+          rate,
+          avail: (r && r.stop_sell) ? 'closed' : 'open',
+          minStayArr: (r && r.min_stay_arrival)||0,
+          minStayThrough: (r && r.min_stay_through)||0,
+          maxStay: (r && r.max_stay)||0,
+          cta: (r && r.cta) ? 'closed' : 'open',
+          ctd: (r && r.ctd) ? 'closed' : 'open',
+          stopSell: (r && r.stop_sell) ? 'closed' : 'open',
+          modified: false
+        }
+      })
+    }
 
     // Prix max calcule = rate + (capacite - included) * extraFee
-    function maxRateOf(bien, dayRate){ const cfg=ppConfig[bien.id]; const extra=Math.max(0, bien.capacity-cfg.included); return dayRate + extra*cfg.extraFee }
+    function maxRateOf(bien, dayRate){ const cfg=ppConfig[bien.id]||{included:bien.included,extraFee:bien.extraFee}; const extra=Math.max(0, bien.capacity-cfg.included); return dayRate + extra*(cfg.extraFee||0) }
 
     function configuredRowParams(){ const setp=new Set(); selectedBiens.forEach(bid=>{const st=states[bid]; if(!st)return; st.forEach(s=>{for(const k in ROW_DEFAULTS){if(s[k]!==ROW_DEFAULTS[k])setp.add(k)}})}); return setp }
 
@@ -209,8 +233,8 @@
     function pushUndo(bid){ undoStack.push({bid,snap:JSON.stringify(states[bid]),pp:JSON.stringify(ppConfig[bid])}); document.getElementById('btn-undo').disabled=false }
     function doUndo(){ if(!undoStack.length)return; const u=undoStack.pop(); states[u.bid]=JSON.parse(u.snap); ppConfig[u.bid]=JSON.parse(u.pp); if(!undoStack.length)document.getElementById('btn-undo').disabled=true; renderBlocks(); showToast('Action annulee') }
 
-    let selectedBiens=[BIENS[0].id]
-    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();renderBlocks()});p.appendChild(o)});updateMsLabel() }
+    let selectedBiens=[]
+    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',async e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();await reloadInventory()});p.appendChild(o)});updateMsLabel() }
     function updateMsLabel(){ const l=document.getElementById('ms-label'); if(!selectedBiens.length)l.textContent='Choisir des biens'; else if(selectedBiens.length===1){const b=BIENS.find(x=>x.id===selectedBiens[0]);l.textContent=b?b.name:'1 bien'}else l.textContent=selectedBiens.length+' biens' }
     document.getElementById('ms-trigger').addEventListener('click',()=>document.getElementById('multi-select').classList.toggle('open'))
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
@@ -261,7 +285,7 @@
       html+='</tr></thead><tbody>'
       // Reservations
       html+='<tr><td class="row-label">Reservations</td>'
-      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';bien.resa.forEach(bk=>{if(i===bk.start){const w=bk.span*100;html+='<div class="resa-bar '+bk.color+'" style="left:50%;width:calc('+w+'% - 1px);z-index:2">'+bk.name+'</div>'}});html+='</td>'})
+      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=bk.span*100;html+='<div class="resa-bar '+bk.color+'" style="left:50%;width:calc('+w+'% - 1px);z-index:2">'+bk.name+'</div>'}});html+='</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
@@ -395,37 +419,138 @@
     document.getElementById('btn-cancel').addEventListener('click',()=>overlay.classList.remove('visible'))
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.classList.remove('visible')})
 
-    document.getElementById('btn-apply').addEventListener('click',()=>{
+    document.getElementById('btn-apply').addEventListener('click',async ()=>{
       if(!popupBienId){overlay.classList.remove('visible');return}
       const st=states[popupBienId];const bien=BIENS.find(b=>b.id===popupBienId)
       const sISO=document.getElementById('range-start').value,eISO=document.getElementById('range-end').value
       pushUndo(popupBienId)
       let touched=0
-      // perPerson (global, sans jours)
-      if(pending.perPerson){ ppConfig[popupBienId]={included:pending.perPerson.included,extraFee:pending.perPerson.extraFee}; touched++ }
+      const segments=[]   // pour le serveur
+      // perPerson (global, sans jours) -> on push aussi (recalc rate plan cote serveur plus tard ; ici on stocke config)
+      if(pending.perPerson){ ppConfig[popupBienId]={included:pending.perPerson.included,extraFee:pending.perPerson.extraFee}; touched++
+        segments.push({ kind:'perPerson', included:pending.perPerson.included, extra_guest_fee:pending.perPerson.extraFee })
+      }
       // params avec jours
       PARAMS.forEach(p=>{
         if(p.type==='perperson')return
         const pv=pending[p.key]; if(!pv)return
         const hasVal = p.type==='price' ? (pv.value!==''&&!isNaN(parseFloat(pv.value))) : (p.type==='num' ? pv.value!=='' : pv.value!=='keep')
         if(!hasVal)return
+        // jours coches -> liste de dow JS
+        const daysArr=[]; for(const k in pv.dow){ if(pv.dow[k]) daysArr.push(parseInt(k,10)) }
+        // application locale (rendu immediat)
         days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&pv.dow[d.getDay()]){ if(p.type==='price'){st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value));st[i].modified=true}else if(p.type==='num'){st[i][p.key]=parseInt(pv.value,10)||0;st[i].modified=true}else{st[i][p.key]=pv.value;st[i].modified=true} } })
+        // segment serveur (mapping interne -> serveur)
+        const seg={ date_from:sISO, date_to:eISO, days:daysArr }
+        if(p.key==='rate'){
+          // pour le serveur on envoie la valeur finale calculee par date n'est pas possible en 1 seg si mode +/-
+          // -> en mode 'set' EUR on envoie la valeur ; sinon on calcule un rate moyen par date cote local et on envoie par date
+          if(pv.mode==='set'&&pv.unit==='eur'){ seg.rate=parseFloat(pv.value) }
+          else { seg.__perDate=true } // gere plus bas (envoi valeurs finales par date)
+        }
+        else if(p.key==='minStayArr') seg.min_stay_arrival=parseInt(pv.value,10)||0
+        else if(p.key==='minStayThrough') seg.min_stay_through=parseInt(pv.value,10)||0
+        else if(p.key==='maxStay') seg.max_stay=parseInt(pv.value,10)||0
+        else if(p.key==='cta') seg.cta=(pv.value==='closed')
+        else if(p.key==='ctd') seg.ctd=(pv.value==='closed')
+        else if(p.key==='stopSell') seg.stop_sell=(pv.value==='closed')
+        else if(p.key==='avail') seg.stop_sell=(pv.value==='closed')
+        segments.push(seg)
         touched++
       })
+
+      // Pour les segments rate en mode +/- ou %, on envoie les valeurs finales par date (depuis le state local deja calcule)
+      const finalSegments=[]
+      segments.forEach(seg=>{
+        if(seg.kind==='perPerson'){ finalSegments.push(seg); return }
+        if(seg.__perDate){
+          // une entree par date concernee avec le rate final
+          days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=seg.date_from&&iso<=seg.date_to&&(!seg.days.length||seg.days.includes(d.getDay()))){ finalSegments.push({ date_from:iso, date_to:iso, rate:st[i].rate }) } })
+        } else { delete seg.__perDate; finalSegments.push(seg) }
+      })
+
       overlay.classList.remove('visible');sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks()
-      showToast(touched>0?'Modifications enregistrees':'Aucune modification')
+
+      // ---- Push serveur ----
+      if(touched>0){
+        showToast('Enregistrement...')
+        try{
+          const resp=await api.calendar.save(popupBienId, finalSegments)
+          if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre (' + resp.warnings.length + ' avertissement)') }
+          else { showToast('Enregistre et publie') }
+          // recharge l'inventory pour refleter l'etat serveur
+          await reloadInventory()
+        }catch(err){ showToast('Erreur: ' + (err.message||'sauvegarde')) }
+      } else { showToast('Aucune modification') }
     })
 
     document.getElementById('btn-undo').addEventListener('click',doUndo)
     const btnS=document.getElementById('btn-simple'),btnC=document.getElementById('btn-complete')
     btnS.addEventListener('click',()=>{showComplete=false;btnS.classList.add('active');btnC.classList.remove('active');renderBlocks()})
     btnC.addEventListener('click',()=>{showComplete=true;btnC.classList.add('active');btnS.classList.remove('active');renderBlocks()})
-    document.getElementById('period-select').addEventListener('change',e=>{MONTHS=parseInt(e.target.value,10);buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();renderBlocks()})
+    document.getElementById('period-select').addEventListener('change',async e=>{MONTHS=parseInt(e.target.value,10);buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();await reloadInventory()})
 
     let toastTimer=null
     function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('visible'),1800)}
 
-    buildDays();renderMultiSelect();renderMonthPills();renderMonthBand();renderBlocks()
+    // ===== CHARGEMENT DONNEES REELLES =====
+    const COLORS_BY_SOURCE = { airbnb:'red', booking:'blue', direct:'green' }
+    function rangeISO(){ return { start: toISO(days[0]), end: toISO(days[days.length-1]) } }
+
+    // Transforme les biens Supabase en structure runtime
+    function mapBien(p){
+      return { id:p.id, name:p.name, capacity:p.capacity||1, base:Number(p.base_price)||0,
+        included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0,
+        currency:p.currency||'EUR', resa:[] }
+    }
+    function mapResa(list){
+      return (list||[]).map(b=>{
+        const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
+        const span=Math.max(1, Math.round((co-ci)/86400000))
+        const src=(b.source||'direct').toLowerCase()
+        return { startISO:b.checkin, span, name:b.guest_name||'Reservation', color:COLORS_BY_SOURCE[src]||'green' }
+      })
+    }
+
+    async function loadData(){
+      // 1) liste de tous les biens du user (pour le dropdown)
+      let all=[]
+      try { const r=await api.channel.listProperties(); all=r.properties||[] } catch(e){ showToast('Erreur chargement biens'); }
+      BIENS = all.map(mapBien)
+      // pre-selection : bien de l'URL si present et possede, sinon le premier
+      if(URL_BIEN_ID && BIENS.find(b=>b.id===URL_BIEN_ID)) selectedBiens=[URL_BIEN_ID]
+      else if(BIENS.length) selectedBiens=[BIENS[0].id]
+      else selectedBiens=[]
+      BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
+      renderMultiSelect()
+      await reloadInventory()
+    }
+
+    // Charge inventory + resa pour les biens selectionnes et la plage courante
+    async function reloadInventory(){
+      if(!selectedBiens.length){ renderBlocks(); return }
+      const {start,end}=rangeISO()
+      try{
+        const r=await api.calendar.load(selectedBiens, start, end)
+        // inventory brut
+        ;(selectedBiens).forEach(id=>{ invByBien[id]=(r.inventory&&r.inventory[id])||{} })
+        // resa
+        if(r.bookings){ BIENS.forEach(b=>{ if(r.bookings[b.id]) b.resa=mapResa(r.bookings[b.id]) }) }
+        // config par personne depuis properties (si renvoyee)
+        if(r.properties){ r.properties.forEach(p=>{ ppConfig[p.id]={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}
+          const bb=BIENS.find(x=>x.id===p.id); if(bb){ bb.base=Number(p.base_price)||bb.base; bb.included=ppConfig[p.id].included; bb.extraFee=ppConfig[p.id].extraFee } }) }
+      }catch(e){ showToast('Erreur chargement calendrier') }
+      // reconstruire les states a partir de l'inventory
+      Object.keys(states).forEach(k=>delete states[k])
+      renderBlocks()
+    }
+
+    // recharge inventory quand on change de periode ou de selection
+    const _origPeriodHandler = document.getElementById('period-select')
+    // (le handler period-select existant appelle renderBlocks ; on le complete pour recharger l'inventory)
+
+    buildDays(); renderMonthPills(); renderMonthBand()
+    await loadData()
   </script>
 </body>
 </html>

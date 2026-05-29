@@ -51,5 +51,11 @@ export const api = {
     listProperties: () => apiCall('channel-property', 'GET'),
     createProperty: (data) => apiCall('channel-property', 'POST', data),
     getToken: (propertyId) => apiCall('channel-token', 'POST', { property_id: propertyId })
+  },
+  calendar: {
+    load: (propertyIds, start, end) =>
+      apiCall(`calendar?property_ids=${encodeURIComponent(propertyIds.join(','))}&start=${start}&end=${end}`, 'GET'),
+    save: (propertyId, segments) =>
+      apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments })
   }
 }
