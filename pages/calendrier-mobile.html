@@ -261,37 +261,53 @@
     // est-ce une date libre (ni reservee ni fermee) ?
     function isFree(iso){ return !resaSet.has(iso) && !isUnavail(iso) }
 
-    // Detection des jours orphelins : trous trop courts pour le min-stay + incoherences arrivee/depart.
-    // Retourne un Set d'ISO orphelins, calcule sur la plage des donnees chargees (mois courant).
+    // Detection orphelins : un jour libre est orphelin si AUCUN sejour valide ne peut le couvrir.
+    // Un sejour [A,D[ est valide si : tous les jours A..D-1 libres, A sans CTA, D sans CTD,
+    // duree (D-A) >= min-stay applicable (max des min_stay_arrival/through concernes, defaut 1).
     function computeOrphans(){
       const orphans=new Set()
-      // on travaille sur les jours du mois affiche
-      const dates=[]
+      // bornes d'analyse : on etend un peu au-dela du mois pour les sejours a cheval
+      const startD=new Date(viewYear,viewMonth,1); startD.setDate(startD.getDate()-10)
+      const endD=new Date(viewYear,viewMonth+1,0); endD.setDate(endD.getDate()+10)
+      const all=[]
+      for(let d=new Date(startD); d<=endD; d.setDate(d.getDate()+1)) all.push(toISO(d))
+      const idxOf={}; all.forEach((iso,i)=>idxOf[iso]=i)
+      const freeAt=(iso)=> isFree(iso)
+      const ctaAt=(iso)=>{ const r=inv[iso]; return !!(r&&r.cta) }
+      const ctdAt=(iso)=>{ const r=inv[iso]; return !!(r&&r.ctd) }
+      const minStayArrAt=(iso)=>{ const r=inv[iso]; return (r&&r.min_stay_arrival)?r.min_stay_arrival:1 }
+      const minStayThroughAt=(iso)=>{ const r=inv[iso]; return (r&&r.min_stay_through)?r.min_stay_through:0 }
+
+      // jours du mois affiche uniquement (ce qu'on colore)
+      const monthDays=[]
       const last=new Date(viewYear,viewMonth+1,0).getDate()
-      for(let day=1; day<=last; day++){ dates.push(toISO(new Date(viewYear,viewMonth,day))) }
-      // 1) trous trop courts : suites de jours libres bordees par reserve/ferme, de longueur < minstay requis
-      let i=0
-      while(i<dates.length){
-        if(isFree(dates[i])){
-          let j=i; while(j<dates.length && isFree(dates[j])) j++
-          const gapLen=j-i // nb de nuits libres consecutives
-          // min-stay requis sur ce trou : max des min_stay_arrival presents (defaut 1)
-          let req=1
-          for(let k=i;k<j;k++){ const r=inv[dates[k]]; if(r&&r.min_stay_arrival>req)req=r.min_stay_arrival }
-          // bordé a gauche/droite par une contrainte (reservation/fermeture) ou bords du mois
-          const borderedLeft = (i===0) || !isFree(dates[i-1])
-          const borderedRight = (j>=dates.length) || !isFree(dates[j])
-          if(gapLen < req && borderedLeft && borderedRight){ for(let k=i;k<j;k++) orphans.add(dates[k]) }
-          i=j
-        } else i++
-      }
-      // 2) incoherences arrivee/depart : jour libre avec CTA actif et veille non-libre (impossible d'arriver ni de continuer)
-      dates.forEach((iso,idx)=>{
-        if(!isFree(iso))return
-        const r=inv[iso]||{}
-        const prevIso = idx>0?dates[idx-1]:null
-        const prevBusy = prevIso && !isFree(prevIso)
-        if(r.cta && prevBusy) orphans.add(iso)   // arrivee bloquee + veille occupee => personne ne peut prendre ce jour
+      for(let day=1; day<=last; day++) monthDays.push(toISO(new Date(viewYear,viewMonth,day)))
+
+      monthDays.forEach(J=>{
+        if(!freeAt(J)) return  // seulement les jours libres
+        const jIdx=idxOf[J]; if(jIdx==null) return
+        let bookable=false
+        // arrivees possibles A : de J en remontant tant que libre (A<=J)
+        for(let ai=jIdx; ai>=0 && freeAt(all[ai]); ai--){
+          const A=all[ai]
+          if(ctaAt(A)) continue           // arrivee bloquee ce jour
+          // departs possibles D : strictement apres J, tant que libre ; D doit etre > J
+          for(let di=jIdx+1; di<all.length; di++){
+            // tous les jours A..di-1 doivent etre libres (on avance tant que libre)
+            if(!freeAt(all[di-1])) break
+            const D=all[di]
+            // D est le jour de depart (peut etre occupe : on part le matin) -> D doit juste ne pas avoir CTD
+            if(ctdAt(D)) { continue }
+            const nights=di-ai
+            if(nights<1) continue
+            // min-stay applicable
+            let req=minStayArrAt(A)
+            for(let k=ai;k<di;k++){ const mt=minStayThroughAt(all[k]); if(mt>req)req=mt }
+            if(nights>=req){ bookable=true; break }
+          }
+          if(bookable) break
+        }
+        if(!bookable) orphans.add(J)
       })
       return orphans
     }
