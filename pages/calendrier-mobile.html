@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#007aff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Tarifs" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <title>Tarifs - HoteSmart</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; -webkit-user-select: none; user-select: none; padding-bottom: env(safe-area-inset-bottom); }
+    .topbar { background: #fff; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; border-bottom: 1px solid #e5e5e7; position: sticky; top: 0; z-index: 20; }
+    .topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .back { color: #007aff; text-decoration: none; font-size: 15px; }
+    .bien-select { flex: 1; padding: 9px 12px; border: 1px solid #d2d2d7; border-radius: 10px; font-size: 15px; background: #fff; font-family: inherit; max-width: 60%; }
+    .undo-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 9px; width: 40px; height: 40px; font-size: 17px; cursor: pointer; }
+    .undo-btn:disabled { opacity: 0.35; }
+    .month-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .month-nav button { background: #f0f0f0; border: none; border-radius: 10px; width: 40px; height: 40px; font-size: 18px; cursor: pointer; color: #1d1d1f; }
+    .month-nav .month-label { font-size: 17px; font-weight: 700; text-transform: capitalize; }
+    main { padding: 12px; }
+    .dow-header { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
+    .dow-header div { text-align: center; font-size: 11px; font-weight: 600; color: #86868b; text-transform: uppercase; padding: 4px 0; }
+    .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .cell { aspect-ratio: 1 / 1.15; border-radius: 10px; background: #fff; border: 1px solid #ececef; padding: 4px 3px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer; position: relative; overflow: hidden; }
+    .cell.empty { background: transparent; border: none; cursor: default; }
+    .cell.past { opacity: 0.4; }
+    .cell .dnum { font-size: 13px; font-weight: 600; color: #1d1d1f; line-height: 1.1; }
+    .cell.today .dnum { background: #007aff; color: #fff; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+    .cell .price { font-size: 11px; color: #6e6e73; margin-top: auto; font-weight: 600; }
+    .cell.unavailable { background: #ffeced; border-color: #f8c9cc; }
+    .cell.unavailable .price { color: #d52a44; text-decoration: line-through; }
+    .cell.reserved { background: #eef0f3; }
+    .cell.reserved::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: #0d4ea6; }
+    .cell .badge { position: absolute; bottom: 2px; right: 3px; font-size: 8px; }
+    .cell.modified::before { content: ''; position: absolute; top: 4px; left: 4px; width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; }
+    .loading { text-align: center; padding: 40px; color: #86868b; font-size: 14px; }
+    /* Sheet popup (bottom sheet mobile) */
+    .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; z-index: 100; align-items: flex-end; }
+    .sheet-overlay.visible { display: flex; }
+    .sheet { background: #fff; border-radius: 18px 18px 0 0; width: 100%; max-height: 88vh; overflow-y: auto; padding: 8px 18px calc(18px + env(safe-area-inset-bottom)); animation: slideUp 0.25s ease; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .sheet-grip { width: 40px; height: 4px; background: #d2d2d7; border-radius: 2px; margin: 8px auto 14px; }
+    .sheet h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+    .sheet .sub { font-size: 13px; color: #6e6e73; margin-bottom: 16px; }
+    .sheet-range { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; font-size: 13px; flex-wrap: wrap; }
+    .sheet-range input[type=date] { padding: 8px 10px; border: 1px solid #d2d2d7; border-radius: 9px; font-size: 14px; font-family: inherit; flex: 1; }
+    .acc { border: 1px solid #ececef; border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
+    .acc-head { padding: 14px 14px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; cursor: pointer; background: #fff; }
+    .acc-head .chev { color: #86868b; transition: transform 0.2s; }
+    .acc.open .acc-head .chev { transform: rotate(180deg); }
+    .acc-body { display: none; padding: 0 14px 14px; }
+    .acc.open .acc-body { display: block; }
+    .acc-head .dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; display: inline-block; margin-left: 6px; }
+    .seg { display: flex; border: 1px solid #d2d2d7; border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+    .seg button { flex: 1; background: #fff; border: none; padding: 10px; font-size: 14px; cursor: pointer; border-right: 1px solid #d2d2d7; font-weight: 500; color: #6e6e73; }
+    .seg button:last-child { border-right: none; }
+    .seg button.active { background: #007aff; color: #fff; }
+    .fld { width: 100%; padding: 12px; border: 1px solid #d2d2d7; border-radius: 10px; font-size: 16px; font-family: inherit; margin-bottom: 10px; }
+    .dow-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
+    .dow-chips label { flex: 1; min-width: 38px; text-align: center; padding: 8px 0; border: 1px solid #d2d2d7; border-radius: 9px; font-size: 12px; }
+    .dow-chips input { display: none; }
+    .dow-chips label.on { background: #007aff; color: #fff; border-color: #007aff; }
+    .preview { background: #f0f9ff; border: 1px solid #cce4ff; border-radius: 10px; padding: 12px; font-size: 13px; color: #0d4ea6; line-height: 1.6; margin-bottom: 10px; }
+    .toggle-avail { display: flex; gap: 8px; }
+    .toggle-avail button { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #d2d2d7; background: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .toggle-avail button.act-open { background: #1f6f23; color: #fff; border-color: #1f6f23; }
+    .toggle-avail button.act-closed { background: #d52a44; color: #fff; border-color: #d52a44; }
+    .sheet-foot { position: sticky; bottom: 0; background: #fff; padding-top: 12px; display: flex; gap: 10px; }
+    .btn-save { flex: 1; background: #007aff; color: #fff; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .btn-close { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 12px; padding: 15px 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120%); background: #1d1d1f; color: #fff; padding: 13px 20px; border-radius: 12px; font-size: 14px; z-index: 200; transition: transform 0.25s; max-width: 90%; text-align: center; }
+    .toast.visible { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-row">
+      <a href="/biens" class="back">&larr; Biens</a>
+      <select class="bien-select" id="bien-select"></select>
+      <button class="undo-btn" id="btn-undo" disabled>&#8634;</button>
+    </div>
+    <div class="month-nav">
+      <button id="prev-month">&lsaquo;</button>
+      <span class="month-label" id="month-label">-</span>
+      <button id="next-month">&rsaquo;</button>
+    </div>
+  </div>
+
+  <main>
+    <div class="dow-header"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div></div>
+    <div class="grid" id="grid"><div class="loading">Chargement...</div></div>
+  </main>
+
+  <div class="sheet-overlay" id="sheet-overlay">
+    <div class="sheet" id="sheet">
+      <div class="sheet-grip"></div>
+      <h3 id="sheet-title">Configurer</h3>
+      <div class="sub" id="sheet-sub">-</div>
+      <div class="sheet-range">
+        <span>Du</span><input type="date" id="r-start" /><span>au</span><input type="date" id="r-end" />
+      </div>
+      <div id="acc-list"></div>
+      <div class="sheet-foot">
+        <button class="btn-close" id="btn-close">Fermer</button>
+        <button class="btn-save" id="btn-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module">
+    import { getUser } from '/shared/supabase.js'
+    import { api } from '/shared/api-client.js'
+    const user = await getUser()
+    if (!user) { window.location.href = '/pages/login.html' }
+
+    // Service worker (PWA)
+    if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('/sw.js') } catch(e){} }
+
+    const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
+    const toISO=(d)=>{ const z=new Date(d.getTime()-d.getTimezoneOffset()*60000); return z.toISOString().slice(0,10) }
+    const todayISO = toISO(new Date())
+
+    // Rubriques (sans stop vente ; dispo = ouvert/ferme simple)
+    const PARAMS=[
+      { key:'rate', label:'Prix de base', type:'price' },
+      { key:'perPerson', label:'Prix par personne', type:'perperson' },
+      { key:'avail', label:'Disponibilite', type:'avail' },
+      { key:'minStayArr', label:'Min nuits (arrivee)', type:'num' },
+      { key:'minStayThrough', label:'Min nuits (sejour)', type:'num' },
+      { key:'maxStay', label:'Max nuits', type:'num' },
+      { key:'cta', label:'Arrivee', type:'openclosed', optOpen:'Autorisee', optClosed:'Bloquee' },
+      { key:'ctd', label:'Depart', type:'openclosed', optOpen:'Autorise', optClosed:'Bloque' }
+    ]
+
+    let BIENS=[], currentBien=null
+    let viewYear, viewMonth // mois affiche
+    let inv={}              // 'YYYY-MM-DD' -> {rate,stop_sell,min_stay_arrival,...}
+    let resaSet=new Set()   // dates ISO reservees
+    let ppConfig={included:1, extraFee:0}
+    const undoStack=[]
+
+    function showToast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('visible'); clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('visible'),1900) }
+
+    // ---- chargement biens ----
+    async function loadBiens(){
+      try{ const r=await api.channel.listProperties(); BIENS=r.properties||[] }catch(e){ showToast('Erreur chargement biens'); BIENS=[] }
+      const sel=document.getElementById('bien-select'); sel.innerHTML=''
+      BIENS.forEach(b=>{ const o=document.createElement('option'); o.value=b.id; o.textContent=b.name+' (cap. '+(b.capacity||1)+')'; sel.appendChild(o) })
+      if(BIENS.length){ currentBien=BIENS[0]; sel.value=currentBien.id; const now=new Date(); viewYear=now.getFullYear(); viewMonth=now.getMonth(); await loadMonth() }
+      else { document.getElementById('grid').innerHTML='<div class="loading">Aucun bien</div>' }
+    }
+    document.getElementById('bien-select').addEventListener('change', async e=>{ currentBien=BIENS.find(b=>b.id===e.target.value); await loadMonth() })
+
+    function monthBounds(){ const first=new Date(viewYear,viewMonth,1); const last=new Date(viewYear,viewMonth+1,0); return { start:toISO(first), end:toISO(last) } }
+
+    async function loadMonth(){
+      if(!currentBien) return
+      document.getElementById('month-label').textContent = monthFull[viewMonth]+' '+viewYear
+      const {start,end}=monthBounds()
+      inv={}; resaSet=new Set()
+      try{
+        const r=await api.calendar.load([currentBien.id], start, end)
+        inv=(r.inventory&&r.inventory[currentBien.id])||{}
+        const p=(r.properties||[]).find(x=>x.id===currentBien.id)
+        if(p){ ppConfig={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}; currentBien.base_price=Number(p.base_price)||currentBien.base_price }
+        const bk=(r.bookings&&r.bookings[currentBien.id])||[]
+        bk.forEach(b=>{ const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00'); for(let d=new Date(ci); d<co; d.setDate(d.getDate()+1)) resaSet.add(toISO(d)) })
+      }catch(e){ showToast('Erreur chargement') }
+      renderGrid()
+    }
+
+    function rateFor(iso){ const r=inv[iso]; return (r&&r.rate!=null)?Number(r.rate):(Number(currentBien.base_price)||0) }
+    function isUnavail(iso){ const r=inv[iso]; return !!(r&&r.stop_sell) }
+    function isConfigured(iso){ const r=inv[iso]; if(!r)return false; return (r.min_stay_arrival||r.min_stay_through||r.max_stay||r.cta||r.ctd) }
+
+    function renderGrid(){
+      const grid=document.getElementById('grid'); grid.innerHTML=''
+      const first=new Date(viewYear,viewMonth,1)
+      let startDow=first.getDay(); startDow=(startDow===0)?6:startDow-1 // Lun=0
+      for(let i=0;i<startDow;i++){ const e=document.createElement('div'); e.className='cell empty'; grid.appendChild(e) }
+      const last=new Date(viewYear,viewMonth+1,0).getDate()
+      for(let day=1; day<=last; day++){
+        const d=new Date(viewYear,viewMonth,day); const iso=toISO(d)
+        const cell=document.createElement('div'); cell.className='cell'
+        if(iso===todayISO) cell.classList.add('today')
+        if(iso<todayISO) cell.classList.add('past')
+        if(isUnavail(iso)) cell.classList.add('unavailable')
+        else if(resaSet.has(iso)) cell.classList.add('reserved')
+        if(isConfigured(iso)) cell.classList.add('modified')
+        let badge=''; const r=inv[iso]
+        if(r&&r.min_stay_arrival>0) badge='&#127769;'+r.min_stay_arrival
+        cell.innerHTML='<span class="dnum">'+day+'</span><span class="price">'+rateFor(iso)+'&euro;</span>'+(badge?'<span class="badge">'+badge+'</span>':'')
+        cell.addEventListener('click',()=>openSheet(iso))
+        grid.appendChild(cell)
+      }
+    }
+
+    document.getElementById('prev-month').addEventListener('click', async ()=>{ viewMonth--; if(viewMonth<0){viewMonth=11;viewYear--} await loadMonth() })
+    document.getElementById('next-month').addEventListener('click', async ()=>{ viewMonth++; if(viewMonth>11){viewMonth=0;viewYear++} await loadMonth() })
+
+    // ---- bottom sheet ----
+    const overlay=document.getElementById('sheet-overlay')
+    let pending={}, sheetDate=null
+    function defaultDow(){ return {1:true,2:true,3:true,4:true,5:true,6:true,0:true} }
+
+    function openSheet(iso){
+      sheetDate=iso; pending={}
+      document.getElementById('sheet-sub').textContent='Date : '+iso
+      document.getElementById('r-start').value=iso
+      document.getElementById('r-end').value=iso
+      renderAccordions()
+      overlay.classList.add('visible')
+    }
+    function closeSheet(){ overlay.classList.remove('visible') }
+    document.getElementById('btn-close').addEventListener('click', closeSheet)
+    overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet() })
+
+    function dowChipsHtml(pk, dow){ let h='<div class="dow-chips">'; const order=[1,2,3,4,5,6,0]; const lbl={1:'L',2:'M',3:'M',4:'J',5:'V',6:'S',0:'D'}; order.forEach(d=>{ h+='<label class="'+(dow[d]?'on':'')+'" data-pk="'+pk+'" data-dow="'+d+'"><input type="checkbox" '+(dow[d]?'checked':'')+'/>'+lbl[d]+'</label>' }); h+='</div>'; return h }
+
+    function renderAccordions(){
+      const wrap=document.getElementById('acc-list'); wrap.innerHTML=''
+      PARAMS.forEach(p=>{
+        const acc=document.createElement('div'); acc.className='acc'; acc.dataset.pk=p.key
+        let body=''
+        if(p.type==='perperson'){
+          if(!pending.perPerson)pending.perPerson={included:ppConfig.included,extraFee:ppConfig.extraFee}
+          body+='<label style="font-size:13px;font-weight:600">Voyageurs inclus</label><input class="fld" type="number" id="pp-inc" value="'+pending.perPerson.included+'" min="1" max="'+(currentBien.capacity||1)+'"/>'
+          body+='<label style="font-size:13px;font-weight:600">Supplement / pers. sup. (EUR)</label><input class="fld" type="number" id="pp-extra" value="'+pending.perPerson.extraFee+'" min="0"/>'
+          body+='<div class="preview" id="pp-prev"></div>'
+        } else if(p.type==='price'){
+          if(!pending[p.key])pending[p.key]={mode:'set',unit:'eur',value:'',dow:defaultDow()}
+          const pv=pending[p.key]
+          body+=dowChipsHtml(p.key,pv.dow)
+          body+='<div class="seg" data-seg="mode" data-pk="'+p.key+'"><button data-v="set" class="'+(pv.mode==='set'?'active':'')+'">Definir</button><button data-v="inc" class="'+(pv.mode==='inc'?'active':'')+'">+</button><button data-v="dec" class="'+(pv.mode==='dec'?'active':'')+'">-</button></div>'
+          body+='<div class="seg" data-seg="unit" data-pk="'+p.key+'"><button data-v="eur" class="'+(pv.unit==='eur'?'active':'')+'">EUR</button><button data-v="pct" class="'+(pv.unit==='pct'?'active':'')+'">%</button></div>'
+          body+='<input class="fld" type="number" inputmode="decimal" placeholder="Valeur" data-val="'+p.key+'" value="'+pv.value+'"/>'
+        } else if(p.type==='num'){
+          if(!pending[p.key])pending[p.key]={value:'',dow:defaultDow()}
+          const pv=pending[p.key]
+          body+=dowChipsHtml(p.key,pv.dow)
+          body+='<input class="fld" type="number" inputmode="numeric" placeholder="Nombre de nuits (0=aucune)" data-val="'+p.key+'" value="'+pv.value+'"/>'
+        } else if(p.type==='openclosed'){
+          if(!pending[p.key])pending[p.key]={value:'keep',dow:defaultDow()}
+          const pv=pending[p.key]
+          body+=dowChipsHtml(p.key,pv.dow)
+          body+='<div class="seg" data-seg="oc" data-pk="'+p.key+'"><button data-v="keep" class="'+(pv.value==='keep'?'active':'')+'">Inchange</button><button data-v="open" class="'+(pv.value==='open'?'active':'')+'">'+p.optOpen+'</button><button data-v="closed" class="'+(pv.value==='closed'?'active':'')+'">'+p.optClosed+'</button></div>'
+        } else if(p.type==='avail'){
+          if(!pending.avail)pending.avail={value:'keep',dow:defaultDow()}
+          const pv=pending.avail
+          body+=dowChipsHtml('avail',pv.dow)
+          body+='<div class="toggle-avail" data-seg="avail"><button data-v="open" class="'+(pv.value==='open'?'act-open':'')+'">Disponible</button><button data-v="closed" class="'+(pv.value==='closed'?'act-closed':'')+'">Ferme</button></div>'
+        }
+        acc.innerHTML='<div class="acc-head">'+p.label+'<span class="chev">&#9662;</span></div><div class="acc-body">'+body+'</div>'
+        wrap.appendChild(acc)
+      })
+      // ouvrir prix de base par defaut
+      const f=wrap.querySelector('.acc'); if(f)f.classList.add('open')
+      bindAccordion()
+    }
+
+    function bindAccordion(){
+      const wrap=document.getElementById('acc-list')
+      wrap.querySelectorAll('.acc-head').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('open')))
+      wrap.querySelectorAll('.dow-chips label').forEach(l=>l.addEventListener('click',e=>{ e.preventDefault(); const pk=l.dataset.pk, dw=parseInt(l.dataset.dow,10); pending[pk==='avail'?'avail':pk].dow[dw]=!pending[pk==='avail'?'avail':pk].dow[dw]; l.classList.toggle('on') }))
+      wrap.querySelectorAll('.seg').forEach(seg=>{ const type=seg.dataset.seg, pk=seg.dataset.pk; seg.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ seg.querySelectorAll('button').forEach(x=>x.classList.remove('active','act-open','act-closed')); const v=b.dataset.v; if(type==='mode'){pending[pk].mode=v;b.classList.add('active')} else if(type==='unit'){pending[pk].unit=v;b.classList.add('active');updatePpOrPrice()} else if(type==='oc'){pending[pk].value=v;b.classList.add('active')} else if(type==='avail'){pending.avail.value=v;b.classList.add(v==='open'?'act-open':'act-closed')} })) })
+      wrap.querySelectorAll('.toggle-avail button').forEach(b=>b.addEventListener('click',()=>{ const p=b.parentElement; p.querySelectorAll('button').forEach(x=>x.classList.remove('act-open','act-closed')); const v=b.dataset.v; pending.avail.value=v; b.classList.add(v==='open'?'act-open':'act-closed') }))
+      wrap.querySelectorAll('input[data-val]').forEach(inp=>inp.addEventListener('input',e=>{ pending[e.target.dataset.val].value=e.target.value }))
+      const ppi=wrap.querySelector('#pp-inc'), ppe=wrap.querySelector('#pp-extra')
+      if(ppi&&ppe){ const upd=()=>{ pending.perPerson={included:parseInt(ppi.value,10)||currentBien.capacity, extraFee:parseFloat(ppe.value)||0}; let l='Base '+(currentBien.base_price||0)+' EUR :<br>'; for(let pr=pending.perPerson.included+1;pr<=(currentBien.capacity||1);pr++){ l+=pr+'e pers : '+((currentBien.base_price||0)+(pr-pending.perPerson.included)*pending.perPerson.extraFee)+' EUR<br>' } if(pending.perPerson.extraFee===0)l+='(aucun supplement)'; wrap.querySelector('#pp-prev').innerHTML=l }; ppi.addEventListener('input',upd); ppe.addEventListener('input',upd); upd() }
+    }
+    function updatePpOrPrice(){}
+
+    // ---- save ----
+    document.getElementById('btn-save').addEventListener('click', async ()=>{
+      if(!currentBien) return
+      const sISO=document.getElementById('r-start').value, eISO=document.getElementById('r-end').value
+      const segments=[]
+      // perPerson
+      if(pending.perPerson) segments.push({ kind:'perPerson', included:pending.perPerson.included, extra_guest_fee:pending.perPerson.extraFee })
+      const computeFinal=(cur,mode,unit,val)=>{ if(isNaN(val))return cur; if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val; if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val; return unit==='pct'?Math.round(cur*(1-val/100)):cur-val }
+      PARAMS.forEach(p=>{
+        if(p.type==='perperson')return
+        const pv=pending[p.key]; if(!pv)return
+        const daysArr=[]; for(const k in pv.dow){ if(pv.dow[k]) daysArr.push(parseInt(k,10)) }
+        if(p.type==='price'){
+          if(pv.value===''||isNaN(parseFloat(pv.value)))return
+          if(pv.mode==='set'&&pv.unit==='eur'){ segments.push({date_from:sISO,date_to:eISO,days:daysArr,rate:parseFloat(pv.value)}) }
+          else { // valeurs finales par date
+            const d=new Date(sISO+'T00:00:00'), last=new Date(eISO+'T00:00:00')
+            while(d<=last){ const dow=d.getDay(); if(!daysArr.length||daysArr.includes(dow)){ const iso=toISO(d); segments.push({date_from:iso,date_to:iso,rate:computeFinal(rateFor(iso),pv.mode,pv.unit,parseFloat(pv.value))}) } d.setDate(d.getDate()+1) }
+          }
+        } else if(p.type==='num'){ if(pv.value==='')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='minStayArr')seg.min_stay_arrival=parseInt(pv.value,10)||0; else if(p.key==='minStayThrough')seg.min_stay_through=parseInt(pv.value,10)||0; else if(p.key==='maxStay')seg.max_stay=parseInt(pv.value,10)||0; segments.push(seg) }
+        else if(p.type==='openclosed'){ if(pv.value==='keep')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='cta')seg.cta=(pv.value==='closed'); else if(p.key==='ctd')seg.ctd=(pv.value==='closed'); segments.push(seg) }
+        else if(p.type==='avail'){ if(pv.value==='keep')return; segments.push({date_from:sISO,date_to:eISO,days:daysArr,stop_sell:(pv.value==='closed')}) }
+      })
+      if(!segments.length){ showToast('Aucune modification'); return }
+      showToast('Enregistrement...')
+      try{ const resp=await api.calendar.save(currentBien.id, segments); showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre ('+resp.warnings.length+' alerte)':'Enregistre'); closeSheet(); await loadMonth() }
+      catch(err){ showToast('Erreur: '+(err.message||'sauvegarde')) }
+    })
+
+    document.getElementById('btn-undo').addEventListener('click',()=>{}) // undo non gere en V1 mobile
+
+    await loadBiens()
+  </script>
+</body>
+</html>

@@ -11,6 +11,10 @@
   },
   "rewrites": [
     {
+      "source": "/m/calendrier",
+      "destination": "/pages/calendrier-mobile"
+    },
+    {
       "source": "/login",
       "destination": "/pages/login"
     },
@@ -85,6 +89,17 @@
     {
       "source": "/apps/agent-ai/messagerie",
       "destination": "/apps/agent-ai/messagerie"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
     }
   ]
 }
