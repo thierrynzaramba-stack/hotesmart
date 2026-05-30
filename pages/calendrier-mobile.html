@@ -49,7 +49,12 @@
     .cell.unavailable .val { color: #d52a44; }
     .cell.reserved { background: #dde7f5; border-color: #b9cdec; }
     .cell.reserved.weekend { background: #d2def2; }
-    .cell.modified::before { content: ''; position: absolute; top: 4px; left: 4px; width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; }
+    .cell.modified::before { content: ''; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); height: 3px; border-radius: 2px; background: #f59e0b; }
+    .cell.opt1::before { width: 30%; }
+    .cell.opt2::before { width: 55%; }
+    .cell.opt3::before { width: 80%; }
+    .cell.orphan { background: #fff4e5 !important; border-color: #f59e0b; box-shadow: inset 0 0 0 2px #f59e0b; }
+    .cell.orphan .alert { position: absolute; top: 3px; right: 3px; font-size: 11px; }
     .loading { text-align: center; padding: 40px; color: #86868b; font-size: 14px; }
     .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; color: #6e6e73; justify-content: center; }
     .legend span { display: inline-flex; align-items: center; gap: 5px; }
@@ -120,6 +125,11 @@
   <main>
     <div class="dow-header"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div class="we">Sam</div><div class="we">Dim</div></div>
     <div class="grid" id="grid"><div class="loading">Chargement...</div></div>
+    <div id="orphan-banner" style="display:none;margin-top:12px;background:#fff4e5;border:1px solid #f59e0b;border-radius:12px;padding:14px">
+      <div style="font-size:13px;font-weight:600;color:#b45309;margin-bottom:8px">&#9888;&#65039; <span id="orphan-count">0</span> jour(s) orphelin(s) detecte(s)</div>
+      <div style="font-size:12px;color:#92600a;margin-bottom:10px">Ces dates ne peuvent pas etre reservees a cause des contraintes (min. nuits ou arrivee/depart bloques).</div>
+      <button id="btn-fix-orphans" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">Corriger automatiquement</button>
+    </div>
     <div class="legend">
       <span><i style="background:#dde7f5"></i> Reserve</span>
       <span><i style="background:#ffeced"></i> Ferme</span>
@@ -167,6 +177,11 @@
     ]
     let currentView='rate'
 
+    // --- persistance config (localStorage) ---
+    const PREF_KEY='hs_cal_mobile_prefs'
+    function savePrefs(){ try{ localStorage.setItem(PREF_KEY, JSON.stringify({ bienId: currentBien?currentBien.id:null, view: currentView, year: viewYear, month: viewMonth })) }catch(e){} }
+    function loadPrefs(){ try{ return JSON.parse(localStorage.getItem(PREF_KEY)||'null') }catch(e){ return null } }
+
     // Rubriques du sheet (sans stop vente)
     const PARAMS=[
       { key:'rate', label:'Prix de base', type:'price' },
@@ -189,16 +204,28 @@
     // selecteur de vue
     const vsel=document.getElementById('view-select')
     VIEWS.forEach(v=>{ const o=document.createElement('option'); o.value=v.key; o.textContent='Vue : '+v.label; vsel.appendChild(o) })
-    vsel.addEventListener('change',e=>{ currentView=e.target.value; renderGrid() })
+    vsel.addEventListener('change',e=>{ currentView=e.target.value; savePrefs(); renderGrid() })
 
     async function loadBiens(){
       try{ const r=await api.channel.listProperties(); BIENS=r.properties||[] }catch(e){ showToast('Erreur chargement biens'); BIENS=[] }
       const sel=document.getElementById('bien-select'); sel.innerHTML=''
       BIENS.forEach(b=>{ const o=document.createElement('option'); o.value=b.id; o.textContent=b.name; sel.appendChild(o) })
-      if(BIENS.length){ currentBien=BIENS[0]; sel.value=currentBien.id; const now=new Date(); viewYear=now.getFullYear(); viewMonth=now.getMonth(); await loadMonth() }
+      const prefs=loadPrefs()
+      if(BIENS.length){
+        // bien : pref si encore present, sinon premier
+        if(prefs && prefs.bienId && BIENS.find(b=>b.id===prefs.bienId)) currentBien=BIENS.find(b=>b.id===prefs.bienId)
+        else currentBien=BIENS[0]
+        sel.value=currentBien.id
+        // vue
+        if(prefs && prefs.view && VIEWS.find(v=>v.key===prefs.view)){ currentView=prefs.view; document.getElementById('view-select').value=currentView }
+        // mois
+        if(prefs && typeof prefs.year==='number' && typeof prefs.month==='number'){ viewYear=prefs.year; viewMonth=prefs.month }
+        else { const now=new Date(); viewYear=now.getFullYear(); viewMonth=now.getMonth() }
+        await loadMonth()
+      }
       else { document.getElementById('grid').innerHTML='<div class="loading">Aucun bien</div>' }
     }
-    document.getElementById('bien-select').addEventListener('change', async e=>{ currentBien=BIENS.find(b=>b.id===e.target.value); await loadMonth() })
+    document.getElementById('bien-select').addEventListener('change', async e=>{ currentBien=BIENS.find(b=>b.id===e.target.value); savePrefs(); await loadMonth() })
 
     function monthBounds(){ return { start:toISO(new Date(viewYear,viewMonth,1)), end:toISO(new Date(viewYear,viewMonth+1,0)) } }
 
@@ -228,6 +255,48 @@
     function isUnavail(iso){ const r=inv[iso]; return !!(r&&r.stop_sell) }
     function isConfigured(iso){ const r=inv[iso]; if(!r)return false; return (r.min_stay_arrival||r.min_stay_through||r.max_stay||r.cta||r.ctd||r.stop_sell||r.rate!=null) }
 
+    // nb d'options actives sur une date (pour l'epaisseur de l'indicateur)
+    function optionCount(iso){ const r=inv[iso]; if(!r)return 0; let n=0; if(r.min_stay_arrival)n++; if(r.min_stay_through)n++; if(r.max_stay)n++; if(r.cta)n++; if(r.ctd)n++; if(r.stop_sell)n++; return n }
+
+    // est-ce une date libre (ni reservee ni fermee) ?
+    function isFree(iso){ return !resaSet.has(iso) && !isUnavail(iso) }
+
+    // Detection des jours orphelins : trous trop courts pour le min-stay + incoherences arrivee/depart.
+    // Retourne un Set d'ISO orphelins, calcule sur la plage des donnees chargees (mois courant).
+    function computeOrphans(){
+      const orphans=new Set()
+      // on travaille sur les jours du mois affiche
+      const dates=[]
+      const last=new Date(viewYear,viewMonth+1,0).getDate()
+      for(let day=1; day<=last; day++){ dates.push(toISO(new Date(viewYear,viewMonth,day))) }
+      // 1) trous trop courts : suites de jours libres bordees par reserve/ferme, de longueur < minstay requis
+      let i=0
+      while(i<dates.length){
+        if(isFree(dates[i])){
+          let j=i; while(j<dates.length && isFree(dates[j])) j++
+          const gapLen=j-i // nb de nuits libres consecutives
+          // min-stay requis sur ce trou : max des min_stay_arrival presents (defaut 1)
+          let req=1
+          for(let k=i;k<j;k++){ const r=inv[dates[k]]; if(r&&r.min_stay_arrival>req)req=r.min_stay_arrival }
+          // bordé a gauche/droite par une contrainte (reservation/fermeture) ou bords du mois
+          const borderedLeft = (i===0) || !isFree(dates[i-1])
+          const borderedRight = (j>=dates.length) || !isFree(dates[j])
+          if(gapLen < req && borderedLeft && borderedRight){ for(let k=i;k<j;k++) orphans.add(dates[k]) }
+          i=j
+        } else i++
+      }
+      // 2) incoherences arrivee/depart : jour libre avec CTA actif et veille non-libre (impossible d'arriver ni de continuer)
+      dates.forEach((iso,idx)=>{
+        if(!isFree(iso))return
+        const r=inv[iso]||{}
+        const prevIso = idx>0?dates[idx-1]:null
+        const prevBusy = prevIso && !isFree(prevIso)
+        if(r.cta && prevBusy) orphans.add(iso)   // arrivee bloquee + veille occupee => personne ne peut prendre ce jour
+      })
+      return orphans
+    }
+    let orphanSet=new Set()
+
     // valeur affichee selon la vue courante
     function cellValue(iso){
       const r=inv[iso]||{}
@@ -251,6 +320,7 @@
     }
 
     function renderGrid(){
+      orphanSet=computeOrphans()
       const grid=document.getElementById('grid'); grid.innerHTML=''
       const first=new Date(viewYear,viewMonth,1)
       let startDow=first.getDay(); startDow=(startDow===0)?6:startDow-1 // Lun=0
@@ -275,11 +345,16 @@
           if(c.iso===todayISO) cell.classList.add('today')
           if(c.iso<todayISO) cell.classList.add('past')
           if(isUnavail(c.iso)) cell.classList.add('unavailable')
-          else if(resaSet.has(c.iso) && !showResa) cell.classList.add('reserved') // autres vues : case coloree
-          if(isConfigured(c.iso)) cell.classList.add('modified')
+          else if(resaSet.has(c.iso) && !showResa) cell.classList.add('reserved')
+          // indicateur d'options : epaisseur selon le nombre
+          const oc=optionCount(c.iso)
+          if(oc>0){ cell.classList.add('modified'); cell.classList.add(oc>=3?'opt3':(oc===2?'opt2':'opt1')) }
+          // jour orphelin
+          let alertIcon=''
+          if(orphanSet.has(c.iso)){ cell.classList.add('orphan'); alertIcon='<span class="alert">\u26A0\uFE0F</span>' }
           const val=cellValue(c.iso)
           const small=(currentView!=='rate')?' small':''
-          cell.innerHTML='<span class="dnum">'+c.day+'</span><span class="val'+small+'">'+val+'</span>'
+          cell.innerHTML='<span class="dnum">'+c.day+'</span>'+alertIcon+'<span class="val'+small+'">'+val+'</span>'
           cell.addEventListener('click',()=>openSheet(c.iso))
           week.appendChild(cell)
         })
@@ -290,18 +365,26 @@
           // dates de la semaine (index 0..6 -> iso)
           const isoByCol=slice.map(c=>c.iso)
           resaList.forEach(rz=>{
-            // intersection de [checkin, checkout) avec cette semaine
+            // intersection de [checkin, checkout] avec cette semaine, en demi-journees
+            // la barre couvre de la moitie du jour d'arrivee a la moitie du jour de depart
+            const ci=rz.checkin, co=rz.checkout
+            // jours occupes "visuellement" : de checkin a checkout inclus (le depart = demi-journee)
             let segStart=-1, segEnd=-1
             for(let col=0; col<7; col++){
               const iso=isoByCol[col]; if(!iso)continue
-              if(iso>=rz.checkin && iso<rz.checkout){ if(segStart<0)segStart=col; segEnd=col }
+              if(iso>=ci && iso<=co){ if(segStart<0)segStart=col; segEnd=col }
             }
             if(segStart<0)return
-            const contLeft = (isoByCol[segStart] > rz.checkin)   // continue depuis semaine precedente
-            const contRight = (isoByCol[segEnd] < (()=>{ const co=new Date(rz.checkout+'T00:00:00'); co.setDate(co.getDate()-1); return toISO(co) })()) // continue vers semaine suivante
             const colW=100/7
-            const leftPct=segStart*colW
-            const widthPct=(segEnd-segStart+1)*colW
+            const startsHere = (isoByCol[segStart]===ci)   // le jour d'arrivee est dans cette semaine
+            const endsHere = (isoByCol[segEnd]===co)        // le jour de depart est dans cette semaine
+            const contLeft = !startsHere   // vient de la semaine precedente
+            const contRight = !endsHere    // continue la semaine suivante
+            // demi-journee : +0.5 case au debut si arrivee ici, -0.5 case a la fin si depart ici
+            let leftCol = segStart + (startsHere ? 0.5 : 0)
+            let rightCol = segEnd + (endsHere ? 0.5 : 1)   // depart = milieu ; sinon jusqu'au bord droit
+            const leftPct=leftCol*colW
+            const widthPct=(rightCol-leftCol)*colW
             const bar=document.createElement('div')
             bar.className='resa-bar '+rz.source+(contLeft?' cont-left':'')+(contRight?' cont-right':'')
             bar.style.left='calc('+leftPct+'% + 2px)'
@@ -314,10 +397,14 @@
         }
         grid.appendChild(week)
       }
+      // bandeau orphelins
+      const banner=document.getElementById('orphan-banner')
+      if(orphanSet.size>0){ document.getElementById('orphan-count').textContent=orphanSet.size; banner.style.display='block' }
+      else { banner.style.display='none' }
     }
 
-    document.getElementById('prev-month').addEventListener('click', async ()=>{ viewMonth--; if(viewMonth<0){viewMonth=11;viewYear--} await loadMonth() })
-    document.getElementById('next-month').addEventListener('click', async ()=>{ viewMonth++; if(viewMonth>11){viewMonth=0;viewYear++} await loadMonth() })
+    document.getElementById('prev-month').addEventListener('click', async ()=>{ viewMonth--; if(viewMonth<0){viewMonth=11;viewYear--} savePrefs(); await loadMonth() })
+    document.getElementById('next-month').addEventListener('click', async ()=>{ viewMonth++; if(viewMonth>11){viewMonth=0;viewYear++} savePrefs(); await loadMonth() })
 
     // ---- undo ----
     function pushUndo(){ undoStack.push(JSON.stringify(inv)); document.getElementById('btn-undo').disabled=false }
@@ -328,12 +415,47 @@
       renderGrid(); showToast('Annule (affichage)')
     })
 
-    // ---- sheet ----
+    // ---- correction orphelins ----
+    document.getElementById('btn-fix-orphans').addEventListener('click', ()=>{ openOrphanFix() })
+
+    function openOrphanFix(){
+      // mini sheet : choix d'appliquer un prix special + mode
+      const dates=[...orphanSet].sort()
+      if(!dates.length){ showToast('Aucun orphelin'); return }
+      const sub=document.getElementById('sheet-sub')
+      document.getElementById('sheet-title').textContent='Corriger '+dates.length+' jour(s) orphelin(s)'
+      sub.textContent='Les contraintes seront ajustees pour rendre ces dates reservables.'
+      document.getElementById('r-start').value=dates[0]
+      document.getElementById('r-end').value=dates[dates.length-1]
+      const wrap=document.getElementById('acc-list')
+      wrap.innerHTML=''
+      // explication
+      const info=document.createElement('div'); info.style.cssText='font-size:13px;color:#6e6e73;margin-bottom:14px;line-height:1.5'
+      info.innerHTML='La correction va : reduire le minimum de nuits a la taille du trou, et lever les blocages d\'arrivee/depart sur ces dates. Vous pouvez aussi appliquer un prix special pour les rendre plus attractives.'
+      wrap.appendChild(info)
+      // prix special optionnel
+      if(!pending.__orphanPrice) pending.__orphanPrice={enabled:false, mode:'set', unit:'eur', value:''}
+      const op=pending.__orphanPrice
+      const box=document.createElement('div')
+      box.innerHTML='<label style="display:flex;align-items:center;gap:10px;font-size:14px;margin-bottom:12px"><input type="checkbox" id="op-enable" '+(op.enabled?'checked':'')+'/> Appliquer un prix special</label>'+
+        '<div id="op-fields" style="display:'+(op.enabled?'block':'none')+'"><div class="price-row"><input class="fld" type="number" inputmode="decimal" id="op-value" placeholder="Valeur" value="'+op.value+'"/></div>'+
+        '<div class="seg" id="op-mode"><button data-v="set" class="'+(op.mode==='set'?'active':'')+'">Definir</button><button data-v="inc" class="'+(op.mode==='inc'?'active':'')+'">+</button><button data-v="dec" class="'+(op.mode==='dec'?'active':'')+'">-</button></div>'+
+        '<div class="seg" id="op-unit" style="margin-top:8px"><button data-v="eur" class="'+(op.unit==='eur'?'active':'')+'">EUR</button><button data-v="pct" class="'+(op.unit==='pct'?'active':'')+'">%</button></div></div>'
+      wrap.appendChild(box)
+      document.getElementById('op-enable').addEventListener('change',e=>{ op.enabled=e.target.checked; document.getElementById('op-fields').style.display=op.enabled?'block':'none' })
+      document.getElementById('op-value').addEventListener('input',e=>{ op.value=e.target.value })
+      box.querySelectorAll('#op-mode button').forEach(b=>b.addEventListener('click',()=>{ op.mode=b.dataset.v; box.querySelectorAll('#op-mode button').forEach(x=>x.classList.toggle('active',x===b)) }))
+      box.querySelectorAll('#op-unit button').forEach(b=>b.addEventListener('click',()=>{ op.unit=b.dataset.v; box.querySelectorAll('#op-unit button').forEach(x=>x.classList.toggle('active',x===b)) }))
+      // marquer le mode "fix orphelins" pour le bouton enregistrer
+      sheetMode='orphan'
+      overlay.classList.add('visible')
+    }
+    let sheetMode='normal'
     const overlay=document.getElementById('sheet-overlay')
     let pending={}, sheetDate=null
     function defaultDow(){ return {1:true,2:true,3:true,4:true,5:true,6:true,0:true} }
     function openSheet(iso){
-      sheetDate=iso; pending={}
+      sheetMode='normal'; sheetDate=iso; pending={}
       document.getElementById('sheet-sub').textContent='Date : '+iso
       document.getElementById('r-start').value=iso; document.getElementById('r-end').value=iso
       renderAccordions(); overlay.classList.add('visible')
@@ -404,6 +526,25 @@
 
     document.getElementById('btn-save').addEventListener('click', async ()=>{
       if(!currentBien)return
+      // --- mode correction orphelins ---
+      if(sheetMode==='orphan'){
+        const dates=[...orphanSet].sort()
+        if(!dates.length){ closeSheet(); return }
+        const segments=[]
+        const op=pending.__orphanPrice||{enabled:false}
+        const computeFinal=(cur,mode,unit,val)=>{ if(isNaN(val))return cur; if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val; if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val; return unit==='pct'?Math.round(cur*(1-val/100)):cur-val }
+        // pour chaque orphelin : lever contraintes + prix special optionnel
+        dates.forEach(iso=>{
+          const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false, stop_sell:false }
+          if(op.enabled && op.value!=='' && !isNaN(parseFloat(op.value))){ seg.rate=computeFinal(rateFor(iso),op.mode,op.unit,parseFloat(op.value)) }
+          segments.push(seg)
+        })
+        pushUndo(); showToast('Correction...')
+        try{ const resp=await api.calendar.save(currentBien.id, segments); showToast('Orphelins corriges'); closeSheet(); await loadMonth() }
+        catch(err){ showToast('Erreur: '+(err.message||'correction')) }
+        return
+      }
+      // --- mode normal ---
       const sISO=document.getElementById('r-start').value, eISO=document.getElementById('r-end').value
       const segments=[]
       if(pending.perPerson) segments.push({ kind:'perPerson', included:pending.perPerson.included, extra_guest_fee:pending.perPerson.extraFee })
