@@ -125,11 +125,6 @@
   <main>
     <div class="dow-header"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div class="we">Sam</div><div class="we">Dim</div></div>
     <div class="grid" id="grid"><div class="loading">Chargement...</div></div>
-    <div id="orphan-banner" style="display:none;margin-top:12px;background:#fff4e5;border:1px solid #f59e0b;border-radius:12px;padding:14px">
-      <div style="font-size:13px;font-weight:600;color:#b45309;margin-bottom:8px">&#9888;&#65039; <span id="orphan-count">0</span> jour(s) orphelin(s) detecte(s)</div>
-      <div style="font-size:12px;color:#92600a;margin-bottom:10px">Ces dates ne peuvent pas etre reservees a cause des contraintes (min. nuits ou arrivee/depart bloques).</div>
-      <button id="btn-fix-orphans" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">Corriger automatiquement</button>
-    </div>
     <div class="legend">
       <span><i style="background:#dde7f5"></i> Reserve</span>
       <span><i style="background:#ffeced"></i> Ferme</span>
@@ -179,7 +174,8 @@
 
     // --- persistance config (localStorage) ---
     const PREF_KEY='hs_cal_mobile_prefs'
-    function savePrefs(){ try{ localStorage.setItem(PREF_KEY, JSON.stringify({ bienId: currentBien?currentBien.id:null, view: currentView, year: viewYear, month: viewMonth })) }catch(e){} }
+    let orphanAutoFix=false  // reglage global persistant
+    function savePrefs(){ try{ localStorage.setItem(PREF_KEY, JSON.stringify({ bienId: currentBien?currentBien.id:null, view: currentView, year: viewYear, month: viewMonth, orphanAutoFix })) }catch(e){} }
     function loadPrefs(){ try{ return JSON.parse(localStorage.getItem(PREF_KEY)||'null') }catch(e){ return null } }
 
     // Rubriques du sheet (sans stop vente)
@@ -191,7 +187,8 @@
       { key:'minStayThrough', label:'Min nuits (sejour)', type:'num' },
       { key:'maxStay', label:'Max nuits', type:'num' },
       { key:'cta', label:'Arrivee', type:'openclosed', optOpen:'Autorisee', optClosed:'Bloquee' },
-      { key:'ctd', label:'Depart', type:'openclosed', optOpen:'Autorise', optClosed:'Bloque' }
+      { key:'ctd', label:'Depart', type:'openclosed', optOpen:'Autorise', optClosed:'Bloque' },
+      { key:'orphan', label:'Nuits orphelines', type:'orphan' }
     ]
 
     let BIENS=[], currentBien=null
@@ -211,6 +208,7 @@
       const sel=document.getElementById('bien-select'); sel.innerHTML=''
       BIENS.forEach(b=>{ const o=document.createElement('option'); o.value=b.id; o.textContent=b.name; sel.appendChild(o) })
       const prefs=loadPrefs()
+      if(prefs && typeof prefs.orphanAutoFix==='boolean') orphanAutoFix=prefs.orphanAutoFix
       if(BIENS.length){
         // bien : pref si encore present, sinon premier
         if(prefs && prefs.bienId && BIENS.find(b=>b.id===prefs.bienId)) currentBien=BIENS.find(b=>b.id===prefs.bienId)
@@ -371,7 +369,7 @@
           const val=cellValue(c.iso)
           const small=(currentView!=='rate')?' small':''
           cell.innerHTML='<span class="dnum">'+c.day+'</span>'+alertIcon+'<span class="val'+small+'">'+val+'</span>'
-          cell.addEventListener('click',()=>openSheet(c.iso))
+          cell.addEventListener('click',()=>openSheet(c.iso, orphanSet.has(c.iso)?'orphan':null))
           week.appendChild(cell)
         })
         // overlay barres resa (vue tarifs uniquement)
@@ -413,10 +411,6 @@
         }
         grid.appendChild(week)
       }
-      // bandeau orphelins
-      const banner=document.getElementById('orphan-banner')
-      if(orphanSet.size>0){ document.getElementById('orphan-count').textContent=orphanSet.size; banner.style.display='block' }
-      else { banner.style.display='none' }
     }
 
     document.getElementById('prev-month').addEventListener('click', async ()=>{ viewMonth--; if(viewMonth<0){viewMonth=11;viewYear--} savePrefs(); await loadMonth() })
@@ -431,47 +425,13 @@
       renderGrid(); showToast('Annule (affichage)')
     })
 
-    // ---- correction orphelins ----
-    document.getElementById('btn-fix-orphans').addEventListener('click', ()=>{ openOrphanFix() })
-
-    function openOrphanFix(){
-      // mini sheet : choix d'appliquer un prix special + mode
-      const dates=[...orphanSet].sort()
-      if(!dates.length){ showToast('Aucun orphelin'); return }
-      const sub=document.getElementById('sheet-sub')
-      document.getElementById('sheet-title').textContent='Corriger '+dates.length+' jour(s) orphelin(s)'
-      sub.textContent='Les contraintes seront ajustees pour rendre ces dates reservables.'
-      document.getElementById('r-start').value=dates[0]
-      document.getElementById('r-end').value=dates[dates.length-1]
-      const wrap=document.getElementById('acc-list')
-      wrap.innerHTML=''
-      // explication
-      const info=document.createElement('div'); info.style.cssText='font-size:13px;color:#6e6e73;margin-bottom:14px;line-height:1.5'
-      info.innerHTML='La correction va : reduire le minimum de nuits a la taille du trou, et lever les blocages d\'arrivee/depart sur ces dates. Vous pouvez aussi appliquer un prix special pour les rendre plus attractives.'
-      wrap.appendChild(info)
-      // prix special optionnel
-      if(!pending.__orphanPrice) pending.__orphanPrice={enabled:false, mode:'set', unit:'eur', value:''}
-      const op=pending.__orphanPrice
-      const box=document.createElement('div')
-      box.innerHTML='<label style="display:flex;align-items:center;gap:10px;font-size:14px;margin-bottom:12px"><input type="checkbox" id="op-enable" '+(op.enabled?'checked':'')+'/> Appliquer un prix special</label>'+
-        '<div id="op-fields" style="display:'+(op.enabled?'block':'none')+'"><div class="price-row"><input class="fld" type="number" inputmode="decimal" id="op-value" placeholder="Valeur" value="'+op.value+'"/></div>'+
-        '<div class="seg" id="op-mode"><button data-v="set" class="'+(op.mode==='set'?'active':'')+'">Definir</button><button data-v="inc" class="'+(op.mode==='inc'?'active':'')+'">+</button><button data-v="dec" class="'+(op.mode==='dec'?'active':'')+'">-</button></div>'+
-        '<div class="seg" id="op-unit" style="margin-top:8px"><button data-v="eur" class="'+(op.unit==='eur'?'active':'')+'">EUR</button><button data-v="pct" class="'+(op.unit==='pct'?'active':'')+'">%</button></div></div>'
-      wrap.appendChild(box)
-      document.getElementById('op-enable').addEventListener('change',e=>{ op.enabled=e.target.checked; document.getElementById('op-fields').style.display=op.enabled?'block':'none' })
-      document.getElementById('op-value').addEventListener('input',e=>{ op.value=e.target.value })
-      box.querySelectorAll('#op-mode button').forEach(b=>b.addEventListener('click',()=>{ op.mode=b.dataset.v; box.querySelectorAll('#op-mode button').forEach(x=>x.classList.toggle('active',x===b)) }))
-      box.querySelectorAll('#op-unit button').forEach(b=>b.addEventListener('click',()=>{ op.unit=b.dataset.v; box.querySelectorAll('#op-unit button').forEach(x=>x.classList.toggle('active',x===b)) }))
-      // marquer le mode "fix orphelins" pour le bouton enregistrer
-      sheetMode='orphan'
-      overlay.classList.add('visible')
-    }
     let sheetMode='normal'
     const overlay=document.getElementById('sheet-overlay')
-    let pending={}, sheetDate=null
+    let pending={}, sheetDate=null, forceOpenKey=null
     function defaultDow(){ return {1:true,2:true,3:true,4:true,5:true,6:true,0:true} }
-    function openSheet(iso){
-      sheetMode='normal'; sheetDate=iso; pending={}
+    function openSheet(iso, openKey){
+      sheetMode='normal'; sheetDate=iso; pending={}; forceOpenKey=openKey||null
+      document.getElementById('sheet-title').textContent='Configurer'
       document.getElementById('sheet-sub').textContent='Date : '+iso
       document.getElementById('r-start').value=iso; document.getElementById('r-end').value=iso
       renderAccordions(); overlay.classList.add('visible')
@@ -484,8 +444,8 @@
 
     function renderAccordions(){
       const wrap=document.getElementById('acc-list'); wrap.innerHTML=''
-      // ouvrir par defaut la rubrique correspondant a la vue courante (sinon prix de base)
-      const openKey = PARAMS.find(p=>p.key===currentView)?currentView:'rate'
+      // ouvrir : rubrique forcee (clic orphelin) sinon rubrique de la vue courante sinon prix de base
+      const openKey = forceOpenKey || (PARAMS.find(p=>p.key===currentView)?currentView:'rate')
       PARAMS.forEach(p=>{
         const acc=document.createElement('div'); acc.className='acc'; acc.dataset.pk=p.key
         let body=''
@@ -517,8 +477,19 @@
           const pv=pending.avail
           body+=dowChipsHtml('avail',pv.dow)
           body+='<div class="toggle-avail" data-seg="avail"><button data-v="open" class="'+(pv.value==='open'?'act-open':'')+'">Disponible</button><button data-v="closed" class="'+(pv.value==='closed'?'act-closed':'')+'">Ferme</button></div>'
+        } else if(p.type==='orphan'){
+          const nb=orphanSet.size
+          if(!pending.orphan)pending.orphan={autofix:orphanAutoFix, price:{enabled:false,mode:'set',unit:'eur',value:''}}
+          const o=pending.orphan
+          body+='<div style="font-size:12px;color:#92600a;background:#fff4e5;border-radius:8px;padding:10px;margin-bottom:12px">&#9888;&#65039; '+nb+' nuit(s) orpheline(s) ce mois-ci. Ces dates ne peuvent pas etre reservees a cause des contraintes.</div>'
+          body+='<label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;margin-bottom:6px"><input type="checkbox" id="o-autofix" '+(o.autofix?'checked':'')+'/> Correction automatique</label>'
+          body+='<div style="font-size:12px;color:#6e6e73;margin-bottom:14px">Ajuste le minimum de nuits et leve les blocages arrivee/depart sur les nuits orphelines pour les rendre reservables. Reglage conserve.</div>'
+          body+='<label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;margin-bottom:6px"><input type="checkbox" id="o-price-en" '+(o.price.enabled?'checked':'')+'/> Prix special nuits orphelines</label>'
+          body+='<div id="o-price-fields" style="display:'+(o.price.enabled?'block':'none')+'"><div class="price-row"><input class="fld" type="number" inputmode="decimal" id="o-price-val" placeholder="Valeur" value="'+o.price.value+'"/></div>'
+          body+='<div class="seg" id="o-price-mode"><button data-v="set" class="'+(o.price.mode==='set'?'active':'')+'">Definir</button><button data-v="inc" class="'+(o.price.mode==='inc'?'active':'')+'">+</button><button data-v="dec" class="'+(o.price.mode==='dec'?'active':'')+'">-</button></div>'
+          body+='<div class="seg" id="o-price-unit" style="margin-top:8px"><button data-v="eur" class="'+(o.price.unit==='eur'?'active':'')+'">EUR</button><button data-v="pct" class="'+(o.price.unit==='pct'?'active':'')+'">%</button></div></div>'
         }
-        acc.innerHTML='<div class="acc-head">'+p.label+'<span class="chev">&#9662;</span></div><div class="acc-body">'+body+'</div>'
+        acc.innerHTML='<div class="acc-head">'+p.label+(p.key==='orphan'&&orphanSet.size>0?'<span style="background:#f59e0b;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px">'+orphanSet.size+'</span>':'')+'<span class="chev">&#9662;</span></div><div class="acc-body">'+body+'</div>'
         if(p.key===openKey) acc.classList.add('open')
         wrap.appendChild(acc)
       })
@@ -538,33 +509,34 @@
       wrap.querySelectorAll('input[data-val]').forEach(inp=>inp.addEventListener('input',e=>{ pending[e.target.dataset.val].value=e.target.value }))
       const ppi=wrap.querySelector('#pp-inc'), ppe=wrap.querySelector('#pp-extra')
       if(ppi&&ppe){ const upd=()=>{ pending.perPerson={included:parseInt(ppi.value,10)||currentBien.capacity, extraFee:parseFloat(ppe.value)||0}; let l='Base '+(currentBien.base_price||0)+' EUR :<br>'; for(let pr=pending.perPerson.included+1;pr<=(currentBien.capacity||1);pr++){ l+=pr+'e pers : '+((currentBien.base_price||0)+(pr-pending.perPerson.included)*pending.perPerson.extraFee)+' EUR<br>' } if(pending.perPerson.extraFee===0)l+='(aucun supplement)'; wrap.querySelector('#pp-prev').innerHTML=l }; ppi.addEventListener('input',upd); ppe.addEventListener('input',upd); upd() }
+      // rubrique orphan
+      const oaf=wrap.querySelector('#o-autofix')
+      if(oaf){ oaf.addEventListener('change',e=>{ pending.orphan.autofix=e.target.checked }) }
+      const open=wrap.querySelector('#o-price-en')
+      if(open){ open.addEventListener('change',e=>{ pending.orphan.price.enabled=e.target.checked; wrap.querySelector('#o-price-fields').style.display=e.target.checked?'block':'none' }) }
+      const opv=wrap.querySelector('#o-price-val'); if(opv) opv.addEventListener('input',e=>{ pending.orphan.price.value=e.target.value })
+      const om=wrap.querySelector('#o-price-mode'); if(om) om.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ pending.orphan.price.mode=b.dataset.v; om.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b)) }))
+      const ou=wrap.querySelector('#o-price-unit'); if(ou) ou.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ pending.orphan.price.unit=b.dataset.v; ou.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b)) }))
     }
 
     document.getElementById('btn-save').addEventListener('click', async ()=>{
       if(!currentBien)return
-      // --- mode correction orphelins ---
-      if(sheetMode==='orphan'){
-        const dates=[...orphanSet].sort()
-        if(!dates.length){ closeSheet(); return }
-        const segments=[]
-        const op=pending.__orphanPrice||{enabled:false}
-        const computeFinal=(cur,mode,unit,val)=>{ if(isNaN(val))return cur; if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val; if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val; return unit==='pct'?Math.round(cur*(1-val/100)):cur-val }
-        // pour chaque orphelin : lever contraintes + prix special optionnel
-        dates.forEach(iso=>{
-          const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false, stop_sell:false }
-          if(op.enabled && op.value!=='' && !isNaN(parseFloat(op.value))){ seg.rate=computeFinal(rateFor(iso),op.mode,op.unit,parseFloat(op.value)) }
-          segments.push(seg)
-        })
-        pushUndo(); showToast('Correction...')
-        try{ const resp=await api.calendar.save(currentBien.id, segments); showToast('Orphelins corriges'); closeSheet(); await loadMonth() }
-        catch(err){ showToast('Erreur: '+(err.message||'correction')) }
-        return
-      }
-      // --- mode normal ---
       const sISO=document.getElementById('r-start').value, eISO=document.getElementById('r-end').value
       const segments=[]
       if(pending.perPerson) segments.push({ kind:'perPerson', included:pending.perPerson.included, extra_guest_fee:pending.perPerson.extraFee })
       const computeFinal=(cur,mode,unit,val)=>{ if(isNaN(val))return cur; if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val; if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val; return unit==='pct'?Math.round(cur*(1-val/100)):cur-val }
+      // --- rubrique nuits orphelines ---
+      if(pending.orphan){
+        const o=pending.orphan
+        orphanAutoFix=!!o.autofix; savePrefs()  // reglage persistant
+        if(o.autofix && orphanSet.size){
+          [...orphanSet].sort().forEach(iso=>{
+            const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false, stop_sell:false }
+            if(o.price.enabled && o.price.value!=='' && !isNaN(parseFloat(o.price.value))){ seg.rate=computeFinal(rateFor(iso),o.price.mode,o.price.unit,parseFloat(o.price.value)) }
+            segments.push(seg)
+          })
+        }
+      }
       PARAMS.forEach(p=>{
         if(p.type==='perperson')return
         const pv=pending[p.key]; if(!pv)return
