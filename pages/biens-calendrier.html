@@ -38,6 +38,9 @@
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
     .bien-title { font-size: 18px; font-weight: 700; margin: 16px 0 12px; padding: 0 14px; display: inline-flex; align-items: center; gap: 10px; position: sticky; left: 0; background: #fff; z-index: 6; max-width: 90vw; }
+    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; border-left: 4px solid #007aff; vertical-align: middle; line-height: 1.2; }
+    table.cal .row-label.bien-head .cap-h { display: block; font-size: 10px; font-weight: 400; color: #86868b; margin-top: 2px; }
+    .bien-section { padding-top: 18px; }
     .bien-title::before { content: ''; width: 5px; height: 22px; background: #007aff; border-radius: 3px; display: inline-block; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
@@ -295,8 +298,7 @@
     function renderBienBlock(bien){
       const st=states[bien.id]
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
-      let html='<div class="bien-title">'+bien.name+' <span class="cap">capacite '+bien.capacity+'</span></div>'
-      html+='<table class="cal"><thead><tr><th class="row-label"></th>'
+      let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
       days.forEach((d,idx)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(idx)?' month-start':'';html+='<th class="'+(we?'weekend':'')+(isToday(idx)?' today':'')+ms+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
       html+='</tr></thead><tbody>'
       // Reservations
