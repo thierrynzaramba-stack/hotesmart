@@ -37,7 +37,7 @@
     /* Separation logements renforcee */
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
-    .bien-title { font-size: 18px; font-weight: 700; margin: 16px 14px 12px; display: flex; align-items: center; gap: 10px; position: sticky; left: 0; }
+    .bien-title { font-size: 18px; font-weight: 700; margin: 16px 0 12px; padding: 0 14px; display: inline-flex; align-items: center; gap: 10px; position: sticky; left: 0; background: #fff; z-index: 6; max-width: 90vw; }
     .bien-title::before { content: ''; width: 5px; height: 22px; background: #007aff; border-radius: 3px; display: inline-block; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
@@ -552,11 +552,10 @@
       const prefs=loadPrefsD()
       // periode memorisee
       if(prefs && prefs.months){ MONTHS=prefs.months; const ps=document.getElementById('period-select'); if(ps) ps.value=String(MONTHS); buildDays(); renderMonthPills(); renderMonthBand() }
-      // pre-selection : URL prioritaire, sinon prefs, sinon premier
-      if(URL_BIEN_ID && BIENS.find(b=>b.id===URL_BIEN_ID)) selectedBiens=[URL_BIEN_ID]
-      else if(prefs && Array.isArray(prefs.biens) && prefs.biens.length){ selectedBiens=prefs.biens.filter(id=>BIENS.find(b=>b.id===id)); if(!selectedBiens.length && BIENS.length) selectedBiens=[BIENS[0].id] }
-      else if(BIENS.length) selectedBiens=[BIENS[0].id]
-      else selectedBiens=[]
+      // pre-selection : prefs prioritaires (persistance), sinon URL, sinon premier
+      if(prefs && Array.isArray(prefs.biens) && prefs.biens.length){ selectedBiens=prefs.biens.filter(id=>BIENS.find(b=>b.id===id)) }
+      if(!selectedBiens.length && URL_BIEN_ID && BIENS.find(b=>b.id===URL_BIEN_ID)) selectedBiens=[URL_BIEN_ID]
+      if(!selectedBiens.length && BIENS.length) selectedBiens=[BIENS[0].id]
       BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
       renderMultiSelect()
       await reloadInventory()
