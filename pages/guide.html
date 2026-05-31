@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guide d'utilisation - HoteSmart</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; line-height: 1.6; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 80px; }
+    header { background: #fff; border-bottom: 1px solid #e5e5e7; position: sticky; top: 0; z-index: 10; }
+    .header-inner { max-width: 860px; margin: 0 auto; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
+    .header-inner .back { color: #007aff; text-decoration: none; font-size: 15px; }
+    .header-inner .title { font-size: 17px; font-weight: 700; }
+    h1 { font-size: 32px; font-weight: 800; margin: 40px 0 8px; letter-spacing: -0.5px; }
+    .lead { font-size: 17px; color: #6e6e73; margin-bottom: 32px; }
+    /* sommaire */
+    .toc { background: #fff; border: 1px solid #e5e5e7; border-radius: 14px; padding: 20px 24px; margin-bottom: 36px; }
+    .toc h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: #86868b; margin-bottom: 12px; }
+    .toc ul { list-style: none; }
+    .toc li { margin: 7px 0; }
+    .toc a { color: #007aff; text-decoration: none; font-size: 15px; }
+    .toc a:hover { text-decoration: underline; }
+    section { background: #fff; border: 1px solid #e5e5e7; border-radius: 14px; padding: 28px 30px; margin-bottom: 20px; scroll-margin-top: 80px; }
+    section h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.3px; }
+    section h3 { font-size: 17px; font-weight: 600; margin: 22px 0 8px; }
+    section p { margin-bottom: 12px; color: #333; }
+    .opt { border-left: 3px solid #007aff; padding: 4px 0 4px 16px; margin: 16px 0; }
+    .opt .name { font-weight: 700; font-size: 16px; }
+    .opt .when { color: #6e6e73; font-size: 14px; }
+    .tuto { background: #f0f9ff; border: 1px solid #cce4ff; border-radius: 12px; padding: 18px 20px; margin: 18px 0; }
+    .tuto .tuto-title { font-weight: 700; color: #0d4ea6; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .tuto ol { margin-left: 18px; }
+    .tuto li { margin: 6px 0; }
+    .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; vertical-align: middle; margin-left: 8px; }
+    .tag.both { background: #e6f7ed; color: #1f6f23; }
+    .tag.mobile { background: #fef3e2; color: #b45309; }
+    .tag.desktop { background: #eef2fb; color: #0d4ea6; }
+    .pill { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: middle; margin-right: 4px; }
+    .callout { background: #fff8e6; border: 1px solid #ffe08a; border-radius: 12px; padding: 16px 18px; margin: 16px 0; font-size: 14px; color: #6b5600; }
+    footer { text-align: center; color: #86868b; font-size: 13px; margin-top: 40px; }
+    code { background: #f0f0f2; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a href="/biens" class="back">&larr; Retour</a>
+      <span class="title">Guide d'utilisation</span>
+      <span style="width:60px"></span>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <h1>Gérer vos tarifs et votre calendrier</h1>
+    <p class="lead">Tout ce qu'il faut savoir pour piloter vos prix, vos disponibilités et vos restrictions de séjour, sur ordinateur comme sur mobile.</p>
+
+    <div class="toc">
+      <h2>Sommaire</h2>
+      <ul>
+        <li><a href="#demarrer">1. Démarrer</a></li>
+        <li><a href="#vues">2. Les deux interfaces : ordinateur et mobile</a></li>
+        <li><a href="#options">3. Toutes les options expliquées</a></li>
+        <li><a href="#orphelines">4. Les nuits orphelines</a></li>
+        <li><a href="#tutos">5. Tutoriels pas à pas</a></li>
+        <li><a href="#faq">6. Questions fréquentes</a></li>
+      </ul>
+    </div>
+
+    <section id="demarrer">
+      <h2>1. Démarrer</h2>
+      <p>Le calendrier est le cœur de la gestion de vos biens. Chaque modification que vous y faites (prix, disponibilité, durée minimale de séjour…) est <strong>enregistrée</strong> puis <strong>publiée automatiquement</strong> sur vos plateformes de réservation connectées.</p>
+      <p>Pour ouvrir le calendrier d'un bien : rendez-vous dans <strong>Mes biens</strong>, puis cliquez sur <strong>Calendrier</strong> sur le bien souhaité.</p>
+      <div class="callout">Une date pour laquelle vous n'avez rien configuré utilise automatiquement le <strong>prix de base</strong> du bien. Vous ne configurez que les exceptions (week-ends, vacances, périodes spéciales…).</div>
+    </section>
+
+    <section id="vues">
+      <h2>2. Les deux interfaces</h2>
+      <h3>Sur ordinateur <span class="tag desktop">Ordinateur</span></h3>
+      <p>Le calendrier s'affiche sous forme de <strong>tableau horizontal</strong> : les jours en colonnes, les informations en lignes (Prix, Disponibilité, etc.). Vous pouvez afficher <strong>plusieurs biens en même temps</strong>, empilés, pour comparer.</p>
+      <p>L'édition se fait comme dans un tableur : cliquez sur une case, tapez une valeur, validez avec Entrée. Vous pouvez sélectionner plusieurs cases d'un coup pour appliquer la même valeur.</p>
+      <h3>Sur mobile <span class="tag mobile">Mobile</span></h3>
+      <p>Le calendrier s'affiche sous forme de <strong>calendrier mensuel</strong> classique, un bien à la fois. Naviguez de mois en mois avec les flèches. En haut, deux menus : le <strong>bien</strong> et la <strong>vue</strong> (ce que les cases affichent : tarifs, durée minimale, disponibilité…).</p>
+      <p>Touchez une date pour ouvrir le panneau de configuration. Vous pouvez installer l'application sur votre écran d'accueil pour un accès rapide.</p>
+      <div class="tuto">
+        <div class="tuto-title">📲 Installer l'application sur iPhone</div>
+        <ol>
+          <li>Ouvrez le calendrier dans Safari</li>
+          <li>Touchez le bouton <strong>Partager</strong></li>
+          <li>Choisissez <strong>« Sur l'écran d'accueil »</strong></li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="options">
+      <h2>3. Toutes les options expliquées</h2>
+      <p>Voici chaque réglage que vous pouvez appliquer à une date ou une période, et quand l'utiliser.</p>
+
+      <div class="opt">
+        <div class="name">Prix de base</div>
+        <p>Le tarif d'une nuit. <span class="when">Utilisez-le pour ajuster vos prix selon les saisons, week-ends, événements locaux.</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Prix par personne</div>
+        <p>Définit le nombre de voyageurs inclus dans le prix de base, et un supplément par voyageur additionnel. <span class="when">Utile si vous facturez plus cher au-delà d'un certain nombre d'occupants.</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Disponibilité</div>
+        <p>Ouvre ou ferme une date à la réservation. Une date fermée apparaît en <span class="pill" style="background:#ffeced"></span>rouge clair. <span class="when">Fermez les dates où vous ne souhaitez pas louer (usage personnel, travaux…).</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Minimum de nuits à l'arrivée</div>
+        <p>Nombre minimal de nuits qu'un voyageur doit réserver s'il arrive ce jour-là. <span class="when">Classique pour imposer 2 ou 3 nuits le week-end, ou une semaine en haute saison.</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Minimum de nuits sur le séjour</div>
+        <p>Durée minimale imposée si le séjour traverse cette date. <span class="when">Pour protéger des périodes entières (vacances scolaires par exemple).</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Maximum de nuits</div>
+        <p>Durée maximale d'un séjour incluant cette date. <span class="when">Pour éviter les très longs séjours sur des périodes prisées.</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Arrivée (autorisée / bloquée)</div>
+        <p>Empêche les voyageurs d'<strong>arriver</strong> ce jour précis (les séjours en cours peuvent continuer). <span class="when">Pratique pour caler les arrivées sur des jours fixes (ex. arrivées le samedi uniquement).</span></p>
+      </div>
+
+      <div class="opt">
+        <div class="name">Départ (autorisé / bloqué)</div>
+        <p>Empêche les voyageurs de <strong>partir</strong> ce jour précis. <span class="when">Même logique que l'arrivée, pour organiser vos rotations et ménages.</span></p>
+      </div>
+
+      <div class="callout">Chaque réglage peut être appliqué à une <strong>période</strong> (date de début à date de fin) et filtré par <strong>jours de la semaine</strong>. Exemple : « +30 % sur les vendredis et samedis de juillet ».</div>
+    </section>
+
+    <section id="orphelines">
+      <h2>4. Les nuits orphelines</h2>
+      <p>Une <strong>nuit orpheline</strong> est une nuit libre qu'<strong>aucun voyageur ne peut réserver</strong> à cause de vos contraintes. Exemple typique : il vous reste une seule nuit libre entre deux réservations, mais votre minimum de séjour est de 2 nuits — personne ne peut donc la réserver. Cette nuit risque de rester vide.</p>
+      <p>HôteSmart les détecte automatiquement et les fait ressortir en <span class="pill" style="background:#fff4e5;border:1px solid #f59e0b"></span><strong>orange avec une alerte ⚠️</strong> dans le calendrier.</p>
+      <h3>Corriger une nuit orpheline</h3>
+      <p>Touchez (ou cliquez) une nuit orpheline : le panneau s'ouvre directement sur la rubrique <strong>Nuits orphelines</strong>. Vous y trouvez :</p>
+      <div class="opt">
+        <div class="name">Correction automatique</div>
+        <p>Quand activée, HôteSmart ajuste les contraintes (réduit le minimum de nuits, lève les blocages d'arrivée/départ) sur les nuits orphelines pour les rendre réservables. <span class="when">Ce réglage est conservé et suit votre bien sur tous vos appareils.</span></p>
+      </div>
+      <div class="opt">
+        <div class="name">Prix spécial nuits orphelines</div>
+        <p>Appliquez un tarif attractif (fixe, ou en plus/moins, ou en pourcentage) pour inciter à réserver ces nuits difficiles. <span class="when">Une remise de dernière minute sur ces nuits améliore votre taux d'occupation.</span></p>
+      </div>
+    </section>
+
+    <section id="tutos">
+      <h2>5. Tutoriels pas à pas</h2>
+
+      <div class="tuto">
+        <div class="tuto-title">💶 Augmenter mes prix le week-end</div>
+        <ol>
+          <li>Ouvrez le calendrier de votre bien</li>
+          <li>Ouvrez le panneau de configuration (clic ou toucher sur une date)</li>
+          <li>Dans <strong>Prix de base</strong>, choisissez la période concernée</li>
+          <li>Sélectionnez uniquement <strong>Ven</strong> et <strong>Sam</strong> dans le filtre des jours</li>
+          <li>Entrez le montant (ou utilisez +/− pour ajuster)</li>
+          <li>Enregistrez : c'est publié automatiquement</li>
+        </ol>
+      </div>
+
+      <div class="tuto">
+        <div class="tuto-title">🔒 Bloquer une période (usage personnel)</div>
+        <ol>
+          <li>Ouvrez le panneau de configuration</li>
+          <li>Réglez la période de début et de fin</li>
+          <li>Dans <strong>Disponibilité</strong>, choisissez <strong>Fermé</strong></li>
+          <li>Enregistrez : les dates passent en rouge, plus aucune réservation possible</li>
+        </ol>
+      </div>
+
+      <div class="tuto">
+        <div class="tuto-title">🌙 Imposer un minimum de 3 nuits en haute saison</div>
+        <ol>
+          <li>Ouvrez le panneau, réglez la période (ex. juillet-août)</li>
+          <li>Dans <strong>Minimum de nuits à l'arrivée</strong>, entrez <code>3</code></li>
+          <li>Enregistrez</li>
+        </ol>
+      </div>
+
+      <div class="tuto">
+        <div class="tuto-title">⚠️ Récupérer mes nuits orphelines</div>
+        <ol>
+          <li>Repérez les dates en orange dans le calendrier</li>
+          <li>Touchez-en une : la rubrique <strong>Nuits orphelines</strong> s'ouvre</li>
+          <li>Activez <strong>Correction automatique</strong></li>
+          <li>(Optionnel) Activez un <strong>prix spécial</strong> attractif</li>
+          <li>Enregistrez : ces nuits redeviennent réservables</li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="faq">
+      <h2>6. Questions fréquentes</h2>
+      <h3>Où sont enregistrées mes modifications ?</h3>
+      <p>Vos tarifs et restrictions sont enregistrés de façon permanente et publiés sur vos plateformes connectées. HôteSmart reste la référence de votre historique.</p>
+      <h3>Que se passe-t-il pour une date que je n'ai pas configurée ?</h3>
+      <p>Elle utilise automatiquement le prix de base de votre bien. Vous n'avez à configurer que les exceptions.</p>
+      <h3>Mes réglages sont-ils les mêmes sur mobile et ordinateur ?</h3>
+      <p>Oui. Les tarifs, restrictions et la correction automatique des nuits orphelines sont partagés. Seul l'affichage diffère (tableau sur ordinateur, calendrier mensuel sur mobile).</p>
+    </section>
+
+    <footer>
+      Guide HôteSmart — document évolutif, enrichi au fil des mises à jour.
+    </footer>
+  </div>
+</body>
+</html>

@@ -11,6 +11,10 @@
   },
   "rewrites": [
     {
+      "source": "/guide",
+      "destination": "/pages/guide"
+    },
+    {
       "source": "/m/calendrier",
       "destination": "/pages/calendrier-mobile"
     },
