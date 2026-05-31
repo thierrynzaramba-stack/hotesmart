@@ -58,8 +58,13 @@
     table.cal td.modified::after { content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; background: #f59e0b; border-radius: 50%; }
     .rate-input { width: 100%; border: none; background: #fff; text-align: center; font-size: 12px; font-weight: 600; font-family: inherit; padding: 3px 0; outline: 2px solid #007aff; border-radius: 3px; }
     table.cal .resa-cell { position: relative; padding: 0 !important; height: 24px; }
-    .resa-bar { position: absolute; top: 3px; bottom: 3px; color: white; font-size: 10px; font-weight: 500; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: hidden; border-radius: 3px; }
+    .resa-bar { position: absolute; top: 3px; bottom: 3px; color: white; font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; white-space: nowrap; overflow: hidden; border-radius: 11px; }
     .resa-bar.blue { background: #0d4ea6; } .resa-bar.green { background: #1f6f23; } .resa-bar.red { background: #d52a44; }
+    .resa-bar.airbnb { background: #d52a44; } .resa-bar.booking { background: #0d4ea6; } .resa-bar.direct { background: #1f6f23; }
+    .resa-bar .ava { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .resa-bar .ava svg { width: 10px; height: 10px; }
+    td.cell-closed { background: #ffeced !important; }
+    td.cell-reserved { background: #dde7f5 !important; }
     .float-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(140%); background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px); }
     .float-bar.visible { transform: translateX(-50%) translateY(0); }
     .float-bar .sel-info { font-size: 13px; } .float-bar .sel-info strong { font-weight: 600; }
@@ -285,14 +290,17 @@
       html+='</tr></thead><tbody>'
       // Reservations
       html+='<tr><td class="row-label">Reservations</td>'
-      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=bk.span*100;html+='<div class="resa-bar '+bk.color+'" style="left:50%;width:calc('+w+'% - 1px);z-index:2">'+bk.name+'</div>'}});html+='</td>'})
+      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=(bk.span-0.5)*100;const nameShort=bk.name.length>16?bk.name.slice(0,15)+'.':bk.name;html+='<div class="resa-bar '+bk.source+'" style="left:50%;width:calc('+w+'% - 2px);z-index:2"><span class="ava">'+platformLogo(bk.source)+'</span>'+nameShort+'</div>'}});html+='</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
         const editable=(pk==='rate') // maxRate = calcule, non editable case par case
         const lbl = pk==='maxRate' ? 'Prix max' : paramLabel(pk)
         html+='<tr><td class="row-label">'+lbl+'</td>'
-        st.forEach((s,i)=>{const we=days[i].getDay()===0||days[i].getDay()===6;const ms=isMonthStart(i)?' month-start':'';const c=[];if(editable)c.push('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');if(we)c.push('weekend');if(isToday(i))c.push('today');if(ms)c.push('month-start');if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
+        st.forEach((s,i)=>{const we=days[i].getDay()===0||days[i].getDay()===6;const ms=isMonthStart(i)?' month-start':'';const c=[];if(editable)c.push('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');if(we)c.push('weekend');if(isToday(i))c.push('today');if(ms)c.push('month-start');
+          // coloration etat (ligne prix uniquement) : ferme=rouge clair, reserve=bleute
+          if(pk==='rate'){ const iso=toISO(days[i]); const closed=(s.avail==='closed'||s.stopSell==='closed'); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
+          if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
         html+='</tr>'
       })
       html+='</tbody></table>'
@@ -335,7 +343,7 @@
     document.addEventListener('keydown',e=>{ if(!sel.bienId||sel.idx.size===0)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return; if(document.getElementById('overlay').classList.contains('visible'))return; const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; if(!cell)return; if(e.key==='Enter'||e.key==='F2'){e.preventDefault();startInlineEdit(cell,f,'')}else if(/^[0-9]$/.test(e.key)){e.preventDefault();startInlineEdit(cell,f,e.key)} })
     function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected');else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
 
-    function startInlineEdit(cell,idx,initial){ if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="number" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();try{input.select()}catch(e){};let done=false;const commit=(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Applique a '+n+' jours':'Enregistre');return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
+    function startInlineEdit(cell,idx,initial){ if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="number" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){const l=input.value.length;input.setSelectionRange(l,l)}else input.select();let done=false;const commit=(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Applique a '+n+' jours':'Enregistre');return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
 
     const floatBar=document.getElementById('float-bar')
     function showFloatBar(){ if(sel.idx.size===0){hideFloatBar();return}document.getElementById('sel-count').textContent=sel.idx.size;floatBar.classList.add('visible') }
@@ -504,12 +512,20 @@
         currency:p.currency||'EUR', resa:[] }
     }
     function mapResa(list){
-      return (list||[]).map(b=>{
+      const SRC=['airbnb','booking','direct']
+      return (list||[]).map((b,idx)=>{
         const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
         const span=Math.max(1, Math.round((co-ci)/86400000))
-        const src=(b.source||'direct').toLowerCase()
-        return { startISO:b.checkin, span, name:b.guest_name||'Reservation', color:COLORS_BY_SOURCE[src]||'green' }
+        // source variee pour la demo (en attendant la vraie source via webhooks)
+        const src=SRC[idx % 3]
+        return { startISO:b.checkin, checkout:b.checkout, span, name:b.guest_name||'Reservation', source:src, color:COLORS_BY_SOURCE[src]||'green' }
       })
+    }
+    // logos plateforme (SVG inline)
+    function platformLogo(src){
+      if(src==='airbnb') return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2c-1.1 0-2 .7-2.5 1.8C8 6.5 4 15 4 18a4 4 0 0 0 7 2.6A4 4 0 0 0 18 18c0-3-4-11.5-5.5-14.2C12 2.7 11.1 2 12 2zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>'
+      if(src==='booking') return '<svg viewBox="0 0 24 24" fill="#fff"><text x="12" y="17" font-size="15" font-weight="700" text-anchor="middle">B</text></svg>'
+      return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3l9 7v11h-6v-6H9v6H3V10z"/></svg>'
     }
 
     async function loadData(){
