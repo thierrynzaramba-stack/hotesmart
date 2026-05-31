@@ -41,7 +41,7 @@
     .bien-title::before { content: ''; width: 5px; height: 22px; background: #007aff; border-radius: 3px; display: inline-block; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-    table.cal th, table.cal td { padding: 5px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
+    table.cal th, table.cal td { padding: 9px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
     table.cal thead th { border-bottom: 1px solid #e5e5e7; }
     table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 2; border-right: 1px solid #e5e5e7; font-weight: 500; }
     table.cal thead .row-label { z-index: 4; }
@@ -196,7 +196,18 @@
     const toISO=(d)=>d.toISOString().slice(0,10)
     const CELL_W=34
 
-    function buildDays(){ const t=new Date(); t.setHours(0,0,0,0); const n=Math.round(MONTHS*30); days=[]; for(let i=0;i<n;i++){const d=new Date(t);d.setDate(t.getDate()+i);days.push(d)} }
+    function buildDays(){
+      const t=new Date(); t.setHours(0,0,0,0)
+      let n=Math.round(MONTHS*30)
+      // remplir la largeur de l'ecran : nb de colonnes qui tiennent (largeur - label 120px) / 34px
+      try{
+        const COLW=34, LABEL=120, PAD=48
+        const avail=Math.max(0, (window.innerWidth||1200)-LABEL-PAD)
+        const fit=Math.floor(avail/COLW)
+        if(fit>n) n=fit
+      }catch(e){}
+      days=[]; for(let i=0;i<n;i++){const d=new Date(t);d.setDate(t.getDate()+i);days.push(d)}
+    }
     function isMonthStart(i){ return i===0||days[i].getDate()===1 }
     function isToday(i){ return i===0 }
 
@@ -239,7 +250,7 @@
     function doUndo(){ if(!undoStack.length)return; const u=undoStack.pop(); states[u.bid]=JSON.parse(u.snap); ppConfig[u.bid]=JSON.parse(u.pp); if(!undoStack.length)document.getElementById('btn-undo').disabled=true; renderBlocks(); showToast('Action annulee') }
 
     let selectedBiens=[]
-    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',async e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();await reloadInventory()});p.appendChild(o)});updateMsLabel() }
+    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',async e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();savePrefsD();await reloadInventory()});p.appendChild(o)});updateMsLabel() }
     function updateMsLabel(){ const l=document.getElementById('ms-label'); if(!selectedBiens.length)l.textContent='Choisir des biens'; else if(selectedBiens.length===1){const b=BIENS.find(x=>x.id===selectedBiens[0]);l.textContent=b?b.name:'1 bien'}else l.textContent=selectedBiens.length+' biens' }
     document.getElementById('ms-trigger').addEventListener('click',()=>document.getElementById('multi-select').classList.toggle('open'))
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
@@ -496,7 +507,7 @@
     const btnS=document.getElementById('btn-simple'),btnC=document.getElementById('btn-complete')
     btnS.addEventListener('click',()=>{showComplete=false;btnS.classList.add('active');btnC.classList.remove('active');renderBlocks()})
     btnC.addEventListener('click',()=>{showComplete=true;btnC.classList.add('active');btnS.classList.remove('active');renderBlocks()})
-    document.getElementById('period-select').addEventListener('change',async e=>{MONTHS=parseInt(e.target.value,10);buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();await reloadInventory()})
+    document.getElementById('period-select').addEventListener('change',async e=>{MONTHS=parseInt(e.target.value,10);savePrefsD();buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();await reloadInventory()})
 
     let toastTimer=null
     function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('visible'),1800)}
@@ -528,13 +539,22 @@
       return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3l9 7v11h-6v-6H9v6H3V10z"/></svg>'
     }
 
+    // --- persistance config (localStorage) ---
+    const PREF_KEY_D='hs_cal_desktop_prefs'
+    function savePrefsD(){ try{ localStorage.setItem(PREF_KEY_D, JSON.stringify({ biens:selectedBiens, months:MONTHS })) }catch(e){} }
+    function loadPrefsD(){ try{ return JSON.parse(localStorage.getItem(PREF_KEY_D)||'null') }catch(e){ return null } }
+
     async function loadData(){
       // 1) liste de tous les biens du user (pour le dropdown)
       let all=[]
       try { const r=await api.channel.listProperties(); all=r.properties||[] } catch(e){ showToast('Erreur chargement biens'); }
       BIENS = all.map(mapBien)
-      // pre-selection : bien de l'URL si present et possede, sinon le premier
+      const prefs=loadPrefsD()
+      // periode memorisee
+      if(prefs && prefs.months){ MONTHS=prefs.months; const ps=document.getElementById('period-select'); if(ps) ps.value=String(MONTHS); buildDays(); renderMonthPills(); renderMonthBand() }
+      // pre-selection : URL prioritaire, sinon prefs, sinon premier
       if(URL_BIEN_ID && BIENS.find(b=>b.id===URL_BIEN_ID)) selectedBiens=[URL_BIEN_ID]
+      else if(prefs && Array.isArray(prefs.biens) && prefs.biens.length){ selectedBiens=prefs.biens.filter(id=>BIENS.find(b=>b.id===id)); if(!selectedBiens.length && BIENS.length) selectedBiens=[BIENS[0].id] }
       else if(BIENS.length) selectedBiens=[BIENS[0].id]
       else selectedBiens=[]
       BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
