@@ -49,10 +49,8 @@
     .cell.unavailable .val { color: #d52a44; }
     .cell.reserved { background: #dde7f5; border-color: #b9cdec; }
     .cell.reserved.weekend { background: #d2def2; }
-    .cell.modified::before { content: ''; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); height: 3px; border-radius: 2px; background: #f59e0b; }
-    .cell.opt1::before { width: 30%; }
-    .cell.opt2::before { width: 55%; }
-    .cell.opt3::before { width: 80%; }
+    .cell.has-options { background: #fafbfd; }
+    .cell.has-options.weekend { background: #eef2f9; }
     .cell.orphan { background: #fff4e5 !important; border-color: #f59e0b; box-shadow: inset 0 0 0 2px #f59e0b; }
     .cell.orphan .alert { position: absolute; top: 3px; right: 3px; font-size: 11px; }
     .loading { text-align: center; padding: 40px; color: #86868b; font-size: 14px; }
@@ -235,7 +233,11 @@
         const r=await api.calendar.load([currentBien.id], start, end)
         inv=(r.inventory&&r.inventory[currentBien.id])||{}
         const p=(r.properties||[]).find(x=>x.id===currentBien.id)
-        if(p){ ppConfig={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}; currentBien.base_price=Number(p.base_price)||currentBien.base_price; currentBien.capacity=p.capacity||currentBien.capacity }
+        if(p){ ppConfig={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}; currentBien.base_price=Number(p.base_price)||currentBien.base_price; currentBien.capacity=p.capacity||currentBien.capacity
+          // config orphan depuis la base
+          orphanAutoFix=!!p.orphan_autofix
+          currentBien.orphanPrice={ enabled:!!p.orphan_price_enabled, mode:p.orphan_price_mode||'set', unit:p.orphan_price_unit||'eur', value:(p.orphan_price_value!=null?String(p.orphan_price_value):'') }
+        }
         const bk=(r.bookings&&r.bookings[currentBien.id])||[]
         const SRC=['airbnb','booking','direct']
         bk.forEach((b,idx)=>{
@@ -360,9 +362,9 @@
           if(c.iso<todayISO) cell.classList.add('past')
           if(isUnavail(c.iso)) cell.classList.add('unavailable')
           else if(resaSet.has(c.iso) && !showResa) cell.classList.add('reserved')
-          // indicateur d'options : epaisseur selon le nombre
+          // indicateur discret : fond legerement teinte si options actives
           const oc=optionCount(c.iso)
-          if(oc>0){ cell.classList.add('modified'); cell.classList.add(oc>=3?'opt3':(oc===2?'opt2':'opt1')) }
+          if(oc>0) cell.classList.add('has-options')
           // jour orphelin
           let alertIcon=''
           if(orphanSet.has(c.iso)){ cell.classList.add('orphan'); alertIcon='<span class="alert">\u26A0\uFE0F</span>' }
@@ -479,7 +481,7 @@
           body+='<div class="toggle-avail" data-seg="avail"><button data-v="open" class="'+(pv.value==='open'?'act-open':'')+'">Disponible</button><button data-v="closed" class="'+(pv.value==='closed'?'act-closed':'')+'">Ferme</button></div>'
         } else if(p.type==='orphan'){
           const nb=orphanSet.size
-          if(!pending.orphan)pending.orphan={autofix:orphanAutoFix, price:{enabled:false,mode:'set',unit:'eur',value:''}}
+          if(!pending.orphan)pending.orphan={autofix:orphanAutoFix, price:(currentBien.orphanPrice?{...currentBien.orphanPrice}:{enabled:false,mode:'set',unit:'eur',value:''})}
           const o=pending.orphan
           body+='<div style="font-size:12px;color:#92600a;background:#fff4e5;border-radius:8px;padding:10px;margin-bottom:12px">&#9888;&#65039; '+nb+' nuit(s) orpheline(s) ce mois-ci. Ces dates ne peuvent pas etre reservees a cause des contraintes.</div>'
           body+='<label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;margin-bottom:6px"><input type="checkbox" id="o-autofix" '+(o.autofix?'checked':'')+'/> Correction automatique</label>'
@@ -528,7 +530,10 @@
       // --- rubrique nuits orphelines ---
       if(pending.orphan){
         const o=pending.orphan
-        orphanAutoFix=!!o.autofix; savePrefs()  // reglage persistant
+        orphanAutoFix=!!o.autofix
+        // persister la config en base (properties)
+        segments.push({ kind:'orphanConfig', orphan_autofix:o.autofix, orphan_price_enabled:o.price.enabled, orphan_price_mode:o.price.mode, orphan_price_unit:o.price.unit, orphan_price_value:(o.price.value!==''?o.price.value:null) })
+        // appliquer la correction aux orphelines actuelles si autofix
         if(o.autofix && orphanSet.size){
           [...orphanSet].sort().forEach(iso=>{
             const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false, stop_sell:false }

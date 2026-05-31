@@ -42,7 +42,7 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(ids) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id')
+      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value')
       .eq('user_id', user.id)
       .in('id', ids)
     if (error) throw new Error('Erreur lecture biens')
@@ -154,7 +154,29 @@ module.exports = async function handler(req, res) {
       }
       return out
     }
+    // Segments speciaux (config sur properties, pas sur calendar_inventory)
+    const propUpdates = {}
+    const dateSegments = []
     for (const seg of segments) {
+      if (seg.kind === 'perPerson') {
+        if (seg.included != null) propUpdates.included_guests = seg.included
+        if (seg.extra_guest_fee != null) propUpdates.extra_guest_fee = seg.extra_guest_fee
+      } else if (seg.kind === 'orphanConfig') {
+        if (seg.orphan_autofix != null) propUpdates.orphan_autofix = !!seg.orphan_autofix
+        if (seg.orphan_price_enabled != null) propUpdates.orphan_price_enabled = !!seg.orphan_price_enabled
+        if (seg.orphan_price_mode != null) propUpdates.orphan_price_mode = seg.orphan_price_mode
+        if (seg.orphan_price_unit != null) propUpdates.orphan_price_unit = seg.orphan_price_unit
+        if (seg.orphan_price_value != null && seg.orphan_price_value !== '') propUpdates.orphan_price_value = parseFloat(seg.orphan_price_value)
+      } else {
+        dateSegments.push(seg)
+      }
+    }
+    if (Object.keys(propUpdates).length) {
+      const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', property_id).eq('user_id', user.id)
+      if (pErr) console.error('[calendar] properties update error', pErr.message)
+    }
+
+    for (const seg of dateSegments) {
       const dates = expandDays(seg.date_from, seg.date_to, seg.days)
       for (const ds of dates) {
         if (!rowsByDate[ds]) rowsByDate[ds] = { property_id, date: ds }
@@ -193,7 +215,7 @@ module.exports = async function handler(req, res) {
       // Restrictions (rate + min/max + cta/ctd/stop_sell) -> /restrictions
       const restrictionValues = []
       const availabilityValues = []
-      for (const seg of segments) {
+      for (const seg of dateSegments) {
         const dayCodes = (seg.days && seg.days.length) ? seg.days.map(d => DOW_CODE[d]).filter(Boolean) : undefined
         // bloc restrictions
         const rv = { property_id: propId, rate_plan_id: ratePlanId, date_from: seg.date_from, date_to: seg.date_to }
