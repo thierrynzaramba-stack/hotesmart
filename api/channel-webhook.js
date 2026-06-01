@@ -227,6 +227,13 @@ module.exports = async function handler(req, res) {
   const { event, payload } = req.body || {}
   if (!event) return res.status(400).json({ error: 'event manquant' })
 
+  // -- MODE DEBUG TEMPORAIRE : renvoie le feed brut sans enregistrer ni acker.
+  // A retirer apres diagnostic. Declenche par { "event": "debug_feed" }.
+  if (event === 'debug_feed') {
+    const r = await channelCall('GET', '/booking_revisions/feed?page=1')
+    return res.status(200).json({ status: r.status, body: r.json })
+  }
+
   try {
     let result = { ok: true, reason: 'ignored:' + event }
     if (event === 'booking') {
