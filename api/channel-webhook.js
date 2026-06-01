@@ -19,6 +19,7 @@ const supabase = createClient(
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 const WEBHOOK_SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection deploiement (Preview)
 
 async function channelCall(method, path, body) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
@@ -166,7 +167,13 @@ module.exports = async function handler(req, res) {
         is_global: true,
         is_active: true,
         send_data: true,
-        headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET }
+        headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
+        // Bypass protection deploiement Vercel (Preview) : Channex ajoute ces
+        // parametres GET a chaque appel pour passer le mur d'authentification.
+        request_params: VERCEL_BYPASS ? {
+          'x-vercel-protection-bypass': VERCEL_BYPASS,
+          'x-vercel-set-bypass-cookie': 'true'
+        } : {}
       }
     })
     return res.status(reg.ok ? 201 : 502).json(reg.json)
