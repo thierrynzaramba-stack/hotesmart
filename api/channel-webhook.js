@@ -47,29 +47,61 @@ async function ownerOfProperty(providerPropertyId) {
 }
 
 // ---- BOOKING ----
-async function handleBooking(payload) {
-  const bookingId = payload?.booking_id
-  const revisionId = payload?.revision_id
-  if (!revisionId && !bookingId) return { ok: false, reason: 'no_id' }
+// Strategie Feed (recommandee certif) : le webhook n'est qu'un declencheur.
+// On lit GET /booking_revisions/feed (toutes les revisions non-ack), on traite
+// chacune, puis on ACK seulement apres sauvegarde reussie. Une revision ackee
+// ne reapparait plus dans le feed. Robuste aux webhooks perdus / hors ordre.
+async function handleBooking(_payload) {
+  const processed = []
+  let page = 1
+  const MAX_PAGES = 10  // garde-fou
 
-  // 1) Pull de l'etat reel de la revision
-  const r = await channelCall('GET', `/booking_revisions/${revisionId || bookingId}`)
-  if (!r.ok) {
-    console.error('[channel-webhook] pull revision failed', r.status, r.json)
-    return { ok: false, reason: 'pull_failed' }
+  while (page <= MAX_PAGES) {
+    const r = await channelCall('GET', `/booking_revisions/feed?order[inserted_at]=asc&page=${page}`)
+    if (!r.ok) {
+      console.error('[channel-webhook] feed failed', r.status, r.json)
+      return { ok: false, reason: 'feed_failed' }
+    }
+
+    const list = Array.isArray(r.json?.data) ? r.json.data : []
+    if (list.length === 0) break  // plus rien a traiter
+
+    for (const item of list) {
+      const rev = item.attributes || {}
+      const revisionId = rev.id || item.id
+      const res = await saveRevision(rev, revisionId)
+      if (res.saved) {
+        await ackRevision(revisionId)  // ack UNIQUEMENT apres sauvegarde reussie
+        processed.push(revisionId)
+      } else if (res.reason === 'unknown_property') {
+        // Bien non rattache a un user HoteSmart : on ack pour purger le feed.
+        await ackRevision(revisionId)
+      } else {
+        // Erreur DB : on N'ACK PAS -> la revision restera dans le feed (retry).
+        console.error('[channel-webhook] save failed, pas d ack', revisionId, res.reason)
+      }
+    }
+
+    // Pagination : si moins d'une page pleine, on s'arrete.
+    const limit = r.json?.meta?.limit || list.length
+    if (list.length < limit) break
+    page++
   }
-  const rev = r.json?.data?.attributes || r.json?.data || {}
 
-  const providerPropertyId = rev.property_id || payload.property_id
+  console.log('[channel-webhook] feed traite, revisions ackees:', processed.length)
+  return { ok: true, processed: processed.length }
+}
+
+// Mappe une revision Channex -> bookings_snapshot. Ne fait PAS l'ack.
+async function saveRevision(rev, revisionId) {
+  const providerPropertyId = rev.property_id
+  const bookingId = rev.booking_id || revisionId
   const owner = await ownerOfProperty(providerPropertyId)
   if (!owner) {
     console.warn('[channel-webhook] bien inconnu', providerPropertyId)
-    // On ack quand meme pour ne pas boucler, mais on ne stocke rien.
-    if (revisionId) await ackRevision(revisionId)
-    return { ok: true, reason: 'unknown_property' }
+    return { saved: false, reason: 'unknown_property' }
   }
 
-  // 2) Mapping vers bookings_snapshot (snapshot jsonb)
   const occ = rev.occupancy || {}
   const customer = rev.customer || {}
   const snapshot = {
@@ -82,14 +114,16 @@ async function handleBooking(payload) {
     numAdult:  occ.adults || null,
     numChild:  occ.children || null,
     source:    rev.ota_name || 'direct',     // vraie source plateforme
-    otaReservationCode: rev.ota_reservation_code || null
+    otaReservationCode: rev.ota_reservation_code || null,
+    amount:    rev.amount || null,
+    currency:  rev.currency || null
   }
 
   const { error: upErr } = await supabase
     .from('bookings_snapshot')
     .upsert({
       user_id:     owner.user_id,
-      booking_id:  String(bookingId || revisionId),
+      booking_id:  String(bookingId),
       property_id: String(providerPropertyId),   // = provider_property_id (text)
       snapshot,
       updated_at:  new Date().toISOString()
@@ -97,19 +131,19 @@ async function handleBooking(payload) {
 
   if (upErr) {
     console.error('[channel-webhook] upsert booking failed', upErr.message)
-    return { ok: false, reason: 'db_error' }   // 5xx -> Channex retentera
+    return { saved: false, reason: 'db_error' }
   }
 
-  // 3) Ack de la revision (sinon renvoyee pendant 30 min puis email)
-  if (revisionId) await ackRevision(revisionId)
-
   console.log('[channel-webhook] booking', snapshot.status, bookingId, '->', owner.user_id)
-  return { ok: true }
+  return { saved: true }
 }
 
+// Ack d'une revision. Isole + log detaille : au 1er vrai webhook, les logs
+// Vercel confirmeront si l'endpoint /ack repond 200 (sinon on ajuste l'URL).
 async function ackRevision(revisionId) {
   const a = await channelCall('POST', `/booking_revisions/${revisionId}/ack`)
   if (!a.ok) console.error('[channel-webhook] ack failed', revisionId, a.status, a.json)
+  else console.log('[channel-webhook] ack ok', revisionId)
   return a.ok
 }
 
