@@ -244,6 +244,26 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ status: r.status, properties: list })
   }
 
+  // -- DEBUG TEMPORAIRE : liste les canaux Channex (id + titre + propriete).
+  if (event === 'debug_channels') {
+    const r = await channelCall('GET', '/channels')
+    const list = Array.isArray(r.json?.data) ? r.json.data.map(c => ({
+      id: c.id,
+      title: c.attributes?.title,
+      property_id: c.attributes?.property_id,
+      ota: c.attributes?.channel
+    })) : r.json
+    return res.status(200).json({ status: r.status, channels: list })
+  }
+
+  // -- DEBUG TEMPORAIRE : supprime un canal par id. { event:'debug_delete_channel', channel_id:'...' }
+  if (event === 'debug_delete_channel') {
+    const cid = payload?.channel_id
+    if (!cid) return res.status(400).json({ error: 'channel_id requis' })
+    const r = await channelCall('DELETE', `/channels/${cid}`)
+    return res.status(200).json({ status: r.status, body: r.json })
+  }
+
   try {
     let result = { ok: true, reason: 'ignored:' + event }
     if (event === 'booking') {
