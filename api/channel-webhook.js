@@ -234,6 +234,16 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ status: r.status, body: r.json })
   }
 
+  // -- DEBUG TEMPORAIRE : liste les proprietes Channex (id + titre).
+  if (event === 'debug_properties') {
+    const r = await channelCall('GET', '/properties')
+    const list = Array.isArray(r.json?.data) ? r.json.data.map(p => ({
+      id: p.id,
+      title: p.attributes?.title
+    })) : r.json
+    return res.status(200).json({ status: r.status, properties: list })
+  }
+
   try {
     let result = { ok: true, reason: 'ignored:' + event }
     if (event === 'booking') {
