@@ -62,6 +62,9 @@ module.exports = async function handler(req, res) {
   }
 
   // ===== One-time token =====
+  // TEST TEMPORAIRE : username surchargeable via ?username= pour diagnostiquer
+  // l'echec d'auth iframe. A retirer une fois le bon format identifie.
+  const username = req.query.username || user.id
   try {
     const r = await fetch(`${CHANNEL_APP_BASE}/api/v1/auth/one_time_token`, {
       method: 'POST',
@@ -69,7 +72,7 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify({
         one_time_token: {
           property_id: prop.provider_property_id,
-          username: user.id
+          username: username
         }
       })
     })
@@ -85,14 +88,13 @@ module.exports = async function handler(req, res) {
     const oneTimeToken = json.data.token
 
     // ===== Construit l'URL d'iframe headless =====
-    const params = new URLSearchParams({
-      oauth_session_key: oneTimeToken,
-      app_mode: 'headless',
-      redirect_to: '/channels',
-      property_id: prop.provider_property_id,
-      channels: ALLOWED_CHANNELS
-    })
-    const iframeUrl = `${CHANNEL_APP_BASE}/auth/exchange?${params.toString()}`
+    // Format exact de la doc, sans encodage de redirect_to ni channels.
+    const iframeUrl = `${CHANNEL_APP_BASE}/auth/exchange`
+      + `?oauth_session_key=${oneTimeToken}`
+      + `&app_mode=headless`
+      + `&redirect_to=/channels`
+      + `&property_id=${prop.provider_property_id}`
+      + `&channels=${ALLOWED_CHANNELS}`
 
     return res.status(200).json({
       iframe_url: iframeUrl,
