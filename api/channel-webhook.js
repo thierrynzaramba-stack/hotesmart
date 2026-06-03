@@ -264,6 +264,27 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ status: r.status, body: r.json })
   }
 
+  // -- DEBUG TEMPORAIRE : detail room types + dispo d'une propriete.
+  // { event:'debug_room_detail', property_id:'<uuid channex>', date_from, date_to }
+  if (event === 'debug_room_detail') {
+    const pid = payload?.property_id
+    if (!pid) return res.status(400).json({ error: 'property_id requis' })
+    const rt = await channelCall('GET', `/room_types?filter[property_id]=${pid}`)
+    const rooms = Array.isArray(rt.json?.data) ? rt.json.data.map(r => ({
+      id: r.id,
+      title: r.attributes?.title,
+      count_of_rooms: r.attributes?.count_of_rooms,
+      occ_adults: r.attributes?.occ_adults
+    })) : rt.json
+    let avail = null
+    if (payload.date_from && payload.date_to) {
+      const a = await channelCall('GET',
+        `/availability?filter[property_id]=${pid}&filter[date][gte]=${payload.date_from}&filter[date][lte]=${payload.date_to}`)
+      avail = a.json
+    }
+    return res.status(200).json({ rooms, availability: avail })
+  }
+
   try {
     let result = { ok: true, reason: 'ignored:' + event }
     if (event === 'booking') {
