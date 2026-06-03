@@ -294,6 +294,19 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ status: r.status, body: r.json })
   }
 
+  // -- DEBUG TEMPORAIRE : liste les webhooks enregistres chez Channex.
+  if (event === 'debug_webhooks') {
+    const r = await channelCall('GET', '/webhooks')
+    const list = Array.isArray(r.json?.data) ? r.json.data.map(w => ({
+      id: w.id,
+      callback_url: w.attributes?.callback_url,
+      event_mask: w.attributes?.event_mask,
+      is_active: w.attributes?.is_active,
+      property_id: w.attributes?.property_id
+    })) : r.json
+    return res.status(200).json({ status: r.status, webhooks: list })
+  }
+
   // -- DEBUG TEMPORAIRE : detail room types + dispo d'une propriete.
   // { event:'debug_room_detail', property_id:'<uuid channex>', date_from, date_to }
   if (event === 'debug_room_detail') {
