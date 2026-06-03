@@ -257,6 +257,29 @@ module.exports = async function handler(req, res) {
   const { event, payload } = req.body || {}
   if (!event) return res.status(400).json({ error: 'event manquant' })
 
+  // -- ADMIN : enregistre le webhook global chez Channex.
+  // Protege par le secret webhook (deja valide ci-dessus). { event:'register_admin', callback_url }
+  if (event === 'register_admin') {
+    const callbackUrl = req.body.callback_url
+    if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
+    const reg = await channelCall('POST', '/webhooks', {
+      webhook: {
+        callback_url: callbackUrl,
+        event_mask: 'booking;message',
+        property_id: null,
+        is_global: true,
+        is_active: true,
+        send_data: true,
+        headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
+        request_params: VERCEL_BYPASS ? {
+          'x-vercel-protection-bypass': VERCEL_BYPASS,
+          'x-vercel-set-bypass-cookie': 'true'
+        } : {}
+      }
+    })
+    return res.status(reg.ok ? 201 : 502).json(reg.json)
+  }
+
   try {
     let result = { ok: true, reason: 'ignored:' + event }
     if (event === 'booking') {
