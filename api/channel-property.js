@@ -1,7 +1,11 @@
 // api/channel-property.js
 // Gere la creation et la liste des biens cote channel manager
-// POST : cree property + room_type + rate_plan (3 appels API) + INSERT Supabase
+// POST : cree property + room_type + rate_plan + push dispo 365j + INSERT Supabase
 // GET  : liste les biens du user courant
+//
+// inventory_type :
+//   whole = logement entier  -> count_of_rooms=1, dispo 1 sur 365j (le seul supporte aujourd'hui)
+//   room / hotel             -> multi-unites, tarifs mutualisables (NON encore supporte)
 
 const { createClient } = require('@supabase/supabase-js')
 
@@ -37,6 +41,13 @@ async function channelDelete(path) {
   }
 }
 
+// Date ISO (YYYY-MM-DD) decalee de n jours par rapport a aujourd'hui.
+function isoPlusDays(n) {
+  const d = new Date()
+  d.setDate(d.getDate() + n)
+  return d.toISOString().split('T')[0]
+}
+
 module.exports = async function handler(req, res) {
   // ===== AUTH (pattern beds24.js) =====
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -52,7 +63,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, currency, city, country, capacity, created_at')
+      .select('id, name, provider, provider_property_id, currency, city, country, capacity, inventory_type, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
@@ -66,6 +77,18 @@ module.exports = async function handler(req, res) {
   // ===== POST : creation d'un bien complet =====
   if (req.method === 'POST') {
     const { name, capacity, currency, address, city, country, zip_code, base_price, included_guests, extra_guest_fee } = req.body || {}
+
+    // Type d'inventaire : defaut whole. Seul whole est supporte pour l'instant.
+    const inventoryType = (req.body?.inventory_type || 'whole').toLowerCase()
+    if (!['whole', 'room', 'hotel'].includes(inventoryType)) {
+      return res.status(400).json({ error: "inventory_type invalide (whole | room | hotel)" })
+    }
+    if (inventoryType !== 'whole') {
+      return res.status(501).json({
+        error: "Type de bien non encore supporte. Seuls les logements entiers (whole) sont disponibles pour l'instant.",
+        inventory_type: inventoryType
+      })
+    }
 
     // Validation minimale
     if (!name || typeof name !== 'string' || name.length < 1 || name.length > 100) {
@@ -120,6 +143,7 @@ module.exports = async function handler(req, res) {
       }
 
       // Etape 2 : creer room_type
+      // whole => 1 seule unite vendable (count_of_rooms verrouille a 1).
       const roomRes = await channelCall('POST', '/room_types', {
         room_type: {
           property_id: providerPropertyId,
@@ -183,6 +207,23 @@ module.exports = async function handler(req, res) {
       }
       providerRatePlanId = rateRes.json?.data?.id
 
+      // Etape 3bis : ouvrir la dispo (whole = 1 unite) sur 365 jours.
+      // Sans ce push, le room type herite d'un inventaire par defaut indesirable.
+      // Le prix n'est PAS pousse ici : une date sans tarif applique base_price.
+      const availRes = await channelCall('POST', '/availability', {
+        values: [{
+          property_id: providerPropertyId,
+          room_type_id: providerRoomTypeId,
+          date_from: isoPlusDays(0),
+          date_to: isoPlusDays(365),
+          availability: 1
+        }]
+      })
+      if (!availRes.ok) {
+        // Non bloquant pour la creation, mais on le signale : la dispo devra etre repoussee.
+        console.error('[channel-property] push dispo 365j echoue', availRes.status, availRes.json)
+      }
+
       // Etape 4 : INSERT en base Supabase
       const { data: insertData, error: insertError } = await supabase
         .from('properties')
@@ -190,6 +231,7 @@ module.exports = async function handler(req, res) {
           user_id: user.id,
           name,
           provider: 'channex',
+          inventory_type: inventoryType,
           provider_property_id: providerPropertyId,
           provider_room_type_id: providerRoomTypeId,
           provider_rate_plan_id: providerRatePlanId,
@@ -214,7 +256,7 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: 'Sauvegarde echouee' })
       }
 
-      return res.status(201).json({ property: insertData })
+      return res.status(201).json({ property: insertData, dispo_pushed: availRes.ok })
 
     } catch (err) {
       console.error('[channel-property] Internal error', err.message)
