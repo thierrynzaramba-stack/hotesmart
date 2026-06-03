@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // HôteSmart — Cron orchestrateur
 // Refactoring Session #6 : logique éclatée en modules lib/cron-*.js
+// Session #14 : ajout du poll de secours du feed Channex (filet webhook).
 // ═══════════════════════════════════════════════════════════════════════════
-
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
 const { detectBookingChanges } = require('../lib/cron-bookings')
@@ -11,15 +11,14 @@ const { processProperty } = require('../lib/cron-classify')
 const { checkPendingMessages, checkBatteries } = require('../lib/cron-access')
 const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
+const { pollChannelFeed } = require('../lib/cron-channel-feed')
 
 module.exports = async function handler(req, res) {
   const authHeader = req.headers.authorization
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     if (req.method !== 'GET') return res.status(401).json({ error: 'Non autorisé' })
   }
-
   console.log('[Cron] Démarrage', new Date().toISOString())
-
   const results = {
     timestamp: new Date().toISOString(),
     properties: [],
@@ -28,33 +27,31 @@ module.exports = async function handler(req, res) {
     totalAutoReplies: 0,
     totalBookingEvents: 0,
     totalAutoMessages: 0,
+    totalChannelRevisions: 0,
     errors: []
   }
-
   try {
     // 1. Refresh tokens Beds24 (indispensable avant tout fetch)
     try { await refreshBeds24Tokens() }
     catch (err) { console.error('[Cron] Erreur refresh tokens:', err.message) }
-
     // 2. Récupère les clés Beds24 actives et les tokens publics
     const { data: apiKeys } = await supabase
       .from('api_keys')
       .select('user_id, api_key')
       .eq('service', 'beds24')
-    if (!apiKeys?.length) return res.json({ ...results, message: 'Aucune clé Beds24' })
-
     const { data: tokens } = await supabase
       .from('public_tokens')
       .select('token, property_ids, user_id')
-
-    // 3. Traitement par utilisateur
-    for (const { user_id, api_key } of apiKeys) {
-      try {
-        const userTokens = (tokens || []).filter(t => t.user_id === user_id)
-        await processUser(user_id, api_key, userTokens, results)
-      } catch (err) {
-        console.error(`[Cron] Erreur user ${user_id}:`, err.message)
-        results.errors.push({ user_id, error: err.message })
+    // 3. Traitement par utilisateur (Beds24)
+    if (apiKeys?.length) {
+      for (const { user_id, api_key } of apiKeys) {
+        try {
+          const userTokens = (tokens || []).filter(t => t.user_id === user_id)
+          await processUser(user_id, api_key, userTokens, results)
+        } catch (err) {
+          console.error(`[Cron] Erreur user ${user_id}:`, err.message)
+          results.errors.push({ user_id, error: err.message })
+        }
       }
     }
 
@@ -69,6 +66,14 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur pending messages:', err.message)
       results.errors.push({ context: 'pending_messages', error: err.message })
+    }
+
+    // Poll de secours Channex : rattrape les réservations dont le webhook
+    // se serait perdu. Lit le feed global, traite et acke chaque révision.
+    try { await pollChannelFeed(results) }
+    catch (err) {
+      console.error('[Cron] Erreur poll Channex:', err.message)
+      results.errors.push({ context: 'channel_feed', error: err.message })
     }
 
     // 5. Log du run
