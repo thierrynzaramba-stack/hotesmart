@@ -285,6 +285,19 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ rooms, availability: avail })
   }
 
+  // -- DEBUG TEMPORAIRE : pousse une dispo de test sur une plage.
+  // { event:'debug_push_avail', payload:{ property_id, room_type_id, date_from, date_to, availability } }
+  if (event === 'debug_push_avail') {
+    const { property_id, room_type_id, date_from, date_to, availability } = payload || {}
+    if (!property_id || !room_type_id || !date_from || !date_to || availability == null) {
+      return res.status(400).json({ error: 'property_id, room_type_id, date_from, date_to, availability requis' })
+    }
+    const r = await channelCall('POST', '/availability', {
+      values: [{ property_id, room_type_id, date_from, date_to, availability }]
+    })
+    return res.status(200).json({ status: r.status, body: r.json })
+  }
+
   try {
     let result = { ok: true, reason: 'ignored:' + event }
     if (event === 'booking') {
