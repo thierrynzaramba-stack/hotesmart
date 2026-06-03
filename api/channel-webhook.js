@@ -236,7 +236,6 @@ module.exports = async function handler(req, res) {
         // parametres GET a chaque appel pour passer le mur d'authentification.
         request_params: VERCEL_BYPASS ? {
           'x-vercel-protection-bypass': VERCEL_BYPASS,
-          'x-vercel-set-bypass-cookie': 'true'
         } : {}
       }
     })
@@ -283,7 +282,6 @@ module.exports = async function handler(req, res) {
         headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
         request_params: VERCEL_BYPASS ? {
           'x-vercel-protection-bypass': VERCEL_BYPASS,
-          'x-vercel-set-bypass-cookie': 'true'
         } : {}
       }
     })
@@ -306,7 +304,6 @@ module.exports = async function handler(req, res) {
         headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
         request_params: VERCEL_BYPASS ? {
           'x-vercel-protection-bypass': VERCEL_BYPASS,
-          'x-vercel-set-bypass-cookie': 'true'
         } : {}
       }
     })
