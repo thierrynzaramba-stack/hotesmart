@@ -294,6 +294,19 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ status: r.status, body: r.json })
   }
 
+  // -- DEBUG TEMPORAIRE : execute la VRAIE fonction setWholeAvailability.
+  // { event:'debug_close', payload:{ provider_property_id, arrival, departure, available } }
+  if (event === 'debug_close') {
+    const { provider_property_id, arrival, departure, available } = payload || {}
+    if (!provider_property_id || !arrival || !departure || available == null) {
+      return res.status(400).json({ error: 'provider_property_id, arrival, departure, available requis' })
+    }
+    const owner = await ownerOfProperty(provider_property_id)
+    if (!owner) return res.status(404).json({ error: 'bien inconnu' })
+    await setWholeAvailability(owner, provider_property_id, arrival, departure, available)
+    return res.status(200).json({ ok: true, inventory_type: owner.inventory_type, room_type: owner.provider_room_type_id })
+  }
+
   // -- DEBUG TEMPORAIRE : liste les webhooks enregistres chez Channex.
   if (event === 'debug_webhooks') {
     const r = await channelCall('GET', '/webhooks')
