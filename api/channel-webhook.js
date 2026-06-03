@@ -40,10 +40,35 @@ async function channelCall(method, path, body) {
 async function ownerOfProperty(providerPropertyId) {
   const { data } = await supabase
     .from('properties')
-    .select('user_id, provider_property_id')
+    .select('user_id, provider_property_id, provider_room_type_id, inventory_type')
     .eq('provider_property_id', providerPropertyId)
     .maybeSingle()
   return data || null
+}
+
+// Ferme (avail 0) ou rouvre (avail 1) la dispo d'un bien whole sur les nuits
+// occupees. La nuit de depart n'est PAS occupee -> on va de arrival a departure-1.
+async function setWholeAvailability(owner, providerPropertyId, arrival, departure, available) {
+  if (owner.inventory_type !== 'whole') return            // room/hotel : non gere ici
+  if (!owner.provider_room_type_id || !arrival || !departure) return
+
+  // derniere nuit = veille du depart
+  const lastNight = new Date(departure)
+  lastNight.setDate(lastNight.getDate() - 1)
+  const dateTo = lastNight.toISOString().split('T')[0]
+  if (dateTo < arrival) return                            // sejour 0 nuit : rien a faire
+
+  const r = await channelCall('POST', '/availability', {
+    values: [{
+      property_id: providerPropertyId,
+      room_type_id: owner.provider_room_type_id,
+      date_from: arrival,
+      date_to: dateTo,
+      availability: available
+    }]
+  })
+  if (!r.ok) console.error('[channel-webhook] setWholeAvailability echec', r.status, r.json)
+  else console.log('[channel-webhook] dispo', available, arrival, '->', dateTo, providerPropertyId)
 }
 
 // ---- BOOKING ----
@@ -135,6 +160,11 @@ async function saveRevision(rev, revisionId) {
   }
 
   console.log('[channel-webhook] booking', snapshot.status, bookingId, '->', owner.user_id)
+
+  // Gestion dispo pour bien whole : reservation occupe la maison, annulation la libere.
+  const open = (snapshot.status === 'cancelled') ? 1 : 0
+  await setWholeAvailability(owner, providerPropertyId, snapshot.arrival, snapshot.departure, open)
+
   return { saved: true }
 }
 
