@@ -269,10 +269,24 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ status: r.status, body: r.json })
   }
   if (event === 'test_webhook_admin') {
-    const wid = req.body.webhook_id
-    if (!wid) return res.status(400).json({ error: 'webhook_id requis' })
-    // Channex envoie un evenement de test a l'URL du webhook.
-    const r = await channelCall('POST', `/webhooks/${wid}/send_test`, {})
+    const callbackUrl = req.body.callback_url
+    if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
+    // POST /webhooks/test : Channex envoie un POST de test a callback_url
+    // et renvoie le status_code + body retournes par l'endpoint cible.
+    const r = await channelCall('POST', '/webhooks/test', {
+      webhook: {
+        callback_url: callbackUrl,
+        event_mask: 'booking',
+        property_id: null,
+        is_global: true,
+        send_data: true,
+        headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
+        request_params: VERCEL_BYPASS ? {
+          'x-vercel-protection-bypass': VERCEL_BYPASS,
+          'x-vercel-set-bypass-cookie': 'true'
+        } : {}
+      }
+    })
     return res.status(200).json({ status: r.status, body: r.json })
   }
 
