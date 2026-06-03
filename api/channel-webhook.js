@@ -268,6 +268,13 @@ module.exports = async function handler(req, res) {
     const r = await channelCall('DELETE', `/webhooks/${wid}`)
     return res.status(200).json({ status: r.status, body: r.json })
   }
+  if (event === 'test_webhook_admin') {
+    const wid = req.body.webhook_id
+    if (!wid) return res.status(400).json({ error: 'webhook_id requis' })
+    // Channex envoie un evenement de test a l'URL du webhook.
+    const r = await channelCall('POST', `/webhooks/${wid}/send_test`, {})
+    return res.status(200).json({ status: r.status, body: r.json })
+  }
 
   // -- ADMIN : enregistre le webhook global chez Channex.
   // Protege par le secret webhook (deja valide ci-dessus). { event:'register_admin', callback_url }
