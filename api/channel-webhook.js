@@ -267,6 +267,16 @@ module.exports = async function handler(req, res) {
     const r = await channelCall('DELETE', `/webhooks/${wid}`)
     return res.status(200).json({ status: r.status, body: r.json })
   }
+  // -- ADMIN : envoie un message voyageur via le moteur lib/channels/channex.js.
+  // { event:'send_message_admin', booking_id:'<id booking channex>', message:'...' }
+  if (event === 'send_message_admin') {
+    const { booking_id, message } = req.body
+    if (!booking_id || !message) return res.status(400).json({ error: 'booking_id et message requis' })
+    const channelEngine = require('../lib/channels/channex')
+    const r = await channelEngine.sendMessage({}, { bookingId: booking_id, message })
+    return res.status(200).json(r)
+  }
+
   // -- ADMIN : installe l'app Messages sur une propriete existante.
   // { event:'install_app_admin', property_id:'<uuid channex>' }
   if (event === 'install_app_admin') {
