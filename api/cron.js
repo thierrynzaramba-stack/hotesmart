@@ -12,6 +12,7 @@ const { checkPendingMessages, checkBatteries } = require('../lib/cron-access')
 const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
+const { processChannelProperties } = require('../lib/cron-channel-props')
 
 module.exports = async function handler(req, res) {
   const authHeader = req.headers.authorization
@@ -53,6 +54,14 @@ module.exports = async function handler(req, res) {
           results.errors.push({ user_id, error: err.message })
         }
       }
+    }
+
+    // 3bis. Traitement des biens channel (provider='channex') : messages auto
+    // depuis bookings_snapshot, envoi via lib/channels/channex.
+    try { await processChannelProperties(results) }
+    catch (err) {
+      console.error('[Cron] Erreur biens channel:', err.message)
+      results.errors.push({ context: 'channel_props', error: err.message })
     }
 
     // 4. Tâches transverses (non liées à un user spécifique)
