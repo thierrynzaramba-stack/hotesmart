@@ -224,6 +224,19 @@ module.exports = async function handler(req, res) {
         console.error('[channel-property] push dispo 365j echoue', availRes.status, availRes.json)
       }
 
+      // Etape 3ter : installer l'application Messages sur la propriete.
+      // Indispensable pour l'agent IA / messages auto (sinon l'API messages renvoie 403).
+      // Non bloquant : si echec, le bien reste utilisable, la messagerie sera a activer.
+      const appRes = await channelCall('POST', '/applications', {
+        application_installation: {
+          property_id: providerPropertyId,
+          application_code: 'channex_messages'
+        }
+      })
+      if (!appRes.ok) {
+        console.error('[channel-property] install app messages echoue', appRes.status, appRes.json)
+      }
+
       // Etape 4 : INSERT en base Supabase
       const { data: insertData, error: insertError } = await supabase
         .from('properties')
@@ -256,7 +269,7 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: 'Sauvegarde echouee' })
       }
 
-      return res.status(201).json({ property: insertData, dispo_pushed: availRes.ok })
+      return res.status(201).json({ property: insertData, dispo_pushed: availRes.ok, messages_app: appRes.ok })
 
     } catch (err) {
       console.error('[channel-property] Internal error', err.message)

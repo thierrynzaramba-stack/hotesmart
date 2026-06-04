@@ -267,6 +267,17 @@ module.exports = async function handler(req, res) {
     const r = await channelCall('DELETE', `/webhooks/${wid}`)
     return res.status(200).json({ status: r.status, body: r.json })
   }
+  // -- ADMIN : installe l'app Messages sur une propriete existante.
+  // { event:'install_app_admin', property_id:'<uuid channex>' }
+  if (event === 'install_app_admin') {
+    const pid = req.body.property_id
+    if (!pid) return res.status(400).json({ error: 'property_id requis' })
+    const r = await channelCall('POST', '/applications', {
+      application_installation: { property_id: pid, application_code: 'channex_messages' }
+    })
+    return res.status(200).json({ status: r.status, body: r.json })
+  }
+
   if (event === 'test_webhook_admin') {
     const callbackUrl = req.body.callback_url
     if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
