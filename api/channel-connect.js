@@ -18,8 +18,9 @@ const supabase = createClient(
 const CHANNEL_APP_BASE = process.env.CHANNEL_APP_BASE   // ex: https://staging.channex.io
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 
-// OTA proposees a l'hote dans l'iframe (cible LCD). BDC=Booking, ABB=Airbnb.
-const ALLOWED_CHANNELS = 'BDC,ABB'
+// NB : pas de filtre channels=BDC,ABB ici. Applique a un bien SANS canal
+// existant, ce filtre donne une recherche vide -> page d'erreur "Ooops"
+// (confirme par le support). L'hote voit donc tous les canaux disponibles.
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -94,7 +95,6 @@ module.exports = async function handler(req, res) {
       + `&app_mode=headless`
       + `&redirect_to=/channels`
       + `&property_id=${prop.provider_property_id}`
-      + `&channels=${ALLOWED_CHANNELS}`
 
     return res.status(200).json({
       iframe_url: iframeUrl,
