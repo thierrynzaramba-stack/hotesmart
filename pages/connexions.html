@@ -13,7 +13,6 @@
     .status-ok  { background:#E1F5EE; color:#085041; }
     .status-off { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
     .status-soon { background:#FAEEDA; color:#633806; }
-
     .steps { display:flex; flex-direction:column; gap:12px; margin-bottom:20px; }
     .step { display:flex; gap:12px; align-items:flex-start; }
     .step-num { width:24px; height:24px; border-radius:50%; background:var(--green); color:white; font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
@@ -22,21 +21,27 @@
     .step-body a { color:var(--green); text-decoration:none; }
     .step-body a:hover { text-decoration:underline; }
     .step-body code { background:var(--bg2); padding:1px 6px; border-radius:4px; font-size:12px; border:0.5px solid var(--border); }
-
     .invite-row { display:flex; gap:8px; margin-top:12px; }
     .invite-row input { flex:1; font-family:var(--font-mono, monospace); font-size:12px; }
-
     .token-info { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; font-size:12px; color:var(--text2); margin-top:12px; display:none; }
     .token-info.show { display:block; }
-
     .toast { padding:8px 14px; border-radius:var(--radius); font-size:12px; margin-top:12px; display:none; }
     .toast.success { background:#E1F5EE; color:#085041; border:0.5px solid var(--green); }
     .toast.error   { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; }
-
     .divider { border:none; border-top:0.5px solid var(--border); margin:20px 0; }
-
     .coming-soon { opacity:0.5; pointer-events:none; }
     .api-actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+
+    /* ── Plateformes OTA ── */
+    .ota-prop-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:0.5px solid var(--border); }
+    .ota-prop-row:last-child { border-bottom:none; }
+    .ota-modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:1000; padding:20px; }
+    .ota-modal.show { display:flex; }
+    .ota-modal-box { background:var(--bg); border-radius:var(--radius-lg); width:100%; max-width:1100px; height:90vh; display:flex; flex-direction:column; overflow:hidden; }
+    .ota-modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:0.5px solid var(--border); }
+    .ota-modal-head .title { font-size:14px; font-weight:500; }
+    .ota-modal-box iframe { flex:1; border:none; width:100%; }
+    @media (max-width:768px){ .ota-modal { padding:0 } .ota-modal-box { height:100vh; border-radius:0; max-width:none } }
   </style>
 </head>
 <body>
@@ -50,7 +55,6 @@
       </div>
     </div>
     <div class="content">
-
       <!-- Beds24 -->
       <div class="api-card" id="card-beds24">
         <div class="api-header">
@@ -114,6 +118,20 @@
             🔗 Ouvrir Beds24 API
           </a>
         </div>
+      </div>
+
+      <!-- Plateformes OTA (gestionnaire de canaux, marque blanche) -->
+      <div class="api-card" id="card-ota">
+        <div class="api-header">
+          <div class="api-name">🌐 Mes plateformes (Booking, Airbnb…)</div>
+          <div class="api-status status-off" id="status-ota">Vérification…</div>
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:14px">
+          Connectez vos annonces Booking.com, Airbnb et autres plateformes directement à vos biens HôteSmart.
+          Les réservations remontent automatiquement et votre calendrier reste synchronisé en temps réel.
+        </div>
+        <div id="ota-properties" style="font-size:13px;color:var(--text2)">Chargement…</div>
+        <div class="toast" id="toast-ota"></div>
       </div>
 
       <!-- Seam -->
@@ -187,6 +205,17 @@
   </div>
 </div>
 
+<!-- Modale plein écran : connexion des plateformes (iframe headless) -->
+<div class="ota-modal" id="ota-modal">
+  <div class="ota-modal-box">
+    <div class="ota-modal-head">
+      <div class="title" id="ota-modal-title">Mes plateformes</div>
+      <button class="btn" id="ota-modal-close">✕ Terminé</button>
+    </div>
+    <iframe id="ota-iframe" src="about:blank" title="Connexion des plateformes"></iframe>
+  </div>
+</div>
+
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
@@ -208,6 +237,9 @@
     .select('seam_api_key, seam_enabled').eq('user_id', session.user.id).maybeSingle()
   const seamOk = !!(seamData?.seam_api_key && seamData?.seam_enabled !== false)
   setStatus('seam', seamOk ? 'ok' : 'off', seamOk ? 'Connecté ✓' : 'Non connecté')
+
+  // Plateformes OTA
+  await loadOtaProperties()
 
   // Bouton connecter Beds24
   document.getElementById('btn-connect-beds24').addEventListener('click', async () => {
@@ -276,6 +308,75 @@
     } else {
       info.classList.remove('show')
     }
+  }
+
+  // ===== Plateformes OTA (gestionnaire de canaux) =====
+  async function loadOtaProperties() {
+    const box = document.getElementById('ota-properties')
+    try {
+      const res = await fetch('/api/channel-property', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      })
+      const data = await res.json()
+      const props = (data.properties || []).filter(p => p.provider === 'channex' || p.provider === 'channel')
+
+      if (!props.length) {
+        box.innerHTML = `<div style="font-size:13px;color:var(--text2)">
+          Aucun bien éligible pour le moment.
+          <a href="/pages/biens-nouveau" style="color:var(--green)">Créez d'abord un bien</a>
+          pour connecter vos plateformes.</div>`
+        setStatus('ota', 'off', 'Aucun bien')
+        return
+      }
+
+      setStatus('ota', 'ok', `${props.length} bien${props.length > 1 ? 's' : ''}`)
+      box.innerHTML = props.map(p => `
+        <div class="ota-prop-row">
+          <div>
+            <div style="font-size:14px;font-weight:500;color:var(--text)">${esc(p.name)}</div>
+            <div style="font-size:12px;color:var(--text2)">${esc(p.city || '')}${p.capacity ? ' · ' + p.capacity + ' pers.' : ''}</div>
+          </div>
+          <button class="btn btn-primary" data-prop="${p.id}" data-name="${esc(p.name)}">Connecter mes plateformes</button>
+        </div>`).join('')
+
+      box.querySelectorAll('button[data-prop]').forEach(b =>
+        b.addEventListener('click', () => openOtaModal(b.dataset.prop, b.dataset.name, b)))
+    } catch (e) {
+      box.innerHTML = `<div style="font-size:13px;color:#E24B4A">Erreur de chargement des biens.</div>`
+      setStatus('ota', 'off', 'Erreur')
+    }
+  }
+
+  async function openOtaModal(propId, propName, btn) {
+    btn.disabled = true
+    const old = btn.textContent
+    btn.textContent = '⏳ Préparation…'
+    try {
+      const res = await fetch(`/api/channel-connect?property_id=${encodeURIComponent(propId)}`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      })
+      const data = await res.json()
+      if (!res.ok || !data.iframe_url) throw new Error(data.error || 'Erreur de connexion')
+
+      document.getElementById('ota-modal-title').textContent = `Mes plateformes — ${propName}`
+      document.getElementById('ota-iframe').src = data.iframe_url
+      document.getElementById('ota-modal').classList.add('show')
+    } catch (e) {
+      showToast('ota', '❌ ' + e.message, 'error')
+    } finally {
+      btn.disabled = false
+      btn.textContent = old
+    }
+  }
+
+  document.getElementById('ota-modal-close').addEventListener('click', () => {
+    document.getElementById('ota-modal').classList.remove('show')
+    document.getElementById('ota-iframe').src = 'about:blank'
+  })
+
+  function esc(s) {
+    return String(s || '').replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   }
 
   function setStatus(id, type, label) {
