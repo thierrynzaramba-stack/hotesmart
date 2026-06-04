@@ -227,7 +227,7 @@ module.exports = async function handler(req, res) {
       // Etape 3ter : installer l'application Messages sur la propriete.
       // Indispensable pour l'agent IA / messages auto (sinon l'API messages renvoie 403).
       // Non bloquant : si echec, le bien reste utilisable, la messagerie sera a activer.
-      const appRes = await channelCall('POST', '/applications', {
+      const appRes = await channelCall('POST', '/applications/install', {
         application_installation: {
           property_id: providerPropertyId,
           application_code: 'channex_messages'

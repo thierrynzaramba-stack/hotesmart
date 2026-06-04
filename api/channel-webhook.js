@@ -272,7 +272,7 @@ module.exports = async function handler(req, res) {
   if (event === 'install_app_admin') {
     const pid = req.body.property_id
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
-    const r = await channelCall('POST', '/applications', {
+    const r = await channelCall('POST', '/applications/install', {
       application_installation: { property_id: pid, application_code: 'channex_messages' }
     })
     return res.status(200).json({ status: r.status, body: r.json })
