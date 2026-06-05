@@ -15,9 +15,12 @@ const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 
 module.exports = async function handler(req, res) {
+  // Auth stricte : le cron Vercel natif envoie automatiquement
+  // Authorization: Bearer <CRON_SECRET> (variable definie cote Vercel).
+  // Plus d'exception GET (l'ancien declencheur externe est abandonne).
   const authHeader = req.headers.authorization
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    if (req.method !== 'GET') return res.status(401).json({ error: 'Non autorisé' })
+    return res.status(401).json({ error: 'Non autorisé' })
   }
   console.log('[Cron] Démarrage', new Date().toISOString())
   const results = {
