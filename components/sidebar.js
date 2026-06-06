@@ -16,6 +16,11 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-label">Accueil</span>
       </a>
 
+      <a class="nav-item ${activePage === 'biens' || activePage.startsWith('biens-') ? 'active' : ''}" href="/biens">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">Mes biens</span>
+      </a>
+
       <div class="nav-section-label">Apps</div>
       ${renderApps(activePage)}
 
@@ -25,17 +30,10 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-label">Connexions</span>
       </a>
       ${renderApiItem('Beds24',        apiStatus.beds24, null)}
+      ${renderApiItem('Booking & Airbnb', apiStatus.ota,  '/connexions')}
       ${renderApiItem('Seam Serrures', apiStatus.seam,   '/apps/serrures')}
       ${renderApiItem('Brevo SMS',     apiStatus.brevo,  null)}
       ${renderApiItem('Stripe',        apiStatus.stripe, null)}
-      <div class="nav-sub" style="opacity:0.4">
-        <div class="sub-dot gray"></div>Airbnb
-        <span class="sub-soon">bientôt</span>
-      </div>
-      <div class="nav-sub" style="opacity:0.4">
-        <div class="sub-dot gray"></div>Booking.com
-        <span class="sub-soon">bientôt</span>
-      </div>
 
       <div class="nav-section-label">Compte</div>
       <a class="nav-item ${activePage === 'compte' ? 'active' : ''}" href="/pages/compte.html">
@@ -45,6 +43,10 @@ export async function renderSidebar(activePage = '') {
       <a class="nav-item ${activePage === 'abonnement' ? 'active' : ''}" href="/abonnement">
         <span class="nav-icon">◈</span>
         <span class="nav-label">Abonnement</span>
+      </a>
+      <a class="nav-item ${activePage === 'guide' ? 'active' : ''}" href="/guide">
+        <span class="nav-icon">📖</span>
+        <span class="nav-label">Guide</span>
       </a>
       <div class="nav-item" onclick="handleSignOut()" style="cursor:pointer">
         <span class="nav-icon">↩</span>
@@ -213,6 +215,15 @@ function renderApiItem(label, active, href) {
         <span class="sub-check">✓</span>
       </${tag}>`
   }
+  // Inactif : cliquable si une destination existe (ex. page Connexions pour
+  // brancher la plateforme), sinon simple indicateur.
+  if (href) {
+    return `
+      <a class="nav-sub" href="${href}" style="opacity:0.55;text-decoration:none;color:inherit">
+        <div class="sub-dot gray"></div>${label}
+        <span class="sub-soon">à connecter</span>
+      </a>`
+  }
   return `
     <div class="nav-sub" style="opacity:0.4">
       <div class="sub-dot gray"></div>${label}
@@ -221,13 +232,25 @@ function renderApiItem(label, active, href) {
 }
 
 async function getApiStatus(user) {
-  if (!user) return { beds24: false, seam: false, brevo: false, stripe: false, plan: null }
+  if (!user) return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null }
   try {
     const { data } = await supabase
       .from('api_keys')
       .select('api_key, seam_api_key, seam_enabled')
       .eq('user_id', user.id)
       .maybeSingle()
+
+    // Plateformes OTA (gestionnaire de canaux) : actif si au moins un bien provider channel
+    let otaActive = false
+    try {
+      const { data: chProps } = await supabase
+        .from('properties')
+        .select('id')
+        .eq('user_id', user.id)
+        .in('provider', ['channex', 'channel'])
+        .limit(1)
+      otaActive = !!(chProps && chProps.length)
+    } catch { otaActive = false }
 
     let stripeActive = false
     let plan = null
@@ -250,13 +273,14 @@ async function getApiStatus(user) {
 
     return {
       beds24: !!data?.api_key,
+      ota:    otaActive,
       seam:   !!(data?.seam_api_key && data?.seam_enabled !== false),
       brevo:  true,
       stripe: stripeActive,
       plan:   plan
     }
   } catch {
-    return { beds24: false, seam: false, brevo: false, stripe: false, plan: null }
+    return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null }
   }
 }
 
