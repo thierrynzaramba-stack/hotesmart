@@ -1,76 +1,47 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ajouter un bien - HoteSmart</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Ajouter un bien</title>
+  <link rel="stylesheet" href="/public/style.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f5f5f7;
-      min-height: 100vh;
-      color: #1d1d1f;
-    }
-    header {
-      background: #fff;
-      padding: 16px 24px;
-      border-bottom: 1px solid #e5e5e7;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    header a.back {
-      color: #007aff;
-      text-decoration: none;
-      font-size: 14px;
-    }
-    header h1 {
-      font-size: 18px;
-      font-weight: 600;
-    }
-    main {
-      max-width: 600px;
-      margin: 0 auto;
+    .form-card {
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
       padding: 24px;
+      max-width: 640px;
     }
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    }
-    .field {
-      margin-bottom: 20px;
-    }
+    .field { margin-bottom: 20px; }
     .field label {
       display: block;
       font-size: 13px;
       font-weight: 600;
-      color: #1d1d1f;
+      color: var(--text);
       margin-bottom: 6px;
     }
     .field .hint {
       display: block;
       font-size: 12px;
-      color: #86868b;
+      color: var(--text2);
       margin-top: 4px;
     }
     .field input,
     .field select {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #d2d2d7;
-      border-radius: 8px;
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
       font-size: 15px;
       font-family: inherit;
-      background: #fff;
-      color: #1d1d1f;
+      background: var(--bg);
+      color: var(--text);
     }
     .field input:focus,
     .field select:focus {
       outline: none;
-      border-color: #007aff;
+      border-color: var(--green);
     }
     .row {
       display: grid;
@@ -80,182 +51,182 @@
     @media (max-width: 480px) {
       .row { grid-template-columns: 1fr; }
     }
-    .btn-primary {
+    .btn-submit {
       width: 100%;
       padding: 14px;
-      background: #007aff;
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
-      cursor: pointer;
       margin-top: 8px;
-    }
-    .btn-primary:disabled {
-      background: #c7c7cc;
-      cursor: not-allowed;
     }
     .feedback {
       margin-top: 16px;
       padding: 12px;
-      border-radius: 8px;
+      border-radius: var(--radius);
       font-size: 14px;
       display: none;
     }
     .feedback.error {
-      background: #fff2f0;
-      color: #ff3b30;
-      border: 1px solid #ffccc7;
+      background: #fdecea;
+      color: #E24B4A;
+      border: 0.5px solid #E24B4A;
       display: block;
     }
     .feedback.success {
-      background: #f0f9ff;
-      color: #007aff;
-      border: 1px solid #cce4ff;
+      background: #E1F5EE;
+      color: #085041;
+      border: 0.5px solid var(--green);
       display: block;
     }
   </style>
 </head>
 <body>
-  <header>
-    <a href="/biens" class="back">&larr; Mes biens</a>
-    <h1>Ajouter un bien</h1>
-  </header>
-  <main>
-    <div class="card">
-      <form id="form-property">
-        <div class="field">
-          <label for="name">Nom du bien</label>
-          <input type="text" id="name" name="name" required maxlength="100" placeholder="Mon appartement Toulouse" />
-          <span class="hint">Ce nom est visible uniquement dans HoteSmart.</span>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="capacity">Capacite max</label>
-            <input type="number" id="capacity" name="capacity" required min="1" max="20" value="2" />
-          </div>
-          <div class="field">
-            <label for="currency">Devise</label>
-            <select id="currency" name="currency">
-              <option value="EUR" selected>EUR</option>
-              <option value="USD">USD</option>
-              <option value="GBP">GBP</option>
-              <option value="CHF">CHF</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="base_price">Prix de base par nuit</label>
-          <input type="number" id="base_price" name="base_price" required min="1" max="100000" step="1" placeholder="80" />
-          <span class="hint">Vous pourrez ajuster les tarifs par date ensuite (saisons, weekends, evenements).</span>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="included_guests">Voyageurs inclus dans le prix (optionnel)</label>
-            <input type="number" id="included_guests" name="included_guests" min="1" max="20" placeholder="Tous" />
-          </div>
-          <div class="field">
-            <label for="extra_guest_fee">Supplement par voyageur additionnel (optionnel)</label>
-            <input type="number" id="extra_guest_fee" name="extra_guest_fee" min="0" max="100000" step="1" placeholder="0" />
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="address">Adresse (optionnel)</label>
-          <input type="text" id="address" name="address" maxlength="200" placeholder="12 rue de la Republique" />
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="zip_code">Code postal (optionnel)</label>
-            <input type="text" id="zip_code" name="zip_code" maxlength="20" placeholder="31000" />
-          </div>
-          <div class="field">
-            <label for="city">Ville (optionnel)</label>
-            <input type="text" id="city" name="city" maxlength="100" placeholder="Toulouse" />
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="field"></div>
-          <div class="field">
-            <label for="country">Pays</label>
-            <select id="country" name="country">
-              <option value="FR" selected>France</option>
-              <option value="BE">Belgique</option>
-              <option value="CH">Suisse</option>
-              <option value="ES">Espagne</option>
-              <option value="IT">Italie</option>
-              <option value="PT">Portugal</option>
-            </select>
-          </div>
-        </div>
-
-        <button type="submit" class="btn-primary" id="btn-submit">Creer le bien</button>
-
-        <div class="feedback" id="feedback"></div>
-      </form>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">🏠 Ajouter un bien</div>
+        <div class="page-sub"><a href="/biens" style="color:var(--green);text-decoration:none">← Retour à Mes biens</a></div>
+      </div>
     </div>
-  </main>
+    <div class="content">
+      <div class="form-card">
+        <form id="form-property">
+          <div class="field">
+            <label for="name">Nom du bien</label>
+            <input type="text" id="name" name="name" required maxlength="100" placeholder="Mon appartement Toulouse" />
+            <span class="hint">Ce nom est visible uniquement dans HôteSmart.</span>
+          </div>
 
-  <script type="module">
-    import { getUser } from '/shared/supabase.js'
-    import { api } from '/shared/api-client.js'
-    import { logger } from '/shared/logger.js'
+          <div class="row">
+            <div class="field">
+              <label for="capacity">Capacité max</label>
+              <input type="number" id="capacity" name="capacity" required min="1" max="20" value="2" />
+            </div>
+            <div class="field">
+              <label for="currency">Devise</label>
+              <select id="currency" name="currency">
+                <option value="EUR" selected>EUR</option>
+                <option value="USD">USD</option>
+                <option value="GBP">GBP</option>
+                <option value="CHF">CHF</option>
+              </select>
+            </div>
+          </div>
 
-    const user = await getUser()
-    if (!user) {
-      window.location.href = '/pages/login.html'
+          <div class="field">
+            <label for="base_price">Prix de base par nuit</label>
+            <input type="number" id="base_price" name="base_price" required min="1" max="100000" step="1" placeholder="80" />
+            <span class="hint">Vous pourrez ajuster les tarifs par date ensuite (saisons, weekends, événements).</span>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="included_guests">Voyageurs inclus dans le prix (optionnel)</label>
+              <input type="number" id="included_guests" name="included_guests" min="1" max="20" placeholder="Tous" />
+            </div>
+            <div class="field">
+              <label for="extra_guest_fee">Supplément par voyageur additionnel (optionnel)</label>
+              <input type="number" id="extra_guest_fee" name="extra_guest_fee" min="0" max="100000" step="1" placeholder="0" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="address">Adresse (optionnel)</label>
+            <input type="text" id="address" name="address" maxlength="200" placeholder="12 rue de la République" />
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="zip_code">Code postal (optionnel)</label>
+              <input type="text" id="zip_code" name="zip_code" maxlength="20" placeholder="31000" />
+            </div>
+            <div class="field">
+              <label for="city">Ville (optionnel)</label>
+              <input type="text" id="city" name="city" maxlength="100" placeholder="Toulouse" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field"></div>
+            <div class="field">
+              <label for="country">Pays</label>
+              <select id="country" name="country">
+                <option value="FR" selected>France</option>
+                <option value="BE">Belgique</option>
+                <option value="CH">Suisse</option>
+                <option value="ES">Espagne</option>
+                <option value="IT">Italie</option>
+                <option value="PT">Portugal</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-submit" id="btn-submit">Créer le bien</button>
+
+          <div class="feedback" id="feedback"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { api } from '/shared/api-client.js'
+  import { logger } from '/shared/logger.js'
+
+  initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('biens-nouveau')
+
+  const form = document.getElementById('form-property')
+  const btn = document.getElementById('btn-submit')
+  const feedback = document.getElementById('feedback')
+
+  function showFeedback(message, type) {
+    feedback.textContent = message
+    feedback.className = 'feedback ' + type
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    feedback.className = 'feedback'
+    feedback.textContent = ''
+
+    const data = {
+      name: form.name.value.trim(),
+      capacity: parseInt(form.capacity.value, 10),
+      currency: form.currency.value,
+      country: form.country.value,
+      address: form.address.value.trim() || null,
+      city: form.city.value.trim() || null,
+      zip_code: form.zip_code.value.trim() || null,
+      base_price: parseFloat(form.base_price.value),
+      included_guests: form.included_guests.value ? parseInt(form.included_guests.value, 10) : null,
+      extra_guest_fee: form.extra_guest_fee.value !== '' ? parseFloat(form.extra_guest_fee.value) : null
     }
 
-    const form = document.getElementById('form-property')
-    const btn = document.getElementById('btn-submit')
-    const feedback = document.getElementById('feedback')
+    btn.disabled = true
+    btn.textContent = 'Création en cours…'
 
-    function showFeedback(message, type) {
-      feedback.textContent = message
-      feedback.className = 'feedback ' + type
+    try {
+      const result = await api.channel.createProperty(data)
+      logger.info('biens-nouveau', 'Bien créé', { id: result.property?.id })
+      showFeedback('Bien créé avec succès. Redirection…', 'success')
+      setTimeout(() => {
+        window.location.href = '/biens'
+      }, 1200)
+    } catch (err) {
+      logger.error('biens-nouveau', err.message)
+      showFeedback('Erreur : ' + err.message, 'error')
+      btn.disabled = false
+      btn.textContent = 'Créer le bien'
     }
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault()
-      feedback.className = 'feedback'
-      feedback.textContent = ''
-
-      const data = {
-        name: form.name.value.trim(),
-        capacity: parseInt(form.capacity.value, 10),
-        currency: form.currency.value,
-        country: form.country.value,
-        address: form.address.value.trim() || null,
-        city: form.city.value.trim() || null,
-        zip_code: form.zip_code.value.trim() || null,
-        base_price: parseFloat(form.base_price.value),
-        included_guests: form.included_guests.value ? parseInt(form.included_guests.value, 10) : null,
-        extra_guest_fee: form.extra_guest_fee.value !== '' ? parseFloat(form.extra_guest_fee.value) : null
-      }
-
-      btn.disabled = true
-      btn.textContent = 'Creation en cours...'
-
-      try {
-        const result = await api.channel.createProperty(data)
-        logger.info('biens-nouveau', 'Bien cree', { id: result.property?.id })
-        showFeedback('Bien cree avec succes. Redirection...', 'success')
-        setTimeout(() => {
-          window.location.href = '/biens'
-        }, 1200)
-      } catch (err) {
-        logger.error('biens-nouveau', err.message)
-        showFeedback('Erreur : ' + err.message, 'error')
-        btn.disabled = false
-        btn.textContent = 'Creer le bien'
-      }
-    })
-  </script>
+  })
+</script>
 </body>
 </html>
