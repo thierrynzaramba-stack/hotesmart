@@ -81,7 +81,11 @@ module.exports = async function handler(req, res) {
 
     return res.status(200).json({
       token: oneTimeToken,
-      property_id: providerPropertyId
+      property_id: providerPropertyId,
+      // Base de l'app du channel manager pour construire l'URL iframe cote
+      // front. Suit la bascule d'environnement (staging -> prod) sans
+      // modification du front.
+      app_base: process.env.CHANNEL_APP_BASE || 'https://staging.channex.io'
     })
 
   } catch (error) {
