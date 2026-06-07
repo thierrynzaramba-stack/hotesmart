@@ -171,14 +171,8 @@ function renderApps(activePage) {
     const isActive    = app.active !== false
     const isActiveApp = activePage === app.id || activePage.startsWith(app.id + '-')
 
-    if (!isActive) {
-      return `
-        <div class="nav-item" style="opacity:0.35;cursor:default;pointer-events:none">
-          <span class="nav-icon" style="font-size:14px">${app.icon}</span>
-          <span class="nav-label">${app.name}</span>
-          <span class="sub-soon" style="margin-left:auto;font-size:10px">bientôt</span>
-        </div>`
-    }
+    // Apps non disponibles : masquées (réactivables via shared/config.js à leur sortie)
+    if (!isActive) return ''
 
     let subMenu = ''
 
