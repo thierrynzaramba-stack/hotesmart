@@ -194,7 +194,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
             body: JSON.stringify({ action: 'getConversations', propertyId: pid })
-          }).then(r => r.json()).then(d => d.conversations || [])
+          }).then(r => r.json()).then(d => (d.conversations || []).map(c => ({ ...c, _pid: pid })))
         )),
         window._supabase.from('conversations').select('*')
           .eq('user_id', window._session.user.id)
@@ -221,6 +221,7 @@
         const bookId = String(conv.bookId)
         convMap[bookId] = {
           bookId,
+          propertyId: String(conv.propertyId || conv.propId || conv._pid || ''),
           guestName:  conv.guestFirstName ? `${conv.guestFirstName} ${conv.guestName || ''}`.trim() : 'Voyageur',
           firstNight: conv.firstNight,
           lastNight:  conv.lastNight,
@@ -240,6 +241,7 @@
         if (!convMap[bookId]) {
           convMap[bookId] = {
             bookId,
+            propertyId: c.property_id ? String(c.property_id) : '',
             guestName:  c.guest_name || 'Voyageur',
             firstNight: null, lastNight: null,
             platform:   'direct',
@@ -321,19 +323,65 @@
     renderConvList()
   }
 
+  // ── Normalisation pour la déduplication d'affichage ────────────────────────
+  // Le même message hôte existe dans DEUX sources : la copie locale (table
+  // conversations, insérée avant signature) et le message Beds24 réellement
+  // parti (avec signature éventuelle). On compare après retrait de la
+  // signature et normalisation des espaces.
+  function normalizeText(s) {
+    return (s || '')
+      .replace(/—\s*propulsé par GuestFlow\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+  }
+
   function renderConvView(bookId) {
     const conv = conversations.find(c => c.bookId === bookId)
     if (!conv) return
 
     // Fusionner et trier tous les messages
     const allMessages = []
+    const hostMsgs = []
 
     conv.thread.forEach(m => {
-      allMessages.push({ type: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time })
+      const msg = { type: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }
+      if (msg.type === 'host') {
+        msg._norm = normalizeText(m.message)
+        hostMsgs.push(msg)
+      }
+      allMessages.push(msg)
     })
 
+    // Déduplication 1-pour-1 : chaque copie locale (aiReplies) est absorbée par
+    // LA bulle Beds24 correspondante (même texte normalisé, horodatage le plus
+    // proche, < 6h). La bulle conservée est celle de Beds24 (contenu réellement
+    // reçu par le voyageur) qui hérite du label d'origine (auto / IA).
+    // Si deux envois réels ont eu lieu (ex: doublon manuel + auto), les DEUX
+    // bulles Beds24 restent visibles — fidèle à la réalité.
     conv.aiReplies.forEach(c => {
-      const isAuto = c.guest_message?.startsWith('[AUTO:')
+      const isAuto   = c.guest_message?.startsWith('[AUTO:')
+      const isManual = c.guest_message === '[Envoi manuel hôte]'
+      const norm = normalizeText(c.agent_reply)
+
+      let best = null, bestDt = Infinity
+      hostMsgs.forEach(h => {
+        if (h._merged || h._norm !== norm) return
+        const dt = Math.abs(new Date(h.time) - new Date(c.created_at))
+        if (dt < bestDt) { best = h; bestDt = dt }
+      })
+
+      if (best && bestDt < 6 * 3600 * 1000) {
+        best._merged = true
+        if (isAuto) {
+          best.type = 'auto'
+          best.label = c.guest_message
+        } else if (!isManual) {
+          best.type = 'ai'
+        }
+        return // pas de seconde bulle
+      }
+
       allMessages.push({
         type:    isAuto ? 'auto' : 'ai',
         content: c.agent_reply,
@@ -490,7 +538,7 @@
         const conv = conversations.find(c => c.bookId === bookId)
         await window._supabase.from('conversations').insert({
           user_id:       window._session.user.id,
-          property_id:   conv?.property_id || null,
+          property_id:   conv?.propertyId || null,
           guest_name:    conv?.guestName || 'Voyageur',
           guest_message: '[Envoi manuel hôte]',
           agent_reply:   text,
