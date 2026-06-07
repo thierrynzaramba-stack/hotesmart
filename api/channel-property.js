@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, currency, city, country, capacity, inventory_type, created_at')
+      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
@@ -72,6 +72,134 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ error: 'Erreur lecture' })
     }
     return res.status(200).json({ properties: data })
+  }
+
+  // ===== PATCH : modification d'un bien (champs cosmetiques) =====
+  // Body : { property_id (uuid Supabase), name?, address?, city?, zip_code?, country? }
+  if (req.method === 'PATCH') {
+    const { property_id: pid, name, address, city, zip_code, country } = req.body || {}
+    if (!pid) return res.status(400).json({ error: 'property_id requis' })
+
+    const { data: prop, error: propErr } = await supabase
+      .from('properties')
+      .select('id, provider, provider_property_id')
+      .eq('id', pid)
+      .eq('user_id', user.id)
+      .single()
+    if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
+
+    const updates = {}
+    if (name !== undefined && String(name).trim()) updates.name = String(name).trim().slice(0, 100)
+    if (address !== undefined) updates.address = address ? String(address).trim().slice(0, 200) : null
+    if (city !== undefined) updates.city = city ? String(city).trim().slice(0, 100) : null
+    if (zip_code !== undefined) updates.zip_code = zip_code ? String(zip_code).trim().slice(0, 20) : null
+    if (country !== undefined && country) updates.country = String(country).trim().slice(0, 2).toUpperCase()
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'Aucun champ a modifier' })
+
+    // Sync cote channel manager (best effort, non bloquant)
+    let channelSynced = null
+    if ((prop.provider === 'channex' || prop.provider === 'channel') && prop.provider_property_id) {
+      const chBody = { property: {} }
+      if (updates.name) chBody.property.title = updates.name
+      if (updates.address !== undefined) chBody.property.address = updates.address || undefined
+      if (updates.city !== undefined) chBody.property.city = updates.city || undefined
+      if (updates.zip_code !== undefined) chBody.property.zip_code = updates.zip_code || undefined
+      if (updates.country) chBody.property.country = updates.country
+      if (Object.keys(chBody.property).length) {
+        const r = await channelCall('PUT', `/properties/${prop.provider_property_id}`, chBody)
+        channelSynced = r.ok
+        if (!r.ok) console.error('[channel-property] PATCH sync channel echec', r.status, r.json)
+      }
+    }
+
+    const { data: updated, error: updErr } = await supabase
+      .from('properties')
+      .update(updates)
+      .eq('id', pid)
+      .eq('user_id', user.id)
+      .select()
+      .single()
+    if (updErr) {
+      console.error('[channel-property] UPDATE error', updErr.message)
+      return res.status(500).json({ error: 'Erreur de mise a jour' })
+    }
+    return res.status(200).json({ property: updated, channel_synced: channelSynced })
+  }
+
+  // ===== DELETE : suppression complete d'un bien =====
+  // Body : { property_id (uuid Supabase) }
+  // Supprime chez le channel manager (canaux compris) PUIS purge Supabase :
+  // properties + toutes les donnees liees par property_id (= provider_property_id).
+  // DESTRUCTIF ET DEFINITIF — la confirmation est cote UI.
+  if (req.method === 'DELETE') {
+    const { property_id: pid } = req.body || {}
+    if (!pid) return res.status(400).json({ error: 'property_id requis' })
+
+    const { data: prop, error: propErr } = await supabase
+      .from('properties')
+      .select('id, name, provider, provider_property_id')
+      .eq('id', pid)
+      .eq('user_id', user.id)
+      .single()
+    if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
+
+    const providerId = prop.provider_property_id
+
+    // 1. Suppression cote channel manager (best effort : un 404 = deja absent, on continue)
+    let channelDeleted = null
+    if ((prop.provider === 'channex' || prop.provider === 'channel') && providerId) {
+      const r = await channelCall('DELETE', `/properties/${providerId}`)
+      channelDeleted = r.ok || r.status === 404
+      if (!channelDeleted) {
+        console.error('[channel-property] DELETE channel echec', r.status, r.json)
+        // On n'avorte pas : l'utilisateur veut supprimer son bien. On purge quand
+        // meme cote HoteSmart et on signale l'etat dans la reponse.
+      }
+    }
+
+    // 2. Purge des donnees liees (property_id TEXT = id provider)
+    if (providerId) {
+      const propKey = String(providerId)
+
+      // message_sent_log n'a pas de property_id : purge via les booking_id du bien
+      const { data: snapRows } = await supabase
+        .from('bookings_snapshot')
+        .select('booking_id')
+        .eq('user_id', user.id)
+        .eq('property_id', propKey)
+      const bookingIds = (snapRows || []).map(r => r.booking_id)
+      if (bookingIds.length) {
+        await supabase.from('message_sent_log')
+          .delete().eq('user_id', user.id).in('booking_id', bookingIds)
+      }
+
+      const tables = [
+        'bookings_snapshot', 'conversations', 'agent_tasks',
+        'message_templates', 'access_codes', 'knowledge', 'property_status'
+      ]
+      for (const t of tables) {
+        const q = supabase.from(t).delete().eq('property_id', propKey)
+        // access_codes n'a pas de user_id direct partout : filtre property_id seul
+        const { error: delErr } = (t === 'access_codes')
+          ? await q
+          : await q.eq('user_id', user.id)
+        if (delErr) console.error(`[channel-property] purge ${t} echec`, delErr.message)
+      }
+    }
+
+    // 3. Suppression du bien lui-meme
+    const { error: delPropErr } = await supabase
+      .from('properties')
+      .delete()
+      .eq('id', pid)
+      .eq('user_id', user.id)
+    if (delPropErr) {
+      console.error('[channel-property] DELETE properties error', delPropErr.message)
+      return res.status(500).json({ error: 'Erreur de suppression' })
+    }
+
+    console.log(`[channel-property] Bien supprime: ${prop.name} (${pid}, provider ${providerId || 'n/a'})`)
+    return res.status(200).json({ deleted: true, channel_deleted: channelDeleted })
   }
 
   // ===== POST : creation d'un bien complet =====

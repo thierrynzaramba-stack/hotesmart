@@ -34,6 +34,10 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+    .btn-danger {
+      color: #E24B4A;
+      border-color: #E24B4A;
+    }
     .badge {
       display: inline-block;
       background: var(--bg2);
@@ -55,6 +59,20 @@
     .empty-state h2 { font-size: 17px; margin-bottom: 8px; color: var(--text); }
     .empty-state p { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
     .loader { text-align: center; padding: 48px; color: var(--text2); }
+
+    /* Modales */
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+    .modal.show { display: flex; }
+    .modal-box { background: var(--bg); border-radius: var(--radius-lg); width: 100%; max-width: 460px; padding: 24px; }
+    .modal-box h2 { font-size: 16px; margin-bottom: 16px; color: var(--text); }
+    .modal-box .field { margin-bottom: 14px; }
+    .modal-box .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .modal-box .field input { width: 100%; padding: 10px 12px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); }
+    .modal-box .field input:focus { outline: none; border-color: var(--green); }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+    .modal-feedback { font-size: 13px; margin-top: 12px; display: none; }
+    .modal-feedback.error { color: #E24B4A; display: block; }
+    .danger-note { background: #fdecea; border: 0.5px solid #E24B4A; border-radius: var(--radius); padding: 12px; font-size: 13px; color: #8a1f1e; margin-bottom: 14px; line-height: 1.5; }
   </style>
 </head>
 <body>
@@ -64,7 +82,7 @@
     <div class="topbar">
       <div>
         <div class="page-title">🏠 Mes biens</div>
-        <div class="page-sub">Gérez vos logements, tarifs et calendriers</div>
+        <div class="page-sub">Gérez vos logements et leurs calendriers</div>
       </div>
       <a href="/biens/nouveau" class="btn btn-primary">+ Ajouter un bien</a>
     </div>
@@ -76,6 +94,55 @@
         <a href="/biens/nouveau" class="btn btn-primary">+ Ajouter mon premier bien</a>
       </div>
       <div id="grid" class="biens-grid" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modale modification -->
+<div class="modal" id="edit-modal">
+  <div class="modal-box">
+    <h2>Modifier le bien</h2>
+    <div class="field">
+      <label for="edit-name">Nom</label>
+      <input type="text" id="edit-name" maxlength="100">
+    </div>
+    <div class="field">
+      <label for="edit-address">Adresse</label>
+      <input type="text" id="edit-address" maxlength="200">
+    </div>
+    <div class="field">
+      <label for="edit-city">Ville</label>
+      <input type="text" id="edit-city" maxlength="100">
+    </div>
+    <div class="field">
+      <label for="edit-zip">Code postal</label>
+      <input type="text" id="edit-zip" maxlength="20">
+    </div>
+    <div class="modal-feedback" id="edit-feedback"></div>
+    <div class="modal-actions">
+      <button class="btn" id="edit-cancel">Annuler</button>
+      <button class="btn btn-primary" id="edit-save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modale suppression -->
+<div class="modal" id="delete-modal">
+  <div class="modal-box">
+    <h2>Supprimer le bien</h2>
+    <div class="danger-note">
+      Cette action est <strong>définitive</strong>. Le bien sera supprimé, ses connexions
+      aux plateformes seront coupées, et toutes ses données (réservations, messages,
+      modèles, codes d'accès) seront effacées. Aucune récupération possible.
+    </div>
+    <div class="field">
+      <label for="delete-confirm">Tapez le nom exact du bien pour confirmer : <span id="delete-name" style="font-weight:700"></span></label>
+      <input type="text" id="delete-confirm" autocomplete="off">
+    </div>
+    <div class="modal-feedback" id="delete-feedback"></div>
+    <div class="modal-actions">
+      <button class="btn" id="delete-cancel">Annuler</button>
+      <button class="btn btn-danger" id="delete-go" disabled>Supprimer définitivement</button>
     </div>
   </div>
 </div>
@@ -96,6 +163,9 @@
   const empty  = document.getElementById('empty')
   const grid   = document.getElementById('grid')
 
+  let currentEdit = null   // bien en cours d'édition
+  let currentDelete = null // bien en cours de suppression
+
   function escapeHtml(s) {
     if (s == null) return ''
     return String(s).replace(/[&<>"']/g, c => ({
@@ -103,10 +173,23 @@
     }[c]))
   }
 
-  // Libellé provider en marque blanche : jamais le nom technique du gestionnaire.
   function providerLabel(provider) {
     if (provider === 'beds24') return 'Beds24'
     return 'HôteSmart'
+  }
+
+  async function callApi(method, body) {
+    const res = await fetch('/api/channel-property', {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify(body)
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`)
+    return data
   }
 
   function renderProperty(p) {
@@ -124,32 +207,122 @@
         <span>Devise : ${escapeHtml(p.currency || 'EUR')}</span>
       </div>
       <div class="card-actions">
-        <a href="/biens/${p.id}/calendrier" class="btn">Calendrier</a>
-        <a href="/biens/${p.id}" class="btn">Gérer les tarifs</a>
+        <a href="/biens/${p.id}/calendrier" class="btn btn-primary">📅 Calendrier</a>
+        <button class="btn" data-edit="${p.id}">Modifier</button>
+        <button class="btn btn-danger" data-delete="${p.id}">Supprimer</button>
       </div>
     `
+    card.querySelector('[data-edit]').addEventListener('click', () => openEdit(p))
+    card.querySelector('[data-delete]').addEventListener('click', () => openDelete(p))
     return card
   }
 
-  try {
-    const result = await api.channel.listProperties()
-    const properties = result.properties || []
-    logger.info('biens', `${properties.length} biens chargés`)
-
-    loader.style.display = 'none'
-
-    if (properties.length === 0) {
-      empty.style.display = 'block'
-    } else {
-      grid.style.display = 'grid'
-      for (const p of properties) {
-        grid.appendChild(renderProperty(p))
+  async function loadProperties() {
+    loader.style.display = 'block'
+    empty.style.display = 'none'
+    grid.style.display = 'none'
+    grid.innerHTML = ''
+    try {
+      const result = await api.channel.listProperties()
+      const properties = result.properties || []
+      logger.info('biens', `${properties.length} biens chargés`)
+      loader.style.display = 'none'
+      if (properties.length === 0) {
+        empty.style.display = 'block'
+      } else {
+        grid.style.display = 'grid'
+        for (const p of properties) grid.appendChild(renderProperty(p))
       }
+    } catch (err) {
+      logger.error('biens', err.message)
+      loader.textContent = 'Erreur de chargement : ' + err.message
     }
-  } catch (err) {
-    logger.error('biens', err.message)
-    loader.textContent = 'Erreur de chargement : ' + err.message
   }
+
+  // ===== Modification =====
+  const editModal = document.getElementById('edit-modal')
+  const editFeedback = document.getElementById('edit-feedback')
+
+  function openEdit(p) {
+    currentEdit = p
+    document.getElementById('edit-name').value = p.name || ''
+    document.getElementById('edit-address').value = p.address || ''
+    document.getElementById('edit-city').value = p.city || ''
+    document.getElementById('edit-zip').value = p.zip_code || ''
+    editFeedback.className = 'modal-feedback'
+    editModal.classList.add('show')
+  }
+
+  document.getElementById('edit-cancel').addEventListener('click', () => {
+    editModal.classList.remove('show')
+    currentEdit = null
+  })
+
+  document.getElementById('edit-save').addEventListener('click', async () => {
+    if (!currentEdit) return
+    const btn = document.getElementById('edit-save')
+    btn.disabled = true; btn.textContent = '⏳ Enregistrement…'
+    try {
+      await callApi('PATCH', {
+        property_id: currentEdit.id,
+        name: document.getElementById('edit-name').value,
+        address: document.getElementById('edit-address').value,
+        city: document.getElementById('edit-city').value,
+        zip_code: document.getElementById('edit-zip').value
+      })
+      editModal.classList.remove('show')
+      currentEdit = null
+      await loadProperties()
+    } catch (err) {
+      editFeedback.textContent = '❌ ' + err.message
+      editFeedback.className = 'modal-feedback error'
+    } finally {
+      btn.disabled = false; btn.textContent = 'Enregistrer'
+    }
+  })
+
+  // ===== Suppression =====
+  const deleteModal = document.getElementById('delete-modal')
+  const deleteInput = document.getElementById('delete-confirm')
+  const deleteBtn = document.getElementById('delete-go')
+  const deleteFeedback = document.getElementById('delete-feedback')
+
+  function openDelete(p) {
+    currentDelete = p
+    document.getElementById('delete-name').textContent = p.name
+    deleteInput.value = ''
+    deleteBtn.disabled = true
+    deleteFeedback.className = 'modal-feedback'
+    deleteModal.classList.add('show')
+  }
+
+  deleteInput.addEventListener('input', () => {
+    deleteBtn.disabled = !(currentDelete && deleteInput.value.trim() === currentDelete.name)
+  })
+
+  document.getElementById('delete-cancel').addEventListener('click', () => {
+    deleteModal.classList.remove('show')
+    currentDelete = null
+  })
+
+  deleteBtn.addEventListener('click', async () => {
+    if (!currentDelete) return
+    deleteBtn.disabled = true; deleteBtn.textContent = '⏳ Suppression…'
+    try {
+      await callApi('DELETE', { property_id: currentDelete.id })
+      deleteModal.classList.remove('show')
+      currentDelete = null
+      await loadProperties()
+    } catch (err) {
+      deleteFeedback.textContent = '❌ ' + err.message
+      deleteFeedback.className = 'modal-feedback error'
+      deleteBtn.disabled = false
+    } finally {
+      deleteBtn.textContent = 'Supprimer définitivement'
+    }
+  })
+
+  await loadProperties()
 </script>
 </body>
 </html>

@@ -8,6 +8,12 @@ export async function renderSidebar(activePage = '') {
 
   const apiStatus = await getApiStatus(user)
 
+  // Lien Calendrier : pointe vers le calendrier du premier bien ;
+  // sans bien, mène à la liste pour en créer un.
+  const calendrierHref = apiStatus.firstPropertyId
+    ? `/biens/${apiStatus.firstPropertyId}/calendrier`
+    : '/biens'
+
   sidebar.innerHTML = `
     <div class="nav">
 
@@ -16,24 +22,34 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-label">Accueil</span>
       </a>
 
-      <a class="nav-item ${activePage === 'biens' || activePage.startsWith('biens-') ? 'active' : ''}" href="/biens">
+      <a class="nav-item ${activePage === 'biens' || activePage === 'biens-detail' || activePage === 'biens-nouveau' ? 'active' : ''}" href="/biens">
         <span class="nav-icon">🏠</span>
         <span class="nav-label">Mes biens</span>
+      </a>
+
+      <a class="nav-item ${activePage === 'agent-ai-messagerie' ? 'active' : ''}" href="/apps/agent-ai/messagerie">
+        <span class="nav-icon">💬</span>
+        <span class="nav-label">Messages</span>
+      </a>
+
+      <a class="nav-item ${activePage === 'biens-calendrier' ? 'active' : ''}" href="${calendrierHref}">
+        <span class="nav-icon">📅</span>
+        <span class="nav-label">Calendrier</span>
       </a>
 
       <div class="nav-section-label">Apps</div>
       ${renderApps(activePage)}
 
-      <div class="nav-section-label">API connectées</div>
+      <div class="nav-section-label">Configuration</div>
       <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/connexions">
         <span class="nav-icon">⚡</span>
         <span class="nav-label">Connexions</span>
       </a>
-      ${renderApiItem('Beds24',        apiStatus.beds24, null)}
-      ${renderApiItem('Booking & Airbnb', apiStatus.ota,  '/connexions')}
-      ${renderApiItem('Seam Serrures', apiStatus.seam,   '/apps/serrures')}
-      ${renderApiItem('Brevo SMS',     apiStatus.brevo,  null)}
-      ${renderApiItem('Stripe',        apiStatus.stripe, null)}
+      ${renderApiItem('Beds24',           apiStatus.beds24, null)}
+      ${renderApiItem('Booking & Airbnb', apiStatus.ota,    '/connexions')}
+      ${renderApiItem('Seam Serrures',    apiStatus.seam,   '/apps/serrures')}
+      ${renderApiItem('Brevo SMS',        apiStatus.brevo,  null)}
+      ${renderApiItem('Stripe',           apiStatus.stripe, null)}
 
       <div class="nav-section-label">Compte</div>
       <a class="nav-item ${activePage === 'compte' ? 'active' : ''}" href="/pages/compte.html">
@@ -167,12 +183,11 @@ function renderApps(activePage) {
     let subMenu = ''
 
     if (app.id === 'agent-ai') {
+      // NB : la Messagerie est montée dans le menu principal ("Messages"),
+      // elle n'apparaît plus dans ce sous-menu.
       subMenu = `
         <a class="nav-sub ${activePage === 'agent-ai' ? 'connected' : ''}" href="/apps/agent-ai">
           <div class="sub-dot ${activePage === 'agent-ai' ? 'green' : 'gray'}"></div>Signature Humaine
-        </a>
-        <a class="nav-sub ${activePage === 'agent-ai-messagerie' ? 'connected' : ''}" href="/apps/agent-ai/messagerie">
-          <div class="sub-dot ${activePage === 'agent-ai-messagerie' ? 'green' : 'gray'}"></div>Messagerie
         </a>
         <a class="nav-sub ${activePage === 'agent-ai-knowledge' ? 'connected' : ''}" href="/apps/agent-ai/knowledge">
           <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
@@ -215,8 +230,6 @@ function renderApiItem(label, active, href) {
         <span class="sub-check">✓</span>
       </${tag}>`
   }
-  // Inactif : cliquable si une destination existe (ex. page Connexions pour
-  // brancher la plateforme), sinon simple indicateur.
   if (href) {
     return `
       <a class="nav-sub" href="${href}" style="opacity:0.55;text-decoration:none;color:inherit">
@@ -232,7 +245,7 @@ function renderApiItem(label, active, href) {
 }
 
 async function getApiStatus(user) {
-  if (!user) return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null }
+  if (!user) return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null, firstPropertyId: null }
   try {
     const { data } = await supabase
       .from('api_keys')
@@ -240,17 +253,22 @@ async function getApiStatus(user) {
       .eq('user_id', user.id)
       .maybeSingle()
 
-    // Plateformes OTA (gestionnaire de canaux) : actif si au moins un bien provider channel
+    // Biens géré par le channel manager : statut OTA + premier bien (lien Calendrier)
     let otaActive = false
+    let firstPropertyId = null
     try {
       const { data: chProps } = await supabase
         .from('properties')
         .select('id')
         .eq('user_id', user.id)
         .in('provider', ['channex', 'channel'])
+        .order('created_at', { ascending: true })
         .limit(1)
-      otaActive = !!(chProps && chProps.length)
-    } catch { otaActive = false }
+      if (chProps && chProps.length) {
+        otaActive = true
+        firstPropertyId = chProps[0].id
+      }
+    } catch { /* no-op */ }
 
     let stripeActive = false
     let plan = null
@@ -277,10 +295,11 @@ async function getApiStatus(user) {
       seam:   !!(data?.seam_api_key && data?.seam_enabled !== false),
       brevo:  true,
       stripe: stripeActive,
-      plan:   plan
+      plan:   plan,
+      firstPropertyId
     }
   } catch {
-    return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null }
+    return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null, firstPropertyId: null }
   }
 }
 
