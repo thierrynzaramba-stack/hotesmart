@@ -173,11 +173,6 @@
     }[c]))
   }
 
-  function providerLabel(provider) {
-    if (provider === 'beds24') return 'Beds24'
-    return 'HôteSmart'
-  }
-
   async function callApi(method, body) {
     const res = await fetch('/api/channel-property', {
       method,
@@ -195,11 +190,30 @@
   function renderProperty(p) {
     const card = document.createElement('div')
     card.className = 'property-card'
-    const cityLine = p.city ? `<span>${escapeHtml(p.city)}, ${escapeHtml(p.country || 'FR')}</span>` : ''
+    const cityLine = p.city ? `<span>${escapeHtml(p.city)}${p.country ? ', ' + escapeHtml(p.country) : ''}</span>` : ''
+
+    if (p._source === 'beds24') {
+      // Bien connecté Beds24 : calendrier et tarifs gérés dans Beds24.
+      card.innerHTML = `
+        <div>
+          <h3>${escapeHtml(p.name)}</h3>
+          <span class="badge">Beds24 ✓</span>
+        </div>
+        <div class="meta">
+          ${cityLine}
+          <span>Réservations, tarifs et calendrier gérés via Beds24</span>
+        </div>
+        <div class="card-actions">
+          <a href="https://beds24.com" target="_blank" class="btn">🔗 Ouvrir Beds24</a>
+        </div>
+      `
+      return card
+    }
+
     card.innerHTML = `
       <div>
         <h3>${escapeHtml(p.name)}</h3>
-        <span class="badge">${providerLabel(p.provider)}</span>
+        <span class="badge">HôteSmart</span>
       </div>
       <div class="meta">
         ${cityLine}
@@ -217,25 +231,56 @@
     return card
   }
 
+  async function fetchBeds24Properties() {
+    const res = await fetch('/api/beds24', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'getProperties' })
+    })
+    if (!res.ok) throw new Error('Beds24 indisponible')
+    const data = await res.json()
+    return (data.properties || []).map(p => ({ ...p, _source: 'beds24' }))
+  }
+
+  async function fetchChannelProperties() {
+    const result = await api.channel.listProperties()
+    return (result.properties || [])
+      .filter(p => p.provider !== 'beds24')
+      .map(p => ({ ...p, _source: 'channel' }))
+  }
+
   async function loadProperties() {
     loader.style.display = 'block'
     empty.style.display = 'none'
     grid.style.display = 'none'
     grid.innerHTML = ''
-    try {
-      const result = await api.channel.listProperties()
-      const properties = result.properties || []
-      logger.info('biens', `${properties.length} biens chargés`)
-      loader.style.display = 'none'
-      if (properties.length === 0) {
-        empty.style.display = 'block'
-      } else {
-        grid.style.display = 'grid'
-        for (const p of properties) grid.appendChild(renderProperty(p))
+
+    // Les deux sources en parallèle ; si l'une échoue, l'autre s'affiche quand même.
+    const [beds24Res, channelRes] = await Promise.allSettled([
+      fetchBeds24Properties(),
+      fetchChannelProperties()
+    ])
+
+    const beds24Props  = beds24Res.status === 'fulfilled' ? beds24Res.value : []
+    const channelProps = channelRes.status === 'fulfilled' ? channelRes.value : []
+    if (beds24Res.status === 'rejected')  logger.error('biens', 'Beds24: ' + beds24Res.reason?.message)
+    if (channelRes.status === 'rejected') logger.error('biens', 'Channel: ' + channelRes.reason?.message)
+
+    const properties = [...beds24Props, ...channelProps]
+    logger.info('biens', `${properties.length} biens chargés (${beds24Props.length} Beds24, ${channelProps.length} HôteSmart)`)
+
+    loader.style.display = 'none'
+
+    if (properties.length === 0) {
+      if (beds24Res.status === 'rejected' && channelRes.status === 'rejected') {
+        loader.style.display = 'block'
+        loader.textContent = 'Erreur de chargement des biens.'
+        return
       }
-    } catch (err) {
-      logger.error('biens', err.message)
-      loader.textContent = 'Erreur de chargement : ' + err.message
+      empty.style.display = 'block'
+    } else {
+      grid.style.display = 'grid'
+      for (const p of properties) grid.appendChild(renderProperty(p))
     }
   }
 
