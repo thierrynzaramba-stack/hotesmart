@@ -196,8 +196,8 @@
 
   const SIM_ID = '__SIM__'
 
-  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-  function escAttr(s) { return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
+  function escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+  function escAttr(s) { return String(s ?? '').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
   function formatDateShort(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) }
   function getPropName(propId) {
     const p = (window._props || []).find(p => String(p.id) === String(propId))
