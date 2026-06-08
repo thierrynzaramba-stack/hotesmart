@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Calendrier - HoteSmart</title>
+  <title>HôteSmart — Calendrier</title>
+  <link rel="stylesheet" href="/public/style.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; min-height: 100vh; color: #1d1d1f; -webkit-user-select: none; user-select: none; }
-    header { background: #fff; padding: 14px 20px; border-bottom: 1px solid #e5e5e7; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; position: sticky; top: 0; z-index: 20; }
-    header .left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-    header a.back { color: #007aff; text-decoration: none; font-size: 14px; white-space: nowrap; }
+    /* CSS spécifique au calendrier (conservé tel quel, ne dépend pas de style.css) */
+    .cal-page * { box-sizing: border-box; }
+    .cal-page { -webkit-user-select: none; user-select: none; }
+    .cal-controls { background: var(--bg); padding: 14px 20px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; position: sticky; top: 0; z-index: 20; }
+    .cal-controls .left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .header-actions { display: flex; align-items: center; gap: 10px; }
     .icon-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 8px; width: 36px; height: 36px; cursor: pointer; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; color: #1d1d1f; }
     .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -20,10 +21,10 @@
     .multi-select .ms-trigger { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; cursor: pointer; min-width: 190px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .multi-select .ms-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #fff; border: 1px solid #d2d2d7; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 250px; max-height: 320px; overflow-y: auto; z-index: 30; padding: 6px; }
     .multi-select.open .ms-panel { display: block; }
-    .multi-select .ms-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 14px; }
+    .multi-select .ms-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 14px; color:#1d1d1f; }
     .multi-select .ms-option:hover { background: #f5f5f7; }
-    .period-select { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; font-family: inherit; }
-    main { max-width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 100px; }
+    .period-select { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; font-family: inherit; color:#1d1d1f; }
+    .cal-main { padding: 16px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 100px; color:#1d1d1f; }
     .month-pills { display: flex; gap: 6px; flex-wrap: wrap; }
     .month-pill { background: #fff; border: 1px solid #d2d2d7; border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; color: #1d1d1f; font-weight: 500; text-transform: capitalize; }
     .month-pill:hover { background: #eef4ff; border-color: #007aff; }
@@ -34,7 +35,6 @@
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
     table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 5; border-bottom: 1px solid #e5e5e7; }
-    /* Separation logements renforcee */
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
     .bien-title { font-size: 18px; font-weight: 700; margin: 16px 0 12px; padding: 0 14px; display: inline-flex; align-items: center; gap: 10px; position: sticky; left: 0; background: #fff; z-index: 6; max-width: 90vw; }
@@ -76,7 +76,7 @@
     .float-bar .btn-clear { background: transparent; color: #a1a1a6; }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
     .overlay.visible { display: flex; }
-    .popup-lg { background: #fff; border-radius: 16px; width: 100%; max-width: 740px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+    .popup-lg { background: #fff; border-radius: 16px; width: 100%; max-width: 740px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; color:#1d1d1f; }
     .popup-head { padding: 20px 24px 14px; border-bottom: 1px solid #f0f0f0; }
     .popup-head h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
     .range-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; }
@@ -115,25 +115,36 @@
   </style>
 </head>
 <body>
-  <header>
-    <div class="left">
-      <a href="/biens" class="back">&larr; Mes biens</a>
-      <div class="multi-select" id="multi-select">
-        <div class="ms-trigger" id="ms-trigger"><span id="ms-label">Choisir des biens</span><span>&#9662;</span></div>
-        <div class="ms-panel" id="ms-panel"></div>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main cal-page">
+    <div class="topbar">
+      <div>
+        <div class="page-title">📅 Calendrier</div>
+        <div class="page-sub"><a href="/biens" style="color:var(--green);text-decoration:none">← Retour à Mes biens</a></div>
       </div>
-      <select class="period-select" id="period-select"><option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">1 an</option></select>
     </div>
-    <div class="header-actions">
-      <button class="icon-btn" id="btn-undo" title="Annuler" disabled>&#8634;</button>
-      <div class="toggle"><button id="btn-simple" class="active">Simplifiee</button><button id="btn-complete">Complete</button></div>
-    </div>
-  </header>
 
-  <main id="main">
-    <div class="month-pills" id="month-pills"></div>
-    <div class="scroll-shell"><div class="scroll-area" id="scroll-area"><div id="month-band-wrap"></div><div id="blocks"></div></div></div>
-  </main>
+    <div class="cal-controls">
+      <div class="left">
+        <div class="multi-select" id="multi-select">
+          <div class="ms-trigger" id="ms-trigger"><span id="ms-label">Choisir des biens</span><span>&#9662;</span></div>
+          <div class="ms-panel" id="ms-panel"></div>
+        </div>
+        <select class="period-select" id="period-select"><option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">1 an</option></select>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="btn-undo" title="Annuler" disabled>&#8634;</button>
+        <div class="toggle"><button id="btn-simple" class="active">Simplifiee</button><button id="btn-complete">Complete</button></div>
+      </div>
+    </div>
+
+    <div class="cal-main" id="main">
+      <div class="month-pills" id="month-pills"></div>
+      <div class="scroll-shell"><div class="scroll-area" id="scroll-area"><div id="month-band-wrap"></div><div id="blocks"></div></div></div>
+    </div>
+  </div>
+</div>
 
   <div class="float-bar" id="float-bar">
     <span class="sel-info"><strong id="sel-count">0</strong> jour(s)</span>
@@ -161,10 +172,12 @@
   <div class="toast" id="toast">Modifications enregistrees</div>
 
   <script type="module">
-    import { getUser } from '/shared/supabase.js'
+    import { requireAuth }   from '/components/auth-guard.js'
+    import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
-    const user = await getUser()
-    if (!user) { window.location.href = '/pages/login.html' }
+    const session = await requireAuth()
+    if (!session) throw new Error('Non authentifié')
+    await renderSidebar('biens-calendrier')
 
     // id du bien depuis l'URL /biens/:id/calendrier
     function bienIdFromUrl(){
@@ -173,7 +186,6 @@
     }
     const URL_BIEN_ID = bienIdFromUrl()
 
-    // Parametres du popup (chacun avec ses propres jours, sauf perPerson)
     const PARAMS = [
       { key:'rate',           label:'Prix de base',   type:'price', desc:'Tarif par nuit pour le nombre de voyageurs inclus.' },
       { key:'perPerson',      label:'Prix par personne', type:'perperson', desc:'Configuration globale du bien. Le prix de base couvre un nombre de voyageurs inclus ; au-dela, un supplement par personne s\u0027applique.' },
@@ -185,9 +197,8 @@
       { key:'ctd',            label:'Depart',         type:'openclosed', optOpen:'Autorise', optClosed:'Bloque', desc:'Autorise ou bloque les departs ce jour-la.' },
       { key:'stopSell',       label:'Stop vente',     type:'openclosed', optOpen:'En vente', optClosed:'Stoppe', desc:'Arrete la vente sur tous les canaux sans modifier la disponibilite reelle.' }
     ]
-    // params affichables en lignes calendrier (perPerson -> ligne 'Prix max' calculee)
     const ROW_DEFAULTS = { avail:'open', minStayArr:0, minStayThrough:0, maxStay:0, cta:'open', ctd:'open', stopSell:'open' }
-    let pinnedSimple = new Set()  // rate + maxRate geres a part (toujours visibles selon vue)
+    let pinnedSimple = new Set()
 
     let MONTHS=1, days=[]
     const dayNames=['DIM','LUN','MAR','MER','JEU','VEN','SAM']
@@ -202,10 +213,13 @@
     function buildDays(){
       const t=new Date(); t.setHours(0,0,0,0)
       let n=Math.round(MONTHS*30)
-      // remplir la largeur de l'ecran : nb de colonnes qui tiennent (largeur - label 120px) / 34px
+      // remplir la largeur DISPONIBLE (conteneur calendrier, pas la fenêtre :
+      // la sidebar occupe ~260px en desktop). Fallback sur innerWidth si besoin.
       try{
         const COLW=34, LABEL=120, PAD=48
-        const avail=Math.max(0, (window.innerWidth||1200)-LABEL-PAD)
+        const main=document.getElementById('main')
+        const containerW = (main && main.clientWidth) ? main.clientWidth : ((window.innerWidth||1200)-260)
+        const avail=Math.max(0, containerW-LABEL-PAD)
         const fit=Math.floor(avail/COLW)
         if(fit>n) n=fit
       }catch(e){}
@@ -214,14 +228,11 @@
     function isMonthStart(i){ return i===0||days[i].getDate()===1 }
     function isToday(i){ return i===0 }
 
-    // BIENS charges depuis Supabase. Structure runtime :
-    // { id, name, capacity, base, included, extraFee, currency, resa:[{startISO,endISO,name,color}] }
     let BIENS=[]
-    const ppConfig={}   // { bienId: {included, extraFee} }
-    const invByBien={}  // { bienId: { 'YYYY-MM-DD': {rate,avail,stop_sell,min_stay_arrival,...} } }  donnees serveur brutes
+    const ppConfig={}
+    const invByBien={}
 
     const states={}
-    // Pour une date : si inventory configure -> valeurs ; sinon defaut (prix de base partout)
     function initState(b){
       const inv = invByBien[b.id] || {}
       states[b.id]=days.map(d=>{
@@ -242,9 +253,7 @@
       })
     }
 
-    // Prix max calcule = rate + (capacite - included) * extraFee
     function maxRateOf(bien, dayRate){ const cfg=ppConfig[bien.id]||{included:bien.included,extraFee:bien.extraFee}; const extra=Math.max(0, bien.capacity-cfg.included); return dayRate + extra*(cfg.extraFee||0) }
-
     function configuredRowParams(){ const setp=new Set(); selectedBiens.forEach(bid=>{const st=states[bid]; if(!st)return; st.forEach(s=>{for(const k in ROW_DEFAULTS){if(s[k]!==ROW_DEFAULTS[k])setp.add(k)}})}); return setp }
 
     let sel={bienId:null, idx:new Set(), row:'rate'}
@@ -279,11 +288,9 @@
       } return ''
     }
 
-    // Lignes visibles. rate toujours. maxRate visible si pp configure(extra>0) OU complete. autres selon regle.
     function visibleRows(bien){
       const rows=['rate']
       const configured=configuredRowParams()
-      // maxRate (prix max) : en complete toujours ; en simple si epingle
       if(showComplete || pinnedSimple.has('maxRate')) rows.push('maxRate')
       PARAMS.forEach(p=>{
         if(p.key==='rate'||p.key==='perPerson')return
@@ -301,17 +308,15 @@
       let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
       days.forEach((d,idx)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(idx)?' month-start':'';html+='<th class="'+(we?'weekend':'')+(isToday(idx)?' today':'')+ms+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
       html+='</tr></thead><tbody>'
-      // Reservations
       html+='<tr><td class="row-label">Reservations</td>'
       days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=(bk.span-0.5)*100;const nameShort=bk.name.length>16?bk.name.slice(0,15)+'.':bk.name;html+='<div class="resa-bar '+bk.source+'" style="left:50%;width:calc('+w+'% - 2px);z-index:2"><span class="ava">'+platformLogo(bk.source)+'</span>'+nameShort+'</div>'}});html+='</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
-        const editable=(pk==='rate') // maxRate = calcule, non editable case par case
+        const editable=(pk==='rate')
         const lbl = pk==='maxRate' ? 'Prix max' : paramLabel(pk)
         html+='<tr><td class="row-label">'+lbl+'</td>'
         st.forEach((s,i)=>{const we=days[i].getDay()===0||days[i].getDay()===6;const ms=isMonthStart(i)?' month-start':'';const c=[];if(editable)c.push('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');if(we)c.push('weekend');if(isToday(i))c.push('today');if(ms)c.push('month-start');
-          // coloration etat (ligne prix uniquement) : ferme=rouge clair, reserve=bleute
           if(pk==='rate'){ const iso=toISO(days[i]); const closed=(s.avail==='closed'||s.stopSell==='closed'); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
           if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
         html+='</tr>'
@@ -323,12 +328,11 @@
 
     let isDragging=false, dragStart=null, dragBien=null, dragRow=null
     function attachEvents(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx);sel.idx=new Set();for(let i=lo;i<=hi;i++)sel.idx.add(i);updateSelectionUI()})})}) }
-    // Auto-scroll pendant le drag quand on approche des bords
     let lastMouseX=0, autoScrollRAF=null
     function colIndexUnderX(clientX){
       const area=document.getElementById('scroll-area')
       const rect=area.getBoundingClientRect()
-      const xInContent = (clientX - rect.left) + area.scrollLeft - 120 // 120 = largeur colonne label sticky
+      const xInContent = (clientX - rect.left) + area.scrollLeft - 120
       let idx = Math.floor(xInContent / CELL_W)
       if(idx<0) idx=0; if(idx>days.length-1) idx=days.length-1
       return idx
@@ -348,7 +352,6 @@
     document.addEventListener('mousemove',e=>{
       if(!isDragging)return
       lastMouseX=e.clientX
-      // etendre la selection a la colonne sous le curseur (drag normal)
       extendSelTo(colIndexUnderX(e.clientX))
       if(!autoScrollRAF) autoScrollRAF=requestAnimationFrame(autoScrollStep)
     })
@@ -363,10 +366,8 @@
     function hideFloatBar(){ floatBar.classList.remove('visible') }
     document.getElementById('btn-clear-sel').addEventListener('click',()=>{sel={bienId:null,idx:new Set(),row:'rate'};updateSelectionUI();hideFloatBar()})
 
-    // ===== POPUP =====
     const overlay=document.getElementById('overlay')
     let activeParam='rate', popupBienId=null, popupIdxs=[]
-    // pending par param : price -> {mode,unit,value,dow}, num -> {value,dow}, openclosed -> {value,dow}, perPerson -> {included,extraFee}
     let pending={}
 
     function openPopup(startParam){
@@ -429,7 +430,6 @@
         h+='<div class="field"><select id="pv-oc"><option value="keep"'+(pv.value==='keep'?' selected':'')+'>Ne pas changer</option><option value="open"'+(pv.value==='open'?' selected':'')+'>'+p.optOpen+'</option><option value="closed"'+(pv.value==='closed'?' selected':'')+'>'+p.optClosed+'</option></select></div>'; c.innerHTML=h
         c.querySelector('#pv-oc').addEventListener('change',e=>{pv.value=e.target.value})
       }
-      // rebrancher les chips jours (apres innerHTML)
       c.querySelectorAll('input[data-dow]').forEach(inp=>inp.addEventListener('change',e=>{pv.dow[parseInt(e.target.dataset.dow,10)]=e.target.checked}))
       if(p.type==='price')updatePvPreview()
     }
@@ -446,28 +446,21 @@
       const sISO=document.getElementById('range-start').value,eISO=document.getElementById('range-end').value
       pushUndo(popupBienId)
       let touched=0
-      const segments=[]   // pour le serveur
-      // perPerson (global, sans jours) -> on push aussi (recalc rate plan cote serveur plus tard ; ici on stocke config)
+      const segments=[]
       if(pending.perPerson){ ppConfig[popupBienId]={included:pending.perPerson.included,extraFee:pending.perPerson.extraFee}; touched++
         segments.push({ kind:'perPerson', included:pending.perPerson.included, extra_guest_fee:pending.perPerson.extraFee })
       }
-      // params avec jours
       PARAMS.forEach(p=>{
         if(p.type==='perperson')return
         const pv=pending[p.key]; if(!pv)return
         const hasVal = p.type==='price' ? (pv.value!==''&&!isNaN(parseFloat(pv.value))) : (p.type==='num' ? pv.value!=='' : pv.value!=='keep')
         if(!hasVal)return
-        // jours coches -> liste de dow JS
         const daysArr=[]; for(const k in pv.dow){ if(pv.dow[k]) daysArr.push(parseInt(k,10)) }
-        // application locale (rendu immediat)
         days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&pv.dow[d.getDay()]){ if(p.type==='price'){st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value));st[i].modified=true}else if(p.type==='num'){st[i][p.key]=parseInt(pv.value,10)||0;st[i].modified=true}else{st[i][p.key]=pv.value;st[i].modified=true} } })
-        // segment serveur (mapping interne -> serveur)
         const seg={ date_from:sISO, date_to:eISO, days:daysArr }
         if(p.key==='rate'){
-          // pour le serveur on envoie la valeur finale calculee par date n'est pas possible en 1 seg si mode +/-
-          // -> en mode 'set' EUR on envoie la valeur ; sinon on calcule un rate moyen par date cote local et on envoie par date
           if(pv.mode==='set'&&pv.unit==='eur'){ seg.rate=parseFloat(pv.value) }
-          else { seg.__perDate=true } // gere plus bas (envoi valeurs finales par date)
+          else { seg.__perDate=true }
         }
         else if(p.key==='minStayArr') seg.min_stay_arrival=parseInt(pv.value,10)||0
         else if(p.key==='minStayThrough') seg.min_stay_through=parseInt(pv.value,10)||0
@@ -480,26 +473,22 @@
         touched++
       })
 
-      // Pour les segments rate en mode +/- ou %, on envoie les valeurs finales par date (depuis le state local deja calcule)
       const finalSegments=[]
       segments.forEach(seg=>{
         if(seg.kind==='perPerson'){ finalSegments.push(seg); return }
         if(seg.__perDate){
-          // une entree par date concernee avec le rate final
           days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=seg.date_from&&iso<=seg.date_to&&(!seg.days.length||seg.days.includes(d.getDay()))){ finalSegments.push({ date_from:iso, date_to:iso, rate:st[i].rate }) } })
         } else { delete seg.__perDate; finalSegments.push(seg) }
       })
 
       overlay.classList.remove('visible');sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks()
 
-      // ---- Push serveur ----
       if(touched>0){
         showToast('Enregistrement...')
         try{
           const resp=await api.calendar.save(popupBienId, finalSegments)
           if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre (' + resp.warnings.length + ' avertissement)') }
           else { showToast('Enregistre et publie') }
-          // recharge l'inventory pour refleter l'etat serveur
           await reloadInventory()
         }catch(err){ showToast('Erreur: ' + (err.message||'sauvegarde')) }
       } else { showToast('Aucune modification') }
@@ -514,11 +503,9 @@
     let toastTimer=null
     function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('visible'),1800)}
 
-    // ===== CHARGEMENT DONNEES REELLES =====
     const COLORS_BY_SOURCE = { airbnb:'red', booking:'blue', direct:'green' }
     function rangeISO(){ return { start: toISO(days[0]), end: toISO(days[days.length-1]) } }
 
-    // Transforme les biens Supabase en structure runtime
     function mapBien(p){
       return { id:p.id, name:p.name, capacity:p.capacity||1, base:Number(p.base_price)||0,
         included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0,
@@ -529,32 +516,26 @@
       return (list||[]).map((b,idx)=>{
         const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
         const span=Math.max(1, Math.round((co-ci)/86400000))
-        // source variee pour la demo (en attendant la vraie source via webhooks)
         const src=SRC[idx % 3]
         return { startISO:b.checkin, checkout:b.checkout, span, name:b.guest_name||'Reservation', source:src, color:COLORS_BY_SOURCE[src]||'green' }
       })
     }
-    // logos plateforme (SVG inline)
     function platformLogo(src){
       if(src==='airbnb') return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2c-1.1 0-2 .7-2.5 1.8C8 6.5 4 15 4 18a4 4 0 0 0 7 2.6A4 4 0 0 0 18 18c0-3-4-11.5-5.5-14.2C12 2.7 11.1 2 12 2zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>'
       if(src==='booking') return '<svg viewBox="0 0 24 24" fill="#fff"><text x="12" y="17" font-size="15" font-weight="700" text-anchor="middle">B</text></svg>'
       return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3l9 7v11h-6v-6H9v6H3V10z"/></svg>'
     }
 
-    // --- persistance config (localStorage) ---
     const PREF_KEY_D='hs_cal_desktop_prefs'
     function savePrefsD(){ try{ localStorage.setItem(PREF_KEY_D, JSON.stringify({ biens:selectedBiens, months:MONTHS })) }catch(e){} }
     function loadPrefsD(){ try{ return JSON.parse(localStorage.getItem(PREF_KEY_D)||'null') }catch(e){ return null } }
 
     async function loadData(){
-      // 1) liste de tous les biens du user (pour le dropdown)
       let all=[]
       try { const r=await api.channel.listProperties(); all=r.properties||[] } catch(e){ showToast('Erreur chargement biens'); }
       BIENS = all.map(mapBien)
       const prefs=loadPrefsD()
-      // periode memorisee
       if(prefs && prefs.months){ MONTHS=prefs.months; const ps=document.getElementById('period-select'); if(ps) ps.value=String(MONTHS); buildDays(); renderMonthPills(); renderMonthBand() }
-      // pre-selection : prefs prioritaires (persistance), sinon URL, sinon premier
       if(prefs && Array.isArray(prefs.biens) && prefs.biens.length){ selectedBiens=prefs.biens.filter(id=>BIENS.find(b=>b.id===id)) }
       if(!selectedBiens.length && URL_BIEN_ID && BIENS.find(b=>b.id===URL_BIEN_ID)) selectedBiens=[URL_BIEN_ID]
       if(!selectedBiens.length && BIENS.length) selectedBiens=[BIENS[0].id]
@@ -563,28 +544,19 @@
       await reloadInventory()
     }
 
-    // Charge inventory + resa pour les biens selectionnes et la plage courante
     async function reloadInventory(){
       if(!selectedBiens.length){ renderBlocks(); return }
       const {start,end}=rangeISO()
       try{
         const r=await api.calendar.load(selectedBiens, start, end)
-        // inventory brut
         ;(selectedBiens).forEach(id=>{ invByBien[id]=(r.inventory&&r.inventory[id])||{} })
-        // resa
         if(r.bookings){ BIENS.forEach(b=>{ if(r.bookings[b.id]) b.resa=mapResa(r.bookings[b.id]) }) }
-        // config par personne depuis properties (si renvoyee)
         if(r.properties){ r.properties.forEach(p=>{ ppConfig[p.id]={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}
           const bb=BIENS.find(x=>x.id===p.id); if(bb){ bb.base=Number(p.base_price)||bb.base; bb.included=ppConfig[p.id].included; bb.extraFee=ppConfig[p.id].extraFee } }) }
       }catch(e){ showToast('Erreur chargement calendrier') }
-      // reconstruire les states a partir de l'inventory
       Object.keys(states).forEach(k=>delete states[k])
       renderBlocks()
     }
-
-    // recharge inventory quand on change de periode ou de selection
-    const _origPeriodHandler = document.getElementById('period-select')
-    // (le handler period-select existant appelle renderBlocks ; on le complete pour recharger l'inventory)
 
     buildDays(); renderMonthPills(); renderMonthBand()
     await loadData()
