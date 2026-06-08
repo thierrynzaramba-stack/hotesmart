@@ -224,10 +224,13 @@
     const tasks = allTasks.filter(t => String(t.book_id) === String(bookId)
       && ['pending','pending_validation'].includes(t.status))
     if (!tasks.length) return null
-    if (tasks.some(t => t.task_type === 'intervention')) return { type:'intervention', label:'🚨 Intervention requise' }
-    if (tasks.some(t => t.task_type === 'info_unknown')) return { type:'info_unknown', label:'❓ Info à compléter' }
-    if (tasks.some(t => t.status === 'pending_validation')) return { type:'pending_validation', label:'✉️ Réponse à valider' }
-    return { type:'pending_validation', label:'✉️ À traiter' }
+    const inter = tasks.find(t => t.task_type === 'intervention')
+    if (inter) return { type:'intervention', label:'🚨 Intervention requise', summary: inter.summary || '' }
+    const info = tasks.find(t => t.task_type === 'info_unknown')
+    if (info) return { type:'info_unknown', label:'❓ Info à compléter', summary: info.summary || '' }
+    const val = tasks.find(t => t.status === 'pending_validation')
+    if (val) return { type:'pending_validation', label:'✉️ Réponse à valider', summary: val.summary || '' }
+    return { type:'pending_validation', label:'✉️ À traiter', summary: tasks[0].summary || '' }
   }
   const FLAG_RANK = { intervention:0, info_unknown:1, pending_validation:2 }
 
@@ -363,7 +366,11 @@
       const flag = convFlag(conv.bookId)
       const isPinned = pinnedSet.has(conv.bookId)
       const flagClass = flag ? `flag-${flag.type}` : ''
-      const titleAttr = flag ? ` title="${escAttr(flag.label)}"` : ''
+      const titleAttr = flag ? ` title="${escAttr(flag.label + (flag.summary ? ' — ' + flag.summary : ''))}"` : ''
+      // Si tâche en attente : l'aperçu montre le libellé + résumé de la tâche
+      const previewText = flag
+        ? `${flag.label}${flag.summary ? ' — ' + flag.summary : ''}`
+        : preview
 
       return `
         <div class="conv-item ${isActive ? 'active' : ''} ${flagClass}"${titleAttr} onclick="selectConv('${conv.bookId}')">
@@ -374,7 +381,7 @@
             <span class="platform-badge platform-${conv.platform}">${platformLabel}</span>
           </div>
           ${date ? `<div class="conv-item-meta">${date}</div>` : ''}
-          <div class="conv-item-preview">${escHtml(preview)}</div>
+          <div class="conv-item-preview"${flag ? ` style="color:var(--text);font-weight:500"` : ''}>${escHtml(previewText)}</div>
         </div>`
     }).join('')
 
@@ -485,7 +492,9 @@
 
     let body = ''
     if (isValidation) {
+      const ctx = task.summary || task.guest_message || ''
       body = `
+        ${ctx ? `<div class="task-bubble-q">${escHtml(ctx)}</div>` : ''}
         <textarea class="task-reply" id="val-${task.id}">${escHtml(task.suggested_reply || '')}</textarea>
         <div class="task-bubble-actions">
           <button class="btn btn-validate" data-validate="${task.id}" data-book="${escAttr(task.book_id)}">✉️ Valider et envoyer</button>
