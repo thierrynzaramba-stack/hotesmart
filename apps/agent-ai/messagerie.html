@@ -68,7 +68,7 @@
     .msg-time { font-size:10px; color:var(--text2); margin-top:3px; }
 
     /* Bulle d'action (tâche IA à traiter dans le fil) */
-    .task-bubble { width:100%; border-radius:var(--radius-lg); border:0.5px solid var(--border); overflow:hidden; margin:4px 0; }
+    .task-bubble { width:100%; flex-shrink:0; align-self:stretch; box-sizing:border-box; border-radius:var(--radius-lg); border:0.5px solid var(--border); overflow:hidden; margin:4px 0; background:var(--bg); }
     .task-bubble.intervention { border-left:3px solid #E24B4A; }
     .task-bubble.info_unknown { border-left:3px solid #F59E0B; }
     .task-bubble.pending_validation { border-left:3px solid #378ADD; }
@@ -325,15 +325,13 @@
     }
   }
 
-  // Tri : épinglées d'abord, puis tâches par priorité, puis chronologique
+  // Tri : épinglées d'abord (action manuelle), puis chronologique.
+  // Les conversations avec tâche gardent leur code couleur pour être repérables,
+  // mais ne sont plus forcées en tête (l'épingle sert à ça).
   function sortConversations(a, b) {
     const pa = pinnedSet.has(a.bookId) ? 0 : 1
     const pb = pinnedSet.has(b.bookId) ? 0 : 1
     if (pa !== pb) return pa - pb
-    const fa = convFlag(a.bookId), fb = convFlag(b.bookId)
-    const ra = fa ? FLAG_RANK[fa.type] : 9
-    const rb = fb ? FLAG_RANK[fb.type] : 9
-    if (ra !== rb) return ra - rb
     return new Date(b.lastTime || 0) - new Date(a.lastTime || 0)
   }
 
@@ -502,14 +500,21 @@
           <button class="btn" data-done="${task.id}">✓ Traité</button>
         </div>`
     } else if (subTasks.length) {
+      const noteLabel = isInfo ? 'Information à compléter' : 'Action à mener'
       body = subTasks.map((st, i) => `
         <div class="task-bubble-q">${i+1}. ${escHtml(st.question || st.summary || '')}</div>
-        <textarea class="task-reply" id="reply-${task.id}-${i}" placeholder="${isInfo ? 'Réponse à ajouter dans la FAQ…' : 'Votre réponse…'}">${escHtml(st.suggested_reply || '')}</textarea>
+        ${st.suggested_reply ? `<div style="font-size:12px;color:var(--text2);background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 11px;line-height:1.5;white-space:pre-wrap">${escHtml(st.suggested_reply)}</div>` : ''}
+        ${isInfo ? `
+        <div class="task-bubble-q" style="margin-top:9px">Réponse à enregistrer dans la base de connaissance :</div>
+        <textarea class="task-reply" id="reply-${task.id}-${i}" placeholder="Réponse à ajouter dans la FAQ…"></textarea>
         <div class="task-bubble-actions">
-          ${isInfo ? `<button class="btn btn-faq" data-faq="${task.id}" data-idx="${i}" data-prop="${escAttr(task.property_id)}" data-question="${escAttr(st.question || st.summary || '')}">📚 FAQ</button>` : ''}
-          <button class="btn btn-primary" data-sendtask="${task.id}" data-idx="${i}" data-book="${escAttr(task.book_id)}">✉️ Envoyer</button>
-          ${i === subTasks.length - 1 ? `<button class="btn" data-ignore="${task.id}">🚫 Ignorer</button><button class="btn" data-done="${task.id}">✓ Traité</button>` : ''}
-        </div>`).join('<hr style="border:none;border-top:0.5px solid var(--border);margin:10px 0">')
+          <button class="btn btn-faq" data-faq="${task.id}" data-idx="${i}" data-prop="${escAttr(task.property_id)}" data-question="${escAttr(st.question || st.summary || '')}">📚 Enregistrer dans la FAQ</button>
+        </div>` : ''}`).join('<hr style="border:none;border-top:0.5px solid var(--border);margin:10px 0">') + `
+        <div class="task-bubble-actions" style="margin-top:11px">
+          <button class="btn btn-validate" data-done="${task.id}">✓ Traité</button>
+          <button class="btn" data-ignore="${task.id}">🚫 Ignorer</button>
+          <button class="btn btn-improve" data-reply="${escAttr(task.book_id)}">↩ Répondre au voyageur</button>
+        </div>`
     } else {
       body = `
         <div class="task-bubble-q">${escHtml(task.summary || task.guest_message || '')}</div>
@@ -590,6 +595,12 @@
 
     if (ignoreBtn) await setTaskStatus(ignoreBtn.dataset.ignore, 'ignored')
     if (doneBtn)   await setTaskStatus(doneBtn.dataset.done, 'done')
+
+    const replyBtn = e.target.closest('[data-reply]')
+    if (replyBtn) {
+      const ta = document.getElementById('compose-text')
+      if (ta) { ta.focus(); ta.scrollIntoView({ block: 'center' }) }
+    }
   })
 
   async function setTaskStatus(id, status) {
