@@ -208,8 +208,10 @@
       const prefs=loadPrefs()
       if(prefs && typeof prefs.orphanAutoFix==='boolean') orphanAutoFix=prefs.orphanAutoFix
       if(BIENS.length){
-        // bien : pref si encore present, sinon premier
-        if(prefs && prefs.bienId && BIENS.find(b=>b.id===prefs.bienId)) currentBien=BIENS.find(b=>b.id===prefs.bienId)
+        // bien : ?bien= dans l'URL (clic Calendrier) prioritaire, sinon pref, sinon premier
+        const urlBien = new URLSearchParams(window.location.search).get('bien')
+        if(urlBien && BIENS.find(b=>b.id===urlBien)) currentBien=BIENS.find(b=>b.id===urlBien)
+        else if(prefs && prefs.bienId && BIENS.find(b=>b.id===prefs.bienId)) currentBien=BIENS.find(b=>b.id===prefs.bienId)
         else currentBien=BIENS[0]
         sel.value=currentBien.id
         // vue

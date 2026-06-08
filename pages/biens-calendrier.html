@@ -175,6 +175,14 @@
     import { requireAuth }   from '/components/auth-guard.js'
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
+
+    // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
+    if (window.innerWidth <= 768) {
+      const m = window.location.pathname.match(/\/biens\/([^/]+)\/calendrier/)
+      const bid = m ? m[1] : ''
+      window.location.replace('/m/calendrier' + (bid ? '?bien=' + encodeURIComponent(bid) : ''))
+    }
+
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifié')
     await renderSidebar('biens-calendrier')
