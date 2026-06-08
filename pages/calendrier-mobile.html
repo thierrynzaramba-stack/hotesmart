@@ -14,7 +14,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; -webkit-user-select: none; user-select: none; padding-bottom: env(safe-area-inset-bottom); }
     .topbar { background: #fff; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; border-bottom: 1px solid #e5e5e7; position: sticky; top: 0; z-index: 20; }
-    .topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-left: 44px; }
     .back { color: #007aff; text-decoration: none; font-size: 15px; white-space: nowrap; }
     .undo-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 9px; width: 40px; height: 40px; font-size: 17px; cursor: pointer; }
     .undo-btn:disabled { opacity: 0.35; }
@@ -103,9 +103,9 @@
   </style>
 </head>
 <body>
+  <div class="sidebar" id="sidebar"></div>
   <div class="topbar">
     <div class="topbar-row">
-      <a href="/biens" class="back">&larr; Biens</a>
       <span style="font-weight:700;font-size:16px">Tarifs</span>
       <button class="undo-btn" id="btn-undo" disabled>&#8634;</button>
     </div>
@@ -148,10 +148,12 @@
   <div class="toast" id="toast"></div>
 
   <script type="module">
-    import { getUser } from '/shared/supabase.js'
+    import { requireAuth } from '/components/auth-guard.js'
+    import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
-    const user = await getUser()
-    if (!user) { window.location.href = '/pages/login.html' }
+    const session = await requireAuth()
+    if (!session) throw new Error('Non authentifie')
+    await renderSidebar('biens-calendrier')
     if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('/sw.js') } catch(e){} }
 
     const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
