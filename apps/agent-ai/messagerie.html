@@ -10,12 +10,20 @@
 
     /* Liste conversations */
     .conv-list { border-right:0.5px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
-    .conv-list-header { padding:14px 16px; border-bottom:0.5px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:8px; }
+    .conv-list-header { padding:14px 16px; border-bottom:0.5px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .conv-list-header select { flex:1; font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; }
+    .sim-toggle { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text2); cursor:pointer; user-select:none; white-space:nowrap; }
+    .sim-toggle input { cursor:pointer; }
     .conv-items { flex:1; overflow-y:auto; }
-    .conv-item { padding:12px 16px; border-bottom:0.5px solid var(--border); cursor:pointer; transition:background 0.1s; }
+    .conv-item { padding:12px 16px; border-bottom:0.5px solid var(--border); cursor:pointer; transition:background 0.1s; border-left:3px solid transparent; }
     .conv-item:hover { background:var(--bg2); }
-    .conv-item.active { background:#E1F5EE; border-left:3px solid var(--green); }
+    .conv-item.active { background:#E1F5EE; border-left-color:var(--green); }
+    /* Code couleur priorité tâche */
+    .conv-item.flag-intervention { border-left-color:#E24B4A; }
+    .conv-item.flag-info_unknown { border-left-color:#F59E0B; }
+    .conv-item.flag-pending_validation { border-left-color:#378ADD; }
+    .conv-item.sim-conv { background:#EEEDFE; border-left-color:#6E63D8; }
+    .conv-item.sim-conv.active { background:#e0ddfb; }
     .conv-item-name { font-size:13px; font-weight:500; margin-bottom:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
     .conv-item-meta { font-size:11px; color:var(--text2); line-height:1.5; }
     .conv-item-preview { font-size:11px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:3px; }
@@ -24,13 +32,23 @@
     .platform-booking { background:#003B9522; color:#003B95; }
     .platform-direct  { background:#E1F5EE; color:var(--green); }
     .platform-ota     { background:#EEEDFE; color:#3C3489; }
+    .flag-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .flag-dot.intervention { background:#E24B4A; }
+    .flag-dot.info_unknown { background:#F59E0B; }
+    .flag-dot.pending_validation { background:#378ADD; }
+    .pin-mark { font-size:11px; flex-shrink:0; }
     .unread-dot { width:7px; height:7px; border-radius:50%; background:var(--green); flex-shrink:0; }
 
     /* Vue conversation */
     .conv-view { display:flex; flex-direction:column; overflow:hidden; }
-    .conv-view-header { padding:14px 18px; border-bottom:0.5px solid var(--border); background:var(--bg2); }
+    .conv-view-header { padding:14px 18px; border-bottom:0.5px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:8px; }
+    .conv-view-header-content { flex:1; min-width:0; }
     .conv-view-title { font-size:14px; font-weight:500; }
     .conv-view-meta { font-size:11px; color:var(--text2); margin-top:2px; }
+    .conv-view-actions { display:flex; gap:6px; flex-shrink:0; }
+    .btn-mini { font-size:11px; padding:4px 9px; border-radius:var(--radius); border:0.5px solid var(--border); background:var(--bg); color:var(--text2); cursor:pointer; font-family:inherit; white-space:nowrap; }
+    .btn-mini:hover { border-color:var(--green); color:var(--green); }
+    .btn-mini.active { background:#FFF3CD; color:#856404; border-color:#F5C775; }
     .conv-messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
 
     /* Bulles */
@@ -49,10 +67,29 @@
     .msg-bubble.system { background:var(--bg2); color:var(--text2); border-radius:10px; font-size:11px; max-width:90%; text-align:center; font-style:italic; }
     .msg-time { font-size:10px; color:var(--text2); margin-top:3px; }
 
+    /* Bulle d'action (tâche IA à traiter dans le fil) */
+    .task-bubble { width:100%; border-radius:var(--radius-lg); border:0.5px solid var(--border); overflow:hidden; margin:4px 0; }
+    .task-bubble.intervention { border-left:3px solid #E24B4A; }
+    .task-bubble.info_unknown { border-left:3px solid #F59E0B; }
+    .task-bubble.pending_validation { border-left:3px solid #378ADD; }
+    .task-bubble-head { padding:9px 13px; background:var(--bg2); font-size:12px; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .task-bubble-body { padding:11px 13px; }
+    .task-bubble-q { font-size:12px; font-weight:500; margin-bottom:7px; }
+    .task-reply { width:100%; min-height:70px; resize:vertical; font-size:13px; line-height:1.6; font-family:inherit; border:0.5px solid var(--border); border-radius:var(--radius); padding:9px 11px; background:var(--bg); color:var(--text); }
+    .task-reply:focus { outline:none; border-color:var(--green); }
+    .task-bubble-actions { display:flex; gap:7px; margin-top:9px; flex-wrap:wrap; }
+    .badge { padding:2px 8px; border-radius:20px; font-size:10px; font-weight:500; }
+    .badge-intervention { background:#fdecea; color:#E24B4A; }
+    .badge-info { background:#FFF3CD; color:#856404; }
+    .badge-validation { background:#E6F1FB; color:#0C447C; }
+    .badge-property { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
+    .btn-faq { background:#EEEDFE; color:#3C3489; border-color:#c5c3f5; }
+    .btn-faq:hover { background:#d8d6fc; }
+    .btn-validate { background:#E1F5EE; color:#085041; border-color:#9FE1CB; }
+    .btn-validate:hover { background:#9FE1CB; }
+
     /* Zone rédaction */
     .conv-compose { border-top:0.5px solid var(--border); padding:14px 16px; background:var(--bg); }
-    .compose-hint { font-size:11px; color:var(--text2); margin-bottom:8px; line-height:1.6; }
-    .compose-hint code { background:var(--bg2); border:0.5px solid var(--border); padding:1px 5px; border-radius:4px; font-size:11px; color:#3C3489; }
     .compose-textarea { width:100%; min-height:70px; max-height:160px; resize:vertical; font-size:13px; line-height:1.6; font-family:inherit; border:0.5px solid var(--border); border-radius:var(--radius); padding:10px 12px; background:var(--bg2); color:var(--text); }
     .compose-textarea:focus { outline:none; border-color:var(--green); background:var(--bg); }
     .compose-actions { display:flex; gap:8px; margin-top:8px; align-items:center; }
@@ -60,52 +97,24 @@
     .btn-improve:hover { background:#d8d6fc; }
     .compose-status { font-size:11px; color:var(--text2); flex:1; }
 
-    /* Instruction AI mise en évidence dans le textarea */
-    .instruction-badge { display:inline-block; background:#EEEDFE; color:#3C3489; border:0.5px solid #AFA9EC; border-radius:4px; font-size:10px; padding:1px 6px; margin-left:4px; }
-
     .empty-conv { flex:1; display:flex; align-items:center; justify-content:center; color:var(--text2); font-size:13px; flex-direction:column; gap:8px; }
     .empty-conv .icon { font-size:40px; }
     .loading { text-align:center; padding:20px; color:var(--text2); font-size:13px; }
-
-    /* Bouton retour mobile (cache en desktop) */
     .btn-back-mobile { display:none; background:none; border:none; font-size:22px; cursor:pointer; color:var(--text); padding:0 10px 0 0; line-height:1; }
 
-    /* ========== MOBILE : pattern WhatsApp (liste OU conversation) ========== */
     @media (max-width: 768px) {
-      .msg-layout {
-        grid-template-columns: 1fr;
-        height: calc(100vh - 80px);
-        border: none;
-        border-radius: 0;
-      }
-
-      .conv-list {
-        border-right: none;
-      }
-
-      /* Par defaut en mobile : liste visible, vue conversation cachee */
-      .conv-view { display: none; }
-
-      /* Quand une conversation est ouverte : inverse */
-      .msg-layout.mobile-conv-open .conv-list { display: none; }
-      .msg-layout.mobile-conv-open .conv-view { display: flex; }
-
-      /* Bouton retour visible uniquement en mobile */
-      .btn-back-mobile { display: inline-block; }
-
-      /* Header de la vue conversation : fleche retour + titre */
-      .conv-view-header { display: flex; align-items: center; gap: 8px; }
-      .conv-view-header-content { flex: 1; min-width: 0; }
-
-      /* Tailles adaptees au pouce */
-      .conv-item { padding: 14px 16px; }
-      .conv-item-name { font-size: 14px; }
-      .conv-item-meta { font-size: 12px; }
-      .conv-item-preview { font-size: 12px; }
-      .msg-bubble { font-size: 14px; max-width: 85%; }
-      .compose-textarea { font-size: 16px; min-height: 80px; } /* 16px = pas de zoom iOS */
-      .compose-actions { flex-wrap: wrap; }
-      .compose-actions .btn { flex: 1; min-width: 120px; }
+      .msg-layout { grid-template-columns:1fr; height:calc(100vh - 80px); border:none; border-radius:0; }
+      .conv-list { border-right:none; }
+      .conv-view { display:none; }
+      .msg-layout.mobile-conv-open .conv-list { display:none; }
+      .msg-layout.mobile-conv-open .conv-view { display:flex; }
+      .btn-back-mobile { display:inline-block; }
+      .conv-item { padding:14px 16px; }
+      .conv-item-name { font-size:14px; }
+      .msg-bubble { font-size:14px; max-width:85%; }
+      .compose-textarea { font-size:16px; min-height:80px; }
+      .compose-actions { flex-wrap:wrap; }
+      .compose-actions .btn { flex:1; min-width:120px; }
     }
   </style>
 </head>
@@ -122,25 +131,25 @@
     </div>
     <div class="content" style="padding:0;height:calc(100vh - 120px)">
       <div class="msg-layout">
-
         <div class="conv-list">
           <div class="conv-list-header">
             <select id="prop-select" onchange="loadConversations()">
               <option value="">Tous les biens</option>
             </select>
+            <label class="sim-toggle" title="Afficher une conversation de test où vous écrivez en voyageur et l'IA répond">
+              <input type="checkbox" id="sim-toggle-input"> 🧪 Simulateur
+            </label>
           </div>
           <div class="conv-items" id="conv-items">
             <div class="loading">Chargement…</div>
           </div>
         </div>
-
         <div class="conv-view" id="conv-view">
           <div class="empty-conv">
             <div class="icon">💬</div>
             <p>Sélectionnez une conversation</p>
           </div>
         </div>
-
       </div>
     </div>
   </div>
@@ -165,8 +174,9 @@
     body: JSON.stringify({ action: 'getProperties' })
   })
   const data = await res.json()
+  window._props = data.properties || []
   const select = document.getElementById('prop-select')
-  ;(data.properties || []).forEach(p => {
+  window._props.forEach(p => {
     const opt = document.createElement('option')
     opt.value = p.id; opt.textContent = p.name
     select.appendChild(opt)
@@ -177,7 +187,49 @@
 
 <script>
   let conversations = []
+  let allTasks = []
+  let pinnedSet = new Set()
   let currentConvId = null
+  let simEnabled = false
+  let simMessages = []   // tchat inversé : { type:'guest'|'ai'|'auto', content, label, time }
+  let simPropId = ''
+
+  const SIM_ID = '__SIM__'
+
+  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+  function escAttr(s) { return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
+  function formatDateShort(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) }
+  function getPropName(propId) {
+    const p = (window._props || []).find(p => String(p.id) === String(propId))
+    return p?.name || propId || '—'
+  }
+
+  function normalizeText(s) {
+    return (s || '').replace(/—\s*propulsé par GuestFlow\s*$/i, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  }
+
+  function detectPlatform(msg) {
+    const channel = (msg.channel || '').toLowerCase()
+    const apiSource = (msg.apiSource || '').toLowerCase()
+    if (channel === 'airbnb'  || apiSource === 'airbnb')        return 'airbnb'
+    if (channel === 'booking' || apiSource.includes('booking')) return 'booking'
+    if (channel === 'vrbo'    || apiSource.includes('vrbo'))     return 'vrbo'
+    if (channel === 'expedia' || apiSource.includes('expedia'))  return 'expedia'
+    if (channel || apiSource)                                    return 'ota'
+    return 'direct'
+  }
+
+  // Priorité de mise en avant d'une conversation selon ses tâches en attente
+  function convFlag(bookId) {
+    const tasks = allTasks.filter(t => String(t.book_id) === String(bookId)
+      && ['pending','pending_validation'].includes(t.status))
+    if (!tasks.length) return null
+    if (tasks.some(t => t.task_type === 'intervention')) return { type:'intervention', label:'🚨 Intervention requise' }
+    if (tasks.some(t => t.task_type === 'info_unknown')) return { type:'info_unknown', label:'❓ Info à compléter' }
+    if (tasks.some(t => t.status === 'pending_validation')) return { type:'pending_validation', label:'✉️ Réponse à valider' }
+    return { type:'pending_validation', label:'✉️ À traiter' }
+  }
+  const FLAG_RANK = { intervention:0, info_unknown:1, pending_validation:2 }
 
   window.loadConversations = async () => {
     const propId = document.getElementById('prop-select').value
@@ -187,8 +239,7 @@
     try {
       const props = propId ? [propId] : ['169567', '209413']
 
-      // Fetch conversations Beds24 + réponses AI Supabase en parallèle
-      const [beds24Results, convRes] = await Promise.all([
+      const [beds24Results, convRes, taskRes, pinRes] = await Promise.all([
         Promise.all(props.map(pid =>
           fetch('/api/beds24', {
             method: 'POST',
@@ -199,121 +250,142 @@
         window._supabase.from('conversations').select('*')
           .eq('user_id', window._session.user.id)
           .not('book_id', 'like', 'SIM_%')
-          .order('created_at', { ascending: false })
-          .limit(200)
+          .order('created_at', { ascending: false }).limit(200),
+        window._supabase.from('agent_tasks').select('*')
+          .eq('user_id', window._session.user.id)
+          .order('created_at', { ascending: false }).limit(200),
+        window._supabase.from('conversation_flags').select('book_id, pinned')
+          .eq('user_id', window._session.user.id).eq('pinned', true)
       ])
 
       const beds24Convs = beds24Results.flat()
       const supaConvs   = convRes.data || []
+      allTasks  = taskRes.data || []
+      pinnedSet = new Set((pinRes.data || []).map(p => String(p.book_id)))
 
-      // Indexer les réponses AI par book_id
       const aiByBooking = {}
       supaConvs.forEach(c => {
         const bookId = String(c.book_id)
-        if (!aiByBooking[bookId]) aiByBooking[bookId] = []
-        aiByBooking[bookId].push(c)
+        ;(aiByBooking[bookId] = aiByBooking[bookId] || []).push(c)
       })
 
-      // Construire la map finale
       const convMap = {}
-
       beds24Convs.forEach(conv => {
         const bookId = String(conv.bookId)
         convMap[bookId] = {
           bookId,
           propertyId: String(conv.propertyId || conv.propId || conv._pid || ''),
           guestName:  conv.guestFirstName ? `${conv.guestFirstName} ${conv.guestName || ''}`.trim() : 'Voyageur',
-          firstNight: conv.firstNight,
-          lastNight:  conv.lastNight,
-          platform:   detectPlatform(conv),
-          status:     conv.status,
-          thread:     conv.thread || [],
-          aiReplies:  aiByBooking[bookId] || [],
-          hasMessages: conv.hasMessages,
-          waitingReply: conv.waitingReply,
-          lastTime:   conv.lastTime || conv.firstNight
+          firstNight: conv.firstNight, lastNight: conv.lastNight,
+          platform:   detectPlatform(conv), status: conv.status,
+          thread:     conv.thread || [], aiReplies: aiByBooking[bookId] || [],
+          hasMessages: conv.hasMessages, lastTime: conv.lastTime || conv.firstNight
         }
       })
-
-      // Ajouter les convs Supabase sans booking Beds24 (ex: anciennes)
       supaConvs.forEach(c => {
         const bookId = String(c.book_id)
         if (!convMap[bookId]) {
           convMap[bookId] = {
-            bookId,
-            propertyId: c.property_id ? String(c.property_id) : '',
-            guestName:  c.guest_name || 'Voyageur',
-            firstNight: null, lastNight: null,
-            platform:   'direct',
-            status:     '',
-            thread:     [],
-            aiReplies:  [c],
-            hasMessages: false,
-            waitingReply: false,
-            lastTime:   c.created_at
+            bookId, propertyId: c.property_id ? String(c.property_id) : '',
+            guestName: c.guest_name || 'Voyageur',
+            firstNight: null, lastNight: null, platform: 'direct', status: '',
+            thread: [], aiReplies: [c], hasMessages: false, lastTime: c.created_at
+          }
+        }
+      })
+
+      // Inclure les conversations qui n'ont QUE des tâches (sans message stocké)
+      allTasks.forEach(t => {
+        const bookId = String(t.book_id)
+        if (bookId && bookId !== 'null' && !convMap[bookId]) {
+          convMap[bookId] = {
+            bookId, propertyId: t.property_id ? String(t.property_id) : '',
+            guestName: t.guest_name || 'Voyageur',
+            firstNight: t.arrival || null, lastNight: t.departure || null,
+            platform: 'direct', status: '', thread: t.source_thread || [],
+            aiReplies: [], hasMessages: (t.source_thread || []).length > 0, lastTime: t.created_at
           }
         }
       })
 
       conversations = Object.values(convMap)
-        .filter(c => c.hasMessages || c.aiReplies.length > 0)
-        .sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
+        .filter(c => c.hasMessages || c.aiReplies.length > 0 || convFlag(c.bookId))
+        .sort(sortConversations)
 
-      document.getElementById('topStatus').textContent = `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}`
+      const pendingTasks = allTasks.filter(t => ['pending','pending_validation'].includes(t.status)).length
+      document.getElementById('topStatus').textContent =
+        `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}` +
+        (pendingTasks ? ` · ${pendingTasks} à traiter` : '')
       renderConvList()
-
     } catch (err) {
       document.getElementById('conv-items').innerHTML = `<div class="loading">❌ ${err.message}</div>`
     }
   }
 
-  function detectPlatform(msg) {
-    // channel est le champ le plus fiable retourné par Beds24
-    const channel   = (msg.channel   || '').toLowerCase()
-    const apiSource = (msg.apiSource || '').toLowerCase()
-
-    if (channel === 'airbnb'  || apiSource === 'airbnb')       return 'airbnb'
-    if (channel === 'booking' || apiSource.includes('booking')) return 'booking'
-    if (channel === 'vrbo'    || apiSource.includes('vrbo'))    return 'vrbo'
-    if (channel === 'expedia' || apiSource.includes('expedia')) return 'expedia'
-    if (channel || apiSource)                                   return 'ota'
-    return 'direct'
+  // Tri : épinglées d'abord, puis tâches par priorité, puis chronologique
+  function sortConversations(a, b) {
+    const pa = pinnedSet.has(a.bookId) ? 0 : 1
+    const pb = pinnedSet.has(b.bookId) ? 0 : 1
+    if (pa !== pb) return pa - pb
+    const fa = convFlag(a.bookId), fb = convFlag(b.bookId)
+    const ra = fa ? FLAG_RANK[fa.type] : 9
+    const rb = fb ? FLAG_RANK[fb.type] : 9
+    if (ra !== rb) return ra - rb
+    return new Date(b.lastTime || 0) - new Date(a.lastTime || 0)
   }
 
   function renderConvList() {
     const items = document.getElementById('conv-items')
-    if (!conversations.length) {
+    let html = ''
+
+    // Conversation Simulateur en tête (si activé)
+    if (simEnabled) {
+      const active = currentConvId === SIM_ID ? 'active' : ''
+      html += `
+        <div class="conv-item sim-conv ${active}" onclick="selectConv('${SIM_ID}')">
+          <div class="conv-item-name">🧪 Simulateur <span class="platform-badge platform-ota">Test</span></div>
+          <div class="conv-item-preview">Vous écrivez en voyageur, l'IA répond</div>
+        </div>`
+    }
+
+    if (!conversations.length && !simEnabled) {
       items.innerHTML = '<div class="loading">Aucune conversation récente</div>'
       return
     }
-    items.innerHTML = conversations.map(conv => {
-      const isActive  = conv.bookId === currentConvId
-      const lastMsg   = conv.thread[conv.thread.length - 1]
-      const lastReply = conv.aiReplies[0]
-      const preview   = lastMsg?.message?.substring(0, 55) || lastReply?.agent_reply?.substring(0, 55) || '—'
+
+    html += conversations.map(conv => {
+      const isActive = conv.bookId === currentConvId
+      const lastMsg  = conv.thread[conv.thread.length - 1]
+      const preview  = lastMsg?.message?.substring(0, 55) || conv.aiReplies[0]?.agent_reply?.substring(0, 55) || '—'
       const hasUnread = lastMsg?.source === 'guest'
-      const platform  = conv.platform
-      const platformLabel = platform === 'airbnb' ? 'Airbnb' : platform === 'booking' ? 'Booking' : platform === 'vrbo' ? 'Vrbo' : platform === 'expedia' ? 'Expedia' : platform === 'ota' ? 'OTA' : 'Direct'
+      const platformLabel = { airbnb:'Airbnb', booking:'Booking', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
       const date = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : ''
+      const flag = convFlag(conv.bookId)
+      const isPinned = pinnedSet.has(conv.bookId)
+      const flagClass = flag ? `flag-${flag.type}` : ''
+      const titleAttr = flag ? ` title="${escAttr(flag.label)}"` : ''
 
       return `
-        <div class="conv-item ${isActive ? 'active' : ''}" onclick="selectConv('${conv.bookId}')">
+        <div class="conv-item ${isActive ? 'active' : ''} ${flagClass}"${titleAttr} onclick="selectConv('${conv.bookId}')">
           <div class="conv-item-name">
-            ${hasUnread ? '<span class="unread-dot"></span>' : ''}
+            ${isPinned ? '<span class="pin-mark">📌</span>' : ''}
+            ${flag ? `<span class="flag-dot ${flag.type}"></span>` : (hasUnread ? '<span class="unread-dot"></span>' : '')}
             ${escHtml(conv.guestName)}
-            <span class="platform-badge platform-${platform}">${platformLabel}</span>
+            <span class="platform-badge platform-${conv.platform}">${platformLabel}</span>
           </div>
           ${date ? `<div class="conv-item-meta">${date}</div>` : ''}
           <div class="conv-item-preview">${escHtml(preview)}</div>
         </div>`
     }).join('')
+
+    items.innerHTML = html
   }
 
   window.selectConv = (bookId) => {
     currentConvId = bookId
     renderConvList()
-    renderConvView(bookId)
-    // Mode mobile : bascule vers la vue conversation (pattern WhatsApp)
+    if (bookId === SIM_ID) renderSimView()
+    else renderConvView(bookId)
     document.querySelector('.msg-layout')?.classList.add('mobile-conv-open')
   }
 
@@ -323,123 +395,9 @@
     renderConvList()
   }
 
-  // ── Normalisation pour la déduplication d'affichage ────────────────────────
-  // Le même message hôte existe dans DEUX sources : la copie locale (table
-  // conversations, insérée avant signature) et le message Beds24 réellement
-  // parti (avec signature éventuelle). On compare après retrait de la
-  // signature et normalisation des espaces.
-  function normalizeText(s) {
-    return (s || '')
-      .replace(/—\s*propulsé par GuestFlow\s*$/i, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase()
-  }
-
-  function renderConvView(bookId) {
-    const conv = conversations.find(c => c.bookId === bookId)
-    if (!conv) return
-
-    // Fusionner et trier tous les messages
-    const allMessages = []
-    const hostMsgs = []
-
-    conv.thread.forEach(m => {
-      const msg = { type: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }
-      if (msg.type === 'host') {
-        msg._norm = normalizeText(m.message)
-        hostMsgs.push(msg)
-      }
-      allMessages.push(msg)
-    })
-
-    // Déduplication 1-pour-1 : chaque copie locale (aiReplies) est absorbée par
-    // LA bulle Beds24 correspondante (même texte normalisé, horodatage le plus
-    // proche, < 6h). La bulle conservée est celle de Beds24 (contenu réellement
-    // reçu par le voyageur) qui hérite du label d'origine (auto / IA).
-    // Si deux envois réels ont eu lieu (ex: doublon manuel + auto), les DEUX
-    // bulles Beds24 restent visibles — fidèle à la réalité.
-    conv.aiReplies.forEach(c => {
-      const isAuto   = c.guest_message?.startsWith('[AUTO:')
-      const isManual = c.guest_message === '[Envoi manuel hôte]'
-      const norm = normalizeText(c.agent_reply)
-
-      let best = null, bestDt = Infinity
-      hostMsgs.forEach(h => {
-        if (h._merged || h._norm !== norm) return
-        const dt = Math.abs(new Date(h.time) - new Date(c.created_at))
-        if (dt < bestDt) { best = h; bestDt = dt }
-      })
-
-      if (best && bestDt < 6 * 3600 * 1000) {
-        best._merged = true
-        if (isAuto) {
-          best.type = 'auto'
-          best.label = c.guest_message
-        } else if (!isManual) {
-          best.type = 'ai'
-        }
-        return // pas de seconde bulle
-      }
-
-      allMessages.push({
-        type:    isAuto ? 'auto' : 'ai',
-        content: c.agent_reply,
-        label:   isAuto ? c.guest_message : null,
-        time:    c.created_at
-      })
-    })
-
-    allMessages.sort((a, b) => new Date(a.time) - new Date(b.time))
-
-    const platformLabel = conv.platform === 'airbnb' ? 'Airbnb' : conv.platform === 'booking' ? 'Booking.com' : conv.platform === 'vrbo' ? 'Vrbo' : conv.platform === 'expedia' ? 'Expedia' : conv.platform === 'ota' ? 'OTA' : 'Direct'
-
-    document.getElementById('conv-view').innerHTML = `
-      <div class="conv-view-header">
-        <button class="btn-back-mobile" onclick="backToList()" aria-label="Retour">←</button>
-        <div class="conv-view-header-content">
-        <div class="conv-view-title">👤 ${escHtml(conv.guestName)}</div>
-        <div class="conv-view-meta">
-          ${platformLabel} · #${bookId}${conv.firstNight ? ` · ${formatDateShort(conv.firstNight)} → ${formatDateShort(conv.lastNight)}` : ''}
-        </div>
-        </div>
-      </div>
-
-      <div class="conv-messages" id="conv-messages">
-        ${allMessages.length
-          ? allMessages.map(m => renderBubble(m)).join('')
-          : '<div class="empty-conv"><p>Aucun message</p></div>'}
-      </div>
-
-      <div class="conv-compose">
-        <textarea class="compose-textarea" id="compose-text"
-          placeholder="Écrivez votre message… ou utilisez ((consigne)) pour guider l'IA"></textarea>
-        <div class="compose-actions">
-          <button class="btn btn-improve" onclick="improveMessage('${bookId}')">✨ Améliorer</button>
-          <button class="btn btn-primary" onclick="sendMessage('${bookId}')">✉️ Envoyer</button>
-          <span style="font-size:10px;color:var(--text2);line-height:1.5">
-            Consigne IA : <code style="background:var(--bg2);border:0.5px solid var(--border);padding:1px 4px;border-radius:3px;color:#3C3489">((votre instruction))</code>
-          </span>
-          <span class="compose-status" id="compose-status"></span>
-        </div>
-      </div>
-    `
-
-    // Scroll bas
-    const mc = document.getElementById('conv-messages')
-    if (mc) mc.scrollTop = mc.scrollHeight
-  }
-
   function renderBubble(m) {
     const time = m.time ? new Date(m.time).toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : ''
-    const sourceLabel = {
-      guest:  '👤 Voyageur',
-      host:   '🏠 Hôte',
-      ai:     '🤖 GuestFlow AI',
-      auto:   '⚙️ Message automatique',
-      system: '⚙️ Système'
-    }[m.type] || m.type
-
+    const sourceLabel = { guest:'👤 Voyageur', host:'🏠 Hôte', ai:'🤖 GuestFlow AI', auto:'⚙️ Message automatique', system:'⚙️ Système' }[m.type] || m.type
     return `
       <div class="msg-bubble-wrap ${m.type}">
         <div class="msg-source">${sourceLabel}${m.label ? ` <span style="opacity:0.6;font-style:italic">${escHtml(m.label)}</span>` : ''}</div>
@@ -448,128 +406,370 @@
       </div>`
   }
 
-  // ── Améliorer avec historique + consignes ((...)) ─────────────────────────
-  window.improveMessage = async (bookId) => {
-    const textarea = document.getElementById('compose-text')
-    const rawText  = textarea?.value?.trim()
-    if (!rawText) return setStatus('Écrivez d\'abord un message')
+  // ── Rendu d'une conversation voyageur (fil + tâches en bulles d'action) ────
+  function renderConvView(bookId) {
+    const conv = conversations.find(c => c.bookId === bookId)
+    if (!conv) return
 
-    // Extraire les consignes ((...))
-    const instructions = []
-    const cleanText = rawText.replace(/\(\(([^)]+)\)\)/g, (_, inst) => {
-      instructions.push(inst.trim())
-      return ''
-    }).trim()
-
-    const btn = document.querySelector('.btn-improve')
-    btn.disabled = true; btn.textContent = '⏳…'
-    setStatus('Amélioration en cours…')
-
-    try {
-      const conv = conversations.find(c => c.bookId === bookId)
-      const guestName = conv?.guestName || 'le voyageur'
-
-      // Construire l'historique récent (5 derniers messages)
-      const allMessages = []
-      conv?.thread?.forEach(m => allMessages.push({ role: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }))
-      conv?.aiReplies?.forEach(c => allMessages.push({ role: 'host', content: c.agent_reply, time: c.created_at }))
-      allMessages.sort((a, b) => new Date(a.time) - new Date(b.time))
-      const recentHistory = allMessages.slice(-5).map(m => `${m.role === 'guest' ? '👤 Voyageur' : '🏠 Hôte'}: "${m.content}"`).join('\n')
-
-      // Construire le prompt
-      let systemPrompt = `Tu es un assistant de conciergerie LCD. Améliore ce message pour qu'il soit chaleureux, professionnel et naturel. Adresse-toi à ${guestName}.`
-
-      if (recentHistory) {
-        systemPrompt += `\n\nHistorique récent de la conversation :\n${recentHistory}`
+    const allMessages = []
+    const hostMsgs = []
+    conv.thread.forEach(m => {
+      const msg = { type: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }
+      if (msg.type === 'host') { msg._norm = normalizeText(m.message); hostMsgs.push(msg) }
+      allMessages.push(msg)
+    })
+    conv.aiReplies.forEach(c => {
+      const isAuto = c.guest_message?.startsWith('[AUTO:')
+      const isManual = c.guest_message === '[Envoi manuel hôte]'
+      const norm = normalizeText(c.agent_reply)
+      let best = null, bestDt = Infinity
+      hostMsgs.forEach(h => {
+        if (h._merged || h._norm !== norm) return
+        const dt = Math.abs(new Date(h.time) - new Date(c.created_at))
+        if (dt < bestDt) { best = h; bestDt = dt }
+      })
+      if (best && bestDt < 6 * 3600 * 1000) {
+        best._merged = true
+        if (isAuto) { best.type = 'auto'; best.label = c.guest_message }
+        else if (!isManual) best.type = 'ai'
+        return
       }
+      allMessages.push({ type: isAuto ? 'auto' : 'ai', content: c.agent_reply, label: isAuto ? c.guest_message : null, time: c.created_at })
+    })
+    allMessages.sort((a, b) => new Date(a.time) - new Date(b.time))
 
-      if (instructions.length) {
-        systemPrompt += `\n\nConsignes spécifiques de l'hôte :\n${instructions.map((i, n) => `${n+1}. ${i}`).join('\n')}`
-      }
+    // Tâches en attente de cette conversation → bulles d'action en fin de fil
+    const convTasks = allTasks.filter(t => String(t.book_id) === String(bookId)
+      && ['pending','pending_validation'].includes(t.status))
 
-      systemPrompt += '\n\nRéponds UNIQUEMENT avec le message amélioré, sans commentaire ni explication.'
+    const platformLabel = { airbnb:'Airbnb', booking:'Booking.com', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
+    const isPinned = pinnedSet.has(bookId)
 
-      const res = await fetch('/api/grok', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-        body: JSON.stringify({
-          systemPrompt,
-          messages: [{ role: 'user', content: `Message à améliorer : "${cleanText || rawText}"` }]
-        })
+    document.getElementById('conv-view').innerHTML = `
+      <div class="conv-view-header">
+        <button class="btn-back-mobile" onclick="backToList()" aria-label="Retour">←</button>
+        <div class="conv-view-header-content">
+          <div class="conv-view-title">👤 ${escHtml(conv.guestName)}</div>
+          <div class="conv-view-meta">${platformLabel} · #${bookId}${conv.firstNight ? ` · ${formatDateShort(conv.firstNight)} → ${formatDateShort(conv.lastNight)}` : ''}</div>
+        </div>
+        <div class="conv-view-actions">
+          <button class="btn-mini ${isPinned ? 'active' : ''}" onclick="togglePin('${bookId}')">${isPinned ? '📌 Épinglé' : '📌 Épingler'}</button>
+        </div>
+      </div>
+      <div class="conv-messages" id="conv-messages">
+        ${allMessages.length ? allMessages.map(m => renderBubble(m)).join('') : '<div class="empty-conv"><p>Aucun message</p></div>'}
+        ${convTasks.map(t => renderTaskBubble(t)).join('')}
+      </div>
+      <div class="conv-compose">
+        <textarea class="compose-textarea" id="compose-text" placeholder="Écrivez votre message… ou utilisez ((consigne)) pour guider l'IA"></textarea>
+        <div class="compose-actions">
+          <button class="btn btn-improve" onclick="improveMessage('${bookId}')">✨ Améliorer</button>
+          <button class="btn btn-primary" onclick="sendMessage('${bookId}')">✉️ Envoyer</button>
+          <span class="compose-status" id="compose-status"></span>
+        </div>
+      </div>
+    `
+    const mc = document.getElementById('conv-messages')
+    if (mc) mc.scrollTop = mc.scrollHeight
+  }
+
+  // ── Bulle d'action : une tâche IA à traiter, dans le fil ───────────────────
+  function renderTaskBubble(task) {
+    const isValidation = task.status === 'pending_validation'
+    const isInfo = task.task_type === 'info_unknown'
+    const subTasks = task.sub_tasks || []
+    let head, badge
+    if (isValidation)      { head = '✉️ Réponse générée — à valider'; badge = '<span class="badge badge-validation">À valider</span>' }
+    else if (isInfo)       { head = '❓ Information manquante';        badge = '<span class="badge badge-info">Info</span>' }
+    else                   { head = '🚨 Intervention requise';        badge = '<span class="badge badge-intervention">Intervention</span>' }
+
+    let body = ''
+    if (isValidation) {
+      body = `
+        <textarea class="task-reply" id="val-${task.id}">${escHtml(task.suggested_reply || '')}</textarea>
+        <div class="task-bubble-actions">
+          <button class="btn btn-validate" data-validate="${task.id}" data-book="${escAttr(task.book_id)}">✉️ Valider et envoyer</button>
+          <button class="btn" data-ignore="${task.id}">🚫 Ignorer</button>
+          <button class="btn" data-done="${task.id}">✓ Traité</button>
+        </div>`
+    } else if (subTasks.length) {
+      body = subTasks.map((st, i) => `
+        <div class="task-bubble-q">${i+1}. ${escHtml(st.question || st.summary || '')}</div>
+        <textarea class="task-reply" id="reply-${task.id}-${i}" placeholder="${isInfo ? 'Réponse à ajouter dans la FAQ…' : 'Votre réponse…'}">${escHtml(st.suggested_reply || '')}</textarea>
+        <div class="task-bubble-actions">
+          ${isInfo ? `<button class="btn btn-faq" data-faq="${task.id}" data-idx="${i}" data-prop="${escAttr(task.property_id)}" data-question="${escAttr(st.question || st.summary || '')}">📚 FAQ</button>` : ''}
+          <button class="btn btn-primary" data-sendtask="${task.id}" data-idx="${i}" data-book="${escAttr(task.book_id)}">✉️ Envoyer</button>
+          ${i === subTasks.length - 1 ? `<button class="btn" data-ignore="${task.id}">🚫 Ignorer</button><button class="btn" data-done="${task.id}">✓ Traité</button>` : ''}
+        </div>`).join('<hr style="border:none;border-top:0.5px solid var(--border);margin:10px 0">')
+    } else {
+      body = `
+        <div class="task-bubble-q">${escHtml(task.summary || task.guest_message || '')}</div>
+        <div class="task-bubble-actions">
+          <button class="btn" data-ignore="${task.id}">🚫 Ignorer</button>
+          <button class="btn" data-done="${task.id}">✓ Traité</button>
+        </div>`
+    }
+
+    return `
+      <div class="task-bubble ${isValidation ? 'pending_validation' : task.task_type}" id="task-${task.id}">
+        <div class="task-bubble-head">${head} ${badge} <span class="badge badge-property">${getPropName(task.property_id)}</span></div>
+        <div class="task-bubble-body">${body}</div>
+      </div>`
+  }
+
+  // ── Délégation des actions de tâches (dans la vue conversation) ────────────
+  document.getElementById('conv-view').addEventListener('click', async (e) => {
+    const validateBtn = e.target.closest('[data-validate]')
+    const faqBtn      = e.target.closest('[data-faq]')
+    const sendBtn     = e.target.closest('[data-sendtask]')
+    const ignoreBtn   = e.target.closest('[data-ignore]')
+    const doneBtn     = e.target.closest('[data-done]')
+
+    if (validateBtn) {
+      const taskId = validateBtn.dataset.validate
+      const bookId = validateBtn.dataset.book
+      const reply  = document.getElementById(`val-${taskId}`)?.value?.trim()
+      if (!reply) return alert('La réponse est vide')
+      validateBtn.disabled = true; validateBtn.textContent = '⏳ Envoi…'
+      const res = await fetch('/api/beds24', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
       })
       const data = await res.json()
+      if (data.success) {
+        const task = allTasks.find(t => t.id === taskId)
+        if (task) await window._supabase.from('conversations').insert({
+          user_id: window._session.user.id, property_id: task.property_id, guest_name: task.guest_name,
+          guest_message: task.guest_message, agent_reply: reply, book_id: bookId
+        })
+        await setTaskStatus(taskId, 'done')
+      } else { validateBtn.disabled = false; validateBtn.textContent = '✉️ Valider et envoyer'; alert('Erreur : ' + (data.error || 'Inconnu')) }
+    }
 
-      if (data.reply) {
-        textarea.value = data.reply
-        setStatus(instructions.length ? `✅ Amélioré avec ${instructions.length} consigne${instructions.length > 1 ? 's' : ''}` : '✅ Message amélioré')
+    if (faqBtn) {
+      const taskId = faqBtn.dataset.faq, idx = faqBtn.dataset.idx
+      const propId = faqBtn.dataset.prop, question = faqBtn.dataset.question
+      const reply = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
+      if (!reply) return alert('Entrez une réponse avant la FAQ')
+      faqBtn.disabled = true; faqBtn.textContent = '⏳…'
+      const { error } = await window._supabase.from('knowledge').insert({
+        user_id: window._session.user.id, property_id: String(propId), type: 'faq', key: question, value: reply
+      })
+      if (error) { faqBtn.disabled = false; faqBtn.textContent = '📚 FAQ'; return alert(error.message) }
+      faqBtn.textContent = '✅ FAQ'
+    }
+
+    if (sendBtn) {
+      const taskId = sendBtn.dataset.sendtask, idx = sendBtn.dataset.idx, bookId = sendBtn.dataset.book
+      const reply = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
+      if (!reply) return alert('Entrez une réponse')
+      sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi…'
+      const res = await fetch('/api/beds24', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
+      })
+      const data = await res.json()
+      if (data.success) {
+        const task = allTasks.find(t => t.id === taskId)
+        if (task) await window._supabase.from('conversations').insert({
+          user_id: window._session.user.id, property_id: task.property_id, guest_name: task.guest_name,
+          guest_message: task.guest_message, agent_reply: reply, book_id: bookId
+        })
+        sendBtn.textContent = '✅ Envoyé'
+      } else { sendBtn.disabled = false; sendBtn.textContent = '✉️ Envoyer'; alert('Erreur : ' + (data.error || 'Inconnu')) }
+    }
+
+    if (ignoreBtn) await setTaskStatus(ignoreBtn.dataset.ignore, 'ignored')
+    if (doneBtn)   await setTaskStatus(doneBtn.dataset.done, 'done')
+  })
+
+  async function setTaskStatus(id, status) {
+    await window._supabase.from('agent_tasks').update({ status }).eq('id', id)
+    const t = allTasks.find(t => t.id === id); if (t) t.status = status
+    // Re-trier et rafraîchir (la conversation peut perdre sa couleur / descendre)
+    conversations.sort(sortConversations)
+    renderConvList()
+    if (currentConvId && currentConvId !== SIM_ID) renderConvView(currentConvId)
+  }
+
+  // ── Épingler / dépingler ───────────────────────────────────────────────────
+  window.togglePin = async (bookId) => {
+    const wasPinned = pinnedSet.has(bookId)
+    if (wasPinned) {
+      pinnedSet.delete(bookId)
+      await window._supabase.from('conversation_flags').delete()
+        .eq('user_id', window._session.user.id).eq('book_id', String(bookId))
+    } else {
+      pinnedSet.add(bookId)
+      await window._supabase.from('conversation_flags')
+        .upsert({ user_id: window._session.user.id, book_id: String(bookId), pinned: true },
+                { onConflict: 'user_id,book_id' })
+    }
+    conversations.sort(sortConversations)
+    renderConvList()
+    if (currentConvId === bookId) renderConvView(bookId)
+  }
+
+  // ── Simulateur : conversation de test (tchat inversé) ──────────────────────
+  function renderSimView() {
+    const propOptions = (window._props || []).map(p =>
+      `<option value="${escAttr(p.id)}" ${String(p.id) === String(simPropId) ? 'selected' : ''}>${escHtml(p.name)}</option>`
+    ).join('')
+
+    document.getElementById('conv-view').innerHTML = `
+      <div class="conv-view-header">
+        <button class="btn-back-mobile" onclick="backToList()" aria-label="Retour">←</button>
+        <div class="conv-view-header-content">
+          <div class="conv-view-title">🧪 Simulateur</div>
+          <div class="conv-view-meta">Test : vous écrivez en voyageur, l'IA répond comme l'hôte</div>
+        </div>
+        <div class="conv-view-actions">
+          <select id="sim-prop" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
+            <option value="">Choisir un bien…</option>
+            ${propOptions}
+          </select>
+          <button class="btn-mini" onclick="clearSim()">✕ Effacer</button>
+        </div>
+      </div>
+      <div class="conv-messages" id="sim-messages">
+        ${simMessages.length ? simMessages.map(m => renderBubble(m)).join('')
+          : '<div class="empty-conv"><div class="icon">🧪</div><p>Écrivez un message de voyageur pour tester la réponse de l\'IA</p></div>'}
+      </div>
+      <div class="conv-compose">
+        <textarea class="compose-textarea" id="sim-input" placeholder="Message du voyageur à tester…"></textarea>
+        <div class="compose-actions">
+          <button class="btn btn-primary" onclick="runSim()">▶ Envoyer (simuler)</button>
+          <span class="compose-status" id="sim-status"></span>
+        </div>
+      </div>
+    `
+    document.getElementById('sim-prop').addEventListener('change', (e) => { simPropId = e.target.value })
+    const mc = document.getElementById('sim-messages')
+    if (mc) mc.scrollTop = mc.scrollHeight
+  }
+
+  window.clearSim = () => { simMessages = []; renderSimView() }
+
+  window.runSim = async () => {
+    const input = document.getElementById('sim-input')
+    const message = input?.value?.trim()
+    if (!message) return
+    if (!simPropId) { document.getElementById('sim-status').textContent = '❌ Choisissez un bien'; return }
+
+    simMessages.push({ type: 'guest', content: message, time: new Date().toISOString() })
+    renderSimView()
+    const status = document.getElementById('sim-status')
+    if (status) status.textContent = '⏳ L\'IA réfléchit…'
+
+    try {
+      const res = await fetch('/api/simulate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ message, guestName: 'Voyageur Test', propertyId: simPropId })
+      })
+      const data = await res.json()
+      if (!data.success) {
+        simMessages.push({ type: 'system', content: '❌ ' + (data.error || 'Erreur'), time: new Date().toISOString() })
+        renderSimView(); return
       }
+      const c = data.classification || {}
+      if (c.auto_reply) {
+        simMessages.push({ type: 'ai', content: c.auto_reply, label: `→ ${c.type}`, time: new Date().toISOString() })
+      } else if (c.sub_tasks?.length) {
+        const lines = c.sub_tasks.map((st, i) => `${i+1}. ${st.question || st.summary || ''}`).join('\n')
+        const label = c.type === 'intervention' ? '🚨 Intervention → To-do' : '❓ Info manquante → To-do'
+        simMessages.push({ type: 'auto', content: `${label}\n\n${lines}`, label: 'Aucune réponse auto — créerait une tâche', time: new Date().toISOString() })
+      } else {
+        simMessages.push({ type: 'auto', content: `Classé : ${c.type || 'inconnu'} — aucune réponse générée`, time: new Date().toISOString() })
+      }
+      renderSimView()
     } catch (err) {
-      setStatus('❌ ' + err.message)
-    } finally {
-      btn.disabled = false; btn.textContent = '✨ Améliorer'
+      simMessages.push({ type: 'system', content: '❌ ' + err.message, time: new Date().toISOString() })
+      renderSimView()
     }
   }
 
-  // ── Envoyer ───────────────────────────────────────────────────────────────
+  // ── Toggle simulateur (état mémorisé en base via conversation_flags) ───────
+  const simToggle = document.getElementById('sim-toggle-input')
+  simToggle.addEventListener('change', async () => {
+    simEnabled = simToggle.checked
+    await window._supabase.from('conversation_flags')
+      .upsert({ user_id: window._session.user.id, book_id: '__SIM_ENABLED__', pinned: simEnabled },
+              { onConflict: 'user_id,book_id' })
+    if (!simEnabled && currentConvId === SIM_ID) { currentConvId = null; document.getElementById('conv-view').innerHTML = '<div class="empty-conv"><div class="icon">💬</div><p>Sélectionnez une conversation</p></div>' }
+    renderConvList()
+  })
+
+  // Restaurer l'état du toggle au chargement
+  ;(async () => {
+    const { data } = await window._supabase.from('conversation_flags')
+      .select('pinned').eq('user_id', window._session.user.id).eq('book_id', '__SIM_ENABLED__').maybeSingle()
+    if (data?.pinned) { simEnabled = true; simToggle.checked = true; renderConvList() }
+  })()
+
+  // ── Améliorer (consignes ((...)) + historique) ─────────────────────────────
+  window.improveMessage = async (bookId) => {
+    const textarea = document.getElementById('compose-text')
+    const rawText = textarea?.value?.trim()
+    if (!rawText) return setStatus('Écrivez d\'abord un message')
+    const instructions = []
+    const cleanText = rawText.replace(/\(\(([^)]+)\)\)/g, (_, inst) => { instructions.push(inst.trim()); return '' }).trim()
+    const btn = document.querySelector('.btn-improve')
+    btn.disabled = true; btn.textContent = '⏳…'; setStatus('Amélioration en cours…')
+    try {
+      const conv = conversations.find(c => c.bookId === bookId)
+      const guestName = conv?.guestName || 'le voyageur'
+      const allM = []
+      conv?.thread?.forEach(m => allM.push({ role: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }))
+      conv?.aiReplies?.forEach(c => allM.push({ role: 'host', content: c.agent_reply, time: c.created_at }))
+      allM.sort((a, b) => new Date(a.time) - new Date(b.time))
+      const recent = allM.slice(-5).map(m => `${m.role === 'guest' ? '👤 Voyageur' : '🏠 Hôte'}: "${m.content}"`).join('\n')
+      let sys = `Tu es un assistant de conciergerie LCD. Améliore ce message pour qu'il soit chaleureux, professionnel et naturel. Adresse-toi à ${guestName}.`
+      if (recent) sys += `\n\nHistorique récent :\n${recent}`
+      if (instructions.length) sys += `\n\nConsignes de l'hôte :\n${instructions.map((i, n) => `${n+1}. ${i}`).join('\n')}`
+      sys += '\n\nRéponds UNIQUEMENT avec le message amélioré, sans commentaire.'
+      const res = await fetch('/api/grok', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ systemPrompt: sys, messages: [{ role: 'user', content: `Message à améliorer : "${cleanText || rawText}"` }] })
+      })
+      const data = await res.json()
+      if (data.reply) { textarea.value = data.reply; setStatus(instructions.length ? `✅ Amélioré avec ${instructions.length} consigne(s)` : '✅ Message amélioré') }
+    } catch (err) { setStatus('❌ ' + err.message) }
+    finally { btn.disabled = false; btn.textContent = '✨ Améliorer' }
+  }
+
+  // ── Envoyer (manuel) ────────────────────────────────────────────────────────
   window.sendMessage = async (bookId) => {
     const textarea = document.getElementById('compose-text')
     const text = textarea?.value?.trim()
     if (!text) return setStatus('Écrivez un message')
-
-    // Vérifier s'il reste des consignes non traitées
     if (text.includes('((') && text.includes('))')) {
-      const confirm = window.confirm('Votre message contient encore des consignes ((...)) — voulez-vous d\'abord cliquer sur ✨ Améliorer ?')
-      if (confirm) return
+      if (window.confirm('Le message contient encore des consignes ((...)) — cliquer sur ✨ Améliorer d\'abord ?')) return
     }
-
-    const btn = document.querySelector('.btn-primary')
-    btn.disabled = true; btn.textContent = '⏳ Envoi…'
-    setStatus('Envoi en cours…')
-
+    const btn = document.querySelector('.conv-compose .btn-primary')
+    btn.disabled = true; btn.textContent = '⏳ Envoi…'; setStatus('Envoi en cours…')
     try {
       const res = await fetch('/api/beds24', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
         body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: text })
       })
       const data = await res.json()
-
       if (data.success) {
         const conv = conversations.find(c => c.bookId === bookId)
         await window._supabase.from('conversations').insert({
-          user_id:       window._session.user.id,
-          property_id:   conv?.propertyId || null,
-          guest_name:    conv?.guestName || 'Voyageur',
-          guest_message: '[Envoi manuel hôte]',
-          agent_reply:   text,
-          book_id:       bookId
+          user_id: window._session.user.id, property_id: conv?.propertyId || null,
+          guest_name: conv?.guestName || 'Voyageur', guest_message: '[Envoi manuel hôte]', agent_reply: text, book_id: bookId
         })
-        textarea.value = ''
-        setStatus('✅ Message envoyé')
-        await loadConversations()
-        selectConv(bookId)
-      } else {
-        setStatus('❌ ' + (data.error || 'Erreur inconnue'))
-      }
-    } catch (err) {
-      setStatus('❌ ' + err.message)
-    } finally {
-      btn.disabled = false; btn.textContent = '✉️ Envoyer'
-    }
+        textarea.value = ''; setStatus('✅ Message envoyé')
+        await loadConversations(); selectConv(bookId)
+      } else setStatus('❌ ' + (data.error || 'Erreur inconnue'))
+    } catch (err) { setStatus('❌ ' + err.message) }
+    finally { btn.disabled = false; btn.textContent = '✉️ Envoyer' }
   }
 
   function setStatus(msg) {
     const el = document.getElementById('compose-status')
-    if (el) el.textContent = msg
-    setTimeout(() => { if (document.getElementById('compose-status')) document.getElementById('compose-status').textContent = '' }, 4000)
+    if (el) { el.textContent = msg; setTimeout(() => { const e2 = document.getElementById('compose-status'); if (e2) e2.textContent = '' }, 4000) }
   }
-
-  function formatDateShort(dateStr) {
-    if (!dateStr) return '—'
-    return new Date(dateStr).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' })
-  }
-
-  function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 </script>
 </body>
 </html>

@@ -177,12 +177,10 @@ function renderApps(activePage) {
     let subMenu = ''
 
     if (app.id === 'agent-ai') {
-      // NB : la Messagerie est montée dans le menu principal ("Messages"),
-      // elle n'apparaît plus dans ce sous-menu.
+      // La Messagerie est dans le menu principal ("Messages"). La to-do (ex
+      // "Signature Humaine") et le Simulateur sont désormais intégrés DANS la
+      // page Messages — ils ne figurent plus dans ce sous-menu.
       subMenu = `
-        <a class="nav-sub ${activePage === 'agent-ai' ? 'connected' : ''}" href="/apps/agent-ai">
-          <div class="sub-dot ${activePage === 'agent-ai' ? 'green' : 'gray'}"></div>Signature Humaine
-        </a>
         <a class="nav-sub ${activePage === 'agent-ai-knowledge' ? 'connected' : ''}" href="/apps/agent-ai/knowledge">
           <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
         </a>
@@ -191,9 +189,6 @@ function renderApps(activePage) {
         </a>
         <a class="nav-sub ${activePage === 'agent-ai-config' ? 'connected' : ''}" href="/apps/agent-ai/config">
           <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Configuration
-        </a>
-        <a class="nav-sub ${activePage === 'agent-ai-test' ? 'connected' : ''}" href="/apps/agent-ai/test">
-          <div class="sub-dot ${activePage === 'agent-ai-test' ? 'green' : 'gray'}"></div>Simulateur
         </a>`
     } else if (app.id === 'menages') {
       subMenu = `
