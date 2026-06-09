@@ -136,6 +136,66 @@ module.exports = async function handler(req, res) {
   // ===== POST : sauvegarde (Supabase puis push channel) =====
   if (req.method === 'POST') {
     const { action, property_id, segments } = req.body || {}
+
+    // ===== FULL SYNC : pousse 500 jours d'inventaire en 2 appels (certif test 1) =====
+    if (action === 'fullsync') {
+      if (!property_id) return res.status(400).json({ error: 'property_id requis' })
+      const ownedFs = await loadOwnedProperties([property_id])
+      const bienFs = ownedFs[0]
+      if (!bienFs) return res.status(403).json({ error: 'Bien non trouve' })
+      const propIdFs = bienFs.provider_property_id
+      const ratePlanFs = bienFs.provider_rate_plan_id
+      const roomTypeFs = bienFs.provider_room_type_id
+      if (!propIdFs || !ratePlanFs || !roomTypeFs) {
+        return res.status(400).json({ error: 'Bien non connecte au canal (ids manquants)' })
+      }
+      const startFs = new Date(); startFs.setHours(0,0,0,0)
+      const endFs = new Date(startFs); endFs.setDate(endFs.getDate() + 500)
+      const isoFs = (d) => d.toISOString().slice(0,10)
+      const { data: invFs, error: invErrFs } = await supabase
+        .from('calendar_inventory')
+        .select('date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
+        .eq('property_id', property_id)
+        .gte('date', isoFs(startFs))
+        .lte('date', isoFs(endFs))
+        .order('date', { ascending: true })
+      if (invErrFs) return res.status(500).json({ error: 'Erreur lecture inventory' })
+      const invMapFs = {}
+      ;(invFs || []).forEach(r => { invMapFs[r.date] = r })
+      const baseRate = Math.round((Number(bienFs.base_price) || 0) * 100)
+      const availabilityValues = []
+      const restrictionValues = []
+      for (let i = 0; i < 500; i++) {
+        const d = new Date(startFs); d.setDate(d.getDate() + i)
+        const iso = isoFs(d)
+        const r = invMapFs[iso] || {}
+        const rateCents = (r.rate != null) ? Math.round(Number(r.rate) * 100) : baseRate
+        const avail = (r.avail != null) ? r.avail : 1
+        availabilityValues.push({ property_id: propIdFs, room_type_id: roomTypeFs, date_from: iso, date_to: iso, availability: avail })
+        restrictionValues.push({
+          property_id: propIdFs, rate_plan_id: ratePlanFs, date_from: iso, date_to: iso,
+          rate: rateCents,
+          min_stay_arrival: r.min_stay_arrival || 1,
+          min_stay_through: r.min_stay_through || 1,
+          max_stay: r.max_stay || 0,
+          closed_to_arrival: !!r.cta,
+          closed_to_departure: !!r.ctd,
+          stop_sell: !!r.stop_sell
+        })
+      }
+      const warningsFs = []
+      let pushedFs = false
+      try {
+        const a = await channelCall('POST', '/availability', { values: availabilityValues })
+        if (!a.ok) warningsFs.push('availability: HTTP ' + a.status); else pushedFs = true
+        const rr = await channelCall('POST', '/restrictions', { values: restrictionValues })
+        if (!rr.ok) warningsFs.push('restrictions: HTTP ' + rr.status); else pushedFs = true
+      } catch (e) {
+        warningsFs.push('push: ' + e.message)
+      }
+      return res.status(200).json({ fullsync: true, days: 500, pushed: pushedFs, warnings: warningsFs })
+    }
+
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })
     if (!property_id || !Array.isArray(segments) || !segments.length) {
       return res.status(400).json({ error: 'property_id et segments requis' })
