@@ -168,7 +168,12 @@ module.exports = async function handler(req, res) {
       for (let i = 0; i < 500; i++) {
         const d = new Date(startFs); d.setDate(d.getDate() + i)
         const iso = isoFs(d)
-        const r = invMapFs[iso] || {}
+        const r = invMapFs[iso]
+        // Regle metier : pas d'entree d'inventaire = date fermee (availability 0).
+        if (!r) {
+          availabilityValues.push({ property_id: propIdFs, room_type_id: roomTypeFs, date_from: iso, date_to: iso, availability: 0 })
+          continue
+        }
         const rateCents = (r.rate != null) ? Math.round(Number(r.rate) * 100) : baseRate
         const avail = (r.avail != null) ? r.avail : 1
         availabilityValues.push({ property_id: propIdFs, room_type_id: roomTypeFs, date_from: iso, date_to: iso, availability: avail })
@@ -240,6 +245,19 @@ module.exports = async function handler(req, res) {
     if (Object.keys(propUpdates).length) {
       const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', property_id).eq('user_id', user.id)
       if (pErr) console.error('[calendar] properties update error', pErr.message)
+    }
+
+    const allDates = new Set()
+    for (const seg of dateSegments) {
+      for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) allDates.add(ds)
+    }
+    if (allDates.size) {
+      const { data: existingRows } = await supabase
+        .from('calendar_inventory')
+        .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
+        .eq('property_id', property_id)
+        .in('date', [...allDates])
+      ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
     }
 
     for (const seg of dateSegments) {
