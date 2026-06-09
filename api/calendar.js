@@ -15,12 +15,18 @@ const supabase = createClient(
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 
-async function channelCall(method, path, body) {
+async function channelCall(method, path, body, _attempt = 0) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
     method,
     headers: { 'user-api-key': CHANNEL_KEY, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined
   })
+  if ((res.status === 429 || res.status >= 500) && _attempt < 4) {
+    const retryAfter = parseInt(res.headers.get('retry-after') || '0', 10)
+    const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * Math.pow(2, _attempt), 8000)
+    await new Promise(r => setTimeout(r, waitMs))
+    return channelCall(method, path, body, _attempt + 1)
+  }
   const text = await res.text()
   let json
   try { json = JSON.parse(text) } catch { json = { raw: text } }
