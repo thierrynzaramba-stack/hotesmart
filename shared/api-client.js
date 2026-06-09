@@ -56,6 +56,8 @@ export const api = {
     load: (propertyIds, start, end) =>
       apiCall(`calendar?property_ids=${encodeURIComponent(propertyIds.join(','))}&start=${start}&end=${end}`, 'GET'),
     save: (propertyId, segments) =>
-      apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments })
+      apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments }),
+    fullsync: (propertyId) =>
+      apiCall('calendar', 'POST', { action: 'fullsync', property_id: propertyId })
   }
 }
