@@ -295,6 +295,7 @@ module.exports = async function handler(req, res) {
     const roomTypeId = bien.provider_room_type_id
     let pushWarnings = []
     let pushed = false
+    const taskIdsSave = {}
 
     if (propId && ratePlanId) {
       // Restrictions (rate + min/max + cta/ctd/stop_sell) -> /restrictions
@@ -326,12 +327,12 @@ module.exports = async function handler(req, res) {
         if (restrictionValues.length) {
           const r = await channelCall('POST', '/restrictions', { values: restrictionValues })
           if (!r.ok) { pushWarnings.push('restrictions: HTTP ' + r.status) }
-          else { pushed = true; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
+          else { pushed = true; taskIdsSave.restrictions = r.json?.data?.[0]?.id || null; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
         }
         if (availabilityValues.length) {
           const a = await channelCall('POST', '/availability', { values: availabilityValues })
           if (!a.ok) { pushWarnings.push('availability: HTTP ' + a.status) }
-          else { pushed = true }
+          else { pushed = true; taskIdsSave.availability = a.json?.data?.[0]?.id || null }
         }
       } catch (e) {
         console.error('[calendar] push channel error', e.message)
@@ -344,7 +345,8 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       saved: rows.length,
       pushed,
-      warnings: pushWarnings
+      warnings: pushWarnings,
+      task_ids: taskIdsSave
     })
   }
 

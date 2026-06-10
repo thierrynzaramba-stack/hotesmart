@@ -495,8 +495,10 @@
         showToast('Enregistrement...')
         try{
           const resp=await api.calendar.save(popupBienId, finalSegments)
-          if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre (' + resp.warnings.length + ' avertissement)') }
-          else { showToast('Enregistre et publie') }
+          const tids = resp && resp.task_ids ? [resp.task_ids.restrictions, resp.task_ids.availability].filter(Boolean) : []
+          if(tids.length){ try{ await navigator.clipboard.writeText(tids.join('\n')) }catch(e){} }
+          if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre (' + resp.warnings.length + ' avertissement)' + (tids.length?' — task ID copie':'')) }
+          else { showToast('Enregistre et publie' + (tids.length?' — task ID copie : '+tids[0]:'')) }
           await reloadInventory()
         }catch(err){ showToast('Erreur: ' + (err.message||'sauvegarde')) }
       } else { showToast('Aucune modification') }
