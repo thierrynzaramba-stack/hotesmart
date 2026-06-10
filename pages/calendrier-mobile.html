@@ -244,7 +244,7 @@
         }
         const bk=(r.bookings&&r.bookings[currentBien.id])||[]
         const SRC=['airbnb','booking','direct']
-        bk.forEach((b,idx)=>{
+        bk.forEach((b,idx)=>{ if(String(b.status||'').toLowerCase()==='cancelled')return; if(String(b.status||'').toLowerCase()==='cancelled')return;
           const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
           for(let d=new Date(ci); d<co; d.setDate(d.getDate()+1)) resaSet.add(toISO(d))
           // source variee pour la demo (en attendant la vraie source via webhooks)
