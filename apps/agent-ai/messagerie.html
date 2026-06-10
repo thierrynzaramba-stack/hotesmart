@@ -18,6 +18,9 @@
     .conv-item { padding:12px 16px; border-bottom:0.5px solid var(--border); cursor:pointer; transition:background 0.1s; border-left:3px solid transparent; }
     .conv-item:hover { background:var(--bg2); }
     .conv-item.active { background:#E1F5EE; border-left-color:var(--green); }
+    .conv-item.cancelled { opacity:0.5; }
+    .conv-item.cancelled .conv-item-name { text-decoration:line-through; }
+    .badge-cancelled { font-size:9px; padding:1px 6px; border-radius:10px; background:#fdecea; color:#d52a44; font-weight:600; }
     /* Code couleur priorité tâche */
     .conv-item.flag-intervention { border-left-color:#E24B4A; }
     .conv-item.flag-info_unknown { border-left-color:#F59E0B; }
@@ -362,7 +365,8 @@
       const platformLabel = { airbnb:'Airbnb', booking:'Booking', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
       const date = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : ''
       const flag = convFlag(conv.bookId)
-      const isPinned = pinnedSet.has(conv.bookId)
+      oconst isPinned = pinnedSet.has(conv.bookId)
+      const isCancelled = String(conv.status || '').toLowerCase() === 'cancelled'
       const flagClass = flag ? `flag-${flag.type}` : ''
       const titleAttr = flag ? ` title="${escAttr(flag.label + (flag.summary ? ' — ' + flag.summary : ''))}"` : ''
       // Si tâche en attente : l'aperçu montre le libellé + résumé de la tâche
@@ -371,12 +375,13 @@
         : preview
 
       return `
-        <div class="conv-item ${isActive ? 'active' : ''} ${flagClass}"${titleAttr} onclick="selectConv('${conv.bookId}')">
+        <div class="conv-item ${isActive ? 'active' : ''} ${flagClass} ${isCancelled ? 'cancelled' : ''}"${titleAttr} onclick="selectConv('${conv.bookId}')">
           <div class="conv-item-name">
             ${isPinned ? '<span class="pin-mark">📌</span>' : ''}
             ${flag ? `<span class="flag-dot ${flag.type}"></span>` : (hasUnread ? '<span class="unread-dot"></span>' : '')}
             ${escHtml(conv.guestName)}
             <span class="platform-badge platform-${conv.platform}">${platformLabel}</span>
+            ${isCancelled ? '<span class="badge-cancelled">Annulé</span>' : ''}
           </div>
           ${date ? `<div class="conv-item-meta">${date}</div>` : ''}
           <div class="conv-item-preview"${flag ? ` style="color:var(--text);font-weight:500"` : ''}>${escHtml(previewText)}</div>
