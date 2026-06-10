@@ -523,7 +523,7 @@
     }
     function mapResa(list){
       const SRC=['airbnb','booking','direct']
-      return (list||[]).map((b,idx)=>{
+      return (list||[]).filter(function(b){return String(b.status||'').toLowerCase()!=='cancelled'}).map((b,idx)=>{
         const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
         const span=Math.max(1, Math.round((co-ci)/86400000))
         const src=SRC[idx % 3]
