@@ -235,7 +235,7 @@
       btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Publication…'
       try {
         const r = await api.calendar.fullsync(p.id)
-        if (r.pushed) { btn.textContent = '✅ Publié'; alert('Calendrier publié : ' + r.days + ' jours envoyés.' + (r.warnings && r.warnings.length ? '\n\nAvertissements :\n' + r.warnings.join('\n') : '')) }
+        if (r.pushed) { btn.textContent = '✅ Publié'; const ids = r.task_ids ? ('\n\nTask IDs (certif) :\navailability: ' + (r.task_ids.availability || '—') + '\nrestrictions: ' + (r.task_ids.restrictions || '—')) : ''; alert('Calendrier publié : ' + r.days + ' jours envoyés.' + ids + (r.warnings && r.warnings.length ? '\n\nAvertissements :\n' + r.warnings.join('\n') : '')) }
         else { btn.textContent = old; btn.disabled = false; alert('Échec de la publication.' + (r.warnings && r.warnings.length ? '\n' + r.warnings.join('\n') : '')) }
       } catch (err) {
         btn.textContent = old; btn.disabled = false; alert('Erreur : ' + (err.message || 'inconnue'))

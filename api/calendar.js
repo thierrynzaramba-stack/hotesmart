@@ -190,15 +190,16 @@ module.exports = async function handler(req, res) {
       }
       const warningsFs = []
       let pushedFs = false
+      const taskIds = {}
       try {
         const a = await channelCall('POST', '/availability', { values: availabilityValues })
-        if (!a.ok) warningsFs.push('availability: HTTP ' + a.status); else pushedFs = true
+        if (!a.ok) warningsFs.push('availability: HTTP ' + a.status); else { pushedFs = true; taskIds.availability = a.json?.data?.[0]?.id || null }
         const rr = await channelCall('POST', '/restrictions', { values: restrictionValues })
-        if (!rr.ok) warningsFs.push('restrictions: HTTP ' + rr.status); else pushedFs = true
+        if (!rr.ok) warningsFs.push('restrictions: HTTP ' + rr.status); else { pushedFs = true; taskIds.restrictions = rr.json?.data?.[0]?.id || null }
       } catch (e) {
         warningsFs.push('push: ' + e.message)
       }
-      return res.status(200).json({ fullsync: true, days: 500, pushed: pushedFs, warnings: warningsFs })
+      return res.status(200).json({ fullsync: true, days: 500, pushed: pushedFs, warnings: warningsFs, task_ids: taskIds })
     }
 
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })
