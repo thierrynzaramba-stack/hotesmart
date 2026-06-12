@@ -726,8 +726,8 @@
 
   // Restaurer l'état du toggle au chargement
   ;(async () => {
-    const { data } = await window._supabase.from('conversation_flags')
-      .select('pinned').eq('user_id', window._session.user.id).eq('book_id', '__SIM_ENABLED__').maybeSingle()
+    const { data } = await supabase.from('conversation_flags')
+      .select('pinned').eq('user_id', session.user.id).eq('book_id', '__SIM_ENABLED__').maybeSingle()
     if (data?.pinned) { simEnabled = true; simToggle.checked = true; renderConvList() }
   })()
 
