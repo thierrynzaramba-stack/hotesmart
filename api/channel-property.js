@@ -59,19 +59,46 @@ module.exports = async function handler(req, res) {
   }
   const user = userData.user
 
-  // ===== GET : liste des biens =====
+  // ===== GET : liste des biens (FUSION Beds24 + Channex) =====
   if (req.method === 'GET') {
-    const { data, error } = await supabase
+    const { data: chanData, error: chanErr } = await supabase
       .from('properties')
       .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('[channel-property] SELECT error', error.message)
+    if (chanErr) {
+      console.error('[channel-property] SELECT error', chanErr.message)
       return res.status(500).json({ error: 'Erreur lecture' })
     }
-    return res.status(200).json({ properties: data })
+    const channexProps = (chanData || []).map(p => ({ ...p, provider: p.provider || 'channex' }))
+    let beds24Props = []
+    try {
+      const { data: keyData } = await supabase
+        .from('api_keys')
+        .select('api_key')
+        .eq('user_id', user.id)
+        .eq('service', 'beds24')
+        .single()
+      if (keyData && keyData.api_key) {
+        const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: keyData.api_key } })
+        const d = await r.json()
+        beds24Props = (d.data || []).map(b => ({
+          id: b.id,
+          name: b.name,
+          provider: 'beds24',
+          provider_property_id: b.id,
+          currency: b.currency || 'EUR',
+          address: b.address || '',
+          city: b.city || '',
+          capacity: (b.roomTypes && b.roomTypes[0] && b.roomTypes[0].maxPeople) || 1,
+          inventory_type: 'whole',
+          created_at: null
+        }))
+      }
+    } catch (e) {
+      console.warn('[channel-property] Beds24 list skipped:', e.message)
+    }
+    return res.status(200).json({ properties: [...beds24Props, ...channexProps] })
   }
 
   // ===== PATCH : modification d'un bien (champs cosmetiques) =====
