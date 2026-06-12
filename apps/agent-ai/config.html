@@ -134,20 +134,26 @@
 </script>
 
 <script>
-  const PROPERTIES = [
-    { id: '169567', name: 'Cœur de vie 23' },
-    { id: '209413', name: 'La bulle' }
-  ]
+  let PROPERTIES = []
   const ALERT_TYPES = [
     { key: 'intervention', label: '🚨 Intervention requise',  badgeClass: 'badge-intervention' },
     { key: 'info_unknown', label: '❓ Information manquante', badgeClass: 'badge-info' }
   ]
 
-  let currentProp = PROPERTIES[0].id
+  let currentProp = null
   let config = {}
   let promptingConfig = { global: '', overrides: {} }
 
+  async function loadProperties() {
+    try {
+      const res = await fetch('/api/channel-property', { headers: { 'Authorization': `Bearer ${window._session.access_token}` } })
+      const data = await res.json()
+      PROPERTIES = (data.properties || []).map(p => ({ id: p.provider_property_id || p.id, name: p.name }))
+      if (PROPERTIES.length && !currentProp) currentProp = PROPERTIES[0].id
+    } catch (e) { console.error('loadProperties', e.message) }
+  }
   window.init = async () => {
+    await loadProperties()
     renderTabs()
     await loadConfig()
     await loadPrompting()

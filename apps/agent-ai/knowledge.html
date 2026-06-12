@@ -197,10 +197,9 @@
   }
 
   async function loadProperties() {
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ action: 'getProperties' })
+    const res = await fetch('/api/channel-property', {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
     })
     const data = await res.json()
     properties = data.properties || []
