@@ -365,7 +365,7 @@
       const platformLabel = { airbnb:'Airbnb', booking:'Booking', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
       const date = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : ''
       const flag = convFlag(conv.bookId)
-      oconst isPinned = pinnedSet.has(conv.bookId)
+      const isPinned = pinnedSet.has(conv.bookId)
       const isCancelled = String(conv.status || '').toLowerCase() === 'cancelled'
       const flagClass = flag ? `flag-${flag.type}` : ''
       const titleAttr = flag ? ` title="${escAttr(flag.label + (flag.summary ? ' — ' + flag.summary : ''))}"` : ''
