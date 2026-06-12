@@ -96,10 +96,7 @@
 </script>
 
 <script>
-  const PROPERTIES = [
-    { id: '169567', name: 'Cœur de vie 23' },
-    { id: '209413', name: 'La bulle' }
-  ]
+  let PROPERTIES = []
 
   const EVENTS = {
     booking_confirmed: {
@@ -135,11 +132,19 @@
   const DAY_OPTIONS = [-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7]
   const HOURS = Array.from({length:24}, (_,h) => String(h).padStart(2,'0') + ':00')
 
-  let currentProp = PROPERTIES[0].id
+  let currentProp = null
   let templates   = []
   let propLocks   = []
 
-  window.init = async () => { renderTabs(); await loadPropLocks(); await loadTemplates() }
+  async function loadProperties() {
+    try {
+      const res = await fetch('/api/channel-property', { headers: { 'Authorization': `Bearer ${window._session.access_token}` } })
+      const data = await res.json()
+      PROPERTIES = (data.properties || []).map(p => ({ id: p.provider_property_id || p.id, name: p.name }))
+      if (PROPERTIES.length && !currentProp) currentProp = PROPERTIES[0].id
+    } catch (e) { console.error('loadProperties', e.message) }
+  }
+  window.init = async () => { await loadProperties(); renderTabs(); await loadPropLocks(); await loadTemplates() }
 
   async function loadPropLocks() {
     const { data } = await window._supabase
