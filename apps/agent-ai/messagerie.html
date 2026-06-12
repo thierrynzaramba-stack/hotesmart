@@ -295,9 +295,16 @@
             bookId, propertyId: c.property_id ? String(c.property_id) : '',
             guestName: c.guest_name || 'Voyageur',
             firstNight: null, lastNight: null, platform: 'direct', status: '',
-            thread: [], aiReplies: [c], hasMessages: false, lastTime: c.created_at
+            thread: [], aiReplies: [], hasMessages: false, lastTime: c.created_at
           }
         }
+        const cm = convMap[bookId]
+        if (c.guest_message && !String(c.guest_message).startsWith('[')) {
+          cm.thread.push({ source: 'guest', message: c.guest_message, time: c.created_at })
+          cm.hasMessages = true
+        }
+        cm.aiReplies.push(c)
+        if (c.guest_name && cm.guestName === 'Voyageur') cm.guestName = c.guest_name
       })
 
       // Inclure les conversations qui n'ont QUE des tâches (sans message stocké)
