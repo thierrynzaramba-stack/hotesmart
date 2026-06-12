@@ -270,7 +270,7 @@
     function doUndo(){ if(!undoStack.length)return; const u=undoStack.pop(); states[u.bid]=JSON.parse(u.snap); ppConfig[u.bid]=JSON.parse(u.pp); if(!undoStack.length)document.getElementById('btn-undo').disabled=true; renderBlocks(); showToast('Action annulee') }
 
     let selectedBiens=[]
-    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',async e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();savePrefsD();await reloadInventory()});p.appendChild(o)});updateMsLabel() }
+    function renderMultiSelect(){ const p=document.getElementById('ms-panel'); p.innerHTML=''; BIENS.forEach(b=>{const o=document.createElement('label');o.className='ms-option';if(b.provider==='beds24'){o.style.opacity='0.5';o.style.cursor='not-allowed';o.innerHTML='<input type="checkbox" disabled/> '+b.name+' <span style="color:#86868b;font-size:11px">(gere dans Beds24)</span>';p.appendChild(o);return}o.innerHTML='<input type="checkbox" value="'+b.id+'" '+(selectedBiens.includes(b.id)?'checked':'')+'/> '+b.name+' <span style="color:#86868b;font-size:12px">(cap. '+b.capacity+')</span>';o.querySelector('input').addEventListener('change',async e=>{if(e.target.checked){if(!selectedBiens.includes(b.id))selectedBiens.push(b.id)}else{selectedBiens=selectedBiens.filter(x=>x!==b.id)}updateMsLabel();savePrefsD();await reloadInventory()});p.appendChild(o)});updateMsLabel() }
     function updateMsLabel(){ const l=document.getElementById('ms-label'); if(!selectedBiens.length)l.textContent='Choisir des biens'; else if(selectedBiens.length===1){const b=BIENS.find(x=>x.id===selectedBiens[0]);l.textContent=b?b.name:'1 bien'}else l.textContent=selectedBiens.length+' biens' }
     document.getElementById('ms-trigger').addEventListener('click',()=>document.getElementById('multi-select').classList.toggle('open'))
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
@@ -519,7 +519,7 @@
     function mapBien(p){
       return { id:p.id, name:p.name, capacity:p.capacity||1, base:Number(p.base_price)||0,
         included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0,
-        currency:p.currency||'EUR', resa:[] }
+        currency:p.currency||'EUR', provider:p.provider||'channex', resa:[] }
     }
     function mapResa(list){
       const SRC=['airbnb','booking','direct']
@@ -546,9 +546,10 @@
       BIENS = all.map(mapBien)
       const prefs=loadPrefsD()
       if(prefs && prefs.months){ MONTHS=prefs.months; const ps=document.getElementById('period-select'); if(ps) ps.value=String(MONTHS); buildDays(); renderMonthPills(); renderMonthBand() }
-      if(prefs && Array.isArray(prefs.biens) && prefs.biens.length){ selectedBiens=prefs.biens.filter(id=>BIENS.find(b=>b.id===id)) }
-      if(!selectedBiens.length && URL_BIEN_ID && BIENS.find(b=>b.id===URL_BIEN_ID)) selectedBiens=[URL_BIEN_ID]
-      if(!selectedBiens.length && BIENS.length) selectedBiens=[BIENS[0].id]
+      const editable=b=>b && b.provider!=='beds24'
+      if(prefs && Array.isArray(prefs.biens) && prefs.biens.length){ selectedBiens=prefs.biens.filter(id=>{const b=BIENS.find(x=>x.id===id);return editable(b)}) }
+      if(!selectedBiens.length && URL_BIEN_ID && editable(BIENS.find(b=>b.id===URL_BIEN_ID))) selectedBiens=[URL_BIEN_ID]
+      if(!selectedBiens.length){ const first=BIENS.find(editable); if(first) selectedBiens=[first.id] }
       BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
       renderMultiSelect()
       await reloadInventory()
