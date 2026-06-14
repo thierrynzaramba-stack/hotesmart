@@ -191,6 +191,23 @@ async function handleMessage(payload) {
     return { ok: true, reason: 'not_guest' }
   }
 
+  // Deduplication : Channex peut renvoyer le meme message (retry/double webhook).
+  // On ignore si un message identique non repondu existe deja dans les 2 dernieres minutes.
+  const since = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+  const { data: dup } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('property_id', String(providerPropertyId))
+    .eq('book_id', payload.booking_id || null)
+    .eq('guest_message', payload.message || '')
+    .is('agent_reply', null)
+    .gte('created_at', since)
+    .limit(1)
+  if (dup && dup.length) {
+    console.log('[channel-webhook] message duplique ignore', payload.booking_id)
+    return { ok: true, reason: 'duplicate' }
+  }
+
   const { error } = await supabase
     .from('conversations')
     .insert({
