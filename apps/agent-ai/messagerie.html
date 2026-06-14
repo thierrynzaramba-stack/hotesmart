@@ -781,9 +781,15 @@
     const btn = document.querySelector('.conv-compose .btn-primary')
     btn.disabled = true; btn.textContent = '⏳ Envoi…'; setStatus('Envoi en cours…')
     try {
-      const res = await fetch('/api/beds24', {
+      const convForSend = conversations.find(c => c.bookId === bookId)
+      const isChannex = String(convForSend?.propertyId || '').includes('-')
+      const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
+      const payload = isChannex
+        ? { bookingId: bookId, message: text }
+        : { action: 'sendMessage', bookingId: bookId, message: text }
+      const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: text })
+        body: JSON.stringify(payload)
       })
       const data = await res.json()
       if (data.success) {
