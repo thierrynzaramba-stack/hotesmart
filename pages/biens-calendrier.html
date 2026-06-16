@@ -416,10 +416,10 @@
         const cfg=ppConfig[popupBienId]; const bien=BIENS.find(b=>b.id===popupBienId)
         if(!pending.perPerson)pending.perPerson={included:cfg.included,extraFee:cfg.extraFee}
         h+='<div class="field"><label>Voyageurs inclus dans le prix de base</label><input type="number" id="pp-inc" min="1" max="'+bien.capacity+'" value="'+pending.perPerson.included+'" /></div>'
-        h+='<div class="field"><label>Supplement par voyageur supplementaire (EUR)</label><input type="number" id="pp-extra" min="0" value="'+pending.perPerson.extraFee+'" /></div>'
+        h+='<div class="field"><label>Supplement par voyageur supplementaire ('+curSym(bien.currency)+')</label><input type="number" id="pp-extra" min="0" value="'+pending.perPerson.extraFee+'" /></div>'
         h+='<div class="preview-box" id="pp-preview"></div>'
         c.innerHTML=h
-        const upd=()=>{const inc=parseInt(document.getElementById('pp-inc').value,10)||bien.capacity;const ex=parseFloat(document.getElementById('pp-extra').value)||0;pending.perPerson={included:inc,extraFee:ex};let l='Sur la base de '+bien.base+' EUR :<br>Jusqu\u0027a '+inc+' pers. : '+bien.base+' EUR<br>';for(let pr=inc+1;pr<=bien.capacity;pr++){l+=pr+'e pers. : '+(bien.base+(pr-inc)*ex)+' EUR<br>'}if(ex===0)l+='(aucun supplement)';document.getElementById('pp-preview').innerHTML=l}
+        const upd=()=>{const inc=parseInt(document.getElementById('pp-inc').value,10)||bien.capacity;const ex=parseFloat(document.getElementById('pp-extra').value)||0;pending.perPerson={included:inc,extraFee:ex};let l='Sur la base de '+bien.base+' '+curSym(bien.currency)+' :<br>Jusqu\u0027a '+inc+' pers. : '+bien.base+' '+curSym(bien.currency)+'<br>';for(let pr=inc+1;pr<=bien.capacity;pr++){l+=pr+'e pers. : '+(bien.base+(pr-inc)*ex)+' '+curSym(bien.currency)+'<br>'}if(ex===0)l+='(aucun supplement)';document.getElementById('pp-preview').innerHTML=l}
         document.getElementById('pp-inc').addEventListener('input',upd);document.getElementById('pp-extra').addEventListener('input',upd);upd()
         return
       }
@@ -427,7 +427,7 @@
       const pv=pending[p.key]
       h+=dowChipsHtml(pv.dow)
       if(p.type==='price'){
-        h+='<div class="field"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div class="seg" id="seg-mode"><button data-mode="set">Definir</button><button data-mode="inc">+</button><button data-mode="dec">-</button></div><div class="seg" id="seg-unit"><button data-unit="eur">EUR</button><button data-unit="pct">%</button></div><input type="number" id="pv-value" placeholder="Valeur" style="flex:1;min-width:90px" value="'+pv.value+'" /></div><div class="preview-box" id="pv-preview">Saisissez une valeur</div></div>'
+        h+='<div class="field"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div class="seg" id="seg-mode"><button data-mode="set">Definir</button><button data-mode="inc">+</button><button data-mode="dec">-</button></div><div class="seg" id="seg-unit"><button data-unit="eur">'+curSym((BIENS.find(b=>b.id===popupBienId)||{}).currency)+'</button><button data-unit="pct">%</button></div><input type="number" id="pv-value" placeholder="Valeur" style="flex:1;min-width:90px" value="'+pv.value+'" /></div><div class="preview-box" id="pv-preview">Saisissez une valeur</div></div>'
         c.innerHTML=h
         c.querySelector('#seg-mode').querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.dataset.mode===pv.mode);b.addEventListener('click',()=>{pv.mode=b.dataset.mode;c.querySelector('#seg-mode').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));updatePvPreview()})})
         c.querySelector('#seg-unit').querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.dataset.unit===pv.unit);b.addEventListener('click',()=>{pv.unit=b.dataset.unit;c.querySelector('#seg-unit').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));updatePvPreview()})})
@@ -443,7 +443,7 @@
       if(p.type==='price')updatePvPreview()
     }
     function computeNewRate(cur,mode,unit,val){if(isNaN(val))return cur;if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val;if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val;return unit==='pct'?Math.round(cur*(1-val/100)):cur-val}
-    function updatePvPreview(){const pv=pending[activeParam];const box=document.getElementById('pv-preview');if(!box||!pv)return;const val=parseFloat(pv.value);if(isNaN(val)){box.textContent='Saisissez une valeur';return}const sample=states[popupBienId][popupIdxs[0]].rate;const r=computeNewRate(sample,pv.mode,pv.unit,val);const verb=pv.mode==='set'?'defini a':(pv.mode==='inc'?'augmente a':'reduit a');box.textContent='Exemple : '+sample+' EUR -> '+verb+' '+r+' EUR'}
+    function updatePvPreview(){const pv=pending[activeParam];const box=document.getElementById('pv-preview');if(!box||!pv)return;const val=parseFloat(pv.value);if(isNaN(val)){box.textContent='Saisissez une valeur';return}const sample=states[popupBienId][popupIdxs[0]].rate;const r=computeNewRate(sample,pv.mode,pv.unit,val);const verb=pv.mode==='set'?'defini a':(pv.mode==='inc'?'augmente a':'reduit a');const _b=BIENS.find(b=>b.id===popupBienId);const _sym=curSym(_b&&_b.currency);box.textContent='Exemple : '+sample+' '+_sym+' -> '+verb+' '+r+' '+_sym}
 
     document.getElementById('btn-open-popup').addEventListener('click',()=>openPopup(sel.row||'rate'))
     document.getElementById('btn-cancel').addEventListener('click',()=>overlay.classList.remove('visible'))
