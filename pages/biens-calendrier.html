@@ -282,10 +282,11 @@
     let showComplete=false
     const paramLabel=(k)=>(PARAMS.find(p=>p.key===k)||{}).label||k
 
+    function curSym(c){const m={EUR:String.fromCharCode(38)+"euro;",USD:"$",GBP:"&pound;",CHF:"CHF ",CAD:"C$"};return m[(c||"EUR").toUpperCase()]||((c||"EUR")+" ")}
     function cellDisplay(param,s,bien){
       switch(param){
-        case 'rate': return s.rate+'&euro;'
-        case 'maxRate': return maxRateOf(bien,s.rate)+'&euro;'
+        case 'rate': return s.rate+curSym(bien.currency)
+        case 'maxRate': return maxRateOf(bien,s.rate)+curSym(bien.currency)
         case 'avail': return s.avail==='closed'?'<span style="color:#d52a44">Ferme</span>':'<span style="color:#d2d2d7">.</span>'
         case 'minStayArr': return s.minStayArr>0?'<span style="color:#6e6e73">&#127769;'+s.minStayArr+'</span>':'<span style="color:#d2d2d7">.</span>'
         case 'minStayThrough': return s.minStayThrough>0?'<span style="color:#6e6e73">'+s.minStayThrough+'</span>':'<span style="color:#d2d2d7">.</span>'
