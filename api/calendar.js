@@ -169,26 +169,26 @@ module.exports = async function handler(req, res) {
         const d = new Date(startFs); d.setDate(d.getDate() + i)
         const iso = isoFs(d)
         const r = invMapFs[iso]
-        // Regle metier : pas d'entree d'inventaire = date fermee (availability 0).
-        if (!r) {
-          availabilityValues.push({ property_id: propIdFs, room_type_id: roomTypeFs, date_from: iso, date_to: iso, availability: 0 })
-          continue
-        }
-        const rateCents = (r.rate != null) ? Math.round(Number(r.rate) * 100) : baseRate
-        const avail = (r.avail != null) ? r.avail : 1
+        // Fenetre IDENTIQUE pour /availability et /restrictions (exigence certif Channex) :
+        // on emet les DEUX pour chacune des 500 dates. Pas de ligne d'inventaire = date
+        // fermee (availability 0) mais la restriction est quand meme poussee (rate de base
+        // + defauts). availability et restrictions sont des dimensions independantes.
+        const avail = r ? ((r.avail != null) ? r.avail : 1) : 0
+        const rateCents = (r && r.rate != null) ? Math.round(Number(r.rate) * 100) : baseRate
         availabilityValues.push({ property_id: propIdFs, room_type_id: roomTypeFs, date_from: iso, date_to: iso, availability: avail })
         restrictionValues.push({
           property_id: propIdFs, rate_plan_id: ratePlanFs, date_from: iso, date_to: iso,
           rate: rateCents,
-          min_stay_arrival: r.min_stay_arrival || 1,
-          min_stay_through: r.min_stay_through || 1,
-          max_stay: r.max_stay || 0,
-          closed_to_arrival: !!r.cta,
-          closed_to_departure: !!r.ctd,
-          stop_sell: !!r.stop_sell
+          min_stay_arrival: (r && r.min_stay_arrival) || 1,
+          min_stay_through: (r && r.min_stay_through) || 1,
+          max_stay: (r && r.max_stay) || 0,
+          closed_to_arrival: !!(r && r.cta),
+          closed_to_departure: !!(r && r.ctd),
+          stop_sell: !!(r && r.stop_sell)
         })
       }
       const warningsFs = []
+      if (baseRate === 0) warningsFs.push('base_price manquant ou nul sur le bien ' + property_id + ' — rate 0 sera rejete par Channex')
       let pushedFs = false
       const taskIds = {}
       try {
