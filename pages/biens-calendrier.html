@@ -249,7 +249,7 @@
         const rate = (r && r.rate!=null) ? Number(r.rate) : b.base
         return {
           rate,
-          avail: (r && r.stop_sell) ? 'closed' : 'open',
+          avail: (r && r.avail === 0) ? 'closed' : 'open',
           minStayArr: (r && r.min_stay_arrival)||0,
           minStayThrough: (r && r.min_stay_through)||0,
           maxStay: (r && r.max_stay)||0,
@@ -442,7 +442,7 @@
       c.querySelectorAll('input[data-dow]').forEach(inp=>inp.addEventListener('change',e=>{pv.dow[parseInt(e.target.dataset.dow,10)]=e.target.checked}))
       if(p.type==='price')updatePvPreview()
     }
-    function computeNewRate(cur,mode,unit,val){if(isNaN(val))return cur;if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val;if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val;return unit==='pct'?Math.round(cur*(1-val/100)):cur-val}
+    function computeNewRate(cur,mode,unit,val){if(isNaN(val))return cur;if(mode==='set')return val;if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val;return unit==='pct'?Math.round(cur*(1-val/100)):cur-val}
     function updatePvPreview(){const pv=pending[activeParam];const box=document.getElementById('pv-preview');if(!box||!pv)return;const val=parseFloat(pv.value);if(isNaN(val)){box.textContent='Saisissez une valeur';return}const sample=states[popupBienId][popupIdxs[0]].rate;const r=computeNewRate(sample,pv.mode,pv.unit,val);const verb=pv.mode==='set'?'defini a':(pv.mode==='inc'?'augmente a':'reduit a');const _b=BIENS.find(b=>b.id===popupBienId);const _sym=curSym(_b&&_b.currency);box.textContent='Exemple : '+sample+' '+_sym+' -> '+verb+' '+r+' '+_sym}
 
     document.getElementById('btn-open-popup').addEventListener('click',()=>openPopup(sel.row||'rate'))
@@ -477,7 +477,7 @@
         else if(p.key==='cta') seg.cta=(pv.value==='closed')
         else if(p.key==='ctd') seg.ctd=(pv.value==='closed')
         else if(p.key==='stopSell') seg.stop_sell=(pv.value==='closed')
-        else if(p.key==='avail') seg.stop_sell=(pv.value==='closed')
+        else if(p.key==='avail') seg.avail=(pv.value==='closed')?0:1
         segments.push(seg)
         touched++
       })
