@@ -302,24 +302,25 @@ module.exports = async function handler(req, res) {
       const restrictionValues = []
       const availabilityValues = []
       for (const seg of dateSegments) {
-        const dayCodes = (seg.days && seg.days.length) ? seg.days.map(d => DOW_CODE[d]).filter(Boolean) : undefined
-        // bloc restrictions
-        const rv = { property_id: propId, rate_plan_id: ratePlanId, date_from: seg.date_from, date_to: seg.date_to }
-        if (dayCodes) rv.days = dayCodes
-        let hasR = false
-        if (seg.rate != null) { rv.rate = Math.round(seg.rate * 100); hasR = true }   // cents
-        if (seg.min_stay_arrival != null) { rv.min_stay_arrival = seg.min_stay_arrival; hasR = true }
-        if (seg.min_stay_through != null) { rv.min_stay_through = seg.min_stay_through; hasR = true }
-        if (seg.max_stay != null) { rv.max_stay = seg.max_stay; hasR = true }
-        if (seg.cta != null) { rv.closed_to_arrival = !!seg.cta; hasR = true }
-        if (seg.ctd != null) { rv.closed_to_departure = !!seg.ctd; hasR = true }
-        if (seg.stop_sell != null) { rv.stop_sell = !!seg.stop_sell; hasR = true }
-        if (hasR) restrictionValues.push(rv)
-        // bloc availability (room_type)
-        if (seg.avail != null && roomTypeId) {
-          const av = { property_id: propId, room_type_id: roomTypeId, date_from: seg.date_from, date_to: seg.date_to, availability: seg.avail }
-          if (dayCodes) av.days = dayCodes
-          availabilityValues.push(av)
+        // Mono-date : un objet de valeur par date (certif Channex exige une date unique,
+        // pas une plage). On reutilise expandDays (respecte le filtre jours DOW).
+        const segDates = expandDays(seg.date_from, seg.date_to, seg.days)
+        for (const iso of segDates) {
+          // bloc restrictions (rate + min/max + cta/ctd/stop_sell) -> /restrictions
+          const rv = { property_id: propId, rate_plan_id: ratePlanId, date_from: iso, date_to: iso }
+          let hasR = false
+          if (seg.rate != null) { rv.rate = Math.round(seg.rate * 100); hasR = true }   // cents
+          if (seg.min_stay_arrival != null) { rv.min_stay_arrival = seg.min_stay_arrival; hasR = true }
+          if (seg.min_stay_through != null) { rv.min_stay_through = seg.min_stay_through; hasR = true }
+          if (seg.max_stay != null) { rv.max_stay = seg.max_stay; hasR = true }
+          if (seg.cta != null) { rv.closed_to_arrival = !!seg.cta; hasR = true }
+          if (seg.ctd != null) { rv.closed_to_departure = !!seg.ctd; hasR = true }
+          if (seg.stop_sell != null) { rv.stop_sell = !!seg.stop_sell; hasR = true }
+          if (hasR) restrictionValues.push(rv)
+          // bloc availability (room_type)
+          if (seg.avail != null && roomTypeId) {
+            availabilityValues.push({ property_id: propId, room_type_id: roomTypeId, date_from: iso, date_to: iso, availability: seg.avail })
+          }
         }
       }
 
