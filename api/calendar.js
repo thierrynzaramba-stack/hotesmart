@@ -325,6 +325,8 @@ module.exports = async function handler(req, res) {
       }
 
       try {
+        // TEMP DEBUG $66 — RETIRER APRES VERIF
+        console.log('[TEMP rate-capture]', JSON.stringify(restrictionValues.filter(v => v.rate != null)))
         if (restrictionValues.length) {
           const r = await channelCall('POST', '/restrictions', { values: restrictionValues })
           if (!r.ok) { pushWarnings.push('restrictions: HTTP ' + r.status) }
