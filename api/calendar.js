@@ -15,6 +15,13 @@ const supabase = createClient(
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 
+// Formatage YYYY-MM-DD en composantes LOCALES (jamais via toISOString/UTC).
+// Evite le decalage d'un jour si le code tourne hors UTC (dev Mac/WSL GMT+2).
+const toLocalISO = (d) => {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), j = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${j}`
+}
+
 async function channelCall(method, path, body, _attempt = 0) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
     method,
@@ -151,7 +158,7 @@ module.exports = async function handler(req, res) {
       }
       const startFs = new Date(); startFs.setHours(0,0,0,0)
       const endFs = new Date(startFs); endFs.setDate(endFs.getDate() + 500)
-      const isoFs = (d) => d.toISOString().slice(0,10)
+      const isoFs = (d) => toLocalISO(d)
       const { data: invFs, error: invErrFs } = await supabase
         .from('calendar_inventory')
         .select('date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
@@ -221,7 +228,7 @@ module.exports = async function handler(req, res) {
       const last = new Date(date_to + 'T00:00:00')
       while (d <= last) {
         const dow = d.getDay()
-        if (!days || !days.length || days.includes(dow)) out.push(d.toISOString().slice(0,10))
+        if (!days || !days.length || days.includes(dow)) out.push(toLocalISO(d))
         d.setDate(d.getDate() + 1)
       }
       return out

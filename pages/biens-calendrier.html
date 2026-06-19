@@ -215,7 +215,7 @@
     const monthShort=['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
     const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
     const fmtShort=(d)=>d.getDate()+' '+monthShort[d.getMonth()]
-    const toISO=(d)=>d.toISOString().slice(0,10)
+    const toISO=(d)=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),j=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+j}
     const CELL_W=34
 
     function buildDays(){
