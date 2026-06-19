@@ -198,19 +198,6 @@ module.exports = async function handler(req, res) {
       if (baseRate === 0) warningsFs.push('base_price manquant ou nul sur le bien ' + property_id + ' — rate 0 sera rejete par Channex')
       let pushedFs = false
       const taskIds = {}
-      // TEMP fullsync-check — RETIRER APRES VERIF certif
-      console.log('[TEMP fullsync-check]', JSON.stringify({
-        availLen: availabilityValues.length,
-        availFirst: availabilityValues[0]?.date_from,
-        availLast: availabilityValues[availabilityValues.length - 1]?.date_from,
-        restrLen: restrictionValues.length,
-        restrFirst: restrictionValues[0]?.date_from,
-        restrLast: restrictionValues[restrictionValues.length - 1]?.date_from,
-        msaFirst: restrictionValues[0]?.min_stay_arrival,
-        msaLast: restrictionValues[restrictionValues.length - 1]?.min_stay_arrival,
-        baseRate,
-        baseRateWarn: baseRate === 0
-      }))
       try {
         const a = await channelCall('POST', '/availability', { values: availabilityValues })
         if (!a.ok) warningsFs.push('availability: HTTP ' + a.status); else { pushedFs = true; taskIds.availability = a.json?.data?.[0]?.id || null }
