@@ -43,6 +43,60 @@ async function channelCall(method, path, body, _attempt = 0) {
 // Mapping jour JS (0=dim..6=sam) -> code channel (mo,tu,we,th,fr,sa,su)
 const DOW_CODE = { 1:'mo', 2:'tu', 3:'we', 4:'th', 5:'fr', 6:'sa', 0:'su' }
 
+// Jour suivant en ISO (UTC, deterministe quel que soit le fuseau serveur)
+function nextISO(iso) {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+// Objet restrictions canonique pour une ligne d'inventaire (ou {} si absente).
+// min_stay_arrival/through couples (miroir) ; booleans en etat effectif (false=ouvert).
+function restrictionObj(r) {
+  r = r || {}
+  const obj = {}
+  if (r.rate != null) obj.rate = Math.round(Number(r.rate) * 100)   // euros -> cents
+  const msa = (r.min_stay_arrival != null && r.min_stay_arrival > 0) ? r.min_stay_arrival : 0
+  const mst = (r.min_stay_through != null && r.min_stay_through > 0) ? r.min_stay_through : 0
+  if (msa || mst) {
+    obj.min_stay_arrival = msa || mst
+    obj.min_stay_through = mst || msa
+  }
+  if (r.max_stay != null && r.max_stay > 0) obj.max_stay = r.max_stay
+  obj.closed_to_arrival = !!r.cta
+  obj.closed_to_departure = !!r.ctd
+  obj.stop_sell = !!r.stop_sell
+  return obj
+}
+
+// Une restriction "vide" (aucun rate/min/max, tout ouvert) equivaut a "pas de restriction".
+function isEmptyRestriction(obj) {
+  return obj.rate == null && obj.min_stay_arrival == null && obj.max_stay == null
+    && !obj.closed_to_arrival && !obj.closed_to_departure && !obj.stop_sell
+}
+
+// Signature de comparaison delta : 'NONE' si vide, sinon JSON stable.
+function restChangeSig(obj) {
+  return isEmptyRestriction(obj) ? 'NONE' : JSON.stringify(obj)
+}
+
+// Coalescence : regroupe les dates consecutives a signature identique en plages.
+// items: [{ date:'YYYY-MM-DD', sig:string, value:object }] tries par date asc.
+function coalesceRanges(items) {
+  const out = []
+  let cur = null
+  for (const it of items) {
+    if (cur && it.sig === cur.sig && nextISO(cur.date_to) === it.date) {
+      cur.date_to = it.date
+    } else {
+      if (cur) out.push({ ...cur.value, date_from: cur.date_from, date_to: cur.date_to })
+      cur = { sig: it.sig, date_from: it.date, date_to: it.date, value: it.value }
+    }
+  }
+  if (cur) out.push({ ...cur.value, date_from: cur.date_from, date_to: cur.date_to })
+  return out
+}
+
 module.exports = async function handler(req, res) {
   // ===== AUTH =====
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -169,33 +223,34 @@ module.exports = async function handler(req, res) {
       if (invErrFs) return res.status(500).json({ error: 'Erreur lecture inventory' })
       const invMapFs = {}
       ;(invFs || []).forEach(r => { invMapFs[r.date] = r })
-      const baseRate = Math.round((Number(bienFs.base_price) || 0) * 100)
-      const availabilityValues = []
-      const restrictionValues = []
+      const baseEur = Number(bienFs.base_price) || 0
+      // Full sync : fenetre IDENTIQUE availability + restrictions sur les 500 dates (pas de
+      // delta), une restriction poussee pour CHAQUE date (rate de base + defauts si pas de
+      // ligne), le tout coalesce en plages (Channex accepte/prefere les plages).
+      const availItems = []
+      const restItems = []
       for (let i = 0; i < 500; i++) {
         const d = new Date(startFs); d.setDate(d.getDate() + i)
         const iso = isoFs(d)
         const r = invMapFs[iso]
-        // Fenetre IDENTIQUE pour /availability et /restrictions (exigence certif Channex) :
-        // on emet les DEUX pour chacune des 500 dates. Pas de ligne d'inventaire = date
-        // fermee (availability 0) mais la restriction est quand meme poussee (rate de base
-        // + defauts). availability et restrictions sont des dimensions independantes.
-        const avail = r ? ((r.avail != null) ? r.avail : 1) : 0
-        const rateCents = (r && r.rate != null) ? Math.round(Number(r.rate) * 100) : baseRate
-        availabilityValues.push({ property_id: propIdFs, room_type_id: roomTypeFs, date_from: iso, date_to: iso, availability: avail })
-        restrictionValues.push({
-          property_id: propIdFs, rate_plan_id: ratePlanFs, date_from: iso, date_to: iso,
-          rate: rateCents,
+        // Availability : pas de ligne d'inventaire = date fermee (0), sinon avail (defaut 1)
+        const availability = r ? ((r.avail != null) ? r.avail : 1) : 0
+        availItems.push({ date: iso, sig: String(availability), value: { property_id: propIdFs, room_type_id: roomTypeFs, availability } })
+        // Restrictions : defauts full sync pre-remplis (rate->baseRate, min_stay->1) puis
+        // restrictionObj assure le couplage min_stay, les booleans effectifs et les cents.
+        const obj = restrictionObj({
+          rate: (r && r.rate != null) ? Number(r.rate) : baseEur,
           min_stay_arrival: (r && r.min_stay_arrival) || 1,
           min_stay_through: (r && r.min_stay_through) || 1,
           max_stay: (r && r.max_stay) || 0,
-          closed_to_arrival: !!(r && r.cta),
-          closed_to_departure: !!(r && r.ctd),
-          stop_sell: !!(r && r.stop_sell)
+          cta: r && r.cta, ctd: r && r.ctd, stop_sell: r && r.stop_sell
         })
+        restItems.push({ date: iso, sig: JSON.stringify(obj), value: { property_id: propIdFs, rate_plan_id: ratePlanFs, ...obj } })
       }
+      const availabilityValues = coalesceRanges(availItems)
+      const restrictionValues = coalesceRanges(restItems)
       const warningsFs = []
-      if (baseRate === 0) warningsFs.push('base_price manquant ou nul sur le bien ' + property_id + ' — rate 0 sera rejete par Channex')
+      if (baseEur === 0) warningsFs.push('base_price manquant ou nul sur le bien ' + property_id + ' — rate 0 sera rejete par Channex')
       let pushedFs = false
       const taskIds = {}
       try {
@@ -259,13 +314,14 @@ module.exports = async function handler(req, res) {
     for (const seg of dateSegments) {
       for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) allDates.add(ds)
     }
+    const beforeByDate = {} // etat ARI avant edition (delta strict "only send changes" #13)
     if (allDates.size) {
       const { data: existingRows } = await supabase
         .from('calendar_inventory')
         .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
         .eq('property_id', property_id)
         .in('date', [...allDates])
-      ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
+      ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er }; beforeByDate[er.date] = { ...er } })
     }
 
     for (const seg of dateSegments) {
@@ -305,31 +361,34 @@ module.exports = async function handler(req, res) {
     const taskIdsSave = {}
 
     if (propId && ratePlanId) {
-      // Restrictions (rate + min/max + cta/ctd/stop_sell) -> /restrictions
-      const restrictionValues = []
-      const availabilityValues = []
-      for (const seg of dateSegments) {
-        // Mono-date : un objet de valeur par date (certif Channex exige une date unique,
-        // pas une plage). On reutilise expandDays (respecte le filtre jours DOW).
-        const segDates = expandDays(seg.date_from, seg.date_to, seg.days)
-        for (const iso of segDates) {
-          // bloc restrictions (rate + min/max + cta/ctd/stop_sell) -> /restrictions
-          const rv = { property_id: propId, rate_plan_id: ratePlanId, date_from: iso, date_to: iso }
-          let hasR = false
-          if (seg.rate != null) { rv.rate = Math.round(seg.rate * 100); hasR = true }   // cents
-          if (seg.min_stay_arrival != null) { rv.min_stay_arrival = seg.min_stay_arrival; hasR = true }
-          if (seg.min_stay_through != null) { rv.min_stay_through = seg.min_stay_through; hasR = true }
-          if (seg.max_stay != null) { rv.max_stay = seg.max_stay; hasR = true }
-          if (seg.cta != null) { rv.closed_to_arrival = !!seg.cta; hasR = true }
-          if (seg.ctd != null) { rv.closed_to_departure = !!seg.ctd; hasR = true }
-          if (seg.stop_sell != null) { rv.stop_sell = !!seg.stop_sell; hasR = true }
-          if (hasR) restrictionValues.push(rv)
-          // bloc availability (room_type)
-          if (seg.avail != null && roomTypeId) {
-            availabilityValues.push({ property_id: propId, room_type_id: roomTypeId, date_from: iso, date_to: iso, availability: seg.avail })
-          }
+      // Delta strict ("only send changes", engagement Channex #13) : on compare l'etat
+      // ARI AVANT edition (beforeByDate) a l'etat APRES (rowsByDate, source de verite),
+      // et on n'emet QUE les dates dont la signature a change, coalescees en plages.
+      const sortedDates = Object.keys(rowsByDate).sort()
+
+      // --- Restrictions (rate_plan) : dates dont la signature ARI a change ---
+      const restItems = []
+      for (const d of sortedDates) {
+        const beforeObj = restrictionObj(beforeByDate[d])
+        const afterObj = restrictionObj(rowsByDate[d])
+        if (restChangeSig(beforeObj) === restChangeSig(afterObj)) continue   // inchange -> non emis
+        restItems.push({ date: d, sig: JSON.stringify(afterObj), value: { property_id: propId, rate_plan_id: ratePlanId, ...afterObj } })
+      }
+
+      // --- Availability (room_type) : dates dont l'availability a change ---
+      const availItems = []
+      if (roomTypeId) {
+        for (const d of sortedDates) {
+          const beforeAvail = (beforeByDate[d] && beforeByDate[d].avail != null) ? beforeByDate[d].avail : null
+          const afterAvail = (rowsByDate[d].avail != null) ? rowsByDate[d].avail : null
+          if (beforeAvail === afterAvail) continue   // inchange
+          if (afterAvail == null) continue           // rien a poser
+          availItems.push({ date: d, sig: String(afterAvail), value: { property_id: propId, room_type_id: roomTypeId, availability: afterAvail } })
         }
       }
+
+      const restrictionValues = coalesceRanges(restItems)
+      const availabilityValues = coalesceRanges(availItems)
 
       try {
         if (restrictionValues.length) {

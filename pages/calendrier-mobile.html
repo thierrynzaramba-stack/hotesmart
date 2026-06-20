@@ -256,7 +256,7 @@
     }
 
     function rateFor(iso){ const r=inv[iso]; return (r&&r.rate!=null)?Number(r.rate):(Number(currentBien.base_price)||0) }
-    function isUnavail(iso){ const r=inv[iso]; return !!(r&&r.stop_sell) }
+    function isUnavail(iso){ const r=inv[iso]; return !!(r&&(r.avail===0||r.stop_sell)) }
     function isConfigured(iso){ const r=inv[iso]; if(!r)return false; return (r.min_stay_arrival||r.min_stay_through||r.max_stay||r.cta||r.ctd||r.stop_sell||r.rate!=null) }
 
     // nb d'options actives sur une date (pour l'epaisseur de l'indicateur)
@@ -556,7 +556,7 @@
           else { const d=new Date(sISO+'T00:00:00'), last=new Date(eISO+'T00:00:00'); while(d<=last){ const dow=d.getDay(); if(!daysArr.length||daysArr.includes(dow)){ const iso=toISO(d); segments.push({date_from:iso,date_to:iso,rate:computeFinal(rateFor(iso),pv.mode,pv.unit,parseFloat(pv.value))}) } d.setDate(d.getDate()+1) } }
         } else if(p.type==='num'){ if(pv.value==='')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='minStayArr')seg.min_stay_arrival=parseInt(pv.value,10)||0; else if(p.key==='minStayThrough')seg.min_stay_through=parseInt(pv.value,10)||0; else if(p.key==='maxStay')seg.max_stay=parseInt(pv.value,10)||0; segments.push(seg) }
         else if(p.type==='openclosed'){ if(pv.value==='keep')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='cta')seg.cta=(pv.value==='closed'); else if(p.key==='ctd')seg.ctd=(pv.value==='closed'); segments.push(seg) }
-        else if(p.type==='avail'){ if(pv.value==='keep')return; segments.push({date_from:sISO,date_to:eISO,days:daysArr,stop_sell:(pv.value==='closed')}) }
+        else if(p.type==='avail'){ if(pv.value==='keep')return; segments.push({date_from:sISO,date_to:eISO,days:daysArr,avail:(pv.value==='closed')?0:1}) }
       })
       if(!segments.length){ showToast('Aucune modification'); return }
       pushUndo()
