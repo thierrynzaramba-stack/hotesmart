@@ -236,15 +236,19 @@ module.exports = async function handler(req, res) {
         // Availability : pas de ligne d'inventaire = date fermee (0), sinon avail (defaut 1)
         const availability = r ? ((r.avail != null) ? r.avail : 1) : 0
         availItems.push({ date: iso, sig: String(availability), value: { property_id: propIdFs, room_type_id: roomTypeFs, availability } })
-        // Restrictions : defauts full sync pre-remplis (rate->baseRate, min_stay->1) puis
-        // restrictionObj assure le couplage min_stay, les booleans effectifs et les cents.
-        const obj = restrictionObj({
-          rate: (r && r.rate != null) ? Number(r.rate) : baseEur,
+        // Restrictions full sync : ETAT COMPLET, tous les champs declares presents sur CHAQUE
+        // date (exigence certif #1 "147/168 missing max_stay"). On NE passe PAS par restrictionObj
+        // (qui omet max_stay==0 / champs vides) : ici on veut l'etat complet, pas un delta minimal.
+        // max_stay TOUJOURS emis (0 = pas de limite). min_stay couples, defaut 1. rate en cents.
+        const obj = {
+          rate: Math.round(((r && r.rate != null) ? Number(r.rate) : baseEur) * 100),
           min_stay_arrival: (r && r.min_stay_arrival) || 1,
           min_stay_through: (r && r.min_stay_through) || 1,
           max_stay: (r && r.max_stay) || 0,
-          cta: r && r.cta, ctd: r && r.ctd, stop_sell: r && r.stop_sell
-        })
+          closed_to_arrival: !!(r && r.cta),
+          closed_to_departure: !!(r && r.ctd),
+          stop_sell: !!(r && r.stop_sell)
+        }
         restItems.push({ date: iso, sig: JSON.stringify(obj), value: { property_id: propIdFs, rate_plan_id: ratePlanFs, ...obj } })
       }
       const availabilityValues = coalesceRanges(availItems)
@@ -314,14 +318,13 @@ module.exports = async function handler(req, res) {
     for (const seg of dateSegments) {
       for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) allDates.add(ds)
     }
-    const beforeByDate = {} // etat ARI avant edition (delta strict "only send changes" #13)
     if (allDates.size) {
       const { data: existingRows } = await supabase
         .from('calendar_inventory')
         .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
         .eq('property_id', property_id)
         .in('date', [...allDates])
-      ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er }; beforeByDate[er.date] = { ...er } })
+      ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
     }
 
     for (const seg of dateSegments) {
@@ -361,31 +364,48 @@ module.exports = async function handler(req, res) {
     const taskIdsSave = {}
 
     if (propId && ratePlanId) {
-      // Delta strict ("only send changes", engagement Channex #13) : on compare l'etat
-      // ARI AVANT edition (beforeByDate) a l'etat APRES (rowsByDate, source de verite),
-      // et on n'emet QUE les dates dont la signature a change, coalescees en plages.
-      const sortedDates = Object.keys(rowsByDate).sort()
+      // Push NATIVEMENT conforme ("only send changes" #13) : on source directement depuis
+      // les segments edites, qui ne portent QUE les champs reellement touches. Aucun champ
+      // non edite n'est emis. expandDays respecte le filtre jours -> la coalescence ne peut
+      // pas reinclure de jour exclu. Pas de delta beforeByDate : l'intention utilisateur EST
+      // le minimal a emettre. Accumulation PAR DATE (gere le chevauchement multi-segments).
 
-      // --- Restrictions (rate_plan) : dates dont la signature ARI a change ---
-      const restItems = []
-      for (const d of sortedDates) {
-        const beforeObj = restrictionObj(beforeByDate[d])
-        const afterObj = restrictionObj(rowsByDate[d])
-        if (restChangeSig(beforeObj) === restChangeSig(afterObj)) continue   // inchange -> non emis
-        restItems.push({ date: d, sig: JSON.stringify(afterObj), value: { property_id: propId, rate_plan_id: ratePlanId, ...afterObj } })
-      }
-
-      // --- Availability (room_type) : dates dont l'availability a change ---
-      const availItems = []
-      if (roomTypeId) {
-        for (const d of sortedDates) {
-          const beforeAvail = (beforeByDate[d] && beforeByDate[d].avail != null) ? beforeByDate[d].avail : null
-          const afterAvail = (rowsByDate[d].avail != null) ? rowsByDate[d].avail : null
-          if (beforeAvail === afterAvail) continue   // inchange
-          if (afterAvail == null) continue           // rien a poser
-          availItems.push({ date: d, sig: String(afterAvail), value: { property_id: propId, room_type_id: roomTypeId, availability: afterAvail } })
+      // 1) Accumulation par date des champs edites
+      const restByDate = {}   // date -> objet restriction partiel (champs presents uniquement)
+      const availByDate = {}  // date -> availability (room_type)
+      for (const seg of dateSegments) {
+        const hasRest = seg.rate != null || seg.min_stay_arrival != null || seg.min_stay_through != null
+          || seg.max_stay != null || seg.cta != null || seg.ctd != null || seg.stop_sell != null
+        for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) {
+          if (hasRest) {
+            const o = restByDate[ds] || (restByDate[ds] = {})
+            if (seg.rate != null) o.rate = Math.round(Number(seg.rate) * 100)            // euros -> cents
+            if (seg.min_stay_arrival != null || seg.min_stay_through != null) {            // couplage miroir
+              o.min_stay_arrival = seg.min_stay_arrival != null ? seg.min_stay_arrival : seg.min_stay_through
+              o.min_stay_through = seg.min_stay_through != null ? seg.min_stay_through : seg.min_stay_arrival
+            }
+            if (seg.max_stay != null) o.max_stay = seg.max_stay
+            if (seg.cta != null) o.closed_to_arrival = !!seg.cta
+            if (seg.ctd != null) o.closed_to_departure = !!seg.ctd
+            if (seg.stop_sell != null) o.stop_sell = !!seg.stop_sell
+          }
+          if (seg.avail != null) availByDate[ds] = seg.avail
         }
       }
+
+      // 2) Restrictions : items tries par date -> coalescence (sig = champs+valeurs exacts)
+      const restItems = Object.keys(restByDate).sort().map(d => ({
+        date: d, sig: JSON.stringify(restByDate[d]),
+        value: { property_id: propId, rate_plan_id: ratePlanId, ...restByDate[d] }
+      }))
+
+      // 3) Availability : items tries par date -> coalescence (room_type uniquement)
+      const availItems = roomTypeId
+        ? Object.keys(availByDate).sort().map(d => ({
+            date: d, sig: String(availByDate[d]),
+            value: { property_id: propId, room_type_id: roomTypeId, availability: availByDate[d] }
+          }))
+        : []
 
       const restrictionValues = coalesceRanges(restItems)
       const availabilityValues = coalesceRanges(availItems)
