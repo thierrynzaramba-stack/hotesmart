@@ -231,12 +231,20 @@
     card.querySelector('[data-delete]').addEventListener('click', () => openDelete(p))
     card.querySelector('[data-fullsync]').addEventListener('click', async (e) => {
       const btn = e.target
-      if (!confirm('Publier 500 jours de calendrier (prix + disponibilités) vers les canaux de distribution ?')) return
-      btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Publication…'
+      if (!confirm('Mettre en file la publication de 500 jours de calendrier (prix + disponibilités) vers les canaux de distribution ?')) return
+      btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Mise en file…'
       try {
         const r = await api.calendar.fullsync(p.id)
-        if (r.pushed) { btn.textContent = '✅ Publié'; const idTxt = r.task_ids ? ('availability: ' + (r.task_ids.availability || '—') + '\nrestrictions: ' + (r.task_ids.restrictions || '—')) : ''; if (idTxt) { try { await navigator.clipboard.writeText(idTxt) } catch(e){} } alert('Calendrier publié : ' + r.days + ' jours envoyés.\n\nTask IDs (copiés dans le presse-papier) :\n' + idTxt + (r.warnings && r.warnings.length ? '\n\nAvertissements :\n' + r.warnings.join('\n') : '')) }
-        else { btn.textContent = old; btn.disabled = false; alert('Échec de la publication.' + (r.warnings && r.warnings.length ? '\n' + r.warnings.join('\n') : '')) }
+        if (r.enqueued) {
+          btn.textContent = '🕓 En file'
+          alert('Publication mise en file d\'attente.\nElle sera envoyée automatiquement dans les prochaines minutes (1 bien à la fois).')
+        } else {
+          btn.textContent = old; btn.disabled = false
+          const msg = r.reason === 'cooldown'
+            ? ('Déjà publié dans les dernières 24h.' + (r.next_allowed_at ? '\nProchaine publication possible : ' + new Date(r.next_allowed_at).toLocaleString('fr-FR') : ''))
+            : (r.message || 'Déjà en file pour ce bien.')
+          alert(msg)
+        }
       } catch (err) {
         btn.textContent = old; btn.disabled = false; alert('Erreur : ' + (err.message || 'inconnue'))
       }

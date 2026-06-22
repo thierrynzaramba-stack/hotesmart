@@ -13,6 +13,7 @@ const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { processChannelProperties } = require('../lib/cron-channel-props')
+const { processSyncQueue } = require('../lib/cron-channel-sync')
 
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
@@ -65,6 +66,14 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur biens channel:', err.message)
       results.errors.push({ context: 'channel_props', error: err.message })
+    }
+
+    // 3ter. File d'attente des full syncs ARI : depile UN bien (le plus ancien
+    // pending), pousse 500 jours vers Channex, pose last_fullsync_at. 1 bien / run.
+    try { await processSyncQueue(results) }
+    catch (err) {
+      console.error('[Cron] Erreur file sync ARI:', err.message)
+      results.errors.push({ context: 'channel_sync', error: err.message })
     }
 
     // 4. Tâches transverses (non liées à un user spécifique)

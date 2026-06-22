@@ -109,7 +109,7 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(ids) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value')
+      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
       .eq('user_id', user.id)
       .in('id', ids)
     if (error) throw new Error('Erreur lecture biens')
@@ -200,72 +200,48 @@ module.exports = async function handler(req, res) {
 
     // ===== FULL SYNC : pousse 500 jours d'inventaire en 2 appels (certif test 1) =====
     if (action === 'fullsync') {
+      // ENQUEUE : le clic "Publier" met le bien en FILE. Le worker cron (*/5) execute
+      // le push reel (runFullSync), 1 bien a la fois. Refus = 200 + { enqueued:false, reason }.
       if (!property_id) return res.status(400).json({ error: 'property_id requis' })
       const ownedFs = await loadOwnedProperties([property_id])
       const bienFs = ownedFs[0]
       if (!bienFs) return res.status(403).json({ error: 'Bien non trouve' })
-      const propIdFs = bienFs.provider_property_id
-      const ratePlanFs = bienFs.provider_rate_plan_id
-      const roomTypeFs = bienFs.provider_room_type_id
-      if (!propIdFs || !ratePlanFs || !roomTypeFs) {
+      if (!bienFs.provider_property_id || !bienFs.provider_rate_plan_id || !bienFs.provider_room_type_id) {
         return res.status(400).json({ error: 'Bien non connecte au canal (ids manquants)' })
       }
-      const startFs = new Date(); startFs.setHours(0,0,0,0)
-      const endFs = new Date(startFs); endFs.setDate(endFs.getDate() + 500)
-      const isoFs = (d) => toLocalISO(d)
-      const { data: invFs, error: invErrFs } = await supabase
-        .from('calendar_inventory')
-        .select('date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
-        .eq('property_id', property_id)
-        .gte('date', isoFs(startFs))
-        .lte('date', isoFs(endFs))
-        .order('date', { ascending: true })
-      if (invErrFs) return res.status(500).json({ error: 'Erreur lecture inventory' })
-      const invMapFs = {}
-      ;(invFs || []).forEach(r => { invMapFs[r.date] = r })
-      const baseEur = Number(bienFs.base_price) || 0
-      // Full sync : fenetre IDENTIQUE availability + restrictions sur les 500 dates (pas de
-      // delta), une restriction poussee pour CHAQUE date (rate de base + defauts si pas de
-      // ligne), le tout coalesce en plages (Channex accepte/prefere les plages).
-      const availItems = []
-      const restItems = []
-      for (let i = 0; i < 500; i++) {
-        const d = new Date(startFs); d.setDate(d.getDate() + i)
-        const iso = isoFs(d)
-        const r = invMapFs[iso]
-        // Availability : pas de ligne d'inventaire = date fermee (0), sinon avail (defaut 1)
-        const availability = r ? ((r.avail != null) ? r.avail : 1) : 0
-        availItems.push({ date: iso, sig: String(availability), value: { property_id: propIdFs, room_type_id: roomTypeFs, availability } })
-        // Restrictions full sync : ETAT COMPLET, tous les champs declares presents sur CHAQUE
-        // date (exigence certif #1 "147/168 missing max_stay"). On NE passe PAS par restrictionObj
-        // (qui omet max_stay==0 / champs vides) : ici on veut l'etat complet, pas un delta minimal.
-        // max_stay TOUJOURS emis (0 = pas de limite). min_stay couples, defaut 1. rate en cents.
-        const obj = {
-          rate: Math.round(((r && r.rate != null) ? Number(r.rate) : baseEur) * 100),
-          min_stay_arrival: (r && r.min_stay_arrival) || 1,
-          min_stay_through: (r && r.min_stay_through) || 1,
-          max_stay: (r && r.max_stay) || 0,
-          closed_to_arrival: !!(r && r.cta),
-          closed_to_departure: !!(r && r.ctd),
-          stop_sell: !!(r && r.stop_sell)
+      // Garde 1 : un full sync a-t-il deja ete EXECUTE il y a moins de 24h ?
+      if (bienFs.last_fullsync_at) {
+        const last = new Date(bienFs.last_fullsync_at).getTime()
+        if (Date.now() - last < 24 * 3600 * 1000) {
+          const nextAllowed = new Date(last + 24 * 3600 * 1000).toISOString()
+          return res.status(200).json({ enqueued: false, reason: 'cooldown', message: 'Full sync deja effectue dans les dernieres 24h', next_allowed_at: nextAllowed })
         }
-        restItems.push({ date: iso, sig: JSON.stringify(obj), value: { property_id: propIdFs, rate_plan_id: ratePlanFs, ...obj } })
       }
-      const availabilityValues = coalesceRanges(availItems)
-      const restrictionValues = coalesceRanges(restItems)
-      const warningsFs = []
-      if (baseEur === 0) warningsFs.push('base_price manquant ou nul sur le bien ' + property_id + ' — rate 0 sera rejete par Channex')
-      let pushedFs = false
-      const taskIds = {}
-      try {
-        const a = await channelCall('POST', '/availability', { values: availabilityValues })
-        if (!a.ok) warningsFs.push('availability: HTTP ' + a.status); else { pushedFs = true; taskIds.availability = a.json?.data?.[0]?.id || null }
-        const rr = await channelCall('POST', '/restrictions', { values: restrictionValues })
-        if (!rr.ok) warningsFs.push('restrictions: HTTP ' + rr.status); else { pushedFs = true; taskIds.restrictions = rr.json?.data?.[0]?.id || null }
-      } catch (e) {
-        warningsFs.push('push: ' + e.message)
+      // Garde 2 : une entree active (pending/processing) existe-t-elle deja pour ce bien ?
+      const { data: activeRows, error: activeErr } = await supabase
+        .from('channel_sync_queue')
+        .select('id, status')
+        .eq('property_id', property_id)
+        .in('status', ['pending', 'processing'])
+        .limit(1)
+      if (activeErr) { console.error('[calendar] queue read error', activeErr.message); return res.status(500).json({ error: 'Lecture file echouee' }) }
+      if (activeRows && activeRows.length) {
+        return res.status(200).json({ enqueued: false, reason: 'already_queued', message: 'Full sync deja en file pour ce bien', queue_status: activeRows[0].status })
       }
-      return res.status(200).json({ fullsync: true, days: 500, pushed: pushedFs, warnings: warningsFs, task_ids: taskIds })
+      // Insertion pending (l'index unique partiel garantit l'unicite cote base : anti-race)
+      const { data: inserted, error: insErr } = await supabase
+        .from('channel_sync_queue')
+        .insert({ property_id })
+        .select('id')
+        .single()
+      if (insErr) {
+        if (insErr.code === '23505') {
+          return res.status(200).json({ enqueued: false, reason: 'already_queued', message: 'Full sync deja en file pour ce bien' })
+        }
+        console.error('[calendar] enqueue error', insErr.message)
+        return res.status(500).json({ error: 'Mise en file echouee' })
+      }
+      return res.status(200).json({ enqueued: true, queue_id: inserted.id })
     }
 
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })
