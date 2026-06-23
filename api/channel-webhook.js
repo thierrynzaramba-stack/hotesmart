@@ -21,6 +21,9 @@ const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 const WEBHOOK_SECRET = process.env.CHANNEL_WEBHOOK_SECRET
 const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection deploiement (Preview)
 
+// Push availability mutualise (idempotence anti-doublon webhook+poll, cf. lib/channel-availability.js)
+const { pushAvailabilityOnce } = require('../lib/channel-availability')
+
 async function channelCall(method, path, body) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
     method,
@@ -44,31 +47,6 @@ async function ownerOfProperty(providerPropertyId) {
     .eq('provider_property_id', providerPropertyId)
     .maybeSingle()
   return data || null
-}
-
-// Ferme (avail 0) ou rouvre (avail 1) la dispo d'un bien whole sur les nuits
-// occupees. La nuit de depart n'est PAS occupee -> on va de arrival a departure-1.
-async function setWholeAvailability(owner, providerPropertyId, arrival, departure, available) {
-  if (owner.inventory_type !== 'whole') return            // room/hotel : non gere ici
-  if (!owner.provider_room_type_id || !arrival || !departure) return
-
-  // derniere nuit = veille du depart
-  const lastNight = new Date(departure)
-  lastNight.setDate(lastNight.getDate() - 1)
-  const dateTo = lastNight.toISOString().split('T')[0]
-  if (dateTo < arrival) return                            // sejour 0 nuit : rien a faire
-
-  const r = await channelCall('POST', '/availability', {
-    values: [{
-      property_id: providerPropertyId,
-      room_type_id: owner.provider_room_type_id,
-      date_from: arrival,
-      date_to: dateTo,
-      availability: available
-    }]
-  })
-  if (!r.ok) console.error('[channel-webhook] setWholeAvailability echec', r.status, r.json)
-  else console.log('[channel-webhook] dispo', available, arrival, '->', dateTo, providerPropertyId)
 }
 
 // ---- BOOKING ----
@@ -163,7 +141,7 @@ async function saveRevision(rev, revisionId) {
 
   // Gestion dispo pour bien whole : reservation occupe la maison, annulation la libere.
   const open = (snapshot.status === 'cancelled') ? 1 : 0
-  await setWholeAvailability(owner, providerPropertyId, snapshot.arrival, snapshot.departure, open)
+  await pushAvailabilityOnce(owner, providerPropertyId, snapshot.arrival, snapshot.departure, open, 'channel-webhook')
 
   return { saved: true }
 }
