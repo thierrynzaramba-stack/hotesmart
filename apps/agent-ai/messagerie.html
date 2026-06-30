@@ -785,8 +785,8 @@
       const isChannex = String(convForSend?.propertyId || '').includes('-')
       const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
       const payload = isChannex
-        ? { bookingId: bookId, message: text }
-        : { action: 'sendMessage', bookingId: bookId, message: text }
+        ? { bookingId: bookId, message: text, propertyId: convForSend?.propertyId || null }
+        : { action: 'sendMessage', bookingId: bookId, message: text, propertyId: convForSend?.propertyId || null }
       const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
         body: JSON.stringify(payload)

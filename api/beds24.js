@@ -1,4 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
+// Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
+const { recordMessage } = require('../lib/record-message')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -142,6 +144,27 @@ module.exports = async function handler(req, res) {
         })
         const d = await r.json()
         console.log('[Beds24] sendMessage response:', JSON.stringify(d))
+
+        // DOUBLE ECRITURE (etape 2) : message manuel hote sortant dans `messages`,
+        // sans toucher au flux d'envoi ni a l'INSERT conversations (fait cote front).
+        // Fail-safe : recordMessage ne throw jamais, n'affecte pas la reponse.
+        // ota null -> lookup (null pour Beds24). providerMsgId null -> dedup logique.
+        if (r.ok) {
+          await recordMessage({
+            userId:        user.id,
+            provider:      'beds24',
+            propertyId:    propertyId,
+            bookingId:     bookingId,
+            direction:     'outbound',
+            sender:        'host',
+            body:          message,
+            providerMsgId: null,
+            ota:           null,
+            sentAt:        null,
+            kind:          'message'
+          })
+        }
+
         return res.json({ success: r.ok, data: d })
       }
 
