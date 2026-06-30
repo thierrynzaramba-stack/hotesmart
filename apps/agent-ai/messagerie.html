@@ -199,6 +199,10 @@
 
   const SIM_ID = '__SIM__'
 
+  // Etape 4c : bascule messagerie unifiee. Par defaut -> nouveau chemin (/api/messages).
+  // ?legacy=1 -> ancien chemin (merge Beds24-live + conversations). Filet de repli.
+  const LEGACY = new URLSearchParams(location.search).get('legacy') === '1'
+
   function escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
   function escAttr(s) { return String(s ?? '').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
   function formatDateShort(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) }
@@ -237,7 +241,8 @@
   }
   const FLAG_RANK = { intervention:0, info_unknown:1, pending_validation:2 }
 
-  window.loadConversations = async () => {
+  // Ancien chemin (etape 4c) : conserve INTACT sous ?legacy=1. Suppression = etape 5.
+  const loadConversationsLegacy = async () => {
     const propId = document.getElementById('prop-select').value
     document.getElementById('topStatus').textContent = 'Chargement…'
     document.getElementById('conv-items').innerHTML = '<div class="loading">Chargement…</div>'
@@ -335,6 +340,70 @@
     }
   }
 
+  // Dispatcher : par defaut V2 (table messages unifiee), ?legacy=1 -> ancien chemin.
+  window.loadConversations = () => LEGACY ? loadConversationsLegacy() : loadConversationsV2()
+
+  // Nouveau chemin (etape 4c) : lit la table `messages` unifiee via /api/messages
+  // (source unique de verite, doublon elimine). agent_tasks + conversation_flags
+  // restent lus directement (RLS avec policy, lisibles cote client).
+  const loadConversationsV2 = async () => {
+    const propId = document.getElementById('prop-select').value
+    document.getElementById('topStatus').textContent = 'Chargement…'
+    document.getElementById('conv-items').innerHTML = '<div class="loading">Chargement…</div>'
+
+    try {
+      const [msgRes, taskRes, pinRes] = await Promise.all([
+        fetch('/api/messages', {
+          headers: { 'Authorization': `Bearer ${window._session.access_token}` }
+        }).then(r => r.json()),
+        window._supabase.from('agent_tasks').select('*')
+          .eq('user_id', window._session.user.id)
+          .order('created_at', { ascending: false }).limit(200),
+        window._supabase.from('conversation_flags').select('book_id, pinned')
+          .eq('user_id', window._session.user.id).eq('pinned', true)
+      ])
+
+      conversations = msgRes.conversations || []
+      allTasks  = taskRes.data || []
+      pinnedSet = new Set((pinRes.data || []).map(p => String(p.book_id)))
+
+      // Filtre par bien si selectionne (l'endpoint renvoie tout le user).
+      if (propId) conversations = conversations.filter(c => String(c.propertyId) === String(propId))
+
+      // Reinclusion des conversations "tache seule" : booking avec une tache mais
+      // AUCUN message dans `messages` -> l'endpoint ne les renvoie pas.
+      const present = new Set(conversations.map(c => String(c.bookId)))
+      allTasks.forEach(t => {
+        const bid = String(t.book_id)
+        if (!bid || bid === 'null' || present.has(bid)) return
+        if (propId && String(t.property_id) !== String(propId)) return
+        present.add(bid)
+        conversations.push({
+          bookId: bid,
+          propertyId: t.property_id ? String(t.property_id) : '',
+          provider: '', ota: 'Direct', platform: 'direct', displayLabel: 'Direct',
+          guestName: t.guest_name || 'Voyageur',
+          firstNight: t.arrival || null, lastNight: t.departure || null, status: null,
+          lastTime: t.created_at,
+          messages: (t.source_thread || []).map(m => ({
+            sender: m.source, direction: m.source === 'guest' ? 'inbound' : 'outbound',
+            body: m.message, sent_at: m.time, kind: 'message'
+          }))
+        })
+      })
+
+      conversations.sort(sortConversations)
+
+      const pendingTasks = allTasks.filter(t => ['pending','pending_validation'].includes(t.status)).length
+      document.getElementById('topStatus').textContent =
+        `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}` +
+        (pendingTasks ? ` · ${pendingTasks} à traiter` : '')
+      renderConvList()
+    } catch (err) {
+      document.getElementById('conv-items').innerHTML = `<div class="loading">❌ ${err.message}</div>`
+    }
+  }
+
   // Tri : épinglées d'abord (action manuelle), puis chronologique.
   // Les conversations avec tâche gardent leur code couleur pour être repérables,
   // mais ne sont plus forcées en tête (l'épingle sert à ça).
@@ -366,10 +435,20 @@
 
     html += conversations.map(conv => {
       const isActive = conv.bookId === currentConvId
-      const lastMsg  = conv.thread[conv.thread.length - 1]
-      const preview  = lastMsg?.message?.substring(0, 55) || conv.aiReplies[0]?.agent_reply?.substring(0, 55) || '—'
-      const hasUnread = lastMsg?.source === 'guest'
-      const platformLabel = { airbnb:'Airbnb', booking:'Booking', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
+      let preview, hasUnread, platformLabel
+      if (conv.messages) {
+        // V2 : depuis la table messages unifiee
+        const lastMsg = conv.messages[conv.messages.length - 1]
+        preview = lastMsg?.body?.substring(0, 55) || '—'
+        hasUnread = lastMsg?.sender === 'guest'
+        platformLabel = conv.displayLabel || 'Direct'
+      } else {
+        // Legacy (?legacy=1)
+        const lastMsg = conv.thread[conv.thread.length - 1]
+        preview = lastMsg?.message?.substring(0, 55) || conv.aiReplies[0]?.agent_reply?.substring(0, 55) || '—'
+        hasUnread = lastMsg?.source === 'guest'
+        platformLabel = { airbnb:'Airbnb', booking:'Booking', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
+      }
       const date = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : ''
       const flag = convFlag(conv.bookId)
       const isPinned = pinnedSet.has(conv.bookId)
@@ -428,38 +507,49 @@
     const conv = conversations.find(c => c.bookId === bookId)
     if (!conv) return
 
-    const allMessages = []
-    const hostMsgs = []
-    conv.thread.forEach(m => {
-      const msg = { type: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }
-      if (msg.type === 'host') { msg._norm = normalizeText(m.message); hostMsgs.push(msg) }
-      allMessages.push(msg)
-    })
-    conv.aiReplies.forEach(c => {
-      const isAuto = c.guest_message?.startsWith('[AUTO:')
-      const isManual = c.guest_message === '[Envoi manuel hôte]'
-      const norm = normalizeText(c.agent_reply)
-      let best = null, bestDt = Infinity
-      hostMsgs.forEach(h => {
-        if (h._merged || h._norm !== norm) return
-        const dt = Math.abs(new Date(h.time) - new Date(c.created_at))
-        if (dt < bestDt) { best = h; bestDt = dt }
+    let allMessages
+    if (conv.messages) {
+      // V2 : chaque ligne `messages` est deja distincte avec son sender correct
+      // (guest/host/ai/auto/system) -> mapping direct, AUCUNE dedup (la dedup
+      // legacy n'existait que pour le doublon thread-host + conversations.agent_reply).
+      allMessages = conv.messages.map(m => ({ type: m.sender, content: m.body, time: m.sent_at }))
+    } else {
+      // Legacy (?legacy=1) : thread + aiReplies avec dedup texte. INCHANGE.
+      allMessages = []
+      const hostMsgs = []
+      conv.thread.forEach(m => {
+        const msg = { type: m.source === 'guest' ? 'guest' : 'host', content: m.message, time: m.time }
+        if (msg.type === 'host') { msg._norm = normalizeText(m.message); hostMsgs.push(msg) }
+        allMessages.push(msg)
       })
-      if (best && bestDt < 6 * 3600 * 1000) {
-        best._merged = true
-        if (isAuto) { best.type = 'auto'; best.label = c.guest_message }
-        else if (!isManual) best.type = 'ai'
-        return
-      }
-      allMessages.push({ type: isAuto ? 'auto' : 'ai', content: c.agent_reply, label: isAuto ? c.guest_message : null, time: c.created_at })
-    })
+      conv.aiReplies.forEach(c => {
+        const isAuto = c.guest_message?.startsWith('[AUTO:')
+        const isManual = c.guest_message === '[Envoi manuel hôte]'
+        const norm = normalizeText(c.agent_reply)
+        let best = null, bestDt = Infinity
+        hostMsgs.forEach(h => {
+          if (h._merged || h._norm !== norm) return
+          const dt = Math.abs(new Date(h.time) - new Date(c.created_at))
+          if (dt < bestDt) { best = h; bestDt = dt }
+        })
+        if (best && bestDt < 6 * 3600 * 1000) {
+          best._merged = true
+          if (isAuto) { best.type = 'auto'; best.label = c.guest_message }
+          else if (!isManual) best.type = 'ai'
+          return
+        }
+        allMessages.push({ type: isAuto ? 'auto' : 'ai', content: c.agent_reply, label: isAuto ? c.guest_message : null, time: c.created_at })
+      })
+    }
     allMessages.sort((a, b) => new Date(a.time) - new Date(b.time))
 
     // Tâches en attente de cette conversation → bulles d'action en fin de fil
     const convTasks = allTasks.filter(t => String(t.book_id) === String(bookId)
       && ['pending','pending_validation'].includes(t.status))
 
-    const platformLabel = { airbnb:'Airbnb', booking:'Booking.com', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct'
+    const platformLabel = conv.messages
+      ? (conv.displayLabel || 'Direct')
+      : ({ airbnb:'Airbnb', booking:'Booking.com', vrbo:'Vrbo', expedia:'Expedia', ota:'OTA', direct:'Direct' }[conv.platform] || 'Direct')
     const isPinned = pinnedSet.has(bookId)
 
     document.getElementById('conv-view').innerHTML = `
