@@ -23,6 +23,8 @@ const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection depl
 
 // Push availability mutualise (idempotence anti-doublon webhook+poll, cf. lib/channel-availability.js)
 const { pushAvailabilityOnce } = require('../lib/channel-availability')
+// Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
+const { recordMessage } = require('../lib/record-message')
 
 async function channelCall(method, path, body) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
@@ -201,6 +203,30 @@ async function handleMessage(payload) {
     console.error('[channel-webhook] insert message failed', error.message)
     return { ok: false, reason: 'db_error' }
   }
+
+  // CAPTURE TEMPORAIRE : decouvrir le vrai nom du champ id de message Channex
+  // sur le prochain webhook reel. A RETIRER une fois le champ identifie.
+  console.log('[channel-webhook] payload message keys:', Object.keys(payload || {}))
+
+  // DOUBLE ECRITURE (etape 2) : on ecrit AUSSI dans `messages`, sans toucher
+  // a l'INSERT conversations ci-dessus. Fail-safe : recordMessage ne throw
+  // jamais, son echec ne casse ni l'insert conversations ni l'ack.
+  // providerMsgId : seul un champ explicite message_id est utilise (id de
+  // message Channex non confirme dans le payload) -> sinon dedup logique.
+  // ota = null : recordMessage resout via bookings_snapshot (gere la race).
+  await recordMessage({
+    userId:        owner.user_id,
+    provider:      'channex',
+    propertyId:    providerPropertyId,
+    bookingId:     payload.booking_id || null,
+    direction:     'inbound',
+    sender:        'guest',
+    body:          payload.message || '',
+    providerMsgId: payload.message_id || null,
+    ota:           null,
+    sentAt:        payload.inserted_at || payload.timestamp || null,
+    kind:          'message'
+  })
 
   console.log('[channel-webhook] message', payload.booking_id, '->', owner.user_id)
   return { ok: true }
