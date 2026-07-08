@@ -6,6 +6,7 @@
 //        -> upsert Supabase PUIS push channel manager (ARI). Synchrone.
 
 const { createClient } = require('@supabase/supabase-js')
+const { buildOccupancyRates } = require('../lib/channel-pricing')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -347,6 +348,8 @@ module.exports = async function handler(req, res) {
       // le minimal a emettre. Accumulation PAR DATE (gere le chevauchement multi-segments).
 
       // 1) Accumulation par date des champs edites
+      // extra_guest_fee stocke en unite majeure sur properties -> cents.
+      const feeCentsCal = Math.round((Number(bien.extra_guest_fee) || 0) * 100)
       const restByDate = {}   // date -> objet restriction partiel (champs presents uniquement)
       const availByDate = {}  // date -> availability (room_type)
       for (const seg of dateSegments) {
@@ -355,7 +358,13 @@ module.exports = async function handler(req, res) {
         for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) {
           if (hasRest) {
             const o = restByDate[ds] || (restByDate[ds] = {})
-            if (seg.rate != null) o.rate = Math.round(Number(seg.rate) * 100)            // euros -> cents
+            if (seg.rate != null) {
+              const rateCents = Math.round(Number(seg.rate) * 100)                         // euros -> cents
+              const occRates  = buildOccupancyRates(rateCents, bien.capacity, bien.included_guests, feeCentsCal)
+              // occRates non-null -> rates[] par occupation ; null -> rate singulier (inchange).
+              if (occRates) o.rates = occRates
+              else          o.rate  = rateCents
+            }
             if (seg.min_stay_arrival != null || seg.min_stay_through != null) {            // couplage miroir
               o.min_stay_arrival = seg.min_stay_arrival != null ? seg.min_stay_arrival : seg.min_stay_through
               o.min_stay_through = seg.min_stay_through != null ? seg.min_stay_through : seg.min_stay_arrival
