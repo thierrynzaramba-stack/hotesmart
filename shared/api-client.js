@@ -50,7 +50,10 @@ export const api = {
   channel: {
     listProperties: () => apiCall('channel-property', 'GET'),
     createProperty: (data) => apiCall('channel-property', 'POST', data),
-    getToken: (propertyId) => apiCall('channel-token', 'POST', { property_id: propertyId })
+    getToken: (propertyId) => apiCall('channel-token', 'POST', { property_id: propertyId }),
+    // Connexion + mapping OTA : renvoie { iframe_url } vers la page /channels
+    // (redirect_to=/channels du gestionnaire de canaux, marque blanche).
+    connect: (propertyId) => apiCall(`channel-connect?property_id=${encodeURIComponent(propertyId)}`, 'GET')
   },
   calendar: {
     load: (propertyIds, start, end) =>
