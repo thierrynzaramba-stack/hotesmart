@@ -284,7 +284,13 @@ module.exports = async function handler(req, res) {
           currency: cur,
           property_type: 'apartment',
           country: cnt,
-          zip_code: zip_code || undefined
+          zip_code: zip_code || undefined,
+          timezone: 'Europe/Paris',            // TODO: deduire du pays du bien
+          settings: {
+            allow_availability_autoupdate_on_confirmation: true,   // defaut Channex: decremente sur nouvelle resa
+            allow_availability_autoupdate_on_modification: false,  // gere par notre PMS
+            allow_availability_autoupdate_on_cancellation: false   // gere par notre PMS
+          }
         }
       })
       if (!propRes.ok) {
