@@ -368,21 +368,28 @@ module.exports = async function handler(req, res) {
       }
       providerRatePlanId = rateRes.json?.data?.id
 
-      // Etape 3bis : ouvrir la dispo (whole = 1 unite) sur 365 jours.
-      // Sans ce push, le room type herite d'un inventaire par defaut indesirable.
+      // Etape 3bis : ouvrir la dispo (whole = 1 unite) sur 500 jours.
+      // Horizon aligne sur le full sync (channel-fullsync.js days:500) : sans ca,
+      // les dates J+366..J+500 naissent fermees (0) jusqu'au premier full sync.
       // Le prix n'est PAS pousse ici : une date sans tarif applique base_price.
-      const availRes = await channelCall('POST', '/availability', {
+      const availPayload = {
         values: [{
           property_id: providerPropertyId,
           room_type_id: providerRoomTypeId,
           date_from: isoPlusDays(0),
-          date_to: isoPlusDays(365),
+          date_to: isoPlusDays(500),
           availability: 1
         }]
-      })
+      }
+      let availRes = await channelCall('POST', '/availability', availPayload)
       if (!availRes.ok) {
-        // Non bloquant pour la creation, mais on le signale : la dispo devra etre repoussee.
-        console.error('[channel-property] push dispo 365j echoue', availRes.status, availRes.json)
+        // Hoquet transitoire probable : une seule relance apres 2s.
+        await new Promise(r => setTimeout(r, 2000))
+        availRes = await channelCall('POST', '/availability', availPayload)
+        if (!availRes.ok) {
+          // Non bloquant pour la creation, mais on le signale : la dispo devra etre repoussee.
+          console.error('[channel-property] push dispo 500j echoue apres retry', availRes.status, availRes.json)
+        }
       }
 
       // Etape 3ter : installer l'application Messages sur la propriete.
