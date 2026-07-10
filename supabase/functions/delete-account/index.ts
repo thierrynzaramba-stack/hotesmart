@@ -86,7 +86,20 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // 6. Supprimer l'utilisateur (cascade sur les tables avec ON DELETE CASCADE)
+    // 6. Purge des tables a user_id SANS FK vers auth.users : le ON DELETE CASCADE
+    //    des FK ne les couvre pas, elles resteraient orphelines.
+    //    Liste = resultat de la requete SQL "user_id sans FK" (dashboard) = ['messages'].
+    //    Purge NON BLOQUANTE : une table absente / sans colonne user_id est loggee
+    //    et ignoree, la suppression du compte se poursuit.
+    const ORPHAN_TABLES = ['messages']
+    for (const table of ORPHAN_TABLES) {
+      const { error: purgeErr } = await adminClient.from(table).delete().eq('user_id', userId)
+      if (purgeErr) {
+        console.error(`[delete-account] purge ${table} echec: ${purgeErr.message}`)
+      }
+    }
+
+    // 7. Supprimer l'utilisateur (les FK ON DELETE CASCADE purgent le reste)
     const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId)
     if (deleteErr) {
       return new Response(JSON.stringify({ error: deleteErr.message }), {
