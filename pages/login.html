@@ -45,8 +45,12 @@
 
   <div id="form-register" style="display:none">
     <div class="form-group">
-      <label class="form-label">Prénom et nom</label>
-      <input class="form-input" type="text" id="reg-name" placeholder="Thierry Dupont">
+      <label class="form-label">Prénom</label>
+      <input class="form-input" type="text" id="reg-first-name" placeholder="Thierry">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nom</label>
+      <input class="form-input" type="text" id="reg-last-name" placeholder="Dupont">
     </div>
     <div class="form-group">
       <label class="form-label">Email</label>
@@ -55,6 +59,28 @@
     <div class="form-group">
       <label class="form-label">Mot de passe</label>
       <input class="form-input" type="password" id="reg-password" placeholder="••••••••">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Société <span style="color:var(--text2);font-weight:400">(optionnel)</span></label>
+      <input class="form-input" type="text" id="reg-company" placeholder="Ma conciergerie">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sur combien de biens HôteSmart peut vous aider ?</label>
+      <input class="form-input" type="number" id="reg-property-count" min="1" placeholder="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Qu'attendez-vous d'HôteSmart ?</label>
+      <div id="reg-expectations" style="display:flex;flex-direction:column;gap:8px;margin-top:6px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="revenus"> Augmenter mes revenus</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="ia_voyageurs"> Une IA qui répond à mes voyageurs</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="menages"> Gérer les ménages</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="arrivees"> Automatiser les arrivées (codes d'accès, instructions)</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="calendriers"> Centraliser mes calendriers</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="gain_temps"> Gagner du temps au quotidien</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="multi_biens"> Piloter plusieurs biens facilement</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer"><input type="checkbox" value="autre" id="reg-exp-autre"> Autre :</label>
+        <input class="form-input" type="text" id="reg-expectations-other" placeholder="Précisez…" style="display:none">
+      </div>
     </div>
     <button class="btn btn-primary" style="width:100%" id="btn-register">Créer mon compte</button>
     <div class="error" id="reg-error"></div>
@@ -90,14 +116,35 @@
     }
   })
 
+  document.getElementById('reg-exp-autre').addEventListener('change', function() {
+    document.getElementById('reg-expectations-other').style.display = this.checked ? 'block' : 'none'
+  })
+
   document.getElementById('btn-register').addEventListener('click', async () => {
-    const name = document.getElementById('reg-name').value
+    const firstName = document.getElementById('reg-first-name').value.trim()
+    const lastName = document.getElementById('reg-last-name').value.trim()
     const email = document.getElementById('reg-email').value
     const password = document.getElementById('reg-password').value
+    const company = document.getElementById('reg-company').value.trim()
+    const propertyCount = parseInt(document.getElementById('reg-property-count').value, 10)
+    const expectations = Array.from(document.querySelectorAll('#reg-expectations input[type=checkbox]:checked')).map(c => c.value)
+    const expectationsOther = document.getElementById('reg-expectations-other').value.trim()
     const err = document.getElementById('reg-error')
+
+    if (!firstName || !lastName) { err.textContent = 'Prénom et nom requis'; err.style.display = 'block'; return }
+    if (!propertyCount || propertyCount < 1) { err.textContent = 'Indiquez le nombre de biens (min. 1)'; err.style.display = 'block'; return }
+
     const { error } = await supabase.auth.signUp({
       email, password,
-      options: { data: { full_name: name } }
+      options: { data: {
+        first_name: firstName,
+        last_name: lastName,
+        full_name: `${firstName} ${lastName}`,
+        company: company || null,
+        property_count: propertyCount,
+        expectations,
+        expectations_other: expectations.includes('autre') ? (expectationsOther || null) : null
+      } }
     })
     if (error) {
       err.textContent = error.message
