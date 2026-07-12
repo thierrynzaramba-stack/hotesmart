@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="supabase-url" content="https://cjmrizpdyhrcurmgyrhs.supabase.co">
+  <meta name="supabase-key" content="sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD">
+  <title>HôteSmart — Diagnostic</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    body { background: var(--bg2); padding: 24px; }
+    .diag-wrap { max-width: 640px; margin: 0 auto; }
+    .diag-title { font-size: 22px; font-weight: 500; color: #C97B5C; margin-bottom: 4px; }
+    .diag-sub { font-size: 13px; color: var(--text2); margin-bottom: 24px; }
+    .diag-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 18px; margin-bottom: 14px; }
+    .diag-card h3 { font-size: 14px; font-weight: 500; margin: 0 0 4px; }
+    .diag-card p { font-size: 12px; color: var(--text2); margin: 0 0 12px; line-height: 1.5; }
+    .diag-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .diag-status { font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+    .diag-status.ok { background: #E6F4EA; color: #137333; }
+    .diag-status.ko { background: #FCE8E6; color: #C5221F; }
+    .diag-status.idle { background: var(--bg2); color: var(--text2); }
+    .diag-out { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px; margin-top: 12px; max-height: 260px; overflow: auto; display: none; }
+    .diag-out.show { display: block; }
+    button.diag-btn { margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="diag-wrap">
+  <div class="diag-title">Diagnostic système</div>
+  <div class="diag-sub">Tests de santé en un clic depuis votre session connectée. Aucun secret n'est exposé.</div>
+
+  <div class="diag-card" data-test="1">
+    <div class="diag-head">
+      <h3>1. Session (front)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Affiche l'utilisateur courant via le client Supabase front.</p>
+    <button class="btn diag-btn" data-run="1">Tester</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="2">
+    <div class="diag-head">
+      <h3>2. Token → Supabase (direct)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Valide l'access_token de la session directement contre l'API Supabase.</p>
+    <button class="btn diag-btn" data-run="2">Tester</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="3">
+    <div class="diag-head">
+      <h3>3. Token → notre API</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Vérifie que nos endpoints serveur valident ce même token (GET /api/channel-property).</p>
+    <button class="btn diag-btn" data-run="3">Tester</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="4">
+    <div class="diag-head">
+      <h3>4. Webhook register</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Enregistre le webhook global chez le gestionnaire de canaux (POST /api/channel-webhook).</p>
+    <button class="btn diag-btn" data-run="4">Tester</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="5">
+    <div class="diag-head">
+      <h3>5. API canaux (prod)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Teste la connexion live au gestionnaire de canaux (CHANNEL_BASE_URL + clé prod).</p>
+    <button class="btn diag-btn" data-run="5">Tester</button>
+    <pre class="diag-out"></pre>
+  </div>
+</div>
+
+<script type="module">
+  import { supabase, getUser } from '/shared/supabase.js'
+
+  const user = await getUser()
+  if (!user) { window.location.href = '/pages/login.html'; throw new Error('not auth') }
+
+  const SUPABASE_URL = document.querySelector('meta[name="supabase-url"]').content
+  const SUPABASE_KEY = document.querySelector('meta[name="supabase-key"]').content
+
+  function card(n) { return document.querySelector(`.diag-card[data-test="${n}"]`) }
+  function setStatus(n, ok, label) {
+    const s = card(n).querySelector('.diag-status')
+    s.className = 'diag-status ' + (ok === null ? 'idle' : ok ? 'ok' : 'ko')
+    s.textContent = label
+  }
+  function setOut(n, obj) {
+    const out = card(n).querySelector('.diag-out')
+    out.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2)
+    out.classList.add('show')
+  }
+
+  async function token() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Aucune session (reconnectez-vous)')
+    return session.access_token
+  }
+
+  const tests = {
+    // 1. Session front
+    async '1'() {
+      const { data: { user }, error } = await supabase.auth.getUser()
+      if (error || !user) throw new Error(error?.message || 'Pas d\'utilisateur')
+      setOut(1, { email: user.email, user_id: user.id })
+      return true
+    },
+    // 2. Token -> Supabase direct
+    async '2'() {
+      const t = await token()
+      const res = await fetch(SUPABASE_URL + '/auth/v1/user', {
+        headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(2, { http: res.status, body })
+      return res.ok
+    },
+    // 3. Token -> notre API
+    async '3'() {
+      const t = await token()
+      const res = await fetch('/api/channel-property', {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(3, { http: res.status, body })
+      return res.ok
+    },
+    // 4. Webhook register
+    async '4'() {
+      const t = await token()
+      const res = await fetch('/api/channel-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ action: 'register', callback_url: 'https://hotesmart.vercel.app/api/channel-webhook' })
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(4, { http: res.status, body })
+      return res.ok
+    },
+    // 5. API canaux prod
+    async '5'() {
+      const t = await token()
+      const res = await fetch('/api/diagnostic?check=channel', {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(5, { http: res.status, body })
+      return res.ok
+    }
+  }
+
+  document.querySelectorAll('[data-run]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const n = btn.dataset.run
+      setStatus(n, null, 'En cours…')
+      btn.disabled = true
+      try {
+        const ok = await tests[n]()
+        setStatus(n, ok, ok ? 'OK' : 'Échec')
+      } catch (e) {
+        setStatus(n, false, 'Échec')
+        setOut(n, 'Erreur : ' + e.message)
+      } finally {
+        btn.disabled = false
+      }
+    })
+  })
+</script>
+
+</body>
+</html>
