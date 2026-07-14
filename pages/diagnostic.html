@@ -80,6 +80,17 @@
     <button class="btn diag-btn" data-run="5">Tester</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="6">
+    <div class="diag-head">
+      <h3>6. Import des messages d'un bien</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Importe l'historique des messages du bien (POST /api/channel-import-messages).</p>
+    <input class="form-input" id="import-prop-id" type="text" placeholder="UUID du bien" value="1a2cfd91-f501-4b0e-83ef-0598a0c921b2" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="6">Importer</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -158,6 +169,20 @@
       const body = await res.json().catch(() => ({}))
       setOut(5, { http: res.status, body })
       return res.ok
+    },
+    // 6. Import des messages d'un bien
+    async '6'() {
+      const t = await token()
+      const propertyId = document.getElementById('import-prop-id').value.trim()
+      if (!propertyId) throw new Error('UUID du bien requis')
+      const res = await fetch('/api/channel-import-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ property_id: propertyId })
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(6, { http: res.status, body })
+      return res.ok && !body.error
     }
   }
 
