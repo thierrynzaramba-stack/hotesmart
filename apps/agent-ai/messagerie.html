@@ -171,17 +171,20 @@
   window._session  = session
   window._supabase = supabase
 
-  const res  = await fetch('/api/beds24', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-    body: JSON.stringify({ action: 'getProperties' })
+  // Liste FUSIONNEE beds24 + channex. Le POST /api/beds24 getProperties ne
+  // renvoyait que les biens Beds24 -> biens channex absents du filtre.
+  const res  = await fetch('/api/channel-property', {
+    headers: { 'Authorization': `Bearer ${session.access_token}` }
   })
   const data = await res.json()
   window._props = data.properties || []
   const select = document.getElementById('prop-select')
   window._props.forEach(p => {
     const opt = document.createElement('option')
-    opt.value = p.id; opt.textContent = p.name
+    // Cle de filtrage = provider_property_id : numerique (beds24) ou id Channex.
+    // Correspond a messages.property_id ET agent_tasks.property_id. JAMAIS p.id
+    // (UUID Supabase pour channex -> ne matche aucun message).
+    opt.value = p.provider_property_id; opt.textContent = p.name
     select.appendChild(opt)
   })
 
@@ -207,7 +210,8 @@
   function escAttr(s) { return String(s ?? '').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
   function formatDateShort(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) }
   function getPropName(propId) {
-    const p = (window._props || []).find(p => String(p.id) === String(propId))
+    // propId = provider_property_id (cle de filtrage), pas l'UUID Supabase.
+    const p = (window._props || []).find(p => String(p.provider_property_id) === String(propId))
     return p?.name || propId || '—'
   }
 
@@ -735,7 +739,7 @@
   // ── Simulateur : conversation de test (tchat inversé) ──────────────────────
   function renderSimView() {
     const propOptions = (window._props || []).map(p =>
-      `<option value="${escAttr(p.id)}" ${String(p.id) === String(simPropId) ? 'selected' : ''}>${escHtml(p.name)}</option>`
+      `<option value="${escAttr(p.provider_property_id)}" ${String(p.provider_property_id) === String(simPropId) ? 'selected' : ''}>${escHtml(p.name)}</option>`
     ).join('')
 
     document.getElementById('conv-view').innerHTML = `
