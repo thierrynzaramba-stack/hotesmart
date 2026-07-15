@@ -1,0 +1,355 @@
+// components/airbnb-connect.js
+// Assistant de connexion Airbnb (remplace l'iframe connexion+mapping).
+// Orchestration A -> OAuth -> B -> C -> D :
+//   A     : prerequis + bouton "Connecter mon Airbnb"
+//   OAuth : iframe channel-connect (seul moment iframe) + polling channels 3s
+//   B     : choix de l'annonce (list_listings)
+//   C     : map (POST /mappings) puis activate, avec feedback + retry
+//   D     : "Connectee" (le webhook channel-events fait le reste)
+//
+// Le mapping s'adresse par provider_property_id ; l'OAuth par UUID HoteSmart.
+// L'appelant passe donc l'objet bien complet { id, name, provider_property_id }.
+import { api } from '/shared/api-client.js'
+import { logger } from '/shared/logger.js'
+
+let injected = false
+let S = null   // etat de la session d'ouverture
+
+const POLL_MS = 3000
+const OAUTH_TIMEOUT_MS = 3 * 60 * 1000
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+function ensureModal() {
+  if (injected) return
+  injected = true
+
+  const style = document.createElement('style')
+  style.textContent = `
+    .ab-modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:1000; padding:20px; }
+    .ab-modal.show { display:flex; }
+    .ab-modal-box { background:var(--bg); border-radius:var(--radius-lg); width:100%; max-width:560px; max-height:90vh; display:flex; flex-direction:column; overflow:hidden; }
+    .ab-modal-box.wide { max-width:1000px; height:90vh; }
+    .ab-head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:0.5px solid var(--border); flex-shrink:0; }
+    .ab-head .title { font-size:14px; font-weight:500; }
+    .ab-steps { display:flex; align-items:center; gap:6px; padding:12px 18px; border-bottom:0.5px solid var(--border); flex-shrink:0; overflow-x:auto; }
+    .ab-step { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text2); white-space:nowrap; }
+    .ab-step .num { width:18px; height:18px; border-radius:50%; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:10px; flex-shrink:0; }
+    .ab-step.active { color:var(--text); font-weight:500; }
+    .ab-step.active .num, .ab-step.done .num { background:var(--green); color:#fff; border-color:var(--green); }
+    .ab-step-sep { flex:1; height:1px; background:var(--border); min-width:10px; }
+    .ab-body { padding:20px; overflow:auto; flex:1; }
+    .ab-body.frame { padding:0; display:flex; flex-direction:column; }
+    .ab-body.frame iframe { flex:1; border:none; width:100%; }
+    .ab-h { font-size:16px; font-weight:500; margin-bottom:6px; }
+    .ab-sub { font-size:13px; color:var(--text2); margin-bottom:18px; line-height:1.5; }
+    .ab-prereq { list-style:none; padding:0; margin:0 0 20px; }
+    .ab-prereq li { display:flex; gap:10px; align-items:flex-start; font-size:13px; padding:8px 0; border-bottom:0.5px solid var(--border); }
+    .ab-prereq li span.ic { flex-shrink:0; }
+    .ab-list { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; max-height:340px; overflow:auto; }
+    .ab-opt { display:flex; align-items:center; gap:10px; padding:11px 13px; border:0.5px solid var(--border); border-radius:var(--radius); cursor:pointer; font-size:13px; }
+    .ab-opt:hover { border-color:var(--green); }
+    .ab-opt input { cursor:pointer; }
+    .ab-status { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text2); padding:14px 0; }
+    .ab-spin { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--green); border-radius:50%; animation:ab-rot 0.8s linear infinite; flex-shrink:0; }
+    @keyframes ab-rot { to { transform:rotate(360deg); } }
+    .ab-err { font-size:13px; color:#C5221F; background:#FCE8E6; border-radius:var(--radius); padding:10px 12px; margin-bottom:16px; line-height:1.5; }
+    .ab-ok { font-size:15px; font-weight:500; color:#137333; text-align:center; padding:14px 0; }
+    .ab-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    @media (max-width:768px){ .ab-modal { padding:0 } .ab-modal-box, .ab-modal-box.wide { height:100vh; max-height:none; border-radius:0; max-width:none } }
+  `
+  document.head.appendChild(style)
+
+  const modal = document.createElement('div')
+  modal.className = 'ab-modal'
+  modal.id = 'ab-modal'
+  modal.innerHTML = `
+    <div class="ab-modal-box" id="ab-box">
+      <div class="ab-head">
+        <div class="title" id="ab-title">Connexion Airbnb</div>
+        <button class="btn" id="ab-close">✕</button>
+      </div>
+      <div class="ab-steps" id="ab-steps">
+        <div class="ab-step" data-step="1"><span class="num">1</span><span>Connexion</span></div>
+        <div class="ab-step-sep"></div>
+        <div class="ab-step" data-step="2"><span class="num">2</span><span>Votre annonce</span></div>
+        <div class="ab-step-sep"></div>
+        <div class="ab-step" data-step="3"><span class="num">3</span><span>Liaison</span></div>
+        <div class="ab-step-sep"></div>
+        <div class="ab-step" data-step="4"><span class="num">4</span><span>Terminé</span></div>
+      </div>
+      <div class="ab-body" id="ab-body"></div>
+    </div>
+  `
+  document.body.appendChild(modal)
+  document.getElementById('ab-close').addEventListener('click', close)
+  modal.addEventListener('click', (e) => { if (e.target === modal) close() })
+}
+
+function close() {
+  if (S?.pollTimer) clearInterval(S.pollTimer)
+  const modal = document.getElementById('ab-modal')
+  if (modal) modal.classList.remove('show')
+  const box = document.getElementById('ab-box')
+  if (box) box.classList.remove('wide')
+  const body = document.getElementById('ab-body')
+  if (body) { body.classList.remove('frame'); body.innerHTML = '' }
+  S = null
+}
+
+function setBody(html, { frame = false, wide = false } = {}) {
+  const body = document.getElementById('ab-body')
+  body.classList.toggle('frame', frame)
+  document.getElementById('ab-box').classList.toggle('wide', wide)
+  body.innerHTML = html
+}
+
+// Fil d'Ariane : 1 Connexion (A+OAuth) · 2 Votre annonce (B) · 3 Liaison (C) · 4 Terminé (D).
+// Les etapes < active = "done", l'active = "active". Les ecrans d'erreur conservent l'etape.
+function setStep(active) {
+  document.querySelectorAll('#ab-steps .ab-step').forEach(el => {
+    const n = Number(el.dataset.step)
+    el.classList.toggle('done', n < active)
+    el.classList.toggle('active', n === active)
+  })
+}
+
+// ---------- A : prerequis ----------
+function screenA() {
+  setStep(1)
+  document.getElementById('ab-title').textContent = `Connexion Airbnb — ${S.property.name || ''}`.trim()
+  setBody(`
+    <div class="ab-h">Avant de commencer</div>
+    <div class="ab-sub">Pour une connexion réussie, vérifiez ces trois points sur votre compte Airbnb :</div>
+    <ul class="ab-prereq">
+      <li><span class="ic">📋</span><span>Votre annonce Airbnb est <b>complète et publiée</b> (photos, prix, règlement) — HôteSmart en récupère les détails.</span></li>
+      <li><span class="ic">🔌</span><span><b>Aucun autre logiciel de synchronisation</b> n'est déjà relié à cette annonce (cela créerait un conflit).</span></li>
+      <li><span class="ic">👤</span><span>Vous vous connecterez au <b>bon compte Airbnb</b> (celui qui possède l'annonce).</span></li>
+    </ul>
+    <div class="ab-actions">
+      <button class="btn btn-primary" id="ab-start">Connecter mon Airbnb</button>
+    </div>
+  `)
+  document.getElementById('ab-start').addEventListener('click', startOAuth)
+}
+
+// ---------- OAuth : iframe + polling ----------
+async function startOAuth() {
+  setBody(`<div class="ab-status"><div class="ab-spin"></div> Préparation de la connexion…</div>`)
+  let data
+  try {
+    data = await api.channel.connect(S.property.id)
+    if (!data?.iframe_url) throw new Error(data?.error || 'iframe_url absent')
+  } catch (e) {
+    logger.error('airbnb-connect', 'connect echec', { e: e.message })
+    return showOAuthError('La connexion à Airbnb n\'a pas pu démarrer.')
+  }
+
+  setBody(`
+    <iframe id="ab-oauth-frame" src="${escHtml(data.iframe_url)}" title="Connexion Airbnb" allow="clipboard-read; clipboard-write"></iframe>
+    <div style="padding:12px 16px; border-top:0.5px solid var(--border); flex-shrink:0;">
+      <div class="ab-status" style="padding:0 0 8px;"><div class="ab-spin"></div> En attente de la connexion de votre compte…</div>
+      <div class="ab-actions">
+        <button class="btn" id="ab-done">J'ai terminé la connexion</button>
+      </div>
+    </div>
+  `, { frame: true, wide: true })
+  document.getElementById('ab-done').addEventListener('click', () => checkChannels(true))
+
+  S.pollDeadline = Date.now() + OAUTH_TIMEOUT_MS
+  S.pollTimer = setInterval(() => checkChannels(false), POLL_MS)
+}
+
+async function checkChannels(manual) {
+  try {
+    const r = await api.channel.mapping.channels(S.property.provider_property_id)
+    if ((r?.channel_count || 0) > 0) {
+      if (S.pollTimer) clearInterval(S.pollTimer)
+      S.channelId = r.channels[0].id
+      logger.info('airbnb-connect', 'canal detecte', { channelId: S.channelId })
+      return screenB()
+    }
+  } catch (e) {
+    logger.error('airbnb-connect', 'poll channels echec', { e: e.message })
+  }
+  if (manual) {
+    // Clic "j'ai terminé" sans canal detecte : indice, on continue le polling.
+    const s = document.querySelector('.ab-status')
+    if (s) s.innerHTML = `<div class="ab-spin"></div> Connexion pas encore détectée — laissez la fenêtre ouverte quelques secondes.`
+  }
+  if (Date.now() > S.pollDeadline) {
+    if (S.pollTimer) clearInterval(S.pollTimer)
+    showOAuthError('Connexion non détectée après 3 minutes.')
+  }
+}
+
+function showOAuthError(msg) {
+  setBody(`
+    <div class="ab-err">${escHtml(msg)}</div>
+    <div class="ab-sub">Vérifiez que vous avez bien autorisé HôteSmart dans la fenêtre Airbnb, puis réessayez.</div>
+    <div class="ab-actions">
+      <button class="btn btn-primary" id="ab-retry">Réessayer</button>
+      <button class="btn" id="ab-cancel">Annuler</button>
+    </div>
+  `)
+  document.getElementById('ab-retry').addEventListener('click', screenA)
+  document.getElementById('ab-cancel').addEventListener('click', close)
+}
+
+// ---------- B : choix de l'annonce ----------
+function normListings(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map(x => ({
+      id: x.id || x.listing_id || x.value,
+      label: x.title || x.name || x.label || x.id || x.listing_id
+    })).filter(o => o.id)
+  }
+  if (raw && typeof raw === 'object') {
+    return Object.entries(raw).map(([id, v]) => ({
+      id,
+      label: typeof v === 'string' ? v : (v?.title || v?.name || id)
+    }))
+  }
+  return []
+}
+
+async function screenB() {
+  setStep(2)
+  setBody(`<div class="ab-status"><div class="ab-spin"></div> Récupération de vos annonces Airbnb…</div>`)
+  let listings
+  try {
+    const r = await api.channel.mapping.listListings(S.property.provider_property_id, S.channelId)
+    listings = normListings(r?.listings)
+  } catch (e) {
+    logger.error('airbnb-connect', 'list_listings echec', { e: e.message })
+    return screenBError('Impossible de récupérer vos annonces Airbnb pour le moment. Réessayez dans un instant.')
+  }
+  if (!listings.length) {
+    return screenBError('Aucune annonce trouvée sur ce compte Airbnb.')
+  }
+
+  const opts = listings.map((l, i) => `
+    <label class="ab-opt">
+      <input type="radio" name="ab-listing" value="${escHtml(l.id)}" data-idx="${i}">
+      <span><b>${escHtml(l.label)}</b></span>
+    </label>
+  `).join('')
+
+  setBody(`
+    <div class="ab-h">Choisissez votre annonce</div>
+    <div class="ab-sub">Sélectionnez l'annonce Airbnb à relier à votre logement.</div>
+    <div class="ab-list">${opts}</div>
+    <div class="ab-actions">
+      <button class="btn btn-primary" id="ab-continue" disabled>Continuer</button>
+    </div>
+  `)
+  const cont = document.getElementById('ab-continue')
+  document.querySelectorAll('input[name="ab-listing"]').forEach(r =>
+    r.addEventListener('change', () => { S.listingId = r.value; cont.disabled = false }))
+  cont.addEventListener('click', screenC)
+}
+
+function screenBError(msg) {
+  setBody(`
+    <div class="ab-err">${escHtml(msg)}</div>
+    <div class="ab-actions">
+      <button class="btn btn-primary" id="ab-b-retry">Réessayer</button>
+      <button class="btn" id="ab-cancel">Annuler</button>
+    </div>
+  `)
+  document.getElementById('ab-b-retry').addEventListener('click', screenB)
+  document.getElementById('ab-cancel').addEventListener('click', close)
+}
+
+// ---------- C : mapping + activation ----------
+async function screenC() {
+  setStep(3)
+  const pid = S.property.provider_property_id
+  setBody(`<div class="ab-status"><div class="ab-spin"></div> Liaison de votre annonce…</div>`)
+  try {
+    const m = await api.channel.mapping.map(pid, S.channelId, S.listingId, { dryRun: false })
+    if (!m?.rate_plans_populated) {
+      throw new Error('rate_plans vide apres map (mapping non pris)')   // signal interne (logs)
+    }
+    setBody(`<div class="ab-status"><div class="ab-spin"></div> Finalisation de la connexion…</div>`)
+    await api.channel.mapping.activate(pid, S.channelId, { dryRun: false })
+    logger.info('airbnb-connect', 'mapping + activation OK', { channelId: S.channelId, listingId: S.listingId })
+    screenD()
+  } catch (e) {
+    logger.error('airbnb-connect', 'map/activate echec', { e: e.message })
+    setBody(`
+      <div class="ab-err">Votre annonce n'a pas pu être reliée. Vérifiez qu'elle est complète et publiée sur Airbnb, puis réessayez.</div>
+      <div class="ab-sub">Vous pouvez réessayer, ou choisir une autre annonce.</div>
+      <div class="ab-actions">
+        <button class="btn btn-primary" id="ab-c-retry">Réessayer</button>
+        <button class="btn" id="ab-c-back">Choisir une autre annonce</button>
+      </div>
+    `)
+    document.getElementById('ab-c-retry').addEventListener('click', screenC)
+    document.getElementById('ab-c-back').addEventListener('click', screenB)
+  }
+}
+
+// ---------- D : connectee ----------
+function screenD() {
+  setStep(4)
+  setBody(`
+    <div class="ab-ok">✓ Votre annonce est connectée</div>
+    <div class="ab-sub" style="text-align:center">
+      HôteSmart récupère maintenant vos réservations et messages en arrière-plan.
+      Vous pouvez fermer cette fenêtre.
+    </div>
+    <div class="ab-actions" style="justify-content:center">
+      <button class="btn btn-primary" id="ab-finish">Terminé</button>
+    </div>
+  `)
+  document.getElementById('ab-finish').addEventListener('click', close)
+}
+
+// ---------- Deja connectee (bien avec un canal actif : protege Colomiers) ----------
+function screenAlreadyConnected() {
+  setStep(4)
+  setBody(`
+    <div class="ab-ok">✓ Votre annonce est déjà connectée</div>
+    <div class="ab-sub" style="text-align:center">
+      Ce logement est relié à Airbnb. Vos réservations et messages se synchronisent automatiquement.
+    </div>
+    <div class="ab-actions" style="justify-content:center">
+      <button class="btn btn-primary" id="ab-finish">Fermer</button>
+    </div>
+  `)
+  document.getElementById('ab-finish').addEventListener('click', close)
+}
+
+// Detecte l'etat du bien : canal actif -> deja connecte ; canal present mais inactif ->
+// reprise directe au choix de l'annonce (OAuth deja fait) ; aucun canal -> flux complet.
+async function detectAndRoute() {
+  setBody(`<div class="ab-status"><div class="ab-spin"></div> Vérification de la connexion…</div>`)
+  try {
+    const r = await api.channel.mapping.channels(S.property.provider_property_id)
+    const chans = r?.channels || []
+    const active = chans.find(c => c.is_active)
+    if (active) { S.channelId = active.id; return screenAlreadyConnected() }
+    if (chans.length) { S.channelId = chans[0].id; return screenB() }   // OAuth fait, mapping a finir
+  } catch (e) {
+    logger.error('airbnb-connect', 'detect status echec', { e: e.message })
+    // En cas d'echec de detection : on retombe sur le flux complet (screenA), sans rien casser.
+  }
+  screenA()
+}
+
+// Point d'entree. property = { id (UUID HoteSmart), name, provider_property_id }.
+export async function openAirbnbConnect(property, btn = null) {
+  if (!property?.id || !property?.provider_property_id) {
+    alert('Ce logement n\'est pas encore prêt pour la connexion Airbnb.')
+    return
+  }
+  ensureModal()
+  S = { property, channelId: null, listingId: null, pollTimer: null, pollDeadline: 0 }
+  document.getElementById('ab-title').textContent = `Connexion Airbnb — ${property.name || ''}`.trim()
+  document.getElementById('ab-modal').classList.add('show')
+  detectAndRoute()
+}

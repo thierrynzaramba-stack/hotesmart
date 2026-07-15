@@ -51,9 +51,29 @@ export const api = {
     listProperties: () => apiCall('channel-property', 'GET'),
     createProperty: (data) => apiCall('channel-property', 'POST', data),
     getToken: (propertyId) => apiCall('channel-token', 'POST', { property_id: propertyId }),
-    // Connexion + mapping OTA : renvoie { iframe_url } vers la page /channels
-    // (redirect_to=/channels du gestionnaire de canaux, marque blanche).
-    connect: (propertyId) => apiCall(`channel-connect?property_id=${encodeURIComponent(propertyId)}`, 'GET')
+    // Connexion OAuth : renvoie { iframe_url } vers la page /channels (marque blanche).
+    // propertyId = UUID HoteSmart (channel-connect verifie l'ownership par id).
+    connect: (propertyId) => apiCall(`channel-connect?property_id=${encodeURIComponent(propertyId)}`, 'GET'),
+    // Actions de mapping (channel-mapping). ATTENTION : property_id = provider_property_id
+    // (UUID Channex du bien), PAS l'UUID HoteSmart. dry_run=false = ecriture reelle.
+    mapping: {
+      // Liste les annonces OTA du compte connecte (ecran de choix).
+      listListings: (providerPropertyId, channelId = '') =>
+        apiCall(`channel-mapping?action=list_listings&property_id=${encodeURIComponent(providerPropertyId)}`
+          + (channelId ? `&channel_id=${encodeURIComponent(channelId)}` : ''), 'GET'),
+      // Etat des canaux du bien (polling detection fin OAuth).
+      channels: (providerPropertyId) =>
+        apiCall(`channel-mapping?action=channels&property_id=${encodeURIComponent(providerPropertyId)}`, 'GET'),
+      // Lie notre rate plan au listing choisi (POST /channels/:id/mappings).
+      map: (providerPropertyId, channelId, listingId, { dryRun = false, force = false } = {}) =>
+        apiCall(`channel-mapping?action=map&property_id=${encodeURIComponent(providerPropertyId)}`
+          + `&channel_id=${encodeURIComponent(channelId)}&listing_id=${encodeURIComponent(listingId)}`
+          + `&dry_run=${dryRun}${force ? '&force=1' : ''}`, 'GET'),
+      // Passe le canal live (POST /channels/:id/activate).
+      activate: (providerPropertyId, channelId, { dryRun = false, force = false } = {}) =>
+        apiCall(`channel-mapping?action=activate&property_id=${encodeURIComponent(providerPropertyId)}`
+          + `&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}${force ? '&force=1' : ''}`, 'GET')
+    }
   },
   calendar: {
     load: (propertyIds, start, end) =>
