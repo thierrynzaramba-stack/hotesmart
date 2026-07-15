@@ -91,6 +91,17 @@
     <button class="btn diag-btn" data-run="6">Importer</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="7">
+    <div class="diag-head">
+      <h3>7. Lire les canaux d'un bien</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Liste les canaux (Airbnb, Booking…) du bien puis affiche l'objet complet de chacun : mappings room/rate, is_active, tous les attributs. Appel serveur (GET only), valeurs sensibles masquées.</p>
+    <input class="form-input" id="channels-prop-id" type="text" placeholder="provider_property_id (id Channex)" value="b8cdab91-fe19-4b47-ad62-5f59ddb7b6a0" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="7">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -182,6 +193,18 @@
       })
       const body = await res.json().catch(() => ({}))
       setOut(6, { http: res.status, body })
+      return res.ok && !body.error
+    },
+    // 7. Lire les canaux d'un bien
+    async '7'() {
+      const t = await token()
+      const propertyId = document.getElementById('channels-prop-id').value.trim()
+      if (!propertyId) throw new Error('provider_property_id requis')
+      const res = await fetch('/api/diagnostic?check=channel_detail&property_id=' + encodeURIComponent(propertyId), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(7, { http: res.status, body })
       return res.ok && !body.error
     }
   }

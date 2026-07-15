@@ -38,6 +38,46 @@ module.exports = async function handler(req, res) {
 
   const check = req.query.check || 'channel'
 
+  // ?check=channel_detail&property_id=<providerPropertyId>
+  // LECTURE SEULE : liste les canaux d'un bien puis, pour CHAQUE canal, recupere
+  // l'objet complet (mappings room/rate, is_active, tous attributs). Les valeurs
+  // sensibles (tokens/secrets OTA eventuels) sont masquees avant renvoi.
+  if (check === 'channel_detail') {
+    if (!CHANNEL_API || !CHANNEL_KEY) {
+      return res.status(503).json({
+        error: 'Gestionnaire de canaux non configure (CHANNEL_BASE_URL / CHANNEL_API_KEY absents)'
+      })
+    }
+    const propId = (req.query.property_id || '').trim()
+    if (!propId) return res.status(400).json({ error: 'property_id requis' })
+
+    // Masque recursif : on ne veut voir QUE la structure, jamais un secret.
+    const SENSITIVE = /token|secret|password|api[_-]?key|access|refresh|credential|client_id|signature/i
+    const redact = (v) => {
+      if (Array.isArray(v)) return v.map(redact)
+      if (v && typeof v === 'object') {
+        const out = {}
+        for (const [k, val] of Object.entries(v)) out[k] = SENSITIVE.test(k) ? '***REDACTED***' : redact(val)
+        return out
+      }
+      return v
+    }
+
+    const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(propId)}`)
+    const rows = Array.isArray(list.json?.data) ? list.json.data : []
+    const channels = []
+    for (const row of rows) {
+      const one = await channelCall('GET', `/channels/${row.id}`)
+      channels.push(one.ok ? redact(one.json?.data ?? one.json) : { id: row.id, http: one.status, body: redact(one.json) })
+    }
+    return res.status(list.ok ? 200 : 502).json({
+      ok: list.ok,
+      channel_status: list.status,
+      channel_count: rows.length,
+      channels
+    })
+  }
+
   if (check === 'channel') {
     if (!CHANNEL_API || !CHANNEL_KEY) {
       return res.status(503).json({
