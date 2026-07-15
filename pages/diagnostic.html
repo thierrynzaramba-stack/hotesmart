@@ -102,6 +102,16 @@
     <button class="btn diag-btn" data-run="7">Lire</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="8">
+    <div class="diag-head">
+      <h3>8. Register webhook events (canal)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Enregistre le 2e webhook séparé pour les events canal (new_channel;updated_channel;activate_channel) → POST /api/channel-events. Le webhook booking/message reste inchangé.</p>
+    <button class="btn diag-btn" data-run="8">Register</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -206,6 +216,18 @@
       const body = await res.json().catch(() => ({}))
       setOut(7, { http: res.status, body })
       return res.ok && !body.error
+    },
+    // 8. Register webhook events (canal)
+    async '8'() {
+      const t = await token()
+      const res = await fetch('/api/channel-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ action: 'register', callback_url: 'https://hotesmart.vercel.app/api/channel-events' })
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(8, { http: res.status, body })
+      return res.ok && body.registered !== false
     }
   }
 
