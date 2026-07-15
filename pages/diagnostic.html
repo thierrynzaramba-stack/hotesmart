@@ -112,6 +112,37 @@
     <button class="btn diag-btn" data-run="8">Register</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="9">
+    <div class="diag-head">
+      <h3>9. Group ID du bien</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>GET /groups → identifie le group_id propriétaire du bien (requis pour créer un canal). Lecture seule. Le champ ci-dessous sert aussi aux tests 10 et 11.</p>
+    <input class="form-input" id="map-prop-id" type="text" placeholder="provider_property_id (id Channex)" value="b8cdab91-fe19-4b47-ad62-5f59ddb7b6a0" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="9">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="10">
+    <div class="diag-head">
+      <h3>10. Canaux du bien (état)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>GET /channels?filter[property_id] → voir si l'OAuth crée un canal nu (réserve 1) et son is_active. Utilise le champ du test 9.</p>
+    <button class="btn diag-btn" data-run="10">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="11">
+    <div class="diag-head">
+      <h3>11. mapping_details (annonces Airbnb)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>POST /channels/mapping_details du canal → rooms[]/rates[] Airbnb + codes entiers room_type_code/rate_plan_code (réserve 2 + point 4). Utilise le champ du test 9.</p>
+    <button class="btn diag-btn" data-run="11">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -228,6 +259,42 @@
       const body = await res.json().catch(() => ({}))
       setOut(8, { http: res.status, body })
       return res.ok && body.registered !== false
+    },
+    // 9. Group ID du bien
+    async '9'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis')
+      const res = await fetch('/api/channel-mapping?action=groups&property_id=' + encodeURIComponent(pid), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(9, { http: res.status, body })
+      return res.ok && !body.error
+    },
+    // 10. Canaux du bien (état)
+    async '10'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      const res = await fetch('/api/channel-mapping?action=channels&property_id=' + encodeURIComponent(pid), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(10, { http: res.status, body })
+      return res.ok && !body.error
+    },
+    // 11. mapping_details (annonces Airbnb)
+    async '11'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      const res = await fetch('/api/channel-mapping?action=mapping_details&property_id=' + encodeURIComponent(pid), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(11, { http: res.status, body })
+      return res.ok && !body.error
     }
   }
 
