@@ -187,26 +187,43 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, reason: 'ignored:' + event })
     }
 
-    // Resolution du provider_property_id : direct depuis le payload, sinon via le canal.
-    let providerPropertyId = payload?.property_id || null
-    if (!providerPropertyId && payload?.channel_id) {
+    // Resolution du/des provider_property_id du canal.
+    // Le payload activate_channel ne porte PAS de property_id (seulement
+    // {title, channel_id, ota_name}) -> fallback : lire l'objet canal.
+    // Structure reelle (test 7) : data.attributes.properties = [UUID...] et
+    // data.relationships.properties.data[].id = memes UUID = nos provider_property_id.
+    let providerPropertyIds = []
+    if (payload?.property_id) {
+      providerPropertyIds = [payload.property_id]
+    } else if (payload?.channel_id) {
       const ch = await channelCall('GET', `/channels/${payload.channel_id}`)
-      providerPropertyId = ch.json?.data?.attributes?.property_id || ch.json?.data?.property_id || null
+      if (!ch.ok) console.error('[channel-events] GET /channels echec', ch.status, JSON.stringify(ch.json))
+      const d = ch.json?.data || {}
+      const fromAttrs = Array.isArray(d.attributes?.properties) ? d.attributes.properties : []
+      const fromRel = Array.isArray(d.relationships?.properties?.data)
+        ? d.relationships.properties.data.map(x => x && x.id) : []
+      providerPropertyIds = [...new Set([...fromAttrs, ...fromRel])].filter(Boolean)
     }
-    if (!providerPropertyId) {
-      console.warn('[channel-events] property_id introuvable dans event', event)
+
+    if (!providerPropertyIds.length) {
+      console.warn('[channel-events] property_id introuvable (payload + canal), event', event, 'channel_id', payload?.channel_id)
       return res.status(200).json({ ok: true, reason: 'no_property_id' })
     }
 
-    const owner = await ownerOfProperty(providerPropertyId)
-    if (!owner) {
-      console.warn('[channel-events] bien inconnu', providerPropertyId)
-      return res.status(200).json({ ok: true, reason: 'unknown_property' })
+    // Un canal peut porter plusieurs proprietes : on traite chacune (idempotent).
+    const results = []
+    for (const ppid of providerPropertyIds) {
+      const owner = await ownerOfProperty(ppid)
+      if (!owner) {
+        console.warn('[channel-events] bien inconnu', ppid)
+        results.push({ property_id: ppid, reason: 'unknown_property' })
+        continue
+      }
+      const r = await runPostMapping(owner)
+      console.log('[channel-events]', event, 'traite', JSON.stringify(r))
+      results.push(r)
     }
-
-    const result = await runPostMapping(owner)
-    console.log('[channel-events]', event, 'traite', JSON.stringify(result))
-    return res.status(200).json({ ok: true, event, result })
+    return res.status(200).json({ ok: true, event, results })
   } catch (err) {
     console.error('[channel-events]', err.message)
     return res.status(500).json({ ok: false })   // 5xx -> Channex retente
