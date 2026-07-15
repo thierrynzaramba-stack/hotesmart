@@ -56,6 +56,18 @@ async function resolveGroupId(providerPropertyId) {
   return match?.id || null
 }
 
+// Defauts STRUCTURELS du rate plan Airbnb (issus du canal reel Colomiers), appliques en
+// PLANCHER : `{ ...DEFAULTS, ...base }` -> les reglages tires de l'annonce (base) PRIMENT.
+// NE JAMAIS y mettre de valeur fees/policy/prix/guest_controls : ces reglages viennent de
+// l'annonce Airbnb de l'hote (doc Channex : "the details are pulled from the listing").
+const AIRBNB_RATE_PLAN_DEFAULTS = {
+  min_stay_type: 'Arrival',
+  listing_type: 'apartment',
+  sync_category: 'sync_all',
+  primary_occ: true,
+  pricing_availability_model: { in_model_transition: false, type: 'standard' }
+}
+
 module.exports = async function handler(req, res) {
   if (!CHANNEL_API || !CHANNEL_KEY) {
     return res.status(503).json({ error: 'Gestionnaire de canaux non configure' })
@@ -178,12 +190,16 @@ module.exports = async function handler(req, res) {
       })
     }
 
-    // --- map : cree (POST) ou met a jour (PUT) le mapping rate_plan <-> listing Airbnb ---
-    // SECURITE : dry_run=true PAR DEFAUT (construit + montre le payload SANS envoyer).
-    // Ecriture reelle uniquement avec dry_run=false ; refusee sur un canal deja actif
-    // (protege Colomiers) sauf force=1.
+    // --- map : lie notre rate plan au listing Airbnb choisi par l'hote (read-modify-write) ---
+    // listing_id OBLIGATOIRE (choix hote). On RELIT le canal nu (cree par l'OAuth) et on ne
+    // touche QU'A listing_id : les reglages tires de l'annonce Airbnb (base) et le settings
+    // compte ne sont jamais inventes ni ecrases. dry_run=true par defaut ; ecriture refusee
+    // sur un canal deja actif sauf force=1 (protege Colomiers).
     if (action === 'map') {
       const listingId = (req.query.listing_id || '').trim()
+      if (!listingId) {
+        return res.status(400).json({ error: 'listing_id requis (choix de l\'hote)' })
+      }
       const dryRun = req.query.dry_run !== 'false'
       const force = req.query.force === '1'
       let channelId = (req.query.channel_id || '').trim()
@@ -195,54 +211,53 @@ module.exports = async function handler(req, res) {
       const groupId = await resolveGroupId(providerPropertyId)
       if (!groupId) return res.status(422).json({ error: 'group_id introuvable pour ce bien (GET /groups)' })
 
-      // Canal template : channel_id fourni, sinon 1er canal du bien -> on CLONE ses
-      // settings (min_stay_type, booking_amount_settings, ...) pour ne rien deviner.
+      // Canal du bien courant = le canal nu cree par l'OAuth. On le RELIT ; s'il n'existe
+      // pas, l'hote doit d'abord connecter son compte (OAuth) -> pas de POST from scratch
+      // (le settings compte Airbnb ne peut pas etre invente).
       const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
       const rows = Array.isArray(list.json?.data) ? list.json.data : []
       if (!channelId) channelId = rows[0]?.id || ''
-
-      let channelCode = 'Airbnb'
-      let tmplChannelSettings = {}
-      let tmplRatePlanSettings = {}
-      let targetIsActive = null
-      if (channelId) {
-        const ch = await channelCall('GET', `/channels/${channelId}`)
-        const attrs = ch.json?.data?.attributes || {}
-        channelCode = attrs.channel || attrs.ota_name || 'Airbnb'
-        tmplChannelSettings = attrs.settings || {}
-        tmplRatePlanSettings = (attrs.rate_plans && attrs.rate_plans[0] && attrs.rate_plans[0].settings) || {}
-        targetIsActive = attrs.is_active
+      if (!channelId) {
+        return res.status(404).json({ error: 'Aucun canal sur ce bien : l\'hote doit d\'abord connecter son compte via OAuth' })
       }
 
-      const ratePlanSettings = { ...tmplRatePlanSettings }
-      if (listingId) ratePlanSettings.listing_id = listingId
+      const ch = await channelCall('GET', `/channels/${channelId}`)
+      const attrs = ch.json?.data?.attributes || {}
+      const channelCode = attrs.channel || attrs.ota_name || 'Airbnb'
+      const channelSettings = attrs.settings || {}   // connexion compte : RELU, jamais invente
+      const base = (attrs.rate_plans && attrs.rate_plans[0] && attrs.rate_plans[0].settings) || {}
+      const targetIsActive = attrs.is_active
+
+      // Read-modify-write : l'annonce (base) PRIME sur les defauts structurels ; on n'impose
+      // QUE listing_id. Aucune valeur fees/policy/prix/guest_controls de notre part.
+      const ratePlanSettings = { ...AIRBNB_RATE_PLAN_DEFAULTS, ...base, listing_id: listingId }
 
       const payload = { channel: {
         channel: channelCode,
         group_id: groupId,
         is_active: false,
-        title: `Airbnb — ${prop.name || prop.provider_property_id}`,
+        title: attrs.title || `Airbnb — ${prop.name || prop.provider_property_id}`,
         properties: [providerPropertyId],
         rate_plans: [{ rate_plan_id: prop.provider_rate_plan_id, settings: ratePlanSettings }],
-        settings: tmplChannelSettings
+        settings: channelSettings
       }}
 
-      const method = channelId ? 'PUT' : 'POST'
-      const path = channelId ? `/channels/${channelId}` : '/channels'
+      const method = 'PUT'
+      const path = `/channels/${channelId}`
 
       // DRY-RUN (defaut) : on montre ce qui SERAIT envoye, rien n'est ecrit.
       if (dryRun) {
         return res.status(200).json({
           dry_run: true,
           would_send: { method, path, payload: redact(payload) },
-          template_channel_id: channelId || null,
+          channel_id: channelId,
           target_is_active: targetIsActive,
           group_id: groupId
         })
       }
 
       // GARDE-FOU : ecriture reelle sur un canal DEJA ACTIF refusee sans force (protege Colomiers).
-      if (method === 'PUT' && targetIsActive === true && !force) {
+      if (targetIsActive === true && !force) {
         return res.status(409).json({
           error: 'Canal deja actif : ecriture bloquee (protege Colomiers). force=1 pour outrepasser (a eviter en prod).',
           channel_id: channelId
@@ -273,7 +288,39 @@ module.exports = async function handler(req, res) {
       return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
     }
 
-    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | map | activate)' })
+    // --- deactivate : met le canal en pause. dry_run=true par defaut. (cycle throwaway) ---
+    if (action === 'deactivate') {
+      const dryRun = req.query.dry_run !== 'false'
+      const channelId = (req.query.channel_id || '').trim()
+      if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
+
+      if (dryRun) {
+        return res.status(200).json({ dry_run: true, would_send: { method: 'POST', path: `/channels/${channelId}/deactivate`, body: {} } })
+      }
+      const w = await channelCall('POST', `/channels/${channelId}/deactivate`, {})
+      return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
+    }
+
+    // --- delete : supprime le canal (exige inactif). dry_run=true par defaut. (cycle throwaway) ---
+    if (action === 'delete') {
+      const dryRun = req.query.dry_run !== 'false'
+      const force = req.query.force === '1'
+      const channelId = (req.query.channel_id || '').trim()
+      if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
+
+      if (dryRun) {
+        return res.status(200).json({ dry_run: true, would_send: { method: 'DELETE', path: `/channels/${channelId}` } })
+      }
+      // Garde-fou : DELETE exige un canal inactif ; refus si actif sans force (protege Colomiers).
+      const ch = await channelCall('GET', `/channels/${channelId}`)
+      if (ch.json?.data?.attributes?.is_active === true && !force) {
+        return res.status(409).json({ error: 'Canal actif : deactivate d\'abord (DELETE exige inactif). force=1 pour outrepasser.', channel_id: channelId })
+      }
+      const w = await channelCall('DELETE', `/channels/${channelId}`)
+      return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
+    }
+
+    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | map | activate | deactivate | delete)' })
   } catch (err) {
     console.error('[channel-mapping]', err.message)
     return res.status(500).json({ error: 'Erreur interne' })
