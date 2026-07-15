@@ -195,6 +195,17 @@
     <button class="btn diag-btn" data-run="15">Prévisualiser</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="16">
+    <div class="diag-head">
+      <h3>16. Lignes de mapping (lecture)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>GET /channels/:id/mappings + /listings. Lecture pure : confirme sur l'API réelle que la sous-ressource /mappings existe et sa structure (listing_id, rate_plan_id, is_mapped). Utilise le provider_property_id du test 9. channel_id prérempli Colomiers.</p>
+    <input class="form-input" id="mappings-channel-id" type="text" placeholder="channel_id (vide = 1er canal du bien)" value="6ec9c4fc-7cbe-43dc-bc15-600b11c343f2" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="16">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -401,6 +412,20 @@
       const body = await res.json().catch(() => ({}))
       setOut(15, { http: res.status, body })
       return res.ok && body.dry_run === !real
+    },
+    // 16. Lignes de mapping (lecture pure : /mappings + /listings)
+    async '16'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      const chId = document.getElementById('mappings-channel-id').value.trim()
+      const q = '&property_id=' + encodeURIComponent(pid) + (chId ? '&channel_id=' + encodeURIComponent(chId) : '')
+      const mRes = await fetch('/api/channel-mapping?action=mappings' + q, { headers: { Authorization: 'Bearer ' + t } })
+      const mBody = await mRes.json().catch(() => ({}))
+      const lRes = await fetch('/api/channel-mapping?action=listings' + q, { headers: { Authorization: 'Bearer ' + t } })
+      const lBody = await lRes.json().catch(() => ({}))
+      setOut(16, { mappings: { http: mRes.status, body: mBody }, listings: { http: lRes.status, body: lBody } })
+      return mRes.ok && !!mBody.ok
     }
   }
 

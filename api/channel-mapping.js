@@ -190,6 +190,55 @@ module.exports = async function handler(req, res) {
       })
     }
 
+    // --- mappings : lignes de mapping listing<->rate_plan d'un canal (LECTURE PURE) ---
+    // Valide sur l'API reelle la sous-ressource /channels/:id/mappings decouverte via
+    // channex-mcp : structure (id, listing_id, room_type_id, rate_plan_id, is_mapped).
+    if (action === 'mappings') {
+      let channelId = (req.query.channel_id || '').trim()
+      if (!channelId) {
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const rows = Array.isArray(list.json?.data) ? list.json.data : []
+        channelId = rows[0]?.id
+      }
+      if (!channelId) return res.status(404).json({ error: 'Aucun canal sur ce bien' })
+
+      const r = await channelCall('GET', `/channels/${channelId}/mappings`)
+      const rows = Array.isArray(r.json?.data) ? r.json.data : []
+      return res.status(r.ok ? 200 : 502).json({
+        ok: r.ok,
+        http: r.status,
+        channel_id: channelId,
+        mapping_count: rows.length,
+        mappings: rows.map(m => ({
+          id:           m.id,
+          listing_id:   m.attributes?.listing_id,
+          room_type_id: m.attributes?.room_type_id,
+          rate_plan_id: m.attributes?.rate_plan_id,
+          is_mapped:    m.attributes?.is_mapped
+        })),
+        raw: redact(r.json?.data ?? r.json)
+      })
+    }
+
+    // --- listings : annonces Airbnb du canal (GET /channels/:id/listings, LECTURE PURE) ---
+    if (action === 'listings') {
+      let channelId = (req.query.channel_id || '').trim()
+      if (!channelId) {
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const rows = Array.isArray(list.json?.data) ? list.json.data : []
+        channelId = rows[0]?.id
+      }
+      if (!channelId) return res.status(404).json({ error: 'Aucun canal sur ce bien' })
+
+      const r = await channelCall('GET', `/channels/${channelId}/listings`)
+      return res.status(r.ok ? 200 : 502).json({
+        ok: r.ok,
+        http: r.status,
+        channel_id: channelId,
+        listings: redact(r.json?.data ?? r.json)
+      })
+    }
+
     // --- map : lie notre rate plan au listing Airbnb choisi par l'hote (read-modify-write) ---
     // listing_id OBLIGATOIRE (choix hote). On RELIT le canal nu (cree par l'OAuth) et on ne
     // touche QU'A listing_id : les reglages tires de l'annonce Airbnb (base) et le settings
@@ -320,7 +369,7 @@ module.exports = async function handler(req, res) {
       return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
     }
 
-    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | map | activate | deactivate | delete)' })
+    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | mappings | listings | map | activate | deactivate | delete)' })
   } catch (err) {
     console.error('[channel-mapping]', err.message)
     return res.status(500).json({ error: 'Erreur interne' })
