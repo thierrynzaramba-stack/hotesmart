@@ -46,28 +46,6 @@ const redact = (v) => {
   return v
 }
 
-// Resout le group_id proprietaire du bien (relationships.properties inclut l'UUID).
-async function resolveGroupId(providerPropertyId) {
-  const r = await channelCall('GET', '/groups')
-  const groups = Array.isArray(r.json?.data) ? r.json.data : []
-  const match = groups.find(g =>
-    (g.relationships?.properties?.data || []).some(p => String(p.id) === String(providerPropertyId))
-  )
-  return match?.id || null
-}
-
-// Defauts STRUCTURELS du rate plan Airbnb (issus du canal reel Colomiers), appliques en
-// PLANCHER : `{ ...DEFAULTS, ...base }` -> les reglages tires de l'annonce (base) PRIMENT.
-// NE JAMAIS y mettre de valeur fees/policy/prix/guest_controls : ces reglages viennent de
-// l'annonce Airbnb de l'hote (doc Channex : "the details are pulled from the listing").
-const AIRBNB_RATE_PLAN_DEFAULTS = {
-  min_stay_type: 'Arrival',
-  listing_type: 'apartment',
-  sync_category: 'sync_all',
-  primary_occ: true,
-  pricing_availability_model: { in_model_transition: false, type: 'standard' }
-}
-
 module.exports = async function handler(req, res) {
   if (!CHANNEL_API || !CHANNEL_KEY) {
     return res.status(503).json({ error: 'Gestionnaire de canaux non configure' })
@@ -240,10 +218,11 @@ module.exports = async function handler(req, res) {
     }
 
     // --- map : lie notre rate plan au listing Airbnb choisi par l'hote (read-modify-write) ---
-    // listing_id OBLIGATOIRE (choix hote). On RELIT le canal nu (cree par l'OAuth) et on ne
-    // touche QU'A listing_id : les reglages tires de l'annonce Airbnb (base) et le settings
-    // compte ne sont jamais inventes ni ecrases. dry_run=true par defaut ; ecriture refusee
-    // sur un canal deja actif sauf force=1 (protege Colomiers).
+    // listing_id OBLIGATOIRE (choix hote). Payload MINIMAL confirme par capture reseau
+    // de l'iframe : POST /channels/:id/mappings { mapping: { rate_plan_id, settings:
+    // { listing_id, primary_occ:true } } }. Channex tire le reste de l'annonce Airbnb.
+    // Le PUT /channels/:id ne posait PAS le mapping (rate_plans:[] restait vide) -> abandonne.
+    // dry_run=true par defaut ; ecriture refusee sur un canal deja actif sauf force=1.
     if (action === 'map') {
       const listingId = (req.query.listing_id || '').trim()
       if (!listingId) {
@@ -253,16 +232,13 @@ module.exports = async function handler(req, res) {
       const force = req.query.force === '1'
       let channelId = (req.query.channel_id || '').trim()
 
-      if (!prop.provider_rate_plan_id) {
+      const ratePlanId = prop.provider_rate_plan_id
+      if (!ratePlanId) {
         return res.status(400).json({ error: 'Bien sans provider_rate_plan_id (provisioning incomplet)' })
       }
 
-      const groupId = await resolveGroupId(providerPropertyId)
-      if (!groupId) return res.status(422).json({ error: 'group_id introuvable pour ce bien (GET /groups)' })
-
-      // Canal du bien courant = le canal nu cree par l'OAuth. On le RELIT ; s'il n'existe
-      // pas, l'hote doit d'abord connecter son compte (OAuth) -> pas de POST from scratch
-      // (le settings compte Airbnb ne peut pas etre invente).
+      // Canal du bien courant = le canal cree par l'OAuth. Si absent, l'hote doit d'abord
+      // connecter son compte (OAuth) -> on ne cree pas de canal from scratch ici.
       const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
       const rows = Array.isArray(list.json?.data) ? list.json.data : []
       if (!channelId) channelId = rows[0]?.id || ''
@@ -270,38 +246,24 @@ module.exports = async function handler(req, res) {
         return res.status(404).json({ error: 'Aucun canal sur ce bien : l\'hote doit d\'abord connecter son compte via OAuth' })
       }
 
+      // Etat actuel du canal (garde-fou canal actif).
       const ch = await channelCall('GET', `/channels/${channelId}`)
-      const attrs = ch.json?.data?.attributes || {}
-      const channelCode = attrs.channel || attrs.ota_name || 'Airbnb'
-      const channelSettings = attrs.settings || {}   // connexion compte : RELU, jamais invente
-      const base = (attrs.rate_plans && attrs.rate_plans[0] && attrs.rate_plans[0].settings) || {}
-      const targetIsActive = attrs.is_active
+      const targetIsActive = ch.json?.data?.attributes?.is_active
 
-      // Read-modify-write : l'annonce (base) PRIME sur les defauts structurels ; on n'impose
-      // QUE listing_id. Aucune valeur fees/policy/prix/guest_controls de notre part.
-      const ratePlanSettings = { ...AIRBNB_RATE_PLAN_DEFAULTS, ...base, listing_id: listingId }
-
-      const payload = { channel: {
-        channel: channelCode,
-        group_id: groupId,
-        is_active: false,
-        title: attrs.title || `Airbnb — ${prop.name || prop.provider_property_id}`,
-        properties: [providerPropertyId],
-        rate_plans: [{ rate_plan_id: prop.provider_rate_plan_id, settings: ratePlanSettings }],
-        settings: channelSettings
+      const method = 'POST'
+      const path = `/channels/${channelId}/mappings`
+      const payload = { mapping: {
+        rate_plan_id: ratePlanId,
+        settings: { listing_id: listingId, primary_occ: true }
       }}
-
-      const method = 'PUT'
-      const path = `/channels/${channelId}`
 
       // DRY-RUN (defaut) : on montre ce qui SERAIT envoye, rien n'est ecrit.
       if (dryRun) {
         return res.status(200).json({
           dry_run: true,
-          would_send: { method, path, payload: redact(payload) },
+          would_send: { method, path, payload },
           channel_id: channelId,
-          target_is_active: targetIsActive,
-          group_id: groupId
+          target_is_active: targetIsActive
         })
       }
 
@@ -314,7 +276,20 @@ module.exports = async function handler(req, res) {
       }
 
       const w = await channelCall(method, path, payload)
-      return res.status(w.ok ? 200 : 502).json({ dry_run: false, method, path, http: w.status, result: redact(w.json) })
+
+      // PREUVE : on relit le canal, rate_plans[] doit desormais etre PEUPLE (mapping pris).
+      const after = await channelCall('GET', `/channels/${channelId}`)
+      const ratePlansAfter = after.json?.data?.attributes?.rate_plans || []
+
+      return res.status(w.ok ? 200 : 502).json({
+        dry_run: false,
+        method, path,
+        http: w.status,
+        result: redact(w.json),
+        rate_plans_count: ratePlansAfter.length,
+        rate_plans_populated: ratePlansAfter.length > 0,
+        rate_plans_after: redact(ratePlansAfter)
+      })
     }
 
     // --- activate : passe le canal live. dry_run=true par defaut ; refus si deja actif ---
