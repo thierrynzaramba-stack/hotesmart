@@ -23,6 +23,9 @@
     .diag-out { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px; margin-top: 12px; max-height: 260px; overflow: auto; display: none; }
     .diag-out.show { display: block; }
     button.diag-btn { margin-top: 4px; }
+    .real-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 4px 0 10px; cursor: pointer; user-select: none; }
+    .real-warn { display: none; font-size: 12px; color: #C5221F; font-weight: 600; margin-bottom: 10px; padding: 6px 10px; background: #FCE8E6; border-radius: var(--radius); }
+    .real-warn.show { display: block; }
   </style>
 </head>
 <body>
@@ -156,23 +159,40 @@
 
   <div class="diag-card" data-test="13">
     <div class="diag-head">
-      <h3>13. Mapper — DRY-RUN (n'envoie rien)</h3>
+      <h3>13. Mapper (dry-run par défaut)</h3>
       <span class="diag-status idle">En attente</span>
     </div>
-    <p>Construit le payload map (group_id + rate_plan_id + settings clonés du canal réel, listing_id remplacé) et l'affiche <b>sans l'envoyer</b>. Utilise le champ du test 9.</p>
-    <input class="form-input" id="map-listing-id" type="text" placeholder="listing_id Airbnb (optionnel en dry-run)" style="margin-bottom:10px">
+    <p>Construit le payload map (group_id + rate_plan_id + settings clonés du canal réel, listing_id remplacé). Dry-run = affiché sans envoi. Utilise le champ du test 9.</p>
+    <input class="form-input" id="map-listing-id" type="text" placeholder="listing_id Airbnb" value="1246359231705217087" style="margin-bottom:10px">
+    <label class="real-row"><input type="checkbox" class="real-exec"> ⚠️ exécution réelle</label>
+    <div class="real-warn">⚠️ Écriture réelle sur le canal — dry-run désactivé.</div>
     <button class="btn diag-btn" data-run="13">Construire le payload</button>
     <pre class="diag-out"></pre>
   </div>
 
   <div class="diag-card" data-test="14">
     <div class="diag-head">
-      <h3>14. Activer — DRY-RUN (n'envoie rien)</h3>
+      <h3>14. Activer (dry-run par défaut)</h3>
       <span class="diag-status idle">En attente</span>
     </div>
-    <p>Montre l'appel POST /channels/:id/activate <b>sans l'envoyer</b>. Renseigne un channel_id (ne PAS utiliser celui de Colomiers pour un vrai envoi).</p>
-    <input class="form-input" id="activate-channel-id" type="text" placeholder="channel_id" style="margin-bottom:10px">
+    <p>Appel POST /channels/:id/activate. Dry-run = affiché sans envoi. channel_id prérempli avec Colomiers.</p>
+    <input class="form-input" id="activate-channel-id" type="text" placeholder="channel_id" value="6ec9c4fc-7cbe-43dc-bc15-600b11c343f2" style="margin-bottom:10px">
+    <label class="real-row"><input type="checkbox" class="real-exec"> ⚠️ exécution réelle</label>
+    <div class="real-warn">⚠️ Écriture réelle sur le canal — dry-run désactivé.</div>
     <button class="btn diag-btn" data-run="14">Prévisualiser</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="15">
+    <div class="diag-head">
+      <h3>15. Désactiver (dry-run par défaut)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Appel POST /channels/:id/deactivate. Dry-run = affiché sans envoi. channel_id prérempli avec Colomiers.</p>
+    <input class="form-input" id="deactivate-channel-id" type="text" placeholder="channel_id" value="6ec9c4fc-7cbe-43dc-bc15-600b11c343f2" style="margin-bottom:10px">
+    <label class="real-row"><input type="checkbox" class="real-exec"> ⚠️ exécution réelle</label>
+    <div class="real-warn">⚠️ Écriture réelle sur le canal — dry-run désactivé.</div>
+    <button class="btn diag-btn" data-run="15">Prévisualiser</button>
     <pre class="diag-out"></pre>
   </div>
 </div>
@@ -346,28 +366,55 @@
       const pid = document.getElementById('map-prop-id').value.trim()
       if (!pid) throw new Error('provider_property_id requis (test 9)')
       const listing = document.getElementById('map-listing-id').value.trim()
-      const url = '/api/channel-mapping?action=map&dry_run=true&property_id=' + encodeURIComponent(pid)
+      const real = realExec(13)
+      const url = '/api/channel-mapping?action=map&dry_run=' + (real ? 'false' : 'true') + '&property_id=' + encodeURIComponent(pid)
         + (listing ? '&listing_id=' + encodeURIComponent(listing) : '')
       const res = await fetch(url, { headers: { Authorization: 'Bearer ' + t } })
       const body = await res.json().catch(() => ({}))
       setOut(13, { http: res.status, body })
-      return res.ok && body.dry_run === true
+      return res.ok && body.dry_run === !real
     },
-    // 14. Activer — DRY-RUN
+    // 14. Activer (dry-run par défaut)
     async '14'() {
       const t = await token()
       const pid = document.getElementById('map-prop-id').value.trim()
       const chId = document.getElementById('activate-channel-id').value.trim()
       if (!pid) throw new Error('provider_property_id requis (test 9)')
       if (!chId) throw new Error('channel_id requis')
-      const url = '/api/channel-mapping?action=activate&dry_run=true&property_id=' + encodeURIComponent(pid)
+      const real = realExec(14)
+      const url = '/api/channel-mapping?action=activate&dry_run=' + (real ? 'false' : 'true') + '&property_id=' + encodeURIComponent(pid)
         + '&channel_id=' + encodeURIComponent(chId)
       const res = await fetch(url, { headers: { Authorization: 'Bearer ' + t } })
       const body = await res.json().catch(() => ({}))
       setOut(14, { http: res.status, body })
-      return res.ok && body.dry_run === true
+      return res.ok && body.dry_run === !real
+    },
+    // 15. Désactiver (dry-run par défaut)
+    async '15'() {
+      const t = await token()
+      const chId = document.getElementById('deactivate-channel-id').value.trim()
+      if (!chId) throw new Error('channel_id requis')
+      const real = realExec(15)
+      const url = '/api/channel-mapping?action=deactivate&dry_run=' + (real ? 'false' : 'true')
+        + '&channel_id=' + encodeURIComponent(chId)
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + t } })
+      const body = await res.json().catch(() => ({}))
+      setOut(15, { http: res.status, body })
+      return res.ok && body.dry_run === !real
     }
   }
+
+  // Case "exécution réelle" -> bascule l'avertissement rouge de sa carte.
+  function realExec(n) {
+    const cb = card(n).querySelector('.real-exec')
+    return !!(cb && cb.checked)
+  }
+  document.querySelectorAll('.real-exec').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const warn = cb.closest('.diag-card').querySelector('.real-warn')
+      if (warn) warn.classList.toggle('show', cb.checked)
+    })
+  })
 
   document.querySelectorAll('[data-run]').forEach(btn => {
     btn.addEventListener('click', async () => {
