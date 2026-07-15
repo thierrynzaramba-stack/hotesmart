@@ -143,6 +143,38 @@
     <button class="btn diag-btn" data-run="11">Lire</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="12">
+    <div class="diag-head">
+      <h3>12. Lister les annonces Airbnb</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>POST /channels/mapping_details → listing_id_dictionary (les annonces du compte, pour l'écran de choix). Lecture. Utilise le champ du test 9.</p>
+    <button class="btn diag-btn" data-run="12">Lister</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="13">
+    <div class="diag-head">
+      <h3>13. Mapper — DRY-RUN (n'envoie rien)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Construit le payload map (group_id + rate_plan_id + settings clonés du canal réel, listing_id remplacé) et l'affiche <b>sans l'envoyer</b>. Utilise le champ du test 9.</p>
+    <input class="form-input" id="map-listing-id" type="text" placeholder="listing_id Airbnb (optionnel en dry-run)" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="13">Construire le payload</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="14">
+    <div class="diag-head">
+      <h3>14. Activer — DRY-RUN (n'envoie rien)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Montre l'appel POST /channels/:id/activate <b>sans l'envoyer</b>. Renseigne un channel_id (ne PAS utiliser celui de Colomiers pour un vrai envoi).</p>
+    <input class="form-input" id="activate-channel-id" type="text" placeholder="channel_id" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="14">Prévisualiser</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -295,6 +327,45 @@
       const body = await res.json().catch(() => ({}))
       setOut(11, { http: res.status, body })
       return res.ok && !body.error
+    },
+    // 12. Lister les annonces Airbnb
+    async '12'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      const res = await fetch('/api/channel-mapping?action=list_listings&property_id=' + encodeURIComponent(pid), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(12, { http: res.status, body })
+      return res.ok && !body.error
+    },
+    // 13. Mapper — DRY-RUN
+    async '13'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      const listing = document.getElementById('map-listing-id').value.trim()
+      const url = '/api/channel-mapping?action=map&dry_run=true&property_id=' + encodeURIComponent(pid)
+        + (listing ? '&listing_id=' + encodeURIComponent(listing) : '')
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + t } })
+      const body = await res.json().catch(() => ({}))
+      setOut(13, { http: res.status, body })
+      return res.ok && body.dry_run === true
+    },
+    // 14. Activer — DRY-RUN
+    async '14'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      const chId = document.getElementById('activate-channel-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      if (!chId) throw new Error('channel_id requis')
+      const url = '/api/channel-mapping?action=activate&dry_run=true&property_id=' + encodeURIComponent(pid)
+        + '&channel_id=' + encodeURIComponent(chId)
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + t } })
+      const body = await res.json().catch(() => ({}))
+      setOut(14, { http: res.status, body })
+      return res.ok && body.dry_run === true
     }
   }
 

@@ -46,6 +46,16 @@ const redact = (v) => {
   return v
 }
 
+// Resout le group_id proprietaire du bien (relationships.properties inclut l'UUID).
+async function resolveGroupId(providerPropertyId) {
+  const r = await channelCall('GET', '/groups')
+  const groups = Array.isArray(r.json?.data) ? r.json.data : []
+  const match = groups.find(g =>
+    (g.relationships?.properties?.data || []).some(p => String(p.id) === String(providerPropertyId))
+  )
+  return match?.id || null
+}
+
 module.exports = async function handler(req, res) {
   if (!CHANNEL_API || !CHANNEL_KEY) {
     return res.status(503).json({ error: 'Gestionnaire de canaux non configure' })
@@ -144,7 +154,126 @@ module.exports = async function handler(req, res) {
       })
     }
 
-    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details)' })
+    // --- list_listings : le listing_id_dictionary Airbnb (ecran de choix d'annonce) ---
+    if (action === 'list_listings') {
+      let channelId = (req.query.channel_id || '').trim()
+      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+      const rows = Array.isArray(list.json?.data) ? list.json.data : []
+      if (!channelId) channelId = rows[0]?.id
+      if (!channelId) return res.status(404).json({ error: 'Aucun canal sur ce bien', channel_count: rows.length })
+
+      const ch = await channelCall('GET', `/channels/${channelId}`)
+      const attrs = ch.json?.data?.attributes || {}
+      const md = await channelCall('POST', '/channels/mapping_details', {
+        channel: attrs.channel || attrs.ota_name,
+        settings: attrs.settings || {}
+      })
+      const data = md.json?.data ?? md.json ?? {}
+      return res.status(md.ok ? 200 : 502).json({
+        ok: md.ok,
+        http: md.status,
+        channel_id: channelId,
+        listings: redact(data.listing_id_dictionary ?? data.listings ?? data),
+        full: redact(data)
+      })
+    }
+
+    // --- map : cree (POST) ou met a jour (PUT) le mapping rate_plan <-> listing Airbnb ---
+    // SECURITE : dry_run=true PAR DEFAUT (construit + montre le payload SANS envoyer).
+    // Ecriture reelle uniquement avec dry_run=false ; refusee sur un canal deja actif
+    // (protege Colomiers) sauf force=1.
+    if (action === 'map') {
+      const listingId = (req.query.listing_id || '').trim()
+      const dryRun = req.query.dry_run !== 'false'
+      const force = req.query.force === '1'
+      let channelId = (req.query.channel_id || '').trim()
+
+      if (!prop.provider_rate_plan_id) {
+        return res.status(400).json({ error: 'Bien sans provider_rate_plan_id (provisioning incomplet)' })
+      }
+
+      const groupId = await resolveGroupId(providerPropertyId)
+      if (!groupId) return res.status(422).json({ error: 'group_id introuvable pour ce bien (GET /groups)' })
+
+      // Canal template : channel_id fourni, sinon 1er canal du bien -> on CLONE ses
+      // settings (min_stay_type, booking_amount_settings, ...) pour ne rien deviner.
+      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+      const rows = Array.isArray(list.json?.data) ? list.json.data : []
+      if (!channelId) channelId = rows[0]?.id || ''
+
+      let channelCode = 'Airbnb'
+      let tmplChannelSettings = {}
+      let tmplRatePlanSettings = {}
+      let targetIsActive = null
+      if (channelId) {
+        const ch = await channelCall('GET', `/channels/${channelId}`)
+        const attrs = ch.json?.data?.attributes || {}
+        channelCode = attrs.channel || attrs.ota_name || 'Airbnb'
+        tmplChannelSettings = attrs.settings || {}
+        tmplRatePlanSettings = (attrs.rate_plans && attrs.rate_plans[0] && attrs.rate_plans[0].settings) || {}
+        targetIsActive = attrs.is_active
+      }
+
+      const ratePlanSettings = { ...tmplRatePlanSettings }
+      if (listingId) ratePlanSettings.listing_id = listingId
+
+      const payload = { channel: {
+        channel: channelCode,
+        group_id: groupId,
+        is_active: false,
+        title: `Airbnb — ${prop.name || prop.provider_property_id}`,
+        properties: [providerPropertyId],
+        rate_plans: [{ rate_plan_id: prop.provider_rate_plan_id, settings: ratePlanSettings }],
+        settings: tmplChannelSettings
+      }}
+
+      const method = channelId ? 'PUT' : 'POST'
+      const path = channelId ? `/channels/${channelId}` : '/channels'
+
+      // DRY-RUN (defaut) : on montre ce qui SERAIT envoye, rien n'est ecrit.
+      if (dryRun) {
+        return res.status(200).json({
+          dry_run: true,
+          would_send: { method, path, payload: redact(payload) },
+          template_channel_id: channelId || null,
+          target_is_active: targetIsActive,
+          group_id: groupId
+        })
+      }
+
+      // GARDE-FOU : ecriture reelle sur un canal DEJA ACTIF refusee sans force (protege Colomiers).
+      if (method === 'PUT' && targetIsActive === true && !force) {
+        return res.status(409).json({
+          error: 'Canal deja actif : ecriture bloquee (protege Colomiers). force=1 pour outrepasser (a eviter en prod).',
+          channel_id: channelId
+        })
+      }
+
+      const w = await channelCall(method, path, payload)
+      return res.status(w.ok ? 200 : 502).json({ dry_run: false, method, path, http: w.status, result: redact(w.json) })
+    }
+
+    // --- activate : passe le canal live. dry_run=true par defaut ; refus si deja actif ---
+    if (action === 'activate') {
+      const dryRun = req.query.dry_run !== 'false'
+      const force = req.query.force === '1'
+      const channelId = (req.query.channel_id || '').trim()
+      if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
+
+      if (dryRun) {
+        return res.status(200).json({ dry_run: true, would_send: { method: 'POST', path: `/channels/${channelId}/activate`, body: {} } })
+      }
+
+      // Garde-fou : ne pas re-activer un canal deja actif sans force (protege Colomiers).
+      const ch = await channelCall('GET', `/channels/${channelId}`)
+      if (ch.json?.data?.attributes?.is_active === true && !force) {
+        return res.status(409).json({ error: 'Canal deja actif : activation ignoree (force=1 pour outrepasser).', channel_id: channelId })
+      }
+      const w = await channelCall('POST', `/channels/${channelId}/activate`, {})
+      return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
+    }
+
+    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | map | activate)' })
   } catch (err) {
     console.error('[channel-mapping]', err.message)
     return res.status(500).json({ error: 'Erreur interne' })
