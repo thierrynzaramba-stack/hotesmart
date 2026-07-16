@@ -265,10 +265,16 @@ function pickThumb(o) {
   return o.thumbnail || o.thumbnail_url || o.picture || o.photo || o.image || first || ''
 }
 function normListings(raw) {
+  // Forme reelle action/listings : { values: [ {id,title,type,...} ] } -> on deballe.
+  if (raw && !Array.isArray(raw) && Array.isArray(raw.values)) raw = raw.values
   const mk = (id, v) => {
     const o = (v && typeof v === 'object') ? v : {}
     const label = typeof v === 'string' ? v : (o.title || o.name || o.label || String(id))
-    return { id: String(id), label: String(label), city: String(pickCity(o) || ''), thumb: String(pickThumb(o) || '') }
+    return {
+      id: String(id), label: String(label),
+      type: String(o.type || ''),
+      city: String(pickCity(o) || ''), thumb: String(pickThumb(o) || '')
+    }
   }
   if (Array.isArray(raw)) {
     return raw.map(x => {
@@ -303,7 +309,7 @@ async function screenB() {
       ${l.thumb ? `<img class="ab-thumb" src="${escHtml(l.thumb)}" alt="" onerror="this.remove()">` : ''}
       <span class="ab-opt-txt">
         <b>${escHtml(l.label)}</b>
-        <span class="ab-opt-sub">#${escHtml(l.id)}${l.city ? ' · ' + escHtml(l.city) : ''}</span>
+        <span class="ab-opt-sub">#${escHtml(l.id)}${l.type ? ' · ' + escHtml(l.type) : ''}${l.city ? ' · ' + escHtml(l.city) : ''}</span>
       </span>
     </label>
   `).join('')

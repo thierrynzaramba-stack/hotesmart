@@ -183,11 +183,17 @@ module.exports = async function handler(req, res) {
 
       const r = await channelCall('GET', `/channels/${channelId}/action/listings`)
       const data = r.json?.data ?? r.json ?? {}
+      // Forme reelle (doc) : data.listing_id_dictionary.values[] = [{id,title,type,...}].
+      const dict = data.listing_id_dictionary
+      const values = Array.isArray(dict?.values) ? dict.values
+                   : Array.isArray(dict) ? dict
+                   : Array.isArray(data.listings) ? data.listings
+                   : (dict ?? data)
       return res.status(r.ok ? 200 : 502).json({
         ok: r.ok,
         http: r.status,
         channel_id: channelId,
-        listings: redact(data.listing_id_dictionary ?? data.listings ?? data),
+        listings: redact(values),
         full: redact(data)
       })
     }
