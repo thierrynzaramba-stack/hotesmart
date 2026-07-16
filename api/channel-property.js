@@ -217,18 +217,31 @@ module.exports = async function handler(req, res) {
           .delete().eq('user_id', user.id).in('booking_id', bookingIds)
       }
 
-      const tables = [
-        'bookings_snapshot', 'conversations', 'agent_tasks',
-        'message_templates', 'access_codes', 'knowledge', 'property_status'
+      // Tables enfant keyees par property_id = provider_property_id (TEXT). AUCUNE FK
+      // cascade (property_id TEXT vs properties.id UUID) -> purge EXPLICITE obligatoire,
+      // sinon donnees orphelines (bug messages Colomiers). Groupe AVEC colonne user_id
+      // (scoping defensif) :
+      const tablesWithUser = [
+        'bookings_snapshot', 'conversations', 'agent_tasks', 'message_templates',
+        'knowledge', 'property_status', 'messages',
+        'menage_events', 'menage_comments', 'menage_done', 'agent_prompting', 'public_tokens'
       ]
-      for (const t of tables) {
-        const q = supabase.from(t).delete().eq('property_id', propKey)
-        // access_codes n'a pas de user_id direct partout : filtre property_id seul
-        const { error: delErr } = (t === 'access_codes')
-          ? await q
-          : await q.eq('user_id', user.id)
+      for (const t of tablesWithUser) {
+        const { error: delErr } = await supabase.from(t).delete()
+          .eq('property_id', propKey).eq('user_id', user.id)
         if (delErr) console.error(`[channel-property] purge ${t} echec`, delErr.message)
       }
+      // Groupe SANS colonne user_id : filtre property_id seul.
+      const tablesNoUser = ['access_codes', 'calendar_inventory', 'channel_sync_queue', 'sms_logs']
+      for (const t of tablesNoUser) {
+        const { error: delErr } = await supabase.from(t).delete().eq('property_id', propKey)
+        if (delErr) console.error(`[channel-property] purge ${t} echec`, delErr.message)
+      }
+      // airbnb_connect_sessions : sa colonne property_id = UUID HoteSmart ; la cle provider
+      // est provider_property_id -> on purge par provider_property_id (= propKey).
+      const { error: sessErr } = await supabase.from('airbnb_connect_sessions').delete()
+        .eq('provider_property_id', propKey).eq('user_id', user.id)
+      if (sessErr) console.error('[channel-property] purge airbnb_connect_sessions echec', sessErr.message)
     }
 
     // 3. Suppression du bien lui-meme
