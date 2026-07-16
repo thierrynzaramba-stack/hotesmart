@@ -54,12 +54,23 @@ export const api = {
     // Connexion OAuth : renvoie { iframe_url } vers la page /channels (marque blanche).
     // propertyId = UUID HoteSmart (channel-connect verifie l'ownership par id).
     connect: (propertyId) => apiCall(`channel-connect?property_id=${encodeURIComponent(propertyId)}`, 'GET'),
+    // OAuth Airbnb lien-direct : renvoie { oauth_url } (airbnb.com/oauth2/auth...).
+    // propertyUuid = UUID HoteSmart (ownership verifiee cote serveur).
+    airbnbConnect: (propertyUuid) => apiCall('channel-airbnb-connect', 'POST', { property_id: propertyUuid }),
+    // Retour Airbnb : valide token+channel_id (resolution par TOKEN, pas la session).
+    // Renvoie { property_id, provider_property_id, name, channel_id }.
+    airbnbValidate: (token, channelId) =>
+      apiCall('channel-airbnb-connect?action=validate', 'POST', { token, channel_id: channelId }),
     // Actions de mapping (channel-mapping). ATTENTION : property_id = provider_property_id
     // (UUID Channex du bien), PAS l'UUID HoteSmart. dry_run=false = ecriture reelle.
     mapping: {
-      // Liste les annonces OTA du compte connecte (ecran de choix).
+      // Liste les annonces OTA du compte connecte (ecran de choix, ancien iframe).
       listListings: (providerPropertyId, channelId = '') =>
         apiCall(`channel-mapping?action=list_listings&property_id=${encodeURIComponent(providerPropertyId)}`
+          + (channelId ? `&channel_id=${encodeURIComponent(channelId)}` : ''), 'GET'),
+      // Annonces Airbnb via GET /channels/:id/action/listings (parcours lien-direct).
+      actionListings: (providerPropertyId, channelId = '') =>
+        apiCall(`channel-mapping?action=action_listings&property_id=${encodeURIComponent(providerPropertyId)}`
           + (channelId ? `&channel_id=${encodeURIComponent(channelId)}` : ''), 'GET'),
       // Etat des canaux du bien (polling detection fin OAuth).
       channels: (providerPropertyId) =>

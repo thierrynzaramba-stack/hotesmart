@@ -168,6 +168,30 @@ module.exports = async function handler(req, res) {
       })
     }
 
+    // --- action_listings : annonces Airbnb via GET /channels/:id/action/listings ---
+    // Endpoint officiel du parcours lien-direct (doc Evan). Meme structure
+    // listing_id_dictionary que list_listings (mapping_details), mais en GET sur le
+    // canal auto-cree par l'OAuth. list_listings reste pour le diagnostic (non touche).
+    if (action === 'action_listings') {
+      let channelId = (req.query.channel_id || '').trim()
+      if (!channelId) {
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const rows = Array.isArray(list.json?.data) ? list.json.data : []
+        channelId = rows[0]?.id
+      }
+      if (!channelId) return res.status(404).json({ error: 'Aucun canal sur ce bien' })
+
+      const r = await channelCall('GET', `/channels/${channelId}/action/listings`)
+      const data = r.json?.data ?? r.json ?? {}
+      return res.status(r.ok ? 200 : 502).json({
+        ok: r.ok,
+        http: r.status,
+        channel_id: channelId,
+        listings: redact(data.listing_id_dictionary ?? data.listings ?? data),
+        full: redact(data)
+      })
+    }
+
     // --- mappings : lignes de mapping listing<->rate_plan d'un canal (LECTURE PURE) ---
     // Valide sur l'API reelle la sous-ressource /channels/:id/mappings decouverte via
     // channex-mcp : structure (id, listing_id, room_type_id, rate_plan_id, is_mapped).
@@ -344,7 +368,7 @@ module.exports = async function handler(req, res) {
       return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
     }
 
-    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | mappings | listings | map | activate | deactivate | delete)' })
+    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | action_listings | mappings | listings | map | activate | deactivate | delete)' })
   } catch (err) {
     console.error('[channel-mapping]', err.message)
     return res.status(500).json({ error: 'Erreur interne' })

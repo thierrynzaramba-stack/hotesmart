@@ -153,12 +153,15 @@
   import { initErrorHandler } from '/shared/error-handler.js'
   import { api } from '/shared/api-client.js'
   import { logger } from '/shared/logger.js'
-  import { openAirbnbConnect } from '/components/airbnb-connect.js'
+  import { openAirbnbConnect, bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
 
   initErrorHandler()
   const session = await requireAuth()
   if (!session) throw new Error('Non authentifié')
   await renderSidebar('biens')
+
+  // Repli pleine page du parcours Airbnb : rouvre l'assistant a l'ecran B au retour.
+  bootstrapAirbnbReturn()
 
   const loader = document.getElementById('loader')
   const empty  = document.getElementById('empty')

@@ -91,6 +91,7 @@ function ensureModal() {
 
 function close() {
   if (S?.pollTimer) clearInterval(S.pollTimer)
+  if (S?.onMessage) { window.removeEventListener('message', S.onMessage); S.onMessage = null }
   const modal = document.getElementById('ab-modal')
   if (modal) modal.classList.remove('show')
   const box = document.getElementById('ab-box')
@@ -136,31 +137,75 @@ function screenA() {
   document.getElementById('ab-start').addEventListener('click', startOAuth)
 }
 
-// ---------- OAuth : iframe + polling ----------
+// ---------- OAuth : lien direct Airbnb (popup) + retour postMessage ----------
+// Airbnb OAuth est une navigation de 1er niveau : on l'ouvre dans une POPUP. Au retour,
+// pages/airbnb-retour.html fait postMessage vers cet onglet -> on valide (anti-forge) et
+// on reprend a l'ecran B. Repli PLEINE PAGE si la popup est bloquee. Polling channels =
+// filet si le postMessage n'arrive pas (popup fermee a la main).
 async function startOAuth() {
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Préparation de la connexion…</div>`)
   let data
   try {
-    data = await api.channel.connect(S.property.id)
-    if (!data?.iframe_url) throw new Error(data?.error || 'iframe_url absent')
+    data = await api.channel.airbnbConnect(S.property.id)
+    if (!data?.oauth_url) throw new Error(data?.error || 'oauth_url absent')
   } catch (e) {
-    logger.error('airbnb-connect', 'connect echec', { e: e.message })
+    logger.error('airbnb-connect', 'airbnbConnect echec', { e: e.message })
     return showOAuthError('La connexion à Airbnb n\'a pas pu démarrer.')
   }
 
-  setBody(`
-    <iframe id="ab-oauth-frame" src="${escHtml(data.iframe_url)}" title="Connexion Airbnb" allow="clipboard-read; clipboard-write"></iframe>
-    <div style="padding:12px 16px; border-top:0.5px solid var(--border); flex-shrink:0;">
-      <div class="ab-status" style="padding:0 0 8px;"><div class="ab-spin"></div> En attente de la connexion de votre compte…</div>
-      <div class="ab-actions">
-        <button class="btn" id="ab-done">J'ai terminé la connexion</button>
-      </div>
-    </div>
-  `, { frame: true, wide: true })
-  document.getElementById('ab-done').addEventListener('click', () => checkChannels(true))
+  attachReturnListener()
+  const popup = window.open(data.oauth_url, 'airbnb_oauth', 'width=520,height=760')
+  const blocked = !popup || popup.closed || typeof popup.closed === 'undefined'
 
+  if (blocked) {
+    // Repli PLEINE PAGE : le retour reviendra sur biens.html?airbnb_return=1.
+    setBody(`
+      <div class="ab-status"><div class="ab-spin"></div> Redirection vers Airbnb…</div>
+      <div class="ab-sub">Si rien ne se passe, <a href="${escHtml(data.oauth_url)}">cliquez ici pour continuer sur Airbnb</a>.</div>
+    `)
+    window.location.href = data.oauth_url
+    return
+  }
+
+  setBody(`
+    <div class="ab-h">Autorisez HôteSmart sur Airbnb</div>
+    <div class="ab-sub">Une fenêtre Airbnb s'est ouverte. Connectez-vous et autorisez l'accès. Cette page se mettra à jour automatiquement au retour.</div>
+    <div class="ab-status"><div class="ab-spin"></div> En attente de votre autorisation…</div>
+    <div class="ab-actions">
+      <button class="btn" id="ab-reopen">Rouvrir la fenêtre Airbnb</button>
+    </div>
+  `)
+  document.getElementById('ab-reopen').addEventListener('click', () => window.open(data.oauth_url, 'airbnb_oauth'))
+
+  // Filet : si le postMessage n'arrive pas, on detecte le canal par polling.
   S.pollDeadline = Date.now() + OAUTH_TIMEOUT_MS
   S.pollTimer = setInterval(() => checkChannels(false), POLL_MS)
+}
+
+// Ecoute le retour de pages/airbnb-retour.html (postMessage meme origine).
+function attachReturnListener() {
+  if (S.onMessage) return
+  S.onMessage = async (ev) => {
+    if (ev.origin !== window.location.origin) return
+    const d = ev.data
+    if (!d || d.source !== 'hotesmart-airbnb-return') return
+    window.removeEventListener('message', S.onMessage)
+    S.onMessage = null
+    if (S.pollTimer) clearInterval(S.pollTimer)
+    if (!d.ok || !d.token) {
+      return showOAuthError('La connexion Airbnb a échoué ou a été refusée.')
+    }
+    try {
+      const v = await api.channel.airbnbValidate(d.token, d.channelId)
+      S.channelId = v.channel_id
+      logger.info('airbnb-connect', 'retour Airbnb valide', { channelId: S.channelId })
+      screenB()
+    } catch (e) {
+      logger.error('airbnb-connect', 'validate retour echec', { e: e.message })
+      showOAuthError('Le retour d\'Airbnb n\'a pas pu être validé. Réessayez.')
+    }
+  }
+  window.addEventListener('message', S.onMessage)
 }
 
 async function checkChannels(manual) {
@@ -221,7 +266,7 @@ async function screenB() {
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Récupération de vos annonces Airbnb…</div>`)
   let listings
   try {
-    const r = await api.channel.mapping.listListings(S.property.provider_property_id, S.channelId)
+    const r = await api.channel.mapping.actionListings(S.property.provider_property_id, S.channelId)
     listings = normListings(r?.listings)
   } catch (e) {
     logger.error('airbnb-connect', 'list_listings echec', { e: e.message })
@@ -348,8 +393,36 @@ export async function openAirbnbConnect(property, btn = null) {
     return
   }
   ensureModal()
-  S = { property, channelId: null, listingId: null, pollTimer: null, pollDeadline: 0 }
+  S = { property, channelId: null, listingId: null, pollTimer: null, pollDeadline: 0, onMessage: null }
   document.getElementById('ab-title').textContent = `Connexion Airbnb — ${property.name || ''}`.trim()
   document.getElementById('ab-modal').classList.add('show')
   detectAndRoute()
+}
+
+// Repli PLEINE PAGE : appele au chargement de biens.html. Si on revient d'Airbnb
+// (?airbnb_return=1 + sessionStorage), on resout le bien VIA LE TOKEN (validate,
+// resolution serveur par token — pas la session) et on rouvre l'assistant a l'ecran B.
+export async function bootstrapAirbnbReturn() {
+  const url = new URL(window.location.href)
+  if (url.searchParams.get('airbnb_return') !== '1') return
+
+  let ret = null
+  try { ret = JSON.parse(sessionStorage.getItem('airbnb_return') || 'null') } catch (e) {}
+  sessionStorage.removeItem('airbnb_return')
+  url.searchParams.delete('airbnb_return')
+  window.history.replaceState({}, '', url.pathname + url.search)
+
+  if (!ret || !ret.ok || !ret.token) return   // echec/refus : l'hote reprend manuellement
+
+  try {
+    const v = await api.channel.airbnbValidate(ret.token, ret.channelId)
+    const property = { id: v.property_id, name: v.name, provider_property_id: v.provider_property_id }
+    ensureModal()
+    S = { property, channelId: v.channel_id, listingId: null, pollTimer: null, pollDeadline: 0, onMessage: null }
+    document.getElementById('ab-title').textContent = `Connexion Airbnb — ${property.name || ''}`.trim()
+    document.getElementById('ab-modal').classList.add('show')
+    screenB()
+  } catch (e) {
+    logger.error('airbnb-connect', 'bootstrap retour echec', { e: e.message })
+  }
 }
