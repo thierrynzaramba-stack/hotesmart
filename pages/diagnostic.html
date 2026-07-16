@@ -90,7 +90,7 @@
       <span class="diag-status idle">En attente</span>
     </div>
     <p>Importe l'historique des messages du bien (POST /api/channel-import-messages).</p>
-    <input class="form-input" id="import-prop-id" type="text" placeholder="UUID du bien" value="1a2cfd91-f501-4b0e-83ef-0598a0c921b2" style="margin-bottom:10px">
+    <input class="form-input" id="import-prop-id" type="text" placeholder="UUID du bien" value="430aaac1-7e30-4bec-8826-18e78c4c0312" style="margin-bottom:10px">
     <button class="btn diag-btn" data-run="6">Importer</button>
     <pre class="diag-out"></pre>
   </div>
@@ -101,7 +101,7 @@
       <span class="diag-status idle">En attente</span>
     </div>
     <p>Liste les canaux (Airbnb, Booking…) du bien puis affiche l'objet complet de chacun : mappings room/rate, is_active, tous les attributs. Appel serveur (GET only), valeurs sensibles masquées.</p>
-    <input class="form-input" id="channels-prop-id" type="text" placeholder="provider_property_id (id Channex)" value="b8cdab91-fe19-4b47-ad62-5f59ddb7b6a0" style="margin-bottom:10px">
+    <input class="form-input" id="channels-prop-id" type="text" placeholder="provider_property_id (id Channex)" value="4402f849-702c-4a82-9d4a-8f8cc64e837d" style="margin-bottom:10px">
     <button class="btn diag-btn" data-run="7">Lire</button>
     <pre class="diag-out"></pre>
   </div>
@@ -122,7 +122,7 @@
       <span class="diag-status idle">En attente</span>
     </div>
     <p>GET /groups → identifie le group_id propriétaire du bien (requis pour créer un canal). Lecture seule. Le champ ci-dessous sert aussi aux tests 10 et 11.</p>
-    <input class="form-input" id="map-prop-id" type="text" placeholder="provider_property_id (id Channex)" value="b8cdab91-fe19-4b47-ad62-5f59ddb7b6a0" style="margin-bottom:10px">
+    <input class="form-input" id="map-prop-id" type="text" placeholder="provider_property_id (id Channex)" value="4402f849-702c-4a82-9d4a-8f8cc64e837d" style="margin-bottom:10px">
     <button class="btn diag-btn" data-run="9">Lire</button>
     <pre class="diag-out"></pre>
   </div>
@@ -176,7 +176,7 @@
       <span class="diag-status idle">En attente</span>
     </div>
     <p>Appel POST /channels/:id/activate. Dry-run = affiché sans envoi. channel_id prérempli avec Colomiers.</p>
-    <input class="form-input" id="activate-channel-id" type="text" placeholder="channel_id" value="6ec9c4fc-7cbe-43dc-bc15-600b11c343f2" style="margin-bottom:10px">
+    <input class="form-input" id="activate-channel-id" type="text" placeholder="channel_id (voir Test 10)" value="" style="margin-bottom:10px">
     <label class="real-row"><input type="checkbox" class="real-exec"> ⚠️ exécution réelle</label>
     <div class="real-warn">⚠️ Écriture réelle sur le canal — dry-run désactivé.</div>
     <button class="btn diag-btn" data-run="14">Prévisualiser</button>
@@ -189,7 +189,7 @@
       <span class="diag-status idle">En attente</span>
     </div>
     <p>Appel POST /channels/:id/deactivate. Dry-run = affiché sans envoi. channel_id prérempli avec Colomiers.</p>
-    <input class="form-input" id="deactivate-channel-id" type="text" placeholder="channel_id" value="6ec9c4fc-7cbe-43dc-bc15-600b11c343f2" style="margin-bottom:10px">
+    <input class="form-input" id="deactivate-channel-id" type="text" placeholder="channel_id (voir Test 10)" value="" style="margin-bottom:10px">
     <label class="real-row"><input type="checkbox" class="real-exec"> ⚠️ exécution réelle</label>
     <div class="real-warn">⚠️ Écriture réelle sur le canal — dry-run désactivé.</div>
     <button class="btn diag-btn" data-run="15">Prévisualiser</button>
@@ -202,7 +202,7 @@
       <span class="diag-status idle">En attente</span>
     </div>
     <p>GET /channels/:id/mappings + /listings. Lecture pure : confirme sur l'API réelle que la sous-ressource /mappings existe et sa structure (listing_id, rate_plan_id, is_mapped). Utilise le provider_property_id du test 9. channel_id prérempli Colomiers.</p>
-    <input class="form-input" id="mappings-channel-id" type="text" placeholder="channel_id (vide = 1er canal du bien)" value="6ec9c4fc-7cbe-43dc-bc15-600b11c343f2" style="margin-bottom:10px">
+    <input class="form-input" id="mappings-channel-id" type="text" placeholder="channel_id (vide = 1er canal du bien)" value="" style="margin-bottom:10px">
     <button class="btn diag-btn" data-run="16">Lire</button>
     <pre class="diag-out"></pre>
   </div>
