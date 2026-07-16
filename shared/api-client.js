@@ -55,8 +55,15 @@ export const api = {
     // propertyId = UUID HoteSmart (channel-connect verifie l'ownership par id).
     connect: (propertyId) => apiCall(`channel-connect?property_id=${encodeURIComponent(propertyId)}`, 'GET'),
     // OAuth Airbnb lien-direct : renvoie { oauth_url } (airbnb.com/oauth2/auth...).
-    // propertyUuid = UUID HoteSmart (ownership verifiee cote serveur).
-    airbnbConnect: (propertyUuid) => apiCall('channel-airbnb-connect', 'POST', { property_id: propertyUuid }),
+    // propertyUuid = UUID HoteSmart. channelId (option) = flux de re-connexion : on ajoute
+    // le bien a un canal Airbnb existant au lieu d'en creer un nouveau (multi-biens/compte).
+    airbnbConnect: (propertyUuid, { channelId = '' } = {}) =>
+      apiCall('channel-airbnb-connect', 'POST',
+        { property_id: propertyUuid, ...(channelId ? { channel_id: channelId } : {}) }),
+    // Le compte du user a-t-il deja une connexion Airbnb (via ses autres biens) ?
+    // Renvoie { existing_channels: [{ id, title, is_active, via_property }] }.
+    airbnbAccountStatus: (propertyUuid) =>
+      apiCall('channel-airbnb-connect?action=account_status', 'POST', { property_id: propertyUuid }),
     // Retour Airbnb : valide token+channel_id (resolution par TOKEN, pas la session).
     // Renvoie { property_id, provider_property_id, name, channel_id }.
     airbnbValidate: (token, channelId) =>
@@ -80,10 +87,14 @@ export const api = {
         apiCall(`channel-mapping?action=map&property_id=${encodeURIComponent(providerPropertyId)}`
           + `&channel_id=${encodeURIComponent(channelId)}&listing_id=${encodeURIComponent(listingId)}`
           + `&dry_run=${dryRun}${force ? '&force=1' : ''}`, 'GET'),
-      // Passe le canal live (POST /channels/:id/activate).
+      // Passe le canal live (POST /channels/:id/activate). Idempotent : no-op si deja actif.
       activate: (providerPropertyId, channelId, { dryRun = false, force = false } = {}) =>
         apiCall(`channel-mapping?action=activate&property_id=${encodeURIComponent(providerPropertyId)}`
-          + `&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}${force ? '&force=1' : ''}`, 'GET')
+          + `&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}${force ? '&force=1' : ''}`, 'GET'),
+      // Tire les resas d'un listing rejoignant un canal (POST action/load_future_reservations).
+      loadReservations: (providerPropertyId, channelId, listingId) =>
+        apiCall(`channel-mapping?action=load_reservations&property_id=${encodeURIComponent(providerPropertyId)}`
+          + `&channel_id=${encodeURIComponent(channelId)}&listing_id=${encodeURIComponent(listingId)}`, 'GET')
     }
   },
   calendar: {

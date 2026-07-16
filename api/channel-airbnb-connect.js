@@ -56,10 +56,11 @@ async function resolveGroupId(providerPropertyId) {
 }
 
 // Le channel_id recu appartient-il vraiment au provider_property_id stocke ? (anti-forge)
-async function channelBelongsToProperty(channelId, providerPropertyId) {
+// Renvoie le canal correspondant (avec attributes.is_active) ou null.
+async function findChannelForProperty(channelId, providerPropertyId) {
   const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
   const rows = Array.isArray(r.json?.data) ? r.json.data : []
-  return rows.some(c => String(c.id) === String(channelId))
+  return rows.find(c => String(c.id) === String(channelId)) || null
 }
 
 module.exports = async function handler(req, res) {
@@ -98,10 +99,11 @@ module.exports = async function handler(req, res) {
 
     if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
     // Anti-forge : le canal doit appartenir au bien lie au token.
-    const belongs = await channelBelongsToProperty(channelId, sess.provider_property_id)
-    if (!belongs) {
+    const chan = await findChannelForProperty(channelId, sess.provider_property_id)
+    if (!chan) {
       return res.status(403).json({ error: 'channel_id non rattache a ce bien' })
     }
+    const channelIsActive = chan.attributes?.is_active === true
 
     const { error: uErr } = await supabase
       .from('airbnb_connect_sessions')
@@ -121,7 +123,8 @@ module.exports = async function handler(req, res) {
       property_id: sess.property_id,
       provider_property_id: sess.provider_property_id,
       name: prop?.name || null,
-      channel_id: channelId
+      channel_id: channelId,
+      channel_is_active: channelIsActive
     })
   }
 
@@ -156,8 +159,64 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Bien non provisionne cote gestionnaire' })
   }
 
+  // ===================================================================
+  // account_status : le user a-t-il DEJA une connexion Airbnb (via ses autres biens) ?
+  // Sert a proposer la re-connexion (multi-biens / meme compte Airbnb) plutot que de
+  // recreer un canal en double. On ne PRESUME pas que 2 biens = meme compte : on liste
+  // les canaux Airbnb existants et l'hote choisit (reutiliser vs nouveau compte).
+  // ===================================================================
+  if (action === 'account_status') {
+    const { data: others, error: oErr } = await supabase
+      .from('properties')
+      .select('id, provider_property_id, name')
+      .eq('user_id', user.id)
+      .in('provider', ['channel', 'channex'])
+      .neq('id', prop.id)
+      .not('provider_property_id', 'is', null)
+    if (oErr) {
+      console.error('[channel-airbnb-connect] account_status SELECT', oErr.message)
+      return res.status(500).json({ error: 'Erreur lecture' })
+    }
+    const seen = new Map()
+    for (const o of (others || [])) {
+      const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(o.provider_property_id)}`)
+      const rows = Array.isArray(r.json?.data) ? r.json.data : []
+      for (const c of rows) {
+        const ota = c.attributes?.channel || c.attributes?.ota_name || ''
+        if (String(ota).toUpperCase() !== 'AIRBNB') continue
+        if (!seen.has(c.id)) {
+          seen.set(c.id, {
+            id: c.id,
+            title: c.attributes?.title || 'Compte Airbnb',
+            is_active: c.attributes?.is_active === true,
+            via_property: o.name || null
+          })
+        }
+      }
+    }
+    return res.status(200).json({ existing_channels: Array.from(seen.values()) })
+  }
+
+  // ===================================================================
+  // create (+ re-connexion si channel_id fourni)
+  // ===================================================================
+  const reuseChannelId = (req.body?.channel_id || '').trim()
+
   try {
-    const groupId = await resolveGroupId(prop.provider_property_id)
+    let groupId = await resolveGroupId(prop.provider_property_id)
+    // Liste des biens a associer au canal (le bien courant ; + ceux deja lies si re-connexion).
+    let properties = [prop.provider_property_id]
+
+    if (reuseChannelId) {
+      // Flux de re-connexion (doc Channex : channel_id = canal existant). On garde les biens
+      // deja lies et on AJOUTE le bien courant ; le canal reste le meme (pas de doublon).
+      const ch = await channelCall('GET', `/channels/${reuseChannelId}`)
+      const existing = ch.json?.data?.attributes?.properties || []
+      properties = Array.from(new Set([...existing.map(String), prop.provider_property_id]))
+      const grp = ch.json?.data?.relationships?.group?.data?.id
+      if (grp) groupId = grp   // le groupe du canal existant prime
+    }
+
     if (!groupId) {
       return res.status(400).json({ error: 'Bien non rattache a un groupe (provisioning incomplet)' })
     }
@@ -181,9 +240,9 @@ module.exports = async function handler(req, res) {
     const redirectUri = `${APP_URL}/pages/airbnb-retour.html`
     const failureUri = `${APP_URL}/pages/airbnb-retour.html?failure=1`
 
-    const payload = { connection_link: {
+    const link = {
       group_id: groupId,
-      properties: [prop.provider_property_id],
+      properties,
       redirect_uri: redirectUri,
       failure_redirect_uri: failureUri,
       token,
@@ -194,7 +253,9 @@ module.exports = async function handler(req, res) {
         cohost_payout_calculations: false,
         send_email_notifications: false
       }
-    }}
+    }
+    if (reuseChannelId) link.channel_id = reuseChannelId   // re-connexion : reutilise le canal
+    const payload = { connection_link: link }
 
     const r = await channelCall('POST', '/meta/airbnb/connection_link', payload)
     const url = r.json?.data?.attributes?.url

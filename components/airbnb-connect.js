@@ -56,6 +56,8 @@ function ensureModal() {
     .ab-thumb { width:44px; height:44px; border-radius:6px; object-fit:cover; flex-shrink:0; }
     .ab-opt-txt { display:flex; flex-direction:column; gap:2px; min-width:0; }
     .ab-opt-sub { font-size:11px; color:var(--text2); word-break:break-all; }
+    .ab-opt-disabled { opacity:0.55; cursor:not-allowed; }
+    .ab-opt-disabled:hover { border-color:var(--border); }
     .ab-status { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text2); padding:14px 0; }
     .ab-spin { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--green); border-radius:50%; animation:ab-rot 0.8s linear infinite; flex-shrink:0; }
     @keyframes ab-rot { to { transform:rotate(360deg); } }
@@ -137,7 +139,7 @@ function screenA() {
       <button class="btn btn-primary" id="ab-start">Connecter mon Airbnb</button>
     </div>
   `)
-  document.getElementById('ab-start').addEventListener('click', startOAuth)
+  document.getElementById('ab-start').addEventListener('click', () => startOAuth())
 }
 
 // ---------- OAuth : lien direct Airbnb (popup) + retour postMessage ----------
@@ -145,11 +147,12 @@ function screenA() {
 // pages/airbnb-retour.html fait postMessage vers cet onglet -> on valide (anti-forge) et
 // on reprend a l'ecran B. Repli PLEINE PAGE si la popup est bloquee. Polling channels =
 // filet si le postMessage n'arrive pas (popup fermee a la main).
-async function startOAuth() {
+// reuseChannelId : flux de re-connexion (ajoute le bien a un canal Airbnb existant).
+async function startOAuth(reuseChannelId = '') {
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Préparation de la connexion…</div>`)
   let data
   try {
-    data = await api.channel.airbnbConnect(S.property.id)
+    data = await api.channel.airbnbConnect(S.property.id, reuseChannelId ? { channelId: reuseChannelId } : {})
     if (!data?.oauth_url) throw new Error(data?.error || 'oauth_url absent')
   } catch (e) {
     logger.error('airbnb-connect', 'airbnbConnect echec', { e: e.message })
@@ -201,6 +204,7 @@ function attachReturnListener() {
     try {
       const v = await api.channel.airbnbValidate(d.token, d.channelId)
       S.channelId = v.channel_id
+      S.channelActive = v.channel_is_active === true
       logger.info('airbnb-connect', 'retour Airbnb valide', { channelId: S.channelId })
       screenB()
     } catch (e) {
@@ -217,6 +221,7 @@ async function checkChannels(manual) {
     if ((r?.channel_count || 0) > 0) {
       if (S.pollTimer) clearInterval(S.pollTimer)
       S.channelId = r.channels[0].id
+      S.channelActive = r.channels[0].is_active === true
       logger.info('airbnb-connect', 'canal detecte', { channelId: S.channelId })
       return screenB()
     }
@@ -243,7 +248,7 @@ function showOAuthError(msg) {
       <button class="btn" id="ab-cancel">Annuler</button>
     </div>
   `)
-  document.getElementById('ab-retry').addEventListener('click', screenA)
+  document.getElementById('ab-retry').addEventListener('click', detectAndRoute)
   document.getElementById('ab-cancel').addEventListener('click', close)
 }
 
@@ -291,10 +296,11 @@ function normListings(raw) {
 async function screenB() {
   setStep(2)
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Récupération de vos annonces Airbnb…</div>`)
-  let listings
+  let listings, mapped
   try {
     const r = await api.channel.mapping.actionListings(S.property.provider_property_id, S.channelId)
     listings = normListings(r?.listings)
+    mapped = new Set((r?.mapped_listing_ids || []).map(String))
   } catch (e) {
     logger.error('airbnb-connect', 'list_listings echec', { e: e.message })
     return screenBError('Impossible de récupérer vos annonces Airbnb pour le moment. Réessayez dans un instant.')
@@ -302,17 +308,25 @@ async function screenB() {
   if (!listings.length) {
     return screenBError('Aucune annonce trouvée sur ce compte Airbnb.')
   }
+  // Multi-biens : les annonces deja reliees a un autre logement sont grisees (non
+  // selectionnables) -> l'hote ne peut pas re-mapper listing1 par erreur.
+  const selectable = listings.filter(l => !mapped.has(String(l.id)))
+  if (!selectable.length) {
+    return screenBError('Toutes les annonces de ce compte Airbnb sont déjà reliées à un logement.')
+  }
 
-  const opts = listings.map((l, i) => `
-    <label class="ab-opt">
-      <input type="radio" name="ab-listing" value="${escHtml(l.id)}" data-idx="${i}">
+  const opts = listings.map((l, i) => {
+    const isMapped = mapped.has(String(l.id))
+    return `
+    <label class="ab-opt${isMapped ? ' ab-opt-disabled' : ''}">
+      <input type="radio" name="ab-listing" value="${escHtml(l.id)}" data-idx="${i}"${isMapped ? ' disabled' : ''}>
       ${l.thumb ? `<img class="ab-thumb" src="${escHtml(l.thumb)}" alt="" onerror="this.remove()">` : ''}
       <span class="ab-opt-txt">
         <b>${escHtml(l.label)}</b>
-        <span class="ab-opt-sub">#${escHtml(l.id)}${l.type ? ' · ' + escHtml(l.type) : ''}${l.city ? ' · ' + escHtml(l.city) : ''}</span>
+        <span class="ab-opt-sub">#${escHtml(l.id)}${l.type ? ' · ' + escHtml(l.type) : ''}${l.city ? ' · ' + escHtml(l.city) : ''}${isMapped ? ' · déjà reliée' : ''}</span>
       </span>
-    </label>
-  `).join('')
+    </label>`
+  }).join('')
 
   setBody(`
     <div class="ab-h">Choisissez votre annonce</div>
@@ -346,12 +360,19 @@ async function screenC() {
   const pid = S.property.provider_property_id
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Liaison de votre annonce…</div>`)
   try {
-    const m = await api.channel.mapping.map(pid, S.channelId, S.listingId, { dryRun: false })
+    // Re-connexion sur un canal DEJA actif (2e bien meme compte) : le mapping additif est
+    // legitime -> force=1 pour outrepasser le garde-fou "canal actif".
+    const m = await api.channel.mapping.map(pid, S.channelId, S.listingId, { dryRun: false, force: S.channelActive === true })
     if (!m?.rate_plans_populated) {
       throw new Error('rate_plans vide apres map (mapping non pris)')   // signal interne (logs)
     }
     setBody(`<div class="ab-status"><div class="ab-spin"></div> Finalisation de la connexion…</div>`)
+    // activate est idempotent cote serveur (no-op si deja actif) -> sur d'appeler.
     await api.channel.mapping.activate(pid, S.channelId, { dryRun: false })
+    // Post-mapping : tire les resas de CE listing (indispensable quand le listing rejoint un
+    // canal deja actif : le webhook activate_channel ne refire pas). Best-effort.
+    try { await api.channel.mapping.loadReservations(pid, S.channelId, S.listingId) }
+    catch (e) { logger.error('airbnb-connect', 'load_future_reservations echec', { e: e.message }) }
     logger.info('airbnb-connect', 'mapping + activation OK', { channelId: S.channelId, listingId: S.listingId })
     screenD()
   } catch (e) {
@@ -401,20 +422,63 @@ function screenAlreadyConnected() {
 }
 
 // Detecte l'etat du bien : canal actif -> deja connecte ; canal present mais inactif ->
-// reprise directe au choix de l'annonce (OAuth deja fait) ; aucun canal -> flux complet.
+// reprise directe au choix de l'annonce (OAuth deja fait) ; aucun canal sur CE bien mais un
+// canal Airbnb existe sur le compte (autre bien) -> choix reutiliser/nouveau ; sinon flux complet.
 async function detectAndRoute() {
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Vérification de la connexion…</div>`)
   try {
     const r = await api.channel.mapping.channels(S.property.provider_property_id)
     const chans = r?.channels || []
     const active = chans.find(c => c.is_active)
-    if (active) { S.channelId = active.id; return screenAlreadyConnected() }
-    if (chans.length) { S.channelId = chans[0].id; return screenB() }   // OAuth fait, mapping a finir
+    if (active) { S.channelId = active.id; S.channelActive = true; return screenAlreadyConnected() }
+    if (chans.length) { S.channelId = chans[0].id; S.channelActive = false; return screenB() }   // OAuth fait, mapping a finir
+    // Aucun canal sur ce bien : le compte a-t-il deja une connexion Airbnb (autre bien) ?
+    try {
+      const acc = await api.channel.airbnbAccountStatus(S.property.id)
+      const existing = acc?.existing_channels || []
+      if (existing.length) return screenChooseConnection(existing)
+    } catch (e) {
+      logger.error('airbnb-connect', 'account_status echec', { e: e.message })
+      // detection compte KO : on retombe sur le flux complet, sans rien casser.
+    }
   } catch (e) {
     logger.error('airbnb-connect', 'detect status echec', { e: e.message })
     // En cas d'echec de detection : on retombe sur le flux complet (screenA), sans rien casser.
   }
   screenA()
+}
+
+// ---------- Choix : reutiliser un compte Airbnb existant OU en connecter un autre ----------
+function screenChooseConnection(channels) {
+  setStep(1)
+  const opts = channels.map((c, i) => `
+    <label class="ab-opt">
+      <input type="radio" name="ab-conn" value="${escHtml(c.id)}" data-idx="${i}" data-active="${c.is_active ? '1' : '0'}">
+      <span class="ab-opt-txt">
+        <b>${escHtml(c.title)}</b>
+        <span class="ab-opt-sub">Connexion Airbnb existante${c.via_property ? ' · ' + escHtml(c.via_property) : ''}${c.is_active ? ' · active' : ''}</span>
+      </span>
+    </label>
+  `).join('')
+
+  setBody(`
+    <div class="ab-h">Vous avez déjà un compte Airbnb connecté</div>
+    <div class="ab-sub">Réutilisez cette connexion pour y ajouter ce logement, ou connectez un autre compte Airbnb.</div>
+    <div class="ab-list">${opts}</div>
+    <div class="ab-actions">
+      <button class="btn btn-primary" id="ab-reuse" disabled>Réutiliser cette connexion</button>
+      <button class="btn" id="ab-newconn">Connecter un autre compte</button>
+    </div>
+  `)
+  const reuse = document.getElementById('ab-reuse')
+  document.querySelectorAll('input[name="ab-conn"]').forEach(r =>
+    r.addEventListener('change', () => {
+      S.reuseChannelId = r.value
+      S.channelActive = r.dataset.active === '1'
+      reuse.disabled = false
+    }))
+  reuse.addEventListener('click', () => startOAuth(S.reuseChannelId))
+  document.getElementById('ab-newconn').addEventListener('click', () => { S.channelActive = false; startOAuth() })
 }
 
 // Point d'entree. property = { id (UUID HoteSmart), name, provider_property_id }.
@@ -424,7 +488,7 @@ export async function openAirbnbConnect(property, btn = null) {
     return
   }
   ensureModal()
-  S = { property, channelId: null, listingId: null, pollTimer: null, pollDeadline: 0, onMessage: null }
+  S = { property, channelId: null, listingId: null, pollTimer: null, pollDeadline: 0, onMessage: null, channelActive: false, reuseChannelId: null }
   document.getElementById('ab-title').textContent = `Connexion Airbnb — ${property.name || ''}`.trim()
   document.getElementById('ab-modal').classList.add('show')
   detectAndRoute()
@@ -449,7 +513,7 @@ export async function bootstrapAirbnbReturn() {
     const v = await api.channel.airbnbValidate(ret.token, ret.channelId)
     const property = { id: v.property_id, name: v.name, provider_property_id: v.provider_property_id }
     ensureModal()
-    S = { property, channelId: v.channel_id, listingId: null, pollTimer: null, pollDeadline: 0, onMessage: null }
+    S = { property, channelId: v.channel_id, listingId: null, pollTimer: null, pollDeadline: 0, onMessage: null, channelActive: v.channel_is_active === true, reuseChannelId: null }
     document.getElementById('ab-title').textContent = `Connexion Airbnb — ${property.name || ''}`.trim()
     document.getElementById('ab-modal').classList.add('show')
     screenB()

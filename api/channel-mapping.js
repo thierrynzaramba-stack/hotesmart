@@ -189,11 +189,21 @@ module.exports = async function handler(req, res) {
                    : Array.isArray(dict) ? dict
                    : Array.isArray(data.listings) ? data.listings
                    : (dict ?? data)
+
+      // Annonces DEJA mappees sur ce canal (multi-biens : eviter de re-mapper listing1).
+      const mp = await channelCall('GET', `/channels/${channelId}/mappings`)
+      const mrows = Array.isArray(mp.json?.data) ? mp.json.data : []
+      const mappedListingIds = mrows
+        .map(m => m.attributes?.listing_id)
+        .filter(v => v != null)
+        .map(String)
+
       return res.status(r.ok ? 200 : 502).json({
         ok: r.ok,
         http: r.status,
         channel_id: channelId,
         listings: redact(values),
+        mapped_listing_ids: mappedListingIds,
         full: redact(data)
       })
     }
@@ -322,10 +332,9 @@ module.exports = async function handler(req, res) {
       })
     }
 
-    // --- activate : passe le canal live. dry_run=true par defaut ; refus si deja actif ---
+    // --- activate : passe le canal live. dry_run=true par defaut ; no-op si deja actif ---
     if (action === 'activate') {
       const dryRun = req.query.dry_run !== 'false'
-      const force = req.query.force === '1'
       const channelId = (req.query.channel_id || '').trim()
       if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
 
@@ -333,13 +342,33 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ dry_run: true, would_send: { method: 'POST', path: `/channels/${channelId}/activate`, body: {} } })
       }
 
-      // Garde-fou : ne pas re-activer un canal deja actif sans force (protege Colomiers).
+      // Idempotent : canal deja actif -> no-op succes (cas multi-biens : on ajoute un
+      // listing a un canal deja live, inutile et risque de re-activer).
       const ch = await channelCall('GET', `/channels/${channelId}`)
-      if (ch.json?.data?.attributes?.is_active === true && !force) {
-        return res.status(409).json({ error: 'Canal deja actif : activation ignoree (force=1 pour outrepasser).', channel_id: channelId })
+      if (ch.json?.data?.attributes?.is_active === true) {
+        return res.status(200).json({ dry_run: false, already_active: true, http: 200, channel_id: channelId })
       }
       const w = await channelCall('POST', `/channels/${channelId}/activate`, {})
       return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
+    }
+
+    // --- load_reservations : tire les resas d'un listing rejoignant un canal ---
+    // POST /channels/:id/action/load_future_reservations { listing_id }. Recommande par la
+    // doc quand un NOUVEAU listing rejoint un canal existant (le webhook activate_channel ne
+    // refire pas sur un canal deja actif -> post-mapping non declenche sans ceci).
+    if (action === 'load_reservations') {
+      const listingId = (req.query.listing_id || '').trim()
+      let channelId = (req.query.channel_id || '').trim()
+      if (!channelId) {
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const rows = Array.isArray(list.json?.data) ? list.json.data : []
+        channelId = rows[0]?.id || ''
+      }
+      if (!channelId) return res.status(404).json({ error: 'Aucun canal sur ce bien' })
+
+      const body = listingId ? { listing_id: listingId } : {}
+      const w = await channelCall('POST', `/channels/${channelId}/action/load_future_reservations`, body)
+      return res.status(w.ok ? 200 : 502).json({ ok: w.ok, http: w.status, channel_id: channelId, result: redact(w.json) })
     }
 
     // --- deactivate : met le canal en pause. dry_run=true par defaut. (cycle throwaway) ---
@@ -374,7 +403,7 @@ module.exports = async function handler(req, res) {
       return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
     }
 
-    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | action_listings | mappings | listings | map | activate | deactivate | delete)' })
+    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | action_listings | mappings | listings | map | activate | load_reservations | deactivate | delete)' })
   } catch (err) {
     console.error('[channel-mapping]', err.message)
     return res.status(500).json({ error: 'Erreur interne' })
