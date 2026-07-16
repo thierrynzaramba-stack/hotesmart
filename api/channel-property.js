@@ -164,13 +164,30 @@ module.exports = async function handler(req, res) {
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id')
+      .select('id, name, provider, provider_property_id, provider_rate_plan_id')
       .eq('id', pid)
       .eq('user_id', user.id)
       .single()
     if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
 
     const providerId = prop.provider_property_id
+
+    // GARDE-FOU : refuser la suppression d'un bien channex ENCORE relie a une annonce OTA
+    // (sinon on casserait un canal actif). L'hote doit "Deconnecter" d'abord (assistant).
+    if ((prop.provider === 'channex' || prop.provider === 'channel') && providerId && prop.provider_rate_plan_id) {
+      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerId)}`)
+      const chans = Array.isArray(list.json?.data) ? list.json.data : []
+      for (const c of chans) {
+        const mp = await channelCall('GET', `/channels/${c.id}/mappings`)
+        const rows = Array.isArray(mp.json?.data) ? mp.json.data : []
+        const stillMapped = rows.some(m => String(m.attributes?.rate_plan_id) === String(prop.provider_rate_plan_id))
+        if (stillMapped) {
+          return res.status(409).json({
+            error: 'Ce logement est encore relié à une annonce Airbnb ou Booking. Déconnectez-le d\'abord (bouton « Déconnecter cette annonce » dans l\'assistant de connexion), puis vous pourrez le supprimer.'
+          })
+        }
+      }
+    }
 
     // 1. Suppression cote channel manager (best effort : un 404 = deja absent, on continue)
     let channelDeleted = null

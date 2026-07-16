@@ -403,7 +403,71 @@ module.exports = async function handler(req, res) {
       return res.status(w.ok ? 200 : 502).json({ dry_run: false, http: w.status, result: redact(w.json) })
     }
 
-    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | action_listings | mappings | listings | map | activate | load_reservations | deactivate | delete)' })
+    // --- disconnect : deconnecte CE bien de son annonce OTA (langage hote). ---
+    // SECURITE canal partage : on demappe UNIQUEMENT le mapping de CE bien (rate_plan_id ==
+    // provider_rate_plan_id) ; on ne supprime le canal QUE s'il ne reste plus aucun mapping
+    // (bien seul). Sinon on laisse le canal actif pour les autres biens du meme compte.
+    // dry_run=true par defaut (montre ce qui serait fait) ; l'assistant passe dry_run=false.
+    if (action === 'disconnect') {
+      const dryRun = req.query.dry_run !== 'false'
+      let channelId = (req.query.channel_id || '').trim()
+      const ratePlanId = prop.provider_rate_plan_id
+      if (!ratePlanId) {
+        return res.status(400).json({ error: 'Bien sans provider_rate_plan_id (rien a deconnecter)' })
+      }
+
+      if (!channelId) {
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const rows = Array.isArray(list.json?.data) ? list.json.data : []
+        channelId = rows[0]?.id || ''
+      }
+      if (!channelId) {
+        return res.status(404).json({ error: 'Aucun canal sur ce bien (deja deconnecte)' })
+      }
+
+      // Mapping(s) de CE bien sur le canal (resolus en direct : mapping_id non persiste).
+      const mp = await channelCall('GET', `/channels/${channelId}/mappings`)
+      const rows = Array.isArray(mp.json?.data) ? mp.json.data : []
+      const mine = rows.filter(m => String(m.attributes?.rate_plan_id) === String(ratePlanId))
+      const willEmpty = (rows.length - mine.length) === 0
+
+      if (dryRun) {
+        return res.status(200).json({
+          dry_run: true,
+          channel_id: channelId,
+          would_unmap: mine.map(m => m.id),
+          would_delete_channel: willEmpty
+        })
+      }
+
+      // 1. Demapper CE bien (libere son annonce OTA).
+      for (const m of mine) {
+        await channelCall('DELETE', `/channels/${channelId}/mappings/${m.id}`)
+      }
+
+      // 2. Recompter : ne supprimer le canal que s'il est desormais vide.
+      const after = await channelCall('GET', `/channels/${channelId}/mappings`)
+      const remaining = Array.isArray(after.json?.data) ? after.json.data.length : 0
+
+      let channelDeleted = false
+      if (remaining === 0) {
+        // Anti-canal-fantome : deactivate PUIS delete (delete exige inactif).
+        await channelCall('POST', `/channels/${channelId}/deactivate`, {})
+        const del = await channelCall('DELETE', `/channels/${channelId}`)
+        channelDeleted = del.ok
+      }
+
+      return res.status(200).json({
+        dry_run: false,
+        channel_id: channelId,
+        unmapped: mine.length,
+        remaining_mappings: remaining,
+        channel_deleted: channelDeleted,
+        channel_kept: !channelDeleted
+      })
+    }
+
+    return res.status(400).json({ error: 'action inconnue (groups | channels | mapping_details | list_listings | action_listings | mappings | listings | map | activate | load_reservations | disconnect | deactivate | delete)' })
   } catch (err) {
     console.error('[channel-mapping]', err.message)
     return res.status(500).json({ error: 'Erreur interne' })

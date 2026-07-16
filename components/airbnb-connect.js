@@ -416,9 +416,52 @@ function screenAlreadyConnected() {
     </div>
     <div class="ab-actions" style="justify-content:center">
       <button class="btn btn-primary" id="ab-finish">Fermer</button>
+      <button class="btn" id="ab-disconnect">Déconnecter cette annonce</button>
     </div>
   `)
   document.getElementById('ab-finish').addEventListener('click', close)
+  document.getElementById('ab-disconnect').addEventListener('click', screenDisconnectConfirm)
+}
+
+// ---------- Deconnexion : confirmation -> action -> succes/erreur ----------
+function screenDisconnectConfirm() {
+  setBody(`
+    <div class="ab-h">Déconnecter cette annonce ?</div>
+    <div class="ab-sub">Votre annonce restera en ligne sur Airbnb, mais HôteSmart ne mettra plus à jour ses prix ni son calendrier automatiquement. Vos réservations déjà reçues sont conservées. Vous pourrez la reconnecter plus tard — Airbnb vous redemandera alors votre autorisation.</div>
+    <div class="ab-actions">
+      <button class="btn btn-primary" id="ab-disc-yes">Déconnecter</button>
+      <button class="btn" id="ab-disc-no">Annuler</button>
+    </div>
+  `)
+  document.getElementById('ab-disc-yes').addEventListener('click', doDisconnect)
+  document.getElementById('ab-disc-no').addEventListener('click', screenAlreadyConnected)
+}
+
+async function doDisconnect() {
+  setBody(`<div class="ab-status"><div class="ab-spin"></div> Déconnexion en cours…</div>`)
+  try {
+    await api.channel.mapping.disconnect(S.property.provider_property_id, S.channelId)
+    logger.info('airbnb-connect', 'deconnexion OK', { channelId: S.channelId })
+    setBody(`
+      <div class="ab-ok">✓ Annonce déconnectée</div>
+      <div class="ab-sub" style="text-align:center">C'est fait. Cette annonce n'est plus synchronisée par HôteSmart et reste en ligne sur Airbnb. Vous pouvez maintenant supprimer ce logement si vous le souhaitez.</div>
+      <div class="ab-actions" style="justify-content:center">
+        <button class="btn btn-primary" id="ab-finish">Fermer</button>
+      </div>
+    `)
+    document.getElementById('ab-finish').addEventListener('click', close)
+  } catch (e) {
+    logger.error('airbnb-connect', 'deconnexion echec', { e: e.message })
+    setBody(`
+      <div class="ab-err">La déconnexion n'a pas pu aboutir. Réessayez dans un instant ; si le problème persiste, contactez le support.</div>
+      <div class="ab-actions">
+        <button class="btn btn-primary" id="ab-disc-retry">Réessayer</button>
+        <button class="btn" id="ab-disc-close">Fermer</button>
+      </div>
+    `)
+    document.getElementById('ab-disc-retry').addEventListener('click', doDisconnect)
+    document.getElementById('ab-disc-close').addEventListener('click', close)
+  }
 }
 
 // Detecte l'etat du bien : canal actif -> deja connecte ; canal present mais inactif ->

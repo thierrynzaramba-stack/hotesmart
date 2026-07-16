@@ -94,7 +94,12 @@ export const api = {
       // Tire les resas d'un listing rejoignant un canal (POST action/load_future_reservations).
       loadReservations: (providerPropertyId, channelId, listingId) =>
         apiCall(`channel-mapping?action=load_reservations&property_id=${encodeURIComponent(providerPropertyId)}`
-          + `&channel_id=${encodeURIComponent(channelId)}&listing_id=${encodeURIComponent(listingId)}`, 'GET')
+          + `&channel_id=${encodeURIComponent(channelId)}&listing_id=${encodeURIComponent(listingId)}`, 'GET'),
+      // Deconnecte CE bien de son annonce OTA : demappe le bien, supprime le canal seulement
+      // s'il devient vide (protege les autres biens d'un compte Airbnb partage). dry_run=false.
+      disconnect: (providerPropertyId, channelId = '') =>
+        apiCall(`channel-mapping?action=disconnect&property_id=${encodeURIComponent(providerPropertyId)}`
+          + (channelId ? `&channel_id=${encodeURIComponent(channelId)}` : '') + `&dry_run=false`, 'GET')
     }
   },
   calendar: {
