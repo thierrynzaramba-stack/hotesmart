@@ -52,7 +52,10 @@ function ensureModal() {
     .ab-list { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; max-height:340px; overflow:auto; }
     .ab-opt { display:flex; align-items:center; gap:10px; padding:11px 13px; border:0.5px solid var(--border); border-radius:var(--radius); cursor:pointer; font-size:13px; }
     .ab-opt:hover { border-color:var(--green); }
-    .ab-opt input { cursor:pointer; }
+    .ab-opt input { cursor:pointer; flex-shrink:0; }
+    .ab-thumb { width:44px; height:44px; border-radius:6px; object-fit:cover; flex-shrink:0; }
+    .ab-opt-txt { display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .ab-opt-sub { font-size:11px; color:var(--text2); word-break:break-all; }
     .ab-status { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text2); padding:14px 0; }
     .ab-spin { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--green); border-radius:50%; animation:ab-rot 0.8s linear infinite; flex-shrink:0; }
     @keyframes ab-rot { to { transform:rotate(360deg); } }
@@ -245,18 +248,36 @@ function showOAuthError(msg) {
 }
 
 // ---------- B : choix de l'annonce ----------
+// Ville/adresse pour distinguer 2 annonces similaires (champs best-effort : la shape
+// exacte de action/listings est confirmee au test, on tolere l'absence).
+function pickCity(o) {
+  if (!o || typeof o !== 'object') return ''
+  const a = o.address || {}
+  return o.city || o.town || a.city || a.town
+    || [a.street, a.city].filter(Boolean).join(', ')
+    || (typeof o.address === 'string' ? o.address : '')
+    || (typeof o.location === 'string' ? o.location : '') || ''
+}
+function pickThumb(o) {
+  if (!o || typeof o !== 'object') return ''
+  const p = o.pictures || o.photos
+  const first = Array.isArray(p) ? (p[0]?.url || p[0]?.thumbnail_url || p[0]) : ''
+  return o.thumbnail || o.thumbnail_url || o.picture || o.photo || o.image || first || ''
+}
 function normListings(raw) {
+  const mk = (id, v) => {
+    const o = (v && typeof v === 'object') ? v : {}
+    const label = typeof v === 'string' ? v : (o.title || o.name || o.label || String(id))
+    return { id: String(id), label: String(label), city: String(pickCity(o) || ''), thumb: String(pickThumb(o) || '') }
+  }
   if (Array.isArray(raw)) {
-    return raw.map(x => ({
-      id: x.id || x.listing_id || x.value,
-      label: x.title || x.name || x.label || x.id || x.listing_id
-    })).filter(o => o.id)
+    return raw.map(x => {
+      const id = x.id || x.listing_id || x.value
+      return id ? mk(id, x) : null
+    }).filter(Boolean)
   }
   if (raw && typeof raw === 'object') {
-    return Object.entries(raw).map(([id, v]) => ({
-      id,
-      label: typeof v === 'string' ? v : (v?.title || v?.name || id)
-    }))
+    return Object.entries(raw).map(([id, v]) => mk(id, v))
   }
   return []
 }
@@ -279,13 +300,17 @@ async function screenB() {
   const opts = listings.map((l, i) => `
     <label class="ab-opt">
       <input type="radio" name="ab-listing" value="${escHtml(l.id)}" data-idx="${i}">
-      <span><b>${escHtml(l.label)}</b></span>
+      ${l.thumb ? `<img class="ab-thumb" src="${escHtml(l.thumb)}" alt="" onerror="this.remove()">` : ''}
+      <span class="ab-opt-txt">
+        <b>${escHtml(l.label)}</b>
+        <span class="ab-opt-sub">#${escHtml(l.id)}${l.city ? ' · ' + escHtml(l.city) : ''}</span>
+      </span>
     </label>
   `).join('')
 
   setBody(`
     <div class="ab-h">Choisissez votre annonce</div>
-    <div class="ab-sub">Sélectionnez l'annonce Airbnb à relier à votre logement.</div>
+    <div class="ab-sub">Sélectionnez l'annonce Airbnb à relier à votre logement. Vérifiez l'identifiant et la ville pour ne pas vous tromper d'annonce.</div>
     <div class="ab-list">${opts}</div>
     <div class="ab-actions">
       <button class="btn btn-primary" id="ab-continue" disabled>Continuer</button>
