@@ -113,10 +113,13 @@ async function runPostMapping(owner) {
     }
   }
 
-  // 3) Marque le bien pret (non bloquant si la colonne channel_ready manque encore).
+  // 3) Marque le bien pret + horodate l'activation et REARME le rattrapage messages.
+  // channel_ready_at = fenetre de rattrapage cron (les threads OTA arrivent en differe).
+  // messages_backfilled=false a CHAQUE activation : rejoue l'import pour cette activation
+  // (idempotent via provider_msg_id). Non bloquant si les colonnes manquent encore.
   const { error: readyErr } = await supabase
     .from('properties')
-    .update({ channel_ready: true })
+    .update({ channel_ready: true, channel_ready_at: new Date().toISOString(), messages_backfilled: false })
     .eq('id', owner.id)
   if (readyErr) console.error('[channel-events] channel_ready update echec', readyErr.message)
   else out.ready = true

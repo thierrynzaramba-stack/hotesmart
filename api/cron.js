@@ -2,6 +2,7 @@
 // HôteSmart — Cron orchestrateur
 // Refactoring Session #6 : logique éclatée en modules lib/cron-*.js
 // Session #14 : ajout du poll de secours du feed Channex (filet webhook).
+// Session #24 : rattrapage de l'import messages post-activation (fenêtre 30 min).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -14,6 +15,7 @@ const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
+const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
 
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
@@ -74,6 +76,15 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur file sync ARI:', err.message)
       results.errors.push({ context: 'channel_sync', error: err.message })
+    }
+
+    // 3quater. Rattrapage import messages post-activation : les threads OTA arrivent
+    // en differe cote Channex (le webhook activate_channel importe 0). Rejoue
+    // importMessages pour les biens actives < 30 min, puis pose messages_backfilled.
+    try { await processMessagesBackfill(results) }
+    catch (err) {
+      console.error('[Cron] Erreur rattrapage messages:', err.message)
+      results.errors.push({ context: 'messages_backfill', error: err.message })
     }
 
     // 4. Tâches transverses (non liées à un user spécifique)
