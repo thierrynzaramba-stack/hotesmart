@@ -440,8 +440,12 @@ function screenDisconnectConfirm() {
 async function doDisconnect() {
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Déconnexion en cours…</div>`)
   try {
-    await api.channel.mapping.disconnect(S.property.provider_property_id, S.channelId)
-    logger.info('airbnb-connect', 'deconnexion OK', { channelId: S.channelId })
+    const r = await api.channel.mapping.disconnect(S.property.provider_property_id, S.channelId)
+    // Succes REEL uniquement : au moins un mapping retire, ou canal supprime. Sinon -> erreur
+    // (protege contre un 2xx sans effet).
+    const realSuccess = (r?.unmapped > 0) || r?.channel_deleted === true
+    if (!realSuccess) throw new Error(r?.error || 'Déconnexion sans effet')
+    logger.info('airbnb-connect', 'deconnexion OK', { channelId: S.channelId, unmapped: r.unmapped, channelDeleted: r.channel_deleted })
     setBody(`
       <div class="ab-ok">✓ Annonce déconnectée</div>
       <div class="ab-sub" style="text-align:center">C'est fait. Cette annonce n'est plus synchronisée par HôteSmart et reste en ligne sur Airbnb. Vous pouvez maintenant supprimer ce logement si vous le souhaitez.</div>

@@ -425,45 +425,90 @@ module.exports = async function handler(req, res) {
         return res.status(404).json({ error: 'Aucun canal sur ce bien (deja deconnecte)' })
       }
 
-      // Mapping(s) de CE bien sur le canal (resolus en direct : mapping_id non persiste).
-      const mp = await channelCall('GET', `/channels/${channelId}/mappings`)
-      const rows = Array.isArray(mp.json?.data) ? mp.json.data : []
-      const mine = rows.filter(m => String(m.attributes?.rate_plan_id) === String(ratePlanId))
-      const willEmpty = (rows.length - mine.length) === 0
+      // SOURCE CORRECTE du mapping_id : channel.attributes.rate_plans[].id (via GET /channels/:id),
+      // PAS l'endpoint /mappings. Chaque entree = un channel_rate_plan : .id = mapping_id a DELETE ;
+      // le rate_plan_id sous-jacent (notre provisioning) sert a identifier LE mapping de CE bien.
+      const rpUnderlying = (rp) =>
+        rp?.rate_plan_id ?? rp?.attributes?.rate_plan_id ?? rp?.settings?.rate_plan_id
+        ?? rp?.relationships?.rate_plan?.data?.id ?? null
+
+      const chBefore = await channelCall('GET', `/channels/${channelId}`)
+      const rpsBefore = Array.isArray(chBefore.json?.data?.attributes?.rate_plans)
+        ? chBefore.json.data.attributes.rate_plans : []
+
+      // Defensif multi-biens : match sur notre rate_plan_id ; a defaut, si UN SEUL mapping
+      // present, c'est forcement le notre (cas Colomiers). Plusieurs sans match -> ambigu (stop).
+      let mine = rpsBefore.filter(rp => rpUnderlying(rp) != null && String(rpUnderlying(rp)) === String(ratePlanId))
+      let matchedBy = 'rate_plan_id'
+      if (mine.length === 0 && rpsBefore.length === 1) { mine = rpsBefore; matchedBy = 'sole_entry' }
+      const ambiguous = mine.length === 0 && rpsBefore.length > 1
+      const mappingIds = mine.map(rp => rp?.id).filter(Boolean)
 
       if (dryRun) {
         return res.status(200).json({
-          dry_run: true,
-          channel_id: channelId,
-          would_unmap: mine.map(m => m.id),
-          would_delete_channel: willEmpty
+          dry_run: true, channel_id: channelId,
+          rate_plans_before: rpsBefore.length, would_unmap: mappingIds, matched_by: matchedBy, ambiguous
         })
       }
 
-      // 1. Demapper CE bien (libere son annonce OTA).
-      for (const m of mine) {
-        await channelCall('DELETE', `/channels/${channelId}/mappings/${m.id}`)
+      // ECHEC EXPLICITE (jamais de faux succes) : ambigu ou rien a retirer.
+      if (ambiguous) {
+        return res.status(409).json({
+          error: 'Plusieurs annonces reliees a ce canal : impossible d\'identifier celle de ce logement sans risque.',
+          channel_id: channelId, rate_plans_before: rpsBefore.length
+        })
+      }
+      if (!mappingIds.length) {
+        return res.status(404).json({ error: 'Aucune annonce reliee trouvee pour ce logement (rien a deconnecter).', channel_id: channelId })
       }
 
-      // 2. Recompter : ne supprimer le canal que s'il est desormais vide.
-      const after = await channelCall('GET', `/channels/${channelId}/mappings`)
-      const remaining = Array.isArray(after.json?.data) ? after.json.data.length : 0
+      // 1. DELETE chaque mapping (verif reponse).
+      const delResults = []
+      for (const mid of mappingIds) {
+        const d = await channelCall('DELETE', `/channels/${channelId}/mappings/${mid}`)
+        delResults.push({ mapping_id: mid, ok: d.ok, http: d.status })
+      }
 
+      // 2. PREUVE : re-GET le canal ; nos mapping_id ne doivent PLUS etre dans rate_plans[].
+      const chAfter = await channelCall('GET', `/channels/${channelId}`)
+      const rpsAfter = Array.isArray(chAfter.json?.data?.attributes?.rate_plans)
+        ? chAfter.json.data.attributes.rate_plans : []
+      const stillThere = rpsAfter.some(rp => mappingIds.includes(rp?.id))
+      if (stillThere) {
+        return res.status(502).json({
+          error: 'La deconnexion a echoue cote gestionnaire (le mapping est toujours present apres suppression).',
+          channel_id: channelId, del_results: delResults, rate_plans_after: rpsAfter.length
+        })
+      }
+
+      // 3. Canal VIDE -> deactivate (verifier is_active:false) -> delete (verifier suppression).
+      let channelDeactivated = null
       let channelDeleted = false
-      if (remaining === 0) {
-        // Anti-canal-fantome : deactivate PUIS delete (delete exige inactif).
+      let cleanupWarning = null
+      if (rpsAfter.length === 0) {
         await channelCall('POST', `/channels/${channelId}/deactivate`, {})
-        const del = await channelCall('DELETE', `/channels/${channelId}`)
-        channelDeleted = del.ok
+        const chk = await channelCall('GET', `/channels/${channelId}`)
+        channelDeactivated = chk.json?.data?.attributes?.is_active === false
+        if (channelDeactivated) {
+          const del = await channelCall('DELETE', `/channels/${channelId}`)
+          if (del.ok) {
+            const gone = await channelCall('GET', `/channels/${channelId}`)
+            channelDeleted = gone.status === 404 || !gone.json?.data
+          }
+        }
+        if (!channelDeleted) cleanupWarning = 'canal vide non supprime (a nettoyer)'
       }
 
       return res.status(200).json({
         dry_run: false,
         channel_id: channelId,
-        unmapped: mine.length,
-        remaining_mappings: remaining,
+        unmapped: mappingIds.length,
+        matched_by: matchedBy,
+        rate_plans_after: rpsAfter.length,
+        channel_deactivated: channelDeactivated,
         channel_deleted: channelDeleted,
-        channel_kept: !channelDeleted
+        channel_kept: rpsAfter.length > 0,
+        cleanup_warning: cleanupWarning
       })
     }
 
