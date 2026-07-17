@@ -206,6 +206,37 @@
     <button class="btn diag-btn" data-run="16">Lire</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="17">
+    <div class="diag-head">
+      <h3>17. Booking — capacités du canal</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>GET /channels/list. Lecture pure, aucun compte concerné. Tranche l'inconnue #3 : <code>load_and_save_ari</code> est-il proposé pour Booking (= importer les tarifs Booking existants) ou seulement <code>load_future_reservations</code> ? Donne aussi min_price / devise imposés par Booking.</p>
+    <button class="btn diag-btn" data-run="17">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="18">
+    <div class="diag-head">
+      <h3>18. Booking — compte test (les 4 lectures)</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Enchaîne list + test_connection + mapping_details + connection_details sur un hotel_id. Lecture pure : aucun canal créé, aucun prix envoyé. Montre les room/rate EXISTANTS de Booking, le pricing_type et la devise. Comptes test : <b>5868189</b> = OBP, <b>6519420</b> = Standard.</p>
+    <input class="form-input" id="bcom-hotel-id" type="text" placeholder="hotel_id" value="5868189" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="18">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
+
+  <div class="diag-card" data-test="19">
+    <div class="diag-head">
+      <h3>19. Booking — nos room_types / rate_plans</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>GET /room_types/options + /rate_plans/options?multi_occupancy=true sur NOTRE bien. Tranche l'inconnue #2 : notre rate plan unique ressort-il en une seule entrée, ou éclaté en une entrée par occupation ? Lire <code>multi_occupancy_expands</code>. Utilise le provider_property_id du test 9.</p>
+    <button class="btn diag-btn" data-run="19">Lire</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -426,6 +457,41 @@
       const lBody = await lRes.json().catch(() => ({}))
       setOut(16, { mappings: { http: mRes.status, body: mBody }, listings: { http: lRes.status, body: lBody } })
       return mRes.ok && !!mBody.ok
+    },
+
+    // 17. Booking : capacites du canal (inconnue #3 = load_and_save_ari)
+    async '17'() {
+      const t = await token()
+      const res = await fetch('/api/channel-bcom?action=list', { headers: { Authorization: 'Bearer ' + t } })
+      const body = await res.json().catch(() => ({}))
+      setOut(17, body)
+      return res.ok && !!body.ok
+    },
+
+    // 18. Booking : les 4 lectures sur un compte test
+    async '18'() {
+      const t = await token()
+      const hid = document.getElementById('bcom-hotel-id').value.trim()
+      if (!hid) throw new Error('hotel_id requis (5868189 OBP / 6519420 Standard)')
+      const res = await fetch('/api/channel-bcom?action=all&hotel_id=' + encodeURIComponent(hid), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(18, body)
+      return res.ok && body.test_connection?.success === true
+    },
+
+    // 19. Booking : nos options Channex (inconnue #2 = une ligne par occupation ?)
+    async '19'() {
+      const t = await token()
+      const pid = document.getElementById('map-prop-id').value.trim()
+      if (!pid) throw new Error('provider_property_id requis (test 9)')
+      const res = await fetch('/api/channel-bcom?action=our_options&property_id=' + encodeURIComponent(pid), {
+        headers: { Authorization: 'Bearer ' + t }
+      })
+      const body = await res.json().catch(() => ({}))
+      setOut(19, body)
+      return res.ok && !!body.ok
     }
   }
 
