@@ -209,3 +209,62 @@ l'unique garde-fou. **À vérifier au diagnostic (appels #1 et #2) avant de s'en
 3. **Décision produit** : V1 lecture, ou rate plan indépendant.
 4. Seulement ensuite : UI + `POST /channels` en `dry_run` par défaut, cycle throwaway
    (`DELETE` avant chaque retest, contrainte 1 canal/hotel_id).
+
+---
+
+## Validation E2E sur Booking réel Jean-Éric (Session #22, 18 juil 2026)
+
+Bien Colomiers : `properties.id = e14e25f6-…`, UUID Channex `0544fd9a-…`,
+`provider_rate_plan_id = 06a3f06c-…`, `group_id = 8fed3205-…`. Hôtel Booking `12902199`.
+
+**Décision RLO → Standard.** `mapping_details` renvoie `pricing_type:"RLO"` (absent de la doc
+Evan et du Postman : seuls `Standard`/`OBP` existent dans le `select` `rate_params.pricing_type`).
+Structure vide (`occupancies:[]`, `price_1:null`) = prix unique par logement = définition du
+Standard. On mappe donc en `Standard`. **Channex a accepté** (canal créé HTTP 201, mapping relu
+identique). RLO activé mais inutilisé côté Booking → Standard est le bon équivalent.
+
+**Étape 1 — mapping seul** (`api/channel-bcom-write.js`, action `create`) : `POST /channels`,
+`is_active:false` forcé serveur, aucun push ARI (allowlist réseau refuse
+availability/restrictions/action/sync). Canal créé : `fc215573-d51c-41f8-827e-e04488a0e4ef`.
+`actions:["load_future_reservations"]` (pas de `load_and_save_ari` pour BookingCom → pas
+d'import des tarifs Booking existants, cf. §5(b)). `delete` prêt en rollback.
+
+**Étape 2 — activation** (`api/channel-bcom-activate.js`, actions `activate`/`deactivate`/`ari`) :
+fichier séparé, allowlist autorise seulement activate/deactivate + lectures ; aucune écriture ARI.
+`POST /channels/:id/activate` → `is_active:true`, Channex « Success ». Lecture ARI post-activation :
+`availability` OK (Channex détient dispo `1` sur dates libres, `0` sur résas réelles — recoupe la
+résa Airbnb de Cristina arr. 28 juil) ; **lecture `restrictions` en 400** (`"restrictions is
+required"` : le GET Channex exige un paramètre `restrictions=min_stay_…` — format à corriger si on
+veut prouver le min stay par lecture ; min stay 3 déjà confirmé propagé via rate plan unique).
+`deactivate` = rollback immédiat (garde le mapping).
+
+**Chaîne post-activation AUTOMATIQUE — validée, rien à coder.** L'event `activate_channel`
+(channel-events.js) s'est déclenché **à notre activation directe par API** (`POST /channels/:id/activate`),
+pas seulement depuis l'iframe. Trace Vercel : `GET /channels/fc215573` → `GET properties` →
+`GET /bookings` → 3× `POST bookings_snapshot` → `GET /message_threads`+messages →
+`PATCH properties (channel_ready)`. Preuve base : `channel_ready_at=22:58:47` (= moment de
+l'`activate`, pas du `create` à 22:40 → **la création seule n'arme pas la chaîne, l'activation
+oui**). Donc pour un hôte réel : map+active dans l'iframe → historique résas + messages rapatriés
+automatiquement.
+
+**Prêt (vérifié lecture) pour un hôte Booking** : rapatriement résas (`getReservations` OTA-agnostique),
+capture temps réel résas (webhook + feed cron, routés par `provider_property_id`, aucun filtre OTA),
+import + capture messages (`importMessages` OTA-agnostique, `normOta('BookingCom')→'booking'`),
+push dispo cross-canal (`pushAvailabilityOnce`, dispo seule — jamais prix/min stay).
+
+**Push ARI : jamais automatique sur prix/min stay.** Seuls déclencheurs = action hôte explicite
+(`calendar.js action=fullsync` → file → cron worker ; ou sauvegarde d'édition calendrier → push
+direct). Aucun cron/webhook ne pousse prix ni restrictions. Le seul flux sortant automatique =
+`availability` (0/1) reflétant une vraie résa/annulation. Réserve : ce que **Channex** propage de
+lui-même à l'activation (état déjà correct : min stay 3, dispo) n'est pas gouverné par notre code.
+
+**Reste à confirmer pour certifier « hôte Booking fonctionnel »** :
+- app messages Channex **active sur le compte de l'hôte** (sinon `importMessages` → 403
+  `messages_app_absent`, import à vide). Colomiers n'a aucune résa Booking → non prouvable ici.
+- enregistrement du 2ᵉ webhook (channel-events, action `register`) **par compte hôte** à l'onboarding.
+- **envoi** message → Booking (`sendMessage` → `POST /bookings/:id/messages` ; 422 = OTA sans
+  support) non testé bout en bout (connection_details annonce « Messaging XML Active », non prouvé).
+
+État final : canal `fc215573` **actif et mappé, gardé** (Voie A : rouvrir les dates). Fichiers
+`channel-bcom-write.js` (create/delete) et `channel-bcom-activate.js` (activate/deactivate/ari)
+déployés, chacun avec allowlist anti-push ARI.
