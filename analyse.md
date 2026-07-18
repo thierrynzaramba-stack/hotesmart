@@ -268,3 +268,92 @@ lui-même à l'activation (état déjà correct : min stay 3, dispo) n'est pas g
 État final : canal `fc215573` **actif et mappé, gardé** (Voie A : rouvrir les dates). Fichiers
 `channel-bcom-write.js` (create/delete) et `channel-bcom-activate.js` (activate/deactivate/ari)
 déployés, chacun avec allowlist anti-push ARI.
+
+---
+
+## Chantier écran « Connexions » par bien + assistant Booking (Session #23, analyse)
+
+Aujourd'hui le bouton de la carte d'un bien (`biens.html`, `[data-connect]`) appelle
+directement `openAirbnbConnect`. Avec Booking, il faut une étape intermédiaire : un écran
+listant les canaux, qui route vers l'assistant du canal cliqué.
+
+### 1. Détection d'état par canal — UN SEUL appel
+
+`api.channel.mapping.channels(providerPropertyId)` (action `channels` de `channel-mapping.js`,
+déjà déployée) fait `GET /channels?filter[property_id]` et renvoie **tous** les canaux du bien :
+`[{ id, title, ota, is_active }]` avec `ota ∈ {Airbnb, BookingCom}`. **Un seul appel couvre
+Airbnb ET Booking** → on classe les lignes par `ota`. Pas besoin d'`account_status` (spécifique
+Airbnb) ni d'appel séparé Booking.
+
+- Airbnb connecté = ligne `ota=Airbnb` présente (+ `is_active`). Nom de l'annonce en référence :
+  `title` du canal en v1 ; le nom exact de l'annonce Airbnb nécessiterait un 2ᵉ appel
+  (`action=mappings`) — à faire **paresseusement** (seulement si on veut le nom précis), pas au
+  chargement.
+- Booking connecté = ligne `ota=BookingCom` + `is_active`. Mappé-mais-inactif = état intermédiaire.
+
+**Coût / ne pas alourdir** : 1 appel au moment où l'hôte OUVRE l'écran Connexions d'un bien (la
+modale). **Ne PAS** mettre de badge d'état sur chaque carte de la liste des biens (ce serait N
+appels au chargement de `biens.html`) — l'état ne se lit qu'à l'ouverture de la modale.
+
+### 2. Placement — nouveau composant `components/connexions.js` (modale)
+
+Composant séparé, calqué sur l'infra modale d'`airbnb-connect.js` (`ensureModal`/`setBody`/`close`),
+qui liste les canaux et route :
+- clic Airbnb → `openAirbnbConnect(p, el)` (existant, inchangé).
+- clic Booking → `openBookingConnect(p, el)` (à créer, cf. §4).
+
+**Collision de nom à éviter** : `/connexions` existe DÉJÀ (`pages/connexions.html` = « Connexions
+API », page globale de la sidebar : clés API/état des intégrations). Le nouvel écran est une
+**modale par bien**, pas cette page. Garder le fichier `components/connexions.js` mais titrer la
+modale « Connexions de {bien} » / « Canaux de distribution » pour ne pas les confondre. Export
+proposé : `openConnexions(property, anchorEl)`.
+
+### 3. Refactor minimal `biens.html`
+
+Une ligne + un import :
+- `import { openConnexions } from '/components/connexions.js'`
+- `card.querySelector('[data-connect]')...` → `openConnexions(p, e.currentTarget)` au lieu de
+  `openAirbnbConnect`. Le libellé du bouton passe de « Connecter / Mapper mes annonces » à
+  « Connexions ». `airbnb-connect.js` reste importé (appelé par le nouveau composant), inchangé.
+
+### 4. Assistant Booking A→D (sans OAuth)
+
+Réutilise l'infra modale + le fil d'étapes (`setStep`) d'Airbnb. Pas de popup OAuth : Booking
+s'autorise dans l'extranet de l'hôte, pas par redirection.
+
+- **A — prérequis + `hotel_id`** : 3 prérequis (autoriser le provider de connectivité dans
+  l'extranet Booking ; aucun autre channel manager sur cet hôtel — Booking est one-to-one ;
+  récupérer l'ID hôtel). **Avertissement fort** : à l'établissement de la connexion, Booking
+  **ferme les dates** jusqu'à la fin du process (constaté en vrai) ; HôteSmart les rouvre à
+  l'activation. Saisie du `hotel_id`.
+- **B — vérification** : `test_connection` (connectable ?) + `mapping_details` (chambres/tarifs) +
+  `connection_details` (devise). Affiche « établissement trouvé » + chambre(s)/tarif(s) + devise à
+  confirmer. RLO→Standard géré en interne (aucun jargon montré à l'hôte).
+- **C — liaison + activation** : `create` (POST /channels, `is_active:false`) puis `activate`.
+  Feedback « Liaison… » → « Activation… » ; réouverture des dates annoncée.
+- **D — connecté** : réservations + messages récupérés, calendrier synchronisé. + écran
+  « déjà connecté » avec Déconnecter (via `delete`/`deactivate`).
+
+**BLOCAGE PRODUIT à trancher pour l'écran A (marque blanche)** : dans l'extranet Booking, l'hôte
+doit sélectionner le **provider de connectivité par son nom**. Ce nom est celui du provider certifié
+auprès de Booking — vraisemblablement **« Channex »**, pas « HôteSmart » (`machine_account` observé
+= `Channex-prod-q2-2026`). La règle marque blanche (jamais exposer Channex) **casse à cette étape**
+sauf si Channex propose un nom de provider en marque blanche. **À vérifier avec Channex avant de
+figer le texte de l'écran A** — c'est le seul endroit où l'hôte verrait « Channex ».
+
+### 5. Ce qu'on réutilise / ce qui manque
+
+Réutilisable tel quel (endpoints déjà déployés) :
+- `channel-bcom.js` : `test_connection`, `mapping_details`, `connection_details`, `our_options` (écran B).
+- `channel-bcom-write.js` : `create` (écran C), `delete` (déconnexion).
+- `channel-bcom-activate.js` : `activate` (écran C), `deactivate`/`ari` (déconnexion / vérif).
+- RLO→Standard déjà géré : `create` a `pricing_type=Standard` par défaut.
+
+Manque (plomberie à écrire) :
+- Wrappers `api-client.js` : `api.channel.bcom.{ testConnection, mappingDetails, connectionDetails,
+  ourOptions, create, delete, activate, deactivate, ari }` (aucun n'existe aujourd'hui).
+- `components/connexions.js` (routeur) + `openBookingConnect` (assistant B, dans un nouveau
+  `components/booking-connect.js` calqué sur `airbnb-connect.js`).
+- Résolution `group_id`/`provider_rate_plan_id` : déjà gérée **côté serveur** par `create`
+  (l'UI n'envoie que `property_id`, `hotel_id`, `room_type_code`, `rate_plan_code` — ces deux
+  derniers viennent de l'écran B `mapping_details`).
