@@ -153,7 +153,8 @@
   import { initErrorHandler } from '/shared/error-handler.js'
   import { api } from '/shared/api-client.js'
   import { logger } from '/shared/logger.js'
-  import { openAirbnbConnect, bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
+  import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
+  import { openConnexions } from '/components/connexions.js'
 
   initErrorHandler()
   const session = await requireAuth()
@@ -226,13 +227,13 @@
       </div>
       <div class="card-actions">
         <a href="/biens/${p.id}/calendrier" class="btn btn-primary">📅 Calendrier</a>
-        <button class="btn" data-connect="${p.id}">🔗 Connecter / Mapper mes annonces</button>
+        <button class="btn" data-connect="${p.id}">🔗 Connexions</button>
         <button class="btn" data-fullsync="${p.id}">📤 Publier</button>
         <button class="btn" data-edit="${p.id}">Modifier</button>
         <button class="btn btn-danger" data-delete="${p.id}">Supprimer</button>
       </div>
     `
-    card.querySelector('[data-connect]').addEventListener('click', (e) => openAirbnbConnect(p, e.currentTarget))
+    card.querySelector('[data-connect]').addEventListener('click', (e) => openConnexions(p, e.currentTarget))
     card.querySelector('[data-edit]').addEventListener('click', () => openEdit(p))
     card.querySelector('[data-delete]').addEventListener('click', () => openDelete(p))
     card.querySelector('[data-fullsync]').addEventListener('click', async (e) => {

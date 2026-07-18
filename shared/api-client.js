@@ -100,6 +100,34 @@ export const api = {
       disconnect: (providerPropertyId, channelId = '') =>
         apiCall(`channel-mapping?action=disconnect&property_id=${encodeURIComponent(providerPropertyId)}`
           + (channelId ? `&channel_id=${encodeURIComponent(channelId)}` : '') + `&dry_run=false`, 'GET')
+    },
+    // Booking.com (channel-bcom*.js). hotel_id = ID etablissement Booking ; property_id =
+    // provider_property_id (UUID Channex). Ecritures via GET + dry_run explicite (comme mapping).
+    bcom: {
+      testConnection: (hotelId) =>
+        apiCall(`channel-bcom?action=test_connection&hotel_id=${encodeURIComponent(hotelId)}`, 'GET'),
+      mappingDetails: (hotelId) =>
+        apiCall(`channel-bcom?action=mapping_details&hotel_id=${encodeURIComponent(hotelId)}`, 'GET'),
+      connectionDetails: (hotelId) =>
+        apiCall(`channel-bcom?action=connection_details&hotel_id=${encodeURIComponent(hotelId)}`, 'GET'),
+      ourOptions: (providerPropertyId) =>
+        apiCall(`channel-bcom?action=our_options&property_id=${encodeURIComponent(providerPropertyId)}`, 'GET'),
+      // create : mapping seul, is_active:false force serveur. room_type_code/rate_plan_code
+      // viennent de mappingDetails (ecran B). occupancy omis -> serveur = capacity du bien.
+      create: (providerPropertyId, { hotelId, roomTypeCode, ratePlanCode, occupancy, pricingType = 'Standard', dryRun = true } = {}) =>
+        apiCall(`channel-bcom-write?action=create&property_id=${encodeURIComponent(providerPropertyId)}`
+          + `&hotel_id=${encodeURIComponent(hotelId)}&room_type_code=${encodeURIComponent(roomTypeCode)}`
+          + `&rate_plan_code=${encodeURIComponent(ratePlanCode)}`
+          + (occupancy != null ? `&occupancy=${encodeURIComponent(occupancy)}` : '')
+          + `&pricing_type=${encodeURIComponent(pricingType)}&dry_run=${dryRun}`, 'GET'),
+      remove: (channelId, { dryRun = true } = {}) =>
+        apiCall(`channel-bcom-write?action=delete&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}`, 'GET'),
+      activate: (channelId, { dryRun = true } = {}) =>
+        apiCall(`channel-bcom-activate?action=activate&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}`, 'GET'),
+      deactivate: (channelId, { dryRun = true } = {}) =>
+        apiCall(`channel-bcom-activate?action=deactivate&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}`, 'GET'),
+      ari: (channelId) =>
+        apiCall(`channel-bcom-activate?action=ari&channel_id=${encodeURIComponent(channelId)}`, 'GET')
     }
   },
   calendar: {
