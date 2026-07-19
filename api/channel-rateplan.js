@@ -117,5 +117,39 @@ module.exports = async function handler(req, res) {
     })
   }
 
-  return res.status(400).json({ error: 'action inconnue (create_derived)' })
+  // --- inspect : lecture pure config + ARI d'un rate plan (avant remap) ---
+  if (action === 'inspect') {
+    const providerPropertyId = (req.query.property_id || '').trim()
+    const ratePlanId = (req.query.rate_plan_id || '').trim()
+    if (!providerPropertyId || !ratePlanId) return res.status(400).json({ error: 'property_id + rate_plan_id requis' })
+
+    const { data: prop } = await supabase
+      .from('properties').select('id, provider_property_id')
+      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+    if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
+
+    const rp = await channelCall('GET', `/rate_plans/${ratePlanId}`)
+    const a = rp.json?.data?.attributes || {}
+
+    const from = new Date(); const to = new Date(from); to.setDate(to.getDate() + 3)
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    const rd = await channelCall('GET', `/restrictions?filter[property_id]=${encodeURIComponent(providerPropertyId)}`
+      + `&filter[date][gte]=${ymd(from)}&filter[date][lte]=${ymd(to)}&filter[restrictions]=rate,min_stay_arrival,min_stay_through`)
+    const ari = rd.json?.data || {}
+
+    return res.status(200).json({
+      config: {
+        id: ratePlanId, title: a.title, parent_rate_plan_id: a.parent_rate_plan_id,
+        rate_mode: a.rate_mode, sell_mode: a.sell_mode,
+        inherit_rate: a.inherit_rate, inherit_min_stay_arrival: a.inherit_min_stay_arrival,
+        inherit_min_stay_through: a.inherit_min_stay_through,
+        options: a.options
+      },
+      ari_child: ari[ratePlanId] || null,
+      ari_base: ari['06a3f06c-d62f-4e6c-beb1-1b5280081b80'] || null,
+      ari_all_keys: Object.keys(ari)
+    })
+  }
+
+  return res.status(400).json({ error: 'action inconnue (create_derived | inspect)' })
 }
