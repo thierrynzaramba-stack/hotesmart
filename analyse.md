@@ -357,3 +357,169 @@ Manque (plomberie à écrire) :
 - Résolution `group_id`/`provider_rate_plan_id` : déjà gérée **côté serveur** par `create`
   (l'UI n'envoie que `property_id`, `hotel_id`, `room_type_code`, `rate_plan_code` — ces deux
   derniers viennent de l'écran B `mapping_details`).
+
+---
+
+## Chantier rate plans dérivés par plateforme (Session #24, analyse — rien codé)
+
+Vocabulaire figé : **tarif de base** (rate plan pilote, prix/restrictions de référence) ·
+**tarif dérivé** (un par canal, = base × règle, restrictions propres possibles) ·
+**override** (date détachée du calcul, prix/restriction manuels).
+
+### Fait structurant (détermine tout le chantier)
+
+Prix ET restrictions sont poussés **par `rate_plan_id`** :
+`channel-fullsync.js` construit `restItems`/`availItems` avec un **unique** `rate_plan_id`
+(`ratePlanFs`), idem le push delta de `calendar.js`. Or Colomiers a **1 rate plan mappé sur
+les DEUX canaux** (Airbnb + Booking). **Conséquence dure** : tant qu'un bien n'a qu'un rate plan,
+**aucune** différenciation n'est possible — ni prix, ni min stay. Le 2ᵉ rate plan mappé à Booking
+est le **socle incontournable**, y compris pour le cas « juste le min stay » (cf. §6).
+
+`calendar_inventory` est clé par **`property_id` (UUID bien) + date** — pas par rate plan. Il porte
+le **tarif de base** (rate, min_stay, cta/ctd, avail…). C'est notre source de vérité de la base.
+
+### 1. Modèle de données
+
+**Aujourd'hui** : `properties.provider_rate_plan_id` + `provider_room_type_id` = colonnes UNIQUES
+(référencées dans 8 fichiers). Insuffisant pour N rate plans.
+
+**Cible — table de liaison bien ↔ canal ↔ rate plan Channex** :
+
+```sql
+create table property_channel_rate_plans (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid not null references properties(id) on delete cascade,
+  channel text not null,                 -- 'airbnb' | 'booking' (canal logique)
+  role text not null default 'derived',  -- 'base' | 'derived'
+  provider_rate_plan_id text not null,   -- rate plan Channex (TEXT)
+  provider_room_type_id text not null,   -- room type Channex (partagé, whole=1 unité)
+  -- règle de dérivation (null pour la base)
+  derive_mode  text,                     -- 'percent' | 'amount' | null
+  derive_value numeric,                  -- +18 (%) ou +2500 (cents), signé
+  -- restriction propre au canal (null = suit la base)
+  min_stay int,
+  is_active boolean not null default true,
+  created_at timestamptz default now(),
+  unique(property_id, channel)
+);
+```
+
+- Ligne **base** : `role='base'`, `derive_mode=null` (mappée au canal de référence, ex. Airbnb).
+- Ligne **dérivée** : `role='derived'`, `channel='booking'`, `derive_mode='percent'`,
+  `derive_value=18`, `min_stay=3`.
+- **Règle de dérivation stockée dans cette table** (une ligne = un canal = sa règle).
+- `properties.provider_rate_plan_id` reste (rétro-compat = la base) ; la table est la source pour
+  qui sait boucler. Migration douce, pas de big-bang sur les 8 fichiers.
+
+**Overrides — table séparée par date et par dérivé** (ne PAS surcharger `calendar_inventory`,
+qui est la base) :
+
+```sql
+create table channel_rate_overrides (
+  id uuid primary key default gen_random_uuid(),
+  pcrp_id uuid not null references property_channel_rate_plans(id) on delete cascade,
+  date date not null,
+  rate_cents int,           -- prix manuel (null = suit la dérivation)
+  min_stay_arrival int, min_stay_through int,
+  cta boolean, ctd boolean, stop_sell boolean,
+  unique(pcrp_id, date)
+);
+```
+
+Une ligne ici = cette date, sur ce dérivé, **détachée** du calcul auto.
+
+### 2. Provisioning & migration
+
+**Nouveau bien** : créer le room_type (1, whole) + le rate plan **base**, puis 0..N rate plans
+**dérivés** (un par canal à différencier). Aujourd'hui `channel-property.js` n'en crée qu'un — à
+étendre pour insérer aussi les lignes `property_channel_rate_plans`.
+
+**Biens EXISTANTS (Colomiers)** — coexistence, PAS big-bang :
+- État actuel : 1 rate plan mappé Airbnb **et** Booking. On le déclare `role='base'` (Airbnb).
+- Pour différencier Booking : créer un **2ᵉ rate plan Channex** (dérivé), **démapper Booking** du
+  rate plan partagé, **remapper Booking** sur le dérivé.
+- ⚠️ **Fenêtre de risque** : le remap Booking rejoue la fermeture des dates (vécu à la connexion) —
+  c'est une **migration délibérée**, à faire dans un moment calme, pas un cron silencieux.
+- Les biens qui ne différencient rien restent en 1 rate plan : la table les décrit avec une seule
+  ligne `base`. Coexistence propre.
+
+**Beds24** : hors périmètre total (ces biens se gèrent dans Beds24). La table ne concerne que
+`provider='channex'`.
+
+### 3. Moteur de calcul
+
+**Calcul au PUSH, pas stocké** (éviter la double source qui désynchronise ; le fullsync lit déjà
+`calendar_inventory` en direct). Pour chaque rate plan du bien :
+- **base** : pousse `calendar_inventory` tel quel (comportement actuel).
+- **dérivé** : par date, `prix = override.rate_cents ?? round(base_rate × coef)` ;
+  `min_stay = override ?? pcrp.min_stay ?? base.min_stay` ; autres restrictions = `override ?? base`.
+
+**Restrictions (min stay) : définies par canal, indépendamment** (pas dérivées d'un coef) —
+`pcrp.min_stay` écrase la base pour ce canal. C'est le cas #1 (Airbnb 2 / Booking 3). Le prix, lui,
+est dérivé par coef (cas #2). Deux mécanismes distincts, cohérent avec le vocabulaire figé.
+
+**Piste à VÉRIFIER avec Channex (peut réduire drastiquement le chantier)** : Channex expose
+`derived_rate_plan_ids` (vu dans `mapping_details`). S'il gère nativement des **rate plans dérivés**
+(enfant = parent × règle, avec **restrictions indépendantes**), alors :
+- on crée le dérivé Booking comme **enfant** du base côté Channex,
+- on pousse l'ARI **uniquement à la base** → `channel-fullsync.js` **reste inchangé (certifié
+  intact)**, Channex dérive le prix Booking tout seul,
+- le min stay Booking se pose une fois sur le dérivé (hors fullsync).
+**Inconnues à lever sur le compte test** : (a) un dérivé accepte-t-il des restrictions propres
+(min stay différent) ? (b) modes de dérivation supportés (% et montant fixe) ? (c) signe/plage.
+**Si oui → Option A (léger). Si non → Option B (on calcule et on pousse N).**
+
+### 4. Push
+
+- **Option A (dérivation native Channex)** : fullsync **non touché**. On ne pousse qu'à la base.
+  Idéal : le fichier certifié reste tel quel. Dépend de la vérif §3.
+- **Option B (on pousse N)** : extraire un helper `pushRatePlanARI(bien, pcrp, overrides)` et
+  **boucler** sur les rate plans du bien. **La forme du push par rate plan reste identique**
+  (mêmes champs, même coalescence, état complet) — on répète juste l'appel avec un autre
+  `rate_plan_id` et d'autres valeurs. Impact certif : le **format fil par rate plan est inchangé**,
+  donc sémantiquement conforme ; mais on **modifie un fichier certifié** → à confirmer si Channex
+  exige une re-revue. Mitigation : garder `runFullSync` comme wrapper qui appelle le helper en
+  boucle, sans changer la logique d'un push unitaire.
+
+**Recommandation** : trancher §3 sur le compte test AVANT de choisir. Option A évite de toucher le
+certifié — à privilégier si elle marche.
+
+### 5. UI
+
+- **Règle par canal** : sur l'**écran Connexions** (déjà par bien, par canal) — c'est le foyer
+  naturel. Sur la ligne Booking : « Prix Booking = base + __ % » et « Séjour minimum Booking = __
+  nuits ». Écrit dans `property_channel_rate_plans`.
+- **Calendrier** : 3 états à distinguer visuellement — **base** (normal), **dérivé** (valeur
+  calculée, badge/teinte discrète « auto »), **override** (bordure ambre = manuel, détaché). Le
+  calendrier actuel montre UNE ligne par bien ; pour le par-canal il faut un **sélecteur de canal**
+  (onglet Base / Booking) plutôt qu'empiler les lignes. Décision UI à figer ; garder le calendrier
+  base par défaut, canal dérivé en second onglet.
+
+### 6. Ampleur & découpage minimal livrable vite ⭐
+
+**Fichiers touchés (Option B, complet)** : migration SQL (2 tables) · `channel-property.js`
+(provisioning N) · `channel-fullsync.js` + `cron-channel-sync.js` (boucle push, certifié) ·
+`calendar.js` (push delta + lecture) · `channel-mapping.js`/`channel-bcom-*` (remap sur dérivé) ·
+`api-client.js` + `connexions.js`/calendrier (UI règle + affichage) · moteur de calcul (nouveau
+lib). Gros chantier (~8-10 fichiers + 2 tables + UI calendrier).
+
+**Le sous-ensemble livrable vite existe — mais un socle est incompressible.**
+
+- **Socle (Step 0, incontournable)** : donner au bien un **2ᵉ rate plan mappé Booking** +
+  la table `property_channel_rate_plans` + la migration Colomiers (créer dérivé, remap Booking).
+  Sans lui, RIEN ne diffère. C'est le vrai prérequis, même pour le min stay.
+- **Tranche 1 — min stay différencié (cas #1, la plus légère)** : une fois 2 rate plans en place,
+  pousser un `min_stay` propre au canal. **Pas de coefficient, pas de moteur de prix, pas
+  d'overrides** — juste un entier par canal + une restriction poussée sur le dérivé. Prix
+  **identiques** au départ (coef neutre). Livre le cas #1 vite.
+- **Tranche 2 — prix dérivé (cas #2)** : ajoute `derive_mode/value` + le moteur de calcul + l'UI
+  coefficient. Plus lourd.
+- **Tranche 3 — overrides par date** : table `channel_rate_overrides` + calendrier (sélecteur
+  canal, code couleur). Le plus lourd en UI.
+
+**Réponse au point 6** : oui, il y a un livrable rapide = **Socle + Tranche 1 (min stay)**. Mais
+honnêteté : le Socle (2ᵉ rate plan + migration Colomiers avec fenêtre de fermeture des dates)
+n'est **pas** trivial — c'est le prix d'entrée, partagé par les deux cas. Le min stay seul est
+ensuite quasi gratuit ; le prix dérivé est le vrai surcoût. **Ordre recommandé** : (0) vérifier la
+dérivation native Channex sur le compte test → (1) Socle + min stay → (2) prix dérivé → (3)
+overrides. Si la dérivation native marche (§3), le Socle rétrécit et le certifié n'est pas touché.
