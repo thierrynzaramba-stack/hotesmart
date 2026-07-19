@@ -53,6 +53,7 @@ function ensureModal() {
     .bk-recap .row { display:flex; justify-content:space-between; gap:12px; font-size:13px; padding:9px 12px; border:0.5px solid var(--border); border-radius:var(--radius); }
     .bk-recap .row .k { color:var(--text2); }
     .bk-recap .row .v { font-weight:500; text-align:right; }
+    .bk-recap .row .v .hint { display:block; font-weight:400; color:var(--text2); font-size:11px; margin-top:2px; }
     .bk-note { font-size:12px; color:var(--text2); margin-bottom:16px; line-height:1.5; }
     .bk-status { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text2); padding:14px 0; }
     .bk-spin { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--green); border-radius:50%; animation:bk-rot 0.8s linear infinite; flex-shrink:0; }
@@ -125,7 +126,7 @@ function screenA() {
     <div class="bk-warn">⚠️ <b>Important.</b> Dès le lancement de la connexion, Booking.com <b>ferme temporairement vos dates à la réservation</b>, le temps que la liaison s'établisse. C'est normal et prévu : HôteSmart <b>rouvre vos dates automatiquement</b> dès l'activation, en respectant vos réservations en cours. Choisissez un moment calme pour connecter.</div>
     <div class="bk-field">
       <label for="bk-hotelid">Votre ID d'établissement Booking</label>
-      <input id="bk-hotelid" type="text" inputmode="numeric" placeholder="ex. 12902199" value="${escHtml(S.hotelId || '')}">
+      <input id="bk-hotelid" type="text" inputmode="numeric" placeholder="Numéro à 7-8 chiffres" value="${escHtml(S.hotelId || '')}">
     </div>
     <div class="bk-actions">
       <button class="btn btn-primary" id="bk-continue">Continuer</button>
@@ -185,7 +186,7 @@ async function screenB() {
     <div class="bk-h">✓ Établissement trouvé</div>
     <div class="bk-sub">Voici ce que HôteSmart va synchroniser avec votre établissement Booking.com :</div>
     <div class="bk-recap">
-      <div class="row"><span class="k">Chambre</span><span class="v">${escHtml(room.title || S.roomTypeCode)}</span></div>
+      <div class="row"><span class="k">Chambre</span><span class="v">${escHtml(room.title || S.roomTypeCode)}<br><span class="hint">type de logement tel que défini sur Booking.com</span></span></div>
       <div class="row"><span class="k">Tarif</span><span class="v">${escHtml(rate.title || S.ratePlanCode)}</span></div>
       ${S.currency ? `<div class="row"><span class="k">Devise</span><span class="v">${escHtml(S.currency)}</span></div>` : ''}
     </div>
