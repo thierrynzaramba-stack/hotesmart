@@ -398,5 +398,16 @@ module.exports = async function handler(req, res) {
     })
   }
 
-  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap | remap_airbnb | set_rule)' })
+  // --- raw_channel : GET /channels/:id redacte (diagnostic etat mapping) ---
+  if (action === 'raw_channel') {
+    const channelId = (req.query.channel_id || '').trim()
+    if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
+    const ch = await channelCall('GET', `/channels/${channelId}`)
+    const rps = (ch.json?.data?.attributes?.rate_plans || []).map(rp => ({
+      mapping_id: rp.id, rate_plan_id: rp.rate_plan_id, listing_id: rp.settings?.listing_id, primary_occ: rp.settings?.primary_occ
+    }))
+    return res.status(200).json({ http: ch.status, is_active: ch.json?.data?.attributes?.is_active, rate_plans: rps })
+  }
+
+  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap | remap_airbnb | set_rule | raw_channel)' })
 }
