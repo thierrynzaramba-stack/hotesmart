@@ -106,9 +106,10 @@ module.exports = async function handler(req, res) {
     const childId = c.json?.data?.id
     if (!childId) return res.status(502).json({ error: 'Pas d id enfant en reponse' })
 
-    // Lignes de liaison : base (airbnb) upsert + derive (channel) insert
+    // Lignes de liaison. Modele correct : la BASE n'est liee a AUCUN OTA -> sentinelle
+    // channel='base' (garde unique(property_id,channel) propre). Chaque OTA = un derive.
     const rows = [
-      { property_id: prop.id, channel: 'airbnb', role: 'base', provider_rate_plan_id: base, derive_mode: 'percent', derive_value: 0, is_active: true },
+      { property_id: prop.id, channel: 'base', role: 'base', provider_rate_plan_id: base, derive_mode: null, derive_value: 0, is_active: true },
       { property_id: prop.id, channel, role: 'derived', provider_rate_plan_id: childId, derive_mode: 'percent', derive_value: 0, min_stay: null, is_active: true }
     ]
     const { error: upErr } = await supabase
@@ -319,5 +320,71 @@ module.exports = async function handler(req, res) {
     })
   }
 
-  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap | set_rule)' })
+  // --- remap_airbnb : bascule le canal Airbnb sur son derive via /mappings ---
+  // Airbnb NE se remap PAS par PUT /channels (settings = jetons OAuth). On ajoute le
+  // nouveau mapping (rate_plan_id enfant + listing_id), on verifie, puis on retire l'ancien.
+  if (action === 'remap_airbnb') {
+    const channelId = (req.query.channel_id || '').trim()
+    const providerPropertyId = (req.query.property_id || '').trim()
+    const dryRun = req.query.dry_run !== 'false'
+    if (!channelId || !providerPropertyId) return res.status(400).json({ error: 'channel_id + property_id requis' })
+
+    const { data: prop } = await supabase
+      .from('properties').select('id, provider_property_id')
+      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+    if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
+
+    const { data: row } = await supabase
+      .from('property_channel_rate_plans')
+      .select('provider_rate_plan_id')
+      .eq('property_id', prop.id).eq('channel', 'airbnb').eq('role', 'derived').maybeSingle()
+    if (!row?.provider_rate_plan_id) return res.status(400).json({ error: 'Aucun derive airbnb (create_derived channel=airbnb d\'abord)' })
+    const childId = row.provider_rate_plan_id
+
+    const ch = await channelCall('GET', `/channels/${channelId}`)
+    const attrs = ch.json?.data?.attributes || {}
+    if (!ch.json?.data) return res.status(404).json({ error: 'Canal introuvable', http: ch.status })
+    if (!/airbnb/i.test(attrs.channel || '')) return res.status(400).json({ error: 'Ce canal n\'est pas Airbnb' })
+
+    const currentRps = Array.isArray(attrs.rate_plans) ? attrs.rate_plans : []
+    const cur = currentRps[0] || null
+    const oldMappingId = cur?.id
+    const listingId = cur?.settings?.listing_id
+    const primaryOcc = cur?.settings?.primary_occ !== false
+    if (!oldMappingId || !listingId) return res.status(400).json({ error: 'Mapping Airbnb courant introuvable (id/listing_id absents)' })
+    if (cur.rate_plan_id === childId) return res.status(200).json({ already: true, channel_id: channelId, mapped: childId })
+
+    const newMapping = { mapping: { rate_plan_id: childId, settings: { listing_id: listingId, primary_occ: primaryOcc } } }
+
+    if (dryRun) {
+      return res.status(200).json({
+        dry_run: true, channel_id: channelId, target_rate_plan_id: childId,
+        current_mapping_id: oldMappingId, current_rate_plan_id: cur.rate_plan_id,
+        would_send: [
+          { method: 'POST', path: `/channels/${channelId}/mappings`, payload: redact(newMapping) },
+          { method: 'DELETE', path: `/channels/${channelId}/mappings/${oldMappingId}` }
+        ]
+      })
+    }
+
+    // 1) AJOUTE le nouveau mapping (si echec -> Airbnb reste sur l'ancien, aucun degat).
+    const add = await channelCall('POST', `/channels/${channelId}/mappings`, newMapping)
+    if (!add.ok) return res.status(502).json({ error: 'Ajout mapping enfant echoue (Airbnb inchange)', http: add.status, detail: redact(add.json) })
+
+    // 2) RETIRE l'ancien mapping (base).
+    const del = await channelCall('DELETE', `/channels/${channelId}/mappings/${oldMappingId}`)
+
+    // PREUVE : re-GET, rate_plans[] ne doit plus contenir que l'enfant.
+    const after = await channelCall('GET', `/channels/${channelId}`)
+    const rpsAfter = after.json?.data?.attributes?.rate_plans || []
+    const mappedAfter = rpsAfter.map(rp => rp.rate_plan_id)
+    return res.status(200).json({
+      channel_id: channelId, target_rate_plan_id: childId,
+      add_http: add.status, delete_http: del.status,
+      mapped_after: mappedAfter,
+      ok_switched: mappedAfter.length > 0 && mappedAfter.every(id => id === childId)
+    })
+  }
+
+  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap | remap_airbnb | set_rule)' })
 }
