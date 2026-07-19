@@ -26,6 +26,18 @@ async function channelCall(method, path, body) {
   return { ok: res.ok, status: res.status, json }
 }
 
+// Masque recursif : jamais un secret (jetons OAuth Airbnb dans channel.settings) en sortie.
+const SENSITIVE = /token|secret|password|api[_-]?key|access|refresh|credential|client_id|signature/i
+const redact = (v) => {
+  if (Array.isArray(v)) return v.map(redact)
+  if (v && typeof v === 'object') {
+    const out = {}
+    for (const [k, val] of Object.entries(v)) out[k] = SENSITIVE.test(k) ? '***REDACTED***' : redact(val)
+    return out
+  }
+  return v
+}
+
 module.exports = async function handler(req, res) {
   if (!CHANNEL_API || !CHANNEL_KEY) return res.status(503).json({ error: 'Gestionnaire de canaux non configure' })
 
@@ -181,6 +193,11 @@ module.exports = async function handler(req, res) {
     const ch = await channelCall('GET', `/channels/${channelId}`)
     if (!ch.json?.data) return res.status(404).json({ error: 'Canal introuvable', http: ch.status })
     const attrs = ch.json.data.attributes || {}
+    // GARDE-FOU : PUT /channels round-tripperait les settings du canal. Pour Airbnb ceux-ci
+    // contiennent les JETONS OAuth -> interdit ici. Airbnb se remap via /mappings (a coder).
+    if (/airbnb/i.test(attrs.channel || '')) {
+      return res.status(400).json({ error: 'remap PUT non supporte pour Airbnb (settings = jetons OAuth). Utiliser le chemin /mappings.' })
+    }
     const groupId = ch.json.data.relationships?.group?.data?.id
     const currentRatePlans = Array.isArray(attrs.rate_plans) ? attrs.rate_plans : []
     if (!currentRatePlans.length) return res.status(400).json({ error: 'Canal sans mapping a basculer' })
@@ -204,7 +221,7 @@ module.exports = async function handler(req, res) {
     if (dryRun) {
       return res.status(200).json({
         dry_run: true, channel_id: channelId, to, target_rate_plan_id: targetRatePlanId,
-        current_mapped: currentMapped, would_send: { method: 'PUT', path: `/channels/${channelId}`, payload }
+        current_mapped: currentMapped, would_send: { method: 'PUT', path: `/channels/${channelId}`, payload: redact(payload) }
       })
     }
 
@@ -216,7 +233,7 @@ module.exports = async function handler(req, res) {
       dry_run: false, http: w.status, channel_id: channelId, to,
       target_rate_plan_id: targetRatePlanId, mapped_after: mappedAfter,
       ok_switched: mappedAfter.length > 0 && mappedAfter.every(id => id === targetRatePlanId),
-      result: w.json
+      result: redact(w.json)
     })
   }
 
