@@ -68,11 +68,12 @@ module.exports = async function handler(req, res) {
     const roomType = prop.provider_room_type_id
     if (!base || !roomType) return res.status(400).json({ error: 'Bien sans base rate plan / room type (provisioning incomplet)' })
 
-    // Idempotence : un derive existe deja pour ce canal ?
+    // Idempotence : un derive existe deja pour ce canal ? (role='derived' : ne pas
+    // confondre avec une eventuelle ligne base sentinelle du meme channel)
     const { data: existing } = await supabase
       .from('property_channel_rate_plans')
       .select('id, provider_rate_plan_id')
-      .eq('property_id', prop.id).eq('channel', channel).maybeSingle()
+      .eq('property_id', prop.id).eq('channel', channel).eq('role', 'derived').maybeSingle()
     if (existing?.provider_rate_plan_id) {
       return res.status(200).json({ already: true, channel, derived_rate_plan_id: existing.provider_rate_plan_id })
     }
