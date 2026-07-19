@@ -368,12 +368,23 @@ module.exports = async function handler(req, res) {
       })
     }
 
-    // 1) AJOUTE le nouveau mapping (si echec -> Airbnb reste sur l'ancien, aucun degat).
-    const add = await channelCall('POST', `/channels/${channelId}/mappings`, newMapping)
-    if (!add.ok) return res.status(502).json({ error: 'Ajout mapping enfant echoue (Airbnb inchange)', http: add.status, detail: redact(add.json) })
-
-    // 2) RETIRE l'ancien mapping (base).
+    // Airbnb impose 1 mapping par listing -> DELETE l'ancien AVANT d'ajouter le nouveau.
+    // 1) RETIRE l'ancien mapping (base).
     const del = await channelCall('DELETE', `/channels/${channelId}/mappings/${oldMappingId}`)
+    if (!del.ok) return res.status(502).json({ error: 'Suppression ancien mapping echouee (Airbnb inchange)', http: del.status, detail: redact(del.json) })
+
+    // 2) AJOUTE le nouveau mapping (enfant). Echec -> ROLLBACK : re-mappe la base
+    //    (minimal ; Channex re-tire la config de l'annonce) pour ne pas laisser Airbnb non mappe.
+    const add = await channelCall('POST', `/channels/${channelId}/mappings`, newMapping)
+    if (!add.ok) {
+      const rb = await channelCall('POST', `/channels/${channelId}/mappings`, {
+        mapping: { rate_plan_id: cur.rate_plan_id, settings: { listing_id: listingId, primary_occ: primaryOcc } }
+      })
+      return res.status(502).json({
+        error: 'Ajout mapping enfant echoue apres suppression ; rollback base tente',
+        http: add.status, detail: redact(add.json), rollback_http: rb.status, rollback_ok: rb.ok
+      })
+    }
 
     // PREUVE : re-GET, rate_plans[] ne doit plus contenir que l'enfant.
     const after = await channelCall('GET', `/channels/${channelId}`)
