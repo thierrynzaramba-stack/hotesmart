@@ -220,5 +220,87 @@ module.exports = async function handler(req, res) {
     })
   }
 
-  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap)' })
+  // --- set_rule : regle prix (coef %) + min stay propre sur le derive d'un canal ---
+  // Ecrit la base (property_channel_rate_plans) ET Channex (PUT /rate_plans/:id).
+  // percent/min_stay optionnels ; au moins un requis. min_stay omis => herite du base.
+  if (action === 'set_rule') {
+    const providerPropertyId = (req.query.property_id || '').trim()
+    const channel = (req.query.channel || 'booking').trim()
+    const hasPercent = req.query.percent != null && req.query.percent !== ''
+    const hasMinStay = req.query.min_stay != null && req.query.min_stay !== ''
+    const percent = hasPercent ? Number(req.query.percent) : null
+    const minStay = hasMinStay ? parseInt(req.query.min_stay, 10) : null
+    const dryRun = req.query.dry_run !== 'false'
+    if (!providerPropertyId) return res.status(400).json({ error: 'property_id requis' })
+    if (!hasPercent && !hasMinStay) return res.status(400).json({ error: 'percent et/ou min_stay requis' })
+    if (hasPercent && !Number.isFinite(percent)) return res.status(400).json({ error: 'percent invalide' })
+    if (hasMinStay && (!Number.isInteger(minStay) || minStay < 1)) return res.status(400).json({ error: 'min_stay invalide (>=1)' })
+
+    const { data: prop } = await supabase
+      .from('properties').select('id, provider_property_id')
+      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+    if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
+
+    const { data: row } = await supabase
+      .from('property_channel_rate_plans')
+      .select('id, provider_rate_plan_id')
+      .eq('property_id', prop.id).eq('channel', channel).eq('role', 'derived').maybeSingle()
+    if (!row?.provider_rate_plan_id) return res.status(400).json({ error: 'Aucun rate plan derive pour ce canal' })
+    const childId = row.provider_rate_plan_id
+
+    // Config actuelle pour cloner les options.
+    const cur = await channelCall('GET', `/rate_plans/${childId}`)
+    const curAttr = cur.json?.data?.attributes || {}
+    const curOpts = Array.isArray(curAttr.options) ? curAttr.options : []
+
+    // Construit le rate_plan a PUT.
+    const rp = {}
+    if (hasPercent) {
+      rp.inherit_rate = true
+      rp.options = (curOpts.length ? curOpts : [{ occupancy: 4, is_primary: true }]).map(o => ({
+        occupancy: o.occupancy, is_primary: !!o.is_primary,
+        derived_option: { rate: [['increase_by_percent', String(percent)]] }
+      }))
+    }
+    if (hasMinStay) {
+      rp.inherit_min_stay_arrival = false
+      rp.inherit_min_stay_through = false
+      rp.min_stay_arrival = minStay
+      rp.min_stay_through = minStay
+    } else {
+      // min_stay non fourni => on (re)met l'heritage du base.
+      rp.inherit_min_stay_arrival = true
+      rp.inherit_min_stay_through = true
+    }
+
+    const payload = { rate_plan: rp }
+    if (dryRun) {
+      return res.status(200).json({
+        dry_run: true, channel, derived_rate_plan_id: childId,
+        rule: { percent: hasPercent ? percent : 'inchange', min_stay: hasMinStay ? minStay : 'herite' },
+        would_send: { method: 'PUT', path: `/rate_plans/${childId}`, payload }
+      })
+    }
+
+    const w = await channelCall('PUT', `/rate_plans/${childId}`, payload)
+    if (!w.ok) return res.status(502).json({ error: 'PUT rate_plan echoue', http: w.status, detail: w.json })
+
+    // Ecrit la base (source de verite UI).
+    const dbPatch = {}
+    if (hasPercent) { dbPatch.derive_mode = 'percent'; dbPatch.derive_value = percent }
+    if (hasMinStay) dbPatch.min_stay = minStay
+    else dbPatch.min_stay = null
+    const { error: upErr } = await supabase
+      .from('property_channel_rate_plans').update(dbPatch).eq('id', row.id)
+    if (upErr) console.error('[channel-rateplan] set_rule DB', upErr.message)
+
+    return res.status(200).json({
+      ok: true, channel, derived_rate_plan_id: childId,
+      applied: { percent: hasPercent ? percent : null, min_stay: hasMinStay ? minStay : 'herite' },
+      db_written: !upErr,
+      channex: w.json?.data?.attributes ? { min_stay_arrival: w.json.data.attributes.min_stay_arrival, inherit_min_stay_arrival: w.json.data.attributes.inherit_min_stay_arrival } : null
+    })
+  }
+
+  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap | set_rule)' })
 }
