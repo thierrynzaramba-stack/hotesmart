@@ -151,5 +151,74 @@ module.exports = async function handler(req, res) {
     })
   }
 
-  return res.status(400).json({ error: 'action inconnue (create_derived | inspect)' })
+  // --- remap : bascule le rate plan mappe d'un canal (base <-> derive) ---
+  // PUT /channels/:id avec le meme payload, rate_plan_id echange. dry_run par defaut.
+  // ⚠️ rejoue la fermeture des dates cote OTA (fenetre de connexion).
+  if (action === 'remap') {
+    const channelId = (req.query.channel_id || '').trim()
+    const providerPropertyId = (req.query.property_id || '').trim()
+    const to = (req.query.to || 'derived').trim()   // 'derived' | 'base'
+    const dryRun = req.query.dry_run !== 'false'
+    if (!channelId || !providerPropertyId) return res.status(400).json({ error: 'channel_id + property_id requis' })
+
+    const { data: prop } = await supabase
+      .from('properties').select('id, provider_property_id, provider_rate_plan_id')
+      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+    if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
+
+    // Cible : base = provider_rate_plan_id du bien ; derived = ligne de liaison du canal.
+    let targetRatePlanId = prop.provider_rate_plan_id
+    if (to === 'derived') {
+      const { data: row } = await supabase
+        .from('property_channel_rate_plans')
+        .select('provider_rate_plan_id')
+        .eq('property_id', prop.id).eq('channel', 'booking').eq('role', 'derived').maybeSingle()
+      if (!row?.provider_rate_plan_id) return res.status(400).json({ error: 'Aucun rate plan derive booking en base (create_derived d\'abord)' })
+      targetRatePlanId = row.provider_rate_plan_id
+    }
+
+    // Etat actuel du canal
+    const ch = await channelCall('GET', `/channels/${channelId}`)
+    if (!ch.json?.data) return res.status(404).json({ error: 'Canal introuvable', http: ch.status })
+    const attrs = ch.json.data.attributes || {}
+    const groupId = ch.json.data.relationships?.group?.data?.id
+    const currentRatePlans = Array.isArray(attrs.rate_plans) ? attrs.rate_plans : []
+    if (!currentRatePlans.length) return res.status(400).json({ error: 'Canal sans mapping a basculer' })
+
+    // Reconstruit rate_plans[] : mêmes settings, rate_plan_id echange vers la cible.
+    const newRatePlans = currentRatePlans.map(rp => ({ rate_plan_id: targetRatePlanId, settings: rp.settings }))
+    const payload = {
+      channel: {
+        channel: attrs.channel,
+        group_id: groupId,
+        is_active: attrs.is_active,
+        title: attrs.title,
+        known_mappings_list: [],
+        properties: attrs.properties,
+        rate_plans: newRatePlans,
+        settings: attrs.settings
+      }
+    }
+    const currentMapped = currentRatePlans.map(rp => rp.rate_plan_id)
+
+    if (dryRun) {
+      return res.status(200).json({
+        dry_run: true, channel_id: channelId, to, target_rate_plan_id: targetRatePlanId,
+        current_mapped: currentMapped, would_send: { method: 'PUT', path: `/channels/${channelId}`, payload }
+      })
+    }
+
+    const w = await channelCall('PUT', `/channels/${channelId}`, payload)
+    // PREUVE : re-GET, rate_plans[] doit pointer la cible.
+    const after = await channelCall('GET', `/channels/${channelId}`)
+    const mappedAfter = (after.json?.data?.attributes?.rate_plans || []).map(rp => rp.rate_plan_id)
+    return res.status(w.ok ? 200 : 502).json({
+      dry_run: false, http: w.status, channel_id: channelId, to,
+      target_rate_plan_id: targetRatePlanId, mapped_after: mappedAfter,
+      ok_switched: mappedAfter.length > 0 && mappedAfter.every(id => id === targetRatePlanId),
+      result: w.json
+    })
+  }
+
+  return res.status(400).json({ error: 'action inconnue (create_derived | inspect | remap)' })
 }
