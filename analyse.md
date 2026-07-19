@@ -523,3 +523,27 @@ n'est **pas** trivial — c'est le prix d'entrée, partagé par les deux cas. Le
 ensuite quasi gratuit ; le prix dérivé est le vrai surcoût. **Ordre recommandé** : (0) vérifier la
 dérivation native Channex sur le compte test → (1) Socle + min stay → (2) prix dérivé → (3)
 overrides. Si la dérivation native marche (§3), le Socle rétrécit et le certifié n'est pas touché.
+
+### Étape 0 — dérivation native Channex : VÉRIFIÉE (doc + test live, Session #24)
+
+**Doc** (docs.channex.io « Rate Plans Collection » + « ARI ») :
+- `POST /rate_plans` accepte `parent_rate_plan_id`, `rate_mode ∈ {manual,derived,cascade,auto}`,
+  et des flags d'héritage PAR restriction : `inherit_rate`, `inherit_min_stay_arrival`,
+  `inherit_min_stay_through`, `inherit_closed_to_arrival/departure`, `inherit_stop_sell`,
+  `inherit_max_stay`… Défaut `true` si parent présent, mais réglables un par un.
+- Dérivation prix via `derived_option` par option : `{ rate: [["increase_by_percent","18"]] }`
+  (aussi `increase_by_amount`).
+- `derived_rate_plan_ids` (vu dans Booking `mapping_details`) = côté Booking (OTA), PAS Channex.
+- Lecture ARI : `GET /restrictions?filter[property_id]=&filter[date][gte]=&filter[date][lte]=
+  &filter[restrictions]=rate,min_stay_arrival,min_stay_through` → réponse indexée par rate_plan_id
+  (donc parent + enfant en une lecture).
+
+**Test live jetable** (propriété `ZZ-TEST-derive`, aucun mapping canal, teardown vérifié) :
+parent poussé `min_stay=2, rate=100€` par date → **enfant lu = `min_stay=3` (indépendant) + `rate=118€`
+(dérivé +18%)**, dès la 1ʳᵉ lecture. Propriété supprimée (`property_gone:true`).
+
+**VERDICT : Option A adoptée.** Booking = enfant du base (`parent_rate_plan_id`, `inherit_rate:true`
++ `derived_option +X%`, `inherit_min_stay_*:false` + `min_stay` propre). On pousse l'ARI UNIQUEMENT
+à la base → `channel-fullsync.js` CERTIFIÉ INTACT, l'enfant dérive prix + garde son min stay.
+Le chantier Push (§4) tombe. Reste le socle : table `property_channel_rate_plans` + création du
+dérivé Booking pour Colomiers + migration (remap Booking = rejoue la fermeture des dates, moment choisi).
