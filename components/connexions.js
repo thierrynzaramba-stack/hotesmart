@@ -139,14 +139,17 @@ function renderRows({ airbnb, booking }) {
     </div>
   `)
 
+  // IMPORTANT : capturer property AVANT close() -> close() fait S=null, donc lire
+  // S.property apres fermeture planterait (TypeError: null is not an object).
+  const property = S.property
   document.getElementById('cx-airbnb').addEventListener('click', () => {
     close()
-    openAirbnbConnect(S.property, null)
+    openAirbnbConnect(property, null)
   })
   document.getElementById('cx-booking').addEventListener('click', () => {
     const existingChannel = booking ? { id: booking.id, is_active: booking.is_active } : null
     close()
-    openBookingConnect(S.property, null, { existingChannel })
+    openBookingConnect(property, null, { existingChannel })
   })
 }
 
