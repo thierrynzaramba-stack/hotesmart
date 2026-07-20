@@ -21,7 +21,10 @@
 
     <div class="content">
 
-      <div class="section-title">Mes biens</div>
+      <div class="section-header">
+        <div class="section-title">Mes biens</div>
+        <a href="/biens/nouveau" class="btn btn-primary">+ Ajouter un bien</a>
+      </div>
       <div class="apps-grid" id="properties-grid">
         <div class="app-card">Chargement...</div>
       </div>
@@ -42,6 +45,9 @@
   import CONFIG from '/shared/config.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { logger } from '/shared/logger.js'
+  import {
+    loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml
+  } from '/shared/properties.js'
 
   initErrorHandler()
 
@@ -58,8 +64,8 @@
       const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'là'
       document.getElementById('welcome').textContent = `Bonjour ${name} !`
 
-      // Charge les propriétés Beds24
-      await loadProperties(session)
+      // Charge les biens (Beds24 + channel manager)
+      await loadProperties()
 
       // Charge les apps
       renderApps()
@@ -69,40 +75,80 @@
     }
   }
 
-  async function loadProperties(session) {
+  // Carte compacte de l'accueil. Le chrome differe de /pages/biens (.app-card vs
+  // .property-card, pas de boutons d'action ici) ; seules la SOURCE des biens et
+  // les badges sont partages, via /shared/properties.js.
+  function renderPropertyCard(p) {
+    const card = document.createElement('div')
+    card.className = 'app-card'
+
+    // Beds24 expose address/city + horaires ; le channel manager expose city/country.
+    const location = p._source === 'beds24'
+      ? [p.address, p.city].filter(Boolean).join(', ')
+      : [p.city, p.country].filter(Boolean).join(', ')
+
+    const hours = (p.checkInStart && p.checkOutEnd)
+      ? `<div class="app-desc" style="margin-top:4px">Check-in : ${escapeHtml(p.checkInStart)} · Check-out : ${escapeHtml(p.checkOutEnd)}</div>`
+      : ''
+
+    card.innerHTML = `
+      <div class="app-icon" style="background:#E1F5EE">🏠</div>
+      <div class="app-name">${escapeHtml(p.name)}</div>
+      <div class="app-desc">${escapeHtml(location)}</div>
+      ${hours}
+      <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
+      <div class="channel-badges" data-channels></div>
+    `
+    return card
+  }
+
+  // Carte d'ajout, toujours en fin de grille : le point d'entree "creer un bien"
+  // reste visible a cote des biens existants, pas seulement dans l'etat vide.
+  function renderAddCard() {
+    const a = document.createElement('a')
+    a.href = '/biens/nouveau'
+    a.className = 'app-card app-card-add'
+    a.innerHTML = `
+      <div class="add-plus">+</div>
+      <div class="app-name">Ajouter un bien</div>
+    `
+    return a
+  }
+
+  async function loadProperties() {
+    const grid = document.getElementById('properties-grid')
+    const status = document.getElementById('status')
+
     try {
-      const res = await fetch('/api/beds24', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({ action: 'getProperties' })
-      })
+      const { properties, allFailed } = await loadAllProperties()
 
-      const data = await res.json()
-
-      if (data.properties && data.properties.length > 0) {
-        document.getElementById('status').textContent = `${data.properties.length} bien(s) connecté(s) via Beds24`
-
-        const grid = document.getElementById('properties-grid')
-        grid.innerHTML = data.properties.map(p => `
-          <div class="app-card">
-            <div class="app-icon" style="background:#E1F5EE">🏠</div>
-            <div class="app-name">${p.name}</div>
-            <div class="app-desc">${p.address}, ${p.city}</div>
-            <div class="app-desc" style="margin-top:4px">Check-in : ${p.checkInStart} · Check-out : ${p.checkOutEnd}</div>
-            <div class="app-status status-on">● Connecté</div>
-          </div>
-        `).join('')
-
-        logger.info('Dashboard', `${data.properties.length} propriétés chargées`)
-      } else {
-        document.getElementById('properties-grid').innerHTML = '<div class="app-card"><div class="app-desc">Aucun bien trouvé — configurez votre clé Beds24</div></div>'
-        document.getElementById('status').textContent = 'Beds24 non configuré'
+      if (allFailed) {
+        grid.innerHTML = '<div class="app-card"><div class="app-desc">Erreur de chargement des biens.</div></div>'
+        status.textContent = 'Chargement impossible'
+        return
       }
+
+      if (!properties.length) {
+        grid.innerHTML = ''
+        grid.appendChild(renderAddCard())
+        status.textContent = 'Aucun bien'
+        return
+      }
+
+      // Libelle neutre : l'accueil ne parle plus de Beds24, les deux backends coexistent.
+      status.textContent = `${properties.length} bien(s)`
+
+      grid.innerHTML = ''
+      for (const p of properties) {
+        const card = renderPropertyCard(p)
+        grid.appendChild(card)
+        // Canaux charges en differe : la carte s'affiche sans attendre Channex.
+        hydrateChannelBadges(p, card.querySelector('[data-channels]'))
+      }
+      grid.appendChild(renderAddCard())
     } catch (err) {
-      logger.error('Dashboard', 'Erreur chargement propriétés', err)
+      logger.error('Dashboard', 'Erreur chargement biens', err)
+      grid.innerHTML = '<div class="app-card"><div class="app-desc">Erreur de chargement des biens.</div></div>'
     }
   }
 

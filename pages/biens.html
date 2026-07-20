@@ -38,17 +38,7 @@
       color: #E24B4A;
       border-color: #E24B4A;
     }
-    .badge {
-      display: inline-block;
-      background: var(--bg2);
-      color: var(--text2);
-      border: 0.5px solid var(--border);
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 500;
-      margin-top: 4px;
-    }
+    /* .badge / .badge-channel / .channel-badges : voir public/style.css (partages avec l'accueil). */
     .empty-state {
       background: var(--bg);
       border: 0.5px solid var(--border);
@@ -155,6 +145,9 @@
   import { logger } from '/shared/logger.js'
   import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
   import { openConnexions } from '/components/connexions.js'
+  import {
+    loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml
+  } from '/shared/properties.js'
 
   initErrorHandler()
   const session = await requireAuth()
@@ -170,13 +163,6 @@
 
   let currentEdit = null   // bien en cours d'édition
   let currentDelete = null // bien en cours de suppression
-
-  function escapeHtml(s) {
-    if (s == null) return ''
-    return String(s).replace(/[&<>"']/g, c => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[c]))
-  }
 
   async function callApi(method, body) {
     const res = await fetch('/api/channel-property', {
@@ -202,7 +188,7 @@
       card.innerHTML = `
         <div>
           <h3>${escapeHtml(p.name)}</h3>
-          <span class="badge">Beds24 ✓</span>
+          <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
         </div>
         <div class="meta">
           ${cityLine}
@@ -215,11 +201,15 @@
       return card
     }
 
+    // Badge de PROVENANCE ("qui gere le bien") puis, sur une ligne separee, les
+    // canaux de distribution REELS lus chez Channex. L'ancien badge unique
+    // "HôteSmart" se lisait a tort comme un canal connecte.
     card.innerHTML = `
       <div>
         <h3>${escapeHtml(p.name)}</h3>
-        <span class="badge">HôteSmart</span>
+        <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
       </div>
+      <div class="channel-badges" data-channels></div>
       <div class="meta">
         ${cityLine}
         <span>Capacité : ${escapeHtml(p.capacity)} personne(s)</span>
@@ -236,6 +226,9 @@
     card.querySelector('[data-connect]').addEventListener('click', (e) => openConnexions(p, e.currentTarget))
     card.querySelector('[data-edit]').addEventListener('click', () => openEdit(p))
     card.querySelector('[data-delete]').addEventListener('click', () => openDelete(p))
+    // Canaux charges en differe : la carte et ses actions restent utilisables
+    // sans attendre la reponse Channex.
+    hydrateChannelBadges(p, card.querySelector('[data-channels]'))
     card.querySelector('[data-fullsync]').addEventListener('click', async (e) => {
       const btn = e.target
       if (!confirm('Mettre en file la publication de 500 jours de calendrier (prix + disponibilités) vers les canaux de distribution ?')) return
@@ -259,48 +252,19 @@
     return card
   }
 
-  async function fetchBeds24Properties() {
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ action: 'getProperties' })
-    })
-    if (!res.ok) throw new Error('Beds24 indisponible')
-    const data = await res.json()
-    return (data.properties || []).map(p => ({ ...p, _source: 'beds24' }))
-  }
-
-  async function fetchChannelProperties() {
-    const result = await api.channel.listProperties()
-    return (result.properties || [])
-      .filter(p => p.provider !== 'beds24')
-      .map(p => ({ ...p, _source: 'channel' }))
-  }
-
   async function loadProperties() {
     loader.style.display = 'block'
     empty.style.display = 'none'
     grid.style.display = 'none'
     grid.innerHTML = ''
 
-    // Les deux sources en parallèle ; si l'une échoue, l'autre s'affiche quand même.
-    const [beds24Res, channelRes] = await Promise.allSettled([
-      fetchBeds24Properties(),
-      fetchChannelProperties()
-    ])
-
-    const beds24Props  = beds24Res.status === 'fulfilled' ? beds24Res.value : []
-    const channelProps = channelRes.status === 'fulfilled' ? channelRes.value : []
-    if (beds24Res.status === 'rejected')  logger.error('biens', 'Beds24: ' + beds24Res.reason?.message)
-    if (channelRes.status === 'rejected') logger.error('biens', 'Channel: ' + channelRes.reason?.message)
-
-    const properties = [...beds24Props, ...channelProps]
-    logger.info('biens', `${properties.length} biens chargés (${beds24Props.length} Beds24, ${channelProps.length} HôteSmart)`)
+    // Source partagee avec l'accueil : voir /shared/properties.js.
+    const { properties, allFailed } = await loadAllProperties()
 
     loader.style.display = 'none'
 
     if (properties.length === 0) {
-      if (beds24Res.status === 'rejected' && channelRes.status === 'rejected') {
+      if (allFailed) {
         loader.style.display = 'block'
         loader.textContent = 'Erreur de chargement des biens.'
         return

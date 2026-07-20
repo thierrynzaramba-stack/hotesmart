@@ -319,3 +319,60 @@ body {
   font-family: inherit;
 }
 .form-input:focus { outline: none; border-color: var(--green); }
+
+/* ===== Badges biens (partages accueil + /pages/biens) ===== */
+/* .badge = provenance ("Beds24 ✓" / "Géré par HôteSmart").
+   .badge-channel = canal de distribution reel (Airbnb, Booking.com). */
+.badge {
+  display: inline-block;
+  background: var(--bg2);
+  color: var(--text2);
+  border: 0.5px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 4px;
+}
+.badge-channel {
+  background: var(--green-bg);
+  color: var(--green);
+  border-color: transparent;
+}
+/* Canal mappe mais non active : visible mais grise, jamais masque. */
+.badge-channel.is-inactive {
+  background: var(--bg2);
+  color: var(--text2);
+  border-color: var(--border);
+  opacity: 0.7;
+}
+.channel-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+/* En-tete de section avec action a droite (ex. "Mes biens" + Ajouter un bien). */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.section-header .section-title { margin-bottom: 0; }
+
+/* Carte "ajouter" en fin de grille : meme gabarit qu'une carte bien. */
+.app-card-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-style: dashed;
+  color: var(--text2);
+  text-decoration: none;
+}
+.app-card-add:hover { border-color: var(--green); color: var(--green); }
+.app-card-add .add-plus { font-size: 22px; line-height: 1; margin-bottom: 6px; }
