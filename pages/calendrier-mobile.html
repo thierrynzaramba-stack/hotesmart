@@ -151,6 +151,7 @@
     import { requireAuth } from '/components/auth-guard.js'
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
+    import { loadCalendarData } from '/shared/calendar-core.js'
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifie')
     await renderSidebar('biens-calendrier')
@@ -234,15 +235,15 @@
       document.getElementById('month-label').textContent=monthFull[viewMonth]+' '+viewYear
       const {start,end}=monthBounds(); inv={}; resaSet=new Set(); resaList=[]
       try{
-        const r=await api.calendar.load([currentBien.id], start, end)
-        inv=(r.inventory&&r.inventory[currentBien.id])||{}
-        const p=(r.properties||[]).find(x=>x.id===currentBien.id)
+        const {inv:invMap,rawProps,bookings:bkMap}=await loadCalendarData([currentBien.id], start, end)
+        inv=invMap[currentBien.id]||{}
+        const p=rawProps[currentBien.id]
         if(p){ ppConfig={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}; currentBien.base_price=Number(p.base_price)||currentBien.base_price; currentBien.capacity=p.capacity||currentBien.capacity
           // config orphan depuis la base
           orphanAutoFix=!!p.orphan_autofix
           currentBien.orphanPrice={ enabled:!!p.orphan_price_enabled, mode:p.orphan_price_mode||'set', unit:p.orphan_price_unit||'eur', value:(p.orphan_price_value!=null?String(p.orphan_price_value):'') }
         }
-        const bk=(r.bookings&&r.bookings[currentBien.id])||[]
+        const bk=(bkMap&&bkMap[currentBien.id])||[]
         const SRC=['airbnb','booking','direct']
         bk.forEach((b,idx)=>{ if(String(b.status||'').toLowerCase()==='cancelled')return; if(String(b.status||'').toLowerCase()==='cancelled')return;
           const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')

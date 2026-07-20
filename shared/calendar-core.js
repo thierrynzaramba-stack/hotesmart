@@ -83,10 +83,11 @@ export async function loadCalendarData(selectedBiens, start, end) {
   const r = await api.calendar.load(selectedBiens, start, end)
   const inv = {}
   selectedBiens.forEach(id => { inv[id] = (r && r.inventory && r.inventory[id]) || {} })
-  const pp = {}, propsById = {}
+  const pp = {}, propsById = {}, rawProps = {}
   if (r && r.properties) r.properties.forEach(p => {
     pp[p.id] = { included: p.included_guests || p.capacity || 1, extraFee: Number(p.extra_guest_fee) || 0 }
     propsById[p.id] = { base: Number(p.base_price), included: pp[p.id].included, extraFee: pp[p.id].extraFee }
+    rawProps[p.id] = p   // objet propriete brut (capacity, orphan_*, etc.) -> superset pour mobile
   })
-  return { inv, pp, propsById, bookings: (r && r.bookings) || null }
+  return { inv, pp, propsById, bookings: (r && r.bookings) || null, rawProps }
 }
