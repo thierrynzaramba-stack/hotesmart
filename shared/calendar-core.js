@@ -30,3 +30,47 @@ export const PARAMS = [
   { key: 'stopSell', label: 'Stop vente', type: 'openclosed', optOpen: 'En vente', optClosed: 'Stoppe', desc: 'Arrete la vente sur tous les canaux sans modifier la disponibilite reelle.' }
 ]
 export const ROW_DEFAULTS = { avail: 'open', minStayArr: 0, minStayThrough: 0, maxStay: 0, cta: 'open', ctd: 'open', stopSell: 'open' }
+
+// --- Logique de dates / etat (PURE : dependances passees en parametres) ---
+
+// Genere les jours consecutifs de la grille. months = periode ; containerW = largeur
+// dispo en px (remplissage). Logique VERBATIM de l'ancien buildDays (partie calcul).
+export function computeDays(months, containerW) {
+  const t = new Date(); t.setHours(0, 0, 0, 0)
+  let n = Math.round(months * 30)
+  const COLW = 34, LABEL = 120, PAD = 48
+  const avail = Math.max(0, (containerW || 0) - LABEL - PAD)
+  const fit = Math.floor(avail / COLW)
+  if (fit > n) n = fit
+  const out = []
+  for (let i = 0; i < n; i++) { const d = new Date(t); d.setDate(t.getDate() + i); out.push(d) }
+  return out
+}
+
+// Construit l'etat editable d'un bien depuis son inventaire. VERBATIM de l'ancien initState.
+export function buildStateFromInventory(days, inv, base) {
+  const src = inv || {}
+  return days.map(d => {
+    const iso = toISO(d)
+    const r = src[iso]
+    const rate = (r && r.rate != null) ? Number(r.rate) : base
+    return {
+      rate,
+      avail: (r && r.avail === 0) ? 'closed' : 'open',
+      minStayArr: (r && r.min_stay_arrival) || 0,
+      minStayThrough: (r && r.min_stay_through) || 0,
+      maxStay: (r && r.max_stay) || 0,
+      cta: (r && r.cta) ? 'closed' : 'open',
+      ctd: (r && r.ctd) ? 'closed' : 'open',
+      stopSell: (r && r.stop_sell) ? 'closed' : 'open',
+      modified: false
+    }
+  })
+}
+
+// Params effectivement configures (non-defaut) sur les biens selectionnes. VERBATIM.
+export function configuredRowParams(selectedBiens, states) {
+  const setp = new Set()
+  selectedBiens.forEach(bid => { const st = states[bid]; if (!st) return; st.forEach(s => { for (const k in ROW_DEFAULTS) { if (s[k] !== ROW_DEFAULTS[k]) setp.add(k) } }) })
+  return setp
+}

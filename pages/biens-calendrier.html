@@ -175,7 +175,7 @@
     import { requireAuth }   from '/components/auth-guard.js'
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
-    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym } from '/shared/calendar-core.js'
+    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams } from '/shared/calendar-core.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -202,19 +202,14 @@
     // Constantes dates (dayNames..CELL_W) : deplacees verbatim dans shared/calendar-core.js.
 
     function buildDays(){
-      const t=new Date(); t.setHours(0,0,0,0)
-      let n=Math.round(MONTHS*30)
-      // remplir la largeur DISPONIBLE (conteneur calendrier, pas la fenêtre :
-      // la sidebar occupe ~260px en desktop). Fallback sur innerWidth si besoin.
+      // Largeur dispo lue au DOM (specifique desktop), puis calcul PUR dans le coeur.
+      // Fallback identique a l'ancien code : si le DOM echoue, containerW null -> pas de fit.
+      let containerW=null
       try{
-        const COLW=34, LABEL=120, PAD=48
         const main=document.getElementById('main')
-        const containerW = (main && main.clientWidth) ? main.clientWidth : ((window.innerWidth||1200)-260)
-        const avail=Math.max(0, containerW-LABEL-PAD)
-        const fit=Math.floor(avail/COLW)
-        if(fit>n) n=fit
+        containerW = (main && main.clientWidth) ? main.clientWidth : ((window.innerWidth||1200)-260)
       }catch(e){}
-      days=[]; for(let i=0;i<n;i++){const d=new Date(t);d.setDate(t.getDate()+i);days.push(d)}
+      days=computeDays(MONTHS, containerW)
     }
     function isMonthStart(i){ return i===0||days[i].getDate()===1 }
     function isToday(i){ return i===0 }
@@ -224,28 +219,10 @@
     const invByBien={}
 
     const states={}
-    function initState(b){
-      const inv = invByBien[b.id] || {}
-      states[b.id]=days.map(d=>{
-        const iso=toISO(d)
-        const r=inv[iso]
-        const rate = (r && r.rate!=null) ? Number(r.rate) : b.base
-        return {
-          rate,
-          avail: (r && r.avail === 0) ? 'closed' : 'open',
-          minStayArr: (r && r.min_stay_arrival)||0,
-          minStayThrough: (r && r.min_stay_through)||0,
-          maxStay: (r && r.max_stay)||0,
-          cta: (r && r.cta) ? 'closed' : 'open',
-          ctd: (r && r.ctd) ? 'closed' : 'open',
-          stopSell: (r && r.stop_sell) ? 'closed' : 'open',
-          modified: false
-        }
-      })
-    }
+    function initState(b){ states[b.id]=buildStateFromInventory(days, invByBien[b.id]||{}, b.base) }
 
     function maxRateOf(bien, dayRate){ const cfg=ppConfig[bien.id]||{included:bien.included,extraFee:bien.extraFee}; const extra=Math.max(0, bien.capacity-cfg.included); return dayRate + extra*(cfg.extraFee||0) }
-    function configuredRowParams(){ const setp=new Set(); selectedBiens.forEach(bid=>{const st=states[bid]; if(!st)return; st.forEach(s=>{for(const k in ROW_DEFAULTS){if(s[k]!==ROW_DEFAULTS[k])setp.add(k)}})}); return setp }
+    // configuredRowParams : deplace dans shared/calendar-core.js (appele avec selectedBiens, states).
 
     let sel={bienId:null, idx:new Set(), row:'rate'}
     const undoStack=[]
@@ -282,7 +259,7 @@
 
     function visibleRows(bien){
       const rows=['rate']
-      const configured=configuredRowParams()
+      const configured=configuredRowParams(selectedBiens, states)
       if(showComplete || pinnedSimple.has('maxRate')) rows.push('maxRate')
       PARAMS.forEach(p=>{
         if(p.key==='rate'||p.key==='perPerson')return
@@ -375,7 +352,7 @@
 
     function renderPopupMenu(){
       const menu=document.getElementById('popup-menu'); menu.innerHTML=''
-      const configured=configuredRowParams()
+      const configured=configuredRowParams(selectedBiens, states)
       PARAMS.forEach(p=>{ const mi=document.createElement('div'); const isConf=(p.key!=='rate'&&p.key!=='perPerson'&&configured.has(p.key)); mi.className='mi'+(p.key===activeParam?' active':'')+(isConf?' config-dot':''); mi.textContent=p.label; mi.addEventListener('click',()=>{activeParam=p.key;renderPopupMenu();renderPopupContent()}); menu.appendChild(mi) })
       const sep=document.createElement('div'); sep.className='mi-sep'; menu.appendChild(sep)
       const af=document.createElement('div'); af.className='mi'+(activeParam==='__display'?' active':''); af.textContent='Affichage'; af.addEventListener('click',()=>{activeParam='__display';renderPopupMenu();renderPopupContent()}); menu.appendChild(af)
