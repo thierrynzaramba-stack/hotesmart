@@ -175,6 +175,7 @@
     import { requireAuth }   from '/components/auth-guard.js'
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
+    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym } from '/shared/calendar-core.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -194,29 +195,11 @@
     }
     const URL_BIEN_ID = bienIdFromUrl()
 
-    const PARAMS = [
-      { key:'rate',           label:'Prix de base',   type:'price', desc:'Tarif par nuit pour le nombre de voyageurs inclus.' },
-      { key:'perPerson',      label:'Prix par personne', type:'perperson', desc:'Configuration globale du bien. Le prix de base couvre un nombre de voyageurs inclus ; au-dela, un supplement par personne s\u0027applique.' },
-      { key:'avail',          label:'Disponibilite',  type:'openclosed', optOpen:'Ouvert', optClosed:'Ferme', desc:'Ouvre ou ferme la date a la reservation.' },
-      { key:'minStayArr',     label:'Min nuits (arrivee)', type:'num', desc:'Nombre minimum de nuits si le voyageur arrive ce jour-la.' },
-      { key:'minStayThrough', label:'Min nuits (sejour)',  type:'num', desc:'Nombre minimum de nuits pour tout sejour couvrant cette date.' },
-      { key:'maxStay',        label:'Max nuits',      type:'num', desc:'Nombre maximum de nuits pour un sejour incluant cette date.' },
-      { key:'cta',            label:'Arrivee',        type:'openclosed', optOpen:'Autorisee', optClosed:'Bloquee', desc:'Autorise ou bloque les arrivees ce jour-la.' },
-      { key:'ctd',            label:'Depart',         type:'openclosed', optOpen:'Autorise', optClosed:'Bloque', desc:'Autorise ou bloque les departs ce jour-la.' },
-      { key:'stopSell',       label:'Stop vente',     type:'openclosed', optOpen:'En vente', optClosed:'Stoppe', desc:'Arrete la vente sur tous les canaux sans modifier la disponibilite reelle.' }
-    ]
-    const ROW_DEFAULTS = { avail:'open', minStayArr:0, minStayThrough:0, maxStay:0, cta:'open', ctd:'open', stopSell:'open' }
+    // PARAMS / ROW_DEFAULTS : deplaces verbatim dans shared/calendar-core.js.
     let pinnedSimple = new Set()
 
     let MONTHS=1, days=[]
-    const dayNames=['DIM','LUN','MAR','MER','JEU','VEN','SAM']
-    const dowOrder=[1,2,3,4,5,6,0]
-    const dowLabels={1:'Lun',2:'Mar',3:'Mer',4:'Jeu',5:'Ven',6:'Sam',0:'Dim'}
-    const monthShort=['jan','fev','mar','avr','mai','juin','juil','aout','sep','oct','nov','dec']
-    const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
-    const fmtShort=(d)=>d.getDate()+' '+monthShort[d.getMonth()]
-    const toISO=(d)=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),j=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+j}
-    const CELL_W=34
+    // Constantes dates (dayNames..CELL_W) : deplacees verbatim dans shared/calendar-core.js.
 
     function buildDays(){
       const t=new Date(); t.setHours(0,0,0,0)
@@ -282,7 +265,7 @@
     let showComplete=false
     const paramLabel=(k)=>(PARAMS.find(p=>p.key===k)||{}).label||k
 
-    function curSym(c){const m={EUR:String.fromCharCode(38)+"euro;",USD:"$",GBP:"&pound;",CHF:"CHF ",CAD:"C$"};return m[(c||"EUR").toUpperCase()]||((c||"EUR")+" ")}
+    // curSym : deplace verbatim dans shared/calendar-core.js.
     function cellDisplay(param,s,bien){
       switch(param){
         case 'rate': return s.rate+curSym(bien.currency)
