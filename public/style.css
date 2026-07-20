@@ -362,17 +362,3 @@ body {
   margin-bottom: 12px;
 }
 .section-header .section-title { margin-bottom: 0; }
-
-/* Carte "ajouter" en fin de grille : meme gabarit qu'une carte bien. */
-.app-card-add {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  border-style: dashed;
-  color: var(--text2);
-  text-decoration: none;
-}
-.app-card-add:hover { border-color: var(--green); color: var(--green); }
-.app-card-add .add-plus { font-size: 22px; line-height: 1; margin-bottom: 6px; }

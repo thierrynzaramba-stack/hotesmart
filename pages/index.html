@@ -102,19 +102,6 @@
     return card
   }
 
-  // Carte d'ajout, toujours en fin de grille : le point d'entree "creer un bien"
-  // reste visible a cote des biens existants, pas seulement dans l'etat vide.
-  function renderAddCard() {
-    const a = document.createElement('a')
-    a.href = '/biens/nouveau'
-    a.className = 'app-card app-card-add'
-    a.innerHTML = `
-      <div class="add-plus">+</div>
-      <div class="app-name">Ajouter un bien</div>
-    `
-    return a
-  }
-
   async function loadProperties() {
     const grid = document.getElementById('properties-grid')
     const status = document.getElementById('status')
@@ -129,8 +116,8 @@
       }
 
       if (!properties.length) {
-        grid.innerHTML = ''
-        grid.appendChild(renderAddCard())
+        // Le bouton "Ajouter un bien" de l'en-tete reste le seul point d'entree.
+        grid.innerHTML = '<div class="app-card"><div class="app-desc">Aucun bien pour le moment.</div></div>'
         status.textContent = 'Aucun bien'
         return
       }
@@ -145,7 +132,6 @@
         // Canaux charges en differe : la carte s'affiche sans attendre Channex.
         hydrateChannelBadges(p, card.querySelector('[data-channels]'))
       }
-      grid.appendChild(renderAddCard())
     } catch (err) {
       logger.error('Dashboard', 'Erreur chargement biens', err)
       grid.innerHTML = '<div class="app-card"><div class="app-desc">Erreur de chargement des biens.</div></div>'
@@ -154,12 +140,16 @@
 
   function renderApps() {
     const grid = document.getElementById('apps-grid')
+    // Pas de ligne de statut ici : elle etait ecrite en dur ("○ Inactif") et
+    // affichait donc Inactif pour toutes les apps, y compris celles utilisees.
+    // `app.active` ne mesure pas l'usage, il dit si l'app est livree (filtre
+    // du catalogue ci-dessous). Un vrai indicateur (plutot "configure / a
+    // parametrer", pour l'onboarding) demandera une source d'usage par app.
     grid.innerHTML = CONFIG.apps.filter(app => app.active !== false).map(app => `
       <a class="app-card" href="/apps/${app.id}">
         <div class="app-icon" style="background:${app.color}">${app.icon}</div>
         <div class="app-name">${app.name}</div>
         <div class="app-desc">Cliquez pour configurer</div>
-        <div class="app-status status-off">○ Inactif</div>
       </a>
     `).join('')
   }
