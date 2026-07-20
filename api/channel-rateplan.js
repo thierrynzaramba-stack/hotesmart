@@ -317,11 +317,34 @@ module.exports = async function handler(req, res) {
       .from('property_channel_rate_plans').update(dbPatch).eq('id', row.id)
     if (upErr) console.error('[channel-rateplan] set_rule DB', upErr.message)
 
+    // MATERIALISATION : le PUT change la config du rate plan mais NE re-pousse PAS l'ARI
+    // par date -> l'enfant garderait sa valeur heritee figee. On force la materialisation.
+    const toLocalISO = (d) => { const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), j = String(d.getDate()).padStart(2, '0'); return `${y}-${m}-${j}` }
+    const start = new Date(); start.setHours(0, 0, 0, 0)
+    const end = new Date(start); end.setDate(end.getDate() + 500)
+    let materialize = null
+    if (hasMinStay) {
+      // Pousse le min stay PROPRE de l'enfant sur l'horizon (rate non touche -> reste derive).
+      const mr = await channelCall('POST', '/restrictions', {
+        values: [{ property_id: providerPropertyId, rate_plan_id: childId, date_from: toLocalISO(start), date_to: toLocalISO(end), min_stay_arrival: minStay, min_stay_through: minStay }]
+      })
+      materialize = { mode: 'child_min_stay', http: mr.status, ok: mr.ok }
+    } else {
+      // Retour a l'heritage : re-pousser la base re-materialise l'enfant (inherit=true).
+      try {
+        const { runFullSync } = require('../lib/channel-fullsync')
+        const { data: bien } = await supabase.from('properties')
+          .select('id, provider_property_id, provider_rate_plan_id, provider_room_type_id, base_price, capacity, included_guests, extra_guest_fee')
+          .eq('id', prop.id).single()
+        const fs = await runFullSync(bien)
+        materialize = { mode: 'base_repush', pushed: fs.pushed, warnings: fs.warnings }
+      } catch (e) { materialize = { mode: 'base_repush', error: e.message } }
+    }
+
     return res.status(200).json({
       ok: true, channel, derived_rate_plan_id: childId,
       applied: { percent: hasPercent ? percent : null, min_stay: hasMinStay ? minStay : 'herite' },
-      db_written: !upErr,
-      channex: w.json?.data?.attributes ? { min_stay_arrival: w.json.data.attributes.min_stay_arrival, inherit_min_stay_arrival: w.json.data.attributes.inherit_min_stay_arrival } : null
+      db_written: !upErr, materialize
     })
   }
 
