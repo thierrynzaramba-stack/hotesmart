@@ -275,10 +275,14 @@ module.exports = async function handler(req, res) {
     // Construit le rate_plan a PUT.
     const rp = {}
     if (hasPercent) {
+      // Channex : increase_by_percent (>=0) OU decrease_by_percent (<0, valeur absolue).
+      // On n'envoie jamais de valeur negative (non garantie par la doc).
+      const op = percent < 0 ? 'decrease_by_percent' : 'increase_by_percent'
+      const val = String(Math.abs(percent))
       rp.inherit_rate = true
       rp.options = (curOpts.length ? curOpts : [{ occupancy: 4, is_primary: true }]).map(o => ({
         occupancy: o.occupancy, is_primary: !!o.is_primary,
-        derived_option: { rate: [['increase_by_percent', String(percent)]] }
+        derived_option: { rate: [[op, val]] }
       }))
     }
     if (hasMinStay) {
@@ -396,6 +400,23 @@ module.exports = async function handler(req, res) {
       mapped_after: mappedAfter,
       ok_switched: mappedAfter.length > 0 && mappedAfter.every(id => id === childId)
     })
+  }
+
+  // --- rules : lecture des regles par canal (service key -> pas de souci RLS UI) ---
+  if (action === 'rules') {
+    const providerPropertyId = (req.query.property_id || '').trim()
+    if (!providerPropertyId) return res.status(400).json({ error: 'property_id requis' })
+    const { data: prop } = await supabase
+      .from('properties').select('id, provider_property_id')
+      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+    if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
+    const { data: rows } = await supabase
+      .from('property_channel_rate_plans')
+      .select('channel, role, provider_rate_plan_id, derive_mode, derive_value, min_stay')
+      .eq('property_id', prop.id)
+    const derived = {}
+    for (const r of rows || []) if (r.role === 'derived') derived[r.channel] = { percent: Number(r.derive_value) || 0, min_stay: r.min_stay }
+    return res.status(200).json({ rules: derived })
   }
 
   // --- raw_channel : GET /channels/:id redacte (diagnostic etat mapping) ---

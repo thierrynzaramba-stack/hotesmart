@@ -47,6 +47,13 @@ function ensureModal() {
     .cx-dot.on { background:var(--green); }
     .cx-dot.off { background:var(--border); border:1px solid var(--text2); box-sizing:border-box; }
     .cx-row .btn { flex-shrink:0; }
+    .cx-rule { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 14px; margin-top:-8px; border:0.5px solid var(--border); border-top:none; border-radius:0 0 var(--radius) var(--radius); background:var(--bg2,#fafafa); font-size:13px; }
+    .cx-rule-f { display:flex; align-items:center; gap:6px; }
+    .cx-rule input { width:66px; padding:6px 8px; border:0.5px solid var(--border); border-radius:6px; font-size:13px; background:var(--bg); color:var(--text); }
+    .cx-rule .btn { padding:6px 12px; }
+    .cx-rule-msg { font-size:12px; }
+    .cx-rule-msg.ok { color:#137333; }
+    .cx-rule-msg.err { color:#C5221F; }
     @media (max-width:768px){ .cx-modal { padding:0 } .cx-modal-box { height:100vh; max-height:none; border-radius:0; max-width:none } }
   `
   document.head.appendChild(style)
@@ -90,9 +97,14 @@ async function render() {
   }
 
   let channels = []
+  let rules = {}
   try {
-    const r = await api.channel.mapping.channels(pid)
-    channels = Array.isArray(r?.channels) ? r.channels : []
+    const [rc, rr] = await Promise.all([
+      api.channel.mapping.channels(pid),
+      api.channel.rateplan.rules(pid).catch(() => ({ rules: {} }))
+    ])
+    channels = Array.isArray(rc?.channels) ? rc.channels : []
+    rules = rr?.rules || {}
   } catch (e) {
     logger.error('connexions', 'channels echec', { e: e.message })
     setBody(`<div class="cx-err">Impossible de charger l'état de vos canaux pour le moment. Réessayez dans un instant.</div>`)
@@ -101,10 +113,52 @@ async function render() {
 
   const airbnb = channels.find(c => /airbnb/i.test(c.ota || '')) || null
   const booking = channels.find(c => /booking/i.test(c.ota || '')) || null
-  renderRows({ airbnb, booking })
+  renderRows({ airbnb, booking, rules })
 }
 
-function renderRows({ airbnb, booking }) {
+// Formulaire de regle par canal (coef prix + min stay). rule = { percent, min_stay } | undefined.
+function ruleForm(channel, rule) {
+  if (!rule) return ''
+  const pct = rule.percent ?? 0
+  const ms = rule.min_stay ?? ''
+  return `
+    <div class="cx-rule" data-ch="${channel}">
+      <div class="cx-rule-f"><label>Prix : base +</label><input class="cx-pct" type="number" step="1" value="${escHtml(pct)}"> %</div>
+      <div class="cx-rule-f"><label>Séjour min.</label><input class="cx-ms" type="number" min="1" value="${escHtml(ms)}" placeholder="hérité"> nuits</div>
+      <button class="btn btn-primary cx-save">Enregistrer</button>
+      <span class="cx-rule-msg"></span>
+    </div>`
+}
+
+async function saveRule(channel, formEl, pid) {
+  const pct = formEl.querySelector('.cx-pct').value
+  const ms = formEl.querySelector('.cx-ms').value
+  const msg = formEl.querySelector('.cx-rule-msg')
+  const btn = formEl.querySelector('.cx-save')
+  btn.disabled = true
+  msg.className = 'cx-rule-msg'
+  msg.textContent = 'Enregistrement…'
+  try {
+    await api.channel.rateplan.setRule(pid, channel, { percent: pct === '' ? 0 : Number(pct), minStay: ms, dryRun: false })
+    // PREUVE : relire la regle appliquee (jamais de faux succes).
+    const rr = await api.channel.rateplan.rules(pid)
+    const applied = rr?.rules?.[channel]
+    if (applied) {
+      formEl.querySelector('.cx-pct').value = applied.percent ?? 0
+      formEl.querySelector('.cx-ms').value = applied.min_stay ?? ''
+    }
+    msg.className = 'cx-rule-msg ok'
+    msg.textContent = '✓ Enregistré'
+  } catch (e) {
+    logger.error('connexions', 'setRule echec', { e: e.message })
+    msg.className = 'cx-rule-msg err'
+    msg.textContent = '✗ Échec — non enregistré'
+  } finally {
+    btn.disabled = false
+  }
+}
+
+function renderRows({ airbnb, booking, rules = {} }) {
   const airbnbConnected = !!airbnb
   const bookingConnected = !!(booking && booking.is_active === true)
   const bookingMappedInactive = !!(booking && booking.is_active !== true)
@@ -124,6 +178,7 @@ function renderRows({ airbnb, booking }) {
         </div>
         <button class="btn ${airbnbConnected ? '' : 'btn-primary'}" id="cx-airbnb">${airbnbConnected ? 'Gérer' : 'Connecter'}</button>
       </div>
+      ${airbnbConnected ? ruleForm('airbnb', rules.airbnb) : ''}
       <div class="cx-row">
         <div class="cx-logo">🅱️</div>
         <div class="cx-info">
@@ -136,12 +191,14 @@ function renderRows({ airbnb, booking }) {
         </div>
         <button class="btn ${bookingConnected || bookingMappedInactive ? '' : 'btn-primary'}" id="cx-booking">${bookingConnected || bookingMappedInactive ? 'Gérer' : 'Connecter'}</button>
       </div>
+      ${(bookingConnected || bookingMappedInactive) ? ruleForm('booking', rules.booking) : ''}
     </div>
   `)
 
   // IMPORTANT : capturer property AVANT close() -> close() fait S=null, donc lire
   // S.property apres fermeture planterait (TypeError: null is not an object).
   const property = S.property
+  const pid = property.provider_property_id
   document.getElementById('cx-airbnb').addEventListener('click', () => {
     close()
     openAirbnbConnect(property, null)
@@ -150,6 +207,10 @@ function renderRows({ airbnb, booking }) {
     const existingChannel = booking ? { id: booking.id, is_active: booking.is_active } : null
     close()
     openBookingConnect(property, null, { existingChannel })
+  })
+  // Boutons Enregistrer des regles (un par formulaire present).
+  document.querySelectorAll('.cx-rule').forEach(formEl => {
+    formEl.querySelector('.cx-save').addEventListener('click', () => saveRule(formEl.dataset.ch, formEl, pid))
   })
 }
 

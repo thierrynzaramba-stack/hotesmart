@@ -128,6 +128,19 @@ export const api = {
         apiCall(`channel-bcom-activate?action=deactivate&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}`, 'GET'),
       ari: (channelId) =>
         apiCall(`channel-bcom-activate?action=ari&channel_id=${encodeURIComponent(channelId)}`, 'GET')
+    },
+    // Rate plans derives par canal (channel-rateplan.js). Regle = coef prix + min stay.
+    rateplan: {
+      rules: (providerPropertyId) =>
+        apiCall(`channel-rateplan?action=rules&property_id=${encodeURIComponent(providerPropertyId)}`, 'GET'),
+      // percent : nombre (0/negatif OK). minStay : entier, '' => retour a l'heritage base.
+      setRule: (providerPropertyId, channel, { percent, minStay, dryRun = false } = {}) => {
+        let u = `channel-rateplan?action=set_rule&property_id=${encodeURIComponent(providerPropertyId)}`
+          + `&channel=${encodeURIComponent(channel)}&dry_run=${dryRun}`
+        if (percent != null && percent !== '') u += `&percent=${encodeURIComponent(percent)}`
+        if (minStay != null && minStay !== '') u += `&min_stay=${encodeURIComponent(minStay)}`
+        return apiCall(u, 'GET')
+      }
     }
   },
   calendar: {
