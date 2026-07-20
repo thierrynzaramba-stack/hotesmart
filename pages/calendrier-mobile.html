@@ -101,13 +101,32 @@
     .btn-close { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 12px; padding: 15px 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
     .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120%); background: #1d1d1f; color: #fff; padding: 13px 20px; border-radius: 12px; font-size: 14px; z-index: 200; transition: transform 0.25s; max-width: 90%; text-align: center; }
     .toast.visible { transform: translateX(-50%) translateY(0); }
+    .menu-btn { background:#f0f0f0; border:none; border-radius:10px; width:40px; height:40px; font-size:20px; cursor:pointer; color:#1d1d1f; line-height:1; }
+    .m-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; z-index:60; }
+    .m-overlay.open { display:block; }
+    .m-menu { position:fixed; top:0; left:0; bottom:0; width:78%; max-width:300px; background:#fff; z-index:61; transform:translateX(-100%); transition:transform .22s ease; padding:calc(env(safe-area-inset-top) + 16px) 14px 16px; display:flex; flex-direction:column; gap:2px; box-shadow:2px 0 20px rgba(0,0,0,0.15); }
+    .m-menu.open { transform:translateX(0); }
+    .m-menu .m-title { font-size:13px; color:#86868b; padding:8px 12px 8px; }
+    .m-menu a, .m-menu .m-item { display:flex; align-items:center; gap:12px; padding:14px 12px; border-radius:10px; text-decoration:none; color:#1d1d1f; font-size:16px; font-weight:500; cursor:pointer; }
+    .m-menu a:active, .m-menu .m-item:active { background:#f0f0f0; }
   </style>
 </head>
 <body>
-  <div class="sidebar" id="sidebar"></div>
+  <div class="m-overlay" id="m-overlay"></div>
+  <nav class="m-menu" id="m-menu">
+    <div class="m-title">Menu</div>
+    <a href="/">&#8962; Accueil</a>
+    <a href="/biens">&#127968; Mes biens</a>
+    <a href="/apps/agent-ai/messagerie">&#128172; Messages</a>
+    <a href="/guide">&#128214; Guide</a>
+    <div class="m-item" id="m-signout">&#8617; D&eacute;connexion</div>
+  </nav>
   <div class="topbar">
     <div class="topbar-row">
-      <span style="font-weight:700;font-size:16px">Tarifs</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="menu-btn" id="menu-btn" aria-label="Menu">&#9776;</button>
+        <span style="font-weight:700;font-size:16px">Tarifs</span>
+      </div>
       <button class="undo-btn" id="btn-undo" disabled>&#8634;</button>
     </div>
     <div class="selectors">
@@ -150,13 +169,23 @@
 
   <script type="module">
     import { requireAuth } from '/components/auth-guard.js'
-    import { renderSidebar } from '/components/sidebar.js'
+    import { signOut } from '/shared/supabase.js'
     import { api } from '/shared/api-client.js'
     import { loadCalendarData } from '/shared/calendar-core.js'
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifie')
-    await renderSidebar('biens-calendrier')
     if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('/sw.js') } catch(e){} }
+
+    // Menu mobile (☰) : remplace la sidebar desktop (non stylee ici). Nav secondaire.
+    ;(function initMobileMenu(){
+      const btn=document.getElementById('menu-btn'), menu=document.getElementById('m-menu'), ov=document.getElementById('m-overlay')
+      if(!btn||!menu||!ov) return
+      const set=(open)=>{ menu.classList.toggle('open',open); ov.classList.toggle('open',open) }
+      btn.addEventListener('click',()=>set(!menu.classList.contains('open')))
+      ov.addEventListener('click',()=>set(false))
+      const so=document.getElementById('m-signout')
+      if(so) so.addEventListener('click',async()=>{ try{ await signOut() }catch(e){} window.location.href='/' })
+    })()
 
     const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
     const toISO=(d)=>{ const z=new Date(d.getTime()-d.getTimezoneOffset()*60000); return z.toISOString().slice(0,10) }
