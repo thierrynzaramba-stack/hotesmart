@@ -1,8 +1,8 @@
 // shared/calendar-core.js
-// Coeur partage du calendrier (desktop + mobile). Extraction ISO-COMPORTEMENT :
-// primitives PURES uniquement (aucun DOM, aucun etat module, aucun effet de bord).
-// Le chargement / la sauvegarde ARI seront ajoutes en etapes ulterieures, verifies un
-// par un — le chemin de sauvegarde Base (qui pousse les prix reels) ne doit pas changer.
+// Coeur partage du calendrier (desktop + mobile). Extraction ISO-COMPORTEMENT.
+// Primitives pures + chargement (loadCalendarData). La SAUVEGARDE reste dans chaque
+// vue pour l'instant (chemin qui pousse les prix reels) et sera extraite en dernier.
+import { api } from '/shared/api-client.js'
 
 // --- Constantes de dates / grille ---
 export const CELL_W = 34
@@ -73,4 +73,20 @@ export function configuredRowParams(selectedBiens, states) {
   const setp = new Set()
   selectedBiens.forEach(bid => { const st = states[bid]; if (!st) return; st.forEach(s => { for (const k in ROW_DEFAULTS) { if (s[k] !== ROW_DEFAULTS[k]) setp.add(k) } }) })
   return setp
+}
+
+// --- Chargement (api.calendar.load) + normalisation. Logique VERBATIM de reloadInventory.
+// Retourne des donnees BRUTES ; l'application a l'etat (invByBien/ppConfig/resa) et le
+// rendu restent dans chaque vue. propsById.base = Number(base_price) (le fallback ||bb.base
+// est applique cote vue, comme avant).
+export async function loadCalendarData(selectedBiens, start, end) {
+  const r = await api.calendar.load(selectedBiens, start, end)
+  const inv = {}
+  selectedBiens.forEach(id => { inv[id] = (r && r.inventory && r.inventory[id]) || {} })
+  const pp = {}, propsById = {}
+  if (r && r.properties) r.properties.forEach(p => {
+    pp[p.id] = { included: p.included_guests || p.capacity || 1, extraFee: Number(p.extra_guest_fee) || 0 }
+    propsById[p.id] = { base: Number(p.base_price), included: pp[p.id].included, extraFee: pp[p.id].extraFee }
+  })
+  return { inv, pp, propsById, bookings: (r && r.bookings) || null }
 }

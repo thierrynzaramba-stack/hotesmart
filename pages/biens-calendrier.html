@@ -175,7 +175,7 @@
     import { requireAuth }   from '/components/auth-guard.js'
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
-    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams } from '/shared/calendar-core.js'
+    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -520,11 +520,11 @@
       if(!selectedBiens.length){ renderBlocks(); return }
       const {start,end}=rangeISO()
       try{
-        const r=await api.calendar.load(selectedBiens, start, end)
-        ;(selectedBiens).forEach(id=>{ invByBien[id]=(r.inventory&&r.inventory[id])||{} })
-        if(r.bookings){ BIENS.forEach(b=>{ if(r.bookings[b.id]) b.resa=mapResa(r.bookings[b.id]) }) }
-        if(r.properties){ r.properties.forEach(p=>{ ppConfig[p.id]={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}
-          const bb=BIENS.find(x=>x.id===p.id); if(bb){ bb.base=Number(p.base_price)||bb.base; bb.included=ppConfig[p.id].included; bb.extraFee=ppConfig[p.id].extraFee } }) }
+        const {inv,pp,propsById,bookings}=await loadCalendarData(selectedBiens, start, end)
+        ;(selectedBiens).forEach(id=>{ invByBien[id]=inv[id] })
+        if(bookings){ BIENS.forEach(b=>{ if(bookings[b.id]) b.resa=mapResa(bookings[b.id]) }) }
+        for(const id in pp){ ppConfig[id]=pp[id]
+          const bb=BIENS.find(x=>x.id===id); if(bb){ bb.base=propsById[id].base||bb.base; bb.included=pp[id].included; bb.extraFee=pp[id].extraFee } }
       }catch(e){ showToast('Erreur chargement calendrier') }
       Object.keys(states).forEach(k=>delete states[k])
       renderBlocks()
