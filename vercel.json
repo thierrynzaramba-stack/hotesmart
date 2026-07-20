@@ -41,10 +41,6 @@
       "destination": "/apps/sms/index"
     },
     {
-      "source": "/apps",
-      "destination": "/pages/apps"
-    },
-    {
       "source": "/settings",
       "destination": "/pages/settings"
     },
@@ -78,15 +74,11 @@
     },
     {
       "source": "/apps/agent-ai",
-      "destination": "/apps/agent-ai/index"
+      "destination": "/apps/agent-ai/config"
     },
     {
       "source": "/apps/agent-ai/knowledge",
       "destination": "/apps/agent-ai/knowledge"
-    },
-    {
-      "source": "/apps/agent-ai/test",
-      "destination": "/apps/agent-ai/test"
     },
     {
       "source": "/apps/agent-ai/config",
