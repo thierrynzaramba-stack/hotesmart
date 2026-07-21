@@ -45,11 +45,10 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-icon">⚡</span>
         <span class="nav-label">Connexions</span>
       </a>
-      ${renderApiItem('Beds24',           apiStatus.beds24, null)}
+      ${renderApiItem('Beds24',           apiStatus.beds24, '/connexions')}
       ${renderApiItem('Booking & Airbnb', apiStatus.ota,    '/connexions')}
       ${renderApiItem('Seam Serrures',    apiStatus.seam,   '/apps/serrures')}
-      ${renderApiItem('Brevo SMS',        apiStatus.brevo,  null)}
-      ${renderApiItem('Stripe',           apiStatus.stripe, null)}
+      ${renderApiItem('Brevo SMS',        apiStatus.brevo,  '/connexions')}
 
       <div class="nav-section-label">Compte</div>
       <a class="nav-item ${activePage === 'compte' ? 'active' : ''}" href="/pages/compte.html">
@@ -238,7 +237,7 @@ async function getApiStatus(user) {
   try {
     const { data } = await supabase
       .from('api_keys')
-      .select('api_key, seam_api_key, seam_enabled')
+      .select('api_key, seam_api_key, seam_enabled, brevo_api_key, brevo_enabled')
       .eq('user_id', user.id)
       .maybeSingle()
 
@@ -282,7 +281,7 @@ async function getApiStatus(user) {
       beds24: !!data?.api_key,
       ota:    otaActive,
       seam:   !!(data?.seam_api_key && data?.seam_enabled !== false),
-      brevo:  true,
+      brevo:  !!(data?.brevo_api_key && data?.brevo_enabled === true),
       stripe: stripeActive,
       plan:   plan,
       firstPropertyId
