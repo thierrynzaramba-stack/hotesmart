@@ -58,6 +58,11 @@
     .ob-btn-ghost:hover { color: var(--text); }
     .ob-skip { font-size: 14px; color: var(--text-muted); background: none; border: none; cursor: pointer; text-decoration: underline; font-family: inherit; }
     .ob-skip:hover { color: var(--text); }
+    .ob-choice-primary { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; background: var(--primary); color: #fff; border: none; border-radius: 14px; padding: 20px; cursor: pointer; margin-bottom: 14px; font-family: inherit; }
+    .ob-choice-primary .ch-title { font-size: 17px; font-weight: 600; }
+    .ob-choice-primary .ch-sub { font-size: 13px; opacity: 0.92; line-height: 1.5; }
+    .ob-choice-secondary { width: 100%; text-align: left; background: none; border: 1px solid var(--border); border-radius: 12px; padding: 14px 20px; cursor: pointer; font-size: 14px; color: var(--text); font-family: inherit; }
+    .ob-choice-secondary:hover { border-color: var(--text-muted); }
     .ob-error { background: #fee; color: #c0392b; padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
     .ob-empty { padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 14px; font-style: italic; }
     @media (max-width: 640px) {
@@ -156,7 +161,11 @@
 <div class="ob-shell">
   <header class="ob-header">
     <div class="ob-logo">HôteSmart</div>
-    <a href="#" class="ob-logout" id="logout-link">Se déconnecter</a>
+    <div style="display:flex; align-items:center; gap:18px;">
+      <button class="ob-skip" id="skip-step-link" style="display:none;">Passer cette étape</button>
+      <a href="#" class="ob-logout" id="quit-link">Quitter</a>
+      <a href="#" class="ob-logout" id="logout-link">Se déconnecter</a>
+    </div>
   </header>
 
   <div class="ob-step-label" id="step-label">Étape 1 sur 8</div>
@@ -296,6 +305,10 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
   function renderStep() {
     renderStepper();
+    // "Passer cette étape" (header) : uniquement sur les étapes FACULTATIVES (3 serrures,
+    // 4 agent IA, 5 SMS). Jamais sur PMS/biens (obligatoires) ni intro/finales.
+    const skipLink = document.getElementById('skip-step-link');
+    if (skipLink) skipLink.style.display = [3, 4, 5].indexOf(currentStep) !== -1 ? '' : 'none';
     content.innerHTML = '';
     const fn = steps[currentStep] || renderUnknown;
     fn(content);
@@ -350,118 +363,38 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   }
 
   function renderStep1Placeholder(c) {
-    const providers = [
-      { id: 'beds24',    label: 'Beds24'    },
-      { id: 'smoobu',    label: 'Smoobu'    },
-      { id: 'hostaway',  label: 'Hostaway'  },
-      { id: 'lodgify',   label: 'Lodgify'   },
-      { id: 'superhote', label: 'SuperHote' },
-      { id: 'autre',     label: 'Autre'     }
-    ];
+    c.innerHTML = [
+      '<h2>Comment gérez-vous vos réservations ?</h2>',
+      '<p class="lead">Deux façons de démarrer, selon votre situation.</p>',
+      '<button class="ob-choice-primary" id="ch-direct">',
+      '<span class="ch-title">Enregistrer mes annonces Airbnb et Booking</span>',
+      '<span class="ch-sub">Vous gérez vos annonces vous-même, sans logiciel de gestion. Indiquez-nous vos annonces : nous connectons pour vous vos réservations, vos messages et votre calendrier.</span>',
+      '</button>',
+      '<button class="ob-choice-secondary" id="ch-cm">J\'utilise déjà un channel manager</button>',
+      '<div class="ob-actions"><button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button><span></span></div>'
+    ].join('');
 
-    let selected = stepData.channel_manager || null;
-    let customName = stepData.channel_manager_custom || '';
-
-    function render() {
-      const optionsHtml = providers.map(function (p) {
-        const isSel = selected === p.id;
-        return '<div class="ob-option' + (isSel ? ' selected' : '') + '" data-id="' + p.id + '">' + p.label + '</div>';
-      }).join('');
-
-      const customField = (selected === 'autre')
-        ? '<div class="ob-field" style="margin-top:20px;"><label>Précisez le nom de votre channel manager</label><input type="text" id="cm-custom" placeholder="Ex: Hostify, Guesty..." value="' + customName.replace(/"/g, '&quot;') + '"></div>'
-        : '';
-
-      const nextDisabled = !selected || (selected === 'autre' && !customName.trim());
-
-      c.innerHTML = [
-        '<h2>Votre channel manager</h2>',
-        '<p class="lead">Sur quelle plateforme gérez-vous vos réservations ?</p>',
-        '<div class="ob-options">', optionsHtml, '</div>',
-        customField,
-        '<div class="ob-actions">',
-        '<span></span>',
-        '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>Suivant →</button>',
-        '</div>'
-      ].join('');
-
-      // Click sur option
-      c.querySelectorAll('.ob-option').forEach(function (el) {
-        el.onclick = function () {
-          selected = el.getAttribute('data-id');
-          render();
-        };
-      });
-
-      // Input custom
-      const customInput = document.getElementById('cm-custom');
-      if (customInput) {
-        customInput.oninput = function () {
-          customName = customInput.value;
-          // Mettre à jour l'état disabled sans tout re-rendre (perdre le focus)
-          document.getElementById('btn-next').disabled = !customName.trim();
-        };
+    document.getElementById('ch-direct').onclick = async function () {
+      const btn = document.getElementById('ch-direct');
+      btn.disabled = true;
+      // channel_manager 'channex' = interne (jamais montre a l'hote). Route le parcours
+      // "Mes biens" [0,1,8,3,9]. Concierge beta : provisioning manuel via integration_requests.
+      await saveState({ channel_manager: 'channex' });
+      if (!stepData.cm_request_id) {
+        const { data: ins } = await supabase.from('integration_requests').insert({
+          user_id: user.id, type: 'channel_manager', provider_name: 'Airbnb + Booking (direct)', status: 'pending'
+        }).select().single();
+        if (ins) await saveState({ cm_request_id: ins.id });
       }
+      goToStep(getNextStep(1));
+    };
 
-      // Bouton Suivant
-      document.getElementById('btn-next').onclick = async function () {
-        if (!selected) return;
-        if (selected === 'autre' && !customName.trim()) return;
+    document.getElementById('ch-cm').onclick = async function () {
+      await saveState({ channel_manager: 'beds24' });
+      goToStep(getNextStep(1));
+    };
 
-        const btn = document.getElementById('btn-next');
-        btn.disabled = true;
-        btn.textContent = 'Enregistrement…';
-
-        // Cas Beds24 : parcours complet, on passe à l'étape 2 (clés API)
-        if (selected === 'beds24') {
-          await saveState({ channel_manager: 'beds24' });
-          goToStep(getNextStep(1));
-          return;
-        }
-
-        // Cas autre CM : on enregistre la demande d'intégration et on continue
-        // vers l'étape serrures (3) pour collecter aussi la marque de serrures.
-        // L'écran "merci" sera affiché par l'étape 3 quand CM ≠ beds24.
-        const providerName = (selected === 'autre') ? customName.trim() : providers.find(function (p) { return p.id === selected; }).label;
-
-        let requestId = stepData.cm_request_id;
-        if (requestId) {
-          await supabase
-            .from('integration_requests')
-            .update({ provider_name: providerName })
-            .eq('id', requestId)
-            .eq('user_id', user.id);
-        } else {
-          const { data: inserted, error: insErr } = await supabase
-            .from('integration_requests')
-            .insert({
-              user_id: user.id,
-              type: 'channel_manager',
-              provider_name: providerName,
-              status: 'pending'
-            })
-            .select()
-            .single();
-          if (insErr) {
-            console.error('[onboarding] integration_request insert failed:', insErr);
-            btn.disabled = false;
-            btn.textContent = 'Suivant →';
-            return;
-          }
-          requestId = inserted.id;
-        }
-
-        await saveState({
-          channel_manager: selected,
-          channel_manager_custom: customName,
-          cm_request_id: requestId
-        });
-
-        goToStep(getNextStep(1));
-      };
-    }
-
-    render();
+    document.getElementById('btn-back').onclick = function () { goToStep(0); };
   }
 
   function renderWaitingScreen() {
@@ -804,7 +737,6 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         '<div class="ob-actions">',
         '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
         '<div style="display:flex; gap:16px; align-items:center;">',
-        (cm === 'beds24' ? '<button class="ob-skip" id="btn-skip">Passer cette étape</button>' : ''),
         '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>' + nextLabel + '</button>',
         '</div></div>'
       ].join('');
@@ -833,14 +765,6 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         if (idx > 0) goToStep(p[idx - 1]);
       };
 
-      // Bouton Passer : équivalent à "Aucune", seulement présent si Beds24
-      const skipBtn = document.getElementById('btn-skip');
-      if (skipBtn) {
-        skipBtn.onclick = async function () {
-          await saveState({ smart_lock: 'none', smart_lock_custom: '' });
-          await proceedFromStep3();
-        };
-      }
 
       // Bouton Suivant / Terminer
       document.getElementById('btn-next').onclick = async function () {
@@ -1471,6 +1395,10 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   // ====================================================================
   // Étape 8 — Mes biens (parcours non-Beds24 uniquement)
   // ====================================================================
+  // TODO (post-beta, option B) : rendre ce parcours SELF-SERVICE au lieu de collecter
+  // des URLs pour provisioning manuel. Brancher sur channel-property (createProperty) +
+  // l'ecran Connexions et les assistants Airbnb (OAuth) / Booking deja construits.
+  // Beta : concierge (5-10 hotes provisionnes a la main via integration_requests).
   function renderStep8MesBiens(c) {
     let count = Number(stepData.properties_count) || 1;
     let urls = Array.isArray(stepData.properties_urls) ? stepData.properties_urls.slice() : [];
@@ -1695,6 +1623,20 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     e.preventDefault();
     sessionStorage.clear();
     await signOut();
+  };
+
+  // Quitter : ferme le wizard, retour accueil, avancement conservé (saveState persiste
+  // current_step ; l'onboarding restant facultatif, le bandeau invitera a reprendre).
+  document.getElementById('quit-link').onclick = async function (e) {
+    e.preventDefault();
+    try { await saveState(); } catch (err) {}
+    window.location.href = '/';
+  };
+
+  // Passer cette étape (facultatives 3/4/5) : avance sans enregistrer de donnée d'étape.
+  document.getElementById('skip-step-link').onclick = function (e) {
+    e.preventDefault();
+    goToStep(getNextStep(currentStep));
   };
 
   renderStep();
