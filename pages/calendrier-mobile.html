@@ -256,7 +256,16 @@
         else { const now=new Date(); viewYear=now.getFullYear(); viewMonth=now.getMonth() }
         await loadMonth()
       }
-      else { document.getElementById('grid').innerHTML='<div class="loading">Aucun bien</div>' }
+      else {
+        // Aucun bien connecte -> etat vide explicite (meme modele que desktop).
+        const m=document.querySelector('main')
+        if(m) m.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:40px 20px;color:#6e6e73">
+          <div style="font-size:40px;margin-bottom:14px">&#128197;</div>
+          <h2 style="font-size:17px;color:#1d1d1f;margin-bottom:8px">Votre calendrier apparaîtra ici</h2>
+          <p style="font-size:14px;max-width:440px;margin-bottom:24px;line-height:1.5">Une fois votre PMS connecté, vous piloterez ici les tarifs, les disponibilités et le séjour minimum de chaque logement, avec vos réservations.</p>
+          <a href="/pages/onboarding.html" style="display:inline-block;background:#007aff;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px">Connecter mon logement</a>
+        </div>`
+      }
     }
     document.getElementById('bien-select').addEventListener('change', async e=>{ currentBien=BIENS.find(b=>b.id===e.target.value); savePrefs(); await loadMonth() })
 
