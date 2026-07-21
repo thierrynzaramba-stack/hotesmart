@@ -223,7 +223,8 @@ module.exports = async function handler(req, res) {
       const tablesWithUser = [
         'bookings_snapshot', 'conversations', 'agent_tasks', 'message_templates',
         'knowledge', 'property_status', 'messages',
-        'menage_events', 'menage_comments', 'menage_done', 'agent_prompting', 'public_tokens'
+        'menage_events', 'menage_comments', 'menage_done', 'agent_prompting', 'public_tokens',
+        'sms_logs'
       ]
       for (const t of tablesWithUser) {
         const { error: delErr } = await supabase.from(t).delete()
@@ -231,7 +232,7 @@ module.exports = async function handler(req, res) {
         if (delErr) console.error(`[channel-property] purge ${t} echec`, delErr.message)
       }
       // Groupe SANS colonne user_id : filtre property_id seul.
-      const tablesNoUser = ['access_codes', 'calendar_inventory', 'channel_sync_queue', 'sms_logs']
+      const tablesNoUser = ['access_codes', 'calendar_inventory', 'channel_sync_queue']
       for (const t of tablesNoUser) {
         const { error: delErr } = await supabase.from(t).delete().eq('property_id', propKey)
         if (delErr) console.error(`[channel-property] purge ${t} echec`, delErr.message)
