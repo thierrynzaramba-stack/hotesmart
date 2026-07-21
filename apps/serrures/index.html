@@ -298,7 +298,12 @@
   function renderLocks(locks) {
     const container = document.getElementById('locks-container')
     if (!locks.length) {
-      container.innerHTML = '<div class="empty-state">Aucune serrure connectée — configurez vos serrures dans la console Seam</div>'
+      container.innerHTML = `<div class="empty-state" style="max-width:460px;margin:0 auto;line-height:1.6">
+        <div style="font-size:40px;margin-bottom:12px">&#128274;</div>
+        <h2 style="font-size:17px;color:var(--text);margin-bottom:8px">Serrures connectées — module optionnel</h2>
+        <p style="font-size:14px;margin-bottom:20px">Reliez vos serrures (Nuki, Yale, Igloo, August…) pour générer et envoyer automatiquement un code d'accès à chaque réservation. Ce module est facultatif : HôteSmart fonctionne très bien sans.</p>
+        <button onclick="switchTab('config')" style="background:#007aff;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer">Configurer Seam</button>
+      </div>`
       return
     }
 
