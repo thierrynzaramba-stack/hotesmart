@@ -3,13 +3,15 @@
 // Refactoring Session #6 : logique éclatée en modules lib/cron-*.js
 // Session #14 : ajout du poll de secours du feed Channex (filet webhook).
 // Session #24 : rattrapage de l'import messages post-activation (fenêtre 30 min).
+// Session #25 : retrait de checkPendingMessages (file message_sent_log inexistante,
+//   erreur 42703 récurrente ; le report est géré par les templates + menage_done).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
 const { detectBookingChanges } = require('../lib/cron-bookings')
 const { processMessageTemplates } = require('../lib/cron-messages')
 const { processProperty } = require('../lib/cron-classify')
-const { checkPendingMessages, checkBatteries } = require('../lib/cron-access')
+const { checkBatteries } = require('../lib/cron-access')
 const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
@@ -93,12 +95,6 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur batterie:', err.message)
       results.errors.push({ context: 'battery_check', error: err.message })
-    }
-
-    try { await checkPendingMessages(results) }
-    catch (err) {
-      console.error('[Cron] Erreur pending messages:', err.message)
-      results.errors.push({ context: 'pending_messages', error: err.message })
     }
 
     // Poll de secours Channex : rattrape les réservations dont le webhook
