@@ -11,6 +11,7 @@
 
 import { api } from '/shared/api-client.js'
 import { logger } from '/shared/logger.js'
+import { supabase, getUser } from '/shared/supabase.js'
 
 export function escapeHtml(s) {
   if (s == null) return ''
@@ -37,8 +38,27 @@ async function fetchChannelProperties() {
 // Renvoie { properties, beds24Failed, channelFailed, allFailed } — allFailed
 // permet a l'appelant de distinguer "aucun bien" d'un "chargement casse".
 export async function loadAllProperties() {
+  // Beds24 n'est interroge QUE s'il est configure (api_keys.api_key existe). Onboarding
+  // facultatif : un hote sans PMS ne doit pas declencher /api/beds24 (400 sans cle).
+  // En cas de doute (check en erreur), on appelle quand meme -> ne jamais amputer un
+  // hote Beds24 reel (ses biens ne remontent que par cette voie, filtres cote channel).
+  let beds24Configured = true
+  try {
+    const user = await getUser()
+    if (!user) {
+      beds24Configured = false
+    } else {
+      const { data: keyRow } = await supabase
+        .from('api_keys').select('api_key').eq('user_id', user.id).maybeSingle()
+      beds24Configured = !!keyRow?.api_key
+    }
+  } catch (e) {
+    logger.error('properties', 'beds24 config check echec: ' + (e?.message || e))
+    beds24Configured = true
+  }
+
   const [beds24Res, channelRes] = await Promise.allSettled([
-    fetchBeds24Properties(),
+    beds24Configured ? fetchBeds24Properties() : Promise.resolve([]),
     fetchChannelProperties()
   ])
 
