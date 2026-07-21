@@ -44,8 +44,9 @@ async function sendSms(to, message, property_id = null, context = null, ownerUse
     return { success: false, error: configError };
   }
 
-  // Numéro invalide → pas d'appel Brevo (comportement historique : pas de log)
+  // Numéro invalide → pas d'appel Brevo, mais on trace l'échec
   if (!normalized) {
+    await logSms({ to_number: String(to), message, property_id, context, status: 'error', error: `Numéro invalide : ${to}` });
     return { success: false, error: `Numéro invalide : ${to}` };
   }
 
@@ -108,25 +109,28 @@ async function logSms({ to_number, message, property_id = null, context = null, 
 }
 
 /**
- * Normalise un numéro français vers le format E.164 (+33XXXXXXXXX)
+ * Normalise un numéro vers E.164 strict (+CC…). Gère les séparateurs
+ * (espaces, points, tirets, parenthèses) et le national français 0X…→+33.
+ * Renvoie null si le résultat n'est pas un E.164 valide (rejet avant envoi).
  */
 function normalizePhone(phone) {
   if (!phone) return null;
-  let p = phone.replace(/[\s.\-()]/g, '');
 
-  // Déjà au format international
-  if (p.startsWith('+')) return p;
+  // Ne garde que les chiffres et un éventuel +
+  let p = String(phone).replace(/[^\d+]/g, '');
 
-  // Format 0033...
-  if (p.startsWith('0033')) return '+33' + p.slice(4);
+  // Préfixe international 00… → +… (ex. 0033 → +33)
+  if (p.startsWith('00')) p = '+' + p.slice(2);
 
-  // Format 06/07...
-  if (p.startsWith('0') && p.length === 10) return '+33' + p.slice(1);
+  // National français 0X XX XX XX XX (10 chiffres commençant par 0) → +33XXXXXXXXX
+  if (/^0\d{9}$/.test(p)) p = '+33' + p.slice(1);
+  // Mobile sans indicatif ni 0 (6/7 + 8 chiffres) → +33
+  else if (/^[67]\d{8}$/.test(p)) p = '+33' + p;
 
-  // Format sans indicatif (6XXXXXXXX)
-  if (p.length === 9 && (p.startsWith('6') || p.startsWith('7'))) return '+33' + p;
+  // Validation E.164 : + suivi d'un indicatif non nul, 8 à 15 chiffres au total
+  if (!/^\+[1-9]\d{7,14}$/.test(p)) return null;
 
-  return null;
+  return p;
 }
 
 // ─── Handler Vercel ───────────────────────────────────────────────────────────
