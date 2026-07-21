@@ -172,9 +172,11 @@
     import { signOut } from '/shared/supabase.js'
     import { api } from '/shared/api-client.js'
     import { loadCalendarData } from '/shared/calendar-core.js'
+    import { renderOnboardingBanner } from '/components/onboarding-banner.js'
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifie')
     if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('/sw.js') } catch(e){} }
+    renderOnboardingBanner().catch(()=>{})
 
     // Menu mobile (☰) : remplace la sidebar desktop (non stylee ici). Nav secondaire.
     ;(function initMobileMenu(){
