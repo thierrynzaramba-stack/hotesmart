@@ -145,8 +145,24 @@ module.exports = async (req, res) => {
     user = data?.user;
   }
 
-  // GET /api/sms → historique des logs
+  // GET /api/sms → config Brevo (action=config) OU historique des logs
   if (req.method === 'GET') {
+    const { action } = req.query;
+
+    // Statut de configuration Brevo du propriétaire
+    if (action === 'config') {
+      if (!user) return res.status(401).json({ error: 'Non autorisé' });
+      const { data } = await supabase
+        .from('api_keys')
+        .select('brevo_api_key, brevo_enabled')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      return res.status(200).json({
+        configured: !!data?.brevo_api_key,
+        enabled:    data?.brevo_enabled === true
+      });
+    }
+
     const { property_id, limit = 50 } = req.query;
     let query = supabase
       .from('sms_logs')
@@ -161,11 +177,38 @@ module.exports = async (req, res) => {
     return res.status(200).json({ logs: data });
   }
 
-  // POST /api/sms → envoi SMS
+  // POST /api/sms → config Brevo (saveConfig/toggleConfig) OU envoi SMS
   if (req.method === 'POST') {
     if (!user) return res.status(401).json({ error: 'Non autorisé' });
 
-    const { to, message, property_id, context } = req.body || {};
+    const body = req.body || {};
+    const { action } = body;
+
+    // Enregistrer la clé Brevo du propriétaire.
+    // upsert onConflict:'user_id' : un hôte Channex sans ligne api_keys peut créer sa ligne.
+    if (action === 'saveConfig') {
+      const { apiKey } = body;
+      if (!apiKey) return res.status(400).json({ error: 'Clé API requise' });
+      const { error } = await supabase.from('api_keys').upsert(
+        { user_id: user.id, brevo_api_key: apiKey, brevo_enabled: true },
+        { onConflict: 'user_id' }
+      );
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ success: true });
+    }
+
+    // Activer / désactiver l'envoi SMS
+    if (action === 'toggleConfig') {
+      const { enabled } = body;
+      const { error } = await supabase.from('api_keys')
+        .update({ brevo_enabled: enabled === true })
+        .eq('user_id', user.id);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ success: true });
+    }
+
+    // Envoi SMS (action 'send' ou appel legacy sans action)
+    const { to, message, property_id, context } = body;
 
     if (!to || !message) {
       return res.status(400).json({ error: 'Paramètres manquants : to, message requis' });
