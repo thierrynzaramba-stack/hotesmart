@@ -40,13 +40,13 @@ async function sendSms(to, message, property_id = null, context = null, ownerUse
 
   // Non configuré / désactivé → log en base (status error) puis sortie
   if (configError) {
-    await logSms({ to_number: normalized || to, message, property_id, context, status: 'error', error: configError });
+    await logSms({ to_number: normalized || to, message, property_id, context, status: 'error', error: configError, user_id: ownerUserId });
     return { success: false, error: configError };
   }
 
   // Numéro invalide → pas d'appel Brevo, mais on trace l'échec
   if (!normalized) {
-    await logSms({ to_number: String(to), message, property_id, context, status: 'error', error: `Numéro invalide : ${to}` });
+    await logSms({ to_number: String(to), message, property_id, context, status: 'error', error: `Numéro invalide : ${to}`, user_id: ownerUserId });
     return { success: false, error: `Numéro invalide : ${to}` };
   }
 
@@ -83,7 +83,7 @@ async function sendSms(to, message, property_id = null, context = null, ownerUse
     errorMsg = err.message;
   }
 
-  await logSms({ to_number: normalized, message, property_id, context, status, error: errorMsg, twilio_sid: messageId });
+  await logSms({ to_number: normalized, message, property_id, context, status, error: errorMsg, twilio_sid: messageId, user_id: ownerUserId });
 
   if (status === 'error') {
     return { success: false, error: errorMsg };
@@ -95,7 +95,7 @@ async function sendSms(to, message, property_id = null, context = null, ownerUse
 /**
  * Insert d'un enregistrement dans sms_logs.
  */
-async function logSms({ to_number, message, property_id = null, context = null, status, error = null, twilio_sid = null }) {
+async function logSms({ to_number, message, property_id = null, context = null, status, error = null, twilio_sid = null, user_id = null }) {
   await supabase.from('sms_logs').insert({
     to_number,
     message,
@@ -104,7 +104,8 @@ async function logSms({ to_number, message, property_id = null, context = null, 
     twilio_sid,
     property_id,
     context,
-    error
+    error,
+    user_id
   });
 }
 
@@ -167,10 +168,14 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Historique : cloisonné par hôte (numéros voyageurs = données réelles)
+    if (!user) return res.status(401).json({ error: 'Non autorisé' });
+
     const { property_id, limit = 50 } = req.query;
     let query = supabase
       .from('sms_logs')
       .select('*')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(parseInt(limit));
 
