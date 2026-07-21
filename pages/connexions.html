@@ -32,6 +32,17 @@
     .coming-soon { opacity:0.5; pointer-events:none; }
     .api-actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
 
+    /* ── Brevo SMS ── */
+    .brevo-context { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; font-size:12px; color:var(--text2); line-height:1.6; margin-bottom:18px; }
+    .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:16px; border-top:0.5px solid var(--border); }
+    .toggle-label { font-size:13px; color:var(--text2); }
+    .toggle { position:relative; width:44px; height:24px; flex-shrink:0; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:#ccc; border-radius:24px; cursor:pointer; transition:0.2s; }
+    .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
+    input:checked + .toggle-slider { background:var(--green); }
+    input:checked + .toggle-slider:before { transform:translateX(20px); }
+
     /* ── Plateformes OTA ── */
     .ota-prop-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:0.5px solid var(--border); }
     .ota-prop-row:last-child { border-bottom:none; }
@@ -120,6 +131,64 @@
         </div>
       </div>
 
+      <!-- Brevo SMS (par hôte : chaque hôte connecte son propre compte Brevo) -->
+      <div class="api-card" id="card-brevo">
+        <div class="api-header">
+          <div class="api-name">💬 Brevo SMS</div>
+          <div class="api-status status-off" id="status-brevo">Vérification…</div>
+        </div>
+
+        <div class="brevo-context">
+          Module SMS <strong>optionnel</strong>. Les crédits SMS sont facturés sur
+          <strong>votre propre compte Brevo</strong> (~0,06 €/SMS), pas par HôteSmart.
+        </div>
+
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              Créez un compte sur <a href="https://www.brevo.com/fr/" target="_blank">brevo.com</a>.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              Dans <strong>Mon compte → Clés API</strong>
+              (<a href="https://app.brevo.com/settings/keys/api" target="_blank">lien direct</a>),
+              créez une clé (commence par <code>xkeysib-</code>).
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              Achetez des crédits SMS :
+              <a href="https://app.brevo.com/billing/addon/customize/sms" target="_blank">app.brevo.com/billing</a>.
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              Collez la clé ci-dessous et enregistrez.
+            </div>
+          </div>
+        </div>
+
+        <div class="invite-row">
+          <input class="form-input" type="password" id="brevo-key" placeholder="xkeysib-…">
+          <button class="btn btn-primary" id="btn-save-brevo">Enregistrer</button>
+        </div>
+
+        <div class="toggle-row">
+          <span class="toggle-label">Activer l'envoi SMS</span>
+          <label class="toggle">
+            <input type="checkbox" id="brevo-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="toast" id="toast-brevo"></div>
+      </div>
+
       <!-- Plateformes OTA (gestionnaire de canaux, marque blanche) -->
       <div class="api-card" id="card-ota">
         <div class="api-header">
@@ -164,18 +233,6 @@
         </div>
         <div class="api-actions">
           <a class="btn btn-primary" href="/apps/serrures">⚙️ Configurer Seam</a>
-        </div>
-      </div>
-
-      <!-- Brevo -->
-      <div class="api-card">
-        <div class="api-header">
-          <div class="api-name">💬 Brevo SMS</div>
-          <div class="api-status status-ok">Actif</div>
-        </div>
-        <div style="font-size:13px;color:var(--text2);line-height:1.7">
-          Brevo est configuré au niveau serveur. Les SMS sont envoyés automatiquement
-          pour les alertes agent et les notifications. Aucune configuration requise.
         </div>
       </div>
 
@@ -241,6 +298,9 @@
   // Plateformes OTA
   await loadOtaProperties()
 
+  // Brevo SMS (config par hôte)
+  await loadBrevoConfig()
+
   // Bouton connecter Beds24
   document.getElementById('btn-connect-beds24').addEventListener('click', async () => {
     const code = document.getElementById('invite-code').value.trim()
@@ -284,6 +344,72 @@
       await checkBeds24Status()
     } else {
       showToast('beds24', '❌ ' + (data.error || 'Erreur'), 'error')
+    }
+  })
+
+  // ===== Brevo SMS (config par hôte) =====
+  async function loadBrevoConfig() {
+    try {
+      const res = await fetch('/api/sms?action=config', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      })
+      const data = await res.json()
+      if (data.configured) {
+        document.getElementById('brevo-key').value = '••••••••••••••••••••'
+        document.getElementById('brevo-enabled').checked = data.enabled
+        setStatus('brevo', data.enabled ? 'ok' : 'off',
+          data.enabled ? 'Connecté ✓' : 'Clé enregistrée, envoi désactivé')
+      } else {
+        setStatus('brevo', 'off', 'Non configuré')
+      }
+    } catch {
+      setStatus('brevo', 'off', 'Erreur')
+    }
+  }
+
+  document.getElementById('btn-save-brevo').addEventListener('click', async () => {
+    const key = document.getElementById('brevo-key').value.trim()
+    if (!key || key.startsWith('•')) return showToast('brevo', 'Saisissez une clé API valide', 'error')
+
+    const btn = document.getElementById('btn-save-brevo')
+    btn.disabled = true; btn.textContent = '⏳ Enregistrement…'
+    try {
+      const res = await fetch('/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'saveConfig', apiKey: key })
+      })
+      const data = await res.json()
+      if (data.success) {
+        document.getElementById('brevo-key').value = '••••••••••••••••••••'
+        document.getElementById('brevo-enabled').checked = true
+        setStatus('brevo', 'ok', 'Connecté ✓')
+        showToast('brevo', '✅ Clé Brevo enregistrée', 'success')
+      } else {
+        showToast('brevo', '❌ ' + (data.error || 'Erreur'), 'error')
+      }
+    } catch (e) {
+      showToast('brevo', '❌ ' + e.message, 'error')
+    } finally {
+      btn.disabled = false; btn.textContent = 'Enregistrer'
+    }
+  })
+
+  document.getElementById('brevo-enabled').addEventListener('change', async (e) => {
+    const enabled = e.target.checked
+    try {
+      const res = await fetch('/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'toggleConfig', enabled })
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || 'Erreur')
+      setStatus('brevo', enabled ? 'ok' : 'off', enabled ? 'Connecté ✓' : 'Envoi désactivé')
+      showToast('brevo', enabled ? '✅ SMS activé' : '⏸ SMS désactivé', 'success')
+    } catch (er) {
+      document.getElementById('brevo-enabled').checked = !enabled
+      showToast('brevo', '❌ ' + er.message, 'error')
     }
   })
 
