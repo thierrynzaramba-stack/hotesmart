@@ -52,7 +52,7 @@ async function runBackfill({ dryRun = true } = {}) {
   const { data: apiKeys, error: keyErr } = await supabase
     .from('api_keys')
     .select('user_id, api_key')
-    .eq('service', 'beds24')
+    .not('api_key', 'is', null)
   if (keyErr) return { error: 'api_keys:' + keyErr.message, cutoff: CUTOFF, dryRun, global: null, properties: [] }
   if (!apiKeys?.length) return { error: null, cutoff: CUTOFF, dryRun, global: emptyCounters(), properties: [] }
 

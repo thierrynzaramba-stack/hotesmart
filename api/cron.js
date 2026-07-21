@@ -42,10 +42,11 @@ module.exports = async function handler(req, res) {
     try { await refreshBeds24Tokens() }
     catch (err) { console.error('[Cron] Erreur refresh tokens:', err.message) }
     // 2. Récupère les clés Beds24 actives et les tokens publics
+    //    (hôtes ayant un vrai token ; ignore les lignes sans api_key, ex. brevo-only)
     const { data: apiKeys } = await supabase
       .from('api_keys')
       .select('user_id, api_key')
-      .eq('service', 'beds24')
+      .not('api_key', 'is', null)
     const { data: tokens } = await supabase
       .from('public_tokens')
       .select('token, property_ids, user_id')

@@ -29,7 +29,6 @@ module.exports = async function handler(req, res) {
       .from('api_keys')
       .select('api_key')
       .eq('user_id', user.id)
-      .eq('service', 'beds24')
       .single()
 
     if (keyError || !keyData) {

@@ -165,7 +165,7 @@ module.exports = async function handler(req, res) {
     const visibilityDays = tokenData.visibility_days || 30
 
     const { data: keyData } = await supabase
-      .from('api_keys').select('api_key').eq('user_id', userId).eq('service', 'beds24').single()
+      .from('api_keys').select('api_key').eq('user_id', userId).single()
     if (!keyData) return res.status(400).json({ error: 'Beds24 non configuré' })
 
     const beds24Key = keyData.api_key

@@ -77,7 +77,6 @@ module.exports = async function handler(req, res) {
         .from('api_keys')
         .select('api_key')
         .eq('user_id', user.id)
-        .eq('service', 'beds24')
         .single()
       if (keyData && keyData.api_key) {
         const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: keyData.api_key } })

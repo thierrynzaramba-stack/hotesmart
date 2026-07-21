@@ -42,10 +42,9 @@ module.exports = async function handler(req, res) {
 
       const { error } = await supabase.from('api_keys').upsert({
         user_id:       user.id,
-        service:       'beds24',
         api_key:       d.token,
         refresh_token: d.refreshToken || null
-      }, { onConflict: 'user_id,service' })
+      }, { onConflict: 'user_id' })
 
       if (error) return res.status(500).json({ error: error.message })
 
@@ -65,7 +64,7 @@ module.exports = async function handler(req, res) {
   if (action === 'refresh') {
     try {
       const { data: keyData } = await supabase.from('api_keys')
-        .select('refresh_token').eq('user_id', user.id).eq('service', 'beds24').single()
+        .select('refresh_token').eq('user_id', user.id).single()
 
       if (!keyData?.refresh_token) {
         return res.status(400).json({ error: 'Pas de refresh token — reconnectez Beds24' })
@@ -86,7 +85,7 @@ module.exports = async function handler(req, res) {
       }
 
       await supabase.from('api_keys').update({ api_key: d.token })
-        .eq('user_id', user.id).eq('service', 'beds24')
+        .eq('user_id', user.id)
 
       return res.json({ success: true, expiresIn: d.expiresIn })
 
@@ -100,7 +99,7 @@ module.exports = async function handler(req, res) {
   if (action === 'status') {
     const { data } = await supabase.from('api_keys')
       .select('api_key, refresh_token')
-      .eq('user_id', user.id).eq('service', 'beds24').maybeSingle()
+      .eq('user_id', user.id).maybeSingle()
 
     return res.json({
       connected:   !!data?.api_key,
