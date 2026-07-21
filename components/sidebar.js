@@ -1,5 +1,6 @@
 import { getUser, signOut, supabase } from '../shared/supabase.js'
 import CONFIG from '../shared/config.js'
+import { renderOnboardingBanner } from '/components/onboarding-banner.js'
 
 export async function renderSidebar(activePage = '') {
   const user = await getUser()
@@ -80,6 +81,9 @@ export async function renderSidebar(activePage = '') {
   `
 
   initMobileSidebar(sidebar)
+
+  // Bandeau d'incitation (onboarding puis abonnement). Non bloquant.
+  renderOnboardingBanner().catch(() => {})
 }
 
 function initMobileSidebar(sidebar) {

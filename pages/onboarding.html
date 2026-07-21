@@ -229,6 +229,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   async function saveState(patch) {
     const next = Object.assign({}, stepData, patch || {});
     stepData = next;
+    // Libelle de reprise pour le bandeau (calcule ici : source UNIQUE de la logique de path).
+    try { const p = getPath(); const idx = p.indexOf(currentStep); next.resume_label = 'Étape ' + (idx === -1 ? p.length : idx + 1) + ' sur ' + p.length; } catch (e) {}
     const { error } = await supabase
       .from('onboarding_state')
       .update({ current_step: currentStep, data: next })
