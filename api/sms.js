@@ -9,22 +9,42 @@ const supabase = createClient(
 );
 
 /**
- * Envoie un SMS via Brevo et log dans Supabase
+ * Envoie un SMS via Brevo (clé du propriétaire) et log dans Supabase.
+ * Multi-tenant strict : la clé Brevo est lue sur api_keys du propriétaire
+ * (ownerUserId). AUCUN fallback sur process.env.BREVO_API_KEY.
  * @param {string} to          - Numéro destinataire (+33XXXXXXXXX)
  * @param {string} message     - Texte du SMS (max 160 caractères)
  * @param {string} property_id - ID du bien concerné (optionnel)
  * @param {string} context     - Contexte d'envoi (ex: "agent-ai", "menages", "cron")
+ * @param {string} ownerUserId - user_id du propriétaire (sa clé Brevo, ses crédits)
  * @returns {object}           - { success, sid, error }
  */
-async function sendSms(to, message, property_id = null, context = null) {
-  const apiKey = process.env.BREVO_API_KEY;
+async function sendSms(to, message, property_id = null, context = null, ownerUserId = null) {
+  const normalized = normalizePhone(to);
 
-  if (!apiKey) {
-    throw new Error('Variable BREVO_API_KEY manquante');
+  // Résolution de la clé Brevo du propriétaire — multi-tenant strict, pas de fallback env
+  let apiKey = null;
+  let configError = null;
+  if (!ownerUserId) {
+    configError = 'Expéditeur inconnu';
+  } else {
+    const { data: keyRow } = await supabase
+      .from('api_keys')
+      .select('brevo_api_key, brevo_enabled')
+      .eq('user_id', ownerUserId)
+      .maybeSingle();
+    if (!keyRow?.brevo_api_key)              configError = 'Brevo non configuré';
+    else if (keyRow.brevo_enabled === false) configError = 'SMS désactivé';
+    else apiKey = keyRow.brevo_api_key;
   }
 
-  // Normalisation du numéro (accepte 06, 07, +336, +337)
-  const normalized = normalizePhone(to);
+  // Non configuré / désactivé → log en base (status error) puis sortie
+  if (configError) {
+    await logSms({ to_number: normalized || to, message, property_id, context, status: 'error', error: configError });
+    return { success: false, error: configError };
+  }
+
+  // Numéro invalide → pas d'appel Brevo (comportement historique : pas de log)
   if (!normalized) {
     return { success: false, error: `Numéro invalide : ${to}` };
   }
@@ -37,7 +57,7 @@ async function sendSms(to, message, property_id = null, context = null) {
     const response = await fetch('https://api.brevo.com/v3/transactionalSMS/sms', {
       method: 'POST',
       headers: {
-        'api-key':     apiKey,
+        'api-key':      apiKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -62,23 +82,29 @@ async function sendSms(to, message, property_id = null, context = null) {
     errorMsg = err.message;
   }
 
-  // Log dans Supabase (toujours, même en erreur)
-  await supabase.from('sms_logs').insert({
-    to_number:   normalized,
-    message:     message,
-    sender:      'HoteSmart',
-    status:      status,
-    twilio_sid:  messageId,
-    property_id: property_id,
-    context:     context,
-    error:       errorMsg
-  });
+  await logSms({ to_number: normalized, message, property_id, context, status, error: errorMsg, twilio_sid: messageId });
 
   if (status === 'error') {
     return { success: false, error: errorMsg };
   }
 
   return { success: true, sid: messageId, status };
+}
+
+/**
+ * Insert d'un enregistrement dans sms_logs.
+ */
+async function logSms({ to_number, message, property_id = null, context = null, status, error = null, twilio_sid = null }) {
+  await supabase.from('sms_logs').insert({
+    to_number,
+    message,
+    sender: 'HoteSmart',
+    status,
+    twilio_sid,
+    property_id,
+    context,
+    error
+  });
 }
 
 /**
@@ -111,6 +137,14 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // Auth Supabase — nécessaire pour rattacher l'envoi au propriétaire (sa clé Brevo)
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  let user = null;
+  if (token) {
+    const { data } = await supabase.auth.getUser(token);
+    user = data?.user;
+  }
+
   // GET /api/sms → historique des logs
   if (req.method === 'GET') {
     const { property_id, limit = 50 } = req.query;
@@ -129,6 +163,8 @@ module.exports = async (req, res) => {
 
   // POST /api/sms → envoi SMS
   if (req.method === 'POST') {
+    if (!user) return res.status(401).json({ error: 'Non autorisé' });
+
     const { to, message, property_id, context } = req.body || {};
 
     if (!to || !message) {
@@ -140,7 +176,7 @@ module.exports = async (req, res) => {
     }
 
     try {
-      const result = await sendSms(to, message, property_id, context);
+      const result = await sendSms(to, message, property_id, context, user.id);
       return res.status(result.success ? 200 : 500).json(result);
     } catch (err) {
       return res.status(500).json({ error: err.message });
