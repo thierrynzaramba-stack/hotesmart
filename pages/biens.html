@@ -63,6 +63,17 @@
     .modal-feedback { font-size: 13px; margin-top: 12px; display: none; }
     .modal-feedback.error { color: #E24B4A; display: block; }
     .danger-note { background: #fdecea; border: 0.5px solid #E24B4A; border-radius: var(--radius); padding: 12px; font-size: 13px; color: #8a1f1e; margin-bottom: 14px; line-height: 1.5; }
+    /* Mode de prix (OTA) */
+    .rate-mode { font-size: 12px; color: var(--text2); margin: 8px 0 2px; }
+    .rate-mode strong { color: var(--text); font-weight: 600; }
+    .rate-mode button { background: none; border: none; color: var(--green); font: inherit; font-size: 12px; cursor: pointer; padding: 0; margin-left: 6px; text-decoration: underline; }
+    .mode-card { display: flex; gap: 10px; align-items: flex-start; border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; cursor: pointer; }
+    .mode-card input { margin-top: 3px; }
+    .mode-title { font-size: 14px; font-weight: 600; color: var(--text); }
+    .mode-tag { font-size: 11px; font-weight: 500; color: var(--green); margin-left: 6px; }
+    .mode-desc { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.45; }
+    .ack { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--text); margin-top: 4px; cursor: pointer; }
+    .ack input { margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -155,6 +166,41 @@
   </div>
 </div>
 
+<!-- Modale : choix du mode de prix (keep / managed) -->
+<div class="modal" id="ratemode-modal">
+  <div class="modal-box">
+    <h2>Gestion de vos prix</h2>
+    <label class="mode-card">
+      <input type="radio" name="ratemode" value="keep">
+      <div>
+        <div class="mode-title">Je garde mes prix <span class="mode-tag">recommandé pour démarrer</span></div>
+        <div class="mode-desc">HôteSmart synchronise vos disponibilités pour éviter les doubles réservations. Vos prix ne changent pas : vous les gérez sur chaque plateforme comme aujourd'hui.</div>
+      </div>
+    </label>
+    <label class="mode-card">
+      <input type="radio" name="ratemode" value="managed">
+      <div>
+        <div class="mode-title">HôteSmart gère mes prix</div>
+        <div class="mode-desc">Vos tarifs sont pilotés depuis votre calendrier HôteSmart et envoyés aux plateformes.</div>
+      </div>
+    </label>
+    <div class="danger-note" id="ratemode-warning" style="display:none">
+      En activant ce mode, les tarifs que vous avez définis sur Airbnb, Booking et vos autres
+      plateformes seront <strong>écrasés</strong> par les prix de votre calendrier HôteSmart,
+      sur toutes vos dates à venir. Vos anciens prix ne pourront pas être récupérés.
+    </div>
+    <label class="ack" id="ratemode-ack" style="display:none">
+      <input type="checkbox" id="ratemode-ack-check">
+      <span>J'ai compris, je veux gérer mes prix depuis HôteSmart.</span>
+    </label>
+    <div class="modal-feedback" id="ratemode-feedback"></div>
+    <div class="modal-actions">
+      <button class="btn" id="ratemode-cancel">Annuler</button>
+      <button class="btn" id="ratemode-save">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
@@ -182,6 +228,7 @@
   let currentEdit = null    // bien en cours d'édition
   let currentDelete = null  // bien en cours de suppression
   let currentPublish = null // bien en cours de publication (Mode B, écrase les prix OTA)
+  let currentRateMode = null // bien en cours de changement de mode de prix
 
   async function callApi(method, body) {
     const res = await fetch('/api/channel-property', {
@@ -234,6 +281,11 @@
         <span>Capacité : ${escapeHtml(p.capacity)} personne(s)</span>
         <span>Devise : ${escapeHtml(p.currency || 'EUR')}</span>
       </div>
+      ${(p.provider === 'channex' || p.provider === 'channel') ? `
+      <div class="rate-mode">
+        💶 Prix sur les plateformes : <strong>${p.rate_sync_mode === 'managed' ? 'Gérés par HôteSmart' : 'Je garde mes prix'}</strong>
+        <button data-ratemode="${p.id}">Changer</button>
+      </div>` : ''}
       <div class="card-actions">
         <a href="/biens/${p.id}/calendrier" class="btn btn-primary">📅 Calendrier</a>
         <button class="btn" data-connect="${p.id}">🔗 Connexions</button>
@@ -253,6 +305,8 @@
     // 'keep' (défaut) et pour les biens Beds24 -> aucun écrasement par surprise.
     const fullsyncBtn = card.querySelector('[data-fullsync]')
     if (fullsyncBtn) fullsyncBtn.addEventListener('click', () => openPublish(p))
+    const rateModeBtn = card.querySelector('[data-ratemode]')
+    if (rateModeBtn) rateModeBtn.addEventListener('click', () => openRateMode(p))
     return card
   }
 
@@ -405,6 +459,74 @@
       publishFeedback.textContent = '❌ ' + (err.message || 'Erreur inconnue')
       publishFeedback.className = 'modal-feedback error'
       publishGo.disabled = false; publishGo.textContent = 'Remplacer mes prix'
+    }
+  })
+
+  // ===== Mode de prix (keep / managed) =====
+  const rateModeModal = document.getElementById('ratemode-modal')
+  const rateModeWarning = document.getElementById('ratemode-warning')
+  const rateModeAck = document.getElementById('ratemode-ack')
+  const rateModeAckCheck = document.getElementById('ratemode-ack-check')
+  const rateModeSave = document.getElementById('ratemode-save')
+  const rateModeCancel = document.getElementById('ratemode-cancel')
+  const rateModeFeedback = document.getElementById('ratemode-feedback')
+  const rateModeRadios = () => rateModeModal.querySelectorAll('input[name="ratemode"]')
+
+  function selectedRateMode() {
+    const r = rateModeModal.querySelector('input[name="ratemode"]:checked')
+    return r ? r.value : 'keep'
+  }
+
+  // Etat de l'UI selon la cible choisie vs le mode courant. L'avertissement + la case a
+  // cocher n'apparaissent QUE pour l'activation de 'managed' (changement keep -> managed),
+  // et le bouton d'activation reste desactive tant que la case n'est pas cochee.
+  function updateRateModeUI() {
+    const target = selectedRateMode()
+    const current = (currentRateMode && currentRateMode.rate_sync_mode === 'managed') ? 'managed' : 'keep'
+    const changing = target !== current
+    const toManaged = target === 'managed' && changing
+    rateModeWarning.style.display = toManaged ? 'block' : 'none'
+    rateModeAck.style.display = toManaged ? 'flex' : 'none'
+    if (!toManaged) rateModeAckCheck.checked = false
+    rateModeFeedback.className = 'modal-feedback'
+    if (!changing) {
+      rateModeSave.textContent = 'Fermer'; rateModeSave.className = 'btn'; rateModeSave.disabled = false
+    } else if (toManaged) {
+      rateModeSave.textContent = 'Activer ce mode'; rateModeSave.className = 'btn btn-danger'; rateModeSave.disabled = !rateModeAckCheck.checked
+    } else {
+      rateModeSave.textContent = 'Revenir à ce mode'; rateModeSave.className = 'btn'; rateModeSave.disabled = false
+    }
+  }
+
+  function openRateMode(p) {
+    currentRateMode = p
+    const cur = p.rate_sync_mode === 'managed' ? 'managed' : 'keep'
+    rateModeRadios().forEach(r => { r.checked = (r.value === cur) })
+    rateModeAckCheck.checked = false
+    updateRateModeUI()
+    rateModeModal.classList.add('show')
+  }
+
+  rateModeRadios().forEach(r => r.addEventListener('change', updateRateModeUI))
+  rateModeAckCheck.addEventListener('change', updateRateModeUI)
+  rateModeCancel.addEventListener('click', () => { rateModeModal.classList.remove('show'); currentRateMode = null })
+
+  rateModeSave.addEventListener('click', async () => {
+    if (!currentRateMode) return
+    const target = selectedRateMode()
+    const current = currentRateMode.rate_sync_mode === 'managed' ? 'managed' : 'keep'
+    // Pas de changement -> "Fermer" : on ferme sans ecrire (aucun PATCH inutile).
+    if (target === current) { rateModeModal.classList.remove('show'); currentRateMode = null; return }
+    rateModeSave.disabled = true; const old = rateModeSave.textContent; rateModeSave.textContent = '⏳ Enregistrement…'
+    try {
+      await callApi('PATCH', { property_id: currentRateMode.id, rate_sync_mode: target })
+      rateModeModal.classList.remove('show')
+      currentRateMode = null
+      await loadProperties()
+    } catch (err) {
+      rateModeFeedback.textContent = '❌ ' + (err.message || 'Erreur inconnue')
+      rateModeFeedback.className = 'modal-feedback error'
+      rateModeSave.disabled = false; rateModeSave.textContent = old
     }
   })
 

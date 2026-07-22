@@ -63,7 +63,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     const { data: chanData, error: chanErr } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, created_at')
+      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, rate_sync_mode, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (chanErr) {
@@ -103,7 +103,7 @@ module.exports = async function handler(req, res) {
   // ===== PATCH : modification d'un bien (champs cosmetiques) =====
   // Body : { property_id (uuid Supabase), name?, address?, city?, zip_code?, country? }
   if (req.method === 'PATCH') {
-    const { property_id: pid, name, address, city, zip_code, country } = req.body || {}
+    const { property_id: pid, name, address, city, zip_code, country, rate_sync_mode } = req.body || {}
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
     const { data: prop, error: propErr } = await supabase
@@ -120,6 +120,17 @@ module.exports = async function handler(req, res) {
     if (city !== undefined) updates.city = city ? String(city).trim().slice(0, 100) : null
     if (zip_code !== undefined) updates.zip_code = zip_code ? String(zip_code).trim().slice(0, 20) : null
     if (country !== undefined && country) updates.country = String(country).trim().slice(0, 2).toUpperCase()
+    // Mode de prix : reserve aux biens OTA/Channex (un bien Beds24 n'a pas de rate_sync_mode
+    // pertinent). Valeurs contraintes en base, revalidees ici.
+    if (rate_sync_mode !== undefined) {
+      if (!['keep', 'managed'].includes(rate_sync_mode)) {
+        return res.status(400).json({ error: 'rate_sync_mode invalide (keep | managed)' })
+      }
+      if (prop.provider !== 'channex' && prop.provider !== 'channel') {
+        return res.status(400).json({ error: 'Le mode de prix ne s applique qu aux biens connectes aux plateformes' })
+      }
+      updates.rate_sync_mode = rate_sync_mode
+    }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'Aucun champ a modifier' })
 
     // Sync cote channel manager (best effort, non bloquant)
