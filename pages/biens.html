@@ -138,6 +138,23 @@
   </div>
 </div>
 
+<!-- Modale publication (Mode B : remplace les prix OTA) -->
+<div class="modal" id="publish-modal">
+  <div class="modal-box">
+    <h2>Remplacer vos prix sur les plateformes ?</h2>
+    <div class="danger-note">
+      Les tarifs que vous avez définis sur Airbnb, Booking et vos autres plateformes
+      vont être <strong>écrasés</strong> par les prix de votre calendrier HôteSmart,
+      sur toutes vos dates à venir. Vos anciens prix ne pourront pas être récupérés.
+    </div>
+    <div class="modal-feedback" id="publish-feedback"></div>
+    <div class="modal-actions">
+      <button class="btn" id="publish-cancel">Annuler</button>
+      <button class="btn btn-danger" id="publish-go">Remplacer mes prix</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
@@ -162,8 +179,9 @@
   const empty  = document.getElementById('empty')
   const grid   = document.getElementById('grid')
 
-  let currentEdit = null   // bien en cours d'édition
-  let currentDelete = null // bien en cours de suppression
+  let currentEdit = null    // bien en cours d'édition
+  let currentDelete = null  // bien en cours de suppression
+  let currentPublish = null // bien en cours de publication (Mode B, écrase les prix OTA)
 
   async function callApi(method, body) {
     const res = await fetch('/api/channel-property', {
@@ -219,7 +237,7 @@
       <div class="card-actions">
         <a href="/biens/${p.id}/calendrier" class="btn btn-primary">📅 Calendrier</a>
         <button class="btn" data-connect="${p.id}">🔗 Connexions</button>
-        <button class="btn" data-fullsync="${p.id}">📤 Publier</button>
+        ${p.rate_sync_mode === 'managed' ? `<button class="btn" data-fullsync="${p.id}">📤 Publier</button>` : ''}
         <button class="btn" data-edit="${p.id}">Modifier</button>
         <button class="btn btn-danger" data-delete="${p.id}">Supprimer</button>
       </div>
@@ -230,26 +248,11 @@
     // Canaux charges en differe : la carte et ses actions restent utilisables
     // sans attendre la reponse Channex.
     hydrateChannelBadges(p, card.querySelector('[data-channels]'))
-    card.querySelector('[data-fullsync]').addEventListener('click', async (e) => {
-      const btn = e.target
-      if (!confirm('Mettre en file la publication de 500 jours de calendrier (prix + disponibilités) vers les canaux de distribution ?')) return
-      btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Mise en file…'
-      try {
-        const r = await api.calendar.fullsync(p.id)
-        if (r.enqueued) {
-          btn.textContent = '🕓 En file'
-          alert('Publication mise en file d\'attente.\nElle sera envoyée automatiquement dans les prochaines minutes (1 bien à la fois).')
-        } else {
-          btn.textContent = old; btn.disabled = false
-          const msg = r.reason === 'cooldown'
-            ? ('Déjà publié dans les dernières 24h.' + (r.next_allowed_at ? '\nProchaine publication possible : ' + new Date(r.next_allowed_at).toLocaleString('fr-FR') : ''))
-            : (r.message || 'Déjà en file pour ce bien.')
-          alert(msg)
-        }
-      } catch (err) {
-        btn.textContent = old; btn.disabled = false; alert('Erreur : ' + (err.message || 'inconnue'))
-      }
-    })
+    // Bouton Publier gaté : présent uniquement en rate_sync_mode='managed'
+    // (l'hôte a explicitement demandé que HôteSmart gère ses prix). Absent en
+    // 'keep' (défaut) et pour les biens Beds24 -> aucun écrasement par surprise.
+    const fullsyncBtn = card.querySelector('[data-fullsync]')
+    if (fullsyncBtn) fullsyncBtn.addEventListener('click', () => openPublish(p))
     return card
   }
 
@@ -357,6 +360,51 @@
       deleteBtn.disabled = false
     } finally {
       deleteBtn.textContent = 'Supprimer définitivement'
+    }
+  })
+
+  // ===== Publication (Mode B : remplace les prix OTA) =====
+  const publishModal = document.getElementById('publish-modal')
+  const publishGo = document.getElementById('publish-go')
+  const publishCancel = document.getElementById('publish-cancel')
+  const publishFeedback = document.getElementById('publish-feedback')
+
+  function openPublish(p) {
+    currentPublish = p
+    publishFeedback.className = 'modal-feedback'
+    publishGo.disabled = false
+    publishGo.textContent = 'Remplacer mes prix'
+    publishModal.classList.add('show')
+    // Défaut sûr : le focus part sur Annuler. Entrée = Annuler, jamais l'action destructive.
+    publishCancel.focus()
+  }
+
+  publishCancel.addEventListener('click', () => {
+    publishModal.classList.remove('show')
+    currentPublish = null
+  })
+
+  publishGo.addEventListener('click', async () => {
+    if (!currentPublish) return
+    publishGo.disabled = true; publishGo.textContent = '⏳ Publication…'
+    try {
+      const r = await api.calendar.fullsync(currentPublish.id)
+      if (r.enqueued) {
+        publishModal.classList.remove('show')
+        currentPublish = null
+        alert('Vos prix seront envoyés à vos plateformes dans les prochaines minutes.')
+      } else {
+        const msg = r.reason === 'cooldown'
+          ? ('Déjà publié dans les dernières 24h.' + (r.next_allowed_at ? ' Prochaine publication possible : ' + new Date(r.next_allowed_at).toLocaleString('fr-FR') : ''))
+          : (r.message || 'Déjà en file pour ce bien.')
+        publishFeedback.textContent = msg
+        publishFeedback.className = 'modal-feedback error'
+        publishGo.disabled = false; publishGo.textContent = 'Remplacer mes prix'
+      }
+    } catch (err) {
+      publishFeedback.textContent = '❌ ' + (err.message || 'Erreur inconnue')
+      publishFeedback.className = 'modal-feedback error'
+      publishGo.disabled = false; publishGo.textContent = 'Remplacer mes prix'
     }
   })
 

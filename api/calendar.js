@@ -7,6 +7,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
+const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -110,7 +111,7 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(ids) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
+      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
       .eq('user_id', user.id)
       .in('id', ids)
     if (error) throw new Error('Erreur lecture biens')
@@ -209,6 +210,12 @@ module.exports = async function handler(req, res) {
       if (!bienFs) return res.status(403).json({ error: 'Bien non trouve' })
       if (!bienFs.provider_property_id || !bienFs.provider_rate_plan_id || !bienFs.provider_room_type_id) {
         return res.status(400).json({ error: 'Bien non connecte au canal (ids manquants)' })
+      }
+      // Garde 0 : le bien doit pouvoir pousser ses tarifs (mode 'managed'). En 'keep'
+      // (defaut protecteur) on REFUSE la mise en file — aucun tarif ne part. Le bouton
+      // "Publier" est deja masque en keep : ce garde couvre les appels hors UI (forge, rejeu).
+      if (!canPushRates(bienFs)) {
+        return res.status(200).json({ enqueued: false, ...RATE_PUSH_BLOCKED })
       }
       // Garde 1 : un full sync a-t-il deja ete EXECUTE il y a moins de 24h ?
       if (bienFs.last_fullsync_at) {
@@ -397,10 +404,18 @@ module.exports = async function handler(req, res) {
 
       try {
         if (restrictionValues.length) {
-          const r = await channelCall('POST', '/restrictions', { values: restrictionValues })
-          if (!r.ok) { pushWarnings.push('restrictions: HTTP ' + r.status) }
-          else { pushed = true; taskIdsSave.restrictions = r.json?.data?.[0]?.id || null; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
+          // SCISSION dispo/tarifs : /restrictions porte le rate (+ conditions de sejour).
+          // On ne le pousse qu'en mode 'managed'. En 'keep', tout est deja enregistre en
+          // base (brouillon local) mais rien ne part : l'hote garde ses prix cote plateforme.
+          if (canPushRates(bien)) {
+            const r = await channelCall('POST', '/restrictions', { values: restrictionValues })
+            if (!r.ok) { pushWarnings.push('restrictions: HTTP ' + r.status) }
+            else { pushed = true; taskIdsSave.restrictions = r.json?.data?.[0]?.id || null; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
+          } else {
+            taskIdsSave.restrictions_skipped = 'mode_keep'
+          }
         }
+        // Availability : TOUJOURS poussee (anti-surbooking, non negociable), quel que soit le mode.
         if (availabilityValues.length) {
           const a = await channelCall('POST', '/availability', { values: availabilityValues })
           if (!a.ok) { pushWarnings.push('availability: HTTP ' + a.status) }

@@ -9,6 +9,7 @@
 // l'enfant derive prix + garde son min stay (verifie etape 0).
 
 const { createClient } = require('@supabase/supabase-js')
+const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
@@ -176,7 +177,7 @@ module.exports = async function handler(req, res) {
     if (!channelId || !providerPropertyId) return res.status(400).json({ error: 'channel_id + property_id requis' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id, provider_rate_plan_id')
+      .from('properties').select('id, provider_property_id, provider_rate_plan_id, rate_sync_mode')
       .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
@@ -227,6 +228,10 @@ module.exports = async function handler(req, res) {
       })
     }
 
+    // Gate tarifaire : le remap change la source de prix lue par l'OTA -> ecriture tarifaire.
+    // Refuse en 'keep' (le dry_run ci-dessus reste autorise : il n'ecrit rien).
+    if (!canPushRates(prop)) return res.status(200).json({ ...RATE_PUSH_BLOCKED })
+
     const w = await channelCall('PUT', `/channels/${channelId}`, payload)
     // PREUVE : re-GET, rate_plans[] doit pointer la cible.
     const after = await channelCall('GET', `/channels/${channelId}`)
@@ -256,7 +261,7 @@ module.exports = async function handler(req, res) {
     if (hasMinStay && (!Number.isInteger(minStay) || minStay < 1)) return res.status(400).json({ error: 'min_stay invalide (>=1)' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id')
+      .from('properties').select('id, provider_property_id, rate_sync_mode')
       .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
@@ -304,6 +309,10 @@ module.exports = async function handler(req, res) {
         would_send: { method: 'PUT', path: `/rate_plans/${childId}`, payload }
       })
     }
+
+    // Gate tarifaire : set_rule ecrit le rate plan derive (+ re-pousse l'ARI base plus bas).
+    // Refuse en 'keep' (le dry_run ci-dessus reste autorise : il n'ecrit rien).
+    if (!canPushRates(prop)) return res.status(200).json({ ...RATE_PUSH_BLOCKED })
 
     const w = await channelCall('PUT', `/rate_plans/${childId}`, payload)
     if (!w.ok) return res.status(502).json({ error: 'PUT rate_plan echoue', http: w.status, detail: w.json })
@@ -358,7 +367,7 @@ module.exports = async function handler(req, res) {
     if (!channelId || !providerPropertyId) return res.status(400).json({ error: 'channel_id + property_id requis' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id')
+      .from('properties').select('id, provider_property_id, rate_sync_mode')
       .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
@@ -394,6 +403,10 @@ module.exports = async function handler(req, res) {
         ]
       })
     }
+
+    // Gate tarifaire : remap_airbnb bascule le listing sur le derive -> change les prix lus
+    // par Airbnb. Refuse en 'keep' (le dry_run ci-dessus reste autorise : il n'ecrit rien).
+    if (!canPushRates(prop)) return res.status(200).json({ ...RATE_PUSH_BLOCKED })
 
     // Airbnb impose 1 mapping par listing -> DELETE l'ancien AVANT d'ajouter le nouveau.
     // 1) RETIRE l'ancien mapping (base).
