@@ -50,6 +50,13 @@
 </div>
 
 <script type="module">
+  // [EN SOMMEIL - Option B] La route /biens/:id ouvrait l'iframe Channex (inventaire
+  // brut) en auto-load. En beta, tout le detail bien vit sur /biens : on redirige.
+  // Le chargement iframe self-service est conserve ci-dessous, commente, pour
+  // reactivation post-beta. Aucun chemin appelable ne subsiste ici.
+  window.location.replace('/biens')
+
+  /* --- iframe self-service Channex (dormant, ne pas activer sans lever l'option B) ---
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { initErrorHandler } from '/shared/error-handler.js'
@@ -105,6 +112,7 @@
       statusEl.classList.add('error')
     }
   }
+  --- fin dormant --- */
 </script>
 </body>
 </html>

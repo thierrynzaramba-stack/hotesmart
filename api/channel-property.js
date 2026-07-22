@@ -48,6 +48,22 @@ function isoPlusDays(n) {
   return d.toISOString().split('T')[0]
 }
 
+// URLs d'annonces fournies par l'hote lors d'une demande de connexion OTA
+// (Option B : mapping manuel). Objet { booking?, airbnb? }, les deux facultatifs.
+// Ne garde que des URLs http(s) plausibles, tronquees a 500 car. Renvoie null
+// si rien d'exploitable -> l'hote a pu demander sans coller de lien.
+function sanitizeListingUrls(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const out = {}
+  for (const key of ['booking', 'airbnb']) {
+    const v = raw[key]
+    if (typeof v !== 'string') continue
+    const url = v.trim().slice(0, 500)
+    if (/^https?:\/\/\S+$/i.test(url)) out[key] = url
+  }
+  return Object.keys(out).length ? out : null
+}
+
 module.exports = async function handler(req, res) {
   // ===== AUTH (pattern beds24.js) =====
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -63,7 +79,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     const { data: chanData, error: chanErr } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, rate_sync_mode, created_at')
+      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (chanErr) {
@@ -103,7 +119,7 @@ module.exports = async function handler(req, res) {
   // ===== PATCH : modification d'un bien (champs cosmetiques) =====
   // Body : { property_id (uuid Supabase), name?, address?, city?, zip_code?, country? }
   if (req.method === 'PATCH') {
-    const { property_id: pid, name, address, city, zip_code, country, rate_sync_mode } = req.body || {}
+    const { property_id: pid, name, address, city, zip_code, country, rate_sync_mode, ota_connect_status, ota_listing_urls } = req.body || {}
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
     const { data: prop, error: propErr } = await supabase
@@ -130,6 +146,23 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Le mode de prix ne s applique qu aux biens connectes aux plateformes' })
       }
       updates.rate_sync_mode = rate_sync_mode
+    }
+    // Demande de connexion OTA (Option B : mapping manuel par l'equipe HoteSmart).
+    // L'hote ne peut que passer draft -> requested. Le passage a 'live' est reserve
+    // a l'admin (endpoint dedie, allow-list ADMIN_EMAILS) : jamais depuis ici.
+    if (ota_connect_status !== undefined) {
+      if (ota_connect_status !== 'requested') {
+        return res.status(400).json({ error: 'Transition de statut non autorisee' })
+      }
+      if (prop.provider !== 'channex' && prop.provider !== 'channel') {
+        return res.status(400).json({ error: 'Statut OTA reserve aux biens connectes aux plateformes' })
+      }
+      updates.ota_connect_status = 'requested'
+      updates.ota_requested_at = new Date().toISOString()   // horodatage serveur, jamais le client
+    }
+    // URLs d'annonces (facultatives) : validees/tronquees, ou null si rien d'exploitable.
+    if (ota_listing_urls !== undefined) {
+      updates.ota_listing_urls = sanitizeListingUrls(ota_listing_urls)
     }
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'Aucun champ a modifier' })
 

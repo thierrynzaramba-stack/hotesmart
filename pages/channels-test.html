@@ -102,6 +102,12 @@
   </main>
 
   <script>
+    // [EN SOMMEIL - Option B] Page de test Phase 1 : ouvrait l'iframe Channex brute.
+    // Chargement neutralise ; rewrite /channels-test retiree de vercel.json.
+    // Code conserve ci-dessous, commente, pour reactivation post-beta.
+    document.getElementById('status').textContent = 'Page de test desactivee (Option B).';
+
+    /* --- iframe self-service Channex (dormant, ne pas activer sans lever l'option B) ---
     (async function loadChannelInterface() {
       const statusEl = document.getElementById('status');
       const iframeEl = document.getElementById('channel-frame');
@@ -144,6 +150,7 @@
         statusEl.classList.add('error');
       }
     })();
+    --- fin dormant --- */
   </script>
 </body>
 </html>

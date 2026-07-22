@@ -53,10 +53,6 @@
       "destination": "/pages/connexions"
     },
     {
-      "source": "/channels-test",
-      "destination": "/pages/channels-test"
-    },
-    {
       "source": "/biens",
       "destination": "/pages/biens"
     },
