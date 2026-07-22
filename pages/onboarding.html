@@ -397,10 +397,10 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
 
     content.innerHTML = [
       '<h1>Vos biens sont créés 🎉</h1>',
-      '<p class="lead">Tout est en place. Nous connectons vos annonces Airbnb et Booking à vos biens — en général sous 24-48h.</p>',
-      '<p>Pas besoin d\'attendre : dès maintenant, configurez vos biens, vos tarifs et votre calendrier. Vos réservations remonteront automatiquement dès la connexion active.</p>',
+      '<p class="lead">Dernière étape : connectez vos annonces Airbnb et Booking à vos biens. C\'est rapide et guidé — vos réservations et votre calendrier se synchronisent ensuite automatiquement.</p>',
+      '<p>Rendez-vous dans « Mes biens » : pour chaque logement, cliquez sur <strong>Connexions</strong> et laissez-vous guider.</p>',
       '<div class="ob-actions"><span></span>',
-      '<a class="ob-btn ob-btn-primary" href="/biens" style="display:inline-block; text-decoration:none;">Accéder à mes biens →</a>',
+      '<a class="ob-btn ob-btn-primary" href="/biens" style="display:inline-block; text-decoration:none;">Connecter mes annonces →</a>',
       '</div>'
     ].join('');
   }
@@ -1384,9 +1384,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   // Étape 8 — Mes biens (parcours non-Beds24 uniquement)
   // ====================================================================
   // Etape "Vos biens" — cree de VRAIS biens via POST /api/channel-property (meme
-  // endpoint et memes champs que /biens/nouveau : nom, capacite, ville, prix, devise),
-  // en ota_connect_status='requested'. A la fin, l'hote voit ses biens dans /biens
-  // avec le pill "connexion en cours" ; le mapping se fait cote Channex (Option B).
+  // endpoint et memes champs que /biens/nouveau). Les biens sont crees "normaux" ;
+  // l'hote connecte ensuite ses annonces lui-meme via l'assistant (self-service).
   // Anti-fantome/anti-doublon : rollback durci cote endpoint + reconcile client
   // (nom+capacite+ville) avant tout (re)POST.
   function renderStep8MesBiens(c) {
@@ -1569,8 +1568,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
               zip_code: b.zip_code.trim() || null,
               country: b.country,
               included_guests: b.included_guests !== '' ? Number(b.included_guests) : null,
-              extra_guest_fee: b.extra_guest_fee !== '' ? Number(b.extra_guest_fee) : null,
-              ota_connect_status: 'requested'
+              extra_guest_fee: b.extra_guest_fee !== '' ? Number(b.extra_guest_fee) : null
             })
           });
           const d = await r.json().catch(function () { return {}; });
@@ -1673,9 +1671,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
           const { error: updErr } = await supabase
             .from('integration_requests')
             .update({
-              // Biens desormais crees comme vraies lignes properties (ota_connect_status
-              // 'requested') a l'etape 8 : la source de verite du mapping est properties,
-              // plus integration_requests. On ne garde ici que le contact.
+              // Biens crees comme vraies lignes properties a l'etape 8 : on ne garde
+              // ici que le contact (integration_requests sert de fiche de suivi hote).
               contact_first_name: firstName.trim(),
               contact_last_name: lastName.trim(),
               contact_phone: phone.trim(),

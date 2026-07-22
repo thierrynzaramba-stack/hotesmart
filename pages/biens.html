@@ -74,10 +74,6 @@
     .mode-desc { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.45; }
     .ack { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--text); margin-top: 4px; cursor: pointer; }
     .ack input { margin-top: 2px; }
-    /* Pill de statut de connexion OTA (Option B). Affinage copy/style : point 3. */
-    .ota-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 20px; align-self: flex-start; }
-    .ota-pill.pending { background: #FAEEDA; color: #633806; }
-    .ota-pill.live { background: #E1F5EE; color: #085041; }
   </style>
 </head>
 <body>
@@ -236,42 +232,14 @@
   </div>
 </div>
 
-<!-- Modale : demande de connexion des annonces (Option B, mapping manuel) -->
-<div class="modal" id="connect-modal">
-  <div class="modal-box">
-    <h2>Demander la connexion de mes annonces</h2>
-    <p style="font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:16px">
-      Notre équipe connecte vos annonces Airbnb et Booking à ce logement, en général
-      <strong>sous 24-48h</strong>. Collez les liens de vos annonces si vous les avez
-      sous la main — c'est facultatif, vous pouvez demander sans.
-    </p>
-    <div class="field">
-      <label for="connect-booking">Lien de votre annonce Booking.com <span style="font-weight:400;color:var(--text2)">(facultatif)</span></label>
-      <input type="url" id="connect-booking" placeholder="https://www.booking.com/hotel/…" maxlength="500">
-    </div>
-    <div class="field">
-      <label for="connect-airbnb">Lien de votre annonce Airbnb <span style="font-weight:400;color:var(--text2)">(facultatif)</span></label>
-      <input type="url" id="connect-airbnb" placeholder="https://www.airbnb.fr/rooms/…" maxlength="500">
-    </div>
-    <div class="modal-feedback" id="connect-feedback"></div>
-    <div class="modal-actions">
-      <button class="btn" id="connect-cancel">Annuler</button>
-      <button class="btn btn-primary" id="connect-send">Envoyer ma demande</button>
-    </div>
-  </div>
-</div>
-
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { api } from '/shared/api-client.js'
   import { logger } from '/shared/logger.js'
-  // [EN SOMMEIL - Option B] Self-service canaux mis en sommeil. Imports conserves
-  // (exports dormants, reactivation post-beta) mais plus references : la carte
-  // n'ouvre plus d'assistant/iframe, et le retour OAuth Airbnb n'est plus cable.
-  // import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
-  // import { openConnexions } from '/components/connexions.js'
+  import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
+  import { openConnexions } from '/components/connexions.js'
   import {
     loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml
   } from '/shared/properties.js'
@@ -281,6 +249,9 @@
   if (!session) throw new Error('Non authentifié')
   await renderSidebar('biens')
 
+  // Repli pleine page du parcours Airbnb : rouvre l'assistant a l'ecran B au retour OAuth.
+  bootstrapAirbnbReturn()
+
   const loader = document.getElementById('loader')
   const empty  = document.getElementById('empty')
   const grid   = document.getElementById('grid')
@@ -289,7 +260,6 @@
   let currentDelete = null  // bien en cours de suppression
   let currentPublish = null // bien en cours de publication (Mode B, écrase les prix OTA)
   let currentRateMode = null // bien en cours de changement de mode de prix
-  let currentConnect = null  // bien en cours de demande de connexion OTA (Option B)
 
   async function callApi(method, body) {
     const res = await fetch('/api/channel-property', {
@@ -331,15 +301,9 @@
     // Badge de PROVENANCE ("qui gere le bien") puis, sur une ligne separee, les
     // canaux de distribution REELS lus chez Channex. L'ancien badge unique
     // "HôteSmart" se lisait a tort comme un canal connecte.
-    // Biens OTA (channel manager). ota_connect_status pilote l'affichage :
-    //   draft     -> bouton "Demander la connexion" (Option B : mapping manuel)
-    //   requested -> pill "Connexion en cours" (point 3)
-    //   live      -> pill "Connecté" (point 3)
-    // NB Option B : l'ancien self-service (bouton "Connexions" -> openConnexions,
-    // assistants Airbnb/Booking) est mis en sommeil, pas supprime. A reactiver
-    // post-beta. Voir components/connexions.js et api/channel-connect.js.
+    // Self-service : le bouton "Connexions" ouvre l'assistant marque blanche par bien
+    // (Airbnb OAuth / Booking) via components/connexions.js -> Channex reste masque.
     const isOta = p.provider === 'channex' || p.provider === 'channel'
-    const otaStatus = isOta ? (p.ota_connect_status || 'draft') : null
 
     card.innerHTML = `
       <div>
@@ -352,7 +316,6 @@
         <span>Capacité : ${escapeHtml(p.capacity)} personne(s)</span>
         <span>Devise : ${escapeHtml(p.currency || 'EUR')}</span>
       </div>
-      ${isOta ? otaStatusPill(otaStatus) : ''}
       ${isOta ? `
       <div class="rate-mode">
         💶 Prix sur les plateformes : <strong>${p.rate_sync_mode === 'managed' ? 'Gérés par HôteSmart' : 'Je garde mes prix'}</strong>
@@ -360,7 +323,7 @@
       </div>` : ''}
       <div class="card-actions">
         <a href="/biens/${p.id}/calendrier" class="btn btn-primary">📅 Calendrier</a>
-        ${isOta && otaStatus === 'draft' ? `<button class="btn btn-primary" data-request-connect="${p.id}">🔗 Demander la connexion de mes annonces</button>` : ''}
+        ${isOta ? `<button class="btn" data-connect="${p.id}">🔗 Connexions</button>` : ''}
         ${p.rate_sync_mode === 'managed' ? `<button class="btn" data-fullsync="${p.id}">📤 Publier</button>` : ''}
         <button class="btn" data-edit="${p.id}">Modifier</button>
         <button class="btn btn-danger" data-delete="${p.id}">Supprimer</button>
@@ -378,17 +341,9 @@
     if (fullsyncBtn) fullsyncBtn.addEventListener('click', () => openPublish(p))
     const rateModeBtn = card.querySelector('[data-ratemode]')
     if (rateModeBtn) rateModeBtn.addEventListener('click', () => openRateMode(p))
-    const requestBtn = card.querySelector('[data-request-connect]')
-    if (requestBtn) requestBtn.addEventListener('click', () => openConnectRequest(p))
+    const connectBtn = card.querySelector('[data-connect]')
+    if (connectBtn) connectBtn.addEventListener('click', (e) => openConnexions(p, e.currentTarget))
     return card
-  }
-
-  // Pill de statut de connexion OTA. draft -> rien (le bouton d'action suffit).
-  // Copy/design affines au point 3.
-  function otaStatusPill(status) {
-    if (status === 'requested') return `<div class="ota-pill pending">⏳ Connexion des annonces en cours (24-48h) — vous pouvez déjà configurer ce bien</div>`
-    if (status === 'live') return `<div class="ota-pill live">✓ Annonces connectées</div>`
-    return ''
   }
 
   async function loadProperties() {
@@ -626,53 +581,6 @@
       rateModeFeedback.textContent = '❌ ' + (err.message || 'Erreur inconnue')
       rateModeFeedback.className = 'modal-feedback error'
       rateModeSave.disabled = false; rateModeSave.textContent = old
-    }
-  })
-
-  // ===== Demande de connexion des annonces (Option B : mapping manuel) =====
-  const connectModal = document.getElementById('connect-modal')
-  const connectBooking = document.getElementById('connect-booking')
-  const connectAirbnb = document.getElementById('connect-airbnb')
-  const connectSend = document.getElementById('connect-send')
-  const connectFeedback = document.getElementById('connect-feedback')
-
-  function openConnectRequest(p) {
-    currentConnect = p
-    // Pre-remplit si l'hote avait deja saisi des liens lors d'une demande precedente.
-    const prev = p.ota_listing_urls || {}
-    connectBooking.value = prev.booking || ''
-    connectAirbnb.value = prev.airbnb || ''
-    connectFeedback.className = 'modal-feedback'
-    connectSend.disabled = false; connectSend.textContent = 'Envoyer ma demande'
-    connectModal.classList.add('show')
-  }
-
-  document.getElementById('connect-cancel').addEventListener('click', () => {
-    connectModal.classList.remove('show')
-    currentConnect = null
-  })
-
-  connectSend.addEventListener('click', async () => {
-    if (!currentConnect) return
-    connectSend.disabled = true; connectSend.textContent = '⏳ Envoi…'
-    // URLs facultatives : on n'envoie que celles qui sont renseignees. Le serveur
-    // revalide (http(s), 500 car.) et pose ota_requested_at cote serveur.
-    const urls = {}
-    const b = connectBooking.value.trim(); if (b) urls.booking = b
-    const a = connectAirbnb.value.trim(); if (a) urls.airbnb = a
-    try {
-      await callApi('PATCH', {
-        property_id: currentConnect.id,
-        ota_connect_status: 'requested',
-        ota_listing_urls: Object.keys(urls).length ? urls : null
-      })
-      connectModal.classList.remove('show')
-      currentConnect = null
-      await loadProperties()
-    } catch (err) {
-      connectFeedback.textContent = '❌ ' + (err.message || 'Erreur inconnue')
-      connectFeedback.className = 'modal-feedback error'
-      connectSend.disabled = false; connectSend.textContent = 'Envoyer ma demande'
     }
   })
 

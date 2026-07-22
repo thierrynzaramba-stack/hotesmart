@@ -54,19 +54,6 @@
     .ota-modal-box iframe { flex:1; border:none; width:100%; }
     @media (max-width:768px){ .ota-modal { padding:0 } .ota-modal-box { height:100vh; border-radius:0; max-width:none } }
 
-    /* ── Statut de connexion OTA (Option B : mapping manuel) ── */
-    .ota-pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:500; padding:5px 10px; border-radius:20px; }
-    .ota-pill.pending { background:#FAEEDA; color:#633806; }
-    .ota-pill.live { background:#E1F5EE; color:#085041; }
-    .req-modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:1100; padding:20px; }
-    .req-modal.show { display:flex; }
-    .req-box { background:var(--bg); border-radius:var(--radius-lg); width:100%; max-width:460px; padding:24px; }
-    .req-box h2 { font-size:16px; margin-bottom:8px; color:var(--text); }
-    .req-box .field { margin-bottom:14px; }
-    .req-box label { display:block; font-size:13px; font-weight:600; color:var(--text); margin-bottom:6px; }
-    .req-box input { width:100%; padding:10px 12px; border:0.5px solid var(--border); border-radius:var(--radius); font-size:14px; font-family:inherit; background:var(--bg); color:var(--text); box-sizing:border-box; }
-    .req-box input:focus { outline:none; border-color:var(--green); }
-    .req-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
   </style>
 </head>
 <body>
@@ -210,8 +197,8 @@
           <div class="api-status status-off" id="status-ota">Vérification…</div>
         </div>
         <div style="font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:14px">
-          Demandez la connexion de vos annonces Booking.com et Airbnb : notre équipe les relie à vos biens
-          HôteSmart, en général sous 24-48h. Ensuite, réservations et calendrier restent synchronisés automatiquement.
+          Connectez vos annonces Booking.com, Airbnb et autres plateformes directement à vos biens HôteSmart.
+          Les réservations remontent automatiquement et votre calendrier reste synchronisé en temps réel.
         </div>
         <div id="ota-properties" style="font-size:13px;color:var(--text2)">Chargement…</div>
         <div class="toast" id="toast-ota"></div>
@@ -276,31 +263,6 @@
   </div>
 </div>
 
-<!-- Modale : demande de connexion des annonces (Option B, mapping manuel) -->
-<div class="req-modal" id="req-modal">
-  <div class="req-box">
-    <h2>Demander la connexion de mes annonces</h2>
-    <p style="font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:16px">
-      Notre équipe connecte vos annonces Airbnb et Booking à <strong id="req-prop"></strong>,
-      en général <strong>sous 24-48h</strong>. Collez les liens de vos annonces si vous les avez
-      sous la main — c'est facultatif, vous pouvez demander sans.
-    </p>
-    <div class="field">
-      <label for="req-booking">Lien de votre annonce Booking.com <span style="font-weight:400;color:var(--text2)">(facultatif)</span></label>
-      <input type="url" id="req-booking" placeholder="https://www.booking.com/hotel/…" maxlength="500">
-    </div>
-    <div class="field">
-      <label for="req-airbnb">Lien de votre annonce Airbnb <span style="font-weight:400;color:var(--text2)">(facultatif)</span></label>
-      <input type="url" id="req-airbnb" placeholder="https://www.airbnb.fr/rooms/…" maxlength="500">
-    </div>
-    <div class="toast" id="req-feedback"></div>
-    <div class="req-actions">
-      <button class="btn" id="req-cancel">Annuler</button>
-      <button class="btn btn-primary" id="req-send">Envoyer ma demande</button>
-    </div>
-  </div>
-</div>
-
 <!-- [EN SOMMEIL - Option B] Modale plein écran self-service (iframe headless Channex).
      Conservée pour réactivation post-beta ; plus ouverte par aucun bouton. -->
 <div class="ota-modal" id="ota-modal">
@@ -318,6 +280,7 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { openConnexions } from '/components/connexions.js'
 
   initErrorHandler()
   const session = await requireAuth()
@@ -326,8 +289,7 @@
   window._session  = session
   window._supabase = supabase
 
-  let otaProps = []      // biens OTA charges (source pour le pre-remplissage du formulaire)
-  let reqCurrent = null  // bien en cours de demande de connexion
+  let otaProps = []      // biens OTA charges (source pour l'assistant de connexion par bien)
 
   // Vérifier statut Beds24
   await checkBeds24Status()
@@ -500,88 +462,30 @@
 
       otaProps = props
       setStatus('ota', 'ok', `${props.length} bien${props.length > 1 ? 's' : ''}`)
-      // Option B : chaque bien affiche son statut de connexion. draft -> bouton
-      // "Demander la connexion" ; requested/live -> pill. Plus d'iframe self-service.
-      box.innerHTML = props.map(p => {
-        const status = p.ota_connect_status || 'draft'
-        const right = status === 'draft'
-          ? `<button class="btn btn-primary" data-request="${p.id}">Demander la connexion de mes annonces</button>`
-          : otaPill(status)
-        return `
+      // Self-service : chaque bien ouvre l'assistant marque blanche (Airbnb OAuth /
+      // Booking) via components/connexions.js -> Channex reste masque.
+      box.innerHTML = props.map(p => `
         <div class="ota-prop-row">
           <div>
             <div style="font-size:14px;font-weight:500;color:var(--text)">${esc(p.name)}</div>
             <div style="font-size:12px;color:var(--text2)">${esc(p.city || '')}${p.capacity ? ' · ' + p.capacity + ' pers.' : ''}</div>
           </div>
-          ${right}
-        </div>`
-      }).join('')
+          <button class="btn btn-primary" data-connect="${p.id}">Connecter mes plateformes</button>
+        </div>`).join('')
 
-      box.querySelectorAll('button[data-request]').forEach(b =>
-        b.addEventListener('click', () => openReqModal(b.dataset.request)))
+      box.querySelectorAll('button[data-connect]').forEach(b =>
+        b.addEventListener('click', () => {
+          const p = otaProps.find(x => x.id === b.dataset.connect)
+          if (p) openConnexions(p, b)
+        }))
     } catch (e) {
       box.innerHTML = `<div style="font-size:13px;color:#E24B4A">Erreur de chargement des biens.</div>`
       setStatus('ota', 'off', 'Erreur')
     }
   }
 
-  // Pill de statut de connexion OTA. draft -> '' (le bouton d'action suffit).
-  function otaPill(status) {
-    if (status === 'requested') return `<span class="ota-pill pending">⏳ Connexion en cours, sous 24-48h</span>`
-    if (status === 'live') return `<span class="ota-pill live">✓ Annonces connectées</span>`
-    return ''
-  }
-
-  // ===== Demande de connexion des annonces (Option B : mapping manuel) =====
-  function openReqModal(propId) {
-    const p = otaProps.find(x => x.id === propId)
-    if (!p) return
-    reqCurrent = p
-    document.getElementById('req-prop').textContent = p.name || 'ce logement'
-    const prev = p.ota_listing_urls || {}
-    document.getElementById('req-booking').value = prev.booking || ''
-    document.getElementById('req-airbnb').value = prev.airbnb || ''
-    const fb = document.getElementById('req-feedback'); fb.style.display = 'none'
-    const send = document.getElementById('req-send'); send.disabled = false; send.textContent = 'Envoyer ma demande'
-    document.getElementById('req-modal').classList.add('show')
-  }
-
-  document.getElementById('req-cancel').addEventListener('click', () => {
-    document.getElementById('req-modal').classList.remove('show'); reqCurrent = null
-  })
-
-  document.getElementById('req-send').addEventListener('click', async () => {
-    if (!reqCurrent) return
-    const send = document.getElementById('req-send')
-    send.disabled = true; send.textContent = '⏳ Envoi…'
-    // URLs facultatives : on n'envoie que celles renseignees. Le serveur revalide
-    // (http(s), 500 car.) et pose ota_requested_at cote serveur.
-    const urls = {}
-    const b = document.getElementById('req-booking').value.trim(); if (b) urls.booking = b
-    const a = document.getElementById('req-airbnb').value.trim(); if (a) urls.airbnb = a
-    try {
-      const res = await fetch('/api/channel-property', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({
-          property_id: reqCurrent.id,
-          ota_connect_status: 'requested',
-          ota_listing_urls: Object.keys(urls).length ? urls : null
-        })
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`)
-      document.getElementById('req-modal').classList.remove('show')
-      reqCurrent = null
-      await loadOtaProperties()
-    } catch (e) {
-      const fb = document.getElementById('req-feedback')
-      fb.textContent = '❌ ' + e.message; fb.className = 'toast error'; fb.style.display = 'block'
-      send.disabled = false; send.textContent = 'Envoyer ma demande'
-    }
-  })
-
-  // [EN SOMMEIL - Option B] Ouverture de l'iframe self-service Channex. Conservee
+  // [EN SOMMEIL] Ouverture de l'iframe self-service Channex BRUTE (expose l'UI Channex).
+  // On lui prefere l'assistant marque blanche (openConnexions). Conservee
   // pour reactivation post-beta ; plus appelee par aucun bouton (voir loadOtaProperties).
   async function openOtaModal(propId, propName, btn) {
     btn.disabled = true
