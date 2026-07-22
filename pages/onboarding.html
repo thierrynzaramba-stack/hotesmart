@@ -317,15 +317,8 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   function renderStep0(c) {
     c.innerHTML = [
       '<h1>Bienvenue sur HôteSmart 👋</h1>',
-      '<p class="lead">En 5 minutes, on configure tout pour que vos voyageurs reçoivent des réponses automatiques 24h/24, même à 23h quand vous dormez.</p>',
-      '<p>Vous allez connecter :</p>',
-      '<ul style="margin: 12px 0 24px 20px; color: var(--text-muted);">',
-      '<li>Votre channel manager (Beds24 ou autre)</li>',
-      '<li>Vos serrures connectées (optionnel)</li>',
-      '<li>L\'agent IA qui répond aux voyageurs</li>',
-      '<li>Les SMS d\'alerte (optionnel)</li>',
-      '</ul>',
-      '<p>La plupart des étapes sont skippables. Vous pourrez tout reconfigurer plus tard.</p>',
+      '<p class="lead">Quelques minutes pour que vos voyageurs reçoivent des réponses automatiques, même à 23h quand vous dormez.</p>',
+      '<p>On commence par vos annonces — le reste peut attendre, vous pourrez tout configurer plus tard.</p>',
       '<div class="ob-actions"><span></span><button class="ob-btn ob-btn-primary" id="btn-start">Commencer →</button></div>'
     ].join('');
     document.getElementById('btn-start').onclick = function () { goToStep(1); };
@@ -1395,90 +1388,102 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   // ====================================================================
   // Étape 8 — Mes biens (parcours non-Beds24 uniquement)
   // ====================================================================
-  // TODO (post-beta, option B) : rendre ce parcours SELF-SERVICE au lieu de collecter
-  // des URLs pour provisioning manuel. Brancher sur channel-property (createProperty) +
-  // l'ecran Connexions et les assistants Airbnb (OAuth) / Booking deja construits.
-  // Beta : concierge (5-10 hotes provisionnes a la main via integration_requests).
+  // Etape "Vos biens" — cree de VRAIS biens via POST /api/channel-property (meme
+  // endpoint et memes champs que /biens/nouveau : nom, capacite, ville, prix, devise),
+  // en ota_connect_status='requested'. A la fin, l'hote voit ses biens dans /biens
+  // avec le pill "connexion en cours" ; le mapping se fait cote Channex (Option B).
+  // Anti-fantome/anti-doublon : rollback durci cote endpoint + reconcile client
+  // (nom+capacite+ville) avant tout (re)POST.
   function renderStep8MesBiens(c) {
-    let count = Number(stepData.properties_count) || 1;
-    let urls = Array.isArray(stepData.properties_urls) ? stepData.properties_urls.slice() : [];
-    // Aligner urls.length sur count
-    while (urls.length < count) urls.push('');
-    if (urls.length > count) urls = urls.slice(0, count);
+    const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF'];
+    // Un objet par bien. created=true => provisionne, ne pas recreer au retry.
+    let biens = [{ name: '', capacity: 2, city: '', base_price: '', currency: 'EUR', created: false, error: '' }];
+    let creating = false;
 
-    // Regex URL stricte : http(s)://domaine.tld[/...]
-    function isValidUrl(u) {
-      if (!u || typeof u !== 'string') return false;
-      try {
-        const parsed = new URL(u.trim());
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-        if (!parsed.hostname || parsed.hostname.indexOf('.') === -1) return false;
-        return true;
-      } catch (e) {
-        return false;
-      }
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+      });
+    }
+    function newBien() { return { name: '', capacity: 2, city: '', base_price: '', currency: 'EUR', created: false, error: '' }; }
+    function validBien(b) {
+      return b.name.trim().length > 0
+        && Number(b.capacity) >= 1 && Number(b.capacity) <= 20
+        && b.city.trim().length > 0
+        && Number(b.base_price) > 0 && Number(b.base_price) <= 100000
+        && CURRENCIES.indexOf(b.currency) !== -1;
+    }
+    function allDone() { return biens.every(function (b) { return b.created; }); }
+    function allReady() { return biens.every(function (b) { return b.created || validBien(b); }); }
+    function anyCreated() { return biens.some(function (b) { return b.created; }); }
+    function refreshNext() {
+      const bn = document.getElementById('btn-next');
+      if (bn) bn.disabled = !allReady() || creating;
     }
 
     function render() {
-      const urlInputs = urls.map(function (u, i) {
-        const trimmed = (u || '').trim();
-        const hasContent = trimmed.length > 0;
-        const valid = isValidUrl(trimmed);
-        const errMsg = (hasContent && !valid)
-          ? '<div style="color:#c0392b; font-size:13px; margin-top:4px;">URL invalide. Format attendu : https://...</div>'
-          : '';
+      const cards = biens.map(function (b, i) {
+        const dis = b.created ? ' disabled' : '';
+        const badge = b.created ? '<span style="color:#137333; font-size:13px; margin-left:8px;">✓ créé</span>' : '';
+        const err = b.error ? '<div style="color:#c0392b; font-size:13px; margin-top:6px;">' + escAttr(b.error) + '</div>' : '';
+        const curOpts = CURRENCIES.map(function (cu) {
+          return '<option value="' + cu + '"' + (b.currency === cu ? ' selected' : '') + '>' + cu + '</option>';
+        }).join('');
         return [
-          '<div class="ob-field" style="margin-bottom:12px;">',
-          '<label>Lien de l\'annonce du bien ' + (i + 1) + '</label>',
-          '<input type="url" class="prop-url" data-idx="' + i + '" placeholder="https://www.airbnb.fr/rooms/..." value="' + trimmed.replace(/"/g, '&quot;') + '">',
-          errMsg,
+          '<div style="border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px;">',
+          '<div style="font-weight:600; margin-bottom:10px;">Bien ' + (i + 1) + badge + '</div>',
+          '<div class="ob-field" style="margin-bottom:10px;">',
+          '<label>Nom du bien</label>',
+          '<input type="text" class="b-name" data-idx="' + i + '" maxlength="100" placeholder="Mon appartement Toulouse" value="' + escAttr(b.name) + '"' + dis + '>',
+          '</div>',
+          '<div style="display:flex; gap:12px; flex-wrap:wrap;">',
+          '<div class="ob-field" style="flex:1; min-width:100px;"><label>Capacité max</label>',
+          '<input type="number" class="b-cap" data-idx="' + i + '" min="1" max="20" value="' + escAttr(b.capacity) + '"' + dis + '></div>',
+          '<div class="ob-field" style="flex:1; min-width:100px;"><label>Prix/nuit</label>',
+          '<input type="number" class="b-price" data-idx="' + i + '" min="1" max="100000" step="1" placeholder="80" value="' + escAttr(b.base_price) + '"' + dis + '></div>',
+          '<div class="ob-field" style="flex:1; min-width:90px;"><label>Devise</label>',
+          '<select class="b-cur" data-idx="' + i + '"' + dis + '>' + curOpts + '</select></div>',
+          '</div>',
+          '<div class="ob-field" style="margin-top:10px;"><label>Ville</label>',
+          '<input type="text" class="b-city" data-idx="' + i + '" maxlength="100" placeholder="Toulouse" value="' + escAttr(b.city) + '"' + dis + '></div>',
+          err,
           '</div>'
         ].join('');
       }).join('');
 
-      const allValid = urls.every(function (u) { return isValidUrl(u); });
-      const validCount = count >= 1 && count <= 20;
-      const nextDisabled = !allValid || !validCount;
+      const nextLabel = creating
+        ? 'Création…'
+        : (biens.some(function (b) { return b.error; }) ? 'Réessayer les biens en échec' : 'Créer mes biens →');
 
       c.innerHTML = [
         '<h2>Vos biens</h2>',
-        '<p class="lead">Combien de biens en location courte durée gérez-vous ?</p>',
+        '<p class="lead">Créez vos biens en location courte durée. Nous connectons ensuite vos annonces (sous 24-48h).</p>',
         '<div class="ob-field">',
         '<label>Nombre de biens</label>',
-        '<input type="number" id="prop-count" min="1" max="20" value="' + count + '" style="max-width:120px;">',
+        '<input type="number" id="prop-count" min="1" max="20" value="' + biens.length + '" style="max-width:120px;"' + ((creating || anyCreated()) ? ' disabled' : '') + '>',
         '</div>',
-        '<div style="margin-top:24px;">',
-        urlInputs,
-        '</div>',
+        '<div style="margin-top:20px;">', cards, '</div>',
         '<div class="ob-actions">',
         '<button class="ob-btn ob-btn-ghost" id="btn-back">← Retour</button>',
-        '<button class="ob-btn ob-btn-primary" id="btn-next"' + (nextDisabled ? ' disabled' : '') + '>Suivant →</button>',
+        '<button class="ob-btn ob-btn-primary" id="btn-next"' + ((!allReady() || creating) ? ' disabled' : '') + '>' + nextLabel + '</button>',
         '</div>'
       ].join('');
 
       const countInput = document.getElementById('prop-count');
+      // Verrouille apres la 1re creation reussie : evite de tronquer un bien deja provisionne.
       countInput.oninput = function () {
-        const newCount = Math.max(1, Math.min(20, Number(countInput.value) || 1));
-        if (newCount !== count) {
-          count = newCount;
-          while (urls.length < count) urls.push('');
-          if (urls.length > count) urls = urls.slice(0, count);
-          render();
-        }
+        const n = Math.max(1, Math.min(20, Number(countInput.value) || 1));
+        if (n === biens.length) return;
+        if (n > biens.length) { while (biens.length < n) biens.push(newBien()); }
+        else { biens = biens.slice(0, n); }
+        render();
       };
 
-      c.querySelectorAll('.prop-url').forEach(function (input) {
-        input.oninput = function () {
-          const idx = Number(input.getAttribute('data-idx'));
-          urls[idx] = input.value;
-          const ok = urls.every(function (u) { return isValidUrl(u); });
-          document.getElementById('btn-next').disabled = !ok;
-        };
-        // Au blur, re-render pour afficher/cacher l'erreur sous le champ
-        input.onblur = function () {
-          render();
-        };
-      });
+      c.querySelectorAll('.b-name').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].name = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-cap').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].capacity = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-price').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].base_price = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-city').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].city = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-cur').forEach(function (el) { el.onchange = function () { biens[+el.dataset.idx].currency = el.value; refreshNext(); }; });
 
       document.getElementById('btn-back').onclick = function () {
         const p = getPath();
@@ -1486,17 +1491,69 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         if (idx > 0) goToStep(p[idx - 1]);
       };
 
-      document.getElementById('btn-next').onclick = async function () {
-        if (!urls.every(function (u) { return isValidUrl(u); })) {
-          render();
-          return;
+      document.getElementById('btn-next').onclick = createBiens;
+    }
+
+    async function createBiens() {
+      if (creating || !allReady()) return;
+      creating = true;
+      biens.forEach(function (b) { b.error = ''; });
+      render();
+
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // Reconcile : on lit les biens deja en base pour ne PAS recreer (retry partiel
+      // ou timeout ambigu). Heuristique beta = nom+capacite+ville.
+      let existing = [];
+      try {
+        const gr = await fetch('/api/channel-property', { headers: { 'Authorization': 'Bearer ' + session.access_token } });
+        const gd = await gr.json();
+        existing = Array.isArray(gd.properties) ? gd.properties : [];
+      } catch (e) { /* GET KO : on cree quand meme (pire cas = doublon, rare) */ }
+
+      function matches(b, p) {
+        return (p.name || '').trim().toLowerCase() === b.name.trim().toLowerCase()
+          && Number(p.capacity) === Number(b.capacity)
+          && (p.city || '').trim().toLowerCase() === b.city.trim().toLowerCase();
+      }
+
+      for (let i = 0; i < biens.length; i++) {
+        const b = biens[i];
+        if (b.created) continue;
+        if (existing.some(function (p) { return matches(b, p); })) { b.created = true; continue; }
+        try {
+          const r = await fetch('/api/channel-property', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
+            body: JSON.stringify({
+              name: b.name.trim(),
+              capacity: Number(b.capacity),
+              city: b.city.trim(),
+              currency: b.currency,
+              base_price: Number(b.base_price),
+              ota_connect_status: 'requested'
+            })
+          });
+          const d = await r.json().catch(function () { return {}; });
+          if (r.status === 201) {
+            b.created = true; b.error = '';
+            existing.push(d.property || { name: b.name, capacity: b.capacity, city: b.city });
+          } else if (d && d.error === 'rollback_incomplete') {
+            b.error = 'Erreur technique côté plateforme (nettoyage requis). Réessayez plus tard.';
+          } else {
+            b.error = (d && d.error) ? d.error : ('Erreur ' + r.status);
+          }
+        } catch (e) {
+          b.error = 'Connexion interrompue. Réessayez.';
         }
-        await saveState({
-          properties_count: count,
-          properties_urls: urls.map(function (u) { return u.trim(); })
-        });
+      }
+
+      creating = false;
+      if (allDone()) {
         goToStep(getNextStep(currentStep));
-      };
+      } else {
+        render();
+      }
     }
 
     render();
@@ -1577,12 +1634,13 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
           const { error: updErr } = await supabase
             .from('integration_requests')
             .update({
+              // Biens desormais crees comme vraies lignes properties (ota_connect_status
+              // 'requested') a l'etape 8 : la source de verite du mapping est properties,
+              // plus integration_requests. On ne garde ici que le contact.
               contact_first_name: firstName.trim(),
               contact_last_name: lastName.trim(),
               contact_phone: phone.trim(),
-              contact_email: email,
-              properties_count: stepData.properties_count || null,
-              properties_urls: stepData.properties_urls || null
+              contact_email: email
             })
             .eq('id', requestId)
             .eq('user_id', user.id);

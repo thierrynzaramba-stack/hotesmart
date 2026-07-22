@@ -41,6 +41,23 @@ async function channelDelete(path) {
   }
 }
 
+// Rollback DURCI de la property (le seul delete qui compte : sans property, les
+// room_type/rate_plan orphelins sont inertes et invisibles). Retente une fois
+// avant d'abandonner. Renvoie true si la property est bien supprimee (ou absente),
+// false si un fantome subsiste cote channel manager -> l'appelant doit le signaler.
+async function rollbackProperty(providerPropertyId) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const r = await channelCall('DELETE', `/properties/${providerPropertyId}`)
+      if (r.ok || r.status === 404) return true   // supprimee, ou deja absente
+      console.error('[channel-property] rollback property non-ok', attempt, r.status, r.json)
+    } catch (e) {
+      console.error('[channel-property] rollback property exception', attempt, e.message)
+    }
+  }
+  return false
+}
+
 // Date ISO (YYYY-MM-DD) decalee de n jours par rapport a aujourd'hui.
 function isoPlusDays(n) {
   const d = new Date()
@@ -305,7 +322,15 @@ module.exports = async function handler(req, res) {
 
   // ===== POST : creation d'un bien complet =====
   if (req.method === 'POST') {
-    const { name, capacity, currency, address, city, country, zip_code, base_price, included_guests, extra_guest_fee } = req.body || {}
+    const { name, capacity, currency, address, city, country, zip_code, base_price, included_guests, extra_guest_fee, ota_connect_status } = req.body || {}
+
+    // Statut de connexion OTA a la creation (facultatif). Seul 'requested' est
+    // accepte (parcours onboarding : l'hote demande la connexion en creant le bien).
+    // Absent -> defaut DB 'draft' (cas /biens/nouveau). Jamais 'live' ici.
+    if (ota_connect_status !== undefined && ota_connect_status !== 'requested') {
+      return res.status(400).json({ error: 'ota_connect_status invalide (requested attendu ou champ absent)' })
+    }
+    const requestConnect = ota_connect_status === 'requested'
 
     // Type d'inventaire : defaut whole. Seul whole est supporte pour l'instant.
     const inventoryType = (req.body?.inventory_type || 'whole').toLowerCase()
@@ -498,16 +523,25 @@ module.exports = async function handler(req, res) {
           capacity: cap,
           base_price: basePrice,
           included_guests: incGuests,
-          extra_guest_fee: extraFee
+          extra_guest_fee: extraFee,
+          // Onboarding : l'hote demande la connexion en creant le bien. Sinon defaut DB 'draft'.
+          ...(requestConnect ? { ota_connect_status: 'requested', ota_requested_at: new Date().toISOString() } : {})
         })
         .select()
         .single()
 
       if (insertError) {
         console.error('[channel-property] INSERT Supabase failed', insertError.message)
+        // Rollback : enfants best-effort, puis property avec retry. Si la property
+        // ne peut pas etre supprimee -> fantome cote channel manager : on le signale
+        // distinctement (jamais silencieux) pour nettoyage manuel.
         await channelDelete(`/rate_plans/${providerRatePlanId}`)
         await channelDelete(`/room_types/${providerRoomTypeId}`)
-        await channelDelete(`/properties/${providerPropertyId}`)
+        const cleaned = await rollbackProperty(providerPropertyId)
+        if (!cleaned) {
+          console.error(`[channel-property] ORPHAN provider_property_id=${providerPropertyId} (rollback incomplet apres INSERT KO)`)
+          return res.status(502).json({ error: 'rollback_incomplete', orphan_property_id: providerPropertyId })
+        }
         return res.status(500).json({ error: 'Sauvegarde echouee' })
       }
 
@@ -517,7 +551,13 @@ module.exports = async function handler(req, res) {
       console.error('[channel-property] Internal error', err.message)
       if (providerRatePlanId) await channelDelete(`/rate_plans/${providerRatePlanId}`)
       if (providerRoomTypeId) await channelDelete(`/room_types/${providerRoomTypeId}`)
-      if (providerPropertyId) await channelDelete(`/properties/${providerPropertyId}`)
+      if (providerPropertyId) {
+        const cleaned = await rollbackProperty(providerPropertyId)
+        if (!cleaned) {
+          console.error(`[channel-property] ORPHAN provider_property_id=${providerPropertyId} (rollback incomplet apres exception)`)
+          return res.status(502).json({ error: 'rollback_incomplete', orphan_property_id: providerPropertyId })
+        }
+      }
       return res.status(500).json({ error: 'Erreur interne' })
     }
   }
