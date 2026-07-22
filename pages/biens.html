@@ -124,6 +124,37 @@
       <label for="edit-zip">Code postal</label>
       <input type="text" id="edit-zip" maxlength="20">
     </div>
+    <div class="field">
+      <label for="edit-country">Pays</label>
+      <select id="edit-country">
+        <option value="FR">France</option>
+        <option value="BE">Belgique</option>
+        <option value="CH">Suisse</option>
+        <option value="ES">Espagne</option>
+        <option value="IT">Italie</option>
+        <option value="PT">Portugal</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="edit-capacity">Capacité max</label>
+      <input type="number" id="edit-capacity" min="1" max="20">
+    </div>
+    <div class="field">
+      <label for="edit-base-price">Prix de base par nuit</label>
+      <input type="number" id="edit-base-price" min="1" max="100000" step="1">
+    </div>
+    <div class="field">
+      <label for="edit-included">Voyageurs inclus dans le prix (optionnel)</label>
+      <input type="number" id="edit-included" min="1" max="20" placeholder="Tous">
+    </div>
+    <div class="field">
+      <label for="edit-extra">Supplément par voyageur additionnel (optionnel)</label>
+      <input type="number" id="edit-extra" min="0" max="100000" step="1" placeholder="0">
+    </div>
+    <div class="field">
+      <label for="edit-currency">Devise</label>
+      <input type="text" id="edit-currency" disabled title="La devise ne peut pas être modifiée après la création">
+    </div>
     <div class="modal-feedback" id="edit-feedback"></div>
     <div class="modal-actions">
       <button class="btn" id="edit-cancel">Annuler</button>
@@ -355,7 +386,7 @@
   // Pill de statut de connexion OTA. draft -> rien (le bouton d'action suffit).
   // Copy/design affines au point 3.
   function otaStatusPill(status) {
-    if (status === 'requested') return `<div class="ota-pill pending">⏳ Connexion en cours, sous 24-48h</div>`
+    if (status === 'requested') return `<div class="ota-pill pending">⏳ Connexion des annonces en cours (24-48h) — vous pouvez déjà configurer ce bien</div>`
     if (status === 'live') return `<div class="ota-pill live">✓ Annonces connectées</div>`
     return ''
   }
@@ -394,6 +425,12 @@
     document.getElementById('edit-address').value = p.address || ''
     document.getElementById('edit-city').value = p.city || ''
     document.getElementById('edit-zip').value = p.zip_code || ''
+    document.getElementById('edit-country').value = p.country || 'FR'
+    document.getElementById('edit-capacity').value = p.capacity != null ? p.capacity : ''
+    document.getElementById('edit-base-price').value = p.base_price != null ? p.base_price : ''
+    document.getElementById('edit-included').value = p.included_guests != null ? p.included_guests : ''
+    document.getElementById('edit-extra').value = p.extra_guest_fee != null ? p.extra_guest_fee : ''
+    document.getElementById('edit-currency').value = p.currency || 'EUR'
     editFeedback.className = 'modal-feedback'
     editModal.classList.add('show')
   }
@@ -408,13 +445,25 @@
     const btn = document.getElementById('edit-save')
     btn.disabled = true; btn.textContent = '⏳ Enregistrement…'
     try {
-      await callApi('PATCH', {
+      const g = (id) => document.getElementById(id).value
+      // Cosmetiques : toujours envoyes (le PATCH sync la property, appel leger).
+      const body = {
         property_id: currentEdit.id,
-        name: document.getElementById('edit-name').value,
-        address: document.getElementById('edit-address').value,
-        city: document.getElementById('edit-city').value,
-        zip_code: document.getElementById('edit-zip').value
-      })
+        name: g('edit-name'),
+        address: g('edit-address'),
+        city: g('edit-city'),
+        zip_code: g('edit-zip'),
+        country: g('edit-country')
+      }
+      // Prix / occupation : envoyes UNIQUEMENT si modifies -> evite de reconstruire
+      // le rate_plan Channex quand on ne touche qu'un champ cosmetique. Devise non editable.
+      const norm = (v) => (v == null ? '' : String(v))
+      const capV = g('edit-capacity'), baseV = g('edit-base-price'), incV = g('edit-included'), extraV = g('edit-extra')
+      if (norm(capV) !== norm(currentEdit.capacity)) body.capacity = Number(capV)
+      if (norm(baseV) !== norm(currentEdit.base_price)) body.base_price = Number(baseV)
+      if (norm(incV) !== norm(currentEdit.included_guests)) body.included_guests = incV === '' ? null : Number(incV)
+      if (norm(extraV) !== norm(currentEdit.extra_guest_fee)) body.extra_guest_fee = extraV === '' ? null : Number(extraV)
+      await callApi('PATCH', body)
       editModal.classList.remove('show')
       currentEdit = null
       await loadProperties()

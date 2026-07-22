@@ -393,21 +393,16 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   function renderWaitingScreen() {
     // Vide le stepper visuel
     stepper.innerHTML = '';
-    stepLabel.textContent = 'Demande enregistrée';
+    stepLabel.textContent = 'C\'est prêt';
 
     content.innerHTML = [
-      '<h1>Merci, on s\'occupe de vous</h1>',
-      '<p class="lead">Votre demande d\'intégration a bien été enregistrée. Un développeur va la traiter rapidement.</p>',
-      '<p>Vous recevrez un email dès que votre channel manager sera disponible sur HôteSmart. En attendant, vous pouvez fermer cette fenêtre.</p>',
+      '<h1>Vos biens sont créés 🎉</h1>',
+      '<p class="lead">Tout est en place. Nous connectons vos annonces Airbnb et Booking à vos biens — en général sous 24-48h.</p>',
+      '<p>Pas besoin d\'attendre : dès maintenant, configurez vos biens, vos tarifs et votre calendrier. Vos réservations remonteront automatiquement dès la connexion active.</p>',
       '<div class="ob-actions"><span></span>',
-      '<button class="ob-btn ob-btn-ghost" id="btn-logout-waiting">Se déconnecter</button>',
+      '<a class="ob-btn ob-btn-primary" href="/biens" style="display:inline-block; text-decoration:none;">Accéder à mes biens →</a>',
       '</div>'
     ].join('');
-
-    document.getElementById('btn-logout-waiting').onclick = async function () {
-      sessionStorage.clear();
-      await signOut();
-    };
   }
   function renderStep2Placeholder(c) {
     let inviteCode = stepData.beds24_invite_code_attempt || '';
@@ -1396,8 +1391,15 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
   // (nom+capacite+ville) avant tout (re)POST.
   function renderStep8MesBiens(c) {
     const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF'];
+    // Memes options que /biens/nouveau (parite stricte).
+    const COUNTRIES = [['FR', 'France'], ['BE', 'Belgique'], ['CH', 'Suisse'], ['ES', 'Espagne'], ['IT', 'Italie'], ['PT', 'Portugal']];
     // Un objet par bien. created=true => provisionne, ne pas recreer au retry.
-    let biens = [{ name: '', capacity: 2, city: '', base_price: '', currency: 'EUR', created: false, error: '' }];
+    function newBien() {
+      return { name: '', capacity: 2, city: '', base_price: '', currency: 'EUR',
+        address: '', zip_code: '', country: 'FR', included_guests: '', extra_guest_fee: '',
+        created: false, error: '' };
+    }
+    let biens = [newBien()];
     let creating = false;
 
     function escAttr(s) {
@@ -1405,13 +1407,23 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
       });
     }
-    function newBien() { return { name: '', capacity: 2, city: '', base_price: '', currency: 'EUR', created: false, error: '' }; }
     function validBien(b) {
-      return b.name.trim().length > 0
-        && Number(b.capacity) >= 1 && Number(b.capacity) <= 20
-        && b.city.trim().length > 0
-        && Number(b.base_price) > 0 && Number(b.base_price) <= 100000
-        && CURRENCIES.indexOf(b.currency) !== -1;
+      const cap = Number(b.capacity);
+      if (!(b.name.trim().length > 0)) return false;
+      if (!(cap >= 1 && cap <= 20)) return false;
+      if (!(b.city.trim().length > 0)) return false;
+      if (!(Number(b.base_price) > 0 && Number(b.base_price) <= 100000)) return false;
+      if (CURRENCIES.indexOf(b.currency) === -1) return false;
+      // Facultatifs, mais si renseignes ils doivent etre coherents (comme cote serveur).
+      if (b.included_guests !== '' && b.included_guests != null) {
+        const ig = Number(b.included_guests);
+        if (!(ig >= 1 && ig <= cap)) return false;
+      }
+      if (b.extra_guest_fee !== '' && b.extra_guest_fee != null) {
+        const ef = Number(b.extra_guest_fee);
+        if (!(ef >= 0 && ef <= 100000)) return false;
+      }
+      return true;
     }
     function allDone() { return biens.every(function (b) { return b.created; }); }
     function allReady() { return biens.every(function (b) { return b.created || validBien(b); }); }
@@ -1429,6 +1441,9 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         const curOpts = CURRENCIES.map(function (cu) {
           return '<option value="' + cu + '"' + (b.currency === cu ? ' selected' : '') + '>' + cu + '</option>';
         }).join('');
+        const cntOpts = COUNTRIES.map(function (co) {
+          return '<option value="' + co[0] + '"' + (b.country === co[0] ? ' selected' : '') + '>' + co[1] + '</option>';
+        }).join('');
         return [
           '<div style="border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px;">',
           '<div style="font-weight:600; margin-bottom:10px;">Bien ' + (i + 1) + badge + '</div>',
@@ -1444,8 +1459,22 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
           '<div class="ob-field" style="flex:1; min-width:90px;"><label>Devise</label>',
           '<select class="b-cur" data-idx="' + i + '"' + dis + '>' + curOpts + '</select></div>',
           '</div>',
-          '<div class="ob-field" style="margin-top:10px;"><label>Ville</label>',
+          '<div class="ob-field" style="margin-top:10px;"><label>Adresse <span style="font-weight:400;color:var(--text-muted)">(facultatif)</span></label>',
+          '<input type="text" class="b-address" data-idx="' + i + '" maxlength="200" placeholder="12 rue de la République" value="' + escAttr(b.address) + '"' + dis + '></div>',
+          '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;">',
+          '<div class="ob-field" style="flex:1; min-width:100px;"><label>Code postal</label>',
+          '<input type="text" class="b-zip" data-idx="' + i + '" maxlength="20" placeholder="31000" value="' + escAttr(b.zip_code) + '"' + dis + '></div>',
+          '<div class="ob-field" style="flex:2; min-width:120px;"><label>Ville</label>',
           '<input type="text" class="b-city" data-idx="' + i + '" maxlength="100" placeholder="Toulouse" value="' + escAttr(b.city) + '"' + dis + '></div>',
+          '<div class="ob-field" style="flex:1; min-width:110px;"><label>Pays</label>',
+          '<select class="b-cnt" data-idx="' + i + '"' + dis + '>' + cntOpts + '</select></div>',
+          '</div>',
+          '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;">',
+          '<div class="ob-field" style="flex:1; min-width:140px;"><label>Voyageurs inclus <span style="font-weight:400;color:var(--text-muted)">(facultatif)</span></label>',
+          '<input type="number" class="b-inc" data-idx="' + i + '" min="1" max="20" placeholder="Tous" value="' + escAttr(b.included_guests) + '"' + dis + '></div>',
+          '<div class="ob-field" style="flex:1; min-width:140px;"><label>Prix / pers. sup. <span style="font-weight:400;color:var(--text-muted)">(facultatif)</span></label>',
+          '<input type="number" class="b-extra" data-idx="' + i + '" min="0" max="100000" step="1" placeholder="0" value="' + escAttr(b.extra_guest_fee) + '"' + dis + '></div>',
+          '</div>',
           err,
           '</div>'
         ].join('');
@@ -1484,6 +1513,11 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       c.querySelectorAll('.b-price').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].base_price = el.value; refreshNext(); }; });
       c.querySelectorAll('.b-city').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].city = el.value; refreshNext(); }; });
       c.querySelectorAll('.b-cur').forEach(function (el) { el.onchange = function () { biens[+el.dataset.idx].currency = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-address').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].address = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-zip').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].zip_code = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-cnt').forEach(function (el) { el.onchange = function () { biens[+el.dataset.idx].country = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-inc').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].included_guests = el.value; refreshNext(); }; });
+      c.querySelectorAll('.b-extra').forEach(function (el) { el.oninput = function () { biens[+el.dataset.idx].extra_guest_fee = el.value; refreshNext(); }; });
 
       document.getElementById('btn-back').onclick = function () {
         const p = getPath();
@@ -1531,6 +1565,11 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
               city: b.city.trim(),
               currency: b.currency,
               base_price: Number(b.base_price),
+              address: b.address.trim() || null,
+              zip_code: b.zip_code.trim() || null,
+              country: b.country,
+              included_guests: b.included_guests !== '' ? Number(b.included_guests) : null,
+              extra_guest_fee: b.extra_guest_fee !== '' ? Number(b.extra_guest_fee) : null,
               ota_connect_status: 'requested'
             })
           });

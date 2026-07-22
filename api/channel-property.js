@@ -81,6 +81,21 @@ function sanitizeListingUrls(raw) {
   return Object.keys(out).length ? out : null
 }
 
+// Construit sell_mode + options d'un rate_plan a partir des parametres de prix.
+// SOURCE UNIQUE de la formule (creation ET modification) pour ne jamais diverger.
+// extraFee > 0 -> per_person (progression Airbnb-like) ; sinon per_room (prix unique).
+function buildRatePlanOptions(basePrice, incGuests, extraFee, cap) {
+  if (extraFee != null && extraFee > 0) {
+    const options = []
+    for (let i = 1; i <= cap; i++) {
+      const additional = Math.max(0, i - incGuests)
+      options.push({ occupancy: i, rate: Math.round((basePrice + (additional * extraFee)) * 100), is_primary: (i === cap) })
+    }
+    return { sell_mode: 'per_person', options }
+  }
+  return { sell_mode: 'per_room', options: [{ occupancy: cap, rate: Math.round(basePrice * 100), is_primary: true }] }
+}
+
 module.exports = async function handler(req, res) {
   // ===== AUTH (pattern beds24.js) =====
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -96,7 +111,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     const { data: chanData, error: chanErr } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
+      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (chanErr) {
@@ -133,15 +148,19 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ properties: [...beds24Props, ...channexProps] })
   }
 
-  // ===== PATCH : modification d'un bien (champs cosmetiques) =====
-  // Body : { property_id (uuid Supabase), name?, address?, city?, zip_code?, country? }
+  // ===== PATCH : modification d'un bien =====
+  // Body : { property_id (uuid Supabase), name?, address?, city?, zip_code?, country?,
+  //          capacity?, base_price?, included_guests?, extra_guest_fee?, rate_sync_mode?,
+  //          ota_connect_status?, ota_listing_urls? }
+  // Devise volontairement NON modifiable (changement mal supporte cote Channex).
   if (req.method === 'PATCH') {
-    const { property_id: pid, name, address, city, zip_code, country, rate_sync_mode, ota_connect_status, ota_listing_urls } = req.body || {}
+    const { property_id: pid, name, address, city, zip_code, country, rate_sync_mode,
+      ota_connect_status, ota_listing_urls, capacity, base_price, included_guests, extra_guest_fee } = req.body || {}
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
-      .select('id, provider, provider_property_id')
+      .select('id, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee')
       .eq('id', pid)
       .eq('user_id', user.id)
       .single()
@@ -181,7 +200,64 @@ module.exports = async function handler(req, res) {
     if (ota_listing_urls !== undefined) {
       updates.ota_listing_urls = sanitizeListingUrls(ota_listing_urls)
     }
+
+    // ===== Champs prix / occupation (modifiables apres creation) =====
+    // Ces champs definissent le rate_plan (et le room_type pour la capacite) cote
+    // Channex. Une ecriture DB seule ferait diverger DB et Channex -> plus bas on
+    // reconstruit le rate_plan EN PLACE (meme provider_rate_plan_id : les mappings de
+    // canaux qui referencent cet id ne sont pas casses), de facon BLOQUANTE.
+    let pricingTouched = false
+    let effCap, effBase, effInc, effExtra
+    if (capacity !== undefined || base_price !== undefined || included_guests !== undefined || extra_guest_fee !== undefined) {
+      if (prop.provider !== 'channex' && prop.provider !== 'channel') {
+        return res.status(400).json({ error: 'Champs prix reserves aux biens connectes aux plateformes' })
+      }
+      pricingTouched = true
+      // Valeur effective = nouvelle valeur si fournie, sinon valeur actuelle en base.
+      effCap = capacity !== undefined ? parseInt(capacity, 10) : Number(prop.capacity)
+      if (!effCap || effCap < 1 || effCap > 20) return res.status(400).json({ error: 'Capacite invalide (1-20)' })
+      effBase = base_price !== undefined ? parseFloat(base_price) : Number(prop.base_price)
+      if (!effBase || effBase <= 0 || effBase > 100000) return res.status(400).json({ error: 'Prix de base invalide (>0)' })
+      effInc = included_guests !== undefined
+        ? ((included_guests === null || included_guests === '') ? effCap : parseInt(included_guests, 10))
+        : (prop.included_guests != null ? Number(prop.included_guests) : effCap)
+      if (!effInc || effInc < 1 || effInc > effCap) return res.status(400).json({ error: 'Voyageurs inclus invalide (1 a capacite)' })
+      effExtra = extra_guest_fee !== undefined
+        ? ((extra_guest_fee === null || extra_guest_fee === '') ? null : parseFloat(extra_guest_fee))
+        : (prop.extra_guest_fee != null ? Number(prop.extra_guest_fee) : null)
+      if (effExtra != null && (effExtra < 0 || effExtra > 100000)) return res.status(400).json({ error: 'Supplement invalide' })
+      updates.capacity = effCap
+      updates.base_price = effBase
+      updates.included_guests = effInc
+      updates.extra_guest_fee = effExtra
+    }
+
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'Aucun champ a modifier' })
+
+    // Sync prix/occupation cote Channex (BLOQUANT : si echec, on n'ecrit PAS en DB pour
+    // ne pas diverger). room_type mis a jour si la capacite change ; rate_plan reconstruit
+    // en place via la formule partagee. Fait AVANT le PUT property cosmetique.
+    if (pricingTouched && (prop.provider === 'channex' || prop.provider === 'channel') && prop.provider_property_id) {
+      if (capacity !== undefined && prop.provider_room_type_id) {
+        const rtRes = await channelCall('PUT', `/room_types/${prop.provider_room_type_id}`, {
+          room_type: { occ_adults: effCap, default_occupancy: effCap }
+        })
+        if (!rtRes.ok) {
+          console.error('[channel-property] PATCH room_type echec', rtRes.status, rtRes.json)
+          return res.status(502).json({ error: 'Mise a jour de la capacite echouee cote plateforme' })
+        }
+      }
+      if (prop.provider_rate_plan_id) {
+        const rp = buildRatePlanOptions(effBase, effInc, effExtra, effCap)
+        const rpRes = await channelCall('PUT', `/rate_plans/${prop.provider_rate_plan_id}`, {
+          rate_plan: { sell_mode: rp.sell_mode, options: rp.options }
+        })
+        if (!rpRes.ok) {
+          console.error('[channel-property] PATCH rate_plan echec', rpRes.status, rpRes.json)
+          return res.status(502).json({ error: 'Mise a jour du tarif echouee cote plateforme' })
+        }
+      }
+    }
 
     // Sync cote channel manager (best effort, non bloquant)
     let channelSynced = null
@@ -422,40 +498,16 @@ module.exports = async function handler(req, res) {
       }
       providerRoomTypeId = roomRes.json?.data?.id
 
-      // Etape 3 : creer rate_plan
-      // Si extraFee defini et > 0 : Per Person avec progression Airbnb-like
-      // Sinon : Per Room avec prix unique
-      let ratePlanPayload
-      if (extraFee != null && extraFee > 0) {
-        const options = []
-        for (let i = 1; i <= cap; i++) {
-          const additional = Math.max(0, i - incGuests)
-          options.push({
-            occupancy: i,
-            rate: Math.round((basePrice + (additional * extraFee)) * 100),
-            is_primary: (i === cap)
-          })
-        }
-        ratePlanPayload = {
-          rate_plan: {
-            property_id: providerPropertyId,
-            room_type_id: providerRoomTypeId,
-            title: 'Tarif Standard',
-            currency: cur,
-            sell_mode: 'per_person',
-            options
-          }
-        }
-      } else {
-        ratePlanPayload = {
-          rate_plan: {
-            property_id: providerPropertyId,
-            room_type_id: providerRoomTypeId,
-            title: 'Tarif Standard',
-            currency: cur,
-            sell_mode: 'per_room',
-            options: [{ occupancy: cap, rate: Math.round(basePrice * 100), is_primary: true }]
-          }
+      // Etape 3 : creer rate_plan (formule partagee avec la modification -> buildRatePlanOptions)
+      const rpCreate = buildRatePlanOptions(basePrice, incGuests, extraFee, cap)
+      const ratePlanPayload = {
+        rate_plan: {
+          property_id: providerPropertyId,
+          room_type_id: providerRoomTypeId,
+          title: 'Tarif Standard',
+          currency: cur,
+          sell_mode: rpCreate.sell_mode,
+          options: rpCreate.options
         }
       }
       const rateRes = await channelCall('POST', '/rate_plans', ratePlanPayload)

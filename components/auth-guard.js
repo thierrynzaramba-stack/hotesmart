@@ -30,17 +30,39 @@ export async function requireAuth() {
   // le bandeau persistant (renderOnboardingBanner) ; l'acces aux features payantes par le
   // parcours Stripe reel (coupon beta). On garantit seulement l'existence de la ligne
   // onboarding_state au 1er login, pour le suivi d'avancement et le bandeau.
+  let step = 0
+  let completed = false
   try {
     const { data: onboarding } = await supabase
       .from('onboarding_state')
-      .select('user_id')
+      .select('current_step, completed')
       .eq('user_id', userId)
       .maybeSingle()
     if (!onboarding) {
       await supabase.from('onboarding_state').insert({ user_id: userId, current_step: 0, completed: false })
+    } else {
+      step = onboarding.current_step
+      completed = onboarding.completed === true
     }
   } catch (e) {
     console.error('[auth-guard] ensure onboarding_state failed:', e)
+  }
+
+  // 1er login : forcer l'onboarding UNE fois. Un hote qui a deja avance (current_step > 0)
+  // ou termine n'est jamais reforce -> le bandeau persistant prend le relais. La garde
+  // localStorage (par utilisateur) evite de repiéger a chaque page un hote reste a l'etape 0.
+  try {
+    const onOnboarding = window.location.pathname.indexOf('onboarding') !== -1
+    const neverStarted = (step == null || step === 0)
+    const forcedKey = 'hs_ob_forced_' + userId
+    if (!completed && neverStarted && !onOnboarding && !localStorage.getItem(forcedKey)) {
+      localStorage.setItem(forcedKey, '1')
+      window.location.replace('/pages/onboarding.html')
+      return null
+    }
+  } catch (e) {
+    // localStorage indisponible : on n'empeche pas l'acces (redirection best-effort).
+    console.error('[auth-guard] onboarding redirect skipped:', e)
   }
 
   return session
