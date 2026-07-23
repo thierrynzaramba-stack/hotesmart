@@ -1,3 +1,4 @@
+// ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT).
 const { createClient } = require('@supabase/supabase-js')
 const { sendViaBeds24 } = require('../lib/cron-beds24')
 const { markReady } = require('../lib/cron-property-status')
@@ -164,18 +165,21 @@ module.exports = async function handler(req, res) {
     const userId         = tokenData.user_id
     const visibilityDays = tokenData.visibility_days || 30
 
-    const { data: keyData } = await supabase
-      .from('api_keys').select('api_key').eq('user_id', userId).single()
-    if (!keyData) return res.status(400).json({ error: 'Beds24 non configuré' })
+    // Biens du prestataire : lecture de la table `properties` (dual-provider,
+    // ZERO appel Beds24). Cle universelle = provider_property_id, deja utilisee par
+    // les tokens (property_ids), menage_done, property_status et bookings_snapshot.
+    const { data: propRows } = await supabase
+      .from('properties')
+      .select('provider_property_id, name')
+      .eq('user_id', userId)
+      .not('provider_property_id', 'is', null)
 
-    const beds24Key = keyData.api_key
-    const propsRes  = await fetch('https://beds24.com/api/v2/properties', { headers: { token: beds24Key } })
-    const propsData = await propsRes.json()
-    const allProperties = propsData.data || []
-
-    const allowedIds = tokenData.property_ids || []
-    const properties = allowedIds.length
-      ? allProperties.filter(p => allowedIds.includes(String(p.id))) : allProperties
+    const allowedIds = (tokenData.property_ids || []).map(String)
+    const properties = (propRows || [])
+      .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
+      .map(p => ({ id: String(p.provider_property_id), name: p.name }))
+    const propNameById = {}
+    properties.forEach(p => { propNameById[p.id] = p.name })
 
     const today   = new Date(); today.setHours(0,0,0,0)
     const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + visibilityDays)
@@ -187,17 +191,35 @@ module.exports = async function handler(req, res) {
     const dateFrom = minDate.toISOString().split('T')[0]
     const dateTo   = maxDate.toISOString().split('T')[0]
 
-    const allBookings = []
-    for (const prop of properties) {
-      const r = await fetch(
-        `https://beds24.com/api/v2/bookings?propId=${prop.id}&departureFrom=${dateFrom}&departureTo=${dateTo}`,
-        { headers: { token: beds24Key } }
-      )
-      const d = await r.json()
-      const propBookings = (d.data || [])
-        .filter(b => String(b.propertyId) === String(prop.id))
-        .map(b => ({ ...b, propName: prop.name, propId: prop.id }))
-      allBookings.push(...propBookings)
+    // Reservations : lecture bookings_snapshot (alimentee par la couche sync, tous
+    // providers). Mappe vers la MEME forme que l'ancien retour Beds24 -> contrat
+    // front inchange. Annulations exclues (pas de menage sur une reservation annulee).
+    const propIds = properties.map(p => p.id)
+    let allBookings = []
+    if (propIds.length) {
+      const { data: snaps } = await supabase
+        .from('bookings_snapshot')
+        .select('booking_id, property_id, snapshot')
+        .eq('user_id', userId)
+        .in('property_id', propIds)
+      allBookings = (snaps || [])
+        .map(s => {
+          const snap = s.snapshot || {}
+          return {
+            id:        String(s.booking_id),
+            propId:    String(s.property_id),
+            propName:  propNameById[String(s.property_id)] || '',
+            arrival:   snap.arrival || null,
+            departure: snap.departure || null,
+            firstName: snap.firstName || '',
+            lastName:  snap.lastName || '',
+            numAdult:  snap.numAdult ?? null,
+            numChild:  snap.numChild ?? null,
+            status:    snap.status || 'new'
+          }
+        })
+        .filter(b => b.status !== 'cancelled')
+        .filter(b => b.departure && b.departure >= dateFrom && b.departure <= dateTo)
     }
 
     const bookingIds = allBookings.map(b => String(b.id))
