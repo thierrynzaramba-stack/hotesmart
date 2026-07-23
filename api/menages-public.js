@@ -1,8 +1,6 @@
 // ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT).
 const { createClient } = require('@supabase/supabase-js')
-const { sendViaBeds24 } = require('../lib/cron-beds24')
 const { markReady } = require('../lib/cron-property-status')
-const { buildMessage } = require('../lib/message-builder')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -276,79 +274,8 @@ function todayInParis() {
   return fmt.format(new Date()) // en-CA donne YYYY-MM-DD
 }
 
-// ─── Génération code Seam ─────────────────────────────────────────────────────
-// (conservee mais plus appelee depuis le commit a95d8f1 — a nettoyer plus tard)
-async function generateSeamCode(userId, lockId, booking) {
-  try {
-    const { data: lock } = await supabase
-      .from('locks').select('seam_device_id, brand, label').eq('id', lockId).single()
-    if (!lock?.seam_device_id) return null
-
-    const { data: keyRow } = await supabase
-      .from('api_keys').select('seam_api_key').eq('user_id', userId).maybeSingle()
-    const apiKey = keyRow?.seam_api_key || process.env.SEAM_API_KEY
-    if (!apiKey) return null
-
-    // Réutiliser un code existant pending (pas encore envoyé)
-    const { data: existing } = await supabase.from('access_codes').select('code, seam_code_id, status')
-      .eq('booking_id', String(booking.id)).eq('lock_id', lockId).maybeSingle()
-    if (existing?.code && existing.status !== 'deleted') {
-      console.log(`[Menage] Code existant réutilisé booking ${booking.id}: ${existing.code}`)
-      return existing.code
-    }
-
-    const { generateCode } = require('../lib/providers/seam')
-    const result = await generateCode({
-      seamDeviceId: lock.seam_device_id,
-      guestName:    `${booking.firstName || ''} ${booking.lastName || ''}`.trim() || 'Voyageur',
-      startsAt:     new Date(booking.arrival).toISOString(),
-      endsAt:       new Date(booking.departure + 'T23:59:59').toISOString(),
-      apiKey
-    })
-
-    await supabase.from('access_codes').insert({
-      lock_id: lockId, booking_id: String(booking.id),
-      property_id: String(booking.propertyId || booking.propId),
-      seam_code_id: result.seam_code_id, code: result.code,
-      starts_at: result.starts_at, ends_at: result.ends_at, status: 'active'
-    })
-
-    console.log(`[Menage] Code généré booking ${booking.id}: ${result.code}`)
-    return result.code
-  } catch (err) {
-    console.error('[Menage] Erreur generateSeamCode:', err.message)
-    return null
-  }
-}
-
-// ─── Helpers (a nettoyer plus tard, plus appeles) ─────────────────────────────
-async function saveAndSend(userId, propertyId, bookingId, template, guestName, message, beds24Key) {
-  await supabase.from('conversations').insert({
-    user_id: userId, property_id: String(propertyId),
-    guest_name: guestName, guest_message: '[AUTO: menage_done]',
-    agent_reply: message, book_id: String(bookingId)
-  })
-  await supabase.from('message_sent_log').insert({
-    user_id: userId, booking_id: String(bookingId),
-    template_id: template.id
-  })
-  await sendViaBeds24(beds24Key, bookingId, message)
-}
-
-function applyEarliestHour(date, earliestTime) {
-  const [h, m] = earliestTime.split(':').map(Number)
-  const earliest = new Date(date)
-  earliest.setHours(h, m, 0, 0)
-  if (date < earliest) return earliest
-  return date
-}
-
-function parseDelayMs(value) {
-  const map = { '0min':0, '10min':600000, '15min':900000, '30min':1800000, '1h':3600000, '2h':7200000 }
-  return map[value] || 0
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' })
-}
+// Note isolation provider : cet endpoint ne lit/écrit AUCUN provider en direct.
+// L'envoi du message d'arrivée + code voyageur est géré par la couche cron/sync
+// (lib/cron-arrival-code processArrivalCodes), déclenchée quand le ménage passe
+// le logement en statut 'ready'. Les anciens helpers d'envoi direct Beds24/Seam
+// (saveAndSend, generateSeamCode) ont été retirés (bloc 2b) : ils étaient morts.
