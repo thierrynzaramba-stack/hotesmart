@@ -5,9 +5,11 @@
 // Session #24 : rattrapage de l'import messages post-activation (fenêtre 30 min).
 // Session #25 : retrait de checkPendingMessages (file message_sent_log inexistante,
 //   erreur 42703 récurrente ; le report est géré par les templates + menage_done).
+// Session #26 : matérialisation des biens Beds24 en table properties (billing).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
+const { materializeBeds24Properties } = require('../lib/cron-beds24-props')
 const { detectBookingChanges } = require('../lib/cron-bookings')
 const { processMessageTemplates } = require('../lib/cron-messages')
 const { processProperty } = require('../lib/cron-classify')
@@ -37,6 +39,7 @@ module.exports = async function handler(req, res) {
     totalBookingEvents: 0,
     totalAutoMessages: 0,
     totalChannelRevisions: 0,
+    totalBeds24Materialized: 0,
     errors: []
   }
   try {
@@ -126,6 +129,11 @@ module.exports = async function handler(req, res) {
 // ─── Traitement par utilisateur (boucle sur ses propriétés) ─────────────────
 async function processUser(userId, beds24Key, tokens, results) {
   const properties = await fetchProperties(beds24Key)
+
+  // Materialisation des biens Beds24 en table properties (pose active_at a la 1re
+  // apparition). Non bloquant : une erreur ici ne doit pas empecher le traitement des biens.
+  try { await materializeBeds24Properties(userId, properties, results) }
+  catch (err) { console.error(`[Cron] Erreur materialisation Beds24 user ${userId}:`, err.message) }
 
   for (const property of properties) {
     try {

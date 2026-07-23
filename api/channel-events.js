@@ -11,6 +11,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { getProvider } = require('../lib/channels')
+const billing = require('../lib/billing')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -123,6 +124,24 @@ async function runPostMapping(owner) {
     .eq('id', owner.id)
   if (readyErr) console.error('[channel-events] channel_ready update echec', readyErr.message)
   else out.ready = true
+
+  // active_at = 1re activation reussie du bien (base de la facturation). First-write-wins :
+  // le filtre .is('active_at', null) garantit qu'on ne reecrit JAMAIS une valeur existante,
+  // meme si le bien est reactive plus tard (contrairement a channel_ready_at, reecrit a chaque fois).
+  // Non bloquant si la colonne manque encore.
+  const { data: activated, error: activeErr } = await supabase
+    .from('properties')
+    .update({ active_at: new Date().toISOString() })
+    .eq('id', owner.id)
+    .is('active_at', null)
+    .select('id')
+  if (activeErr) console.error('[channel-events] active_at update echec', activeErr.message)
+
+  // 1re activation de CE bien -> aligne la facturation du compte (no-op si beta).
+  if (activated && activated.length) {
+    try { await billing.syncAccountBilling(owner.user_id) }
+    catch (e) { console.error('[channel-events] billing sync echec', e.message) }
+  }
 
   return out
 }

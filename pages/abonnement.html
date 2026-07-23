@@ -217,6 +217,20 @@ if (!user) { window.location.replace('/pages/login.html'); throw new Error('not 
 await loadAndRender();
 
 async function loadAndRender() {
+  // BETA : compte flague accounts.is_beta => aucun ecran de paiement. On affiche un etat
+  // neutre et on n'affiche jamais les offres ni le checkout. (Table accounts possiblement absente.)
+  try {
+    const { data: acct } = await supabase
+      .from('accounts')
+      .select('is_beta')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (acct && acct.is_beta === true) {
+      content.innerHTML = '<div class="ab-banner">Votre compte est en beta : aucun paiement requis. Toutes les fonctionnalites sont accessibles sans abonnement.</div>';
+      return;
+    }
+  } catch (e) { /* colonne absente ou lecture KO : parcours normal */ }
+
   // Charger les subs de l'user
   const { data: subs, error } = await supabase
     .from('subscriptions')

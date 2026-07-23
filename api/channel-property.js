@@ -118,7 +118,13 @@ module.exports = async function handler(req, res) {
       console.error('[channel-property] SELECT error', chanErr.message)
       return res.status(500).json({ error: 'Erreur lecture' })
     }
-    const channexProps = (chanData || []).map(p => ({ ...p, provider: p.provider || 'channex' }))
+    // Les biens Beds24 sont servis par le fetch live plus bas. Depuis leur materialisation
+    // en table (cron), on EXCLUT ici les lignes provider='beds24' pour ne pas les renvoyer
+    // deux fois. provider null = ancien bien channex -> conserve. Sortie ainsi identique
+    // a l'avant-materialisation : tous les consommateurs de cet endpoint restent corrects.
+    const channexProps = (chanData || [])
+      .filter(p => p.provider !== 'beds24')
+      .map(p => ({ ...p, provider: p.provider || 'channex' }))
     let beds24Props = []
     try {
       const { data: keyData } = await supabase

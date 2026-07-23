@@ -282,9 +282,24 @@ async function handleUserAction(req, res) {
   let body = {}
   try { body = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {} } catch (e) {}
 
-  const action = (req.url || '').includes('action=') 
+  const action = (req.url || '').includes('action=')
     ? new URL(req.url, 'http://localhost').searchParams.get('action')
     : body.action
+
+  // BETA : compte flague accounts.is_beta => aucun appel Stripe, aucune facturation. On
+  // refuse toute action avant meme de toucher Stripe. is_beta n'est ecrit QUE par le
+  // service_role (aucune policy d'ecriture client sur 'accounts') : non falsifiable cote user.
+  // Table possiblement absente (schema non versionne) : dans ce cas on laisse passer (non-beta).
+  try {
+    const { data: acct } = await supabase
+      .from('accounts')
+      .select('is_beta')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (acct?.is_beta === true) {
+      return res.status(403).json({ beta: true, error: 'Compte en beta : aucun paiement requis.' })
+    }
+  } catch (e) { /* table absente ou lecture KO : on ne bloque pas */ }
 
   if (action === 'create_checkout') {
     return createCheckout(req, res, user, body)

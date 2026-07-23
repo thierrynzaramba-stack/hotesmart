@@ -27,14 +27,26 @@ export async function renderOnboardingBanner() {
       .eq('user_id', user.id)
       .maybeSingle()
 
+    // Flag beta lu sur 'accounts' (non falsifiable client). Table possiblement absente.
+    let isBeta = false
+    try {
+      const { data: acct } = await supabase
+        .from('accounts')
+        .select('is_beta')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      isBeta = acct?.is_beta === true
+    } catch (e) { /* table absente : non-beta */ }
+
     if (ob && !ob.completed) {
       const step = (ob.data && ob.data.resume_label) ? ' — ' + ob.data.resume_label : ''
       banner = {
         text: 'Finalisez la configuration de votre compte' + step,
         cta: 'Reprendre', href: '/pages/onboarding.html'
       }
-    } else if (ob && ob.completed) {
-      // 2) Onboarding fini mais pas d'abonnement actif -> incitation abonnement.
+    } else if (ob && ob.completed && !isBeta) {
+      // 2) Onboarding fini, hors beta, pas d'abonnement actif -> incitation abonnement.
+      //    Beta : aucune incitation au paiement.
       const { data: gf } = await supabase
         .from('subscriptions')
         .select('status')
