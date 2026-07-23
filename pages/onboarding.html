@@ -285,9 +285,58 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
         completed_at: new Date().toISOString()
       })
       .eq('user_id', user.id);
+    // Seed des alertes : email du compte active par defaut (canal universel, cle plateforme).
+    // Best-effort, non bloquant : on ne retarde/casse jamais la fin d'onboarding pour ca.
+    try { await seedAlertConfig(); } catch (e) { console.error('[onboarding] seed alertes:', e); }
     markOnboardingCompleted();
     // Plus aucune demande de paiement en fin d'onboarding : acces direct au tableau de bord.
     window.location.replace('/biens');
+  }
+
+  // Prerempli agent_alert_config pour chaque bien : email d'alerte = email du compte,
+  // email_enabled=true (canal par defaut). N'ecrase JAMAIS une config existante (merge).
+  async function seedAlertConfig() {
+    const email = user?.email || '';
+    if (!email) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const auth = { 'Authorization': 'Bearer ' + session.access_token };
+
+    // Config existante (ne pas ecraser)
+    let config = {};
+    try {
+      const r = await fetch('/api/agent-config', { headers: auth });
+      if (r.ok) config = (await r.json()).config || {};
+    } catch {}
+
+    // Biens du compte (Channex + Beds24), keyes par provider_property_id (= cle de config).
+    let props = [];
+    try {
+      const r = await fetch('/api/channel-property', { headers: auth });
+      if (r.ok) props = (await r.json()).properties || [];
+    } catch {}
+    if (!props.length) return;
+
+    const TYPES = ['intervention', 'info_unknown'];
+    let changed = false;
+    for (const p of props) {
+      const pid = String(p.provider_property_id || p.id);
+      if (!config[pid]) { config[pid] = {}; changed = true; }
+      if (!config[pid].mode) { config[pid].mode = 'test'; changed = true; }
+      for (const t of TYPES) {
+        if (!config[pid][t]) {
+          config[pid][t] = { sms_enabled: false, sms_lines: '', email_enabled: true, email_lines: email };
+          changed = true;
+        }
+      }
+    }
+    if (!changed) return;
+
+    await fetch('/api/agent-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...auth },
+      body: JSON.stringify({ config })
+    });
   }
 
   const steps = {

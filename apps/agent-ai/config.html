@@ -143,6 +143,8 @@
   let currentProp = null
   let config = {}
   let promptingConfig = { global: '', overrides: {} }
+  let pausedState = {}         // provider_property_id -> automation_paused (miroir du kill switch /biens)
+  let brevoConfigured = false  // l'hote a-t-il une cle Brevo enregistree (gate le canal SMS)
 
   async function loadProperties() {
     try {
@@ -152,11 +154,32 @@
       if (PROPERTIES.length && !currentProp) currentProp = PROPERTIES[0].id
     } catch (e) { console.error('loadProperties', e.message) }
   }
+
+  // Etat kill switch (miroir de /biens) : cle = provider_property_id = currentProp.
+  async function loadKillState() {
+    try {
+      const res = await fetch('/api/property-automation', { headers: { 'Authorization': `Bearer ${window._session.access_token}` } })
+      const data = await res.json().catch(() => ({}))
+      pausedState = (res.ok && data.paused) ? data.paused : {}
+    } catch { pausedState = {} }
+  }
+
+  // Config Brevo de l'hote : gate le canal SMS (SMS = cle Brevo de l'hote, obligatoire).
+  async function loadBrevoState() {
+    try {
+      const res = await fetch('/api/sms?action=config', { headers: { 'Authorization': `Bearer ${window._session.access_token}` } })
+      const data = await res.json().catch(() => ({}))
+      brevoConfigured = !!data.configured
+    } catch { brevoConfigured = false }
+  }
+
   window.init = async () => {
     await loadProperties()
     renderTabs()
     await loadConfig()
     await loadPrompting()
+    await loadKillState()
+    await loadBrevoState()
     renderPanel()
   }
 
@@ -263,16 +286,18 @@
       if (!config[p.id]) config[p.id] = {}
       // Mode par défaut : test
       if (!config[p.id].mode) config[p.id].mode = 'test'
+      const acctEmail = window._session?.user?.email || ''
       ALERT_TYPES.forEach(t => {
         if (!config[p.id][t.key]) config[p.id][t.key] = {
           sms_enabled: false, sms_lines: '',
-          email_enabled: false, email_lines: ''
+          // Email = canal par defaut universel (cle plateforme), prerempli avec l'email du compte.
+          email_enabled: true, email_lines: acctEmail
         }
         const c = config[p.id][t.key]
         if (!c.sms_lines && c.sms_numbers?.length) c.sms_lines = c.sms_numbers.join('\n')
         if (!c.sms_lines) c.sms_lines = ''
         if (!c.email_lines && c.email_addresses?.length) c.email_lines = c.email_addresses.join('\n')
-        if (!c.email_lines) c.email_lines = ''
+        if (!c.email_lines) c.email_lines = acctEmail
       })
     })
     renderPanel()
@@ -280,7 +305,21 @@
 
   function renderPanel() {
     const isAuto = config[currentProp].mode === 'auto'
+    const paused = pausedState[currentProp] === true
     document.getElementById('configPanel').innerHTML = `
+
+      <!-- Kill switch (miroir de /biens) -->
+      <div class="mode-card" id="kill-card" style="${paused ? 'border-color:#ff3b30;background:#fff5f5' : ''}">
+        <div class="mode-info">
+          <div class="mode-title">${paused ? '⏸️ IA en pause (kill switch)' : '⚡ Automatisation active'}</div>
+          <div class="mode-desc">Coupe TOUT l'automatique sur ce bien (réponses IA, codes serrure, messages). Miroir du bouton sur la page Biens. La lecture et la synchro restent actives.</div>
+        </div>
+        <span class="mode-badge" style="${paused ? 'background:#ff3b30;color:#fff' : 'background:#E1F5EE;color:var(--green)'}">${paused ? 'En pause' : 'Active'}</span>
+        <label class="toggle">
+          <input type="checkbox" ${paused ? '' : 'checked'} onchange="toggleKill(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
 
       <!-- Mode d'envoi -->
       <div class="mode-card ${isAuto ? 'auto-mode' : 'test-mode'}" id="mode-card">
@@ -340,6 +379,9 @@
 
   function buildSection(type) {
     const cfg = config[currentProp][type.key]
+    // SMS = cle Brevo de l'hote : gate si absente (message + lien vers /connexions).
+    const smsBlocked = !brevoConfigured
+    const smsOn = cfg.sms_enabled && !smsBlocked
     return `
     <div class="alert-section">
       <div class="alert-section-header">
@@ -347,20 +389,23 @@
         <span class="alert-type-label">${type.label}</span>
       </div>
       <div class="channels-grid">
-        <div class="channel-block ${cfg.sms_enabled ? '' : 'disabled'}" id="sms-block-${type.key}">
+        <div class="channel-block ${smsOn ? '' : 'disabled'}" id="sms-block-${type.key}">
           <div class="channel-title">
             <span>📱 SMS (Brevo)</span>
             <label class="toggle">
-              <input type="checkbox" ${cfg.sms_enabled ? 'checked' : ''}
+              <input type="checkbox" ${smsOn ? 'checked' : ''} ${smsBlocked ? 'disabled' : ''}
                      onchange="toggleChannel('${type.key}','sms',this.checked)">
               <span class="toggle-slider"></span>
             </label>
           </div>
-          <div class="field-label">Destinataires SMS</div>
+          ${smsBlocked
+            ? `<div class="field-hint" style="color:#B45309">Le SMS nécessite un compte Brevo (gratuit). <a href="/connexions" style="color:#B45309;text-decoration:underline">Connectez votre clé API</a> pour l'activer.</div>`
+            : `<div class="field-label">Destinataires SMS</div>
           <textarea class="form-input" rows="3" style="resize:vertical;font-size:12px"
                     onchange="updateLines('${type.key}','sms',this.value)"
                     placeholder="Thierry : +33612345678&#10;Marie : +33698765432">${escHtml(cfg.sms_lines)}</textarea>
           <div class="field-hint">Une ligne par destinataire · Format : Nom : +33XXXXXXXXX</div>
+          <button type="button" class="btn" style="margin-top:8px;font-size:12px;padding:4px 12px" onclick="testChannel('${type.key}','sms')">Tester</button>`}
         </div>
         <div class="channel-block ${cfg.email_enabled ? '' : 'disabled'}" id="email-block-${type.key}">
           <div class="channel-title">
@@ -375,7 +420,8 @@
           <textarea class="form-input" rows="3" style="resize:vertical;font-size:12px"
                     onchange="updateLines('${type.key}','email',this.value)"
                     placeholder="Thierry : thierry@mail.com&#10;Marie : marie@mail.com">${escHtml(cfg.email_lines)}</textarea>
-          <div class="field-hint">Une ligne par destinataire · Format : Nom : email@mail.com</div>
+          <div class="field-hint">Une ligne par destinataire · Format : Nom : email@mail.com · Envoyé par HôteSmart (pas besoin de compte Brevo)</div>
+          <button type="button" class="btn" style="margin-top:8px;font-size:12px;padding:4px 12px" onclick="testChannel('${type.key}','email')">Tester</button>
         </div>
       </div>
     </div>`
@@ -384,6 +430,50 @@
   window.toggleMode = (isAuto) => {
     config[currentProp].mode = isAuto ? 'auto' : 'test'
     renderPanel()
+  }
+
+  // Kill switch : toggle checked = automatisation ACTIVE. Decocher = mettre en pause.
+  // Synchronise avec /biens via api/property-automation (immediat, pas de bouton Enregistrer).
+  window.toggleKill = async (active) => {
+    const next = !active  // paused = !active
+    if (next && !confirm('Couper toute l\'automatisation IA sur ce bien (réponses, codes, messages) ? La lecture et la synchro restent actives.')) {
+      renderPanel(); return
+    }
+    try {
+      const res = await fetch('/api/property-automation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ provider_property_id: currentProp, paused: next })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`)
+      pausedState[currentProp] = next
+      renderPanel()
+      showToast(next ? '⏸️ IA mise en pause' : '▶️ IA réactivée')
+    } catch (e) {
+      showToast('✗ ' + e.message, true)
+      renderPanel()
+    }
+  }
+
+  // Bouton Tester : envoie au 1er destinataire configure du canal. SMS via cle hote,
+  // email via cle plateforme. Renvoie l'erreur Brevo exacte.
+  window.testChannel = async (typeKey, channel) => {
+    const lines = config[currentProp][typeKey][channel === 'sms' ? 'sms_lines' : 'email_lines'] || ''
+    const first = lines.split('\n').map(l => l.trim()).filter(Boolean)[0] || ''
+    const to = first.includes(':') ? first.slice(first.indexOf(':') + 1).trim() : first
+    if (!to) { showToast('Ajoutez d\'abord un destinataire', true); return }
+    showToast('Envoi du test…')
+    try {
+      const res = await fetch('/api/alert-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        body: JSON.stringify({ channel, to })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (data.ok) showToast(`✓ Test ${channel === 'sms' ? 'SMS' : 'email'} envoyé à ${to}`)
+      else showToast('✗ ' + (data.error || 'échec'), true)
+    } catch (e) { showToast('✗ ' + e.message, true) }
   }
 
   window.toggleChannel = (typeKey, channel, enabled) => {
