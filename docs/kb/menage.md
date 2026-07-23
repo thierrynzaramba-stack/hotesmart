@@ -32,6 +32,10 @@ En ouvrant le lien (**aucun compte à créer**), il arrive sur **« HôteSmart C
 - **fenêtre** affichée : **14 derniers jours** (pour rattraper un ménage en retard) + la visibilité
   future du token.
 - Il **ne voit que les biens qui lui sont affectés**.
+- **Nouveautés (🔔)** : réservations nouvelles/modifiées/annulées + notes de l'employeur.
+  Le prestataire les **acquitte** en cliquant une notif ou via **« ✓ Tout marquer lu »**.
+  L'acquittement est **persisté même hors-ligne** (miroir local + file de sync rejouée à la
+  reconnexion) : une notif acquittée **ne réapparaît plus** au rechargement.
 
 ### Installation PWA (facultative)
 L'app est installable sur l'écran d'accueil :

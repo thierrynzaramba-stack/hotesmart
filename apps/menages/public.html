@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT). -->
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
@@ -614,12 +615,14 @@ if ("serviceWorker" in navigator) {
   // melangeait verite serveur et clic visuel.
   const LS_DONE_SERVER = 'menages-done-server-v2'   // miroir verite serveur, format `${booking_id}|${departure_date}`
   const LS_PENDING     = 'menages-pending-v2'       // file [{action, booking_id, property_id, departure_date, ts}]
+  const LS_READ        = 'menages-read-v2'          // miroir LOCAL des notifs acquittees (event ids) - offline-safe
 
   let properties = []
   let bookings = []
   let doneSet = new Set()              // ids menage afficheS comme fait (= union miroir + pending)
   let serverDoneSet = new Set()        // miroir serveur
   let pendingQueue = []                // file actions en attente
+  let readSet = new Set()              // ids d evenements acquittes (persistes en local + syncs)
   let commentsMap = {}
   let visibilityDays = 30
   let currentWeekStart = getMonday(new Date())
@@ -896,9 +899,11 @@ if ("serviceWorker" in navigator) {
   function loadLocalState() {
     try { const raw = localStorage.getItem(LS_DONE_SERVER); if (raw) serverDoneSet = new Set(JSON.parse(raw)) } catch(e) {}
     try { const raw = localStorage.getItem(LS_PENDING);     if (raw) pendingQueue  = JSON.parse(raw)         } catch(e) {}
+    try { const raw = localStorage.getItem(LS_READ);        if (raw) readSet       = new Set(JSON.parse(raw)) } catch(e) {}
   }
   function saveServerDoneSet() { localStorage.setItem(LS_DONE_SERVER, JSON.stringify([...serverDoneSet])) }
   function savePendingQueue()  { localStorage.setItem(LS_PENDING,     JSON.stringify(pendingQueue))       }
+  function saveReadSet()       { try { localStorage.setItem(LS_READ,  JSON.stringify([...readSet])) } catch(e) {} }
 
   // doneSet (le visuel) = (serverDoneSet + pending markDone) - (pending markUndone)
   function rebuildDoneSet() {
@@ -984,9 +989,14 @@ if ("serviceWorker" in navigator) {
   }
 
   function removeFromPending(action) {
-    pendingQueue = pendingQueue.filter(a =>
-      !(a.action === action.action && a.booking_id === action.booking_id && a.departure_date === action.departure_date)
-    )
+    if (action.action === 'markRead') {
+      // Une seule entree markRead accumulee -> on la retire par type d action.
+      pendingQueue = pendingQueue.filter(a => a.action !== 'markRead')
+    } else {
+      pendingQueue = pendingQueue.filter(a =>
+        !(a.action === action.action && a.booking_id === action.booking_id && a.departure_date === action.departure_date)
+      )
+    }
     savePendingQueue()
   }
 
@@ -997,6 +1007,29 @@ if ("serviceWorker" in navigator) {
     )
     pendingQueue.push({ ...action, ts: Date.now() })
     savePendingQueue()
+  }
+
+  // File offline des acquittements de notifs : une seule entree markRead qui accumule les
+  // event_ids (rejouee a la reconnexion vers menage_events.read, la table restant la verite).
+  function enqueueRead(ids) {
+    ids = ids.map(String)
+    let item = pendingQueue.find(a => a.action === 'markRead')
+    if (item) { item.event_ids = [...new Set([...(item.event_ids || []), ...ids])] }
+    else { pendingQueue.push({ action: 'markRead', event_ids: [...new Set(ids)], ts: Date.now() }) }
+    savePendingQueue()
+  }
+
+  // Acquittement d une ou plusieurs notifs : miroir local persiste (anti-reapparition offline)
+  // + mise en file pour sync serveur + re-render. Plus de fetch fire-and-forget.
+  function markEventsRead(ids) {
+    ids = (ids || []).map(String)
+    if (!ids.length) return
+    ids.forEach(id => readSet.add(id))
+    saveReadSet()
+    newsItems.forEach(n => { if (ids.includes(String(n.id))) n.read = true })
+    enqueueRead(ids)
+    renderNews()
+    flushPendingQueue()
   }
 
   // ─── Chargement initial ────────────────────────────────────────────────────
@@ -1079,6 +1112,9 @@ if ("serviceWorker" in navigator) {
   }
 
   function renderNews() {
+    // Réconcilie le miroir local d acquittement (offline-safe) : une notif acquittee reste lue
+    // même si la sync serveur n a pas encore eu lieu (empêche la réapparition au reload).
+    newsItems.forEach(n => { if (readSet.has(String(n.id))) n.read = true })
     const unread = newsItems.filter(n => !n.read)
     const panel  = document.getElementById('news-panel')
     const count  = document.getElementById('news-count')
@@ -1126,32 +1162,17 @@ if ("serviceWorker" in navigator) {
     }).join('')
 
     list.querySelectorAll('.news-item').forEach(item => {
-      item.addEventListener('click', async () => {
+      item.addEventListener('click', () => {
         const id = item.dataset.id
         const n = newsItems.find(n => String(n.id) === String(id))
-        if (n && !n.read) {
-          n.read = true
-          await fetch(`/api/menages-public?token=${currentToken}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'markRead', event_ids: [id] })
-          }).catch(() => {})
-          renderNews()
-        }
+        if (n && !n.read) markEventsRead([id])
       })
     })
   }
 
-  async function markAllNewsRead() {
+  function markAllNewsRead() {
     const unreadIds = newsItems.filter(n => !n.read).map(n => n.id)
-    if (unreadIds.length === 0) return
-    newsItems.forEach(n => { n.read = true })
-    await fetch(`/api/menages-public?token=${currentToken}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'markRead', event_ids: unreadIds })
-    }).catch(() => {})
-    renderNews()
+    markEventsRead(unreadIds)
   }
 
   function renderWeek() {
