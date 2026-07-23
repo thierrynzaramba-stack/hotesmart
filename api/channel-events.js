@@ -248,6 +248,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true, event, results })
   } catch (err) {
     console.error('[channel-events]', err.message)
+    try { await require('../lib/founder-notify').reportIncident('webhook_error', { threshold: 3, detail: `channel-events: ${err.message}` }) } catch (e) {}
     return res.status(500).json({ ok: false })   // 5xx -> Channex retente
   }
 }

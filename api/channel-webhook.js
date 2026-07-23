@@ -292,6 +292,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true })
   } catch (err) {
     console.error('[channel-webhook]', err.message)
+    try { await require('../lib/founder-notify').reportIncident('webhook_error', { threshold: 3, detail: `channel-webhook: ${err.message}` }) } catch (e) {}
     return res.status(500).json({ ok: false })   // retente
   }
 }

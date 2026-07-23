@@ -6,6 +6,7 @@
 // Session #25 : retrait de checkPendingMessages (file message_sent_log inexistante,
 //   erreur 42703 récurrente ; le report est géré par les templates + menage_done).
 // Session #26 : matérialisation des biens Beds24 en table properties (billing).
+// Session #27 : surveillance volume messages + coupe-circuit auto (alerting fondateur).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -20,6 +21,7 @@ const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
+const { checkMessageVolume } = require('../lib/cron-alerting')
 
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
@@ -40,6 +42,7 @@ module.exports = async function handler(req, res) {
     totalAutoMessages: 0,
     totalChannelRevisions: 0,
     totalBeds24Materialized: 0,
+    circuitBreakerTriggered: 0,
     errors: []
   }
   try {
@@ -98,6 +101,14 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur batterie:', err.message)
       results.errors.push({ context: 'battery_check', error: err.message })
+    }
+
+    // 4bis. Surveillance volume messages IA/auto (alerte fondateur si anormal) +
+    // coupe-circuit automatique par conversation (met le bien en pause si boucle).
+    try { await checkMessageVolume(results) }
+    catch (err) {
+      console.error('[Cron] Erreur surveillance volume:', err.message)
+      results.errors.push({ context: 'message_volume', error: err.message })
     }
 
     // Poll de secours Channex : rattrape les réservations dont le webhook
