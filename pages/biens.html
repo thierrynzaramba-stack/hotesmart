@@ -275,6 +275,65 @@
     return data
   }
 
+  // ===== Kill switch par bien =====
+  // Etat charge une fois avant le rendu. Cle = provider_property_id : pour Beds24 c'est
+  // l'id numerique (= p.id du fetch live) ; pour Channex c'est p.provider_property_id.
+  let pausedState = {}
+
+  function killKeyOf(p) {
+    if (p._source === 'beds24') return p.id != null ? String(p.id) : null
+    return p.provider_property_id != null ? String(p.provider_property_id) : null
+  }
+
+  async function loadPausedState() {
+    try {
+      const res = await fetch('/api/property-automation', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      })
+      const data = await res.json().catch(() => ({}))
+      pausedState = (res.ok && data.paused) ? data.paused : {}
+    } catch { pausedState = {} }
+  }
+
+  function killPausedBadge(p) {
+    const key = killKeyOf(p)
+    return (key && pausedState[key] === true)
+      ? '<span class="badge" style="background:#ff3b30;color:#fff">IA en pause</span>'
+      : ''
+  }
+
+  function killSwitchHtml(p) {
+    const key = killKeyOf(p)
+    if (!key) return ''
+    const paused = pausedState[key] === true
+    return `<button class="btn ${paused ? 'btn-primary' : 'btn-danger'}" data-kill="${escapeHtml(key)}">${paused ? '▶️ Réactiver l\'IA' : '⏸️ Couper l\'IA'}</button>`
+  }
+
+  function bindKillSwitch(card, p) {
+    const btn = card.querySelector('[data-kill]')
+    if (!btn) return
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.kill
+      const next = pausedState[key] !== true
+      if (next && !confirm('Couper toute l\'automatisation IA sur ce bien (réponses, codes, messages) ? La lecture et la synchro restent actives.')) return
+      btn.disabled = true
+      try {
+        const res = await fetch('/api/property-automation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          body: JSON.stringify({ provider_property_id: key, paused: next })
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`)
+        pausedState[key] = next
+        await loadProperties()
+      } catch (e) {
+        alert(e.message)
+        btn.disabled = false
+      }
+    })
+  }
+
   function renderProperty(p) {
     const card = document.createElement('div')
     card.className = 'property-card'
@@ -286,6 +345,7 @@
         <div>
           <h3>${escapeHtml(p.name)}</h3>
           <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
+          ${killPausedBadge(p)}
         </div>
         <div class="meta">
           ${cityLine}
@@ -293,8 +353,10 @@
         </div>
         <div class="card-actions">
           <a href="https://beds24.com" target="_blank" class="btn">🔗 Ouvrir Beds24</a>
+          ${killSwitchHtml(p)}
         </div>
       `
+      bindKillSwitch(card, p)
       return card
     }
 
@@ -309,6 +371,7 @@
       <div>
         <h3>${escapeHtml(p.name)}</h3>
         <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
+        ${killPausedBadge(p)}
       </div>
       <div class="channel-badges" data-channels></div>
       <div class="meta">
@@ -327,10 +390,12 @@
         ${p.rate_sync_mode === 'managed' ? `<button class="btn" data-fullsync="${p.id}">📤 Publier</button>` : ''}
         <button class="btn" data-edit="${p.id}">Modifier</button>
         <button class="btn btn-danger" data-delete="${p.id}">Supprimer</button>
+        ${killSwitchHtml(p)}
       </div>
     `
     card.querySelector('[data-edit]').addEventListener('click', () => openEdit(p))
     card.querySelector('[data-delete]').addEventListener('click', () => openDelete(p))
+    bindKillSwitch(card, p)
     // Canaux charges en differe : la carte et ses actions restent utilisables
     // sans attendre la reponse Channex.
     hydrateChannelBadges(p, card.querySelector('[data-channels]'))
@@ -353,7 +418,11 @@
     grid.innerHTML = ''
 
     // Source partagee avec l'accueil : voir /shared/properties.js.
-    const { properties, allFailed } = await loadAllProperties()
+    // Etat kill switch charge en parallele (cle provider_property_id).
+    const [{ properties, allFailed }] = await Promise.all([
+      loadAllProperties(),
+      loadPausedState()
+    ])
 
     loader.style.display = 'none'
 
