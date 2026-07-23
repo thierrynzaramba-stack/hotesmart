@@ -7,6 +7,7 @@
 //   erreur 42703 récurrente ; le report est géré par les templates + menage_done).
 // Session #26 : matérialisation des biens Beds24 en table properties (billing).
 // Session #27 : surveillance volume messages + coupe-circuit auto (alerting fondateur).
+// Session #28 : sonde anti-boucle de production d'événements ménage (alerte fondateur seule).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -21,7 +22,7 @@ const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
-const { checkMessageVolume } = require('../lib/cron-alerting')
+const { checkMessageVolume, checkEventProduction } = require('../lib/cron-alerting')
 
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
@@ -109,6 +110,15 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur surveillance volume:', err.message)
       results.errors.push({ context: 'message_volume', error: err.message })
+    }
+
+    // 4ter. Sonde anti-boucle de production d'événements ménage : détecte un
+    // producteur qui génère des menage_events en rafale (> seuil / booking / 24h).
+    // Alerte fondateur seule, dédup 24h par bien. Aucune suspension d'écriture.
+    try { await checkEventProduction() }
+    catch (err) {
+      console.error('[Cron] Erreur sonde événements:', err.message)
+      results.errors.push({ context: 'event_production', error: err.message })
     }
 
     // Poll de secours Channex : rattrape les réservations dont le webhook
