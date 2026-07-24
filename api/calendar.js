@@ -1,3 +1,4 @@
+// ⚠️ DOC : comportement documenté dans docs/kb/synchronisation.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce kb (MÊME COMMIT).
 // api/calendar.js
 // Gestion du calendrier tarifaire (source de verite : Supabase ; miroir : channel manager)
 // GET  ?property_ids=a,b,c&start=YYYY-MM-DD&end=YYYY-MM-DD
@@ -111,7 +112,7 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(ids) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
+      .select('id, name, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
       .eq('user_id', user.id)
       .in('id', ids)
     if (error) throw new Error('Erreur lecture biens')
@@ -345,6 +346,7 @@ module.exports = async function handler(req, res) {
     const roomTypeId = bien.provider_room_type_id
     let pushWarnings = []
     let pushed = false
+    let localOnly = false
     const taskIdsSave = {}
 
     if (propId && ratePlanId) {
@@ -426,12 +428,20 @@ module.exports = async function handler(req, res) {
         pushWarnings.push('push: ' + e.message)
       }
     } else {
-      pushWarnings.push('Bien non connecte au canal de distribution (sauvegarde locale uniquement)')
+      // Aucun id canal (rate plan) -> rien n'est pousse. Message hote explicite : pour un
+      // bien Beds24, l'hote doit editer ses prix/sejours min DANS Beds24 (source cote OTA).
+      localOnly = true
+      if (bien.provider === 'beds24') {
+        pushWarnings.push('Enregistré dans HôteSmart — ce bien est géré par Beds24 : modifiez prix et séjour minimum directement dans Beds24, ils ne sont pas envoyés aux plateformes depuis ici.')
+      } else {
+        pushWarnings.push('Bien non connecté au canal de distribution — modifications enregistrées dans HôteSmart uniquement, non envoyées aux plateformes.')
+      }
     }
 
     return res.status(200).json({
       saved: rows.length,
       pushed,
+      local_only: localOnly,
       warnings: pushWarnings,
       task_ids: taskIdsSave
     })

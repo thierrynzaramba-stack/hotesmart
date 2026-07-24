@@ -229,7 +229,7 @@
     let inv={}, resaSet=new Set(), resaList=[], ppConfig={included:1,extraFee:0}
     const undoStack=[]
 
-    function showToast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('visible'); clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('visible'),1900) }
+    function showToast(m,ms){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('visible'); clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('visible'),ms||1900) }
 
     // selecteur de vue
     const vsel=document.getElementById('view-select')
@@ -603,7 +603,7 @@
       if(!segments.length){ showToast('Aucune modification'); return }
       pushUndo()
       showToast('Enregistrement...')
-      try{ const resp=await api.calendar.save(currentBien.id, segments); showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre ('+resp.warnings.length+' alerte)':'Enregistre'); closeSheet(); await loadMonth() }
+      try{ const resp=await api.calendar.save(currentBien.id, segments); if(resp&&resp.local_only){showToast(resp.warnings[0],6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre ('+resp.warnings.length+' alerte)':'Enregistre')} closeSheet(); await loadMonth() }
       catch(err){ showToast('Erreur: '+(err.message||'sauvegarde')) }
     })
 
