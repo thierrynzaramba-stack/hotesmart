@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT). -->
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
@@ -115,6 +116,7 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { loadAllProperties } from '/shared/properties.js'
 
   initErrorHandler()
 
@@ -143,13 +145,15 @@
   }
 
   async function loadProperties() {
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
-      body: JSON.stringify({ action: 'getProperties' })
-    })
-    const data = await res.json()
-    properties = data.properties || []
+    // Dual-provider via le loader partage (fini le /api/beds24 direct). Cle universelle
+    // = provider_property_id (Beds24 : = id/propId ; channel : UUID Channex) -> coherente
+    // avec les tokens, bookings_snapshot et menage_done. Un bien channel non provisionne
+    // (sans provider_property_id) n'a pas de menages -> exclu de l'affectation.
+    const { properties: all } = await loadAllProperties()
+    properties = (all || []).map(p => {
+      const key = p._source === 'beds24' ? p.id : p.provider_property_id
+      return key ? { id: String(key), name: p.name } : null
+    }).filter(Boolean)
   }
 
   async function loadPrestataires() {

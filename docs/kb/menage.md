@@ -5,11 +5,14 @@
 > `apps/menages/public.html` (app prestataire + PWA), `api/menages-public.js` (endpoint public :
 > tâches, markDone, markUndone), `lib/cron-arrival-code.js` (conditionnement ménage → code)
 
-## Où viennent les données (limite réelle à connaître)
-L'app ménage lit les réservations depuis **Beds24**. L'endpoint exige une **clé Beds24** :
-sans clé, il répond **« Beds24 non configuré »**. → Aujourd'hui, un hôte **connecté en direct
-(Airbnb/Booking) sans Beds24 ne peut pas utiliser la liste de ménages** de l'app. (Comportement
-actuel du code, pas une intention.)
+## Où viennent les données
+L'app ménage lit les biens dans la table **properties** et les réservations dans
+**bookings_snapshot** (alimentés par la couche de synchronisation, tous providers). Elle
+fonctionne donc pour **tous les hôtes** — équipés Beds24 **comme** connectés en direct
+(Airbnb/Booking via le channel manager interne). Plus aucun appel Beds24 en direct, plus de
+message « Beds24 non configuré ». Clé d'identification des biens = `provider_property_id`
+(commune aux tokens, à `menage_done` et à `property_status`). Les réservations **annulées** ne
+génèrent pas de ménage.
 
 ## 1. Parcours d'installation
 
@@ -71,8 +74,8 @@ retour du réseau.
   reste valable ; sinon l'envoi est re-bloqué jusqu'à re-validation.
 - « Le prestataire ne voit pas un ménage » → vérifier : le **bien est-il coché** pour ce prestataire ;
   la **date tombe-t-elle dans la fenêtre** (14 j passés + visibilité future) ; la **réservation
-  est-elle remontée de Beds24**. Et rappel : **sans Beds24, l'app ménage n'a pas de tâches**
-  (« Beds24 non configuré »).
+  est-elle bien synchronisée** (présente dans le planning du bien) ; la réservation n'est-elle pas
+  **annulée** (les annulations ne créent pas de ménage).
 
 ## Lien avec les codes d'accès
 La validation du ménage est la **condition d'envoi du code** voyageur (sauf 1er voyageur). Détail
