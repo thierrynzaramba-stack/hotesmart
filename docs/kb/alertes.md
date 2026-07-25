@@ -60,9 +60,13 @@ continuent ; code déjà posé valable). **Réactivation en un clic** après vé
 Il existe aussi un canal d'alerte **plateforme/fondateur** (incidents techniques → équipe, SMS+email,
 persistance + anti-spam). Utilisé par le futur chat support pour remonter un bug bloquant. Ne pas
 l'exposer aux hôtes. Types d'incidents : échecs d'envoi, échec code serrure, volume anormal, erreur
-webhook, coupe-circuit, et **boucle de production d'événements ménage** (`event_loop` : un producteur
+webhook, coupe-circuit, **boucle de production d'événements ménage** (`event_loop` : un producteur
 qui génère des `menage_events` en rafale, seuil `EVENT_LOOP_THRESHOLD`/booking/24h, alerte seule,
-dédup 24h par bien — aucune suspension d'écriture).
+dédup 24h par bien — aucune suspension d'écriture), et **croissance anormale d'une table**
+(`table_growth` : sonde générique horaire sur les tables à écriture auto — menage_events,
+message_sent_log, messages, agent_tasks, automation_incidents, sms_logs, bookings_snapshot ;
+seuils larges surchargeables via `TABLE_GROWTH_MULTIPLIER` ; alerte seule, dédup 6h par table,
+aucune action automatique).
 
 ## Rappel
 Aucun SMS n'est **inclus ni facturé par HôteSmart** : le SMS passe **par le compte Brevo de l'hôte**.
