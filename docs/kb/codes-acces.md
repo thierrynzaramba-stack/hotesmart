@@ -12,12 +12,20 @@ Génère un **code unique par voyageur** via **Seam** et l'envoie dans le messag
 moment et seulement si le logement est prêt.
 
 ## Quand le code est créé et envoyé
-- **Création (PHASE 1)** : le code est créé sur la serrure **dès la planification** (avant l'envoi).
-  Sa **validité** démarre à l'heure de **check-in** (`{checkin}` du bien / réservation, défaut 15:00)
-  et se termine au départ.
+- **Création (PHASE 1)** : le code est créé **dès la planification** (avant l'envoi). Sa **validité**
+  démarre à l'heure de **check-in** (`{checkin}` du bien / réservation, défaut 15:00) et se termine au
+  départ. **Un seul code par voyageur** est créé (garanti sans doublon). Pour les serrures
+  **igloohome (hors-ligne)**, le **PIN peut être calculé quelques instants après** la création
+  (asynchrone côté serrure) ; il est **récupéré automatiquement avant l'envoi** (PHASE 2), l'hôte
+  n'a rien à faire.
 - **Envoi (PHASE 2)** : le message part le **jour d'arrivée**, à partir de l'**heure configurée par
   bien** dans le template = champ **« heure d'envoi au plus tôt » (`earliest_send_time`, défaut
   15:00, Europe/Paris)**. Réglable dans **Agent IA → Messages**.
+- **Si le PIN tarde (serrure igloohome)** : le PIN peut mettre quelques minutes à se poser. S'il
+  **reste indisponible** à l'approche de l'arrivée, l'hôte est **prévenu par email** (adresse de son
+  **compte**, même sans alerte configurée) **et par une tâche in-app**, pour **transmettre le code à
+  la main** si besoin. Le message d'arrivée est **retenu** jusqu'à l'arrivée du PIN. **Une seule
+  alerte par réservation** (pas de spam à chaque cycle).
 - **Conditionné au ménage — seulement si un suivi ménage existe pour le bien.** « Suivi ménage
   existe » = **un prestataire est affecté au bien** OU **au moins un ménage a déjà été validé**.
   Dans ce cas, pour un **2ᵉ voyageur et suivants**, le code n'est envoyé qu'après **validation du
