@@ -40,3 +40,6 @@ réponses de l'IA.
 ## ⚠️ À VÉRIFIER
 - Emplacement exact du bascule mode auto ↔ validation dans la config agent. (Kill switch : sur
   `/biens` + miroir config — confirmé.)
+
+## Fix août 2026 — garde anti-reclassification (conso tokens)
+Garde temporelle commune Beds24+Channex (hasNewerTaskOrConv) : toute tâche ou conversation créée après le dernier message guest fait skipper le thread AVANT l'appel IA. Le chemin Channex n'avait aucune garde basée sur les tâches (~3500 classifications/jour inutiles). Skip également si le dernier message du thread est du host.
