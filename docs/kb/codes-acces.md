@@ -87,3 +87,6 @@ code n'est créé ni envoyé** ; le **code déjà en place reste valable**. Voir
 
 ## Module optionnel
 Un hôte peut ne **jamais** connecter de serrure — HôteSmart fonctionne sans.
+
+## Fix août 2026 — claim et contrainte NOT NULL
+Le claim access_codes (INSERT pending avant appel Seam) porte starts_at/ends_at dès l'INSERT (colonnes NOT NULL). Fenêtre calculée avant le claim : starts_at = maintenant, ends_at = departure + heure checkout + 1h. Un échec de claim déclenche un incident fondateur (claim_failure).
