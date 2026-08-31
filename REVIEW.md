@@ -136,6 +136,34 @@ arrivées dans le cycle attendent le suivant.
 
 ---
 
+## 8. Tester le cas dangereux, pas sa version confortable
+
+**Règle : un test qui vérifie un cas limite doit reproduire les données réelles de
+ce cas limite — pas une version enrichie qui emprunte le chemin facile.**
+
+À vérifier :
+- [ ] une ligne « legacy » de test est vraiment legacy : **sans** les champs ajoutés depuis (`provider`, `statusRaw`…) ;
+- [ ] un double de table porte **toutes** les clés de la vraie table, en particulier celles des clés composites (`user_id`) ;
+- [ ] le test échouerait si on retirait le correctif — sinon il ne teste rien ;
+- [ ] question à se poser : *quelle valeur exacte aurait cette ligne en base, écrite par l'ancien code ?*
+
+**Pourquoi.** Deux fois dans le chantier d'unification, un test vert a laissé passer
+le bug qu'il prétendait couvrir :
+
+- le stub `bookings_snapshot` du dispatcher omettait `user_id`, donc
+  `cle(undefined, '77')` ne matchait jamais : les 14 tests tournaient tous avec
+  `snapshot === null`. La jointure par clé composite, raison d'être du commit,
+  n'était pas testée — ce qui a laissé passer deux constats de review ;
+- le test « ligne antérieure à l'unification » utilisait `{status:'black',
+  provider:'beds24'}`. Or une vraie ligne legacy **n'a pas** de champ `provider` :
+  c'est exactement ce qui fait retomber `canonicalStatus` sur `confirmed` et
+  ramène le ménage fantôme. Le cas dangereux n'était pas couvert.
+
+Dans les deux cas le test était vert, le code était faux, et c'est une relecture
+externe qui l'a vu.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

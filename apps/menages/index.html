@@ -218,8 +218,7 @@
 
     await renderSidebar('menages')
     loadDoneSet()
-    await loadProperties()
-    await loadAllBookings()
+    await loadPlanning()
     await loadComments()
     renderFilters()
     renderMiniCal()
@@ -236,29 +235,56 @@
     document.getElementById('btn-save-comment').addEventListener('click', saveComment)
   }
 
-  async function loadProperties() {
-    const res = await fetch('/api/beds24', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
-      body: JSON.stringify({ action: 'getProperties' })
-    })
-    const data = await res.json()
-    properties = data.properties || []
-    activeProps = new Set(properties.map(p => p.id))
+  // Planning dual-provider : une seule lecture serveur (api/menages.js), qui lit
+  // bookings_snapshot. Fini l'appel direct a /api/beds24, qui laissait le planning
+  // VIDE pour un hote Channex (ecart E1 de l'audit d'unification).
+  // La cle des biens est provider_property_id, deja utilisee par menage_comments,
+  // menage_done et public_tokens : les ecritures du front restent inchangees.
+  // Fenetre demandee au serveur : bornee pour ne jamais dependre du cap de
+  // pagination (un planning tronque en silence perdrait des menages de la semaine
+  // en cours). Large de part et d'autre pour couvrir la navigation par semaines.
+  function fenetrePlanning() {
+    const d = (mois) => { const x = new Date(); x.setMonth(x.getMonth() + mois); return x.toISOString().split('T')[0] }
+    return { from: d(-12), to: d(12) }
   }
 
-  async function loadAllBookings() {
-    bookings = []
-    for (const prop of properties) {
-      const res = await fetch('/api/beds24', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentSession.access_token}` },
-        body: JSON.stringify({ action: 'getBookings', propertyId: prop.id })
+  async function loadPlanning() {
+    const { from, to } = fenetrePlanning()
+    let res
+    try {
+      res = await fetch(`/api/menages?from=${from}&to=${to}`, {
+        headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
       })
-      const data = await res.json()
-      const propBookings = (data.bookings || []).map(b => ({ ...b, propId: prop.id, propName: prop.name }))
-      bookings.push(...propBookings)
+    } catch (e) {
+      return planningEnErreur('Connexion impossible. Vérifiez votre réseau.')
     }
+
+    // Un echec silencieux afficherait un planning VIDE, indiscernable de
+    // « aucune reservation » — exactement le symptome que ce module corrige.
+    if (res.status === 401) {
+      return planningEnErreur('Session expirée. <a href="/login">Se reconnecter</a>')
+    }
+    if (!res.ok) {
+      console.error('[menages] chargement planning echec', res.status)
+      return planningEnErreur('Impossible de charger le planning. Réessayez dans un instant.')
+    }
+
+    const data = await res.json()
+    properties = data.properties || []
+    bookings = data.bookings || []
+    activeProps = new Set(properties.map(p => p.id))
+    if (data.tronque) console.warn('[menages] planning tronque : fenetre trop large')
+  }
+
+  // Etat d'erreur explicite : on ne laisse jamais croire a un planning vide.
+  let planningErreur = null
+  function planningEnErreur(message) {
+    planningErreur = message
+    properties = []
+    bookings = []
+    const grid = document.getElementById('week-grid')
+    if (grid) grid.innerHTML = `<div style="grid-column:span 7;text-align:center;padding:40px;color:var(--danger,#c0392b)">
+      ⚠️ ${message}</div>`
   }
 
   async function loadComments() {
@@ -368,6 +394,8 @@
   }
 
   function renderWeek() {
+    // Le message d'erreur prime sur un rendu vide trompeur.
+    if (planningErreur) return
     const today = new Date()
     today.setHours(0,0,0,0)
     const weekEnd = addDays(currentWeekStart, 6)

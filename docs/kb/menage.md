@@ -1,9 +1,11 @@
 # KB — App ménage prestataire
 
 <!-- SOURCES (mapping inverse). ⚠️ DOC en tête de ces fichiers pointe ici. Modif = MÊME COMMIT. -->
-> Sources : `apps/menages/prestataires.html` (création prestataire + lien, côté hôte),
+> Sources : `apps/menages/index.html` (planning côté hôte), `api/menages.js` (endpoint hôte :
+> biens + réservations), `apps/menages/prestataires.html` (création prestataire + lien, côté hôte),
 > `apps/menages/public.html` (app prestataire + PWA), `api/menages-public.js` (endpoint public :
-> tâches, markDone, markUndone), `lib/cron-arrival-code.js` (conditionnement ménage → code)
+> tâches, markDone, markUndone), `lib/cron-arrival-code.js` (conditionnement ménage → code),
+> `lib/cleaning/sync-menages.js` (notifications prestataire, cf. `booking-changes.md`)
 
 ## Où viennent les données
 L'app ménage lit les biens dans la table **properties** et les réservations dans
@@ -11,8 +13,36 @@ L'app ménage lit les biens dans la table **properties** et les réservations da
 fonctionne donc pour **tous les hôtes** — équipés Beds24 **comme** connectés en direct
 (Airbnb/Booking via le channel manager interne). Plus aucun appel Beds24 en direct, plus de
 message « Beds24 non configuré ». Clé d'identification des biens = `provider_property_id`
-(commune aux tokens, à `menage_done` et à `property_status`). Les réservations **annulées** ne
-génèrent pas de ménage.
+(commune aux tokens, à `menage_done` et à `property_status`).
+
+**Deux endpoints, une même source** :
+- `api/menages.js` — planning **de l'hôte** (`/apps/menages`), session vérifiée serveur ;
+- `api/menages-public.js` — planning **du prestataire**, accès par token.
+
+Seuls les séjours au statut canonique `confirmed` donnent lieu à un ménage : une
+annulation, un **blocage propriétaire** Beds24 (`black`) ou une **demande non
+confirmée** (`request`) n'apparaissent pas au planning. Voir
+`docs/kb/bookings-snapshot.md`.
+
+⚠️ **Aucun appel provider dans ce domaine.** Ni `/api/beds24`, ni `lib/channels/`, ni
+`shared/properties.js` (qui interroge Beds24) dans `apps/menages/*`,
+`api/menages*.js` ou `lib/cleaning/*`. C'est le critère de clôture de
+l'unification — un appel provider ici rendrait à nouveau les biens Channex
+invisibles. Vérifiable par grep.
+
+Un bien Beds24 tout juste ajouté n'apparaît qu'après son passage par le cron, qui le
+matérialise dans `properties` (délai maximum 5 minutes).
+
+**Le planning n'est jamais vide par accident.** Sur erreur de chargement (session
+expirée, réseau, 500), les deux pages affichent un message explicite au lieu d'un
+planning vide — celui-ci serait indiscernable de « aucune réservation », exactement
+le symptôme que ce module vient de corriger pour les biens Channex.
+
+La lecture est bornée et triée côté SQL (`snapshot->>departure`), et le front demande
+une fenêtre de ±12 mois : sans cela, le cap de pagination PostgREST (1000 lignes par
+défaut) tronquerait le planning dans un ordre non déterministe, et des ménages de la
+semaine en cours pourraient disparaître sans aucune erreur. Le champ `tronque` de la
+réponse signale le cas.
 
 ## 1. Parcours d'installation
 

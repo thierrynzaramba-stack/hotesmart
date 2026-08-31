@@ -1,4 +1,4 @@
-# KB — Chantier unification : état au 31 août 2026
+# KB — Chantier unification : état au 31 août 2026 (clos)
 
 <!-- SOURCES (mapping inverse). ⚠️ DOC en tête de ces fichiers pointe ici. Modif = MÊME COMMIT. -->
 > Sources : `docs/kb/bookings-snapshot.md`, `docs/kb/booking-changes.md`,
@@ -23,7 +23,7 @@ prestataires). Il fallait les traiter avant toute nouvelle table.
 | **E5** | Vocabulaire de statut divergent → ménages fantômes | **corrigé, déployé** |
 | **E2** | Aucun `menage_event` côté Channex | **corrigé, déployé** |
 | **E6** | Clés UUID vs TEXT | **tranché** (voir plus bas) |
-| **E1** | Planning ménage hôte mono-provider | **RESTE À FAIRE** |
+| **E1** | Planning ménage hôte mono-provider | **corrigé** |
 
 ## Ce qui est déployé en production
 
@@ -48,16 +48,27 @@ canonique.
 (table + index partiel + RLS lecture seule, colonnes `properties.checkin_time` /
 `checkout_time`).
 
-## Ce qui reste : E1 — le planning ménage hôte
+## E1 — planning ménage hôte (dernier écart, corrigé)
 
-`apps/menages/index.html` (page « Planning » de la sidebar) appelle `/api/beds24`
-directement — un hôte Channex y voit un planning **vide**. À faire :
-- lire `bookings_snapshot` via un endpoint serverless (pattern `api/menages-public.js`) ;
-- passer par `shared/properties.js` `loadAllProperties()` ;
-- vérifier par grep qu'aucune référence Beds24 ne subsiste dans
-  `api/menages-public.js`, `apps/menages/*`, `lib/cleaning/*`.
+**Commit 3** : `api/menages.js` (nouvel endpoint hôte) lit `properties` +
+`bookings_snapshot` et ne garde que les séjours `confirmed`.
+`apps/menages/index.html` et `apps/menages/prestataires.html` l'appellent au lieu de
+`/api/beds24` et de `shared/properties.js` (qui interroge Beds24). Un hôte Channex
+voit enfin son planning.
 
-Ensuite seulement : chantier avis voyageurs, puis fondation prestataires.
+**Critère de clôture — vérifié par grep, à rejouer avant toute modification du
+domaine ménage :**
+
+```
+grep -rn "api/beds24\|lib/channels\|loadAllProperties\|_source" \
+  apps/menages/ api/menages-public.js api/menages.js lib/cleaning/
+```
+
+Doit ne retourner que des commentaires historiques. Aucun appel provider.
+
+**L'unification est close.** La suite : chantier avis voyageurs
+(`docs/specs/spec-avis-voyageurs.md`), puis fondation prestataires
+(`docs/specs/spec-prestataires-menage.md`).
 
 ## E6 — décision de clés
 
