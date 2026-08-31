@@ -216,14 +216,32 @@
     currentSession = await requireAuth()
     if (!currentSession) return
 
-    await renderSidebar('menages')
+    // Les trois chargements ne dependent que de la session : ils partent ENSEMBLE.
+    // En serie, leurs latences s'additionnaient avant le premier pixel de grille.
+    // Chacun porte son propre catch : une promesse rejetee ne doit pas empecher
+    // les autres d'aboutir.
     loadDoneSet()
-    await loadPlanning()
-    await loadComments()
+    const pSidebar  = renderSidebar('menages').catch(e => console.error('[menages] sidebar', e))
+    const pPlanning = loadPlanning().catch(e => { console.error('[menages] planning', e); planningEnErreur('Impossible de charger le planning.') })
+    const pComments = loadComments().catch(e => console.error('[menages] commentaires', e))
+
+    // La grille s'affiche des que le planning est la. Les commentaires n'alimentent
+    // qu'un badge de note : les attendre retarderait l'affichage pour rien.
+    await pPlanning
     renderFilters()
     renderMiniCal()
     renderWeek()
 
+    // Rafraichissement discret quand les notes arrivent.
+    pComments.then(() => { renderMiniCal(); renderWeek() })
+
+    // ⚠ Les ecouteurs sont cables ICI, juste apres l'affichage de la grille, et
+    // surtout PAS derriere une attente de la sidebar : celle-ci est la chaine la
+    // plus lente de la page (getApiStatus enchaine trois requetes en serie).
+    // Attendre sa resolution laisserait une grille complete et cliquable a
+    // l'ecran, mais des boutons morts — navigation par semaine, ouverture d'une
+    // carte, « Marquer effectue » — sans aucun retour visuel ; et indefiniment
+    // si la sidebar ne se resolvait jamais. Rien ici n'en depend.
     document.getElementById('btn-prev-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, -7); renderWeek(); renderMiniCal() })
     document.getElementById('btn-next-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, 7); renderWeek(); renderMiniCal() })
     document.getElementById('btn-today').addEventListener('click', () => { currentWeekStart = getMonday(new Date()); miniCalDate = new Date(); renderWeek(); renderMiniCal() })

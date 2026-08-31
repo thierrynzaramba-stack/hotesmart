@@ -273,3 +273,57 @@ test('lecture normale : tronque = false', async () => {
   await handler(req(), res)
   assert.strictEqual(res.body.tronque, false)
 })
+
+// ─── Chrono par etape : une ligne de log en fin de requete ──────────────────
+
+test('chrono : une ligne loguee avec le detail des etapes', async () => {
+  const lignes = []
+  const log = console.log
+  console.log = (...a) => lignes.push(a.join(' '))
+  try {
+    const { handler } = chargerEndpoint({
+      props: [{ provider_property_id: '12345', name: 'Bien', provider: 'beds24' }],
+      snaps: [snap()]
+    })
+    await handler(req(), reponse())
+  } finally { console.log = log }
+
+  const ligne = lignes.find(l => l.startsWith('[menages]'))
+  assert.ok(ligne, 'une ligne de chrono est loguee')
+  for (const etape of ['auth=', 'properties=', 'snapshots=', 'mapping=', 'total=']) {
+    assert.ok(ligne.includes(etape), `l'etape ${etape} est mesuree`)
+  }
+  assert.ok(/biens=1 resas=1/.test(ligne), 'les volumes sont reportes')
+})
+
+test('chrono : la sortie 401 est aussi tracee', async () => {
+  const lignes = []
+  const log = console.log
+  console.log = (...a) => lignes.push(a.join(' '))
+  try {
+    const { handler } = chargerEndpoint({ user: null })
+    await handler(req(), reponse())
+  } finally { console.log = log }
+  assert.ok(lignes.some(l => l.includes('[menages]') && l.includes('-> 401')))
+})
+
+test('chrono : les sorties 500 sont tracees aussi (cas le plus interessant)', async () => {
+  for (const [cas, opts] of [
+    ['properties', { props: [], propErr: { message: 'timeout' } }],
+    ['snapshots',  { props: [{ provider_property_id: '12345', name: 'B', provider: 'beds24' }], snaps: [], snapErr: { message: 'statement timeout' } }]
+  ]) {
+    const lignes = []
+    const log = console.log, err = console.error
+    console.log = (...a) => lignes.push(a.join(' ')); console.error = () => {}
+    try {
+      const { handler } = chargerEndpoint(opts)
+      const res = reponse()
+      await handler(req(), res)
+      assert.strictEqual(res.code, 500, cas)
+    } finally { console.log = log; console.error = err }
+    const l = lignes.find(x => x.startsWith('[menages]'))
+    assert.ok(l, `chrono logue sur 500 ${cas}`)
+    assert.ok(l.includes(`-> 500 ${cas}`), `motif de sortie identifie (${cas}) : ${l}`)
+    assert.ok(l.includes('total='), 'la duree totale est reportee')
+  }
+})

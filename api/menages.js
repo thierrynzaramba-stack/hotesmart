@@ -31,14 +31,32 @@ const supabase = createClient(
 // Le planning en renvoie l'alerte plutot que de tronquer en silence.
 const MAX_LIGNES = 5000
 
+// Chrono par etape : loge une seule ligne en fin de requete. Permet d'identifier
+// l'etape lente sans instrumenter a l'aveugle (une page a deja mis 41 s sans
+// qu'aucune requete mesuree cote serveur ne depasse 300 ms).
+function chrono() {
+  const t0 = Date.now()
+  let dernier = t0
+  const etapes = []
+  return {
+    top(nom) { const n = Date.now(); etapes.push(`${nom}=${n - dernier}ms`); dernier = n },
+    ligne(suffixe) { return `[menages] ${etapes.join(' ')} total=${Date.now() - t0}ms${suffixe || ''}` }
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Méthode non autorisée' })
+  const t = chrono()
 
   // ===== AUTH =====
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Non autorisé' })
   const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
+  t.top('auth')
+  if (authError || !userData?.user) {
+    console.log(t.ligne(' -> 401'))
+    return res.status(401).json({ error: 'Session invalide' })
+  }
   const userId = userData.user.id
 
   try {
@@ -49,8 +67,10 @@ module.exports = async function handler(req, res) {
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
       .order('name', { ascending: true })
+    t.top('properties')
     if (propErr) {
       console.error('[menages] lecture properties echec', propErr.message)
+      console.log(t.ligne(' -> 500 properties'))
       return res.status(500).json({ error: 'Erreur lecture biens' })
     }
 
@@ -59,7 +79,10 @@ module.exports = async function handler(req, res) {
       name:     p.name || `Bien ${p.provider_property_id}`,
       provider: p.provider || null
     }))
-    if (!properties.length) return res.status(200).json({ properties: [], bookings: [] })
+    if (!properties.length) {
+      console.log(t.ligne(' -> aucun bien'))
+      return res.status(200).json({ properties: [], bookings: [] })
+    }
 
     const nomParId = {}
     const providerParId = {}
@@ -85,8 +108,10 @@ module.exports = async function handler(req, res) {
     const { data: snaps, error: snapErr } = await requete
       .order('snapshot->>departure', { ascending: true })
       .limit(MAX_LIGNES)
+    t.top('snapshots')
     if (snapErr) {
       console.error('[menages] lecture bookings_snapshot echec', snapErr.message)
+      console.log(t.ligne(' -> 500 snapshots'))
       return res.status(500).json({ error: 'Erreur lecture réservations' })
     }
 
@@ -126,9 +151,14 @@ module.exports = async function handler(req, res) {
     const tronque = (snaps || []).length >= MAX_LIGNES
     if (tronque) console.warn(`[menages] lecture tronquee a ${MAX_LIGNES} lignes (user ${userId}) — fenetre trop large`)
 
+    t.top('mapping')
+    console.log(t.ligne(` biens=${properties.length} resas=${bookings.length}${tronque ? ' TRONQUE' : ''}`))
     return res.status(200).json({ properties, bookings, tronque })
   } catch (err) {
+    // Une requete qui rame PUIS echoue est le cas le plus interessant a
+    // diagnostiquer : il doit loguer son chrono comme les autres.
     console.error('[menages] erreur', err.message)
+    console.log(t.ligne(' -> 500 exception'))
     return res.status(500).json({ error: err.message })
   }
 }

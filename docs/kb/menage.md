@@ -33,6 +33,22 @@ invisibles. Vérifiable par grep.
 Un bien Beds24 tout juste ajouté n'apparaît qu'après son passage par le cron, qui le
 matérialise dans `properties` (délai maximum 5 minutes).
 
+**Chargement.** Les trois lectures d'initialisation (sidebar, planning, notes)
+partent en parallèle ; la grille s'affiche dès que le planning est là, sans attendre
+les notes, qui n'alimentent qu'un badge. En série, leurs latences s'additionnaient
+avant le premier pixel.
+
+`api/menages.js` logue une ligne de chrono par requête
+(`[menages] auth=… properties=… snapshots=… mapping=… total=…`), pour identifier une
+étape lente sans instrumenter à l'aveugle.
+
+⚠️ **Reste à traiter, chantier séparé** : la barre latérale (`components/sidebar.js`,
+`getApiStatus`) enchaîne `api_keys`, `properties` et `subscriptions` **en série**, et
+la capture réseau montre des appels **dupliqués** à l'initialisation (`user` ×2,
+`subscriptions` ×2, `onboarding_state` ×2 — ce dernier depuis `components/auth-guard.js`).
+Ces requêtes concernent **toutes** les pages de l'app, pas seulement le planning :
+à corriger avec leurs propres tests, pas en marge d'un chantier ménage.
+
 **Le planning n'est jamais vide par accident.** Sur erreur de chargement (session
 expirée, réseau, 500), les deux pages affichent un message explicite au lieu d'un
 planning vide — celui-ci serait indiscernable de « aucune réservation », exactement
