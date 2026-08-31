@@ -83,9 +83,17 @@ sur un cas non spécifié, mais on le rend visible dans les logs Vercel.
 
 ### Lecture
 Ne jamais tester `snapshot.status === 'cancelled'` en dur. Utiliser :
-- `readStatus(snapshot)` → statut canonique, **tolère les lignes écrites avant
-  l'unification** (vocabulaire brut) : aucun backfill SQL n'est nécessaire ;
+- `readStatus(snapshot)` → statut canonique ;
 - `isActiveStatus(snapshot)` → `true` seulement si `confirmed`.
+
+⚠️ **Lignes écrites AVANT l'unification** : elles portent le statut **brut** du
+provider et **aucun champ `provider`**. `readStatus` ne peut alors pas choisir la
+bonne table de correspondance : un `black` Beds24 tombe dans le fallback et devient
+`confirmed` — le ménage fantôme revient. La tolérance aux anciennes lignes n'est
+acquise **que si l'appelant fournit le provider du bien en second argument**. Tout
+lecteur de `bookings_snapshot` doit donc récupérer `properties.provider` et le passer
+(`api/menages-public.js`, `lib/cron-arrival-code.js`, `api/calendar.js` le font).
+C'est ce qui évite un backfill SQL ; à défaut, il en faudrait un.
 
 **Bookings bruts** (réponse directe de l'API d'un provider, sans passer par
 `bookings_snapshot`) : ils ne portent pas de champ `provider`. Passer le provider en

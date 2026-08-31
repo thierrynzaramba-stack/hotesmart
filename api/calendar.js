@@ -162,7 +162,14 @@ module.exports = async function handler(req, res) {
     ownedIds.forEach(id => { bookings[id] = [] })
     // map provider_property_id (text) -> id Supabase (uuid)
     const provToId = {}
-    owned.forEach(p => { if (p.provider_property_id != null) provToId[String(p.provider_property_id)] = p.id })
+    // provider du bien : defaut de lecture du statut pour les lignes anterieures
+    // a l'unification (statut brut, sans champ provider dans le snapshot).
+    const provToProvider = {}
+    owned.forEach(p => {
+      if (p.provider_property_id == null) return
+      provToId[String(p.provider_property_id)] = p.id
+      provToProvider[String(p.provider_property_id)] = p.provider
+    })
     const provIds = Object.keys(provToId)
     if (provIds.length) {
       try {
@@ -186,7 +193,7 @@ module.exports = async function handler(req, res) {
               guest_name: name,
               checkin, checkout,
               source: (s.source || s.channel || 'direct'),
-              status: readStatus(s)
+              status: readStatus(s, provToProvider[String(row.property_id)])
             })
           })
         }

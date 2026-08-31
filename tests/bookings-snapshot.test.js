@@ -205,6 +205,40 @@ test('sans defaut, le comportement precedent est inchange (retrocompat)', () => 
   assert.strictEqual(readStatus({ status: 'black', provider: 'beds24' }), STATUS.BLOCKED)
 })
 
+// ─── Lignes ANTERIEURES a l'unification (statut brut, sans champ provider) ───
+// Cas signale par la revue : les 5 writers pre-unification n'ecrivaient pas de
+// champ `provider`. Sans defaut fourni par l'appelant, canonicalStatus ne peut pas
+// choisir la table de correspondance et retombe sur confirmed -> menage fantome.
+
+test('ligne legacy Beds24 sans provider : le defaut est INDISPENSABLE', () => {
+  const legacy = { status: 'black', arrival: '2026-09-01', departure: '2026-09-05' }
+
+  // Sans defaut : le fallback la rend active (c'est le piege).
+  assert.strictEqual(isActiveStatus(legacy), true)
+
+  // Avec le provider du bien : blocage correctement reconnu.
+  assert.strictEqual(readStatus(legacy, 'beds24'), STATUS.BLOCKED)
+  assert.strictEqual(isActiveStatus(legacy, 'beds24'), false)
+})
+
+test('ligne legacy Beds24 : request et inquiry aussi ecartes avec le defaut', () => {
+  assert.strictEqual(isActiveStatus({ status: 'request' }, 'beds24'), false)
+  assert.strictEqual(isActiveStatus({ status: 'inquiry' }, 'beds24'), false)
+})
+
+test('ligne legacy Channex sans provider : statut brut lu correctement', () => {
+  assert.strictEqual(readStatus({ status: 'modified' }, 'channex'), STATUS.CONFIRMED)
+  assert.strictEqual(readStatus({ status: 'cancelled' }, 'channex'), STATUS.CANCELLED)
+})
+
+test('une ligne legacy reecrite par le writer devient auto-portante', () => {
+  // Apres passage du cron, le snapshot porte provider + statut canonique : le
+  // defaut n'est plus necessaire pour la lire correctement.
+  const reecrite = fromBeds24({ status: 'black', arrival: '2026-09-01' })
+  assert.strictEqual(reecrite.provider, 'beds24')
+  assert.strictEqual(isActiveStatus(reecrite), false)
+})
+
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 test('fromBeds24 : schéma complet, provider rempli, champs inconnus non écrasants', () => {
   const snap = fromBeds24({

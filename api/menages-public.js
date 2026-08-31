@@ -168,18 +168,23 @@ module.exports = async function handler(req, res) {
     // Biens du prestataire : lecture de la table `properties` (dual-provider,
     // ZERO appel Beds24). Cle universelle = provider_property_id, deja utilisee par
     // les tokens (property_ids), menage_done, property_status et bookings_snapshot.
+    // `provider` est indispensable pour lire le statut des lignes bookings_snapshot
+    // ecrites AVANT l'unification : elles portent le statut BRUT du provider et
+    // aucun champ `provider`. Sans ce defaut, un blocage proprietaire Beds24
+    // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
     const { data: propRows } = await supabase
       .from('properties')
-      .select('provider_property_id, name')
+      .select('provider_property_id, name, provider')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
 
     const allowedIds = (tokenData.property_ids || []).map(String)
     const properties = (propRows || [])
       .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
-      .map(p => ({ id: String(p.provider_property_id), name: p.name }))
+      .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider }))
     const propNameById = {}
-    properties.forEach(p => { propNameById[p.id] = p.name })
+    const propProviderById = {}
+    properties.forEach(p => { propNameById[p.id] = p.name; propProviderById[p.id] = p.provider })
 
     const today   = new Date(); today.setHours(0,0,0,0)
     const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + visibilityDays)
@@ -215,7 +220,7 @@ module.exports = async function handler(req, res) {
             lastName:  snap.lastName || '',
             numAdult:  snap.numAdult ?? null,
             numChild:  snap.numChild ?? null,
-            status:    readStatus(snap)
+            status:    readStatus(snap, propProviderById[String(s.property_id)])
           }
         })
         // Seul un statut canonique 'confirmed' donne lieu a un menage : un blocage
