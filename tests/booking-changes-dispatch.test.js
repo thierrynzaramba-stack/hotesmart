@@ -325,3 +325,45 @@ test('booking_confirmed : ignore si la reservation n\'est plus active', async ()
   await mod.dispatchBookingChanges({})
   assert.strictEqual(etat.appels.templates, 0, 'pas de bienvenue pour une resa annulee entre-temps')
 })
+
+// ─── Heures d'arrivee/depart : coherence entre les deux chemins de message ──
+// Le template d'arrivee recoit le bien BRUT Beds24 (checkInStart) via
+// processMessageTemplates ; booking_confirmed passe par le dispatcher. Les deux
+// doivent donner la meme heure, sinon le voyageur recoit deux messages
+// contradictoires — et message_sent_log rend le mauvais non rejouable.
+
+test('hote Beds24 SANS Connaissances : booking_confirmed = heure Beds24 synchronisee', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  // properties.checkin_time est alimentee par la couche sync depuis
+  // property.checkInStart — la meme valeur que recoit le template d'arrivee.
+  const heureBeds24 = { checkInStart: '15:00', checkOutEnd: '11:00' }
+  const ctx = {
+    propsByKey: { 'u1|12345': { name: 'Bien', provider: 'beds24', checkin_time: '15:00', checkout_time: '11:00' } },
+    knowledgeByKey: {}   // l'hote n'a jamais ouvert le formulaire
+  }
+  const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345' }, ctx)
+  assert.strictEqual(p.checkInStart, heureBeds24.checkInStart, 'meme heure que le template d\'arrivee')
+  assert.strictEqual(p.checkOutEnd, heureBeds24.checkOutEnd)
+  assert.notStrictEqual(p.checkInStart, '18:00', 'pas le defaut code en dur')
+})
+
+test('le formulaire Connaissances prime sur les heures synchronisees', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  const ctx = {
+    propsByKey: { 'u1|12345': { name: 'Bien', provider: 'beds24', checkin_time: '15:00', checkout_time: '11:00' } },
+    knowledgeByKey: { 'u1|12345': { checkin: '16:30', checkout: '10:30' } }
+  }
+  const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345' }, ctx)
+  assert.strictEqual(p.checkInStart, '16:30')
+  assert.strictEqual(p.checkOutEnd, '10:30')
+})
+
+test('ni Connaissances ni heures synchronisees : null (defauts appliques en aval)', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  const p = mod.propertyDepuisContexte(
+    { user_id: 'u1', property_id: '12345' },
+    { propsByKey: { 'u1|12345': { name: 'Bien', provider: 'channex' } }, knowledgeByKey: {} }
+  )
+  assert.strictEqual(p.checkInStart, null)
+  assert.strictEqual(p.checkOutEnd, null)
+})

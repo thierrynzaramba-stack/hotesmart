@@ -150,6 +150,31 @@ encore appliquée, coupure réseau) perd le changement **définitivement et en
 silence**. Dans cet ordre, un upsert en échec laisse au pire un événement en double
 au cycle suivant : du bruit, pas une perte.
 
+## 3 octies. Fenêtre de détection
+
+Les deux chemins Beds24 n'ont pas la même fenêtre, **volontairement** :
+- `lib/cron-bookings.js` → `-1j/+90j` ;
+- `lib/cron-classify.js` → `-6 mois`, **sans borne haute**.
+
+La seconde est la plus large et c'est elle qui gouverne la détection. Une
+réservation prise très en avance était sinon détectée avec des mois de retard.
+Deux gardes rendent cet élargissement sûr : la **garde d'ancienneté** borne le
+passé, le drapeau **`initialImport`** empêche un premier import de distribuer quoi
+que ce soit. Sans elles, cette fenêtre produirait un envoi de masse.
+
+## 3 nonies. Heures d'arrivée et de départ
+
+`properties.checkin_time` / `checkout_time` sont alimentées par la couche sync
+(`lib/cron-beds24-props.js`, à partir de `checkInStart`/`checkOutEnd` de l'API
+Beds24). Le dispatcher lit `properties` **uniquement** — jamais le provider.
+
+Ordre de priorité à la lecture : **formulaire Connaissances**, puis heures
+synchronisées, puis les défauts codés en dur (`18:00`/`10:00`). Sans ce dernier
+repli, un hôte Beds24 n'ayant jamais ouvert le formulaire recevait les défauts dans
+son `booking_confirmed` alors que son template d'arrivée affichait l'heure réelle —
+deux messages contradictoires au même voyageur, et `message_sent_log` rendait le
+mauvais non rejouable.
+
 ## 4. Garde anti-boucle (la règle la plus importante)
 
 Un événement est marqué `processed_at` **même si un consommateur échoue**.

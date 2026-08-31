@@ -51,3 +51,16 @@ create policy booking_change_events_select on booking_change_events
 drop policy if exists booking_change_events_insert on booking_change_events;
 drop policy if exists booking_change_events_update on booking_change_events;
 drop policy if exists booking_change_events_delete on booking_change_events;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Heures d'arrivee / depart du bien
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Alimentees par la couche sync (lib/cron-beds24-props.js, depuis checkInStart /
+-- checkOutEnd de l'API Beds24). Permettent au code metier de rendre les
+-- placeholders {checkin} / {checkout} sans jamais interroger le provider.
+--
+-- Priorite a la lecture : formulaire Connaissances (knowledge type 'fixed'), puis
+-- ces colonnes, puis les defauts codes en dur 18:00 / 10:00.
+
+alter table properties add column if not exists checkin_time  text;
+alter table properties add column if not exists checkout_time text;
