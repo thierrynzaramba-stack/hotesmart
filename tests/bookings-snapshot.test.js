@@ -330,13 +330,15 @@ test('le writer pauvre ne dégrade plus le writer riche (régression E3)', () =>
 })
 
 // ─── Écriture (client Supabase simulé) ───────────────────────────────────────
-function fakeSupabase({ existing = null, captureRef = {} } = {}) {
+function fakeSupabase({ existing = null, captureRef = {}, existingPropId = '12345' } = {}) {
   return {
     from() {
       return {
         select() { return this },
         eq() { return this },
-        maybeSingle: async () => ({ data: existing ? { snapshot: existing } : null }),
+        // La vraie ligne porte aussi property_id : la garde « inchangee » le
+        // compare, une reservation deplacee de bien doit etre reecrite.
+        maybeSingle: async () => ({ data: existing ? { snapshot: existing, property_id: existingPropId } : null }),
         upsert: async (row) => { captureRef.row = row; return { error: null } },
         // booking_change_events : journalisation du changement, faite AVANT l'upsert.
         insert: async (row) => { (captureRef.events = captureRef.events || []).push(row); return { error: null } }
@@ -393,6 +395,9 @@ test('saveBookingSnapshot : provider inconnu -> échec propre, jamais de throw',
 // booking par booking : 2N allers-retours Supabase par cycle.
 
 function fakeBatchSupabase({ rows = [], failSelect = false } = {}) {
+  // Les lignes du prefetch portent property_id : sans lui, la garde « inchangee »
+  // ne peut pas conclure et le writer reecrit (comportement prudent voulu).
+  rows = rows.map(r => ({ property_id: '12345', ...r }))
   const stats = { selects: 0, upserts: 0, upsertedRows: [], events: [] }
   const client = {
     from() {
@@ -493,12 +498,14 @@ test('saveBookingSnapshots : bookings sans id ignores', async () => {
 // Le snapshot est la seule memoire d'etat : une fois avance, le changement n'est
 // plus detectable. Un journal en echec ne doit donc pas laisser avancer le snapshot.
 
-function fakeSupabaseEchecJournal({ existing = null, captureRef = {} } = {}) {
+function fakeSupabaseEchecJournal({ existing = null, captureRef = {}, existingPropId = '12345' } = {}) {
   return {
     from(nom) {
       return {
         select() { return this }, eq() { return this },
-        maybeSingle: async () => ({ data: existing ? { snapshot: existing } : null }),
+        // La vraie ligne porte aussi property_id : la garde « inchangee » le
+        // compare, une reservation deplacee de bien doit etre reecrite.
+        maybeSingle: async () => ({ data: existing ? { snapshot: existing, property_id: existingPropId } : null }),
         upsert: async (row) => { captureRef.upserted = row; return { error: null } },
         insert: async () => ({ error: { message: 'relation booking_change_events does not exist' } })
       }
@@ -624,4 +631,57 @@ test('lot : seules les lignes modifiees sont ecrites', async () => {
   assert.strictEqual(res.saved, 1)
   assert.strictEqual(stats.upserts, 1, 'une seule ecriture pour deux reservations')
   assert.strictEqual(stats.upsertedRows[0].booking_id, '2')
+})
+
+test('reservation DEPLACEE vers un autre bien -> reecrite malgre un snapshot identique', async () => {
+  // property_id n'est pas dans le snapshot, mais c'est une colonne de la ligne et
+  // la contrainte porte sur (user_id, booking_id). Sans cette garde, la ligne
+  // resterait accrochee a l'ancien bien : fantome sur l'ancien, invisible sur le
+  // nouveau, car les lecteurs filtrent sur property_id.
+  const capture = {}
+  const booking = { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', numAdult: 2, numChild: 0 }
+  const sb = fakeSupabase({ existing: fromBeds24(booking), captureRef: capture, existingPropId: 'ANCIEN_BIEN' })
+
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 'NOUVEAU_BIEN', provider: 'beds24', booking
+  })
+  assert.ok(!res.inchange, 'le changement de bien n\'est pas « inchange »')
+  assert.ok(capture.row, 'la ligne est reecrite')
+  assert.strictEqual(capture.row.property_id, 'NOUVEAU_BIEN')
+})
+
+test('property_id inconnu (existing fourni sans lui) -> on ecrit, par prudence', async () => {
+  const capture = {}
+  const booking = { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }
+  const sb = fakeSupabase({ captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: '12345', provider: 'beds24', booking,
+    existing: fromBeds24(booking)      // pas d'existingPropertyId
+  })
+  assert.ok(!res.inchange)
+  assert.ok(capture.row, 'sans certitude sur le bien, on ecrit')
+})
+
+test('repli sans prefetch : les lignes inchangees sont comptees comme telles', async () => {
+  const inchange = fromBeds24({ status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' })
+  const stats = { selects: 0, upserts: 0, upsertedRows: [], events: [] }
+  const client = {
+    from() {
+      const q = {
+        select() { return q }, eq() { return q }, in() { return q },
+        maybeSingle: async () => { stats.selects++; return { data: { snapshot: inchange, property_id: '12345' } } },
+        upsert: async (row) => { stats.upserts++; stats.upsertedRows.push(row); return { error: null } },
+        insert: async (row) => { stats.events.push(row); return { error: null } },
+        then(res, rej) { stats.selects++; return Promise.resolve({ data: null, error: { message: 'boom' } }).then(res, rej) }
+      }
+      return q
+    }
+  }
+  const res = await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [{ id: 1, status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }]
+  })
+  assert.strictEqual(res.inchanges, 1, 'meme comptage que le chemin nominal')
+  assert.strictEqual(res.saved, 0)
+  assert.strictEqual(stats.upserts, 0)
 })

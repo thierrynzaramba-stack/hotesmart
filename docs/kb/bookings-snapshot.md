@@ -145,6 +145,30 @@ Ne jamais réimplémenter ce pré-chargement dans un appelant : il vit dans le w
 Si la relecture groupée échoue, le lot retombe sur la relecture unitaire plutôt que
 d'écraser à l'aveugle.
 
+## 5 bis. Lignes inchangées : ni écriture, ni événement
+
+Si le snapshot fusionné est **strictement identique** à l'existant **et** que la
+ligne est déjà rattachée au bon `property_id`, rien n'est écrit.
+
+Le cron repassait sinon sur toutes les réservations de chaque bien à chaque cycle
+(~90 par bien, un upsert chacune, en série) : l'étape `classify` prenait 9 à 17 s
+par bien et le cycle frôlait les 60 s de plafond.
+
+`property_id` entre dans la comparaison bien qu'il ne soit **pas** dans le
+snapshot : c'est une colonne de la ligne, et la contrainte porte sur
+`(user_id, booking_id)`. Une réservation déplacée vers un autre bien garde des
+dates, un statut et un voyageur identiques — sans cette garde, la ligne resterait
+accrochée à l'ancien bien pour toujours, fantôme sur l'ancien et invisible sur le
+nouveau. Quand le `property_id` en base n'est pas connu de l'appelant, on écrit.
+
+⚠️ **`updated_at` change de sens.** Il ne signifie plus « vue au dernier cycle »
+mais « dernier changement de contenu ». Sur un parc nominal, la plupart des lignes
+porteront une date vieille de plusieurs semaines : c'est normal, pas le signe d'une
+synchro morte. Ne **jamais** bâtir de purge des snapshots périmés sur ce champ —
+elle supprimerait des réservations bien vivantes. Et ne jamais y adosser un tri
+censé refléter la fraîcheur métier (piège déjà corrigé dans
+`lib/cron-arrival-code.js`, cf. `docs/kb/codes-acces.md`).
+
 ## 6. Clés
 
 `bookings_snapshot.property_id` est du **TEXT** = `properties.provider_property_id`

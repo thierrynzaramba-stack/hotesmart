@@ -82,7 +82,10 @@ async function runPostMapping(owner) {
     bookings,
     initialImport: true
   })
-  out.bookings = saved.saved
+  // Les lignes deja a jour comptent : a la reactivation d'un bien deja importe,
+  // tout est identique et `saved` vaut 0 — annoncer « 0 reservation » ferait
+  // croire a un import rate.
+  out.bookings = saved.saved + (saved.inchanges || 0)
   if (saved.failed) console.error('[channel-events] upsert booking echec x' + saved.failed)
 
   // 2) IMPORT messages (dedup interne provider_msg_id -> idempotent).
