@@ -1,6 +1,8 @@
 // ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT).
 const { createClient } = require('@supabase/supabase-js')
 const { markReady } = require('../lib/cron-property-status')
+// Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
+const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -213,10 +215,13 @@ module.exports = async function handler(req, res) {
             lastName:  snap.lastName || '',
             numAdult:  snap.numAdult ?? null,
             numChild:  snap.numChild ?? null,
-            status:    snap.status || 'new'
+            status:    readStatus(snap)
           }
         })
-        .filter(b => b.status !== 'cancelled')
+        // Seul un statut canonique 'confirmed' donne lieu a un menage : un blocage
+        // proprietaire Beds24 ('black') ou une demande non confirmee ('request')
+        // creait un menage fantome au planning (audit E5).
+        .filter(b => b.status === STATUS.CONFIRMED)
         .filter(b => b.departure && b.departure >= dateFrom && b.departure <= dateTo)
     }
 

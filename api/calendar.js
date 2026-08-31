@@ -9,6 +9,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
+const { readStatus } = require('../lib/bookings-snapshot')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -185,7 +186,7 @@ module.exports = async function handler(req, res) {
               guest_name: name,
               checkin, checkout,
               source: (s.source || s.channel || 'direct'),
-              status: s.status || 'new'
+              status: readStatus(s)
             })
           })
         }

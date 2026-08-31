@@ -16,6 +16,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
+// Writer unique de bookings_snapshot (audit E3/E4/E5) : schema commun aux deux
+// providers, statut canonique, merge non destructif.
+const { saveBookingSnapshot, fromChannex, STATUS } = require('../lib/bookings-snapshot')
+
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 const WEBHOOK_SECRET = process.env.CHANNEL_WEBHOOK_SECRET
@@ -107,42 +111,27 @@ async function saveRevision(rev, revisionId) {
     return { saved: false, reason: 'unknown_property' }
   }
 
-  const occ = rev.occupancy || {}
-  const customer = rev.customer || {}
-  const snapshot = {
-    status:    rev.status || 'new',          // new | modified | cancelled
-    arrival:   rev.arrival_date || null,
-    departure: rev.departure_date || null,
-    arrivalHour: rev.arrival_hour || null,
-    firstName: customer.name || '',
-    lastName:  customer.surname || '',
-    numAdult:  occ.adults || null,
-    numChild:  occ.children || null,
-    source:    rev.ota_name || 'direct',     // vraie source plateforme
-    otaReservationCode: rev.ota_reservation_code || null,
-    amount:    rev.amount || null,
-    currency:  rev.currency || null
-  }
+  // Statut Channex brut (new | modified | cancelled) normalise en canonique
+  // (confirmed | cancelled) par le writer unique.
+  const snapshot = fromChannex(rev)
 
-  const { error: upErr } = await supabase
-    .from('bookings_snapshot')
-    .upsert({
-      user_id:     owner.user_id,
-      booking_id:  String(bookingId),
-      property_id: String(providerPropertyId),   // = provider_property_id (text)
-      snapshot,
-      updated_at:  new Date().toISOString()
-    }, { onConflict: 'user_id,booking_id' })
+  const saved = await saveBookingSnapshot(supabase, {
+    userId:     owner.user_id,
+    bookingId,
+    propertyId: providerPropertyId,   // = provider_property_id (text)
+    provider:   'channex',
+    snapshot
+  })
 
-  if (upErr) {
-    console.error('[channel-webhook] upsert booking failed', upErr.message)
+  if (!saved.ok) {
+    console.error('[channel-webhook] upsert booking failed', saved.error || saved.reason)
     return { saved: false, reason: 'db_error' }
   }
 
   console.log('[channel-webhook] booking', snapshot.status, bookingId, '->', owner.user_id)
 
   // Gestion dispo pour bien whole : reservation occupe la maison, annulation la libere.
-  const open = (snapshot.status === 'cancelled') ? 1 : 0
+  const open = (snapshot.status === STATUS.CANCELLED) ? 1 : 0
   await pushAvailabilityOnce(owner, providerPropertyId, snapshot.arrival, snapshot.departure, open, 'channel-webhook')
 
   return { saved: true }

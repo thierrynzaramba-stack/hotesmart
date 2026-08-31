@@ -11,6 +11,8 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { getProvider } = require('../lib/channels')
+// Writer unique de bookings_snapshot (audit E3/E4/E5).
+const { saveBookingSnapshot } = require('../lib/bookings-snapshot')
 const billing = require('../lib/billing')
 
 const supabase = createClient(
@@ -48,27 +50,9 @@ async function ownerOfProperty(providerPropertyId) {
   return data || null
 }
 
-// Snapshot bookings_snapshot : MEME forme que saveRevision (api/channel-webhook.js),
-// qui reste la source de verite. Duplique ici volontairement pour ne pas editer le
-// fichier certifie. Les attributs viennent de GET /bookings (getReservations).
-function toSnapshot(b) {
-  const occ = b.occupancy || {}
-  const customer = b.customer || {}
-  return {
-    status:    b.status || 'new',
-    arrival:   b.arrival_date || null,
-    departure: b.departure_date || null,
-    arrivalHour: b.arrival_hour || null,
-    firstName: customer.name || '',
-    lastName:  customer.surname || '',
-    numAdult:  occ.adults || null,
-    numChild:  occ.children || null,
-    source:    b.ota_name || 'direct',
-    otaReservationCode: b.ota_reservation_code || null,
-    amount:    b.amount || null,
-    currency:  b.currency || null
-  }
-}
+// Snapshot bookings_snapshot : ecriture via le writer unique lib/bookings-snapshot.js.
+// Le mapping Channex (fromChannex) est partage avec le webhook et le feed : plus de
+// duplication de schema, plus de divergence possible (audit E3/E4).
 
 // Chaine post-mapping, idempotente, pour un bien deja resolu.
 async function runPostMapping(owner) {
@@ -89,14 +73,14 @@ async function runPostMapping(owner) {
   }
   for (const b of bookings) {
     if (!b.id) continue
-    const { error } = await supabase.from('bookings_snapshot').upsert({
-      user_id:     owner.user_id,
-      booking_id:  String(b.id),
-      property_id: String(providerPropertyId),
-      snapshot:    toSnapshot(b),
-      updated_at:  new Date().toISOString()
-    }, { onConflict: 'user_id,booking_id' })
-    if (error) console.error('[channel-events] upsert booking echec', b.id, error.message)
+    const r = await saveBookingSnapshot(supabase, {
+      userId:     owner.user_id,
+      bookingId:  b.id,
+      propertyId: providerPropertyId,
+      provider:   'channex',
+      booking:    b
+    })
+    if (!r.ok) console.error('[channel-events] upsert booking echec', b.id, r.error || r.reason)
     else out.bookings++
   }
 
