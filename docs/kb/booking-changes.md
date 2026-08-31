@@ -73,6 +73,50 @@ Conséquence assumée : un passage réel de « 0 enfant » à « information abs
 produit aucun événement — un faux positif coûterait un déplacement inutile à la
 femme de ménage.
 
+## 3 bis. Garde d'ancienneté : pas d'envoi de masse
+
+Un séjour **terminé depuis plus de 7 jours** ne produit aucun événement, quel que
+soit l'état précédent.
+
+Sans cette garde, la première activation d'un bien Channex déclenchait un envoi de
+masse : `api/channel-events.js` appelle `getReservations()` **sans fenêtre de
+date**, donc tout l'historique OTA remonte ; chaque réservation, inconnue en base,
+produisait un `new` — soit un message « bienvenue » à des voyageurs partis depuis
+des mois, et une avalanche de `menage_events` sur des dates passées. Le chemin
+Beds24 était borné par sa fenêtre de fetch (`-1j/+90j`), pas le chemin Channex.
+
+La marge de 7 jours laisse passer une réservation saisie en retard ou un départ
+tout juste passé (la PWA prestataire remonte les départs jusqu'à J-14).
+
+## 3 ter. Isolation multi-comptes
+
+Le dispatcher traite un lot **multi-comptes** et tourne avec la service key, qui
+contourne la RLS. Les filtres explicites sont donc la **seule** défense :
+
+- `tokensPourBien(tokens, propertyId, userId)` — un token « tous les biens »
+  (`property_ids` vide) d'un hôte B satisferait sinon n'importe quel bien d'un
+  hôte A, et la PWA prestataire lit `menage_events` **par token seul**
+  (`api/menages-public.js`) : le prestataire de B verrait les voyageurs de A.
+- Toutes les maps de contexte sont indexées par `user_id|identifiant`, jamais par
+  l'identifiant seul : la clé primaire de `bookings_snapshot` est
+  `(user_id, booking_id)`, et `provider_property_id` n'a **aucune** contrainte
+  d'unicité globale (deux hôtes d'un même property manager Beds24 peuvent porter
+  le même propId). Sans cela, le dispatcher enverrait le voyageur d'un hôte dans
+  le message et le code d'accès d'un autre.
+
+## 3 quater. Reconstruction du bien
+
+`propertyDepuisContexte()` reconstruit le bien au format attendu par les
+consommateurs historiques, qui recevaient l'objet **brut** de l'API Beds24 :
+
+- `provider` commande le routage d'envoi (`sendGuestMessage`). Sans lui, un hôte
+  Channex-only partirait vers `sendViaBeds24` sans clé → échec silencieux ; et
+  `message_sent_log` étant écrit **avant** l'envoi, le message ne serait jamais
+  rejoué.
+- `address`, `phone`, `checkInStart`, `checkOutEnd` alimentent les placeholders
+  `{adresse}`, `{telephone_hote}`, `{checkin}`, `{checkout}`. Ils viennent de
+  `properties` et de `knowledge` (type `fixed`), la source configurée par l'hôte.
+
 ## 4. Garde anti-boucle (la règle la plus importante)
 
 Un événement est marqué `processed_at` **même si un consommateur échoue**.

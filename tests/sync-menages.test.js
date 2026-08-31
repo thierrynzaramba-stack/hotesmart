@@ -98,3 +98,43 @@ test('voyageur sans nom -> libelle par defaut', async () => {
   })
   assert.strictEqual(inserts[0].row.event_data.guestName, 'Voyageur')
 })
+
+// ─── Isolation multi-comptes (fuite signalee par la revue) ──────────────────
+// Le dispatcher traite un lot MULTI-COMPTES et charge les tokens de tous les
+// hotes du lot. La PWA prestataire lit menage_events par TOKEN seul, et le
+// dispatcher tourne en service key : le filtre user_id est la seule defense.
+
+test('FUITE : un token « tous les biens » d\'un autre hote ne recoit rien', async () => {
+  inserts.length = 0
+  const tokens = [
+    { token: 'tok_A', property_ids: [], user_id: 'u1' },   // hote A, tous ses biens
+    { token: 'tok_B', property_ids: [], user_id: 'u2' }    // hote B, tous SES biens
+  ]
+  const r = await syncMenageEvent(event({ user_id: 'u1' }), { snapshot, propertyName: 'x', tokens })
+  assert.strictEqual(r.written, 1)
+  assert.deepStrictEqual(inserts.map(i => i.row.token), ['tok_A'])
+  assert.ok(!inserts.some(i => i.row.token === 'tok_B'), 'aucun menage_event pour le prestataire de l\'autre hote')
+})
+
+test('FUITE : meme provider_property_id chez deux hotes -> pas de croisement', async () => {
+  inserts.length = 0
+  // Deux hotes d'un meme property manager Beds24 peuvent porter le propId '1'.
+  const tokens = [
+    { token: 'tok_A', property_ids: ['1'], user_id: 'u1' },
+    { token: 'tok_B', property_ids: ['1'], user_id: 'u2' }
+  ]
+  await syncMenageEvent(event({ user_id: 'u2', property_id: '1' }), { snapshot, propertyName: 'x', tokens })
+  assert.deepStrictEqual(inserts.map(i => i.row.token), ['tok_B'])
+})
+
+test('tokensPourBien : le filtre user_id prime sur le filtre bien', () => {
+  const tokens = [
+    { token: 'bon',     property_ids: [],      user_id: 'u1' },
+    { token: 'mauvais', property_ids: [],      user_id: 'u2' },
+    { token: 'cible',   property_ids: ['123'], user_id: 'u1' },
+    { token: 'autreh',  property_ids: ['123'], user_id: 'u2' }
+  ]
+  assert.deepStrictEqual(tokensPourBien(tokens, '123', 'u1').map(t => t.token), ['bon', 'cible'])
+  assert.deepStrictEqual(tokensPourBien(tokens, '123', 'u2').map(t => t.token), ['mauvais', 'autreh'])
+  assert.deepStrictEqual(tokensPourBien(tokens, '123', 'inconnu'), [])
+})

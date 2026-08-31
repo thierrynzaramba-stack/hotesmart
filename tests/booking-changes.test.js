@@ -136,3 +136,47 @@ test('Channex : new et modified sont tous deux des reservations reelles', () => 
   // et une annulation aussi
   assert.strictEqual(detectChange(chx(), chx({ status: 'cancelled' }), 'channex').type, 'cancelled')
 })
+
+// ─── Garde d'anciennete : pas d'envoi de masse a l'activation d'un canal ─────
+// api/channel-events.js appelle getReservations() SANS fenetre de date : tout
+// l'historique OTA remonte a la premiere activation d'un bien Channex.
+
+const { sejourTermine, JOURS_DE_GRACE } = require('../lib/booking-changes')
+const AUJOURDHUI = '2026-08-31'
+
+test('activation Channex : une resa terminee depuis des mois ne produit RIEN', () => {
+  const vieille = snap({ provider: 'channex', status: 'new', arrival: '2026-01-10', departure: '2026-01-17' })
+  assert.strictEqual(detectChange(null, vieille, 'channex', AUJOURDHUI), null)
+})
+
+test('activation Channex : une resa a venir produit bien un new', () => {
+  const future = snap({ provider: 'channex', status: 'new', arrival: '2026-09-10', departure: '2026-09-17' })
+  assert.strictEqual(detectChange(null, future, 'channex', AUJOURDHUI).type, 'new')
+})
+
+test('garde d\'anciennete : le depart recent reste notifie (rattrapage)', () => {
+  // Depart il y a 2 jours : la PWA prestataire remonte les departs jusqu'a J-14,
+  // une resa saisie en retard doit encore produire son evenement.
+  const recente = snap({ departure: '2026-08-29', arrival: '2026-08-25' })
+  assert.strictEqual(sejourTermine(recente, AUJOURDHUI), false)
+  assert.strictEqual(detectChange(null, recente, 'beds24', AUJOURDHUI).type, 'new')
+})
+
+test('garde d\'anciennete : bornes exactes', () => {
+  assert.strictEqual(sejourTermine({ departure: '2026-08-23' }, AUJOURDHUI), true)   // J-8 : termine
+  assert.strictEqual(sejourTermine({ departure: '2026-08-24' }, AUJOURDHUI), false)  // J-7 pile : encore notifie
+  assert.strictEqual(sejourTermine({ departure: null }, AUJOURDHUI), false)          // inconnu -> on ne bloque pas
+  assert.strictEqual(JOURS_DE_GRACE, 7)
+})
+
+test('annulation tardive d\'un sejour a venir : toujours notifiee', () => {
+  const avant = snap({ arrival: '2026-09-10', departure: '2026-09-17' })
+  const apres = snap({ arrival: '2026-09-10', departure: '2026-09-17', status: STATUS.CANCELLED })
+  assert.strictEqual(detectChange(avant, apres, 'beds24', AUJOURDHUI).type, 'cancelled')
+})
+
+test('annulation d\'un sejour deja termine : aucun evenement', () => {
+  const avant = snap({ arrival: '2026-01-10', departure: '2026-01-17' })
+  const apres = snap({ arrival: '2026-01-10', departure: '2026-01-17', status: STATUS.CANCELLED })
+  assert.strictEqual(detectChange(avant, apres, 'beds24', AUJOURDHUI), null)
+})

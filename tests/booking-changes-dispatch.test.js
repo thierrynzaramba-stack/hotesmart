@@ -59,14 +59,26 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
   stub('lib/founder-notify.js', {
     reportIncident: async (type, detail) => { etat.incidents.push({ type, detail }) }
   })
+  const cle = (u, p) => `${u}|${String(p)}`
   stub('lib/cleaning/sync-menages.js', {
-    syncMenageEvent: async () => {
+    cle,
+    syncMenageEvent: async (event, { tokens }) => {
       etat.appels.menages++
+      etat.tokensRecus = tokens
       if (menageThrows) throw new Error('menage_events insert: boom')
       etat.menageWrites++
       return { written: 1 }
     },
-    loadContext: async () => ({ tokens: [{ token: 'tok', property_ids: [], user_id: 'u1' }], nameByPropId: { '12345': 'Bien test' } })
+    loadContext: async () => ({
+      tokens: [{ token: 'tok', property_ids: [], user_id: 'u1' }],
+      propsByKey: {
+        [cle('u1', '12345')]:      { name: 'Bien test', provider: 'beds24', address: '1 rue A' },
+        [cle('u1', 'uuid-channex')]: { name: 'Bien Channex', provider: 'channex', address: '2 rue B' }
+      },
+      knowledgeByKey: {
+        [cle('u1', '12345')]: { telephone_hote: '0600000000', checkin: '15:00', checkout: '11:00' }
+      }
+    })
   })
   stub('lib/cron-access.js', {
     cancelAccessCode: async () => { etat.appels.access++; if (accessThrows) throw new Error('seam down') },
@@ -187,4 +199,69 @@ test('bookingDepuisSnapshot : reconstruit les champs attendus par les consommate
   assert.strictEqual(b.propertyId, '12345')
   assert.strictEqual(b.firstName, 'Marie')
   assert.strictEqual(b.source, 'booking')   // hasMessagingThread s'appuie dessus
+})
+
+// ─── Reconstruction du bien (regression signalee par la revue) ──────────────
+// Un property ampute a {id, name} route tout vers Beds24 : un hote Channex-only
+// part vers sendViaBeds24 sans cle -> echec silencieux, et message_sent_log
+// etant ecrit AVANT l'envoi, le message n'est jamais rejoue.
+
+test('property reconstruit : provider present -> routage d\'envoi correct', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  const ctx = {
+    propsByKey: { 'u1|uuid-channex': { name: 'Villa', provider: 'channex', address: '2 rue B' } },
+    knowledgeByKey: {}
+  }
+  const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: 'uuid-channex', provider: 'channex' }, ctx)
+  assert.strictEqual(p.provider, 'channex', 'sans provider, sendGuestMessage partirait vers Beds24')
+  assert.strictEqual(p.name, 'Villa')
+})
+
+test('property reconstruit : les placeholders des templates sont alimentes', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  const ctx = {
+    propsByKey: { 'u1|12345': { name: 'Bien', provider: 'beds24', address: '1 rue A' } },
+    knowledgeByKey: { 'u1|12345': { telephone_hote: '0600000000', checkin: '15:00', checkout: '11:00' } }
+  }
+  const p = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '12345', provider: 'beds24' }, ctx)
+  assert.strictEqual(p.address, '1 rue A')        // {adresse}
+  assert.strictEqual(p.phone, '0600000000')       // {telephone_hote}
+  assert.strictEqual(p.checkInStart, '15:00')     // {checkin} (defaut 18:00 sinon)
+  assert.strictEqual(p.checkOutEnd, '11:00')      // {checkout} (defaut 10:00 sinon)
+})
+
+test('property reconstruit : le provider de l\'evenement sert de repli', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  const p = mod.propertyDepuisContexte(
+    { user_id: 'u1', property_id: 'inconnu', provider: 'channex' },
+    { propsByKey: {}, knowledgeByKey: {} }
+  )
+  assert.strictEqual(p.provider, 'channex')
+})
+
+test('ISOLATION : le bien d\'un autre hote n\'est jamais repris (cle composite)', () => {
+  const { mod } = chargerDispatcher({ events: [] })
+  const ctx = {
+    propsByKey: {
+      'u1|1': { name: 'Bien de A', provider: 'beds24', address: 'chez A' },
+      'u2|1': { name: 'Bien de B', provider: 'channex', address: 'chez B' }
+    },
+    knowledgeByKey: {}
+  }
+  // Meme provider_property_id '1' chez deux hotes : aucune contrainte d'unicite
+  // globale ne l'interdit (cf. lib/cron-beds24-props.js).
+  const pA = mod.propertyDepuisContexte({ user_id: 'u1', property_id: '1' }, ctx)
+  const pB = mod.propertyDepuisContexte({ user_id: 'u2', property_id: '1' }, ctx)
+  assert.strictEqual(pA.name, 'Bien de A')
+  assert.strictEqual(pA.address, 'chez A')
+  assert.strictEqual(pB.name, 'Bien de B')
+  assert.strictEqual(pB.provider, 'channex')
+})
+
+test('les tokens transmis au consommateur menage sont ceux du lot complet (filtrage en aval)', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev()] })
+  await mod.dispatchBookingChanges({})
+  // Le dispatcher passe la liste ; c'est syncMenageEvent qui filtre par user_id
+  // (verrouille par tests/sync-menages.test.js).
+  assert.ok(Array.isArray(etat.tokensRecus))
 })
