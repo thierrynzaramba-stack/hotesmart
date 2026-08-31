@@ -25,6 +25,19 @@ vocabulaires de statut. Conséquences constatées :
   reconnus par tous les lecteurs. Un blocage propriétaire apparaissait comme une
   réservation active et créait un **ménage fantôme** au planning du prestataire.
 
+## 1 bis. Le writer détecte aussi les changements
+
+Avant l'upsert — seul instant où l'état précédent et l'état entrant coexistent —
+le writer appelle `detectChange()` (`lib/booking-changes.js`) et journalise le
+résultat dans `booking_change_events`. Le snapshot reste ainsi **l'unique mémoire
+d'état** : aucune table miroir à maintenir. Le webhook Channex passant par le même
+writer produit les mêmes événements que le cron Beds24 (écart E2).
+
+Voir `docs/kb/booking-changes.md` pour les règles de typage et la garde
+anti-boucle. Le vocabulaire de statut est isolé dans
+`lib/bookings-snapshot-status.js` (partagé sans cycle d'imports, et ré-exporté
+par ce module : les appelants existants n'ont rien à changer).
+
 ## 2. Règle absolue
 
 **`lib/bookings-snapshot.js` est le seul writer autorisé de `bookings_snapshot`.**

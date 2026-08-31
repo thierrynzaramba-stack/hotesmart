@@ -9,6 +9,13 @@
 // Session #27 : surveillance volume messages + coupe-circuit auto (alerting fondateur).
 // Session #28 : sonde anti-boucle de production d'événements ménage (alerte fondateur seule).
 // Session #29 : sonde générique de croissance des tables (filet anti-boucle d'écriture, alerte seule).
+// Session #30 : unification des changements de réservation. La détection n'est plus
+//   câblée dans le chemin Beds24 : le writer unique (lib/bookings-snapshot.js) la
+//   journalise dans booking_change_events pour les DEUX providers, et
+//   lib/booking-changes-dispatch.js la distribue aux ménages, codes d'accès et
+//   templates. C'est ce qui ferme l'écart E2 (biens Channex sans menage_events).
+//   ⚠ Le dispatch tourne APRÈS la mise à jour de tous les snapshots (Beds24, biens
+//   channel, feed Channex), pour traiter le cycle en une seule passe.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -24,6 +31,7 @@ const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
 const { checkMessageVolume, checkEventProduction, checkTableGrowth } = require('../lib/cron-alerting')
+const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
@@ -41,6 +49,7 @@ module.exports = async function handler(req, res) {
     totalTasks: 0,
     totalAutoReplies: 0,
     totalBookingEvents: 0,
+    totalBookingChanges: 0,
     totalAutoMessages: 0,
     totalChannelRevisions: 0,
     totalBeds24Materialized: 0,
@@ -98,6 +107,27 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'messages_backfill', error: err.message })
     }
 
+    // Poll de secours Channex : rattrape les réservations dont le webhook
+    // se serait perdu. Lit le feed global, traite et acke chaque révision.
+    // ⚠ Placé AVANT le dispatch : les révisions qu'il écrit produisent des
+    // booking_change_events qui doivent être distribués dans le même cycle.
+    try { await pollChannelFeed(results) }
+    catch (err) {
+      console.error('[Cron] Erreur poll Channex:', err.message)
+      results.errors.push({ context: 'channel_feed', error: err.message })
+    }
+
+    // 3quinquies. DISTRIBUTION des changements de réservation, tous providers
+    // confondus. Tourne APRÈS la mise à jour de tous les snapshots. Consomme les
+    // booking_change_events non traités et alimente menage_events, codes d'accès
+    // et templates. Garde anti-boucle : un événement est marqué processed_at même
+    // si un consommateur échoue — jamais de retraitement automatique.
+    try { await dispatchBookingChanges(results) }
+    catch (err) {
+      console.error('[Cron] Erreur dispatch changements:', err.message)
+      results.errors.push({ context: 'booking_changes_dispatch', error: err.message })
+    }
+
     // 4. Tâches transverses (non liées à un user spécifique)
     try { await checkBatteries(results) }
     catch (err) {
@@ -132,14 +162,6 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'table_growth', error: err.message })
     }
 
-    // Poll de secours Channex : rattrape les réservations dont le webhook
-    // se serait perdu. Lit le feed global, traite et acke chaque révision.
-    try { await pollChannelFeed(results) }
-    catch (err) {
-      console.error('[Cron] Erreur poll Channex:', err.message)
-      results.errors.push({ context: 'channel_feed', error: err.message })
-    }
-
     // 5. Log du run
     await supabase.from('cron_logs').upsert({
       id: 'agent-ai',
@@ -169,6 +191,8 @@ async function processUser(userId, beds24Key, tokens, results) {
 
   for (const property of properties) {
     try {
+      // Rafraichit les snapshots Beds24. La detection des changements a lieu
+      // dans le writer ; la distribution, plus bas dans le cycle (3quinquies).
       await detectBookingChanges(userId, beds24Key, property, tokens, results)
       await processMessageTemplates(userId, beds24Key, property, results)
       await processProperty(userId, beds24Key, property, results)
