@@ -518,16 +518,19 @@ test('journal en echec -> le snapshot n\'avance PAS (pas de perte definitive)', 
   assert.strictEqual(capture.upserted, undefined, 'aucun upsert : le changement reste detectable au prochain cycle')
 })
 
-test('sans changement detecte, le snapshot avance normalement', async () => {
+test('un champ hors diff a change -> upsert, mais aucun evenement', async () => {
+  // Le nom du voyageur ne fait pas partie des quatre champs de diff : la ligne
+  // doit etre mise a jour, sans notifier personne.
   const capture = {}
-  const identique = { provider: 'beds24', status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: '', lastName: '', numAdult: null, numChild: null, source: 'direct', otaReservationCode: null, statusRaw: 'confirmed' }
-  const sb = fakeSupabaseEchecJournal({ existing: identique, captureRef: capture })
+  const existant = { provider: 'beds24', status: 'confirmed', statusRaw: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: 'Jean', lastName: '', numAdult: null, numChild: null, source: 'direct', otaReservationCode: null }
+  const sb = fakeSupabaseEchecJournal({ existing: existant, captureRef: capture })
   const res = await saveBookingSnapshot(sb, {
     userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
-    booking: { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }
+    booking: { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: 'Marie' }
   })
   assert.strictEqual(res.ok, true)
-  assert.ok(capture.upserted, 'rien a journaliser -> l\'upsert a bien lieu')
+  assert.ok(capture.upserted, 'la ligne a change -> elle est ecrite')
+  assert.strictEqual(capture.upserted.snapshot.firstName, 'Marie')
 })
 
 test('IMPORT INITIAL : les evenements sont materialises DEJA traites', async () => {
@@ -552,4 +555,73 @@ test('hors import initial, l\'evenement part non traite', async () => {
   })
   const ev = (capture.events || [])[0]
   assert.strictEqual(ev.processed_at, null)
+})
+
+// ─── Ne pas reecrire une ligne inchangee ────────────────────────────────────
+// Le cron repassait sur toutes les reservations de chaque bien a chaque cycle,
+// un upsert chacune, en serie : l'etape classify prenait 9 a 17 s par bien et le
+// cycle frolait les 60 s de plafond.
+
+test('ligne INCHANGEE -> aucun upsert, aucun evenement', async () => {
+  const capture = {}
+  const booking = { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: 'Jean', lastName: 'Dupont', numAdult: 2, numChild: 0, channel: 'airbnb', apiReference: 'HMS1' }
+  // L'existant est exactement ce que le mapper produirait.
+  const existant = fromBeds24(booking)
+  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24', booking
+  })
+  assert.strictEqual(res.ok, true)
+  assert.strictEqual(res.inchange, true)
+  assert.strictEqual(res.change, null)
+  assert.strictEqual(capture.row, undefined, 'aucune ecriture')
+  assert.strictEqual((capture.events || []).length, 0, 'aucun evenement')
+})
+
+test('ligne CHANGEE -> upsert ET evenement', async () => {
+  const capture = {}
+  const existant = fromBeds24({ status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', numAdult: 2, numChild: 0 })
+  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-08', numAdult: 2, numChild: 0 }
+  })
+  assert.strictEqual(res.ok, true)
+  assert.ok(!res.inchange)
+  assert.strictEqual(res.change.type, 'modified')
+  assert.ok(capture.row, 'la ligne est ecrite')
+  assert.strictEqual(capture.row.snapshot.departure, '2099-09-08')
+  assert.strictEqual((capture.events || []).length, 1, 'un evenement journalise')
+})
+
+test('PREMIERE ecriture -> upsert (pas d\'existant a comparer)', async () => {
+  const capture = {}
+  const sb = fakeSupabase({ existing: null, captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }
+  })
+  assert.strictEqual(res.ok, true)
+  assert.ok(!res.inchange)
+  assert.ok(capture.row, 'la premiere ecriture a toujours lieu')
+})
+
+test('lot : seules les lignes modifiees sont ecrites', async () => {
+  const inchange = fromBeds24({ status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', numAdult: 2, numChild: 0 })
+  const { client, stats } = fakeBatchSupabase({
+    rows: [{ booking_id: '1', snapshot: inchange }]
+  })
+  const res = await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [
+      { id: 1, status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', numAdult: 2, numChild: 0 },  // identique
+      { id: 2, status: 'confirmed', arrival: '2099-10-01', departure: '2099-10-05' }                             // nouvelle
+    ]
+  })
+  assert.strictEqual(res.inchanges, 1)
+  assert.strictEqual(res.saved, 1)
+  assert.strictEqual(stats.upserts, 1, 'une seule ecriture pour deux reservations')
+  assert.strictEqual(stats.upsertedRows[0].booking_id, '2')
 })
