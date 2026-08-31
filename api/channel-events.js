@@ -12,7 +12,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { getProvider } = require('../lib/channels')
 // Writer unique de bookings_snapshot (audit E3/E4/E5).
-const { saveBookingSnapshot } = require('../lib/bookings-snapshot')
+const { saveBookingSnapshots } = require('../lib/bookings-snapshot')
 const billing = require('../lib/billing')
 
 const supabase = createClient(
@@ -71,18 +71,15 @@ async function runPostMapping(owner) {
     // Reserve : confirmer les noms d'attributs bookings au 1er passage reel.
     console.log('[channel-events] 1er booking keys:', Object.keys(bookings[0] || {}))
   }
-  for (const b of bookings) {
-    if (!b.id) continue
-    const r = await saveBookingSnapshot(supabase, {
-      userId:     owner.user_id,
-      bookingId:  b.id,
-      propertyId: providerPropertyId,
-      provider:   'channex',
-      booking:    b
-    })
-    if (!r.ok) console.error('[channel-events] upsert booking echec', b.id, r.error || r.reason)
-    else out.bookings++
-  }
+  // Import initial : ecriture par lot (une seule relecture groupee cote writer).
+  const saved = await saveBookingSnapshots(supabase, {
+    userId:     owner.user_id,
+    propertyId: providerPropertyId,
+    provider:   'channex',
+    bookings
+  })
+  out.bookings = saved.saved
+  if (saved.failed) console.error('[channel-events] upsert booking echec x' + saved.failed)
 
   // 2) IMPORT messages (dedup interne provider_msg_id -> idempotent).
   if (typeof provider.importMessages === 'function') {

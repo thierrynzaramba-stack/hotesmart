@@ -12,7 +12,8 @@ const {
   fromBeds24,
   fromChannex,
   mergeSnapshot,
-  saveBookingSnapshot
+  saveBookingSnapshot,
+  saveBookingSnapshots
 } = require('../lib/bookings-snapshot')
 
 // ─── Mapping des statuts Beds24 ──────────────────────────────────────────────
@@ -383,4 +384,103 @@ test('saveBookingSnapshot : provider inconnu -> échec propre, jamais de throw',
   })
   assert.strictEqual(res.ok, false)
   assert.strictEqual(res.reason, 'exception')
+})
+
+// ─── Ecriture par lot : une seule relecture, merge conserve ──────────────────
+// Les boucles d'import (cron Beds24, activation d'un canal) relisaient la ligne
+// booking par booking : 2N allers-retours Supabase par cycle.
+
+function fakeBatchSupabase({ rows = [], failSelect = false } = {}) {
+  const stats = { selects: 0, upserts: 0, upsertedRows: [] }
+  const client = {
+    from() {
+      const q = {
+        _op: null,
+        select() { this._op = 'select'; return this },
+        eq() { return this },
+        in() { return this },
+        maybeSingle: async () => { stats.selects++; return { data: null } },
+        then: undefined,
+        upsert: async (row) => { stats.upserts++; stats.upsertedRows.push(row); return { error: null } }
+      }
+      // `.select().eq().in()` est attendu (awaited) directement par le lot.
+      q.then = (resolve, reject) => {
+        stats.selects++
+        const result = failSelect
+          ? { data: null, error: { message: 'boom' } }
+          : { data: rows, error: null }
+        return Promise.resolve(result).then(resolve, reject)
+      }
+      return q
+    }
+  }
+  return { client, stats }
+}
+
+test('saveBookingSnapshots : UNE relecture pour N bookings', async () => {
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  const res = await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [
+      { id: 1, status: 'new' },
+      { id: 2, status: 'confirmed' },
+      { id: 3, status: 'black' }
+    ]
+  })
+  assert.strictEqual(res.saved, 3)
+  assert.strictEqual(stats.upserts, 3)
+  assert.strictEqual(stats.selects, 1, `attendu 1 select, obtenu ${stats.selects}`)
+})
+
+test('saveBookingSnapshots : le merge non destructif est conserve', async () => {
+  const { client, stats } = fakeBatchSupabase({
+    rows: [{ booking_id: '1', snapshot: { amount: '250.00', currency: 'EUR' } }]
+  })
+  await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [{ id: 1, status: 'confirmed', arrival: '2026-09-01' }]
+  })
+  const written = stats.upsertedRows[0].snapshot
+  assert.strictEqual(written.amount, '250.00')   // non fourni par Beds24 -> preserve
+  assert.strictEqual(written.currency, 'EUR')
+  assert.strictEqual(written.status, STATUS.CONFIRMED)
+})
+
+test('saveBookingSnapshots : statuts canoniques appliques a tout le lot', async () => {
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [{ id: 1, status: 'black' }, { id: 2, status: 'request' }]
+  })
+  const statuts = stats.upsertedRows.map(r => r.snapshot.status)
+  assert.deepStrictEqual(statuts, [STATUS.BLOCKED, STATUS.REQUEST])
+})
+
+test('saveBookingSnapshots : relecture groupee en echec -> repli unitaire, pas d\'ecrasement', async () => {
+  const { client, stats } = fakeBatchSupabase({ failSelect: true })
+  const res = await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [{ id: 1, status: 'new' }, { id: 2, status: 'new' }]
+  })
+  assert.strictEqual(res.saved, 2)
+  // 1 select groupe en echec + 1 relecture unitaire par booking
+  assert.strictEqual(stats.selects, 3)
+})
+
+test('saveBookingSnapshots : lot vide ou cles manquantes -> aucune ecriture', async () => {
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  assert.strictEqual((await saveBookingSnapshots(client, { userId: 'u1', propertyId: 'p', bookings: [] })).saved, 0)
+  assert.strictEqual((await saveBookingSnapshots(client, { bookings: [{ id: 1 }] })).saved, 0)
+  assert.strictEqual((await saveBookingSnapshots(client, {})).saved, 0)
+  assert.strictEqual(stats.upserts, 0)
+})
+
+test('saveBookingSnapshots : bookings sans id ignores', async () => {
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  const res = await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    bookings: [{ id: 1, status: 'new' }, { status: 'new' }, null]
+  })
+  assert.strictEqual(res.saved, 1)
+  assert.strictEqual(stats.upserts, 1)
 })

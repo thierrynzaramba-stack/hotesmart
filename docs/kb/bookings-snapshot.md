@@ -124,6 +124,14 @@ pas fournir, jamais `null`.
 
 L'appelant qui a déjà lu la ligne passe `existing` pour éviter une seconde lecture.
 
+**Écrire un lot** (boucle d'import : cron Beds24, activation d'un canal) :
+`saveBookingSnapshots(supabase, { userId, propertyId, provider, bookings })`.
+La relecture des lignes existantes s'y fait en **un seul select par lot** au lieu
+d'un par booking — sinon le cycle cron `*/5` double ses allers-retours Supabase.
+Ne jamais réimplémenter ce pré-chargement dans un appelant : il vit dans le writer.
+Si la relecture groupée échoue, le lot retombe sur la relecture unitaire plutôt que
+d'écraser à l'aveugle.
+
 ## 6. Clés
 
 `bookings_snapshot.property_id` est du **TEXT** = `properties.provider_property_id`
