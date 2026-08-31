@@ -87,6 +87,16 @@ Ne jamais tester `snapshot.status === 'cancelled'` en dur. Utiliser :
   l'unification** (vocabulaire brut) : aucun backfill SQL n'est nécessaire ;
 - `isActiveStatus(snapshot)` → `true` seulement si `confirmed`.
 
+**Bookings bruts** (réponse directe de l'API d'un provider, sans passer par
+`bookings_snapshot`) : ils ne portent pas de champ `provider`. Passer le provider en
+second argument — `isActiveStatus(booking, 'beds24')`. Le `provider` d'un snapshot
+reste prioritaire, donc un consommateur à source mixte (bruts Beds24 + snapshots
+channel, cas de `lib/cron-arrival-code.js`) passe simplement le provider de sa source
+brute. Sans second argument, le comportement est inchangé.
+
+Piège corrigé au passage : `status !== 'cancelled' && status !== 'black'` laissait
+passer `request` (demande non confirmée) comme une réservation active.
+
 ## 4. Schéma du champ `snapshot` (jsonb)
 
 `provider`, `status`, `statusRaw`, `arrival`, `departure`, `arrivalHour`, `firstName`,

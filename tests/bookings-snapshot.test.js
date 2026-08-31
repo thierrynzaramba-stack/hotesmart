@@ -163,6 +163,48 @@ test('isActiveStatus : seul confirmed occupe le logement', () => {
   assert.strictEqual(isActiveStatus({ status: 'modified', provider: 'channex' }), true)
 })
 
+// ─── Provider par defaut : consommateurs de bookings BRUTS ───────────────────
+// lib/cron-property-status.js (bookings Beds24 bruts) et lib/cron-arrival-code.js
+// (source MIXTE : bruts Beds24 + snapshots channel) testaient en dur
+// `status !== 'cancelled' && status !== 'black'`, ce qui laissait passer 'request'.
+
+test('booking Beds24 brut (sans champ provider) : black et request non actifs', () => {
+  // Un booking brut de l'API v2 n'a pas de champ `provider` : sans defaut, 'black'
+  // serait inconnu et retomberait sur confirmed.
+  assert.strictEqual(isActiveStatus({ status: 'black' }, 'beds24'), false)
+  assert.strictEqual(isActiveStatus({ status: 'request' }, 'beds24'), false)
+  assert.strictEqual(isActiveStatus({ status: 'cancelled' }, 'beds24'), false)
+  assert.strictEqual(isActiveStatus({ status: 'new' }, 'beds24'), true)
+  assert.strictEqual(isActiveStatus({ status: 'confirmed' }, 'beds24'), true)
+})
+
+test("regression : 'request' etait traite comme actif par l'ancien filtre en dur", () => {
+  const ancienFiltre = b => b.status !== 'cancelled' && b.status !== 'black'
+  const booking = { status: 'request' }
+  assert.strictEqual(ancienFiltre(booking), true)              // ancien comportement
+  assert.strictEqual(isActiveStatus(booking, 'beds24'), false) // corrige
+})
+
+test('source mixte : le provider du snapshot prime sur le defaut', () => {
+  // Snapshot Channex traverse un consommateur dont la source brute est Beds24.
+  const snapChannex = { status: 'modified', provider: 'channex' }
+  const warns = []
+  const original = console.warn
+  console.warn = (...a) => warns.push(a.join(' '))
+  try {
+    assert.strictEqual(isActiveStatus(snapChannex, 'beds24'), true)
+  } finally { console.warn = original }
+  assert.deepStrictEqual(warns, [], 'aucun warn : le provider du snapshot est utilise')
+
+  // Et un 'black' Beds24 reste un blocage meme si le defaut dit autre chose.
+  assert.strictEqual(isActiveStatus({ status: 'black', provider: 'beds24' }, 'channex'), false)
+})
+
+test('sans defaut, le comportement precedent est inchange (retrocompat)', () => {
+  assert.strictEqual(readStatus({ status: 'cancelled' }), STATUS.CANCELLED)
+  assert.strictEqual(readStatus({ status: 'black', provider: 'beds24' }), STATUS.BLOCKED)
+})
+
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 test('fromBeds24 : schéma complet, provider rempli, champs inconnus non écrasants', () => {
   const snap = fromBeds24({
