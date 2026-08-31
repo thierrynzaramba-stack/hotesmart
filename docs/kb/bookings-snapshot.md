@@ -48,17 +48,32 @@ Quatre valeurs, identiques quel que soit le provider :
 
 Correspondances appliquées **à l'écriture** :
 
+Listes officielles, vérifiées sur la documentation des deux providers :
+- **Beds24 v2** : `new` | `confirmed` | `request` | `cancelled` | `black`
+  (wiki.beds24.com, Category:Bookings). `new` = réservation reçue non encore ouverte ;
+  elle passe à `confirmed` dès qu'elle est ouverte et enregistrée — les deux sont donc
+  des réservations réelles.
+- **Channex v1** : `new` | `modified` | `cancelled`
+  (docs.channex.io, Bookings Collection : « can be one of three values »).
+
 | Brut provider          | Beds24      | Channex     |
 |------------------------|-------------|-------------|
 | `new`                  | confirmed   | confirmed   |
-| `confirmed`            | confirmed   | confirmed   |
+| `confirmed`            | confirmed   | —           |
 | `modified`             | —           | confirmed   |
 | `request`              | request     | —           |
-| `inquiry`              | request     | —           |
+| `inquiry`              | request*    | —           |
 | `black`                | **blocked** | —           |
 | `cancelled`            | cancelled   | cancelled   |
 | vide / absent          | confirmed   | confirmed   |
 | inconnu                | confirmed + warn en log | confirmed + warn en log |
+
+\* `inquiry` n'est **pas** documenté par Beds24 (qui utilise `request`) : mapping
+défensif, pour qu'un tel statut ne soit jamais traité comme réservation active.
+
+Aucun statut réellement émis par les deux providers ne passe par le fallback : c'est
+verrouillé par test (`zero warn`), sinon chaque nouvelle réservation polluerait les
+logs Vercel à chaque cycle cron.
 
 Le statut brut est conservé dans `snapshot.statusRaw` pour le debug.
 

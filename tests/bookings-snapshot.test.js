@@ -55,6 +55,78 @@ test('"black" n\'existe pas chez Channex : pas de contamination entre providers'
   assert.strictEqual(canonicalStatus('black', 'beds24'), STATUS.BLOCKED)
 })
 
+// ─── Aucun statut REEL ne doit passer par le fallback "inconnu" ──────────────
+// Le fallback logge un warn : si 'new' y tombait, chaque nouvelle reservation
+// polluerait les logs Vercel a chaque cycle cron.
+// Listes officielles :
+//   Beds24 v2  : new | confirmed | request | cancelled | black
+//                (wiki.beds24.com, Category:Bookings)
+//   Channex v1 : new | modified | cancelled
+//                (docs.channex.io, Bookings Collection : "can be one of three values")
+const BEDS24_REAL  = ['new', 'confirmed', 'request', 'cancelled', 'black']
+const CHANNEX_REAL = ['new', 'modified', 'cancelled']
+
+function captureWarns(fn) {
+  const warns = []
+  const original = console.warn
+  console.warn = (...args) => warns.push(args.join(' '))
+  try { fn() } finally { console.warn = original }
+  return warns
+}
+
+test('Beds24 : aucun statut documente ne declenche le fallback (zero warn)', () => {
+  const warns = captureWarns(() => {
+    for (const raw of BEDS24_REAL) canonicalStatus(raw, 'beds24')
+  })
+  assert.deepStrictEqual(warns, [], `warns inattendus : ${warns.join(' | ')}`)
+})
+
+test('Channex : aucun statut documente ne declenche le fallback (zero warn)', () => {
+  const warns = captureWarns(() => {
+    for (const raw of CHANNEX_REAL) canonicalStatus(raw, 'channex')
+  })
+  assert.deepStrictEqual(warns, [], `warns inattendus : ${warns.join(' | ')}`)
+})
+
+test('le fallback logge bien un warn quand il sert vraiment', () => {
+  const warns = captureWarns(() => canonicalStatus('statut_jamais_vu', 'beds24'))
+  assert.strictEqual(warns.length, 1)
+  assert.ok(warns[0].includes('statut_jamais_vu'))
+})
+
+test('mapping Beds24 complet et explicite (table de reference)', () => {
+  assert.deepStrictEqual(
+    BEDS24_REAL.map(s => [s, canonicalStatus(s, 'beds24')]),
+    [
+      ['new',       STATUS.CONFIRMED],
+      ['confirmed', STATUS.CONFIRMED],
+      ['request',   STATUS.REQUEST],
+      ['cancelled', STATUS.CANCELLED],
+      ['black',     STATUS.BLOCKED]
+    ]
+  )
+})
+
+test('mapping Channex complet et explicite (table de reference)', () => {
+  assert.deepStrictEqual(
+    CHANNEX_REAL.map(s => [s, canonicalStatus(s, 'channex')]),
+    [
+      ['new',       STATUS.CONFIRMED],
+      ['modified',  STATUS.CONFIRMED],
+      ['cancelled', STATUS.CANCELLED]
+    ]
+  )
+})
+
+test("'inquiry' : mapping defensif, non documente par Beds24", () => {
+  // Absent de la doc Beds24 (qui utilise 'request'). Garde en filet : si l'API
+  // en emettait un jour, il ne serait pas traite comme une reservation active.
+  const warns = captureWarns(() => {
+    assert.strictEqual(canonicalStatus('inquiry', 'beds24'), STATUS.REQUEST)
+  })
+  assert.deepStrictEqual(warns, [])
+})
+
 // ─── Cas limites ─────────────────────────────────────────────────────────────
 test('statut vide ou absent -> confirmed (comportement historique)', () => {
   assert.strictEqual(canonicalStatus('', 'beds24'), STATUS.CONFIRMED)
