@@ -38,6 +38,21 @@ Chaque bien a un bouton **Couper l'IA / Réactiver** sur **`/biens`** (miroir da
 - **Continuent** : la **réception** des messages et la **synchro** des réservations.
 - Le **code du voyageur déjà en place reste valable** (le kill switch ne le supprime pas).
 
+**Périmètre du kill switch : il est tourné vers le VOYAGEUR, pas vers le ménage.**
+Décision produit assumée — un bien en pause continue de notifier son prestataire,
+parce que le logement doit être nettoyé même quand l'automatisation voyageur est
+coupée. Concrètement, restent actifs pendant la pause :
+- les **notifications ménage** (`menage_events` : nouvelle réservation, modification,
+  annulation) et donc la PWA prestataire ;
+- la **suppression** du code d'accès sur annulation (`cancelAccessCode`) — seule sa
+  *régénération* est bloquée ;
+- l'écriture des `bookings_snapshot` et des `booking_change_events`.
+
+**Aucun rattrapage à la reprise** : un événement ignoré pour cause de pause est
+consommé et marqué traité (garde anti-boucle, cf. `docs/kb/booking-changes.md`).
+Rien ne s'accumule, rien ne repart en masse à la réactivation — un message non
+envoyé pendant la pause est définitivement perdu, ce qui est le comportement voulu.
+
 ### Pause automatique (coupe-circuit)
 Deux protections tournent en fond (par heure glissante) :
 - **Volume anormal par bien** (seuil ~10 messages IA/auto en 1h) → **alerte** l'équipe, **sans**

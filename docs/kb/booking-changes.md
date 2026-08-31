@@ -117,6 +117,17 @@ consommateurs historiques, qui recevaient l'objet **brut** de l'API Beds24 :
   `{adresse}`, `{telephone_hote}`, `{checkin}`, `{checkout}`. Ils viennent de
   `properties` et de `knowledge` (type `fixed`), la source configurée par l'hôte.
 
+## 3 quinquies. Interaction avec le kill switch
+
+Le flux **ne consulte pas** `automation_paused` : les événements sont produits et
+distribués même sur un bien en pause. Ce sont les consommateurs qui filtrent, et
+seulement ceux tournés vers le voyageur (`triggerTemplates`, `refreshAccessCode`).
+Les `menage_events` continuent donc d'être écrits — décision produit, voir
+`docs/kb/alertes.md` §3.
+
+Un consommateur qui s'abstient pour cause de pause n'est pas une erreur :
+l'événement est marqué traité, rien n'est rejoué à la réactivation.
+
 ## 4. Garde anti-boucle (la règle la plus importante)
 
 Un événement est marqué `processed_at` **même si un consommateur échoue**.
