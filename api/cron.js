@@ -35,6 +35,34 @@ const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfi
 const { checkMessageVolume, checkEventProduction, checkTableGrowth } = require('../lib/cron-alerting')
 const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 
+// ─── Chrono d'etape ──────────────────────────────────────────────────────────
+// Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
+// d'alerting et le heartbeat cron_logs avant qu'ils ne tournent. On mesure chaque
+// etape, on loge AU FIL DE L'EAU (un cycle tue n'ecrit jamais sa ligne finale) et
+// on recapitule a la fin. Instrumentation seule : aucun changement de comportement.
+function chronoCycle() {
+  const t0 = Date.now()
+  const etapes = []
+  return {
+    async mesure(nom, fn) {
+      const a = Date.now()
+      try { return await fn() }
+      finally {
+        const d = Date.now() - a
+        etapes.push({ nom, ms: d })
+        // Loge immediatement : si l'invocation est tuee, on sait ou elle en etait.
+        console.log(`[Cron][chrono] ${nom} ${d}ms (cumul ${Date.now() - t0}ms)`)
+      }
+    },
+    total() { return Date.now() - t0 },
+    resume() {
+      const tri = [...etapes].sort((a, b) => b.ms - a.ms)
+      return `[Cron][chrono] TOTAL ${Date.now() - t0}ms | ` +
+             tri.map(e => `${e.nom}=${e.ms}ms`).join(' ')
+    }
+  }
+}
+
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
   // Authorization: Bearer <CRON_SECRET> (variable definie cote Vercel).
@@ -44,6 +72,7 @@ module.exports = async function handler(req, res) {
     return res.status(401).json({ error: 'Non autorisé' })
   }
   console.log('[Cron] Démarrage', new Date().toISOString())
+  const chrono = chronoCycle()
   const results = {
     timestamp: new Date().toISOString(),
     properties: [],
@@ -60,7 +89,7 @@ module.exports = async function handler(req, res) {
   }
   try {
     // 1. Refresh tokens Beds24 (indispensable avant tout fetch)
-    try { await refreshBeds24Tokens() }
+    try { await chrono.mesure('refresh_tokens', () => refreshBeds24Tokens()) }
     catch (err) { console.error('[Cron] Erreur refresh tokens:', err.message) }
     // 2. Récupère les clés Beds24 actives et les tokens publics
     //    (hôtes ayant un vrai token ; ignore les lignes sans api_key, ex. brevo-only)
@@ -76,7 +105,7 @@ module.exports = async function handler(req, res) {
       for (const { user_id, api_key } of apiKeys) {
         try {
           const userTokens = (tokens || []).filter(t => t.user_id === user_id)
-          await processUser(user_id, api_key, userTokens, results)
+          await chrono.mesure(`user_${user_id.slice(0, 8)}`, () => processUser(user_id, api_key, userTokens, results, chrono))
         } catch (err) {
           console.error(`[Cron] Erreur user ${user_id}:`, err.message)
           results.errors.push({ user_id, error: err.message })
@@ -86,7 +115,7 @@ module.exports = async function handler(req, res) {
 
     // 3bis. Traitement des biens channel (provider='channex') : messages auto
     // depuis bookings_snapshot, envoi via lib/channels/channex.
-    try { await processChannelProperties(results) }
+    try { await chrono.mesure('biens_channel', () => processChannelProperties(results)) }
     catch (err) {
       console.error('[Cron] Erreur biens channel:', err.message)
       results.errors.push({ context: 'channel_props', error: err.message })
@@ -94,7 +123,7 @@ module.exports = async function handler(req, res) {
 
     // 3ter. File d'attente des full syncs ARI : depile UN bien (le plus ancien
     // pending), pousse 500 jours vers Channex, pose last_fullsync_at. 1 bien / run.
-    try { await processSyncQueue(results) }
+    try { await chrono.mesure('file_sync_ari', () => processSyncQueue(results)) }
     catch (err) {
       console.error('[Cron] Erreur file sync ARI:', err.message)
       results.errors.push({ context: 'channel_sync', error: err.message })
@@ -103,7 +132,7 @@ module.exports = async function handler(req, res) {
     // 3quater. Rattrapage import messages post-activation : les threads OTA arrivent
     // en differe cote Channex (le webhook activate_channel importe 0). Rejoue
     // importMessages pour les biens actives < 30 min, puis pose messages_backfilled.
-    try { await processMessagesBackfill(results) }
+    try { await chrono.mesure('backfill_messages', () => processMessagesBackfill(results)) }
     catch (err) {
       console.error('[Cron] Erreur rattrapage messages:', err.message)
       results.errors.push({ context: 'messages_backfill', error: err.message })
@@ -113,14 +142,14 @@ module.exports = async function handler(req, res) {
     // se serait perdu. Lit le feed global, traite et acke chaque révision.
     // ⚠ Placé AVANT le dispatch : les révisions qu'il écrit produisent des
     // booking_change_events qui doivent être distribués dans le même cycle.
-    try { await pollChannelFeed(results) }
+    try { await chrono.mesure('poll_channel_feed', () => pollChannelFeed(results)) }
     catch (err) {
       console.error('[Cron] Erreur poll Channex:', err.message)
       results.errors.push({ context: 'channel_feed', error: err.message })
     }
 
     // 4. Tâches transverses (non liées à un user spécifique)
-    try { await checkBatteries(results) }
+    try { await chrono.mesure('sonde_batteries', () => checkBatteries(results)) }
     catch (err) {
       console.error('[Cron] Erreur batterie:', err.message)
       results.errors.push({ context: 'battery_check', error: err.message })
@@ -128,7 +157,7 @@ module.exports = async function handler(req, res) {
 
     // 4bis. Surveillance volume messages IA/auto (alerte fondateur si anormal) +
     // coupe-circuit automatique par conversation (met le bien en pause si boucle).
-    try { await checkMessageVolume(results) }
+    try { await chrono.mesure('sonde_volume_messages', () => checkMessageVolume(results)) }
     catch (err) {
       console.error('[Cron] Erreur surveillance volume:', err.message)
       results.errors.push({ context: 'message_volume', error: err.message })
@@ -137,7 +166,7 @@ module.exports = async function handler(req, res) {
     // 4ter. Sonde anti-boucle de production d'événements ménage : détecte un
     // producteur qui génère des menage_events en rafale (> seuil / booking / 24h).
     // Alerte fondateur seule, dédup 24h par bien. Aucune suspension d'écriture.
-    try { await checkEventProduction() }
+    try { await chrono.mesure('sonde_evenements', () => checkEventProduction()) }
     catch (err) {
       console.error('[Cron] Erreur sonde événements:', err.message)
       results.errors.push({ context: 'event_production', error: err.message })
@@ -147,7 +176,7 @@ module.exports = async function handler(req, res) {
     // d'écriture) : 1x/heure, compte les lignes créées sur la dernière heure dans
     // chaque table à écriture auto ; dépassement -> alerte fondateur (aucune
     // action automatique). Marqueur horaire dans cron_logs.
-    try { await checkTableGrowth() }
+    try { await chrono.mesure('sonde_croissance', () => checkTableGrowth()) }
     catch (err) {
       console.error('[Cron] Erreur sonde croissance tables:', err.message)
       results.errors.push({ context: 'table_growth', error: err.message })
@@ -163,7 +192,7 @@ module.exports = async function handler(req, res) {
     // cron_logs — or ces sondes existent précisément pour détecter les rafales
     // d'écriture que le dispatch peut produire. Le dispatcher s'auto-limite
     // (LOT_MAX + budget mur) et reporte le reliquat au cycle suivant.
-    try { await dispatchBookingChanges(results) }
+    try { await chrono.mesure('dispatch_changements', () => dispatchBookingChanges(results)) }
     catch (err) {
       console.error('[Cron] Erreur dispatch changements:', err.message)
       results.errors.push({ context: 'booking_changes_dispatch', error: err.message })
@@ -178,6 +207,7 @@ module.exports = async function handler(req, res) {
       errors: results.errors
     })
 
+    console.log(chrono.resume())
     console.log('[Cron] Terminé', results)
     return res.json(results)
 
@@ -188,28 +218,33 @@ module.exports = async function handler(req, res) {
 }
 
 // ─── Traitement par utilisateur (boucle sur ses propriétés) ─────────────────
-async function processUser(userId, beds24Key, tokens, results) {
-  const properties = await fetchProperties(beds24Key)
+async function processUser(userId, beds24Key, tokens, results, chrono) {
+  // Chrono optionnel : sous-etapes par bien, pour savoir laquelle mange le budget.
+  const mesure = chrono ? chrono.mesure.bind(chrono) : (nom, fn) => fn()
+
+  const properties = await mesure('  fetchProperties', () => fetchProperties(beds24Key))
 
   // Materialisation des biens Beds24 en table properties (pose active_at a la 1re
   // apparition). Non bloquant : une erreur ici ne doit pas empecher le traitement des biens.
-  try { await materializeBeds24Properties(userId, properties, results) }
+  try { await mesure('  materialisation', () => materializeBeds24Properties(userId, properties, results)) }
   catch (err) { console.error(`[Cron] Erreur materialisation Beds24 user ${userId}:`, err.message) }
 
   for (const property of properties) {
     try {
       // Rafraichit les snapshots Beds24. La detection des changements a lieu
       // dans le writer ; la distribution, plus bas dans le cycle (3quinquies).
-      await detectBookingChanges(userId, beds24Key, property, tokens, results)
-      await processMessageTemplates(userId, beds24Key, property, results)
-      await processProperty(userId, beds24Key, property, results)
+      const bien = String(property.id)
+      await mesure(`  snapshots[${bien}]`, () => detectBookingChanges(userId, beds24Key, property, tokens, results))
+      await mesure(`  templates[${bien}]`, () => processMessageTemplates(userId, beds24Key, property, results))
+      // Suspect n°1 : appels Haiku en serie, un par thread de message non traite.
+      await mesure(`  classify[${bien}]`, () => processProperty(userId, beds24Key, property, results))
 
       // Generation juste-a-temps du code d'acces + envoi du message
       // d'arrivee pour les voyageurs dont arrival = aujourd'hui et dont
       // le logement est en statut 'ready' (menage valide).
       try {
         const bookings = await fetchBookings(beds24Key, property.id, { daysBefore: 0, daysAfter: 2 })
-        await processArrivalCodes(userId, beds24Key, property, bookings, results)
+        await mesure(`  codes_arrivee[${bien}]`, () => processArrivalCodes(userId, beds24Key, property, bookings, results))
       } catch (err) {
         console.error(`[Cron] Erreur processArrivalCodes ${property.id}:`, err.message)
       }
