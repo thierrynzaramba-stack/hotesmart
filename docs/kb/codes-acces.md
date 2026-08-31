@@ -81,6 +81,23 @@ Nos deux biens tournent en **Igloohome via Seam**. ⚠️ À VÉRIFIER = les dé
 - **Côté voyageur** : il saisit le code sur le clavier de la serrure selon le modèle (⚠️ À VÉRIFIER :
   format/validation exacts selon le modèle Igloohome).
 
+## Recherche du séjour précédent
+
+Le code n'est envoyé qu'après validation du ménage du **séjour précédent** — sauf
+pour le premier voyageur, ou si aucun suivi ménage n'existe sur le bien.
+
+Ce séjour précédent est cherché dans `bookings_snapshot`, trié par **date de
+départ** décroissante et borné à la date d'arrivée du voyageur courant. Le tri se
+faisait auparavant sur `updated_at`, ce qui ne fonctionnait que par effet de bord :
+le cron réécrivait toutes les lignes à chaque cycle, leurs `updated_at` étaient
+quasi identiques et l'ordre de fait arbitraire — le bon départ était attrapé par
+chance. Dès que les lignes inchangées cessent d'être réécrites, les réservations
+terminées sortent du lot : plus de départ précédent trouvé, donc **code envoyé sans
+attendre le ménage**.
+
+⚠️ Ne jamais réintroduire de tri par `updated_at` ici : ce champ ne porte aucune
+sémantique métier pour cette recherche.
+
 ## Interaction avec le kill switch / la pause auto
 Si l'IA est **coupée** (kill switch) ou le bien **en pause automatique** (coupe-circuit), **aucun
 code n'est créé ni envoyé** ; le **code déjà en place reste valable**. Voir `alertes.md`.
