@@ -128,6 +128,28 @@ Les `menage_events` continuent donc d'être écrits — décision produit, voir
 Un consommateur qui s'abstient pour cause de pause n'est pas une erreur :
 l'événement est marqué traité, rien n'est rejoué à la réactivation.
 
+## 3 sexies. Import initial : matérialiser sans distribuer
+
+`saveBookingSnapshots({ ..., initialImport: true })` écrit les événements **déjà
+marqués traités**. `api/channel-events.js` l'utilise à l'activation d'un canal.
+
+La garde d'ancienneté ne borne que le **passé** : à l'activation d'un bien Channex,
+les réservations **à venir** (prises il y a des mois) sont toutes inconnues en base
+et produiraient chacune un `new` — donc un message de bienvenue tardif et un
+`menage_event`. Le drapeau peuple `bookings_snapshot` correctement pour les
+lecteurs (calendrier, planning) sans rien distribuer.
+
+## 3 septies. Ordre d'écriture dans le writer
+
+Le changement est journalisé **avant** l'upsert du snapshot, et le snapshot
+n'avance pas si la journalisation échoue.
+
+Le snapshot est la seule mémoire d'état : une fois avancé, le changement n'est plus
+détectable. Journaliser après signifierait qu'un insert en échec (migration pas
+encore appliquée, coupure réseau) perd le changement **définitivement et en
+silence**. Dans cet ordre, un upsert en échec laisse au pire un événement en double
+au cycle suivant : du bruit, pas une perte.
+
 ## 4. Garde anti-boucle (la règle la plus importante)
 
 Un événement est marqué `processed_at` **même si un consommateur échoue**.
@@ -139,8 +161,19 @@ template cassé) coûterait bien plus cher qu'une notification manquée. Pour
 rejouer un événement, il faut remettre son `processed_at` à `null` à la main,
 après avoir corrigé la cause.
 
-Le dispatcher traite au maximum **200 événements par cycle**, les plus anciens
-d'abord.
+Le dispatcher traite au maximum **25 événements par cycle** (les plus anciens
+d'abord) et s'arrête au bout de **25 secondes**. `api/cron.js` est plafonné à
+`maxDuration: 60` et chaque `new` peut coûter un appel Haiku plus un appel Seam :
+un lot trop gros épuisait le budget avant les sondes d'alerting et le heartbeat
+`cron_logs`. Être tué entre les consommateurs et le marquage `processed_at`
+rejouerait l'événement à chaque cycle — exactement ce que la garde évite. Le
+reliquat part au cycle suivant, 5 minutes plus tard.
+
+**Le dispatch est la dernière étape du cron**, après les sondes : ce sont elles qui
+détectent les rafales d'écriture qu'il peut produire.
+
+Si le marquage lui-même échoue, un incident est levé (`RISQUE DE REJEU`) : c'est le
+seul cas où la garde ne tient pas.
 
 ## 5. Ordonnancement dans le cron
 
@@ -148,12 +181,32 @@ Le dispatch tourne **après** la mise à jour de tous les snapshots — biens Be
 biens channel, et poll du feed Channex — pour que les révisions arrivées dans le
 cycle soient distribuées dans le même passage. Voir `api/cron.js` §3quinquies.
 
+## 5 bis. Erreurs de lecture : reporter, ne pas consommer
+
+Les lectures de contexte (`api_keys`, `bookings_snapshot`, `public_tokens`,
+`properties`, `knowledge`) **remontent** leurs erreurs. Une liste vide renvoyée
+silencieusement serait indiscernable d'un cas nominal (« cet hôte n'a pas de
+prestataire ») : les événements seraient consommés à vide et marqués traités, donc
+perdus pour de bon. En cas d'échec, le lot entier est reporté au cycle suivant et
+un incident est levé.
+
 ## 6. Table `booking_change_events`
 
 `id`, `user_id`, `booking_id`, `property_id` (TEXT = `provider_property_id`),
 `provider`, `type` (`new|modified|cancelled`), `changes` jsonb, `created_at`,
-`processed_at`, `processing_errors` jsonb. RLS `user_id = auth.uid()` ; écritures
-serveur via service key.
+`processed_at`, `processing_errors` jsonb.
+
+**RLS en LECTURE SEULE côté client** : une seule policy `select`, aucune policy
+d'écriture pour `authenticated`. Une policy `insert` contrôlant `user_id` laisserait
+`booking_id` et `property_id` libres — un hôte connecté pourrait faire annuler le
+code d'accès du voyageur d'un autre hôte en insérant un événement `cancelled`
+nommant sa réservation, que le dispatcher exécuterait en service key. Une policy
+`update` permettrait de rejouer des événements à volonté ; `delete`, d'effacer les
+traces. Les écritures passent exclusivement par la service key.
+
+La table est purgée explicitement à la suppression d'un bien
+(`api/channel-property.js`) et surveillée par la sonde de croissance
+(`lib/cron-alerting.js`).
 
 **Fail-safe** : tant que la migration n'est pas appliquée, l'insert et la lecture
 échouent proprement (log + no-op). Les snapshots s'écrivent normalement, aucun

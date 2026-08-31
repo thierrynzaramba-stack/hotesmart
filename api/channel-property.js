@@ -364,7 +364,7 @@ module.exports = async function handler(req, res) {
       // sinon donnees orphelines (bug messages Colomiers). Groupe AVEC colonne user_id
       // (scoping defensif) :
       const tablesWithUser = [
-        'bookings_snapshot', 'conversations', 'agent_tasks', 'message_templates',
+        'bookings_snapshot', 'booking_change_events', 'conversations', 'agent_tasks', 'message_templates',
         'knowledge', 'property_status', 'messages',
         'menage_events', 'menage_comments', 'menage_done', 'agent_prompting', 'public_tokens',
         'sms_logs'

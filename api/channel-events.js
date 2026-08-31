@@ -72,11 +72,15 @@ async function runPostMapping(owner) {
     console.log('[channel-events] 1er booking keys:', Object.keys(bookings[0] || {}))
   }
   // Import initial : ecriture par lot (une seule relecture groupee cote writer).
+  // initialImport -> les changements sont materialises DEJA traites. getReservations
+  // n'a aucune fenetre de date : sans ce drapeau, activer un bien enverrait un
+  // message de bienvenue a chaque reservation a venir prise il y a des mois.
   const saved = await saveBookingSnapshots(supabase, {
     userId:     owner.user_id,
     propertyId: providerPropertyId,
     provider:   'channex',
-    bookings
+    bookings,
+    initialImport: true
   })
   out.bookings = saved.saved
   if (saved.failed) console.error('[channel-events] upsert booking echec x' + saved.failed)

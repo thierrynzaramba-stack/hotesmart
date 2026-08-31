@@ -337,7 +337,9 @@ function fakeSupabase({ existing = null, captureRef = {} } = {}) {
         select() { return this },
         eq() { return this },
         maybeSingle: async () => ({ data: existing ? { snapshot: existing } : null }),
-        upsert: async (row) => { captureRef.row = row; return { error: null } }
+        upsert: async (row) => { captureRef.row = row; return { error: null } },
+        // booking_change_events : journalisation du changement, faite AVANT l'upsert.
+        insert: async (row) => { (captureRef.events = captureRef.events || []).push(row); return { error: null } }
       }
     }
   }
@@ -391,7 +393,7 @@ test('saveBookingSnapshot : provider inconnu -> échec propre, jamais de throw',
 // booking par booking : 2N allers-retours Supabase par cycle.
 
 function fakeBatchSupabase({ rows = [], failSelect = false } = {}) {
-  const stats = { selects: 0, upserts: 0, upsertedRows: [] }
+  const stats = { selects: 0, upserts: 0, upsertedRows: [], events: [] }
   const client = {
     from() {
       const q = {
@@ -401,7 +403,9 @@ function fakeBatchSupabase({ rows = [], failSelect = false } = {}) {
         in() { return this },
         maybeSingle: async () => { stats.selects++; return { data: null } },
         then: undefined,
-        upsert: async (row) => { stats.upserts++; stats.upsertedRows.push(row); return { error: null } }
+        upsert: async (row) => { stats.upserts++; stats.upsertedRows.push(row); return { error: null } },
+        // booking_change_events : journal ecrit AVANT l'upsert du snapshot.
+        insert: async (row) => { stats.events.push(row); return { error: null } }
       }
       // `.select().eq().in()` est attendu (awaited) directement par le lot.
       q.then = (resolve, reject) => {
@@ -483,4 +487,69 @@ test('saveBookingSnapshots : bookings sans id ignores', async () => {
   })
   assert.strictEqual(res.saved, 1)
   assert.strictEqual(stats.upserts, 1)
+})
+
+// ─── Ordre d'ecriture : le changement est journalise AVANT le snapshot ───────
+// Le snapshot est la seule memoire d'etat : une fois avance, le changement n'est
+// plus detectable. Un journal en echec ne doit donc pas laisser avancer le snapshot.
+
+function fakeSupabaseEchecJournal({ existing = null, captureRef = {} } = {}) {
+  return {
+    from(nom) {
+      return {
+        select() { return this }, eq() { return this },
+        maybeSingle: async () => ({ data: existing ? { snapshot: existing } : null }),
+        upsert: async (row) => { captureRef.upserted = row; return { error: null } },
+        insert: async () => ({ error: { message: 'relation booking_change_events does not exist' } })
+      }
+    }
+  }
+}
+
+test('journal en echec -> le snapshot n\'avance PAS (pas de perte definitive)', async () => {
+  const capture = {}
+  const sb = fakeSupabaseEchecJournal({ captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }
+  })
+  assert.strictEqual(res.ok, false)
+  assert.strictEqual(res.reason, 'change_not_recorded')
+  assert.strictEqual(capture.upserted, undefined, 'aucun upsert : le changement reste detectable au prochain cycle')
+})
+
+test('sans changement detecte, le snapshot avance normalement', async () => {
+  const capture = {}
+  const identique = { provider: 'beds24', status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: '', lastName: '', numAdult: null, numChild: null, source: 'direct', otaReservationCode: null, statusRaw: 'confirmed' }
+  const sb = fakeSupabaseEchecJournal({ existing: identique, captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }
+  })
+  assert.strictEqual(res.ok, true)
+  assert.ok(capture.upserted, 'rien a journaliser -> l\'upsert a bien lieu')
+})
+
+test('IMPORT INITIAL : les evenements sont materialises DEJA traites', async () => {
+  const capture = {}
+  const sb = fakeSupabase({ captureRef: capture })
+  await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'channex',
+    booking: { status: 'new', arrival_date: '2099-09-01', departure_date: '2099-09-05' },
+    initialImport: true
+  })
+  const ev = (capture.events || [])[0]
+  assert.ok(ev, 'un evenement est bien journalise')
+  assert.ok(ev.processed_at, 'processed_at pose d\'emblee : aucune distribution')
+})
+
+test('hors import initial, l\'evenement part non traite', async () => {
+  const capture = {}
+  const sb = fakeSupabase({ captureRef: capture })
+  await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 78, propertyId: 12345, provider: 'channex',
+    booking: { status: 'new', arrival_date: '2099-09-01', departure_date: '2099-09-05' }
+  })
+  const ev = (capture.events || [])[0]
+  assert.strictEqual(ev.processed_at, null)
 })

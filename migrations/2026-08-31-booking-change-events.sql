@@ -28,22 +28,26 @@ create index if not exists booking_change_events_pending_idx
 create index if not exists booking_change_events_booking_idx
   on booking_change_events (booking_id, created_at desc);
 
--- RLS standard du projet : lecture/ecriture limitees au proprietaire.
--- Les ecritures serveur passent par la service key (qui contourne la RLS).
+-- RLS : LECTURE SEULE cote client. Cette file est ecrite exclusivement par le
+-- serveur (service key, qui contourne la RLS) — aucune policy d'ecriture n'est
+-- accordee a `authenticated`.
+--
+-- ⚠ Pourquoi aucune ecriture client. Le dispatcher consomme cette file avec la
+-- service key et agit sur les donnees designees par booking_id / property_id.
+-- Une policy `for insert ... with check (user_id = auth.uid())` laisserait le
+-- user_id conforme mais booking_id et property_id LIBRES : un hote connecte
+-- pourrait faire annuler le code d'acces du voyageur d'un autre hote en insérant
+-- un evenement 'cancelled' nommant le booking de ce dernier.
+-- Une policy `for update` permettrait de remettre processed_at a null pour
+-- rejouer des evenements a volonte ; `for delete`, d'effacer processing_errors.
+-- Le rejeu manuel documente (docs/kb/booking-changes.md §4) se fait cote serveur.
 alter table booking_change_events enable row level security;
 
 drop policy if exists booking_change_events_select on booking_change_events;
 create policy booking_change_events_select on booking_change_events
   for select to authenticated using (user_id = auth.uid());
 
+-- Nettoyage si une version anterieure de cette migration a ete appliquee.
 drop policy if exists booking_change_events_insert on booking_change_events;
-create policy booking_change_events_insert on booking_change_events
-  for insert to authenticated with check (user_id = auth.uid());
-
 drop policy if exists booking_change_events_update on booking_change_events;
-create policy booking_change_events_update on booking_change_events
-  for update to authenticated using (user_id = auth.uid());
-
 drop policy if exists booking_change_events_delete on booking_change_events;
-create policy booking_change_events_delete on booking_change_events
-  for delete to authenticated using (user_id = auth.uid());

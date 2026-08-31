@@ -15,7 +15,9 @@
 //   lib/booking-changes-dispatch.js la distribue aux ménages, codes d'accès et
 //   templates. C'est ce qui ferme l'écart E2 (biens Channex sans menage_events).
 //   ⚠ Le dispatch tourne APRÈS la mise à jour de tous les snapshots (Beds24, biens
-//   channel, feed Channex), pour traiter le cycle en une seule passe.
+//   channel, feed Channex) ET après les sondes d'alerting : il est le poste le plus
+//   coûteux du cycle (appels Haiku/Seam) et ne doit pas consommer le budget des
+//   60 s avant les filets anti-boucle.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -117,17 +119,6 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'channel_feed', error: err.message })
     }
 
-    // 3quinquies. DISTRIBUTION des changements de réservation, tous providers
-    // confondus. Tourne APRÈS la mise à jour de tous les snapshots. Consomme les
-    // booking_change_events non traités et alimente menage_events, codes d'accès
-    // et templates. Garde anti-boucle : un événement est marqué processed_at même
-    // si un consommateur échoue — jamais de retraitement automatique.
-    try { await dispatchBookingChanges(results) }
-    catch (err) {
-      console.error('[Cron] Erreur dispatch changements:', err.message)
-      results.errors.push({ context: 'booking_changes_dispatch', error: err.message })
-    }
-
     // 4. Tâches transverses (non liées à un user spécifique)
     try { await checkBatteries(results) }
     catch (err) {
@@ -162,7 +153,23 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'table_growth', error: err.message })
     }
 
-    // 5. Log du run
+    // 5. DISTRIBUTION des changements de réservation, tous providers confondus.
+    // Tourne APRÈS la mise à jour de tous les snapshots (Beds24, biens channel,
+    // feed Channex) et APRÈS les sondes.
+    // ⚠ Placé en dernier volontairement : chaque événement 'new' peut coûter un
+    // appel Haiku (~2 s) et un appel Seam, et cette fonction est plafonnée à
+    // maxDuration 60 s (vercel.json). Placé plus tôt, un lot d'événements
+    // épuisait le budget avant les sondes d'alerting et avant le heartbeat
+    // cron_logs — or ces sondes existent précisément pour détecter les rafales
+    // d'écriture que le dispatch peut produire. Le dispatcher s'auto-limite
+    // (LOT_MAX + budget mur) et reporte le reliquat au cycle suivant.
+    try { await dispatchBookingChanges(results) }
+    catch (err) {
+      console.error('[Cron] Erreur dispatch changements:', err.message)
+      results.errors.push({ context: 'booking_changes_dispatch', error: err.message })
+    }
+
+    // 6. Log du run
     await supabase.from('cron_logs').upsert({
       id: 'agent-ai',
       last_run: new Date().toISOString(),

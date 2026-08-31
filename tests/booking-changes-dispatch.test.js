@@ -18,7 +18,7 @@ function stub(relPath, exports) {
   return abs
 }
 
-function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false }) {
+function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed' }) {
   const etat = {
     updates: [],
     incidents: [],
@@ -32,11 +32,15 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
       in() { return q }, not() { return q }, eq(col, val) { q._eq = val; return q },
       limit: async () => ({ data: nom === 'booking_change_events' ? events : [], error: null }),
       update(payload) { q._payload = payload; return q },
-      insert: async () => ({ error: null }),
+      insert: async (row) => { etat.inserts = etat.inserts || []; etat.inserts.push({ table: nom, row }); return { error: null } },
       then(res, rej) {
         // `await supabase.from(x).select().in(...)` sans .limit()
+        // ⚠ user_id INDISPENSABLE : le dispatcher indexe par `user_id|booking_id`.
+        // Sans lui, cle(undefined, '77') ne matche jamais cle('u1', '77') et tous
+        // les tests tourneraient avec snapshot === null — la jointure par cle
+        // composite, raison d'etre de ce commit, ne serait pas testee.
         const data = nom === 'bookings_snapshot'
-          ? events.map(e => ({ booking_id: e.booking_id, snapshot: { firstName: 'Jean', lastName: 'Dupont', arrival: '2026-09-01', departure: '2026-09-05', numAdult: 2, numChild: 0, source: 'airbnb' } }))
+          ? events.map(e => ({ user_id: e.user_id, booking_id: e.booking_id, snapshot: { firstName: 'Jean', lastName: 'Dupont', arrival: '2026-09-01', departure: '2026-09-05', numAdult: 2, numChild: 0, source: 'airbnb', status: snapshotStatus, provider: e.provider } }))
           : []
         return Promise.resolve({ data, error: null }).then(res, rej)
       }
@@ -264,4 +268,60 @@ test('les tokens transmis au consommateur menage sont ceux du lot complet (filtr
   // Le dispatcher passe la liste ; c'est syncMenageEvent qui filtre par user_id
   // (verrouille par tests/sync-menages.test.js).
   assert.ok(Array.isArray(etat.tokensRecus))
+})
+
+// ─── Erreurs de lecture : reporter le lot plutot que le consommer a vide ────
+function chargerAvecErreurLecture(tableEnEchec) {
+  const etat = { updates: [], incidents: [], appels: { menages: 0, access: 0, templates: 0 } }
+  const table = (nom) => {
+    const q = {
+      select() { return q }, is() { return q }, order() { return q }, in() { return q }, not() { return q },
+      eq(col, val) { if (q._payload) { etat.updates.push({ id: val, payload: q._payload }); return Promise.resolve({ error: null }) } return q },
+      limit: async () => ({ data: nom === 'booking_change_events' ? [ev()] : [], error: null }),
+      update(p) { q._payload = p; return q },
+      insert: async () => ({ error: null }),
+      then(res, rej) {
+        const enEchec = nom === tableEnEchec
+        return Promise.resolve(enEchec
+          ? { data: null, error: { message: 'timeout' } }
+          : { data: [], error: null }).then(res, rej)
+      }
+    }
+    return q
+  }
+  stub('lib/cron-shared.js', { supabase: { from: table } })
+  stub('lib/founder-notify.js', { reportIncident: async (t, d) => { etat.incidents.push({ t, d }) } })
+  const cle = (u, p) => `${u}|${String(p)}`
+  stub('lib/cleaning/sync-menages.js', {
+    cle,
+    syncMenageEvent: async () => { etat.appels.menages++; return { written: 1 } },
+    loadContext: async () => ({ tokens: [], propsByKey: {}, knowledgeByKey: {} })
+  })
+  stub('lib/cron-access.js', { cancelAccessCode: async () => { etat.appels.access++ }, refreshAccessCode: async () => {}, checkBatteries: async () => {} })
+  stub('lib/cron-messages.js', { triggerTemplates: async () => { etat.appels.templates++ }, processMessageTemplates: async () => {} })
+  delete require.cache[require.resolve('../lib/booking-changes-dispatch')]
+  return { mod: require('../lib/booking-changes-dispatch'), etat }
+}
+
+test('lecture api_keys en echec -> lot reporte, RIEN n\'est consomme', async () => {
+  const { mod, etat } = chargerAvecErreurLecture('api_keys')
+  const out = await mod.dispatchBookingChanges({})
+  assert.strictEqual(out.traites, 0)
+  assert.strictEqual(etat.appels.menages, 0)
+  assert.strictEqual(etat.updates.length, 0, 'aucun evenement marque traite')
+  assert.strictEqual(etat.incidents.length, 1, 'un incident est leve')
+})
+
+test('lecture bookings_snapshot en echec -> lot reporte, RIEN n\'est consomme', async () => {
+  const { mod, etat } = chargerAvecErreurLecture('bookings_snapshot')
+  const out = await mod.dispatchBookingChanges({})
+  assert.strictEqual(out.traites, 0)
+  assert.strictEqual(etat.updates.length, 0)
+  assert.strictEqual(etat.incidents.length, 1)
+})
+
+test('booking_confirmed : ignore si la reservation n\'est plus active', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev({ type: 'new' })], snapshotStatus: 'cancelled' })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.appels.templates, 0, 'pas de bienvenue pour une resa annulee entre-temps')
 })
