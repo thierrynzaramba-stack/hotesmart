@@ -211,10 +211,18 @@ module.exports = async function handler(req, res) {
     // du gestionnaire de canaux ne sert que de confirmation SUPPLEMENTAIRE quand
     // elle porte un property_id — rien ne garantit que ce champ est relu, et en
     // faire l'unique controle ferait repondre 403 a tous les appels legitimes.
-    const { data: liens } = await supabase
+    // ⚠ L'erreur est testee : sans elle, `liens` vaut null sur une panne
+    // transitoire, la liste des rate plans connus se reduit a la base du bien, et
+    // un derive parfaitement legitime recevait 403 « Droits insuffisants » — une
+    // panne deguisee en refus, exactement ce que le repli beds24 corrige.
+    const { data: liens, error: liensErr } = await supabase
       .from('property_channel_rate_plans')
       .select('provider_rate_plan_id')
       .eq('property_id', prop.id)
+    if (liensErr) {
+      console.error('[channel-rateplan] lecture liens', liensErr.message)
+      return res.status(500).json({ error: 'Erreur lecture' })
+    }
     const connus = new Set([prop.provider_rate_plan_id, ...((liens || []).map(l => l.provider_rate_plan_id))]
       .filter(Boolean).map(String))
     if (!connus.has(String(ratePlanId))) {

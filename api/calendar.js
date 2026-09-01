@@ -151,7 +151,7 @@ module.exports = async function handler(req, res) {
     // (200, liste vide) pour un bien channel designe par sa reference canal,
     // alors que le POST sur le meme identifiant fonctionnait.
     const uuids = ids.filter(v => UUID_RE.test(v))
-    const refs  = ids.filter(v => REF_SURE_RE.test(v) || UUID_RE.test(v))
+    const refs  = ids.filter(v => REF_SURE_RE.test(v))   // REF_SURE_RE accepte deja les UUID
     const COLS = 'id, name, user_id, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
     const paquets = []
     if (uuids.length) paquets.push(supabase.from('properties').select(COLS).in('id', uuids))
@@ -308,6 +308,14 @@ module.exports = async function handler(req, res) {
     // ⚠ TOUTES les actions POST de cet endpoint ecrivent : tarifs, sejour
     // minimum, disponibilites, et les poussent vers les OTA. Droit `reservations`
     // en ECRITURE sur le bien vise, avant toute chose.
+    //
+    // REGLE DE PARTAGE DES DOMAINES, pour ne pas la re-arbitrer a chaque lecture :
+    // ce qui s'ecrit dans `calendar_inventory` et se pousse en ARI (tarif du jour,
+    // dispo, sejour minimum, fullsync) releve de `reservations` — c'est le metier
+    // du calendrier. Ce qui s'ecrit dans `properties` releve de `reglages` — c'est
+    // la configuration du bien (prix par personne, autofix des nuits orphelines),
+    // gardee ailleurs par ce meme domaine. Un membre peut donc tenir le calendrier
+    // sans pouvoir reconfigurer le bien.
     const gardePost = await requirePermission(req, res, {
       domaine: 'reservations', niveau: 'write', bien: property_id, bienRequis: true, userId
     })

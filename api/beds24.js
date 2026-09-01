@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
-const { requirePermission, verifierSession, resoudreBooking } = require('../lib/require-permission')
+const { requirePermission, verifierSession, resoudreBooking, resoudreBien } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -64,6 +64,21 @@ module.exports = async function handler(req, res) {
     }
     const parReservation = !!(bookingConnu && bookingConnu.property_id)
 
+    // ⚠ Sur le repli de sendMessage, un `propertyId` PRESENT mais introuvable en
+    // base doit etre traite comme ABSENT, pas comme un refus. `bienRequis: false`
+    // ne couvre que le cas ou la valeur manque : quand elle est fournie, l'etape
+    // 2b de la garde repond 404 « Bien introuvable ». Le front joint desormais
+    // toujours un propertyId, et un bien retire de `properties` dont les
+    // conversations restent affichees aurait donc casse la reponse au voyageur.
+    // Beds24 tranchera de toute facon plus bas.
+    let bienAnnonce = propertyId || null
+    if (action === 'sendMessage' && !parReservation && bienAnnonce) {
+      if (!await resoudreBien(bienAnnonce)) {
+        console.log('[Beds24] sendMessage : bien annonce non materialise, Beds24 tranchera')
+        bienAnnonce = null
+      }
+    }
+
     const garde = await requirePermission(req, res, {
       domaine: regle.domaine,
       niveau:  regle.niveau,
@@ -75,7 +90,7 @@ module.exports = async function handler(req, res) {
       // perimetre n'existant pas en sortie. Sans bien, la garde retombe sur le
       // compte de l'appelant : il ne voit que les siens.
       bien:    action === 'getProperties' ? null
-               : action === 'sendMessage' ? (parReservation ? null : (propertyId || null))
+               : action === 'sendMessage' ? (parReservation ? null : bienAnnonce)
                : (propertyId || null),
       // ⚠ Le repli de sendMessage n'EXIGE pas de bien. Le front n'en a pas
       // toujours un a fournir (messages.property_id peut etre NULL), et exiger
@@ -98,9 +113,13 @@ module.exports = async function handler(req, res) {
 
     // Identifiant Beds24 RESOLU en base. Le propId brut du client n'atteint
     // jamais l'API : c'est le bien valide par la garde qui le fournit.
+    // ⚠ Le dernier repli est `bienAnnonce`, PAS `propertyId` : quand le bien
+    // annonce n'a pas pu etre resolu, il a ete mis a null exprès. Reprendre la
+    // valeur client ici la reintroduisait telle quelle, et la confrontation
+    // Beds24 plus bas la comparait a un propId reel — donc 403 systematique.
     const propId = garde.bien
       ? garde.bien.provider_property_id
-      : (garde.booking ? garde.booking.property_id : propertyId)
+      : (garde.booking ? garde.booking.property_id : bienAnnonce)
 
     // Bien cree a l'onboarding mais jamais connecte : sans ce refus, l'URL
     // partait avec `propId=null` et l'hote voyait une liste vide sans savoir
@@ -259,16 +278,30 @@ module.exports = async function handler(req, res) {
             // repasse dessus. La cle utilisee etant celle du compte de
             // l'appelant, Beds24 ne peut designer qu'un de ses biens — mais le
             // PERIMETRE, lui, reste a verifier.
-            const gardeResa = await requirePermission(req, res, {
-              domaine: 'messages', niveau: 'write',
-              bien: resa.propertyId, bienRequis: true, userId: appelant
-            })
-            if (!gardeResa.ok) return
-            if (String(gardeResa.accountUserId) !== String(garde.accountUserId)) {
-              console.log('[Beds24] refus sendMessage : bien d\'un autre compte')
-              return res.status(403).json({ error: 'Droits insuffisants' })
+            const bienDeLaResa = await resoudreBien(resa.propertyId)
+            if (!bienDeLaResa) {
+              // Bien Beds24 pas (ou plus) materialise dans `properties` : aucun
+              // perimetre n'est verifiable. On n'accepte alors que le TITULAIRE
+              // du compte dont la cle a servi — un membre au perimetre restreint
+              // passerait sans controle. En pratique il n'arrive pas ici : ce
+              // chemin utilise la cle de l'appelant, qu'un membre n'a pas.
+              if (String(garde.accountUserId) !== String(appelant)) {
+                console.log('[Beds24] refus sendMessage : bien non materialise, perimetre invérifiable')
+                return res.status(403).json({ error: 'Droits insuffisants' })
+              }
+              propIdEnvoi = resa.propertyId
+            } else {
+              const gardeResa = await requirePermission(req, res, {
+                domaine: 'messages', niveau: 'write',
+                bien: bienDeLaResa.id, bienRequis: true, userId: appelant
+              })
+              if (!gardeResa.ok) return
+              if (String(gardeResa.accountUserId) !== String(garde.accountUserId)) {
+                console.log('[Beds24] refus sendMessage : bien d\'un autre compte')
+                return res.status(403).json({ error: 'Droits insuffisants' })
+              }
+              propIdEnvoi = gardeResa.bien.provider_property_id
             }
-            propIdEnvoi = gardeResa.bien.provider_property_id
           }
         }
 

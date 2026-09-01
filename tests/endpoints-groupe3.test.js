@@ -43,7 +43,7 @@ const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/cale
 
 // `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
-                     snapshots = [], messages = [], fetchStub = null } = {}) {
+                     snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null } = {}) {
   const etat = { ecritures: [], filtresIn: [], appels: [] }
 
   const client = {
@@ -96,6 +96,7 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         }
         if (nom === 'profile_permissions') return { data: permissions, error: null }
         if (nom === 'bookings_snapshot') {
+          if (erreurSnapshot) return { data: null, error: { message: erreurSnapshot } }
           const rows = snapshots.filter(s =>
             (q._f.booking_id == null || String(s.booking_id) === String(q._f.booking_id)) &&
             (q._f.user_id == null || s.user_id === q._f.user_id) &&
@@ -597,6 +598,53 @@ test('beds24 sendMessage : bien derive de Beds24 mais HORS perimetre -> 403', as
     action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: null } }), res)
   assert.ok(res.code === 400 || res.code === 403, `attendu 400/403, recu ${res.code}`)
   assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/bookings/messages')), [])
+})
+
+test('beds24 sendMessage : propertyId PRESENT mais non materialise -> Beds24 tranche, pas 404', async () => {
+  // Le front joint toujours un propertyId. Un bien retire de `properties` dont
+  // les conversations restent affichees ne doit pas casser la reponse au voyageur.
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 88801, propertyId: BIEN_A.provider_property_id }] }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: '404040' } }), res)
+  assert.notStrictEqual(res.code, 404)
+  assert.ok(etat.appels.some(a => a.url.includes('/bookings/messages') && a.method === 'POST'),
+    `code=${res.code} body=${JSON.stringify(res.body)} appels=${JSON.stringify(etat.appels)}`)
+})
+
+test('beds24 sendMessage : bien Beds24 non materialise -> le titulaire passe', async () => {
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) {
+      // propId inconnu de `properties` : rien a resoudre.
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 88801, propertyId: '777777' }] }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: null } }), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.ok(etat.appels.some(a => a.url.includes('/bookings/messages') && a.method === 'POST'))
+})
+
+test('messages : erreur du SECOND select -> 500, sans detail PostgREST', async () => {
+  // Avant : l'erreur du snapshot etait avalee et l'endpoint renvoyait toutes les
+  // conversations « Voyageur », sans dates ni statut, sans erreur visible.
+  const DETAIL = 'column bookings_snapshot.property_id does not exist'
+  preparer({ user: PROD, erreurSnapshot: DETAIL, messages: [
+    { booking_id: '1', property_id: BIEN_A.provider_property_id, provider: 'beds24',
+      sender: 'guest', direction: 'inbound', body: 'a', sent_at: new Date().toISOString() }
+  ] })
+  const res = reponse()
+  await require('../api/messages')(req({ method: 'GET' }), res)
+  assert.strictEqual(res.code, 500)
+  assert.ok(!JSON.stringify(res.body).includes('does not exist'),
+    'le detail PostgREST ne doit pas sortir vers le navigateur')
 })
 
 // ─── messages : collection filtree par le perimetre ──────────────────────────

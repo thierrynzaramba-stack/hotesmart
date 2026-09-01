@@ -97,8 +97,10 @@ module.exports = async function handler(req, res) {
     ])
 
     if (msgRes.error) {
+      // Le detail PostgREST (colonne, contrainte, fragment de requete) reste
+      // dans les logs : la reponse ne porte qu'un libelle.
       console.error('[messages] select messages echec', msgRes.error.message)
-      return res.status(500).json({ error: msgRes.error.message })
+      return res.status(500).json({ error: 'Erreur lecture messages' })
     }
     // ⚠ L'erreur du SECOND select doit remonter elle aussi. La laisser passer
     // rendait toutes les conversations « Voyageur », sans dates ni statut, sans
@@ -106,7 +108,7 @@ module.exports = async function handler(req, res) {
     // desormais sur cette requete aussi.
     if (snapRes.error) {
       console.error('[messages] select bookings_snapshot echec', snapRes.error.message)
-      return res.status(500).json({ error: snapRes.error.message })
+      return res.status(500).json({ error: 'Erreur lecture réservations' })
     }
     const messages = msgRes.data || []
     const snaps    = snapRes.data || []
@@ -178,6 +180,6 @@ module.exports = async function handler(req, res) {
 
   } catch (e) {
     console.error('[messages] exception', e.message)
-    return res.status(500).json({ error: e.message })
+    return res.status(500).json({ error: 'Erreur serveur' })
   }
 }
