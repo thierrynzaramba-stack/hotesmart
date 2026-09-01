@@ -266,8 +266,17 @@
   }
 
   window.toggleSeam = async () => {
-    const enabled = document.getElementById('seamEnabled').checked
-    await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'toggleConfig', enabled }) })
+    const el = document.getElementById('seamEnabled')
+    const enabled = el.checked
+    // ⚠ La reponse est LUE. Sans cle enregistree le serveur refuse la bascule, et
+    // la page affichait quand meme « Serrures activées » : l'hote croyait ses
+    // serrures actives alors que rien n'avait change.
+    const r = await fetch('/api/serrures', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${window._session?.access_token}` }, body: JSON.stringify({ action:'toggleConfig', enabled }) })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      el.checked = !enabled
+      return toast('configToast', '❌ ' + (d.error || 'Bascule impossible'), 'error')
+    }
     updateBanner(enabled)
     toast('configToast', enabled ? '✅ Serrures activées' : '⏸ Serrures désactivées', 'success')
   }

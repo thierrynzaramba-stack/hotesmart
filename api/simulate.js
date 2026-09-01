@@ -48,7 +48,15 @@ module.exports = async function handler(req, res) {
   const user = { id: garde.accountUserId }
   // ⚠ Reference RESOLUE : les tables enfants portent le provider_property_id
   // (REVIEW.md §10), et la valeur client peut etre l'UUID comme la reference canal.
+  // ⚠ Elle peut etre NULL (bien cree mais pas encore provisionne cote canal).
+  // Sans ce refus, String(null) donnait la chaine 'null' : la base de
+  // connaissances etait cherchee sur property_id='null' (toujours vide, donc
+  // classification systematique en info_unknown) et les lignes ecrites devenaient
+  // invisibles a la messagerie.
   const refBien = garde.bien.provider_property_id
+  if (refBien == null || refBien === '') {
+    return res.status(400).json({ error: 'Bien non connecté au PMS' })
+  }
 
   // Charger base de connaissance
   const { data: knowledge } = await supabase

@@ -55,18 +55,37 @@ module.exports = async function handler(req, res) {
     // ecriture, sur le bien RESOLU — la valeur client ne designe pas le compte.
     // ⚠ Le 409 « pas encore synchronise » doit survivre a la garde : il dit a
     // l'hote d'attendre le cron, la ou un 404 « Bien introuvable » laisserait
-    // croire a une erreur de sa part. On resout donc avant, pour distinguer.
+    // croire a une erreur de sa part.
+    //
+    // ⚠ MAIS IL NE DOIT PAS PRECEDER LE CONTROLE DE DROITS. Emis avant la garde,
+    // il devenait un oracle d'existence : 409 = ce provider_property_id n'existe
+    // nulle part, 403 = il existe chez quelqu'un d'autre. La garde repond 404
+    // justement pour ne pas distinguer les deux. On resout donc en amont pour
+    // savoir, mais on ne differencie le message QUE pour un bien du compte : un
+    // bien inconnu de la plateforme et un bien d'autrui recoivent le meme 409
+    // neutre, sans rien reveler.
     const cible = await resoudreBien(provider_property_id)
     if (cible && cible.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
-    if (!cible) {
-      return res.status(409).json({ error: 'Bien pas encore synchronise. Reessayez dans quelques minutes.' })
+    if (cible && cible.ambigu) return res.status(409).json({ error: 'Référence de bien ambiguë' })
+
+    if (cible) {
+      const garde = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write',
+        bien: provider_property_id, bienResolu: cible, bienRequis: true, userId: appelant
+      })
+      if (!garde.ok) return
+      return await basculer(req, res, garde, { provider_property_id, paused, reason })
     }
 
-    const garde = await requirePermission(req, res, {
-      domaine: 'reglages', niveau: 'write',
-      bien: provider_property_id, bienResolu: cible, bienRequis: true, userId: appelant
-    })
-    if (!garde.ok) return
+    return res.status(409).json({ error: 'Bien pas encore synchronise. Reessayez dans quelques minutes.' })
+  }
+
+  res.setHeader('Allow', 'GET, POST')
+  return res.status(405).json({ error: 'Methode non autorisee' })
+}
+
+async function basculer (req, res, garde, { provider_property_id, paused, reason }) {
+  {
 
     const updates = {
       automation_paused: paused,
@@ -88,7 +107,4 @@ module.exports = async function handler(req, res) {
     }
     return res.status(200).json({ ok: true, paused, updated: data.length })
   }
-
-  res.setHeader('Allow', 'GET, POST')
-  return res.status(405).json({ error: 'Methode non autorisee' })
 }

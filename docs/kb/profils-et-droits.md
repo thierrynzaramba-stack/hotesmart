@@ -558,3 +558,63 @@ pouvoir reconfigurer le bien.
 La page lit `/api/beds24 getProperties`. Pour un hôte 100 % channel, elle répond
 400 « Clé Beds24 non configurée » et la liste des biens reste vide. Même nature que
 l'écart E1 du planning ménage. À traiter avant la bêta.
+
+## 8. Étape 3 terminée — 26 / 26 endpoints
+
+### Groupe final (7)
+
+`grok`, `serrures`, `stripe`, `property-automation`, `simulate`, `extract-kb`,
+`menages`.
+
+### ⚠️ Deux fuites de clé plateforme, fermées
+
+**`api/grok.js` n'avait aucune authentification.** N'importe qui sur Internet
+pouvait poster et consommer la clé Claude de la plateforme : relais IA gratuit,
+facturé au compte HôteSmart. Les quatre appelants envoyaient déjà le jeton — la
+garde n'a cassé aucun parcours. Taille de requête bornée (40 messages,
+200 000 caractères, calibrés sur `analyze.html` qui inline jusqu'à
+50 conversations).
+
+**`getSeamKey` retombait sur `SEAM_API_KEY`.** Un hôte sans clé Seam propre
+empruntait celle de la plateforme — donc le **même compte Seam** que tous les
+autres hôtes dans ce cas : `devices/list` leur listait les serrures les uns des
+autres, `access_codes/delete` acceptait n'importe quel `code_id`. Le repli est
+retiré pour un compte identifié ; il ne survit que pour `!userId` (appel interne
+sans compte). Il y avait **deux copies** de `getSeamKey` — `api/serrures.js`
+utilise désormais celle de `lib/providers/seam.js`.
+
+**Vérifié avant de retirer le repli** : une seule ligne `api_keys` en base, et
+elle porte sa propre clé Seam. Aucun compte de production ne dépendait de la clé
+d'environnement.
+
+Contrepartie : un compte mal configuré n'a plus de repli silencieux. Le cron
+(`lib/cron-arrival-code.js`) lève désormais un incident `seam_key_missing` au
+lieu d'un simple `console.warn` — sans quoi la ligne `access_codes` restait
+`pending` indéfiniment, sans PIN et sans que personne soit prévenu.
+
+### `provider_property_id` n'est pas unique entre comptes
+
+`resoudreBien` interrogeait la branche TEXTE avec `.maybeSingle()`. Deux hôtes
+Beds24 peuvent porter le même `propId` : PostgREST répond alors `PGRST116`, que le
+marqueur d'erreur transformait en **503 permanent**. La fonction lit maintenant
+toutes les lignes et refuse explicitement l'ambiguïté (`{ ambigu: true }` → 409),
+comme le fait déjà `resoudreBooking`.
+
+### Domaines retenus pour le groupe final
+
+| Endpoint | Domaine | Remarque |
+|---|---|---|
+| `grok` | session seule | pas de ressource, la garde est l'authentification |
+| `serrures` | `reglages` (clé) / `reservations` (codes) | la clé du compte est ce qui borne réellement Seam |
+| `stripe` | `facturation` | **non délégable** — la barrière de l'étape 5 |
+| `property-automation` | `reglages` | bien résolu ; 409 « pas encore synchronisé » émis **après** la garde |
+| `simulate` | `messages` | écrit le `provider_property_id` résolu |
+| `extract-kb` | `reglages` | alimente la KB qui nourrit les réponses IA |
+| `menages` | `menages` | collection + filtre de périmètre |
+
+### ⚠️ Dette : `api_keys` est une table fourre-tout
+
+Elle porte la clé Beds24 **et** la clé Seam, et n'est créée que par
+`beds24-setup` et `sms`. `saveConfig` de `serrures` fait donc un `upsert` : sans
+lui, un hôte Channex qui n'a jamais configuré le SMS n'aurait jamais pu
+enregistrer sa serrure. À découper quand un troisième fournisseur s'ajoutera.

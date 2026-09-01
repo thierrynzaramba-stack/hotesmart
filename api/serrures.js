@@ -161,18 +161,16 @@ async function traiter (req, res, user) {
       const { apiKey } = body
       if (!apiKey) return res.status(400).json({ error: 'Clé API requise' })
 
-      // ⚠ `update` sur une ligne INEXISTANTE ne renvoie pas d'erreur : sans le
-      // .select(), l'hote lisait « enregistre » alors qu'aucune cle n'etait
-      // stockee, et toutes ses actions suivantes repondaient « non configuree ».
-      const { data, error } = await supabase.from('api_keys')
-        .update({ seam_api_key: apiKey, seam_enabled: true })
-        .eq('user_id', user.id)
-        .select('user_id')
+      // ⚠ UPSERT, pas UPDATE. La ligne api_keys n'est creee que par beds24-setup
+      // et par sms : un hote Channex qui n'a jamais configure le SMS n'en a pas,
+      // et un `update` n'y touchait rien — sans erreur, donc « enregistre » alors
+      // que rien n'etait stocke, puis « cle non configuree » a chaque action.
+      // La serrure ne depend d'aucun PMS : rien ne justifie d'exiger l'un pour
+      // l'autre.
+      const { error } = await supabase.from('api_keys')
+        .upsert({ user_id: user.id, seam_api_key: apiKey, seam_enabled: true }, { onConflict: 'user_id' })
 
       if (error) { console.error('[serrures] saveConfig', error.message); return res.status(500).json({ error: 'Enregistrement echoue' }) }
-      if (!data || !data.length) {
-        return res.status(409).json({ error: 'Aucune connexion PMS sur ce compte : connectez votre PMS avant la serrure.' })
-      }
       return res.status(200).json({ success: true })
     }
 
@@ -185,7 +183,9 @@ async function traiter (req, res, user) {
         .eq('user_id', user.id)
         .select('user_id')
       if (error) { console.error('[serrures] toggleConfig', error.message); return res.status(500).json({ error: 'Mise a jour echouee' }) }
-      if (!data || !data.length) return res.status(409).json({ error: 'Aucune configuration a basculer' })
+      // Rien a basculer = aucune cle enregistree. Le front doit le voir : il
+      // affichait « Serrures activees » sans regarder la reponse.
+      if (!data || !data.length) return res.status(409).json({ error: 'Aucune clé Seam enregistrée : enregistrez-la d\'abord.' })
       return res.status(200).json({ success: true })
     }
 
@@ -199,7 +199,10 @@ async function traiter (req, res, user) {
         const code = await generateAccessCode(lock_id, guest_name || 'Voyageur', starts_at, ends_at, user.id)
         return res.status(200).json({ success: true, code })
       } catch (err) {
-        return res.status(500).json({ error: err.message })
+        // Le detail (message de l'API Seam, panne de lecture de la cle) reste
+        // dans les logs, comme pour saveConfig/toggleConfig.
+        console.error('[serrures] generateCode', err.message)
+        return res.status(500).json({ error: 'Génération du code échouée' })
       }
     }
 

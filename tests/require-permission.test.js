@@ -26,6 +26,18 @@ function charger({ user = MEMBRE, biens = [BIEN_PROD, BIEN_AUTRE], profil = null
         select() { return q },
         eq(c, v) { q._f[c] = v; return q },
         or(expr) { q._or = expr; return q },
+        // ⚠ La branche TEXTE de resoudreBien ne fait plus `.maybeSingle()` : un
+        // provider_property_id n'est pas unique entre comptes, et PostgREST
+        // repondait PGRST116 (donc « panne ») sur un doublon legitime. Elle lit
+        // desormais toutes les lignes — le double doit etre « thenable ».
+        then(ok, ko) {
+          if (nom === 'properties') {
+            const v = q._f.provider_property_id
+            const rows = v == null ? [] : biens.filter(b => b.provider_property_id === v)
+            return Promise.resolve({ data: rows, error: null }).then(ok, ko)
+          }
+          return Promise.resolve({ data: [], error: null }).then(ok, ko)
+        },
         maybeSingle: async () => {
           if (nom === 'properties') {
             // Deux chemins : `.or(id.eq…,provider_property_id.eq…)` pour un UUID,

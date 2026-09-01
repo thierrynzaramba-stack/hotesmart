@@ -15,10 +15,16 @@ const client = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY
 })
 
-// Bornes de taille : sans elles, un appelant authentifie peut faire couter
-// autant qu'il veut par requete.
+// Bornes de taille : sans elles, un appelant authentifie peut faire couter autant
+// qu'il veut par requete.
+//
+// ⚠ Calibrees sur le PLUS GROS appelant legitime, pas sur une valeur ronde :
+// apps/agent-ai/analyze.html inline jusqu'a 50 conversations (message voyageur +
+// reponse) dans son systemPrompt. Une borne trop basse aurait fait echouer la
+// page en 400 opaque chez les hotes les plus actifs — precisement ceux a qui
+// l'analyse sert.
 const MAX_MESSAGES = 40
-const MAX_CARACTERES = 40000
+const MAX_CARACTERES = 200000
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {

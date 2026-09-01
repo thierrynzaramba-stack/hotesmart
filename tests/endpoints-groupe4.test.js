@@ -101,6 +101,28 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
   return etat
 }
 
+// Double ou un provider_property_id est porte par DEUX comptes.
+function preparerAmbigu () {
+  const doublons = [BIEN_A, { ...BIEN_TIERS, provider_property_id: BIEN_A.provider_property_id }]
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: PROD } }, error: null }) },
+    from () {
+      const q = {
+        select () { return q }, eq () { return q }, or () { return q }, in () { return q },
+        order () { return q }, limit () { return q },
+        maybeSingle: async () => ({ data: null, error: null }),
+        single: async () => ({ data: null, error: null }),
+        then (ok, ko) { return Promise.resolve({ data: doublons, error: null }).then(ok, ko) }
+      }
+      return q
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+}
+
 function reponse () {
   const r = { code: null, body: null }
   r.status = c => { r.code = c; return r }
@@ -140,7 +162,7 @@ test('grok : requete demesuree -> 400 (le cout par appel est borne)', async () =
   preparer({ user: PROD })
   const res = reponse()
   await require('../api/grok')(req({ method: 'POST', body: {
-    messages: [{ role: 'user', content: 'x'.repeat(50000) }] } }), res)
+    messages: [{ role: 'user', content: 'x'.repeat(250000) }] } }), res)
   assert.strictEqual(res.code, 400)
 })
 
@@ -225,13 +247,36 @@ test('serrures : action heritee d\'Object.prototype -> 400', async () => {
   assert.strictEqual(res.code, 400)
 })
 
-test('serrures : saveConfig sans ligne api_keys -> 409, pas un faux succes', async () => {
-  // `update` sur une ligne inexistante ne renvoie pas d'erreur : l'hote lisait
-  // « enregistre » sans qu'aucune cle ne soit stockee.
-  preparer({ user: AUTRE })   // aucune ligne api_keys pour ce compte
+test('serrures : saveConfig CREE la ligne quand elle n\'existe pas', async () => {
+  // ⚠ `update` sur une ligne inexistante ne leve pas d'erreur : l'hote lisait
+  // « enregistre » sans qu'aucune cle ne soit stockee. Mais refuser n'etait pas
+  // la reponse : la ligne api_keys n'est creee que par beds24-setup et par sms,
+  // donc un hote Channex sans SMS n'aurait JAMAIS pu enregistrer sa serrure.
+  const etat = preparer({ user: AUTRE })   // aucune ligne api_keys pour ce compte
   const res = reponse()
   await require('../api/serrures')(req({ method: 'POST', body: { action: 'saveConfig', apiKey: 'x' } }), res)
+  assert.strictEqual(res.code, 200)
+  const ecr = etat.ecritures.find(e => e.table === 'api_keys')
+  assert.ok(ecr, 'la ligne doit etre creee')
+  assert.strictEqual(ecr.row.user_id, AUTRE, 'creee sur le compte de l\'appelant')
+})
+
+test('serrures : toggleConfig sans cle enregistree -> 409 (le front le lit)', async () => {
+  preparer({ user: AUTRE })
+  const res = reponse()
+  await require('../api/serrures')(req({ method: 'POST', body: { action: 'toggleConfig', enabled: true } }), res)
   assert.strictEqual(res.code, 409)
+})
+
+test('garde : un provider_property_id porte par DEUX comptes -> 409, pas 503', async () => {
+  // ⚠ `provider_property_id` n'est pas unique entre comptes. `.maybeSingle()`
+  // echouait en PGRST116, transforme en 503 permanent : le kill switch et la
+  // simulation devenaient inutilisables pour ces biens.
+  preparerAmbigu()
+  const { resoudreBien } = require('../lib/require-permission')
+  const r = await resoudreBien('209413')
+  assert.strictEqual(r.ambigu, true)
+  assert.notStrictEqual(r.erreur, true, 'une ambiguite n\'est pas une panne')
 })
 
 // ─── property-automation : kill switch ──────────────────────────────────────

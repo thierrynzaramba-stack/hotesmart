@@ -89,6 +89,9 @@ module.exports = async function handler(req, res) {
       if (essai && essai.erreur) {
         return res.status(503).json({ error: 'Service temporairement indisponible' })
       }
+      if (essai && essai.ambigu) {
+        return res.status(409).json({ error: 'Référence de bien ambiguë' })
+      }
       if (!essai) {
         // Bien jamais materialise dans `properties` (import Beds24 non rejoue,
         // propId code en dur d'une vue legacy). On retombe sur le compte de
@@ -322,6 +325,9 @@ module.exports = async function handler(req, res) {
             const bienDeLaResa = await resoudreBien(resa.propertyId)
             if (bienDeLaResa && bienDeLaResa.erreur) {
               return res.status(503).json({ error: 'Service temporairement indisponible' })
+            }
+            if (bienDeLaResa && bienDeLaResa.ambigu) {
+              return res.status(409).json({ error: 'Référence de bien ambiguë' })
             }
             if (!bienDeLaResa) {
               // Bien Beds24 pas (ou plus) materialise dans `properties` : aucun
