@@ -21,6 +21,7 @@
 
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -131,21 +132,25 @@ module.exports = async function handler(req, res) {
   // ===================================================================
   // create : genere le lien OAuth Airbnb direct. AUTH hote requise.
   // ===================================================================
-  const authToken = req.headers.authorization?.replace('Bearer ', '')
-  if (!authToken) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(authToken)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
-
   const propertyId = (req.body?.property_id || '').trim()
-  if (!propertyId) return res.status(400).json({ error: 'property_id (UUID HoteSmart) requis' })
 
-  // Ownership : SES biens uniquement.
+  // Bien resolu et perimetre verifie avant toute generation de lien OAuth.
+  //
+  // ⚠ Le filtre porte sur le compte PROPRIETAIRE, pas sur l'appelant. Depuis que
+  // channel-connect accepte la delegation, filtrer ici sur `user.id` rendait le
+  // parcours OTA incoherent : un membre delegue ouvrait l'iframe du bien du
+  // titulaire, puis recevait 404 sur cette etape pour le meme bien.
+  const garde = await requirePermission(req, res, {
+    domaine: 'reglages', niveau: 'write', bien: propertyId, bienRequis: true
+  })
+  if (!garde.ok) return
+  const compteBien = garde.accountUserId
+
   const { data: prop, error: propErr } = await supabase
     .from('properties')
     .select('id, provider, provider_property_id, name')
-    .eq('id', propertyId)
-    .eq('user_id', user.id)
+    .eq('id', garde.bien.id)
+    .eq('user_id', compteBien)
     .maybeSingle()
   if (propErr) {
     console.error('[channel-airbnb-connect] create SELECT', propErr.message)
@@ -169,7 +174,7 @@ module.exports = async function handler(req, res) {
     const { data: others, error: oErr } = await supabase
       .from('properties')
       .select('id, provider_property_id, name')
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien)
       .in('provider', ['channel', 'channex'])
       .neq('id', prop.id)
       .not('provider_property_id', 'is', null)
@@ -227,7 +232,9 @@ module.exports = async function handler(req, res) {
       .from('airbnb_connect_sessions')
       .insert({
         token,
-        user_id: user.id,
+        // La session appartient au compte PROPRIETAIRE du bien : c'est lui qui
+        // possede la connexion Airbnb, pas le membre qui l'a declenchee.
+        user_id: compteBien,
         property_id: prop.id,
         provider_property_id: prop.provider_property_id,
         status: 'pending'

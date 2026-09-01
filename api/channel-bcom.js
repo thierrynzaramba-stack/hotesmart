@@ -27,6 +27,7 @@
 //   6519420 = modele Standard (per room)
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -210,9 +211,8 @@ module.exports = async function handler(req, res) {
   // ===== AUTH (la cle canal reste cote serveur) =====
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
+  // La session est verifiee par requirePermission (auth.getUser y est appele) :
+  // un second appel ici serait un aller-retour Supabase de plus par requete.
 
   const action = req.query.action || ''
   const hotelId = (req.query.hotel_id || '').trim()
@@ -235,10 +235,17 @@ module.exports = async function handler(req, res) {
       if (!providerPropertyId) {
         return res.status(400).json({ error: 'property_id (provider_property_id) requis' })
       }
+      // Bien resolu et perimetre verifie avant tout appel au gestionnaire de
+      // canaux. Le filtre user_id porte sur le compte PROPRIETAIRE.
+      const garde = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: providerPropertyId, bienRequis: true
+      })
+      if (!garde.ok) return
+      const compteBien = garde.accountUserId
       const { data: prop, error: propErr } = await supabase
         .from('properties')
         .select('id, name, provider_property_id, provider_room_type_id, provider_rate_plan_id')
-        .eq('user_id', user.id)
+        .eq('user_id', compteBien)
         .eq('provider_property_id', providerPropertyId)
         .maybeSingle()
       if (propErr) {

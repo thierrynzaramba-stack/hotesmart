@@ -463,6 +463,19 @@
     const first = lines.split('\n').map(l => l.trim()).filter(Boolean)[0] || ''
     const to = first.includes(':') ? first.slice(first.indexOf(':') + 1).trim() : first
     if (!to) { showToast('Ajoutez d\'abord un destinataire', true); return }
+
+    // ⚠ Le serveur n'accepte QUE les destinataires enregistres dans la config
+    // (api/alert-test.js). Or ce bouton lit la config EN MEMOIRE, telle qu'elle
+    // vient d'etre saisie : sans cette sauvegarde prealable, tester un numero
+    // qu'on vient de taper renvoyait 403, et tester sur un bien jamais
+    // configure renvoyait 400 — le cas nominal du bouton ne passait plus.
+    showToast('Enregistrement…')
+    try {
+      await window.saveConfig({ silencieux: true })
+    } catch (e) {
+      showToast('✗ Impossible d\'enregistrer avant le test', true); return
+    }
+
     showToast('Envoi du test…')
     try {
       const res = await fetch('/api/alert-test', {
@@ -485,11 +498,15 @@
     config[currentProp][typeKey][channel === 'sms' ? 'sms_lines' : 'email_lines'] = value
   }
 
-  window.saveConfig = async () => {
+  // `silencieux` : appel depuis testChannel, qui enchaine avec son propre retour
+  // visuel. Dans ce mode l'echec est PROPAGE (throw) au lieu d'etre seulement
+  // affiche — sinon le test partirait sur une config non enregistree et se
+  // ferait refuser par le serveur.
+  window.saveConfig = async ({ silencieux = false } = {}) => {
     const btn    = document.getElementById('btnSave')
     const status = document.getElementById('saveStatus')
-    btn.disabled = true; btn.textContent = 'Enregistrement…'
-    status.textContent = ''; status.className = 'save-status'
+    if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…' }
+    if (status) { status.textContent = ''; status.className = 'save-status' }
     try {
       const res = await fetch('/api/agent-config', {
         method: 'POST',
@@ -497,13 +514,16 @@
         body: JSON.stringify({ config })
       })
       if (!res.ok) throw new Error(await res.text())
-      status.textContent = '✓ Enregistré'; status.className = 'save-status ok'
-      showToast('✅ Configuration sauvegardée')
-      setTimeout(() => { status.textContent = '' }, 3000)
+      if (!silencieux) {
+        status.textContent = '✓ Enregistré'; status.className = 'save-status ok'
+        showToast('✅ Configuration sauvegardée')
+        setTimeout(() => { status.textContent = '' }, 3000)
+      }
     } catch(e) {
-      status.textContent = '✗ ' + e.message; status.className = 'save-status err'
+      if (status) { status.textContent = '✗ ' + e.message; status.className = 'save-status err' }
+      if (silencieux) throw e
     } finally {
-      btn.disabled = false; btn.textContent = 'Enregistrer'
+      if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer' }
     }
   }
 

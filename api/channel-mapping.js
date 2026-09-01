@@ -13,6 +13,7 @@
 // rooms/rates de l'OTA) -> sans danger sur Colomiers en prod.
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -54,12 +55,44 @@ module.exports = async function handler(req, res) {
   // ===== AUTH =====
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
+  // La session est verifiee par requirePermission (auth.getUser y est appele) :
+  // un second appel ici serait un aller-retour Supabase de plus par requete.
 
   const action = req.query.action || ''
+
+  // ⚠ FUITE CORRIGEE. La garde plus bas valide le `property_id`, mais plusieurs
+  // actions prennent AUSSI un `channel_id` en query et l'envoient tel quel au
+  // gestionnaire de canaux — sans jamais verifier que ce canal appartient au
+  // bien annonce. Un membre legitime sur SON bien pouvait donc passer le
+  // channel_id d'un AUTRE compte et agir dessus : activate, deactivate, delete,
+  // load_reservations, jusqu'a la suppression du canal d'un tiers.
+  // Le canal est desormais resolu vers son bien, et les droits verifies sur ce
+  // bien-la — meme modele que channel-bcom-activate.js.
+  const ACTIONS_A_CANAL = ['mapping_details', 'list_listings', 'action_listings', 'mappings',
+                           'listings', 'map', 'activate', 'deactivate', 'delete', 'load_reservations']
+  const canalDemande = (req.query.channel_id || '').trim()
   const providerPropertyId = (req.query.property_id || '').trim()
+  // Le bien vient du client : resolu en base et confronte au perimetre AVANT
+  // tout appel au gestionnaire de canaux. Les filtres user_id qui suivent
+  // portent sur le compte PROPRIETAIRE (delegation possible), pas sur l'appelant.
+  const garde = await requirePermission(req, res, {
+    domaine: 'reglages', niveau: 'write', bien: providerPropertyId, bienRequis: true
+  })
+  if (!garde.ok) return
+  const compteBien = garde.accountUserId
+
+  if (canalDemande && ACTIONS_A_CANAL.includes(action)) {
+    const gardeCanal = await requirePermissionPourCanal(req, res, { channelId: canalDemande, channelCall })
+    if (!gardeCanal.ok) return
+    // Le canal doit relever du MEME bien que celui annonce : sinon l'appelant
+    // ferait valider le bien A pour agir sur un canal du bien B.
+    if (String(gardeCanal.bienDuCanal) !== String(providerPropertyId)) {
+      console.log('[channel-mapping] refus : canal rattache a un autre bien')
+      return res.status(403).json({ error: 'Ce canal ne releve pas du bien indique' })
+    }
+  }
+  // (Le cas « property_id absent » est deja traite par la garde ci-dessus,
+  // bienRequis:true -> 400. Ce bloc reste comme filet, sans etre atteignable.)
   if (!providerPropertyId) {
     return res.status(400).json({ error: 'property_id (provider_property_id) requis' })
   }
@@ -68,7 +101,7 @@ module.exports = async function handler(req, res) {
   const { data: prop, error: propErr } = await supabase
     .from('properties')
     .select('id, provider, provider_property_id, provider_rate_plan_id, provider_room_type_id, name')
-    .eq('user_id', user.id)
+    .eq('user_id', compteBien)
     .eq('provider_property_id', providerPropertyId)
     .maybeSingle()
   if (propErr) {

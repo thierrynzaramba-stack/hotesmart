@@ -19,6 +19,7 @@
 //   ari        -> lecture ARI seule (etat que Channex detient et propagerait)
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -112,9 +113,8 @@ module.exports = async function handler(req, res) {
   // ===== AUTH =====
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
+  // La session est verifiee par requirePermission (auth.getUser y est appele) :
+  // un second appel ici serait un aller-retour Supabase de plus par requete.
 
   const action = (req.query.action || '').trim()
   const channelId = (req.query.channel_id || '').trim()
@@ -136,10 +136,25 @@ module.exports = async function handler(req, res) {
     const providerPropertyId = Array.isArray(attrs.properties) ? attrs.properties[0] : null
     const isActive = attrs.is_active
 
+    // ⚠ Ici le bien est DEDUIT DU CANAL, pas fourni par le client : la garde ne
+    // peut donc venir qu'apres l'appel au gestionnaire de canaux. Cet appel ne
+    // divulgue rien (sa reponse n'est pas renvoyee avant la verification), mais
+    // il permet a un appelant de savoir qu'un channel_id existe — fuite
+    // d'existence residuelle, acceptee : les identifiants de canaux ne sont pas
+    // devinables et rien d'autre ne transpire.
+    if (!providerPropertyId) {
+      return res.status(404).json({ error: 'Canal sans bien rattache' })
+    }
+    const garde = await requirePermission(req, res, {
+      domaine: 'reglages', niveau: 'write', bien: providerPropertyId, bienRequis: true
+    })
+    if (!garde.ok) return
+    const compteBien = garde.accountUserId
+
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, name, provider_property_id, provider_rate_plan_id, provider_room_type_id')
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien)
       .eq('provider_property_id', providerPropertyId)
       .maybeSingle()
     if (propErr) {

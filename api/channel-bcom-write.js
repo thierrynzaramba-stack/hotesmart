@@ -20,6 +20,7 @@
 //              canal actif sans force=1.
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -90,9 +91,8 @@ module.exports = async function handler(req, res) {
   // ===== AUTH (cle canal cote serveur) =====
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
+  // La session est verifiee par requirePermission (auth.getUser y est appele) :
+  // un second appel ici serait un aller-retour Supabase de plus par requete.
 
   const action = (req.query.action || '').trim()
 
@@ -110,11 +110,19 @@ module.exports = async function handler(req, res) {
 
       const dryRun = req.query.dry_run !== 'false'
 
+      // Bien resolu et perimetre verifie avant tout appel au gestionnaire de
+      // canaux. Le filtre user_id porte sur le compte PROPRIETAIRE.
+      const garde = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: providerPropertyId, bienRequis: true
+      })
+      if (!garde.ok) return
+      const compteBien = garde.accountUserId
+
       // Ownership + rate_plan_id Channex du bien.
       const { data: prop, error: propErr } = await supabase
         .from('properties')
         .select('id, name, provider, provider_property_id, provider_rate_plan_id, capacity')
-        .eq('user_id', user.id)
+        .eq('user_id', compteBien)
         .eq('provider_property_id', providerPropertyId)
         .maybeSingle()
       if (propErr) {
@@ -209,6 +217,15 @@ module.exports = async function handler(req, res) {
       if (!DELETE_CHANNEL_RE.test(`/channels/${channelId}`)) {
         return res.status(400).json({ error: 'channel_id invalide' })
       }
+
+      // ⚠ FUITE CORRIGEE : cette branche n'avait AUCUNE garde. Seule la branche
+      // `create` en avait recu une. N'importe quel utilisateur authentifie
+      // pouvait donc supprimer n'importe quel canal Channex par son id — y
+      // compris actif, le garde-fou 409 etant contournable par `force=1` que
+      // l'appelant fournit lui-meme.
+      const gardeCanal = await requirePermissionPourCanal(req, res, { channelId, channelCall })
+      if (!gardeCanal.ok) return
+
       const dryRun = req.query.dry_run !== 'false'
       const force = req.query.force === '1'
 
