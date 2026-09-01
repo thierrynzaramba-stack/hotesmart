@@ -264,7 +264,14 @@
     document.getElementById('conv-items').innerHTML = '<div class="loading">Chargement…</div>'
 
     try {
-      const props = propId ? [propId] : ['169567', '209413']
+      // ⚠ Plus de propIds codes en dur : c'etaient ceux d'UN compte. Depuis que
+      // /api/beds24 verifie le perimetre, les envoyer depuis un autre compte
+      // repond 403 au lieu d'une liste vide. Sans bien selectionne, on prend ceux
+      // de la liste deja chargee pour ce compte.
+      const props = propId
+        ? [propId]
+        : Array.from(document.getElementById('prop-select').options)
+            .map(o => o.value).filter(Boolean)
 
       const [beds24Results, convRes, taskRes, pinRes] = await Promise.all([
         Promise.all(props.map(pid =>

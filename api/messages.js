@@ -64,6 +64,8 @@ module.exports = async function handler(req, res) {
   const refsAutorisees = refsDuPerimetre(garde.contexte)
   // Filtre de perimetre en SQL (construction + garde de format : lib/permissions).
   // Une expression vide signifie « perimetre vide ou refuse » : on echoue ferme.
+  // Le cas property_id NULL est EXCLU (defaut) : une conversation voyageur sans
+  // bien rattache ne doit pas apparaitre a un membre limite a un autre bien.
   const filtreOr = filtrePerimetreSql(refsAutorisees)
   if (filtreOr === '') return res.status(200).json({ conversations: [] })
 

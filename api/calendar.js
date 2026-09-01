@@ -272,7 +272,14 @@ module.exports = async function handler(req, res) {
           .select('property_id, snapshot')
           .eq('user_id', gardeGet.compte)
           .in('property_id', provIds)
-        if (!snapErr && snapRows) {
+        // ⚠ Une erreur ici ne peut PAS etre avalee : sans reservations, le
+        // calendrier s'affiche entierement LIBRE, et une simple panne transitoire
+        // devient une surreservation. On echoue bruyamment.
+        if (snapErr) {
+          console.error('[calendar] lecture bookings_snapshot', snapErr.message)
+          return res.status(500).json({ error: 'Erreur lecture reservations' })
+        }
+        if (snapRows) {
           snapRows.forEach(row => {
             const id = provToId[String(row.property_id)]
             if (!id) return
@@ -292,7 +299,10 @@ module.exports = async function handler(req, res) {
           })
         }
       } catch (e) {
-        console.warn('[calendar] bookings_snapshot read skipped:', e.message)
+        // Meme raison : un calendrier ampute de ses reservations est pire qu'une
+        // erreur visible.
+        console.error('[calendar] bookings_snapshot read echec:', e.message)
+        return res.status(500).json({ error: 'Erreur lecture reservations' })
       }
     }
 
@@ -421,6 +431,21 @@ module.exports = async function handler(req, res) {
     // autofix des nuits orphelines). Partout ailleurs ces reglages relevent de
     // `reglages` — channel-rateplan garde la config tarifaire avec ce domaine.
     // Sans ce controle, `reservations: write` suffisait a les changer.
+    // ⚠ Le front pousse un segment perPerson des que l'onglet « Prix par
+    // personne » a ete AFFICHE, meme sans modification. Exiger `reglages` sur sa
+    // seule presence faisait perdre au membre ses changements de tarifs — pourtant
+    // autorises — parce que le handler s'arretait avant l'upsert.
+    // On ne garde donc que ce qui change REELLEMENT, et la garde ne se declenche
+    // que s'il reste quelque chose a ecrire.
+    for (const cle of Object.keys(propUpdates)) {
+      const avant = bien[cle]
+      const apres = propUpdates[cle]
+      const memeValeur = (avant == null && apres == null) ||
+                         (typeof avant === 'number' || typeof apres === 'number'
+                            ? Number(avant) === Number(apres)
+                            : String(avant) === String(apres))
+      if (memeValeur) delete propUpdates[cle]
+    }
     if (Object.keys(propUpdates).length) {
       const gardeReglages = await requirePermission(req, res, {
         domaine: 'reglages', niveau: 'write', bien: bienId, bienRequis: true, userId

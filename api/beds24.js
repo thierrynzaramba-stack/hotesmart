@@ -58,6 +58,9 @@ module.exports = async function handler(req, res) {
     let bookingConnu = null
     if (action === 'sendMessage' && bookingId) {
       bookingConnu = await resoudreBooking(bookingId)
+      if (bookingConnu && bookingConnu.erreur) {
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
       if (bookingConnu && bookingConnu.ambigu) {
         return res.status(409).json({ error: 'Réservation ambiguë' })
       }
@@ -72,9 +75,18 @@ module.exports = async function handler(req, res) {
     // conversations restent affichees aurait donc casse la reponse au voyageur.
     // Beds24 tranchera de toute facon plus bas.
     let bienAnnonce = propertyId || null
-    if (action === 'sendMessage' && !parReservation && bienAnnonce) {
-      if (!await resoudreBien(bienAnnonce)) {
-        console.log('[Beds24] sendMessage : bien annonce non materialise, Beds24 tranchera')
+    if (bienAnnonce) {
+      const essai = await resoudreBien(bienAnnonce)
+      if (essai && essai.erreur) {
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      if (!essai) {
+        // Bien jamais materialise dans `properties` (import Beds24 non rejoue,
+        // propId code en dur d'une vue legacy). On retombe sur le compte de
+        // l'appelant : sa propre cle Beds24 borne deja ce que l'API renvoie, et
+        // un membre delegue n'en a pas — donc 400, pas un acces elargi. Refuser
+        // ici transformait une liste vide en 404.
+        console.log('[Beds24] bien annonce non materialise : compte de l\'appelant')
         bienAnnonce = null
       }
     }
@@ -103,7 +115,7 @@ module.exports = async function handler(req, res) {
       // configuree ». Ce n'est pas une regression — l'endpoint lisait deja la cle
       // sur l'appelant — mais la delegation de ce chemin precis attend le
       // selecteur de compte (etape 5).
-      bienRequis: action !== 'getProperties' && !(action === 'sendMessage' && !parReservation),
+      bienRequis: false,
       booking: parReservation ? bookingId : null,
       bookingRequis: false,
       bookingResolu: bookingConnu,
@@ -279,6 +291,9 @@ module.exports = async function handler(req, res) {
             // l'appelant, Beds24 ne peut designer qu'un de ses biens — mais le
             // PERIMETRE, lui, reste a verifier.
             const bienDeLaResa = await resoudreBien(resa.propertyId)
+            if (bienDeLaResa && bienDeLaResa.erreur) {
+              return res.status(503).json({ error: 'Service temporairement indisponible' })
+            }
             if (!bienDeLaResa) {
               // Bien Beds24 pas (ou plus) materialise dans `properties` : aucun
               // perimetre n'est verifiable. On n'accepte alors que le TITULAIRE

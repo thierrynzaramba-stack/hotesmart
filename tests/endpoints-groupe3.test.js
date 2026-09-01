@@ -139,6 +139,28 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
   return etat
 }
 
+// Double ou TOUTE lecture echoue : sert a verifier qu'une panne ne se deguise
+// pas en refus de droits.
+function preparerPanne () {
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: PROD } }, error: null }) },
+    from () {
+      const q = {
+        select () { return q }, eq () { return q }, or () { return q }, in () { return q },
+        order () { return q }, limit () { return q }, gte () { return q }, lte () { return q },
+        single: async () => ({ data: null, error: { message: 'timeout' } }),
+        maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }),
+        then (ok, ko) { return Promise.resolve({ data: null, error: { message: 'timeout' } }).then(ok, ko) }
+      }
+      return q
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+}
+
 function reponse () {
   const r = { code: null, body: null }
   r.status = c => { r.code = c; return r }
@@ -274,6 +296,30 @@ test('calendar POST : segments de dates seuls -> reglages non exige', async () =
     segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', rate: 120 }] } }), res)
   assert.notStrictEqual(res.code, 403)
   assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'))
+})
+
+test('garde : une PANNE de lecture donne 503, pas 404 ni 403', async () => {
+  // ⚠ L'erreur Supabase etait avalee : un timeout rendait « bien introuvable »
+  // (404) et « aucun droit » (403). Un incident de trente secondes faisait croire
+  // aux hotes qu'ils avaient perdu leurs biens.
+  const { requirePermission } = (() => {
+    preparerPanne()
+    return require('../lib/require-permission')
+  })()
+  const res = reponse()
+  const g = await requirePermission(req(), res, {
+    domaine: 'reservations', niveau: 'read', bien: BIEN_A.id, bienRequis: true })
+  assert.strictEqual(g.ok, false)
+  assert.strictEqual(res.code, 503)
+})
+
+test('calendar GET : erreur de lecture des reservations -> 500, jamais un calendrier libre', async () => {
+  // Un calendrier affiche sans reservations invite a la surreservation.
+  preparer({ user: PROD, erreurSnapshot: 'timeout' })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: {
+    property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 500)
 })
 
 // ─── channel-rateplan : tarifs derives par canal ─────────────────────────────
@@ -734,12 +780,19 @@ test('filtrePerimetreSql : aucun perimetre -> null (aucun filtre)', () => {
   assert.strictEqual(filtrePerimetreSql(null), null)
 })
 
-test('filtrePerimetreSql : le cas NULL est INCLUS (aligne sur in_scope)', () => {
-  // Un `.in()` nu rendrait invisibles les messages sans bien, que le SQL accepte.
+test('filtrePerimetreSql : le cas NULL est EXCLU par defaut', () => {
+  // ⚠ Divergence assumee d'avec in_scope : une conversation voyageur sans bien
+  // rattache ne doit pas apparaitre a un membre limite a un autre bien.
   const { filtrePerimetreSql } = require('../lib/permissions')
   const f = filtrePerimetreSql([BIEN_B.id, BIEN_B.provider_property_id])
-  assert.ok(f.startsWith('property_id.is.null,'), f)
+  assert.ok(!f.includes('is.null'), f)
   assert.ok(f.includes(BIEN_B.provider_property_id))
+})
+
+test('filtrePerimetreSql : le cas NULL s\'inclut sur demande explicite', () => {
+  const { filtrePerimetreSql } = require('../lib/permissions')
+  const f = filtrePerimetreSql([BIEN_B.id], 'property_id', true)
+  assert.ok(f.startsWith('property_id.is.null,'), f)
 })
 
 test('filtrePerimetreSql : perimetre vide -> chaine vide (echec FERME)', () => {
@@ -752,7 +805,7 @@ test('filtrePerimetreSql : reference au format refuse -> ecartee, pas d\'injecti
   // Elle est ECARTEE : les biens sains du membre restent visibles.
   const { filtrePerimetreSql } = require('../lib/permissions')
   const f = filtrePerimetreSql(['ok', 'a),user_id.neq.x,(b'])
-  assert.strictEqual(f, 'property_id.is.null,property_id.in.(ok)')
+  assert.strictEqual(f, 'property_id.in.(ok)')
   assert.strictEqual(filtrePerimetreSql(['a),user_id.neq.x,(b']), '',
     'aucune reference sure -> echec ferme')
   assert.ok(!filtrePerimetreSql(['ok', 'avec espace']).includes('espace'))
