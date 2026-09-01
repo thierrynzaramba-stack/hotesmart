@@ -7,6 +7,12 @@ Les choix de conception (boucle d'acquittement, escalade, priorités, verrou man
 
 Ce chantier s'appuie sur le chantier « Avis voyageurs » (table `ota_reviews` avec colonne `menage_event_id` réservée) : on livre ici le rattachement avis ↔ ménage ↔ prestataire.
 
+> ⚠️ **Cette spec est postérieurement révisée par `docs/specs/spec-profils-et-droits.md`** :
+> `cleaning_providers` disparaît au profit de `profiles`, et les droits d'accès
+> (dont ceux du prestataire sur ses propres disponibilités) relèvent désormais de
+> `profile_permissions`. Lire les deux ensemble ; en cas de contradiction, la spec
+> profils et droits fait foi.
+
 Règles d'architecture à respecter impérativement :
 - **L'app ménage est provider-agnostique** : elle s'appuie uniquement sur les données en base HôteSmart (`bookings_snapshot`, `properties`, `menage_events`…). Elle ne connaît ni Beds24 ni Channex. Seule la couche sync (cron, webhooks, `lib/channels/`) parle aux providers et alimente ces tables.
 - `cron.js` : toujours générer le fichier complet.
@@ -25,26 +31,33 @@ Avant toute migration, vérifier et corriger si nécessaire :
 
 ## 1. Migration SQL
 
+> ⚠️ **RÉVISÉ par `docs/specs/spec-profils-et-droits.md`.** La table
+> `cleaning_providers` **n'existe plus** : un prestataire est un `profiles` avec
+> `access_mode = 'lien'`. Un prestataire est un profil comme un autre, ce qui évite
+> deux annuaires de personnes à maintenir. Toutes les références ci-dessous
+> pointent donc `profiles(id)`.
+>
+> Ce qui figurait dans `cleaning_providers` est repris par :
+> - `name`, `phone`, `email` → `profiles.first_name` / `last_name` / `phone` / `email` ;
+> - `pwa_token` → `profiles.pwa_token` (`access_mode = 'lien'`) ;
+> - `active` → `profiles.active` ;
+> - `requires_ack` → **reste à placer** : il ne relève pas de l'identité mais du
+>   mode d'assignation. À porter sur `property_cleaning_providers` (par bien, ce qui
+>   est plus fin) ou sur une colonne dédiée de `profiles`. **À trancher à l'étape 1.**
+>
+> `self_availability` (`profile_permissions`) commande l'écran « Mes disponibilités »
+> de la PWA : `none` → pas d'écran, `read` → lecture seule, `write` → le prestataire
+> gère ses règles et exceptions. L'admin garde toujours le dernier mot.
+
 ```sql
--- Prestataires
-create table cleaning_providers (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  name text not null,
-  phone text,
-  email text,
-  pwa_token text not null unique,           -- token d'accès PWA propre à ce prestataire
-  requires_ack boolean not null default true, -- false = assignation directe sans acceptation (mode « auto accept »)
-  active boolean default true,
-  created_at timestamptz default now()
-);
+-- Prestataires : PAS de table dédiée. Voir profiles (access_mode = 'lien').
 
 -- Liaison bien ↔ prestataire
 create table property_cleaning_providers (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   property_id uuid not null references properties(id) on delete cascade,
-  provider_id uuid not null references cleaning_providers(id) on delete cascade,
+  provider_id uuid not null references profiles(id) on delete cascade,   -- profil prestataire (access_mode='lien')
   priority int not null default 1,          -- 1 = principal, 2 = renfort…
   quota_share numeric,                      -- part cible pour le mode quota (ex. 0.5, 0.333) ; null si mode ≠ quota
   weekdays int[],                           -- jours attitrés pour le mode jour (0=dim … 6=sam) ; null si mode ≠ jour
@@ -62,7 +75,7 @@ alter table properties
 create table provider_availability_rules (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  provider_id uuid not null references cleaning_providers(id) on delete cascade,
+  provider_id uuid not null references profiles(id) on delete cascade,   -- profil prestataire (access_mode='lien')
   rrule text not null,                      -- ex. "DTSTART:20260905\nRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU"
   label text,                               -- lisible : "Week-ends, une semaine sur deux"
   active boolean default true
@@ -72,7 +85,7 @@ create table provider_availability_rules (
 create table provider_availability_exceptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  provider_id uuid not null references cleaning_providers(id) on delete cascade,
+  provider_id uuid not null references profiles(id) on delete cascade,   -- profil prestataire (access_mode='lien')
   date date not null,
   available boolean not null,               -- false = congé ; true = dispo exceptionnelle
   reason text,
@@ -87,7 +100,7 @@ alter table menage_events
     check (priority in ('standard','urgent')),
   add column status text not null default 'created'
     check (status in ('created','offered','accepted','started','completed','orphaned','cancelled')),
-  add column provider_id uuid references cleaning_providers(id),
+  add column provider_id uuid references profiles(id),
   add column assigned_by text check (assigned_by in ('auto','manual')),
   add column assignment_reason text,        -- trace lisible : "mode jour : samedi → X" / "aucune candidate"
   add column escalation_level int not null default 0,  -- rang de la candidate à qui l'offre est en cours
@@ -120,7 +133,9 @@ create table menage_assignment_log (
 Toute transition de `status` ou de `provider_id` écrit une ligne dans `menage_assignment_log`. C'est la source des métriques (délai offre→acceptation, taux d'expiration, taux d'orphelins) et la preuve en cas de litige.
 
 ### Migration des données existantes (Régina)
-- Créer un enregistrement `cleaning_providers` pour Régina avec le token PWA **actuel** comme `pwa_token` (aucune rupture de son lien).
+- Créer un **profil** pour Régina : `access_mode = 'lien'`, le token PWA **actuel**
+  comme `pwa_token` (aucune rupture de son lien), `self_availability = 'write'`
+  (à ajuster), `self_view_reviews = true`.
 - La lier en priorité 1 à chaque bien de Thierry.
 - Renseigner `provider_id = Régina`, `assigned_by = 'auto'` sur tous les `menage_events` passés du compte (historique de qualité cohérent).
 - Vérifier que cette migration ne touche que les comptes ayant déjà un token ménage configuré.
@@ -207,7 +222,7 @@ job cron escaladeOffres (à chaque exécution du cron) :
 
 ## 4. PWA prestataire — `api/menages-public.js` et front PWA
 
-- Le token identifie désormais un `cleaning_providers.pwa_token` (et non plus un token global). Un prestataire ne voit **que** ses ménages (`provider_id = lui`). Un token inconnu ou inactif → 401.
+- Le token identifie désormais un `profiles.pwa_token` (et non plus un token global). Un prestataire ne voit **que** ses ménages (`provider_id = lui`). Un token inconnu ou inactif → 401.
 - Écran principal : les **offres en attente** en tête (badge « À confirmer », délai restant, badge « URGENT » si `priority='urgent'`), avec boutons « J'accepte » / « Je refuse » ; puis les ménages acceptés du jour et à venir.
 - Sur un ménage accepté : boutons « Je commence » (`started_at`) et « Terminé » (`completed_at`) — deux clics, aucune saisie. C'est ce qui donnera la durée réelle par bien et par prestataire.
 - Nouvel écran « Mes disponibilités » dans la PWA :
@@ -219,7 +234,11 @@ job cron escaladeOffres (à chaque exécution du cron) :
 ## 5. Dashboard hôte
 
 ### Onglet « Prestataires » (nouveau, dans les réglages ou l'app ménage)
-- CRUD prestataires : nom, téléphone, email, actif. Génération du `pwa_token` et affichage du lien PWA à envoyer.
+- CRUD prestataires : **c'est la page « Équipe et droits »** de
+  `spec-profils-et-droits.md` §5 (création d'un profil `lien`, génération du token,
+  affichage du lien PWA). Ne pas construire un second écran de gestion de personnes.
+  La **fiche prestataire** (§4 de cette même spec) reste propre à ce chantier :
+  biens, mode d'assignation, disponibilités et section qualité non dissociable.
 - Règles de disponibilité par prestataire : formulaire jours + hebdo/quinzaine + date de départ (génère la RRULE). Liste des exceptions (dont celles déclarées par le prestataire).
 - Par bien : mode d'assignation + liaisons (priorité, jours attitrés si mode jour, part si mode quota). Validation : en mode quota la somme des parts actives = 1 (avertissement, pas blocage).
 
