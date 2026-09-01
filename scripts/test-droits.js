@@ -69,6 +69,7 @@ const LOTS = {
   6: [
     { table: 'properties',        domaine: 'dedie',       cle: 'uuid' },
     { table: 'api_keys',          domaine: 'dedie',       cle: null },
+    { table: 'app_logs',          domaine: 'dedie',       cle: null },
     { table: 'agent_alert_config',domaine: 'reglages',    cle: null },
     { table: 'accounts',          domaine: 'facturation', cle: null },
     { table: 'subscriptions',     domaine: 'facturation', cle: null }

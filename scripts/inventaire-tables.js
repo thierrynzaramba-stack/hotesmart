@@ -8,7 +8,12 @@
 // echoue en tentant de la creer.
 //
 // La source de verite est ici l'API OpenAPI de PostgREST (GET /rest/v1/), qui
-// liste TOUT ce que le schema public expose, code ou pas.
+// liste TOUT ce que le schema public expose, code ou pas — TABLES ET COLONNES.
+//
+// ⚠ Deuxieme piege, tombe une fois de plus : lire les colonnes depuis les LIGNES
+// echoue sur une table VIDE. `app_logs` (0 ligne) a ainsi ete classee « sans
+// user_id » alors qu'elle en a un. Les colonnes viennent donc du descripteur,
+// jamais d'un echantillon.
 //
 // USAGE : node scripts/inventaire-tables.js
 // LECTURE SEULE.
@@ -21,18 +26,22 @@ const KEY = process.env.SUPABASE_SERVICE_KEY
 const supabase = createClient(URL, KEY)
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// Toutes les tables exposees, depuis le descripteur OpenAPI de PostgREST.
-async function listerTables() {
+// Toutes les tables ET leurs colonnes, depuis le descripteur OpenAPI de PostgREST.
+async function listerSchema() {
   const r = await fetch(`${URL}/rest/v1/`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } })
   if (!r.ok) throw new Error(`descripteur OpenAPI indisponible : HTTP ${r.status}`)
   const doc = await r.json()
-  return Object.keys(doc.definitions || doc.components?.schemas || {}).sort()
+  const defs = doc.definitions || doc.components?.schemas || {}
+  const schema = {}
+  Object.keys(defs).sort().forEach(t => { schema[t] = Object.keys(defs[t].properties || {}) })
+  return schema
 }
 
 async function main() {
   if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents de .env.local'); process.exit(1) }
 
-  const tables = await listerTables()
+  const schema = await listerSchema()
+  const tables = Object.keys(schema)
   const { data: props } = await supabase.from('properties').select('id, provider_property_id')
   const uuids = new Set((props || []).map(p => String(p.id)))
   const refs  = new Set((props || []).map(p => String(p.provider_property_id)))
@@ -46,8 +55,9 @@ async function main() {
     const { data, count, error } = await supabase.from(t).select('*', { count: 'exact' }).limit(200)
     if (error) { console.log(`${t.padEnd(32)}${'?'.padStart(7)}  (${error.message.slice(0, 40)})`); continue }
 
-    const cols = new Set()
-    ;(data || []).forEach(r => Object.keys(r).forEach(k => cols.add(k)))
+    // Colonnes depuis le SCHEMA, pas depuis les lignes : une table vide a des
+    // colonnes, et c'est justement celle qu'on risque de mal classer.
+    const cols = new Set(schema[t] || [])
     const aUserId = cols.has('user_id')
     if (!aUserId) sansUserId.push(t)
 
