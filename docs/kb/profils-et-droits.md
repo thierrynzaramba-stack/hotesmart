@@ -312,8 +312,35 @@ Analyse, sur un bien Channex, est écrite sous une clé que le reste du code ne 
 pas — et devient invisible aux membres une fois les politiques posées. C'est un
 bug **antérieur** au chantier des droits, que celui-ci rend simplement visible.
 
-À corriger dans un chantier dédié : uniformiser sur `provider_property_id`, puis
-rattacher ou purger les 19 lignes orphelines.
+**CORRIGÉ** (chantier knowledge, 2 septembre 2026) : `knowledge.html` et
+`analyze.html` normalisent désormais leur clé à la lecture
+(`p.provider_property_id || p.id`), comme `messages.html` et `config.html`. Voir
+`REVIEW.md` §10.
+
+**Diagnostic des orphelines** (`scripts/diagnostic-orphelines.js`) : les quatre
+valeurs correspondent à des biens **supprimés**, aucune n'est rattachable à un
+bien existant.
+
+| Table | `property_id` | Lignes | Verdict |
+|---|---|---|---|
+| `knowledge` | `1a2cfd91-f501-4b0e-83ef-0598a0c921b2` | 6 | bien supprimé |
+| `knowledge` | `90e2986f-0fb8-4783-9566-92941d1c1bba` | 6 | bien supprimé |
+| `knowledge` | `33494dd7-e309-450e-9892-48761084c5a8` | 7 | bien supprimé |
+| `messages` | `429f043c-f927-41af-b874-3b9b07cca15a` | 1 | bien supprimé |
+
+**PURGÉES le 2 septembre 2026** (`scripts/purge-orphelines.js`) : comptage à blanc
+20, `--apply` 20 supprimées 0 échec, second comptage 0. `knowledge` passe de 63 à
+44 lignes (26 pour coeur de vie 23, 18 pour La bulle), et plus aucune valeur de
+`property_id` inconnue ne subsiste dans les 16 tables enfants examinées.
+
+**Chantier knowledge clos.** La cause est corrigée (normalisation de la clé dans
+les quatre pages), la règle est écrite (`REVIEW.md` §10), les résidus sont
+supprimés.
+
+À noter : les deux biens Channex actuels (`colomier`, `Colomiers`) n'ont **aucune
+connaissance** enregistrée, ni sous UUID ni sous `provider_property_id`. Le bug
+était donc réel mais n'a lésé aucune donnée vivante — il aurait frappé à la
+première saisie.
 
 ## 5 quater. Étape 2 TERMINÉE — les 30 tables
 

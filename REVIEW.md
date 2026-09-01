@@ -189,6 +189,33 @@ d'autre ? »*, jamais à *« puis-je toucher les miennes ? »*.
 
 ---
 
+## 10. `property_id` d'une table enfant est TOUJOURS `provider_property_id`
+
+**Règle : dans toute table enfant, `property_id` porte
+`properties.provider_property_id` — jamais `properties.id`.**
+
+À vérifier :
+- [ ] toute écriture front normalise sa clé : `p.provider_property_id || p.id` ;
+- [ ] `/api/channel-property` expose `id` = **UUID** pour un bien channel et = **propId** pour un bien Beds24 : ne jamais l'utiliser tel quel comme `property_id` ;
+- [ ] une nouvelle page qui liste des biens copie le motif de `messages.html` / `config.html`, pas celui d'une page antérieure non vérifiée ;
+- [ ] question à se poser : *cette clé serait-elle la même pour un bien Beds24 et pour un bien Channex ?*
+
+**Pourquoi.** Les tables enfants n'ont aucune FK vers `properties` : rien en base
+n'empêche d'y écrire un identifiant qui ne sera jamais relu. Une ligne mal clée
+n'est pas en erreur, elle est **silencieusement ignorée**.
+
+**Cas vécu.** `apps/agent-ai/knowledge.html` et `analyze.html` écrivaient
+`properties[].id` tel quel. Pour un bien Beds24 ça tombait juste par coïncidence
+(l'endpoint y expose le propId) ; pour un bien **Channex**, elles écrivaient
+l'UUID. Résultat : les connaissances saisies sur un bien Channex étaient ignorées
+par l'Agent IA, sans le moindre message d'erreur. Le bug a survécu des mois et n'a
+été révélé que par le chantier des droits, qui a rendu ces lignes invisibles.
+
+Deux pages faisaient déjà correctement (`messages.html`, `config.html`) : c'était
+une incohérence entre pages, pas une convention absente.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).
