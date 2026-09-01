@@ -10,6 +10,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { getProvider } = require('../lib/channels')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -21,24 +22,23 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: 'Methode non autorisee' })
   }
 
-  // ===== AUTH =====
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) {
-    return res.status(401).json({ error: 'Session invalide' })
-  }
-  const user = userData.user
-
-  // ===== Bien demande (ownership) =====
+  // ===== Droits =====
+  // L'import ECRIT dans `messages` : niveau write, domaine messages. Le bien est
+  // fourni par le client, donc resolu en base — c'est lui qui designe le compte.
   const pid = req.body?.property_id
-  if (!pid) return res.status(400).json({ error: 'property_id requis' })
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', bien: pid, bienRequis: true
+  })
+  if (!garde.ok) return
 
+  // ⚠ `pid` n'est PAS reutilise ici : le filtre porte sur l'identifiant resolu.
+  // Reinjecter la valeur client dans un `.eq('id', ...)` est le piege qui a
+  // provoque la regression SMS (uuid vs propId Beds24).
   const { data: prop, error: propErr } = await supabase
     .from('properties')
     .select('id, provider, provider_property_id, name')
-    .eq('id', pid)
-    .eq('user_id', user.id)          // securite : seulement SES biens
+    .eq('id', garde.bien.id)
+    .eq('user_id', garde.accountUserId)   // defense en profondeur
     .maybeSingle()
 
   if (propErr) {
@@ -57,7 +57,9 @@ module.exports = async function handler(req, res) {
   }
 
   const result = await provider.importMessages({
-    userId:            user.id,
+    // Les messages importes appartiennent au compte PROPRIETAIRE du bien, pas a
+    // l'appelant : un membre delegue ne doit pas se les attribuer.
+    userId:            garde.accountUserId,
     propertyId:        prop.provider_property_id,
     providerPropertyId: prop.provider_property_id,
     debug:             true   // phase test : capture les reponses brutes

@@ -7,6 +7,8 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+const { requirePermission } = require('../lib/require-permission')
+const { refsDuPerimetre } = require('../lib/permissions')
 
 // ─── Normalisation OTA (marque blanche) ──────────────────────────────────────
 // Valeur brute heterogene (Beds24 'airbnb' / Channex 'Airbnb.com' / ...) -> cle CSS.
@@ -43,12 +45,28 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: 'Methode non autorisee' })
   }
 
-  // ── Auth (calque sur api/channel-message.js) ──
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: u, error: authErr } = await supabase.auth.getUser(token)
-  if (authErr || !u?.user) return res.status(401).json({ error: 'Session invalide' })
-  const userId = u.user.id
+  // ── Droits ──
+  // Endpoint de COLLECTION : aucun identifiant client, donc aucune ressource ne
+  // designe un compte — le compte cible est celui de l'appelant.
+  //
+  // ⚠ PORTEE REELLE, a ne pas surestimer : la garde et le filtre ci-dessous sont
+  // INERTES aujourd'hui. Un appelant est toujours titulaire de son propre compte,
+  // donc `niveauEffectif` renvoie 'write' et `refsDuPerimetre` renvoie null. La
+  // consequence est fonctionnelle, pas securitaire : un membre invite ne voit pas
+  // la messagerie du compte auquel il appartient, il voit la sienne (vide).
+  // Le choix du compte cible est l'etape 5 ; le cablage est pose des maintenant
+  // pour qu'elle n'ait qu'a fournir `accountUserId`. Couverture : les tests
+  // portent sur refsDuPerimetre (lib/permissions), pas sur cet endpoint — un vert
+  // ici ne prouverait rien.
+  const garde = await requirePermission(req, res, { domaine: 'messages', niveau: 'read' })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const refsAutorisees = refsDuPerimetre(garde.contexte)
+  // Perimetre restreint et vide -> rien a montrer. Repondre avant la requete
+  // evite un `.in()` sur liste vide, dont le comportement n'est pas garanti.
+  if (Array.isArray(refsAutorisees) && refsAutorisees.length === 0) {
+    return res.status(200).json({ conversations: [] })
+  }
 
   try {
     // Fenetre 6 mois.
@@ -56,17 +74,27 @@ module.exports = async function handler(req, res) {
 
     // ── 2 SELECT (zero N+1) : messages recents + snapshots du user ──
     const [msgRes, snapRes] = await Promise.all([
-      supabase
-        .from('messages')
-        .select('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
-        .eq('user_id', userId)
-        .gte('sent_at', since)
-        .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
-        .limit(2000),
-      supabase
-        .from('bookings_snapshot')
-        .select('booking_id, snapshot')
-        .eq('user_id', userId)
+      (() => {
+        let q = supabase
+          .from('messages')
+          .select('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
+          .eq('user_id', userId)
+          .gte('sent_at', since)
+        if (refsAutorisees) q = q.in('property_id', refsAutorisees)
+        return q
+          .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
+          .limit(2000)
+      })(),
+      (() => {
+        let q = supabase
+          .from('bookings_snapshot')
+          .select('booking_id, snapshot')
+          .eq('user_id', userId)
+        // Le filtre messages suffirait (la jointure est pilotee par eux), mais
+        // charger les reservations hors perimetre en memoire n'a aucun interet.
+        if (refsAutorisees) q = q.in('property_id', refsAutorisees)
+        return q
+      })()
     ])
 
     if (msgRes.error) {

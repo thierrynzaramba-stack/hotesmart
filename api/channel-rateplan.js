@@ -9,6 +9,7 @@
 // l'enfant derive prix + garde son min stay (verifie etape 0).
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -50,6 +51,26 @@ module.exports = async function handler(req, res) {
 
   const action = (req.query.action || '').trim()
 
+  // ⚠ CET ENDPOINT CONFIGURE LES TARIFS POUSSES AUX OTA (rate plans derives,
+  // coefficients par canal, sejour minimum). Une erreur de perimetre y coute des
+  // reservations, pas une fuite de lecture : un coefficient applique au bien d'un
+  // autre compte, ou un rate plan remappe.
+  // Le bien vient du client : resolu en base et confronte au perimetre avant
+  // tout appel au gestionnaire de canaux.
+  const bienDemande = String(req.query.property_id || req.body?.property_id || '').trim()
+  const LECTURE_SEULE = new Set(['inspect', 'rules'])
+  let compteBien = null
+  if (bienDemande) {
+    const garde = await requirePermission(req, res, {
+      domaine: 'reglages',
+      niveau: LECTURE_SEULE.has(action) ? 'read' : 'write',
+      bien: bienDemande,
+      bienRequis: true
+    })
+    if (!garde.ok) return
+    compteBien = garde.accountUserId
+  }
+
   // --- create_derived : enfant neutre + lignes de liaison ---
   if (action === 'create_derived') {
     const providerPropertyId = (req.query.property_id || '').trim()
@@ -60,7 +81,7 @@ module.exports = async function handler(req, res) {
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, name, currency, capacity, provider_property_id, provider_rate_plan_id, provider_room_type_id')
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien || user.id)
       .eq('provider_property_id', providerPropertyId)
       .maybeSingle()
     if (propErr) { console.error('[channel-rateplan] SELECT', propErr.message); return res.status(500).json({ error: 'Erreur lecture' }) }
@@ -140,7 +161,7 @@ module.exports = async function handler(req, res) {
 
     const { data: prop } = await supabase
       .from('properties').select('id, provider_property_id')
-      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     const rp = await channelCall('GET', `/rate_plans/${ratePlanId}`)
@@ -178,7 +199,7 @@ module.exports = async function handler(req, res) {
 
     const { data: prop } = await supabase
       .from('properties').select('id, provider_property_id, provider_rate_plan_id, rate_sync_mode')
-      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     // Cible : base = provider_rate_plan_id du bien ; derived = ligne de liaison du canal.
@@ -262,7 +283,7 @@ module.exports = async function handler(req, res) {
 
     const { data: prop } = await supabase
       .from('properties').select('id, provider_property_id, rate_sync_mode')
-      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     const { data: row } = await supabase
@@ -368,7 +389,7 @@ module.exports = async function handler(req, res) {
 
     const { data: prop } = await supabase
       .from('properties').select('id, provider_property_id, rate_sync_mode')
-      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     const { data: row } = await supabase
@@ -444,7 +465,7 @@ module.exports = async function handler(req, res) {
     if (!providerPropertyId) return res.status(400).json({ error: 'property_id requis' })
     const { data: prop } = await supabase
       .from('properties').select('id, provider_property_id')
-      .eq('user_id', user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
     const { data: rows } = await supabase
       .from('property_channel_rate_plans')
@@ -459,6 +480,13 @@ module.exports = async function handler(req, res) {
   if (action === 'raw_channel') {
     const channelId = (req.query.channel_id || '').trim()
     if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
+    // Seule action sans property_id : le canal est l'unique reference. Sans cette
+    // garde, n'importe quel channel_id de la plateforme etait lisible (mappings et
+    // listing_id d'un autre compte).
+    const gardeCanal = await requirePermissionPourCanal(req, res, {
+      channelId, channelCall, domaine: 'reglages', niveau: 'read'
+    })
+    if (!gardeCanal.ok) return
     const ch = await channelCall('GET', `/channels/${channelId}`)
     const rps = (ch.json?.data?.attributes?.rate_plans || []).map(rp => ({
       mapping_id: rp.id, rate_plan_id: rp.rate_plan_id, listing_id: rp.settings?.listing_id, primary_occ: rp.settings?.primary_occ

@@ -663,9 +663,13 @@
       const reply  = document.getElementById(`val-${taskId}`)?.value?.trim()
       if (!reply) return alert('La réponse est vide')
       validateBtn.disabled = true; validateBtn.textContent = '⏳ Envoi…'
+      // propertyId JOINT A L'ENVOI : /api/beds24 verifie desormais le perimetre du
+      // bien. Quand la reservation est trop ancienne pour figurer dans
+      // bookings_snapshot, c'est la seule reference dont dispose la garde (qui la
+      // reconfronte ensuite a Beds24).
       const res = await fetch('/api/beds24', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => t.id === taskId)?.property_id || null })
       })
       const data = await res.json()
       if (data.success) {
@@ -698,7 +702,7 @@
       sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi…'
       const res = await fetch('/api/beds24', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply })
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => t.id === taskId)?.property_id || null })
       })
       const data = await res.json()
       if (data.success) {

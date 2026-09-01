@@ -1,0 +1,421 @@
+// tests/endpoints-groupe3.test.js
+// Groupe 3 de l'etape 3 : les endpoints qui touchent aux PRIX, aux DISPONIBILITES
+// et aux MESSAGES VOYAGEURS.
+//
+//   calendar               ecrit tarifs / dispos, pousse vers les OTA
+//   channel-rateplan       configure les tarifs derives par canal
+//   beds24                 proxy Beds24 (lecture conversations + envoi)
+//   channel-import-messages import d'historique
+//   messages               collection : la RLS ne s'applique pas, la garde si
+//
+// Ici une erreur de perimetre ne fuit pas une donnee : elle publie un tarif ou
+// ferme des dates sur le bien d'un autre compte, ou ecrit au voyageur d'autrui.
+// Chaque refus est donc double d'un chemin PASSANT, pour qu'un 403 de trop se
+// voie tout de suite.
+
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'https://api.exemple'
+process.env.CHANNEL_API_KEY  = process.env.CHANNEL_API_KEY  || 'cle-test'
+
+const test = require('node:test')
+const assert = require('node:assert')
+const path = require('node:path')
+const Module = require('node:module')
+
+const PROD = 'compte-prod', AUTRE = 'compte-autre', MEMBRE = 'membre'
+
+const BIEN_A = { id: '58001ed1-e194-498a-94b4-606eece8f33d', user_id: PROD, name: 'La bulle',
+                 provider: 'beds24', provider_property_id: '209413' }
+const BIEN_B = { id: '7c2b0f11-2222-4444-8888-aaaaaaaaaaaa', user_id: PROD, name: 'Coeur de vie',
+                 provider: 'beds24', provider_property_id: '169567' }
+const BIEN_TIERS = { id: '9f3c0000-3333-4444-9999-bbbbbbbbbbbb', user_id: AUTRE, name: 'Chez un autre',
+                     provider: 'beds24', provider_property_id: '999999' }
+const BIENS = [BIEN_A, BIEN_B, BIEN_TIERS]
+
+const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/calendar',
+                 '../api/channel-rateplan', '../api/beds24', '../api/messages',
+                 '../api/channel-import-messages', '../lib/record-message', '../lib/channels']
+
+// `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
+function preparer ({ user = MEMBRE, profil = null, permissions = null,
+                     snapshots = [], messages = [], fetchStub = null } = {}) {
+  const etat = { ecritures: [], filtresIn: [], appels: [] }
+
+  const client = {
+    auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
+                                       : { data: null, error: { message: 'x' } }) },
+    from (nom) {
+      const q = {
+        _f: {}, _in: null, _or: null,
+        select () { return q },
+        eq (c, v) { q._f[c] = v; return q },
+        or (e) { q._or = e; return q },
+        in (c, v) { q._in = { c, v }; etat.filtresIn.push({ table: nom, colonne: c, valeurs: v }); return q },
+        neq () { return q }, not () { return q }, is () { return q },
+        order () { return q }, limit () { return q }, gte () { return q }, lte () { return q },
+        insert (r) { etat.ecritures.push({ table: nom, row: r }); return { select: () => ({ single: async () => ({ data: { id: 'q1' }, error: null }) }) } },
+        upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
+        update (r) { etat.ecritures.push({ table: nom, row: r }); return q },
+        single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),
+        then (ok, ko) { return Promise.resolve(rep(nom, q, true)).then(ok, ko) }
+      }
+      function rep (nom, q, tableau = false) {
+        if (nom === 'properties') {
+          // ⚠ Le double reproduit le PIEGE REEL : `id` est de type uuid. Une
+          // valeur non-UUID dans la branche `id.eq.` est une ERREUR Postgres, pas
+          // un resultat vide — c'est ce qui avait casse l'envoi de SMS.
+          if (q._or) {
+            const m = String(q._or).match(/^id\.eq\.([^,]+),provider_property_id\.eq\.(.+)$/)
+            assert.ok(m, 'filtre .or() inattendu : ' + q._or)
+            assert.match(m[1], /^[0-9a-f]{8}-/i, 'un identifiant non-UUID ne doit JAMAIS atteindre id.eq')
+            const b = BIENS.find(x => x.id === m[1] || x.provider_property_id === m[2]) || null
+            return { data: b, error: null }
+          }
+          if (q._f.id != null) {
+            assert.match(String(q._f.id), /^[0-9a-f]{8}-/i, '.eq(id) recoit un identifiant non-UUID')
+          }
+          const cands = BIENS.filter(b =>
+            (q._f.id == null || b.id === q._f.id) &&
+            (q._f.provider_property_id == null || b.provider_property_id === q._f.provider_property_id) &&
+            (q._f.user_id == null || b.user_id === q._f.user_id) &&
+            (q._in == null || q._in.c !== 'id' || q._in.v.includes(b.id)))
+          return { data: tableau ? cands : (cands[0] || null), error: null }
+        }
+        if (nom === 'profiles') {
+          const ok = profil && profil.account_user_id === q._f.account_user_id &&
+                              profil.member_user_id === q._f.member_user_id
+          return { data: ok ? profil : null, error: null }
+        }
+        if (nom === 'profile_permissions') return { data: permissions, error: null }
+        if (nom === 'bookings_snapshot') {
+          const rows = snapshots.filter(s =>
+            (q._f.booking_id == null || String(s.booking_id) === String(q._f.booking_id)) &&
+            (q._f.user_id == null || s.user_id === q._f.user_id) &&
+            (q._in == null || q._in.c !== 'property_id' || q._in.v.includes(s.property_id)))
+          return { data: tableau ? rows : (rows[0] || null), error: null }
+        }
+        if (nom === 'api_keys') return { data: { api_key: 'cle-du-compte' }, error: null }
+        if (nom === 'messages') {
+          const rows = messages.filter(m =>
+            (q._in == null || q._in.c !== 'property_id' || q._in.v.includes(m.property_id)))
+          return { data: tableau ? rows : (rows[0] || null), error: null }
+        }
+        if (nom === 'channel_sync_queue') return { data: tableau ? [] : null, error: null }
+        if (nom === 'calendar_inventory') return { data: tableau ? [] : null, error: null }
+        return { data: tableau ? [] : null, error: null }
+      }
+      return q
+    }
+  }
+
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+
+  globalThis.fetch = async (url, opts) => {
+    etat.appels.push({ url: String(url), method: opts?.method || 'GET' })
+    if (fetchStub) {
+      const r = await fetchStub(String(url), opts)
+      if (r) return r
+    }
+    return { ok: true, status: 200, json: async () => ({ data: [] }), text: async () => '{}' }
+  }
+  return etat
+}
+
+function reponse () {
+  const r = { code: null, body: null }
+  r.status = c => { r.code = c; return r }
+  r.json = b => { r.body = b; return r }
+  r.setHeader = () => {}
+  return r
+}
+
+const profilActif = (o = {}) => ({ id: 'p1', account_user_id: PROD, member_user_id: MEMBRE,
+                                   active: true, accepted_at: '2026-09-01', ...o })
+const perms = (o = {}) => ({ profile_id: 'p1', property_scope: 'all', property_ids: [], property_refs: [],
+                             reservations: 'none', menages: 'none', prestataires: 'none', messages: 'none',
+                             avis: 'none', reglages: 'none', facturation: 'none', equipe: 'none', ...o })
+const req = (o = {}) => ({ method: 'GET', headers: { authorization: 'Bearer tok' }, query: {}, body: {}, ...o })
+
+// ─── calendar : prix et disponibilites ───────────────────────────────────────
+
+test('calendar GET : membre sans droit reservations -> 403', async () => {
+  preparer({ profil: profilActif(), permissions: perms({ reservations: 'none' }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: { property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 403)
+})
+
+test('calendar GET : titulaire -> passe', async () => {
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: { property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 200)
+})
+
+test('calendar GET : un bien ETRANGER glisse dans la liste -> refus global', async () => {
+  // Sans garde, loadOwnedProperties se contentait de filtrer : la requete
+  // repondait 200 en ignorant l'intrus, sans jamais refuser l'appelant.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: { property_ids: `${BIEN_A.id},${BIEN_TIERS.id}`, start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.ok(res.code === 403 || res.code === 404, `attendu 403/404, recu ${res.code}`)
+})
+
+test('calendar POST : membre reservations=read -> 403, AUCUNE ecriture', async () => {
+  const etat = preparer({ profil: profilActif(), permissions: perms({ reservations: 'read' }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-12', rate: 1 }]
+  } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.ecritures, [], 'un tarif a ete ecrit malgre le refus')
+})
+
+test('calendar POST : bien HORS perimetre -> 403, AUCUNE ecriture', async () => {
+  const etat = preparer({ profil: profilActif(),
+    permissions: perms({ reservations: 'write', property_scope: 'selected',
+                         property_ids: [BIEN_B.id], property_refs: [BIEN_B.provider_property_id] }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-12', rate: 1 }]
+  } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('calendar POST : property_id envoye en propId Beds24 -> resolu, jamais passe a .eq(id)', async () => {
+  // Le double leve une assertion si un non-UUID atteint la colonne uuid.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.provider_property_id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', rate: 120 }]
+  } }), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.notStrictEqual(res.code, 404)
+  const inv = etat.ecritures.filter(e => e.table === 'calendar_inventory')
+  assert.ok(inv.length, 'aucune ecriture calendar_inventory')
+  const lignes = [].concat(...inv.map(e => e.row))
+  assert.ok(lignes.every(l => l.property_id === BIEN_A.id),
+    'calendar_inventory doit porter l\'UUID resolu, pas la valeur client')
+})
+
+// ─── channel-rateplan : tarifs derives par canal ─────────────────────────────
+
+test('channel-rateplan : membre reglages=none -> 403', async () => {
+  preparer({ profil: profilActif(), permissions: perms({ reglages: 'none' }) })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({
+    query: { action: 'set_rule', property_id: BIEN_A.provider_property_id, channel: 'booking' } }), res)
+  assert.strictEqual(res.code, 403)
+})
+
+test('channel-rateplan : bien d\'un AUTRE compte -> 403', async () => {
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({
+    query: { action: 'set_rule', property_id: BIEN_TIERS.provider_property_id, channel: 'booking' } }), res)
+  assert.strictEqual(res.code, 403)
+})
+
+test('channel-rateplan : raw_channel exige un canal rattache au perimetre', async () => {
+  // Le canal appartient au bien d'un autre compte : ses mappings ne doivent pas
+  // sortir. Avant la garde, un channel_id suffisait.
+  preparer({ user: PROD, fetchStub: async (url) => {
+    if (url.includes('/channels/canal-tiers')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({
+        data: { attributes: { properties: [BIEN_TIERS.provider_property_id], rate_plans: [] } } }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({ query: { action: 'raw_channel', channel_id: 'canal-tiers' } }), res)
+  assert.ok(res.code === 403 || res.code === 404, `attendu 403/404, recu ${res.code}`)
+})
+
+// ─── beds24 : proxy conversations + envoi ────────────────────────────────────
+
+test('beds24 getConversations : membre messages=none -> 403', async () => {
+  preparer({ profil: profilActif(), permissions: perms({ messages: 'none' }) })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: { action: 'getConversations', propertyId: BIEN_A.provider_property_id } }), res)
+  assert.strictEqual(res.code, 403)
+})
+
+test('beds24 getConversations : membre messages=read -> passe', async () => {
+  preparer({ profil: profilActif(), permissions: perms({ messages: 'read' }) })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: { action: 'getConversations', propertyId: BIEN_A.provider_property_id } }), res)
+  assert.notStrictEqual(res.code, 403)
+})
+
+test('beds24 : bien d\'un AUTRE compte -> refus avant tout appel Beds24', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: { action: 'getMessages', propertyId: BIEN_TIERS.provider_property_id } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('beds24.com')), [])
+})
+
+test('beds24 sendMessage : reservation d\'un AUTRE compte -> 403, aucun envoi', async () => {
+  const etat = preparer({ user: PROD, snapshots: [
+    { user_id: AUTRE, booking_id: '55501', property_id: BIEN_TIERS.provider_property_id, snapshot: {} }
+  ] })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '55501', message: 'coucou', propertyId: BIEN_A.provider_property_id } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/messages')), [])
+})
+
+test('beds24 sendMessage : la RESERVATION fait foi, le propertyId client est ignore', async () => {
+  // Membre limite au bien B. Il passe propertyId=B mais un bookingId du bien A :
+  // la garde doit voir A (via le snapshot) et refuser.
+  const etat = preparer({
+    profil: profilActif(),
+    permissions: perms({ messages: 'write', property_scope: 'selected',
+                         property_ids: [BIEN_B.id], property_refs: [BIEN_B.provider_property_id] }),
+    snapshots: [{ user_id: PROD, booking_id: '77701', property_id: BIEN_A.provider_property_id, snapshot: {} }]
+  })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '77701', message: 'coucou', propertyId: BIEN_B.provider_property_id } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/messages')), [])
+})
+
+test('beds24 sendMessage : reservation HORS snapshot -> Beds24 tranche, propId different = 403', async () => {
+  // Chemin de repli (reservation trop ancienne pour le snapshot). Le client
+  // presente le bien B ; Beds24 dit que la reservation est sur le bien A.
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 88801, propertyId: BIEN_A.provider_property_id }] }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: BIEN_B.provider_property_id } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/bookings/messages')), [],
+    'aucun message ne doit partir quand Beds24 contredit le bien annonce')
+})
+
+test('beds24 sendMessage : reservation HORS snapshot, propId concordant -> envoi', async () => {
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 88801, propertyId: BIEN_A.provider_property_id }] }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: BIEN_A.provider_property_id } }), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.ok(etat.appels.some(a => a.url.includes('/bookings/messages') && a.method === 'POST'),
+    'le chemin legitime doit envoyer')
+})
+
+// ─── messages : collection filtree par le perimetre ──────────────────────────
+
+test('messages : le compte cible est celui de l\'appelant, jamais un autre', async () => {
+  // ⚠ CE QUE CE TEST CONSTATE, et qui n'est PAS un oubli : l'endpoint n'a aucun
+  // identifiant client, donc aucune ressource ne designe un autre compte. Un
+  // membre invite ne voit donc pas la messagerie du compte auquel il appartient
+  // — il voit la sienne, qui est vide. Le choix du compte est l'etape 5.
+  // La garde et le filtre de perimetre sont cables des maintenant pour que cette
+  // etape n'ait pas a repasser sur l'endpoint ; ils sont INERTES tant qu'il n'y a
+  // pas de selecteur de compte, et refuser un membre serait faux : c'est SON
+  // compte qu'il interroge, sur lequel il est titulaire.
+  const etat = preparer({
+    profil: profilActif(), permissions: perms({ messages: 'none' }),
+    messages: [{ booking_id: '1', property_id: BIEN_A.provider_property_id, provider: 'beds24',
+                 sender: 'guest', direction: 'inbound', body: 'a', sent_at: new Date().toISOString() }]
+  })
+  const res = reponse()
+  await require('../api/messages')(req({ method: 'GET' }), res)
+  assert.strictEqual(res.code, 200)
+  // Le point qui compte : la requete porte sur l'appelant.
+  assert.ok(!etat.filtresIn.some(f => f.table === 'messages' && f.colonne !== 'property_id'))
+})
+
+test('messages : titulaire -> aucun filtre de perimetre', async () => {
+  const etat = preparer({ user: PROD, messages: [
+    { booking_id: '1', property_id: BIEN_A.provider_property_id, provider: 'beds24', sender: 'guest', direction: 'inbound', body: 'a', sent_at: new Date().toISOString() }
+  ] })
+  const res = reponse()
+  await require('../api/messages')(req({ method: 'GET' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.conversations.length, 1)
+  assert.ok(!etat.filtresIn.some(f => f.table === 'messages'), 'le titulaire ne doit pas etre filtre')
+})
+
+test('messages : session absente -> 401', async () => {
+  preparer({ user: null })
+  const res = reponse()
+  await require('../api/messages')(req({ method: 'GET' }), res)
+  assert.strictEqual(res.code, 401)
+})
+
+// ─── refsDuPerimetre : le filtre de collection, teste la ou il vit ───────────
+// L'endpoint messages ne peut pas encore l'exercer (pas de selecteur de compte).
+// Le tester ici evite de faire croire, par un vert d'endpoint, a une protection
+// qui ne s'applique pas encore.
+
+test('refsDuPerimetre : titulaire -> null (aucun filtre)', () => {
+  const { refsDuPerimetre } = require('../lib/permissions')
+  assert.strictEqual(refsDuPerimetre({ userId: PROD, accountUserId: PROD }), null)
+})
+
+test('refsDuPerimetre : perimetre all -> null', () => {
+  const { refsDuPerimetre } = require('../lib/permissions')
+  assert.strictEqual(refsDuPerimetre({
+    userId: MEMBRE, accountUserId: PROD,
+    profil: profilActif(), permissions: perms({ property_scope: 'all' })
+  }), null)
+})
+
+test('refsDuPerimetre : perimetre selected -> UUID et refs melanges', () => {
+  const { refsDuPerimetre } = require('../lib/permissions')
+  const r = refsDuPerimetre({
+    userId: MEMBRE, accountUserId: PROD, profil: profilActif(),
+    permissions: perms({ property_scope: 'selected', property_ids: [BIEN_B.id],
+                         property_refs: [BIEN_B.provider_property_id] })
+  })
+  assert.deepStrictEqual(r.sort(), [BIEN_B.id, BIEN_B.provider_property_id].sort())
+})
+
+test('refsDuPerimetre : profil revoque -> liste VIDE, jamais null', () => {
+  // ⚠ Le piege : `null` signifie « aucun filtre », donc TOUT. Un membre revoque
+  // qui obtiendrait null verrait l'integralite du compte.
+  const { refsDuPerimetre } = require('../lib/permissions')
+  assert.deepStrictEqual(refsDuPerimetre({
+    userId: MEMBRE, accountUserId: PROD,
+    profil: profilActif({ active: false }), permissions: perms({ property_scope: 'selected' })
+  }), [])
+  assert.deepStrictEqual(refsDuPerimetre({
+    userId: MEMBRE, accountUserId: PROD, profil: null, permissions: null
+  }), [])
+})
+
+// ─── channel-import-messages ─────────────────────────────────────────────────
+
+test('import-messages : membre messages=read -> 403 (l\'import ECRIT)', async () => {
+  preparer({ profil: profilActif(), permissions: perms({ messages: 'read' }) })
+  const res = reponse()
+  await require('../api/channel-import-messages')(req({ method: 'POST', body: { property_id: BIEN_A.id } }), res)
+  assert.strictEqual(res.code, 403)
+})
+
+test('import-messages : bien d\'un AUTRE compte -> 403', async () => {
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/channel-import-messages')(req({ method: 'POST', body: { property_id: BIEN_TIERS.id } }), res)
+  assert.strictEqual(res.code, 403)
+})

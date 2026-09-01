@@ -10,6 +10,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 const { readStatus } = require('../lib/bookings-snapshot')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -109,15 +110,50 @@ module.exports = async function handler(req, res) {
   if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
   const user = userData.user
 
-  // Helper : charge les biens du user et verifie l'ownership
-  async function loadOwnedProperties(ids) {
+  // Helper : charge les biens et verifie l'ownership.
+  //
+  // ⚠ CET ENDPOINT ECRIT DES PRIX ET DES DISPONIBILITES VERS LES OTA. Une erreur
+  // de perimetre n'y coute pas une fuite de lecture mais des reservations : un
+  // tarif ou une fermeture pousses sur le bien d'un autre compte.
+  // Chaque bien demande passe donc par la garde, un par un — `property_ids` est
+  // une LISTE fournie par le client, et il suffirait d'un identifiant etranger
+  // glisse dans la liste pour que loadOwnedProperties le rejette silencieusement
+  // (il filtre) sans que l'appelant soit refuse.
+  async function loadOwnedProperties(uuids, compte) {
     const { data, error } = await supabase
       .from('properties')
       .select('id, name, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
-      .eq('user_id', user.id)
-      .in('id', ids)
+      .eq('user_id', compte)
+      .in('id', uuids)
     if (error) throw new Error('Erreur lecture biens')
     return data || []
+  }
+
+  // Verifie les droits sur CHAQUE bien demande et renvoie les biens RESOLUS.
+  // Renvoie null si l'un d'eux est refuse — la garde a alors deja repondu.
+  //
+  // ⚠ Les identifiants resolus sont ensuite les SEULS utilises : la valeur
+  // client ne doit jamais atteindre un `.eq('id', ...)`, `properties.id` etant
+  // de type uuid (un propId Beds24 y fait echouer la requete entiere, pas
+  // renvoyer zero ligne — c'est la regression SMS deja vecue).
+  async function gardeSurBiens(ids, niveau) {
+    const biens = []
+    let compte = null
+    for (const id of ids) {
+      const g = await requirePermission(req, res, {
+        domaine: 'reservations', niveau, bien: id, bienRequis: true
+      })
+      if (!g.ok) return null
+      // Une requete ne porte que sur UN compte : un melange signale une tentative
+      // de faire passer le bien d'un autre compte dans la liste.
+      if (compte && String(compte) !== String(g.accountUserId)) {
+        res.status(403).json({ error: 'Droits insuffisants' })
+        return null
+      }
+      compte = g.accountUserId
+      biens.push(g.bien)
+    }
+    return { biens, compte }
   }
 
   // ===== GET : inventory + reservations =====
@@ -130,8 +166,11 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'property_ids, start et end requis' })
     }
 
-    // verifie ownership
-    const owned = await loadOwnedProperties(ids)
+    // Droits en LECTURE sur chacun des biens demandes.
+    const gardeGet = await gardeSurBiens(ids, 'read')
+    if (!gardeGet) return
+
+    const owned = await loadOwnedProperties(gardeGet.biens.map(b => b.id), gardeGet.compte)
     const ownedIds = owned.map(p => p.id)
     if (!ownedIds.length) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
 
@@ -176,7 +215,7 @@ module.exports = async function handler(req, res) {
         const { data: snapRows, error: snapErr } = await supabase
           .from('bookings_snapshot')
           .select('property_id, snapshot')
-          .eq('user_id', user.id)
+          .eq('user_id', gardeGet.compte)
           .in('property_id', provIds)
         if (!snapErr && snapRows) {
           snapRows.forEach(row => {
@@ -209,12 +248,22 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const { action, property_id, segments } = req.body || {}
 
+    // ⚠ TOUTES les actions POST de cet endpoint ecrivent : tarifs, sejour
+    // minimum, disponibilites, et les poussent vers les OTA. Droit `reservations`
+    // en ECRITURE sur le bien vise, avant toute chose.
+    const gardePost = await requirePermission(req, res, {
+      domaine: 'reservations', niveau: 'write', bien: property_id, bienRequis: true
+    })
+    if (!gardePost.ok) return
+    const bienId = gardePost.bien.id
+    const compte = gardePost.accountUserId
+
     // ===== FULL SYNC : pousse 500 jours d'inventaire en 2 appels (certif test 1) =====
     if (action === 'fullsync') {
       // ENQUEUE : le clic "Publier" met le bien en FILE. Le worker cron (*/5) execute
       // le push reel (runFullSync), 1 bien a la fois. Refus = 200 + { enqueued:false, reason }.
       if (!property_id) return res.status(400).json({ error: 'property_id requis' })
-      const ownedFs = await loadOwnedProperties([property_id])
+      const ownedFs = await loadOwnedProperties([bienId], compte)
       const bienFs = ownedFs[0]
       if (!bienFs) return res.status(403).json({ error: 'Bien non trouve' })
       if (!bienFs.provider_property_id || !bienFs.provider_rate_plan_id || !bienFs.provider_room_type_id) {
@@ -238,7 +287,7 @@ module.exports = async function handler(req, res) {
       const { data: activeRows, error: activeErr } = await supabase
         .from('channel_sync_queue')
         .select('id, status')
-        .eq('property_id', property_id)
+        .eq('property_id', bienId)
         .in('status', ['pending', 'processing'])
         .limit(1)
       if (activeErr) { console.error('[calendar] queue read error', activeErr.message); return res.status(500).json({ error: 'Lecture file echouee' }) }
@@ -248,7 +297,7 @@ module.exports = async function handler(req, res) {
       // Insertion pending (l'index unique partiel garantit l'unicite cote base : anti-race)
       const { data: inserted, error: insErr } = await supabase
         .from('channel_sync_queue')
-        .insert({ property_id })
+        .insert({ property_id: bienId })
         .select('id')
         .single()
       if (insErr) {
@@ -267,7 +316,7 @@ module.exports = async function handler(req, res) {
     }
 
     // ownership + recup ids channel
-    const owned = await loadOwnedProperties([property_id])
+    const owned = await loadOwnedProperties([bienId], compte)
     const bien = owned[0]
     if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
 
@@ -303,7 +352,7 @@ module.exports = async function handler(req, res) {
       }
     }
     if (Object.keys(propUpdates).length) {
-      const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', property_id).eq('user_id', user.id)
+      const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', bienId).eq('user_id', compte)
       if (pErr) console.error('[calendar] properties update error', pErr.message)
     }
 
@@ -315,7 +364,7 @@ module.exports = async function handler(req, res) {
       const { data: existingRows } = await supabase
         .from('calendar_inventory')
         .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
-        .eq('property_id', property_id)
+        .eq('property_id', bienId)
         .in('date', [...allDates])
       ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
     }
@@ -323,7 +372,7 @@ module.exports = async function handler(req, res) {
     for (const seg of dateSegments) {
       const dates = expandDays(seg.date_from, seg.date_to, seg.days)
       for (const ds of dates) {
-        if (!rowsByDate[ds]) rowsByDate[ds] = { property_id, date: ds }
+        if (!rowsByDate[ds]) rowsByDate[ds] = { property_id: bienId, date: ds }
         const r = rowsByDate[ds]
         if (seg.rate != null) r.rate = seg.rate
         if (seg.avail != null) r.avail = seg.avail

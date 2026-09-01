@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
+const { requirePermission, resoudreBooking } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -13,30 +14,79 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '')
-    if (!token) return res.status(401).json({ error: 'Non autorisé' })
+    const { action, propertyId, bookingId, message } = req.body || {}
 
-    const { data: userData, error: authError } = await supabase.auth.getUser(token)
-    if (authError) {
-      console.error('[Beds24] Auth error:', authError)
-      return res.status(401).json({ error: 'Session invalide', detail: authError.message })
+    // ── Droits ──
+    // Proxy Beds24. La cle du compte borne DEJA ce que Beds24 renvoie, mais elle
+    // ne dit rien des droits INTERNES : sans garde, tout membre invite pouvait
+    // lire les conversations voyageurs et en envoyer, quels que soient son
+    // domaine et son perimetre.
+    //
+    // Chaque action declare son domaine et son niveau. `sendMessage` ne porte
+    // qu'un bookingId : c'est la RESERVATION qui designe le bien et le compte
+    // (le `propertyId` eventuellement joint par le client est ignore par la garde).
+    const REGLES = {
+      getProperties:    { domaine: 'reglages',     niveau: 'read'  },
+      getBookings:      { domaine: 'reservations', niveau: 'read'  },
+      getMessages:      { domaine: 'messages',     niveau: 'read'  },
+      getHistory:       { domaine: 'messages',     niveau: 'read'  },
+      getConversations: { domaine: 'messages',     niveau: 'read'  },
+      sendMessage:      { domaine: 'messages',     niveau: 'write' }
     }
+    const regle = REGLES[action]
+    if (!regle) return res.status(400).json({ error: `Action inconnue : ${action}` })
 
-    const user = userData?.user
-    if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' })
+    // ⚠ SENDMESSAGE ET LA RESERVATION ABSENTE DU SNAPSHOT.
+    // Passer bookingId a la garde serait la voie propre, mais le snapshot ne
+    // couvre que la fenetre de sync du cron (-3 / +6 mois d'arrivee) alors que
+    // l'action getMessages en expose sur ±1 an : exiger la reservation en base
+    // ferait repondre 404 a une reponse voyageur parfaitement legitime.
+    // On tente donc le snapshot d'abord (autoritaire), et a defaut on retombe
+    // sur le bien fourni par le client — verifie par la garde, PUIS confronte a
+    // Beds24 : la reservation doit reellement porter ce propId (controle plus
+    // bas). Sans cette confrontation, un membre limite au bien A pourrait
+    // ecrire au voyageur d'une reservation du bien B en passant `propertyId: A`.
+    let bookingConnu = null
+    if (action === 'sendMessage' && bookingId) {
+      bookingConnu = await resoudreBooking(bookingId)
+      if (bookingConnu && bookingConnu.ambigu) {
+        return res.status(409).json({ error: 'Réservation ambiguë' })
+      }
+    }
+    const parReservation = !!(bookingConnu && bookingConnu.property_id)
 
+    const garde = await requirePermission(req, res, {
+      domaine: regle.domaine,
+      niveau:  regle.niveau,
+      // getProperties n'a pas de bien : il liste ceux du compte de l'appelant.
+      bien:    action === 'sendMessage'
+                 ? (parReservation ? null : (propertyId || null))
+                 : (propertyId || null),
+      bienRequis: action !== 'getProperties',
+      booking: parReservation ? bookingId : null,
+      bookingRequis: false
+    })
+    if (!garde.ok) return
+
+    // Identifiant Beds24 RESOLU en base. Le propId brut du client n'atteint
+    // jamais l'API : c'est le bien valide par la garde qui le fournit.
+    const propId = garde.bien
+      ? garde.bien.provider_property_id
+      : (garde.booking ? garde.booking.property_id : propertyId)
+
+    // La cle appartient au compte PROPRIETAIRE du bien, pas a l'appelant : c'est
+    // ce qui rend la delegation possible (un membre invite n'a pas de cle a lui).
     const { data: keyData, error: keyError } = await supabase
       .from('api_keys')
       .select('api_key')
-      .eq('user_id', user.id)
+      .eq('user_id', garde.accountUserId)
       .single()
 
     if (keyError || !keyData) {
-      return res.status(400).json({ error: 'Clé Beds24 non configurée', detail: keyError?.message, userId: user.id })
+      return res.status(400).json({ error: 'Clé Beds24 non configurée' })
     }
 
     const beds24Key = keyData.api_key
-    const { action, propertyId, bookingId, message } = req.body
 
     switch (action) {
 
@@ -47,19 +97,19 @@ module.exports = async function handler(req, res) {
       }
 
       case 'getBookings': {
-        const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${propertyId}`, { headers: { token: beds24Key } })
+        const r = await fetch(`https://beds24.com/api/v2/bookings?propId=${encodeURIComponent(propId)}`, { headers: { token: beds24Key } })
         const d = await r.json()
-        const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propertyId))
+        const bookings = (d.data || []).filter(b => String(b.propertyId) === String(propId))
         return res.json({ bookings })
       }
 
       case 'getMessages': {
         const r = await fetch(
-          `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=200`,
+          `https://beds24.com/api/v2/bookings/messages?propId=${encodeURIComponent(propId)}&limit=200`,
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
-        const allMessages = (d.data || []).filter(m => String(m.propertyId) === String(propertyId))
+        const allMessages = (d.data || []).filter(m => String(m.propertyId) === String(propId))
         console.log('[Beds24] getMessages total:', (d.data || []).length, '→ filtrés:', allMessages.length)
 
         const byBooking = {}
@@ -76,7 +126,7 @@ module.exports = async function handler(req, res) {
           const dateFrom = new Date(); dateFrom.setFullYear(dateFrom.getFullYear() - 1)
           const dateTo   = new Date(); dateTo.setFullYear(dateTo.getFullYear() + 1)
           const rb = await fetch(
-            `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
+            `https://beds24.com/api/v2/bookings?propId=${encodeURIComponent(propId)}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
             { headers: { token: beds24Key } }
           )
           const db = await rb.json()
@@ -125,17 +175,34 @@ module.exports = async function handler(req, res) {
 
       case 'getHistory': {
         const r = await fetch(
-          `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=200`,
+          `https://beds24.com/api/v2/bookings/messages?propId=${encodeURIComponent(propId)}&limit=200`,
           { headers: { token: beds24Key } }
         )
         const d = await r.json()
         const messages = (d.data || [])
-          .filter(m => String(m.propertyId) === String(propertyId))
+          .filter(m => String(m.propertyId) === String(propId))
           .map(m => ({ bookId: m.bookingId, message: m.message, guestMessage: m.message, source: m.source, time: m.time }))
         return res.json({ messages, totalBookings: messages.length })
       }
 
       case 'sendMessage': {
+        // Chemin de repli (reservation absente du snapshot) : Beds24 tranche.
+        // La cle ne repond que pour les reservations du compte, et on exige que
+        // le propId retourne soit bien celui valide par la garde.
+        if (!parReservation) {
+          const rb = await fetch(
+            `https://beds24.com/api/v2/bookings?id=${encodeURIComponent(bookingId)}`,
+            { headers: { token: beds24Key } }
+          )
+          const db = await rb.json()
+          const resa = (db.data || [])[0]
+          if (!resa) return res.status(404).json({ error: 'Réservation introuvable' })
+          if (String(resa.propertyId) !== String(propId)) {
+            console.log('[Beds24] refus sendMessage : reservation hors du bien autorise')
+            return res.status(403).json({ error: 'Droits insuffisants' })
+          }
+        }
+
         const r = await fetch('https://beds24.com/api/v2/bookings/messages', {
           method: 'POST',
           headers: { token: beds24Key, 'Content-Type': 'application/json' },
@@ -150,9 +217,10 @@ module.exports = async function handler(req, res) {
         // ota null -> lookup (null pour Beds24). providerMsgId null -> dedup logique.
         if (r.ok) {
           await recordMessage({
-            userId:        user.id,
+            userId:        garde.accountUserId,
             provider:      'beds24',
-            propertyId:    propertyId,
+            // La reservation fait foi : jamais le propertyId envoye par le client.
+            propertyId:    propId,
             bookingId:     bookingId,
             direction:     'outbound',
             sender:        'host',
@@ -174,11 +242,11 @@ module.exports = async function handler(req, res) {
 
         const [bookingsRes, messagesRes] = await Promise.all([
           fetch(
-            `https://beds24.com/api/v2/bookings?propId=${propertyId}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
+            `https://beds24.com/api/v2/bookings?propId=${encodeURIComponent(propId)}&arrivalFrom=${dateFrom.toISOString().split('T')[0]}&arrivalTo=${dateTo.toISOString().split('T')[0]}`,
             { headers: { token: beds24Key } }
           ),
           fetch(
-            `https://beds24.com/api/v2/bookings/messages?propId=${propertyId}&limit=200`,
+            `https://beds24.com/api/v2/bookings/messages?propId=${encodeURIComponent(propId)}&limit=200`,
             { headers: { token: beds24Key } }
           )
         ])
@@ -186,8 +254,8 @@ module.exports = async function handler(req, res) {
         const bookingsData = await bookingsRes.json()
         const messagesData = await messagesRes.json()
 
-        const bookings = (bookingsData.data || []).filter(b => String(b.propertyId) === String(propertyId))
-        const messages = (messagesData.data || []).filter(m => String(m.propertyId) === String(propertyId))
+        const bookings = (bookingsData.data || []).filter(b => String(b.propertyId) === String(propId))
+        const messages = (messagesData.data || []).filter(m => String(m.propertyId) === String(propId))
 
         // Grouper les messages par bookingId
         const messagesByBooking = {}
@@ -239,6 +307,7 @@ module.exports = async function handler(req, res) {
       }
 
       default:
+        // Inatteignable : REGLES a deja filtre les actions connues.
         return res.status(400).json({ error: `Action inconnue : ${action}` })
     }
 
