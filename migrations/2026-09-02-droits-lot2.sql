@@ -1,5 +1,6 @@
 -- migrations/2026-09-02-droits-lot2.sql
--- Etape 2, LOT 2 — journaux et historiques metier (5 tables).
+-- Etape 2, LOT 2 — journaux et historiques metier (5 tables)
+--                  + RATTRAPAGE de la purge des anciennes politiques du LOT 1.
 --
 -- PREMIER TEST POSITIF du chantier : le compte test a `menages = read` sur un
 -- seul bien. Il doit voir les lignes de La bulle dans menage_comments et
@@ -13,23 +14,36 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 0. PURGE DES ANCIENNES POLITIQUES
 -- ═══════════════════════════════════════════════════════════════════════════
--- Les politiques historiques (`user_id = auth.uid()`) doivent DISPARAITRE :
--- laissees en place, elles s'ajouteraient aux nouvelles en OU logique (Postgres
--- combine les policies permissives par OR), et un membre invite se verrait
--- refuser l'acces par la nouvelle tout en... non : l'inverse. Le titulaire
--- passerait par l'ancienne, et surtout AUCUNE restriction de perimetre ne
--- s'appliquerait a lui alors que le nouveau modele l'exige. Pire, une ancienne
--- politique `for all` annulerait les refus d'ecriture attendus.
+-- Les politiques historiques (`user_id = auth.uid()`) doivent DISPARAITRE.
+--
+-- Postgres combine les politiques PERMISSIVES en OU : une ligne est visible des
+-- qu'UNE politique l'autorise. Une ancienne `user_id = auth.uid()` laissee en
+-- place rend donc toute ligne du compte visible a son titulaire sans passer par
+-- le perimetre, et une ancienne politique `for all` autorise des ecritures que
+-- can_write refuse. Le nouveau modele ne s'applique reellement que seul.
 --
 -- On ne suppose AUCUN nom : on supprime tout ce qui ne fait pas partie du
 -- nouveau modele, table par table.
+--
+-- ⚠ La liste couvre AUSSI les cinq tables du LOT 1, qui n'ont pas eu leur purge.
+-- Le dashboard fonctionne apres le lot 1, mais cela ne dit RIEN sur la presence
+-- d'anciennes politiques : le titulaire voit ses donnees dans les deux cas
+-- (perm_level lui rend 'write' des que auth.uid() = row_user_id). Seule la
+-- requete de controle c) tranche — au-dela de 2 politiques par table, une
+-- ancienne a survecu.
 do $$
 declare
   t text;
   pol record;
   gardees text[] := array[]::text[];
 begin
-  foreach t in array array['sms_logs','message_sent_log','agent_tasks','menage_comments','menage_done']
+  foreach t in array array[
+    -- LOT 1 (rattrapage : ces tables n'ont pas eu leur purge)
+    'automation_incidents','integration_requests','onboarding_state',
+    'agent_prompting','conversation_flags',
+    -- LOT 2
+    'sms_logs','message_sent_log','agent_tasks','menage_comments','menage_done'
+  ]
   loop
     gardees := array[t || '_select', t || '_write'];
     for pol in
@@ -129,10 +143,14 @@ order by c.table_name;
 --      and tablename not in ('profiles','profile_permissions')
 --    order by tablename;
 --
--- c) Le lot 2 a bien 2 politiques par table :
---   select tablename, count(*) from pg_policies
+-- c) Les lots 1 et 2 ont bien EXACTEMENT 2 politiques par table (si une table en
+--    affiche 3 ou plus, une ancienne a survecu a la purge) :
+--   select tablename, count(*) as politiques
+--     from pg_policies
 --    where schemaname='public'
---      and tablename in ('sms_logs','message_sent_log','agent_tasks','menage_comments','menage_done')
+--      and tablename in ('automation_incidents','integration_requests','onboarding_state',
+--                        'agent_prompting','conversation_flags',
+--                        'sms_logs','message_sent_log','agent_tasks','menage_comments','menage_done')
 --    group by tablename order by tablename;
 --
 -- RETOUR ARRIERE :
