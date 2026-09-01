@@ -10,7 +10,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 const { readStatus } = require('../lib/bookings-snapshot')
-const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
+const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { peutLire, peutEcrire } = require('../lib/permissions')
 
 const supabase = createClient(
@@ -109,10 +109,14 @@ function coalesceRanges(items) {
 const MAX_BIENS = 50
 
 module.exports = async function handler(req, res) {
-  // La session est verifiee par requirePermission (qui appelle auth.getUser).
-  // On ne teste ici que la PRESENCE du jeton, pour repondre 401 plutot que 400
-  // sur une requete malformee — sans payer un second aller-retour Auth.
-  if (!req.headers.authorization) return res.status(401).json({ error: 'Non autorise' })
+  // ⚠ SESSION VERIFIEE ICI, INCONDITIONNELLEMENT. Se reposer sur la garde des
+  // biens ne suffisait pas : quand aucun identifiant ne se resolvait, la garde
+  // n'etait jamais atteinte et la requete repondait 200 avec un jeton invalide —
+  // deux SELECT properties partaient en service key au passage, et la difference
+  // entre 200 et 401 revelait l'existence d'un bien. Le userId est ensuite
+  // repasse aux gardes, qui ne refont pas d'appel Auth.
+  const userId = await verifierSession(req, res)
+  if (!userId) return
 
   // Helper : charge les biens et verifie l'ownership.
   //
@@ -173,10 +177,13 @@ module.exports = async function handler(req, res) {
       return null
     }
     const biens = await resoudreListe(ids)
+    // Aucun identifiant connu : rien a renvoyer, donc rien a proteger. La session
+    // est deja verifiee plus haut ; inutile de charger un profil pour repondre
+    // une liste vide.
     if (!biens.length) return { biens: [], compte: null }
 
     const g = await requirePermission(req, res, {
-      domaine: 'reservations', niveau, bien: biens[0].id, bienRequis: true
+      domaine: 'reservations', niveau, bien: biens[0].id, bienRequis: true, userId
     })
     if (!g.ok) return null
 
@@ -294,7 +301,7 @@ module.exports = async function handler(req, res) {
     // minimum, disponibilites, et les poussent vers les OTA. Droit `reservations`
     // en ECRITURE sur le bien vise, avant toute chose.
     const gardePost = await requirePermission(req, res, {
-      domaine: 'reservations', niveau: 'write', bien: property_id, bienRequis: true
+      domaine: 'reservations', niveau: 'write', bien: property_id, bienRequis: true, userId
     })
     if (!gardePost.ok) return
     const bienId = gardePost.bien.id

@@ -100,6 +100,14 @@ module.exports = async function handler(req, res) {
       console.error('[messages] select messages echec', msgRes.error.message)
       return res.status(500).json({ error: msgRes.error.message })
     }
+    // ⚠ L'erreur du SECOND select doit remonter elle aussi. La laisser passer
+    // rendait toutes les conversations « Voyageur », sans dates ni statut, sans
+    // qu'aucune erreur ne soit visible — et le filtre de perimetre porte
+    // desormais sur cette requete aussi.
+    if (snapRes.error) {
+      console.error('[messages] select bookings_snapshot echec', snapRes.error.message)
+      return res.status(500).json({ error: snapRes.error.message })
+    }
     const messages = msgRes.data || []
     const snaps    = snapRes.data || []
 

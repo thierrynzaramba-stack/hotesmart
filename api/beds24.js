@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
-const { requirePermission, resoudreBooking } = require('../lib/require-permission')
+const { requirePermission, verifierSession, resoudreBooking } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -33,8 +33,17 @@ module.exports = async function handler(req, res) {
       getConversations: { domaine: 'messages',     niveau: 'read'  },
       sendMessage:      { domaine: 'messages',     niveau: 'write' }
     }
-    const regle = REGLES[action]
-    if (!regle) return res.status(400).json({ error: `Action inconnue : ${action}` })
+    // ⚠ hasOwnProperty, pas `REGLES[action]` : `constructor`, `toString` et
+    // consorts sont herites d'Object.prototype et passaient le test, pour finir
+    // en 500 « configuration de droits invalide » au lieu d'un 400.
+    const regle = Object.prototype.hasOwnProperty.call(REGLES, action) ? REGLES[action] : null
+    if (!regle) return res.status(400).json({ error: 'Action inconnue' })
+
+    // Session verifiee AVANT toute lecture : resoudreBooking interroge la base en
+    // service key, et son 409 « reservation ambigue » repondait a un appelant non
+    // authentifie — un oracle sur l'existence d'un booking_id partage.
+    const appelant = await verifierSession(req, res)
+    if (!appelant) return
 
     // ⚠ SENDMESSAGE ET LA RESERVATION ABSENTE DU SNAPSHOT.
     // Passer bookingId a la garde serait la voie propre, mais le snapshot ne
@@ -68,9 +77,14 @@ module.exports = async function handler(req, res) {
       bien:    action === 'getProperties' ? null
                : action === 'sendMessage' ? (parReservation ? null : (propertyId || null))
                : (propertyId || null),
-      bienRequis: action !== 'getProperties',
+      // ⚠ Le repli de sendMessage n'EXIGE pas de bien. Le front n'en a pas
+      // toujours un a fournir (messages.property_id peut etre NULL), et exiger
+      // ici renvoyait 400 sur une reponse voyageur qui fonctionnait avant. Quand
+      // il manque, c'est Beds24 qui donne le bien, et la garde repasse dessus.
+      bienRequis: action !== 'getProperties' && !(action === 'sendMessage' && !parReservation),
       booking: parReservation ? bookingId : null,
-      bookingRequis: false
+      bookingRequis: false,
+      userId: appelant
     })
     if (!garde.ok) return
 
@@ -83,7 +97,7 @@ module.exports = async function handler(req, res) {
     // Bien cree a l'onboarding mais jamais connecte : sans ce refus, l'URL
     // partait avec `propId=null` et l'hote voyait une liste vide sans savoir
     // pourquoi.
-    if (action !== 'getProperties' && (propId == null || propId === '')) {
+    if (action !== 'getProperties' && action !== 'sendMessage' && (propId == null || propId === '')) {
       return res.status(400).json({ error: 'Bien non connecté au PMS' })
     }
 
@@ -202,6 +216,7 @@ module.exports = async function handler(req, res) {
         // Chemin de repli (reservation absente du snapshot) : Beds24 tranche.
         // La cle ne repond que pour les reservations du compte, et on exige que
         // le propId retourne soit bien celui valide par la garde.
+        let propIdEnvoi = propId
         if (!parReservation) {
           const rb = await fetch(
             `https://beds24.com/api/v2/bookings?id=${encodeURIComponent(bookingId)}`,
@@ -224,9 +239,28 @@ module.exports = async function handler(req, res) {
           // chose et rien ne serait verifie.
           const resa = db.data.find(b => String(b.id) === String(bookingId))
           if (!resa) return res.status(404).json({ error: 'Réservation introuvable' })
-          if (String(resa.propertyId) !== String(propId)) {
-            console.log('[Beds24] refus sendMessage : reservation hors du bien autorise')
-            return res.status(403).json({ error: 'Droits insuffisants' })
+
+          if (propId != null && propId !== '') {
+            // Le client a annonce un bien : Beds24 doit le confirmer.
+            if (String(resa.propertyId) !== String(propId)) {
+              console.log('[Beds24] refus sendMessage : reservation hors du bien autorise')
+              return res.status(403).json({ error: 'Droits insuffisants' })
+            }
+          } else {
+            // Aucun bien annonce : c'est Beds24 qui le designe, et la garde
+            // repasse dessus. La cle utilisee etant celle du compte de
+            // l'appelant, Beds24 ne peut designer qu'un de ses biens — mais le
+            // PERIMETRE, lui, reste a verifier.
+            const gardeResa = await requirePermission(req, res, {
+              domaine: 'messages', niveau: 'write',
+              bien: resa.propertyId, bienRequis: true, userId: appelant
+            })
+            if (!gardeResa.ok) return
+            if (String(gardeResa.accountUserId) !== String(garde.accountUserId)) {
+              console.log('[Beds24] refus sendMessage : bien d\'un autre compte')
+              return res.status(403).json({ error: 'Droits insuffisants' })
+            }
+            propIdEnvoi = gardeResa.bien.provider_property_id
           }
         }
 
@@ -247,7 +281,7 @@ module.exports = async function handler(req, res) {
             userId:        garde.accountUserId,
             provider:      'beds24',
             // La reservation fait foi : jamais le propertyId envoye par le client.
-            propertyId:    propId,
+            propertyId:    propIdEnvoi,
             bookingId:     bookingId,
             direction:     'outbound',
             sender:        'host',

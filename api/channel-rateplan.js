@@ -9,7 +9,7 @@
 // l'enfant derive prix + garde son min stay (verifie etape 0).
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
+const { requirePermission, requirePermissionPourCanal, verifierSession, REF_SURE_RE } = require('../lib/require-permission')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -43,11 +43,9 @@ const redact = (v) => {
 module.exports = async function handler(req, res) {
   if (!CHANNEL_API || !CHANNEL_KEY) return res.status(503).json({ error: 'Gestionnaire de canaux non configure' })
 
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+  const user = { id: appelant }
 
   const action = (req.query.action || '').trim()
 
@@ -66,7 +64,8 @@ module.exports = async function handler(req, res) {
       domaine: 'reglages',
       niveau: LECTURE_SEULE.has(action) ? 'read' : 'write',
       bien: bienDemande,
-      bienRequis: true
+      bienRequis: true,
+      userId: appelant
     })
     if (!garde.ok) return
     compteBien = garde.accountUserId
@@ -80,16 +79,30 @@ module.exports = async function handler(req, res) {
   // Booking.com ou Airbnb d'autrui sur ses propres tarifs — ou casser son mapping.
   // Le canal doit donc appartenir au bien deja valide.
   const canalDemande = (req.query.channel_id || '').trim()
-  if (canalDemande && bienResolu) {
+  // ⚠ Format verifie AVANT tout usage. La garde interroge
+  // `/channels/${encodeURIComponent(id)}` alors que les actions construisent
+  // `/channels/${id}` brut : un identifiant contenant / ? ou # designerait deux
+  // ressources differentes dans le controle et dans l'ecriture. Restreindre le
+  // format rend les deux formes identiques.
+  if (canalDemande && !REF_SURE_RE.test(canalDemande)) {
+    return res.status(400).json({ error: 'channel_id invalide' })
+  }
+  // La garde de canal s'applique des qu'un channel_id est fourni — y compris
+  // sans property_id. La conditionner au bien resolu laissait toute action
+  // future prenant un canal seul sans protection par defaut.
+  let canalVerifie = false
+  if (canalDemande) {
     const gardeCanal = await requirePermissionPourCanal(req, res, {
-      channelId: canalDemande, channelCall,
+      channelId: canalDemande, channelCall, userId: appelant,
       domaine: 'reglages', niveau: LECTURE_SEULE.has(action) ? 'read' : 'write'
     })
     if (!gardeCanal.ok) return
-    if (String(gardeCanal.bienDuCanal) !== String(bienResolu.provider_property_id)) {
+    // Quand un bien est aussi demande, le canal doit etre LE SIEN.
+    if (bienResolu && String(gardeCanal.bienDuCanal) !== String(bienResolu.provider_property_id)) {
       console.log('[channel-rateplan] refus : canal rattache a un autre bien')
       return res.status(403).json({ error: 'Droits insuffisants' })
     }
+    canalVerifie = true
   }
 
   // --- create_derived : enfant neutre + lignes de liaison ---
@@ -512,10 +525,14 @@ module.exports = async function handler(req, res) {
     // Seule action sans property_id : le canal est l'unique reference. Sans cette
     // garde, n'importe quel channel_id de la plateforme etait lisible (mappings et
     // listing_id d'un autre compte).
-    const gardeCanal = await requirePermissionPourCanal(req, res, {
-      channelId, channelCall, domaine: 'reglages', niveau: 'read'
-    })
-    if (!gardeCanal.ok) return
+    // Deja verifie en tete de handler (channel_id present) : ne pas refaire
+    // l'aller-retour Channex ni la resolution des droits.
+    if (!canalVerifie) {
+      const gardeCanal = await requirePermissionPourCanal(req, res, {
+        channelId, channelCall, domaine: 'reglages', niveau: 'read', userId: appelant
+      })
+      if (!gardeCanal.ok) return
+    }
     const ch = await channelCall('GET', `/channels/${channelId}`)
     const rps = (ch.json?.data?.attributes?.rate_plans || []).map(rp => ({
       mapping_id: rp.id, rate_plan_id: rp.rate_plan_id, listing_id: rp.settings?.listing_id, primary_occ: rp.settings?.primary_occ

@@ -727,7 +727,7 @@
 
   async function setTaskStatus(id, status) {
     await window._supabase.from('agent_tasks').update({ status }).eq('id', id)
-    const t = allTasks.find(t => t.id === id); if (t) t.status = status
+    const t = allTasks.find(t => String(t.id) === String(id)); if (t) t.status = status
     // Re-trier et rafraîchir (la conversation peut perdre sa couleur / descendre)
     conversations.sort(sortConversations)
     renderConvList()

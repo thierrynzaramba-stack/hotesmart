@@ -215,6 +215,26 @@ test('calendar POST : property_id envoye en propId Beds24 -> resolu, jamais pass
     'calendar_inventory doit porter l\'UUID resolu, pas la valeur client')
 })
 
+test('calendar GET : jeton invalide -> 401, meme quand aucun bien ne se resout', async () => {
+  // ⚠ Regression introduite puis corrigee : sans identifiant resolvable, la garde
+  // n'etait jamais atteinte et la requete repondait 200 sans session valide — et
+  // la difference 200/401 revelait l'existence d'un bien.
+  const etat = preparer({ user: null })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: {
+    property_ids: '00000000-0000-0000-0000-000000000000', start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 401)
+  void etat
+})
+
+test('calendar : sans en-tete Authorization -> 401', async () => {
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')({ method: 'GET', headers: {}, query: {
+    property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' }, body: {} }, res)
+  assert.strictEqual(res.code, 401)
+})
+
 // ─── channel-rateplan : tarifs derives par canal ─────────────────────────────
 
 test('channel-rateplan : membre reglages=none -> 403', async () => {
@@ -231,6 +251,17 @@ test('channel-rateplan : bien d\'un AUTRE compte -> 403', async () => {
   await require('../api/channel-rateplan')(req({
     query: { action: 'set_rule', property_id: BIEN_TIERS.provider_property_id, channel: 'booking' } }), res)
   assert.strictEqual(res.code, 403)
+})
+
+test('channel-rateplan : channel_id au format refuse -> 400 (garde et action alignees)', async () => {
+  // La garde interrogeait /channels/<encode> et les actions /channels/<brut> :
+  // un / ou un ? y designait deux ressources differentes.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({ query: {
+    action: 'remap', property_id: BIEN_A.provider_property_id, channel_id: 'abc/../autre' } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/channels/')), [])
 })
 
 test('channel-rateplan : raw_channel exige un canal rattache au perimetre', async () => {
@@ -470,6 +501,62 @@ test('calendar GET : user_id ne ressort pas dans la reponse', async () => {
   const res = reponse()
   await require('../api/calendar')(req({ query: { property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' } }), res)
   assert.ok(res.body.properties.every(p => p.user_id === undefined))
+})
+
+test('beds24 : action heritee d\'Object.prototype -> 400, pas 500', async () => {
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: { action: 'constructor' } }), res)
+  assert.strictEqual(res.code, 400)
+})
+
+test('beds24 sendMessage : jeton invalide -> 401 avant toute lecture en base', async () => {
+  // resoudreBooking interrogeait la base, et son 409 repondait pre-auth.
+  const etat = preparer({ user: null, snapshots: [
+    { user_id: PROD, booking_id: '99', property_id: BIEN_A.provider_property_id, snapshot: {} },
+    { user_id: AUTRE, booking_id: '99', property_id: BIEN_TIERS.provider_property_id, snapshot: {} }
+  ] })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '99', message: 'x' } }), res)
+  assert.strictEqual(res.code, 401, 'un 409 ici serait un oracle sur l\'existence du booking')
+  void etat
+})
+
+test('beds24 sendMessage : sans propertyId ni snapshot -> Beds24 designe le bien', async () => {
+  // Le front n'a pas toujours de reference de bien (messages.property_id NULL) :
+  // exiger le bien renvoyait 400 sur un envoi qui fonctionnait.
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 88801, propertyId: BIEN_A.provider_property_id }] }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: null } }), res)
+  assert.notStrictEqual(res.code, 400)
+  assert.ok(etat.appels.some(a => a.url.includes('/bookings/messages') && a.method === 'POST'))
+})
+
+test('beds24 sendMessage : bien derive de Beds24 mais HORS perimetre -> 403', async () => {
+  const etat = preparer({
+    profil: profilActif(),
+    permissions: perms({ messages: 'write', property_scope: 'selected',
+                         property_ids: [BIEN_B.id], property_refs: [BIEN_B.provider_property_id] }),
+    snapshots: [],
+    fetchStub: async (url) => {
+      if (url.includes('/bookings?id=')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 88801, propertyId: BIEN_A.provider_property_id }] }) }
+      }
+      return null
+    }
+  })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: null } }), res)
+  assert.ok(res.code === 400 || res.code === 403, `attendu 400/403, recu ${res.code}`)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/bookings/messages')), [])
 })
 
 // ─── messages : collection filtree par le perimetre ──────────────────────────
