@@ -174,13 +174,17 @@ async function main() {
       // polluerait la base (REVIEW.md §9).
       const echecs = []
 
-      if (lignes.length) {
+      if (lignes.length && lignes[0].id != null) {
         const cible = lignes[0]
-        const { error, count } = await sb.from(table)
+        // ⚠ On lit les LIGNES RENVOYEES, pas un `count` avec head:true : sur un
+        // update refuse par la RLS, PostgREST repond 200 sans erreur et le count
+        // vaut `null` (pas 0). Tester `count === 0` concluait donc « ecriture
+        // acceptee » alors que rien n'etait modifie — faux positif verifie en base.
+        const { data: modifiees, error } = await sb.from(table)
           .update({ user_id: compteCible })       // valeur inchangee : seule la RLS est testee
-          .eq('id', cible.id ?? null)
-          .select('*', { count: 'exact', head: true })
-        if (error || count === 0) echecs.push('update refuse')
+          .eq('id', cible.id)
+          .select('id')
+        if (error || !modifiees || modifiees.length === 0) echecs.push('update refuse')
         else echecs.push(null)
       }
 
@@ -195,9 +199,9 @@ async function main() {
         if (insere?.[0]?.id) await sb.from(table).delete().eq('id', insere[0].id)
       }
 
-      const refusee = echecs.every(e => e !== null)
+      const refusee = echecs.length > 0 && echecs.every(e => e !== null)
       verdict(refusee, `ecriture sur le compte cible refusee`,
-              refusee ? '' : 'ECRITURE ACCEPTEE — faille')
+              refusee ? '' : 'ECRITURE ACCEPTEE — a verifier en base avant de conclure')
     }
   }
 
