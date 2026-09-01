@@ -22,6 +22,16 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - paiements = Stripe TEST. emails = Brevo. cron = Vercel natif */5 → /api/cron (Bearer CRON_SECRET).
 - deploy = hotesmart.vercel.app (Vercel Pro, 100 fonctions, auto-deploy sur push main). Branche travail = channex-phase1.
 
+## RÈGLE ABSOLUE — REVIEW AVANT PUSH
+- **Aucun push tant qu'une review est en cours.** La review fait partie du commit,
+  pas de l'après-commit : on attend son retour, on la LIT, on corrige, puis on pousse.
+- Vécu : un push lancé pendant une review a mis en production une régression
+  bloquante (l'envoi de SMS cassé ~20 min) que cette même review a signalée en
+  premier point. Sur ce chantier, chaque review a trouvé au moins un défaut réel
+  dans du code qui passait les tests.
+- Corollaire : `npm test` au vert n'autorise pas à pousser. Les tests disent que
+  ce qu'on a pensé à vérifier fonctionne, pas que le code est correct.
+
 ## RÈGLES TECHNIQUES DURES (non négociables)
 - api/grok.js : NE JAMAIS RENOMMER/SUPPRIMER (wrapper Haiku, legacy Lisa). Utilisé par agent-ai/index.html, messages.html, analyze.html, messagerie.html, extract-kb.js.
 - api/cron.js : TOUJOURS généré en fichier COMPLET. Jamais de patch manuel partiel.

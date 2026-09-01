@@ -422,6 +422,39 @@ portait sur une manière de conclure juste pour une mauvaise raison :
 Les droits attendus sont désormais **lus en base**, jamais codés en dur : une
 bascule de configuration change l'attendu du test, au lieu de le contredire.
 
+## 5 quinquies. Étape 3 — endpoints serverless (en cours)
+
+Les endpoints écrivent en **service key**, qui contourne la RLS : les politiques
+de l'étape 2 ne protègent que les accès directs depuis le navigateur. Chaque
+endpoint agissant au nom d'un utilisateur doit donc vérifier lui-même, via
+`lib/require-permission.js` — garde unique, jamais de vérification ad hoc.
+
+**État : 4 endpoints sur 26 · 2 fuites entre comptes fermées · 1 régression
+introduite puis corrigée.**
+
+| Endpoint | Domaine | Constat |
+|---|---|---|
+| `diagnostic.js` | reglages / titulaire | **FUITE** — `property_id` client non vérifié : lecture des canaux OTA de n'importe quel bien. Et `check=channel` renvoyait les identifiants de biens d'autres clients. |
+| `channel-message.js` | messages / write | **FUITE** — `bookingId` client non vérifié : envoi d'un message au voyageur de n'importe quelle réservation, en son nom. |
+| `sms.js` | messages / write | Pas de fuite. `property_id` client non validé (traçabilité faussée) ; garde rendue inconditionnelle. |
+| `channel-property.js` | reglages / write | Pas de fuite (filtrait déjà `user_id`), mais aucun droit de domaine. Garde sur PATCH/DELETE/POST. |
+
+**Régression introduite puis corrigée** : `resoudreBien` interrogeait `id.eq.<v>`
+sur une colonne de type **uuid**. Avec un propId Beds24, Postgres renvoie une
+*erreur*, pas un résultat vide — l'envoi de SMS a été cassé une vingtaine de
+minutes. Les doubles de test utilisaient `'uuid-bulle'` comme `properties.id` :
+une valeur qui n'est pas un UUID masquait exactement ce piège (`REVIEW.md` §8).
+
+**Reste 22 endpoints**, à traiter par groupes de 5, review lue **avant** chaque
+push (`CLAUDE.md`, règle absolue).
+
+### ⚠️ Dette : `apps/sms` n'est pas dans le menu
+
+L'application SMS existe (`apps/sms/index.html`, endpoint `api/sms.js`,
+227 lignes dans `sms_logs`) mais n'est déclarée ni dans `shared/config.js`, ni
+dans `components/sidebar.js` : elle n'est atteignable que par URL directe. À
+trancher — l'exposer dans le menu, ou la retirer si elle n'a plus d'usage.
+
 ## 6. Points restant à trancher
 
 **Les 4 valeurs orphelines** de `knowledge` et `messages` (§2) : purger ou
