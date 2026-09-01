@@ -271,11 +271,15 @@
       // provider_property_id Channex ne correspond a aucun propId. Sur un compte
       // 100 % channel, chaque appel finissait en 400 avale silencieusement — et
       // pour un hote a 30 biens, en 30 requetes paralleles.
+      // ⚠ Le bien SELECTIONNE est filtre lui aussi : `prop-select` melange
+      // beds24 et channex, et envoyer un UUID Channex a /api/beds24 donne un 400
+      // avale silencieusement — une liste vide sans explication.
+      const beds24Ids = (window._props || [])
+        .filter(p => p.provider === 'beds24' && p.provider_property_id)
+        .map(p => String(p.provider_property_id))
       const props = propId
-        ? [propId]
-        : (window._props || [])
-            .filter(p => p.provider === 'beds24' && p.provider_property_id)
-            .map(p => p.provider_property_id)
+        ? (beds24Ids.includes(String(propId)) ? [propId] : [])
+        : beds24Ids
 
       const [beds24Results, convRes, taskRes, pinRes] = await Promise.all([
         Promise.all(props.map(pid =>

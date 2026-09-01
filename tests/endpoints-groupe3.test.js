@@ -46,7 +46,8 @@ const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/cale
 
 // `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
-                     snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null } = {}) {
+                     snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null,
+                     erreurUpdateProperties = null } = {}) {
   const etat = { ecritures: [], filtresIn: [], appels: [] }
 
   const client = {
@@ -63,7 +64,14 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         order () { return q }, limit () { return q }, gte () { return q }, lte () { return q },
         insert (r) { etat.ecritures.push({ table: nom, row: r }); return { select: () => ({ single: async () => ({ data: { id: 'q1' }, error: null }) }) } },
         upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
-        update (r) { etat.ecritures.push({ table: nom, row: r }); return q },
+        update (r) {
+          etat.ecritures.push({ table: nom, row: r })
+          if (nom === 'properties' && erreurUpdateProperties) {
+            const echec = { eq: () => echec, then: (ok) => Promise.resolve({ error: { message: erreurUpdateProperties } }).then(ok) }
+            return echec
+          }
+          return q
+        },
         single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),
         then (ok, ko) { return Promise.resolve(rep(nom, q, true)).then(ok, ko) }
       }
@@ -352,6 +360,58 @@ test('calendar POST : un segment de config INCHANGE n\'exige pas reglages', asyn
   assert.notStrictEqual(res.code, 403)
   assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'),
     'les tarifs autorises doivent etre enregistres')
+})
+
+test('garde : une ligne mise en cache qui ne correspond PAS a la reference est ignoree', async () => {
+  // ⚠ Le cache court-circuiterait la resolution : accountUserId et le perimetre
+  // derivent du seul bienResolu. Passer la reference A et la ligne de B ferait
+  // verifier les droits sur B.
+  preparer({ user: PROD })
+  const { requirePermission } = require('../lib/require-permission')
+  const res = reponse()
+  const g = await requirePermission(req(), res, {
+    domaine: 'reservations', niveau: 'read',
+    bien: BIEN_TIERS.provider_property_id,   // reference d'un AUTRE compte
+    bienResolu: BIEN_A,                      // ligne d'un bien du compte appelant
+    bienRequis: true
+  })
+  assert.strictEqual(g.ok, false, 'la ligne mise en cache ne doit pas primer sur la reference')
+  assert.strictEqual(res.code, 403)
+})
+
+test('garde : une ligne mise en cache CONFORME evite la relecture', async () => {
+  preparer({ user: PROD })
+  const { requirePermission } = require('../lib/require-permission')
+  const res = reponse()
+  const g = await requirePermission(req(), res, {
+    domaine: 'reservations', niveau: 'read',
+    bien: BIEN_A.provider_property_id, bienResolu: BIEN_A, bienRequis: true
+  })
+  assert.strictEqual(g.ok, true)
+  assert.strictEqual(g.bien.id, BIEN_A.id)
+})
+
+test('calendar POST : un echec de la config ne fait pas perdre les tarifs', async () => {
+  // Les deux ecritures sont independantes : l'hote doit etre averti sans perdre
+  // ce qui pouvait aboutir.
+  const etat = preparer({ user: PROD, erreurUpdateProperties: 'contrainte' })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ kind: 'perPerson', extra_guest_fee: 12 },
+               { date_from: '2026-09-10', date_to: '2026-09-10', rate: 100 }] } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'), 'les tarifs doivent etre ecrits')
+  assert.ok((res.body.warnings || []).some(w => /configuration/.test(w)), 'l\'echec doit etre remonte')
+})
+
+test('calendar POST : config SEULE en echec -> 500', async () => {
+  preparer({ user: PROD, erreurUpdateProperties: 'contrainte' })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ kind: 'perPerson', extra_guest_fee: 12 }] } }), res)
+  assert.strictEqual(res.code, 500)
 })
 
 // ─── channel-rateplan : tarifs derives par canal ─────────────────────────────

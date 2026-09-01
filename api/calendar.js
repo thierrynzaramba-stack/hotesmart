@@ -455,13 +455,21 @@ module.exports = async function handler(req, res) {
       })
       if (!gardeReglages.ok) return
     }
+    // ⚠ Un echec ici ne peut pas se solder par un 200 muet : l'hote lit
+    // « enregistre » alors que la configuration du bien n'a pas bouge. Mais il ne
+    // doit pas non plus faire perdre les TARIFS de la meme sauvegarde, qui sont
+    // independants et deja autorises. On note l'echec, on continue, et on le
+    // remonte dans les avertissements — sauf s'il n'y avait que de la config a
+    // enregistrer, auquel cas il n'y a rien a sauver et c'est une vraie erreur.
+    let echecConfig = null
     if (Object.keys(propUpdates).length) {
       const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', bienId).eq('user_id', compte)
-      // ⚠ Un echec ici ne peut pas se solder par un 200 : l'hote lit
-      // « enregistre » alors que la configuration du bien n'a pas bouge.
       if (pErr) {
         console.error('[calendar] properties update error', pErr.message)
-        return res.status(500).json({ error: 'Enregistrement de la configuration echoue' })
+        echecConfig = 'configuration du bien non enregistree'
+        if (!dateSegments.length) {
+          return res.status(500).json({ error: 'Enregistrement de la configuration echoue' })
+        }
       }
     }
 
@@ -510,7 +518,7 @@ module.exports = async function handler(req, res) {
     const propId = bien.provider_property_id
     const ratePlanId = bien.provider_rate_plan_id
     const roomTypeId = bien.provider_room_type_id
-    let pushWarnings = []
+    let pushWarnings = echecConfig ? [echecConfig] : []
     let pushed = false
     let localOnly = false
     const taskIdsSave = {}

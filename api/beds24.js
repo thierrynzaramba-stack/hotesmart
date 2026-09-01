@@ -94,6 +94,8 @@ module.exports = async function handler(req, res) {
         // ici transformait une liste vide en 404.
         console.log('[Beds24] bien annonce non materialise : compte de l\'appelant')
         bienAnnonce = null
+      } else {
+        bienAnnonceResolu = essai
       }
     }
 
