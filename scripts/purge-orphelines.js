@@ -20,6 +20,30 @@ const { createClient } = require('@supabase/supabase-js')
 
 const APPLY = process.argv.includes('--apply')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+
+// Lecture PAGINEE : PostgREST tronque a 1000 lignes par defaut. Un select('*')
+// nu sur une table de plus de 1000 lignes n'inspecterait que la premiere page et
+// pourrait conclure « aucune orpheline » a tort.
+async function lireTout(supabase, table, colonnes) {
+  const PAGE = 1000
+  let out = [], from = 0
+  for (;;) {
+    const { data, error } = await supabase.from(table).select(colonnes).range(from, from + PAGE - 1)
+    if (error) return { data: null, error }
+    out = out.concat(data || [])
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
+  return { data: out, error: null }
+}
+
+// ⚠ NE JAMAIS classer « bien supprime » une valeur qui n'est pas un UUID.
+// Les biens Beds24 sont servis en live par l'API et ne sont materialises dans
+// `properties` que par le cron : un propId numerique absent de la table peut
+// parfaitement designer un bien VIVANT dont la materialisation n'a pas encore eu
+// lieu. Purger sur cette base supprimerait des donnees actives.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const TABLES = ['knowledge', 'messages', 'conversations', 'agent_tasks', 'sms_logs',
                 'menage_events', 'menage_done', 'menage_comments', 'bookings_snapshot',
                 'access_codes', 'property_status', 'message_templates', 'agent_prompting',
@@ -38,15 +62,23 @@ async function main() {
 
   let total = 0, supprimees = 0
   for (const t of TABLES) {
-    const { data, error } = await supabase.from(t).select('id, property_id')
+    const { data, error } = await lireTout(supabase, t, 'id, property_id')
     if (error) continue
 
-    const aPurger = {}
+    const aPurger = {}, aVerifier = {}
     ;(data || []).forEach(r => {
       const v = r.property_id == null ? null : String(r.property_id)
       if (v === null || connus.has(v)) return
-      ;(aPurger[v] = aPurger[v] || []).push(r.id)
+      // Seules les valeurs au format UUID sont purgeables : un propId numerique
+      // inconnu de `properties` peut designer un bien Beds24 vivant, pas encore
+      // materialise par le cron.
+      if (UUID_RE.test(v)) (aPurger[v] = aPurger[v] || []).push(r.id)
+      else (aVerifier[v] = aVerifier[v] || []).push(r.id)
     })
+
+    for (const [v, ids] of Object.entries(aVerifier)) {
+      console.log(`${t.padEnd(22)} ${v}  ${String(ids.length).padStart(3)} ligne(s)  ⚠ NON PURGEABLE (identifiant non-UUID : bien Beds24 peut-etre non materialise)`)
+    }
 
     for (const [v, ids] of Object.entries(aPurger)) {
       total += ids.length

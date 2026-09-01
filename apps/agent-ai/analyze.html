@@ -154,12 +154,19 @@
       body: JSON.stringify({ action: 'getProperties' })
     })
     const data = await res.json()
-    // ⚠ CLE DES TABLES ENFANTS = provider_property_id, JAMAIS properties.id.
-    // /api/channel-property expose `id` = properties.id (UUID) pour un bien
-    // channel, et = propId pour un bien Beds24. Ecrire cet `id` tel quel dans
-    // knowledge produisait, pour les biens channel, des lignes sous une cle que
-    // le cron ne lit pas : les connaissances etaient ignorees par l'Agent IA.
-    // On normalise donc des la lecture, comme messages.html et config.html.
+    // ⚠ CLE DES TABLES ENFANTS = provider_property_id, JAMAIS properties.id
+    // (REVIEW.md §10). La normalisation ci-dessous est un GARDE-FOU : cette page
+    // lit /api/beds24 getProperties, qui renvoie les objets BRUTS de l'API Beds24
+    // — ils n'ont pas de champ provider_property_id, et leur `id` EST deja le
+    // propId. Le map est donc inerte aujourd'hui, et le reste si la source
+    // changeait pour /api/channel-property (dont l'`id` est l'UUID pour un bien
+    // channel).
+    //
+    // ⚠ DEFAUT CONNU, NON CORRIGE ICI : cette page est MONO-PROVIDER. Pour un
+    // hote 100 % channel, /api/beds24 repond 400 « Cle Beds24 non configuree » et
+    // la liste des biens reste vide — la page Analyse ne fonctionne pas. Meme
+    // nature que l'ecart E1 du planning menage. A traiter dans un chantier dedie
+    // (bascule sur /api/channel-property + loadAllProperties).
     properties = (data.properties || []).map(p => ({ ...p, id: String(p.provider_property_id || p.id) }))
 
     const select = document.getElementById('property-select')

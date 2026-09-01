@@ -296,8 +296,10 @@ mais voir ci-dessous.
 La parade de fond serait qu'aucun parcours n'écrive l'UUID dans `knowledge`.
 **Ce n'est pas le cas aujourd'hui.**
 
-`apps/agent-ai/knowledge.html` et `apps/agent-ai/analyze.html` prennent leur clé
-dans `properties[].id` renvoyé par `/api/channel-property`. Or cet endpoint
+`apps/agent-ai/knowledge.html` prend sa clé dans `properties[].id` renvoyé par
+`/api/channel-property`. (`analyze.html` présente le même motif mais lit
+`/api/beds24`, dont l'`id` est déjà le propId : elle n'écrivait pas d'UUID —
+vérification faite après coup, l'affirmation initiale était trop large.) Or cet endpoint
 expose, pour un bien **Channex**, l'`id` de la table `properties` — l'UUID — alors
 que pour un bien **Beds24** il expose le `provider_property_id`
 (`api/channel-property.js:139-142`). Ces deux pages écrivent donc l'UUID pour tout
@@ -312,8 +314,9 @@ Analyse, sur un bien Channex, est écrite sous une clé que le reste du code ne 
 pas — et devient invisible aux membres une fois les politiques posées. C'est un
 bug **antérieur** au chantier des droits, que celui-ci rend simplement visible.
 
-**CORRIGÉ** (chantier knowledge, 2 septembre 2026) : `knowledge.html` et
-`analyze.html` normalisent désormais leur clé à la lecture
+**CORRIGÉ** (chantier knowledge, 2 septembre 2026) : `knowledge.html` normalise
+désormais sa clé à la lecture (`analyze.html` porte le même garde-fou, inerte pour
+elle)
 (`p.provider_property_id || p.id`), comme `messages.html` et `config.html`. Voir
 `REVIEW.md` §10.
 
@@ -332,6 +335,21 @@ bien existant.
 20, `--apply` 20 supprimées 0 échec, second comptage 0. `knowledge` passe de 63 à
 44 lignes (26 pour coeur de vie 23, 18 pour La bulle), et plus aucune valeur de
 `property_id` inconnue ne subsiste dans les 16 tables enfants examinées.
+
+### ⚠️ Dette : `analyze.html` est mono-provider
+
+Même famille que l'écart **E1** du planning ménage. `apps/agent-ai/analyze.html`
+lit `/api/beds24 getProperties` : pour un hôte 100 % channel, l'endpoint répond
+`400 « Clé Beds24 non configurée »`, `data.properties` est `undefined` et la page
+Analyse affiche une liste vide — elle ne fonctionne pas du tout.
+
+À traiter **avant la bêta** : bascule sur `/api/channel-property` (ou
+`shared/properties.js`), comme l'ont été le planning ménage et la page
+Prestataires.
+
+C'est aussi ce qui a corrigé un diagnostic trop large de ma part : cette page
+présentait le même motif de code que `knowledge.html`, mais lit une **autre
+source** — son `id` est déjà le propId, elle n'a jamais écrit d'UUID.
 
 **Chantier knowledge clos.** La cause est corrigée (normalisation de la clé dans
 les quatre pages), la règle est écrite (`REVIEW.md` §10), les résidus sont

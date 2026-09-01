@@ -204,12 +204,18 @@ d'autre ? »*, jamais à *« puis-je toucher les miennes ? »*.
 n'empêche d'y écrire un identifiant qui ne sera jamais relu. Une ligne mal clée
 n'est pas en erreur, elle est **silencieusement ignorée**.
 
-**Cas vécu.** `apps/agent-ai/knowledge.html` et `analyze.html` écrivaient
-`properties[].id` tel quel. Pour un bien Beds24 ça tombait juste par coïncidence
-(l'endpoint y expose le propId) ; pour un bien **Channex**, elles écrivaient
-l'UUID. Résultat : les connaissances saisies sur un bien Channex étaient ignorées
-par l'Agent IA, sans le moindre message d'erreur. Le bug a survécu des mois et n'a
-été révélé que par le chantier des droits, qui a rendu ces lignes invisibles.
+**Cas vécu.** `apps/agent-ai/knowledge.html` écrivait `properties[].id` tel quel,
+en lisant `/api/channel-property` : pour un bien Beds24 ça tombait juste par
+coïncidence (l'endpoint y expose le propId), mais pour un bien **Channex** elle
+écrivait l'UUID. Les connaissances saisies sur un bien Channex étaient donc
+ignorées par l'Agent IA, sans le moindre message d'erreur. Le bug a survécu des
+mois et n'a été révélé que par le chantier des droits, qui a rendu ces lignes
+invisibles.
+
+⚠️ Ne pas généraliser sans vérifier la **source** : `analyze.html` présentait le
+même motif de code mais lit `/api/beds24`, dont l'`id` est déjà le propId — elle
+n'a jamais écrit d'UUID. C'est l'endpoint qui détermine la nature de la clé, pas
+la forme de l'écriture.
 
 Deux pages faisaient déjà correctement (`messages.html`, `config.html`) : c'était
 une incohérence entre pages, pas une convention absente.

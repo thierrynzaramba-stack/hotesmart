@@ -170,6 +170,11 @@ async function main() {
         verdict(lignes.length === 0,
                 `aucune ligne du compte cible visible (${lignes.length})${suffixe}`,
                 lignes.length ? 'FUITE : domaine non autorise' : '')
+      } else if (cle && mesDroits?.property_scope === 'all') {
+        // Perimetre GLOBAL : property_ids/property_refs sont vides par
+        // construction (migration : default '{}'). Comparer a ces tableaux
+        // classerait TOUTE ligne visible comme une fuite.
+        verdict(true, `${lignes.length} ligne(s) du compte cible (perimetre : tous les biens)${suffixe}`)
       } else if (cle) {
         const autorisees = new Set(cle === 'uuid' ? idsOk : refsOk)
         // `properties` n'a pas de colonne property_id : son identifiant EST sa
@@ -206,20 +211,37 @@ async function main() {
         else echecs.push(null)
       }
 
+      // ⚠ Un insert minimal echoue souvent sur une contrainte NOT NULL AVANT
+      // meme que la politique ne soit evaluee (ex. booking_change_events.
+      // property_id NOT NULL). Le refus serait alors vert pour une mauvaise
+      // raison — une politique d'ecriture permissive passerait inapercue.
+      // On distingue donc le code d'erreur : 42501 = refus RLS, 23502/23503 =
+      // contrainte, donc test NON CONCLUANT.
+      let insertConcluant = true
       const { data: insere, error: insErr } = await sb.from(table)
         .insert({ user_id: compteCible })
         .select('id')
-      if (insErr) echecs.push('insert refuse')
-      else {
+      if (insErr) {
+        const contrainte = ['23502', '23503', '23514', '23505'].includes(insErr.code)
+        if (contrainte) { insertConcluant = false; echecs.push('insert non concluant (' + insErr.code + ')') }
+        else echecs.push('insert refuse')
+      } else {
         echecs.push(null)
-        // Filet de securite : si la RLS a laisse passer, on retire immediatement
-        // la ligne pour ne pas laisser de trace du test.
+        // Filet : si la RLS a laisse passer, on retire immediatement la ligne.
         if (insere?.[0]?.id) await sb.from(table).delete().eq('id', insere[0].id)
       }
 
       const refusee = echecs.length > 0 && echecs.every(e => e !== null)
-      verdict(refusee, `ecriture sur le compte cible refusee`,
-              refusee ? '' : 'ECRITURE ACCEPTEE — a verifier en base avant de conclure')
+      const aUnUpdate = lignes.length > 0 && lignes[0].id != null
+      // Si SEUL l'insert a ete tente et qu'il a bute sur une contrainte, on n'a
+      // rien prouve : le dire plutot que d'afficher un vert trompeur.
+      if (refusee && !aUnUpdate && !insertConcluant) {
+        verdict(false, `ecriture : TEST NON CONCLUANT (contrainte avant la RLS)`,
+                'aucune ligne visible a modifier, et l\'insert minimal viole une contrainte')
+      } else {
+        verdict(refusee, `ecriture sur le compte cible refusee`,
+                refusee ? '' : 'ECRITURE ACCEPTEE — a verifier en base avant de conclure')
+      }
     }
   }
 
