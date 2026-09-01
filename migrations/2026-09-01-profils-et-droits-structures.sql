@@ -8,6 +8,30 @@
 --
 -- Rejouable sans erreur (if not exists / or replace / inserts idempotents).
 -- A EXECUTER dans l'editeur SQL Supabase.
+--
+-- ETAT : execute en production le 1er septembre 2026. Resultat verifie :
+-- 5 profils titulaires (5 comptes auth.users), 1 profil « lien » (Regina, token
+-- conserve, perimetre resolu en 2 UUID et 2 refs par le trigger du pont).
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 0. LIBERER LE NOM `profiles`
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Une table `public.profiles` PREEXISTAIT (id, email, full_name, plan,
+-- created_at ; 5 lignes ; plan='starter' partout, full_name null partout).
+-- Aucun code du repo ne la lisait ni ne l'ecrivait — verifie par grep sur api/,
+-- lib/, apps/, pages/, components/, shared/. La facturation vit dans `accounts`
+-- et `subscriptions` depuis longtemps : c'etait un vestige.
+--
+-- On RENOMME plutot que de supprimer : les donnees sont conservees, rien n'est
+-- perdu, et le nom `profiles` — celui qu'emploie toute la spec — se libere.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'profiles' and column_name = 'plan')
+  then
+    alter table public.profiles rename to profiles_legacy;
+  end if;
+end $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 1. TABLES
@@ -354,6 +378,56 @@ where p.access_mode = 'lien'
   and not exists (select 1 from profile_permissions pp where pp.profile_id = p.id);
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- 5 bis. INSCRIPTIONS FUTURES
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Le §5 ne traite que les comptes EXISTANTS. Sans ce qui suit, tout nouvel
+-- inscrit naitrait sans profil titulaire : perm_level lui rendrait quand meme
+-- 'write' sur ses propres donnees (auth.uid() = row_user_id court-circuite),
+-- mais il serait absent de la page Equipe et n'aurait aucune identite dans les
+-- journaux.
+--
+-- Le trigger `on_auth_user_created` sur auth.users EXISTE DEJA : on ne le
+-- recree pas, on redefinit seulement la fonction qu'il appelle.
+--
+-- ⚠ Cette fonction alimentait l'ancienne table `profiles` (devenue
+-- profiles_legacy). Elle est ici reecrite pour le nouveau modele. Si la version
+-- en base fait autre chose en plus (envoi d'email, ligne accounts...), FUSIONNER
+-- avant de rejouer ce script : `create or replace` ecrase sans prevenir.
+--   Pour lire la version en place :
+--   select prosrc from pg_proc where proname = 'handle_new_user';
+
+create or replace function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare nouveau_profil uuid;
+begin
+  insert into profiles (account_user_id, member_user_id, first_name, email,
+                        access_mode, is_owner, active, accepted_at)
+  values (new.id, new.id,
+          coalesce(nullif(split_part(coalesce(new.email, ''), '@', 1), ''), 'Titulaire'),
+          new.email, 'compte', true, true, now())
+  on conflict do nothing
+  returning id into nouveau_profil;
+
+  -- `on conflict do nothing` ne renvoie rien si la ligne existait deja : on la
+  -- relit, sinon la ligne de permissions ne serait pas creee lors d'un rejeu.
+  if nouveau_profil is null then
+    select id into nouveau_profil from profiles
+     where account_user_id = new.id and is_owner limit 1;
+  end if;
+
+  insert into profile_permissions (
+    profile_id, account_user_id, property_scope,
+    reservations, menages, prestataires, messages, avis, reglages, facturation, equipe,
+    self_availability, self_view_reviews)
+  values (nouveau_profil, new.id, 'all',
+          'write','write','write','write','write','write','write','write',
+          'write', true)
+  on conflict (profile_id) do nothing;
+
+  return new;
+end $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- 6. VERIFICATIONS (lecture seule — a lire apres execution)
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Un titulaire par compte, et le compte des profils « lien » :
@@ -365,6 +439,12 @@ where p.access_mode = 'lien'
 --
 -- Aucune politique des tables existantes n'a bouge :
 --   select tablename, count(*) from pg_policies where schemaname='public' group by 1 order by 1;
+--
+-- L'ancienne table est bien renommee, ses donnees intactes :
+--   select count(*) from profiles_legacy;   -- 5 attendues
+--
+-- Les inscriptions futures produisent bien un profil titulaire + ses permissions :
+--   select prosrc from pg_proc where proname = 'handle_new_user';
 --
 -- ⚠ Resolution INCOMPLETE du perimetre d'un prestataire migre (a corriger a la
 -- main sur la page Equipe si des lignes remontent) :

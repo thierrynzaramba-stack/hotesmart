@@ -15,7 +15,7 @@ Relevé **sur la base de production**, pas sur le code : chaque valeur de
 `property_id` a été comparée à `properties.id` (UUID) et à
 `properties.provider_property_id` (TEXT), sur la totalité des lignes.
 
-### Tables à `user_id` — soumises aux nouvelles politiques (28)
+### Tables à `user_id` — soumises aux nouvelles politiques (29)
 
 | # | Table | Domaine | `property_id` | Lignes |
 |---|---|---|---|---|
@@ -24,6 +24,7 @@ Relevé **sur la base de production**, pas sur le code : chaque valeur de
 | 3 | `access_codes` | reservations | TEXT | 109 |
 | 4 | `property_locks` | reservations | TEXT | 2 |
 | 5 | `locks` | reservations | absent | 3 |
+| 5b | `lock_alert_config` | reservations | absent (clé `lock_id`) | 3 |
 | 6 | `property_status` | menages | TEXT | 2 |
 | 7 | `menage_events` | menages | TEXT | 167 |
 | 8 | `menage_done` | menages | TEXT | 116 |
@@ -48,7 +49,7 @@ Relevé **sur la base de production**, pas sur le code : chaque valeur de
 | 27 | `accounts` | facturation | absent | 1 |
 | 28 | `subscriptions` | facturation | absent | 2 |
 
-### Tables sans `user_id` — hors périmètre RLS par compte (6)
+### Tables sans `user_id` — hors périmètre RLS par compte (9)
 
 | Table | Nature | `property_id` |
 |---|---|---|
@@ -58,13 +59,30 @@ Relevé **sur la base de production**, pas sur le code : chaque valeur de
 | `availability_push_log` | déduplication technique | absent |
 | `cron_logs` | horodatage des cycles | absent |
 | `kb_question_templates` | référentiel global | absent |
+| `app_logs` | journal applicatif, 0 ligne | absent |
+| `locks_with_alert_config` | **vue** (jointure locks + config) | absent |
+| `profiles_legacy` | ancienne table, conservée, plus lue | absent |
 
 Les trois premières sont rattachées à un bien : elles devront être protégées **par
 jointure** sur `properties.user_id`, pas par `can_read(user_id, …)`. Les trois
 dernières sont des tables techniques sans donnée client.
 
-**34 tables au total, 28 à `user_id`** — la spec en annonçait 27. L'écart vient de
-`booking_change_events`, créée pendant le chantier d'unification.
+**38 tables au total, 29 à `user_id`.**
+
+⚠️ **Le premier inventaire en annonçait 34 et il était faux.** Il partait des tables
+citées dans le code (`grep from('...')`) : une table présente en base mais qu'aucun
+code ne lit y était **structurellement invisible** — précisément le cas d'une table
+abandonnée. C'est ainsi que `profiles` a été manquée, et que la migration de
+l'étape 1 a échoué en tentant de la créer.
+
+`scripts/inventaire-tables.js` corrige la méthode : il interroge le descripteur
+OpenAPI de PostgREST (`GET /rest/v1/`), qui expose **tout** le schéma public.
+Quatre tables sont ainsi apparues : `profiles` (l'ancienne), `app_logs`,
+`lock_alert_config` (à `user_id`, donc dans le périmètre) et la vue
+`locks_with_alert_config`.
+
+**Leçon** : inventorier une base depuis le code renseigne sur ce que le code
+connaît, pas sur ce que la base contient.
 
 ## 2. Deux anomalies à traiter avant les politiques
 
@@ -160,7 +178,34 @@ tables `profiles` et `profile_permissions`, fonctions `perm_level`, `in_scope`
 triggers de resynchronisation, profil titulaire pour chaque compte, profils `lien`
 pour les prestataires existants.
 
-**Aucune politique des 28 tables existantes n'est modifiée** — impact zéro.
+**Aucune politique des 29 tables existantes n'est modifiée.** Attention à la
+nuance : un **trigger** est posé sur `properties`, qui s'exécute donc à chaque
+écriture de cette table. « Impact zéro » vaut pour les politiques, pas pour les
+triggers.
+
+**Exécutée en production le 1er septembre 2026.** Résultat vérifié : 5 profils
+titulaires, 1 profil `lien` (Régina, token conservé, périmètre résolu en 2 UUID et
+2 refs par le trigger du pont).
+
+Trois éléments ont été ajoutés au fil de l'exécution et **réintégrés au fichier**
+pour qu'il reste la vérité :
+
+- **`alter table profiles rename to profiles_legacy`** — l'ancienne table
+  (`id, email, full_name, plan`) occupait le nom. Aucun code ne la lisait ; la
+  facturation vit dans `accounts` et `subscriptions`. Renommée, pas supprimée :
+  ses 5 lignes sont conservées.
+- **`handle_new_user()` réécrite** pour créer le profil titulaire **et** sa ligne
+  de permissions à chaque inscription. Sans elle, un nouvel inscrit garderait ses
+  droits (`perm_level` court-circuite pour le titulaire) mais serait absent de la
+  page Équipe et sans identité dans les journaux.
+- **Le trigger `on_auth_user_created` reste en place** : seule la fonction qu'il
+  appelle est redéfinie.
+
+⚠️ La version de `handle_new_user()` inscrite dans le fichier est **reconstruite**,
+pas copiée depuis la base. Si celle en place fait autre chose en plus (email,
+ligne `accounts`…), **fusionner avant de rejouer** : `create or replace` écrase
+sans prévenir. Pour la lire :
+`select prosrc from pg_proc where proname = 'handle_new_user';`
 
 Deux points de mise en œuvre qui méritent d'être connus :
 
