@@ -164,6 +164,31 @@ externe qui l'a vu.
 
 ---
 
+## 9. Un script de test n'écrit jamais au nom du testeur
+
+**Règle : toute tentative d'écriture d'un test de droits vise le compte CIBLE, et
+doit échouer. Jamais une ligne au nom du testeur.**
+
+À vérifier :
+- [ ] les insert/update de test portent `user_id = <compte cible>`, pas celui du testeur ;
+- [ ] la lecture ne compte que les lignes du compte cible — un testeur voit toujours ses propres données, c'est normal et sans intérêt ;
+- [ ] si une écriture passe malgré tout (c'est le bug recherché), le script **nettoie** la ligne qu'il vient de créer ;
+- [ ] question à se poser : *si la RLS était absente, ce test laisserait-il une trace en base ?*
+
+**Pourquoi.** Une écriture au nom du testeur est **légitime** sous la RLS
+`user_id = auth.uid()` : elle passe, ne prouve rien, et pollue la base.
+
+**Cas vécu.** Le premier `scripts/test-droits.js` faisait
+`insert({ user_id: <compte test> })` en annonçant « aucune donnée n'est modifiée ».
+L'insert est passé et a créé une ligne vide dans `agent_prompting` — dans une table
+de production. Le même script comptait par ailleurs les lignes propres du testeur
+comme des fuites, produisant deux faux positifs sur cinq tables.
+
+Un test de droits doit répondre à *« puis-je toucher les données de quelqu'un
+d'autre ? »*, jamais à *« puis-je toucher les miennes ? »*.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

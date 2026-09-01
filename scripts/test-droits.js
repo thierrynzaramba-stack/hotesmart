@@ -13,8 +13,14 @@
 // PREREQUIS dans .env.local (jamais commite) :
 //   TEST_EMAIL=...    TEST_PASSWORD=...    SUPABASE_URL=...    SUPABASE_ANON_KEY=...
 //
-// Les tentatives d'ECRITURE font partie du test : elles DOIVENT echouer. Aucune
-// donnee n'est modifiee — si une ecriture passait, ce serait justement le bug.
+// ⚠ REGLE ABSOLUE (REVIEW.md §9). Un script de test ne cree JAMAIS de ligne au
+// nom du testeur. Toute tentative d'ecriture vise le COMPTE CIBLE et doit
+// echouer — si elle passe, c'est le bug qu'on cherche. Une version anterieure
+// inserait `{ user_id: <compte test> }` : sous la RLS actuelle cet insert est
+// legitime, il passait, et polluait la base d'une ligne vide.
+//
+// Meme logique pour la LECTURE : seules comptent les lignes du compte cible. Un
+// testeur voit toujours ses propres donnees, c'est normal et sans interet ici.
 
 require('dotenv').config({ path: '.env.local' })
 const { createClient } = require('@supabase/supabase-js')
@@ -101,10 +107,17 @@ async function main() {
   const monProfil = (profs || []).find(p => p.member_user_id === auth.user.id && !p.is_owner)
   const mesDroits = (perms || []).find(p => p.profile_id === monProfil?.id)
 
+  // LE COMPTE CIBLE : celui sur lequel le testeur est invite. Tout le test porte
+  // sur SES donnees — jamais sur celles du testeur.
+  const compteCible = monProfil?.account_user_id || null
+
   if (!monProfil) {
-    console.log('⚠ Aucun profil de membre trouve : le SQL d\'invitation a-t-il ete execute ?\n')
+    console.log('⚠ Aucun profil de membre trouve : le SQL d\'invitation a-t-il ete execute ?')
+    console.log('  Sans profil, le test ne peut pas identifier le compte cible.\n')
+    process.exit(1)
   } else {
     console.log(`Profil : ${monProfil.first_name} ${monProfil.last_name || ''} · compte ${String(monProfil.account_user_id).slice(0, 8)}…`)
+    console.log(`Compte cible : ${String(compteCible).slice(0, 8)}… — seules SES lignes sont comptees`)
     if (mesDroits) {
       console.log(`Perimetre : ${mesDroits.property_scope} · refs autorisees ${JSON.stringify(mesDroits.property_refs)}`)
       console.log(`Droits : ${Object.entries(DROITS_ATTENDUS).map(([d, n]) => `${d}=${n}`).join(' ')}\n`)
@@ -131,43 +144,59 @@ async function main() {
         verdict(attendu === 'none', `lecture refusee (${error.message.slice(0, 40)})`, attendu !== 'none' ? 'attendu : lisible' : '')
         continue
       }
-      const lignes = data || []
+      const toutes = data || []
+      // Seules les lignes du COMPTE CIBLE comptent. Celles du testeur lui-meme
+      // remontent legitimement (il a son propre compte) et n'ont aucun interet.
+      const lignes = toutes.filter(r => String(r.user_id) === String(compteCible))
+      const siennes = toutes.length - lignes.length
+      const suffixe = siennes ? `  [${siennes} ligne(s) propre(s) au testeur, ignorees]` : ''
 
       if (attendu === 'none') {
-        verdict(lignes.length === 0, `aucune ligne visible (${lignes.length} remontee(s))`,
+        verdict(lignes.length === 0,
+                `aucune ligne du compte cible visible (${lignes.length})${suffixe}`,
                 lignes.length ? 'FUITE : domaine non autorise' : '')
+      } else if (cle) {
+        const autorisees = new Set(cle === 'uuid' ? idsOk : refsOk)
+        const horsPerimetre = lignes.filter(r => r.property_id != null && !autorisees.has(String(r.property_id)))
+        verdict(horsPerimetre.length === 0,
+                `${lignes.length} ligne(s) du compte cible, toutes dans le perimetre${suffixe}`,
+                horsPerimetre.length ? `FUITE : ${horsPerimetre.length} ligne(s) d'un autre bien` : '')
       } else {
-        // Le compte test doit voir SES lignes autorisees, et rien d'autre.
-        if (cle) {
-          const autorisees = new Set(cle === 'uuid' ? idsOk : refsOk)
-          const horsPerimetre = lignes.filter(r => r.property_id != null && !autorisees.has(String(r.property_id)))
-          verdict(horsPerimetre.length === 0,
-                  `${lignes.length} ligne(s) visible(s), toutes dans le perimetre`,
-                  horsPerimetre.length ? `FUITE : ${horsPerimetre.length} ligne(s) d'un autre bien` : '')
-        } else {
-          verdict(true, `${lignes.length} ligne(s) visible(s) (table sans bien)`)
-        }
+        verdict(true, `${lignes.length} ligne(s) du compte cible (table sans bien)${suffixe}`)
       }
 
       // ── ECRITURE (doit echouer) ──
-      // On tente une mise a jour qui ne change rien de reel : seule compte la
-      // reponse de la RLS. Si la table est vide ou invisible, on tente un insert
-      // minimal, egalement voue a l'echec.
-      let ecritureRefusee = false, motif = ''
+      // Deux tentatives, TOUTES DEUX au nom du COMPTE CIBLE :
+      //  a) modifier une ligne visible du compte cible ;
+      //  b) inserer une ligne portant user_id = compte cible.
+      // Jamais d'ecriture au nom du testeur : elle serait legitime, passerait, et
+      // polluerait la base (REVIEW.md §9).
+      const echecs = []
+
       if (lignes.length) {
         const cible = lignes[0]
-        const { error: upErr, count } = await sb.from(table)
-          .update({ updated_at: new Date().toISOString() })
+        const { error, count } = await sb.from(table)
+          .update({ user_id: compteCible })       // valeur inchangee : seule la RLS est testee
           .eq('id', cible.id ?? null)
           .select('*', { count: 'exact', head: true })
-        ecritureRefusee = !!upErr || count === 0
-        motif = upErr ? upErr.message.slice(0, 50) : (count === 0 ? 'aucune ligne affectee' : 'ECRITURE ACCEPTEE')
-      } else {
-        const { error: insErr } = await sb.from(table).insert({ user_id: auth.user.id })
-        ecritureRefusee = !!insErr
-        motif = insErr ? insErr.message.slice(0, 50) : 'ECRITURE ACCEPTEE'
+        if (error || count === 0) echecs.push('update refuse')
+        else echecs.push(null)
       }
-      verdict(ecritureRefusee, `ecriture refusee`, ecritureRefusee ? '' : motif)
+
+      const { data: insere, error: insErr } = await sb.from(table)
+        .insert({ user_id: compteCible })
+        .select('id')
+      if (insErr) echecs.push('insert refuse')
+      else {
+        echecs.push(null)
+        // Filet de securite : si la RLS a laisse passer, on retire immediatement
+        // la ligne pour ne pas laisser de trace du test.
+        if (insere?.[0]?.id) await sb.from(table).delete().eq('id', insere[0].id)
+      }
+
+      const refusee = echecs.every(e => e !== null)
+      verdict(refusee, `ecriture sur le compte cible refusee`,
+              refusee ? '' : 'ECRITURE ACCEPTEE — faille')
     }
   }
 
