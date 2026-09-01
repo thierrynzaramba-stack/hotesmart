@@ -11,8 +11,11 @@ const path = require('node:path')
 const Module = require('node:module')
 
 const PROD = 'compte-prod', AUTRE = 'compte-autre', MEMBRE = 'membre'
-const BIEN_PROD  = { id: 'uuid-bulle', user_id: PROD,  name: 'La bulle',   provider: 'beds24',  provider_property_id: '209413' }
-const BIEN_AUTRE = { id: 'uuid-x',     user_id: AUTRE, name: 'Bien tiers', provider: 'channex', provider_property_id: 'ref-x' }
+// Identifiants REALISTES : properties.id est un uuid Postgres, et
+// provider_property_id un propId Beds24 numerique ou un UUID Channex. Un stub
+// avec 'uuid-bulle' masquerait le piege du type uuid (cf. resoudreBien).
+const BIEN_PROD  = { id: '58001ed1-e194-498a-94b4-606eece8f33d', user_id: PROD,  name: 'La bulle',   provider: 'beds24',  provider_property_id: '209413' }
+const BIEN_AUTRE = { id: 'e14e25f6-0000-4000-8000-000000000001', user_id: AUTRE, name: 'Bien tiers', provider: 'channex', provider_property_id: '0544fd9a' }
 
 function charger({ user = MEMBRE, biens = [BIEN_PROD, BIEN_AUTRE], profil = null, permissions = null }) {
   const client = {
@@ -25,8 +28,12 @@ function charger({ user = MEMBRE, biens = [BIEN_PROD, BIEN_AUTRE], profil = null
         or(expr) { q._or = expr; return q },
         maybeSingle: async () => {
           if (nom === 'properties') {
+            // Deux chemins : `.or(id.eq…,provider_property_id.eq…)` pour un UUID,
+            // `.eq('provider_property_id', …)` sinon — la branche `id` ferait
+            // echouer la requete sur une colonne de type uuid.
             const m = String(q._or || '').match(/id\.eq\.([^,]+),provider_property_id\.eq\.(.+)/)
-            const v = m ? m[1] : null
+            const v = m ? m[1] : q._f.provider_property_id
+            if (v == null) return { data: null }
             return { data: biens.find(b => b.id === v || b.provider_property_id === v) || null }
           }
           if (nom === 'profiles') {
@@ -83,7 +90,7 @@ test('bien d\'un AUTRE compte -> 403, meme avec tous les droits sur le sien', as
     profil: profilActif(), permissions: perms({ reglages: 'write' })
   })
   const res = reponse()
-  const r = await requirePermission(req(), res, { domaine: 'reglages', bien: 'ref-x' })
+  const r = await requirePermission(req(), res, { domaine: 'reglages', bien: '0544fd9a' })
   assert.strictEqual(r.ok, false)
   assert.strictEqual(res.code, 403)
 })
@@ -156,10 +163,10 @@ test('bien HORS perimetre -> 403 (identifiant client revalide serveur)', async (
 })
 
 test('bien DANS le perimetre, designe par son UUID ou par sa ref -> passe', async () => {
-  for (const ref of ['uuid-bulle', '209413']) {
+  for (const ref of ['58001ed1-e194-498a-94b4-606eece8f33d', '209413']) {
     const { requirePermission } = charger({
       profil: profilActif(),
-      permissions: perms({ reglages: 'read', property_scope: 'selected', property_ids: ['uuid-bulle'], property_refs: ['209413'] })
+      permissions: perms({ reglages: 'read', property_scope: 'selected', property_ids: ['58001ed1-e194-498a-94b4-606eece8f33d'], property_refs: ['209413'] })
     })
     const res = reponse()
     const r = await requirePermission(req(), res, { domaine: 'reglages', bien: ref })
@@ -224,11 +231,20 @@ function chargerAvecBookings({ user = MEMBRE, bookings = [], biens = [BIEN_PROD,
         select() { return q },
         eq(c, v) { q._f[c] = v; return q },
         or(expr) { q._or = expr; return q },
+        // bookings_snapshot est lu SANS maybeSingle (booking_id n'est unique que
+        // par (user_id, booking_id)) : la requete est awaitee directement.
+        then(res2, rej) {
+          if (nom !== 'bookings_snapshot') return Promise.resolve({ data: [], error: null }).then(res2, rej)
+          return Promise.resolve({ data: bookings.filter(b => b.booking_id === q._f.booking_id), error: null }).then(res2, rej)
+        },
         maybeSingle: async () => {
-          if (nom === 'bookings_snapshot') return { data: bookings.find(b => b.booking_id === q._f.booking_id) || null }
           if (nom === 'properties') {
+            // Deux chemins : `.or(id.eq…,provider_property_id.eq…)` pour un UUID,
+            // `.eq('provider_property_id', …)` sinon — la branche `id` ferait
+            // echouer la requete sur une colonne de type uuid.
             const m = String(q._or || '').match(/id\.eq\.([^,]+),provider_property_id\.eq\.(.+)/)
-            const v = m ? m[1] : null
+            const v = m ? m[1] : q._f.provider_property_id
+            if (v == null) return { data: null }
             return { data: biens.find(b => b.id === v || b.provider_property_id === v) || null }
           }
           if (nom === 'profiles') {
@@ -251,7 +267,7 @@ function chargerAvecBookings({ user = MEMBRE, bookings = [], biens = [BIEN_PROD,
 }
 
 const BOOK_PROD  = { user_id: PROD,  booking_id: '77', property_id: '209413' }
-const BOOK_AUTRE = { user_id: AUTRE, booking_id: '99', property_id: 'ref-x' }
+const BOOK_AUTRE = { user_id: AUTRE, booking_id: '99', property_id: '0544fd9a' }
 
 test('reservation d\'un AUTRE compte -> 403, meme avec messages=write sur le sien', async () => {
   const { requirePermission } = chargerAvecBookings({
@@ -289,17 +305,81 @@ test('reservation requise mais absente -> 400', async () => {
   assert.strictEqual(res.code, 400)
 })
 
-test('booking et bien de comptes DIFFERENTS -> 403 (tentative de substitution)', async () => {
-  // Un appelant qui fournirait un bookingId de son compte et le property_id d'un
-  // autre, en esperant que l'un des deux serve de reference.
+test('LA RESERVATION FAIT FOI : le bien fourni par le client est IGNORE', async () => {
+  // Le contournement ferme : un membre limite au bien A passait `bien = A` pour
+  // agir sur une reservation du bien B. La garde validait A, l'action portait
+  // sur B — et recordMessage attribuait le message au mauvais fil.
   const { requirePermission } = chargerAvecBookings({
     bookings: [BOOK_PROD], profil: profilActif(), permissions: perms({ messages: 'write' })
   })
   const res = reponse()
   const r = await requirePermission(req(), res, {
-    domaine: 'messages', niveau: 'write', booking: '77', bien: 'ref-x'
+    domaine: 'messages', niveau: 'write', booking: '77', bien: '0544fd9a'
   })
-  assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 403)
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.booking.property_id, '209413', 'la cible vient de la reservation')
+})
+
+test('CONTOURNEMENT FERME : perimetre limite au bien A, reservation du bien B -> 403', async () => {
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [{ user_id: PROD, booking_id: '88', property_id: '169567' }],
+    profil: profilActif(),
+    // Perimetre : le bien 209413 seulement. La reservation porte sur 169567.
+    permissions: perms({ messages: 'write', property_scope: 'selected',
+                         property_ids: ['58001ed1-e194-498a-94b4-606eece8f33d'], property_refs: ['209413'] })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, {
+    domaine: 'messages', niveau: 'write', booking: '88', bien: '209413'   // <- le client tente A
+  })
+  assert.strictEqual(r.ok, false, 'le bien client ne doit pas servir a passer la garde')
+  assert.strictEqual(res.code, 403)
+})
+
+test('meme booking_id sur DEUX comptes -> 409, jamais un choix arbitraire', async () => {
+  // booking_id n'est unique que par (user_id, booking_id).
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [BOOK_PROD, { user_id: AUTRE, booking_id: '77', property_id: '0544fd9a' }],
+    profil: profilActif(), permissions: perms({ messages: 'write' })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: '77' })
+  assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 409)
+})
+
+test('reservation SANS bien rattache -> 409 (sinon le perimetre ne filtre rien)', async () => {
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [{ user_id: PROD, booking_id: '77', property_id: null }],
+    profil: profilActif(),
+    permissions: perms({ messages: 'write', property_scope: 'selected', property_refs: ['209413'] })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: '77' })
+  assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 409)
+})
+
+test('bien de la reservation NON materialise -> passe, la reference TEXTE suffit', async () => {
+  // Un snapshot peut porter un property_id absent de `properties` (bien supprime).
+  // Bloquer serait une regression : l'envoi fonctionnait avant.
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [{ user_id: PROD, booking_id: '77', property_id: 'disparu-42' }],
+    biens: [],
+    profil: profilActif(), permissions: perms({ messages: 'write' })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: '77' })
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.bien, null)
+})
+
+test('identifiant de bien au format dangereux -> refuse (injection PostgREST)', async () => {
+  // La valeur client est interpolee dans un filtre .or(...) : une virgule ou une
+  // parenthese y injecterait des filtres supplementaires.
+  const { requirePermission } = charger({ profil: profilActif(), permissions: perms({ reglages: 'read' }) })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'reglages', bien: '209413,user_id.neq.0' })
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(res.code, 404, 'refuse avant toute requete')
 })
 
 test('reservation hors perimetre -> 403', async () => {

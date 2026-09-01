@@ -166,19 +166,20 @@ module.exports = async function handler(req, res) {
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
     // Modification d'un bien = domaine `reglages` en ecriture, sur CE bien.
-    // Le filtre eq('user_id') ci-dessous est conserve en defense en profondeur.
-    {
-      const garde = await requirePermission(req, res, {
-        domaine: 'reglages', niveau: 'write', bien: pid, bienRequis: true
-      })
-      if (!garde.ok) return
-    }
+    // Le filtre user_id des requetes suivantes porte sur le compte PROPRIETAIRE
+    // (garde.accountUserId), pas sur l'appelant : sinon un membre delegue
+    // franchirait la garde puis recevrait 404, la delegation etant inoperante.
+    const gardePatch = await requirePermission(req, res, {
+      domaine: 'reglages', niveau: 'write', bien: pid, bienRequis: true
+    })
+    if (!gardePatch.ok) return
+    const compteBien = gardePatch.accountUserId
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee')
       .eq('id', pid)
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien)
       .single()
     if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
 
@@ -295,7 +296,7 @@ module.exports = async function handler(req, res) {
       .from('properties')
       .update(updates)
       .eq('id', pid)
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien)
       .select()
       .single()
     if (updErr) {
@@ -316,19 +317,19 @@ module.exports = async function handler(req, res) {
 
     // ⚠ ACTION DESTRUCTRICE : supprime le bien ET purge toutes ses donnees liees
     // (bookings_snapshot, menage_events, messages…). Exige `reglages` en
-    // ecriture sur CE bien.
-    {
-      const garde = await requirePermission(req, res, {
-        domaine: 'reglages', niveau: 'write', bien: pid, bienRequis: true
-      })
-      if (!garde.ok) return
-    }
+    // ecriture sur CE bien. Comme pour PATCH, les requetes suivantes portent sur
+    // le compte PROPRIETAIRE, pas sur l'appelant.
+    const gardeDelete = await requirePermission(req, res, {
+      domaine: 'reglages', niveau: 'write', bien: pid, bienRequis: true
+    })
+    if (!gardeDelete.ok) return
+    const compteBien = gardeDelete.accountUserId
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, name, provider, provider_property_id, provider_rate_plan_id')
       .eq('id', pid)
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien)
       .single()
     if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
 
@@ -371,12 +372,12 @@ module.exports = async function handler(req, res) {
       const { data: snapRows } = await supabase
         .from('bookings_snapshot')
         .select('booking_id')
-        .eq('user_id', user.id)
+        .eq('user_id', compteBien)
         .eq('property_id', propKey)
       const bookingIds = (snapRows || []).map(r => r.booking_id)
       if (bookingIds.length) {
         await supabase.from('message_sent_log')
-          .delete().eq('user_id', user.id).in('booking_id', bookingIds)
+          .delete().eq('user_id', compteBien).in('booking_id', bookingIds)
       }
 
       // Tables enfant keyees par property_id = provider_property_id (TEXT). AUCUNE FK
@@ -391,7 +392,7 @@ module.exports = async function handler(req, res) {
       ]
       for (const t of tablesWithUser) {
         const { error: delErr } = await supabase.from(t).delete()
-          .eq('property_id', propKey).eq('user_id', user.id)
+          .eq('property_id', propKey).eq('user_id', compteBien)
         if (delErr) console.error(`[channel-property] purge ${t} echec`, delErr.message)
       }
       // Groupe SANS colonne user_id : filtre property_id seul.
@@ -403,7 +404,7 @@ module.exports = async function handler(req, res) {
       // airbnb_connect_sessions : sa colonne property_id = UUID HoteSmart ; la cle provider
       // est provider_property_id -> on purge par provider_property_id (= propKey).
       const { error: sessErr } = await supabase.from('airbnb_connect_sessions').delete()
-        .eq('provider_property_id', propKey).eq('user_id', user.id)
+        .eq('provider_property_id', propKey).eq('user_id', compteBien)
       if (sessErr) console.error('[channel-property] purge airbnb_connect_sessions echec', sessErr.message)
     }
 
@@ -412,7 +413,7 @@ module.exports = async function handler(req, res) {
       .from('properties')
       .delete()
       .eq('id', pid)
-      .eq('user_id', user.id)
+      .eq('user_id', compteBien)
     if (delPropErr) {
       console.error('[channel-property] DELETE properties error', delPropErr.message)
       return res.status(500).json({ error: 'Erreur de suppression' })

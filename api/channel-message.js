@@ -47,8 +47,10 @@ module.exports = async function handler(req, res) {
       // possede le fil de messages.
       userId:        garde.accountUserId,
       provider:      'channex',
-      // property_id revalide serveur, jamais celui envoye par le client.
-      propertyId:    garde.bien ? garde.bien.provider_property_id : garde.booking.property_id,
+      // property_id de la RESERVATION, jamais celui envoye par le client : c'est
+      // elle qui designe le fil de messages. `garde.bien` peut etre null si le
+      // bien n'est plus materialise — la reference du snapshot reste valable.
+      propertyId:    garde.booking.property_id,
       bookingId:     bookingId,
       direction:     'outbound',
       sender:        'host',

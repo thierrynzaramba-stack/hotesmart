@@ -229,14 +229,15 @@ module.exports = async (req, res) => {
     // alors un property_id etranger, faussant l'historique et les sondes de
     // volume. L'envoi lui-meme part vers un numero libre et consomme la cle
     // Brevo de l'appelant, pas celle d'autrui — mais la tracabilite, si.
-    let propertyIdValide = null;
-    if (property_id) {
-      const garde = await requirePermission(req, res, {
-        domaine: 'messages', niveau: 'write', bien: property_id
-      });
-      if (!garde.ok) return;
-      propertyIdValide = garde.bien.provider_property_id;
-    }
+    // ⚠ Garde INCONDITIONNELLE. Une garde posee seulement « si property_id est
+    // fourni » se contourne en omettant le champ : un membre sans le domaine
+    // `messages`, ou un profil desactive, pouvait alors envoyer un SMS malgre
+    // tout. C'est l'ENVOI qu'on controle, pas seulement sa tracabilite.
+    const garde = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'write', bien: property_id || null
+    });
+    if (!garde.ok) return;
+    const propertyIdValide = garde.bien ? garde.bien.provider_property_id : null;
 
     if (message.length > 320) {
       return res.status(400).json({ error: 'Message trop long (max 320 caractères / 2 SMS)' });
