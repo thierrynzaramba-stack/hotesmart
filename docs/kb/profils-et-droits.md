@@ -618,3 +618,90 @@ Elle porte la clé Beds24 **et** la clé Seam, et n'est créée que par
 `beds24-setup` et `sms`. `saveConfig` de `serrures` fait donc un `upsert` : sans
 lui, un hôte Channex qui n'a jamais configuré le SMS n'aurait jamais pu
 enregistrer sa serrure. À découper quand un troisième fournisseur s'ajoutera.
+
+## 9. Étape 3 — CLOSE
+
+**26 / 26 endpoints**, 10 fuites fermées, **316 tests** au vert. Déployé en
+production le 1er septembre 2026 (`4c207a7`).
+
+### Décompte des endpoints
+
+| Groupe | Endpoints |
+|---|---|
+| Amorce | `diagnostic`, `channel-message`, `sms`, `channel-property` |
+| 1 — réglages | `agent-config`, `alert-test`, `beds24-setup`, `channel-connect`, `channel-token` |
+| 2 — canaux | `channel-mapping`, `channel-airbnb-connect`, `channel-bcom`, `channel-bcom-write`, `channel-bcom-activate` |
+| 3 — prix, dispos, messages | `channel-rateplan`, `calendar`, `channel-import-messages`, `messages`, `beds24` |
+| 4 — final | `grok`, `serrures`, `stripe`, `property-automation`, `simulate`, `extract-kb`, `menages` |
+
+**Hors périmètre, à dessein** : `cron` (Bearer `CRON_SECRET`), `channel-webhook` et
+`channel-events` (secret partagé), `menages-public` (jeton public), `manifest`,
+`backfill-beds24-host`. Aucun n'agit au nom d'un utilisateur connecté.
+
+### Les 10 fuites
+
+**Entre comptes (8)**
+
+1. `diagnostic` — `property_id` client non vérifié : lecture des canaux OTA de
+   n'importe quel bien, et `property_ids` d'autres clients renvoyés
+2. `channel-message` — `bookingId` non vérifié : message au voyageur de
+   n'importe quelle réservation
+3. `agent-config` — **JWT décodé sans vérification de signature** : usurpation
+   d'identité complète
+4. `channel-bcom-write` action `delete` — suppression de n'importe quel canal
+5. `channel-mapping` — `channel_id` jamais validé
+6. `channel-rateplan remap` — canal Booking.com d'un autre compte rebranché sur
+   ses propres tarifs (`PUT /channels/:id`)
+7. `channel-rateplan remap_airbnb` — mapping Airbnb d'autrui détruit
+   (`DELETE` puis `POST`)
+8. `beds24 getProperties` — un membre limité à un bien récupérait **tous** les
+   biens Beds24 du propriétaire (aucun filtre en sortie)
+
+Plus deux moindres : `channel-rateplan raw_channel` (mappings d'un autre compte)
+et `inspect` (`rate_plan_id` non contrôlé).
+
+**Clé plateforme (2)**
+
+9. `alert-test` puis `grok` — relais ouverts sur les clés de la plateforme.
+   `grok` n'avait **aucune authentification**
+10. `getSeamKey` — repli sur `SEAM_API_KEY` : compte Seam partagé entre hôtes
+
+### Trois régressions introduites par les correctifs eux-mêmes
+
+Toutes trouvées par les reviews, aucune n'a survécu :
+
+1. **Déployée en production ~20 min** : `resoudreBien` interrogeait
+   `id.eq.<propId Beds24>` sur une colonne `uuid` → erreur Postgres, pas résultat
+   vide → 404 → **l'envoi de SMS ne fonctionnait plus**. Origine de la règle
+   absolue « aucun push tant qu'une review est en cours » (`CLAUDE.md`).
+2. **Trou d'authentification dans `calendar`**, créé en retirant l'auth locale au
+   profit de la garde : quand aucun identifiant ne se résolvait, la garde n'était
+   jamais atteinte et la requête répondait 200 avec un jeton invalide.
+3. **`saveConfig` des serrures rendu impossible** pour un hôte sans ligne
+   `api_keys` — le 409 était la mauvaise réponse à un vrai problème.
+
+### Vérification en production (1er septembre 2026)
+
+`GET /api/calendar` sans jeton → **401** · `POST /api/grok` sans authentification
+→ **401** · `GET /api/serrures?action=locks` → **401** ·
+`POST /api/stripe?action=portal` → **401**.
+
+### ⚠️ Ce qui reste inerte jusqu'au sélecteur de compte (étape 5)
+
+Les gardes de `messages`, `menages`, `serrures`, `stripe` et `extract-kb` sont des
+endpoints de **collection ou de compte** : aucun identifiant client, donc aucune
+ressource ne désigne un compte, donc le compte cible est celui de l'appelant —
+qui en est titulaire par définition.
+
+**Conséquence fonctionnelle, pas sécuritaire** : un membre invité ne voit pas les
+données du compte auquel il appartient, il voit les siennes (vides). Le câblage
+est posé pour que l'étape 5 n'ait qu'à fournir `accountUserId`.
+
+La couverture de tests porte donc sur `lib/permissions` (`refsDuPerimetre`,
+`filtrePerimetreSql`), pas sur ces endpoints : un vert d'endpoint ne prouverait
+rien tant que le câblage est inerte.
+
+### Suite
+
+Étape 4 : page Équipe et droits. Étape 5 : **sélecteur de compte** (lève tout ce
+qui précède). Étape 6 : fiche prestataire.
