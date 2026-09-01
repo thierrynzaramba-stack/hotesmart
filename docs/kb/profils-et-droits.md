@@ -250,6 +250,69 @@ serverless : ils écrivent en service key, qui contourne la RLS, et doivent donc
 vérifier les droits eux-mêmes. Module non branché à cette étape (câblage = étape 3),
 mais testé — sa sémantique doit rester strictement alignée sur le SQL.
 
+## 5 ter. Étape 2 — lots 1 à 4 appliqués
+
+| Lot | Tables | Vérifié |
+|---|---|---|
+| 1 | `automation_incidents`, `integration_requests`, `onboarding_state`, `agent_prompting`, `conversation_flags` | 10/10 |
+| 2 | `sms_logs`, `message_sent_log`, `agent_tasks`, `menage_comments`, `menage_done` | 10/10 |
+| 3 | `menage_events`, `property_status`, `public_tokens`, `locks`, `lock_alert_config` | 10/10 |
+| 4 | `messages`, `conversations`, `message_templates`, `knowledge` | 8/8 |
+
+Chaque lot purge les anciennes politiques `user_id = auth.uid()` avant de poser
+les siennes : PostgreSQL combine les politiques permissives en **OU**, une seule
+survivante rendrait le périmètre inopérant.
+
+Le lot 4 a été éprouvé par **bascule temporaire** du compte test à
+`messages = read` / `reglages = read`, puis retour à `none` :
+
+| | bascule active | bascule annulée |
+|---|---|---|
+| `messages` | 465 / 773 | 0 |
+| `conversations` | 499 / 860 | 0 |
+| `message_templates` | 5 / 9 | 0 |
+| `knowledge` | 18 / 62 | 0 |
+
+Sans cette bascule, le test aurait été vert **sans rien prouver** : les deux
+domaines étaient à `none`, donc tout invisible de toute façon. À retenir pour les
+lots suivants — un test entièrement négatif ne démontre que l'absence de
+régression.
+
+### ⚠️ La branche UUID de `in_scope(uuid, text)` n'est pas couverte en base
+
+`in_scope(uuid, text)` compare la référence à `property_refs` **et** à
+`property_ids`, pour les colonnes mixtes. Or **aucune ligne réelle ne porte l'UUID
+d'un bien existant** : les seules valeurs UUID de `knowledge` sont les trois
+orphelines, rattachées à des biens disparus.
+
+Cette branche n'est donc couverte que par les tests unitaires de
+`lib/permissions.js`. Aucune conséquence pratique tant que rien n'écrit l'UUID —
+mais voir ci-dessous.
+
+### ⚠️ La cause des orphelines est TOUJOURS ACTIVE (vérifié par grep)
+
+La parade de fond serait qu'aucun parcours n'écrive l'UUID dans `knowledge`.
+**Ce n'est pas le cas aujourd'hui.**
+
+`apps/agent-ai/knowledge.html` et `apps/agent-ai/analyze.html` prennent leur clé
+dans `properties[].id` renvoyé par `/api/channel-property`. Or cet endpoint
+expose, pour un bien **Channex**, l'`id` de la table `properties` — l'UUID — alors
+que pour un bien **Beds24** il expose le `provider_property_id`
+(`api/channel-property.js:139-142`). Ces deux pages écrivent donc l'UUID pour tout
+bien Channex.
+
+Deux parcours écrivent correctement : `pages/onboarding.html`
+(`provider_property_id || p.id`) et `apps/agent-ai/messagerie.html` (commentaire
+explicite : « propId = provider_property_id, pas l'UUID Supabase »).
+
+**Conséquence** : toute connaissance saisie depuis la page Connaissances ou depuis
+Analyse, sur un bien Channex, est écrite sous une clé que le reste du code ne lit
+pas — et devient invisible aux membres une fois les politiques posées. C'est un
+bug **antérieur** au chantier des droits, que celui-ci rend simplement visible.
+
+À corriger dans un chantier dédié : uniformiser sur `provider_property_id`, puis
+rattacher ou purger les 19 lignes orphelines.
+
 ## 6. Points restant à trancher
 
 **Les 4 valeurs orphelines** de `knowledge` et `messages` (§2) : purger ou
