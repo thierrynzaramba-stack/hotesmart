@@ -21,6 +21,8 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
+const { requirePermission, verifierSession } = require('../lib/require-permission')
+const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -48,24 +50,36 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Méthode non autorisée' })
   const t = chrono()
 
-  // ===== AUTH =====
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorisé' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
+  // ===== DROITS =====
+  // Collection : aucun identifiant client, donc le compte cible est celui de
+  // l'appelant. La garde verifie le domaine `menages` ; le perimetre, qui ne peut
+  // pas s'evaluer bien par bien sur une collection, se traduit en FILTRE.
+  //
+  // ⚠ Portee reelle : inerte tant qu'il n'y a pas de selecteur de compte
+  // (etape 5) — un appelant est titulaire de son propre compte. Le cablage est
+  // pose pour que cette etape n'ait pas a repasser ici. Couverture : les tests
+  // portent sur lib/permissions, pas sur cet endpoint.
+  // Session d'abord — elle seule repond 401 — puis les droits. Deux etapes pour
+  // que la trace chrono distingue la session invalide du refus de droits.
+  const appelant = await verifierSession(req, res)
   t.top('auth')
-  if (authError || !userData?.user) {
-    console.log(t.ligne(' -> 401'))
-    return res.status(401).json({ error: 'Session invalide' })
-  }
-  const userId = userData.user.id
+  if (!appelant) { console.log(t.ligne(' -> 401')); return }
+
+  const garde = await requirePermission(req, res, { domaine: 'menages', niveau: 'read', userId: appelant })
+  if (!garde.ok) { console.log(t.ligne(' -> 403')); return }
+  const userId = garde.accountUserId
+  const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')
+  if (filtreRef === '') return res.status(200).json({ properties: [], bookings: [] })
 
   try {
     // ===== BIENS (tous providers) =====
-    const { data: propRows, error: propErr } = await supabase
+    let qProps = supabase
       .from('properties')
       .select('provider_property_id, name, provider')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
+    if (filtreRef) qProps = qProps.or(filtreRef)
+    const { data: propRows, error: propErr } = await qProps
       .order('name', { ascending: true })
     t.top('properties')
     if (propErr) {

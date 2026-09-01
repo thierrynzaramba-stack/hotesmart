@@ -3,6 +3,7 @@
 // les 50 réponses templates avec un score de confidence.
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 const Anthropic = require('@anthropic-ai/sdk')
 
 const supabase = createClient(
@@ -131,13 +132,14 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
 
-  // Auth
-  const userToken = req.headers.authorization?.replace('Bearer ', '')
-  if (!userToken) return res.status(401).json({ error: 'Non autorisé' })
-
-  const { data: userData } = await supabase.auth.getUser(userToken)
-  const user = userData?.user
-  if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' })
+  // ── Droits ──
+  // L'extraction ALIMENTE la base de connaissances qui nourrit les reponses IA
+  // aux voyageurs : c'est de la configuration, donc `reglages` en ecriture.
+  // Aucun identifiant de bien n'est fourni — le compte cible est l'appelant, et
+  // le filtre user_id reste la defense reelle.
+  const garde = await requirePermission(req, res, { domaine: 'reglages', niveau: 'write' })
+  if (!garde.ok) return
+  const user = { id: garde.accountUserId }
 
   try {
     // 1. Récupérer le beds24Key

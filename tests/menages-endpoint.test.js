@@ -15,14 +15,23 @@ function chargerEndpoint({ props = [], snaps = [], user = { id: 'u1' }, propErr 
         _nom: nom,
         select() { return q }, eq(c, v) { etat.requetes.push({ table: nom, col: c, val: v }); return q },
         not() { return q }, in() { return q }, order(c) { etat.order = c; return q },
+        // `or` : filtre de perimetre pose par la garde (etape 3). Le titulaire
+        // n'en recoit pas ; le double l'accepte pour ne pas casser sur un membre.
+        or(e) { etat.filtreOr = e; return q },
         // Bornes portees cote SQL (cap PostgREST) : enregistrees pour verification.
         gte(c, v) { etat.gte = { col: c, val: v }; return q },
         lte(c, v) { etat.lte = { col: c, val: v }; return q },
         limit(n) { etat.limit = n; return q },
+        // La garde de droits lit profiles / profile_permissions : sans profil,
+        // l'appelant est titulaire de son propre compte, ce que testent ces cas.
+        maybeSingle: async () => ({ data: null, error: null }),
+        single: async () => ({ data: null, error: null }),
         then(res, rej) {
           const r = nom === 'properties'
             ? { data: props, error: propErr }
-            : { data: snaps, error: snapErr }
+            : nom === 'profiles' || nom === 'profile_permissions'
+              ? { data: null, error: null }
+              : { data: snaps, error: snapErr }
           return Promise.resolve(r).then(res, rej)
         }
       }
@@ -35,7 +44,12 @@ function chargerEndpoint({ props = [], snaps = [], user = { id: 'u1' }, propErr 
   m.loaded = true
   require.cache[abs] = m
 
-  delete require.cache[require.resolve('../api/menages')]
+  // ⚠ La garde de droits cree SON PROPRE client supabase au chargement du module.
+  // Ne vider que le cache de l'endpoint la laissait sur un client d'un test
+  // precedent : la session invalide passait, et le test lisait 200 au lieu de 401.
+  for (const mod of ['../lib/require-permission', '../lib/permissions', '../api/menages']) {
+    try { delete require.cache[require.resolve(mod)] } catch {}
+  }
   return { handler: require('../api/menages'), etat }
 }
 

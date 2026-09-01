@@ -2,6 +2,7 @@
 // Route via ?action=... pour les calls user, ou via stripe-signature header pour le webhook.
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 const Stripe = require('stripe')
 
 const supabase = createClient(
@@ -271,12 +272,21 @@ function computeQuantity(module, sub) {
 
 // ─── Handler actions user (create_checkout, cancel_subscription, portal) ──
 async function handleUserAction(req, res) {
-  const userToken = req.headers.authorization?.replace('Bearer ', '')
-  if (!userToken) return res.status(401).json({ error: 'Non autorisé' })
-
-  const { data: userData } = await supabase.auth.getUser(userToken)
-  const user = userData?.user
-  if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' })
+  // ── Droits : domaine `facturation`, NON DELEGABLE ──
+  // Aucune action ne porte d'identifiant de ressource : le compte cible est celui
+  // de l'appelant, qui en est titulaire par definition. La garde est donc INERTE
+  // aujourd'hui — comme api/messages.js. Elle est posee pour deux raisons :
+  //  1. `facturation` figure dans NON_DELEGABLES : `peutEcrire` exigera toujours
+  //     userId === accountUserId, meme quand l'etape 5 fournira un compte cible.
+  //     C'est la seule barriere qui empechera un membre d'ouvrir un abonnement au
+  //     nom du titulaire.
+  //  2. le webhook Stripe (signature) reste hors garde, et c'est voulu : il n'a
+  //     pas d'appelant humain.
+  const garde = await requirePermission(req, res, { domaine: 'facturation', niveau: 'write' })
+  if (!garde.ok) return
+  // `facturation` etant non delegable, l'appelant EST le titulaire : son email est
+  // celui du compte, et c'est bien lui qui doit aller chez Stripe.
+  const user = { id: garde.accountUserId, email: garde.email }
 
   const rawBody = await getRawBody(req)
   let body = {}

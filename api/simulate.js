@@ -1,5 +1,6 @@
 // api/simulate.js — Simule le traitement d'un message exactement comme le cron
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission, verifierSession } = require('../lib/require-permission')
 const Anthropic = require('@anthropic-ai/sdk')
 const { sendAlertNotifications } = require('../lib/alert-notify')
 
@@ -10,20 +11,23 @@ const supabase = createClient(
 const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY })
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  // Endpoint appele uniquement par les pages HoteSmart.
   res.setHeader('Access-Control-Allow-Methods', 'POST, DELETE, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') return res.status(200).end()
 
-  // Auth
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorisé' })
-  const { data: userData } = await supabase.auth.getUser(token)
-  const user = userData?.user
-  if (!user) return res.status(401).json({ error: 'Non autorisé' })
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
 
   // ── DELETE : supprimer un résultat de simulation ──────────────────────────
   if (req.method === 'DELETE') {
+    // Simulation d'un message voyageur : domaine `messages`. Pas d'identifiant de
+    // bien ici, le filtre user_id reste la defense reelle.
+    const gardeDel = await requirePermission(req, res, {
+      domaine: 'messages', niveau: 'write', userId: appelant
+    })
+    if (!gardeDel.ok) return
+    const user = { id: gardeDel.accountUserId }
     const { task_id, conv_id } = req.body || {}
     if (task_id) await supabase.from('agent_tasks').delete().eq('id', task_id).eq('user_id', user.id)
     if (conv_id) await supabase.from('conversations').delete().eq('id', conv_id).eq('user_id', user.id)
@@ -33,14 +37,24 @@ module.exports = async function handler(req, res) {
   // ── POST : simuler un message ─────────────────────────────────────────────
   if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
 
-  const { message, guestName, propertyId } = req.body
+  const { message, guestName, propertyId } = req.body || {}
   if (!message || !propertyId) return res.status(400).json({ error: 'message et propertyId requis' })
+
+  // Le bien vient du client : resolu en base, c'est lui qui designe le compte.
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', bien: propertyId, bienRequis: true, userId: appelant
+  })
+  if (!garde.ok) return
+  const user = { id: garde.accountUserId }
+  // ⚠ Reference RESOLUE : les tables enfants portent le provider_property_id
+  // (REVIEW.md §10), et la valeur client peut etre l'UUID comme la reference canal.
+  const refBien = garde.bien.provider_property_id
 
   // Charger base de connaissance
   const { data: knowledge } = await supabase
     .from('knowledge').select('*')
     .eq('user_id', user.id)
-    .eq('property_id', String(propertyId))
+    .eq('property_id', String(refBien))
 
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
@@ -95,7 +109,7 @@ Réponds UNIQUEMENT en JSON valide :
     if (classification.auto_reply) {
       const { data: conv } = await supabase.from('conversations').insert({
         user_id:       user.id,
-        property_id:   String(propertyId),
+        property_id:   String(refBien),
         guest_name:    guestN,
         guest_message: message,
         agent_reply:   classification.auto_reply,
@@ -108,7 +122,7 @@ Réponds UNIQUEMENT en JSON valide :
 
     const { data: newTask, error: taskError } = await supabase.from('agent_tasks').insert({
       user_id:         user.id,
-      property_id:     String(propertyId),
+      property_id:     String(refBien),
       book_id:         bookId,
       guest_name:      guestN,
       guest_message:   message,
@@ -128,7 +142,7 @@ Réponds UNIQUEMENT en JSON valide :
         await sendAlertNotifications({
           type:       classification.type,
           task:       newTask,
-          propertyId: String(propertyId)
+          propertyId: String(refBien)
         })
       } catch (alertErr) {
         console.error('[Simulate] Erreur alert-notify:', alertErr.message)
