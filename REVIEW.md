@@ -222,6 +222,40 @@ une incohérence entre pages, pas une convention absente.
 
 ---
 
+## 11. Le compte cible vient de la ressource, jamais de l'appelant
+
+**Règle : dans un endpoint, l'identifiant fourni par le client est résolu en base,
+son propriétaire est lu, et les droits sont vérifiés SUR CE COMPTE.**
+
+À vérifier :
+- [ ] tout `property_id`, `booking_id`, `lock_id`… venant du corps ou de l'URL passe par `lib/require-permission.js` ;
+- [ ] la valeur utilisée ensuite pour écrire est celle **résolue en base**, jamais celle envoyée par le client ;
+- [ ] si deux ressources sont désignées (une réservation *et* un bien), leurs propriétaires sont comparés — sinon l'une sert à passer la garde et l'autre à agir ;
+- [ ] question à se poser : *que se passe-t-il si je remplace cet identifiant par celui d'un autre compte ?*
+
+**Pourquoi.** Les endpoints écrivent en **service key**, qui contourne la RLS. Les
+politiques posées sur les 30 tables ne protègent que les accès directs depuis le
+navigateur. Une session valide ne dit rien de ce à quoi elle donne droit : elle
+prouve *qui* appelle, pas *ce qu'il possède*.
+
+**Cas vécus, deux fuites réelles trouvées le même jour :**
+
+- `api/diagnostic.js` — `?check=channel_detail&property_id=X` acceptait le
+  `property_id` du client sans contrôle. Tout compte connecté pouvait lire les
+  canaux OTA de n'importe quel bien : identifiants de listing, mappings, état
+  d'activation. Les secrets étaient masqués, pas la structure. Le même endpoint
+  renvoyait les identifiants des biens du compte channel global — ceux d'autres
+  clients.
+- `api/channel-message.js` — le `bookingId` du client, sans contrôle : tout compte
+  connecté pouvait **envoyer un message au voyageur** de n'importe quelle
+  réservation, en son nom. Lecture *et* écriture *et* envoi réel à un tiers.
+
+Les deux ne dépendaient d'aucun chantier : elles étaient exploitables depuis la
+création des endpoints, et invisibles tant qu'on ne regardait que « la session
+est-elle valide ? ».
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

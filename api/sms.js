@@ -2,6 +2,7 @@
 // Usage : POST /api/sms { to, message, property_id, context }
 
 const { createClient } = require('@supabase/supabase-js');
+const { requirePermission } = require('../lib/require-permission');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -223,12 +224,26 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Paramètres manquants : to, message requis' });
     }
 
+    // ⚠ `property_id` vient du CLIENT. Sans revalidation, un utilisateur pouvait
+    // imputer un envoi au bien d'un autre compte : la ligne sms_logs portait
+    // alors un property_id etranger, faussant l'historique et les sondes de
+    // volume. L'envoi lui-meme part vers un numero libre et consomme la cle
+    // Brevo de l'appelant, pas celle d'autrui — mais la tracabilite, si.
+    let propertyIdValide = null;
+    if (property_id) {
+      const garde = await requirePermission(req, res, {
+        domaine: 'messages', niveau: 'write', bien: property_id
+      });
+      if (!garde.ok) return;
+      propertyIdValide = garde.bien.provider_property_id;
+    }
+
     if (message.length > 320) {
       return res.status(400).json({ error: 'Message trop long (max 320 caractères / 2 SMS)' });
     }
 
     try {
-      const result = await sendSms(to, message, property_id, context, user.id);
+      const result = await sendSms(to, message, propertyIdValide, context, user.id);
       return res.status(result.success ? 200 : 500).json(result);
     } catch (err) {
       return res.status(500).json({ error: err.message });

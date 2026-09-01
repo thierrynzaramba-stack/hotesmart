@@ -1,23 +1,34 @@
 // api/channel-message.js
 // Envoi d'un message sortant (hote -> voyageur) via le provider channel (Channex).
 // POST { bookingId, message } -> getProvider('channex').sendMessage
+//
+// ⚠ FUITE ENTRE COMPTES CORRIGEE (2 septembre 2026). Cet endpoint ne verifiait
+// que la validite de la session : le `bookingId` venait du client SANS aucune
+// verification de propriete. Tout utilisateur connecte pouvait envoyer un
+// message, EN SON NOM, au voyageur de n'importe quelle reservation Channex de
+// n'importe quel compte. C'est une ecriture ET un envoi reel a un tiers.
 const { createClient } = require('@supabase/supabase-js')
 const { getProvider } = require('../lib/channels')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
 
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: u, error: authErr } = await supabase.auth.getUser(token)
-  if (authErr || !u?.user) return res.status(401).json({ error: 'Session invalide' })
-
   const { bookingId, message, propertyId } = req.body || {}
-  if (!bookingId || !message) return res.status(400).json({ error: 'bookingId et message requis' })
+  if (!message) return res.status(400).json({ error: 'message requis' })
+
+  // La reservation designe le compte ET le bien : un bookingId d'un autre compte
+  // donne 404, une reservation hors perimetre 403 — avant tout envoi.
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write',
+    booking: bookingId, bookingRequis: true,
+    bien: propertyId || null
+  })
+  if (!garde.ok) return
 
   try {
     const r = await getProvider('channex').sendMessage({}, { bookingId, message })
@@ -32,9 +43,12 @@ module.exports = async function handler(req, res) {
     // ota null -> lookup bookings_snapshot (snapshot.source). providerMsgId null
     // -> dedup logique.
     await recordMessage({
-      userId:        u.user.id,
+      // Le compte propriétaire de la reservation, pas l'appelant : c'est lui qui
+      // possede le fil de messages.
+      userId:        garde.accountUserId,
       provider:      'channex',
-      propertyId:    propertyId,
+      // property_id revalide serveur, jamais celui envoye par le client.
+      propertyId:    garde.bien ? garde.bien.provider_property_id : garde.booking.property_id,
       bookingId:     bookingId,
       direction:     'outbound',
       sender:        'host',

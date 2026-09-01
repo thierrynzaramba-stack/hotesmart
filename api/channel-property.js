@@ -8,6 +8,7 @@
 //   room / hotel             -> multi-unites, tarifs mutualisables (NON encore supporte)
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -164,6 +165,15 @@ module.exports = async function handler(req, res) {
       ota_connect_status, ota_listing_urls, capacity, base_price, included_guests, extra_guest_fee } = req.body || {}
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
+    // Modification d'un bien = domaine `reglages` en ecriture, sur CE bien.
+    // Le filtre eq('user_id') ci-dessous est conserve en defense en profondeur.
+    {
+      const garde = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: pid, bienRequis: true
+      })
+      if (!garde.ok) return
+    }
+
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee')
@@ -304,6 +314,16 @@ module.exports = async function handler(req, res) {
     const { property_id: pid } = req.body || {}
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
+    // ⚠ ACTION DESTRUCTRICE : supprime le bien ET purge toutes ses donnees liees
+    // (bookings_snapshot, menage_events, messages…). Exige `reglages` en
+    // ecriture sur CE bien.
+    {
+      const garde = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: pid, bienRequis: true
+      })
+      if (!garde.ok) return
+    }
+
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, name, provider, provider_property_id, provider_rate_plan_id')
@@ -404,6 +424,14 @@ module.exports = async function handler(req, res) {
 
   // ===== POST : creation d'un bien complet =====
   if (req.method === 'POST') {
+    // Creation : aucun bien existant a designer, le compte cible est celui de
+    // l'appelant. La garde verifie donc `reglages` en ecriture sur son compte —
+    // un titulaire passe, un membre sans le droit est refuse.
+    {
+      const garde = await requirePermission(req, res, { domaine: 'reglages', niveau: 'write' })
+      if (!garde.ok) return
+    }
+
     const { name, capacity, currency, address, city, country, zip_code, base_price, included_guests, extra_guest_fee, ota_connect_status } = req.body || {}
 
     // Statut de connexion OTA a la creation (facultatif). Seul 'requested' est

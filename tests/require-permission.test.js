@@ -210,3 +210,104 @@ test('domaine inconnu -> 500, jamais un passage silencieux', async () => {
   const r = await requirePermission(req(), res, { domaine: 'inexistant' })
   assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 500)
 })
+
+// ─── Resolution par RESERVATION (cas api/channel-message.js) ────────────────
+// Un bookingId venant du client ne doit pas permettre d'agir sur la reservation
+// d'un autre compte : c'est la reservation qui designe le compte, pas l'appelant.
+
+function chargerAvecBookings({ user = MEMBRE, bookings = [], biens = [BIEN_PROD, BIEN_AUTRE], profil = null, permissions = null }) {
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: user } }, error: null }) },
+    from(nom) {
+      const q = {
+        _f: {},
+        select() { return q },
+        eq(c, v) { q._f[c] = v; return q },
+        or(expr) { q._or = expr; return q },
+        maybeSingle: async () => {
+          if (nom === 'bookings_snapshot') return { data: bookings.find(b => b.booking_id === q._f.booking_id) || null }
+          if (nom === 'properties') {
+            const m = String(q._or || '').match(/id\.eq\.([^,]+),provider_property_id\.eq\.(.+)/)
+            const v = m ? m[1] : null
+            return { data: biens.find(b => b.id === v || b.provider_property_id === v) || null }
+          }
+          if (nom === 'profiles') {
+            if (!profil) return { data: null }
+            const ok = profil.account_user_id === q._f.account_user_id && profil.member_user_id === q._f.member_user_id
+            return { data: ok ? profil : null }
+          }
+          if (nom === 'profile_permissions') return { data: permissions }
+          return { data: null }
+        }
+      }
+      return q
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  delete require.cache[require.resolve('../lib/require-permission')]
+  return require('../lib/require-permission')
+}
+
+const BOOK_PROD  = { user_id: PROD,  booking_id: '77', property_id: '209413' }
+const BOOK_AUTRE = { user_id: AUTRE, booking_id: '99', property_id: 'ref-x' }
+
+test('reservation d\'un AUTRE compte -> 403, meme avec messages=write sur le sien', async () => {
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [BOOK_PROD, BOOK_AUTRE],
+    profil: profilActif(), permissions: perms({ messages: 'write' })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: '99' })
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(res.code, 403)
+})
+
+test('reservation du compte cible + droit -> passe, et resout le bien', async () => {
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [BOOK_PROD], profil: profilActif(), permissions: perms({ messages: 'write' })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: '77' })
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.accountUserId, PROD)
+  assert.strictEqual(r.booking.property_id, '209413')
+})
+
+test('reservation inexistante -> 404', async () => {
+  const { requirePermission } = chargerAvecBookings({ bookings: [], profil: profilActif(), permissions: perms({ messages: 'write' }) })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: 'inconnu' })
+  assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 404)
+})
+
+test('reservation requise mais absente -> 400', async () => {
+  const { requirePermission } = chargerAvecBookings({ profil: profilActif(), permissions: perms({ messages: 'write' }) })
+  const res = reponse()
+  await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: null, bookingRequis: true })
+  assert.strictEqual(res.code, 400)
+})
+
+test('booking et bien de comptes DIFFERENTS -> 403 (tentative de substitution)', async () => {
+  // Un appelant qui fournirait un bookingId de son compte et le property_id d'un
+  // autre, en esperant que l'un des deux serve de reference.
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [BOOK_PROD], profil: profilActif(), permissions: perms({ messages: 'write' })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, {
+    domaine: 'messages', niveau: 'write', booking: '77', bien: 'ref-x'
+  })
+  assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 403)
+})
+
+test('reservation hors perimetre -> 403', async () => {
+  const { requirePermission } = chargerAvecBookings({
+    bookings: [BOOK_PROD], profil: profilActif(),
+    permissions: perms({ messages: 'write', property_scope: 'selected', property_ids: ['autre'], property_refs: ['999'] })
+  })
+  const res = reponse()
+  const r = await requirePermission(req(), res, { domaine: 'messages', niveau: 'write', booking: '77' })
+  assert.strictEqual(r.ok, false); assert.strictEqual(res.code, 403)
+})
