@@ -70,9 +70,13 @@ const LOTS = {
     { table: 'airbnb_connect_sessions',domaine: 'reglages',     cle: 'uuid' }
   ],
   6: [
-    { table: 'properties',        domaine: 'dedie',       cle: 'uuid' },
-    { table: 'api_keys',          domaine: 'dedie',       cle: null },
-    { table: 'app_logs',          domaine: 'dedie',       cle: null },
+    // `properties` : politique DEDIEE au perimetre seul, sans condition de
+    // domaine — un membre doit lire les biens qui lui sont attribues quel que
+    // soit son droit sur `reglages`, sinon aucune page n'affiche de nom de bien.
+    { table: 'properties',        domaine: 'perimetre',   cle: 'uuid' },
+    // `api_keys` et `app_logs` : politique DEDIEE au titulaire seul.
+    { table: 'api_keys',          domaine: 'titulaire',   cle: null },
+    { table: 'app_logs',          domaine: 'titulaire',   cle: null },
     { table: 'agent_alert_config',domaine: 'reglages',    cle: null },
     { table: 'accounts',          domaine: 'facturation', cle: null },
     { table: 'subscriptions',     domaine: 'facturation', cle: null }
@@ -142,7 +146,11 @@ async function main() {
     console.log(`\n${'═'.repeat(72)}\nLOT ${numero}\n${'═'.repeat(72)}`)
 
     for (const { table, domaine, cle } of tables) {
-      const attendu = DROITS_ATTENDUS[domaine] || 'none'
+      // 'perimetre' : lisible si le bien est dans le perimetre, sans domaine.
+      // 'titulaire' : jamais lisible par un membre, quel que soit son domaine.
+      const attendu = domaine === 'perimetre' ? 'read'
+                    : domaine === 'titulaire' ? 'none'
+                    : (DROITS_ATTENDUS[domaine] || 'none')
       console.log(`\n  ${table}  (domaine ${domaine}, droit attendu : ${attendu})`)
 
       // ── LECTURE ──
@@ -164,7 +172,11 @@ async function main() {
                 lignes.length ? 'FUITE : domaine non autorise' : '')
       } else if (cle) {
         const autorisees = new Set(cle === 'uuid' ? idsOk : refsOk)
-        const horsPerimetre = lignes.filter(r => r.property_id != null && !autorisees.has(String(r.property_id)))
+        // `properties` n'a pas de colonne property_id : son identifiant EST sa
+        // cle primaire. Sans ce cas particulier, aucune ligne ne serait comparee
+        // et le test passerait sans rien verifier.
+        const refDe = r => (table === 'properties' ? r.id : r.property_id)
+        const horsPerimetre = lignes.filter(r => refDe(r) != null && !autorisees.has(String(refDe(r))))
         verdict(horsPerimetre.length === 0,
                 `${lignes.length} ligne(s) du compte cible, toutes dans le perimetre${suffixe}`,
                 horsPerimetre.length ? `FUITE : ${horsPerimetre.length} ligne(s) d'un autre bien` : '')

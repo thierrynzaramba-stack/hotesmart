@@ -1,4 +1,4 @@
-# KB — Profils et droits : étape 0 (livrable préalable)
+# KB — Profils et droits (étapes 0 à 2 terminées)
 
 <!-- SOURCES (mapping inverse). ⚠️ DOC en tête de ces fichiers pointe ici. Modif = MÊME COMMIT. -->
 > Sources : `docs/specs/spec-profils-et-droits.md` (spec de référence),
@@ -7,7 +7,9 @@
 > Mots-clés routage chat : droits, profil, équipe, permission, accès, employé,
 > propriétaire, prestataire, RLS.
 
-**Statut : en attente de validation.** Rien n'est codé ni migré.
+**Statut : étapes 0, 1 et 2 appliquées en production.** Les 30 tables sont
+protégées par le modèle de profils. Reste : étapes 3 à 6 (endpoints, page Équipe,
+sélecteur de compte, fiche prestataire).
 
 ## 1. Inventaire des tables
 
@@ -312,6 +314,68 @@ bug **antérieur** au chantier des droits, que celui-ci rend simplement visible.
 
 À corriger dans un chantier dédié : uniformiser sur `provider_property_id`, puis
 rattacher ou purger les 19 lignes orphelines.
+
+## 5 quater. Étape 2 TERMINÉE — les 30 tables
+
+| Lot | Tables | Test |
+|---|---|---|
+| 1 | `automation_incidents`, `integration_requests`, `onboarding_state`, `agent_prompting`, `conversation_flags` | 10/10 |
+| 2 | `sms_logs`, `message_sent_log`, `agent_tasks`, `menage_comments`, `menage_done` | 10/10 |
+| 3 | `menage_events`, `property_status`, `public_tokens`, `locks`, `lock_alert_config` | 10/10 |
+| 4 | `messages`, `conversations`, `message_templates`, `knowledge` | 8/8 (par bascule) |
+| 5 | `bookings_snapshot`, `booking_change_events`, `access_codes`, `property_locks`, `airbnb_connect_sessions` | 10/10 |
+| 6 | `properties`, `api_keys`, `app_logs`, `agent_alert_config`, `accounts`, `subscriptions` | 12/12 |
+
+**30 tables**, toutes protégées. Le contrôle final ne renvoie que `api_keys`,
+`app_logs` et `properties` — les trois politiques dédiées, qui n'utilisent pas
+`can_read` par construction.
+
+### Les trois politiques dédiées
+
+- **`properties`** — lecture par le **périmètre seul**, sans condition de domaine.
+  Elle porte le périmètre lui-même : sans cela, aucune page n'afficherait de nom
+  de bien. Écriture : `reglages = write` + bien dans le périmètre.
+- **`api_keys`** — **titulaire seul**. Clés Beds24, Seam et Brevo en clair : des
+  identifiants d'accès, pas des réglages.
+- **`app_logs`** — **titulaire seul**. Journal d'audit, `data` jsonb libre.
+
+### `booking_change_events` : lecture seule côté client
+
+Aucune politique d'écriture pour `authenticated`. `booking_id` et `property_id` y
+sont libres, et le dispatcher consomme la file en service key : un membre pouvant
+y insérer ferait annuler le code d'accès du voyageur d'un autre bien. Cette table
+a donc **1** politique, pas 2.
+
+### Effet mesuré (compte test : un bien, `reservations`/`menages` en lecture)
+
+```
+bookings_snapshot   90 / 180      menage_events    90 / 167
+menage_done         68 / 116      access_codes     15 / 109
+properties           1 bien du compte prod (La bulle) + le sien
+api_keys, app_logs, accounts, subscriptions, locks, public_tokens : invisibles
+aucune écriture acceptée, sur aucune table
+```
+
+Le cron n'est pas affecté : il écrit en service key. Cycles vérifiés après les
+lots 5 et 6 — 27 à 37 s, terminés, sans erreur.
+
+### Ce que le dispositif de test a appris
+
+`scripts/test-droits.js` a dû être corrigé **quatre fois**, et chaque correction
+portait sur une manière de conclure juste pour une mauvaise raison :
+
+1. il écrivait au nom du testeur — écriture légitime, qui passait et polluait la
+   base (→ `REVIEW.md` §9) ;
+2. il comptait les lignes propres du testeur comme des fuites ;
+3. il lisait un `count` avec `head:true` après un `update` : PostgREST répond 200
+   sans erreur et le count vaut `null`, pas `0` — il concluait « écriture
+   acceptée » alors que rien n'était écrit ;
+4. il traitait `properties` comme un domaine ordinaire, alors que sa politique est
+   au périmètre seul, et cherchait un `property_id` sur une table dont
+   l'identifiant est la clé primaire.
+
+Les droits attendus sont désormais **lus en base**, jamais codés en dur : une
+bascule de configuration change l'attendu du test, au lieu de le contredire.
 
 ## 6. Points restant à trancher
 
