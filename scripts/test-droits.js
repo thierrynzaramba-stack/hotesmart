@@ -27,8 +27,10 @@ const { createClient } = require('@supabase/supabase-js')
 
 const LOT_COURANT = 1
 
-// Perimetre attendu du compte test : un seul bien, lecture reservations + menages.
-const DROITS_ATTENDUS = { reservations: 'read', menages: 'read' }
+// Les droits attendus sont LUS EN BASE (profile_permissions), pas codes en dur :
+// une bascule temporaire (cf. 2026-09-02-test-mixtes-bascule.sql) doit changer
+// l'attendu du test, sinon le test contredirait la configuration reelle.
+let DROITS_ATTENDUS = {}
 
 // domaine : le domaine de la table · cle : 'text' | 'uuid' | null (pas de bien)
 const LOTS = {
@@ -120,8 +122,11 @@ async function main() {
     console.log(`Profil : ${monProfil.first_name} ${monProfil.last_name || ''} · compte ${String(monProfil.account_user_id).slice(0, 8)}…`)
     console.log(`Compte cible : ${String(compteCible).slice(0, 8)}… — seules SES lignes sont comptees`)
     if (mesDroits) {
+      ;['reservations','menages','prestataires','messages','avis','reglages','facturation','equipe']
+        .forEach(d => { if (mesDroits[d] && mesDroits[d] !== 'none') DROITS_ATTENDUS[d] = mesDroits[d] })
       console.log(`Perimetre : ${mesDroits.property_scope} · refs autorisees ${JSON.stringify(mesDroits.property_refs)}`)
-      console.log(`Droits : ${Object.entries(DROITS_ATTENDUS).map(([d, n]) => `${d}=${n}`).join(' ')}\n`)
+      const resume = Object.entries(DROITS_ATTENDUS).map(([d, n]) => `${d}=${n}`).join(' ')
+      console.log(`Droits lus en base : ${resume || '(aucun domaine autorise)'}\n`)
     }
   }
 
