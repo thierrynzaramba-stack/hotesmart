@@ -266,12 +266,16 @@
     try {
       // ⚠ Plus de propIds codes en dur : c'etaient ceux d'UN compte. Depuis que
       // /api/beds24 verifie le perimetre, les envoyer depuis un autre compte
-      // repond 403 au lieu d'une liste vide. Sans bien selectionne, on prend ceux
-      // de la liste deja chargee pour ce compte.
+      // repond 403 au lieu d'une liste vide.
+      // ⚠ Et UNIQUEMENT les biens beds24 : ce chemin appelle /api/beds24, ou un
+      // provider_property_id Channex ne correspond a aucun propId. Sur un compte
+      // 100 % channel, chaque appel finissait en 400 avale silencieusement — et
+      // pour un hote a 30 biens, en 30 requetes paralleles.
       const props = propId
         ? [propId]
-        : Array.from(document.getElementById('prop-select').options)
-            .map(o => o.value).filter(Boolean)
+        : (window._props || [])
+            .filter(p => p.provider === 'beds24' && p.provider_property_id)
+            .map(p => p.provider_property_id)
 
       const [beds24Results, convRes, taskRes, pinRes] = await Promise.all([
         Promise.all(props.map(pid =>

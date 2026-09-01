@@ -74,7 +74,13 @@ module.exports = async function handler(req, res) {
     // toujours un propertyId, et un bien retire de `properties` dont les
     // conversations restent affichees aurait donc casse la reponse au voyageur.
     // Beds24 tranchera de toute facon plus bas.
-    let bienAnnonce = propertyId || null
+    // Le bien annonce n'est resolu que s'il va REELLEMENT servir de reference a la
+    // garde. Le resoudre systematiquement ajoutait un point de panne (503 sur
+    // timeout) a des chemins qui n'en ont pas besoin : getProperties l'ignore, et
+    // sendMessage sur reservation connue laisse la reservation faire foi.
+    const bienUtile = action !== 'getProperties' && !(action === 'sendMessage' && parReservation)
+    let bienAnnonce = bienUtile ? (propertyId || null) : null
+    let bienAnnonceResolu = null
     if (bienAnnonce) {
       const essai = await resoudreBien(bienAnnonce)
       if (essai && essai.erreur) {
@@ -101,9 +107,13 @@ module.exports = async function handler(req, res) {
       // chargee, et GET /properties renvoyait TOUS ses biens Beds24 — le
       // perimetre n'existant pas en sortie. Sans bien, la garde retombe sur le
       // compte de l'appelant : il ne voit que les siens.
-      bien:    action === 'getProperties' ? null
-               : action === 'sendMessage' ? (parReservation ? null : bienAnnonce)
-               : (propertyId || null),
+      // ⚠ `bienAnnonce`, jamais `propertyId` : la valeur client non resolue a ete
+      // mise a null expres (repli). La repasser brute la faisait re-resoudre dans
+      // la garde — donc 404 malgre le repli, et un second SELECT properties a
+      // chaque appel. `bienAnnonce` vaut deja null pour getProperties et pour
+      // sendMessage sur reservation connue.
+      bien:    bienAnnonce,
+      bienResolu: bienAnnonceResolu,
       // ⚠ Le repli de sendMessage n'EXIGE pas de bien. Le front n'en a pas
       // toujours un a fournir (messages.property_id peut etre NULL), et exiger
       // ici renvoyait 400 sur une reponse voyageur qui fonctionnait avant. Quand

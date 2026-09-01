@@ -26,7 +26,10 @@ const Module = require('node:module')
 const PROD = 'compte-prod', AUTRE = 'compte-autre', MEMBRE = 'membre'
 
 const BIEN_A = { id: '58001ed1-e194-498a-94b4-606eece8f33d', user_id: PROD, name: 'La bulle',
-                 provider: 'beds24', provider_property_id: '209413' }
+                 provider: 'beds24', provider_property_id: '209413',
+                 // extra_guest_fee volontairement NULL : c'est le cas ou la mise a
+                 // zero se perdait.
+                 included_guests: 4, extra_guest_fee: null }
 const BIEN_B = { id: '7c2b0f11-2222-4444-8888-aaaaaaaaaaaa', user_id: PROD, name: 'Coeur de vie',
                  provider: 'beds24', provider_property_id: '169567' }
 const BIEN_TIERS = { id: '9f3c0000-3333-4444-9999-bbbbbbbbbbbb', user_id: AUTRE, name: 'Chez un autre',
@@ -320,6 +323,35 @@ test('calendar GET : erreur de lecture des reservations -> 500, jamais un calend
   await require('../api/calendar')(req({ query: {
     property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' } }), res)
   assert.strictEqual(res.code, 500)
+})
+
+test('calendar POST : mettre a 0 un champ NULL est bien enregistre', async () => {
+  // ⚠ Number(null) === 0 : comparer par Number faisait disparaitre la mise a zero
+  // d'un champ jusque-la NULL. L'hote lisait « enregistre » sans rien changer.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ kind: 'perPerson', extra_guest_fee: 0 },
+               { date_from: '2026-09-10', date_to: '2026-09-10', rate: 100 }] } }), res)
+  const maj = etat.ecritures.find(e => e.table === 'properties')
+  assert.ok(maj, 'la mise a zero doit produire une ecriture')
+  assert.strictEqual(maj.row.extra_guest_fee, 0)
+})
+
+test('calendar POST : un segment de config INCHANGE n\'exige pas reglages', async () => {
+  // Le front pousse perPerson des que l'onglet a ete affiche : le membre ne doit
+  // pas perdre ses changements de tarifs pour autant.
+  const etat = preparer({ profil: profilActif(),
+    permissions: perms({ reservations: 'write', reglages: 'none' }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ kind: 'perPerson', included: BIEN_A.included_guests },
+               { date_from: '2026-09-10', date_to: '2026-09-10', rate: 100 }] } }), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'),
+    'les tarifs autorises doivent etre enregistres')
 })
 
 // ─── channel-rateplan : tarifs derives par canal ─────────────────────────────

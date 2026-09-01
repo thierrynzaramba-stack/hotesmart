@@ -437,14 +437,17 @@ module.exports = async function handler(req, res) {
     // autorises — parce que le handler s'arretait avant l'upsert.
     // On ne garde donc que ce qui change REELLEMENT, et la garde ne se declenche
     // que s'il reste quelque chose a ecrire.
+    // ⚠ `null` n'est PAS `0`. Comparer par Number() faisait disparaitre une mise a
+    // zero d'un champ jusque-la NULL (extra_guest_fee, included_guests,
+    // orphan_price_value) : la cle etait retiree, rien n'etait ecrit, et l'hote
+    // voyait « enregistre » sans que sa valeur change.
+    const memeValeur = (avant, apres) => {
+      if (avant == null || apres == null) return avant == null && apres == null
+      if (typeof avant === 'number' || typeof apres === 'number') return Number(avant) === Number(apres)
+      return String(avant) === String(apres)
+    }
     for (const cle of Object.keys(propUpdates)) {
-      const avant = bien[cle]
-      const apres = propUpdates[cle]
-      const memeValeur = (avant == null && apres == null) ||
-                         (typeof avant === 'number' || typeof apres === 'number'
-                            ? Number(avant) === Number(apres)
-                            : String(avant) === String(apres))
-      if (memeValeur) delete propUpdates[cle]
+      if (memeValeur(bien[cle], propUpdates[cle])) delete propUpdates[cle]
     }
     if (Object.keys(propUpdates).length) {
       const gardeReglages = await requirePermission(req, res, {
@@ -454,7 +457,12 @@ module.exports = async function handler(req, res) {
     }
     if (Object.keys(propUpdates).length) {
       const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', bienId).eq('user_id', compte)
-      if (pErr) console.error('[calendar] properties update error', pErr.message)
+      // ⚠ Un echec ici ne peut pas se solder par un 200 : l'hote lit
+      // « enregistre » alors que la configuration du bien n'a pas bouge.
+      if (pErr) {
+        console.error('[calendar] properties update error', pErr.message)
+        return res.status(500).json({ error: 'Enregistrement de la configuration echoue' })
+      }
     }
 
     const allDates = new Set()

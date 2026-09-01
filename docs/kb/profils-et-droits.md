@@ -498,3 +498,63 @@ rattacher, avant que les politiques ne les rendent invisibles.
 
 **`agent_prompting`** est vide : son `property_id` n'a pu être typé par les
 valeurs. À confirmer au moment d'écrire sa politique.
+
+## 7. Étape 3 — état du câblage de la garde
+
+### Endpoints traités : 19 / 26
+
+- **Groupe 1** (`reglages`) : `agent-config`, `alert-test`, `beds24-setup`,
+  `channel-connect`, `channel-token`
+- **Groupe 2** (`reglages`, canaux) : `channel-mapping`, `channel-airbnb-connect`,
+  `channel-bcom`, `channel-bcom-write`, `channel-bcom-activate`
+- **Groupe 3** (prix, disponibilités, messages) : `channel-rateplan`, `calendar`,
+  `channel-import-messages`, `messages`, `beds24`
+- Plus les quatre premiers, hors groupe : `diagnostic`, `channel-message`, `sms`,
+  `channel-property`
+
+**Reste 7 endpoints.**
+
+### ⚠️ Divergence assumée : `property_id` NULL dans un filtre de collection
+
+`in_scope` (SQL) et `dansPerimetre` (JS) considèrent qu'une donnée **sans bien**
+est toujours dans le périmètre. `filtrePerimetreSql`, lui, **exclut** les lignes à
+`property_id` NULL par défaut.
+
+**Pourquoi.** La règle « donnée sans bien = dans le périmètre » vaut pour une
+donnée de **compte**. Elle ne vaut pas pour une **collection de données
+voyageur** : `messages.property_id` peut être NULL par simple défaut de
+rattachement, et inclure ce cas montrerait à un membre limité au bien A les
+conversations des biens B et C. L'alignement propagerait ici une permissivité, il
+ne la justifie pas.
+
+Un appelant dont les lignes sans bien sont légitimement communes au compte passe
+`inclureSansBien = true` explicitement. Aujourd'hui `api/messages.js` est le seul
+consommateur, et il prend le défaut.
+
+### ⚠️ Câblage inerte jusqu'au sélecteur de compte (étape 5)
+
+`api/messages.js` est un endpoint de **collection** : aucun identifiant client, donc
+aucune ressource ne désigne un compte, donc le compte cible est celui de
+l'appelant — qui en est titulaire par définition. La garde de domaine et le filtre
+de périmètre y sont donc **inertes**. Conséquence fonctionnelle, pas sécuritaire :
+un membre invité ne voit pas la messagerie du compte auquel il appartient, il voit
+la sienne (vide). Même limite sur le repli `sendMessage` de `api/beds24.js` sans
+bien ni réservation : la clé Beds24 cherchée est celle de l'appelant.
+
+La couverture de tests porte donc sur `lib/permissions` (`refsDuPerimetre`,
+`filtrePerimetreSql`), pas sur l'endpoint : un vert d'endpoint ne prouverait rien.
+
+### Règle de partage des domaines dans `api/calendar.js`
+
+Ce qui s'écrit dans `calendar_inventory` et se pousse en ARI (tarif du jour,
+disponibilité, séjour minimum, `fullsync`) relève de **`reservations`** — c'est le
+métier du calendrier. Ce qui s'écrit dans `properties` relève de **`reglages`** —
+c'est la configuration du bien (prix par personne, autofix des nuits orphelines),
+gardée par ce même domaine ailleurs. Un membre peut donc tenir le calendrier sans
+pouvoir reconfigurer le bien.
+
+### ⚠️ Dette : `analyze.html` mono-provider
+
+La page lit `/api/beds24 getProperties`. Pour un hôte 100 % channel, elle répond
+400 « Clé Beds24 non configurée » et la liste des biens reste vide. Même nature que
+l'écart E1 du planning ménage. À traiter avant la bêta.
