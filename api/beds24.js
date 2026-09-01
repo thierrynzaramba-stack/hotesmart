@@ -81,9 +81,17 @@ module.exports = async function handler(req, res) {
       // toujours un a fournir (messages.property_id peut etre NULL), et exiger
       // ici renvoyait 400 sur une reponse voyageur qui fonctionnait avant. Quand
       // il manque, c'est Beds24 qui donne le bien, et la garde repasse dessus.
+      //
+      // ⚠ LIMITE ASSUMEE de ce chemin : sans bien ni reservation, le compte cible
+      // est celui de l'appelant, donc la cle Beds24 cherchee est la sienne. Un
+      // membre delegue (qui n'a pas de cle a lui) recoit 400 « Cle non
+      // configuree ». Ce n'est pas une regression — l'endpoint lisait deja la cle
+      // sur l'appelant — mais la delegation de ce chemin precis attend le
+      // selecteur de compte (etape 5).
       bienRequis: action !== 'getProperties' && !(action === 'sendMessage' && !parReservation),
       booking: parReservation ? bookingId : null,
       bookingRequis: false,
+      bookingResolu: bookingConnu,
       userId: appelant
     })
     if (!garde.ok) return

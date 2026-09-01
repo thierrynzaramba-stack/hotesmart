@@ -104,9 +104,12 @@ function coalesceRanges(items) {
 }
 
 // Plafond de la liste `property_ids`. Elle vient du client et n'en avait aucun :
-// chaque identifiant coutant une verification de droits, une liste forgee suffisait
-// a faire expirer la fonction.
-const MAX_BIENS = 50
+// chaque identifiant coutait alors une verification de droits complete, et une
+// liste forgee suffisait a faire expirer la fonction. La resolution se fait
+// desormais en deux requetes quel qu'en soit le nombre — le plafond ne borne plus
+// que la taille du `.in()`, d'ou une valeur large : aucun hote reel ne doit s'y
+// heurter.
+const MAX_BIENS = 200
 
 module.exports = async function handler(req, res) {
   // ⚠ SESSION VERIFIEE ICI, INCONDITIONNELLEMENT. Se reposer sur la garde des
@@ -142,8 +145,13 @@ module.exports = async function handler(req, res) {
   // present dans la liste d'un client ne doit pas faire echouer le calendrier
   // entier — seul un bien EXISTANT mais etranger est un refus.
   async function resoudreListe(ids) {
+    // ⚠ Un provider_property_id Channex EST un UUID. Une valeur au format UUID
+    // doit donc etre cherchee dans LES DEUX colonnes, exactement comme le fait
+    // resoudreBien : ne l'interroger que contre `id` rendait le calendrier blanc
+    // (200, liste vide) pour un bien channel designe par sa reference canal,
+    // alors que le POST sur le meme identifiant fonctionnait.
     const uuids = ids.filter(v => UUID_RE.test(v))
-    const refs  = ids.filter(v => !UUID_RE.test(v) && REF_SURE_RE.test(v))
+    const refs  = ids.filter(v => REF_SURE_RE.test(v) || UUID_RE.test(v))
     const COLS = 'id, name, user_id, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
     const paquets = []
     if (uuids.length) paquets.push(supabase.from('properties').select(COLS).in('id', uuids))
@@ -399,6 +407,17 @@ module.exports = async function handler(req, res) {
       } else {
         dateSegments.push(seg)
       }
+    }
+    // ⚠ SECOND DOMAINE. Les segments perPerson / orphanConfig ne touchent pas au
+    // calendrier : ils modifient la CONFIGURATION du bien (prix par personne,
+    // autofix des nuits orphelines). Partout ailleurs ces reglages relevent de
+    // `reglages` — channel-rateplan garde la config tarifaire avec ce domaine.
+    // Sans ce controle, `reservations: write` suffisait a les changer.
+    if (Object.keys(propUpdates).length) {
+      const gardeReglages = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: bienId, bienRequis: true, userId
+      })
+      if (!gardeReglages.ok) return
     }
     if (Object.keys(propUpdates).length) {
       const { error: pErr } = await supabase.from('properties').update(propUpdates).eq('id', bienId).eq('user_id', compte)

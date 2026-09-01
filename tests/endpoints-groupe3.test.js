@@ -31,7 +31,11 @@ const BIEN_B = { id: '7c2b0f11-2222-4444-8888-aaaaaaaaaaaa', user_id: PROD, name
                  provider: 'beds24', provider_property_id: '169567' }
 const BIEN_TIERS = { id: '9f3c0000-3333-4444-9999-bbbbbbbbbbbb', user_id: AUTRE, name: 'Chez un autre',
                      provider: 'beds24', provider_property_id: '999999' }
-const BIENS = [BIEN_A, BIEN_B, BIEN_TIERS]
+// ⚠ Un provider_property_id Channex EST un UUID : ce bien existe pour que la
+// resolution par reference canal soit reellement exercee.
+const BIEN_CHANNEX = { id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900', user_id: PROD, name: 'Colomiers',
+                       provider: 'channex', provider_property_id: '0544fd9a-6579-44e7-b75e-19c63a2019ba' }
+const BIENS = [BIEN_A, BIEN_B, BIEN_TIERS, BIEN_CHANNEX]
 
 const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/calendar',
                  '../api/channel-rateplan', '../api/beds24', '../api/messages',
@@ -233,6 +237,42 @@ test('calendar : sans en-tete Authorization -> 401', async () => {
   await require('../api/calendar')({ method: 'GET', headers: {}, query: {
     property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' }, body: {} }, res)
   assert.strictEqual(res.code, 401)
+})
+
+test('calendar GET : un provider_property_id Channex (qui EST un UUID) se resout', async () => {
+  // La branche UUID n'interrogeait que `properties.id` : un bien channel designe
+  // par sa reference canal donnait un calendrier blanc en 200, alors que le POST
+  // sur le meme identifiant fonctionnait.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: {
+    property_ids: BIEN_CHANNEX.provider_property_id, start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.properties.length, 1)
+  assert.strictEqual(res.body.properties[0].id, BIEN_CHANNEX.id)
+})
+
+test('calendar POST : perPerson exige AUSSI reglages/write', async () => {
+  // Ces segments modifient la configuration du bien, pas le calendrier.
+  const etat = preparer({ profil: profilActif(),
+    permissions: perms({ reservations: 'write', reglages: 'none' }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ kind: 'perPerson', included: 2, extra_guest_fee: 15 }] } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'properties'), [])
+})
+
+test('calendar POST : segments de dates seuls -> reglages non exige', async () => {
+  const etat = preparer({ profil: profilActif(),
+    permissions: perms({ reservations: 'write', reglages: 'none' }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', rate: 120 }] } }), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'))
 })
 
 // ─── channel-rateplan : tarifs derives par canal ─────────────────────────────
@@ -490,7 +530,7 @@ test('calendar GET : un identifiant INCONNU ne casse pas les autres biens', asyn
 test('calendar GET : liste au-dela du plafond -> 400 avant toute verification', async () => {
   const etat = preparer({ user: PROD })
   const res = reponse()
-  const liste = Array.from({ length: 60 }, (_, i) => `1111111${String(i).padStart(2, '0')}-2222-3333-4444-555555555555`)
+  const liste = Array.from({ length: 250 }, (_, i) => `11111${String(i).padStart(3, '0')}-2222-3333-4444-555555555555`)
   await require('../api/calendar')(req({ query: { property_ids: liste.join(','), start: '2026-09-01', end: '2026-09-30' } }), res)
   assert.strictEqual(res.code, 400)
   void etat
@@ -659,11 +699,15 @@ test('filtrePerimetreSql : perimetre vide -> chaine vide (echec FERME)', () => {
   assert.strictEqual(filtrePerimetreSql([]), '')
 })
 
-test('filtrePerimetreSql : reference au format refuse -> echec FERME, pas d\'injection', () => {
+test('filtrePerimetreSql : reference au format refuse -> ecartee, pas d\'injection', () => {
   // Une virgule ou une parenthese ajouterait des filtres a l'expression .or().
+  // Elle est ECARTEE : les biens sains du membre restent visibles.
   const { filtrePerimetreSql } = require('../lib/permissions')
-  assert.strictEqual(filtrePerimetreSql(['ok', 'a),user_id.neq.x,(b']), '')
-  assert.strictEqual(filtrePerimetreSql(['ok', 'avec espace']), '')
+  const f = filtrePerimetreSql(['ok', 'a),user_id.neq.x,(b'])
+  assert.strictEqual(f, 'property_id.is.null,property_id.in.(ok)')
+  assert.strictEqual(filtrePerimetreSql(['a),user_id.neq.x,(b']), '',
+    'aucune reference sure -> echec ferme')
+  assert.ok(!filtrePerimetreSql(['ok', 'avec espace']).includes('espace'))
 })
 
 // ─── channel-import-messages ─────────────────────────────────────────────────

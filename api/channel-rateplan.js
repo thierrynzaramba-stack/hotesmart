@@ -91,6 +91,7 @@ module.exports = async function handler(req, res) {
   // sans property_id. La conditionner au bien resolu laissait toute action
   // future prenant un canal seul sans protection par defaut.
   let canalVerifie = false
+  let canalLu = null
   if (canalDemande) {
     const gardeCanal = await requirePermissionPourCanal(req, res, {
       channelId: canalDemande, channelCall, userId: appelant,
@@ -103,6 +104,7 @@ module.exports = async function handler(req, res) {
       return res.status(403).json({ error: 'Droits insuffisants' })
     }
     canalVerifie = true
+    canalLu = gardeCanal.canal
   }
 
   // --- create_derived : enfant neutre + lignes de liaison ---
@@ -194,18 +196,37 @@ module.exports = async function handler(req, res) {
     if (!providerPropertyId || !ratePlanId) return res.status(400).json({ error: 'property_id + rate_plan_id requis' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id')
+      .from('properties').select('id, provider_property_id, provider_rate_plan_id')
       .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
-    const rp = await channelCall('GET', `/rate_plans/${encodeURIComponent(ratePlanId)}`)
-    const a = rp.json?.data?.attributes || {}
+    if (!REF_SURE_RE.test(ratePlanId)) return res.status(400).json({ error: 'rate_plan_id invalide' })
+
     // ⚠ `rate_plan_id` est un identifiant CLIENT de plus. Le bien valide ne dit
     // rien de lui : sans ce controle, la configuration du rate plan d'un autre
     // compte (titre, parent, options) sortait d'ici.
+    //
+    // Le rattachement se verifie D'ABORD sur NOS donnees (base du bien, ou ligne
+    // property_channel_rate_plans) : c'est la source dont on est sur. La reponse
+    // du gestionnaire de canaux ne sert que de confirmation SUPPLEMENTAIRE quand
+    // elle porte un property_id — rien ne garantit que ce champ est relu, et en
+    // faire l'unique controle ferait repondre 403 a tous les appels legitimes.
+    const { data: liens } = await supabase
+      .from('property_channel_rate_plans')
+      .select('provider_rate_plan_id')
+      .eq('property_id', prop.id)
+    const connus = new Set([prop.provider_rate_plan_id, ...((liens || []).map(l => l.provider_rate_plan_id))]
+      .filter(Boolean).map(String))
+    if (!connus.has(String(ratePlanId))) {
+      console.log('[channel-rateplan] refus inspect : rate plan non rattache au bien')
+      return res.status(403).json({ error: 'Droits insuffisants' })
+    }
+
+    const rp = await channelCall('GET', `/rate_plans/${encodeURIComponent(ratePlanId)}`)
+    const a = rp.json?.data?.attributes || {}
     if (!rp.ok) return res.status(502).json({ error: 'Lecture rate plan echouee', http: rp.status })
-    if (String(a.property_id || '') !== String(providerPropertyId)) {
-      console.log('[channel-rateplan] refus inspect : rate plan hors du bien')
+    if (a.property_id != null && String(a.property_id) !== String(providerPropertyId)) {
+      console.log('[channel-rateplan] refus inspect : le canal rattache ce rate plan a un autre bien')
       return res.status(403).json({ error: 'Droits insuffisants' })
     }
 
@@ -532,8 +553,11 @@ module.exports = async function handler(req, res) {
         channelId, channelCall, domaine: 'reglages', niveau: 'read', userId: appelant
       })
       if (!gardeCanal.ok) return
+      canalLu = gardeCanal.canal
     }
-    const ch = await channelCall('GET', `/channels/${channelId}`)
+    // La garde a deja lu le canal : le relire serait un second aller-retour pour
+    // exactement la meme reponse.
+    const ch = canalLu || await channelCall('GET', `/channels/${encodeURIComponent(channelId)}`)
     const rps = (ch.json?.data?.attributes?.rate_plans || []).map(rp => ({
       mapping_id: rp.id, rate_plan_id: rp.rate_plan_id, listing_id: rp.settings?.listing_id, primary_occ: rp.settings?.primary_occ
     }))
