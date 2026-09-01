@@ -518,7 +518,10 @@ module.exports = async function handler(req, res) {
     const propId = bien.provider_property_id
     const ratePlanId = bien.provider_rate_plan_id
     const roomTypeId = bien.provider_room_type_id
-    let pushWarnings = echecConfig ? [echecConfig] : []
+    // ⚠ `echecConfig` est AJOUTE en fin de liste, pas en tete : les vues
+    // n'affichent que warnings[0] dans le mode local_only, et le prendre en
+    // premier faisait disparaitre l'explication « ce bien est gere par Beds24 ».
+    let pushWarnings = []
     let pushed = false
     let localOnly = false
     const taskIdsSave = {}
@@ -612,10 +615,16 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    if (echecConfig) pushWarnings.push(echecConfig)
+
     return res.status(200).json({
       saved: rows.length,
       pushed,
       local_only: localOnly,
+      // Drapeau LISIBLE PAR LE CODE : un texte dans `warnings` ne suffit pas, les
+      // vues n'en affichent que le nombre. Sans lui, l'hote lisait
+      // « Enregistre (1 avertissement) » puis voyait sa valeur revenir en place.
+      config_saved: !echecConfig,
       warnings: pushWarnings,
       task_ids: taskIdsSave
     })

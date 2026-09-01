@@ -403,6 +403,9 @@ test('calendar POST : un echec de la config ne fait pas perdre les tarifs', asyn
   assert.strictEqual(res.code, 200)
   assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'), 'les tarifs doivent etre ecrits')
   assert.ok((res.body.warnings || []).some(w => /configuration/.test(w)), 'l\'echec doit etre remonte')
+  // ⚠ Un texte dans `warnings` ne suffit pas : les vues n'en affichaient que le
+  // NOMBRE. Le drapeau est ce sur quoi elles s'appuient.
+  assert.strictEqual(res.body.config_saved, false)
 })
 
 test('calendar POST : config SEULE en echec -> 500', async () => {
@@ -412,6 +415,29 @@ test('calendar POST : config SEULE en echec -> 500', async () => {
     action: 'save', property_id: BIEN_A.id,
     segments: [{ kind: 'perPerson', extra_guest_fee: 12 }] } }), res)
   assert.strictEqual(res.code, 500)
+})
+
+test('calendar POST : sauvegarde reussie -> config_saved vrai', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_A.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', rate: 100 }] } }), res)
+  assert.strictEqual(res.body.config_saved, true)
+  void etat
+})
+
+test('garde : une reference en MAJUSCULES accepte quand meme le cache', async () => {
+  // Postgres rend les UUID en minuscules, UUID_RE accepte les majuscules.
+  preparer({ user: PROD })
+  const { requirePermission } = require('../lib/require-permission')
+  const res = reponse()
+  const g = await requirePermission(req(), res, {
+    domaine: 'reservations', niveau: 'read',
+    bien: BIEN_A.id.toUpperCase(), bienResolu: BIEN_A, bienRequis: true
+  })
+  assert.strictEqual(g.ok, true)
+  assert.strictEqual(g.bien.id, BIEN_A.id)
 })
 
 // ─── channel-rateplan : tarifs derives par canal ─────────────────────────────
