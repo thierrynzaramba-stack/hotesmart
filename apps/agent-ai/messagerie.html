@@ -669,11 +669,11 @@
       // reconfronte ensuite a Beds24).
       const res = await fetch('/api/beds24', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => t.id === taskId)?.property_id || null })
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => String(t.id) === String(taskId))?.property_id || null })
       })
       const data = await res.json()
       if (data.success) {
-        const task = allTasks.find(t => t.id === taskId)
+        const task = allTasks.find(t => String(t.id) === String(taskId))
         if (task) await window._supabase.from('conversations').insert({
           user_id: window._session.user.id, property_id: task.property_id, guest_name: task.guest_name,
           guest_message: task.guest_message, agent_reply: reply, book_id: bookId
@@ -702,11 +702,11 @@
       sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi…'
       const res = await fetch('/api/beds24', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => t.id === taskId)?.property_id || null })
+        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => String(t.id) === String(taskId))?.property_id || null })
       })
       const data = await res.json()
       if (data.success) {
-        const task = allTasks.find(t => t.id === taskId)
+        const task = allTasks.find(t => String(t.id) === String(taskId))
         if (task) await window._supabase.from('conversations').insert({
           user_id: window._session.user.id, property_id: task.property_id, guest_name: task.guest_name,
           guest_message: task.guest_message, agent_reply: reply, book_id: bookId

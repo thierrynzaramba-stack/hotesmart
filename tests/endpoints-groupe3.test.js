@@ -75,11 +75,14 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
           if (q._f.id != null) {
             assert.match(String(q._f.id), /^[0-9a-f]{8}-/i, '.eq(id) recoit un identifiant non-UUID')
           }
+          // ⚠ Le double doit honorer `.in()` sur N'IMPORTE QUELLE colonne. Ne le
+          // traiter que pour `id` faisait renvoyer tous les biens a la requete
+          // par provider_property_id — un bien etranger serait passe inapercu.
           const cands = BIENS.filter(b =>
             (q._f.id == null || b.id === q._f.id) &&
             (q._f.provider_property_id == null || b.provider_property_id === q._f.provider_property_id) &&
             (q._f.user_id == null || b.user_id === q._f.user_id) &&
-            (q._in == null || q._in.c !== 'id' || q._in.v.includes(b.id)))
+            (q._in == null || q._in.v.includes(b[q._in.c])))
           return { data: tableau ? cands : (cands[0] || null), error: null }
         }
         if (nom === 'profiles') {
@@ -95,7 +98,13 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
             (q._in == null || q._in.c !== 'property_id' || q._in.v.includes(s.property_id)))
           return { data: tableau ? rows : (rows[0] || null), error: null }
         }
-        if (nom === 'api_keys') return { data: { api_key: 'cle-du-compte' }, error: null }
+        // ⚠ La cle n'existe QUE pour le compte de production. C'est ce qui rend
+        // visible une bascule de compte indue : sans cle, l'endpoint repond 400.
+        if (nom === 'api_keys') {
+          return q._f.user_id === PROD
+            ? { data: { api_key: 'cle-du-compte' }, error: null }
+            : { data: null, error: { message: 'aucune ligne' } }
+        }
         if (nom === 'messages') {
           const rows = messages.filter(m =>
             (q._in == null || q._in.c !== 'property_id' || q._in.v.includes(m.property_id)))
@@ -239,6 +248,71 @@ test('channel-rateplan : raw_channel exige un canal rattache au perimetre', asyn
   assert.ok(res.code === 403 || res.code === 404, `attendu 403/404, recu ${res.code}`)
 })
 
+test('channel-rateplan remap : SON bien + le canal d\'un AUTRE compte -> 403, aucun PUT', () => {
+  // Le trou que la garde par bien seule laissait entier : rebrancher le canal
+  // Booking.com d'autrui sur ses propres tarifs.
+  return (async () => {
+    const etat = preparer({ user: PROD, fetchStub: async (url) => {
+      if (url.includes('/channels/canal-tiers')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({
+          data: { attributes: { properties: [BIEN_TIERS.provider_property_id], rate_plans: [] } } }) }
+      }
+      return null
+    } })
+    const res = reponse()
+    await require('../api/channel-rateplan')(req({ query: {
+      action: 'remap', property_id: BIEN_A.provider_property_id,
+      channel_id: 'canal-tiers', dry_run: 'false' } }), res)
+    assert.strictEqual(res.code, 403)
+    assert.deepStrictEqual(etat.appels.filter(a => a.method === 'PUT'), [])
+  })()
+})
+
+test('channel-rateplan remap_airbnb : canal etranger -> 403, aucun DELETE', async () => {
+  const etat = preparer({ user: PROD, fetchStub: async (url) => {
+    if (url.includes('/channels/canal-tiers')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({
+        data: { attributes: { properties: [BIEN_TIERS.provider_property_id], rate_plans: [] } } }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({ query: {
+    action: 'remap_airbnb', property_id: BIEN_A.provider_property_id,
+    channel_id: 'canal-tiers', dry_run: 'false' } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.appels.filter(a => a.method === 'DELETE'), [])
+})
+
+test('channel-rateplan remap : canal DU bien -> passe la garde', async () => {
+  const etat = preparer({ user: PROD, fetchStub: async (url) => {
+    if (url.includes('/channels/canal-a')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({
+        data: { attributes: { properties: [BIEN_A.provider_property_id], rate_plans: [] } } }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({ query: {
+    action: 'remap', property_id: BIEN_A.provider_property_id, channel_id: 'canal-a' } }), res)
+  assert.notStrictEqual(res.code, 403, 'le canal du bien ne doit pas etre refuse')
+  void etat
+})
+
+test('channel-rateplan inspect : rate_plan_id d\'un AUTRE bien -> 403', async () => {
+  preparer({ user: PROD, fetchStub: async (url) => {
+    if (url.includes('/rate_plans/rp-tiers')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({
+        data: { attributes: { title: 'secret', property_id: BIEN_TIERS.provider_property_id } } }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/channel-rateplan')(req({ query: {
+    action: 'inspect', property_id: BIEN_A.provider_property_id, rate_plan_id: 'rp-tiers' } }), res)
+  assert.strictEqual(res.code, 403)
+})
+
 // ─── beds24 : proxy conversations + envoi ────────────────────────────────────
 
 test('beds24 getConversations : membre messages=none -> 403', async () => {
@@ -322,6 +396,82 @@ test('beds24 sendMessage : reservation HORS snapshot, propId concordant -> envoi
     'le chemin legitime doit envoyer')
 })
 
+test('beds24 getProperties : un propertyId dans le body n\'ouvre PAS le compte du proprietaire', async () => {
+  // Le piege : le membre est limite au bien A mais getProperties n'a pas de
+  // filtre de sortie. Prendre son propertyId en compte faisait basculer la garde
+  // sur le compte proprietaire, charger SA cle Beds24, et renvoyer TOUS ses biens.
+  const etat = preparer({
+    profil: profilActif(),
+    permissions: perms({ reglages: 'read', messages: 'read', property_scope: 'selected',
+                         property_ids: [BIEN_A.id], property_refs: [BIEN_A.provider_property_id] })
+  })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'getProperties', propertyId: BIEN_A.provider_property_id } }), res)
+  // Le compte cible reste celui de l'appelant : c'est SA cle qui est cherchee,
+  // il n'en a pas, donc 400 — et surtout aucun appel a Beds24.
+  assert.strictEqual(res.code, 400)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('beds24.com')), [],
+    'la cle du proprietaire ne doit jamais servir a lister ses biens pour un membre')
+})
+
+test('beds24 sendMessage : Beds24 en panne -> 502, jamais un 403 trompeur', async () => {
+  // Un 403 ferait croire a un probleme de droits et couperait le titulaire de sa
+  // conversation. On distingue la panne du refus.
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) return { ok: false, status: 503, json: async () => ({}) }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: BIEN_A.provider_property_id } }), res)
+  assert.strictEqual(res.code, 502)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/bookings/messages')), [])
+})
+
+test('beds24 sendMessage : Beds24 ignore le filtre id -> 404, aucun envoi', async () => {
+  const etat = preparer({ user: PROD, snapshots: [], fetchStub: async (url) => {
+    if (url.includes('/bookings?id=')) {
+      // Reservation ARBITRAIRE : le filtre n'a pas ete applique.
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 11111, propertyId: BIEN_A.provider_property_id }] }) }
+    }
+    return null
+  } })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'sendMessage', bookingId: '88801', message: 'coucou', propertyId: BIEN_A.provider_property_id } }), res)
+  assert.strictEqual(res.code, 404)
+  assert.deepStrictEqual(etat.appels.filter(a => a.url.includes('/bookings/messages')), [])
+})
+
+test('calendar GET : un identifiant INCONNU ne casse pas les autres biens', async () => {
+  // Un bien supprime encore present dans la liste d'un client ne doit pas faire
+  // echouer le calendrier entier.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: {
+    property_ids: `${BIEN_A.id},11111111-2222-3333-4444-555555555555`,
+    start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.properties.length, 1)
+})
+
+test('calendar GET : liste au-dela du plafond -> 400 avant toute verification', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  const liste = Array.from({ length: 60 }, (_, i) => `1111111${String(i).padStart(2, '0')}-2222-3333-4444-555555555555`)
+  await require('../api/calendar')(req({ query: { property_ids: liste.join(','), start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.strictEqual(res.code, 400)
+  void etat
+})
+
+test('calendar GET : user_id ne ressort pas dans la reponse', async () => {
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: { property_ids: BIEN_A.id, start: '2026-09-01', end: '2026-09-30' } }), res)
+  assert.ok(res.body.properties.every(p => p.user_id === undefined))
+})
+
 // ─── messages : collection filtree par le perimetre ──────────────────────────
 
 test('messages : le compte cible est celui de l\'appelant, jamais un autre', async () => {
@@ -402,6 +552,31 @@ test('refsDuPerimetre : profil revoque -> liste VIDE, jamais null', () => {
   assert.deepStrictEqual(refsDuPerimetre({
     userId: MEMBRE, accountUserId: PROD, profil: null, permissions: null
   }), [])
+})
+
+test('filtrePerimetreSql : aucun perimetre -> null (aucun filtre)', () => {
+  const { filtrePerimetreSql } = require('../lib/permissions')
+  assert.strictEqual(filtrePerimetreSql(null), null)
+})
+
+test('filtrePerimetreSql : le cas NULL est INCLUS (aligne sur in_scope)', () => {
+  // Un `.in()` nu rendrait invisibles les messages sans bien, que le SQL accepte.
+  const { filtrePerimetreSql } = require('../lib/permissions')
+  const f = filtrePerimetreSql([BIEN_B.id, BIEN_B.provider_property_id])
+  assert.ok(f.startsWith('property_id.is.null,'), f)
+  assert.ok(f.includes(BIEN_B.provider_property_id))
+})
+
+test('filtrePerimetreSql : perimetre vide -> chaine vide (echec FERME)', () => {
+  const { filtrePerimetreSql } = require('../lib/permissions')
+  assert.strictEqual(filtrePerimetreSql([]), '')
+})
+
+test('filtrePerimetreSql : reference au format refuse -> echec FERME, pas d\'injection', () => {
+  // Une virgule ou une parenthese ajouterait des filtres a l'expression .or().
+  const { filtrePerimetreSql } = require('../lib/permissions')
+  assert.strictEqual(filtrePerimetreSql(['ok', 'a),user_id.neq.x,(b']), '')
+  assert.strictEqual(filtrePerimetreSql(['ok', 'avec espace']), '')
 })
 
 // ─── channel-import-messages ─────────────────────────────────────────────────

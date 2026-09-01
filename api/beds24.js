@@ -59,9 +59,15 @@ module.exports = async function handler(req, res) {
       domaine: regle.domaine,
       niveau:  regle.niveau,
       // getProperties n'a pas de bien : il liste ceux du compte de l'appelant.
-      bien:    action === 'sendMessage'
-                 ? (parReservation ? null : (propertyId || null))
-                 : (propertyId || null),
+      // ⚠ getProperties IGNORE `propertyId`. Le prendre en compte suffisait a
+      // ouvrir tout le compte : un membre limite au bien A passait A, la garde
+      // basculait `accountUserId` sur le proprietaire, la cle de celui-ci etait
+      // chargee, et GET /properties renvoyait TOUS ses biens Beds24 — le
+      // perimetre n'existant pas en sortie. Sans bien, la garde retombe sur le
+      // compte de l'appelant : il ne voit que les siens.
+      bien:    action === 'getProperties' ? null
+               : action === 'sendMessage' ? (parReservation ? null : (propertyId || null))
+               : (propertyId || null),
       bienRequis: action !== 'getProperties',
       booking: parReservation ? bookingId : null,
       bookingRequis: false
@@ -73,6 +79,13 @@ module.exports = async function handler(req, res) {
     const propId = garde.bien
       ? garde.bien.provider_property_id
       : (garde.booking ? garde.booking.property_id : propertyId)
+
+    // Bien cree a l'onboarding mais jamais connecte : sans ce refus, l'URL
+    // partait avec `propId=null` et l'hote voyait une liste vide sans savoir
+    // pourquoi.
+    if (action !== 'getProperties' && (propId == null || propId === '')) {
+      return res.status(400).json({ error: 'Bien non connecté au PMS' })
+    }
 
     // La cle appartient au compte PROPRIETAIRE du bien, pas a l'appelant : c'est
     // ce qui rend la delegation possible (un membre invite n'a pas de cle a lui).
@@ -194,8 +207,22 @@ module.exports = async function handler(req, res) {
             `https://beds24.com/api/v2/bookings?id=${encodeURIComponent(bookingId)}`,
             { headers: { token: beds24Key } }
           )
-          const db = await rb.json()
-          const resa = (db.data || [])[0]
+          // ⚠ Distinguer les trois cas, sinon une panne Beds24 se presente comme
+          // un refus de droits et le titulaire ne peut plus repondre a son
+          // voyageur — precisement ce que ce repli existe pour eviter.
+          if (!rb.ok) {
+            console.error('[Beds24] verification reservation HTTP', rb.status)
+            return res.status(502).json({ error: 'Vérification de la réservation impossible' })
+          }
+          const db = await rb.json().catch(() => null)
+          if (!db || !Array.isArray(db.data)) {
+            console.error('[Beds24] verification reservation : reponse illisible')
+            return res.status(502).json({ error: 'Vérification de la réservation impossible' })
+          }
+          // Le filtre `id` doit avoir ete PRIS EN COMPTE : on exige que la ligne
+          // renvoyee soit bien celle demandee, sinon Beds24 nous a repondu autre
+          // chose et rien ne serait verifie.
+          const resa = db.data.find(b => String(b.id) === String(bookingId))
           if (!resa) return res.status(404).json({ error: 'Réservation introuvable' })
           if (String(resa.propertyId) !== String(propId)) {
             console.log('[Beds24] refus sendMessage : reservation hors du bien autorise')

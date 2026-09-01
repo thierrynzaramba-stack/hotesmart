@@ -58,8 +58,9 @@ module.exports = async function handler(req, res) {
   // Le bien vient du client : resolu en base et confronte au perimetre avant
   // tout appel au gestionnaire de canaux.
   const bienDemande = String(req.query.property_id || req.body?.property_id || '').trim()
-  const LECTURE_SEULE = new Set(['inspect', 'rules'])
+  const LECTURE_SEULE = new Set(['inspect', 'rules', 'raw_channel'])
   let compteBien = null
+  let bienResolu = null
   if (bienDemande) {
     const garde = await requirePermission(req, res, {
       domaine: 'reglages',
@@ -69,6 +70,26 @@ module.exports = async function handler(req, res) {
     })
     if (!garde.ok) return
     compteBien = garde.accountUserId
+    bienResolu = garde.bien
+  }
+
+  // ⚠ LE BIEN NE SUFFIT PAS : `channel_id` est un SECOND identifiant client, et
+  // remap / remap_airbnb l'utilisent pour ECRIRE (PUT /channels, DELETE puis POST
+  // /mappings). Valider seulement le bien laissait entier le scenario suivant :
+  // passer SON bien et le canal d'un AUTRE compte, et rebrancher le canal
+  // Booking.com ou Airbnb d'autrui sur ses propres tarifs — ou casser son mapping.
+  // Le canal doit donc appartenir au bien deja valide.
+  const canalDemande = (req.query.channel_id || '').trim()
+  if (canalDemande && bienResolu) {
+    const gardeCanal = await requirePermissionPourCanal(req, res, {
+      channelId: canalDemande, channelCall,
+      domaine: 'reglages', niveau: LECTURE_SEULE.has(action) ? 'read' : 'write'
+    })
+    if (!gardeCanal.ok) return
+    if (String(gardeCanal.bienDuCanal) !== String(bienResolu.provider_property_id)) {
+      console.log('[channel-rateplan] refus : canal rattache a un autre bien')
+      return res.status(403).json({ error: 'Droits insuffisants' })
+    }
   }
 
   // --- create_derived : enfant neutre + lignes de liaison ---
@@ -164,8 +185,16 @@ module.exports = async function handler(req, res) {
       .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
-    const rp = await channelCall('GET', `/rate_plans/${ratePlanId}`)
+    const rp = await channelCall('GET', `/rate_plans/${encodeURIComponent(ratePlanId)}`)
     const a = rp.json?.data?.attributes || {}
+    // ⚠ `rate_plan_id` est un identifiant CLIENT de plus. Le bien valide ne dit
+    // rien de lui : sans ce controle, la configuration du rate plan d'un autre
+    // compte (titre, parent, options) sortait d'ici.
+    if (!rp.ok) return res.status(502).json({ error: 'Lecture rate plan echouee', http: rp.status })
+    if (String(a.property_id || '') !== String(providerPropertyId)) {
+      console.log('[channel-rateplan] refus inspect : rate plan hors du bien')
+      return res.status(403).json({ error: 'Droits insuffisants' })
+    }
 
     const from = new Date(); const to = new Date(from); to.setDate(to.getDate() + 3)
     const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`

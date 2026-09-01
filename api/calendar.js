@@ -10,7 +10,8 @@ const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 const { readStatus } = require('../lib/bookings-snapshot')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
+const { peutLire, peutEcrire } = require('../lib/permissions')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -102,13 +103,16 @@ function coalesceRanges(items) {
   return out
 }
 
+// Plafond de la liste `property_ids`. Elle vient du client et n'en avait aucun :
+// chaque identifiant coutant une verification de droits, une liste forgee suffisait
+// a faire expirer la fonction.
+const MAX_BIENS = 50
+
 module.exports = async function handler(req, res) {
-  // ===== AUTH =====
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'Non autorise' })
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) return res.status(401).json({ error: 'Session invalide' })
-  const user = userData.user
+  // La session est verifiee par requirePermission (qui appelle auth.getUser).
+  // On ne teste ici que la PRESENCE du jeton, pour repondre 401 plutot que 400
+  // sur une requete malformee — sans payer un second aller-retour Auth.
+  if (!req.headers.authorization) return res.status(401).json({ error: 'Non autorise' })
 
   // Helper : charge les biens et verifie l'ownership.
   //
@@ -129,31 +133,67 @@ module.exports = async function handler(req, res) {
     return data || []
   }
 
+  // Resout une LISTE d'identifiants (UUID ou provider_property_id) en DEUX
+  // requetes au plus. Les inconnus sont ignores : un bien supprime encore
+  // present dans la liste d'un client ne doit pas faire echouer le calendrier
+  // entier — seul un bien EXISTANT mais etranger est un refus.
+  async function resoudreListe(ids) {
+    const uuids = ids.filter(v => UUID_RE.test(v))
+    const refs  = ids.filter(v => !UUID_RE.test(v) && REF_SURE_RE.test(v))
+    const COLS = 'id, name, user_id, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
+    const paquets = []
+    if (uuids.length) paquets.push(supabase.from('properties').select(COLS).in('id', uuids))
+    if (refs.length)  paquets.push(supabase.from('properties').select(COLS).in('provider_property_id', refs))
+    const res2 = await Promise.all(paquets)
+    const vus = new Set()
+    const out = []
+    for (const r of res2) {
+      if (r.error) throw new Error('Erreur lecture biens')
+      for (const b of (r.data || [])) { if (!vus.has(b.id)) { vus.add(b.id); out.push(b) } }
+    }
+    return out
+  }
+
   // Verifie les droits sur CHAQUE bien demande et renvoie les biens RESOLUS.
   // Renvoie null si l'un d'eux est refuse — la garde a alors deja repondu.
+  //
+  // ⚠ UNE SEULE garde complete, puis evaluation en memoire. Une garde par
+  // identifiant paraissait plus sure et etait en fait un deni de service : chaque
+  // appel refait auth.getUser + properties + profiles + profile_permissions, et
+  // `property_ids` est une liste client. Le contexte de droits, lui, est le meme
+  // pour tous les biens d'un compte — il n'y a rien a regagner a le recharger.
   //
   // ⚠ Les identifiants resolus sont ensuite les SEULS utilises : la valeur
   // client ne doit jamais atteindre un `.eq('id', ...)`, `properties.id` etant
   // de type uuid (un propId Beds24 y fait echouer la requete entiere, pas
   // renvoyer zero ligne — c'est la regression SMS deja vecue).
   async function gardeSurBiens(ids, niveau) {
-    const biens = []
-    let compte = null
-    for (const id of ids) {
-      const g = await requirePermission(req, res, {
-        domaine: 'reservations', niveau, bien: id, bienRequis: true
-      })
-      if (!g.ok) return null
+    if (ids.length > MAX_BIENS) {
+      res.status(400).json({ error: `Trop de biens demandés (max ${MAX_BIENS})` })
+      return null
+    }
+    const biens = await resoudreListe(ids)
+    if (!biens.length) return { biens: [], compte: null }
+
+    const g = await requirePermission(req, res, {
+      domaine: 'reservations', niveau, bien: biens[0].id, bienRequis: true
+    })
+    if (!g.ok) return null
+
+    for (const b of biens.slice(1)) {
       // Une requete ne porte que sur UN compte : un melange signale une tentative
       // de faire passer le bien d'un autre compte dans la liste.
-      if (compte && String(compte) !== String(g.accountUserId)) {
+      const cible = { id: b.id, ref: b.provider_property_id }
+      const ok = String(b.user_id) === String(g.accountUserId) &&
+                 (niveau === 'write' ? peutEcrire(g.contexte, 'reservations', cible)
+                                     : peutLire(g.contexte, 'reservations', cible))
+      if (!ok) {
+        console.log('[calendar] refus : bien hors du compte ou du perimetre dans property_ids')
         res.status(403).json({ error: 'Droits insuffisants' })
         return null
       }
-      compte = g.accountUserId
-      biens.push(g.bien)
     }
-    return { biens, compte }
+    return { biens, compte: g.accountUserId }
   }
 
   // ===== GET : inventory + reservations =====
@@ -170,7 +210,7 @@ module.exports = async function handler(req, res) {
     const gardeGet = await gardeSurBiens(ids, 'read')
     if (!gardeGet) return
 
-    const owned = await loadOwnedProperties(gardeGet.biens.map(b => b.id), gardeGet.compte)
+    const owned = gardeGet.biens
     const ownedIds = owned.map(p => p.id)
     if (!ownedIds.length) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
 
@@ -241,7 +281,9 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ properties: owned, inventory, bookings })
+    // `user_id` sert au controle de perimetre, pas au front : il ne ressort pas.
+    const proprietesPubliques = owned.map(({ user_id, ...reste }) => reste)
+    return res.status(200).json({ properties: proprietesPubliques, inventory, bookings })
   }
 
   // ===== POST : sauvegarde (Supabase puis push channel) =====

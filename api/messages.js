@@ -8,7 +8,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const { requirePermission } = require('../lib/require-permission')
-const { refsDuPerimetre } = require('../lib/permissions')
+const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 
 // ─── Normalisation OTA (marque blanche) ──────────────────────────────────────
 // Valeur brute heterogene (Beds24 'airbnb' / Channex 'Airbnb.com' / ...) -> cle CSS.
@@ -62,11 +62,10 @@ module.exports = async function handler(req, res) {
   if (!garde.ok) return
   const userId = garde.accountUserId
   const refsAutorisees = refsDuPerimetre(garde.contexte)
-  // Perimetre restreint et vide -> rien a montrer. Repondre avant la requete
-  // evite un `.in()` sur liste vide, dont le comportement n'est pas garanti.
-  if (Array.isArray(refsAutorisees) && refsAutorisees.length === 0) {
-    return res.status(200).json({ conversations: [] })
-  }
+  // Filtre de perimetre en SQL (construction + garde de format : lib/permissions).
+  // Une expression vide signifie « perimetre vide ou refuse » : on echoue ferme.
+  const filtreOr = filtrePerimetreSql(refsAutorisees)
+  if (filtreOr === '') return res.status(200).json({ conversations: [] })
 
   try {
     // Fenetre 6 mois.
@@ -80,7 +79,7 @@ module.exports = async function handler(req, res) {
           .select('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
           .eq('user_id', userId)
           .gte('sent_at', since)
-        if (refsAutorisees) q = q.in('property_id', refsAutorisees)
+        if (filtreOr) q = q.or(filtreOr)
         return q
           .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
           .limit(2000)
@@ -92,7 +91,7 @@ module.exports = async function handler(req, res) {
           .eq('user_id', userId)
         // Le filtre messages suffirait (la jointure est pilotee par eux), mais
         // charger les reservations hors perimetre en memoire n'a aucun interet.
-        if (refsAutorisees) q = q.in('property_id', refsAutorisees)
+        if (filtreOr) q = q.or(filtreOr)
         return q
       })()
     ])
