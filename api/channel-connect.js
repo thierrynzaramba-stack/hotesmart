@@ -9,6 +9,7 @@
 // White-label : base URL via CHANNEL_APP_BASE (jamais "channex" en dur).
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -40,14 +41,25 @@ module.exports = async function handler(req, res) {
   const user = userData.user
 
   // ===== Bien demande =====
+  // Le bien vient de l'URL : resolu en base et confronte au perimetre avant tout
+  // appel au gestionnaire de canaux. Le filtre eq('user_id') ci-dessous est
+  // conserve en defense en profondeur.
   const propertyId = req.query.property_id
-  if (!propertyId) return res.status(400).json({ error: 'property_id requis' })
+  const garde = await requirePermission(req, res, {
+    domaine: 'reglages', niveau: 'write', bien: propertyId, bienRequis: true
+  })
+  if (!garde.ok) return
+  const compteBien = garde.accountUserId
 
   const { data: prop, error: propErr } = await supabase
     .from('properties')
     .select('provider, provider_property_id, name')
-    .eq('id', propertyId)
-    .eq('user_id', user.id)          // securite : seulement SES biens
+    // ⚠ garde.bien.id, PAS la valeur brute du client : `id` est de type uuid, et
+    // un propId Beds24 y ferait echouer la requete (« invalid input syntax for
+    // type uuid ») -> 500 au lieu du bien. Meme piege qu'en tete de
+    // lib/require-permission.js, deja rencontre sur les SMS.
+    .eq('id', garde.bien.id)
+    .eq('user_id', compteBien)       // compte PROPRIETAIRE du bien (delegation possible)
     .maybeSingle()
 
   if (propErr) {
@@ -65,7 +77,12 @@ module.exports = async function handler(req, res) {
   // ===== One-time token =====
   // TEST TEMPORAIRE : username surchargeable via ?username= pour diagnostiquer
   // l'echec d'auth iframe. A retirer une fois le bon format identifie.
-  const username = req.query.username || user.id
+  //
+  // ⚠ compteBien, PAS l'appelant : depuis que la delegation est possible, un
+  // membre et le titulaire ouvriraient l'iframe du MEME bien sous deux « users »
+  // distincts cote gestionnaire de canaux, avec le risque de sessions et de
+  // mappings divergents. L'identite attendue est celle du proprietaire du bien.
+  const username = req.query.username || compteBien
   try {
     const r = await fetch(`${CHANNEL_APP_BASE}/api/v1/auth/one_time_token`, {
       method: 'POST',

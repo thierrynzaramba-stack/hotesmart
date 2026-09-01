@@ -1,5 +1,6 @@
 // api/beds24-setup.js — Échange l'invite code Beds24 contre un token
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -15,6 +16,19 @@ module.exports = async function handler(req, res) {
 
   const userToken = req.headers.authorization?.replace('Bearer ', '')
   if (!userToken) return res.status(401).json({ error: 'Non autorisé' })
+
+  // Echange du code d'invite Beds24 contre un token PMS, puis ecriture dans
+  // api_keys.
+  //
+  // ⚠ PORTEE REELLE DE CETTE GARDE : aucune ressource n'est designee, donc le
+  // compte cible est celui de l'appelant, dont il est titulaire par definition.
+  // Elle ne filtre donc QUE la session — elle ne « reserve au titulaire » rien
+  // du tout, contrairement a ce qu'un `domaine: 'titulaire'` laisse croire.
+  // Ce n'est pas un probleme ici : toutes les ecritures qui suivent portent sur
+  // `user.id`, l'appelant agit donc sur SON compte et sur aucun autre.
+  // Le cloisonnement reel viendra du selecteur de compte (etape 5).
+  const gardeSetup = await requirePermission(req, res, { domaine: 'titulaire' })
+  if (!gardeSetup.ok) return
 
   const { data: userData } = await supabase.auth.getUser(userToken)
   const user = userData?.user

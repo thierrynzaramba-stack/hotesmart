@@ -4,6 +4,7 @@
 // Verifie que l'utilisateur courant est bien proprietaire du bien demande
 
 const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -19,11 +20,9 @@ module.exports = async function handler(req, res) {
   const token = req.headers.authorization?.replace('Bearer ', '')
   if (!token) return res.status(401).json({ error: 'Non autorise' })
 
-  const { data: userData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !userData?.user) {
-    return res.status(401).json({ error: 'Session invalide' })
-  }
-  const user = userData.user
+  // La session est verifiee par requirePermission plus bas (auth.getUser y est
+  // appele) : un second appel ici serait un aller-retour reseau de plus sur un
+  // chemin qui enchaine deja un appel au gestionnaire de canaux.
 
   // Lecture des vars d'env
   const apiKey = process.env.CHANNEL_API_KEY
@@ -34,22 +33,26 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'Configuration incomplete' })
   }
 
-  // Recuperer le property_id depuis le body
+  // Le bien vient du body : resolu en base et confronte au perimetre. Ce token
+  // ouvre l'iframe du gestionnaire de canaux SUR CE BIEN — le delivrer pour le
+  // bien d'un autre compte donnerait acces a sa configuration OTA.
   const { property_id: hotesmartPropertyId } = req.body || {}
-  if (!hotesmartPropertyId) {
-    return res.status(400).json({ error: 'property_id requis' })
-  }
+  const garde = await requirePermission(req, res, {
+    domaine: 'reglages', niveau: 'write', bien: hotesmartPropertyId, bienRequis: true
+  })
+  if (!garde.ok) return
 
-  // Verifier que le user est proprietaire ET recuperer l'UUID Channex
+  // Relecture avec le compte PROPRIETAIRE : defense en profondeur, et c'est elle
+  // qui fournit l'identifiant provider.
   const { data: property, error: propError } = await supabase
     .from('properties')
     .select('provider_property_id')
-    .eq('id', hotesmartPropertyId)
-    .eq('user_id', user.id)
+    .eq('id', garde.bien.id)
+    .eq('user_id', garde.accountUserId)
     .single()
 
   if (propError || !property) {
-    console.error('[channel-token] Property not found or not owned', { hotesmartPropertyId, userId: user.id })
+    console.error('[channel-token] Property not found or not owned', { hotesmartPropertyId })
     return res.status(404).json({ error: 'Bien introuvable' })
   }
 

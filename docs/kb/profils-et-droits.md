@@ -429,8 +429,8 @@ de l'étape 2 ne protègent que les accès directs depuis le navigateur. Chaque
 endpoint agissant au nom d'un utilisateur doit donc vérifier lui-même, via
 `lib/require-permission.js` — garde unique, jamais de vérification ad hoc.
 
-**État : 4 endpoints sur 26 · 2 fuites entre comptes fermées · 1 régression
-introduite puis corrigée.**
+**État : 9 endpoints sur 26 · 3 fuites fermées · 2 régressions introduites puis
+corrigées (toutes deux vues par la review, aucune poussée pour la seconde).**
 
 | Endpoint | Domaine | Constat |
 |---|---|---|
@@ -445,7 +445,43 @@ sur une colonne de type **uuid**. Avec un propId Beds24, Postgres renvoie une
 minutes. Les doubles de test utilisaient `'uuid-bulle'` comme `properties.id` :
 une valeur qui n'est pas un UUID masquait exactement ce piège (`REVIEW.md` §8).
 
-**Reste 22 endpoints**, à traiter par groupes de 5, review lue **avant** chaque
+**Groupe 1 (domaine `reglages`)** : `agent-config`, `alert-test`, `beds24-setup`,
+`channel-connect`, `channel-token`.
+
+**TROISIÈME FUITE, la plus grave** — `agent-config.js` décodait le `user_id`
+depuis le JWT **sans vérifier la signature**. Un JWT est en base64, pas chiffré :
+forger `xxx.<sub de la cible>.yyy` suffisait à lire **et écrire** la configuration
+d'alertes de n'importe quel compte, donc à en rediriger les destinataires. Le
+commentaire invoquait « même pattern que `cron.js` » — faux, `cron.js` utilise
+`CRON_SECRET`. Seul endroit du repo dans ce cas (vérifié par grep).
+
+### ⚠️ Portée réelle de la garde sans ressource désignée
+
+Sur `agent-config`, `alert-test` et `beds24-setup`, **aucun bien n'est désigné** :
+le compte cible est donc celui de l'appelant, dont il est titulaire par
+définition. La garde n'y filtre **que la session** — elle ne « réserve au
+titulaire » rien du tout, et le cloisonnement par domaine n'y prendra effet
+qu'avec le **sélecteur de compte** (étape 5).
+
+Ce n'est pas un défaut : toutes les écritures de ces endpoints portent déjà sur
+le compte de l'appelant. Mais il ne faut pas lire ces gardes comme une protection
+qu'elles n'apportent pas. C'est écrit dans chaque fichier concerné.
+
+### ⚠️ Dette : `alert-test` — `to` non contraint
+
+Tout utilisateur authentifié peut faire partir un SMS (sa clé Brevo) ou un email
+(**clé plateforme**) vers un destinataire arbitraire. Le correctif est une limite
+de débit et/ou une contrainte sur `to` — ce n'est pas un problème de droits, à
+traiter séparément.
+
+### ⚠️ Dette : `channel-airbnb-connect` incohérent
+
+Il filtre encore `.eq('user_id', user.id)` sans passer par la garde. Depuis que
+`channel-connect` accepte la délégation, un membre délégué peut ouvrir l'iframe du
+bien du titulaire mais recevra un **404** sur `channel-airbnb-connect` pour ce même
+bien. Parcours OTA incohérent, à traiter dans le groupe suivant.
+
+**Reste 21 endpoints**, à traiter par groupes de 5, review lue **avant** chaque
 push (`CLAUDE.md`, règle absolue).
 
 ### ⚠️ Dette : `apps/sms` n'est pas dans le menu

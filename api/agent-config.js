@@ -3,23 +3,31 @@
 // POST → sauvegarde la config alertes
 
 const { createClient } = require('@supabase/supabase-js');
+const { requirePermission } = require('../lib/require-permission');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// Décode le user_id depuis le JWT sans vérification (même pattern que cron.js)
-function getUserIdFromToken(req) {
-  try {
-    const token = (req.headers.authorization || '').replace('Bearer ', '');
-    if (!token) return null;
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-    return payload.sub || null;
-  } catch {
-    return null;
-  }
-}
+// ⚠ USURPATION D'IDENTITE CORRIGEE (2 septembre 2026).
+//
+// Cet endpoint decodait le user_id depuis le JWT SANS VERIFIER LA SIGNATURE :
+//
+//   const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64'))
+//   return payload.sub
+//
+// Un JWT est en base64, pas chiffre : n'importe qui pouvait forger
+// `xxx.<payload avec le sub de sa cible>.yyy` et lire ou ECRIRE la configuration
+// d'alertes de n'importe quel compte — les canaux et destinataires des alertes,
+// donc de quoi les rediriger.
+//
+// Le commentaire d'origine invoquait « meme pattern que cron.js » : c'etait faux,
+// cron.js s'authentifie par CRON_SECRET et ne decode aucun JWT. C'etait le seul
+// endroit du repo a faire cela (verifie par grep).
+//
+// La verification passe desormais par lib/require-permission.js, qui appelle
+// supabase.auth.getUser() — laquelle valide la signature.
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27,8 +35,14 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const userId = getUserIdFromToken(req);
-  if (!userId) return res.status(401).json({ error: 'Non authentifié' });
+  // Lecture comme ecriture : la config d'alertes releve du domaine `reglages`.
+  // Elle n'est rattachee a aucun bien -> pas de perimetre a verifier.
+  const garde = await requirePermission(req, res, {
+    domaine: 'reglages',
+    niveau: req.method === 'GET' ? 'read' : 'write'
+  });
+  if (!garde.ok) return;
+  const userId = garde.accountUserId;
 
   // ── GET : charger la config ──────────────────
   if (req.method === 'GET') {
