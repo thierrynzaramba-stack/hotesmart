@@ -77,9 +77,23 @@ interroge les deux clés).
 
 **`messages`** — 3 `provider_property_id` et **1 UUID orphelin** sur 773 lignes.
 
-Ces valeurs orphelines viennent probablement de biens supprimés. Tant qu'elles
-existent, une politique `in_scope` les rejettera — ce qui est le comportement sûr,
-mais il faut le savoir avant de conclure à un bug de droits.
+Valeurs exactes relevées le 1er septembre 2026 :
+
+| Table | `property_id` orphelin | Lignes | Nature |
+|---|---|---|---|
+| `knowledge` | `1a2cfd91-f501-4b0e-83ef-0598a0c921b2` | 6 | UUID |
+| `knowledge` | `90e2986f-0fb8-4783-9566-92941d1c1bba` | 6 | UUID |
+| `knowledge` | `33494dd7-e309-450e-9892-48761084c5a8` | 7 | UUID |
+| `messages` | `429f043c-f927-41af-b874-3b9b07cca15a` | 1 | UUID |
+
+Les 19 lignes de `knowledge` portent des clés `fixed` (`adresse`,
+`telephone_hote`…) : ce sont des fiches de connaissance rattachées à des biens qui
+n'existent plus, ou saisies sous un identifiant qui a changé depuis.
+
+Ces valeurs viennent probablement de biens supprimés. Tant qu'elles existent, une
+politique `in_scope` les rejettera — comportement sûr, mais il faut le savoir avant
+de conclure à un bug de droits. **À trancher séparément** : purger ces lignes, ou
+les rattacher si le bien correspondant est identifiable.
 
 ## 3. Le pont TEXT / UUID — choix proposé
 
@@ -126,19 +140,75 @@ trigger : `create index on properties (user_id, provider_property_id);`
 (stables, lisibles dans l'URL d'un bien) ; `property_refs` est un détail
 d'implémentation que personne ne saisit à la main.
 
-## 4. Points à trancher avec le livrable
+## 4. Décisions prises (validées le 1er septembre 2026)
 
-**`requires_ack`** (spec prestataires) n'a plus de table où vivre. Il ne relève pas
-de l'identité du prestataire mais du mode d'assignation : je propose de le porter
-sur `property_cleaning_providers`, ce qui le rend réglable **par bien** — plus fin
-que l'actuel réglage global par prestataire.
+- **`requires_ack`** → porté par `property_cleaning_providers`, donc réglable **par
+  bien** plutôt que globalement par prestataire.
+- **`public_tokens`** → conservée **en lecture** pendant ce chantier.
+  `profiles.pwa_token` devient la source ; suppression dans un commit ultérieur.
+  Le token en circulation n'est pas régénéré : la migration le reprend tel quel.
+- **`properties`** → politique dédiée : **lecture** si le bien est dans le
+  périmètre du profil, **écriture** si `reglages = 'write'`. Sans cela, aucune page
+  ne pourrait afficher un nom de bien.
+- **Pont TEXT/UUID** → dualité `property_ids` / `property_refs` avec trigger.
 
-**`public_tokens`** (domaine `prestataires`) devient redondante avec
-`profiles.pwa_token`. À migrer puis retirer, ou à conserver le temps de la
-transition ? Elle est lue par `api/menages-public.js` et par la sonde d'événements.
+## 5. Étape 1 — structures livrées
 
-**`properties`** est classée en `reglages`, mais elle porte le périmètre lui-même :
-un membre doit pouvoir **lire** les biens de son périmètre quel que soit son droit
-sur `reglages`, sinon aucune page ne peut afficher un nom de bien. Je propose une
-politique dédiée : lecture si le bien est dans le périmètre, écriture si
-`reglages = 'write'`.
+`migrations/2026-09-01-profils-et-droits-structures.sql` :
+tables `profiles` et `profile_permissions`, fonctions `perm_level`, `in_scope`
+(deux variantes), `can_read` et `can_write` (trois variantes chacune), index,
+triggers de resynchronisation, profil titulaire pour chaque compte, profils `lien`
+pour les prestataires existants.
+
+**Aucune politique des 28 tables existantes n'est modifiée** — impact zéro.
+
+Deux points de mise en œuvre qui méritent d'être connus :
+
+**Trois variantes explicites de `can_read`/`can_write`**, pas un paramètre par
+défaut. `can_read(user_id, 'domaine', null)` serait **ambigu** entre la surcharge
+`uuid` et la surcharge `text`, et PostgreSQL refuserait l'appel — au moment
+d'écrire une politique, pas au moment de la tester.
+
+**RLS activée dès la création** sur `profiles` et `profile_permissions`. « Aucune
+politique modifiée » vaut pour les tables existantes ; ces deux-là naissent
+protégées, sinon elles seraient lisibles par tout porteur de l'anon key.
+
+### Pièges corrigés à l'étape 1 (relevés en revue)
+
+- **`NEW` n'existe pas en `DELETE`.** Le trigger sur `properties` utilisait
+  `coalesce(new.user_id, old.user_id)` : PL/pgSQL lève « record new is not assigned
+  yet » et **annule la transaction**. Toute suppression de bien aurait échoué.
+  Utiliser `TG_OP` pour choisir la ligne. Corollaire à retenir : ce trigger
+  s'exécute sur **chaque écriture de `properties`** — « impact zéro » ne vaut que
+  pour les *politiques*, pas pour les triggers.
+- **Escalade de privilèges.** `account_user_id` est une colonne librement fixée par
+  l'insérant : une policy qui ne vérifie qu'elle laisse un membre créer une ligne de
+  permissions pointant son profil **sur le compte d'un autre**, en mettant son
+  propre uid dans `account_user_id`. La policy exige donc que le profil visé
+  appartienne au compte de l'appelant, et les jointures de `perm_level`/`in_scope`
+  exigent `p.account_user_id = pr.account_user_id`.
+- **Colonnes mixtes.** `in_scope(uuid, text)` compare aussi à `property_ids` :
+  `knowledge` et `messages` portent tantôt le `provider_property_id`, tantôt l'UUID.
+  Ne comparer qu'à `property_refs` masquerait des lignes légitimes.
+- **Périmètre d'un prestataire migré.** Si `public_tokens.property_ids` est non vide
+  mais qu'aucun identifiant ne résout, on bascule sur `'all'` plutôt que de produire
+  un `'selected'` vide — un prestataire coupé de tous ses ménages est pire qu'un
+  périmètre temporairement large, d'autant qu'il ne voit que **ses** ménages via son
+  token. Une requête de contrôle (§6 de la migration) signale l'écart.
+- **`refs_depuis_ids`** est `security definer` : `revoke` pour les clients, les
+  triggers s'exécutant en `definer`.
+- **`search_path`** posé sur les six variantes de `can_read`/`can_write`, comme sur
+  les fonctions qu'elles appellent.
+
+`lib/permissions.js` est le **miroir JS** de ces fonctions, pour les endpoints
+serverless : ils écrivent en service key, qui contourne la RLS, et doivent donc
+vérifier les droits eux-mêmes. Module non branché à cette étape (câblage = étape 3),
+mais testé — sa sémantique doit rester strictement alignée sur le SQL.
+
+## 6. Points restant à trancher
+
+**Les 4 valeurs orphelines** de `knowledge` et `messages` (§2) : purger ou
+rattacher, avant que les politiques ne les rendent invisibles.
+
+**`agent_prompting`** est vide : son `property_id` n'a pu être typé par les
+valeurs. À confirmer au moment d'écrire sa politique.
