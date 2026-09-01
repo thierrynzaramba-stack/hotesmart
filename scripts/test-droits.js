@@ -66,6 +66,7 @@ const LOTS = {
     { table: 'booking_change_events',  domaine: 'reservations', cle: 'text' },
     { table: 'access_codes',           domaine: 'reservations', cle: 'text' },
     { table: 'property_locks',         domaine: 'reglages',     cle: 'text' },
+    // Seule table en cle UUID du chantier : eprouve in_scope(uuid, uuid).
     { table: 'airbnb_connect_sessions',domaine: 'reglages',     cle: 'uuid' }
   ],
   6: [
