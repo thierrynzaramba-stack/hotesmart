@@ -32,6 +32,19 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - Corollaire : `npm test` au vert n'autorise pas à pousser. Les tests disent que
   ce qu'on a pensé à vérifier fonctionne, pas que le code est correct.
 
+## RÈGLE ABSOLUE — UNE REVIEW PAR COMMIT, PAS DE BOUCLE
+- **Une review par commit.** Si elle trouve un problème de SÉCURITÉ (fuite entre
+  comptes, contournement de garde, authentification), on corrige et on re-review
+  **une seule fois** les correctifs.
+- Tout le reste — mineur, style, durcissement optionnel — se corrige **sans
+  nouvelle review**, ou se note au KB comme dette.
+- **Deux reviews sans constat de sécurité = on pousse.**
+- Vécu : neuf reviews enchaînées sur le même groupe d'endpoints. Les trois
+  premières ont trouvé les vraies fuites ; les six suivantes n'ont plus trouvé
+  que du durcissement, chaque correctif ouvrant le prétexte d'une review de plus.
+  Le coût dépassait le gain, et deux régressions ont été introduites par les
+  correctifs eux-mêmes.
+
 ## RÈGLES TECHNIQUES DURES (non négociables)
 - api/grok.js : NE JAMAIS RENOMMER/SUPPRIMER (wrapper Haiku, legacy Lisa). Utilisé par agent-ai/index.html, messages.html, analyze.html, messagerie.html, extract-kb.js.
 - api/cron.js : TOUJOURS généré en fichier COMPLET. Jamais de patch manuel partiel.

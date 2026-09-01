@@ -36,14 +36,16 @@ module.exports = async function handler(req, res) {
     // ⚠ hasOwnProperty, pas `REGLES[action]` : `constructor`, `toString` et
     // consorts sont herites d'Object.prototype et passaient le test, pour finir
     // en 500 « configuration de droits invalide » au lieu d'un 400.
-    const regle = Object.prototype.hasOwnProperty.call(REGLES, action) ? REGLES[action] : null
-    if (!regle) return res.status(400).json({ error: 'Action inconnue' })
-
-    // Session verifiee AVANT toute lecture : resoudreBooking interroge la base en
+    // Session verifiee AVANT tout le reste : resoudreBooking interroge la base en
     // service key, et son 409 « reservation ambigue » repondait a un appelant non
-    // authentifie — un oracle sur l'existence d'un booking_id partage.
+    // authentifie — un oracle sur l'existence d'un booking_id partage. Le controle
+    // de l'action vient APRES, sinon un appelant sans jeton distingue « action
+    // connue » (400) de « action inconnue » (401) et enumere la surface.
     const appelant = await verifierSession(req, res)
     if (!appelant) return
+
+    const regle = Object.prototype.hasOwnProperty.call(REGLES, action) ? REGLES[action] : null
+    if (!regle) return res.status(400).json({ error: 'Action inconnue' })
 
     // ⚠ SENDMESSAGE ET LA RESERVATION ABSENTE DU SNAPSHOT.
     // Passer bookingId a la garde serait la voie propre, mais le snapshot ne
@@ -81,6 +83,7 @@ module.exports = async function handler(req, res) {
     const bienUtile = action !== 'getProperties' && !(action === 'sendMessage' && parReservation)
     let bienAnnonce = bienUtile ? (propertyId || null) : null
     let bienAnnonceResolu = null
+    let repliNonMaterialise = false
     if (bienAnnonce) {
       const essai = await resoudreBien(bienAnnonce)
       if (essai && essai.erreur) {
@@ -94,6 +97,7 @@ module.exports = async function handler(req, res) {
         // ici transformait une liste vide en 404.
         console.log('[Beds24] bien annonce non materialise : compte de l\'appelant')
         bienAnnonce = null
+        repliNonMaterialise = true
       } else {
         bienAnnonceResolu = essai
       }
@@ -141,9 +145,22 @@ module.exports = async function handler(req, res) {
     // annonce n'a pas pu etre resolu, il a ete mis a null exprès. Reprendre la
     // valeur client ici la reintroduisait telle quelle, et la confrontation
     // Beds24 plus bas la comparait a un propId reel — donc 403 systematique.
+    // ⚠ Le repli vaut pour TOUTES les actions, pas seulement sendMessage. Sans la
+    // derniere branche, une lecture sur un bien non materialise repondait 400
+    // « Bien non connecte au PMS » : /api/channel-property sert les biens Beds24
+    // EN LIVE depuis l'API, donc un bien que le cron n'a pas encore materialise
+    // est propose au front, qui le renvoie ici.
+    // La valeur brute n'est reprise que si le compte cible est celui de
+    // l'appelant : c'est SA cle Beds24 qui part, et elle borne deja la reponse.
+    // ⚠ sendMessage en est EXCLU : sur ce chemin c'est Beds24 qui designe le bien
+    // et la confrontation compare propId a ce qu'il repond. Y reinjecter la valeur
+    // client la ferait echouer systematiquement (403).
     const propId = garde.bien
       ? garde.bien.provider_property_id
-      : (garde.booking ? garde.booking.property_id : bienAnnonce)
+      : (garde.booking ? garde.booking.property_id
+         : (bienAnnonce
+            || (repliNonMaterialise && action !== 'sendMessage' &&
+                String(garde.accountUserId) === String(appelant) ? propertyId : null)))
 
     // Bien cree a l'onboarding mais jamais connecte : sans ce refus, l'URL
     // partait avec `propId=null` et l'hote voyait une liste vide sans savoir

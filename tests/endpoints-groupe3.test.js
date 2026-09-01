@@ -811,6 +811,45 @@ test('messages : erreur du SECOND select -> 500, sans detail PostgREST', async (
     'le detail PostgREST ne doit pas sortir vers le navigateur')
 })
 
+test('beds24 getConversations : bien Beds24 non materialise -> lecture, pas 400', async () => {
+  // ⚠ /api/channel-property sert les biens Beds24 EN LIVE : un bien que le cron
+  // n'a pas encore materialise est propose au front, qui le renvoie ici. Le repli
+  // ne valait que pour sendMessage — les lectures repondaient 400.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: {
+    action: 'getConversations', propertyId: '777777' } }), res)
+  assert.notStrictEqual(res.code, 400, JSON.stringify(res.body))
+  assert.notStrictEqual(res.code, 404)
+  assert.ok(etat.appels.some(a => a.url.includes('propId=777777')),
+    'le propId doit partir vers Beds24, borne par la cle du compte')
+})
+
+test('beds24 : action inconnue SANS jeton -> 401, jamais 400', async () => {
+  // Sinon un appelant non authentifie distingue « action connue » de
+  // « action inconnue » et enumere la surface de l'endpoint.
+  preparer({ user: null })
+  const res = reponse()
+  await require('../api/beds24')(req({ method: 'POST', body: { action: 'nimporte' } }), res)
+  assert.strictEqual(res.code, 401)
+})
+
+test('garde : une reservation mise en cache qui ne correspond PAS est ignoree', async () => {
+  preparer({ user: PROD, snapshots: [
+    { user_id: AUTRE, booking_id: '555', property_id: BIEN_TIERS.provider_property_id, snapshot: {} }
+  ] })
+  const { requirePermission } = require('../lib/require-permission')
+  const res = reponse()
+  const g = await requirePermission(req(), res, {
+    domaine: 'messages', niveau: 'write',
+    booking: '555',
+    // Ligne d'une AUTRE reservation, sur un bien du compte appelant.
+    bookingResolu: { user_id: PROD, booking_id: '999', property_id: BIEN_A.provider_property_id, snapshot: {} }
+  })
+  assert.strictEqual(g.ok, false, 'la ligne en cache ne doit pas primer sur l\'identifiant demande')
+  assert.strictEqual(res.code, 403)
+})
+
 // ─── messages : collection filtree par le perimetre ──────────────────────────
 
 test('messages : le compte cible est celui de l\'appelant, jamais un autre', async () => {

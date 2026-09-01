@@ -55,7 +55,11 @@ module.exports = async function handler(req, res) {
   // autre compte, ou un rate plan remappe.
   // Le bien vient du client : resolu en base et confronte au perimetre avant
   // tout appel au gestionnaire de canaux.
-  const bienDemande = String(req.query.property_id || req.body?.property_id || '').trim()
+  // ⚠ MEME SOURCE que les actions, qui lisent toutes `req.query.property_id`.
+  // Accepter aussi le body faisait garder un identifiant que l'action n'utilise
+  // pas : la premiere action qui lirait le body serait controlee sur une valeur
+  // que le client peut choisir differente.
+  const bienDemande = String(req.query.property_id || '').trim()
   const LECTURE_SEULE = new Set(['inspect', 'rules', 'raw_channel'])
   let compteBien = null
   let bienResolu = null
