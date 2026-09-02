@@ -154,11 +154,49 @@ dénormalisées à l'ingestion.
   vérification de la doc Swagger authentifiée.
 - **Classification IA** de la propreté (`ai_clean_verdict`, `ai_clean_excerpt`).
 
+## 6 bis. L'écriture par lot écrasait l'ancrage de séjour
+
+**Défaut réel, vérifié en base puis corrigé.** La liste de colonnes d'un upsert
+PostgREST est déterminée **par requête**, pas par ligne : supabase-js envoie
+l'union des clés de toutes les lignes, et les clés absentes d'une ligne partent
+à `NULL`.
+
+Conséquence : dès qu'**un** avis d'une page résolvait sa réservation,
+`booking_uid`, `stay_start` et `stay_end` entraient dans le `DO UPDATE SET` de
+**toute la page**, et tous les autres avis voyaient leur ancrage écrasé à `null`.
+Un témoin posé à la main est revenu à `null` au poll suivant — la preuve a été
+faite en base, pas déduite.
+
+Un commentaire de `versLigne` affirmait exactement le contraire (« PostgREST ne
+met dans le DO UPDATE SET que les colonnes présentes »). **Il avait tort**, et
+c'est le genre de commentaire qui empêche de chercher le bug.
+
+L'effet était invisible sur un passage isolé — les mêmes 11 avis se résolvaient à
+chaque fois — mais il se serait manifesté à mesure que les réservations sortent
+de la fenêtre de fetch, en vidant progressivement l'ancrage dont le pricing et la
+fiche prestataire dépendent. C'est-à-dire en aggravant silencieusement la dette
+du §4 au lieu de la laisser stable.
+
+**Correctif** : `upsertAvis` écrit deux lots **homogènes en clés** — les lignes
+qui portent l'ancrage, et celles qui ne le portent pas. Le second groupe ne
+mentionne pas ces colonnes, donc ne peut plus les toucher. Ne pas refusionner ces
+deux lots.
+
 ## 7. Classification de la propreté — deux étages
 
 **Étage 1, une règle déterministe, aucun appel IA.** Airbnb livre déjà des tags
 de propreté (`squeaky_clean_bathroom`, `pristine_kitchen`, `spotless_*`,
-`free_of_clutter`) et une note de catégorie. Payer un modèle pour redire ce
+`free_of_clutter`) et une note de catégorie.
+
+⚠ **La polarité se lit dans le tag, elle ne se devine pas.** Les tags portent
+`_positive_` ou `_negative_` en clair. Une première version déduisait la polarité
+de la racine lexicale, avec deux verdicts faux : `_positive_stainless_steel_…`
+contient « stain » et produisait **`remarque`** — un tag élogieux transformé en
+reproche adressé au prestataire, sans extrait pour le vérifier, puisque l'étage 1
+n'en pose jamais. Et `_negative_cleanliness_other` n'était pas reconnu : sans
+texte, l'avis finissait `rien_signale` alors que le voyageur avait explicitement
+signalé un problème. Sur les 70 avis réels, aucun verdict ne change — le
+correctif est préventif, le défaut était bien réel. Payer un modèle pour redire ce
 qu'Airbnb dit en clair serait absurde — et surtout moins auditable : une règle se
 relit, un verdict de modèle se croit.
 
@@ -232,7 +270,25 @@ coût n'est pas un critère de décision ici** — l'auditabilité l'est.
 
 ### Garde-fous dans le cron (bloc 4sexies)
 
-Cadence quotidienne, **marqueur posé avant le travail**, budget mur de 15 s, lot
-borné à 20 avis. Mesuré sur la première passe : ~12 s pour 20 avis, et le budget
+**Cadence horaire**, marqueur posé avant le travail, budget mur de 15 s, lot
+borné à 20 avis.
+
+⚠ **Le lot et la cadence ne règlent pas la même chose** : le lot plafonne le
+**coût d'un passage**, la cadence fixe le **débit**. À 24 h, le débit maximal
+était de 20 avis/jour **pour toute la plateforme** — un hôte connectant un compte
+de 200 avis d'historique monopolisait la file dix jours, et comme le tri est
+`received_at desc`, les avis entrants passaient devant l'historique, qui n'aurait
+jamais été servi dès que le flux approche 20/jour. À l'heure : 480/jour, au même
+coût unitaire.
+
+Deux autres pièges de file, fermés :
+- `received_at` est **nullable**, et PostgreSQL trie `DESC` en `NULLS FIRST` : un
+  avis sans date restait en tête à chaque passage. Combiné à un échec permanent,
+  il squattait le premier slot indéfiniment ; vingt bloquaient toute la file.
+  D'où `nullsFirst: false`.
+- Un avis en échec n'est pas marqué, donc il repasse — voulu. Mais un échec
+  **permanent** (clé d'API expirée) était rejoué chaque jour **sans que rien ne
+  le signale**. Le compte d'avis non classés remonte désormais dans les erreurs
+  du cycle. Mesuré sur la première passe : ~12 s pour 20 avis, et le budget
 a effectivement coupé une passe à 15 avis — le garde-fou fonctionne. Le reliquat
 part au passage suivant, la file étant persistante en base.

@@ -149,8 +149,13 @@ function fauxClient (file = [], journal = []) {
       const chain = {
         select () { return this },
         eq (c, v) { appel.filtres.push([c, v]); return this },
-        is () { return this }, order () { return this },
-        limit () { return Promise.resolve({ data: file, error: null }) },
+        // ⚠ `is`, `order` et `limit` sont ENREGISTRES, pas jetes. Une version
+        // precedente de ce double les ignorait : supprimer la garde
+        // `.is('ai_analyzed_at', null)` laissait la suite entierement au vert,
+        // alors que sans elle toute la table serait reclassifiee chaque jour.
+        is (c, v) { appel.is = [c, v]; return this },
+        order (c, o) { appel.order = { colonne: c, ...o }; return this },
+        limit (n) { appel.limit = n; return Promise.resolve({ data: file, error: null }) },
         maybeSingle () { return Promise.resolve({ data: null, error: null }) },
         upsert () { appel.op = 'upsert'; return Promise.resolve({ error: null }) },
         update (row) { appel.op = 'update'; appel.row = row; return this },
@@ -252,4 +257,81 @@ test('passage : la cadence quotidienne est respectée', async () => {
   })(sb.from)
   const r = await classerAvis(null, { supabase: sb })
   assert.strictEqual(r.skipped, 'cadence')
+})
+
+// ─── La forme de la requête de file : la garde centrale du design ───────────
+test('file : seuls les avis NON analysés sont relus', async () => {
+  // Sans cette garde, chaque passage reclassifierait toute la table : un appel
+  // Haiku par avis et par jour, pour toujours.
+  const journal = []
+  await classerAvis(null, { supabase: fauxClient([AVIS_TAG], journal), forcer: true })
+  const lecture = journal.find(a => a.table === 'ota_reviews' && a.op === 'select')
+  assert.deepStrictEqual(lecture.is, ['ai_analyzed_at', null])
+})
+
+test('file : le lot est borné, et les avis sans date ne squattent pas la tête', async () => {
+  // received_at est nullable et PostgreSQL trie DESC en NULLS FIRST : un avis
+  // sans date resterait en tête à chaque passage. Combiné à un échec permanent,
+  // il monopoliserait le premier slot indéfiniment.
+  const journal = []
+  await classerAvis(null, { supabase: fauxClient([AVIS_TAG], journal), forcer: true })
+  const lecture = journal.find(a => a.table === 'ota_reviews' && a.op === 'select')
+  assert.strictEqual(lecture.limit, 20, 'le lot doit rester borné')
+  assert.strictEqual(lecture.order.colonne, 'received_at')
+  assert.strictEqual(lecture.order.nullsFirst, false)
+})
+
+test('passage : le budget mur coupe et ne consomme pas tout le lot', async () => {
+  // Aucun test n'exerçait le budget : le supprimer ne cassait rien. Ici
+  // l'horloge franchit l'échéance après le premier avis.
+  let t = 0
+  const avis = [1, 2, 3].map(n => ({ ...AVIS_TAG, id: 'x' + n }))
+  const journal = []
+  const bilan = await classerAvis(null, {
+    supabase: fauxClient(avis, journal), forcer: true,
+    // marqueur, échéance, puis un appel par avis.
+    now: () => (t++ < 3 ? 0 : 999999)
+  })
+  assert.strictEqual(bilan.interrompu, 'budget')
+  assert.ok(bilan.lus < 3, 'la coupure doit intervenir avant la fin du lot')
+})
+
+test('passage : des avis non classés remontent dans les erreurs du cycle', async () => {
+  // Un échec permanent (clé d'API expirée) serait sinon rejoué chaque jour sans
+  // que personne ne le voie : le cycle afficherait un bilan sans erreur.
+  const results = { errors: [] }
+  await classerAvis(results, {
+    supabase: fauxClient([AVIS_TEXTE]), forcer: true,
+    anthropic: { messages: { create: async () => { throw new Error('401') } } }
+  })
+  assert.strictEqual(results.errors.length, 1)
+  assert.match(results.errors[0].error, /non classes/)
+})
+
+// ─── La polarité des tags se lit, elle ne se devine pas ─────────────────────
+test('règle : un tag POSITIF ne peut jamais produire une remarque', async () => {
+  // « stainless » contient « stain », « smelling » contient « smell ». Deviner
+  // la polarité depuis la racine transformait un tag élogieux en reproche de
+  // propreté adressé au prestataire — sans extrait pour le vérifier.
+  for (const t of ['guest_review_host_positive_stainless_steel_appliances',
+                   'guest_review_host_positive_fresh_smelling_linens',
+                   'guest_review_host_positive_moldings_beautiful']) {
+    const r = classerParRegle({ ota: 'airbnb', tags: [t] })
+    assert.notStrictEqual(r?.verdict, 'remarque', t)
+  }
+})
+
+test('règle : un cleanliness_other NÉGATIF est une remarque, pas une ambiguïté', async () => {
+  // Non reconnu, il partait à l'étage 2 ; sans texte à analyser, l'avis
+  // finissait « rien_signale » alors que le voyageur avait explicitement coché
+  // un problème de propreté. Irrécupérable sans remise à null manuelle.
+  const r = classerParRegle({ ota: 'airbnb', tags: ['guest_review_host_negative_cleanliness_other'] })
+  assert.strictEqual(r?.verdict, 'remarque')
+})
+
+test('texteVoyageur : le même texte n\'est pas envoyé deux fois au modèle', async () => {
+  // content_public retombe sur content quand l'OTA ne fournit pas de champ
+  // dédié : les deux portent alors la même phrase.
+  const t = texteVoyageur({ content: 'Très propre', content_public: 'Très propre' })
+  assert.strictEqual(t, 'Très propre')
 })

@@ -24,8 +24,10 @@
 //   repartir à chaque tick de 5 min.
 // Session #31 (suite) : classification de la propreté dans les avis. Deux étages —
 //   une règle déterministe sur les tags Airbnb d'abord, Haiku seulement sur ce
-//   qu'elle ne tranche pas. Mêmes garde-fous que le poll : cadence quotidienne,
-//   marqueur posé avant le travail, budget mur, lot borné.
+//   qu'elle ne tranche pas. Mêmes garde-fous que le poll — marqueur posé avant
+//   le travail, budget mur, lot borné — mais cadence HORAIRE et non quotidienne :
+//   le lot borne le coût par passage, la cadence fixe le débit, et 20 avis/jour
+//   pour toute la plateforme affamaient l'historique dès le deuxième client.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -213,7 +215,9 @@ module.exports = async function handler(req, res) {
     // ne coûte rien, puis Haiku seulement sur les avis qu'elle ne tranche pas.
     // ⚠ Lot borné à 20 avis et budget mur de 15 s : chaque appel Haiku coûte
     // ~1 s, et rien ici n'est urgent. Le reliquat part au passage suivant, la
-    // file étant persistante en base.
+    // file étant persistante en base. Cadence horaire (et non quotidienne) :
+    // le lot plafonne le coût d'un passage, la cadence fixe le débit — à 24 h,
+    // la plateforme entière était limitée à 20 avis par jour.
     try { await chrono.mesure('classification_avis', () => classerAvis(results)) }
     catch (err) {
       console.error('[Cron] Erreur classification avis:', err.message)

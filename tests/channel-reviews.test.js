@@ -476,3 +476,51 @@ test('versLigne : la réponse fantôme ne peut pas revenir', () => {
   assert.strictEqual(l.reply, null)
   assert.notStrictEqual(l.reply, '{}')
 })
+
+// ─── L'ancrage de séjour ne doit jamais être écrasé par un lot ──────────────
+const { upsertAvis } = require('../lib/cron-channel-reviews')
+
+test('upsertAvis : une ligne résolue et une non résolue partent en DEUX requêtes', async () => {
+  // La liste de colonnes d'un upsert PostgREST est déterminée PAR REQUÊTE : les
+  // clés absentes d'une ligne partent à NULL. Mélanger les deux formes faisait
+  // écraser booking_uid / stay_start / stay_end de toutes les lignes non
+  // résolues dès qu'UNE ligne de la page l'était. Vérifié en base : un témoin
+  // posé à la main revenait à null au poll suivant.
+  const journal = []
+  const sb = fauxClient({}, journal)
+  const res = await upsertAvis(sb, [
+    { user_id: 'u1', provider: 'channex', external_review_id: 'a' },                        // non résolue
+    { user_id: 'u1', provider: 'channex', external_review_id: 'b', booking_uid: '77',
+      stay_start: '2026-08-01', stay_end: '2026-08-05' }                                    // résolue
+  ])
+  assert.strictEqual(res.ecrits, 2)
+  const ecritures = journal.filter(a => a.table === 'ota_reviews' && a.op === 'upsert')
+  assert.strictEqual(ecritures.length, 2, 'deux groupes homogènes, jamais un lot mixte')
+
+  for (const e of ecritures) {
+    const cles = e.row.map(l => Object.keys(l).includes('booking_uid'))
+    assert.ok(cles.every(v => v === cles[0]),
+      'un groupe ne doit contenir que des lignes portant les mêmes colonnes')
+  }
+})
+
+test('upsertAvis : un lot entièrement non résolu ne mentionne pas les colonnes d\'ancrage', async () => {
+  const journal = []
+  await upsertAvis(fauxClient({}, journal), [
+    { user_id: 'u1', provider: 'channex', external_review_id: 'a' },
+    { user_id: 'u1', provider: 'channex', external_review_id: 'b' }
+  ])
+  const ecritures = journal.filter(a => a.table === 'ota_reviews' && a.op === 'upsert')
+  assert.strictEqual(ecritures.length, 1, 'un seul groupe suffit quand toutes les lignes se ressemblent')
+  for (const l of ecritures[0].row) {
+    assert.ok(!('booking_uid' in l), 'la colonne ne doit pas exister dans le payload')
+    assert.ok(!('stay_start' in l))
+  }
+})
+
+test('upsertAvis : une erreur sur le premier groupe n\'est pas avalée', async () => {
+  const sb = { from: () => ({ upsert: async () => ({ error: { message: 'boom' } }) }) }
+  const r = await upsertAvis(sb, [{ user_id: 'u1', provider: 'channex', external_review_id: 'a' }])
+  assert.strictEqual(r.error.message, 'boom')
+  assert.strictEqual(r.ecrits, 0)
+})
