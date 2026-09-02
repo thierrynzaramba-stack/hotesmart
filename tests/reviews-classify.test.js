@@ -335,3 +335,16 @@ test('texteVoyageur : le même texte n\'est pas envoyé deux fois au modèle', a
   const t = texteVoyageur({ content: 'Très propre', content_public: 'Très propre' })
   assert.strictEqual(t, 'Très propre')
 })
+
+test('le bilan porte le reste en file, seul signal d\'une boucle de réanalyse', async () => {
+  // Si le trigger remettait des avis en file aussi vite qu'on les traite, le
+  // bilan afficherait un travail normal. Ce compte, lui, ne descendrait pas :
+  // la boucle se lit alors en comparant deux cycles.
+  const journal = []
+  const bilan = await classerAvis(null, { supabase: fauxClient([AVIS_TAG], journal), forcer: true })
+  assert.ok('reste_en_file' in bilan, 'le bilan doit porter le reste en file')
+  // Deux lectures de ota_reviews : la file de travail, puis le décompte.
+  const lectures = journal.filter(a => a.table === 'ota_reviews' && a.op === 'select')
+  assert.strictEqual(lectures.length, 2)
+  assert.deepStrictEqual(lectures[1].is, ['ai_analyzed_at', null], 'le décompte porte sur la même file')
+})

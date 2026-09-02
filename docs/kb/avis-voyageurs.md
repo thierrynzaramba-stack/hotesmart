@@ -258,6 +258,23 @@ le poll écrit **par lot sans relire l'existant** : la comparaison côté JS
 coûterait une lecture par avis — le coût qu'on a justement supprimé. Le trigger
 voit `OLD` et `NEW`, aucun writer ne peut l'oublier.
 
+### Dette assumée — aucune alerte sur une boucle de réanalyse
+
+Le trigger remet un avis en file dès que son texte change. Si un provider
+renvoyait un jour un champ texte de façon **instable** — `content` peuplé un
+jour, absent le lendemain — le trigger remettrait les mêmes avis en file à chaque
+poll, indéfiniment, et rien ne le distinguerait d'un rattrapage normal : le bilan
+afficherait `ia: 20` chaque cycle, ce qui ressemble à du travail.
+
+**Décision : dette, pas de code d'alerte.** Le seul garde-fou posé est le compte
+`reste_en_file` (avis à `ai_analyzed_at is null`) dans le log de fin de bloc du
+cron. Une boucle s'y lit à l'œil nu : le compte ne descend jamais alors que le
+bilan annonce du travail à chaque cycle. C'est la surveillance existante des
+cycles qui sert de détecteur, sans mécanisme neuf à maintenir.
+
+Ce qui déclencherait le passage à une vraie alerte : un `reste_en_file` stable ou
+croissant sur plusieurs cycles alors que `ia` reste non nul.
+
 ### Coût réel, mesuré
 
 Un appel : **418 tokens d'entrée, 45 de sortie**. Sur les 70 avis, seuls 41 ont
