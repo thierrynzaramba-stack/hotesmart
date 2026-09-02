@@ -40,6 +40,14 @@
     .callout { background: #fff8e6; border: 1px solid #ffe08a; border-radius: 12px; padding: 16px 18px; margin: 16px 0; font-size: 14px; color: #6b5600; }
     footer { text-align: center; color: #86868b; font-size: 13px; margin-top: 40px; }
     code { background: #f0f0f2; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+    .toc-part { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #86868b; margin: 14px 0 6px; font-weight: 700; }
+    .toc-part:first-of-type { margin-top: 0; }
+    .part-sep { border: 0; border-top: 1px solid #e5e5e7; margin: 48px 0 8px; }
+    .part-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #86868b; font-weight: 700; margin-bottom: 4px; }
+    .bp { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+    .bp.vert { background: #E6F4EA; color: #1E7B34; }
+    .bp.orange { background: #FDF0E2; color: #A85B12; }
+    .bp.gris { background: #F0F0F0; color: #666; }
   </style>
 </head>
 <body>
@@ -52,11 +60,12 @@
   </header>
 
   <div class="wrap">
-    <h1>Gérer vos tarifs et votre calendrier</h1>
-    <p class="lead">Tout ce qu'il faut savoir pour piloter vos prix, vos disponibilités et vos restrictions de séjour, sur ordinateur comme sur mobile.</p>
+    <h1>Guide HôteSmart</h1>
+    <p class="lead">Comment piloter vos tarifs, vos disponibilités et les avis de vos voyageurs.</p>
 
     <div class="toc">
       <h2>Sommaire</h2>
+      <p class="toc-part">Tarifs et calendrier</p>
       <ul>
         <li><a href="#demarrer">1. Démarrer</a></li>
         <li><a href="#vues">2. Les deux interfaces : ordinateur et mobile</a></li>
@@ -65,7 +74,16 @@
         <li><a href="#tutos">5. Tutoriels pas à pas</a></li>
         <li><a href="#faq">6. Questions fréquentes</a></li>
       </ul>
+      <p class="toc-part">Avis voyageurs</p>
+      <ul>
+        <li><a href="#avis">7. Consulter vos avis</a></li>
+        <li><a href="#avis-proprete">8. Le badge propreté</a></li>
+        <li><a href="#avis-saisie">9. Noter un avis reçu en direct</a></li>
+        <li><a href="#avis-faq">10. Questions fréquentes sur les avis</a></li>
+      </ul>
     </div>
+
+    <p class="part-label">Tarifs et calendrier</p>
 
     <section id="demarrer">
       <h2>1. Démarrer</h2>
@@ -209,6 +227,55 @@
       <p>Elle utilise automatiquement le prix de base de votre bien. Vous n'avez à configurer que les exceptions.</p>
       <h3>Mes réglages sont-ils les mêmes sur mobile et ordinateur ?</h3>
       <p>Oui. Les tarifs, restrictions et la correction automatique des nuits orphelines sont partagés. Seul l'affichage diffère (tableau sur ordinateur, calendrier mensuel sur mobile).</p>
+    </section>
+
+    <hr class="part-sep">
+    <p class="part-label">Avis voyageurs</p>
+
+    <section id="avis">
+      <h2>7. Consulter vos avis</h2>
+      <p>La page <strong>Avis</strong>, dans le menu de gauche, rassemble tous les avis de vos voyageurs, quelle que soit la plateforme d'où ils viennent — Airbnb, Booking.com — et ceux que vous saisissez vous-même.</p>
+      <p>En haut de page, trois chiffres : le nombre d'avis, la note moyenne, et le nombre de <strong>remarques sur la propreté des 30 derniers jours</strong>. Ce dernier compteur reste le plus souvent à zéro : c'est normal, et c'est une bonne nouvelle.</p>
+      <p>Le menu déroulant vous permet de n'afficher qu'un seul bien.</p>
+      <div class="callout">Les avis arrivent automatiquement, une fois par jour, et en quelques minutes lorsque la plateforme nous prévient. Vous n'avez rien à lancer.</div>
+    </section>
+
+    <section id="avis-proprete">
+      <h2>8. Le badge propreté</h2>
+      <p>Chaque avis porte une pastille qui dit ce que le voyageur a dit de la <strong>propreté</strong> du logement — et seulement de la propreté. Le bruit, l'emplacement ou l'accueil ne comptent pas ici.</p>
+      <ul>
+        <li><span class="bp vert">Propreté saluée</span> le voyageur a complimenté la propreté.</li>
+        <li><span class="bp orange">Remarque propreté</span> il a signalé quelque chose, même en passant, même dans un avis par ailleurs très bon.</li>
+        <li><span class="bp gris">Propreté non évoquée</span> il n'en a pas parlé. C'est le cas le plus fréquent.</li>
+      </ul>
+      <p>Quand une phrase précise concerne la propreté, elle est <strong>citée telle quelle</strong>, en italique, au-dessus de l'avis. Vous lisez les mots du voyageur, pas un résumé.</p>
+      <div class="callout">Une remarque peut apparaître sur un avis noté 10/10. C'est fréquent : le détail se trouve souvent dans le message privé que le voyageur adresse à l'hôte, pas dans l'avis public. C'est justement ce qui rend cette page utile.</div>
+      <h3>Pourquoi « Analyse en cours » ?</h3>
+      <p>L'avis vient d'arriver et sa lecture n'est pas terminée. Le badge apparaîtra tout seul, au plus tard dans l'heure. Nous préférons vous le dire plutôt que d'afficher « non évoquée », qui laisserait croire que la question a été tranchée.</p>
+    </section>
+
+    <section id="avis-saisie">
+      <h2>9. Noter un avis reçu en direct</h2>
+      <p>Un voyageur vous a envoyé un mot par SMS, par email, ou vous l'a dit en partant ? Le bouton <strong>« + Saisir un avis reçu »</strong> l'ajoute à vos avis, au même endroit que les autres.</p>
+      <ol>
+        <li>Choisissez le <strong>bien</strong> concerné.</li>
+        <li>Indiquez <strong>comment</strong> vous l'avez reçu : SMS, email, ou de vive voix.</li>
+        <li>Choisissez la <strong>date</strong> — celle du jour par défaut.</li>
+        <li>Rattachez-le à un <strong>séjour</strong> si vous savez de qui il s'agit. Facultatif, mais c'est ce qui permettra plus tard de relier l'avis au ménage correspondant.</li>
+        <li>Recopiez <strong>ses mots</strong>, aussi fidèlement que possible.</li>
+      </ol>
+      <p>L'avis est enregistré, puis lu comme les autres : son badge propreté apparaît immédiatement.</p>
+      <div class="callout">Recopiez ses mots plutôt que votre résumé. Si vous écrivez « il a trouvé ça bien », rien ne pourra en être tiré. Si vous écrivez « la douche était impeccable », la remarque est utilisable — y compris, plus tard, pour votre prestataire de ménage.</div>
+    </section>
+
+    <section id="avis-faq">
+      <h2>10. Questions fréquentes sur les avis</h2>
+      <h3>Puis-je répondre à un avis depuis HôteSmart ?</h3>
+      <p>Pas encore. Les réponses se font sur la plateforme d'origine. HôteSmart vous indique si un avis a déjà reçu une réponse.</p>
+      <h3>Pourquoi certains avis anciens n'affichent-ils pas de séjour ?</h3>
+      <p>Nous ne conservons les réservations que sur une période récente. Un avis plus ancien que cette période reste affiché, mais sans le séjour correspondant. Ce lien se reconstituera à mesure que votre historique sera importé.</p>
+      <h3>Qui peut voir mes avis ?</h3>
+      <p>Vous, et les personnes de votre équipe à qui vous avez donné le droit « Avis ». Sans ce droit, la page n'apparaît même pas dans leur menu. Le droit d'écriture est nécessaire pour saisir un avis reçu en direct.</p>
     </section>
 
     <footer>
