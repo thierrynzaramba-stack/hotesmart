@@ -381,3 +381,60 @@ test('sejours : un membre avis=write y a accès', async () => {
   assert.strictEqual(res.code, 200)
   assert.strictEqual(res.body.sejours.length, 1)
 })
+
+// ─── Le domaine `avis` ne donne pas accès aux données de réservation ────────
+test('list : ni le nom du voyageur ni ses dates de séjour ne sortent', async () => {
+  // Fermer `sejours` et laisser la même donnée sortir par `list` ne ferme rien.
+  // Le domaine `avis` donne accès au CONTENU des avis, pas à l'identité des
+  // voyageurs ni à leurs séjours, qui relèvent de `reservations`.
+  const CHAMPS_INTERDITS = ['guest_name', 'stay_start', 'stay_end', 'booking_uid',
+                            'ota_reservation_id', 'content_private']
+  const fs = require('node:fs')
+  const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'api/avis.js'), 'utf8')
+  const bloc = src.slice(src.indexOf('const CHAMPS = `'), src.indexOf('`', src.indexOf('const CHAMPS = `') + 16))
+  for (const c of CHAMPS_INTERDITS) {
+    assert.ok(!new RegExp('\\\\b' + c + '\\\\b').test(bloc),
+      `${c} ne doit pas être renvoyé par la liste des avis`)
+  }
+})
+
+test('list : chaque colonne renvoyée est bien affichée par la page', async () => {
+  // La règle qui empêche la liste de regrossir : une colonne non rendue par
+  // pages/avis.html n'a rien à y faire.
+  const fs = require('node:fs'), pathm = require('node:path')
+  const racine = pathm.join(__dirname, '..')
+  const src = fs.readFileSync(pathm.join(racine, 'api/avis.js'), 'utf8')
+  const page = fs.readFileSync(pathm.join(racine, 'pages/avis.html'), 'utf8')
+  const debut = src.indexOf('const CHAMPS = `')
+  const bloc = src.slice(debut + 16, src.indexOf('`', debut + 16))
+  const colonnes = bloc.split(',').map(c => c.trim()).filter(Boolean)
+  const exemptes = new Set(['id', 'property_id_ref'])  // clés techniques
+  for (const c of colonnes) {
+    if (exemptes.has(c)) continue
+    assert.ok(page.includes(c), `${c} est renvoyée mais jamais affichée : exposition inutile`)
+  }
+})
+
+test('create : une date qui n\'existe pas est refusée, pas reportée', async () => {
+  // V8 REPORTE en silence : '2026-02-30' devient le 2 mars. Sans contrôle, une
+  // date inexistante était acceptée et stockée décalée.
+  const etat = preparer({})
+  const handler = require('../api/avis')
+  for (const date of ['2026-02-30', '2026-04-31']) {
+    const res = reponse()
+    await handler(req({}, { action: 'create', bien: REF_A, texte: 'x', source: 'sms', date }, 'POST'), res)
+    assert.strictEqual(res.code, 400, date)
+  }
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('create : une date réelle passe toujours', async () => {
+  // Contre-épreuve : le contrôle ne doit pas refuser une date valide.
+  const etat = preparer({})
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({}, { action: 'create', bien: REF_A, texte: 'x', source: 'sms', date: '2026-02-28' }, 'POST'), res)
+  assert.strictEqual(res.code, 201)
+  const ligne = etat.ecritures.find(e => e.table === 'ota_reviews' && e.row.provider === 'manuel').row
+  assert.ok(ligne.received_at.startsWith('2026-02-28'))
+})

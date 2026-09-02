@@ -25,15 +25,25 @@ const SOURCES     = new Set(['sms', 'email', 'oral'])
 const MAX_TEXTE   = 5000
 const FENETRE_JRS = 30
 
-// Colonnes renvoyees au front. `content_private` en fait partie : cette page est
-// celle de l'HOTE et de ses membres du domaine `avis`. La restriction du retour
-// prive concerne la fiche PRESTATAIRE, qui est un autre ecran et un autre
-// destinataire (docs/specs/spec-prestataires-menage.md §6).
-const CHAMPS = `id, provider, source, ota, external_review_id, ota_reservation_id,
-  booking_uid, stay_start, stay_end, guest_name, content, content_public,
-  content_private, reply, is_replied, is_hidden, overall_score, score_clean,
-  scores, tags, received_at, expired_at, is_expired,
-  ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at, property_id, property_id_ref`
+// ⚠ STRICTEMENT LES COLONNES QUE LA PAGE AFFICHE. Rien de plus.
+//
+// La premiere version renvoyait la ligne quasi entiere, dont `guest_name`,
+// `stay_start`, `stay_end`, `booking_uid` et `ota_reservation_id`. Un membre
+// `avis: read` / `reservations: none` obtenait ainsi le NOM du voyageur et ses
+// dates de sejour — la donnee meme qu'on venait de lui refuser en durcissant
+// `sejours`. Fermer une action et laisser la meme donnee sortir par l'autre ne
+// ferme rien : le domaine `avis` donne acces au CONTENU des avis, pas a
+// l'identite des voyageurs ni a leurs sejours, qui relevent de `reservations`.
+//
+// `content_private` est retire pour la meme raison de moindre exposition : la
+// page ne l'affiche pas, l'extrait de proprete suffit. L'ajouter un jour est une
+// decision a prendre, pas un defaut a laisser.
+//
+// Regle a tenir en modifiant cette liste : une colonne qui n'est pas rendue par
+// pages/avis.html n'a rien a y faire.
+const CHAMPS = `id, provider, source, ota, content, content_public,
+  overall_score, received_at, ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
+  property_id_ref`
 
 // ─── Lecture ────────────────────────────────────────────────────────────────
 
@@ -164,6 +174,12 @@ async function creer (req, res, garde) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Date invalide' })
     const d = new Date(date + 'T12:00:00Z')
     if (isNaN(d.getTime())) return res.status(400).json({ error: 'Date invalide' })
+    // ⚠ V8 REPORTE en silence : '2026-02-30' devient le 2 mars, '2026-04-31' le
+    // 1er mai. Sans ce controle, une date qui n'existe pas etait acceptee et
+    // stockee decalee — donnee fausse dans le coeur, jamais signalee.
+    if (d.toISOString().slice(0, 10) !== date) {
+      return res.status(400).json({ error: 'Date invalide' })
+    }
     recuLe = d.toISOString()
   }
 

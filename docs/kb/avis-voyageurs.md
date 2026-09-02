@@ -325,6 +325,30 @@ gris : celui-ci signifie « regardé, rien à signaler », ce qui serait faux.
 Le compteur des remarques sur 30 jours est calculé **côté serveur** : le front ne
 reçoit que les premières lignes, il ne peut pas compter juste.
 
+### Le domaine `avis` ne donne pas accès aux données de réservation
+
+C'est le point qui a coûté **deux constats successifs**, le second sur le
+correctif du premier — exactement le même enchaînement que sur `register`.
+
+1. `sejours` était gardé en `avis: read` alors qu'il renvoie le **nom des
+   voyageurs** et leurs dates. Passé en `write`.
+2. Mais `CHAMPS`, la liste des colonnes servie par `list` — qui reste en
+   `read` — contenait toujours `guest_name`, `stay_start`, `stay_end`,
+   `booking_uid` et `ota_reservation_id`. **Fermer une action et laisser la même
+   donnée sortir par l'autre ne ferme rien.** Un membre `avis: read` /
+   `reservations: none` obtenait toujours le nom du voyageur et ses dates, pour
+   tout bien de son périmètre ayant un avis.
+
+**La règle qui en sort** : le domaine `avis` donne accès au **contenu** des avis,
+pas à l'**identité** des voyageurs ni à leurs séjours, qui relèvent de
+`reservations`. `CHAMPS` ne contient donc plus que les colonnes réellement
+affichées — `content_private` compris, retiré par moindre exposition puisque
+l'extrait de propreté suffit.
+
+Un test vérifie les deux sens : aucune colonne interdite dans la liste, **et**
+aucune colonne renvoyée qui ne soit affichée par la page. C'est ce second test
+qui empêchera la liste de regrossir au prochain ajout.
+
 ### `sejours` exige `write`, alors qu'il ne fait que lire
 
 Cette action renvoie le **nom des voyageurs** et leurs dates de séjour. En
@@ -355,6 +379,9 @@ mais il n'emprunte pas des dates qui ne le concernent pas.
   membre au périmètre restreint, pas un cas limite. Un test vérifie désormais que
   chaque appel est **dans** un bloc `try` (et non qu'il existe autant de `try`
   que d'appels : trois `try` placés n'importe où auraient suffi).
+- **Une date peut être reportée en silence.** `'2026-02-30'` est acceptée par
+  `new Date()` puis devient le 2 mars : donnée fausse dans le cœur, jamais
+  signalée. La date reparsée est comparée à la saisie.
 - **Une date de forme valide peut être impossible.** `'2026-13-45'` passe un
   regex `\d{4}-\d{2}-\d{2}`, puis `new Date().toISOString()` lève un
   `RangeError` : 500 au lieu de 400, et l'appelant croit à une panne serveur
