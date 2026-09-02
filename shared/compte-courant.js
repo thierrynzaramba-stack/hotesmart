@@ -188,6 +188,21 @@ export function bienAutorise (idOuRef) {
   return autorises.includes(String(idOuRef))
 }
 
+/**
+ * En-tete a poser sur un `fetch` BRUT (hors shared/api-client.js, qui le fait
+ * seul).
+ *
+ * ⚠ Plusieurs pages appellent l'API en `fetch` direct. Sans cet en-tete, le
+ * serveur travaille sur le compte de l'appelant alors que le reste de la page
+ * lit le compte courant : l'ecran melange deux comptes, et la delegation ne
+ * fonctionne pas de bout en bout. Rien n'est emis quand on est sur son propre
+ * compte.
+ */
+export function enteteCompte () {
+  const c = compteCourant()
+  return (c && contexte.moi && String(c) !== String(contexte.moi)) ? { 'X-Compte': c } : {}
+}
+
 // ─── Bascule ─────────────────────────────────────────────────────────────────
 
 /**
@@ -216,6 +231,83 @@ export async function basculerVers (userId) {
   }
   window.location.reload()
   return true
+}
+
+// ─── Garde-fou des pages NON DELEGABLES ──────────────────────────────────────
+//
+// ⚠ LE CONTRESENS QUE CE GARDE-FOU FERME. Masquer une entree de menu ne ferme
+// pas la page : /settings, /connexions, /abonnement s'ouvraient par URL directe
+// pendant qu'on travaillait sur un compte partage, et affichaient les donnees de
+// L'APPELANT sans le dire. On lisait « vous agissez sur un compte partagé » dans
+// la barre, et l'equipe ou les cles PMS de son propre compte dans la page.
+//
+// Ce n'est pas une fuite — chacun voit les siennes — mais c'est pire a l'usage :
+// on croit modifier un compte et on en modifie un autre.
+//
+// ⚠ GARDE-FOU UNIQUE ET PARTAGE, jamais recopie page par page. Une copie
+// diverge : c'est exactement ainsi qu'une page finit par etre oubliee.
+//
+// Charge le contexte lui-meme si besoin : plusieurs de ces pages n'appellent pas
+// requireAuth, donc rien ne l'aurait fait pour elles.
+export async function exigerCompteProprePage (options = {}) {
+  const { nomPage = 'Cette page' } = options
+  try {
+    if (!contexte.charge) {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return true   // pas de session : la page gere sa redirection
+      await chargerContexte(session.user.id)
+    }
+  } catch (e) {
+    // ⚠ On n'echoue pas FERME ici : bloquer une page sur un incident reseau
+    // empecherait un hote seul d'acceder a ses propres reglages. Le serveur
+    // reste la garde reelle — cette barriere-ci evite un contresens, pas une
+    // fuite.
+    logger.error('compte', 'garde-fou de page : contexte indisponible, on laisse passer')
+    return true
+  }
+
+  if (estTitulaire()) return true
+
+  const actif = contexte.comptes.find(c => String(c.user_id) === String(contexte.compte))
+  const sien  = contexte.comptes.find(c => String(c.user_id) === String(contexte.moi))
+  afficherRefusDePage(nomPage, actif?.nom || 'un compte partagé', sien?.nom || 'votre compte')
+
+  // ⚠ ARRET DEFINITIF DU SCRIPT, volontairement. Le contenu de la page vient
+  // d'etre remplace : laisser la suite s'executer produirait une cascade de
+  // `null` sur des elements disparus, et des erreurs de console qui masqueraient
+  // le vrai message.
+  //
+  // Une promesse jamais resolue plutot qu'un `throw` : elle arrete le module
+  // proprement, sans exception non capturee, et sans obliger 14 pages a
+  // reindenter tout leur script dans un `if`.
+  await new Promise(() => {})
+}
+
+function afficherRefusDePage (nomPage, nomActif, nomSien) {
+  const html = `
+    <div style="max-width:460px;margin:80px auto;padding:28px;text-align:center;
+                font-family:system-ui,-apple-system,sans-serif;line-height:1.6">
+      <div style="font-size:34px;margin-bottom:14px">⚠️</div>
+      <h1 style="font-size:18px;font-weight:500;margin:0 0 10px">
+        ${echapper(nomPage)} concerne votre propre compte</h1>
+      <p style="font-size:14px;color:#6b7280;margin:0 0 20px">
+        Vous travaillez actuellement sur <strong>${echapper(nomActif)}</strong>.
+        Rebasculez sur <strong>${echapper(nomSien)}</strong> pour y accéder.</p>
+      <button id="hs-rebasculer" style="background:#C97B5C;color:#fff;border:0;border-radius:8px;
+              padding:11px 20px;font-size:14px;cursor:pointer;font-family:inherit">
+        Revenir sur mon compte</button>
+      <div style="margin-top:14px">
+        <a href="/" style="font-size:13px;color:#6b7280">Retour à l’accueil</a>
+      </div>
+    </div>`
+  document.body.innerHTML = html
+  const b = document.getElementById('hs-rebasculer')
+  if (b) b.onclick = () => basculerVers(contexte.moi)
+}
+
+function echapper (v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
 // ─── Memoire ─────────────────────────────────────────────────────────────────

@@ -274,3 +274,63 @@ Et `public_tokens`, lu pour prévenir le prestataire d'une note, est sous
 **`prestataires`**, pas `menages` : un membre `menages: write` enregistre bien sa
 note mais ne peut pas la transmettre. L'interface le dit maintenant, au lieu
 d'afficher un succès complet.
+
+
+---
+
+# Pages non délégables : le garde-fou
+
+## Le contresens, trouvé au test humain
+
+Masquer une entrée de menu **ne ferme pas la page**. `/settings` et `/connexions`
+s'ouvraient par URL directe pendant qu'on travaillait sur un compte partagé, et
+affichaient les données de **l'appelant** sans le dire : « vous agissez sur un
+compte partagé » dans la barre, et sa propre équipe dans la page.
+
+Ce n'est pas une fuite — chacun voit les siennes — mais c'est **pire à l'usage** :
+on croit modifier un compte et on en modifie un autre.
+
+Aggravant : `/settings`, `/abonnement` et `/compte` n'appelaient même pas
+`requireAuth`, donc le contexte de compte n'y était **jamais chargé**.
+
+## Un garde-fou unique, jamais recopié
+
+`exigerCompteProprePage()` vit dans `shared/compte-courant.js`. Il charge le
+contexte lui-même si besoin, et remplace le contenu par un refus explicite :
+*« Les réglages concernent votre propre compte — vous travaillez actuellement sur
+X. Rebasculez sur Y »*, avec un bouton pour revenir.
+
+Deux détails qui comptent :
+
+- **Il arrête le script** par une promesse jamais résolue, pas par un `throw` :
+  le contenu vient d'être remplacé, laisser la suite s'exécuter produirait une
+  cascade de `null` et des erreurs qui masqueraient le message.
+- **Il n'échoue pas fermé** sur un incident réseau : bloquer une page parce que
+  la liste des comptes est indisponible empêcherait un hôte seul d'accéder à ses
+  propres réglages. Le serveur reste la garde réelle ; cette barrière évite un
+  contresens, pas une fuite.
+
+## Le recensement — 14 non délégables, 6 délégables
+
+**Non délégables** : `settings`, `connexions`, `abonnement`, `compte`,
+`onboarding`, `biens-nouveau`, `biens-detail`, `serrures`, `sms`,
+`agent-ai/config`, `agent-ai/knowledge`, `agent-ai/messages`, `agent-ai/analyze`,
+`menages/prestataires`.
+
+**Délégables** : `index`, `biens`, `biens-calendrier`, `calendrier-mobile`,
+`menages/index`, `agent-ai/messagerie`.
+
+⚠️ Les pages déléguées ne doivent **pas** porter le garde-fou : il rendrait
+l'application vide pour un membre.
+
+## Le filet qui empêche l'oubli
+
+`tests/pages-non-delegables.test.js` liste toutes les pages du dépôt et échoue
+sur toute page **non classée**. Une page ajoutée demain sans décision sur sa
+délégabilité fait échouer la suite — on ne redécouvre pas le contresens en
+production.
+
+⚠️ Ma première version du test vérifiait `includes('exigerCompteProprePage')` :
+retirer l'appel en laissant l'import la laissait passer. Elle cherche maintenant
+l'**appel**, et vérifie qu'il précède le chargement des données — refuser après
+aurait déjà interrogé la base, et affiché brièvement le contenu.

@@ -106,6 +106,12 @@
 </div>
 
 <script type="module">
+  // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
+  // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
+  // s'ouvrait par URL directe en mode basculé et affichait un contresens.
+  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  await exigerCompteProprePage({ nomPage: 'Mon compte' })
+
   import { supabase, getUser, signOut } from '/shared/supabase.js'
 
   const user = await getUser()

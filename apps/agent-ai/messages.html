@@ -75,6 +75,12 @@
 <div class="toast-msg" id="toast"></div>
 
 <script type="module">
+  // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
+  // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
+  // s'ouvrait par URL directe en mode basculé et affichait un contresens.
+  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  await exigerCompteProprePage({ nomPage: 'Les modèles de messages' })
+
   import { requireAuth }      from '/components/auth-guard.js'
   import { renderSidebar }    from '/components/sidebar.js'
   import { supabase }         from '/shared/supabase.js'
