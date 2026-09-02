@@ -91,13 +91,24 @@ test('settings : le panneau de droits est reduit a QUATRE blocs', () => {
     assert.ok(html.includes(`<div class="bloc-titre">${titre}`), `bloc manquant : ${titre}`)
   }
   assert.ok(html.includes("id=\"zone-acces\""), 'le bloc Accès est rendu par le script')
+  // ⚠ On COMPTE, sinon le test ne tient pas sa promesse : rien n'empechait
+  // d'ajouter un cinquieme bloc alors que le commentaire dit « et rien d'autre ».
+  const blocs = (html.match(/class="bloc"/g) || []).length
+  assert.strictEqual(blocs, 4, `le panneau doit avoir exactement 4 blocs, trouve ${blocs}`)
 })
 
 test('settings : les huit domaines, et une seule phrase visible', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8')
+  // ⚠ On cherche dans la TABLE `DOMAINES`, pas n'importe ou dans le fichier :
+  // `html.includes("'menages'")` matchait le mot cite dans un commentaire ou une
+  // URL, et aurait passe meme avec un domaine retire du formulaire.
+  // ⚠ La fin du tableau est le `]` en DEBUT DE LIGNE : `indexOf(']')` tombait sur
+  // celui de la premiere entree, et la tranche ne contenait qu'un domaine.
+  const debutTable = html.indexOf('const DOMAINES = [')
+  const table = html.slice(debutTable, html.indexOf('\n]', debutTable))
   for (const d of ['reservations', 'menages', 'prestataires', 'messages',
                    'avis', 'reglages', 'facturation', 'equipe']) {
-    assert.ok(html.includes(`'${d}'`), `domaine absent du formulaire : ${d}`)
+    assert.ok(table.includes(`'${d}'`), `domaine absent de DOMAINES : ${d}`)
   }
   assert.ok(html.includes('Facturation et Équipe ne se délèguent pas en écriture.'),
     'la seule phrase visible du bloc Droits')
@@ -111,6 +122,27 @@ test('settings : chaque domaine porte une infobulle, aucun sous-texte', () => {
   assert.ok(html.includes('data-aide='), 'les explications passent par des infobulles')
   assert.ok(!html.includes('dom-hint'),
     'plus de sous-texte sous chaque domaine : huit paragraphes noyaient la regle')
+})
+
+test('settings : l\'aide reste atteignable au doigt et au lecteur d\'ecran', () => {
+  // ⚠ Reservee au :hover, elle etait muette sur mobile et pour un lecteur
+  // d'ecran — alors qu'elle porte des regles. `title` est le repli universel.
+  const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8'))
+  const infobulles = html.match(/<span class="info"[^>]*>/g) || []
+  assert.ok(infobulles.length > 0, 'des infobulles doivent exister')
+  for (const s of infobulles) {
+    assert.ok(/title=/.test(s), `infobulle sans title : ${s.slice(0, 70)}`)
+    assert.ok(!/role="button"/.test(s), 'role="button" annonce un bouton qui ne fait rien')
+  }
+})
+
+test('settings : la regle du perimetre est en TEXTE VISIBLE', () => {
+  // Elle decide de ce que voit un collaborateur quand un bien est ajoute plus
+  // tard : elle ne peut pas dependre d'un survol.
+  const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8'))
+  assert.ok(html.includes('Une sélection reste figée'), 'la regle doit etre lisible sans survol')
+  assert.ok(html.includes('y compris ceux ajoutés plus tard'),
+    'le libelle « tous les biens » doit dire ce qu\'il inclut')
 })
 
 test('settings : Renouveler est AVEC le lien, Desactiver est SEUL', () => {

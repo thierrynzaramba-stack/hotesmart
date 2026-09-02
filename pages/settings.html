@@ -71,7 +71,9 @@
        vivent dans les infobulles — huit paragraphes de domaine faisaient que
        personne ne lisait la seule phrase qui compte. */
     .bloc { padding: 14px 0; border-bottom: 0.5px solid var(--border); }
-    .bloc:last-of-type { border-bottom: 0; }
+    /* ⚠ `:last-of-type` designait `.panel-actions` (meme type `div`), donc la
+       regle ne s'appliquait a aucun `.bloc` : un trait restait sous Acces. */
+    #zone-acces { border-bottom: 0; }
     .bloc-titre { font-size: 13px; font-weight: 500; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
     .regle { font-size: 11px; color: var(--text2); margin-top: 10px; }
     .info {
@@ -84,7 +86,8 @@
     /* L'infobulle s'ouvre au survol ET au focus : accessible au clavier. */
     .info:hover::after, .info:focus::after {
       content: attr(data-aide); position: absolute; left: 50%; bottom: 130%;
-      transform: translateX(-50%); width: 230px; padding: 8px 10px;
+      transform: translateX(-50%); width: 230px; max-width: calc(100vw - 48px);
+      box-sizing: border-box; padding: 8px 10px;
       background: #1d1d1f; color: #fff; border-radius: var(--radius);
       font-size: 11px; line-height: 1.45; text-align: left; z-index: 60;
       pointer-events: none; white-space: normal; font-weight: 400;
@@ -166,14 +169,16 @@
     </div>
 
     <div class="bloc">
-      <div class="bloc-titre">Biens
-        <span class="info" tabindex="0" role="button" aria-label="Aide"
-          data-aide="« Tous les biens » inclut ceux que vous ajouterez plus tard. Une sélection reste figée : un nouveau bien n’y entre pas tout seul.">ⓘ</span>
-      </div>
+      <div class="bloc-titre">Biens</div>
       <select class="f" id="f-scope">
-        <option value="all">Tous les biens</option>
+        <option value="all">Tous les biens, y compris ceux ajoutés plus tard</option>
         <option value="selected">Une sélection</option>
       </select>
+      <!-- ⚠ EN TEXTE VISIBLE, pas en infobulle : c'est une regle, pas un detail.
+           Reservee au survol, elle etait inatteignable au doigt (pas de hover) et
+           muette au lecteur d'ecran — et l'hote croyait un collaborateur couvert
+           sur un bien ajoute depuis. -->
+      <div class="regle" id="regle-perimetre">Une sélection reste figée : un bien ajouté plus tard n’y entre pas.</div>
       <div class="biens" id="f-biens"></div>
     </div>
 
@@ -259,12 +264,12 @@ function resumeDroits (p) {
   const perm = p.permissions || {}
   const perimetre = perm.property_scope === 'selected'
     ? `${(perm.property_ids || []).length} bien(s)` : 'Tous les biens'
+  // ⚠ Plus de mention des « disponibilités » : c'est un droit de PRESTATAIRE, et
+  // les profils `lien` ne sont plus affiches ici. Le libelle survivait a l'ecran
+  // pour des profils qui n'y figurent plus.
   const actifs = DOMAINES.filter(([c]) => perm[c] && perm[c] !== 'none')
-    .map(([c, nom]) => `${nom} ${perm[c] === 'write' ? 'écriture' : 'lecture'}`)
-  const soi = perm.self_availability && perm.self_availability !== 'none'
-    ? `Disponibilités ${perm.self_availability === 'write' ? 'écriture' : 'lecture'}` : null
-  const tout = [...actifs, soi].filter(Boolean)
-  return `${perimetre} · ${tout.length ? tout.join(', ') : 'aucun domaine'}`
+    .map(([c, nom]) => `${nom} ${perm[c] === 'write' ? 'modifier' : 'voir'}`)
+  return `${perimetre} · ${actifs.length ? actifs.join(', ') : 'aucun droit'}`
 }
 
 function ligneProfil (p) {
@@ -357,7 +362,11 @@ function rendrePanneau () {
   DOMAINES.forEach(([cle, nom, aide]) => {
     const bloc = document.createElement('div'); bloc.className = 'dom'
     const g = document.createElement('div'); g.className = 'dom-name'
-    g.innerHTML = `${esc(nom)} <span class="info" tabindex="0" role="button" aria-label="Aide" data-aide="${esc(aide)}">ⓘ</span>`
+    // ⚠ `title` EN PLUS de `data-aide` : l'infobulle CSS est un confort de
+    // survol, `title` est ce qui reste au doigt et au lecteur d'ecran.
+    // Pas de `role="button"` — il annoncait huit boutons sans action, et
+    // intercalait huit arrets de tabulation steriles entre les choix.
+    g.innerHTML = `${esc(nom)} <span class="info" role="note" title="${esc(aide)}" data-aide="${esc(aide)}">ⓘ</span>`
     bloc.appendChild(g)
     bloc.appendChild(segment(brouillon[cle] || 'none',
       v => { brouillon[cle] = v; rendrePanneau() },
@@ -384,11 +393,11 @@ function rendreAcces () {
   //
   // « Renouveler » est ICI, avec le lien : c'est la meme action vue par l'hote —
   // obtenir un lien a transmettre. La confirmation, elle, reste explicite.
+  const aideAcces = esc(edite.access_mode === 'lien'
+    ? 'Ce lien ouvre l’application ménage sans mot de passe. Le renouveler coupe l’ancien immédiatement.'
+    : 'Lien d’invitation valable 7 jours. La personne devra accepter explicitement de rejoindre votre compte. Le renouveler annule le précédent.')
   bloc.innerHTML = `<div class="bloc-titre">Accès
-      <span class="info" tabindex="0" role="button" aria-label="Aide"
-        data-aide="${esc(edite.access_mode === 'lien'
-          ? 'Ce lien ouvre l’application ménage sans mot de passe. Le renouveler coupe l’ancien immédiatement.'
-          : 'Lien d’invitation valable 7 jours. La personne devra accepter explicitement de rejoindre votre compte. Le renouveler annule le précédent.')}">ⓘ</span>
+      <span class="info" role="note" title="${aideAcces}" data-aide="${aideAcces}">ⓘ</span>
     </div>
     <div class="lien-box">
       <input class="f" id="f-lien" readonly value="${esc(lienAffiche)}" placeholder="Cliquez sur « Afficher »">

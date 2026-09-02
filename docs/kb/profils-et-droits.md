@@ -933,3 +933,20 @@ Base revenue à ses 4 biens.
 la déclencher sur un endpoint qui écrit. Ici l'endpoint n'était pas délégable —
 donc il a fait son travail, sur le bon compte — mais l'appel restait une
 écriture réelle en production.
+
+
+### ⚠️ Dette : `self_availability` n'est plus réglable nulle part
+
+Le bloc « Droits sur ses propres données » a été retiré de `/settings` — c'était
+un résidu des prestataires, qui ne s'y gèrent plus. Mais `apps/menages/prestataires.html`
+ne propose aucun contrôle de permissions : il n'écrit que `public_tokens`.
+
+Conséquence : `self_availability` et `self_view_reviews` restent dans le modèle,
+sont préservés par le socle de `validerPermissions`, et **aucun écran ne peut les
+changer**. Un prestataire créé avec `self_availability: 'write'` ne peut plus se
+voir retirer ce droit autrement que par un appel API direct.
+
+Cohérent avec la décision produit — la gestion des prestataires vit dans l'app
+ménage — mais l'écran correspondant n'existe pas encore. **À traiter au chantier
+prestataires**, avec la convergence des deux populations et les trois capacités
+déjà notées (régénérer, désactiver, renommer).
