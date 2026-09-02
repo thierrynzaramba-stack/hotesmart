@@ -255,6 +255,34 @@ Tableau par prestataire sur période sélectionnable : nb ménages, note moyenne
 
 Job cron léger (une fois par jour, après le poll reviews) : pour chaque `ota_reviews` avec `menage_event_id` null et `booking_uid` résolu, trouver le `menage_event` du même bien dont la date est la plus proche **avant** le checkin de la réservation (fenêtre : 3 jours max) et renseigner `menage_event_id`. Si aucun match → laisser null, ne pas forcer. Le `provider_id` se déduit ensuite par jointure — ne pas le dupliquer sur `ota_reviews`.
 
+### Ce que la prestataire voit de l'avis — décision du 2 septembre 2026
+
+**L'extrait de propreté EST montré à la prestataire.** C'est le signal utile :
+« la bouilloire n'était pas du tout propre », c'est à elle qu'il faut le dire, et
+un reproche sans la phrase qui le fonde est incontestable donc inutilisable.
+
+**Trois limites, non négociables :**
+
+1. **L'extrait seul, jamais l'avis complet.** L'extrait est la phrase que la
+   classification a isolée et vérifiée comme citation exacte. Le reste de l'avis
+   ne la concerne pas.
+2. **Jamais le nom du voyageur.** Ni `guest_name`, ni aucun élément permettant de
+   l'identifier.
+3. **Étiqueté « retour privé du voyageur »** quand l'extrait vient de
+   `content_private`. C'est le cas le plus fréquent des remarques — l'unique
+   remarque des 70 premiers avis en venait, sur un avis public élogieux noté
+   10/10. La prestataire doit savoir qu'elle lit un message que le voyageur
+   n'avait pas rendu public, pour ne pas le citer ailleurs.
+
+**Coupé par `self_view_reviews`.** Le drapeau existe déjà (`lib/permissions.js`,
+`api/membres.js`) et vaut `true` par défaut. À `false`, la prestataire ne voit
+aucun extrait — l'hôte garde la main sur ce qu'il transmet.
+
+**Pourquoi c'est écrit ici et pas seulement dans le code** : la donnée est
+techniquement disponible dès que la fiche prestataire lit `ota_reviews`, et rien
+dans le schéma n'empêche d'afficher `content_private` en entier. C'est une
+décision produit, elle ne se déduit d'aucune contrainte technique.
+
 ## 7. Notifications (différenciées par urgence — contre la fatigue de notification)
 - Les SMS/notifications ménage existants (Brevo, clé hôte) partent à la **prestataire visée par l'offre ou assignée**, avec son propre lien PWA. Vérifier qu'il n'y a plus aucune référence à un numéro/token ménage global.
 - `standard` : un SMS à l'offre (« Ménage [bien] le [date] — confirme ici : lien »), un rappel J-1 si accepté. Pas de relance en rafale.

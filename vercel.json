@@ -17,6 +17,10 @@
   ],
   "rewrites": [
     {
+      "source": "/avis",
+      "destination": "/pages/avis"
+    },
+    {
       "source": "/guide",
       "destination": "/pages/guide"
     },

@@ -60,6 +60,12 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-label">Calendrier</span>
       </a>`)}
 
+      ${siLire('avis', `
+      <a class="nav-item ${activePage === 'avis' ? 'active' : ''}" href="/avis">
+        <span class="nav-icon">⭐</span>
+        <span class="nav-label">Avis</span>
+      </a>`)}
+
       ${renderApps(activePage)}
 
       ${estTitulaire() ? `

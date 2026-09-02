@@ -50,7 +50,8 @@ const DELEGABLES = [
   'pages/biens-calendrier.html',    // listProperties + calendrier par ressource
   'pages/calendrier-mobile.html',   // idem
   'apps/menages/index.html',        // délégué en vague 1
-  'apps/agent-ai/messagerie.html'   // délégué en vague 1
+  'apps/agent-ai/messagerie.html',  // délégué en vague 1
+  'pages/avis.html'                 // api/avis honore X-Compte (compteDelegue), domaine `avis`
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────

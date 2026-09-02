@@ -17,10 +17,13 @@ const path = require('node:path')
 
 // Pages dont le script principal est un script CLASSIQUE : il ne peut rien
 // importer, donc tout ce qu'il utilise doit lui etre expose sur `window`.
-const PAGES = ['apps/agent-ai/messagerie.html']
+// ⚠ pages/avis.html a la MEME structure : un <script type="module"> qui importe,
+// et un <script> classique qui fait tout le travail. C'est exactement la
+// configuration qui a tue la messagerie.
+const PAGES = ['apps/agent-ai/messagerie.html', 'pages/avis.html']
 
 // Helpers venus de shared/compte-courant.js, systematiquement en cause.
-const HELPERS = ['compteCourant', 'peutEcrire', 'peutLire', 'enteteCompte', 'estTitulaire']
+const HELPERS = ['compteCourant', 'peutEcrire', 'peutLire', 'enteteCompte', 'estTitulaire', 'apiCall']
 
 function scripts (html) {
   const out = []
@@ -78,4 +81,18 @@ test('les pages qui appellent l\'API en fetch brut posent X-Compte', () => {
     assert.ok(appel.includes('enteteCompte()'),
       `${page} appelle ${endpoint} sans X-Compte : la delegation ne fonctionnera pas`)
   }
+})
+
+// ─── apiCall lève, il ne renvoie pas { error } ──────────────────────────────
+test('pages/avis.html : chaque appel apiCall est protégé par un try', () => {
+  // ⚠ `apiCall` LÈVE sur réponse non-ok (l'erreur porte `.status`). Traiter son
+  // retour comme `{ error }` laissait l'exception remonter : page blanche au
+  // premier 403 — c'est-à-dire le cas NORMAL d'un membre au périmètre restreint,
+  // pas un cas limite.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages/avis.html'), 'utf8')
+  const appels = [...html.matchAll(/apiCall\(/g)].length
+  const essais = [...html.matchAll(/try\s*\{/g)].length
+  assert.ok(appels >= 3, 'la page doit appeler apiCall')
+  assert.ok(essais >= appels - 1,
+    `${appels} appels apiCall pour seulement ${essais} try : un appel non protégé casse la page`)
 })
