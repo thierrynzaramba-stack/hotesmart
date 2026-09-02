@@ -104,23 +104,34 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-  import { apiCall } from '/shared/api-client.js'
-  import { peutEcrire } from '/shared/compte-courant.js'
+  import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
 
   // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
   // tot dans le module : un module est DEFERRE, et ses `import` sont resolus en
   // RESEAU avant que son corps ne s'execute. Le script classique plus bas, lui,
   // s'execute des le parsing. Une init accrochee a DOMContentLoaded partait donc
-  // AVANT que window.apiCall existe — une course, invisible en local, perdue en
-  // production : « window.apiCall is not a function », page vide.
+  // AVANT que le module ait pose quoi que ce soit sur window — une course,
+  // invisible en local ou tout est en cache, perdue en production.
   //
   // Le script classique se contente d'exposer window.initAvis ; c'est nous qui
   // l'appelons, une fois les helpers poses et la session verifiee. Meme motif
   // que apps/agent-ai/messagerie.html, qui appelle window.loadConversations().
-  window.apiCall = apiCall
+  // ⚠ PAS d'import de `apiCall` : shared/api-client.js n'exporte QUE `api`.
+  // L'importer nommement faisait avorter le module entier en production — « does
+  // not provide an export named 'apiCall' » — et la page etait morte. On suit le
+  // motif de apps/agent-ai/messagerie.html : fetch direct, jeton de session et
+  // `enteteCompte()` pour la delegation de compte.
   window.peutEcrire = peutEcrire
+  window.enteteCompte = enteteCompte
 
-  await requireAuth()
+  const session = await requireAuth()
+  // ⚠ requireAuth renvoie null ET declenche une redirection — mais
+  // window.location.replace() n'interrompt PAS le script : le code continuerait
+  // avec _session a null, et le premier appel API leverait un TypeError sur
+  // `.access_token` avant meme que la page de connexion s'affiche. On arrete
+  // ici, comme le fait exigerCompteProprePage pour les pages non delegables.
+  if (!session) await new Promise(() => {})
+  window._session = session
 
   // ⚠ La sidebar ne doit PAS pouvoir empecher la page de s'afficher.
   // renderSidebar appelle getUser(), qui leve sur incident reseau. Sans ce
@@ -160,6 +171,30 @@
     rien_signale: 'Propreté non évoquée'
   }
   const SRC = { sms: 'SMS', email: 'Email', oral: 'De vive voix' }
+
+  // Appel API local, sur le motif de la messagerie : jeton de session et
+  // `enteteCompte()` pour la delegation. Il LEVE sur reponse non-ok, comme
+  // apiCall le faisait, avec le statut porte par l'erreur — les appelants sont
+  // deja ecrits pour ca.
+  async function appelAPI (chemin, method = 'GET', body = null) {
+    const opts = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${window._session.access_token}`,
+        ...(window.enteteCompte ? window.enteteCompte() : {})
+      }
+    }
+    if (body) opts.body = JSON.stringify(body)
+    const res = await fetch('/api/' + chemin, opts)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const err = new Error(data.error || 'Erreur serveur')
+      err.status = res.status
+      throw err
+    }
+    return data
+  }
 
   const echapper = t => String(t == null ? '' : t)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -237,7 +272,7 @@
       // ⚠ apiCall LEVE sur reponse non-ok, il ne renvoie pas { error }. Sans ce
       // try, un 403 — le cas normal d'un membre au perimetre restreint —
       // remontait en exception non capturee et laissait la page blanche.
-      data = await window.apiCall('avis?action=list' + (ref ? '&bien=' + encodeURIComponent(ref) : ''))
+      data = await appelAPI('avis?action=list' + (ref ? '&bien=' + encodeURIComponent(ref) : ''))
     } catch (e) {
       $('loader').style.display = 'none'
       $('liste').innerHTML = ''
@@ -271,7 +306,7 @@
     if (!ref) return
     let d
     try {
-      d = await window.apiCall('avis?action=sejours&bien=' + encodeURIComponent(ref))
+      d = await appelAPI('avis?action=sejours&bien=' + encodeURIComponent(ref))
     } catch {
       // Le rattachement est facultatif : son echec ne doit pas empecher la
       // saisie de l'avis.
@@ -298,7 +333,7 @@
     $('s-envoyer').disabled = true
     $('s-feedback').textContent = 'Enregistrement…'
     try {
-      await window.apiCall('avis', 'POST', {
+      await appelAPI('avis', 'POST', {
         action: 'create',
         bien: $('s-bien').value,
         source: $('s-source').value,
@@ -321,8 +356,9 @@
   }
 
   // ⚠ EXPOSE, PAS AUTO-DECLENCHE. Accrocher cette init a DOMContentLoaded la
-  // ferait partir avant que le module ait pose window.apiCall (voir le
-  // commentaire du module ci-dessus). C'est le module qui appelle.
+  // ferait partir avant que le module ait pose window._session et
+  // window.enteteCompte (voir le commentaire du module). C'est le module qui
+  // appelle.
   window.initAvis = async function () {
     // Le bouton de saisie n'apparait qu'avec le droit d'ecriture sur `avis`.
     // Le serveur le revalide : ce masquage est un confort, pas la garde.

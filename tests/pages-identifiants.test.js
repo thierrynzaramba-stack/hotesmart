@@ -23,7 +23,7 @@ const path = require('node:path')
 const PAGES = ['apps/agent-ai/messagerie.html', 'pages/avis.html']
 
 // Helpers venus de shared/compte-courant.js, systematiquement en cause.
-const HELPERS = ['compteCourant', 'peutEcrire', 'peutLire', 'enteteCompte', 'estTitulaire', 'apiCall']
+const HELPERS = ['compteCourant', 'peutEcrire', 'peutLire', 'enteteCompte', 'estTitulaire']
 
 function scripts (html) {
   const out = []
@@ -111,17 +111,17 @@ function blocsTry (src) {
   return zones
 }
 
-test('pages/avis.html : chaque appel apiCall est DANS un try', () => {
-  // ⚠ `apiCall` LÈVE sur réponse non-ok (l'erreur porte `.status`). Traiter son
-  // retour comme `{ error }` laissait l'exception remonter : page blanche au
-  // premier 403 — c'est-à-dire le cas NORMAL d'un membre au périmètre restreint,
-  // pas un cas limite.
+test('pages/avis.html : chaque appel API est DANS un try', () => {
+  // ⚠ Le helper d'appel LÈVE sur réponse non-ok (l'erreur porte `.status`).
+  // Traiter son retour comme `{ error }` laissait l'exception remonter : page
+  // blanche au premier 403 — c'est-à-dire le cas NORMAL d'un membre au périmètre
+  // restreint, pas un cas limite.
   const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/avis.html'), 'utf8'))
   const zones = blocsTry(html)
-  const appels = [...html.matchAll(/apiCall\s*\(/g)]
-    // L'affectation `window.apiCall = apiCall` n'est pas un appel.
-    .filter(m => html.slice(m.index - 30, m.index).indexOf('window.apiCall =') === -1)
-  assert.ok(appels.length >= 3, 'la page doit appeler apiCall')
+  const appels = [...html.matchAll(/(?<![\w.])appelAPI\s*\(/g)]
+    // La déclaration de la fonction n'est pas un appel.
+    .filter(m => !/function\s+$/.test(html.slice(Math.max(0, m.index - 20), m.index)))
+  assert.ok(appels.length >= 3, 'la page doit appeler l\'API')
   for (const a of appels) {
     const couvert = zones.some(([d, f]) => a.index > d && a.index < f)
     assert.ok(couvert,
