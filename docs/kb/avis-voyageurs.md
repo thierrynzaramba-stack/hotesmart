@@ -626,6 +626,15 @@ contrôle de citation aurait rejeté l'extrait : verdict correct, citation perdu
   côté Channex. Supposer un mécanisme au lieu de le vérifier : le chantier l'a
   payé trois fois.
 
+### Dépendance à connaître
+
+Beds24 **honore `propertyId`** sur cet endpoint — vérifié par le split réel
+(24 avis sur La bulle, 69 sur Cœur de vie 23). Ce n'est pas le cas partout :
+`/bookings` oblige à refiltrer côté client. Les payloads d'avis ne portent pas
+de `propertyId`, donc **aucun filtre de repli n'est écrivable** : si Beds24
+changeait ce comportement, les avis seraient écrits sous le bien courant de la
+boucle. À surveiller si le split cesse de correspondre à l'interface.
+
 ### État du cœur
 
 **168 avis** au total : 93 Beds24, 70 Channex, 5 détections en messagerie.
