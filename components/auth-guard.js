@@ -1,4 +1,5 @@
 import { supabase, getSession } from '/shared/supabase.js'
+import { chargerContexte, reinitialiser } from '/shared/compte-courant.js'
 
 const CACHE_KEY = 'hs_onboarding_completed'
 const GF_CACHE_KEY = 'hs_guestflow_active'
@@ -8,6 +9,11 @@ const SESSION_USER_KEY = 'hs_auth_user_id'
  * BETA : verifie uniquement l'AUTHENTIFICATION. Ni l'onboarding ni l'abonnement ne
  * bloquent l'acces a l'app. Retourne la session, ou redirige vers login si absente.
  */
+// ⚠ Le compte choisi ne doit JAMAIS survivre a un changement d'utilisateur sur
+// le meme navigateur. `reinitialiser` est exporte pour la deconnexion, et le
+// changement d'utilisateur est detecte plus bas (SESSION_USER_KEY).
+export { reinitialiser as oublierCompteCourant }
+
 export async function requireAuth() {
   const session = await getSession()
   if (!session) {
@@ -22,6 +28,10 @@ export async function requireAuth() {
   if (cachedUserId && cachedUserId !== userId) {
     sessionStorage.removeItem(CACHE_KEY)
     sessionStorage.removeItem(GF_CACHE_KEY)
+    // Autre utilisateur sur ce navigateur : son compte memorise n'a rien a faire
+    // ici. `chargerContexte` le revaliderait de toute facon, mais le nettoyer
+    // tout de suite evite une bascule visible sur un compte etranger.
+    reinitialiser()
   }
   sessionStorage.setItem(SESSION_USER_KEY, userId)
 
@@ -63,6 +73,19 @@ export async function requireAuth() {
   } catch (e) {
     // localStorage indisponible : on n'empeche pas l'acces (redirection best-effort).
     console.error('[auth-guard] onboarding redirect skipped:', e)
+  }
+
+  // ⚠ LE CONTEXTE DE COMPTE, resolu ICI et une seule fois. requireAuth est le
+  // passage oblige des 16 pages : c'est le seul endroit ou le poser sans risquer
+  // qu'une page l'oublie.
+  //
+  // Tolerant a la panne : `chargerContexte` retombe sur le compte propre si la
+  // liste des comptes est indisponible. Un incident ne doit pas empecher un hote
+  // seul d'utiliser son application.
+  try {
+    await chargerContexte(userId)
+  } catch (e) {
+    console.error('[auth-guard] contexte de compte indisponible:', e)
   }
 
   return session

@@ -1,6 +1,8 @@
 import { getUser, signOut, supabase } from '../shared/supabase.js'
 import CONFIG from '../shared/config.js'
 import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+import { compteCourant, peutLire, doitAfficherSelecteur, comptes, basculerVers, estTitulaire }
+  from '/shared/compte-courant.js'
 
 export async function renderSidebar(activePage = '') {
   const user = await getUser()
@@ -15,32 +17,43 @@ export async function renderSidebar(activePage = '') {
     ? `/biens/${apiStatus.firstPropertyId}/calendrier`
     : '/biens'
 
+  // ⚠ MASQUAGE PAR DROIT. Un membre ne doit jamais voir une entree qui le
+  // menerait a une page vide ou a un refus. `peutLire` renvoie toujours vrai
+  // pour un titulaire : un hote seul voit exactement ce qu'il voyait avant.
+  const siLire = (domaine, html) => peutLire(domaine) ? html : ''
+
   sidebar.innerHTML = `
     <div class="nav">
+
+      ${renderSelecteurCompte()}
 
       <a class="nav-item ${activePage === 'accueil' ? 'active' : ''}" href="/">
         <span class="nav-icon">⌂</span>
         <span class="nav-label">Accueil</span>
       </a>
 
+      ${siLire('reservations', `
       <a class="nav-item ${activePage === 'biens' || activePage === 'biens-detail' || activePage === 'biens-nouveau' ? 'active' : ''}" href="/biens">
         <span class="nav-icon">🏠</span>
         <span class="nav-label">Mes biens</span>
-      </a>
+      </a>`)}
 
+      ${siLire('messages', `
       <a class="nav-item ${activePage === 'agent-ai-messagerie' ? 'active' : ''}" href="/apps/agent-ai/messagerie">
         <span class="nav-icon">💬</span>
         <span class="nav-label">Messages</span>
-      </a>
+      </a>`)}
 
+      ${siLire('reservations', `
       <a class="nav-item ${activePage === 'biens-calendrier' ? 'active' : ''}" href="${calendrierHref}">
         <span class="nav-icon">📅</span>
         <span class="nav-label">Calendrier</span>
-      </a>
+      </a>`)}
 
       <div class="nav-section-label">Apps</div>
       ${renderApps(activePage)}
 
+      ${estTitulaire() ? `
       <div class="nav-section-label">Configuration</div>
       <a class="nav-item ${activePage === 'api' ? 'active' : ''}" href="/connexions">
         <span class="nav-icon">⚡</span>
@@ -49,17 +62,21 @@ export async function renderSidebar(activePage = '') {
       ${renderApiItem('Beds24',           apiStatus.beds24, '/connexions')}
       ${renderApiItem('Booking & Airbnb', apiStatus.ota,    '/connexions')}
       ${renderApiItem('Seam Serrures',    apiStatus.seam,   '/apps/serrures')}
-      ${renderApiItem('Brevo SMS',        apiStatus.brevo,  '/connexions')}
+      ${renderApiItem('Brevo SMS',        apiStatus.brevo,  '/connexions')}` : ''}
 
       <div class="nav-section-label">Compte</div>
+      ${estTitulaire() ? `
       <a class="nav-item ${activePage === 'settings' ? 'active' : ''}" href="/settings">
         <span class="nav-icon">⚙</span>
         <span class="nav-label">Réglages</span>
-      </a>
+      </a>` : ''}
       <a class="nav-item ${activePage === 'compte' ? 'active' : ''}" href="/pages/compte.html">
         <span class="nav-icon">👤</span>
         <span class="nav-label">Mon compte</span>
       </a>
+      <!-- « Mon compte » et « Abonnement » sont des donnees d'IDENTITE : ils
+           restent visibles quel que soit le compte courant, et montrent ceux de
+           la personne connectee (docs/kb/audit-user-id-front.md #9, #10). -->
       <a class="nav-item ${activePage === 'abonnement' ? 'active' : ''}" href="/abonnement">
         <span class="nav-icon">◈</span>
         <span class="nav-label">Abonnement</span>
@@ -173,6 +190,33 @@ function initMobileSidebar(sidebar) {
   })
 }
 
+// ⚠ NE S'AFFICHE QUE S'IL Y A UN CHOIX. Un hote sans invitation acceptee ne voit
+// rien de nouveau — c'est la non-regression absolue de cette etape.
+// Quand il s'affiche, le compte actif est LISIBLE en permanence : on ne doit
+// jamais avoir a deviner sur quel compte on travaille.
+function renderSelecteurCompte() {
+  if (!doitAfficherSelecteur()) return ''
+  const liste = comptes()
+  const actif = liste.find(c => String(c.user_id) === String(compteCourant())) || liste[0]
+  const options = liste.map(c => `
+    <option value="${escapeAttr(c.user_id)}" ${String(c.user_id) === String(compteCourant()) ? 'selected' : ''}>
+      ${escapeHtml(c.nom)}${c.titulaire ? ' (mon compte)' : ''}
+    </option>`).join('')
+  return `
+    <div class="nav-compte">
+      <div class="nav-compte-label">Compte</div>
+      <select class="nav-compte-select" onchange="handleBasculeCompte(this.value)">${options}</select>
+      ${actif && !actif.titulaire
+        ? '<div class="nav-compte-hint">Vous agissez sur un compte partagé</div>' : ''}
+    </div>`
+}
+
+function escapeHtml(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+const escapeAttr = escapeHtml
+
 function renderApps(activePage) {
   return CONFIG.apps.map(app => {
     const isActive    = app.active !== false
@@ -243,6 +287,10 @@ function renderApiItem(label, active, href) {
 async function getApiStatus(user) {
   if (!user) return { beds24: false, ota: false, seam: false, brevo: false, stripe: false, plan: null, firstPropertyId: null }
   try {
+    // ⚠ IDENTITE, pas compte courant (docs/kb/audit-user-id-front.md #33).
+    // La RLS d'api_keys est `auth.uid()` STRICTE : un membre y lit toujours vide,
+    // et c'est voulu — une cle PMS engage le compte, elle ne se delegue pas. Les
+    // pastilles de connexion affichent donc l'etat du compte DE LA PERSONNE.
     const { data } = await supabase
       .from('api_keys')
       .select('api_key, seam_api_key, seam_enabled, brevo_api_key, brevo_enabled')
@@ -256,7 +304,7 @@ async function getApiStatus(user) {
       const { data: chProps } = await supabase
         .from('properties')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('user_id', compteCourant())
         .in('provider', ['channex', 'channel'])
         .order('created_at', { ascending: true })
         .limit(1)
@@ -269,6 +317,9 @@ async function getApiStatus(user) {
     let stripeActive = false
     let plan = null
     try {
+      // ⚠ IDENTITE (#35) : `facturation` n'est pas delegable, un membre lit son
+      // propre abonnement. Sur le compte d'autrui la RLS renvoie null — d'ou le
+      // `plan = null` en repli, qui doit s'afficher proprement.
       const { data: gf } = await supabase
         .from('subscriptions')
         .select('status')
@@ -301,6 +352,11 @@ async function getApiStatus(user) {
 
 function getInitials(email = '') {
   return email.substring(0, 2).toUpperCase()
+}
+
+// Bascule de compte : la page se recharge, voir shared/compte-courant.js.
+window.handleBasculeCompte = function (userId) {
+  basculerVers(userId)
 }
 
 window.handleSignOut = async function() {

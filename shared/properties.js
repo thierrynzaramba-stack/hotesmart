@@ -11,7 +11,6 @@
 
 import { api } from '/shared/api-client.js'
 import { logger } from '/shared/logger.js'
-import { supabase, getUser } from '/shared/supabase.js'
 
 export function escapeHtml(s) {
   if (s == null) return ''
@@ -20,64 +19,48 @@ export function escapeHtml(s) {
   }[c]))
 }
 
-async function fetchBeds24Properties() {
-  const data = await api.beds24.getProperties()
-  return (data.properties || []).map(p => ({ ...p, _source: 'beds24' }))
-}
-
-async function fetchChannelProperties() {
+// ⚠ UNE SEULE SOURCE : /api/channel-property.
+//
+// Cette fonction interrogeait DEUX endpoints et decidait elle-meme, en lisant
+// `api_keys` cote client, si Beds24 etait configure. Deux raisons de ne plus le
+// faire, et la seconde est bloquante :
+//
+//  1. Le front n'a pas a savoir qu'un provider existe. /api/channel-property
+//     compose deja la liste des deux providers cote serveur — c'est le principe
+//     du coeur de donnees (docs/kb/coeur-de-donnees.md).
+//  2. La RLS d'`api_keys` est `user_id = auth.uid()` STRICTE, sans delegation :
+//     un membre y lit toujours vide. Il en deduisait « Beds24 non configure »,
+//     donc n'affichait AUCUN bien Beds24 — alors que le bien delegue peut
+//     precisement en etre un. Desserrer la RLS aurait ete la mauvaise reponse :
+//     une cle PMS engage le compte et ne se delegue pas.
+//
+// L'endpoint, lui, lit la cle en service key sur le COMPTE COURANT (en-tete
+// X-Compte revalide) : il sait ce que le navigateur ne peut pas savoir.
+async function fetchToutesProprietes() {
   const data = await api.channel.listProperties()
-  // channel-property renvoie AUSSI les biens beds24 de l'utilisateur : on les
-  // retire ici pour ne pas les compter deux fois avec fetchBeds24Properties().
-  return (data.properties || [])
-    .filter(p => p.provider !== 'beds24')
-    .map(p => ({ ...p, _source: 'channel' }))
+  return (data.properties || []).map(p => ({
+    ...p,
+    // `_source` reste la cle de provenance utilisee par les pages (badges,
+    // canaux) : on la derive du provider renvoye par le serveur.
+    _source: p.provider === 'beds24' ? 'beds24' : 'channel'
+  }))
 }
 
 // Les deux sources en parallele : si l'une tombe, l'autre s'affiche quand meme.
 // Renvoie { properties, beds24Failed, channelFailed, allFailed } — allFailed
 // permet a l'appelant de distinguer "aucun bien" d'un "chargement casse".
 export async function loadAllProperties() {
-  // Beds24 n'est interroge QUE s'il est configure (api_keys.api_key existe). Onboarding
-  // facultatif : un hote sans PMS ne doit pas declencher /api/beds24 (400 sans cle).
-  // En cas de doute (check en erreur), on appelle quand meme -> ne jamais amputer un
-  // hote Beds24 reel (ses biens ne remontent que par cette voie, filtres cote channel).
-  let beds24Configured = true
   try {
-    const user = await getUser()
-    if (!user) {
-      beds24Configured = false
-    } else {
-      const { data: keyRow } = await supabase
-        .from('api_keys').select('api_key').eq('user_id', user.id).maybeSingle()
-      beds24Configured = !!keyRow?.api_key
-    }
-  } catch (e) {
-    logger.error('properties', 'beds24 config check echec: ' + (e?.message || e))
-    beds24Configured = true
-  }
-
-  const [beds24Res, channelRes] = await Promise.allSettled([
-    beds24Configured ? fetchBeds24Properties() : Promise.resolve([]),
-    fetchChannelProperties()
-  ])
-
-  const beds24Props  = beds24Res.status  === 'fulfilled' ? beds24Res.value  : []
-  const channelProps = channelRes.status === 'fulfilled' ? channelRes.value : []
-
-  const beds24Failed  = beds24Res.status  === 'rejected'
-  const channelFailed = channelRes.status === 'rejected'
-  if (beds24Failed)  logger.error('properties', 'Beds24: '  + beds24Res.reason?.message)
-  if (channelFailed) logger.error('properties', 'Channel: ' + channelRes.reason?.message)
-
-  const properties = [...beds24Props, ...channelProps]
-  logger.info('properties', `${properties.length} biens (${beds24Props.length} Beds24, ${channelProps.length} channel)`)
-
-  return {
-    properties,
-    beds24Failed,
-    channelFailed,
-    allFailed: beds24Failed && channelFailed
+    const properties = await fetchToutesProprietes()
+    const beds24 = properties.filter(p => p._source === 'beds24').length
+    logger.info('properties', `${properties.length} biens (${beds24} Beds24, ${properties.length - beds24} channel)`)
+    // Les drapeaux d'echec par source sont conserves dans la signature : les
+    // pages les lisent (`allFailed` distingue « aucun bien » d'un chargement
+    // casse). Avec une source unique, les trois sont lies.
+    return { properties, beds24Failed: false, channelFailed: false, allFailed: false }
+  } catch (err) {
+    logger.error('properties', 'chargement des biens echoue: ' + (err?.message || err))
+    return { properties: [], beds24Failed: true, channelFailed: true, allFailed: true }
   }
 }
 

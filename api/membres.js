@@ -652,6 +652,53 @@ async function apercu (req, res) {
   })
 }
 
+// ─── Les comptes auxquels l'appelant a acces ─────────────────────────────────
+//
+// ⚠ HORS du domaine `equipe`, comme preview et accept : la question n'est pas
+// « as-tu le droit de gerer une equipe » mais « de quels comptes fais-tu partie ».
+// Refuser ici priverait un membre du selecteur qui lui donne acces.
+//
+// Ne revele QUE les comptes dont l'appelant est deja membre actif — il n'apprend
+// rien qu'il ne puisse deja atteindre.
+async function mesComptes (req, res, appelant) {
+  // 1. Son propre compte, toujours en tete.
+  const { data: sien, error: eSien } = await supabase
+    .from('profiles').select('first_name, last_name, email')
+    .eq('account_user_id', appelant).eq('is_owner', true).maybeSingle()
+  if (eSien) { console.error('[membres] mes_comptes (sien)', eSien.message); return res.status(503).json({ error: 'Service temporairement indisponible' }) }
+
+  const comptes = [{
+    user_id: appelant,
+    nom: [sien?.first_name, sien?.last_name].filter(Boolean).join(' ') || 'Mon compte',
+    email: sien?.email || null,
+    titulaire: true
+  }]
+
+  // 2. Les comptes ou il est membre ACTIF et ACCEPTE. Un profil desactive ou une
+  //    invitation en attente ne donnent aucun acces — les inclure afficherait un
+  //    compte sur lequel toutes les requetes echoueraient.
+  const { data: membres, error: eMembre } = await supabase
+    .from('profiles').select('account_user_id, first_name, active, accepted_at')
+    .eq('member_user_id', appelant).eq('is_owner', false)
+  if (eMembre) { console.error('[membres] mes_comptes (membre)', eMembre.message); return res.status(503).json({ error: 'Service temporairement indisponible' }) }
+
+  const utiles = (membres || []).filter(m => m.active === true && m.accepted_at)
+  for (const m of utiles) {
+    if (String(m.account_user_id) === String(appelant)) continue
+    const { data: proprio } = await supabase
+      .from('profiles').select('first_name, last_name, email')
+      .eq('account_user_id', m.account_user_id).eq('is_owner', true).maybeSingle()
+    comptes.push({
+      user_id: m.account_user_id,
+      nom: [proprio?.first_name, proprio?.last_name].filter(Boolean).join(' ') || 'Compte partagé',
+      email: proprio?.email || null,
+      titulaire: false
+    })
+  }
+
+  return res.status(200).json({ comptes })
+}
+
 function messageErreur (code) {
   return code === 400 ? 'Identifiant de profil requis'
        : code === 404 ? 'Profil introuvable'
@@ -667,7 +714,7 @@ function messageErreur (code) {
 // mais des l'etape 5 un membre en lecture seule obtiendrait de quoi rattacher un
 // complice. Une action qui divulgue un secret d'acces exige `write`.
 const LECTURE = new Set(['list'])
-const ACTIONS = new Set(['list', 'lien', 'create', 'update', 'deactivate', 'reactivate', 'regenerate', 'accept', 'preview'])
+const ACTIONS = new Set(['list', 'lien', 'create', 'update', 'deactivate', 'reactivate', 'regenerate', 'accept', 'preview', 'mes_comptes'])
 
 module.exports = async function handler (req, res) {
   const action = String(req.query?.action || (req.body || {}).action || '').trim()
@@ -693,7 +740,10 @@ module.exports = async function handler (req, res) {
 
   // `accept` est hors du domaine `equipe` : celui qui l'appelle n'est pas encore
   // membre du compte. Il est authentifie, et c'est le JETON qui designe le compte.
-  if (action === 'accept') return await accepter(req, res, appelant)
+  if (action === 'accept')      return await accepter(req, res, appelant)
+  // `mes_comptes` est hors du domaine `equipe` : voir le commentaire de la
+  // fonction. C'est ce qui alimente le selecteur de compte.
+  if (action === 'mes_comptes') return await mesComptes(req, res, appelant)
 
   const garde = await requirePermission(req, res, {
     domaine: 'equipe',

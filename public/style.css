@@ -362,3 +362,17 @@ body {
   margin-bottom: 12px;
 }
 .section-header .section-title { margin-bottom: 0; }
+
+
+/* ── Sélecteur de compte (sidebar) ──────────────────────────────────────────
+   N'apparaît que si l'utilisateur a accès à plus d'un compte. Le compte actif
+   doit rester lisible en permanence : on ne devine jamais sur quel compte on
+   travaille. */
+.nav-compte { padding: 10px 12px; margin-bottom: 8px; border-bottom: 0.5px solid var(--border); }
+.nav-compte-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 4px; }
+.nav-compte-select {
+  width: 100%; padding: 6px 8px; font-size: 12px; font-family: inherit;
+  border: 0.5px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); cursor: pointer;
+}
+.nav-compte-hint { font-size: 10px; color: #92400E; background: #FEF3C7; border-radius: 4px; padding: 4px 6px; margin-top: 5px; line-height: 1.4; }

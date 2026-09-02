@@ -18,6 +18,23 @@ export async function renderOnboardingBanner() {
   try { user = await getUser() } catch { return }
   if (!user) return
 
+  // ⚠ SUR UN COMPTE PARTAGE, AUCUN BANDEAU.
+  // Onboarding, abonnement et flag beta sont des donnees d'IDENTITE
+  // (docs/kb/audit-user-id-front.md #36-38) : elles decrivent la personne
+  // connectee, pas le compte sur lequel elle travaille. Les afficher pendant
+  // qu'elle agit sur le compte d'un hote serait au mieux hors sujet — « finalisez
+  // votre configuration » alors qu'elle regarde les reservations de quelqu'un
+  // d'autre — au pire trompeur.
+  //
+  // Et techniquement, un membre ne PEUT pas lire `accounts` ni `subscriptions`
+  // du compte courant : la RLS les borne a `can_read(user_id, 'facturation')`,
+  // domaine non delegable. Les lectures renverraient null, sans erreur, et le
+  // bandeau se tromperait en silence.
+  try {
+    const { estTitulaire } = await import('/shared/compte-courant.js')
+    if (!estTitulaire()) return
+  } catch { /* module indisponible : on continue, comportement d'avant */ }
+
   let banner = null
   try {
     // 1) Onboarding non termine -> priorite absolue.

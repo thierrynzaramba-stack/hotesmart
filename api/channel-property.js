@@ -110,10 +110,21 @@ module.exports = async function handler(req, res) {
 
   // ===== GET : liste des biens (FUSION Beds24 + Channex) =====
   if (req.method === 'GET') {
+    // ⚠ COMPTE COURANT, pas l'appelant. C'est le seul endpoint qui compose la
+    // liste des biens des DEUX providers : sans lui, un membre delegue ne verrait
+    // aucun bien Beds24 — la cle PMS n'etant pas lisible cote client (RLS
+    // `auth.uid()` stricte, et c'est voulu). La garde revalide l'en-tete
+    // X-Compte : etre membre actif de ce compte, ou rien.
+    const gardeGet = await requirePermission(req, res, {
+      domaine: 'reservations', niveau: 'read', userId: user.id
+    })
+    if (!gardeGet.ok) return
+    const compteLecture = gardeGet.accountUserId
+
     const { data: chanData, error: chanErr } = await supabase
       .from('properties')
       .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
-      .eq('user_id', user.id)
+      .eq('user_id', compteLecture)
       .order('created_at', { ascending: false })
     if (chanErr) {
       console.error('[channel-property] SELECT error', chanErr.message)
@@ -131,7 +142,7 @@ module.exports = async function handler(req, res) {
       const { data: keyData } = await supabase
         .from('api_keys')
         .select('api_key')
-        .eq('user_id', user.id)
+        .eq('user_id', compteLecture)
         .single()
       if (keyData && keyData.api_key) {
         const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: keyData.api_key } })
@@ -144,6 +155,7 @@ module.exports = async function handler(req, res) {
           currency: b.currency || 'EUR',
           address: b.address || '',
           city: b.city || '',
+          country: b.country || '',
           capacity: (b.roomTypes && b.roomTypes[0] && b.roomTypes[0].maxPeople) || 1,
           inventory_type: 'whole',
           created_at: null

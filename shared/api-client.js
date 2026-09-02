@@ -1,17 +1,40 @@
 import { supabase } from '/shared/supabase.js'
 import { logger } from '/shared/logger.js'
 
+// ⚠ IMPORT PARESSEUX, et pas par confort : shared/compte-courant.js importe ce
+// module. Un import statique creerait un cycle, et le compte n'est de toute
+// facon connu qu'apres le chargement du contexte.
+let lireCompteCourant = null
+async function compteAEnvoyer () {
+  try {
+    if (!lireCompteCourant) {
+      const m = await import('/shared/compte-courant.js')
+      lireCompteCourant = m.compteCourant
+    }
+    return lireCompteCourant()
+  } catch { return null }
+}
+
 async function apiCall(endpoint, method = 'GET', body = null) {
   try {
     // Récupère le token de session automatiquement
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
 
+    // ⚠ X-Compte : le compte sur lequel on travaille, DEMANDE au serveur qui le
+    // revalide (lib/require-permission.js). Il n'est envoye que s'il differe de
+    // l'appelant — un hote seul n'emet donc jamais cet en-tete, et rien ne change
+    // pour lui. Une ressource designee (bien, reservation) prime toujours dessus.
+    const compte = await compteAEnvoyer()
+    const enteteCompte = (compte && session?.user?.id && compte !== session.user.id)
+      ? { 'X-Compte': compte } : {}
+
     const options = {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` })
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+        ...enteteCompte
       }
     }
 
@@ -162,6 +185,7 @@ export const api = {
     desactiver: (id)  => apiCall('membres', 'POST', { action: 'deactivate', profile_id: id }),
     reactiver:  (id)  => apiCall('membres', 'POST', { action: 'reactivate', profile_id: id }),
     regenerer:  (id)  => apiCall('membres', 'POST', { action: 'regenerate', profile_id: id }),
+    mesComptes: ()    => apiCall('membres', 'POST', { action: 'mes_comptes' }),
     apercu:     (t)   => apiCall('membres', 'POST', { action: 'preview', token: t }),
     accepter:   (t)   => apiCall('membres', 'POST', { action: 'accept', token: t })
   }
