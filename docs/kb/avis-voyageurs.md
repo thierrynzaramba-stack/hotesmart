@@ -400,3 +400,160 @@ mais il n'emprunte pas des dates qui ne le concernent pas.
   de `ota_reviews` ignorait `user_id` : retirer `.eq('user_id', …)` de l'endpoint
   — la défense principale, la service key contournant la RLS — laissait les
   quatre tests de lecture au vert.
+
+## 9. Signalements détectés dans la messagerie (lot 6)
+
+Un voyageur a écrit : « **je ne voulais pas le marquer sur Airbnb** mais vous
+devriez contrôler un peu le travail de femme de ménage […] dans la limite
+inférieure de l'acceptable ». Cette phrase n'existe **nulle part ailleurs** :
+ni tag OTA, ni note, ni avis public. C'est la justification du lot, et elle est
+plus forte que n'importe quel argument théorique.
+
+**Sur 70 jours de messagerie réelle : 5 signalements**, contre **1 seule
+remarque sur 70 avis couvrant deux ans**. La messagerie est, de loin, la source
+la plus riche sur la propreté — l'inverse de la hiérarchie qu'on avait supposée
+en ouvrant le chantier.
+
+### Pas d'étage 1, et c'est mesuré
+
+Un message n'a ni tag ni note : aucune règle déterministe n'est possible. Et un
+pré-filtre lexical serait **dangereux** — sur les données réelles il remonte
+25 messages dont **19 faux positifs** (« fournissez-vous draps et serviettes ? »,
+« nous avons vidé les poubelles ») et raterait les formulations indirectes.
+À ~5,5 entrants/jour, tout classer coûte quelques centimes par mois.
+
+Les quatre exclusions du prompt viennent **chacune** d'un faux positif constaté,
+pas d'une précaution théorique. Résultat du rattrapage : **359 messages,
+5 détections, 0 faux positif**.
+
+### La validation humaine est la garantie centrale
+
+Une détection naît en `statut = 'detecte'`, s'affiche avec un bandeau
+« Détecté dans un message · À confirmer avant d'être compté », et n'entre dans
+**aucun** indicateur avant confirmation. Aucun reproche ne parviendra à la
+prestataire sans que l'hôte l'ait validé.
+
+⚠ **L'écriture est en `DO NOTHING`, pas `DO UPDATE`.** `versLigne` pose toujours
+`statut: 'detecte'` : avec un upsert classique, retraiter un message repassait
+une détection **confirmée** en attente et faisait **réapparaître** une détection
+ignorée, que l'hôte ne pouvait plus écarter. Le retraitement n'est pas théorique
+— un échec en milieu de lot fait rejouer les messages déjà traités. Ce que le
+modèle dirait de différent à une seconde lecture n'a aucune valeur face à une
+décision humaine déjà prise.
+
+### La file : ni gel, ni perte silencieuse
+
+Le curseur est **global** (`cron_logs.messages_classify_cursor`), contrairement
+au marqueur par ligne des avis (`ai_analyzed_at`). Cette différence a coûté deux
+correctifs successifs, chacun créant le défaut inverse :
+
+1. `continue` sur échec → le curseur avançait, le message était **perdu
+   définitivement**. Quatre l'ont été au rattrapage.
+2. `break` sans avancer → la file **gelait pour toujours**. Un message que le
+   modèle ne sait pas traiter — citation trop longue tronquée par `max_tokens`,
+   donc JSON invalide — rejouait le même lot toutes les heures, et aucun message
+   postérieur n'était jamais analysé. C'est ce que `REVIEW.md` règle 3 interdit.
+
+**La bonne réponse est un compteur d'échecs consécutifs borné** (3), stocké dans
+`total_messages` de la ligne curseur. Au troisième, le message est sauté **et
+signalé**. Et `dernierTraite` conserve le dernier **succès** : jeter le travail
+déjà fait du lot était précisément ce qui rouvrait la porte au retraitement.
+
+**Curseur sur `created_at`, jamais `sent_at`** : `created_at` est la date
+d'insertion, monotone, donc un message importé tardivement est vu.
+
+**Les messages sortants ne sont jamais analysés** — analyser nos propres
+réponses produirait des détections sur nos mots.
+
+### Une panne n'est pas une absence — trois fois
+
+La lecture du bien ignorait `error` : un 503 transitoire passait pour « bien
+inconnu », le curseur avançait, la détection était perdue — et le cache
+mémorisait le `null` pour tout le lot. Idem sur `bookings_snapshot`, où une panne
+gravait une détection **sans ancrage de séjour** alors que le schéma prévoit une
+résolution tardive. L'écriture ratée perdait aussi la détection. Les trois
+suivent maintenant la même règle : **on ne dépasse pas ce qui n'a pas été
+traité**.
+
+`sans_bien` remonte dans les erreurs du cycle : un compte dont les
+`property_id` ne résolvent jamais perdrait 100 % de ses détections sans un mot.
+
+## 10. Clôture du chantier — bilan des lots 1 à 6
+
+**Chantier clos le 3 septembre 2026.** Une seule question reste ouverte, en §11.
+
+### Ce qui existe
+
+| lot | livré |
+|---|---|
+| 1 | table `ota_reviews` (cœur), schéma tiré de la sonde réelle |
+| 2 | poll quotidien Channex → 70 avis, idempotent |
+| 3 | webhook `updated_review` sur le 2ᵉ webhook, writer partagé avec le poll |
+| 4 | classification propreté en deux étages, règle avant IA |
+| 5 | page `/avis`, saisie manuelle (SMS / email / oral) |
+| 6 | détection automatique dans les messages entrants, avec validation humaine |
+
+### Les chiffres
+
+- **70 avis** OTA en base (68 Airbnb, 2 Booking.com), idempotents sur plusieurs
+  passages, couvrant octobre 2024 → août 2026.
+- **1 seule remarque de propreté** dans ces 70 avis — et elle venait du **retour
+  privé** d'un avis noté 10/10 avec quatre tags positifs (« la bouilloire n'était
+  pas du tout propre »). Ni la note ni les tags ne l'auraient révélée.
+- **359 messages entrants** analysés, **5 détections, 0 faux positif**, toutes
+  rattachées à leur séjour.
+- **11 avis sur 70** rattachés à une réservation — limite structurelle assumée
+  (§4). Les messages, eux, se rattachent presque toujours.
+- Coût mesuré : **418 tokens d'entrée, 45 de sortie** par appel. Quelques
+  centimes pour tout l'historique, moins d'un centime par mois en croisière.
+
+### Les trois leçons qui valent au-delà de ce chantier
+
+**1. Un double de test doit modéliser la TABLE, pas la ligne attendue.**
+Quatre fois dans ce chantier, un double trop permissif a laissé passer un défaut
+réel. Le cas le plus instructif : tolérer l'absence d'un filtre
+(`profile_id == null` → on renvoie quand même) ne suffisait **pas** — en base,
+une requête sans filtre ne rend pas *rien*, elle rend **la première ligne
+venue**. Il a fallu ajouter une **ligne leurre** très permissive à côté de la
+ligne attendue pour que retirer le filtre fasse enfin échouer la suite. Résultat
+mesuré : de 0 à 12 tests en échec sur la même mutation.
+
+**2. Un extrait de modèle se vérifie contre le texte — mais pas au caractère
+près.** `texte.includes(extrait)` rejetait **4 citations légitimes sur 5** pour
+de simples écarts d'espaces. `lib/extrait-verifie.js` rend la portion du **texte
+d'origine** et ne tolère que les espaces : une reformulation ou une concaténation
+de passages non contigus reste rejetée — cas vérifiés sur les données réelles.
+Le contrôle doit être strict sur les **mots**, souple sur la **forme**.
+
+**3. `DO NOTHING` dès qu'une décision humaine est en jeu.** Un upsert qui
+réécrit toutes les colonnes annule silencieusement une validation. La règle :
+une relecture automatique ne prime jamais sur une décision prise par une
+personne.
+
+### Ce que les données ont démenti, à chaque lot
+
+Le chantier a été conçu sur des hypothèses que les mesures ont retournées :
+`reply` est un objet vide et non une chaîne ; les échelles de notes ne coïncident
+pas entre OTA ; `provider_msg_id` manque sur un tiers des messages ; et surtout,
+**la messagerie s'est révélée cinq fois plus riche que les avis** sur la
+propreté. Aucune de ces corrections n'aurait été trouvée sans confronter le code
+aux données réelles avant de le déclarer fini.
+
+## 11. La seule question ouverte — Beds24 en lecture
+
+**Aucune lecture d'avis Beds24 n'est implémentée.** L'étape 0 avait conclu que
+l'API ne l'expose pas — mais cette conclusion repose sur une sonde **sans témoin
+négatif fiable** : un chemin inventé renvoyait le même `200 null` qu'un vrai.
+C'est précisément le contrôle qui a permis, côté Channex, d'affirmer que
+`GET /reviews` existait vraiment.
+
+**Suspendu à la vérification de la doc Swagger authentifiée par le product
+owner.** Deux issues :
+
+- l'API expose les avis → un module `lib/cron-beds24-reviews.js` sur le modèle du
+  poll Channex, écrivant par le même writer ; les biens `coeur de vie 23` et
+  `La bulle` entreraient dans le cœur ;
+- elle ne les expose pas → la saisie manuelle (§8) reste la seule voie pour ces
+  biens, et c'est déjà livré.
+
+Rien d'autre n'est en attente sur ce chantier.

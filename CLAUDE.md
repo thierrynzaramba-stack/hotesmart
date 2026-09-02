@@ -100,6 +100,13 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 ## ÉTAT (fin Session #22)
 Certification PMS Channex SOUMISE (formulaire Google enregistré). En attente revue live Channex.
 
+**Chantier AVIS VOYAGEURS CLOS** (lots 1-6) : `ota_reviews` au cœur, poll
+quotidien Channex (70 avis), webhook `updated_review`, classification propreté
+en deux étages (règle avant IA), page `/avis`, saisie manuelle, et détection
+automatique dans les messages entrants — 359 analysés, 5 signalements, 0 faux
+positif, avec validation humaine avant tout comptage. Bilan, leçons et seule
+question ouverte (Beds24 en lecture) : docs/kb/avis-voyageurs.md §10-11.
+
 **Chantier profils et droits CLOS** (étapes 0-5) : 26/26 endpoints gardés,
 10 fuites fermées, sélecteur de compte et masquage par droit livrés et validés en
 production. Détail et dettes : docs/kb/profils-et-droits.md §12.
@@ -109,7 +116,11 @@ Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcour
 (b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
 
 Prochain chantier : prestataires (fiche + convergence des deux populations +
-les 5 dettes du §12), puis avis voyageurs (spec §0 : ota_reviews appartient au cœur).
+les 5 dettes du §12). La fiche prestataire consommera `ota_reviews` : décision
+déjà gravée dans docs/specs/spec-prestataires-menage.md §6 — l'extrait de
+propreté est montré à la prestataire, mais l'extrait SEUL, jamais le nom du
+voyageur, étiqueté « retour privé » quand il en vient, et coupé par
+`self_view_reviews`.
 
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
