@@ -32,9 +32,35 @@
     .badge-prop.attente      { background:#F0F0F0; color:#999; }
     .badge-src { background:#EEF2FF; color:#3B4CCA; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
 
+    /* ⚠ `hidden` NE MASQUE PAS un element dont une regle auteur pose un display.
+       `.btn` est en `display:inline-flex` (public/style.css), donc `btn.hidden =
+       true` etait un NO-OP : le bouton de saisie restait visible, y compris pour
+       un membre `avis: read`. Le serveur refusait bien en 403, mais le masquage
+       par droit annonce ne fonctionnait pas. Meme cause pour #stats. */
+    [hidden] { display: none !important; }
+
+    /* ⚠ AUCUNE de ces classes n'existe dans public/style.css : `grep '.modal'`
+       n'y renvoie rien. Chaque page definit les siennes (biens.html:54,
+       menages, serrures...). Sans ces regles, la modale s'affichait EN FLUX
+       NORMAL sous le pli — formulaire brut visible en permanence — et le bouton
+       d'ouverture ne produisait rien.
+       Classe d'ouverture `.show`, comme pages/biens.html : une page de plus avec
+       `.open` aurait fait deux conventions pour la meme chose. */
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+             align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+    .modal.show { display: flex; }
+    .modal-content { background: var(--bg); border-radius: var(--radius-lg); width: 100%;
+                     max-width: 520px; padding: 24px; max-height: 90vh; overflow-y: auto; }
+    .modal-content h2 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    .modal-feedback { font-size: 13px; color: #E24B4A; min-height: 18px; margin-top: 10px; }
     .modal-body label { display:block; margin-top:12px; font-size:13px; font-weight:600; }
+    .modal-body input, .modal-body select { width: 100%; padding: 9px 10px; font-size: 14px;
+                     border: 0.5px solid var(--border); border-radius: 8px; background: var(--bg);
+                     color: var(--text); margin-top: 4px; }
     .modal-body textarea { width:100%; min-height:120px; font-family:inherit; font-size:14px;
-                           padding:10px; border:0.5px solid var(--border); border-radius:8px; resize:vertical; }
+                           padding:10px; border:0.5px solid var(--border); border-radius:8px;
+                           resize:vertical; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -56,8 +82,13 @@
       </div>
 
       <div id="loader" class="loader">Chargement…</div>
+      <!-- ⚠ Le titre est DYNAMIQUE. Fige a « Aucun avis pour l'instant », il
+           coiffait le message d'erreur : « Aucun avis pour l'instant / Vous
+           n'avez pas accès aux avis de ce compte. » — deux affirmations
+           contradictoires sur le cas le plus courant, un membre au perimetre
+           restreint. Meme famille que la regression corrigee en 37b5798. -->
       <div id="vide" class="empty-state" style="display:none;">
-        <h2>Aucun avis pour l'instant</h2>
+        <h2 id="vide-titre">Aucun avis pour l'instant</h2>
         <p id="vide-msg">Les avis de vos voyageurs apparaîtront ici dès leur publication.</p>
       </div>
       <div id="liste"></div>
@@ -105,6 +136,7 @@
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
 
   // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
   // tot dans le module : un module est DEFERRE, et ses `import` sont resolus en
@@ -123,6 +155,7 @@
   // `enteteCompte()` pour la delegation de compte.
   window.peutEcrire = peutEcrire
   window.enteteCompte = enteteCompte
+  window._supabase = supabase
 
   const session = await requireAuth()
   // ⚠ requireAuth renvoie null ET declenche une redirection — mais
@@ -156,6 +189,8 @@
     const msg = document.getElementById('vide-msg')
     if (loader) loader.style.display = 'none'
     if (vide) vide.style.display = 'block'
+    const titre = document.getElementById('vide-titre')
+    if (titre) titre.textContent = 'Chargement impossible'
     if (msg) msg.textContent = 'La page n\'a pas pu se charger. Rechargez pour réessayer.'
   }
 </script>
@@ -163,7 +198,7 @@
 <script>
 (function () {
   const $ = id => document.getElementById(id)
-  let biens = [], avisTous = [], envoiEnCours = false
+  let biens = [], envoiEnCours = false
 
   const LIBELLE = {
     positif:      'Propreté saluée',
@@ -177,11 +212,23 @@
   // apiCall le faisait, avec le statut porte par l'erreur — les appelants sont
   // deja ecrits pour ca.
   async function appelAPI (chemin, method = 'GET', body = null) {
+    // ⚠ Le jeton est RELU a chaque appel, pas capture au chargement.
+    // Capture une fois, il expirait sur un onglet laisse ouvert plus d'une heure
+    // (duree par defaut d'un JWT Supabase) : le moindre changement de filtre
+    // partait alors en 401 avec un message serveur brut. `apiCall` relisait la
+    // session a chaque appel — ne pas le faire etait une regression, meme si la
+    // messagerie a le meme defaut.
+    let jeton = window._session && window._session.access_token
+    try {
+      const { data } = await window._supabase.auth.getSession()
+      if (data && data.session) jeton = data.session.access_token
+    } catch { /* on garde le jeton du chargement */ }
+
     const opts = {
       method,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${window._session.access_token}`,
+        'Authorization': `Bearer ${jeton}`,
         ...(window.enteteCompte ? window.enteteCompte() : {})
       }
     }
@@ -245,23 +292,30 @@
   }
 
   function rendre (data) {
+    // Defensif comme charger() : appelAPI rend {} quand le corps n'est pas du
+    // JSON, et un 200 non-JSON produisait ici un TypeError non capture — depuis
+    // le listener `change`, la rejection n'aurait ete vue nulle part.
+    const avis = Array.isArray(data && data.avis) ? data.avis : []
     const stats = $('stats')
-    const notes = data.avis.map(a => a.overall_score).filter(v => v != null)
+    const notes = avis.map(a => a.overall_score).filter(v => v != null)
     const moy = notes.length ? (notes.reduce((s, v) => s + v, 0) / notes.length).toFixed(1) : '—'
     stats.innerHTML = `
-      <div class="stat-card"><div class="stat-val">${data.avis.length}</div>
+      <div class="stat-card"><div class="stat-val">${avis.length}</div>
         <div class="stat-lab">avis au total</div></div>
       <div class="stat-card"><div class="stat-val">${moy}</div>
         <div class="stat-lab">note moyenne sur 10</div></div>
-      <div class="stat-card ${data.remarques30j > 0 ? 'alerte' : ''}">
-        <div class="stat-val">${data.remarques30j}</div>
-        <div class="stat-lab">remarque${data.remarques30j > 1 ? 's' : ''} propreté sur ${data.fenetre_jours} j</div></div>`
+      <div class="stat-card ${(data.remarques30j || 0) > 0 ? 'alerte' : ''}">
+        <div class="stat-val">${data.remarques30j || 0}</div>
+        <div class="stat-lab">remarque${(data.remarques30j || 0) > 1 ? 's' : ''} propreté sur ${data.fenetre_jours || 30} j</div></div>`
     stats.hidden = false
 
-    $('liste').innerHTML = data.avis.map(ligneAvis).join('')
-    $('vide').style.display = data.avis.length ? 'none' : 'block'
-    $('sous-titre').textContent = data.avis.length
-      ? `${data.avis.length} avis` : 'Aucun avis pour le moment'
+    $('liste').innerHTML = avis.map(ligneAvis).join('')
+    // Restaure le libelle neutre : un chargement reussi apres un echec laissait
+    // sinon « Accès refusé » en titre d'un etat vide parfaitement normal.
+    $('vide-titre').textContent = "Aucun avis pour l'instant"
+    $('vide-msg').textContent = 'Les avis de vos voyageurs apparaîtront ici dès leur publication.'
+    $('vide').style.display = avis.length ? 'none' : 'block'
+    $('sous-titre').textContent = avis.length ? `${avis.length} avis` : 'Aucun avis pour le moment'
   }
 
   async function charger () {
@@ -278,15 +332,16 @@
       $('liste').innerHTML = ''
       $('stats').hidden = true
       $('vide').style.display = 'block'
+      $('vide-titre').textContent = e && e.status === 403
+        ? 'Accès refusé' : 'Chargement impossible'
       $('vide-msg').textContent = e && e.status === 403
         ? "Vous n'avez pas accès aux avis de ce compte."
-        : (e && e.message) || 'Chargement impossible.'
+        : (e && e.message) || 'Rechargez la page pour réessayer.'
       $('sous-titre').textContent = ''
       return
     }
     $('loader').style.display = 'none'
     biens = data.biens || []
-    avisTous = data.avis || []
     if ($('filtre-bien').options.length <= 1) {
       for (const b of biens) {
         $('filtre-bien').insertAdjacentHTML('beforeend',
@@ -349,7 +404,7 @@
     }
     envoiEnCours = false
     $('s-envoyer').disabled = false
-    $('saisie-modal').classList.remove('open')
+    $('saisie-modal').classList.remove('show')
     $('s-texte').value = ''
     $('s-feedback').textContent = ''
     await charger()
@@ -369,10 +424,10 @@
     $('filtre-bien').addEventListener('change', charger)
     $('s-bien').addEventListener('change', chargerSejours)
     $('btn-saisir').addEventListener('click', () => {
-      $('saisie-modal').classList.add('open')
+      $('saisie-modal').classList.add('show')
       chargerSejours()
     })
-    $('s-annuler').addEventListener('click', () => $('saisie-modal').classList.remove('open'))
+    $('s-annuler').addEventListener('click', () => $('saisie-modal').classList.remove('show'))
     $('s-envoyer').addEventListener('click', envoyer)
     $('liste').addEventListener('click', e => {
       const i = e.target?.dataset?.plus

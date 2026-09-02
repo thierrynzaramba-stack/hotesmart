@@ -19,6 +19,17 @@ const path = require('node:path')
 
 const racine = path.join(__dirname, '..')
 
+// ⚠ Les commentaires sont neutralises DES DEUX COTES. Sans cela, un
+// `// export function apiCall` dans le module source aurait masque le bug meme
+// que ce test existe pour attraper — et un exemple de code dans un commentaire
+// (ou dans pages/guide.html) aurait produit un faux positif. C'est la regle
+// posee par le test des non delegables, elle vaut ici aussi.
+function sansCommentaires (src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+}
+
 // Toutes les pages HTML du produit.
 function pagesHtml () {
   const out = []
@@ -36,15 +47,43 @@ function pagesHtml () {
   return out
 }
 
-// `import { a, b as c } from '/chemin.js'` -> { source, noms: ['a','b'] }
-function importsNommes (src) {
+// ⚠ Les modules JS aussi. `components/sidebar.js` importe `shared/config.js` :
+// un nom absent la-dedans avorte la sidebar, donc la page qui l'importe — le
+// meme mode de panne, et le try/catch autour de renderSidebar n'y peut RIEN,
+// une resolution d'import ratee est une erreur de LIAISON, anterieure a toute
+// execution.
+function modulesJs () {
   const out = []
-  const re = /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]/g
+  for (const rel of ['shared', 'components']) {
+    let entrees
+    try { entrees = fs.readdirSync(path.join(racine, rel), { withFileTypes: true }) }
+    catch { continue }
+    for (const e of entrees) if (e.isFile() && e.name.endsWith('.js')) out.push(rel + '/' + e.name)
+  }
+  return out
+}
+
+// Couvre les quatre formes : nommee, par defaut, mixte, namespace.
+// `import D, { a, b as c } from '…'` -> noms ['default','a','b'].
+function importsDe (src) {
+  const out = []
+  const re = /import\s+([^'"]+?)\s+from\s*['"]([^'"]+)['"]/g
   let m
   while ((m = re.exec(src))) {
-    const noms = m[1].split(',')
-      .map(n => n.trim().split(/\s+as\s+/)[0].trim())
-      .filter(Boolean)
+    const clause = m[1].trim()
+    const noms = []
+    // Partie nommee entre accolades.
+    const accolades = clause.match(/\{([^}]*)\}/)
+    if (accolades) {
+      for (const n of accolades[1].split(',')) {
+        const brut = n.trim().split(/\s+as\s+/)[0].trim()
+        if (brut) noms.push(brut)
+      }
+    }
+    // Partie par defaut : ce qui precede l'accolade ou la virgule.
+    const avant = clause.split('{')[0].split(',')[0].trim()
+    if (avant && !avant.startsWith('*')) noms.push('default')
+    // `import * as x` : on ne verifie que l'existence du fichier.
     out.push({ source: m[2], noms })
   }
   return out
@@ -63,26 +102,41 @@ function exportsDe (src) {
     }
   }
   if (/export\s+default\b/.test(src)) noms.add('default')
+  // `export let a, b` : la premiere regex ne capte que `a`.
+  for (const m of src.matchAll(/export\s+(?:const|let|var)\s+([\w,\s]+?)\s*=/g)) {
+    for (const n of m[1].split(',')) if (n.trim()) noms.add(n.trim())
+  }
+  // `export * from './y.js'` : un baril re-exporte des noms qu'on ne peut pas
+  // resoudre ici. On le SIGNALE plutot que d'echouer a tort — un test qui cne
+  // dirait rien ferait passer un vrai import casse pour valide.
+  if (/export\s*\*\s*from/.test(src)) noms.add('*reexport*')
   return noms
 }
 
-const PAGES = pagesHtml()
+const CIBLES = [...pagesHtml(), ...modulesJs()]
 
-test('des pages HTML sont bien trouvées (sinon la découverte est cassée)', () => {
-  assert.ok(PAGES.length >= 5, `pages trouvées : ${PAGES.length}`)
+test('des pages et des modules sont bien trouvés (sinon la découverte est cassée)', () => {
+  assert.ok(CIBLES.length >= 15, `cibles trouvées : ${CIBLES.length}`)
+  assert.ok(CIBLES.some(c => c.endsWith('.js')), 'les modules JS doivent être inclus')
 })
 
-for (const page of PAGES) {
-  const html = fs.readFileSync(path.join(racine, page), 'utf8')
-  const imports = importsNommes(html).filter(i => i.source.startsWith('/'))
+for (const page of CIBLES) {
+  const html = sansCommentaires(fs.readFileSync(path.join(racine, page), 'utf8'))
+  // Chemins absolus ET relatifs : `components/sidebar.js` importe
+  // `../shared/config.js`, qui échappait entièrement au test.
+  const imports = importsDe(html).filter(i => i.source.startsWith('/') || i.source.startsWith('.'))
   if (!imports.length) continue
 
   test(`${page} : chaque import nommé existe dans son module`, () => {
     for (const imp of imports) {
-      const fichier = path.join(racine, imp.source.replace(/^\//, ''))
+      const fichier = imp.source.startsWith('/')
+        ? path.join(racine, imp.source.replace(/^\//, ''))
+        : path.resolve(path.dirname(path.join(racine, page)), imp.source)
       assert.ok(fs.existsSync(fichier),
         `${page} importe depuis ${imp.source}, qui n'existe pas`)
-      const exportes = exportsDe(fs.readFileSync(fichier, 'utf8'))
+      const exportes = exportsDe(sansCommentaires(fs.readFileSync(fichier, 'utf8')))
+      // Un fichier baril peut re-exporter n'importe quoi : on ne tranche pas.
+      if (exportes.has('*reexport*')) continue
       for (const nom of imp.noms) {
         assert.ok(exportes.has(nom),
           `${page} importe { ${nom} } depuis ${imp.source}, qui ne l'exporte pas. ` +

@@ -25,6 +25,9 @@ const lire = p => fs.readFileSync(path.join(racine, p), 'utf8')
 // delegables compare des positions).
 function sansCommentaires (src) {
   return src
+    // Commentaires HTML aussi : `<!-- exigerCompteProprePage -->` reproduisait
+    // le faux positif a l'identique.
+    .replace(/<!--[\s\S]*?-->/g, m => ' '.repeat(m.length))
     .replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length))
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
 }
@@ -136,7 +139,10 @@ test('le garde-fou est UNIQUE et partagé', () => {
   assert.ok(source.includes('export async function exigerCompteProprePage'),
     'le garde-fou vit dans shared/compte-courant.js')
   for (const page of NON_DELEGABLES) {
-    const html = lire(page)
+    // Hors commentaires, comme les deux boucles ci-dessus : un commentaire
+    // citant `function exigerCompteProprePage` aurait reproduit exactement le
+    // faux positif qu'on vient de corriger.
+    const html = sansCommentaires(lire(page))
     assert.ok(!html.includes('function exigerCompteProprePage'),
       `${page} redéfinit le garde-fou au lieu de l'importer`)
   }
