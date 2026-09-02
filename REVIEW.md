@@ -288,6 +288,36 @@ termine jamais. La retirer du chemin, si.
 
 ---
 
+## 12. Une sonde sur une API tierce est en LECTURE SEULE
+
+**Règle : explorer une API externe se fait en `GET`. Jamais de `POST`, `PUT`,
+`PATCH` ou `DELETE` exploratoire sur une production tierce — même supposé sans
+effet.**
+
+À vérifier :
+- [ ] toute requête de découverte d'un endpoint provider est un `GET` ;
+- [ ] chercher un paramètre manquant se fait en faisant varier la *query string*, jamais le verbe ;
+- [ ] si un `POST` semble nécessaire pour comprendre, c'est la **documentation** qu'il faut lire, ou le product owner qu'il faut solliciter.
+
+**Pourquoi.** On ne sait pas ce qu'écrit un endpoint qu'on ne connaît pas. Le
+compte visé est celui d'un client réel, chez un fournisseur qui facture, publie
+sur des OTA et porte une certification. Un effet de bord y est invisible depuis
+nos logs et irréversible depuis notre code.
+
+**Cas vécu.** En cherchant le paramètre attendu par
+`GET /channels/booking/reviews` (Beds24), un `POST` a été envoyé sur le même
+chemin avec `{propertyId: …}`. Réponse : `201 Created`, corps `null`. Rien n'a
+été créé — le même chemin en `GET` avec un suffixe inexistant répond pareil, et
+les 93 avis relus ensuite étaient tous antérieurs et cohérents avec l'interface
+Beds24. Mais **ce n'est su qu'après coup** : au moment de l'envoi, un `201` sur
+une API de réservation pouvait aussi bien signifier qu'une ressource venait
+d'être créée sur le compte d'un client.
+
+La bonne réponse était déjà disponible : la documentation officielle, que le
+product owner a consultée le lendemain et qui donnait le paramètre en une ligne.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

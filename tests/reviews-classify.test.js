@@ -348,3 +348,58 @@ test('le bilan porte le reste en file, seul signal d\'une boucle de réanalyse',
   assert.strictEqual(lectures.length, 2)
   assert.deepStrictEqual(lectures[1].is, ['ai_analyzed_at', null], 'le décompte porte sur la même file')
 })
+
+// ─── L'asymétrie du seuil porte sur le PROVIDER, pas sur l'OTA ──────────────
+const { echelleFiable } = require('../lib/cron-reviews-classify')
+
+test('seuil : appliqué à Beds24/Booking, dont l\'échelle est vérifiée cohérente', () => {
+  // Mesuré sur 93 avis réels : review_score et catégories tous sur 10, et la
+  // moyenne des catégories colle au score global (9 pour 9,2 ; 10 pour 10).
+  assert.strictEqual(echelleFiable({ provider: 'beds24', ota: 'booking' }), true)
+  const r = classerParRegle({ provider: 'beds24', ota: 'booking', tags: [], score_clean: 5 })
+  assert.strictEqual(r?.verdict, 'remarque')
+})
+
+test('seuil : EXCLU pour Channex/Booking, dont l\'échelle ne coïncide pas', () => {
+  // Mesuré : un overall_score de 1 avec toutes les catégories à 2.5, un overall
+  // de 10 avec des catégories à 7.5. Le même avis Booking.com est cohérent
+  // quand Beds24 le rend et incohérent quand Channex le rend : l'incohérence
+  // vient du provider, pas de l'OTA — d'où une condition sur le provider.
+  assert.strictEqual(echelleFiable({ provider: 'channex', ota: 'booking' }), false)
+  assert.strictEqual(classerParRegle({ provider: 'channex', ota: 'booking', tags: [], score_clean: 2.5 }), null)
+})
+
+test('seuil : appliqué à Airbnb quel que soit le provider', () => {
+  assert.strictEqual(echelleFiable({ provider: 'channex', ota: 'airbnb' }), true)
+  assert.strictEqual(classerParRegle({ provider: 'channex', ota: 'airbnb', tags: [], score_clean: 6 })?.verdict, 'remarque')
+})
+
+test('seuil : une note absente ne déclenche rien, même échelle fiable', () => {
+  // 4 avis Beds24 sur 93 ont clean à null. Le confondre avec 0 produirait une
+  // remarque sur un avis qui n'en contient pas.
+  assert.strictEqual(classerParRegle({ provider: 'beds24', ota: 'booking', tags: [], score_clean: null }), null)
+  assert.strictEqual(classerParRegle({ provider: 'beds24', ota: 'booking', tags: [] }), null)
+})
+
+test('le prompt interdit de traduire l\'extrait', () => {
+  // Des avis Beds24 sont en espagnol. Sans cette consigne, le modèle traduit
+  // l'extrait et le contrôle de citation le rejette : verdict correct, citation
+  // perdue — exactement le défaut qui coûtait 4 extraits sur 5.
+  const p = construirePrompt('x')
+  assert.match(p, /QUELLE QUE SOIT LA LANGUE/i)
+  assert.match(p, /LANGUE D'ORIGINE/i)
+  assert.match(p, /jamais traduit/i)
+})
+
+test('file : `provider` est lu, sinon le seuil de note ne s\'applique jamais', () => {
+  // Défaut mesuré : `provider` manquait au select de la file, donc
+  // echelleFiable() recevait undefined et trois avis Beds24 notés 2.5 et 5 en
+  // propreté passaient pour « rien_signale ». Invisible en test unitaire —
+  // seule la lecture du SQL réel l'attrape.
+  const fs = require('node:fs'), pathm = require('node:path')
+  const src = fs.readFileSync(pathm.join(__dirname, '..', 'lib/cron-reviews-classify.js'), 'utf8')
+  const select = src.slice(src.indexOf(".select('id, user_id"), src.indexOf("')", src.indexOf(".select('id, user_id")))
+  for (const col of ['provider', 'ota', 'tags', 'score_clean']) {
+    assert.ok(select.includes(col), `la file doit lire ${col} : classerParRegle en dépend`)
+  }
+})

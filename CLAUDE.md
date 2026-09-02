@@ -100,12 +100,14 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 ## ÉTAT (fin Session #22)
 Certification PMS Channex SOUMISE (formulaire Google enregistré). En attente revue live Channex.
 
-**Chantier AVIS VOYAGEURS CLOS** (lots 1-6) : `ota_reviews` au cœur, poll
+**Chantier AVIS VOYAGEURS CLOS** (lots 1-7) : `ota_reviews` au cœur, poll
 quotidien Channex (70 avis), webhook `updated_review`, classification propreté
 en deux étages (règle avant IA), page `/avis`, saisie manuelle, et détection
 automatique dans les messages entrants — 359 analysés, 5 signalements, 0 faux
-positif, avec validation humaine avant tout comptage. Bilan, leçons et seule
-question ouverte (Beds24 en lecture) : docs/kb/avis-voyageurs.md §10-11.
+positif, avec validation humaine avant tout comptage. Beds24 tranché : 93 avis
+Booking.com importés ; les avis Airbnb de ces biens sont hors de portée de
+l'API Beds24 et viendront avec leur migration Channex (doc officielle).
+168 avis dans le cœur. Bilan et leçons : docs/kb/avis-voyageurs.md §10-11.
 
 **Chantier profils et droits CLOS** (étapes 0-5) : 26/26 endpoints gardés,
 10 fuites fermées, sélecteur de compte et masquage par droit livrés et validés en

@@ -22,6 +22,9 @@
 //   (cœur de données). Cadence 1x/24h par marqueur cron_logs, marqueur posé AVANT
 //   le travail et budget mur de 20 s : un poll qui déborderait ne doit jamais
 //   repartir à chaque tick de 5 min.
+// Session #32 : avis Booking.com des biens Beds24 (GET /channels/booking/reviews).
+//   L'endpoint avait ete declare inexistant a l'etape 0 : la sonde testait
+//   /review au SINGULIER. Sous /channels/, un chemin inexistant repond 200 null.
 // Session #31 (fin) : detection des signalements de propreté dans les messages
 //   ENTRANTS des voyageurs. Un « je ne voulais pas le marquer sur Airbnb mais
 //   vous devriez contrôler le travail de la femme de ménage » n'existe nulle
@@ -44,6 +47,7 @@ const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { pollChannelReviews } = require('../lib/cron-channel-reviews')
+const { pollBeds24Reviews } = require('../lib/cron-beds24-reviews')
 const { classerAvis } = require('../lib/cron-reviews-classify')
 const { classerMessages } = require('../lib/cron-messages-classify')
 const { processChannelProperties } = require('../lib/cron-channel-props')
@@ -101,6 +105,7 @@ module.exports = async function handler(req, res) {
     totalAutoMessages: 0,
     totalChannelRevisions: 0,
     totalChannelReviews: 0,
+    totalBeds24Reviews: 0,
     totalReviewsClassified: 0,
     totalMessagesClassified: 0,
     totalBeds24Materialized: 0,
@@ -213,6 +218,16 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur poll avis Channex:', err.message)
       results.errors.push({ context: 'channel_reviews', error: err.message })
+    }
+
+    // 4quinquies bis. Avis Booking.com des biens Beds24 -> ota_reviews.
+    // ⚠ Booking.com SEULEMENT : la doc officielle Beds24 n'expose aucun GET
+    // reviews côté Airbnb. Les avis Airbnb de ces biens viendront avec leur
+    // migration Channex. Un jeton par compte, contrairement à Channex.
+    try { await chrono.mesure('poll_avis_beds24', () => pollBeds24Reviews(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur poll avis Beds24:', err.message)
+      results.errors.push({ context: 'beds24_reviews', error: err.message })
     }
 
     // 4sexies. Classification de la propreté dans les avis (cœur de données).

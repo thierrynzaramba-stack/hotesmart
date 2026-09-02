@@ -480,7 +480,8 @@ traité**.
 
 ## 10. Clôture du chantier — bilan des lots 1 à 6
 
-**Chantier clos le 3 septembre 2026.** Une seule question reste ouverte, en §11.
+**Chantier clos le 3 septembre 2026**, Beds24 compris (§11) — la question qui
+restait ouverte a été tranchée par la doc officielle le jour même.
 
 ### Ce qui existe
 
@@ -492,11 +493,12 @@ traité**.
 | 4 | classification propreté en deux étages, règle avant IA |
 | 5 | page `/avis`, saisie manuelle (SMS / email / oral) |
 | 6 | détection automatique dans les messages entrants, avec validation humaine |
+| 7 | poll Beds24 des avis Booking.com — 93 avis, Airbnb hors de portée de l'API |
 
 ### Les chiffres
 
-- **70 avis** OTA en base (68 Airbnb, 2 Booking.com), idempotents sur plusieurs
-  passages, couvrant octobre 2024 → août 2026.
+- **168 avis** OTA en base : 70 via Channex (68 Airbnb, 2 Booking.com) et
+  **93 via Beds24** (Booking.com), couvrant septembre 2023 → août 2026.
 - **1 seule remarque de propreté** dans ces 70 avis — et elle venait du **retour
   privé** d'un avis noté 10/10 avec quatre tags positifs (« la bouilloire n'était
   pas du tout propre »). Ni la note ni les tags ne l'auraient révélée.
@@ -539,21 +541,92 @@ pas entre OTA ; `provider_msg_id` manque sur un tiers des messages ; et surtout,
 propreté. Aucune de ces corrections n'aurait été trouvée sans confronter le code
 aux données réelles avant de le déclarer fini.
 
-## 11. La seule question ouverte — Beds24 en lecture
+## 11. Beds24 — tranché, et l'erreur d'étape 0 corrigée
 
-**Aucune lecture d'avis Beds24 n'est implémentée.** L'étape 0 avait conclu que
-l'API ne l'expose pas — mais cette conclusion repose sur une sonde **sans témoin
-négatif fiable** : un chemin inventé renvoyait le même `200 null` qu'un vrai.
-C'est précisément le contrôle qui a permis, côté Channex, d'affirmer que
-`GET /reviews` existait vraiment.
+**`GET /channels/booking/reviews` EXISTE.** L'étape 0 l'avait déclaré absent :
+**la sonde testait `/review` au singulier**. Source de la correction :
+documentation officielle Beds24, vérifiée par le product owner le
+3 septembre 2026.
 
-**Suspendu à la vérification de la doc Swagger authentifiée par le product
-owner.** Deux issues :
+### Le piège qui avait produit la fausse conclusion
 
-- l'API expose les avis → un module `lib/cron-beds24-reviews.js` sur le modèle du
-  poll Channex, écrivant par le même writer ; les biens `coeur de vie 23` et
-  `La bulle` entreraient dans le cœur ;
-- elle ne les expose pas → la saisie manuelle (§8) reste la seule voie pour ces
-  biens, et c'est déjà livré.
+```
+400  /channels/booking/reviews          ← existe, valide ses paramètres
+200  /channels/booking/reviewsXYZ  null ← chemin INEXISTANT
+```
 
-Rien d'autre n'est en attente sur ce chantier.
+**Sous `/channels/`, un chemin inexistant répond `200 null`, pas 404.** C'est
+exactement ce qui avait trompé l'étape 0. Le témoin négatif — appliqué côté
+Channex, oublié ici — est ce qui distingue « l'API ne l'expose pas » de « je
+n'ai pas trouvé le bon chemin ». **Ne jamais conclure à l'absence d'un endpoint
+sans avoir vérifié ce que rend un chemin volontairement faux.**
+
+`from` est **obligatoire** : sans lui, `400 Invalid data` quels que soient les
+autres paramètres. Le jeton doit porter le scope `read:channels`.
+
+### ⚠ Booking.com seulement — limite d'API, pas choix produit
+
+La doc officielle expose `GET /channels/booking/reviews` mais **aucun équivalent
+Airbnb** : côté Airbnb, seuls `users`, `listings` et un POST d'actions existent.
+**Les avis Airbnb des biens Beds24 n'entreront dans le cœur qu'à la migration
+Channex de ces biens.** Source : documentation officielle Beds24, vérifiée le
+3 septembre 2026.
+
+### Volume et structure
+
+**93 avis** — 24 sur La bulle, 69 sur Cœur de vie 23, de septembre 2023 à
+août 2026. Plus que les 70 avis Channex.
+
+Deux pièges du format, tous deux mesurés :
+
+- **`content` est un OBJET** — `{headline, positive, negative, language_code}` —
+  et vaut `null` dans 29 cas sur 93. Écrit tel quel dans une colonne `text`, il
+  aurait donné « [object Object] » : le même piège que le `reply` de Channex,
+  qui avait produit 68 réponses fantômes.
+- **`created_timestamp` n'est ni ISO ni fuseau** (`2026-06-19 12:34:53`). Traité
+  comme UTC explicitement, plutôt que de laisser le moteur deviner selon la
+  machine qui exécute le cron.
+
+### L'asymétrie du seuil porte sur le PROVIDER, pas sur l'OTA
+
+Mesure décisive : chez **Beds24**, `review_score` et les catégories sont toutes
+sur 10 et la moyenne des catégories colle au score global (9 pour 9,2 ; 10 pour
+10). Chez **Channex**, le même Booking.com donnait un overall de 1 avec des
+catégories à 2.5.
+
+**L'incohérence vient donc de Channex, pas de Booking.com.** Le seuil
+`clean ≤ 6` s'applique à Beds24/Booking et à Airbnb ; il reste exclu pour
+Channex/Booking. C'est pourquoi la condition regarde le **provider** — «
+harmoniser » sur l'OTA réintroduirait le pari qu'on refuse.
+
+### Résultats du premier poll réel
+
+**93 lus, 93 écrits, 0 erreur, 17 rattachés à un séjour.** Classification :
+**11 remarques, 10 positifs, 72 non évoquée**, avec 17 extraits cités.
+
+Les **5 avis notés `clean ≤ 5`** sont tous classés `remarque`, dont deux qui
+n'ont **aucun texte** — la note seule suffit, et c'est précisément ce que
+l'étage 1 apporte ici.
+
+**La consigne multilingue a été validée sur le terrain** : un extrait espagnol
+est cité **non traduit** — « Las camas están sin hacer, te dejan las sábanas (en
+nuestro caso unas estaban rotas) ». Sans elle, le modèle aurait traduit et le
+contrôle de citation aurait rejeté l'extrait : verdict correct, citation perdue.
+
+### Deux défauts que seul le passage réel a révélés
+
+- **`provider` manquait au `select` de la file de classification.**
+  `echelleFiable()` recevait `undefined`, donc le seuil ne s'appliquait
+  **jamais** : trois avis notés 2.5 et 5 en propreté passaient pour
+  « rien_signale ». Aucun test unitaire ne pouvait le voir — il a fallu lire le
+  SQL réel. Un test vérifie désormais les colonnes du select.
+- **Le poll s'en remettait à « un rattrapage commun » qui n'existe pas.** La
+  passe séparée avait été retirée au lot 2. Résultat : **0 avis rattaché sur 93**
+  alors que 17 l'étaient. La résolution se fait maintenant à l'ingestion, comme
+  côté Channex. Supposer un mécanisme au lieu de le vérifier : le chantier l'a
+  payé trois fois.
+
+### État du cœur
+
+**168 avis** au total : 93 Beds24, 70 Channex, 5 détections en messagerie.
+
