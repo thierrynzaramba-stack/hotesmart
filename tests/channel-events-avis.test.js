@@ -395,3 +395,69 @@ test('updated_review : une exception réseau ne produit PAS un 500', async () =>
   assert.strictEqual(res.body.reason, 'review_exception')
   assert.strictEqual(etat.ecritures.filter(e => e.table === 'ota_reviews').length, 0)
 })
+
+// ─── La cible du webhook est construite par le serveur ──────────────────────
+// Deuxième constat de sécurité, trouvé sur le correctif du premier : valider le
+// seul CHEMIN du callback_url laissait l'hôte libre. Le corps envoyé au
+// gestionnaire contient CHANNEL_WEBHOOK_SECRET et le bypass Vercel : livrer ce
+// corps chez un hôte choisi par l'appelant, c'est lui donner les deux secrets —
+// puis de quoi forger des events sur le webhook certifié.
+
+const HOTES_REFUSES = [
+  'https://evil.example.com/api/channel-events',            // hôte étranger, chemin valide
+  'https://hotesmart.vercel.app.evil.com/api/channel-events', // sous-domaine trompeur
+  'http://127.0.0.1:9/api/channel-events',                  // boucle locale
+  'x/api/channel-events'                                    // même pas une URL
+]
+
+for (const url of HOTES_REFUSES) {
+  test(`register : cible refusée, et aucun secret n'est envoyé — ${url.slice(0, 42)}`, async () => {
+    const etat = preparerRegister({})
+    const handler = require('../api/channel-events')
+    const res = reponse()
+    await handler(requeteRegister(url), res)
+
+    assert.strictEqual(res.code, 400, 'le chemin seul ne suffit pas à valider une cible')
+    assert.strictEqual(etat.appels.length, 0, 'aucun appel ne doit partir vers le gestionnaire')
+  })
+}
+
+test('register : sans callback_url, le serveur détermine la cible et enregistre', async () => {
+  // La donnée client n'est plus nécessaire : elle n'est plus utilisée.
+  const etat = preparerRegister({})
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton' },
+                  body: { action: 'register' } }, res)
+
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.updated, true)
+  const put = etat.appels.find(a => a.method === 'PUT')
+  assert.ok(put.url.includes('/webhooks/wh-moi'))
+})
+
+test('register : un webhook existant sans identifiant ne provoque pas de doublon', async () => {
+  // Cette entrée sautait la garde du masque et tombait sur la création : deux
+  // webhooks sur la même URL, donc chaque event livré deux fois.
+  const etat = preparerRegister({ webhooks: { data: [
+    { attributes: { callback_url: URL_MOI, event_mask: 'booking;message' } }
+  ] } })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  assert.strictEqual(res.body.ok, false)
+  assert.ok(!etat.appels.some(a => a.method === 'POST' && a.url.endsWith('/webhooks')))
+})
+
+test('register : le filet booking/message ignore la casse', async () => {
+  const etat = preparerRegister({ webhooks: { data: [
+    { id: 'wh-x', attributes: { callback_url: URL_MOI, event_mask: 'BOOKING;MESSAGE' } }
+  ] } })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  assert.strictEqual(res.code, 409)
+  assert.ok(!etat.appels.some(a => a.method === 'PUT'))
+})

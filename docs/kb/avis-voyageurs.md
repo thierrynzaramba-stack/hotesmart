@@ -120,15 +120,30 @@ dénormalisées à l'ingestion.
     handler (celui-ci répond 500, donc « retente »). Sans lui, une coupure vers
     le gestionnaire suffisait à lancer une boucle de rejeu et à réveiller le
     canal fondateur pour une panne que le poll rattrape seul.
-  - ⚠ **`register` ne peut cibler que le webhook de ce fichier.** `callback_url`
-    vient du client : sans garde, une session authentifiée quelconque pouvait
-    faire réécrire le masque du webhook **certifié** — dont l'URL est publique —
-    et couper `booking;message` pour tous les hôtes Channex, avec une réponse
-    « succès ». Deux gardes, volontairement redondantes : l'URL doit finir par
-    `/api/channel-events`, et tout webhook dont le masque contient `booking` ou
-    `message` est refusé. Le PUT renvoie aussi `headers` et `request_params` :
-    les omettre ferait perdre le secret partagé si le gestionnaire remplace
-    l'objet au lieu de le fusionner — webhook mort, pas seulement masque cassé.
+  - ⚠ **La cible de `register` est construite par le serveur, jamais reçue.**
+    C'est le point qui a coûté deux constats de sécurité successifs, chacun
+    trouvé sur le correctif du précédent.
+    1. `callback_url` venait du client et désignait la cible d'un `PUT` : une
+       session authentifiée quelconque réécrivait le masque du webhook
+       **certifié** — dont l'URL est publique — coupant `booking;message` pour
+       tous les hôtes Channex, avec une réponse « succès ».
+    2. Le correctif validait alors le **chemin** de cette URL. Insuffisant :
+       `https://evil.example.com/api/channel-events` a un chemin parfaitement
+       valide, et le `POST` de création y aurait fait livrer, en clair,
+       `CHANNEL_WEBHOOK_SECRET` et le bypass Vercel — de quoi ensuite forger
+       des events sur le webhook certifié.
+
+    **La leçon** : on ne valide pas une donnée client qui désigne une
+    ressource, on ne l'utilise pas. L'URL est bâtie depuis `DOMAINES_APP` ; un
+    `callback_url` fourni et divergent est refusé au lieu d'être ignoré en
+    silence. Filet redondant conservé : tout webhook dont le masque contient
+    `booking` ou `message` est refusé, casse ignorée.
+
+    Le `PUT` renvoie aussi `headers` et `request_params` : les omettre ferait
+    perdre le secret partagé si le gestionnaire remplace l'objet au lieu de le
+    fusionner — webhook mort, pas seulement masque cassé. Et une entrée trouvée
+    sans identifiant arrête le traitement au lieu de tomber sur la création,
+    qui produirait un doublon livrant chaque event deux fois.
   - Si la liste des webhooks est illisible, **aucune création à l'aveugle** :
     un doublon livrerait chaque event deux fois.
   - ⚠ **Élargir `CHANNEL_EVENTS` ne suffit pas** sur un webhook déjà enregistré.

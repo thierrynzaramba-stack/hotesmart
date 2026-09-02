@@ -39,6 +39,23 @@ const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 const WEBHOOK_SECRET = process.env.CHANNEL_WEBHOOK_SECRET
 const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN
 
+// Domaines sous lesquels cette application est servie. La cible du webhook est
+// construite ICI, a partir de cette liste, et JAMAIS fournie par le client.
+//
+// ⚠ Pourquoi c'est vital : le corps du webhook envoye au gestionnaire contient
+// CHANNEL_WEBHOOK_SECRET et le bypass de protection Vercel. Laisser le client
+// choisir l'hote, c'est lui laisser faire livrer ces deux secrets chez lui —
+// puis, avec le secret partage, forger des events sur le webhook certifie.
+// Valider le seul CHEMIN ne suffit pas : "https://evil.example.com/api/
+// channel-events" a un chemin parfaitement valide.
+const DOMAINES_APP = ['hotesmart.vercel.app']
+
+function urlWebhookDeCeFichier (req) {
+  const host = String(req.headers?.host || '').toLowerCase().split(':')[0]
+  const domaine = DOMAINES_APP.includes(host) ? host : DOMAINES_APP[0]
+  return `https://${domaine}/api/channel-events`
+}
+
 // Events canal ecoutes par ce 2e webhook.
 // ⚠ Elargir ce masque ne suffit PAS sur un webhook deja enregistre : il faut le
 // mettre a jour cote Channex (PUT), ce que fait l'action 'register' ci-dessous.
@@ -217,21 +234,23 @@ module.exports = async function handler(req, res) {
     const { data: u } = await supabase.auth.getUser(token)
     if (!u?.user) return res.status(401).json({ error: 'Session invalide' })
 
-    const callbackUrl = req.body.callback_url
-    if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
+    // ⚠ GARDE 1 — la cible est construite cote serveur, pas recue.
+    // Une premiere version validait le `callback_url` du client par son chemin.
+    // Insuffisant : le chemin de "https://evil.example.com/api/channel-events"
+    // est valide, et le POST de creation y aurait fait livrer, en clair,
+    // CHANNEL_WEBHOOK_SECRET et le bypass Vercel — de quoi ensuite forger des
+    // events sur le webhook certifie. On ne valide donc plus une donnee client :
+    // on ne l'utilise pas (REVIEW.md regle 11).
+    const callbackUrl = urlWebhookDeCeFichier(req)
 
-    // ⚠ GARDE 1 — la cible ne peut etre QUE ce fichier.
-    // `callback_url` vient du corps de la requete, donc du client. Sans cette
-    // verification, n'importe quelle session authentifiee pouvait faire pointer
-    // le PUT ci-dessous sur le webhook CERTIFIE (api/channel-webhook.js), dont
-    // l'URL est publique, et lui reecrire son masque : plus aucune reservation
-    // ni message voyageur en temps reel, pour TOUS les hotes Channex, avec une
-    // reponse "succes". La ressource visee doit etre validee, jamais deduite
-    // d'un identifiant fourni par le client (REVIEW.md regle 11).
-    if (!/\/api\/channel-events\/?$/.test(String(callbackUrl))) {
+    // Le front envoie deja cette constante. Un ecart signale un appelant qui se
+    // trompe de cible : on le dit plutot que de l'ignorer en silence.
+    const demande = req.body.callback_url
+    if (demande && String(demande) !== callbackUrl) {
       return res.status(400).json({
-        error: 'callback_url doit pointer vers /api/channel-events',
-        reason: "Cet endpoint n'enregistre que son propre webhook."
+        error: 'callback_url non conforme',
+        reason: "Cet endpoint n'enregistre que son propre webhook ; la cible est determinee par le serveur.",
+        attendu: callbackUrl
       })
     }
 
@@ -259,13 +278,22 @@ module.exports = async function handler(req, res) {
     if (trouve) {
       existant = trouve.id || trouve.attributes?.id
       masqueExistant = String(trouve.attributes?.event_mask || trouve.event_mask || '')
+      // Une entree trouvee mais sans identifiant sautait la garde 2 et tombait
+      // sur la creation, donc sur un doublon. On s'arrete au lieu de continuer.
+      if (!existant) {
+        console.error('[channel-events] webhook trouve sans identifiant exploitable')
+        return res.status(200).json({
+          ok: false, registered: false, updated: false,
+          reason: "Un webhook existe deja sur cette URL mais son identifiant est illisible : creation refusee pour ne pas produire de doublon."
+        })
+      }
     }
 
     if (existant) {
       // ⚠ GARDE 2, redondante et voulue — ne jamais toucher au webhook certifie.
       // Si une URL changeait un jour et passait la garde 1, ce filet reste : un
       // webhook qui porte booking ou message est celui de channel-webhook.js.
-      if (/\bbooking\b|\bmessage\b/.test(masqueExistant)) {
+      if (/\bbooking\b|\bmessage\b/i.test(masqueExistant)) {
         console.error('[channel-events] refus de modifier un webhook portant booking/message')
         return res.status(409).json({
           ok: false, registered: false, updated: false,
