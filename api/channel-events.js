@@ -1,7 +1,18 @@
 // api/channel-events.js
-// 2e webhook SEPARE. Le webhook booking/message reste dans api/channel-webhook.js
-// (code certifie Channex, NON modifie). Ici on ne traite QUE les events CANAL :
-// new_channel, updated_channel, activate_channel.
+// 2e webhook SEPARE — events CANAL + AVIS.
+//
+// Le webhook booking/message reste dans api/channel-webhook.js : code CERTIFIE
+// Channex, NON modifie, et la certification PMS est en revue. C'est la raison
+// d'etre de ce fichier, et c'est aussi pourquoi les avis atterrissent ici.
+//
+// ELARGISSEMENT DU PROPOS ASSUME. Ce fichier ne traite plus seulement le canal :
+// il route aussi `updated_review` vers ota_reviews. Le choix a ete pese contre un
+// 3e webhook dedie, plus propre semantiquement. Deux raisons l'ont emporte : le
+// gestionnaire de canaux peut refuser un webhook de plus (ce fichier prevoit deja
+// ce refus pour le 2e), et le poll quotidien de lib/cron-channel-reviews.js
+// reste la source de verite — ce webhook n'apporte que la fraicheur.
+//
+// Events traites : new_channel, updated_channel, activate_channel, updated_review.
 //
 // But : quand l'hote mappe + active un canal dans l'iframe Channex, automatiser
 // le post-mapping SANS action manuelle :
@@ -14,6 +25,9 @@ const { getProvider } = require('../lib/channels')
 // Writer unique de bookings_snapshot (audit E3/E4/E5).
 const { saveBookingSnapshots } = require('../lib/bookings-snapshot')
 const billing = require('../lib/billing')
+// Writer commun avec le poll quotidien : un seul endroit ecrit ota_reviews, et
+// un seul connait la contrainte d'idempotence.
+const { preparerAvis, upsertAvis } = require('../lib/cron-channel-reviews')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -26,7 +40,9 @@ const WEBHOOK_SECRET = process.env.CHANNEL_WEBHOOK_SECRET
 const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN
 
 // Events canal ecoutes par ce 2e webhook.
-const CHANNEL_EVENTS = 'new_channel;updated_channel;activate_channel'
+// ⚠ Elargir ce masque ne suffit PAS sur un webhook deja enregistre : il faut le
+// mettre a jour cote Channex (PUT), ce que fait l'action 'register' ci-dessous.
+const CHANNEL_EVENTS = 'new_channel;updated_channel;activate_channel;updated_review'
 
 async function channelCall(method, path, body) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
@@ -134,6 +150,65 @@ async function runPostMapping(owner) {
   return out
 }
 
+// ─── Avis voyageur (event `updated_review`) ─────────────────────────────────
+// Le payload du webhook n'est pas documente : selon la forme, il porte l'avis
+// complet ou seulement son identifiant. On accepte les deux et on relit chez le
+// provider quand on n'a qu'un id — la relecture donne de toute facon l'etat le
+// plus frais, ce qui est le seul interet de ce webhook face au poll.
+function extraireAvisDuPayload(payload) {
+  const p = payload || {}
+  // Forme JSON:API complete : { data: { id, attributes, relationships } }
+  if (p.data?.attributes) return { item: p.data }
+  if (p.attributes) return { item: p }
+  // Sinon on cherche un identifiant.
+  const id = p.review_id || p.id || p.data?.id
+  return id ? { id: String(id) } : {}
+}
+
+async function traiterAvis(payload, res) {
+  const trouve = extraireAvisDuPayload(payload)
+  let item = trouve.item
+
+  if (!item) {
+    if (!trouve.id) {
+      console.error('[channel-events] updated_review sans avis ni identifiant exploitable')
+      return res.status(200).json({ ok: true, reason: 'review_sans_id' })
+    }
+    const r = await channelCall('GET', `/reviews/${trouve.id}`)
+    if (!r.ok) {
+      // 200 volontaire : un webhook en erreur serait rejoue par le provider, et
+      // le poll quotidien rattrapera cet avis de toute facon.
+      console.error('[channel-events] relecture de l\'avis echouee', trouve.id, r.status)
+      return res.status(200).json({ ok: false, reason: 'review_illisible', channel_status: r.status })
+    }
+    item = r.json?.data
+    if (!item) return res.status(200).json({ ok: true, reason: 'review_vide' })
+  }
+
+  // MEME writer que le poll quotidien : meme resolution du bien (donc meme garde
+  // de cloisonnement), meme resolution de la reservation, meme contrainte
+  // d'idempotence. Rejouer un avis deja recu est sans effet.
+  const prep = await preparerAvis(supabase, item)
+  if (prep.erreur) {
+    console.error('[channel-events] avis non preparable')
+    return res.status(200).json({ ok: false, reason: 'review_non_preparable' })
+  }
+  if (prep.ignore) {
+    // bien_inconnu / bien_ambigu : on n'ecrit pas, et ce n'est pas une erreur.
+    return res.status(200).json({ ok: true, reason: 'ignored:' + prep.ignore })
+  }
+
+  const ecriture = await upsertAvis(supabase, prep.ligne)
+  if (ecriture.error) {
+    console.error('[channel-events] upsert avis echec', ecriture.error.message)
+    return res.status(200).json({ ok: false, reason: 'upsert_echec' })
+  }
+
+  console.log('[channel-events] avis ecrit', prep.ligne.external_review_id,
+              '| resolu:', prep.resolu === true)
+  return res.status(200).json({ ok: true, written: 1, resolved: prep.resolu === true })
+}
+
 module.exports = async function handler(req, res) {
   // ===== REGISTER du 2e webhook (appel authentifie user, comme channel-webhook 'register') =====
   if (req.method === 'POST' && req.body?.action === 'register') {
@@ -144,6 +219,44 @@ module.exports = async function handler(req, res) {
 
     const callbackUrl = req.body.callback_url
     if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
+
+    // Le webhook de ce fichier est probablement DEJA enregistre avec un masque
+    // plus etroit : un POST creerait un doublon ou serait refuse, et le nouvel
+    // event ne serait jamais recu. On cherche donc l'existant pour le mettre a
+    // jour (PUT), et on ne cree qu'a defaut.
+    let existant = null
+    const liste = await channelCall('GET', '/webhooks')
+    if (liste.ok) {
+      const trouve = (liste.json?.data || []).find(w =>
+        (w.attributes?.callback_url || w.callback_url) === callbackUrl)
+      if (trouve) existant = trouve.id || trouve.attributes?.id
+    } else {
+      console.error('[channel-events] lecture des webhooks impossible', liste.status, JSON.stringify(liste.json))
+    }
+
+    if (existant) {
+      const maj = await channelCall('PUT', `/webhooks/${existant}`, {
+        webhook: { event_mask: CHANNEL_EVENTS, is_active: true }
+      })
+      // Meme reserve que pour la creation : un refus doit etre lisible, pas un
+      // crash. Sans cette mise a jour, `updated_review` n'arrive jamais et le
+      // poll quotidien reste seul — degrade, pas casse.
+      if (!maj.ok) {
+        console.error('[channel-events] mise a jour du masque refusee', maj.status, JSON.stringify(maj.json))
+        return res.status(200).json({
+          ok: false,
+          registered: false,
+          updated: false,
+          channel_status: maj.status,
+          reason: "Le gestionnaire de canaux a refuse la mise a jour du masque d'events (ajout de updated_review). Les avis continueront d'arriver par le poll quotidien.",
+          detail: maj.json?.errors || maj.json
+        })
+      }
+      return res.status(200).json({
+        ok: true, registered: true, updated: true,
+        event_mask: CHANNEL_EVENTS, webhook: maj.json?.data || maj.json
+      })
+    }
 
     const reg = await channelCall('POST', '/webhooks', {
       webhook: {
@@ -192,6 +305,13 @@ module.exports = async function handler(req, res) {
   console.log('[channel-events] payload complet:', JSON.stringify(payload || {}))
 
   try {
+    // ===== AVIS VOYAGEUR =====
+    // Traite AVANT la garde des events canal : ce n'est pas un event de mapping,
+    // il ne doit pas passer par la chaine de resolution de canal.
+    if (event === 'updated_review') {
+      return await traiterAvis(payload, res)
+    }
+
     // Seuls les events de mapping/activation declenchent la chaine (idempotents entre eux).
     if (event !== 'new_channel' && event !== 'updated_channel' && event !== 'activate_channel') {
       return res.status(200).json({ ok: true, reason: 'ignored:' + event })

@@ -103,10 +103,24 @@ dénormalisées à l'ingestion.
 
 ## 6. Reste à faire
 
-- **Webhook `updated_review`** : absent des deux webhooks enregistrés
-  (`booking;message` et `new_channel;updated_channel;activate_channel`), et
-  `api/channel-webhook.js` ne route que `booking` et `message`. Le poll reste la
-  source de vérité ; le webhook n'apportera que la fraîcheur.
+- ~~Webhook `updated_review`~~ **fait**. Routé par `api/channel-events.js`, le
+  **2e** webhook — celui qui existe parce que `api/channel-webhook.js` porte la
+  mention « code certifié Channex, NON modifié » et que la certification PMS est
+  en revue. Le propos de ce fichier est donc élargi aux avis, ce que son en-tête
+  assume. Un 3e webhook dédié aurait été plus propre sémantiquement, mais le
+  gestionnaire de canaux peut refuser un webhook de plus (le fichier prévoit
+  déjà ce refus pour le 2e), et le poll reste la source de vérité de toute façon.
+  - **Le webhook écrit par le MÊME writer que le poll** (`preparerAvis` +
+    `upsertAvis`) : mêmes gardes de cloisonnement, même contrainte
+    d'idempotence. Rejouer un event est sans effet.
+  - Le payload n'étant pas documenté, les deux formes sont acceptées : avis
+    complet, ou identifiant seul suivi d'une relecture `GET /reviews/:id`.
+  - Le webhook répond **200 même en échec** : un 500 ferait rejouer l'event par
+    le provider alors que le poll quotidien rattrape de toute façon.
+  - ⚠ **Élargir `CHANNEL_EVENTS` ne suffit pas** sur un webhook déjà enregistré.
+    L'action `register` cherche l'existant et le met à jour (`PUT`), et ne crée
+    qu'à défaut. Sans cette mise à jour côté Channex, `updated_review` n'arrive
+    jamais — dégradé, pas cassé : le poll continue.
 - **Beds24** : aucune lecture d'avis identifiée à ce jour. En attente de
   vérification de la doc Swagger authentifiée.
 - **Classification IA** de la propreté (`ai_clean_verdict`, `ai_clean_excerpt`).
