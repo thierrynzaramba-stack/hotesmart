@@ -59,70 +59,54 @@ serait sans valeur pour le yield.
 
 ## 1. Migration SQL — table `ota_reviews`
 
-```sql
-create table ota_reviews (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  property_id uuid not null references properties(id) on delete cascade,
-  provider text not null check (provider in ('channex','beds24')),
-  ota text not null,                      -- 'airbnb' | 'booking' (normalisé en minuscules)
-  external_review_id text not null,       -- id review Channex OU id review Beds24
-  ota_reservation_id text,                -- code résa OTA (ex. HMSZMHHF2X, 2328423042)
-  booking_uid text,                       -- lien vers bookings_snapshot si résolu, sinon null
-  menage_event_id uuid,                   -- NULL pour l'instant — rempli au chantier prestataires
-  guest_name text,
-  content text,
-  reply text,
-  is_replied boolean default false,
-  overall_score numeric,                  -- normalisé sur 10
-  score_clean numeric,                    -- extrait des scores détaillés (catégorie clean/cleanliness)
-  scores jsonb,                           -- liste complète des scores par catégorie
-  tags jsonb,                             -- tags Airbnb (dirty_bathroom, stains, etc.)
-  received_at timestamptz,
-  ai_clean_verdict text check (ai_clean_verdict in ('rien_signale','remarque','positif')),
-                                          -- classification IA du texte : propreté non évoquée / remarque négative / propreté saluée
-  ai_clean_excerpt text,                  -- extrait exact du texte évoquant la propreté (null si rien_signale)
-  ai_analyzed_at timestamptz,             -- null = pas encore analysé
-  raw jsonb,                              -- payload brut pour debug/évolution
-  created_at timestamptz default now(),
-  updated_at timestamptz default now(),
-  unique (provider, external_review_id)   -- idempotence des upserts
-);
+**Le schéma de référence est `migrations/2026-09-02-ota-reviews.sql`**, écrit
+d'après la structure réelle de `GET /reviews` (sonde du 2 septembre 2026, 70 avis
+Channex : 68 AirBNB, 2 BookingCom). Il ne se relit pas ici pour éviter deux
+vérités divergentes. Ce qui suit ne consigne que les **écarts** avec le schéma
+imaginé plus haut dans cette spec, chacun tiré d'un fait de la sonde.
 
-create index ota_reviews_property_idx on ota_reviews (property_id, received_at desc);
-create index ota_reviews_reservation_idx on ota_reviews (ota_reservation_id);
-```
+**Écart 1 — l'unicité inclut `user_id`.** La spec proposait
+`unique (provider, external_review_id)`. Une unicité globale ferait qu'un second
+compte HôteSmart ayant accès au même bien Channex **écraserait** la ligne du
+premier. La contrainte est `unique (user_id, provider, external_review_id)`,
+alignée sur la PK `(user_id, booking_id)` de `bookings_snapshot`
+(`REVIEW.md` règle 1). Même raison pour les quatre index, tous préfixés `user_id`.
 
-**⚠️ RLS — CORRECTION : cette spec date d'avant le chantier profils et droits.**
+**Écart 2 — aucune normalisation des notes à l'ingestion.** La spec voulait
+`overall_score` « normalisé sur 10 ». Chez Booking, la sonde montre un
+`overall_score` de 1 avec **toutes** les catégories à 2.5, et un autre de 10 avec
+toutes les catégories à 7.5 : les deux échelles ne coïncident pas. Convertir à
+l'écriture graverait l'erreur dans le cœur. On stocke brut ; la mise à l'échelle
+est un calcul d'app.
 
-`user_id = auth.uid()` **ignorerait la délégation** : un membre avec
-`avis: read` ne verrait rien. Les politiques suivent le modèle de droits, domaine
-`avis` :
+**Écart 3 — le contenu n'a pas les mêmes clés selon l'OTA.** `raw_content` vaut
+`{public_review, private_feedback}` chez Airbnb et `{headline, positive,
+negative}` chez Booking, où tout est public. D'où `content_public` /
+`content_private` normalisées, `content` pour le texte fourni tel quel, et `raw`
+qui conserve la forme d'origine.
 
-```sql
-create policy ota_reviews_select on ota_reviews for select to authenticated
-  using (can_read(user_id, 'avis', property_id_ref));
-create policy ota_reviews_write on ota_reviews for all to authenticated
-  using (can_write(user_id, 'avis', property_id_ref))
-  with check (can_write(user_id, 'avis', property_id_ref));
-```
+**Écart 4 — colonnes que la spec n'avait pas prévues**, toutes présentes dans la
+réponse Channex : `expired_at` / `is_expired` (fenêtre de réponse OTA — **58
+avis sur 70 étaient déjà expirés**), `is_hidden`, `provider_updated_at` (à ne pas
+confondre avec notre `updated_at`), `channel_id`, `listing_id` (Airbnb seul),
+`provider_booking_id` (l'UUID booking Channex, distinct de `ota_reservation_id`).
 
-**Deux colonnes s'ajoutent au schéma ci-dessus** :
+**Écart 5 — `booking_uid` n'a pas de clé étrangère.** L'avis peut arriver avant
+que le snapshot existe ; la résolution tardive est un travail de fond. Une FK
+bloquerait l'insert dans le cas même que la spec décrivait.
 
-- **`property_id_ref text not null`** — le `provider_property_id`. `can_read` et
-  le filtre de périmètre travaillent sur la référence **TEXT**, pas sur l'UUID
-  (`REVIEW.md` §10). Sans elle, le périmètre ne s'appliquerait pas.
-- **`stay_start date` / `stay_end date`** — dénormalisées à l'ingestion. Les
-  dates de séjour vivent dans `bookings_snapshot` et ne sont atteignables que par
-  `booking_uid` : quand celui-ci n'est pas résolu, l'avis perd son ancrage
-  temporel, dont le module de pricing a besoin.
+**Ce que la spec avait juste** : `property_id_ref text not null` (le périmètre
+travaille sur la référence TEXT, pas l'UUID — `REVIEW.md` §10), `stay_start` /
+`stay_end` dénormalisées, les politiques RLS par `can_read`/`can_write` sur le
+domaine `avis`, et le rattachement par `ota_reservation_id` — que la sonde
+confirme **peuplé sur 70/70**, contre 155/182 côté `bookings_snapshot`.
 
-**Résolution de `booking_uid`** — la clé existe et est déjà peuplée :
-`bookings_snapshot.snapshot->>'otaReservationCode'` (164 lignes sur 182).
-C'est elle qu'on matche contre `ota_reservation_id`.
-
-Les écritures serveur passent par la service key (cron/webhook), les lectures
-front par l'anon key + RLS.
+**Cloisonnement du poll.** Chaque compte a sa clé Channex et ses biens. Le poll
+itère par compte, avec la clé de ce compte, et ne rattache un avis qu'aux biens
+de ce compte — comme le cron des réservations. La sonde d'étape 0 avait fait
+l'erreur inverse : elle listait `properties` en service key et voyait donc les
+biens de deux comptes à la fois, ce qui avait fait passer le bien Channex du
+compte test pour un doublon.
 
 ## 2. Couche sync — `lib/channels/`
 
