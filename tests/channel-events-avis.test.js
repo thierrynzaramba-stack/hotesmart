@@ -256,3 +256,142 @@ test('le secret partagé garde aussi les avis', async () => {
   assert.strictEqual(res.code, 401)
   assert.strictEqual(etat.ecritures.length, 0)
 })
+
+// ─── Enregistrement du webhook : la zone que la suite ne regardait pas ──────
+// Le constat le plus grave de la review du lot 3 est tombé ici : `callback_url`
+// vient du client, et rien ne validait la ressource visée par le PUT.
+
+const URL_MOI = 'https://hotesmart.vercel.app/api/channel-events'
+const URL_CERTIFIE = 'https://hotesmart.vercel.app/api/channel-webhook'
+
+function webhooksExistants () {
+  return { data: [
+    { id: 'wh-certifie', attributes: { callback_url: URL_CERTIFIE, event_mask: 'booking;message' } },
+    { id: 'wh-moi', attributes: { callback_url: URL_MOI, event_mask: 'new_channel;updated_channel;activate_channel' } }
+  ] }
+}
+
+function preparerRegister ({ webhooks = webhooksExistants(), listeOk = true } = {}) {
+  return preparer({ fetchStub: async (url, opts) => {
+    const method = opts?.method || 'GET'
+    if (url.endsWith('/webhooks') && method === 'GET') {
+      return { ok: listeOk, status: listeOk ? 200 : 500, text: async () => JSON.stringify(listeOk ? webhooks : {}) }
+    }
+    if (url.includes('/webhooks/') && method === 'PUT') {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 'maj' } }) }
+    }
+    if (url.endsWith('/webhooks') && method === 'POST') {
+      return { ok: true, status: 201, text: async () => JSON.stringify({ data: { id: 'cree' } }) }
+    }
+    return null
+  } })
+}
+
+function requeteRegister (callbackUrl) {
+  return { method: 'POST', headers: { authorization: 'Bearer jeton' },
+           body: { action: 'register', callback_url: callbackUrl } }
+}
+
+test('register : le webhook CERTIFIÉ ne peut pas être ciblé par une session quelconque', async () => {
+  // Sans cette garde, n'importe quel hôte connecté réécrivait le masque du
+  // webhook certifié : plus aucune réservation ni message voyageur en temps
+  // réel, pour TOUS les hôtes Channex, avec une réponse « succès ». L'URL du
+  // webhook certifié est publique (elle figure dans pages/diagnostic.html).
+  const etat = preparerRegister({})
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_CERTIFIE), res)
+
+  assert.strictEqual(res.code, 400)
+  assert.ok(!etat.appels.some(a => a.method === 'PUT'),
+    'aucun PUT ne doit partir vers un webhook qui n\'est pas le nôtre')
+})
+
+test('register : un webhook portant booking/message est refusé même s\'il passe l\'URL', async () => {
+  // Filet redondant et voulu : si une URL changeait un jour et passait la
+  // première garde, le masque existant trahit encore le webhook certifié.
+  const etat = preparerRegister({ webhooks: { data: [
+    { id: 'wh-piege', attributes: { callback_url: URL_MOI, event_mask: 'booking;message' } }
+  ] } })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  assert.strictEqual(res.code, 409)
+  assert.ok(!etat.appels.some(a => a.method === 'PUT'))
+})
+
+test('register : le masque de NOTRE webhook est mis à jour, pas dupliqué', async () => {
+  const etat = preparerRegister({})
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.updated, true)
+  const put = etat.appels.find(a => a.method === 'PUT')
+  assert.ok(put && put.url.includes('/webhooks/wh-moi'), 'le PUT doit viser NOTRE webhook')
+  assert.ok(!etat.appels.some(a => a.method === 'POST' && a.url.endsWith('/webhooks')),
+    'aucune création : elle produirait un doublon et une double livraison')
+})
+
+test('register : le PUT renvoie le secret partagé et les request_params', async () => {
+  // Si le gestionnaire remplace l'objet au lieu de le fusionner, omettre les
+  // headers ferait perdre le secret : toutes les livraisons suivantes seraient
+  // rejetées en 401 par notre propre garde. Webhook mort, pas seulement masque
+  // cassé.
+  let corps = null
+  const etat = preparer({ fetchStub: async (url, opts) => {
+    const method = opts?.method || 'GET'
+    if (url.endsWith('/webhooks') && method === 'GET') {
+      return { ok: true, status: 200, text: async () => JSON.stringify(webhooksExistants()) }
+    }
+    if (method === 'PUT') {
+      corps = JSON.parse(opts.body)
+      return { ok: true, status: 200, text: async () => '{"data":{}}' }
+    }
+    return null
+  } })
+  const handler = require('../api/channel-events')
+  await handler(requeteRegister(URL_MOI), reponse())
+
+  assert.ok(corps.webhook.headers['X-Channel-Webhook-Secret'], 'le secret doit être renvoyé')
+  assert.ok(corps.webhook.event_mask.includes('updated_review'))
+  assert.ok(corps.webhook.event_mask.includes('activate_channel'), 'les events canal restent')
+})
+
+test('register : liste des webhooks illisible -> aucune création à l\'aveugle', async () => {
+  // Créer sans savoir si le webhook existe produirait un doublon : chaque event
+  // livré deux fois, donc runPostMapping exécuté deux fois.
+  const etat = preparerRegister({ listeOk: false })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  assert.strictEqual(res.body.ok, false)
+  assert.ok(!etat.appels.some(a => a.method === 'POST' && a.url.endsWith('/webhooks')))
+})
+
+test('register : sans session, rien ne part', async () => {
+  const etat = preparer({})
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler({ method: 'POST', headers: {}, body: { action: 'register', callback_url: URL_MOI } }, res)
+
+  assert.strictEqual(res.code, 401)
+  assert.strictEqual(etat.appels.length, 0)
+})
+
+// ─── Le chemin d'exception, jamais exercé jusqu'ici ─────────────────────────
+test('updated_review : une exception réseau ne produit PAS un 500', async () => {
+  // Un 500 fait retenter le provider : boucle de rejeu, et reportIncident
+  // réveille le canal fondateur pour une panne que le poll rattrape seul.
+  const etat = preparer({ fetchStub: async () => { throw new Error('ECONNRESET') } })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requete({ event: 'updated_review', payload: { review_id: 'rev-9' } }), res)
+
+  assert.strictEqual(res.code, 200, 'une coupure réseau ne doit pas déclencher de rejeu')
+  assert.strictEqual(res.body.reason, 'review_exception')
+  assert.strictEqual(etat.ecritures.filter(e => e.table === 'ota_reviews').length, 0)
+})

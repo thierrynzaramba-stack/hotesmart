@@ -115,8 +115,22 @@ dénormalisées à l'ingestion.
     d'idempotence. Rejouer un event est sans effet.
   - Le payload n'étant pas documenté, les deux formes sont acceptées : avis
     complet, ou identifiant seul suivi d'une relecture `GET /reviews/:id`.
-  - Le webhook répond **200 même en échec** : un 500 ferait rejouer l'event par
-    le provider alors que le poll quotidien rattrape de toute façon.
+  - Le webhook répond **200 même en échec**, exception réseau comprise : le
+    routage a son propre `try/catch`, qui ne rejoint pas le `catch` global du
+    handler (celui-ci répond 500, donc « retente »). Sans lui, une coupure vers
+    le gestionnaire suffisait à lancer une boucle de rejeu et à réveiller le
+    canal fondateur pour une panne que le poll rattrape seul.
+  - ⚠ **`register` ne peut cibler que le webhook de ce fichier.** `callback_url`
+    vient du client : sans garde, une session authentifiée quelconque pouvait
+    faire réécrire le masque du webhook **certifié** — dont l'URL est publique —
+    et couper `booking;message` pour tous les hôtes Channex, avec une réponse
+    « succès ». Deux gardes, volontairement redondantes : l'URL doit finir par
+    `/api/channel-events`, et tout webhook dont le masque contient `booking` ou
+    `message` est refusé. Le PUT renvoie aussi `headers` et `request_params` :
+    les omettre ferait perdre le secret partagé si le gestionnaire remplace
+    l'objet au lieu de le fusionner — webhook mort, pas seulement masque cassé.
+  - Si la liste des webhooks est illisible, **aucune création à l'aveugle** :
+    un doublon livrerait chaque event deux fois.
   - ⚠ **Élargir `CHANNEL_EVENTS` ne suffit pas** sur un webhook déjà enregistré.
     L'action `register` cherche l'existant et le met à jour (`PUT`), et ne crée
     qu'à défaut. Sans cette mise à jour côté Channex, `updated_review` n'arrive

@@ -220,23 +220,74 @@ module.exports = async function handler(req, res) {
     const callbackUrl = req.body.callback_url
     if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
 
+    // ⚠ GARDE 1 — la cible ne peut etre QUE ce fichier.
+    // `callback_url` vient du corps de la requete, donc du client. Sans cette
+    // verification, n'importe quelle session authentifiee pouvait faire pointer
+    // le PUT ci-dessous sur le webhook CERTIFIE (api/channel-webhook.js), dont
+    // l'URL est publique, et lui reecrire son masque : plus aucune reservation
+    // ni message voyageur en temps reel, pour TOUS les hotes Channex, avec une
+    // reponse "succes". La ressource visee doit etre validee, jamais deduite
+    // d'un identifiant fourni par le client (REVIEW.md regle 11).
+    if (!/\/api\/channel-events\/?$/.test(String(callbackUrl))) {
+      return res.status(400).json({
+        error: 'callback_url doit pointer vers /api/channel-events',
+        reason: "Cet endpoint n'enregistre que son propre webhook."
+      })
+    }
+
     // Le webhook de ce fichier est probablement DEJA enregistre avec un masque
     // plus etroit : un POST creerait un doublon ou serait refuse, et le nouvel
     // event ne serait jamais recu. On cherche donc l'existant pour le mettre a
     // jour (PUT), et on ne cree qu'a defaut.
     let existant = null
+    let masqueExistant = ''
     const liste = await channelCall('GET', '/webhooks')
-    if (liste.ok) {
-      const trouve = (liste.json?.data || []).find(w =>
-        (w.attributes?.callback_url || w.callback_url) === callbackUrl)
-      if (trouve) existant = trouve.id || trouve.attributes?.id
-    } else {
+    if (!liste.ok) {
+      // On ne cree PAS a l'aveugle : sans la liste, impossible de savoir si le
+      // webhook existe deja, et un POST produirait un doublon — donc double
+      // livraison de chaque event et double execution de runPostMapping.
       console.error('[channel-events] lecture des webhooks impossible', liste.status, JSON.stringify(liste.json))
+      return res.status(200).json({
+        ok: false, registered: false, updated: false,
+        channel_status: liste.status,
+        reason: "Impossible de lire les webhooks existants : on n'en cree pas a l'aveugle (risque de doublon et de double livraison). Reessayer plus tard."
+      })
+    }
+    const tous = liste.json?.data || []
+    const trouve = tous.find(w =>
+      (w.attributes?.callback_url || w.callback_url) === callbackUrl)
+    if (trouve) {
+      existant = trouve.id || trouve.attributes?.id
+      masqueExistant = String(trouve.attributes?.event_mask || trouve.event_mask || '')
     }
 
     if (existant) {
+      // ⚠ GARDE 2, redondante et voulue — ne jamais toucher au webhook certifie.
+      // Si une URL changeait un jour et passait la garde 1, ce filet reste : un
+      // webhook qui porte booking ou message est celui de channel-webhook.js.
+      if (/\bbooking\b|\bmessage\b/.test(masqueExistant)) {
+        console.error('[channel-events] refus de modifier un webhook portant booking/message')
+        return res.status(409).json({
+          ok: false, registered: false, updated: false,
+          reason: "Ce webhook porte les events booking/message : c'est celui du code certifie, il n'est pas modifiable ici."
+        })
+      }
+
+      // Le PUT renvoie headers et request_params : si le gestionnaire remplace
+      // l'objet au lieu de le fusionner, les omettre ferait perdre le secret
+      // partage — toutes les livraisons suivantes seraient alors rejetees en
+      // 401 par notre propre garde — et le bypass de protection Vercel.
       const maj = await channelCall('PUT', `/webhooks/${existant}`, {
-        webhook: { event_mask: CHANNEL_EVENTS, is_active: true }
+        webhook: {
+          callback_url: callbackUrl,
+          event_mask: CHANNEL_EVENTS,
+          property_id: null,
+          is_global: true,
+          is_active: true,
+          send_data: true,
+          headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
+          request_params: VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+        }
       })
       // Meme reserve que pour la creation : un refus doit etre lisible, pas un
       // crash. Sans cette mise a jour, `updated_review` n'arrive jamais et le
@@ -308,8 +359,19 @@ module.exports = async function handler(req, res) {
     // ===== AVIS VOYAGEUR =====
     // Traite AVANT la garde des events canal : ce n'est pas un event de mapping,
     // il ne doit pas passer par la chaine de resolution de canal.
+    //
+    // ⚠ try/catch PROPRE, qui ne rejoint pas le catch global du handler. Celui-ci
+    // repond 500, donc "retente" cote provider : une coupure reseau vers le
+    // gestionnaire ou une exception Supabase aurait suffi a lancer une boucle de
+    // rejeu, et a reveiller le canal fondateur (reportIncident webhook_error)
+    // pour un incident qui n'en est pas un. Le poll quotidien rattrape.
     if (event === 'updated_review') {
-      return await traiterAvis(payload, res)
+      try {
+        return await traiterAvis(payload, res)
+      } catch (e) {
+        console.error('[channel-events] exception sur updated_review:', e.message)
+        return res.status(200).json({ ok: false, reason: 'review_exception' })
+      }
     }
 
     // Seuls les events de mapping/activation declenchent la chaine (idempotents entre eux).
