@@ -18,6 +18,10 @@
 //   channel, feed Channex) ET après les sondes d'alerting : il est le poste le plus
 //   coûteux du cycle (appels Haiku/Seam) et ne doit pas consommer le budget des
 //   60 s avant les filets anti-boucle.
+// Session #31 : poll quotidien des avis voyageurs Channex vers ota_reviews
+//   (cœur de données). Cadence 1x/24h par marqueur cron_logs, marqueur posé AVANT
+//   le travail et budget mur de 20 s : un poll qui déborderait ne doit jamais
+//   repartir à chaque tick de 5 min.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -29,6 +33,7 @@ const { checkBatteries } = require('../lib/cron-access')
 const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
+const { pollChannelReviews } = require('../lib/cron-channel-reviews')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -83,6 +88,7 @@ module.exports = async function handler(req, res) {
     totalBookingChanges: 0,
     totalAutoMessages: 0,
     totalChannelRevisions: 0,
+    totalChannelReviews: 0,
     totalBeds24Materialized: 0,
     circuitBreakerTriggered: 0,
     errors: []
@@ -180,6 +186,19 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur sonde croissance tables:', err.message)
       results.errors.push({ context: 'table_growth', error: err.message })
+    }
+
+    // 4quinquies. Avis voyageurs Channex -> ota_reviews (cœur de données).
+    // Cadence 1x/24h par marqueur cron_logs : un avis n'arrive qu'une fois par
+    // séjour et la fenêtre de réponse OTA se compte en semaines.
+    // ⚠ Placé APRÈS les sondes et AVANT le dispatch, comme les autres tâches
+    // transverses. Le module pose son marqueur AVANT de travailler et s'arrête
+    // sur un budget mur de 20 s : il ne peut ni boucler à chaque tick de 5 min,
+    // ni manger le budget du dispatch. Le reliquat part au passage du lendemain.
+    try { await chrono.mesure('poll_avis_channel', () => pollChannelReviews(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur poll avis Channex:', err.message)
+      results.errors.push({ context: 'channel_reviews', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.
