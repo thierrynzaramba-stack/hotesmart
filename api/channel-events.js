@@ -50,6 +50,27 @@ const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN
 // channel-events" a un chemin parfaitement valide.
 const DOMAINES_APP = ['hotesmart.vercel.app']
 
+// Le gestionnaire renvoie le webhook complet, HEADERS COMPRIS — donc
+// X-Channel-Webhook-Secret et le bypass Vercel. Les relayer au client les
+// exposait dans la reponse HTTP : onglet reseau, historique, copier-coller d'un
+// rapport de diagnostic. Masquer a l'affichage n'aurait rien change, le secret
+// ayant deja quitte le serveur. On le retire donc de la reponse.
+function webhookSansSecrets (w) {
+  if (!w || typeof w !== 'object') return w
+  const attributs = w.attributes && typeof w.attributes === 'object' ? w.attributes : null
+  const nettoyer = (o) => {
+    const { headers, request_params, ...reste } = o
+    return {
+      ...reste,
+      headers: headers ? Object.keys(headers) : undefined,          // noms seuls
+      request_params: request_params ? Object.keys(request_params) : undefined
+    }
+  }
+  return attributs
+    ? { ...w, attributes: nettoyer(attributs) }
+    : nettoyer(w)
+}
+
 function urlWebhookDeCeFichier (req) {
   const host = String(req.headers?.host || '').toLowerCase().split(':')[0]
   const domaine = DOMAINES_APP.includes(host) ? host : DOMAINES_APP[0]
@@ -333,7 +354,7 @@ module.exports = async function handler(req, res) {
       }
       return res.status(200).json({
         ok: true, registered: true, updated: true,
-        event_mask: CHANNEL_EVENTS, webhook: maj.json?.data || maj.json
+        event_mask: CHANNEL_EVENTS, webhook: webhookSansSecrets(maj.json?.data || maj.json)
       })
     }
 
@@ -362,7 +383,7 @@ module.exports = async function handler(req, res) {
         detail: reg.json?.errors || reg.json
       })
     }
-    return res.status(201).json({ ok: true, registered: true, event_mask: CHANNEL_EVENTS, webhook: reg.json?.data || reg.json })
+    return res.status(201).json({ ok: true, registered: true, event_mask: CHANNEL_EVENTS, webhook: webhookSansSecrets(reg.json?.data || reg.json) })
   }
 
   // ===== RECEPTION d'un event canal =====

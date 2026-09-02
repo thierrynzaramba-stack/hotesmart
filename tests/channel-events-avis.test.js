@@ -461,3 +461,58 @@ test('register : le filet booking/message ignore la casse', async () => {
   assert.strictEqual(res.code, 409)
   assert.ok(!etat.appels.some(a => a.method === 'PUT'))
 })
+
+// ─── Le secret partagé ne sort jamais dans la réponse ───────────────────────
+test('register : la réponse ne contient jamais le secret partagé', async () => {
+  // Le gestionnaire renvoie le webhook complet, HEADERS COMPRIS. Les relayer
+  // exposait X-Channel-Webhook-Secret et le bypass Vercel dans la réponse HTTP —
+  // onglet réseau, historique, copier-coller d'un rapport de diagnostic. Masquer
+  // à l'affichage n'aurait rien changé : le secret avait déjà quitté le serveur.
+  const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+  preparer({ fetchStub: async (url, opts) => {
+    const method = opts?.method || 'GET'
+    if (url.endsWith('/webhooks') && method === 'GET') {
+      return { ok: true, status: 200, text: async () => JSON.stringify(webhooksExistants()) }
+    }
+    if (method === 'PUT') {
+      // Réponse réaliste du gestionnaire : il rend ce qu'on lui a envoyé.
+      return { ok: true, status: 200, text: async () => JSON.stringify({ data: { id: 'wh-moi', attributes: {
+        callback_url: URL_MOI, event_mask: 'x',
+        headers: { 'X-Channel-Webhook-Secret': SECRET },
+        request_params: { 'x-vercel-protection-bypass': 'BYPASS' }
+      } } }) }
+    }
+    return null
+  } })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  const brut = JSON.stringify(res.body)
+  assert.ok(!brut.includes(SECRET), 'le secret partagé ne doit pas être dans la réponse')
+  assert.ok(!brut.includes('BYPASS'), 'le bypass Vercel non plus')
+  // Les NOMS d'en-têtes restent : le diagnostic doit pouvoir dire qu'ils existent.
+  assert.deepStrictEqual(res.body.webhook.attributes.headers, ['X-Channel-Webhook-Secret'])
+})
+
+test('register : à la création aussi, la réponse est nettoyée', async () => {
+  const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+  preparer({ fetchStub: async (url, opts) => {
+    const method = opts?.method || 'GET'
+    if (url.endsWith('/webhooks') && method === 'GET') {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ data: [] }) }
+    }
+    if (method === 'POST') {
+      return { ok: true, status: 201, text: async () => JSON.stringify({ data: {
+        id: 'cree', attributes: { headers: { 'X-Channel-Webhook-Secret': SECRET } }
+      } }) }
+    }
+    return null
+  } })
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler(requeteRegister(URL_MOI), res)
+
+  assert.strictEqual(res.code, 201)
+  assert.ok(!JSON.stringify(res.body).includes(SECRET))
+})
