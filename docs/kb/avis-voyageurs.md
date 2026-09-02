@@ -309,3 +309,67 @@ Deux autres pièges de file, fermés :
   du cycle. Mesuré sur la première passe : ~12 s pour 20 avis, et le budget
 a effectivement coupé une passe à 15 avis — le garde-fou fonctionne. Le reliquat
 part au passage suivant, la file étant persistante en base.
+
+## 8. Affichage et saisie manuelle
+
+### Page `/avis`, pas un onglet de la fiche bien
+
+`biens-detail.html` est en sommeil (il redirige vers `/biens`), la question
+« qu'est-ce qui remonte ? » est transversale avant d'être par bien, et la sidebar
+a déjà le mécanisme : `siLire('avis', …)` fait apparaître l'entrée pour
+`avis: read` et la supprime pour `avis: none`.
+
+Un avis **non encore analysé** affiche « Analyse en cours », jamais le badge
+gris : celui-ci signifie « regardé, rien à signaler », ce qui serait faux.
+
+Le compteur des remarques sur 30 jours est calculé **côté serveur** : le front ne
+reçoit que les premières lignes, il ne peut pas compter juste.
+
+### `sejours` exige `write`, alors qu'il ne fait que lire
+
+Cette action renvoie le **nom des voyageurs** et leurs dates de séjour. En
+`read`, un membre `avis: read` / `reservations: none` aurait obtenu la liste
+nominative des occupants d'un bien — une donnée que son profil lui refuse partout
+ailleurs. **Un domaine ne doit pas en ouvrir un autre.** Elle ne sert qu'au
+formulaire de saisie, déjà réservé à `write` : rien n'est perdu.
+
+### Saisie manuelle
+
+`provider = 'manuel'`, `source ∈ {sms, email, oral}`, identifiant **UUID** — deux
+voyageurs peuvent dire la même chose, une empreinte du contenu les confondrait —
+avec garde anti-double-clic au formulaire. Ni note ni tags : c'est ce qui envoie
+la classification **directement à l'étage 2**, le texte étant le seul signal.
+
+Classification **au fil de l'eau** : l'hôte voit le verdict tout de suite. Un
+échec n'est pas bloquant, `ai_analyzed_at` reste null et le cron reprend.
+`classerUnAvis` est partagée par le cron et la saisie : mêmes gardes.
+
+Le rattachement à un séjour est optionnel. Un séjour d'un **autre bien** ne
+rattache rien et ne bloque pas : l'avis est saisi sans ancrage plutôt que perdu,
+mais il n'emprunte pas des dates qui ne le concernent pas.
+
+### Pièges rencontrés, et pourquoi ils comptent
+
+- **`apiCall` LÈVE**, il ne renvoie pas `{ error }`. Traiter son retour comme un
+  objet d'erreur donnait une page blanche au premier 403 — le cas **normal** d'un
+  membre au périmètre restreint, pas un cas limite. Un test vérifie désormais que
+  chaque appel est **dans** un bloc `try` (et non qu'il existe autant de `try`
+  que d'appels : trois `try` placés n'importe où auraient suffi).
+- **Une date de forme valide peut être impossible.** `'2026-13-45'` passe un
+  regex `\d{4}-\d{2}-\d{2}`, puis `new Date().toISOString()` lève un
+  `RangeError` : 500 au lieu de 400, et l'appelant croit à une panne serveur
+  alors que c'est sa saisie. La validité est vérifiée, et le handler porte un
+  filet global comme `api/menages.js`.
+- **Une panne n'est pas une absence** : l'erreur de la requête « biens » était
+  jetée, la page annonçait un succès en affichant « Bien inconnu » sur tous les
+  avis, filtre et formulaire vides.
+- **Les biens sans `provider_property_id`** (créés mais pas encore provisionnés)
+  sont écartés : ils produisaient une `<option value="">` que le formulaire
+  refusait après l'avoir présentée comme choisie.
+- **Les helpers sont posés sur `window` AVANT les `await`** : posés après, une
+  exception de `renderSidebar` les laissait indéfinis alors que
+  `DOMContentLoaded` se déclenchait quand même.
+- **Un double de test doit porter TOUTES les clés de la vraie table.** Le double
+  de `ota_reviews` ignorait `user_id` : retirer `.eq('user_id', …)` de l'endpoint
+  — la défense principale, la service key contournant la RLS — laissait les
+  quatre tests de lecture au vert.

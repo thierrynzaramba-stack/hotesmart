@@ -107,14 +107,16 @@
   import { apiCall } from '/shared/api-client.js'
   import { peutEcrire } from '/shared/compte-courant.js'
 
-  await requireAuth()
-  await renderSidebar('avis')
-
-  // ⚠ Les helpers sont exposes sur window : les usages vivent dans le script
-  // CLASSIQUE plus bas, et un import de module ne s'y voit pas. Une messagerie
-  // entiere est deja morte sur cet oubli (ReferenceError, tests verts).
+  // ⚠ Les helpers sont exposes sur window AVANT tout await : les usages vivent
+  // dans le script CLASSIQUE plus bas, et un import de module ne s'y voit pas.
+  // Une messagerie entiere est deja morte sur cet oubli (ReferenceError, tests
+  // verts). Poses APRES les await, une exception de renderSidebar les laissait
+  // indefinis alors que DOMContentLoaded se declenchait quand meme.
   window.apiCall = apiCall
   window.peutEcrire = peutEcrire
+
+  await requireAuth()
+  await renderSidebar('avis')
 </script>
 
 <script>

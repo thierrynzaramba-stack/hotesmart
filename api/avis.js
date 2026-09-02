@@ -42,7 +42,10 @@ async function lister (req, res, garde) {
   const refs   = refsDuPerimetre(garde.contexte)
   const filtre = filtrePerimetreSql(refs, 'property_id_ref')
   // Perimetre vide : le membre n'a aucun bien. Ce n'est pas une erreur.
-  if (filtre === '') return res.status(200).json({ avis: [], biens: [], remarques30j: 0 })
+  // `fenetre_jours` DOIT y figurer : la page l'affiche, et son absence donnait
+  // « 0 remarque sur undefined j » — precisement au membre dont le perimetre est
+  // vide, le cas que cette ligne existe pour traiter proprement.
+  if (filtre === '') return res.status(200).json({ avis: [], biens: [], remarques30j: 0, fenetre_jours: FENETRE_JRS })
 
   // Le bien demande, s'il y en a un, doit appartenir au perimetre : sans cette
   // verification, un membre limite a un bien lirait les avis d'un autre en
@@ -70,9 +73,20 @@ async function lister (req, res, garde) {
   let qb = supabase.from('properties')
     .select('id, name, provider_property_id, provider')
     .eq('user_id', userId)
+    // Un bien pas encore provisionne chez le provider n'a pas de reference : il
+    // produirait une <option value=""> qui se confond avec « Tous les biens »,
+    // et que le formulaire refuserait apres l'avoir presentee comme choisie.
+    .not('provider_property_id', 'is', null)
   const filtreBiens = filtrePerimetreSql(refs, 'provider_property_id')
   if (filtreBiens) qb = qb.or(filtreBiens)
-  const { data: biens } = await qb.order('name')
+  const { data: biens, error: errBiens } = await qb.order('name')
+  // ⚠ Une panne n'est pas une absence. Sans ce controle, la page annoncait un
+  // succes en affichant « Bien inconnu » sur TOUS les avis, avec un filtre et un
+  // formulaire vides.
+  if (errBiens) {
+    console.error('[avis] lecture des biens echec:', errBiens.message)
+    return res.status(500).json({ error: 'Lecture impossible' })
+  }
 
   // Compteur des remarques de proprete sur la fenetre. Calcule ICI et non au
   // front : le front ne voit que les MAX_LIGNES premieres lignes.
@@ -142,7 +156,16 @@ async function creer (req, res, garde) {
   if (!texte)   return res.status(400).json({ error: 'Le texte de l\'avis est vide' })
   if (texte.length > MAX_TEXTE) return res.status(400).json({ error: 'Texte trop long' })
   if (!SOURCES.has(source)) return res.status(400).json({ error: 'Canal de reception invalide' })
-  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Date invalide' })
+  // ⚠ La FORME ne suffit pas : '2026-13-45' passe le regex, puis new Date()
+  // rend Invalid Date et .toISOString() leve un RangeError — 500 au lieu de 400,
+  // et l'appelant croit a une panne serveur alors que c'est sa saisie.
+  let recuLe = null
+  if (date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Date invalide' })
+    const d = new Date(date + 'T12:00:00Z')
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Date invalide' })
+    recuLe = d.toISOString()
+  }
 
   // ⚠ Le bien est resolu EN BASE, sur le compte cible, et son perimetre est
   // verifie. La reference vient du client : elle ne designe rien tant qu'elle
@@ -173,7 +196,7 @@ async function creer (req, res, garde) {
     // Un avis recu en direct n'a ni note OTA, ni tags, ni retour prive : ces
     // colonnes restent nulles. C'est ce qui envoie la classification
     // directement a l'etage 2, le texte etant le seul signal disponible.
-    received_at:        date ? new Date(date + 'T12:00:00Z').toISOString() : new Date().toISOString()
+    received_at:        recuLe || new Date().toISOString()
   }
 
   // Rattachement optionnel a un sejour : il remplit l'ancrage temporel dont le
@@ -210,27 +233,47 @@ async function creer (req, res, garde) {
     console.error('[avis] classification immediate echec:', e.message)
   }
 
-  return res.status(201).json({ ok: true, id: cree.id, verdict })
+  return res.status(201).json({ ok: true, id: cree.id, verdict: verdict ? verdict.verdict : null })
 }
 
 // ─── Routage ────────────────────────────────────────────────────────────────
 
 module.exports = async function handler (req, res) {
+  try {
+    return await router(req, res)
+  } catch (e) {
+    // Filet global, comme api/menages.js. Sans lui, une exception imprevue
+    // (date invalide, reponse provider inattendue) sortait en crash de fonction
+    // Vercel : 500 nu, aucun message exploitable, et l'appelant croyait a une
+    // panne serveur alors que sa saisie etait en cause.
+    console.error('[avis] exception:', e && e.message)
+    if (!res.headersSent) return res.status(500).json({ error: 'Erreur serveur' })
+  }
+}
+
+async function router (req, res) {
   const action = String(req.query?.action || req.body?.action || 'list')
 
-  if (action === 'create') {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
+  // ⚠ `sejours` exige `write`, pas `read`, alors qu'il ne fait que LIRE.
+  // Il renvoie le nom des voyageurs et leurs dates de sejour : en `read`, un
+  // membre `avis: read` / `reservations: none` aurait obtenu la liste nominative
+  // des occupants d'un bien — une donnee que son profil lui refuse partout
+  // ailleurs. Un domaine ne doit pas en ouvrir un autre. Cette action ne sert
+  // qu'au formulaire de saisie, deja reserve a `write` : rien n'est perdu.
+  if (action === 'create' || action === 'sejours') {
+    if (action === 'create' && req.method !== 'POST') {
+      return res.status(405).json({ error: 'Methode non autorisee' })
+    }
     const garde = await requirePermission(req, res, {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
     if (!garde.ok) return
-    return await creer(req, res, garde)
+    return action === 'create' ? await creer(req, res, garde) : await sejours(req, res, garde)
   }
 
   const garde = await requirePermission(req, res, {
     domaine: 'avis', niveau: 'read', compteDelegue: true })
   if (!garde.ok) return
 
-  if (action === 'sejours') return await sejours(req, res, garde)
-  if (action === 'list')    return await lister(req, res, garde)
+  if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }

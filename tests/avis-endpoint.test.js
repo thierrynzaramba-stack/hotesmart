@@ -61,10 +61,17 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'ota_reviews') {
-          if (q._count === 'exact') return Promise.resolve({ count: 1, error: null })
+          // ⚠ `user_id` EST honore. Une premiere version de ce double l'ignorait :
+          // supprimer `.eq('user_id', userId)` de l'endpoint — la defense
+          // principale, la service key contournant la RLS — laissait les quatre
+          // tests de lecture au vert. REVIEW.md §8 : un double de table porte
+          // TOUTES les cles de la vraie table.
           let c = avis.filter(a =>
-            (q._f.property_id_ref == null || a.property_id_ref === q._f.property_id_ref))
+            (q._f.user_id == null || a.user_id === q._f.user_id) &&
+            (q._f.property_id_ref == null || a.property_id_ref === q._f.property_id_ref) &&
+            (q._f.ai_clean_verdict == null || a.ai_clean_verdict === q._f.ai_clean_verdict))
           if (q._or) c = c.filter(a => String(q._or).includes(a.property_id_ref))
+          if (q._count === 'exact') return Promise.resolve({ count: c.length, error: null })
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'bookings_snapshot') {
@@ -102,8 +109,11 @@ function reponse () {
   return r
 }
 
-const AVIS_A = { id: 'r1', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
-const AVIS_B = { id: 'r2', property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
+const AVIS_A = { id: 'r1', user_id: PROD, property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
+const AVIS_B = { id: 'r2', user_id: PROD, property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
+// Avis d'un AUTRE compte : il ne doit jamais apparaitre, quel que soit le filtre.
+const AVIS_TIERS = { id: 'r3', user_id: '33333333-3333-4333-8333-333333333333',
+                     property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: '2026-08-25T00:00:00Z' }
 
 function req (query = {}, body = null, method = 'GET') {
   return { method, query, body, headers: { authorization: 'Bearer jeton' } }
@@ -287,4 +297,87 @@ test('sejours : triés du plus récent au plus ancien', async () => {
   const res = reponse()
   await handler(req({ action: 'sejours', bien: REF_A }), res)
   assert.deepStrictEqual(res.body.sejours.map(s => s.booking_uid), ['2', '1'])
+})
+
+// ─── Le cloisonnement par compte, réellement exercé ─────────────────────────
+test('list : un avis d\'un AUTRE compte n\'apparaît jamais', async () => {
+  // La service key contourne la RLS : `.eq('user_id', …)` est la seule défense.
+  // Ce test échoue si on la retire — ce qui n'était pas le cas avant, le double
+  // ignorant `user_id`.
+  preparer({ avis: [AVIS_A, AVIS_B, AVIS_TIERS] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.avis.map(a => a.id).sort(), ['r1', 'r2'])
+})
+
+test('list : le compteur 30 jours est cloisonné lui aussi', async () => {
+  // Il compte les remarques : sans filtre de compte, il aurait inclus celle du
+  // compte tiers et affiché un chiffre appartenant à quelqu'un d'autre.
+  preparer({ avis: [AVIS_A, AVIS_B, AVIS_TIERS] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.body.remarques30j, 1, 'seule la remarque du compte courant compte')
+})
+
+test('list : périmètre vide -> la fenêtre est quand même annoncée', async () => {
+  // Sans `fenetre_jours`, la carte affichait « 0 remarque sur undefined j ».
+  preparer({
+    user: MEMBRE, avis: [AVIS_A],
+    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'some', property_ids: [], property_refs: [] }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'list' }), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.fenetre_jours, 30)
+})
+
+// ─── Saisie : les entrées malformées ne produisent pas de 500 ───────────────
+test('create : une date au format valide mais impossible est refusée en 400', async () => {
+  // '2026-13-45' passe le regex de forme ; new Date() rend Invalid Date et
+  // .toISOString() lève un RangeError — 500 au lieu de 400, et l'appelant croit
+  // à une panne serveur alors que c'est sa saisie.
+  const etat = preparer({})
+  const handler = require('../api/avis')
+  for (const date of ['2026-13-45', '0000-00-00']) {
+    const res = reponse()
+    await handler(req({}, { action: 'create', bien: REF_A, texte: 'x', source: 'sms', date }, 'POST'), res)
+    assert.strictEqual(res.code, 400, date)
+  }
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+// ─── `sejours` expose des noms de voyageurs : il exige `write` ──────────────
+test('sejours : un membre avis=read ne peut PAS lister les séjours', async () => {
+  // Cette action renvoie le nom des voyageurs et leurs dates. En `read`, un
+  // membre `avis: read` / `reservations: none` aurait obtenu la liste nominative
+  // des occupants — une donnée que son profil lui refuse partout ailleurs. Un
+  // domaine ne doit pas en ouvrir un autre.
+  preparer({
+    user: MEMBRE, snapshots: [{ user_id: PROD, property_id: REF_A, booking_id: 1, snapshot: { firstName: 'Jean' } }],
+    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'sejours', bien: REF_A }), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 403)
+})
+
+test('sejours : un membre avis=write y a accès', async () => {
+  // Contre-épreuve : la garde renforcée ne doit pas casser le formulaire.
+  preparer({
+    user: MEMBRE, snapshots: [{ user_id: PROD, property_id: REF_A, booking_id: 1, snapshot: { arrival: '2026-08-01' } }],
+    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'write', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'sejours', bien: REF_A }), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.sejours.length, 1)
 })

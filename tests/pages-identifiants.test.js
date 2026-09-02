@@ -84,15 +84,39 @@ test('les pages qui appellent l\'API en fetch brut posent X-Compte', () => {
 })
 
 // ─── apiCall lève, il ne renvoie pas { error } ──────────────────────────────
-test('pages/avis.html : chaque appel apiCall est protégé par un try', () => {
+// Renvoie les intervalles [debut, fin) de chaque bloc `try { ... }`, en suivant
+// les accolades. Compter les `try` et les comparer au nombre d'appels ne prouve
+// rien : trois `try` places n'importe ou laisseraient le test vert.
+function blocsTry (src) {
+  const zones = []
+  const re = /try\s*\{/g
+  let m
+  while ((m = re.exec(src))) {
+    let i = m.index + m[0].length, prof = 1
+    while (i < src.length && prof > 0) {
+      if (src[i] === '{') prof++
+      else if (src[i] === '}') prof--
+      i++
+    }
+    zones.push([m.index, i])
+  }
+  return zones
+}
+
+test('pages/avis.html : chaque appel apiCall est DANS un try', () => {
   // ⚠ `apiCall` LÈVE sur réponse non-ok (l'erreur porte `.status`). Traiter son
   // retour comme `{ error }` laissait l'exception remonter : page blanche au
   // premier 403 — c'est-à-dire le cas NORMAL d'un membre au périmètre restreint,
   // pas un cas limite.
   const html = fs.readFileSync(path.join(__dirname, '..', 'pages/avis.html'), 'utf8')
-  const appels = [...html.matchAll(/apiCall\(/g)].length
-  const essais = [...html.matchAll(/try\s*\{/g)].length
-  assert.ok(appels >= 3, 'la page doit appeler apiCall')
-  assert.ok(essais >= appels - 1,
-    `${appels} appels apiCall pour seulement ${essais} try : un appel non protégé casse la page`)
+  const zones = blocsTry(html)
+  const appels = [...html.matchAll(/apiCall\s*\(/g)]
+    // L'affectation `window.apiCall = apiCall` n'est pas un appel.
+    .filter(m => html.slice(m.index - 30, m.index).indexOf('window.apiCall =') === -1)
+  assert.ok(appels.length >= 3, 'la page doit appeler apiCall')
+  for (const a of appels) {
+    const couvert = zones.some(([d, f]) => a.index > d && a.index < f)
+    assert.ok(couvert,
+      `appel apiCall non protégé à l'offset ${a.index} : une réponse 403 casserait la page`)
+  }
 })
