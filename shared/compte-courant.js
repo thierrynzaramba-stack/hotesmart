@@ -44,12 +44,19 @@ export async function chargerContexte (userId) {
 
   contexte = { moi: userId, compte: userId, comptes: [], permissions: null, charge: true }
 
+  // ⚠ DISTINGUER « liste indisponible » de « acces revoque ».
+  // Sur panne, on ne connait PAS les comptes accessibles : effacer le choix
+  // memorise ferait perdre son compte a quelqu'un pour un 503 de trente
+  // secondes. On garde la memoire intacte et on retombe sur le compte propre
+  // pour cette session — le prochain chargement reussi restaurera le choix.
+  let listeFiable = true
   try {
     const { comptes } = await api.membres.mesComptes()
     contexte.comptes = Array.isArray(comptes) ? comptes : []
   } catch (e) {
     logger.error('compte', 'liste des comptes indisponible : ' + (e?.message || e))
     contexte.comptes = [{ user_id: userId, nom: 'Mon compte', titulaire: true }]
+    listeFiable = false
   }
 
   // ⚠ REVALIDATION DU COMPTE MEMORISE. Une invitation revoquee, un profil
@@ -59,7 +66,8 @@ export async function chargerContexte (userId) {
   // sans que la personne comprenne pourquoi.
   const memorise = lireMemoire()
   const accessible = memorise && contexte.comptes.some(c => String(c.user_id) === String(memorise))
-  if (memorise && !accessible) {
+  if (memorise && !accessible && listeFiable) {
+    // Liste FIABLE et compte absent : l'acces a reellement ete revoque.
     logger.info('compte', 'compte memorise plus accessible : retour au compte propre')
     oublierMemoire()
   }
@@ -174,8 +182,16 @@ export async function basculerVers (userId) {
     logger.error('compte', 'bascule refusee : compte non accessible')
     return false
   }
-  if (cible === String(contexte.moi)) oublierMemoire()
-  else ecrireMemoire(cible)
+  if (cible === String(contexte.moi)) {
+    oublierMemoire()
+  } else if (!ecrireMemoire(cible)) {
+    // ⚠ localStorage indisponible (navigation privee, quota) : recharger
+    // ramenerait au compte precedent et le selecteur reviendrait en arriere,
+    // sans un mot. On le dit.
+    logger.error('compte', 'choix de compte non memorisable')
+    alert('Impossible de mémoriser le compte : votre navigateur bloque le stockage local.')
+    return false
+  }
   window.location.reload()
   return true
 }
@@ -188,7 +204,7 @@ function lireMemoire () {
   try { return localStorage.getItem(CLE_MEMOIRE) } catch { return null }
 }
 function ecrireMemoire (v) {
-  try { localStorage.setItem(CLE_MEMOIRE, v) } catch { /* navigation privee */ }
+  try { localStorage.setItem(CLE_MEMOIRE, v); return true } catch { return false }
 }
 function oublierMemoire () {
   try { localStorage.removeItem(CLE_MEMOIRE) } catch { /* idem */ }

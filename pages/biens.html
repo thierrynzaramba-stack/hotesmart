@@ -419,7 +419,7 @@
 
     // Source partagee avec l'accueil : voir /shared/properties.js.
     // Etat kill switch charge en parallele (cle provider_property_id).
-    const [{ properties, allFailed }] = await Promise.all([
+    const [{ properties, allFailed, refuse }] = await Promise.all([
       loadAllProperties(),
       loadPausedState()
     ])
@@ -427,6 +427,12 @@
     loader.style.display = 'none'
 
     if (properties.length === 0) {
+      // Refus de droits : etat normal d'un membre, pas un incident a rejouer.
+      if (refuse) {
+        loader.style.display = 'block'
+        loader.textContent = 'Vous n’avez pas accès aux biens de ce compte.'
+        return
+      }
       if (allFailed) {
         loader.style.display = 'block'
         loader.textContent = 'Erreur de chargement des biens.'

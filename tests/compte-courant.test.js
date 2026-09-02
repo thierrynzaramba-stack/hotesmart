@@ -174,7 +174,8 @@ test('X-Compte : un membre ACTIF obtient bien le compte demande', async () => {
   preparer({ liens: [membreActif()], permissions: droits() })
   const { requirePermission } = require('../lib/require-permission')
   const res = reponse()
-  const g = await requirePermission(req(PROD), res, { domaine: 'reservations', niveau: 'read' })
+  const g = await requirePermission(req(PROD), res, {
+    domaine: 'reservations', niveau: 'read', compteDelegue: true })
   assert.strictEqual(g.ok, true)
   assert.strictEqual(g.accountUserId, PROD, 'le compte demande, pas celui de l\'appelant')
 })
@@ -183,7 +184,8 @@ test('X-Compte : compte etranger -> 403 (deux barrieres, une seule suffit)', asy
   preparer({ liens: [] })
   const { requirePermission } = require('../lib/require-permission')
   const res = reponse()
-  const g = await requirePermission(req(PROD), res, { domaine: 'reservations', niveau: 'read' })
+  const g = await requirePermission(req(PROD), res, {
+    domaine: 'reservations', niveau: 'read', compteDelegue: true })
   assert.strictEqual(g.ok, false)
   assert.strictEqual(res.code, 403)
 })
@@ -204,7 +206,8 @@ test('LA RESSOURCE PRIME sur X-Compte', async () => {
   const { requirePermission } = require('../lib/require-permission')
   const res = reponse()
   const g = await requirePermission(req(AUTRE), res, {
-    domaine: 'reservations', niveau: 'read', bien: BIEN_PROD.id, bienRequis: true })
+    domaine: 'reservations', niveau: 'read', bien: BIEN_PROD.id, bienRequis: true,
+    compteDelegue: true })
   assert.strictEqual(g.ok, true)
   assert.strictEqual(g.accountUserId, PROD, 'le compte vient du BIEN, pas de l\'en-tete')
 })
@@ -213,9 +216,34 @@ test('X-Compte : les droits appliques sont ceux du compte VISE', async () => {
   preparer({ liens: [membreActif()], permissions: droits({ reservations: 'read' }) })
   const { requirePermission } = require('../lib/require-permission')
   const res = reponse()
-  const ecriture = await requirePermission(req(PROD), res, { domaine: 'reservations', niveau: 'write' })
+  const ecriture = await requirePermission(req(PROD), res, {
+    domaine: 'reservations', niveau: 'write', compteDelegue: true })
   assert.strictEqual(ecriture.ok, false, 'read ne donne pas write')
   assert.strictEqual(res.code, 403)
+})
+
+test('OPT-IN : sans `compteDelegue`, l\'en-tete est IGNORE', async () => {
+  // ⚠ LA FAILLE QUE CE DEFAUT FERME. Honorer X-Compte partout faisait basculer
+  // d'un coup tous les endpoints sans `bien` sur le compte du titulaire, y
+  // compris ceux que personne n'a audites pour la delegation. Le pire :
+  // api/serrures.js `saveConfig` fait `upsert({ user_id: accountUserId,
+  // seam_api_key })` — un membre `reglages:write` aurait ECRASE LA CLE SEAM DU
+  // TITULAIRE. Un endpoint ne devient delegable qu'apres avoir ete relu pour ca.
+  preparer({ liens: [membreActif()], permissions: droits({ reglages: 'write' }) })
+  const { requirePermission } = require('../lib/require-permission')
+  const res = reponse()
+  const g = await requirePermission(req(PROD), res, { domaine: 'reglages', niveau: 'write' })
+  assert.strictEqual(g.ok, true, 'il agit sur SON compte, ou il est titulaire')
+  assert.strictEqual(g.accountUserId, MEMBRE, 'l\'en-tete n\'a PAS bascule le compte')
+})
+
+test('OPT-IN : le defaut protege les endpoints non audites', async () => {
+  // Meme scenario, domaine different : la protection ne depend pas du domaine.
+  preparer({ liens: [membreActif()], permissions: droits({ messages: 'write' }) })
+  const { requirePermission } = require('../lib/require-permission')
+  const res = reponse()
+  const g = await requirePermission(req(PROD), res, { domaine: 'messages', niveau: 'write' })
+  assert.strictEqual(g.accountUserId, MEMBRE)
 })
 
 // ─── mes_comptes ────────────────────────────────────────────────────────────

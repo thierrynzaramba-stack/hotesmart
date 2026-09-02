@@ -9,6 +9,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
+const { refsDuPerimetre } = require('../lib/permissions')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -116,15 +117,35 @@ module.exports = async function handler(req, res) {
     // `auth.uid()` stricte, et c'est voulu). La garde revalide l'en-tete
     // X-Compte : etre membre actif de ce compte, ou rien.
     const gardeGet = await requirePermission(req, res, {
-      domaine: 'reservations', niveau: 'read', userId: user.id
+      domaine: 'reservations', niveau: 'read', userId: user.id,
+      // Seul endpoint de ce lot ouvert a la delegation : c'est lui qui alimente
+      // la liste des biens, donc tout le reste de l'interface.
+      compteDelegue: true
     })
     if (!gardeGet.ok) return
     const compteLecture = gardeGet.accountUserId
 
-    const { data: chanData, error: chanErr } = await supabase
+    // ⚠ FILTRE DE PERIMETRE. Sans lui, un membre invite sur UN bien recevait le
+    // portefeuille COMPLET du titulaire — noms, adresses, prix de base, URLs
+    // d'annonces. C'est une collection : le perimetre ne peut pas se verifier
+    // bien par bien, il doit devenir un filtre (comme messages et menages).
+    const refsPerimetre = refsDuPerimetre(gardeGet.contexte)
+    if (Array.isArray(refsPerimetre) && refsPerimetre.length === 0) {
+      return res.status(200).json({ properties: [] })
+    }
+
+    let qProps = supabase
       .from('properties')
       .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', compteLecture)
+    if (refsPerimetre) {
+      // Le perimetre melange UUID et provider_property_id : les deux colonnes
+      // sont donc interrogees (cf. lib/permissions.js).
+      const sures = refsPerimetre.filter(r => /^[A-Za-z0-9_-]{1,64}$/.test(r))
+      if (!sures.length) return res.status(200).json({ properties: [] })
+      qProps = qProps.or(`id.in.(${sures.join(',')}),provider_property_id.in.(${sures.join(',')})`)
+    }
+    const { data: chanData, error: chanErr } = await qProps
       .order('created_at', { ascending: false })
     if (chanErr) {
       console.error('[channel-property] SELECT error', chanErr.message)
@@ -147,7 +168,12 @@ module.exports = async function handler(req, res) {
       if (keyData && keyData.api_key) {
         const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: keyData.api_key } })
         const d = await r.json()
-        beds24Props = (d.data || []).map(b => ({
+        beds24Props = (d.data || [])
+          // ⚠ Les biens Beds24 arrivent de l'API du provider, pas de la base :
+          // aucune RLS ne les borne. Le perimetre doit etre applique ICI, sinon
+          // un membre restreint recevrait tous les biens Beds24 du titulaire.
+          .filter(b => !refsPerimetre || refsPerimetre.includes(String(b.id)))
+          .map(b => ({
           id: b.id,
           name: b.name,
           provider: 'beds24',
@@ -158,6 +184,12 @@ module.exports = async function handler(req, res) {
           country: b.country || '',
           capacity: (b.roomTypes && b.roomTypes[0] && b.roomTypes[0].maxPeople) || 1,
           inventory_type: 'whole',
+          // ⚠ Champs BRUTS Beds24 conserves : shared/properties.js n'appelle plus
+          // /api/beds24 getProperties, qui les renvoyait. Sans eux, l'accueil
+          // perd sa ligne « Check-in / Check-out » pour tous les biens Beds24.
+          checkInStart:  b.checkInStart  || null,
+          checkInEnd:    b.checkInEnd    || null,
+          checkOutEnd:   b.checkOutEnd   || null,
           created_at: null
         }))
       }

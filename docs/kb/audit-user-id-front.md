@@ -106,3 +106,50 @@ des bandeaux cassés. Elles restent sur l'identité : chacun voit son abonnement
 
 **Corollaire pour le lot 2** : sidebar et bandeaux doivent fonctionner avec ces
 lectures **vides**, sans erreur console. C'est le cas nominal d'un membre.
+
+---
+
+# L'en-tête `X-Compte` est OPT-IN, endpoint par endpoint
+
+## La règle
+
+`requirePermission` n'honore `X-Compte` que si l'endpoint le demande
+explicitement : `compteDelegue: true`. **Le défaut est `false`** — donc tout
+endpoint non modifié se comporte exactement comme avant.
+
+## Pourquoi, et ce que la première version a failli coûter
+
+La première version honorait l'en-tête **partout**. Conséquence : tous les
+endpoints sans `bien` basculaient d'un coup sur le compte du titulaire, y compris
+ceux que personne n'avait relus pour la délégation.
+
+Le pire cas, trouvé en review : `api/serrures.js` `saveConfig` fait
+`upsert({ user_id: garde.accountUserId, seam_api_key })`. Un membre au preset
+« employé » (`reglages: 'write'`) aurait **écrasé la clé Seam du titulaire**,
+puis `locks` et `generateCode` auraient tourné avec cette clé et un `lock_id`
+fourni par le client. Même classe pour `agent-config`, `extract-kb`,
+`alert-test`, et la **création de bien** de `channel-property`.
+
+C'est l'inverse du bon défaut : une capacité nouvelle ne s'ouvre pas à tout le
+monde parce qu'elle est pratique quelque part.
+
+## Ce qu'un endpoint doit prouver avant de devenir délégable
+
+1. **Il a été relu pour ça.** Ce qu'il écrit, sous quel `user_id`, et ce que le
+   membre pourrait en faire.
+2. **S'il renvoie une collection, il applique le filtre de périmètre.** Sans lui,
+   un membre invité sur un bien reçoit tout le portefeuille — c'était le cas de
+   `channel-property` GET avant correction : noms, adresses, prix de base, URLs
+   d'annonces des biens du titulaire.
+3. **Si ses données viennent d'un provider et non de la base**, le périmètre doit
+   être appliqué **en mémoire** : aucune RLS ne borne une réponse d'API externe.
+   C'est le cas des biens Beds24 dans `channel-property`.
+
+## Endpoints délégables aujourd'hui
+
+| Endpoint | Filtre de périmètre |
+|---|---|
+| `channel-property` GET | oui — SQL sur `properties`, en mémoire sur les biens Beds24 |
+
+Les autres suivront lot par lot, chacun après relecture. Un endpoint absent de ce
+tableau travaille sur le compte de l'appelant, quoi que dise l'en-tête.

@@ -57,10 +57,20 @@ export async function loadAllProperties() {
     // Les drapeaux d'echec par source sont conserves dans la signature : les
     // pages les lisent (`allFailed` distingue « aucun bien » d'un chargement
     // casse). Avec une source unique, les trois sont lies.
-    return { properties, beds24Failed: false, channelFailed: false, allFailed: false }
+    return { properties, beds24Failed: false, channelFailed: false, allFailed: false, refuse: false }
   } catch (err) {
-    logger.error('properties', 'chargement des biens echoue: ' + (err?.message || err))
-    return { properties: [], beds24Failed: true, channelFailed: true, allFailed: true }
+    const message = err?.message || String(err)
+    // ⚠ UN REFUS DE DROITS N'EST PAS UNE PANNE. Un membre sans `reservations:read`
+    // recoit un 403 parfaitement normal : afficher « Erreur de chargement » lui
+    // ferait croire a un incident, et l'inciterait a recharger indefiniment.
+    // `allFailed` est reserve a ce qui est reellement casse.
+    const refuse = /droits insuffisants|non autoris/i.test(message)
+    if (refuse) {
+      logger.info('properties', 'biens non accessibles avec les droits courants')
+      return { properties: [], beds24Failed: false, channelFailed: false, allFailed: false, refuse: true }
+    }
+    logger.error('properties', 'chargement des biens echoue: ' + message)
+    return { properties: [], beds24Failed: true, channelFailed: true, allFailed: true, refuse: false }
   }
 }
 

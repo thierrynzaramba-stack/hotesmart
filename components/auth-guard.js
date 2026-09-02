@@ -9,11 +9,6 @@ const SESSION_USER_KEY = 'hs_auth_user_id'
  * BETA : verifie uniquement l'AUTHENTIFICATION. Ni l'onboarding ni l'abonnement ne
  * bloquent l'acces a l'app. Retourne la session, ou redirige vers login si absente.
  */
-// ⚠ Le compte choisi ne doit JAMAIS survivre a un changement d'utilisateur sur
-// le meme navigateur. `reinitialiser` est exporte pour la deconnexion, et le
-// changement d'utilisateur est detecte plus bas (SESSION_USER_KEY).
-export { reinitialiser as oublierCompteCourant }
-
 export async function requireAuth() {
   const session = await getSession()
   if (!session) {

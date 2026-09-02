@@ -107,7 +107,14 @@
     const status = document.getElementById('status')
 
     try {
-      const { properties, allFailed } = await loadAllProperties()
+      const { properties, allFailed, refuse } = await loadAllProperties()
+
+      // Refus de droits : etat normal d'un membre, pas un incident.
+      if (refuse) {
+        grid.innerHTML = '<div class="app-card"><div class="app-desc">Vous n’avez pas accès aux biens de ce compte.</div></div>'
+        status.textContent = ''
+        return
+      }
 
       if (allFailed) {
         grid.innerHTML = '<div class="app-card"><div class="app-desc">Erreur de chargement des biens.</div></div>'
