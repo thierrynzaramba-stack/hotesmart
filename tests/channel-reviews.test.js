@@ -24,7 +24,7 @@ const {
   extraireScoreClean,
   versLigne,
   proprietaireDuBien,
-  resoudreReservation,
+  chargerIndexCompte,
   pollChannelReviews
 } = require('../lib/cron-channel-reviews')
 
@@ -189,6 +189,21 @@ test('proprietaireDuBien : DEUX biens sur la même référence -> ambigu, pas ab
   assert.strictEqual(r.owner, undefined)
 })
 
+test('proprietaireDuBien : deux lignes du MÊME compte ne sont pas une ambiguïté', async () => {
+  // `properties` n'a aucune unicité sur (user_id, provider_property_id) et
+  // api/channel-property.js crée par INSERT nu : un double envoi du formulaire
+  // suffit à doubler la ligne. Traiter ce cas comme ambigu ferait perdre TOUS
+  // les avis du bien, définitivement et en silence, le poll rejouant à
+  // l'identique chaque jour.
+  const sb = fakeSupabase({ properties: { data: [
+    { id: 'a', user_id: 'u1', provider_property_id: 'ref-1' },
+    { id: 'b', user_id: 'u1', provider_property_id: 'ref-1' }
+  ], error: null } })
+  const r = await proprietaireDuBien(sb, 'ref-1')
+  assert.strictEqual(r.ambigu, undefined, 'un doublon interne au compte reste résolvable')
+  assert.strictEqual(r.owner.user_id, 'u1')
+})
+
 test('proprietaireDuBien : une panne SQL n\'est pas une absence', async () => {
   const sb = fakeSupabase({ properties: { data: null, error: { message: 'boom' } } })
   const r = await proprietaireDuBien(sb, 'x')
@@ -203,33 +218,6 @@ test('proprietaireDuBien : la requête filtre sur le provider ET sur la référe
   const cols = journal[0].filtres.map(f => f[0])
   assert.ok(cols.includes('provider'), 'sans filtre provider, un bien Beds24 de même id pourrait matcher')
   assert.ok(cols.includes('provider_property_id'))
-})
-
-// ─── Résolution de la réservation ───────────────────────────────────────────
-test('resoudreReservation : la requête est TOUJOURS filtrée par user_id (règle 1)', async () => {
-  const journal = []
-  const sb = fakeSupabase({
-    bookings_snapshot: { data: [{ booking_id: 77, snapshot: { arrival: '2026-08-01', departure: '2026-08-05' } }], error: null }
-  }, journal)
-  const r = await resoudreReservation(sb, 'u1', 'HM5WHSHYMQ')
-  const filtres = journal[0].filtres
-  assert.ok(filtres.some(([c, v]) => c === 'user_id' && v === 'u1'),
-    'sans user_id, un code OTA d\'un autre compte pourrait résoudre — REVIEW.md règle 1')
-  assert.strictEqual(r.booking_uid, '77')
-  assert.strictEqual(r.stay_start, '2026-08-01')
-  assert.strictEqual(r.stay_end, '2026-08-05')
-})
-
-test('resoudreReservation : deux snapshots pour un même code -> non résolu', async () => {
-  const sb = fakeSupabase({ bookings_snapshot: { data: [{ booking_id: 1, snapshot: {} }, { booking_id: 2, snapshot: {} }], error: null } })
-  assert.strictEqual(await resoudreReservation(sb, 'u1', 'DOUBLON'), null)
-})
-
-test('resoudreReservation : sans code OTA, aucune requête n\'est faite', async () => {
-  const journal = []
-  const sb = fakeSupabase({}, journal)
-  assert.strictEqual(await resoudreReservation(sb, 'u1', null), null)
-  assert.strictEqual(journal.length, 0)
 })
 
 // ─── Orchestration du poll ──────────────────────────────────────────────────
@@ -324,9 +312,11 @@ test('poll : l\'upsert est idempotent sur (user_id, provider, external_review_id
   await pollChannelReviews(null, { supabase: sb, channelCall: pageAvis([AVIS_AIRBNB]), forcer: true })
   const ecriture = journal.find(a => a.table === 'ota_reviews' && a.op === 'upsert')
   assert.strictEqual(ecriture.opts.onConflict, 'user_id,provider,external_review_id')
-  assert.strictEqual(ecriture.row.user_id, 'u1')
-  assert.strictEqual(ecriture.row.property_id, 'uuid-1')
-  assert.strictEqual(ecriture.row.property_id_ref, 'prop-ref-1')
+  // L'ecriture se fait par lot : une requete par page, pas une par avis.
+  assert.ok(Array.isArray(ecriture.row), 'les avis doivent partir en un seul upsert')
+  assert.strictEqual(ecriture.row[0].user_id, 'u1')
+  assert.strictEqual(ecriture.row[0].property_id, 'uuid-1')
+  assert.strictEqual(ecriture.row[0].property_id_ref, 'prop-ref-1')
 })
 
 test('poll : la référence TEXT écrite est celle du bien en base, pas celle du payload', async () => {
@@ -338,7 +328,7 @@ test('poll : la référence TEXT écrite est celle du bien en base, pas celle du
   }, journal)
   await pollChannelReviews(null, { supabase: sb, channelCall: pageAvis([AVIS_AIRBNB]), forcer: true })
   const ecriture = journal.find(a => a.table === 'ota_reviews' && a.op === 'upsert')
-  assert.strictEqual(ecriture.row.property_id_ref, 'REF-EN-BASE')
+  assert.strictEqual(ecriture.row[0].property_id_ref, 'REF-EN-BASE')
 })
 
 test('poll : un HTTP en échec n\'écrit aucun avis et se signale', async () => {
@@ -354,17 +344,83 @@ test('poll : un HTTP en échec n\'écrit aucun avis et se signale', async () => 
   assert.strictEqual(results.errors.length, 1)
 })
 
-test('poll : le budget mur arrête le passage sans le faire échouer', async () => {
-  let t = 0
+test('poll : le budget mur arrête le passage APRÈS avoir traité des avis', async () => {
+  // L'ancienne version de ce test avançait l'horloge de 60 s à chaque appel :
+  // la boucle sortait avant le premier appel HTTP (lus: 0), et le test passait
+  // même en retirant la garde de budget interne à une page. Ici l'horloge ne
+  // franchit l'échéance qu'une fois deux avis traités.
+  let appels = 0
+  const journal = []
   const sb = fauxClient({
     properties: { data: [{ id: 'uuid-1', user_id: 'u1', provider_property_id: 'prop-ref-1' }], error: null }
-  })
-  // L'horloge saute au-delà du budget dès le deuxième appel.
-  const bilan = await pollChannelReviews(null, {
-    supabase: sb, forcer: true, now: () => (t += 60000),
-    channelCall: pageAvis([AVIS_AIRBNB, AVIS_AIRBNB])
+  }, journal)
+  const results = { errors: [] }
+  const bilan = await pollChannelReviews(results, {
+    supabase: sb, forcer: true,
+    // Appels : marqueur, échéance, tête de boucle, puis un par avis.
+    // On laisse passer deux avis avant de franchir l'échéance.
+    now: () => (appels++ < 5 ? 0 : 999999),
+    channelCall: pageAvis([AVIS_AIRBNB, AVIS_AIRBNB, AVIS_AIRBNB])
   })
   assert.strictEqual(bilan.interrompu, 'budget')
+  assert.ok(bilan.lus > 0, 'des avis doivent avoir été lus avant la coupure')
+  assert.ok(bilan.lus < 3, 'la coupure doit intervenir avant la fin de la page')
+  assert.strictEqual(results.errors.length, 1, 'une troncature ne doit jamais être silencieuse')
+})
+
+// ─── Index des codes OTA : la garde réellement utilisée en production ───────
+test('chargerIndexCompte : la requête est filtrée par user_id (règle 1)', async () => {
+  // C'est CE chemin que le poll exécute. Sans ce test, retirer le filtre
+  // laissait les 522 tests au vert alors que la Map aurait été construite sur
+  // tous les comptes, clé = code OTA seul — la collision de REVIEW.md règle 1.
+  const journal = []
+  const sb = fauxClient({
+    bookings_snapshot: { data: [{ booking_id: 77, snapshot: { otaReservationCode: 'HM5W', arrival: '2026-08-01', departure: '2026-08-05' } }], error: null }
+  }, journal)
+  const index = await chargerIndexCompte(sb, 'u1')
+  const appel = journal.find(a => a.table === 'bookings_snapshot')
+  assert.ok(appel.filtres.some(([c, v]) => c === 'user_id' && v === 'u1'),
+    'sans user_id, l\'index mélangerait les comptes')
+  assert.strictEqual(index.get('HM5W').booking_uid, '77')
+})
+
+test('chargerIndexCompte : une panne SQL rend null, et non un index vide', async () => {
+  // Un index vide se confondrait avec « aucune réservation » : tous les avis
+  // passeraient non résolus sans que rien ne le signale.
+  const sb = fauxClient({ bookings_snapshot: { data: null, error: { message: 'boom' } } })
+  assert.strictEqual(await chargerIndexCompte(sb, 'u1'), null)
+})
+
+test('poll : le booking résolu dénormalise booking_uid ET les dates de séjour', async () => {
+  // Le chemin de résolution réellement exécuté n'était couvert par aucun test :
+  // bilan.resolus valait 0 partout, l'index étant systématiquement vide.
+  const journal = []
+  const sb = fauxClient({
+    properties: { data: [{ id: 'uuid-1', user_id: 'u1', provider_property_id: 'prop-ref-1' }], error: null },
+    bookings_snapshot: { data: [{ booking_id: 999, snapshot: { otaReservationCode: 'HM5WHSHYMQ', arrival: '2026-08-01', departure: '2026-08-05' } }], error: null }
+  }, journal)
+  const bilan = await pollChannelReviews(null, { supabase: sb, channelCall: pageAvis([AVIS_AIRBNB]), forcer: true })
+  assert.strictEqual(bilan.resolus, 1)
+  const ecriture = journal.find(a => a.table === 'ota_reviews' && a.op === 'upsert')
+  const ligne = Array.isArray(ecriture.row) ? ecriture.row[0] : ecriture.row
+  assert.strictEqual(ligne.booking_uid, '999')
+  assert.strictEqual(ligne.stay_start, '2026-08-01')
+  assert.strictEqual(ligne.stay_end, '2026-08-05')
+})
+
+test('poll : un avis NON résolu n\'écrase pas une résolution déjà en base', async () => {
+  // Les colonnes doivent être ABSENTES de la ligne, pas à null : PostgREST ne
+  // met dans le DO UPDATE SET que les colonnes présentes.
+  const journal = []
+  const sb = fauxClient({
+    properties: { data: [{ id: 'uuid-1', user_id: 'u1', provider_property_id: 'prop-ref-1' }], error: null },
+    bookings_snapshot: { data: [], error: null }
+  }, journal)
+  await pollChannelReviews(null, { supabase: sb, channelCall: pageAvis([AVIS_AIRBNB]), forcer: true })
+  const ecriture = journal.find(a => a.table === 'ota_reviews' && a.op === 'upsert')
+  const ligne = Array.isArray(ecriture.row) ? ecriture.row[0] : ecriture.row
+  assert.ok(!('booking_uid' in ligne), 'booking_uid à null détruirait la résolution de la veille')
+  assert.ok(!('stay_start' in ligne))
 })
 
 // ─── Index des codes OTA ────────────────────────────────────────────────────
