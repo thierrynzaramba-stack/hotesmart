@@ -88,7 +88,9 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         },
         delete () {
           etat.suppressions.push({ table: nom, filtres: q._f })
-          return Object.assign(Promise.resolve({ error: null }), { eq: (c, v) => { q._f[c] = v; return q } })
+          const echec = erreurs[nom + ':delete'] ? { message: 'echec' } : null
+          return Object.assign(Promise.resolve({ error: echec }),
+            { eq: (c, v) => { q._f[c] = v; return Object.assign(Promise.resolve({ error: echec }), q) } })
         },
         single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),
         then (ok, ko) { return Promise.resolve(rep(nom, q, true)).then(ok, ko) }
@@ -642,6 +644,72 @@ test('DROITS INTROUVABLES : l\'enregistrement echoue au lieu d\'annoncer un succ
     action: 'update', profile_id: 'p-test', permissions: droitsVides() } }), res)
   assert.strictEqual(res.code, 500)
   void etat
+})
+
+test('LIEN : rendre un jeton exige l\'ECRITURE, pas la lecture', async () => {
+  // ⚠ `equipe: 'read'` est DELEGABLE (seul `write` ne l'est pas). Classer `lien`
+  // en lecture donnerait, des l'etape 5, les jetons PWA et un lien d'invitation
+  // valide a un membre en lecture seule — de quoi rattacher un complice.
+  const { requirePermission } = (() => { preparer({ user: PROD }); return require('../lib/require-permission') })()
+  void requirePermission
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'lien', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 200, 'le titulaire doit pouvoir afficher le lien')
+  void etat
+})
+
+test('LIEN : un profil DESACTIVE ne rend pas de lien mort', async () => {
+  // Son pwa_token subsiste mais la ligne public_tokens a ete retiree : le
+  // transmettre ferait croire a l'hote qu'il rend l'acces.
+  preparer({ user: PROD, profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'lien', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 404)
+})
+
+test('LISTE : un profil desactive n\'annonce plus de lien actif', async () => {
+  preparer({ user: PROD, profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'list' } }), res)
+  const regina = res.body.profils.find(p => p.id === 'p-regina')
+  assert.strictEqual(regina.a_lien_pwa, false)
+})
+
+test('PWA : un enregistrement de droits ne reecrit PAS visibility_days', async () => {
+  // ⚠ L'hote regle 7 a 90 jours dans apps/menages/prestataires.html. Le remettre
+  // a 30 a chaque enregistrement lui ferait perdre son choix en silence.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'public_tokens')
+  assert.ok(maj, 'le perimetre PWA doit suivre')
+  assert.deepStrictEqual(Object.keys(maj.row), ['property_ids'],
+    'seul le perimetre est reecrit : ni visibility_days, ni label')
+})
+
+test('REVOCATION : si l\'ancien jeton ne peut pas etre retire, on le DIT', async () => {
+  const etat = preparer({ user: PROD, erreurs: { 'public_tokens:delete': true } })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'regenerate', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 500)
+  assert.match(res.body.error, /ancien lien reste actif/)
+  void etat
+})
+
+test('PERIMETRE : la garde s\'applique meme sur un profil desactive', async () => {
+  // Sinon on enregistre un etat que la reactivation refusera, sans moyen evident
+  // d'en sortir depuis le panneau « Réactiver ».
+  const etat = preparer({ user: PROD, profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.deepStrictEqual(etat.ecritures, [])
 })
 
 // ─── Divers ─────────────────────────────────────────────────────────────────

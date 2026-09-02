@@ -25,8 +25,8 @@
   <div class="login-sub">Gérez votre location courte durée</div>
 
   <div class="tabs">
-    <div class="tab active">Connexion</div>
-    <div class="tab">Inscription</div>
+    <div class="tab active" data-tab="login">Connexion</div>
+    <div class="tab" data-tab="signup">Inscription</div>
   </div>
 
   <div id="form-login">
@@ -113,6 +113,14 @@
 
   const session = await getSession()
   if (session) window.location.href = APRES_CONNEXION
+
+  // ⚠ `mode=signup` ouvre l'onglet Inscription. Le parcours d'invitation propose
+  // « Créer un compte » : sans cela, les deux boutons menaient au meme onglet
+  // Connexion, et l'invite qui n'a pas encore de compte devait deviner.
+  if (new URLSearchParams(location.search).get('mode') === 'signup') {
+    const onglet = document.querySelector('.tab[data-tab="signup"]')
+    if (onglet) onglet.click()
+  }
 
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', function() {

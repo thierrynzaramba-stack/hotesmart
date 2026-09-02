@@ -161,7 +161,7 @@ function habiller (p) {
   const expire = p.invite_expires_at ? new Date(p.invite_expires_at).getTime() < Date.now() : false
   return {
     ...reste,
-    a_lien_pwa: !!pwa_token,
+    a_lien_pwa: !!pwa_token && p.active !== false,
     invitation_en_attente: !!invite_token && !expire,
     invitation_expiree: !!invite_token && expire,
     statut: !p.active ? 'desactive'
@@ -264,10 +264,11 @@ async function synchroniserTokenPwa (profil, refs, scope, compte) {
     return true
   }
 
+  const nom = [profil.first_name, profil.last_name].filter(Boolean).join(' ')
   const ligne = {
     user_id:         compte,
     token:           profil.pwa_token,
-    label:           [profil.first_name, profil.last_name].filter(Boolean).join(' '),
+    label:           nom,
     // ⚠ SEMANTIQUE DU VIDE, INVERSEE ENTRE LES DEUX TABLES.
     // Dans public_tokens, une liste VIDE veut dire « aucune restriction », donc
     // TOUS les biens (api/menages-public.js). Dans profile_permissions, un
@@ -286,8 +287,13 @@ async function synchroniserTokenPwa (profil, refs, scope, compte) {
     .from('public_tokens').select('id').eq('token', profil.pwa_token).maybeSingle()
   if (eLecture) { console.error('[membres] public_tokens lecture', eLecture.message); return false }
 
+  // ⚠ UNE MISE A JOUR NE TOUCHE QUE CE QUI VIENT D'ICI. `visibility_days` se
+  // regle dans apps/menages/prestataires.html (7 a 90 jours) : le reecrire a 30
+  // a chaque enregistrement de droits ferait perdre silencieusement le choix de
+  // l'hote. Le `label` aussi appartient a cette page — il n'est pose qu'a la
+  // creation, quand la ligne n'existe pas encore.
   const { error } = existante
-    ? await supabase.from('public_tokens').update(ligne).eq('id', existante.id)
+    ? await supabase.from('public_tokens').update({ property_ids: ligne.property_ids }).eq('id', existante.id)
     : await supabase.from('public_tokens').insert(ligne)
   if (error) { console.error('[membres] public_tokens', error.message); return false }
   return true
@@ -324,7 +330,11 @@ async function modifier (req, res, compte) {
     return res.status(biens.code).json({ error: biens.code === 403 ? 'Bien hors du compte' : 'Erreur lecture' })
   }
 
-  if (cible.profil.access_mode === 'lien' && cible.profil.active !== false) {
+  // ⚠ La garde s'applique MEME sur un profil desactive. L'en dispenser laissait
+  // enregistrer un perimetre que la reactivation refuserait ensuite — le panneau
+  // « Réactiver » n'offrant aucune case a cocher, l'hote se retrouvait coince
+  // sans comprendre pourquoi.
+  if (cible.profil.access_mode === 'lien') {
     const refus = perimetrePwaExploitable(v.permissions.property_scope, biens.refs)
     if (refus) return res.status(400).json({ error: refus })
   }
@@ -407,7 +417,12 @@ async function basculerActivite (req, res, compte, actif) {
         return res.status(503).json({ error: 'Service temporairement indisponible' })
       }
       const biens = await verifierBiens((droits.property_ids || []).map(String), compte)
-      if (!biens.ok) return res.status(500).json({ error: 'Réactivation impossible' })
+      if (!biens.ok) {
+        // `active` est deja passe a true : le laisser ainsi afficherait « Actif »
+        // sur un profil sans acces PWA reel.
+        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
+        return res.status(500).json({ error: 'Réactivation impossible' })
+      }
       const refus = perimetrePwaExploitable(droits.property_scope, biens.refs)
       if (refus) {
         await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
@@ -426,7 +441,7 @@ async function basculerActivite (req, res, compte, actif) {
 
 // Renvoie le lien EN CLAIR — action explicite, jamais dans la liste.
 async function donnerLien (req, res, compte, base) {
-  const cible = await chargerCible((req.query.profile_id || (req.body || {}).profile_id), compte)
+  const cible = await chargerCible((req.query?.profile_id || (req.body || {}).profile_id), compte)
   if (cible.erreur) return res.status(cible.erreur).json({ error: messageErreur(cible.erreur) })
   const lien = lienDAcces(cible.profil, base)
   if (!lien) return res.status(404).json({ error: 'Aucun lien actif pour ce profil' })
@@ -434,6 +449,10 @@ async function donnerLien (req, res, compte, base) {
 }
 
 function lienDAcces (profil, base) {
+  // ⚠ Un profil DESACTIVE n'a plus de ligne public_tokens : son pwa_token subsiste
+  // mais n'ouvre plus rien. Le rendre ferait transmettre un lien mort a
+  // quelqu'un, en croyant lui rendre l'acces.
+  if (profil.active === false) return null
   if (profil.access_mode === 'lien' && profil.pwa_token) {
     return `${base}/apps/menages/?token=${encodeURIComponent(profil.pwa_token)}`
   }
@@ -487,7 +506,19 @@ async function regenerer (req, res, compte, base) {
     // L'ancien jeton ne doit plus ouvrir : la ligne qui le portait est retiree
     // APRES que la nouvelle est en place, pour ne jamais laisser le prestataire
     // sans acces valide entre les deux.
-    if (ancien && ancien !== jeton) await supabase.from('public_tokens').delete().eq('token', ancien)
+    // ⚠ Revocation VERIFIEE. Sans lecture de l'erreur, un blip PostgREST laissait
+    // l'ancien lien ouvert indefiniment pendant que l'interface annoncait « l'ancien
+    // lien cessera de fonctionner IMMEDIATEMENT ». Un lien qu'on croit revoque et
+    // qui vit encore est pire qu'un echec visible.
+    if (ancien && ancien !== jeton) {
+      const { error: eSuppr } = await supabase.from('public_tokens').delete().eq('token', ancien)
+      if (eSuppr) {
+        console.error('[membres] revocation ancien jeton', eSuppr.message)
+        return res.status(500).json({
+          error: 'Nouveau lien créé, mais l’ancien n’a pas pu être révoqué. Réessayez : tant que ce message revient, l’ancien lien reste actif.'
+        })
+      }
+    }
 
     return res.status(200).json({ lien: lienDAcces({ ...cible.profil, pwa_token: jeton }, base) })
   }
@@ -595,7 +626,13 @@ function messageErreur (code) {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
-const LECTURE = new Set(['list', 'lien'])
+// ⚠ `lien` N'EST PAS UNE LECTURE. Elle rend un jeton en clair — celui qui ouvre
+// la PWA d'un prestataire, ou celui qui rattache quelqu'un au compte. Classee en
+// lecture, elle n'aurait exige que `equipe: 'read'`, qui est DELEGABLE (seul
+// `write` ne l'est pas). Inoffensif tant qu'il n'y a pas de selecteur de compte,
+// mais des l'etape 5 un membre en lecture seule obtiendrait de quoi rattacher un
+// complice. Une action qui divulgue un secret d'acces exige `write`.
+const LECTURE = new Set(['list'])
 const ACTIONS = new Set(['list', 'lien', 'create', 'update', 'deactivate', 'reactivate', 'regenerate', 'accept', 'preview'])
 
 module.exports = async function handler (req, res) {

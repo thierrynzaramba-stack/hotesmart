@@ -213,7 +213,7 @@ const VIDE = { property_scope: 'all', property_ids: [], reservations: 'none', me
                prestataires: 'none', messages: 'none', avis: 'none', reglages: 'none',
                facturation: 'none', equipe: 'none', self_availability: 'none', self_view_reviews: true }
 
-let biens = [], profils = [], edite = null, brouillon = { ...VIDE }
+let biens = [], profils = [], edite = null, brouillon = { ...VIDE }, lienAffiche = ''
 
 const $ = id => document.getElementById(id)
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -390,11 +390,14 @@ function rendreAcces () {
   }
 
   const bloc = document.createElement('div')
+  // ⚠ Le lien deja affiche est RESTITUE : chaque bascule de droit reconstruit ce
+  // bloc, et le vider faisait disparaitre le lien sous les yeux de l'hote entre
+  // le moment ou il l'affiche et celui ou il le copie.
   bloc.innerHTML = `<label class="f">Accès</label>
     <div class="lien-box">
-      <input class="f" id="f-lien" readonly value="" placeholder="Cliquez sur « Afficher le lien »">
+      <input class="f" id="f-lien" readonly value="${esc(lienAffiche)}" placeholder="Cliquez sur « Afficher le lien »">
       <button class="btn-ghost" id="btn-voir">Afficher le lien</button>
-      <button class="btn-ghost" id="btn-copier" disabled>Copier</button>
+      <button class="btn-ghost" id="btn-copier"${lienAffiche ? '' : ' disabled'}>Copier</button>
     </div>`
 
   if (edite.access_mode === 'compte') {
@@ -427,6 +430,7 @@ function rendreAcces () {
   $('btn-voir').onclick = async () => {
     try {
       const d = await api.membres.lien(edite.id)
+      lienAffiche = d.lien
       $('f-lien').value = d.lien
       $('btn-copier').disabled = false
     } catch (e) { message(e.message) }
@@ -442,6 +446,7 @@ function rendreAcces () {
     if (!window.confirm(texte)) return
     try {
       const d = await api.membres.regenerer(edite.id)
+      lienAffiche = d.lien
       $('f-lien').value = d.lien; $('btn-copier').disabled = false
       message('Nouveau lien généré. Transmettez-le à la personne concernée.', 'ok')
       await charger()
@@ -459,6 +464,7 @@ function rendreAcces () {
 
 function ouvrir (profil) {
   edite = profil || null
+  lienAffiche = ''
   brouillon = profil && profil.permissions
     ? { ...VIDE, ...profil.permissions, property_ids: (profil.permissions.property_ids || []).map(String) }
     : { ...VIDE }
@@ -471,7 +477,7 @@ function ouvrir (profil) {
   rendrePanneau()
   $('overlay').classList.add('open')
 }
-function fermer () { $('overlay').classList.remove('open'); edite = null }
+function fermer () { $('overlay').classList.remove('open'); edite = null; lienAffiche = '' }
 
 async function enregistrer () {
   const prenom = $('f-prenom').value.trim()
@@ -500,7 +506,7 @@ async function enregistrer () {
       // On rouvre sur le profil créé pour que le lien soit immédiatement copiable.
       await charger()
       const frais = profils.find(p => p.id === d.profil.id)
-      if (frais) { ouvrir(frais); $('f-lien') && ($('f-lien').value = d.lien) }
+      if (frais) { ouvrir(frais); lienAffiche = d.lien; rendreAcces() }
       else fermer()
       return
     }
@@ -532,7 +538,7 @@ document.querySelectorAll('[data-modele]').forEach(b => {
 })
 
 const { data: { session } } = await supabase.auth.getSession()
-if (!session) location.href = '/pages/login.html'
+if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings')
 else charger()
 </script>
 </body>

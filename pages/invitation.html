@@ -39,7 +39,13 @@ import { api } from '/shared/api-client.js'
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const $ = id => document.getElementById(id)
-const jeton = new URLSearchParams(location.search).get('token') || ''
+// ⚠ FILET DE RETOUR. Le chemin normal ramene ici par `?next=`. Mais un parcours
+// de connexion qui passe par une confirmation d'email ou un lien magique perd
+// cette URL : l'invite atterrirait sur un tableau de bord vide sans comprendre.
+// Le jeton mis de cote avant la connexion est donc RELU ici.
+const jetonUrl = new URLSearchParams(location.search).get('token') || ''
+const jeton = jetonUrl || sessionStorage.getItem('invitation_token') || ''
+if (jetonUrl) sessionStorage.setItem('invitation_token', jetonUrl)
 
 function afficher (html) { $('contenu').innerHTML = html }
 
@@ -51,10 +57,6 @@ if (!jeton) {
     const { data: { session } } = await supabase.auth.getSession()
 
     if (!session) {
-      // ⚠ Le jeton est conservé le temps de la connexion, puis relu au retour.
-      // Sans cela, se connecter ferait perdre l'invitation et l'utilisateur
-      // atterrirait sur un tableau de bord vide sans comprendre.
-      sessionStorage.setItem('invitation_token', jeton)
       afficher(`
         <h1>Vous êtes invité</h1>
         <p><span class="compte">${esc(info.compte)}</span> vous invite à rejoindre son compte HôteSmart.</p>
@@ -94,6 +96,9 @@ if (!jeton) {
       }
     }
   } catch (e) {
+    // Invitation morte : on retire le jeton mis de cote, sinon il rejouerait le
+    // meme echec a chaque passage.
+    sessionStorage.removeItem('invitation_token')
     afficher(`<div class="err">${esc(e.message)}</div>
       <p style="margin-top:14px">Demandez une nouvelle invitation à la personne qui vous a invité.</p>`)
   }
