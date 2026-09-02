@@ -735,7 +735,15 @@ qui est fourni s'applique (y compris `'none'`, pour pouvoir retirer un droit),
 ce qui est absent est conservé. Une panne de lecture de ce socle répond 503
 plutôt que d'écraser.
 
-Règle générale : **un formulaire qui n'expose pas un champ ne l'écrase jamais.**
+Règle générale : **un formulaire qui n'expose pas un champ ne l'écrase jamais** —
+ni dans `profile_permissions` (socle conservé), ni dans `public_tokens` (writer
+unique, voir ci-dessous).
+
+Exception voulue : un domaine **non délégable** hérité du socle à `'write'` est
+*abaissé* à `'none'`, pas refusé. Une valeur fautive déjà en base rendrait sinon
+le profil définitivement non enregistrable — aucun écran ne permet de l'abaisser,
+et chaque enregistrement la reconduirait pour la refuser aussitôt. Fourni
+explicitement, il reste refusé.
 
 ### Invitation par lien, sans email
 
@@ -746,6 +754,34 @@ Règle générale : **un formulaire qui n'expose pas un champ ne l'écrase jamai
 écarté, il ferait entrer quelqu'un dans un compte tiers sans qu'il le sache.
 
 L'envoi Brevo viendra plus tard : le champ existe, désactivé.
+
+### ⚠️ Un seul writer pour `public_tokens.property_ids`
+
+`apps/menages/prestataires.html` **est** l'écran d'affectation des biens d'un
+prestataire : c'est lui qui écrit `property_ids` et `visibility_days`.
+
+`/settings` n'y touche qu'**à la création**, où il faut bien un point de départ.
+En édition, il n'écrit plus cette colonne du tout. Sans cette séparation :
+l'hôte coche deux biens sur huit dans la fiche prestataire, corrige une faute de
+frappe sur le nom depuis `/settings`, et le prestataire récupère les huit —
+silencieusement. Application directe de `docs/kb/coeur-de-donnees.md`.
+
+Corollaire : la garde de périmètre PWA ne s'applique qu'à la création. La
+maintenir en édition rendait un profil **définitivement non enregistrable** dès
+que ses biens disparaissaient, le panneau réduit n'offrant aucune case pour en
+sortir.
+
+### ⚠️ Un accès par lien ne porte jamais sur « tous les biens »
+
+Refusé côté serveur, à la création. Dans `public_tokens`, une liste vide vaut
+« aucune restriction » : un prestataire créé sans périmètre explicite obtenait le
+planning ménage de **tout le compte**. C'est un écart assumé à la consigne
+« pas de périmètre dans le panneau prestataire » — l'appliquer aussi à la
+création ouvrait cet accès. Le sélecteur de biens reste donc visible à la
+création d'un prestataire, et disparaît ensuite.
+
+La liste affiche toujours le périmètre d'un prestataire, avec un ⚠️ si
+« tous les biens » : un accès trop large hérité doit rester visible.
 
 ### ⚠️ Les deux représentations du périmètre
 

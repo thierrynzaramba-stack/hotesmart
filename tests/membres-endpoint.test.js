@@ -51,7 +51,7 @@ const HIER = () => new Date(Date.now() - 86400000).toISOString()
 
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
                      profils = [OWNER, REGINA, TEST], tokensPwa = [{ id: 'pt1', token: 'jeton-regina' }],
-                     erreurs = {}, biensSansRef = false } = {}) {
+                     erreurs = {}, biensSansRef = false, droitsExistants = {} } = {}) {
   const etat = { ecritures: [], suppressions: [] }
 
   const client = {
@@ -129,6 +129,9 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
             return { data: { profile_id: 'p-regina', property_scope: 'selected',
                              property_ids: [BIEN_A.id, BIEN_B.id], self_availability: 'none',
                              self_view_reviews: true }, error: null }
+          }
+          if (droitsExistants[q._f.profile_id]) {
+            return { data: droitsExistants[q._f.profile_id], error: null }
           }
           if (q._f.profile_id === 'p-test') {
             return { data: { profile_id: 'p-test', property_scope: 'all', property_ids: [],
@@ -683,19 +686,20 @@ test('LISTE : un profil desactive n\'annonce plus de lien actif', async () => {
   assert.strictEqual(regina.a_lien_pwa, false)
 })
 
-test('PWA : un enregistrement de droits ne reecrit PAS visibility_days', async () => {
-  // ⚠ L'hote regle 7 a 90 jours dans apps/menages/prestataires.html. Le remettre
-  // a 30 a chaque enregistrement lui ferait perdre son choix en silence.
+test('PWA : /settings n\'ecrit PLUS le perimetre PWA en edition', async () => {
+  // ⚠ UN SEUL WRITER PAR DONNEE. `public_tokens.property_ids` appartient a
+  // apps/menages/prestataires.html. Le reecrire depuis une page qui ne l'affiche
+  // pas ecrasait l'affectation faite dans la fiche prestataire : l'hote coche
+  // deux biens sur huit, corrige une faute de frappe sur le nom ici, et le
+  // prestataire recupere les huit.
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
     action: 'update', profile_id: 'p-regina',
-    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+    permissions: { self_availability: 'read' } } }), res)
   assert.strictEqual(res.code, 200)
-  const maj = etat.ecritures.find(e => e.table === 'public_tokens')
-  assert.ok(maj, 'le perimetre PWA doit suivre')
-  assert.deepStrictEqual(Object.keys(maj.row), ['property_ids'],
-    'seul le perimetre est reecrit : ni visibility_days, ni label')
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'),
+    'aucune ecriture dans public_tokens depuis /settings en edition')
 })
 
 test('REVOCATION : si l\'ancien jeton ne peut pas etre retire, on le DIT', async () => {
@@ -707,16 +711,18 @@ test('REVOCATION : si l\'ancien jeton ne peut pas etre retire, on le DIT', async
   void etat
 })
 
-test('PERIMETRE : la garde s\'applique meme sur un profil desactive', async () => {
-  // Sinon on enregistre un etat que la reactivation refusera, sans moyen evident
-  // d'en sortir depuis le panneau « Réactiver ».
+test('PERIMETRE : un profil dont les biens ont disparu reste MODIFIABLE', async () => {
+  // ⚠ La garde de perimetre PWA n'a de sens qu'a la creation, la ou le perimetre
+  // s'ecrit. La maintenir a l'edition rendait le profil definitivement non
+  // enregistrable des que ses biens disparaissaient — pas meme un changement de
+  // telephone ne passait, et le panneau reduit n'offre aucune case pour en sortir.
   const etat = preparer({ user: PROD, profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'update', profile_id: 'p-regina',
-    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
-  assert.strictEqual(res.code, 400)
-  assert.deepStrictEqual(etat.ecritures, [])
+    action: 'update', profile_id: 'p-regina', phone: '0600000000',
+    permissions: { self_availability: 'read' } } }), res)
+  assert.strictEqual(res.code, 200)
+  void etat
 })
 
 // ─── Panneau reduit des prestataires ────────────────────────────────────────
@@ -739,18 +745,17 @@ test('PRESTATAIRE : enregistrer sans perimetre CONSERVE celui deja en base', asy
   assert.strictEqual(maj.row.self_availability, 'read', 'ce qui est fourni s\'applique')
 })
 
-test('PRESTATAIRE : le perimetre PWA n\'est pas elargi non plus', async () => {
+test('PRESTATAIRE : le perimetre en base reste intact, et la PWA n\'est pas touchee', async () => {
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
     action: 'update', profile_id: 'p-regina',
     permissions: { self_availability: 'write' } } }), res)
   assert.strictEqual(res.code, 200)
-  const pt = etat.ecritures.find(e => e.table === 'public_tokens')
-  assert.ok(pt, 'la ligne PWA doit etre mise a jour')
-  assert.deepStrictEqual(pt.row.property_ids.sort(),
-    [BIEN_A.provider_property_id, BIEN_B.provider_property_id].sort(),
-    'les deux biens de Régina, pas une liste vide qui vaudrait « tous »')
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.strictEqual(maj.row.property_scope, 'selected')
+  assert.deepStrictEqual(maj.row.property_ids.sort(), [BIEN_A.id, BIEN_B.id].sort())
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'))
 })
 
 test('PRESTATAIRE : un domaine non fourni reste a sa valeur enregistree', async () => {
@@ -782,6 +787,71 @@ test('PANNE : lecture des droits existants en echec -> 503, aucun ecrasement', a
     action: 'update', profile_id: 'p-test', permissions: { self_availability: 'write' } } }), res)
   assert.strictEqual(res.code, 503)
   assert.ok(!etat.ecritures.some(e => e.table === 'profile_permissions'))
+})
+
+test('CREATION PRESTATAIRE : « tous les biens » est REFUSE', async () => {
+  // ⚠ LA FUITE INTRODUITE PAR LE PANNEAU REDUIT : sans perimetre envoye, le
+  // scope retombait sur 'all', `perimetrePwaExploitable` ne refusait rien, et
+  // public_tokens recevait une liste vide — qui vaut « aucune restriction ».
+  // Le nouveau prestataire voyait le planning menage de TOUT le compte.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    permissions: { self_availability: 'write', self_view_reviews: true } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /tous les biens/)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('CREATION PRESTATAIRE : avec des biens explicites -> accepte et perimetre PWA pose', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    permissions: { property_scope: 'selected', property_ids: [BIEN_A.id],
+                   self_availability: 'write', self_view_reviews: true } } }), res)
+  assert.strictEqual(res.code, 200)
+  const pt = etat.ecritures.find(e => e.table === 'public_tokens')
+  assert.deepStrictEqual(pt.row.property_ids, [BIEN_A.provider_property_id],
+    'un perimetre reel, jamais une liste vide qui vaudrait « tous »')
+})
+
+test('CREATION MEMBRE : « tous les biens » reste permis', async () => {
+  // La restriction ne vaut que pour un acces par lien : un employe a
+  // legitimement acces a tous les biens.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Employé', email: 'e@f.fr', access_mode: 'compte',
+    permissions: { ...droitsVides(), property_scope: 'all', reservations: 'write' } } }), res)
+  assert.strictEqual(res.code, 200)
+})
+
+test('NON DELEGABLE herite du socle : abaisse, pas refuse', async () => {
+  // ⚠ Une valeur fautive deja en base (correctif SQL, seed) rendait le profil
+  // definitivement non enregistrable : aucun ecran ne permet de l'abaisser, et
+  // chaque enregistrement la reconduisait pour la refuser aussitot.
+  const etat = preparer({ user: PROD, droitsExistants: { 'p-test': {
+    profile_id: 'p-test', property_scope: 'all', property_ids: [],
+    facturation: 'write', equipe: 'write', self_availability: 'none', self_view_reviews: true } } })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test', permissions: { self_availability: 'read' } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.strictEqual(maj.row.facturation, 'none')
+  assert.strictEqual(maj.row.equipe, 'none')
+})
+
+test('NON DELEGABLE fourni explicitement : toujours refuse', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test',
+    permissions: { ...droitsVides(), equipe: 'write' } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.deepStrictEqual(etat.ecritures, [])
 })
 
 // ─── Divers ─────────────────────────────────────────────────────────────────

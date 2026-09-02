@@ -60,7 +60,17 @@ function validerPermissions (brut, estTitulaireCible, existant = null) {
     // qu'une valeur ecrite en base survivrait a l'interface : un jour ou la garde
     // serait relachee, le membre l'aurait deja.
     if (NON_DELEGABLES.includes(domaine) && niveau === 'write' && !estTitulaireCible) {
-      return { erreur: `Le domaine « ${domaine} » ne peut pas être délégué en écriture` }
+      // ⚠ Fourni explicitement -> on REFUSE, l'appelant doit le savoir.
+      // Herite du socle -> on ABAISSE silencieusement. Une valeur fautive deja en
+      // base (correctif SQL, seed, migration) rendrait sinon le profil
+      // definitivement non enregistrable : aucun ecran ne permet de l'abaisser,
+      // et chaque enregistrement la reconduirait pour la refuser aussitot.
+      if (p[domaine] != null) {
+        return { erreur: `Le domaine « ${domaine} » ne peut pas être délégué en écriture` }
+      }
+      console.warn(`[membres] ${domaine}=write herite du socle : abaisse a 'none'`)
+      out[domaine] = 'none'
+      continue
     }
     out[domaine] = niveau
   }
@@ -120,7 +130,14 @@ async function verifierBiens (ids, compte) {
 // deux cas, ecrire une liste vide dans public_tokens signifierait « tous les
 // biens » — l'exact contraire de l'intention. On le dit, plutot que de deviner.
 function perimetrePwaExploitable (scope, refs) {
-  if (scope !== 'selected') return null
+  // ⚠ « Tous les biens » EST refuse a la creation d'un acces par lien.
+  // Dans public_tokens, une liste vide vaut « aucune restriction » : creer un
+  // prestataire sans perimetre explicite lui ouvrait le planning menage de TOUS
+  // les biens du compte. Un prestataire se designe bien par bien — c'est la
+  // nature de son travail.
+  if (scope !== 'selected') {
+    return 'Choisissez les biens de ce prestataire : un accès par lien ne peut pas porter sur « tous les biens ».'
+  }
   if (refs.length) return null
   return 'Sélectionnez au moins un bien déjà connecté au PMS : sans cela, ce prestataire ne pourrait voir aucun ménage.'
 }
@@ -355,14 +372,11 @@ async function modifier (req, res, compte) {
     return res.status(biens.code).json({ error: biens.code === 403 ? 'Bien hors du compte' : 'Erreur lecture' })
   }
 
-  // ⚠ La garde s'applique MEME sur un profil desactive. L'en dispenser laissait
-  // enregistrer un perimetre que la reactivation refuserait ensuite — le panneau
-  // « Réactiver » n'offrant aucune case a cocher, l'hote se retrouvait coince
-  // sans comprendre pourquoi.
-  if (cible.profil.access_mode === 'lien') {
-    const refus = perimetrePwaExploitable(v.permissions.property_scope, biens.refs)
-    if (refus) return res.status(400).json({ error: refus })
-  }
+  // ⚠ Plus de garde de perimetre PWA a l'edition : elle n'a de sens que la ou le
+  // perimetre s'ecrit, c'est-a-dire a la creation. La maintenir ici rendait un
+  // profil DEFINITIVEMENT non enregistrable des que ses biens disparaissaient —
+  // le panneau reduit n'offre aucune case pour en sortir, pas meme pour changer
+  // un numero de telephone.
 
   const maj = {}
   if (b.first_name != null) {
@@ -396,11 +410,15 @@ async function modifier (req, res, compte) {
     return res.status(500).json({ error: 'Enregistrement impossible : droits introuvables' })
   }
 
-  // Perimetre change sur un prestataire : la PWA doit suivre dans le meme appel.
-  if (cible.profil.access_mode === 'lien' && cible.profil.pwa_token) {
-    const ok = await synchroniserTokenPwa(cible.profil, biens.refs, v.permissions.property_scope, compte)
-    if (!ok) return res.status(500).json({ error: 'Enregistrement partiel : périmètre PWA non mis à jour' })
-  }
+  // ⚠ UN SEUL WRITER PAR DONNEE (docs/kb/coeur-de-donnees.md).
+  // `public_tokens.property_ids` appartient a apps/menages/prestataires.html,
+  // qui est l'ecran d'affectation des biens. Cette page-ci n'y touche PLUS en
+  // edition : elle n'affiche pas le perimetre, donc elle ne peut pas le
+  // reecrire sans l'ecraser a l'aveugle. Le scenario reel : l'hote coche deux
+  // biens sur huit dans la fiche prestataire, puis corrige une faute de frappe
+  // sur le nom depuis /settings — et le prestataire recuperait les huit.
+  //
+  // Elle reste writer a la CREATION, ou il faut bien un point de depart.
 
   return res.status(200).json({ ok: true })
 }

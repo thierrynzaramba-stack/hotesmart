@@ -286,9 +286,16 @@ function resumeDroits (p) {
   // exact et inutile. Ce qui le concerne, c'est ce qu'il peut faire sur ses
   // propres donnees.
   if (p.access_mode === 'lien') {
-    const d = p.permissions?.self_availability
-    return 'Disponibilités : ' + (d === 'write' ? 'il les gère' : d === 'read' ? 'consultation' : 'gérées par vous')
-      + (p.permissions?.self_view_reviews === false ? '' : ' · voit ses avis')
+    const perm = p.permissions || {}
+    // ⚠ Le perimetre RESTE affiche : un prestataire qui verrait tous les biens
+    // doit se distinguer d'un prestataire restreint. Le masquer rendait un acces
+    // trop large invisible depuis cette page.
+    const perimetre = perm.property_scope === 'selected'
+      ? `${(perm.property_ids || []).length} bien(s)` : '⚠ Tous les biens'
+    const d = perm.self_availability
+    return `${perimetre} · Disponibilités : `
+      + (d === 'write' ? 'il les gère' : d === 'read' ? 'consultation' : 'gérées par vous')
+      + (perm.self_view_reviews === false ? '' : ' · voit ses avis')
   }
   const perm = p.permissions || {}
   const perimetre = perm.property_scope === 'selected'
@@ -355,10 +362,29 @@ function rendrePanneau () {
   // ⚠ On MASQUE, on ne supprime pas : le modele de donnees est inchange, et le
   // perimetre deja enregistre d'un prestataire doit survivre a un passage ici.
   // C'est l'endpoint qui garantit qu'il n'est pas ecrase (voir `modifier`).
+  // ⚠ LE PERIMETRE RESTE VISIBLE A LA CREATION D'UN PRESTATAIRE, et seulement la.
+  // Sans lui, un nouveau prestataire partait sur « tous les biens » — et dans
+  // public_tokens, une liste vide vaut « aucune restriction », donc le planning
+  // menage de TOUT le compte. Ecart assume a la consigne « pas de périmètre » :
+  // l'appliquer aussi a la creation ouvrait un acces trop large.
+  // A l'EDITION il disparait : les biens se gerent ensuite dans la fiche
+  // prestataire, seule ecriture de public_tokens.property_ids.
+  const perimetreAffiche = !estPresta || estNouveau
+
   $('bloc-modeles').style.display   = estPresta ? 'none' : 'block'
-  $('bloc-perimetre').style.display = estPresta ? 'none' : 'block'
+  $('bloc-perimetre').style.display = perimetreAffiche ? 'block' : 'none'
   $('bloc-domaines').style.display  = estPresta ? 'none' : 'block'
   $('note-presta').style.display    = estPresta ? 'block' : 'none'
+  $('note-perimetre').style.display = (estPresta && estNouveau) ? 'block' : 'none'
+
+  // Un prestataire se designe bien par bien : le choix « tous les biens » n'a pas
+  // de sens pour lui, et le serveur le refuse.
+  const optionTous = $('f-scope').querySelector('option[value="all"]')
+  if (optionTous) optionTous.disabled = estPresta
+  if (estPresta && estNouveau && brouillon.property_scope !== 'selected') {
+    brouillon.property_scope = 'selected'
+    $('f-scope').value = 'selected'
+  }
 
   $('p-titre').textContent = estNouveau ? 'Nouveau profil' : [edite.first_name, edite.last_name].filter(Boolean).join(' ')
   $('p-soustitre').textContent = estNouveau ? 'Identité, accès et droits.' : 'Modifiez les droits, ou l’accès ci-dessous.'
@@ -543,10 +569,10 @@ async function enregistrer () {
   // Régina, réglée sur deux biens, serait repassée à « tous les biens » au
   // premier enregistrement. L'endpoint conserve ce qu'il a quand on ne lui dit
   // rien.
-  const permissions = estPresta
+  const permissions = (estPresta && edite)
     ? { self_availability: brouillon.self_availability, self_view_reviews: brouillon.self_view_reviews }
     : { ...brouillon, property_scope: $('f-scope').value }
-  if (!estPresta && permissions.property_scope !== 'selected') permissions.property_ids = []
+  if (permissions.property_scope && permissions.property_scope !== 'selected') permissions.property_ids = []
 
   const corps = {
     first_name: prenom,
