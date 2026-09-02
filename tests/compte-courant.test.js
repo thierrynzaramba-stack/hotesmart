@@ -246,6 +246,93 @@ test('OPT-IN : le defaut protege les endpoints non audites', async () => {
   assert.strictEqual(g.accountUserId, MEMBRE)
 })
 
+// ─── Le filtre de perimetre et le piege UUID ────────────────────────────────
+//
+// ⚠ Ces tests appellent l'ENDPOINT et inspectent le filtre qu'il emet. Une
+// premiere version recopiait la logique de construction dans le test : elle
+// passait quoi qu'il arrive, et n'aurait rien vu du bug.
+
+function preparerChannelProperty ({ perimetre }) {
+  const emis = { filtres: [] }
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: MEMBRE } }, error: null }) },
+    from (nom) {
+      const q = {
+        _f: {},
+        select () { return q }, eq (c, v) { q._f[c] = v; return q },
+        or (e) { emis.filtres.push(e); return q },
+        in () { return q }, not () { return q }, order () { return q }, limit () { return q },
+        single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),
+        then (ok, ko) { return Promise.resolve(rep(nom, q, true)).then(ok, ko) }
+      }
+      function rep (nom, q, tableau = false) {
+        if (nom === 'profiles') {
+          const ligne = { id: 'p1', account_user_id: PROD, member_user_id: MEMBRE,
+                          is_owner: false, active: true, accepted_at: '2026-09-01' }
+          return { data: tableau ? [ligne] : ligne, error: null }
+        }
+        if (nom === 'profile_permissions') {
+          return { data: { profile_id: 'p1', property_scope: 'selected',
+                           property_ids: perimetre.filter(r => r.includes('-')),
+                           property_refs: perimetre.filter(r => !r.includes('-')),
+                           reservations: 'read', menages: 'none', prestataires: 'none',
+                           messages: 'none', avis: 'none', reglages: 'none',
+                           facturation: 'none', equipe: 'none',
+                           self_availability: 'none', self_view_reviews: false }, error: null }
+        }
+        if (nom === 'api_keys') return { data: null, error: null }
+        return { data: tableau ? [] : null, error: null }
+      }
+      return q
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of [...MODULES, '../api/channel-property']) {
+    try { delete require.cache[require.resolve(mod)] } catch {}
+  }
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })
+  return emis
+}
+
+const reqGet = (compte) => ({
+  method: 'GET',
+  headers: { authorization: 'Bearer tok', 'x-compte': compte },
+  query: {}, body: {}
+})
+
+test('PERIMETRE : la branche id.in ne recoit QUE des UUID', async () => {
+  // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS DANS CE DEPOT. `properties.id` est
+  // de type uuid : y passer « 209413 » fait echouer la requete ENTIERE en 22P02,
+  // pas renvoyer zero ligne. Le membre voyait « Erreur de chargement des biens »
+  // et croyait a une panne — et refsDuPerimetre melange DELIBEREMENT les deux
+  // formes.
+  const emis = preparerChannelProperty({ perimetre: [BIEN_PROD.id, '209413'] })
+  const res = reponse()
+  await require('../api/channel-property')(reqGet(PROD), res)
+
+  const filtre = emis.filtres.find(f => f.includes('provider_property_id.in.'))
+  assert.ok(filtre, 'un filtre de perimetre doit etre emis')
+  const branche = filtre.match(/(?:^|,)id\.in\.\(([^)]*)\)/)
+  if (branche) {
+    for (const v of branche[1].split(',')) {
+      assert.match(v, /^[0-9a-f]{8}-[0-9a-f]{4}-/i, `valeur non-UUID dans id.in : ${v}`)
+    }
+  }
+  assert.ok(filtre.includes('209413'), 'la reference canal doit rester dans provider_property_id')
+})
+
+test('PERIMETRE : perimetre 100% references canal -> aucune branche id', async () => {
+  const emis = preparerChannelProperty({ perimetre: ['209413', '169567'] })
+  const res = reponse()
+  await require('../api/channel-property')(reqGet(PROD), res)
+  const filtre = emis.filtres.find(f => f.includes('provider_property_id.in.'))
+  assert.ok(filtre)
+  assert.ok(!/(?:^|,)id\.in\./.test(filtre),
+    'aucune branche id quand le perimetre ne contient que des references canal')
+})
+
 // ─── mes_comptes ────────────────────────────────────────────────────────────
 
 test('mes_comptes : un hote seul ne recoit QUE son compte', async () => {

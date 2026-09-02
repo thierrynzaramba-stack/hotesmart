@@ -85,7 +85,7 @@
         <div class="page-title">🏠 Mes biens</div>
         <div class="page-sub">Gérez vos logements et leurs calendriers</div>
       </div>
-      <a href="/biens/nouveau" class="btn btn-primary">+ Ajouter un bien</a>
+      <a href="/biens/nouveau" class="btn btn-primary" id="btn-ajouter-bien" hidden>+ Ajouter un bien</a>
     </div>
     <div class="content">
       <div id="loader" class="loader">Chargement…</div>
@@ -285,6 +285,23 @@
     return p.provider_property_id != null ? String(p.provider_property_id) : null
   }
 
+  // ⚠ « Ajouter un bien » et le kill switch ne sont montres qu'au TITULAIRE.
+  // Aucun de leurs endpoints n'honore encore X-Compte : sur un compte partage,
+  // la creation partirait sur le compte du MEMBRE (bien provisionne chez le
+  // channel manager, invisible dans la liste qu'il regarde), et le kill switch
+  // lirait l'etat d'un autre compte — un clic « couper l'IA » sur un bien deja
+  // en pause l'aurait remis en pause au lieu de le reactiver, sans issue.
+  let estTitulaireCourant = true
+  async function ajusterInterfaceSelonCompte() {
+    try {
+      const { estTitulaire } = await import('/shared/compte-courant.js')
+      estTitulaireCourant = estTitulaire()
+    } catch { estTitulaireCourant = true }
+    const btn = document.getElementById('btn-ajouter-bien')
+    if (btn) btn.hidden = !estTitulaireCourant
+    return estTitulaireCourant
+  }
+
   async function loadPausedState() {
     try {
       const res = await fetch('/api/property-automation', {
@@ -296,6 +313,7 @@
   }
 
   function killPausedBadge(p) {
+    if (!estTitulaireCourant) return ''
     const key = killKeyOf(p)
     return (key && pausedState[key] === true)
       ? '<span class="badge" style="background:#ff3b30;color:#fff">IA en pause</span>'
@@ -303,6 +321,12 @@
   }
 
   function killSwitchHtml(p) {
+    // ⚠ MASQUE HORS TITULAIRE. /api/property-automation n'honore pas encore
+    // X-Compte : il renverrait l'etat du compte de l'APPELANT. Sur un compte
+    // partage, un bien reellement en pause s'affichait donc « Couper l'IA », et
+    // le clic le remettait en pause au lieu de le reactiver — sans issue depuis
+    // cette vue.
+    if (!estTitulaireCourant) return ''
     const key = killKeyOf(p)
     if (!key) return ''
     const paused = pausedState[key] === true
@@ -421,7 +445,7 @@
     // Etat kill switch charge en parallele (cle provider_property_id).
     const [{ properties, allFailed, refuse }] = await Promise.all([
       loadAllProperties(),
-      loadPausedState()
+      ajusterInterfaceSelonCompte().then(t => t ? loadPausedState() : null)
     ])
 
     loader.style.display = 'none'

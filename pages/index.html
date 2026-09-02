@@ -23,7 +23,7 @@
 
       <div class="section-header">
         <div class="section-title">Mes biens</div>
-        <a href="/biens/nouveau" class="btn btn-primary">+ Ajouter un bien</a>
+        <a href="/biens/nouveau" class="btn btn-primary" id="btn-ajouter-bien" hidden>+ Ajouter un bien</a>
       </div>
       <div class="apps-grid" id="properties-grid">
         <div class="app-card">Chargement...</div>
@@ -102,7 +102,20 @@
     return card
   }
 
+  // Cf. pages/biens.html : la creation de bien n'est pas encore delegable.
+  async function ajusterInterfaceSelonCompte() {
+    try {
+      const { estTitulaire } = await import('/shared/compte-courant.js')
+      const btn = document.getElementById('btn-ajouter-bien')
+      if (btn) btn.hidden = !estTitulaire()
+    } catch {
+      const btn = document.getElementById('btn-ajouter-bien')
+      if (btn) btn.hidden = false
+    }
+  }
+
   async function loadProperties() {
+    await ajusterInterfaceSelonCompte()
     const grid = document.getElementById('properties-grid')
     const status = document.getElementById('status')
 

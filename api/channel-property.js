@@ -8,7 +8,7 @@
 //   room / hotel             -> multi-unites, tarifs mutualisables (NON encore supporte)
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { refsDuPerimetre } = require('../lib/permissions')
 
 const supabase = createClient(
@@ -139,11 +139,20 @@ module.exports = async function handler(req, res) {
       .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', compteLecture)
     if (refsPerimetre) {
-      // Le perimetre melange UUID et provider_property_id : les deux colonnes
-      // sont donc interrogees (cf. lib/permissions.js).
-      const sures = refsPerimetre.filter(r => /^[A-Za-z0-9_-]{1,64}$/.test(r))
+      // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS. `properties.id` est de type
+      // uuid : y passer une reference Beds24 numerique (« 209413 ») fait echouer
+      // la requete ENTIERE en 22P02, pas renvoyer zero ligne. Le membre voyait
+      // « Erreur de chargement des biens » et croyait a une panne.
+      // C'est exactement ce que documente resoudreBien depuis la regression SMS —
+      // et refsDuPerimetre melange DELIBEREMENT les deux formes.
+      // La branche `id` ne recoit donc que des UUID, et n'est meme pas emise
+      // quand il n'y en a aucun.
+      const sures = refsPerimetre.filter(r => REF_SURE_RE.test(r))
       if (!sures.length) return res.status(200).json({ properties: [] })
-      qProps = qProps.or(`id.in.(${sures.join(',')}),provider_property_id.in.(${sures.join(',')})`)
+      const uuids = sures.filter(r => UUID_RE.test(r))
+      const filtres = [`provider_property_id.in.(${sures.join(',')})`]
+      if (uuids.length) filtres.unshift(`id.in.(${uuids.join(',')})`)
+      qProps = qProps.or(filtres.join(','))
     }
     const { data: chanData, error: chanErr } = await qProps
       .order('created_at', { ascending: false })

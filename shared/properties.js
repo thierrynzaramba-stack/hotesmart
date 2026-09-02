@@ -63,8 +63,12 @@ export async function loadAllProperties() {
     // ⚠ UN REFUS DE DROITS N'EST PAS UNE PANNE. Un membre sans `reservations:read`
     // recoit un 403 parfaitement normal : afficher « Erreur de chargement » lui
     // ferait croire a un incident, et l'inciterait a recharger indefiniment.
-    // `allFailed` est reserve a ce qui est reellement casse.
-    const refuse = /droits insuffisants|non autoris/i.test(message)
+    //
+    // ⚠ ON TESTE LE STATUT, PAS LE TEXTE. Une regex sur le message confondait
+    // 401 « Non autorisé » (session expiree, il faut se reconnecter) et 403
+    // « Droits insuffisants » — et se serait retournee au premier libelle
+    // reformule.
+    const refuse = err?.status === 403
     if (refuse) {
       logger.info('properties', 'biens non accessibles avec les droits courants')
       return { properties: [], beds24Failed: false, channelFailed: false, allFailed: false, refuse: true }

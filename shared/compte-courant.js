@@ -59,6 +59,19 @@ export async function chargerContexte (userId) {
     listeFiable = false
   }
 
+  // ⚠ SUR PANNE, LE SELECTEUR DOIT SURVIVRE. Reduit au seul compte propre, il
+  // disparaissait (`doitAfficherSelecteur` exige plus d'un compte) : le membre
+  // etait bascule sur son compte vide SANS AUCUN MOYEN DE REVENIR. On reinjecte
+  // donc l'entree memorisee, marquee indisponible, pour qu'il voie ce qui se
+  // passe et puisse reessayer.
+  const memoriseAvant = lireMemoire()
+  if (!listeFiable && memoriseAvant && memoriseAvant !== String(userId)) {
+    contexte.comptes.push({
+      user_id: memoriseAvant, nom: 'Compte partagé (indisponible)',
+      titulaire: false, indisponible: true
+    })
+  }
+
   // ⚠ REVALIDATION DU COMPTE MEMORISE. Une invitation revoquee, un profil
   // desactive, un changement d'utilisateur sur le meme navigateur : le compte
   // garde en memoire peut ne plus etre accessible. On retombe alors
@@ -115,8 +128,17 @@ export function compteCourant () { return contexte.compte || contexte.moi }
 /** L'identite de la personne connectee — distincte du compte. */
 export function moi () { return contexte.moi }
 
-/** true si l'appelant est titulaire du compte courant. */
+/**
+ * true si l'appelant est titulaire du compte courant.
+ *
+ * ⚠ FAUX TANT QUE LE CONTEXTE N'EST PAS CHARGE. `String(null) === String(null)`
+ * valait vrai, donc `peutLire` ouvrait TOUS les domaines : une sidebar rendue
+ * avant `chargerContexte` affichait a un membre la section Configuration et
+ * Reglages. Le serveur reste la vraie garde, mais le masquage — objet meme de ce
+ * lot — etait ouvert par defaut.
+ */
 export function estTitulaire () {
+  if (!contexte.charge || !contexte.moi) return false
   return String(contexte.compte) === String(contexte.moi)
 }
 

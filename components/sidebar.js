@@ -22,6 +22,16 @@ export async function renderSidebar(activePage = '') {
   // pour un titulaire : un hote seul voit exactement ce qu'il voyait avant.
   const siLire = (domaine, html) => peutLire(domaine) ? html : ''
 
+  // ⚠ SUR UN COMPTE PARTAGE, ON NE MONTRE QUE CE QUI EST REELLEMENT CABLE.
+  // Un seul endpoint honore aujourd'hui l'en-tete X-Compte (channel-property
+  // GET) : partout ailleurs, le serveur travaille sur le compte de l'APPELANT.
+  // Laisser les Apps et « Ajouter un bien » visibles pendant que l'interface
+  // annonce « vous agissez sur un compte partagé » etait un piege silencieux —
+  // le membre creait un bien sur SON compte, provisionne chez le channel manager,
+  // qui disparaissait aussitot de la liste qu'il regardait.
+  // Ces entrees reviendront lot par lot, a mesure que les endpoints deviennent
+  // delegables (docs/kb/audit-user-id-front.md).
+
   sidebar.innerHTML = `
     <div class="nav">
 
@@ -50,8 +60,9 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-label">Calendrier</span>
       </a>`)}
 
+      ${estTitulaire() ? `
       <div class="nav-section-label">Apps</div>
-      ${renderApps(activePage)}
+      ${renderApps(activePage)}` : ''}
 
       ${estTitulaire() ? `
       <div class="nav-section-label">Configuration</div>

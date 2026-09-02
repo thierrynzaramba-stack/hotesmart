@@ -153,3 +153,28 @@ monde parce qu'elle est pratique quelque part.
 
 Les autres suivront lot par lot, chacun après relecture. Un endpoint absent de ce
 tableau travaille sur le compte de l'appelant, quoi que dise l'en-tête.
+
+
+---
+
+# Ce qui reste masqué sur un compte partagé
+
+Un seul endpoint honore `X-Compte` aujourd'hui. Tout le reste travaille sur le
+compte de l'appelant — c'est le bon défaut, mais l'interface ne doit pas laisser
+croire l'inverse.
+
+Sont donc **masqués quand on n'est pas titulaire** :
+
+| Élément | Pourquoi |
+|---|---|
+| Section « Apps » de la sidebar | Ménages, Serrures, Agent IA lisent et écrivent sur le compte du membre |
+| « Ajouter un bien » | la création partirait sur le compte du membre, avec provisionnement chez le channel manager — et le bien disparaîtrait de la liste qu'il regarde |
+| Kill switch (`biens.html`) | `property-automation` renvoie l'état du compte de l'appelant : un bien réellement en pause s'affichait « Couper l'IA », et le clic le remettait en pause au lieu de le réactiver, **sans issue** |
+| « Connexions » et « Réglages » | clés PMS et gestion d'équipe, non délégables |
+
+Ces éléments reviendront **lot par lot**, à mesure que leurs endpoints deviennent
+délégables et appliquent leur filtre de périmètre.
+
+**La règle qui les gouverne** : ne jamais afficher un bouton dont l'effet
+porterait sur un autre compte que celui annoncé à l'écran. Un bouton qui échoue
+est désagréable ; un bouton qui réussit **ailleurs** est un piège.

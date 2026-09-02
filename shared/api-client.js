@@ -47,7 +47,14 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 
     if (!res.ok) {
       logger.error('API', data.error || 'Erreur serveur', { endpoint, status: res.status })
-      throw new Error(data.error || 'Erreur serveur')
+      // ⚠ Le STATUT est porte par l'erreur. Sans lui, les appelants devaient
+      // deviner la nature de l'echec en testant le TEXTE du message — et
+      // « Non autorisé » (401, session expiree) se confondait avec « Droits
+      // insuffisants » (403). Un titulaire dont le jeton expire lisait alors
+      // « vous n'avez pas accès à ce compte ».
+      const erreur = new Error(data.error || 'Erreur serveur')
+      erreur.status = res.status
+      throw erreur
     }
 
     logger.info('API', `Réponse OK /api/${endpoint}`)

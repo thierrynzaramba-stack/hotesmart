@@ -30,6 +30,22 @@ export async function requireAuth() {
   }
   sessionStorage.setItem(SESSION_USER_KEY, userId)
 
+  // ⚠ LE CONTEXTE DE COMPTE SE CHARGE AVANT LA REDIRECTION D'ONBOARDING.
+  // Un invite qui n'a jamais eu de compte a lui est exactement dans l'etat que
+  // le forcage vise (`!completed && current_step === 0`) : il partait donc dans
+  // l'assistant « connectez votre logement » sur son propre compte vide, sans
+  // jamais atteindre le selecteur qui lui donne acces au compte ou il est invite.
+  //
+  // Tolerant a la panne : sur echec, `chargerContexte` retombe sur le compte
+  // propre — un incident ne doit pas empecher un hote seul d'utiliser son app.
+  let membreAilleurs = false
+  try {
+    const ctx = await chargerContexte(userId)
+    membreAilleurs = (ctx?.comptes || []).some(c => String(c.user_id) !== String(userId))
+  } catch (e) {
+    console.error('[auth-guard] contexte de compte indisponible:', e)
+  }
+
   // BETA : l'onboarding ET l'abonnement ne BLOQUENT PLUS l'acces a l'app.
   // requireAuth ne fait qu'authentifier. L'incitation a finaliser l'onboarding passe par
   // le bandeau persistant (renderOnboardingBanner) ; l'acces aux features payantes par le
@@ -60,7 +76,10 @@ export async function requireAuth() {
     const onOnboarding = window.location.pathname.indexOf('onboarding') !== -1
     const neverStarted = (step == null || step === 0)
     const forcedKey = 'hs_ob_forced_' + userId
-    if (!completed && neverStarted && !onOnboarding && !localStorage.getItem(forcedKey)) {
+    // Membre d'un autre compte : l'onboarding « connectez votre logement » n'a
+    // aucun sens pour lui, il vient travailler sur le compte de quelqu'un.
+    if (!completed && neverStarted && !onOnboarding && !membreAilleurs
+        && !localStorage.getItem(forcedKey)) {
       localStorage.setItem(forcedKey, '1')
       window.location.replace('/pages/onboarding.html')
       return null
@@ -68,19 +87,6 @@ export async function requireAuth() {
   } catch (e) {
     // localStorage indisponible : on n'empeche pas l'acces (redirection best-effort).
     console.error('[auth-guard] onboarding redirect skipped:', e)
-  }
-
-  // ⚠ LE CONTEXTE DE COMPTE, resolu ICI et une seule fois. requireAuth est le
-  // passage oblige des 16 pages : c'est le seul endroit ou le poser sans risquer
-  // qu'une page l'oublie.
-  //
-  // Tolerant a la panne : `chargerContexte` retombe sur le compte propre si la
-  // liste des comptes est indisponible. Un incident ne doit pas empecher un hote
-  // seul d'utiliser son application.
-  try {
-    await chargerContexte(userId)
-  } catch (e) {
-    console.error('[auth-guard] contexte de compte indisponible:', e)
   }
 
   return session
