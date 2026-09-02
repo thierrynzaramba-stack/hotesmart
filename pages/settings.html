@@ -230,7 +230,10 @@ const MODELES = {
   proprietaire: { property_scope: 'selected', reservations: 'read', menages: 'read', prestataires: 'none',
                   messages: 'read', avis: 'read', reglages: 'none', facturation: 'none', equipe: 'none',
                   self_availability: 'none', self_view_reviews: true },
-  prestataire:  { property_scope: 'all', reservations: 'none', menages: 'none', prestataires: 'none',
+  // ⚠ `selected`, pas `all` : le serveur refuse un accès par lien sur « tous les
+  // biens » (une liste vide y vaut « aucune restriction »). Le dire dans le
+  // modèle plutôt que de compter sur un forçage ultérieur.
+  prestataire:  { property_scope: 'selected', reservations: 'none', menages: 'none', prestataires: 'none',
                   messages: 'none', avis: 'none', reglages: 'none', facturation: 'none', equipe: 'none',
                   self_availability: 'write', self_view_reviews: true, access_mode: 'lien' }
 }
@@ -533,8 +536,11 @@ function rendreAcces () {
   $('btn-activite').onclick = async () => {
     if (edite.active && !window.confirm('Désactiver ce profil ?\n\nL’accès est coupé immédiatement.')) return
     try {
-      await (edite.active ? api.membres.desactiver(edite.id) : api.membres.reactiver(edite.id))
-      message(edite.active ? 'Profil désactivé.' : 'Profil réactivé.', 'ok')
+      const r = await (edite.active ? api.membres.desactiver(edite.id) : api.membres.reactiver(edite.id))
+      // La réactivation d'un prestataire ne rétablit pas ses biens : le serveur
+      // le dit, la page doit le répéter.
+      message(r?.avertissement || (edite.active ? 'Profil désactivé.' : 'Profil réactivé.'),
+              r?.avertissement ? 'err' : 'ok')
       fermer(); await charger()
     } catch (e) { message(e.message) }
   }
@@ -569,8 +575,17 @@ async function enregistrer () {
   // Régina, réglée sur deux biens, serait repassée à « tous les biens » au
   // premier enregistrement. L'endpoint conserve ce qu'il a quand on ne lui dit
   // rien.
-  const permissions = (estPresta && edite)
-    ? { self_availability: brouillon.self_availability, self_view_reviews: brouillon.self_view_reviews }
+  // ⚠ Un prestataire n'a aucun domaine. `brouillon` peut pourtant en porter —
+  // appliquer le modèle « Employé » puis basculer sur « Lien » les y laisse. Le
+  // serveur les force à « rien » de son côté ; on ne les envoie pas non plus.
+  const permissions = estPresta
+    ? {
+        self_availability: brouillon.self_availability,
+        self_view_reviews: brouillon.self_view_reviews,
+        // Le périmètre n'accompagne que la création : ensuite, la fiche
+        // prestataire en est seule responsable.
+        ...(edite ? {} : { property_scope: $('f-scope').value, property_ids: brouillon.property_ids })
+      }
     : { ...brouillon, property_scope: $('f-scope').value }
   if (permissions.property_scope && permissions.property_scope !== 'selected') permissions.property_ids = []
 

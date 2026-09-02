@@ -761,15 +761,33 @@ L'envoi Brevo viendra plus tard : le champ existe, désactivé.
 prestataire : c'est lui qui écrit `property_ids` et `visibility_days`.
 
 `/settings` n'y touche qu'**à la création**, où il faut bien un point de départ.
-En édition, il n'écrit plus cette colonne du tout. Sans cette séparation :
-l'hôte coche deux biens sur huit dans la fiche prestataire, corrige une faute de
-frappe sur le nom depuis `/settings`, et le prestataire récupère les huit —
-silencieusement. Application directe de `docs/kb/coeur-de-donnees.md`.
+Partout ailleurs — édition, réactivation, régénération — il n'écrit plus cette
+colonne. Sans cette séparation, trois chemins la réécrivaient depuis
+`profile_permissions`, qui n'est pas la même donnée :
 
-Corollaire : la garde de périmètre PWA ne s'applique qu'à la création. La
-maintenir en édition rendait un profil **définitivement non enregistrable** dès
-que ses biens disparaissaient, le panneau réduit n'offrant aucune case pour en
-sortir.
+- **édition** : l'hôte coche deux biens sur huit dans la fiche prestataire,
+  corrige une faute de frappe sur le nom ici, le prestataire récupère les huit ;
+- **régénération** : « Régénérer le lien » reconstruisait la ligne entière —
+  désormais seul le `token` de la ligne existante est remplacé ;
+- **réactivation** : elle recréait la ligne depuis les droits. Elle ne la recrée
+  plus du tout : la désactivation ayant supprimé la ligne, son périmètre est
+  perdu et on ne l'invente pas. La réponse porte un avertissement explicite
+  renvoyant vers la fiche prestataire.
+
+Application directe de `docs/kb/coeur-de-donnees.md`.
+
+Corollaire : `perimetrePwaExploitable` et `synchroniserTokenPwa` ne sont plus
+appelées qu'**à la création**. Les garder en réactivation rendait
+**définitivement non réactivable** tout prestataire en `property_scope = 'all'` —
+état pourtant créé par l'ancien modèle — sans aucun écran pour le corriger.
+
+### ⚠️ Un prestataire n'a aucun domaine, et c'est le serveur qui l'impose
+
+Le panneau réduit masque la grille, mais le brouillon peut encore porter des
+domaines : appliquer le modèle « Employé » puis basculer sur « Lien » envoyait
+six domaines en écriture. Ils auraient été **ineffaçables** — non affichés, non
+renvoyés à l'édition, et reconduits par le socle à chaque enregistrement. La
+création force donc tous les domaines à `'none'` pour un accès par lien.
 
 ### ⚠️ Un accès par lien ne porte jamais sur « tous les biens »
 
@@ -814,3 +832,19 @@ testé, c'est qu'il ne touche rien du compte d'autrui : 404 sur tout profil
 
 La zone « Réservé au titulaire » de la page est donc du code prêt pour l'étape 5,
 pas une protection active — c'est écrit dans le fichier.
+
+### ⚠️ Dette : deux populations de prestataires
+
+`/settings` crée `profiles` + `profile_permissions` + `public_tokens`.
+`apps/menages/prestataires.html` crée **uniquement** une ligne `public_tokens`,
+sans profil.
+
+Conséquence : un prestataire créé depuis la fiche prestataire n'apparaît pas dans
+la carte « Prestataires » de `/settings`, qui liste `profiles`. Les deux écrans
+montrent donc des populations partiellement disjointes, alors que le texte de la
+carte renvoie vers la fiche prestataire comme lieu de gestion.
+
+À faire converger à l'**étape 6** (fiche prestataire) : la création d'un
+prestataire doit passer par `profiles`, `public_tokens` n'en étant que la
+projection PWA. Non traité dans l'étape 4 — cela demanderait de réécrire un écran
+qui fonctionne, sans que la fiche prestataire existe encore pour le remplacer.

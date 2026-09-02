@@ -393,9 +393,11 @@ test('le mode d\'acces ne se change pas apres creation', async () => {
 
 // ─── Regeneration du lien de Regina ─────────────────────────────────────────
 
-test('regeneration : le jeton de Régina change dans les DEUX tables', async () => {
-  // ⚠ profiles.pwa_token et public_tokens.token : n'en changer qu'un donne un
-  // lien affiche qui n'ouvre rien, ou un ancien lien qui ouvre encore.
+test('regeneration : le jeton change dans les DEUX tables, le perimetre ne bouge PAS', async () => {
+  // ⚠ Reconstruire la ligne PWA depuis profile_permissions la faisait diverger de
+  // ce que l'hote a regle dans la fiche prestataire : deux biens coches la-bas,
+  // « Régénérer le lien » ici, et le prestataire recuperait les huit. On ne
+  // remplace QUE le jeton, sur la ligne existante.
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: { action: 'regenerate', profile_id: 'p-regina' } }), res)
@@ -404,9 +406,11 @@ test('regeneration : le jeton de Régina change dans les DEUX tables', async () 
   assert.ok(majProfil, 'profiles.pwa_token doit changer')
   assert.notStrictEqual(majProfil.row.pwa_token, 'jeton-regina')
   const majToken = etat.ecritures.find(e => e.table === 'public_tokens')
-  assert.ok(majToken, 'public_tokens doit suivre')
-  const suppr = etat.suppressions.find(s => s.table === 'public_tokens')
-  assert.ok(suppr, 'l\'ancien jeton doit etre retire')
+  assert.ok(majToken, 'la ligne PWA doit suivre')
+  assert.deepStrictEqual(Object.keys(majToken.row), ['token'],
+    'seul le jeton est remplace : ni property_ids, ni visibility_days, ni label')
+  assert.deepStrictEqual(etat.suppressions, [],
+    'l\'ancien jeton disparait par remplacement, aucune ligne orpheline a supprimer')
 })
 
 test('regeneration : rien n\'est regenere sans demande explicite', async () => {
@@ -702,13 +706,61 @@ test('PWA : /settings n\'ecrit PLUS le perimetre PWA en edition', async () => {
     'aucune ecriture dans public_tokens depuis /settings en edition')
 })
 
-test('REVOCATION : si l\'ancien jeton ne peut pas etre retire, on le DIT', async () => {
-  const etat = preparer({ user: PROD, erreurs: { 'public_tokens:delete': true } })
+test('REGENERATION : sans ligne PWA (prestataire jamais affecte) -> 409 explicite', async () => {
+  // Rien a regenerer tant que la fiche prestataire n'a pas defini ses biens :
+  // creer la ligne ici reviendrait a deviner un perimetre.
+  const etat = preparer({ user: PROD, tokensPwa: [] })
   const res = reponse()
   await require('../api/membres')(req({ body: { action: 'regenerate', profile_id: 'p-regina' } }), res)
-  assert.strictEqual(res.code, 500)
-  assert.match(res.body.error, /ancien lien reste actif/)
+  assert.strictEqual(res.code, 409)
+  assert.match(res.body.error, /fiche/)
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'))
+})
+
+test('REACTIVATION : ne recree PAS la ligne PWA, et le dit', async () => {
+  // ⚠ La desactivation a supprime la ligne, donc son perimetre est perdu. Le
+  // reconstruire depuis profile_permissions elargissait l'acces en silence.
+  const etat = preparer({ user: PROD, profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'reactivate', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'),
+    'aucun perimetre devine')
+  assert.match(res.body.avertissement, /fiche prestataire/)
+})
+
+test('REACTIVATION : un prestataire en « tous les biens » n\'est plus bloque', async () => {
+  // ⚠ La garde de perimetre en reactivation rendait DEFINITIVEMENT non
+  // reactivable tout profil cree avant la regle — et aucun ecran ne permettait
+  // de corriger son scope.
+  const etat = preparer({ user: PROD,
+    profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [],
+    droitsExistants: { 'p-regina': { profile_id: 'p-regina', property_scope: 'all',
+                                     property_ids: [], self_availability: 'write',
+                                     self_view_reviews: true } } })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'reactivate', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 200)
   void etat
+})
+
+test('CREATION PRESTATAIRE : les domaines sont forces a « rien », meme envoyes', async () => {
+  // ⚠ Modele « Employé » puis bascule sur « Lien » : six domaines en ecriture
+  // partaient au serveur alors que le panneau ne les montre plus. Ils seraient
+  // ensuite INEFFACABLES — le socle les reconduirait a chaque enregistrement.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    permissions: { property_scope: 'selected', property_ids: [BIEN_A.id],
+                   reservations: 'write', menages: 'write', reglages: 'write',
+                   self_availability: 'write', self_view_reviews: true } } }), res)
+  assert.strictEqual(res.code, 200)
+  const perms = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'insert')
+  assert.strictEqual(perms.row.reservations, 'none')
+  assert.strictEqual(perms.row.menages, 'none')
+  assert.strictEqual(perms.row.reglages, 'none')
+  assert.strictEqual(perms.row.self_availability, 'write', 'ses droits sur lui-meme sont conserves')
 })
 
 test('PERIMETRE : un profil dont les biens ont disparu reste MODIFIABLE', async () => {

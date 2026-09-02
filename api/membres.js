@@ -226,6 +226,16 @@ async function creer (req, res, compte, base) {
   const refusPwa = mode === 'lien' && perimetrePwaExploitable(v.permissions.property_scope, biens.refs)
   if (refusPwa) return res.status(400).json({ error: refusPwa })
 
+  // ⚠ UN PRESTATAIRE N'A AUCUN DOMAINE, et c'est le serveur qui le garantit.
+  // Le panneau masque la grille des domaines, mais `brouillon` peut encore les
+  // porter : il suffit d'appliquer le modele « Employé » puis de basculer sur
+  // « Lien » pour envoyer six domaines en ecriture. Ils seraient ensuite
+  // INEFFACABLES — le panneau reduit ne les affiche pas, l'edition ne les envoie
+  // pas, et le socle les reconduirait a chaque enregistrement.
+  if (mode === 'lien') {
+    for (const domaine of DOMAINES) v.permissions[domaine] = 'none'
+  }
+
   const maintenant = new Date()
   const ligne = {
     account_user_id: compte,
@@ -311,22 +321,13 @@ async function synchroniserTokenPwa (profil, refs, scope, compte) {
     property_ids:    scope === 'selected' ? refs : [],
     visibility_days: VISIBILITE_PWA_JOURS
   }
-  // ⚠ Pas d'`upsert(onConflict: 'token')` : rien ne garantit une contrainte unique
-  // sur cette colonne, et un onConflict qui ne correspond a aucune contrainte
-  // echoue a l'execution. On lit, puis on met a jour ou on insere — deterministe
-  // quel que soit le schema.
-  const { data: existante, error: eLecture } = await supabase
-    .from('public_tokens').select('id').eq('token', profil.pwa_token).maybeSingle()
-  if (eLecture) { console.error('[membres] public_tokens lecture', eLecture.message); return false }
-
-  // ⚠ UNE MISE A JOUR NE TOUCHE QUE CE QUI VIENT D'ICI. `visibility_days` se
-  // regle dans apps/menages/prestataires.html (7 a 90 jours) : le reecrire a 30
-  // a chaque enregistrement de droits ferait perdre silencieusement le choix de
-  // l'hote. Le `label` aussi appartient a cette page — il n'est pose qu'a la
-  // creation, quand la ligne n'existe pas encore.
-  const { error } = existante
-    ? await supabase.from('public_tokens').update({ property_ids: ligne.property_ids }).eq('id', existante.id)
-    : await supabase.from('public_tokens').insert(ligne)
+  // ⚠ CETTE FONCTION N'EST APPELEE QU'A LA CREATION. Le jeton vient d'etre
+  // genere, aucune ligne ne le porte : c'est un INSERT, pas un upsert.
+  // Ailleurs — edition, reactivation, regeneration — cette page n'ecrit plus
+  // `property_ids` : apps/menages/prestataires.html en est le seul writer
+  // (docs/kb/coeur-de-donnees.md). `visibility_days` et `label` s'y reglent
+  // aussi ; les reecrire ici ferait perdre le choix de l'hote.
+  const { error } = await supabase.from('public_tokens').insert(ligne)
   if (error) { console.error('[membres] public_tokens', error.message); return false }
   return true
 }
@@ -448,34 +449,22 @@ async function basculerActivite (req, res, compte, actif) {
         return res.status(500).json({ error: 'Désactivation impossible : le lien n’a pas pu être coupé' })
       }
     } else {
-      // ⚠ `droits?.property_scope || 'all'` sur une lecture non verifiee etait un
-      // ECHEC OUVERT : une panne PostgREST transitoire donnait `undefined`, donc
-      // « tous les biens », et le prestataire restreint recevait le compte entier
-      // dans sa PWA — en silence. Une panne n'est pas une absence.
-      const { data: droits, error: eDroits } = await supabase.from('profile_permissions')
-        .select('property_scope, property_ids').eq('profile_id', cible.profil.id).maybeSingle()
-      if (eDroits || !droits) {
-        console.error('[membres] lecture droits pour reactivation', eDroits?.message || 'ligne absente')
-        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
-        return res.status(503).json({ error: 'Service temporairement indisponible' })
-      }
-      const biens = await verifierBiens((droits.property_ids || []).map(String), compte)
-      if (!biens.ok) {
-        // `active` est deja passe a true : le laisser ainsi afficherait « Actif »
-        // sur un profil sans acces PWA reel.
-        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
-        return res.status(500).json({ error: 'Réactivation impossible' })
-      }
-      const refus = perimetrePwaExploitable(droits.property_scope, biens.refs)
-      if (refus) {
-        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
-        return res.status(400).json({ error: refus })
-      }
-      const ok = await synchroniserTokenPwa({ ...cible.profil, active: true }, biens.refs, droits.property_scope, compte)
-      if (!ok) {
-        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
-        return res.status(500).json({ error: 'Réactivation impossible : lien non rétabli' })
-      }
+      // ⚠ LA REACTIVATION NE DEVINE PAS LE PERIMETRE.
+      // Reconstruire la ligne PWA depuis `profile_permissions` etait un
+      // elargissement silencieux : l'hote coche deux biens sur huit dans la fiche
+      // prestataire (qui n'ecrit que public_tokens), desactive puis reactive
+      // ici — et le prestataire recuperait les huit. Un `property_scope = 'all'`
+      // y ecrivait meme une liste vide, qui vaut « aucune restriction ».
+      //
+      // La desactivation a supprime la ligne, donc son perimetre est perdu : on
+      // ne l'invente pas. Le profil redevient actif, et l'hote est renvoye vers
+      // le seul ecran qui sait affecter des biens.
+      console.log('[membres] reactivation : le perimetre PWA est a redefinir dans la fiche prestataire')
+      return res.status(200).json({
+        ok: true,
+        active: true,
+        avertissement: 'Profil réactivé. Ses biens doivent être redéfinis dans sa fiche prestataire : son lien ne montrera aucun ménage tant que ce n’est pas fait.'
+      })
     }
   }
 
@@ -525,43 +514,38 @@ async function regenerer (req, res, compte, base) {
     const { error } = await supabase.from('profiles').update({ pwa_token: jeton }).eq('id', cible.profil.id)
     if (error) { console.error('[membres] regen pwa', error.message); return res.status(500).json({ error: 'Régénération impossible' }) }
 
-    // Meme regle qu'a la reactivation : une lecture en echec ne doit pas se
-    // traduire par « tous les biens ».
-    const { data: droits, error: eDroits } = await supabase.from('profile_permissions')
-      .select('property_scope, property_ids').eq('profile_id', cible.profil.id).maybeSingle()
-    if (eDroits || !droits) {
-      console.error('[membres] lecture droits pour regeneration', eDroits?.message || 'ligne absente')
+    // ⚠ ON NE CHANGE QUE LE JETON. Reconstruire la ligne PWA depuis
+    // `profile_permissions` la ferait diverger de ce que l'hote a regle dans la
+    // fiche prestataire : il coche deux biens sur huit la-bas, clique
+    // « Régénérer le lien » ici, et le prestataire recupere les huit. Pire, un
+    // `property_scope = 'all'` y ecrivait une liste vide — qui vaut « aucune
+    // restriction ». Le perimetre et la visibilite restent la ou ils sont ecrits.
+    const { data: lignePwa, error: eLigne } = await supabase
+      .from('public_tokens').select('id').eq('token', ancien).maybeSingle()
+    if (eLigne) {
+      console.error('[membres] lecture ligne PWA', eLigne.message)
       await supabase.from('profiles').update({ pwa_token: ancien }).eq('id', cible.profil.id)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
-    const biens = await verifierBiens((droits.property_ids || []).map(String), compte)
-    if (!biens.ok) {
+    if (!lignePwa) {
       await supabase.from('profiles').update({ pwa_token: ancien }).eq('id', cible.profil.id)
-      return res.status(500).json({ error: 'Régénération impossible' })
+      return res.status(409).json({
+        error: 'Ce prestataire n’a pas encore de biens affectés. Définissez-les dans sa fiche avant de régénérer son lien.'
+      })
     }
 
-    const ok = await synchroniserTokenPwa({ ...cible.profil, pwa_token: jeton },
-                                          biens.refs, droits.property_scope, compte)
-    if (!ok) {
+    const { error: eMajToken } = await supabase.from('public_tokens')
+      .update({ token: jeton }).eq('id', lignePwa.id)
+    if (eMajToken) {
+      console.error('[membres] regen token PWA', eMajToken.message)
       await supabase.from('profiles').update({ pwa_token: ancien }).eq('id', cible.profil.id)
       return res.status(500).json({ error: 'Régénération impossible' })
     }
     // L'ancien jeton ne doit plus ouvrir : la ligne qui le portait est retiree
     // APRES que la nouvelle est en place, pour ne jamais laisser le prestataire
     // sans acces valide entre les deux.
-    // ⚠ Revocation VERIFIEE. Sans lecture de l'erreur, un blip PostgREST laissait
-    // l'ancien lien ouvert indefiniment pendant que l'interface annoncait « l'ancien
-    // lien cessera de fonctionner IMMEDIATEMENT ». Un lien qu'on croit revoque et
-    // qui vit encore est pire qu'un echec visible.
-    if (ancien && ancien !== jeton) {
-      const { error: eSuppr } = await supabase.from('public_tokens').delete().eq('token', ancien)
-      if (eSuppr) {
-        console.error('[membres] revocation ancien jeton', eSuppr.message)
-        return res.status(500).json({
-          error: 'Nouveau lien créé, mais l’ancien n’a pas pu être révoqué. Réessayez : tant que ce message revient, l’ancien lien reste actif.'
-        })
-      }
-    }
+    // L'ancien jeton a ete REMPLACE sur la ligne existante : il n'ouvre deja plus
+    // rien, et il n'y a aucune ligne orpheline a supprimer ensuite.
 
     return res.status(200).json({ lien: lienDAcces({ ...cible.profil, pwa_token: jeton }, base) })
   }
