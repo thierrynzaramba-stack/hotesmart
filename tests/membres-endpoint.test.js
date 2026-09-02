@@ -305,7 +305,9 @@ test('titulaire : creation d\'un acces par lien -> public_tokens alimente', asyn
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id],
                    self_availability: 'write' } } }), res)
   assert.strictEqual(res.code, 200)
-  assert.ok(res.body.lien.includes('/apps/menages/?token='), res.body.lien)
+  // ⚠ `/apps/menages/public`, l'URL SANS session. `/apps/menages/` sert le
+  // planning de l'hote et renvoie le prestataire au login.
+  assert.ok(res.body.lien.includes('/apps/menages/public?token='), res.body.lien)
   const pt = etat.ecritures.find(e => e.table === 'public_tokens')
   assert.ok(pt, 'public_tokens doit etre alimente')
   assert.deepStrictEqual(pt.row.property_ids, [BIEN_A.provider_property_id],
@@ -904,6 +906,53 @@ test('NON DELEGABLE fourni explicitement : toujours refuse', async () => {
     permissions: { ...droitsVides(), equipe: 'write' } } }), res)
   assert.strictEqual(res.code, 400)
   assert.deepStrictEqual(etat.ecritures, [])
+})
+
+// ─── Le lien PWA doit ouvrir SANS session ───────────────────────────────────
+
+test('LIEN PWA : pointe sur public, l\'URL qui n\'exige pas de session', async () => {
+  // ⚠ BUG TROUVE AU TEST HUMAIN. Le lien pointait sur `/apps/menages/?token=`,
+  // qui sert index.html — le planning de l'HOTE. Il exige une session : en
+  // navigation privee, le prestataire tombait sur la page de connexion. Il ne
+  // « marchait » qu'ouvert depuis la session de l'hote, ce qui masquait le
+  // defaut. public.html est la PWA prestataire : elle lit `?token=` et interroge
+  // /api/menages-public, sans session.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'lien', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(res.body.lien.includes('/apps/menages/public?token='), res.body.lien)
+  assert.ok(!/\/apps\/menages\/\?token=/.test(res.body.lien),
+    'jamais /apps/menages/ nu : c\'est le planning de l\'hote')
+})
+
+test('LIEN PWA : meme URL pour un profil CREE depuis /settings', async () => {
+  // Régina vient d'une migration, un profil neuf passe par `creer` : les deux
+  // doivent donner exactement la meme forme de lien.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Nadia', access_mode: 'lien',
+    permissions: { property_scope: 'selected', property_ids: [BIEN_A.id],
+                   self_availability: 'write', self_view_reviews: true } } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(res.body.lien.includes('/apps/menages/public?token='), res.body.lien)
+})
+
+test('LIEN PWA : le jeton est encode dans l\'URL', async () => {
+  preparer({ user: PROD, profils: [OWNER, { ...REGINA, pwa_token: 'a+b/c=d e' }],
+             tokensPwa: [{ id: 'pt1', token: 'a+b/c=d e' }] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'lien', profile_id: 'p-regina' } }), res)
+  assert.ok(!res.body.lien.includes(' '), 'aucun caractere brut non encode')
+  assert.ok(res.body.lien.includes(encodeURIComponent('a+b/c=d e')))
+})
+
+test('LIEN D\'INVITATION : inchange, il vise bien /invitation', async () => {
+  preparer({ user: PROD, profils: [OWNER, EN_ATTENTE_REF] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'lien', profile_id: 'p-attente' } }), res)
+  assert.ok(res.body.lien.includes('/invitation?token='), res.body.lien)
 })
 
 // ─── Divers ─────────────────────────────────────────────────────────────────

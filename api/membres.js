@@ -486,7 +486,14 @@ function lienDAcces (profil, base) {
   // quelqu'un, en croyant lui rendre l'acces.
   if (profil.active === false) return null
   if (profil.access_mode === 'lien' && profil.pwa_token) {
-    return `${base}/apps/menages/?token=${encodeURIComponent(profil.pwa_token)}`
+    // ⚠ `/apps/menages/public`, PAS `/apps/menages/`.
+    // Le second sert index.html — le planning de l'HOTE, qui exige une session et
+    // renvoie donc le prestataire vers la page de connexion. Le lien ne semblait
+    // fonctionner qu'ouvert depuis la session de l'hote lui-meme : en navigation
+    // privee, il aboutissait au login. C'est public.html qui lit `?token=` et
+    // interroge /api/menages-public sans session — l'URL qu'utilise deja
+    // apps/menages/prestataires.html.
+    return `${base}/apps/menages/public?token=${encodeURIComponent(profil.pwa_token)}`
   }
   if (profil.invite_token) {
     const expire = profil.invite_expires_at && new Date(profil.invite_expires_at).getTime() < Date.now()
