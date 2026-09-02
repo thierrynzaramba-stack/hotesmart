@@ -93,9 +93,36 @@ create index ota_reviews_property_idx on ota_reviews (property_id, received_at d
 create index ota_reviews_reservation_idx on ota_reviews (ota_reservation_id);
 ```
 
-**RLS obligatoire** (leçon de l'audit des 27 tables) :
-- Policy select/insert/update/delete : `user_id = auth.uid()`.
-- Les écritures serveur passent par la service key (cron/webhook), les lectures front par l'anon key + RLS.
+**⚠️ RLS — CORRECTION : cette spec date d'avant le chantier profils et droits.**
+
+`user_id = auth.uid()` **ignorerait la délégation** : un membre avec
+`avis: read` ne verrait rien. Les politiques suivent le modèle de droits, domaine
+`avis` :
+
+```sql
+create policy ota_reviews_select on ota_reviews for select to authenticated
+  using (can_read(user_id, 'avis', property_id_ref));
+create policy ota_reviews_write on ota_reviews for all to authenticated
+  using (can_write(user_id, 'avis', property_id_ref))
+  with check (can_write(user_id, 'avis', property_id_ref));
+```
+
+**Deux colonnes s'ajoutent au schéma ci-dessus** :
+
+- **`property_id_ref text not null`** — le `provider_property_id`. `can_read` et
+  le filtre de périmètre travaillent sur la référence **TEXT**, pas sur l'UUID
+  (`REVIEW.md` §10). Sans elle, le périmètre ne s'appliquerait pas.
+- **`stay_start date` / `stay_end date`** — dénormalisées à l'ingestion. Les
+  dates de séjour vivent dans `bookings_snapshot` et ne sont atteignables que par
+  `booking_uid` : quand celui-ci n'est pas résolu, l'avis perd son ancrage
+  temporel, dont le module de pricing a besoin.
+
+**Résolution de `booking_uid`** — la clé existe et est déjà peuplée :
+`bookings_snapshot.snapshot->>'otaReservationCode'` (164 lignes sur 182).
+C'est elle qu'on matche contre `ota_reservation_id`.
+
+Les écritures serveur passent par la service key (cron/webhook), les lectures
+front par l'anon key + RLS.
 
 ## 2. Couche sync — `lib/channels/`
 
@@ -114,17 +141,59 @@ lib/channels/reviews.js           → normalisation commune → format ota_revie
 - Résolution `booking_uid` : matcher `ota_reservation_id` contre la référence OTA stockée dans `bookings_snapshot` (vérifier le nom exact de la colonne dans le schéma actuel — apiReference/channel booking id). Si aucun match : laisser null, ne pas bloquer l'insert.
 
 ### Channex — temps réel via webhook
-- Le handler webhook Channex existant doit router l'événement `updated_review` (déclenché quand un feedback voyageur arrive).
+- ⚠️ **État vérifié (étape 0)** : `updated_review` n'est **ni abonné ni routé**.
+  Le code enregistre deux webhooks — `api/channel-webhook.js` avec le masque
+  `booking;message`, et `api/channel-events.js` avec
+  `new_channel;updated_channel;activate_channel`. L'événement n'est dans aucun
+  des deux, et le handler ne traite que `booking` et `message` : tout le reste
+  tombe dans `ignored:<event>` avec un 200. **Deux actions, donc : l'ajouter à
+  l'abonnement ET le router.**
 - Le payload webhook contient l'id de la review → appeler `GET /api/v1/reviews/:review_id` puis upsert dans `ota_reviews` (conflit sur `(provider, external_review_id)`).
 - Vérifier que l'abonnement webhook Channex inclut bien l'événement review (sinon l'ajouter à la création/mise à jour du webhook).
 - **Prérequis manuel (à faire par Thierry, pas par le code)** : activer l'application « Messages & Reviews » sur chaque propriété dans app.channex.io, sinon l'API répond 403.
 
-### Beds24 — poll quotidien via cron
-- Ajouter au cron un job `syncBeds24Reviews` exécuté **une fois par jour** (frugalité — les avis n'arrivent pas en temps réel).
-- Appels : `GET /channels/booking/reviews` et `GET /channels/airbnb/reviews` (API v2).
-- Upsert idempotent sur `(provider, external_review_id)`.
-- En cas d'erreur : logger dans `automation_incidents`, ne pas faire échouer le reste du cron.
-- ⚠️ Le refresh token Beds24 a probablement expiré (généré le 15 avril 2026, expiration ~14 juillet). Lors du renouvellement, inclure le scope donnant accès aux endpoints `channels` (reviews). Ne pas coder de contournement : si le token est invalide, incident + on continue.
+### Beds24 — ⚠️ SOURCE NON CONFIRMÉE (étape 0, 2 septembre 2026)
+
+**Trois hypothèses de cette spec se sont révélées fausses. Vérifié sur le token
+de production, en lecture seule.**
+
+**1. Le token n'a pas expiré.** Il est valide, recréé automatiquement par le cron
+(`GET /authentication/details` → 200, créé le jour même, expire dans 24 h). Aucun
+renouvellement à faire.
+
+**2. Le scope est déjà là.** Scopes réels du token :
+`all:bookings`, `all:bookings-personal`, `all:bookings-financial`,
+`all:inventory`, `read:properties`, `read:accounts`, **`read:channels`**.
+Il n'y a donc pas de scope à ajouter.
+
+**3. L'endpoint de cette spec n'existe pas.** `GET /channels/booking/reviews`
+(pluriel) répond **400 « Invalid data »**. La forme `/channels/booking/review`
+(**singulier**) répond 200 — mais `null`, quels que soient les paramètres
+essayés : `propertyId`, `bookingId` d'une vraie réservation Airbnb, `dateFrom` /
+`dateTo`, `page`.
+
+⚠️ **Et `null` n'est pas une réponse métier.** `GET /channels/airbnb/reviewsList`
+— un chemin **inventé pour le test** — renvoie exactement la même chose, comme
+`/channels`, `/channels/booking` et `/channels/airbnb`. Tout sous-chemin de
+`/channels` répond `200 null` en GET : ces chemins ne sont pas implémentés en
+lecture.
+
+**Indice concordant** : les réservations portent un champ **`allowReview`**
+(booléen). L'API semble donc servir à **publier** un avis hôte → voyageur, pas à
+lire les avis reçus. Aucun champ `review` / `rating` / `score` / `feedback` n'a
+été trouvé sur les réservations.
+
+⚠️ **Un `POST` n'a délibérément PAS été testé** : il publierait un avis réel sur
+une vraie réservation.
+
+**À trancher avant d'écrire une ligne de ce job** : consulter la doc Swagger
+authentifiée de Beds24 (compte Thierry) pour établir si la lecture des avis
+reçus existe. Si elle n'existe pas, **la source Beds24 disparaît de la V1** et
+seul Channex alimente `ota_reviews` — ce qui économise un job cron entier.
+
+Si la lecture existe, le job reste tel que prévu : `syncBeds24Reviews` **une fois
+par jour** (frugalité), upsert idempotent sur `(provider, external_review_id)`,
+erreurs dans `automation_incidents` sans faire échouer le reste du cron.
 
 ## 2 bis. Analyse IA du texte des avis (Claude Haiku via `api/grok.js`)
 
