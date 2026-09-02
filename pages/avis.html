@@ -32,6 +32,19 @@
     .badge-prop.attente      { background:#F0F0F0; color:#999; }
     .badge-src { background:#EEF2FF; color:#3B4CCA; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
 
+    /* Une detection n'est pas un fait : elle se distingue a l'oeil et porte sa
+       propre action. Bordure gauche plutot qu'un fond colore — l'entree reste
+       lisible comme les autres. */
+    .avis-item.detecte { border-left: 3px solid #E8873A; }
+    .bandeau-detecte { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+                       background:#FDF0E2; color:#A85B12; border-radius:8px;
+                       padding:8px 12px; margin-bottom:10px; font-size:13px; }
+    .bandeau-detecte .titre { font-weight:600; }
+    .bandeau-detecte .actions { margin-left:auto; display:flex; gap:8px; }
+    .btn-mini { border:0.5px solid var(--border); background:var(--bg); color:var(--text);
+                border-radius:6px; padding:4px 12px; font-size:12px; font-weight:600; cursor:pointer; }
+    .btn-mini.ok { background:#1E7B34; color:#fff; border-color:#1E7B34; }
+
     /* ⚠ `hidden` NE MASQUE PAS un element dont une regle auteur pose un display.
        `.btn` est en `display:inline-flex` (public/style.css), donc `btn.hidden =
        true` etait un NO-OP : le bouton de saisie restait visible, y compris pour
@@ -205,7 +218,7 @@
     remarque:     'Remarque propreté',
     rien_signale: 'Propreté non évoquée'
   }
-  const SRC = { sms: 'SMS', email: 'Email', oral: 'De vive voix' }
+  const SRC = { sms: 'SMS', email: 'Email', oral: 'De vive voix', message: 'Messagerie' }
 
   // Appel API local, sur le motif de la messagerie : jeton de session et
   // `enteteCompte()` pour la delegation. Il LEVE sur reponse non-ok, comme
@@ -267,6 +280,22 @@
     return b ? b.name : 'Bien inconnu'
   }
 
+  // ⚠ Le bandeau n'apparait qu'avec le droit d'ECRITURE : un membre en lecture
+  // voit la detection mais ne peut pas trancher. Le serveur le revalide.
+  function bandeauDetection (a) {
+    if (a.statut !== 'detecte') return ''
+    const peut = window.peutEcrire ? window.peutEcrire('avis') : false
+    const actions = peut ? `
+        <div class="actions">
+          <button class="btn-mini ok" data-valider="${echapper(a.id)}" data-statut="confirme">Confirmer</button>
+          <button class="btn-mini" data-valider="${echapper(a.id)}" data-statut="ignore">Ignorer</button>
+        </div>` : ''
+    return `<div class="bandeau-detecte">
+        <span class="titre">Détecté dans un message</span>
+        <span>À confirmer avant d'être compté</span>${actions}
+      </div>`
+  }
+
   function ligneAvis (a, i) {
     const texte = a.content_public || a.content || ''
     const note = a.overall_score != null ? `${a.overall_score}/10` : ''
@@ -277,7 +306,8 @@
       ? `<div class="avis-extrait">« ${echapper(a.ai_clean_excerpt)} »</div>` : ''
     const long = texte.length > 160
     return `
-      <div class="avis-item">
+      <div class="avis-item ${a.statut === 'detecte' ? 'detecte' : ''}">
+        ${bandeauDetection(a)}
         <div class="avis-head">
           ${canal}
           <span>${echapper(nomBien(a.property_id_ref))}</span>
@@ -429,7 +459,22 @@
     })
     $('s-annuler').addEventListener('click', () => $('saisie-modal').classList.remove('show'))
     $('s-envoyer').addEventListener('click', envoyer)
-    $('liste').addEventListener('click', e => {
+    $('liste').addEventListener('click', async e => {
+      const id = e.target?.dataset?.valider
+      if (id) {
+        // Garde anti-double-clic : deux envois donneraient un 409 sur le second,
+        // et un message d'erreur pour une action qui a reussi.
+        if (e.target.disabled) return
+        e.target.disabled = true
+        try {
+          await appelAPI('avis', 'POST', { action: 'valider', id, statut: e.target.dataset.statut })
+          await charger()
+        } catch (err) {
+          e.target.disabled = false
+          alert((err && err.message) || 'Action impossible.')
+        }
+        return
+      }
       const i = e.target?.dataset?.plus
       if (i == null) return
       $('txt-' + i).classList.remove('replie')

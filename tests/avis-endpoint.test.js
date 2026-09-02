@@ -44,6 +44,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
         gte () { return chain }, order () { return chain }, limit () { return chain },
+        neq (c, v) { q._neq = q._neq || {}; q._neq[c] = v; return chain },
         is () { return chain }, not () { return chain },
         insert (row) { etat.ecritures.push({ table: nom, row }); q._row = row
                        return { select: () => ({ single: async () => ({ data: { id: 'nouvel-avis' }, error: null }) }) } },
@@ -66,10 +67,16 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
           // principale, la service key contournant la RLS — laissait les quatre
           // tests de lecture au vert. REVIEW.md §8 : un double de table porte
           // TOUTES les cles de la vraie table.
+          // ⚠ `statut` et `neq` sont honores comme le reste : sans eux, retirer
+          // le filtre des compteurs sur 'confirme' — donc faire compter des
+          // detections non validees — ne ferait echouer aucun test.
           let c = avis.filter(a =>
             (q._f.user_id == null || a.user_id === q._f.user_id) &&
             (q._f.property_id_ref == null || a.property_id_ref === q._f.property_id_ref) &&
-            (q._f.ai_clean_verdict == null || a.ai_clean_verdict === q._f.ai_clean_verdict))
+            (q._f.ai_clean_verdict == null || a.ai_clean_verdict === q._f.ai_clean_verdict) &&
+            (q._f.statut == null || (a.statut || 'confirme') === q._f.statut) &&
+            (q._f.id == null || a.id === q._f.id) &&
+            (!q._neq || !q._neq.statut || (a.statut || 'confirme') !== q._neq.statut))
           if (q._or) c = c.filter(a => String(q._or).includes(a.property_id_ref))
           if (q._count === 'exact') return Promise.resolve({ count: c.length, error: null })
           return Promise.resolve({ data: c, error: null })
@@ -123,10 +130,10 @@ function reponse () {
   return r
 }
 
-const AVIS_A = { id: 'r1', user_id: PROD, property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
-const AVIS_B = { id: 'r2', user_id: PROD, property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
+const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
+const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
 // Avis d'un AUTRE compte : il ne doit jamais apparaitre, quel que soit le filtre.
-const AVIS_TIERS = { id: 'r3', user_id: '33333333-3333-4333-8333-333333333333',
+const AVIS_TIERS = { id: 'r3', statut: 'confirme', user_id: '33333333-3333-4333-8333-333333333333',
                      property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: '2026-08-25T00:00:00Z' }
 
 function req (query = {}, body = null, method = 'GET') {
@@ -451,4 +458,113 @@ test('create : une date réelle passe toujours', async () => {
   assert.strictEqual(res.code, 201)
   const ligne = etat.ecritures.find(e => e.table === 'ota_reviews' && e.row.provider === 'manuel').row
   assert.ok(ligne.received_at.startsWith('2026-02-28'))
+})
+
+// ─── Validation d'une détection ─────────────────────────────────────────────
+const DETECTION = { id: '44444444-4444-4444-8444-444444444444', user_id: PROD,
+                    statut: 'detecte', property_id_ref: REF_A,
+                    ai_clean_verdict: 'remarque', received_at: '2026-08-29T00:00:00Z' }
+
+function reqValider (id, statut, extra = {}) {
+  return { method: 'POST', query: {}, body: { action: 'valider', id, statut },
+           headers: { authorization: 'Bearer jeton', ...extra } }
+}
+
+test('valider : une détection passe en confirmé', async () => {
+  const etat = preparer({ avis: [DETECTION] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider(DETECTION.id, 'confirme'), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
+  assert.strictEqual(maj.row.statut, 'confirme')
+})
+
+test('valider : un membre avis=read ne peut PAS valider', async () => {
+  // Confirmer une détection, c'est décider qu'un reproche remontera un jour à
+  // la prestataire. C'est une écriture.
+  const etat = preparer({
+    user: MEMBRE, avis: [DETECTION],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider(DETECTION.id, 'confirme', { 'x-compte': PROD }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('valider : une détection hors périmètre est refusée', async () => {
+  // L'id vient du client : sans relecture, un membre validerait une détection
+  // d'un bien qu'il n'a pas le droit de voir (REVIEW.md règle 11).
+  const etat = preparer({
+    user: MEMBRE, avis: [{ ...DETECTION, property_id_ref: REF_B }],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'write', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider(DETECTION.id, 'confirme', { 'x-compte': PROD }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('valider : on ne revalide pas ce qui est déjà tranché', async () => {
+  // Rouvrir une décision prise doit être un geste explicite, pas l'effet de bord
+  // d'un double clic.
+  const etat = preparer({ avis: [{ ...DETECTION, statut: 'confirme' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider(DETECTION.id, 'ignore'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('valider : un statut inventé est refusé', async () => {
+  const etat = preparer({ avis: [DETECTION] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider(DETECTION.id, 'supprime'), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('valider : un id qui n\'est pas un UUID est refusé sans requête', async () => {
+  const etat = preparer({ avis: [DETECTION] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider('../../etc', 'confirme'), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+// ─── Les compteurs ne comptent que les confirmés ────────────────────────────
+test('list : une détection en attente ne compte pas dans les remarques', async () => {
+  // La faire compter reviendrait à reprocher à la prestataire quelque chose que
+  // l'hôte n'a pas validé.
+  preparer({ avis: [DETECTION] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.body.remarques30j, 0)
+})
+
+test('list : une détection en attente est bien VISIBLE dans la liste', async () => {
+  // Elle ne compte pas, mais elle doit s'afficher : sinon l'hôte n'a aucun moyen
+  // de la valider.
+  preparer({ avis: [DETECTION] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.body.avis.length, 1)
+  assert.strictEqual(res.body.avis[0].statut, 'detecte')
+})
+
+test('list : une détection ignorée disparaît de la liste', async () => {
+  preparer({ avis: [{ ...DETECTION, statut: 'ignore' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.body.avis.length, 0)
 })

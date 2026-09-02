@@ -22,6 +22,10 @@
 //   (cœur de données). Cadence 1x/24h par marqueur cron_logs, marqueur posé AVANT
 //   le travail et budget mur de 20 s : un poll qui déborderait ne doit jamais
 //   repartir à chaque tick de 5 min.
+// Session #31 (fin) : detection des signalements de propreté dans les messages
+//   ENTRANTS des voyageurs. Un « je ne voulais pas le marquer sur Airbnb mais
+//   vous devriez contrôler le travail de la femme de ménage » n'existe nulle
+//   part ailleurs. Cadence horaire, curseur sur messages.created_at.
 // Session #31 (suite) : classification de la propreté dans les avis. Deux étages —
 //   une règle déterministe sur les tags Airbnb d'abord, Haiku seulement sur ce
 //   qu'elle ne tranche pas. Mêmes garde-fous que le poll — marqueur posé avant
@@ -41,6 +45,7 @@ const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { pollChannelReviews } = require('../lib/cron-channel-reviews')
 const { classerAvis } = require('../lib/cron-reviews-classify')
+const { classerMessages } = require('../lib/cron-messages-classify')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -97,6 +102,7 @@ module.exports = async function handler(req, res) {
     totalChannelRevisions: 0,
     totalChannelReviews: 0,
     totalReviewsClassified: 0,
+    totalMessagesClassified: 0,
     totalBeds24Materialized: 0,
     circuitBreakerTriggered: 0,
     errors: []
@@ -222,6 +228,19 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur classification avis:', err.message)
       results.errors.push({ context: 'reviews_classify', error: err.message })
+    }
+
+    // 4septies. Détection des signalements de propreté dans les messages
+    // ENTRANTS. Aucune règle déterministe possible (ni tag ni note sur un
+    // message), donc tout passe par Haiku — le volume réel, ~5,5 messages
+    // entrants par jour, le permet largement.
+    // ⚠ Les messages SORTANTS ne sont jamais analysés : une réponse de l'hôte
+    // n'est pas un signalement. Le curseur porte sur created_at et non sent_at,
+    // pour qu'un message importé tardivement soit vu.
+    try { await chrono.mesure('detection_messages', () => classerMessages(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur détection messages:', err.message)
+      results.errors.push({ context: 'messages_classify', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

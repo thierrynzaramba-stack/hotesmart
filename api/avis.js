@@ -21,6 +21,7 @@ const supabase = createClient(
 )
 
 const MAX_LIGNES  = 500
+const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SOURCES     = new Set(['sms', 'email', 'oral'])
 const MAX_TEXTE   = 5000
 const FENETRE_JRS = 30
@@ -43,7 +44,7 @@ const FENETRE_JRS = 30
 // pages/avis.html n'a rien a y faire.
 const CHAMPS = `id, provider, source, ota, content, content_public,
   overall_score, received_at, ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
-  property_id_ref`
+  property_id_ref, statut`
 
 // ─── Lecture ────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,8 @@ async function lister (req, res, garde) {
   // fonctionne mais se lit mal, et invite a une erreur d'ordre au prochain
   // ajout.
   let q = supabase.from('ota_reviews').select(CHAMPS).eq('user_id', userId)
+    // Les detections ecartees par l'hote disparaissent : il a tranche.
+    .neq('statut', 'ignore')
   if (bienDemande) q = q.eq('property_id_ref', bienDemande)
   else if (filtre) q = q.or(filtre)
   q = q.order('received_at', { ascending: false, nullsFirst: false }).limit(MAX_LIGNES)
@@ -104,6 +107,10 @@ async function lister (req, res, garde) {
   let qc = supabase.from('ota_reviews')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId).eq('ai_clean_verdict', 'remarque')
+    // ⚠ Seuls les CONFIRMES comptent. Une detection en attente de validation
+    // n'est pas un fait : la faire entrer dans l'indicateur reviendrait a
+    // reprocher a la prestataire quelque chose que l'hote n'a pas valide.
+    .eq('statut', 'confirme')
   if (bienDemande) qc = qc.eq('property_id_ref', bienDemande)
   else if (filtre) qc = qc.or(filtre)
   const { count } = await qc.gte('received_at', depuis)
@@ -252,6 +259,49 @@ async function creer (req, res, garde) {
   return res.status(201).json({ ok: true, id: cree.id, verdict: verdict ? verdict.verdict : null })
 }
 
+// ─── Validation d'une detection ─────────────────────────────────────────────
+
+const STATUTS_CIBLES = new Set(['confirme', 'ignore'])
+
+async function valider (req, res, garde) {
+  const userId = garde.accountUserId
+  const id = req.body?.id ? String(req.body.id).trim() : ''
+  const statut = req.body?.statut ? String(req.body.statut).trim() : ''
+
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Identifiant invalide' })
+  if (!STATUTS_CIBLES.has(statut)) return res.status(400).json({ error: 'Statut invalide' })
+
+  // ⚠ La ligne est relue AVANT d'etre modifiee, sur le compte cible et dans le
+  // perimetre. Un update direct par id aurait laisse un membre valider une
+  // detection d'un bien hors de son perimetre — l'id vient du client
+  // (REVIEW.md regle 11).
+  const { data: ligne, error: errLire } = await supabase.from('ota_reviews')
+    .select('id, statut, property_id_ref')
+    .eq('id', id).eq('user_id', userId).maybeSingle()
+  if (errLire) return res.status(500).json({ error: 'Lecture impossible' })
+  if (!ligne) return res.status(404).json({ error: 'Introuvable' })
+
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(ligne.property_id_ref))) {
+    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+  }
+
+  // On ne valide QUE ce qui est en attente. Reconfirmer un avis OTA n'a pas de
+  // sens, et rouvrir une decision deja prise doit etre un geste explicite, pas
+  // un effet de bord d'un double clic.
+  if (ligne.statut !== 'detecte') {
+    return res.status(409).json({ error: 'Cette entree n\'est pas en attente de validation' })
+  }
+
+  const { error } = await supabase.from('ota_reviews')
+    .update({ statut }).eq('id', id).eq('user_id', userId)
+  if (error) {
+    console.error('[avis] validation echec:', error.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  return res.status(200).json({ ok: true, statut })
+}
+
 // ─── Routage ────────────────────────────────────────────────────────────────
 
 module.exports = async function handler (req, res) {
@@ -269,6 +319,15 @@ module.exports = async function handler (req, res) {
 
 async function router (req, res) {
   const action = String(req.query?.action || req.body?.action || 'list')
+
+  // `valider` change l'etat d'une detection : ecriture.
+  if (action === 'valider') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
+    const garde = await requirePermission(req, res, {
+      domaine: 'avis', niveau: 'write', compteDelegue: true })
+    if (!garde.ok) return
+    return await valider(req, res, garde)
+  }
 
   // ⚠ `sejours` exige `write`, pas `read`, alors qu'il ne fait que LIRE.
   // Il renvoie le nom des voyageurs et leurs dates de sejour : en `read`, un
