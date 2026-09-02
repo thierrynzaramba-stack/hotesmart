@@ -71,13 +71,43 @@ function validerPermissions (brut, estTitulaireCible) {
 // Les biens du perimetre doivent appartenir AU COMPTE. Sans ce controle, le
 // titulaire pourrait rattacher un profil au bien d'un autre compte, et ce profil
 // lirait des donnees qui ne sont pas les siennes.
+// ⚠ TROIS CAS A NE PAS CONFONDRE :
+//  - le bien appartient au compte           -> retenu
+//  - le bien appartient a UN AUTRE compte   -> REFUS (c'est la tentative)
+//  - le bien n'existe plus                  -> ignore silencieusement
+//
+// Le troisieme cas n'est pas theorique : un bien supprime laisse son UUID dans
+// le perimetre du profil. Le refuser comme un bien etranger rendait ce profil
+// DEFINITIVEMENT non enregistrable — la page ne propose aucune case pour un bien
+// qui n'existe plus, donc aucun moyen de retirer l'identifiant fautif.
 async function verifierBiens (ids, compte) {
-  if (!ids.length) return { ok: true, refs: [] }
+  if (!ids.length) return { ok: true, ids: [], refs: [] }
   const { data, error } = await supabase
-    .from('properties').select('id, provider_property_id').eq('user_id', compte).in('id', ids)
+    .from('properties').select('id, user_id, provider_property_id').in('id', ids)
   if (error) { console.error('[membres] lecture biens', error.message); return { ok: false, code: 500 } }
-  if ((data || []).length !== ids.length) return { ok: false, code: 403 }
-  return { ok: true, refs: (data || []).map(b => b.provider_property_id).filter(Boolean).map(String) }
+
+  const trouves = data || []
+  if (trouves.some(b => String(b.user_id) !== String(compte))) return { ok: false, code: 403 }
+
+  const disparus = ids.filter(id => !trouves.some(b => String(b.id) === String(id)))
+  if (disparus.length) console.log(`[membres] ${disparus.length} bien(s) du perimetre n'existent plus, ignore(s)`)
+
+  return {
+    ok: true,
+    ids:  trouves.map(b => String(b.id)),
+    refs: trouves.map(b => b.provider_property_id).filter(Boolean).map(String)
+  }
+}
+
+// ⚠ Un acces par LIEN dont le perimetre se resout a zero reference est refuse.
+// Deux chemins y menent : le titulaire coche « une selection » sans cocher aucun
+// bien, ou les biens coches n'ont pas encore de provider_property_id. Dans les
+// deux cas, ecrire une liste vide dans public_tokens signifierait « tous les
+// biens » — l'exact contraire de l'intention. On le dit, plutot que de deviner.
+function perimetrePwaExploitable (scope, refs) {
+  if (scope !== 'selected') return null
+  if (refs.length) return null
+  return 'Sélectionnez au moins un bien déjà connecté au PMS : sans cela, ce prestataire ne pourrait voir aucun ménage.'
 }
 
 // Le profil vise appartient-il bien au compte de l'appelant ?
@@ -161,6 +191,9 @@ async function creer (req, res, compte, base) {
     return res.status(biens.code).json({ error: biens.code === 403 ? 'Bien hors du compte' : 'Erreur lecture' })
   }
 
+  const refusPwa = mode === 'lien' && perimetrePwaExploitable(v.permissions.property_scope, biens.refs)
+  if (refusPwa) return res.status(400).json({ error: refusPwa })
+
   const maintenant = new Date()
   const ligne = {
     account_user_id: compte,
@@ -192,7 +225,7 @@ async function creer (req, res, compte, base) {
   }
 
   const { error: ePerm } = await supabase.from('profile_permissions').insert({
-    profile_id: cree.id, account_user_id: compte, ...v.permissions
+    profile_id: cree.id, account_user_id: compte, ...v.permissions, property_ids: biens.ids
   })
   if (ePerm) {
     // ⚠ Un profil SANS ligne de droits serait un acces au comportement indefini.
@@ -221,12 +254,27 @@ async function creer (req, res, compte, base) {
 // le meme jeton et le meme perimetre, sinon le prestataire a un lien qui ouvre
 // sur rien — ou sur trop.
 async function synchroniserTokenPwa (profil, refs, scope, compte) {
+  // ⚠ REFUS D'AGIR SUR UN PROFIL DESACTIVE. Sans ce garde-fou, enregistrer un
+  // droit ou regenerer un lien sur un profil coupe RECREAIT sa ligne
+  // public_tokens : l'acces revenait alors que l'interface affichait toujours
+  // « Désactivé », et la PWA n'interroge que public_tokens — rien n'aurait
+  // rattrape l'ecart.
+  if (profil.active === false) {
+    console.log('[membres] profil desactive : aucune ligne PWA recreee')
+    return true
+  }
+
   const ligne = {
     user_id:         compte,
     token:           profil.pwa_token,
     label:           [profil.first_name, profil.last_name].filter(Boolean).join(' '),
-    // Perimetre « tous les biens » : le tableau vide est la convention deja en
-    // place cote PWA pour « aucune restriction ».
+    // ⚠ SEMANTIQUE DU VIDE, INVERSEE ENTRE LES DEUX TABLES.
+    // Dans public_tokens, une liste VIDE veut dire « aucune restriction », donc
+    // TOUS les biens (api/menages-public.js). Dans profile_permissions, un
+    // 'selected' vide veut dire ZERO bien. Ecrire l'un dans l'autre sans y penser
+    // donnait a un prestataire cense voir deux biens la totalite du compte.
+    // Le cas est donc REFUSE en amont (voir perimetrePwaExploitable) : on
+    // n'arrive jamais ici avec `selected` et une liste vide.
     property_ids:    scope === 'selected' ? refs : [],
     visibility_days: VISIBILITE_PWA_JOURS
   }
@@ -276,6 +324,11 @@ async function modifier (req, res, compte) {
     return res.status(biens.code).json({ error: biens.code === 403 ? 'Bien hors du compte' : 'Erreur lecture' })
   }
 
+  if (cible.profil.access_mode === 'lien' && cible.profil.active !== false) {
+    const refus = perimetrePwaExploitable(v.permissions.property_scope, biens.refs)
+    if (refus) return res.status(400).json({ error: refus })
+  }
+
   const maj = {}
   if (b.first_name != null) {
     const prenom = String(b.first_name).trim()
@@ -295,10 +348,18 @@ async function modifier (req, res, compte) {
     if (error) { console.error('[membres] update profil', error.message); return res.status(500).json({ error: 'Enregistrement impossible' }) }
   }
 
-  const { error: ePerm } = await supabase.from('profile_permissions')
-    .update({ ...v.permissions, updated_at: new Date().toISOString() })
+  // ⚠ On reecrit le perimetre NETTOYE des biens disparus, et on verifie qu'une
+  // ligne a bien ete touchee : un `update` qui ne correspond a rien ne leve pas
+  // d'erreur, et l'hote lisait « Droits enregistrés » sans que rien ne change.
+  const { data: majDroits, error: ePerm } = await supabase.from('profile_permissions')
+    .update({ ...v.permissions, property_ids: biens.ids, updated_at: new Date().toISOString() })
     .eq('profile_id', cible.profil.id)
+    .select('profile_id')
   if (ePerm) { console.error('[membres] update droits', ePerm.message); return res.status(500).json({ error: 'Enregistrement impossible' }) }
+  if (!majDroits || !majDroits.length) {
+    console.error('[membres] aucune ligne de droits pour le profil', cible.profil.id)
+    return res.status(500).json({ error: 'Enregistrement impossible : droits introuvables' })
+  }
 
   // Perimetre change sur un prestataire : la PWA doit suivre dans le meme appel.
   if (cible.profil.access_mode === 'lien' && cible.profil.pwa_token) {
@@ -334,11 +395,25 @@ async function basculerActivite (req, res, compte, actif) {
         return res.status(500).json({ error: 'Désactivation impossible : le lien n’a pas pu être coupé' })
       }
     } else {
-      const { data: droits } = await supabase.from('profile_permissions')
+      // ⚠ `droits?.property_scope || 'all'` sur une lecture non verifiee etait un
+      // ECHEC OUVERT : une panne PostgREST transitoire donnait `undefined`, donc
+      // « tous les biens », et le prestataire restreint recevait le compte entier
+      // dans sa PWA — en silence. Une panne n'est pas une absence.
+      const { data: droits, error: eDroits } = await supabase.from('profile_permissions')
         .select('property_scope, property_ids').eq('profile_id', cible.profil.id).maybeSingle()
-      const biens = await verifierBiens((droits?.property_ids || []).map(String), compte)
+      if (eDroits || !droits) {
+        console.error('[membres] lecture droits pour reactivation', eDroits?.message || 'ligne absente')
+        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      const biens = await verifierBiens((droits.property_ids || []).map(String), compte)
       if (!biens.ok) return res.status(500).json({ error: 'Réactivation impossible' })
-      const ok = await synchroniserTokenPwa(cible.profil, biens.refs, droits?.property_scope || 'all', compte)
+      const refus = perimetrePwaExploitable(droits.property_scope, biens.refs)
+      if (refus) {
+        await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
+        return res.status(400).json({ error: refus })
+      }
+      const ok = await synchroniserTokenPwa({ ...cible.profil, active: true }, biens.refs, droits.property_scope, compte)
       if (!ok) {
         await supabase.from('profiles').update({ active: false }).eq('id', cible.profil.id)
         return res.status(500).json({ error: 'Réactivation impossible : lien non rétabli' })
@@ -375,6 +450,11 @@ async function regenerer (req, res, compte, base) {
   const cible = await chargerCible((req.body || {}).profile_id, compte)
   if (cible.erreur) return res.status(cible.erreur).json({ error: messageErreur(cible.erreur) })
   if (cible.profil.is_owner) return res.status(403).json({ error: 'Sans objet pour le titulaire' })
+  // ⚠ Regenerer sur un profil DESACTIVE recreait sa ligne public_tokens : l'acces
+  // revenait sans reactivation explicite, badge « Désactivé » toujours affiche.
+  if (cible.profil.active === false) {
+    return res.status(409).json({ error: 'Ce profil est désactivé : réactivez-le d’abord.' })
+  }
 
   const jeton = nouveauJeton()
 
@@ -383,13 +463,23 @@ async function regenerer (req, res, compte, base) {
     const { error } = await supabase.from('profiles').update({ pwa_token: jeton }).eq('id', cible.profil.id)
     if (error) { console.error('[membres] regen pwa', error.message); return res.status(500).json({ error: 'Régénération impossible' }) }
 
-    const { data: droits } = await supabase.from('profile_permissions')
+    // Meme regle qu'a la reactivation : une lecture en echec ne doit pas se
+    // traduire par « tous les biens ».
+    const { data: droits, error: eDroits } = await supabase.from('profile_permissions')
       .select('property_scope, property_ids').eq('profile_id', cible.profil.id).maybeSingle()
-    const biens = await verifierBiens((droits?.property_ids || []).map(String), compte)
-    if (!biens.ok) return res.status(500).json({ error: 'Régénération impossible' })
+    if (eDroits || !droits) {
+      console.error('[membres] lecture droits pour regeneration', eDroits?.message || 'ligne absente')
+      await supabase.from('profiles').update({ pwa_token: ancien }).eq('id', cible.profil.id)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    const biens = await verifierBiens((droits.property_ids || []).map(String), compte)
+    if (!biens.ok) {
+      await supabase.from('profiles').update({ pwa_token: ancien }).eq('id', cible.profil.id)
+      return res.status(500).json({ error: 'Régénération impossible' })
+    }
 
     const ok = await synchroniserTokenPwa({ ...cible.profil, pwa_token: jeton },
-                                          biens.refs, droits?.property_scope || 'all', compte)
+                                          biens.refs, droits.property_scope, compte)
     if (!ok) {
       await supabase.from('profiles').update({ pwa_token: ancien }).eq('id', cible.profil.id)
       return res.status(500).json({ error: 'Régénération impossible' })
@@ -512,6 +602,14 @@ module.exports = async function handler (req, res) {
   const action = String(req.query?.action || (req.body || {}).action || '').trim()
   if (!ACTIONS.has(action)) return res.status(400).json({ error: 'Action inconnue' })
 
+  // ⚠ `preview` PRECEDE la verification de session, et c'est tout l'enjeu du
+  // parcours : l'invite qui ouvre le lien ne s'est JAMAIS connecte chez
+  // HoteSmart. Exiger une session ici lui repondait 401, et la page d'invitation
+  // affichait « Demandez une nouvelle invitation » au lieu de lui proposer de se
+  // connecter. Le jeton EST l'autorisation : il ne revele que le prenom du
+  // titulaire et celui de l'invite, a qui detient deja le lien.
+  if (action === 'preview') return await apercu(req, res)
+
   const appelant = await verifierSession(req, res)
   if (!appelant) return
 
@@ -522,10 +620,9 @@ module.exports = async function handler (req, res) {
   const base = (process.env.PUBLIC_BASE_URL || `https://${req.headers.host || 'hotesmart.vercel.app'}`)
     .replace(/\/+$/, '')
 
-  // `preview` et `accept` sont HORS du domaine `equipe` : celui qui les appelle
-  // n'est pas encore membre du compte. C'est le jeton qui designe le compte.
-  if (action === 'preview') return await apercu(req, res)
-  if (action === 'accept')  return await accepter(req, res, appelant)
+  // `accept` est hors du domaine `equipe` : celui qui l'appelle n'est pas encore
+  // membre du compte. Il est authentifie, et c'est le JETON qui designe le compte.
+  if (action === 'accept') return await accepter(req, res, appelant)
 
   const garde = await requirePermission(req, res, {
     domaine: 'equipe',

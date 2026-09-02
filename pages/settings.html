@@ -97,6 +97,11 @@
 
   <div id="msg" class="msg"></div>
 
+  <!-- ⚠ Cette zone ne s'affiche PAS aujourd'hui, et c'est normal : sans sélecteur
+       de compte (étape 5), un appelant est toujours titulaire de son propre
+       compte, donc le domaine `equipe` lui est ouvert — sur SON compte, pas sur
+       celui dont il serait membre. Elle est prête pour l'étape 5, qui pourra
+       cibler un autre compte et recevra alors un vrai refus. -->
   <div id="zone-refus" style="display:none">
     <div class="card">
       <div class="card-title">Réservé au titulaire du compte</div>
@@ -157,6 +162,10 @@
       <option value="selected">Une sélection de biens</option>
     </select>
     <div class="biens" id="f-biens"></div>
+    <div class="note" id="note-perimetre" style="display:none">
+      Un accès par lien demande au moins un bien coché, déjà connecté au PMS : l’application
+      prestataire ne saurait pas quoi afficher autrement.
+    </div>
 
     <label class="f">Droits par domaine</label>
     <div id="f-domaines"></div>
@@ -306,18 +315,30 @@ function rendrePanneau () {
   const biensEl = $('f-biens')
   biensEl.style.display = brouillon.property_scope === 'selected' ? 'grid' : 'none'
   biensEl.innerHTML = ''
-  biens.forEach(b => {
+
+  const caseBien = (id, libelle, disparu) => {
     const l = document.createElement('label'); l.className = 'bien'
+    if (disparu) { l.style.opacity = '.7'; l.title = 'Ce bien n’existe plus' }
     const c = document.createElement('input'); c.type = 'checkbox'
-    c.checked = (brouillon.property_ids || []).includes(b.id)
+    c.checked = (brouillon.property_ids || []).includes(id)
     c.onchange = () => {
       const s = new Set(brouillon.property_ids || [])
-      c.checked ? s.add(b.id) : s.delete(b.id)
+      c.checked ? s.add(id) : s.delete(id)
       brouillon.property_ids = [...s]
+      if (disparu) rendrePanneau()
     }
-    l.appendChild(c); l.appendChild(document.createTextNode(b.name || b.id))
+    l.appendChild(c); l.appendChild(document.createTextNode(libelle))
     biensEl.appendChild(l)
-  })
+  }
+
+  biens.forEach(b => caseBien(b.id, b.name || b.id, false))
+
+  // ⚠ Un bien SUPPRIME reste dans le perimetre enregistre. Sans case pour lui, le
+  // titulaire n'avait aucun moyen de le retirer — et l'identifiant repartait tel
+  // quel a chaque enregistrement. On l'affiche donc, decochable.
+  const connus = new Set(biens.map(b => b.id))
+  ;(brouillon.property_ids || []).filter(id => !connus.has(id))
+    .forEach(id => caseBien(id, 'Bien supprimé', true))
 
   const dom = $('f-domaines'); dom.innerHTML = ''
   DOMAINES.forEach(([cle, nom, aide]) => {
@@ -353,6 +374,10 @@ function rendrePanneau () {
     v => { brouillon.self_view_reviews = v === 'oui'; rendrePanneau() },
     [['non', 'Non'], ['oui', 'Oui']]))
   self.appendChild(d2)
+
+  const modeCourant = edite ? edite.access_mode : $('f-mode').value
+  $('note-perimetre').style.display =
+    (modeCourant === 'lien' && brouillon.property_scope === 'selected') ? 'block' : 'none'
 
   rendreAcces()
 }
@@ -491,6 +516,7 @@ $('btn-annuler').onclick = fermer
 $('btn-enregistrer').onclick = enregistrer
 $('overlay').onclick = e => { if (e.target === $('overlay')) fermer() }
 $('f-scope').onchange = () => { brouillon.property_scope = $('f-scope').value; rendrePanneau() }
+$('f-mode').onchange = () => rendrePanneau()
 $('liste').onclick = e => {
   const id = e.target?.dataset?.ouvrir
   if (id) ouvrir(profils.find(p => p.id === id))

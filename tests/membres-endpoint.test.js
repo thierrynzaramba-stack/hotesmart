@@ -40,12 +40,18 @@ const TEST = { id: 'p-test', account_user_id: PROD, member_user_id: MEMBRE, firs
 
 const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/membres']
 
+const EN_ATTENTE_REF = { id: 'p-attente', account_user_id: PROD, member_user_id: null,
+                         first_name: 'Invité', email: 'invite@exemple.fr', access_mode: 'compte',
+                         is_owner: false, active: true, accepted_at: null, pwa_token: null,
+                         invite_token: 'jeton-valide',
+                         invite_expires_at: new Date(Date.now() + 6 * 86400000).toISOString() }
+
 const DANS_7_JOURS = () => new Date(Date.now() + 6 * 86400000).toISOString()
 const HIER = () => new Date(Date.now() - 86400000).toISOString()
 
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
                      profils = [OWNER, REGINA, TEST], tokensPwa = [{ id: 'pt1', token: 'jeton-regina' }],
-                     erreurs = {} } = {}) {
+                     erreurs = {}, biensSansRef = false } = {}) {
   const etat = { ecritures: [], suppressions: [] }
 
   const client = {
@@ -94,6 +100,7 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
             (q._f.user_id == null || b.user_id === q._f.user_id) &&
             (q._f.id == null || b.id === q._f.id) &&
             (q._in == null || q._in.c !== 'id' || q._in.v.includes(b.id)))
+            .map(b => biensSansRef ? { ...b, provider_property_id: null } : b)
           return { data: tableau ? rows : (rows[0] || null), error: null }
         }
         if (nom === 'profiles') {
@@ -108,6 +115,14 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
           return { data: tableau ? rows : (rows[0] || null), error: null }
         }
         if (nom === 'profile_permissions') {
+          // `update(...).eq(...).select()` renvoie les lignes touchees : l'endpoint
+          // s'en sert pour distinguer « enregistre » de « aucune ligne ».
+          if (q._maj) {
+            return { data: erreurs['profile_permissions:vide'] ? [] : [{ profile_id: q._f.profile_id }], error: null }
+          }
+          if (erreurs['profile_permissions:lecture']) {
+            return { data: null, error: { message: 'timeout' } }
+          }
           if (q._f.profile_id === 'p-regina') {
             return { data: { property_scope: 'selected', property_ids: [BIEN_A.id, BIEN_B.id] }, error: null }
           }
@@ -482,6 +497,151 @@ test('acceptation : le compte cible vient du JETON, jamais du corps de requete',
   assert.strictEqual(res.code, 200)
   const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
   assert.strictEqual(maj.filtres.id, 'p-attente', 'le profil vise vient du jeton')
+})
+
+// ─── Correctifs de review : le parcours et la coupure d'acces ───────────────
+
+test('APERCU : un invite NON CONNECTE peut lire l\'invitation', async () => {
+  // ⚠ Le cas NOMINAL : l'invite ne s'est jamais connecte chez HoteSmart. Exiger
+  // une session ici lui repondait 401, et la page affichait « Demandez une
+  // nouvelle invitation » au lieu de lui proposer de se connecter. Toute la
+  // branche « se connecter / creer un compte » etait inatteignable.
+  preparer({ user: null, profils: [OWNER, EN_ATTENTE_REF] })
+  const res = reponse()
+  await require('../api/membres')({ method: 'POST', headers: {}, query: {},
+    body: { action: 'preview', token: 'jeton-valide' } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.invite, 'Invité')
+  assert.ok(res.body.compte)
+})
+
+test('APERCU : ne divulgue ni jeton ni email du titulaire', async () => {
+  preparer({ user: null, profils: [OWNER, EN_ATTENTE_REF] })
+  const res = reponse()
+  await require('../api/membres')({ method: 'POST', headers: {}, query: {},
+    body: { action: 'preview', token: 'jeton-valide' } }, res)
+  const brut = JSON.stringify(res.body)
+  assert.ok(!brut.includes('jeton-valide'))
+  assert.ok(!brut.includes('jeton-regina'))
+})
+
+test('APERCU : jeton expire -> 410, aucune information', async () => {
+  preparer({ user: null, profils: [OWNER, { ...EN_ATTENTE_REF, invite_expires_at: HIER() }] })
+  const res = reponse()
+  await require('../api/membres')({ method: 'POST', headers: {}, query: {},
+    body: { action: 'preview', token: 'jeton-valide' } }, res)
+  assert.strictEqual(res.code, 410)
+  assert.ok(!JSON.stringify(res.body).includes('Thierry'))
+})
+
+test('COUPURE : enregistrer des droits sur un profil DESACTIVE ne ressuscite pas son lien', async () => {
+  // ⚠ La desactivation retire la ligne public_tokens mais garde pwa_token. Sans
+  // garde, le prochain enregistrement la RECREAIT : l'acces revenait alors que
+  // l'interface affichait toujours « Désactivé », et la PWA n'interroge pas
+  // profiles — rien n'aurait rattrape l'ecart.
+  const etat = preparer({ user: PROD,
+    profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'),
+    'aucune ligne PWA ne doit etre recreee pour un profil desactive')
+})
+
+test('COUPURE : regenerer le lien d\'un profil DESACTIVE est refuse', async () => {
+  const etat = preparer({ user: PROD,
+    profils: [OWNER, { ...REGINA, active: false }], tokensPwa: [] })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'regenerate', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 409)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('PERIMETRE : « une sélection » sans aucun bien est REFUSEE pour un lien PWA', async () => {
+  // ⚠ INVERSION DE SENS entre les deux tables : dans public_tokens une liste vide
+  // veut dire « tous les biens ». Ecrire un `selected` vide y donnait au
+  // prestataire l'integralite du compte — l'exact contraire de l'intention.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /au moins un bien/)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('PERIMETRE : des biens sans provider_property_id sont refuses pour un lien PWA', async () => {
+  // Meme piege par un autre chemin : les biens existent, mais aucun n'a de
+  // reference canal — `refs` est vide, donc « tous les biens » cote PWA.
+  const etat = preparer({ user: PROD, biensSansRef: true })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('PERIMETRE : un acces par COMPTE accepte une selection vide (aucun bien)', async () => {
+  // Pas de public_tokens en jeu : `selected` vide y veut bien dire zero bien,
+  // et filtrePerimetreSql le traduit correctement.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Sans bien', email: 's@b.fr', access_mode: 'compte',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
+  assert.strictEqual(res.code, 200)
+  void etat
+})
+
+test('BIEN SUPPRIME : le profil reste enregistrable, l\'identifiant disparu est retire', async () => {
+  // ⚠ Un bien supprime laisse son UUID dans le perimetre. Le traiter comme un
+  // bien etranger rendait le profil DEFINITIVEMENT non enregistrable : la page ne
+  // propose aucune case pour un bien qui n'existe plus.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test',
+    permissions: { ...droitsVides(), property_scope: 'selected',
+                   property_ids: [BIEN_A.id, '11111111-2222-3333-4444-555555555555'] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.deepStrictEqual(maj.row.property_ids, [BIEN_A.id],
+    'le perimetre enregistre ne garde que les biens qui existent')
+})
+
+test('BIEN ETRANGER : toujours refuse, lui', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_TIERS.id] } } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('PANNE : une lecture des droits en echec ne donne PAS « tous les biens »', async () => {
+  // `droits?.property_scope || 'all'` etait un echec OUVERT : un incident
+  // transitoire elargissait le perimetre du prestataire en silence.
+  const etat = preparer({ user: PROD, profils: [OWNER, { ...REGINA, active: false }],
+                          erreurs: { 'profile_permissions:lecture': true } })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'reactivate', profile_id: 'p-regina' } }), res)
+  assert.strictEqual(res.code, 503)
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'),
+    'aucune ligne PWA ne doit etre ecrite sur une panne')
+})
+
+test('DROITS INTROUVABLES : l\'enregistrement echoue au lieu d\'annoncer un succes', async () => {
+  const etat = preparer({ user: PROD, erreurs: { 'profile_permissions:vide': true } })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test', permissions: droitsVides() } }), res)
+  assert.strictEqual(res.code, 500)
+  void etat
 })
 
 // ─── Divers ─────────────────────────────────────────────────────────────────
