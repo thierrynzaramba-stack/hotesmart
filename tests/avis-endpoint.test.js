@@ -86,7 +86,21 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
                               profil.member_user_id === q._f.member_user_id
           return Promise.resolve({ data: ok ? [profil] : [], error: null })
         }
-        if (nom === 'profile_permissions') return Promise.resolve({ data: permissions ? [permissions] : [], error: null })
+        if (nom === 'profile_permissions') {
+          // ⚠ LA TABLE EST MODELISEE, pas seulement la ligne attendue.
+          //
+          // Tolerer l'absence de filtre (`profile_id == null` -> on renvoie
+          // quand meme) ne suffit PAS : retirer `.eq('profile_id', profil.id)`
+          // du vrai code laissait encore tous les tests au vert. En base, une
+          // requete sans ce filtre rend la PREMIERE ligne venue — celle d'un
+          // autre profil. On modelise donc une ligne LEURRE, tres permissive :
+          // sans filtre, c'est elle qui sort, et les tests de refus echouent.
+          const LEURRE = { profile_id: 'profil-tiers', avis: 'write', property_scope: 'all' }
+          const table = [LEURRE]
+          if (permissions && profil) table.push({ ...permissions, profile_id: profil.id })
+          const c = table.filter(r => q._f.profile_id == null || r.profile_id === q._f.profile_id)
+          return Promise.resolve({ data: c, error: null })
+        }
         return Promise.resolve({ data: [], error: null })
       }
       return chain
@@ -132,7 +146,7 @@ test('list : le titulaire voit les avis de tous ses biens', async () => {
 test('list : un membre avis=none est refusé', async () => {
   preparer({
     user: MEMBRE, avis: [AVIS_A],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'none', property_scope: 'all' }
   })
   const handler = require('../api/avis')
@@ -144,7 +158,7 @@ test('list : un membre avis=none est refusé', async () => {
 test('list : un membre limité à un bien ne voit que le sien', async () => {
   preparer({
     user: MEMBRE, avis: [AVIS_A, AVIS_B],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
   })
   const handler = require('../api/avis')
@@ -159,7 +173,7 @@ test('list : demander un bien HORS périmètre est refusé, pas silencieusement 
   // passant sa référence dans l'URL.
   preparer({
     user: MEMBRE, avis: [AVIS_A, AVIS_B],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
   })
   const handler = require('../api/avis')
@@ -172,7 +186,7 @@ test('list : demander un bien HORS périmètre est refusé, pas silencieusement 
 test('create : un membre avis=read ne peut PAS saisir', async () => {
   const etat = preparer({
     user: MEMBRE,
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'read', property_scope: 'all' }
   })
   const handler = require('../api/avis')
@@ -217,7 +231,7 @@ test('create : deux saisies produisent deux identifiants distincts', async () =>
 test('create : un bien hors périmètre est refusé', async () => {
   const etat = preparer({
     user: MEMBRE,
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'write', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
   })
   const handler = require('../api/avis')
@@ -279,7 +293,7 @@ test('create : un séjour d\'un AUTRE bien ne rattache rien, et ne bloque pas', 
 test('sejours : un bien hors périmètre est refusé', async () => {
   preparer({
     user: MEMBRE, snapshots: [{ user_id: PROD, property_id: REF_B, booking_id: 1, snapshot: {} }],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
   })
   const handler = require('../api/avis')
@@ -326,7 +340,7 @@ test('list : périmètre vide -> la fenêtre est quand même annoncée', async (
   // Sans `fenetre_jours`, la carte affichait « 0 remarque sur undefined j ».
   preparer({
     user: MEMBRE, avis: [AVIS_A],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'read', property_scope: 'some', property_ids: [], property_refs: [] }
   })
   const handler = require('../api/avis')
@@ -359,7 +373,7 @@ test('sejours : un membre avis=read ne peut PAS lister les séjours', async () =
   // domaine ne doit pas en ouvrir un autre.
   preparer({
     user: MEMBRE, snapshots: [{ user_id: PROD, property_id: REF_A, booking_id: 1, snapshot: { firstName: 'Jean' } }],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'read', property_scope: 'all' }
   })
   const handler = require('../api/avis')
@@ -372,7 +386,7 @@ test('sejours : un membre avis=write y a accès', async () => {
   // Contre-épreuve : la garde renforcée ne doit pas casser le formulaire.
   preparer({
     user: MEMBRE, snapshots: [{ user_id: PROD, property_id: REF_A, booking_id: 1, snapshot: { arrival: '2026-08-01' } }],
-    profil: { account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
     permissions: { avis: 'write', property_scope: 'all' }
   })
   const handler = require('../api/avis')

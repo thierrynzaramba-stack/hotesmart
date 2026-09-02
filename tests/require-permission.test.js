@@ -53,7 +53,20 @@ function charger({ user = MEMBRE, biens = [BIEN_PROD, BIEN_AUTRE], profil = null
             const ok = profil.account_user_id === q._f.account_user_id && profil.member_user_id === q._f.member_user_id
             return { data: ok ? profil : null }
           }
-          if (nom === 'profile_permissions') return { data: permissions }
+          if (nom === 'profile_permissions') {
+            // ⚠ La TABLE est modelisee, pas seulement la ligne attendue. Sans
+            // la ligne leurre, retirer `.eq('profile_id', profil.id)` du code
+            // laissait toute cette suite au vert — sur le test de la garde
+            // centrale elle-meme.
+            const LEURRE = { profile_id: 'profil-tiers', reservations: 'write',
+                             menages: 'write', messages: 'write', avis: 'write',
+                             prestataires: 'write', reglages: 'write',
+                             property_scope: 'all' }
+            const table = [LEURRE]
+            if (permissions && profil) table.push({ ...permissions, profile_id: profil.id })
+            const c = table.filter(r => q._f.profile_id == null || r.profile_id === q._f.profile_id)
+            return { data: c[0] || null }
+          }
           return { data: null }
         }
       }
@@ -264,7 +277,20 @@ function chargerAvecBookings({ user = MEMBRE, bookings = [], biens = [BIEN_PROD,
             const ok = profil.account_user_id === q._f.account_user_id && profil.member_user_id === q._f.member_user_id
             return { data: ok ? profil : null }
           }
-          if (nom === 'profile_permissions') return { data: permissions }
+          if (nom === 'profile_permissions') {
+            // ⚠ La TABLE est modelisee, pas seulement la ligne attendue. Sans
+            // la ligne leurre, retirer `.eq('profile_id', profil.id)` du code
+            // laissait toute cette suite au vert — sur le test de la garde
+            // centrale elle-meme.
+            const LEURRE = { profile_id: 'profil-tiers', reservations: 'write',
+                             menages: 'write', messages: 'write', avis: 'write',
+                             prestataires: 'write', reglages: 'write',
+                             property_scope: 'all' }
+            const table = [LEURRE]
+            if (permissions && profil) table.push({ ...permissions, profile_id: profil.id })
+            const c = table.filter(r => q._f.profile_id == null || r.profile_id === q._f.profile_id)
+            return { data: c[0] || null }
+          }
           return { data: null }
         }
       }
