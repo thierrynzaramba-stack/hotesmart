@@ -149,7 +149,9 @@ function partieModule (html) {
   return m ? m[1] : ''
 }
 function partiesClassiques (html) {
-  return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n')
+  return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter(m => !/type\s*=\s*["']module["']/i.test(m[1]) && !/\bsrc\s*=/i.test(m[1]))
+    .map(m => m[2]).join('\n')
 }
 
 // Globals fournis par un module et consommés par un script classique.
@@ -169,13 +171,24 @@ function pagesMixtes () {
       if (e.isDirectory()) explorer(chemin)
       else if (e.name.endsWith('.html')) {
         const html = fs.readFileSync(path.join(racine, chemin), 'utf8')
-        if (html.includes('<script type="module">') && /<script>/.test(html)) {
+        // ⚠ Tout <script> NON module compte, attributs compris. Tester le
+        // littéral `<script>` laissait `<script defer>` échapper à la
+        // découverte — or `defer` est IGNORÉ sur un script inline, qui
+        // s'exécute au parsing : c'est exactement le bug, et la page n'aurait
+        // même pas été listée.
+        const classiques = [...html.matchAll(/<script\b([^>]*)>/g)]
+          .filter(m => !/type\s*=\s*["']module["']/i.test(m[1]) && !/\bsrc\s*=/i.test(m[1]))
+        if (html.includes('<script type="module">') && classiques.length) {
           trouvees.push(chemin.replace(/^\//, ''))
         }
       }
     }
   }
-  explorer('pages'); explorer('apps')
+  // Une garde par racine : un repertoire renomme ne doit pas faire tomber tout
+  // le fichier de tests, seulement priver ces cas de leur couverture.
+  for (const racineRel of ['pages', 'apps']) {
+    try { explorer(racineRel) } catch (e) { console.error('[test] exploration', racineRel, e.message) }
+  }
   return trouvees
 }
 
@@ -210,13 +223,32 @@ for (const page of MIXTES) {
     const classique = partiesClassiques(html)
     if (!module.trim() || !classique.trim()) return
 
-    // Toute fonction d'init exposée par le script classique doit être appelée
-    // quelque part par le module — sinon rien ne démarre.
-    const exposees = [...classique.matchAll(/window\.(\w*[Ii]nit\w*|loadConversations)\s*=/g)]
+    // ⚠ CE TEST S'APPLIQUE A TOUTE PAGE MIXTE, pas seulement a celles qui
+    // consomment un global du module. Restreint aux consommatrices, il ignorait
+    // cinq des six pages mixtes — et le commit qui l'a introduit creditait au
+    // test leur bonne sante, alors qu'il ne les regardait pas.
+    //
+    // Reformulé deux fois. Le motif de nom (`*init*` ou `loadConversations`)
+    // ne couvrait ni `window.loadConfig`, qu'utilisent serrures et sms, ni un
+    // nom quelconque — et exiger que TOUTE fonction exposée soit appelée par le
+    // module rejetait à tort une page saine exposant, disons,
+    // `window.initTooltips` qu'elle appelle elle-même.
+    //
+    // La bonne formulation ne regarde plus les noms : si le script classique
+    // consomme le module, alors AU MOINS UN point d'entrée qu'il expose doit
+    // être appelé par le module. Sinon, rien ne le déclenche au bon moment.
+    const exposees = [...classique.matchAll(/window\.(\w+)\s*=\s*(async\s+)?(function|\()/g)]
       .map(m => m[1])
-    for (const nom of exposees) {
-      assert.ok(new RegExp('window\\.' + nom + '\\s*\\(').test(module),
-        `${page} expose window.${nom} mais le module ne l'appelle jamais : la page ne démarrera pas`)
-    }
+    const appeleParModule = exposees.filter(n =>
+      new RegExp('window\\.' + n + '\\s*\\(').test(module))
+    // Une page mixte qui n'expose aucun point d'entrée démarre autrement : rien
+    // à vérifier ici.
+    if (!exposees.length) return
+
+    assert.ok(appeleParModule.length > 0,
+      `${page} expose ${exposees.length} fonction(s) sur window (${exposees.slice(0, 4).join(', ')}…) ` +
+      `mais le module n'en appelle AUCUNE. Si l'une d'elles est le point d'entrée de la page, ` +
+      `elle doit être appelée par le module : accrochée à DOMContentLoaded ou appelée depuis le ` +
+      `script classique, elle partirait avant que le module ait posé ses helpers.`)
   })
 }

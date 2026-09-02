@@ -121,9 +121,32 @@
   window.peutEcrire = peutEcrire
 
   await requireAuth()
-  await renderSidebar('avis')
 
-  await window.initAvis()
+  // ⚠ La sidebar ne doit PAS pouvoir empecher la page de s'afficher.
+  // renderSidebar appelle getUser(), qui leve sur incident reseau. Sans ce
+  // catch, l'init n'etait jamais atteinte et la page restait indefiniment sur
+  // « Chargement… », muette. La version d'avant, elle, affichait les avis sans
+  // la sidebar : le correctif d'ordre avait donc introduit une REGRESSION.
+  try {
+    await renderSidebar('avis')
+  } catch (e) {
+    console.error('[avis] sidebar indisponible:', e && e.message)
+  }
+
+  // Et si l'init elle-meme echoue, on le DIT. Une page vide et silencieuse est
+  // le pire retour possible : l'utilisateur ne sait pas s'il n'a pas d'avis ou
+  // si quelque chose est casse.
+  try {
+    await window.initAvis()
+  } catch (e) {
+    console.error('[avis] initialisation echouee:', e && e.message)
+    const loader = document.getElementById('loader')
+    const vide = document.getElementById('vide')
+    const msg = document.getElementById('vide-msg')
+    if (loader) loader.style.display = 'none'
+    if (vide) vide.style.display = 'block'
+    if (msg) msg.textContent = 'La page n\'a pas pu se charger. Rechargez pour réessayer.'
+  }
 </script>
 
 <script>
