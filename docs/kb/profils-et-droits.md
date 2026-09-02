@@ -713,15 +713,20 @@ Livrée le 2 septembre 2026. `/settings` à onglets (Équipe réel, Connexions /
 Abonnement / Mon compte en liens), endpoint `api/membres.js`, parcours
 d'invitation par lien.
 
-### Deux sections, un seul modèle de données
+### `/settings` ne gère que les profils « compte »
 
-Les profils `access_mode = 'lien'` (prestataires) sont affichés dans une section
-« Prestataires » distincte, et leur panneau est réduit à **identité, accès,
-disponibilités, voir ses avis**. Pas de grille des huit domaines, pas de
-périmètre : ils se gèrent depuis la fiche prestataire (étape 6).
+Employés, propriétaires — les gens qui **se connectent à HôteSmart**.
 
-Rien ne change en base — `access_mode` reste la seule différence entre un
-prestataire et un membre.
+Les prestataires de ménage n'y apparaissent plus du tout. Ils n'ont pas accès à
+HôteSmart, seulement à l'app ménage : toute leur gestion vit dans
+`apps/menages/prestataires.html`. Voir la règle « config d'app vs config
+générale » dans `docs/kb/coeur-de-donnees.md`.
+
+**Le modèle de données est inchangé** : un prestataire reste un profil
+`access_mode = 'lien'` dans `profiles`, ce dont les avis et la qualité auront
+besoin au chantier prestataires. `api/membres.js` continue de les servir et de
+les accepter en modification — c'est la page qui les filtre, pas l'endpoint.
+Les retirer côté serveur casserait le chantier prestataires avant qu'il commence.
 
 ### ⚠️ Ce qui n'est pas affiché ne doit pas être écrasé
 
@@ -848,3 +853,14 @@ carte renvoie vers la fiche prestataire comme lieu de gestion.
 prestataire doit passer par `profiles`, `public_tokens` n'en étant que la
 projection PWA. Non traité dans l'étape 4 — cela demanderait de réécrire un écran
 qui fonctionne, sans que la fiche prestataire existe encore pour le remplacer.
+
+
+### ⚠️ Capacité perdue au passage : régénérer un lien prestataire
+
+`/settings` savait régénérer le lien PWA d'un prestataire (action `regenerate`,
+toujours présente dans `api/membres.js`). L'écran de l'app ménage, lui, ne le
+sait pas : il propose « Supprimer » puis recréer — ce qui **perd les biens
+assignés et la visibilité**.
+
+L'action serveur existe et fonctionne ; il manque le bouton côté app ménage. À
+ajouter au chantier prestataires, ou plus tôt si le besoin se présente.

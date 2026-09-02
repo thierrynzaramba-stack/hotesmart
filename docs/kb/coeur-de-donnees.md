@@ -74,3 +74,59 @@ Rappel qui vaut pour toute table du cœur : `properties.id` est un **UUID**, et 
 `property_id` des tables enfants est le **`provider_property_id` en TEXT**
 (`REVIEW.md` §10). Aucune FK ne relie les deux : la purge est explicite, et une
 jointure naïve UUID/TEXT ne renvoie rien — silencieusement.
+
+
+---
+
+# Où vit un réglage : dans l'app, ou dans /settings ?
+
+Règle jumelle de celle du cœur de données. La première dit *où vit une donnée
+provider*, celle-ci *où se règle une configuration*.
+
+## La règle
+
+- **La configuration d'une APP vit DANS l'app.**
+- **`/settings` ne porte que la configuration HôteSmart générale** : identités,
+  accès, droits par domaine, facturation, connexions.
+
+## Le test qui tranche
+
+> **Ce réglage a-t-il un sens si l'app n'existait pas ?**
+
+Oui → `/settings`. Non → dans l'app.
+
+| Réglage | Sens sans l'app ? | Où |
+|---|---|---|
+| Droits d'un employé par domaine | oui | `/settings` |
+| Facturation, abonnement | oui | `/settings` |
+| Connexions PMS, serrures | oui | `/settings` |
+| Biens d'un prestataire de ménage | non | app ménage |
+| Jours de visibilité de la PWA ménage | non | app ménage |
+| Modèles de messages voyageur | non | app messagerie |
+
+## Cas tranché : les prestataires de ménage
+
+Un prestataire **n'a pas accès à HôteSmart**, seulement à l'app ménage. Toute sa
+gestion — création, identité, biens, lien PWA, désactivation — vit dans
+`apps/menages/prestataires.html`, titre « Prestataires ».
+
+`/settings` ne gère que les profils `access_mode = 'compte'` : employés,
+propriétaires. Les profils `lien` n'y apparaissent plus du tout.
+
+**Le modèle de données ne change pas.** Un prestataire reste un profil `lien`
+dans `profiles` — nécessaire pour rattacher avis et qualité au chantier
+prestataires. Seul l'écran change de place.
+
+**Pourquoi cette séparation, concrètement.** Gérer les prestataires depuis
+`/settings` y avait fait naître un **second writer** de
+`public_tokens.property_ids` : l'hôte cochait deux biens sur huit dans l'app
+ménage, corrigeait une faute de frappe sur le nom depuis `/settings`, et le
+prestataire récupérait les huit. Deux écrans qui gèrent la même chose finissent
+toujours par se contredire — c'est la même leçon que le writer unique du cœur.
+
+## Reste à converger (chantier prestataires)
+
+`apps/menages/prestataires.html` écrit aujourd'hui `public_tokens` **sans créer
+de profil**. Les deux populations doivent fusionner : la création d'un
+prestataire devra passer par `profiles`, `public_tokens` n'en étant que la
+projection PWA. Non traité tant que la fiche prestataire n'existe pas.

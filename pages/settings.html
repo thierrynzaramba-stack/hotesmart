@@ -121,18 +121,6 @@
       <div id="liste"></div>
     </div>
 
-    <div class="card">
-      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:4px">
-        <div style="flex:1">
-          <div class="card-title">Prestataires</div>
-          <div class="card-sub">Accès par lien, sans mot de passe : l’application ménage s’ouvre directement.
-            Leurs biens, leur mode d’assignation et leur qualité se gèrent depuis la fiche prestataire —
-            ici, seulement leur identité et leur accès.</div>
-        </div>
-        <button class="btn" id="btn-ajouter-presta">Ajouter</button>
-      </div>
-      <div id="liste-presta"></div>
-    </div>
   </div>
 </div>
 
@@ -150,15 +138,11 @@
       <div><label class="f" for="f-tel">Téléphone</label><input class="f" id="f-tel" autocomplete="off"></div>
     </div>
 
-    <label class="f" for="f-mode">Mode d’accès</label>
-    <select class="f" id="f-mode">
-      <option value="compte">Compte — la personne se connecte à HôteSmart</option>
-      <option value="lien">Lien — application prestataire, sans mot de passe</option>
-    </select>
-    <div class="note" id="note-mode">
-      Le mode d’accès se fixe à la création et ne change plus ensuite : un profil déjà rattaché à un
-      compte ne peut pas devenir un lien, et l’inverse laisserait un lien actif sur quelqu’un qui se
-      connecte. Pour changer, désactivez ce profil et créez-en un nouveau.
+    <input type="hidden" id="f-mode" value="compte">
+    <div class="note">
+      Les profils gérés ici se <strong>connectent à HôteSmart</strong> : employés, propriétaires.
+      Les prestataires de ménage n’ont pas accès à HôteSmart — seulement à l’application ménage —
+      et se gèrent depuis <a href="/apps/menages/prestataires.html">Prestataires</a>.
     </div>
 
     <div id="bloc-modeles">
@@ -166,7 +150,6 @@
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn-ghost" data-modele="employe">Employé</button>
       <button class="btn-ghost" data-modele="proprietaire">Propriétaire</button>
-      <button class="btn-ghost" data-modele="prestataire">Prestataire</button>
     </div>
     <div class="note">Un modèle remplit le formulaire, rien de plus. Aucun rôle n’est enregistré : seuls les droits ci-dessous comptent.</div>
     </div>
@@ -178,10 +161,6 @@
       <option value="selected">Une sélection de biens</option>
     </select>
     <div class="biens" id="f-biens"></div>
-    <div class="note" id="note-perimetre" style="display:none">
-      Un accès par lien demande au moins un bien coché, déjà connecté au PMS : l’application
-      prestataire ne saurait pas quoi afficher autrement.
-    </div>
     </div>
 
     <div id="bloc-domaines">
@@ -189,11 +168,7 @@
     <div id="f-domaines"></div>
     </div>
 
-    <div class="note" id="note-presta" style="display:none">
-      Les biens de ce prestataire, son mode d’assignation et sa qualité se gèrent depuis sa fiche
-      prestataire, pas ici. Cette page ne porte que son identité, son accès et ce qu’il peut faire
-      sur ses propres données.
-    </div>
+
 
     <label class="f">Droits sur ses propres données</label>
     <div id="f-self"></div>
@@ -229,13 +204,7 @@ const MODELES = {
                   self_availability: 'none', self_view_reviews: true },
   proprietaire: { property_scope: 'selected', reservations: 'read', menages: 'read', prestataires: 'none',
                   messages: 'read', avis: 'read', reglages: 'none', facturation: 'none', equipe: 'none',
-                  self_availability: 'none', self_view_reviews: true },
-  // ⚠ `selected`, pas `all` : le serveur refuse un accès par lien sur « tous les
-  // biens » (une liste vide y vaut « aucune restriction »). Le dire dans le
-  // modèle plutôt que de compter sur un forçage ultérieur.
-  prestataire:  { property_scope: 'selected', reservations: 'none', menages: 'none', prestataires: 'none',
-                  messages: 'none', avis: 'none', reglages: 'none', facturation: 'none', equipe: 'none',
-                  self_availability: 'write', self_view_reviews: true, access_mode: 'lien' }
+                  self_availability: 'none', self_view_reviews: true }
 }
 const VIDE = { property_scope: 'all', property_ids: [], reservations: 'none', menages: 'none',
                prestataires: 'none', messages: 'none', avis: 'none', reglages: 'none',
@@ -285,21 +254,6 @@ const LIBELLE_STATUT = {
 
 function resumeDroits (p) {
   if (p.is_owner) return 'Tous les droits — non modifiable'
-  // Un prestataire n'a aucun domaine : lui afficher « aucun domaine » serait
-  // exact et inutile. Ce qui le concerne, c'est ce qu'il peut faire sur ses
-  // propres donnees.
-  if (p.access_mode === 'lien') {
-    const perm = p.permissions || {}
-    // ⚠ Le perimetre RESTE affiche : un prestataire qui verrait tous les biens
-    // doit se distinguer d'un prestataire restreint. Le masquer rendait un acces
-    // trop large invisible depuis cette page.
-    const perimetre = perm.property_scope === 'selected'
-      ? `${(perm.property_ids || []).length} bien(s)` : '⚠ Tous les biens'
-    const d = perm.self_availability
-    return `${perimetre} · Disponibilités : `
-      + (d === 'write' ? 'il les gère' : d === 'read' ? 'consultation' : 'gérées par vous')
-      + (perm.self_view_reviews === false ? '' : ' · voit ses avis')
-  }
   const perm = p.permissions || {}
   const perimetre = perm.property_scope === 'selected'
     ? `${(perm.property_ids || []).length} bien(s)` : 'Tous les biens'
@@ -314,7 +268,7 @@ function resumeDroits (p) {
 function ligneProfil (p) {
     const [libelle, classe] = LIBELLE_STATUT[p.statut] || ['—', '']
     const nom = [p.first_name, p.last_name].filter(Boolean).join(' ')
-    const mode = p.access_mode === 'lien' ? 'Lien prestataire' : 'Compte'
+    const mode = 'Compte'
     return `<div class="row ${p.is_owner ? 'owner' : ''}">
       <div class="row-main">
         <div class="row-name">${esc(nom)}
@@ -330,15 +284,16 @@ function ligneProfil (p) {
 // un autre — `access_mode = 'lien'` est la seule difference. On les separe a
 // l'affichage parce qu'on ne leur pose pas les memes questions, pas parce qu'ils
 // seraient d'une autre nature.
+// ⚠ Les profils `access_mode = 'lien'` NE SONT PAS AFFICHES ICI.
+// Un prestataire n'a pas acces a HoteSmart : seulement a l'application menage.
+// Toute sa gestion — creation, identite, biens, lien, suppression — vit dans
+// apps/menages/prestataires.html. Le modele de donnees, lui, ne change pas : il
+// reste un profil `lien` en base, ce dont les avis et la qualite auront besoin.
 function rendreListe () {
   const membres = profils.filter(p => p.access_mode !== 'lien')
-  const prestas = profils.filter(p => p.access_mode === 'lien')
   $('liste').innerHTML = membres.length
     ? membres.map(ligneProfil).join('')
     : '<div class="vide">Aucun profil.</div>'
-  $('liste-presta').innerHTML = prestas.length
-    ? prestas.map(ligneProfil).join('')
-    : '<div class="vide">Aucun prestataire.</div>'
 }
 
 // ─── Panneau ────────────────────────────────────────────────────────────────
@@ -359,35 +314,9 @@ function segment (valeur, onChange, options, desactive) {
 function rendrePanneau () {
   const estNouveau = !edite
   const verrouille = !estNouveau
-  // Le mode fait foi : celui du profil ouvert, ou celui choisi a la creation.
-  const estPresta = (edite ? edite.access_mode : $('f-mode').value) === 'lien'
-
-  // ⚠ On MASQUE, on ne supprime pas : le modele de donnees est inchange, et le
-  // perimetre deja enregistre d'un prestataire doit survivre a un passage ici.
-  // C'est l'endpoint qui garantit qu'il n'est pas ecrase (voir `modifier`).
-  // ⚠ LE PERIMETRE RESTE VISIBLE A LA CREATION D'UN PRESTATAIRE, et seulement la.
-  // Sans lui, un nouveau prestataire partait sur « tous les biens » — et dans
-  // public_tokens, une liste vide vaut « aucune restriction », donc le planning
-  // menage de TOUT le compte. Ecart assume a la consigne « pas de périmètre » :
-  // l'appliquer aussi a la creation ouvrait un acces trop large.
-  // A l'EDITION il disparait : les biens se gerent ensuite dans la fiche
-  // prestataire, seule ecriture de public_tokens.property_ids.
-  const perimetreAffiche = !estPresta || estNouveau
-
-  $('bloc-modeles').style.display   = estPresta ? 'none' : 'block'
-  $('bloc-perimetre').style.display = perimetreAffiche ? 'block' : 'none'
-  $('bloc-domaines').style.display  = estPresta ? 'none' : 'block'
-  $('note-presta').style.display    = estPresta ? 'block' : 'none'
-  $('note-perimetre').style.display = (estPresta && estNouveau) ? 'block' : 'none'
-
-  // Un prestataire se designe bien par bien : le choix « tous les biens » n'a pas
-  // de sens pour lui, et le serveur le refuse.
-  const optionTous = $('f-scope').querySelector('option[value="all"]')
-  if (optionTous) optionTous.disabled = estPresta
-  if (estPresta && estNouveau && brouillon.property_scope !== 'selected') {
-    brouillon.property_scope = 'selected'
-    $('f-scope').value = 'selected'
-  }
+  // Le mode d'acces est fige a « compte » : les profils par lien ne se gerent
+  // plus ici (voir rendreListe).
+  $('f-mode').disabled = verrouille
 
   $('p-titre').textContent = estNouveau ? 'Nouveau profil' : [edite.first_name, edite.last_name].filter(Boolean).join(' ')
   $('p-soustitre').textContent = estNouveau ? 'Identité, accès et droits.' : 'Modifiez les droits, ou l’accès ci-dessous.'
@@ -546,7 +475,7 @@ function rendreAcces () {
   }
 }
 
-function ouvrir (profil, modeInitial) {
+function ouvrir (profil) {
   edite = profil || null
   lienAffiche = ''
   brouillon = profil && profil.permissions
@@ -556,7 +485,7 @@ function ouvrir (profil, modeInitial) {
   $('f-nom').value    = profil?.last_name || ''
   $('f-email').value  = profil?.email || ''
   $('f-tel').value    = profil?.phone || ''
-  $('f-mode').value   = profil?.access_mode || modeInitial || 'compte'
+  $('f-mode').value   = profil?.access_mode || 'compte'
   $('f-scope').value  = brouillon.property_scope
   rendrePanneau()
   $('overlay').classList.add('open')
@@ -567,27 +496,8 @@ async function enregistrer () {
   const prenom = $('f-prenom').value.trim()
   if (!prenom) return message('Le prénom est requis.')
 
-  const estPresta = (edite ? edite.access_mode : $('f-mode').value) === 'lien'
-
-  // ⚠ POUR UN PRESTATAIRE, ON N'ENVOIE QUE CE QUE CETTE PAGE MONTRE.
-  // Le périmètre et les domaines ne sont pas affichés ici : les renvoyer depuis
-  // un formulaire qui ne les expose pas reviendrait à les réécrire à l'aveugle —
-  // Régina, réglée sur deux biens, serait repassée à « tous les biens » au
-  // premier enregistrement. L'endpoint conserve ce qu'il a quand on ne lui dit
-  // rien.
-  // ⚠ Un prestataire n'a aucun domaine. `brouillon` peut pourtant en porter —
-  // appliquer le modèle « Employé » puis basculer sur « Lien » les y laisse. Le
-  // serveur les force à « rien » de son côté ; on ne les envoie pas non plus.
-  const permissions = estPresta
-    ? {
-        self_availability: brouillon.self_availability,
-        self_view_reviews: brouillon.self_view_reviews,
-        // Le périmètre n'accompagne que la création : ensuite, la fiche
-        // prestataire en est seule responsable.
-        ...(edite ? {} : { property_scope: $('f-scope').value, property_ids: brouillon.property_ids })
-      }
-    : { ...brouillon, property_scope: $('f-scope').value }
-  if (permissions.property_scope && permissions.property_scope !== 'selected') permissions.property_ids = []
+  const permissions = { ...brouillon, property_scope: $('f-scope').value }
+  if (permissions.property_scope !== 'selected') permissions.property_ids = []
 
   const corps = {
     first_name: prenom,
@@ -620,19 +530,15 @@ async function enregistrer () {
 
 // ─── Événements ─────────────────────────────────────────────────────────────
 
-$('btn-ajouter').onclick = () => ouvrir(null, 'compte')
-$('btn-ajouter-presta').onclick = () => ouvrir(null, 'lien')
+$('btn-ajouter').onclick = () => ouvrir(null)
 $('btn-annuler').onclick = fermer
 $('btn-enregistrer').onclick = enregistrer
 $('overlay').onclick = e => { if (e.target === $('overlay')) fermer() }
 $('f-scope').onchange = () => { brouillon.property_scope = $('f-scope').value; rendrePanneau() }
-$('f-mode').onchange = () => rendrePanneau()
-const surClicListe = e => {
+$('liste').onclick = e => {
   const id = e.target?.dataset?.ouvrir
   if (id) ouvrir(profils.find(p => p.id === id))
 }
-$('liste').onclick = surClicListe
-$('liste-presta').onclick = surClicListe
 document.querySelectorAll('[data-modele]').forEach(b => {
   b.onclick = () => {
     const m = MODELES[b.dataset.modele]

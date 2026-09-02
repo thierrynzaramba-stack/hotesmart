@@ -955,6 +955,48 @@ test('LIEN D\'INVITATION : inchange, il vise bien /invitation', async () => {
   assert.ok(res.body.lien.includes('/invitation?token='), res.body.lien)
 })
 
+// ─── Les prestataires ne se gerent plus depuis /settings ────────────────────
+//
+// ⚠ CE QUI CHANGE ET CE QUI NE CHANGE PAS. Un prestataire n'a pas acces a
+// HoteSmart, seulement a l'app menage : toute sa gestion vit dans
+// apps/menages/prestataires.html. Mais le MODELE DE DONNEES est inchange — il
+// reste un profil `lien` en base, ce dont les avis et la qualite auront besoin.
+// L'endpoint continue donc de les servir ; c'est /settings qui ne les affiche
+// plus.
+
+test('l\'endpoint continue de RENVOYER les profils lien', async () => {
+  // Les retirer ici casserait le chantier prestataires, qui devra les lire.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: { action: 'list' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(res.body.profils.some(p => p.access_mode === 'lien'),
+    'le modele de donnees ne change pas : les profils lien restent servis')
+})
+
+test('un profil lien reste modifiable par l\'endpoint', async () => {
+  // L'ecran de l'app menage s'appuiera dessus au chantier prestataires.
+  preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { self_availability: 'read' } } }), res)
+  assert.strictEqual(res.code, 200)
+})
+
+test('son perimetre reste intact : /settings n\'ecrit plus public_tokens', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { self_availability: 'write' } } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'),
+    'apps/menages/prestataires.html est le seul writer du perimetre PWA')
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.deepStrictEqual(maj.row.property_ids.sort(), [BIEN_A.id, BIEN_B.id].sort())
+})
+
 // ─── Divers ─────────────────────────────────────────────────────────────────
 
 test('action inconnue -> 400, avant toute lecture', async () => {

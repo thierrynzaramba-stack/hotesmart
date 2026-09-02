@@ -39,6 +39,22 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - Corollaire pratique : une nouvelle donnée provider se traite dans cet ordre —
   table du cœur, writer dans `lib/`, puis lecture par l'app. Jamais l'inverse.
 
+## ARCHITECTURE — CONFIG D'APP vs CONFIG GÉNÉRALE
+- **La configuration d'une APP vit DANS l'app.** Prestataires de ménage et leurs
+  biens → `apps/menages/prestataires.html`. Modèles de messages → l'app
+  messagerie. Réglages de tarification → l'app yield.
+- **`/settings` ne porte que la configuration HôteSmart GÉNÉRALE** : identités,
+  accès, droits par domaine, facturation, connexions.
+- **Test qui tranche : ce réglage a-t-il un sens si l'app n'existait pas ?**
+  Oui → `/settings`. Non → dans l'app.
+- Corollaire : un prestataire de ménage n'a **pas accès à HôteSmart**, seulement
+  à l'app ménage. Il reste un profil `access_mode = 'lien'` en base — le modèle
+  de données ne bouge pas, les avis et la qualité en auront besoin — mais seul
+  l'écran de l'app ménage le gère.
+- Vécu : gérer les prestataires depuis `/settings` y avait introduit un second
+  writer de `public_tokens.property_ids`, donc l'écrasement silencieux des biens
+  réglés dans l'app ménage.
+
 ## RÈGLE ABSOLUE — REVIEW AVANT PUSH
 - **Aucun push tant qu'une review est en cours.** La review fait partie du commit,
   pas de l'après-commit : on attend son retour, on la LIT, on corrige, puis on pousse.
