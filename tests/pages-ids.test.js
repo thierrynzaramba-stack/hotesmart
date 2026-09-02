@@ -17,7 +17,10 @@ const assert = require('node:assert')
 const fs = require('node:fs')
 const path = require('node:path')
 
-const PAGES = ['pages/settings.html', 'pages/invitation.html']
+// ⚠ Les pages touchees par la delegation y entrent aussi : c'est exactement le
+// genre de refactor ou une reference d'id survit a l'element qu'elle designait.
+const PAGES = ['pages/settings.html', 'pages/invitation.html',
+               'apps/menages/index.html', 'apps/agent-ai/messagerie.html']
 
 // `$('x')`, `getElementById('x')`, `querySelector('#x')`
 const APPELS = [

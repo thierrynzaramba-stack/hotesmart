@@ -51,21 +51,26 @@ module.exports = async function handler(req, res) {
   const t = chrono()
 
   // ===== DROITS =====
-  // Collection : aucun identifiant client, donc le compte cible est celui de
-  // l'appelant. La garde verifie le domaine `menages` ; le perimetre, qui ne peut
-  // pas s'evaluer bien par bien sur une collection, se traduit en FILTRE.
+  // Collection : aucun identifiant client ne designe le compte, c'est donc
+  // l'en-tete X-Compte qui le fait — revalide par la garde. Le perimetre, qui ne
+  // peut pas s'evaluer bien par bien sur une collection, se traduit en FILTRE.
   //
-  // ⚠ Portee reelle : inerte tant qu'il n'y a pas de selecteur de compte
-  // (etape 5) — un appelant est titulaire de son propre compte. Le cablage est
-  // pose pour que cette etape n'ait pas a repasser ici. Couverture : les tests
-  // portent sur lib/permissions, pas sur cet endpoint.
+  // ⚠ ENDPOINT DELEGABLE (etape 5, lot 3). Ce qu'il expose est sensible : le
+  // planning de menage porte les dates de sejour, les noms des voyageurs et le
+  // nombre d'occupants. Deux barrieres, et les deux comptent :
+  //   1. le filtre de perimetre ci-dessous, sur les BIENS ;
+  //   2. les reservations bornees a ces biens (`.in(property_id, …)` plus bas).
+  // La seconde n'est pas redondante : sans elle, une lecture directe de
+  // bookings_snapshot renverrait tout le compte.
+  //
   // Session d'abord — elle seule repond 401 — puis les droits. Deux etapes pour
   // que la trace chrono distingue la session invalide du refus de droits.
   const appelant = await verifierSession(req, res)
   t.top('auth')
   if (!appelant) { console.log(t.ligne(' -> 401')); return }
 
-  const garde = await requirePermission(req, res, { domaine: 'menages', niveau: 'read', userId: appelant })
+  const garde = await requirePermission(req, res, {
+    domaine: 'menages', niveau: 'read', userId: appelant, compteDelegue: true })
   if (!garde.ok) { console.log(t.ligne(' -> 403')); return }
   const userId = garde.accountUserId
   const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')

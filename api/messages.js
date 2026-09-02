@@ -46,19 +46,20 @@ module.exports = async function handler(req, res) {
   }
 
   // ── Droits ──
-  // Endpoint de COLLECTION : aucun identifiant client, donc aucune ressource ne
-  // designe un compte — le compte cible est celui de l'appelant.
+  // Endpoint de COLLECTION : aucun identifiant client ne designe le compte, c'est
+  // l'en-tete X-Compte qui le fait — revalide par la garde.
   //
-  // ⚠ PORTEE REELLE, a ne pas surestimer : la garde et le filtre ci-dessous sont
-  // INERTES aujourd'hui. Un appelant est toujours titulaire de son propre compte,
-  // donc `niveauEffectif` renvoie 'write' et `refsDuPerimetre` renvoie null. La
-  // consequence est fonctionnelle, pas securitaire : un membre invite ne voit pas
-  // la messagerie du compte auquel il appartient, il voit la sienne (vide).
-  // Le choix du compte cible est l'etape 5 ; le cablage est pose des maintenant
-  // pour qu'elle n'ait qu'a fournir `accountUserId`. Couverture : les tests
-  // portent sur refsDuPerimetre (lib/permissions), pas sur cet endpoint — un vert
-  // ici ne prouverait rien.
-  const garde = await requirePermission(req, res, { domaine: 'messages', niveau: 'read' })
+  // ⚠ ENDPOINT DELEGABLE (etape 5, lot 3), et c'est le plus sensible du lot : il
+  // renvoie les CONVERSATIONS DES VOYAGEURS, corps des messages compris. Trois
+  // barrieres :
+  //   1. `user_id` = compte cible ;
+  //   2. filtre de perimetre sur `messages.property_id` ;
+  //   3. meme filtre sur `bookings_snapshot`, qui porte les noms et les dates.
+  // La troisieme n'est pas cosmetique : sans elle, un membre restreint recevrait
+  // en memoire les reservations de tout le compte, et il suffirait d'un message
+  // mal rattache pour qu'elles remontent a l'ecran.
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'read', compteDelegue: true })
   if (!garde.ok) return
   const userId = garde.accountUserId
   const refsAutorisees = refsDuPerimetre(garde.contexte)

@@ -150,6 +150,8 @@ monde parce qu'elle est pratique quelque part.
 | Endpoint | Filtre de périmètre |
 |---|---|
 | `channel-property` GET | oui — SQL sur `properties`, en mémoire sur les biens Beds24 |
+| `menages` GET | oui — sur `properties.provider_property_id`, puis réservations bornées à ces biens |
+| `messages` GET | oui — sur `messages.property_id` **et** sur `bookings_snapshot` |
 
 Les autres suivront lot par lot, chacun après relecture. Un endpoint absent de ce
 tableau travaille sur le compte de l'appelant, quoi que dise l'en-tête.
@@ -178,3 +180,52 @@ délégables et appliquent leur filtre de périmètre.
 **La règle qui les gouverne** : ne jamais afficher un bouton dont l'effet
 porterait sur un autre compte que celui annoncé à l'écran. Un bouton qui échoue
 est désagréable ; un bouton qui réussit **ailleurs** est un piège.
+
+
+---
+
+# Lot 3, vague 1 : `menages` et `messages`
+
+Les deux endpoints les plus sensibles du chantier. `menages` expose les **dates
+de séjour, les noms des voyageurs et le nombre d'occupants** ; `messages` expose
+le **corps des conversations**.
+
+## Deux barrières par endpoint, aucune redondante
+
+**`menages`** — le filtre de périmètre porte sur les **biens**, puis les
+réservations sont bornées à ces biens (`.in('property_id', …)`). La seconde n'est
+pas une ceinture de sécurité : sans elle, la lecture de `bookings_snapshot`
+remonterait tout le compte, le filtre sur `properties` ne la contraignant pas.
+
+**`messages`** — trois filtres : `user_id`, le périmètre sur
+`messages.property_id`, et **le même périmètre sur `bookings_snapshot`**. Ce
+troisième n'est pas cosmétique : c'est lui qui empêche les noms et les dates de
+tout le compte d'arriver en mémoire, où un message mal rattaché suffirait à les
+faire ressortir.
+
+## Pas de piège UUID ici — vérifié, pas supposé
+
+Les colonnes filtrées sont **toutes TEXT** : `properties.provider_property_id`,
+`messages.property_id`, `bookings_snapshot.property_id`. Un `.in()` mixte
+(référence Beds24 + UUID Channex) a été testé en base : il passe.
+
+C'est ce qui distingue ces deux endpoints de `channel-property`, où le filtre
+attaque `properties.id` — colonne `uuid`, et où le mélange fait échouer la requête
+entière.
+
+## Ce qui reste masqué
+
+`renderApps` décide **app par app**, plus en bloc : une entrée n'apparaît que si
+son endpoint honore `X-Compte` **et** applique son périmètre. Ménages y entre ;
+Serrures et GuestFlow AI restent masqués, ils travaillent encore sur le compte de
+l'appelant. Le sous-menu « Prestataires » reste réservé au titulaire.
+
+Et le libellé de section « Apps » ne s'affiche plus au-dessus du vide.
+
+## Lecture seule visible
+
+Un membre à `menages: read` voit le champ de note en **lecture seule**, sans
+bouton d'enregistrement. Un membre à `messages: read` lit les conversations mais
+la zone de composition est remplacée par « Lecture seule — vous ne pouvez pas
+répondre depuis ce compte ». Un formulaire qu'on remplit pour rien est pire qu'un
+formulaire absent.

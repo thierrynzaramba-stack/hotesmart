@@ -193,6 +193,7 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
+import { compteCourant, peutEcrire } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
 
@@ -251,6 +252,16 @@
     document.getElementById('modal-done').addEventListener('click', markDone)
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
     document.getElementById('btn-save-comment').addEventListener('click', saveComment)
+
+    // ⚠ LECTURE SEULE VISIBLE. Un membre a `menages: read` ne doit pas voir un
+    // champ de saisie et un bouton qui echoueront a l'enregistrement — la RLS les
+    // refuserait, mais il aurait deja ecrit sa note. On la lui montre en lecture.
+    if (!peutEcrire('menages')) {
+      const zone = document.getElementById('modal-comment')
+      const bouton = document.getElementById('btn-save-comment')
+      if (zone) { zone.readOnly = true; zone.placeholder = 'Lecture seule' }
+      if (bouton) bouton.remove()
+    }
   }
 
   // Planning dual-provider : une seule lecture serveur (api/menages.js), qui lit
@@ -309,7 +320,7 @@
     const { data } = await supabase
       .from('menage_comments')
       .select('*')
-      .eq('user_id', currentSession.user.id)
+      .eq('user_id', compteCourant())
     ;(data || []).forEach(c => { commentsMap[`${c.booking_id}-${c.departure_date}`] = c.comment })
   }
 
@@ -319,7 +330,10 @@
   const key = `${selectedMenage.bookId}-${selectedMenage.departure}`
 
   const { error } = await supabase.from('menage_comments').upsert({
-    user_id:        currentSession.user.id,
+    // ⚠ Le COMPTE, pas l'appelant : un commentaire ecrit par un membre appartient
+    // au compte de l'hote, sinon il serait invisible a tout le monde — et la RLS
+    // le refuserait de toute facon (can_write sur le compte cible).
+    user_id:        compteCourant(),
     booking_id:     String(selectedMenage.bookId),
     departure_date: selectedMenage.departure,
     property_id:    String(selectedMenage.propId),
@@ -334,7 +348,7 @@
     const { data: tokens } = await supabase
       .from('public_tokens')
       .select('token, property_ids')
-      .eq('user_id', currentSession.user.id)
+      .eq('user_id', compteCourant())
 
     const relevantTokens = (tokens || []).filter(t =>
       !t.property_ids?.length || t.property_ids.includes(String(selectedMenage.propId))
@@ -342,7 +356,7 @@
 
     for (const t of relevantTokens) {
       await supabase.from('menage_events').insert({
-        user_id:       currentSession.user.id,
+        user_id:       compteCourant(),
         booking_id:    String(selectedMenage.bookId),
         property_id:   String(selectedMenage.propId),
         property_name: selectedMenage.propName,

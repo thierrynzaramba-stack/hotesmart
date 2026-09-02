@@ -290,14 +290,14 @@
           }).then(r => r.json()).then(d => (d.conversations || []).map(c => ({ ...c, _pid: pid })))
         )),
         window._supabase.from('conversations').select('*')
-          .eq('user_id', window._session.user.id)
+          .eq('user_id', compteCourant())
           .not('book_id', 'like', 'SIM_%')
           .order('created_at', { ascending: false }).limit(200),
         window._supabase.from('agent_tasks').select('*')
-          .eq('user_id', window._session.user.id)
+          .eq('user_id', compteCourant())
           .order('created_at', { ascending: false }).limit(200),
         window._supabase.from('conversation_flags').select('book_id, pinned')
-          .eq('user_id', window._session.user.id).eq('pinned', true)
+          .eq('user_id', compteCourant()).eq('pinned', true)
       ])
 
       const beds24Convs = beds24Results.flat()
@@ -388,10 +388,10 @@
           headers: { 'Authorization': `Bearer ${window._session.access_token}` }
         }).then(r => r.json()),
         window._supabase.from('agent_tasks').select('*')
-          .eq('user_id', window._session.user.id)
+          .eq('user_id', compteCourant())
           .order('created_at', { ascending: false }).limit(200),
         window._supabase.from('conversation_flags').select('book_id, pinned')
-          .eq('user_id', window._session.user.id).eq('pinned', true)
+          .eq('user_id', compteCourant()).eq('pinned', true)
       ])
 
       conversations = msgRes.conversations || []
@@ -598,6 +598,7 @@
         ${allMessages.length ? allMessages.map(m => renderBubble(m)).join('') : '<div class="empty-conv"><p>Aucun message</p></div>'}
         ${convTasks.map(t => renderTaskBubble(t)).join('')}
       </div>
+      ${peutEcrire('messages') ? `
       <div class="conv-compose">
         <textarea class="compose-textarea" id="compose-text" placeholder="Écrivez votre message… ou utilisez ((consigne)) pour guider l'IA"></textarea>
         <div class="compose-actions">
@@ -605,7 +606,13 @@
           <button class="btn btn-primary" onclick="sendMessage('${bookId}')">✉️ Envoyer</button>
           <span class="compose-status" id="compose-status"></span>
         </div>
-      </div>
+      </div>` : `
+      <!-- ⚠ Un membre a \`messages: read\` lit les conversations mais n'ecrit pas
+           au voyageur. Lui montrer la zone de saisie serait pire qu'inutile : il
+           redigerait un message qui ne partirait jamais. -->
+      <div class="conv-compose" style="font-size:12px;color:var(--text2);text-align:center">
+        Lecture seule — vous ne pouvez pas répondre depuis ce compte.
+      </div>`}
     `
     const mc = document.getElementById('conv-messages')
     if (mc) mc.scrollTop = mc.scrollHeight
@@ -690,7 +697,7 @@
       if (data.success) {
         const task = allTasks.find(t => String(t.id) === String(taskId))
         if (task) await window._supabase.from('conversations').insert({
-          user_id: window._session.user.id, property_id: task.property_id, guest_name: task.guest_name,
+          user_id: compteCourant(), property_id: task.property_id, guest_name: task.guest_name,
           guest_message: task.guest_message, agent_reply: reply, book_id: bookId
         })
         await setTaskStatus(taskId, 'done')
@@ -704,7 +711,7 @@
       if (!reply) return alert('Entrez une réponse avant la FAQ')
       faqBtn.disabled = true; faqBtn.textContent = '⏳…'
       const { error } = await window._supabase.from('knowledge').insert({
-        user_id: window._session.user.id, property_id: String(propId), type: 'faq', key: question, value: reply
+        user_id: compteCourant(), property_id: String(propId), type: 'faq', key: question, value: reply
       })
       if (error) { faqBtn.disabled = false; faqBtn.textContent = '📚 FAQ'; return alert(error.message) }
       faqBtn.textContent = '✅ FAQ'
@@ -723,7 +730,7 @@
       if (data.success) {
         const task = allTasks.find(t => String(t.id) === String(taskId))
         if (task) await window._supabase.from('conversations').insert({
-          user_id: window._session.user.id, property_id: task.property_id, guest_name: task.guest_name,
+          user_id: compteCourant(), property_id: task.property_id, guest_name: task.guest_name,
           guest_message: task.guest_message, agent_reply: reply, book_id: bookId
         })
         sendBtn.textContent = '✅ Envoyé'
@@ -755,11 +762,11 @@
     if (wasPinned) {
       pinnedSet.delete(bookId)
       await window._supabase.from('conversation_flags').delete()
-        .eq('user_id', window._session.user.id).eq('book_id', String(bookId))
+        .eq('user_id', compteCourant()).eq('book_id', String(bookId))
     } else {
       pinnedSet.add(bookId)
       await window._supabase.from('conversation_flags')
-        .upsert({ user_id: window._session.user.id, book_id: String(bookId), pinned: true },
+        .upsert({ user_id: compteCourant(), book_id: String(bookId), pinned: true },
                 { onConflict: 'user_id,book_id' })
     }
     conversations.sort(sortConversations)
@@ -850,7 +857,7 @@
   simToggle.addEventListener('change', async () => {
     simEnabled = simToggle.checked
     await window._supabase.from('conversation_flags')
-      .upsert({ user_id: window._session.user.id, book_id: '__SIM_ENABLED__', pinned: simEnabled },
+      .upsert({ user_id: compteCourant(), book_id: '__SIM_ENABLED__', pinned: simEnabled },
               { onConflict: 'user_id,book_id' })
     if (!simEnabled && currentConvId === SIM_ID) { currentConvId = null; document.getElementById('conv-view').innerHTML = '<div class="empty-conv"><div class="icon">💬</div><p>Sélectionnez une conversation</p></div>' }
     renderConvList()
@@ -860,7 +867,7 @@
   ;(async () => {
     if (window._supabase == null || window._session == null) return
     const { data } = await window._supabase.from('conversation_flags')
-      .select('pinned').eq('user_id', window._session.user.id).eq('book_id', '__SIM_ENABLED__').maybeSingle()
+      .select('pinned').eq('user_id', compteCourant()).eq('book_id', '__SIM_ENABLED__').maybeSingle()
     if (data?.pinned) { simEnabled = true; simToggle.checked = true; renderConvList() }
   })()
 
@@ -920,7 +927,7 @@
       if (data.success) {
         const conv = conversations.find(c => c.bookId === bookId)
         await window._supabase.from('conversations').insert({
-          user_id: window._session.user.id, property_id: conv?.propertyId || null,
+          user_id: compteCourant(), property_id: conv?.propertyId || null,
           guest_name: conv?.guestName || 'Voyageur', guest_message: '[Envoi manuel hôte]', agent_reply: text, book_id: bookId
         })
         textarea.value = ''; setStatus('✅ Message envoyé')

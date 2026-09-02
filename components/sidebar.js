@@ -60,9 +60,7 @@ export async function renderSidebar(activePage = '') {
         <span class="nav-label">Calendrier</span>
       </a>`)}
 
-      ${estTitulaire() ? `
-      <div class="nav-section-label">Apps</div>
-      ${renderApps(activePage)}` : ''}
+      ${renderApps(activePage)}
 
       ${estTitulaire() ? `
       <div class="nav-section-label">Configuration</div>
@@ -228,13 +226,30 @@ function escapeHtml(v) {
 }
 const escapeAttr = escapeHtml
 
+// ⚠ APP PAR APP, PAS EN BLOC. Masquer toutes les Apps hors titulaire etait le
+// bon reflexe tant qu'aucune n'etait delegable ; ce serait maintenant priver un
+// membre de ce a quoi il a droit.
+//
+// La regle reste la meme : une entree n'apparait que si son endpoint honore
+// X-Compte ET applique son perimetre. `/api/menages` le fait depuis ce lot ; les
+// autres apps (Serrures, GuestFlow AI) travaillent encore sur le compte de
+// l'appelant, donc restent masquees — un ecran qui annonce un compte et en montre
+// un autre est pire qu'une entree absente.
+const APPS_DELEGABLES = { menages: 'menages' }
+
 function renderApps(activePage) {
-  return CONFIG.apps.map(app => {
+  const titulaire = estTitulaire()
+  const apps = CONFIG.apps.map(app => {
     const isActive    = app.active !== false
     const isActiveApp = activePage === app.id || activePage.startsWith(app.id + '-')
 
     // Apps non disponibles : masquées (réactivables via shared/config.js à leur sortie)
     if (!isActive) return ''
+
+    if (!titulaire) {
+      const domaine = APPS_DELEGABLES[app.id]
+      if (!domaine || !peutLire(domaine)) return ''
+    }
 
     let subMenu = ''
 
@@ -257,9 +272,10 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
           <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Planning
         </a>
+        ${titulaire ? `
         <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">
           <div class="sub-dot ${activePage === 'menages-prestataires' ? 'green' : 'gray'}"></div>Prestataires
-        </a>`
+        </a>` : ''}`
     }
 
     return `
@@ -269,6 +285,10 @@ function renderApps(activePage) {
       </a>
       ${subMenu}`
   }).join('')
+
+  // Pas de libelle « Apps » au-dessus du vide : un membre sans app deleguee ne
+  // doit pas voir une section orpheline.
+  return apps.trim() ? `<div class="nav-section-label">Apps</div>${apps}` : ''
 }
 
 function renderApiItem(label, active, href) {
