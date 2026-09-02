@@ -107,16 +107,23 @@
   import { apiCall } from '/shared/api-client.js'
   import { peutEcrire } from '/shared/compte-courant.js'
 
-  // ⚠ Les helpers sont exposes sur window AVANT tout await : les usages vivent
-  // dans le script CLASSIQUE plus bas, et un import de module ne s'y voit pas.
-  // Une messagerie entiere est deja morte sur cet oubli (ReferenceError, tests
-  // verts). Poses APRES les await, une exception de renderSidebar les laissait
-  // indefinis alors que DOMContentLoaded se declenchait quand meme.
+  // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
+  // tot dans le module : un module est DEFERRE, et ses `import` sont resolus en
+  // RESEAU avant que son corps ne s'execute. Le script classique plus bas, lui,
+  // s'execute des le parsing. Une init accrochee a DOMContentLoaded partait donc
+  // AVANT que window.apiCall existe — une course, invisible en local, perdue en
+  // production : « window.apiCall is not a function », page vide.
+  //
+  // Le script classique se contente d'exposer window.initAvis ; c'est nous qui
+  // l'appelons, une fois les helpers poses et la session verifiee. Meme motif
+  // que apps/agent-ai/messagerie.html, qui appelle window.loadConversations().
   window.apiCall = apiCall
   window.peutEcrire = peutEcrire
 
   await requireAuth()
   await renderSidebar('avis')
+
+  await window.initAvis()
 </script>
 
 <script>
@@ -290,7 +297,10 @@
     await charger()
   }
 
-  document.addEventListener('DOMContentLoaded', async () => {
+  // ⚠ EXPOSE, PAS AUTO-DECLENCHE. Accrocher cette init a DOMContentLoaded la
+  // ferait partir avant que le module ait pose window.apiCall (voir le
+  // commentaire du module ci-dessus). C'est le module qui appelle.
+  window.initAvis = async function () {
     // Le bouton de saisie n'apparait qu'avec le droit d'ecriture sur `avis`.
     // Le serveur le revalide : ce masquage est un confort, pas la garde.
     const peut = window.peutEcrire ? window.peutEcrire('avis') : false
@@ -313,7 +323,7 @@
     })
 
     await charger()
-  })
+  }
 })()
 </script>
 </body>

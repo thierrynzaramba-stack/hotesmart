@@ -87,6 +87,14 @@ test('les pages qui appellent l\'API en fetch brut posent X-Compte', () => {
 // Renvoie les intervalles [debut, fin) de chaque bloc `try { ... }`, en suivant
 // les accolades. Compter les `try` et les comparer au nombre d'appels ne prouve
 // rien : trois `try` places n'importe ou laisseraient le test vert.
+// Neutralise les commentaires SANS deplacer les offsets : un commentaire qui
+// mentionne `apiCall (voir plus haut)` faisait un faux positif.
+function sansCommentaires (src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+}
+
 function blocsTry (src) {
   const zones = []
   const re = /try\s*\{/g
@@ -108,7 +116,7 @@ test('pages/avis.html : chaque appel apiCall est DANS un try', () => {
   // retour comme `{ error }` laissait l'exception remonter : page blanche au
   // premier 403 — c'est-à-dire le cas NORMAL d'un membre au périmètre restreint,
   // pas un cas limite.
-  const html = fs.readFileSync(path.join(__dirname, '..', 'pages/avis.html'), 'utf8')
+  const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/avis.html'), 'utf8'))
   const zones = blocsTry(html)
   const appels = [...html.matchAll(/apiCall\s*\(/g)]
     // L'affectation `window.apiCall = apiCall` n'est pas un appel.
@@ -120,3 +128,95 @@ test('pages/avis.html : chaque appel apiCall est DANS un try', () => {
       `appel apiCall non protégé à l'offset ${a.index} : une réponse 403 casserait la page`)
   }
 })
+
+// ─── L'ORDRE D'EXÉCUTION, pas seulement la présence ────────────────────────
+//
+// ⚠ POURQUOI CE TEST EXISTE. `pages/avis.html` exposait bien ses helpers sur
+// `window` (le test plus haut le vérifiait) et lançait pourtant, en production :
+// « window.apiCall is not a function », page vide.
+//
+// La présence ne suffit pas, l'ORDRE décide. Un `<script type="module">` est
+// DIFFÉRÉ et ses `import` sont résolus EN RÉSEAU avant que son corps s'exécute ;
+// un `<script>` classique s'exécute dès le parsing. Une initialisation accrochée
+// à `DOMContentLoaded` part donc AVANT que le module ait posé quoi que ce soit —
+// une course, gagnée en local où tout est en cache, perdue en production.
+//
+// Le motif correct est celui de la messagerie : le script classique EXPOSE une
+// fonction d'init, et c'est le MODULE qui l'appelle, une fois ses helpers posés.
+
+function partieModule (html) {
+  const m = html.match(/<script type="module">([\s\S]*?)<\/script>/)
+  return m ? m[1] : ''
+}
+function partiesClassiques (html) {
+  return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n')
+}
+
+// Globals fournis par un module et consommés par un script classique.
+const FOURNIS_PAR_MODULE = ['apiCall', 'peutEcrire', 'peutLire', 'compteCourant',
+                            'enteteCompte', 'estTitulaire', 'initAvis', 'loadConversations']
+
+// ⚠ DECOUVERTE AUTOMATIQUE, pas une liste figee. Une liste ne protege que les
+// pages qu'on a pense a y mettre — or ce bug est arrive sur une page NEUVE. Tout
+// fichier melangeant un <script type="module"> et un <script> classique est
+// examine, y compris ceux qui n'existent pas encore.
+function pagesMixtes () {
+  const racine = path.join(__dirname, '..')
+  const trouvees = []
+  const explorer = (rel) => {
+    for (const e of fs.readdirSync(path.join(racine, rel), { withFileTypes: true })) {
+      const chemin = rel + '/' + e.name
+      if (e.isDirectory()) explorer(chemin)
+      else if (e.name.endsWith('.html')) {
+        const html = fs.readFileSync(path.join(racine, chemin), 'utf8')
+        if (html.includes('<script type="module">') && /<script>/.test(html)) {
+          trouvees.push(chemin.replace(/^\//, ''))
+        }
+      }
+    }
+  }
+  explorer('pages'); explorer('apps')
+  return trouvees
+}
+
+const MIXTES = pagesMixtes()
+
+test('au moins une page mixte est examinée (sinon la découverte est cassée)', () => {
+  assert.ok(MIXTES.length >= 2, `pages mixtes trouvées : ${MIXTES.join(', ') || 'aucune'}`)
+})
+
+for (const page of MIXTES) {
+  test(`${page} : l'init n'est pas accrochée à DOMContentLoaded si elle consomme le module`, () => {
+    const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', page), 'utf8'))
+    const module = partieModule(html)
+    const classique = partiesClassiques(html)
+    if (!module.trim() || !classique.trim()) return
+
+    // Ce que le script classique consomme et que seul le module peut fournir.
+    const consommes = FOURNIS_PAR_MODULE.filter(n =>
+      new RegExp('window\\.' + n + '\\s*\\(').test(classique) &&
+      new RegExp('window\\.' + n + '\\s*=').test(module))
+    if (!consommes.length) return
+
+    assert.ok(!/addEventListener\(\s*['"]DOMContentLoaded['"]/.test(classique),
+      `${page} consomme ${consommes.join(', ')} depuis le module, mais s'initialise sur ` +
+      `DOMContentLoaded : la course est perdue dès que le réseau est lent. ` +
+      `Exposer une fonction d'init et la faire appeler PAR le module.`)
+  })
+
+  test(`${page} : le module déclenche bien l'initialisation`, () => {
+    const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', page), 'utf8'))
+    const module = partieModule(html)
+    const classique = partiesClassiques(html)
+    if (!module.trim() || !classique.trim()) return
+
+    // Toute fonction d'init exposée par le script classique doit être appelée
+    // quelque part par le module — sinon rien ne démarre.
+    const exposees = [...classique.matchAll(/window\.(\w*[Ii]nit\w*|loadConversations)\s*=/g)]
+      .map(m => m[1])
+    for (const nom of exposees) {
+      assert.ok(new RegExp('window\\.' + nom + '\\s*\\(').test(module),
+        `${page} expose window.${nom} mais le module ne l'appelle jamais : la page ne démarrera pas`)
+    }
+  })
+}
