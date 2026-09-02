@@ -147,3 +147,10 @@ vite.config.ts.timestamp-*
 # VS Code local
 .vscode/
 .env*
+
+# Scripts de diagnostic jetables (sondes, rattrapages ponctuels).
+# ⚠ Un `_det.tmp.js` est parti dans un commit : il ouvrait un client service key
+# et lisait des donnees en clair. Inoffensif hors /api, mais il n'avait rien a
+# faire la. tests/pas-de-jetables.test.js verifie qu'aucun n'est suivi.
+_*.tmp.js
+_*.tmp.mjs
