@@ -11,6 +11,52 @@ Règles d'architecture à respecter impérativement :
 - Mettre à jour le fichier `docs/kb/` correspondant dans le même commit.
 - ⚠️ Piège connu : `properties.id` est un UUID, mais les colonnes `property_id` des tables enfants stockent des propIds Beds24 en texte. Pour cette nouvelle table on référence **l'UUID de `properties.id`** (l'app métier est provider-agnostique et ne doit rien connaître de Beds24 ; seule la couche sync parle aux providers).
 
+## 0. Décision d'architecture — `ota_reviews` appartient au CŒUR
+
+> À intégrer **avant** d'ouvrir ce chantier. Décision prise le 2 septembre 2026.
+> Elle conditionne la table, sa rétention et ce qu'on y stocke.
+
+`ota_reviews` fait partie du **cœur de données HôteSmart**
+(`docs/kb/coeur-de-donnees.md`), au même titre que l'historique des ventes que
+consommera YieldFlow. **Ce n'est pas une table du domaine ménage.**
+
+**Table de vérité unique, liée à la réservation** (`booking_uid`), lue par :
+- la **fiche prestataire**, via `menage_event_id` — quels avis se rapportent aux
+  ménages de cette personne ;
+- le **futur module de pricing**, via le bien et les dates — comment les avis
+  évoluent au regard des tarifs et de l'occupation.
+
+**Jamais dupliquée.** Ni copie dans une table ménage, ni recopie d'un extrait
+dans une app. Deux lecteurs, une seule table : c'est précisément le cas que la
+règle du cœur existe pour tenir. Une copie « pour le confort de la fiche
+prestataire » divergerait au premier avis modifié par le voyageur.
+
+### Conserver l'avis COMPLET, pas le verdict propreté
+
+Le réflexe naturel, en abordant ce chantier par la qualité du ménage, serait de
+ne garder que `ai_clean_verdict` et son extrait. **Ce serait une erreur
+irréversible** : les scores par catégorie, les tags, le texte et les dates ne se
+récupèrent pas rétroactivement quand l'OTA les a fait tourner.
+
+On conserve donc : scores par catégorie, tags, texte intégral, réponse de l'hôte,
+**dates de séjour et date de dépôt de l'avis**. Le module de pricing corrélera
+l'évolution des avis avec les tarifs pratiqués et l'occupation — il a besoin de la
+série complète, pas d'un verdict binaire.
+
+⚠️ La table ci-dessous porte `received_at` (dépôt) mais **pas les dates de
+séjour** : elles sont dans `bookings_snapshot`, atteignables par `booking_uid`.
+Quand `booking_uid` n'a pas pu être résolu, l'avis perd son ancrage temporel de
+séjour — prévoir de les dénormaliser (`stay_start`, `stay_end`) ou de traiter la
+résolution tardive du `booking_uid` comme un travail de fond.
+
+### Rétention — alignée sur l'historique des ventes
+
+**Conservée tant que le bien existe, supprimée avec lui.** C'est déjà ce
+qu'exprime `property_id uuid references properties(id) on delete cascade` dans la
+table ci-dessous : la rétention est portée par le schéma, pas par une purge
+périodique. Aucun effacement à l'ancienneté — une série tronquée à douze mois
+serait sans valeur pour le yield.
+
 ## 1. Migration SQL — table `ota_reviews`
 
 ```sql

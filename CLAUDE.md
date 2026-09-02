@@ -22,6 +22,23 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - paiements = Stripe TEST. emails = Brevo. cron = Vercel natif */5 → /api/cron (Bearer CRON_SECRET).
 - deploy = hotesmart.vercel.app (Vercel Pro, 100 fonctions, auto-deploy sur push main). Branche travail = channex-phase1.
 
+## ARCHITECTURE — LE CŒUR DE DONNÉES D'ABORD
+- Toute donnée collectée auprès d'un provider (Channex, Beds24, et ceux qui
+  viendront) est **d'abord répertoriée dans le cœur de données HôteSmart** —
+  les tables Supabase, écrites **par la couche sync uniquement** — puis rendue
+  accessible aux apps (ménage, messagerie, yield, avis…) pour leur traitement
+  particulier.
+- **Aucune app ne lit un provider directement.** Aucune donnée n'existe
+  seulement dans une app.
+- C'est la généralisation du principe `bookings_snapshot` : un writer unique, un
+  schéma commun aux deux providers, et toutes les apps qui lisent la même vérité.
+- Vécu : le planning ménage appelait `/api/beds24` en direct, donc un hôte
+  Channex voyait un planning **vide** (écart E1 de l'audit d'unification). Le
+  correctif n'a pas été d'ajouter un second appel provider dans l'app, mais de la
+  faire lire le cœur.
+- Corollaire pratique : une nouvelle donnée provider se traite dans cet ordre —
+  table du cœur, writer dans `lib/`, puis lecture par l'app. Jamais l'inverse.
+
 ## RÈGLE ABSOLUE — REVIEW AVANT PUSH
 - **Aucun push tant qu'une review est en cours.** La review fait partie du commit,
   pas de l'après-commit : on attend son retour, on la LIT, on corrige, puis on pousse.
@@ -70,6 +87,7 @@ Bloquants pré-lancement : (a) /settings 404 + onboarding 2 parcours ; (b) wirin
 
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
+- docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps).
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.

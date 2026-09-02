@@ -126,7 +126,14 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
             return { data: null, error: { message: 'timeout' } }
           }
           if (q._f.profile_id === 'p-regina') {
-            return { data: { property_scope: 'selected', property_ids: [BIEN_A.id, BIEN_B.id] }, error: null }
+            return { data: { profile_id: 'p-regina', property_scope: 'selected',
+                             property_ids: [BIEN_A.id, BIEN_B.id], self_availability: 'none',
+                             self_view_reviews: true }, error: null }
+          }
+          if (q._f.profile_id === 'p-test') {
+            return { data: { profile_id: 'p-test', property_scope: 'all', property_ids: [],
+                             reservations: 'read', menages: 'read', self_availability: 'none',
+                             self_view_reviews: false }, error: null }
           }
           return { data: tableau ? [] : null, error: null }
         }
@@ -710,6 +717,71 @@ test('PERIMETRE : la garde s\'applique meme sur un profil desactive', async () =
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
   assert.strictEqual(res.code, 400)
   assert.deepStrictEqual(etat.ecritures, [])
+})
+
+// ─── Panneau reduit des prestataires ────────────────────────────────────────
+
+test('PRESTATAIRE : enregistrer sans perimetre CONSERVE celui deja en base', async () => {
+  // ⚠ LE PIEGE DU PANNEAU REDUIT. La page ne montre ni perimetre ni domaines pour
+  // un prestataire — ils se gerent dans la fiche prestataire. Si l'endpoint
+  // repartait de ses valeurs par defaut, Régina (reglee sur DEUX biens) serait
+  // repassee a « tous les biens » au premier enregistrement, et aurait vu tout le
+  // compte dans sa PWA.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { self_availability: 'read', self_view_reviews: true } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.strictEqual(maj.row.property_scope, 'selected', 'le perimetre doit rester restreint')
+  assert.deepStrictEqual(maj.row.property_ids.sort(), [BIEN_A.id, BIEN_B.id].sort())
+  assert.strictEqual(maj.row.self_availability, 'read', 'ce qui est fourni s\'applique')
+})
+
+test('PRESTATAIRE : le perimetre PWA n\'est pas elargi non plus', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    permissions: { self_availability: 'write' } } }), res)
+  assert.strictEqual(res.code, 200)
+  const pt = etat.ecritures.find(e => e.table === 'public_tokens')
+  assert.ok(pt, 'la ligne PWA doit etre mise a jour')
+  assert.deepStrictEqual(pt.row.property_ids.sort(),
+    [BIEN_A.provider_property_id, BIEN_B.provider_property_id].sort(),
+    'les deux biens de Régina, pas une liste vide qui vaudrait « tous »')
+})
+
+test('PRESTATAIRE : un domaine non fourni reste a sa valeur enregistree', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina', permissions: { self_view_reviews: false } } }), res)
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.strictEqual(maj.row.self_view_reviews, false)
+  assert.strictEqual(maj.row.self_availability, 'none', 'valeur du socle, pas une remise a zero arbitraire')
+})
+
+test('MEMBRE : un domaine explicitement remis a « rien » est bien abaisse', async () => {
+  // La conservation ne doit pas empecher de RETIRER un droit : ce qui est fourni
+  // s'applique, y compris 'none'.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test',
+    permissions: { ...droitsVides(), reservations: 'none' } } }), res)
+  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
+  assert.strictEqual(maj.row.reservations, 'none')
+})
+
+test('PANNE : lecture des droits existants en echec -> 503, aucun ecrasement', async () => {
+  const etat = preparer({ user: PROD, erreurs: { 'profile_permissions:lecture': true } })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test', permissions: { self_availability: 'write' } } }), res)
+  assert.strictEqual(res.code, 503)
+  assert.ok(!etat.ecritures.some(e => e.table === 'profile_permissions'))
 })
 
 // ─── Divers ─────────────────────────────────────────────────────────────────

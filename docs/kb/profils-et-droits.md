@@ -705,3 +705,76 @@ rien tant que le câblage est inerte.
 
 Étape 4 : page Équipe et droits. Étape 5 : **sélecteur de compte** (lève tout ce
 qui précède). Étape 6 : fiche prestataire.
+
+
+## 10. Étape 4 — page Équipe et droits
+
+Livrée le 2 septembre 2026. `/settings` à onglets (Équipe réel, Connexions /
+Abonnement / Mon compte en liens), endpoint `api/membres.js`, parcours
+d'invitation par lien.
+
+### Deux sections, un seul modèle de données
+
+Les profils `access_mode = 'lien'` (prestataires) sont affichés dans une section
+« Prestataires » distincte, et leur panneau est réduit à **identité, accès,
+disponibilités, voir ses avis**. Pas de grille des huit domaines, pas de
+périmètre : ils se gèrent depuis la fiche prestataire (étape 6).
+
+Rien ne change en base — `access_mode` reste la seule différence entre un
+prestataire et un membre.
+
+### ⚠️ Ce qui n'est pas affiché ne doit pas être écrasé
+
+Le panneau réduit n'expose ni périmètre ni domaines. Sans précaution,
+enregistrer depuis ce panneau les aurait remis à leurs valeurs par défaut :
+Régina, réglée sur **deux biens**, serait repassée à `property_scope = 'all'` —
+donc **tout le compte** dans sa PWA.
+
+`validerPermissions` prend donc les droits déjà enregistrés comme **socle** : ce
+qui est fourni s'applique (y compris `'none'`, pour pouvoir retirer un droit),
+ce qui est absent est conservé. Une panne de lecture de ce socle répond 503
+plutôt que d'écraser.
+
+Règle générale : **un formulaire qui n'expose pas un champ ne l'écrase jamais.**
+
+### Invitation par lien, sans email
+
+`invite_token` / `invite_expires_at` (7 jours), jeton généré côté serveur, effacé
+à l'acceptation — la contrainte `profiles_invite_coherent` rend l'état
+« accepté avec jeton » impossible à écrire. L'acceptation est explicite
+(« Rejoindre le compte de X ») ; le rattachement automatique par email a été
+écarté, il ferait entrer quelqu'un dans un compte tiers sans qu'il le sache.
+
+L'envoi Brevo viendra plus tard : le champ existe, désactivé.
+
+### ⚠️ Les deux représentations du périmètre
+
+`profile_permissions.property_ids` (UUID) et `public_tokens.property_ids`
+(TEXT, `provider_property_id`). La PWA prestataire ne lit que la seconde.
+
+**Le vide n'y veut pas dire la même chose** : « aucune restriction » côté PWA,
+« zéro bien » côté droits. Un `selected` vide écrit tel quel donnait au
+prestataire l'intégralité du compte. C'est refusé explicitement pour un accès par
+lien.
+
+Une mise à jour ne touche **que** `property_ids` : `visibility_days` (7 à 90
+jours) et `label` se règlent dans `apps/menages/prestataires.html` et étaient
+écrasés à chaque enregistrement.
+
+### ⚠️ Coupure d'accès : deux tables, toujours
+
+`active = false` ne suffit pas — la PWA n'interroge pas `profiles`. La
+désactivation retire la ligne `public_tokens`, et ni l'enregistrement de droits
+ni la régénération ne la recréent sur un profil coupé. La régénération vérifie
+que l'ancien jeton a bien été révoqué, et le dit quand ce n'est pas le cas.
+
+### ⚠️ Inerte jusqu'au sélecteur de compte (étape 5)
+
+Sans sélecteur, aucun identifiant ne désigne un compte : le compte cible est
+celui de l'appelant, qui en est titulaire. Un membre voit donc **sa propre** page
+Équipe, vide — pas celle du compte auquel il appartient. Ce qui est garanti, et
+testé, c'est qu'il ne touche rien du compte d'autrui : 404 sur tout profil
+étranger, refus de rattacher un bien étranger.
+
+La zone « Réservé au titulaire » de la page est donc du code prêt pour l'étape 5,
+pas une protection active — c'est écrit dans le fichier.

@@ -38,12 +38,23 @@ const CHAMPS_PROFIL = 'id, account_user_id, member_user_id, first_name, last_nam
 //
 // Renvoie { erreur } ou { permissions }. Ne fait AUCUNE confiance au client : la
 // page peut griser ce qu'elle veut, la regle vit ici.
-function validerPermissions (brut, estTitulaireCible) {
+// `existant` : la ligne de droits deja en base, ou null a la creation.
+//
+// ⚠ CE QUI N'EST PAS FOURNI EST CONSERVE, PAS REMIS A ZERO. Le panneau des
+// prestataires n'affiche ni perimetre ni domaines — ils se gerent depuis la
+// fiche prestataire. Sans cette regle, enregistrer depuis ce panneau reduit
+// aurait rebascule leur `property_scope` sur 'all' : Régina, reglee sur deux
+// biens, aurait vu TOUT le compte. Un formulaire qui n'expose pas un champ ne
+// doit jamais l'ecraser.
+function validerPermissions (brut, estTitulaireCible, existant = null) {
   const p = brut && typeof brut === 'object' ? brut : {}
+  const defaut = (cle, siVide) => p[cle] != null ? p[cle]
+                                : existant && existant[cle] != null ? existant[cle]
+                                : siVide
   const out = {}
 
   for (const domaine of DOMAINES) {
-    const niveau = p[domaine] == null ? 'none' : String(p[domaine])
+    const niveau = String(defaut(domaine, 'none'))
     if (!NIVEAUX.includes(niveau)) return { erreur: `Niveau invalide pour ${domaine}` }
     // ⚠ `facturation` et `equipe` ne se delèguent pas. Le refus est ici parce
     // qu'une valeur ecrite en base survivrait a l'interface : un jour ou la garde
@@ -54,15 +65,19 @@ function validerPermissions (brut, estTitulaireCible) {
     out[domaine] = niveau
   }
 
-  const dispo = p.self_availability == null ? 'none' : String(p.self_availability)
+  const dispo = String(defaut('self_availability', 'none'))
   if (!NIVEAUX.includes(dispo)) return { erreur: 'Niveau invalide pour les disponibilités' }
   out.self_availability = dispo
-  out.self_view_reviews = p.self_view_reviews !== false
+  out.self_view_reviews = defaut('self_view_reviews', true) !== false
 
-  const scope = p.property_scope === 'selected' ? 'selected' : 'all'
+  // Le perimetre suit la meme regle : absent du corps -> celui deja enregistre.
+  const scope = defaut('property_scope', 'all') === 'selected' ? 'selected' : 'all'
   out.property_scope = scope
+  const idsBruts = p.property_ids != null ? p.property_ids
+                 : existant && existant.property_ids != null ? existant.property_ids
+                 : []
   out.property_ids = scope === 'selected'
-    ? [...new Set((Array.isArray(p.property_ids) ? p.property_ids : []).map(String))]
+    ? [...new Set((Array.isArray(idsBruts) ? idsBruts : []).map(String))]
     : []
 
   return { permissions: out }
@@ -322,7 +337,17 @@ async function modifier (req, res, compte) {
     })
   }
 
-  const v = validerPermissions(b.permissions, false)
+  // ⚠ Les droits DEJA enregistres servent de socle : voir validerPermissions.
+  // Une panne de lecture ici ferait repartir le profil des valeurs par defaut —
+  // on echoue plutot que d'ecraser.
+  const { data: dejaLa, error: eDeja } = await supabase.from('profile_permissions')
+    .select('*').eq('profile_id', cible.profil.id).maybeSingle()
+  if (eDeja) {
+    console.error('[membres] lecture droits existants', eDeja.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
+  const v = validerPermissions(b.permissions, false, dejaLa)
   if (v.erreur) return res.status(400).json({ error: v.erreur })
 
   const biens = await verifierBiens(v.permissions.property_ids, compte)
