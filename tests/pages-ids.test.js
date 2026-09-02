@@ -64,8 +64,10 @@ for (const fichier of PAGES) {
 test('settings : les ids cles de la page Equipe sont bien la', () => {
   // Garde-fou explicite sur ce que la page ne peut pas perdre sans casser.
   const { presents } = analyser('pages/settings.html')
+  // `f-self` a disparu avec « Droits sur ses propres données » — résidu des
+  // prestataires, qui ne se gèrent plus ici.
   for (const id of ['liste', 'overlay', 'p-titre', 'f-prenom', 'f-scope',
-                    'f-biens', 'f-domaines', 'f-self', 'zone-acces',
+                    'f-biens', 'f-domaines', 'zone-acces',
                     'btn-ajouter', 'btn-enregistrer', 'btn-annuler', 'msg']) {
     assert.ok(presents.has(id), `id manquant dans le HTML : ${id}`)
   }
@@ -75,9 +77,62 @@ test('settings : les prestataires ne sont plus references par la page', () => {
   // Le retrait doit etre complet : un residu d'id rouvrirait la porte a une
   // reference morte.
   const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8'))
-  for (const mort of ['liste-presta', 'btn-ajouter-presta', 'note-presta', 'note-mode', 'note-perimetre']) {
+  for (const mort of ['liste-presta', 'btn-ajouter-presta', 'note-presta', 'note-mode',
+                      'note-perimetre', 'f-self', 'bloc-modeles', 'data-modele']) {
     assert.ok(!html.includes(mort), `residu de l'ancienne version : ${mort}`)
   }
+})
+
+test('settings : le panneau de droits est reduit a QUATRE blocs', () => {
+  // ⚠ La demande etait « simplification maximale ». Ce test fige la structure :
+  // Identite, Biens, Droits, Acces — et rien d'autre.
+  const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8'))
+  for (const titre of ['Identité', 'Biens', 'Droits']) {
+    assert.ok(html.includes(`<div class="bloc-titre">${titre}`), `bloc manquant : ${titre}`)
+  }
+  assert.ok(html.includes("id=\"zone-acces\""), 'le bloc Accès est rendu par le script')
+})
+
+test('settings : les huit domaines, et une seule phrase visible', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8')
+  for (const d of ['reservations', 'menages', 'prestataires', 'messages',
+                   'avis', 'reglages', 'facturation', 'equipe']) {
+    assert.ok(html.includes(`'${d}'`), `domaine absent du formulaire : ${d}`)
+  }
+  assert.ok(html.includes('Facturation et Équipe ne se délèguent pas en écriture.'),
+    'la seule phrase visible du bloc Droits')
+  // Les trois choix, dans le vocabulaire demande.
+  assert.ok(html.includes("['none', 'Rien'], ['read', 'Voir'], ['write', 'Modifier']"),
+    'les trois choix doivent etre Rien / Voir / Modifier')
+})
+
+test('settings : chaque domaine porte une infobulle, aucun sous-texte', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8')
+  assert.ok(html.includes('data-aide='), 'les explications passent par des infobulles')
+  assert.ok(!html.includes('dom-hint'),
+    'plus de sous-texte sous chaque domaine : huit paragraphes noyaient la regle')
+})
+
+test('settings : Renouveler est AVEC le lien, Desactiver est SEUL', () => {
+  const html = sansCommentaires(fs.readFileSync(path.join(__dirname, '..', 'pages/settings.html'), 'utf8'))
+  // ⚠ On decoupe sur le TEMPLATE, pas sur la feuille de style : `lien-box` et
+  // `zone-danger` y apparaissent d'abord comme selecteurs CSS, et le test
+  // decoupait donc dans le mauvais bloc — il passait sans rien verifier.
+  const debutLien = html.indexOf('id="f-lien"')
+  const debutDanger = html.indexOf('class="zone-danger"', debutLien)
+  assert.ok(debutLien > 0 && debutDanger > debutLien, 'structure attendue introuvable')
+
+  const boiteLien = html.slice(debutLien, debutDanger)
+  assert.ok(boiteLien.includes('btn-regen'), 'Renouveler appartient a la boite du lien')
+
+  // ⚠ Borne a la FIN DU TEMPLATE (`z.appendChild`) : sans elle, la tranche
+  // courait jusqu'aux gestionnaires d'evenements en bas de fichier, ou
+  // `$('btn-regen').onclick` figure forcement — le test echouait sur du code
+  // qui n'a rien a voir avec la mise en page.
+  const finTemplate = html.indexOf('z.appendChild(bloc)', debutDanger)
+  const boiteDanger = html.slice(debutDanger, finTemplate)
+  assert.ok(boiteDanger.includes('btn-activite'), 'Desactiver est isole dans sa zone')
+  assert.ok(!boiteDanger.includes('btn-regen'), 'Renouveler n\'est plus dans la zone de danger')
 })
 
 test('settings : le lien vers Prestataires respecte cleanUrls', () => {

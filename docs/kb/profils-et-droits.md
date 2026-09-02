@@ -879,3 +879,57 @@ décomptes et les rattachements d'avis.
 **À traiter au chantier prestataires**, en même temps que la convergence des deux
 populations : la suppression devra passer par `profiles`, `public_tokens` n'en
 étant que la projection.
+
+
+## 11. Cobaye de l'étape 5 — ce qui marche, et ce qui n'est pas encore branché
+
+Déroulé le 2 septembre 2026 avec une session réelle du compte test
+(`thierrylapoule31`), membre du compte prod, périmètre = La bulle,
+`reservations`/`menages` en lecture.
+
+### Ce qui fonctionne
+
+| Vérification | Résultat |
+|---|---|
+| Sélecteur | deux comptes listés : le sien + celui de Thierry |
+| Bascule → biens | **La bulle seule** — et c'est un bien **Beds24**, ce qui valide le correctif `properties.js` |
+| Calendrier sur La bulle | 200 |
+| Calendrier sur un autre bien du compte | **403** |
+| Écriture calendrier | **403** |
+| Kill switch | **403** |
+| Titulaire sans invitation | sélecteur **masqué**, rien ne change |
+| Retour sur son compte | ses propres biens |
+
+### ⚠️ Ce qui n'est pas délégué, et donc masqué
+
+Un seul endpoint honore `X-Compte` : `channel-property` GET. Le **calendrier**
+fonctionne par un autre mécanisme — le compte vient de la **ressource**
+(`property_ids`), pas de l'en-tête, ce qui est la règle la plus sûre.
+
+Mais `/api/menages` et `/api/messages` sont des **collections sans ressource** :
+sans `compteDelegue`, elles renvoient les données du **compte de l'appelant**.
+Vérifié : sur le compte prod, `/api/menages` a renvoyé « colomier », le bien du
+compte test.
+
+**Ce n'est pas une fuite** — chacun voit les siennes — mais ce serait un
+**contresens à l'écran** : la sidebar annonce le compte partagé et le planning
+montrerait autre chose. C'est pourquoi Ménages est dans les Apps, masquées hors
+titulaire, et Messages est masqué par `peutLire('messages')`.
+
+Ces endpoints deviendront délégables lot par lot, chacun après relecture et
+ajout de son filtre de périmètre.
+
+### ⚠️ Incident pendant le cobaye : un bien créé en production
+
+Le test « créer un bien » a répondu **201**. Le bien « Intrus » a été créé sur le
+compte **test** (pas sur prod — l'opt-in a tenu, aucune fuite entre comptes) et
+provisionné chez le channel manager.
+
+Supprimé immédiatement par `DELETE /api/channel-property`, qui a répondu
+`{"deleted":true,"channel_deleted":true}` : le dé-provisionnement a bien eu lieu.
+Base revenue à ses 4 biens.
+
+**Leçon** : un test de refus doit vérifier que l'action est refusée *avant* de
+la déclencher sur un endpoint qui écrit. Ici l'endpoint n'était pas délégable —
+donc il a fait son travail, sur le bon compte — mais l'appel restait une
+écriture réelle en production.

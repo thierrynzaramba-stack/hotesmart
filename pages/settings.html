@@ -51,7 +51,6 @@
     .dom { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 0.5px solid var(--border); }
     .dom:last-child { border-bottom: 0; }
     .dom-name { flex: 1; font-size: 13px; }
-    .dom-hint { font-size: 10px; color: var(--text2); display: block; margin-top: 2px; }
     .seg { display: flex; border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
     .seg button { background: var(--bg); border: 0; padding: 5px 11px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text2); }
     .seg button.on { background: #C97B5C; color: #fff; }
@@ -60,13 +59,36 @@
     .biens { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
     .bien { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 5px 8px; border: 0.5px solid var(--border); border-radius: var(--radius); }
 
-    .lien-box { display: flex; gap: 8px; margin-top: 8px; }
+    .lien-box { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
     .lien-box input { flex: 1; font-family: ui-monospace, monospace; font-size: 11px; }
     .zone-danger { border: 0.5px solid #FCA5A5; background: #FEF2F2; border-radius: var(--radius); padding: 12px; margin-top: 16px; }
     .zone-danger .t { font-size: 12px; font-weight: 500; color: #7F1D1D; margin-bottom: 3px; }
     .zone-danger .s { font-size: 11px; color: #991B1B; line-height: 1.5; margin-bottom: 10px; }
 
     .note { font-size: 11px; color: var(--text2); line-height: 1.55; background: var(--bg2); border-radius: var(--radius); padding: 10px 12px; margin-top: 10px; }
+
+    /* Panneau de droits : quatre blocs, aucun paragraphe. Les explications
+       vivent dans les infobulles — huit paragraphes de domaine faisaient que
+       personne ne lisait la seule phrase qui compte. */
+    .bloc { padding: 14px 0; border-bottom: 0.5px solid var(--border); }
+    .bloc:last-of-type { border-bottom: 0; }
+    .bloc-titre { font-size: 13px; font-weight: 500; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+    .regle { font-size: 11px; color: var(--text2); margin-top: 10px; }
+    .info {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; border-radius: 50%; font-size: 10px;
+      color: var(--text2); border: 0.5px solid var(--border); cursor: help;
+      position: relative; flex: none;
+    }
+    .info:hover, .info:focus { color: var(--text); border-color: var(--text2); outline: none; }
+    /* L'infobulle s'ouvre au survol ET au focus : accessible au clavier. */
+    .info:hover::after, .info:focus::after {
+      content: attr(data-aide); position: absolute; left: 50%; bottom: 130%;
+      transform: translateX(-50%); width: 230px; padding: 8px 10px;
+      background: #1d1d1f; color: #fff; border-radius: var(--radius);
+      font-size: 11px; line-height: 1.45; text-align: left; z-index: 60;
+      pointer-events: none; white-space: normal; font-weight: 400;
+    }
     .msg { font-size: 12px; padding: 9px 12px; border-radius: var(--radius); margin-bottom: 14px; display: none; line-height: 1.5; }
     .msg.err { color: #7F1D1D; background: #FEE2E2; border: 0.5px solid #FCA5A5; }
     .msg.ok  { color: #065F46; background: #D1FAE5; border: 0.5px solid #6EE7B7; }
@@ -114,7 +136,9 @@
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:4px">
         <div style="flex:1">
           <div class="card-title">Profils</div>
-          <div class="card-sub">Chaque personne qui accède à votre compte a un profil et des droits à la carte. Il n’y a pas de rôle figé : un modèle remplit le formulaire, vous ajustez ensuite.</div>
+          <div class="card-sub">Les personnes qui se connectent à HôteSmart, et ce qu’elles peuvent y faire.
+            Les prestataires de ménage n’ont pas accès à HôteSmart : ils se gèrent depuis
+            <a href="/apps/menages/prestataires">Prestataires</a>.</div>
         </div>
         <button class="btn" id="btn-ajouter">Ajouter</button>
       </div>
@@ -127,53 +151,39 @@
 <div class="overlay" id="overlay">
   <div class="panel">
     <h3 id="p-titre">Nouveau profil</h3>
-    <div class="h-sub" id="p-soustitre">Identité, accès et droits.</div>
 
-    <div class="grid2">
-      <div><label class="f" for="f-prenom">Prénom *</label><input class="f" id="f-prenom" autocomplete="off"></div>
-      <div><label class="f" for="f-nom">Nom</label><input class="f" id="f-nom" autocomplete="off"></div>
-    </div>
-    <div class="grid2">
-      <div><label class="f" for="f-email">Email</label><input class="f" id="f-email" type="email" autocomplete="off"></div>
-      <div><label class="f" for="f-tel">Téléphone</label><input class="f" id="f-tel" autocomplete="off"></div>
-    </div>
-
-    <input type="hidden" id="f-mode" value="compte">
-    <div class="note">
-      Les profils gérés ici se <strong>connectent à HôteSmart</strong> : employés, propriétaires.
-      Les prestataires de ménage n’ont pas accès à HôteSmart — seulement à l’application ménage —
-      et se gèrent depuis <a href="/apps/menages/prestataires">Prestataires</a>.
+    <div class="bloc">
+      <div class="bloc-titre">Identité</div>
+      <div class="grid2">
+        <div><label class="f" for="f-prenom">Prénom *</label><input class="f" id="f-prenom" autocomplete="off"></div>
+        <div><label class="f" for="f-nom">Nom</label><input class="f" id="f-nom" autocomplete="off"></div>
+      </div>
+      <div class="grid2">
+        <div><label class="f" for="f-email">Email</label><input class="f" id="f-email" type="email" autocomplete="off"></div>
+        <div><label class="f" for="f-tel">Téléphone</label><input class="f" id="f-tel" autocomplete="off"></div>
+      </div>
+      <input type="hidden" id="f-mode" value="compte">
     </div>
 
-    <div id="bloc-modeles">
-    <label class="f">Partir d’un modèle</label>
-    <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn-ghost" data-modele="employe">Employé</button>
-      <button class="btn-ghost" data-modele="proprietaire">Propriétaire</button>
-    </div>
-    <div class="note">Un modèle remplit le formulaire, rien de plus. Aucun rôle n’est enregistré : seuls les droits ci-dessous comptent.</div>
-    </div>
-
-    <div id="bloc-perimetre">
-    <label class="f">Périmètre</label>
-    <select class="f" id="f-scope">
-      <option value="all">Tous les biens, y compris ceux ajoutés plus tard</option>
-      <option value="selected">Une sélection de biens</option>
-    </select>
-    <div class="biens" id="f-biens"></div>
+    <div class="bloc">
+      <div class="bloc-titre">Biens
+        <span class="info" tabindex="0" role="button" aria-label="Aide"
+          data-aide="« Tous les biens » inclut ceux que vous ajouterez plus tard. Une sélection reste figée : un nouveau bien n’y entre pas tout seul.">ⓘ</span>
+      </div>
+      <select class="f" id="f-scope">
+        <option value="all">Tous les biens</option>
+        <option value="selected">Une sélection</option>
+      </select>
+      <div class="biens" id="f-biens"></div>
     </div>
 
-    <div id="bloc-domaines">
-    <label class="f">Droits par domaine</label>
-    <div id="f-domaines"></div>
+    <div class="bloc">
+      <div class="bloc-titre">Droits</div>
+      <div id="f-domaines"></div>
+      <div class="regle">Facturation et Équipe ne se délèguent pas en écriture.</div>
     </div>
 
-
-
-    <label class="f">Droits sur ses propres données</label>
-    <div id="f-self"></div>
-
-    <div id="zone-acces"></div>
+    <div class="bloc" id="zone-acces"></div>
 
     <div class="panel-actions">
       <button class="btn-ghost" id="btn-annuler">Annuler</button>
@@ -187,25 +197,17 @@ import { supabase } from '/shared/supabase.js'
 import { api } from '/shared/api-client.js'
 
 const DOMAINES = [
-  ['reservations', 'Réservations', 'Calendrier, tarifs, disponibilités'],
-  ['menages',      'Ménages',      'Planning et répartition'],
-  ['prestataires', 'Prestataires', 'Fiches et qualité'],
-  ['messages',     'Messagerie',   'Conversations voyageurs'],
-  ['avis',         'Avis',         'Avis voyageurs'],
-  ['reglages',     'Réglages',     'Automatisation, modèles, connaissances'],
-  ['facturation',  'Facturation',  'Abonnement et paiements'],
-  ['equipe',       'Équipe',       'Profils et droits']
+  ['reservations', 'Réservations', 'Calendrier, tarifs et disponibilités des biens du périmètre. « Modifier » publie vers les plateformes.'],
+  ['menages',      'Ménages',      'Planning des ménages et répartition entre prestataires.'],
+  ['prestataires', 'Prestataires', 'Fiches des prestataires et suivi de leur qualité.'],
+  ['messages',     'Messagerie',   'Conversations avec les voyageurs. « Modifier » permet d’envoyer.'],
+  ['avis',         'Avis',         'Avis laissés par les voyageurs sur les plateformes.'],
+  ['reglages',     'Réglages',     'Automatisation, modèles de messages, base de connaissances.'],
+  ['facturation',  'Facturation',  'Abonnement et paiements. Engage le compte : jamais délégable en écriture.'],
+  ['equipe',       'Équipe',       'Profils et droits. Engage le compte : jamais délégable en écriture.']
 ]
 const NON_DELEGABLES = ['facturation', 'equipe']
 
-const MODELES = {
-  employe:      { property_scope: 'all', reservations: 'write', menages: 'write', prestataires: 'write',
-                  messages: 'write', avis: 'write', reglages: 'write', facturation: 'none', equipe: 'none',
-                  self_availability: 'none', self_view_reviews: true },
-  proprietaire: { property_scope: 'selected', reservations: 'read', menages: 'read', prestataires: 'none',
-                  messages: 'read', avis: 'read', reglages: 'none', facturation: 'none', equipe: 'none',
-                  self_availability: 'none', self_view_reviews: true }
-}
 const VIDE = { property_scope: 'all', property_ids: [], reservations: 'none', menages: 'none',
                prestataires: 'none', messages: 'none', avis: 'none', reglages: 'none',
                facturation: 'none', equipe: 'none', self_availability: 'none', self_view_reviews: true }
@@ -317,7 +319,6 @@ function rendrePanneau () {
   // profil ne pouvait etre cree ni modifie.
 
   $('p-titre').textContent = estNouveau ? 'Nouveau profil' : [edite.first_name, edite.last_name].filter(Boolean).join(' ')
-  $('p-soustitre').textContent = estNouveau ? 'Identité, accès et droits.' : 'Modifiez les droits, ou l’accès ci-dessous.'
   // L'email identifie un compte réellement rattaché : il se fige à l'acceptation.
   $('f-email').disabled = !!(edite && edite.accepted_at)
 
@@ -349,41 +350,21 @@ function rendrePanneau () {
   ;(brouillon.property_ids || []).filter(id => !connus.has(id))
     .forEach(id => caseBien(id, 'Bien supprimé', true))
 
+  // ⚠ Une ligne par domaine, trois choix, rien d'autre. Les explications vivent
+  // dans l'infobulle : un paragraphe par domaine faisait huit paragraphes, et
+  // plus personne ne lisait la seule phrase qui compte.
   const dom = $('f-domaines'); dom.innerHTML = ''
   DOMAINES.forEach(([cle, nom, aide]) => {
     const bloc = document.createElement('div'); bloc.className = 'dom'
     const g = document.createElement('div'); g.className = 'dom-name'
-    g.innerHTML = `${esc(nom)}<span class="dom-hint">${esc(aide)}</span>`
+    g.innerHTML = `${esc(nom)} <span class="info" tabindex="0" role="button" aria-label="Aide" data-aide="${esc(aide)}">ⓘ</span>`
     bloc.appendChild(g)
     bloc.appendChild(segment(brouillon[cle] || 'none',
       v => { brouillon[cle] = v; rendrePanneau() },
-      [['none', 'Rien'], ['read', 'Lecture'], ['write', 'Écriture']],
+      [['none', 'Rien'], ['read', 'Voir'], ['write', 'Modifier']],
       v => v === 'write' && NON_DELEGABLES.includes(cle)))
     dom.appendChild(bloc)
   })
-  const avert = document.createElement('div'); avert.className = 'note'
-  avert.textContent = 'Facturation et Équipe ne se délèguent pas en écriture : elles engagent le compte lui-même. Le serveur refuse la valeur, même si elle était forcée ailleurs.'
-  dom.appendChild(avert)
-
-  const self = $('f-self'); self.innerHTML = ''
-  const d1 = document.createElement('div'); d1.className = 'dom'
-  const g1 = document.createElement('div'); g1.className = 'dom-name'
-  g1.innerHTML = 'Ses disponibilités<span class="dom-hint">« Rien » : aucun écran dans l’application prestataire, un message l’invite à vous contacter</span>'
-  d1.appendChild(g1)
-  d1.appendChild(segment(brouillon.self_availability || 'none',
-    v => { brouillon.self_availability = v; rendrePanneau() },
-    [['none', 'Rien'], ['read', 'Lecture'], ['write', 'Écriture']]))
-  self.appendChild(d1)
-
-  const d2 = document.createElement('div'); d2.className = 'dom'
-  const g2 = document.createElement('div'); g2.className = 'dom-name'
-  g2.innerHTML = 'Voir ses propres avis<span class="dom-hint">Sa note et les avis liés à ses ménages</span>'
-  d2.appendChild(g2)
-  d2.appendChild(segment(brouillon.self_view_reviews === false ? 'non' : 'oui',
-    v => { brouillon.self_view_reviews = v === 'oui'; rendrePanneau() },
-    [['non', 'Non'], ['oui', 'Oui']]))
-  self.appendChild(d2)
-
 
   rendreAcces()
 }
@@ -391,7 +372,8 @@ function rendrePanneau () {
 function rendreAcces () {
   const z = $('zone-acces'); z.innerHTML = ''
   if (!edite) {
-    z.innerHTML = '<div class="note">Le lien d’accès s’affichera après l’enregistrement, à copier et transmettre vous-même.</div>'
+    z.innerHTML = `<div class="bloc-titre">Accès</div>
+      <div class="regle">Le lien s’affichera après l’enregistrement, à copier et transmettre vous-même.</div>`
     return
   }
 
@@ -399,35 +381,35 @@ function rendreAcces () {
   // ⚠ Le lien deja affiche est RESTITUE : chaque bascule de droit reconstruit ce
   // bloc, et le vider faisait disparaitre le lien sous les yeux de l'hote entre
   // le moment ou il l'affiche et celui ou il le copie.
-  bloc.innerHTML = `<label class="f">Accès</label>
+  //
+  // « Renouveler » est ICI, avec le lien : c'est la meme action vue par l'hote —
+  // obtenir un lien a transmettre. La confirmation, elle, reste explicite.
+  bloc.innerHTML = `<div class="bloc-titre">Accès
+      <span class="info" tabindex="0" role="button" aria-label="Aide"
+        data-aide="${esc(edite.access_mode === 'lien'
+          ? 'Ce lien ouvre l’application ménage sans mot de passe. Le renouveler coupe l’ancien immédiatement.'
+          : 'Lien d’invitation valable 7 jours. La personne devra accepter explicitement de rejoindre votre compte. Le renouveler annule le précédent.')}">ⓘ</span>
+    </div>
     <div class="lien-box">
-      <input class="f" id="f-lien" readonly value="${esc(lienAffiche)}" placeholder="Cliquez sur « Afficher le lien »">
-      <button class="btn-ghost" id="btn-voir">Afficher le lien</button>
+      <input class="f" id="f-lien" readonly value="${esc(lienAffiche)}" placeholder="Cliquez sur « Afficher »">
+      <button class="btn-ghost" id="btn-voir">Afficher</button>
       <button class="btn-ghost" id="btn-copier"${lienAffiche ? '' : ' disabled'}>Copier</button>
+      <button class="btn-ghost" id="btn-regen">Renouveler</button>
     </div>`
 
   if (edite.access_mode === 'compte') {
-    bloc.innerHTML += `<div class="note">
-      L’envoi par email arrivera plus tard : pour l’instant, copiez ce lien et transmettez-le vous-même.
-      L’invitation est valable 7 jours, et la personne devra accepter explicitement de rejoindre votre compte.
-    </div>
-    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+    bloc.innerHTML += `<div style="display:flex;gap:8px;margin-top:8px;align-items:center">
       <input class="f" id="f-envoi-email" style="flex:1" value="${esc(edite.email || '')}" disabled>
       <button class="btn-ghost" disabled title="Bientôt disponible">Envoyer par email</button>
     </div>`
   }
 
+  // Désactiver reste SEUL, en bas : ce n'est pas une variante d'« obtenir un
+  // lien », c'est une coupure d'accès.
   bloc.innerHTML += `<div class="zone-danger">
-      <div class="t">${edite.access_mode === 'lien' ? 'Régénérer le lien' : 'Renouveler l’invitation'}</div>
-      <div class="s">${edite.access_mode === 'lien'
-        ? 'L’ancien lien cessera de fonctionner immédiatement. La personne perdra l’accès tant qu’elle n’aura pas reçu le nouveau.'
-        : 'L’invitation précédente sera annulée et remplacée par une nouvelle, valable 7 jours.'}</div>
-      <button class="btn-danger" id="btn-regen">${edite.access_mode === 'lien' ? 'Régénérer le lien' : 'Renouveler'}</button>
-    </div>
-    <div class="zone-danger" style="border-color:var(--border);background:var(--bg2)">
-      <div class="t" style="color:var(--text)">${edite.active ? 'Désactiver ce profil' : 'Réactiver ce profil'}</div>
-      <div class="s" style="color:var(--text2)">${edite.active
-        ? 'L’accès est coupé immédiatement, compte comme lien. Les données restent, rien n’est supprimé.'
+      <div class="t">${edite.active ? 'Désactiver ce profil' : 'Réactiver ce profil'}</div>
+      <div class="s">${edite.active
+        ? 'L’accès est coupé immédiatement. Les données restent.'
         : 'L’accès est rétabli avec les droits enregistrés.'}</div>
       <button class="btn-danger" id="btn-activite">${edite.active ? 'Désactiver' : 'Réactiver'}</button>
     </div>`
@@ -535,14 +517,6 @@ $('liste').onclick = e => {
   const id = e.target?.dataset?.ouvrir
   if (id) ouvrir(profils.find(p => p.id === id))
 }
-document.querySelectorAll('[data-modele]').forEach(b => {
-  b.onclick = () => {
-    const m = MODELES[b.dataset.modele]
-    brouillon = { ...VIDE, ...m, property_ids: brouillon.property_ids || [] }
-    $('f-scope').value = brouillon.property_scope
-    rendrePanneau()
-  }
-})
 
 const { data: { session } } = await supabase.auth.getSession()
 if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings')
