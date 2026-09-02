@@ -950,3 +950,98 @@ Cohérent avec la décision produit — la gestion des prestataires vit dans l'a
 ménage — mais l'écran correspondant n'existe pas encore. **À traiter au chantier
 prestataires**, avec la convergence des deux populations et les trois capacités
 déjà notées (régénérer, désactiver, renommer).
+
+---
+
+# 12. CHANTIER CLOS — profils et droits
+
+**Étapes 0 à 5 livrées et vérifiées en production**, validées par le test humain
+du 2 septembre 2026 : bascule de compte, périmètre, écriture calendrier déléguée
+sur Colomiers, rétrogradation immédiate des droits.
+
+L'**étape 6 (fiche prestataire) est fusionnée dans le chantier prestataires**,
+avec les dettes listées plus bas.
+
+## Ce qui a été livré
+
+| Étape | Contenu |
+|---|---|
+| 0 | Audit : 30 tables, domaine et type de `property_id`, choix du pont TEXT/UUID |
+| 1 | `profiles`, `profile_permissions`, fonctions `perm_level` / `in_scope` / `can_read` / `can_write` |
+| 2 | Politiques RLS sur les 30 tables, par lots, testées après chacun |
+| 3 | Garde `require-permission` sur **26 endpoints sur 26** |
+| 4 | Page Équipe et droits, invitations par lien, page `/settings` |
+| 5 | Sélecteur de compte, `X-Compte` opt-in, masquage par droit |
+
+**485 tests** au terme du chantier.
+
+## Les 10 fuites fermées
+
+Détail en §9. Huit entre comptes — dont un **JWT décodé sans vérification de
+signature** (`agent-config`), et un membre limité à un bien qui recevait **tous**
+les biens Beds24 du titulaire. Deux sur une clé plateforme : `grok` n'avait
+**aucune authentification**, et `getSeamKey` faisait partager un même compte Seam
+à tous les hôtes sans clé propre.
+
+## Ce que ce chantier a appris
+
+Ces règles ont été écrites parce qu'un défaut réel les a imposées. Elles valent
+au-delà du chantier :
+
+- **Le compte cible vient de la ressource**, jamais de l'appelant ni d'un en-tête.
+  Une ressource désignée prime toujours sur `X-Compte`.
+- **Une capacité nouvelle est opt-in.** `X-Compte` honoré partout aurait laissé un
+  membre écraser la clé Seam du titulaire.
+- **Une panne n'est pas une absence.** Une lecture en échec ne doit ni élargir un
+  périmètre, ni se faire passer pour un refus de droits.
+- **Un formulaire qui n'expose pas un champ ne l'écrase jamais.**
+- **Un seul writer par donnée** (`docs/kb/coeur-de-donnees.md`).
+- **Un bouton qui échoue est désagréable ; un bouton qui réussit *ailleurs* est un
+  piège.** D'où le garde-fou des pages non délégables.
+- **`properties.id` est un `uuid`.** Le piège a été réintroduit trois fois : une
+  référence Beds24 dans un filtre `id` fait échouer la requête entière.
+
+## ⚠️ Dettes ouvertes — à traiter au chantier prestataires
+
+| # | Dette | Origine |
+|---|---|---|
+| 1 | **`self_availability` / `self_view_reviews` ne sont réglables nulle part.** Le bloc a quitté `/settings` ; l'app ménage n'écrit que `public_tokens`. | Étape 4, §10 |
+| 2 | **Régénérer, désactiver, renommer un prestataire** : les actions serveur existent dans `api/membres.js`, les boutons manquent côté app ménage. | Étape 4, §10 |
+| 3 | **Ligne `profiles` fantôme.** « Supprimer » dans l'app ménage n'efface que `public_tokens` : la ligne `profiles` reste active avec un `pwa_token` vivant. Pas un accès résiduel (la PWA lit `public_tokens`), mais une donnée qui faussera décomptes et rattachements d'avis. | Étape 4, §10 |
+| 4 | **`markDone` n'écrit qu'en `localStorage`.** Un ménage marqué fait par le prestataire (`menage_done`, 117 lignes en prod) n'apparaît pas côté hôte, et l'hôte ne retrouve pas ses marquages sur un autre appareil. | Vague 2, `docs/kb/menage.md` |
+| 5 | **Deux populations de prestataires.** `/settings` créait `profiles` + `public_tokens` ; l'app ménage ne crée que `public_tokens`. La création devra passer par `profiles`, dont `public_tokens` n'est que la projection PWA. | Étape 4, §10 |
+
+## ⚠️ Dettes ouvertes — délégation incomplète
+
+**Serrures et GuestFlow AI ne sont pas délégables** : leurs endpoints travaillent
+sur le compte de l'appelant. Leurs entrées sont donc masquées pour un membre, et
+leurs pages portent le garde-fou.
+
+Un endpoint devient délégable après avoir été relu pour ça, et — s'il renvoie une
+collection — après avoir reçu son filtre de périmètre. La liste tenue à jour est
+dans `docs/kb/audit-user-id-front.md`.
+
+Autres limites assumées, documentées à leur place :
+
+- `analyze.html` est mono-provider (avant la bêta).
+- Le filtre SQL de périmètre exclut `property_id IS NULL`, divergence assumée
+  d'avec `in_scope` : la règle « donnée sans bien = dans le périmètre » vaut pour
+  une donnée de compte, pas pour une collection de données voyageur.
+- Les biens Beds24 ne se pilotent pas dans le calendrier : leurs prix se gèrent
+  dans Beds24. Rendu explicite à l'écran en vague 2.
+
+## Configuration de référence du compte test
+
+À rétablir après chaque campagne de test :
+
+```
+périmètre     selected  →  La bulle seule (provider_property_id 209413)
+reservations  read
+menages       read
+messages      read
+prestataires · avis · reglages · facturation · equipe   none
+self_availability none · self_view_reviews false
+```
+
+Vérifié le 2 septembre 2026 : les trois endpoints délégables ne renvoient que la
+clé `209413`, et Colomiers répond 403 en lecture comme en écriture.

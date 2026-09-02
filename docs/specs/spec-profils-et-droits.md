@@ -182,11 +182,16 @@ La vue de pilotage, distincte de la PWA prestataire :
 - Droits par bien différenciés par domaine (un membre en écriture sur le bien A et en lecture sur le bien B) : le modèle a un seul périmètre de biens par profil.
 
 ## Ordre d'exécution
-0. Livrable préalable : liste des 27 tables avec domaine et type de `property_id` ; choix du pont TEXT/UUID. Validation Thierry.
-1. Migration structures (tables `profiles`, `profile_permissions`, fonctions, index, création du profil owner pour chaque compte existant, migration de Régina). Aucune politique modifiée — impact zéro.
-2. Politiques RLS par lots de 5–6 tables, test réel après chaque lot.
-3. Vérification `can_write` dans les endpoints serverless utilisateur.
-4. Page Équipe et droits + invitations + génération de lien PWA.
-5. Sélecteur de compte + masquage par droit.
-6. Fiche prestataire avec section qualité (les données avis arrivent avec le chantier avis ; la section affiche « — » tant qu'elles n'existent pas).
-7. KB + commit.
+
+> ✅ **CHANTIER CLOS le 2 septembre 2026** — étapes 0 à 5 livrées et validées en
+> production. L'étape 6 est **fusionnée dans le chantier prestataires**.
+> Bilan, dettes et leçons : `docs/kb/profils-et-droits.md` §12.
+
+0. ✅ Livrable préalable : liste des 27 tables avec domaine et type de `property_id` ; choix du pont TEXT/UUID. Validation Thierry.
+1. ✅ Migration structures (tables `profiles`, `profile_permissions`, fonctions, index, création du profil owner pour chaque compte existant, migration de Régina). Aucune politique modifiée — impact zéro.
+2. ✅ Politiques RLS par lots de 5–6 tables, test réel après chaque lot.
+3. ✅ Vérification `can_write` dans les endpoints serverless utilisateur.
+4. ✅ Page Équipe et droits + invitations + génération de lien PWA.
+5. ✅ Sélecteur de compte + masquage par droit.
+6. ➡️ **Reporté au chantier prestataires** — fiche prestataire avec section qualité (les données avis arrivent avec le chantier avis ; la section affiche « — » tant qu'elles n'existent pas).
+7. ✅ KB + commit.

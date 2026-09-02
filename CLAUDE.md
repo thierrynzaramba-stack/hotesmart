@@ -97,13 +97,24 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 ## 3 BOUSSOLES (challenger toute feature, franc, pas complaisant)
 1. Mettre en ligne rapidement. 2. Produit viral et indispensable. 3. Différenciation + résolution douleurs aiguës.
 
-## ÉTAT (fin Session #21)
+## ÉTAT (fin Session #22)
 Certification PMS Channex SOUMISE (formulaire Google enregistré). En attente revue live Channex.
-Bloquants pré-lancement : (a) /settings 404 + onboarding 2 parcours ; (b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
+
+**Chantier profils et droits CLOS** (étapes 0-5) : 26/26 endpoints gardés,
+10 fuites fermées, sélecteur de compte et masquage par droit livrés et validés en
+production. Détail et dettes : docs/kb/profils-et-droits.md §12.
+L'étape 6 (fiche prestataire) est fusionnée dans le chantier prestataires.
+
+Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcours ;
+(b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
+
+Prochain chantier : prestataires (fiche + convergence des deux populations +
+les 5 dettes du §12), puis avis voyageurs (spec §0 : ota_reviews appartient au cœur).
 
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
-- docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps).
+- docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
+- docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.
