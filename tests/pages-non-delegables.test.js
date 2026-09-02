@@ -21,6 +21,14 @@ const path = require('node:path')
 const racine = path.join(__dirname, '..')
 const lire = p => fs.readFileSync(path.join(racine, p), 'utf8')
 
+// Neutralise les commentaires SANS deplacer les offsets (le test des non
+// delegables compare des positions).
+function sansCommentaires (src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+}
+
 // ─── Le recensement ─────────────────────────────────────────────────────────
 
 // Pages qui montrent les données de la PERSONNE connectée, jamais celles du
@@ -58,7 +66,7 @@ const DELEGABLES = [
 
 for (const page of NON_DELEGABLES) {
   test(`${page} : refuse l'accès quand on est basculé`, () => {
-    const html = lire(page)
+    const html = sansCommentaires(lire(page))
     // ⚠ On verifie l'APPEL, pas seulement l'import. Ma premiere version testait
     // `includes('exigerCompteProprePage')` : retirer l'appel en laissant l'import
     // la laissait passer — le test ne voyait pas une page devenue ouverte.
@@ -81,9 +89,14 @@ for (const page of NON_DELEGABLES) {
 
 for (const page of DELEGABLES) {
   test(`${page} : reste accessible sur un compte partagé`, () => {
-    const html = lire(page)
-    assert.ok(!html.includes('exigerCompteProprePage'),
+    // ⚠ On cherche l'APPEL, hors commentaires. `includes()` sur le nom faisait
+    // echouer une page saine dont un commentaire mentionnait le garde-fou —
+    // exactement le faux positif que le test des `try` a deja produit ailleurs.
+    const html = sansCommentaires(lire(page))
+    assert.ok(!/(await\s+)?exigerCompteProprePage\s*\(/.test(html),
       `${page} fonctionne sur le compte courant : le garde-fou l'y rendrait inutilisable`)
+    assert.ok(!/import\s*\{[^}]*exigerCompteProprePage/.test(html),
+      `${page} importe le garde-fou : inutile, et trompeur pour la prochaine lecture`)
   })
 }
 
