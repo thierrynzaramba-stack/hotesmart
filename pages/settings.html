@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="supabase-url" content="https://cjmrizpdyhrcurmgyrhs.supabase.co">
+  <meta name="supabase-key" content="sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD">
+  <title>HôteSmart — Réglages</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    body { background: var(--bg2); padding: 24px; }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    .back { display: inline-block; font-size: 12px; color: var(--text2); text-decoration: none; margin-bottom: 16px; }
+    .back:hover { color: var(--text); }
+    .title-page { font-size: 22px; font-weight: 500; color: #C97B5C; margin-bottom: 4px; }
+    .sub-page { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+
+    .tabs { display: flex; gap: 4px; border-bottom: 0.5px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+    .tab { padding: 9px 14px; font-size: 13px; color: var(--text2); text-decoration: none; border-bottom: 2px solid transparent; cursor: pointer; background: none; border-top: 0; border-left: 0; border-right: 0; font-family: inherit; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: #C97B5C; border-bottom-color: #C97B5C; font-weight: 500; }
+    .tab .ext { font-size: 10px; color: var(--text2); margin-left: 4px; }
+
+    .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px; }
+    .card-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+    .card-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; line-height: 1.5; }
+
+    .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 0.5px solid var(--border); }
+    .row:last-child { border-bottom: 0; }
+    .row-main { flex: 1; min-width: 0; }
+    .row-name { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+    .row-meta { font-size: 11px; color: var(--text2); margin-top: 3px; line-height: 1.5; }
+    .row.owner { opacity: .62; }
+
+    .badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; border: 0.5px solid var(--border); color: var(--text2); white-space: nowrap; }
+    .badge.ok { color: #065F46; background: #D1FAE5; border-color: #6EE7B7; }
+    .badge.wait { color: #92400E; background: #FEF3C7; border-color: #FCD34D; }
+    .badge.off { color: #7F1D1D; background: #FEE2E2; border-color: #FCA5A5; }
+
+    .btn { background: #C97B5C; color: #fff; border: 0; border-radius: var(--radius); padding: 8px 14px; cursor: pointer; font-size: 12px; font-family: inherit; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border: 0.5px solid var(--border); color: var(--text2); border-radius: var(--radius); padding: 7px 12px; cursor: pointer; font-size: 12px; font-family: inherit; }
+    .btn-ghost:hover:not(:disabled) { color: var(--text); }
+    .btn-danger { background: transparent; border: 0.5px solid var(--border); color: var(--text2); border-radius: var(--radius); padding: 7px 12px; cursor: pointer; font-size: 12px; font-family: inherit; }
+    .btn-danger:hover { color: #E24B4A; border-color: #E24B4A; }
+
+    label.f { display: block; font-size: 12px; color: var(--text2); margin: 12px 0 5px; }
+    input.f, select.f { width: 100%; padding: 8px 10px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-family: inherit; background: var(--bg); color: var(--text); box-sizing: border-box; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .dom { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 0.5px solid var(--border); }
+    .dom:last-child { border-bottom: 0; }
+    .dom-name { flex: 1; font-size: 13px; }
+    .dom-hint { font-size: 10px; color: var(--text2); display: block; margin-top: 2px; }
+    .seg { display: flex; border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .seg button { background: var(--bg); border: 0; padding: 5px 11px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text2); }
+    .seg button.on { background: #C97B5C; color: #fff; }
+    .seg button:disabled { opacity: .38; cursor: not-allowed; }
+
+    .biens { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+    .bien { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 5px 8px; border: 0.5px solid var(--border); border-radius: var(--radius); }
+
+    .lien-box { display: flex; gap: 8px; margin-top: 8px; }
+    .lien-box input { flex: 1; font-family: ui-monospace, monospace; font-size: 11px; }
+    .zone-danger { border: 0.5px solid #FCA5A5; background: #FEF2F2; border-radius: var(--radius); padding: 12px; margin-top: 16px; }
+    .zone-danger .t { font-size: 12px; font-weight: 500; color: #7F1D1D; margin-bottom: 3px; }
+    .zone-danger .s { font-size: 11px; color: #991B1B; line-height: 1.5; margin-bottom: 10px; }
+
+    .note { font-size: 11px; color: var(--text2); line-height: 1.55; background: var(--bg2); border-radius: var(--radius); padding: 10px 12px; margin-top: 10px; }
+    .msg { font-size: 12px; padding: 9px 12px; border-radius: var(--radius); margin-bottom: 14px; display: none; line-height: 1.5; }
+    .msg.err { color: #7F1D1D; background: #FEE2E2; border: 0.5px solid #FCA5A5; }
+    .msg.ok  { color: #065F46; background: #D1FAE5; border: 0.5px solid #6EE7B7; }
+    .vide { font-size: 13px; color: var(--text2); text-align: center; padding: 26px 0; }
+
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.34); display: none; align-items: flex-start; justify-content: center; padding: 24px; overflow-y: auto; z-index: 40; }
+    .overlay.open { display: flex; }
+    .panel { background: var(--bg); border-radius: var(--radius-lg); padding: 22px; max-width: 560px; width: 100%; }
+    .panel h3 { font-size: 16px; font-weight: 500; margin-bottom: 3px; }
+    .panel .h-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
+    .panel-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+    @media (max-width: 640px) { .grid2, .biens { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+  <a href="/pages/index.html" class="back">← Retour</a>
+  <div class="title-page">Réglages</div>
+  <div class="sub-page">Tout ce qui configure votre compte, au même endroit.</div>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-equipe">Équipe et droits</button>
+    <a class="tab" href="/connexions">Connexions <span class="ext">↗</span></a>
+    <a class="tab" href="/abonnement">Abonnement <span class="ext">↗</span></a>
+    <a class="tab" href="/pages/compte.html">Mon compte <span class="ext">↗</span></a>
+  </div>
+
+  <div id="msg" class="msg"></div>
+
+  <div id="zone-refus" style="display:none">
+    <div class="card">
+      <div class="card-title">Réservé au titulaire du compte</div>
+      <div class="card-sub">La gestion des profils et de leurs droits n’est pas déléguable. Contactez le titulaire du compte.</div>
+    </div>
+  </div>
+
+  <div id="zone-equipe" style="display:none">
+    <div class="card">
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:4px">
+        <div style="flex:1">
+          <div class="card-title">Profils</div>
+          <div class="card-sub">Chaque personne qui accède à votre compte a un profil et des droits à la carte. Il n’y a pas de rôle figé : un modèle remplit le formulaire, vous ajustez ensuite.</div>
+        </div>
+        <button class="btn" id="btn-ajouter">Ajouter</button>
+      </div>
+      <div id="liste"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="panel">
+    <h3 id="p-titre">Nouveau profil</h3>
+    <div class="h-sub" id="p-soustitre">Identité, accès et droits.</div>
+
+    <div class="grid2">
+      <div><label class="f" for="f-prenom">Prénom *</label><input class="f" id="f-prenom" autocomplete="off"></div>
+      <div><label class="f" for="f-nom">Nom</label><input class="f" id="f-nom" autocomplete="off"></div>
+    </div>
+    <div class="grid2">
+      <div><label class="f" for="f-email">Email</label><input class="f" id="f-email" type="email" autocomplete="off"></div>
+      <div><label class="f" for="f-tel">Téléphone</label><input class="f" id="f-tel" autocomplete="off"></div>
+    </div>
+
+    <label class="f" for="f-mode">Mode d’accès</label>
+    <select class="f" id="f-mode">
+      <option value="compte">Compte — la personne se connecte à HôteSmart</option>
+      <option value="lien">Lien — application prestataire, sans mot de passe</option>
+    </select>
+    <div class="note" id="note-mode">
+      Le mode d’accès se fixe à la création et ne change plus ensuite : un profil déjà rattaché à un
+      compte ne peut pas devenir un lien, et l’inverse laisserait un lien actif sur quelqu’un qui se
+      connecte. Pour changer, désactivez ce profil et créez-en un nouveau.
+    </div>
+
+    <label class="f">Partir d’un modèle</label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn-ghost" data-modele="employe">Employé</button>
+      <button class="btn-ghost" data-modele="proprietaire">Propriétaire</button>
+      <button class="btn-ghost" data-modele="prestataire">Prestataire</button>
+    </div>
+    <div class="note">Un modèle remplit le formulaire, rien de plus. Aucun rôle n’est enregistré : seuls les droits ci-dessous comptent.</div>
+
+    <label class="f">Périmètre</label>
+    <select class="f" id="f-scope">
+      <option value="all">Tous les biens, y compris ceux ajoutés plus tard</option>
+      <option value="selected">Une sélection de biens</option>
+    </select>
+    <div class="biens" id="f-biens"></div>
+
+    <label class="f">Droits par domaine</label>
+    <div id="f-domaines"></div>
+
+    <label class="f">Droits sur ses propres données</label>
+    <div id="f-self"></div>
+
+    <div id="zone-acces"></div>
+
+    <div class="panel-actions">
+      <button class="btn-ghost" id="btn-annuler">Annuler</button>
+      <button class="btn" id="btn-enregistrer">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { supabase } from '/shared/supabase.js'
+import { api } from '/shared/api-client.js'
+
+const DOMAINES = [
+  ['reservations', 'Réservations', 'Calendrier, tarifs, disponibilités'],
+  ['menages',      'Ménages',      'Planning et répartition'],
+  ['prestataires', 'Prestataires', 'Fiches et qualité'],
+  ['messages',     'Messagerie',   'Conversations voyageurs'],
+  ['avis',         'Avis',         'Avis voyageurs'],
+  ['reglages',     'Réglages',     'Automatisation, modèles, connaissances'],
+  ['facturation',  'Facturation',  'Abonnement et paiements'],
+  ['equipe',       'Équipe',       'Profils et droits']
+]
+const NON_DELEGABLES = ['facturation', 'equipe']
+
+const MODELES = {
+  employe:      { property_scope: 'all', reservations: 'write', menages: 'write', prestataires: 'write',
+                  messages: 'write', avis: 'write', reglages: 'write', facturation: 'none', equipe: 'none',
+                  self_availability: 'none', self_view_reviews: true },
+  proprietaire: { property_scope: 'selected', reservations: 'read', menages: 'read', prestataires: 'none',
+                  messages: 'read', avis: 'read', reglages: 'none', facturation: 'none', equipe: 'none',
+                  self_availability: 'none', self_view_reviews: true },
+  prestataire:  { property_scope: 'all', reservations: 'none', menages: 'none', prestataires: 'none',
+                  messages: 'none', avis: 'none', reglages: 'none', facturation: 'none', equipe: 'none',
+                  self_availability: 'write', self_view_reviews: true, access_mode: 'lien' }
+}
+const VIDE = { property_scope: 'all', property_ids: [], reservations: 'none', menages: 'none',
+               prestataires: 'none', messages: 'none', avis: 'none', reglages: 'none',
+               facturation: 'none', equipe: 'none', self_availability: 'none', self_view_reviews: true }
+
+let biens = [], profils = [], edite = null, brouillon = { ...VIDE }
+
+const $ = id => document.getElementById(id)
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+function message (texte, type = 'err') {
+  const m = $('msg')
+  m.textContent = texte; m.className = 'msg ' + type; m.style.display = texte ? 'block' : 'none'
+  if (texte && type === 'ok') setTimeout(() => { m.style.display = 'none' }, 4000)
+}
+
+// ─── Chargement ─────────────────────────────────────────────────────────────
+
+async function charger () {
+  try {
+    const d = await api.membres.list()
+    profils = d.profils || []
+    biens   = d.biens || []
+    $('zone-equipe').style.display = 'block'
+    $('zone-refus').style.display = 'none'
+    rendreListe()
+  } catch (e) {
+    // 403 = domaine `equipe` non accordé. Ce n'est pas une erreur à afficher en
+    // rouge : c'est un état normal pour un membre.
+    if (/droits insuffisants/i.test(e.message)) {
+      $('zone-refus').style.display = 'block'
+      $('zone-equipe').style.display = 'none'
+      return
+    }
+    message(e.message)
+  }
+}
+
+const LIBELLE_STATUT = {
+  actif: ['Actif', 'ok'],
+  invitation_en_attente: ['Invitation en attente', 'wait'],
+  invitation_expiree: ['Invitation expirée', 'wait'],
+  desactive: ['Désactivé', 'off'],
+  sans_acces: ['Sans accès', 'off']
+}
+
+function resumeDroits (p) {
+  if (p.is_owner) return 'Tous les droits — non modifiable'
+  const perm = p.permissions || {}
+  const perimetre = perm.property_scope === 'selected'
+    ? `${(perm.property_ids || []).length} bien(s)` : 'Tous les biens'
+  const actifs = DOMAINES.filter(([c]) => perm[c] && perm[c] !== 'none')
+    .map(([c, nom]) => `${nom} ${perm[c] === 'write' ? 'écriture' : 'lecture'}`)
+  const soi = perm.self_availability && perm.self_availability !== 'none'
+    ? `Disponibilités ${perm.self_availability === 'write' ? 'écriture' : 'lecture'}` : null
+  const tout = [...actifs, soi].filter(Boolean)
+  return `${perimetre} · ${tout.length ? tout.join(', ') : 'aucun domaine'}`
+}
+
+function rendreListe () {
+  if (!profils.length) { $('liste').innerHTML = '<div class="vide">Aucun profil.</div>'; return }
+  $('liste').innerHTML = profils.map(p => {
+    const [libelle, classe] = LIBELLE_STATUT[p.statut] || ['—', '']
+    const nom = [p.first_name, p.last_name].filter(Boolean).join(' ')
+    const mode = p.access_mode === 'lien' ? 'Lien prestataire' : 'Compte'
+    return `<div class="row ${p.is_owner ? 'owner' : ''}">
+      <div class="row-main">
+        <div class="row-name">${esc(nom)}
+          ${p.is_owner ? '<span class="badge">Titulaire</span>' : ''}
+          <span class="badge ${classe}">${libelle}</span></div>
+        <div class="row-meta">${mode}${p.email ? ' · ' + esc(p.email) : ''}<br>${esc(resumeDroits(p))}</div>
+      </div>
+      ${p.is_owner ? '' : `<button class="btn-ghost" data-ouvrir="${p.id}">Modifier</button>`}
+    </div>`
+  }).join('')
+}
+
+// ─── Panneau ────────────────────────────────────────────────────────────────
+
+function segment (valeur, onChange, options, desactive) {
+  const el = document.createElement('div'); el.className = 'seg'
+  options.forEach(([v, libelle]) => {
+    const b = document.createElement('button')
+    b.textContent = libelle
+    b.className = valeur === v ? 'on' : ''
+    if (desactive && desactive(v)) b.disabled = true
+    b.onclick = () => onChange(v)
+    el.appendChild(b)
+  })
+  return el
+}
+
+function rendrePanneau () {
+  const estNouveau = !edite
+  const verrouille = !estNouveau
+
+  $('p-titre').textContent = estNouveau ? 'Nouveau profil' : [edite.first_name, edite.last_name].filter(Boolean).join(' ')
+  $('p-soustitre').textContent = estNouveau ? 'Identité, accès et droits.' : 'Modifiez les droits, ou l’accès ci-dessous.'
+  $('f-mode').disabled = verrouille
+  $('note-mode').style.display = verrouille ? 'block' : 'none'
+  // L'email identifie un compte réellement rattaché : il se fige à l'acceptation.
+  $('f-email').disabled = !!(edite && edite.accepted_at)
+
+  const biensEl = $('f-biens')
+  biensEl.style.display = brouillon.property_scope === 'selected' ? 'grid' : 'none'
+  biensEl.innerHTML = ''
+  biens.forEach(b => {
+    const l = document.createElement('label'); l.className = 'bien'
+    const c = document.createElement('input'); c.type = 'checkbox'
+    c.checked = (brouillon.property_ids || []).includes(b.id)
+    c.onchange = () => {
+      const s = new Set(brouillon.property_ids || [])
+      c.checked ? s.add(b.id) : s.delete(b.id)
+      brouillon.property_ids = [...s]
+    }
+    l.appendChild(c); l.appendChild(document.createTextNode(b.name || b.id))
+    biensEl.appendChild(l)
+  })
+
+  const dom = $('f-domaines'); dom.innerHTML = ''
+  DOMAINES.forEach(([cle, nom, aide]) => {
+    const bloc = document.createElement('div'); bloc.className = 'dom'
+    const g = document.createElement('div'); g.className = 'dom-name'
+    g.innerHTML = `${esc(nom)}<span class="dom-hint">${esc(aide)}</span>`
+    bloc.appendChild(g)
+    bloc.appendChild(segment(brouillon[cle] || 'none',
+      v => { brouillon[cle] = v; rendrePanneau() },
+      [['none', 'Rien'], ['read', 'Lecture'], ['write', 'Écriture']],
+      v => v === 'write' && NON_DELEGABLES.includes(cle)))
+    dom.appendChild(bloc)
+  })
+  const avert = document.createElement('div'); avert.className = 'note'
+  avert.textContent = 'Facturation et Équipe ne se délèguent pas en écriture : elles engagent le compte lui-même. Le serveur refuse la valeur, même si elle était forcée ailleurs.'
+  dom.appendChild(avert)
+
+  const self = $('f-self'); self.innerHTML = ''
+  const d1 = document.createElement('div'); d1.className = 'dom'
+  const g1 = document.createElement('div'); g1.className = 'dom-name'
+  g1.innerHTML = 'Ses disponibilités<span class="dom-hint">« Rien » : aucun écran dans l’application prestataire, un message l’invite à vous contacter</span>'
+  d1.appendChild(g1)
+  d1.appendChild(segment(brouillon.self_availability || 'none',
+    v => { brouillon.self_availability = v; rendrePanneau() },
+    [['none', 'Rien'], ['read', 'Lecture'], ['write', 'Écriture']]))
+  self.appendChild(d1)
+
+  const d2 = document.createElement('div'); d2.className = 'dom'
+  const g2 = document.createElement('div'); g2.className = 'dom-name'
+  g2.innerHTML = 'Voir ses propres avis<span class="dom-hint">Sa note et les avis liés à ses ménages</span>'
+  d2.appendChild(g2)
+  d2.appendChild(segment(brouillon.self_view_reviews === false ? 'non' : 'oui',
+    v => { brouillon.self_view_reviews = v === 'oui'; rendrePanneau() },
+    [['non', 'Non'], ['oui', 'Oui']]))
+  self.appendChild(d2)
+
+  rendreAcces()
+}
+
+function rendreAcces () {
+  const z = $('zone-acces'); z.innerHTML = ''
+  if (!edite) {
+    z.innerHTML = '<div class="note">Le lien d’accès s’affichera après l’enregistrement, à copier et transmettre vous-même.</div>'
+    return
+  }
+
+  const bloc = document.createElement('div')
+  bloc.innerHTML = `<label class="f">Accès</label>
+    <div class="lien-box">
+      <input class="f" id="f-lien" readonly value="" placeholder="Cliquez sur « Afficher le lien »">
+      <button class="btn-ghost" id="btn-voir">Afficher le lien</button>
+      <button class="btn-ghost" id="btn-copier" disabled>Copier</button>
+    </div>`
+
+  if (edite.access_mode === 'compte') {
+    bloc.innerHTML += `<div class="note">
+      L’envoi par email arrivera plus tard : pour l’instant, copiez ce lien et transmettez-le vous-même.
+      L’invitation est valable 7 jours, et la personne devra accepter explicitement de rejoindre votre compte.
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <input class="f" id="f-envoi-email" style="flex:1" value="${esc(edite.email || '')}" disabled>
+      <button class="btn-ghost" disabled title="Bientôt disponible">Envoyer par email</button>
+    </div>`
+  }
+
+  bloc.innerHTML += `<div class="zone-danger">
+      <div class="t">${edite.access_mode === 'lien' ? 'Régénérer le lien' : 'Renouveler l’invitation'}</div>
+      <div class="s">${edite.access_mode === 'lien'
+        ? 'L’ancien lien cessera de fonctionner immédiatement. La personne perdra l’accès tant qu’elle n’aura pas reçu le nouveau.'
+        : 'L’invitation précédente sera annulée et remplacée par une nouvelle, valable 7 jours.'}</div>
+      <button class="btn-danger" id="btn-regen">${edite.access_mode === 'lien' ? 'Régénérer le lien' : 'Renouveler'}</button>
+    </div>
+    <div class="zone-danger" style="border-color:var(--border);background:var(--bg2)">
+      <div class="t" style="color:var(--text)">${edite.active ? 'Désactiver ce profil' : 'Réactiver ce profil'}</div>
+      <div class="s" style="color:var(--text2)">${edite.active
+        ? 'L’accès est coupé immédiatement, compte comme lien. Les données restent, rien n’est supprimé.'
+        : 'L’accès est rétabli avec les droits enregistrés.'}</div>
+      <button class="btn-danger" id="btn-activite">${edite.active ? 'Désactiver' : 'Réactiver'}</button>
+    </div>`
+  z.appendChild(bloc)
+
+  $('btn-voir').onclick = async () => {
+    try {
+      const d = await api.membres.lien(edite.id)
+      $('f-lien').value = d.lien
+      $('btn-copier').disabled = false
+    } catch (e) { message(e.message) }
+  }
+  $('btn-copier').onclick = async () => {
+    try { await navigator.clipboard.writeText($('f-lien').value); message('Lien copié.', 'ok') }
+    catch { $('f-lien').select() }
+  }
+  $('btn-regen').onclick = async () => {
+    const texte = edite.access_mode === 'lien'
+      ? 'Régénérer le lien ?\n\nL’ancien lien cessera de fonctionner IMMÉDIATEMENT. Tant que la personne n’aura pas reçu le nouveau, elle n’aura plus accès.'
+      : 'Renouveler l’invitation ?\n\nLe lien précédent sera annulé.'
+    if (!window.confirm(texte)) return
+    try {
+      const d = await api.membres.regenerer(edite.id)
+      $('f-lien').value = d.lien; $('btn-copier').disabled = false
+      message('Nouveau lien généré. Transmettez-le à la personne concernée.', 'ok')
+      await charger()
+    } catch (e) { message(e.message) }
+  }
+  $('btn-activite').onclick = async () => {
+    if (edite.active && !window.confirm('Désactiver ce profil ?\n\nL’accès est coupé immédiatement.')) return
+    try {
+      await (edite.active ? api.membres.desactiver(edite.id) : api.membres.reactiver(edite.id))
+      message(edite.active ? 'Profil désactivé.' : 'Profil réactivé.', 'ok')
+      fermer(); await charger()
+    } catch (e) { message(e.message) }
+  }
+}
+
+function ouvrir (profil) {
+  edite = profil || null
+  brouillon = profil && profil.permissions
+    ? { ...VIDE, ...profil.permissions, property_ids: (profil.permissions.property_ids || []).map(String) }
+    : { ...VIDE }
+  $('f-prenom').value = profil?.first_name || ''
+  $('f-nom').value    = profil?.last_name || ''
+  $('f-email').value  = profil?.email || ''
+  $('f-tel').value    = profil?.phone || ''
+  $('f-mode').value   = profil?.access_mode || 'compte'
+  $('f-scope').value  = brouillon.property_scope
+  rendrePanneau()
+  $('overlay').classList.add('open')
+}
+function fermer () { $('overlay').classList.remove('open'); edite = null }
+
+async function enregistrer () {
+  const prenom = $('f-prenom').value.trim()
+  if (!prenom) return message('Le prénom est requis.')
+
+  const permissions = { ...brouillon, property_scope: $('f-scope').value }
+  if (permissions.property_scope !== 'selected') permissions.property_ids = []
+
+  const corps = {
+    first_name: prenom,
+    last_name:  $('f-nom').value.trim(),
+    email:      $('f-email').value.trim(),
+    phone:      $('f-tel').value.trim(),
+    permissions
+  }
+
+  $('btn-enregistrer').disabled = true
+  try {
+    if (edite) {
+      await api.membres.modifier({ profile_id: edite.id, ...corps })
+      message('Droits enregistrés.', 'ok')
+      fermer()
+    } else {
+      const d = await api.membres.creer({ ...corps, access_mode: $('f-mode').value })
+      message('Profil créé. Copiez le lien et transmettez-le.', 'ok')
+      // On rouvre sur le profil créé pour que le lien soit immédiatement copiable.
+      await charger()
+      const frais = profils.find(p => p.id === d.profil.id)
+      if (frais) { ouvrir(frais); $('f-lien') && ($('f-lien').value = d.lien) }
+      else fermer()
+      return
+    }
+    await charger()
+  } catch (e) { message(e.message) }
+  finally { $('btn-enregistrer').disabled = false }
+}
+
+// ─── Événements ─────────────────────────────────────────────────────────────
+
+$('btn-ajouter').onclick = () => ouvrir(null)
+$('btn-annuler').onclick = fermer
+$('btn-enregistrer').onclick = enregistrer
+$('overlay').onclick = e => { if (e.target === $('overlay')) fermer() }
+$('f-scope').onchange = () => { brouillon.property_scope = $('f-scope').value; rendrePanneau() }
+$('liste').onclick = e => {
+  const id = e.target?.dataset?.ouvrir
+  if (id) ouvrir(profils.find(p => p.id === id))
+}
+document.querySelectorAll('[data-modele]').forEach(b => {
+  b.onclick = () => {
+    const m = MODELES[b.dataset.modele]
+    brouillon = { ...VIDE, ...m, property_ids: brouillon.property_ids || [] }
+    if (m.access_mode && !edite) $('f-mode').value = m.access_mode
+    $('f-scope').value = brouillon.property_scope
+    rendrePanneau()
+  }
+})
+
+const { data: { session } } = await supabase.auth.getSession()
+if (!session) location.href = '/pages/login.html'
+else charger()
+</script>
+</body>
+</html>

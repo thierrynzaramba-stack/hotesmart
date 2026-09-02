@@ -52,6 +52,10 @@ export async function renderSidebar(activePage = '') {
       ${renderApiItem('Brevo SMS',        apiStatus.brevo,  '/connexions')}
 
       <div class="nav-section-label">Compte</div>
+      <a class="nav-item ${activePage === 'settings' ? 'active' : ''}" href="/settings">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">Réglages</span>
+      </a>
       <a class="nav-item ${activePage === 'compte' ? 'active' : ''}" href="/pages/compte.html">
         <span class="nav-icon">👤</span>
         <span class="nav-label">Mon compte</span>

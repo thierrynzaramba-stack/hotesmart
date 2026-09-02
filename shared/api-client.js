@@ -150,5 +150,19 @@ export const api = {
       apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments }),
     fullsync: (propertyId) =>
       apiCall('calendar', 'POST', { action: 'fullsync', property_id: propertyId })
+  },
+  // Page « Equipe et droits ». Toutes les actions passent par POST : un jeton
+  // d'acces n'a rien a faire dans une URL, qui finit dans les journaux du serveur
+  // et l'historique du navigateur.
+  membres: {
+    list:       ()    => apiCall('membres', 'POST', { action: 'list' }),
+    lien:       (id)  => apiCall('membres', 'POST', { action: 'lien', profile_id: id }),
+    creer:      (p)   => apiCall('membres', 'POST', { action: 'create', ...p }),
+    modifier:   (p)   => apiCall('membres', 'POST', { action: 'update', ...p }),
+    desactiver: (id)  => apiCall('membres', 'POST', { action: 'deactivate', profile_id: id }),
+    reactiver:  (id)  => apiCall('membres', 'POST', { action: 'reactivate', profile_id: id }),
+    regenerer:  (id)  => apiCall('membres', 'POST', { action: 'regenerate', profile_id: id }),
+    apercu:     (t)   => apiCall('membres', 'POST', { action: 'preview', token: t }),
+    accepter:   (t)   => apiCall('membres', 'POST', { action: 'accept', token: t })
   }
 }

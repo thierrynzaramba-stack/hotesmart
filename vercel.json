@@ -45,6 +45,10 @@
       "destination": "/pages/settings"
     },
     {
+      "source": "/invitation",
+      "destination": "/pages/invitation"
+    },
+    {
       "source": "/abonnement",
       "destination": "/pages/abonnement"
     },

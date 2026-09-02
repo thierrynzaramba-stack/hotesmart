@@ -90,8 +90,29 @@
 <script type="module">
   import { supabase, getSession } from '/shared/supabase.js'
 
+  // ⚠ REDIRECTION APRES CONNEXION, strictement INTERNE.
+  // `next` vient de l'URL, donc du client : accepter n'importe quelle valeur
+  // ferait de cette page un tremplin vers un site tiers — on se connecte chez
+  // HoteSmart et on atterrit sur une fausse page qui redemande le mot de passe.
+  // Seul un chemin absolu du meme site est retenu :
+  //   commence par '/', ne commence pas par '//' (qui vaut https://autre-site),
+  //   ne contient ni '\' ni de schema.
+  function destination () {
+    const brut = new URLSearchParams(location.search).get('next')
+    if (!brut) return '/pages/index.html'
+    if (!brut.startsWith('/') || brut.startsWith('//') || brut.includes('\\')) {
+      return '/pages/index.html'
+    }
+    try {
+      // Verification finale : l'URL resolue doit rester sur cette origine.
+      const u = new URL(brut, location.origin)
+      return u.origin === location.origin ? u.pathname + u.search : '/pages/index.html'
+    } catch { return '/pages/index.html' }
+  }
+  const APRES_CONNEXION = destination()
+
   const session = await getSession()
-  if (session) window.location.href = '/pages/index.html'
+  if (session) window.location.href = APRES_CONNEXION
 
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', function() {
@@ -112,7 +133,7 @@
       err.textContent = 'Email ou mot de passe incorrect'
       err.style.display = 'block'
     } else {
-      window.location.href = '/pages/index.html'
+      window.location.href = APRES_CONNEXION
     }
   })
 
@@ -150,7 +171,7 @@
       err.textContent = error.message
       err.style.display = 'block'
     } else {
-      window.location.href = '/pages/index.html'
+      window.location.href = APRES_CONNEXION
     }
   })
 </script>
