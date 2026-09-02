@@ -108,10 +108,14 @@
 
   <div class="diag-card" data-test="8">
     <div class="diag-head">
-      <h3>8. Register webhook events (canal)</h3>
+      <h3>8. Register webhook events (canal + avis)</h3>
       <span class="diag-status idle">En attente</span>
     </div>
-    <p>Enregistre le 2e webhook séparé pour les events canal (new_channel;updated_channel;activate_channel) → POST /api/channel-events. Le webhook booking/message reste inchangé.</p>
+    <p>Enregistre <b>ou met à jour</b> le 2e webhook séparé → POST /api/channel-events.
+      Masque posé : <code>new_channel;updated_channel;activate_channel;updated_review</code>.
+      Le webhook booking/message (code certifié) reste inchangé et ne peut pas être ciblé d'ici.
+      À relancer après tout élargissement du masque : sans ça, <code>updated_review</code> n'arrive jamais
+      et les avis continuent d'entrer par le seul poll quotidien.</p>
     <button class="btn diag-btn" data-run="8">Register</button>
     <pre class="diag-out"></pre>
   </div>
