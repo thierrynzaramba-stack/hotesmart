@@ -229,3 +229,48 @@ bouton d'enregistrement. Un membre à `messages: read` lit les conversations mai
 la zone de composition est remplacée par « Lecture seule — vous ne pouvez pas
 répondre depuis ce compte ». Un formulaire qu'on remplit pour rien est pire qu'un
 formulaire absent.
+
+
+## ⚠️ Deux pièges du front, payés cher
+
+### Un `import` dans le module ne sert pas au script classique
+
+`apps/agent-ai/messagerie.html` a **deux scripts** : un `type="module"` court, et
+le script principal en **script classique** — qui ne peut rien importer.
+
+J'y ai ajouté `import { compteCourant } from …` dans le module en croyant le
+rendre disponible plus bas. Résultat : `ReferenceError: compteCourant is not
+defined` à la première lecture, et **la messagerie ne s'affichait plus du tout**.
+Les 440 tests étaient verts : aucun ne charge le HTML.
+
+La règle : ce qu'un script classique utilise doit lui être **exposé sur
+`window`** par le module, comme `_session` et `_supabase` le sont déjà.
+`tests/pages-identifiants.test.js` le vérifie désormais.
+
+### Un `fetch` brut n'envoie pas `X-Compte`
+
+`shared/api-client.js` pose l'en-tête tout seul ; un `fetch` direct, non. Les
+deux pages de ce lot appelaient leur endpoint en `fetch` brut : le serveur lisait
+le compte de l'appelant pendant que le reste de la page lisait le compte courant.
+
+Un membre aurait vu un **planning vide à côté de commentaires bien présents**, et
+des tâches sans les conversations correspondantes. `enteteCompte()` est exporté
+pour ces cas, et un test vérifie que ces appels le posent.
+
+## ⚠️ Le domaine du bouton n'est pas toujours celui de la page
+
+Dans la messagerie, trois écritures relèvent de **trois domaines différents** :
+
+| Bouton | Table | Domaine |
+|---|---|---|
+| Épingler, Valider, Ignorer, Traité | `conversation_flags`, `conversations` | `messages` |
+| Enregistrer dans la FAQ | `knowledge` | **`reglages`** |
+| Note de ménage | `menage_comments` | `menages` |
+
+Le bouton FAQ était gardé — au mieux — par `messages` : un membre
+`messages: write` / `reglages: none` recevait un message PostgREST brut.
+
+Et `public_tokens`, lu pour prévenir le prestataire d'une note, est sous
+**`prestataires`**, pas `menages` : un membre `menages: write` enregistre bien sa
+note mais ne peut pas la transmettre. L'interface le dit maintenant, au lieu
+d'afficher un succès complet.

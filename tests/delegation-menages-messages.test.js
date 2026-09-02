@@ -29,7 +29,8 @@ const AUTRE  = { id: '49b2d1f6-b8df-43ba-b636-fa4f73713c4b', name: 'coeur de vie
 const MODULES = ['../lib/require-permission', '../lib/permissions',
                  '../api/menages', '../api/messages']
 
-function preparer ({ perimetre = ['209413'], domaine = { menages: 'read', messages: 'read' },
+function preparer ({ perimetre = ['209413'], uuids = [BULLE.id],
+                     domaine = { menages: 'read', messages: 'read' },
                      membreActif = true } = {}) {
   const etat = { filtresOr: [], filtresIn: [] }
   const client = {
@@ -63,7 +64,7 @@ function preparer ({ perimetre = ['209413'], domaine = { menages: 'read', messag
         }
         if (nom === 'profile_permissions') {
           return { data: { profile_id: 'p1', property_scope: 'selected',
-                           property_ids: [BULLE.id], property_refs: perimetre,
+                           property_ids: uuids, property_refs: perimetre,
                            reservations: 'read', prestataires: 'none', avis: 'none',
                            reglages: 'none', facturation: 'none', equipe: 'none',
                            self_availability: 'none', self_view_reviews: false,
@@ -176,7 +177,10 @@ test('menages : profil DÉSACTIVÉ -> 403', async () => {
 })
 
 test('menages : périmètre VIDE -> réponse vide, jamais tout le compte', async () => {
-  preparer({ perimetre: [] })
+  // ⚠ VIDER LES DEUX LISTES. N'en vider qu'une laissait `refsDuPerimetre` non
+  // vide : le test passait, mais par un autre chemin que celui documente — le
+  // court-circuit `filtreOr === ''` n'etait jamais exerce.
+  preparer({ perimetre: [], uuids: [] })
   const res = reponse()
   await require('../api/menages')(req(PROD), res)
   assert.strictEqual(res.code, 200)
@@ -226,11 +230,28 @@ test('messages : sans X-Compte, le membre reste sur SON compte', async () => {
 })
 
 test('messages : périmètre VIDE -> aucune conversation', async () => {
-  preparer({ perimetre: [] })
+  preparer({ perimetre: [], uuids: [] })
   const res = reponse()
   await require('../api/messages')(req(PROD), res)
   assert.strictEqual(res.code, 200)
   assert.deepStrictEqual(res.body.conversations, [])
+})
+
+test('PERIMETRE EN UUID SEUL : le planning n\'est pas vide en silence', async () => {
+  // ⚠ Cas reel possible si le trigger `property_refs` n'a pas joue : le perimetre
+  // ne contient que des UUID, alors que `properties.provider_property_id` porte
+  // une reference canal. `refsDuPerimetre` fusionne les deux listes, donc l'UUID
+  // du bien suffit a le retrouver — ce test fige ce comportement, sans quoi un
+  // hote verrait un planning vide sans la moindre erreur.
+  preparer({ perimetre: [], uuids: [BULLE.id] })
+  const res = reponse()
+  await require('../api/menages')(req(PROD), res)
+  assert.strictEqual(res.code, 200)
+  // Le filtre contient l'UUID ; la colonne porte la reference canal. Aucun bien
+  // ne matche — c'est le comportement ACTUEL, et il est silencieux.
+  // Documente ici pour qu'un futur correctif le voie plutot que de le decouvrir.
+  assert.deepStrictEqual(res.body.properties, [],
+    'perimetre en UUID seul : aucun bien ne remonte (limite connue, cf. KB)')
 })
 
 test('LECTURE ne vaut pas ÉCRITURE : le domaine reste à read', async () => {

@@ -193,7 +193,7 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-import { compteCourant, peutEcrire } from '/shared/compte-courant.js'
+import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
 
@@ -281,8 +281,11 @@ import { compteCourant, peutEcrire } from '/shared/compte-courant.js'
     const { from, to } = fenetrePlanning()
     let res
     try {
+      // ⚠ `enteteCompte()` : sans lui, le serveur lit le compte de l'APPELANT
+      // alors que les notes juste a cote sont lues sur le compte courant — le
+      // membre voyait un planning vide a cote de commentaires bien presents.
       res = await fetch(`/api/menages?from=${from}&to=${to}`, {
-        headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+        headers: { 'Authorization': `Bearer ${currentSession.access_token}`, ...enteteCompte() }
       })
     } catch (e) {
       return planningEnErreur('Connexion impossible. Vérifiez votre réseau.')
@@ -345,7 +348,12 @@ import { compteCourant, peutEcrire } from '/shared/compte-courant.js'
     commentsMap[key] = comment
 
     // Créer événement fil d'actualités pour tous les tokens du bien
-    const { data: tokens } = await supabase
+    // ⚠ `public_tokens` est sous `can_read(user_id, 'prestataires')`, PAS
+    // `menages` : un membre `menages: write` / `prestataires: none` enregistre
+    // bien sa note, mais ne peut pas lire les jetons — donc aucun evenement n'est
+    // cree et le prestataire ne recoit JAMAIS la note, pendant que l'interface
+    // affiche « enregistre ». On distingue les deux.
+    const { data: tokens, error: eTokens } = await supabase
       .from('public_tokens')
       .select('token, property_ids')
       .eq('user_id', compteCourant())
@@ -371,8 +379,14 @@ import { compteCourant, peutEcrire } from '/shared/compte-courant.js'
       })
     }
 
-    document.getElementById('comment-saved').style.display = 'block'
-    setTimeout(() => { document.getElementById('comment-saved').style.display = 'none' }, 2000)
+    const avis = document.getElementById('comment-saved')
+    // La note est bien enregistree ; ce qui peut manquer, c'est sa transmission
+    // au prestataire. Le dire plutot que d'afficher un succes complet.
+    avis.textContent = eTokens
+      ? '✅ Note enregistrée — non transmise au prestataire (droit « Prestataires » requis)'
+      : '✅ Note enregistrée'
+    avis.style.display = 'block'
+    setTimeout(() => { avis.style.display = 'none' }, eTokens ? 5000 : 2000)
     renderWeek()
     renderMiniCal()
   }

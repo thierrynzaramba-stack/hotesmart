@@ -163,6 +163,7 @@
   import { renderSidebar }    from '/components/sidebar.js'
   import { supabase }         from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.js'
 
   initErrorHandler()
   const session = await requireAuth()
@@ -170,6 +171,16 @@
   await renderSidebar('agent-ai-messagerie')
   window._session  = session
   window._supabase = supabase
+
+  // ⚠ LE SCRIPT PRINCIPAL DE CETTE PAGE EST UN SCRIPT CLASSIQUE, pas un module :
+  // il ne peut pas faire d'`import`. Les helpers de compte doivent donc lui etre
+  // exposes ici, comme `_session` et `_supabase` le sont deja. Les avoir importes
+  // dans ce module en croyant les rendre disponibles plus bas laissait un
+  // `ReferenceError: compteCourant is not defined` a la premiere lecture — la
+  // messagerie ne s'affichait plus du tout.
+  window.compteCourant = compteCourant
+  window.peutEcrire    = peutEcrire
+  window.enteteCompte  = enteteCompte
 
   // Liste FUSIONNEE beds24 + channex. Le POST /api/beds24 getProperties ne
   // renvoyait que les biens Beds24 -> biens channex absents du filtre.
@@ -285,7 +296,7 @@
         Promise.all(props.map(pid =>
           fetch('/api/beds24', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
             body: JSON.stringify({ action: 'getConversations', propertyId: pid })
           }).then(r => r.json()).then(d => (d.conversations || []).map(c => ({ ...c, _pid: pid })))
         )),
@@ -384,8 +395,12 @@
 
     try {
       const [msgRes, taskRes, pinRes] = await Promise.all([
+        // ⚠ `enteteCompte()` : sans lui, /api/messages lit le compte de
+        // l'APPELANT pendant que agent_tasks et conversation_flags, juste en
+        // dessous, sont lus sur le compte courant — des taches et des epingles
+        // sans les conversations correspondantes.
         fetch('/api/messages', {
-          headers: { 'Authorization': `Bearer ${window._session.access_token}` }
+          headers: { 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() }
         }).then(r => r.json()),
         window._supabase.from('agent_tasks').select('*')
           .eq('user_id', compteCourant())
@@ -591,7 +606,7 @@
           <div class="conv-view-meta">${platformLabel} · #${bookId}${conv.firstNight ? ` · ${formatDateShort(conv.firstNight)} → ${formatDateShort(conv.lastNight)}` : ''}</div>
         </div>
         <div class="conv-view-actions">
-          <button class="btn-mini ${isPinned ? 'active' : ''}" onclick="togglePin('${bookId}')">${isPinned ? '📌 Épinglé' : '📌 Épingler'}</button>
+          ${peutEcrire('messages') ? `<button class="btn-mini ${isPinned ? 'active' : ''}" onclick="togglePin('${bookId}')">${isPinned ? '📌 Épinglé' : '📌 Épingler'}</button>` : ''}
         </div>
       </div>
       <div class="conv-messages" id="conv-messages">
@@ -635,9 +650,10 @@
         ${ctx ? `<div class="task-bubble-q">${escHtml(ctx)}</div>` : ''}
         <textarea class="task-reply" id="val-${task.id}">${escHtml(task.suggested_reply || '')}</textarea>
         <div class="task-bubble-actions">
+          ${peutEcrire('messages') ? `
           <button class="btn btn-validate" data-validate="${task.id}" data-book="${escAttr(task.book_id)}">✉️ Valider et envoyer</button>
           <button class="btn" data-ignore="${task.id}">🚫 Ignorer</button>
-          <button class="btn" data-done="${task.id}">✓ Traité</button>
+          <button class="btn" data-done="${task.id}">✓ Traité</button>` : ''}
         </div>`
     } else if (subTasks.length) {
       const noteLabel = isInfo ? 'Information à compléter' : 'Action à mener'
@@ -648,11 +664,12 @@
         <div class="task-bubble-q" style="margin-top:9px">Réponse à enregistrer dans la base de connaissance :</div>
         <textarea class="task-reply" id="reply-${task.id}-${i}" placeholder="Réponse à ajouter dans la FAQ…"></textarea>
         <div class="task-bubble-actions">
-          <button class="btn btn-faq" data-faq="${task.id}" data-idx="${i}" data-prop="${escAttr(task.property_id)}" data-question="${escAttr(st.question || st.summary || '')}">📚 Enregistrer dans la FAQ</button>
+          ${peutEcrire('reglages') ? `<button class="btn btn-faq" data-faq="${task.id}" data-idx="${i}" data-prop="${escAttr(task.property_id)}" data-question="${escAttr(st.question || st.summary || '')}">📚 Enregistrer dans la FAQ</button>` : ''}
         </div>` : ''}`).join('<hr style="border:none;border-top:0.5px solid var(--border);margin:10px 0">') + `
         <div class="task-bubble-actions" style="margin-top:11px">
+          ${peutEcrire('messages') ? `
           <button class="btn btn-validate" data-done="${task.id}">✓ Traité</button>
-          <button class="btn" data-ignore="${task.id}">🚫 Ignorer</button>
+          <button class="btn" data-ignore="${task.id}">🚫 Ignorer</button>` : ''}
           <button class="btn btn-improve" data-reply="${escAttr(task.book_id)}">↩ Répondre au voyageur</button>
         </div>`
     } else {
@@ -690,7 +707,7 @@
       // bookings_snapshot, c'est la seule reference dont dispose la garde (qui la
       // reconfronte ensuite a Beds24).
       const res = await fetch('/api/beds24', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
         body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => String(t.id) === String(taskId))?.property_id || null })
       })
       const data = await res.json()
@@ -723,7 +740,7 @@
       if (!reply) return alert('Entrez une réponse')
       sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi…'
       const res = await fetch('/api/beds24', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
         body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => String(t.id) === String(taskId))?.property_id || null })
       })
       const data = await res.json()
@@ -827,7 +844,7 @@
 
     try {
       const res = await fetch('/api/simulate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
         body: JSON.stringify({ message, guestName: 'Voyageur Test', propertyId: simPropId })
       })
       const data = await res.json()
@@ -865,7 +882,11 @@
 
   // Restaurer l'état du toggle au chargement
   ;(async () => {
+    // ⚠ Le simulateur ecrit `conversation_flags` (RLS `messages` write) : sans ce
+    // garde, un membre en lecture bascule l'interrupteur, rien n'est persiste, et
+    // l'etat revient au rechargement.
     if (window._supabase == null || window._session == null) return
+    if (typeof peutEcrire === 'function' && !peutEcrire('messages')) return
     const { data } = await window._supabase.from('conversation_flags')
       .select('pinned').eq('user_id', compteCourant()).eq('book_id', '__SIM_ENABLED__').maybeSingle()
     if (data?.pinned) { simEnabled = true; simToggle.checked = true; renderConvList() }
@@ -893,7 +914,7 @@
       if (instructions.length) sys += `\n\nConsignes de l'hôte :\n${instructions.map((i, n) => `${n+1}. ${i}`).join('\n')}`
       sys += '\n\nRéponds UNIQUEMENT avec le message amélioré, sans commentaire.'
       const res = await fetch('/api/grok', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
         body: JSON.stringify({ systemPrompt: sys, messages: [{ role: 'user', content: `Message à améliorer : "${cleanText || rawText}"` }] })
       })
       const data = await res.json()
@@ -920,7 +941,7 @@
         ? { bookingId: bookId, message: text, propertyId: convForSend?.propertyId || null }
         : { action: 'sendMessage', bookingId: bookId, message: text, propertyId: convForSend?.propertyId || null }
       const res = await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
         body: JSON.stringify(payload)
       })
       const data = await res.json()
