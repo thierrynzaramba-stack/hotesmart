@@ -153,3 +153,86 @@ dénormalisées à l'ingestion.
 - **Beds24** : aucune lecture d'avis identifiée à ce jour. En attente de
   vérification de la doc Swagger authentifiée.
 - **Classification IA** de la propreté (`ai_clean_verdict`, `ai_clean_excerpt`).
+
+## 7. Classification de la propreté — deux étages
+
+**Étage 1, une règle déterministe, aucun appel IA.** Airbnb livre déjà des tags
+de propreté (`squeaky_clean_bathroom`, `pristine_kitchen`, `spotless_*`,
+`free_of_clutter`) et une note de catégorie. Payer un modèle pour redire ce
+qu'Airbnb dit en clair serait absurde — et surtout moins auditable : une règle se
+relit, un verdict de modèle se croit.
+
+**Étage 2, Haiku, seulement sur ce que la règle ne tranche pas.** 30 des 70
+premiers avis n'ont **aucun** tag (Booking n'en fournit jamais), et 13 parlent de
+propreté dans leur texte sans qu'aucun tag ne le signale.
+
+**Première passe réelle sur les 70 avis** : 27 tranchés par la règle, 41 par
+l'IA, 2 sans texte, **0 erreur**. Verdicts : 40 `positif`, 1 `remarque`,
+29 `rien_signale`.
+
+### Ce que l'étage 2 a trouvé et qu'aucun signal structuré ne donnait
+
+La seule `remarque` du jeu porte sur un avis dont le `score_clean` vaut **10/10**
+et qui porte **quatre tags positifs**. Le défaut est dans le **retour privé** :
+« la bouilloire n'était pas du tout propre ». Ni la note, ni les tags, ni l'avis
+public ne l'auraient jamais révélé. C'est exactement ce que l'étage 2 existe pour
+attraper.
+
+### ⚠ Asymétrie assumée entre OTA — ne pas « harmoniser »
+
+Le seuil de note (`score_clean ≤ 6` → `remarque`) ne s'applique **qu'à Airbnb**,
+dont l'échelle sur 10 est connue et cohérente. Chez Booking, les échelles ne
+coïncident pas : `overall_score` de 1 avec toutes les catégories à 2.5, overall
+de 10 avec catégories à 7.5. Comme on stocke brut sans normaliser (§3), un seuil
+sur ces valeurs serait un pari. **Les avis Booking sans tag passent directement à
+l'étage 2 : le texte tranche.**
+
+### Rien d'invérifiable n'entre en base
+
+- un verdict hors des trois classes est **rejeté** (la colonne porte un CHECK) ;
+- **l'extrait est vérifié comme citation réelle** : s'il ne se retrouve pas mot
+  pour mot dans le texte, il est mis à `null`. Une reformulation affichée au
+  prestataire passerait pour une parole du voyageur. Mesuré : **0 extrait non
+  retrouvé** sur les 13 posés.
+  - Limite connue : la comparaison est stricte. Un avis dont le texte contient
+    « tres propre » a perdu son extrait pour un écart de forme. Verdict correct,
+    citation absente. Normaliser les espaces et la casse avant comparaison
+    récupérerait ces cas — dette mineure, non traitée.
+- un **échec** (appel IA en erreur, réponse illisible) **ne pose pas**
+  `ai_analyzed_at` : l'avis repasse. Le poser le sortirait de la file pour
+  toujours.
+- un avis **sans tag et sans texte** est classé `rien_signale` et sort de la
+  file : sinon il y reviendrait à chaque passage, indéfiniment (2 avis sur 70).
+
+### Réanalyse quand le texte change
+
+Trigger `ota_reviews_touch` (migration `2026-09-02-ota-reviews-reanalyse.sql`) :
+si `content`, `content_public` ou `content_private` change, `ai_analyzed_at`,
+`ai_clean_verdict` et `ai_clean_excerpt` repassent à `null`. Un verdict périmé
+sur la fiche prestataire serait pire que pas de verdict.
+
+**`reply` en est volontairement exclu** : quand l'hôte répond, l'avis change,
+mais ce que le voyageur a dit de la propreté ne change pas. Réanalyser dessus
+ferait repasser tout l'historique par le modèle pour un verdict identique.
+
+Le trigger plutôt que du code parce que deux writers alimentent la table et que
+le poll écrit **par lot sans relire l'existant** : la comparaison côté JS
+coûterait une lecture par avis — le coût qu'on a justement supprimé. Le trigger
+voit `OLD` et `NEW`, aucun writer ne peut l'oublier.
+
+### Coût réel, mesuré
+
+Un appel : **418 tokens d'entrée, 45 de sortie**. Sur les 70 avis, seuls 41 ont
+appelé le modèle → environ **17 000 tokens d'entrée et 1 800 de sortie** pour
+tout l'historique. Aux tarifs Haiku, cela se compte en **centimes, une fois**.
+
+En rythme de croisière, 70 avis couvrent presque deux ans sur un bien, soit ~3
+par mois ; à dix biens, ~30 avis/mois dont la moitié tranchée par la règle. **Le
+coût n'est pas un critère de décision ici** — l'auditabilité l'est.
+
+### Garde-fous dans le cron (bloc 4sexies)
+
+Cadence quotidienne, **marqueur posé avant le travail**, budget mur de 15 s, lot
+borné à 20 avis. Mesuré sur la première passe : ~12 s pour 20 avis, et le budget
+a effectivement coupé une passe à 15 avis — le garde-fou fonctionne. Le reliquat
+part au passage suivant, la file étant persistante en base.

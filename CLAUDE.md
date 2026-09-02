@@ -115,7 +115,7 @@ les 5 dettes du §12), puis avis voyageurs (spec §0 : ota_reviews appartient au
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
-- docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations).
+- docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.
