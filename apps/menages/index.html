@@ -261,6 +261,11 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
       const bouton = document.getElementById('btn-save-comment')
       if (zone) { zone.readOnly = true; zone.placeholder = 'Lecture seule' }
       if (bouton) bouton.remove()
+      // ⚠ « Marquer fait » aussi. Il ne touche aujourd'hui que le localStorage
+      // (voir markDone), donc il ne pouvait rien casser en base — mais le laisser
+      // actif en lecture seule fait croire a une action partagee qui n'existe pas.
+      const fait = document.getElementById('modal-done')
+      if (fait) fait.remove()
     }
   }
 
@@ -574,14 +579,24 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     document.getElementById('modal-comment').value = m.comment || ''
     document.getElementById('comment-saved').style.display = 'none'
 
+    // Le bouton a pu etre retire (lecture seule) : ne pas le supposer present.
     const btn = document.getElementById('modal-done')
-    btn.textContent = m.done ? '↩ Marquer non fait' : '✓ Marquer fait'
-    btn.className = m.done ? 'btn' : 'btn btn-primary'
+    if (btn) {
+      btn.textContent = m.done ? '↩ Marquer non fait' : '✓ Marquer fait'
+      btn.className = m.done ? 'btn' : 'btn btn-primary'
+    }
     document.getElementById('modal').style.display = 'flex'
   }
 
   function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null }
 
+  // ⚠ DEFAUT CONNU, INDEPENDANT DE LA DELEGATION : ce marquage ne vit que dans le
+  // localStorage DE CE NAVIGATEUR. Il n'ecrit pas `menage_done`, que la PWA
+  // prestataire alimente pourtant (117 lignes en prod via api/menages-public).
+  // Consequences : un menage marque fait par le prestataire n'apparait pas ici,
+  // l'hote ne retrouve pas ses marquages sur un autre appareil, et rien n'est
+  // partage dans l'equipe. A brancher sur `menage_done` — chantier a part, note
+  // dans docs/kb/menage.md.
   function markDone() {
     if (!selectedMenage) return
     if (doneSet.has(selectedMenage.id)) doneSet.delete(selectedMenage.id)

@@ -133,6 +133,10 @@
       <select id="bien-select"></select>
       <select id="view-select"></select>
     </div>
+    <!-- Limite produit : les biens Beds24 ne se pilotent pas ici. -->
+    <div id="avis-beds24" style="display:none;margin:0 12px 10px;padding:9px 12px;
+         background:#FEF3C7;border:0.5px solid #FCD34D;border-radius:8px;
+         font-size:12px;color:#92400E;line-height:1.45"></div>
     <div class="month-nav">
       <button id="prev-month">&lsaquo;</button>
       <span class="month-label" id="month-label">-</span>
@@ -171,6 +175,7 @@
     import { requireAuth } from '/components/auth-guard.js'
     import { signOut } from '/shared/supabase.js'
     import { api } from '/shared/api-client.js'
+    import { peutEcrire } from '/shared/compte-courant.js'
     import { loadCalendarData } from '/shared/calendar-core.js'
     import { renderOnboardingBanner } from '/components/onboarding-banner.js'
     const session = await requireAuth()
@@ -237,7 +242,24 @@
     vsel.addEventListener('change',e=>{ currentView=e.target.value; savePrefs(); renderGrid() })
 
     async function loadBiens(){
-      try{ const r=await api.channel.listProperties(); BIENS=r.properties||[] }catch(e){ showToast('Erreur chargement biens'); BIENS=[] }
+      let TOUS=[]
+      try{ const r=await api.channel.listProperties(); TOUS=r.properties||[] }catch(e){ showToast('Erreur chargement biens'); TOUS=[] }
+      // ⚠ LIMITE PRODUIT : un bien Beds24 ne se pilote pas ici, ses prix se
+      // modifient dans Beds24. La version bureau les grise deja ; cette page les
+      // proposait, et l'hote decouvrait le refus seulement a l'enregistrement
+      // (« local_only »). On les exclut, et on le DIT.
+      BIENS = TOUS.filter(b => b.provider !== 'beds24')
+      const beds24 = TOUS.filter(b => b.provider === 'beds24')
+      const avis = document.getElementById('avis-beds24')
+      if(avis){
+        if(beds24.length){
+          const noms = beds24.map(b => b.name).join(', ')
+          avis.textContent = BIENS.length
+            ? `${noms} : géré${beds24.length>1?'s':''} dans Beds24, prix et disponibilités modifiables là-bas.`
+            : `Aucun bien pilotable ici. ${noms} : les prix et disponibilités se modifient directement dans Beds24.`
+          avis.style.display='block'
+        } else avis.style.display='none'
+      }
       const sel=document.getElementById('bien-select'); sel.innerHTML=''
       BIENS.forEach(b=>{ const o=document.createElement('option'); o.value=b.id; o.textContent=b.name; sel.appendChild(o) })
       const prefs=loadPrefs()
@@ -477,7 +499,11 @@
     const overlay=document.getElementById('sheet-overlay')
     let pending={}, sheetDate=null, forceOpenKey=null
     function defaultDow(){ return {1:true,2:true,3:true,4:true,5:true,6:true,0:true} }
+    // ⚠ LECTURE SEULE : la feuille d'edition ne s'ouvre pas pour un membre
+    // `reservations: read`. Le serveur refuse deja, mais l'hote aurait saisi un
+    // prix avant de l'apprendre.
     function openSheet(iso, openKey){
+      if(!peutEcrire('reservations')){ showToast('Lecture seule : modification impossible sur ce compte'); return }
       sheetMode='normal'; sheetDate=iso; pending={}; forceOpenKey=openKey||null
       document.getElementById('sheet-title').textContent='Configurer'
       document.getElementById('sheet-sub').textContent='Date : '+iso

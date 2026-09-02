@@ -139,6 +139,15 @@
       </div>
     </div>
 
+    <!-- Limite produit : les biens Beds24 ne se pilotent pas ici. Message rempli
+         par annoncerBiensBeds24(), masque quand le compte n'a aucun bien Beds24. -->
+    <div id="avis-beds24" style="display:none;margin:0 16px 12px;padding:10px 13px;
+         background:#FEF3C7;border:0.5px solid #FCD34D;border-radius:8px;
+         font-size:12px;color:#92400E;line-height:1.5"></div>
+    <div id="avis-lecture" style="display:none;margin:0 16px 12px;padding:10px 13px;
+         background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;
+         font-size:12px;color:var(--text2);line-height:1.5"></div>
+
     <div class="cal-main" id="main">
       <div class="month-pills" id="month-pills"></div>
       <div class="scroll-shell"><div class="scroll-area" id="scroll-area"><div id="month-band-wrap"></div><div id="blocks"></div></div></div>
@@ -175,6 +184,7 @@
     import { requireAuth }   from '/components/auth-guard.js'
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
+    import { peutEcrire } from '/shared/compte-courant.js'
     import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
@@ -328,7 +338,11 @@
     document.addEventListener('keydown',e=>{ if(!sel.bienId||sel.idx.size===0)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return; if(document.getElementById('overlay').classList.contains('visible'))return; const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; if(!cell)return; if(e.key==='Enter'||e.key==='F2'){e.preventDefault();startInlineEdit(cell,f,'')}else if(/^[0-9]$/.test(e.key)){e.preventDefault();startInlineEdit(cell,f,e.key)} })
     function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected');else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
 
-    function startInlineEdit(cell,idx,initial){ if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="text" inputmode="decimal" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}else{try{input.select()}catch(e){}};let done=false;const commit=async(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const bienId=sel.bienId;const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;const segs=targets.map(i=>({date_from:toISO(days[i]),date_to:toISO(days[i]),rate:st[i].rate}));sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Enregistrement '+n+' jours...':'Enregistrement...');try{const resp=await api.calendar.save(bienId,segs);if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre et publie',6500)}await reloadInventory()}catch(err){showToast('Erreur: '+(err.message||'sauvegarde'))}return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
+    // ⚠ LECTURE SEULE : aucune edition en ligne pour un membre `reservations: read`.
+    // Le serveur refuse deja en 403, mais l'hote aurait tape un prix, vu le champ
+    // se fermer et un message d'erreur — sans comprendre qu'il n'y avait jamais eu
+    // de droit d'ecrire.
+    function startInlineEdit(cell,idx,initial){ if(!peutEcrire('reservations'))return; if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="text" inputmode="decimal" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}else{try{input.select()}catch(e){}};let done=false;const commit=async(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const bienId=sel.bienId;const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;const segs=targets.map(i=>({date_from:toISO(days[i]),date_to:toISO(days[i]),rate:st[i].rate}));sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Enregistrement '+n+' jours...':'Enregistrement...');try{const resp=await api.calendar.save(bienId,segs);if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre et publie',6500)}await reloadInventory()}catch(err){showToast('Erreur: '+(err.message||'sauvegarde'))}return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
 
     const floatBar=document.getElementById('float-bar')
     function showFloatBar(){ if(sel.idx.size===0){hideFloatBar();return}document.getElementById('sel-count').textContent=sel.idx.size;floatBar.classList.add('visible') }
@@ -529,8 +543,51 @@
       if(!selectedBiens.length){ const first=BIENS.find(editable); if(first) selectedBiens=[first.id] }
       BIENS.forEach(b=>{ ppConfig[b.id]={included:b.included, extraFee:b.extraFee} })
       renderMultiSelect()
+      annoncerBiensBeds24()
+      appliquerLectureSeule()
       await reloadInventory()
     }
+
+    // ⚠ LECTURE SEULE VISIBLE. Un membre `reservations: read` consulte le
+    // calendrier mais ne publie rien. Les boutons d'ecriture sont retires plutot
+    // que desactives : un bouton grise invite a chercher pourquoi, un bouton
+    // absent avec un message dit ce qu'il en est.
+    function appliquerLectureSeule(){
+      if(peutEcrire('reservations')) return
+      for(const id of ['btn-open-popup','btn-undo']){
+        const el=document.getElementById(id); if(el) el.remove()
+      }
+      const fb=document.getElementById('float-bar'); if(fb) fb.remove()
+      const z=document.getElementById('avis-lecture')
+      if(z){ z.textContent='Lecture seule : vous ne pouvez pas modifier les prix ni les disponibilités de ce compte.'; z.style.display='block' }
+    }
+
+    // ⚠ LIMITE PRODUIT ASSUMEE, rendue EXPLICITE.
+    // Les prix et disponibilites d'un bien Beds24 se pilotent DANS Beds24 :
+    // HoteSmart n'y pousse pas d'ARI (voir docs/kb/menage.md et le calendrier).
+    // Jusqu'ici, la seule mention vivait dans le selecteur multiple — il fallait
+    // l'ouvrir pour la voir. Un hote 100 % Beds24 arrivait donc sur un calendrier
+    // vide sans explication, et un membre dont le perimetre ne contient que du
+    // Beds24 encore plus : lui ne peut meme pas changer de bien.
+    function annoncerBiensBeds24(){
+      const zone = document.getElementById('avis-beds24')
+      if(!zone) return
+      const beds24 = BIENS.filter(b => b.provider === 'beds24')
+      if(!beds24.length){ zone.style.display='none'; return }
+
+      const noms = beds24.map(b => b.name).join(', ')
+      const aucunPilotable = !BIENS.some(b => b.provider !== 'beds24')
+      zone.innerHTML = aucunPilotable
+        ? `<strong>Aucun bien pilotable ici.</strong> ${escapeHtmlLocal(noms)} ${beds24.length > 1 ? 'sont gérés' : 'est géré'} dans Beds24 :
+           leurs prix et disponibilités se modifient directement depuis Beds24, pas depuis HôteSmart.`
+        : `${escapeHtmlLocal(noms)} ${beds24.length > 1 ? 'sont gérés' : 'est géré'} dans Beds24 :
+           ${beds24.length > 1 ? 'leurs prix et disponibilités se modifient' : 'ses prix et disponibilités se modifient'}
+           directement depuis Beds24. Les autres biens restent pilotables ici.`
+      zone.style.display='block'
+    }
+
+    function escapeHtmlLocal(v){ return String(v==null?'':v).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
     async function reloadInventory(){
       if(!selectedBiens.length){ renderBlocks(); return }

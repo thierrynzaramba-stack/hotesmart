@@ -126,3 +126,43 @@ retour du réseau.
 ## Lien avec les codes d'accès
 La validation du ménage est la **condition d'envoi du code** voyageur (sauf 1er voyageur). Détail
 dans `codes-acces.md`.
+
+
+## ⚠️ « Marquer fait » côté hôte ne vit que dans le navigateur
+
+Trouvé au test humain de l'étape 5 : basculé sur un compte partagé avec
+`menages: read`, le bouton « ✓ Marquer fait » restait actif.
+
+**Diagnostic** : ni faille de périmètre, ni refus serveur — une troisième
+possibilité. `markDone()` dans `apps/menages/index.html` n'écrit **rien en
+base** : il ne touche que `localStorage['menages-done']`.
+
+**Conséquences, indépendantes de la délégation :**
+
+- Un ménage marqué fait par le prestataire dans sa PWA écrit `menage_done`
+  (117 lignes en production via `api/menages-public`) — l'hôte **ne le voit
+  pas**.
+- L'hôte ne retrouve pas ses propres marquages sur un autre appareil.
+- Rien n'est partagé dans l'équipe.
+
+Le bouton est désormais retiré en lecture seule — il donnait l'illusion d'une
+action partagée. Mais **le défaut de fond reste** : la page hôte doit être
+branchée sur `menage_done`, comme la PWA l'est déjà. Chantier à part.
+
+## Limite produit : les biens Beds24 ne se pilotent pas dans le calendrier
+
+Les prix et disponibilités d'un bien Beds24 se modifient **dans Beds24**.
+HôteSmart n'y pousse pas d'ARI — c'est assumé, pas un défaut.
+
+Jusqu'ici la mention vivait dans le sélecteur multiple du calendrier : il fallait
+l'**ouvrir** pour la voir. Un hôte 100 % Beds24 arrivait donc sur un calendrier
+vide sans explication, et un membre dont le périmètre ne contient que du Beds24
+encore plus — lui ne peut même pas changer de bien.
+
+Rendu explicite :
+
+- **Bureau** : bandeau permanent nommant les biens concernés, avec un message
+  distinct quand **aucun** bien n'est pilotable.
+- **Mobile** : la page les *proposait* dans son sélecteur, et l'hôte découvrait
+  le refus seulement à l'enregistrement (`local_only`). Ils en sont désormais
+  exclus, et leur absence est expliquée.
