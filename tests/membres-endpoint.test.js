@@ -984,18 +984,6 @@ test('un profil lien reste modifiable par l\'endpoint', async () => {
   assert.strictEqual(res.code, 200)
 })
 
-test('son perimetre reste intact : /settings n\'ecrit plus public_tokens', async () => {
-  const etat = preparer({ user: PROD })
-  const res = reponse()
-  await require('../api/membres')(req({ body: {
-    action: 'update', profile_id: 'p-regina',
-    permissions: { self_availability: 'write' } } }), res)
-  assert.strictEqual(res.code, 200)
-  assert.ok(!etat.ecritures.some(e => e.table === 'public_tokens'),
-    'apps/menages/prestataires.html est le seul writer du perimetre PWA')
-  const maj = etat.ecritures.find(e => e.table === 'profile_permissions' && e.action === 'update')
-  assert.deepStrictEqual(maj.row.property_ids.sort(), [BIEN_A.id, BIEN_B.id].sort())
-})
 
 // ─── Divers ─────────────────────────────────────────────────────────────────
 

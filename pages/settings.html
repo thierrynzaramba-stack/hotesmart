@@ -142,7 +142,7 @@
     <div class="note">
       Les profils gérés ici se <strong>connectent à HôteSmart</strong> : employés, propriétaires.
       Les prestataires de ménage n’ont pas accès à HôteSmart — seulement à l’application ménage —
-      et se gèrent depuis <a href="/apps/menages/prestataires.html">Prestataires</a>.
+      et se gèrent depuis <a href="/apps/menages/prestataires">Prestataires</a>.
     </div>
 
     <div id="bloc-modeles">
@@ -280,10 +280,6 @@ function ligneProfil (p) {
     </div>`
 }
 
-// ⚠ DEUX LISTES, un seul modele de donnees. Un prestataire est un profil comme
-// un autre — `access_mode = 'lien'` est la seule difference. On les separe a
-// l'affichage parce qu'on ne leur pose pas les memes questions, pas parce qu'ils
-// seraient d'une autre nature.
 // ⚠ Les profils `access_mode = 'lien'` NE SONT PAS AFFICHES ICI.
 // Un prestataire n'a pas acces a HoteSmart : seulement a l'application menage.
 // Toute sa gestion — creation, identite, biens, lien, suppression — vit dans
@@ -314,14 +310,14 @@ function segment (valeur, onChange, options, desactive) {
 function rendrePanneau () {
   const estNouveau = !edite
   const verrouille = !estNouveau
-  // Le mode d'acces est fige a « compte » : les profils par lien ne se gerent
-  // plus ici (voir rendreListe).
-  $('f-mode').disabled = verrouille
+  // ⚠ Plus de reference a `note-mode` ni a `f-mode.disabled`. Le premier element
+  // a ete supprime du HTML avec le selecteur de mode ; le second est devenu un
+  // input cache, ou `disabled` n'a aucun effet. La ligne survivante levait un
+  // TypeError sur `null.style`, AVANT l'ouverture de l'overlay : plus aucun
+  // profil ne pouvait etre cree ni modifie.
 
   $('p-titre').textContent = estNouveau ? 'Nouveau profil' : [edite.first_name, edite.last_name].filter(Boolean).join(' ')
   $('p-soustitre').textContent = estNouveau ? 'Identité, accès et droits.' : 'Modifiez les droits, ou l’accès ci-dessous.'
-  $('f-mode').disabled = verrouille
-  $('note-mode').style.display = verrouille ? 'block' : 'none'
   // L'email identifie un compte réellement rattaché : il se fige à l'acceptation.
   $('f-email').disabled = !!(edite && edite.accepted_at)
 
@@ -543,7 +539,6 @@ document.querySelectorAll('[data-modele]').forEach(b => {
   b.onclick = () => {
     const m = MODELES[b.dataset.modele]
     brouillon = { ...VIDE, ...m, property_ids: brouillon.property_ids || [] }
-    if (m.access_mode && !edite) $('f-mode').value = m.access_mode
     $('f-scope').value = brouillon.property_scope
     rendrePanneau()
   }

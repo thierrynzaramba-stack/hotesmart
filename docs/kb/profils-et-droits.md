@@ -855,12 +855,27 @@ projection PWA. Non traité dans l'étape 4 — cela demanderait de réécrire u
 qui fonctionne, sans que la fiche prestataire existe encore pour le remplacer.
 
 
-### ⚠️ Capacité perdue au passage : régénérer un lien prestataire
+### ⚠️ Capacités perdues au passage, et une ligne orpheline
 
-`/settings` savait régénérer le lien PWA d'un prestataire (action `regenerate`,
-toujours présente dans `api/membres.js`). L'écran de l'app ménage, lui, ne le
-sait pas : il propose « Supprimer » puis recréer — ce qui **perd les biens
-assignés et la visibilité**.
+Sortir les prestataires de `/settings` a fait disparaître trois choses de
+l'interface. Les actions serveur existent toujours dans `api/membres.js` : il
+manque les boutons côté app ménage.
 
-L'action serveur existe et fonctionne ; il manque le bouton côté app ménage. À
-ajouter au chantier prestataires, ou plus tôt si le besoin se présente.
+1. **Régénérer un lien** (`regenerate`). L'écran de l'app ménage propose
+   « Supprimer » puis recréer — ce qui **perd les biens assignés et la
+   visibilité**, et laisse une ligne `profiles` derrière.
+2. **Désactiver un profil** (`deactivate`). Plus aucun écran ne le fait pour un
+   prestataire.
+3. **Renommer le profil**. L'app ménage écrit `public_tokens.label`, pas
+   `profiles.first_name` : les deux peuvent diverger.
+
+**⚠️ La ligne orpheline.** « Supprimer » dans l'app ménage n'efface que
+`public_tokens`. Un prestataire créé auparavant depuis `/settings` garde donc sa
+ligne `profiles` en `active: true` avec un `pwa_token` vivant — invisible partout,
+mais bien présente. Le lien lui-même ne s'ouvre plus (la PWA lit `public_tokens`),
+donc ce n'est pas un accès résiduel ; c'est une donnée fantôme qui faussera les
+décomptes et les rattachements d'avis.
+
+**À traiter au chantier prestataires**, en même temps que la convergence des deux
+populations : la suppression devra passer par `profiles`, `public_tokens` n'en
+étant que la projection.
