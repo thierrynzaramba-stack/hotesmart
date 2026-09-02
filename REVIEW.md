@@ -222,16 +222,23 @@ une incohérence entre pages, pas une convention absente.
 
 ---
 
-## 11. Le compte cible vient de la ressource, jamais de l'appelant
+## 11. Une donnée client qui désigne une ressource ne se valide pas — elle ne s'utilise pas
 
-**Règle : dans un endpoint, l'identifiant fourni par le client est résolu en base,
-son propriétaire est lu, et les droits sont vérifiés SUR CE COMPTE.**
+**Règle, en deux temps :**
+
+1. **Une ressource INTERNE désignée par le client est résolue en base**, son
+   propriétaire est lu, et les droits sont vérifiés SUR CE COMPTE.
+2. **Une ressource EXTERNE (URL, hôte, destinataire) n'est pas validée du tout :
+   elle est CONSTRUITE côté serveur.** Filtrer une valeur hostile, c'est parier
+   qu'on a pensé à toutes ses formes. Ne pas l'utiliser, c'est ne pas parier.
 
 À vérifier :
 - [ ] tout `property_id`, `booking_id`, `lock_id`… venant du corps ou de l'URL passe par `lib/require-permission.js` ;
 - [ ] la valeur utilisée ensuite pour écrire est celle **résolue en base**, jamais celle envoyée par le client ;
 - [ ] si deux ressources sont désignées (une réservation *et* un bien), leurs propriétaires sont comparés — sinon l'une sert à passer la garde et l'autre à agir ;
-- [ ] question à se poser : *que se passe-t-il si je remplace cet identifiant par celui d'un autre compte ?*
+- [ ] **toute URL, tout hôte, tout destinataire sortant est bâti depuis une constante ou une variable d'environnement** — jamais repris d'une requête, même « après vérification » ;
+- [ ] **un secret part-il avec cet appel ?** Si oui, la destination ne peut en aucun cas dépendre de l'appelant ;
+- [ ] questions à se poser : *que se passe-t-il si je remplace cet identifiant par celui d'un autre compte ?* et *où part cette requête si je change cette valeur ?*
 
 **Pourquoi.** Les endpoints écrivent en **service key**, qui contourne la RLS. Les
 politiques posées sur les 30 tables ne protègent que les accès directs depuis le
@@ -253,6 +260,31 @@ prouve *qui* appelle, pas *ce qu'il possède*.
 Les deux ne dépendaient d'aucun chantier : elles étaient exploitables depuis la
 création des endpoints, et invisibles tant qu'on ne regardait que « la session
 est-elle valide ? ».
+
+**Cas vécu qui a fait durcir cette règle — deux constats successifs, le second
+sur le correctif du premier** (`api/channel-events.js`, action `register`) :
+
+- **Constat 1.** `callback_url` venait du corps de la requête et désignait la
+  cible d'un `PUT` chez le gestionnaire de canaux. Toute session authentifiée
+  pouvait réécrire le masque d'events du webhook **certifié** et couper les
+  réservations et messages voyageurs en temps réel de **tous** les hôtes — avec
+  une réponse « succès » et aucune alerte.
+- **Constat 2.** Le correctif validait alors le **chemin** de cette URL. Or
+  `https://evil.example.com/api/channel-events` a un chemin parfaitement valide :
+  le `POST` de création y aurait fait livrer, en clair dans les en-têtes du
+  webhook enregistré, `CHANNEL_WEBHOOK_SECRET` et le bypass Vercel — donc de quoi
+  forger ensuite des events sur le webhook certifié. **Le correctif était plus
+  dangereux que la faille.**
+
+Ce qui a fermé le sujet n'est pas une meilleure validation, c'est la suppression
+de l'entrée : l'URL est bâtie depuis `DOMAINES_APP`, et un `callback_url` fourni
+et divergent est **refusé** au lieu d'être ignoré en silence. Le front envoyait
+déjà cette constante — le paramètre n'avait jamais servi à rien.
+
+**La leçon générale** : tant qu'une donnée client reste dans le chemin, chaque
+review ne peut que chercher la variante à laquelle on n'a pas pensé (casse,
+encodage, sous-domaine trompeur, port, barre finale…). Cette recherche ne se
+termine jamais. La retirer du chemin, si.
 
 ---
 
