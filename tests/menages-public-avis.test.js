@@ -43,6 +43,9 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
                      periodes = [{ user_id: U, provider_id: PROFIL, property_id_ref: 'COL', debut: null, fin: null }],
                      biens = [{ user_id: U, provider_property_id: 'COL', name: 'Colomiers' }],
                      erreurBiens = null,
+                     ratioPeriode = undefined,      // ce que porte public_tokens
+                     colonnePeriodeAbsente = false, // migration pas encore passee
+                     periodesDemandees = [],
                      journal = [] } = {}) {
   const client = {
     from (table) {
@@ -51,12 +54,23 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
       const chain = {
         select (c, opts) { a.colonnes = c; a.head = !!(opts && opts.head); a.count = opts && opts.count; return chain },
         eq (c, v) { a.f[c] = v; return chain },
-        gte (c, v) { a.gte = [c, v]; return chain },
+        gte (c, v) { a.gte = [c, v]; if (table === 'ota_reviews') periodesDemandees.push(v); return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
         not () { return chain }, order () { return chain },
-        limit () { return Promise.resolve(rep()) },
+        // ⚠ Chainable, comme le vrai builder : `.limit()` est suivi d'un `.gte()`
+        // quand une periode est reglee. Un double qui rendait une Promise ici
+        // faisait echouer le test, pas le code.
+        limit () { return chain },
         maybeSingle () {
-          if (table === 'public_tokens') return Promise.resolve({ data: a.f.token === TOKEN ? { user_id: U } : null, error: null })
+          if (table === 'public_tokens') {
+            if (a.f.token !== TOKEN) return Promise.resolve({ data: null, error: null })
+            // PostgREST rejette la ligne entiere quand une colonne du select
+            // n'existe pas : c'est exactement le cas « migration pas passee ».
+            if (colonnePeriodeAbsente && /ratio_periode/.test(a.colonnes || '')) {
+              return Promise.resolve({ data: null, error: { message: 'column does not exist' } })
+            }
+            return Promise.resolve({ data: { user_id: U, ...(ratioPeriode !== undefined ? { ratio_periode: ratioPeriode } : {}) }, error: null })
+          }
           if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
           if (table === 'profile_permissions') return Promise.resolve({ data: droits, error: erreurDroits })
           const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error })
@@ -93,6 +107,7 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+  journal.periodesDemandees = periodesDemandees
   return journal
 }
 
@@ -136,7 +151,7 @@ test('la réponse contient bien ce qu\'elle DOIT contenir', async () => {
   assert.strictEqual(res.body.autorise, true)
   assert.strictEqual(res.body.avis.length, 1)
   assert.deepStrictEqual(Object.keys(res.body.avis[0]).sort(),
-    ['bien', 'bienNom', 'date', 'extrait', 'id', 'prive', 'verdict'])
+    ['bien', 'bienNom', 'extrait', 'id', 'prive', 'recuLe', 'sejourDebut', 'sejourFin', 'verdict'])
   assert.strictEqual(res.body.avis[0].extrait, 'la bouilloire n\'était pas propre')
   assert.strictEqual(res.body.avis[0].bienNom, 'Colomiers')
   assert.ok(res.body.ratio, 'le ratio doit être présent')
@@ -347,4 +362,86 @@ test('PANNE d\'ATTRIBUTION : 503, pas une liste vide silencieuse', async () => {
   const res = reponse()
   await handler(req({ detail: '1' }), res)
   assert.strictEqual(res.code, 503, 'une panne d\'attribution ne doit pas passer pour « aucun avis »')
+})
+
+// ─── La période du ratio vient de l'hôte, pas du porteur du lien ───────────
+
+test('la période appliquée est celle réglée sur public_tokens', async () => {
+  const journal = preparer({ ratioPeriode: '15j' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.periode, '15j')
+  assert.ok(journal.periodesDemandees.length, 'une borne temporelle doit être posée sur ota_reviews')
+})
+
+test('la période demandée en query string est IGNORÉE', async () => {
+  // C'est un réglage de l'hôte. Le porteur du lien ne doit pas pouvoir élargir
+  // sa propre fenêtre de comptage en bricolant l'URL.
+  preparer({ ratioPeriode: '15j' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1', periode: 'toujours' }), res)
+  assert.strictEqual(res.body.periode, '15j')
+})
+
+test('sans réglage, le défaut est « toujours » — pas 30 jours', async () => {
+  // `periodeNormalisee` retombe sur '30j' sur une valeur inconnue : appliqué tel
+  // quel, il aurait rétréci le ratio de tout le monde sans décision d'un hôte.
+  const journal = preparer({ ratioPeriode: null })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.periode, 'toujours')
+  assert.strictEqual(journal.periodesDemandees.length, 0, 'aucune borne ne doit être posée')
+})
+
+test('valeur inconnue en base : « toujours », jamais un rétrécissement muet', async () => {
+  const journal = preparer({ ratioPeriode: 'trimestre' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.periode, 'toujours')
+  assert.strictEqual(journal.periodesDemandees.length, 0)
+})
+
+test('MIGRATION PAS PASSÉE : la PWA répond quand même', async () => {
+  // Sans le repli, le select d'une colonne inconnue fait échouer la ligne
+  // entière et l'endpoint répondrait « Token invalide » — toute la vue tombée
+  // pour un réglage d'affichage.
+  preparer({ colonnePeriodeAbsente: true })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.autorise, true)
+  assert.strictEqual(res.body.periode, 'toujours')
+})
+
+// ─── Les trois dates, jamais fondues en une ────────────────────────────────
+
+test('le séjour et la réception sortent SÉPARÉMENT', async () => {
+  preparer({ avis: [{ ...AVIS_BASE, stay_start: '2026-08-25', stay_end: '2026-08-28',
+                      received_at: '2026-08-30T00:00:00Z' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  const a = res.body.avis[0]
+  assert.strictEqual(a.sejourDebut, '2026-08-25')
+  assert.strictEqual(a.sejourFin, '2026-08-28')
+  assert.strictEqual(a.recuLe, '2026-08-30T00:00:00Z')
+})
+
+test('un avis SANS séjour ne se voit pas attribuer une date inventée', async () => {
+  // L'ancien `stay_end || received_at` présentait la date de réception comme
+  // une date de séjour : la prestataire aurait cherché le mauvais ménage.
+  preparer({ avis: [{ ...AVIS_BASE, stay_start: null, stay_end: null,
+                      received_at: '2026-08-30T00:00:00Z' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  const a = res.body.avis[0]
+  assert.strictEqual(a.sejourDebut, null)
+  assert.strictEqual(a.sejourFin, null)
+  assert.strictEqual(a.recuLe, '2026-08-30T00:00:00Z')
 })

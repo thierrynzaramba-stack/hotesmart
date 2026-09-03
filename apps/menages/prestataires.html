@@ -98,6 +98,21 @@
             </select>
           </div>
 
+          <!-- Periode du ratio d'avis affiche dans SA PWA. La config de l'app
+               menage vit dans l'app menage (docs/kb/coeur-de-donnees.md). -->
+          <div class="visibility-row">
+            <div class="visibility-label">
+              Période du ratio affiché
+              <small>Sur quelle période la prestataire voit ses avis de propreté comptés, dans son app</small>
+            </div>
+            <select class="form-input visibility-select" id="ratio-periode">
+              <option value="15j">15 jours</option>
+              <option value="30j">30 jours</option>
+              <option value="6mois">6 mois</option>
+              <option value="toujours" selected>Depuis le début</option>
+            </select>
+          </div>
+
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary" id="btn-create">Créer et générer le lien</button>
             <button class="btn" id="btn-cancel">Annuler</button>
@@ -230,6 +245,7 @@
           </div>
           <div class="presta-meta">
             <span class="presta-meta-item highlight">📅 ${visibilityDays} jours visibles</span>
+            <span class="presta-meta-item">⭐ Ratio ${LIB_PERIODE_RATIO[p.ratio_periode] || LIB_PERIODE_RATIO.toujours}</span>
           </div>
           <div class="presta-link">
             <span>${url}</span>
@@ -279,7 +295,8 @@
       token,
       label: name,
       property_ids: selectedProps,
-      visibility_days: visibilityDays
+      visibility_days: visibilityDays,
+      ratio_periode: periodeChoisie()
     })
 
     if (error) { alert('Erreur création : ' + error.message); return }
@@ -302,6 +319,11 @@
 
     document.getElementById('presta-name').value = p.label || ''
     document.getElementById('visibility-days').value = p.visibility_days || 30
+    // ⚠ Repli sur « toujours », le meme defaut que la colonne : une valeur
+    // inconnue laisserait le <select> sur l'option precedemment affichee et
+    // l'enregistrement changerait le reglage sans que l'hote l'ait demande.
+    document.getElementById('ratio-periode').value = PERIODES_RATIO.includes(p.ratio_periode)
+      ? p.ratio_periode : 'toujours'
     document.getElementById('form-section').style.display = 'block'
     document.getElementById('btn-show-form').style.display = 'none'
     document.getElementById('form-title').textContent = 'Modifier le prestataire'
@@ -324,7 +346,8 @@
     const visibilityDays = parseInt(document.getElementById('visibility-days').value)
 
     const { error } = await supabase.from('public_tokens')
-      .update({ label: name, property_ids: selectedProps, visibility_days: visibilityDays })
+      .update({ label: name, property_ids: selectedProps, visibility_days: visibilityDays,
+                ratio_periode: periodeChoisie() })
       .eq('id', id)
       .eq('user_id', currentSession.user.id)
 
@@ -335,9 +358,23 @@
     showToast('✓ Prestataire modifié !')
   }
 
+  // Les quatre cles reconnues par lib/stats-avis.js. Une cinquieme valeur serait
+  // refusee par la contrainte CHECK de la colonne — autant ne jamais l'envoyer.
+  const PERIODES_RATIO = ['15j', '30j', '6mois', 'toujours']
+  const LIB_PERIODE_RATIO = {
+    '15j': 'sur 15 jours', '30j': 'sur 30 jours',
+    '6mois': 'sur 6 mois', 'toujours': 'depuis le début'
+  }
+
+  function periodeChoisie() {
+    const v = document.getElementById('ratio-periode')?.value
+    return PERIODES_RATIO.includes(v) ? v : 'toujours'
+  }
+
   function resetForm() {
     document.getElementById('presta-name').value = ''
     document.getElementById('visibility-days').value = '30'
+    document.getElementById('ratio-periode').value = 'toujours'
     document.getElementById('form-section').style.display = 'none'
     document.getElementById('btn-show-form').style.display = 'inline-flex'
     const btn = document.getElementById('btn-create')

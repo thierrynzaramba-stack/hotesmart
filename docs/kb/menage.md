@@ -98,11 +98,28 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   l'onglet existe, mais le serveur calcule quand même le ratio complet (attribution + 4 `count`),
   à **chaque ouverture de la PWA**, y compris pour qui n'ouvre jamais l'onglet. Un paramètre
   `sonde=1` ne rendant que `{ autorise }` économiserait ces requêtes.
-- **En tête** : le nombre d'avis pris en compte, puis 👍 propreté saluée / 👎 remarques.
-  Ces chiffres sortent de la **même fonction** que la page hôte `/avis` (`lib/stats-avis.js`) :
-  deux compteurs calculés séparément finiraient par se contredire.
+- **Ratio permanent** : les mêmes 👍/👎 s'affichent **dans l'en-tête de la PWA**, à côté du
+  nom — visibles dès l'ouverture et sur **tous** les onglets, avec le total et la période en
+  petit (« 98 avis · depuis le début »). C'est le rappel d'objectif quotidien.
+  ⚠️ Il ne s'affiche **que sur des chiffres sûrs** : panne de comptage, champ manquant ou
+  comptage partiel, il reste **masqué** — un rappel permanent qui annoncerait un faux chiffre
+  serait pire que pas de rappel. L'onglet Avis, lui, explique.
+- **En tête de l'onglet** : le nombre d'avis pris en compte (avec sa période), puis
+  👍 propreté saluée / 👎 remarques. Ces chiffres sortent de la **même fonction** que la page
+  hôte `/avis` (`lib/stats-avis.js`) : deux compteurs calculés séparément finiraient par se
+  contredire.
+- **Période du ratio** : réglée par l'hôte dans `apps/menages/prestataires.html`
+  (15 j / 30 j / 6 mois / depuis le début), stockée dans `public_tokens.ratio_periode`,
+  défaut **« depuis le début »**. ⚠️ Elle vient **de la base, jamais de l'URL** : le porteur
+  du lien ne doit pas pouvoir élargir sa propre fenêtre de comptage.
 - **En dessous** : la liste des avis qui **parlent de propreté** (date, bien, extrait). Les avis
   qui n'évoquent pas le ménage ne sont pas listés — ils restent comptés dans le total.
+- **La date identifie LE ménage** : « Séjour du 12 au 15 août » quand `stay_start`/`stay_end`
+  sont connus. ⚠️ Sinon, la date de réception est affichée **étiquetée comme telle**
+  (« Avis reçu le 3 septembre ») et **jamais** présentée comme un séjour : la prestataire
+  irait chercher la mauvaise intervention. Rien n'est comblé — l'import de l'historique des
+  réservations fera basculer ces avis vers leur vraie date de séjour, sans rien changer ici.
+  Même règle sur la page hôte `/avis`.
 - **Étiquette « retour privé »** : l'extrait vient d'un message que le voyageur **n'avait pas
   rendu public**. À ne pas citer ailleurs.
 - **Jamais** : le nom du voyageur, le texte complet de l'avis, la note. Le serveur ne les envoie

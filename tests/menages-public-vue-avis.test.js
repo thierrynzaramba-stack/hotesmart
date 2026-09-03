@@ -56,7 +56,7 @@ function elem (id, dataset = {}) {
 // `style="display:none"` supprime par megarde doit faire tomber un test, pas
 // etre recopie ici a la main.
 const DEPART = {}
-for (const id of ['tabs', 'avis-vue', 'avis-ratio']) {
+for (const id of ['tabs', 'avis-vue', 'avis-ratio', 'entete-ratio']) {
   const m = HTML.match(new RegExp('id="' + id + '"[^>]*'))
   DEPART[id] = (m && /style="display:none"/.test(m[0])) ? 'none' : ''
 }
@@ -68,6 +68,7 @@ test('le HTML masque les onglets et la vue Avis AU DEPART', async () => {
   assert.strictEqual(DEPART['tabs'], 'none', '#tabs doit partir masque')
   assert.strictEqual(DEPART['avis-vue'], 'none', '#avis-vue doit partir masque')
   assert.strictEqual(DEPART['avis-ratio'], 'none', '#avis-ratio doit partir masque')
+  assert.strictEqual(DEPART['entete-ratio'], 'none', '#entete-ratio doit partir masque')
 })
 
 // Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
@@ -391,4 +392,133 @@ test('un champ de compteur manquant est traite comme une panne', async () => {
   ctx.renderAvis({ autorise: true, ratio: { total: 98, positif: 10 }, avis: [] })
   assert.ok(/indisponible/i.test(get('avis-etat').innerHTML))
   assert.ok(!/undefined/.test(get('avis-ratio').innerHTML))
+})
+
+// ─── Le ratio permanent de l'en-tête ───────────────────────────────────────
+// Il est visible sur tous les onglets, dès l'ouverture. C'est un rappel
+// d'objectif quotidien : il doit être JUSTE ou absent, jamais approximatif.
+
+test('la sonde remplit l\'en-tête dès l\'ouverture, sans ouvrir l\'onglet', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'Régina', autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.initAvis()
+  const html = get('entete-ratio').innerHTML
+  assert.strictEqual(get('entete-ratio').style.display, '')
+  // Les deux chiffres sont lus dans LEUR bloc respectif : `/10/` passerait sur
+  // n'importe quel « 10 » de la page, y compris celui d'un autre compteur.
+  const pos = html.match(/ratio-item pos[^>]*>(.*?)<\/span>/s)
+  const neg = html.match(/ratio-item neg[^>]*>(.*?)<\/span>/s)
+  assert.ok(pos && /(^|>)10$/.test(pos[1].trim()), 'propretés saluées : ' + (pos && pos[1]))
+  assert.ok(neg && /(^|>)15$/.test(neg[1].trim()), 'remarques : ' + (neg && neg[1]))
+  assert.ok(/98 avis/.test(html), 'avec le total')
+})
+
+test('la période réglée par l\'hôte est ÉCRITE à côté du ratio', async () => {
+  // « 10 / 11 » ne veut rien dire sans sa période : sur 15 jours ou depuis le
+  // début, ce n'est pas le même résultat.
+  for (const [cle, libelle] of [['15j', 'sur 15 jours'], ['30j', 'sur 30 jours'],
+                                ['6mois', 'sur 6 mois'], ['toujours', 'depuis le début']]) {
+    const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: { ...RATIO_OK, periode: cle }, avis: [] } }] })
+    await ctx.initAvis()
+    assert.ok(get('entete-ratio').innerHTML.includes(libelle), `${cle} doit s'afficher « ${libelle} »`)
+  }
+})
+
+test('PANNE de compteurs : l\'en-tête reste VIDE, jamais un faux chiffre', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: { total: 0, positif: 0, remarque: 0, erreur: true }, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').innerHTML, '')
+})
+
+test('comptage TRONQUÉ : pas de ratio permanent non plus', async () => {
+  // Un chiffre partiel affiché en permanence, sans place pour l'expliquer,
+  // se lirait comme le total. L'onglet Avis, lui, le dit.
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: { ...RATIO_OK, tronque: true }, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
+})
+
+test('self_view_reviews coupé : ni onglet NI ratio permanent', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'R', autorise: false, ratio: null, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').innerHTML, '')
+})
+
+test('droit retiré entre la sonde et le clic : l\'en-tête se vide aussi', async () => {
+  const { ctx, get } = contexte({ reponses: [
+    { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } },
+    { status: 200, body: { autorise: false, ratio: null, avis: [] } }
+  ] })
+  await ctx.initAvis()
+  assert.strictEqual(get('entete-ratio').style.display, '')
+  await ctx.chargerAvis()
+  assert.strictEqual(get('entete-ratio').style.display, 'none', 'un ratio survivant au retrait du droit serait une fuite')
+})
+
+// ─── Les dates : identifier LE ménage ──────────────────────────────────────
+
+test('un séjour complet s\'affiche comme un séjour', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+      sejourDebut: '2026-08-12', sejourFin: '2026-08-15', recuLe: '2026-09-03T10:00:00Z' }
+  ] })
+  const html = get('avis-liste').innerHTML
+  assert.ok(/Séjour du 12 au 15 août 2026/.test(html), html)
+  assert.ok(!/reçu/i.test(html), 'la date de réception n\'a rien à faire là quand le séjour est connu')
+})
+
+test('séjour à cheval sur deux mois : les deux mois sont écrits', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+      sejourDebut: '2026-07-30', sejourFin: '2026-08-02', recuLe: null }
+  ] })
+  assert.ok(/Séjour du 30 juillet au 2 août 2026/.test(get('avis-liste').innerHTML))
+})
+
+test('sans séjour, la date de réception est ÉTIQUETÉE comme telle', async () => {
+  // Jamais présentée comme un séjour : la prestataire irait chercher le mauvais
+  // ménage. Rien d'inventé, jamais.
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+      sejourDebut: null, sejourFin: null, recuLe: '2026-09-03T10:00:00Z' }
+  ] })
+  const html = get('avis-liste').innerHTML
+  assert.ok(/Avis reçu le 3 septembre 2026/.test(html), html)
+  assert.ok(!/Séjour/.test(html), 'aucune mention de séjour quand il n\'est pas connu')
+})
+
+test('seule la fin de séjour connue : dit « terminé le »', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+      sejourDebut: null, sejourFin: '2026-08-15', recuLe: '2026-09-03T10:00:00Z' }
+  ] })
+  assert.ok(/Séjour terminé le 15 août 2026/.test(get('avis-liste').innerHTML))
+})
+
+test('aucune date du tout : aucune date affichée, et pas de plantage', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+      sejourDebut: null, sejourFin: null, recuLe: null }
+  ] })
+  const html = get('avis-liste').innerHTML
+  assert.ok(html.includes('avis-card'))
+  assert.ok(!/Séjour|reçu/i.test(html))
+})
+
+test('une date illisible ne devient pas « Invalid Date »', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+    { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+      sejourDebut: 'pas-une-date', sejourFin: null, recuLe: '2026-09-03T10:00:00Z' }
+  ] })
+  const html = get('avis-liste').innerHTML
+  assert.ok(!/Invalid/.test(html))
+  assert.ok(/Avis reçu le/.test(html), 'on retombe sur la date de réception, étiquetée')
 })

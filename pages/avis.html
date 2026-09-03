@@ -316,6 +316,21 @@
     return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
   }
 
+  // ⚠ UNE DATE DE RÉCEPTION N'EST PAS UNE DATE DE SÉJOUR. Confondre les deux
+  // fait chercher le mauvais ménage — et côté prestataire, c'est le seul repère
+  // qui permet d'identifier l'intervention concernée. On étiquette donc toujours
+  // ce qu'on montre, et on ne comble jamais un séjour manquant : les avis sans
+  // ancrage basculeront d'eux-mêmes à l'import de l'historique.
+  const libelleDateAvis = a => {
+    const deb = a.stay_start ? dateFr(a.stay_start) : ''
+    const fin = a.stay_end ? dateFr(a.stay_end) : ''
+    if (deb && fin) return `Séjour ${deb} → ${fin}`
+    if (fin) return `Séjour terminé le ${fin}`
+    if (deb) return `Séjour à partir du ${deb}`
+    const recu = dateFr(a.received_at)
+    return recu ? `Reçu le ${recu}` : ''
+  }
+
   // Petit sélecteur de correction, à côté du badge. Le serveur revalide le
   // droit : ce masquage est un confort, pas la garde.
   function requalif (a) {
@@ -373,7 +388,7 @@
         <div class="avis-head">
           ${canal}
           <span>${echapper(nomBien(a.property_id_ref))}</span>
-          <span>${dateFr(a.received_at)}</span>
+          <span>${echapper(libelleDateAvis(a))}</span>
           ${badge(a)}${requalif(a)}
           <span class="avis-note">${note}</span>
         </div>

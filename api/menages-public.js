@@ -326,9 +326,23 @@ function extraitEstPrive (a) {
 // La liste et le ratio passent par la MEME fonction que /avis : deux chiffres
 // calcules differemment finiraient par se contredire, et c'est celui-ci qui
 // perdrait sa credibilite.
+// Les quatre cles de lib/stats-avis.js, repetees ici parce que le defaut n'est
+// pas le meme : « toujours » cote PWA, '30j' cote /avis.
+const PERIODES_PWA = ['15j', '30j', '6mois', 'toujours']
+
 async function avisDeLaPrestataire (req, res, token) {
-  const { data: pt } = await supabase.from('public_tokens')
-    .select('user_id').eq('token', token).maybeSingle()
+  // ⚠ Le second `select` est un REPLI, pas une redondance : tant que la
+  // migration `ratio_periode` n'est pas passee, PostgREST rejette la colonne
+  // inconnue et `pt` serait null — la PWA entiere repondrait « Token invalide »
+  // pour un reglage d'affichage. On retombe alors sur le select d'origine et le
+  // defaut « toujours ». A retirer quand la colonne est en place partout.
+  let { data: pt } = await supabase.from('public_tokens')
+    .select('user_id, ratio_periode').eq('token', token).maybeSingle()
+  if (!pt) {
+    const repli = await supabase.from('public_tokens')
+      .select('user_id').eq('token', token).maybeSingle()
+    pt = repli.data
+  }
   if (!pt) return res.status(401).json({ error: 'Token invalide' })
   const userId = pt.user_id
 
@@ -360,7 +374,16 @@ async function avisDeLaPrestataire (req, res, token) {
     return res.status(200).json({ prenom: profil.first_name, autorise: false, ratio: null, avis: [] })
   }
 
-  const periode = periodeNormalisee(String(req.query.periode || 'toujours'))
+  // ⚠ LA PERIODE EST CELLE QUE L'HOTE A REGLEE, jamais celle que le porteur du
+  // lien demande : c'est un reglage d'affichage qui lui appartient. Le defaut
+  // reste « toujours » — `periodeNormalisee` retombe sur '30j' sur une valeur
+  // inconnue, ce qui changerait le ratio sans decision de personne.
+  // ⚠ `periodeNormalisee` retombe sur '30j' — un defaut adapte a /avis, ou la
+  // periode vient d'un selecteur, mais PAS ici : une valeur inconnue en base
+  // (contrainte tombee, correctif SQL, colonne absente) retrecirait le ratio de
+  // la prestataire sans qu'aucun hote ne l'ait demande. On valide explicitement.
+  const brut = String(pt.ratio_periode || 'toujours')
+  const periode = PERIODES_PWA.includes(brut) ? brut : 'toujours'
   const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id })
 
   // ⚠ CONTRAT A HONORER PAR L'INTERFACE PWA, QUI RESTE A ECRIRE.
@@ -398,7 +421,7 @@ async function avisDeLaPrestataire (req, res, token) {
         // Seul l'extrait sort, avec de quoi le dater et savoir s'il est prive.
         // `content_public` sert UNIQUEMENT a decider de l'etiquette, cote
         // serveur ; il ne part jamais au front.
-        .select('id, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, received_at, stay_end, property_id_ref')
+        .select('id, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, received_at, stay_start, stay_end, property_id_ref')
         .eq('user_id', userId).eq('statut', 'confirme')
         // Meme borne que l'attribution : au-dela, l'URL PostgREST casse.
         .in('id', att.ids.slice(0, MAX_IDS))
@@ -421,7 +444,15 @@ async function avisDeLaPrestataire (req, res, token) {
         // provient, pour l'etiqueter. Le comparer ici evite de laisser le front
         // le deduire, donc de lui transmettre le texte prive.
         prive: extraitEstPrive(a),
-        date: a.stay_end || a.received_at,
+        // ⚠ TROIS DATES DISTINCTES, JAMAIS FONDUES EN UNE.
+        // `stay_end || received_at` presentait une date de reception comme une
+        // date de sejour des que l'ancrage manquait — c'est ce qui permet a la
+        // prestataire d'identifier LE menage concerne, elle ne doit pas etre
+        // devinee. L'affichage etiquette ce qu'il montre ; l'import de
+        // l'historique fera basculer les avis vers leur vraie date de sejour.
+        sejourDebut: a.stay_start || null,
+        sejourFin: a.stay_end || null,
+        recuLe: a.received_at || null,
         bien: a.property_id_ref,
         // Rempli juste apres. `property_id_ref` est un identifiant provider :
         // « 287031 » ne dit rien a une femme de menage.

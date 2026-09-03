@@ -54,6 +54,14 @@
     .avis-meta .pos { color: #1E7B34; }
     .avis-meta .neg { color: #A85B12; }
     .avis-texte { font-size: 13px; line-height: 1.5; }
+    .entete-ratio { text-align: right; line-height: 1.3; }
+    .entete-ratio .ratio { justify-content: flex-end; gap: 10px; }
+    .entete-ratio .ratio-item { font-size: 14px; }
+    .entete-ratio .entete-periode { font-size: 11px; color: var(--text2); }
+    @media (max-width: 500px) {
+      .entete-ratio .ratio-item { font-size: 13px; }
+      .entete-ratio .entete-periode { font-size: 10px; }
+    }
     .avis-sans-detail { color: var(--text2); font-style: italic; }
     .badge-prive { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--text2); }
 
@@ -498,6 +506,11 @@
         <div class="page-title">🧹 Planning ménages</div>
         <div class="page-sub" id="presta-label">Chargement...</div>
       </div>
+      <!-- Ratio permanent : visible des l'ouverture et sur tous les onglets,
+           c'est le rappel d'objectif quotidien. Masque tant que le serveur n'a
+           pas confirme le droit — et sur panne de compteurs, car un ratio faux
+           en permanence vaut moins que pas de ratio. -->
+      <div class="entete-ratio" id="entete-ratio" style="display:none"></div>
     </div>
 
     <div class="content">
@@ -1579,6 +1592,14 @@ if ("serviceWorker" in navigator) {
   let avisCharge = false          // la liste a deja ete chargee une fois
   let currentTab = 'planning'
 
+  // La periode est reglee par l'hote (public_tokens.ratio_periode) ; l'ecran la
+  // DIT, sinon « 10 / 11 » ne veut rien dire — sur 15 jours ou depuis toujours,
+  // ce n'est pas le meme resultat.
+  const LIB_PERIODE = {
+    '15j': 'sur 15 jours', '30j': 'sur 30 jours',
+    '6mois': 'sur 6 mois', 'toujours': 'depuis le début'
+  }
+
   function echapper (t) {
     return String(t == null ? '' : t)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -1631,6 +1652,31 @@ if ("serviceWorker" in navigator) {
     try { data = await res.json() } catch (err) { return }
     if (data.actif === false || data.autorise !== true) return
     montrerOnglets()
+    renderEnteteRatio(data)
+  }
+
+  // Le ratio permanent, a cote du prenom. Il ne s'affiche QUE sur des chiffres
+  // surs : panne de comptage, champ manquant ou comptage partiel, il reste
+  // masque et l'onglet Avis explique. Un rappel d'objectif quotidien qui
+  // annoncerait un faux chiffre serait pire que pas de rappel.
+  function renderEnteteRatio (data) {
+    const el = document.getElementById('entete-ratio')
+    if (!el) return
+    const r = data && data.ratio
+    const sur = v => Number.isFinite(v)
+    if (!r || r.erreur || r.tronque || !sur(r.total) || !sur(r.positif) || !sur(r.remarque)) {
+      el.style.display = 'none'
+      el.innerHTML = ''
+      return
+    }
+    const lib = LIB_PERIODE[r.periode] || LIB_PERIODE[data.periode] || ''
+    el.innerHTML = `
+      <div class="ratio">
+        <span class="ratio-item pos">${POUCE_HAUT}${r.positif}</span>
+        <span class="ratio-item neg">${POUCE_BAS}${r.remarque}</span>
+      </div>
+      <div class="entete-periode">${r.total} avis${lib ? ' · ' + echapper(lib) : ''}</div>`
+    el.style.display = ''
   }
 
   function montrerOnglets () {
@@ -1665,10 +1711,12 @@ if ("serviceWorker" in navigator) {
     // Le droit a pu etre retire entre la sonde et le clic.
     if (data.actif === false || data.autorise !== true) {
       document.getElementById('tabs').style.display = 'none'
+      renderEnteteRatio(null)
       setTab('planning')
       return
     }
     avisCharge = true
+    renderEnteteRatio(data)
     renderAvis(data)
   }
 
@@ -1696,7 +1744,8 @@ if ("serviceWorker" in navigator) {
     document.getElementById('avis-etat').style.display = 'none'
     const ratio = document.getElementById('avis-ratio')
     ratio.innerHTML = `
-      <div class="week-stat"><strong>${r.total}</strong>avis pris en compte</div>
+      <div class="week-stat"><strong>${r.total}</strong>avis pris en compte${
+        LIB_PERIODE[r.periode] ? ', ' + echapper(LIB_PERIODE[r.periode]) : ''}</div>
       <div class="week-stat">
         <strong class="ratio">
           <span class="ratio-item pos">${POUCE_HAUT}${r.positif}</span>
@@ -1722,10 +1771,34 @@ if ("serviceWorker" in navigator) {
     liste.innerHTML = parlants.map(ligneAvis).join('')
   }
 
+  // ⚠ CE QUI IDENTIFIE LE MENAGE, C'EST LA DATE DU SEJOUR — pas celle de l'avis.
+  // Et une date de reception presentee comme un sejour est une donnee inventee :
+  // elle enverrait la prestataire chercher le mauvais menage. On etiquette donc
+  // toujours ce qu'on montre, et on ne comble jamais un sejour manquant.
+  function libelleDate (a) {
+    const jour = v => {
+      const d = v ? new Date(v) : null
+      return (d && !isNaN(d)) ? d : null
+    }
+    const deb = jour(a.sejourDebut), fin = jour(a.sejourFin), recu = jour(a.recuLe)
+    const court = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+    const long = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    if (deb && fin) {
+      // Meme mois : « du 12 au 15 août », sinon les deux mois en entier.
+      const memeMois = deb.getFullYear() === fin.getFullYear() && deb.getMonth() === fin.getMonth()
+      return `Séjour du ${memeMois ? deb.getDate() : court(deb)} au ${long(fin)}`
+    }
+    if (fin) return `Séjour terminé le ${long(fin)}`
+    if (deb) return `Séjour à partir du ${long(deb)}`
+    // Aucun ancrage : on le DIT. L'import de l'historique fera basculer ces
+    // avis vers leur vraie date de sejour, sans rien changer ici.
+    if (recu) return `Avis reçu le ${long(recu)}`
+    return ''
+  }
+
   function ligneAvis (a) {
     const neg = a.verdict === 'remarque'
-    const d = a.date ? new Date(a.date) : null
-    const dateTxt = (d && !isNaN(d)) ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+    const dateTxt = libelleDate(a)
     // Le nom du bien s'il est connu, sinon rien : l'identifiant provider brut
     // (« 287031 ») ne dit rien a personne.
     const bien = a.bienNom || ''

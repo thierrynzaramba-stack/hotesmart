@@ -42,8 +42,12 @@ const MAX_TEXTE   = 5000
 //
 // Regle a tenir en modifiant cette liste : une colonne qui n'est pas rendue par
 // pages/avis.html n'a rien a y faire.
+// ⚠ `stay_start` / `stay_end` ne sont pas decoratifs : ils disent DE QUEL
+// SEJOUR parle l'avis. Sans eux, l'ecran n'avait que `received_at` a montrer et
+// une date de reception se lisait comme une date de sejour.
 const CHAMPS = `id, provider, source, ota, content, content_public,
-  overall_score, received_at, ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
+  overall_score, received_at, stay_start, stay_end,
+  ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
   property_id_ref, statut, verdict_source`
 
 // ─── Lecture ────────────────────────────────────────────────────────────────
