@@ -1127,19 +1127,26 @@ if ("serviceWorker" in navigator) {
   }
 
   // ─── Chargement initial ────────────────────────────────────────────────────
-  async function loadData(token) {
+  // ⚠ `silencieux` : un rechargement EN COURS DE SESSION ne doit pas detruire
+  // l'ecran. La branche ci-dessous remplace tout le contenu par « Token
+  // invalide » — acceptable au demarrage, desastreux apres une acceptation que
+  // le serveur vient d'enregistrer : un simple timeout PostgREST (le GET rend
+  // 503 sur toute panne de lecture) laissait la prestataire devant un lien
+  // qu'elle croyait mort, sur un menage qu'elle venait d'accepter.
+  async function loadData(token, { silencieux = false } = {}) {
     let res
     try {
       res = await fetch(`/api/menages-public?token=${token}`)
     } catch (err) {
       // Pas de reseau au demarrage : mode degraded, on reste avec le cache
       console.warn('[Init] Hors ligne, mode degraded')
-      document.getElementById('presta-label').textContent = '(Hors ligne — donnees en cache)'
-      return
+      if (!silencieux) document.getElementById('presta-label').textContent = '(Hors ligne — donnees en cache)'
+      return { ok: false }
     }
     if (!res.ok) {
+      if (silencieux) { console.warn('[Menages] rechargement impossible', res.status); return { ok: false } }
       document.querySelector('.content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Token invalide</div>'
-      return
+      return { ok: false }
     }
     const data = await res.json()
 
@@ -1170,6 +1177,7 @@ if ("serviceWorker" in navigator) {
       serverDoneSet = new Set(data.done.map(d => `${d.booking_id}|${d.departure_date}`))
       saveServerDoneSet()
     }
+    return { ok: true }
   }
 
   // ⚠ UNE DATE NUE SE PARSE EN LOCAL, PAS EN UTC.
@@ -1538,19 +1546,29 @@ if ("serviceWorker" in navigator) {
     }
     btnOui.disabled = true; btnNon.disabled = true
     try {
+      // ⚠ AUCUN REJEU. `fetchWithRetry` rejoue sur toute exception de `fetch` —
+      // y compris une reponse perdue alors que le serveur a DEJA commite.
+      // Le rejeu retombe alors sur `status='offered'` faux, donc zero ligne,
+      // donc 409 : on annoncerait « ce menage ne vous est plus propose » a
+      // quelqu'un qui vient de l'accepter. Sur un telephone en 4G instable,
+      // exactement l'inverse de ce qu'on veut dire. `doMarkDone`, lui, rejoue :
+      // marquer fait est idempotent, accepter ne l'est pas.
       const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: accepte ? 'accepterMenage' : 'refuserMenage',
           booking_id: menage.bookId, property_id: menage.propId,
           departure_date: menage.dateStr })
-      })
+      }, 0)
       const data = await res.json().catch(() => null)
       if (res.status === 409) {
         // ⚠ Course perdue, PAS une panne : on le dit clairement, sinon elle
         // s'organiserait autour d'un menage qui ne lui revient plus.
         showModalWarning('Ce ménage ne vous est plus proposé.')
         await rechargerAssignations()
+        // La fiche porte un menage qui n'est plus le sien : la laisser ouverte
+        // avec ses deux boutons invitait a recliquer, pour un 404.
+        setTimeout(closeModal, 1600)
         return
       }
       if (!res.ok) {
@@ -1571,8 +1589,10 @@ if ("serviceWorker" in navigator) {
   // Recharge la vérité serveur après une réponse : c'est lui qui tranche.
   async function rechargerAssignations() {
     try {
-      await loadData(currentToken)
+      const r = await loadData(currentToken, { silencieux: true })
+      if (!r || r.ok === false) return   // l'ecran garde ce qu'il a
       rebuildDoneSet()
+      renderFilters()   // les filtres de biens sont reconstruits par loadData
       routeRender()
     } catch (e) { console.warn('[Offre] rechargement impossible', e) }
   }

@@ -79,6 +79,7 @@
                        border-radius: 999px; padding: 1px 6px; margin-top: 3px; background: rgba(255,255,255,0.75); }
     .presta-pastille.offert { border: 1px dashed currentColor; }
     .presta-pastille.vide   { background: rgba(0,0,0,0.06); font-weight: 500; font-style: italic; }
+    .presta-pastille.refus  { background: #FEE2E2; color: #991B1B; }
     .presta-ligne { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
     .presta-ligne select { flex: 1; padding: 6px 8px; font-size: 13px; border: 0.5px solid var(--border);
                            border-radius: var(--radius); background: var(--bg); color: var(--text); }
@@ -609,6 +610,12 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
   function pastillePrestataire(m) {
     if (!m.assign) return ''
     const prenom = prenomDe(m.assign.provider_id)
+    // ⚠ UN REFUS N'EST PAS UN « PERSONNE » ORDINAIRE : quelqu'un a dit non, et
+    // rien ne le reprendra tout seul. Les confondre laissait l'hote sans savoir
+    // qu'il doit agir.
+    if (m.assign.status === 'orphaned') {
+      return `<div class="presta-pastille refus" title="${echapper(m.assign.assignment_reason || '')}">⚠ refusé</div>`
+    }
     if (!m.assign.provider_id) return '<div class="presta-pastille vide">personne</div>'
     if (!prenom) return ''   // profil inconnu du lot : on n'invente pas de nom
     const offert = m.assign.status === 'offered'

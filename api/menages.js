@@ -186,7 +186,10 @@ module.exports = async function handler(req, res) {
     let menages = []
     let prestataires = []
     const { data: mn, error: errMn } = await supabase.from('menages')
-      .select('booking_id, property_id, departure_date, provider_id, status, assigned_by')
+      // `assignment_reason` porte « Refuse par X. » : sans elle, un refus est
+      // indiscernable d'un menage jamais assigne, et l'hote ne sait pas qu'il
+      // doit agir.
+      .select('booking_id, property_id, departure_date, provider_id, status, assigned_by, assignment_reason')
       .eq('user_id', userId)
       .in('property_id', properties.map(p => p.id))
       .neq('status', 'cancelled')

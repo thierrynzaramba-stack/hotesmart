@@ -577,3 +577,42 @@ test('un ménage REFUSÉ (orphaned) n\'est pas rendu à qui l\'a refusé', async
   assert.strictEqual(bilan.assignes_apres_coup, 0)
   assert.strictEqual(etat.majs.length, 0)
 })
+
+test('un ménage REFUSÉ puis annulé puis revenu n\'est PAS re-proposé', async () => {
+  // ⚠ LA BOUCLE QUE CE TEST FERME. Le statut `orphaned` seul était respecté par
+  // la boucle de rattrapage, mais deux autres chemins l'ignoraient : un départ
+  // déplacé passe le ménage à `cancelled`, et s'il revient, la résurrection
+  // RECALCULAIT l'assignation — donc réémettait une offre vers la personne qui
+  // venait de refuser, avec au journal « la réservation existe toujours ».
+  // Il suffisait qu'un voyageur décale son départ puis revienne dessus.
+  const etat = preparer({
+    snaps: [SNAP()],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'cancelled',
+                provider_id: null, assigned_by: 'manual',
+                assignment_reason: 'Refuse par Marie.' }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1 }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.ressuscites, 1, 'le ménage revient au planning')
+  assert.strictEqual(etat.majs[0].row.provider_id, null, 'mais sans personne')
+  assert.strictEqual(etat.majs[0].row.status, 'orphaned', 'et toujours en attente d\'une décision')
+  assert.strictEqual(etat.majs[0].row.assigned_by, 'manual', 'le verrou survit à l\'annulation')
+})
+
+test('une résurrection ORDINAIRE recalcule bien l\'assignation', async () => {
+  // Contre-épreuve : conserver le verrou ne doit pas empêcher un ménage sans
+  // décision humaine de retrouver sa référente.
+  const etat = preparer({
+    snaps: [SNAP()],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'cancelled',
+                provider_id: null, assigned_by: 'auto' }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1 }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  assert.strictEqual(etat.majs[0].row.provider_id, REGINA)
+  assert.strictEqual(etat.majs[0].row.status, 'accepted')
+})

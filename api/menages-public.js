@@ -5,7 +5,7 @@ const { markReady } = require('../lib/cron-property-status')
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, MAX_IDS } = require('../lib/attribution-prestataire')
-const { reportIncident } = require('../lib/founder-notify')
+const { alertMenageRefuse } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 
 const supabase = createClient(
@@ -105,7 +105,9 @@ module.exports = async function handler(req, res) {
           if (p.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
           if (!p.autorise) return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
         } else if (!droit.autorise) {
-          return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
+          return res.status(403).json({ error: droit.motif === 'offre'
+            ? 'Acceptez d\'abord ce ménage'
+            : 'Ce ménage ne vous est pas attribué' })
         }
 
         // Insert dans menage_done. ON CONFLICT DO NOTHING grace a la contrainte unique.
@@ -173,7 +175,9 @@ module.exports = async function handler(req, res) {
           if (p.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
           if (!p.autorise) return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
         } else if (!droit.autorise) {
-          return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
+          return res.status(403).json({ error: droit.motif === 'offre'
+            ? 'Acceptez d\'abord ce ménage'
+            : 'Ce ménage ne vous est pas attribué' })
         }
 
         // Suppression de la ligne menage_done
@@ -524,6 +528,13 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   // arriere). Le cloisonnement par bien reste applique dans ce cas.
   if (!menage) return { autorise: 'perimetre' }
 
+  // ⚠ ON NE FAIT PAS UN MENAGE QU'ON N'A PAS ACCEPTE. La regle n'existait que
+  // dans le front ; le serveur, lui, acceptait un `markDone` sur un menage
+  // encore `offered` — le message de commit affirmait pourtant qu'il « refuserait
+  // l'un des deux ». Une offre non repondue n'engage personne : la marquer faite
+  // court-circuiterait la confirmation que tout ce lot vient d'ajouter.
+  if (menage.status === 'offered') return { autorise: false, motif: 'offre' }
+
   const identifiee = !!(profil && profil.active !== false)
   if (identifiee && menage.provider_id === profil.id) return { autorise: true }
   if (!menage.provider_id) return { autorise: true }
@@ -611,7 +622,15 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // touche pas. L'escalade automatique vers la candidate suivante reste reportee
   // (spec §3 bis) : ici, c'est l'hote qui tranche.
   const { data: maj, error: errMaj } = await supabase.from('menages')
+    // ⚠ `assigned_by: 'manual'` EN PLUS DU STATUT. Le statut seul ne suffisait
+    // pas : la boucle de rattrapage le respectait, mais deux autres chemins du
+    // writer l'ignoraient. Un menage refuse dont la date de depart bouge passe a
+    // `cancelled` ; s'il reparait, la resurrection RECALCULE l'assignation et le
+    // re-proposait a la personne qui venait de le refuser — la boucle que ce lot
+    // dit fermer. Un refus EST une decision humaine : il se verrouille comme
+    // celles de l'hote, et le verrou, lui, est respecte partout.
     .update({ status: 'orphaned', provider_id: null, offered_at: null, accepted_at: null,
+              assigned_by: 'manual',
               assignment_reason: `Refuse par ${profil.first_name}.`,
               updated_at: new Date().toISOString() })
     .eq('id', menage.id).eq('status', 'offered').eq('provider_id', profil.id)
@@ -628,13 +647,18 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     from_provider_id: profil.id, actor: 'provider',
     reason: 'Refus depuis la PWA.'
   })
-  // ⚠ L'hote DOIT le savoir : un menage refuse et non repris est un logement qui
-  // ne sera pas prepare. C'est le seul cas de ce lot ou personne ne prend le
-  // relais automatiquement.
+  // ⚠ L'HOTE DOIT LE SAVOIR — et `reportIncident` ne l'aurait PAS prevenu :
+  // c'est le canal FONDATEUR (docs/kb/alertes.md : « a ne pas exposer aux
+  // hotes »). Le commit precedent l'annoncait pourtant dans le guide utilisateur
+  // (« vous etes prevenu ») : une promesse que le code ne tenait pas.
+  // `alertMenageRefuse` pose une tache in-app, toujours visible et sans config
+  // prealable, plus un SMS/email best-effort. Un menage refuse et non repris est
+  // un logement qui ne sera pas prepare, et personne ne prend le relais
+  // automatiquement (l'escalade reste reportee, spec §3 bis).
   try {
-    await reportIncident('menage_non_assigne', {
-      userId, propertyId: String(propertyId),
-      detail: { message: `Menage du ${departureDate} refuse par ${profil.first_name} : personne n'est assigne.` }
+    await alertMenageRefuse({
+      userId, propertyId: String(propertyId), bookingId,
+      departureDate, prenom: profil.first_name
     })
   } catch (e) { console.error('[menages-public] alerte refus echec:', e.message) }
   return res.json({ success: true, status: 'orphaned' })

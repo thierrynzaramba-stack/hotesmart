@@ -112,11 +112,23 @@ naît `accepted`, rien ne change pour Régina.
   posée **dans** l'update, pas testée avant. Zéro ligne modifiée = l'offre n'est plus valide
   (retirée, réassignée à la main, prise par une autre) → **409, « ce ménage ne vous est plus
   proposé »**. C'est ce qui rend une double affectation impossible.
-- **Un refus met le ménage en `orphaned`**, pas `unassigned`. ⚠️ La distinction évite une
-  boucle : `unassigned` serait réassigné à la même personne au cycle suivant, qui refuserait
-  encore. `orphaned` dit « quelqu'un a refusé, il faut une décision humaine » — le writer n'y
-  touche pas, et **l'hôte est alerté**. C'est le seul cas où personne ne prend le relais
-  automatiquement : l'escalade vers la candidate suivante reste reportée (spec §3 bis).
+- **Un refus met le ménage en `orphaned` ET pose `assigned_by='manual'`.**
+  ⚠️ Le statut seul ne suffisait pas : la boucle de rattrapage le respectait, mais deux autres
+  chemins du writer l'ignoraient — un départ déplacé passe le ménage à `cancelled`, et s'il
+  reparaît, la résurrection **recalculait** l'assignation, donc re-proposait le ménage à la
+  personne qui venait de le refuser. Il suffisait qu'un voyageur décale son départ puis revienne
+  dessus. Un refus **est** une décision humaine : il se verrouille comme celles de l'hôte, et le
+  verrou est respecté partout — y compris à la résurrection.
+- ⚠️ **L'alerte va à l'HÔTE, pas au fondateur.** `reportIncident` est le canal
+  plateforme/fondateur (`docs/kb/alertes.md` : « à ne pas exposer aux hôtes »). Le refus passe
+  par `alertMenageRefuse` (`lib/alert-notify.js`) : une **tâche in-app** — toujours visible,
+  sans configuration préalable — plus un SMS/email best-effort. C'est le seul cas où personne
+  ne prend le relais automatiquement, et le guide utilisateur promet à l'hôte qu'il sera
+  prévenu : la promesse doit être tenue par le code.
+- Sur le planning hôte, un ménage refusé porte **« ⚠ refusé »** et non « personne » : les
+  confondre laissait l'hôte sans savoir qu'il doit agir.
+- ⚠️ **Le serveur refuse un `markDone` sur un ménage encore `offered`.** La règle « on ne fait
+  pas un ménage qu'on n'a pas accepté » n'existait que dans le front.
 - ⚠️ **Aucune file hors ligne** ici, contrairement à « marquer fait ». Accepter est une
   **course** : rejouer une acceptation vieille de deux heures ferait croire à un engagement que
   le serveur a peut-être déjà donné à quelqu'un d'autre. Hors ligne, l'écran le dit et ne

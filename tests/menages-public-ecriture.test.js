@@ -160,3 +160,35 @@ test('PANNE de lecture du profil : 503 elle aussi', async () => {
   assert.strictEqual(res.code, 503)
   assert.strictEqual(etat.ecritures.length, 0)
 })
+
+test('markDone sur un ménage encore PROPOSÉ est refusé par le serveur', async () => {
+  // ⚠ La règle « on ne fait pas un ménage qu'on n'a pas accepté » n'existait que
+  // dans le front : le serveur, lui, laissait passer. Une offre non répondue
+  // n'engage personne — la marquer faite court-circuiterait la confirmation.
+  const etat = preparer({ menage: { provider_id: MARIE, status: 'offered' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markDone'), res)
+  assert.strictEqual(res.code, 403)
+  assert.match(res.body.error, /Acceptez/)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('markUndone sur un ménage proposé est refusé lui aussi', async () => {
+  const etat = preparer({ menage: { provider_id: MARIE, status: 'offered' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markUndone'), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.suppressions.length, 0)
+})
+
+test('une fois accepté, le même ménage passe', async () => {
+  // Contre-épreuve : la garde ne doit pas bloquer le cas normal.
+  const etat = preparer({ menage: { provider_id: MARIE, status: 'accepted' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markDone'), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.length, 1)
+})

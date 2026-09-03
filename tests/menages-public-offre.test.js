@@ -52,8 +52,24 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           if (table === 'public_tokens') {
             return Promise.resolve({ data: a.f.token === TOKEN ? { user_id: U } : null, error: null })
           }
-          if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
-          if (table === 'menages') return Promise.resolve({ data: menage, error: erreurMenage })
+          // ⚠ LES FILTRES SONT HONORES. Un double qui rend la ligne quels que
+          // soient les `.eq()` rend indétectables les deux gardes de
+          // cloisonnement de ce chemin : retirer `.eq('pwa_token')` ou
+          // `.eq('user_id')` laissait les 1029 tests au vert. Ce sont pourtant
+          // elles qui empêchent un porteur de lien de se faire passer pour un
+          // autre profil, et une acceptation de traverser les comptes.
+          if (table === 'profiles') {
+            const bon = a.f.account_user_id === U && a.f.pwa_token === TOKEN
+            return Promise.resolve({ data: bon ? profil : null, error: null })
+          }
+          if (table === 'menages') {
+            if (erreurMenage) return Promise.resolve({ data: null, error: erreurMenage })
+            const bon = a.f.user_id === U &&
+                        String(a.f.property_id) === '209413' &&
+                        String(a.f.booking_id) === 'b1' &&
+                        a.f.departure_date === '2026-09-05'
+            return Promise.resolve({ data: bon ? menage : null, error: null })
+          }
           return Promise.resolve({ data: null, error: null })
         },
         then (ok) { return Promise.resolve({ data: [], error: null }).then(ok) }
@@ -64,13 +80,17 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
   const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
-  const absNotify = require.resolve(path.join(__dirname, '..', 'lib/founder-notify.js'))
+  // ⚠ Le canal HOTE, pas le canal fondateur. `reportIncident` alerte Thierry ;
+  // `alertMenageRefuse` pose une tache in-app visible par l'hote et tente un
+  // SMS/email. Le premier commit de ce lot promettait le second et appelait le
+  // premier — le guide utilisateur affirmait « vous etes prevenu » pour rien.
+  const absNotify = require.resolve(path.join(__dirname, '..', 'lib/alert-notify.js'))
   const mn = new Module(absNotify)
-  mn.exports = { reportIncident: async (type, opts) => { etat.incidents.push({ type, ...opts }) } }
+  mn.exports = { alertMenageRefuse: async (opts) => { etat.incidents.push(opts) } }
   mn.loaded = true
   require.cache[absNotify] = mn
   for (const mod of ['../api/menages-public', '../lib/stats-avis', '../lib/attribution-prestataire',
-                     '../lib/cron-property-status']) {
+                     '../lib/cron-property-status', '../lib/founder-notify']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
   return etat
@@ -151,15 +171,29 @@ test('refuser : le ménage devient ORPHANED, pas unassigned', async () => {
   assert.strictEqual(etat.majs[0].row.provider_id, null)
 })
 
-test('un refus ALERTE l\'hôte', async () => {
-  // C'est le seul cas de ce lot où personne ne prend le relais automatiquement :
-  // un ménage refusé et non repris est un logement qui ne sera pas préparé.
+test('un refus alerte L\'HÔTE, pas le fondateur', async () => {
+  // ⚠ `reportIncident` alerte le FONDATEUR — docs/kb/alertes.md : « canal
+  // plateforme/fondateur, à ne pas exposer aux hôtes ». L'hôte, lui, ne recevait
+  // RIEN, alors que le guide utilisateur lui promet « vous êtes prévenu » et que
+  // c'est à lui de confier le ménage à quelqu'un d'autre : personne ne prend le
+  // relais automatiquement.
   const etat = preparer({})
   const handler = require('../api/menages-public')
   await handler(post('refuserMenage'), reponse())
   assert.strictEqual(etat.incidents.length, 1)
-  assert.strictEqual(etat.incidents[0].type, 'menage_non_assigne')
   assert.strictEqual(etat.incidents[0].propertyId, '209413')
+  assert.strictEqual(etat.incidents[0].departureDate, '2026-09-05')
+  assert.strictEqual(etat.incidents[0].prenom, 'Marie', 'l\'hôte doit savoir QUI a refusé')
+})
+
+test('le refus VERROUILLE le ménage', async () => {
+  // Le statut `orphaned` seul ne suffisait pas : la boucle de rattrapage le
+  // respectait, mais l'annulation puis la résurrection — une date de départ qui
+  // bouge et revient — le re-proposaient à la personne qui venait de refuser.
+  const etat = preparer({})
+  const handler = require('../api/menages-public')
+  await handler(post('refuserMenage'), reponse())
+  assert.strictEqual(etat.majs[0].row.assigned_by, 'manual')
 })
 
 test('le refus est atomique lui aussi', async () => {
@@ -250,4 +284,29 @@ test('PANNE d\'écriture : 503, et rien au journal', async () => {
   await handler(post('accepterMenage'), res)
   assert.strictEqual(res.code, 503)
   assert.strictEqual(etat.journal.length, 0)
+})
+
+// ─── Les deux gardes de cloisonnement ──────────────────────────────────────
+// ⚠ Elles n'étaient couvertes par rien : le double rendait profil et ménage
+// quels que soient les filtres posés. Les retirer laissait 1029 tests au vert.
+
+test('le profil est résolu par SON jeton, sur SON compte', async () => {
+  // Sans `.eq('pwa_token', token)`, un porteur de lien répondrait à une offre au
+  // nom du premier profil venu du compte.
+  const etat = preparer({})
+  const handler = require('../api/menages-public')
+  await handler(post('accepterMenage'), reponse())
+  const q = etat.requetes.find(r => r.table === 'profiles')
+  assert.strictEqual(q.f.pwa_token, TOKEN)
+  assert.strictEqual(q.f.account_user_id, U)
+})
+
+test('le ménage est cherché SUR LE COMPTE du token', async () => {
+  // Sans `.eq('user_id', userId)`, une acceptation traverserait les comptes :
+  // `booking_id` et `provider_property_id` n'ont aucune unicité globale.
+  const etat = preparer({})
+  const handler = require('../api/menages-public')
+  await handler(post('accepterMenage'), reponse())
+  const q = etat.requetes.find(r => r.table === 'menages' && r.f.booking_id)
+  assert.strictEqual(q.f.user_id, U)
 })
