@@ -363,12 +363,33 @@ async function avisDeLaPrestataire (req, res, token) {
   const periode = periodeNormalisee(String(req.query.periode || 'toujours'))
   const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id })
 
+  // ⚠ CONTRAT A HONORER PAR L'INTERFACE PWA, QUI RESTE A ECRIRE.
+  // `ratio` peut porter `erreur: true` : c'est une PANNE, pas un resultat. Le
+  // front DEVRA le lire AVANT d'afficher quoi que ce soit — sans quoi il
+  // montrera « 0 avis, 0 remarque » a une prestataire qui en a 98, et elle en
+  // tirera une conclusion fausse.
+  // On ne transforme pas cette panne en 503 ici : la vue par defaut n'affiche
+  // qu'un ratio a cote du prenom, et couper toute la page pour un compteur
+  // indisponible serait disproportionne. C'est a l'affichage de dire « compteurs
+  // indisponibles » — comme le fait deja pages/avis.html.
+
   // La liste n'est chargee qu'a la demande : la vue par defaut n'affiche que le
   // ratio a cote du prenom.
   let avis = []
   if (req.query.detail === '1') {
     const att = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
-    if (!att.erreur && att.ids.length) {
+    // ⚠ UNE PANNE N'EST PAS « AUCUN AVIS ».
+    // Sauter silencieusement laissait partir un 200 avec une liste vide,
+    // indiscernable de « elle n'a aucun avis » — alors que la base en contient
+    // 98 pour Regina. Elle en aurait tire une conclusion fausse et l'aurait
+    // gardee. Symetrique du 503 de la lecture de liste, cinq lignes plus bas :
+    // deux traitements opposes pour la meme famille de panne n'avaient pas lieu
+    // d'etre.
+    if (att.erreur) {
+      console.error('[menages-public] attribution echec')
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    if (att.ids.length) {
       const borne = borneDepuis(periode)
       let q = supabase.from('ota_reviews')
         // ⚠ NI `guest_name`, NI `content`, NI `content_public`, NI `raw`.

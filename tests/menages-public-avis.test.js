@@ -1,0 +1,317 @@
+// tests/menages-public-avis.test.js
+// Vue « Avis » de la PWA prestataire — les trois limites du §6.
+//
+// ⚠ POURQUOI CES TESTS EXISTENT ET CE QU'ILS GARDENT.
+// `api/menages-public.js` s'ouvre avec un simple token en query string, sans
+// session. Ce qui en sort est lu par une femme de ménage, sur son téléphone.
+// Le §6 de docs/specs/spec-prestataires-menage.md pose trois limites non
+// négociables : l'extrait SEUL, jamais le nom du voyageur, et une étiquette
+// « retour privé » quand l'extrait vient d'un message que le voyageur n'avait
+// pas rendu public. Rien de tout cela n'était vérifié par un test.
+
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+
+const test = require('node:test')
+const assert = require('node:assert')
+const path = require('node:path')
+const Module = require('node:module')
+
+const U = 'compte-1', TOKEN = 'regina-x6w01q', PROFIL = 'profil-regina'
+
+const MODULES = ['../api/menages-public', '../lib/stats-avis',
+                 '../lib/attribution-prestataire', '../lib/extrait-verifie',
+                 '../lib/cron-property-status', '../lib/bookings-snapshot']
+
+// Un avis complet, tel qu'il est EN BASE — avec tout ce qui ne doit pas sortir.
+const AVIS_BASE = {
+  id: 'avis-1', user_id: U, statut: 'confirme', property_id_ref: 'COL',
+  ai_clean_verdict: 'remarque',
+  ai_clean_excerpt: 'la bouilloire n\'était pas propre',
+  content: 'Séjour parfait.\nla bouilloire n\'était pas propre',
+  content_public: 'Séjour parfait.',
+  content_private: 'la bouilloire n\'était pas propre',
+  guest_name: 'Fanny Démollière',
+  raw: { attributes: { reviewer: { name: 'Fanny Démollière' } } },
+  received_at: '2026-08-30T00:00:00Z', stay_end: '2026-08-28',
+  menage_event_id: null
+}
+
+function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
+                     erreurDroits = null, erreurListe = null,
+                     profil = { id: PROFIL, first_name: 'Régina', active: true },
+                     periodes = [{ user_id: U, provider_id: PROFIL, property_id_ref: 'COL', debut: null, fin: null }],
+                     journal = [] } = {}) {
+  const client = {
+    from (table) {
+      const a = { table, f: {}, ins: [], colonnes: null }
+      journal.push(a)
+      const chain = {
+        select (c, opts) { a.colonnes = c; a.head = !!(opts && opts.head); a.count = opts && opts.count; return chain },
+        eq (c, v) { a.f[c] = v; return chain },
+        gte (c, v) { a.gte = [c, v]; return chain },
+        in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
+        not () { return chain }, order () { return chain },
+        limit () { return Promise.resolve(rep()) },
+        maybeSingle () {
+          if (table === 'public_tokens') return Promise.resolve({ data: a.f.token === TOKEN ? { user_id: U } : null, error: null })
+          if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
+          if (table === 'profile_permissions') return Promise.resolve({ data: droits, error: erreurDroits })
+          const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error })
+        },
+        then (r) { return Promise.resolve(rep()).then(r) }
+      }
+      function rep () {
+        if (table === 'prestataire_periodes') return { data: periodes.filter(p =>
+          (a.f.user_id == null || p.user_id === a.f.user_id) &&
+          (a.f.provider_id == null || p.provider_id === a.f.provider_id)), error: null }
+        if (table === 'menage_events') return { data: [], error: null }
+        if (table === 'ota_reviews') {
+          if (erreurListe && !a.head) return { data: null, count: null, error: erreurListe }
+          const d = avis.filter(v =>
+            (a.f.user_id == null || v.user_id === a.f.user_id) &&
+            (a.f.statut == null || (v.statut || 'confirme') === a.f.statut) &&
+            (a.f.ai_clean_verdict == null || v.ai_clean_verdict === a.f.ai_clean_verdict) &&
+            (a.f.property_id_ref == null || v.property_id_ref === a.f.property_id_ref) &&
+            a.ins.every(f => f.v.includes(String(v[f.c]))))
+          return { data: a.head ? null : d, count: d.length, error: null }
+        }
+        return { data: [], count: 0, error: null }
+      }
+      return chain
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+  return journal
+}
+
+function reponse () {
+  const r = { code: null, body: null }
+  r.status = c => { r.code = c; return r }
+  r.json = b => { r.body = b; return r }
+  r.setHeader = () => {}
+  r.end = () => r
+  return r
+}
+const req = (q = {}) => ({ method: 'GET', query: { token: TOKEN, action: 'avis', ...q }, headers: {} })
+
+// ─── Le périmètre des colonnes, DANS LES DEUX SENS ─────────────────────────
+const INTERDITS = ['guest_name', 'content', 'content_public', 'raw', 'ota_reservation_id', 'booking_uid']
+
+test('la réponse ne contient AUCUN champ interdit — sérialisée en entier', async () => {
+  // Test sur le JSON complet, pas champ par champ : un champ ajouté demain à un
+  // niveau imprévu serait attrapé.
+  preparer({})
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  const brut = JSON.stringify(res.body)
+  assert.ok(!brut.includes('Fanny'), 'le nom du voyageur ne doit JAMAIS sortir')
+  assert.ok(!brut.includes('Séjour parfait'), 'le texte public de l\'avis ne sort pas non plus')
+  for (const champ of INTERDITS) {
+    assert.ok(!brut.includes(`"${champ}"`), `${champ} ne doit pas être dans la réponse`)
+  }
+})
+
+test('la réponse contient bien ce qu\'elle DOIT contenir', async () => {
+  // Le sens inverse : un test qui ne vérifie que des absences reste vert sur une
+  // réponse vide.
+  preparer({})
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.prenom, 'Régina')
+  assert.strictEqual(res.body.autorise, true)
+  assert.strictEqual(res.body.avis.length, 1)
+  assert.deepStrictEqual(Object.keys(res.body.avis[0]).sort(),
+    ['bien', 'date', 'extrait', 'id', 'prive', 'verdict'])
+  assert.strictEqual(res.body.avis[0].extrait, 'la bouilloire n\'était pas propre')
+  assert.ok(res.body.ratio, 'le ratio doit être présent')
+})
+
+test('la requête ne SÉLECTIONNE pas les colonnes interdites', async () => {
+  // Une donnée non demandée à la base ne peut pas fuiter par accident plus tard.
+  const journal = preparer({})
+  const handler = require('../api/menages-public')
+  await handler(req({ detail: '1' }), reponse())
+  const lecture = journal.filter(j => j.table === 'ota_reviews' && j.colonnes && !j.head).pop()
+  assert.ok(lecture, 'la liste doit être lue')
+  for (const champ of ['guest_name', 'raw', 'ota_reservation_id']) {
+    assert.ok(!lecture.colonnes.includes(champ), `${champ} ne doit pas être sélectionné`)
+  }
+  // `content_public` EST sélectionné — il sert à décider de l'étiquette côté
+  // serveur — mais il ne sort pas (test précédent).
+  assert.ok(lecture.colonnes.includes('content_public'))
+})
+
+// ─── L'étiquette « retour privé », les trois cas ───────────────────────────
+test('extrait venant du PUBLIC : prive = false', async () => {
+  preparer({ avis: [{ ...AVIS_BASE,
+    ai_clean_excerpt: 'Séjour parfait',
+    content_public: 'Séjour parfait, tout était nickel.',
+    content_private: 'Rien à signaler.' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis[0].prive, false)
+})
+
+test('extrait venant du PRIVÉ : prive = true', async () => {
+  preparer({})   // AVIS_BASE : l'extrait est exactement le content_private
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis[0].prive, true)
+})
+
+test('extrait À CHEVAL public/privé : prive = true', async () => {
+  // ⚠ Le cas qui a motivé le correctif. La classification analyse la
+  // CONCATÉNATION public + privé avec des espaces souples : un extrait qui
+  // commence dans l'un et finit dans l'autre n'est une sous-chaîne exacte NI de
+  // l'un NI de l'autre. Il sortait avec prive:false, et la prestataire lisait un
+  // reproche venu d'un message que le voyageur n'avait pas rendu public, sans
+  // le savoir — donc libre de le citer ailleurs.
+  preparer({ avis: [{ ...AVIS_BASE,
+    content_public: 'Super séjour, tout était nickel.',
+    content_private: 'Juste la bouilloire, pas du tout propre.',
+    ai_clean_excerpt: 'nickel. Juste la bouilloire' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis[0].prive, true, 'dans le doute, on étiquette')
+})
+
+test('aucun retour privé sur l\'avis : prive = false', async () => {
+  preparer({ avis: [{ ...AVIS_BASE, content_private: null,
+                      ai_clean_excerpt: 'Séjour parfait', content_public: 'Séjour parfait.' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis[0].prive, false)
+})
+
+// ─── self_view_reviews ─────────────────────────────────────────────────────
+test('self_view_reviews = true : la vue s\'affiche', async () => {
+  preparer({ droits: { self_view_reviews: true } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.autorise, true)
+  assert.strictEqual(res.body.avis.length, 1)
+})
+
+test('self_view_reviews = false : rien ne sort', async () => {
+  preparer({ droits: { self_view_reviews: false } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.autorise, false)
+  assert.deepStrictEqual(res.body.avis, [])
+  assert.strictEqual(res.body.ratio, null)
+  assert.ok(!JSON.stringify(res.body).includes('bouilloire'), 'aucun extrait ne doit sortir')
+})
+
+test('PANNE de lecture des droits : la vue est COUPÉE, pas ouverte', async () => {
+  // ⚠ Sur un drapeau de confidentialité, la panne coupe. L'erreur n'était pas
+  // lue : un timeout rendait `droits` null et la vue s'affichait ENTIÈREMENT,
+  // y compris pour un hôte ayant explicitement coupé le partage.
+  preparer({ erreurDroits: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 503)
+  assert.ok(!JSON.stringify(res.body).includes('bouilloire'))
+})
+
+test('PANNE de lecture de la liste : 503, pas une liste vide silencieuse', async () => {
+  // Une liste vide par erreur est indiscernable de « aucun avis » — alors que le
+  // ratio affiché à côté annoncerait un nombre non nul.
+  preparer({ erreurListe: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 503)
+})
+
+// ─── Les gardes d'accès ────────────────────────────────────────────────────
+test('un token inconnu est refusé', async () => {
+  preparer({})
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler({ method: 'GET', query: { token: 'inconnu', action: 'avis' }, headers: {} }, res)
+  assert.strictEqual(res.code, 401)
+})
+
+test('un profil désactivé ne voit rien', async () => {
+  preparer({ profil: { id: PROFIL, first_name: 'Régina', active: false } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.actif, false)
+  assert.deepStrictEqual(res.body.avis, [])
+})
+
+test('sans detail=1, le ratio sort mais pas la liste', async () => {
+  // La vue par défaut n'affiche que le ratio à côté du prénom.
+  preparer({})
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.avis, [])
+  assert.ok(res.body.ratio)
+  assert.ok(!JSON.stringify(res.body).includes('bouilloire'))
+})
+
+test('la prestataire ne voit QUE les avis qui lui sont attribués', async () => {
+  // L'invariant central : sans le `.in('id', …)`, elle verrait ceux de l'hôte.
+  preparer({ avis: [
+    AVIS_BASE,
+    { ...AVIS_BASE, id: 'pas-a-elle', property_id_ref: 'AUTRE-BIEN',
+      ai_clean_excerpt: 'ceci ne la concerne pas' }
+  ] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis.length, 1)
+  assert.strictEqual(res.body.avis[0].id, 'avis-1')
+  assert.ok(!JSON.stringify(res.body).includes('ne la concerne pas'))
+})
+
+test('PANNE d\'ATTRIBUTION : 503, pas une liste vide silencieuse', async () => {
+  // ⚠ Défaut trouvé en écrivant ces tests. `avisDuPrestataire` renvoie
+  // { erreur: true } sur cinq chemins de panne ; la condition
+  // `if (!att.erreur && att.ids.length)` sautait alors silencieusement et
+  // laissait partir un 200 avec une liste vide — indiscernable de « aucun
+  // avis », alors que la base en contient 98 pour Régina. Elle en aurait tiré
+  // une conclusion fausse et l'aurait gardée.
+  //
+  // L'incohérence était visible dans le même bloc : panne de la LISTE → 503,
+  // panne de l'ATTRIBUTION → 200 vide, à cinq lignes d'écart.
+  const journal = []
+  preparer({ journal })
+  // On fait échouer la lecture des périodes, l'un des cinq chemins.
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const vrai = require.cache[abs].exports.createClient
+  require.cache[abs].exports = { createClient: () => {
+    const c = vrai()
+    const orig = c.from.bind(c)
+    c.from = (t) => {
+      const chain = orig(t)
+      if (t === 'prestataire_periodes') {
+        chain.then = (r) => Promise.resolve({ data: null, error: { message: 'timeout' } }).then(r)
+      }
+      return chain
+    }
+    return c
+  } }
+  for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 503, 'une panne d\'attribution ne doit pas passer pour « aucun avis »')
+})
