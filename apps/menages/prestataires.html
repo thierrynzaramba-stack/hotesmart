@@ -257,10 +257,16 @@
     list.innerHTML = `<div class="presta-list">${prestataires.map(p => {
       const url = `${window.location.origin}/apps/menages/public?token=${p.token}`
       const visibilityDays = p.visibility_days || 30
-      const propTags = properties.map(prop => {
-        const active = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
-        return `<span class="prop-tag ${active ? 'active' : ''}">${echapper(prop.name)}</span>`
-      }).join('')
+      // ⚠ SEULS LES BIENS REELLEMENT AFFECTES. La liste affichait TOUS les biens
+      // du compte, les non affectes en gris, sous le titre « BIENS ASSIGNES » :
+      // une prestataire affectee a un seul bien se lisait « 3 biens assignés »,
+      // en contradiction avec le resume « référente sur 1 bien » juste au-dessus.
+      // Le titre disait vrai, la liste non.
+      const siens = properties.filter(prop =>
+        !p.property_ids?.length || p.property_ids.includes(String(prop.id)))
+      const propTags = siens.length
+        ? siens.map(prop => `<span class="prop-tag active">${echapper(prop.name)}</span>`).join('')
+        : '<span class="prop-tag">Aucun bien — cette personne ne verra aucun ménage</span>'
 
       return `
         <div class="presta-card">
@@ -281,7 +287,8 @@
             <span>${url}</span>
             <button class="btn-copy" data-url="${url}" title="Copier le lien">📋</button>
           </div>
-          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:500">BIENS ASSIGNÉS</div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:500">${
+            (p.property_ids || []).length ? 'BIENS ASSIGNÉS' : 'TOUS LES BIENS'}</div>
           <div class="presta-props">${propTags}</div>
         </div>
       `

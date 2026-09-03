@@ -105,6 +105,17 @@ seulement à l'app ménage.
 - **Le rang se règle bien par bien**, avec « Suppléante » par défaut. Le cas réel est mixte
   (suppléante ici, référente ailleurs), et **on ne devient pas référente par accident** : le
   référent est assigné d'office, sans confirmation.
+- **Poser une liaison rattrape immédiatement les ménages à venir sans personne.** Le cron le
+  fait déjà à chaque cycle, mais jusqu'à **cinq minutes plus tard**, et rien à l'écran
+  n'explique ce vide — le premier test humain réel est tombé exactement dedans : une référente
+  venait d'être posée, son planning était vide, et il fallait deviner qu'il suffisait
+  d'attendre.
+  ⚠️ **Seulement les ménages à venir, et seulement `unassigned`** : jamais le passé (réécrire
+  l'histoire attribuerait à quelqu'un un travail qu'il n'a pas fait, et l'attribution des avis
+  suit cette assignation), jamais un `orphaned` (quelqu'un a refusé), jamais un
+  `assigned_by='manual'` (l'hôte a tranché), jamais un ménage déjà assigné.
+  ⚠️ Le rattrapage vise le **référent du bien après l'écriture**, pas la personne dont on
+  enregistre la fiche : si quelqu'un d'autre est déjà rang 1, c'est lui qui prend les ménages.
 - **Un bien qui perd sa dernière référente est signalé, pas bloqué** — à l'écran avant
   d'enregistrer, et par le serveur dans `sans_referent`. Le refuser laisserait l'hôte sans issue
   le jour où une prestataire s'en va.

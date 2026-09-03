@@ -534,7 +534,9 @@ async function ecrireLiaisons (req, res) {
   // c'est sa decision — le lui refuser le laisserait sans issue le jour ou une
   // prestataire s'en va.
   const { data: apres } = await supabase.from('property_cleaning_providers')
-    .select('property_id, rang').eq('user_id', userId).eq('active', true)
+    // `provider_id` sert au rattrapage immediat plus bas : c'est l'etat APRES
+    // cette ecriture qui decide, pas ce que l'appelant vient d'envoyer.
+    .select('property_id, provider_id, rang').eq('user_id', userId).eq('active', true)
   const avecReferent = new Set((apres || []).filter(l => l.rang === 1).map(l => String(l.property_id)))
   // ⚠ L'avertissement reste DANS le perimetre de l'appelant : sinon la reponse
   // lui rend les references des biens qu'il n'a pas le droit de voir.
@@ -544,5 +546,57 @@ async function ecrireLiaisons (req, res) {
   const sansReferent = visibles.filter(ref =>
     (apres || []).some(l => String(l.property_id) === ref) && !avecReferent.has(ref))
 
-  return res.status(200).json({ success: true, sans_referent: sansReferent })
+  // ⚠ RATTRAPAGE IMMEDIAT DES MENAGES A VENIR SANS PERSONNE.
+  //
+  // Le cron le fait deja a chaque cycle — mais jusqu'a cinq minutes plus tard,
+  // et rien a l'ecran n'explique ce vide. Le premier test humain reel est tombe
+  // exactement dedans : une referente venait d'etre posee sur un bien, son
+  // planning etait vide, et il fallait deviner qu'il suffisait d'attendre.
+  //
+  // ⚠ SEULEMENT LES MENAGES A VENIR, ET SEULEMENT `unassigned` :
+  //   - jamais le PASSE : reecrire l'histoire attribuerait a quelqu'un un
+  //     travail qu'il n'a pas fait, et l'attribution des avis suit cette meme
+  //     assignation. Le cron, lui, couvre sa fenetre — c'est son role de
+  //     reconcilier, pas celui d'un geste d'interface ;
+  //   - jamais `orphaned` : quelqu'un a refuse, c'est une decision humaine ;
+  //   - jamais `assigned_by='manual'` : l'hote a tranche ;
+  //   - jamais un menage deja assigne : ce serait defaire une offre en cours.
+  const aujourdhui = new Date().toISOString().slice(0, 10)
+  let rattrapes = 0
+  for (const v of voulues) {
+    // Le referent du bien APRES cette ecriture, pas celui qu'on vient d'envoyer :
+    // une autre personne peut deja etre rang 1.
+    const surCeBien = (apres || []).filter(l => String(l.property_id) === v.ref)
+      .sort((a, b) => a.rang - b.rang)
+    if (!surCeBien.length) continue
+    const { data: maj, error: errRat } = await supabase.from('menages')
+      .update({
+        provider_id: surCeBien[0].provider_id,
+        status: surCeBien[0].rang === 1 ? 'accepted' : 'offered',
+        assigned_by: 'auto',
+        assignment_reason: surCeBien[0].rang === 1
+          ? 'Referent du bien (rang 1), assigne d\'office.'
+          : `Suppleant (rang ${surCeBien[0].rang}) : en attente de sa confirmation.`,
+        assignment_mode: 'priorite',
+        accepted_at: surCeBien[0].rang === 1 ? new Date().toISOString() : null,
+        offered_at: surCeBien[0].rang === 1 ? null : new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId).eq('property_id', v.ref)
+      .eq('status', 'unassigned').is('provider_id', null)
+      .gte('departure_date', aujourdhui)
+      .select('id, user_id')
+    if (errRat) { console.error('[menages] rattrapage echec', errRat.message); continue }
+    rattrapes += (maj || []).length
+    if ((maj || []).length) {
+      await supabase.from('menage_assignment_log').insert((maj || []).map(m => ({
+        user_id: m.user_id, menage_id: m.id,
+        event: surCeBien[0].rang === 1 ? 'assigned' : 'offered',
+        to_provider_id: surCeBien[0].provider_id, actor: 'host',
+        reason: 'Prestataire lie au bien : menages a venir rattrapes.'
+      })))
+    }
+  }
+
+  return res.status(200).json({ success: true, sans_referent: sansReferent, rattrapes })
 }
