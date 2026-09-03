@@ -56,12 +56,24 @@ test('48 h, mais jamais au-delà de la veille du départ', async () => {
   assert.strictEqual(echeanceOffre('2026-09-02', t), '2026-09-01T16:00:00.000Z')
 })
 
-test('une échéance DÉJÀ PASSÉE rend null : on ne propose pas dans le vide', async () => {
-  // ⚠ Une proposition doit laisser un vrai délai de réponse. Sans cette garde,
-  // proposer un ménage pour demain après 18 h envoyait une proposition
-  // morte-née — expirée avant d'avoir été lue.
+test("DERNIÈRE MINUTE : on propose quand même, avec un terme d'une heure", async () => {
+  // ⚠ AUCUN PLANCHER. Les changements de dernière minute font partie du métier :
+  // refuser la proposition à une heure du départ obligeait l'hôte à engager
+  // quelqu'un sans son accord alors qu'un simple oui aurait suffi.
+  // L'échéance, elle, reste obligatoire — la contrainte `menages_offre_datee`
+  // l'impose, et une proposition sans terme resterait en suspens.
   const t = Date.parse('2026-09-01T20:00:00Z')
-  assert.strictEqual(echeanceOffre('2026-09-02', t), null)
+  assert.strictEqual(echeanceOffre('2026-09-02', t), '2026-09-01T21:00:00.000Z')
+})
+
+test("une échéance n'est JAMAIS dans le passé", async () => {
+  // Une proposition déjà expirée à sa naissance serait effacée par le premier
+  // passage de cron, sans que personne ne l'ait vue.
+  const t = Date.parse('2026-09-05T12:00:00Z')
+  for (const d of ['2026-09-01', '2026-09-05', '2026-09-06', null]) {
+    const e = echeanceOffre(d, t)
+    assert.ok(e && Date.parse(e) > t, `${d} -> ${e}`)
+  }
 })
 
 test('une date de départ illisible retombe sur les 48 h', async () => {
@@ -181,12 +193,8 @@ test('aucun couple : aucune requête, une map vide', async () => {
   assert.strictEqual(sb.vu.userIds, null, 'pas de requête à vide')
 })
 
-test('une proposition doit laisser au moins deux heures', async () => {
-  // ⚠ « Pas zéro » ne suffit pas : un départ le lendemain à 15h59 UTC produisait
-  // une proposition valable UNE MINUTE, tuée par le passage de cron suivant.
-  // Un vrai délai de réponse, c'est le temps de lire un SMS et de répondre.
+test('une proposition COURTE reste possible', async () => {
+  // Une heure avant la veille-18h : on ne refuse pas, on propose.
   const t = Date.parse('2026-09-01T15:00:00Z')
-  assert.strictEqual(echeanceOffre('2026-09-02', t), null, 'une heure : refusé')
-  const t2 = Date.parse('2026-09-01T13:00:00Z')
-  assert.strictEqual(echeanceOffre('2026-09-02', t2), '2026-09-01T16:00:00.000Z', 'trois heures : accepté')
+  assert.strictEqual(echeanceOffre('2026-09-02', t), '2026-09-01T16:00:00.000Z')
 })

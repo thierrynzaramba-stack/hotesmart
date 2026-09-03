@@ -224,16 +224,20 @@ test('proposer à un SUPPLÉANT ne retire RIEN à la porteuse', async () => {
   assert.strictEqual(res.body.provider_id, REGINA, 'la réponse dit qui le porte toujours')
 })
 
-test('proposer trop tard est REFUSÉ, pas envoyé dans le vide', async () => {
-  // ⚠ Une proposition doit laisser un vrai délai de réponse. Passé la veille du
-  // départ à 18 h, elle serait morte-née — expirée avant d'avoir été lue.
-  const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-  const { handler, etat } = preparer({ liaison: { rang: 2 }, dateAttendue: hier })
+test('proposer À LA DERNIÈRE MINUTE reste possible', async () => {
+  // ⚠ Décision du 4 septembre : on propose à tout moment. Le plancher de deux
+  // heures avait été posé puis retiré — les changements de dernière minute font
+  // partie du métier, et refuser la proposition obligeait l'hôte à engager
+  // quelqu'un sans son accord alors qu'un simple oui aurait suffi.
+  const demain = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+  const { handler, etat } = preparer({ liaison: { rang: 2 }, dateAttendue: demain })
   const res = reponse()
-  await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: hier }), res)
-  assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /Trop tard/)
-  assert.strictEqual(etat.majs.length, 0)
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: demain }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
+  // L'échéance existe toujours : une proposition sans terme resterait en suspens.
+  assert.ok(etat.majs[0].row.offer_expires_at)
+  assert.ok(Date.parse(etat.majs[0].row.offer_expires_at) > Date.now())
 })
 
 test('un prestataire sans liaison sur ce bien reçoit une PROPOSITION', async () => {
