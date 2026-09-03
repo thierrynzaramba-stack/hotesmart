@@ -3,7 +3,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { markReady } = require('../lib/cron-property-status')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
-const { ratioProprete, periodeNormalisee, borneDepuis } = require('../lib/stats-avis')
+const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, MAX_IDS } = require('../lib/attribution-prestataire')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 
@@ -331,17 +331,19 @@ function extraitEstPrive (a) {
 const PERIODES_PWA = ['15j', '30j', '6mois', 'toujours']
 
 async function avisDeLaPrestataire (req, res, token) {
-  // ⚠ Le second `select` est un REPLI, pas une redondance : tant que la
-  // migration `ratio_periode` n'est pas passee, PostgREST rejette la colonne
-  // inconnue et `pt` serait null — la PWA entiere repondrait « Token invalide »
-  // pour un reglage d'affichage. On retombe alors sur le select d'origine et le
-  // defaut « toujours ». A retirer quand la colonne est en place partout.
-  let { data: pt } = await supabase.from('public_tokens')
+  // ⚠ L'ERREUR EST LUE. Un `select` en panne (timeout, 5xx transitoire) rend
+  // `data` null, indiscernable d'un token inconnu : la PWA repondait alors
+  // « Token invalide » a une prestataire dont le lien est parfaitement valide.
+  // Un repli sur un second select avait ete tente ici pour survivre a une
+  // migration non passee ; il avalait AUSSI les pannes reseau, et le ratio se
+  // recalculait alors « depuis le debut » au lieu des 15 jours regles par
+  // l'hote — un elargissement silencieux, la faute symetrique de celle que la
+  // validation de periode ferme. Une panne coupe, elle ne devine pas.
+  const { data: pt, error: errToken } = await supabase.from('public_tokens')
     .select('user_id, ratio_periode').eq('token', token).maybeSingle()
-  if (!pt) {
-    const repli = await supabase.from('public_tokens')
-      .select('user_id').eq('token', token).maybeSingle()
-    pt = repli.data
+  if (errToken) {
+    console.error('[menages-public] lecture du token echec:', errToken.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
   if (!pt) return res.status(401).json({ error: 'Token invalide' })
   const userId = pt.user_id

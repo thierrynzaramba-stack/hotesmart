@@ -40,7 +40,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
       const q = { _f: {}, _or: null, table: nom }
       etat.requetes.push(q)
       const chain = {
-        select (c, opts) { q._count = opts?.count; q._head = !!(opts && opts.head); return chain },
+        select (c, opts) { q._colonnes = c; q._count = opts?.count; q._head = !!(opts && opts.head); return chain },
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
         gte (c, v) { q._gte = { colonne: c, valeur: v }; return chain },
@@ -418,15 +418,71 @@ test('list : ni le nom du voyageur ni ses dates de séjour ne sortent', async ()
   // Fermer `sejours` et laisser la même donnée sortir par `list` ne ferme rien.
   // Le domaine `avis` donne accès au CONTENU des avis, pas à l'identité des
   // voyageurs ni à leurs séjours, qui relèvent de `reservations`.
+  // ⚠ CETTE ASSERTION NE POUVAIT PAS ÉCHOUER. Quatre antislashs dans un littéral
+  // JS donnent la chaîne `\\b`, que `RegExp` lit comme un antislash LITTÉRAL
+  // suivi d'un `b` : la regex cherchait `\bstay_start\b` en caractères bruts,
+  // absent de tout code source. Le test est resté vert pendant qu'un commit
+  // réintroduisait `stay_start` et `stay_end` dans `CHAMPS` — exactement ce
+  // qu'il prétend interdire. Une comparaison de chaîne ne peut pas se tromper.
   const CHAMPS_INTERDITS = ['guest_name', 'stay_start', 'stay_end', 'booking_uid',
                             'ota_reservation_id', 'content_private']
   const fs = require('node:fs')
   const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'api/avis.js'), 'utf8')
-  const bloc = src.slice(src.indexOf('const CHAMPS = `'), src.indexOf('`', src.indexOf('const CHAMPS = `') + 16))
+  const debut = src.indexOf('const CHAMPS = `')
+  const bloc = src.slice(debut + 16, src.indexOf('`', debut + 16))
   for (const c of CHAMPS_INTERDITS) {
-    assert.ok(!new RegExp('\\\\b' + c + '\\\\b').test(bloc),
-      `${c} ne doit pas être renvoyé par la liste des avis`)
+    assert.ok(!bloc.includes(c), `${c} ne doit pas être renvoyé par la liste des avis`)
   }
+})
+
+// ─── Les dates de séjour suivent `reservations`, pas `avis` ────────────────
+
+function colonnesDemandees (etat) {
+  const q = etat.requetes.find(r => r.table === 'ota_reviews' && !r._head && typeof r._colonnes === 'string')
+  return q ? q._colonnes : ''
+}
+
+test('list : un membre SANS le droit reservations n\'obtient pas les dates de séjour', async () => {
+  // Les dates d'occupation d'un bien relèvent de `reservations`. C'est pour
+  // elles que l'action `sejours` est montée à `write` ; les servir par `list`
+  // rouvrait la même porte par l'autre action.
+  const etat = preparer({
+    user: MEMBRE, avis: [AVIS_A],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', reservations: 'none', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'list' }), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  const cols = colonnesDemandees(etat)
+  assert.ok(!cols.includes('stay_start'), 'la colonne ne doit même pas être demandée à la base')
+  assert.ok(!cols.includes('stay_end'))
+  assert.ok(!JSON.stringify(res.body).includes('stay_'), 'et rien ne doit sortir dans la réponse')
+})
+
+test('list : un membre AVEC reservations:read obtient les dates de séjour', async () => {
+  // Contre-épreuve : sans elle, couper la donnée pour tout le monde passerait
+  // aussi pour un succès.
+  const etat = preparer({
+    user: MEMBRE, avis: [AVIS_A],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', reservations: 'read', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'list' }), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(colonnesDemandees(etat).includes('stay_start'))
+})
+
+test('list : le titulaire obtient les dates de séjour', async () => {
+  const etat = preparer({ avis: [AVIS_A] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(colonnesDemandees(etat).includes('stay_end'))
 })
 
 test('list : chaque colonne renvoyée est bien affichée par la page', async () => {
@@ -438,7 +494,11 @@ test('list : chaque colonne renvoyée est bien affichée par la page', async () 
   const page = fs.readFileSync(pathm.join(racine, 'pages/avis.html'), 'utf8')
   const debut = src.indexOf('const CHAMPS = `')
   const bloc = src.slice(debut + 16, src.indexOf('`', debut + 16))
-  const colonnes = bloc.split(',').map(c => c.trim()).filter(Boolean)
+  // Les colonnes conditionnelles comptent aussi : une donnee servie sous droit
+  // reste une donnee servie.
+  const etendu = src.slice(src.indexOf('const CHAMPS_AVEC_SEJOUR = `'))
+  const suite = etendu.slice(etendu.indexOf('${CHAMPS}') + 9, etendu.indexOf('`', etendu.indexOf('${CHAMPS}')))
+  const colonnes = (bloc + suite).split(',').map(c => c.trim()).filter(Boolean)
   const exemptes = new Set(['id', 'property_id_ref'])  // clés techniques
   for (const c of colonnes) {
     if (exemptes.has(c)) continue

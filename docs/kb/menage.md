@@ -120,6 +120,15 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   irait chercher la mauvaise intervention. Rien n'est comblé — l'import de l'historique des
   réservations fera basculer ces avis vers leur vraie date de séjour, sans rien changer ici.
   Même règle sur la page hôte `/avis`.
+  ⚠️ Les dates de séjour sont des colonnes `date` : elles se formatent **en UTC**. En heure
+  locale, `2026-08-15` s'affiche « 14 août » à l'ouest de Greenwich — donc pour une
+  prestataire en Guadeloupe, Martinique ou Guyane. Un séjour décalé d'un jour a le même effet
+  qu'une date inventée. `received_at` est un instant réel : il reste en heure locale.
+- **Côté hôte, les dates de séjour suivent le droit `reservations`**, pas `avis` : le contenu
+  d'un avis relève d'`avis`, mais les dates d'occupation d'un bien relèvent de `reservations`
+  (c'est pour elles que l'action `sejours` est montée à `write`). Un membre `avis: read` /
+  `reservations: none` voit « Reçu le… » — l'information reste vraie, seulement moins précise,
+  et la colonne n'est même pas sélectionnée.
 - **Étiquette « retour privé »** : l'extrait vient d'un message que le voyageur **n'avait pas
   rendu public**. À ne pas citer ailleurs.
 - **Jamais** : le nom du voyageur, le texte complet de l'avis, la note. Le serveur ne les envoie

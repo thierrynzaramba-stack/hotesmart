@@ -316,14 +316,25 @@
     return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
   }
 
+  // ⚠ Pour une colonne `date` (« 2026-08-15 »), pas pour un timestamp.
+  // `new Date('2026-08-15')` vaut minuit UTC : formaté en heure locale, il
+  // affiche la VEILLE à l'ouest de Greenwich — un séjour décalé d'un jour pour
+  // un hôte aux Antilles ou en Guyane. Les dates de séjour se lisent donc en
+  // UTC ; `received_at`, qui est un instant réel, reste en local.
+  const dateNueFr = d => {
+    if (!d) return ''
+    const x = new Date(d)
+    return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  }
+
   // ⚠ UNE DATE DE RÉCEPTION N'EST PAS UNE DATE DE SÉJOUR. Confondre les deux
   // fait chercher le mauvais ménage — et côté prestataire, c'est le seul repère
   // qui permet d'identifier l'intervention concernée. On étiquette donc toujours
   // ce qu'on montre, et on ne comble jamais un séjour manquant : les avis sans
   // ancrage basculeront d'eux-mêmes à l'import de l'historique.
   const libelleDateAvis = a => {
-    const deb = a.stay_start ? dateFr(a.stay_start) : ''
-    const fin = a.stay_end ? dateFr(a.stay_end) : ''
+    const deb = a.stay_start ? dateNueFr(a.stay_start) : ''
+    const fin = a.stay_end ? dateNueFr(a.stay_end) : ''
     if (deb && fin) return `Séjour ${deb} → ${fin}`
     if (fin) return `Séjour terminé le ${fin}`
     if (deb) return `Séjour à partir du ${deb}`
@@ -516,7 +527,7 @@
       return
     }
     for (const s of (d && d.sejours) || []) {
-      const dates = [dateFr(s.arrival), dateFr(s.departure)].filter(Boolean).join(' → ')
+      const dates = [dateNueFr(s.arrival), dateNueFr(s.departure)].filter(Boolean).join(' → ')
       const nom = s.nom ? ' · ' + s.nom : ''
       sel.insertAdjacentHTML('beforeend',
         `<option value="${echapper(s.booking_uid)}">${echapper(dates + nom)}</option>`)

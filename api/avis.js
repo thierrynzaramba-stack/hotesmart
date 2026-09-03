@@ -12,7 +12,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
+const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 
@@ -42,13 +42,26 @@ const MAX_TEXTE   = 5000
 //
 // Regle a tenir en modifiant cette liste : une colonne qui n'est pas rendue par
 // pages/avis.html n'a rien a y faire.
-// ⚠ `stay_start` / `stay_end` ne sont pas decoratifs : ils disent DE QUEL
-// SEJOUR parle l'avis. Sans eux, l'ecran n'avait que `received_at` a montrer et
-// une date de reception se lisait comme une date de sejour.
 const CHAMPS = `id, provider, source, ota, content, content_public,
-  overall_score, received_at, stay_start, stay_end,
-  ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
+  overall_score, received_at, ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
   property_id_ref, statut, verdict_source`
+
+// ⚠ LES DATES DE SEJOUR SORTENT SOUS LE DROIT `reservations`, PAS SOUS `avis`.
+//
+// Elles ne sont pas decoratives : elles disent DE QUEL SEJOUR parle l'avis, et
+// sans elles l'ecran n'a que `received_at` a montrer — une date de reception qui
+// se lit alors comme une date de sejour. Mais ce sont les dates d'occupation
+// d'un bien, exactement ce que le bloc ci-dessus refuse a un membre
+// `avis: read` / `reservations: none`, et ce pour quoi l'action `sejours` est
+// montee a `write`. Les ajouter a `CHAMPS` rouvrait cette porte par l'autre
+// action, avec deux commentaires opposes dans le meme fichier.
+//
+// La regle tranchee : le CONTENU de l'avis reste sous `avis` ; le SEJOUR qu'il
+// designe suit `reservations`. Qui n'a pas ce droit voit « Recu le … », etiquete
+// comme tel — l'information reste vraie, elle est seulement moins precise.
+// La colonne n'est meme pas SELECTIONNEE dans ce cas : une donnee qu'on ne
+// demande pas a la base ne peut pas fuiter plus tard par un oubli d'affichage.
+const CHAMPS_AVEC_SEJOUR = `${CHAMPS}, stay_start, stay_end`
 
 // ─── Lecture ────────────────────────────────────────────────────────────────
 
@@ -93,7 +106,12 @@ async function lister (req, res, garde) {
   // Filtres d'abord, tri et borne ensuite : appliquer un filtre APRES .limit()
   // fonctionne mais se lit mal, et invite a une erreur d'ordre au prochain
   // ajout.
-  let q = supabase.from('ota_reviews').select(CHAMPS).eq('user_id', userId)
+  // Le titulaire (`contexte` null) voit tout ; un membre doit porter le droit.
+  // Le perimetre est deja applique par `filtre` plus bas : on n'interroge ici
+  // que le NIVEAU du domaine, sans cible.
+  const voitSejours = !garde.contexte || peutLire(garde.contexte, 'reservations', null)
+  let q = supabase.from('ota_reviews')
+    .select(voitSejours ? CHAMPS_AVEC_SEJOUR : CHAMPS).eq('user_id', userId)
     // Les detections ecartees par l'hote disparaissent : il a tranche.
     .neq('statut', 'ignore')
   // ⚠ LA PERIODE FILTRE AUSSI LA LISTE. Sans cela, deux selecteurs voisins et

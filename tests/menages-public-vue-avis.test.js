@@ -86,7 +86,9 @@ function contexte ({ reponses = [] } = {}) {
     document: {
       getElementById: get,
       querySelector: sel => get(sel.replace(/^[.#]/, '')),
-      querySelectorAll: sel => /button/.test(sel) ? boutons : []
+      querySelectorAll: sel => /button/.test(sel) ? boutons : [],
+      addEventListener () {},
+      visibilityState: 'visible'
     },
     fetch: async (url) => {
       appels.push(url)
@@ -150,7 +152,7 @@ test('des avis, mais aucun qui parle de proprete : message DIFFERENT', async () 
   const { ctx, get } = contexte()
   ctx.renderAvis({
     autorise: true, ratio: { total: 12, positif: 0, remarque: 0 },
-    avis: [{ id: 'a', verdict: 'rien_signale', extrait: null, date: '2026-08-01', bien: 'COL', bienNom: 'Colomiers' }]
+    avis: [{ id: 'a', verdict: 'rien_signale', extrait: null, bien: 'COL', bienNom: 'Colomiers' }]
   })
   const html = get('avis-liste').innerHTML
   assert.ok(/Aucune mention/.test(html), 'ne pas dire « aucun avis » quand il y en a 12')
@@ -164,9 +166,9 @@ test('seuls les avis qui parlent de proprete sont listes', async () => {
   ctx.renderAvis({
     autorise: true, ratio: RATIO_OK,
     avis: [
-      { id: '1', verdict: 'remarque',     extrait: 'bouilloire sale',  date: '2026-08-28', bien: 'COL', bienNom: 'Colomiers' },
-      { id: '2', verdict: 'positif',      extrait: 'impeccable',       date: '2026-08-20', bien: 'COL', bienNom: 'Colomiers' },
-      { id: '3', verdict: 'rien_signale', extrait: null,               date: '2026-08-10', bien: 'COL', bienNom: 'Colomiers' }
+      { id: '1', verdict: 'remarque',     extrait: 'bouilloire sale',  bien: 'COL', bienNom: 'Colomiers' },
+      { id: '2', verdict: 'positif',      extrait: 'impeccable',       bien: 'COL', bienNom: 'Colomiers' },
+      { id: '3', verdict: 'rien_signale', extrait: null,               bien: 'COL', bienNom: 'Colomiers' }
     ]
   })
   const html = get('avis-liste').innerHTML
@@ -182,8 +184,8 @@ test('l\'etiquette « retour prive » n\'apparait que quand elle est posee', asy
   ctx.renderAvis({
     autorise: true, ratio: RATIO_OK,
     avis: [
-      { id: '1', verdict: 'remarque', extrait: 'un', date: '2026-08-28', bien: 'C', bienNom: 'C', prive: true },
-      { id: '2', verdict: 'remarque', extrait: 'deux', date: '2026-08-27', bien: 'C', bienNom: 'C', prive: false }
+      { id: '1', verdict: 'remarque', extrait: 'un', bien: 'C', bienNom: 'C', prive: true },
+      { id: '2', verdict: 'remarque', extrait: 'deux', bien: 'C', bienNom: 'C', prive: false }
     ]
   })
   assert.strictEqual((get('avis-liste').innerHTML.match(/retour privé/g) || []).length, 1)
@@ -194,7 +196,7 @@ test('un extrait hostile est ECHAPPE', async () => {
   const { ctx, get } = contexte()
   ctx.renderAvis({
     autorise: true, ratio: RATIO_OK,
-    avis: [{ id: '1', verdict: 'remarque', bien: 'C', bienNom: '<b>x</b>', date: '2026-08-28',
+    avis: [{ id: '1', verdict: 'remarque', bien: 'C', bienNom: '<b>x</b>',
              extrait: '<img src=x onerror="alert(1)">' }]
   })
   const html = get('avis-liste').innerHTML
@@ -210,7 +212,7 @@ test('l\'identifiant technique du bien ne s\'affiche pas quand le nom manque', a
   const { ctx, get } = contexte()
   ctx.renderAvis({
     autorise: true, ratio: RATIO_OK,
-    avis: [{ id: '1', verdict: 'remarque', extrait: 'x', date: '2026-08-28', bien: '287031', bienNom: null }]
+    avis: [{ id: '1', verdict: 'remarque', extrait: 'x', bien: '287031', bienNom: null }]
   })
   assert.ok(!get('avis-liste').innerHTML.includes('287031'), '« 287031 » ne dit rien a une femme de menage')
 })
@@ -345,7 +347,7 @@ test('une remarque SANS extrait ne produit pas une carte muette', async () => {
   const { ctx, get } = contexte()
   ctx.renderAvis({
     autorise: true, ratio: RATIO_OK,
-    avis: [{ id: '1', verdict: 'remarque', extrait: null, date: '2026-08-28', bien: 'C', bienNom: 'Colomiers' }]
+    avis: [{ id: '1', verdict: 'remarque', extrait: null, bien: 'C', bienNom: 'Colomiers' }]
   })
   const html = get('avis-liste').innerHTML
   assert.ok(html.includes('avis-card'), 'la carte reste listee : l\'information la concerne')
@@ -357,7 +359,7 @@ test('un avis positif sans extrait le dit aussi', async () => {
   const { ctx, get } = contexte()
   ctx.renderAvis({
     autorise: true, ratio: RATIO_OK,
-    avis: [{ id: '1', verdict: 'positif', extrait: null, date: '2026-08-28', bien: 'C', bienNom: 'C' }]
+    avis: [{ id: '1', verdict: 'positif', extrait: null, bien: 'C', bienNom: 'C' }]
   })
   assert.ok(/sans commentaire détaillé/.test(get('avis-liste').innerHTML))
 })
@@ -521,4 +523,64 @@ test('une date illisible ne devient pas « Invalid Date »', async () => {
   const html = get('avis-liste').innerHTML
   assert.ok(!/Invalid/.test(html))
   assert.ok(/Avis reçu le/.test(html), 'on retombe sur la date de réception, étiquetée')
+})
+
+// ─── Le fuseau du téléphone ne doit pas décaler un séjour ──────────────────
+// ⚠ `stay_start` / `stay_end` sont des colonnes `date` : PostgREST rend
+// « 2026-08-15 », que `new Date` lit à MINUIT UTC. Formaté en heure locale, ce
+// jour s'affiche « 14 août » à l'ouest de Greenwich. Une prestataire en
+// Guadeloupe, Martinique ou Guyane — marchés francophones visés — lirait un
+// séjour décalé d'un jour et chercherait le mauvais ménage.
+//
+// Ces tests FORCENT le fuseau : verts sur une machine à Paris, ils resteraient
+// aveugles au défaut. C'est la règle 8 de REVIEW.md — tester le cas dangereux,
+// pas sa version confortable.
+
+function sousFuseau (tz, fn) {
+  const avant = process.env.TZ
+  process.env.TZ = tz
+  try { return fn() } finally {
+    if (avant === undefined) delete process.env.TZ; else process.env.TZ = avant
+  }
+}
+
+for (const tz of ['America/Guadeloupe', 'America/New_York', 'Pacific/Honolulu']) {
+  test(`séjour non décalé sous ${tz}`, async () => {
+    sousFuseau(tz, () => {
+      const { ctx, get } = contexte()
+      ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+        { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+          sejourDebut: '2026-08-12', sejourFin: '2026-08-15', recuLe: null }
+      ] })
+      assert.ok(/Séjour du 12 au 15 août 2026/.test(get('avis-liste').innerHTML),
+        `décalage sous ${tz} : ` + get('avis-liste').innerHTML)
+    })
+  })
+}
+
+test('séjour à cheval sur deux mois : la forme ne change pas avec le fuseau', async () => {
+  // Un séjour du 31 juillet au 2 août lu à l'ouest deviendrait « du 30 au 1er »,
+  // donc une autre forme de phrase — et une autre date.
+  for (const tz of ['Europe/Paris', 'America/Guadeloupe', 'Pacific/Auckland']) {
+    sousFuseau(tz, () => {
+      const { ctx, get } = contexte()
+      ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [
+        { id: '1', verdict: 'remarque', extrait: 'x', bien: 'C', bienNom: 'C',
+          sejourDebut: '2026-07-31', sejourFin: '2026-08-02', recuLe: null }
+      ] })
+      assert.ok(/Séjour du 31 juillet au 2 août 2026/.test(get('avis-liste').innerHTML),
+        `sous ${tz} : ` + get('avis-liste').innerHTML)
+    })
+  }
+})
+
+test('la sonde vide l\'en-tête quand le droit n\'est pas là', async () => {
+  // Ne pas compter sur l'état initial du HTML : c'est une coïncidence qui
+  // protège, pas le code.
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: false, ratio: null, avis: [] } }] })
+  get('entete-ratio').innerHTML = '<span>ratio périmé</span>'
+  get('entete-ratio').style.display = ''
+  await ctx.initAvis()
+  assert.strictEqual(get('entete-ratio').innerHTML, '')
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
 })

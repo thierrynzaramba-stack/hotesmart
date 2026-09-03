@@ -956,6 +956,24 @@ if ("serviceWorker" in navigator) {
 
     // Non bloquant : le planning ne doit pas dependre de la vue Avis.
     initAvis().catch(err => console.warn('[Avis] sonde impossible', err))
+
+    // ⚠ UN RAPPEL QUOTIDIEN CALCULE UNE SEULE FOIS N'EN EST PAS UN. Une PWA
+    // reste ouverte des jours sur un telephone : sans ce reveil, le ratio date
+    // du dernier chargement, et un droit `self_view_reviews` retire resterait
+    // affiche jusqu'a un rechargement. Au retour au premier plan, on resonde —
+    // au plus une fois par quart d'heure, pour ne pas rejouer le comptage a
+    // chaque bascule d'application.
+    let derniereSonde = Date.now()
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - derniereSonde < 15 * 60 * 1000) return
+      derniereSonde = Date.now()
+      avisCharge = false   // la liste ouverte se rechargera aussi
+      initAvis().catch(err => console.warn('[Avis] resonde impossible', err))
+      if (currentTab === 'avis') {
+        chargerAvis().catch(err => console.warn('[Avis] rechargement impossible', err))
+      }
+    })
   }
 
   // ─── Local storage : chargement / persistance ──────────────────────────────
@@ -1650,7 +1668,11 @@ if ("serviceWorker" in navigator) {
     if (!res.ok) return
     let data
     try { data = await res.json() } catch (err) { return }
-    if (data.actif === false || data.autorise !== true) return
+    // ⚠ On VIDE explicitement plutot que de compter sur l'etat initial du HTML :
+    // c'est une coincidence — l'element part masque et la sonde ne tourne
+    // qu'une fois — qui protege ici, pas le code. Un second appel ajoute plus
+    // tard laisserait sinon un ratio perime en en-tete.
+    if (data.actif === false || data.autorise !== true) { renderEnteteRatio(null); return }
     montrerOnglets()
     renderEnteteRatio(data)
   }
@@ -1672,10 +1694,10 @@ if ("serviceWorker" in navigator) {
     const lib = LIB_PERIODE[r.periode] || LIB_PERIODE[data.periode] || ''
     el.innerHTML = `
       <div class="ratio">
-        <span class="ratio-item pos">${POUCE_HAUT}${r.positif}</span>
-        <span class="ratio-item neg">${POUCE_BAS}${r.remarque}</span>
+        <span class="ratio-item pos" title="Propreté saluée">${POUCE_HAUT}${r.positif}</span>
+        <span class="ratio-item neg" title="Remarques sur la propreté">${POUCE_BAS}${r.remarque}</span>
       </div>
-      <div class="entete-periode">${r.total} avis${lib ? ' · ' + echapper(lib) : ''}</div>`
+      <div class="entete-periode">sur ${r.total} avis${lib ? ' · ' + echapper(lib) : ''}</div>`
     el.style.display = ''
   }
 
@@ -1781,18 +1803,29 @@ if ("serviceWorker" in navigator) {
       return (d && !isNaN(d)) ? d : null
     }
     const deb = jour(a.sejourDebut), fin = jour(a.sejourFin), recu = jour(a.recuLe)
-    const court = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
-    const long = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    // ⚠ `stay_start` / `stay_end` sont des colonnes `date` : PostgREST rend
+    // « 2026-08-15 », que `new Date` interprete a MINUIT UTC. Formate en heure
+    // locale, ce meme jour s'affiche « 14 août » a l'ouest de Greenwich — donc
+    // pour une prestataire en Guadeloupe, en Martinique ou en Guyane, marches
+    // francophones vises. Un sejour decale d'un jour envoie chercher le mauvais
+    // menage, exactement ce que cet etiquetage veut empecher. On force donc UTC
+    // pour les dates NUES. `recuLe` est un vrai instant : il reste en local.
+    const UTC = { timeZone: 'UTC' }
+    const court = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', ...UTC })
+    const long = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', ...UTC })
+    const longLocal = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
     if (deb && fin) {
-      // Meme mois : « du 12 au 15 août », sinon les deux mois en entier.
-      const memeMois = deb.getFullYear() === fin.getFullYear() && deb.getMonth() === fin.getMonth()
-      return `Séjour du ${memeMois ? deb.getDate() : court(deb)} au ${long(fin)}`
+      // Meme mois : « du 12 au 15 août », sinon les deux mois en entier. La
+      // comparaison est en UTC elle aussi, sinon un séjour du 31 au 1er
+      // basculerait de forme selon le fuseau de lecture.
+      const memeMois = deb.getUTCFullYear() === fin.getUTCFullYear() && deb.getUTCMonth() === fin.getUTCMonth()
+      return `Séjour du ${memeMois ? deb.getUTCDate() : court(deb)} au ${long(fin)}`
     }
     if (fin) return `Séjour terminé le ${long(fin)}`
     if (deb) return `Séjour à partir du ${long(deb)}`
     // Aucun ancrage : on le DIT. L'import de l'historique fera basculer ces
     // avis vers leur vraie date de sejour, sans rien changer ici.
-    if (recu) return `Avis reçu le ${long(recu)}`
+    if (recu) return `Avis reçu le ${longLocal(recu)}`
     return ''
   }
 

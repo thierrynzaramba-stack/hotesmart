@@ -43,8 +43,8 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
                      periodes = [{ user_id: U, provider_id: PROFIL, property_id_ref: 'COL', debut: null, fin: null }],
                      biens = [{ user_id: U, provider_property_id: 'COL', name: 'Colomiers' }],
                      erreurBiens = null,
-                     ratioPeriode = undefined,      // ce que porte public_tokens
-                     colonnePeriodeAbsente = false, // migration pas encore passee
+                     ratioPeriode = null,     // ce que porte public_tokens
+                     erreurToken = null,      // panne de lecture du token
                      periodesDemandees = [],
                      journal = [] } = {}) {
   const client = {
@@ -63,13 +63,17 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
         limit () { return chain },
         maybeSingle () {
           if (table === 'public_tokens') {
+            if (erreurToken) return Promise.resolve({ data: null, error: erreurToken })
             if (a.f.token !== TOKEN) return Promise.resolve({ data: null, error: null })
-            // PostgREST rejette la ligne entiere quand une colonne du select
-            // n'existe pas : c'est exactement le cas « migration pas passee ».
-            if (colonnePeriodeAbsente && /ratio_periode/.test(a.colonnes || '')) {
-              return Promise.resolve({ data: null, error: { message: 'column does not exist' } })
+            // ⚠ Ne rend QUE les colonnes demandees, comme PostgREST : un double
+            // qui sert `ratio_periode` sans qu'on l'ait selectionnee est plus
+            // permissif que la base, et couvrirait un select incomplet.
+            const ligne = { user_id: U, ratio_periode: ratioPeriode }
+            const out = {}
+            for (const c of String(a.colonnes || '').split(',').map(x => x.trim())) {
+              if (c && Object.prototype.hasOwnProperty.call(ligne, c)) out[c] = ligne[c]
             }
-            return Promise.resolve({ data: { user_id: U, ...(ratioPeriode !== undefined ? { ratio_periode: ratioPeriode } : {}) }, error: null })
+            return Promise.resolve({ data: out, error: null })
           }
           if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
           if (table === 'profile_permissions') return Promise.resolve({ data: droits, error: erreurDroits })
@@ -405,17 +409,25 @@ test('valeur inconnue en base : « toujours », jamais un rétrécissement muet'
   assert.strictEqual(journal.periodesDemandees.length, 0)
 })
 
-test('MIGRATION PAS PASSÉE : la PWA répond quand même', async () => {
-  // Sans le repli, le select d'une colonne inconnue fait échouer la ligne
-  // entière et l'endpoint répondrait « Token invalide » — toute la vue tombée
-  // pour un réglage d'affichage.
-  preparer({ colonnePeriodeAbsente: true })
+test('PANNE de lecture du token : 503, jamais « Token invalide »', async () => {
+  // Un `select` en panne rend `data` null, indiscernable d'un token inconnu :
+  // la PWA annonçait un lien invalide à une prestataire dont le lien est bon.
+  preparer({ erreurToken: { message: 'timeout' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req({ detail: '1' }), res)
-  assert.strictEqual(res.code, 200)
-  assert.strictEqual(res.body.autorise, true)
-  assert.strictEqual(res.body.periode, 'toujours')
+  assert.strictEqual(res.code, 503)
+})
+
+test('PANNE de lecture du token : pas d\'élargissement silencieux du ratio', async () => {
+  // Le repli précédent retombait sur « toujours » : le ratio se recalculait sur
+  // tout l'historique au lieu des 15 jours réglés par l'hôte, sans signal.
+  preparer({ erreurToken: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.ok(!res.body.ratio, 'aucun ratio ne doit sortir d\'une panne')
+  assert.ok(!res.body.periode)
 })
 
 // ─── Les trois dates, jamais fondues en une ────────────────────────────────
