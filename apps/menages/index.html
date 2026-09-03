@@ -616,10 +616,20 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     if (m.assign.status === 'orphaned') {
       return `<div class="presta-pastille refus" title="${echapper(m.assign.assignment_reason || '')}">⚠ refusé</div>`
     }
-    if (!m.assign.provider_id) return '<div class="presta-pastille vide">personne</div>'
-    if (!prenom) return ''   // profil inconnu du lot : on n'invente pas de nom
-    const offert = m.assign.status === 'offered'
-    return `<div class="presta-pastille ${offert ? 'offert' : ''}">${offert ? '⏳' : '👤'} ${echapper(prenom)}${offert ? ' ?' : ''}</div>`
+    // ⚠ LA PROPOSITION NE REMPLACE PAS LE PORTEUR (regle du 4 septembre).
+    // La pastille dit d'abord QUI le porte ; la proposition en cours s'ajoute a
+    // cote, en pointilles. Afficher la sollicitee a la place de la porteuse
+    // laissait croire que le menage avait change de mains alors que personne
+    // n'avait accepte.
+    const proposeA = m.assign.offered_to ? prenomDe(m.assign.offered_to) : null
+    const mention = proposeA
+      ? `<div class="presta-pastille offert">⏳ proposé à ${echapper(proposeA)}</div>`
+      : ''
+    if (!m.assign.provider_id) {
+      return mention || '<div class="presta-pastille vide">personne</div>'
+    }
+    if (!prenom) return mention   // profil inconnu : on n'invente pas de nom
+    return `<div class="presta-pastille">👤 ${echapper(prenom)}</div>${mention}`
   }
 
   function openModal(m) {
@@ -657,9 +667,12 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     const options = ['<option value="">— personne —</option>'].concat(
       actifs.map(p => `<option value="${echapper(p.id)}"${p.id === m.assign.provider_id ? ' selected' : ''}>${echapper(p.prenom)}</option>`)
     ).join('')
-    const verrou = m.assign.assigned_by === 'manual'
-      ? 'Affectation manuelle : l\'automate n\'y touchera plus.'
-      : (m.assign.status === 'offered' ? 'En attente de confirmation.' : '')
+    const proposeA = m.assign.offered_to ? prenomDe(m.assign.offered_to) : null
+    const verrou = proposeA
+      ? `Proposé à ${proposeA} — le ménage reste chez son porteur tant que personne n'a accepté.`
+      : (m.assign.assigned_by === 'manual'
+          ? 'Affectation manuelle : l\'automate n\'y touchera plus.'
+          : '')
     return `<div class="presta-ligne"><span style="font-size:13px">Qui le fait</span>
               <select id="modal-presta">${options}</select></div>
             <div class="presta-etat" id="presta-etat">${echapper(verrou)}</div>`
@@ -693,16 +706,17 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
         }
         // La verite affichee vient du SERVEUR, pas de ce qu'on croyait demander :
         // c'est lui qui decide si la personne est engagee ou seulement sollicitee.
+        // ⚠ La verite vient du SERVEUR : c'est lui qui decide si la personne
+        // PORTE le menage ou si elle est seulement sollicitee.
         m.assign.provider_id = data.provider_id
         m.assign.status = data.status
-        m.assign.assigned_by = data.provider_id ? 'manual' : null
+        m.assign.offered_to = data.offered_to || null
+        m.assign.assigned_by = data.offered_to ? m.assign.assigned_by : (data.provider_id ? 'manual' : null)
         assignations[`${m.propId}|${m.bookId}|${m.departure}`] = m.assign
         if (etat) {
-          etat.textContent = data.provider_id
-            ? (data.status === 'offered'
-                ? `Proposé à ${data.prenom} — en attente de sa confirmation.`
-                : `Confirmé : ${data.prenom}.`)
-            : 'Ménage laissé sans prestataire.'
+          etat.textContent = data.offered_to
+            ? `Proposé à ${data.prenom} — le ménage reste chez son porteur jusqu'à acceptation.`
+            : (data.provider_id ? `Confirmé : ${data.prenom}.` : 'Ménage laissé sans prestataire.')
         }
         routeRenderSafe()
       } catch (err) {

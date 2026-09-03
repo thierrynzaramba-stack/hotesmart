@@ -23,6 +23,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
+const { echeanceOffre } = require('../lib/cleaning/assign')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -200,7 +201,7 @@ module.exports = async function handler(req, res) {
       // `assignment_reason` porte « Refuse par X. » : sans elle, un refus est
       // indiscernable d'un menage jamais assigne, et l'hote ne sait pas qu'il
       // doit agir.
-      .select('booking_id, property_id, departure_date, provider_id, status, assigned_by, assignment_reason')
+      .select('booking_id, property_id, departure_date, provider_id, status, assigned_by, assignment_reason, offered_to, offer_expires_at')
       .eq('user_id', userId)
       .in('property_id', properties.map(p => p.id))
       .neq('status', 'cancelled')
@@ -359,59 +360,77 @@ async function reassigner (req, res) {
   // vers le referent du bien l'engage d'office ; vers un suppleant, il devra
   // confirmer. La reassignation manuelle emprunte le meme chemin que
   // l'automate, sinon deux regles d'engagement coexisteraient.
-  let status = 'unassigned', offered_at = null, accepted_at = null
-  if (choisi) {
+  // ⚠ REASSIGNER N'EST PAS PROPOSER (regle du 4 septembre 2026).
+  //   - vers le REFERENT du bien : il PORTE le menage, tout de suite.
+  //   - vers quelqu'un d'autre : on lui PROPOSE. Le menage reste chez son
+  //     porteur actuel tant qu'elle n'a pas accepte — il ne quitte ni son
+  //     planning ni sa responsabilite. Ecraser `provider_id` laissait un
+  //     logement sans personne pendant tout le temps de la reflexion.
+  let maj = { updated_at: new Date().toISOString() }
+  let reponse = {}
+
+  if (!choisi) {
+    // Desassigner : plus de porteur, et la proposition en cours tombe avec.
+    maj = { ...maj, provider_id: null, status: 'unassigned', assigned_by: 'manual',
+            offered_to: null, offered_at: null, offer_expires_at: null,
+            accepted_at: null,
+            assignment_reason: 'Desassigne a la main par l\'hote.' }
+    reponse = { status: 'unassigned', provider_id: null, prenom: null }
+  } else {
     const { data: liaison, error: errLiaison } = await supabase.from('property_cleaning_providers')
       .select('rang').eq('user_id', userId).eq('property_id', String(property_id))
       .eq('provider_id', choisi.id).eq('active', true).maybeSingle()
-    // ⚠ L'ERREUR EST LUE. Ignoree, une panne transitoire degradait
-    // silencieusement une REFERENTE en « offered » : elle recevait une offre a
-    // confirmer pour un menage qui aurait du lui etre attribue d'office, et
-    // personne n'aurait su pourquoi. Les trois autres lectures de ce chemin
-    // rendent deja 503 ; il n'y avait pas de raison que celle-ci fasse exception.
+    // ⚠ Ignoree, une panne transitoire degradait une REFERENTE en simple
+    // sollicitee : elle recevait une proposition a confirmer pour un menage qui
+    // aurait du lui revenir d'office.
     if (errLiaison) {
       console.error('[menages] lecture de la liaison echec', errLiaison.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
     const referent = liaison && liaison.rang === 1
-    status = referent ? 'accepted' : 'offered'
-    if (referent) accepted_at = new Date().toISOString()
-    else offered_at = new Date().toISOString()
+
+    if (referent) {
+      maj = { ...maj, provider_id: choisi.id, status: 'accepted', assigned_by: 'manual',
+              offered_to: null, offered_at: null, offer_expires_at: null,
+              accepted_at: new Date().toISOString(),
+              assignment_reason: `Referent du bien, assigne a la main par l'hote.` }
+      reponse = { status: 'accepted', provider_id: choisi.id, prenom: choisi.first_name }
+    } else {
+      // ⚠ UNE PROPOSITION DOIT LAISSER UN VRAI DELAI DE REPONSE. Passe la veille
+      // du depart a 18 h, elle serait morte-nee : on refuse, et l'hote assigne
+      // directement s'il le souhaite.
+      const echeance = echeanceOffre(departure_date)
+      if (!echeance) {
+        return res.status(409).json({
+          error: 'Trop tard pour proposer ce ménage : assignez-le directement ou changez de référente'
+        })
+      }
+      maj = { ...maj, offered_to: choisi.id, offered_at: new Date().toISOString(),
+              offer_expires_at: echeance,
+              assignment_reason: `Propose a ${choisi.first_name} par l'hote.` }
+      reponse = { status: avant.status, provider_id: avant.provider_id,
+                  offered_to: choisi.id, prenom: choisi.first_name, expire_le: echeance }
+    }
   }
 
-  const { error: errMaj } = await supabase.from('menages').update({
-    provider_id: choisi ? choisi.id : null,
-    status,
-    // ⚠ 'manual' MEME QUAND ON DESASSIGNE. Remettre `null` ici rendait le geste
-    // invisible au writer, dont la garde teste `assigned_by === 'manual'` : le
-    // cron rendait le menage a la referente dans les cinq minutes, avec au
-    // journal un motif faux. Laisser un menage sans personne EST une decision de
-    // l'hote, et elle se verrouille comme les autres.
-    assigned_by: 'manual',
-    assignment_reason: choisi
-      ? `Reassigne a la main par l'hote (${status === 'accepted' ? 'referent du bien' : 'suppleant, en attente de confirmation'}).`
-      : 'Desassigne a la main par l\'hote.',
-    offered_at, accepted_at,
-    updated_at: new Date().toISOString()
-  }).eq('id', avant.id)
+  const { error: errMaj } = await supabase.from('menages').update(maj).eq('id', avant.id)
   if (errMaj) {
     console.error('[menages] reassignation echec', errMaj.message)
     return res.status(500).json({ error: 'Réassignation impossible' })
   }
 
-  // Le journal est immuable : il porte la trace du changement, pas son resultat.
   await supabase.from('menage_assignment_log').insert({
-    user_id: userId, menage_id: avant.id, event: 'manual_assign',
-    from_provider_id: avant.provider_id, to_provider_id: choisi ? choisi.id : null,
+    user_id: userId, menage_id: avant.id,
+    event: maj.offered_to ? 'offered' : 'manual_assign',
+    from_provider_id: avant.provider_id,
+    to_provider_id: maj.offered_to || maj.provider_id || null,
     actor: 'host',
-    reason: choisi ? `Vers ${choisi.first_name}.` : 'Menage laisse sans prestataire.'
+    reason: maj.offered_to
+      ? `Propose a ${choisi.first_name} : le menage reste chez son porteur jusqu'a acceptation.`
+      : (choisi ? `Vers ${choisi.first_name}.` : 'Menage laisse sans prestataire.')
   })
 
-  return res.status(200).json({
-    success: true, status,
-    provider_id: choisi ? choisi.id : null,
-    prenom: choisi ? choisi.first_name : null
-  })
+  return res.status(200).json({ success: true, ...reponse })
 }
 
 // ─── Qui intervient sur quel bien, et a quel rang (spec §11.2) ──────────────

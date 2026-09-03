@@ -45,7 +45,15 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
             // La garde de droits lit `profiles` par member_user_id ; la
             // vérification du prestataire, par id. Deux usages, deux réponses —
             // les confondre rendrait le test aveugle à ce qu'il vérifie.
-            if (a.f.id) return Promise.resolve({ data: prestataire, error: erreurProfil })
+            if (a.f.id) {
+              // ⚠ Rend le profil DEMANDE. Rendre toujours le meme masquait le
+              // fait que la reponse porte bien la personne visee.
+              const p = prestataire && (prestataire.id === a.f.id || prestataire.force)
+                ? prestataire
+                : (prestataire ? { ...prestataire, id: a.f.id,
+                                   first_name: a.f.id === NOUVELLE ? 'Marie' : prestataire.first_name } : null)
+              return Promise.resolve({ data: p, error: erreurProfil })
+            }
             return Promise.resolve({ data: profil, error: null })
           }
           if (table === 'profile_permissions') return Promise.resolve({ data: permissions, error: null })
@@ -58,7 +66,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
             const bon = a.f.user_id === compteAttendu &&
                         String(a.f.property_id) === '209413' &&
                         String(a.f.booking_id) === 'b1' &&
-                        a.f.departure_date === '2026-09-05'
+                        typeof a.f.departure_date === 'string'
             return Promise.resolve({ data: bon ? menage : null, error: null })
           }
           if (table === 'property_cleaning_providers') return Promise.resolve({ data: liaison, error: erreurLiaison })
@@ -89,7 +97,10 @@ const post = (body, entetes = {}) => ({
   method: 'POST', query: {}, body,
   headers: { authorization: 'Bearer jeton', ...entetes }
 })
-const CORPS = { property_id: '209413', booking_id: 'b1', departure_date: '2026-09-05', provider_id: REGINA }
+// Un départ lointain : les tests qui ne parlent pas d'échéance ne doivent pas
+// tomber sur « trop tard pour proposer ».
+const LOIN = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+const CORPS = { property_id: '209413', booking_id: 'b1', departure_date: LOIN, provider_id: REGINA }
 
 // ─── Les droits ────────────────────────────────────────────────────────────
 
@@ -191,24 +202,51 @@ test('réassigner vers le RÉFÉRENT l\'engage d\'office', async () => {
   assert.ok(etat.majs[0].row.accepted_at)
 })
 
-test('réassigner vers un SUPPLÉANT lui laisse la confirmation', async () => {
-  // ⚠ Sinon deux règles d'engagement coexisteraient : celle de l'automate et
-  // celle de la main. L'hôte ne peut pas engager quelqu'un à sa place.
-  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+test('proposer à un SUPPLÉANT ne retire RIEN à la porteuse', async () => {
+  // ⚠ LA RÈGLE DU 4 SEPTEMBRE. Écraser `provider_id` faisait sortir le ménage du
+  // planning de la référente pendant tout le temps de la réflexion : un logement
+  // pouvait n'être couvert par personne sans que personne ne le sache.
+  const { handler, etat } = preparer({
+    liaison: { rang: 2 },
+    menage: { id: 'm1', provider_id: REGINA, status: 'accepted' }
+  })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE }), res)
-  assert.strictEqual(res.body.status, 'offered')
-  assert.ok(etat.majs[0].row.offered_at)
-  assert.strictEqual(etat.majs[0].row.accepted_at, null)
+  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE, 'la proposition est posée')
+  assert.ok(etat.majs[0].row.offer_expires_at, 'avec son échéance')
+  assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur n\'est PAS touché')
+  assert.strictEqual(etat.majs[0].row.status, undefined, 'ni le statut')
+  assert.strictEqual(res.body.provider_id, REGINA, 'la réponse dit qui le porte toujours')
 })
 
-test('un prestataire sans liaison sur ce bien reste un suppléant', async () => {
-  // Assigner quelqu'un qui n'intervient pas d'habitude est légitime — mais ça ne
-  // fait pas de lui le référent.
-  const { handler } = preparer({ liaison: null })
+test('proposer trop tard est REFUSÉ, pas envoyé dans le vide', async () => {
+  // ⚠ Une proposition doit laisser un vrai délai de réponse. Passé la veille du
+  // départ à 18 h, elle serait morte-née — expirée avant d'avoir été lue.
+  const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: hier }), res)
+  assert.strictEqual(res.code, 409)
+  assert.match(res.body.error, /Trop tard/)
+  assert.strictEqual(etat.majs.length, 0)
+})
+
+test('un prestataire sans liaison sur ce bien reçoit une PROPOSITION', async () => {
+  // Solliciter quelqu'un qui n'intervient pas d'habitude est légitime — mais ça
+  // ne fait pas de lui le référent, et ça ne retire rien à la porteuse.
+  const { handler, etat } = preparer({ liaison: null })
   const res = reponse()
   await handler(post(CORPS), res)
-  assert.strictEqual(res.body.status, 'offered')
+  assert.strictEqual(etat.majs[0].row.offered_to, REGINA)
+  assert.strictEqual(etat.majs[0].row.provider_id, undefined)
+})
+
+test('réassigner vers le RÉFÉRENT efface une proposition en cours', async () => {
+  // L'hôte a tranché : la sollicitation n'a plus lieu d'être.
+  const { handler, etat } = preparer({ liaison: { rang: 1 } })
+  await handler(post(CORPS), reponse())
+  assert.strictEqual(etat.majs[0].row.offered_to, null)
+  assert.strictEqual(etat.majs[0].row.offer_expires_at, null)
 })
 
 test('l\'assignation manuelle VERROUILLE le ménage', async () => {

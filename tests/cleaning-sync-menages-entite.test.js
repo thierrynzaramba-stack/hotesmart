@@ -28,7 +28,7 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                      // fantome. Le double le porte donc, comme la vraie table.
                      biens = [{ user_id: U, provider_property_id: '209413', provider: 'beds24' },
                               { user_id: 'compte-2', provider_property_id: '209413', provider: 'beds24' }],
-                     erreurBiens = null } = {}) {
+                     erreurBiens = null, expirees = null } = {}) {
   const etat = { inseres: [], majs: [], journal: [], incidents: [], requetes: [] }
 
   const client = {
@@ -43,6 +43,7 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
         gte (c, v) { a.gte = { c, v }; return chain },
         lte (c, v) { a.lte = { c, v }; return chain },
         not () { return chain },
+        lt (c, v) { a.lt = { c, v }; return chain },
         is (c, v) { a.is = { c, v }; return chain },
         // ⚠ Chainable, comme le vrai builder : `.order()` est suivi d'un
         // `.limit()`. Un double qui rendait une Promise ici faisait echouer les
@@ -86,7 +87,12 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           })
           return { data: d, error: null }
         }
-        if (table === 'menages') return { data: menages, error: null }
+        if (table === 'menages') {
+          // `expirerPropositions` lit les propositions echues : un jeu distinct
+          // des menages du writer, sinon les deux tests se marcheraient dessus.
+          if (expirees !== null && a.lt) return { data: expirees, error: null }
+          return { data: menages, error: null }
+        }
         if (table === 'property_cleaning_providers') return { data: liaisons, error: null }
         if (table === 'properties') return { data: biens, error: erreurBiens }
         return { data: [], error: null }
@@ -105,9 +111,15 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
   const mn = new Module(absNotify)
   mn.exports = { reportIncident: async (type, opts) => { etat.incidents.push({ type, ...opts }) } }
   mn.loaded = true
-  require.cache[absNotify] = mn
 
+  // ⚠ VIDER LE CACHE AVANT DE POSER LE DOUBLE, jamais après.
+  // `MODULES` contient `founder-notify` : le vider après l'avoir remplacé
+  // ANNULAIT le remplacement, et le vrai module reprenait sa place. Conséquence :
+  // `etat.incidents` restait vide quoi qu'il arrive, et TOUS les tests qui
+  // vérifient qu'une alerte est levée passaient sans rien vérifier — pendant que
+  // ceux qui vérifient l'ABSENCE d'alerte passaient pour la mauvaise raison.
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+  require.cache[absNotify] = mn
   return etat
 }
 
@@ -615,4 +627,73 @@ test('une résurrection ORDINAIRE recalcule bien l\'assignation', async () => {
   await synchroniserMenages()
   assert.strictEqual(etat.majs[0].row.provider_id, REGINA)
   assert.strictEqual(etat.majs[0].row.status, 'accepted')
+})
+
+// ─── L'expiration des propositions ─────────────────────────────────────────
+// ⚠ UNE PROPOSITION QUI EXPIRE NE CHANGE RIEN AU PORTEUR. Elle s'efface, et le
+// ménage reste chez la référente comme si de rien n'était — elle l'a toujours
+// eu. Rien n'est découvert, donc rien n'appelle une alerte. Le seul cas grave
+// est celui d'un ménage que PERSONNE ne porte.
+
+test('une proposition expirée s\'efface, et le porteur ne bouge pas', async () => {
+  const etat = preparer({ expirees: [
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+      provider_id: REGINA, offered_to: NOUVELLE }
+  ] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await expirerPropositions()
+  assert.strictEqual(bilan.expirees, 1)
+  assert.strictEqual(bilan.orphelins, 0)
+  const maj = etat.majs[0]
+  assert.strictEqual(maj.row.offered_to, null)
+  assert.strictEqual(maj.row.offer_expires_at, null)
+  assert.strictEqual(maj.row.provider_id, undefined, 'le porteur n\'est pas touché')
+  assert.strictEqual(maj.row.status, undefined, 'ni le statut')
+})
+
+test('une proposition expirée sur un ménage porté N\'ALERTE PAS', async () => {
+  // Alerter serait du bruit : rien n'est découvert, et l'hôte finirait par ne
+  // plus lire ces messages.
+  const etat = preparer({ expirees: [
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+      provider_id: REGINA, offered_to: NOUVELLE }
+  ] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  await expirerPropositions()
+  assert.strictEqual(etat.incidents.length, 0)
+})
+
+test('expirée SANS porteur : orphaned, et l\'hôte est alerté', async () => {
+  // Là, un logement ne sera pas préparé : c'est le seul cas qui mérite une
+  // alerte forte.
+  const etat = preparer({ expirees: [
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+      provider_id: null, offered_to: NOUVELLE }
+  ] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await expirerPropositions()
+  assert.strictEqual(bilan.orphelins, 1)
+  assert.strictEqual(etat.majs[0].row.status, 'orphaned')
+  assert.strictEqual(etat.incidents.length, 1)
+})
+
+test('chaque expiration laisse une trace au journal', async () => {
+  const etat = preparer({ expirees: [
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+      provider_id: REGINA, offered_to: NOUVELLE }
+  ] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  await expirerPropositions()
+  const l = etat.journal.find(x => x.event === 'expired')
+  assert.ok(l, 'un événement `expired` est attendu')
+  assert.strictEqual(l.from_provider_id, NOUVELLE)
+  assert.strictEqual(l.actor, 'cron')
+})
+
+test('aucune proposition expirée : aucune écriture', async () => {
+  const etat = preparer({ expirees: [] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await expirerPropositions()
+  assert.strictEqual(bilan.expirees, 0)
+  assert.strictEqual(etat.majs.length, 0)
 })

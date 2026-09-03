@@ -175,6 +175,34 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
   marquer fait — ou **défaire** — le ménage de quelqu'un d'autre. Repli quand aucun ménage
   n'existe encore en base (la table est récente, le writer ne couvre que J−30/J+180) : le
   périmètre du token s'applique, et refuser aurait cassé le rattrapage à 14 jours de la PWA.
+### La responsabilité ne se transfère qu'à l'acceptation (4 septembre 2026)
+
+⚠️ **Une proposition ne retire rien à personne.** Elle vit dans `offered_to` / `offer_expires_at`,
+**à côté** de `provider_id` — jamais à sa place.
+
+- Un ménage proposé à une suppléante **reste** chez la référente : il ne quitte ni son planning
+  PWA ni sa responsabilité, et y porte la mention discrète « proposé à quelqu'un ».
+  ⚠️ **Il n'existe aucun état où personne ne porte un ménage couvert par une référente** —
+  l'ancien modèle écrasait `provider_id` et laissait un logement sans personne pendant tout le
+  temps de la réflexion.
+- **L'acceptation fait le transfert**, atomiquement : `provider_id` devient la suppléante, la
+  proposition s'efface, et le journal trace les deux côtés. C'est le seul endroit où la
+  responsabilité change de mains.
+- **Refus ou expiration** : la proposition s'annule, le ménage reste chez la référente comme si
+  de rien n'était. Événement au journal (`declined` / `expired`), **aucune alerte** — rien n'est
+  découvert, et alerter là-dessus noierait les vraies alertes. Le sélecteur de réassignation
+  redevient libre.
+- **`orphaned` ne concerne plus que le cas SANS référente** : un bien dont l'unique référente
+  refuse, ou dont personne ne porte le ménage à l'expiration. Là, alerte forte et décision
+  humaine.
+- **Délai** : 48 h, **jamais au-delà de la veille du départ à 18 h**. ⚠️ Si l'échéance serait
+  déjà passée, la proposition est **refusée** (409) plutôt qu'envoyée morte-née : une
+  proposition doit laisser un vrai délai de réponse. L'hôte assigne alors directement.
+- La PWA de la suppléante affiche **le délai restant** sur chaque proposition ; celle de la
+  référente voit le ménage normalement, avec la mention. Le **prénom de la sollicitée n'est pas
+  transmis à la porteuse** : savoir qu'une proposition est en cours lui suffit.
+- Job `expirerPropositions` dans le cron, juste après la réconciliation.
+
 ### Répondre à une offre (lot 2.2)
 
 Un ménage `offered` porte le badge **« À CONFIRMER »** sur sa carte, et la fiche propose

@@ -35,6 +35,11 @@
 //   le travail, budget mur, lot borné — mais cadence HORAIRE et non quotidienne :
 //   le lot borne le coût par passage, la cadence fixe le débit, et 20 avis/jour
 //   pour toute la plateforme affamaient l'historique dès le deuxième client.
+// Session #34 : la responsabilité ne se transfère qu'à l'acceptation. Une
+//   proposition à une suppléante vit dans `offered_to`, À CÔTÉ de `provider_id` :
+//   le ménage ne quitte jamais le planning de la référente tant que personne ne
+//   l'a accepté. Job d'expiration des propositions (48 h, jamais au-delà de la
+//   veille du départ) — il n'alerte que sur ce que plus personne ne porte.
 // Session #33 : le ménage devient une entité (table `menages`, spec §11). Un
 //   writer unique réconcilie les ménages depuis bookings_snapshot et assigne le
 //   référent du bien d'office. Placé AVANT le dispatch : il coûte deux requêtes
@@ -55,7 +60,7 @@ const { pollBeds24Reviews } = require('../lib/cron-beds24-reviews')
 const { classerAvis } = require('../lib/cron-reviews-classify')
 const { classerMessages } = require('../lib/cron-messages-classify')
 const { rattacherMenages } = require('../lib/cron-rattacher-menages')
-const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+const { synchroniserMenages, expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -295,6 +300,21 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur synchronisation ménages:', err.message)
       results.errors.push({ context: 'sync_menages_entite', error: err.message })
+    }
+
+    // 4decies. EXPIRATION DES PROPOSITIONS DE MÉNAGE.
+    // ⚠ Une proposition qui expire ne change RIEN au porteur : elle s'efface, et
+    // le ménage reste chez la référente comme si de rien n'était — elle l'a
+    // toujours eu. C'est tout l'intérêt du modèle parallèle, et c'est pourquoi
+    // cette tâche n'alerte pas : rien n'est découvert.
+    // Seul cas alerté : un ménage que PERSONNE ne porte (bien sans référente
+    // dont la proposition expire) — il devient `orphaned`.
+    // Placée juste après la réconciliation, dont elle dépend : c'est elle qui
+    // pose les propositions.
+    try { await chrono.mesure('expirer_offres', () => expirerPropositions(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur expiration des propositions:', err.message)
+      results.errors.push({ context: 'expirer_offres', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

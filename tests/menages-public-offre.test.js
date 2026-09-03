@@ -19,7 +19,7 @@ const Module = require('node:module')
 const U = 'compte-1', TOKEN = 'marie-x', MARIE = 'p-marie', REGINA = 'p-regina'
 
 function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
-                     menage = { id: 'm1', provider_id: MARIE, status: 'offered' },
+                     menage = { id: 'm1', provider_id: REGINA, offered_to: MARIE, status: 'accepted' },
                      majTouche = true, erreurMaj = null, erreurMenage = null } = {}) {
   const etat = { majs: [], journal: [], incidents: [], requetes: [] }
   const client = {
@@ -37,12 +37,20 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           const q = { row, f: {} }
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
+            gt (c, v) { q.gt = { c, v }; return c2 },
             select () {
               etat.majs.push({ table, ...q })
               // ⚠ L'update est CONDITIONNEL : le double le simule. Sans cela,
               // retirer `.eq('status','offered')` du code ne casserait rien —
               // et c'est précisément la garde anti double affectation.
-              return Promise.resolve({ data: majTouche ? [{ id: 'm1' }] : [], error: erreurMaj })
+              // ⚠ LE DOUBLE APPLIQUE LA CONDITION. Rendre une valeur préréglée
+              // laissait passer le retrait de `.eq('offered_to', …)` ou de la
+              // garde d'expiration — c'est pourtant tout ce qui empêche une
+              // double affectation. Vérifié : la mutation fait tomber ce test.
+              const viseSonOffre = q.f.offered_to === undefined ||
+                                   q.f.offered_to === (menage && menage.offered_to)
+              const ok = majTouche && viseSonOffre
+              return Promise.resolve({ data: ok ? [{ id: 'm1' }] : [], error: erreurMaj })
             },
             then (ok) { etat.majs.push({ table, ...q }); return Promise.resolve({ error: erreurMaj }).then(ok) }
           }
@@ -121,17 +129,19 @@ test('accepter une offre : le ménage passe à accepted, avec sa date', async ()
   assert.ok(etat.majs[0].row.accepted_at)
 })
 
-test('l\'acceptation est ATOMIQUE : la condition est dans l\'update', async () => {
+test('l\'acceptation est ATOMIQUE, et elle TRANSFÈRE', async () => {
   // ⚠ Tester l'état avant de l'écrire laisserait une fenêtre entre les deux :
-  // l'hôte réassigne, ou une autre candidate accepte, et deux personnes se
-  // croient engagées sur le même ménage. La condition doit être posée par la
-  // base, pas par le code.
+  // l'hôte réassigne, ou l'offre expire, et deux personnes se croient engagées
+  // sur le même ménage. La condition doit être posée par la base.
+  // ⚠ Et c'est ICI, et seulement ici, que la responsabilité change de mains.
   const etat = preparer({})
   const handler = require('../api/menages-public')
   await handler(post('accepterMenage'), reponse())
   const maj = etat.majs[0]
-  assert.strictEqual(maj.f.status, 'offered', 'l\'update exige que l\'offre soit encore ouverte')
-  assert.strictEqual(maj.f.provider_id, MARIE, 'et qu\'elle lui soit toujours adressée')
+  assert.strictEqual(maj.f.offered_to, MARIE, 'l\'update exige que l\'offre lui soit adressée')
+  assert.ok(maj.gt && maj.gt.c === 'offer_expires_at', 'et qu\'elle ne soit pas expirée')
+  assert.strictEqual(maj.row.provider_id, MARIE, 'le porteur devient elle')
+  assert.strictEqual(maj.row.offered_to, null, 'et la proposition s\'efface')
 })
 
 test('offre déjà prise : 409, et surtout PAS un succès', async () => {
@@ -158,50 +168,49 @@ test('chaque acceptation écrit UNE ligne de journal, au nom de la prestataire',
 
 // ─── Le refus ──────────────────────────────────────────────────────────────
 
-test('refuser : le ménage devient ORPHANED, pas unassigned', async () => {
-  // ⚠ La distinction évite une boucle : `unassigned` serait réassigné à la même
-  // personne au cycle suivant, qui refuserait encore. `orphaned` dit « quelqu'un
-  // a refusé, il faut une décision humaine ».
+test('refuser un ménage PORTÉ par la référente : il reste chez elle', async () => {
+  // ⚠ LA RÈGLE DU 4 SEPTEMBRE. Un refus n'efface que la PROPOSITION, jamais le
+  // porteur. Rien n'est découvert — la référente l'a toujours eu — donc rien
+  // n'appelle une alerte. Avant, le refus mettait le ménage en `orphaned` et
+  // laissait un logement sans personne alors qu'une référente le couvrait.
   const etat = preparer({})
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.porte, true)
+  assert.strictEqual(etat.majs[0].row.offered_to, null, 'la proposition s\'efface')
+  assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur n\'est pas touché')
+  assert.strictEqual(etat.majs[0].row.status, undefined, 'le statut non plus')
+})
+
+test('un refus sur un ménage porté n\'ALERTE PAS', async () => {
+  // Rien n'est découvert : alerter serait du bruit, et l'hôte finirait par ne
+  // plus lire ces messages.
+  const etat = preparer({})
+  const handler = require('../api/menages-public')
+  await handler(post('refuserMenage'), reponse())
+  assert.strictEqual(etat.incidents.length, 0)
+})
+
+test('refuser un ménage que PERSONNE ne porte : orphaned, et l\'hôte est alerté', async () => {
+  // Le seul cas grave : un bien sans référente. Là, un logement ne sera pas
+  // préparé, et c'est à l'hôte de trancher.
+  const etat = preparer({ menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('refuserMenage'), res)
   assert.strictEqual(res.body.status, 'orphaned')
   assert.strictEqual(etat.majs[0].row.status, 'orphaned')
-  assert.strictEqual(etat.majs[0].row.provider_id, null)
-})
-
-test('un refus alerte L\'HÔTE, pas le fondateur', async () => {
-  // ⚠ `reportIncident` alerte le FONDATEUR — docs/kb/alertes.md : « canal
-  // plateforme/fondateur, à ne pas exposer aux hôtes ». L'hôte, lui, ne recevait
-  // RIEN, alors que le guide utilisateur lui promet « vous êtes prévenu » et que
-  // c'est à lui de confier le ménage à quelqu'un d'autre : personne ne prend le
-  // relais automatiquement.
-  const etat = preparer({})
-  const handler = require('../api/menages-public')
-  await handler(post('refuserMenage'), reponse())
+  assert.strictEqual(etat.majs[0].row.assigned_by, 'manual', 'décision humaine, verrouillée')
   assert.strictEqual(etat.incidents.length, 1)
-  assert.strictEqual(etat.incidents[0].propertyId, '209413')
-  assert.strictEqual(etat.incidents[0].departureDate, '2026-09-05')
   assert.strictEqual(etat.incidents[0].prenom, 'Marie', 'l\'hôte doit savoir QUI a refusé')
 })
 
-test('le refus VERROUILLE le ménage', async () => {
-  // Le statut `orphaned` seul ne suffisait pas : la boucle de rattrapage le
-  // respectait, mais l'annulation puis la résurrection — une date de départ qui
-  // bouge et revient — le re-proposaient à la personne qui venait de refuser.
+test('le refus est atomique : il ne touche que SA proposition', async () => {
   const etat = preparer({})
   const handler = require('../api/menages-public')
   await handler(post('refuserMenage'), reponse())
-  assert.strictEqual(etat.majs[0].row.assigned_by, 'manual')
-})
-
-test('le refus est atomique lui aussi', async () => {
-  const etat = preparer({})
-  const handler = require('../api/menages-public')
-  await handler(post('refuserMenage'), reponse())
-  assert.strictEqual(etat.majs[0].f.status, 'offered')
-  assert.strictEqual(etat.majs[0].f.provider_id, MARIE)
+  assert.strictEqual(etat.majs[0].f.offered_to, MARIE)
 })
 
 test('refuser une offre déjà retirée : 409, aucune alerte', async () => {
@@ -237,13 +246,12 @@ test('un profil DÉSACTIVÉ non plus', async () => {
 
 test('on ne répond pas à l\'offre de quelqu\'un d\'autre', async () => {
   // La condition atomique s'en charge : l'update ne touche rien.
-  const etat = preparer({ menage: { id: 'm1', provider_id: REGINA, status: 'offered' },
-                          majTouche: false })
+  const etat = preparer({ menage: { id: 'm1', provider_id: REGINA, offered_to: 'p-tiers', status: 'accepted' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('accepterMenage'), res)
   assert.strictEqual(res.code, 409)
-  assert.strictEqual(etat.majs[0].f.provider_id, MARIE, 'la condition porte SON identifiant')
+  assert.strictEqual(etat.majs[0].f.offered_to, MARIE, 'la condition porte SON identifiant')
 })
 
 // ─── Les entrées et les pannes ─────────────────────────────────────────────

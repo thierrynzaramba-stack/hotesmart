@@ -9,7 +9,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { chargerLiaisons, choisirPrestataire, horodatages } = require('../lib/cleaning/assign')
+const { chargerLiaisons, choisirPrestataire, horodatages, echeanceOffre } = require('../lib/cleaning/assign')
 
 const REGINA = 'p-regina', NOUVELLE = 'p-nouvelle'
 
@@ -25,13 +25,48 @@ test('le RÉFÉRENT (rang 1) est assigné d\'office, sans confirmation', async (
   assert.strictEqual(c.assignedBy, 'auto')
 })
 
-test('le SUPPLÉANT (rang 2+) doit confirmer : le ménage naît « offered »', async () => {
-  // L'engager d'office reviendrait à disposer du temps de quelqu'un sans qu'il
-  // ait rien accepté.
+test('un SUPPLÉANT ne PORTE pas le ménage : il reçoit une proposition', async () => {
+  // ⚠ LA RESPONSABILITÉ NE SE TRANSFÈRE QU'À L'ACCEPTATION (4 septembre 2026).
+  // Écrire le suppléant dans `provider_id` faisait sortir le ménage du planning
+  // de la référente pendant qu'il n'était encore accepté par personne : entre
+  // les deux, un logement pouvait n'être couvert par personne sans que personne
+  // ne le sache. La proposition vit dans `offered_to`, À CÔTÉ du porteur.
   const c = choisirPrestataire([{ providerId: NOUVELLE, rang: 2 }])
-  assert.strictEqual(c.providerId, NOUVELLE)
+  assert.strictEqual(c.providerId, null, 'personne ne porte : ce bien n\'a pas de référent')
+  assert.strictEqual(c.offeredTo, NOUVELLE)
   assert.strictEqual(c.status, 'offered')
   assert.strictEqual(c.referent, false)
+})
+
+test('un RÉFÉRENT porte le ménage, et rien n\'est proposé', async () => {
+  const c = choisirPrestataire([{ providerId: REGINA, rang: 1 }])
+  assert.strictEqual(c.providerId, REGINA)
+  assert.strictEqual(c.offeredTo, null)
+  assert.strictEqual(c.status, 'accepted')
+})
+
+// ─── L'échéance d'une proposition ──────────────────────────────────────────
+
+test('48 h, mais jamais au-delà de la veille du départ', async () => {
+  // Au-delà, une réponse arriverait trop tard pour servir à quoi que ce soit.
+  const t = Date.parse('2026-09-01T08:00:00Z')
+  // Départ lointain : le plafond de 48 h s'applique.
+  assert.strictEqual(echeanceOffre('2026-09-20', t), '2026-09-03T08:00:00.000Z')
+  // Départ proche : c'est la veille qui tranche.
+  assert.strictEqual(echeanceOffre('2026-09-02', t), '2026-09-01T16:00:00.000Z')
+})
+
+test('une échéance DÉJÀ PASSÉE rend null : on ne propose pas dans le vide', async () => {
+  // ⚠ Une proposition doit laisser un vrai délai de réponse. Sans cette garde,
+  // proposer un ménage pour demain après 18 h envoyait une proposition
+  // morte-née — expirée avant d'avoir été lue.
+  const t = Date.parse('2026-09-01T20:00:00Z')
+  assert.strictEqual(echeanceOffre('2026-09-02', t), null)
+})
+
+test('une date de départ illisible retombe sur les 48 h', async () => {
+  const t = Date.parse('2026-09-01T08:00:00Z')
+  assert.strictEqual(echeanceOffre(null, t), '2026-09-03T08:00:00.000Z')
 })
 
 test('le rang décide, pas l\'ordre d\'arrivée de la liste', async () => {

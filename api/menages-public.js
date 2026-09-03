@@ -342,7 +342,7 @@ module.exports = async function handler(req, res) {
 
     const identifiee = !!(profilPresta && profilPresta.active !== false)
     let requete = supabase.from('menages')
-      .select('booking_id, property_id, departure_date, status, provider_id')
+      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, offer_expires_at')
       .eq('user_id', userId)
       .neq('status', 'cancelled')
       .gte('departure_date', dateFrom)
@@ -361,9 +361,16 @@ module.exports = async function handler(req, res) {
         menages: null, prenom: null
       })
     }
+    // ⚠ DEUX FAMILLES DE MENAGES POUR UNE PRESTATAIRE IDENTIFIEE :
+    //   - ceux qu'elle PORTE (`provider_id`), y compris ceux qu'on est en train
+    //     de proposer a quelqu'un d'autre — ils restent les siens tant que
+    //     personne n'a accepte ;
+    //   - ceux qu'on lui PROPOSE (`offered_to`), qu'elle ne porte pas encore.
+    // Les confondre, c'etait soit lui retirer un menage dont elle reste
+    // responsable, soit lui en attribuer un qu'elle n'a pas accepte.
     requete = identifiee
-      ? requete.eq('provider_id', profilPresta.id)
-      : requete.is('provider_id', null).in('property_id', propIdsPresta)
+      ? requete.or(`provider_id.eq.${profilPresta.id},offered_to.eq.${profilPresta.id}`)
+      : requete.is('provider_id', null).is('offered_to', null).in('property_id', propIdsPresta)
     const { data: mn, error: errMen } = await requete
     // ⚠ Une liste vide par panne serait indiscernable d'« aucun menage », et la
     // prestataire conclurait qu'elle n'a rien a faire aujourd'hui.
@@ -439,7 +446,19 @@ module.exports = async function handler(req, res) {
       // `accepted` = engage. `null` quand ce token n'a pas encore de profil —
       // l'ecran ne doit alors afficher aucun etat d'assignation plutot qu'un
       // etat faux.
-      menages: menagesAssignes,
+      // Chaque menage dit CE QU'IL EST pour celle qui regarde :
+      //   role 'porteur'  -> il est a elle (une proposition peut etre en cours) ;
+      //   role 'propose'  -> on le lui propose, elle ne le porte pas encore.
+      // Le prenom de la personne sollicitee n'est PAS renvoye a la porteuse :
+      // savoir qu'une proposition est en cours lui suffit, et le nom de sa
+      // collegue ne la regarde pas plus que l'organisation de l'hote.
+      menages: menagesAssignes && menagesAssignes.map(m => ({
+        booking_id: m.booking_id, property_id: m.property_id,
+        departure_date: m.departure_date, status: m.status,
+        role: profilPresta && m.provider_id === profilPresta.id ? 'porteur' : 'propose',
+        propose: !!m.offered_to,
+        expire_le: m.offered_to ? m.offer_expires_at : null
+      })),
       prenom: profilPresta ? profilPresta.first_name : null
     })
 
@@ -582,7 +601,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   }
 
   const { data: menage, error: errMen } = await supabase.from('menages')
-    .select('id, provider_id, status')
+    .select('id, provider_id, status, offered_to')
     .eq('user_id', userId).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .maybeSingle()
@@ -593,10 +612,22 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   if (!menage) return res.status(404).json({ error: 'Ménage introuvable' })
 
   if (accepte) {
+    // ⚠ C'EST ICI, ET SEULEMENT ICI, QUE LA RESPONSABILITE SE TRANSFERE.
+    // Jusqu'a cet instant le menage etait porte par la referente ; il bascule
+    // maintenant chez celle qui accepte, et la proposition s'efface.
+    //
+    // La condition reste ATOMIQUE, et elle porte desormais sur `offered_to` (a
+    // qui on l'a propose) et sur l'echeance. La tester avant d'ecrire laisserait
+    // une fenetre ou l'hote reassigne, ou l'offre expire, entre les deux.
     const { data: maj, error: errMaj } = await supabase.from('menages')
-      .update({ status: 'accepted', accepted_at: new Date().toISOString(),
+      .update({ provider_id: profil.id, status: 'accepted',
+                offered_to: null, offered_at: null, offer_expires_at: null,
+                assigned_by: 'auto',
+                assignment_reason: `Accepte par ${profil.first_name}.`,
+                accepted_at: new Date().toISOString(),
                 updated_at: new Date().toISOString() })
-      .eq('id', menage.id).eq('status', 'offered').eq('provider_id', profil.id)
+      .eq('id', menage.id).eq('offered_to', profil.id)
+      .gt('offer_expires_at', new Date().toISOString())
       .select('id')
     if (errMaj) {
       console.error('[menages-public] acceptation echec:', errMaj.message)
@@ -610,30 +641,37 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     }
     await supabase.from('menage_assignment_log').insert({
       user_id: userId, menage_id: menage.id, event: 'accepted',
-      to_provider_id: profil.id, actor: 'provider'
+      // Le transfert est trace des deux cotes : qui le portait, qui le porte.
+      from_provider_id: menage.provider_id, to_provider_id: profil.id,
+      actor: 'provider',
+      reason: menage.provider_id ? 'Transfert a l\'acceptation.' : null
     })
     return res.json({ success: true, status: 'accepted' })
   }
 
-  // REFUS. ⚠ Le menage devient `orphaned`, PAS `unassigned` : sans cette
-  // distinction, le writer le reassignerait a la meme personne au cycle suivant,
-  // qui le refuserait encore — une boucle dont personne ne sortirait. `orphaned`
-  // dit « quelqu'un a refuse, il faut une decision humaine », et le writer n'y
-  // touche pas. L'escalade automatique vers la candidate suivante reste reportee
-  // (spec §3 bis) : ici, c'est l'hote qui tranche.
+  // REFUS. ⚠ IL N'EFFACE QUE LA PROPOSITION, JAMAIS LE PORTEUR.
+  //
+  // Si une referente porte ce menage, il RESTE chez elle comme si de rien
+  // n'etait — elle l'a toujours eu. Rien n'est decouvert, donc rien n'appelle
+  // une alerte, et le selecteur de reassignation de l'hote redevient libre.
+  // La version precedente mettait le menage en `orphaned` et le retirait a tout
+  // le monde : un logement se retrouvait sans personne alors qu'une referente
+  // le couvrait.
+  //
+  // Le cas grave est l'autre : PERSONNE ne porte ce menage — un bien sans
+  // referente. La, il devient `orphaned`, se verrouille (le writer ne doit pas
+  // le rendre a qui vient de le refuser) et l'hote est alerte.
+  const porte = !!menage.provider_id
   const { data: maj, error: errMaj } = await supabase.from('menages')
-    // ⚠ `assigned_by: 'manual'` EN PLUS DU STATUT. Le statut seul ne suffisait
-    // pas : la boucle de rattrapage le respectait, mais deux autres chemins du
-    // writer l'ignoraient. Un menage refuse dont la date de depart bouge passe a
-    // `cancelled` ; s'il reparait, la resurrection RECALCULE l'assignation et le
-    // re-proposait a la personne qui venait de le refuser — la boucle que ce lot
-    // dit fermer. Un refus EST une decision humaine : il se verrouille comme
-    // celles de l'hote, et le verrou, lui, est respecte partout.
-    .update({ status: 'orphaned', provider_id: null, offered_at: null, accepted_at: null,
-              assigned_by: 'manual',
-              assignment_reason: `Refuse par ${profil.first_name}.`,
-              updated_at: new Date().toISOString() })
-    .eq('id', menage.id).eq('status', 'offered').eq('provider_id', profil.id)
+    .update({
+      offered_to: null, offered_at: null, offer_expires_at: null,
+      ...(porte
+        ? { assignment_reason: `Propose a ${profil.first_name}, qui a refuse : reste chez son porteur.` }
+        : { status: 'orphaned', assigned_by: 'manual',
+            assignment_reason: `Refuse par ${profil.first_name}, et personne ne porte ce menage.` }),
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', menage.id).eq('offered_to', profil.id)
     .select('id')
   if (errMaj) {
     console.error('[menages-public] refus echec:', errMaj.message)
@@ -647,21 +685,25 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     from_provider_id: profil.id, actor: 'provider',
     reason: 'Refus depuis la PWA.'
   })
-  // ⚠ L'HOTE DOIT LE SAVOIR — et `reportIncident` ne l'aurait PAS prevenu :
-  // c'est le canal FONDATEUR (docs/kb/alertes.md : « a ne pas exposer aux
-  // hotes »). Le commit precedent l'annoncait pourtant dans le guide utilisateur
-  // (« vous etes prevenu ») : une promesse que le code ne tenait pas.
-  // `alertMenageRefuse` pose une tache in-app, toujours visible et sans config
-  // prealable, plus un SMS/email best-effort. Un menage refuse et non repris est
-  // un logement qui ne sera pas prepare, et personne ne prend le relais
-  // automatiquement (l'escalade reste reportee, spec §3 bis).
-  try {
-    await alertMenageRefuse({
-      userId, propertyId: String(propertyId), bookingId,
-      departureDate, prenom: profil.first_name
-    })
-  } catch (e) { console.error('[menages-public] alerte refus echec:', e.message) }
-  return res.json({ success: true, status: 'orphaned' })
+  // ⚠ ALERTE SEULEMENT SI PLUS PERSONNE NE PORTE CE MENAGE.
+  // Alerter sur un refus dont la referente garde la charge serait du bruit :
+  // rien n'est decouvert, elle l'a toujours eu, et l'hote finirait par ne plus
+  // lire ces messages. Il est informe autrement — la mention « propose a X »
+  // disparait de son planning, et le selecteur redevient libre.
+  //
+  // Quand PERSONNE ne le porte, en revanche, c'est un logement qui ne sera pas
+  // prepare : la, l'alerte est justifiee. `alertMenageRefuse` pose une tache
+  // in-app, toujours visible et sans configuration prealable, plus un SMS/email
+  // best-effort — `reportIncident` n'aurait prevenu que le fondateur.
+  if (!porte) {
+    try {
+      await alertMenageRefuse({
+        userId, propertyId: String(propertyId), bookingId,
+        departureDate, prenom: profil.first_name
+      })
+    } catch (e) { console.error('[menages-public] alerte refus echec:', e.message) }
+  }
+  return res.json({ success: true, status: porte ? 'accepted' : 'orphaned', porte })
 }
 
 async function avisDeLaPrestataire (req, res, token) {

@@ -65,6 +65,8 @@
     /* ⚠ Une offre n'est PAS un menage a faire : elle attend une reponse. La
        distinguer a l'oeil evite qu'on s'organise autour de quelque chose qu'on
        n'a pas encore accepte — ou qu'on laisse filer une offre sans repondre. */
+    .badge-propose { display: inline-block; font-size: 9px; font-style: italic; opacity: 0.75;
+                     margin-top: 3px; }
     .badge-offre { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
                    border: 1px dashed currentColor; border-radius: 999px; padding: 0 5px; margin-top: 3px; }
     .menage-card.offre { border: 1px dashed var(--primary); }
@@ -1443,9 +1445,36 @@ if ("serviceWorker" in navigator) {
   // personne n'est engage : le dire a l'oeil evite qu'on s'organise autour de
   // quelque chose qu'on n'a pas confirme — ou qu'on laisse filer une offre sans
   // repondre. Le referent ne voit jamais ce badge : son menage nait accepte.
-  function estUneOffre (m) { return !!(m.assign && m.assign.status === 'offered') }
+  // ⚠ DEUX SITUATIONS TRES DIFFERENTES, et les confondre serait grave :
+  //   - `role: 'propose'` — on ME le propose. Je ne le porte pas encore, je dois
+  //     repondre, et un delai court.
+  //   - `role: 'porteur'` + `propose` — je le PORTE, et il est propose a
+  //     quelqu'un d'autre. Il reste ma responsabilite tant que personne n'a
+  //     accepte : la mention est discrete, et il n'y a rien a faire.
+  function estUneOffre (m) { return !!(m.assign && m.assign.role === 'propose') }
+  function estPropose (m) { return !!(m.assign && m.assign.role === 'porteur' && m.assign.propose) }
+
+  // Le temps qu'il reste pour repondre, en clair. « Il reste 3 h » se decide
+  // mieux qu'une date d'expiration a calculer soi-meme.
+  function delaiRestant (m) {
+    const t = m.assign && m.assign.expire_le ? Date.parse(m.assign.expire_le) : NaN
+    if (!t || isNaN(t)) return ''
+    const ms = t - Date.now()
+    if (ms <= 0) return 'expirée'
+    const h = Math.floor(ms / 3600000)
+    if (h >= 24) return `${Math.floor(h / 24)} j restants`
+    if (h >= 1) return `${h} h restantes`
+    return `${Math.max(1, Math.round(ms / 60000))} min restantes`
+  }
+
   function badgeOffre (m) {
-    return estUneOffre(m) ? '<div class="badge-offre">À CONFIRMER</div>' : ''
+    if (estUneOffre(m)) {
+      const d = delaiRestant(m)
+      return `<div class="badge-offre">À CONFIRMER${d ? ' · ' + d : ''}</div>`
+    }
+    // ⚠ Discret : ce menage reste le sien, rien ne lui est demande.
+    if (estPropose(m)) return '<div class="badge-propose">proposé à quelqu\'un</div>'
+    return ''
   }
 
   function openModal(m) {
@@ -1483,8 +1512,15 @@ if ("serviceWorker" in navigator) {
     btnNon.style.display = offre ? '' : 'none'
     btn.style.display = offre ? 'none' : ''
     if (offre) {
+      const d = delaiRestant(m)
+      if (d) showModalWarning(`À confirmer — ${d}.`)
       document.getElementById('modal').style.display = 'flex'
       return
+    }
+    // ⚠ La porteuse garde TOUS ses boutons : ce menage est le sien tant que
+    // personne n'a accepte. La mention l'informe, elle ne lui retire rien.
+    if (estPropose(m)) {
+      showModalWarning('Ce ménage est proposé à quelqu\'un d\'autre. Il reste le vôtre tant que personne ne l\'a accepté.')
     }
 
     if (m.done) {

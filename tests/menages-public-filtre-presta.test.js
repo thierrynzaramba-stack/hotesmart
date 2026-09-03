@@ -41,7 +41,8 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
         select (c) { a.colonnes = c; return chain },
         eq (c, v) { a.f[c] = v; return chain },
         neq (c, v) { a.neq = { c, v }; return chain },
-        is (c, v) { a.is = { c, v }; return chain },
+        is (c, v) { (a.is = a.is || []).push({ c, v }); return chain },
+        or (e) { a.or = e; return chain },
         in (c, v) { a.ins = { c, v }; return chain },
         gte (c, v) { a.gte = { c, v }; return chain },
         lte (c, v) { a.lte = { c, v }; return chain },
@@ -68,9 +69,20 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
           // ⚠ Les filtres sont HONORES. Un double qui rend la liste entiere
           // quel que soit le `.eq('provider_id')` ou le `.is(..., null)`
           // laisserait passer exactement la fuite que ce fichier garde.
-          const d = (menages || []).filter(m =>
-            (a.f.provider_id === undefined || m.provider_id === a.f.provider_id) &&
-            (!a.is || a.is.c !== 'provider_id' || m.provider_id == null))
+          // ⚠ Le `.or()` est HONORE : c'est lui qui fait remonter les DEUX
+          // familles — ce qu'elle porte, et ce qu'on lui propose. Un double qui
+          // l'ignore rendrait le filtre indetectable.
+          const d = (menages || []).filter(m => {
+            if (a.or) {
+              const ids = [...String(a.or).matchAll(/(provider_id|offered_to)\.eq\.([^,)]+)/g)]
+              return ids.some(([, col, val]) => String(m[col] || '') === val)
+            }
+            if (a.f.provider_id !== undefined && m.provider_id !== a.f.provider_id) return false
+            for (const c of (a.is || [])) {
+              if (c.v === null && m[c.c] != null) return false
+            }
+            return true
+          })
           return { data: d, error: null }
         }
         return { data: [], error: null }
@@ -99,9 +111,9 @@ function reponse () {
 }
 const req = () => ({ method: 'GET', query: { token: TOKEN }, headers: {} })
 
-const MENAGE = (booking, provider, depart) => ({
+const MENAGE = (booking, provider, depart, over = {}) => ({
   booking_id: booking, property_id: '209413', departure_date: depart,
-  provider_id: provider, status: 'accepted'
+  provider_id: provider, status: 'accepted', offered_to: null, offer_expires_at: null, ...over
 })
 
 // ─── Le filtre par personne ────────────────────────────────────────────────
@@ -147,14 +159,51 @@ test('un ménage ANNULÉ ne revient pas au planning', async () => {
   assert.deepStrictEqual(q.neq, { c: 'status', v: 'cancelled' })
 })
 
-test('la lecture des ménages est filtrée par COMPTE et par PRESTATAIRE', async () => {
+test('la lecture des ménages est filtrée par COMPTE et par PERSONNE', async () => {
   // ⚠ Sans `user_id`, la service key contourne la RLS et rien ne cloisonne.
+  // Le filtre par personne, lui, porte désormais sur les DEUX colonnes : ce
+  // qu'elle porte, et ce qu'on lui propose.
   const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
   const handler = require('../api/menages-public')
   await handler(req(), reponse())
   const q = journal.find(a => a.table === 'menages')
   assert.strictEqual(q.f.user_id, U)
-  assert.strictEqual(q.f.provider_id, REGINA)
+  assert.ok(q.or && q.or.includes(`provider_id.eq.${REGINA}`), 'ce qu\'elle porte')
+  assert.ok(q.or && q.or.includes(`offered_to.eq.${REGINA}`), 'et ce qu\'on lui propose')
+})
+
+test('un ménage PROPOSÉ à quelqu\'un d\'autre reste dans SON planning', async () => {
+  // ⚠ LA RÈGLE DU 4 SEPTEMBRE. La proposition ne lui retire rien : tant que
+  // personne n'a accepté, le ménage reste sa responsabilité, avec la mention.
+  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05',
+    { offered_to: NOUVELLE, offer_expires_at: '2026-09-04T16:00:00Z' })] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.bookings.map(b => b.id), ['b1'], 'il reste à l\'écran')
+  assert.strictEqual(res.body.menages[0].role, 'porteur')
+  assert.strictEqual(res.body.menages[0].propose, true, 'avec la mention')
+})
+
+test('le prénom de la personne sollicitée n\'est PAS renvoyé à la porteuse', async () => {
+  // Savoir qu'une proposition est en cours lui suffit ; le nom de sa collègue ne
+  // la regarde pas plus que l'organisation de l'hôte.
+  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05',
+    { offered_to: NOUVELLE, offer_expires_at: '2026-09-04T16:00:00Z' })] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.ok(!JSON.stringify(res.body).includes(NOUVELLE), 'aucun identifiant de la sollicitée')
+})
+
+test('un ménage PROPOSÉ à elle porte son délai, et le rôle « propose »', async () => {
+  preparer({ menages: [MENAGE('b1', null, '2026-09-05',
+    { offered_to: REGINA, offer_expires_at: '2026-09-04T16:00:00Z', status: 'offered' })] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.body.menages[0].role, 'propose')
+  assert.strictEqual(res.body.menages[0].expire_le, '2026-09-04T16:00:00Z')
 })
 
 // ─── Le pont de convergence, assumé ────────────────────────────────────────
