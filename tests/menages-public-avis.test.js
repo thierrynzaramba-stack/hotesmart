@@ -41,6 +41,8 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
                      erreurDroits = null, erreurListe = null,
                      profil = { id: PROFIL, first_name: 'Régina', active: true },
                      periodes = [{ user_id: U, provider_id: PROFIL, property_id_ref: 'COL', debut: null, fin: null }],
+                     biens = [{ user_id: U, provider_property_id: 'COL', name: 'Colomiers' }],
+                     erreurBiens = null,
                      journal = [] } = {}) {
   const client = {
     from (table) {
@@ -66,6 +68,12 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
           (a.f.user_id == null || p.user_id === a.f.user_id) &&
           (a.f.provider_id == null || p.provider_id === a.f.provider_id)), error: null }
         if (table === 'menage_events') return { data: [], error: null }
+        if (table === 'properties') {
+          if (erreurBiens) return { data: null, error: erreurBiens }
+          return { data: biens.filter(b =>
+            (a.f.user_id == null || b.user_id === a.f.user_id) &&
+            a.ins.every(f => f.v.includes(String(b[f.c])))), error: null }
+        }
         if (table === 'ota_reviews') {
           if (erreurListe && !a.head) return { data: null, count: null, error: erreurListe }
           const d = avis.filter(v =>
@@ -128,9 +136,33 @@ test('la réponse contient bien ce qu\'elle DOIT contenir', async () => {
   assert.strictEqual(res.body.autorise, true)
   assert.strictEqual(res.body.avis.length, 1)
   assert.deepStrictEqual(Object.keys(res.body.avis[0]).sort(),
-    ['bien', 'date', 'extrait', 'id', 'prive', 'verdict'])
+    ['bien', 'bienNom', 'date', 'extrait', 'id', 'prive', 'verdict'])
   assert.strictEqual(res.body.avis[0].extrait, 'la bouilloire n\'était pas propre')
+  assert.strictEqual(res.body.avis[0].bienNom, 'Colomiers')
   assert.ok(res.body.ratio, 'le ratio doit être présent')
+})
+
+test('le nom du bien est résolu POUR CE COMPTE seulement', async () => {
+  // Un bien d'un autre compte portant le même identifiant provider (Beds24
+  // n'est pas globalement unique entre comptes) ne doit pas prêter son nom.
+  preparer({ biens: [{ user_id: 'autre-compte', provider_property_id: 'COL', name: 'Villa du voisin' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.avis[0].bienNom, null)
+})
+
+test('une panne sur les noms de biens ne coupe PAS la liste', async () => {
+  // Le nom est un confort ; l'avis, lui, doit s'afficher. On retombe sur
+  // l'identifiant plutôt que de rendre un 503.
+  preparer({ erreurBiens: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.avis.length, 1)
+  assert.strictEqual(res.body.avis[0].bienNom, null)
+  assert.strictEqual(res.body.avis[0].bien, 'COL')
 })
 
 test('la requête ne SÉLECTIONNE pas les colonnes interdites', async () => {

@@ -20,7 +20,8 @@ const path = require('node:path')
 // ⚠ Les pages touchees par la delegation y entrent aussi : c'est exactement le
 // genre de refactor ou une reference d'id survit a l'element qu'elle designait.
 const PAGES = ['pages/settings.html', 'pages/invitation.html', 'pages/avis.html',
-               'apps/menages/index.html', 'apps/agent-ai/messagerie.html']
+               'apps/menages/index.html', 'apps/menages/public.html',
+               'apps/agent-ai/messagerie.html']
 
 // `$('x')`, `getElementById('x')`, `querySelector('#x')`
 const APPELS = [

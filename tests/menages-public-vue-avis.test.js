@@ -1,0 +1,256 @@
+// tests/menages-public-vue-avis.test.js
+// La vue « Avis » de la PWA prestataire, cote NAVIGATEUR.
+//
+// ⚠ POURQUOI CE TEST EXISTE. Le serveur est deja garde par
+// tests/menages-public-avis.test.js — mais tout son travail se perd au dernier
+// metre si l'affichage lit mal ce qu'il recoit. Deux pieges concrets :
+//   1. `ratio.erreur` signale une PANNE. Un ecran qui l'ignore affiche
+//      « 0 avis, 0 remarque » a une prestataire qui en a 98 ; elle en tire une
+//      conclusion fausse sur son propre travail et la garde. C'est exactement ce
+//      qui est arrive une fois sur pages/avis.html.
+//   2. L'extrait est du texte ecrit par un voyageur. Non echappe, il s'execute.
+//
+// Le script de la page est inline. On en extrait le bloc « Vue Avis » et on
+// l'evalue avec un DOM minimal : ce sont les VRAIES fonctions qui tournent ici,
+// pas une copie qui pourrait deriver.
+
+const test = require('node:test')
+const assert = require('node:assert')
+const fs = require('node:fs')
+const path = require('node:path')
+const vm = require('node:vm')
+
+const HTML = fs.readFileSync(path.join(__dirname, '..', 'apps/menages/public.html'), 'utf8')
+
+const DEBUT = '  // ─── Vue « Avis » ─'
+const FIN   = '  // ─── Helpers dates ─'
+
+function extraireBloc () {
+  const i = HTML.indexOf(DEBUT)
+  const j = HTML.indexOf(FIN)
+  assert.ok(i > 0 && j > i, 'le bloc « Vue Avis » doit rester delimite par ses deux commentaires')
+  return HTML.slice(i, j)
+}
+
+function elem (id) {
+  return {
+    id, innerHTML: '', textContent: '', style: {}, dataset: {},
+    classList: { toggle () {}, add () {}, remove () {} },
+    addEventListener () {},
+    querySelectorAll: () => []
+  }
+}
+
+// Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
+// ecrit dans chaque conteneur.
+function contexte ({ reponses = [] } = {}) {
+  const els = new Map()
+  const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
+  const appels = []
+  const ctx = {
+    console,
+    document: {
+      getElementById: get,
+      querySelector: sel => get(sel.replace(/^[.#]/, '')),
+      querySelectorAll: () => []
+    },
+    fetch: async (url) => {
+      appels.push(url)
+      const r = reponses.shift()
+      if (!r) throw new Error('reseau')
+      if (r.jete) throw new Error('reseau')
+      return { ok: r.status < 400, status: r.status, json: async () => r.body }
+    },
+    currentToken: 'tok-test',
+    routeRender () {}
+  }
+  vm.createContext(ctx)
+  vm.runInContext(extraireBloc(), ctx)
+  // `let avisCharge` vit dans le scope lexical du script, pas sur l'objet
+  // contexte : on le relit par une evaluation dans ce meme contexte.
+  const lire = expr => vm.runInContext(expr, ctx)
+  return { ctx, els, get, appels, lire }
+}
+
+const RATIO_OK = { total: 98, positif: 10, remarque: 15, rien_signale: 73, periode: 'toujours' }
+
+// ─── Le contrat `ratio.erreur` ─────────────────────────────────────────────
+
+test('PANNE de compteurs : jamais « 0 avis », un etat de panne explicite', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: { total: 0, positif: 0, remarque: 0, erreur: true }, avis: [] })
+  const etat = get('avis-etat').innerHTML
+  assert.ok(/indisponible/i.test(etat), 'l\'ecran doit dire que le service est indisponible')
+  assert.ok(!/\b0 avis\b/.test(etat + get('avis-ratio').innerHTML), 'aucun zero ne doit etre affiche')
+  assert.strictEqual(get('avis-ratio').style.display, 'none', 'les compteurs restent caches')
+  assert.strictEqual(get('avis-liste').innerHTML, '', 'et la liste aussi')
+})
+
+test('ratio ABSENT : traite comme une panne, pas comme un zero', async () => {
+  // Une reponse tronquee ou un champ renomme cote serveur ne doit pas se lire
+  // comme « aucun avis ».
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, avis: [] })
+  assert.ok(/indisponible/i.test(get('avis-etat').innerHTML))
+})
+
+test('la panne laisse la vue REESSAYABLE a la prochaine ouverture', async () => {
+  const { ctx, lire } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: { erreur: true }, avis: [] })
+  assert.strictEqual(lire('avisCharge'), false, 'rien n\'a ete affiche : il ne faut pas marquer la vue chargee')
+})
+
+// ─── Les deux etats vides, qui ne disent pas la meme chose ─────────────────
+
+test('« aucun avis » REEL : total a zero', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: { total: 0, positif: 0, remarque: 0 }, avis: [] })
+  assert.ok(/Aucun avis pour l/.test(get('avis-liste').innerHTML))
+  assert.strictEqual(get('avis-ratio').style.display, '', 'le ratio s\'affiche : zero est ici un vrai resultat')
+})
+
+test('des avis, mais aucun qui parle de proprete : message DIFFERENT', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: { total: 12, positif: 0, remarque: 0 },
+    avis: [{ id: 'a', verdict: 'rien_signale', extrait: null, date: '2026-08-01', bien: 'COL', bienNom: 'Colomiers' }]
+  })
+  const html = get('avis-liste').innerHTML
+  assert.ok(/Aucune mention/.test(html), 'ne pas dire « aucun avis » quand il y en a 12')
+  assert.ok(!/Aucun avis pour l/.test(html))
+})
+
+// ─── La liste ──────────────────────────────────────────────────────────────
+
+test('seuls les avis qui parlent de proprete sont listes', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: RATIO_OK,
+    avis: [
+      { id: '1', verdict: 'remarque',     extrait: 'bouilloire sale',  date: '2026-08-28', bien: 'COL', bienNom: 'Colomiers' },
+      { id: '2', verdict: 'positif',      extrait: 'impeccable',       date: '2026-08-20', bien: 'COL', bienNom: 'Colomiers' },
+      { id: '3', verdict: 'rien_signale', extrait: null,               date: '2026-08-10', bien: 'COL', bienNom: 'Colomiers' }
+    ]
+  })
+  const html = get('avis-liste').innerHTML
+  assert.ok(html.includes('bouilloire sale') && html.includes('impeccable'))
+  assert.strictEqual((html.match(/avis-card/g) || []).length, 2, 'l\'avis sans mention n\'a pas sa place dans la liste')
+  // Le ratio garde le TOTAL reel : les deux chiffres ne disent pas la meme chose
+  // et l'ecran doit porter les deux.
+  assert.ok(get('avis-ratio').innerHTML.includes('98'))
+})
+
+test('l\'etiquette « retour prive » n\'apparait que quand elle est posee', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: RATIO_OK,
+    avis: [
+      { id: '1', verdict: 'remarque', extrait: 'un', date: '2026-08-28', bien: 'C', bienNom: 'C', prive: true },
+      { id: '2', verdict: 'remarque', extrait: 'deux', date: '2026-08-27', bien: 'C', bienNom: 'C', prive: false }
+    ]
+  })
+  assert.strictEqual((get('avis-liste').innerHTML.match(/retour privé/g) || []).length, 1)
+})
+
+test('un extrait hostile est ECHAPPE', async () => {
+  // L'extrait vient d'un voyageur. Il finit dans un innerHTML.
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: RATIO_OK,
+    avis: [{ id: '1', verdict: 'remarque', bien: 'C', bienNom: '<b>x</b>', date: '2026-08-28',
+             extrait: '<img src=x onerror="alert(1)">' }]
+  })
+  const html = get('avis-liste').innerHTML
+  assert.ok(!html.includes('<img'), 'la balise ne doit pas etre injectee')
+  // `onerror=` subsiste comme TEXTE, et c'est inoffensif ; ce qui compte est
+  // que le guillemet soit echappe, donc qu'aucun attribut ne se referme.
+  assert.ok(!html.includes('onerror="'), 'l\'attribut ne doit pas pouvoir se former')
+  assert.ok(!html.includes('<b>x</b>'), 'le nom du bien est echappe lui aussi')
+  assert.ok(html.includes('&lt;img'))
+})
+
+test('l\'identifiant technique du bien ne s\'affiche pas quand le nom manque', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: RATIO_OK,
+    avis: [{ id: '1', verdict: 'remarque', extrait: 'x', date: '2026-08-28', bien: '287031', bienNom: null }]
+  })
+  assert.ok(!get('avis-liste').innerHTML.includes('287031'), '« 287031 » ne dit rien a une femme de menage')
+})
+
+// ─── La sonde de demarrage : qui voit l'onglet ─────────────────────────────
+
+test('self_view_reviews coupe : PAS d\'onglet', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'Régina', autorise: false, ratio: null, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, undefined, 'l\'onglet ne doit meme pas apparaitre')
+})
+
+test('profil desactive : PAS d\'onglet', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { actif: false, ratio: null, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, undefined)
+})
+
+test('hors ligne : PAS d\'onglet, et surtout aucune exception', async () => {
+  const { ctx, get } = contexte({ reponses: [{ jete: true }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, undefined)
+})
+
+test('token refuse : PAS d\'onglet', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 401, body: { error: 'Token invalide' } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, undefined)
+})
+
+test('autorisee : l\'onglet apparait', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'Régina', autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, '')
+})
+
+test('503 a la sonde : l\'onglet apparait, en etat de panne', async () => {
+  // Masquer sur 503 ferait passer une panne pour un droit retire — et la
+  // prestataire n'aurait aucun moyen de savoir qu'il faut reessayer.
+  const { ctx, get } = contexte({ reponses: [{ status: 503, body: { error: 'Service temporairement indisponible' } }] })
+  await ctx.initAvis()
+  assert.strictEqual(get('tabs').style.display, '')
+})
+
+test('la sonde ne demande PAS la liste : un seul aller-retour, sans detail', async () => {
+  const { ctx, appels } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.initAvis()
+  assert.strictEqual(appels.length, 1)
+  assert.ok(!appels[0].includes('detail=1'), 'la vue par defaut n\'a pas besoin de la liste')
+})
+
+// ─── Le chargement de la liste ─────────────────────────────────────────────
+
+test('503 au chargement : « service indisponible », jamais une liste vide', async () => {
+  const { ctx, get, lire } = contexte({ reponses: [{ status: 503, body: { error: 'x' } }] })
+  await ctx.chargerAvis()
+  assert.ok(/indisponible/i.test(get('avis-etat').innerHTML))
+  assert.strictEqual(lire('avisCharge'), false)
+})
+
+test('panne reseau au chargement : etat de panne, pas « aucun avis »', async () => {
+  const { ctx, get } = contexte({ reponses: [{ jete: true }] })
+  await ctx.chargerAvis()
+  assert.ok(/indisponible/i.test(get('avis-etat').innerHTML))
+  assert.ok(!/Aucun avis/.test(get('avis-etat').innerHTML))
+})
+
+test('droit retire ENTRE la sonde et le clic : l\'onglet disparait', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'R', autorise: false, ratio: null, avis: [] } }] })
+  await ctx.chargerAvis()
+  assert.strictEqual(get('tabs').style.display, 'none')
+  assert.strictEqual(get('avis-liste').innerHTML, '', 'et rien n\'est affiche')
+})
+
+test('chargement reussi : la liste est demandee AVEC detail=1', async () => {
+  const { ctx, appels } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.chargerAvis()
+  assert.ok(appels[0].includes('detail=1'))
+  assert.ok(appels[0].includes('action=avis'))
+})

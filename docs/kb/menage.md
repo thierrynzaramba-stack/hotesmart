@@ -86,6 +86,27 @@ En ouvrant le lien (**aucun compte à créer**), il arrive sur **« HôteSmart C
   L'acquittement est **persisté même hors-ligne** (miroir local + file de sync rejouée à la
   reconnexion) : une notif acquittée **ne réapparaît plus** au rechargement.
 
+### Onglet « Avis » (ce que le prestataire voit de son propre travail)
+Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet**.
+
+- **Qui le voit** : le droit `self_view_reviews` du profil (défaut **oui**). Coupé par l'hôte,
+  l'onglet **n'apparaît pas du tout** — pas d'écran « accès refusé ».
+- **En tête** : le nombre d'avis pris en compte, puis 👍 propreté saluée / 👎 remarques.
+  Ces chiffres sortent de la **même fonction** que la page hôte `/avis` (`lib/stats-avis.js`) :
+  deux compteurs calculés séparément finiraient par se contredire.
+- **En dessous** : la liste des avis qui **parlent de propreté** (date, bien, extrait). Les avis
+  qui n'évoquent pas le ménage ne sont pas listés — ils restent comptés dans le total.
+- **Étiquette « retour privé »** : l'extrait vient d'un message que le voyageur **n'avait pas
+  rendu public**. À ne pas citer ailleurs.
+- **Jamais** : le nom du voyageur, le texte complet de l'avis, la note. Le serveur ne les envoie
+  pas (`api/menages-public.js`, `action=avis`).
+- **Quels avis** : ceux des ménages qui lui sont attribués — soit par `menage_events`, soit par
+  une **période déclarée** (`prestataire_periodes`). Un avis non attribuable reste **non attribué**.
+- **États distincts** : « chargement », « service indisponible, réessayez » (**panne** : 503 ou
+  `ratio.erreur`), et « aucun avis pour l'instant » (**vrai** zéro). ⚠️ Une panne ne doit
+  **jamais** s'afficher comme « 0 avis » : la prestataire en tirerait une conclusion fausse
+  sur son travail.
+
 ### Installation PWA (facultative)
 L'app est installable sur l'écran d'accueil :
 - **Android (Chrome)** : menu ⋮ → **Installer l'application / Ajouter à l'écran d'accueil**.

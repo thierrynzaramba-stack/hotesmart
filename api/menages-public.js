@@ -420,8 +420,26 @@ async function avisDeLaPrestataire (req, res, token) {
         // le deduire, donc de lui transmettre le texte prive.
         prive: extraitEstPrive(a),
         date: a.stay_end || a.received_at,
-        bien: a.property_id_ref
+        bien: a.property_id_ref,
+        // Rempli juste apres. `property_id_ref` est un identifiant provider :
+        // « 287031 » ne dit rien a une femme de menage.
+        bienNom: null
       }))
+
+      // Le nom lisible du bien. Il ne peut PAS etre resolu par le front : sa
+      // liste de biens est construite a partir des reservations de la fenetre
+      // visible (14 jours en arriere, 30 en avant), alors qu'un avis peut
+      // porter sur un sejour bien plus ancien — le bien serait alors sans nom.
+      // Une panne ici ne coupe rien : on retombe sur l'identifiant.
+      const refs = [...new Set(avis.map(a => a.bien).filter(Boolean))]
+      if (refs.length) {
+        const { data: biens, error: errBiens } = await supabase.from('properties')
+          .select('provider_property_id, name')
+          .eq('user_id', userId).in('provider_property_id', refs)
+        if (errBiens) console.error('[menages-public] noms des biens echec:', errBiens.message)
+        const nomParRef = new Map((biens || []).map(b => [String(b.provider_property_id), b.name]))
+        avis.forEach(a => { a.bienNom = nomParRef.get(String(a.bien)) || null })
+      }
     }
   }
 
