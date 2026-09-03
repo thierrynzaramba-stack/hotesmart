@@ -21,10 +21,10 @@ const MEMBRE = '22222222-2222-4222-8222-222222222222'
 const REGINA = 'aaaa1111-1111-4111-8111-111111111111'
 const NOUVELLE = 'bbbb2222-2222-4222-8222-222222222222'
 
-function preparer ({ user = PROD, profil = null, permissions = null,
+function preparer ({ user = PROD, profil = null, permissions = null, compteAttendu = PROD,
                      prestataire = { id: REGINA, first_name: 'Régina', active: true },
                      menage = { id: 'm1', provider_id: null, status: 'unassigned' },
-                     liaison = { rang: 1 }, erreurProfil = null } = {}) {
+                     liaison = { rang: 1 }, erreurProfil = null, erreurLiaison = null } = {}) {
   const etat = { majs: [], journal: [], requetes: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -49,8 +49,19 @@ function preparer ({ user = PROD, profil = null, permissions = null,
             return Promise.resolve({ data: profil, error: null })
           }
           if (table === 'profile_permissions') return Promise.resolve({ data: permissions, error: null })
-          if (table === 'menages') return Promise.resolve({ data: menage, error: null })
-          if (table === 'property_cleaning_providers') return Promise.resolve({ data: liaison, error: null })
+          if (table === 'menages') {
+            // ⚠ LES FILTRES SONT HONORES. Le double rendait le menage quels que
+            // soient les `.eq`, si bien que `.eq('user_id', …)` — la SEULE garde
+            // inter-comptes de ce chemin, `refsDuPerimetre` rendant null pour un
+            // titulaire — n'etait couverte par aucune assertion. Le retirer
+            // laissait les 18 tests verts.
+            const bon = a.f.user_id === compteAttendu &&
+                        String(a.f.property_id) === '209413' &&
+                        String(a.f.booking_id) === 'b1' &&
+                        a.f.departure_date === '2026-09-05'
+            return Promise.resolve({ data: bon ? menage : null, error: null })
+          }
+          if (table === 'property_cleaning_providers') return Promise.resolve({ data: liaison, error: erreurLiaison })
           return Promise.resolve({ data: null, error: null })
         },
         then (ok, ko) { return Promise.resolve({ data: [], error: null }).then(ok, ko) }
@@ -254,5 +265,38 @@ test('un ménage introuvable rend 404, pas une création implicite', async () =>
   const res = reponse()
   await handler(post(CORPS), res)
   assert.strictEqual(res.code, 404)
+  assert.strictEqual(etat.majs.length, 0)
+})
+
+test('le ménage est cherché SUR LE COMPTE de l\'appelant', async () => {
+  // ⚠ `refsDuPerimetre` rend `null` pour un titulaire : le contrôle de périmètre
+  // ne s'applique pas à lui, et `.eq('user_id', …)` est alors la SEULE garde
+  // inter-comptes de cet endpoint. Le double honore désormais les filtres, si
+  // bien que retirer cette ligne fait tomber ce test.
+  const { handler, etat } = preparer({ compteAttendu: 'un-autre-compte' })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.strictEqual(res.code, 404, 'un ménage d\'un autre compte doit rester introuvable')
+  assert.strictEqual(etat.majs.length, 0)
+})
+
+test('un ménage ANNULÉ ne se réassigne pas', async () => {
+  // Le prochain cycle du cron le ré-annulerait : l'hôte verrait son geste défait
+  // sans un mot.
+  const { handler, etat } = preparer({ menage: { id: 'm1', provider_id: null, status: 'cancelled' } })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.majs.length, 0)
+})
+
+test('PANNE de lecture de la liaison : 503, jamais une référente dégradée', async () => {
+  // Ignorer cette erreur transformait silencieusement une référente en
+  // suppléante : elle recevait une offre à confirmer pour un ménage qui aurait
+  // dû lui être attribué d'office.
+  const { handler, etat } = preparer({ liaison: null, erreurLiaison: { message: 'timeout' } })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.strictEqual(res.code, 503)
   assert.strictEqual(etat.majs.length, 0)
 })

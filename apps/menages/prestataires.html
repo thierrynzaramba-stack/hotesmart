@@ -73,6 +73,19 @@
 
       <div class="section-card" id="form-section" style="display:none">
         <div class="section-title" id="form-title">Nouveau prestataire</div>
+        <!-- ⚠ Cet ecran cree un lien PWA, PAS une personne : il insere dans
+             `public_tokens` sans creer de profil. Depuis le lot 2.1, l'app
+             menage assigne les menages a des PROFILS — un lien cree ici ne peut
+             donc recevoir aucune assignation, et son porteur ne voit que les
+             menages qui ne sont a personne. Le dire plutot que de laisser
+             quelqu'un decouvrir une PWA a moitie vide. La convergence est le
+             lot 2.5. -->
+        <div class="empty-state" style="text-align:left;font-size:12px;line-height:1.5;margin-bottom:12px">
+          Pour une <strong>nouvelle personne</strong> qui va faire des ménages,
+          passez par <a href="/settings">Réglages → Équipe et droits</a> : c'est là
+          qu'un profil est créé, et c'est le profil qui reçoit les ménages.
+          Ce formulaire crée un lien de consultation, sans personne derrière.
+        </div>
         <div class="form-section">
           <div class="form-row">
             <input class="form-input" id="presta-name" placeholder="Nom (ex: Marie, Société Propre+)">

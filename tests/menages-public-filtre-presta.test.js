@@ -31,7 +31,7 @@ const SNAPS = [
 
 function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true },
                      menages = null, erreurProfil = null, erreurMenages = null,
-                     tokenPropIds = ['209413'] } = {}) {
+                     tokenPropIds = ['209413'], done = [] } = {}) {
   const journal = []
   const client = {
     from (table) {
@@ -41,6 +41,7 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
         select (c) { a.colonnes = c; return chain },
         eq (c, v) { a.f[c] = v; return chain },
         neq (c, v) { a.neq = { c, v }; return chain },
+        is (c, v) { a.is = { c, v }; return chain },
         in (c, v) { a.ins = { c, v }; return chain },
         gte (c, v) { a.gte = { c, v }; return chain },
         lte (c, v) { a.lte = { c, v }; return chain },
@@ -60,7 +61,17 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
       function rep () {
         if (table === 'properties') return { data: BIENS, error: null }
         if (table === 'bookings_snapshot') return { data: SNAPS, error: null }
-        if (table === 'menages') return { data: menages, error: erreurMenages }
+        if (table === 'menage_done') return { data: done, error: null }
+        if (table === 'menages') {
+          if (erreurMenages) return { data: null, error: erreurMenages }
+          // ⚠ Les filtres sont HONORES. Un double qui rend la liste entiere
+          // quel que soit le `.eq('provider_id')` ou le `.is(..., null)`
+          // laisserait passer exactement la fuite que ce fichier garde.
+          const d = (menages || []).filter(m =>
+            (a.f.provider_id === undefined || m.provider_id === a.f.provider_id) &&
+            (!a.is || a.is.c !== 'provider_id' || m.provider_id == null))
+          return { data: d, error: null }
+        }
         return { data: [], error: null }
       }
       return chain
@@ -147,26 +158,49 @@ test('la lecture des ménages est filtrée par COMPTE et par PRESTATAIRE', async
 
 // ─── Le pont de convergence, assumé ────────────────────────────────────────
 
-test('un token SANS profil garde l\'ancien comportement (filtrage par bien)', async () => {
-  // ⚠ Dette `profiles` <-> `public_tokens` du §6. Couper l'accès d'un lien
-  // legacy en le rendant vide serait une panne silencieuse pour la personne qui
-  // l'utilise tous les jours.
-  preparer({ profil: null, menages: null })
+test('un token SANS profil ne voit QUE ce qui n\'est assigné à personne', async () => {
+  // ⚠ LA FUITE QUE CE TEST FERME. `apps/menages/prestataires.html` crée un
+  // `public_tokens` SANS profil : garder l'ancien filtrage par bien pour ces
+  // tokens-là aurait montré à une prestataire nouvellement créée TOUS les
+  // ménages de Régina sur les mêmes biens, noms des voyageurs compris.
+  // La règle se dérive du modèle, pas d'une date de bascule : pas de profil,
+  // donc rien de ce qui appartient à quelqu'un.
+  preparer({ profil: null, menages: [
+    MENAGE('b1', REGINA, '2026-09-05'),
+    { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
+  ] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
-  assert.strictEqual(res.body.bookings.length, 2, 'les deux séjours du bien restent visibles')
+  assert.deepStrictEqual(res.body.bookings.map(b => b.id), ['b2'],
+    'le ménage de Régina ne doit pas sortir ; celui de personne, si')
+  assert.ok(!JSON.stringify(res.body).includes('Alice'), 'ni le voyageur de Régina')
   assert.strictEqual(res.body.menages, null, 'et aucun état d\'assignation n\'est affiché')
 })
 
-test('un profil DÉSACTIVÉ ne bascule pas non plus sur le filtre', async () => {
-  // Son token vaut ce qu'il valait ; c'est la désactivation du profil, pas le
-  // filtre, qui doit lui retirer l'accès — et ce n'est pas l'objet de ce lot.
-  preparer({ profil: { id: REGINA, first_name: 'Régina', active: false }, menages: [] })
+test('un lien legacy sur un bien SANS assignation continue de fonctionner', async () => {
+  // Contre-épreuve : fermer la fuite ne doit pas vider l'écran de quelqu'un qui
+  // s'en sert tous les jours. Colomiers est dans ce cas — 14 ménages, personne
+  // d'assigné.
+  preparer({ profil: null, menages: [
+    { ...MENAGE('b1', null, '2026-09-05'), status: 'unassigned' },
+    { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
+  ] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
   assert.strictEqual(res.body.bookings.length, 2)
+})
+
+test('un profil DÉSACTIVÉ retombe sur la même règle, pas sur l\'ancienne', async () => {
+  // Un profil désactivé ne peut pas porter d'assignation : son token ne doit
+  // pas pour autant redevenir une clé passe-partout.
+  preparer({ profil: { id: REGINA, first_name: 'Régina', active: false },
+             menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.bookings, [], 'rien qui appartienne à quelqu\'un')
 })
 
 // ─── Les pannes coupent, elles n'élargissent pas ───────────────────────────
@@ -201,4 +235,22 @@ test('le statut d\'assignation est renvoyé, pour distinguer proposé et engagé
   assert.strictEqual(res.body.menages.length, 1)
   assert.strictEqual(res.body.menages[0].status, 'offered')
   assert.strictEqual(res.body.prenom, 'Régina')
+})
+
+test('la liste des ménages FAITS suit la personne, pas les biens du token', async () => {
+  // ⚠ Elle était calculée sur les biens du token : les `booking_id` et les dates
+  // des ménages terminés par l'autre prestataire traversaient le filtre que ce
+  // lot vient d'installer.
+  preparer({
+    menages: [MENAGE('b1', REGINA, '2026-09-05')],
+    done: [
+      { booking_id: 'b1', property_id: '209413', departure_date: '2026-09-05', done_at: 'x' },
+      { booking_id: 'b2', property_id: '209413', departure_date: '2026-09-09', done_at: 'y' }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.done.map(d => d.booking_id), ['b1'],
+    'le ménage fait par l\'autre ne doit pas sortir')
 })

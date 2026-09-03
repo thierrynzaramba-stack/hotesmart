@@ -26,6 +26,20 @@ le **dérivait** de `bookings_snapshot.departure`. Conception : `docs/specs/spec
 - **Seul un séjour `confirmed` produit un ménage.** `blocked` (blocage propriétaire) et
   `request` n'en produisent pas : c'est la source historique des ménages fantômes.
 - **Fenêtre** : départs de J−30 à J+180. Au-delà, l'historique ne change plus.
+  ⚠️ La lecture est **ordonnée et plafonnée** (500 lignes, plafond **global**). Si le plafond
+  mord, **aucune annulation n'a lieu ce cycle** : `vivants` serait construit sur un
+  sous-ensemble, et des ménages bien vivants seraient annulés. Créer reste sûr.
+- **Le statut se lit avec `isActiveStatus(snap, providerDuBien)`**, jamais par comparaison de
+  texte : une ligne antérieure à l'unification du 31 août porte le statut **brut** du provider
+  (Beds24 appelle `new` une réservation confirmée). La comparer à `'confirmed'` faisait passer
+  un séjour vivant pour disparu — et le writer annulait son ménage pendant que le planning de
+  l'hôte continuait de l'afficher. Le `provider` du bien est **obligatoire**, sinon `black`
+  retombe sur `confirmed` et le ménage fantôme revient.
+- **Un ménage annulé à tort est ressuscité** dès que sa réservation reparaît : sans ce chemin,
+  il disparaissait de la PWA pour de bon.
+- **Les ménages restés sans personne sont réassignés à chaque cycle** — le cas de tout nouvel
+  hôte qui branche son PMS avant de configurer ses prestataires. ⚠️ Jamais un
+  `assigned_by='manual'`, jamais une offre en cours : ce serait défaire une décision.
 - **Une réservation annulée ou déplacée** met le ménage en `cancelled` — elle ne le supprime
   pas : une prestataire a pu s'organiser autour, et l'historique de qualité s'appuie dessus.
 
@@ -57,9 +71,17 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
 ### Ce que chaque écran montre
 
 - **PWA** : chaque prestataire ne voit que **ses** ménages (`menages.provider_id` = le profil
-  derrière son token). ⚠️ **Pont assumé** : un token sans profil correspondant garde l'ancien
-  filtrage par bien — couper un lien legacy en le rendant vide serait une panne silencieuse
-  pour la personne qui l'utilise. C'est la dette `profiles` ↔ `public_tokens`.
+  derrière son token). Un token **sans profil** ne voit que ce qui n'est **assigné à personne**.
+  ⚠️ **Pourquoi cette règle et pas « l'ancien filtrage par bien »** : `apps/menages/prestataires.html`
+  crée un `public_tokens` **sans profil**. Garder l'ancien comportement pour ces tokens-là
+  aurait montré à une prestataire créée depuis cet écran **tous** les ménages de Régina sur les
+  mêmes biens, noms des voyageurs compris — exactement ce que ce chantier existe pour empêcher.
+  La règle se dérive du modèle, pas d'une date de bascule : un lien legacy continue de
+  fonctionner tant que personne n'est assigné sur ses biens (cas de Colomiers), et se ferme de
+  lui-même dès qu'une personne l'est.
+  ⚠️ **Dette, lot 2.5** : créer une personne se fait dans **Réglages → Équipe et droits**
+  (`api/membres.js`, mode `lien`), qui pose le profil **et** le token. Le formulaire de l'app
+  ménage ne crée qu'un lien de consultation — un encart le dit désormais à l'écran.
 - **Écran hôte** : une pastille par ménage — le prénom, en pointillés quand c'est `offered`
   (un suppléant qui n'a pas répondu n'est **pas** un ménage couvert), « personne » en clair
   quand il n'y a pas d'assignation. Le sélecteur de la modale réassigne en deux clics.

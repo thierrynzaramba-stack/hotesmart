@@ -67,6 +67,12 @@ function preparer ({ perimetre = ['209413'], uuids = [BULLE.id],
         if (nom === 'menages' || nom === 'menage_assignment_log' || nom === 'property_cleaning_providers') {
           return { data: tableau ? [] : null, error: null }
         }
+        // ⚠ L'annuaire des prestataires est demande par `.eq('access_mode','lien')`.
+        // Le rendre indistinctement du profil de la GARDE masquerait le droit
+        // qu'on veut verifier ici.
+        if (nom === 'profiles' && q._f.access_mode === 'lien') {
+          return { data: [{ id: 'presta-1', first_name: 'Régina', active: true }], error: null }
+        }
         if (nom === 'profiles') {
           const l = { id: 'p1', account_user_id: PROD, member_user_id: MEMBRE,
                       is_owner: false, active: membreActif, accepted_at: '2026-09-01' }
@@ -271,4 +277,17 @@ test('LECTURE ne vaut pas ÉCRITURE : le domaine reste à read', async () => {
   const messages = require('node:fs').readFileSync(path.join(__dirname, '..', 'api/messages.js'), 'utf8')
   assert.ok(/domaine: 'menages', niveau: 'read'/.test(menages))
   assert.ok(/domaine: 'messages', niveau: 'read'/.test(messages))
+})
+
+test('menages : un membre `prestataires: none` n\'obtient PAS l\'annuaire', async () => {
+  // ⚠ Ce commit pose la séparation des deux droits pour l'ÉCRITURE ; la lecture
+  // doit la respecter aussi. Sans ce contrôle, un membre qui n'a que le planning
+  // récupérait la liste des femmes de ménage du compte — prénoms et
+  // identifiants — qu'il ne peut de toute façon pas réassigner.
+  preparer()
+  const res = reponse()
+  await require('../api/menages')(req(PROD), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.prestataires, [], 'aucun prestataire ne doit sortir')
+  assert.ok(!JSON.stringify(res.body).includes('Régina'))
 })
