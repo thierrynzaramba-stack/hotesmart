@@ -408,13 +408,28 @@ test('file : `provider` est lu, sinon le seuil de note ne s\'applique jamais', (
   }
 })
 
-test('file : un verdict HUMAIN n\'est jamais repris par le modèle', () => {
-  // Même logique que le DO NOTHING des détections : ce que le modèle dirait
-  // d'une seconde lecture n'a aucune valeur face à une correction déjà faite.
-  // Sans ce filtre, la correction de l'hôte aurait tenu jusqu'au prochain
-  // changement de texte, puis aurait été silencieusement écrasée.
-  const fs = require('node:fs'), pathm = require('node:path')
-  const src = fs.readFileSync(pathm.join(__dirname, '..', 'lib/cron-reviews-classify.js'), 'utf8')
-  assert.match(src, /\.neq\('verdict_source',\s*'humain'\)/,
-    'la file doit exclure les verdicts humains')
+test('file ET décompte : les verdicts humains sont exclus des DEUX requêtes', async () => {
+  // ⚠ La version précédente cherchait la chaîne dans le fichier source. Elle
+  // disait « la garde existe quelque part », pas « la garde s'applique » :
+  // retirer le filtre de la requête de DÉCOMPTE, en gardant celui de la file,
+  // la laissait au vert. On lit désormais ce que le double a enregistré.
+  const journal = []
+  await classerAvis(null, { supabase: fauxClient([AVIS_TAG], journal), forcer: true })
+  const lectures = journal.filter(a => a.table === 'ota_reviews' && a.op === 'select')
+  assert.strictEqual(lectures.length, 2, 'la file, puis le décompte du reste')
+  for (const l of lectures) {
+    assert.deepStrictEqual(l.neq, { verdict_source: 'humain' },
+      'une correction humaine ne se relit pas et ne se recompte pas')
+  }
+})
+
+test('écriture : le verdict automatique ne peut pas écraser une correction humaine', async () => {
+  // TOCTOU réel : entre la lecture de la file et l'écriture il y a un appel au
+  // modèle, soit plusieurs secondes. L'hôte peut requalifier pendant ce temps.
+  // La garde doit donc être sur l'ÉCRITURE, pas seulement sur la lecture.
+  const journal = []
+  await classerAvis(null, { supabase: fauxClient([AVIS_TAG], journal), forcer: true })
+  const maj = journal.find(a => a.op === 'update')
+  assert.deepStrictEqual(maj.neq, { verdict_source: 'humain' },
+    'l\'update doit être conditionnel, sinon la correction est écrasée et la ligne gelée')
 })

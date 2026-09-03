@@ -592,17 +592,20 @@ test('requalifier : le verdict change et devient HUMAIN', async () => {
   assert.ok(maj.row.verdict_modifie_at, 'la date de correction est tracée')
 })
 
-test('requalifier : l\'avis n\'est JAMAIS supprimé ni son texte modifié', async () => {
-  // Un avis reste un fait. Le faire disparaître parce qu'on n'aime pas sa
-  // lecture automatique effacerait la parole du voyageur.
+test('requalifier : SEULES les colonnes de verdict sont écrites', async () => {
+  // ⚠ LISTE BLANCHE, pas liste noire. La version précédente énumérait cinq
+  // colonnes interdites : ajouter `content_private`, `reply` ou `statut: ignore`
+  // à la charge utile passait au vert — or `statut: 'ignore'` fait littéralement
+  // disparaître l'avis de la liste, c'est-à-dire l'effacement que ce lot
+  // interdit. Une liste blanche ne se périme pas à l'ajout d'une colonne.
   const etat = preparer({ avis: [AVIS_AUTO] })
   const handler = require('../api/avis')
   await handler(reqRequalif(AVIS_AUTO.id, 'positif'), reponse())
   const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
-  for (const interdit of ['content', 'content_public', 'overall_score', 'score_clean', 'received_at']) {
-    assert.ok(!(interdit in maj.row), `${interdit} ne doit pas être touché`)
-  }
-  assert.ok(!etat.ecritures.some(e => e.op === 'delete'))
+  assert.deepStrictEqual(Object.keys(maj.row).sort(), [
+    'ai_analyzed_at', 'ai_clean_excerpt', 'ai_clean_verdict',
+    'verdict_modifie_at', 'verdict_modifie_par', 'verdict_source'
+  ], 'aucune autre colonne ne doit être touchée — surtout pas statut ni le contenu')
 })
 
 test('requalifier : l\'extrait du modèle est retiré, il ne colle plus au verdict', async () => {
@@ -667,4 +670,61 @@ test('requalifier : un id qui n\'est pas un UUID est refusé sans requête', asy
   await handler(reqRequalif('99', 'positif'), res)
   assert.strictEqual(res.code, 400)
   assert.strictEqual(etat.ecritures.length, 0)
+})
+
+// ─── Le cloisonnement par COMPTE de valider / requalifier ───────────────────
+// ⚠ POURQUOI CES TESTS EXISTENT. Supprimer `.eq('user_id', userId)` de
+// `requalifier` laissait 41 tests au vert. Or `refsDuPerimetre` renvoie `null`
+// — donc AUCUNE vérification de périmètre — pour un titulaire et pour tout
+// membre `property_scope: 'all'`. Sur ces profils, ce filtre est la SEULE
+// défense, la service key contournant la RLS. Sans lui, n'importe quel compte
+// avec `avis: write` requalifiait par simple UUID l'avis de n'importe quel hôte
+// de la plateforme — et le gelait en `humain`.
+
+const AVIS_TIERS_CONF = { id: '66666666-6666-4666-8666-666666666666',
+                          user_id: '33333333-3333-4333-8333-333333333333',
+                          statut: 'confirme', property_id_ref: REF_A,
+                          ai_clean_verdict: 'positif', verdict_source: 'auto',
+                          received_at: '2026-08-01T00:00:00Z' }
+
+test('requalifier : l\'avis d\'un AUTRE compte est introuvable, jamais modifié', async () => {
+  const etat = preparer({ avis: [AVIS_TIERS_CONF] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_TIERS_CONF.id, 'remarque'), res)
+  assert.strictEqual(res.code, 404, 'la relecture doit être filtrée par user_id')
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('valider : la détection d\'un AUTRE compte est introuvable, jamais modifiée', async () => {
+  // Même trou de couverture, antérieur à ce lot : `valider` ne l'avait pas non
+  // plus.
+  const etat = preparer({ avis: [{ ...AVIS_TIERS_CONF, statut: 'detecte' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqValider(AVIS_TIERS_CONF.id, 'confirme'), res)
+  assert.strictEqual(res.code, 404)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('requalifier : une détection IGNORÉE ne se requalifie pas non plus', async () => {
+  // Elle ne s'affiche plus : la requalifier modifierait le verdict d'une ligne
+  // que personne ne voit, et la gèlerait en `humain`.
+  const etat = preparer({ avis: [{ ...AVIS_AUTO, statut: 'ignore' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_AUTO.id, 'positif'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('requalifier : ai_analyzed_at est posé si la réanalyse l\'avait effacé', async () => {
+  // Sans ça, la ligne devenait MORTE : badge « Analyse en cours » à vie, plus de
+  // sélecteur donc plus de correction possible, et la file ne la reprend jamais
+  // puisqu'elle est `humain`.
+  const etat = preparer({ avis: [{ ...AVIS_AUTO, ai_analyzed_at: null }] })
+  const handler = require('../api/avis')
+  await handler(reqRequalif(AVIS_AUTO.id, 'remarque'), reponse())
+  const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
+  assert.ok(maj.row.ai_analyzed_at, 'un verdict humain EST une analyse')
 })

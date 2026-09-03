@@ -317,7 +317,7 @@ async function requalifier (req, res, garde) {
   // ⚠ Relecture AVANT ecriture, sur le compte cible et dans le perimetre :
   // l'id vient du client (REVIEW.md regle 11).
   const { data: ligne, error: errLire } = await supabase.from('ota_reviews')
-    .select('id, property_id_ref, ai_clean_verdict, statut')
+    .select('id, property_id_ref, ai_clean_verdict, statut, ai_analyzed_at')
     .eq('id', id).eq('user_id', userId).maybeSingle()
   if (errLire) return res.status(500).json({ error: 'Lecture impossible' })
   if (!ligne) return res.status(404).json({ error: 'Introuvable' })
@@ -327,11 +327,14 @@ async function requalifier (req, res, garde) {
     return res.status(403).json({ error: 'Bien hors de votre perimetre' })
   }
 
-  // Une detection en attente se tranche par Confirmer / Ignorer, pas par une
-  // requalification : deux gestes pour la meme decision se contrediraient.
-  if (ligne.statut === 'detecte') {
+  // Seule une ligne RETENUE se requalifie. Une detection en attente se tranche
+  // par Confirmer / Ignorer — deux gestes pour la meme decision se
+  // contrediraient — et une detection ignoree ne s'affiche plus : la
+  // requalifier modifierait le verdict d'une ligne que personne ne voit, et la
+  // gelerait en `humain`.
+  if (ligne.statut !== 'confirme') {
     return res.status(409).json({
-      error: 'Cette detection se confirme ou s\'ignore, elle ne se requalifie pas' })
+      error: 'Seul un avis retenu se requalifie ; une detection se confirme ou s\'ignore' })
   }
 
   // ⚠ L'AVIS N'EST JAMAIS SUPPRIME, ni son texte modifie. Seul le verdict
@@ -345,7 +348,13 @@ async function requalifier (req, res, garde) {
     verdict_modifie_at:  new Date().toISOString(),
     verdict_modifie_par: garde.userId || null,
     // L'extrait vient du modele : il ne correspond plus au verdict corrige.
-    ai_clean_excerpt:    null
+    ai_clean_excerpt:    null,
+    // ⚠ Un verdict humain EST une analyse. Sans cette ligne, requalifier un avis
+    // dont le trigger venait de remettre ai_analyzed_at a null — ce qui arrive
+    // des que le poll reecrit le texte — laissait une ligne MORTE : badge
+    // « Analyse en cours » a vie, plus de selecteur donc plus de correction
+    // possible, et la file ne la reprend jamais puisqu'elle est `humain`.
+    ai_analyzed_at:      ligne.ai_analyzed_at || new Date().toISOString()
   }).eq('id', id).eq('user_id', userId)
 
   if (error) {

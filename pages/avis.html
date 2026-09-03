@@ -482,15 +482,19 @@
     $('liste').addEventListener('change', async e => {
       const id = e.target?.dataset?.requalif
       if (!id) return
-      const avant = e.target.value
+      // ⚠ `change` se declenche APRES que le select a pris sa nouvelle valeur :
+      // celle d'avant n'est memorisee nulle part. En cas d'echec, on RECHARGE au
+      // lieu de laisser l'ecran mentir — sinon la ligne affichait le selecteur
+      // sur un verdict et le badge sur un autre, dont aucun n'etait celui de la
+      // base, jusqu'au prochain rechargement manuel.
+      const choisi = e.target.value
       e.target.disabled = true
       try {
-        await appelAPI('avis', 'POST', { action: 'requalifier', id, verdict: avant })
-        await charger()
+        await appelAPI('avis', 'POST', { action: 'requalifier', id, verdict: choisi })
       } catch (err) {
-        e.target.disabled = false
         alert((err && err.message) || 'Correction impossible.')
       }
+      await charger()
     })
 
     $('liste').addEventListener('click', async e => {

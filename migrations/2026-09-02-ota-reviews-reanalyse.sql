@@ -1,3 +1,10 @@
+-- ⚠⚠ SUPERSEDE PAR migrations/2026-09-03-ota-reviews-requalification.sql.
+-- NE PAS REJOUER SEUL : ce fichier contient une version de ota_reviews_touch()
+-- SANS la garde des verdicts humains. Le rejouer supprimerait cette garde en
+-- silence — et sa propre requete de verification resterait au vert, puisqu'elle
+-- ne cherche que 'ai_analyzed_at'. Rejouer la migration du 3 septembre a la
+-- place, ou apres.
+--
 -- migrations/2026-09-02-ota-reviews-reanalyse.sql
 -- Chantier AVIS, lot 4 — reanalyse automatique quand le texte du voyageur change.
 --
