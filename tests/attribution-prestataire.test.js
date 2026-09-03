@@ -200,3 +200,42 @@ test('une panne se signale, elle ne rend pas « aucun avis »', async () => {
   const r = await avisDuPrestataire(sb, { userId: U, prestataireId: P_REGINA })
   assert.strictEqual(r.erreur, true)
 })
+
+// ─── Le cloisonnement, avec des données de DEUX comptes ────────────────────
+// ⚠ POURQUOI CES TESTS EXISTENT. Toutes les fixtures portaient `user_id: U` :
+// les quatre requêtes pouvaient perdre leur filtre de compte sans qu'un test
+// bronche. Le module revendique la règle 1 dans ses commentaires ; le test ne
+// la vérifiait pas.
+
+const AUTRE = 'compte-2'
+
+test('les ménages d\'un AUTRE compte ne sont jamais lus', async () => {
+  const r = await avisDuPrestataire(fauxClient({
+    profils: [REGINA],
+    menages: [{ id: 'm-autre', user_id: AUTRE, token: 'regina-x' }],
+    avis: [{ id: 'a-autre', user_id: AUTRE, menage_event_id: 'm-autre', property_id_ref: '209413' }]
+  }), { userId: U, prestataireId: P_REGINA })
+  assert.deepStrictEqual(r.ids, [], 'même token, autre compte : rien')
+})
+
+test('les périodes d\'un AUTRE compte ne s\'appliquent pas', async () => {
+  const r = await avisDuPrestataire(fauxClient({
+    profils: [TIPHAINE],
+    periodes: [{ user_id: AUTRE, provider_id: P_TIPH, property_id_ref: 'COL', debut: null, fin: null }],
+    avis: [{ id: 'a1', user_id: U, property_id_ref: 'COL', stay_end: '2026-05-01' }]
+  }), { userId: U, prestataireId: P_TIPH })
+  assert.deepStrictEqual(r.ids, [])
+})
+
+test('les avis d\'un AUTRE compte ne sont jamais attribués', async () => {
+  // La défense principale : la service key contourne la RLS.
+  const r = await avisDuPrestataire(fauxClient({
+    profils: [TIPHAINE],
+    periodes: [{ user_id: U, provider_id: P_TIPH, property_id_ref: 'COL', debut: null, fin: null }],
+    avis: [
+      { id: 'mien', user_id: U,     property_id_ref: 'COL', stay_end: '2026-05-01' },
+      { id: 'autre', user_id: AUTRE, property_id_ref: 'COL', stay_end: '2026-05-01' }
+    ]
+  }), { userId: U, prestataireId: P_TIPH })
+  assert.deepStrictEqual(r.ids, ['mien'])
+})

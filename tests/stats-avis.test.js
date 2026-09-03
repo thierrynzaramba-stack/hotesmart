@@ -28,17 +28,41 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
       // n'importe quelle table — y compris `profiles` — et le test « une
       // prestataire sans attribution voit zéro » ne testait rien de réel.
       const AUTRES = ['profiles', 'prestataire_periodes', 'menage_events']
+      // Jeu d'attribution optionnel : sans lui, `avisDuPrestataire` sort tout de
+      // suite et la ligne `.in('id', idsAttribues)` n'est JAMAIS exercee — le
+      // test de l'invariant central du §6 ne testait donc rien.
+      const attrib = fauxClient.attribution || null
       const chain = {
         select (_c, opts) { appel.head = !!(opts && opts.head); appel.count = opts && opts.count; return chain },
         eq (c, v) { appel.filtres[c] = v; return chain },
         gte (c, v) { appel.gte = { colonne: c, valeur: v }; return chain },
         in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
+        not () { return chain },
+        order () { return chain },
+        // `avisDuPrestataire` borne ses lectures : le double doit resoudre.
+        limit () {
+          if (AUTRES.includes(table)) {
+            const d = attrib && attrib[table] ? attrib[table] : []
+            return Promise.resolve({ data: d, error: null })
+          }
+          const d = lignes.filter(l =>
+            Object.entries(appel.filtres).every(([c, v]) =>
+              c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
+            appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))))
+          return Promise.resolve({ data: d, error: null })
+        },
         maybeSingle () {
-          if (AUTRES.includes(table)) return Promise.resolve({ data: null, error: null })
+          if (AUTRES.includes(table)) {
+            const d = attrib && attrib[table] ? attrib[table] : []
+            return Promise.resolve({ data: d[0] || null, error: null })
+          }
           return Promise.resolve({ data: null, error: null })
         },
         then (r) {
-          if (AUTRES.includes(table)) return Promise.resolve({ data: [], count: 0, error: null }).then(r)
+          if (AUTRES.includes(table)) {
+            const d = attrib && attrib[table] ? attrib[table] : []
+            return Promise.resolve({ data: d, count: d.length, error: null }).then(r)
+          }
           if (erreur) return Promise.resolve({ data: null, count: null, error: erreur }).then(r)
           const d = lignes.filter(l =>
             Object.entries(appel.filtres).every(([c, v]) =>
@@ -230,4 +254,30 @@ test('ratio : une prestataire sans attribution voit ZÉRO, pas le ratio de l\'h�
                                       periode: 'toujours', maintenant: T0 })
   assert.strictEqual(r.total, 0)
   assert.strictEqual(r.remarque, 0)
+})
+
+// ─── L'invariant central du §6, réellement exercé ──────────────────────────
+test('ratio : une prestataire ne voit QUE ses avis, jamais ceux de l\'hôte', async () => {
+  // ⚠ Supprimer `.in('id', idsAttribues)` de ratioProprete fait voir à la
+  // prestataire le ratio COMPLET de l'hôte — le scénario que la spec déclare le
+  // plus important à empêcher — et les 801 tests restaient verts. Le test
+  // précédent utilisait un prestataireId inconnu : il ne quittait jamais la
+  // sortie anticipée et n'atteignait jamais la ligne à protéger. C'est la
+  // version confortable du cas dangereux, exactement ce que REVIEW.md §8 décrit.
+  const SIEN = L({ ai_clean_verdict: 'positif',  id: 'sien',  property_id_ref: 'COL' })
+  const AUTRE = L({ ai_clean_verdict: 'remarque', id: 'autre', property_id_ref: 'AILLEURS' })
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL', debut: null, fin: null }],
+    menage_events: []
+  }
+  try {
+    const r = await ratioProprete(fauxClient([SIEN, AUTRE]),
+      { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 1, 'seul son avis compte')
+    assert.strictEqual(r.positif, 1)
+    assert.strictEqual(r.remarque, 0, 'la remarque d\'un bien qui n\'est pas le sien ne doit pas remonter')
+  } finally {
+    fauxClient.attribution = null
+  }
 })

@@ -4,7 +4,8 @@ const { markReady } = require('../lib/cron-property-status')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, periodeNormalisee, borneDepuis } = require('../lib/stats-avis')
-const { avisDuPrestataire } = require('../lib/attribution-prestataire')
+const { avisDuPrestataire, MAX_IDS } = require('../lib/attribution-prestataire')
+const { extraitVerifie } = require('../lib/extrait-verifie')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -284,6 +285,33 @@ module.exports = async function handler(req, res) {
 // Important : on raisonne en string pure pour eviter les pieges timezone
 // (cf. catalogue bugs critiques resolus, regle "dates pures").
 
+
+// ⚠ L'ETIQUETTE « RETOUR PRIVE » ECHOUE DU BON COTE : dans le doute, elle est
+// POSEE.
+//
+// Un `content_private.includes(extrait)` ratait un cas reel : la classification
+// analyse la CONCATENATION de content_public, content_private et content, et
+// `extraitVerifie` tolere les ecarts d'espaces. Un extrait qui commence dans le
+// public et finit dans le prive — le saut de ligne de jointure etant absorbe par
+// la souplesse — n'est une sous-chaine exacte NI de l'un NI de l'autre. Il
+// sortait alors avec `prive: false`, et la prestataire lisait un reproche venu
+// d'un message que le voyageur n'avait pas rendu public, sans le savoir, donc
+// libre de le citer ailleurs.
+//
+// La regle : prive DES QU'il n'est pas certainement public.
+function extraitEstPrive (a) {
+  const extrait = a?.ai_clean_excerpt
+  if (!extrait) return false
+  if (!a.content_private) return false          // pas de retour prive du tout
+  // Retrouve dans le prive, meme avec des ecarts d'espaces -> prive.
+  if (extraitVerifie(a.content_private, extrait)) return true
+  // Retrouve INTEGRALEMENT dans le public -> public, sans ambiguite.
+  if (a.content_public && extraitVerifie(a.content_public, extrait)) return false
+  // Ni l'un ni l'autre : extrait a cheval, ou texte modifie depuis l'analyse.
+  // On etiquette, c'est le defaut sur.
+  return true
+}
+
 // ─── Vue « Avis » de la prestataire (spec-prestataires-menage §6) ───────────
 //
 // ⚠ CE QUE LA PRESTATAIRE VOIT, ET SEULEMENT CELA :
@@ -316,8 +344,18 @@ async function avisDeLaPrestataire (req, res, token) {
   // ⚠ `self_view_reviews` coupe la vue entiere. Le defaut est `true`
   // (lib/permissions.js) : l'absence de ligne de droits ne doit pas priver la
   // prestataire de ce qui la concerne.
-  const { data: droits } = await supabase.from('profile_permissions')
+  const { data: droits, error: errDroits } = await supabase.from('profile_permissions')
     .select('self_view_reviews').eq('profile_id', profil.id).maybeSingle()
+  // ⚠ SUR UN DRAPEAU DE CONFIDENTIALITE, LA PANNE COUPE — elle n'ouvre pas.
+  // L'erreur n'etait pas lue : un timeout PostgREST rendait `droits` null, et la
+  // vue s'affichait ENTIEREMENT, y compris pour un hote ayant explicitement mis
+  // self_view_reviews a false. Et `null` ne veut pas dire « pas de ligne » :
+  // api/membres.js supprime le profil si l'insertion des droits echoue, donc une
+  // ligne existe toujours.
+  if (errDroits) {
+    console.error('[menages-public] lecture des droits echec:', errDroits.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
   if (droits && droits.self_view_reviews === false) {
     return res.status(200).json({ prenom: profil.first_name, autorise: false, ratio: null, avis: [] })
   }
@@ -335,13 +373,22 @@ async function avisDeLaPrestataire (req, res, token) {
       let q = supabase.from('ota_reviews')
         // ⚠ NI `guest_name`, NI `content`, NI `content_public`, NI `raw`.
         // Seul l'extrait sort, avec de quoi le dater et savoir s'il est prive.
-        .select('id, ai_clean_verdict, ai_clean_excerpt, content_private, received_at, stay_end, property_id_ref')
+        // `content_public` sert UNIQUEMENT a decider de l'etiquette, cote
+        // serveur ; il ne part jamais au front.
+        .select('id, ai_clean_verdict, ai_clean_excerpt, content_private, content_public, received_at, stay_end, property_id_ref')
         .eq('user_id', userId).eq('statut', 'confirme')
-        .in('id', att.ids.slice(0, 500))
+        // Meme borne que l'attribution : au-dela, l'URL PostgREST casse.
+        .in('id', att.ids.slice(0, MAX_IDS))
         .order('received_at', { ascending: false, nullsFirst: false })
         .limit(200)
       if (borne) q = q.gte('received_at', borne)
-      const { data } = await q
+      const { data, error: errListe } = await q
+      // Une liste vide parce que la requete a rate est indiscernable de « aucun
+      // avis » — et le ratio affiche a cote annoncerait, lui, un nombre non nul.
+      if (errListe) {
+        console.error('[menages-public] liste des avis echec:', errListe.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
       avis = (data || []).map(a => ({
         id: a.id,
         verdict: a.ai_clean_verdict,
@@ -350,8 +397,7 @@ async function avisDeLaPrestataire (req, res, token) {
         // ⚠ On ne renvoie PAS content_private : on dit seulement si l'extrait en
         // provient, pour l'etiqueter. Le comparer ici evite de laisser le front
         // le deduire, donc de lui transmettre le texte prive.
-        prive: !!(a.ai_clean_excerpt && a.content_private &&
-                  String(a.content_private).includes(a.ai_clean_excerpt)),
+        prive: extraitEstPrive(a),
         date: a.stay_end || a.received_at,
         bien: a.property_id_ref
       }))
