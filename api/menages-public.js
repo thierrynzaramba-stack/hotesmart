@@ -3,6 +3,8 @@ const { createClient } = require('@supabase/supabase-js')
 const { markReady } = require('../lib/cron-property-status')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
+const { ratioProprete, periodeNormalisee, borneDepuis } = require('../lib/stats-avis')
+const { avisDuPrestataire } = require('../lib/attribution-prestataire')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -17,6 +19,11 @@ module.exports = async function handler(req, res) {
 
   const { token } = req.query
   if (!token) return res.status(401).json({ error: 'Token manquant' })
+
+  // ─── Vue « Avis » de la prestataire ───────────────────────────────────────
+  if (req.method === 'GET' && req.query.action === 'avis') {
+    return await avisDeLaPrestataire(req, res, token)
+  }
 
   if (req.method === 'POST') {
     const { action, event_ids, booking_id, property_id, departure_date } = req.body || {}
@@ -276,6 +283,87 @@ module.exports = async function handler(req, res) {
 // Helper : date du jour en zone Europe/Paris au format YYYY-MM-DD.
 // Important : on raisonne en string pure pour eviter les pieges timezone
 // (cf. catalogue bugs critiques resolus, regle "dates pures").
+
+// ─── Vue « Avis » de la prestataire (spec-prestataires-menage §6) ───────────
+//
+// ⚠ CE QUE LA PRESTATAIRE VOIT, ET SEULEMENT CELA :
+//   - l'EXTRAIT de proprete, jamais l'avis complet ;
+//   - jamais le nom du voyageur, ni rien qui permette de l'identifier ;
+//   - une mention « retour prive du voyageur » quand l'extrait en vient : elle
+//     doit savoir qu'elle lit un message que le voyageur n'avait pas rendu
+//     public, pour ne pas le citer ailleurs ;
+//   - rien du tout si `self_view_reviews` est faux : l'hote garde la main sur
+//     ce qu'il transmet.
+//
+// La liste et le ratio passent par la MEME fonction que /avis : deux chiffres
+// calcules differemment finiraient par se contredire, et c'est celui-ci qui
+// perdrait sa credibilite.
+async function avisDeLaPrestataire (req, res, token) {
+  const { data: pt } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  if (!pt) return res.status(401).json({ error: 'Token invalide' })
+  const userId = pt.user_id
+
+  // Le profil derriere ce token. Sans profil, pas d'attribution possible : on
+  // rend une vue vide plutot que d'inventer un rattachement.
+  const { data: profil } = await supabase.from('profiles')
+    .select('id, first_name, active')
+    .eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
+  if (!profil || profil.active === false) {
+    return res.status(200).json({ actif: false, ratio: null, avis: [] })
+  }
+
+  // ⚠ `self_view_reviews` coupe la vue entiere. Le defaut est `true`
+  // (lib/permissions.js) : l'absence de ligne de droits ne doit pas priver la
+  // prestataire de ce qui la concerne.
+  const { data: droits } = await supabase.from('profile_permissions')
+    .select('self_view_reviews').eq('profile_id', profil.id).maybeSingle()
+  if (droits && droits.self_view_reviews === false) {
+    return res.status(200).json({ prenom: profil.first_name, autorise: false, ratio: null, avis: [] })
+  }
+
+  const periode = periodeNormalisee(String(req.query.periode || 'toujours'))
+  const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id })
+
+  // La liste n'est chargee qu'a la demande : la vue par defaut n'affiche que le
+  // ratio a cote du prenom.
+  let avis = []
+  if (req.query.detail === '1') {
+    const att = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
+    if (!att.erreur && att.ids.length) {
+      const borne = borneDepuis(periode)
+      let q = supabase.from('ota_reviews')
+        // ⚠ NI `guest_name`, NI `content`, NI `content_public`, NI `raw`.
+        // Seul l'extrait sort, avec de quoi le dater et savoir s'il est prive.
+        .select('id, ai_clean_verdict, ai_clean_excerpt, content_private, received_at, stay_end, property_id_ref')
+        .eq('user_id', userId).eq('statut', 'confirme')
+        .in('id', att.ids.slice(0, 500))
+        .order('received_at', { ascending: false, nullsFirst: false })
+        .limit(200)
+      if (borne) q = q.gte('received_at', borne)
+      const { data } = await q
+      avis = (data || []).map(a => ({
+        id: a.id,
+        verdict: a.ai_clean_verdict,
+        // L'extrait, et rien d'autre du texte.
+        extrait: a.ai_clean_excerpt || null,
+        // ⚠ On ne renvoie PAS content_private : on dit seulement si l'extrait en
+        // provient, pour l'etiqueter. Le comparer ici evite de laisser le front
+        // le deduire, donc de lui transmettre le texte prive.
+        prive: !!(a.ai_clean_excerpt && a.content_private &&
+                  String(a.content_private).includes(a.ai_clean_excerpt)),
+        date: a.stay_end || a.received_at,
+        bien: a.property_id_ref
+      }))
+    }
+  }
+
+  return res.status(200).json({
+    prenom: profil.first_name, autorise: true,
+    ratio, avis, periode
+  })
+}
+
 function todayInParis() {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Paris',

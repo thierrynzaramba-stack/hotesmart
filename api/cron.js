@@ -50,6 +50,7 @@ const { pollChannelReviews } = require('../lib/cron-channel-reviews')
 const { pollBeds24Reviews } = require('../lib/cron-beds24-reviews')
 const { classerAvis } = require('../lib/cron-reviews-classify')
 const { classerMessages } = require('../lib/cron-messages-classify')
+const { rattacherMenages } = require('../lib/cron-rattacher-menages')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -108,6 +109,7 @@ module.exports = async function handler(req, res) {
     totalBeds24Reviews: 0,
     totalReviewsClassified: 0,
     totalMessagesClassified: 0,
+    totalMenagesRattaches: 0,
     totalBeds24Materialized: 0,
     circuitBreakerTriggered: 0,
     errors: []
@@ -256,6 +258,18 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur détection messages:', err.message)
       results.errors.push({ context: 'messages_classify', error: err.message })
+    }
+
+    // 4octies. Rattachement des avis au ménage qui a précédé le séjour.
+    // Tourne APRÈS le poll et la classification : il consomme des avis dont le
+    // booking_uid vient d'être résolu.
+    // ⚠ Un avis non rattachable reste non rattaché — aucun « ménage le plus
+    // proche » faute de mieux : un reproche qui tombe sur la mauvaise personne
+    // coûte plus cher qu'une case vide.
+    try { await chrono.mesure('rattacher_menages', () => rattacherMenages(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur rattachement ménages:', err.message)
+      results.errors.push({ context: 'rattacher_menages', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

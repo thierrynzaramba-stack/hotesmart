@@ -273,6 +273,35 @@ l'invariant `[] ≠ null` de la fonction.
 voyageur » quand il en vient, jamais le nom du voyageur, jamais l'avis complet,
 et coupé par `self_view_reviews`.
 
+### Mécanisme d'attribution — implémenté le 3 septembre 2026
+
+`lib/attribution-prestataire.js`. **Deux voies, dans cet ordre de fiabilité :**
+
+1. **`menage_event_id`** — le lien au ménage précis. Voie normale, et la seule
+   pour tout ménage futur. La prestataire y est identifiée par son `pwa_token`
+   (`menage_events` n'a pas encore de `provider_id`) : un profil sans token —
+   identité d'attribution historique — n'a donc aucun ménage par cette voie, et
+   c'est correct.
+2. **`prestataire_periodes`** — attribution déclarée, quand aucun ménage
+   n'existe. Le ménage précis **prime** en cas de recouvrement.
+
+**La date qui situe l'avis** : `stay_end` d'abord — un ménage précède le séjour,
+l'avis peut tomber des semaines après. `received_at` est un **repli assumé**,
+utilisé par 136 des 168 avis réels faute de séjour résolu. Quand l'import de
+l'historique des réservations résoudra les `booking_uid`, `stay_end` reprendra
+la main **sans reprise manuelle** : l'attribution se recalcule à chaque
+affichage, elle n'est jamais figée en base.
+
+⚠ **Un avis non attribuable reste non attribué.** Ni « le prestataire du bien
+par défaut », ni « le ménage le plus proche ». Un avis sans date n'est jamais
+attribué. Deux ménages pour une même réservation : la case reste vide. Un
+reproche qui tombe sur la mauvaise personne coûte plus cher qu'un reproche qui
+ne tombe sur personne.
+
+**Mesuré sur les données réelles** : Régina 98 avis (10 positifs, 16 remarques),
+Tiphaine 58 avis (36 positifs, 1 remarque) — tous par période, aucun par ménage,
+puisque `menage_event_id` est encore vide partout.
+
 ### Attribution rétroactive — faits établis, périmètre borné
 
 Trois faits, établis par le product owner, pas déduits du code :

@@ -87,6 +87,35 @@ create policy prestataire_periodes_write on public.prestataire_periodes
   with check (can_write(user_id, 'prestataires', property_id_ref));
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- 2 bis. ASSOUPLISSEMENT DE `profiles_token_coherent`
+-- ═══════════════════════════════════════════════════════════════════════════
+-- La contrainte du chantier droits exigeait un `pwa_token` pour TOUT profil
+-- `access_mode = 'lien'`. Elle n'avait pas prevu le cas qui se presente ici :
+-- une identite d'ATTRIBUTION HISTORIQUE — quelqu'un dont on doit pouvoir dire
+-- « elle a fait ces menages », mais qui ne travaille plus et a qui on n'ouvre
+-- aucun acces.
+--
+-- ⚠ L'ASSOUPLISSEMENT EST BORNE, et la partie qui compte reste stricte :
+--   - lien ACTIF   -> token OBLIGATOIRE. C'est ce qui empeche de creer un
+--     prestataire cense travailler mais sans aucun moyen d'acceder a son
+--     planning — une panne silencieuse pour la personne concernee.
+--   - lien INACTIF -> token FACULTATIF. Un profil inactif n'accede a rien : lui
+--     imposer un jeton reviendrait a fabriquer un secret dont personne ne se
+--     sert, et que la desactivation rend de toute facon inoperant.
+--   - compte       -> jamais de token. Inchange.
+--
+-- Verifie avant d'ecrire : aucun code ne suppose qu'un profil `lien` porte un
+-- token. `lienDAcces` (api/membres.js) refuse d'abord les profils inactifs,
+-- puis teste `&& profil.pwa_token` ; la liste expose `a_lien_pwa`, un booleen
+-- deja calcule avec `active !== false`. La page Equipe et l'app menage lisent
+-- ce booleen, jamais le jeton.
+alter table public.profiles drop constraint if exists profiles_token_coherent;
+alter table public.profiles add constraint profiles_token_coherent check (
+  (access_mode = 'lien'   and (pwa_token is not null or active = false)) or
+  (access_mode = 'compte' and pwa_token is null)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- 3. LE PROFIL DE TIPHAINE
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ⚠ INACTIF et SANS pwa_token : c'est une identite d'ATTRIBUTION HISTORIQUE,
@@ -160,7 +189,12 @@ select
      where first_name = 'Tiphaine' and access_mode = 'lien'
        and active = false and pwa_token is null)                                    as tiphaine_inactive_sans_token,
   (select count(*) from pg_policies
-     where schemaname='public' and tablename='prestataire_periodes')                as politiques;
+     where schemaname='public' and tablename='prestataire_periodes')                as politiques,
+  -- La contrainte doit accepter un lien INACTIF sans token, et refuser un lien
+  -- ACTIF sans token.
+  (select count(*) from pg_constraint
+     where conname = 'profiles_token_coherent'
+       and pg_get_constraintdef(oid) like '%active = false%')                       as contrainte_assouplie;
 
 -- Le detail, pour relecture humaine.
 select p.first_name, pp.property_id_ref, pp.debut, pp.fin

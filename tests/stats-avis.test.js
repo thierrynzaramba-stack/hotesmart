@@ -23,12 +23,22 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
     from (table) {
       const appel = { table, filtres: {}, ins: [], gte: null, head: false }
       journal.push(appel)
+      // ⚠ Les tables de l'attribution existent maintenant que ratioProprete
+      // accepte `prestataireId`. Sans elles, le double renvoyait les avis pour
+      // n'importe quelle table — y compris `profiles` — et le test « une
+      // prestataire sans attribution voit zéro » ne testait rien de réel.
+      const AUTRES = ['profiles', 'prestataire_periodes', 'menage_events']
       const chain = {
         select (_c, opts) { appel.head = !!(opts && opts.head); appel.count = opts && opts.count; return chain },
         eq (c, v) { appel.filtres[c] = v; return chain },
         gte (c, v) { appel.gte = { colonne: c, valeur: v }; return chain },
         in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
+        maybeSingle () {
+          if (AUTRES.includes(table)) return Promise.resolve({ data: null, error: null })
+          return Promise.resolve({ data: null, error: null })
+        },
         then (r) {
+          if (AUTRES.includes(table)) return Promise.resolve({ data: [], count: 0, error: null }).then(r)
           if (erreur) return Promise.resolve({ data: null, count: null, error: erreur }).then(r)
           const d = lignes.filter(l =>
             Object.entries(appel.filtres).every(([c, v]) =>
@@ -207,4 +217,17 @@ test('ratio : la période rendue est NORMALISÉE, pas celle reçue', async () =>
   const r = await ratioProprete(fauxClient([]), { userId: 'u1', periode: 'constructor', maintenant: T0 })
   assert.strictEqual(r.periode, '30j')
   assert.strictEqual(r.depuis, borneDepuis('30j', T0))
+})
+
+// ─── L'attribution à une prestataire ────────────────────────────────────────
+test('ratio : une prestataire sans attribution voit ZÉRO, pas le ratio de l\'hôte', async () => {
+  // ⚠ L'invariant le plus important de la fiche prestataire. Si l'absence
+  // d'attribution se lisait comme « aucun filtre », elle verrait le travail de
+  // tout le monde — y compris les remarques qui ne la concernent pas.
+  const sb = fauxClient([L({ ai_clean_verdict: 'remarque' })])
+  // Aucun profil, donc aucune attribution possible.
+  const r = await ratioProprete(sb, { userId: 'u1', prestataireId: 'inconnu',
+                                      periode: 'toujours', maintenant: T0 })
+  assert.strictEqual(r.total, 0)
+  assert.strictEqual(r.remarque, 0)
 })
