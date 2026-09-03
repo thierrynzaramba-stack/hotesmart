@@ -253,13 +253,13 @@
       const visibilityDays = p.visibility_days || 30
       const propTags = properties.map(prop => {
         const active = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
-        return `<span class="prop-tag ${active ? 'active' : ''}">${prop.name}</span>`
+        return `<span class="prop-tag ${active ? 'active' : ''}">${echapper(prop.name)}</span>`
       }).join('')
 
       return `
         <div class="presta-card">
           <div class="presta-card-header">
-            <div class="presta-name">🧹 ${p.label || 'Sans nom'}</div>
+            <div class="presta-name">🧹 ${echapper(p.label || 'Sans nom')}</div>
             <div class="presta-actions">
               <a class="btn" href="${url}" target="_blank">👁 Voir</a>
               <button class="btn btn-edit" data-id="${p.id}">✏️ Modifier</button>
@@ -337,7 +337,7 @@
       cb.addEventListener('change', majEtatDesRangs)
     })
     container.querySelectorAll('.rang-select').forEach(sel => {
-      sel.addEventListener('change', () => avertirSiPlusDeReferent(sel.dataset.bien))
+      sel.addEventListener('change', () => avertirSiPlusDeReferent())
     })
   }
 
@@ -351,16 +351,23 @@
       sel.disabled = !cb.checked
       sel.style.opacity = cb.checked ? '' : '0.45'
     })
-    properties.forEach(p => avertirSiPlusDeReferent(p.id))
+    avertirSiPlusDeReferent()
   }
 
   // ⚠ AVERTIR, PAS BLOQUER. Un bien qui perd sa dernière référente verra ses
   // prochains ménages naître NON ASSIGNÉS. L'hôte doit le savoir — mais le lui
   // refuser le laisserait sans issue le jour où une prestataire s'en va.
-  function avertirSiPlusDeReferent(bienRef) {
+  function avertirSiPlusDeReferent() {
     const zone = document.getElementById('avert-rang')
     if (!zone) return
     const manquants = properties.filter(p => {
+      // ⚠ MEME REGLE QUE LE SERVEUR : un bien sans AUCUNE liaison n'est pas
+      // signale. Il n'est pas gere par l'app menage, et l'avertir a chaque
+      // ouverture du formulaire sur un compte neuf serait le bruit permanent que
+      // le serveur evite deja.
+      const geré = liaisons.some(l => String(l.property_id) === String(p.id) && l.active !== false)
+      const coche = document.getElementById(`prop-${p.id}`)?.checked
+      if (!geré && !coche) return false
       const cb = document.getElementById(`prop-${p.id}`)
       const sel = document.getElementById(`rang-${p.id}`)
       if (!cb || !sel) return false
@@ -427,20 +434,33 @@
       if (!res.ok) { alert('Création impossible : ' + ((data && data.error) || res.status)); return }
 
       const profilId = data.profil && data.profil.id
-      if (profilId) {
-        await enregistrerLiaisons(profilId, biens)
-        // Les réglages d'affichage de l'app ménage, sur la ligne que
-        // `/api/membres` vient de créer.
-        await supabase.from('public_tokens')
+      if (!profilId) { alert('Création incomplète : profil introuvable.'); return }
+
+      const okLiaisons = await enregistrerLiaisons(profilId, biens)
+
+      // ⚠ LE JETON N'EST PAS DANS `profil`. `habiller()` le retire de toute
+      // reponse — c'est deliberé. Il n'apparait que dans `lien`, l'URL de la
+      // PWA. La premiere version lisait `data.profil.pwa_token`, donc
+      // `undefined`, faisait `.eq('token', '')`, ne touchait aucune ligne, et
+      // Supabase ne renvoyait AUCUNE erreur : les jours de visibilite et la
+      // periode du ratio saisis dans le formulaire etaient jetes en silence.
+      const jeton = jetonDuLien(data.lien)
+      if (jeton) {
+        const { error: eMaj } = await supabase.from('public_tokens')
           .update({ label: name,
                     visibility_days: parseInt(document.getElementById('visibility-days').value),
                     ratio_periode: periodeChoisie() })
-          .eq('user_id', currentSession.user.id).eq('token', data.profil.pwa_token || '')
+          .eq('user_id', currentSession.user.id).eq('token', jeton)
+        if (eMaj) alert('Prestataire créé, mais ses réglages d\'affichage n\'ont pas été enregistrés.')
+      } else {
+        alert('Prestataire créé, mais son lien n\'a pas pu être lu : réglages d\'affichage non enregistrés.')
       }
 
       resetForm()
-      await loadPrestataires()
-      showToast('✓ Prestataire créé !')
+      await rechargerTout()
+      // ⚠ Le succes ne s'annonce QUE s'il est complet : afficher « créé ! »
+      // juste apres « ses biens n'ont pas pu etre enregistres » se contredit.
+      if (okLiaisons) showToast('✓ Prestataire créé !')
     } catch (e) {
       alert('Connexion impossible. Réessayez.')
     } finally {
@@ -448,7 +468,25 @@
     }
   }
 
-  // Écrit qui intervient sur quel bien, et à quel rang.
+  // Le jeton vit dans l'URL du lien PWA, seule forme sous laquelle le serveur
+  // le rend (`lienDAcces`).
+  function jetonDuLien(lien) {
+    if (!lien) return null
+    const m = String(lien).match(/[?&]token=([^&#]+)/)
+    return m ? decodeURIComponent(m[1]) : null
+  }
+
+  // C3 : les liaisons et les profils viennent de `/api/menages`, que
+  // `loadPrestataires` ne rappelle pas. Sans ce rechargement, la carte de la
+  // personne qu'on vient de creer affiche « lien seul, aucun menage
+  // assignable » — le message d'alarme, sur un succes.
+  async function rechargerTout() {
+    await loadProperties()
+    await loadPrestataires()
+  }
+
+  // Écrit qui intervient sur quel bien, et à quel rang. Rend `true` si tout a été
+  // enregistré.
   async function enregistrerLiaisons(profilId, biens) {
     const res = await fetch('/api/menages', {
       method: 'POST',
@@ -465,7 +503,7 @@
       // et rien à l'écran ne le laisserait deviner.
       alert('Le prestataire est créé, mais ses biens n\'ont pas pu être enregistrés : '
             + ((data && data.error) || res.status) + '. Modifiez sa fiche pour réessayer.')
-      return
+      return false
     }
     if (data && data.sans_referent && data.sans_referent.length) {
       const noms = data.sans_referent
@@ -473,13 +511,44 @@
         .join(', ')
       showToast(`⚠️ Sans référente : ${noms}`)
     }
+    return true
   }
 
+  // ⚠ SUPPRIMER LE LIEN NE SUFFIT PLUS. Depuis le lot 2.1, le moteur assigne les
+  // menages a des PROFILS et ne consulte jamais `public_tokens` : effacer le
+  // seul lien laissait le profil actif et ses liaisons actives, si bien que le
+  // cron continuait d'attribuer des menages — d'office si elle etait referente —
+  // a quelqu'un dont le lien n'existe plus et qui ne les verrait jamais. Le bien
+  // paraissait couvert et ne l'etait pas.
   async function deletePrestataire(id) {
-    if (!confirm('Supprimer ce prestataire ? Le lien ne fonctionnera plus.')) return
+    const ligne = prestataires.find(p => p.id === id)
+    const profilId = ligne ? profilDuToken(ligne) : null
+    if (!confirm(profilId
+      ? 'Retirer ce prestataire ? Son lien cessera de fonctionner et il ne recevra plus de ménages.'
+      : 'Supprimer ce lien ? Il cessera de fonctionner.')) return
+
+    // Le profil d'abord : `deactivate` supprime lui-meme la ligne
+    // `public_tokens` (api/membres.js), donc l'ordre inverse laisserait une
+    // suppression a faire deux fois.
+    if (profilId) {
+      const rp = await fetch('/api/membres', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+                   'Authorization': `Bearer ${currentSession.access_token}` },
+        body: JSON.stringify({ action: 'deactivate', id: profilId })
+      })
+      if (!rp.ok) {
+        const d = await rp.json().catch(() => null)
+        alert('Retrait impossible : ' + ((d && d.error) || rp.status))
+        return
+      }
+      // Ses liaisons aussi : sinon le moteur continue de la choisir.
+      await enregistrerLiaisons(profilId, [])
+    }
+
     const { error } = await supabase.from('public_tokens').delete().eq('id', id).eq('user_id', currentSession.user.id)
-    if (error) { alert('Erreur suppression : ' + error.message); return }
-    await loadPrestataires()
+    if (error && !profilId) { alert('Erreur suppression : ' + error.message); return }
+    await rechargerTout()
   }
 
   function editPrestataire(id) {
@@ -518,14 +587,18 @@
     btn.onclick = () => saveEdit(id)
   }
 
-  // Le lien et le profil portent le MEME jeton (`synchroniserTokenPwa`) : c'est
-  // par lui qu'on les rapproche. Aucun jeton ne sort du serveur cote profils —
-  // on compare donc sur le prenom en dernier recours, faute de mieux, et on
-  // s'abstient si l'on n'est pas sur.
+  // ⚠ LE RAPPROCHEMENT VIENT DU SERVEUR, par le jeton — jamais par le prenom.
+  // La premiere version comparait `public_tokens.label` a `profiles.first_name` :
+  // or le label vaut « Prenom Nom » des qu'un nom de famille existe, et un
+  // accent, une casse, un renommage ou un homonyme suffisaient a rompre le
+  // rapprochement. L'ecran affichait alors « lien seul, aucun menage
+  // assignable » sur une prestataire parfaitement fonctionnelle, dont les rangs
+  // devenaient definitivement non modifiables — et deux liens de meme label
+  // renvoyaient le MEME profil, si bien qu'editer l'un effacait les biens de
+  // l'autre.
   function profilDuToken(ligneToken) {
-    const parNom = prestatairesProfils.filter(x =>
-      (x.prenom || '').trim().toLowerCase() === String(ligneToken.label || '').trim().toLowerCase())
-    return parNom.length === 1 ? parNom[0].id : null
+    const p = prestatairesProfils.find(x => x.public_token_id === ligneToken.id)
+    return p ? p.id : null
   }
 
   async function saveEdit(id) {
@@ -535,23 +608,51 @@
     const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')].map(cb => cb.value)
     const visibilityDays = parseInt(document.getElementById('visibility-days').value)
 
+    // ⚠ LES BIENS APPARTIENNENT A `/api/membres` QUAND UN PROFIL EXISTE.
+    // Les ecrire ici en direct laissait `profile_permissions.property_ids`
+    // (uuid[]) diverger de `public_tokens.property_ids` (text[]) — deux
+    // representations du meme perimetre, dont l'en-tete d'api/membres.js dit
+    // qu'elles doivent rester synchrones. L'app garde `label`,
+    // `visibility_days` et `ratio_periode` : des reglages d'affichage.
+    const biens = saisieDesBiens()
+    if (editionEnCours) {
+      const rp = await fetch('/api/membres', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+                   'Authorization': `Bearer ${currentSession.access_token}` },
+        body: JSON.stringify({
+          action: 'update', id: editionEnCours,
+          permissions: { property_scope: 'selected',
+                         property_ids: biens.map(b => b.uuid).filter(Boolean) }
+        })
+      })
+      if (!rp.ok) {
+        const d = await rp.json().catch(() => null)
+        alert('Modification impossible : ' + ((d && d.error) || rp.status))
+        return
+      }
+    }
+
+    const champs = { label: name, visibility_days: visibilityDays, ratio_periode: periodeChoisie() }
+    // Sans profil (lien anterieur au lot 2.5), personne d'autre n'ecrit le
+    // perimetre : cet ecran reste son seul writer.
+    if (!editionEnCours) champs.property_ids = selectedProps
     const { error } = await supabase.from('public_tokens')
-      .update({ label: name, property_ids: selectedProps, visibility_days: visibilityDays,
-                ratio_periode: periodeChoisie() })
+      .update(champs)
       .eq('id', id)
       .eq('user_id', currentSession.user.id)
 
     if (error) { alert('Erreur modification : ' + error.message); return }
 
-    // ⚠ Les rangs suivent les biens. Sans profil derriere ce lien (creation
-    // anterieure au lot 2.5), il n'y a rien a lier : on le dit une fois, sans
-    // bloquer l'enregistrement du reste.
-    if (editionEnCours) await enregistrerLiaisons(editionEnCours, saisieDesBiens())
+    // ⚠ Les rangs suivent les biens. Sans profil derriere ce lien, il n'y a rien
+    // a lier : on le dit, sans bloquer l'enregistrement du reste.
+    let ok = true
+    if (editionEnCours) ok = await enregistrerLiaisons(editionEnCours, biens)
     else showToast('⚠️ Lien sans personne : aucun ménage ne peut lui être assigné')
 
     resetForm()
-    await loadPrestataires()
-    showToast('✓ Prestataire modifié !')
+    await rechargerTout()
+    if (ok && editionEnCours) showToast('✓ Prestataire modifié !')
   }
 
   // Les quatre cles reconnues par lib/stats-avis.js. Une cinquieme valeur serait
@@ -580,10 +681,6 @@
     renderPropCheckboxes()
   }
 
-  function generateToken(name) {
-    const slug = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20)
-    return `${slug}-${Math.random().toString(36).slice(2, 8)}`
-  }
 
   function showToast(msg = '✓ Lien copié !') {
     const toast = document.getElementById('copy-toast')

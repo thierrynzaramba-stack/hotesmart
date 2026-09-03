@@ -63,9 +63,24 @@ seulement à l'app ménage.
   un prestataire créé ainsi ne pouvait recevoir **aucune** assignation, et sa PWA ne lui
   montrait que les ménages qui n'étaient à personne. Le parcours de création d'un prestataire
   *utilisable* n'existait nulle part.
-- ⚠️ **Frontière des writers de `public_tokens`, à tenir** : `/api/membres` possède `token` et
+- ⚠️ **Frontière des writers de `public_tokens`** : `/api/membres` possède `token` et
   `property_ids` ; l'app ménage garde `label`, `visibility_days` et `ratio_periode` — des
-  réglages d'affichage qui n'ont rien à faire dans la gestion des personnes.
+  réglages d'affichage qui n'ont rien à faire dans la gestion des personnes. La modification
+  d'un prestataire **ayant un profil** passe donc par `/api/membres` (action `update`) pour ses
+  biens ; les écrire en direct laissait `profile_permissions.property_ids` (uuid[]) diverger de
+  `public_tokens.property_ids` (text[]). Un **lien sans profil** n'a pas d'autre writer : cet
+  écran reste le sien.
+  ⚠️ Nuance assumée : `synchroniserTokenPwa` pose `label` et `visibility_days` **à la création**
+  (valeurs par défaut) ; l'écran les réécrit juste après avec la saisie.
+- ⚠️ **Le rapprochement lien ↔ profil se fait EN BASE, par le jeton** (`public_token_id`, posé
+  par `/api/menages`) — jamais par comparaison de prénoms. `public_tokens.label` vaut
+  « Prénom Nom » dès qu'un nom de famille existe : un accent, une casse, un renommage ou un
+  homonyme rompait le rapprochement, et l'écran affichait « lien seul » sur une prestataire
+  fonctionnelle, dont les rangs devenaient non modifiables.
+- ⚠️ **Retirer un prestataire désactive la PERSONNE**, pas seulement le lien. Le moteur
+  n'interroge jamais `public_tokens` : effacer le seul lien laissait le profil et ses liaisons
+  actifs, et le cron continuait d'attribuer des ménages — d'office si elle était référente — à
+  quelqu'un qui ne les verrait jamais. Le bien paraissait couvert et ne l'était pas.
 - **Le rang se règle bien par bien**, avec « Suppléante » par défaut. Le cas réel est mixte
   (suppléante ici, référente ailleurs), et **on ne devient pas référente par accident** : le
   référent est assigné d'office, sans confirmation.

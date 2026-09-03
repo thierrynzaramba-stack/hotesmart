@@ -222,11 +222,30 @@ module.exports = async function handler(req, res) {
         .eq('account_user_id', userId).eq('access_mode', 'lien')
         .order('first_name', { ascending: true })
       if (errPr) console.error('[menages] lecture prestataires echec', errPr.message)
-      else prestataires = (pr || []).map(x => ({
-        id: x.id, prenom: x.first_name, actif: x.active !== false,
-        // Le jeton lui-meme ne sort JAMAIS : seul le fait qu'il en existe un.
-        a_lien: !!x.pwa_token
-      }))
+      else {
+        // ⚠ LE RAPPROCHEMENT LIEN <-> PROFIL SE FAIT ICI, PAR LE JETON.
+        // L'ecran le faisait en comparant des PRENOMS : or `public_tokens.label`
+        // vaut « Prenom Nom » quand un nom de famille existe, alors que cette
+        // reponse n'expose que le prenom. Un accent, une casse, un renommage ou
+        // un homonyme suffisaient a rompre le rapprochement — et l'ecran
+        // affichait alors « lien seul, aucun menage assignable » sur une
+        // prestataire parfaitement fonctionnelle, dont les rangs devenaient
+        // definitivement non modifiables.
+        // Le jeton lui-meme ne sort JAMAIS : on rend l'ID de sa ligne
+        // `public_tokens`, que cet ecran connait deja.
+        const jetons = (pr || []).map(x => x.pwa_token).filter(Boolean)
+        let parJeton = new Map()
+        if (jetons.length) {
+          const { data: pt } = await supabase.from('public_tokens')
+            .select('id, token').eq('user_id', userId).in('token', jetons)
+          parJeton = new Map((pt || []).map(t => [t.token, t.id]))
+        }
+        prestataires = (pr || []).map(x => ({
+          id: x.id, prenom: x.first_name, actif: x.active !== false,
+          a_lien: !!x.pwa_token,
+          public_token_id: x.pwa_token ? (parJeton.get(x.pwa_token) || null) : null
+        }))
+      }
 
       // Les liaisons bien <-> prestataire, avec leur rang. C'est ce qui decide
       // si un menage nait accepte ou propose.
@@ -414,16 +433,30 @@ async function ecrireLiaisons (req, res) {
   // Chaque bien doit etre dans le perimetre de l'appelant ET du compte.
   const refs = refsDuPerimetre(garde.contexte)
   const voulues = []
+  const vues = new Set()
   for (const l of liaisons) {
     const ref = String(l && l.property_id || '')
     const rang = Number(l && l.rang)
     if (!ref) return res.status(400).json({ error: 'Bien manquant dans une liaison' })
+    // ⚠ REF_SQL_SURE, comme partout ailleurs : cette reference finit interpolee
+    // dans un filtre PostgREST plus bas. Aucun chemin d'ecriture connu ne place
+    // un guillemet dans `provider_property_id`, mais le depot a un garde nomme
+    // pour ce motif et il n'y a pas de raison de faire exception.
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(ref)) {
+      return res.status(400).json({ error: 'Référence de bien invalide' })
+    }
     if (!Number.isInteger(rang) || rang < 1 || rang > 9) {
       return res.status(400).json({ error: 'Rang invalide' })
     }
     if (Array.isArray(refs) && !refs.map(String).includes(ref)) {
       return res.status(403).json({ error: 'Bien hors périmètre' })
     }
+    // ⚠ Un bien repete produirait deux lignes de meme cle de conflit dans un
+    // seul upsert : Postgres refuse (42P10), et l'endpoint rendrait 500 APRES
+    // avoir desactive les liaisons — la prestataire perdrait ses biens sans en
+    // recuperer aucun.
+    if (vues.has(ref)) return res.status(400).json({ error: 'Bien en double dans la demande' })
+    vues.add(ref)
     voulues.push({ ref, rang })
   }
 
@@ -440,10 +473,25 @@ async function ecrireLiaisons (req, res) {
   }
 
   // 1. Desactiver ce qui n'est plus voulu.
+  //
+  // ⚠ BORNE AU PERIMETRE DE L'APPELANT. Les biens AJOUTES etaient confrontes au
+  // perimetre, les biens RETIRES ne l'etaient pas : tout ce qui n'etait pas dans
+  // la liste envoyee etait desactive, y compris hors perimetre. Un gestionnaire
+  // limite au bien A retirait ainsi la referente des biens B et C — dont les
+  // prochains menages naissaient non assignes, SANS alerte (un bien sans liaison
+  // n'est pas considere en panne). Un corps `liaisons: []` coupait la prestataire
+  // de tous les biens du compte depuis un perimetre d'un seul bien.
+  // C'est REVIEW.md regle 11 dans l'autre sens : la donnee client agissait sur
+  // des ressources qu'elle ne designe pas.
   const gardees = voulues.map(v => v.ref)
   let desactivation = supabase.from('property_cleaning_providers')
     .update({ active: false })
     .eq('user_id', userId).eq('provider_id', prof.id)
+  if (Array.isArray(refs)) {
+    // Perimetre restreint : on ne touche QUE ses biens. `refs` vide -> aucune
+    // desactivation, ce qui est le comportement sur (il ne gere aucun bien).
+    desactivation = desactivation.in('property_id', refs.map(String))
+  }
   if (gardees.length) desactivation = desactivation.not('property_id', 'in', `(${gardees.map(r => `"${r}"`).join(',')})`)
   const { error: errDes } = await desactivation
   if (errDes) {
@@ -471,7 +519,12 @@ async function ecrireLiaisons (req, res) {
   const { data: apres } = await supabase.from('property_cleaning_providers')
     .select('property_id, rang').eq('user_id', userId).eq('active', true)
   const avecReferent = new Set((apres || []).filter(l => l.rang === 1).map(l => String(l.property_id)))
-  const sansReferent = [...duCompte].filter(ref =>
+  // ⚠ L'avertissement reste DANS le perimetre de l'appelant : sinon la reponse
+  // lui rend les references des biens qu'il n'a pas le droit de voir.
+  const visibles = Array.isArray(refs)
+    ? [...duCompte].filter(ref => refs.map(String).includes(ref))
+    : [...duCompte]
+  const sansReferent = visibles.filter(ref =>
     (apres || []).some(l => String(l.property_id) === ref) && !avecReferent.has(ref))
 
   return res.status(200).json({ success: true, sans_referent: sansReferent })
