@@ -62,6 +62,12 @@
       .entete-ratio .ratio-item { font-size: 13px; }
       .entete-ratio .entete-periode { font-size: 10px; }
     }
+    /* ⚠ Une offre n'est PAS un menage a faire : elle attend une reponse. La
+       distinguer a l'oeil evite qu'on s'organise autour de quelque chose qu'on
+       n'a pas encore accepte — ou qu'on laisse filer une offre sans repondre. */
+    .badge-offre { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
+                   border: 1px dashed currentColor; border-radius: 999px; padding: 0 5px; margin-top: 3px; }
+    .menage-card.offre { border: 1px dashed var(--primary); }
     .avis-periode { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--text2); }
     .avis-periode select { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 5px 8px; font-size: 12px; color: var(--text); }
     .avis-sans-detail { color: var(--text2); font-style: italic; }
@@ -658,6 +664,8 @@
     <div class="modal-success" id="modal-success"></div>
     <div class="modal-warning" id="modal-warning"></div>
     <div class="modal-actions">
+      <button class="btn btn-primary" id="modal-accepter" style="display:none">✓ J'accepte</button>
+      <button class="btn" id="modal-refuser" style="display:none">Je ne peux pas</button>
       <button class="btn btn-primary" id="modal-done">✓ Marquer fait</button>
       <button class="btn" id="modal-close">Fermer</button>
     </div>
@@ -689,6 +697,10 @@ if ("serviceWorker" in navigator) {
   let bookings = []
   let doneSet = new Set()              // ids menage afficheS comme fait (= union miroir + pending)
   let serverDoneSet = new Set()        // miroir serveur
+  // Assignations recues du serveur, indexees par `bien|resa|depart`. `null`
+  // quand ce lien n'a pas de profil : l'ecran n'affiche alors AUCUN etat
+  // d'assignation plutot qu'un etat faux.
+  let assignations = null
   let pendingQueue = []                // file actions en attente
   let readSet = new Set()              // ids d evenements acquittes (persistes en local + syncs)
   let commentsMap = {}
@@ -851,6 +863,7 @@ if ("serviceWorker" in navigator) {
           + '<div class="menage-card-prop">' + m.propName + '</div>'
           + '<div class="menage-card-title">M\u00e9nage d\u00e9part</div>'
           + '<div class="menage-card-time">' + m.guestName + '</div>'
+          + badgeOffre(m)
           + (m.done ? '<div class="menage-card-check">\u2713</div>' : '')
           + (m.pending ? '<div class="menage-card-pending">\u23f3</div>' : '')
           + (m.comment ? '<div class="menage-card-comment">\ud83d\udcac</div>' : '')
@@ -958,6 +971,8 @@ if ("serviceWorker" in navigator) {
     document.getElementById('mini-next').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1); renderMiniCal() })
     document.getElementById('modal-close').addEventListener('click', closeModal)
     document.getElementById('modal-done').addEventListener('click', onModalDoneClick)
+    document.getElementById('modal-accepter').addEventListener('click', () => repondreOffre(true))
+    document.getElementById('modal-refuser').addEventListener('click', () => repondreOffre(false))
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
     document.getElementById('news-close').addEventListener('click', markAllNewsRead)
 
@@ -1143,6 +1158,13 @@ if ("serviceWorker" in navigator) {
 
     newsItems = data.events || []
 
+    // ⚠ `data.menages` vaut `null` pour un lien sans profil — a ne pas confondre
+    // avec « aucun menage assigne », qui est un tableau vide.
+    assignations = Array.isArray(data.menages)
+      ? Object.fromEntries(data.menages.map(m =>
+          [`${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`, m]))
+      : null
+
     // Verite serveur : on remplace le miroir local
     if (Array.isArray(data.done)) {
       serverDoneSet = new Set(data.done.map(d => `${d.booking_id}|${d.departure_date}`))
@@ -1172,11 +1194,14 @@ if ("serviceWorker" in navigator) {
       if (!b.departure) continue
       const dep = dateNueLocale(b.departure)
       if (!dep) continue
+      const assign = assignations
+        ? (assignations[`${b.propId}|${String(b.id)}|${b.departure}`] || null)
+        : null
       const propIdx = properties.findIndex(p => p.id === b.propId)
       const id = `${b.id}-${b.departure}`
       const isPending = pendingQueue.some(a => a.booking_id === String(b.id) && a.departure_date === b.departure)
       menages.push({
-        id, date: dep, dateStr: b.departure,
+        id, date: dep, dateStr: b.departure, assign,
         propId: b.propId, propName: b.propName, propIdx,
         guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
         arrival: b.arrival, departure: b.departure,
@@ -1310,6 +1335,7 @@ if ("serviceWorker" in navigator) {
                 <div class="menage-card-prop">${m.propName}</div>
                 <div class="menage-card-title">Ménage départ</div>
                 <div class="menage-card-time">${m.guestName}</div>
+                ${badgeOffre(m)}
                 ${m.done ? '<div class="menage-card-check">✓</div>' : ''}
                 ${m.pending ? '<div class="menage-card-pending">⏳</div>' : ''}
                 ${m.comment ? '<div class="menage-card-comment">📝</div>' : ''}
@@ -1405,6 +1431,15 @@ if ("serviceWorker" in navigator) {
     return m.dateStr > toDateStr(new Date())
   }
 
+  // ⚠ UNE OFFRE N'EST PAS UN MENAGE A FAIRE. Tant qu'elle n'est pas acceptee,
+  // personne n'est engage : le dire a l'oeil evite qu'on s'organise autour de
+  // quelque chose qu'on n'a pas confirme — ou qu'on laisse filer une offre sans
+  // repondre. Le referent ne voit jamais ce badge : son menage nait accepte.
+  function estUneOffre (m) { return !!(m.assign && m.assign.status === 'offered') }
+  function badgeOffre (m) {
+    return estUneOffre(m) ? '<div class="badge-offre">À CONFIRMER</div>' : ''
+  }
+
   function openModal(m) {
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
@@ -1428,7 +1463,21 @@ if ("serviceWorker" in navigator) {
     const future   = isMenageFuture(m)
 
     const btn = document.getElementById('modal-done')
+    const btnOui = document.getElementById('modal-accepter')
+    const btnNon = document.getElementById('modal-refuser')
     btn.style.opacity = ''
+
+    // ⚠ TANT QUE L'OFFRE N'EST PAS ACCEPTEE, il n'y a rien a marquer fait :
+    // proposer les deux a la fois laisserait croire qu'on peut faire le menage
+    // sans l'avoir accepte, et le serveur refuserait ensuite l'un des deux.
+    const offre = estUneOffre(m)
+    btnOui.style.display = offre ? '' : 'none'
+    btnNon.style.display = offre ? '' : 'none'
+    btn.style.display = offre ? 'none' : ''
+    if (offre) {
+      document.getElementById('modal').style.display = 'flex'
+      return
+    }
 
     if (m.done) {
       btn.textContent = '↩ Marquer non fait'
@@ -1471,6 +1520,63 @@ if ("serviceWorker" in navigator) {
   }
 
   // ─── Routage du clic du bouton modal-done ──────────────────────────────────
+  // ─── Repondre a une offre (spec §11.3) ─────────────────────────────────────
+  //
+  // ⚠ AUCUNE FILE HORS LIGNE ICI, contrairement a « marquer fait ». Accepter une
+  // offre est une COURSE : l'hote peut reassigner, une autre candidate peut
+  // prendre le menage. Rejouer une acceptation vieille de deux heures ferait
+  // croire a un engagement que le serveur a peut-etre deja donne a quelqu'un
+  // d'autre. Hors ligne, on le dit et on ne promet rien.
+  async function repondreOffre(accepte) {
+    const menage = selectedMenage
+    if (!menage) return
+    const btnOui = document.getElementById('modal-accepter')
+    const btnNon = document.getElementById('modal-refuser')
+    if (navigator.onLine === false) {
+      showModalError('Hors ligne : impossible de répondre à une offre pour le moment.')
+      return
+    }
+    btnOui.disabled = true; btnNon.disabled = true
+    try {
+      const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: accepte ? 'accepterMenage' : 'refuserMenage',
+          booking_id: menage.bookId, property_id: menage.propId,
+          departure_date: menage.dateStr })
+      })
+      const data = await res.json().catch(() => null)
+      if (res.status === 409) {
+        // ⚠ Course perdue, PAS une panne : on le dit clairement, sinon elle
+        // s'organiserait autour d'un menage qui ne lui revient plus.
+        showModalWarning('Ce ménage ne vous est plus proposé.')
+        await rechargerAssignations()
+        return
+      }
+      if (!res.ok) {
+        showModalError((data && data.error) || 'Impossible d\'enregistrer votre réponse.')
+        return
+      }
+      if (menage.assign) menage.assign.status = accepte ? 'accepted' : 'orphaned'
+      showModalSuccess(accepte ? 'Ménage accepté.' : 'Réponse enregistrée : votre employeur est prévenu.')
+      await rechargerAssignations()
+      setTimeout(closeModal, 1200)
+    } catch (err) {
+      showModalError('Connexion impossible. Réessayez.')
+    } finally {
+      btnOui.disabled = false; btnNon.disabled = false
+    }
+  }
+
+  // Recharge la vérité serveur après une réponse : c'est lui qui tranche.
+  async function rechargerAssignations() {
+    try {
+      await loadData(currentToken)
+      rebuildDoneSet()
+      routeRender()
+    } catch (e) { console.warn('[Offre] rechargement impossible', e) }
+  }
+
   async function onModalDoneClick() {
     if (!selectedMenage) return
     if (selectedMenage.done) await doMarkUndone()

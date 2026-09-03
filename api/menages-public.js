@@ -5,6 +5,7 @@ const { markReady } = require('../lib/cron-property-status')
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, MAX_IDS } = require('../lib/attribution-prestataire')
+const { reportIncident } = require('../lib/founder-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 
 const supabase = createClient(
@@ -34,6 +35,25 @@ module.exports = async function handler(req, res) {
       await supabase.from('menage_events').update({ read: true })
         .in('id', event_ids).eq('token', token)
       return res.json({ success: true })
+    }
+
+    // --- accepterMenage / refuserMenage : la boucle d'acquittement (spec §11.3) ---
+    //
+    // ⚠ NE CONCERNE QUE LE SUPPLEANT. Le referent (rang 1) est assigne d'office
+    // et son menage nait `accepted` : il n'a rien a confirmer, et Regina ne verra
+    // jamais ce bouton. Un suppleant, lui, recoit une offre — l'engager sans son
+    // accord reviendrait a disposer du temps de quelqu'un.
+    if (action === 'accepterMenage' || action === 'refuserMenage') {
+      if (!booking_id || !property_id || !departure_date) {
+        return res.status(400).json({ error: 'Champs requis manquants (booking_id, property_id, departure_date)' })
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+        return res.status(400).json({ error: 'Format departure_date invalide, attendu YYYY-MM-DD' })
+      }
+      return await repondreALOffre(req, res, token, {
+        accepte: action === 'accepterMenage',
+        propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+      })
     }
 
     // --- markDone : nouveau, avec table menage_done + garde-fous ---
@@ -517,6 +537,107 @@ async function bienDansLePerimetre (userId, token, propertyId) {
   if (error) return { erreur: true }
   const ids = (pt?.property_ids || []).map(String)
   return { autorise: !ids.length || ids.includes(String(propertyId)) }
+}
+
+// Repond a une offre de menage. Acceptation ou refus, meme chemin.
+//
+// ⚠ ACCEPTATION ATOMIQUE (spec §3 bis, conservee telle quelle) : la condition
+// `status='offered' and provider_id=<elle>` est posee DANS l'update, pas testee
+// avant. Zero ligne modifiee = l'offre n'est plus valide — expiree, retiree, ou
+// reassignee a la main pendant qu'elle avait l'ecran ouvert. Deux acceptations
+// concurrentes, ou une acceptation qui croise une reassignation de l'hote, ne
+// peuvent pas produire de double affectation.
+async function repondreALOffre (req, res, token, { accepte, propertyId, bookingId, departureDate }) {
+  const { data: pt, error: errTok } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  if (errTok) {
+    console.error('[menages-public] lecture du token echec:', errTok.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!pt) return res.status(401).json({ error: 'Token invalide' })
+  const userId = pt.user_id
+
+  // ⚠ Repondre a une offre suppose d'ETRE quelqu'un. Un lien sans profil ne
+  // porte aucune assignation : il n'a rien a accepter, et le laisser faire
+  // ecrirait une acceptation au nom de personne.
+  const { data: profil, error: errProfil } = await supabase.from('profiles')
+    .select('id, first_name, active').eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
+  if (errProfil) {
+    console.error('[menages-public] lecture du profil echec:', errProfil.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!profil || profil.active === false) {
+    return res.status(403).json({ error: 'Ce lien ne permet pas de répondre à une offre' })
+  }
+
+  const { data: menage, error: errMen } = await supabase.from('menages')
+    .select('id, provider_id, status')
+    .eq('user_id', userId).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .maybeSingle()
+  if (errMen) {
+    console.error('[menages-public] lecture du menage echec:', errMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!menage) return res.status(404).json({ error: 'Ménage introuvable' })
+
+  if (accepte) {
+    const { data: maj, error: errMaj } = await supabase.from('menages')
+      .update({ status: 'accepted', accepted_at: new Date().toISOString(),
+                updated_at: new Date().toISOString() })
+      .eq('id', menage.id).eq('status', 'offered').eq('provider_id', profil.id)
+      .select('id')
+    if (errMaj) {
+      console.error('[menages-public] acceptation echec:', errMaj.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    // ⚠ Zero ligne : ce n'est PAS une erreur technique, c'est une course perdue.
+    // On le DIT plutot que de rendre un succes : elle doit savoir que ce menage
+    // ne lui revient plus, sinon elle s'organisera autour.
+    if (!maj || !maj.length) {
+      return res.status(409).json({ error: 'Cette offre n\'est plus disponible' })
+    }
+    await supabase.from('menage_assignment_log').insert({
+      user_id: userId, menage_id: menage.id, event: 'accepted',
+      to_provider_id: profil.id, actor: 'provider'
+    })
+    return res.json({ success: true, status: 'accepted' })
+  }
+
+  // REFUS. ⚠ Le menage devient `orphaned`, PAS `unassigned` : sans cette
+  // distinction, le writer le reassignerait a la meme personne au cycle suivant,
+  // qui le refuserait encore — une boucle dont personne ne sortirait. `orphaned`
+  // dit « quelqu'un a refuse, il faut une decision humaine », et le writer n'y
+  // touche pas. L'escalade automatique vers la candidate suivante reste reportee
+  // (spec §3 bis) : ici, c'est l'hote qui tranche.
+  const { data: maj, error: errMaj } = await supabase.from('menages')
+    .update({ status: 'orphaned', provider_id: null, offered_at: null, accepted_at: null,
+              assignment_reason: `Refuse par ${profil.first_name}.`,
+              updated_at: new Date().toISOString() })
+    .eq('id', menage.id).eq('status', 'offered').eq('provider_id', profil.id)
+    .select('id')
+  if (errMaj) {
+    console.error('[menages-public] refus echec:', errMaj.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!maj || !maj.length) {
+    return res.status(409).json({ error: 'Cette offre n\'est plus disponible' })
+  }
+  await supabase.from('menage_assignment_log').insert({
+    user_id: userId, menage_id: menage.id, event: 'declined',
+    from_provider_id: profil.id, actor: 'provider',
+    reason: 'Refus depuis la PWA.'
+  })
+  // ⚠ L'hote DOIT le savoir : un menage refuse et non repris est un logement qui
+  // ne sera pas prepare. C'est le seul cas de ce lot ou personne ne prend le
+  // relais automatiquement.
+  try {
+    await reportIncident('menage_non_assigne', {
+      userId, propertyId: String(propertyId),
+      detail: { message: `Menage du ${departureDate} refuse par ${profil.first_name} : personne n'est assigne.` }
+    })
+  } catch (e) { console.error('[menages-public] alerte refus echec:', e.message) }
+  return res.json({ success: true, status: 'orphaned' })
 }
 
 async function avisDeLaPrestataire (req, res, token) {

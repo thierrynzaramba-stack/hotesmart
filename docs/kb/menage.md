@@ -101,6 +101,29 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
   marquer fait — ou **défaire** — le ménage de quelqu'un d'autre. Repli quand aucun ménage
   n'existe encore en base (la table est récente, le writer ne couvre que J−30/J+180) : le
   périmètre du token s'applique, et refuser aurait cassé le rattrapage à 14 jours de la PWA.
+### Répondre à une offre (lot 2.2)
+
+Un ménage `offered` porte le badge **« À CONFIRMER »** sur sa carte, et la fiche propose
+**« J'accepte »** / **« Je ne peux pas »** — à la place du bouton « Marquer fait », qui n'a pas
+de sens tant que rien n'est accepté. ⚠️ **Le référent ne voit jamais ces boutons** : son ménage
+naît `accepted`, rien ne change pour Régina.
+
+- **L'acceptation est atomique** : la condition `status='offered' AND provider_id=<elle>` est
+  posée **dans** l'update, pas testée avant. Zéro ligne modifiée = l'offre n'est plus valide
+  (retirée, réassignée à la main, prise par une autre) → **409, « ce ménage ne vous est plus
+  proposé »**. C'est ce qui rend une double affectation impossible.
+- **Un refus met le ménage en `orphaned`**, pas `unassigned`. ⚠️ La distinction évite une
+  boucle : `unassigned` serait réassigné à la même personne au cycle suivant, qui refuserait
+  encore. `orphaned` dit « quelqu'un a refusé, il faut une décision humaine » — le writer n'y
+  touche pas, et **l'hôte est alerté**. C'est le seul cas où personne ne prend le relais
+  automatiquement : l'escalade vers la candidate suivante reste reportée (spec §3 bis).
+- ⚠️ **Aucune file hors ligne** ici, contrairement à « marquer fait ». Accepter est une
+  **course** : rejouer une acceptation vieille de deux heures ferait croire à un engagement que
+  le serveur a peut-être déjà donné à quelqu'un d'autre. Hors ligne, l'écran le dit et ne
+  promet rien.
+- **Un lien sans profil ne peut pas répondre** : il ne porte aucune assignation, et le laisser
+  faire écrirait une acceptation au nom de personne.
+
 - **Écran hôte** : une pastille par ménage — le prénom, en pointillés quand c'est `offered`
   (un suppléant qui n'a pas répondu n'est **pas** un ménage couvert), « personne » en clair
   quand il n'y a pas d'assignation. Le sélecteur de la modale réassigne en deux clics.

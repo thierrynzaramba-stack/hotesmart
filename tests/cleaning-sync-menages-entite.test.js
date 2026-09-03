@@ -560,3 +560,20 @@ test('un bien inconnu ne fait pas non plus ANNULER ses ménages', async () => {
   const bilan = await synchroniserMenages()
   assert.strictEqual(bilan.annules, 0, 'un bien qu\'on ne sait pas lire n\'est pas un bien disparu')
 })
+
+test('un ménage REFUSÉ (orphaned) n\'est pas rendu à qui l\'a refusé', async () => {
+  // ⚠ Sans cette garde, le writer le réassignerait à la même personne au cycle
+  // suivant, qui le refuserait encore : une boucle dont personne ne sortirait.
+  // `orphaned` appelle une décision humaine — l'hôte a été alerté.
+  const etat = preparer({
+    snaps: [SNAP()],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'orphaned',
+                provider_id: null, assigned_by: 'auto' }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1 }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.assignes_apres_coup, 0)
+  assert.strictEqual(etat.majs.length, 0)
+})
