@@ -652,3 +652,56 @@ Détail : `docs/specs/spec-prestataires-menage.md` §6.
 
 **168 avis** au total : 93 Beds24, 70 Channex, 5 détections en messagerie.
 
+
+## 12. `ratioProprete` — la fonction partagée
+
+`lib/stats-avis.js`. **Deux écrans l'appellent, aux destinataires différents** :
+`/avis` côté hôte, et la fiche prestataire. Ne pas la dupliquer — deux chiffres
+calculés différemment pour la même chose finiraient par se contredire, et c'est
+celui montré à la prestataire qui perdrait sa crédibilité.
+
+```js
+ratioProprete(sb, {
+  userId,          // OBLIGATOIRE — sans lui, rien n'est compté et aucune requête n'est émise
+  periode,         // '15j' | '30j' | '6mois' | 'toujours'.  Défaut '30j' ; une clé
+                   // inconnue y retombe (élargir en silence serait pire)
+  refs,            // null = tous les biens du compte | [] = AUCUN | ['209413', …]
+  menageEventIds,  // null = tous | [] = AUCUN | ['uuid', …]  ← la fiche prestataire
+  maintenant       // horloge injectable
+})
+→ { total, positif, remarque, rien_signale, non_analyses, periode, depuis, erreur? }
+```
+
+**Quatre invariants, chacun vérifié par mutation :**
+
+1. **`user_id` toujours filtré.** Le cron et les endpoints tournent en service
+   key : la RLS ne les protège pas, ce filtre est la seule défense.
+2. **`statut = 'confirme'` seul.** Une détection en attente n'est pas un fait :
+   la compter reviendrait à reprocher à la prestataire quelque chose que l'hôte
+   n'a pas validé.
+3. **`[]` n'est pas `null`.** Un tableau vide veut dire « aucun » et rend zéro,
+   sans même émettre de requête. Les confondre montrerait à un membre au
+   périmètre vide — ou à une prestataire sans ménage rattaché — les chiffres de
+   tout le compte.
+4. **Une panne n'est pas zéro.** Elle rend `erreur: true` plutôt que des
+   compteurs à zéro, qui se liraient comme un résultat.
+
+Un avis **non analysé** est compté dans `non_analyses`, jamais dans
+`rien_signale` : le ranger là ferait croire que la question a été tranchée.
+
+**Ce que la fonction ne fait PAS** : décider de ce qui est montré à qui. Ce
+filtre appartient à l'appelant — pour la prestataire,
+`docs/specs/spec-prestataires-menage.md` §6.
+
+### L'affichage
+
+Sélecteur de période mémorisé en `localStorage` (`avis_periode`), défaut 30 jours,
+avec repli silencieux si le stockage est indisponible — c'est un confort
+d'affichage, pas une donnée du compte. Le ratio est rendu par deux icônes SVG,
+pouce haut et pouce bas : **pas d'emoji**, dont le rendu dépend de la police du
+système.
+
+Les avis portent une **étiquette d'origine** colorée — Messagerie, Avis Airbnb,
+Avis Booking, SMS, Email, De vive voix. Elle dit d'où vient l'avis, pas ce qu'il
+vaut : une détection en messagerie et un avis public n'ont ni la même fiabilité
+ni le même statut, les confondre visuellement ferait lire l'une pour l'autre.

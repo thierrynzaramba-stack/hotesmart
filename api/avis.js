@@ -14,6 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
+const { ratioProprete, PERIODES } = require('../lib/stats-avis')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -24,7 +25,6 @@ const MAX_LIGNES  = 500
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SOURCES     = new Set(['sms', 'email', 'oral'])
 const MAX_TEXTE   = 5000
-const FENETRE_JRS = 30
 
 // ⚠ STRICTEMENT LES COLONNES QUE LA PAGE AFFICHE. Rien de plus.
 //
@@ -56,7 +56,13 @@ async function lister (req, res, garde) {
   // `fenetre_jours` DOIT y figurer : la page l'affiche, et son absence donnait
   // « 0 remarque sur undefined j » — precisement au membre dont le perimetre est
   // vide, le cas que cette ligne existe pour traiter proprement.
-  if (filtre === '') return res.status(200).json({ avis: [], biens: [], remarques30j: 0, fenetre_jours: FENETRE_JRS })
+  if (filtre === '') {
+    return res.status(200).json({
+      avis: [], biens: [], periodes: Object.keys(PERIODES),
+      ratio: { total: 0, positif: 0, remarque: 0, rien_signale: 0,
+               non_analyses: 0, periode: '30j', depuis: null }
+    })
+  }
 
   // Le bien demande, s'il y en a un, doit appartenir au perimetre : sans cette
   // verification, un membre limite a un bien lirait les avis d'un autre en
@@ -101,25 +107,24 @@ async function lister (req, res, garde) {
     return res.status(500).json({ error: 'Lecture impossible' })
   }
 
-  // Compteur des remarques de proprete sur la fenetre. Calcule ICI et non au
-  // front : le front ne voit que les MAX_LIGNES premieres lignes.
-  const depuis = new Date(Date.now() - FENETRE_JRS * 24 * 3600 * 1000).toISOString()
-  let qc = supabase.from('ota_reviews')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId).eq('ai_clean_verdict', 'remarque')
-    // ⚠ Seuls les CONFIRMES comptent. Une detection en attente de validation
-    // n'est pas un fait : la faire entrer dans l'indicateur reviendrait a
-    // reprocher a la prestataire quelque chose que l'hote n'a pas valide.
-    .eq('statut', 'confirme')
-  if (bienDemande) qc = qc.eq('property_id_ref', bienDemande)
-  else if (filtre) qc = qc.or(filtre)
-  const { count } = await qc.gte('received_at', depuis)
+  // ⚠ Le ratio est calcule par lib/stats-avis.js, la MEME fonction que la fiche
+  // prestataire consommera. Deux chiffres calcules differemment pour la meme
+  // chose finiraient par se contredire.
+  //
+  // Il est calcule ICI et non au front : le front ne recoit que les MAX_LIGNES
+  // premieres lignes, il ne peut pas compter juste.
+  const periode = PERIODES[String(req.query?.periode || '')] !== undefined
+    ? String(req.query.periode) : '30j'
+  // Le perimetre transmis a la fonction : le bien demande s'il y en a un, sinon
+  // les references du perimetre du membre (null = tous les biens du compte).
+  const refsRatio = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))
+  const ratio = await ratioProprete(supabase, { userId, periode, refs: refsRatio })
 
   return res.status(200).json({
     avis: avis || [],
     biens: biens || [],
-    remarques30j: count || 0,
-    fenetre_jours: FENETRE_JRS
+    ratio,
+    periodes: Object.keys(PERIODES)
   })
 }
 

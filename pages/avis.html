@@ -30,7 +30,23 @@
     .badge-prop.remarque     { background:#FDF0E2; color:#A85B12; }
     .badge-prop.rien_signale { background:#F0F0F0; color:#666; }
     .badge-prop.attente      { background:#F0F0F0; color:#999; }
-    .badge-src { background:#EEF2FF; color:#3B4CCA; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+    /* Etiquette d'origine, une couleur par source. Meme forme que les badges
+       de proprete pour que l'oeil les lise comme une meme famille. */
+    .badge-src { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+    .badge-src.messagerie { background:#EEF2FF; color:#3B4CCA; }
+    .badge-src.airbnb     { background:#FDECEF; color:#B0224A; }
+    .badge-src.booking    { background:#E8EEFB; color:#1B3E8F; }
+    .badge-src.sms        { background:#E9F5EC; color:#276B3B; }
+    .badge-src.email      { background:#F3EDFA; color:#5B3B8F; }
+    .badge-src.oral       { background:#FBF0E4; color:#8A5A18; }
+    .badge-src.autre      { background:#F0F0F0; color:#666; }
+
+    /* Ratio de proprete sur la periode */
+    .ratio { display:flex; gap:14px; align-items:center; }
+    .ratio-item { display:flex; gap:5px; align-items:center; font-size:15px; font-weight:700; }
+    .ratio-item svg { width:15px; height:15px; }
+    .ratio-item.pos { color:#1E7B34; }
+    .ratio-item.neg { color:#A85B12; }
 
     /* Une detection n'est pas un fait : elle se distingue a l'oeil et porte sa
        propre action. Bordure gauche plutot qu'un fond colore — l'entree reste
@@ -98,6 +114,12 @@
 
       <div class="avis-barre">
         <select id="filtre-bien"><option value="">Tous les biens</option></select>
+        <select id="filtre-periode">
+          <option value="15j">15 derniers jours</option>
+          <option value="30j">30 derniers jours</option>
+          <option value="6mois">6 derniers mois</option>
+          <option value="toujours">Depuis toujours</option>
+        </select>
       </div>
 
       <div id="loader" class="loader">Chargement…</div>
@@ -224,7 +246,27 @@
     remarque:     'Remarque propreté',
     rien_signale: 'Propreté non évoquée'
   }
-  const SRC = { sms: 'SMS', email: 'Email', oral: 'De vive voix', message: 'Messagerie' }
+  // Icônes de pouce, en SVG : cohérentes avec les badges, et lisibles quelle
+  // que soit la police du système (un emoji ne l'est pas).
+  const POUCE_HAUT = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 21h4V9H2v12zM23 10a2 2 0 0 0-2-2h-6.3l1-4.6v-.3a1.5 1.5 0 0 0-.4-1L14 1 7.6 7.4A2 2 0 0 0 7 8.8V19a2 2 0 0 0 2 2h9a2 2 0 0 0 1.8-1.2l3-7.1c.1-.2.2-.5.2-.7v-2z"/></svg>'
+  const POUCE_BAS  = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 3h-4v12h4V3zM1 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3a1.5 1.5 0 0 0 .4 1L10 23l6.4-6.4a2 2 0 0 0 .6-1.4V5a2 2 0 0 0-2-2H6a2 2 0 0 0-1.8 1.2l-3 7.1c-.1.2-.2.5-.2.7v2z"/></svg>'
+
+  // ⚠ L'étiquette dit D'OÙ vient l'avis, pas ce qu'il vaut. Une détection en
+  // messagerie et un avis Airbnb n'ont ni la même fiabilité ni le même statut :
+  // les confondre visuellement ferait lire une remarque détectée comme un avis
+  // public.
+  function etiquetteSource (a) {
+    if (a.provider === 'manuel') {
+      if (a.source === 'message') return ['messagerie', 'Messagerie']
+      if (a.source === 'sms')     return ['sms', 'SMS']
+      if (a.source === 'email')   return ['email', 'Email']
+      if (a.source === 'oral')    return ['oral', 'De vive voix']
+      return ['autre', 'Direct']
+    }
+    if (a.ota === 'airbnb')  return ['airbnb', 'Avis Airbnb']
+    if (a.ota === 'booking') return ['booking', 'Avis Booking']
+    return ['autre', a.ota || 'Avis']
+  }
 
   // Appel API local, sur le motif de la messagerie : jeton de session et
   // `enteteCompte()` pour la delegation. Il LEVE sur reponse non-ok, comme
@@ -318,9 +360,8 @@
   function ligneAvis (a, i) {
     const texte = a.content_public || a.content || ''
     const note = a.overall_score != null ? `${a.overall_score}/10` : ''
-    const canal = a.provider === 'manuel'
-      ? `<span class="badge-src">${SRC[a.source] || 'Direct'}</span>`
-      : echapper(a.ota || '')
+    const [classeSrc, libelleSrc] = etiquetteSource(a)
+    const canal = `<span class="badge-src ${classeSrc}">${echapper(libelleSrc)}</span>`
     const extrait = a.ai_clean_excerpt
       ? `<div class="avis-extrait">« ${echapper(a.ai_clean_excerpt)} »</div>` : ''
     const long = texte.length > 160
@@ -348,14 +389,23 @@
     const stats = $('stats')
     const notes = avis.map(a => a.overall_score).filter(v => v != null)
     const moy = notes.length ? (notes.reduce((s, v) => s + v, 0) / notes.length).toFixed(1) : '—'
+    // ⚠ Le ratio vient du SERVEUR : le front ne reçoit que les premières lignes,
+    // il ne peut pas compter juste. Et c'est la même fonction que celle qui
+    // servira la fiche prestataire.
+    const r = data.ratio || { total: 0, positif: 0, remarque: 0 }
+    const libPeriode = { '15j': 'sur 15 jours', '30j': 'sur 30 jours',
+                         '6mois': 'sur 6 mois', toujours: 'depuis toujours' }[r.periode] || ''
     stats.innerHTML = `
-      <div class="stat-card"><div class="stat-val">${avis.length}</div>
-        <div class="stat-lab">avis au total</div></div>
+      <div class="stat-card"><div class="stat-val">${r.total}</div>
+        <div class="stat-lab">avis et signalements retenus ${echapper(libPeriode)}</div></div>
       <div class="stat-card"><div class="stat-val">${moy}</div>
         <div class="stat-lab">note moyenne sur 10</div></div>
-      <div class="stat-card ${(data.remarques30j || 0) > 0 ? 'alerte' : ''}">
-        <div class="stat-val">${data.remarques30j || 0}</div>
-        <div class="stat-lab">remarque${(data.remarques30j || 0) > 1 ? 's' : ''} propreté sur ${data.fenetre_jours || 30} j</div></div>`
+      <div class="stat-card ${r.remarque > 0 ? 'alerte' : ''}">
+        <div class="stat-val ratio">
+          <span class="ratio-item pos">${POUCE_HAUT}${r.positif}</span>
+          <span class="ratio-item neg">${POUCE_BAS}${r.remarque}</span>
+        </div>
+        <div class="stat-lab">propreté saluée / remarques ${echapper(libPeriode)}</div></div>`
     stats.hidden = false
 
     $('liste').innerHTML = avis.map(ligneAvis).join('')
@@ -370,12 +420,14 @@
   async function charger () {
     $('loader').style.display = 'block'
     const ref = $('filtre-bien').value
+    const periode = $('filtre-periode').value || '30j'
     let data
     try {
       // ⚠ apiCall LEVE sur reponse non-ok, il ne renvoie pas { error }. Sans ce
       // try, un 403 — le cas normal d'un membre au perimetre restreint —
       // remontait en exception non capturee et laissait la page blanche.
-      data = await appelAPI('avis?action=list' + (ref ? '&bien=' + encodeURIComponent(ref) : ''))
+      data = await appelAPI('avis?action=list&periode=' + encodeURIComponent(periode) +
+                            (ref ? '&bien=' + encodeURIComponent(ref) : ''))
     } catch (e) {
       $('loader').style.display = 'none'
       $('liste').innerHTML = ''
@@ -470,6 +522,24 @@
     $('btn-saisir').hidden = !peut
 
     $('s-date').value = new Date().toISOString().slice(0, 10)
+
+    // ⚠ Le choix de periode est memorise PAR NAVIGATEUR, pas en base : c'est un
+    // confort d'affichage, pas une donnee du compte. localStorage peut lever
+    // (navigation privee, site data bloque) — on retombe alors sur le defaut
+    // plutot que de casser la page.
+    try {
+      const memo = localStorage.getItem('avis_periode')
+      if (memo && $('filtre-periode').querySelector(`option[value="${memo}"]`)) {
+        $('filtre-periode').value = memo
+      } else {
+        $('filtre-periode').value = '30j'
+      }
+    } catch { $('filtre-periode').value = '30j' }
+
+    $('filtre-periode').addEventListener('change', () => {
+      try { localStorage.setItem('avis_periode', $('filtre-periode').value) } catch { /* sans mémoire */ }
+      charger()
+    })
     $('filtre-bien').addEventListener('change', charger)
     $('s-bien').addEventListener('change', chargerSejours)
     $('btn-saisir').addEventListener('click', () => {

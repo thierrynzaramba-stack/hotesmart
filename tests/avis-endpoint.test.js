@@ -43,8 +43,12 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         select (c, opts) { q._count = opts?.count; return chain },
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
-        gte () { return chain }, order () { return chain }, limit () { return chain },
+        gte (c, v) { q._gte = { colonne: c, valeur: v }; return chain },
+        order () { return chain }, limit () { return chain },
         neq (c, v) { q._neq = q._neq || {}; q._neq[c] = v; return chain },
+        // ⚠ `in` et `gte` sont honores : le ratio en depend, et sans eux
+        // supprimer le filtre de perimetre ou de periode ne casserait rien.
+        in (c, v) { q._in = { colonne: c, valeurs: (v || []).map(String) }; return chain },
         is () { return chain }, not () { return chain },
         insert (row) { etat.ecritures.push({ table: nom, row }); q._row = row
                        return { select: () => ({ single: async () => ({ data: { id: 'nouvel-avis' }, error: null }) }) } },
@@ -76,6 +80,8 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
             (q._f.ai_clean_verdict == null || a.ai_clean_verdict === q._f.ai_clean_verdict) &&
             (q._f.statut == null || (a.statut || 'confirme') === q._f.statut) &&
             (q._f.id == null || a.id === q._f.id) &&
+            (!q._in || (q._in.valeurs.includes(String(a[q._in.colonne])))) &&
+            (!q._gte || String(a[q._gte.colonne] || '') >= String(q._gte.valeur)) &&
             (!q._neq || !q._neq.statut || (a.statut || 'confirme') !== q._neq.statut))
           if (q._or) c = c.filter(a => String(q._or).includes(a.property_id_ref))
           if (q._count === 'exact') return Promise.resolve({ count: c.length, error: null })
@@ -130,10 +136,10 @@ function reponse () {
   return r
 }
 
-const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
-const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
+const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-30T01:00:00Z', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
+const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-20T01:00:00Z', property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
 // Avis d'un AUTRE compte : il ne doit jamais apparaitre, quel que soit le filtre.
-const AVIS_TIERS = { id: 'r3', statut: 'confirme', user_id: '33333333-3333-4333-8333-333333333333',
+const AVIS_TIERS = { id: 'r3', statut: 'confirme', ai_analyzed_at: '2026-08-25T01:00:00Z', user_id: '33333333-3333-4333-8333-333333333333',
                      property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: '2026-08-25T00:00:00Z' }
 
 function req (query = {}, body = null, method = 'GET') {
@@ -333,18 +339,19 @@ test('list : un avis d\'un AUTRE compte n\'apparaît jamais', async () => {
   assert.deepStrictEqual(res.body.avis.map(a => a.id).sort(), ['r1', 'r2'])
 })
 
-test('list : le compteur 30 jours est cloisonné lui aussi', async () => {
+test('list : le ratio est cloisonné lui aussi', async () => {
   // Il compte les remarques : sans filtre de compte, il aurait inclus celle du
   // compte tiers et affiché un chiffre appartenant à quelqu'un d'autre.
   preparer({ avis: [AVIS_A, AVIS_B, AVIS_TIERS] })
   const handler = require('../api/avis')
   const res = reponse()
   await handler(req({ action: 'list' }), res)
-  assert.strictEqual(res.body.remarques30j, 1, 'seule la remarque du compte courant compte')
+  assert.strictEqual(res.body.ratio.remarque, 1, 'seule la remarque du compte courant compte')
 })
 
-test('list : périmètre vide -> la fenêtre est quand même annoncée', async () => {
-  // Sans `fenetre_jours`, la carte affichait « 0 remarque sur undefined j ».
+test('list : périmètre vide -> un ratio à zéro, pas un ratio absent', async () => {
+  // La carte lirait `undefined` sinon. Et surtout : un périmètre vide doit
+  // rendre ZÉRO, jamais les chiffres de tout le compte.
   preparer({
     user: MEMBRE, avis: [AVIS_A],
     profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
@@ -354,7 +361,8 @@ test('list : périmètre vide -> la fenêtre est quand même annoncée', async (
   const res = reponse()
   await handler({ ...req({ action: 'list' }), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
   assert.strictEqual(res.code, 200)
-  assert.strictEqual(res.body.fenetre_jours, 30)
+  assert.strictEqual(res.body.ratio.total, 0)
+  assert.strictEqual(res.body.ratio.remarque, 0)
 })
 
 // ─── Saisie : les entrées malformées ne produisent pas de 500 ───────────────
@@ -547,7 +555,7 @@ test('list : une détection en attente ne compte pas dans les remarques', async 
   const handler = require('../api/avis')
   const res = reponse()
   await handler(req({ action: 'list' }), res)
-  assert.strictEqual(res.body.remarques30j, 0)
+  assert.strictEqual(res.body.ratio.remarque, 0)
 })
 
 test('list : une détection en attente est bien VISIBLE dans la liste', async () => {
@@ -727,4 +735,39 @@ test('requalifier : ai_analyzed_at est posé si la réanalyse l\'avait effacé',
   await handler(reqRequalif(AVIS_AUTO.id, 'remarque'), reponse())
   const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
   assert.ok(maj.row.ai_analyzed_at, 'un verdict humain EST une analyse')
+})
+
+test('list : un avis NON analysé n\'est ni positif ni remarque', async () => {
+  // Il est compté à part. Le ranger d'office dans « rien signalé » ferait
+  // croire que la question a été tranchée alors qu'on n'a pas encore regardé.
+  preparer({ avis: [{ ...AVIS_A, ai_analyzed_at: null, ai_clean_verdict: null }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list' }), res)
+  assert.strictEqual(res.body.ratio.total, 1)
+  assert.strictEqual(res.body.ratio.non_analyses, 1)
+  assert.strictEqual(res.body.ratio.positif, 0)
+  assert.strictEqual(res.body.ratio.remarque, 0)
+})
+
+test('list : la période demandée est honorée', async () => {
+  // Un avis hors fenêtre ne doit pas entrer dans le ratio.
+  const vieux = { ...AVIS_A, id: 'r9', received_at: '2024-01-01T00:00:00Z',
+                  ai_analyzed_at: '2024-01-01T01:00:00Z', ai_clean_verdict: 'positif' }
+  preparer({ avis: [vieux] })
+  const handler = require('../api/avis')
+  const r30 = reponse(); await handler(req({ action: 'list', periode: '30j' }), r30)
+  assert.strictEqual(r30.body.ratio.total, 0, 'hors des 30 jours')
+  const rTout = reponse(); await handler(req({ action: 'list', periode: 'toujours' }), rTout)
+  assert.strictEqual(rTout.body.ratio.total, 1, 'mais présent depuis toujours')
+  assert.strictEqual(rTout.body.ratio.positif, 1)
+})
+
+test('list : une période inventée retombe sur le défaut, sans erreur', async () => {
+  preparer({ avis: [AVIS_A] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'list', periode: 'depuis-toujours-ou-presque' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.ratio.periode, '30j')
 })
