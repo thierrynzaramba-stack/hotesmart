@@ -376,6 +376,7 @@ async function avisDeLaPrestataire (req, res, token) {
   // La liste n'est chargee qu'a la demande : la vue par defaut n'affiche que le
   // ratio a cote du prenom.
   let avis = []
+  let listeTronquee = false
   if (req.query.detail === '1') {
     const att = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
     // ⚠ UNE PANNE N'EST PAS « AUCUN AVIS ».
@@ -390,6 +391,7 @@ async function avisDeLaPrestataire (req, res, token) {
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
     if (att.ids.length) {
+      listeTronquee = att.tronque === true || att.ids.length > MAX_IDS
       const borne = borneDepuis(periode)
       let q = supabase.from('ota_reviews')
         // ⚠ NI `guest_name`, NI `content`, NI `content_public`, NI `raw`.
@@ -430,7 +432,9 @@ async function avisDeLaPrestataire (req, res, token) {
       // liste de biens est construite a partir des reservations de la fenetre
       // visible (14 jours en arriere, 30 en avant), alors qu'un avis peut
       // porter sur un sejour bien plus ancien — le bien serait alors sans nom.
-      // Une panne ici ne coupe rien : on retombe sur l'identifiant.
+      // Une panne ici ne coupe pas la liste : les avis s'affichent quand meme,
+      // sans le nom du bien. L'identifiant provider n'est PAS montre en repli —
+      // « 287031 » n'apprend rien a une femme de menage.
       const refs = [...new Set(avis.map(a => a.bien).filter(Boolean))]
       if (refs.length) {
         const { data: biens, error: errBiens } = await supabase.from('properties')
@@ -445,7 +449,11 @@ async function avisDeLaPrestataire (req, res, token) {
 
   return res.status(200).json({
     prenom: profil.first_name, autorise: true,
-    ratio, avis, periode
+    ratio, avis, periode,
+    // ⚠ La liste est coupee a MAX_IDS avant meme d'interroger `ota_reviews`.
+    // Sans ce drapeau, une liste partielle se lit comme la liste complete —
+    // exactement la faute contre laquelle `ratio.tronque` a ete ajoute.
+    ...(listeTronquee ? { listeTronquee: true } : {})
   })
 }
 

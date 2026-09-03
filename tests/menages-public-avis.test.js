@@ -153,8 +153,9 @@ test('le nom du bien est résolu POUR CE COMPTE seulement', async () => {
 })
 
 test('une panne sur les noms de biens ne coupe PAS la liste', async () => {
-  // Le nom est un confort ; l'avis, lui, doit s'afficher. On retombe sur
-  // l'identifiant plutôt que de rendre un 503.
+  // Le nom est un confort ; l'avis, lui, doit s'afficher. On rend la liste sans
+  // le nom plutôt qu'un 503 — l'affichage n'y substitue pas l'identifiant
+  // provider, qui n'apprendrait rien à une femme de ménage.
   preparer({ erreurBiens: { message: 'timeout' } })
   const handler = require('../api/menages-public')
   const res = reponse()

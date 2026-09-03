@@ -54,6 +54,7 @@
     .avis-meta .pos { color: #1E7B34; }
     .avis-meta .neg { color: #A85B12; }
     .avis-texte { font-size: 13px; line-height: 1.5; }
+    .avis-sans-detail { color: var(--text2); font-style: italic; }
     .badge-prive { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--text2); }
 
     .mini-cal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; position: sticky; top: 0; }
@@ -500,6 +501,11 @@
     </div>
 
     <div class="content">
+      <!-- Bandeau sync (cache si rien a syncer). HORS des onglets : « hors ligne »
+           et « actions en attente d'envoi » concernent l'app entiere, et il
+           disparaissait quand la vue Avis masquait le planning. -->
+      <div class="sync-banner" id="sync-banner" style="display:none"></div>
+
       <!-- Onglets. `display:none` et non l'attribut `hidden` : le CSS de la page
            pose des `display` sur des classes voisines, et `hidden` y avait deja
            ete rendu inoperant une fois. -->
@@ -544,9 +550,6 @@
         </div>
 
         <div>
-          <!-- Bandeau sync (cache si rien a syncer) -->
-          <div class="sync-banner" id="sync-banner" style="display:none"></div>
-
           <!-- Fil d'actualités -->
           <div class="news-panel" id="news-panel" style="display:none">
             <div class="news-header">
@@ -899,7 +902,13 @@ if ("serviceWorker" in navigator) {
     document.getElementById('filters-close-btn')?.addEventListener('click', closeFilters)
     // Re-render au resize (passage mobile <-> desktop)
     let resizeT
-    window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(routeRender, 150) })
+    // Le re-rendu de resize ne concerne que le planning. Sans ce garde-fou, il
+    // reste inoffensif par accident (tout ce que touche `routeRender` est sous
+    // `.menage-layout`, masquee) — et rien ne garantit que ca dure.
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeT)
+      resizeT = setTimeout(() => { if (currentTab !== 'avis') routeRender() }, 150)
+    })
 
     currentToken = getToken()
     if (!currentToken) {
@@ -1590,7 +1599,12 @@ if ("serviceWorker" in navigator) {
     const fab = document.getElementById('fab-filters')
     if (fab) fab.style.display = (currentTab === 'avis') ? 'none' : ''
     if (currentTab === 'planning') routeRender()
-    if (currentTab === 'avis' && !avisCharge) chargerAvis()
+    if (currentTab === 'avis' && !avisCharge) {
+      chargerAvis().catch(err => {
+        console.warn('[Avis] chargement impossible', err)
+        etatAvis('Service indisponible', 'Réessayez dans un instant.')
+      })
+    }
   }
 
   function etatAvis (titre, message) {
@@ -1663,7 +1677,10 @@ if ("serviceWorker" in navigator) {
     // ⚠ CONTRAT DU SERVEUR : `ratio.erreur` est une PANNE, pas un resultat. Lu
     // AVANT tout affichage — sans quoi l'ecran annoncerait « 0 avis » a une
     // prestataire qui en a 98, et elle en tirerait une conclusion fausse.
-    if (!r || r.erreur) {
+    const chiffre = v => Number.isFinite(v) ? v : null
+    if (!r || r.erreur || chiffre(r.total) === null || chiffre(r.positif) === null || chiffre(r.remarque) === null) {
+      // Un champ manquant est traite comme la panne qu'il est : afficher
+      // « undefined avis » vaudrait le « 0 avis » que tout ceci evite.
       etatAvis('Compteurs indisponibles', 'Vos avis n\'ont pas pu être comptés. Réessayez dans un instant.')
       avisCharge = false   // rien d'affiche : la prochaine ouverture doit reessayer
       return
@@ -1686,6 +1703,12 @@ if ("serviceWorker" in navigator) {
           <span class="ratio-item neg">${POUCE_BAS}${r.remarque}</span>
         </strong>propreté saluée / remarques
       </div>`
+    // ⚠ `tronque` dit que le comptage a bute sur une borne : le chiffre est
+    // PARTIEL. Ne pas le dire le ferait lire comme un total — la meme famille
+    // de faute que la panne affichee en « 0 avis ».
+    if (r.tronque || data.listeTronquee) {
+      ratio.innerHTML += '<div class="week-stat" style="flex-basis:100%">Vous avez beaucoup d\'avis : cet écran n\'en montre qu\'une partie.</div>'
+    }
     ratio.style.display = ''
 
     const liste = document.getElementById('avis-liste')
@@ -1706,6 +1729,19 @@ if ("serviceWorker" in navigator) {
     // Le nom du bien s'il est connu, sinon rien : l'identifiant provider brut
     // (« 287031 ») ne dit rien a personne.
     const bien = a.bienNom || ''
+    // ⚠ UN AVIS PEUT NE PAS AVOIR D'EXTRAIT — et une carte rouge vide est un
+    // reproche que la personne visee ne peut ni verifier ni situer. Trois
+    // chemins de production en produisent : la regle de l'etage 1 n'en pose
+    // JAMAIS (tag `_negative_` Airbnb, note de proprete basse), l'etage 2 le
+    // met a null quand la citation du modele ne se retrouve pas dans le texte,
+    // et la requalification par l'hote l'efface. On le DIT au lieu de laisser
+    // un blanc. Le cas est invisible aujourd'hui (1 remarque sur 70, avec
+    // extrait) : il apparaitra au premier tag negatif.
+    const texte = a.extrait
+      ? echapper(a.extrait)
+      : `<span class="avis-sans-detail">${neg
+          ? 'Propreté signalée, sans détail rapporté par le voyageur.'
+          : 'Propreté saluée, sans commentaire détaillé.'}</span>`
     return `<div class="avis-card ${neg ? 'neg' : 'pos'}">
       <div class="avis-meta">
         <span class="${neg ? 'neg' : 'pos'}">${neg ? POUCE_BAS : POUCE_HAUT}</span>
@@ -1713,7 +1749,7 @@ if ("serviceWorker" in navigator) {
         ${bien ? `<span>· ${echapper(bien)}</span>` : ''}
         ${a.prive ? '<span class="badge-prive">retour privé</span>' : ''}
       </div>
-      <div class="avis-texte">${echapper(a.extrait || '')}</div>
+      <div class="avis-texte">${texte}</div>
     </div>`
   }
 

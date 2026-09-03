@@ -32,14 +32,43 @@ function extraireBloc () {
   return HTML.slice(i, j)
 }
 
-function elem (id) {
-  return {
-    id, innerHTML: '', textContent: '', style: {}, dataset: {},
-    classList: { toggle () {}, add () {}, remove () {} },
-    addEventListener () {},
+function elem (id, dataset = {}) {
+  const e = {
+    id, innerHTML: '', textContent: '', dataset,
+    // `style.display` part de la valeur POSEE PAR LE HTML, pas de `undefined` :
+    // sinon « masque » et « jamais touche » se confondent, et une mutation qui
+    // supprime le masquage laisse les tests verts.
+    style: { display: DEPART[id] === undefined ? '' : DEPART[id] },
+    classes: new Set(),
+    classList: {
+      toggle (c, on) { if (on) e.classes.add(c); else e.classes.delete(c) },
+      add (c) { e.classes.add(c) }, remove (c) { e.classes.delete(c) }
+    },
+    listeners: [],
+    addEventListener (ev, fn) { e.listeners.push([ev, fn]) },
+    click () { e.listeners.filter(l => l[0] === 'click').forEach(l => l[1]()) },
     querySelectorAll: () => []
   }
+  return e
 }
+
+// L'etat de depart que le HTML pose reellement. Il est RELU du fichier : un
+// `style="display:none"` supprime par megarde doit faire tomber un test, pas
+// etre recopie ici a la main.
+const DEPART = {}
+for (const id of ['tabs', 'avis-vue', 'avis-ratio']) {
+  const m = HTML.match(new RegExp('id="' + id + '"[^>]*'))
+  DEPART[id] = (m && /style="display:none"/.test(m[0])) ? 'none' : ''
+}
+
+test('le HTML masque les onglets et la vue Avis AU DEPART', async () => {
+  // La garantie centrale du commit — self_view_reviews coupe ⇒ pas d'onglet —
+  // repose d'abord sur cet attribut : si le HTML les affiche, tout le monde
+  // voit l'onglet avant meme qu'une ligne de script ne tourne.
+  assert.strictEqual(DEPART['tabs'], 'none', '#tabs doit partir masque')
+  assert.strictEqual(DEPART['avis-vue'], 'none', '#avis-vue doit partir masque')
+  assert.strictEqual(DEPART['avis-ratio'], 'none', '#avis-ratio doit partir masque')
+})
 
 // Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
 // ecrit dans chaque conteneur.
@@ -47,12 +76,16 @@ function contexte ({ reponses = [] } = {}) {
   const els = new Map()
   const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
   const appels = []
+  // Les deux vrais boutons d'onglet : sans eux, `setTab` n'est exerce par aucun
+  // test et sept mutations du basculement passaient inapercues.
+  const boutons = [elem('btn-planning', { tab: 'planning' }), elem('btn-avis', { tab: 'avis' })]
+  els.set('tabs', Object.assign(elem('tabs'), { querySelectorAll: () => boutons }))
   const ctx = {
     console,
     document: {
       getElementById: get,
       querySelector: sel => get(sel.replace(/^[.#]/, '')),
-      querySelectorAll: () => []
+      querySelectorAll: sel => /button/.test(sel) ? boutons : []
     },
     fetch: async (url) => {
       appels.push(url)
@@ -69,7 +102,7 @@ function contexte ({ reponses = [] } = {}) {
   // `let avisCharge` vit dans le scope lexical du script, pas sur l'objet
   // contexte : on le relit par une evaluation dans ce meme contexte.
   const lire = expr => vm.runInContext(expr, ctx)
-  return { ctx, els, get, appels, lire }
+  return { ctx, els, get, appels, lire, boutons }
 }
 
 const RATIO_OK = { total: 98, positif: 10, remarque: 15, rien_signale: 73, periode: 'toujours' }
@@ -81,7 +114,10 @@ test('PANNE de compteurs : jamais « 0 avis », un etat de panne explicite', asy
   ctx.renderAvis({ autorise: true, ratio: { total: 0, positif: 0, remarque: 0, erreur: true }, avis: [] })
   const etat = get('avis-etat').innerHTML
   assert.ok(/indisponible/i.test(etat), 'l\'ecran doit dire que le service est indisponible')
-  assert.ok(!/\b0 avis\b/.test(etat + get('avis-ratio').innerHTML), 'aucun zero ne doit etre affiche')
+  // ⚠ Assertion sur le CONTENU REEL du bloc de compteurs, pas sur une chaine
+  // « 0 avis » que le gabarit n'emet jamais : la version precedente se lisait
+  // comme le garde-fou du risque principal et ne testait rien.
+  assert.strictEqual(get('avis-ratio').innerHTML, '', 'aucun compteur ne doit etre rendu')
   assert.strictEqual(get('avis-ratio').style.display, 'none', 'les compteurs restent caches')
   assert.strictEqual(get('avis-liste').innerHTML, '', 'et la liste aussi')
 })
@@ -183,25 +219,25 @@ test('l\'identifiant technique du bien ne s\'affiche pas quand le nom manque', a
 test('self_view_reviews coupe : PAS d\'onglet', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'Régina', autorise: false, ratio: null, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, undefined, 'l\'onglet ne doit meme pas apparaitre')
+  assert.strictEqual(get('tabs').style.display, 'none', 'l\'onglet ne doit meme pas apparaitre')
 })
 
 test('profil desactive : PAS d\'onglet', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { actif: false, ratio: null, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, undefined)
+  assert.strictEqual(get('tabs').style.display, 'none')
 })
 
 test('hors ligne : PAS d\'onglet, et surtout aucune exception', async () => {
   const { ctx, get } = contexte({ reponses: [{ jete: true }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, undefined)
+  assert.strictEqual(get('tabs').style.display, 'none')
 })
 
 test('token refuse : PAS d\'onglet', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 401, body: { error: 'Token invalide' } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, undefined)
+  assert.strictEqual(get('tabs').style.display, 'none')
 })
 
 test('autorisee : l\'onglet apparait', async () => {
@@ -253,4 +289,106 @@ test('chargement reussi : la liste est demandee AVEC detail=1', async () => {
   await ctx.chargerAvis()
   assert.ok(appels[0].includes('detail=1'))
   assert.ok(appels[0].includes('action=avis'))
+})
+
+// ─── Le basculement d'onglet ───────────────────────────────────────────────
+// Sept mutations du basculement survivaient aux tests : `setTab` n'etait exerce
+// par aucun d'eux, faute de boutons dans le DOM factice.
+
+test('passer sur Avis masque le planning et son bouton de filtres', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  ctx.setTab('avis')
+  assert.strictEqual(get('menage-layout').style.display, 'none', 'le planning ne doit pas rester affiche sous la vue Avis')
+  assert.strictEqual(get('avis-vue').style.display, '')
+  assert.strictEqual(get('fab-filters').style.display, 'none', 'le bouton Filtres n\'a rien a filtrer ici')
+})
+
+test('revenir sur Planning re-rend le planning et rend le bouton de filtres', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  let rendus = 0
+  ctx.routeRender = () => { rendus++ }
+  ctx.setTab('avis')
+  ctx.setTab('planning')
+  assert.strictEqual(get('menage-layout').style.display, '')
+  assert.strictEqual(get('avis-vue').style.display, 'none')
+  assert.strictEqual(get('fab-filters').style.display, '')
+  assert.ok(rendus >= 1, 'le planning doit etre re-rendu au retour')
+})
+
+test('le premier passage sur Avis DECLENCHE le chargement', async () => {
+  // Sans cet appel, l'ecran reste sur « Chargement… » indefiniment.
+  const { ctx, appels } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  ctx.setTab('avis')
+  await new Promise(r => setImmediate(r))
+  assert.strictEqual(appels.length, 1)
+  assert.ok(appels[0].includes('detail=1'))
+})
+
+test('les boutons d\'onglet sont REELLEMENT branches', async () => {
+  // `dataset.tab` renomme d'un cote et pas de l'autre rendait les deux onglets
+  // inertes sans qu'aucun test ne bronche.
+  const { ctx, get, boutons } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.initAvis()
+  boutons.find(b => b.dataset.tab === 'avis').click()
+  assert.strictEqual(get('avis-vue').style.display, '', 'un clic sur « Avis » doit ouvrir la vue')
+  boutons.find(b => b.dataset.tab === 'planning').click()
+  assert.strictEqual(get('avis-vue').style.display, 'none')
+})
+
+// ─── Un avis sans extrait ──────────────────────────────────────────────────
+
+test('une remarque SANS extrait ne produit pas une carte muette', async () => {
+  // L'etage 1 de la classification (regle sur les tags Airbnb) ne pose JAMAIS
+  // d'extrait, et la requalification par l'hote l'efface. Une carte rouge vide
+  // serait un reproche que la prestataire ne peut ni verifier ni situer.
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: RATIO_OK,
+    avis: [{ id: '1', verdict: 'remarque', extrait: null, date: '2026-08-28', bien: 'C', bienNom: 'Colomiers' }]
+  })
+  const html = get('avis-liste').innerHTML
+  assert.ok(html.includes('avis-card'), 'la carte reste listee : l\'information la concerne')
+  assert.ok(/sans détail rapporté/.test(html), 'et elle dit qu\'aucun detail n\'a ete rapporte')
+  assert.ok(!/<div class="avis-texte"><\/div>/.test(html), 'jamais un bloc de texte vide')
+})
+
+test('un avis positif sans extrait le dit aussi', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({
+    autorise: true, ratio: RATIO_OK,
+    avis: [{ id: '1', verdict: 'positif', extrait: null, date: '2026-08-28', bien: 'C', bienNom: 'C' }]
+  })
+  assert.ok(/sans commentaire détaillé/.test(get('avis-liste').innerHTML))
+})
+
+// ─── Le comptage partiel ───────────────────────────────────────────────────
+
+test('un comptage TRONQUE est annonce comme partiel', async () => {
+  // Meme famille que la panne affichee en « 0 avis » : un chiffre partiel lu
+  // comme un total est une conclusion fausse.
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: { ...RATIO_OK, tronque: true }, avis: [] })
+  assert.ok(/qu'une partie/.test(get('avis-ratio').innerHTML))
+})
+
+test('une LISTE tronquee est annoncee elle aussi', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, listeTronquee: true, avis: [] })
+  assert.ok(/qu'une partie/.test(get('avis-ratio').innerHTML))
+})
+
+test('sans troncature, aucune mention parasite', async () => {
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: RATIO_OK, avis: [] })
+  assert.ok(!/qu'une partie/.test(get('avis-ratio').innerHTML))
+})
+
+// ─── Un ratio incomplet ────────────────────────────────────────────────────
+
+test('un champ de compteur manquant est traite comme une panne', async () => {
+  // `undefined avis pris en compte` vaudrait le « 0 avis » que tout ceci evite.
+  const { ctx, get } = contexte()
+  ctx.renderAvis({ autorise: true, ratio: { total: 98, positif: 10 }, avis: [] })
+  assert.ok(/indisponible/i.test(get('avis-etat').innerHTML))
+  assert.ok(!/undefined/.test(get('avis-ratio').innerHTML))
 })

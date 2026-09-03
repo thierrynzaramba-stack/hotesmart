@@ -89,8 +89,15 @@ En ouvrant le lien (**aucun compte à créer**), il arrive sur **« HôteSmart C
 ### Onglet « Avis » (ce que le prestataire voit de son propre travail)
 Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet**.
 
-- **Qui le voit** : le droit `self_view_reviews` du profil (défaut **oui**). Coupé par l'hôte,
+- **Qui le voit** : le droit `self_view_reviews` du profil (défaut **oui**). À `false`,
   l'onglet **n'apparaît pas du tout** — pas d'écran « accès refusé ».
+  ⚠️ **Dette** : ce droit n'a **aucun contrôle dans `/settings`** aujourd'hui. `api/membres.js`
+  l'accepte, le serveur et la PWA le respectent, mais l'hôte n'a pas de case à décocher — il
+  faut passer par la base. Le contrôle est à poser avec la fiche prestataire.
+  ⚠️ **Dette** : la sonde d'ouverture (`action=avis` sans `detail=1`) sert seulement à savoir si
+  l'onglet existe, mais le serveur calcule quand même le ratio complet (attribution + 4 `count`),
+  à **chaque ouverture de la PWA**, y compris pour qui n'ouvre jamais l'onglet. Un paramètre
+  `sonde=1` ne rendant que `{ autorise }` économiserait ces requêtes.
 - **En tête** : le nombre d'avis pris en compte, puis 👍 propreté saluée / 👎 remarques.
   Ces chiffres sortent de la **même fonction** que la page hôte `/avis` (`lib/stats-avis.js`) :
   deux compteurs calculés séparément finiraient par se contredire.
@@ -102,10 +109,14 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   pas (`api/menages-public.js`, `action=avis`).
 - **Quels avis** : ceux des ménages qui lui sont attribués — soit par `menage_events`, soit par
   une **période déclarée** (`prestataire_periodes`). Un avis non attribuable reste **non attribué**.
+- **Un avis sans extrait** (la règle de l'étage 1 n'en pose jamais ; la requalification par
+  l'hôte l'efface) affiche **« sans détail rapporté »**, jamais une carte vide : un reproche
+  muet ne peut être ni vérifié ni situé.
 - **États distincts** : « chargement », « service indisponible, réessayez » (**panne** : 503 ou
   `ratio.erreur`), et « aucun avis pour l'instant » (**vrai** zéro). ⚠️ Une panne ne doit
   **jamais** s'afficher comme « 0 avis » : la prestataire en tirerait une conclusion fausse
-  sur son travail.
+  sur son travail. Au-delà de 150 avis attribués, l'écran annonce qu'il n'en montre qu'une
+  partie (`ratio.tronque`, `listeTronquee`) plutôt que de laisser lire un total partiel.
 
 ### Installation PWA (facultative)
 L'app est installable sur l'écran d'accueil :
