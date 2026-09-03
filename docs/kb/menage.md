@@ -72,6 +72,21 @@ seulement à l'app ménage.
   écran reste le sien.
   ⚠️ Nuance assumée : `synchroniserTokenPwa` pose `label` et `visibility_days` **à la création**
   (valeurs par défaut) ; l'écran les réécrit juste après avec la saisie.
+  ⚠️ **`public_tokens.property_ids` s'écrit dans cet écran, y compris pour un prestataire ayant
+  un profil.** `/api/membres` refuse d'y toucher en édition — son commentaire désigne nommément
+  cet écran comme seul writer, parce qu'il n'affiche pas le périmètre et l'écraserait à
+  l'aveugle. Le lui retirer rendait la propriété **circulaire** : plus personne ne l'écrivait,
+  et décocher un bien ne retirait pas l'accès de la prestataire aux voyageurs de ce bien — c'est
+  la seule source que lit la PWA. Il n'y a pas deux writers pour autant : `/api/membres` écrit
+  `profile_permissions.property_ids` (uuid[]), l'écran écrit `public_tokens.property_ids`
+  (text[]) — deux tables, deux représentations, le même geste.
+  ⚠️ **Le corps envoyé à `/api/membres` porte `profile_id`, pas `id`.** Envoyer `id` rend 400 et
+  `saveEdit` sortait avant d'écrire quoi que ce soit : modifier ou supprimer un prestataire créé
+  depuis le lot 2.5 était totalement inopérant.
+  ⚠️ **Dette connue** : `/api/membres` exige `equipe: write`, qui est **non délégable**. Cet
+  écran n'est donc utilisable que par le titulaire du compte — alors que l'action `liaisons`,
+  elle, est déléguée et gardée par `prestataires: write`. Échoue fermé, mais l'asymétrie est
+  réelle : un gestionnaire ne peut pas créer une prestataire depuis cet écran.
 - ⚠️ **Le rapprochement lien ↔ profil se fait EN BASE, par le jeton** (`public_token_id`, posé
   par `/api/menages`) — jamais par comparaison de prénoms. `public_tokens.label` vaut
   « Prénom Nom » dès qu'un nom de famille existe : un accent, une casse, un renommage ou un

@@ -24,7 +24,8 @@ const MARIE = 'bbbb2222-2222-4222-8222-222222222222'
 function preparer ({ user = PROD, profil = null, permissions = null,
                      prestataire = { id: MARIE, first_name: 'Marie', active: true },
                      biens = [{ provider_property_id: '209413' }, { provider_property_id: '169567' }],
-                     apres = [], erreurBiens = null } = {}) {
+                     apres = [], erreurBiens = null,
+                     profilsLien = [], tokens = [], erreurTokens = null } = {}) {
   const etat = { upserts: [], majs: [], requetes: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -56,6 +57,16 @@ function preparer ({ user = PROD, profil = null, permissions = null,
           return Promise.resolve({ data: null, error: null })
         },
         then (ok) {
+          // Le chemin GET : profils `lien` (annuaire) et jetons (rapprochement).
+          if (table === 'profiles' && a.f.access_mode === 'lien') {
+            return Promise.resolve({ data: profilsLien, error: null }).then(ok)
+          }
+          if (table === 'public_tokens') {
+            return Promise.resolve({ data: erreurTokens ? null : tokens, error: erreurTokens }).then(ok)
+          }
+          if (table === 'bookings_snapshot' || table === 'menages') {
+            return Promise.resolve({ data: [], error: null }).then(ok)
+          }
           // ⚠ LES FILTRES SONT HONORES. Sans cela, retirer `.eq('user_id')` de la
           // lecture des biens — la garde qui empeche de lier le bien d'un AUTRE
           // COMPTE — laissait les 15 tests au vert (REVIEW.md regles 1 et 8).
@@ -349,4 +360,59 @@ test('l\'avertissement reste DANS le périmètre', async () => {
   await handler(post(CORPS, { 'x-compte': PROD }), res)
   assert.deepStrictEqual(res.body.sans_referent, ['209413'],
     'le bien hors périmètre ne doit pas apparaître dans la réponse')
+})
+
+// ─── Le rapprochement lien ↔ profil, et sa panne ───────────────────────────
+
+test('la réponse porte `public_token_id`, jamais le jeton', async () => {
+  // L'écran rapprochait les liens des profils par PRÉNOM : un accent, une casse,
+  // un renommage ou un homonyme rompait le rapprochement. Le serveur le fait
+  // maintenant par le jeton — mais le jeton lui-même ne doit pas sortir.
+  const { handler } = preparer({
+    profilsLien: [{ id: MARIE, first_name: 'Marie', active: true, pwa_token: 'jeton-secret' }],
+    tokens: [{ id: 'pt-1', token: 'jeton-secret' }]
+  })
+  const res = reponse()
+  await handler({ method: 'GET', query: {}, headers: { authorization: 'Bearer jeton' } }, res)
+  assert.strictEqual(res.code, 200)
+  const p = (res.body.prestataires || [])[0]
+  assert.ok(p, 'un prestataire doit sortir')
+  assert.strictEqual(p.public_token_id, 'pt-1')
+  assert.ok(!JSON.stringify(res.body).includes('jeton-secret'), 'le jeton ne sort JAMAIS')
+})
+
+test('PANNE de rapprochement : la réponse le DIT', async () => {
+  // ⚠ Ignorée, la panne dégradait vers le comportement dangereux : tous les
+  // `public_token_id` à null, donc « lien seul » sur chaque carte, rangs non
+  // modifiables, et « retirer » qui ne désactivait plus la personne — profil et
+  // liaisons laissés actifs, des ménages attribués d'office à quelqu'un qui ne
+  // les verra jamais.
+  const { handler } = preparer({
+    profilsLien: [{ id: MARIE, first_name: 'Marie', active: true, pwa_token: 'jeton-secret' }],
+    erreurTokens: { message: 'timeout' }
+  })
+  const res = reponse()
+  await handler({ method: 'GET', query: {}, headers: { authorization: 'Bearer jeton' } }, res)
+  assert.strictEqual(res.body.rapprochement, 'indisponible')
+})
+
+test('sans panne, le rapprochement est annoncé sûr', async () => {
+  const { handler } = preparer({
+    profilsLien: [{ id: MARIE, first_name: 'Marie', active: true, pwa_token: 'jeton-secret' }],
+    tokens: [{ id: 'pt-1', token: 'jeton-secret' }]
+  })
+  const res = reponse()
+  await handler({ method: 'GET', query: {}, headers: { authorization: 'Bearer jeton' } }, res)
+  assert.strictEqual(res.body.rapprochement, 'ok')
+})
+
+test('le rapprochement est cloisonné par compte', async () => {
+  const { handler, etat } = preparer({
+    profilsLien: [{ id: MARIE, first_name: 'Marie', active: true, pwa_token: 'jeton-secret' }],
+    tokens: [{ id: 'pt-1', token: 'jeton-secret' }]
+  })
+  await handler({ method: 'GET', query: {}, headers: { authorization: 'Bearer jeton' } }, reponse())
+  const q = etat.requetes.find(r => r.table === 'public_tokens')
+  assert.ok(q, 'la lecture des jetons doit exister')
+  assert.strictEqual(q.f.user_id, PROD)
 })

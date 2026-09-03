@@ -207,6 +207,7 @@
     properties = (data.properties || []).map(p => ({ id: String(p.id), uuid: p.uuid, name: p.name }))
     liaisons = data.liaisons || []
     prestatairesProfils = data.prestataires || []
+    rapprochementSur = data.rapprochement !== 'indisponible'
   }
 
   function biensEnErreur(message) {
@@ -215,6 +216,11 @@
   }
 
   let liaisons = []          // property_cleaning_providers actives du compte
+  // ⚠ Faux quand le serveur n'a pas pu rapprocher les liens des profils. On ne
+  // SUPPRIME alors rien : sans rapprochement, on ne sait pas s'il y a une
+  // personne derriere ce lien, et la supprimer a moitie laisserait le moteur
+  // continuer de lui attribuer des menages.
+  let rapprochementSur = true
   let prestatairesProfils = []  // profils `lien` du compte (id, prenom, actif, a_lien)
   let editionEnCours = null  // profil_id en cours de modification, ou null
 
@@ -456,8 +462,8 @@
         alert('Prestataire créé, mais son lien n\'a pas pu être lu : réglages d\'affichage non enregistrés.')
       }
 
-      resetForm()
       await rechargerTout()
+      resetForm()
       // ⚠ Le succes ne s'annonce QUE s'il est complet : afficher « créé ! »
       // juste apres « ses biens n'ont pas pu etre enregistres » se contredit.
       if (okLiaisons) showToast('✓ Prestataire créé !')
@@ -501,8 +507,11 @@
     if (!res.ok) {
       // ⚠ On le DIT. Un prestataire créé sans liaison ne recevra aucun ménage,
       // et rien à l'écran ne le laisserait deviner.
-      alert('Le prestataire est créé, mais ses biens n\'ont pas pu être enregistrés : '
-            + ((data && data.error) || res.status) + '. Modifiez sa fiche pour réessayer.')
+      // ⚠ Message NEUTRE : cette fonction sert a la creation, a la modification
+      // ET a la suppression. « Le prestataire est cree » etait faux deux fois
+      // sur trois — et absurde apres une suppression.
+      alert('Ses biens n\'ont pas pu être enregistrés : '
+            + ((data && data.error) || res.status) + '. Rouvrez sa fiche pour réessayer.')
       return false
     }
     if (data && data.sans_referent && data.sans_referent.length) {
@@ -521,6 +530,11 @@
   // a quelqu'un dont le lien n'existe plus et qui ne les verrait jamais. Le bien
   // paraissait couvert et ne l'etait pas.
   async function deletePrestataire(id) {
+    if (!rapprochementSur) {
+      alert('Impossible de retirer un prestataire pour le moment : le lien avec les personnes '
+            + 'n\'a pas pu être établi. Rechargez la page et réessayez.')
+      return
+    }
     const ligne = prestataires.find(p => p.id === id)
     const profilId = ligne ? profilDuToken(ligne) : null
     if (!confirm(profilId
@@ -535,15 +549,23 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json',
                    'Authorization': `Bearer ${currentSession.access_token}` },
-        body: JSON.stringify({ action: 'deactivate', id: profilId })
+        body: JSON.stringify({ action: 'deactivate', profile_id: profilId })
       })
       if (!rp.ok) {
         const d = await rp.json().catch(() => null)
         alert('Retrait impossible : ' + ((d && d.error) || rp.status))
         return
       }
-      // Ses liaisons aussi : sinon le moteur continue de la choisir.
-      await enregistrerLiaisons(profilId, [])
+      // Ses liaisons aussi : sinon le moteur continue de la choisir — il ne lit
+      // ni `public_tokens` ni `profiles.active`. ⚠ L'echec est DIT : profil
+      // desactive mais liaisons vivantes, c'est exactement la panne qu'on
+      // cherche a fermer — des menages attribues d'office a quelqu'un qui ne les
+      // verra jamais.
+      const coupees = await enregistrerLiaisons(profilId, [])
+      if (!coupees) {
+        alert('Le prestataire est désactivé, mais ses biens n\'ont pas pu être libérés. '
+              + 'Rouvrez sa fiche et décochez ses biens, sinon des ménages continueront de lui être attribués.')
+      }
     }
 
     const { error } = await supabase.from('public_tokens').delete().eq('id', id).eq('user_id', currentSession.user.id)
@@ -621,7 +643,13 @@
         headers: { 'Content-Type': 'application/json',
                    'Authorization': `Bearer ${currentSession.access_token}` },
         body: JSON.stringify({
-          action: 'update', id: editionEnCours,
+          // ⚠ `profile_id`, PAS `id`. `/api/membres` lit `b.profile_id` : envoyer
+          // `id` rendait 400 « Identifiant de profil requis », et `saveEdit`
+          // sortait AVANT d'ecrire le nom, les jours visibles, la periode du
+          // ratio, les biens et les rangs. Modifier un prestataire cree depuis
+          // le lot 2.5 — donc tous ceux qui recoivent des menages — etait
+          // totalement inoperant. Meme faute sur `deactivate`.
+          action: 'update', profile_id: editionEnCours,
           permissions: { property_scope: 'selected',
                          property_ids: biens.map(b => b.uuid).filter(Boolean) }
         })
@@ -633,10 +661,21 @@
       }
     }
 
-    const champs = { label: name, visibility_days: visibilityDays, ratio_periode: periodeChoisie() }
-    // Sans profil (lien anterieur au lot 2.5), personne d'autre n'ecrit le
-    // perimetre : cet ecran reste son seul writer.
-    if (!editionEnCours) champs.property_ids = selectedProps
+    // ⚠ `public_tokens.property_ids` S'ECRIT ICI, DANS TOUS LES CAS.
+    // `/api/membres` refuse d'y toucher en edition — son commentaire designe
+    // NOMMEMENT cet ecran comme seul writer, parce que lui n'affiche pas le
+    // perimetre et l'ecraserait a l'aveugle. Le retirer d'ici rendait la
+    // propriete circulaire : plus personne ne l'ecrivait, et decocher un bien ne
+    // retirait pas l'acces de la prestataire aux voyageurs de ce bien — c'est la
+    // SEULE source que lit la PWA.
+    //
+    // Il n'y a pas deux writers pour autant : `/api/membres` ecrit
+    // `profile_permissions.property_ids` (uuid[]), cet ecran ecrit
+    // `public_tokens.property_ids` (text[]). Deux tables, deux representations,
+    // le meme geste — c'est ce que l'en-tete d'api/membres.js demande de tenir
+    // synchrone, et ce que la version precedente cassait dans l'autre sens.
+    const champs = { label: name, visibility_days: visibilityDays,
+                     ratio_periode: periodeChoisie(), property_ids: selectedProps }
     const { error } = await supabase.from('public_tokens')
       .update(champs)
       .eq('id', id)
@@ -650,9 +689,12 @@
     if (editionEnCours) ok = await enregistrerLiaisons(editionEnCours, biens)
     else showToast('⚠️ Lien sans personne : aucun ménage ne peut lui être assigné')
 
-    resetForm()
+    // ⚠ `rechargerTout` AVANT `resetForm` : le formulaire se redessine a partir
+    // des liaisons, et les reinitialiser d'abord le laissait afficher l'etat
+    // d'avant l'enregistrement.
     await rechargerTout()
-    if (ok && editionEnCours) showToast('✓ Prestataire modifié !')
+    resetForm()
+    if (ok) showToast('✓ Prestataire modifié !')
   }
 
   // Les quatre cles reconnues par lib/stats-avis.js. Une cinquieme valeur serait

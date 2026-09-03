@@ -195,6 +195,7 @@ module.exports = async function handler(req, res) {
     let menages = []
     let prestataires = []
     let liaisons = []
+    let rapprochement = 'ok'
     const { data: mn, error: errMn } = await supabase.from('menages')
       // `assignment_reason` porte « Refuse par X. » : sans elle, un refus est
       // indiscernable d'un menage jamais assigne, et l'hote ne sait pas qu'il
@@ -235,9 +236,22 @@ module.exports = async function handler(req, res) {
         // `public_tokens`, que cet ecran connait deja.
         const jetons = (pr || []).map(x => x.pwa_token).filter(Boolean)
         let parJeton = new Map()
+        let rapprochementSur = true
         if (jetons.length) {
-          const { data: pt } = await supabase.from('public_tokens')
+          const { data: pt, error: errPt } = await supabase.from('public_tokens')
             .select('id, token').eq('user_id', userId).in('token', jetons)
+          // ⚠ L'ERREUR EST LUE. Ignoree, `parJeton` restait vide et TOUS les
+          // `public_token_id` valaient null : l'ecran affichait « lien seul,
+          // aucun menage assignable » sur chaque prestataire, leurs rangs
+          // devenaient non modifiables, et surtout « retirer » retombait sur la
+          // branche « supprimer le lien seul » — profil et liaisons laisses
+          // actifs, donc des menages attribues d'office a quelqu'un qui ne les
+          // verra jamais. Une panne de lecture ne doit pas degrader vers le
+          // comportement dangereux en silence.
+          if (errPt) {
+            console.error('[menages] rapprochement des jetons echec', errPt.message)
+            rapprochementSur = false
+          }
           parJeton = new Map((pt || []).map(t => [t.token, t.id]))
         }
         prestataires = (pr || []).map(x => ({
@@ -245,6 +259,9 @@ module.exports = async function handler(req, res) {
           a_lien: !!x.pwa_token,
           public_token_id: x.pwa_token ? (parJeton.get(x.pwa_token) || null) : null
         }))
+        // L'ecran doit pouvoir distinguer « ce lien n'a pas de profil » d'« on
+        // n'a pas pu le savoir ».
+        rapprochement = rapprochementSur ? 'ok' : 'indisponible'
       }
 
       // Les liaisons bien <-> prestataire, avec leur rang. C'est ce qui decide
@@ -258,7 +275,7 @@ module.exports = async function handler(req, res) {
 
     t.top('mapping')
     console.log(t.ligne(` biens=${properties.length} resas=${bookings.length} menages=${menages.length}${tronque ? ' TRONQUE' : ''}`))
-    return res.status(200).json({ properties, bookings, tronque, menages, prestataires, liaisons })
+    return res.status(200).json({ properties, bookings, tronque, menages, prestataires, liaisons, rapprochement })
   } catch (err) {
     // Une requete qui rame PUIS echoue est le cas le plus interessant a
     // diagnostiquer : il doit loguer son chrono comme les autres.
