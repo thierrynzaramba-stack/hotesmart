@@ -1776,19 +1776,34 @@ if ("serviceWorker" in navigator) {
     // extraits en sous-sol, met l'appli en fond et revient, perdait l'ecran
     // qu'elle pouvait encore lire. Une PWA hors-ligne garde ce qu'elle a.
     if (navigator.onLine === false) return
-    avisCharge = false
     await chargerAvis()
   }
 
-  async function chargerAvis () {
+  // ⚠ JETON DE REQUETE. Deux changements de periode rapproches, ou un changement
+  // pendant le rechargement du reveil, lancaient deux chargements paralleles :
+  // la reponse la plus lente ecrivait en dernier, et le selecteur affichait
+  // « 6 mois » au-dessus d'un dossier calcule sur 15 jours. Seul le dernier
+  // chargement demande a le droit d'ecrire a l'ecran.
+  let chargementCourant = 0
+
+  // ⚠ La periode est passee en ARGUMENT, pas relue du stockage. Le handler du
+  // selecteur la memorisait puis appelait `chargerAvis`, qui relisait le
+  // localStorage : quand `setItem` echoue (navigation privee, quota, Safari qui
+  // bloque le stockage), le choix etait perdu en silence — la requete partait
+  // sur l'ancienne periode, et le <select> etait remis dessus en fin de
+  // chargement. La prestataire voyait son choix disparaitre sans un mot.
+  async function chargerAvis (periodeVoulue) {
+    const p = PERIODES_VUE.includes(periodeVoulue) ? periodeVoulue : periodeVueLocale()
+    const jeton = ++chargementCourant
     etatAvis('Chargement…', '')
     let res
     try {
-      res = await fetch(`/api/menages-public?action=avis&detail=1&periode=${encodeURIComponent(periodeVueLocale())}&token=${currentToken}`)
+      res = await fetch(`/api/menages-public?action=avis&detail=1&periode=${encodeURIComponent(p)}&token=${currentToken}`)
     } catch (err) {
-      etatAvis('Service indisponible', 'Vérifiez votre connexion, puis réessayez.')
+      if (jeton === chargementCourant) etatAvis('Service indisponible', 'Vérifiez votre connexion, puis réessayez.')
       return
     }
+    if (jeton !== chargementCourant) return   // un chargement plus recent a pris la main
     if (!res.ok) {
       // 503 : panne serveur (droits, attribution ou liste). Surtout pas « aucun
       // avis » — la difference change ce qu'elle en conclut sur son travail.
@@ -1800,6 +1815,7 @@ if ("serviceWorker" in navigator) {
       etatAvis('Service indisponible', 'Réessayez dans un instant.')
       return
     }
+    if (jeton !== chargementCourant) return
     // Le droit a pu etre retire entre la sonde et le clic.
     if (data.actif === false || data.autorise !== true) {
       document.getElementById('tabs').style.display = 'none'
@@ -1810,7 +1826,9 @@ if ("serviceWorker" in navigator) {
     avisCharge = true
     renderEnteteRatio(data)
     renderAvis(data)
-    montrerSelecteurPeriode()
+    // La periode que le serveur dit avoir appliquee — pas celle qu'on croyait
+    // demander : c'est elle qui est sous les yeux de la prestataire.
+    montrerSelecteurPeriode(data.periodeVue || p)
   }
 
   function renderAvis (data) {
@@ -1903,22 +1921,38 @@ if ("serviceWorker" in navigator) {
     return ''
   }
 
-  // Le selecteur n'apparait qu'une fois un dossier reellement charge : offert
-  // sur un ecran de panne, il inviterait a recharger ce qui n'a pas pu s'afficher.
+  // Le selecteur n'apparait qu'une fois un PREMIER dossier reellement charge :
+  // offert d'emblee sur un ecran de panne, il inviterait a recharger ce qui n'a
+  // jamais pu s'afficher. Une fois montre, il RESTE — y compris si un
+  // changement de periode echoue : c'est par lui qu'elle revient en arriere.
   let selecteurBranche = false
-  function montrerSelecteurPeriode () {
+  // ⚠ Ce que le <select> affiche doit etre la periode du dossier REELLEMENT a
+  // l'ecran, pas celle du stockage : les deux divergent des qu'une ecriture
+  // locale echoue ou qu'un chargement est abandonne.
+  let derniereePeriodeAffichee = 'toujours'
+  function montrerSelecteurPeriode (periodeAffichee) {
     const ligne = document.getElementById('avis-periode-ligne')
     const sel = document.getElementById('avis-periode')
     if (!ligne || !sel) return
-    sel.value = periodeVueLocale()
+    if (PERIODES_VUE.includes(periodeAffichee)) derniereePeriodeAffichee = periodeAffichee
+    sel.value = derniereePeriodeAffichee
     ligne.style.display = ''
     if (selecteurBranche) return
     selecteurBranche = true
     sel.addEventListener('change', () => {
       const v = PERIODES_VUE.includes(sel.value) ? sel.value : 'toujours'
+      // La memorisation est un confort : si elle echoue, le choix vaut quand
+      // meme pour cette session — il part en argument, pas par le stockage.
       try { localStorage.setItem(LS_PERIODE_AVIS, v) } catch (e) {}
-      avisCharge = false
-      chargerAvis().catch(err => {
+      // ⚠ HORS LIGNE, ON GARDE L'ECRAN. Le chargement remplacerait la liste par
+      // « service indisponible » : la prestataire qui consulte en sous-sol
+      // perdrait ce qu'elle avait encore sous les yeux. Meme garde que le reveil
+      // au premier plan, par une autre porte.
+      if (navigator.onLine === false) {
+        sel.value = derniereePeriodeAffichee
+        return
+      }
+      chargerAvis(v).catch(err => {
         console.warn('[Avis] changement de periode impossible', err)
         etatAvis('Service indisponible', 'Réessayez dans un instant.')
       })

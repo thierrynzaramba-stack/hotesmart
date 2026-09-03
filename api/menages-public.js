@@ -419,9 +419,24 @@ async function avisDeLaPrestataire (req, res, token) {
   // sans que personne ne l'ait demande. On valide explicitement, des deux cotes.
   const brut = String(pt.ratio_periode || 'toujours')
   const periode = PERIODES_PWA.includes(brut) ? brut : 'toujours'
+  // ⚠ ASYMETRIE VOULUE, a ne pas « corriger » : parametre ABSENT -> on suit
+  // l'objectif de l'hote (defaut sur), parametre PRESENT mais invalide -> on
+  // rend « toujours ». Une valeur bricolee n'ouvre rien de plus — la
+  // consultation est libre par decision produit — et le selecteur du front a
+  // exactement le meme repli, si bien que les deux ne se contredisent pas.
   const brutVue = String(req.query.periode || periode)
   const periodeVue = PERIODES_PWA.includes(brutVue) ? brutVue : 'toujours'
-  const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id })
+
+  // ⚠ RESOLUE UNE FOIS POUR TOUTE LA REQUETE. Deux comptages et une liste la
+  // resolvaient chacun de leur cote, avec les memes arguments : trois allers-
+  // retours base identiques sur un endpoint ouvert sans session, qu'un porteur
+  // de lien peut marteler. Une seule resolution, partagee.
+  const attribution = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
+  if (attribution.erreur) {
+    console.error('[menages-public] attribution echec')
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id, attribution })
 
   // ⚠ CONTRAT A HONORER PAR L'INTERFACE PWA, QUI RESTE A ECRIRE.
   // `ratio` peut porter `erreur: true` : c'est une PANNE, pas un resultat. Le
@@ -443,19 +458,12 @@ async function avisDeLaPrestataire (req, res, token) {
   if (req.query.detail === '1') {
     ratioVue = periodeVue === periode
       ? ratio
-      : await ratioProprete(supabase, { userId, periode: periodeVue, prestataireId: profil.id })
-    const att = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
-    // ⚠ UNE PANNE N'EST PAS « AUCUN AVIS ».
-    // Sauter silencieusement laissait partir un 200 avec une liste vide,
-    // indiscernable de « elle n'a aucun avis » — alors que la base en contient
-    // 98 pour Regina. Elle en aurait tire une conclusion fausse et l'aurait
-    // gardee. Symetrique du 503 de la lecture de liste, cinq lignes plus bas :
-    // deux traitements opposes pour la meme famille de panne n'avaient pas lieu
-    // d'etre.
-    if (att.erreur) {
-      console.error('[menages-public] attribution echec')
-      return res.status(503).json({ error: 'Service temporairement indisponible' })
-    }
+      : await ratioProprete(supabase, { userId, periode: periodeVue, prestataireId: profil.id, attribution })
+    // ⚠ UNE PANNE N'EST PAS « AUCUN AVIS » : elle coupe en 503 (garde posee plus
+    // haut, a la resolution unique). Sauter silencieusement laissait partir un
+    // 200 avec une liste vide, indiscernable de « elle n'a aucun avis » — alors
+    // que la base en contient 98 pour Regina.
+    const att = attribution
     if (att.ids.length) {
       listeTronquee = att.tronque === true || att.ids.length > MAX_IDS
       // ⚠ La liste suit la periode CHOISIE, pas l'objectif : un compteur qui

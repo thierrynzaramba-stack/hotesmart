@@ -123,7 +123,12 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   cadre un objectif, elle ne restreint pas un accès.
   ⚠️ Les deux valeurs sont validées **explicitement** contre les quatre clés, en base comme en
   query string : `periodeNormalisee` retombe sur `'30j'`, ce qui rétrécirait un compteur sans
-  que personne ne l'ait demandé.
+  que personne ne l'ait demandé. Le repli est **asymétrique à dessein** : paramètre *absent* →
+  on suit l'objectif de l'hôte ; paramètre *présent mais invalide* → « depuis le début », le
+  même repli que le sélecteur du front, pour que les deux ne se contredisent pas.
+  ⚠️ L'attribution des avis (`avisDuPrestataire`) est résolue **une seule fois par requête** et
+  passée aux deux comptages et à la liste — elle l'était trois fois, avec les mêmes arguments,
+  sur un endpoint ouvert sans session que le porteur d'un lien peut marteler.
 - **En dessous** : la liste des avis qui **parlent de propreté** (date, bien, extrait). Les avis
   qui n'évoquent pas le ménage ne sont pas listés — ils restent comptés dans le total.
 - **La date identifie LE ménage** : « Séjour du 12 au 15 août » quand `stay_start`/`stay_end`

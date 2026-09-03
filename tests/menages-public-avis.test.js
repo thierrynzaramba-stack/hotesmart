@@ -389,8 +389,14 @@ test('la query string ne déplace PAS l\'objectif de l\'en-tête', async () => {
   await handler(req({ detail: '1', periode: 'toujours' }), res)
   assert.strictEqual(res.body.periode, '15j', 'l\'objectif ne bouge pas')
   assert.strictEqual(res.body.periodeVue, 'toujours', 'la consultation suit la demande')
-  assert.ok(res.body.ratio, 'le compteur de l\'objectif est toujours là')
-  assert.ok(res.body.ratioVue, 'et celui du dossier à côté')
+  // ⚠ ASSERTER SUR LE COMPTEUR LUI-MEME, pas seulement sur la variable scalaire
+  // recopiée à côté. `res.body.periode` est une chaîne posée par le handler :
+  // faire calculer l'en-tête sur la période du client la laissait juste, et le
+  // test restait vert sur exactement le défaut qu'il nomme. C'est
+  // `ratio.periode`, écrit par `ratioProprete`, qui dit sur quoi le compte a
+  // réellement porté.
+  assert.strictEqual(res.body.ratio.periode, '15j', 'l\'en-tête est compté sur l\'objectif')
+  assert.strictEqual(res.body.ratioVue.periode, 'toujours', 'le dossier sur la période demandée')
 })
 
 test('sans période demandée, le dossier suit l\'objectif', async () => {
@@ -400,6 +406,21 @@ test('sans période demandée, le dossier suit l\'objectif', async () => {
   const res = reponse()
   await handler(req({ detail: '1' }), res)
   assert.strictEqual(res.body.periodeVue, '15j')
+  assert.strictEqual(res.body.ratioVue.periode, '15j')
+})
+
+test('l\'attribution n\'est résolue QU\'UNE FOIS par requête', async () => {
+  // Deux comptages et une liste la résolvaient chacun de leur côté, avec les
+  // mêmes arguments : trois allers-retours identiques sur un endpoint ouvert
+  // sans session, qu'un porteur de lien peut marteler en bouclant sur les
+  // quatre périodes.
+  const journal = preparer({ ratioPeriode: '15j' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1', periode: 'toujours' }), res)
+  assert.strictEqual(res.code, 200)
+  const resolutions = journal.filter(a => a.table === 'prestataire_periodes').length
+  assert.strictEqual(resolutions, 1, `l'attribution a été résolue ${resolutions} fois`)
 })
 
 test('une période bricolée dans l\'URL retombe sur « toujours »', async () => {

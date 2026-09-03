@@ -74,7 +74,7 @@ test('le HTML masque les onglets et la vue Avis AU DEPART', async () => {
 
 // Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
 // ecrit dans chaque conteneur.
-function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {} } = {}) {
+function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {}, stockageRefuse = false } = {}) {
   const els = new Map()
   const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
   const appels = []
@@ -98,13 +98,20 @@ function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {} 
     // sur son appareil, et ne remonte a personne.
     localStorage: {
       getItem: k => Object.prototype.hasOwnProperty.call(stockage, k) ? stockage[k] : null,
-      setItem: (k, v) => { stockage[k] = String(v) },
+      // ⚠ `setItem` PEUT JETER : navigation privée, quota plein, Safari réglé
+      // sur « bloquer tous les cookies ». Un double qui ne jette jamais laisse
+      // passer tout un chemin de code.
+      setItem: (k, v) => { if (stockageRefuse) throw new Error('QuotaExceededError'); stockage[k] = String(v) },
       removeItem: k => { delete stockage[k] }
     },
     fetch: async (url) => {
       appels.push(url)
       const r = reponses.shift()
       if (!r) throw new Error('reseau')
+      // ⚠ Une reponse peut arriver EN RETARD. Sans ce delai, deux chargements
+      // concurrents se resolvaient toujours dans l'ordre d'appel et la course
+      // que le jeton de requete empeche n'etait jamais exercee.
+      if (r.retard) await new Promise(res => setTimeout(res, r.retard))
       if (r.jete) throw new Error('reseau')
       return { ok: r.status < 400, status: r.status, json: async () => r.body }
     },
@@ -787,11 +794,26 @@ test('changer de période recharge le dossier, et rien d\'autre', async () => {
   assert.strictEqual(get('entete-ratio').innerHTML, enteteAvant, 'l\'objectif de l\'en-tête ne bouge pas')
 })
 
-test('le sélecteur n\'apparaît PAS sur un écran de panne', async () => {
-  // Offert sur une panne, il inviterait à recharger ce qui n'a pas pu s'afficher.
+test('le sélecteur n\'apparaît pas sur une panne AU PREMIER chargement', async () => {
+  // Offert d'emblée sur une panne, il inviterait à recharger ce qui n'a jamais
+  // pu s'afficher.
   const { ctx, get } = contexte({ reponses: [{ status: 503, body: { error: 'x' } }] })
   await ctx.chargerAvis()
   assert.strictEqual(get('avis-periode-ligne').style.display, 'none')
+})
+
+test('une fois montré, le sélecteur RESTE même si un rechargement échoue', async () => {
+  // C'est par lui qu'elle revient à la période précédente. Le masquer la
+  // laisserait devant un écran de panne sans aucune action possible.
+  const { ctx, get } = contexte({ reponses: [
+    { status: 200, body: { autorise: true, ratio: RATIO_OK, ratioVue: RATIO_VUE, periodeVue: 'toujours', avis: [] } },
+    { status: 503, body: { error: 'x' } }
+  ] })
+  await ctx.chargerAvis()
+  assert.strictEqual(get('avis-periode-ligne').style.display, '')
+  await ctx.chargerAvis('15j')
+  assert.ok(/indisponible/i.test(get('avis-etat').innerHTML))
+  assert.strictEqual(get('avis-periode-ligne').style.display, '', 'le sélecteur doit rester atteignable')
 })
 
 test('le sélecteur apparaît dès qu\'un dossier est chargé, même vide', async () => {
@@ -810,4 +832,74 @@ test('le sélecteur ne se rebranche pas à chaque chargement', async () => {
   await ctx.chargerAvis()
   const sel = els.get('avis-periode')
   assert.strictEqual(sel.listeners.filter(l => l[0] === 'change').length, 1)
+})
+
+// ─── Le choix de période survit à ce qui peut mal tourner ──────────────────
+
+function changerPeriode (els, valeur) {
+  const sel = els.get('avis-periode')
+  sel.value = valeur
+  sel.listeners.filter(l => l[0] === 'change').forEach(l => l[1]())
+  return sel
+}
+
+test('stockage local REFUSÉ : le choix vaut quand même pour cette session', async () => {
+  // ⚠ Le handler mémorisait puis appelait `chargerAvis`, qui RELISAIT le
+  // stockage : quand `setItem` jette, le choix était perdu en silence, la
+  // requête partait sur l'ancienne période et le <select> y était remis en fin
+  // de chargement. La prestataire voyait son choix disparaître sans un mot.
+  const ok = p => ({ status: 200, body: { autorise: true, ratio: { ...RATIO_OK, periode: 'toujours' },
+                                          ratioVue: { ...RATIO_VUE, periode: p }, periodeVue: p, avis: [] } })
+  const { ctx, els, appels } = contexte({ stockageRefuse: true, reponses: [ok('toujours'), ok('15j')] })
+  await ctx.chargerAvis()
+  changerPeriode(els, '15j')
+  await new Promise(r => setImmediate(r))
+  assert.ok(appels[1] && appels[1].includes('periode=15j'), 'la requête doit porter le choix : ' + appels[1])
+  assert.strictEqual(els.get('avis-periode').value, '15j', 'et le sélecteur ne doit pas revenir en arrière')
+})
+
+test('le sélecteur affiche la période que le SERVEUR dit avoir appliquée', async () => {
+  // Pas celle qu'on croyait demander : c'est la première qui est sous ses yeux.
+  const { ctx, els } = contexte({ reponses: [{ status: 200, body: {
+    autorise: true, ratio: RATIO_OK, ratioVue: { ...RATIO_VUE, periode: '30j' }, periodeVue: '30j', avis: [] } }] })
+  await ctx.chargerAvis('6mois')
+  assert.strictEqual(els.get('avis-periode').value, '30j')
+})
+
+test('hors ligne, changer de période NE VIDE PAS l\'écran lisible', async () => {
+  // Même garde que le réveil au premier plan, par une autre porte : le
+  // chargement remplacerait la liste par « service indisponible ».
+  const { ctx, get, els } = contexte({ enLigne: false, reponses: [{ status: 200, body: {
+    autorise: true, ratio: RATIO_OK, ratioVue: RATIO_VUE, periodeVue: 'toujours', avis: [
+      { id: '1', verdict: 'remarque', extrait: 'bouilloire sale', bien: 'C', bienNom: 'C', recuLe: '2026-08-01T00:00:00Z' }
+    ] } }] })
+  await ctx.chargerAvis()
+  const avant = get('avis-liste').innerHTML
+  const sel = changerPeriode(els, '15j')
+  await new Promise(r => setImmediate(r))
+  assert.strictEqual(get('avis-liste').innerHTML, avant, 'la liste doit rester lisible')
+  assert.strictEqual(sel.value, 'toujours', 'et le sélecteur revenir sur ce qui est affiché')
+})
+
+test('deux changements rapprochés : la réponse en retard n\'écrase pas l\'écran', async () => {
+  // Sans jeton de requête, la plus lente écrivait en dernier et le sélecteur
+  // annonçait une période au-dessus d'un dossier calculé sur une autre.
+  const lent = { status: 200, retard: 30, body: { autorise: true, ratio: RATIO_OK,
+                                      ratioVue: { ...RATIO_VUE, periode: '15j' }, periodeVue: '15j', avis: [] } }
+  const rapide = { status: 200, body: { autorise: true, ratio: RATIO_OK,
+                                        ratioVue: { ...RATIO_VUE, periode: '6mois' }, periodeVue: '6mois', avis: [] } }
+  const { ctx, get } = contexte({ reponses: [lent, rapide] })
+  const p1 = ctx.chargerAvis('15j')
+  const p2 = ctx.chargerAvis('6mois')
+  await Promise.all([p1, p2])
+  const bloc = get('avis-ratio').innerHTML
+  assert.ok(/sur 6 mois/.test(bloc), 'seul le dernier chargement demandé écrit à l\'écran : ' + bloc)
+  assert.ok(!/sur 15 jours/.test(bloc))
+})
+
+test('une période inconnue passée en argument retombe sur la mémoire locale', async () => {
+  const { ctx, appels } = contexte({ stockage: { 'menages-avis-periode-v1': '30j' },
+    reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.chargerAvis('trimestre')
+  assert.ok(appels[0].includes('periode=30j'), appels[0])
 })
