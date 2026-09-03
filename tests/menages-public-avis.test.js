@@ -379,13 +379,79 @@ test('la période appliquée est celle réglée sur public_tokens', async () => 
   assert.ok(journal.periodesDemandees.length, 'une borne temporelle doit être posée sur ota_reviews')
 })
 
-test('la période demandée en query string est IGNORÉE', async () => {
-  // C'est un réglage de l'hôte. Le porteur du lien ne doit pas pouvoir élargir
-  // sa propre fenêtre de comptage en bricolant l'URL.
+test('la query string ne déplace PAS l\'objectif de l\'en-tête', async () => {
+  // Deux périodes, deux fonctions : `periode` est l'objectif réglé par l'hôte,
+  // et rien venu du client ne doit l'atteindre. La consultation, elle, est
+  // libre — c'est `periodeVue`, testée juste en dessous.
   preparer({ ratioPeriode: '15j' })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req({ detail: '1', periode: 'toujours' }), res)
+  assert.strictEqual(res.body.periode, '15j', 'l\'objectif ne bouge pas')
+  assert.strictEqual(res.body.periodeVue, 'toujours', 'la consultation suit la demande')
+  assert.ok(res.body.ratio, 'le compteur de l\'objectif est toujours là')
+  assert.ok(res.body.ratioVue, 'et celui du dossier à côté')
+})
+
+test('sans période demandée, le dossier suit l\'objectif', async () => {
+  // Défaut sûr : un écran ouvert sans choix montre ce que l'hôte a réglé.
+  preparer({ ratioPeriode: '15j' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.body.periodeVue, '15j')
+})
+
+test('une période bricolée dans l\'URL retombe sur « toujours »', async () => {
+  // `periodeNormalisee` retomberait sur '30j' : un compteur rétréci que personne
+  // n'a demandé. La validation est explicite des deux côtés.
+  preparer({ ratioPeriode: 'toujours' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1', periode: '__proto__' }), res)
+  assert.strictEqual(res.body.periodeVue, 'toujours')
+})
+
+test('la LISTE suit la période consultée, pas l\'objectif', async () => {
+  // Un compteur qui annonce 15 jours au-dessus d'une liste qui en montre 183 est
+  // un écran qui se contredit tout seul.
+  //
+  // ⚠ L'assertion vise la requête de LISTE précisément — reconnaissable à ses
+  // colonnes. Compter les bornes de tout le journal ne discriminait rien : le
+  // compteur de consultation en pose aussi, si bien que la mutation « la liste
+  // suit l'objectif » restait verte.
+  const journal = preparer({ ratioPeriode: 'toujours' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1', periode: '15j' }), res)
+  assert.strictEqual(res.body.periodeVue, '15j')
+  const liste = journal.find(a => a.table === 'ota_reviews' && !a.head &&
+    String(a.colonnes || '').includes('ai_clean_excerpt'))
+  assert.ok(liste, 'la requête de liste doit exister')
+  assert.ok(liste.gte, 'elle doit porter une borne : l\'objectif « toujours » n\'en pose aucune')
+  assert.strictEqual(liste.gte[0], 'received_at')
+})
+
+test('la liste ne pose AUCUNE borne quand la consultation est « depuis le début »', async () => {
+  // Contre-épreuve : poser une borne systématiquement passerait aussi le test
+  // précédent, en amputant silencieusement le dossier.
+  const journal = preparer({ ratioPeriode: '15j' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1', periode: 'toujours' }), res)
+  const liste = journal.find(a => a.table === 'ota_reviews' && !a.head &&
+    String(a.colonnes || '').includes('ai_clean_excerpt'))
+  assert.ok(liste && !liste.gte, 'aucune borne ne doit être posée')
+})
+
+test('sans detail=1, aucun compteur de consultation n\'est calculé', async () => {
+  // La sonde d'ouverture ne sert qu'à l'en-tête : lui faire calculer un second
+  // ratio serait payer deux fois pour un écran qui n'est pas ouvert.
+  preparer({ ratioPeriode: '15j' })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ periode: 'toujours' }), res)
+  assert.strictEqual(res.body.ratioVue, undefined)
   assert.strictEqual(res.body.periode, '15j')
 })
 

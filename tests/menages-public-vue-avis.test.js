@@ -56,7 +56,7 @@ function elem (id, dataset = {}) {
 // `style="display:none"` supprime par megarde doit faire tomber un test, pas
 // etre recopie ici a la main.
 const DEPART = {}
-for (const id of ['tabs', 'avis-vue', 'avis-ratio', 'entete-ratio']) {
+for (const id of ['tabs', 'avis-vue', 'avis-ratio', 'entete-ratio', 'avis-periode-ligne']) {
   const m = HTML.match(new RegExp('id="' + id + '"[^>]*'))
   DEPART[id] = (m && /style="display:none"/.test(m[0])) ? 'none' : ''
 }
@@ -69,11 +69,12 @@ test('le HTML masque les onglets et la vue Avis AU DEPART', async () => {
   assert.strictEqual(DEPART['avis-vue'], 'none', '#avis-vue doit partir masque')
   assert.strictEqual(DEPART['avis-ratio'], 'none', '#avis-ratio doit partir masque')
   assert.strictEqual(DEPART['entete-ratio'], 'none', '#entete-ratio doit partir masque')
+  assert.strictEqual(DEPART['avis-periode-ligne'], 'none', '#avis-periode-ligne doit partir masque')
 })
 
 // Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
 // ecrit dans chaque conteneur.
-function contexte ({ reponses = [], enLigne = true, reveils = [] } = {}) {
+function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {} } = {}) {
   const els = new Map()
   const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
   const appels = []
@@ -93,6 +94,13 @@ function contexte ({ reponses = [], enLigne = true, reveils = [] } = {}) {
       visibilityState: 'visible'
     },
     navigator: { onLine: enLigne },
+    // Le stockage local de la prestataire : sa periode de consultation y vit,
+    // sur son appareil, et ne remonte a personne.
+    localStorage: {
+      getItem: k => Object.prototype.hasOwnProperty.call(stockage, k) ? stockage[k] : null,
+      setItem: (k, v) => { stockage[k] = String(v) },
+      removeItem: k => { delete stockage[k] }
+    },
     fetch: async (url) => {
       appels.push(url)
       const r = reponses.shift()
@@ -110,7 +118,7 @@ function contexte ({ reponses = [], enLigne = true, reveils = [] } = {}) {
   const lire = expr => vm.runInContext(expr, ctx)
   // Un reveil comme le navigateur en produit : l'onglet redevient visible.
   const reveiller = () => { reveils.forEach(fn => fn()) }
-  return { ctx, els, get, appels, lire, boutons, reveils, reveiller }
+  return { ctx, els, get, appels, lire, boutons, reveils, reveiller, stockage }
 }
 
 const RATIO_OK = { total: 98, positif: 10, remarque: 15, rien_signale: 73, periode: 'toujours' }
@@ -691,4 +699,115 @@ test('une date illisible ne produit pas une date fantôme', async () => {
   // `getMenages` saute l'entrée plutôt que de placer un ménage n'importe où.
   assert.strictEqual(extraireDateNueLocale()('pas-une-date'), null)
   assert.strictEqual(extraireDateNueLocale()(''), null)
+})
+
+// ─── Deux périodes, deux fonctions ─────────────────────────────────────────
+// En haut, l'objectif fixé par l'hôte. Dans l'onglet, la consultation libre de
+// la prestataire. Les deux peuvent différer à l'écran ; chacun porte sa période
+// écrite, sinon l'un se lit à la place de l'autre.
+
+const RATIO_VUE = { total: 12, positif: 3, remarque: 2, periode: '15j' }
+
+test('l\'en-tête garde l\'objectif de l\'hôte, même quand le dossier montre autre chose', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: {
+    autorise: true,
+    ratio: { ...RATIO_OK, periode: '30j' },        // l'objectif
+    ratioVue: RATIO_VUE, periodeVue: '15j',        // la consultation
+    avis: []
+  } }] })
+  await ctx.chargerAvis()
+  const entete = get('entete-ratio').innerHTML
+  assert.ok(/sur 30 jours/.test(entete), 'la période de l\'hôte : ' + entete)
+  assert.ok(/sur 98 avis/.test(entete), 'et son total')
+  // ⚠ L'assertion porte sur la LIGNE de total, pas sur tout le bloc : les SVG
+  // des pouces contiennent des coordonnées, donc à peu près n'importe quel
+  // nombre. Un `/12/` sur le bloc entier échouerait pour une raison fausse.
+  const ligne = entete.match(/entete-periode[^>]*>(.*?)<\/div>/s)
+  assert.ok(ligne && !/12/.test(ligne[1]), 'le total du dossier n\'a rien à faire en en-tête : ' + (ligne && ligne[1]))
+})
+
+test('le compteur du dossier suit la période consultée, étiquetée', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: {
+    autorise: true, ratio: { ...RATIO_OK, periode: '30j' },
+    ratioVue: RATIO_VUE, periodeVue: '15j', avis: []
+  } }] })
+  await ctx.chargerAvis()
+  const bloc = get('avis-ratio').innerHTML
+  assert.ok(/12/.test(bloc), 'le total de la période consultée')
+  assert.ok(/sur 15 jours/.test(bloc), 'avec sa période écrite : ' + bloc)
+  assert.ok(!/98/.test(bloc), 'pas le total de l\'objectif')
+})
+
+test('sans ratioVue, le dossier retombe sur le ratio principal', async () => {
+  // Compatibilité : une réponse sans compteur de consultation ne doit pas vider
+  // l'écran.
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: {
+    autorise: true, ratio: { ...RATIO_OK, periode: 'toujours' }, avis: []
+  } }] })
+  await ctx.chargerAvis()
+  assert.ok(/98/.test(get('avis-ratio').innerHTML))
+})
+
+test('la période consultée part de « depuis le début »', async () => {
+  const { ctx, appels } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.chargerAvis()
+  assert.ok(appels[0].includes('periode=toujours'), appels[0])
+})
+
+test('la période choisie est mémorisée sur l\'appareil et renvoyée au serveur', async () => {
+  const stockage = { 'menages-avis-periode-v1': '6mois' }
+  const { ctx, appels } = contexte({ stockage, reponses: [{ status: 200, body: {
+    autorise: true, ratio: RATIO_OK, ratioVue: RATIO_VUE, periodeVue: '6mois', avis: [] } }] })
+  await ctx.chargerAvis()
+  assert.ok(appels[0].includes('periode=6mois'), appels[0])
+})
+
+test('une valeur illisible en mémoire retombe sur « depuis le début »', async () => {
+  // Un localStorage bricolé ou survivant d'une ancienne version ne doit pas
+  // partir tel quel dans l'URL.
+  const { ctx, appels } = contexte({ stockage: { 'menages-avis-periode-v1': 'trimestre' },
+    reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+  await ctx.chargerAvis()
+  assert.ok(appels[0].includes('periode=toujours'), appels[0])
+})
+
+test('changer de période recharge le dossier, et rien d\'autre', async () => {
+  const stockage = {}
+  const ok = p => ({ status: 200, body: { autorise: true, ratio: { ...RATIO_OK, periode: '30j' },
+                                          ratioVue: { ...RATIO_VUE, periode: p }, periodeVue: p, avis: [] } })
+  const { ctx, get, els, stockage: st } = contexte({ stockage, reponses: [ok('toujours'), ok('15j')] })
+  await ctx.chargerAvis()
+  const enteteAvant = get('entete-ratio').innerHTML
+  const sel = els.get('avis-periode')
+  sel.value = '15j'
+  sel.listeners.filter(l => l[0] === 'change').forEach(l => l[1]())
+  await new Promise(r => setImmediate(r))
+  assert.strictEqual(st['menages-avis-periode-v1'], '15j', 'le choix est mémorisé')
+  assert.ok(get('avis-ratio').innerHTML.includes('sur 15 jours'), 'le dossier a suivi')
+  assert.strictEqual(get('entete-ratio').innerHTML, enteteAvant, 'l\'objectif de l\'en-tête ne bouge pas')
+})
+
+test('le sélecteur n\'apparaît PAS sur un écran de panne', async () => {
+  // Offert sur une panne, il inviterait à recharger ce qui n'a pas pu s'afficher.
+  const { ctx, get } = contexte({ reponses: [{ status: 503, body: { error: 'x' } }] })
+  await ctx.chargerAvis()
+  assert.strictEqual(get('avis-periode-ligne').style.display, 'none')
+})
+
+test('le sélecteur apparaît dès qu\'un dossier est chargé, même vide', async () => {
+  const { ctx, get } = contexte({ reponses: [{ status: 200, body: {
+    autorise: true, ratio: { total: 0, positif: 0, remarque: 0 }, avis: [] } }] })
+  await ctx.chargerAvis()
+  assert.strictEqual(get('avis-periode-ligne').style.display, '')
+})
+
+test('le sélecteur ne se rebranche pas à chaque chargement', async () => {
+  // Même défaut que les onglets : un écouteur par chargement, donc autant de
+  // rechargements pour un seul changement de période.
+  const ok = { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }
+  const { ctx, els } = contexte({ reponses: [ok, ok, ok] })
+  await ctx.chargerAvis()
+  await ctx.chargerAvis()
+  const sel = els.get('avis-periode')
+  assert.strictEqual(sel.listeners.filter(l => l[0] === 'change').length, 1)
 })

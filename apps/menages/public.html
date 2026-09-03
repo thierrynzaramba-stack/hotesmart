@@ -62,6 +62,8 @@
       .entete-ratio .ratio-item { font-size: 13px; }
       .entete-ratio .entete-periode { font-size: 10px; }
     }
+    .avis-periode { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--text2); }
+    .avis-periode select { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 5px 8px; font-size: 12px; color: var(--text); }
     .avis-sans-detail { color: var(--text2); font-style: italic; }
     .badge-prive { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--text2); }
 
@@ -529,6 +531,18 @@
 
       <!-- Vue Avis (masquee par defaut, y compris quand l'onglet n'existe pas) -->
       <section id="avis-vue" style="display:none">
+        <!-- Consultation libre : ce selecteur ne touche QUE le dossier. Le ratio
+             de l'en-tete garde la periode reglee par l'hote — c'est l'objectif,
+             il ne se deplace pas depuis ici. -->
+        <div class="avis-periode" id="avis-periode-ligne" style="display:none">
+          <label for="avis-periode">Période consultée</label>
+          <select id="avis-periode">
+            <option value="15j">15 jours</option>
+            <option value="30j">30 jours</option>
+            <option value="6mois">6 mois</option>
+            <option value="toujours" selected>Depuis le début</option>
+          </select>
+        </div>
         <div class="avis-etat" id="avis-etat">Chargement…</div>
         <div class="week-stats" id="avis-ratio" style="display:none"></div>
         <div id="avis-liste"></div>
@@ -1617,6 +1631,22 @@ if ("serviceWorker" in navigator) {
     '15j': 'sur 15 jours', '30j': 'sur 30 jours',
     '6mois': 'sur 6 mois', 'toujours': 'depuis le début'
   }
+  const PERIODES_VUE = ['15j', '30j', '6mois', 'toujours']
+  const LS_PERIODE_AVIS = 'menages-avis-periode-v1'
+
+  // ⚠ LA PERIODE DU DOSSIER N'EST PAS CELLE DE L'EN-TETE.
+  // En haut, l'objectif fixe par l'hote : il ne bouge pas d'ici. Dans l'onglet,
+  // la consultation libre de la prestataire, memorisee sur SON appareil — elle
+  // ne remonte a personne et ne change rien d'autre. Les deux chiffres peuvent
+  // donc differer a l'ecran, et chacun porte sa periode ecrite : c'est la seule
+  // facon qu'aucun des deux ne se lise a la place de l'autre.
+  function periodeVueLocale () {
+    try {
+      const v = localStorage.getItem(LS_PERIODE_AVIS)
+      if (PERIODES_VUE.includes(v)) return v
+    } catch (e) {}
+    return 'toujours'
+  }
 
   function echapper (t) {
     return String(t == null ? '' : t)
@@ -1754,7 +1784,7 @@ if ("serviceWorker" in navigator) {
     etatAvis('Chargement…', '')
     let res
     try {
-      res = await fetch(`/api/menages-public?action=avis&detail=1&token=${currentToken}`)
+      res = await fetch(`/api/menages-public?action=avis&detail=1&periode=${encodeURIComponent(periodeVueLocale())}&token=${currentToken}`)
     } catch (err) {
       etatAvis('Service indisponible', 'Vérifiez votre connexion, puis réessayez.')
       return
@@ -1780,10 +1810,14 @@ if ("serviceWorker" in navigator) {
     avisCharge = true
     renderEnteteRatio(data)
     renderAvis(data)
+    montrerSelecteurPeriode()
   }
 
   function renderAvis (data) {
-    const r = data.ratio
+    // ⚠ `ratioVue` d'abord : c'est le compteur de la periode consultee. Prendre
+    // `ratio` (l'objectif) afficherait un total qui ne correspond pas a la liste
+    // en dessous — un ecran qui se contredit tout seul.
+    const r = data.ratioVue || data.ratio
     // ⚠ CONTRAT DU SERVEUR : `ratio.erreur` est une PANNE, pas un resultat. Lu
     // AVANT tout affichage — sans quoi l'ecran annoncerait « 0 avis » a une
     // prestataire qui en a 98, et elle en tirerait une conclusion fausse.
@@ -1867,6 +1901,28 @@ if ("serviceWorker" in navigator) {
     // avis vers leur vraie date de sejour, sans rien changer ici.
     if (recu) return `Avis reçu le ${longLocal(recu)}`
     return ''
+  }
+
+  // Le selecteur n'apparait qu'une fois un dossier reellement charge : offert
+  // sur un ecran de panne, il inviterait a recharger ce qui n'a pas pu s'afficher.
+  let selecteurBranche = false
+  function montrerSelecteurPeriode () {
+    const ligne = document.getElementById('avis-periode-ligne')
+    const sel = document.getElementById('avis-periode')
+    if (!ligne || !sel) return
+    sel.value = periodeVueLocale()
+    ligne.style.display = ''
+    if (selecteurBranche) return
+    selecteurBranche = true
+    sel.addEventListener('change', () => {
+      const v = PERIODES_VUE.includes(sel.value) ? sel.value : 'toujours'
+      try { localStorage.setItem(LS_PERIODE_AVIS, v) } catch (e) {}
+      avisCharge = false
+      chargerAvis().catch(err => {
+        console.warn('[Avis] changement de periode impossible', err)
+        etatAvis('Service indisponible', 'Réessayez dans un instant.')
+      })
+    })
   }
 
   function ligneAvis (a) {

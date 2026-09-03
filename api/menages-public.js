@@ -400,16 +400,27 @@ async function avisDeLaPrestataire (req, res, token) {
     return res.status(200).json({ prenom: profil.first_name, autorise: false, ratio: null, avis: [] })
   }
 
-  // ⚠ LA PERIODE EST CELLE QUE L'HOTE A REGLEE, jamais celle que le porteur du
-  // lien demande : c'est un reglage d'affichage qui lui appartient. Le defaut
-  // reste « toujours » — `periodeNormalisee` retombe sur '30j' sur une valeur
-  // inconnue, ce qui changerait le ratio sans decision de personne.
+  // ⚠ DEUX PERIODES, DEUX FONCTIONS. Ne pas les confondre.
+  //
+  // `periode` — celle que l'HOTE a reglee (public_tokens.ratio_periode) — porte
+  // le ratio permanent de l'en-tete : c'est l'OBJECTIF fixe, et il n'appartient
+  // pas au porteur du lien de le deplacer. Aucun parametre client ne l'atteint.
+  //
+  // `periodeVue` — celle que la PRESTATAIRE choisit dans l'onglet — porte le
+  // dossier : son compteur et sa liste. C'est de la CONSULTATION libre, sur des
+  // avis qui sont deja les siens ; l'hote garde l'interrupteur qui coupe tout
+  // (`self_view_reviews`), et c'est lui la garde de confidentialite, pas cette
+  // fenetre. Sans ce cloisonnement, un sélecteur dans l'onglet deplacerait
+  // l'objectif affiche en haut.
+  //
   // ⚠ `periodeNormalisee` retombe sur '30j' — un defaut adapte a /avis, ou la
-  // periode vient d'un selecteur, mais PAS ici : une valeur inconnue en base
-  // (contrainte tombee, correctif SQL, colonne absente) retrecirait le ratio de
-  // la prestataire sans qu'aucun hote ne l'ait demande. On valide explicitement.
+  // periode vient d'un selecteur, mais PAS ici : une valeur inconnue (contrainte
+  // tombee, correctif SQL, ou query string bricolee) retrecirait un compteur
+  // sans que personne ne l'ait demande. On valide explicitement, des deux cotes.
   const brut = String(pt.ratio_periode || 'toujours')
   const periode = PERIODES_PWA.includes(brut) ? brut : 'toujours'
+  const brutVue = String(req.query.periode || periode)
+  const periodeVue = PERIODES_PWA.includes(brutVue) ? brutVue : 'toujours'
   const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id })
 
   // ⚠ CONTRAT A HONORER PAR L'INTERFACE PWA, QUI RESTE A ECRIRE.
@@ -426,7 +437,13 @@ async function avisDeLaPrestataire (req, res, token) {
   // ratio a cote du prenom.
   let avis = []
   let listeTronquee = false
+  // Le compteur du dossier. Recalcule seulement s'il porte une autre periode que
+  // l'objectif : deux comptages identiques coutent deux fois pour rien.
+  let ratioVue = null
   if (req.query.detail === '1') {
+    ratioVue = periodeVue === periode
+      ? ratio
+      : await ratioProprete(supabase, { userId, periode: periodeVue, prestataireId: profil.id })
     const att = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
     // ⚠ UNE PANNE N'EST PAS « AUCUN AVIS ».
     // Sauter silencieusement laissait partir un 200 avec une liste vide,
@@ -441,7 +458,10 @@ async function avisDeLaPrestataire (req, res, token) {
     }
     if (att.ids.length) {
       listeTronquee = att.tronque === true || att.ids.length > MAX_IDS
-      const borne = borneDepuis(periode)
+      // ⚠ La liste suit la periode CHOISIE, pas l'objectif : un compteur qui
+      // annonce 30 jours au-dessus d'une liste qui en montre 15 est un ecran qui
+      // se contredit.
+      const borne = borneDepuis(periodeVue)
       let q = supabase.from('ota_reviews')
         // ⚠ NI `guest_name`, NI `content`, NI `content_public`, NI `raw`.
         // Seul l'extrait sort, avec de quoi le dater et savoir s'il est prive.
@@ -507,6 +527,10 @@ async function avisDeLaPrestataire (req, res, token) {
   return res.status(200).json({
     prenom: profil.first_name, autorise: true,
     ratio, avis, periode,
+    // ⚠ Le dossier porte SON compteur et SA periode, distincts de ceux de
+    // l'en-tete. Les fondre en un seul champ ferait afficher l'un a la place de
+    // l'autre au premier refactor.
+    ...(ratioVue ? { ratioVue, periodeVue } : {}),
     // ⚠ La liste est coupee a MAX_IDS avant meme d'interroger `ota_reviews`.
     // Sans ce drapeau, une liste partielle se lit comme la liste complete —
     // exactement la faute contre laquelle `ratio.tronque` a ete ajoute.

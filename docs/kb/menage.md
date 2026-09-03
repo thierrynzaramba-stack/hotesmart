@@ -108,10 +108,22 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   👍 propreté saluée / 👎 remarques. Ces chiffres sortent de la **même fonction** que la page
   hôte `/avis` (`lib/stats-avis.js`) : deux compteurs calculés séparément finiraient par se
   contredire.
-- **Période du ratio** : réglée par l'hôte dans `apps/menages/prestataires.html`
-  (15 j / 30 j / 6 mois / depuis le début), stockée dans `public_tokens.ratio_periode`,
-  défaut **« depuis le début »**. ⚠️ Elle vient **de la base, jamais de l'URL** : le porteur
-  du lien ne doit pas pouvoir élargir sa propre fenêtre de comptage.
+- **DEUX PÉRIODES, DEUX FONCTIONS — ne pas les confondre.**
+  - **L'en-tête** suit `public_tokens.ratio_periode`, réglée par l'hôte dans
+    `apps/menages/prestataires.html` (15 j / 30 j / 6 mois / depuis le début), défaut
+    **« depuis le début »**. C'est **l'objectif fixé** : aucun paramètre client ne l'atteint,
+    et la prestataire ne peut pas le déplacer.
+  - **L'onglet Avis** porte un **sélecteur local** (mêmes quatre choix, défaut « depuis le
+    début »), mémorisé dans le `localStorage` de son appareil — il ne remonte à personne.
+    Il gouverne le compteur en tête d'onglet **et** la liste, jamais l'en-tête.
+  - Les deux chiffres peuvent donc **différer à l'écran**, et chacun porte sa période écrite :
+    c'est la seule façon qu'aucun ne se lise à la place de l'autre.
+  ⚠️ La période n'est **pas une garde de confidentialité** : la consultation porte sur des avis
+  qui sont déjà les siens, et c'est `self_view_reviews` qui coupe tout. Une période courte
+  cadre un objectif, elle ne restreint pas un accès.
+  ⚠️ Les deux valeurs sont validées **explicitement** contre les quatre clés, en base comme en
+  query string : `periodeNormalisee` retombe sur `'30j'`, ce qui rétrécirait un compteur sans
+  que personne ne l'ait demandé.
 - **En dessous** : la liste des avis qui **parlent de propreté** (date, bien, extrait). Les avis
   qui n'évoquent pas le ménage ne sont pas listés — ils restent comptés dans le total.
 - **La date identifie LE ménage** : « Séjour du 12 au 15 août » quand `stay_start`/`stay_end`
