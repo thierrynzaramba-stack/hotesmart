@@ -428,6 +428,12 @@
         headers: { 'Content-Type': 'application/json',
                    'Authorization': `Bearer ${currentSession.access_token}` },
         body: JSON.stringify({
+          // ⚠ `action` EST OBLIGATOIRE. `/api/membres` la lit AVANT toute autre
+          // chose et rejette d'emblee ce qu'il ne connait pas : sans elle, la
+          // creation rendait 400 « Action inconnue » et echouait entierement.
+          // Le defaut n'etait visible qu'a l'usage reel — aucun test ne
+          // confrontait le corps envoye par l'ecran aux actions du serveur.
+          action: 'create',
           first_name: name,
           access_mode: 'lien',
           permissions: {

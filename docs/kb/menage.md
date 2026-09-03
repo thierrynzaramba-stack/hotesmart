@@ -80,6 +80,12 @@ seulement à l'app ménage.
   la seule source que lit la PWA. Il n'y a pas deux writers pour autant : `/api/membres` écrit
   `profile_permissions.property_ids` (uuid[]), l'écran écrit `public_tokens.property_ids`
   (text[]) — deux tables, deux représentations, le même geste.
+  ⚠️ **Le corps envoyé à `/api/membres` DOIT porter `action`.** L'endpoint la lit **avant tout
+  le reste** — avant même la session — et rejette en 400 « Action inconnue » ce qu'il ne
+  reconnaît pas. La création l'avait oubliée : elle échouait **entièrement** en production,
+  alors que 1063 tests passaient. Aucun ne confrontait le corps envoyé par un écran aux actions
+  acceptées par un endpoint : c'est l'angle mort exact entre les tests serveur et les tests
+  d'écran, désormais couvert par `tests/contrat-front-api.test.js`.
   ⚠️ **Le corps envoyé à `/api/membres` porte `profile_id`, pas `id`.** Envoyer `id` rend 400 et
   `saveEdit` sortait avant d'écrire quoi que ce soit : modifier ou supprimer un prestataire créé
   depuis le lot 2.5 était totalement inopérant.
