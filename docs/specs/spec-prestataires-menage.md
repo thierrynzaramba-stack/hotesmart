@@ -255,6 +255,41 @@ Tableau par prestataire sur période sélectionnable : nb ménages, note moyenne
 
 Job cron léger (une fois par jour, après le poll reviews) : pour chaque `ota_reviews` avec `menage_event_id` null et `booking_uid` résolu, trouver le `menage_event` du même bien dont la date est la plus proche **avant** le checkin de la réservation (fenêtre : 3 jours max) et renseigner `menage_event_id`. Si aucun match → laisser null, ne pas forcer. Le `provider_id` se déduit ensuite par jointure — ne pas le dupliquer sur `ota_reviews`.
 
+### Vue « Avis » de la PWA prestataire — décidé le 3 septembre 2026
+
+À côté du prénom de la prestataire, un **ratio** : nombre d'avis, pouce haut,
+pouce bas. Calculé par **`ratioProprete`** (`lib/stats-avis.js`), la même
+fonction que `/avis` — voir `docs/kb/avis-voyageurs.md` §12 pour sa signature.
+Deux chiffres calculés différemment pour la même chose finiraient par se
+contredire, et c'est celui montré à la prestataire qui perdrait sa crédibilité.
+
+**Restreint à son travail** : `menageEventIds` = les ménages qu'elle a faits, et
+`statut = 'confirme'` seul (la fonction l'impose déjà). Une prestataire sans
+aucun ménage rattaché voit **zéro**, jamais le ratio de l'hôte — c'est
+l'invariant `[] ≠ null` de la fonction.
+
+**Au clic**, la liste des avis correspondants, filtrée à l'identique, et
+**soumise au §6** : extrait de propreté seul, étiqueté « retour privé du
+voyageur » quand il en vient, jamais le nom du voyageur, jamais l'avis complet,
+et coupé par `self_view_reviews`.
+
+### Attribution rétroactive — faits établis, périmètre borné
+
+Trois faits, établis par le product owner, pas déduits du code :
+
+| prestataire | biens | période couverte |
+|---|---|---|
+| **Régina** | La bulle, Cœur de vie 23 | depuis le début, 100 % des ménages |
+| **Tiphaine** | Colomiers | jusqu'au **31 juillet 2026**, 100 % des ménages |
+
+**Après ces dates, le rattachement se fait par `menage_event` uniquement.**
+
+⚠ **Ces attributions sont une exception bornée, pas un mode de rattachement.**
+Une seconde femme de ménage arrive : à partir de là, seul le lien au ménage
+précis dit qui a préparé quel séjour. Rattacher « au prestataire du bien »
+attribuerait à l'une le travail de l'autre dès la première semaine — et le
+reproche tomberait sur la mauvaise personne.
+
 ### Fait établi — Régina couvre les deux biens depuis le début
 
 **Régina est la femme de ménage de La bulle et de Cœur de vie 23 depuis

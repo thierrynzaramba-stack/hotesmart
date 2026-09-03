@@ -14,7 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
-const { ratioProprete, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -50,6 +50,18 @@ const CHAMPS = `id, provider, source, ota, content, content_public,
 
 async function lister (req, res, garde) {
   const userId = garde.accountUserId
+  // ⚠ Lue en TETE : le retour « perimetre vide » ci-dessous s'en sert deja.
+  //
+  // `PERIODES[x] !== undefined` laissait passer 'constructor', '__proto__',
+  // 'toString'... — heritees du prototype — et la cle ressortait telle quelle
+  // au front, qui affichait « retenus function Object() { [native code] } ».
+  //
+  // Cette normalisation est aujourd'hui REDONDANTE avec celle de
+  // `ratioProprete` et de `borneDepuis` : une mutation qui la supprime ne fait
+  // echouer aucun test, c'est verifie. On la garde parce que `periode` sert ici
+  // a TROIS choses — le ratio, le filtre de liste, et la reponse au client — et
+  // que la seule dont la normalisation serait garantie est la premiere.
+  const periode = periodeNormalisee(String(req.query?.periode || ''))
   const refs   = refsDuPerimetre(garde.contexte)
   const filtre = filtrePerimetreSql(refs, 'property_id_ref')
   // Perimetre vide : le membre n'a aucun bien. Ce n'est pas une erreur.
@@ -57,10 +69,12 @@ async function lister (req, res, garde) {
   // « 0 remarque sur undefined j » — precisement au membre dont le perimetre est
   // vide, le cas que cette ligne existe pour traiter proprement.
   if (filtre === '') {
+    // La periode DEMANDEE, pas '30j' fige : un membre au perimetre vide qui
+    // choisit « 6 mois » lisait « sur 30 jours ».
     return res.status(200).json({
       avis: [], biens: [], periodes: Object.keys(PERIODES),
       ratio: { total: 0, positif: 0, remarque: 0, rien_signale: 0,
-               non_analyses: 0, periode: '30j', depuis: null }
+               non_analyses: 0, periode, depuis: borneDepuis(periode) }
     })
   }
 
@@ -78,6 +92,12 @@ async function lister (req, res, garde) {
   let q = supabase.from('ota_reviews').select(CHAMPS).eq('user_id', userId)
     // Les detections ecartees par l'hote disparaissent : il a tranche.
     .neq('statut', 'ignore')
+  // ⚠ LA PERIODE FILTRE AUSSI LA LISTE. Sans cela, deux selecteurs voisins et
+  // visuellement identiques n'avaient pas la meme portee : la carte annoncait
+  // « 2 avis retenus sur 15 jours » au-dessus d'une liste montrant des avis de
+  // 2023. L'ecran se contredisait lui-meme.
+  const bornePeriode = borneDepuis(periode)
+  if (bornePeriode) q = q.gte('received_at', bornePeriode)
   if (bienDemande) q = q.eq('property_id_ref', bienDemande)
   else if (filtre) q = q.or(filtre)
   q = q.order('received_at', { ascending: false, nullsFirst: false }).limit(MAX_LIGNES)
@@ -113,8 +133,6 @@ async function lister (req, res, garde) {
   //
   // Il est calcule ICI et non au front : le front ne recoit que les MAX_LIGNES
   // premieres lignes, il ne peut pas compter juste.
-  const periode = PERIODES[String(req.query?.periode || '')] !== undefined
-    ? String(req.query.periode) : '30j'
   // Le perimetre transmis a la fonction : le bien demande s'il y en a un, sinon
   // les references du perimetre du membre (null = tous les biens du compte).
   const refsRatio = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))

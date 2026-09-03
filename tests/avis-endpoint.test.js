@@ -40,7 +40,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
       const q = { _f: {}, _or: null, table: nom }
       etat.requetes.push(q)
       const chain = {
-        select (c, opts) { q._count = opts?.count; return chain },
+        select (c, opts) { q._count = opts?.count; q._head = !!(opts && opts.head); return chain },
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
         gte (c, v) { q._gte = { colonne: c, valeur: v }; return chain },
@@ -48,7 +48,9 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         neq (c, v) { q._neq = q._neq || {}; q._neq[c] = v; return chain },
         // ⚠ `in` et `gte` sont honores : le ratio en depend, et sans eux
         // supprimer le filtre de perimetre ou de periode ne casserait rien.
-        in (c, v) { q._in = { colonne: c, valeurs: (v || []).map(String) }; return chain },
+        // ⚠ Les `in` sont ACCUMULES : ratioProprete en pose deux (biens puis
+        // ménages). N'en garder qu'un laissait passer un cloisonnement ignoré.
+        in (c, v) { (q._ins = q._ins || []).push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
         is () { return chain }, not () { return chain },
         insert (row) { etat.ecritures.push({ table: nom, row }); q._row = row
                        return { select: () => ({ single: async () => ({ data: { id: 'nouvel-avis' }, error: null }) }) } },
@@ -80,11 +82,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
             (q._f.ai_clean_verdict == null || a.ai_clean_verdict === q._f.ai_clean_verdict) &&
             (q._f.statut == null || (a.statut || 'confirme') === q._f.statut) &&
             (q._f.id == null || a.id === q._f.id) &&
-            (!q._in || (q._in.valeurs.includes(String(a[q._in.colonne])))) &&
+            (!q._ins || q._ins.every(f => f.valeurs.includes(String(a[f.colonne])))) &&
             (!q._gte || String(a[q._gte.colonne] || '') >= String(q._gte.valeur)) &&
             (!q._neq || !q._neq.statut || (a.statut || 'confirme') !== q._neq.statut))
           if (q._or) c = c.filter(a => String(q._or).includes(a.property_id_ref))
-          if (q._count === 'exact') return Promise.resolve({ count: c.length, error: null })
+          if (q._count === 'exact') return Promise.resolve({ data: q._head ? null : c, count: c.length, error: null })
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'bookings_snapshot') {
@@ -770,4 +772,69 @@ test('list : une période inventée retombe sur le défaut, sans erreur', async 
   await handler(req({ action: 'list', periode: 'depuis-toujours-ou-presque' }), res)
   assert.strictEqual(res.code, 200)
   assert.strictEqual(res.body.ratio.periode, '30j')
+})
+
+// ─── Le périmètre du RATIO, pas seulement celui de la liste ────────────────
+test('list : le ratio respecte le périmètre restreint du membre', async () => {
+  // ⚠ Remplacer le calcul du périmètre par `null` — donc « le ratio de tout le
+  // compte pour n'importe quel membre » — laissait les 48 tests au vert : les
+  // tests de périmètre existants portaient tous sur un périmètre VIDE, cas qui
+  // sort en amont et n'atteint jamais ratioProprete. Le cas dangereux est le
+  // périmètre restreint NON vide.
+  preparer({
+    user: MEMBRE, avis: [AVIS_A, AVIS_B],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'list', periode: 'toujours' }),
+                  headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.ratio.total, 1, 'seul l\'avis du bien autorisé compte')
+  assert.strictEqual(res.body.ratio.positif, 1, 'AVIS_A est sur REF_A')
+  assert.strictEqual(res.body.ratio.remarque, 0, 'AVIS_B est sur REF_B, hors périmètre')
+})
+
+test('list : une période héritée du prototype ne traverse pas le serveur', async () => {
+  // `PERIODES['constructor'] !== undefined` est vrai : la clé passait la
+  // validation et ressortait au front, qui affichait
+  // « retenus function Object() { [native code] } ».
+  preparer({ avis: [AVIS_A] })
+  const handler = require('../api/avis')
+  for (const piege of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    const res = reponse()
+    await handler(req({ action: 'list', periode: piege }), res)
+    assert.strictEqual(res.code, 200, piege)
+    assert.strictEqual(res.body.ratio.periode, '30j', `${piege} doit retomber sur le défaut`)
+  }
+})
+
+test('list : la période filtre AUSSI la liste, pas seulement le ratio', async () => {
+  // Deux sélecteurs voisins et visuellement identiques n'avaient pas la même
+  // portée : la carte annonçait « 2 avis retenus sur 15 jours » au-dessus d'une
+  // liste montrant des avis de 2023.
+  const vieux = { ...AVIS_A, id: 'r9', received_at: '2024-01-01T00:00:00Z',
+                  ai_analyzed_at: '2024-01-01T01:00:00Z' }
+  preparer({ avis: [vieux] })
+  const handler = require('../api/avis')
+  const r30 = reponse(); await handler(req({ action: 'list', periode: '30j' }), r30)
+  assert.strictEqual(r30.body.avis.length, 0, 'la liste doit être filtrée elle aussi')
+  assert.strictEqual(r30.body.ratio.total, 0)
+  const rTout = reponse(); await handler(req({ action: 'list', periode: 'toujours' }), rTout)
+  assert.strictEqual(rTout.body.avis.length, 1)
+  assert.strictEqual(rTout.body.ratio.total, 1)
+})
+
+test('list : périmètre vide -> la période DEMANDÉE est renvoyée, pas 30j figé', async () => {
+  preparer({
+    user: MEMBRE, avis: [AVIS_A],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'some', property_ids: [], property_refs: [] }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler({ ...req({ action: 'list', periode: '6mois' }),
+                  headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.body.ratio.periode, '6mois')
 })

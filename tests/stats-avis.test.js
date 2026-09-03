@@ -10,24 +10,32 @@ const { ratioProprete, borneDepuis, PERIODES } = require('../lib/stats-avis')
 
 const T0 = Date.parse('2026-09-03T12:00:00Z')
 
+// ⚠ Ce double COMPTE, comme la vraie base. `ratioProprete` utilise
+// `select('id', { count: 'exact', head: true })` : compter en JS sur des lignes
+// rapatriees tronquait en silence au-dela de 1000 (db-max-rows).
+//
+// ⚠ Il ACCUMULE les `in` dans un tableau. Une version precedente n'en gardait
+// qu'un seul : le second appel ecrasait le premier, et le test « la prestataire
+// ne voit que son travail » serait passe au vert avec le cloisonnement par bien
+// silencieusement ignore.
 function fauxClient (lignes = [], journal = [], erreur = null) {
   return {
     from (table) {
-      const appel = { table, filtres: {}, in: null, gte: null }
+      const appel = { table, filtres: {}, ins: [], gte: null, head: false }
       journal.push(appel)
       const chain = {
-        select () { return chain },
+        select (_c, opts) { appel.head = !!(opts && opts.head); appel.count = opts && opts.count; return chain },
         eq (c, v) { appel.filtres[c] = v; return chain },
         gte (c, v) { appel.gte = { colonne: c, valeur: v }; return chain },
-        in (c, v) { appel.in = { colonne: c, valeurs: (v || []).map(String) }; return chain },
+        in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
         then (r) {
-          if (erreur) return Promise.resolve({ data: null, error: erreur }).then(r)
+          if (erreur) return Promise.resolve({ data: null, count: null, error: erreur }).then(r)
           const d = lignes.filter(l =>
-            (appel.filtres.user_id == null || l.user_id === appel.filtres.user_id) &&
-            (appel.filtres.statut == null || (l.statut || 'confirme') === appel.filtres.statut) &&
+            Object.entries(appel.filtres).every(([c, v]) =>
+              c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
             (!appel.gte || String(l[appel.gte.colonne] || '') >= String(appel.gte.valeur)) &&
-            (!appel.in || appel.in.valeurs.includes(String(l[appel.in.colonne]))))
-          return Promise.resolve({ data: d, error: null }).then(r)
+            appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))))
+          return Promise.resolve({ data: appel.head ? null : d, count: d.length, error: null }).then(r)
         }
       }
       return chain
@@ -163,4 +171,40 @@ test('ratio : la période filtre bien sur received_at', async () => {
   await ratioProprete(fauxClient([], journal), { userId: 'u1', periode: '15j', maintenant: T0 })
   assert.strictEqual(journal[0].gte.colonne, 'received_at')
   assert.strictEqual(journal[0].gte.valeur, borneDepuis('15j', T0))
+})
+
+test('ratio : les DEUX filtres s\'appliquent ensemble', async () => {
+  // ⚠ C'est l'appel de la fiche prestataire : les ménages de la personne, dans
+  // les biens de son périmètre. Un double qui n'accumulait qu'un seul `in`
+  // aurait laissé ce test au vert en n'appliquant qu'une des deux restrictions —
+  // le cloisonnement par bien silencieusement ignoré.
+  const r = await ratioProprete(fauxClient([
+    L({ ai_clean_verdict: 'positif',  property_id_ref: '209413', menage_event_id: 'm1' }),
+    L({ ai_clean_verdict: 'remarque', property_id_ref: '169567', menage_event_id: 'm1' }),
+    L({ ai_clean_verdict: 'remarque', property_id_ref: '209413', menage_event_id: 'm2' })
+  ]), { userId: 'u1', refs: ['209413'], menageEventIds: ['m1'], periode: 'toujours', maintenant: T0 })
+  assert.strictEqual(r.total, 1, 'seule la ligne qui satisfait LES DEUX filtres')
+  assert.strictEqual(r.positif, 1)
+  assert.strictEqual(r.remarque, 0)
+})
+
+test('ratio : le comptage se fait côté base, sans rapatrier les lignes', async () => {
+  // Compter en JS sur la réponse tronquait en silence au-delà de db-max-rows
+  // (1000) : le total était faux, en moins, et rien ne le disait.
+  const journal = []
+  await ratioProprete(fauxClient([L({ ai_clean_verdict: 'positif' })], journal),
+    { userId: 'u1', periode: 'toujours', maintenant: T0 })
+  assert.ok(journal.length >= 4, 'un comptage par verdict, plus le total')
+  for (const a of journal) {
+    assert.strictEqual(a.count, 'exact', 'count exact')
+    assert.strictEqual(a.head, true, 'aucune ligne ne doit être transférée')
+  }
+})
+
+test('ratio : la période rendue est NORMALISÉE, pas celle reçue', async () => {
+  // Rendre l'entrée telle quelle faisait se contredire `periode` et `depuis`
+  // dans le même objet.
+  const r = await ratioProprete(fauxClient([]), { userId: 'u1', periode: 'constructor', maintenant: T0 })
+  assert.strictEqual(r.periode, '30j')
+  assert.strictEqual(r.depuis, borneDepuis('30j', T0))
 })
