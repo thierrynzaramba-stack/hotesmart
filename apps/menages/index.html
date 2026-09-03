@@ -73,6 +73,16 @@
     .menage-card-time { font-size: 9px; opacity: 0.7; margin-top: 2px; }
     .menage-card-check { position: absolute; top: 4px; right: 4px; font-size: 10px; }
     .menage-card-comment { position: absolute; bottom: 4px; right: 4px; font-size: 9px; }
+    /* Qui fait le menage. `offered` = propose, pas encore confirme : la nuance
+       compte, un suppleant qui n'a pas repondu n'est pas un menage couvert. */
+    .presta-pastille { display: inline-flex; align-items: center; gap: 3px; font-size: 9px; font-weight: 600;
+                       border-radius: 999px; padding: 1px 6px; margin-top: 3px; background: rgba(255,255,255,0.75); }
+    .presta-pastille.offert { border: 1px dashed currentColor; }
+    .presta-pastille.vide   { background: rgba(0,0,0,0.06); font-weight: 500; font-style: italic; }
+    .presta-ligne { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+    .presta-ligne select { flex: 1; padding: 6px 8px; font-size: 13px; border: 0.5px solid var(--border);
+                           border-radius: var(--radius); background: var(--bg); color: var(--text); }
+    .presta-etat { font-size: 11px; color: var(--text2); margin-top: 6px; min-height: 14px; }
 
     .prop-color-0 { background: #DBEAFE; color: #1E40AF; }
     .prop-color-1 { background: #D1FAE5; color: #065F46; }
@@ -204,6 +214,8 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
   const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
 
   let currentSession = null
+  let assignations = {}   // `bien|resa|depart` -> { provider_id, status, assigned_by }
+  let prestataires = []   // profils `lien` du compte, pour le selecteur
   let properties = []
   let bookings = []
   let doneSet = new Set()
@@ -309,6 +321,13 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     const data = await res.json()
     properties = data.properties || []
     bookings = data.bookings || []
+    // Qui fait quoi (spec §11.6). Indexe par l'IDENTITE du menage — la meme que
+    // menage_done et que la file hors ligne de la PWA.
+    assignations = {}
+    ;(data.menages || []).forEach(m => {
+      assignations[`${m.property_id}|${m.booking_id}|${m.departure_date}`] = m
+    })
+    prestataires = data.prestataires || []
     activeProps = new Set(properties.map(p => p.id))
     if (data.tronque) console.warn('[menages] planning tronque : fenetre trop large')
   }
@@ -406,8 +425,10 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
       const propIdx = properties.findIndex(p => p.id === b.propId)
       const id = `${b.id}-${b.departure}`
       const commentKey = `${b.id}-${b.departure}`
+      const assign = assignations[`${b.propId}|${b.id}|${b.departure}`] || null
       menages.push({
         id,
+        assign,
         date: dep,
         dateStr: b.departure,
         propId: b.propId,
@@ -489,6 +510,7 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
                 <div class="menage-card-prop">${m.propName}</div>
                 <div class="menage-card-title">Ménage départ</div>
                 <div class="menage-card-time">${m.guestName}</div>
+                ${pastillePrestataire(m)}
                 ${m.done ? '<div class="menage-card-check">✓</div>' : ''}
                 ${m.comment ? '<div class="menage-card-comment">📝</div>' : ''}
               </div>
@@ -565,6 +587,34 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     }
   }
 
+  function echapper(t) {
+    return String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  }
+
+  function prenomDe(providerId) {
+    const p = prestataires.find(x => x.id === providerId)
+    return p ? p.prenom : null
+  }
+
+  // ⚠ TROIS ETATS DISTINCTS, et ils ne disent pas la meme chose :
+  //   - pas d'assignation connue  -> rien du tout. Le lot 2.1 vient d'arriver et
+  //     un menage peut n'avoir aucune ligne : afficher « personne » serait faux.
+  //   - assigne et accepte        -> le prenom.
+  //   - propose et pas confirme   -> le prenom en pointilles. Un suppleant qui
+  //     n'a pas repondu n'est PAS un menage couvert, et le planning doit le dire.
+  //   - assignation vide          -> « personne », en clair. C'est une alerte
+  //     visuelle, pas un blanc qu'on prend pour un chargement en cours.
+  function pastillePrestataire(m) {
+    if (!m.assign) return ''
+    const prenom = prenomDe(m.assign.provider_id)
+    if (!m.assign.provider_id) return '<div class="presta-pastille vide">personne</div>'
+    if (!prenom) return ''   // profil inconnu du lot : on n'invente pas de nom
+    const offert = m.assign.status === 'offered'
+    return `<div class="presta-pastille ${offert ? 'offert' : ''}">${offert ? '⏳' : '👤'} ${echapper(prenom)}${offert ? ' ?' : ''}</div>`
+  }
+
   function openModal(m) {
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
@@ -575,7 +625,9 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
       <div class="modal-row"><span>Arrivée</span><span>${m.arrival || '—'}</span></div>
       <div class="modal-row"><span>Départ</span><span>${m.departure || '—'}</span></div>
       <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : '⏳ À faire'}</span></div>
+      ${blocPrestataire(m)}
     `
+    brancherSelecteurPrestataire(m)
     document.getElementById('modal-comment').value = m.comment || ''
     document.getElementById('comment-saved').style.display = 'none'
 
@@ -586,6 +638,79 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
       btn.className = m.done ? 'btn' : 'btn btn-primary'
     }
     document.getElementById('modal').style.display = 'flex'
+  }
+
+  // Le selecteur n'apparait QUE si le menage existe en base et qu'il y a au
+  // moins une prestataire active a proposer : offrir un <select> vide serait une
+  // promesse en l'air.
+  function blocPrestataire(m) {
+    if (!m.assign) return ''
+    const actifs = prestataires.filter(p => p.actif)
+    if (!actifs.length) return ''
+    const options = ['<option value="">— personne —</option>'].concat(
+      actifs.map(p => `<option value="${echapper(p.id)}"${p.id === m.assign.provider_id ? ' selected' : ''}>${echapper(p.prenom)}</option>`)
+    ).join('')
+    const verrou = m.assign.assigned_by === 'manual'
+      ? 'Affectation manuelle : l\'automate n\'y touchera plus.'
+      : (m.assign.status === 'offered' ? 'En attente de confirmation.' : '')
+    return `<div class="presta-ligne"><span style="font-size:13px">Qui le fait</span>
+              <select id="modal-presta">${options}</select></div>
+            <div class="presta-etat" id="presta-etat">${echapper(verrou)}</div>`
+  }
+
+  function brancherSelecteurPrestataire(m) {
+    const sel = document.getElementById('modal-presta')
+    if (!sel) return
+    sel.addEventListener('change', async () => {
+      const etat = document.getElementById('presta-etat')
+      const choix = sel.value || null
+      sel.disabled = true
+      if (etat) etat.textContent = 'Enregistrement…'
+      try {
+        const res = await fetch('/api/menages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json',
+                     'Authorization': `Bearer ${currentSession.access_token}`, ...enteteCompte() },
+          body: JSON.stringify({
+            property_id: m.propId, booking_id: m.bookId,
+            departure_date: m.departure, provider_id: choix })
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) {
+          // ⚠ On DIT pourquoi. Un select qui revient en arriere sans un mot
+          // laisse croire a un bug ; le motif le plus frequent est un droit
+          // manquant (« Prestataires » en ecriture).
+          if (etat) etat.textContent = (data && data.error) || 'Réassignation impossible.'
+          sel.value = m.assign.provider_id || ''
+          return
+        }
+        // La verite affichee vient du SERVEUR, pas de ce qu'on croyait demander :
+        // c'est lui qui decide si la personne est engagee ou seulement sollicitee.
+        m.assign.provider_id = data.provider_id
+        m.assign.status = data.status
+        m.assign.assigned_by = data.provider_id ? 'manual' : null
+        assignations[`${m.propId}|${m.bookId}|${m.departure}`] = m.assign
+        if (etat) {
+          etat.textContent = data.provider_id
+            ? (data.status === 'offered'
+                ? `Proposé à ${data.prenom} — en attente de sa confirmation.`
+                : `Confirmé : ${data.prenom}.`)
+            : 'Ménage laissé sans prestataire.'
+        }
+        routeRenderSafe()
+      } catch (err) {
+        if (etat) etat.textContent = 'Connexion impossible. Réessayez.'
+        sel.value = m.assign.provider_id || ''
+      } finally {
+        sel.disabled = false
+      }
+    })
+  }
+
+  // Le planning se re-rend apres une reassignation, sans supposer quelle vue
+  // est active — l'ecran hote n'a qu'une vue semaine aujourd'hui.
+  function routeRenderSafe() {
+    try { renderWeek(); renderMiniCal() } catch (e) { console.warn('[menages] re-rendu', e) }
   }
 
   function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null }

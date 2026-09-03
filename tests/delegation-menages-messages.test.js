@@ -43,6 +43,10 @@ function preparer ({ perimetre = ['209413'], uuids = [BULLE.id],
         in (c, v) { q._in = { c, v }; etat.filtresIn.push({ table: nom, colonne: c, valeurs: v }); return q },
         not () { return q }, is () { return q }, order () { return q },
         limit () { return q }, gte () { return q }, lte () { return q },
+        // ⚠ Honore, comme le reste : sans lui, la lecture des menages levait un
+        // TypeError que le catch de l'endpoint transformait en 500 — un test
+        // rouge pour une raison etrangere a ce qu'il verifie.
+        neq () { return q },
         single: async () => rep(nom, q), maybeSingle: async () => rep(nom, q),
         then (ok, ko) { return Promise.resolve(rep(nom, q, true)).then(ok, ko) }
       }
@@ -57,6 +61,12 @@ function preparer ({ perimetre = ['209413'], uuids = [BULLE.id],
         return permis.includes(String(valeur))
       }
       function rep (nom, q, tableau = false) {
+        // Les nouvelles tables du lot 2.1. `menages` vide : ce fichier teste le
+        // PERIMETRE des biens, pas l'assignation — et une liste vide n'ampute
+        // rien, l'endpoint hote affiche le planning sans pastille.
+        if (nom === 'menages' || nom === 'menage_assignment_log' || nom === 'property_cleaning_providers') {
+          return { data: tableau ? [] : null, error: null }
+        }
         if (nom === 'profiles') {
           const l = { id: 'p1', account_user_id: PROD, member_user_id: MEMBRE,
                       is_owner: false, active: membreActif, accepted_at: '2026-09-01' }

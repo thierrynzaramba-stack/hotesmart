@@ -262,6 +262,49 @@ module.exports = async function handler(req, res) {
         .filter(b => b.departure && b.departure >= dateFrom && b.departure <= dateTo)
     }
 
+    // ─── FILTRAGE PAR PRESTATAIRE (spec §11.5) ─────────────────────────────
+    // ⚠ LE FILTRE PASSE DU BIEN A LA PERSONNE. Tant que la PWA filtrait par
+    // `public_tokens.property_ids`, deux prestataires sur un meme bien voyaient
+    // chacune TOUS les menages de l'autre — le cas qui motive tout ce chantier.
+    //
+    // ⚠ PONT DE CONVERGENCE, ASSUME ET BORNE. Un token sans profil correspondant
+    // (`profiles.pwa_token`) garde l'ancien comportement : filtrage par bien.
+    // C'est la dette `profiles` <-> `public_tokens` du §6 : couper l'acces d'un
+    // lien legacy en le rendant vide serait une panne silencieuse pour la
+    // personne qui l'utilise. Regina, elle, est deja convergee.
+    const { data: profilPresta, error: errProfil } = await supabase.from('profiles')
+      .select('id, first_name, active')
+      .eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
+    // ⚠ La panne COUPE plutot que d'elargir : sans cette garde, un timeout
+    // PostgREST rendrait `profilPresta` null et la prestataire verrait de nouveau
+    // les menages de tout le monde sur ses biens.
+    if (errProfil) {
+      console.error('[menages-public] lecture du profil echec:', errProfil.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+
+    let menagesAssignes = null
+    if (profilPresta && profilPresta.active !== false) {
+      const { data: mn, error: errMen } = await supabase.from('menages')
+        .select('booking_id, property_id, departure_date, status')
+        .eq('user_id', userId)
+        .eq('provider_id', profilPresta.id)
+        .neq('status', 'cancelled')
+        .gte('departure_date', dateFrom)
+        .lte('departure_date', dateTo)
+      // Meme raison : une liste vide par panne serait indiscernable d'« aucun
+      // menage », et la prestataire conclurait qu'elle n'a rien a faire.
+      if (errMen) {
+        console.error('[menages-public] lecture des menages echec:', errMen.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      menagesAssignes = mn || []
+      const siens = new Set(menagesAssignes.map(m =>
+        `${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`))
+      allBookings = allBookings.filter(b =>
+        siens.has(`${b.propId}|${String(b.id)}|${b.departure}`))
+    }
+
     const bookingIds = allBookings.map(b => String(b.id))
     let comments = []
     if (bookingIds.length) {
@@ -296,7 +339,13 @@ module.exports = async function handler(req, res) {
       bookings: allBookings, label: tokenData.label,
       property_ids: allowedIds, visibility_days: visibilityDays,
       comments, events: eventsData || [],
-      done: doneList
+      done: doneList,
+      // Le statut de chaque menage assigne : `offered` = a confirmer (suppleant),
+      // `accepted` = engage. `null` quand ce token n'a pas encore de profil —
+      // l'ecran ne doit alors afficher aucun etat d'assignation plutot qu'un
+      // etat faux.
+      menages: menagesAssignes,
+      prenom: profilPresta ? profilPresta.first_name : null
     })
 
   } catch (err) {

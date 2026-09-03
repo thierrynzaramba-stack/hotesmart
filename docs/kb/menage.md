@@ -7,6 +7,63 @@
 > tâches, markDone, markUndone), `lib/cron-arrival-code.js` (conditionnement ménage → code),
 > `lib/cleaning/sync-menages.js` (notifications prestataire, cf. `booking-changes.md`)
 
+## Le ménage est une entité (lot 2.1, 3 septembre 2026)
+
+La table **`menages`** porte le ménage. Avant, il n'existait nulle part : la PWA
+le **dérivait** de `bookings_snapshot.departure`. Conception : `docs/specs/spec-prestataires-menage.md` §11.
+
+- **Identité** : `(user_id, property_id, booking_id, departure_date)` — la même que
+  `menage_done`, et celle que la file hors ligne de la PWA envoie déjà.
+  ⚠️ `property_id` est du **TEXT** (`provider_property_id`), comme les tables voisines.
+- **Writer unique** : `lib/cleaning/sync-menages-entite.js`, appelé à chaque cycle du cron.
+  Réconciliateur (il balaye la fenêtre) et **idempotent** — deux passages sans changement
+  n'écrivent rien.
+- ⚠️ **Ne pas confondre avec `menage_events`**, qui reste un **journal de notifications** :
+  une ligne par prestataire notifiée ET par type d'événement (168 lignes pour 151 couples
+  bien/réservation). C'est pour cela que le cycle de vie n'y a **pas** été greffé.
+- ⚠️ **`menages` ne dit pas si le ménage est FAIT.** `menage_done` reste la seule vérité
+  là-dessus — writer = la PWA, file hors ligne qui en dépend.
+- **Seul un séjour `confirmed` produit un ménage.** `blocked` (blocage propriétaire) et
+  `request` n'en produisent pas : c'est la source historique des ménages fantômes.
+- **Fenêtre** : départs de J−30 à J+180. Au-delà, l'historique ne change plus.
+- **Une réservation annulée ou déplacée** met le ménage en `cancelled` — elle ne le supprime
+  pas : une prestataire a pu s'organiser autour, et l'historique de qualité s'appuie dessus.
+
+### Qui fait le ménage
+
+`property_cleaning_providers (property_id, provider_id, rang, active)` dit qui intervient sur
+quel bien. **V1 = mode `priorite` seul** : le plus petit rang actif. Les modes `jour` et
+`quota` restent la cible et supposent les disponibilités RRULE.
+
+⚠️ **Règle d'engagement** (décision du 3 septembre 2026) :
+- **rang 1 = référent → assigné d'office**, le ménage naît `accepted`. C'est le
+  fonctionnement de Régina, rien ne change pour elle.
+- **rang 2+ = suppléant → doit confirmer**, le ménage naît `offered`.
+
+La **réassignation manuelle** (`POST /api/menages`) emprunte le même chemin : réassigner vers
+le référent l'engage, vers un suppléant lui laisse la confirmation. Elle pose
+`assigned_by='manual'`, ce qui **verrouille** le ménage — l'automate n'y touche plus jamais.
+Droit requis : **`prestataires: write`**, pas `menages` — consulter le planning et décider qui
+le fait ne sont pas le même droit.
+
+⚠️ **Aucun forçage** : sans liaison active, le ménage reste **non assigné**. Jamais de repli
+sur « le prestataire du bien d'à côté » — l'attribution des remarques de propreté suit cette
+assignation, et un reproche qui tombe sur la mauvaise personne coûte plus cher qu'une case vide.
+
+⚠️ **L'alerte « non assigné » ne se déclenche QUE si le bien a au moins une liaison active.**
+Un bien sans aucun prestataire lié n'est pas en panne, il n'est pas géré ; alerter à chaque
+départ noierait les vraies alertes sous du bruit permanent (décision du product owner).
+
+### Ce que chaque écran montre
+
+- **PWA** : chaque prestataire ne voit que **ses** ménages (`menages.provider_id` = le profil
+  derrière son token). ⚠️ **Pont assumé** : un token sans profil correspondant garde l'ancien
+  filtrage par bien — couper un lien legacy en le rendant vide serait une panne silencieuse
+  pour la personne qui l'utilise. C'est la dette `profiles` ↔ `public_tokens`.
+- **Écran hôte** : une pastille par ménage — le prénom, en pointillés quand c'est `offered`
+  (un suppléant qui n'a pas répondu n'est **pas** un ménage couvert), « personne » en clair
+  quand il n'y a pas d'assignation. Le sélecteur de la modale réassigne en deux clics.
+
 ## Où viennent les données
 L'app ménage lit les biens dans la table **properties** et les réservations dans
 **bookings_snapshot** (alimentés par la couche de synchronisation, tous providers). Elle

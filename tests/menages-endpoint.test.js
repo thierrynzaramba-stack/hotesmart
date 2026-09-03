@@ -6,22 +6,33 @@ const assert = require('node:assert')
 const path = require('node:path')
 const Module = require('node:module')
 
-function chargerEndpoint({ props = [], snaps = [], user = { id: 'u1' }, propErr = null, snapErr = null }) {
-  const etat = { requetes: [] }
+function chargerEndpoint({ props = [], snaps = [], user = { id: 'u1' }, propErr = null, snapErr = null,
+                          menages = [], prestataires = [] }) {
+  const etat = { requetes: [], parTable: {} }
+  const par = nom => (etat.parTable[nom] = etat.parTable[nom] || {})
   const client = {
     auth: { getUser: async () => (user ? { data: { user }, error: null } : { data: null, error: { message: 'invalide' } }) },
     from(nom) {
       const q = {
         _nom: nom,
         select() { return q }, eq(c, v) { etat.requetes.push({ table: nom, col: c, val: v }); return q },
-        not() { return q }, in() { return q }, order(c) { etat.order = c; return q },
+        not() { return q }, in() { return q },
+        order(c) { par(nom).order = c; etat.order = c; return q },
         // `or` : filtre de perimetre pose par la garde (etape 3). Le titulaire
         // n'en recoit pas ; le double l'accepte pour ne pas casser sur un membre.
         or(e) { etat.filtreOr = e; return q },
-        // Bornes portees cote SQL (cap PostgREST) : enregistrees pour verification.
-        gte(c, v) { etat.gte = { col: c, val: v }; return q },
-        lte(c, v) { etat.lte = { col: c, val: v }; return q },
-        limit(n) { etat.limit = n; return q },
+        // ⚠ ENREGISTRE PAR TABLE. Une variable unique gardait la DERNIERE requete
+        // du handler : des qu'il a interroge `menages` et `profiles` apres les
+        // snapshots, les assertions sur les bornes SQL du planning lisaient le
+        // tri de `profiles`. Les tests tombaient pour une raison fausse — et
+        // auraient pu passer pour une raison fausse aussi.
+        gte(c, v) { par(nom).gte = { col: c, val: v }; etat.gte = { col: c, val: v }; return q },
+        lte(c, v) { par(nom).lte = { col: c, val: v }; etat.lte = { col: c, val: v }; return q },
+        limit(n) { par(nom).limit = n; etat.limit = n; return q },
+        // ⚠ `neq` est HONORE comme le reste : sans lui, le double levait un
+        // TypeError que le catch de l'endpoint transformait en 500 — un test
+        // rouge pour une raison qui n'a rien a voir avec ce qu'il verifie.
+        neq(c, v) { etat.neq = { col: c, val: v }; return q },
         // La garde de droits lit profiles / profile_permissions : sans profil,
         // l'appelant est titulaire de son propre compte, ce que testent ces cas.
         maybeSingle: async () => ({ data: null, error: null }),
@@ -29,9 +40,17 @@ function chargerEndpoint({ props = [], snaps = [], user = { id: 'u1' }, propErr 
         then(res, rej) {
           const r = nom === 'properties'
             ? { data: props, error: propErr }
-            : nom === 'profiles' || nom === 'profile_permissions'
-              ? { data: null, error: null }
-              : { data: snaps, error: snapErr }
+            : nom === 'menages'
+              ? { data: menages, error: null }
+              // `profiles` sert DEUX usages ici : la garde de droits (qui attend
+              // null pour reconnaitre un titulaire) et la liste des prestataires
+              // du selecteur. Le second passe par `then`, le premier par
+              // `maybeSingle` — d'ou deux valeurs differentes, volontairement.
+              : nom === 'profiles'
+                ? { data: prestataires, error: null }
+                : nom === 'profile_permissions'
+                  ? { data: null, error: null }
+                  : { data: snaps, error: snapErr }
           return Promise.resolve(r).then(res, rej)
         }
       }
@@ -81,11 +100,22 @@ test('auth : session invalide -> 401', async () => {
   assert.strictEqual(res.code, 401)
 })
 
-test('methode non GET -> 405', async () => {
+test('methode ni GET ni POST -> 405', async () => {
+  // ⚠ POST n'est plus refuse : c'est la reassignation manuelle (spec §11.6).
+  // Elle a sa propre garde — `prestataires: write` — testee juste en dessous.
   const { handler } = chargerEndpoint({})
   const res = reponse()
-  await handler({ method: 'POST', headers: {}, query: {} }, res)
+  await handler({ method: 'DELETE', headers: {}, query: {} }, res)
   assert.strictEqual(res.code, 405)
+})
+
+test('reassignation : sans session -> 401, jamais 405', async () => {
+  // Un 405 laisserait croire que la reassignation n'existe pas ; le vrai motif
+  // du refus est l'absence de session.
+  const { handler } = chargerEndpoint({})
+  const res = reponse()
+  await handler({ method: 'POST', headers: {}, query: {}, body: {} }, res)
+  assert.strictEqual(res.code, 401)
 })
 
 test('E1 : un bien CHANNEX apparait au planning', async () => {
@@ -250,8 +280,10 @@ test('les bornes from/to sont portees cote SQL, pas seulement en JS', async () =
     snaps: [snap()]
   })
   await handler(req(undefined, { from: '2026-09-01', to: '2026-09-30' }), reponse())
-  assert.deepStrictEqual(etat.gte, { col: 'snapshot->>departure', val: '2026-09-01' })
-  assert.deepStrictEqual(etat.lte, { col: 'snapshot->>departure', val: '2026-09-30' })
+  // L'assertion vise la requete des SNAPSHOTS precisement : le handler en pose
+  // d'autres (menages, prestataires) qui ont leurs propres bornes.
+  assert.deepStrictEqual(etat.parTable['bookings_snapshot'].gte, { col: 'snapshot->>departure', val: '2026-09-01' })
+  assert.deepStrictEqual(etat.parTable['bookings_snapshot'].lte, { col: 'snapshot->>departure', val: '2026-09-30' })
 })
 
 test('la lecture est toujours triee et bornee (cap PostgREST)', async () => {
@@ -260,8 +292,9 @@ test('la lecture est toujours triee et bornee (cap PostgREST)', async () => {
     snaps: [snap()]
   })
   await handler(req(), reponse())
-  assert.strictEqual(etat.order, 'snapshot->>departure', 'ordre deterministe')
-  assert.ok(etat.limit > 0, 'limite explicite')
+  const q = etat.parTable['bookings_snapshot']
+  assert.strictEqual(q.order, 'snapshot->>departure', 'ordre deterministe')
+  assert.ok(q.limit > 0, 'limite explicite')
 })
 
 test('troncature signalee a l\'appelant plutot que subie', async () => {

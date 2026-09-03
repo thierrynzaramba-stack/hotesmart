@@ -35,6 +35,10 @@
 //   le travail, budget mur, lot borné — mais cadence HORAIRE et non quotidienne :
 //   le lot borne le coût par passage, la cadence fixe le débit, et 20 avis/jour
 //   pour toute la plateforme affamaient l'historique dès le deuxième client.
+// Session #33 : le ménage devient une entité (table `menages`, spec §11). Un
+//   writer unique réconcilie les ménages depuis bookings_snapshot et assigne le
+//   référent du bien d'office. Placé AVANT le dispatch : il coûte deux requêtes
+//   et ne doit pas être privé de budget par le poste le plus lourd du cycle.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -51,6 +55,7 @@ const { pollBeds24Reviews } = require('../lib/cron-beds24-reviews')
 const { classerAvis } = require('../lib/cron-reviews-classify')
 const { classerMessages } = require('../lib/cron-messages-classify')
 const { rattacherMenages } = require('../lib/cron-rattacher-menages')
+const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -110,6 +115,7 @@ module.exports = async function handler(req, res) {
     totalReviewsClassified: 0,
     totalMessagesClassified: 0,
     totalMenagesRattaches: 0,
+    totalMenagesCrees: 0,
     totalBeds24Materialized: 0,
     circuitBreakerTriggered: 0,
     errors: []
@@ -270,6 +276,25 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur rattachement ménages:', err.message)
       results.errors.push({ context: 'rattacher_menages', error: err.message })
+    }
+
+    // 4nonies. RÉCONCILIATION DES MÉNAGES (table `menages`, spec §11).
+    // Le ménage est une entité : cette tâche est son writer unique. Elle balaye
+    // les réservations de la fenêtre, crée les ménages manquants, assigne le
+    // référent du bien d'office (le suppléant, lui, reçoit une offre à
+    // confirmer) et annule ceux dont la réservation a disparu ou changé de date.
+    // ⚠ Placée APRÈS toutes les mises à jour de snapshots (Beds24, biens
+    // channel, feed Channex) — elle les lit — et AVANT le dispatch : elle ne
+    // coûte que deux requêtes, et le poste le plus lourd du cycle ne doit pas
+    // la priver de budget.
+    // ⚠ Idempotente : deux passages sans changement n'écrivent rien.
+    try {
+      const bilanMenages = await chrono.mesure('sync_menages', () => synchroniserMenages(results))
+      results.totalMenagesCrees = bilanMenages?.crees || 0
+    }
+    catch (err) {
+      console.error('[Cron] Erreur synchronisation ménages:', err.message)
+      results.errors.push({ context: 'sync_menages_entite', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

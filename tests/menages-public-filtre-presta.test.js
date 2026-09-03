@@ -1,0 +1,204 @@
+// tests/menages-public-filtre-presta.test.js
+// api/menages-public.js — le planning PWA filtre par PRESTATAIRE (spec §11.5).
+//
+// ⚠ CE QUE CE FILTRE FERME. Tant que la PWA filtrait par
+// `public_tokens.property_ids`, deux prestataires sur un même bien voyaient
+// chacune TOUS les ménages de l'autre — les noms des voyageurs, les dates, les
+// occupants. C'est le cas qui motive tout ce chantier : une seconde femme de
+// ménage arrive en renfort sur les mêmes biens.
+
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
+
+const test = require('node:test')
+const assert = require('node:assert')
+const path = require('node:path')
+const Module = require('node:module')
+
+const U = 'compte-1', TOKEN = 'regina-x', REGINA = 'p-regina', NOUVELLE = 'p-nouvelle'
+
+const BIENS = [{ provider_property_id: '209413', name: 'La bulle', provider: 'beds24' }]
+
+// Deux séjours sur le MÊME bien, l'un à Régina, l'autre à la nouvelle.
+const SNAPS = [
+  { booking_id: 'b1', property_id: '209413',
+    snapshot: { status: 'confirmed', arrival: '2026-09-01', departure: '2026-09-05',
+                firstName: 'Alice', lastName: 'Martin', provider: 'beds24' } },
+  { booking_id: 'b2', property_id: '209413',
+    snapshot: { status: 'confirmed', arrival: '2026-09-06', departure: '2026-09-09',
+                firstName: 'Bruno', lastName: 'Durand', provider: 'beds24' } }
+]
+
+function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true },
+                     menages = null, erreurProfil = null, erreurMenages = null,
+                     tokenPropIds = ['209413'] } = {}) {
+  const journal = []
+  const client = {
+    from (table) {
+      const a = { table, f: {}, journal }
+      journal.push(a)
+      const chain = {
+        select (c) { a.colonnes = c; return chain },
+        eq (c, v) { a.f[c] = v; return chain },
+        neq (c, v) { a.neq = { c, v }; return chain },
+        in (c, v) { a.ins = { c, v }; return chain },
+        gte (c, v) { a.gte = { c, v }; return chain },
+        lte (c, v) { a.lte = { c, v }; return chain },
+        not () { return chain }, order () { return chain },
+        limit () { return Promise.resolve(rep()) },
+        maybeSingle () {
+          if (table === 'public_tokens') {
+            return Promise.resolve({ data: a.f.token === TOKEN
+              ? { user_id: U, label: 'Régina', property_ids: tokenPropIds, visibility_days: 30, ratio_periode: 'toujours' }
+              : null, error: null })
+          }
+          if (table === 'profiles') return Promise.resolve({ data: profil, error: erreurProfil })
+          const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error })
+        },
+        then (ok, ko) { return Promise.resolve(rep()).then(ok, ko) }
+      }
+      function rep () {
+        if (table === 'properties') return { data: BIENS, error: null }
+        if (table === 'bookings_snapshot') return { data: SNAPS, error: null }
+        if (table === 'menages') return { data: menages, error: erreurMenages }
+        return { data: [], error: null }
+      }
+      return chain
+    }
+  }
+  const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
+  const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
+  require.cache[abs] = m
+  for (const mod of ['../api/menages-public', '../lib/cron-property-status',
+                     '../lib/bookings-snapshot', '../lib/stats-avis',
+                     '../lib/attribution-prestataire']) {
+    try { delete require.cache[require.resolve(mod)] } catch {}
+  }
+  return journal
+}
+
+function reponse () {
+  const r = { code: null, body: null }
+  r.status = c => { r.code = c; return r }
+  r.json = b => { r.body = b; return r }
+  r.setHeader = () => {}
+  r.end = () => r
+  return r
+}
+const req = () => ({ method: 'GET', query: { token: TOKEN }, headers: {} })
+
+const MENAGE = (booking, provider, depart) => ({
+  booking_id: booking, property_id: '209413', departure_date: depart,
+  provider_id: provider, status: 'accepted'
+})
+
+// ─── Le filtre par personne ────────────────────────────────────────────────
+
+test('la prestataire ne voit QUE les ménages qui lui sont assignés', async () => {
+  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, null)
+  assert.deepStrictEqual(res.body.bookings.map(b => b.id), ['b1'])
+})
+
+test('le séjour de l\'AUTRE prestataire ne sort pas — ni le nom du voyageur', async () => {
+  // Le filtre porte sur la réponse entière : un champ imprévu qui laisserait
+  // fuiter « Bruno Durand » serait attrapé ici.
+  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  const brut = JSON.stringify(res.body)
+  assert.ok(!brut.includes('Bruno'), 'le voyageur de l\'autre prestataire ne doit pas sortir')
+  assert.ok(!brut.includes('Durand'))
+  assert.ok(brut.includes('Alice'), 'le sien, si')
+})
+
+test('aucun ménage assigné : planning VIDE, pas le planning du bien', async () => {
+  // Sans le filtre, elle verrait les deux séjours d'un bien où elle n'intervient
+  // plus.
+  preparer({ menages: [] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.bookings, [])
+})
+
+test('un ménage ANNULÉ ne revient pas au planning', async () => {
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  await handler(req(), reponse())
+  const q = journal.find(a => a.table === 'menages')
+  assert.ok(q, 'les ménages doivent être lus')
+  assert.deepStrictEqual(q.neq, { c: 'status', v: 'cancelled' })
+})
+
+test('la lecture des ménages est filtrée par COMPTE et par PRESTATAIRE', async () => {
+  // ⚠ Sans `user_id`, la service key contourne la RLS et rien ne cloisonne.
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  await handler(req(), reponse())
+  const q = journal.find(a => a.table === 'menages')
+  assert.strictEqual(q.f.user_id, U)
+  assert.strictEqual(q.f.provider_id, REGINA)
+})
+
+// ─── Le pont de convergence, assumé ────────────────────────────────────────
+
+test('un token SANS profil garde l\'ancien comportement (filtrage par bien)', async () => {
+  // ⚠ Dette `profiles` <-> `public_tokens` du §6. Couper l'accès d'un lien
+  // legacy en le rendant vide serait une panne silencieuse pour la personne qui
+  // l'utilise tous les jours.
+  preparer({ profil: null, menages: null })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.body.bookings.length, 2, 'les deux séjours du bien restent visibles')
+  assert.strictEqual(res.body.menages, null, 'et aucun état d\'assignation n\'est affiché')
+})
+
+test('un profil DÉSACTIVÉ ne bascule pas non plus sur le filtre', async () => {
+  // Son token vaut ce qu'il valait ; c'est la désactivation du profil, pas le
+  // filtre, qui doit lui retirer l'accès — et ce n'est pas l'objet de ce lot.
+  preparer({ profil: { id: REGINA, first_name: 'Régina', active: false }, menages: [] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.body.bookings.length, 2)
+})
+
+// ─── Les pannes coupent, elles n'élargissent pas ───────────────────────────
+
+test('PANNE de lecture du profil : 503, jamais le planning de tout le monde', async () => {
+  // Sans cette garde, un timeout PostgREST rendrait `profil` null et la
+  // prestataire verrait de nouveau les ménages des autres sur ses biens.
+  preparer({ erreurProfil: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 503)
+})
+
+test('PANNE de lecture des ménages : 503, jamais « rien à faire »', async () => {
+  // Une liste vide par panne serait indiscernable d'« aucun ménage », et elle en
+  // conclurait qu'elle n'a rien à faire aujourd'hui.
+  preparer({ erreurMenages: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 503)
+})
+
+// ─── Ce que la réponse porte en plus ───────────────────────────────────────
+
+test('le statut d\'assignation est renvoyé, pour distinguer proposé et engagé', async () => {
+  preparer({ menages: [{ ...MENAGE('b1', REGINA, '2026-09-05'), status: 'offered' }] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.body.menages.length, 1)
+  assert.strictEqual(res.body.menages[0].status, 'offered')
+  assert.strictEqual(res.body.prenom, 'Régina')
+})
