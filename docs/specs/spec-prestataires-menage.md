@@ -92,7 +92,15 @@ create table provider_availability_exceptions (
   unique (provider_id, date)
 );
 
--- Assignation, cycle de vie et qualité sur les ménages
+-- ⚠️ RÉVISÉ LE 3 SEPTEMBRE 2026 — VOIR §11. Ce bloc `alter table menage_events`
+-- N'EST PLUS LA CONCEPTION RETENUE et ne doit pas être exécuté tel quel.
+-- `menage_events` est un journal de NOTIFICATIONS (une ligne par prestataire
+-- notifiée ET par type d'événement : 168 lignes pour 151 couples bien/résa en
+-- production). Y greffer un cycle de vie d'assignation donnerait, dès la
+-- seconde prestataire, plusieurs lignes concurrentes pour le même ménage,
+-- chacune avec son `status` et son `provider_id`.
+-- Ces colonnes vont sur la table `menages` (§11), qui fait du ménage une entité.
+-- Le bloc est conservé ici comme référence des champs à porter, pas comme SQL.
 alter table menage_events
   add column type text not null default 'turnover'
     check (type in ('turnover','ponctuel','fond')),   -- turnover auto ; ponctuel/fond créés par l'hôte
@@ -185,6 +193,12 @@ résultat : une LISTE ORDONNÉE de candidates (pas une seule) → transmise à l
 
 ## 3 bis. Boucle d'offre, acquittement et escalade — `lib/cleaning/offer.js`
 
+> ⚠️ **PRÉCISÉ PAR LE §11.3 (3 septembre 2026)** : le référent (rang 1) est
+> assigné d'office, sans confirmation ; seul le suppléant (rang 2+) reçoit une
+> offre à accepter. L'escalade en cascade et les délais d'expiration ci-dessous
+> sont reportés — les statuts, eux, sont posés dès le premier lot.
+
+
 Principe (Turno/Breezeway/PagerDuty) : **assigné ≠ accepté**. Un ménage n'est réputé pris en charge que lorsque la prestataire l'a accepté dans sa PWA. V1 = dispatch **séquentiel** (offre à la 1re candidate, puis à la suivante si refus ou délai dépassé).
 
 ```
@@ -222,6 +236,10 @@ job cron escaladeOffres (à chaque exécution du cron) :
 
 ## 4. PWA prestataire — `api/menages-public.js` et front PWA
 
+> ⚠️ **PRÉCISÉ PAR LE §11.5** : le filtre passe du bien à la personne
+> (`menages.provider_id`), et non plus `public_tokens.property_ids`.
+
+
 - Le token identifie désormais un `profiles.pwa_token` (et non plus un token global). Un prestataire ne voit **que** ses ménages (`provider_id = lui`). Un token inconnu ou inactif → 401.
 - Écran principal : les **offres en attente** en tête (badge « À confirmer », délai restant, badge « URGENT » si `priority='urgent'`), avec boutons « J'accepte » / « Je refuse » ; puis les ménages acceptés du jour et à venir.
 - Sur un ménage accepté : boutons « Je commence » (`started_at`) et « Terminé » (`completed_at`) — deux clics, aucune saisie. C'est ce qui donnera la durée réelle par bien et par prestataire.
@@ -232,6 +250,10 @@ job cron escaladeOffres (à chaque exécution du cron) :
 - Endpoints correspondants scoped par token, jamais par user_id côté PWA.
 
 ## 5. Dashboard hôte
+
+> ⚠️ **COMPLÉTÉ PAR LE §11.6** : le « marquer fait » de l'écran hôte n'écrit
+> pas `menage_done` aujourd'hui — dette à régler dans le lot 2.3.
+
 
 ### Onglet « Prestataires » (nouveau, dans les réglages ou l'app ménage)
 - CRUD prestataires : **c'est la page « Équipe et droits »** de
@@ -402,3 +424,145 @@ Mettre à jour `docs/kb/` (app ménage) : nouvelles tables, moteur d'assignation
 5. Dashboard : prestataires, modes par bien, réassignation, notation.
 6. Rattachement avis + vue qualité par prestataire.
 7. KB + commit.
+
+## 11. Lot 2 — gestion et assignation (conception gravée le 3 septembre 2026)
+
+Déclencheur : une seconde femme de ménage arrive à Bagnères-de-Bigorre, **en
+renfort de Régina** sur La bulle et Cœur de vie 23. Colomiers reste hors de son
+périmètre.
+
+### 11.1 Le ménage devient une entité — `menages`
+
+**Décision révisée** : le §1 posait `provider_id`, `status`, `offered_at`… sur
+`menage_events`. Cette table est un **journal de notifications**, écrit par
+`lib/cleaning/sync-menages.js` **une fois par prestataire notifiée et par type
+d'événement** — mesuré en production : 168 lignes pour 151 couples (bien,
+réservation), dont 156 `new`, 7 `modified`, 5 `note`. Greffer un cycle de vie
+dessus donnerait plusieurs lignes concurrentes pour le même ménage, chacune avec
+son statut : le statut du ménage serait indéterminé. C'est la faute du double
+writer de `public_tokens.property_ids` (CLAUDE.md), et `lib/cron-rattacher-menages.js`
+la constate déjà : *« DEUX TOKENS = deux prestataires notifiées : on ne devine
+pas laquelle a préparé le séjour. »*
+
+Le ménage n'existait nulle part : la PWA le **dérivait** de
+`bookings_snapshot.departure`. Il devient une ligne, avec l'identité déjà
+utilisée partout — celle de `menage_done` :
+
+```
+menages (user_id, property_id, booking_id, departure_date)  -- unique
+```
+
+⚠️ `property_id` est du **TEXT** (`provider_property_id`), comme
+`menage_events`, `menage_done` et `bookings_snapshot` — REVIEW.md règle 10. Pas
+d'UUID ici, sans quoi les biens Beds24 et Channex ne joignent plus.
+
+**Writer unique** : la couche sync, à partir de `bookings_snapshot`. Aucune app
+n'écrit un ménage. C'est la règle du cœur de données appliquée telle quelle.
+
+**Ce qui NE va PAS dans `menages`** : le fait que le ménage soit *fait*.
+`menage_done` reste la seule vérité sur ce point — writer existant (la PWA), file
+hors ligne qui en dépend, 118 lignes en production. Deux vérités sur « c'est
+fait » seraient pires que la duplication qu'on vient de supprimer. Les
+`started_at` / `completed_at` du §1 viendront avec les boutons « je commence » /
+« terminé », et **le writer sera à trancher à ce moment-là**, pas avant.
+
+### 11.2 Assignation — rang, puis les trois modes
+
+Liaison `property_cleaning_providers (property_id, provider_id, rang, active)`.
+
+**Cible inchangée** : les trois modes du §3 (`priorite`, `jour`, `quota`) et les
+disponibilités RRULE du §2 restent l'objectif. La colonne
+`properties.cleaning_assignment_mode` est posée **dès le premier lot** pour ne
+pas migrer deux fois, mais seul `priorite` est implémenté en V1.
+
+**Règle de départ** : Régina **rang 1 (référente)** sur les deux biens de
+Bagnères ; la nouvelle **rang 2 (suppléante)**. Le rythme « week-ends, une
+semaine sur deux » attend le mode `jour` ; d'ici là, **réassignation manuelle**.
+
+### 11.3 Règle d'engagement — décision du 3 septembre 2026
+
+**Elle précise le §3 bis, qui traitait toutes les candidates de la même façon.**
+
+- **Le référent (rang 1) est assigné d'office.** L'assignation vaut engagement,
+  aucune confirmation — c'est le fonctionnement actuel de Régina, et rien ne
+  change pour elle. Le ménage naît `accepted`.
+- **Le suppléant (rang 2+) doit confirmer.** Une assignation vers lui naît
+  `offered` ; il l'accepte depuis sa PWA. C'est la boucle offre/acquittement du
+  §3 bis, **déclenchée uniquement pour les non-référents**.
+
+Ce qui reste reporté du §3 bis : l'escalade automatique en cascade, les délais
+d'expiration et la ré-alerte périodique. Les statuts `offered` / `accepted` sont
+posés dès le premier lot pour que cette suite s'ajoute sans migration.
+
+**Acceptation atomique**, conservée du §3 bis — c'est la garde anti double
+affectation, elle ne se reporte pas :
+```sql
+update menages set status='accepted', accepted_at=now()
+ where id=? and status='offered' and provider_id=?
+```
+0 ligne modifiée = l'offre n'est plus valide.
+
+### 11.4 Aucun forçage
+
+Chaque bien a toujours un référent (le rang 1 actif). Si « personne
+d'assignable » survient malgré tout, le ménage reste **non assigné** — jamais de
+repli sur quelqu'un — et l'hôte est alerté par le canal d'alerte existant.
+C'est le pendant, côté assignation, de la règle de souplesse du §6 : *un avis non
+attribuable reste non attribué*.
+
+### 11.5 PWA — chacune ne voit que ses ménages
+
+Le filtre passe **du bien à la personne** : `menages.provider_id` = le profil
+derrière le token, et non plus `public_tokens.property_ids`. Sans ce changement,
+deux prestataires sur un même bien verraient chacune tous les ménages de l'autre.
+
+La file hors ligne n'a pas à changer : elle envoie déjà
+`(booking_id, property_id, departure_date)`, qui est l'identité du ménage.
+
+### 11.6 Écran hôte
+
+⚠️ **Dette à régler dans ce lot** : le « marquer fait » de `apps/menages/index.html`
+ne vit que dans le `localStorage` du navigateur et n'écrit jamais `menage_done`,
+que la PWA alimente pourtant (défaut écrit en clair dans son code). L'hôte ne
+voit donc pas ce que la prestataire a fait — « qui fait quoi » serait faux dès le
+premier écran.
+
+Vue cible : le planning existant, la prestataire assignée sur chaque ménage, et
+un sélecteur de réassignation (deux clics) qui écrit `assigned_by='manual'` et
+une ligne de `menage_assignment_log`. Un ménage `manual` n'est jamais réassigné
+par l'automate — verrou du §3, conservé.
+
+### 11.7 Attribution des avis
+
+`lib/attribution-prestataire.js` voie 1 passe du `pwa_token` au
+`menages.provider_id`. `lib/cron-rattacher-menages.js` cesse de renoncer sur deux
+tokens : l'avis pointe le ménage, le ménage porte la prestataire.
+`prestataire_periodes` reste l'exception rétroactive bornée du §6.
+
+### 11.8 Reprise de l'existant
+
+Les 118 `menage_done` et les 168 `menage_events` portent **tous** le token de
+Régina. Les 118 ménages faits lui sont rattachés rétroactivement — fait établi
+par le product owner, confirmé le 3 septembre 2026. **La reprise s'arrête à
+l'arrivée de la seconde prestataire** : après, seul le lien au ménage dit qui a
+préparé quel séjour (§6).
+
+⚠️ **À vérifier avant de s'y appuyer** : la chaîne de notification n'a jamais
+rien produit pour Tiphaine — 168 `menage_events` sur 168 sont à Régina, alors que
+le token de Tiphaine existe.
+
+**Tiphaine** reste une identité d'attribution historique : profil inactif, sans
+`pwa_token`, sans accès. Rien ne change pour elle.
+
+### 11.9 Découpage en lots
+
+| Lot | Contenu | Écrans touchés |
+|---|---|---|
+| **2.1** | Table `menages` + `property_cleaning_providers` + RLS + writer sync + reprise des 118 + assignation par rang | aucun |
+| **2.2** | PWA filtrée par prestataire + acceptation du suppléant | PWA |
+| **2.3** | Écran hôte : qui fait quoi, réassignation 2 clics, « fait » branché sur `menage_done` | app ménage |
+| **2.4** | Attribution des avis par `provider_id` | — |
+| **2.5** | Profil et lien PWA de la nouvelle prestataire, rang 2 | équipe et droits |
+
+⚠️ **2.5 vient après 2.2, et pas avant** : lui ouvrir un accès pendant que la PWA
+filtre encore par bien lui montrerait tous les ménages de Régina.
