@@ -25,6 +25,14 @@
     .form-row .form-input { flex: 1; }
     .prop-checkboxes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
     .prop-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .prop-ligne { justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 6px 0; }
+    .prop-ligne-nom { display: flex; align-items: center; gap: 8px; }
+    .rang-select { width: auto; min-width: 210px; font-size: 12px; padding: 5px 8px; }
+    .avert-rang { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E;
+                  border-radius: var(--radius); padding: 8px 10px; font-size: 12px;
+                  line-height: 1.45; margin: 8px 0 4px; }
+    .presta-rang { font-size: 11px; color: var(--text2); }
+    .presta-rang strong { color: var(--text); }
     .prop-checkbox input { cursor: pointer; accent-color: var(--primary); }
     .prop-checkbox label { font-size: 13px; cursor: pointer; }
 
@@ -73,19 +81,6 @@
 
       <div class="section-card" id="form-section" style="display:none">
         <div class="section-title" id="form-title">Nouveau prestataire</div>
-        <!-- ⚠ Cet ecran cree un lien PWA, PAS une personne : il insere dans
-             `public_tokens` sans creer de profil. Depuis le lot 2.1, l'app
-             menage assigne les menages a des PROFILS — un lien cree ici ne peut
-             donc recevoir aucune assignation, et son porteur ne voit que les
-             menages qui ne sont a personne. Le dire plutot que de laisser
-             quelqu'un decouvrir une PWA a moitie vide. La convergence est le
-             lot 2.5. -->
-        <div class="empty-state" style="text-align:left;font-size:12px;line-height:1.5;margin-bottom:12px">
-          Pour une <strong>nouvelle personne</strong> qui va faire des ménages,
-          passez par <a href="/settings">Réglages → Équipe et droits</a> : c'est là
-          qu'un profil est créé, et c'est le profil qui reçoit les ménages.
-          Ce formulaire crée un lien de consultation, sans personne derrière.
-        </div>
         <div class="form-section">
           <div class="form-row">
             <input class="form-input" id="presta-name" placeholder="Nom (ex: Marie, Société Propre+)">
@@ -95,6 +90,7 @@
           <div class="prop-checkboxes" id="prop-checkboxes">
             <div style="font-size:12px;color:var(--text2)">Chargement...</div>
           </div>
+          <div id="avert-rang" class="avert-rang" style="display:none"></div>
 
           <!-- Visibilité calendrier -->
           <div class="visibility-row">
@@ -206,12 +202,26 @@
         : 'Impossible de charger vos biens. Réessayez dans un instant.')
     }
     const data = await res.json()
-    properties = (data.properties || []).map(p => ({ id: String(p.id), name: p.name }))
+    // `id` = provider_property_id (TEXT), `uuid` = properties.id — les deux sont
+    // necessaires : le domaine menage raisonne en ref, `/api/membres` en UUID.
+    properties = (data.properties || []).map(p => ({ id: String(p.id), uuid: p.uuid, name: p.name }))
+    liaisons = data.liaisons || []
+    prestatairesProfils = data.prestataires || []
   }
 
   function biensEnErreur(message) {
     const liste = document.getElementById('presta-list')
     if (liste) liste.innerHTML = `<div class="empty-state" style="color:var(--danger,#c0392b)">⚠️ ${message}</div>`
+  }
+
+  let liaisons = []          // property_cleaning_providers actives du compte
+  let prestatairesProfils = []  // profils `lien` du compte (id, prenom, actif, a_lien)
+  let editionEnCours = null  // profil_id en cours de modification, ou null
+
+  function echapper(t) {
+    return String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
   async function loadPrestataires() {
@@ -259,6 +269,7 @@
           <div class="presta-meta">
             <span class="presta-meta-item highlight">📅 ${visibilityDays} jours visibles</span>
             <span class="presta-meta-item">⭐ Ratio ${LIB_PERIODE_RATIO[p.ratio_periode] || 'non réglé (depuis le début)'}</span>
+            ${resumeRang(p)}
           </div>
           <div class="presta-link">
             <span>${url}</span>
@@ -281,42 +292,187 @@
     })
   }
 
+  // ⚠ UN LIEN SANS PERSONNE NE RECOIT AUCUN MENAGE, et rien a l'ecran ne le
+  // laissait deviner : c'est ce qui rendait la creation d'une seconde femme de
+  // menage inutilisable en silence. On le dit sur sa carte.
+  function resumeRang(p) {
+    const profilId = profilDuToken(p)
+    if (!profilId) {
+      return '<span class="presta-meta-item" style="background:#FEE2E2;color:#991B1B">⚠ lien seul — aucun ménage assignable</span>'
+    }
+    const miennes = liaisons.filter(l => l.provider_id === profilId && l.active !== false)
+    if (!miennes.length) return '<span class="presta-meta-item">Aucun bien attribué</span>'
+    const ref = miennes.filter(l => l.rang === 1).length
+    const sup = miennes.length - ref
+    const bouts = []
+    if (ref) bouts.push(`référente sur ${ref} bien${ref > 1 ? 's' : ''}`)
+    if (sup) bouts.push(`suppléante sur ${sup}`)
+    return `<span class="presta-meta-item">👤 ${bouts.join(', ')}</span>`
+  }
+
   function renderPropCheckboxes() {
     const container = document.getElementById('prop-checkboxes')
     if (properties.length === 0) {
       container.innerHTML = '<div style="font-size:12px;color:var(--text2)">Aucun bien trouvé</div>'
       return
     }
+    // ⚠ LE RANG EST PAR BIEN, et il vaut « suppléante » par défaut.
+    // Le cas réel est mixte : suppléante ici, référente ailleurs. Et on ne
+    // devient pas référente par accident — le référent est assigné D'OFFICE,
+    // sans confirmation : c'est le rôle le plus engageant, il se choisit.
     container.innerHTML = properties.map(p => `
-      <div class="prop-checkbox">
-        <input type="checkbox" id="prop-${p.id}" value="${p.id}" checked>
-        <label for="prop-${p.id}">${p.name}</label>
+      <div class="prop-checkbox prop-ligne">
+        <div class="prop-ligne-nom">
+          <input type="checkbox" id="prop-${p.id}" value="${p.id}" checked>
+          <label for="prop-${p.id}">${echapper(p.name)}</label>
+        </div>
+        <select class="form-input rang-select" id="rang-${p.id}" data-bien="${p.id}">
+          <option value="2" selected>Suppléante — doit confirmer</option>
+          <option value="1">Référente — reçoit d'office</option>
+        </select>
       </div>
     `).join('')
+    majEtatDesRangs()
+    container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', majEtatDesRangs)
+    })
+    container.querySelectorAll('.rang-select').forEach(sel => {
+      sel.addEventListener('change', () => avertirSiPlusDeReferent(sel.dataset.bien))
+    })
   }
 
+  // Un bien décoché n'a pas de rang à régler : laisser le sélecteur actif
+  // laisserait croire qu'on peut poser un rôle sur un bien qu'on retire.
+  function majEtatDesRangs() {
+    properties.forEach(p => {
+      const cb = document.getElementById(`prop-${p.id}`)
+      const sel = document.getElementById(`rang-${p.id}`)
+      if (!cb || !sel) return
+      sel.disabled = !cb.checked
+      sel.style.opacity = cb.checked ? '' : '0.45'
+    })
+    properties.forEach(p => avertirSiPlusDeReferent(p.id))
+  }
+
+  // ⚠ AVERTIR, PAS BLOQUER. Un bien qui perd sa dernière référente verra ses
+  // prochains ménages naître NON ASSIGNÉS. L'hôte doit le savoir — mais le lui
+  // refuser le laisserait sans issue le jour où une prestataire s'en va.
+  function avertirSiPlusDeReferent(bienRef) {
+    const zone = document.getElementById('avert-rang')
+    if (!zone) return
+    const manquants = properties.filter(p => {
+      const cb = document.getElementById(`prop-${p.id}`)
+      const sel = document.getElementById(`rang-${p.id}`)
+      if (!cb || !sel) return false
+      // Une autre personne est-elle référente sur ce bien ?
+      const autreReferent = liaisons.some(l =>
+        String(l.property_id) === String(p.id) && l.rang === 1 && l.active !== false &&
+        l.provider_id !== editionEnCours)
+      if (autreReferent) return false
+      // Sinon, c'est cette fiche qui doit en fournir un.
+      return !(cb.checked && sel.value === '1')
+    })
+    zone.innerHTML = manquants.length
+      ? `⚠️ ${manquants.map(p => echapper(p.name)).join(', ')} n'aura${manquants.length > 1 ? 'ont' : ''} plus de référente : les prochains ménages y naîtront non assignés.`
+      : ''
+    zone.style.display = manquants.length ? '' : 'none'
+  }
+
+  // Ce que le formulaire décrit : les biens cochés, et le rang sur chacun.
+  function saisieDesBiens() {
+    return properties
+      .filter(p => document.getElementById(`prop-${p.id}`)?.checked)
+      .map(p => ({
+        ref: p.id, uuid: p.uuid,
+        rang: document.getElementById(`rang-${p.id}`)?.value === '1' ? 1 : 2
+      }))
+  }
+
+  // ⚠ CRÉER UN PRESTATAIRE, C'EST CRÉER UNE PERSONNE — pas un lien.
+  // Cet écran insérait directement dans `public_tokens`, sans profil. Or les
+  // ménages sont assignés à des PROFILS (`menages.provider_id` → `profiles.id`) :
+  // un prestataire créé ainsi ne pouvait recevoir aucune assignation, et sa PWA
+  // ne lui montrait que les ménages qui n'étaient à personne. La création passe
+  // donc par `/api/membres` (mode `lien`), le writer qui pose le profil, ses
+  // droits ET la ligne `public_tokens` avec le même jeton et le même périmètre.
+  //
+  // ⚠ FRONTIÈRE DES WRITERS, à tenir : `/api/membres` possède `token` et
+  // `property_ids` ; cet écran garde `label`, `visibility_days` et
+  // `ratio_periode`, qui sont des réglages d'affichage de l'app ménage et n'ont
+  // rien à faire dans la gestion des personnes.
   async function createPrestataire() {
     const name = document.getElementById('presta-name').value.trim()
     if (!name) return alert('Entrez un nom pour le prestataire')
 
-    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')].map(cb => cb.value)
-    const visibilityDays = parseInt(document.getElementById('visibility-days').value)
-    const token = generateToken(name)
+    const biens = saisieDesBiens()
+    if (!biens.length) return alert('Cochez au moins un bien : un prestataire sans bien ne verrait aucun ménage.')
 
-    const { error } = await supabase.from('public_tokens').insert({
-      user_id: currentSession.user.id,
-      token,
-      label: name,
-      property_ids: selectedProps,
-      visibility_days: visibilityDays,
-      ratio_periode: periodeChoisie()
+    const btn = document.getElementById('btn-create')
+    btn.disabled = true
+    try {
+      const res = await fetch('/api/membres', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+                   'Authorization': `Bearer ${currentSession.access_token}` },
+        body: JSON.stringify({
+          first_name: name,
+          access_mode: 'lien',
+          permissions: {
+            property_scope: 'selected',
+            property_ids: biens.map(b => b.uuid).filter(Boolean)
+          }
+        })
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) { alert('Création impossible : ' + ((data && data.error) || res.status)); return }
+
+      const profilId = data.profil && data.profil.id
+      if (profilId) {
+        await enregistrerLiaisons(profilId, biens)
+        // Les réglages d'affichage de l'app ménage, sur la ligne que
+        // `/api/membres` vient de créer.
+        await supabase.from('public_tokens')
+          .update({ label: name,
+                    visibility_days: parseInt(document.getElementById('visibility-days').value),
+                    ratio_periode: periodeChoisie() })
+          .eq('user_id', currentSession.user.id).eq('token', data.profil.pwa_token || '')
+      }
+
+      resetForm()
+      await loadPrestataires()
+      showToast('✓ Prestataire créé !')
+    } catch (e) {
+      alert('Connexion impossible. Réessayez.')
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  // Écrit qui intervient sur quel bien, et à quel rang.
+  async function enregistrerLiaisons(profilId, biens) {
+    const res = await fetch('/api/menages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+                 'Authorization': `Bearer ${currentSession.access_token}` },
+      body: JSON.stringify({
+        action: 'liaisons', provider_id: profilId,
+        liaisons: biens.map(b => ({ property_id: b.ref, rang: b.rang }))
+      })
     })
-
-    if (error) { alert('Erreur création : ' + error.message); return }
-
-    resetForm()
-    await loadPrestataires()
-    showToast('✓ Prestataire créé !')
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      // ⚠ On le DIT. Un prestataire créé sans liaison ne recevra aucun ménage,
+      // et rien à l'écran ne le laisserait deviner.
+      alert('Le prestataire est créé, mais ses biens n\'ont pas pu être enregistrés : '
+            + ((data && data.error) || res.status) + '. Modifiez sa fiche pour réessayer.')
+      return
+    }
+    if (data && data.sans_referent && data.sans_referent.length) {
+      const noms = data.sans_referent
+        .map(ref => (properties.find(p => p.id === ref) || {}).name || ref)
+        .join(', ')
+      showToast(`⚠️ Sans référente : ${noms}`)
+    }
   }
 
   async function deletePrestataire(id) {
@@ -341,14 +497,35 @@
     document.getElementById('btn-show-form').style.display = 'none'
     document.getElementById('form-title').textContent = 'Modifier le prestataire'
 
+    // Le profil derriere ce lien, s'il en a un. Les liens crees avant le lot 2.5
+    // n'en ont pas : on le DIT plutot que d'afficher un rang qui n'existe pas.
+    editionEnCours = profilDuToken(p)
+
     properties.forEach(prop => {
       const cb = document.getElementById(`prop-${prop.id}`)
       if (cb) cb.checked = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
+      const sel = document.getElementById(`rang-${prop.id}`)
+      if (sel) {
+        const l = liaisons.find(x => String(x.property_id) === String(prop.id) &&
+                                     x.provider_id === editionEnCours)
+        sel.value = l && l.rang === 1 ? '1' : '2'
+      }
     })
+    majEtatDesRangs()
 
     const btn = document.getElementById('btn-create')
     btn.textContent = 'Sauvegarder les modifications'
     btn.onclick = () => saveEdit(id)
+  }
+
+  // Le lien et le profil portent le MEME jeton (`synchroniserTokenPwa`) : c'est
+  // par lui qu'on les rapproche. Aucun jeton ne sort du serveur cote profils —
+  // on compare donc sur le prenom en dernier recours, faute de mieux, et on
+  // s'abstient si l'on n'est pas sur.
+  function profilDuToken(ligneToken) {
+    const parNom = prestatairesProfils.filter(x =>
+      (x.prenom || '').trim().toLowerCase() === String(ligneToken.label || '').trim().toLowerCase())
+    return parNom.length === 1 ? parNom[0].id : null
   }
 
   async function saveEdit(id) {
@@ -365,6 +542,12 @@
       .eq('user_id', currentSession.user.id)
 
     if (error) { alert('Erreur modification : ' + error.message); return }
+
+    // ⚠ Les rangs suivent les biens. Sans profil derriere ce lien (creation
+    // anterieure au lot 2.5), il n'y a rien a lier : on le dit une fois, sans
+    // bloquer l'enregistrement du reste.
+    if (editionEnCours) await enregistrerLiaisons(editionEnCours, saisieDesBiens())
+    else showToast('⚠️ Lien sans personne : aucun ménage ne peut lui être assigné')
 
     resetForm()
     await loadPrestataires()
@@ -385,6 +568,7 @@
   }
 
   function resetForm() {
+    editionEnCours = null
     document.getElementById('presta-name').value = ''
     document.getElementById('visibility-days').value = '30'
     document.getElementById('ratio-periode').value = 'toujours'

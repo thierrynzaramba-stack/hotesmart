@@ -51,7 +51,11 @@ module.exports = async function handler(req, res) {
   // `menages`. Consulter le planning et decider QUI le fait ne sont pas le meme
   // droit : un membre `menages: read` voit les menages sans pouvoir toucher aux
   // affectations. Meme separation que celle deja posee sur `public_tokens`.
-  if (req.method === 'POST') return await reassigner(req, res)
+  if (req.method === 'POST') {
+    const action = req.body && req.body.action
+    if (action === 'liaisons') return await ecrireLiaisons(req, res)
+    return await reassigner(req, res)
+  }
   if (req.method !== 'GET') return res.status(405).json({ error: 'Méthode non autorisée' })
   const t = chrono()
 
@@ -85,7 +89,11 @@ module.exports = async function handler(req, res) {
     // ===== BIENS (tous providers) =====
     let qProps = supabase
       .from('properties')
-      .select('provider_property_id, name, provider')
+      // `id` (UUID) est indispensable a l'ecran Prestataires : `/api/membres`
+      // attend `permissions.property_ids` en UUID, alors que tout le domaine
+      // menage raisonne en `provider_property_id`. Les deux sont donc exposes,
+      // sous deux noms distincts — les confondre est le piege n°1 du depot.
+      .select('id, provider_property_id, name, provider')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
     if (filtreRef) qProps = qProps.or(filtreRef)
@@ -100,6 +108,7 @@ module.exports = async function handler(req, res) {
 
     const properties = (propRows || []).map(p => ({
       id:       String(p.provider_property_id),
+      uuid:     p.id,
       name:     p.name || `Bien ${p.provider_property_id}`,
       provider: p.provider || null
     }))
@@ -185,6 +194,7 @@ module.exports = async function handler(req, res) {
     // « rien a faire » ; ici l'hote voit ses reservations, qui ne mentent pas.
     let menages = []
     let prestataires = []
+    let liaisons = []
     const { data: mn, error: errMn } = await supabase.from('menages')
       // `assignment_reason` porte « Refuse par X. » : sans elle, un refus est
       // indiscernable d'un menage jamais assigne, et l'hote ne sait pas qu'il
@@ -208,16 +218,28 @@ module.exports = async function handler(req, res) {
     // exactement ce qu'on veut, il ne pourrait de toute facon pas reassigner.
     if (peutLire(garde.contexte, 'prestataires', null)) {
       const { data: pr, error: errPr } = await supabase.from('profiles')
-        .select('id, first_name, active')
+        .select('id, first_name, active, pwa_token')
         .eq('account_user_id', userId).eq('access_mode', 'lien')
         .order('first_name', { ascending: true })
       if (errPr) console.error('[menages] lecture prestataires echec', errPr.message)
-      else prestataires = (pr || []).map(x => ({ id: x.id, prenom: x.first_name, actif: x.active !== false }))
+      else prestataires = (pr || []).map(x => ({
+        id: x.id, prenom: x.first_name, actif: x.active !== false,
+        // Le jeton lui-meme ne sort JAMAIS : seul le fait qu'il en existe un.
+        a_lien: !!x.pwa_token
+      }))
+
+      // Les liaisons bien <-> prestataire, avec leur rang. C'est ce qui decide
+      // si un menage nait accepte ou propose.
+      const { data: lia, error: errLia } = await supabase.from('property_cleaning_providers')
+        .select('property_id, provider_id, rang, active')
+        .eq('user_id', userId).eq('active', true)
+      if (errLia) console.error('[menages] lecture liaisons echec', errLia.message)
+      else liaisons = lia || []
     }
 
     t.top('mapping')
     console.log(t.ligne(` biens=${properties.length} resas=${bookings.length} menages=${menages.length}${tronque ? ' TRONQUE' : ''}`))
-    return res.status(200).json({ properties, bookings, tronque, menages, prestataires })
+    return res.status(200).json({ properties, bookings, tronque, menages, prestataires, liaisons })
   } catch (err) {
     // Une requete qui rame PUIS echoue est le cas le plus interessant a
     // diagnostiquer : il doit loguer son chrono comme les autres.
@@ -354,4 +376,103 @@ async function reassigner (req, res) {
     provider_id: choisi ? choisi.id : null,
     prenom: choisi ? choisi.first_name : null
   })
+}
+
+// ─── Qui intervient sur quel bien, et a quel rang (spec §11.2) ──────────────
+//
+// ⚠ REMPLACE L'ENSEMBLE des liaisons de CE prestataire : les biens absents du
+// corps sont DESACTIVES, pas supprimes. Une liaison supprimee emporterait avec
+// elle la trace de qui intervenait sur ce bien — or les menages passes la
+// referencent par leur `provider_id`, et l'historique de qualite s'appuie
+// dessus.
+//
+// ⚠ LE RANG EST PAR BIEN. Le cas reel est mixte : suppleante ici, referente
+// ailleurs. Un rang unique par personne aurait ete a refaire.
+async function ecrireLiaisons (req, res) {
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+
+  const garde = await requirePermission(req, res, {
+    domaine: 'prestataires', niveau: 'write', userId: appelant, compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+
+  const { provider_id, liaisons } = req.body || {}
+  if (!provider_id) return res.status(400).json({ error: 'Prestataire manquant' })
+  if (!Array.isArray(liaisons)) return res.status(400).json({ error: 'Liaisons manquantes' })
+
+  // Le prestataire doit etre un profil `lien` DE CE COMPTE (REVIEW.md regle 11).
+  const { data: prof, error: errProf } = await supabase.from('profiles')
+    .select('id, first_name, active').eq('id', String(provider_id))
+    .eq('account_user_id', userId).eq('access_mode', 'lien').maybeSingle()
+  if (errProf) {
+    console.error('[menages] verification profil echec', errProf.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!prof) return res.status(400).json({ error: 'Prestataire inconnu' })
+
+  // Chaque bien doit etre dans le perimetre de l'appelant ET du compte.
+  const refs = refsDuPerimetre(garde.contexte)
+  const voulues = []
+  for (const l of liaisons) {
+    const ref = String(l && l.property_id || '')
+    const rang = Number(l && l.rang)
+    if (!ref) return res.status(400).json({ error: 'Bien manquant dans une liaison' })
+    if (!Number.isInteger(rang) || rang < 1 || rang > 9) {
+      return res.status(400).json({ error: 'Rang invalide' })
+    }
+    if (Array.isArray(refs) && !refs.map(String).includes(ref)) {
+      return res.status(403).json({ error: 'Bien hors périmètre' })
+    }
+    voulues.push({ ref, rang })
+  }
+
+  const { data: biensDuCompte, error: errBiens } = await supabase.from('properties')
+    .select('provider_property_id').eq('user_id', userId)
+    .not('provider_property_id', 'is', null)
+  if (errBiens) {
+    console.error('[menages] lecture biens echec', errBiens.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  const duCompte = new Set((biensDuCompte || []).map(b => String(b.provider_property_id)))
+  for (const v of voulues) {
+    if (!duCompte.has(v.ref)) return res.status(403).json({ error: 'Bien hors du compte' })
+  }
+
+  // 1. Desactiver ce qui n'est plus voulu.
+  const gardees = voulues.map(v => v.ref)
+  let desactivation = supabase.from('property_cleaning_providers')
+    .update({ active: false })
+    .eq('user_id', userId).eq('provider_id', prof.id)
+  if (gardees.length) desactivation = desactivation.not('property_id', 'in', `(${gardees.map(r => `"${r}"`).join(',')})`)
+  const { error: errDes } = await desactivation
+  if (errDes) {
+    console.error('[menages] desactivation liaisons echec', errDes.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+
+  // 2. Poser ou remettre les voulues.
+  if (voulues.length) {
+    const { error: errUp } = await supabase.from('property_cleaning_providers')
+      .upsert(voulues.map(v => ({
+        user_id: userId, property_id: v.ref, provider_id: prof.id,
+        rang: v.rang, active: true
+      })), { onConflict: 'user_id,property_id,provider_id' })
+    if (errUp) {
+      console.error('[menages] upsert liaisons echec', errUp.message)
+      return res.status(500).json({ error: 'Enregistrement impossible' })
+    }
+  }
+
+  // ⚠ AVERTISSEMENT, PAS BLOCAGE. Un bien qui perd sa derniere referente verra
+  // ses prochains menages naitre NON ASSIGNES : l'hote doit le savoir, mais
+  // c'est sa decision — le lui refuser le laisserait sans issue le jour ou une
+  // prestataire s'en va.
+  const { data: apres } = await supabase.from('property_cleaning_providers')
+    .select('property_id, rang').eq('user_id', userId).eq('active', true)
+  const avecReferent = new Set((apres || []).filter(l => l.rang === 1).map(l => String(l.property_id)))
+  const sansReferent = [...duCompte].filter(ref =>
+    (apres || []).some(l => String(l.property_id) === ref) && !avecReferent.has(ref))
+
+  return res.status(200).json({ success: true, sans_referent: sansReferent })
 }

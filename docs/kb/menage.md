@@ -50,6 +50,33 @@ le **dérivait** de `bookings_snapshot.departure`. Conception : `docs/specs/spec
 - **Une réservation annulée ou déplacée** met le ménage en `cancelled` — elle ne le supprime
   pas : une prestataire a pu s'organiser autour, et l'historique de qualité s'appuie dessus.
 
+### Créer un prestataire (lot 2.5)
+
+⚠️ **Tout se passe dans `apps/menages/prestataires.html`.** `/settings` ne gère plus les
+prestataires depuis le 2 septembre (`cb53217`) : un prestataire n'a pas accès à HôteSmart,
+seulement à l'app ménage.
+
+- **La création passe par `/api/membres` (mode `lien`)**, qui pose le **profil**, ses droits
+  **et** la ligne `public_tokens` avec le même jeton et le même périmètre.
+  ⚠️ **Pourquoi ce changement** : l'écran insérait directement dans `public_tokens`, sans
+  profil. Or les ménages sont assignés à des **profils** (`menages.provider_id` → `profiles.id`) :
+  un prestataire créé ainsi ne pouvait recevoir **aucune** assignation, et sa PWA ne lui
+  montrait que les ménages qui n'étaient à personne. Le parcours de création d'un prestataire
+  *utilisable* n'existait nulle part.
+- ⚠️ **Frontière des writers de `public_tokens`, à tenir** : `/api/membres` possède `token` et
+  `property_ids` ; l'app ménage garde `label`, `visibility_days` et `ratio_periode` — des
+  réglages d'affichage qui n'ont rien à faire dans la gestion des personnes.
+- **Le rang se règle bien par bien**, avec « Suppléante » par défaut. Le cas réel est mixte
+  (suppléante ici, référente ailleurs), et **on ne devient pas référente par accident** : le
+  référent est assigné d'office, sans confirmation.
+- **Un bien qui perd sa dernière référente est signalé, pas bloqué** — à l'écran avant
+  d'enregistrer, et par le serveur dans `sans_referent`. Le refuser laisserait l'hôte sans issue
+  le jour où une prestataire s'en va.
+- **Les biens retirés sont désactivés, pas supprimés** : une liaison supprimée emporterait la
+  trace de qui intervenait, alors que les ménages passés la référencent.
+- La carte d'un lien **sans profil** (créé avant ce lot) porte « ⚠ lien seul — aucun ménage
+  assignable ». C'est le cas du token de Tiphaine, identité historique inchangée.
+
 ### Qui fait le ménage
 
 `property_cleaning_providers (property_id, provider_id, rang, active)` dit qui intervient sur
