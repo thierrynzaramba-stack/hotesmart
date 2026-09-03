@@ -76,6 +76,18 @@ module.exports = async function handler(req, res) {
 
         const userId = tokenData.user_id
 
+        // ⚠ Garde de propriete : voir `menageDeCePorteur`.
+        const droit = await menageDeCePorteur(userId, token, {
+          propertyId: property_id, bookingId: booking_id, departureDate: departure_date })
+        if (droit.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+        if (droit.autorise === 'perimetre') {
+          const p = await bienDansLePerimetre(userId, token, property_id)
+          if (p.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+          if (!p.autorise) return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
+        } else if (!droit.autorise) {
+          return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
+        }
+
         // Insert dans menage_done. ON CONFLICT DO NOTHING grace a la contrainte unique.
         // On utilise upsert avec ignoreDuplicates pour rester idempotent.
         const { error: insertErr } = await supabase
@@ -131,6 +143,18 @@ module.exports = async function handler(req, res) {
         if (!tokenData) return res.status(401).json({ error: 'Token invalide' })
 
         const userId = tokenData.user_id
+
+        // ⚠ Garde de propriete : voir `menageDeCePorteur`.
+        const droit = await menageDeCePorteur(userId, token, {
+          propertyId: property_id, bookingId: booking_id, departureDate: departure_date })
+        if (droit.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+        if (droit.autorise === 'perimetre') {
+          const p = await bienDansLePerimetre(userId, token, property_id)
+          if (p.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+          if (!p.autorise) return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
+        } else if (!droit.autorise) {
+          return res.status(403).json({ error: 'Ce ménage ne vous est pas attribué' })
+        }
 
         // Suppression de la ligne menage_done
         const { error: delErr } = await supabase
@@ -301,9 +325,21 @@ module.exports = async function handler(req, res) {
       .lte('departure_date', dateTo)
     // Identifiee : ses menages. Non identifiee : ceux de personne, et rien
     // d'autre — `.is('provider_id', null)`.
+    // ⚠ `.in()` sur une liste VIDE n'a pas de rendu PostgREST garanti (`id=in.()`)
+    // — c'est deja documente dans lib/stats-avis.js. Le cas est atteignable : un
+    // token qui ne pointe que des biens supprimes. Sans bien, il n'y a rien a
+    // montrer, et surtout rien a demander a la base.
+    const propIdsPresta = properties.map(p => p.id)
+    if (!identifiee && !propIdsPresta.length) {
+      return res.json({
+        bookings: [], label: tokenData.label, property_ids: allowedIds,
+        visibility_days: visibilityDays, comments: [], events: [], done: [],
+        menages: null, prenom: null
+      })
+    }
     requete = identifiee
       ? requete.eq('provider_id', profilPresta.id)
-      : requete.is('provider_id', null).in('property_id', properties.map(p => p.id))
+      : requete.is('provider_id', null).in('property_id', propIdsPresta)
     const { data: mn, error: errMen } = await requete
     // ⚠ Une liste vide par panne serait indiscernable d'« aucun menage », et la
     // prestataire conclurait qu'elle n'a rien a faire aujourd'hui.
@@ -328,10 +364,26 @@ module.exports = async function handler(req, res) {
       comments = cd || []
     }
 
-    const { data: eventsData } = await supabase.from('menage_events').select('*')
+    // ⚠ LE FIL D'ACTUALITES EST FILTRE LUI AUSSI.
+    // `menage_events` est diffuse PAR BIEN (lib/cleaning/sync-menages.js) : tout
+    // token dont `property_ids` couvre le bien recoit une ligne, sans aucune
+    // notion de prestataire — la table n'a pas de `provider_id`. Lu par
+    // `.eq('token', …)` seul, ce fil affichait donc a une nouvelle prestataire
+    // le nom du voyageur, l'arrivee et le depart de CHAQUE reservation du bien,
+    // y compris les menages de quelqu'un d'autre. Le filtrage des reservations
+    // ne servait a rien tant que cette porte restait ouverte.
+    //
+    // On garde les evenements qui portent sur un menage a elle, plus ceux qui ne
+    // designent aucune reservation (les notes de l'hote, `event_type = 'note'`,
+    // qui s'adressent au porteur du lien).
+    const { data: eventsBruts } = await supabase.from('menage_events').select('*')
       .eq('token', token).eq('read', false)
       .gte('created_at', new Date(Date.now() - visibilityDays * 86400000).toISOString())
       .order('created_at', { ascending: false }).limit(50)
+    const bookingsSiens = new Set(allBookings.map(b => `${b.propId}|${String(b.id)}`))
+    const eventsData = (eventsBruts || []).filter(e =>
+      e.event_type === 'note' ||
+      bookingsSiens.has(`${String(e.property_id)}|${String(e.booking_id)}`))
 
     // NOUVEAU : on renvoie aussi la liste des menages deja faits cote serveur.
     // Le front fera l'union avec son localStorage (offline) avant affichage.
@@ -421,6 +473,51 @@ function extraitEstPrive (a) {
 // Les quatre cles de lib/stats-avis.js, repetees ici parce que le defaut n'est
 // pas le meme : « toujours » cote PWA, '30j' cote /avis.
 const PERIODES_PWA = ['15j', '30j', '6mois', 'toujours']
+
+// ⚠ CE MENAGE EST-IL LE SIEN ?
+//
+// `markDone` et `markUndone` ne verifiaient NI `public_tokens.property_ids`, NI
+// l'assignation : ils resolvaient le token en `user_id` puis ecrivaient sur le
+// `property_id` / `booking_id` fournis par le CLIENT. N'importe quel porteur de
+// lien pouvait donc marquer fait — ou defaire — le menage de quelqu'un d'autre,
+// sur n'importe quel bien du compte. C'est REVIEW.md regle 11 : une donnee
+// client qui designe une ressource ne se valide pas, elle ne s'utilise pas.
+//
+// La regle est la meme que pour la LECTURE : le menage doit lui appartenir, ou
+// n'appartenir a personne (token sans profil, lien legacy). Une panne coupe.
+async function menageDeCePorteur (userId, token, { propertyId, bookingId, departureDate }) {
+  const { data: profil, error: errProfil } = await supabase.from('profiles')
+    .select('id, active').eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
+  if (errProfil) return { erreur: true }
+
+  const { data: menage, error: errMen } = await supabase.from('menages')
+    .select('provider_id, status')
+    .eq('user_id', userId).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .maybeSingle()
+  if (errMen) return { erreur: true }
+
+  // ⚠ Aucun menage en base : on LAISSE PASSER, en repli sur le perimetre du
+  // token. La table vient d'etre creee et le writer ne couvre que J-30/J+180 ;
+  // refuser ici casserait le marquage d'un menage plus ancien, que la
+  // prestataire rattrape justement depuis sa PWA (fenetre de 14 jours en
+  // arriere). Le cloisonnement par bien reste applique dans ce cas.
+  if (!menage) return { autorise: 'perimetre' }
+
+  const identifiee = !!(profil && profil.active !== false)
+  if (identifiee && menage.provider_id === profil.id) return { autorise: true }
+  if (!menage.provider_id) return { autorise: true }
+  return { autorise: false }
+}
+
+// Les biens que ce token peut toucher. Repli quand aucun menage n'existe encore.
+async function bienDansLePerimetre (userId, token, propertyId) {
+  const { data: pt, error } = await supabase.from('public_tokens')
+    .select('property_ids').eq('token', token).maybeSingle()
+  if (error) return { erreur: true }
+  const ids = (pt?.property_ids || []).map(String)
+  return { autorise: !ids.length || ids.includes(String(propertyId)) }
+}
 
 async function avisDeLaPrestataire (req, res, token) {
   // ⚠ L'ERREUR EST LUE. Un `select` en panne (timeout, 5xx transitoire) rend

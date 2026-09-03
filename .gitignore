@@ -154,3 +154,18 @@ vite.config.ts.timestamp-*
 # faire la. tests/pas-de-jetables.test.js verifie qu'aucun n'est suivi.
 _*.tmp.js
 _*.tmp.mjs
+
+# ⚠ AUCUN MODULE SERVEUR A LA RACINE. `vercel.json` porte outputDirectory "."
+# et il n'y a pas de .vercelignore : la racine EST le repertoire statique servi.
+# Trois copies de api/menages*.js et lib/cleaning/*.js y sont parties dans un
+# commit — laissees par un script de verification qui restaurait ses sauvegardes
+# au mauvais endroit. Publiees, elles auraient expose le modele d'autorisation
+# complet, les noms de tables et les commentaires qui documentent les points
+# faibles. Aucun secret en dur, mais une carte du systeme offerte sans
+# authentification. Seul sw.js a sa place ici (service worker de la PWA).
+/menages-public.js
+/menages.js
+/sync-menages-entite.js
+/cron.js
+/assign.js
+/*-entite.js

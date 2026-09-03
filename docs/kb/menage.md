@@ -37,6 +37,13 @@ le **dérivait** de `bookings_snapshot.departure`. Conception : `docs/specs/spec
   retombe sur `confirmed` et le ménage fantôme revient.
 - **Un ménage annulé à tort est ressuscité** dès que sa réservation reparaît : sans ce chemin,
   il disparaissait de la PWA pour de bon.
+- ⚠️ **Un bien inconnu de `properties` est SAUTÉ**, et ses ménages ne sont **pas** annulés.
+  Sans provider, `canonicalStatus('black', undefined)` retombe sur `confirmed` : un blocage
+  propriétaire redeviendrait un ménage. Et un bien qu'on ne sait pas lire n'est pas un bien
+  dont les séjours ont disparu — c'est un bien sur lequel on ne se prononce pas.
+- **Une désassignation manuelle reste `assigned_by='manual'`.** Remettre `null` rendait le
+  geste invisible au writer, qui rendait le ménage à la référente dans les cinq minutes.
+  Laisser un ménage sans personne **est** une décision de l'hôte.
 - **Les ménages restés sans personne sont réassignés à chaque cycle** — le cas de tout nouvel
   hôte qui branche son PMS avant de configurer ses prestataires. ⚠️ Jamais un
   `assigned_by='manual'`, jamais une offre en cours : ce serait défaire une décision.
@@ -82,6 +89,18 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
   ⚠️ **Dette, lot 2.5** : créer une personne se fait dans **Réglages → Équipe et droits**
   (`api/membres.js`, mode `lien`), qui pose le profil **et** le token. Le formulaire de l'app
   ménage ne crée qu'un lien de consultation — un encart le dit désormais à l'écran.
+- ⚠️ **Le fil d'actualités est filtré lui aussi.** `menage_events` est diffusé **par bien** et
+  n'a **pas** de `provider_id` : lu par `.eq('token', …)` seul, le bandeau affichait à une
+  nouvelle prestataire le nom du voyageur, l'arrivée et le départ de **chaque** réservation du
+  bien — pendant que `bookings` et `done`, eux, étaient bien filtrés. Seuls passent les
+  événements portant sur un de ses ménages, plus les **notes de l'hôte**, qui ne désignent
+  aucune réservation.
+- ⚠️ **`markDone` / `markUndone` vérifient que le ménage est le sien.** Ces deux actions ne
+  regardaient ni le périmètre du token ni l'assignation : elles écrivaient sur le
+  `property_id`/`booking_id` **fournis par le client**. N'importe quel porteur de lien pouvait
+  marquer fait — ou **défaire** — le ménage de quelqu'un d'autre. Repli quand aucun ménage
+  n'existe encore en base (la table est récente, le writer ne couvre que J−30/J+180) : le
+  périmètre du token s'applique, et refuser aurait cassé le rattrapage à 14 jours de la PWA.
 - **Écran hôte** : une pastille par ménage — le prénom, en pointillés quand c'est `offered`
   (un suppléant qui n'a pas répondu n'est **pas** un ménage couvert), « personne » en clair
   quand il n'y a pas d'assignation. Le sélecteur de la modale réassigne en deux clics.

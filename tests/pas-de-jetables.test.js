@@ -26,3 +26,35 @@ test('aucun script jetable n\'est suivi par git', () => {
     `scripts jetables suivis par git : ${jetables.join(', ')}. ` +
     `Ils ouvrent souvent un client service key — les supprimer avant de committer.`)
 })
+
+// ⚠ POURQUOI CE SECOND TEST. Trois copies de modules SERVEUR — `menages.js`,
+// `menages-public.js`, `sync-menages-entite.js` — sont parties dans un commit,
+// laissées par un script de vérification qui restaurait ses sauvegardes au
+// mauvais endroit. Or `vercel.json` porte `outputDirectory: "."` et il n'existe
+// pas de `.vercelignore` : **la racine du dépôt EST le répertoire statique
+// servi**. Publiées, ces copies auraient répondu sur
+// `https://.../menages-public.js` sans aucune authentification, exposant le
+// modèle d'autorisation complet, les noms de tables et de colonnes, et les
+// commentaires qui documentent précisément les points faibles.
+//
+// Aucun secret en dur — tout passe par `process.env` — donc c'était de la
+// divulgation, pas une fuite de clé. Une carte du système offerte, tout de même.
+//
+// `sw.js` est le seul `.js` légitime à la racine : c'est le service worker de la
+// PWA, il DOIT être servi depuis là (sa portée est celle de son chemin).
+test('aucun module serveur ne traîne à la racine du dépôt', () => {
+  let suivis
+  try {
+    suivis = execFileSync('git', ['ls-files'], { cwd: path.join(__dirname, '..'), encoding: 'utf8' })
+  } catch {
+    return
+  }
+  const AUTORISES = new Set(['sw.js'])
+  const racine = suivis.split('\n')
+    .map(f => f.trim())
+    .filter(f => f && !f.includes('/') && /\.(js|mjs|cjs)$/.test(f))
+    .filter(f => !AUTORISES.has(f))
+  assert.deepStrictEqual(racine, [],
+    `modules JS à la racine (donc servis en statique) : ${racine.join(', ')}. ` +
+    `Le code serveur vit dans api/ et lib/ ; seul sw.js a sa place ici.`)
+})

@@ -369,8 +369,31 @@ test('un ménage annulé à tort est RESSUSCITÉ quand sa réservation est là',
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
   assert.strictEqual(bilan.ressuscites, 1)
-  assert.strictEqual(etat.majs[0].row.status, 'unassigned')
+  assert.strictEqual(etat.majs[0].row.status, 'accepted', 'la référente le reprend')
+  assert.strictEqual(etat.majs[0].row.provider_id, REGINA)
   assert.ok(etat.journal.some(l => l.event === 'created'))
+})
+
+test('la résurrection REND UNE LIGNE COHÉRENTE, elle ne repeint pas un statut', async () => {
+  // ⚠ LE CAS DANGEREUX, celui que le test précédent ne couvrait pas : le ménage
+  // annulé portait une prestataire et un `accepted_at`. Écrire `unassigned` seul
+  // laissait `provider_id` renseigné — la PWA le remontrait à Régina pendant que
+  // son statut disait « personne », l'écran hôte affichait une pastille sur un
+  // statut qui la contredit, et la boucle de rattrapage, qui saute toute ligne à
+  // `provider_id` non nul, ne réparait jamais rien.
+  const etat = preparer({
+    snaps: [SNAP()],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'cancelled',
+                provider_id: REGINA, assigned_by: 'auto' }],
+    liaisons: []   // plus aucune liaison : le ménage doit redevenir SANS personne
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  const row = etat.majs[0].row
+  assert.strictEqual(row.status, 'unassigned')
+  assert.strictEqual(row.provider_id, null, 'la prestataire périmée doit partir avec le statut')
+  assert.strictEqual(row.accepted_at, null, 'et l\'horodatage avec')
 })
 
 // ─── C2 : le statut se lit comme les LECTEURS le lisent ────────────────────
@@ -470,4 +493,70 @@ test('le rattrapage ne ressuscite pas un ménage annulé par la bande', async ()
   const bilan = await synchroniserMenages()
   assert.strictEqual(bilan.assignes_apres_coup, 0)
   assert.strictEqual(bilan.ressuscites, 0)
+})
+
+// ─── L'isolation multi-comptes des lectures du writer ──────────────────────
+// ⚠ Ces deux `.in('user_id', …)` sont les SEULES gardes inter-comptes de leurs
+// lectures : le writer tourne en service key, qui contourne la RLS par
+// conception. Aucune assertion ne les couvrait — les retirer laissait les 996
+// tests verts.
+
+test('la lecture des ménages existants est filtrée par COMPTE', async () => {
+  const etat = preparer({ snaps: [SNAP()], liaisons: [] })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  const q = etat.requetes.find(r => r.table === 'menages' && r.ins)
+  assert.ok(q, 'la lecture des ménages doit exister')
+  assert.strictEqual(q.ins.c, 'user_id')
+  assert.deepStrictEqual(q.ins.v, [U])
+})
+
+test('la lecture des biens est filtrée par COMPTE', async () => {
+  const etat = preparer({ snaps: [SNAP()], liaisons: [] })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  const q = etat.requetes.find(r => r.table === 'properties')
+  assert.ok(q && q.ins, 'la lecture des biens doit être filtrée')
+  assert.strictEqual(q.ins.c, 'user_id')
+})
+
+test('les deux lectures sont PLAFONNÉES et ordonnées', async () => {
+  // PostgREST tronque à 1000 lignes sans erreur : une troncature silencieuse de
+  // `menages` ferait annuler ceux qu'on n'a pas lus.
+  const etat = preparer({ snaps: [SNAP()], liaisons: [] })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  await synchroniserMenages()
+  const qm = etat.requetes.find(r => r.table === 'menages' && r.ins)
+  assert.ok(qm.order && String(qm.order).includes('departure'))
+})
+
+test('un bien INCONNU de `properties` ne produit aucun ménage', async () => {
+  // ⚠ Régression introduite par le passage au statut canonique :
+  // `canonicalStatus('black', undefined)` retombe sur 'confirmed'. Un blocage
+  // propriétaire redevenait donc un ménage dès que le bien n'avait plus de ligne
+  // `properties` — cas atteignable, rien ne purge les snapshots d'un bien retiré.
+  const etat = preparer({
+    snaps: [{ ...SNAP(), snapshot: { status: 'black', departure: '2026-09-05' } }],
+    biens: [],
+    liaisons: []
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.crees, 0)
+  assert.strictEqual(etat.inseres.length, 0)
+})
+
+test('un bien inconnu ne fait pas non plus ANNULER ses ménages', async () => {
+  // Contre-épreuve : sauter la ligne ne doit pas la faire passer pour disparue.
+  // Ici la lecture est tronquée à zéro bien, donc `tronque` est faux mais aucun
+  // séjour n'entre dans `vivants` — c'est le pire cas.
+  const etat = preparer({
+    snaps: [SNAP()],
+    biens: [],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.annules, 0, 'un bien qu\'on ne sait pas lire n\'est pas un bien disparu')
 })

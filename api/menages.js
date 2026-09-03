@@ -321,7 +321,12 @@ async function reassigner (req, res) {
   const { error: errMaj } = await supabase.from('menages').update({
     provider_id: choisi ? choisi.id : null,
     status,
-    assigned_by: choisi ? 'manual' : null,
+    // ⚠ 'manual' MEME QUAND ON DESASSIGNE. Remettre `null` ici rendait le geste
+    // invisible au writer, dont la garde teste `assigned_by === 'manual'` : le
+    // cron rendait le menage a la referente dans les cinq minutes, avec au
+    // journal un motif faux. Laisser un menage sans personne EST une decision de
+    // l'hote, et elle se verrouille comme les autres.
+    assigned_by: 'manual',
     assignment_reason: choisi
       ? `Reassigne a la main par l'hote (${status === 'accepted' ? 'referent du bien' : 'suppleant, en attente de confirmation'}).`
       : 'Desassigne a la main par l\'hote.',

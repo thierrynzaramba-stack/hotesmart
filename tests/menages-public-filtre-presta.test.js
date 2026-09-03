@@ -31,7 +31,7 @@ const SNAPS = [
 
 function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true },
                      menages = null, erreurProfil = null, erreurMenages = null,
-                     tokenPropIds = ['209413'], done = [] } = {}) {
+                     tokenPropIds = ['209413'], done = [], events = [] } = {}) {
   const journal = []
   const client = {
     from (table) {
@@ -62,6 +62,7 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
         if (table === 'properties') return { data: BIENS, error: null }
         if (table === 'bookings_snapshot') return { data: SNAPS, error: null }
         if (table === 'menage_done') return { data: done, error: null }
+        if (table === 'menage_events') return { data: events, error: null }
         if (table === 'menages') {
           if (erreurMenages) return { data: null, error: erreurMenages }
           // ⚠ Les filtres sont HONORES. Un double qui rend la liste entiere
@@ -253,4 +254,44 @@ test('la liste des ménages FAITS suit la personne, pas les biens du token', asy
   await handler(req(), res)
   assert.deepStrictEqual(res.body.done.map(d => d.booking_id), ['b1'],
     'le ménage fait par l\'autre ne doit pas sortir')
+})
+
+// ─── Le fil d'actualités : la porte que le filtre laissait ouverte ─────────
+
+test('le fil d\'actualités ne porte QUE ses ménages', async () => {
+  // ⚠ LA FUITE QUE CE TEST FERME. `menage_events` est diffusé PAR BIEN
+  // (lib/cleaning/sync-menages.js) : tout token dont `property_ids` couvre le
+  // bien reçoit une ligne, la table n'ayant aucun `provider_id`. Lu par
+  // `.eq('token', …)` seul, le bandeau affichait à une nouvelle prestataire le
+  // NOM DU VOYAGEUR, l'arrivée et le départ de chaque réservation du bien —
+  // pendant que `bookings` et `done`, eux, étaient bien filtrés. Filtrer les
+  // réservations ne servait à rien tant que cette porte restait ouverte.
+  preparer({
+    menages: [MENAGE('b1', REGINA, '2026-09-05')],
+    events: [
+      { id: 'e1', token: TOKEN, property_id: '209413', booking_id: 'b1', event_type: 'new',
+        event_data: { guestName: 'Alice Martin', arrival: '2026-09-01', departure: '2026-09-05' } },
+      { id: 'e2', token: TOKEN, property_id: '209413', booking_id: 'b2', event_type: 'new',
+        event_data: { guestName: 'Bruno Durand', arrival: '2026-09-06', departure: '2026-09-09' } }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.events.map(e => e.id), ['e1'])
+  assert.ok(!JSON.stringify(res.body).includes('Bruno'), 'le voyageur de l\'autre ne doit pas sortir')
+})
+
+test('les notes de l\'hôte passent, elles ne désignent aucune réservation', async () => {
+  // Contre-épreuve : fermer la porte ne doit pas faire disparaître les messages
+  // que l'hôte adresse au porteur du lien.
+  preparer({
+    menages: [],
+    events: [{ id: 'n1', token: TOKEN, property_id: '209413', booking_id: null,
+               event_type: 'note', event_data: { note: 'Penser aux draps' } }]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.events.map(e => e.id), ['n1'])
 })

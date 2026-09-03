@@ -217,13 +217,18 @@ test('l\'assignation manuelle VERROUILLE le ménage', async () => {
   assert.strictEqual(etat.majs[0].row.assigned_by, 'manual')
 })
 
-test('désassigner est possible, et ne verrouille rien', async () => {
+test('désassigner est possible, ET le geste reste VERROUILLÉ', async () => {
+  // ⚠ Remettre `assigned_by: null` rendait la décision invisible au writer,
+  // dont la garde teste `assigned_by === 'manual'` : le cron rendait le ménage
+  // à la référente dans les cinq minutes, avec au journal un motif faux
+  // (« prestataire lié après la création »). Laisser un ménage sans personne
+  // EST une décision de l'hôte, et elle se verrouille comme les autres.
   const { handler, etat } = preparer({})
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: null }), res)
   assert.strictEqual(res.body.status, 'unassigned')
   assert.strictEqual(etat.majs[0].row.provider_id, null)
-  assert.strictEqual(etat.majs[0].row.assigned_by, null)
+  assert.strictEqual(etat.majs[0].row.assigned_by, 'manual')
 })
 
 // ─── Le journal ────────────────────────────────────────────────────────────
