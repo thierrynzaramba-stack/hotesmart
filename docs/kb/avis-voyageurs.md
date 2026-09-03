@@ -495,10 +495,18 @@ restait ouverte a été tranchée par la doc officielle le jour même.
 | 6 | détection automatique dans les messages entrants, avec validation humaine |
 | 7 | poll Beds24 des avis Booking.com — 93 avis, Airbnb hors de portée de l'API |
 
-### Les chiffres
+### Les chiffres finaux
 
-- **168 avis** OTA en base : 70 via Channex (68 Airbnb, 2 Booking.com) et
-  **93 via Beds24** (Booking.com), couvrant septembre 2023 → août 2026.
+- **168 entrées dans le cœur** : **93 Beds24** (Booking.com), **70 Channex**
+  (68 Airbnb, 2 Booking.com), **5 détections en messagerie**. Couverture de
+  septembre 2023 à août 2026.
+- **17 remarques de propreté confirmées**, dont **5 validées à la main depuis la
+  messagerie** — le circuit de validation humaine a donc fonctionné en
+  conditions réelles, sur des signalements qu'aucune autre source ne portait.
+  Décomposition : 11 Beds24, 1 Channex, 5 messagerie.
+- **Couverture Booking.com complète sur les trois biens.** Les avis Airbnb des
+  deux biens Beds24 restent hors de portée : l'API ne les expose pas (§11), ils
+  viendront avec la migration Channex de ces biens.
 - **1 seule remarque de propreté** dans ces 70 avis — et elle venait du **retour
   privé** d'un avis noté 10/10 avec quatre tags positifs (« la bouilloire n'était
   pas du tout propre »). Ni la note ni les tags ne l'auraient révélée.
@@ -705,3 +713,54 @@ Les avis portent une **étiquette d'origine** colorée — Messagerie, Avis Airb
 Avis Booking, SMS, Email, De vive voix. Elle dit d'où vient l'avis, pas ce qu'il
 vaut : une détection en messagerie et un avis public n'ont ni la même fiabilité
 ni le même statut, les confondre visuellement ferait lire l'une pour l'autre.
+
+## 13. Chantier clos — 3 septembre 2026
+
+**Sept lots, de la table au signalement automatique.** Ce qui existe :
+
+| | |
+|---|---|
+| **Sources** | Channex (poll quotidien + webhook `updated_review`), Beds24 (poll quotidien, Booking.com), messagerie (détection horaire), saisie manuelle (SMS / email / oral) |
+| **Cœur** | `ota_reviews` — un writer par source, une contrainte d'idempotence, jamais deux entrées pour un même avis |
+| **Classification** | deux étages : règle déterministe sur les tags et les notes, Haiku sur ce qu'elle ne tranche pas |
+| **Humain** | validation des détections, requalification définitive des verdicts |
+| **Affichage** | `/avis` — étiquettes d'origine, badges de propreté, extraits cités, ratio sur période |
+| **Partagé** | `ratioProprete` — la fiche prestataire la consommera telle quelle (§12) |
+
+### Ce que ce chantier a coûté, et ce qu'il faut en retenir
+
+**Onze reviews, et chacune a trouvé au moins un défaut réel** dans du code qui
+passait les tests. Trois enchaînements où le correctif d'un constat en a créé un
+autre — `register` (chemin validé, hôte libre), la file des messages (`continue`
+qui perdait, puis `break` qui gelait), et le verdict humain (garde en lecture,
+puis TOCTOU à l'écriture). **À chaque fois, c'est la re-review imposée qui a
+rattrapé le second trou.**
+
+**Le motif dominant, cinq fois : un double de test trop permissif.** Le code
+était juste ; rien ne l'empêchait de cesser de l'être. La leçon la plus
+coûteuse : **tolérer l'absence d'un filtre ne suffit pas** — en base, une requête
+sans filtre ne rend pas *rien*, elle rend **la première ligne venue**. Il a fallu
+une ligne leurre pour que la mutation morde enfin.
+
+**Et systématiquement, ce sont les données réelles qui ont tranché**, pas le
+raisonnement : `reply` objet vide (68 réponses fantômes), échelles de notes
+incohérentes chez un provider et pas chez l'autre, `provider_msg_id` absent d'un
+tiers des messages, quatre extraits sur cinq perdus pour un écart d'espaces,
+`provider` manquant d'un `select` — invisible en test, révélé au premier passage
+sur 93 avis. **Aucun de ces défauts n'aurait été trouvé sans confronter le code
+aux données avant de le déclarer fini.**
+
+### Règles nées de ce chantier
+
+- `REVIEW.md` **règle 11 durcie** : une donnée client qui désigne une ressource
+  ne se valide pas, elle ne s'utilise pas.
+- `REVIEW.md` **règle 12** : une sonde sur une API tierce est en lecture seule.
+- **Jamais de donnée inventée dans le cœur** — appliqué au refus d'approximer une
+  date de séjour, puis au refus de reconstituer des `menage_events` historiques.
+
+### La suite
+
+La fiche prestataire consomme `ratioProprete` avec `menageEventIds`, et n'affiche
+de l'extrait que ce que `spec-prestataires-menage.md` §6 autorise : l'extrait
+seul, étiqueté « retour privé » quand il en vient, jamais le nom du voyageur,
+coupé par `self_view_reviews`.
