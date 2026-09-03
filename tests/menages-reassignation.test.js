@@ -22,6 +22,7 @@ const REGINA = 'aaaa1111-1111-4111-8111-111111111111'
 const NOUVELLE = 'bbbb2222-2222-4222-8222-222222222222'
 
 function preparer ({ user = PROD, profil = null, permissions = null, compteAttendu = PROD,
+                     dateAttendue = LOIN,
                      prestataire = { id: REGINA, first_name: 'Régina', active: true },
                      menage = { id: 'm1', provider_id: null, status: 'unassigned' },
                      liaison = { rang: 1 }, erreurProfil = null, erreurLiaison = null } = {}) {
@@ -66,7 +67,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
             const bon = a.f.user_id === compteAttendu &&
                         String(a.f.property_id) === '209413' &&
                         String(a.f.booking_id) === 'b1' &&
-                        typeof a.f.departure_date === 'string'
+                        // ⚠ Recale sur la date REELLEMENT demandee. Accepter
+                        // n'importe quelle chaine relachait le double : changer
+                        // la date de lecture dans l'endpoint ne cassait plus
+                        // rien (REVIEW.md regle 8).
+                        a.f.departure_date === dateAttendue
             return Promise.resolve({ data: bon ? menage : null, error: null })
           }
           if (table === 'property_cleaning_providers') return Promise.resolve({ data: liaison, error: erreurLiaison })
@@ -223,7 +228,7 @@ test('proposer trop tard est REFUSÉ, pas envoyé dans le vide', async () => {
   // ⚠ Une proposition doit laisser un vrai délai de réponse. Passé la veille du
   // départ à 18 h, elle serait morte-née — expirée avant d'avoir été lue.
   const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const { handler, etat } = preparer({ liaison: { rang: 2 }, dateAttendue: hier })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: hier }), res)
   assert.strictEqual(res.code, 409)
@@ -342,4 +347,22 @@ test('PANNE de lecture de la liaison : 503, jamais une référente dégradée', 
   await handler(post(CORPS), res)
   assert.strictEqual(res.code, 503)
   assert.strictEqual(etat.majs.length, 0)
+})
+
+test('re-choisir la PORTEUSE retire la proposition, sans la déloger', async () => {
+  // ⚠ LE GESTE QUI MANQUAIT. Aucune action ne permettait d'annuler une
+  // proposition en gardant la porteuse : « — personne — » retirait AUSSI la
+  // porteuse, l'inverse de l'intention. Et si elle n'était pas rang 1, la
+  // resélectionner partait sur la branche « proposer » et écrivait
+  // `offered_to = provider_id` — ce que la base refuse (500).
+  const { handler, etat } = preparer({
+    menage: { id: 'm1', provider_id: REGINA, offered_to: NOUVELLE, status: 'accepted' }
+  })
+  const res = reponse()
+  await handler(post(CORPS), res)   // CORPS vise REGINA, déjà porteuse
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.retiree, true)
+  assert.strictEqual(etat.majs[0].row.offered_to, null, 'la proposition tombe')
+  assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'la porteuse ne bouge pas')
+  assert.strictEqual(etat.journal[0].event, 'offer_withdrawn')
 })

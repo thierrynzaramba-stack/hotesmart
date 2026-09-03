@@ -201,7 +201,21 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
 - La PWA de la suppléante affiche **le délai restant** sur chaque proposition ; celle de la
   référente voit le ménage normalement, avec la mention. Le **prénom de la sollicitée n'est pas
   transmis à la porteuse** : savoir qu'une proposition est en cours lui suffit.
-- Job `expirerPropositions` dans le cron, juste après la réconciliation.
+- Job `expirerPropositions` dans le cron, juste après la réconciliation. ⚠️ Il **exclut les
+  ménages annulés** : l'annulation n'efface pas la proposition, et sans ce filtre un ménage
+  annulé repassait en `orphaned`, réapparaissait au planning et déclenchait une alerte pour une
+  réservation qui n'existe plus.
+- ⚠️ **Re-choisir la porteuse dans le sélecteur RETIRE la proposition**, sans la déloger
+  (`offer_withdrawn` au journal). C'était le geste manquant : « — personne — » retirait *aussi*
+  la porteuse, et resélectionner une porteuse non-référente écrivait `offered_to = provider_id`,
+  ce que la base refuse.
+- ⚠️ **La garde d'écriture (`markDone` / `markUndone`) lit `offered_to`, pas le statut.**
+  Elle testait `status === 'offered'`, en supposant que proposition impliquait ce statut — le
+  modèle parallèle casse l'équivalence. Un ménage sous proposition redevenait « à personne » :
+  n'importe quelle prestataire du compte pouvait le marquer fait, ou le **défaire**. La porteuse,
+  elle, garde toujours l'action : le ménage reste le sien.
+- ⚠️ **Délai minimum de 2 h.** « Pas zéro » ne suffisait pas : un départ le lendemain à 15h59 UTC
+  produisait une proposition valable **une minute**, tuée par le passage de cron suivant.
 
 ### Répondre à une offre (lot 2.2)
 

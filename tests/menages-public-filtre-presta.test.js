@@ -74,8 +74,17 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
           // l'ignore rendrait le filtre indetectable.
           const d = (menages || []).filter(m => {
             if (a.or) {
-              const ids = [...String(a.or).matchAll(/(provider_id|offered_to)\.eq\.([^,)]+)/g)]
-              return ids.some(([, col, val]) => String(m[col] || '') === val)
+              // ⚠ TOUT TERME EST APPLIQUE, pas seulement ceux qu'on attend.
+              // Extraire les seuls `provider_id`/`offered_to` rendait
+              // INDETECTABLE l'ajout d'un terme : `,status.eq.offered` aurait
+              // fait voir a chaque prestataire tous les menages proposes du
+              // compte, sans qu'un test bronche.
+              const termes = String(a.or).split(',').map(t => t.trim()).filter(Boolean)
+              return termes.some(t => {
+                const [col, op, val] = t.split('.')
+                if (op !== 'eq') return true   // opérateur non modélisé : on ne masque pas
+                return String(m[col] === undefined ? '' : (m[col] ?? '')) === val
+              })
             }
             if (a.f.provider_id !== undefined && m.provider_id !== a.f.provider_id) return false
             for (const c of (a.is || [])) {
@@ -343,4 +352,32 @@ test('les notes de l\'hôte passent, elles ne désignent aucune réservation', a
   const res = reponse()
   await handler(req(), res)
   assert.deepStrictEqual(res.body.events.map(e => e.id), ['n1'])
+})
+
+test('un lien SANS profil ne voit pas un ménage SOUS PROPOSITION', async () => {
+  // ⚠ La garde `.is('offered_to', null)` du chemin legacy n'était couverte par
+  // rien : un ménage proposé à quelqu'un n'est pas « à personne », et le laisser
+  // voir par un lien anonyme rouvrirait la fuite que ce chemin ferme.
+  preparer({ profil: null, menages: [
+    { ...MENAGE('b1', null, '2026-09-05'), status: 'offered', offered_to: NOUVELLE,
+      offer_expires_at: '2026-09-04T16:00:00Z' },
+    { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
+  ] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.deepStrictEqual(res.body.bookings.map(b => b.id), ['b2'],
+    'seul le ménage qui n\'est ni porté ni proposé reste visible')
+})
+
+test('le `.or()` ne ramène QUE ses deux colonnes', async () => {
+  // ⚠ Un terme supplémentaire ferait voir à chaque prestataire des ménages qui
+  // ne la concernent pas. Le double applique tous les termes : ajouter
+  // `status.eq.offered` fait tomber ce test.
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  await handler(req(), reponse())
+  const q = journal.find(a => a.table === 'menages')
+  const termes = String(q.or).split(',').map(t => t.split('.')[0])
+  assert.deepStrictEqual(termes.sort(), ['offered_to', 'provider_id'])
 })

@@ -534,7 +534,7 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   if (errProfil) return { erreur: true }
 
   const { data: menage, error: errMen } = await supabase.from('menages')
-    .select('provider_id, status')
+    .select('provider_id, status, offered_to')
     .eq('user_id', userId).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .maybeSingle()
@@ -547,15 +547,26 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   // arriere). Le cloisonnement par bien reste applique dans ce cas.
   if (!menage) return { autorise: 'perimetre' }
 
-  // ⚠ ON NE FAIT PAS UN MENAGE QU'ON N'A PAS ACCEPTE. La regle n'existait que
-  // dans le front ; le serveur, lui, acceptait un `markDone` sur un menage
-  // encore `offered` — le message de commit affirmait pourtant qu'il « refuserait
-  // l'un des deux ». Une offre non repondue n'engage personne : la marquer faite
-  // court-circuiterait la confirmation que tout ce lot vient d'ajouter.
-  if (menage.status === 'offered') return { autorise: false, motif: 'offre' }
-
   const identifiee = !!(profil && profil.active !== false)
+
+  // ⚠ CELLE QUI PORTE LE MENAGE PEUT TOUJOURS LE MARQUER FAIT, meme si une
+  // proposition est en cours : il reste le sien tant que personne n'a accepte.
   if (identifiee && menage.provider_id === profil.id) return { autorise: true }
+
+  // ⚠ ON NE FAIT PAS UN MENAGE QU'ON N'A PAS ACCEPTE.
+  // La garde testait `status === 'offered'`, en supposant que proposition
+  // impliquait ce statut. Le modele parallele casse cette equivalence : une
+  // proposition posee sur un menage `unassigned` laisse le statut intact. Un
+  // menage sous proposition redevenait donc « a personne » — n'importe quelle
+  // prestataire identifiee du compte pouvait le marquer fait, ou le DEFAIRE,
+  // avec le seul triplet (bien, reservation, date) qu'elle lit dans sa PWA.
+  // C'est desormais `offered_to` qui tranche, comme partout ailleurs.
+  if (menage.offered_to) {
+    return identifiee && menage.offered_to === profil.id
+      ? { autorise: false, motif: 'offre' }   // a elle, mais pas encore acceptee
+      : { autorise: false }
+  }
+
   if (!menage.provider_id) return { autorise: true }
   return { autorise: false }
 }
@@ -622,12 +633,18 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     const { data: maj, error: errMaj } = await supabase.from('menages')
       .update({ provider_id: profil.id, status: 'accepted',
                 offered_to: null, offered_at: null, offer_expires_at: null,
-                assigned_by: 'auto',
+                // ⚠ PAS de `assigned_by: 'auto'` : ecraser un verrou pose par
+                // l'hote le ferait disparaitre, et une resurrection ulterieure
+                // recalculerait l'assignation contre sa decision.
                 assignment_reason: `Accepte par ${profil.first_name}.`,
                 accepted_at: new Date().toISOString(),
                 updated_at: new Date().toISOString() })
       .eq('id', menage.id).eq('offered_to', profil.id)
       .gt('offer_expires_at', new Date().toISOString())
+      // ⚠ Une PWA restee ouverte sur un menage dont la reservation a disparu
+      // pouvait le repasser en `accepted` avec un porteur — un menage vivant
+      // pour une reservation qui ne l'est plus.
+      .neq('status', 'cancelled')
       .select('id')
     if (errMaj) {
       console.error('[menages-public] acceptation echec:', errMaj.message)
@@ -703,7 +720,9 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
       })
     } catch (e) { console.error('[menages-public] alerte refus echec:', e.message) }
   }
-  return res.json({ success: true, status: porte ? 'accepted' : 'orphaned', porte })
+  // ⚠ `porte` est la VRAIE information. Le statut en base n'a pas ete touche
+  // quand quelqu'un porte le menage : l'inventer ici ferait mentir la reponse.
+  return res.json({ success: true, porte })
 }
 
 async function avisDeLaPrestataire (req, res, token) {

@@ -697,3 +697,50 @@ test('aucune proposition expirée : aucune écriture', async () => {
   assert.strictEqual(bilan.expirees, 0)
   assert.strictEqual(etat.majs.length, 0)
 })
+
+test('le writer ne réassigne PAS un ménage sous proposition', async () => {
+  // ⚠ Une proposition en cours n'est pas un ménage sans personne : la réassigner
+  // effacerait une sollicitation à laquelle quelqu'un s'apprête peut-être à
+  // répondre — et deux personnes se croiraient concernées.
+  const etat = preparer({
+    snaps: [SNAP()],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'unassigned',
+                provider_id: null, offered_to: NOUVELLE, assigned_by: 'auto' }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1 }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.assignes_apres_coup, 0)
+  assert.strictEqual(etat.majs.length, 0)
+})
+
+test('le rattrapage PROPOSE quand le bien n\'a qu\'un suppléant', async () => {
+  // ⚠ Tester le seul `providerId` faisait sauter tous ces cas : un hôte qui ne
+  // lie qu'un rang 2 voyait ses ménages déjà créés n'être jamais proposés à
+  // personne, et la seule alerte avait eu lieu à leur création.
+  const etat = preparer({
+    snaps: [SNAP()],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'unassigned',
+                provider_id: null, offered_to: null, assigned_by: null }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2 }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages()
+  assert.strictEqual(bilan.assignes_apres_coup, 1)
+  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
+  assert.strictEqual(etat.majs[0].row.provider_id, null, 'personne ne le porte encore')
+})
+
+test('une proposition EXPIRÉE sur un ménage annulé n\'est pas ressuscitée', async () => {
+  // ⚠ L'annulation n'efface pas la proposition : sans filtre, un ménage annulé
+  // repassait en `orphaned`, réapparaissait au planning et déclenchait une
+  // alerte pour une réservation qui n'existe plus.
+  const etat = preparer({ expirees: [] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  await expirerPropositions()
+  const q = etat.requetes.find(r => r.table === 'menages' && r.lt)
+  assert.ok(q, 'la lecture des propositions échues doit exister')
+  assert.deepStrictEqual(q.neq, { c: 'status', v: 'cancelled' })
+})

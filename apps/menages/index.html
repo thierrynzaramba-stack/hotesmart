@@ -613,8 +613,13 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     // ⚠ UN REFUS N'EST PAS UN « PERSONNE » ORDINAIRE : quelqu'un a dit non, et
     // rien ne le reprendra tout seul. Les confondre laissait l'hote sans savoir
     // qu'il doit agir.
-    if (m.assign.status === 'orphaned') {
-      return `<div class="presta-pastille refus" title="${echapper(m.assign.assignment_reason || '')}">⚠ refusé</div>`
+    const proposeAOrph = m.assign.offered_to ? prenomDe(m.assign.offered_to) : null
+    if (m.assign.status === 'orphaned' && !proposeAOrph) {
+      // ⚠ « refusé » n'est plus exact : un `orphaned` peut aussi venir d'une
+      // proposition EXPIREE. Et s'il est re-propose, la pastille masquait la
+      // proposition alors que la modale, elle, l'affichait — deux endroits de la
+      // meme page qui se contredisaient.
+      return `<div class="presta-pastille refus" title="${echapper(m.assign.assignment_reason || '')}">⚠ personne</div>`
     }
     // ⚠ LA PROPOSITION NE REMPLACE PAS LE PORTEUR (regle du 4 septembre).
     // La pastille dit d'abord QUI le porte ; la proposition en cours s'ajoute a

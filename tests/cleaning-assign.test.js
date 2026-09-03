@@ -180,3 +180,13 @@ test('aucun couple : aucune requête, une map vide', async () => {
   assert.strictEqual(map.size, 0)
   assert.strictEqual(sb.vu.userIds, null, 'pas de requête à vide')
 })
+
+test('une proposition doit laisser au moins deux heures', async () => {
+  // ⚠ « Pas zéro » ne suffit pas : un départ le lendemain à 15h59 UTC produisait
+  // une proposition valable UNE MINUTE, tuée par le passage de cron suivant.
+  // Un vrai délai de réponse, c'est le temps de lire un SMS et de répondre.
+  const t = Date.parse('2026-09-01T15:00:00Z')
+  assert.strictEqual(echeanceOffre('2026-09-02', t), null, 'une heure : refusé')
+  const t2 = Date.parse('2026-09-01T13:00:00Z')
+  assert.strictEqual(echeanceOffre('2026-09-02', t2), '2026-09-01T16:00:00.000Z', 'trois heures : accepté')
+})

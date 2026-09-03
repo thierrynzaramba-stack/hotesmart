@@ -1513,7 +1513,13 @@ if ("serviceWorker" in navigator) {
     btn.style.display = offre ? 'none' : ''
     if (offre) {
       const d = delaiRestant(m)
-      if (d) showModalWarning(`À confirmer — ${d}.`)
+      // ⚠ Une offre expiree ne peut plus aboutir : le serveur rendra 409.
+      // Laisser les deux boutons actifs, c'est proposer une action qui echoue.
+      const expiree = d === 'expirée'
+      btnOui.disabled = expiree
+      btnNon.disabled = expiree
+      if (expiree) showModalWarning('Cette proposition a expiré : le ménage est resté à quelqu\'un d\'autre.')
+      else if (d) showModalWarning(`À confirmer — ${d}.`)
       document.getElementById('modal').style.display = 'flex'
       return
     }
@@ -1612,7 +1618,14 @@ if ("serviceWorker" in navigator) {
         return
       }
       if (menage.assign) menage.assign.status = accepte ? 'accepted' : 'orphaned'
-      showModalSuccess(accepte ? 'Ménage accepté.' : 'Réponse enregistrée : votre employeur est prévenu.')
+      // ⚠ NE PAS PROMETTRE CE QUI N'ARRIVE PLUS. Le refus d'un menage PORTE par
+      // quelqu'un d'autre n'alerte pas l'hote — rien n'est decouvert, la
+      // porteuse l'a toujours. Le serveur dit lequel des deux cas c'est.
+      showModalSuccess(accepte
+        ? 'Ménage accepté.'
+        : (data && data.porte
+            ? 'Réponse enregistrée. Ce ménage reste à la personne qui en a la charge.'
+            : 'Réponse enregistrée : votre employeur est prévenu.'))
       await rechargerAssignations()
       setTimeout(closeModal, 1200)
     } catch (err) {

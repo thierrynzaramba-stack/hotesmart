@@ -165,7 +165,7 @@ test('markDone sur un ménage encore PROPOSÉ est refusé par le serveur', async
   // ⚠ La règle « on ne fait pas un ménage qu'on n'a pas accepté » n'existait que
   // dans le front : le serveur, lui, laissait passer. Une offre non répondue
   // n'engage personne — la marquer faite court-circuiterait la confirmation.
-  const etat = preparer({ menage: { provider_id: MARIE, status: 'offered' } })
+  const etat = preparer({ menage: { provider_id: null, offered_to: MARIE, status: 'unassigned' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('markDone'), res)
@@ -175,7 +175,7 @@ test('markDone sur un ménage encore PROPOSÉ est refusé par le serveur', async
 })
 
 test('markUndone sur un ménage proposé est refusé lui aussi', async () => {
-  const etat = preparer({ menage: { provider_id: MARIE, status: 'offered' } })
+  const etat = preparer({ menage: { provider_id: null, offered_to: MARIE, status: 'unassigned' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('markUndone'), res)
@@ -191,4 +191,32 @@ test('une fois accepté, le même ménage passe', async () => {
   await handler(post('markDone'), res)
   assert.notStrictEqual(res.code, 403)
   assert.strictEqual(etat.ecritures.length, 1)
+})
+
+test('la PORTEUSE peut marquer fait même pendant une proposition', async () => {
+  // ⚠ Le ménage reste le sien tant que personne n'a accepté : lui refuser
+  // l'action reviendrait à lui retirer une responsabilité qu'elle a toujours.
+  const etat = preparer({ menage: { provider_id: MARIE, offered_to: 'p-autre', status: 'accepted' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markDone'), res)
+  assert.notStrictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.length, 1)
+})
+
+test('une TIERCE ne peut pas toucher un ménage sous proposition', async () => {
+  // ⚠ LA GARDE QUE CE TEST FERME. Elle testait `status === 'offered'`, en
+  // supposant que proposition impliquait ce statut — le modèle parallèle casse
+  // l'équivalence : une proposition posée sur un ménage `unassigned` laisse le
+  // statut intact. Le ménage redevenait « à personne », et n'importe quelle
+  // prestataire du compte pouvait le marquer fait, ou le DÉFAIRE.
+  const etat = preparer({
+    profil: { id: 'p-julie', active: true },
+    menage: { provider_id: null, offered_to: MARIE, status: 'unassigned' }
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markUndone'), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.suppressions.length, 0)
 })

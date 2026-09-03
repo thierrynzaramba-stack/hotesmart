@@ -339,7 +339,7 @@ async function reassigner (req, res) {
   }
 
   const { data: avant, error: errLire } = await supabase.from('menages')
-    .select('id, provider_id, status')
+    .select('id, provider_id, status, offered_to')
     .eq('user_id', userId).eq('property_id', String(property_id))
     .eq('booking_id', String(booking_id)).eq('departure_date', departure_date)
     .maybeSingle()
@@ -376,6 +376,17 @@ async function reassigner (req, res) {
             accepted_at: null,
             assignment_reason: 'Desassigne a la main par l\'hote.' }
     reponse = { status: 'unassigned', provider_id: null, prenom: null }
+  } else if (choisi.id === avant.provider_id) {
+    // ⚠ RE-CHOISIR LA PORTEUSE = RETIRER LA PROPOSITION.
+    // C'etait le geste manquant : aucune action ne permettait d'annuler une
+    // proposition en gardant la porteuse. « — personne — » retirait AUSSI la
+    // porteuse, l'inverse de l'intention. Et si elle n'etait pas rang 1, la
+    // resélectionner partait sur la branche « proposer » et ecrivait
+    // `offered_to = provider_id` — viole `menages_offre_pas_a_soi`, donc 500.
+    maj = { ...maj, offered_to: null, offered_at: null, offer_expires_at: null,
+            assignment_reason: `Proposition retiree par l'hote : reste chez ${choisi.first_name}.` }
+    reponse = { status: avant.status, provider_id: avant.provider_id,
+                offered_to: null, prenom: choisi.first_name, retiree: true }
   } else {
     const { data: liaison, error: errLiaison } = await supabase.from('property_cleaning_providers')
       .select('rang').eq('user_id', userId).eq('property_id', String(property_id))
@@ -421,13 +432,15 @@ async function reassigner (req, res) {
 
   await supabase.from('menage_assignment_log').insert({
     user_id: userId, menage_id: avant.id,
-    event: maj.offered_to ? 'offered' : 'manual_assign',
+    event: reponse.retiree ? 'offer_withdrawn' : (maj.offered_to ? 'offered' : 'manual_assign'),
     from_provider_id: avant.provider_id,
     to_provider_id: maj.offered_to || maj.provider_id || null,
     actor: 'host',
-    reason: maj.offered_to
-      ? `Propose a ${choisi.first_name} : le menage reste chez son porteur jusqu'a acceptation.`
-      : (choisi ? `Vers ${choisi.first_name}.` : 'Menage laisse sans prestataire.')
+    reason: reponse.retiree
+      ? 'Proposition retiree : le menage reste chez son porteur.'
+      : (maj.offered_to
+          ? `Propose a ${choisi.first_name} : le menage reste chez son porteur jusqu'a acceptation.`
+          : (choisi ? `Vers ${choisi.first_name}.` : 'Menage laisse sans prestataire.'))
   })
 
   return res.status(200).json({ success: true, ...reponse })

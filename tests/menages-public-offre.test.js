@@ -38,6 +38,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
             gt (c, v) { q.gt = { c, v }; return c2 },
+            neq (c, v) { q.neq = { c, v }; return c2 },
             select () {
               etat.majs.push({ table, ...q })
               // ⚠ L'update est CONDITIONNEL : le double le simule. Sans cela,
@@ -49,7 +50,11 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
               // double affectation. Vérifié : la mutation fait tomber ce test.
               const viseSonOffre = q.f.offered_to === undefined ||
                                    q.f.offered_to === (menage && menage.offered_to)
-              const ok = majTouche && viseSonOffre
+              // ⚠ `.neq('status','cancelled')` est HONORE : une PWA restée
+              // ouverte sur un ménage dont la réservation a disparu ne doit pas
+              // pouvoir le ressusciter avec un porteur.
+              const pasAnnule = !q.neq || (menage && menage.status) !== q.neq.v
+              const ok = majTouche && viseSonOffre && pasAnnule
               return Promise.resolve({ data: ok ? [{ id: 'm1' }] : [], error: erreurMaj })
             },
             then (ok) { etat.majs.push({ table, ...q }); return Promise.resolve({ error: erreurMaj }).then(ok) }
@@ -199,7 +204,9 @@ test('refuser un ménage que PERSONNE ne porte : orphaned, et l\'hôte est alert
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('refuserMenage'), res)
-  assert.strictEqual(res.body.status, 'orphaned')
+  // ⚠ `porte` est la vraie information : le statut renvoyé était INVENTÉ quand
+  // quelqu'un portait le ménage, puisque la base n'était pas touchée.
+  assert.strictEqual(res.body.porte, false)
   assert.strictEqual(etat.majs[0].row.status, 'orphaned')
   assert.strictEqual(etat.majs[0].row.assigned_by, 'manual', 'décision humaine, verrouillée')
   assert.strictEqual(etat.incidents.length, 1)
@@ -317,4 +324,16 @@ test('le ménage est cherché SUR LE COMPTE du token', async () => {
   await handler(post('accepterMenage'), reponse())
   const q = etat.requetes.find(r => r.table === 'menages' && r.f.booking_id)
   assert.strictEqual(q.f.user_id, U)
+})
+
+test('accepter un ménage ANNULÉ est refusé', async () => {
+  // Une PWA restée ouverte sur un ménage dont la réservation a disparu pouvait
+  // le repasser en `accepted` avec un porteur — un ménage vivant pour une
+  // réservation qui ne l'est plus.
+  const etat = preparer({ menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'cancelled' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('accepterMenage'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.journal.length, 0)
 })
