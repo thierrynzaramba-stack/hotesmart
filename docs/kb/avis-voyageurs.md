@@ -635,6 +635,19 @@ de `propertyId`, donc **aucun filtre de repli n'est écrivable** : si Beds24
 changeait ce comportement, les avis seraient écrits sous le bien courant de la
 boucle. À surveiller si le split cesse de correspondre à l'interface.
 
+### Ce que cet historique vaut pour la fiche prestataire
+
+**Régina est la femme de ménage de La bulle et de Cœur de vie 23 depuis le
+début** (fait établi par le product owner). Les remarques de propreté de ces deux
+biens, 2023-2026, concernent donc son travail, et l'historique pourra lui être
+rattaché **rétroactivement** — lot du chantier prestataires.
+
+⚠ **Cette exception ne devient pas la règle.** Tout ménage futur se rattache par
+`menage_event` : une seconde femme de ménage arrive, et seul le lien au ménage
+précis dira qui a préparé quel séjour. Rattacher « au prestataire du bien »
+attribuerait à l'une le travail de l'autre dès la première semaine.
+Détail : `docs/specs/spec-prestataires-menage.md` §6.
+
 ### État du cœur
 
 **168 avis** au total : 93 Beds24, 70 Channex, 5 détections en messagerie.

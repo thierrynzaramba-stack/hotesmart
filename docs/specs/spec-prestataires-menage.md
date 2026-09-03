@@ -255,6 +255,24 @@ Tableau par prestataire sur période sélectionnable : nb ménages, note moyenne
 
 Job cron léger (une fois par jour, après le poll reviews) : pour chaque `ota_reviews` avec `menage_event_id` null et `booking_uid` résolu, trouver le `menage_event` du même bien dont la date est la plus proche **avant** le checkin de la réservation (fenêtre : 3 jours max) et renseigner `menage_event_id`. Si aucun match → laisser null, ne pas forcer. Le `provider_id` se déduit ensuite par jointure — ne pas le dupliquer sur `ota_reviews`.
 
+### Fait établi — Régina couvre les deux biens depuis le début
+
+**Régina est la femme de ménage de La bulle et de Cœur de vie 23 depuis
+l'origine.** Les remarques de propreté de ces deux biens, de 2023 à 2026,
+concernent donc son travail — fait établi par le product owner, pas une
+déduction du code.
+
+**Conséquence pour la fiche prestataire** : l'historique de ces deux biens peut
+lui être rattaché **rétroactivement**, sans passer par `menage_event_id`. C'est
+un lot du chantier prestataires, à faire une fois, sur ces deux biens nommément.
+
+⚠ **La règle générale ne change pas pour autant : tout ménage FUTUR se rattache
+par `menage_event`.** Une seconde femme de ménage arrive, et à partir de là seul
+le lien au ménage précis dira qui a préparé quel séjour. Le rattachement
+rétroactif est une exception bornée à un fait connu, pas un précédent — ne pas
+généraliser « le prestataire du bien » comme mode de rattachement, ce serait
+attribuer à l'une le travail de l'autre dès la première semaine de la seconde.
+
 ### Ce que la prestataire voit de l'avis — décision du 2 septembre 2026
 
 **L'extrait de propreté EST montré à la prestataire.** C'est le signal utile :
