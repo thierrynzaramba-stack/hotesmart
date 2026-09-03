@@ -568,3 +568,103 @@ test('list : une détection ignorée disparaît de la liste', async () => {
   await handler(req({ action: 'list' }), res)
   assert.strictEqual(res.body.avis.length, 0)
 })
+
+// ─── Requalification d'un verdict ───────────────────────────────────────────
+const AVIS_AUTO = { id: '55555555-5555-4555-8555-555555555555', user_id: PROD,
+                    statut: 'confirme', property_id_ref: REF_A,
+                    ai_clean_verdict: 'rien_signale', verdict_source: 'auto',
+                    received_at: '2026-08-01T00:00:00Z' }
+
+function reqRequalif (id, verdict, extra = {}) {
+  return { method: 'POST', query: {}, body: { action: 'requalifier', id, verdict },
+           headers: { authorization: 'Bearer jeton', ...extra } }
+}
+
+test('requalifier : le verdict change et devient HUMAIN', async () => {
+  const etat = preparer({ avis: [AVIS_AUTO] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_AUTO.id, 'remarque'), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
+  assert.strictEqual(maj.row.ai_clean_verdict, 'remarque')
+  assert.strictEqual(maj.row.verdict_source, 'humain')
+  assert.ok(maj.row.verdict_modifie_at, 'la date de correction est tracée')
+})
+
+test('requalifier : l\'avis n\'est JAMAIS supprimé ni son texte modifié', async () => {
+  // Un avis reste un fait. Le faire disparaître parce qu'on n'aime pas sa
+  // lecture automatique effacerait la parole du voyageur.
+  const etat = preparer({ avis: [AVIS_AUTO] })
+  const handler = require('../api/avis')
+  await handler(reqRequalif(AVIS_AUTO.id, 'positif'), reponse())
+  const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
+  for (const interdit of ['content', 'content_public', 'overall_score', 'score_clean', 'received_at']) {
+    assert.ok(!(interdit in maj.row), `${interdit} ne doit pas être touché`)
+  }
+  assert.ok(!etat.ecritures.some(e => e.op === 'delete'))
+})
+
+test('requalifier : l\'extrait du modèle est retiré, il ne colle plus au verdict', async () => {
+  const etat = preparer({ avis: [AVIS_AUTO] })
+  const handler = require('../api/avis')
+  await handler(reqRequalif(AVIS_AUTO.id, 'rien_signale'), reponse())
+  const maj = etat.ecritures.find(e => e.table === 'ota_reviews')
+  assert.strictEqual(maj.row.ai_clean_excerpt, null)
+})
+
+test('requalifier : un membre avis=read ne peut pas corriger', async () => {
+  const etat = preparer({
+    user: MEMBRE, avis: [AVIS_AUTO],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'read', property_scope: 'all' }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_AUTO.id, 'positif', { 'x-compte': PROD }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('requalifier : hors périmètre, refusé', async () => {
+  const etat = preparer({
+    user: MEMBRE, avis: [{ ...AVIS_AUTO, property_id_ref: REF_B }],
+    profil: { id: 'profil-1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { avis: 'write', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }
+  })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_AUTO.id, 'positif', { 'x-compte': PROD }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('requalifier : un verdict inventé est refusé', async () => {
+  // La colonne porte un CHECK : une valeur libre ferait échouer l'update.
+  const etat = preparer({ avis: [AVIS_AUTO] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_AUTO.id, 'tres_sale'), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('requalifier : une DÉTECTION en attente ne se requalifie pas', async () => {
+  // Elle se confirme ou s'ignore. Deux gestes pour la même décision se
+  // contrediraient.
+  const etat = preparer({ avis: [{ ...AVIS_AUTO, statut: 'detecte' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif(AVIS_AUTO.id, 'positif'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('requalifier : un id qui n\'est pas un UUID est refusé sans requête', async () => {
+  const etat = preparer({ avis: [AVIS_AUTO] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqRequalif('99', 'positif'), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})

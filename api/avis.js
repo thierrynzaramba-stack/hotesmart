@@ -44,7 +44,7 @@ const FENETRE_JRS = 30
 // pages/avis.html n'a rien a y faire.
 const CHAMPS = `id, provider, source, ota, content, content_public,
   overall_score, received_at, ai_clean_verdict, ai_clean_excerpt, ai_analyzed_at,
-  property_id_ref, statut`
+  property_id_ref, statut, verdict_source`
 
 // ─── Lecture ────────────────────────────────────────────────────────────────
 
@@ -302,6 +302,59 @@ async function valider (req, res, garde) {
   return res.status(200).json({ ok: true, statut })
 }
 
+// ─── Requalification d'un verdict de proprete ───────────────────────────────
+
+const VERDICTS = new Set(['positif', 'remarque', 'rien_signale'])
+
+async function requalifier (req, res, garde) {
+  const userId = garde.accountUserId
+  const id = req.body?.id ? String(req.body.id).trim() : ''
+  const verdict = req.body?.verdict ? String(req.body.verdict).trim() : ''
+
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Identifiant invalide' })
+  if (!VERDICTS.has(verdict)) return res.status(400).json({ error: 'Verdict invalide' })
+
+  // ⚠ Relecture AVANT ecriture, sur le compte cible et dans le perimetre :
+  // l'id vient du client (REVIEW.md regle 11).
+  const { data: ligne, error: errLire } = await supabase.from('ota_reviews')
+    .select('id, property_id_ref, ai_clean_verdict, statut')
+    .eq('id', id).eq('user_id', userId).maybeSingle()
+  if (errLire) return res.status(500).json({ error: 'Lecture impossible' })
+  if (!ligne) return res.status(404).json({ error: 'Introuvable' })
+
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(ligne.property_id_ref))) {
+    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+  }
+
+  // Une detection en attente se tranche par Confirmer / Ignorer, pas par une
+  // requalification : deux gestes pour la meme decision se contrediraient.
+  if (ligne.statut === 'detecte') {
+    return res.status(409).json({
+      error: 'Cette detection se confirme ou s\'ignore, elle ne se requalifie pas' })
+  }
+
+  // ⚠ L'AVIS N'EST JAMAIS SUPPRIME, ni son texte modifie. Seul le verdict
+  // change : un avis reste un fait, et le faire disparaitre parce qu'on n'aime
+  // pas sa lecture automatique effacerait la parole du voyageur.
+  const { error } = await supabase.from('ota_reviews').update({
+    ai_clean_verdict:    verdict,
+    // `humain` verrouille : ni la classification ni le trigger de reanalyse ne
+    // reviendront dessus.
+    verdict_source:      'humain',
+    verdict_modifie_at:  new Date().toISOString(),
+    verdict_modifie_par: garde.userId || null,
+    // L'extrait vient du modele : il ne correspond plus au verdict corrige.
+    ai_clean_excerpt:    null
+  }).eq('id', id).eq('user_id', userId)
+
+  if (error) {
+    console.error('[avis] requalification echec:', error.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  return res.status(200).json({ ok: true, verdict, verdict_source: 'humain' })
+}
+
 // ─── Routage ────────────────────────────────────────────────────────────────
 
 module.exports = async function handler (req, res) {
@@ -319,6 +372,15 @@ module.exports = async function handler (req, res) {
 
 async function router (req, res) {
   const action = String(req.query?.action || req.body?.action || 'list')
+
+  // `requalifier` corrige un verdict de proprete : ecriture.
+  if (action === 'requalifier') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
+    const garde = await requirePermission(req, res, {
+      domaine: 'avis', niveau: 'write', compteDelegue: true })
+    if (!garde.ok) return
+    return await requalifier(req, res, garde)
+  }
 
   // `valider` change l'etat d'une detection : ecriture.
   if (action === 'valider') {

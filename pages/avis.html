@@ -45,6 +45,12 @@
                 border-radius:6px; padding:4px 12px; font-size:12px; font-weight:600; cursor:pointer; }
     .btn-mini.ok { background:#1E7B34; color:#fff; border-color:#1E7B34; }
 
+    /* Requalification : discrete, elle ne doit pas concurrencer la lecture de
+       l'avis. Un petit selecteur qui n'apparait qu'au droit d'ecriture. */
+    .requalif { margin-left:8px; font-size:11px; border:0.5px solid var(--border);
+                border-radius:6px; padding:1px 4px; background:var(--bg); color:var(--text2); }
+    .corrige { font-size:11px; color:var(--text2); font-style:italic; margin-left:6px; }
+
     /* ⚠ `hidden` NE MASQUE PAS un element dont une regle auteur pose un display.
        `.btn` est en `display:inline-flex` (public/style.css), donc `btn.hidden =
        true` etait un NO-OP : le bouton de saisie restait visible, y compris pour
@@ -266,6 +272,19 @@
     return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
   }
 
+  // Petit sélecteur de correction, à côté du badge. Le serveur revalide le
+  // droit : ce masquage est un confort, pas la garde.
+  function requalif (a) {
+    if (a.statut === 'detecte') return ''   // une détection se confirme ou s'ignore
+    if (!a.ai_analyzed_at) return ''
+    const peut = window.peutEcrire ? window.peutEcrire('avis') : false
+    if (!peut) return a.verdict_source === 'humain' ? '<span class="corrige">corrigé</span>' : ''
+    const opts = [['positif','Propreté saluée'],['remarque','Remarque propreté'],['rien_signale','Propreté non évoquée']]
+      .map(([v,l]) => `<option value="${v}"${a.ai_clean_verdict===v?' selected':''}>${l}</option>`).join('')
+    return `<select class="requalif" data-requalif="${echapper(a.id)}" title="Corriger ce verdict">${opts}</select>` +
+           (a.verdict_source === 'humain' ? '<span class="corrige">corrigé</span>' : '')
+  }
+
   function badge (avis) {
     // Pas encore analyse : on le DIT, plutot que d'afficher un gris qui
     // signifierait « rien a signaler » alors qu'on n'a pas encore regarde.
@@ -312,7 +331,7 @@
           ${canal}
           <span>${echapper(nomBien(a.property_id_ref))}</span>
           <span>${dateFr(a.received_at)}</span>
-          ${badge(a)}
+          ${badge(a)}${requalif(a)}
           <span class="avis-note">${note}</span>
         </div>
         ${extrait}
@@ -459,6 +478,21 @@
     })
     $('s-annuler').addEventListener('click', () => $('saisie-modal').classList.remove('show'))
     $('s-envoyer').addEventListener('click', envoyer)
+    // ⚠ `change` et non `click` : un <select> ne se lit pas au clic.
+    $('liste').addEventListener('change', async e => {
+      const id = e.target?.dataset?.requalif
+      if (!id) return
+      const avant = e.target.value
+      e.target.disabled = true
+      try {
+        await appelAPI('avis', 'POST', { action: 'requalifier', id, verdict: avant })
+        await charger()
+      } catch (err) {
+        e.target.disabled = false
+        alert((err && err.message) || 'Correction impossible.')
+      }
+    })
+
     $('liste').addEventListener('click', async e => {
       const id = e.target?.dataset?.valider
       if (id) {
