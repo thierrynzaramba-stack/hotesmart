@@ -40,6 +40,9 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
       const q = { _f: {}, _or: null, table: nom }
       etat.requetes.push(q)
       const chain = {
+        // ⚠ Ne rend QUE les colonnes demandees, comme PostgREST. Servir la ligne
+        // entiere rendait decorative toute assertion « ce champ ne sort pas » :
+        // elle ne testait plus que la fixture.
         select (c, opts) { q._colonnes = c; q._count = opts?.count; q._head = !!(opts && opts.head); return chain },
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
@@ -87,7 +90,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
             (!q._neq || !q._neq.statut || (a.statut || 'confirme') !== q._neq.statut))
           if (q._or) c = c.filter(a => String(q._or).includes(a.property_id_ref))
           if (q._count === 'exact') return Promise.resolve({ data: q._head ? null : c, count: c.length, error: null })
-          return Promise.resolve({ data: c, error: null })
+          return Promise.resolve({ data: c.map(a => projeter(a, q._colonnes)), error: null })
         }
         if (nom === 'bookings_snapshot') {
           const c = snapshots.filter(s =>
@@ -130,6 +133,19 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
   return etat
 }
 
+// ⚠ PostgREST ne rend QUE les colonnes demandees. Un double qui sert la ligne
+// entiere rend decorative toute assertion « ce champ ne sort pas » : elle ne
+// teste plus que la fixture. Verifie : avec ce filtre, ajouter les dates de
+// sejour a AVIS_A fait tomber le test des colonnes interdites si la garde de
+// droits saute.
+function projeter (ligne, colonnes) {
+  if (typeof colonnes !== 'string' || !colonnes.trim() || colonnes.trim() === '*') return ligne
+  const noms = colonnes.split(',').map(c => c.trim()).filter(Boolean)
+  const out = {}
+  for (const n of noms) if (Object.prototype.hasOwnProperty.call(ligne, n)) out[n] = ligne[n]
+  return out
+}
+
 function reponse () {
   const r = { code: null, body: null }
   r.status = c => { r.code = c; return r }
@@ -138,7 +154,10 @@ function reponse () {
   return r
 }
 
-const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-30T01:00:00Z', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z' }
+const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-30T01:00:00Z', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z',
+                 // ⚠ De VRAIES dates de sejour en base : sans elles, l'assertion
+                 // « aucun `stay_` ne sort » ne peut rien attraper.
+                 stay_start: '2026-08-25', stay_end: '2026-08-28', guest_name: 'Fanny D.' }
 const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-20T01:00:00Z', property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
 // Avis d'un AUTRE compte : il ne doit jamais apparaitre, quel que soit le filtre.
 const AVIS_TIERS = { id: 'r3', statut: 'confirme', ai_analyzed_at: '2026-08-25T01:00:00Z', user_id: '33333333-3333-4333-8333-333333333333',
@@ -432,6 +451,17 @@ test('list : ni le nom du voyageur ni ses dates de séjour ne sortent', async ()
   const bloc = src.slice(debut + 16, src.indexOf('`', debut + 16))
   for (const c of CHAMPS_INTERDITS) {
     assert.ok(!bloc.includes(c), `${c} ne doit pas être renvoyé par la liste des avis`)
+  }
+
+  // ⚠ LA LISTE CONDITIONNELLE COMPTE AUSSI. `CHAMPS_AVEC_SEJOUR` n'ajoute que
+  // les deux dates de séjour, servies sous le droit `reservations` ; y glisser
+  // `booking_uid` ou `guest_name` rouvrirait la même porte un cran plus loin,
+  // et le test précédent n'y verrait rien.
+  const etendu = src.slice(src.indexOf('const CHAMPS_AVEC_SEJOUR = `'))
+  const suite = etendu.slice(etendu.indexOf('${CHAMPS}') + 9, etendu.indexOf('`', etendu.indexOf('${CHAMPS}')))
+  for (const c of CHAMPS_INTERDITS) {
+    if (c === 'stay_start' || c === 'stay_end') continue
+    assert.ok(!suite.includes(c), `${c} n'a rien à faire dans la liste étendue non plus`)
   }
 })
 

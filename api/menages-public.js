@@ -61,8 +61,17 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const { data: tokenData } = await supabase
+        const { data: tokenData, error: errTok } = await supabase
           .from('public_tokens').select('user_id').eq('token', token).maybeSingle()
+        // ⚠ UNE PANNE N'EST PAS UN TOKEN INVALIDE — et ici la difference DETRUIT
+        // du travail. Le front supprime l'action de sa file d'attente sur tout
+        // 4xx (le serveur a tranche, inutile de rejouer) : un timeout PostgREST
+        // pendant la resynchro effacait donc silencieusement un « menage fait »,
+        // et le visuel revenait en arriere. Un 503 laisse l'action en file.
+        if (errTok) {
+          console.error('[menages-public] lecture du token echec:', errTok.message)
+          return res.status(503).json({ error: 'Service temporairement indisponible' })
+        }
         if (!tokenData) return res.status(401).json({ error: 'Token invalide' })
 
         const userId = tokenData.user_id
@@ -108,8 +117,17 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const { data: tokenData } = await supabase
+        const { data: tokenData, error: errTok } = await supabase
           .from('public_tokens').select('user_id').eq('token', token).maybeSingle()
+        // ⚠ UNE PANNE N'EST PAS UN TOKEN INVALIDE — et ici la difference DETRUIT
+        // du travail. Le front supprime l'action de sa file d'attente sur tout
+        // 4xx (le serveur a tranche, inutile de rejouer) : un timeout PostgREST
+        // pendant la resynchro effacait donc silencieusement un « menage fait »,
+        // et le visuel revenait en arriere. Un 503 laisse l'action en file.
+        if (errTok) {
+          console.error('[menages-public] lecture du token echec:', errTok.message)
+          return res.status(503).json({ error: 'Service temporairement indisponible' })
+        }
         if (!tokenData) return res.status(401).json({ error: 'Token invalide' })
 
         const userId = tokenData.user_id
@@ -168,7 +186,13 @@ module.exports = async function handler(req, res) {
       .from('public_tokens').select('user_id, label, property_ids, visibility_days')
       .eq('token', token).maybeSingle()
 
-    if (tokenError || !tokenData) return res.status(401).json({ error: 'Token invalide' })
+    // Meme regle que les deux chemins d'ecriture ci-dessus : la panne coupe en
+    // 503, elle ne se fait pas passer pour un lien invalide.
+    if (tokenError) {
+      console.error('[menages-public] lecture du token echec:', tokenError.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    if (!tokenData) return res.status(401).json({ error: 'Token invalide' })
 
     const userId         = tokenData.user_id
     const visibilityDays = tokenData.visibility_days || 30

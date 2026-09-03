@@ -957,23 +957,7 @@ if ("serviceWorker" in navigator) {
     // Non bloquant : le planning ne doit pas dependre de la vue Avis.
     initAvis().catch(err => console.warn('[Avis] sonde impossible', err))
 
-    // ⚠ UN RAPPEL QUOTIDIEN CALCULE UNE SEULE FOIS N'EN EST PAS UN. Une PWA
-    // reste ouverte des jours sur un telephone : sans ce reveil, le ratio date
-    // du dernier chargement, et un droit `self_view_reviews` retire resterait
-    // affiche jusqu'a un rechargement. Au retour au premier plan, on resonde —
-    // au plus une fois par quart d'heure, pour ne pas rejouer le comptage a
-    // chaque bascule d'application.
-    let derniereSonde = Date.now()
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible') return
-      if (Date.now() - derniereSonde < 15 * 60 * 1000) return
-      derniereSonde = Date.now()
-      avisCharge = false   // la liste ouverte se rechargera aussi
-      initAvis().catch(err => console.warn('[Avis] resonde impossible', err))
-      if (currentTab === 'avis') {
-        chargerAvis().catch(err => console.warn('[Avis] rechargement impossible', err))
-      }
-    })
+    brancherResonde()
   }
 
   // ─── Local storage : chargement / persistance ──────────────────────────────
@@ -1152,12 +1136,28 @@ if ("serviceWorker" in navigator) {
     }
   }
 
+  // ⚠ UNE DATE NUE SE PARSE EN LOCAL, PAS EN UTC.
+  // `arrival` / `departure` sont des dates de calendrier (« 2026-08-15 »), que
+  // `new Date` interprete a MINUIT UTC. Tout le planning, lui, raisonne en heure
+  // locale (`setHours(0,0,0,0)`, `toDateStr`) : a l'ouest de Greenwich, un
+  // depart du 15 tombait donc dans la colonne du 14 — en Guadeloupe, en
+  // Martinique, en Guyane. La vue Mois, qui compare la chaine brute, restait
+  // juste : les deux vues du meme ecran se contredisaient.
+  function dateNueLocale (s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''))
+    if (!m) { const d = new Date(s); return isNaN(d) ? null : d }
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    d.setHours(0, 0, 0, 0)
+    return d
+  }
+
   function getMenages() {
     const menages = []
     for (const b of bookings) {
       if (!activeProps.has(b.propId)) continue
       if (!b.departure) continue
-      const dep = new Date(b.departure)
+      const dep = dateNueLocale(b.departure)
+      if (!dep) continue
       const propIdx = properties.findIndex(p => p.id === b.propId)
       const id = `${b.id}-${b.departure}`
       const isPending = pendingQueue.some(a => a.booking_id === String(b.id) && a.departure_date === b.departure)
@@ -1380,7 +1380,7 @@ if ("serviceWorker" in navigator) {
     if (laterDone) return true
     const laterArrived = bookings.some(b =>
       b.propId === m.propId && b.id !== m.bookId && b.arrival &&
-      new Date(b.arrival) > menageDate && new Date(b.arrival) <= today
+      dateNueLocale(b.arrival) > menageDate && dateNueLocale(b.arrival) <= today
     )
     return laterArrived
   }
@@ -1701,13 +1701,53 @@ if ("serviceWorker" in navigator) {
     el.style.display = ''
   }
 
+  // ⚠ IDEMPOTENT. Les ecouteurs sont poses UNE FOIS. `initAvis` ne tournait
+  // qu'au demarrage quand cette fonction a ete ecrite ; le re-sondage au retour
+  // au premier plan la rappelle, et une fleche anonyme ne se dedoublonne pas :
+  // une PWA laissee ouverte une journee accumulait un ecouteur par reveil, si
+  // bien qu'UN SEUL tap sur « Avis » lancait autant de chargements paralleles
+  // (`avisCharge` ne passe a true qu'apres le premier `await`, donc aucun ne
+  // s'arrete). Mesure sur le vrai bloc : 3 sondes = 3 fetchs pour un clic.
+  let ongletsBranches = false
   function montrerOnglets () {
     const tabs = document.getElementById('tabs')
     if (!tabs) return
     tabs.style.display = ''
+    if (ongletsBranches) return
+    ongletsBranches = true
     tabs.querySelectorAll('button').forEach(b => {
       b.addEventListener('click', () => setTab(b.dataset.tab))
     })
+  }
+
+  // ⚠ UN RAPPEL QUOTIDIEN CALCULE UNE SEULE FOIS N'EN EST PAS UN. Une PWA reste
+  // ouverte des jours sur un telephone : sans ce reveil, le ratio date du
+  // dernier chargement, et un droit `self_view_reviews` retire resterait
+  // affiche. Au plus une fois par quart d'heure, pour ne pas rejouer le
+  // comptage a chaque bascule d'application.
+  let derniereSonde = Date.now()
+  function brancherResonde () {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - derniereSonde < 15 * 60 * 1000) return
+      derniereSonde = Date.now()
+      resonder().catch(err => console.warn('[Avis] resonde impossible', err))
+    })
+  }
+
+  async function resonder () {
+    // ⚠ SEQUENCE, PAS PARALLELE. Lances ensemble, la sonde et le chargement
+    // ecrivent tous deux l'en-tete : sur un droit retire entre les deux
+    // reponses, l'ordre d'arrivee decidait de ce qui restait affiche.
+    await initAvis()
+    if (currentTab !== 'avis') return
+    // ⚠ ET SEULEMENT SI ON PEUT ABOUTIR. Hors ligne, `chargerAvis` remplace la
+    // liste par « service indisponible » — la prestataire qui lisait ses
+    // extraits en sous-sol, met l'appli en fond et revient, perdait l'ecran
+    // qu'elle pouvait encore lire. Une PWA hors-ligne garde ce qu'elle a.
+    if (navigator.onLine === false) return
+    avisCharge = false
+    await chargerAvis()
   }
 
   async function chargerAvis () {

@@ -106,9 +106,15 @@ async function lister (req, res, garde) {
   // Filtres d'abord, tri et borne ensuite : appliquer un filtre APRES .limit()
   // fonctionne mais se lit mal, et invite a une erreur d'ordre au prochain
   // ajout.
-  // Le titulaire (`contexte` null) voit tout ; un membre doit porter le droit.
-  // Le perimetre est deja applique par `filtre` plus bas : on n'interroge ici
-  // que le NIVEAU du domaine, sans cible.
+  // ⚠ Ce que fait REELLEMENT cette ligne. `requirePermission` ne rend
+  // `contexte: null` que pour `domaine: 'titulaire'` : ici le contexte est
+  // toujours renseigne, et c'est `niveauEffectif` qui reconnait le titulaire
+  // (`userId === accountUserId` -> tout). Le `!garde.contexte` est une ceinture,
+  // pas le mecanisme — ne pas le lire comme la garde du titulaire.
+  // La cible est `null` a dessein : on interroge le NIVEAU du domaine, le
+  // perimetre des LIGNES etant deja pose par `filtre` / `bienDemande` plus bas.
+  // `property_scope` etant unique par profil, le perimetre `reservations` ne
+  // peut pas etre plus large que celui d'`avis`.
   const voitSejours = !garde.contexte || peutLire(garde.contexte, 'reservations', null)
   let q = supabase.from('ota_reviews')
     .select(voitSejours ? CHAMPS_AVEC_SEJOUR : CHAMPS).eq('user_id', userId)
@@ -445,6 +451,16 @@ async function router (req, res) {
     return await valider(req, res, garde)
   }
 
+  // ⚠ DETTE ASSUMEE, a lire avec le bloc `CHAMPS_AVEC_SEJOUR` en tete de fichier.
+  // Celui-ci pose que le SEJOUR suit `reservations` ; `sejours`, lui, sert
+  // encore le nom du voyageur ET les dates a un membre `avis: write` /
+  // `reservations: none`. Le compromis d'origine (ci-dessous) tient : `write`
+  // est deja un cran au-dessus de `read`, et cette action ne sert qu'au
+  // formulaire de saisie. Mais les deux regles ne coincident pas, et
+  // l'alignement — ajouter `peutLire(ctx, 'reservations', null)` ici — est une
+  // decision produit : il retirerait le rattachement a un sejour aux membres
+  // qui saisissent des avis sans droit sur les reservations.
+  //
   // ⚠ `sejours` exige `write`, pas `read`, alors qu'il ne fait que LIRE.
   // Il renvoie le nom des voyageurs et leurs dates de sejour : en `read`, un
   // membre `avis: read` / `reservations: none` aurait obtenu la liste nominative

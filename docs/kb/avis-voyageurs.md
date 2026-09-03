@@ -341,13 +341,55 @@ correctif du premier — exactement le même enchaînement que sur `register`.
 
 **La règle qui en sort** : le domaine `avis` donne accès au **contenu** des avis,
 pas à l'**identité** des voyageurs ni à leurs séjours, qui relèvent de
-`reservations`. `CHAMPS` ne contient donc plus que les colonnes réellement
+`reservations`. `CHAMPS` ne contient donc que les colonnes réellement
 affichées — `content_private` compris, retiré par moindre exposition puisque
 l'extrait de propreté suffit.
 
 Un test vérifie les deux sens : aucune colonne interdite dans la liste, **et**
 aucune colonne renvoyée qui ne soit affichée par la page. C'est ce second test
 qui empêchera la liste de regrossir au prochain ajout.
+
+#### Troisième reprise (3 septembre 2026) : la même porte, rouverte par mégarde
+
+Le lot « dates de séjour » a **remis `stay_start` / `stay_end` dans `CHAMPS`** —
+pour une bonne raison d'affichage (une date de réception se lisait comme une date
+de séjour), mais en rouvrant exactement la porte ci-dessus. Le commentaire qui
+l'interdit était toujours là, trois lignes plus haut, inchangé.
+
+Deux leçons, l'une sur le code, l'autre sur les tests :
+
+- **Un comportement volontaire qui contredit une décision gravée doit réécrire la
+  décision, pas se poser à côté d'elle.** Deux commentaires opposés dans le même
+  bloc, c'est la garantie que le suivant tranchera au hasard.
+- **Le test qui gardait cette liste ne pouvait pas échouer.** Quatre antislashs
+  dans un littéral JS donnent `\b` littéral : la regex cherchait la chaîne
+  `\bstay_start\b` en caractères bruts, absente de tout code source. Il était
+  vert depuis son écriture, et l'est resté pendant la réouverture. Une
+  comparaison de chaîne (`bloc.includes`) ne peut pas se tromper.
+
+**Règle tranchée** : le **contenu** de l'avis reste sous `avis` ; le **séjour**
+qu'il désigne suit `reservations`. Concrètement, `CHAMPS_AVEC_SEJOUR` ajoute les
+deux dates **seulement** si `peutLire(contexte, 'reservations', null)` — sinon la
+colonne n'est même pas sélectionnée, et l'écran affiche « Reçu le… », étiqueté
+comme tel. Trois tests de **comportement** couvrent les trois cas (sans droit,
+avec droit, titulaire) ; le garde textuel porte maintenant sur les deux listes.
+
+⚠️ **Dette assumée** : `sejours` sert toujours le nom du voyageur et les dates à
+un membre `avis: write` / `reservations: none`. Le compromis tient (`write` est
+un cran au-dessus, et l'action ne sert qu'au formulaire de saisie), mais les deux
+règles ne coïncident pas. Les aligner retirerait le rattachement à un séjour aux
+membres qui saisissent des avis sans droit sur les réservations : c'est une
+décision produit, pas un correctif.
+
+#### Et les dates nues se lisent en UTC
+
+`stay_start` / `stay_end` sont des colonnes `date`. `new Date('2026-08-15')` vaut
+minuit **UTC** : formaté en heure locale, ce jour s'affiche « 14 août » à l'ouest
+de Greenwich — donc pour un hôte ou une prestataire en Guadeloupe, en Martinique
+ou en Guyane. Un séjour décalé d'un jour a le même effet qu'une date inventée.
+Les dates de calendrier se formatent donc en `timeZone: 'UTC'` ; `received_at`,
+qui est un instant réel, reste en heure locale. Les tests **forcent** le fuseau :
+verts sur une machine à Paris, ils restaient aveugles au défaut.
 
 ### `sejours` exige `write`, alors qu'il ne fait que lire
 

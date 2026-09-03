@@ -73,7 +73,7 @@ test('le HTML masque les onglets et la vue Avis AU DEPART', async () => {
 
 // Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
 // ecrit dans chaque conteneur.
-function contexte ({ reponses = [] } = {}) {
+function contexte ({ reponses = [], enLigne = true, reveils = [] } = {}) {
   const els = new Map()
   const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
   const appels = []
@@ -87,9 +87,12 @@ function contexte ({ reponses = [] } = {}) {
       getElementById: get,
       querySelector: sel => get(sel.replace(/^[.#]/, '')),
       querySelectorAll: sel => /button/.test(sel) ? boutons : [],
-      addEventListener () {},
+      // Le vrai listener de re-sonde est branche ici : on le retient pour
+      // pouvoir le declencher, au lieu de faire semblant de le couvrir.
+      addEventListener (ev, fn) { if (ev === 'visibilitychange') reveils.push(fn) },
       visibilityState: 'visible'
     },
+    navigator: { onLine: enLigne },
     fetch: async (url) => {
       appels.push(url)
       const r = reponses.shift()
@@ -105,7 +108,9 @@ function contexte ({ reponses = [] } = {}) {
   // `let avisCharge` vit dans le scope lexical du script, pas sur l'objet
   // contexte : on le relit par une evaluation dans ce meme contexte.
   const lire = expr => vm.runInContext(expr, ctx)
-  return { ctx, els, get, appels, lire, boutons }
+  // Un reveil comme le navigateur en produit : l'onglet redevient visible.
+  const reveiller = () => { reveils.forEach(fn => fn()) }
+  return { ctx, els, get, appels, lire, boutons, reveils, reveiller }
 }
 
 const RATIO_OK = { total: 98, positif: 10, remarque: 15, rien_signale: 73, periode: 'toujours' }
@@ -583,4 +588,107 @@ test('la sonde vide l\'en-tête quand le droit n\'est pas là', async () => {
   await ctx.initAvis()
   assert.strictEqual(get('entete-ratio').innerHTML, '')
   assert.strictEqual(get('entete-ratio').style.display, 'none')
+})
+
+// ─── Le re-sondage au retour au premier plan ───────────────────────────────
+
+test('re-sonder n\'empile pas les écouteurs d\'onglets', async () => {
+  // ⚠ UN SEUL TAP LANÇAIT AUTANT DE CHARGEMENTS QU'IL Y AVAIT EU DE RÉVEILS.
+  // `montrerOnglets` posait une flèche anonyme par appel, et `avisCharge` ne
+  // passe à true qu'après le premier `await` : aucun des appels concurrents ne
+  // s'arrêtait. Mesuré avant correctif : 3 sondes = 3 fetchs pour un clic.
+  const ok = { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }
+  const { ctx, boutons, appels } = contexte({ reponses: [ok, ok, ok, ok, ok, ok] })
+  await ctx.initAvis()
+  await ctx.initAvis()
+  await ctx.initAvis()
+  const btnAvis = boutons.find(b => b.dataset.tab === 'avis')
+  assert.strictEqual(btnAvis.listeners.length, 1, 'un seul écouteur, quel que soit le nombre de sondes')
+  const avant = appels.length
+  btnAvis.click()
+  await new Promise(r => setImmediate(r))
+  assert.strictEqual(appels.length - avant, 1, 'un clic = un chargement')
+})
+
+test('hors ligne, le retour au premier plan NE VIDE PAS la liste affichée', async () => {
+  // La prestataire qui lit ses extraits en sous-sol, met l'appli en fond et
+  // revient, gardait un écran illisible « Service indisponible » à la place de
+  // ce qu'elle avait encore sous les yeux. Une PWA hors-ligne garde ce qu'elle a.
+  const reveils = []
+  const { ctx, get } = contexte({
+    enLigne: false, reveils,
+    reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [
+      { id: '1', verdict: 'remarque', extrait: 'bouilloire sale', bien: 'C', bienNom: 'C',
+        sejourDebut: '2026-08-12', sejourFin: '2026-08-15', recuLe: null }
+    ] } }]
+  })
+  await ctx.chargerAvis()
+  ctx.setTab('avis')
+  const avant = get('avis-liste').innerHTML
+  assert.ok(avant.includes('bouilloire sale'))
+  await ctx.resonder()
+  assert.strictEqual(get('avis-liste').innerHTML, avant, 'la liste doit survivre au retour au premier plan')
+})
+
+test('en ligne, le retour au premier plan RAFRAÎCHIT bien', async () => {
+  // Contre-épreuve : ne rien rafraîchir passerait aussi le test précédent.
+  const { ctx, get } = contexte({ reponses: [
+    { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [
+      { id: '1', verdict: 'remarque', extrait: 'ancien', bien: 'C', bienNom: 'C', recuLe: '2026-08-01T00:00:00Z' }] } },
+    { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } },
+    { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [
+      { id: '2', verdict: 'remarque', extrait: 'nouveau', bien: 'C', bienNom: 'C', recuLe: '2026-09-01T00:00:00Z' }] } }
+  ] })
+  await ctx.chargerAvis()
+  ctx.setTab('avis')
+  assert.ok(get('avis-liste').innerHTML.includes('ancien'))
+  await ctx.resonder()
+  assert.ok(get('avis-liste').innerHTML.includes('nouveau'), get('avis-liste').innerHTML)
+})
+
+test('le réveil est branché sur visibilitychange, et respecte son délai', async () => {
+  const reveils = []
+  const ok = { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }
+  const { ctx, appels, reveiller } = contexte({ reveils, reponses: [ok, ok] })
+  ctx.brancherResonde()
+  assert.strictEqual(reveils.length, 1, 'un écouteur visibilitychange doit être posé')
+  reveiller()
+  await new Promise(r => setImmediate(r))
+  assert.strictEqual(appels.length, 0, 'un réveil juste après le chargement ne resonde pas')
+})
+
+// ─── Les dates nues du PLANNING ────────────────────────────────────────────
+// ⚠ Même famille que le décalage de la vue Avis, sur l'autre écran. `arrival` /
+// `departure` sont des dates de calendrier ; `new Date('2026-08-15')` vaut
+// minuit UTC, alors que tout le planning raisonne en heure locale. À l'ouest de
+// Greenwich, un départ du 15 tombait dans la colonne du 14 — pendant que la vue
+// Mois, qui compare la chaîne brute, affichait le bon jour. Deux vues du même
+// écran qui se contredisent.
+
+function extraireDateNueLocale () {
+  const i = HTML.indexOf('  function dateNueLocale (s) {')
+  assert.ok(i > 0, 'le helper doit rester repérable')
+  const j = HTML.indexOf('\n  }', i) + 4
+  const ctx = { }
+  vm.createContext(ctx)
+  vm.runInContext(HTML.slice(i, j) + '\n;globalThis.f = dateNueLocale', ctx)
+  return ctx.f
+}
+
+for (const tz of ['Europe/Paris', 'America/Guadeloupe', 'America/New_York', 'Pacific/Auckland']) {
+  test(`une date nue tombe le bon jour sous ${tz}`, async () => {
+    sousFuseau(tz, () => {
+      const d = extraireDateNueLocale()('2026-08-15')
+      assert.strictEqual(d.getFullYear(), 2026)
+      assert.strictEqual(d.getMonth(), 7, 'août')
+      assert.strictEqual(d.getDate(), 15, `jour décalé sous ${tz}`)
+      assert.strictEqual(d.getHours(), 0, 'minuit LOCAL, comme le reste du planning')
+    })
+  })
+}
+
+test('une date illisible ne produit pas une date fantôme', async () => {
+  // `getMenages` saute l'entrée plutôt que de placer un ménage n'importe où.
+  assert.strictEqual(extraireDateNueLocale()('pas-une-date'), null)
+  assert.strictEqual(extraireDateNueLocale()(''), null)
 })

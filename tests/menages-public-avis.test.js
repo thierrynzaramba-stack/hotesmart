@@ -419,15 +419,20 @@ test('PANNE de lecture du token : 503, jamais « Token invalide »', async () =>
   assert.strictEqual(res.code, 503)
 })
 
-test('PANNE de lecture du token : pas d\'élargissement silencieux du ratio', async () => {
-  // Le repli précédent retombait sur « toujours » : le ratio se recalculait sur
-  // tout l'historique au lieu des 15 jours réglés par l'hôte, sans signal.
-  preparer({ erreurToken: { message: 'timeout' } })
+test('PANNE de lecture du token : la coupure est EFFECTIVE', async () => {
+  // ⚠ L'assertion précédente (`!res.body.ratio`) était satisfaite par n'importe
+  // quel corps d'erreur, 401 compris : elle ne distinguait pas le correctif du
+  // défaut. Ce qui prouve la coupure, c'est qu'aucun comptage n'a lieu — le
+  // repli précédent, lui, recalculait le ratio sur tout l'historique au lieu de
+  // la période réglée par l'hôte.
+  const journal = preparer({ erreurToken: { message: 'timeout' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req({ detail: '1' }), res)
-  assert.ok(!res.body.ratio, 'aucun ratio ne doit sortir d\'une panne')
-  assert.ok(!res.body.periode)
+  assert.strictEqual(res.code, 503)
+  assert.strictEqual(journal.filter(a => a.table === 'ota_reviews').length, 0,
+    'aucun avis ne doit être lu ni compté après une panne de lecture du token')
+  assert.strictEqual(journal.filter(a => a.table === 'profile_permissions').length, 0)
 })
 
 // ─── Les trois dates, jamais fondues en une ────────────────────────────────
@@ -456,4 +461,38 @@ test('un avis SANS séjour ne se voit pas attribuer une date inventée', async (
   assert.strictEqual(a.sejourDebut, null)
   assert.strictEqual(a.sejourFin, null)
   assert.strictEqual(a.recuLe, '2026-08-30T00:00:00Z')
+})
+
+// ─── Une panne ne doit jamais se faire passer pour un lien invalide ────────
+// ⚠ Sur les deux chemins d'ÉCRITURE, la différence détruit du travail : le
+// front supprime l'action de sa file d'attente sur tout 4xx (le serveur a
+// tranché, inutile de rejouer). Un timeout PostgREST pendant la resynchro
+// effaçait donc silencieusement un « ménage fait ».
+
+const CHEMINS = [
+  { nom: 'planning (GET)',   req: () => ({ method: 'GET', query: { token: TOKEN }, headers: {} }) },
+  { nom: 'markDone (POST)',  req: () => ({ method: 'POST', query: { token: TOKEN },
+      body: { action: 'markDone', booking_id: 'b1', property_id: 'COL', departure_date: '2026-08-01' }, headers: {} }) },
+  { nom: 'markUndone (POST)', req: () => ({ method: 'POST', query: { token: TOKEN },
+      body: { action: 'markUndone', booking_id: 'b1', property_id: 'COL', departure_date: '2026-08-01' }, headers: {} }) }
+]
+
+for (const c of CHEMINS) {
+  test(`${c.nom} : une panne de lecture du token rend 503, pas 401`, async () => {
+    preparer({ erreurToken: { message: 'timeout' } })
+    const handler = require('../api/menages-public')
+    const res = reponse()
+    await handler(c.req(), res)
+    assert.notStrictEqual(res.code, 401, 'un 4xx fait purger la file d\'attente du front')
+    assert.strictEqual(res.code, 503)
+  })
+}
+
+test('un token réellement inconnu rend toujours 401', async () => {
+  // Contre-épreuve : répondre 503 à tout le monde masquerait un lien révoqué.
+  preparer({})
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler({ method: 'GET', query: { token: 'lien-revoque' }, headers: {} }, res)
+  assert.strictEqual(res.code, 401)
 })
