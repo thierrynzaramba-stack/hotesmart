@@ -11,12 +11,15 @@
        (`pages/biens-calendrier.html`), décliné aux ménages — décision du product
        owner du 5 septembre 2026. Ce n'est PAS une réinvention : même barre de
        contrôles collante, mêmes pastilles de mois, même bande de mois, même
-       `table.cal` à colonnes de 34 px et libellé de ligne figé à gauche, mêmes
-       classes `weekend` / `today` / `month-start`.
+       `table.cal` et libellé de ligne figé à gauche, mêmes classes
+       `weekend` / `today` / `month-start`. Seule la LARGEUR de case diffère —
+       cet écran écrit des prénoms, celui des tarifs des chiffres.
        Deux écrans qui montrent des jours et des biens doivent se lire pareil :
        une seconde grammaire visuelle, c'est un second apprentissage. */
     .cal-page * { box-sizing: border-box; }
-    .cal-page { -webkit-user-select: none; user-select: none; }
+    /* Largeur de case par défaut ; le script l'ajuste selon la taille d'écran. */
+    .cal-page { -webkit-user-select: none; user-select: none; --case: 84px; --label: 120px; }
+    @media (max-width: 640px) { .cal-page { --case: 62px; --label: 92px; } }
     .cal-controls { background: var(--bg); padding: 14px 20px; border-bottom: 0.5px solid var(--border);
                     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
                     gap: 12px; position: sticky; top: 0; z-index: 20; }
@@ -52,16 +55,22 @@
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left;
                           padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
-    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff;
-                               z-index: 5; border-bottom: 1px solid #e5e5e7; }
+    table.month-band .corner { width: var(--label); min-width: var(--label); position: sticky; left: 0;
+                               background: #fff; z-index: 5; border-bottom: 1px solid #e5e5e7; }
 
     .bien-section { padding-top: 18px; padding-bottom: 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-    table.cal th, table.cal td { padding: 6px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
+    /* ⚠ LA LARGEUR DE CASE EST PROPRE A CET ECRAN, et pilotée par `--case`.
+       `CELL_W` (34 px) reste la largeur du calendrier des tarifs, qui n'affiche
+       que des chiffres : l'y modifier pour écrire un prénom aurait élargi un
+       écran qui n'en a pas besoin, et les deux grilles partagent ce module. */
+    table.cal th, table.cal td { padding: 6px 2px; text-align: center; white-space: nowrap;
+                                 width: var(--case); min-width: var(--case); }
     table.cal thead th { border-bottom: 1px solid #e5e5e7; }
-    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px;
-                           min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 2;
+    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73;
+                           width: var(--label); min-width: var(--label);
+                           background: #fff; position: sticky; left: 0; z-index: 2;
                            border-right: 1px solid #e5e5e7; font-weight: 500; }
     table.cal thead .row-label { z-index: 4; }
     table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; border-left: 4px solid #007aff;
@@ -75,14 +84,20 @@
     table.cal td.cell { cursor: pointer; position: relative; }
     table.cal td.cell:hover { background: #eef4ff; }
 
-    /* La pastille de garde : une initiale, une couleur stable par personne.
-       ⚠ La grille doit rester DENSE : à 34 px de colonne, un prénom entier ne
-       tient pas — l'initiale tient, le reste est au survol et au clic. */
-    .gard { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-            border-radius: 50%; font-size: 11px; font-weight: 700; color: #fff; }
-    .gard.vide { background: transparent; color: #d2d2d7; font-weight: 400; }
-    .gard.alerte { background: #d52a44; }
-    .gard.regler { background: #f59e0b; }
+    /* Le PRÉNOM EN ENTIER dans la ligne Garde (décision du 5 septembre 2026, en
+       remplacement des pastilles à initiale) : les colonnes s'élargissent, la
+       grille défile — moins de jours d'un coup, mais on lit qui c'est sans
+       survoler.
+       ⚠ L'ellipse est CSS, pas une coupe en JavaScript : couper une chaîne à
+       N caractères tranche au milieu d'un accent composé, et « Régina » y
+       devenait « Re… ». Le navigateur, lui, coupe au pixel et sait le faire.
+       Le prénom complet reste dans le `title` de la case. */
+    .gard { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-size: 11px; font-weight: 600; line-height: 18px; border-radius: 4px;
+            padding: 0 4px; border-left: 3px solid transparent; text-align: left; }
+    .gard.vide { color: #d2d2d7; font-weight: 400; text-align: center; border-left-color: transparent; }
+    .gard.alerte { background: #ffeced; color: #d52a44; border-left-color: #d52a44; }
+    .gard.regler { background: #FEF3C7; color: #92400E; border-left-color: #f59e0b; }
     .men { display: inline-block; width: 100%; font-size: 11px; line-height: 18px; border-radius: 4px; }
     .men.porte { background: #dde7f5; color: #0d4ea6; }
     .men.attente { background: #FEF3C7; color: #92400E; }
@@ -173,9 +188,9 @@
         </div>
       </div>
       <div class="legende" id="legende" style="display:none">
-        <span><span class="gard" style="background:#0d4ea6">R</span> de garde</span>
-        <span><span class="gard regler">R</span> jours à régler</span>
-        <span><span class="gard alerte">R</span> désactivée</span>
+        <span><span class="gard" style="display:inline-block;border-left-color:#0d4ea6;background:#0d4ea614;color:#1d1d1f">Régina</span> de garde</span>
+        <span><span class="gard regler" style="display:inline-block">Marie</span> jours à régler</span>
+        <span><span class="gard alerte" style="display:inline-block">Marie</span> désactivée</span>
         <span><span class="men porte">&nbsp;✓&nbsp;</span> ménage porté</span>
         <span><span class="men attente">&nbsp;⏳&nbsp;</span> proposé</span>
         <span><span class="men alerte">&nbsp;⚠&nbsp;</span> personne / refusé</span>
@@ -205,9 +220,11 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { enteteCompte } from '/shared/compte-courant.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  // ⚠ MÊMES PRIMITIVES QUE LE CALENDRIER DES TARIFS. Réécrire `toISO` ou la
-  // largeur de colonne ici, c'était garantir que les deux grilles se décalent.
-  import { CELL_W, dayNames, monthFull, toISO } from '/shared/calendar-core.js'
+  // ⚠ MÊMES PRIMITIVES QUE LE CALENDRIER DES TARIFS — sauf la LARGEUR DE CASE,
+  // qui est propre à cet écran depuis qu'il écrit des prénoms. `CELL_W` (34 px)
+  // reste celle du calendrier des tarifs, qui n'affiche que des chiffres : la
+  // changer là-bas pour nos besoins aurait élargi un écran qui n'en a pas besoin.
+  import { dayNames, monthFull, toISO } from '/shared/calendar-core.js'
 
   initErrorHandler()
 
@@ -229,6 +246,16 @@
   // Les deux bornes doivent être écrites au même endroit dans la tête de celui
   // qui les lit : ici, et en commentaire du serveur.
   const MAX_JOURS = 92
+
+  // ⚠ LA LARGEUR LUE DEPUIS LE CSS, jamais recopiée. Deux constantes — une en
+  // CSS pour peindre, une en JS pour faire défiler — se désynchronisent au
+  // premier ajustement, et « Aujourd'hui » tombe alors à côté de la colonne du
+  // jour. Le CSS est la source, la media query comprise.
+  function largeurCase () {
+    const v = getComputedStyle(document.querySelector('.cal-page')).getPropertyValue('--case')
+    const n = parseFloat(v)
+    return Number.isFinite(n) && n > 0 ? n : 84
+  }
 
   function construireJours () {
     const t = new Date(); t.setHours(0, 0, 0, 0)
@@ -258,10 +285,14 @@
     for (const c of String(id || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0
     return COULEURS[h % COULEURS.length]
   }
-  function initialeDe (p, avecNoms) {
+  // ⚠ LE PRÉNOM EN ENTIER, et c'est le CSS qui coupe s'il déborde (ellipse au
+  // pixel). Tronquer en JavaScript à N caractères tranche au milieu d'un accent
+  // composé — « Régina » y devenait « Re… » — et ne sait pas ce qui tient
+  // vraiment dans la case, qui change avec la taille de l'écran.
+  function nomAffiche (p, avecNoms) {
     if (!p) return ''
-    if (!avecNoms || !p.prenom) return '•'
-    return p.prenom.trim().charAt(0).toUpperCase()
+    if (!avecNoms || !p.prenom) return 'quelqu\'un'
+    return p.prenom.trim()
   }
   function nomOu (p, avecNoms) {
     if (!p) return 'personne'
@@ -308,6 +339,7 @@
   }
 
   function etat (titre, message) {
+    grilleAffichee = false
     document.getElementById('legende').style.display = 'none'
     document.getElementById('month-band-wrap').innerHTML = ''
     // ⚠ Les pastilles de mois AUSSI : laissées au-dessus de « Service
@@ -351,6 +383,7 @@
       ? biens.map(b => blocBien(b, gardeIdx, menIdx, gereIdx[b.id] !== false, data.avec_noms)).join('')
       : '<div class="cal-etat">Aucun bien sélectionné.</div>'
     document.getElementById('legende').style.display = ''
+    grilleAffichee = true
     brancherCellules(gardeIdx, menIdx, gereIdx)
     centrerSurAujourdhui(false)
   }
@@ -362,7 +395,8 @@
       const m = jours[i].getMonth()
       let span = 0
       while (i + span < jours.length && jours[i + span].getMonth() === m) span++
-      h += `<td colspan="${span}" class="month-start" style="width:${span * CELL_W}px;min-width:${span * CELL_W}px">${monthFull[m]} ${jours[i].getFullYear()}</td>`
+      const w = span * largeurCase()
+      h += `<td colspan="${span}" class="month-start" style="width:${w}px;min-width:${w}px">${monthFull[m]} ${jours[i].getFullYear()}</td>`
       i += span
     }
     document.getElementById('month-band-wrap').innerHTML = h + '</tr></table>'
@@ -380,7 +414,7 @@
       p.className = 'month-pill'
       p.textContent = monthFull[d.getMonth()]
       p.addEventListener('click', () => {
-        document.getElementById('scroll-area').scrollTo({ left: idx * CELL_W, behavior: 'smooth' })
+        document.getElementById('scroll-area').scrollTo({ left: idx * largeurCase(), behavior: 'smooth' })
         w.querySelectorAll('.month-pill').forEach(x => x.classList.remove('active'))
         p.classList.add('active')
       })
@@ -437,12 +471,23 @@
     if (!gere) return '<span class="gard vide">·</span>'
     if (!g || g.trou || !g.responsable) return '<span class="gard vide">—</span>'
     const p = g.responsable
+    const nom = echapper(nomAffiche(p, avecNoms))
+    // ⚠ AUCUN `title` ICI. `.gard` est en `display: block` et remplit la boîte de
+    // la cellule : une infobulle posée dessus GAGNE au survol et masque celle du
+    // `<td>`, qui est la seule voie d'accès à « désactivée : sa PWA ne s'ouvre
+    // plus », « jours à régler », la remplaçante et le nom du bien. L'hôte aurait
+    // survolé une case rouge pour n'y lire qu'un prénom. Le prénom complet est
+    // déjà en tête de `titreGarde` — une seule infobulle, et elle dit tout.
     // Désactivée ou jours non réglés : elle est « de garde » pour le calcul, mais
     // elle ne recevra rien. L'afficher comme les autres laissait l'hôte compter
     // sur quelqu'un qui ne verra jamais le ménage.
-    if (p.actif === false) return `<span class="gard alerte">${echapper(initialeDe(p, avecNoms))}</span>`
-    if (p.a_regler) return `<span class="gard regler">${echapper(initialeDe(p, avecNoms))}</span>`
-    return `<span class="gard" style="background:${couleurDe(p.id || p.prenom)}">${echapper(initialeDe(p, avecNoms))}</span>`
+    if (p.actif === false) return `<span class="gard alerte">${nom}</span>`
+    if (p.a_regler) return `<span class="gard regler">${nom}</span>`
+    // ⚠ COULEUR STABLE PAR PERSONNE, en LISERÉ plus fond très clair : un aplat
+    // plein sur toute la largeur d'une case devenait un mur de couleur dès trois
+    // biens, et le prénom s'y lisait moins bien que le calme.
+    const c = couleurDe(p.id || p.prenom)
+    return `<span class="gard" style="border-left-color:${c};background:${c}14;color:#1d1d1f">${nom}</span>`
   }
 
   // ⚠ LE ROUGE EST CONDITIONNEL, ET TROIS FOIS : pas de ménage, bien non confié,
@@ -481,8 +526,9 @@
 
   // ─── Le survol : ce que la grille ne peut pas écrire ──────────────────────
   //
-  // ⚠ À 34 px de colonne, aucun texte ne tient. Le `title` porte la phrase
-  // complète au survol, et le clic ouvre le détail : toute l'information reste
+  // ⚠ LA CASE ÉCRIT UN PRÉNOM, PAS UNE PHRASE. Le `title` de la cellule porte le
+  // reste au survol — le bien, la mention « désactivée » ou « jours à régler »,
+  // la remplaçante — et le clic ouvre le détail : toute l'information reste
   // accessible, aucune n'encombre la grille.
   function titreGarde (bien, g, gere, avecNoms) {
     if (!gere) return `${bien.name} — non confié à un prestataire`
@@ -659,7 +705,7 @@
     const area = document.getElementById('scroll-area')
     if (!area) return
     // La colonne du jour, moins un peu de marge pour voir ce qui précède.
-    area.scrollTo({ left: Math.max(0, JOURS_AVANT * CELL_W - 40), behavior: doux ? 'smooth' : 'auto' })
+    area.scrollTo({ left: Math.max(0, JOURS_AVANT * largeurCase() - 40), behavior: doux ? 'smooth' : 'auto' })
   }
 
   // ─── Branchements ─────────────────────────────────────────────────────────
@@ -675,6 +721,26 @@
     charger()
   })
   document.getElementById('btn-today').addEventListener('click', () => centrerSurAujourdhui(true))
+
+  // ⚠ LA BANDE DE MOIS EST CALCULÉE EN PIXELS. La media query change `--case`
+  // toute seule pour les cases, mais pas les largeurs que le script a écrites :
+  // après une rotation de téléphone, la bande restait aux dimensions de l'autre
+  // orientation et se décalait des colonnes qu'elle est censée coiffer.
+  // ⚠ ON NE REDESSINE QUE LA BANDE, jamais la grille entière. `rendre()` se
+  // termine par `centrerSurAujourdhui()` et réactive la première pastille de
+  // mois : sur Chrome Android, la simple rétractation de la barre d'URL pendant
+  // un défilement émet `resize` — l'hôte qui consultait la mi-octobre était
+  // ramené de force sur la colonne du jour, sans avoir rien demandé.
+  // ⚠ ET JAMAIS PAR-DESSUS UN ÉTAT D'ERREUR OU DE CHARGEMENT. `donnees` garde la
+  // dernière réponse reçue : redessiner sur ce seul critère repeignait une
+  // ancienne grille à la place de « Chargement… » ou de « Service indisponible »,
+  // avec le sélecteur affichant une période que la grille ne couvre pas.
+  let grilleAffichee = false
+  let redessin = null
+  window.addEventListener('resize', () => {
+    clearTimeout(redessin)
+    redessin = setTimeout(() => { if (grilleAffichee) renderMonthBand() }, 150)
+  })
   document.getElementById('btn-fermer').addEventListener('click', () => {
     document.getElementById('overlay').classList.remove('visible')
   })

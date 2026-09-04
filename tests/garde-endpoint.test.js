@@ -766,11 +766,18 @@ test('l\'écran REPREND la grille du calendrier des tarifs, il ne la réinvente 
   const front = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
   assert.match(front, /from '\/shared\/calendar-core\.js'/, 'le noyau partagé')
-  for (const marqueur of ['CELL_W', 'cal-controls', 'month-pills', 'month-band',
+  for (const marqueur of ['cal-controls', 'month-pills', 'month-band',
                           'scroll-shell', 'table class="cal"', 'row-label',
                           'weekend', 'today', 'month-start']) {
     assert.ok(front.includes(marqueur), `structure commune manquante : ${marqueur}`)
   }
+  // ⚠ `CELL_W` N'EST PLUS IMPORTÉ, et c'est voulu : la largeur de case est propre
+  // à cet écran depuis qu'il écrit des prénoms. La changer dans le noyau aurait
+  // élargi le calendrier des tarifs, qui n'affiche que des chiffres.
+  const imports = /import \{([^}]*)\} from '\/shared\/calendar-core\.js'/.exec(front)[1]
+  assert.ok(!imports.includes('CELL_W'), 'la largeur ne vient plus du noyau partagé')
+  assert.ok(imports.includes('toISO') && imports.includes('monthFull'),
+    'mais les primitives de dates, si')
 })
 
 test('AUCUNE information de la version précédente n\'a disparu', async () => {
@@ -936,4 +943,57 @@ test('les titres de page suivent le menu, sans se répéter', async () => {
   assert.strictEqual(enTete(garde), '🧹 Planning')
   assert.strictEqual(titre(menages), 'HôteSmart — Ménages')
   assert.strictEqual(enTete(menages), 'Ménages')
+})
+
+// ─── Le prénom en entier (5 septembre 2026) ────────────────────────────────
+
+test('la ligne Garde écrit le PRÉNOM, plus une initiale', async () => {
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  assert.ok(!front.includes('function initialeDe'), 'plus de réduction à une lettre')
+  assert.match(front, /function nomAffiche/)
+  // ⚠ L'ellipse est CSS : couper à N caractères en JS tranche au milieu d'un
+  // accent composé — « Régina » y devient « Re… » — et ignore la largeur réelle
+  // de la case, qui change avec l'écran.
+  assert.match(front, /text-overflow: ellipsis/)
+  assert.ok(!/\.slice\(0,\s*\d+\)\s*\+\s*'…'/.test(front), 'aucune troncature en JavaScript')
+})
+
+test('la largeur de case est PROPRE à cet écran, et lue depuis le CSS', async () => {
+  // ⚠ Deux constantes — une en CSS pour peindre, une en JS pour faire défiler —
+  // se désynchronisent au premier ajustement, et « Aujourd'hui » tombe alors à
+  // côté de la colonne du jour. Le CSS est la source, la media query comprise.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  assert.match(front, /--case: 84px/)
+  assert.match(front, /@media \(max-width: 640px\)[\s\S]{0,80}--case: 62px/)
+  assert.match(front, /getPropertyValue\('--case'\)/)
+  assert.ok(!/largeurCase\s*=\s*\d+/.test(front), 'jamais une largeur recopiée en JS')
+})
+
+test('une seule infobulle : celle de la CELLULE', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `.gard` est en `display: block` et remplit la
+  // case : un `title` posé dessus gagne au survol et masque celui du `<td>` —
+  // seule voie d'accès à « désactivée », « jours à régler », la remplaçante et
+  // le nom du bien. L'hôte aurait survolé une case rouge pour n'y lire qu'un
+  // prénom.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const bloc = front.slice(front.indexOf('function pastilleGarde'),
+                           front.indexOf('function caseMenage'))
+  assert.ok(!bloc.includes('title='), 'aucun `title` sur la pastille')
+  assert.match(front, /title="\$\{echapper\(titreGarde/, 'mais un sur la cellule')
+})
+
+test('un `resize` ne ramène pas l\'hôte sur aujourd\'hui', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `rendre()` recentre et réactive la première
+  // pastille : sur Chrome Android, la rétractation de la barre d'URL émet
+  // `resize`, et l'hôte qui consultait la mi-octobre était ramené au jour même.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const bloc = front.slice(front.indexOf("addEventListener('resize'"),
+                           front.indexOf("addEventListener('resize'") + 300)
+  assert.match(bloc, /renderMonthBand\(\)/, 'seule la bande de mois est recalculée')
+  assert.ok(!bloc.includes('rendre()'), 'jamais la grille entière')
+  assert.match(bloc, /grilleAffichee/, 'et jamais par-dessus une erreur ou un chargement')
 })

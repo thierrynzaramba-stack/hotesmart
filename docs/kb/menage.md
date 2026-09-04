@@ -174,15 +174,39 @@ Il répond à une seule question : **mes logements sont-ils couverts cette semai
 déclinée aux ménages — décision du product owner du 5 septembre 2026, après un premier essai en
 calendrier vertical qui ne convenait pas. Ce n'est **pas** une réinvention : même barre de
 contrôles collante (sélecteur de biens, période), mêmes pastilles de mois, même bande de mois,
-même `table.cal` à colonnes de 34 px avec le libellé figé à gauche, mêmes classes
-`weekend` / `today` / `month-start`, et les primitives viennent du **noyau partagé**
-(`shared/calendar-core.js`). Deux écrans qui montrent des jours et des biens doivent se lire
+même `table.cal` avec le libellé figé à gauche, mêmes classes `weekend` / `today` / `month-start`,
+et les primitives de dates viennent du **noyau partagé** (`shared/calendar-core.js`). Deux écrans qui montrent des jours et des biens doivent se lire
 pareil : une seconde grammaire visuelle, c'est un second apprentissage — et réécrire `toISO` ou
 la largeur de colonne, c'était garantir que les deux grilles se décalent.
 
-**Deux lignes par bien** : « Garde » (une initiale, couleur **stable par personne** — dérivée de
-son identifiant, pas de l'ordre d'affichage, qui changeait au premier congé) et « Ménage » (son
-état). Un `title` porte la phrase complète au survol, un clic ouvre le détail.
+**Deux lignes par bien** : « Garde » (le **prénom en entier**) et « Ménage » (son état). Un
+`title` porte la phrase complète au survol, un clic ouvre le détail.
+
+⚠️ **LE PRÉNOM EN ENTIER, pas une initiale** (décision du 5 septembre 2026). Les colonnes
+s'élargissent en conséquence — **84 px**, et **62 px sous 640 px de large** — la grille défile,
+et on lit qui c'est sans survoler. Mesuré : 10,7 jours visibles sur un portable, 4,0 sur un
+iPhone SE ; « Régina » et « Marie » passent entiers partout, « Christine » devient « Christi… »
+sur téléphone.
+⚠️ **L'ellipse est CSS, jamais une coupe en JavaScript** : couper à N caractères tranche au
+milieu d'un accent composé — « Régina » y devient « Re… » — et ne sait pas ce qui tient
+réellement dans une case dont la largeur change avec l'écran.
+⚠️ **La largeur est propre à cet écran** (variable CSS `--case`, lue par le script). `CELL_W`
+(34 px) reste celle du calendrier des tarifs, qui n'affiche que des chiffres : l'élargir là-bas
+pour nos besoins aurait élargi un écran qui n'en a pas besoin, et les deux partagent le module.
+⚠️ **La couleur stable par personne** — dérivée de son identifiant, pas de l'ordre d'affichage,
+qui changeait au premier congé — est un **liseré gauche plus un fond très clair**, pas un aplat :
+trois biens l'un sous l'autre en aplat plein faisaient un mur de couleur où le prénom se lisait
+moins bien que le calme.
+⚠️ **Une seule infobulle, celle de la CELLULE.** `.gard` est en `display: block` et remplit la
+case : un `title` posé dessus gagne au survol et masque celui du `<td>` — seule voie d'accès à
+« désactivée », « jours à régler », la remplaçante et le nom du bien. L'hôte aurait survolé une
+case rouge pour n'y lire qu'un prénom.
+⚠️ **Le `resize` ne redessine QUE la bande de mois**, jamais la grille : `rendre()` recentre sur
+aujourd'hui et réactive la première pastille, or sur Chrome Android la simple rétractation de la
+barre d'URL émet `resize` — l'hôte qui consultait la mi-octobre était ramené sur le jour même.
+Et jamais par-dessus un état d'erreur ou de chargement (`grilleAffichee`) : `donnees` garde la
+dernière réponse reçue, et redessiner sur ce seul critère repeignait une ancienne grille à la
+place de « Chargement… ».
 
 ⚠️ **La grille commence 7 jours AVANT aujourd'hui** — la seule divergence assumée avec le
 calendrier des tarifs, qui n'a aucune raison de montrer le passé. Le retour de propreté ne
@@ -216,10 +240,10 @@ au clic les liste tous — mais la grille est ce que l'hôte parcourt pour repé
 garde à un an n'a aucun sens — les règles de disponibilité auront changé avant, et l'écran
 afficherait une prévision présentée comme un fait. La borne serveur (92 jours) dit la même chose.
 
-⚠️ **La densité est le sujet.** À 34 px de colonne, aucun texte ne tient : la case porte une
-initiale et un marqueur (✓ ⏳ ⚠ ·, plus un 👍/👎 discret quand un retour existe), **jamais un
-extrait**. Un pavé par cellule ruinerait ce qui fait l'intérêt d'un calendrier. Tout le reste —
-délai, motif de refus, remplaçante, phrase du voyageur — est au **survol** et au **clic**.
+⚠️ **La densité reste le sujet.** La case porte un prénom et un marqueur (✓ ⏳ ⚠ ·, plus un
+👍/👎 discret quand un retour existe), **jamais un extrait**. Un pavé par cellule ruinerait ce
+qui fait l'intérêt d'un calendrier. Tout le reste — délai, motif de refus, remplaçante, phrase
+du voyageur — est au **survol** et au **clic**.
 
 ⚠️ **La garde vient de `planningDeGarde`, la MÊME brique que le moteur** (§12.2). Recopier la
 règle côté écran, c'était garantir que les deux divergent : l'hôte aurait lu un planning qui ne
