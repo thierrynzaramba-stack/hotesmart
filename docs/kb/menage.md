@@ -90,6 +90,61 @@ tous les jours. Défaut trouvé en écrivant les tests, pas par une review.
 en rang 2 ne doit pas être condamnée à confirmer pour toujours. Reprise fidèle :
 rang 1 → `false` (d'office, comme aujourd'hui), rang 2+ → `true`.
 
+### La garde du jour (lot 3.2) — la brique, rien de branché
+
+`lib/cleaning/garde.js` répond à : **qui est de garde sur ce bien, ce jour-là ?**
+`responsableDuJour(bien, date)` et `planningDeGarde({ biens, du, au })` sont des **fonctions
+pures**. Rien ne les consomme encore — le moteur les consommera au lot 3.3, et un test le
+vérifie (il tombera exactement quand ce sera fait).
+
+⚠️ **« Référente d'un bien » n'existe plus comme statut.** C'est l'apparence qu'a une personne
+attitrée tous les jours. La référence est **par journée** : pour chaque bien et chaque jour, la
+responsable est la première — **par rang croissant** — parmi les personnes **attitrées ce
+jour-là** (`weekdays`) **et disponibles** (`availability.js`). La **remplaçante** est la
+**suivante disponible**, pas « celle de rang 2 » : un rang 2 en congé ce jour-là n'est pas la
+remplaçante de ce jour, le rang 3 l'est.
+
+⚠️ **`weekdays` vide ou NULL = attitrée TOUS LES JOURS.** C'est ce qui rend le modèle
+rétrocompatible **sans aucune migration** : Régina, sans `weekdays`, est de garde tous les jours
+sur ses deux biens — exactement l'état actuel. Lire le vide comme « aucun jour » aurait vidé le
+planning au premier déploiement.
+
+⚠️ **La garde est CALCULÉE, jamais stockée.** Pas de table `garde_jour`. Une garde persistée
+serait de la donnée dérivée qui diverge dès qu'une règle change entre deux cycles, sans que rien
+ne le signale — ce dépôt a payé ce prix deux fois (snapshots fantômes, double writer de
+`public_tokens`). Elle **est** déterminée pour n'importe quel jour futur, à tout instant : ne pas
+être stockée ne veut pas dire ne pas être décidée. Une table ne se justifiera que le jour où l'on
+voudra l'**historique** de qui était de garde.
+
+⚠️ **Deux filtres distincts, à ne pas confondre** : `weekdays` dit quels **jours elle prend**, la
+RRULE dit quels **jours elle est là**. Se déclarer disponible un mardi ne rend pas attitrée le
+mardi — sinon une prestataire du week-end recevrait des ménages en semaine.
+
+⚠️ **`requires_ack` est transporté, pas interprété.** Cette brique informe, le lot 3.3 tranche
+entre « portée d'office » et « proposée » (§12.4). **Absent, il vaut `true`** — le défaut de la
+colonne, et le prudent : devenir « assignée d'office » par omission d'un champ, ce serait engager
+quelqu'un sans son accord.
+
+⚠️ **L'ordre est déterministe à rang égal** (départage par `provider_id`). Sans lui, la
+responsable changeait d'un appel à l'autre selon l'ordre renvoyé par PostgREST : le ménage
+passait de main en main sans que rien n'ait bougé.
+
+⚠️ **Trou de garde : visible, pas alerté** (§12.6). `planningDeGarde` liste les couples
+(bien, jour) sans personne, **y compris les jours sans réservation** — c'est ce qui permet de voir
+venir. L'alerte ne part que si un **ménage existe** ce jour-là sans personne : c'est au 3.3 de
+croiser les deux.
+
+⚠️ **Cloisonnement multi-comptes** : les disponibilités sont lues par clé composite
+`user_id|provider_id` (REVIEW.md règle 1). Le moteur tourne en service key, qui contourne la
+RLS : indexée sur le seul `provider_id`, l'exception d'un autre hôte mettrait Régina en congé
+chez celui-ci.
+
+⚠️ **Fenêtre bornée à 92 jours**, et une fenêtre inversée ou illisible **coupe**. Au-delà, c'est
+un appelant qui se trompe : l'écran affiche une semaine, le moteur un jour. L'itération se fait à
+**midi UTC** — incrémenter de 24 h depuis minuit local rend deux fois le même jour au changement
+d'heure. Une mémoïsation `(personne, jour)` vit **le temps de l'appel seulement** : la garder
+entre deux appels serait la garde stockée que le §12.2 refuse.
+
 ### Créer un prestataire (lot 2.5)
 
 ⚠️ **Tout se passe dans `apps/menages/prestataires.html`.** `/settings` ne gère plus les
