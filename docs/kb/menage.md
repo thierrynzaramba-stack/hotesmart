@@ -260,6 +260,19 @@ Dans la modale du planning hôte, deux boutons distincts :
 quelqu'un sans son accord doit rester un choix explicite, jamais ce qui arrive
 par accident.
 
+⚠️ **La notification vérifie ce qui est RÉELLEMENT parti.** `sendSms` et
+`sendPlatformEmail` **ne lèvent jamais** : clé Brevo absente, `brevo_enabled` à
+false, numéro invalide — tout ressort en `{ success: false }`. Un `try/catch`
+n'attrape donc rien, et le bilan valait « envoyé » quoi qu'il arrive : l'écran
+affichait « Elle a été prévenue » à un hôte sans Brevo, qui croyait avoir confié
+son logement. Le bilan se lit sur la **valeur de retour**.
+⚠️ **Le lien du SMS porte son jeton.** Sans `?token=`, la PWA affiche « Lien
+invalide » sur tout appareil qui ne l'a pas déjà en `localStorage` — c'est-à-dire
+le téléphone où elle ouvre le SMS pour la première fois, ou le navigateur intégré
+de l'app SMS.
+⚠️ **Tiret simple, pas cadratin** : « — » n'est pas dans GSM-7 et fait basculer
+tout le message en UCS-2, soit 2 à 3 SMS au lieu d'un sur la clé de l'hôte.
+
 ⚠️ **Une assignation directe est NOTIFIÉE** (`lib/cleaning/notifier-prestataire.js`,
 SMS via la clé Brevo de l'hôte + email plateforme). Le ménage apparaît aussitôt
 dans sa PWA — mais personne ne regarde sa PWA toutes les cinq minutes : sans

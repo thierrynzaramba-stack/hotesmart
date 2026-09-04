@@ -425,16 +425,16 @@ async function reassigner (req, res) {
       // ⚠ UNE PROPOSITION DOIT LAISSER UN VRAI DELAI DE REPONSE. Passe la veille
       // du depart a 18 h, elle serait morte-nee : on refuse, et l'hote assigne
       // directement s'il le souhaite.
-      // ⚠ LE PLANCHER NE VAUT QUE POUR LA PROPOSITION. Une proposition qui
-      // expire avant d'avoir ete lue ne sert a rien ; l'assignation directe,
-      // elle, n'a aucune limite — c'est justement le geste de la derniere
-      // minute. Le 409 dit lequel des deux prendre.
+      // ⚠ `echeanceOffre` NE REND PLUS JAMAIS NULL depuis le retrait du plancher
+      // (8568741) : on propose a tout moment, et une veille deja passee retombe
+      // sur une heure. Le 409 « trop tard pour proposer » qui vivait ici etait
+      // donc devenu inatteignable — retire plutot que laisse en garde-fou d'un
+      // plancher qui n'existe plus. La garde reste cote base : une proposition
+      // sans echeance viole `menages_offre_datee`.
       const echeance = echeanceOffre(departure_date)
       if (!echeance) {
-        return res.status(409).json({
-          error: 'Trop tard pour une proposition — assignez directement, elle sera notifiée',
-          assigner_possible: true
-        })
+        console.error('[menages] echeance introuvable — proposition refusee')
+        return res.status(500).json({ error: 'Proposition impossible' })
       }
       maj = { ...maj, offered_to: choisi.id, offered_at: new Date().toISOString(),
               offer_expires_at: echeance,
@@ -468,12 +468,17 @@ async function reassigner (req, res) {
   // a l'hote ce qui est REELLEMENT parti, plutot que de lui promettre un SMS.
   let notif = { sms: false, email: false }
   if (reponse.assignee && choisi) {
-    const { data: bien } = await supabase.from('properties')
+    // ⚠ L'erreur est LUE : `provider_property_id` n'a pas de contrainte d'unicite,
+    // et `maybeSingle` rend une erreur sur deux lignes. Ignoree, le SMS partait
+    // sans nom de bien, en silence.
+    const { data: bien, error: errBien } = await supabase.from('properties')
       .select('name').eq('user_id', userId).eq('provider_property_id', String(property_id)).maybeSingle()
+    if (errBien) console.error('[menages] nom du bien illisible', errBien.message)
     const base = (process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')
     try {
       notif = await notifierAssignation({
         userId, providerId: choisi.id, propertyName: bien && bien.name,
+        propertyId: String(property_id),
         departureDate: departure_date, lien: `${base}/apps/menages/public`
       })
     } catch (e) { console.error('[menages] notification assignation echec', e.message) }

@@ -715,6 +715,12 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
         bProp.style.display = memeQuePorteur && m.assign.offered_to ? 'none' : ''
       }
       if (bAff) {
+        // ⚠ REACTIVER, sinon le bouton reste grise apres la premiere action.
+        // `envoyer` le desactive et seul `majBoutons` tourne ensuite : le retrait
+        // d'une proposition — le geste que ce lot revendique — devenait
+        // inatteignable sans fermer puis rouvrir la fiche. Meme effet apres un
+        // refus de droits ou une panne reseau.
+        bAff.disabled = false
         bAff.textContent = ''
         bAff.insertAdjacentHTML('afterbegin', memeQuePorteur && m.assign.offered_to
           ? 'Retirer la proposition<small>le ménage lui reste</small>'
@@ -784,7 +790,19 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     }
 
     if (bProp) bProp.addEventListener('click', () => envoyer('proposer'))
-    if (bAff) bAff.addEventListener('click', () => envoyer('assigner'))
+    // ⚠ LE GESTE DEPEND DE CE QUE LE BOUTON DIT, PAS DU BOUTON.
+    // Il envoyait `assigner` quel que soit son libelle, alors que le libelle se
+    // decide sur un cache FRONT (`m.assign.provider_id`) et que le serveur, lui,
+    // compare a la base. Ecran perime : la suppleante vient d'accepter, l'hote
+    // clique « Retirer la proposition » — le serveur voyait une personne
+    // differente de la porteuse, prenait la branche `assigner`, et DELOGEAIT
+    // celle qui venait d'accepter, SMS a l'appui. L'hote voulait annuler.
+    // `proposer` est le repli sur : la branche de retrait ignore le mode, et sur
+    // un ecran perime le pire devient une proposition, pas un transfert.
+    if (bAff) bAff.addEventListener('click', () => {
+      const retrait = /Retirer la proposition/.test(bAff.textContent || '')
+      envoyer(retrait ? 'proposer' : 'assigner')
+    })
   }
 
   // Le planning se re-rend apres une reassignation, sans supposer quelle vue
