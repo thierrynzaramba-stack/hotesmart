@@ -42,12 +42,13 @@ const { extraitVerifie } = require('../lib/extrait-verifie')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-// ⚠ FENETRE BORNEE A 31 JOURS. L'ecran affiche une semaine ; au-dela, c'est un
-// appelant qui se trompe. `planningDeGarde` a son propre plafond (92 jours) mais
-// il fait tourner la recurrence RRULE par (personne, jour) : une fenetre d'un an
-// demandee par une URL bricolee ferait des dizaines de milliers d'evaluations
-// pour un ecran que personne ne regarde.
-const MAX_JOURS = 31
+// ⚠ FENETRE BORNEE A 92 JOURS — le meme plafond que `planningDeGarde`, et pour
+// la meme raison : il fait tourner la recurrence RRULE par (personne, jour), et
+// une fenetre d'un an demandee par une URL bricolee ferait des dizaines de
+// milliers d'evaluations pour un ecran que personne ne regarde.
+// L'ecran propose 1 mois et 3 mois : au-dela, une garde n'a plus de sens — les
+// regles de disponibilite auront change avant.
+const MAX_JOURS = 92
 const LOT_MENAGES = 500
 const LOT_BIENS = 200
 
@@ -346,7 +347,14 @@ module.exports = async function handler (req, res) {
       // juste sous la pastille violette de sa responsable — deux affirmations
       // contradictoires, et un clic sur « semaine suivante » suffisait a rougir
       // tout l'ecran d'un compte dont personne n'est d'office.
+      // ⚠ ET SEULEMENT DANS LE FUTUR. `dansLaFenetreDeProposition` est bornee des
+      // DEUX cotes : un depart vieux de deux jours en sort aussi, et le menage
+      // se decrivait alors « proposition a venir — le depart est encore loin »,
+      // pour un depart PASSE que personne n'a fait. Depuis que la grille montre
+      // les sept jours ecoulés, le cas n'est plus rare : il est garanti. Un
+      // menage passe sans personne est exactement ce que l'hote doit voir.
       differe: !m.provider_id && !m.offered_to &&
+               m.departure_date >= todayEnParis() &&
                !dansLaFenetreDeProposition(m.departure_date) &&
                !!(responsableDuJour[`${String(m.property_id)}|${m.departure_date}`])
     }))

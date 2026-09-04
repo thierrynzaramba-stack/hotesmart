@@ -694,7 +694,7 @@ responsable noierait les vraies alertes.
 | **3.1** | Tables de disponibilité, `rrule`, `requires_ack`, `availability.js` + tests. Rien de branché. | aucun |
 | **3.2** | `lib/cleaning/garde.js` : `responsableDuJour()` / `planningDeGarde()`. Fonctions pures. | aucun |
 | **3.3** | ✅ **LIVRÉ** (4 septembre 2026) — le moteur consomme la garde : création, changement de date, refus/expiration → remplaçante, `requires_ack` interprété partout, la proposition notifie, alerte sur trou de garde. | — |
-| **3.4** | ✅ **LIVRÉ** (4 septembre 2026, après le 3.5) — écran **planning de garde** : un calendrier EN LONGUEUR (un bloc par jour, une ligne par bien) plutôt qu'une grille 7 colonnes, illisible sur téléphone dès le troisième bien. Qui est de garde, la remplaçante, les ménages posés dessus avec leur état, et les pouces de propreté. Lecture seule. | app ménage |
+| **3.4** | ✅ **LIVRÉ** (4 septembre 2026, après le 3.5) — écran **planning de garde** : la MÊME grille que le calendrier des réservations et tarifs, déclinée aux ménages (décision du 5 septembre 2026, après un essai en calendrier vertical écarté) : deux lignes par bien — garde et ménage — sur la structure partagée `shared/calendar-core.js`. Qui est de garde, la remplaçante, les ménages posés dessus avec leur état, et les pouces de propreté. Lecture seule. | app ménage |
 | **3.5** | ✅ **LIVRÉ** (4 septembre 2026, **avant le 3.4** : le moteur était inerte sans lui) — jours attitrés + engagement dans la fiche, disponibilités côté hôte (`api/disponibilites.js`), « Mes absences » dans la PWA. | 2 écrans |
 
 **Qui déclare les congés** : la prestataire (`self_availability: write`), l'hôte

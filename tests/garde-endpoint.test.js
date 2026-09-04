@@ -585,8 +585,12 @@ test('le DÉLAI de réponse remonte ET est affiché', async () => {
   assert.strictEqual(res.body.menages[0].expireLe, '2026-09-12T16:00:00Z')
   const front = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  assert.match(front, /delaiLisible\(m\.expireLe\)/, 'et l\'écran doit le montrer')
+  // ⚠ Depuis la refonte en grille, le délai vit dans l'infobulle et dans le
+  // détail au clic : la case fait 34 px, aucun texte n'y tient. Mais il doit
+  // TOUJOURS être quelque part.
+  assert.match(front, /function delaiTexte/, 'et l\'écran doit le montrer')
   assert.match(front, /timeZone: 'Europe\/Paris'/, 'en heure de Paris, pas en UTC')
+  assert.match(front, /délai dépassé/, 'et ne pas dire « avant » d\'une échéance passée')
 })
 
 test('un bien SANS AUCUNE liaison n\'est pas un trou de garde', async () => {
@@ -749,4 +753,143 @@ test('la REMPLAÇANTE aussi porte « jours à régler »', async () => {
   const front = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
   assert.match(front, /g\.remplacante\.a_regler/, 'un filet de sécurité qui n\'existe pas doit se voir')
+})
+
+// ─── La refonte en grille (5 septembre 2026) ───────────────────────────────
+
+test('l\'écran REPREND la grille du calendrier des tarifs, il ne la réinvente pas', async () => {
+  // ⚠ Décision du product owner. Deux écrans qui montrent des jours et des biens
+  // doivent se lire pareil : une seconde grammaire visuelle, c'est un second
+  // apprentissage. Les primitives viennent du noyau partagé — réécrire `toISO`
+  // ou la largeur de colonne ici, c'était garantir que les deux grilles se
+  // décalent d'un pixel puis d'un jour.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  assert.match(front, /from '\/shared\/calendar-core\.js'/, 'le noyau partagé')
+  for (const marqueur of ['CELL_W', 'cal-controls', 'month-pills', 'month-band',
+                          'scroll-shell', 'table class="cal"', 'row-label',
+                          'weekend', 'today', 'month-start']) {
+    assert.ok(front.includes(marqueur), `structure commune manquante : ${marqueur}`)
+  }
+})
+
+test('AUCUNE information de la version précédente n\'a disparu', async () => {
+  // ⚠ La refonte ne portait que sur la PRÉSENTATION : tout ce qui était dit
+  // hier doit rester accessible, au survol ou au clic si la grille est trop
+  // dense pour l'écrire. Ce test est la liste de ce qui ne doit pas se perdre.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const attendus = [
+    'non confié',            // bien sans liaison : jamais rouge
+    'personne de garde',     // trou de garde
+    'proposition à venir',   // hors fenêtre de proposition
+    'jours à régler',        // responsable jamais sollicitée
+    'désactivée',            // profil désactivé
+    'réponse avant',         // délai d'une proposition
+    'délai dépassé',         // échéance passée
+    'refusé',                // orphaned
+    'retour privé',          // extrait venu d'un message privé
+    'requalifié par vous',   // requalification humaine
+    'retour-extrait',        // la phrase du voyageur
+    'Liste incomplète',      // troncature dite
+    'quelqu\'un'             // sans `prestataires: read`
+  ]
+  for (const a of attendus) {
+    assert.ok(front.includes(a), `information perdue à la refonte : « ${a} »`)
+  }
+})
+
+test('la grille reste DENSE : le retour de propreté n\'y est pas en pavé', async () => {
+  // ⚠ Un extrait par cellule ruinerait la densité, qui est tout l'intérêt d'un
+  // calendrier. La case porte un 👍/👎 discret ; la phrase est au clic.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const grille = front.slice(front.indexOf('function caseMenage'),
+                             front.indexOf('function titreGarde'))
+  assert.ok(!grille.includes('retour-extrait'), 'pas d\'extrait dans la case')
+  assert.match(grille, /avis-ok|avis-ko/, 'mais un marqueur discret')
+  assert.match(front, /function ouvrirDetail/, 'et le détail au clic')
+})
+
+test('une garde à 6 ou 12 mois n\'est PAS proposée', async () => {
+  // ⚠ Les règles de disponibilité auront changé bien avant : l'écran
+  // afficherait une prévision présentée comme un fait. La borne serveur dit la
+  // même chose (92 jours).
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const select = front.slice(front.indexOf('id="period-select"'),
+                             front.indexOf('</select>'))
+  assert.ok(!select.includes('value="6"') && !select.includes('value="12"'))
+  assert.ok(select.includes('value="1"') && select.includes('value="3"'))
+})
+
+test('la fenêtre que l\'écran DEMANDE VRAIMENT est acceptée', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW, et il rendait « 3 mois » totalement inopérant :
+  // le front demandait 90 + 7 = 97 jours, le serveur en accepte 92, et l'écran
+  // affichait « Service indisponible ». Mon test précédent prenait une fenêtre
+  // de 91 jours que l'écran ne demande jamais : il était vert pendant que la
+  // fonctionnalité était morte. On dérive donc les bornes de la MÊME formule que
+  // le front, en la relisant dans le fichier.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const avant = Number(/const JOURS_AVANT = (\d+)/.exec(front)[1])
+  const maxFront = Number(/const MAX_JOURS = (\d+)/.exec(front)[1])
+  assert.ok(front.includes('Math.min(MAX_JOURS'), 'le front doit borner sa fenêtre')
+
+  for (const mois of [1, 3]) {
+    const n = Math.min(maxFront, Math.round(mois * 30) + avant)
+    const t = new Date(); t.setHours(0, 0, 0, 0)
+    const debut = new Date(t); debut.setDate(t.getDate() - avant)
+    const fin = new Date(debut); fin.setDate(debut.getDate() + n - 1)
+    const { handler } = preparer({ liaisons: [LIAISON()] })
+    const res = reponse()
+    await handler(get({ du: debut.toISOString().slice(0, 10),
+                        au: fin.toISOString().slice(0, 10) }), res)
+    assert.strictEqual(res.code, 200, `période de ${mois} mois (${n} jours) refusée`)
+  }
+})
+
+test('au-delà de la borne, le serveur refuse plutôt que de tronquer', async () => {
+  const { handler } = preparer({ liaisons: [LIAISON()] })
+  const res = reponse()
+  await handler(get({ du: '2026-01-01', au: '2026-06-30' }), res)
+  assert.strictEqual(res.code, 400)
+})
+
+test('un ménage PASSÉ sans personne n\'est jamais « proposition à venir »', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `dansLaFenetreDeProposition` est bornée des deux
+  // côtés : un départ vieux de deux jours en sort aussi, et le ménage se
+  // décrivait « le départ est encore loin » — pour un départ passé que personne
+  // n'a fait. Depuis que la grille montre les sept jours écoulés, ce n'est plus
+  // un cas rare, c'est une garantie.
+  const vieux = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10)
+  const { handler } = preparer({
+    liaisons: [LIAISON({ provider_id: SECONDE, requires_ack: true, weekdays: [0, 1, 2, 3, 4, 5, 6] })],
+    menages: [MENAGE({ departure_date: vieux, provider_id: null, status: 'unassigned' })]
+  })
+  const res = reponse()
+  await handler(get(PASSE), res)
+  assert.strictEqual(res.body.menages[0].differe, false, 'c\'est une alerte, pas une attente')
+})
+
+test('un ménage REFUSÉ reste « refusé », même hors fenêtre de proposition', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `orphaned` n'a ni porteur ni offre : dès que son
+  // départ sort de la fenêtre, il satisfait aussi `differe`. L'écran testait
+  // `differe` en premier et peignait en gris « proposition à venir » la décision
+  // humaine que ce statut existe pour réclamer.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  const bloc = front.slice(front.indexOf('function etatMenage'), front.indexOf('const MARQUEUR'))
+  assert.ok(bloc.indexOf("'orphaned'") < bloc.indexOf('m.differe'),
+    '`orphaned` doit être testé AVANT `differe`')
+})
+
+test('sur un jour à PLUSIEURS ménages, la case montre le plus grave', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. La cellule ne montrait que le premier : un ménage
+  // porté (✓) cachait un second que personne n'a (⚠). La grille est ce que
+  // l'hôte parcourt pour repérer un problème.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  assert.match(front, /const GRAVITE = /)
+  assert.match(front, /GRAVITE\[e\] > GRAVITE\[etat\]/)
 })

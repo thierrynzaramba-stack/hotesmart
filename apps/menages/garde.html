@@ -7,65 +7,127 @@
   <title>HôteSmart — Planning de garde</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    /* ⚠ CALENDRIER EN LONGUEUR, pas une grille 7 colonnes. Un tableau
-       biens × jours devient illisible dès le troisième bien sur un téléphone,
-       et la question que se pose l'hôte est « ce jour-là, qui est où ? ». */
-    .garde-nav { display: flex; align-items: center; justify-content: space-between;
-                 gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-    .garde-nav-boutons { display: flex; align-items: center; gap: 8px; }
-    .garde-nav button { background: var(--bg); border: 0.5px solid var(--border);
-                        border-radius: var(--radius); padding: 6px 10px; cursor: pointer;
-                        font-size: 13px; color: var(--text); }
-    .garde-nav button:hover { background: var(--bg2); }
-    .garde-label { font-size: 14px; font-weight: 500; text-align: center; min-width: 180px; }
+    /* ⚠ MÊME LANGAGE VISUEL QUE LE CALENDRIER DES RÉSERVATIONS ET TARIFS
+       (`pages/biens-calendrier.html`), décliné aux ménages — décision du product
+       owner du 5 septembre 2026. Ce n'est PAS une réinvention : même barre de
+       contrôles collante, mêmes pastilles de mois, même bande de mois, même
+       `table.cal` à colonnes de 34 px et libellé de ligne figé à gauche, mêmes
+       classes `weekend` / `today` / `month-start`.
+       Deux écrans qui montrent des jours et des biens doivent se lire pareil :
+       une seconde grammaire visuelle, c'est un second apprentissage. */
+    .cal-page * { box-sizing: border-box; }
+    .cal-page { -webkit-user-select: none; user-select: none; }
+    .cal-controls { background: var(--bg); padding: 14px 20px; border-bottom: 0.5px solid var(--border);
+                    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+                    gap: 12px; position: sticky; top: 0; z-index: 20; }
+    .cal-controls .left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .icon-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 8px; padding: 0 12px;
+                height: 36px; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center;
+                justify-content: center; color: #1d1d1f; }
+    .period-select { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px;
+                     background: #fff; font-family: inherit; color: #1d1d1f; }
+    .multi-select { position: relative; }
+    .multi-select .ms-trigger { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px;
+                                font-size: 14px; background: #fff; cursor: pointer; min-width: 190px;
+                                display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .multi-select .ms-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0;
+                              background: #fff; border: 1px solid #d2d2d7; border-radius: 10px;
+                              box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 250px; max-height: 320px;
+                              overflow-y: auto; z-index: 30; padding: 6px; }
+    .multi-select.open .ms-panel { display: block; }
+    .multi-select .ms-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+                               border-radius: 7px; cursor: pointer; font-size: 14px; color: #1d1d1f; }
+    .multi-select .ms-option:hover { background: #f5f5f7; }
 
-    .jour-bloc { background: var(--bg); border: 0.5px solid var(--border);
-                 border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden; }
-    .jour-bloc.aujourdhui { border-color: var(--primary); }
-    .jour-entete { display: flex; align-items: center; justify-content: space-between;
-                   gap: 8px; padding: 10px 14px; background: var(--bg2);
-                   font-size: 13px; font-weight: 600; text-transform: capitalize; }
-    .jour-entete .jour-marque { font-size: 11px; font-weight: 500; color: var(--primary); text-transform: none; }
-    .jour-vide { padding: 10px 14px; font-size: 12px; color: var(--text2); }
+    .cal-main { padding: 16px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 60px; color: #1d1d1f; }
+    .month-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .month-pill { background: #fff; border: 1px solid #d2d2d7; border-radius: 20px; padding: 5px 14px;
+                  font-size: 13px; cursor: pointer; color: #1d1d1f; font-weight: 500; text-transform: capitalize; }
+    .month-pill:hover { background: #eef4ff; border-color: #007aff; }
+    .month-pill.active { background: #007aff; color: #fff; border-color: #007aff; }
+    .scroll-shell { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; }
+    .scroll-area { overflow-x: auto; }
+    table.month-band { border-collapse: collapse; table-layout: fixed; }
+    table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left;
+                          padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; }
+    table.month-band td.month-start { border-left: 2px solid #007aff; }
+    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff;
+                               z-index: 5; border-bottom: 1px solid #e5e5e7; }
 
-    .garde-ligne { display: flex; align-items: flex-start; justify-content: space-between;
-                   gap: 10px; padding: 10px 14px; border-top: 0.5px solid var(--border);
-                   flex-wrap: wrap; }
-    .garde-bien { font-size: 13px; min-width: 140px; flex: 1; }
-    .garde-qui { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .bien-section { padding-top: 18px; padding-bottom: 16px; margin-bottom: 4px; }
+    .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
+    table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+    table.cal th, table.cal td { padding: 6px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
+    table.cal thead th { border-bottom: 1px solid #e5e5e7; }
+    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px;
+                           min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 2;
+                           border-right: 1px solid #e5e5e7; font-weight: 500; }
+    table.cal thead .row-label { z-index: 4; }
+    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; border-left: 4px solid #007aff;
+                                     vertical-align: middle; line-height: 1.2; }
+    table.cal .row-label.bien-head .cap-h { display: block; font-size: 10px; font-weight: 400; color: #86868b; margin-top: 2px; }
+    table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
+    table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
+    table.cal .weekend { background: rgba(0,0,0,0.022); }
+    table.cal .month-start { border-left: 2px solid #007aff; }
+    table.cal .today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
+    table.cal td.cell { cursor: pointer; position: relative; }
+    table.cal td.cell:hover { background: #eef4ff; }
 
-    .pastille { font-size: 12px; border-radius: 20px; padding: 3px 10px;
-                border: 0.5px solid var(--border); background: var(--bg2); color: var(--text2); }
+    /* La pastille de garde : une initiale, une couleur stable par personne.
+       ⚠ La grille doit rester DENSE : à 34 px de colonne, un prénom entier ne
+       tient pas — l'initiale tient, le reste est au survol et au clic. */
+    .gard { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+            border-radius: 50%; font-size: 11px; font-weight: 700; color: #fff; }
+    .gard.vide { background: transparent; color: #d2d2d7; font-weight: 400; }
+    .gard.alerte { background: #d52a44; }
+    .gard.regler { background: #f59e0b; }
+    .men { display: inline-block; width: 100%; font-size: 11px; line-height: 18px; border-radius: 4px; }
+    .men.porte { background: #dde7f5; color: #0d4ea6; }
+    .men.attente { background: #FEF3C7; color: #92400E; }
+    .men.alerte { background: #ffeced; color: #d52a44; font-weight: 700; }
+    .men.differe { background: #f5f5f7; color: #86868b; }
+    .men.gris { background: #f5f5f7; color: #c7c7cc; }
+    .men.avis-ok::after { content: '👍'; font-size: 9px; margin-left: 1px; }
+    .men.avis-ko::after { content: '👎'; font-size: 9px; margin-left: 1px; }
+    td.non-confie { background: #fafafa; }
+
+    .legende { font-size: 11px; color: #6e6e73; line-height: 2.2; padding: 0 4px; }
+    .legende span { margin-right: 14px; white-space: nowrap; }
+    .cal-etat { text-align: center; padding: 40px 20px; color: #6e6e73; font-size: 13px; line-height: 1.6; }
+    .cal-etat strong { display: block; color: #1d1d1f; margin-bottom: 4px; }
+    .bandeau { margin: 0 0 12px; padding: 10px 13px; background: #FEF3C7; border: 0.5px solid #FCD34D;
+               border-radius: 8px; font-size: 12px; color: #92400E; line-height: 1.5; }
+
+    /* Le détail au clic : tout ce que la grille ne peut pas montrer. */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center;
+               justify-content: center; z-index: 100; padding: 16px; }
+    .overlay.visible { display: flex; }
+    .popup { background: #fff; border-radius: 16px; width: 100%; max-width: 440px; max-height: 92vh;
+             overflow-y: auto; color: #1d1d1f; }
+    .popup-head { padding: 18px 20px 12px; border-bottom: 1px solid #f0f0f0; }
+    .popup-head h3 { font-size: 16px; font-weight: 600; text-transform: capitalize; }
+    .popup-head .sous { font-size: 13px; color: #86868b; margin-top: 2px; }
+    .popup-corps { padding: 16px 20px; font-size: 13px; line-height: 1.6; }
+    .popup-corps .bloc { margin-bottom: 14px; }
+    .popup-corps .bloc:last-child { margin-bottom: 0; }
+    .popup-corps .etiq { font-size: 11px; color: #86868b; text-transform: uppercase; letter-spacing: 0.03em; }
+    .popup-foot { padding: 12px 20px 18px; display: flex; gap: 10px; justify-content: flex-end; }
+    .btn-fermer { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 9px; padding: 9px 16px;
+                  font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-ouvrir { background: #007aff; color: #fff; border: none; border-radius: 9px; padding: 9px 16px;
+                  font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; }
+    .pastille { font-size: 12px; border-radius: 20px; padding: 3px 10px; border: 0.5px solid #d2d2d7;
+                background: #f5f5f7; color: #6e6e73; display: inline-block; }
     .pastille.porte { background: #EEEDFE; color: #3C3489; border-color: #C4B5FD; }
     .pastille.attente { background: #FEF3C7; color: #92400E; border-color: #D97706; }
     .pastille.alerte { background: #FEE2E2; color: #991B1B; border-color: #E24B4A; }
-    .pastille.absent { background: var(--bg2); color: var(--text2); }
-    .remplacante { font-size: 11px; color: var(--text2); }
-    .retour { margin-top: 6px; }
     .pastille.retour-ok { background: #DCFCE7; color: #166534; border-color: #86EFAC; }
     .pastille.retour-ko { background: #FEF3C7; color: #92400E; border-color: #D97706; }
-    .retour-etiquette { font-size: 10px; color: var(--text2); border: 0.5px solid var(--border);
-                        border-radius: 20px; padding: 2px 8px; margin-left: 4px; }
-    .retour-extrait { font-size: 12px; color: var(--text); margin-top: 4px; line-height: 1.5;
-                      font-style: italic; }
-
-    .menage-ligne { font-size: 12px; color: var(--text2); padding: 2px 14px 10px 14px; }
-    .menage-ligne a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-    .menage-ligne .motif { color: #991B1B; }
-    .menage-ligne .delai { color: #92400E; }
-
-    .legende { font-size: 11px; color: var(--text2); line-height: 1.9; margin-top: 14px; }
-    .legende span { margin-right: 14px; white-space: nowrap; }
-
-    .garde-etat { text-align: center; padding: 40px 20px; color: var(--text2);
-                  font-size: 13px; line-height: 1.6; }
-    .garde-etat strong { display: block; color: var(--text); margin-bottom: 4px; }
-
-    @media (max-width: 640px) {
-      .garde-label { min-width: 0; flex: 1; }
-      .garde-ligne { flex-direction: column; gap: 4px; }
-      .garde-bien { min-width: 0; }
-    }
+    .retour-etiquette { font-size: 10px; color: #86868b; border: 0.5px solid #d2d2d7; border-radius: 20px;
+                        padding: 2px 8px; margin-left: 4px; }
+    .retour-extrait { font-size: 13px; margin-top: 6px; line-height: 1.5; font-style: italic; }
   </style>
 </head>
 <body>
@@ -73,35 +135,67 @@
 <div class="layout">
   <div class="sidebar" id="sidebar"></div>
 
-  <div class="main">
+  <div class="main cal-page">
     <div class="topbar">
       <div>
-        <div class="page-title">Planning de garde</div>
-        <div class="page-sub">Qui est de garde, jour par jour</div>
+        <div class="page-title">🧹 Planning de garde</div>
+        <div class="page-sub">Qui est de garde, par bien et par jour</div>
       </div>
     </div>
 
-    <div class="content">
-      <div class="garde-nav">
-        <div class="garde-nav-boutons">
-          <button id="btn-prev">← Semaine préc.</button>
-          <div class="garde-label" id="garde-label"></div>
-          <button id="btn-next">Semaine suiv. →</button>
+    <div class="cal-controls">
+      <div class="left">
+        <div class="multi-select" id="multi-select">
+          <div class="ms-trigger" id="ms-trigger"><span id="ms-label">Tous les biens</span><span>&#9662;</span></div>
+          <div class="ms-panel" id="ms-panel"></div>
         </div>
-        <button id="btn-today">Aujourd'hui</button>
+        <!-- ⚠ PAS DE 6 NI 12 MOIS, contrairement au calendrier des tarifs. Une
+             garde à un an n'a aucun sens : les règles de disponibilité auront
+             changé bien avant, et l'écran afficherait une prévision présentée
+             comme un fait. La borne serveur (92 jours) dit la même chose. -->
+        <select class="period-select" id="period-select">
+          <option value="1" selected>1 mois</option>
+          <option value="3">3 mois</option>
+        </select>
       </div>
-
-      <div id="garde-liste">
-        <div class="garde-etat">Chargement…</div>
+      <div class="header-actions">
+        <button class="icon-btn" id="btn-today">Aujourd'hui</button>
       </div>
+    </div>
 
+    <div class="cal-main">
+      <div id="bandeau" class="bandeau" style="display:none"></div>
+      <div class="month-pills" id="month-pills"></div>
+      <div class="scroll-shell">
+        <div class="scroll-area" id="scroll-area">
+          <div id="month-band-wrap"></div>
+          <div id="blocks"><div class="cal-etat">Chargement…</div></div>
+        </div>
+      </div>
       <div class="legende" id="legende" style="display:none">
-        <span><span class="pastille porte">Prénom</span> de garde / porte le ménage</span>
-        <span><span class="pastille attente">⏳ Prénom</span> proposé, en attente</span>
-        <span><span class="pastille alerte">⚠ personne</span> ménage sans personne</span>
-        <span><span class="pastille absent">—</span> aucune garde ce jour-là</span>
-        <span><span class="pastille retour-ok">👍</span> / <span class="pastille retour-ko">👎</span> retour du voyageur sur ce ménage</span>
+        <span><span class="gard" style="background:#0d4ea6">R</span> de garde</span>
+        <span><span class="gard regler">R</span> jours à régler</span>
+        <span><span class="gard alerte">R</span> désactivée</span>
+        <span><span class="men porte">&nbsp;✓&nbsp;</span> ménage porté</span>
+        <span><span class="men attente">&nbsp;⏳&nbsp;</span> proposé</span>
+        <span><span class="men alerte">&nbsp;⚠&nbsp;</span> personne / refusé</span>
+        <span><span class="men differe">&nbsp;·&nbsp;</span> proposition à venir</span>
+        <span>👍 👎 retour du voyageur — cliquez la case</span>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="popup">
+    <div class="popup-head">
+      <h3 id="popup-titre"></h3>
+      <div class="sous" id="popup-sous"></div>
+    </div>
+    <div class="popup-corps" id="popup-corps"></div>
+    <div class="popup-foot">
+      <button class="btn-fermer" id="btn-fermer">Fermer</button>
+      <a class="btn-ouvrir" href="/apps/menages">Ouvrir le planning</a>
     </div>
   </div>
 </div>
@@ -111,43 +205,43 @@
   import { renderSidebar } from '/components/sidebar.js'
   import { enteteCompte } from '/shared/compte-courant.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  // ⚠ MÊMES PRIMITIVES QUE LE CALENDRIER DES TARIFS. Réécrire `toISO` ou la
+  // largeur de colonne ici, c'était garantir que les deux grilles se décalent.
+  import { CELL_W, dayNames, monthFull, toISO } from '/shared/calendar-core.js'
 
   initErrorHandler()
 
   let session = null
-  let debutSemaine = lundiDe(new Date())
+  let jours = []            // les Date de la grille
+  let donnees = null        // la dernière réponse serveur
+  let biensChoisis = null   // null = tous
+  let mois = 1
 
-  // ─── Dates ────────────────────────────────────────────────────────────────
-  //
-  // ⚠ TOUT EN UTC, ET LES JOURS SONT DES CHAÎNES. Le domaine ménage raisonne en
-  // jours de calendrier : passer par un instant local fait basculer la date d'un
-  // jour au moindre décalage — le piège déjà corrigé deux fois dans ce dépôt.
-  function lundiDe (d) {
-    const j = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12))
-    const dow = j.getUTCDay()                 // 0 = dimanche
-    j.setUTCDate(j.getUTCDate() - ((dow + 6) % 7))
-    return j
+  // ⚠ LA GRILLE COMMENCE AVANT AUJOURD'HUI, contrairement au calendrier des
+  // tarifs — et c'est la seule vraie divergence, assumée. Le retour de propreté
+  // d'un séjour ne s'affiche que sur un ménage PASSÉ : une grille qui démarre
+  // aujourd'hui ne l'aurait jamais montré. On garde donc la semaine écoulée, et
+  // « Aujourd'hui » recentre.
+  const JOURS_AVANT = 7
+  // ⚠ LA MÊME BORNE QUE LE SERVEUR (`api/garde.js`), et que `planningDeGarde`.
+  // « 3 mois » demandait 90 + 7 = 97 jours : le serveur refusait, et l'écran
+  // affichait « Service indisponible » — l'option était morte à la livraison.
+  // Les deux bornes doivent être écrites au même endroit dans la tête de celui
+  // qui les lit : ici, et en commentaire du serveur.
+  const MAX_JOURS = 92
+
+  function construireJours () {
+    const t = new Date(); t.setHours(0, 0, 0, 0)
+    const debut = new Date(t); debut.setDate(t.getDate() - JOURS_AVANT)
+    const n = Math.min(MAX_JOURS, Math.round(mois * 30) + JOURS_AVANT)
+    const out = []
+    for (let i = 0; i < n; i++) { const d = new Date(debut); d.setDate(debut.getDate() + i); out.push(d) }
+    return out
   }
-  const cle = d => d.toISOString().slice(0, 10)
-  function plusDeJours (d, n) {
-    const c = new Date(d.getTime()); c.setUTCDate(c.getUTCDate() + n); return c
-  }
-  function jourLisible (s) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-    if (!m) return s
-    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12))
-      .toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
-  }
-  function libelleSemaine (du, au) {
-    const f = s => {
-      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-      return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12))
-        .toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', timeZone: 'UTC' })
-    }
-    return `${f(du)} – ${f(au)}`
-  }
-  const aujourdhui = () => cle(new Date(Date.UTC(
-    new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 12)))
+
+  const estAujourdhui = d => toISO(d) === toISO(new Date())
+  const estWeekend = d => d.getDay() === 0 || d.getDay() === 6
+  const debutDeMois = (d, i) => i === 0 || d.getDate() === 1
 
   function echapper (t) {
     return String(t == null ? '' : t)
@@ -155,24 +249,44 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
+  // ⚠ UNE COULEUR STABLE PAR PERSONNE, dérivée de son identifiant : la même
+  // prestataire garde sa couleur d'un bien à l'autre et d'une semaine à l'autre.
+  // Une couleur tirée de l'ordre d'affichage changeait au premier congé.
+  const COULEURS = ['#0d4ea6', '#1f6f23', '#7c3aed', '#b45309', '#0f766e', '#9d174d']
+  function couleurDe (id) {
+    let h = 0
+    for (const c of String(id || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0
+    return COULEURS[h % COULEURS.length]
+  }
+  function initialeDe (p, avecNoms) {
+    if (!p) return ''
+    if (!avecNoms || !p.prenom) return '•'
+    return p.prenom.trim().charAt(0).toUpperCase()
+  }
+  function nomOu (p, avecNoms) {
+    if (!p) return 'personne'
+    if (!avecNoms || !p.prenom) return 'quelqu\'un'
+    return p.prenom
+  }
+
   // ─── Chargement ───────────────────────────────────────────────────────────
   let chargementCourant = 0
   async function charger () {
-    const du = cle(debutSemaine)
-    const au = cle(plusDeJours(debutSemaine, 6))
-    document.getElementById('garde-label').textContent = libelleSemaine(du, au)
-
-    // ⚠ UN JETON PAR CHARGEMENT. Deux clics rapides sur « semaine suivante »
-    // lancent deux requêtes : sans ce garde-fou, la plus lente écrase la plus
-    // récente et l'écran affiche une semaine que personne ne regarde.
+    // ⚠ `jours` N'EST AFFECTÉ QU'AU SUCCÈS. Le muter avant le fetch laissait, sur
+    // une erreur, une fenêtre de 3 mois en mémoire avec les données d'un mois :
+    // le moindre `rendre()` ultérieur — cocher un bien dans le sélecteur en
+    // appelle un — repeignait 60 jours en « aucun ménage / personne de garde »,
+    // c'est-à-dire du silence exactement là où des alertes peuvent exister.
+    const fenetre = construireJours()
+    const du = toISO(fenetre[0])
+    const au = toISO(fenetre[fenetre.length - 1])
     const jeton = ++chargementCourant
     etat('Chargement…')
 
     let res
     try {
       // ⚠ `enteteCompte()` : sans lui, le serveur lit le compte de l'APPELANT et
-      // non celui qui est sélectionné — un gestionnaire verrait la garde de son
-      // propre compte en croyant lire celle de son client.
+      // non celui qui est sélectionné.
       res = await fetch(`/api/garde?du=${du}&au=${au}`, {
         headers: { 'Authorization': `Bearer ${session.access_token}`, ...enteteCompte() }
       })
@@ -180,248 +294,403 @@
       if (jeton === chargementCourant) etat('Connexion impossible', 'Vérifiez votre réseau, puis réessayez.')
       return
     }
+    // ⚠ Deux changements de période rapides lancent deux requêtes : sans ce
+    // jeton, la plus lente écrase la plus récente.
     if (jeton !== chargementCourant) return
     if (res.status === 403) return etat('Accès refusé', 'Vous n\'avez pas le droit de consulter les ménages.')
     if (!res.ok) return etat('Service indisponible', 'Réessayez dans un instant.')
-
     let data
     try { data = await res.json() } catch (e) { return etat('Réponse illisible') }
     if (jeton !== chargementCourant) return
-    rendre(data)
+    jours = fenetre
+    donnees = data
+    rendre()
   }
 
   function etat (titre, message) {
     document.getElementById('legende').style.display = 'none'
-    document.getElementById('garde-liste').innerHTML =
-      `<div class="garde-etat"><strong>${echapper(titre)}</strong>${echapper(message || '')}</div>`
+    document.getElementById('month-band-wrap').innerHTML = ''
+    // ⚠ Les pastilles de mois AUSSI : laissées au-dessus de « Service
+    // indisponible », elles annonçaient une période dont plus rien n'est affiché.
+    document.getElementById('month-pills').innerHTML = ''
+    document.getElementById('blocks').innerHTML =
+      `<div class="cal-etat"><strong>${echapper(titre)}</strong>${echapper(message || '')}</div>`
   }
 
-  // ─── Rendu ────────────────────────────────────────────────────────────────
-  function rendre (data) {
-    const biens = data.biens || []
-    if (!biens.length) {
-      return etat('Aucun bien', 'Connectez un logement pour voir sa garde.')
+  // ─── Rendu de la grille ───────────────────────────────────────────────────
+  function rendre () {
+    const data = donnees
+    const tous = data.biens || []
+    if (!tous.length) return etat('Aucun bien', 'Connectez un logement pour voir sa garde.')
+
+    const biens = biensChoisis ? tous.filter(b => biensChoisis.has(b.id)) : tous
+
+    // Index (bien, jour) -> garde, et (bien, jour) -> ménages.
+    const gardeIdx = {}
+    const gereIdx = {}
+    for (const b of (data.garde || [])) {
+      gereIdx[b.propertyId] = b.gere !== false
+      for (const j of (b.jours || [])) gardeIdx[`${b.propertyId}|${j.date}`] = j
+    }
+    const menIdx = {}
+    for (const m of (data.menages || [])) {
+      (menIdx[`${m.propertyId}|${m.date}`] ||= []).push(m)
     }
 
-    const nomBien = Object.fromEntries(biens.map(b => [b.propertyId || b.id, b.name]))
-    // garde[bien][date] et menages[bien][date] : l'écran est vertical, la donnée
-    // arrive par bien — on retourne l'index une fois plutôt qu'à chaque cellule.
-    const gardeParJour = {}
-    for (const b of (data.garde || [])) {
-      for (const j of (b.jours || [])) {
-        (gardeParJour[j.date] ||= {})[b.propertyId] = j
+    const bandeau = document.getElementById('bandeau')
+    if (data.tronque) {
+      bandeau.textContent = '⚠️ Liste incomplète : trop de biens ou de ménages sur cette période. Réduisez la période pour tout voir.'
+      bandeau.style.display = ''
+    } else bandeau.style.display = 'none'
+
+    renderMonthBand()
+    renderMonthPills()
+
+    const blocks = document.getElementById('blocks')
+    blocks.innerHTML = biens.length
+      ? biens.map(b => blocBien(b, gardeIdx, menIdx, gereIdx[b.id] !== false, data.avec_noms)).join('')
+      : '<div class="cal-etat">Aucun bien sélectionné.</div>'
+    document.getElementById('legende').style.display = ''
+    brancherCellules(gardeIdx, menIdx, gereIdx)
+    centrerSurAujourdhui(false)
+  }
+
+  function renderMonthBand () {
+    let h = '<table class="month-band"><tr><td class="corner"></td>'
+    let i = 0
+    while (i < jours.length) {
+      const m = jours[i].getMonth()
+      let span = 0
+      while (i + span < jours.length && jours[i + span].getMonth() === m) span++
+      h += `<td colspan="${span}" class="month-start" style="width:${span * CELL_W}px;min-width:${span * CELL_W}px">${monthFull[m]} ${jours[i].getFullYear()}</td>`
+      i += span
+    }
+    document.getElementById('month-band-wrap').innerHTML = h + '</tr></table>'
+  }
+
+  function renderMonthPills () {
+    const w = document.getElementById('month-pills')
+    w.innerHTML = ''
+    const vus = new Set()
+    jours.forEach((d, idx) => {
+      const k = `${d.getFullYear()}-${d.getMonth()}`
+      if (vus.has(k)) return
+      vus.add(k)
+      const p = document.createElement('button')
+      p.className = 'month-pill'
+      p.textContent = monthFull[d.getMonth()]
+      p.addEventListener('click', () => {
+        document.getElementById('scroll-area').scrollTo({ left: idx * CELL_W, behavior: 'smooth' })
+        w.querySelectorAll('.month-pill').forEach(x => x.classList.remove('active'))
+        p.classList.add('active')
+      })
+      w.appendChild(p)
+    })
+    const f = w.querySelector('.month-pill')
+    if (f) f.classList.add('active')
+  }
+
+  function blocBien (bien, gardeIdx, menIdx, gere, avecNoms) {
+    let h = `<div class="bien-section" data-bien="${echapper(bien.id)}"><table class="cal"><thead><tr>`
+    h += `<th class="row-label bien-head">${echapper(bien.name)}${gere ? '' : '<span class="cap-h">non confié</span>'}</th>`
+    jours.forEach((d, i) => {
+      const cls = [estWeekend(d) ? 'weekend' : '', estAujourdhui(d) ? 'today' : '', debutDeMois(d, i) ? 'month-start' : '']
+      h += `<th class="${cls.join(' ')}"><div class="day-name">${dayNames[d.getDay()]}</div><div class="day-num">${d.getDate()}</div></th>`
+    })
+    h += '</tr></thead><tbody>'
+
+    // Ligne 1 — LA GARDE. Une initiale par jour, couleur stable par personne.
+    h += '<tr><td class="row-label">Garde</td>'
+    jours.forEach((d, i) => {
+      const iso = toISO(d)
+      const g = gardeIdx[`${bien.id}|${iso}`]
+      h += `<td class="${classesCellule(d, i, gere).join(' ')}" data-bien="${echapper(bien.id)}" data-jour="${iso}"` +
+           ` title="${echapper(titreGarde(bien, g, gere, avecNoms))}">${pastilleGarde(g, gere, avecNoms)}</td>`
+    })
+    h += '</tr>'
+
+    // Ligne 2 — LE MÉNAGE.
+    h += '<tr><td class="row-label">Ménage</td>'
+    jours.forEach((d, i) => {
+      const iso = toISO(d)
+      const menages = menIdx[`${bien.id}|${iso}`] || []
+      h += `<td class="${classesCellule(d, i, gere).join(' ')}" data-bien="${echapper(bien.id)}" data-jour="${iso}"` +
+           ` title="${echapper(titreMenage(menages, gere, avecNoms))}">${caseMenage(menages, gere)}</td>`
+    })
+    h += '</tr></tbody></table></div>'
+    return h
+  }
+
+  function classesCellule (d, i, gere) {
+    const c = ['cell']
+    if (estWeekend(d)) c.push('weekend')
+    if (estAujourdhui(d)) c.push('today')
+    if (debutDeMois(d, i)) c.push('month-start')
+    if (!gere) c.push('non-confie')
+    return c
+  }
+
+  // ⚠ UN BIEN NON CONFIÉ N'EST PAS UN TROU DE GARDE : le moteur sépare les deux
+  // et n'alerte que sur le second (décision du 3 septembre). Les confondre
+  // peignait en rouge chaque départ d'un hôte qui fait son ménage lui-même.
+  function pastilleGarde (g, gere, avecNoms) {
+    if (!gere) return '<span class="gard vide">·</span>'
+    if (!g || g.trou || !g.responsable) return '<span class="gard vide">—</span>'
+    const p = g.responsable
+    // Désactivée ou jours non réglés : elle est « de garde » pour le calcul, mais
+    // elle ne recevra rien. L'afficher comme les autres laissait l'hôte compter
+    // sur quelqu'un qui ne verra jamais le ménage.
+    if (p.actif === false) return `<span class="gard alerte">${echapper(initialeDe(p, avecNoms))}</span>`
+    if (p.a_regler) return `<span class="gard regler">${echapper(initialeDe(p, avecNoms))}</span>`
+    return `<span class="gard" style="background:${couleurDe(p.id || p.prenom)}">${echapper(initialeDe(p, avecNoms))}</span>`
+  }
+
+  // ⚠ LE ROUGE EST CONDITIONNEL, ET TROIS FOIS : pas de ménage, bien non confié,
+  // ou proposition simplement différée ne sont pas des alertes.
+  // ⚠ LE PLUS GRAVE L'EMPORTE quand un jour porte plusieurs ménages. La cellule
+  // n'en montrait que le PREMIER : un ménage porté (✓ vert) cachait un second
+  // que personne n'a (⚠). Le détail au clic les liste tous, mais la grille est
+  // ce que l'hôte parcourt pour repérer un problème — c'est elle qui doit
+  // porter le pire.
+  const GRAVITE = { alerte: 4, attente: 3, differe: 2, porte: 1, gris: 0 }
+  function etatMenage (m, gere) {
+    if (!gere) return 'gris'
+    // ⚠ `orphaned` AVANT `differe`. Un ménage refusé n'a ni porteur ni offre :
+    // dès que son départ sort de la fenêtre de proposition, il satisfait aussi
+    // `differe` — et s'affichait « proposition à venir » en gris, cachant la
+    // décision humaine que ce statut existe pour réclamer.
+    if (m.proposeA) return 'attente'
+    if (m.status === 'orphaned') return 'alerte'
+    if (m.differe) return 'differe'
+    if (m.porteur) return 'porte'
+    return 'alerte'
+  }
+  const MARQUEUR = { alerte: '⚠', attente: '⏳', differe: '·', porte: '✓', gris: '·' }
+
+  function caseMenage (menages, gere) {
+    if (!menages.length) return ''
+    let pire = menages[0], etat = etatMenage(menages[0], gere)
+    for (const m of menages.slice(1)) {
+      const e = etatMenage(m, gere)
+      if (GRAVITE[e] > GRAVITE[etat]) { pire = m; etat = e }
+    }
+    const avis = pire.retour ? (pire.retour.verdict === 'positif' ? ' avis-ok' : ' avis-ko') : ''
+    const plus = menages.length > 1 ? `<sup>${menages.length}</sup>` : ''
+    return `<span class="men ${etat}${avis}">${MARQUEUR[etat]}${plus}</span>`
+  }
+
+  // ─── Le survol : ce que la grille ne peut pas écrire ──────────────────────
+  //
+  // ⚠ À 34 px de colonne, aucun texte ne tient. Le `title` porte la phrase
+  // complète au survol, et le clic ouvre le détail : toute l'information reste
+  // accessible, aucune n'encombre la grille.
+  function titreGarde (bien, g, gere, avecNoms) {
+    if (!gere) return `${bien.name} — non confié à un prestataire`
+    if (!g || g.trou || !g.responsable) return `${bien.name} — personne de garde ce jour-là`
+    const p = g.responsable
+    let t = `${bien.name} — ${nomOu(p, avecNoms)} de garde`
+    if (p.actif === false) t += ' (désactivée : sa PWA ne s\'ouvre plus)'
+    else if (p.a_regler) t += ' (jours à régler : aucune proposition ne lui partira)'
+    if (g.remplacante) {
+      t += ` · remplaçante : ${nomOu(g.remplacante, avecNoms)}`
+      if (g.remplacante.a_regler) t += ' (jours à régler)'
+    }
+    return t
+  }
+
+  function titreMenage (menages, gere, avecNoms) {
+    if (!menages.length) return 'Aucun ménage ce jour-là'
+    const suffixe = menages.length > 1 ? ` · ${menages.length} ménages ce jour-là, cliquez` : ''
+    let pire = menages[0], etat = etatMenage(menages[0], gere)
+    for (const m of menages.slice(1)) {
+      const e = etatMenage(m, gere)
+      if (GRAVITE[e] > GRAVITE[etat]) { pire = m; etat = e }
+    }
+    return titreDUnMenage(pire, gere, avecNoms) + suffixe
+  }
+
+  function titreDUnMenage (m, gere, avecNoms) {
+    if (!gere) return 'Ménage — bien non confié à un prestataire'
+    if (m.proposeA) {
+      const chez = m.porteur ? ` (porté par ${nomOu(m.porteur, avecNoms)})` : ''
+      return `Ménage proposé à ${nomOu(m.proposeA, avecNoms)}${chez}${delaiTexte(m)}`
+    }
+    // ⚠ Même ordre que `etatMenage` : `orphaned` avant `differe`.
+    if (m.status === 'orphaned') return `Ménage refusé — décision attendue${m.raison ? ' · ' + m.raison : ''}`
+    if (m.differe) return 'Ménage — proposition à venir (le départ est encore loin)'
+    if (m.porteur) return `Ménage porté par ${nomOu(m.porteur, avecNoms)}${m.retour ? ' · retour du voyageur, cliquez' : ''}`
+    return 'Ménage — personne'
+  }
+
+  // ⚠ EN HEURE DE PARIS, et une échéance passée ne se dit pas « avant » :
+  // l'information qui dit « faut-il agir maintenant » indiquerait le contraire.
+  function delaiTexte (m) {
+    if (!m.expireLe) return ''
+    const d = new Date(m.expireLe)
+    if (Number.isNaN(d.getTime())) return ''
+    const quand = d.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long',
+                                              hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
+    return Date.parse(m.expireLe) < Date.now() ? ` · délai dépassé (${quand})` : ` · réponse avant ${quand}`
+  }
+
+  // ─── Le détail au clic ────────────────────────────────────────────────────
+  // ⚠ UN SEUL ÉCOUTEUR, DÉLÉGUÉ. Un par cellule, c'était 200 biens × 97 jours ×
+  // 2 lignes ≈ 39 000 écouteurs, reconstruits à chaque rendu — y compris à
+  // chaque case cochée dans le sélecteur de biens. La cellule porte déjà ce
+  // qu'il faut dans ses `data-`.
+  let indexCourant = { garde: {}, menages: {}, gere: {} }
+  function brancherCellules (gardeIdx, menIdx, gereIdx) {
+    indexCourant = { garde: gardeIdx, menages: menIdx, gere: gereIdx }
+  }
+  document.getElementById('blocks').addEventListener('click', e => {
+    const td = e.target.closest('td.cell')
+    if (!td) return
+    const bien = td.dataset.bien
+    const jour = td.dataset.jour
+    ouvrirDetail(bien, jour, indexCourant.garde[`${bien}|${jour}`],
+                 indexCourant.menages[`${bien}|${jour}`] || [],
+                 indexCourant.gere[bien] !== false)
+  })
+
+  function ouvrirDetail (bienId, jour, g, menages, gere) {
+    const bien = (donnees.biens || []).find(b => b.id === bienId)
+    const avecNoms = donnees.avec_noms
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(jour)
+    // ⚠ En UTC : une date de calendrier lue en heure locale se décale d'un jour
+    // à l'ouest de Greenwich — le piège déjà corrigé deux fois dans ce dépôt.
+    const lisible = m
+      ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12))
+          .toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+      : jour
+    document.getElementById('popup-titre').textContent = lisible
+    document.getElementById('popup-sous').textContent = bien ? bien.name : bienId
+
+    let h = ''
+    if (!gere) {
+      h += '<div class="bloc">Ce bien n\'est confié à aucun prestataire. Ses ménages n\'ont personne, et c\'est normal.</div>'
+    } else if (!g || g.trou || !g.responsable) {
+      h += '<div class="bloc"><div class="etiq">Garde</div><span class="pastille alerte">personne de garde ce jour-là</span></div>'
+    } else {
+      const p = g.responsable
+      // ⚠ MÊMES COULEURS QUE LA GRILLE : rouge pour une désactivée, ambre pour
+      // des jours non réglés. Les fondre en une seule teinte confondait deux
+      // problèmes différents — l'une ne peut plus ouvrir sa PWA, l'autre attend
+      // un réglage.
+      const mention = p.actif === false ? ' — désactivée, sa PWA ne s\'ouvre plus'
+                    : (p.a_regler ? ' — jours à régler, aucune proposition ne lui partira' : '')
+      const teinte = p.actif === false ? 'alerte' : (p.a_regler ? 'attente' : 'porte')
+      h += `<div class="bloc"><div class="etiq">Garde</div>` +
+           `<span class="pastille ${teinte}">${echapper(nomOu(p, avecNoms))}${echapper(mention)}</span></div>`
+      if (g.remplacante) {
+        h += `<div class="bloc"><div class="etiq">Remplaçante</div>` +
+             `<span class="pastille">${echapper(nomOu(g.remplacante, avecNoms))}${g.remplacante.a_regler ? ' — jours à régler' : ''}</span></div>`
       }
     }
-    const menagesParJour = {}
-    for (const m of (data.menages || [])) {
-      ((menagesParJour[m.date] ||= {})[m.propertyId] ||= []).push(m)
+
+    if (!menages.length) {
+      h += '<div class="bloc"><div class="etiq">Ménage</div>Aucun ménage ce jour-là.</div>'
     }
-
-    const auj = aujourdhui()
-    // Les biens que l'app ménage ne gère pas : aucun prestataire n'y est lié.
-    const geres = Object.fromEntries((data.garde || []).map(b => [b.propertyId, b.gere !== false]))
-    const html = (data.jours || []).map(date => {
-      const lignes = biens.map(b => {
-        const ref = b.id
-        const g = (gardeParJour[date] || {})[ref] || null
-        const menages = (menagesParJour[date] || {})[ref] || []
-        return ligneBien(nomBien[ref] || ref, g, menages, data.avec_noms, geres[ref] !== false)
-      }).join('')
-      const marque = date === auj ? '<span class="jour-marque">aujourd\'hui</span>' : ''
-      return `
-        <div class="jour-bloc ${date === auj ? 'aujourdhui' : ''}">
-          <div class="jour-entete"><span>${echapper(jourLisible(date))}</span>${marque}</div>
-          ${lignes}
-        </div>`
-    }).join('')
-
-    // ⚠ UNE LISTE TRONQUÉE SE DIT. Un ménage hors du lot rend son jour « sans
-    // ménage » : il s'afficherait en gris au lieu du rouge — l'alerte que cet
-    // écran existe pour montrer deviendrait un silence.
-    const avert = data.tronque
-      ? '<div class="jour-bloc"><div class="jour-vide">⚠️ Liste incomplète : trop de biens ou de ménages sur cette période. Réduisez la fenêtre pour tout voir.</div></div>'
-      : ''
-    document.getElementById('garde-liste').innerHTML = avert + html
-    document.getElementById('legende').style.display = ''
-  }
-
-  function ligneBien (nom, g, menages, avecNoms, gere) {
-    // ⚠ LE ROUGE EST CONDITIONNEL, ET DEUX FOIS (§12.6). Un jour sans personne
-    // ET sans ménage n'est pas un problème : un bien n'a pas de départ tous les
-    // jours, et peindre chaque case vide noierait les vrais trous.
-    // ⚠ ET UN BIEN NON GÉRÉ N'EST PAS UN TROU DE GARDE. `deciderParGarde` sépare
-    // « aucune liaison » (ce bien n'est pas confié à l'app ménage — le moteur
-    // n'alerte PAS, décision du 3 septembre) de « personne ce jour-là ». Les
-    // confondre peignait en rouge chaque départ d'un hôte qui fait son ménage
-    // lui-même, ou ses deux logements sur trois non confiés : l'écran entier
-    // rouge, et l'hôte cesse de le regarder.
-    const trou = !g || g.trou
-    const aMenage = menages.length > 0
-    const qui = !gere
-      ? '<span class="pastille absent">non confié</span>'
-      : trou
-        ? (aMenage
-            ? '<span class="pastille alerte">⚠ personne de garde</span>'
-            : '<span class="pastille absent">—</span>')
-        : pastilleQui(g.responsable, avecNoms)
-
-    // ⚠ LA REMPLAÇANTE PEUT ELLE AUSSI N'ÊTRE JAMAIS SOLLICITÉE (§12.9c). Sans
-    // cette mention, l'hôte croyait avoir un filet de sécurité qui n'existe pas :
-    // une suppléante « à confirmer » sans jours réglés ne recevra aucune
-    // proposition, jamais.
-    const remplacante = (!trou && g.remplacante)
-      ? `<span class="remplacante">↻ ${echapper(nomOu(g.remplacante, avecNoms))}${
-           g.remplacante.a_regler ? ' — jours à régler' : ''}</span>` : ''
-
-    return `
-      <div class="garde-ligne">
-        <div class="garde-bien">${echapper(nom)}</div>
-        <div class="garde-qui">${qui}${remplacante}</div>
-      </div>
-      ${menages.map(m => ligneMenage(m, avecNoms, gere)).join('')}`
-  }
-
-  // ⚠ SANS LE DROIT `prestataires`, ON DIT « quelqu'un », PAS UN IDENTIFIANT.
-  // L'écran reste juste — le bien est couvert — sans exposer qui compose le
-  // personnel de ménage à un propriétaire délégué.
-  function nomOu (p, avecNoms) {
-    if (!p) return 'personne'
-    if (!avecNoms || !p.prenom) return 'quelqu\'un'
-    return p.prenom
-  }
-
-  function pastilleQui (p, avecNoms) {
-    if (!p) return '<span class="pastille absent">—</span>'
-    // ⚠ ELLE EST DE GARDE, MAIS LE MOTEUR NE LA SOLLICITERA JAMAIS : elle doit
-    // confirmer et aucun jour ne lui est confié sur ce bien (§12.9c). Sans cette
-    // mention, l'écran affichait « Marie » juste au-dessus de « ménage —
-    // personne » : deux affirmations contradictoires, et aucun indice que le
-    // problème est un réglage de jours.
-    // ⚠ UN PROFIL DÉSACTIVÉ N'A PLUS DE PWA. La désactivation supprime sa ligne
-    // `public_tokens` sans toucher à ses liaisons : elle reste donc « de garde »
-    // pour le calcul, mais elle ne peut plus ouvrir son planning ni répondre.
-    // L'afficher en violet, comme si tout allait bien, laissait l'hôte compter
-    // sur quelqu'un qui ne verra jamais le ménage.
-    if (p.actif === false) {
-      return `<span class="pastille alerte">${echapper(nomOu(p, avecNoms))} — désactivée</span>`
+    for (const men of menages) {
+      h += `<div class="bloc"><div class="etiq">Ménage</div>${etatMenageDetail(men, gere, avecNoms)}`
+      // ⚠ LE RETOUR DE PROPRETÉ EST ICI, PAS DANS LA GRILLE : un pavé de texte
+      // par cellule ruinerait la densité, qui est tout l'intérêt d'un calendrier.
+      // La grille porte un 👍/👎 discret, le détail porte la phrase.
+      if (men.retour) {
+        const r = men.retour
+        const badge = r.verdict === 'positif'
+          ? '<span class="pastille retour-ok">👍 propreté saluée</span>'
+          : '<span class="pastille retour-ko">👎 remarque propreté</span>'
+        const prive = r.prive ? '<span class="retour-etiquette">retour privé</span>' : ''
+        const humain = r.humain ? '<span class="retour-etiquette">requalifié par vous</span>' : ''
+        const extrait = r.extrait ? `<div class="retour-extrait">« ${echapper(r.extrait)} »</div>` : ''
+        h += `<div style="margin-top:8px">${badge}${prive}${humain}${extrait}</div>`
+      }
+      h += '</div>'
     }
-    if (p.a_regler) {
-      return `<span class="pastille attente">${echapper(nomOu(p, avecNoms))} — jours à régler</span>`
-    }
-    return `<span class="pastille porte">${echapper(nomOu(p, avecNoms))}</span>`
+    document.getElementById('popup-corps').innerHTML = h
+    document.getElementById('overlay').classList.add('visible')
   }
 
-  // Le retour de propreté DU SÉJOUR, sur un ménage déjà passé.
-  //
-  // ⚠ ATTACHÉ À UN MÉNAGE, PAS À UNE PERSONNE (décision du 4 septembre 2026).
-  // Les compteurs globaux d'une prestataire — son ratio — sont sa fiche qualité :
-  // ils vivent sur /avis et dans sa PWA, pas sur l'écran des ménages.
-  //
-  // ⚠ RIEN QUAND IL N'Y A RIEN. Un ménage sans avis rattaché n'affiche pas
-  // « pas encore d'avis » : ce serait remplir l'écran de vide, et faire douter
-  // d'un travail correct.
-  //
-  // ⚠ JAMAIS LE NOM DU VOYAGEUR — le serveur ne l'envoie pas — et l'étiquette
-  // « retour privé » quand l'extrait vient d'un message que le voyageur n'a pas
-  // rendu public.
-  function retourProprete (m) {
-    const r = m && m.retour
-    if (!r) return ''
-    const badge = r.verdict === 'positif'
-      ? '<span class="pastille retour-ok">👍 propreté saluée</span>'
-      : '<span class="pastille retour-ko">👎 remarque propreté</span>'
-    const prive = r.prive ? ' <span class="retour-etiquette">retour privé</span>' : ''
-    const humain = r.humain ? ' <span class="retour-etiquette">requalifié par vous</span>' : ''
-    // L'extrait est une CITATION : il porte des guillemets, et rien d'autre du
-    // texte n'est disponible côté client.
-    const extrait = r.extrait
-      ? `<div class="retour-extrait">« ${echapper(r.extrait)} »</div>` : ''
-    return `<div class="retour">${badge}${prive}${humain}${extrait}</div>`
-  }
-
-  // L'échéance d'une proposition, dite à l'heure de PARIS. ⚠ `offer_expires_at`
-  // est un INSTANT : l'afficher en UTC annonce 16 h à quelqu'un qui a jusqu'à
-  // 18 h, et fait passer une proposition de fin de journée pour déjà perdue.
-  function delaiLisible (iso) {
-    if (!iso) return null
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return null
-    return d.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long',
-                                       hour: '2-digit', minute: '2-digit',
-                                       timeZone: 'Europe/Paris' })
-  }
-
-  function ligneMenage (m, avecNoms, gere) {
-    // Quatre états, et l'écran ne doit pas les confondre :
-    //   porté     : quelqu'un a la charge ;
-    //   proposé   : porté OU non, mais une réponse est attendue (⏳) ;
-    //   orphaned  : refusé, une décision humaine est attendue (⚠) ;
-    //   sinon     : personne.
-    let etatMenage
+  function etatMenageDetail (m, gere, avecNoms) {
+    if (!gere) return '<span class="pastille">bien non confié</span>'
     if (m.proposeA) {
-      const chez = m.porteur ? ` (chez ${echapper(nomOu(m.porteur, avecNoms))})` : ''
-      // ⚠ LE DÉLAI EST L'INFORMATION QUI DÉCIDE. « Proposé à Marie » sans terme
-      // ne dit pas s'il faut agir maintenant ou attendre : une réponse due dans
-      // deux heures et une autre dans quarante n'appellent pas le même geste.
-      // Il était calculé et transporté, mais jamais affiché.
-      // ⚠ UNE ÉCHÉANCE PASSÉE NE SE DIT PAS « réponse avant ». Entre l'expiration
-      // et le passage du cron (jusqu'à cinq minutes, davantage si un cycle
-      // échoue), l'écran annonçait un délai déjà écoulé — soit l'inverse exact de
-      // l'information qu'il porte, « faut-il agir maintenant ».
-      const expiree = m.expireLe && Date.parse(m.expireLe) < Date.now()
-      const avant = delaiLisible(m.expireLe)
-      const delai = !avant ? ''
-        : expiree ? ' <span class="motif">délai dépassé</span>'
-                  : ` <span class="delai">réponse avant ${echapper(avant)}</span>`
-      etatMenage = `<span class="pastille attente">⏳ proposé à ${echapper(nomOu(m.proposeA, avecNoms))}</span>${chez}${delai}`
-    } else if (m.status === 'orphaned') {
-      // ⚠ « refusé » et « personne » ne sont PAS la même chose : le premier
-      // demande une décision, le second attend peut-être encore le moteur.
-      etatMenage = '<span class="pastille alerte">⚠ refusé</span>'
-    } else if (m.porteur) {
-      etatMenage = `<span class="pastille porte">${echapper(nomOu(m.porteur, avecNoms))}</span>`
-    } else if (m.differe) {
-      // ⚠ « PAS ENCORE PROPOSÉ » N'EST PAS « PERSONNE ». Au-delà de la fenêtre de
-      // proposition, le ménage attend simplement que la date approche : le
-      // peindre en rouge sous la pastille de sa responsable affichait deux
-      // affirmations contradictoires sur la même ligne — et un clic sur
-      // « semaine suivante » suffisait à rougir tout l'écran.
-      etatMenage = '<span class="pastille absent">proposition à venir</span>'
-    } else if (!gere) {
-      // Ce bien n'est pas confié à l'app ménage : ses ménages n'ont personne, et
-      // c'est normal. Le signaler en rouge serait du bruit permanent.
-      etatMenage = '<span class="pastille absent">non confié</span>'
-    } else {
-      etatMenage = '<span class="pastille alerte">⚠ personne</span>'
+      const chez = m.porteur ? ` — porté par ${echapper(nomOu(m.porteur, avecNoms))} en attendant` : ''
+      return `<span class="pastille attente">⏳ proposé à ${echapper(nomOu(m.proposeA, avecNoms))}</span>${chez}${echapper(delaiTexte(m))}`
     }
-    const motif = (m.status === 'orphaned' && m.raison)
-      ? ` <span class="motif">${echapper(m.raison)}</span>` : ''
-    // ⚠ AUCUN RÉGLAGE ICI (règle de config) : le lien renvoie au Planning, où la
-    // réassignation existe déjà. Dupliquer ce geste sur deux écrans, ce serait
-    // deux writers pour la même décision.
-    return `<div class="menage-ligne">▸ Ménage — ${etatMenage}${motif}
-              · <a href="/apps/menages">ouvrir dans le planning</a>
-              ${retourProprete(m)}</div>`
+    // ⚠ Même ordre que la grille : `orphaned` avant `differe`.
+    if (m.status === 'orphaned') {
+      return `<span class="pastille alerte">⚠ refusé</span>${m.raison ? ' ' + echapper(m.raison) : ''}`
+    }
+    if (m.differe) return '<span class="pastille">proposition à venir</span> — le départ est encore loin, la proposition partira à l\'approche.'
+    if (m.porteur) return `<span class="pastille porte">${echapper(nomOu(m.porteur, avecNoms))}</span>`
+    return '<span class="pastille alerte">⚠ personne</span>'
   }
 
-  // ─── Démarrage ────────────────────────────────────────────────────────────
-  document.getElementById('btn-prev').addEventListener('click', () => {
-    debutSemaine = plusDeJours(debutSemaine, -7); charger()
+  // ─── Sélecteur de biens ───────────────────────────────────────────────────
+  //
+  // ⚠ RÉGLAGE D'AFFICHAGE, PAS DE CONFIGURATION (règle de config d'app). Il ne
+  // vit que dans cette page : rien n'est écrit en base depuis cet écran.
+  function renderSelecteurBiens () {
+    const panel = document.getElementById('ms-panel')
+    const tous = (donnees && donnees.biens) || []
+    panel.innerHTML = tous.map(b => `
+      <label class="ms-option">
+        <input type="checkbox" value="${echapper(b.id)}" ${!biensChoisis || biensChoisis.has(b.id) ? 'checked' : ''}>
+        <span>${echapper(b.name)}</span>
+      </label>`).join('')
+    panel.querySelectorAll('input').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const coches = [...panel.querySelectorAll('input')].filter(x => x.checked).map(x => x.value)
+        biensChoisis = coches.length === tous.length ? null : new Set(coches)
+        majLabelBiens()
+        rendre()
+      })
+    })
+    majLabelBiens()
+  }
+  function majLabelBiens () {
+    const tous = (donnees && donnees.biens) || []
+    const n = biensChoisis ? biensChoisis.size : tous.length
+    document.getElementById('ms-label').textContent =
+      !biensChoisis || n === tous.length ? 'Tous les biens' : `${n} bien${n > 1 ? 's' : ''}`
+  }
+
+  function centrerSurAujourdhui (doux) {
+    const area = document.getElementById('scroll-area')
+    if (!area) return
+    // La colonne du jour, moins un peu de marge pour voir ce qui précède.
+    area.scrollTo({ left: Math.max(0, JOURS_AVANT * CELL_W - 40), behavior: doux ? 'smooth' : 'auto' })
+  }
+
+  // ─── Branchements ─────────────────────────────────────────────────────────
+  document.getElementById('ms-trigger').addEventListener('click', () => {
+    document.getElementById('multi-select').classList.toggle('open')
   })
-  document.getElementById('btn-next').addEventListener('click', () => {
-    debutSemaine = plusDeJours(debutSemaine, 7); charger()
+  document.addEventListener('click', e => {
+    const ms = document.getElementById('multi-select')
+    if (!ms.contains(e.target)) ms.classList.remove('open')
   })
-  document.getElementById('btn-today').addEventListener('click', () => {
-    debutSemaine = lundiDe(new Date()); charger()
+  document.getElementById('period-select').addEventListener('change', e => {
+    mois = Number(e.target.value) || 1
+    charger()
+  })
+  document.getElementById('btn-today').addEventListener('click', () => centrerSurAujourdhui(true))
+  document.getElementById('btn-fermer').addEventListener('click', () => {
+    document.getElementById('overlay').classList.remove('visible')
+  })
+  document.getElementById('overlay').addEventListener('click', e => {
+    if (e.target.id === 'overlay') document.getElementById('overlay').classList.remove('visible')
+  })
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.getElementById('overlay').classList.remove('visible')
   })
 
   ;(async () => {
     session = await requireAuth()
     if (!session) return
-    // ⚠ La sidebar ne doit pas retarder l'écran : elle a sa propre chaîne
-    // d'appels, et la page ne dépend de rien qu'elle produise.
     renderSidebar('menages-garde').catch(e => console.error('[garde] sidebar', e))
-    charger()
+    await charger()
+    if (donnees && (donnees.biens || []).length) renderSelecteurBiens()
   })()
 </script>
 </body>

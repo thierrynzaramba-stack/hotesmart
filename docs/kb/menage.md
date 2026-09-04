@@ -156,9 +156,56 @@ entre deux appels serait la garde stockée que le §12.2 refuse.
 `apps/menages/garde.html` + `api/garde.js`. Une entrée **Garde** dans la sidebar, sous Ménages.
 Il répond à une seule question : **mes logements sont-ils couverts cette semaine ?**
 
-⚠️ **Un CALENDRIER EN LONGUEUR, pas une grille biens × jours.** Un tableau à 7 colonnes devient
-illisible dès le troisième bien sur un téléphone, et la question de l'hôte est « ce jour-là, qui
-est où ». Un bloc par jour, une ligne par bien, le jour courant marqué.
+⚠️ **LA MÊME GRILLE QUE LE CALENDRIER DES RÉSERVATIONS ET TARIFS** (`pages/biens-calendrier.html`),
+déclinée aux ménages — décision du product owner du 5 septembre 2026, après un premier essai en
+calendrier vertical qui ne convenait pas. Ce n'est **pas** une réinvention : même barre de
+contrôles collante (sélecteur de biens, période), mêmes pastilles de mois, même bande de mois,
+même `table.cal` à colonnes de 34 px avec le libellé figé à gauche, mêmes classes
+`weekend` / `today` / `month-start`, et les primitives viennent du **noyau partagé**
+(`shared/calendar-core.js`). Deux écrans qui montrent des jours et des biens doivent se lire
+pareil : une seconde grammaire visuelle, c'est un second apprentissage — et réécrire `toISO` ou
+la largeur de colonne, c'était garantir que les deux grilles se décalent.
+
+**Deux lignes par bien** : « Garde » (une initiale, couleur **stable par personne** — dérivée de
+son identifiant, pas de l'ordre d'affichage, qui changeait au premier congé) et « Ménage » (son
+état). Un `title` porte la phrase complète au survol, un clic ouvre le détail.
+
+⚠️ **La grille commence 7 jours AVANT aujourd'hui** — la seule divergence assumée avec le
+calendrier des tarifs, qui n'a aucune raison de montrer le passé. Le retour de propreté ne
+s'affiche que sur un ménage **passé** : une grille démarrant aujourd'hui ne l'aurait jamais
+montré. « Aujourd'hui » recentre.
+
+⚠️ **La borne de fenêtre est écrite DES DEUX CÔTÉS, et elles doivent concorder** : le front
+demandait 90 + 7 = 97 jours pour « 3 mois », le serveur en accepte 92 — l'option répondait 400 et
+l'écran affichait « Service indisponible ». Elle était morte à la livraison, et le test qui la
+couvrait prenait une fenêtre de 91 jours que l'écran ne demande jamais : vert sur une
+fonctionnalité cassée. Le test dérive désormais les bornes de la **même formule que le front**.
+
+⚠️ **`jours` n'est affecté qu'au SUCCÈS.** Le muter avant le fetch laissait, sur erreur, une
+fenêtre de 3 mois en mémoire avec les données d'un mois : cocher un bien dans le sélecteur
+repeignait 60 jours en « aucun ménage / personne de garde » — du silence là où des alertes
+peuvent exister.
+
+⚠️ **`orphaned` se teste AVANT `differe`, et `differe` exige un départ FUTUR.** Un ménage refusé
+n'a ni porteur ni offre : dès que son départ sort de la fenêtre de proposition, il satisfait
+aussi `differe` et s'affichait « proposition à venir », cachant la décision humaine que ce statut
+réclame. Et `dansLaFenetreDeProposition` étant bornée des deux côtés, un départ **passé** en sort
+également : le ménage se décrivait « le départ est encore loin » pour un séjour terminé que
+personne n'a fait. Depuis que la grille montre les sept jours écoulés, ce n'était plus un cas
+rare mais une garantie.
+
+⚠️ **Sur un jour à plusieurs ménages, la case montre le PLUS GRAVE** (et leur nombre en exposant).
+Elle n'en montrait que le premier : un ménage porté cachait un second que personne n'a. Le détail
+au clic les liste tous — mais la grille est ce que l'hôte parcourt pour repérer un problème.
+
+⚠️ **Périodes : 1 et 3 mois seulement**, là où le calendrier des tarifs propose jusqu'à 12. Une
+garde à un an n'a aucun sens — les règles de disponibilité auront changé avant, et l'écran
+afficherait une prévision présentée comme un fait. La borne serveur (92 jours) dit la même chose.
+
+⚠️ **La densité est le sujet.** À 34 px de colonne, aucun texte ne tient : la case porte une
+initiale et un marqueur (✓ ⏳ ⚠ ·, plus un 👍/👎 discret quand un retour existe), **jamais un
+extrait**. Un pavé par cellule ruinerait ce qui fait l'intérêt d'un calendrier. Tout le reste —
+délai, motif de refus, remplaçante, phrase du voyageur — est au **survol** et au **clic**.
 
 ⚠️ **La garde vient de `planningDeGarde`, la MÊME brique que le moteur** (§12.2). Recopier la
 règle côté écran, c'était garantir que les deux divergent : l'hôte aurait lu un planning qui ne
