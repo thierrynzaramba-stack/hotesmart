@@ -24,6 +24,7 @@ const { isActiveStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
 const { echeanceOffre } = require('../lib/cleaning/assign')
+const { notifierAssignation } = require('../lib/cleaning/notifier-prestataire')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -304,7 +305,16 @@ async function reassigner (req, res) {
   if (!garde.ok) return
   const userId = garde.accountUserId
 
-  const { property_id, booking_id, departure_date, provider_id } = req.body || {}
+  // ⚠ DEUX GESTES DISTINCTS, et l'hote choisit lequel.
+  //   `proposer` — elle confirme. Garde son plancher de deux heures.
+  //   `assigner` — transfert IMMEDIAT, sans aucune limite de delai. C'est le
+  //     geste d'urgence : quelqu'un se decommande a deux heures du depart, et il
+  //     faut que le menage soit fait. Elle est notifiee, et le menage apparait
+  //     aussitot dans sa PWA.
+  // Le defaut reste `proposer` quand le temps le permet : engager quelqu'un sans
+  // son accord doit rester un choix explicite, pas ce qui arrive par defaut.
+  const { property_id, booking_id, departure_date, provider_id, mode } = req.body || {}
+  const geste = mode === 'assigner' ? 'assigner' : 'proposer'
   if (!property_id || !booking_id || !departure_date) {
     return res.status(400).json({ error: 'Champs requis manquants (property_id, booking_id, departure_date)' })
   }
@@ -400,20 +410,30 @@ async function reassigner (req, res) {
     }
     const referent = liaison && liaison.rang === 1
 
-    if (referent) {
+    // Le referent est TOUJOURS assigne directement : c'est le sens de son rang.
+    // Pour les autres, c'est le geste demande qui tranche.
+    if (referent || geste === 'assigner') {
       maj = { ...maj, provider_id: choisi.id, status: 'accepted', assigned_by: 'manual',
               offered_to: null, offered_at: null, offer_expires_at: null,
               accepted_at: new Date().toISOString(),
-              assignment_reason: `Referent du bien, assigne a la main par l'hote.` }
-      reponse = { status: 'accepted', provider_id: choisi.id, prenom: choisi.first_name }
+              assignment_reason: referent
+                ? `Referent du bien, assigne a la main par l'hote.`
+                : `Assigne directement par l'hote (sans confirmation).` }
+      reponse = { status: 'accepted', provider_id: choisi.id, prenom: choisi.first_name,
+                  assignee: true }
     } else {
       // ⚠ UNE PROPOSITION DOIT LAISSER UN VRAI DELAI DE REPONSE. Passe la veille
       // du depart a 18 h, elle serait morte-nee : on refuse, et l'hote assigne
       // directement s'il le souhaite.
+      // ⚠ LE PLANCHER NE VAUT QUE POUR LA PROPOSITION. Une proposition qui
+      // expire avant d'avoir ete lue ne sert a rien ; l'assignation directe,
+      // elle, n'a aucune limite — c'est justement le geste de la derniere
+      // minute. Le 409 dit lequel des deux prendre.
       const echeance = echeanceOffre(departure_date)
       if (!echeance) {
         return res.status(409).json({
-          error: 'Trop tard pour proposer ce ménage : assignez-le directement ou changez de référente'
+          error: 'Trop tard pour une proposition — assignez directement, elle sera notifiée',
+          assigner_possible: true
         })
       }
       maj = { ...maj, offered_to: choisi.id, offered_at: new Date().toISOString(),
@@ -443,7 +463,23 @@ async function reassigner (req, res) {
           : (choisi ? `Vers ${choisi.first_name}.` : 'Menage laisse sans prestataire.'))
   })
 
-  return res.status(200).json({ success: true, ...reponse })
+  // ⚠ NOTIFIER, MAIS APRES AVOIR ECRIT. L'assignation est deja en base : un
+  // envoi qui echoue ne doit ni la defaire, ni faire echouer la requete. On dit
+  // a l'hote ce qui est REELLEMENT parti, plutot que de lui promettre un SMS.
+  let notif = { sms: false, email: false }
+  if (reponse.assignee && choisi) {
+    const { data: bien } = await supabase.from('properties')
+      .select('name').eq('user_id', userId).eq('provider_property_id', String(property_id)).maybeSingle()
+    const base = (process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')
+    try {
+      notif = await notifierAssignation({
+        userId, providerId: choisi.id, propertyName: bien && bien.name,
+        departureDate: departure_date, lien: `${base}/apps/menages/public`
+      })
+    } catch (e) { console.error('[menages] notification assignation echec', e.message) }
+  }
+
+  return res.status(200).json({ success: true, ...reponse, notifiee: notif })
 }
 
 // ─── Qui intervient sur quel bien, et a quel rang (spec §11.2) ──────────────

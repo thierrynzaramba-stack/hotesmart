@@ -205,6 +205,29 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
   ménages annulés** : l'annulation n'efface pas la proposition, et sans ce filtre un ménage
   annulé repassait en `orphaned`, réapparaissait au planning et déclenchait une alerte pour une
   réservation qui n'existe plus.
+### Deux gestes, pas un (4 septembre 2026)
+
+Dans la modale du planning hôte, deux boutons distincts :
+
+- **« Proposer (elle confirme) »** — le geste par défaut. Le ménage **reste chez
+  son porteur** jusqu'à l'acceptation. Possible **à tout moment**, dernière minute
+  comprise ; seule l'échéance s'ajuste (une heure quand la veille est passée).
+- **« Assigner (immédiat) »** — le geste d'**urgence** : transfert tout de suite,
+  sans confirmation, **sans aucune limite de délai**. Quelqu'un se décommande à
+  deux heures du départ, il faut que le ménage soit fait.
+
+⚠️ **Le défaut reste « proposer »**, et un `mode` inconnu y retombe : engager
+quelqu'un sans son accord doit rester un choix explicite, jamais ce qui arrive
+par accident.
+
+⚠️ **Une assignation directe est NOTIFIÉE** (`lib/cleaning/notifier-prestataire.js`,
+SMS via la clé Brevo de l'hôte + email plateforme). Le ménage apparaît aussitôt
+dans sa PWA — mais personne ne regarde sa PWA toutes les cinq minutes : sans
+notification, le geste d'urgence serait muet, et le logement pas préparé alors
+que l'hôte croit l'avoir confié. L'envoi est **best-effort** : l'assignation est
+déjà écrite, un envoi raté ne la défait pas et ne fait pas échouer la requête.
+L'écran dit ce qui est **réellement** parti, plutôt que de promettre un SMS.
+
 - ⚠️ **Re-choisir la porteuse dans le sélecteur RETIRE la proposition**, sans la déloger
   (`offer_withdrawn` au journal). C'était le geste manquant : « — personne — » retirait *aussi*
   la porteuse, et resélectionner une porteuse non-référente écrivait `offered_to = provider_id`,

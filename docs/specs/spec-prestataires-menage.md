@@ -150,6 +150,11 @@ Toute transition de `status` ou de `provider_id` écrit une ligne dans `menage_a
 
 ## 2. Calcul de disponibilité — `lib/cleaning/availability.js`
 
+> ⚠️ **PRÉCISÉ PAR LE §12 (4 septembre 2026)** : la disponibilité ne sert plus
+> à filtrer des « candidates d'un bien » mais à désigner la **responsable du
+> jour**. Tout est normalisé à **midi UTC** — pas minuit.
+
+
 Dépendance : `npm install rrule`. Ne pas réimplémenter la récurrence.
 
 `isAvailable(provider, date)` :
@@ -164,6 +169,13 @@ Côté UI, l'hôte ne voit jamais la chaîne RRULE : le formulaire propose jours
 Bénéfice ultérieur (hors périmètre) : le format est iCal, donc un export du planning de chaque prestataire abonnable depuis Google Agenda devient trivial.
 
 ## 3. Moteur d'assignation — `lib/cleaning/assign.js`
+
+> ⚠️ **RÉVISÉ PAR LE §12.1** : les trois modes n'en font plus qu'un. `priorite`
+> était le cas particulier où personne n'a de jours attitrés — `weekdays` vide
+> vaut « tous les jours ». `properties.cleaning_assignment_mode` reste dormante
+> pour `quota`, seul mode alternatif restant. Le rang ne sert plus qu'à
+> départager et remplacer.
+
 
 Appelé par le cron à la création de chaque `menage_event` (date du ménage = jour du checkout), et exposé aussi pour un recalcul manuel depuis le dashboard.
 
@@ -566,3 +578,125 @@ le token de Tiphaine existe.
 
 ⚠️ **2.5 vient après 2.2, et pas avant** : lui ouvrir un accès pendant que la PWA
 filtre encore par bien lui montrerait tous les ménages de Régina.
+
+## 12. Lot 3 — l'assignation automatique, par JOURNÉE (conception gravée le 4 septembre 2026)
+
+Thierry ne veut pas assigner à la main. Ce lot rend l'assignation automatique —
+mais il révise d'abord la façon dont on désigne qui fait quoi.
+
+### 12.1 Le prisme : la responsable DU JOUR
+
+⚠️ **« Référente d'un bien » n'existe plus comme statut.** C'est l'apparence
+qu'a une personne attitrée sur tous les jours. La référence est **par journée** :
+
+> Pour chaque **bien** et chaque **jour**, la **responsable effective** est la
+> première — par rang croissant — parmi les personnes **attitrées ce jour-là**
+> (`weekdays`) **et disponibles** (règles RRULE + exceptions).
+
+**`weekdays` vide ou NULL = attitrée tous les jours.** C'est ce qui rend le
+modèle rétrocompatible sans aucune migration de données : Régina, sans
+`weekdays`, est de garde tous les jours sur ses deux biens — exactement l'état
+actuel.
+
+**Conséquence : le « mode » du bien disparaît.** `priorite` n'était pas un mode
+concurrent de `jour`, c'était le cas particulier où personne n'a de jours
+attitrés. Un seul algorithme suffit. `properties.cleaning_assignment_mode` reste
+en base, **dormante**, pour le jour où `quota` arrivera — le seul vrai mode
+alternatif. Le rang, lui, ne sert plus qu'à **départager et remplacer**.
+
+### 12.2 La garde est CALCULÉE, jamais stockée
+
+Décision du 4 septembre 2026. `responsableDuJour(bien, date)` est une **fonction
+pure** : l'écran l'appelle pour la semaine affichée, le moteur à la création d'un
+ménage. **Aucune table `garde_jour`.**
+
+⚠️ **Pourquoi.** Une garde stockée est de la donnée dérivée persistée : elle
+diverge dès qu'une règle change entre deux cycles, et rien ne le signale. Ce
+dépôt a payé ce prix deux fois — snapshots fantômes, double writer de
+`public_tokens`. L'exigence « la remplaçante est en place avant même qu'une
+réservation tombe » est satisfaite sans stockage : elle **est** déterminée pour
+n'importe quel jour futur, à tout instant. Ne pas être stockée ne veut pas dire
+ne pas être décidée.
+
+Une table ne se justifiera que le jour où l'on voudra l'**historique** de qui
+était de garde — pas maintenant.
+
+### 12.3 `requires_ack` est une propriété de la LIAISON, pas du rang
+
+Avec le prisme par journée, « d'office ou doit confirmer » ne se déduit plus du
+rang : une attitrée du week-end en rang 2 ne doit pas être condamnée à confirmer
+pour toujours. La colonne vit donc sur `property_cleaning_providers`.
+
+- `requires_ack = false` → elle **porte** le ménage d'office.
+- `requires_ack = true` → elle reçoit une **proposition** (modèle parallèle §11.3).
+
+**Reprise** : toutes les liaisons de rang 1 passent à `false` — c'est leur
+comportement actuel, rien ne change pour personne. Les rangs 2+ restent à `true`.
+Le jour où une suppléante est rodée : **un booléen à basculer, pas une
+migration**.
+
+### 12.4 L'invariant de la porteuse, appliqué au jour
+
+Celui du §11 tient tel quel, appliqué à la responsable du jour :
+
+> Le ménage est **porté** par la première candidate qui n'a rien à confirmer.
+> Il est **proposé** à la responsable du jour si elle est différente.
+
+Déroulé du cas réel — samedi, Régina attitrée tous les jours (`requires_ack`
+false), la seconde attitrée le week-end (`requires_ack` true) :
+
+| Moment | Porteuse | Proposé à |
+|---|---|---|
+| Création | Régina | la seconde |
+| Acceptation | la seconde | — (transfert) |
+| Refus / expiration | Régina | — (l'escalade retombe sur elle, qui porte déjà) |
+| Samedi de semaine « off » | Régina | personne (indisponible → hors candidates) |
+| Mardi | Régina | personne (pas attitrée ce jour-là) |
+
+**Aucun état sans porteuse**, et l'escalade se termine d'elle-même. Le seul cas
+où personne ne porte : aucune candidate `requires_ack = false` — c'est le
+`offered` du §11, déjà géré.
+
+### 12.5 Congé déclaré APRÈS l'assignation
+
+- Ménage **proposé** → recalculé. Rien n'est engagé.
+- Ménage **accepté** → **jamais défait automatiquement**. L'hôte est alerté et
+  tranche. ⚠️ Un engagement ne se défait que par un humain.
+- Ménage **verrouillé** (`assigned_by='manual'`) → jamais recalculé, comme partout.
+
+### 12.6 Trou de garde : visible, mais pas alerté
+
+Un bien n'a pas de ménage tous les jours. Alerter sur chaque jour sans
+responsable noierait les vraies alertes.
+
+- **L'écran** montre les trous, y compris les jours sans réservation — c'est ce
+  qui permet de voir venir.
+- **L'alerte** ne part que si un **ménage existe** ce jour-là sans personne.
+
+### 12.7 Fuseaux et conventions
+
+- `weekdays` : **0 = dimanche … 6 = samedi**, lu avec `getUTCDay()`. Le
+  samedi-dimanche s'écrit `[0, 6]`.
+- ⚠️ Une RRULE raisonne en **instants**, une garde en **jours de calendrier**.
+  Tout est normalisé à **midi UTC** — pas minuit, qui bascule de jour au moindre
+  décalage. C'est le piège déjà corrigé deux fois sur les dates de séjour et sur
+  le planning.
+- ⚠️ **Jamais de récurrence codée à la main** : la lib npm `rrule`. Décision
+  gravée du §2.
+
+### 12.8 Découpage
+
+| Lot | Contenu | Écrans |
+|---|---|---|
+| **3.1** | Tables de disponibilité, `rrule`, `requires_ack`, `availability.js` + tests. Rien de branché. | aucun |
+| **3.2** | `lib/cleaning/garde.js` : `responsableDuJour()` / `planningDeGarde()`. Fonctions pures. | aucun |
+| **3.3** | Le moteur consomme la garde : création, changement de date, refus → remplaçante, alerte. | — |
+| **3.4** | Écran **planning de garde** : semaine × biens, qui est de garde, ménages posés dessus. | app ménage |
+| **3.5** | Jours attitrés et disponibilités côté hôte, « Mes disponibilités » dans la PWA. | 2 écrans |
+
+**Qui déclare les congés** : la prestataire (`self_availability: write`), l'hôte
+voit tout et corrige.
+
+**Le quota reste reporté** — il suppose de compter les ménages réalisés sur 30
+jours par personne et par bien, pour un besoin qui n'existe pas à deux
+prestataires. `quota_share` est déjà en base : aucune migration le jour venu.

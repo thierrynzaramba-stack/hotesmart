@@ -22,11 +22,11 @@ const REGINA = 'aaaa1111-1111-4111-8111-111111111111'
 const NOUVELLE = 'bbbb2222-2222-4222-8222-222222222222'
 
 function preparer ({ user = PROD, profil = null, permissions = null, compteAttendu = PROD,
-                     dateAttendue = LOIN,
+                     dateAttendue = LOIN, notifJette = false,
                      prestataire = { id: REGINA, first_name: 'Régina', active: true },
                      menage = { id: 'm1', provider_id: null, status: 'unassigned' },
                      liaison = { rang: 1 }, erreurProfil = null, erreurLiaison = null } = {}) {
-  const etat = { majs: [], journal: [], requetes: [] }
+  const etat = { majs: [], journal: [], requetes: [], notifs: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
                                        : { data: null, error: { message: 'x' } }) },
@@ -85,9 +85,22 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
   const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
-  for (const mod of ['../lib/require-permission', '../lib/permissions', '../api/menages']) {
+  // ⚠ Le cache est vide AVANT la pose du double : l'inverse annulerait le
+  // remplacement, et `etat.notifs` resterait vide quoi qu'il arrive — le defaut
+  // exact trouve hier sur le double d'alerte.
+  for (const mod of ['../lib/require-permission', '../lib/permissions', '../api/menages',
+                     '../lib/cleaning/notifier-prestataire']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
+  const absNotif = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
+  const mnotif = new Module(absNotif)
+  mnotif.exports = { notifierAssignation: async (opts) => {
+    if (notifJette) throw new Error('brevo indisponible')
+    etat.notifs.push(opts)
+    return { sms: true, email: false }
+  } }
+  mnotif.loaded = true
+  require.cache[absNotif] = mnotif
   return { handler: require('../api/menages'), etat }
 }
 
@@ -369,4 +382,89 @@ test('re-choisir la PORTEUSE retire la proposition, sans la déloger', async () 
   assert.strictEqual(etat.majs[0].row.offered_to, null, 'la proposition tombe')
   assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'la porteuse ne bouge pas')
   assert.strictEqual(etat.journal[0].event, 'offer_withdrawn')
+})
+
+// ─── Les deux gestes : proposer, ou assigner directement ───────────────────
+// ⚠ L'ASSIGNATION DIRECTE EST LE GESTE D'URGENCE. Quelqu'un se décommande à
+// deux heures du départ : il faut que le ménage soit fait, et attendre une
+// confirmation n'est plus possible. Elle n'a donc AUCUNE limite de délai, et la
+// personne est notifiée — sans quoi le geste serait muet.
+// La proposition reste le geste par défaut : engager quelqu'un sans son accord
+// doit rester un choix explicite.
+
+test('mode `assigner` : transfert IMMÉDIAT, même vers une suppléante', async () => {
+  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
+  assert.strictEqual(res.body.status, 'accepted')
+  assert.strictEqual(etat.majs[0].row.provider_id, NOUVELLE, 'elle porte le ménage tout de suite')
+  assert.strictEqual(etat.majs[0].row.offered_to, null, 'aucune proposition en attente')
+  assert.ok(etat.majs[0].row.accepted_at)
+})
+
+test('mode `assigner` : AUCUNE limite de délai', async () => {
+  // ⚠ C'est tout l'objet du geste. La proposition, elle, garde son échéance.
+  const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const { handler, etat } = preparer({ liaison: { rang: 2 }, dateAttendue: hier })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: hier, mode: 'assigner' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.majs[0].row.provider_id, NOUVELLE)
+})
+
+test('le DÉFAUT reste `proposer` : on n\'engage personne par accident', async () => {
+  // Un corps sans `mode` ne doit pas transférer : engager quelqu'un sans son
+  // accord doit rester un choix explicite.
+  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  await handler(post({ ...CORPS, provider_id: NOUVELLE }), reponse())
+  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
+  assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur ne bouge pas')
+})
+
+test('un mode inconnu retombe sur `proposer`, jamais sur `assigner`', async () => {
+  // Le repli sûr est celui qui n'engage personne.
+  for (const mode of ['ASSIGNER', 'forcer', 42, null]) {
+    const { handler, etat } = preparer({ liaison: { rang: 2 } })
+    await handler(post({ ...CORPS, provider_id: NOUVELLE, mode }), reponse())
+    assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE, String(mode))
+  }
+})
+
+test('le référent est assigné d\'office même en mode `proposer`', async () => {
+  // C'est le sens de son rang : on ne lui propose pas ce qui lui revient.
+  const { handler, etat } = preparer({ liaison: { rang: 1 } })
+  await handler(post({ ...CORPS, mode: 'proposer' }), reponse())
+  assert.strictEqual(etat.majs[0].row.provider_id, REGINA)
+  assert.strictEqual(etat.majs[0].row.offered_to, null)
+})
+
+test('une assignation directe est NOTIFIÉE, et la réponse dit ce qui est parti', async () => {
+  // ⚠ Le ménage apparaît aussitôt dans sa PWA — mais personne ne regarde sa PWA
+  // toutes les cinq minutes. Sans notification, le geste d'urgence est muet, et
+  // le logement n'est pas préparé alors que l'hôte croit l'avoir confié.
+  // ⚠ Et on dit ce qui est RÉELLEMENT parti : promettre un SMS qui n'a pas pu
+  // partir est pire que ne rien promettre.
+  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
+  assert.strictEqual(etat.notifs.length, 1, 'la personne assignée est prévenue')
+  assert.strictEqual(etat.notifs[0].providerId, NOUVELLE)
+  assert.ok(res.body.notifiee, 'la réponse porte ce qui est parti')
+})
+
+test('une PROPOSITION ne notifie pas par ce canal', async () => {
+  // Elle n'engage personne : c'est la PWA qui l'annonce, avec son délai.
+  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
+  assert.strictEqual(etat.notifs.length, 0)
+})
+
+test('une notification qui ÉCHOUE ne défait pas l\'assignation', async () => {
+  // ⚠ L'assignation est déjà écrite : un envoi raté ne doit ni la défaire, ni
+  // faire échouer la requête. La vérité reste la base ; le SMS est un rappel.
+  const { handler, etat } = preparer({ liaison: { rang: 2 }, notifJette: true })
+  const res = reponse()
+  await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.majs[0].row.provider_id, NOUVELLE)
 })

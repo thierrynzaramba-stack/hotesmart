@@ -84,6 +84,10 @@
     .presta-ligne select { flex: 1; padding: 6px 8px; font-size: 13px; border: 0.5px solid var(--border);
                            border-radius: var(--radius); background: var(--bg); color: var(--text); }
     .presta-etat { font-size: 11px; color: var(--text2); margin-top: 6px; min-height: 14px; }
+    .presta-gestes { display: flex; gap: 8px; margin-top: 8px; }
+    .presta-gestes button { flex: 1; font-size: 12px; padding: 7px 6px; line-height: 1.2; }
+    .presta-gestes button small { display: block; font-size: 10px; opacity: 0.65; font-weight: 400; }
+    .presta-gestes button:disabled { opacity: 0.4; cursor: default; }
 
     .prop-color-0 { background: #DBEAFE; color: #1E40AF; }
     .prop-color-1 { background: #D1FAE5; color: #065F46; }
@@ -678,18 +682,54 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
       : (m.assign.assigned_by === 'manual'
           ? 'Affectation manuelle : l\'automate n\'y touchera plus.'
           : '')
+    // ⚠ DEUX GESTES DISTINCTS, et l'hote choisit en connaissance.
+    //   « Proposer » — elle confirme. Le menage RESTE chez son porteur jusque-la.
+    //   « Assigner »  — transfert immediat, sans confirmation, notification a la
+    //     cle. C'est le geste d'urgence : quelqu'un se decommande a deux heures
+    //     du depart. Aucune limite de delai.
+    // La proposition reste le geste par defaut quand le temps le permet :
+    // engager quelqu'un sans son accord doit rester un choix explicite.
     return `<div class="presta-ligne"><span style="font-size:13px">Qui le fait</span>
               <select id="modal-presta">${options}</select></div>
+            <div class="presta-gestes" id="presta-gestes">
+              <button class="btn" id="btn-proposer">Proposer <small>(elle confirme)</small></button>
+              <button class="btn" id="btn-assigner">Assigner <small>(immédiat)</small></button>
+            </div>
             <div class="presta-etat" id="presta-etat">${echapper(verrou)}</div>`
   }
 
   function brancherSelecteurPrestataire(m) {
     const sel = document.getElementById('modal-presta')
     if (!sel) return
-    sel.addEventListener('change', async () => {
+    const bProp = document.getElementById('btn-proposer')
+    const bAff = document.getElementById('btn-assigner')
+
+    // ⚠ Le choix dans la liste ne DECLENCHE plus rien : c'est le bouton qui dit
+    // ce qu'on veut faire. Un `change` seul ne pouvait pas exprimer les deux
+    // gestes, et re-choisir la personne deja selectionnee n'emettait rien du
+    // tout — le retrait d'une proposition etait donc impossible.
+    const majBoutons = () => {
+      const memeQuePorteur = sel.value && sel.value === (m.assign.provider_id || '')
+      if (bProp) {
+        bProp.disabled = !sel.value || memeQuePorteur
+        bProp.style.display = memeQuePorteur && m.assign.offered_to ? 'none' : ''
+      }
+      if (bAff) {
+        bAff.textContent = ''
+        bAff.insertAdjacentHTML('afterbegin', memeQuePorteur && m.assign.offered_to
+          ? 'Retirer la proposition<small>le ménage lui reste</small>'
+          : (sel.value ? 'Assigner<small>(immédiat)</small>' : 'Retirer<small>(personne)</small>'))
+      }
+    }
+    sel.addEventListener('change', majBoutons)
+    majBoutons()
+
+    const envoyer = async (geste) => {
       const etat = document.getElementById('presta-etat')
       const choix = sel.value || null
       sel.disabled = true
+      if (bProp) bProp.disabled = true
+      if (bAff) bAff.disabled = true
       if (etat) etat.textContent = 'Enregistrement…'
       try {
         const res = await fetch('/api/menages', {
@@ -698,15 +738,19 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
                      'Authorization': `Bearer ${currentSession.access_token}`, ...enteteCompte() },
           body: JSON.stringify({
             property_id: m.propId, booking_id: m.bookId,
-            departure_date: m.departure, provider_id: choix })
+            departure_date: m.departure, provider_id: choix, mode: geste })
         })
         const data = await res.json().catch(() => null)
         if (!res.ok) {
           // ⚠ On DIT pourquoi. Un select qui revient en arriere sans un mot
           // laisse croire a un bug ; le motif le plus frequent est un droit
           // manquant (« Prestataires » en ecriture).
+          // ⚠ Et quand c'est « trop tard pour proposer », le serveur dit que
+          // l'assignation directe reste possible : on ne laisse pas l'hote
+          // devant une impasse a deux heures du depart.
           if (etat) etat.textContent = (data && data.error) || 'Réassignation impossible.'
-          sel.value = m.assign.provider_id || ''
+          if (data && data.assigner_possible && bAff) bAff.disabled = false
+          else sel.value = m.assign.provider_id || ''
           return
         }
         // La verite affichee vient du SERVEUR, pas de ce qu'on croyait demander :
@@ -719,9 +763,15 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
         m.assign.assigned_by = data.offered_to ? m.assign.assigned_by : (data.provider_id ? 'manual' : null)
         assignations[`${m.propId}|${m.bookId}|${m.departure}`] = m.assign
         if (etat) {
-          etat.textContent = data.offered_to
-            ? `Proposé à ${data.prenom} — le ménage reste chez son porteur jusqu'à acceptation.`
-            : (data.provider_id ? `Confirmé : ${data.prenom}.` : 'Ménage laissé sans prestataire.')
+          // ⚠ On dit ce qui est REELLEMENT parti, pas ce qu'on esperait envoyer.
+          const canal = data.notifiee && (data.notifiee.sms || data.notifiee.email)
+            ? ' Elle a été prévenue.'
+            : (data.assignee ? ' (aucune notification n\'a pu partir)' : '')
+          etat.textContent = data.retiree
+            ? `Proposition retirée — le ménage reste à ${data.prenom}.`
+            : (data.offered_to
+                ? `Proposé à ${data.prenom} — le ménage reste chez son porteur jusqu'à acceptation.`
+                : (data.provider_id ? `Assigné à ${data.prenom}.${canal}` : 'Ménage laissé sans prestataire.'))
         }
         routeRenderSafe()
       } catch (err) {
@@ -729,8 +779,12 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
         sel.value = m.assign.provider_id || ''
       } finally {
         sel.disabled = false
+        majBoutons()
       }
-    })
+    }
+
+    if (bProp) bProp.addEventListener('click', () => envoyer('proposer'))
+    if (bAff) bAff.addEventListener('click', () => envoyer('assigner'))
   }
 
   // Le planning se re-rend apres une reassignation, sans supposer quelle vue
