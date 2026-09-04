@@ -549,6 +549,32 @@ Le bouton est désormais retiré en lecture seule — il donnait l'illusion d'un
 action partagée. Mais **le défaut de fond reste** : la page hôte doit être
 branchée sur `menage_done`, comme la PWA l'est déjà. Chantier à part.
 
+## Backlog — notifications PUSH de la PWA prestataire
+
+**Lot dédié, après le chantier garde.** Web Push via le service worker qui existe
+déjà (`apps/menages/sw.js`) : un canal **natif et gratuit** pour les propositions
+de ménage et les rappels, là où le SMS coûte à chaque envoi sur la clé Brevo de
+l'hôte.
+
+Ce qu'il faudra :
+- un **abonnement push par prestataire**, stocké côté serveur (endpoint +
+  clés du navigateur), posé depuis la PWA à l'acceptation de la permission ;
+- l'**envoi depuis le serveur en VAPID** (paire de clés à générer, la publique
+  servie à la PWA, la privée en variable d'environnement) ;
+- un **repli SMS pour l'urgent** quand la prestataire n'a pas d'abonnement — le
+  push ne remplace pas le canal d'urgence, il l'économise.
+
+⚠️ **iOS exige que la PWA soit installée sur l'écran d'accueil** pour recevoir
+des notifications ; sur Android le navigateur suffit. À documenter dans
+`pages/guide.html`, au même endroit que l'installation de la PWA — sans quoi une
+prestataire sur iPhone ne recevra jamais rien sans comprendre pourquoi.
+
+⚠️ **Un abonnement push n'est pas une garantie de réception** : permission
+révoquée, appareil éteint, abonnement expiré. Le serveur doit lire le retour de
+l'envoi et le traiter comme `notifierAssignation` traite déjà le SMS — sur la
+**valeur de retour**, jamais sur l'absence d'exception. C'est le défaut qui a
+fait afficher « Elle a été prévenue » sans que rien ne parte.
+
 ## Limite produit : les biens Beds24 ne se pilotent pas dans le calendrier
 
 Les prix et disponibilités d'un bien Beds24 se modifient **dans Beds24**.
