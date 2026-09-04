@@ -145,6 +145,37 @@ test('le parcours de création d\'un prestataire est complet, de bout en bout', 
     'le retirer passe par /api/membres action=deactivate')
 })
 
+test('la fiche prestataire envoie le téléphone et l\'email, en création comme en édition', () => {
+  // ⚠ SANS TELEPHONE, LE GESTE D'URGENCE NE PREVIENT PERSONNE.
+  // `lib/cleaning/notifier-prestataire.js` n'envoie un SMS que si le profil
+  // porte un `phone`, un email que s'il porte un `email` — sinon il se tait.
+  // L'écran créait donc des prestataires sans aucun canal, et « assigner en
+  // urgence » restait muet alors que /api/membres accepte les deux champs.
+  const posts = appels(lire('apps/menages/prestataires.html'))
+  for (const action of ['create', 'update']) {
+    const a = posts.find(x => x.url === '/api/membres' && x.litterale === action)
+    assert.ok(a, `action ${action} introuvable`)
+    assert.match(a.brut, /phone:/, `${action} doit porter le téléphone`)
+    assert.match(a.brut, /email:/, `${action} doit porter l'email`)
+  }
+})
+
+test('saveEdit ne lit pas `editionEnCours` APRÈS `resetForm`', () => {
+  // ⚠ DÉFAUT RÉEL, TROUVÉ EN REVUE. `resetForm()` remet `editionEnCours` à
+  // `null` : tester la variable après lui rendait `!editionEnCours` toujours
+  // vrai. Chaque enregistrement réussi s'annonçait « ⚠️ Lien sans personne :
+  // aucun ménage ne peut lui être assigné », et le toast de succès était devenu
+  // inatteignable. Le verdict doit être capturé AVANT la réinitialisation.
+  const src = lire('apps/menages/prestataires.html')
+  const debut = src.indexOf('async function saveEdit')
+  assert.ok(debut > 0, 'saveEdit introuvable')
+  const corps = src.slice(debut, src.indexOf('\n  }', debut))
+  const reset = corps.indexOf('resetForm()')
+  assert.ok(reset > 0, 'saveEdit doit réinitialiser le formulaire')
+  assert.ok(!/editionEnCours/.test(corps.slice(reset)),
+    '`editionEnCours` est lu après `resetForm()`, qui vient de le vider')
+})
+
 test('les corps envoyés à /api/membres portent `profile_id`, jamais `id`', () => {
   // ⚠ Déjà corrigé une fois : `chargerCible` lit `b.profile_id`. Envoyer `id`
   // rend 400 « Identifiant de profil requis », et l'écran sortait avant

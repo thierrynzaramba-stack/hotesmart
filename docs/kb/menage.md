@@ -133,6 +133,54 @@ seulement à l'app ménage.
   écran n'est donc utilisable que par le titulaire du compte — alors que l'action `liaisons`,
   elle, est déléguée et gardée par `prestataires: write`. Échoue fermé, mais l'asymétrie est
   réelle : un gestionnaire ne peut pas créer une prestataire depuis cet écran.
+- **Téléphone et email, facultatifs, saisis dans la fiche** (4 septembre 2026).
+  ⚠️ **Sans eux, rien ne notifie.** `lib/cleaning/notifier-prestataire.js` envoie un SMS si le
+  profil porte un `phone`, un email s'il porte un `email` — et **se tait** sinon. L'écran ne les
+  envoyait pas alors que `/api/membres` les accepte depuis le lot 2.5 : toute prestataire créée
+  ici n'avait **aucun canal**, et le geste « assigner en urgence » restait muet. Les laisser
+  vides reste un choix légitime — une prestataire qui ouvre sa PWA plusieurs fois par jour n'en
+  a pas besoin — mais c'est désormais un choix, pas une fatalité.
+  ⚠️ **Les champs partent MÊME VIDES en édition** : `/api/membres` ne touche à un champ que s'il
+  est présent dans le corps. Ne pas l'envoyer rendrait un numéro ineffaçable une fois posé. Ils
+  sont donc **pré-remplis depuis le profil** (`/api/menages` les rend, sous la garde
+  `prestataires`) — les laisser vides aurait effacé un numéro existant au premier
+  enregistrement.
+  ⚠️ **L'email d'un accès par lien était FIGÉ.** La garde d'`/api/membres` portait sur
+  `accepted_at` ; or un accès par lien naît `accepted_at` rempli — il est utilisable tout de
+  suite — sans jamais porter de `member_user_id`. Son email n'identifie donc **aucun** compte
+  auth : il sert à la prévenir. La garde porte désormais sur `member_user_id`, ce qui laisse
+  l'intention d'origine intacte pour un accès par compte (les deux colonnes y sont écrites dans
+  le même update, à l'acceptation).
+  ⚠️ **Ce que la notification couvre RÉELLEMENT** : seul le geste « assigner » envoie quelque
+  chose (`api/menages.js`, sous `if (reponse.assignee && choisi)`). La **proposition** écrit
+  `offered_to` et retourne sans aucun envoi ; l'assignation automatique du cron n'envoie rien non
+  plus. L'aide de l'écran ne promet donc que l'assignation en urgence — écrire « ou proposé »
+  aurait été la faute du commit `c6d0553`, « elle a été prévenue était un mensonge ». Brancher la
+  notification sur la proposition reste à faire (lot 3.3).
+  ⚠️ **Les coordonnées ne sortent que sur `GET /api/menages?contacts=1`.** Ce n'est **pas** une
+  garde de droit — la garde reste `peutLire(…, 'prestataires')`, inchangée, et qui l'a franchie
+  obtient les coordonnées en ajoutant le paramètre. C'est un opt-in qui évite une exposition
+  **incidente** : le planning (`apps/menages/index.html`) appelle le même endpoint et ne lit que
+  `id`, `prenom`, `actif` — il recevait les numéros personnels de tout le personnel de ménage
+  sans jamais les afficher. Une donnée qu'un écran n'utilise pas n'a pas à transiter par lui.
+  ⚠️ **Un lien SANS profil coupe les deux champs**, il ne les laisse pas vides. `saveEdit` saute
+  tout l'appel `/api/membres` quand aucun profil n'est rattaché : une saisie y serait jetée en
+  silence, et l'écran annonçait quand même « ✓ Prestataire modifié ! » — `showToast` écrase
+  `textContent`, donc l'avertissement « lien sans personne » était remplacé avant d'être lu.
+  ⚠️ **Le verdict se lit AVANT `resetForm()`**, qui remet `editionEnCours` à `null`. Le tester
+  après rendait `!editionEnCours` toujours vrai : chaque enregistrement réussi s'annonçait
+  « ⚠️ Lien sans personne », et le toast de succès devenait inatteignable — l'inverse exact du
+  défaut qu'on corrigeait. Trouvé en revue, couvert par `tests/contrat-front-api.test.js`.
+  ⚠️ **« Pas de profil » et « on n'a pas pu le savoir » ne se disent pas pareil.** `profilLie`
+  rend `null` dans les deux cas ; `rapprochementSur` les sépare, comme le fait déjà
+  `deletePrestataire`. Conseiller « recréez le prestataire » sur une simple panne de lecture de
+  `public_tokens` pousserait à détruire une prestataire fonctionnelle.
+  ⚠️ **Le nom ne part PAS vers le profil.** Ce champ est pré-rempli depuis `public_tokens.label`,
+  qui vaut « Prénom Nom » dès qu'un `last_name` existe. Le renvoyer en `first_name` écrirait
+  « Régina Dupont » dans le prénom en laissant `last_name` à « Dupont » : planning, « Bonjour … »
+  du SMS et `/settings` afficheraient « Régina Dupont Dupont », sans aucun champ ici pour
+  réparer. **Dette assumée** : `label` et `first_name` peuvent diverger au renommage — le
+  renommage du profil reste à la page Équipe.
 - ⚠️ **Le rapprochement lien ↔ profil se fait EN BASE, par le jeton** (`public_token_id`, posé
   par `/api/menages`) — jamais par comparaison de prénoms. `public_tokens.label` vaut
   « Prénom Nom » dès qu'un nom de famille existe : un accent, une casse, un renommage ou un

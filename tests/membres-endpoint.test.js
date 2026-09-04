@@ -779,6 +779,52 @@ test('PERIMETRE : un profil dont les biens ont disparu reste MODIFIABLE', async 
   void etat
 })
 
+test('CONTACT : l\'email d\'un acces par LIEN reste modifiable', async () => {
+  // ⚠ LA GARDE PORTAIT SUR `accepted_at`, ET ELLE FIGEAIT LES PRESTATAIRES.
+  // Un acces par lien nait `accepted_at` rempli — il est utilisable tout de
+  // suite — sans jamais porter de `member_user_id`. Son email n'identifie donc
+  // aucun compte : il sert a la prevenir. Fige, il ne pouvait plus etre corrige
+  // apres une faute de frappe, et la notification partait dans le vide.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina',
+    phone: '0600000000', email: 'regina@exemple.fr',
+    permissions: { self_availability: 'read' } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.strictEqual(maj.row.phone, '0600000000')
+  assert.strictEqual(maj.row.email, 'regina@exemple.fr')
+})
+
+test('CONTACT : l\'email d\'un membre RATTACHE a un compte reste fige', async () => {
+  // L'intention d'origine, intacte : une fois `member_user_id` pose, l'email
+  // identifie un compte auth reel. Le changer ici le desynchroniserait.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-test',
+    phone: '0611111111', email: 'usurpation@exemple.fr',
+    permissions: droitsVides() } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.strictEqual(maj.row.phone, '0611111111', 'le telephone, lui, reste modifiable')
+  assert.strictEqual(maj.row.email, undefined, 'l\'email n\'est pas touche')
+})
+
+test('CONTACT : un email VIDE efface, il ne laisse pas l\'ancien', async () => {
+  // Le formulaire envoie le champ meme vide : c'est le seul moyen d'effacer.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: 'p-regina', phone: '', email: '',
+    permissions: { self_availability: 'read' } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.strictEqual(maj.row.phone, null)
+  assert.strictEqual(maj.row.email, null)
+})
+
 // ─── Panneau reduit des prestataires ────────────────────────────────────────
 
 test('PRESTATAIRE : enregistrer sans perimetre CONSERVE celui deja en base', async () => {

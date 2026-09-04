@@ -86,6 +86,34 @@
             <input class="form-input" id="presta-name" placeholder="Nom (ex: Marie, Société Propre+)">
           </div>
 
+          <!-- ⚠ SANS TELEPHONE, LA NOTIFIER NE NOTIFIE RIEN.
+               `lib/cleaning/notifier-prestataire.js` envoie un SMS si le profil
+               porte un `phone`, un email s'il porte un `email` — et sinon se
+               tait. Le geste « assigner en urgence » restait donc muet pour
+               toute prestataire creee depuis cet ecran, qui n'envoyait ni l'un
+               ni l'autre alors que /api/membres les accepte depuis le lot 2.5.
+               Les deux sont facultatifs : une prestataire qui ouvre sa PWA
+               plusieurs fois par jour n'en a pas besoin.
+
+               ⚠ NE PROMETTRE QUE CE QUI PART. Le seul chemin qui notifie est
+               `api/menages.js`, sous `if (reponse.assignee && choisi)` — donc
+               le geste « assigner ». La PROPOSITION ecrit `offered_to` et
+               retourne sans aucun envoi, et l'assignation automatique du cron
+               n'envoie rien non plus. Ecrire « ou propose » ici serait la meme
+               faute que le commit c6d0553, « elle a ete prevenue etait un
+               mensonge ». -->
+          <div class="form-row">
+            <input class="form-input" id="presta-phone" type="tel"
+                   placeholder="Téléphone (optionnel, ex: +33612345678)">
+            <input class="form-input" id="presta-email" type="email"
+                   placeholder="Email (optionnel)">
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin:-4px 0 12px" id="aide-contact">
+            Sert à la prévenir quand vous lui assignez un ménage en urgence.
+            Sans aucun des deux, elle ne le verra qu'en ouvrant son lien.
+            Une proposition, elle, ne part pas encore par SMS ni par email.
+          </div>
+
           <div style="font-size:11px;color:var(--text2);margin-bottom:8px;font-weight:500">BIENS ACCESSIBLES</div>
           <div class="prop-checkboxes" id="prop-checkboxes">
             <div style="font-size:12px;color:var(--text2)">Chargement...</div>
@@ -184,7 +212,10 @@
     // -> naturellement exclu de l'affectation.
     let res
     try {
-      res = await fetch('/api/menages', {
+      // ⚠ `contacts=1` : le telephone et l'email des prestataires ne sortent que
+      // sur demande. C'est le SEUL ecran qui en a besoin — pour pre-remplir la
+      // fiche — et le planning n'a aucune raison de les recevoir.
+      res = await fetch('/api/menages?contacts=1', {
         headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
       })
     } catch (e) {
@@ -427,6 +458,11 @@
     const biens = saisieDesBiens()
     if (!biens.length) return alert('Cochez au moins un bien : un prestataire sans bien ne verrait aucun ménage.')
 
+    // ⚠ Facultatifs, et envoyes MEME VIDES : `/api/membres` les normalise en
+    // `null`. Ce sont les deux seuls canaux par lesquels une prestataire
+    // apprend un menage sans ouvrir sa PWA.
+    const contact = contactSaisi()
+
     const btn = document.getElementById('btn-create')
     btn.disabled = true
     try {
@@ -442,6 +478,8 @@
           // confrontait le corps envoye par l'ecran aux actions du serveur.
           action: 'create',
           first_name: name,
+          phone: contact.phone,
+          email: contact.email,
           access_mode: 'lien',
           permissions: {
             property_scope: 'selected',
@@ -603,7 +641,22 @@
 
     // Le profil derriere ce lien, s'il en a un. Les liens crees avant le lot 2.5
     // n'en ont pas : on le DIT plutot que d'afficher un rang qui n'existe pas.
-    editionEnCours = profilDuToken(p)
+    const profil = profilLie(p)
+    editionEnCours = profil ? profil.id : null
+
+    // ⚠ PRE-REMPLIS DEPUIS LE PROFIL, pas depuis `public_tokens` : le telephone
+    // et l'email vivent sur `profiles`, c'est `/api/membres` qui les ecrit.
+    // Les laisser vides aurait efface un numero deja pose au premier
+    // enregistrement, puisque l'edition envoie le champ meme vide.
+    //
+    // ⚠ SANS PROFIL, LES CHAMPS SONT COUPES — ils ne sont pas seulement vides.
+    // `saveEdit` saute tout l'appel a `/api/membres` quand `editionEnCours` est
+    // nul (lien d'avant le lot 2.5, ou rapprochement indisponible) : une saisie
+    // y serait jetee en silence, et l'ecran annoncerait « modifie ». Une case
+    // qui n'enregistre pas ne doit pas etre saisissable.
+    coordonneesSaisissables(!!profil)
+    document.getElementById('presta-phone').value = (profil && profil.telephone) || ''
+    document.getElementById('presta-email').value = (profil && profil.email) || ''
 
     properties.forEach(prop => {
       const cb = document.getElementById(`prop-${prop.id}`)
@@ -631,8 +684,12 @@
   // devenaient definitivement non modifiables — et deux liens de meme label
   // renvoyaient le MEME profil, si bien qu'editer l'un effacait les biens de
   // l'autre.
+  function profilLie(ligneToken) {
+    return prestatairesProfils.find(x => x.public_token_id === ligneToken.id) || null
+  }
+
   function profilDuToken(ligneToken) {
-    const p = prestatairesProfils.find(x => x.public_token_id === ligneToken.id)
+    const p = profilLie(ligneToken)
     return p ? p.id : null
   }
 
@@ -650,6 +707,16 @@
     // qu'elles doivent rester synchrones. L'app garde `label`,
     // `visibility_days` et `ratio_periode` : des reglages d'affichage.
     const biens = saisieDesBiens()
+    // ⚠ LE NOM NE PART PAS VERS LE PROFIL, et c'est deliberé.
+    // Ce champ est pre-rempli depuis `public_tokens.label`, qui vaut
+    // « Prenom Nom » des qu'un nom de famille existe (`synchroniserTokenPwa`
+    // le compose ainsi). Le renvoyer en `first_name` ecrirait « Regina Dupont »
+    // dans le prenom en laissant `last_name` a « Dupont » : le planning, le
+    // « Bonjour … » du SMS et /settings afficheraient « Regina Dupont Dupont »,
+    // et cet ecran n'a aucun champ `last_name` pour reparer. Le renommage du
+    // profil reste a la page Equipe. Dette assumee : label et prenom peuvent
+    // diverger — c'est deja le cas aujourd'hui, et c'est sans consequence.
+    const contact = contactSaisi()
     if (editionEnCours) {
       const rp = await fetch('/api/membres', {
         method: 'POST',
@@ -663,6 +730,7 @@
           // le lot 2.5 — donc tous ceux qui recoivent des menages — etait
           // totalement inoperant. Meme faute sur `deactivate`.
           action: 'update', profile_id: editionEnCours,
+          phone: contact.phone, email: contact.email,
           permissions: { property_scope: 'selected',
                          property_ids: biens.map(b => b.uuid).filter(Boolean) }
         })
@@ -694,20 +762,47 @@
       .eq('id', id)
       .eq('user_id', currentSession.user.id)
 
-    if (error) { alert('Erreur modification : ' + error.message); return }
+    // ⚠ LE VERDICT SE LIT AVANT `resetForm`, QUI REMET `editionEnCours` A NULL.
+    // Le tester apres rendait `!editionEnCours` TOUJOURS vrai : chaque
+    // enregistrement reussi s'annoncait « ⚠️ Lien sans personne », et le toast de
+    // succes etait devenu inatteignable — exactement l'inverse de ce qu'on
+    // corrigeait.
+    const avaitProfil = !!editionEnCours
+
+    // ⚠ L'ECHEC PARTIEL SE DIT COMME TEL, ET L'ECRAN SE RECHARGE.
+    // Annoncer « Erreur modification » puis sortir sans recharger laissait croire
+    // que rien n'avait bouge, sur un ecran qui affichait encore l'etat d'avant :
+    // l'hote ressaisissait par-dessus une base deja modifiee.
+    //
+    // ⚠ MAIS SEULEMENT S'IL Y A UN PROFIL. Sans profil, l'appel a `/api/membres`
+    // n'a pas eu lieu : rien n'a ete ecrit, et affirmer « ses coordonnees sont
+    // bien prises en compte » serait le meme mensonge que c6d0553.
+    if (error) {
+      await rechargerTout()
+      alert(avaitProfil
+        ? 'Enregistrement incomplet. Ses coordonnées et son périmètre sont bien pris en compte, '
+          + 'mais son nom affiché et ses réglages d\'affichage n\'ont pas pu être écrits : '
+          + error.message
+        : 'Enregistrement impossible, rien n\'a été modifié : ' + error.message)
+      return
+    }
 
     // ⚠ Les rangs suivent les biens. Sans profil derriere ce lien, il n'y a rien
     // a lier : on le dit, sans bloquer l'enregistrement du reste.
     let ok = true
-    if (editionEnCours) ok = await enregistrerLiaisons(editionEnCours, biens)
-    else showToast('⚠️ Lien sans personne : aucun ménage ne peut lui être assigné')
+    if (avaitProfil) ok = await enregistrerLiaisons(editionEnCours, biens)
 
     // ⚠ `rechargerTout` AVANT `resetForm` : le formulaire se redessine a partir
     // des liaisons, et les reinitialiser d'abord le laissait afficher l'etat
     // d'avant l'enregistrement.
     await rechargerTout()
     resetForm()
-    if (ok) showToast('✓ Prestataire modifié !')
+    // ⚠ UN SEUL TOAST. `showToast` ecrase `textContent` : l'avertissement « lien
+    // sans personne » etait remplace par « ✓ Prestataire modifie ! » avant meme
+    // d'etre lu, si bien qu'un enregistrement qui n'avait rien pu rattacher
+    // s'annoncait comme un succes.
+    if (!avaitProfil) showToast('⚠️ Lien sans personne : aucun ménage ne peut lui être assigné')
+    else if (ok) showToast('✓ Prestataire modifié !')
   }
 
   // Les quatre cles reconnues par lib/stats-avis.js. Une cinquieme valeur serait
@@ -723,9 +818,44 @@
     return PERIODES_RATIO.includes(v) ? v : 'toujours'
   }
 
+  // Ouvre ou coupe les deux coordonnees, avec le motif ecrit a cote. Un lien
+  // sans profil n'a aucun writer pour `profiles` : rien ne pourrait y etre ecrit.
+  const AIDE_CONTACT = document.getElementById('aide-contact').innerHTML
+  function coordonneesSaisissables(ouvert) {
+    for (const id of ['presta-phone', 'presta-email']) {
+      const el = document.getElementById(id)
+      el.disabled = !ouvert
+      el.style.opacity = ouvert ? '' : '0.5'
+    }
+    // ⚠ « PAS DE PROFIL » ET « ON N'A PAS PU LE SAVOIR » NE SE DISENT PAS PAREIL.
+    // `profilLie` rend `null` dans les deux cas, mais `rapprochementSur` les
+    // separe — c'est deja la garde de `deletePrestataire`. Conseiller « recreez
+    // le prestataire » sur une simple panne de lecture pousserait a detruire une
+    // prestataire parfaitement fonctionnelle.
+    document.getElementById('aide-contact').innerHTML = ouvert ? AIDE_CONTACT
+      : !rapprochementSur
+        ? 'Le lien avec les personnes n\'a pas pu être établi : téléphone et email sont '
+          + 'momentanément non modifiables. Rechargez la page et réessayez.'
+        : 'Ce lien n\'est rattaché à aucune personne : ni téléphone ni email ne peuvent y être '
+          + 'enregistrés. Recréez le prestataire pour qu\'il puisse être prévenu et recevoir des ménages.'
+  }
+
+  // Le telephone et l'email tels que saisis. Rendus meme vides : en edition,
+  // `/api/membres` ne touche a un champ que s'il est PRESENT dans le corps —
+  // ne pas l'envoyer rendrait un numero ineffacable une fois pose.
+  function contactSaisi() {
+    return {
+      phone: document.getElementById('presta-phone').value.trim(),
+      email: document.getElementById('presta-email').value.trim()
+    }
+  }
+
   function resetForm() {
     editionEnCours = null
     document.getElementById('presta-name').value = ''
+    document.getElementById('presta-phone').value = ''
+    document.getElementById('presta-email').value = ''
+    coordonneesSaisissables(true)   // la creation, elle, pose toujours un profil
     document.getElementById('visibility-days').value = '30'
     document.getElementById('ratio-periode').value = 'toujours'
     document.getElementById('form-section').style.display = 'none'

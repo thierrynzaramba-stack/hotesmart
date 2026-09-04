@@ -100,6 +100,38 @@ test('auth : session invalide -> 401', async () => {
   assert.strictEqual(res.code, 401)
 })
 
+const PRESTA = [{ id: 'p1', first_name: 'Régina', active: true, pwa_token: null,
+                 phone: '0600000000', email: 'regina@exemple.fr' }]
+
+test('CONTACTS : sans `contacts=1`, ni téléphone ni email ne sortent', async () => {
+  // ⚠ Le planning (`apps/menages/index.html`) appelle le meme endpoint et ne lit
+  // que `id`, `prenom` et `actif`. Les rendre a tout appelant donnait les
+  // coordonnees personnelles de tout le personnel de menage a un delegue en
+  // lecture seule, sur un ecran qui ne les affiche nulle part.
+  const { handler } = chargerEndpoint({
+    props: [{ provider_property_id: '12345', name: 'Bien', provider: 'beds24' }],
+    prestataires: PRESTA })
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 200)
+  const p = res.body.prestataires[0]
+  assert.strictEqual(p.prenom, 'Régina', 'l\'annuaire lui-meme reste rendu')
+  assert.ok(!('telephone' in p), 'pas de telephone sans demande explicite')
+  assert.ok(!('email' in p), 'pas d\'email sans demande explicite')
+})
+
+test('CONTACTS : avec `contacts=1`, la fiche prestataire les reçoit', async () => {
+  const { handler } = chargerEndpoint({
+    props: [{ provider_property_id: '12345', name: 'Bien', provider: 'beds24' }],
+    prestataires: PRESTA })
+  const res = reponse()
+  await handler(req(undefined, { contacts: '1' }), res)
+  assert.strictEqual(res.code, 200)
+  const p = res.body.prestataires[0]
+  assert.strictEqual(p.telephone, '0600000000')
+  assert.strictEqual(p.email, 'regina@exemple.fr')
+})
+
 test('methode ni GET ni POST -> 405', async () => {
   // ⚠ POST n'est plus refuse : c'est la reassignation manuelle (spec §11.6).
   // Elle a sa propre garde — `prestataires: write` — testee juste en dessous.

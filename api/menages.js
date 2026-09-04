@@ -127,6 +127,9 @@ module.exports = async function handler(req, res) {
     // Bornes optionnelles sur la date de depart (= date du menage).
     const from = typeof req.query.from === 'string' ? req.query.from : null
     const to   = typeof req.query.to   === 'string' ? req.query.to   : null
+    // Les coordonnees des prestataires : sur demande, et sous le droit
+    // `prestataires` comme le reste de l'annuaire (voir plus bas).
+    const avecContacts = String(req.query.contacts || '') === '1'
 
     // ⚠ Filtre et tri portes cote SQL. Sans eux, PostgREST tronque a 1000 lignes
     // par defaut, dans un ordre non deterministe : des menages de la semaine en
@@ -221,7 +224,7 @@ module.exports = async function handler(req, res) {
     // exactement ce qu'on veut, il ne pourrait de toute facon pas reassigner.
     if (peutLire(garde.contexte, 'prestataires', null)) {
       const { data: pr, error: errPr } = await supabase.from('profiles')
-        .select('id, first_name, active, pwa_token')
+        .select('id, first_name, active, pwa_token' + (avecContacts ? ', phone, email' : ''))
         .eq('account_user_id', userId).eq('access_mode', 'lien')
         .order('first_name', { ascending: true })
       if (errPr) console.error('[menages] lecture prestataires echec', errPr.message)
@@ -259,6 +262,16 @@ module.exports = async function handler(req, res) {
         prestataires = (pr || []).map(x => ({
           id: x.id, prenom: x.first_name, actif: x.active !== false,
           a_lien: !!x.pwa_token,
+          // Les coordonnees ne sortent que si l'appelant les demande.
+          // ⚠ CE N'EST PAS UNE GARDE DE DROIT — la garde, c'est
+          // `peutLire(..., 'prestataires')` ci-dessus, et elle est inchangee :
+          // qui l'a franchie obtient les coordonnees en ajoutant `contacts=1`.
+          // C'est un opt-in qui evite une exposition INCIDENTE : le planning
+          // (`apps/menages/index.html`) appelle le meme endpoint et ne lit que
+          // `id`, `prenom` et `actif` ; sans cet opt-in, il recevait les numeros
+          // personnels de tout le personnel de menage sans jamais les afficher.
+          // Une donnee qu'un ecran n'utilise pas n'a pas a transiter par lui.
+          ...(avecContacts ? { telephone: x.phone || null, email: x.email || null } : {}),
           public_token_id: x.pwa_token ? (parJeton.get(x.pwa_token) || null) : null
         }))
         // L'ecran doit pouvoir distinguer « ce lien n'a pas de profil » d'« on

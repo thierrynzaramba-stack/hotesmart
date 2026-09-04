@@ -387,9 +387,17 @@ async function modifier (req, res, compte) {
   }
   if (b.last_name != null) maj.last_name = String(b.last_name).trim() || null
   if (b.phone != null)     maj.phone     = String(b.phone).trim() || null
-  // L'email n'est modifiable que tant que l'invitation n'a pas ete acceptee :
-  // apres, il identifie un compte reellement rattache.
-  if (b.email != null && !cible.profil.accepted_at) {
+  // L'email n'est modifiable que tant qu'il n'identifie pas un compte auth
+  // reellement rattache — c'est `member_user_id` qui le dit, pose dans le meme
+  // update que `accepted_at` a l'acceptation d'une invitation.
+  //
+  // ⚠ LA GARDE PORTAIT SUR `accepted_at`, ET ELLE BLOQUAIT LES PRESTATAIRES.
+  // Un acces par LIEN naissait `accepted_at` rempli (il est utilisable tout de
+  // suite, cf. `creer`) sans jamais porter de `member_user_id` : son email
+  // etait donc definitivement fige a la creation, alors qu'il n'identifie
+  // aucun compte et sert uniquement a la prevenir. Pour un acces par compte,
+  // rien ne change : les deux colonnes sont ecrites ensemble.
+  if (b.email != null && !cible.profil.member_user_id) {
     maj.email = String(b.email).trim() || null
   }
 
