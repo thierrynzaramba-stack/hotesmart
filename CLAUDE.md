@@ -117,6 +117,13 @@ L'étape 6 (fiche prestataire) est fusionnée dans le chantier prestataires.
 Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcours ;
 (b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
 
+Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
+RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
+remplace `rang === 1` partout, proposition posee a l'approche du depart
+(7 jours) et notifiee, escalade automatique au refus et a l'expiration en
+sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
+(ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
+
 Prochain chantier : prestataires (fiche + convergence des deux populations +
 les 5 dettes du §12). La fiche prestataire consommera `ota_reviews` : décision
 déjà gravée dans docs/specs/spec-prestataires-menage.md §6 — l'extrait de

@@ -7,6 +7,12 @@ const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
+// Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
+// « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
+// la remplacante de ce jour.
+const { chargerLiaisons, chargerDisponibilites, chargerRefus,
+        deciderParGarde, echeanceOffre } = require('../lib/cleaning/assign')
+const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -678,14 +684,41 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // Le cas grave est l'autre : PERSONNE ne porte ce menage — un bien sans
   // referente. La, il devient `orphaned`, se verrouille (le writer ne doit pas
   // le rendre a qui vient de le refuser) et l'hote est alerte.
+  //
+  // ⚠ LA REMPLACANTE PREND LE RELAIS (lot 3.3, §12.4). Elle est calculee AVANT
+  // d'ecrire, et posee dans le MEME update : la calculer apres aurait laisse le
+  // menage sans proposition — et, quand personne ne le porte, `orphaned` avec
+  // une alerte — entre les deux ecritures. C'est la candidate SUIVANTE du jour,
+  // en sautant celles que le journal connait deja comme ayant refuse ou laisse
+  // expirer : sans cette memoire, on reproposerait a qui vient de dire non.
   const porte = !!menage.provider_id
+  const suivante = await remplacanteApresRefus({
+    userId, propertyId, departureDate, menageId: menage.id,
+    refusee: profil.id, porteurId: menage.provider_id
+  })
+
   const { data: maj, error: errMaj } = await supabase.from('menages')
     .update({
-      offered_to: null, offered_at: null, offer_expires_at: null,
-      ...(porte
-        ? { assignment_reason: `Propose a ${profil.first_name}, qui a refuse : reste chez son porteur.` }
-        : { status: 'orphaned', assigned_by: 'manual',
-            assignment_reason: `Refuse par ${profil.first_name}, et personne ne porte ce menage.` }),
+      ...(suivante
+        ? { offered_to: suivante.providerId,
+            offered_at: new Date().toISOString(),
+            offer_expires_at: suivante.echeance,
+            // ⚠ Trois etats possibles, et un seul est faux :
+            //   - quelqu'un porte deja : son statut ne bouge pas, la proposition
+            //     vit A COTE ;
+            //   - personne ne porte MAIS la garde du jour designe une candidate
+            //     d'office : on la pose porteuse, et le menage est `accepted` ;
+            //   - personne ne porte et personne d'office : `offered`.
+            ...(porte ? {} : (suivante.porteuse
+                  ? { provider_id: suivante.porteuse, status: 'accepted',
+                      accepted_at: new Date().toISOString() }
+                  : { status: 'offered' })),
+            assignment_reason: `Refuse par ${profil.first_name} : propose a la candidate suivante.` }
+        : { offered_to: null, offered_at: null, offer_expires_at: null,
+            ...(porte
+              ? { assignment_reason: `Propose a ${profil.first_name}, qui a refuse : reste chez son porteur.` }
+              : { status: 'orphaned', assigned_by: 'manual',
+                  assignment_reason: `Refuse par ${profil.first_name}, et personne ne porte ce menage.` }) }),
       updated_at: new Date().toISOString()
     })
     .eq('id', menage.id).eq('offered_to', profil.id)
@@ -702,6 +735,26 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     from_provider_id: profil.id, actor: 'provider',
     reason: 'Refus depuis la PWA.'
   })
+  if (suivante) {
+    // ⚠ L'ESCALADE EST TRACEE COMME UNE PROPOSITION DE L'AUTOMATE (`actor:'cron'`) :
+    // ce n'est pas la personne qui refuse qui a choisi sa remplacante.
+    await supabase.from('menage_assignment_log').insert({
+      user_id: userId, menage_id: menage.id, event: 'offered',
+      from_provider_id: menage.provider_id || null, to_provider_id: suivante.providerId,
+      actor: 'cron', reason: 'Escalade automatique apres refus : candidate suivante du jour.'
+    })
+    // ⚠ BEST-EFFORT, ET APRES L'ECRITURE. Une proposition muette expirerait sans
+    // que la personne ait su qu'on lui demandait quelque chose.
+    try {
+      await notifierProposition({
+        userId, providerId: suivante.providerId,
+        propertyName: await nomDuBien(userId, propertyId),
+        propertyId: String(propertyId),
+        departureDate, expireLe: suivante.echeance,
+        lien: `${(process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')}/apps/menages/public`
+      })
+    } catch (e) { console.error('[menages-public] notification escalade echec:', e.message) }
+  }
   // ⚠ ALERTE SEULEMENT SI PLUS PERSONNE NE PORTE CE MENAGE.
   // Alerter sur un refus dont la referente garde la charge serait du bruit :
   // rien n'est decouvert, elle l'a toujours eu, et l'hote finirait par ne plus
@@ -712,7 +765,11 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // prepare : la, l'alerte est justifiee. `alertMenageRefuse` pose une tache
   // in-app, toujours visible et sans configuration prealable, plus un SMS/email
   // best-effort — `reportIncident` n'aurait prevenu que le fondateur.
-  if (!porte) {
+  //
+  // ⚠ UNE ESCALADE REUSSIE N'ALERTE PAS NON PLUS : quelqu'un vient d'etre
+  // sollicite, rien n'est decouvert. Si elle ne repond pas, l'expiration
+  // reprendra la main — et alertera alors, puisque la file sera epuisee.
+  if (!porte && !suivante) {
     try {
       await alertMenageRefuse({
         userId, propertyId: String(propertyId), bookingId,
@@ -722,7 +779,73 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   }
   // ⚠ `porte` est la VRAIE information. Le statut en base n'a pas ete touche
   // quand quelqu'un porte le menage : l'inventer ici ferait mentir la reponse.
-  return res.json({ success: true, porte })
+  return res.json({ success: true, porte, escalade: !!suivante })
+}
+
+// Qui prend le relais apres un refus, ce jour-la.
+//
+// ⚠ RIEN N'EST ECRIT ICI : cette fonction CALCULE, l'appelant ecrit — dans le
+// meme update que le refus, pour qu'il n'existe aucun instant ou le menage soit
+// a la fois refuse et sans proposition.
+//
+// ⚠ UNE PANNE N'EMPECHE PAS LE REFUS. On rend `null`, et on retombe sur le
+// comportement du modele parallele : le menage reste chez sa porteuse (ou
+// devient `orphaned` si personne ne le porte, avec alerte a l'hote). Faire
+// echouer un refus parce que le calcul de la remplacante est en panne
+// obligerait la prestataire a reessayer, ou pire, la laisserait engagee.
+//
+// ⚠ HORS FENETRE DE PROPOSITION, `deciderParGarde` rend `offeredTo: null` : un
+// depart lointain n'est pas escalade tout de suite, il le sera par le cron quand
+// la date approchera — le journal du refus etant deja ecrit, la personne qui
+// vient de refuser ne sera pas resollicitee.
+async function remplacanteApresRefus ({ userId, propertyId, departureDate, menageId, refusee, porteurId }) {
+  try {
+    const liaisonsParBien = await chargerLiaisons(supabase, [{ userId, propertyId }])
+    const dispos = await chargerDisponibilites(supabase, [userId], { du: departureDate, au: departureDate })
+    const refus = await chargerRefus(supabase, [menageId])
+    // ⚠ La ligne `declined` de CE refus n'est pas encore ecrite : sans cet ajout,
+    // la remplacante calculee serait la personne qui vient de refuser.
+    const exclus = new Set(refus.get(String(menageId)) || [])
+    exclus.add(String(refusee))
+
+    const bien = {
+      userId, propertyId: String(propertyId),
+      liaisons: liaisonsParBien.get(`${userId}|${String(propertyId)}`) || [],
+      regles: dispos.regles, exceptions: dispos.exceptions
+    }
+    const choix = deciderParGarde(bien, departureDate, { exclus })
+    if (!choix.offeredTo) return null
+    // ⚠ `menages_offre_pas_a_soi` : la responsable du jour peut etre celle qui
+    // porte deja le menage. Lui proposer ce qu'elle a deja ferait echouer
+    // l'update — donc le refus lui-meme.
+    if (porteurId && String(choix.offeredTo) === String(porteurId)) return null
+    return {
+      providerId: choix.offeredTo,
+      echeance: echeanceOffre(departureDate),
+      // ⚠ LA PORTEUSE D'OFFICE EST RENDUE AUSSI. Un menage que personne ne porte
+      // alors que la garde du jour designe quelqu'un en `requires_ack = false` —
+      // l'hote vient de la lier, ou son conge s'est termine — repartait avec
+      // `offered_to` renseigne et `provider_id` toujours nul : la candidate
+      // d'office ne le recevait jamais, et la boucle de rattrapage du writer
+      // sautait la ligne puisqu'une proposition y est posee.
+      porteuse: porteurId ? null : (choix.providerId || null)
+    }
+  } catch (e) {
+    console.error('[menages-public] calcul de la remplacante echec:', e.message)
+    return null
+  }
+}
+
+// Le nom du bien, pour que le SMS dise de quoi il parle. Jamais bloquant.
+async function nomDuBien (userId, propertyId) {
+  const { data, error } = await supabase.from('properties')
+    .select('name').eq('user_id', userId)
+    .eq('provider_property_id', String(propertyId)).maybeSingle()
+  // ⚠ L'erreur est LUE : `provider_property_id` n'a pas de contrainte d'unicite,
+  // et `maybeSingle` rend une erreur sur deux lignes. Ignoree, le SMS partait
+  // sans nom de bien, en silence.
+  if (error) { console.error('[menages-public] nom du bien illisible:', error.message); return null }
+  return data && data.name ? data.name : null
 }
 
 async function avisDeLaPrestataire (req, res, token) {

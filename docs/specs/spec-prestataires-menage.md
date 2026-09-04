@@ -690,12 +690,41 @@ responsable noierait les vraies alertes.
 |---|---|---|
 | **3.1** | Tables de disponibilité, `rrule`, `requires_ack`, `availability.js` + tests. Rien de branché. | aucun |
 | **3.2** | `lib/cleaning/garde.js` : `responsableDuJour()` / `planningDeGarde()`. Fonctions pures. | aucun |
-| **3.3** | Le moteur consomme la garde : création, changement de date, refus → remplaçante, alerte. | — |
+| **3.3** | ✅ **LIVRÉ** (4 septembre 2026) — le moteur consomme la garde : création, changement de date, refus/expiration → remplaçante, `requires_ack` interprété partout, la proposition notifie, alerte sur trou de garde. | — |
 | **3.4** | Écran **planning de garde** : semaine × biens, qui est de garde, ménages posés dessus. | app ménage |
 | **3.5** | Jours attitrés et disponibilités côté hôte, « Mes disponibilités » dans la PWA. | 2 écrans |
 
 **Qui déclare les congés** : la prestataire (`self_availability: write`), l'hôte
 voit tout et corrige.
+
+### 12.9 Ce que le lot 3.3 a tranché en plus (4 septembre 2026)
+
+Deux points que le §12 laissait ouverts, et que l'implémentation a dû fermer.
+
+**(a) La file de proposition, ce sont les candidates qui doivent confirmer** — pas seulement
+celles placées avant la porteuse dans le classement du jour. Le tableau du §12.4 dit
+« Création : portée par Régina, proposée à la seconde », alors que Régina est **rang 1 ET**
+d'office : lire l'invariant au pied de la lettre (« proposée à la première du classement si
+différente ») ne proposait plus jamais rien sur le seul cas réel du dépôt. Proposition et
+escalade seraient nées mortes. La porteuse reste la première `requires_ack = false` ; la file
+est la suite des candidates du jour qui doivent confirmer, moins celles que le journal connaît.
+
+**(b) La proposition est POSÉE À L'APPROCHE DU DÉPART, pas à la création** — fenêtre de
+**7 jours** (`JOURS_PROPOSITION`), job `poserPropositionsDues` dans le cron. Deux raisons, et
+chacune suffirait :
+- une proposition expire en **48 h** au plus. Posée à la création d'un départ dans six mois,
+  elle serait morte deux jours plus tard, la file serait épuisée, et la responsable du jour
+  n'aurait **plus jamais** l'occasion de prendre ce ménage ;
+- le writer balaye **J−30/J+180**. Proposer à la création aurait envoyé, à la première
+  activation d'un compte Channex, **un SMS par réservation future de l'historique** — REVIEW.md
+  règle 2, la faute exacte qui a produit les messages « bienvenue » à des voyageurs partis.
+
+Entre la création et la fenêtre, **personne n'est découvert** : la porteuse a le ménage depuis
+le premier instant. C'est l'invariant du §12.4 qui rend ce report possible.
+
+Corollaire : ce même job est le **chemin d'escalade** après une expiration. Le refus, lui,
+escalade tout de suite — dans le même update que le refus, pour qu'il n'existe aucun instant où
+le ménage soit à la fois refusé et sans proposition.
 
 **Le quota reste reporté** — il suppose de compter les ménages réalisés sur 30
 jours par personne et par bien, pour un besoin qui n'existe pas à deux

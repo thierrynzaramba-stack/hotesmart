@@ -339,17 +339,32 @@ test('le verdict ne dépend pas du fuseau de la machine', async () => {
   }
 })
 
-// ─── RIEN N'EST BRANCHÉ ────────────────────────────────────────────────────
+// ─── LA GARDE EST BRANCHÉE (lot 3.3) ───────────────────────────────────────
 
-test('le lot 3.2 ne branche rien : personne ne consomme encore la garde', async () => {
-  // ⚠ Ce lot pose la brique. Le moteur la consomme au 3.3. Ce test tombera
-  // exactement quand ce sera fait — et c'est le moment de le retirer.
+test('le moteur d\'assignation consomme bien la garde', async () => {
+  // ⚠ Ce test remplace celui du lot 3.2 (« personne ne consomme encore la
+  // garde »), qui devait tomber exactement quand le moteur la consommerait.
+  // Il vérifie l'inverse : que la décision d'assignation passe PAR ICI. Sans
+  // lui, un retour en arrière — un `rang === 1` réintroduit dans un chemin —
+  // passerait inaperçu, et deux règles d'assignation coexisteraient à nouveau.
+  const { deciderParGarde } = require('../lib/cleaning/assign')
+  const c = deciderParGarde(bagneres(), '2026-09-05',
+    { maintenant: Date.parse('2026-09-01T08:00:00Z') })
+  assert.strictEqual(c.providerId, REGINA, 'la porteuse vient de la garde du jour')
+  assert.strictEqual(c.offeredTo, SECONDE)
+})
+
+test('plus AUCUN chemin ne décide par `rang === 1`', async () => {
+  // ⚠ `requires_ack` a remplacé le rang partout (§12.3). Un rang 1 qui décide
+  // de l'engagement, c'est une attitrée du week-end condamnée à confirmer pour
+  // toujours — et deux écrans qui répondent différemment à la même question.
   const { execSync } = require('node:child_process')
+  // Le périmètre est le code qui DÉCIDE : les endpoints et les libs. Un écran
+  // peut encore parler de rang — c'est ce qu'il écrit dans `rang`, et le rang
+  // sert toujours à départager et à remplacer (§12.1).
   const sortie = execSync(
-    "grep -rlnE \"require\\(['\\\"][^'\\\"]*garde['\\\"]\\)\" --include=*.js --include=*.html " +
-    ". --exclude-dir=node_modules --exclude-dir=.git || true",
+    "grep -rnE \"rang (===|==) 1\" --include=*.js api lib || true",
     { encoding: 'utf8' }).trim()
-  const fichiers = sortie ? sortie.split('\n') : []
-  assert.deepStrictEqual(fichiers, ['./tests/cleaning-garde.test.js'],
-    `garde.js est consommé par : ${fichiers.join(', ')}`)
+  const lignes = sortie ? sortie.split('\n') : []
+  assert.deepStrictEqual(lignes, [], `le rang décide encore ici :\n${lignes.join('\n')}`)
 })

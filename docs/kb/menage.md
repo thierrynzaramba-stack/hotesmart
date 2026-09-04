@@ -50,10 +50,13 @@ le **dérivait** de `bookings_snapshot.departure`. Conception : `docs/specs/spec
 - **Une réservation annulée ou déplacée** met le ménage en `cancelled` — elle ne le supprime
   pas : une prestataire a pu s'organiser autour, et l'historique de qualité s'appuie dessus.
 
-### Disponibilités (lot 3.1) — la brique, rien de branché
+### Disponibilités (lot 3.1, consommées par le moteur au lot 3.3)
 
 `lib/cleaning/availability.js` répond à une seule question : **cette personne
-est-elle disponible ce jour-là ?** Rien ne la consomme encore.
+est-elle disponible ce jour-là ?** Depuis le lot 3.3, `chargerDisponibilites` les lit par lot
+et le moteur s'en sert pour établir la garde du jour. ⚠️ **Une panne de cette lecture COUPE le
+cycle** : retomber sur des maps vides ferait paraître tout le monde disponible — « aucune règle
+= disponible » — et les ménages partiraient à des gens en congé, sans que rien ne le signale.
 
 L'ordre de décision, et il compte :
 1. une **exception** pour ce jour tranche, **dans les deux sens** — c'est ce qui
@@ -90,12 +93,13 @@ tous les jours. Défaut trouvé en écrivant les tests, pas par une review.
 en rang 2 ne doit pas être condamnée à confirmer pour toujours. Reprise fidèle :
 rang 1 → `false` (d'office, comme aujourd'hui), rang 2+ → `true`.
 
-### La garde du jour (lot 3.2) — la brique, rien de branché
+### La garde du jour (lot 3.2, consommée par le moteur au lot 3.3)
 
 `lib/cleaning/garde.js` répond à : **qui est de garde sur ce bien, ce jour-là ?**
 `responsableDuJour(bien, date)` et `planningDeGarde({ biens, du, au })` sont des **fonctions
-pures**. Rien ne les consomme encore — le moteur les consommera au lot 3.3, et un test le
-vérifie (il tombera exactement quand ce sera fait).
+pures**. ⚠️ **Depuis le lot 3.3, le moteur les consomme** (`deciderParGarde` dans
+`lib/cleaning/assign.js`) : voir « Qui fait le ménage ». Un test vérifie qu'aucun chemin de
+`api/` ni de `lib/` ne décide plus par `rang === 1`.
 
 ⚠️ **« Référente d'un bien » n'existe plus comme statut.** C'est l'apparence qu'a une personne
 attitrée tous les jours. La référence est **par journée** : pour chaque bien et chaque jour, la
@@ -120,8 +124,9 @@ voudra l'**historique** de qui était de garde.
 RRULE dit quels **jours elle est là**. Se déclarer disponible un mardi ne rend pas attitrée le
 mardi — sinon une prestataire du week-end recevrait des ménages en semaine.
 
-⚠️ **`requires_ack` est transporté, pas interprété.** Cette brique informe, le lot 3.3 tranche
-entre « portée d'office » et « proposée » (§12.4). **Absent, il vaut `true`** — le défaut de la
+⚠️ **`requires_ack` est transporté par cette brique, INTERPRÉTÉ par le moteur** (lot 3.3) :
+`garde.js` informe, `deciderParGarde` tranche entre « portée d'office » et « proposée » (§12.4).
+**Absent, il vaut `true`** — le défaut de la
 colonne, et le prudent : devenir « assignée d'office » par omission d'un champ, ce serait engager
 quelqu'un sans son accord.
 
@@ -206,12 +211,19 @@ seulement à l'app ménage.
   auth : il sert à la prévenir. La garde porte désormais sur `member_user_id`, ce qui laisse
   l'intention d'origine intacte pour un accès par compte (les deux colonnes y sont écrites dans
   le même update, à l'acceptation).
-  ⚠️ **Ce que la notification couvre RÉELLEMENT** : seul le geste « assigner » envoie quelque
-  chose (`api/menages.js`, sous `if (reponse.assignee && choisi)`). La **proposition** écrit
-  `offered_to` et retourne sans aucun envoi ; l'assignation automatique du cron n'envoie rien non
-  plus. L'aide de l'écran ne promet donc que l'assignation en urgence — écrire « ou proposé »
-  aurait été la faute du commit `c6d0553`, « elle a été prévenue était un mensonge ». Brancher la
-  notification sur la proposition reste à faire (lot 3.3).
+  ⚠️ **Ce que la notification couvre RÉELLEMENT** (mis à jour au lot 3.3) : le geste
+  « assigner » (`api/menages.js`) **et** toute PROPOSITION posée par le moteur —
+  `notifierProposition`, avec son **échéance dans le message** : à l'approche du départ
+  (`poserPropositionsDues`), à l'escalade après un refus (`api/menages-public.js`), et au
+  rattrapage d'une liaison qui vient d'être créée (`POST liaisons` — le cron ne repassera pas
+  dessus, c'est ici ou nulle part). Reste **muette** : l'assignation d'office décidée par le
+  cron, qui n'attend de réponse de personne et se voit dans la PWA. L'aide de l'écran dit
+  exactement cela — en promettre plus serait la faute du commit `c6d0553`, « elle a été prévenue
+  était un mensonge ».
+  ⚠️ **Plafond d'envois** : 30 propositions notifiées par cycle de cron, 10 par enregistrement
+  de fiche. La fenêtre de 7 jours borne déjà la source ; le plafond protège la clé Brevo de
+  l'hôte d'une bascule de masse. Le reliquat part au cycle suivant — la proposition, elle, est
+  déjà posée en base.
   ⚠️ **Les coordonnées ne sortent que sur `GET /api/menages?contacts=1`.** Ce n'est **pas** une
   garde de droit — la garde reste `peutLire(…, 'prestataires')`, inchangée, et qui l'a franchie
   obtient les coordonnées en ajoutant le paramètre. C'est un opt-in qui évite une exposition
@@ -257,40 +269,106 @@ seulement à l'app ménage.
   l'histoire attribuerait à quelqu'un un travail qu'il n'a pas fait, et l'attribution des avis
   suit cette assignation), jamais un `orphaned` (quelqu'un a refusé), jamais un
   `assigned_by='manual'` (l'hôte a tranché), jamais un ménage déjà assigné.
-  ⚠️ Le rattrapage vise le **référent du bien après l'écriture**, pas la personne dont on
-  enregistre la fiche : si quelqu'un d'autre est déjà rang 1, c'est lui qui prend les ménages.
-- **Un bien qui perd sa dernière référente est signalé, pas bloqué** — à l'écran avant
-  d'enregistrer, et par le serveur dans `sans_referent`. Le refuser laisserait l'hôte sans issue
-  le jour où une prestataire s'en va.
+  ⚠️ Le rattrapage vise **qui est de garde CE JOUR-LÀ**, pas la personne dont on enregistre la
+  fiche : si quelqu'un d'autre est assigné d'office sur ce bien, c'est lui qui prend les ménages.
+  ⚠️ Depuis le lot 3.3, **chaque ménage est décidé par la garde de son jour** : la version
+  précédente écrivait le même prestataire — le rang 1 — sur tous les ménages à venir, quelle que
+  soit leur date, si bien qu'une attitrée du week-end héritait des ménages du mardi. Les
+  propositions qu'il pose sont **notifiées ici ou nulle part** : le cron ne repassera pas dessus.
+- **Un bien qui n'a plus PERSONNE D'OFFICE est signalé, pas bloqué** — à l'écran avant
+  d'enregistrer, et par le serveur dans `sans_referent` (nom de clé conservé : c'est le contrat
+  du front). Ses ménages y seront **proposés**, et ne resteront sans personne que si nul ne
+  répond — l'ancien message « naîtront non assignés » était devenu faux.
 - **Les biens retirés sont désactivés, pas supprimés** : une liaison supprimée emporterait la
   trace de qui intervenait, alors que les ménages passés la référencent.
 - La carte d'un lien **sans profil** (créé avant ce lot) porte « ⚠ lien seul — aucun ménage
   assignable ». C'est le cas du token de Tiphaine, identité historique inchangée.
 
-### Qui fait le ménage
+### Qui fait le ménage (lot 3.3, 4 septembre 2026 — la garde du jour décide)
 
-`property_cleaning_providers (property_id, provider_id, rang, active)` dit qui intervient sur
-quel bien. **V1 = mode `priorite` seul** : le plus petit rang actif. Les modes `jour` et
-`quota` restent la cible et supposent les disponibilités RRULE.
+`property_cleaning_providers (property_id, provider_id, rang, weekdays, requires_ack, active)`
+dit qui intervient sur quel bien. **Ce n'est plus le rang qui décide**, c'est la **garde du
+jour** (§12) : `deciderParGarde(bien, date)` retient les personnes **attitrées ce jour-là**
+(`weekdays`) et **disponibles** (RRULE + exceptions), classées par rang croissant.
 
-⚠️ **Règle d'engagement** (décision du 3 septembre 2026) :
-- **rang 1 = référent → assigné d'office**, le ménage naît `accepted`. C'est le
-  fonctionnement de Régina, rien ne change pour elle.
-- **rang 2+ = suppléant → doit confirmer**, le ménage naît `offered`.
+⚠️ **Règle d'engagement : `requires_ack`, pas le rang** (§12.3).
+- `requires_ack = false` → elle **PORTE** le ménage d'office, il naît `accepted` ;
+- `requires_ack = true` → elle reçoit une **PROPOSITION** (modèle parallèle).
+
+⚠️ **L'invariant de la porteuse** (§12.4) : *le ménage est porté par la première candidate qui
+n'a rien à confirmer, et proposé à celle qui est de garde ce jour-là.* Le cas réel de
+Bagnères : Régina (tous les jours, d'office) **porte**, la seconde (week-end une semaine sur
+deux, doit confirmer) est **sollicitée** — le samedi « on » seulement. Le samedi « off » et le
+mardi, Régina porte seule et **rien n'est proposé**.
+
+⚠️ **La file de proposition, ce sont les candidates qui doivent confirmer** — pas seulement
+celles placées avant la porteuse. Lire « proposé à la première du classement si différente » au
+pied de la lettre ne proposait plus jamais rien sur le seul cas réel du dépôt (Régina est rang 1
+ET d'office) : proposition et escalade seraient nées mortes.
+
+⚠️ **La proposition est posée À L'APPROCHE DU DÉPART** (`JOURS_PROPOSITION = 7`), jamais à la
+création d'un départ lointain. Une proposition expire en 48 h : posée six mois à l'avance, elle
+serait morte avant le séjour, la file serait épuisée, et la responsable du jour n'aurait plus
+jamais l'occasion de prendre ce ménage. C'est **aussi** la garde d'envoi de masse (REVIEW.md
+règle 2) : le writer balaye J−30/J+180, et proposer à la création aurait envoyé un SMS par
+réservation future de l'historique à la première activation d'un compte. Entre-temps, personne
+n'est découvert : la porteuse a le ménage depuis sa création. Job : `poserPropositionsDues`.
+
+⚠️ **L'escalade est automatique** — refus ou expiration : la candidate suivante du jour est
+sollicitée, **en sautant celles que le journal connaît** (`declined`, `expired`). Sans cette
+mémoire, on reproposerait à qui vient de dire non, toutes les cinq minutes. Quand la file est
+épuisée, le ménage **reste chez sa porteuse** : l'escalade se termine d'elle-même. Le refus
+escalade **dans le même update** que le refus lui-même — le calculer après laisserait le ménage
+sans proposition, et `orphaned` avec une alerte, entre les deux écritures.
+
+⚠️ **Un `orphaned` d'EXPIRATION est repris, un `orphaned` de REFUS ne l'est pas.** Ce qui les
+distingue n'est pas le statut mais le **verrou** : un refus pose `assigned_by = 'manual'` — une
+décision humaine, qu'on ne rouvre pas ; une expiration ne le pose pas — le silence n'est pas une
+décision. Trouvé en review : exclure `orphaned` de la pose différée arrêtait l'escalade dans le
+seul cas où elle compte (bien sans personne d'office, deux candidates, la première ne répond
+pas — la seconde n'était jamais sollicitée, et rien ne ressuscite ce statut ailleurs).
+
+⚠️ **Le refus pose AUSSI la porteuse d'office quand il y en a une.** Sur un ménage que personne
+ne porte alors que la garde du jour désigne quelqu'un en `requires_ack = false` — l'hôte vient
+de la lier, ou son congé s'est terminé — n'écrire que la proposition laissait `provider_id` nul :
+la candidate d'office ne le recevait jamais, et le rattrapage du writer sautait la ligne
+puisqu'une proposition y est posée.
+
+⚠️ **Les lectures du moteur se PAGINENT, elles ne se tronquent pas** (règles, exceptions,
+journal des refus). Lever à la première page pleine faisait rendre `interrompu:'db'` au writer —
+donc plus **aucune** création, annulation ni alerte, à chaque cycle et sans reprise ; trois
+prestataires à qui on déclare leurs congés de l'année suffisaient. Et une troncature silencieuse
+du **journal** ferait redevenir « candidate » une personne qui a refusé : un SMS toutes les 48 h
+jusqu'au départ.
 
 La **réassignation manuelle** (`POST /api/menages`) emprunte le même chemin : réassigner vers
-le référent l'engage, vers un suppléant lui laisse la confirmation. Elle pose
-`assigned_by='manual'`, ce qui **verrouille** le ménage — l'automate n'y touche plus jamais.
-Droit requis : **`prestataires: write`**, pas `menages` — consulter le planning et décider qui
-le fait ne sont pas le même droit.
+quelqu'un d'`requires_ack = false` l'engage, vers quelqu'un qui confirme lui laisse le choix.
+Elle pose `assigned_by='manual'`, ce qui **verrouille** le ménage — l'automate n'y touche plus
+jamais. Droit requis : **`prestataires: write`**, pas `menages`.
 
-⚠️ **Aucun forçage** : sans liaison active, le ménage reste **non assigné**. Jamais de repli
+⚠️ **`requires_ack` est POSÉ par `POST liaisons`**, depuis le choix référente/suppléante de
+l'écran, faute de réglage dédié (lot 3.5). Il vaut `true` par défaut en base : sans cette
+écriture, une prestataire désignée comme référente ne portait plus rien d'office.
+**Le rang envoyé est une INTENTION : quand il bouge, il retranche ; quand il ne bouge pas, le
+réglage existant est conservé.** Les deux fautes symétriques ont été vues : toujours recalculer
+écrasait un réglage fin à chaque enregistrement de la fiche ; ne jamais recalculer rendait la
+**promotion impossible** — échanger les rangs de deux personnes ne changeait rien, et aucun
+écran n'expose `requires_ack` pour corriger.
+
+⚠️ **Aucun forçage** : sans candidate, le ménage reste **non assigné**. Jamais de repli
 sur « le prestataire du bien d'à côté » — l'attribution des remarques de propreté suit cette
 assignation, et un reproche qui tombe sur la mauvaise personne coûte plus cher qu'une case vide.
 
-⚠️ **L'alerte « non assigné » ne se déclenche QUE si le bien a au moins une liaison active.**
-Un bien sans aucun prestataire lié n'est pas en panne, il n'est pas géré ; alerter à chaque
-départ noierait les vraies alertes sous du bruit permanent (décision du product owner).
+⚠️ **L'alerte « personne de garde » ne part QUE sur un TROU DE GARDE un jour où un ménage
+existe** (§12.6) : le bien a des prestataires, et aucune n'est là ce jour-là. Elle ne part
+**pas** pour un bien sans aucune liaison (il n'est pas géré — alerter à chaque départ noierait
+les vraies alertes), ni quand une proposition est en cours ou différée (quelqu'un est
+identifié, rien n'est découvert). Les trous des jours **sans** réservation restent visibles à
+l'écran (lot 3.4) et ne sont jamais alertés.
+
+⚠️ **Les ménages d'avant le lot 3.3 ne sont jamais repris.** Le nouveau moteur pose
+`assignment_mode = 'garde'` ; les 179 ménages `accepted` du 4 septembre portent `'priorite'` et
+aucun chemin ne les recalcule — un engagement pris avec quelqu'un ne se rouvre pas.
 
 ### Ce que chaque écran montre
 
@@ -331,13 +409,19 @@ départ noierait les vraies alertes sous du bruit permanent (décision du produc
 - **L'acceptation fait le transfert**, atomiquement : `provider_id` devient la suppléante, la
   proposition s'efface, et le journal trace les deux côtés. C'est le seul endroit où la
   responsabilité change de mains.
-- **Refus ou expiration** : la proposition s'annule, le ménage reste chez la référente comme si
+- **Refus ou expiration** : la proposition s'annule, le ménage reste chez sa porteuse comme si
   de rien n'était. Événement au journal (`declined` / `expired`), **aucune alerte** — rien n'est
   découvert, et alerter là-dessus noierait les vraies alertes. Le sélecteur de réassignation
   redevient libre.
-- **`orphaned` ne concerne plus que le cas SANS référente** : un bien dont l'unique référente
-  refuse, ou dont personne ne porte le ménage à l'expiration. Là, alerte forte et décision
-  humaine.
+  ⚠️ **Depuis le lot 3.3, la candidate SUIVANTE du jour prend le relais** — escalade immédiate
+  au refus (dans le même update), au cycle suivant pour une expiration
+  (`poserPropositionsDues`). Le journal est la mémoire : on ne repropose jamais à qui a déjà
+  refusé ou laissé expirer. **Une escalade réussie n'alerte pas** : quelqu'un vient d'être
+  sollicité.
+- **`orphaned` ne concerne que le cas où PERSONNE ne porte ET la file est épuisée** : un bien
+  sans porteuse dont la dernière candidate refuse ou ne répond pas. Là, alerte forte et décision
+  humaine — le refus pose alors `assigned_by='manual'`, l'expiration non (le silence n'est pas
+  une décision, et la pose différée doit pouvoir solliciter la suivante au même cycle).
 - **Délai** : 48 h, **jamais au-delà de la veille du départ à 18 h**. ⚠️ Si l'échéance serait
   déjà passée, la proposition est **refusée** (409) plutôt qu'envoyée morte-née : une
   proposition doit laisser un vrai délai de réponse. L'hôte assigne alors directement.
@@ -400,8 +484,8 @@ L'écran dit ce qui est **réellement** parti, plutôt que de promettre un SMS.
 
 Un ménage `offered` porte le badge **« À CONFIRMER »** sur sa carte, et la fiche propose
 **« J'accepte »** / **« Je ne peux pas »** — à la place du bouton « Marquer fait », qui n'a pas
-de sens tant que rien n'est accepté. ⚠️ **Le référent ne voit jamais ces boutons** : son ménage
-naît `accepted`, rien ne change pour Régina.
+de sens tant que rien n'est accepté. ⚠️ **Celle qui est assignée d'office (`requires_ack =
+false`) ne voit jamais ces boutons** : son ménage naît `accepted`, rien ne change pour Régina.
 
 - **L'acceptation est atomique** : la condition `status='offered' AND provider_id=<elle>` est
   posée **dans** l'update, pas testée avant. Zéro ligne modifiée = l'offre n'est plus valide

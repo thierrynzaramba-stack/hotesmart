@@ -1618,14 +1618,23 @@ if ("serviceWorker" in navigator) {
         return
       }
       if (menage.assign) menage.assign.status = accepte ? 'accepted' : 'orphaned'
-      // ⚠ NE PAS PROMETTRE CE QUI N'ARRIVE PLUS. Le refus d'un menage PORTE par
-      // quelqu'un d'autre n'alerte pas l'hote — rien n'est decouvert, la
-      // porteuse l'a toujours. Le serveur dit lequel des deux cas c'est.
+      // ⚠ NE PAS PROMETTRE CE QUI N'ARRIVE PLUS. Le serveur dit lequel des TROIS
+      // cas c'est, et il ne faut en annoncer aucun autre :
+      //   - `porte`    : quelqu'un d'autre a la charge du menage — rien n'est
+      //                  decouvert, l'hote n'est pas alerte ;
+      //   - `escalade` : la personne suivante de garde vient d'etre sollicitee.
+      //                  L'hote n'est PAS alerte non plus (`!porte && !suivante`
+      //                  cote serveur) : lui dire « votre employeur est prevenu »
+      //                  etait un mensonge, la faute exacte du commit c6d0553 ;
+      //   - ni l'un ni l'autre : plus personne ne porte ce menage, et LA l'hote
+      //                  recoit une tache in-app plus un SMS/email.
       showModalSuccess(accepte
         ? 'Ménage accepté.'
         : (data && data.porte
             ? 'Réponse enregistrée. Ce ménage reste à la personne qui en a la charge.'
-            : 'Réponse enregistrée : votre employeur est prévenu.'))
+            : (data && data.escalade
+                ? 'Réponse enregistrée. Le ménage est proposé à quelqu\'un d\'autre.'
+                : 'Réponse enregistrée : votre employeur est prévenu.')))
       await rechargerAssignations()
       setTimeout(closeModal, 1200)
     } catch (err) {

@@ -95,13 +95,14 @@
                Les deux sont facultatifs : une prestataire qui ouvre sa PWA
                plusieurs fois par jour n'en a pas besoin.
 
-               ⚠ NE PROMETTRE QUE CE QUI PART. Le seul chemin qui notifie est
-               `api/menages.js`, sous `if (reponse.assignee && choisi)` — donc
-               le geste « assigner ». La PROPOSITION ecrit `offered_to` et
-               retourne sans aucun envoi, et l'assignation automatique du cron
-               n'envoie rien non plus. Ecrire « ou propose » ici serait la meme
-               faute que le commit c6d0553, « elle a ete prevenue etait un
-               mensonge ». -->
+               ⚠ NE PROMETTRE QUE CE QUI PART. Depuis le lot 3.3, la PROPOSITION
+               notifie elle aussi (`notifierProposition`, avec son echeance) :
+               posee par le cron a l'approche du depart, par l'escalade apres un
+               refus, ou par le rattrapage a la creation d'une liaison. Reste
+               muette : l'assignation d'office decidee par le cron — elle
+               n'attend de reponse de personne, et le ménage est visible dans la
+               PWA. Ecrire ici plus que ce qui part serait la meme faute que le
+               commit c6d0553, « elle a ete prevenue etait un mensonge ». -->
           <div class="form-row">
             <input class="form-input" id="presta-phone" type="tel"
                    placeholder="Téléphone (optionnel, ex: +33612345678)">
@@ -109,9 +110,9 @@
                    placeholder="Email (optionnel)">
           </div>
           <div style="font-size:11px;color:var(--text2);margin:-4px 0 12px" id="aide-contact">
-            Sert à la prévenir quand vous lui assignez un ménage en urgence.
+            Sert à la prévenir quand vous lui assignez un ménage en urgence,
+            et quand un ménage lui est proposé — avec son délai de réponse.
             Sans aucun des deux, elle ne le verra qu'en ouvrant son lien.
-            Une proposition, elle, ne part pas encore par SMS ni par email.
           </div>
 
           <div style="font-size:11px;color:var(--text2);margin-bottom:8px;font-weight:500">BIENS ACCESSIBLES</div>
@@ -346,11 +347,14 @@
     }
     const miennes = liaisons.filter(l => l.provider_id === profilId && l.active !== false)
     if (!miennes.length) return '<span class="presta-meta-item">Aucun bien attribué</span>'
-    const ref = miennes.filter(l => l.rang === 1).length
+    // ⚠ C'est `requires_ack` qui dit ce qui lui arrive, pas le rang (§12.3) :
+    // une suppléante rodée peut être assignée d'office sans être promue devant
+    // la titulaire, et l'ancien libellé lui promettait le contraire.
+    const ref = miennes.filter(l => l.requires_ack === false).length
     const sup = miennes.length - ref
     const bouts = []
-    if (ref) bouts.push(`référente sur ${ref} bien${ref > 1 ? 's' : ''}`)
-    if (sup) bouts.push(`suppléante sur ${sup}`)
+    if (ref) bouts.push(`d'office sur ${ref} bien${ref > 1 ? 's' : ''}`)
+    if (sup) bouts.push(`à confirmer sur ${sup}`)
     return `<span class="presta-meta-item">👤 ${bouts.join(', ')}</span>`
   }
 
@@ -415,16 +419,20 @@
       const cb = document.getElementById(`prop-${p.id}`)
       const sel = document.getElementById(`rang-${p.id}`)
       if (!cb || !sel) return false
-      // Une autre personne est-elle référente sur ce bien ?
+      // Une autre personne est-elle assignée d'office sur ce bien ?
       const autreReferent = liaisons.some(l =>
-        String(l.property_id) === String(p.id) && l.rang === 1 && l.active !== false &&
-        l.provider_id !== editionEnCours)
+        String(l.property_id) === String(p.id) && l.requires_ack === false &&
+        l.active !== false && l.provider_id !== editionEnCours)
       if (autreReferent) return false
       // Sinon, c'est cette fiche qui doit en fournir un.
       return !(cb.checked && sel.value === '1')
     })
     zone.innerHTML = manquants.length
-      ? `⚠️ ${manquants.map(p => echapper(p.name)).join(', ')} n'aura${manquants.length > 1 ? 'ont' : ''} plus de référente : les prochains ménages y naîtront non assignés.`
+      // ⚠ « non assignés » était devenu FAUX depuis le lot 3.3 : sans personne
+      // d'office, les ménages sont PROPOSÉS à qui est de garde ce jour-là, et ne
+      // restent sans personne que si nul ne répond. Le dire autrement, c'est
+      // faire craindre à l'hôte une panne qui n'existe pas.
+      ? `⚠️ ${manquants.map(p => echapper(p.name)).join(', ')} n'aura${manquants.length > 1 ? 'ont' : ''} plus personne d'office : les ménages y seront seulement proposés, et resteront sans personne si nul ne répond.`
       : ''
     zone.style.display = manquants.length ? '' : 'none'
   }
@@ -565,11 +573,17 @@
             + ((data && data.error) || res.status) + '. Rouvrez sa fiche pour réessayer.')
       return false
     }
+    // ⚠ « Sans référente » ne veut plus rien dire depuis le lot 3.3 : ce statut
+    // n'existe pas, c'est l'apparence d'une personne attitrée tous les jours.
+    // Ce que l'hôte doit savoir, c'est qu'AUCUNE personne n'est assignée d'office
+    // sur ces biens : leurs ménages y naîtront en simple proposition, et
+    // resteront sans personne si nul ne répond. La clé de réponse garde son nom
+    // (contrat serveur), le message dit la vraie chose.
     if (data && data.sans_referent && data.sans_referent.length) {
       const noms = data.sans_referent
         .map(ref => (properties.find(p => p.id === ref) || {}).name || ref)
         .join(', ')
-      showToast(`⚠️ Sans référente : ${noms}`)
+      showToast(`⚠️ Personne d'office : ${noms}`)
     }
     return true
   }

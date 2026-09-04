@@ -1,48 +1,247 @@
 // tests/cleaning-assign.test.js
-// lib/cleaning/assign.js — le moteur d'assignation (spec §11.2 et §11.3).
+// lib/cleaning/assign.js — le moteur d'assignation (spec §11.2, §11.3, puis §12).
 //
 // ⚠ CE QUI EST EN JEU. L'assignation ne décide pas seulement qui reçoit une
-// notification : c'est elle qui, via `menages.provider_id`, décidera à qui sont
+// notification : c'est elle qui, via `menages.provider_id`, décide à qui sont
 // attribuées les remarques de propreté des voyageurs. Un ménage attribué à
 // quelqu'un qui ne l'a pas fait fait tomber le reproche sur la mauvaise
 // personne — la faute que tout ce chantier cherche à éviter.
+//
+// ⚠ DEPUIS LE LOT 3.3, LE RANG NE DÉCIDE PLUS. Ce qui décide, c'est la GARDE DU
+// JOUR — attitrée ce jour-là (`weekdays`) et disponible (RRULE + exceptions) —
+// et `requires_ack`, qui dit si elle porte d'office ou reçoit une proposition.
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { chargerLiaisons, choisirPrestataire, horodatages, echeanceOffre } = require('../lib/cleaning/assign')
+const {
+  chargerLiaisons, chargerDisponibilites, chargerRefus,
+  deciderParGarde, dansLaFenetreDeProposition,
+  horodatages, echeanceOffre, JOURS_PROPOSITION
+} = require('../lib/cleaning/assign')
+const { construireRrule, indexerParPrestataire } = require('../lib/cleaning/availability')
 
-const REGINA = 'p-regina', NOUVELLE = 'p-nouvelle'
+const COMPTE = 'u-thierry'
+const REGINA = 'p-regina', SECONDE = 'p-seconde', TROISIEME = 'p-troisieme'
 
-// ─── La règle d'engagement (décision du 3 septembre 2026) ──────────────────
+// ─── LE CAS RÉEL DE BAGNÈRES-DE-BIGORRE ────────────────────────────────────
+// Régina : attitrée tous les jours (`weekdays` NULL), assignée d'office.
+// La seconde : le week-end une semaine sur deux, doit confirmer.
+const WEEKEND_QUINZAINE = construireRrule({ jours: [0, 6], toutesLesNSemaines: 2, depuis: '2026-09-05' })
+const AVANT = Date.parse('2026-09-01T08:00:00Z')   // 4 jours avant le samedi « on »
 
-test('le RÉFÉRENT (rang 1) est assigné d\'office, sans confirmation', async () => {
-  // C'est le fonctionnement actuel de Régina : lui imposer un bouton
-  // « j'accepte » serait une régression pour quelqu'un qui n'en a jamais eu.
-  const c = choisirPrestataire([{ providerId: REGINA, rang: 1 }])
+function bagneres ({ liaisons = null, exceptions = [], regles = null } = {}) {
+  return {
+    userId: COMPTE, propertyId: '209413',
+    liaisons: liaisons || [
+      { provider_id: REGINA,  rang: 1, weekdays: null,   requires_ack: false, active: true },
+      { provider_id: SECONDE, rang: 2, weekdays: [0, 6], requires_ack: true,  active: true }
+    ],
+    regles: indexerParPrestataire(regles || [
+      { user_id: COMPTE, provider_id: SECONDE, rrule: WEEKEND_QUINZAINE, active: true }
+    ]),
+    exceptions: indexerParPrestataire(exceptions)
+  }
+}
+
+// ─── L'INVARIANT DE LA PORTEUSE (§12.4) ────────────────────────────────────
+
+test('samedi « on » : Régina PORTE, la seconde est PROPOSÉE', async () => {
+  // ⚠ C'est l'invariant : « porté par la première qui n'a rien à confirmer,
+  // proposé à la première du classement si elle est différente ». Écrire la
+  // seconde dans `provider_id` sortirait le ménage du planning de Régina pendant
+  // que personne ne l'a accepté — un logement découvert sans que personne ne le
+  // sache.
+  const c = deciderParGarde(bagneres(), '2026-09-05', { maintenant: AVANT })
   assert.strictEqual(c.providerId, REGINA)
+  assert.strictEqual(c.offeredTo, SECONDE)
   assert.strictEqual(c.status, 'accepted')
-  assert.strictEqual(c.referent, true)
   assert.strictEqual(c.assignedBy, 'auto')
+  assert.strictEqual(c.trouDeGarde, false)
 })
 
-test('un SUPPLÉANT ne PORTE pas le ménage : il reçoit une proposition', async () => {
-  // ⚠ LA RESPONSABILITÉ NE SE TRANSFÈRE QU'À L'ACCEPTATION (4 septembre 2026).
-  // Écrire le suppléant dans `provider_id` faisait sortir le ménage du planning
-  // de la référente pendant qu'il n'était encore accepté par personne : entre
-  // les deux, un logement pouvait n'être couvert par personne sans que personne
-  // ne le sache. La proposition vit dans `offered_to`, À CÔTÉ du porteur.
-  const c = choisirPrestataire([{ providerId: NOUVELLE, rang: 2 }])
-  assert.strictEqual(c.providerId, null, 'personne ne porte : ce bien n\'a pas de référent')
-  assert.strictEqual(c.offeredTo, NOUVELLE)
-  assert.strictEqual(c.status, 'offered')
-  assert.strictEqual(c.referent, false)
-})
-
-test('un RÉFÉRENT porte le ménage, et rien n\'est proposé', async () => {
-  const c = choisirPrestataire([{ providerId: REGINA, rang: 1 }])
+test('samedi de semaine « off » : Régina seule, RIEN n\'est proposé', async () => {
+  // La règle RRULE de la seconde ne couvre pas ce samedi-là : hors candidates.
+  // Lui proposer quand même serait lui demander de travailler un jour où elle a
+  // déclaré ne pas être là.
+  const c = deciderParGarde(bagneres(), '2026-09-12', { maintenant: Date.parse('2026-09-08T08:00:00Z') })
   assert.strictEqual(c.providerId, REGINA)
   assert.strictEqual(c.offeredTo, null)
   assert.strictEqual(c.status, 'accepted')
+})
+
+test('mardi : la seconde n\'est PAS attitrée, Régina porte seule', async () => {
+  // ⚠ `weekdays` et disponibilité sont deux filtres DIFFÉRENTS : être libre un
+  // mardi ne rend pas attitrée le mardi. Les confondre enverrait une prestataire
+  // du week-end en semaine.
+  const c = deciderParGarde(bagneres(), '2026-09-08', { maintenant: Date.parse('2026-09-02T08:00:00Z') })
+  assert.strictEqual(c.providerId, REGINA)
+  assert.strictEqual(c.offeredTo, null)
+})
+
+test('un congé de Régina : la seconde devient la porteuse… non, la proposée', async () => {
+  // Régina absente, il ne reste que la seconde — qui doit confirmer. PERSONNE ne
+  // porte le ménage : c'est le seul cas de `offered` (§12.4).
+  const c = deciderParGarde(bagneres({
+    exceptions: [{ user_id: COMPTE, provider_id: REGINA, date: '2026-09-05', available: false }]
+  }), '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, null, 'aucune candidate d\'office ce jour-là')
+  assert.strictEqual(c.offeredTo, SECONDE)
+  assert.strictEqual(c.status, 'offered')
+})
+
+test('personne ce jour-là : TROU DE GARDE, distinct de « aucune liaison »', async () => {
+  // ⚠ Le drapeau commande l'ALERTE (§12.6). Un bien sans prestataire lié n'est
+  // pas en panne, il n'est pas géré — alerter à chaque départ noierait les
+  // vraies alertes. Un bien qui a des prestataires dont AUCUNE n'est là ce
+  // jour-là, en revanche, est un ménage que personne ne peut faire.
+  const c = deciderParGarde(bagneres({
+    exceptions: [{ user_id: COMPTE, provider_id: REGINA, date: '2026-09-08', available: false }]
+  }), '2026-09-08', { maintenant: AVANT })
+  assert.strictEqual(c.trouDeGarde, true)
+  assert.strictEqual(c.aucuneLiaison, false)
+  assert.strictEqual(c.status, 'unassigned')
+  assert.strictEqual(c.providerId, null)
+})
+
+test('sans liaison : NON ASSIGNÉ, jamais un repli sur quelqu\'un', async () => {
+  const c = deciderParGarde({ userId: COMPTE, propertyId: 'X', liaisons: [] }, '2026-09-05')
+  assert.strictEqual(c.providerId, null)
+  assert.strictEqual(c.status, 'unassigned')
+  assert.strictEqual(c.assignedBy, null)
+  assert.strictEqual(c.aucuneLiaison, true)
+  assert.strictEqual(c.trouDeGarde, false, 'pas de trou de garde là où il n\'y a personne à garder')
+})
+
+test('un bien inexistant ou une entrée bidon n\'assigne personne', async () => {
+  for (const bidon of [null, undefined, {}, { liaisons: null }, { liaisons: 'regina' }]) {
+    const c = deciderParGarde(bidon, '2026-09-05')
+    assert.strictEqual(c.providerId, null, String(bidon))
+    assert.strictEqual(c.aucuneLiaison, true)
+  }
+})
+
+// ─── `requires_ack`, PAS LE RANG (§12.3) ───────────────────────────────────
+
+test('une personne d\'office en rang 2 PORTE, la rang 1 qui confirme est proposée', async () => {
+  // ⚠ C'est exactement ce que le rang interdisait. Une attitrée du week-end en
+  // rang 2 était condamnée à confirmer pour toujours ; une seconde rodée ne
+  // pouvait être assignée d'office sans la promouvoir devant la titulaire.
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: SECONDE, rang: 1, requires_ack: true,  active: true },
+    { provider_id: REGINA,  rang: 2, requires_ack: false, active: true }
+  ] }), '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, REGINA, 'la première qui n\'a rien à confirmer')
+  assert.strictEqual(c.offeredTo, SECONDE, 'la responsable du jour, qui doit confirmer')
+})
+
+test('`requires_ack` ABSENT vaut « doit confirmer », jamais « d\'office »', async () => {
+  // Le défaut de la colonne, et le prudent : devenir assignée d'office parce
+  // qu'un appelant a oublié une colonne, ce serait engager quelqu'un sans son
+  // accord.
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: REGINA, rang: 1, active: true }
+  ] }), '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, null)
+  assert.strictEqual(c.offeredTo, REGINA)
+  assert.strictEqual(c.status, 'offered')
+})
+
+test('la file de proposition suit le CLASSEMENT DU JOUR, pas la place de la porteuse', async () => {
+  // ⚠ C'est le déroulé du tableau §12.4 : Régina est rang 1 ET d'office, la
+  // seconde rang 2 et doit confirmer — et c'est bien à la seconde qu'on propose.
+  // Borner la file aux candidates qui PRIMENT sur la porteuse ne proposait plus
+  // jamais rien sur le seul cas réel du dépôt : proposition et escalade
+  // seraient nées mortes.
+  const bien = bagneres({ liaisons: [
+    { provider_id: REGINA,    rang: 1, requires_ack: false, active: true },
+    { provider_id: SECONDE,   rang: 2, requires_ack: true,  active: true },
+    { provider_id: TROISIEME, rang: 3, requires_ack: true,  active: true }
+  ], regles: [] })
+  const c = deciderParGarde(bien, '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, REGINA)
+  assert.strictEqual(c.offeredTo, SECONDE, 'la première qui doit confirmer')
+  // Elle refuse : la suivante du classement, jamais la porteuse (elle porte déjà).
+  const apres = deciderParGarde(bien, '2026-09-05',
+    { maintenant: AVANT, exclus: new Set([SECONDE]) })
+  assert.strictEqual(apres.providerId, REGINA)
+  assert.strictEqual(apres.offeredTo, TROISIEME)
+})
+
+// ─── L'ESCALADE : REFUS ET EXPIRATION (§12.4) ──────────────────────────────
+
+test('refus de la première : la SUIVANTE de la file est sollicitée', async () => {
+  // La file du jour est [seconde, troisième] devant Régina, qui porte.
+  const bien = bagneres({ liaisons: [
+    { provider_id: SECONDE,   rang: 1, requires_ack: true,  active: true },
+    { provider_id: TROISIEME, rang: 2, requires_ack: true,  active: true },
+    { provider_id: REGINA,    rang: 3, requires_ack: false, active: true }
+  ], regles: [] })
+  const c = deciderParGarde(bien, '2026-09-05', { maintenant: AVANT, exclus: new Set([SECONDE]) })
+  assert.strictEqual(c.providerId, REGINA, 'la porteuse n\'a jamais bougé')
+  assert.strictEqual(c.offeredTo, TROISIEME)
+})
+
+test('file ÉPUISÉE : le ménage reste chez sa porteuse, plus rien n\'est proposé', async () => {
+  // ⚠ L'escalade se termine d'elle-même. Sans cette borne, on reproposerait
+  // indéfiniment à des gens qui ont déjà dit non — toutes les cinq minutes.
+  const bien = bagneres({ liaisons: [
+    { provider_id: SECONDE, rang: 1, requires_ack: true,  active: true },
+    { provider_id: REGINA,  rang: 2, requires_ack: false, active: true }
+  ], regles: [] })
+  const c = deciderParGarde(bien, '2026-09-05', { maintenant: AVANT, exclus: new Set([SECONDE]) })
+  assert.strictEqual(c.providerId, REGINA)
+  assert.strictEqual(c.offeredTo, null)
+  assert.strictEqual(c.status, 'accepted')
+  assert.strictEqual(c.epuise, false, 'quelqu\'un porte : rien n\'est épuisé')
+})
+
+test('file épuisée SANS porteuse : `orphaned`, une décision humaine est requise', async () => {
+  const bien = bagneres({ liaisons: [
+    { provider_id: SECONDE,   rang: 1, requires_ack: true, active: true },
+    { provider_id: TROISIEME, rang: 2, requires_ack: true, active: true }
+  ], regles: [] })
+  const c = deciderParGarde(bien, '2026-09-05',
+    { maintenant: AVANT, exclus: new Set([SECONDE, TROISIEME]) })
+  assert.strictEqual(c.providerId, null)
+  assert.strictEqual(c.offeredTo, null)
+  assert.strictEqual(c.status, 'orphaned')
+  assert.strictEqual(c.epuise, true)
+})
+
+// ─── LA FENÊTRE DE PROPOSITION ─────────────────────────────────────────────
+
+test('un départ LOINTAIN n\'est pas proposé : il serait expiré avant le séjour', async () => {
+  // ⚠ Une proposition expire en 48 h au plus. Posée six mois à l'avance, elle
+  // serait morte deux jours plus tard, la file serait épuisée, et la responsable
+  // du jour n'aurait plus jamais l'occasion de prendre ce ménage. C'est aussi la
+  // garde d'envoi de masse (REVIEW.md règle 2) : à la première activation d'un
+  // compte Channex, un SMS par réservation future de l'historique.
+  const c = deciderParGarde(bagneres(), '2026-11-14', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, REGINA, 'quelqu\'un porte, personne n\'est découvert')
+  assert.strictEqual(c.offeredTo, null)
+  assert.strictEqual(c.differee, true)
+})
+
+test('la fenêtre inclut le jour même et le passé proche', async () => {
+  // Un ménage d'hier peut encore être à faire — et c'est justement le moment où
+  // l'hôte cherche quelqu'un en urgence.
+  const t = Date.parse('2026-09-05T09:00:00Z')
+  assert.strictEqual(dansLaFenetreDeProposition('2026-09-05', t), true)
+  assert.strictEqual(dansLaFenetreDeProposition('2026-09-04', t), true)
+  assert.strictEqual(dansLaFenetreDeProposition('2026-09-12', t), true, `J+${JOURS_PROPOSITION}`)
+  assert.strictEqual(dansLaFenetreDeProposition('2026-09-13', t), false)
+  assert.strictEqual(dansLaFenetreDeProposition(null, t), false)
+})
+
+test('un départ lointain SANS porteuse reste `unassigned`, pas `orphaned`', async () => {
+  // Rien n'est perdu : la proposition sera posée quand la date approchera.
+  // L'appeler `orphaned` aurait appelé une décision humaine pour rien.
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: SECONDE, rang: 1, requires_ack: true, active: true }
+  ], regles: [] }), '2026-11-14', { maintenant: AVANT })
+  assert.strictEqual(c.status, 'unassigned')
+  assert.strictEqual(c.differee, true)
+  assert.strictEqual(c.epuise, false)
 })
 
 // ─── L'échéance d'une proposition ──────────────────────────────────────────
@@ -81,44 +280,20 @@ test('une date de départ illisible retombe sur les 48 h', async () => {
   assert.strictEqual(echeanceOffre(null, t), '2026-09-03T08:00:00.000Z')
 })
 
-test('le rang décide, pas l\'ordre d\'arrivée de la liste', async () => {
-  const c = choisirPrestataire([{ providerId: REGINA, rang: 1 }, { providerId: NOUVELLE, rang: 2 }])
-  assert.strictEqual(c.providerId, REGINA)
-})
-
-// ─── Aucun forçage (spec §11.4) ────────────────────────────────────────────
-
-test('sans liaison : NON ASSIGNÉ, jamais un repli sur quelqu\'un', async () => {
-  const c = choisirPrestataire([])
-  assert.strictEqual(c.providerId, null)
-  assert.strictEqual(c.status, 'unassigned')
-  assert.strictEqual(c.assignedBy, null)
-})
-
-test('« aucune liaison » se distingue de « personne de disponible »', async () => {
-  // ⚠ Le drapeau commande l'ALERTE : un bien sans prestataire lié n'est pas en
-  // panne, il n'est pas géré — alerter à chaque départ noierait les vraies
-  // alertes. Décision du product owner.
-  assert.strictEqual(choisirPrestataire([]).aucuneLiaison, true)
-  assert.strictEqual(choisirPrestataire([{ providerId: REGINA, rang: 1 }]).aucuneLiaison, false)
-})
-
-test('une entrée non-tableau ne fait pas assigner n\'importe qui', async () => {
-  for (const bidon of [null, undefined, 'regina', {}, 0]) {
-    const c = choisirPrestataire(bidon)
-    assert.strictEqual(c.providerId, null, String(bidon))
-    assert.strictEqual(c.aucuneLiaison, true)
-  }
+test('une proposition COURTE reste possible', async () => {
+  // Une heure avant la veille-18h : on ne refuse pas, on propose.
+  const t = Date.parse('2026-09-01T15:00:00Z')
+  assert.strictEqual(echeanceOffre('2026-09-02', t), '2026-09-01T16:00:00.000Z')
 })
 
 // ─── Les horodatages suivent l'état ────────────────────────────────────────
 
-test('accepted pose accepted_at, offered pose offered_at — jamais les deux', async () => {
+test('accepted pose accepted_at, offered pose offered_at', async () => {
   const t = new Date('2026-09-03T10:00:00Z')
   const a = horodatages({ status: 'accepted' }, t)
   assert.strictEqual(a.accepted_at, '2026-09-03T10:00:00.000Z')
   assert.strictEqual(a.offered_at, null)
-  const o = horodatages({ status: 'offered' }, t)
+  const o = horodatages({ status: 'offered', offeredTo: SECONDE }, t)
   assert.strictEqual(o.offered_at, '2026-09-03T10:00:00.000Z')
   assert.strictEqual(o.accepted_at, null)
   const u = horodatages({ status: 'unassigned' }, t)
@@ -126,12 +301,22 @@ test('accepted pose accepted_at, offered pose offered_at — jamais les deux', a
   assert.strictEqual(u.accepted_at, null)
 })
 
+test('un ménage PORTÉ et PROPOSÉ pose les DEUX horodatages', async () => {
+  // ⚠ Depuis le modèle parallèle, c'est le cas nominal du §12.4. Lier
+  // `offered_at` au seul statut `offered` laissait la PWA sans date de départ
+  // pour afficher le délai restant.
+  const t = new Date('2026-09-03T10:00:00Z')
+  const d = horodatages({ status: 'accepted', offeredTo: SECONDE }, t)
+  assert.strictEqual(d.accepted_at, '2026-09-03T10:00:00.000Z')
+  assert.strictEqual(d.offered_at, '2026-09-03T10:00:00.000Z')
+})
+
 // ─── L'isolation multi-comptes (REVIEW.md règle 1) ─────────────────────────
 
 function doubleSb (lignes, erreur = null) {
-  const vu = { userIds: null, propIds: null, actif: null }
+  const vu = { userIds: null, propIds: null, actif: null, colonnes: null }
   const chain = {
-    select () { return chain },
+    select (c) { vu.colonnes = c; return chain },
     in (c, v) { if (c === 'user_id') vu.userIds = v; if (c === 'property_id') vu.propIds = v; return chain },
     eq (c, v) { if (c === 'active') vu.actif = v; return chain },
     order () { return Promise.resolve({ data: lignes, error: erreur }) }
@@ -150,9 +335,20 @@ test('les liaisons sont indexées par compte ET par bien', async () => {
   const map = await chargerLiaisons(sb, [
     { userId: 'A', propertyId: '209413' }, { userId: 'B', propertyId: '209413' }
   ])
-  assert.strictEqual(map.get('A|209413')[0].providerId, REGINA)
-  assert.strictEqual(map.get('B|209413')[0].providerId, 'p-autre')
+  assert.strictEqual(map.get('A|209413')[0].provider_id, REGINA)
+  assert.strictEqual(map.get('B|209413')[0].provider_id, 'p-autre')
   assert.strictEqual(map.size, 2, 'deux comptes, deux entrées : jamais fondues')
+})
+
+test('les liaisons chargent `weekdays` ET `requires_ack`', async () => {
+  // ⚠ Sans eux, la normalisation retombe sur ses défauts : attitrée tous les
+  // jours, et « doit confirmer ». Toute personne assignée d'office redeviendrait
+  // une simple sollicitée, et une attitrée du week-end recevrait des ménages en
+  // semaine — sans la moindre erreur visible.
+  const sb = doubleSb([])
+  await chargerLiaisons(sb, [{ userId: 'A', propertyId: '1' }])
+  assert.match(sb.vu.colonnes, /weekdays/)
+  assert.match(sb.vu.colonnes, /requires_ack/)
 })
 
 test('seules les liaisons ACTIVES sont chargées', async () => {
@@ -174,7 +370,7 @@ test('les rangs sont retriés par groupe, pas seulement globalement', async () =
   ])
   const map = await chargerLiaisons(sb, [{ userId: 'A', propertyId: '1' }])
   assert.deepStrictEqual(map.get('A|1').map(l => l.rang), [1, 2])
-  assert.strictEqual(map.get('A|1')[0].providerId, 'x', 'le rang 1 doit sortir en tete')
+  assert.strictEqual(map.get('A|1')[0].provider_id, 'x', 'le rang 1 doit sortir en tete')
 })
 
 test('une PANNE de lecture des liaisons LÈVE, elle ne rend pas « personne »', async () => {
@@ -193,8 +389,102 @@ test('aucun couple : aucune requête, une map vide', async () => {
   assert.strictEqual(sb.vu.userIds, null, 'pas de requête à vide')
 })
 
-test('une proposition COURTE reste possible', async () => {
-  // Une heure avant la veille-18h : on ne refuse pas, on propose.
-  const t = Date.parse('2026-09-01T15:00:00Z')
-  assert.strictEqual(echeanceOffre('2026-09-02', t), '2026-09-01T16:00:00.000Z')
+// ─── Les disponibilités du lot ─────────────────────────────────────────────
+
+function doubleDispos ({ regles = [], exceptions = [], erreur = null } = {}) {
+  const vu = { tables: [], userIds: [], actif: null, du: null, au: null }
+  return {
+    from (table) {
+      vu.tables.push(table)
+      const chain = {
+        select () { return chain },
+        in (c, v) { if (c === 'user_id') vu.userIds.push(v); return chain },
+        eq (c, v) { if (c === 'active') vu.actif = v; return chain },
+        gte (c, v) { vu.du = v; return chain },
+        lte (c, v) { vu.au = v; return chain },
+        order () { return chain },
+        // ⚠ La lecture est PAGINÉE : `.order().range()`. Un double qui s'arrêtait
+        // à `.limit()` ne verrait pas une pagination cassée — et une exception de
+        // congé manquée envoie quelqu'un qui n'est pas là.
+        range (from) {
+          if (erreur) return Promise.resolve({ data: null, error: erreur })
+          const tout = table === 'provider_availability_rules' ? regles : exceptions
+          return Promise.resolve({ data: from === 0 ? tout : [], error: null })
+        }
+      }
+      return chain
+    },
+    vu
+  }
+}
+
+test('les disponibilités sont indexées `user_id|provider_id`', async () => {
+  // ⚠ REVIEW.md règle 1. Le moteur tourne en service key, qui contourne la RLS :
+  // indexée sur le seul `provider_id`, l'exception d'un autre hôte mettrait
+  // Régina en congé chez celui-ci.
+  const sb = doubleDispos({
+    regles: [{ user_id: 'A', provider_id: REGINA, rrule: WEEKEND_QUINZAINE, active: true }],
+    exceptions: [{ user_id: 'B', provider_id: REGINA, date: '2026-09-05', available: false }]
+  })
+  const d = await chargerDisponibilites(sb, ['A', 'B'])
+  assert.strictEqual(d.regles.get(`A|${REGINA}`).length, 1)
+  assert.strictEqual(d.regles.get(`B|${REGINA}`), undefined)
+  assert.strictEqual(d.exceptions.get(`B|${REGINA}`).length, 1)
+  assert.strictEqual(d.exceptions.get(`A|${REGINA}`), undefined)
+})
+
+test('une PANNE de lecture des disponibilités LÈVE : elle n\'ouvre pas', async () => {
+  // ⚠ Rendre des maps vides ferait paraître TOUT LE MONDE disponible — « aucune
+  // règle = disponible ». Les congés seraient ignorés et les ménages partiraient
+  // à des gens absents, sans que rien ne le signale. Une panne coupe.
+  const sb = doubleDispos({ erreur: { message: 'timeout' } })
+  await assert.rejects(() => chargerDisponibilites(sb, ['A']), /timeout/)
+})
+
+test('aucun compte : aucune requête', async () => {
+  const sb = doubleDispos({})
+  const d = await chargerDisponibilites(sb, [])
+  assert.strictEqual(d.regles.size, 0)
+  assert.deepStrictEqual(sb.vu.tables, [])
+})
+
+// ─── La mémoire de l'escalade ──────────────────────────────────────────────
+
+function doubleJournal (lignes, erreur = null) {
+  const vu = { events: null, ids: null }
+  const chain = {
+    select () { return chain },
+    in (c, v) { if (c === 'event') vu.events = v; if (c === 'menage_id') vu.ids = v; return chain },
+    order () { return chain },
+    range (from) { return Promise.resolve({ data: from === 0 ? lignes : [], error: erreur }) }
+  }
+  return { from: () => chain, vu }
+}
+
+test('le journal dit qui a refusé ET qui n\'a pas répondu, par ménage', async () => {
+  // ⚠ `expired` compte comme un refus : reproposé après son expiration,
+  // quelqu'un qui n'a pas répondu recevrait un SMS toutes les 48 h jusqu'au
+  // départ.
+  const sb = doubleJournal([
+    { menage_id: 'm1', from_provider_id: SECONDE, event: 'declined' },
+    { menage_id: 'm1', from_provider_id: TROISIEME, event: 'expired' },
+    { menage_id: 'm2', from_provider_id: SECONDE, event: 'declined' },
+    { menage_id: 'm2', from_provider_id: null, event: 'declined' }
+  ])
+  const refus = await chargerRefus(sb, ['m1', 'm2'])
+  assert.deepStrictEqual([...refus.get('m1')].sort(), [SECONDE, TROISIEME].sort())
+  assert.deepStrictEqual([...refus.get('m2')], [SECONDE], 'une ligne sans personne est ignorée')
+  assert.deepStrictEqual(sb.vu.events, ['declined', 'expired'])
+})
+
+test('une PANNE du journal LÈVE : mieux vaut ne pas escalader que reproposer à qui a refusé', async () => {
+  const sb = doubleJournal(null, { message: 'timeout' })
+  await assert.rejects(() => chargerRefus(sb, ['m1']), /journal: timeout/)
+})
+
+test('aucun ménage : aucune requête au journal', async () => {
+  const sb = doubleJournal([])
+  const refus = await chargerRefus(sb, [])
+  assert.strictEqual(refus.size, 0)
+  assert.strictEqual(sb.vu.ids, null)
 })

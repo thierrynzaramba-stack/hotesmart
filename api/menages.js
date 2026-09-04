@@ -23,8 +23,9 @@ const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
-const { echeanceOffre } = require('../lib/cleaning/assign')
-const { notifierAssignation } = require('../lib/cleaning/notifier-prestataire')
+const { echeanceOffre, chargerLiaisons, chargerDisponibilites,
+        deciderParGarde } = require('../lib/cleaning/assign')
+const { notifierAssignation, notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -279,10 +280,13 @@ module.exports = async function handler(req, res) {
         rapprochement = rapprochementSur ? 'ok' : 'indisponible'
       }
 
-      // Les liaisons bien <-> prestataire, avec leur rang. C'est ce qui decide
-      // si un menage nait accepte ou propose.
+      // Les liaisons bien <-> prestataire. ⚠ `requires_ack` EST EXPOSE : c'est
+      // lui, et non le rang, qui dit si un menage nait porte d'office ou
+      // seulement propose (§12.3). Sans lui, l'ecran continuait d'annoncer
+      // « referente » a partir du rang — et promettait des menages assignes
+      // d'office a quelqu'un qui devait confirmer.
       const { data: lia, error: errLia } = await supabase.from('property_cleaning_providers')
-        .select('property_id, provider_id, rang, active')
+        .select('property_id, provider_id, rang, requires_ack, weekdays, active')
         .eq('user_id', userId).eq('active', true)
       if (errLia) console.error('[menages] lecture liaisons echec', errLia.message)
       else liaisons = lia || []
@@ -379,10 +383,13 @@ async function reassigner (req, res) {
     return res.status(409).json({ error: 'Ce ménage est annulé : sa réservation n\'existe plus' })
   }
 
-  // ⚠ Le rang decide de l'ENGAGEMENT, pas la personne (spec §11.3) : reassigner
-  // vers le referent du bien l'engage d'office ; vers un suppleant, il devra
-  // confirmer. La reassignation manuelle emprunte le meme chemin que
-  // l'automate, sinon deux regles d'engagement coexisteraient.
+  // ⚠ `requires_ack` DECIDE DE L'ENGAGEMENT, PAS LE RANG (spec §12.3, lot 3.3) :
+  // reassigner vers quelqu'un qui n'a rien a confirmer l'engage d'office ; vers
+  // quelqu'un qui doit confirmer, on propose. La reassignation manuelle emprunte
+  // le meme chemin que l'automate, sinon deux regles d'engagement coexisteraient.
+  // Lire le rang ici condamnait une attitree du week-end en rang 2 a confirmer
+  // pour toujours, et interdisait a une seconde personne rodee d'etre assignee
+  // d'office sans la promouvoir rang 1 devant la titulaire.
   // ⚠ REASSIGNER N'EST PAS PROPOSER (regle du 4 septembre 2026).
   //   - vers le REFERENT du bien : il PORTE le menage, tout de suite.
   //   - vers quelqu'un d'autre : on lui PROPOSE. Le menage reste chez son
@@ -412,25 +419,31 @@ async function reassigner (req, res) {
                 offered_to: null, prenom: choisi.first_name, retiree: true }
   } else {
     const { data: liaison, error: errLiaison } = await supabase.from('property_cleaning_providers')
-      .select('rang').eq('user_id', userId).eq('property_id', String(property_id))
+      .select('rang, requires_ack').eq('user_id', userId).eq('property_id', String(property_id))
       .eq('provider_id', choisi.id).eq('active', true).maybeSingle()
-    // ⚠ Ignoree, une panne transitoire degradait une REFERENTE en simple
-    // sollicitee : elle recevait une proposition a confirmer pour un menage qui
-    // aurait du lui revenir d'office.
+    // ⚠ Ignoree, une panne transitoire degradait une personne assignee d'office
+    // en simple sollicitee : elle recevait une proposition a confirmer pour un
+    // menage qui aurait du lui revenir sans rien demander.
     if (errLiaison) {
       console.error('[menages] lecture de la liaison echec', errLiaison.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
-    const referent = liaison && liaison.rang === 1
+    // ⚠ `requires_ack` ABSENT vaut « doit confirmer », jamais « d'office » —
+    // meme defaut que la colonne et que `garde.js`. Engager quelqu'un parce
+    // qu'une lecture a manque une colonne serait le pire des deux resultats.
+    // Une personne SANS liaison sur ce bien (l'hote depanne avec quelqu'un d'un
+    // autre bien) doit confirmer : rien ne dit qu'elle a accepte ce bien-la.
+    const dOffice = !!liaison && liaison.requires_ack === false
 
-    // Le referent est TOUJOURS assigne directement : c'est le sens de son rang.
-    // Pour les autres, c'est le geste demande qui tranche.
-    if (referent || geste === 'assigner') {
+    // Celle qui n'a rien a confirmer est TOUJOURS assignee directement : c'est
+    // le sens de `requires_ack = false`. Pour les autres, c'est le geste demande
+    // qui tranche.
+    if (dOffice || geste === 'assigner') {
       maj = { ...maj, provider_id: choisi.id, status: 'accepted', assigned_by: 'manual',
               offered_to: null, offered_at: null, offer_expires_at: null,
               accepted_at: new Date().toISOString(),
-              assignment_reason: referent
-                ? `Referent du bien, assigne a la main par l'hote.`
+              assignment_reason: dOffice
+                ? `Assignee d'office sur ce bien, posee a la main par l'hote.`
                 : `Assigne directement par l'hote (sans confirmation).` }
       reponse = { status: 'accepted', provider_id: choisi.id, prenom: choisi.first_name,
                   assignee: true }
@@ -603,11 +616,47 @@ async function ecrireLiaisons (req, res) {
   }
 
   // 2. Poser ou remettre les voulues.
+  //
+  // ⚠ `requires_ack` DOIT ETRE POSE A LA CREATION. Il vaut `true` par defaut en
+  // base : sans cette ligne, une prestataire que l'hote vient de designer comme
+  // referente ne portait plus rien d'office — ses menages lui etaient seulement
+  // PROPOSES, et restaient sans personne si elle ne repondait pas. Le formulaire
+  // n'a pas encore de reglage dedie (lot 3.5) : il traduit son choix
+  // referente/suppleante, exactement comme la reprise de la migration
+  // (`requires_ack = false where rang = 1`).
+  //
+  // ⚠ ON NE LE RECALCULE QUE SI LE RANG CHANGE. Deux fautes symetriques a eviter :
+  //   - le recalculer TOUJOURS ecraserait un `requires_ack` regle finement — une
+  //     suppleante rodee passee d'office sans etre promue — a chaque
+  //     enregistrement de la fiche, sans que personne comprenne pourquoi elle
+  //     redemande confirmation ;
+  //   - ne JAMAIS le recalculer rendait la promotion impossible : echanger les
+  //     rangs de deux personnes depuis leurs deux fiches ne changeait rien, la
+  //     nouvelle rang 1 restait « a confirmer », et aucun ecran n'expose encore
+  //     `requires_ack` pour corriger (lot 3.5).
+  // Le rang envoye est donc une INTENTION : quand il bouge, il retranche.
+  const { data: connues, error: errConnues } = await supabase
+    .from('property_cleaning_providers')
+    .select('property_id, rang, requires_ack')
+    .eq('user_id', userId).eq('provider_id', prof.id)
+  if (errConnues) {
+    console.error('[menages] lecture liaisons connues echec', errConnues.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  const ackConnu = new Map((connues || []).map(l => [String(l.property_id), l]))
+  // `true` = cette liaison garde son reglage ; `false` = le rang vient de bouger,
+  // l'intention de l'ecran l'emporte.
+  const ackConserve = v => {
+    const l = ackConnu.get(v.ref)
+    return l && Number(l.rang) === Number(v.rang) ? l.requires_ack : null
+  }
+
   if (voulues.length) {
     const { error: errUp } = await supabase.from('property_cleaning_providers')
       .upsert(voulues.map(v => ({
         user_id: userId, property_id: v.ref, provider_id: prof.id,
-        rang: v.rang, active: true
+        rang: v.rang, active: true,
+        requires_ack: ackConserve(v) === null ? v.rang !== 1 : ackConserve(v)
       })), { onConflict: 'user_id,property_id,provider_id' })
     if (errUp) {
       console.error('[menages] upsert liaisons echec', errUp.message)
@@ -615,15 +664,22 @@ async function ecrireLiaisons (req, res) {
     }
   }
 
-  // ⚠ AVERTISSEMENT, PAS BLOCAGE. Un bien qui perd sa derniere referente verra
-  // ses prochains menages naitre NON ASSIGNES : l'hote doit le savoir, mais
-  // c'est sa decision — le lui refuser le laisserait sans issue le jour ou une
-  // prestataire s'en va.
+  // ⚠ AVERTISSEMENT, PAS BLOCAGE. Un bien qui n'a plus PERSONNE D'OFFICE verra
+  // ses prochains menages naitre en simple proposition — ou non assignes si
+  // personne ne repond : l'hote doit le savoir, mais c'est sa decision — le lui
+  // refuser le laisserait sans issue le jour ou une prestataire s'en va.
+  //
+  // ⚠ LE CRITERE EST `requires_ack`, PLUS LE RANG (§12.3). Un bien dont le rang 1
+  // doit confirmer n'a pas de porteuse d'office, et l'ancien test le declarait
+  // pourtant couvert. La cle de reponse garde son nom (`sans_referent`) : c'est
+  // le contrat de `apps/menages/prestataires.html`.
   const { data: apres } = await supabase.from('property_cleaning_providers')
     // `provider_id` sert au rattrapage immediat plus bas : c'est l'etat APRES
     // cette ecriture qui decide, pas ce que l'appelant vient d'envoyer.
-    .select('property_id, provider_id, rang').eq('user_id', userId).eq('active', true)
-  const avecReferent = new Set((apres || []).filter(l => l.rang === 1).map(l => String(l.property_id)))
+    .select('property_id, provider_id, rang, requires_ack, weekdays')
+    .eq('user_id', userId).eq('active', true)
+  const avecReferent = new Set((apres || [])
+    .filter(l => l.requires_ack === false).map(l => String(l.property_id)))
   // ⚠ L'avertissement reste DANS le perimetre de l'appelant : sinon la reponse
   // lui rend les references des biens qu'il n'a pas le droit de voir.
   const visibles = Array.isArray(refs)
@@ -647,42 +703,149 @@ async function ecrireLiaisons (req, res) {
   //   - jamais `orphaned` : quelqu'un a refuse, c'est une decision humaine ;
   //   - jamais `assigned_by='manual'` : l'hote a tranche ;
   //   - jamais un menage deja assigne : ce serait defaire une offre en cours.
-  const aujourdhui = new Date().toISOString().slice(0, 10)
-  let rattrapes = 0
-  for (const v of voulues) {
-    // Le referent du bien APRES cette ecriture, pas celui qu'on vient d'envoyer :
-    // une autre personne peut deja etre rang 1.
-    const surCeBien = (apres || []).filter(l => String(l.property_id) === v.ref)
-      .sort((a, b) => a.rang - b.rang)
-    if (!surCeBien.length) continue
-    const { data: maj, error: errRat } = await supabase.from('menages')
-      .update({
-        provider_id: surCeBien[0].provider_id,
-        status: surCeBien[0].rang === 1 ? 'accepted' : 'offered',
-        assigned_by: 'auto',
-        assignment_reason: surCeBien[0].rang === 1
-          ? 'Referent du bien (rang 1), assigne d\'office.'
-          : `Suppleant (rang ${surCeBien[0].rang}) : en attente de sa confirmation.`,
-        assignment_mode: 'priorite',
-        accepted_at: surCeBien[0].rang === 1 ? new Date().toISOString() : null,
-        offered_at: surCeBien[0].rang === 1 ? null : new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', userId).eq('property_id', v.ref)
-      .eq('status', 'unassigned').is('provider_id', null)
-      .gte('departure_date', aujourdhui)
-      .select('id, user_id')
-    if (errRat) { console.error('[menages] rattrapage echec', errRat.message); continue }
-    rattrapes += (maj || []).length
-    if ((maj || []).length) {
-      await supabase.from('menage_assignment_log').insert((maj || []).map(m => ({
-        user_id: m.user_id, menage_id: m.id,
-        event: surCeBien[0].rang === 1 ? 'assigned' : 'offered',
-        to_provider_id: surCeBien[0].provider_id, actor: 'host',
-        reason: 'Prestataire lie au bien : menages a venir rattrapes.'
-      })))
-    }
-  }
+  //
+  // ⚠ CHAQUE MENAGE EST DECIDE PAR LA GARDE DE SON JOUR (§12.1, lot 3.3). La
+  // version precedente ecrivait LE MEME prestataire sur tous les menages a venir
+  // du bien — le rang 1 — quelle que soit leur date : une attitree du week-end
+  // heritait des menages du mardi, et une personne en conge des menages de son
+  // absence. Deux ecrans donnaient alors deux reponses differentes a la meme
+  // question.
+  const rattrapage = await rattraperMenagesSansPersonne(userId, voulues.map(v => v.ref))
+  if (rattrapage.erreur) console.error('[menages] rattrapage echec', rattrapage.erreur)
 
-  return res.status(200).json({ success: true, sans_referent: sansReferent, rattrapes })
+  return res.status(200).json({ success: true, sans_referent: sansReferent,
+                                rattrapes: rattrapage.rattrapes })
+}
+
+// ─── Rattrapage immediat des menages sans personne (lot 3.3) ────────────────
+//
+// L'hote vient de lier une prestataire a des biens. Le cron ferait le meme
+// travail au cycle suivant, mais jusqu'a cinq minutes plus tard, et rien a
+// l'ecran n'expliquerait ce vide : le premier test humain reel est tombe
+// exactement dedans.
+//
+// ⚠ MEME MOTEUR QUE LE CRON — `deciderParGarde`, par JOUR. Recopier ici une
+// regle d'assignation, c'etait garantir qu'elle diverge : c'est ce qui s'est
+// produit (« rang 1 = accepted » ecrit sur tous les menages a venir, quel que
+// soit le jour).
+//
+// ⚠ UNE PANNE NE FAIT PAS ECHOUER L'ENREGISTREMENT DES LIAISONS. Elles sont
+// deja ecrites ; le rattrapage est un confort, le cron repassera.
+async function rattraperMenagesSansPersonne (userId, refs) {
+  const bilan = { rattrapes: 0, erreur: null }
+  const biens = [...new Set((refs || []).map(String))].filter(Boolean)
+  if (!biens.length) return bilan
+  const maintenant = Date.now()
+  const aujourdhui = new Date(maintenant).toISOString().slice(0, 10)
+
+  try {
+    // ⚠ `assigned_by` NULL DOIT PASSER. Un menage cree sans aucune liaison porte
+    // `assigned_by = null` : `.neq('assigned_by','manual')` l'aurait ECARTE (en
+    // SQL, `null <> 'manual'` ne vaut pas vrai), c'est-a-dire exclu du rattrapage
+    // precisement le cas que ce rattrapage existe pour traiter.
+    const { data: menages, error: errLire } = await supabase.from('menages')
+      .select('id, user_id, property_id, departure_date')
+      .eq('user_id', userId).in('property_id', biens)
+      .eq('status', 'unassigned').is('provider_id', null).is('offered_to', null)
+      .or('assigned_by.is.null,assigned_by.neq.manual')
+      .gte('departure_date', aujourdhui)
+      .order('departure_date', { ascending: true })
+      .limit(500)
+    if (errLire) { bilan.erreur = errLire.message; return bilan }
+    if (!menages || !menages.length) return bilan
+
+    const liaisonsParBien = await chargerLiaisons(supabase, menages.map(m => ({
+      userId, propertyId: m.property_id
+    })))
+    const dispos = await chargerDisponibilites(supabase, [userId], {
+      du: menages[0].departure_date, au: menages[menages.length - 1].departure_date
+    })
+
+    // Groupe par destination ET par echeance : deux departs de dates
+    // differentes ne partagent pas la meme echeance de proposition.
+    const groupes = new Map()
+    for (const m of menages) {
+      const bien = {
+        userId, propertyId: String(m.property_id),
+        liaisons: liaisonsParBien.get(`${userId}|${String(m.property_id)}`) || [],
+        regles: dispos.regles, exceptions: dispos.exceptions
+      }
+      const choix = deciderParGarde(bien, m.departure_date, { maintenant })
+      if (!choix.providerId && !choix.offeredTo) continue
+      const echeance = choix.offeredTo ? echeanceOffre(m.departure_date, maintenant) : null
+      const k = `${choix.providerId}|${choix.offeredTo}|${echeance}`
+      if (!groupes.has(k)) groupes.set(k, { choix, echeance, menages: [] })
+      groupes.get(k).menages.push(m)
+    }
+
+    const journal = []
+    const aNotifier = []
+    for (const { choix, echeance, menages: lot } of groupes.values()) {
+      const iso = new Date(maintenant).toISOString()
+      const { data: maj, error: errRat } = await supabase.from('menages')
+        .update({
+          provider_id: choix.providerId,
+          offered_to: choix.offeredTo || null,
+          offer_expires_at: choix.offeredTo ? echeance : null,
+          status: choix.providerId ? 'accepted' : (choix.offeredTo ? 'offered' : 'unassigned'),
+          assigned_by: 'auto',
+          assignment_reason: choix.raison,
+          assignment_mode: 'garde',
+          accepted_at: choix.providerId ? iso : null,
+          offered_at: choix.offeredTo ? iso : null,
+          updated_at: iso
+        })
+        // ⚠ Les memes conditions que la lecture, POSEES DANS L'UPDATE : entre les
+        // deux, le cron a pu assigner ces menages. Zero ligne = il a ete plus
+        // rapide, et c'est un resultat normal.
+        .in('id', lot.map(m => m.id))
+        .eq('status', 'unassigned').is('provider_id', null).is('offered_to', null)
+        // ⚠ `property_id` EST RELU. Le groupe est indexe par (destination,
+        // echeance) et PAS par bien : deux biens differents tombent dans le meme
+        // groupe des que la meme personne est retenue avec la meme echeance —
+        // le cas nominal quand l'hote lie une prestataire a plusieurs biens d'un
+        // coup. Notifier avec le bien du PREMIER menage du lot annoncait
+        // « Appartement A » pour un menage de l'Appartement B, et comptait le SMS
+        // sur le mauvais bien.
+        .select('id, user_id, property_id, departure_date')
+      if (errRat) { bilan.erreur = errRat.message; continue }
+      bilan.rattrapes += (maj || []).length
+      for (const m of (maj || [])) {
+        journal.push({
+          user_id: m.user_id, menage_id: m.id,
+          event: choix.offeredTo ? 'offered' : 'assigned',
+          to_provider_id: choix.offeredTo || choix.providerId, actor: 'host',
+          reason: 'Prestataire liee au bien : menages a venir rattrapes, garde du jour.'
+        })
+        if (choix.offeredTo) {
+          aNotifier.push({ providerId: choix.offeredTo, propertyId: m.property_id,
+                           departureDate: m.departure_date, expireLe: echeance })
+        }
+      }
+    }
+    if (journal.length) await supabase.from('menage_assignment_log').insert(journal)
+
+    // ⚠ UNE PROPOSITION MUETTE EXPIRE SANS QUE PERSONNE NE SACHE QU'ON LUI A
+    // DEMANDE QUELQUE CHOSE. Le cron ne repassera pas dessus — l'offre y est
+    // deja posee — donc c'est ici ou nulle part. Best-effort et PLAFONNE : la
+    // fenetre de proposition borne deja la source, ce plafond protege la cle
+    // Brevo de l'hote d'un geste qui toucherait beaucoup de biens d'un coup.
+    const MAX_NOTIFS = 10
+    for (const n of aNotifier.slice(0, MAX_NOTIFS)) {
+      try {
+        const { data: bien } = await supabase.from('properties')
+          .select('name').eq('user_id', userId)
+          .eq('provider_property_id', String(n.propertyId)).maybeSingle()
+        const base = (process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')
+        await notifierProposition({
+          userId, providerId: n.providerId, propertyName: bien && bien.name,
+          propertyId: String(n.propertyId), departureDate: n.departureDate,
+          expireLe: n.expireLe, lien: `${base}/apps/menages/public`
+        })
+      } catch (e) { console.error('[menages] notification proposition echec', e.message) }
+    }
+  } catch (e) {
+    bilan.erreur = e.message
+  }
+  return bilan
 }

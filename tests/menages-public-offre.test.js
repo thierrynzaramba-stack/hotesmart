@@ -20,8 +20,11 @@ const U = 'compte-1', TOKEN = 'marie-x', MARIE = 'p-marie', REGINA = 'p-regina'
 
 function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      menage = { id: 'm1', provider_id: REGINA, offered_to: MARIE, status: 'accepted' },
-                     majTouche = true, erreurMaj = null, erreurMenage = null } = {}) {
-  const etat = { majs: [], journal: [], incidents: [], requetes: [] }
+                     majTouche = true, erreurMaj = null, erreurMenage = null,
+                     // Lot 3.3 : de quoi calculer la remplaçante du jour.
+                     liaisons = [], regles = [], exceptions = [], refus = [],
+                     erreurLiaisons = null } = {}) {
+  const etat = { majs: [], journal: [], incidents: [], requetes: [], notifs: [] }
   const client = {
     from (table) {
       const a = { table, f: {}, cond: {} }
@@ -31,7 +34,20 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         eq (c, v) { a.f[c] = v; return chain },
         neq () { return chain }, in () { return chain }, is () { return chain },
         gte () { return chain }, lte () { return chain }, not () { return chain },
-        order () { return chain }, limit () { return Promise.resolve({ data: [], error: null }) },
+        order () { return chain },
+        range (from) {
+          if (from !== 0) return Promise.resolve({ data: [], error: null })
+          if (table === 'provider_availability_rules') return Promise.resolve({ data: regles, error: null })
+          if (table === 'provider_availability_exceptions') return Promise.resolve({ data: exceptions, error: null })
+          if (table === 'menage_assignment_log') return Promise.resolve({ data: refus, error: null })
+          return Promise.resolve({ data: [], error: null })
+        },
+        limit () {
+          if (table === 'provider_availability_rules') return Promise.resolve({ data: regles, error: null })
+          if (table === 'provider_availability_exceptions') return Promise.resolve({ data: exceptions, error: null })
+          if (table === 'menage_assignment_log') return Promise.resolve({ data: refus, error: null })
+          return Promise.resolve({ data: [], error: null })
+        },
         insert (rows) { etat.journal.push(...[].concat(rows)); return Promise.resolve({ error: null }) },
         update (row) {
           const q = { row, f: {} }
@@ -85,7 +101,14 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           }
           return Promise.resolve({ data: null, error: null })
         },
-        then (ok) { return Promise.resolve({ data: [], error: null }).then(ok) }
+        then (ok) {
+          // `chargerLiaisons` termine par `.order()` : c'est ici qu'elle atterrit.
+          if (table === 'property_cleaning_providers') {
+            return Promise.resolve({ data: erreurLiaisons ? null : liaisons,
+                                     error: erreurLiaisons }).then(ok)
+          }
+          return Promise.resolve({ data: [], error: null }).then(ok)
+        }
       }
       return chain
     }
@@ -102,8 +125,19 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
   mn.exports = { alertMenageRefuse: async (opts) => { etat.incidents.push(opts) } }
   mn.loaded = true
   require.cache[absNotify] = mn
+  // ⚠ Sans ce double, l'escalade enverrait un VRAI SMS depuis les tests.
+  const absPresta = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
+  const mp = new Module(absPresta)
+  mp.exports = {
+    notifierProposition: async (o) => { etat.notifs.push(o); return { sms: true, email: false } },
+    notifierAssignation: async () => ({ sms: false, email: false }),
+    jourLisible: d => String(d)
+  }
+  mp.loaded = true
+  require.cache[absPresta] = mp
   for (const mod of ['../api/menages-public', '../lib/stats-avis', '../lib/attribution-prestataire',
-                     '../lib/cron-property-status', '../lib/founder-notify']) {
+                     '../lib/cron-property-status', '../lib/founder-notify',
+                     '../lib/cleaning/assign']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
   return etat
@@ -218,6 +252,161 @@ test('le refus est atomique : il ne touche que SA proposition', async () => {
   const handler = require('../api/menages-public')
   await handler(post('refuserMenage'), reponse())
   assert.strictEqual(etat.majs[0].f.offered_to, MARIE)
+})
+
+// ─── L'ESCALADE APRÈS UN REFUS (lot 3.3, §12.4) ────────────────────────────
+
+const TROISIEME = 'p-troisieme'
+const LIAISONS_TROIS = [
+  { user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false, active: true },
+  { user_id: U, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, active: true },
+  { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 3, requires_ack: true, active: true }
+]
+
+test('refuser : la REMPLAÇANTE du jour prend le relais, dans le même écrit', async () => {
+  // ⚠ Calculée AVANT d'écrire et posée dans le MÊME update : la calculer après
+  // laisserait le ménage sans proposition entre les deux écritures — et, quand
+  // personne ne le porte, `orphaned` avec une alerte pour rien.
+  const etat = preparer({ liaisons: LIAISONS_TROIS })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, true)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.offered_to, TROISIEME)
+  assert.ok(maj.row.offer_expires_at, 'une proposition sans échéance est refusée par la base')
+  assert.strictEqual(maj.f.offered_to, MARIE, 'la condition reste atomique sur SA proposition')
+  assert.strictEqual(etat.notifs.length, 1, 'une proposition muette expire sans que personne ne sache')
+  assert.strictEqual(etat.notifs[0].providerId, TROISIEME)
+})
+
+test('l\'escalade laisse au journal le refus ET la nouvelle proposition', async () => {
+  const etat = preparer({ liaisons: LIAISONS_TROIS })
+  const handler = require('../api/menages-public')
+  await handler(post('refuserMenage'), reponse())
+  assert.ok(etat.journal.find(l => l.event === 'declined' && l.from_provider_id === MARIE))
+  const offre = etat.journal.find(l => l.event === 'offered')
+  assert.ok(offre && offre.to_provider_id === TROISIEME)
+  assert.strictEqual(offre.actor, 'cron', 'ce n\'est pas celle qui refuse qui choisit sa remplaçante')
+})
+
+test('une escalade réussie N\'ALERTE PAS l\'hôte', async () => {
+  // Quelqu'un vient d'être sollicité : rien n'est découvert. Si elle ne répond
+  // pas, l'expiration reprendra la main — et alertera, la file étant épuisée.
+  const etat = preparer({
+    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    liaisons: [
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, active: true },
+      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, active: true }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, true)
+  assert.strictEqual(etat.incidents.length, 0)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.status, 'offered', 'personne ne porte : le statut le dit')
+  assert.strictEqual(maj.row.offered_to, TROISIEME)
+})
+
+test('personne d\'AUTRE : on retombe sur le modèle parallèle, sans boucle', async () => {
+  // ⚠ La seule candidate qui doit confirmer vient de refuser : la file est
+  // épuisée. Lui reproposer serait une boucle dont personne ne sortirait.
+  const etat = preparer({ liaisons: [
+    { user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false, active: true },
+    { user_id: U, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, active: true }
+  ] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, false)
+  assert.strictEqual(res.body.porte, true)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.offered_to, null)
+  assert.strictEqual(etat.notifs.length, 0)
+})
+
+test('qui a DÉJÀ refusé ce ménage n\'est pas resollicité', async () => {
+  // La mémoire est le journal : `declined` et `expired`.
+  const etat = preparer({
+    liaisons: LIAISONS_TROIS,
+    refus: [{ menage_id: 'm1', from_provider_id: TROISIEME, event: 'expired' }]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, false, 'la file est épuisée')
+  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.offered_to, null)
+})
+
+test('une PANNE du calcul de la remplaçante n\'empêche PAS le refus', async () => {
+  // ⚠ Faire échouer un refus parce que le calcul est en panne obligerait la
+  // prestataire à réessayer — ou, pire, la laisserait engagée. On retombe sur
+  // le comportement du modèle parallèle.
+  const etat = preparer({ liaisons: LIAISONS_TROIS, erreurLiaisons: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.success, true)
+  assert.strictEqual(res.body.escalade, false)
+  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.offered_to, null)
+})
+
+test('la remplaçante n\'est JAMAIS la porteuse (contrainte `offre_pas_a_soi`)', async () => {
+  // Si la garde du jour désignait la porteuse elle-même, l'update violerait
+  // `menages_offre_pas_a_soi` — et le refus échouerait avec elle.
+  const etat = preparer({
+    menage: { id: 'm1', provider_id: TROISIEME, offered_to: MARIE, status: 'accepted' },
+    liaisons: [
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, active: true },
+      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, active: true }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, false)
+  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.offered_to, null)
+})
+
+test('escalade sur un ménage SANS porteur : la candidate d\'office est posée', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `remplacanteApresRefus` ne retenait que
+  // `choix.offeredTo` : sur un ménage que personne ne porte alors que la garde du
+  // jour désigne quelqu'un d'office — l'hôte vient de la lier, ou son congé s'est
+  // terminé — le refus écrivait `offered` avec `provider_id` toujours nul. La
+  // candidate d'office ne le recevait jamais, et le writer sautait la ligne
+  // puisqu'une proposition y est posée.
+  const etat = preparer({
+    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    liaisons: [
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, active: true },
+      { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, requires_ack: false, active: true },
+      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 3, requires_ack: true, active: true }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.provider_id, REGINA, 'la porteuse d\'office prend la charge')
+  assert.strictEqual(maj.row.status, 'accepted')
+  assert.ok(maj.row.accepted_at)
+  assert.strictEqual(maj.row.offered_to, TROISIEME, 'et la suivante est sollicitée à côté')
+})
+
+test('la PWA ne promet pas une alerte que le serveur n\'envoie pas', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW, même classe que le commit c6d0553. Le serveur
+  // n'alerte l'hôte que si `!porte && !suivante` ; la PWA affichait « votre
+  // employeur est prévenu » dès que `porte` était faux — donc aussi après une
+  // escalade réussie, où personne n'a été prévenu.
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/public.html'), 'utf8')
+  assert.ok(front.includes('data.escalade'),
+    'le front doit lire `escalade` avant d\'annoncer une alerte')
+  const i = front.indexOf('votre employeur est prévenu')
+  assert.ok(i > 0 && front.lastIndexOf('data.escalade', i) > 0,
+    'la promesse d\'alerte doit être le dernier cas, après `porte` et `escalade`')
 })
 
 test('refuser une offre déjà retirée : 409, aucune alerte', async () => {

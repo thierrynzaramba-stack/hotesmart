@@ -1,10 +1,11 @@
 // tests/menages-liaisons.test.js
 // api/menages.js POST `liaisons` — qui intervient sur quel bien, et à quel rang.
 //
-// ⚠ CE QUE CET ENDPOINT DÉCIDE. Le rang ne décore pas : le rang 1 est assigné
-// D'OFFICE (le ménage naît `accepted`), le rang 2+ reçoit une offre à confirmer.
-// Se tromper de personne, c'est engager quelqu'un sans son accord — ou laisser
-// un logement sans personne pour le préparer.
+// ⚠ CE QUE CET ENDPOINT DÉCIDE. Depuis le lot 3.3, ce n'est plus le rang qui
+// tranche mais `requires_ack` — posé ICI à la création d'une liaison, faute de
+// réglage dédié à l'écran (lot 3.5) — et la GARDE DU JOUR pour le rattrapage
+// des ménages à venir. Se tromper de personne, c'est engager quelqu'un sans son
+// accord — ou laisser un logement sans personne pour le préparer.
 //
 // Trois données viennent du client — le prestataire, les biens, les rangs — et
 // aucune ne dit à quel compte elle appartient (REVIEW.md règle 11).
@@ -26,8 +27,8 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      biens = [{ provider_property_id: '209413' }, { provider_property_id: '169567' }],
                      apres = [], erreurBiens = null,
                      profilsLien = [], tokens = [], erreurTokens = null,
-                     rattrapables = [] } = {}) {
-  const etat = { upserts: [], majs: [], requetes: [], journal: [] }
+                     aRattraper = [], rattrapables = [] } = {}) {
+  const etat = { upserts: [], majs: [], requetes: [], journal: [], notifs: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
                                        : { data: null, error: { message: 'x' } }) },
@@ -38,9 +39,17 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         select () { return chain },
         eq (c, v) { a.f[c] = v; return chain },
         neq () { return chain }, in () { return chain }, is () { return chain },
-        gte () { return chain }, lte () { return chain },
+        gte () { return chain }, lte () { return chain }, or () { return chain },
         not (c, op, v) { a.not = { c, op, v }; return chain },
-        order () { return chain }, limit () { return Promise.resolve({ data: [], error: null }) },
+        order () { return chain },
+        // Les disponibilités se lisent paginées : première page pleine, puis vide.
+        range (from) { return Promise.resolve({ data: [], error: null }) },
+        // ⚠ Le rattrapage LIT les ménages à reprendre avant de les écrire : un
+        // double qui rendait toujours une liste vide ne testait plus rien.
+        limit () {
+          if (table === 'menages') return Promise.resolve({ data: aRattraper, error: null })
+          return Promise.resolve({ data: [], error: null })
+        },
         upsert (rows, opts) { etat.upserts.push({ table, rows, opts }); return Promise.resolve({ error: null }) },
         insert (rows) { etat.journal.push(...[].concat(rows)); return Promise.resolve({ error: null }) },
         update (row) {
@@ -95,6 +104,17 @@ function preparer ({ user = PROD, profil = null, permissions = null,
   const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
+  // ⚠ Le rattrapage NOTIFIE les propositions qu'il pose : sans ce double, un
+  // test qui donnerait un téléphone à la fixture enverrait un vrai SMS.
+  const absPresta = require.resolve(path.join(__dirname, '..', 'lib/cleaning/notifier-prestataire.js'))
+  const mp = new Module(absPresta)
+  mp.exports = {
+    notifierProposition: async (o) => { etat.notifs.push(o); return { sms: true, email: false } },
+    notifierAssignation: async (o) => { etat.notifs.push({ ...o, assignation: true }); return { sms: false, email: false } },
+    jourLisible: d => String(d)
+  }
+  mp.loaded = true
+  require.cache[absPresta] = mp
   for (const mod of ['../lib/require-permission', '../lib/permissions', '../api/menages']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
@@ -239,11 +259,22 @@ test('un bien sans référente est SIGNALÉ, et l\'écriture passe quand même',
   assert.deepStrictEqual(res.body.sans_referent, ['209413'])
 })
 
-test('un bien qui garde une référente n\'est pas signalé', async () => {
-  const { handler } = preparer({ apres: [{ property_id: '209413', rang: 1 }] })
+test('un bien qui garde quelqu\'un D\'OFFICE n\'est pas signalé', async () => {
+  // ⚠ Le critère est `requires_ack`, plus le rang (§12.3) : un bien dont le
+  // rang 1 doit confirmer n'a personne d'office, et l'ancien test le déclarait
+  // pourtant couvert.
+  const { handler } = preparer({ apres: [{ property_id: '209413', rang: 1, requires_ack: false }] })
   const res = reponse()
   await handler(post(CORPS), res)
   assert.deepStrictEqual(res.body.sans_referent, [])
+})
+
+test('un rang 1 qui DOIT CONFIRMER est signalé comme les autres', async () => {
+  // Personne d'office sur ce bien : ses ménages y seront seulement proposés.
+  const { handler } = preparer({ apres: [{ property_id: '209413', rang: 1, requires_ack: true }] })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.deepStrictEqual(res.body.sans_referent, ['209413'])
 })
 
 test('un bien SANS aucune liaison n\'est pas signalé non plus', async () => {
@@ -431,10 +462,15 @@ test('le rapprochement est cloisonné par compte', async () => {
 // venait d'être posée, son planning était vide, et il fallait deviner qu'il
 // suffisait d'attendre.
 
-test('poser une référente rattrape les ménages À VENIR sans personne', async () => {
+const MENAGE = (over = {}) => ({ id: 'm1', user_id: PROD, property_id: '209413',
+                                 departure_date: '2099-09-05', ...over })
+
+test('poser quelqu\'un D\'OFFICE rattrape les ménages À VENIR sans personne', async () => {
   const { handler, etat } = preparer({
-    apres: [{ property_id: '209413', provider_id: MARIE, rang: 1 }],
-    rattrapables: [{ id: 'm1', user_id: PROD }, { id: 'm2', user_id: PROD }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: false }],
+    aRattraper: [MENAGE(), MENAGE({ id: 'm2' })],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' },
+                   { id: 'm2', user_id: PROD, departure_date: '2099-09-05' }]
   })
   const res = reponse()
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), res)
@@ -442,58 +478,128 @@ test('poser une référente rattrape les ménages À VENIR sans personne', async
   const maj = etat.majs.find(m => m.row && m.row.status === 'accepted')
   assert.ok(maj, 'les ménages doivent être assignés')
   assert.strictEqual(maj.row.provider_id, MARIE)
-  assert.ok(maj.row.accepted_at, 'le référent est engagé d\'office')
+  assert.ok(maj.row.accepted_at, 'elle est engagée d\'office')
+  assert.strictEqual(maj.row.assignment_mode, 'garde',
+    'décidé par la garde du jour, jamais par le mode `priorite` d\'avant')
 })
 
 test('le rattrapage ne touche NI le passé, NI ce qui est déjà assigné', async () => {
   // ⚠ Réécrire le passé attribuerait à quelqu'un un travail qu'il n'a pas fait —
   // et l'attribution des remarques de propreté suit cette même assignation.
+  // ⚠ Les mêmes conditions sont POSÉES DANS L'UPDATE : entre la lecture et
+  // l'écriture, le cron a pu assigner ces ménages.
   const { handler, etat } = preparer({
-    apres: [{ property_id: '209413', provider_id: MARIE, rang: 1 }],
-    rattrapables: [{ id: 'm1', user_id: PROD }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: false }],
+    aRattraper: [MENAGE()],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' }]
   })
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
+  const lecture = etat.requetes.filter(r => r.table === 'menages').pop()
+  assert.ok(lecture, 'les ménages à reprendre sont lus avant d\'être écrits')
   const maj = etat.majs.find(m => m.row && m.row.status === 'accepted')
-  const auj = new Date().toISOString().slice(0, 10)
-  assert.strictEqual(maj.f.departure_date_gte, auj, 'borné à aujourd\'hui')
-  assert.strictEqual(maj.f.status, 'unassigned', 'et aux ménages sans personne')
+  assert.strictEqual(maj.f.status, 'unassigned', 'seuls les ménages sans personne')
   assert.strictEqual(maj.f.provider_id_is, null, 'qui n\'ont vraiment personne')
+  assert.strictEqual(maj.f.offered_to_is, null, 'et sur lesquels rien n\'est proposé')
 })
 
 test('un ménage REFUSÉ ou VERROUILLÉ n\'est pas rattrapé', async () => {
-  // La condition `status='unassigned'` les exclut : `orphaned` est un refus,
-  // `assigned_by='manual'` une décision de l'hôte. Ni l'un ni l'autre ne se
-  // défait par un geste de configuration.
+  // `orphaned` est un refus, `assigned_by='manual'` une décision de l'hôte. Ni
+  // l'un ni l'autre ne se défait par un geste de configuration.
+  // ⚠ `assigned_by` NULL doit PASSER : un ménage créé sans aucune liaison le
+  // porte, et `.neq('assigned_by','manual')` l'aurait écarté — précisément le
+  // cas que ce rattrapage existe pour traiter.
   const { handler, etat } = preparer({
-    apres: [{ property_id: '209413', provider_id: MARIE, rang: 1 }],
-    rattrapables: []
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: false }],
+    aRattraper: [], rattrapables: []
   })
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
-  const maj = etat.majs.find(m => m.row && m.row.status === 'accepted')
-  assert.strictEqual(maj.f.status, 'unassigned',
-    'seuls les ménages sans personne sont repris — pas les orphaned, pas les manuels')
+  const source = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'api/menages.js'), 'utf8')
+  assert.ok(source.includes("assigned_by.is.null,assigned_by.neq.manual"),
+    'le filtre doit laisser passer `assigned_by` NULL et écarter les manuels')
+  assert.ok(source.includes(".eq('status', 'unassigned')"),
+    'et ne reprendre que les ménages sans personne — jamais un `orphaned`')
 })
 
-test('un SUPPLÉANT rattrape en « offered », pas en « accepted »', async () => {
-  // Le rang décide de l'engagement, ici comme partout ailleurs.
+test('quelqu\'un qui DOIT CONFIRMER rattrape en « offered », pas en « accepted »', async () => {
+  // ⚠ C'est `requires_ack`, pas le rang : un rang 1 qui doit confirmer reçoit
+  // une proposition, et le ménage reste sans porteur en attendant sa réponse.
   const { handler, etat } = preparer({
-    apres: [{ property_id: '209413', provider_id: MARIE, rang: 2 }],
-    rattrapables: [{ id: 'm1', user_id: PROD }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true }],
+    // ⚠ Départ PROCHE : hors de la fenêtre de proposition, rien ne serait
+    // proposé — une offre posée six mois à l'avance expirerait en 48 h.
+    aRattraper: [MENAGE({ departure_date: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) })],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2026-09-05' }]
   })
-  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 2 }] }), reponse())
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
   const maj = etat.majs.find(m => m.row && (m.row.status === 'offered' || m.row.status === 'accepted'))
   assert.strictEqual(maj.row.status, 'offered')
-  assert.ok(maj.row.offered_at)
+  assert.strictEqual(maj.row.offered_to, MARIE)
+  assert.ok(maj.row.offer_expires_at, 'une proposition sans échéance est refusée par la base')
   assert.strictEqual(maj.row.accepted_at, null)
 })
 
-test('le rattrapage vise le RÉFÉRENT du bien, pas l\'appelant', async () => {
-  // Si quelqu'un d'autre est déjà rang 1, c'est lui qui prend les ménages —
-  // même si c'est la fiche d'une suppléante qu'on enregistre.
+test('la proposition posée par le rattrapage est NOTIFIÉE', async () => {
+  // ⚠ Le cron ne repassera pas dessus — l'offre y est déjà posée — donc c'est
+  // ici ou nulle part. Une proposition muette expire sans que la personne ait su
+  // qu'on lui demandait quelque chose.
   const { handler, etat } = preparer({
-    apres: [{ property_id: '209413', provider_id: 'p-regina', rang: 1 },
-            { property_id: '209413', provider_id: MARIE, rang: 2 }],
-    rattrapables: [{ id: 'm1', user_id: PROD }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true }],
+    aRattraper: [MENAGE({ departure_date: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) })],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2026-09-05' }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
+  assert.strictEqual(etat.notifs.length, 1)
+  assert.strictEqual(etat.notifs[0].providerId, MARIE)
+  assert.ok(etat.notifs[0].expireLe, 'le délai de réponse est dans le message')
+})
+
+test('le SMS de proposition nomme LE BON bien', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. Le groupe est indexé par (destination, échéance)
+  // et PAS par bien : deux biens tombent dans le même groupe dès que la même
+  // personne est retenue avec la même échéance — le cas nominal quand l'hôte lie
+  // une prestataire à plusieurs biens d'un coup. Notifier avec le bien du premier
+  // ménage du lot annonçait « Appartement A » pour un ménage de l'Appartement B.
+  const proche = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10)
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true },
+            { user_id: PROD, property_id: '169567', provider_id: MARIE, rang: 1, requires_ack: true }],
+    aRattraper: [MENAGE({ departure_date: proche }),
+                 MENAGE({ id: 'm2', property_id: '169567', departure_date: proche })],
+    rattrapables: [{ id: 'm1', user_id: PROD, property_id: '209413', departure_date: proche },
+                   { id: 'm2', user_id: PROD, property_id: '169567', departure_date: proche }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1 }, { property_id: '169567', rang: 1 }
+  ] }), reponse())
+  const biens = etat.notifs.map(n => n.propertyId).sort()
+  assert.deepStrictEqual(biens, ['169567', '209413'],
+    'chaque personne prévenue doit l\'être pour SON bien')
+})
+
+test('un départ LOINTAIN n\'est pas proposé : le cron le fera à son heure', async () => {
+  // ⚠ Une proposition expire en 48 h : posée à six mois, elle serait morte avant
+  // le séjour, et la responsable du jour n'aurait plus jamais l'occasion de
+  // prendre ce ménage.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true }],
+    aRattraper: [MENAGE({ departure_date: '2099-09-05' })],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' }]
+  })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), res)
+  assert.strictEqual(res.body.rattrapes, 0, 'rien à écrire : ni porteuse, ni proposition due')
+  assert.strictEqual(etat.journal.length, 0)
+})
+
+test('le rattrapage vise QUI EST DE GARDE, pas l\'appelant', async () => {
+  // Si quelqu'un d'autre est assigné d'office sur ce bien, c'est lui qui prend
+  // les ménages — même si c'est la fiche d'une suppléante qu'on enregistre.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: 'p-regina', rang: 1, requires_ack: false },
+            { user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true }],
+    aRattraper: [MENAGE()],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' }]
   })
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 2 }] }), reponse())
   const maj = etat.majs.find(m => m.row && m.row.provider_id)
@@ -503,13 +609,65 @@ test('le rattrapage vise le RÉFÉRENT du bien, pas l\'appelant', async () => {
 
 test('chaque ménage rattrapé laisse une trace au journal', async () => {
   const { handler, etat } = preparer({
-    apres: [{ property_id: '209413', provider_id: MARIE, rang: 1 }],
-    rattrapables: [{ id: 'm1', user_id: PROD }, { id: 'm2', user_id: PROD }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: false }],
+    aRattraper: [MENAGE(), MENAGE({ id: 'm2' })],
+    rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' },
+                   { id: 'm2', user_id: PROD, departure_date: '2099-09-05' }]
   })
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
   const lignes = etat.journal.filter(l => l.event === 'assigned')
   assert.strictEqual(lignes.length, 2)
   assert.ok(lignes.every(l => l.actor === 'host'))
+})
+
+test('`requires_ack` est POSÉ à la création de la liaison', async () => {
+  // ⚠ Il vaut `true` par défaut en base : sans cette écriture, une prestataire
+  // que l'hôte vient de désigner comme référente ne portait plus rien d'office —
+  // ses ménages lui étaient seulement PROPOSÉS, et restaient sans personne si
+  // elle ne répondait pas.
+  const { handler, etat } = preparer({})
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1 }, { property_id: '169567', rang: 2 }
+  ] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.strictEqual(up.rows.find(r => r.property_id === '209413').requires_ack, false)
+  assert.strictEqual(up.rows.find(r => r.property_id === '169567').requires_ack, true)
+})
+
+test('PROMOUVOIR quelqu\'un en rang 1 la rend bien « d\'office »', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. Conserver le `requires_ack` de toute liaison
+  // existante rendait la promotion IMPOSSIBLE : échanger les rangs de deux
+  // personnes ne changeait rien, la nouvelle rang 1 restait « à confirmer », et
+  // aucun écran n'expose `requires_ack` pour corriger (lot 3.5).
+  // Le rang envoyé est une INTENTION : quand il bouge, il retranche.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.strictEqual(up.rows[0].requires_ack, false, 'promue : elle porte d\'office')
+})
+
+test('RÉTROGRADER quelqu\'un lui rend la confirmation', async () => {
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: false }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 2 }] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.strictEqual(up.rows[0].requires_ack, true)
+})
+
+test('une liaison EXISTANTE au MÊME rang garde son `requires_ack`', async () => {
+  // ⚠ Une suppléante rodée passée d'office sans être promue rang 1 serait
+  // écrasée à chaque enregistrement de la fiche, et personne ne comprendrait
+  // pourquoi elle redemande confirmation.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: false }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 2 }] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.strictEqual(up.rows[0].requires_ack, false,
+    'rang inchangé : un réglage fin n\'est pas écrasé par un simple enregistrement')
 })
 
 test('retirer un bien ne rattrape rien', async () => {

@@ -25,7 +25,7 @@ function preparer ({ user = PROD, profil = null, permissions = null, compteAtten
                      dateAttendue = LOIN, notifJette = false,
                      prestataire = { id: REGINA, first_name: 'Régina', active: true },
                      menage = { id: 'm1', provider_id: null, status: 'unassigned' },
-                     liaison = { rang: 1 }, erreurProfil = null, erreurLiaison = null } = {}) {
+                     liaison = { rang: 1, requires_ack: false }, erreurProfil = null, erreurLiaison = null } = {}) {
   const etat = { majs: [], journal: [], requetes: [], notifs: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -211,8 +211,8 @@ test('PANNE de vérification : 503, jamais une assignation à l\'aveugle', async
 
 // ─── La règle d'engagement s'applique aussi à la main ──────────────────────
 
-test('réassigner vers le RÉFÉRENT l\'engage d\'office', async () => {
-  const { handler, etat } = preparer({ liaison: { rang: 1 } })
+test('réassigner vers quelqu\'un D\'OFFICE l\'engage tout de suite', async () => {
+  const { handler, etat } = preparer({ liaison: { rang: 1, requires_ack: false } })
   const res = reponse()
   await handler(post(CORPS), res)
   assert.strictEqual(res.body.status, 'accepted')
@@ -225,7 +225,7 @@ test('proposer à un SUPPLÉANT ne retire RIEN à la porteuse', async () => {
   // planning de la référente pendant tout le temps de la réflexion : un logement
   // pouvait n'être couvert par personne sans que personne ne le sache.
   const { handler, etat } = preparer({
-    liaison: { rang: 2 },
+    liaison: { rang: 2, requires_ack: true },
     menage: { id: 'm1', provider_id: REGINA, status: 'accepted' }
   })
   const res = reponse()
@@ -243,7 +243,7 @@ test('proposer À LA DERNIÈRE MINUTE reste possible', async () => {
   // partie du métier, et refuser la proposition obligeait l'hôte à engager
   // quelqu'un sans son accord alors qu'un simple oui aurait suffi.
   const demain = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-  const { handler, etat } = preparer({ liaison: { rang: 2 }, dateAttendue: demain })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true }, dateAttendue: demain })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: demain }), res)
   assert.strictEqual(res.code, 200)
@@ -263,9 +263,9 @@ test('un prestataire sans liaison sur ce bien reçoit une PROPOSITION', async ()
   assert.strictEqual(etat.majs[0].row.provider_id, undefined)
 })
 
-test('réassigner vers le RÉFÉRENT efface une proposition en cours', async () => {
+test('réassigner vers la PORTEUSE efface une proposition en cours', async () => {
   // L'hôte a tranché : la sollicitation n'a plus lieu d'être.
-  const { handler, etat } = preparer({ liaison: { rang: 1 } })
+  const { handler, etat } = preparer({ liaison: { rang: 1, requires_ack: false } })
   await handler(post(CORPS), reponse())
   assert.strictEqual(etat.majs[0].row.offered_to, null)
   assert.strictEqual(etat.majs[0].row.offer_expires_at, null)
@@ -355,8 +355,8 @@ test('un ménage ANNULÉ ne se réassigne pas', async () => {
   assert.strictEqual(etat.majs.length, 0)
 })
 
-test('PANNE de lecture de la liaison : 503, jamais une référente dégradée', async () => {
-  // Ignorer cette erreur transformait silencieusement une référente en
+test('PANNE de lecture de la liaison : 503, jamais une porteuse dégradée', async () => {
+  // Ignorer cette erreur transformait silencieusement une personne d'office en
   // suppléante : elle recevait une offre à confirmer pour un ménage qui aurait
   // dû lui être attribué d'office.
   const { handler, etat } = preparer({ liaison: null, erreurLiaison: { message: 'timeout' } })
@@ -393,7 +393,7 @@ test('re-choisir la PORTEUSE retire la proposition, sans la déloger', async () 
 // doit rester un choix explicite.
 
 test('mode `assigner` : transfert IMMÉDIAT, même vers une suppléante', async () => {
-  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
   assert.strictEqual(res.body.status, 'accepted')
@@ -405,7 +405,7 @@ test('mode `assigner` : transfert IMMÉDIAT, même vers une suppléante', async 
 test('mode `assigner` : AUCUNE limite de délai', async () => {
   // ⚠ C'est tout l'objet du geste. La proposition, elle, garde son échéance.
   const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-  const { handler, etat } = preparer({ liaison: { rang: 2 }, dateAttendue: hier })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true }, dateAttendue: hier })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: hier, mode: 'assigner' }), res)
   assert.strictEqual(res.code, 200)
@@ -415,7 +415,7 @@ test('mode `assigner` : AUCUNE limite de délai', async () => {
 test('le DÉFAUT reste `proposer` : on n\'engage personne par accident', async () => {
   // Un corps sans `mode` ne doit pas transférer : engager quelqu'un sans son
   // accord doit rester un choix explicite.
-  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
   await handler(post({ ...CORPS, provider_id: NOUVELLE }), reponse())
   assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
   assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur ne bouge pas')
@@ -424,15 +424,16 @@ test('le DÉFAUT reste `proposer` : on n\'engage personne par accident', async (
 test('un mode inconnu retombe sur `proposer`, jamais sur `assigner`', async () => {
   // Le repli sûr est celui qui n'engage personne.
   for (const mode of ['ASSIGNER', 'forcer', 42, null]) {
-    const { handler, etat } = preparer({ liaison: { rang: 2 } })
+    const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
     await handler(post({ ...CORPS, provider_id: NOUVELLE, mode }), reponse())
     assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE, String(mode))
   }
 })
 
-test('le référent est assigné d\'office même en mode `proposer`', async () => {
-  // C'est le sens de son rang : on ne lui propose pas ce qui lui revient.
-  const { handler, etat } = preparer({ liaison: { rang: 1 } })
+test('`requires_ack = false` est assignée d\'office même en mode `proposer`', async () => {
+  // C'est le sens de `requires_ack = false` : on ne lui PROPOSE pas ce qui lui
+  // revient d'office. Le rang, lui, ne sert plus qu'à départager et à remplacer.
+  const { handler, etat } = preparer({ liaison: { rang: 1, requires_ack: false } })
   await handler(post({ ...CORPS, mode: 'proposer' }), reponse())
   assert.strictEqual(etat.majs[0].row.provider_id, REGINA)
   assert.strictEqual(etat.majs[0].row.offered_to, null)
@@ -444,7 +445,7 @@ test('une assignation directe est NOTIFIÉE, et la réponse dit ce qui est parti
   // le logement n'est pas préparé alors que l'hôte croit l'avoir confié.
   // ⚠ Et on dit ce qui est RÉELLEMENT parti : promettre un SMS qui n'a pas pu
   // partir est pire que ne rien promettre.
-  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
   assert.strictEqual(etat.notifs.length, 1, 'la personne assignée est prévenue')
@@ -454,7 +455,7 @@ test('une assignation directe est NOTIFIÉE, et la réponse dit ce qui est parti
 
 test('une PROPOSITION ne notifie pas par ce canal', async () => {
   // Elle n'engage personne : c'est la PWA qui l'annonce, avec son délai.
-  const { handler, etat } = preparer({ liaison: { rang: 2 } })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'proposer' }), reponse())
   assert.strictEqual(etat.notifs.length, 0)
 })
@@ -462,7 +463,7 @@ test('une PROPOSITION ne notifie pas par ce canal', async () => {
 test('une notification qui ÉCHOUE ne défait pas l\'assignation', async () => {
   // ⚠ L'assignation est déjà écrite : un envoi raté ne doit ni la défaire, ni
   // faire échouer la requête. La vérité reste la base ; le SMS est un rappel.
-  const { handler, etat } = preparer({ liaison: { rang: 2 }, notifJette: true })
+  const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true }, notifJette: true })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
   assert.strictEqual(res.code, 200)
