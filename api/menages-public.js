@@ -700,9 +700,13 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   const { data: maj, error: errMaj } = await supabase.from('menages')
     .update({
       ...(suivante
-        ? { offered_to: suivante.providerId,
-            offered_at: new Date().toISOString(),
-            offer_expires_at: suivante.echeance,
+        ? { // La proposition n'est ecrite QUE s'il y a quelqu'un a solliciter :
+            // une releve peut n'etre qu'une porteuse posee.
+            ...(suivante.providerId
+              ? { offered_to: suivante.providerId,
+                  offered_at: new Date().toISOString(),
+                  offer_expires_at: suivante.echeance }
+              : { offered_to: null, offered_at: null, offer_expires_at: null }),
             // ⚠ Trois etats possibles, et un seul est faux :
             //   - quelqu'un porte deja : son statut ne bouge pas, la proposition
             //     vit A COTE ;
@@ -713,7 +717,9 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
                   ? { provider_id: suivante.porteuse, status: 'accepted',
                       accepted_at: new Date().toISOString() }
                   : { status: 'offered' })),
-            assignment_reason: `Refuse par ${profil.first_name} : propose a la candidate suivante.` }
+            assignment_reason: suivante.providerId
+              ? `Refuse par ${profil.first_name} : propose a la candidate suivante.`
+              : `Refuse par ${profil.first_name} : repris par la personne de garde ce jour-la.` }
         : { offered_to: null, offered_at: null, offer_expires_at: null,
             ...(porte
               ? { assignment_reason: `Propose a ${profil.first_name}, qui a refuse : reste chez son porteur.` }
@@ -735,7 +741,14 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     from_provider_id: profil.id, actor: 'provider',
     reason: 'Refus depuis la PWA.'
   })
-  if (suivante) {
+  if (suivante && suivante.porteuse) {
+    await supabase.from('menage_assignment_log').insert({
+      user_id: userId, menage_id: menage.id, event: 'assigned',
+      from_provider_id: profil.id, to_provider_id: suivante.porteuse,
+      actor: 'cron', reason: 'Refus : le menage revient a la personne de garde ce jour-la.'
+    })
+  }
+  if (suivante && suivante.providerId) {
     // ⚠ L'ESCALADE EST TRACEE COMME UNE PROPOSITION DE L'AUTOMATE (`actor:'cron'`) :
     // ce n'est pas la personne qui refuse qui a choisi sa remplacante.
     await supabase.from('menage_assignment_log').insert({
@@ -769,7 +782,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // ⚠ UNE ESCALADE REUSSIE N'ALERTE PAS NON PLUS : quelqu'un vient d'etre
   // sollicite, rien n'est decouvert. Si elle ne repond pas, l'expiration
   // reprendra la main — et alertera alors, puisque la file sera epuisee.
-  if (!porte && !suivante) {
+  if (!porte && !(suivante && (suivante.providerId || suivante.porteuse))) {
     try {
       await alertMenageRefuse({
         userId, propertyId: String(propertyId), bookingId,
@@ -777,9 +790,21 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
       })
     } catch (e) { console.error('[menages-public] alerte refus echec:', e.message) }
   }
-  // ⚠ `porte` est la VRAIE information. Le statut en base n'a pas ete touche
-  // quand quelqu'un porte le menage : l'inventer ici ferait mentir la reponse.
-  return res.json({ success: true, porte, escalade: !!suivante })
+  // ⚠ ON NE REND QUE CE QUI S'EST REELLEMENT PASSE — la PWA construit son
+  // message dessus, et le commit c6d0553 a montre ce que coute une promesse
+  // inexacte :
+  //   `porte`    : quelqu'un a la charge du menage a la sortie de ce refus — soit
+  //                depuis toujours, soit parce qu'on vient d'y poser la personne
+  //                de garde du jour ;
+  //   `escalade` : quelqu'un vient d'etre SOLLICITE. Poser une porteuse n'est pas
+  //                une sollicitation : elle n'a rien a repondre.
+  // ⚠ La porteuse posee ici n'est pas notifiee, comme toute assignation decidee
+  // par l'automate : le menage est dans sa PWA, et personne n'attend de reponse.
+  return res.json({
+    success: true,
+    porte: porte || !!(suivante && suivante.porteuse),
+    escalade: !!(suivante && suivante.providerId)
+  })
 }
 
 // Qui prend le relais apres un refus, ce jour-la.
@@ -814,21 +839,30 @@ async function remplacanteApresRefus ({ userId, propertyId, departureDate, menag
       regles: dispos.regles, exceptions: dispos.exceptions
     }
     const choix = deciderParGarde(bien, departureDate, { exclus })
-    if (!choix.offeredTo) return null
+
+    // ⚠ LA PORTEUSE D'OFFICE EST RENDUE MEME SANS PERSONNE A SOLLICITER.
+    // Sortir des qu'il n'y a plus de proposition jetait ce repli — et depuis la
+    // restriction sur les jours attitres, `offeredTo` est nul dans TOUS les cas
+    // reels tant que le lot 3.5 n'existe pas. Un menage que personne ne porte
+    // alors qu'une candidate d'office est la — l'hote vient de la lier, ou son
+    // conge s'est termine — partait donc en `orphaned` + verrou `manual` : plus
+    // aucun chemin ne le reprend (ni le writer, ni la pose differee, ni le
+    // rattrapage), et il reste sans personne pour toujours.
+    const porteuse = porteurId ? null : (choix.providerId || null)
+
     // ⚠ `menages_offre_pas_a_soi` : la responsable du jour peut etre celle qui
     // porte deja le menage. Lui proposer ce qu'elle a deja ferait echouer
-    // l'update — donc le refus lui-meme.
-    if (porteurId && String(choix.offeredTo) === String(porteurId)) return null
+    // l'update — donc le refus lui-meme. Idem si c'est la porteuse qu'on
+    // s'apprete a poser.
+    let proposeeA = choix.offeredTo || null
+    const dejaLa = porteurId || porteuse
+    if (proposeeA && dejaLa && String(proposeeA) === String(dejaLa)) proposeeA = null
+
+    if (!proposeeA && !porteuse) return null
     return {
-      providerId: choix.offeredTo,
-      echeance: echeanceOffre(departureDate),
-      // ⚠ LA PORTEUSE D'OFFICE EST RENDUE AUSSI. Un menage que personne ne porte
-      // alors que la garde du jour designe quelqu'un en `requires_ack = false` —
-      // l'hote vient de la lier, ou son conge s'est termine — repartait avec
-      // `offered_to` renseigne et `provider_id` toujours nul : la candidate
-      // d'office ne le recevait jamais, et la boucle de rattrapage du writer
-      // sautait la ligne puisqu'une proposition y est posee.
-      porteuse: porteurId ? null : (choix.providerId || null)
+      providerId: proposeeA,
+      echeance: proposeeA ? echeanceOffre(departureDate) : null,
+      porteuse
     }
   } catch (e) {
     console.error('[menages-public] calcul de la remplacante echec:', e.message)

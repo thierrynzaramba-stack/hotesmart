@@ -306,6 +306,21 @@ celles placées avant la porteuse. Lire « proposé à la première du classemen
 pied de la lettre ne proposait plus jamais rien sur le seul cas réel du dépôt (Régina est rang 1
 ET d'office) : proposition et escalade seraient nées mortes.
 
+⚠️ **ON NE PROPOSE QU'AUX LIAISONS DONT LES `weekdays` SONT RÉGLÉS** (décision du
+4 septembre 2026, **à revoir au lot 3.5** — spec §12.9c). `weekdays` vide vaut « tous les
+jours », donc sans cette restriction toute liaison « à confirmer » recevrait un SMS **par
+départ**, pour des jours qu'elle n'a jamais déclaré prendre — et aucun écran ne permet encore
+de les régler. La restriction ne porte **que** sur la proposition : la porteuse d'office n'est
+pas concernée (elle ne confirme rien), et Régina, sans `weekdays`, porte comme avant.
+⚠️ L'alerte part **aussi pour un ménage déjà en base**, pas seulement à la création : un départ
+lointain devenu proche, un congé posé depuis, une restriction introduite après — sans quoi le
+ménage restait sans personne et sans le moindre signal jusqu'au jour du départ, contre ce que la
+spec et le guide promettent. Un départ **encore lointain**, lui, n'alerte pas : on ne signale un
+manque de réglage que quand il commence à compter.
+⚠️ Quand cela laisse un ménage que **personne ne porte**, l'hôte **est alerté** avec ce motif :
+le silence porte sur le SMS, pas sur un logement sans personne. Statut `unassigned`, jamais
+`orphaned` — le jour où les jours sont réglés, le rattrapage reprend le ménage tout seul.
+
 ⚠️ **La proposition est posée À L'APPROCHE DU DÉPART** (`JOURS_PROPOSITION = 7`), jamais à la
 création d'un départ lointain. Une proposition expire en 48 h : posée six mois à l'avance, elle
 serait morte avant le séjour, la file serait épuisée, et la responsable du jour n'aurait plus
@@ -327,6 +342,13 @@ décision humaine, qu'on ne rouvre pas ; une expiration ne le pose pas — le si
 décision. Trouvé en review : exclure `orphaned` de la pose différée arrêtait l'escalade dans le
 seul cas où elle compte (bien sans personne d'office, deux candidates, la première ne répond
 pas — la seconde n'était jamais sollicitée, et rien ne ressuscite ce statut ailleurs).
+
+⚠️ **Le refus pose la porteuse d'office MÊME quand il n'y a personne à solliciter.** Sortir dès
+qu'aucune proposition n'est possible jetait ce repli — et depuis la restriction sur les jours
+attitrés, c'est le cas de **tous** les biens en production tant que le lot 3.5 n'existe pas. Le
+refus partait alors en `orphaned` + verrou `manual` : plus aucun chemin ne reprend ce ménage (ni
+le writer, ni la pose différée, ni le rattrapage), et le logement reste sans personne pour
+toujours avec une candidate d'office juste à côté. Trouvé en review.
 
 ⚠️ **Le refus pose AUSSI la porteuse d'office quand il y en a une.** Sur un ménage que personne
 ne porte alors que la garde du jour désigne quelqu'un en `requires_ack = false` — l'hôte vient

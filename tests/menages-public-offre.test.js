@@ -18,6 +18,14 @@ const Module = require('node:module')
 
 const U = 'compte-1', TOKEN = 'marie-x', MARIE = 'p-marie', REGINA = 'p-regina'
 
+// ⚠ « ATTITRÉE TOUS LES JOURS », ÉCRIT EXPLICITEMENT. Depuis la restriction du
+// 4 septembre 2026, une liaison qui doit confirmer et dont les `weekdays` ne sont
+// PAS réglés n'est jamais sollicitée — pas de proposition, donc pas de SMS, tant
+// que l'écran du lot 3.5 n'existe pas. Les fixtures qui veulent une proposition
+// doivent donc déclarer leurs jours, comme le fera l'hôte.
+const TOUS_LES_JOURS = [0, 1, 2, 3, 4, 5, 6]
+
+
 function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      menage = { id: 'm1', provider_id: REGINA, offered_to: MARIE, status: 'accepted' },
                      majTouche = true, erreurMaj = null, erreurMenage = null,
@@ -259,8 +267,8 @@ test('le refus est atomique : il ne touche que SA proposition', async () => {
 const TROISIEME = 'p-troisieme'
 const LIAISONS_TROIS = [
   { user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false, active: true },
-  { user_id: U, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, active: true },
-  { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 3, requires_ack: true, active: true }
+  { user_id: U, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+  { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 3, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
 ]
 
 test('refuser : la REMPLAÇANTE du jour prend le relais, dans le même écrit', async () => {
@@ -296,8 +304,8 @@ test('une escalade réussie N\'ALERTE PAS l\'hôte', async () => {
   const etat = preparer({
     menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
     liaisons: [
-      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, active: true },
-      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, active: true }
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
     ]
   })
   const handler = require('../api/menages-public')
@@ -315,7 +323,7 @@ test('personne d\'AUTRE : on retombe sur le modèle parallèle, sans boucle', as
   // épuisée. Lui reproposer serait une boucle dont personne ne sortirait.
   const etat = preparer({ liaisons: [
     { user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false, active: true },
-    { user_id: U, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, active: true }
+    { user_id: U, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
   ] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -359,8 +367,8 @@ test('la remplaçante n\'est JAMAIS la porteuse (contrainte `offre_pas_a_soi`)',
   const etat = preparer({
     menage: { id: 'm1', provider_id: TROISIEME, offered_to: MARIE, status: 'accepted' },
     liaisons: [
-      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, active: true },
-      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, active: true }
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
     ]
   })
   const handler = require('../api/menages-public')
@@ -380,9 +388,9 @@ test('escalade sur un ménage SANS porteur : la candidate d\'office est posée',
   const etat = preparer({
     menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
     liaisons: [
-      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, active: true },
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
       { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, requires_ack: false, active: true },
-      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 3, requires_ack: true, active: true }
+      { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 3, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
     ]
   })
   const handler = require('../api/menages-public')
@@ -393,6 +401,53 @@ test('escalade sur un ménage SANS porteur : la candidate d\'office est posée',
   assert.strictEqual(maj.row.status, 'accepted')
   assert.ok(maj.row.accepted_at)
   assert.strictEqual(maj.row.offered_to, TROISIEME, 'et la suivante est sollicitée à côté')
+})
+
+test('SANS aucun jour réglé — l\'état réel de la prod — la porteuse est quand même posée', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `remplacanteApresRefus` sortait dès qu'il n'y
+  // avait personne à SOLLICITER — or depuis la restriction sur les jours
+  // attitrés, c'est le cas de TOUS les biens en production tant que l'écran du
+  // lot 3.5 n'existe pas. Le repli sur la porteuse d'office était donc mort, et
+  // le refus partait en `orphaned` + verrou `manual` : plus aucun chemin ne
+  // reprend ce ménage — ni le writer, ni la pose différée, ni le rattrapage — et
+  // le logement reste sans personne pour toujours, avec une candidate d'office
+  // juste à côté.
+  const etat = preparer({
+    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    liaisons: [
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, weekdays: null, requires_ack: true, active: true },
+      { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, weekdays: null, requires_ack: false, active: true }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.provider_id, REGINA, 'la personne de garde reprend le ménage')
+  assert.strictEqual(maj.row.status, 'accepted')
+  assert.strictEqual(maj.row.offered_to, null, 'personne à solliciter : aucune offre posée')
+  assert.notStrictEqual(maj.row.assigned_by, 'manual', 'et surtout : AUCUN verrou')
+  assert.strictEqual(res.body.porte, true, 'quelqu\'un a la charge du ménage')
+  assert.strictEqual(res.body.escalade, false, 'mais personne n\'a été sollicité')
+  assert.strictEqual(etat.incidents.length, 0, 'donc aucune alerte : rien n\'est découvert')
+  assert.ok(etat.journal.find(l => l.event === 'assigned' && l.to_provider_id === REGINA))
+})
+
+test('ni porteuse ni personne à solliciter : là, le verrou et l\'alerte', async () => {
+  const etat = preparer({
+    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    liaisons: [
+      { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, weekdays: null, requires_ack: true, active: true }
+    ]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.status, 'orphaned')
+  assert.strictEqual(maj.row.assigned_by, 'manual', 'une décision humaine est attendue')
+  assert.strictEqual(res.body.porte, false)
+  assert.strictEqual(etat.incidents.length, 1, 'l\'hôte doit trancher')
 })
 
 test('la PWA ne promet pas une alerte que le serveur n\'envoie pas', async () => {

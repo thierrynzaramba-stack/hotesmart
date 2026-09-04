@@ -18,6 +18,14 @@ const path = require('node:path')
 const Module = require('node:module')
 
 const U = 'compte-1', REGINA = 'p-regina', NOUVELLE = 'p-nouvelle'
+
+// ⚠ « ATTITRÉE TOUS LES JOURS », ÉCRIT EXPLICITEMENT. Depuis la restriction du
+// 4 septembre 2026, une liaison qui doit confirmer et dont les `weekdays` ne sont
+// PAS réglés n'est jamais sollicitée — pas de proposition, donc pas de SMS, tant
+// que l'écran du lot 3.5 n'existe pas. Les fixtures qui veulent une proposition
+// doivent donc déclarer leurs jours, comme le fera l'hôte.
+const TOUS_LES_JOURS = [0, 1, 2, 3, 4, 5, 6]
+
 const MODULES = ['../lib/cleaning/sync-menages-entite', '../lib/cleaning/assign',
                  '../lib/cleaning/notifier-prestataire',
                  '../lib/founder-notify', '../lib/cron-shared']
@@ -201,7 +209,7 @@ test('le référent est assigné d\'office : le ménage naît accepté', async (
 
 test('le suppléant reçoit une OFFRE, il n\'est pas engagé', async () => {
   const etat = preparer({ snaps: [SNAP()],
-    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2, requires_ack: true }] })
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS }] })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   await synchroniserMenages()
   assert.strictEqual(etat.inseres[0].status, 'offered')
@@ -763,7 +771,7 @@ test('le rattrapage PROPOSE quand le bien n\'a qu\'un suppléant', async () => {
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
                 departure_date: '2026-09-05', status: 'unassigned',
                 provider_id: null, offered_to: null, assigned_by: null }],
-    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2, requires_ack: true }]
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
@@ -1037,8 +1045,8 @@ test('un ménage ORPHELIN par EXPIRATION est bien escaladé', async () => {
   // seconde n'était jamais sollicitée alors qu'elle est attitrée et disponible.
   const etat = preparer({
     liaisons: [
-      { user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 1, requires_ack: true, active: true },
-      { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, requires_ack: true, active: true }
+      { user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+      { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
     ],
     refus: [{ menage_id: 'm1', from_provider_id: NOUVELLE, event: 'expired' }],
     propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
@@ -1074,4 +1082,93 @@ test('les disponibilités se lisent PAGINÉES, elles ne coupent plus le cycle', 
   assert.ok(!source.includes('lecture tronquee a'), 'plus de levée sur une page pleine')
   assert.ok(source.includes("lireTout(() => sb.from('menage_assignment_log')"),
     'le journal aussi : une refusante manquée relance un SMS toutes les 48 h')
+})
+
+// ─── La restriction du 4 septembre, vue du writer ─────────────────────────
+
+test('sans jours attitrés réglés : aucune proposition posée, aucun SMS', async () => {
+  // ⚠ Restriction du product owner (à revoir au lot 3.5). Une liaison qui doit
+  // confirmer et dont les `weekdays` ne sont pas réglés n'est jamais sollicitée :
+  // sinon elle recevrait un SMS par départ, sur la clé Brevo de l'hôte, pour des
+  // jours qu'elle n'a jamais déclaré prendre.
+  const etat = preparer({
+    liaisons: [
+      { user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, weekdays: null, requires_ack: false, active: true },
+      { user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2, weekdays: null, requires_ack: true, active: true }
+    ],
+    propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                     departure_date: '2026-09-05', provider_id: REGINA, status: 'accepted' }]
+  })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(bilan.proposees, 0)
+  assert.strictEqual(etat.notifs.length, 0, 'aucun SMS')
+  assert.strictEqual(etat.majs.length, 0, 'et le ménage reste chez sa porteuse, intact')
+})
+
+test('la porteuse d\'office N\'EST PAS concernée par la restriction', async () => {
+  // Régina n'a pas de `weekdays` et n'en aura pas : elle ne confirme rien, elle
+  // porte. Le lui retirer aurait vidé le planning au déploiement.
+  const etat = preparer({
+    snaps: [SNAP({ departure: '2026-09-05' })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1,
+                 weekdays: null, requires_ack: false, active: true }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, { maintenant: T0 })
+  assert.strictEqual(etat.inseres[0].provider_id, REGINA)
+  assert.strictEqual(bilan.alertes, 0)
+})
+
+test('personne d\'office et aucun jour réglé : le ménage n\'est pas SILENCIEUX', async () => {
+  // ⚠ Le silence voulu porte sur le SMS, pas sur un logement sans personne.
+  // L'hôte est alerté, avec le motif exact — c'est ce qui lui dit quoi régler.
+  const etat = preparer({
+    snaps: [SNAP({ departure: '2026-09-05' })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 1,
+                 weekdays: null, requires_ack: true, active: true }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, { maintenant: T0 })
+  assert.strictEqual(etat.inseres[0].provider_id, null)
+  assert.strictEqual(etat.inseres[0].offered_to, null)
+  assert.strictEqual(etat.inseres[0].status, 'unassigned')
+  assert.strictEqual(bilan.alertes, 1)
+  assert.match(etat.incidents[0].detail.message, /jours attitres regles/)
+})
+
+test('un ménage DÉJÀ EN BASE sans personne alerte lui aussi', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. L'alerte n'était poussée que dans la boucle de
+  // création : un ménage créé avant que le problème n'apparaisse — un départ
+  // lointain devenu proche, un congé posé depuis — restait sans personne et sans
+  // le moindre signal jusqu'au jour du départ, alors que la spec et le guide
+  // promettent à l'hôte qu'il sera prévenu.
+  const etat = preparer({
+    snaps: [SNAP({ departure: '2026-09-05' })],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-09-05', status: 'unassigned', provider_id: null,
+                offered_to: null, assigned_by: 'auto' }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 1,
+                 weekdays: null, requires_ack: true, active: true }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, { maintenant: T0 })
+  assert.strictEqual(bilan.alertes, 1)
+  assert.match(etat.incidents[0].detail.message, /jours attitres regles/)
+})
+
+test('un départ LOINTAIN bridé n\'alerte pas : il attend son heure', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `differee` était calculé APRÈS le filtre des
+  // jours : un départ à cinq mois tombait dans la branche « bridée » et alertait
+  // dès la création, au lieu d'attendre en silence que la date approche. On ne
+  // signale un manque de réglage que quand il commence à compter.
+  const etat = preparer({
+    snaps: [SNAP({ departure: '2026-11-14' })],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 1,
+                 weekdays: null, requires_ack: true, active: true }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, { maintenant: T0 })
+  assert.strictEqual(bilan.alertes, 0)
+  assert.strictEqual(etat.inseres[0].status, 'unassigned')
 })

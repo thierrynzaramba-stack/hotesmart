@@ -21,6 +21,14 @@ const {
 const { construireRrule, indexerParPrestataire } = require('../lib/cleaning/availability')
 
 const COMPTE = 'u-thierry'
+
+// ⚠ « ATTITRÉE TOUS LES JOURS », ÉCRIT EXPLICITEMENT. Depuis la restriction du
+// 4 septembre 2026, une liaison qui doit confirmer et dont les `weekdays` ne sont
+// PAS réglés n'est jamais sollicitée — pas de proposition, donc pas de SMS, tant
+// que l'écran du lot 3.5 n'existe pas. Les fixtures qui veulent une proposition
+// doivent donc déclarer leurs jours, comme le fera l'hôte.
+const TOUS_LES_JOURS = [0, 1, 2, 3, 4, 5, 6]
+
 const REGINA = 'p-regina', SECONDE = 'p-seconde', TROISIEME = 'p-troisieme'
 
 // ─── LE CAS RÉEL DE BAGNÈRES-DE-BIGORRE ────────────────────────────────────
@@ -127,7 +135,7 @@ test('une personne d\'office en rang 2 PORTE, la rang 1 qui confirme est propos�
   // rang 2 était condamnée à confirmer pour toujours ; une seconde rodée ne
   // pouvait être assignée d'office sans la promouvoir devant la titulaire.
   const c = deciderParGarde(bagneres({ liaisons: [
-    { provider_id: SECONDE, rang: 1, requires_ack: true,  active: true },
+    { provider_id: SECONDE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS,  active: true },
     { provider_id: REGINA,  rang: 2, requires_ack: false, active: true }
   ] }), '2026-09-05', { maintenant: AVANT })
   assert.strictEqual(c.providerId, REGINA, 'la première qui n\'a rien à confirmer')
@@ -139,11 +147,61 @@ test('`requires_ack` ABSENT vaut « doit confirmer », jamais « d\'office »', 
   // qu'un appelant a oublié une colonne, ce serait engager quelqu'un sans son
   // accord.
   const c = deciderParGarde(bagneres({ liaisons: [
-    { provider_id: REGINA, rang: 1, active: true }
+    { provider_id: REGINA, rang: 1, weekdays: TOUS_LES_JOURS, active: true }
   ] }), '2026-09-05', { maintenant: AVANT })
-  assert.strictEqual(c.providerId, null)
+  assert.strictEqual(c.providerId, null, 'elle ne porte pas : elle doit confirmer')
   assert.strictEqual(c.offeredTo, REGINA)
   assert.strictEqual(c.status, 'offered')
+})
+
+// ─── LA RESTRICTION DU 4 SEPTEMBRE : PAS DE JOURS RÉGLÉS, PAS DE SOLLICITATION ─
+// ⚠ À REVOIR AU LOT 3.5, quand l'écran permettra de régler ces jours.
+
+test('une liaison SANS jours attitrés n\'est JAMAIS sollicitée', async () => {
+  // ⚠ `weekdays` vide veut dire « attitrée tous les jours » (§12.1) — ce qui,
+  // tant qu'aucun écran ne permet de régler ces jours, ferait recevoir une
+  // proposition à CHAQUE départ, donc un SMS par ménage, à quelqu'un qui n'a
+  // jamais déclaré prendre ces jours-là. Le défaut est le silence.
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: REGINA,  rang: 1, weekdays: null, requires_ack: false, active: true },
+    { provider_id: SECONDE, rang: 2, weekdays: null, requires_ack: true,  active: true }
+  ], regles: [] }), '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, REGINA, 'la porteuse d\'office n\'est PAS concernée')
+  assert.strictEqual(c.offeredTo, null, 'aucune proposition, donc aucun SMS')
+})
+
+test('les jours RÉGLÉS rouvrent la sollicitation, sans rien d\'autre à faire', async () => {
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: REGINA,  rang: 1, weekdays: null,   requires_ack: false, active: true },
+    { provider_id: SECONDE, rang: 2, weekdays: [0, 6], requires_ack: true,  active: true }
+  ], regles: [] }), '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.offeredTo, SECONDE)
+})
+
+test('la restriction ne retire personne des CANDIDATES', async () => {
+  // Elle ne porte que sur la proposition : une liaison sans jours reste attitrée
+  // tous les jours pour tout le reste, et Régina continue de porter ses ménages
+  // exactement comme avant.
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: REGINA, rang: 1, weekdays: null, requires_ack: false, active: true }
+  ], regles: [] }), '2026-09-08', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, REGINA)
+  assert.strictEqual(c.trouDeGarde, false)
+})
+
+test('personne d\'office ET personne aux jours réglés : ce n\'est PAS silencieux', async () => {
+  // ⚠ Le silence voulu porte sur le SMS, pas sur le fait qu'un logement n'a
+  // personne. Sans ce drapeau, un ménage restait sans personne sans que rien ne
+  // le signale — et il n'y avait même pas de trou de garde à voir, puisque des
+  // candidates existent.
+  const c = deciderParGarde(bagneres({ liaisons: [
+    { provider_id: SECONDE, rang: 1, weekdays: null, requires_ack: true, active: true }
+  ], regles: [] }), '2026-09-05', { maintenant: AVANT })
+  assert.strictEqual(c.providerId, null)
+  assert.strictEqual(c.offeredTo, null)
+  assert.strictEqual(c.sansJoursAttitres, true)
+  assert.strictEqual(c.status, 'unassigned',
+    'jamais `orphaned` : rien d\'humain n\'a été décidé, et le rattrapage doit pouvoir reprendre ce ménage')
 })
 
 test('la file de proposition suit le CLASSEMENT DU JOUR, pas la place de la porteuse', async () => {
@@ -154,8 +212,8 @@ test('la file de proposition suit le CLASSEMENT DU JOUR, pas la place de la port
   // seraient nées mortes.
   const bien = bagneres({ liaisons: [
     { provider_id: REGINA,    rang: 1, requires_ack: false, active: true },
-    { provider_id: SECONDE,   rang: 2, requires_ack: true,  active: true },
-    { provider_id: TROISIEME, rang: 3, requires_ack: true,  active: true }
+    { provider_id: SECONDE,   rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS,  active: true },
+    { provider_id: TROISIEME, rang: 3, requires_ack: true, weekdays: TOUS_LES_JOURS,  active: true }
   ], regles: [] })
   const c = deciderParGarde(bien, '2026-09-05', { maintenant: AVANT })
   assert.strictEqual(c.providerId, REGINA)
@@ -172,8 +230,8 @@ test('la file de proposition suit le CLASSEMENT DU JOUR, pas la place de la port
 test('refus de la première : la SUIVANTE de la file est sollicitée', async () => {
   // La file du jour est [seconde, troisième] devant Régina, qui porte.
   const bien = bagneres({ liaisons: [
-    { provider_id: SECONDE,   rang: 1, requires_ack: true,  active: true },
-    { provider_id: TROISIEME, rang: 2, requires_ack: true,  active: true },
+    { provider_id: SECONDE,   rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS,  active: true },
+    { provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS,  active: true },
     { provider_id: REGINA,    rang: 3, requires_ack: false, active: true }
   ], regles: [] })
   const c = deciderParGarde(bien, '2026-09-05', { maintenant: AVANT, exclus: new Set([SECONDE]) })
@@ -185,7 +243,7 @@ test('file ÉPUISÉE : le ménage reste chez sa porteuse, plus rien n\'est propo
   // ⚠ L'escalade se termine d'elle-même. Sans cette borne, on reproposerait
   // indéfiniment à des gens qui ont déjà dit non — toutes les cinq minutes.
   const bien = bagneres({ liaisons: [
-    { provider_id: SECONDE, rang: 1, requires_ack: true,  active: true },
+    { provider_id: SECONDE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS,  active: true },
     { provider_id: REGINA,  rang: 2, requires_ack: false, active: true }
   ], regles: [] })
   const c = deciderParGarde(bien, '2026-09-05', { maintenant: AVANT, exclus: new Set([SECONDE]) })
@@ -197,8 +255,8 @@ test('file ÉPUISÉE : le ménage reste chez sa porteuse, plus rien n\'est propo
 
 test('file épuisée SANS porteuse : `orphaned`, une décision humaine est requise', async () => {
   const bien = bagneres({ liaisons: [
-    { provider_id: SECONDE,   rang: 1, requires_ack: true, active: true },
-    { provider_id: TROISIEME, rang: 2, requires_ack: true, active: true }
+    { provider_id: SECONDE,   rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+    { provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
   ], regles: [] })
   const c = deciderParGarde(bien, '2026-09-05',
     { maintenant: AVANT, exclus: new Set([SECONDE, TROISIEME]) })
@@ -237,7 +295,7 @@ test('un départ lointain SANS porteuse reste `unassigned`, pas `orphaned`', asy
   // Rien n'est perdu : la proposition sera posée quand la date approchera.
   // L'appeler `orphaned` aurait appelé une décision humaine pour rien.
   const c = deciderParGarde(bagneres({ liaisons: [
-    { provider_id: SECONDE, rang: 1, requires_ack: true, active: true }
+    { provider_id: SECONDE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
   ], regles: [] }), '2026-11-14', { maintenant: AVANT })
   assert.strictEqual(c.status, 'unassigned')
   assert.strictEqual(c.differee, true)

@@ -726,6 +726,29 @@ Corollaire : ce même job est le **chemin d'escalade** après une expiration. Le
 escalade tout de suite — dans le même update que le refus, pour qu'il n'existe aucun instant où
 le ménage soit à la fois refusé et sans proposition.
 
+**(c) On ne propose qu'aux liaisons dont les `weekdays` sont explicitement
+réglés** — décision du product owner, 4 septembre 2026, **à revoir au lot 3.5**.
+
+`weekdays` vide vaut « attitrée tous les jours » (§12.1), et c'est ce qui rend le
+modèle rétrocompatible sans migration. Mais tant qu'aucun écran ne permet de
+régler ces jours, **toute** liaison à `requires_ack = true` est candidate à chaque
+départ : elle recevrait une proposition, donc un SMS, par ménage — pour des jours
+qu'elle n'a jamais déclaré prendre. Le défaut est donc le **silence**.
+
+Portée exacte, et elle est étroite :
+- la restriction ne vaut que pour la **proposition**. Elle ne retire personne des
+  candidates : une liaison sans jours reste attitrée tous les jours pour tout le
+  reste, et **la porteuse d'office n'est pas concernée** — elle ne confirme rien.
+  Régina, sans `weekdays`, porte ses ménages exactement comme avant ;
+- ⚠️ quand la restriction laisse un ménage que **personne ne porte** (aucune
+  candidate d'office, et aucune aux jours réglés), l'hôte **est alerté** avec ce
+  motif précis. Le silence porte sur le SMS, pas sur le fait qu'un logement n'a
+  personne — sans cela, un ménage restait sans personne sans que rien ne le
+  signale, et il n'y avait même pas de trou de garde à voir puisque des
+  candidates existent. Le statut reste `unassigned` (jamais `orphaned`, qui
+  verrouille) : le jour où l'hôte règle les jours, le rattrapage du writer
+  reprend ce ménage tout seul, sans geste.
+
 **Le quota reste reporté** — il suppose de compter les ménages réalisés sur 30
 jours par personne et par bien, pour un besoin qui n'existe pas à deux
 prestataires. `quota_share` est déjà en base : aucune migration le jour venu.

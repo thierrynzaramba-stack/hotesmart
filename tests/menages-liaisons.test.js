@@ -22,6 +22,14 @@ const PROD = '11111111-1111-4111-8111-111111111111'
 const MEMBRE = '22222222-2222-4222-8222-222222222222'
 const MARIE = 'bbbb2222-2222-4222-8222-222222222222'
 
+// ⚠ « ATTITRÉE TOUS LES JOURS », ÉCRIT EXPLICITEMENT. Depuis la restriction du
+// 4 septembre 2026, une liaison qui doit confirmer et dont les `weekdays` ne sont
+// PAS réglés n'est jamais sollicitée — pas de proposition, donc pas de SMS, tant
+// que l'écran du lot 3.5 n'existe pas. Les fixtures qui veulent une proposition
+// doivent donc déclarer leurs jours, comme le fera l'hôte.
+const TOUS_LES_JOURS = [0, 1, 2, 3, 4, 5, 6]
+
+
 function preparer ({ user = PROD, profil = null, permissions = null,
                      prestataire = { id: MARIE, first_name: 'Marie', active: true },
                      biens = [{ provider_property_id: '209413' }, { provider_property_id: '169567' }],
@@ -271,7 +279,7 @@ test('un bien qui garde quelqu\'un D\'OFFICE n\'est pas signalé', async () => {
 
 test('un rang 1 qui DOIT CONFIRMER est signalé comme les autres', async () => {
   // Personne d'office sur ce bien : ses ménages y seront seulement proposés.
-  const { handler } = preparer({ apres: [{ property_id: '209413', rang: 1, requires_ack: true }] })
+  const { handler } = preparer({ apres: [{ property_id: '209413', rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS }] })
   const res = reponse()
   await handler(post(CORPS), res)
   assert.deepStrictEqual(res.body.sans_referent, ['209413'])
@@ -525,7 +533,7 @@ test('quelqu\'un qui DOIT CONFIRMER rattrape en « offered », pas en « accepte
   // ⚠ C'est `requires_ack`, pas le rang : un rang 1 qui doit confirmer reçoit
   // une proposition, et le ménage reste sans porteur en attendant sa réponse.
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true }],
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS }],
     // ⚠ Départ PROCHE : hors de la fenêtre de proposition, rien ne serait
     // proposé — une offre posée six mois à l'avance expirerait en 48 h.
     aRattraper: [MENAGE({ departure_date: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) })],
@@ -544,7 +552,7 @@ test('la proposition posée par le rattrapage est NOTIFIÉE', async () => {
   // ici ou nulle part. Une proposition muette expire sans que la personne ait su
   // qu'on lui demandait quelque chose.
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true }],
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS }],
     aRattraper: [MENAGE({ departure_date: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) })],
     rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2026-09-05' }]
   })
@@ -562,8 +570,8 @@ test('le SMS de proposition nomme LE BON bien', async () => {
   // ménage du lot annonçait « Appartement A » pour un ménage de l'Appartement B.
   const proche = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10)
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true },
-            { user_id: PROD, property_id: '169567', provider_id: MARIE, rang: 1, requires_ack: true }],
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS },
+            { user_id: PROD, property_id: '169567', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS }],
     aRattraper: [MENAGE({ departure_date: proche }),
                  MENAGE({ id: 'm2', property_id: '169567', departure_date: proche })],
     rattrapables: [{ id: 'm1', user_id: PROD, property_id: '209413', departure_date: proche },
@@ -582,7 +590,7 @@ test('un départ LOINTAIN n\'est pas proposé : le cron le fera à son heure', a
   // le séjour, et la responsable du jour n'aurait plus jamais l'occasion de
   // prendre ce ménage.
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true }],
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS }],
     aRattraper: [MENAGE({ departure_date: '2099-09-05' })],
     rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' }]
   })
@@ -597,7 +605,7 @@ test('le rattrapage vise QUI EST DE GARDE, pas l\'appelant', async () => {
   // les ménages — même si c'est la fiche d'une suppléante qu'on enregistre.
   const { handler, etat } = preparer({
     apres: [{ user_id: PROD, property_id: '209413', provider_id: 'p-regina', rang: 1, requires_ack: false },
-            { user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true }],
+            { user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS }],
     aRattraper: [MENAGE()],
     rattrapables: [{ id: 'm1', user_id: PROD, departure_date: '2099-09-05' }]
   })
@@ -641,7 +649,7 @@ test('PROMOUVOIR quelqu\'un en rang 1 la rend bien « d\'office »', async () =>
   // aucun écran n'expose `requires_ack` pour corriger (lot 3.5).
   // Le rang envoyé est une INTENTION : quand il bouge, il retranche.
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS }]
   })
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
   const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
