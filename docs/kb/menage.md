@@ -50,6 +50,46 @@ le **dérivait** de `bookings_snapshot.departure`. Conception : `docs/specs/spec
 - **Une réservation annulée ou déplacée** met le ménage en `cancelled` — elle ne le supprime
   pas : une prestataire a pu s'organiser autour, et l'historique de qualité s'appuie dessus.
 
+### Disponibilités (lot 3.1) — la brique, rien de branché
+
+`lib/cleaning/availability.js` répond à une seule question : **cette personne
+est-elle disponible ce jour-là ?** Rien ne la consomme encore.
+
+L'ordre de décision, et il compte :
+1. une **exception** pour ce jour tranche, **dans les deux sens** — c'est ce qui
+   permet de dire « pas ce samedi-là » sans défaire sa récurrence ;
+2. **aucune règle active = disponible**. C'est le cas de Régina, et c'est ce qui
+   rend le système sans effet tant que personne n'a rien déclaré ;
+3. sinon, disponible si au moins une règle couvre ce jour.
+
+⚠️ **Aucune récurrence codée à la main** — la lib `rrule` (RFC 5545). « Les
+week-ends une semaine sur deux » s'écrit `FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU`
+avec un `DTSTART` qui sert d'**ancrage** : c'est lui qui dit quelle semaine est
+« on ». Réimplémenter ça à la main, c'est réimplémenter un calendrier — les
+années bissextiles, les changements d'heure et les semaines à cheval sur deux
+mois s'y cassent en silence. ⚠️ **L'hôte ne voit jamais la chaîne** :
+`construireRrule` la fabrique à partir de cases (jours + cadence + date de
+départ).
+
+⚠️ **Tout est normalisé à MIDI UTC**, jamais minuit : à minuit, le moindre
+décalage de fuseau fait basculer la date d'un jour. Même piège que les dates de
+séjour et le planning, corrigé deux fois avant celui-ci. Convention des jours :
+**0 = dimanche … 6 = samedi**, celle de `weekdays` et de `getUTCDay()`.
+
+⚠️ **Une règle illisible rend INDISPONIBLE**, elle n'est pas ignorée. L'ignorer
+ferait paraître la personne disponible tous les jours : on lui assignerait des
+ménages qu'elle ne peut pas faire, et personne ne le saurait avant le jour J.
+Indisponible, le ménage part ailleurs ou devient non assigné — et là, il y a une
+alerte. Une panne coupe, elle n'ouvre pas.
+⚠️ **Une règle VIDE n'est pas une absence de règle** : le filtre écartait les
+`rrule` vides, si bien qu'une personne dont l'unique règle était corrompue
+retombait sur « aucune règle = disponible » et se voyait attribuer des ménages
+tous les jours. Défaut trouvé en écrivant les tests, pas par une review.
+
+`requires_ack` vit sur la **liaison**, pas sur le rang : une attitrée du week-end
+en rang 2 ne doit pas être condamnée à confirmer pour toujours. Reprise fidèle :
+rang 1 → `false` (d'office, comme aujourd'hui), rang 2+ → `true`.
+
 ### Créer un prestataire (lot 2.5)
 
 ⚠️ **Tout se passe dans `apps/menages/prestataires.html`.** `/settings` ne gère plus les
