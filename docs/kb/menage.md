@@ -151,9 +151,23 @@ un appelant qui se trompe : l'écran affiche une semaine, le moteur un jour. L'i
 d'heure. Une mémoïsation `(personne, jour)` vit **le temps de l'appel seulement** : la garder
 entre deux appels serait la garde stockée que le §12.2 refuse.
 
-### L'écran « Planning de garde » (lot 3.4, 4 septembre 2026)
+### L'écran « Planning » — le calendrier de garde (lot 3.4, 4 septembre 2026)
 
-`apps/menages/garde.html` + `api/garde.js`. Une entrée **Garde** dans la sidebar, sous Ménages.
+`apps/menages/garde.html` + `api/garde.js`.
+
+⚠️ **NOMMAGE, tranché le 5 septembre 2026.** Le sous-menu Ménages dit désormais
+**Ménages · Planning · Prestataires** :
+- **Ménages** (`/apps/menages`) = ce qu'on **fait** — affecter, noter, marquer fait ;
+- **Planning** (`/apps/menages/garde`) = le **calendrier de garde**, cet écran.
+
+Avant, « Planning » désignait l'écran d'affectation et le calendrier s'appelait « Garde » : deux
+plannings, dont aucun ne portait le mot au bon endroit. ⚠️ **Les URL et les clés `activePage`
+n'ont PAS bougé** — un lien envoyé par SMS ou mis en favori doit continuer d'ouvrir la même page ;
+un renommage d'étiquette ne casse pas d'adresse. Un test fige l'ordre et les libellés : un
+renommage partiel recréerait le doublon qu'on vient de lever.
+⚠️ **Dette de nommage assumée** : l'app elle-même s'appelle encore « Gestion ménages »
+(`shared/config.js`), donc la nav lit « Gestion ménages › Ménages ». Redondant, mais changer le
+nom de l'app touche toutes les pages du domaine — à faire dans un lot dédié.
 Il répond à une seule question : **mes logements sont-ils couverts cette semaine ?**
 
 ⚠️ **LA MÊME GRILLE QUE LE CALENDRIER DES RÉSERVATIONS ET TARIFS** (`pages/biens-calendrier.html`),

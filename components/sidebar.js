@@ -275,11 +275,19 @@ function renderApps(activePage) {
         </a>`
     } else if (app.id === 'menages') {
       subMenu = `
+        <!-- ⚠ NOMMAGE TRANCHE LE 5 SEPTEMBRE 2026. « Planning » designait l'ecran
+             d'AFFECTATION, et le calendrier de garde s'appelait « Garde » — deux
+             plannings dont aucun ne portait le mot au bon endroit. Desormais :
+             « Ménages » = ce qu'on fait (affecter, noter, marquer fait),
+             « Planning » = le calendrier de garde.
+             ⚠ Les URL et les cles `activePage` NE BOUGENT PAS : un lien envoye
+             par SMS ou mis en favori doit continuer d'ouvrir la meme page. Un
+             renommage d'etiquette ne casse pas d'adresse. -->
         <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
-          <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Planning
+          <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Ménages
         </a>
         <a class="nav-sub ${activePage === 'menages-garde' ? 'connected' : ''}" href="/apps/menages/garde">
-          <div class="sub-dot ${activePage === 'menages-garde' ? 'green' : 'gray'}"></div>Garde
+          <div class="sub-dot ${activePage === 'menages-garde' ? 'green' : 'gray'}"></div>Planning
         </a>
         ${titulaire ? `
         <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">

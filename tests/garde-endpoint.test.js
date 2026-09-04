@@ -893,3 +893,47 @@ test('sur un jour à PLUSIEURS ménages, la case montre le plus grave', async ()
   assert.match(front, /const GRAVITE = /)
   assert.match(front, /GRAVITE\[e\] > GRAVITE\[etat\]/)
 })
+
+// ─── Le nommage du sous-menu (tranché le 5 septembre 2026) ─────────────────
+
+test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async () => {
+  // ⚠ « Planning » désignait l'écran d'AFFECTATION, et le calendrier de garde
+  // s'appelait « Garde » : deux plannings, dont aucun ne portait le mot au bon
+  // endroit. Décision du product owner — « Ménages » = ce qu'on fait,
+  // « Planning » = le calendrier. Ce test fige l'ordre ET les libellés : un
+  // renommage partiel recréerait le doublon qu'on vient de lever.
+  const sidebar = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
+  const bloc = sidebar.slice(sidebar.indexOf("app.id === 'menages'"),
+                             sidebar.indexOf('return `', sidebar.indexOf("app.id === 'menages'")))
+  const libelles = [...bloc.matchAll(/><\/div>([A-Za-zÀ-ÿ]+)/g)].map(m => m[1])
+  assert.deepStrictEqual(libelles, ['Ménages', 'Planning', 'Prestataires'])
+  // Et chacun pointe où il faut.
+  assert.ok(bloc.indexOf('href="/apps/menages"') < bloc.indexOf('href="/apps/menages/garde"'),
+    '« Ménages » avant « Planning »')
+})
+
+test('les URL n\'ont PAS bougé avec les étiquettes', async () => {
+  // ⚠ Un lien envoyé par SMS ou mis en favori doit continuer d'ouvrir la même
+  // page : un renommage d'étiquette ne casse pas d'adresse.
+  const sidebar = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
+  assert.match(sidebar, /href="\/apps\/menages\/garde"/)
+  assert.match(sidebar, /activePage === 'menages-garde'/)
+  const front = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+  assert.match(front, /renderSidebar\('menages-garde'\)/)
+})
+
+test('les titres de page suivent le menu, sans se répéter', async () => {
+  const lire = f => require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', f), 'utf8')
+  const titre = h => /<title>(.*?)<\/title>/.exec(h)[1]
+  const enTete = h => /class="page-title">(.*?)<\/div>/.exec(h)[1]
+  const garde = lire('apps/menages/garde.html')
+  const menages = lire('apps/menages/index.html')
+  assert.strictEqual(titre(garde), 'HôteSmart — Planning')
+  assert.strictEqual(enTete(garde), '🧹 Planning')
+  assert.strictEqual(titre(menages), 'HôteSmart — Ménages')
+  assert.strictEqual(enTete(menages), 'Ménages')
+})
