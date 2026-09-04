@@ -1172,3 +1172,24 @@ test('un départ LOINTAIN bridé n\'alerte pas : il attend son heure', async () 
   assert.strictEqual(bilan.alertes, 0)
   assert.strictEqual(etat.inseres[0].status, 'unassigned')
 })
+
+test('un ménage sans personne LOINTAIN n\'alerte pas à chaque cycle', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. Ces ménages restent `unassigned` par conception :
+  // ils repassent dans la boucle à CHAQUE cycle, toutes les cinq minutes. Or
+  // `reportIncident` n'anti-spamme que l'ENVOI — il insère une ligne
+  // `automation_incidents` à tous les coups. Trois biens concernés produisaient
+  // ~860 lignes par jour, exactement la boucle d'écriture que la sonde
+  // `table_growth` existe pour attraper.
+  const etat = preparer({
+    snaps: [SNAP({ departure: '2026-11-14' })],
+    menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                departure_date: '2026-11-14', status: 'unassigned', provider_id: null,
+                offered_to: null, assigned_by: 'auto' }],
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 1,
+                 weekdays: null, requires_ack: true, active: true }]
+  })
+  const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await synchroniserMenages(null, { maintenant: T0 })
+  assert.strictEqual(bilan.alertes, 0, 'le départ est loin : rien à signaler encore')
+  assert.strictEqual(etat.incidents.length, 0)
+})

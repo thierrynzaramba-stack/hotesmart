@@ -1054,3 +1054,52 @@ test('sans session -> 401', async () => {
   await require('../api/membres')(req({ body: { action: 'list' } }), res)
   assert.strictEqual(res.code, 401)
 })
+
+// ─── `self_availability` : le défaut d'un profil `lien` (lot 3.5) ──────────
+
+test('un profil `lien` gère ses absences par DÉFAUT', async () => {
+  // ⚠ Sans cela, l'écran « Mes absences » de la PWA n'existe pour PERSONNE :
+  // il ne s'affiche que si le droit est là, et le défaut général ('none')
+  // rendait tout le lot 3.5 inatteignable pour une prestataire créée depuis
+  // l'app ménage. C'est aussi ce que dit le préset `prestataire` de
+  // lib/permissions.js depuis l'étape 1.
+  const etat = preparer({ user: PROD, profil: null, permissions: null })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Marie', access_mode: 'lien',
+    permissions: { property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  const droits = etat.ecritures.find(e => e.table === 'profile_permissions')
+  assert.ok(droits, 'les droits sont écrits à la création')
+  assert.strictEqual(droits.row.self_availability, 'write')
+})
+
+test('un profil de COMPTE, lui, n\'a pas d\'absences à déclarer', async () => {
+  const etat = preparer({ user: PROD, profil: null, permissions: null })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Employé', email: 'e@x.fr',
+    permissions: { property_scope: 'all', property_ids: [] } } }), res)
+  const droits = etat.ecritures.find(e => e.table === 'profile_permissions')
+  assert.ok(droits)
+  assert.strictEqual(droits.row.self_availability, 'none')
+})
+
+test('le droit ENVOYÉ l\'emporte sur le défaut', async () => {
+  // L'hôte peut couper ce droit dès la création depuis la fiche.
+  const etat = preparer({ user: PROD, profil: null, permissions: null })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Marie', access_mode: 'lien',
+    permissions: { property_scope: 'selected', property_ids: [BIEN_A.id], self_availability: 'none' } } }), res)
+  const droits = etat.ecritures.find(e => e.table === 'profile_permissions')
+  assert.strictEqual(droits.row.self_availability, 'none')
+})
+
+test('le défaut « lien » ne s\'applique QU\'À LA CRÉATION', async () => {
+  // Un hôte qui coupe ce droit ne doit pas le voir revenir à chaque
+  // enregistrement de la fiche : `defaut()` lit l'existant d'abord.
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'api/membres.js'), 'utf8')
+  assert.match(source, /modeLien && !existant \? 'write' : 'none'/)
+  assert.match(source, /validerPermissions\(b\.permissions, false, null, b\.access_mode === 'lien'\)/)
+})

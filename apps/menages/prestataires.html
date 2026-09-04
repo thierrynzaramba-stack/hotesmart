@@ -28,6 +28,22 @@
     .prop-ligne { justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 6px 0; }
     .prop-ligne-nom { display: flex; align-items: center; gap: 8px; }
     .rang-select { width: auto; min-width: 210px; font-size: 12px; padding: 5px 8px; }
+    .prop-bloc { border-bottom: 0.5px solid var(--border); padding-bottom: 8px; }
+    .prop-bloc:last-child { border-bottom: none; }
+    .jours-ligne { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 0 0 26px; }
+    .jours-titre { font-size: 11px; color: var(--text2); margin-right: 4px; }
+    .jour-case { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text2); cursor: pointer; }
+    .jour-case input { cursor: pointer; accent-color: var(--primary); margin: 0; }
+    .jour-tous { background: none; border: 0.5px solid var(--border); border-radius: 12px;
+                 font-size: 10px; color: var(--text2); padding: 1px 8px; cursor: pointer; }
+    .jours-aide { font-size: 11px; color: #92400E; padding: 2px 0 0 26px; }
+    .dispo-bloc { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 16px; }
+    .dispo-ligne { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                   font-size: 12px; padding: 4px 0; border-bottom: 0.5px solid var(--border); }
+    .dispo-ligne:last-child { border-bottom: none; }
+    .dispo-vide { font-size: 12px; color: var(--text2); }
+    .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 12px;
+                font-size: 11px; color: var(--text2); padding: 2px 10px; cursor: pointer; }
     .avert-rang { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E;
                   border-radius: var(--radius); padding: 8px 10px; font-size: 12px;
                   line-height: 1.45; margin: 8px 0 4px; }
@@ -120,6 +136,61 @@
             <div style="font-size:12px;color:var(--text2)">Chargement...</div>
           </div>
           <div id="avert-rang" class="avert-rang" style="display:none"></div>
+
+          <!-- ⚠ SES DISPONIBILITÉS — À NE PAS CONFONDRE AVEC LES JOURS CONFIÉS.
+               Les cases ci-dessus disent quels jours vous lui confiez CE bien ;
+               ce bloc dit quels jours elle EST LÀ, tous biens confondus. Se
+               déclarer disponible un mardi ne la rend pas attitrée le mardi.
+               ⚠ N'apparaît qu'en MODIFICATION : il faut une personne existante
+               pour lui poser un congé, et ces réglages s'écrivent tout de suite
+               (pas au « Enregistrer » du formulaire), parce qu'ils ne dépendent
+               d'aucun autre champ de la fiche. -->
+          <div id="dispo-section" style="display:none">
+            <div style="font-size:11px;color:var(--text2);margin:16px 0 8px;font-weight:500">SES DISPONIBILITÉS</div>
+            <div class="dispo-bloc">
+              <div style="font-size:12px;margin-bottom:6px">Quand elle travaille</div>
+              <div id="dispo-regles"><div class="dispo-vide">Chargement…</div></div>
+              <div class="jours-ligne" style="padding-left:0;margin-top:8px">
+                <span class="jours-titre">Ajouter</span>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="1"><span>L</span></label>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="2"><span>M</span></label>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="3"><span>M</span></label>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="4"><span>J</span></label>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="5"><span>V</span></label>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="6"><span>S</span></label>
+                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="0"><span>D</span></label>
+                <select class="form-input rang-select" id="dispo-cadence" style="min-width:150px">
+                  <option value="1" selected>toutes les semaines</option>
+                  <option value="2">une semaine sur deux</option>
+                </select>
+                <button type="button" class="btn-mini" id="btn-ajouter-regle">Ajouter</button>
+              </div>
+              <div style="font-size:11px;color:var(--text2);margin-top:6px">
+                Aucune règle = disponible tous les jours. Une semaine sur deux part de la semaine en cours.
+              </div>
+
+              <div style="font-size:12px;margin:14px 0 6px">Absences et exceptions</div>
+              <div id="dispo-exceptions"><div class="dispo-vide">Chargement…</div></div>
+              <div class="jours-ligne" style="padding-left:0;margin-top:8px">
+                <input type="date" class="form-input" id="dispo-date" style="width:auto;font-size:12px;padding:5px 8px">
+                <button type="button" class="btn-mini" id="btn-absente">Absente ce jour</button>
+                <button type="button" class="btn-mini" id="btn-presente">Présente exceptionnellement</button>
+              </div>
+              <div style="font-size:11px;color:var(--text2);margin-top:6px">
+                Une exception l'emporte toujours sur la règle.
+              </div>
+
+              <!-- ⚠ SANS CE DROIT, L'ONGLET « Mes absences » N'EXISTE PAS dans sa
+                   PWA. Il vaut « oui » pour toute personne créée depuis cet écran :
+                   le laisser à « non » par défaut aurait rendu cet écran
+                   inatteignable, et le réglage invisible. -->
+              <label class="prop-checkbox" style="margin-top:12px">
+                <input type="checkbox" id="presta-self-dispo" checked>
+                <span style="font-size:12px">Elle peut déclarer ses absences depuis son application</span>
+              </label>
+              <div class="jours-aide" id="aide-self-dispo" style="display:none;padding-left:0"></div>
+            </div>
+          </div>
 
           <!-- Visibilité calendrier -->
           <div class="visibility-row">
@@ -364,40 +435,109 @@
       container.innerHTML = '<div style="font-size:12px;color:var(--text2)">Aucun bien trouvé</div>'
       return
     }
-    // ⚠ LE RANG EST PAR BIEN, et il vaut « suppléante » par défaut.
-    // Le cas réel est mixte : suppléante ici, référente ailleurs. Et on ne
-    // devient pas référente par accident — le référent est assigné D'OFFICE,
-    // sans confirmation : c'est le rôle le plus engageant, il se choisit.
+    // ⚠ TROIS RÉGLAGES PAR BIEN, ET ILS NE DISENT PAS LA MÊME CHOSE :
+    //   - la case du bien : est-ce qu'elle y intervient ;
+    //   - les JOURS (L-D) : quels jours vous lui confiez CE bien (`weekdays`) ;
+    //   - l'ENGAGEMENT : d'office, ou elle confirme (`requires_ack`).
+    // Le rang, lui, n'apparaît plus : il ne sert qu'à départager deux personnes
+    // et à décider qui remplace, et le lui faire choisir revenait à lui faire
+    // régler l'engagement par la bande (lot 3.3).
+    //
+    // ⚠ « D'office » n'est PAS le défaut : c'est le rôle le plus engageant, il
+    // se choisit. On ne devient pas responsable d'un logement par accident.
+    //
+    // ⚠ AUCUN JOUR COCHÉ = elle ne sera JAMAIS sollicitée sur ce bien tant
+    // qu'elle doit confirmer (spec §12.9c). C'est écrit sous les cases, parce
+    // que c'est exactement le piège : cocher le bien et croire que ça suffit.
     container.innerHTML = properties.map(p => `
-      <div class="prop-checkbox prop-ligne">
-        <div class="prop-ligne-nom">
-          <input type="checkbox" id="prop-${p.id}" value="${p.id}" checked>
-          <label for="prop-${p.id}">${echapper(p.name)}</label>
+      <div class="prop-bloc" id="bloc-${p.id}">
+        <div class="prop-checkbox prop-ligne">
+          <div class="prop-ligne-nom">
+            <input type="checkbox" id="prop-${p.id}" value="${p.id}" checked>
+            <label for="prop-${p.id}">${echapper(p.name)}</label>
+          </div>
+          <select class="form-input rang-select" id="ack-${p.id}" data-bien="${p.id}">
+            <option value="1" selected>Elle confirme</option>
+            <option value="0">D'office — elle reçoit sans confirmer</option>
+          </select>
         </div>
-        <select class="form-input rang-select" id="rang-${p.id}" data-bien="${p.id}">
-          <option value="2" selected>Suppléante — doit confirmer</option>
-          <option value="1">Référente — reçoit d'office</option>
-        </select>
+        <div class="jours-ligne" id="jours-${p.id}">
+          <span class="jours-titre">Jours confiés</span>
+          ${JOURS.map(j => `
+            <label class="jour-case">
+              <input type="checkbox" class="jour-${p.id}" value="${j.n}">
+              <span>${j.court}</span>
+            </label>`).join('')}
+          <button type="button" class="jour-tous" data-bien="${p.id}">tous</button>
+        </div>
+        <div class="jours-aide" id="aide-jours-${p.id}"></div>
       </div>
     `).join('')
     majEtatDesRangs()
-    container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    container.querySelectorAll('input[type=checkbox][id^=prop-]').forEach(cb => {
       cb.addEventListener('change', majEtatDesRangs)
     })
     container.querySelectorAll('.rang-select').forEach(sel => {
-      sel.addEventListener('change', () => avertirSiPlusDeReferent())
+      sel.addEventListener('change', majEtatDesRangs)
+    })
+    properties.forEach(p => {
+      document.querySelectorAll(`.jour-${p.id}`).forEach(cb => {
+        cb.addEventListener('change', majEtatDesRangs)
+      })
+    })
+    container.querySelectorAll('.jour-tous').forEach(b => {
+      b.addEventListener('click', () => {
+        const ref = b.dataset.bien
+        const cases = [...document.querySelectorAll(`.jour-${ref}`)]
+        const tout = cases.every(c => c.checked)
+        cases.forEach(c => { c.checked = !tout })
+        majEtatDesRangs()
+      })
     })
   }
 
-  // Un bien décoché n'a pas de rang à régler : laisser le sélecteur actif
-  // laisserait croire qu'on peut poser un rôle sur un bien qu'on retire.
+  // Convention 0 = dimanche … 6 = samedi — celle de `getUTCDay()` et du §12.7.
+  // ⚠ Affichée du lundi au dimanche, parce que c'est ainsi qu'on lit une
+  // semaine de travail ; la VALEUR, elle, reste la convention du moteur.
+  const JOURS = [
+    { n: 1, court: 'L' }, { n: 2, court: 'M' }, { n: 3, court: 'M' },
+    { n: 4, court: 'J' }, { n: 5, court: 'V' }, { n: 6, court: 'S' }, { n: 0, court: 'D' }
+  ]
+
+  // Un bien décoché n'a rien à régler : laisser les contrôles actifs laisserait
+  // croire qu'on peut poser un rôle sur un bien qu'on retire.
   function majEtatDesRangs() {
     properties.forEach(p => {
       const cb = document.getElementById(`prop-${p.id}`)
-      const sel = document.getElementById(`rang-${p.id}`)
+      const sel = document.getElementById(`ack-${p.id}`)
+      const zone = document.getElementById(`jours-${p.id}`)
+      const aide = document.getElementById(`aide-jours-${p.id}`)
       if (!cb || !sel) return
       sel.disabled = !cb.checked
       sel.style.opacity = cb.checked ? '' : '0.45'
+      if (zone) {
+        zone.style.opacity = cb.checked ? '' : '0.45'
+        zone.querySelectorAll('input, button').forEach(e => { e.disabled = !cb.checked })
+      }
+      // ⚠ LE PIÈGE, DIT À L'ÉCRAN. Une personne qui doit confirmer et à qui
+      // aucun jour n'est confié ne sera JAMAIS sollicitée sur ce bien : ses
+      // ménages y resteront chez la personne d'office, ou sans personne. Le
+      // découvrir en production, c'est le découvrir trop tard.
+      if (aide) {
+        const jours = [...document.querySelectorAll(`.jour-${p.id}`)].filter(c => c.checked)
+        const confirme = sel.value === '1'
+        // ⚠ L'AVERTISSEMENT VAUT AUSSI POUR QUELQU'UN D'OFFICE, et il est même
+        // plus grave dans ce cas : sans aucun jour confié, elle sort des
+        // candidates, donc elle ne reçoit RIEN — pas seulement « aucune
+        // proposition ». Ne le montrer qu'aux personnes qui confirment laissait
+        // passer le geste le plus destructeur en silence.
+        aide.textContent = (cb.checked && !jours.length)
+          ? (confirme
+              ? '⚠️ Aucun jour confié : elle ne recevra aucune proposition sur ce bien.'
+              : '⚠️ Aucun jour confié : elle ne recevra AUCUN ménage sur ce bien.')
+          : ''
+        aide.style.display = aide.textContent ? '' : 'none'
+      }
     })
     avertirSiPlusDeReferent()
   }
@@ -417,15 +557,15 @@
       const coche = document.getElementById(`prop-${p.id}`)?.checked
       if (!geré && !coche) return false
       const cb = document.getElementById(`prop-${p.id}`)
-      const sel = document.getElementById(`rang-${p.id}`)
+      const sel = document.getElementById(`ack-${p.id}`)
       if (!cb || !sel) return false
       // Une autre personne est-elle assignée d'office sur ce bien ?
       const autreReferent = liaisons.some(l =>
         String(l.property_id) === String(p.id) && l.requires_ack === false &&
         l.active !== false && l.provider_id !== editionEnCours)
       if (autreReferent) return false
-      // Sinon, c'est cette fiche qui doit en fournir un.
-      return !(cb.checked && sel.value === '1')
+      // Sinon, c'est cette fiche qui doit en fournir un. `'0'` = d'office.
+      return !(cb.checked && sel.value === '0')
     })
     zone.innerHTML = manquants.length
       // ⚠ « non assignés » était devenu FAUX depuis le lot 3.3 : sans personne
@@ -441,10 +581,23 @@
   function saisieDesBiens() {
     return properties
       .filter(p => document.getElementById(`prop-${p.id}`)?.checked)
-      .map(p => ({
-        ref: p.id, uuid: p.uuid,
-        rang: document.getElementById(`rang-${p.id}`)?.value === '1' ? 1 : 2
-      }))
+      .map(p => {
+        const dOffice = document.getElementById(`ack-${p.id}`)?.value === '0'
+        return {
+          ref: p.id, uuid: p.uuid,
+          // ⚠ LE RANG SUIT L'ENGAGEMENT, il ne le décide plus. Il ne sert qu'à
+          // départager et à remplacer (§12.1) : une personne d'office passe
+          // devant, c'est tout ce que ce chiffre veut dire ici.
+          rang: dOffice ? 1 : 2,
+          requires_ack: !dOffice,
+          // ⚠ TOUJOURS ENVOYÉ, même vide : `[]` veut dire « aucun jour confié »,
+          // un choix explicite, et le serveur le distingue d'un champ absent
+          // (« je ne me prononce pas »). Sans cela, décocher tous les jours ne
+          // les aurait jamais retirés.
+          weekdays: [...document.querySelectorAll(`.jour-${p.id}`)]
+            .filter(c => c.checked).map(c => Number(c.value)).sort((a, b) => a - b)
+        }
+      })
   }
 
   // ⚠ CRÉER UN PRESTATAIRE, C'EST CRÉER UNE PERSONNE — pas un lien.
@@ -491,7 +644,8 @@
           access_mode: 'lien',
           permissions: {
             property_scope: 'selected',
-            property_ids: biens.map(b => b.uuid).filter(Boolean)
+            property_ids: biens.map(b => b.uuid).filter(Boolean),
+            ...droitDispoSaisi()
           }
         })
       })
@@ -559,7 +713,12 @@
                  'Authorization': `Bearer ${currentSession.access_token}` },
       body: JSON.stringify({
         action: 'liaisons', provider_id: profilId,
-        liaisons: biens.map(b => ({ property_id: b.ref, rang: b.rang }))
+        // ⚠ Les trois champs partent ENSEMBLE. `weekdays` et `requires_ack` sont
+        // désormais réglés ici et nulle part ailleurs : les omettre laisserait le
+        // serveur retomber sur l'existant, et l'écran mentirait sur ce qu'il vient
+        // d'enregistrer.
+        liaisons: biens.map(b => ({ property_id: b.ref, rang: b.rang,
+                                    requires_ack: b.requires_ack, weekdays: b.weekdays }))
       })
     })
     const data = await res.json().catch(() => null)
@@ -669,18 +828,55 @@
     // y serait jetee en silence, et l'ecran annoncerait « modifie ». Une case
     // qui n'enregistre pas ne doit pas etre saisissable.
     coordonneesSaisissables(!!profil)
+
+    // ⚠ Le bloc « disponibilités » suppose une PERSONNE. Un lien sans profil n'en
+    // désigne aucune : afficher des cases qui n'enregistrent rien serait la même
+    // faute que les coordonnées ci-dessus.
+    const section = document.getElementById('dispo-section')
+    section.style.display = profil ? '' : 'none'
+    if (profil) {
+      // ⚠ L'ÉTAT VIENT DU SERVEUR, ET « INCONNU » N'EST PAS « NON ».
+      // `permissions: null` veut dire que le serveur n'a pas pu lire ce droit.
+      // Décocher la case dans ce cas la faisait mentir — et le premier
+      // enregistrement réécrivait `self_availability: 'none'` : un timeout
+      // révoquait définitivement un droit que personne n'avait touché. On grise,
+      // et `saveEdit` s'abstient alors de l'envoyer.
+      const caseDispo = document.getElementById('presta-self-dispo')
+      const droitConnu = !!(profil.permissions)
+      caseDispo.disabled = !droitConnu
+      caseDispo.checked = droitConnu &&
+        profil.permissions.self_availability === 'write'
+      const aideDispo = document.getElementById('aide-self-dispo')
+      if (aideDispo) {
+        aideDispo.textContent = droitConnu ? ''
+          : '⚠️ Ce réglage n\'a pas pu être lu : il ne sera pas modifié en enregistrant.'
+        aideDispo.style.display = droitConnu ? 'none' : ''
+      }
+      chargerDisponibilites(profil.id)
+    }
     document.getElementById('presta-phone').value = (profil && profil.telephone) || ''
     document.getElementById('presta-email').value = (profil && profil.email) || ''
 
     properties.forEach(prop => {
       const cb = document.getElementById(`prop-${prop.id}`)
       if (cb) cb.checked = !p.property_ids?.length || p.property_ids.includes(String(prop.id))
-      const sel = document.getElementById(`rang-${prop.id}`)
-      if (sel) {
-        const l = liaisons.find(x => String(x.property_id) === String(prop.id) &&
-                                     x.provider_id === editionEnCours)
-        sel.value = l && l.rang === 1 ? '1' : '2'
-      }
+      // ⚠ L'ÉTAT AFFICHÉ VIENT DE LA BASE, PAS D'UNE DÉDUCTION. C'est
+      // `requires_ack` qui dit l'engagement, et `weekdays` les jours : les
+      // déduire du rang était le détournement que le lot 3.5 supprime.
+      const l = liaisons.find(x => String(x.property_id) === String(prop.id) &&
+                                   x.provider_id === editionEnCours)
+      const sel = document.getElementById(`ack-${prop.id}`)
+      if (sel) sel.value = l && l.requires_ack === false ? '0' : '1'
+      // ⚠ `weekdays` NULL VEUT DIRE « TOUS LES JOURS » (§12.1), et c'est l'état
+      // de toutes les liaisons d'avant ce lot. L'afficher avec zéro case cochée
+      // se lisait « aucun jour » : le premier enregistrement de la fiche envoyait
+      // alors `[]`, et l'hôte retirait tous les jours d'une prestataire sans
+      // l'avoir voulu ni l'avoir vu.
+      const brut = l && l.weekdays
+      const jours = Array.isArray(brut) ? brut.map(Number) : JOURS.map(j => j.n)
+      document.querySelectorAll(`.jour-${prop.id}`).forEach(c => {
+        c.checked = jours.includes(Number(c.value))
+      })
     })
     majEtatDesRangs()
 
@@ -746,7 +942,8 @@
           action: 'update', profile_id: editionEnCours,
           phone: contact.phone, email: contact.email,
           permissions: { property_scope: 'selected',
-                         property_ids: biens.map(b => b.uuid).filter(Boolean) }
+                         property_ids: biens.map(b => b.uuid).filter(Boolean),
+                         ...droitDispoSaisi() }
         })
       })
       if (!rp.ok) {
@@ -866,12 +1063,19 @@
 
   function resetForm() {
     editionEnCours = null
+    const section = document.getElementById('dispo-section')
+    if (section) section.style.display = 'none'
     document.getElementById('presta-name').value = ''
     document.getElementById('presta-phone').value = ''
     document.getElementById('presta-email').value = ''
     coordonneesSaisissables(true)   // la creation, elle, pose toujours un profil
     document.getElementById('visibility-days').value = '30'
     document.getElementById('ratio-periode').value = 'toujours'
+    const caseDispoReset = document.getElementById('presta-self-dispo')
+    caseDispoReset.checked = true
+    caseDispoReset.disabled = false
+    const aideReset = document.getElementById('aide-self-dispo')
+    if (aideReset) aideReset.style.display = 'none'
     document.getElementById('form-section').style.display = 'none'
     document.getElementById('btn-show-form').style.display = 'inline-flex'
     const btn = document.getElementById('btn-create')
@@ -880,6 +1084,133 @@
     renderPropCheckboxes()
   }
 
+
+  // Le droit « elle gère ses absences », tel que la fiche le porte.
+  //
+  // ⚠ RIEN N'EST ENVOYÉ QUAND LE DROIT N'A PAS PU ÊTRE LU (case grisée) : le
+  // serveur garde alors celui qui est en base. Envoyer 'none' par défaut faisait
+  // d'une panne d'affichage une révocation définitive.
+  function droitDispoSaisi () {
+    const c = document.getElementById('presta-self-dispo')
+    if (!c || c.disabled) return {}
+    return { self_availability: c.checked ? 'write' : 'none' }
+  }
+
+  // ─── SES DISPONIBILITÉS (lot 3.5) ────────────────────────────────────────
+  //
+  // ⚠ ÉCRITURE IMMÉDIATE, pas au « Enregistrer » du formulaire. Ces réglages ne
+  // dépendent d'aucun autre champ de la fiche, et les empiler dans le
+  // formulaire aurait fait perdre un congé posé à quelqu'un qui referme sans
+  // enregistrer — exactement ce qu'on ne veut pas sur une absence.
+  //
+  // ⚠ AUCUNE CHAÎNE RRULE NE TRANSITE PAR CET ÉCRAN. On envoie des jours et une
+  // cadence, le serveur produit le standard et renvoie un libellé lisible.
+  async function appelDispo(methode, corps, query) {
+    const url = '/api/disponibilites' + (query || '')
+    const res = await fetch(url, {
+      method: methode,
+      headers: { 'Content-Type': 'application/json',
+                 'Authorization': `Bearer ${currentSession.access_token}` },
+      body: corps ? JSON.stringify(corps) : undefined
+    })
+    const data = await res.json().catch(() => null)
+    return { ok: res.ok, status: res.status, data }
+  }
+
+  async function chargerDisponibilites(profilId) {
+    const zoneR = document.getElementById('dispo-regles')
+    const zoneE = document.getElementById('dispo-exceptions')
+    zoneR.innerHTML = '<div class="dispo-vide">Chargement…</div>'
+    zoneE.innerHTML = ''
+    const { ok, data } = await appelDispo('GET', null, `?provider_id=${encodeURIComponent(profilId)}`)
+    // ⚠ ON LE DIT. Une panne qui laisse « Chargement… » à l'écran ferait croire
+    // à une prestataire sans aucune règle — donc disponible tous les jours.
+    if (!ok || !data) {
+      zoneR.innerHTML = '<div class="dispo-vide">⚠️ Disponibilités illisibles. Rouvrez la fiche.</div>'
+      return
+    }
+    const regles = (data.regles || []).filter(r => r.active !== false)
+    zoneR.innerHTML = regles.length
+      ? regles.map(r => `
+          <div class="dispo-ligne">
+            <span>${echapper(r.label || 'Règle')}</span>
+            <button type="button" class="btn-mini" data-regle="${r.id}">retirer</button>
+          </div>`).join('')
+      : '<div class="dispo-vide">Aucune règle : elle est disponible tous les jours.</div>'
+    zoneR.querySelectorAll('[data-regle]').forEach(b => {
+      b.addEventListener('click', () => retirerRegle(profilId, b.dataset.regle))
+    })
+
+    const exceptions = data.exceptions || []
+    zoneE.innerHTML = exceptions.length
+      ? exceptions.map(e => `
+          <div class="dispo-ligne">
+            <span>${e.available ? '✅' : '🚫'} ${dateLisible(e.date)}
+              <span style="color:var(--text2)">— ${e.source === 'prestataire' ? 'déclarée par elle' : 'posée par vous'}</span>
+            </span>
+            <button type="button" class="btn-mini" data-exception="${e.id}">retirer</button>
+          </div>`).join('')
+      : '<div class="dispo-vide">Aucune absence déclarée.</div>'
+    zoneE.querySelectorAll('[data-exception]').forEach(b => {
+      b.addEventListener('click', () => retirerException(profilId, b.dataset.exception))
+    })
+  }
+
+  function dateLisible(d) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''))
+    if (!m) return String(d || '')
+    // ⚠ En UTC : une date de calendrier lue en heure locale se décale d'un jour
+    // à l'ouest de Greenwich — le piège déjà corrigé deux fois dans ce dépôt.
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString('fr-FR',
+      { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+  }
+
+  async function ajouterRegle() {
+    if (!editionEnCours) return
+    const jours = [...document.querySelectorAll('.dispo-jour')]
+      .filter(c => c.checked).map(c => Number(c.value))
+    if (!jours.length) return alert('Cochez au moins un jour.')
+    const cadence = Number(document.getElementById('dispo-cadence').value) || 1
+    const { ok, data } = await appelDispo('POST', {
+      provider_id: editionEnCours, action: 'poserRegle',
+      jours, toutes_les_n_semaines: cadence,
+      // L'ancrage décide quelle semaine est « on » pour une quinzaine.
+      depuis: new Date().toISOString().slice(0, 10)
+    })
+    if (!ok) return alert((data && data.error) || 'Enregistrement impossible.')
+    document.querySelectorAll('.dispo-jour').forEach(c => { c.checked = false })
+    await chargerDisponibilites(editionEnCours)
+    showToast('✓ Règle ajoutée')
+  }
+
+  async function retirerRegle(profilId, id) {
+    const { ok, data } = await appelDispo('POST', { provider_id: profilId, action: 'retirerRegle', id })
+    if (!ok) return alert((data && data.error) || 'Retrait impossible.')
+    await chargerDisponibilites(profilId)
+  }
+
+  async function poserException(available) {
+    if (!editionEnCours) return
+    const date = document.getElementById('dispo-date').value
+    if (!date) return alert('Choisissez une date.')
+    const { ok, data } = await appelDispo('POST', {
+      provider_id: editionEnCours, action: 'poserException', date, available
+    })
+    if (!ok) return alert((data && data.error) || 'Enregistrement impossible.')
+    document.getElementById('dispo-date').value = ''
+    await chargerDisponibilites(editionEnCours)
+    showToast(available ? '✓ Présence exceptionnelle' : '✓ Absence enregistrée')
+  }
+
+  async function retirerException(profilId, id) {
+    const { ok, data } = await appelDispo('POST', { provider_id: profilId, action: 'retirerException', id })
+    if (!ok) return alert((data && data.error) || 'Retrait impossible.')
+    await chargerDisponibilites(profilId)
+  }
+
+  document.getElementById('btn-ajouter-regle').addEventListener('click', ajouterRegle)
+  document.getElementById('btn-absente').addEventListener('click', () => poserException(false))
+  document.getElementById('btn-presente').addEventListener('click', () => poserException(true))
 
   function showToast(msg = '✓ Lien copié !') {
     const toast = document.getElementById('copy-toast')

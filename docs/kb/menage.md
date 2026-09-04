@@ -150,6 +150,103 @@ un appelant qui se trompe : l'écran affiche une semaine, le moteur un jour. L'i
 d'heure. Une mémoïsation `(personne, jour)` vit **le temps de l'appel seulement** : la garder
 entre deux appels serait la garde stockée que le §12.2 refuse.
 
+### Régler les jours et les disponibilités (lot 3.5, 4 septembre 2026)
+
+C'est l'écran qui **débloque** le lot 3.3 : sans jours réglés, aucune proposition ne partait
+(§12.9c). Tout se passe dans la **fiche prestataire** (`apps/menages/prestataires.html`) —
+config d'app, donc dans l'app (CLAUDE.md).
+
+**Par bien, trois réglages qui ne disent pas la même chose :**
+- la **case du bien** : est-ce qu'elle y intervient ;
+- les **jours L-D** → `weekdays` : quels jours vous lui **confiez ce bien** ;
+- l'**engagement** → `requires_ack` : d'office, ou elle confirme.
+
+⚠️ **Le rang n'apparaît plus à l'écran.** Il ne sert qu'à départager deux personnes et à décider
+qui remplace (§12.1) ; le faire choisir revenait à faire régler l'engagement par la bande. Le
+front le déduit maintenant de l'engagement (d'office → 1) au lieu de l'inverse.
+
+⚠️ **La règle « le rang qui bouge retranche `requires_ack` » du lot 3.3 est RETIRÉE.** Elle
+n'existait que faute d'écran. La garder ferait **deux writers de la même colonne**, dont un
+implicite — la faute du double writer de `public_tokens` : le rang aurait défait en silence un
+mode d'engagement choisi. Ce qui reste : un champ **absent** ne remet rien à zéro (un écran plus
+ancien ne doit pas effacer un réglage), et à la **création seulement**, le rang donne encore le
+défaut.
+
+⚠️ **TROIS états de `weekdays`, et aucun ne veut dire la même chose** (révisé au 3.5, trouvé en
+review) :
+- **NULL** = attitrée **tous les jours** — la rétrocompatibilité du §12.1, l'état de toutes les
+  liaisons d'avant ce lot ;
+- **`[]`** = **aucun jour**, un choix explicite de l'hôte. `garde.js` les distingue désormais :
+  les confondre faisait l'inverse exact du geste — l'hôte décochait tout, et elle restait
+  attitrée sept jours sur sept, sans le moindre signe ;
+- **champ absent** dans la requête = « je ne me prononce pas », et le serveur garde l'existant.
+
+⚠️ **L'écran affiche NULL comme « tous les jours »** (toutes les cases cochées). L'afficher vide
+se lisait « aucun jour » : le premier enregistrement d'une fiche envoyait alors `[]` et retirait
+tous les jours d'une prestataire sans que l'hôte l'ait voulu ni vu.
+
+⚠️ **Le piège est dit à l'écran, pour les DEUX cas** : sans jour confié, une personne qui
+confirme ne sera jamais sollicitée, et une personne d'office ne recevra **aucun ménage** — elle
+sort des candidates. N'avertir que la première laissait passer le geste le plus destructeur en
+silence. Le découvrir en production, c'est le découvrir
+trop tard.
+
+**Ses disponibilités** (`api/disponibilites.js`, droit `prestataires: write`) : récurrence
+(« le week-end, une semaine sur deux ») et exceptions ponctuelles, dans les deux sens.
+⚠️ **Aucune chaîne RRULE ne transite par l'écran** — ni dans un sens ni dans l'autre. L'hôte
+envoie des jours et une cadence, `construireRrule` produit le standard, et la lecture ne rend
+que le **libellé**. Une chaîne acceptée du client serait une expression exécutée par la lib
+`rrule` sur les données d'un autre compte, et un `COUNT=100000` suffirait à faire tourner le
+moteur pour rien à chaque cycle.
+⚠️ **Retirer une règle la DÉSACTIVE** ; une exception, elle, se supprime. Une règle effacée
+emporterait la raison pour laquelle des ménages passés ont été attribués comme ils l'ont été.
+⚠️ **La lecture des exceptions a un PLANCHER** (J−30). Triée par date croissante et plafonnée,
+une lecture sans plancher finit par ne rendre que du passé : les congés à venir tombent hors du
+lot, et l'hôte confie des ménages sur des jours d'absence en croyant qu'aucun n'est déclaré.
+⚠️ **Une panne de lecture répond 503**, jamais une liste vide : « aucune règle » veut dire
+« disponible tous les jours », et l'afficher sur une panne ferait croire à l'hôte que sa
+prestataire n'a aucune contrainte.
+
+**« Mes absences » dans la PWA** (`api/menages-public.js`) :
+- ⚠️ **Chaque sonde ne dévoile que SON onglet.** `initDisponibilites` affichait la barre entière,
+  donc l'onglet **Avis** avec elle — y compris pour quelqu'un dont `self_view_reviews` est à
+  `false`, l'inverse exact de ce que ce droit garantit. Et un droit retiré sur les avis masque le
+  **seul** bouton Avis, jamais la barre : elle emportait « Mes absences » jusqu'au rechargement ;
+- ⚠️ **double garde, jamais l'une sans l'autre** — le **token** identifie la personne, le droit
+  **`self_availability`** dit si elle gère ses absences. Le token seul autoriserait n'importe
+  quel porteur de lien du compte ; le droit seul ne désignerait personne ;
+- ⚠️ **le défaut est `none`, l'inverse de `self_view_reviews`** : consulter ses avis ne change
+  rien pour personne, se retirer du planning engage le logement de quelqu'un d'autre. Une ligne
+  de droits absente n'ouvre donc pas l'écriture. **Mais un profil `lien` naît à `write`**
+  (`api/membres.js`) — sans quoi l'onglet n'existait pour personne et le lot était inatteignable ;
+  la fiche porte la case qui le coupe ;
+- ⚠️ **elle déclare une ABSENCE, jamais une présence** : `available` n'est pas un paramètre.
+  Se rendre disponible un jour que l'hôte ne lui a pas confié n'aurait aucun effet et lui ferait
+  croire le contraire ;
+- ⚠️ **elle ne touche jamais ses jours attitrés** — décision de l'hôte (§12.9d) : pouvoir s'en
+  retirer lui permettrait de quitter un bien sans qu'il l'apprenne ;
+- ⚠️ **« rien à supprimer » n'est pas « ce n'est pas à vous »** : un double tap sur « Annuler »
+  (3G, PWA) annonçait à la prestataire que son employeur avait posé une absence qu'elle venait
+  elle-même de retirer. Zéro ligne touchée déclenche une relecture : plus rien sur ce jour →
+  succès idempotent ; une ligne de l'hôte → 409 ;
+- ⚠️ **elle ne défait que ce QU'ELLE a déclaré** (`source = 'prestataire'`). Effacer une absence
+  posée par l'hôte la remettrait candidate sur un jour dont il l'avait retirée, sans qu'il
+  l'apprenne — 409 explicite ;
+- ⚠️ **et elle ne se l'approprie pas non plus.** Un `upsert` sur `(provider_id, date)` met à jour
+  la ligne **quelle qu'elle soit** et bascule sa `source` : l'absence de l'hôte devenait la
+  sienne, donc effaçable en deux gestes. Le chemin est une séquence — mettre à jour SA ligne
+  (`source = 'prestataire'`), sinon insérer, et si la contrainte d'unicité refuse, c'est que le
+  jour est occupé par l'hôte : 409. Trouvé en review, c'était le défaut le plus grave du lot ;
+- ⚠️ **« aujourd'hui » se lit en heure de PARIS** (`todayInParis()`), pas en UTC : entre minuit
+  et 2 h du matin l'été, l'UTC est encore la veille et la garde « pas dans le passé » laissait
+  passer ;
+- ⚠️ **pas de déclaration dans le passé**, et **aucune file hors ligne** : une absence rejouée
+  deux heures plus tard porterait sur un planning qui a bougé, et l'écran ne peut pas dire
+  « c'est enregistré » quand rien n'est parti. Hors ligne, il le dit.
+
+**Effet immédiat** : dès qu'un bien a des jours réglés, la restriction du §12.9c se lève d'elle-même
+— les propositions repartent, sans autre geste.
+
 ### Créer un prestataire (lot 2.5)
 
 ⚠️ **Tout se passe dans `apps/menages/prestataires.html`.** `/settings` ne gère plus les
@@ -312,6 +409,11 @@ jours », donc sans cette restriction toute liaison « à confirmer » recevrait
 départ**, pour des jours qu'elle n'a jamais déclaré prendre — et aucun écran ne permet encore
 de les régler. La restriction ne porte **que** sur la proposition : la porteuse d'office n'est
 pas concernée (elle ne confirme rien), et Régina, sans `weekdays`, porte comme avant.
+⚠️ Pour un ménage déjà en base, l'alerte est **bornée à la fenêtre de proposition** — c'est une
+garde anti-rejeu, pas un confort : ces ménages restent `unassigned` par conception et repassent
+donc dans la boucle toutes les cinq minutes, or `reportIncident` n'anti-spamme que l'**envoi** et
+insère une ligne `automation_incidents` à tous les coups (~860 lignes/jour pour trois biens —
+exactement la boucle d'écriture que la sonde `table_growth` existe pour attraper).
 ⚠️ L'alerte part **aussi pour un ménage déjà en base**, pas seulement à la création : un départ
 lointain devenu proche, un congé posé depuis, une restriction introduite après — sans quoi le
 ménage restait sans personne et sans le moindre signal jusqu'au jour du départ, contre ce que la
@@ -367,6 +469,11 @@ La **réassignation manuelle** (`POST /api/menages`) emprunte le même chemin : 
 quelqu'un d'`requires_ack = false` l'engage, vers quelqu'un qui confirme lui laisse le choix.
 Elle pose `assigned_by='manual'`, ce qui **verrouille** le ménage — l'automate n'y touche plus
 jamais. Droit requis : **`prestataires: write`**, pas `menages`.
+
+⚠️ **Une panne de lecture du droit `self_availability` n'est PAS un droit coupé.** L'API rend
+`permissions: null` dans ce cas, l'écran grise la case et n'envoie rien : sans ce drapeau, un
+timeout PostgREST décochait la case, et le premier enregistrement réécrivait `'none'` —
+révocation définitive d'un droit que personne n'avait touché. Même schéma que `rapprochement`.
 
 ⚠️ **`requires_ack` est POSÉ par `POST liaisons`**, depuis le choix référente/suppléante de
 l'écran, faute de réglage dédié (lot 3.5). Il vaut `true` par défaut en base : sans cette

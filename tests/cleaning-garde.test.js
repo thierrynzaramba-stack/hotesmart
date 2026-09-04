@@ -80,7 +80,25 @@ test('`weekdays` NULL = attitrée TOUS LES JOURS', async () => {
     assert.strictEqual(r.responsable.providerId, REGINA, jour)
   }
   assert.strictEqual(attitreeCeJour({ weekdays: null }, '2026-09-08'), true)
-  assert.strictEqual(attitreeCeJour({ weekdays: [] }, '2026-09-08'), true, 'vide aussi')
+  assert.strictEqual(attitreeCeJour({ weekdays: undefined }, '2026-09-08'), true, 'absent aussi')
+})
+
+test('`weekdays: []` = AUCUN JOUR, et ce n\'est PAS la même chose que NULL', async () => {
+  // ⚠ RÉVISÉ AU LOT 3.5, et trouvé en review. NULL est l'état rétrocompatible
+  // (personne n'a rien réglé) ; le tableau VIDE est un choix explicite de l'hôte,
+  // que l'écran produit dès qu'il décoche tous les jours. Les confondre faisait
+  // l'inverse exact du geste : il retirait quelqu'un de tous les jours, et elle
+  // restait attitrée sept jours sur sept, sans le moindre signe.
+  for (const jour of ['2026-09-07', '2026-09-12', '2026-09-13']) {
+    assert.strictEqual(attitreeCeJour({ weekdays: [] }, jour), false, jour)
+  }
+  const bien = {
+    userId: COMPTE, propertyId: '209413',
+    liaisons: [{ provider_id: REGINA, rang: 1, weekdays: [], requires_ack: false, active: true }]
+  }
+  const r = responsableDuJour(bien, '2026-09-08')
+  assert.strictEqual(r.responsable, null, 'aucun jour confié : elle n\'est candidate nulle part')
+  assert.strictEqual(r.trou, true)
 })
 
 // ─── `requires_ack` TRANSPORTÉ ─────────────────────────────────────────────

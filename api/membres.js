@@ -46,7 +46,7 @@ const CHAMPS_PROFIL = 'id, account_user_id, member_user_id, first_name, last_nam
 // aurait rebascule leur `property_scope` sur 'all' : Régina, reglee sur deux
 // biens, aurait vu TOUT le compte. Un formulaire qui n'expose pas un champ ne
 // doit jamais l'ecraser.
-function validerPermissions (brut, estTitulaireCible, existant = null) {
+function validerPermissions (brut, estTitulaireCible, existant = null, modeLien = false) {
   const p = brut && typeof brut === 'object' ? brut : {}
   const defaut = (cle, siVide) => p[cle] != null ? p[cle]
                                 : existant && existant[cle] != null ? existant[cle]
@@ -75,7 +75,16 @@ function validerPermissions (brut, estTitulaireCible, existant = null) {
     out[domaine] = niveau
   }
 
-  const dispo = String(defaut('self_availability', 'none'))
+  // ⚠ UN PROFIL `lien` GERE SES ABSENCES PAR DEFAUT (lot 3.5). Le defaut general
+  // reste 'none' — un membre du compte n'a pas d'absences a declarer — mais une
+  // prestataire, si : l'ecran « Mes absences » de sa PWA n'existe que si ce droit
+  // est la, et le laisser a 'none' rendait ce lot INATTEIGNABLE pour toute
+  // personne creee depuis l'app menage. C'est aussi ce que dit le preset
+  // `prestataire` de lib/permissions.js depuis l'etape 1.
+  // ⚠ Un profil DEJA EN BASE garde le sien : `defaut()` lit l'existant d'abord,
+  // et un hote qui a coupe ce droit ne doit pas le voir revenir a chaque
+  // enregistrement de la fiche.
+  const dispo = String(defaut('self_availability', modeLien && !existant ? 'write' : 'none'))
   if (!NIVEAUX.includes(dispo)) return { erreur: 'Niveau invalide pour les disponibilités' }
   out.self_availability = dispo
   out.self_view_reviews = defaut('self_view_reviews', true) !== false
@@ -215,7 +224,7 @@ async function creer (req, res, compte, base) {
     return res.status(400).json({ error: 'Un accès par compte demande une adresse email' })
   }
 
-  const v = validerPermissions(b.permissions, false)
+  const v = validerPermissions(b.permissions, false, null, b.access_mode === 'lien')
   if (v.erreur) return res.status(400).json({ error: v.erreur })
 
   const biens = await verifierBiens(v.permissions.property_ids, compte)

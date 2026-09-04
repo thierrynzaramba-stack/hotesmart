@@ -546,3 +546,14 @@ test('aucun ménage : aucune requête au journal', async () => {
   assert.strictEqual(refus.size, 0)
   assert.strictEqual(sb.vu.ids, null)
 })
+
+test('la fenêtre de proposition est bornée DES DEUX CÔTÉS', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. Ouverte vers le passé, elle laissait le writer
+  // re-signaler à chaque cycle des ménages vieux d'un mois que plus personne ne
+  // fera — une ligne `automation_incidents` toutes les 5 minutes et par bien
+  // (`reportIncident` n'anti-spamme que l'envoi, pas l'écriture).
+  const t = Date.parse('2026-09-05T09:00:00Z')
+  assert.strictEqual(dansLaFenetreDeProposition('2026-09-04', t), true, 'hier : encore à faire')
+  assert.strictEqual(dansLaFenetreDeProposition('2026-09-03', t), false, 'avant-hier : trop tard')
+  assert.strictEqual(dansLaFenetreDeProposition('2026-08-06', t), false, 'un mois : plus personne')
+})

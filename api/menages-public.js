@@ -33,6 +33,11 @@ module.exports = async function handler(req, res) {
     return await avisDeLaPrestataire(req, res, token)
   }
 
+  // ─── « Mes disponibilites » : ce qu'elle a declare ────────────────────────
+  if (req.method === 'GET' && req.query.action === 'disponibilites') {
+    return await mesDisponibilites(req, res, token)
+  }
+
   if (req.method === 'POST') {
     const { action, event_ids, booking_id, property_id, departure_date } = req.body || {}
 
@@ -59,6 +64,19 @@ module.exports = async function handler(req, res) {
       return await repondreALOffre(req, res, token, {
         accepte: action === 'accepterMenage',
         propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+      })
+    }
+
+    // --- « Mes disponibilites » (lot 3.5) : elle DECLARE, l'hote corrige ---
+    //
+    // ⚠ ELLE NE DECLARE QUE DES INDISPONIBILITES. Ses JOURS ATTITRES
+    // (`property_cleaning_providers.weekdays`) sont une decision de l'HOTE :
+    // pouvoir s'en retirer elle-meme lui permettrait de quitter un bien sans
+    // qu'il l'apprenne, alors qu'il compte sur elle pour le preparer. Decision du
+    // product owner, 4 septembre 2026.
+    if (action === 'declarerIndisponibilite' || action === 'retirerIndisponibilite') {
+      return await mesIndisponibilites(req, res, token, {
+        retirer: action === 'retirerIndisponibilite'
       })
     }
 
@@ -848,7 +866,17 @@ async function remplacanteApresRefus ({ userId, propertyId, departureDate, menag
     // conge s'est termine — partait donc en `orphaned` + verrou `manual` : plus
     // aucun chemin ne le reprend (ni le writer, ni la pose differee, ni le
     // rattrapage), et il reste sans personne pour toujours.
-    const porteuse = porteurId ? null : (choix.providerId || null)
+    // ⚠ ET JAMAIS CELLE QUI VIENT DE REFUSER. `deciderParGarde` choisit la
+    // porteuse par « la premiere qui n'a rien a confirmer », SANS consulter
+    // `exclus` — c'est voulu la-bas (une personne d'office ne se retire pas du
+    // planning parce qu'elle a decline une proposition), mais ici ce serait
+    // absurde : depuis que la fiche permet de basculer une liaison sur
+    // « d'office » en un clic, une offre en cours chez quelqu'un qui devient
+    // d'office et refuse lui aurait ete RECOLLEE dans la seconde, avec un
+    // journal ou `from` et `to` sont la meme personne et une PWA qui lui annonce
+    // que « quelqu'un a repris » son menage.
+    let porteuse = porteurId ? null : (choix.providerId || null)
+    if (porteuse && exclus.has(String(porteuse))) porteuse = null
 
     // ⚠ `menages_offre_pas_a_soi` : la responsable du jour peut etre celle qui
     // porte deja le menage. Lui proposer ce qu'elle a deja ferait echouer
@@ -1087,3 +1115,208 @@ function todayInParis() {
 // (lib/cron-arrival-code processArrivalCodes), déclenchée quand le ménage passe
 // le logement en statut 'ready'. Les anciens helpers d'envoi direct Beds24/Seam
 // (saveAndSend, generateSeamCode) ont été retirés (bloc 2b) : ils étaient morts.
+
+// ─── « MES DISPONIBILITÉS » (lot 3.5) ───────────────────────────────────────
+//
+// ⚠ DOUBLE GARDE, JAMAIS L'UNE SANS L'AUTRE :
+//   1. le TOKEN identifie la personne (`profiles.pwa_token`) — sans profil, il
+//      n'y a personne dont ce serait le calendrier, et un lien de consultation
+//      ne doit pas pouvoir mettre quelqu'un en conge ;
+//   2. le DROIT `self_availability` dit si elle gere ses disponibilites
+//      elle-meme. A 'none', elle passe par son hote : c'est le cas d'une
+//      prestataire qui ne veut pas de cet ecran, et c'est un reglage, pas un
+//      oubli.
+// Le token seul autoriserait n'importe quel porteur de lien du compte ; le droit
+// seul ne designerait personne.
+//
+// ⚠ SUR CE DROIT, LE DEFAUT EST 'none' — l'inverse de `self_view_reviews`.
+// Consulter ses propres avis ne change rien pour personne ; se retirer du
+// planning engage le logement de quelqu'un d'autre. Une ligne de droits absente
+// ne doit donc PAS ouvrir l'ecriture.
+async function celleQuiDeclare (token, { ecriture }) {
+  const { data: pt, error: errTok } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  // ⚠ Une panne n'est pas un token invalide (meme motif que `markDone`).
+  if (errTok) { console.error('[menages-public] lecture du token echec:', errTok.message); return { erreur: 503 } }
+  if (!pt) return { erreur: 401 }
+
+  const { data: profil, error: errProfil } = await supabase.from('profiles')
+    .select('id, first_name, active').eq('account_user_id', pt.user_id)
+    .eq('pwa_token', token).maybeSingle()
+  if (errProfil) { console.error('[menages-public] lecture du profil echec:', errProfil.message); return { erreur: 503 } }
+  if (!profil || profil.active === false) return { erreur: 403 }
+
+  const { data: droits, error: errDroits } = await supabase.from('profile_permissions')
+    .select('self_availability').eq('profile_id', profil.id).maybeSingle()
+  // ⚠ UNE PANNE COUPE. Sur un droit d'ECRITURE, deviner serait pire qu'echouer.
+  if (errDroits) { console.error('[menages-public] lecture des droits echec:', errDroits.message); return { erreur: 503 } }
+
+  const niveau = (droits && droits.self_availability) || 'none'
+  if (ecriture && niveau !== 'write') return { erreur: 403 }
+  if (!ecriture && niveau === 'none') return { erreur: 403 }
+  return { userId: pt.user_id, profil, niveau }
+}
+
+// Ce qu'elle a declare, et ce que l'hote a pose pour elle.
+//
+// ⚠ ELLE VOIT LES DEUX SOURCES, ET LAQUELLE EST LAQUELLE (`source`). Masquer ce
+// que l'hote a pose lui ferait croire a un bug le jour ou il corrige une de ses
+// declarations — et c'est precisement le geste que le modele prevoit.
+async function mesDisponibilites (req, res, token) {
+  const qui = await celleQuiDeclare(token, { ecriture: false })
+  if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
+  if (qui.erreur === 403) return res.status(200).json({ autorise: false, exceptions: [], regles: [] })
+  if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+
+  // ⚠ FENETRE BORNEE. Sans borne, la PWA d'une prestataire de longue date
+  // telechargerait des annees de conges passes sur un telephone en 3G, pour un
+  // ecran qui montre les semaines a venir.
+  // ⚠ EN HEURE DE PARIS, pas en UTC. Entre minuit et 2 h du matin l'ete, l'UTC est
+  // encore la veille : la liste lui montrait un jour deja passe chez elle, et la
+  // garde d'ecriture plus bas le laissait declarer.
+  const aujourdhui = todayInParis()
+  const { data: exceptions, error } = await supabase.from('provider_availability_exceptions')
+    .select('id, date, available, reason, source')
+    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .gte('date', aujourdhui)
+    .order('date', { ascending: true }).limit(200)
+  if (error) {
+    console.error('[menages-public] lecture disponibilites echec:', error.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
+  // Les regles recurrentes : leur LIBELLE seulement. La chaine RRULE n'a rien a
+  // faire dans une PWA, et son libelle suffit a dire « le week-end, une semaine
+  // sur deux ».
+  const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
+    .select('id, label').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .eq('active', true).order('created_at', { ascending: true }).limit(50)
+  if (errR) {
+    console.error('[menages-public] lecture regles echec:', errR.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
+  return res.status(200).json({
+    autorise: true,
+    modifiable: qui.niveau === 'write',
+    prenom: qui.profil.first_name,
+    exceptions: exceptions || [],
+    regles: (regles || []).map(r => ({ id: r.id, label: r.label }))
+  })
+}
+
+// Elle pose ou retire une INDISPONIBILITE. Une seule forme : un jour, absente.
+//
+// ⚠ ELLE NE PEUT PAS SE DECLARER DISPONIBLE UN JOUR QU'ELLE NE PREND PAS.
+// `available` n'est pas un parametre : une exception posee ici vaut TOUJOURS
+// `false`. Ouvrir le sens inverse lui permettrait de se rendre candidate un jour
+// que l'hote ne lui a pas confie — et l'ecran de l'hote, lui, garde les deux
+// sens (c'est lui qui peut dire « viens exceptionnellement ce samedi »).
+async function mesIndisponibilites (req, res, token, { retirer }) {
+  const qui = await celleQuiDeclare(token, { ecriture: true })
+  if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
+  if (qui.erreur === 403) {
+    return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+  }
+  if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+
+  const { date } = req.body || {}
+  const jour = jourValide(date)
+  if (!jour) return res.status(400).json({ error: 'Date invalide' })
+
+  // ⚠ PAS DE DECLARATION DANS LE PASSE. Se retirer d'un jour deja passe ne veut
+  // rien dire — le menage a eu lieu ou non — et cela reecrirait l'historique sur
+  // lequel s'appuie l'attribution des remarques de proprete.
+  if (jour < todayInParis()) {
+    return res.status(400).json({ error: 'Cette date est déjà passée' })
+  }
+
+  if (retirer) {
+    // ⚠ ELLE NE RETIRE QUE CE QU'ELLE A DECLARE (`source = 'prestataire'`). Une
+    // absence posee par l'HOTE — « tu ne travailles pas ce jour-la » — n'est pas
+    // la sienne a defaire : la lui laisser effacer la remettrait candidate sur un
+    // jour dont il l'avait retiree, sans qu'il l'apprenne.
+    const { data, error } = await supabase.from('provider_availability_exceptions')
+      .delete()
+      .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+      .eq('date', jour).eq('source', 'prestataire')
+      .select('id')
+    if (error) {
+      console.error('[menages-public] retrait indisponibilite echec:', error.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    if (!data || !data.length) {
+      // ⚠ « RIEN A SUPPRIMER » N'EST PAS « CE N'EST PAS A VOUS ». Zero ligne
+      // touchee couvre deux cas tres differents, et le 409 les confondait : sur
+      // cette PWA en 3G, un double tap sur « Annuler » annoncait a la
+      // prestataire que son employeur avait pose une absence qu'elle venait
+      // elle-meme de retirer. On regarde ce qui occupe reellement ce jour.
+      const { data: reste, error: errLire } = await supabase
+        .from('provider_availability_exceptions')
+        .select('id, source')
+        .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+        .eq('date', jour).maybeSingle()
+      if (errLire) {
+        console.error('[menages-public] lecture exception echec:', errLire.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      // Plus rien sur ce jour : c'est le resultat qu'elle demandait. Succes
+      // idempotent, comme le chemin de declaration.
+      if (!reste) return res.status(200).json({ success: true, date: jour, retiree: true })
+      return res.status(409).json({ error: 'Cette absence a été posée par votre employeur' })
+    }
+    return res.status(200).json({ success: true, date: jour, retiree: true })
+  }
+
+  // ⚠ JAMAIS D'UPSERT NU ICI. La cible de conflit est `(provider_id, date)` : un
+  // upsert met a jour la ligne existante QUELLE QU'ELLE SOIT et bascule sa
+  // `source` a 'prestataire'. Une absence posee par l'HOTE devenait donc la
+  // sienne — et comme elle ne peut retirer que ce qui porte sa source, elle
+  // pouvait ensuite l'EFFACER en deux gestes, sans qu'il l'apprenne. C'est
+  // exactement la garde que ce chemin existe pour tenir.
+  //
+  // La sequence est atomique et n'ecrase rien :
+  //   1. mettre a jour SA ligne si elle existe (`source = 'prestataire'`) ;
+  //   2. sinon inserer — et si la contrainte d'unicite refuse, c'est qu'une ligne
+  //      de l'HOTE occupe ce jour. On le DIT plutot que de la remplacer.
+  const ligne = { user_id: qui.userId, provider_id: qui.profil.id, date: jour,
+                  available: false, source: 'prestataire' }
+
+  const { data: maj, error: errMaj } = await supabase.from('provider_availability_exceptions')
+    .update({ available: false })
+    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .eq('date', jour).eq('source', 'prestataire')
+    .select('id, date, available, source')
+  if (errMaj) {
+    console.error('[menages-public] declaration indisponibilite echec:', errMaj.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ Un double tap sur un telephone est le cas NORMAL, pas une erreur : la
+  // ligne etait deja la, on rend un succes.
+  if (maj && maj.length) return res.status(200).json({ success: true, exception: maj[0] })
+
+  const { data, error } = await supabase.from('provider_availability_exceptions')
+    .insert(ligne).select('id, date, available, source').maybeSingle()
+  if (error) {
+    // 23505 = violation d'unicite : une ligne existe sur ce jour, et elle n'est
+    // pas la sienne (l'update ci-dessus n'a rien touche).
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: 'Votre employeur a déjà noté quelque chose sur cette date. Prévenez-le directement.' })
+    }
+    console.error('[menages-public] declaration indisponibilite echec:', error.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  return res.status(200).json({ success: true, exception: data })
+}
+
+// Une date de calendrier, et rien d'autre. ⚠ Pas de `new Date()` sur une chaine
+// libre : « 2026-13-45 » y devient une date valide dans certains moteurs, et le
+// jour ecrit ne serait pas celui qu'elle a touche.
+function jourValide (date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''))
+  if (!m) return null
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12))
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString().slice(0, 10) === `${m[1]}-${m[2]}-${m[3]}` ? `${m[1]}-${m[2]}-${m[3]}` : null
+}

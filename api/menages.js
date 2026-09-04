@@ -240,6 +240,32 @@ module.exports = async function handler(req, res) {
         // definitivement non modifiables.
         // Le jeton lui-meme ne sort JAMAIS : on rend l'ID de sa ligne
         // `public_tokens`, que cet ecran connait deja.
+        // Le droit « elle gère ses absences » (lot 3.5). ⚠ C'est un REGLAGE, pas
+        // une coordonnee : il sort sous le meme droit `prestataires` que le reste
+        // de l'annuaire, sans opt-in. Sans lui, la case de la fiche partirait
+        // toujours cochee et retablirait au premier enregistrement un droit que
+        // l'hote avait coupe.
+        let dispoParProfil = new Map()
+        let droitsLisibles = true
+        if ((pr || []).length) {
+          const { data: dr, error: errDr } = await supabase.from('profile_permissions')
+            .select('profile_id, self_availability')
+            .in('profile_id', (pr || []).map(x => x.id))
+          // ⚠ UNE PANNE SE DIT, ELLE NE SE DEGUISE PAS EN 'none'. Ignoree, elle
+          // rendait un droit indistinguable d'un droit coupe : l'ecran decochait
+          // la case, et le premier enregistrement de la fiche REECRIVAIT
+          // `self_availability: 'none'` — un timeout PostgREST revoquait
+          // definitivement un droit que personne n'avait touche. Le drapeau
+          // permet a l'ecran de griser la case au lieu de la mentir, exactement
+          // comme `rapprochement` le fait pour les jetons.
+          if (errDr) {
+            console.error('[menages] lecture des droits prestataires echec', errDr.message)
+            droitsLisibles = false
+          } else {
+            dispoParProfil = new Map((dr || []).map(d => [d.profile_id, d.self_availability]))
+          }
+        }
+
         const jetons = (pr || []).map(x => x.pwa_token).filter(Boolean)
         let parJeton = new Map()
         let rapprochementSur = true
@@ -273,7 +299,10 @@ module.exports = async function handler(req, res) {
           // personnels de tout le personnel de menage sans jamais les afficher.
           // Une donnee qu'un ecran n'utilise pas n'a pas a transiter par lui.
           ...(avecContacts ? { telephone: x.phone || null, email: x.email || null } : {}),
-          public_token_id: x.pwa_token ? (parJeton.get(x.pwa_token) || null) : null
+          public_token_id: x.pwa_token ? (parJeton.get(x.pwa_token) || null) : null,
+          permissions: droitsLisibles
+            ? { self_availability: dispoParProfil.get(x.id) || 'none' }
+            : null
         }))
         // L'ecran doit pouvoir distinguer « ce lien n'a pas de profil » d'« on
         // n'a pas pu le savoir ».
@@ -553,6 +582,40 @@ async function ecrireLiaisons (req, res) {
   for (const l of liaisons) {
     const ref = String(l && l.property_id || '')
     const rang = Number(l && l.rang)
+    // ⚠ LES JOURS ATTITRES SONT UNE DONNEE CLIENT : ils decident QUI recoit un
+    // menage, donc ils se valident comme une reference de bien, pas comme un
+    // affichage. Un tableau vide et l'absence de champ ne veulent PAS dire la
+    // meme chose :
+    //   - `weekdays` ABSENT (undefined) = l'appelant ne se prononce pas, on garde
+    //     ce qui est en base. C'est ce qui protege un reglage existant contre un
+    //     ecran plus ancien qui n'enverrait pas ce champ ;
+    //   - `weekdays: []` = « aucun jour attitre », un choix explicite de l'hote.
+    let jours
+    if (l && l.weekdays !== undefined) {
+      if (!Array.isArray(l.weekdays)) {
+        return res.status(400).json({ error: 'Jours attitrés invalides' })
+      }
+      // ⚠ PAS DE `Number()` NU. `Number(null)` vaut 0, `Number('')` aussi, et
+      // `Number([])` encore : un `[null]` envoye par erreur devenait « dimanche »,
+      // et quelqu'un se retrouvait attitre un jour que personne n'avait coche.
+      // On n'accepte qu'un entier, ou un chiffre ecrit — ce que rend un <input>.
+      const lus = l.weekdays.map(v =>
+        typeof v === 'number' ? v
+          : (typeof v === 'string' && /^[0-6]$/.test(v.trim()) ? Number(v) : NaN))
+      if (lus.some(j => !Number.isInteger(j) || j < 0 || j > 6)) {
+        return res.status(400).json({ error: 'Jours attitrés invalides' })
+      }
+      jours = [...new Set(lus)]
+      // Convention 0 = dimanche … 6 = samedi (§12.7), triee pour que deux
+      // enregistrements identiques ne produisent pas deux valeurs differentes.
+      jours.sort((x, y) => x - y)
+    }
+    // ⚠ L'ENGAGEMENT EST DESORMAIS EXPLICITE (lot 3.5). `requires_ack` absent =
+    // on ne se prononce pas ; sa valeur, quand elle vient, est la SEULE source —
+    // le rang ne la deduit plus (voir le retrait de la regle du 3.3 plus bas).
+    if (l && l.requires_ack !== undefined && typeof l.requires_ack !== 'boolean') {
+      return res.status(400).json({ error: 'Mode d\'engagement invalide' })
+    }
     if (!ref) return res.status(400).json({ error: 'Bien manquant dans une liaison' })
     // ⚠ REF_SQL_SURE, comme partout ailleurs : cette reference finit interpolee
     // dans un filtre PostgREST plus bas. Aucun chemin d'ecriture connu ne place
@@ -573,7 +636,8 @@ async function ecrireLiaisons (req, res) {
     // recuperer aucun.
     if (vues.has(ref)) return res.status(400).json({ error: 'Bien en double dans la demande' })
     vues.add(ref)
-    voulues.push({ ref, rang })
+    voulues.push({ ref, rang, jours,
+                   requiresAck: l && l.requires_ack !== undefined ? l.requires_ack : undefined })
   }
 
   const { data: biensDuCompte, error: errBiens } = await supabase.from('properties')
@@ -625,30 +689,44 @@ async function ecrireLiaisons (req, res) {
   // referente/suppleante, exactement comme la reprise de la migration
   // (`requires_ack = false where rang = 1`).
   //
-  // ⚠ ON NE LE RECALCULE QUE SI LE RANG CHANGE. Deux fautes symetriques a eviter :
-  //   - le recalculer TOUJOURS ecraserait un `requires_ack` regle finement — une
-  //     suppleante rodee passee d'office sans etre promue — a chaque
-  //     enregistrement de la fiche, sans que personne comprenne pourquoi elle
-  //     redemande confirmation ;
-  //   - ne JAMAIS le recalculer rendait la promotion impossible : echanger les
-  //     rangs de deux personnes depuis leurs deux fiches ne changeait rien, la
-  //     nouvelle rang 1 restait « a confirmer », et aucun ecran n'expose encore
-  //     `requires_ack` pour corriger (lot 3.5).
-  // Le rang envoye est donc une INTENTION : quand il bouge, il retranche.
+  // ⚠ `requires_ack` ET `weekdays` VIENNENT DE L'ECRAN, ET DE LUI SEUL (lot 3.5).
+  //
+  // La regle du lot 3.3 — « le rang qui bouge retranche `requires_ack` » — est
+  // RETIREE ICI. Elle n'existait que parce qu'aucun ecran n'exposait le reglage :
+  // le rang servait d'intention par defaut. Maintenant que la fiche le regle
+  // explicitement, la garder ferait DEUX writers de la meme colonne, dont un
+  // implicite — c'est la faute exacte du double writer de `public_tokens`
+  // (CLAUDE.md) : le rang aurait defait en silence un mode d'engagement choisi.
+  //
+  // Ce qui reste, c'est le repli sur l'EXISTANT quand l'appelant ne se prononce
+  // pas (champ absent) : un ecran plus ancien, ou un appel partiel, ne doit pas
+  // remettre a zero un reglage. A la CREATION seulement, faute de tout reglage,
+  // le rang donne encore le defaut — un rang 1 est « d'office », comme la reprise
+  // de la migration du 3.1.
   const { data: connues, error: errConnues } = await supabase
     .from('property_cleaning_providers')
-    .select('property_id, rang, requires_ack')
+    .select('property_id, rang, requires_ack, weekdays')
     .eq('user_id', userId).eq('provider_id', prof.id)
   if (errConnues) {
     console.error('[menages] lecture liaisons connues echec', errConnues.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-  const ackConnu = new Map((connues || []).map(l => [String(l.property_id), l]))
-  // `true` = cette liaison garde son reglage ; `false` = le rang vient de bouger,
-  // l'intention de l'ecran l'emporte.
-  const ackConserve = v => {
-    const l = ackConnu.get(v.ref)
-    return l && Number(l.rang) === Number(v.rang) ? l.requires_ack : null
+  const connue = new Map((connues || []).map(l => [String(l.property_id), l]))
+
+  // L'engagement effectif : ce que l'ecran dit ; sinon ce qui existe ; sinon le
+  // defaut du rang, et seulement a la creation.
+  const ackVoulu = v => {
+    if (v.requiresAck !== undefined) return v.requiresAck
+    const l = connue.get(v.ref)
+    return l ? l.requires_ack : v.rang !== 1
+  }
+  // Les jours : ce que l'ecran dit ; sinon ce qui existe ; sinon rien (= tous les
+  // jours au sens du §12.1, et donc jamais sollicitee tant que rien n'est regle,
+  // §12.9c).
+  const joursVoulus = v => {
+    if (v.jours !== undefined) return v.jours
+    const l = connue.get(v.ref)
+    return l ? l.weekdays : null
   }
 
   if (voulues.length) {
@@ -656,7 +734,7 @@ async function ecrireLiaisons (req, res) {
       .upsert(voulues.map(v => ({
         user_id: userId, property_id: v.ref, provider_id: prof.id,
         rang: v.rang, active: true,
-        requires_ack: ackConserve(v) === null ? v.rang !== 1 : ackConserve(v)
+        requires_ack: ackVoulu(v), weekdays: joursVoulus(v)
       })), { onConflict: 'user_id,property_id,provider_id' })
     if (errUp) {
       console.error('[menages] upsert liaisons echec', errUp.message)

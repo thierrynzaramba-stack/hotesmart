@@ -593,7 +593,10 @@ qu'a une personne attitrée sur tous les jours. La référence est **par journé
 > première — par rang croissant — parmi les personnes **attitrées ce jour-là**
 > (`weekdays`) **et disponibles** (règles RRULE + exceptions).
 
-**`weekdays` vide ou NULL = attitrée tous les jours.** C'est ce qui rend le
+**`weekdays` NULL = attitrée tous les jours** (⚠️ révisé au lot 3.5 : un **tableau vide**
+est désormais « aucun jour », un choix explicite de l'hôte — l'écran le produit
+dès qu'il décoche tout, et les confondre faisait l'inverse du geste).
+**NULL, lui, reste « tous les jours ».** C'est ce qui rend le
 modèle rétrocompatible sans aucune migration de données : Régina, sans
 `weekdays`, est de garde tous les jours sur ses deux biens — exactement l'état
 actuel.
@@ -692,7 +695,7 @@ responsable noierait les vraies alertes.
 | **3.2** | `lib/cleaning/garde.js` : `responsableDuJour()` / `planningDeGarde()`. Fonctions pures. | aucun |
 | **3.3** | ✅ **LIVRÉ** (4 septembre 2026) — le moteur consomme la garde : création, changement de date, refus/expiration → remplaçante, `requires_ack` interprété partout, la proposition notifie, alerte sur trou de garde. | — |
 | **3.4** | Écran **planning de garde** : semaine × biens, qui est de garde, ménages posés dessus. | app ménage |
-| **3.5** | Jours attitrés et disponibilités côté hôte, « Mes disponibilités » dans la PWA. | 2 écrans |
+| **3.5** | ✅ **LIVRÉ** (4 septembre 2026, **avant le 3.4** : le moteur était inerte sans lui) — jours attitrés + engagement dans la fiche, disponibilités côté hôte (`api/disponibilites.js`), « Mes absences » dans la PWA. | 2 écrans |
 
 **Qui déclare les congés** : la prestataire (`self_availability: write`), l'hôte
 voit tout et corrige.
@@ -726,8 +729,19 @@ Corollaire : ce même job est le **chemin d'escalade** après une expiration. Le
 escalade tout de suite — dans le même update que le refus, pour qu'il n'existe aucun instant où
 le ménage soit à la fois refusé et sans proposition.
 
+**(d) La prestataire ne déclare que ses INDISPONIBILITÉS** — décision du product
+owner, 4 septembre 2026. Ses **jours attitrés** sont une décision de l'hôte :
+pouvoir s'en retirer elle-même lui permettrait de quitter un bien sans qu'il
+l'apprenne, alors qu'il compte sur elle pour le préparer. Elle déclare, il voit
+tout et corrige. Corollaire tenu par le code : `available` n'est pas un
+paramètre de son endpoint (une exception qu'elle pose vaut toujours `false`), et
+elle ne peut défaire que ce que `source = 'prestataire'` marque comme sien.
+
 **(c) On ne propose qu'aux liaisons dont les `weekdays` sont explicitement
-réglés** — décision du product owner, 4 septembre 2026, **à revoir au lot 3.5**.
+réglés** — décision du product owner, 4 septembre 2026. ✅ **La restriction se
+lève d'elle-même depuis le lot 3.5** : l'écran permet désormais de régler ces
+jours, et un bien réglé redevient sollicitable sans autre geste. Elle reste en
+place comme défaut prudent pour tout ce qui n'est pas réglé.
 
 `weekdays` vide vaut « attitrée tous les jours » (§12.1), et c'est ce qui rend le
 modèle rétrocompatible sans migration. Mais tant qu'aucun écran ne permet de

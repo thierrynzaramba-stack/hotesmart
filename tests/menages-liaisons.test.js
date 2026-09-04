@@ -642,40 +642,97 @@ test('`requires_ack` est POSÉ à la création de la liaison', async () => {
   assert.strictEqual(up.rows.find(r => r.property_id === '169567').requires_ack, true)
 })
 
-test('PROMOUVOIR quelqu\'un en rang 1 la rend bien « d\'office »', async () => {
-  // ⚠ DÉFAUT TROUVÉ EN REVIEW. Conserver le `requires_ack` de toute liaison
-  // existante rendait la promotion IMPOSSIBLE : échanger les rangs de deux
-  // personnes ne changeait rien, la nouvelle rang 1 restait « à confirmer », et
-  // aucun écran n'expose `requires_ack` pour corriger (lot 3.5).
-  // Le rang envoyé est une INTENTION : quand il bouge, il retranche.
+test('le RANG SEUL ne change plus l\'engagement (fin du détournement)', async () => {
+  // ⚠ La règle du lot 3.3 — « le rang qui bouge retranche `requires_ack` » —
+  // n'existait que faute d'écran pour régler l'engagement. Maintenant que la
+  // fiche le règle explicitement, la garder ferait DEUX writers de la même
+  // colonne, dont un implicite : le rang aurait défait en silence un mode
+  // d'engagement choisi. C'est la faute du double writer de `public_tokens`.
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true }]
   })
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
   const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
-  assert.strictEqual(up.rows[0].requires_ack, false, 'promue : elle porte d\'office')
+  assert.strictEqual(up.rows[0].requires_ack, true,
+    'le rang a bougé, l\'engagement non : seul l\'écran le décide')
+  assert.strictEqual(up.rows[0].rang, 1, 'le rang, lui, est bien enregistré')
 })
 
-test('RÉTROGRADER quelqu\'un lui rend la confirmation', async () => {
+test('c\'est `requires_ack` ENVOYÉ qui décide, quel que soit le rang', async () => {
   const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: false }]
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true }]
   })
-  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 2 }] }), reponse())
-  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
-  assert.strictEqual(up.rows[0].requires_ack, true)
-})
-
-test('une liaison EXISTANTE au MÊME rang garde son `requires_ack`', async () => {
-  // ⚠ Une suppléante rodée passée d'office sans être promue rang 1 serait
-  // écrasée à chaque enregistrement de la fiche, et personne ne comprendrait
-  // pourquoi elle redemande confirmation.
-  const { handler, etat } = preparer({
-    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: false }]
-  })
-  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 2 }] }), reponse())
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 2, requires_ack: false }
+  ] }), reponse())
   const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
   assert.strictEqual(up.rows[0].requires_ack, false,
-    'rang inchangé : un réglage fin n\'est pas écrasé par un simple enregistrement')
+    'une suppléante rodée peut être assignée d\'office sans être promue')
+})
+
+test('à la CRÉATION seulement, le rang donne encore le défaut', async () => {
+  // Faute de tout réglage existant, un rang 1 est « d'office » — la reprise
+  // fidèle de la migration du lot 3.1.
+  const { handler, etat } = preparer({ apres: [] })
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1 }, { property_id: '169567', rang: 2 }
+  ] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.strictEqual(up.rows.find(r => r.property_id === '209413').requires_ack, false)
+  assert.strictEqual(up.rows.find(r => r.property_id === '169567').requires_ack, true)
+})
+
+test('les JOURS ATTITRÉS sont écrits, et validés comme une donnée client', async () => {
+  // ⚠ Ils décident QUI reçoit un ménage : ils se valident comme une référence de
+  // bien, pas comme un affichage.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1, weekdays: [6, 0, 6] }
+  ] }), res)
+  assert.strictEqual(res.code, 200)
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows[0].weekdays, [0, 6],
+    'dédoublonnés et triés : deux enregistrements identiques ne doivent pas différer')
+})
+
+test('des jours hors 0-6, ou non-tableau, sont refusés avant toute écriture', async () => {
+  for (const w of [[7], [-1], ['samedi'], [1.5], 'lundi', {}, [null]]) {
+    const { handler, etat } = preparer({})
+    const res = reponse()
+    await handler(post({ provider_id: MARIE, liaisons: [
+      { property_id: '209413', rang: 1, weekdays: w }
+    ] }), res)
+    assert.strictEqual(res.code, 400, JSON.stringify(w))
+    assert.strictEqual(etat.upserts.length, 0)
+  }
+})
+
+test('`weekdays: []` est un choix EXPLICITE, pas une absence', async () => {
+  // ⚠ « Aucun jour attitré » et « je ne me prononce pas » ne sont pas la même
+  // chose : confondre les deux ferait effacer un réglage par un écran plus
+  // ancien, ou ignorer une mise à zéro voulue par l'hôte.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1,
+              requires_ack: true, weekdays: [0, 6] }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [
+    { property_id: '209413', rang: 1, weekdays: [] }
+  ] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows[0].weekdays, [])
+})
+
+test('un champ ABSENT ne remet rien à zéro', async () => {
+  // Un écran plus ancien, ou un appel partiel, ne doit pas effacer un réglage.
+  const { handler, etat } = preparer({
+    apres: [{ user_id: PROD, property_id: '209413', provider_id: MARIE, rang: 1,
+              requires_ack: false, weekdays: [0, 6] }]
+  })
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
+  const up = etat.upserts.find(u => u.table === 'property_cleaning_providers')
+  assert.deepStrictEqual(up.rows[0].weekdays, [0, 6])
+  assert.strictEqual(up.rows[0].requires_ack, false)
 })
 
 test('retirer un bien ne rattrape rien', async () => {

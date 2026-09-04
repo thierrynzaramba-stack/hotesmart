@@ -40,6 +40,19 @@
     .tabs button.active { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); font-weight: 600; }
 
     .avis-etat { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; line-height: 1.6; }
+    .dispo-carte { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg);
+                   padding: 16px; margin-bottom: 12px; }
+    .dispo-titre { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .dispo-saisie { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .dispo-input { flex: 1; min-width: 150px; padding: 10px; font-size: 14px;
+                   border: 0.5px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+    .dispo-aide { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
+    .dispo-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                  font-size: 13px; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+    .dispo-item:last-child { border-bottom: none; }
+    .dispo-item .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 14px;
+                            font-size: 12px; color: var(--text2); padding: 4px 12px; cursor: pointer; }
+    .dispo-source { font-size: 11px; color: var(--text2); }
     .avis-etat strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 4px; }
     .ratio { display: flex; gap: 14px; align-items: center; }
     .ratio-item { display: flex; gap: 5px; align-items: center; font-size: 18px; font-weight: 600; }
@@ -534,7 +547,16 @@
            ete rendu inoperant une fois. -->
       <div class="tabs" id="tabs" style="display:none">
         <button data-tab="planning" class="active">Planning</button>
-        <button data-tab="avis">Avis</button>
+        <!-- ⚠ MASQUE PAR DEFAUT, comme « Mes absences ». Sans cela, la sonde des
+             absences affichait la barre et l'onglet Avis apparaissait avec elle —
+             y compris pour une prestataire dont `self_view_reviews` est a false,
+             c'est-a-dire l'inverse exact de ce que ce droit garantit. Chaque
+             sonde ne devoile QUE son propre onglet. -->
+        <button data-tab="avis" id="tab-avis" style="display:none">Avis</button>
+        <!-- ⚠ N'APPARAIT QUE SI LE DROIT EST LA (`self_availability`). A 'none',
+             ses absences sont gerees par son hote : un onglet qui repondrait
+             403 a chaque geste vaudrait moins que pas d'onglet. -->
+        <button data-tab="dispo" id="tab-dispo" style="display:none">Mes absences</button>
       </div>
 
       <!-- Vue Avis (masquee par defaut, y compris quand l'onglet n'existe pas) -->
@@ -554,6 +576,34 @@
         <div class="avis-etat" id="avis-etat">Chargement…</div>
         <div class="week-stats" id="avis-ratio" style="display:none"></div>
         <div id="avis-liste"></div>
+      </section>
+
+      <!-- Mes absences (masquee par defaut, comme la vue Avis) -->
+      <section id="dispo-vue" style="display:none">
+        <div class="avis-etat" id="dispo-etat">Chargement…</div>
+        <div id="dispo-contenu" style="display:none">
+          <!-- ⚠ ELLE DECLARE UNE ABSENCE, JAMAIS UNE PRESENCE. Se rendre
+               disponible un jour que l'hote ne lui a pas confie n'aurait aucun
+               effet (ses jours attitres sont sa decision a lui) et lui ferait
+               croire le contraire. -->
+          <div class="dispo-carte">
+            <div class="dispo-titre">Je ne suis pas disponible le…</div>
+            <div class="dispo-saisie">
+              <input type="date" id="dispo-date" class="dispo-input">
+              <button id="btn-absente" class="btn btn-primary">Déclarer</button>
+            </div>
+            <div class="dispo-aide" id="dispo-message"></div>
+          </div>
+          <div class="dispo-carte">
+            <div class="dispo-titre">Mes absences à venir</div>
+            <div id="dispo-liste"></div>
+          </div>
+          <div class="dispo-carte" id="dispo-regles-carte" style="display:none">
+            <div class="dispo-titre">Mes jours habituels</div>
+            <div id="dispo-regles"></div>
+            <div class="dispo-aide">Réglés par votre employeur. Pour les changer, dites-le lui.</div>
+          </div>
+        </div>
       </section>
 
       <div class="menage-layout">
@@ -985,8 +1035,9 @@ if ("serviceWorker" in navigator) {
     // Tentative de flush au demarrage si on a des actions en attente
     if (pendingQueue.length > 0) flushPendingQueue()
 
-    // Non bloquant : le planning ne doit pas dependre de la vue Avis.
+    // Non bloquant : le planning ne doit dependre d'aucune des deux vues.
     initAvis().catch(err => console.warn('[Avis] sonde impossible', err))
+    initDisponibilites().catch(err => console.warn('[Dispo] sonde impossible', err))
 
     brancherResonde()
   }
@@ -1839,19 +1890,22 @@ if ("serviceWorker" in navigator) {
   }
 
   function setTab (t) {
-    currentTab = (t === 'avis') ? 'avis' : 'planning'
+    currentTab = (t === 'avis' || t === 'dispo') ? t : 'planning'
     document.querySelectorAll('#tabs button').forEach(b => {
       b.classList.toggle('active', b.dataset.tab === currentTab)
     })
     const planning = document.querySelector('.menage-layout')
     const vue = document.getElementById('avis-vue')
-    if (planning) planning.style.display = (currentTab === 'avis') ? 'none' : ''
+    const vueDispo = document.getElementById('dispo-vue')
+    if (planning) planning.style.display = (currentTab === 'planning') ? '' : 'none'
     if (vue) vue.style.display = (currentTab === 'avis') ? '' : 'none'
+    if (vueDispo) vueDispo.style.display = (currentTab === 'dispo') ? '' : 'none'
     // Le bouton flottant Filtres appartient au planning : il n'a rien a filtrer
-    // dans la vue Avis et resterait sinon en travers de l'ecran sur mobile.
+    // ailleurs et resterait sinon en travers de l'ecran sur mobile.
     const fab = document.getElementById('fab-filters')
-    if (fab) fab.style.display = (currentTab === 'avis') ? 'none' : ''
+    if (fab) fab.style.display = (currentTab === 'planning') ? '' : 'none'
     if (currentTab === 'planning') routeRender()
+    if (currentTab === 'dispo') chargerDisponibilites()
     if (currentTab === 'avis' && !avisCharge) {
       chargerAvis().catch(err => {
         console.warn('[Avis] chargement impossible', err)
@@ -1868,17 +1922,149 @@ if ("serviceWorker" in navigator) {
     el.style.display = ''
   }
 
+  // ─── MES ABSENCES (lot 3.5) ──────────────────────────────────────────────
+  //
+  // ⚠ ELLE DECLARE UNE ABSENCE, JAMAIS UNE PRESENCE, et jamais ses JOURS
+  // ATTITRES : ceux-la sont une decision de son employeur. Pouvoir s'en retirer
+  // elle-meme lui permettrait de quitter un bien sans qu'il l'apprenne, alors
+  // qu'il compte sur elle pour le preparer.
+  //
+  // ⚠ AUCUNE FILE HORS LIGNE ICI, contrairement a « marquer fait ». Une absence
+  // rejouee deux heures plus tard porterait sur un planning qui a bouge — et
+  // surtout, l'ecran ne peut pas promettre que son employeur l'a vue si rien
+  // n'est parti. Hors ligne, on le DIT.
+  let dispoCharge = false
+
+  async function chargerDisponibilites () {
+    const etat = document.getElementById('dispo-etat')
+    const contenu = document.getElementById('dispo-contenu')
+    if (!dispoCharge) { etat.textContent = 'Chargement…'; etat.style.display = ''; contenu.style.display = 'none' }
+    let data
+    try {
+      const res = await fetch(`/api/menages-public?action=disponibilites&token=${currentToken}`)
+      if (!res.ok) throw new Error(String(res.status))
+      data = await res.json()
+    } catch (err) {
+      // ⚠ On le DIT plutot que d'afficher une liste vide : « aucune absence »
+      // sur une panne ferait croire a une prestataire qu'elle a bien declare.
+      etat.innerHTML = '<strong>Absences indisponibles</strong>Vérifiez votre connexion, puis rouvrez cet onglet.'
+      etat.style.display = ''; contenu.style.display = 'none'
+      return
+    }
+    if (data.autorise !== true) {
+      etat.innerHTML = '<strong>Vos absences sont gérées par votre employeur</strong>Prévenez-le directement.'
+      etat.style.display = ''; contenu.style.display = 'none'
+      return
+    }
+    dispoCharge = true
+    etat.style.display = 'none'; contenu.style.display = ''
+
+    // ⚠ Les absences posees par l'EMPLOYEUR sont visibles mais pas effacables :
+    // les masquer lui ferait croire a un bug le jour ou il en pose une, et les
+    // lui laisser retirer la remettrait candidate sur un jour dont il l'avait
+    // retiree — sans qu'il l'apprenne.
+    const liste = document.getElementById('dispo-liste')
+    const exceptions = (data.exceptions || []).filter(e => e.available === false)
+    liste.innerHTML = exceptions.length
+      ? exceptions.map(e => `
+          <div class="dispo-item">
+            <span>🚫 ${echapper(jourLisible(e.date))}
+              ${e.source === 'prestataire' ? '' : '<span class="dispo-source">— posée par votre employeur</span>'}
+            </span>
+            ${e.source === 'prestataire'
+              ? `<button class="btn-mini" data-retirer="${echapper(e.date)}">Annuler</button>` : ''}
+          </div>`).join('')
+      : '<div class="dispo-aide">Aucune absence déclarée.</div>'
+    liste.querySelectorAll('[data-retirer]').forEach(b => {
+      b.addEventListener('click', () => declarerAbsence(b.dataset.retirer, true))
+    })
+
+    const carte = document.getElementById('dispo-regles-carte')
+    const regles = data.regles || []
+    if (regles.length) {
+      document.getElementById('dispo-regles').innerHTML =
+        regles.map(r => `<div class="dispo-item"><span>${echapper(r.label || 'Règle')}</span></div>`).join('')
+      carte.style.display = ''
+    } else {
+      carte.style.display = 'none'
+    }
+
+    if (!data.modifiable) {
+      document.getElementById('btn-absente').disabled = true
+      document.getElementById('dispo-message').textContent =
+        'Vous pouvez consulter vos absences, mais c\'est votre employeur qui les pose.'
+    }
+  }
+
+  function jourLisible (d) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''))
+    if (!m) return String(d || '')
+    // ⚠ En UTC : une date de calendrier lue en heure locale se decale d'un jour
+    // a l'ouest de Greenwich.
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString('fr-FR',
+      { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+  }
+
+  async function declarerAbsence (date, retirer) {
+    const msg = document.getElementById('dispo-message')
+    if (!date) { msg.textContent = 'Choisissez une date.'; return }
+    // ⚠ HORS LIGNE, ON NE PROMET RIEN. Le reste de cette PWA a une file
+    // d'attente ; une absence, non — la rejouer plus tard porterait sur un
+    // planning qui a bouge, et l'ecran ne peut pas dire « c'est enregistre »
+    // quand rien n'est parti.
+    if (!navigator.onLine) {
+      msg.textContent = '⚠️ Hors ligne : rien n\'a été envoyé. Réessayez une fois connectée.'
+      return
+    }
+    msg.textContent = ''
+    try {
+      const res = await fetch(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: retirer ? 'retirerIndisponibilite' : 'declarerIndisponibilite', date })
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) { msg.textContent = (data && data.error) || 'Impossible d\'enregistrer.'; return }
+      document.getElementById('dispo-date').value = ''
+      msg.textContent = retirer ? '✓ Absence annulée.' : '✓ Absence enregistrée.'
+      await chargerDisponibilites()
+    } catch (err) {
+      msg.textContent = 'Connexion impossible. Réessayez.'
+    }
+  }
+
+  document.getElementById('btn-absente').addEventListener('click',
+    () => declarerAbsence(document.getElementById('dispo-date').value, false))
+
   // Sonde au demarrage : sert UNIQUEMENT a savoir si l'onglet doit exister.
   // `self_view_reviews` a false => pas d'onglet du tout. Hors ligne ou token
   // refuse => pas d'onglet non plus : on ne sait rien, on n'affiche rien.
   // Un 503 en revanche fait apparaitre l'onglet, en etat de panne : le serveur
   // nous parle, et masquer la vue ferait passer une panne pour un droit retire.
+  // ⚠ MEME LOGIQUE QUE L'ONGLET AVIS : l'onglet n'existe que si le serveur dit
+  // que le droit est la. Un onglet qui repondrait 403 a chaque geste vaudrait
+  // moins que pas d'onglet — et une panne ne doit pas le faire disparaitre non
+  // plus, sinon une indisponibilite passagere ressemble a un droit retire.
+  async function initDisponibilites () {
+    let res
+    try {
+      res = await fetch(`/api/menages-public?action=disponibilites&token=${currentToken}`)
+    } catch (err) { return }
+    if (res.status === 503) { montrerOnglets(); document.getElementById('tab-dispo').style.display = ''; return }
+    if (!res.ok) return
+    let data
+    try { data = await res.json() } catch (err) { return }
+    if (data.autorise !== true) return
+    montrerOnglets()
+    document.getElementById('tab-dispo').style.display = ''
+  }
+
   async function initAvis () {
     let res
     try {
       res = await fetch(`/api/menages-public?action=avis&token=${currentToken}`)
     } catch (err) { return }
-    if (res.status === 503) { montrerOnglets(); return }
+    if (res.status === 503) { montrerOnglets(); montrerOngletAvis(); return }
     if (!res.ok) return
     let data
     try { data = await res.json() } catch (err) { return }
@@ -1888,6 +2074,7 @@ if ("serviceWorker" in navigator) {
     // tard laisserait sinon un ratio perime en en-tete.
     if (data.actif === false || data.autorise !== true) { renderEnteteRatio(null); return }
     montrerOnglets()
+    montrerOngletAvis()
     renderEnteteRatio(data)
   }
 
@@ -1922,6 +2109,12 @@ if ("serviceWorker" in navigator) {
   // bien qu'UN SEUL tap sur « Avis » lancait autant de chargements paralleles
   // (`avisCharge` ne passe a true qu'apres le premier `await`, donc aucun ne
   // s'arrete). Mesure sur le vrai bloc : 3 sondes = 3 fetchs pour un clic.
+  // Chaque sonde devoile SON onglet, et lui seul.
+  function montrerOngletAvis () {
+    const b = document.getElementById('tab-avis')
+    if (b) b.style.display = ''
+  }
+
   let ongletsBranches = false
   function montrerOnglets () {
     const tabs = document.getElementById('tabs')
@@ -2002,7 +2195,11 @@ if ("serviceWorker" in navigator) {
     if (jeton !== chargementCourant) return
     // Le droit a pu etre retire entre la sonde et le clic.
     if (data.actif === false || data.autorise !== true) {
-      document.getElementById('tabs').style.display = 'none'
+      // ⚠ ON MASQUE LE SEUL ONGLET AVIS, PAS LA BARRE. La masquer entierement
+      // emportait « Mes absences », parfaitement legitime, jusqu'au rechargement
+      // de la PWA : un droit retire sur les avis ne retire pas les autres.
+      const bouton = document.getElementById('tab-avis')
+      if (bouton) bouton.style.display = 'none'
       renderEnteteRatio(null)
       setTab('planning')
       return
