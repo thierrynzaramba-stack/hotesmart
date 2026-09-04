@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<!-- ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce kb (MÊME COMMIT). -->
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Planning de garde</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    /* ⚠ CALENDRIER EN LONGUEUR, pas une grille 7 colonnes. Un tableau
+       biens × jours devient illisible dès le troisième bien sur un téléphone,
+       et la question que se pose l'hôte est « ce jour-là, qui est où ? ». */
+    .garde-nav { display: flex; align-items: center; justify-content: space-between;
+                 gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .garde-nav-boutons { display: flex; align-items: center; gap: 8px; }
+    .garde-nav button { background: var(--bg); border: 0.5px solid var(--border);
+                        border-radius: var(--radius); padding: 6px 10px; cursor: pointer;
+                        font-size: 13px; color: var(--text); }
+    .garde-nav button:hover { background: var(--bg2); }
+    .garde-label { font-size: 14px; font-weight: 500; text-align: center; min-width: 180px; }
+
+    .jour-bloc { background: var(--bg); border: 0.5px solid var(--border);
+                 border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden; }
+    .jour-bloc.aujourdhui { border-color: var(--primary); }
+    .jour-entete { display: flex; align-items: center; justify-content: space-between;
+                   gap: 8px; padding: 10px 14px; background: var(--bg2);
+                   font-size: 13px; font-weight: 600; text-transform: capitalize; }
+    .jour-entete .jour-marque { font-size: 11px; font-weight: 500; color: var(--primary); text-transform: none; }
+    .jour-vide { padding: 10px 14px; font-size: 12px; color: var(--text2); }
+
+    .garde-ligne { display: flex; align-items: flex-start; justify-content: space-between;
+                   gap: 10px; padding: 10px 14px; border-top: 0.5px solid var(--border);
+                   flex-wrap: wrap; }
+    .garde-bien { font-size: 13px; min-width: 140px; flex: 1; }
+    .garde-qui { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+    .pastille { font-size: 12px; border-radius: 20px; padding: 3px 10px;
+                border: 0.5px solid var(--border); background: var(--bg2); color: var(--text2); }
+    .pastille.porte { background: #EEEDFE; color: #3C3489; border-color: #C4B5FD; }
+    .pastille.attente { background: #FEF3C7; color: #92400E; border-color: #D97706; }
+    .pastille.alerte { background: #FEE2E2; color: #991B1B; border-color: #E24B4A; }
+    .pastille.absent { background: var(--bg2); color: var(--text2); }
+    .remplacante { font-size: 11px; color: var(--text2); }
+    .retour { margin-top: 6px; }
+    .pastille.retour-ok { background: #DCFCE7; color: #166534; border-color: #86EFAC; }
+    .pastille.retour-ko { background: #FEF3C7; color: #92400E; border-color: #D97706; }
+    .retour-etiquette { font-size: 10px; color: var(--text2); border: 0.5px solid var(--border);
+                        border-radius: 20px; padding: 2px 8px; margin-left: 4px; }
+    .retour-extrait { font-size: 12px; color: var(--text); margin-top: 4px; line-height: 1.5;
+                      font-style: italic; }
+
+    .menage-ligne { font-size: 12px; color: var(--text2); padding: 2px 14px 10px 14px; }
+    .menage-ligne a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+    .menage-ligne .motif { color: #991B1B; }
+    .menage-ligne .delai { color: #92400E; }
+
+    .legende { font-size: 11px; color: var(--text2); line-height: 1.9; margin-top: 14px; }
+    .legende span { margin-right: 14px; white-space: nowrap; }
+
+    .garde-etat { text-align: center; padding: 40px 20px; color: var(--text2);
+                  font-size: 13px; line-height: 1.6; }
+    .garde-etat strong { display: block; color: var(--text); margin-bottom: 4px; }
+
+    @media (max-width: 640px) {
+      .garde-label { min-width: 0; flex: 1; }
+      .garde-ligne { flex-direction: column; gap: 4px; }
+      .garde-bien { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">Planning de garde</div>
+        <div class="page-sub">Qui est de garde, jour par jour</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="garde-nav">
+        <div class="garde-nav-boutons">
+          <button id="btn-prev">← Semaine préc.</button>
+          <div class="garde-label" id="garde-label"></div>
+          <button id="btn-next">Semaine suiv. →</button>
+        </div>
+        <button id="btn-today">Aujourd'hui</button>
+      </div>
+
+      <div id="garde-liste">
+        <div class="garde-etat">Chargement…</div>
+      </div>
+
+      <div class="legende" id="legende" style="display:none">
+        <span><span class="pastille porte">Prénom</span> de garde / porte le ménage</span>
+        <span><span class="pastille attente">⏳ Prénom</span> proposé, en attente</span>
+        <span><span class="pastille alerte">⚠ personne</span> ménage sans personne</span>
+        <span><span class="pastille absent">—</span> aucune garde ce jour-là</span>
+        <span><span class="pastille retour-ok">👍</span> / <span class="pastille retour-ko">👎</span> retour du voyageur sur ce ménage</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { enteteCompte } from '/shared/compte-courant.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+
+  let session = null
+  let debutSemaine = lundiDe(new Date())
+
+  // ─── Dates ────────────────────────────────────────────────────────────────
+  //
+  // ⚠ TOUT EN UTC, ET LES JOURS SONT DES CHAÎNES. Le domaine ménage raisonne en
+  // jours de calendrier : passer par un instant local fait basculer la date d'un
+  // jour au moindre décalage — le piège déjà corrigé deux fois dans ce dépôt.
+  function lundiDe (d) {
+    const j = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12))
+    const dow = j.getUTCDay()                 // 0 = dimanche
+    j.setUTCDate(j.getUTCDate() - ((dow + 6) % 7))
+    return j
+  }
+  const cle = d => d.toISOString().slice(0, 10)
+  function plusDeJours (d, n) {
+    const c = new Date(d.getTime()); c.setUTCDate(c.getUTCDate() + n); return c
+  }
+  function jourLisible (s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+    if (!m) return s
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12))
+      .toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+  }
+  function libelleSemaine (du, au) {
+    const f = s => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+      return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12))
+        .toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+    }
+    return `${f(du)} – ${f(au)}`
+  }
+  const aujourdhui = () => cle(new Date(Date.UTC(
+    new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 12)))
+
+  function echapper (t) {
+    return String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  }
+
+  // ─── Chargement ───────────────────────────────────────────────────────────
+  let chargementCourant = 0
+  async function charger () {
+    const du = cle(debutSemaine)
+    const au = cle(plusDeJours(debutSemaine, 6))
+    document.getElementById('garde-label').textContent = libelleSemaine(du, au)
+
+    // ⚠ UN JETON PAR CHARGEMENT. Deux clics rapides sur « semaine suivante »
+    // lancent deux requêtes : sans ce garde-fou, la plus lente écrase la plus
+    // récente et l'écran affiche une semaine que personne ne regarde.
+    const jeton = ++chargementCourant
+    etat('Chargement…')
+
+    let res
+    try {
+      // ⚠ `enteteCompte()` : sans lui, le serveur lit le compte de l'APPELANT et
+      // non celui qui est sélectionné — un gestionnaire verrait la garde de son
+      // propre compte en croyant lire celle de son client.
+      res = await fetch(`/api/garde?du=${du}&au=${au}`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}`, ...enteteCompte() }
+      })
+    } catch (e) {
+      if (jeton === chargementCourant) etat('Connexion impossible', 'Vérifiez votre réseau, puis réessayez.')
+      return
+    }
+    if (jeton !== chargementCourant) return
+    if (res.status === 403) return etat('Accès refusé', 'Vous n\'avez pas le droit de consulter les ménages.')
+    if (!res.ok) return etat('Service indisponible', 'Réessayez dans un instant.')
+
+    let data
+    try { data = await res.json() } catch (e) { return etat('Réponse illisible') }
+    if (jeton !== chargementCourant) return
+    rendre(data)
+  }
+
+  function etat (titre, message) {
+    document.getElementById('legende').style.display = 'none'
+    document.getElementById('garde-liste').innerHTML =
+      `<div class="garde-etat"><strong>${echapper(titre)}</strong>${echapper(message || '')}</div>`
+  }
+
+  // ─── Rendu ────────────────────────────────────────────────────────────────
+  function rendre (data) {
+    const biens = data.biens || []
+    if (!biens.length) {
+      return etat('Aucun bien', 'Connectez un logement pour voir sa garde.')
+    }
+
+    const nomBien = Object.fromEntries(biens.map(b => [b.propertyId || b.id, b.name]))
+    // garde[bien][date] et menages[bien][date] : l'écran est vertical, la donnée
+    // arrive par bien — on retourne l'index une fois plutôt qu'à chaque cellule.
+    const gardeParJour = {}
+    for (const b of (data.garde || [])) {
+      for (const j of (b.jours || [])) {
+        (gardeParJour[j.date] ||= {})[b.propertyId] = j
+      }
+    }
+    const menagesParJour = {}
+    for (const m of (data.menages || [])) {
+      ((menagesParJour[m.date] ||= {})[m.propertyId] ||= []).push(m)
+    }
+
+    const auj = aujourdhui()
+    // Les biens que l'app ménage ne gère pas : aucun prestataire n'y est lié.
+    const geres = Object.fromEntries((data.garde || []).map(b => [b.propertyId, b.gere !== false]))
+    const html = (data.jours || []).map(date => {
+      const lignes = biens.map(b => {
+        const ref = b.id
+        const g = (gardeParJour[date] || {})[ref] || null
+        const menages = (menagesParJour[date] || {})[ref] || []
+        return ligneBien(nomBien[ref] || ref, g, menages, data.avec_noms, geres[ref] !== false)
+      }).join('')
+      const marque = date === auj ? '<span class="jour-marque">aujourd\'hui</span>' : ''
+      return `
+        <div class="jour-bloc ${date === auj ? 'aujourdhui' : ''}">
+          <div class="jour-entete"><span>${echapper(jourLisible(date))}</span>${marque}</div>
+          ${lignes}
+        </div>`
+    }).join('')
+
+    // ⚠ UNE LISTE TRONQUÉE SE DIT. Un ménage hors du lot rend son jour « sans
+    // ménage » : il s'afficherait en gris au lieu du rouge — l'alerte que cet
+    // écran existe pour montrer deviendrait un silence.
+    const avert = data.tronque
+      ? '<div class="jour-bloc"><div class="jour-vide">⚠️ Liste incomplète : trop de biens ou de ménages sur cette période. Réduisez la fenêtre pour tout voir.</div></div>'
+      : ''
+    document.getElementById('garde-liste').innerHTML = avert + html
+    document.getElementById('legende').style.display = ''
+  }
+
+  function ligneBien (nom, g, menages, avecNoms, gere) {
+    // ⚠ LE ROUGE EST CONDITIONNEL, ET DEUX FOIS (§12.6). Un jour sans personne
+    // ET sans ménage n'est pas un problème : un bien n'a pas de départ tous les
+    // jours, et peindre chaque case vide noierait les vrais trous.
+    // ⚠ ET UN BIEN NON GÉRÉ N'EST PAS UN TROU DE GARDE. `deciderParGarde` sépare
+    // « aucune liaison » (ce bien n'est pas confié à l'app ménage — le moteur
+    // n'alerte PAS, décision du 3 septembre) de « personne ce jour-là ». Les
+    // confondre peignait en rouge chaque départ d'un hôte qui fait son ménage
+    // lui-même, ou ses deux logements sur trois non confiés : l'écran entier
+    // rouge, et l'hôte cesse de le regarder.
+    const trou = !g || g.trou
+    const aMenage = menages.length > 0
+    const qui = !gere
+      ? '<span class="pastille absent">non confié</span>'
+      : trou
+        ? (aMenage
+            ? '<span class="pastille alerte">⚠ personne de garde</span>'
+            : '<span class="pastille absent">—</span>')
+        : pastilleQui(g.responsable, avecNoms)
+
+    // ⚠ LA REMPLAÇANTE PEUT ELLE AUSSI N'ÊTRE JAMAIS SOLLICITÉE (§12.9c). Sans
+    // cette mention, l'hôte croyait avoir un filet de sécurité qui n'existe pas :
+    // une suppléante « à confirmer » sans jours réglés ne recevra aucune
+    // proposition, jamais.
+    const remplacante = (!trou && g.remplacante)
+      ? `<span class="remplacante">↻ ${echapper(nomOu(g.remplacante, avecNoms))}${
+           g.remplacante.a_regler ? ' — jours à régler' : ''}</span>` : ''
+
+    return `
+      <div class="garde-ligne">
+        <div class="garde-bien">${echapper(nom)}</div>
+        <div class="garde-qui">${qui}${remplacante}</div>
+      </div>
+      ${menages.map(m => ligneMenage(m, avecNoms, gere)).join('')}`
+  }
+
+  // ⚠ SANS LE DROIT `prestataires`, ON DIT « quelqu'un », PAS UN IDENTIFIANT.
+  // L'écran reste juste — le bien est couvert — sans exposer qui compose le
+  // personnel de ménage à un propriétaire délégué.
+  function nomOu (p, avecNoms) {
+    if (!p) return 'personne'
+    if (!avecNoms || !p.prenom) return 'quelqu\'un'
+    return p.prenom
+  }
+
+  function pastilleQui (p, avecNoms) {
+    if (!p) return '<span class="pastille absent">—</span>'
+    // ⚠ ELLE EST DE GARDE, MAIS LE MOTEUR NE LA SOLLICITERA JAMAIS : elle doit
+    // confirmer et aucun jour ne lui est confié sur ce bien (§12.9c). Sans cette
+    // mention, l'écran affichait « Marie » juste au-dessus de « ménage —
+    // personne » : deux affirmations contradictoires, et aucun indice que le
+    // problème est un réglage de jours.
+    // ⚠ UN PROFIL DÉSACTIVÉ N'A PLUS DE PWA. La désactivation supprime sa ligne
+    // `public_tokens` sans toucher à ses liaisons : elle reste donc « de garde »
+    // pour le calcul, mais elle ne peut plus ouvrir son planning ni répondre.
+    // L'afficher en violet, comme si tout allait bien, laissait l'hôte compter
+    // sur quelqu'un qui ne verra jamais le ménage.
+    if (p.actif === false) {
+      return `<span class="pastille alerte">${echapper(nomOu(p, avecNoms))} — désactivée</span>`
+    }
+    if (p.a_regler) {
+      return `<span class="pastille attente">${echapper(nomOu(p, avecNoms))} — jours à régler</span>`
+    }
+    return `<span class="pastille porte">${echapper(nomOu(p, avecNoms))}</span>`
+  }
+
+  // Le retour de propreté DU SÉJOUR, sur un ménage déjà passé.
+  //
+  // ⚠ ATTACHÉ À UN MÉNAGE, PAS À UNE PERSONNE (décision du 4 septembre 2026).
+  // Les compteurs globaux d'une prestataire — son ratio — sont sa fiche qualité :
+  // ils vivent sur /avis et dans sa PWA, pas sur l'écran des ménages.
+  //
+  // ⚠ RIEN QUAND IL N'Y A RIEN. Un ménage sans avis rattaché n'affiche pas
+  // « pas encore d'avis » : ce serait remplir l'écran de vide, et faire douter
+  // d'un travail correct.
+  //
+  // ⚠ JAMAIS LE NOM DU VOYAGEUR — le serveur ne l'envoie pas — et l'étiquette
+  // « retour privé » quand l'extrait vient d'un message que le voyageur n'a pas
+  // rendu public.
+  function retourProprete (m) {
+    const r = m && m.retour
+    if (!r) return ''
+    const badge = r.verdict === 'positif'
+      ? '<span class="pastille retour-ok">👍 propreté saluée</span>'
+      : '<span class="pastille retour-ko">👎 remarque propreté</span>'
+    const prive = r.prive ? ' <span class="retour-etiquette">retour privé</span>' : ''
+    const humain = r.humain ? ' <span class="retour-etiquette">requalifié par vous</span>' : ''
+    // L'extrait est une CITATION : il porte des guillemets, et rien d'autre du
+    // texte n'est disponible côté client.
+    const extrait = r.extrait
+      ? `<div class="retour-extrait">« ${echapper(r.extrait)} »</div>` : ''
+    return `<div class="retour">${badge}${prive}${humain}${extrait}</div>`
+  }
+
+  // L'échéance d'une proposition, dite à l'heure de PARIS. ⚠ `offer_expires_at`
+  // est un INSTANT : l'afficher en UTC annonce 16 h à quelqu'un qui a jusqu'à
+  // 18 h, et fait passer une proposition de fin de journée pour déjà perdue.
+  function delaiLisible (iso) {
+    if (!iso) return null
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long',
+                                       hour: '2-digit', minute: '2-digit',
+                                       timeZone: 'Europe/Paris' })
+  }
+
+  function ligneMenage (m, avecNoms, gere) {
+    // Quatre états, et l'écran ne doit pas les confondre :
+    //   porté     : quelqu'un a la charge ;
+    //   proposé   : porté OU non, mais une réponse est attendue (⏳) ;
+    //   orphaned  : refusé, une décision humaine est attendue (⚠) ;
+    //   sinon     : personne.
+    let etatMenage
+    if (m.proposeA) {
+      const chez = m.porteur ? ` (chez ${echapper(nomOu(m.porteur, avecNoms))})` : ''
+      // ⚠ LE DÉLAI EST L'INFORMATION QUI DÉCIDE. « Proposé à Marie » sans terme
+      // ne dit pas s'il faut agir maintenant ou attendre : une réponse due dans
+      // deux heures et une autre dans quarante n'appellent pas le même geste.
+      // Il était calculé et transporté, mais jamais affiché.
+      // ⚠ UNE ÉCHÉANCE PASSÉE NE SE DIT PAS « réponse avant ». Entre l'expiration
+      // et le passage du cron (jusqu'à cinq minutes, davantage si un cycle
+      // échoue), l'écran annonçait un délai déjà écoulé — soit l'inverse exact de
+      // l'information qu'il porte, « faut-il agir maintenant ».
+      const expiree = m.expireLe && Date.parse(m.expireLe) < Date.now()
+      const avant = delaiLisible(m.expireLe)
+      const delai = !avant ? ''
+        : expiree ? ' <span class="motif">délai dépassé</span>'
+                  : ` <span class="delai">réponse avant ${echapper(avant)}</span>`
+      etatMenage = `<span class="pastille attente">⏳ proposé à ${echapper(nomOu(m.proposeA, avecNoms))}</span>${chez}${delai}`
+    } else if (m.status === 'orphaned') {
+      // ⚠ « refusé » et « personne » ne sont PAS la même chose : le premier
+      // demande une décision, le second attend peut-être encore le moteur.
+      etatMenage = '<span class="pastille alerte">⚠ refusé</span>'
+    } else if (m.porteur) {
+      etatMenage = `<span class="pastille porte">${echapper(nomOu(m.porteur, avecNoms))}</span>`
+    } else if (m.differe) {
+      // ⚠ « PAS ENCORE PROPOSÉ » N'EST PAS « PERSONNE ». Au-delà de la fenêtre de
+      // proposition, le ménage attend simplement que la date approche : le
+      // peindre en rouge sous la pastille de sa responsable affichait deux
+      // affirmations contradictoires sur la même ligne — et un clic sur
+      // « semaine suivante » suffisait à rougir tout l'écran.
+      etatMenage = '<span class="pastille absent">proposition à venir</span>'
+    } else if (!gere) {
+      // Ce bien n'est pas confié à l'app ménage : ses ménages n'ont personne, et
+      // c'est normal. Le signaler en rouge serait du bruit permanent.
+      etatMenage = '<span class="pastille absent">non confié</span>'
+    } else {
+      etatMenage = '<span class="pastille alerte">⚠ personne</span>'
+    }
+    const motif = (m.status === 'orphaned' && m.raison)
+      ? ` <span class="motif">${echapper(m.raison)}</span>` : ''
+    // ⚠ AUCUN RÉGLAGE ICI (règle de config) : le lien renvoie au Planning, où la
+    // réassignation existe déjà. Dupliquer ce geste sur deux écrans, ce serait
+    // deux writers pour la même décision.
+    return `<div class="menage-ligne">▸ Ménage — ${etatMenage}${motif}
+              · <a href="/apps/menages">ouvrir dans le planning</a>
+              ${retourProprete(m)}</div>`
+  }
+
+  // ─── Démarrage ────────────────────────────────────────────────────────────
+  document.getElementById('btn-prev').addEventListener('click', () => {
+    debutSemaine = plusDeJours(debutSemaine, -7); charger()
+  })
+  document.getElementById('btn-next').addEventListener('click', () => {
+    debutSemaine = plusDeJours(debutSemaine, 7); charger()
+  })
+  document.getElementById('btn-today').addEventListener('click', () => {
+    debutSemaine = lundiDe(new Date()); charger()
+  })
+
+  ;(async () => {
+    session = await requireAuth()
+    if (!session) return
+    // ⚠ La sidebar ne doit pas retarder l'écran : elle a sa propre chaîne
+    // d'appels, et la page ne dépend de rien qu'elle produise.
+    renderSidebar('menages-garde').catch(e => console.error('[garde] sidebar', e))
+    charger()
+  })()
+</script>
+</body>
+</html>

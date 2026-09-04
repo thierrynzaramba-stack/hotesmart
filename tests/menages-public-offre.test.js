@@ -45,6 +45,9 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         order () { return chain },
         range (from) {
           if (from !== 0) return Promise.resolve({ data: [], error: null })
+          if (table === 'property_cleaning_providers') {
+            return Promise.resolve({ data: erreurLiaisons ? null : liaisons, error: erreurLiaisons })
+          }
           if (table === 'provider_availability_rules') return Promise.resolve({ data: regles, error: null })
           if (table === 'provider_availability_exceptions') return Promise.resolve({ data: exceptions, error: null })
           if (table === 'menage_assignment_log') return Promise.resolve({ data: refus, error: null })

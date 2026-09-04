@@ -1,7 +1,8 @@
 # KB — App ménage prestataire
 
 <!-- SOURCES (mapping inverse). ⚠️ DOC en tête de ces fichiers pointe ici. Modif = MÊME COMMIT. -->
-> Sources : `apps/menages/index.html` (planning côté hôte), `api/menages.js` (endpoint hôte :
+> Sources : `apps/menages/index.html` (planning côté hôte), `apps/menages/garde.html` +
+> `api/garde.js` (planning de garde, lot 3.4), `api/menages.js` (endpoint hôte :
 > biens + réservations), `apps/menages/prestataires.html` (création prestataire + lien, côté hôte),
 > `apps/menages/public.html` (app prestataire + PWA), `api/menages-public.js` (endpoint public :
 > tâches, markDone, markUndone), `lib/cron-arrival-code.js` (conditionnement ménage → code),
@@ -149,6 +150,124 @@ un appelant qui se trompe : l'écran affiche une semaine, le moteur un jour. L'i
 **midi UTC** — incrémenter de 24 h depuis minuit local rend deux fois le même jour au changement
 d'heure. Une mémoïsation `(personne, jour)` vit **le temps de l'appel seulement** : la garder
 entre deux appels serait la garde stockée que le §12.2 refuse.
+
+### L'écran « Planning de garde » (lot 3.4, 4 septembre 2026)
+
+`apps/menages/garde.html` + `api/garde.js`. Une entrée **Garde** dans la sidebar, sous Ménages.
+Il répond à une seule question : **mes logements sont-ils couverts cette semaine ?**
+
+⚠️ **Un CALENDRIER EN LONGUEUR, pas une grille biens × jours.** Un tableau à 7 colonnes devient
+illisible dès le troisième bien sur un téléphone, et la question de l'hôte est « ce jour-là, qui
+est où ». Un bloc par jour, une ligne par bien, le jour courant marqué.
+
+⚠️ **La garde vient de `planningDeGarde`, la MÊME brique que le moteur** (§12.2). Recopier la
+règle côté écran, c'était garantir que les deux divergent : l'hôte aurait lu un planning qui ne
+dit pas ce que le cron fait. Un test vérifie que l'endpoint importe bien la brique.
+
+⚠️ **Le rouge est CONDITIONNEL, et DEUX FOIS** (§12.6) :
+- un jour sans personne **et sans ménage** affiche un `—` gris : un bien n'a pas de départ tous
+  les jours, et peindre chaque case vide noierait les vrais trous ;
+- un **bien non confié** (aucune liaison) affiche « non confié », jamais du rouge. Le moteur
+  sépare « aucune liaison » de « personne ce jour-là » et n'alerte que sur le second (décision du
+  3 septembre) ; les confondre peignait en rouge chaque départ d'un hôte qui fait son ménage
+  lui-même — l'écran entier rouge, et l'hôte cesse de le regarder. Trouvé en review.
+
+Le même jour, sur un bien confié, **avec** un ménage : rouge. C'est exactement la règle qui
+décide des alertes du moteur — les deux doivent dire la même chose.
+
+⚠️ **Une responsable que le moteur ne sollicitera JAMAIS est signalée** (« jours à régler ») :
+une liaison « à confirmer » sans `weekdays` est candidate (null = tous les jours) donc affichée
+comme responsable, mais la restriction du §12.9c l'exclut de toute proposition. L'écran affichait
+« Marie est de garde » juste au-dessus de « ménage — personne » : deux affirmations
+contradictoires, sans indice que le problème est un réglage.
+
+⚠️ **« Pas encore proposé » n'est PAS « personne ».** Au-delà de la fenêtre de proposition
+(§12.9b), un ménage dont la responsable doit confirmer reste `unassigned` sans offre — le moteur
+dit qu'il n'y a rien à signaler. L'écran affiche « proposition à venir », pas du rouge : le
+peindre en alerte sous la pastille de sa responsable affichait deux affirmations contradictoires
+sur la même ligne, et un clic sur « semaine suivante » suffisait à rougir tout l'écran.
+
+⚠️ **Une prestataire DÉSACTIVÉE est signalée.** La désactivation supprime sa ligne
+`public_tokens` — sa PWA ne s'ouvre plus — sans toucher ses liaisons : elle reste « de garde »
+pour le calcul. L'afficher en violet laissait l'hôte compter sur quelqu'un qui ne verra jamais
+le ménage. **La remplaçante** porte elle aussi « jours à régler » le cas échéant : un filet de
+sécurité qui n'existe pas doit se voir.
+
+⚠️ **Deux avis peuvent porter sur le MÊME séjour** (un avis OTA et une détection dans les
+messages, tous deux confirmés). L'arbitrage est explicite : une **requalification humaine** prime
+— c'est une décision — et à défaut la **remarque** prime sur le compliment. Sans règle, l'ordre
+de PostgREST décidait, et une remarque pouvait être masquée d'un appel à l'autre.
+
+⚠️ **Sans `prestataires: read`, pas même l'IDENTIFIANT.** Rendu jour par jour et bien par bien,
+un UUID stable suffit à reconstituer le calendrier de présence et d'absence du personnel — ce que
+`api/disponibilites.js` refuse précisément à `menages: read`. Un identifiant est une identité
+quand il est constant.
+
+⚠️ **Une échéance passée ne se dit pas « réponse avant »** : entre l'expiration et le passage du
+cron, l'écran annonçait un délai déjà écoulé — l'inverse de l'information qu'il porte. Il affiche
+« délai dépassé ».
+
+⚠️ **Quatre états de ménage, à ne pas confondre** : porté (pastille violette), proposé
+(⏳ + **le délai de réponse, en heure de Paris** — c'est lui qui dit s'il faut agir maintenant ou
+attendre), **refusé** (⚠ + le motif du journal), personne. « Refusé » et « personne » ne sont
+pas la même chose — le premier demande une décision, le second attend peut-être encore le moteur.
+
+**Trois droits, et ils ne recouvrent pas la même chose :**
+- `menages: read` — l'entrée de l'écran : voir la **couverture** ;
+- `prestataires: read` — les **prénoms**. Sans lui, l'écran dit « quelqu'un » / « personne » :
+  un propriétaire délégué voit que son bien est couvert, sans l'identité de votre personnel ;
+- `avis: read` — le **retour de propreté DU SÉJOUR** sur les ménages déjà passés (voir plus bas).
+
+**Le retour de propreté, attaché au MÉNAGE** (décision du product owner, 4 septembre 2026) :
+⚠️ **Pas de compteur global de personne sur cet écran.** Le ratio d'une prestataire est sa fiche
+**qualité** : il vit sur `/avis` et dans sa PWA. Ici on montre ce que le voyageur a dit de **CE
+séjour-là** — le seul retour qui aide à lire un planning.
+- **Seulement sur un ménage PASSÉ**, jugé en heure de Paris. Un avis ne peut pas concerner un
+  séjour qui n'a pas eu lieu : ce serait au mieux l'avis d'un autre séjour du même bien, au pire
+  un rattachement faux présenté comme un fait ;
+- **rattaché par le couple (bien, réservation)**, jamais sur le seul booking — ni `booking_uid`
+  ni `property_id_ref` n'ont d'unicité globale (REVIEW.md règle 1) ;
+- **`statut = 'confirme'` seulement** : c'est la validation humaine. Une détection en attente
+  n'est pas un fait, et l'afficher sur un planning en ferait un ;
+- **rien quand il n'y a rien.** Un ménage sans avis rattaché, ou dont le verdict est
+  `rien_signale`, n'affiche **rien** — pas de « pas encore d'avis », qui remplirait l'écran de
+  vide et ferait douter d'un travail correct ;
+- ⚠️ **jamais le nom du voyageur, jamais le texte complet** : seul l'extrait sort.
+  `content_public` et `content_private` servent uniquement à décider de l'étiquette, côté
+  serveur ;
+- ⚠️ **« retour privé » dès que l'extrait n'est pas CERTAINEMENT public** — même règle et même
+  code que la PWA (`extraitEstPrive`). Un extrait à cheval sortait sinon comme public, et l'hôte
+  lisait sur son planning une phrase que le voyageur n'avait pas rendue publique ;
+- une **requalification humaine** est signalée : l'hôte doit savoir qu'il lit sa propre
+  correction, pas le verdict de la machine ;
+- **une panne de lecture des avis ne coupe pas l'écran** : sans retour, le planning reste juste.
+  C'est la différence avec les liaisons, dont l'absence rendrait la garde fausse.
+
+⚠️ **AUCUN RÉGLAGE ICI** (règle de config d'app, CLAUDE.md). Un ménage porte un lien vers le
+Planning, où la réassignation existe déjà : dupliquer ce geste sur deux écrans, ce serait deux
+writers pour la même décision.
+
+⚠️ **Fenêtre bornée à 31 jours, et une fenêtre trop large est REFUSÉE, pas tronquée** : un écran
+qui affiche six jours sur sept sans le dire laisse croire que le septième n'a pas de ménage.
+`planningDeGarde` évalue la récurrence par (personne, jour) — une fenêtre d'un an demandée par
+une URL bricolée ferait des dizaines de milliers d'évaluations.
+
+⚠️ **Le champ `raison` ne sort QUE sous `prestataires: read`.** `assignment_reason` porte des
+prénoms (« Refusé par Marie… », « reste chez Régina ») : rendu sans condition, il affichait à un
+propriétaire délégué exactement ce que la garde venait de masquer. Sans le droit, le **statut**
+suffit — c'est lui qui commande une action.
+
+⚠️ **Une lecture tronquée est DITE** (bandeau « liste incomplète »). Un ménage hors du lot rend
+son jour « sans ménage » : il s'afficherait en gris au lieu du rouge, et l'alerte que cet écran
+existe pour montrer deviendrait un silence.
+
+⚠️ **Une panne des liaisons ou des disponibilités COUPE (503).** Une garde calculée sur des
+données partielles afficherait « personne » sur des jours couverts, ou quelqu'un qui est en
+congé : un écran faux est pire qu'un écran en panne — celui-là, on le rouvre. L'annuaire, lui,
+ne coupe pas : sans prénoms l'écran reste juste (« quelqu'un »).
+
+**Dette assumée** : pas de filtre de biens sur cet écran (le Planning en a un). À quinze biens,
+les blocs s'allongent ; le jour où un compte y arrive, c'est le même composant à reprendre.
 
 ### Régler les jours et les disponibilités (lot 3.5, 4 septembre 2026)
 

@@ -278,6 +278,9 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
           <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Planning
         </a>
+        <a class="nav-sub ${activePage === 'menages-garde' ? 'connected' : ''}" href="/apps/menages/garde">
+          <div class="sub-dot ${activePage === 'menages-garde' ? 'green' : 'gray'}"></div>Garde
+        </a>
         ${titulaire ? `
         <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">
           <div class="sub-dot ${activePage === 'menages-prestataires' ? 'green' : 'gray'}"></div>Prestataires

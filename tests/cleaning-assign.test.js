@@ -377,7 +377,11 @@ function doubleSb (lignes, erreur = null) {
     select (c) { vu.colonnes = c; return chain },
     in (c, v) { if (c === 'user_id') vu.userIds = v; if (c === 'property_id') vu.propIds = v; return chain },
     eq (c, v) { if (c === 'active') vu.actif = v; return chain },
-    order () { return Promise.resolve({ data: lignes, error: erreur }) }
+    order () { return chain },
+    // ⚠ Les liaisons se lisent PAGINÉES depuis le lot 3.4 : sans borne,
+    // PostgREST tronquait à 1000 lignes SANS erreur, et l'écran de garde
+    // affichait « personne » sur des biens couverts.
+    range (from) { return Promise.resolve({ data: from === 0 ? lignes : [], error: erreur }) }
   }
   return { from: () => chain, vu }
 }
@@ -556,4 +560,18 @@ test('la fenêtre de proposition est bornée DES DEUX CÔTÉS', async () => {
   assert.strictEqual(dansLaFenetreDeProposition('2026-09-04', t), true, 'hier : encore à faire')
   assert.strictEqual(dansLaFenetreDeProposition('2026-09-03', t), false, 'avant-hier : trop tard')
   assert.strictEqual(dansLaFenetreDeProposition('2026-08-06', t), false, 'un mois : plus personne')
+})
+
+test('les liaisons se lisent PAGINÉES : la troncature silencieuse est fermée', async () => {
+  // ⚠ DÉFAUT TROUVÉ EN REVIEW. C'était la seule des trois lectures sans borne :
+  // PostgREST tronque à 1000 lignes SANS erreur, et l'écran de garde — jusqu'à
+  // 200 biens — perdait alors des liaisons en silence. Les biens concernés
+  // devenaient « personne de garde » sept jours sur sept : l'écran FAUX que le
+  // 503 sur panne existe pour empêcher.
+  const source = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'lib/cleaning/assign.js'), 'utf8')
+  const bloc = source.slice(source.indexOf('async function chargerLiaisons'),
+                            source.indexOf('async function chargerDisponibilites'))
+  assert.match(bloc, /lireTout\(/, 'la lecture doit être paginée')
+  assert.match(bloc, /'liaisons', 'id'/, 'et ordonnée sur une clé STABLE et unique')
 })

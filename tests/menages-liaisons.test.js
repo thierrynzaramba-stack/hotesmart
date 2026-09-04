@@ -50,8 +50,15 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         gte () { return chain }, lte () { return chain }, or () { return chain },
         not (c, op, v) { a.not = { c, op, v }; return chain },
         order () { return chain },
-        // Les disponibilités se lisent paginées : première page pleine, puis vide.
-        range (from) { return Promise.resolve({ data: [], error: null }) },
+        // Les disponibilités ET les liaisons se lisent paginées.
+        range (from) {
+          if (from !== 0) return Promise.resolve({ data: [], error: null })
+          if (table === 'property_cleaning_providers') {
+            const d = a.f.user_id === undefined || a.f.user_id === PROD ? apres : []
+            return Promise.resolve({ data: d, error: null })
+          }
+          return Promise.resolve({ data: [], error: null })
+        },
         // ⚠ Le rattrapage LIT les ménages à reprendre avant de les écrire : un
         // double qui rendait toujours une liste vide ne testait plus rien.
         limit () {
