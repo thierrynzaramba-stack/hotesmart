@@ -13,7 +13,8 @@ const {
   fromChannex,
   mergeSnapshot,
   saveBookingSnapshot,
-  saveBookingSnapshots
+  saveBookingSnapshots,
+  empreinte
 } = require('../lib/bookings-snapshot')
 
 // ─── Mapping des statuts Beds24 ──────────────────────────────────────────────
@@ -330,7 +331,7 @@ test('le writer pauvre ne dégrade plus le writer riche (régression E3)', () =>
 })
 
 // ─── Écriture (client Supabase simulé) ───────────────────────────────────────
-function fakeSupabase({ existing = null, captureRef = {}, existingPropId = '12345' } = {}) {
+function fakeSupabase({ existing = null, captureRef = {}, existingPropId = '12345', existingRaw = null } = {}) {
   return {
     from() {
       return {
@@ -338,10 +339,17 @@ function fakeSupabase({ existing = null, captureRef = {}, existingPropId = '1234
         eq() { return this },
         // La vraie ligne porte aussi property_id : la garde « inchangee » le
         // compare, une reservation deplacee de bien doit etre reecrite.
-        maybeSingle: async () => ({ data: existing ? { snapshot: existing, property_id: existingPropId } : null }),
+        maybeSingle: async () => ({ data: existing ? { snapshot: existing, property_id: existingPropId, raw_hash: empreinte(existingRaw) } : null }),
         upsert: async (row) => { captureRef.row = row; return { error: null } },
         // booking_change_events : journalisation du changement, faite AVANT l'upsert.
-        insert: async (row) => { (captureRef.events = captureRef.events || []).push(row); return { error: null } }
+        insert: async (row) => { (captureRef.events = captureRef.events || []).push(row); return { error: null } },
+        // UPDATE cible du seul `raw` (spec §4) : contenu normalise inchange, on
+        // rafraichit le payload brut sans toucher updated_at ni produire d'evenement.
+        update(patch) { this._patch = patch; return this },
+        then(resoudre) {
+          if (this._patch) { (captureRef.updates = captureRef.updates || []).push(this._patch); this._patch = null }
+          return Promise.resolve({ error: null }).then(resoudre)
+        }
       }
     }
   }
@@ -398,7 +406,7 @@ function fakeBatchSupabase({ rows = [], failSelect = false } = {}) {
   // Les lignes du prefetch portent property_id : sans lui, la garde « inchangee »
   // ne peut pas conclure et le writer reecrit (comportement prudent voulu).
   rows = rows.map(r => ({ property_id: '12345', ...r }))
-  const stats = { selects: 0, upserts: 0, upsertedRows: [], events: [] }
+  const stats = { selects: 0, upserts: 0, upsertedRows: [], events: [], updates: [] }
   const client = {
     from() {
       const q = {
@@ -410,10 +418,17 @@ function fakeBatchSupabase({ rows = [], failSelect = false } = {}) {
         then: undefined,
         upsert: async (row) => { stats.upserts++; stats.upsertedRows.push(row); return { error: null } },
         // booking_change_events : journal ecrit AVANT l'upsert du snapshot.
-        insert: async (row) => { stats.events.push(row); return { error: null } }
+        insert: async (row) => { stats.events.push(row); return { error: null } },
+        // UPDATE cible du seul `raw` (spec §4).
+        update(patch) { this._patch = patch; return this }
       }
-      // `.select().eq().in()` est attendu (awaited) directement par le lot.
+      // `.select().eq().in()` est attendu (awaited) directement par le lot, tout
+      // comme `.update().eq().eq()` : on distingue les deux par `_patch`.
       q.then = (resolve, reject) => {
+        if (q._patch) {
+          stats.updates.push(q._patch); q._patch = null
+          return Promise.resolve({ error: null }).then(resolve, reject)
+        }
         stats.selects++
         const result = failSelect
           ? { data: null, error: { message: 'boom' } }
@@ -574,7 +589,8 @@ test('ligne INCHANGEE -> aucun upsert, aucun evenement', async () => {
   const booking = { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: 'Jean', lastName: 'Dupont', numAdult: 2, numChild: 0, channel: 'airbnb', apiReference: 'HMS1' }
   // L'existant est exactement ce que le mapper produirait.
   const existant = fromBeds24(booking)
-  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+  // `existingRaw` = le meme payload : rien a rafraichir non plus (spec §4).
+  const sb = fakeSupabase({ existing: existant, captureRef: capture, existingRaw: booking })
 
   const res = await saveBookingSnapshot(sb, {
     userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24', booking
@@ -583,7 +599,24 @@ test('ligne INCHANGEE -> aucun upsert, aucun evenement', async () => {
   assert.strictEqual(res.inchange, true)
   assert.strictEqual(res.change, null)
   assert.strictEqual(capture.row, undefined, 'aucune ecriture')
+  assert.strictEqual((capture.updates || []).length, 0, 'pas meme un rafraichissement du raw')
   assert.strictEqual((capture.events || []).length, 0, 'aucun evenement')
+})
+
+test('ligne INCHANGEE mais RAW absent en base -> le raw est pose, sans upsert ni evenement', async () => {
+  // Premier passage apres la migration : les lignes existantes n'ont pas de raw.
+  // Il se remplit par un UPDATE cible, sans reecrire la ligne ni notifier personne.
+  const capture = {}
+  const booking = { status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05', firstName: 'Jean', lastName: 'Dupont', numAdult: 2, numChild: 0, channel: 'airbnb', apiReference: 'HMS1' }
+  const sb = fakeSupabase({ existing: fromBeds24(booking), captureRef: capture, existingRaw: null })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24', booking
+  })
+  assert.strictEqual(res.inchange, true)
+  assert.strictEqual(res.rawMisAJour, true)
+  assert.strictEqual(capture.row, undefined, 'aucun upsert')
+  assert.strictEqual((capture.events || []).length, 0, 'aucun evenement')
+  assert.deepStrictEqual((capture.updates || [])[0], { raw: booking, raw_hash: empreinte(booking) })
 })
 
 test('ligne CHANGEE -> upsert ET evenement', async () => {
@@ -662,6 +695,8 @@ test('property_id inconnu (existing fourni sans lui) -> on ecrit, par prudence',
   assert.ok(capture.row, 'sans certitude sur le bien, on ecrit')
 })
 
+const BOOKING_REPLI = { id: 1, status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }
+
 test('repli sans prefetch : les lignes inchangees sont comptees comme telles', async () => {
   const inchange = fromBeds24({ status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' })
   const stats = { selects: 0, upserts: 0, upsertedRows: [], events: [] }
@@ -669,17 +704,24 @@ test('repli sans prefetch : les lignes inchangees sont comptees comme telles', a
     from() {
       const q = {
         select() { return q }, eq() { return q }, in() { return q },
-        maybeSingle: async () => { stats.selects++; return { data: { snapshot: inchange, property_id: '12345' } } },
+        // Le raw relu est identique au booking entrant : rien a rafraichir, la
+        // garde « inchangee » doit conclure sans aucune ecriture (spec §4).
+        maybeSingle: async () => { stats.selects++; return { data: { snapshot: inchange, property_id: '12345', raw_hash: empreinte(BOOKING_REPLI) } } },
         upsert: async (row) => { stats.upserts++; stats.upsertedRows.push(row); return { error: null } },
         insert: async (row) => { stats.events.push(row); return { error: null } },
-        then(res, rej) { stats.selects++; return Promise.resolve({ data: null, error: { message: 'boom' } }).then(res, rej) }
+        update(patch) { q._patch = patch; return q },
+        then(res, rej) {
+          if (q._patch) { stats.updates = stats.updates || []; stats.updates.push(q._patch); q._patch = null; return Promise.resolve({ error: null }).then(res, rej) }
+          stats.selects++
+          return Promise.resolve({ data: null, error: { message: 'boom' } }).then(res, rej)
+        }
       }
       return q
     }
   }
   const res = await saveBookingSnapshots(client, {
     userId: 'u1', propertyId: '12345', provider: 'beds24',
-    bookings: [{ id: 1, status: 'confirmed', arrival: '2099-09-01', departure: '2099-09-05' }]
+    bookings: [BOOKING_REPLI]
   })
   assert.strictEqual(res.inchanges, 1, 'meme comptage que le chemin nominal')
   assert.strictEqual(res.saved, 0)

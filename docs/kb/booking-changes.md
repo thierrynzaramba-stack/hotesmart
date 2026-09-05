@@ -118,6 +118,21 @@ la panne fermée côté Beds24 par ce même commit, rouverte côté Channex.
 `detectChange` passe désormais `previous` à la garde. Test de non-régression :
 `tests/booking-changes.test.js`, « ANNULATION sans dates ».
 
+## 3 bis bis. Le `raw` ne déclenche jamais rien
+
+Depuis le sous-chantier A (spec §4), le writer conserve le payload provider
+intégral dans `bookings_snapshot.raw`. **Il n'entre pas dans la détection.**
+
+`detectChange` compare les snapshots normalisés, et rien d'autre. Un payload brut
+qui bouge sans qu'aucun des quatre champs de diff ne change — une ligne de facture
+ajoutée, un `modifiedTime`, un champ OTA interne — met à jour `raw` en silence :
+aucun `booking_change_event`, donc aucun ménage, aucun code d'accès, aucun message.
+
+C'est ce qui rend le remplissage initial du `raw` sûr : le premier cycle après
+déploiement réécrit toutes les lignes actives une fois, **zéro événement attendu**.
+Même profil que le remplissage d'`amount` du commit `5f1777d`, et c'est le test
+d'acceptation de la règle.
+
 ## 3 ter. Isolation multi-comptes
 
 Le dispatcher traite un lot **multi-comptes** et tourne avec la service key, qui

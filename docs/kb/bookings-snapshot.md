@@ -190,6 +190,135 @@ message**. Vérifié par test (`tests/bookings-snapshot.test.js`, section AMOUNT
 y compris le garde-fou inverse : un montant qui apparaît **en même temps** qu'un
 changement de dates ne masque pas le `modified`.
 
+## 4 ter. `raw` — le payload provider intégral
+
+Colonne `raw` (JSONB), écrite par le seul writer, pour **les deux providers**.
+Spec : `docs/specs/spec-historique-reservations.md` §4.
+
+Le snapshot normalisé garde 14 champs (266 o). Le provider en sert bien plus, et
+tout le reste était jeté à l'écriture : `invoiceItems`, `price`, `bookingTime`,
+`cancelTime`, `rateDescription` côté Beds24 ; `rooms[].meta.days_breakdown`,
+`services`, `ota_commission`, `notes` de payout côté Channex. Le pricing, les avis
+et les stats en auront besoin — **une donnée non collectée au moment où le
+provider la sert ne se rattrape pas.**
+
+### La règle de détection (gravée, ne pas rediscuter)
+
+> Un événement est déclenché **si et seulement si `merged` change** — les champs
+> normalisés, comme avant. Le `raw` est **stocké, jamais comparé** pour décider.
+> Si le payload brut diffère mais que `merged` est identique : mettre à jour `raw`
+> silencieusement, **sans** événement et **sans** toucher `updated_at`.
+
+`updated_at` signifie « dernier changement de contenu **normalisé** » : la
+surveillance de cycle, les lecteurs et le diagnostic la lisent ainsi. Un
+rafraîchissement de `raw` passe donc par un `UPDATE` ciblé sur la seule colonne,
+jamais par l'upsert (qui la réécrirait).
+
+| situation | écriture | `updated_at` | événement |
+|---|---|---|---|
+| `merged` change | upsert complet (+ `raw`) | posé | **oui**, si `detectChange` en produit un |
+| `merged` identique, `raw` différent | `UPDATE raw` seul | **intact** | non |
+| `merged` et `raw` identiques | aucune | — | non |
+| appelant sans payload source | `raw` absent de l'upsert → colonne intacte | selon `merged` | selon `merged` |
+
+Le dernier cas compte : `lib/cron-channel-feed.js` et `api/channel-webhook.js`
+mappent eux-mêmes et passent `snapshot`. Ils transmettent désormais **aussi** le
+payload — sans quoi le flux temps réel Channex, qui est le chemin nominal,
+n'aurait aucun `raw`. Et un appelant qui ne fournit pas de source n'efface jamais
+un `raw` déjà conservé : la clé est simplement absente de l'objet upserté, et
+`ON CONFLICT DO UPDATE SET` ne touche que les colonnes citées.
+
+**Une seule forme dans la colonne, côté Channex.** Ces deux chemins servent une
+`booking_revision`, dont l'`id` est celui de la **révision** ; `api/channel-events.js`
+écrit `{ id: <booking id>, ...attributs }` via `getReservations`. Sans
+normalisation, `raw.id` désignerait tantôt une révision tantôt une réservation
+selon le dernier chemin ayant écrit, et les deux formes se chasseraient l'une
+l'autre à chaque passage — un `UPDATE` du `raw` sans qu'aucun contenu n'ait bougé.
+Les deux chemins forcent donc `id` au booking id. `revision_id` reste dans les
+attributs Channex : rien n'est perdu.
+
+**⚠ `includeInvoiceItems` est indispensable côté Beds24.** Sans ce paramètre,
+`invoiceItems` n'est pas servi **du tout** — le `raw` ne porterait aucune ligne de
+facture, alors que c'est le premier argument de la colonne. L'inventaire de
+l'étape 0 avait été mené avec le paramètre dans des appels manuels, mais le code
+de production ne le demandait pas : `totalCharges()` rendait donc toujours 0 dans
+le cron, et le repli de `montantBeds24` sur saisie directe n'avait **jamais** pu
+se déclencher en production. Corrigé dans `lib/cron-beds24.js` (constante
+`AVEC_FACTURES`), pour 0,1 crédit de plus par page.
+
+### ⚠ Le piège : Postgres `jsonb` ne conserve pas l'ordre des clés
+
+Vérifié sur la base — le mapper produit `provider, status, statusRaw, arrival…`
+et la même ligne relue rend `amount, source, status, arrival…` (`jsonb` trie par
+longueur de clé puis alphabétiquement).
+
+La comparaison du snapshot y échappait **par accident** : `merged` dérive de
+`previous` par spread, donc les deux portent l'ordre de la base. Le `raw`, lui,
+arrive du provider et se compare à un `jsonb` relu : un `JSON.stringify` naïf les
+déclarerait **toujours** différents, et chaque cycle réécrirait toutes les lignes
+pour rien — exactement ce que la garde « ligne inchangée » (§5 bis) a fermé.
+
+D'où `stableStringify` / `memeContenu` : tri **récursif** des clés avant
+comparaison. Les tableaux gardent leur ordre — dans un payload provider
+(`invoiceItems`, `rooms`, `days_breakdown`) l'ordre porte du sens, deux ordres
+différents sont deux payloads différents. Vérifié sur 300 payloads Beds24 réels et
+les 18 Channex : zéro faux positif de changement, et l'inversion de deux lignes de
+facture est bien détectée.
+
+### `raw_hash` : savoir si le payload a bougé sans le rapatrier
+
+Le writer ne relit **jamais** `raw`. Il compare l'empreinte `raw_hash` (sha256 de
+la forme stable), écrite en même temps que le payload. Relire `raw` à chaque cycle
+coûtait jusqu'à **1,2 Mo par requête** côté Channex (200 lignes × ~6 Ko) et
+~350 Ko côté Beds24, toutes les 5 minutes, pour une simple égalité.
+
+`empreinte(undefined)` et `empreinte(null)` rendent tous deux `null` : « absent »
+et « pas de payload » se valent, sinon un appelant sans `existingRawHash`
+réémettrait l'`UPDATE` à chaque cycle.
+
+### Budget de rafraîchissement par cycle
+
+Ces `UPDATE` sont **séquentiels** et vivent dans le cron `*/5`. Au premier cycle
+après la migration, toutes les lignes ont un `raw` vide, et `cron-classify` peut en
+présenter jusqu'à 500 par bien : autant d'allers-retours dépasseraient le plafond
+de 60 s de la fonction Vercel et **couperaient le cycle avant les codes d'accès et
+les messages**. `RAW_PAR_CYCLE = 60` borne le nombre de rafraîchissements par
+appel ; le remplissage s'étale sur quelques cycles. Rien n'est perdu, seulement
+différé — le compteur `rawDifferes` le dit dans le résumé.
+
+Les compteurs du lot : `rawMisAJour`, `rawDifferes` et `rawEchecs`. Ce dernier est
+loggé en `console.error` — sans lui, un échec systématique (droit manquant,
+colonne absente) restait invisible derrière un « N inchangées » rassurant pendant
+que `raw` restait vide indéfiniment.
+
+### Si la colonne manque : repli, jamais de boucle
+
+Un upsert portant `raw` sur une base non migrée échoue en `PGRST204`. Ce serait
+bien pire qu'une écriture ratée : l'événement est journalisé **avant** l'upsert et
+le snapshot n'avance pas, donc un échec **permanent** ferait redétecter le même
+changement à chaque cycle `*/5` — message de bienvenue, ménage et code d'accès
+renvoyés indéfiniment. Le commentaire de l'ordre d'écriture (§ « ordre critique »)
+suppose un échec *transitoire* ; ici il ne l'est pas.
+
+Le writer réessaie donc sans le payload : le contenu normalisé passe, l'événement
+est consommé une fois, seul l'enrichissement attend. Cela couvre aussi la fenêtre
+où le cache de schéma PostgREST n'a pas encore rechargé après la migration.
+
+### Volumétrie
+
+| | snapshot | raw |
+|---|---|---|
+| Beds24 (1 413 réservations) | 340 Ko | **2,36 Mo** (1 754 o/ligne) |
+| Channex (18) | ~5 Ko | 105 Ko (5 994 o/ligne) |
+
+Le `raw` pèse ~7 fois le snapshot côté Beds24, ~21 fois côté Channex. Projection à
+100 biens × 1 413 réservations : **~236 Mo** contre 33 Mo pour le snapshot seul.
+C'est assumé — le coût de stockage est sans commune mesure avec celui d'une donnée
+provider définitivement perdue.
+
+Le prefetch de lot relit `raw` (tranches de 200 → moins d'un mégaoctet par
+requête) pour que le writer compare sans seconde lecture.
+
 ## 5. Merge non destructif
 
 Un champ **non fourni** (`undefined`) par un mapper ne remet jamais à `null` la valeur

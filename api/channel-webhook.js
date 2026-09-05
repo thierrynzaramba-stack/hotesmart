@@ -120,7 +120,14 @@ async function saveRevision(rev, revisionId) {
     bookingId,
     propertyId: providerPropertyId,   // = provider_property_id (text)
     provider:   'channex',
-    snapshot
+    snapshot,
+    // Le payload brut, avec `id` FORCE au booking id : la colonne `raw` doit
+    // porter la meme forme quel que soit le chemin d'ecriture. api/channel-events.js
+    // y met `{ id: <booking id>, ...attributs }` ; ici `rev` est une
+    // booking_revision dont l'id est celui de la REVISION. Sans cela, `raw.id`
+    // designerait tantot l'une tantot l'autre, et les deux formes se chasseraient
+    // a chaque passage en declenchant un UPDATE sans changement de contenu.
+    booking:    { ...rev, id: bookingId }
   })
 
   if (!saved.ok) {

@@ -62,10 +62,23 @@ async function chaine(id) {
   else if (!snaps?.length) console.log('  ✗ AUCUN SNAPSHOT — la reservation n\'a jamais ete synchronisee')
   else snaps.forEach(r => {
     const s = r.snapshot || {}
-    console.log(`  bien ${t(r.property_id)} · maj ${t(r.updated_at).slice(0, 19)}`)
+    // `maj` = dernier changement de contenu NORMALISE. Un rafraichissement du
+    // seul payload brut ne la touche pas (spec §4) : les deux lignes sont donc
+    // affichees separement, sans quoi on croirait le raw fige.
+    console.log(`  bien ${t(r.property_id)} · maj ${t(r.updated_at).slice(0, 19)} (contenu normalise)`)
     console.log(`  provider=${t(s.provider)}  statut=${t(s.status)} (brut: ${t(s.statusRaw)})`)
     console.log(`  ${t(s.firstName)} ${t(s.lastName)} · ${t(s.arrival)} -> ${t(s.departure)} · ${t(s.numAdult)} adulte(s) ${t(s.numChild)} enfant(s)`)
-    console.log(`  source=${t(s.source)}  codeOTA=${t(s.otaReservationCode)}  montant=${t(s.amount)} ${t(s.currency || '')}`)
+    console.log(`  source=${t(s.source)}  codeOTA=${t(s.otaReservationCode)}  montant=${t(s.amount)} ${t(s.currency || '')}  commission=${t(s.commission)}`)
+    if (r.raw) {
+      const champs = Object.keys(r.raw).length
+      const poids = JSON.stringify(r.raw).length
+      const factures = Array.isArray(r.raw.invoiceItems) ? r.raw.invoiceItems.length : null
+      console.log(`  payload brut : ${champs} champs · ${poids} o` +
+                  (factures !== null ? ` · ${factures} ligne(s) de facture` : '') +
+                  `  empreinte=${t(r.raw_hash).slice(0, 12)}…`)
+    } else {
+      console.log('  payload brut : ✗ absent (pas encore capture par un cycle)')
+    }
   })
 
   // ─── 2. Changements detectes ───
