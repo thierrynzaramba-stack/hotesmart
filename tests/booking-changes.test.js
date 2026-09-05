@@ -165,8 +165,54 @@ test('garde d\'anciennete : le depart recent reste notifie (rattrapage)', () => 
 test('garde d\'anciennete : bornes exactes', () => {
   assert.strictEqual(sejourTermine({ departure: '2026-08-23' }, AUJOURDHUI), true)   // J-8 : termine
   assert.strictEqual(sejourTermine({ departure: '2026-08-24' }, AUJOURDHUI), false)  // J-7 pile : encore notifie
-  assert.strictEqual(sejourTermine({ departure: null }, AUJOURDHUI), false)          // inconnu -> on ne bloque pas
   assert.strictEqual(JOURS_DE_GRACE, 7)
+})
+
+// Cas reel : Channex sert une reservation annulee dont arrival_date ET
+// departure_date sont nuls (Colomiers, a3f88358, Booking.com). L'ancienne garde
+// renvoyait false et laissait passer un evenement pour un sejour sans date.
+test('garde d\'anciennete : SANS date de depart, on se replie sur l\'arrivee', () => {
+  // Arrivee vieille de plus de 7 jours : termine, quelle que soit la duree.
+  assert.strictEqual(sejourTermine({ departure: null, arrival: '2026-08-01' }, AUJOURDHUI), true)
+  // Arrivee recente : encore notifie, le sejour peut etre en cours.
+  assert.strictEqual(sejourTermine({ departure: null, arrival: '2026-08-29' }, AUJOURDHUI), false)
+  // Arrivee future : evidemment pas termine.
+  assert.strictEqual(sejourTermine({ departure: null, arrival: '2026-09-10' }, AUJOURDHUI), false)
+})
+
+// ⚠ REGRESSION ATTRAPEE EN REVIEW, A NE PAS REINTRODUIRE.
+// La premiere version de la garde ne regardait que le snapshot ENTRANT. Or
+// `mergeSnapshot` ecrase les dates connues avec les nulls d'une annulation
+// Channex a charge utile vide (un null fourni est une information) : l'annulation
+// d'un sejour pourtant connu et date ne produisait plus AUCUN evenement — ni
+// menage annule, ni code revoque, ni message stoppe. Soit exactement la panne que
+// ce chantier ferme cote Beds24, rouverte cote Channex.
+test('ANNULATION sans dates : la garde se replie sur le sejour DEJA CONNU', () => {
+  const vide = { provider: 'channex', status: STATUS.CANCELLED, arrival: null, departure: null }
+
+  // Sejour a venir : l'annulation DOIT partir.
+  const aVenir = snap({ provider: 'channex', arrival: '2026-09-20', departure: '2026-09-21' })
+  assert.strictEqual(sejourTermine(vide, AUJOURDHUI, aVenir), false)
+  assert.strictEqual(detectChange(aVenir, vide, 'channex', AUJOURDHUI).type, 'cancelled')
+
+  // Sejour en cours : idem.
+  const enCours = snap({ provider: 'channex', arrival: '2026-08-30', departure: '2026-09-03' })
+  assert.strictEqual(detectChange(enCours, vide, 'channex', AUJOURDHUI).type, 'cancelled')
+
+  // Sejour termine depuis longtemps : la garde tient, rien ne part.
+  const vieux = snap({ provider: 'channex', arrival: '2026-01-10', departure: '2026-01-17' })
+  assert.strictEqual(sejourTermine(vide, AUJOURDHUI, vieux), true)
+  assert.strictEqual(detectChange(vieux, vide, 'channex', AUJOURDHUI), null)
+})
+
+test('garde d\'anciennete : AUCUNE date -> on bloque, un menage sans date est ininterpretable', () => {
+  assert.strictEqual(sejourTermine({ departure: null, arrival: null }, AUJOURDHUI), true)
+  assert.strictEqual(sejourTermine({}, AUJOURDHUI), true)
+  assert.strictEqual(sejourTermine(null, AUJOURDHUI), true)
+  // Et le refus remonte bien jusqu'a l'evenement : aucun 'new' produit.
+  // (sans `previous`, il n'y a aucune date de repli nulle part)
+  const sansDates = snap({ provider: 'channex', status: 'new', arrival: null, departure: null })
+  assert.strictEqual(detectChange(null, sansDates, 'channex', AUJOURDHUI), null)
 })
 
 test('annulation tardive d\'un sejour a venir : toujours notifiee', () => {

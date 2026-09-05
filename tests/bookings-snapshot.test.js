@@ -685,3 +685,224 @@ test('repli sans prefetch : les lignes inchangees sont comptees comme telles', a
   assert.strictEqual(res.saved, 0)
   assert.strictEqual(stats.upserts, 0)
 })
+
+// ─── MONTANT : `price`, jamais la somme des invoiceItems ─────────────────────
+// Mesure sur les 1231 reservations facturees du bien 209413 : la somme des
+// invoiceItems vaut le net HOTE chez Airbnb (846/846) et le total VOYAGEUR chez
+// Booking.com (253/253). La retenir donnerait deux grandeurs differentes dans le
+// meme champ. Ces tests reprennent des reservations reelles.
+
+test('montant Beds24 : Airbnb -> price, pas la somme des invoiceItems (qui est le net hote)', () => {
+  // booking 92450280 : price 160, commission 29.76, invoiceItems 130.24 = 160 - 29.76
+  const s = fromBeds24({
+    status: 'new', arrival: '2026-09-05', departure: '2026-09-06', channel: 'airbnb',
+    price: 160, commission: 29.76,
+    invoiceItems: [{ type: 'charge', subType: 8, lineTotal: 130.24 }]
+  })
+  assert.strictEqual(s.amount, 160, 'le total facture au voyageur')
+  assert.strictEqual(s.commission, 29.76, 'la commission est stockee a part')
+  assert.notStrictEqual(s.amount, 130.24, 'surtout pas le payout hote')
+})
+
+test('montant Beds24 : Booking.com -> price, qui vaut deja la somme des charges', () => {
+  // booking 89748613 : price 149.18 = 146.88 (nuit) + 2.30 (taxe de sejour)
+  const s = fromBeds24({
+    status: 'new', arrival: '2026-07-24', departure: '2026-07-25', channel: 'booking',
+    price: 149.18, commission: 24.09,
+    invoiceItems: [
+      { type: 'charge', subType: 8, lineTotal: 146.88 },
+      { type: 'charge', subType: 11, lineTotal: 2.30 }
+    ]
+  })
+  assert.strictEqual(s.amount, 149.18)
+  assert.strictEqual(s.commission, 24.09)
+})
+
+test('montant Beds24 : les deux canaux rendent la MEME grandeur pour un meme prix voyageur', () => {
+  const airbnb  = fromBeds24({ status: 'new', channel: 'airbnb',  price: 100, commission: 18.6, invoiceItems: [{ type: 'charge', lineTotal: 81.4 }] })
+  const booking = fromBeds24({ status: 'new', channel: 'booking', price: 100, commission: 18.6, invoiceItems: [{ type: 'charge', lineTotal: 100 }] })
+  assert.strictEqual(airbnb.amount, booking.amount, 'sinon un yield compare un net a un brut')
+})
+
+test('montant Beds24 : le repli exige une saisie DIRECTE, pas seulement une commission nulle', () => {
+  // Une reservation OTA dont Beds24 remet price et commission a 0 en conservant
+  // la ligne de payout ferait entrer un net hote dans un champ « total voyageur ».
+  // Aucun cas de cette forme dans les 1413 reservations mesurees, mais l'invariant
+  // ne doit pas dependre des donnees du jour.
+  const airbnbSansPrix = fromBeds24({
+    status: 'cancelled', channel: 'airbnb', price: 0, commission: 0,
+    invoiceItems: [{ type: 'charge', subType: 8, lineTotal: 130.24 }]
+  })
+  assert.strictEqual(airbnbSansPrix.amount, undefined, 'le payout Airbnb n\'entre pas dans amount')
+
+  // Meme forme sans `channel`, mais la source reste une OTA via apiSource.
+  const viaApiSource = fromBeds24({
+    status: 'cancelled', apiSource: 'Airbnb', price: 0, commission: 0,
+    invoiceItems: [{ type: 'charge', lineTotal: 130.24 }]
+  })
+  assert.strictEqual(viaApiSource.amount, undefined)
+})
+
+test('montant Beds24 : repli sur les charges UNIQUEMENT sans commission (saisie directe)', () => {
+  // booking 51537887 : direct, price 0, facture 123 EUR. Sans commission, les
+  // charges valent bien le total voyageur.
+  const direct = fromBeds24({
+    status: 'confirmed', channel: 'direct', price: 0, commission: 0,
+    invoiceItems: [{ type: 'charge', subType: 7, lineTotal: 123 }, { type: 'payment', subType: 200, lineTotal: -123 }]
+  })
+  assert.strictEqual(direct.amount, 123, 'les paiements ne comptent pas, seules les charges')
+
+  // Meme forme mais AVEC commission : le repli est interdit, ce serait un net.
+  const ota = fromBeds24({ status: 'new', channel: 'airbnb', price: 0, commission: 18.6, invoiceItems: [{ type: 'charge', lineTotal: 81.4 }] })
+  assert.strictEqual(ota.amount, undefined, 'mieux vaut rien qu\'un net range dans un champ brut')
+})
+
+test('montant Beds24 : rien d\'exploitable -> undefined, pour ne PAS effacer l\'existant', () => {
+  // price 0 chez Beds24 veut dire « gratuit » ou « non renseigne », sans qu'on
+  // puisse trancher. Rendre null effacerait un montant deja en base a chaque cycle.
+  const s = fromBeds24({ status: 'cancelled', channel: 'direct', price: 0, commission: 0 })
+  assert.strictEqual(s.amount, undefined)
+  assert.strictEqual(s.commission, undefined)
+  assert.strictEqual(mergeSnapshot({ amount: 250, commission: 46.5 }, s).amount, 250)
+  assert.strictEqual(mergeSnapshot({ amount: 250, commission: 46.5 }, s).commission, 46.5)
+})
+
+test('montant Beds24 : currency reste undefined (reellement non servi)', () => {
+  // undefined et non null : le merge doit PRESERVER une devise deja en base,
+  // pas l'effacer a chaque cycle.
+  const s = fromBeds24({ status: 'new', price: 160 })
+  assert.strictEqual(s.currency, undefined)
+  assert.strictEqual(mergeSnapshot({ currency: 'EUR' }, s).currency, 'EUR')
+})
+
+test('montant Channex : les chaines servies par l\'API deviennent des NOMBRES', () => {
+  // Channex sert '82.21', Beds24 sert 160. Sans conversion, un cumul
+  // (total += snapshot.amount) donnerait une concatenation ou un NaN selon
+  // l'ordre des lignes — sur le champ meme qu'on promet homogene.
+  const s = fromChannex({
+    status: 'new', arrival_date: '2026-09-05', departure_date: '2026-09-06',
+    amount: '82.21', ota_commission: '18.79', currency: 'EUR', ota_name: 'AirBNB'
+  })
+  assert.strictEqual(s.amount, 82.21)
+  assert.strictEqual(s.commission, 18.79)
+  assert.strictEqual(s.currency, 'EUR')
+})
+
+test('montant : les DEUX providers rendent le meme type, un cumul reste un nombre', () => {
+  const b = fromBeds24({ status: 'new', channel: 'airbnb', price: 160, commission: 29.76 })
+  const c = fromChannex({ status: 'new', amount: '82.21', ota_commission: '18.79' })
+  assert.strictEqual(typeof b.amount, 'number')
+  assert.strictEqual(typeof c.amount, 'number')
+  const total = [b, c].reduce((somme, x) => somme + (x.amount || 0), 0)
+  assert.ok(Math.abs(total - 242.21) < 0.001, `cumul numerique, obtenu ${total}`)
+  assert.ok(!Number.isNaN(total))
+})
+
+test('montant Channex : rien de servi -> undefined, l\'existant est PRESERVE', () => {
+  // Meme regle que cote Beds24 : un null ecraserait la valeur deja en base.
+  const s = fromChannex({ status: 'cancelled', arrival_date: null, departure_date: null })
+  assert.strictEqual(s.amount, undefined)
+  assert.strictEqual(s.commission, undefined)
+  assert.strictEqual(mergeSnapshot({ amount: 97, commission: 15 }, s).amount, 97)
+})
+
+// ─── Le remplissage d'amount est INERTE pour les trois consommateurs ─────────
+// Remplir `amount` rend « changees » toutes les lignes Beds24 actives au premier
+// cycle. Ces tests verifient que ce changement ecrit la ligne SANS journaliser
+// d'evenement : le dispatcher ne lit que booking_change_events, donc sans
+// evenement il n'y a ni menage, ni code d'acces, ni message. C'est la garantie
+// demandee avant le deploiement.
+
+test('AMOUNT : son apparition ecrit la ligne mais ne journalise AUCUN evenement', async () => {
+  const capture = {}
+  // Ligne telle qu'ecrite par l'ancien mapper : amount jamais renseigne.
+  const existant = {
+    provider: 'beds24', status: 'confirmed', statusRaw: 'new',
+    arrival: '2099-09-01', departure: '2099-09-05',
+    firstName: 'Jean', lastName: 'Durand', numAdult: 2, numChild: 0,
+    source: 'airbnb', otaReservationCode: 'HMXXXX'
+  }
+  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: {
+      status: 'new', arrival: '2099-09-01', departure: '2099-09-05',
+      firstName: 'Jean', lastName: 'Durand', numAdult: 2, numChild: 0,
+      channel: 'airbnb', apiReference: 'HMXXXX', price: 160, commission: 29.76
+    }
+  })
+  assert.strictEqual(res.ok, true)
+  assert.strictEqual(res.inchange, undefined, 'la ligne a bien change -> elle est reecrite')
+  assert.strictEqual(capture.row.snapshot.amount, 160)
+  assert.strictEqual(capture.row.snapshot.commission, 29.76)
+  assert.strictEqual(res.change, null, 'AUCUN changement detecte')
+  assert.strictEqual((capture.events || []).length, 0, 'AUCUN evenement : ni menage, ni code, ni message')
+})
+
+test('AMOUNT : un montant qui BOUGE (repricing OTA) ne notifie personne non plus', async () => {
+  const capture = {}
+  const existant = {
+    provider: 'beds24', status: 'confirmed', statusRaw: 'new',
+    arrival: '2099-09-01', departure: '2099-09-05', firstName: '', lastName: '',
+    numAdult: 2, numChild: 0, source: 'airbnb', otaReservationCode: null,
+    amount: 160, commission: 29.76
+  }
+  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'new', arrival: '2099-09-01', departure: '2099-09-05', numAdult: 2, numChild: 0, channel: 'airbnb', price: 210, commission: 39.06 }
+  })
+  assert.strictEqual(capture.row.snapshot.amount, 210)
+  assert.strictEqual(res.change, null)
+  assert.strictEqual((capture.events || []).length, 0)
+})
+
+test('AMOUNT : le remplissage ne masque PAS un vrai changement simultane', async () => {
+  // Garde-fou inverse : si les dates bougent en meme temps que le montant
+  // apparait, l'evenement 'modified' doit toujours partir.
+  const capture = {}
+  const existant = {
+    provider: 'beds24', status: 'confirmed', statusRaw: 'new',
+    arrival: '2099-09-01', departure: '2099-09-05', firstName: '', lastName: '',
+    numAdult: 2, numChild: 0, source: 'airbnb', otaReservationCode: null
+  }
+  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 77, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'new', arrival: '2099-09-01', departure: '2099-09-07', numAdult: 2, numChild: 0, channel: 'airbnb', price: 160, commission: 29.76 }
+  })
+  assert.strictEqual(res.change.type, 'modified')
+  assert.deepStrictEqual(res.change.changes.departure, { before: '2099-09-05', after: '2099-09-07' })
+  assert.strictEqual(capture.row.snapshot.amount, 160)
+})
+
+test('AMOUNT : commission et amount ne sont dans aucun des quatre champs de diff', () => {
+  const { DIFF_FIELDS } = require('../lib/booking-changes')
+  const cles = DIFF_FIELDS.map(f => f.key)
+  assert.deepStrictEqual(cles, ['arrival', 'departure', 'numAdult', 'numChild'])
+  assert.ok(!cles.includes('amount'))
+  assert.ok(!cles.includes('commission'))
+})
+
+// ─── Annulation Beds24 : le cas 92209790 ────────────────────────────────────
+test('ANNULATION Beds24 : le passage a cancelled produit bien un evenement cancelled', async () => {
+  // Cas reel : booking 92209790, annule le 4 septembre, arrivee le 12 septembre.
+  // Il restait `confirmed` en base parce que GET /bookings excluait les
+  // annulations : le writer ne le revoyait jamais.
+  const capture = {}
+  const existant = {
+    provider: 'beds24', status: 'confirmed', statusRaw: 'new',
+    arrival: '2099-09-12', departure: '2099-09-13', firstName: '', lastName: '',
+    numAdult: 2, numChild: 0, source: 'airbnb', otaReservationCode: null
+  }
+  const sb = fakeSupabase({ existing: existant, captureRef: capture })
+  const res = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 92209790, propertyId: 12345, provider: 'beds24',
+    booking: { status: 'cancelled', arrival: '2099-09-12', departure: '2099-09-13', numAdult: 2, numChild: 0, channel: 'airbnb' }
+  })
+  assert.strictEqual(res.change.type, 'cancelled')
+  assert.strictEqual(capture.row.snapshot.status, 'cancelled')
+  assert.strictEqual(capture.row.snapshot.statusRaw, 'cancelled')
+  assert.strictEqual((capture.events || []).length, 1, 'l\'evenement part vers le dispatcher')
+  assert.strictEqual(capture.events[0].type, 'cancelled')
+})

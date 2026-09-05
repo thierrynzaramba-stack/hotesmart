@@ -88,6 +88,36 @@ Beds24 était borné par sa fenêtre de fetch (`-1j/+90j`), pas le chemin Channe
 La marge de 7 jours laisse passer une réservation saisie en retard ou un départ
 tout juste passé (la PWA prestataire remonte les départs jusqu'à J-14).
 
+**La garde tient aussi SANS date.** Elle renvoyait `false` dès que `departure`
+manquait — « date inconnue : on ne bloque pas » — et laissait donc passer un
+événement pour une réservation qu'aucune prestataire ne peut planifier. Ce n'est
+pas théorique : Channex sert exactement ce cas. Sur Colomiers, la réservation
+`a3f88358` (annulée, Booking.com, 97,00 €) porte `arrival_date: null`,
+`departure_date: null`, `rooms: []`.
+
+La règle est désormais :
+
+| dates | verdict |
+|---|---|
+| départ connu | comparé à J-7, comme avant |
+| départ absent, **arrivée** connue | l'arrivée sert de référence, comparée à J-7 |
+| entrant sans aucune date, **ligne existante** datée | on juge le séjour **déjà connu** |
+| aucune date nulle part | **terminé** → aucun événement |
+
+Sans aucune date, on bloque : un ménage sans date est ininterprétable. Un faux
+négatif coûte ici une notification perdue sur une donnée déjà incomplète ; un faux
+positif envoie une prestataire sur place sans lui dire quel jour.
+
+⚠ **La ligne du repli sur l'existant a coûté une régression, attrapée en review.**
+Première version : la garde ne regardait que le snapshot **entrant**. Or
+`mergeSnapshot` écrase les dates connues avec les `null` de l'annulation Channex
+à charge utile vide — un `null` fourni est une information (§5 du KB snapshot).
+L'annulation d'un séjour pourtant connu et daté ne produisait donc plus **aucun**
+événement : ni ménage annulé, ni code révoqué, ni message stoppé. Soit exactement
+la panne fermée côté Beds24 par ce même commit, rouverte côté Channex.
+`detectChange` passe désormais `previous` à la garde. Test de non-régression :
+`tests/booking-changes.test.js`, « ANNULATION sans dates ».
+
 ## 3 ter. Isolation multi-comptes
 
 Le dispatcher traite un lot **multi-comptes** et tourne avec la service key, qui
@@ -150,11 +180,71 @@ encore appliquée, coupure réseau) perd le changement **définitivement et en
 silence**. Dans cet ordre, un upsert en échec laisse au pire un événement en double
 au cycle suivant : du bruit, pas une perte.
 
+## 3 octies bis. Les annulations Beds24 ne remontent QUE si on les demande
+
+`GET /bookings` **exclut les annulations par défaut**, et ne le dit nulle part :
+pas d'erreur, pas d'indice, la réservation disparaît simplement de la réponse.
+
+Conséquence mesurée en production sur le bien 209413 : une réservation confirmée
+puis annulée n'était **jamais revue** par le writer. `detectChange` ne voyait donc
+aucune transition, et le snapshot restait `confirmed` **pour toujours**. Trois
+réservations annulées étaient encore actives en base, dont une **à venir**
+(`92209790`, 12-13 septembre 2026) : ménage notifié, code d'accès posé et message
+envoyé pour un séjour qui n'existe plus.
+
+Le correctif ne purge rien : il **rend l'annulation visible** pour que la
+correction passe par le chemin normal du cœur (fetch → writer → `detectChange` →
+événement `cancelled` → dispatcher). C'est le principe « pas de purge, mais une
+réconciliation ».
+
+`fetchBookings` demande les six statuts (`new`, `confirmed`, `request`, `inquiry`,
+`black`, `cancelled`) — même coût, 1,5 crédit par page.
+
+**`includeCancelled` est opt-in, et c'est délibéré.** Deux appelants partagent
+cette fonction :
+
+| appelant | annulées ? | pourquoi |
+|---|---|---|
+| `lib/cron-bookings.js` (writer) | **oui** | c'est tout l'objet du correctif |
+| `lib/cron-messages.js` (templates) | **non** | envoie un message par booking rapporté : servir les annulées enverrait « bienvenue » et « bon retour » à des voyageurs dont le séjour est annulé |
+
+Le chemin Beds24 de `cron-messages` filtre en plus par `isActiveStatus`, comme le
+fait déjà `fetchChannelBookings` côté Channex : les deux chemins disent la même
+chose, et une future activation de l'option ne peut pas rouvrir la brèche.
+
+`syncStatusFromBookings` filtrait déjà par `isActiveStatus` : une annulée ne peut
+pas faire passer le logement en `occupied`.
+
 ## 3 octies. Fenêtre de détection
 
 Les deux chemins Beds24 n'ont pas la même fenêtre, **volontairement** :
 - `lib/cron-bookings.js` → `-1j/+90j` ;
-- `lib/cron-classify.js` → `-6 mois`, **sans borne haute**.
+- `lib/cron-classify.js` → `-6 mois`, **sans borne haute**, **paginé**.
+
+⚠ `fetchBookingsHistory` ne lisait que la **première page**. L'API plafonne à 100
+réservations et signale la suite dans `pages.nextPageExists`, que l'ancien code
+ignorait : sur le bien 209413, six mois d'historique en comptent plus de 100, et le
+reste était perdu **en silence**. `lib/cron-classify.js` rattachait donc les
+messages à un sous-ensemble arbitraire des séjours.
+
+**Coût en crédits, et pourquoi le plafond est bas.** `classify` tourne à chaque
+cycle `*/5`, **par bien**, et chaque page est un appel HTTP en série dans un cycle
+déjà mesuré à 40-56 s pour un plafond Vercel de 60 s. Six mois d'historique sur
+209413 = 181 réservations = 2 pages, soit **3 crédits au lieu de 1,5 par bien et
+par cycle** (81 réservations étaient perdues en silence). Le budget Beds24 est de
+**100 crédits par fenêtre glissante de 5 minutes**.
+
+Le plafond est donc volontairement bas : **5 pages** = 500 réservations sur six
+mois, très au-delà du besoin réel, et le pire cas reste borné à 7,5 crédits et ~2 s
+par bien. À surveiller au-delà d'une dizaine de biens Beds24 : c'est le premier
+plafond que ce cron rencontrera.
+
+**Deux troncatures, deux messages.** Le plafond atteint est un `warn` ; un échec
+API en cours de pagination est une `error` qui sort immédiatement. Les confondre
+enverrait le diagnostic dans la mauvaise direction — un token expiré n'est pas un
+historique trop long. Même principe dans `fetchBookings` : une réponse
+`success: false` est **loggée** au lieu d'être rendue comme une liste vide, sinon le
+writer recevrait un lot vide et cesserait silencieusement toute détection.
 
 La seconde est la plus large et c'est elle qui gouverne la détection. Une
 réservation prise très en avance était sinon détectée avec des mois de retard.

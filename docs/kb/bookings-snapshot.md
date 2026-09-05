@@ -121,11 +121,74 @@ passer `request` (demande non confirmée) comme une réservation active.
 ## 4. Schéma du champ `snapshot` (jsonb)
 
 `provider`, `status`, `statusRaw`, `arrival`, `departure`, `arrivalHour`, `firstName`,
-`lastName`, `numAdult`, `numChild`, `source`, `otaReservationCode`, `amount`, `currency`.
+`lastName`, `numAdult`, `numChild`, `source`, `otaReservationCode`, `amount`,
+`commission`, `currency`.
 
 `otaReservationCode` est la clé de rattachement des avis voyageurs
 (Beds24 : `apiReference` ; Channex : `ota_reservation_code`).
-Non fournis par l'API Beds24 v2 bookings : `arrivalHour`, `amount`, `currency`.
+Réellement non fournis par l'API Beds24 v2 bookings : `arrivalHour`, `currency`.
+
+## 4 bis. `amount` = ce que paie le VOYAGEUR, jamais le net hôte
+
+Le mapper Beds24 portait `amount: undefined` avec le commentaire « non fourni sur
+cet endpoint ». **C'était faux.** `price` et `commission` sont servis à 100 %, avec
+ou sans `includeInvoiceItems`. Mesure sur les 1 413 réservations du bien 209413 :
+`amount` était rempli sur **0** ligne Beds24, contre 18/18 côté Channex. Un module
+revenus, yield ou facturation aurait lu zéro pour tout un provider **sans qu'aucune
+erreur ne se déclenche**.
+
+### Pourquoi pas la somme des `invoiceItems`
+
+Sa sémantique **dépend du canal** — mesuré sur les 1 231 réservations facturées :
+
+| canal | n | `somme(charge)` vaut |
+|---|---|---|
+| airbnb | 846/846 | `price − commission` → **net hôte** |
+| booking | 253/253 | `price` → **total voyageur** |
+| direct | 132 | commission nulle, les deux se confondent |
+
+La retenir donnerait un champ valant un net sur un canal et un brut sur l'autre :
+**~19 % d'écart systématique entre Airbnb et Booking**, invisible à la lecture.
+`price` est la seule grandeur de même sens partout.
+
+### La règle
+
+```
+amount = price                si price > 0
+       = somme(charge)        si source = direct ET commission = 0
+       = undefined            sinon
+commission                    stockée à part, jamais soustraite d'amount
+```
+
+Le repli teste la **source** et pas seulement la commission. Une réservation OTA
+dont Beds24 remettrait `price` et `commission` à 0 en conservant la ligne de payout
+ferait sinon entrer un net hôte dans un champ « total voyageur ». Aucun cas de
+cette forme dans les 1 413 réservations mesurées — les 5 replis observés sont tous
+`direct` — mais l'invariant ne doit pas dépendre des données du jour.
+
+**Même type des deux côtés.** Channex sert les montants en chaînes (`'82.21'`),
+Beds24 en nombres (`160`). Les deux mappers convertissent : sans cela un cumul
+`total += snapshot.amount` donnerait une concaténation ou un `NaN` selon l'ordre
+des lignes, sur le champ même qu'on promet homogène.
+
+**`undefined`, pas `null`, quand rien n'est exploitable** : Beds24 ne distingue pas
+« séjour gratuit » de « montant non renseigné » — `price` vaut 0 dans les deux cas
+(189 lignes sur 1 413, dont 109 annulées). Rendre `null` affirmerait « ce provider
+sait qu'il n'y a pas de valeur » et **effacerait à chaque cycle** un montant déjà en
+base. Résultat après correction : `amount` renseigné sur 1 229/1 413, `commission`
+sur 1 116/1 413, aucune incohérence avec `price`.
+
+### Remplir `amount` ne réveille personne
+
+Le premier cycle après ce changement réécrit toutes les lignes Beds24 actives : le
+snapshot fusionné diffère de l'existant, donc la garde « ligne inchangée » ne
+s'applique pas. **Attendre un cycle long, c'est normal.** En revanche `amount` et
+`commission` ne font pas partie des quatre champs de diff (`arrival`, `departure`,
+`numAdult`, `numChild`) : `detectChange` renvoie `null`, aucun `booking_change_event`
+n'est écrit, et le dispatcher ne lit rien d'autre — **ni ménage, ni code d'accès, ni
+message**. Vérifié par test (`tests/bookings-snapshot.test.js`, section AMOUNT),
+y compris le garde-fou inverse : un montant qui apparaît **en même temps** qu'un
+changement de dates ne masque pas le `modified`.
 
 ## 5. Merge non destructif
 
