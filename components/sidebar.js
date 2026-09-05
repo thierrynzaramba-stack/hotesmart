@@ -274,15 +274,23 @@ function renderApps(activePage) {
           <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Configuration
         </a>`
     } else if (app.id === 'menages') {
+      // ⚠ NOMMAGE TRANCHE LE 5 SEPTEMBRE 2026. « Planning » designait l'ecran
+      // d'AFFECTATION, et le calendrier de garde s'appelait « Garde » — deux
+      // plannings dont aucun ne portait le mot au bon endroit. Desormais :
+      //   « Menages »  = ce qu'on fait (affecter, noter, marquer fait),
+      //   « Planning » = le calendrier de garde.
+      // ⚠ Les URL et les cles activePage NE BOUGENT PAS : un lien envoye par SMS
+      // ou mis en favori doit continuer d'ouvrir la meme page. Un renommage
+      // d'etiquette ne casse pas d'adresse.
+      //
+      // ⚠ CE COMMENTAIRE EST EN JS, PAS EN HTML DANS LE TEMPLATE. La version
+      // precedente etait un <!-- --> A L'INTERIEUR du template literal, et il
+      // contenait des accents graves autour d'un nom de variable : le premier
+      // FERMAIT la chaine, et le fichier ne parsait plus — « Unexpected
+      // identifier 'activePage' », navigation cassee sur TOUTES les pages de
+      // l'app. Un commentaire n'a rien a faire dans une chaine qui part au
+      // navigateur, et surtout pas avec des accents graves dedans.
       subMenu = `
-        <!-- ⚠ NOMMAGE TRANCHE LE 5 SEPTEMBRE 2026. « Planning » designait l'ecran
-             d'AFFECTATION, et le calendrier de garde s'appelait « Garde » — deux
-             plannings dont aucun ne portait le mot au bon endroit. Desormais :
-             « Ménages » = ce qu'on fait (affecter, noter, marquer fait),
-             « Planning » = le calendrier de garde.
-             ⚠ Les URL et les cles `activePage` NE BOUGENT PAS : un lien envoye
-             par SMS ou mis en favori doit continuer d'ouvrir la meme page. Un
-             renommage d'etiquette ne casse pas d'adresse. -->
         <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
           <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Ménages
         </a>
