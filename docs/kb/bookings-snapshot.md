@@ -132,7 +132,9 @@ Réellement non fournis par l'API Beds24 v2 bookings : `arrivalHour`, `currency`
 
 Le mapper Beds24 portait `amount: undefined` avec le commentaire « non fourni sur
 cet endpoint ». **C'était faux.** `price` et `commission` sont servis à 100 %, avec
-ou sans `includeInvoiceItems`. Mesure sur les 1 413 réservations du bien 209413 :
+ou sans `includeInvoiceItems`. Mesure sur les 1 413 réservations des **deux biens
+Beds24** — `GET /bookings` ignore le filtre `propId` et rend tout le compte, le
+code refiltre côté client (780 pour 209413, 633 pour 169567) :
 `amount` était rempli sur **0** ligne Beds24, contre 18/18 côté Channex. Un module
 revenus, yield ou facturation aurait lu zéro pour tout un provider **sans qu'aucune
 erreur ne se déclenche**.
@@ -308,7 +310,7 @@ où le cache de schéma PostgREST n'a pas encore rechargé après la migration.
 
 | | snapshot | raw |
 |---|---|---|
-| Beds24 (1 413 réservations) | 340 Ko | **2,36 Mo** (1 754 o/ligne) |
+| Beds24 (1 413 réservations, les deux biens) | 340 Ko | **2,36 Mo** (1 754 o/ligne) |
 | Channex (18) | ~5 Ko | 105 Ko (5 994 o/ligne) |
 
 Le `raw` pèse ~7 fois le snapshot côté Beds24, ~21 fois côté Channex. Projection à
@@ -318,6 +320,97 @@ provider définitivement perdue.
 
 Le prefetch de lot relit `raw` (tranches de 200 → moins d'un mégaoctet par
 requête) pour que le writer compare sans seconde lecture.
+
+## 4 quater. Backfill historique (sous-chantier B)
+
+`scripts/backfill-historique.js` — hors cron, idempotent, écrit **exclusivement**
+par le writer unique. Résultat : **214 → 1 433 lignes**, dont 1 431 avec leur `raw`.
+
+| bien | provider | écrites | fantômes réconciliés |
+|---|---|---|---|
+| 209413 | 780 → 781 | 677 | 2 |
+| 169567 | 633 → 634 | 553 | 9 |
+| Colomiers | 18 | 16 | 0 |
+
+Contre-vérifié contre un export Beds24 « daily occupancy » : **1 414 attendues,
+1 415 en base**. L'écart de 1 est le booking `53137890`, un **blocage propriétaire**
+(`black` → `blocked`) que le rapport d'occupation ne compte pas, à juste titre.
+Échantillon aléatoire de 10 réservations comparées champ à champ au provider :
+**10/10 conformes**, empreintes valides, factures présentes.
+
+**Bénéfice mesuré** : rattachement des avis du 209413 passé de **5/28 à 24/28**,
+sans une ligne de code applicatif — seulement parce que le cœur contient enfin
+l'historique.
+
+### ⚠ Beds24 ignore `propId`
+
+`GET /bookings?propId=X` rend **tout le compte**. Le code refiltre côté client
+(`fetchBookings`, `fetchBookingsIntegral`), mais l'inventaire d'étape 0 avait
+attribué les 1 413 réservations au seul 209413 : c'est le total des deux biens
+(780 + 633). Toute mesure future doit filtrer avant de compter.
+
+### ⚠ L'API Channex n'est pas déterministe
+
+Deux appels consécutifs au même endpoint rendent `rooms[].meta.days_breakdown`
+dans un **ordre différent** (3 réservations sur 18) :
+
+```
+appel 1 : 2026-07-22, 2026-07-23, 2026-07-24
+appel 2 : 2026-07-24, 2026-07-22, 2026-07-23
+```
+
+Même contenu, ordre aléatoire.
+
+**Ce changement d'empreinte invalide tous les `raw_hash` déjà en base.** Les lignes
+écrites par le commit `373c302` l'ont été avec l'ancienne définition
+(ordre-sensible) : après déploiement, tout payload contenant un tableau non déjà
+trié produit une empreinte différente, soit ~1 400 lignes à réécrire. Sans danger —
+ce sont des `UPDATE`, la sonde `table_growth` compte des `created_at` et ne se
+déclenche pas — mais bridé à 60 par cycle, le rattrapage prendrait ~24 cycles.
+
+**L'ordre compte : déployer d'abord, re-hasher ensuite.** Re-hasher pendant que la
+production tourne encore avec l'ancienne définition ferait s'affronter deux
+writers : le script pose des empreintes canoniques, le cron ne les reconnaît pas et
+les réécrit à l'ancienne, 60 par cycle, indéfiniment. Et cela aurait l'air de
+fonctionner — `rawEchecs` à zéro, `rawMisAJour` à 60, un chiffre qu'on lirait comme
+un rattrapage en cours plutôt que comme une bataille. Séquence : **push →
+déploiement vérifié → re-hash one-shot → un cycle cron muet** (zéro `rawMisAJour`,
+preuve que le cron et le script s'accordent enfin). Aucun script dédié n'est
+nécessaire : un passage de `backfill-historique.js` recalcule les empreintes.
+
+C'est pourquoi `empreinte()` s'appuie sur
+`canoniqueStringify`, qui trie **aussi** les éléments de tableaux, là où
+`stableStringify` ne trie que les clés. Sans cela, ces lignes se réécrivaient à
+chaque passage — backfill non idempotent, et le cron aurait fait de même toutes
+les 5 minutes. Le `raw` stocké conserve l'ordre du dernier payload reçu : on ne
+perd rien, on cesse seulement de traiter un aléa de sérialisation comme un
+changement.
+
+### Ce que le backfill ne touche pas
+
+**Les réservations futures**, même absentes. Le backfill pose `initialImport`,
+donc l'événement `new` est journalisé *déjà traité* et jamais distribué : la ligne
+existerait sans que personne n'ait été prévenu, et le cron, la voyant présente, ne
+produirait plus jamais de `new`. Aucune notification de ménage, aucun message,
+aucun code — pour un séjour bien réel. Laisser le cron les créer est strictement
+plus sûr. Restent donc hors couverture 2 lignes Channex : une annulation sans
+aucune date, et une réservation en cours.
+
+### La sonde `table_growth` : faux positif documenté
+
+Le backfill a déclenché l'alerte de croissance (`+1 219` lignes en une heure,
+seuil 80/h). **Ce n'est pas un incident.**
+
+Le seuil reste bien calibré : il mesure un **débit**, pas une taille. Le régime
+normal est de **0,21 ligne/heure** (36 lignes sur 7 jours) — une marge de ~380×.
+Que la table soit passée de 214 à 1 433 lignes n'y change rien, et relever le
+seuil aveuglerait la sonde sur les vraies boucles d'écriture, sa raison d'être.
+
+**Le prochain backfill doit être annoncé, pas subi.** Le script insère désormais
+lui-même une entrée `automation_incidents` de type `table_growth` déjà marquée
+`alerted` avant d'écrire : l'anti-spam de 6 h de la sonde fait le reste, sans
+qu'on touche à son code. Un onboarding d'hôte avec reprise d'historique suivra la
+même voie.
 
 ## 5. Merge non destructif
 

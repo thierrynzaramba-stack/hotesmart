@@ -35,9 +35,15 @@ stats, et tout ce qui viendra.
 
 ## 3. Acquis de l'étape 0 (rappel des faits)
 
-- Beds24, bien 209413 : 4 ans d'historique complet, 1 413 réservations (1 234 actives + 179
-  annulées), `price`/`commission` remplis à 100 %, ~24 crédits API par bien (budget 100/5 min
+- Beds24 : 4 ans d'historique complet, 1 413 réservations (1 234 actives + 179 annulées),
+  `price`/`commission` remplis à 100 %, ~24 crédits API par appel intégral (budget 100/5 min
   partagé avec le cron de prod).
+  **Correction du 6 septembre** : ces 1 413 sont le total des **deux** biens, pas celui du
+  seul 209413. `GET /bookings` ignore le filtre `propId` et rend tout le compte ; le code
+  refiltre côté client, mais l'inventaire d'étape 0 avait attribué le total au premier bien.
+  Répartition réelle : **209413 = 780** (686 actives + 94 annulées),
+  **169567 = 633** (548 actives + 85 annulées). Les chiffres dérivés qui portaient sur le
+  corpus entier (montants, volumétrie, taux de remplissage) restent exacts.
 - Channex : historique depuis le branchement du canal seulement ; payload plus riche.
 - Le writer conserve 14 champs (266 octets), jamais le payload brut → objet du sous-chantier A.
 - La fenêtre -1j/+90j du flux nominal borne la réconciliation des annulations : les

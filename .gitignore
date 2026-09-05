@@ -169,3 +169,6 @@ _*.tmp.mjs
 /cron.js
 /assign.js
 /*-entite.js
+
+# Curseur de reprise du backfill historique (etat local, jamais versionne)
+.backfill-historique.json

@@ -407,3 +407,18 @@ test('COMPTEURS : un echec de maj du raw remonte dans le resume du lot', async (
     assert.ok(cris.some(c => c.includes('EN ECHEC')), 'le resume de cycle le crie')
   } finally { console.error = vraiErr }
 })
+
+test('EMPREINTE : insensible a l\'ordre des TABLEAUX (API non deterministe)', () => {
+  // Mesure sur Channex : deux appels consecutifs au meme endpoint rendent
+  // days_breakdown dans un ordre different. Sans cette tolerance, ces lignes se
+  // reecrivaient a chaque passage — backfill non idempotent, et cron qui aurait
+  // fait de meme toutes les 5 minutes.
+  const a = { rooms: [{ meta: { days_breakdown: [{ date: '2026-07-22' }, { date: '2026-07-23' }, { date: '2026-07-24' }] } }] }
+  const b = { rooms: [{ meta: { days_breakdown: [{ date: '2026-07-24' }, { date: '2026-07-22' }, { date: '2026-07-23' }] } }] }
+  assert.strictEqual(empreinte(a), empreinte(b), 'meme contenu, ordre different -> meme empreinte')
+  // Un vrai changement de contenu reste detecte.
+  const c = { rooms: [{ meta: { days_breakdown: [{ date: '2026-07-22' }, { date: '2026-07-23' }, { date: '2026-07-25' }] } }] }
+  assert.notStrictEqual(empreinte(a), empreinte(c))
+  // Et stableStringify, lui, reste strict : les deux fonctions ont des roles distincts.
+  assert.notStrictEqual(stableStringify(a), stableStringify(b))
+})

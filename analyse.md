@@ -12,6 +12,16 @@ Lecture seule. Aucun code de production écrit, aucune migration. 5 septembre 20
 
 ## 1. Beds24 — bien 209413 « Cœur de vie La bulle »
 
+> **RECTIFICATIF du 6 septembre 2026.** Les 1 413 réservations de cette section sont
+> le total des **deux** biens Beds24, pas celui du seul 209413 : `GET /bookings`
+> **ignore le filtre `propId`** et rend tout le compte. Le code de production
+> refiltre côté client (`fetchBookings`, `fetchBookingsIntegral`), donc aucun défaut
+> en production — l'erreur était dans cet inventaire.
+> Répartition réelle : **209413 = 780** (686 actives + 94 annulées),
+> **169567 = 633** (548 actives + 85 annulées).
+> Les mesures portant sur le corpus entier (montants, volumétrie, remplissage des
+> champs, sémantique par canal) restent exactes telles quelles.
+
 ### Profondeur d'historique
 
 | Mesure | Valeur |
@@ -30,7 +40,7 @@ tronque pas, ne purge pas.
 |---|---|
 | Réservations non annulées | **1 234** |
 | Réservations **annulées** (requête séparée) | **179** |
-| **Total historique** | **1 413** |
+| **Total historique** | **1 413** (les DEUX biens — voir rectificatif) |
 
 Par année d'arrivée (hors annulées) : 2022 = 49, 2023 = 164, 2024 = 372,
 2025 = 399, 2026 = 250.
@@ -218,7 +228,7 @@ zéro pour les hôtes Beds24 sans qu'aucune erreur ne se déclenche.
 | Mesure | Valeur |
 |---|---|
 | Lignes totales dans `bookings_snapshot` | **185** |
-| dont bien 209413 | 92 (le provider en a **1 413**) |
+| dont bien 209413 | 92 (le provider en a **780**) |
 | dont bien 169567 | 75 |
 | dont Colomiers (Channex) | 18 |
 | Fenêtre d'arrivées couverte | 2026-03-20 → 2026-09-26 |
