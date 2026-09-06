@@ -173,6 +173,14 @@ export const api = {
       }
     }
   },
+  // ─── Reservation directe (Channex CRS) ────────────────────────────────────
+  // Passe par apiCall comme tout le reste : Authorization et X-Compte sont donc
+  // poses automatiquement, et la delegation de compte fonctionne sans que la
+  // page ait a y penser.
+  reservationDirecte: {
+    creer:   (payload)   => apiCall('reservation-directe', 'POST', payload),
+    annuler: (payload)   => apiCall('reservation-directe', 'DELETE', payload)
+  },
   calendar: {
     load: (propertyIds, start, end) =>
       apiCall(`calendar?property_ids=${encodeURIComponent(propertyIds.join(','))}&start=${start}&end=${end}`, 'GET'),

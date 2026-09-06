@@ -64,6 +64,8 @@
     .resa-bar { position: absolute; top: 3px; bottom: 3px; color: white; font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; white-space: nowrap; overflow: hidden; border-radius: 11px; }
     .resa-bar.blue { background: #0d4ea6; } .resa-bar.green { background: #1f6f23; } .resa-bar.red { background: #d52a44; }
     .resa-bar.airbnb { background: #d52a44; } .resa-bar.booking { background: #0d4ea6; } .resa-bar.direct { background: #1f6f23; }
+    .resa-bar.cliquable { cursor: pointer; }
+    .resa-bar.cliquable:hover { filter: brightness(1.15); box-shadow: 0 0 0 2px rgba(255,255,255,0.6) inset; }
     .resa-bar .ava { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .resa-bar .ava svg { width: 10px; height: 10px; }
     td.cell-closed { background: #ffeced !important; }
@@ -158,7 +160,64 @@
   <div class="float-bar" id="float-bar">
     <span class="sel-info"><strong id="sel-count">0</strong> jour(s)</span>
     <button class="btn-params" id="btn-open-popup">Plus de parametres</button>
+    <!-- Seconde action de la selection (spec §5) : masquee par defaut, montree
+         seulement sur un bien Channex, avec le droit d'ecrire, et hors lecture
+         seule. On ne propose pas un bouton qui echouerait. -->
+    <button class="btn-params" id="btn-ajouter-resa" style="background:#1f6f23;display:none">+ Ajouter une réservation</button>
     <button class="btn-clear" id="btn-clear-sel">Annuler</button>
+  </div>
+
+  <!-- FICHE D'UNE RESERVATION — consultation, et actions si elle est Offline.
+       Overlay distinct de celui de configuration : les deux peuvent coexister
+       sans que l'un ecrase l'etat de l'autre. -->
+  <!-- FORMULAIRE D'AJOUT — pre-rempli depuis la selection et l'inventaire. -->
+  <div class="overlay" id="overlay-ajout">
+    <div class="popup-lg" style="max-width:520px">
+      <div class="popup-head">
+        <h3>Ajouter une réservation</h3>
+        <div class="hint" id="ajout-sous-titre"></div>
+      </div>
+      <div style="padding:18px 24px;overflow-y:auto">
+        <div id="ajout-recap" style="background:#f5f5f7;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px"></div>
+        <label style="font-size:12px;color:#86868b">Nom du voyageur *</label>
+        <input id="ajout-nom" type="text" placeholder="Prénom Nom" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
+        <label style="font-size:12px;color:#86868b">Email</label>
+        <input id="ajout-email" type="email" placeholder="facultatif" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
+        <label style="font-size:12px;color:#86868b">Téléphone</label>
+        <input id="ajout-tel" type="tel" placeholder="facultatif" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
+        <div style="display:flex;gap:12px">
+          <div style="flex:1"><label style="font-size:12px;color:#86868b">Adultes</label>
+            <input id="ajout-adultes" type="number" min="1" value="2" style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>
+          <div style="flex:1"><label style="font-size:12px;color:#86868b">Enfants</label>
+            <input id="ajout-enfants" type="number" min="0" value="0" style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>
+        </div>
+        <label style="font-size:12px;color:#86868b;display:block;margin-top:12px">Prix par nuit</label>
+        <input id="ajout-prix" type="number" step="0.01" min="0.01" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
+        <label style="font-size:12px;color:#86868b">Note interne</label>
+        <input id="ajout-ref" type="text" placeholder="facultatif — visible de vous seul" style="width:100%;padding:9px;margin:4px 0;border:1px solid #d2d2d7;border-radius:8px">
+      </div>
+      <div class="popup-foot">
+        <span class="hint" id="ajout-etat"></span>
+        <div style="display:flex;gap:10px">
+          <button class="btn-cancel" id="ajout-annuler">Annuler</button>
+          <button class="btn-apply" id="ajout-valider">Créer la réservation</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay-resa">
+    <div class="popup-lg" style="max-width:520px">
+      <div class="popup-head">
+        <h3 id="resa-titre">Réservation</h3>
+        <div class="hint" id="resa-sous-titre"></div>
+      </div>
+      <div style="padding:18px 24px;overflow-y:auto" id="resa-corps"></div>
+      <div class="popup-foot">
+        <span class="hint" id="resa-note"></span>
+        <div style="display:flex;gap:10px" id="resa-actions"></div>
+      </div>
+    </div>
   </div>
 
   <div class="overlay" id="overlay">
@@ -288,7 +347,7 @@
       days.forEach((d,idx)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(idx)?' month-start':'';html+='<th class="'+(we?'weekend':'')+(isToday(idx)?' today':'')+ms+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
       html+='</tr></thead><tbody>'
       html+='<tr><td class="row-label">Reservations</td>'
-      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=(bk.span-0.5)*100;const nameShort=bk.name.length>16?bk.name.slice(0,15)+'.':bk.name;html+='<div class="resa-bar '+bk.source+'" style="left:50%;width:calc('+w+'% - 2px);z-index:2"><span class="ava">'+platformLogo(bk.source)+'</span>'+nameShort+'</div>'}});html+='</td>'})
+      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=(bk.span-0.5)*100;const nameShort=escapeHtmlLocal(bk.name.length>16?bk.name.slice(0,15)+'.':bk.name);html+='<div class="resa-bar '+bk.source+(bk.id?' cliquable':'')+'" data-resa="'+(bk.id||'')+'" data-bien="'+bien.id+'" title="'+escapeHtmlLocal(bk.name||'')+' — cliquer pour le detail" style="left:50%;width:calc('+w+'% - 2px);z-index:2"><span class="ava">'+platformLogo(bk.source)+'</span>'+nameShort+'</div>'}});html+='</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
@@ -306,7 +365,17 @@
     }
 
     let isDragging=false, dragStart=null, dragBien=null, dragRow=null
-    function attachEvents(){ if(LECTURE_SEULE) return; blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx);sel.idx=new Set();for(let i=lo;i<=hi;i++)sel.idx.add(i);updateSelectionUI()})})}) }
+    function attachEvents(){
+      // ⚠ AVANT la sortie « lecture seule » : la fiche est de la CONSULTATION.
+      // Un membre en lecture doit pouvoir ouvrir une reservation ; ce sont les
+      // boutons d'action de la fiche qui sont gardes, pas son ouverture.
+      blocksEl.querySelectorAll('.resa-bar.cliquable').forEach(bar=>{
+        bar.addEventListener('click', e=>{
+          e.preventDefault(); e.stopPropagation()
+          ouvrirFicheResa(bar.dataset.bien, bar.dataset.resa)
+        })
+      })
+      if(LECTURE_SEULE) return; blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx);sel.idx=new Set();for(let i=lo;i<=hi;i++)sel.idx.add(i);updateSelectionUI()})})}) }
     let lastMouseX=0, autoScrollRAF=null
     let LECTURE_SEULE=false
     function colIndexUnderX(clientX){
@@ -336,7 +405,11 @@
       if(!autoScrollRAF) autoScrollRAF=requestAnimationFrame(autoScrollStep)
     })
     document.addEventListener('mouseup',()=>{ if(!isDragging)return; isDragging=false; if(autoScrollRAF){cancelAnimationFrame(autoScrollRAF);autoScrollRAF=null} if(sel.idx.size===0)return; showFloatBar() })
-    document.addEventListener('keydown',e=>{ if(!sel.bienId||sel.idx.size===0)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return; if(document.getElementById('overlay').classList.contains('visible'))return; const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; if(!cell)return; if(e.key==='Enter'||e.key==='F2'){e.preventDefault();startInlineEdit(cell,f,'')}else if(/^[0-9]$/.test(e.key)){e.preventDefault();startInlineEdit(cell,f,e.key)} })
+    document.addEventListener('keydown',e=>{ if(!sel.bienId||sel.idx.size===0)return; const tag=(e.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='select'||tag==='textarea')return; // ⚠ TOUS les overlays neutralisent le raccourci, pas seulement celui de
+      // configuration : le focus peut etre sur un <button> d'une modale (donc le
+      // garde `tag==='input'` ne s'applique pas), et une frappe demarrerait alors
+      // l'edition d'un tarif DERRIERE la fenetre, en lui volant le focus.
+      if(['overlay','overlay-ajout','overlay-resa'].some(id=>document.getElementById(id)?.classList.contains('visible')))return; const f=Math.min(...sel.idx); const sec=blocksEl.querySelector('.bien-section[data-bien-id="'+sel.bienId+'"]'); const cell=sec?sec.querySelector('.edit-cell[data-idx="'+f+'"][data-row="'+sel.row+'"]'):null; if(!cell)return; if(e.key==='Enter'||e.key==='F2'){e.preventDefault();startInlineEdit(cell,f,'')}else if(/^[0-9]$/.test(e.key)){e.preventDefault();startInlineEdit(cell,f,e.key)} })
     function updateSelectionUI(){ blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;if(sel.bienId===bid&&sel.row===row&&sel.idx.has(idx))cell.classList.add('selected');else cell.classList.remove('selected')})}); if(sel.idx.size>0)showFloatBar() }
 
     // ⚠ LECTURE SEULE : aucune edition en ligne pour un membre `reservations: read`.
@@ -346,7 +419,23 @@
     function startInlineEdit(cell,idx,initial){ if(!peutEcrire('reservations'))return; if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="text" inputmode="decimal" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}else{try{input.select()}catch(e){}};let done=false;const commit=async(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const bienId=sel.bienId;const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;const segs=targets.map(i=>({date_from:toISO(days[i]),date_to:toISO(days[i]),rate:st[i].rate}));sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Enregistrement '+n+' jours...':'Enregistrement...');try{const resp=await api.calendar.save(bienId,segs);if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre et publie',6500)}await reloadInventory()}catch(err){showToast('Erreur: '+(err.message||'sauvegarde'))}return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
 
     const floatBar=document.getElementById('float-bar')
-    function showFloatBar(){ const c=document.getElementById('sel-count'); if(!floatBar||!c)return; if(sel.idx.size===0){hideFloatBar();return}c.textContent=sel.idx.size;floatBar.classList.add('visible') }
+    function showFloatBar(){
+      const c=document.getElementById('sel-count'); if(!floatBar||!c)return
+      if(sel.idx.size===0){hideFloatBar();return}
+      c.textContent=sel.idx.size
+      // Le bouton d'ajout n'apparait que si l'ecriture est REELLEMENT possible :
+      // bien Channex (le CRS n'existe pas cote Beds24), droit `reservations`
+      // write, et pas en lecture seule. Sinon il reste cache — un bouton qui
+      // promet un pouvoir qu'on n'a pas est pire que pas de bouton.
+      const btn=document.getElementById('btn-ajouter-resa')
+      if(btn){
+        const bien=BIENS.find(x=>x.id===sel.bienId)
+        const ok = bien && (bien.provider==='channex'||bien.provider==='channel')
+                   && peutEcrire('reservations') && !LECTURE_SEULE
+        btn.style.display = ok ? '' : 'none'
+      }
+      floatBar.classList.add('visible')
+    }
     function hideFloatBar(){ if(floatBar) floatBar.classList.remove('visible') }
     document.getElementById('btn-clear-sel')?.addEventListener('click',()=>{sel={bienId:null,idx:new Set(),row:'rate'};updateSelectionUI();hideFloatBar()})
 
@@ -492,23 +581,262 @@
     document.getElementById('period-select').addEventListener('change',async e=>{MONTHS=parseInt(e.target.value,10);savePrefsD();buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();await reloadInventory()})
 
     let toastTimer=null
+    // ═══════════════════════════════════════════════════════════════════════
+    // AJOUT D'UNE RESERVATION DIRECTE (spec-reservation-manuelle.md §5)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // Chemin : selection existante -> ce formulaire -> l'endpoint, qui applique
+    // le verrou et la capacite de l'etape 2 -> Channex -> retour PAR LE FEED.
+    // Aucune ecriture directe du snapshot, jamais : la reservation apparait
+    // quand le cœur l'a apprise, comme une reservation OTA.
+    function bornesSelection(){
+      if(!sel.bienId || sel.idx.size===0) return null
+      const tries=[...sel.idx].sort((a,b)=>a-b)
+      // La selection porte sur des NUITS ; le depart est le lendemain de la
+      // derniere nuit selectionnee. C'est ce que fait Channex, et c'est ce qui
+      // laisse la borne libre pour l'arrivee suivante.
+      const depart=new Date(days[tries[tries.length-1]]); depart.setDate(depart.getDate()+1)
+      return { arrival: toISO(days[tries[0]]), departure: toISO(depart), nuits: tries.length }
+    }
+
+    function ouvrirFormulaireAjout(){
+      const b = bornesSelection()
+      const bien = BIENS.find(x=>x.id===sel.bienId)
+      if(!b||!bien) { showToast('Sélectionnez d\'abord des dates'); return }
+      if(!peutEcrire('reservations')||LECTURE_SEULE){ showToast('Vous n\'avez pas le droit de créer une réservation'); return }
+
+      document.getElementById('ajout-sous-titre').textContent = bien.name
+      document.getElementById('ajout-recap').innerHTML =
+        '<strong>' + b.arrival + '</strong> → <strong>' + b.departure + '</strong>'
+        + ' · ' + b.nuits + ' nuit' + (b.nuits>1?'s':'')
+      // Prix prerempli depuis l'inventaire du premier jour selectionne, a defaut
+      // le prix de base du bien.
+      const st = states[sel.bienId]
+      const premier = [...sel.idx].sort((a,b)=>a-b)[0]
+      // `bien.base` : c'est le nom du champ dans mapBien (`base_price` cote API).
+      const prix = (st && st[premier] && st[premier].rate) || bien.base || ''
+      document.getElementById('ajout-prix').value = prix
+      document.getElementById('ajout-nom').value = ''
+      document.getElementById('ajout-email').value = ''
+      document.getElementById('ajout-tel').value = ''
+      document.getElementById('ajout-ref').value = ''
+      document.getElementById('ajout-etat').textContent = ''
+      // ⚠ Reinitialiser le bouton : apres une creation reussie il restait
+      // desactive et affiche « Envoi… », rendant toute deuxieme saisie
+      // impossible sans recharger la page.
+      const btnV = document.getElementById('ajout-valider')
+      btnV.disabled = false; btnV.textContent = 'Créer la réservation'
+      document.getElementById('overlay-ajout').classList.add('visible')
+      document.getElementById('ajout-nom').focus()
+    }
+
+    function fermerFormulaireAjout(){ document.getElementById('overlay-ajout').classList.remove('visible') }
+
+    async function validerAjout(){
+      const b = bornesSelection()
+      const bien = BIENS.find(x=>x.id===sel.bienId)
+      if(!b||!bien) return
+      const nomComplet = document.getElementById('ajout-nom').value.trim()
+      if(!nomComplet){ document.getElementById('ajout-etat').textContent='Le nom du voyageur est obligatoire.'; return }
+      const prix = parseFloat(document.getElementById('ajout-prix').value)
+      if(!(prix>0)){ document.getElementById('ajout-etat').textContent='Prix par nuit invalide.'; return }
+
+      const morceaux = nomComplet.split(' ')
+      const btn = document.getElementById('ajout-valider')
+      btn.disabled = true; btn.textContent = 'Envoi…'
+      // ⚠ CONFIRMATION EN DEUX TEMPS (spec §5). Premier temps : le canal a
+      // accepte. Le second — « visible dans HôteSmart » — ne peut PAS etre
+      // affirme ici : la reservation n'existe dans le cœur qu'apres le passage
+      // du feed. Le dire autrement serait mentir.
+      document.getElementById('ajout-etat').textContent = 'Envoi au canal…'
+      try{
+        const r = await api.reservationDirecte.creer({
+          propertyId: bien.provider_property_id,
+          arrival: b.arrival, departure: b.departure,
+          prixParNuit: prix,
+          customer: {
+            name: morceaux[0] || nomComplet,
+            surname: morceaux.slice(1).join(' '),
+            mail: document.getElementById('ajout-email').value.trim() || null,
+            phone: document.getElementById('ajout-tel').value.trim() || null
+          },
+          occupancy: {
+            adults: parseInt(document.getElementById('ajout-adultes').value, 10) || 1,
+            children: parseInt(document.getElementById('ajout-enfants').value, 10) || 0
+          },
+          reference: document.getElementById('ajout-ref').value.trim() || null
+        })
+        fermerFormulaireAjout()
+        sel={bienId:null,idx:new Set(),row:'rate'}; updateSelectionUI(); hideFloatBar()
+        showToast('Envoyée au canal ✓ — visible dans HôteSmart au prochain rafraîchissement', 7000)
+        // Second temps : on relit le cœur. Si le feed a deja remonte, la
+        // reservation apparait ; sinon elle apparaitra au rafraichissement
+        // suivant, et le message ci-dessus l'a annonce.
+        setTimeout(()=>{ reloadInventory().catch(()=>{}) }, 8000)
+      }catch(e){
+        // 409 = refus METIER (nuit deja prise, saisie concurrente). On le dit
+        // dans les mots du metier, pas en jargon technique.
+        const msg = e.status===409
+          ? (e.message || 'Ces dates ne sont plus disponibles.')
+          : ('Erreur : ' + (e.message||'envoi'))
+        document.getElementById('ajout-etat').textContent = msg
+        btn.disabled=false; btn.textContent='Créer la réservation'
+      }
+    }
+
+    document.getElementById('btn-ajouter-resa')?.addEventListener('click', ouvrirFormulaireAjout)
+    document.getElementById('ajout-annuler')?.addEventListener('click', fermerFormulaireAjout)
+    document.getElementById('ajout-valider')?.addEventListener('click', validerAjout)
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FICHE D'UNE RESERVATION (spec-reservation-manuelle.md §5)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // ⚠ CONSULTATION POUR TOUTES, ACTIONS POUR LES SEULES « Offline ».
+    // Une reservation venue d'une OTA ne peut etre ni modifiee ni annulee par
+    // nous : Airbnb et Booking.com sont maitres de leurs reservations, et le CRS
+    // ne sert qu'a nos propres ecritures. Afficher un bouton qui echouerait
+    // promettrait un pouvoir qu'on n'a pas — mieux vaut dire pourquoi il n'y en
+    // a pas. C'est la regle de l'amendement UI, et elle vaut aussi pour les
+    // biens Beds24 : le module est Channex-only par spec.
+    let resaCourante = null
+
+    function fermerFiche(){ document.getElementById('overlay-resa').classList.remove('visible'); resaCourante=null }
+
+    function ligneFiche(label, valeur){
+      if(valeur===null||valeur===undefined||valeur==='') return ''
+      return '<div style="display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid #f5f5f7">'
+        + '<span style="color:#86868b;font-size:13px">'+escapeHtmlLocal(label)+'</span>'
+        + '<span style="font-size:13px;font-weight:500;text-align:right">'+escapeHtmlLocal(String(valeur))+'</span></div>'
+    }
+
+    const LIBELLE_CANAL = { airbnb:'Airbnb', booking:'Booking.com', direct:'Direct' }
+
+    function ouvrirFicheResa(bienId, resaId){
+      const bien = BIENS.find(x=>x.id===bienId)
+      const resa = (bien&&bien.resa||[]).find(r=>String(r.id)===String(resaId))
+      if(!bien||!resa) { showToast('Réservation introuvable'); return }
+      resaCourante = { bien, resa }
+
+      const nuits = Math.max(1, Math.round((new Date(resa.checkout+'T00:00:00') - new Date(resa.startISO+'T00:00:00'))/86400000))
+      const voyageurs = [resa.numAdult?resa.numAdult+' adulte'+(resa.numAdult>1?'s':''):null,
+                         resa.numChild?resa.numChild+' enfant'+(resa.numChild>1?'s':''):null].filter(Boolean).join(', ')
+      const montant = resa.amount!=null ? (resa.amount+' '+(resa.currency||'EUR')) : null
+      // `sourceBrute` est la verite du provider (« Offline », « AirBNB »…) ;
+      // le libelle n'est qu'un habillage.
+      const canal = resa.offline ? 'Direct (saisie HôteSmart)'
+                                 : (LIBELLE_CANAL[resa.source] || resa.sourceBrute || resa.source)
+
+      document.getElementById('resa-titre').textContent = resa.name
+      document.getElementById('resa-sous-titre').textContent = bien.name
+      document.getElementById('resa-corps').innerHTML =
+          ligneFiche('Arrivée', resa.startISO + (resa.arrivalHour?' à '+resa.arrivalHour:''))
+        + ligneFiche('Départ', resa.checkout)
+        + ligneFiche('Nuits', nuits)
+        + ligneFiche('Voyageurs', voyageurs)
+        + ligneFiche('Canal', canal)
+        + ligneFiche('Montant', montant)
+        + ligneFiche('Commission', resa.commission!=null ? resa.commission+' '+(resa.currency||'EUR') : null)
+        + ligneFiche('Référence OTA', resa.otaCode)
+        + ligneFiche('Identifiant', resa.id)
+
+      const actions = document.getElementById('resa-actions')
+      const note = document.getElementById('resa-note')
+      actions.innerHTML = '<button class="btn-cancel" id="resa-fermer">Fermer</button>'
+
+      const channex = (bien.provider==='channex'||bien.provider==='channel')
+      if(resa.offline && channex && peutEcrire('reservations') && !LECTURE_SEULE){
+        actions.insertAdjacentHTML('afterbegin',
+          '<button class="btn-cancel" id="resa-annuler" style="color:#c0392b">Annuler la réservation</button>')
+        note.textContent = 'Réservation directe : modifiable depuis HôteSmart.'
+      } else if(resa.offline && channex){
+        note.textContent = 'Réservation directe — vous n\'avez pas le droit de la modifier.'
+      } else {
+        // On DIT pourquoi il n'y a pas de bouton, plutot que de laisser un vide.
+        note.textContent = channex
+          ? 'Réservation venue de ' + canal + ' : modifiable uniquement chez ' + canal + '.'
+          : 'Bien synchronisé hors HôteSmart : consultation seule.'
+      }
+      document.getElementById('resa-fermer').addEventListener('click', fermerFiche)
+      const btnAnn = document.getElementById('resa-annuler')
+      if(btnAnn) btnAnn.addEventListener('click', annulerResaCourante)
+      document.getElementById('overlay-resa').classList.add('visible')
+    }
+
+    async function annulerResaCourante(){
+      if(!resaCourante) return
+      const { bien, resa } = resaCourante
+      if(!confirm('Annuler la réservation de '+resa.name+' du '+resa.startISO+' au '+resa.checkout+' ?\n\nLes dates seront rouvertes à la vente.')) return
+      const btn = document.getElementById('resa-annuler')
+      if(btn){ btn.disabled=true; btn.textContent='Annulation…' }
+      try{
+        // `api.reservationDirecte` : Authorization et X-Compte poses par
+        // api-client, comme tous les autres appels de cette page.
+        await api.reservationDirecte.annuler({
+          propertyId: bien.provider_property_id, bookingId: resa.id
+        })
+        fermerFiche()
+        // ⚠ On ne retire PAS la reservation de l'affichage : elle disparaitra
+        // quand le cœur l'aura apprise par le feed. Retirer tout de suite
+        // afficherait une date libre qui ne l'est pas encore cote Channex.
+        showToast('Annulation envoyée — visible dans HôteSmart au prochain rafraîchissement', 6000)
+      }catch(e){
+        if(btn){ btn.disabled=false; btn.textContent='Annuler la réservation' }
+        showToast('Erreur : '+(e.message||'annulation'), 6000)
+      }
+    }
+
     function showToast(m,ms){const t=document.getElementById('toast');t.textContent=m;t.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('visible'),ms||1800)}
 
     const COLORS_BY_SOURCE = { airbnb:'red', booking:'blue', direct:'green' }
     function rangeISO(){ return { start: toISO(days[0]), end: toISO(days[days.length-1]) } }
 
     function mapBien(p){
+      // ⚠ `provider_property_id` EST INDISPENSABLE : c'est l'identifiant que
+      // l'API de reservation directe attend. Sans lui, JSON.stringify supprime
+      // la cle et le serveur repond « propertyId manquant » — creation et
+      // annulation echouaient a 100 % des cas.
       return { id:p.id, name:p.name, capacity:p.capacity||1, base:Number(p.base_price)||0,
         included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0,
-        currency:p.currency||'EUR', provider:p.provider||'channex', resa:[] }
+        currency:p.currency||'EUR', provider:p.provider||'channex',
+        provider_property_id:p.provider_property_id||null, resa:[] }
     }
+    // ⚠ LA SOURCE EST CELLE DU CŒUR, PAS UNE COULEUR TIREE AU SORT.
+    // L'ancienne version faisait `SRC[idx % 3]` : airbnb, booking et direct en
+    // rotation par index. Les pastilles de canal du planning etaient donc
+    // DECORATIVES et fausses — une reservation Airbnb pouvait s'afficher en
+    // « direct ». L'endpoint sert la vraie source depuis bookings_snapshot.
+    //
+    // `id` : indispensable a la fiche de consultation. Sans lui, le bandeau
+    // n'est qu'un rectangle et rien ne peut etre ouvert au clic.
+    function familleSource(src){
+      const v=String(src||'').toLowerCase()
+      if(v.includes('airbnb')||v.includes('abb')) return 'airbnb'
+      if(v.includes('booking')||v.includes('bdc')) return 'booking'
+      // « Offline » = reservation directe creee par nous (spec reservation
+      // manuelle). Elle partage la couleur du direct : c'en est une.
+      if(v==='offline'||v.includes('direct')) return 'direct'
+      return 'direct'
+    }
+    function estOffline(src){ return String(src||'').toLowerCase()==='offline' }
+
     function mapResa(list){
-      const SRC=['airbnb','booking','direct']
-      return (list||[]).filter(function(b){return String(b.status||'').toLowerCase()!=='cancelled'}).map((b,idx)=>{
+      return (list||[]).filter(function(b){return String(b.status||'').toLowerCase()!=='cancelled'}).map(b=>{
         const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
         const span=Math.max(1, Math.round((co-ci)/86400000))
-        const src=SRC[idx % 3]
-        return { startISO:b.checkin, checkout:b.checkout, span, name:b.guest_name||'Reservation', source:src, color:COLORS_BY_SOURCE[src]||'green' }
+        const src=familleSource(b.source)
+        return {
+          id: b.booking_id || null,
+          startISO:b.checkin, checkout:b.checkout, span,
+          name:b.guest_name||'Reservation',
+          source:src, sourceBrute:b.source||null, offline:estOffline(b.source),
+          color:COLORS_BY_SOURCE[src]||'green',
+          amount:b.amount ?? null, currency:b.currency||null,
+          commission:b.commission ?? null,
+          numAdult:b.numAdult ?? null, numChild:b.numChild ?? null,
+          otaCode:b.otaReservationCode||null, arrivalHour:b.arrivalHour||null,
+          statut:b.status||null
+        }
       })
     }
     function platformLogo(src){

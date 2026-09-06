@@ -269,7 +269,7 @@ module.exports = async function handler(req, res) {
       try {
         const { data: snapRows, error: snapErr } = await supabase
           .from('bookings_snapshot')
-          .select('property_id, snapshot')
+          .select('booking_id, property_id, snapshot')
           .eq('user_id', gardeGet.compte)
           .in('property_id', provIds)
         // ⚠ Une erreur ici ne peut PAS etre avalee : sans reservations, le
@@ -290,11 +290,24 @@ module.exports = async function handler(req, res) {
             // ne garder que ce qui chevauche la plage demandee
             if (checkout < start || checkin > end) return
             const name = [s.firstName, s.lastName].filter(Boolean).join(' ') || s.guest_name || 'Reservation'
+            // `booking_id` : sans lui, aucune fiche de consultation n'est
+            // possible cote calendrier — c'est la cle de tout le reste (lecture
+            // du detail, modification et annulation d'une reservation directe).
+            // `amount`, `commission` et `numAdult/numChild` : la fiche les
+            // affiche ; les relire ailleurs imposerait un second appel.
             bookings[id].push({
+              booking_id: String(row.booking_id),
               guest_name: name,
               checkin, checkout,
               source: (s.source || s.channel || 'direct'),
-              status: readStatus(s, provToProvider[String(row.property_id)])
+              status: readStatus(s, provToProvider[String(row.property_id)]),
+              amount: s.amount ?? null,
+              currency: s.currency || null,
+              commission: s.commission ?? null,
+              numAdult: s.numAdult ?? null,
+              numChild: s.numChild ?? null,
+              otaReservationCode: s.otaReservationCode || null,
+              arrivalHour: s.arrivalHour || null
             })
           })
         }

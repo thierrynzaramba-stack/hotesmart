@@ -94,8 +94,23 @@ test('calendrier : la barre flottante n\'est PAS supprimee du DOM', () => {
   assert.ok(!/float-bar'\)[^\n]*remove\(\)/.test(bloc),
     'float-bar ne doit pas etre retiree : d\'autres fonctions la lisent')
   assert.ok(bloc.includes('LECTURE_SEULE = true'), 'un drapeau doit bloquer la selection')
-  assert.ok(html.includes('function attachEvents(){ if(LECTURE_SEULE) return;'),
+  // ⚠ On teste la PROPRIETE, pas la forme litterale : depuis l'etape 3, un
+  // ecouteur de consultation (ouverture de la fiche d'une reservation) est pose
+  // AVANT ce return — consulter n'est pas ecrire, et un membre en lecture doit
+  // pouvoir ouvrir une reservation. Ce qui doit rester vrai : le code de
+  // SELECTION (mousedown/mouseenter) ne s'attache pas en lecture seule.
+  const iAttach = html.indexOf('function attachEvents')
+  const blocAttach = html.slice(iAttach, iAttach + 2600)
+  const posReturn = blocAttach.indexOf('if(LECTURE_SEULE) return')
+  const posMousedown = blocAttach.indexOf("addEventListener('mousedown'")
+  assert.ok(posReturn > -1, 'attachEvents doit sortir en lecture seule')
+  assert.ok(posMousedown > -1, 'le code de selection doit exister')
+  assert.ok(posReturn < posMousedown,
     'la selection ne doit pas demarrer du tout en lecture seule')
+  // Et l'ecouteur de la fiche, lui, doit etre AVANT : la consultation reste
+  // ouverte a tous.
+  const posFiche = blocAttach.indexOf('ouvrirFicheResa')
+  if (posFiche > -1) assert.ok(posFiche < posReturn, 'la fiche doit s\'ouvrir meme en lecture seule')
 })
 
 test('calendrier : showFloatBar tolere un DOM incomplet', () => {
