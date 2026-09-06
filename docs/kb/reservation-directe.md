@@ -123,6 +123,9 @@ conflit-là », pas « ce bien ne m'intéresse plus ».
 
 ### Qui reçoit, qui acquitte
 
+État de référence des numéros (qui reçoit quoi) : `docs/kb/alertes.md`,
+section « Qui est joignable, et où ».
+
 **L'hôte est prévenu en premier** (SMS + email, via `platform-notify`), le
 fondateur reste en copie pour la supervision. Première version : l'alarme ne
 partait qu'au canal fondateur alors que le bouton est filtré sur le propriétaire

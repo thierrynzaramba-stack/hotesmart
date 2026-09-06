@@ -100,3 +100,46 @@ deux voyageurs devant la même porte le même soir. Il passe donc par
 
 **Réservé à cette gravité.** Une alerte qui crie pour rien finit ignorée, et le
 jour où elle compte, personne ne la lit. Détail : `docs/kb/reservation-directe.md`.
+
+## Qui est joignable, et où — état de référence au 6 septembre 2026
+
+Photo prise à la clôture de l'étape 2 du chantier « réservation manuelle », après
+correction. Numéros masqués : seuls les quatre derniers chiffres figurent ici — le
+KB est versionné, il ne porte pas de coordonnées complètes.
+
+| emplacement | numéro | à quoi il sert |
+|---|---|---|
+| `profiles` — **titulaire** (`is_owner = true`) | **…6760** | alarmes qui réveillent l'hôte : surréservation, incidents |
+| `profiles` — **Régina** (`access_mode = 'lien'`) | **…5290** | ses notifications de ménage et propositions d'assignation |
+| `knowledge.telephone_hote` — coeur de vie 23 | **…5290** | contact **voyageur** (placeholder `{telephone_hote}`) |
+| `knowledge.telephone_hote` — Cœur de vie « La bulle » | **…5290** | idem |
+
+**Deux numéros distincts pour quatre emplacements**, et c'est voulu :
+
+- Le titulaire est seul sur le sien. C'est lui que l'alarme de surréservation
+  appelle, et lui seul qui peut l'acquitter — le cycle « crier jusqu'à
+  acquittement » ne boucle que si ces deux rôles coïncident.
+- Régina porte son propre numéro, **définitif**, sur son profil comme dans
+  `telephone_hote`. Ce dernier est un **choix produit assumé** : c'est le contact
+  terrain donné aux voyageurs, et c'est elle qui est sur place.
+
+### Ce que cette photo corrige
+
+Jusqu'au 6 septembre 2026, le profil de Régina portait **le numéro du titulaire**.
+Ses notifications de ménage et ses propositions d'assignation arrivaient donc chez
+l'hôte — ce qui explique probablement qu'on n'ait jamais constaté qu'elle ne les
+recevait pas.
+
+Cette collision a bien failli avoir une seconde conséquence, plus grave. Le code
+de l'alarme de surréservation cherchait d'abord le titulaire par
+`member_user_id is null` — un filtre qui désigne en réalité un **accès par lien**,
+donc Régina. L'alarme lui aurait été adressée toutes les 45 minutes, avec le nom du
+bien et les identifiants des réservations en conflit. Le défaut serait resté
+**invisible** en test, puisque son profil portait alors le numéro de l'hôte : les
+SMS seraient arrivés au bon endroit pour la mauvaise raison, jusqu'au jour où un
+vrai numéro aurait été renseigné pour elle. Le titulaire se reconnaît à
+`is_owner`, jamais à l'absence de `member_user_id`.
+
+`telephone_hote` n'existe **que sur les deux biens Beds24**. Les biens Channex
+(Colomiers) n'ont pas d'entrée : un modèle de message qui utiliserait ce
+placeholder sur ces biens ne le résoudrait pas.
