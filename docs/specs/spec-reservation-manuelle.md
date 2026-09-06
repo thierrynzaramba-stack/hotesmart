@@ -62,9 +62,29 @@ prod) et dédupliquer les variables en double de `.env.local` — les deux pièg
 
 ## 4. Étape 2 — verrou anti-surréservation + alarme (exigence gravée du 6 sept)
 
+### Amendement du 6 septembre 2026 — capacité (Thierry)
+
+La règle ci-dessous supposait un stock de **1** : vrai pour un logement entier,
+faux en général. Généralisation :
+
+- Chaque bien porte un **nombre d'unités louables**, avec **défaut 1** — aucun
+  réglage requis pour le cas LCD actuel.
+- **Incident `overbooking`** : pour une **nuit donnée**, le nombre de réservations
+  `confirmed` occupant cette nuit **dépasse** le nombre d'unités du bien.
+- Le verrou refuse **quand il ne reste plus d'unité**, non pas « quand il existe
+  déjà une réservation ».
+- À 1 unité, le comportement est identique à la règle d'origine.
+
+⚠ **La colonne est `inventory_units`, PAS `capacity`.** `properties.capacity`
+existe déjà et compte les **personnes** accueillies (`biens.html` : « Capacité :
+X personne(s) » ; `channel-rateplan.js` s'en sert comme `occupancy`). La
+réutiliser autoriserait quatre réservations simultanées sur Colomiers, qui porte
+`capacity = 4` — soit exactement la surréservation à empêcher.
+
 **Verrou, avant tout appel CRS :**
-1. Lecture du cœur : aucune réservation `confirmed` du bien ne chevauche les dates
-   demandées (`bookings_snapshot`, toutes origines).
+1. Lecture du cœur : pour chaque nuit demandée, le nombre de réservations
+   `confirmed` du bien qui l'occupent reste **strictement inférieur** à
+   `inventory_units` (`bookings_snapshot`, toutes origines).
 2. Verrou d'écriture par bien pendant la séquence vérif→création (réutiliser le
    mécanisme de verrouillage existant du repo ; à défaut, verrou advisory Postgres).
 3. Seulement alors : `createBooking`. En cas d'échec CRS, le verrou se libère,
@@ -80,16 +100,68 @@ prod) et dédupliquer les variables en double de `.env.local` — les deux pièg
 - Test règle 8 : provoquer un vrai chevauchement sur staging via la primitive,
   constater l'incident, l'alarme, l'acquittement, le silence.
 
-## 5. Étape 3 — formulaire admin
+## 5. Étape 3 — dans le calendrier, pas à côté
 
-Page admin (biens Channex du compte uniquement) : dates, voyageur (nom, email,
-téléphone), nombre de personnes, prix par nuit prérempli depuis l'inventaire
-(mode managed) et modifiable, note libre → `meta.reference_interne`.
+### Amendement UI du 6 septembre 2026 (Thierry)
 
-Chemin : API interne → verrou (§4) → `createBooking` → la réservation REVIENT par
-le feed. L'interface confirme en deux temps : « envoyée à Channex » (réponse CRS),
-puis « visible dans HôteSmart » (apparition dans le snapshot au cycle suivant —
-poll court). Aucune écriture directe du snapshot par le formulaire, jamais.
+**Pas de page de saisie séparée : tout vit dans le planning/calendrier existant.**
+
+1. **Sélection de dates libres** → deux actions proposées :
+   « modifier les dates » (blocage/ouverture de disponibilité, le chemin actuel)
+   ou **« ajouter une réservation »** → formulaire pré-rempli (bien, dates, prix
+   depuis l'inventaire), saisie du voyageur, puis le chemin de l'étape 2 :
+   verrou → capacité → `createBooking` → retour par le feed.
+2. **Clic sur une réservation** → fiche de consultation (voyageur, montant, canal,
+   ménage / messages / code).
+3. **Modification et annulation depuis la fiche : UNIQUEMENT pour les réservations
+   `Offline`** (via `updateBooking` / `cancelBooking`). Les réservations OTA sont
+   en **consultation seule** — on ne promet pas un pouvoir qu'on n'a pas.
+
+**DESKTOP D'ABORD.** Fiche et formulaire construits uniquement dans
+`pages/biens-calendrier.html`. `pages/calendrier-mobile.html` reste en
+consultation pure ; le chemin mobile viendra sur besoin réel constaté, pas avant.
+
+### Étape 0 du calendrier — constaté le 6 septembre, pas supposé
+
+| question | réponse |
+|---|---|
+| composant | `biens-calendrier.html` (52 Ko) + `calendrier-mobile.html`, sur `shared/calendar-core.js` (93 lignes de logique pure) et `api/calendar.js` |
+| les réservations sont-elles déjà là ? | **oui** — l'endpoint rend `{ properties, inventory, bookings }` depuis `bookings_snapshot`, affichées en bandeaux colorés par canal |
+| sélection de plage ? | **oui, complète** — `attachEvents` (drag `mousedown`/`mouseenter`), état `sel = { bienId, idx:Set, row }`, barre flottante et undo |
+| clic sur une réservation ? | **non** — `.resa-bar` est un `div` décoratif, sans écouteur ni identifiant. C'est le point à construire |
+
+Deux limites à connaître : la sélection est liée à une **ligne de paramètre**
+(prix, disponibilité…) et non au séjour, et elle est coupée en lecture seule
+(`if (LECTURE_SEULE) return`) et sans le droit `reservations`.
+
+`mapResa` construit déjà `startISO`, `span`, `checkout`, `name` et `source` : il
+suffira d'y porter l'identifiant et d'accrocher un écouteur. Le `source` vaudra
+`Offline` pour nos réservations directes — c'est ce qui décidera quels boutons
+afficher (point 3).
+
+### À vérifier à l'entrée de l'étape 3 : le droit `reservations`
+
+Le modèle est à trois niveaux (`none` / `read` / `write`) par domaine, sans
+distinction entre types d'écriture. `reservations: write` couvrira donc la
+création **et** l'édition des paramètres de calendrier.
+
+Constat : créer engage le logement auprès d'un voyageur et ferme la vente sur tous
+les canaux ; modifier un tarif se corrige en un clic. Deux gravités sous un même
+niveau. **Décision par défaut : ne pas distinguer** — ajouter un domaine impose de
+bouger ensemble migration, presets, endpoints et écran de droits, et créerait un
+droit que personne ne règle. À rouvrir si un besoin réel apparaît (confier le
+calendrier sans l'engagement commercial).
+
+⚠ Le contrôle doit être fait **côté serveur**, pas seulement dans l'interface :
+`attachEvents` et `startInlineEdit` testent déjà le droit côté page, mais
+l'endpoint de création devra le refaire.
+
+### Le chemin
+
+API interne → verrou (§4) → `createBooking` → la réservation REVIENT par le feed.
+L'interface confirme en deux temps : « envoyée » (réponse CRS), puis « visible
+dans HôteSmart » (apparition dans le snapshot au cycle suivant — poll court).
+Aucune écriture directe du snapshot par le formulaire, jamais.
 
 Pas de paiement dans ce chantier (le paiement appartient au moteur, phase 3).
 

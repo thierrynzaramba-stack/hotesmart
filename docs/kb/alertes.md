@@ -85,3 +85,18 @@ aucune action automatique).
 
 ## Rappel
 Aucun SMS n'est **inclus ni facturé par HôteSmart** : le SMS passe **par le compte Brevo de l'hôte**.
+
+## Surréservation — l'exception qui ne se tait pas
+
+`overbooking` est le SEUL type d'alerte à ne pas suivre l'anti-spam décrit
+ci-dessus. Il réémet un SMS toutes les ~45 minutes et ne s'arrête **que** par
+acquittement manuel (`api/incidents-acquitter.js`, bouton au dashboard) — ou
+lorsque le conflit disparaît de lui-même.
+
+Raison : c'est le seul incident du produit qui ne se rattrape pas après coup —
+deux voyageurs devant la même porte le même soir. Il passe donc par
+`envoyerAlerteBrute` (envoi seul, sans persistance ni anti-spam) et non par
+`reportIncident`, qui dupliquerait l'incident et éteindrait la relance.
+
+**Réservé à cette gravité.** Une alerte qui crie pour rien finit ignorée, et le
+jour où elle compte, personne ne la lit. Détail : `docs/kb/reservation-directe.md`.

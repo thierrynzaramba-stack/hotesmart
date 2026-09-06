@@ -74,6 +74,7 @@ const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
 const { checkMessageVolume, checkEventProduction, checkTableGrowth } = require('../lib/cron-alerting')
+const { checkOverbooking } = require('../lib/cron-overbooking')
 const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
@@ -227,6 +228,23 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur sonde croissance tables:', err.message)
       results.errors.push({ context: 'table_growth', error: err.message })
+    }
+
+    // 4quater bis. SURRÉSERVATION — le filet derrière le verrou.
+    // Channex n'oppose AUCUNE défense (mesure du protocole CRS du 6 septembre :
+    // HTTP 200 sur une dispo à 0, stock à −1). Le verrou de
+    // lib/reservation-directe.js protège ce qui passe par nous ; cette sonde
+    // attrape le reste — deux OTA qui vendent la même nuit avant que la fermeture
+    // ne se propage, une modification de dates qui recouvre un séjour existant.
+    //
+    // ⚠ Son alarme est RÉCURRENTE et ne s'éteint QUE par acquittement manuel
+    // (api/incidents-acquitter.js). C'est la sémantique inverse de la sonde
+    // ci-dessus, et c'est délibéré : deux voyageurs devant la même porte est le
+    // seul incident du produit qui ne se rattrape pas après coup.
+    try { await chrono.mesure('sonde_surreservation', () => checkOverbooking(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur sonde surréservation:', err.message)
+      results.errors.push({ context: 'overbooking', error: err.message })
     }
 
     // 4quinquies. Avis voyageurs Channex -> ota_reviews (cœur de données).

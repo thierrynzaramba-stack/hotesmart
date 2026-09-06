@@ -21,6 +21,12 @@
 
     <div class="content">
 
+      <!-- ALARME SURRESERVATION — bandeau d'acquittement.
+           Vide et invisible tant qu'aucune alarme n'est ouverte. C'est le SEUL
+           moyen d'arreter la reemission des SMS : aucune extinction automatique
+           tant que le conflit dure (spec-reservation-manuelle.md §4). -->
+      <div id="alarmes-overbooking" hidden></div>
+
       <div class="section-header">
         <div class="section-title">Mes biens</div>
         <a href="/biens/nouveau" class="btn btn-primary" id="btn-ajouter-bien" hidden>+ Ajouter un bien</a>
@@ -48,6 +54,11 @@
   import {
     loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml
   } from '/shared/properties.js'
+  // ⚠ `enteteCompte()` : l'endpoint des alarmes declare `compteDelegue: true`.
+  // Sans cet en-tete, un profil delegue verrait les alarmes de SON compte et non
+  // de celui qu'il consulte — et son acquittement viserait le mauvais compte.
+  // Regle du depot, verifiee par tests/pages-identifiants.test.js.
+  import { enteteCompte } from '/shared/compte-courant.js'
 
   initErrorHandler()
 
@@ -69,6 +80,7 @@
 
       // Charge les apps
       renderApps()
+      chargerAlarmes()
 
     } catch (err) {
       logger.error('Dashboard', err.message, err)
@@ -155,6 +167,64 @@
     } catch (err) {
       logger.error('Dashboard', 'Erreur chargement biens', err)
       grid.innerHTML = '<div class="app-card"><div class="app-desc">Erreur de chargement des biens.</div></div>'
+    }
+  }
+
+  // ─── Alarmes de surréservation ─────────────────────────────────────────
+  // Une surréservation ne se rattrape pas après coup : l'alarme réémet un SMS
+  // toutes les ~45 min et ne s'arrête QUE par ce bouton. Elle s'éteint seule
+  // dans un seul cas — quand le conflit a disparu (annulation, dates déplacées).
+  async function chargerAlarmes() {
+    const zone = document.getElementById('alarmes-overbooking')
+    if (!zone) return
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      const r = await fetch('/api/incidents-acquitter?type=overbooking', {
+        headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
+      })
+      if (!r.ok) return
+      const { alarmes } = await r.json()
+      if (!alarmes || !alarmes.length) { zone.hidden = true; zone.innerHTML = ''; return }
+
+      zone.hidden = false
+      zone.innerHTML = alarmes.map(a => `
+        <div class="app-card" style="border:2px solid #c0392b;background:#fff5f4;margin-bottom:12px">
+          <div class="app-name" style="color:#c0392b">⚠ Surréservation — bien ${escapeHtml(String(a.property_id))}</div>
+          <div class="app-desc">${escapeHtml(a.detail?.message || 'Deux séjours sur la même nuit.')}</div>
+          <div class="app-desc" style="margin-top:6px;color:#86868b">
+            Détectée le ${escapeHtml(String(a.created_at).slice(0, 16).replace('T', ' à '))}.
+            Cette alerte se répète jusqu'à acquittement.
+          </div>
+          <button class="btn btn-primary" style="margin-top:10px;background:#c0392b"
+                  data-acquitter="${escapeHtml(a.id)}">J'ai vu — arrêter l'alerte</button>
+        </div>`).join('')
+
+      zone.querySelectorAll('[data-acquitter]').forEach(b => {
+        b.addEventListener('click', async () => {
+          b.disabled = true
+          b.textContent = 'Acquittement…'
+          try {
+            const { data: { session: s2 } } = await supabase.auth.getSession()
+            const rep = await fetch('/api/incidents-acquitter', {
+              method: 'POST',
+              headers: {
+                Authorization: 'Bearer ' + s2.access_token,
+                'Content-Type': 'application/json',
+                ...enteteCompte()
+              },
+              body: JSON.stringify({ id: b.dataset.acquitter })
+            })
+            if (!rep.ok) throw new Error('echec')
+            await chargerAlarmes()
+          } catch (e) {
+            b.disabled = false
+            b.textContent = 'Échec — réessayer'
+          }
+        })
+      })
+    } catch (err) {
+      logger.error('Dashboard', 'Erreur chargement alarmes', err)
     }
   }
 

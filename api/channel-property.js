@@ -644,6 +644,26 @@ module.exports = async function handler(req, res) {
         console.error('[channel-property] install app messages echoue', appRes.status, appRes.json)
       }
 
+      // Etape 3quater : installer l'application Booking CRS.
+      // Sans elle, POST /bookings repond 403 (mesure du protocole du 6 septembre) :
+      // la saisie manuelle et, plus tard, le moteur de reservation direct seraient
+      // inutilisables sur ce bien. Comme pour Messages : non bloquant, le bien
+      // reste utilisable sans, et l'echec est dit.
+      //
+      // ⚠ LES BIENS DEJA CREES N'ONT PAS CETTE APP — ce chemin ne couvre que les
+      // nouveaux. Pour le parc existant (Colomiers compris), l'installation se
+      // rattrape a la volee : lib/channels/channex.js expose `installerCRS`, et
+      // l'appelant du verrou la declenche sur un 403.
+      const crsRes = await channelCall('POST', '/applications/install', {
+        application_installation: {
+          property_id: providerPropertyId,
+          application_code: 'booking_crs'
+        }
+      })
+      if (!crsRes.ok) {
+        console.error('[channel-property] install app booking_crs echoue', crsRes.status, crsRes.json)
+      }
+
       // Etape 4 : INSERT en base Supabase
       const { data: insertData, error: insertError } = await supabase
         .from('properties')
