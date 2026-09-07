@@ -97,19 +97,25 @@
               <div class="txt">
                 Cliquez sur <strong>« Créer une clé restreinte »</strong> — pas « Révéler la clé secrète ».
                 <br>Nommez-la par exemple <code>HôteSmart — réservations</code>.
+                <br>Si Stripe propose des <strong>paquets</strong> (« Paiements ponctuels »…),
+                choisissez <strong>« Personnalisé »</strong> : un paquet accorde une trentaine
+                d’autorisations, là où quatre suffisent.
               </div>
             </div>
             <div class="etape">
               <div class="num">3</div>
               <div class="txt">
-                Donnez-lui <strong>exactement</strong> ces droits, et rien d’autre :
+                Donnez-lui <strong>exactement</strong> ces droits, et rien d’autre —
+                tout le reste sur <strong>Aucun</strong> :
                 <ul class="droits">
-                  <li><span class="oblig">ÉCRITURE</span> <code>Checkout Sessions</code></li>
-                  <li><span class="oblig">ÉCRITURE</span> <code>Refunds</code> <span>— pour vous rembourser un voyageur si une réservation échoue</span></li>
-                  <li><span class="oblig">ÉCRITURE</span> <code>Webhook Endpoints</code> <span>— pour que HôteSmart branche la confirmation tout seul</span></li>
-                  <li><span class="oblig">LECTURE</span> <code>PaymentIntents</code></li>
-                  <li><span class="oblig">LECTURE</span> <code>Charges</code></li>
+                  <li><span class="oblig">LECTURE</span> <code>PaymentIntents</code> <span>— vérifier que la clé fonctionne</span></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Checkout Sessions</code> <span>— créer la page de paiement</span></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Webhook Endpoints</code> <span>— brancher la confirmation tout seul</span></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Refunds</code> <span>— rembourser un voyageur si la réservation échoue</span></li>
                 </ul>
+                ⚠ <strong>« Webhook Endpoints » n’est pas rangé avec les autres</strong> :
+                cherchez-le côté <strong>Développeurs / Webhooks</strong>, pas dans les
+                ressources de paiement. C’est celui qu’on rate.
               </div>
             </div>
             <div class="etape">

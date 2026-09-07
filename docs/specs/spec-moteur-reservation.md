@@ -174,9 +174,14 @@ précisément celui que Connect évitait. Décision prise en connaissance de cau
    ne part même pas sur le réseau.
    **Ne pas réintroduire l'avertissement** au motif qu'un hôte est bloqué :
    l'écran le guide pas à pas pour créer une clé restreinte, c'est la réponse.
-   Droits nécessaires :
-   `Checkout Sessions: write`, `PaymentIntents: read`, `Charges: read`,
-   `Refunds: write` (règle 4 du §2), `Webhook Endpoints: write` (point 3).
+   Droits nécessaires — **et rien de plus**, vérifiés contre les appels réels
+   du code : `PaymentIntents: read` (vérification de la clé),
+   `Checkout Sessions: write`, `Webhook Endpoints: write` (point 3),
+   `Refunds: write` (règle 4 du §2, utilisé à l'étape 3).
+   ⚠ `Charges: read` figurait ici « par précaution » et **le code ne l'appelle
+   jamais** : retiré le 7 septembre 2026. Accorder un droit inutilisé est
+   exactement ce contre quoi la clé restreinte existe. Ne rien ajouter sans un
+   appel qui le réclame.
    ⚠ **À vérifier à la construction** : que ce dernier droit soit réellement
    accordable à une clé restreinte. S'il ne l'est pas, repli explicite —
    l'onboarding guide l'hôte pour créer le webhook à la main et coller le
