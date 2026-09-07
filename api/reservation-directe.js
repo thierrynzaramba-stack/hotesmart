@@ -102,21 +102,40 @@ module.exports = async (req, res) => {
     // mais une garde d'interface n'est pas une garde : rien n'empeche un appel
     // direct. `capacity` = nombre de PERSONNES (a ne pas confondre avec
     // `inventory_units`, qui compte les logements).
-    const adultes = Number(occupancy?.adults ?? 1)
-    const enfants = Number(occupancy?.children ?? 0)
-    if (!Number.isFinite(adultes) || adultes < 1) {
-      return res.status(400).json({ error: 'Il faut au moins un adulte.' })
+    // ⚠ CHAQUE COMPTEUR EST VALIDE SEPAREMENT, et c'est la somme VALIDEE qui part.
+    // Ne verifier que le total laissait passer `{adults: 10, children: -7}` :
+    // 10 - 7 = 3 <= 4, garde franchie, et `adults: 10` transmis tel quel. Un
+    // `children: {}` donnait NaN, et toute comparaison avec NaN est fausse — la
+    // garde etait simplement sautee. `infants` echappait au compte entierement.
+    const entierPositif = (v, defaut) => {
+      const n = v === undefined || v === null ? defaut : Number(v)
+      return Number.isInteger(n) && n >= 0 ? n : null
     }
+    const adultes = entierPositif(occupancy?.adults, 1)
+    const enfants = entierPositif(occupancy?.children, 0)
+    const bebes   = entierPositif(occupancy?.infants, 0)
+    if (adultes === null || enfants === null || bebes === null) {
+      return res.status(400).json({ error: 'Nombre de voyageurs invalide.' })
+    }
+    if (adultes < 1) return res.status(400).json({ error: 'Il faut au moins un adulte.' })
+
     const capacite = Number(bien.capacity) || 0
-    if (capacite > 0 && adultes + enfants > capacite) {
+    const personnes = adultes + enfants + bebes
+    if (capacite > 0 && personnes > capacite) {
+      // `error` porte la PHRASE : api-client construit son Error a partir de ce
+      // champ, et l'hote lisait « capacite_depassee » a l'ecran.
       return res.status(400).json({
-        error: 'capacite_depassee',
-        message: `Ce bien accueille ${capacite} personne${capacite > 1 ? 's' : ''} au maximum — ${adultes + enfants} demandées.`
+        error: `Ce bien accueille ${capacite} personne${capacite > 1 ? 's' : ''} au maximum — ${personnes} demandées.`,
+        code: 'capacite_depassee'
       })
     }
+    // ⚠ ARRONDI AU CENTIME AVANT DE REPARTIR. Avec 33.335 sur 3 nuits, la somme
+    // des jours valait 100.02 et le total 100.01 : Channex rejette cet ecart en
+    // 422, comme le documente deja le chemin d'annulation.
+    const cents = Math.round(parNuit * 100)
     const days = {}
-    listeNuits.forEach(n => { days[n] = parNuit.toFixed(2) })
-    const total = (parNuit * listeNuits.length).toFixed(2)
+    listeNuits.forEach(n => { days[n] = (cents / 100).toFixed(2) })
+    const total = ((cents * listeNuits.length) / 100).toFixed(2)
 
     // `creerReservationDirecte` et `payloadCRS` LEVENT volontairement (lecture
     // en echec, champ obligatoire manquant) : sans ce try, l'hote recevait un
@@ -134,7 +153,7 @@ module.exports = async (req, res) => {
         amount: total,
         currency: currency || bien.currency || 'EUR',
         customer: customer || {},
-        occupancy: occupancy || {},
+        occupancy: { adults: adultes, children: enfants, infants: bebes },
         // `meta` = sous-origine. `ota_name` porte deja l'origine (« Offline »).
         meta: { source: 'hotesmart-manual', ...(reference ? { reference_interne: String(reference) } : {}) },
         // Code unique et lisible : c'est notre seule cle de deduplication cote

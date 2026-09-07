@@ -197,6 +197,9 @@
             <input id="ajout-enfants" type="number" min="0" value="0" style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>
         </div>
         <div id="ajout-capacite" style="font-size:12px;color:#86868b;margin-top:6px"></div>
+        <!-- Zone DISTINCTE de `ajout-etat` : un avertissement de capacite ne doit
+             pas effacer « Envoi au canal… » ni le refus d'un 409. -->
+        <div id="ajout-alerte" style="font-size:12px;color:#c0392b;margin-top:4px"></div>
         <label style="font-size:12px;color:#86868b;display:block;margin-top:12px">Prix par nuit</label>
         <input id="ajout-prix" type="number" step="0.01" min="0.01" style="width:100%;padding:9px;margin:4px 0 8px;border:1px solid #d2d2d7;border-radius:8px">
         <!-- Total du sejour : ce que l'hote annonce au voyageur. Le calcul est
@@ -635,6 +638,11 @@
       document.getElementById('ajout-email').value = ''
       document.getElementById('ajout-tel').value = ''
       document.getElementById('ajout-ref').value = ''
+      // ⚠ Les compteurs aussi : sans cela, « 5 adultes » saisis sur un bien
+      // restaient sur le formulaire d'un autre bien, sans avertissement — la
+      // verification n'ayant lieu qu'a la frappe.
+      document.getElementById('ajout-adultes').value = 2
+      document.getElementById('ajout-enfants').value = 0
       document.getElementById('ajout-etat').textContent = ''
       // ⚠ Reinitialiser le bouton : apres une creation reussie il restait
       // desactive et affiche « Envoi… », rendant toute deuxieme saisie
@@ -642,6 +650,7 @@
       const btnV = document.getElementById('ajout-valider')
       btnV.disabled = false; btnV.textContent = 'Créer la réservation'
       rafraichirTotal()
+      verifierCapaciteAffichee()
       document.getElementById('overlay-ajout').classList.add('visible')
       document.getElementById('ajout-prenom').focus()
     }
@@ -653,12 +662,18 @@
     // le calculer de tete.
     function rafraichirTotal(){
       const b = bornesSelection(); if(!b) return
+      const bien = BIENS.find(x=>x.id===sel.bienId)
       const prix = parseFloat(document.getElementById('ajout-prix').value)
       const zone = document.getElementById('ajout-total')
       if(!(prix>0)){ zone.textContent = '—'; return }
+      // ⚠ La devise vient du BIEN (`curSym`, comme partout ailleurs dans cette
+      // page), jamais « € » en dur : sur un bien en GBP, le prix par nuit etait
+      // en livres et le total annonce en euros — or c'est le montant que l'hote
+      // annonce au voyageur.
+      const sym = curSym(bien && bien.currency)
       const total = prix * b.nuits
-      zone.innerHTML = '<strong>Total du séjour : ' + total.toFixed(2) + ' €</strong>'
-        + ' <span style="color:#86868b">(' + prix.toFixed(2) + ' € × ' + b.nuits + ' nuit' + (b.nuits>1?'s':'') + ')</span>'
+      zone.innerHTML = '<strong>Total du séjour : ' + total.toFixed(2) + ' ' + sym + '</strong>'
+        + ' <span style="color:#86868b">(' + prix.toFixed(2) + ' ' + sym + ' × ' + b.nuits + ' nuit' + (b.nuits>1?'s':'') + ')</span>'
     }
 
     // Voyageurs plafonnes a la capacite du bien, dit AVANT la validation.
@@ -673,11 +688,12 @@
         : null
     }
 
+    function verifierCapaciteAffichee(){
+      document.getElementById('ajout-alerte').textContent = depassementCapacite() || ''
+    }
     ;['ajout-prix','ajout-adultes','ajout-enfants'].forEach(id=>{
       document.getElementById(id)?.addEventListener('input', ()=>{
-        rafraichirTotal()
-        const pb = depassementCapacite()
-        document.getElementById('ajout-etat').textContent = pb || ''
+        rafraichirTotal(); verifierCapaciteAffichee()
       })
     })
 
@@ -691,7 +707,7 @@
       const prix = parseFloat(document.getElementById('ajout-prix').value)
       if(!(prix>0)){ document.getElementById('ajout-etat').textContent='Prix par nuit invalide.'; return }
       const pbCap = depassementCapacite()
-      if(pbCap){ document.getElementById('ajout-etat').textContent = pbCap; return }
+      if(pbCap){ document.getElementById('ajout-alerte').textContent = pbCap; return }
       const btn = document.getElementById('ajout-valider')
       btn.disabled = true; btn.textContent = 'Envoi…'
       // ⚠ CONFIRMATION EN DEUX TEMPS (spec §5). Premier temps : le canal a

@@ -159,7 +159,7 @@ test('endpoint : le total est recalcule, jamais recu du client', () => {
   // ⚠ CE TEST PASSAIT A TORT. Il ne verifiait qu'une chaine de caracteres,
   // pendant que le code faisait `amount: amount ?? total` — un POST forge avec
   // `amount: 1` creait une reservation a 1 € pour sept nuits.
-  assert.match(API, /const total = \(parNuit \* listeNuits\.length\)/)
+  assert.match(API, /const total = \(\(cents \* listeNuits\.length\) \/ 100\)/)
   assert.ok(!/amount\s*\?\?\s*total/.test(API), '`amount` du client ne doit jamais servir')
   assert.ok(!/\bamount,\s*currency/.test(API), '`amount` ne doit meme pas etre destructure du body')
   assert.match(API, /amount: total/, 'le total recalcule est le seul montant envoye')
@@ -221,6 +221,64 @@ test('formulaire : les voyageurs sont plafonnes a la CAPACITE du bien', () => {
 test('endpoint : le plafond de capacite est REVERIFIE cote serveur', () => {
   // Une garde d'interface n'est pas une garde : rien n'empeche un appel direct.
   assert.match(API, /capacite_depassee/)
-  assert.match(API, /adultes \+ enfants > capacite/)
+  assert.match(API, /personnes > capacite/)
   assert.match(API, /capacity/)
+})
+
+// ─── Durcissement issu de la review du 7 septembre ──────────────────────────
+
+test('endpoint : CHAQUE compteur de voyageurs est valide, pas seulement la somme', () => {
+  // `{adults: 10, children: -7}` donnait 3 <= 4 : garde franchie, et `adults: 10`
+  // transmis tel quel. `{children: {}}` donnait NaN, et toute comparaison avec
+  // NaN etant fausse, la garde etait sautee.
+  assert.match(API, /const entierPositif/)
+  assert.match(API, /Number\.isInteger\(n\) && n >= 0/)
+  assert.match(API, /adultes === null \|\| enfants === null \|\| bebes === null/)
+})
+
+test('endpoint : `infants` entre dans le plafond', () => {
+  // Il echappait au compte : {adults:2, children:2, infants:99} passait.
+  assert.match(API, /occupancy\?\.infants/)
+  assert.match(API, /const personnes = adultes \+ enfants \+ bebes/)
+})
+
+test('endpoint : l\'occupancy ENVOYEE est celle qui a ete validee', () => {
+  // L'objet brut du client etait reexpedie au provider, pas les valeurs verifiees.
+  assert.match(API, /occupancy: \{ adults: adultes, children: enfants, infants: bebes \}/)
+  assert.ok(!/occupancy: occupancy \|\| \{\}/.test(API), 'plus de reexpedition brute')
+})
+
+test('endpoint : le refus de capacite porte une PHRASE, pas un code', () => {
+  // api-client construit son Error a partir de `data.error` : l'hote lisait
+  // « capacite_depassee » a l'ecran.
+  assert.match(API, /error: `Ce bien accueille/)
+  assert.match(API, /code: 'capacite_depassee'/)
+})
+
+test('endpoint : le prix par nuit est arrondi au centime avant repartition', () => {
+  // 33.335 x 3 : somme des jours 100.02 contre total 100.01, rejete en 422.
+  assert.match(API, /const cents = Math\.round\(parNuit \* 100\)/)
+  assert.match(API, /\(\(cents \* listeNuits\.length\) \/ 100\)/)
+})
+
+test('formulaire : le total porte la DEVISE DU BIEN, pas « € » en dur', () => {
+  const bloc = PAGE.slice(PAGE.indexOf('function rafraichirTotal'), PAGE.indexOf('function depassementCapacite'))
+  assert.ok(bloc.includes('curSym('), 'la page a deja un helper de devise, utilise partout ailleurs')
+  assert.ok(!/Total du séjour : ' \+ total\.toFixed\(2\) \+ ' €/.test(bloc), 'plus d\'euro code en dur')
+})
+
+test('formulaire : les compteurs sont reinitialises ET verifies a l\'ouverture', () => {
+  const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout'), PAGE.indexOf('function fermerFormulaireAjout'))
+  assert.ok(bloc.includes("getElementById('ajout-adultes').value = 2"))
+  assert.ok(bloc.includes("getElementById('ajout-enfants').value = 0"))
+  assert.ok(bloc.includes('verifierCapaciteAffichee()'), 'verifie des l\'ouverture, pas seulement a la frappe')
+})
+
+test('formulaire : l\'avertissement de capacite n\'ecrase pas le message d\'etat', () => {
+  // `ajout-etat` porte « Envoi au canal… » et le refus d'un 409 ; une frappe
+  // effacait l'information.
+  assert.match(PAGE, /id="ajout-alerte"/)
+  assert.match(PAGE, /function verifierCapaciteAffichee/)
+  const bloc = PAGE.slice(PAGE.indexOf('function verifierCapaciteAffichee'), PAGE.indexOf("];['ajout-prix'") + 200)
+  assert.ok(!bloc.includes("ajout-etat"), 'l\'avertissement a sa propre zone')
 })
