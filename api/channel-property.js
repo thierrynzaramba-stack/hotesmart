@@ -422,15 +422,38 @@ module.exports = async function handler(req, res) {
       const propKey = String(providerId)
 
       // message_sent_log n'a pas de property_id : purge via les booking_id du bien
-      const { data: snapRows } = await supabase
-        .from('bookings_snapshot')
-        .select('booking_id')
-        .eq('user_id', compteBien)
-        .eq('property_id', propKey)
-      const bookingIds = (snapRows || []).map(r => r.booking_id)
-      if (bookingIds.length) {
+      //
+      // ⚠ LECTURE PAGINEE. Constat de review du 7 septembre 2026.
+      // Cette lecture n'avait aucune borne : sur un bien portant plus de 1000
+      // reservations, PostgREST en rendait 1000 SANS ERREUR, et la purge
+      // manquait silencieusement les `message_sent_log` des autres — precisement
+      // les donnees orphelines que le commentaire ci-dessous dit vouloir eviter.
+      // Une purge incomplete ne se rattrape pas : le bien n'existe plus, et plus
+      // rien ne relie ces lignes a quoi que ce soit.
+      const bookingIds = []
+      {
+        const PAGE = 1000
+        for (let de = 0; ; de += PAGE) {
+          const { data, error } = await supabase
+            .from('bookings_snapshot')
+            .select('booking_id')
+            .eq('user_id', compteBien)
+            .eq('property_id', propKey)
+            // L'ordre rend la pagination deterministe.
+            .order('booking_id', { ascending: true })
+            .range(de, de + PAGE - 1)
+          if (error) {
+            console.error('[channel-property] lecture booking_id pour purge echec', error.message)
+            break
+          }
+          bookingIds.push(...(data || []).map(r => r.booking_id))
+          if (!data || data.length < PAGE) break
+        }
+      }
+      // `.in()` accepte mal une liste immense : on supprime par paquets.
+      for (let i = 0; i < bookingIds.length; i += 500) {
         await supabase.from('message_sent_log')
-          .delete().eq('user_id', compteBien).in('booking_id', bookingIds)
+          .delete().eq('user_id', compteBien).in('booking_id', bookingIds.slice(i, i + 500))
       }
 
       // Tables enfant keyees par property_id = provider_property_id (TEXT). AUCUNE FK

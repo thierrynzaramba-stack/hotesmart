@@ -231,15 +231,39 @@ module.exports = async function handler(req, res) {
     if (!ownedIds.length) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
 
     // inventory
-    const { data: invRows, error: invErr } = await supabase
-      .from('calendar_inventory')
-      .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
-      .in('property_id', ownedIds)
-      .gte('date', start)
-      .lte('date', end)
-    if (invErr) {
-      console.error('[calendar] inventory select error', invErr.message)
-      return res.status(500).json({ error: 'Erreur lecture inventory' })
+    // ⚠ LECTURE PAGINEE. INCIDENT DU 7 SEPTEMBRE 2026, second foyer.
+    // Cette lecture est bornee par les dates, mais ca ne suffit pas : l'ecran
+    // propose une periode « 1 an » (360 jours) et la selection de plusieurs
+    // biens. Trois biens sur un an font 1080 lignes, et PostgREST en rend 1000
+    // SANS ERREUR — sans `order by`, un sous-ensemble ARBITRAIRE.
+    //
+    // La consequence est pire que sur les reservations : une date absente de
+    // `inventory` est rendue par shared/calendar-core.js comme `avail: 'open'`,
+    // `stopSell: 'open'` et `rate = base`. Une nuit que l'hote a explicitement
+    // fermee s'affiche donc OUVERTE, au prix de base — exactement la
+    // surreservation que la garde d'a cote dit exister pour empecher.
+    let invRows = []
+    {
+      const PAGE = 1000
+      for (let de = 0; ; de += PAGE) {
+        const { data, error } = await supabase
+          .from('calendar_inventory')
+          .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
+          .in('property_id', ownedIds)
+          .gte('date', start)
+          .lte('date', end)
+          // L'ordre rend la pagination DETERMINISTE : sans lui, deux pages
+          // peuvent se recouvrir et en oublier une troisieme.
+          .order('property_id', { ascending: true })
+          .order('date', { ascending: true })
+          .range(de, de + PAGE - 1)
+        if (error) {
+          console.error('[calendar] inventory select error', error.message)
+          return res.status(500).json({ error: 'Erreur lecture inventory' })
+        }
+        invRows = invRows.concat(data || [])
+        if (!data || data.length < PAGE) break
+      }
     }
     // structure : { property_id: { 'YYYY-MM-DD': {rate,...} } }
     const inventory = {}
@@ -268,11 +292,29 @@ module.exports = async function handler(req, res) {
     const provIds = Object.keys(provToId)
     if (provIds.length) {
       try {
+        // ⚠ LE FILTRE DE FENETRE EST DANS LA REQUETE. INCIDENT DU 7 SEPTEMBRE 2026.
+        // Cette lecture ne filtrait que par compte et par bien, et la fenetre
+        // etait appliquee en JavaScript plus bas (`checkout < start || checkin > end`).
+        // PostgREST plafonne un rendu a 1000 lignes : au-dela il en rend 1000
+        // SANS ERREUR. Mesure du jour sur le compte fondateur : 1418 lignes
+        // correspondantes, 1000 rendues, et les PLUS RECENTES absentes.
+        //
+        // La garde `snapErr` juste en dessous protege contre une lecture qui
+        // ECHOUE. Elle ne protege pas contre une lecture qui REUSSIT tronquee —
+        // laquelle produit exactement ce que son commentaire redoute : des nuits
+        // vendues affichees libres, donc une surreservation, et sans le moindre
+        // signal.
+        //
+        // Condition de chevauchement, identique a celle appliquee plus bas :
+        // le sejour touche la fenetre si depart >= start ET arrivee <= end.
+        // Meme forme que lib/cron-overbooking.js.
         const { data: snapRows, error: snapErr } = await supabase
           .from('bookings_snapshot')
           .select('booking_id, property_id, snapshot')
           .eq('user_id', gardeGet.compte)
           .in('property_id', provIds)
+          .gte('snapshot->>departure', start)
+          .lte('snapshot->>arrival', end)
         // ⚠ Une erreur ici ne peut PAS etre avalee : sans reservations, le
         // calendrier s'affiche entierement LIBRE, et une simple panne transitoire
         // devient une surreservation. On echoue bruyamment.
@@ -492,12 +534,37 @@ module.exports = async function handler(req, res) {
       for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) allDates.add(ds)
     }
     if (allDates.size) {
-      const { data: existingRows } = await supabase
-        .from('calendar_inventory')
-        .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
-        .eq('property_id', bienId)
-        .in('date', [...allDates])
-      ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
+      // ⚠ CETTE LECTURE NE PEUT NI ECHOUER EN SILENCE, NI ETRE TRONQUEE.
+      // Constat de review, 7 septembre 2026 — et c'est le plus dangereux des
+      // deux foyers de cette journee.
+      //
+      // Les lignes relues ici sont la BASE de l'upsert plus bas. Si elles
+      // manquent — erreur avalee, ou rendu tronque a 1000 lignes — chaque date
+      // repart d'un objet nu `{ property_id, date }`, et l'upsert ECRIT NULL
+      // par-dessus `stop_sell`, `rate`, `min_stay_*`, `cta`, `ctd`.
+      //
+      // Autrement dit : un hote qui ne modifie QUE le prix d'une periode
+      // effacerait la fermeture qu'il avait memorisee dessus. C'est l'exact
+      // contraire de la regle gravee au chantier audit — « seule une intention
+      // volontaire de l'hote met a jour la memoire ». Un effacement silencieux
+      // n'est pas une intention.
+      //
+      // On pagine ET on remonte l'erreur : mieux vaut un enregistrement refuse
+      // qu'une intention perdue sans que personne ne le sache.
+      const toutesDates = [...allDates]
+      const PAGE = 500
+      for (let i = 0; i < toutesDates.length; i += PAGE) {
+        const { data: existingRows, error: exErr } = await supabase
+          .from('calendar_inventory')
+          .select('property_id, date, rate, avail, stop_sell, min_stay_arrival, min_stay_through, max_stay, cta, ctd')
+          .eq('property_id', bienId)
+          .in('date', toutesDates.slice(i, i + PAGE))
+        if (exErr) {
+          console.error('[calendar] relecture inventory echec', exErr.message)
+          return res.status(503).json({ error: 'Enregistrement refuse : impossible de relire le calendrier existant' })
+        }
+        ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
+      }
     }
 
     for (const seg of dateSegments) {

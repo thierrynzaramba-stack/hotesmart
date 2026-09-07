@@ -276,11 +276,21 @@ module.exports = async function handler(req, res) {
     // ecrites AVANT l'unification : elles portent le statut BRUT du provider et
     // aucun champ `provider`. Sans ce defaut, un blocage proprietaire Beds24
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
-    const { data: propRows } = await supabase
+    const { data: propRows, error: errProps } = await supabase
       .from('properties')
       .select('provider_property_id, name, provider')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
+    // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
+    // Constat de review du 7 septembre. Une panne rendait `propRows` null, donc
+    // `properties` vide, donc `propIds` vide, donc le bloc de lecture des
+    // reservations entierement SAUTE — et la prestataire voyait un planning
+    // vide, indiscernable de « rien a faire aujourd'hui ». C'est le symptome
+    // exact de l'incident du jour, atteint par une autre porte restee ouverte.
+    if (errProps) {
+      console.error('[menages-public] lecture properties echec:', errProps.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
 
     const allowedIds = (tokenData.property_ids || []).map(String)
     const properties = (propRows || [])
@@ -306,11 +316,40 @@ module.exports = async function handler(req, res) {
     const propIds = properties.map(p => p.id)
     let allBookings = []
     if (propIds.length) {
-      const { data: snaps } = await supabase
+      // ⚠ LE FILTRE DE DATES EST DANS LA REQUETE, PAS APRES. INCIDENT DU
+      // 7 SEPTEMBRE 2026.
+      // Cette lecture ne filtrait que par hote et par bien, et la fenetre etait
+      // appliquee en JavaScript ensuite. PostgREST plafonne un rendu a 1000
+      // lignes : au-dela, il en rend 1000 SANS ERREUR et sans le dire.
+      // Mesure du jour : 1418 lignes correspondantes, 1000 rendues.
+      //
+      // Le backfill de l'historique du 5 septembre a fait passer la table de 214
+      // a 1437 lignes. Depuis, les reservations les PLUS RECENTES tombaient hors
+      // du rendu : leur menage arrivait bien, la reservation non, et l'ecran —
+      // qui joint les deux — n'affichait rien. Une mission assignee et acceptee
+      // etait invisible pour la prestataire.
+      //
+      // Aggravant : sans `order by`, les 1000 lignes rendues sont ARBITRAIRES.
+      // Deux appels peuvent ne pas rendre le meme ensemble.
+      //
+      // Filtrer sur les dates ICI ramene le rendu a quelques dizaines de lignes :
+      // la troncature ne peut plus se produire. C'est ce que font deja
+      // api/menages.js et lib/moteur-coeur.js.
+      const { data: snaps, error: errSnaps } = await supabase
         .from('bookings_snapshot')
         .select('booking_id, property_id, snapshot')
         .eq('user_id', userId)
         .in('property_id', propIds)
+        .gte('snapshot->>departure', dateFrom)
+        .lte('snapshot->>departure', dateTo)
+      // ⚠ L'erreur etait AVALEE. Une panne rendait `snaps` indefini, donc zero
+      // reservation, donc un planning vide — indiscernable de « rien a faire
+      // aujourd'hui » pour la prestataire. Meme regle que partout ailleurs sur
+      // ce chemin : on coupe plutot que de rendre une liste faussement vide.
+      if (errSnaps) {
+        console.error('[menages-public] lecture bookings_snapshot echec:', errSnaps.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
       allBookings = (snaps || [])
         .map(s => {
           const snap = s.snapshot || {}
@@ -331,6 +370,8 @@ module.exports = async function handler(req, res) {
         // proprietaire Beds24 ('black') ou une demande non confirmee ('request')
         // creait un menage fantome au planning (audit E5).
         .filter(b => b.status === STATUS.CONFIRMED)
+        // Redondant avec le filtre SQL ci-dessus, et garde exprès : il coute
+        // rien et il protege si la requete venait a changer.
         .filter(b => b.departure && b.departure >= dateFrom && b.departure <= dateTo)
     }
 

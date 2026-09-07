@@ -68,6 +68,11 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         in (c, v) { q._in = { c, v }; etat.filtresIn.push({ table: nom, colonne: c, valeurs: v }); return q },
         neq () { return q }, not () { return q }, is () { return q },
         order () { return q }, limit () { return q }, gte () { return q }, lte () { return q },
+        // ⚠ `range` rend un objet DEJA RESOLU (pas `q`) : la lecture paginee de
+        // api/calendar.js `await`-e chaque page, et rendre `q` ferait boucler la
+        // pagination a l'infini sur la meme page. Une seule page suffit ici — le
+        // harnais ne sert pas a eprouver la pagination elle-meme.
+        range () { return Promise.resolve({ data: q._data || [], error: null }) },
         insert (r) { etat.ecritures.push({ table: nom, row: r }); return { select: () => ({ single: async () => ({ data: { id: 'q1' }, error: null }) }) } },
         upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
         update (r) {
@@ -165,6 +170,11 @@ function preparerPanne () {
       const q = {
         select () { return q }, eq () { return q }, or () { return q }, in () { return q },
         order () { return q }, limit () { return q }, gte () { return q }, lte () { return q },
+        // ⚠ `range` rend un objet DEJA RESOLU (pas `q`) : la lecture paginee de
+        // api/calendar.js `await`-e chaque page, et rendre `q` ferait boucler la
+        // pagination a l'infini sur la meme page. Une seule page suffit ici — le
+        // harnais ne sert pas a eprouver la pagination elle-meme.
+        range () { return Promise.resolve({ data: q._data || [], error: null }) },
         single: async () => ({ data: null, error: { message: 'timeout' } }),
         maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }),
         then (ok, ko) { return Promise.resolve({ data: null, error: { message: 'timeout' } }).then(ok, ko) }
