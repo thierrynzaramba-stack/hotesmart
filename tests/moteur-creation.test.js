@@ -79,7 +79,7 @@ const TENTATIVE = {
     { date: '2026-10-02', prix: 80, supplement: 0, total: 80 },
     { date: '2026-10-03', prix: 80, supplement: 0, total: 80 }
   ],
-  status: 'paid', payment_intent_id: 'pi_1'
+  status: 'paid', payment_intent_id: 'pi_1', paid_at: '2026-09-08T22:14:01.000Z'
 }
 const BIEN = {
   id: 'uuid-bien', name: 'Le Nid', address: '1 rue X', user_id: 'uuid-hote',
@@ -420,4 +420,107 @@ test('une tentative DEJA signalee ne re-alerte pas a chaque cycle', async () => 
   assert.equal(r.signalees, 0)
   assert.equal(r.vues, 1)
   assert.equal(etat.alarmes.length, 0)
+})
+
+
+// ─── CONSTAT DE LA VALIDATION REELLE (8 septembre 2026) ────────────────────
+test('un payload refuse AVANT envoi est un echec CERTAIN : on rembourse', async () => {
+  // ⚠ TROUVE EN PRODUCTION, pas par un test. Un `price_detail` vide faisait
+  // refuser `payloadCRS` LOCALEMENT — avant tout appel reseau — et l exception
+  // tombait dans le fourre-tout « issue incertaine » : argent encaisse, aucun
+  // remboursement, et une alarme qui reveille pour rien.
+  // `channelCall` ATTRAPE les pannes reseau (status 0) : la seule facon dont
+  // createBooking puisse LEVER est le refus du payload, donc rien n est parti.
+  reinit()
+  base.tentative = { ...base.tentative, price_detail: [] }
+  const r = await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  assert.equal(r.ok, false)
+  assert.equal(r.raison, 'detail_prix_invalide')
+  assert.equal(r.rembourse, true, 'l argent revient : rien n a ete envoye')
+  assert.equal(etat.appelsCRS.length, 0, 'AUCUN appel au provider')
+  assert.equal(etat.alarmes.length, 0, 'un echec certain ne REVEILLE PAS')
+  assert.equal(base.tentative.status, 'refunded')
+  assert.equal(etat.emails[0].sorte, 'remboursement')
+})
+
+test('un detail de prix qui ne couvre pas le sejour est refuse', async () => {
+  reinit()
+  base.tentative = { ...base.tentative, price_detail: [{ date: '2026-10-01', total: 80 }] }  // 1 jour pour 3 nuits
+  const r = await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  assert.equal(r.raison, 'detail_prix_invalide')
+  assert.equal(etat.appelsCRS.length, 0)
+  assert.equal(r.rembourse, true)
+})
+
+
+// ─── CONSTAT DE REVIEW : la fenetre de surreservation ouverte par un correctif ─
+// Ces trois controles portent sur la STRUCTURE de api/book-webhook.js, faute de
+// pouvoir signer un webhook Stripe dans un test. Meme forme que
+// tests/bookings-snapshot-troncature.test.js : ils figent l'invariant, pas le
+// comportement — et c'est deja ce qui manquait quand le defaut est passe.
+const sourceWebhook = require('node:fs').readFileSync(
+  require('node:path').join(__dirname, '..', 'api/book-webhook.js'), 'utf8')
+
+test('la liberation des nuits est GARDEE par une creation en vol', () => {
+  // ⚠ Le COMPORTEMENT de `claimActif` est eprouve par execution dans
+  // tests/book-webhook-claim.test.js — un grep de source avait laisse passer du
+  // code mort. Ici on ne verifie que le CABLAGE : que le garde soit bien pose
+  // sur la branche de liberation.
+  assert.match(sourceWebhook, /const creationEnVol = .*claimActif\(tentative\.id\)/)
+  assert.match(sourceWebhook, /&& !creationEnVol\) \{/)
+})
+
+test('un remboursement PARTIEL ne rend pas la tentative terminale', () => {
+  // Stripe emet `charge.refunded` pour tout remboursement. Un geste commercial
+  // de 20 EUR sur 240 faisait basculer la tentative en `refunded` — etat
+  // terminal, revente bloquee, et depuis peu nuits liberees par-dessus.
+  assert.match(sourceWebhook, /amount_refunded/)
+  assert.match(sourceWebhook, /remboursement PARTIEL ignore/)
+})
+
+
+// ─── EXIGENCE DE THIERRY, apres la premiere vraie alarme ───────────────────
+// « Le message doit me permettre de trancher SANS OUVRIR UN ECRAN. »
+test('toute alarme porte dates, montant, voyageur, heure du paiement et code', async () => {
+  reinit()
+  etat.reponseCRS = { ok: false, status: 0 }
+  await C.creerDepuisTentative(supabase, TENTATIVE.id)
+  const d = etat.alarmes[0].detail
+  assert.match(d, /01\/10-04\/10/, 'les dates du sejour')
+  assert.match(d, /240\.00 EUR/, 'le montant')
+  assert.match(d, /ana@exemple\.com/, 'le voyageur')
+  // ⚠ HEURE DE PARIS : 22:14 UTC le 8 septembre = 00:14 le 9 a Paris. C'est
+  // exactement le decalage que le constat de review a releve — mauvais jour ET
+  // mauvaise heure sur le seul message cense permettre de trancher.
+  assert.match(d, /paye 09\/09 00:14/, 'l heure de l ENCAISSEMENT, en heure de Paris')
+  assert.match(d, /HSM-/, 'le code a chercher chez le provider')
+})
+
+test('les faits tiennent dans un SMS (300 caracteres)', () => {
+  // `envoyerAlerteBrute` tronque a 300 : les faits passent AVANT la cause, pour
+  // qu'une troncature coute l explication et jamais de quoi agir.
+  const f = C.faits(TENTATIVE)
+  assert.ok(f.length < 120, `${f.length} caracteres, trop long pour laisser place a la cause`)
+  assert.ok(f.indexOf('240.00') < f.indexOf('HSM-'), 'le montant avant le code')
+})
+
+test('sans heure d encaissement, l alarme le DIT au lieu d inventer', () => {
+  // `updated_at` bougerait au premier rattrapage et mentirait sur l heure du
+  // paiement. Mieux vaut « heure inconnue » qu une date fausse.
+  assert.match(C.faits({ ...TENTATIVE, paid_at: null }), /paye heure inconnue/)
+})
+
+test('l heure d encaissement n est ecrite QUE sur le passage a paye', () => {
+  // ⚠ Compter les occurrences de `paid_at` etait fragile (constat de review) :
+  // toute reference legitime supplementaire cassait le test sans regression.
+  // On verifie ce qui compte : la seule AFFECTATION est celle du passage a
+  // `paid`. Ailleurs, `paid_at` ne doit jamais etre reecrit — sinon l alarme
+  // afficherait l heure de l alarme au lieu de celle du paiement.
+  assert.match(sourceWebhook, /maj\.paid_at = new Date\(\)\.toISOString\(\)/)
+  // On ne compte que les ECRITURES EN BASE (`maj.paid_at`), pas les lectures ni
+  // les replis en memoire : le repli `tentative.paid_at || …` du chemin
+  // d'exception est legitime, il ne deplace rien en base.
+  const ecritures = sourceWebhook.match(/maj\.paid_at\s*=/g) || []
+  assert.equal(ecritures.length, 1,
+    `${ecritures.length} ecritures de paid_at en base — l'heure du paiement ne doit jamais bouger`)
 })

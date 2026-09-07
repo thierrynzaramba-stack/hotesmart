@@ -129,8 +129,23 @@ const CIBLE = {
 
 async function traiter (evenement, hote) {
   const objet = evenement.data && evenement.data.object
-  const cible = CIBLE[evenement.type]
+  let cible = CIBLE[evenement.type]
   if (!objet || !cible) return
+
+  // ⚠ UN REMBOURSEMENT PARTIEL N'EST PAS UN REMBOURSEMENT. Constat de review :
+  // Stripe emet `charge.refunded` pour TOUT remboursement, y compris un geste
+  // commercial de 20 EUR sur un sejour de 240. Le prendre pour un remboursement
+  // integral faisait basculer la tentative dans l'etat TERMINAL `refunded` —
+  // toute revente au meme voyageur devenait impossible (`deja_rembourse`), et
+  // depuis peu ses nuits etaient liberees par-dessus le marche.
+  if (evenement.type === 'charge.refunded') {
+    const total = Number(objet.amount) || 0
+    const rendu = Number(objet.amount_refunded) || 0
+    if (objet.refunded !== true && rendu < total) {
+      console.log(`[book-webhook] remboursement PARTIEL ignore (${rendu}/${total})`)
+      return
+    }
+  }
 
   // Retrouver la tentative : par la Session pour les evenements Checkout, par le
   // PaymentIntent sinon.
@@ -173,7 +188,15 @@ async function traiter (evenement, hote) {
   if (tentative.status === cible) return
 
   const maj = { status: cible, updated_at: new Date().toISOString() }
-  if (cible === ETAT.PAYE && objet.payment_intent) maj.payment_intent_id = objet.payment_intent
+  if (cible === ETAT.PAYE) {
+    if (objet.payment_intent) maj.payment_intent_id = objet.payment_intent
+    // ⚠ L'HEURE DE L'ENCAISSEMENT, ecrite ICI et nulle part ailleurs.
+    // `updated_at` ne peut pas en tenir lieu : le rattrapage l'ecrit a chaque
+    // signalement, et l'alarme afficherait l'heure de l'alarme au lieu de celle
+    // du paiement. Sur un message qui parle d'argent, une date fausse est pire
+    // qu'une date absente.
+    maj.paid_at = new Date().toISOString()
+  }
   if (cible === ETAT.REFUSE) {
     maj.last_error = String((objet.last_payment_error && objet.last_payment_error.message) || '').slice(0, 500)
   }
@@ -190,7 +213,23 @@ async function traiter (evenement, hote) {
   // ─── Rendre les nuits quand plus rien n'est en cours ───────────────────────
   // Sans cela, un abandon bloque les dates jusqu'au bout de la tenue — une
   // demi-heure pendant laquelle personne d'autre ne peut reserver.
-  if (cible === ETAT.EXPIRE) {
+  // ⚠ UN REMBOURSEMENT LIBERE AUSSI LES NUITS — MAIS JAMAIS PENDANT UNE CREATION.
+  // Constate a la validation reelle : la tentative passait bien en `refunded`,
+  // mais ses nuits restaient tenues jusqu'a l'expiration, bloquees alors que plus
+  // rien n'engageait personne.
+  //
+  // ⚠ ET LE CORRECTIF A OUVERT UNE FENETRE DE SURRESERVATION (constat de review).
+  // La transition `paid -> refunded` est permise : si l'hote rembourse PENDANT
+  // que le POST CRS est en vol, cette branche supprimait les tenues, le feed
+  // n'avait pas encore la reservation, le calendrier public revoyait les nuits
+  // libres — et un second voyageur pouvait les acheter avant que le POST du
+  // premier n'aboutisse. Channex ne s'y oppose pas (stock a -1).
+  //
+  // Le claim `resa-crs:<id>` dit exactement « une creation est en cours ». Tant
+  // qu'il existe, on ne touche pas aux tenues : le chemin de creation les rendra
+  // lui-meme, ou elles expireront.
+  const creationEnVol = cible === ETAT.REMBOURSE && await claimActif(tentative.id)
+  if ((cible === ETAT.EXPIRE || cible === ETAT.REMBOURSE) && !creationEnVol) {
     const bien = await bienDe(tentative.property_id)
     if (bien && bien.provider_property_id) {
       await libererIntentions(supabase, {
@@ -232,10 +271,10 @@ async function traiter (evenement, hote) {
       // exactement l'anti-spam que l'exigence gravee demande de contourner.
       console.error('[book-webhook] creation', tentative.id, e.message)
       const bien = await bienDe(tentative.property_id)
-      await alerterReveil(tentative, bien,
-        `Creation interrompue par une erreur (${e.message}). ` +
-        `${(tentative.amount_cents / 100).toFixed(2)} ${tentative.currency} encaisses. ` +
-        `Verifier chez le provider AVANT tout geste.`)
+      // Les faits (dates, montant, voyageur, heure du paiement, code) sont
+      // ajoutes par `alerterReveil` : ici on ne dit que la CAUSE.
+      await alerterReveil({ ...tentative, paid_at: tentative.paid_at || new Date().toISOString() }, bien,
+        `Creation interrompue par une erreur (${e.message}). Verifier chez le provider AVANT tout geste.`)
       return
     }
 
@@ -243,6 +282,29 @@ async function traiter (evenement, hote) {
       console.error('[book-webhook] creation non aboutie', tentative.id, creation.raison)
     }
   }
+}
+
+// Une creation est-elle en cours pour cette tentative ? Le claim de
+// `lib/moteur-creation.js` est la seule source de verite la-dessus.
+async function claimActif (tentativeId) {
+  // ⚠ L'ERREUR SE LIT DANS `error`, PAS DANS UN `catch`. Constat de review,
+  // verifie par execution : postgrest-js NE LEVE JAMAIS sans `.throwOnError()`
+  // — il convertit meme une panne fetch en `{ data: null, error }`.
+  // Le `try/catch` precedent etait donc du CODE MORT : sur la moindre erreur,
+  // `data` valait `null`, `!!data` valait `false`, on concluait « aucune
+  // creation en vol » et on liberait les tenues PENDANT le POST CRS. C'est
+  // exactement la fenetre de surreservation que ce garde pretend fermer.
+  const { data, error } = await supabase.from('write_locks')
+    .select('key').eq('key', `resa-crs:${tentativeId}`)
+    .gt('expire_at', new Date().toISOString()).maybeSingle()
+  if (error) {
+    // On ne sait pas : on suppose qu'une creation est en cours. Garder une tenue
+    // de trop coute une reservation ratee ; la lever de trop coute une
+    // surreservation.
+    console.error('[book-webhook] lecture du claim echouee', error.message)
+    return true
+  }
+  return !!data
 }
 
 async function parColonne (colonne, valeur) {
@@ -281,3 +343,6 @@ module.exports = handler
 // re-serialises, et TOUT evenement est rejete comme invalide.
 // (Defaut reellement present dans api/stripe.js — voir la dette au KB.)
 module.exports.config = { api: { bodyParser: false } }
+// Expose pour que le garde anti-surreservation soit eprouve pour de vrai, et
+// non par une lecture de source — c'est ce qui avait laisse passer le code mort.
+module.exports.claimActif = claimActif
