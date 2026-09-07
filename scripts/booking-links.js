@@ -88,7 +88,17 @@ async function main () {
   }
 
   const biens = await trouverBiens()
-  const cibles = BIEN ? biens.filter(b => b.name.toLowerCase().includes(BIEN.toLowerCase())) : biens
+  // Un nom EXACT l'emporte sur la recherche par fragment. Sans cela, un bien dont
+  // le nom est le prefixe d'un autre est inatteignable : « colomier » designe
+  // aussi « Colomiers », et l'outil refuse alors d'agir — a juste titre, mais
+  // sans laisser aucun moyen de viser le premier.
+  const cibles = BIEN ? choisir(biens, BIEN) : biens
+
+  function choisir (liste, terme) {
+    const t = terme.toLowerCase()
+    const exact = liste.filter(b => b.name.toLowerCase() === t)
+    return exact.length ? exact : liste.filter(b => b.name.toLowerCase().includes(t))
+  }
 
   if (!cibles.length) {
     console.log(`Aucun bien ne correspond a "${BIEN}".`)
