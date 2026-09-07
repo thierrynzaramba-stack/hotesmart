@@ -138,3 +138,58 @@ La sonde ne tourne **pas** à chaque tick : elle scanne `bookings_snapshot` en
 entier avec un filtre qu'aucun index ne sert. Marqueur `overbooking_probe` dans
 `cron_logs`, **15 minutes** par défaut (`OVERBOOKING_CADENCE_MS`) — trois passages
 par relance suffisent à ne rien manquer.
+
+
+## 8. ⚠ Écrire la disponibilité LÈVE le stop-sell (Channex)
+
+**Constaté en production le 7 septembre 2026, sur Colomiers.**
+
+Un `POST /availability` qui ne porte **que** le stock remet `stop_sell` à `false`
+sur les dates touchées. Les deux réglages ne sont pas indépendants, contrairement
+à ce que laisse croire l'API : ils vivent dans la même écriture d'inventaire, et
+celle qui n'est pas fournie est réinitialisée.
+
+Conséquence mesurée : quatre nuits d'un bien **volontairement fermé à la vente**
+(fin d'activité) sont redevenues **réellement vendables sur Airbnb et
+Booking.com** — canaux actifs — pendant les trois minutes qui ont séparé
+l'écriture de la relecture. Rien n'a été réservé, vérifié après coup, mais c'était
+une question de chance.
+
+**La règle : toute écriture de disponibilité sur un bien en stop-sell doit être
+suivie d'une réaffirmation explicite du stop-sell**, puis d'une relecture.
+
+```
+POST /availability   { availability: n }      ← lève stop_sell
+POST /restrictions   { stop_sell: true }      ← à refaire systématiquement
+GET  /restrictions                            ← et à vérifier, jamais supposer
+```
+
+Cela concerne tout code qui pousse de l'inventaire : `lib/channel-availability.js`,
+`lib/rate-sync.js`, la ligne « Disponibilité » du calendrier. **À auditer** — ce
+KB documente le fait, il ne prétend pas que tous les chemins le respectent.
+
+### Le champ local ne dit pas la vérité du provider
+
+`properties.ota_connect_status` valait `draft` sur Colomiers, ce qui m'a fait
+conclure à tort qu'« aucun canal ne propagerait ». Le `GET /channels` de Channex
+montre **deux canaux actifs** (Booking.com et Airbnb), et les 18 réservations
+réelles du bien le disaient déjà.
+
+Devant une question de sécurité — « est-ce que ça part vraiment chez l'OTA ? » —
+**interroger le provider, jamais se fier au miroir local**.
+
+## 9. Le verrou ignore le stop-sell
+
+`verifierDisponibilite` lit le **cœur** : il empêche deux réservations de se
+chevaucher, mais **ne sait pas qu'un bien est fermé à la vente**. Sur des dates en
+stop-sell, il répond « autorisé » — vérifié.
+
+Sur un bien ouvert, sans conséquence. Sur un bien fermé, une saisie directe
+passerait outre une décision de l'hôte, et Channex l'accepterait en faisant
+descendre le stock à −1.
+
+**Choix produit à trancher** : une réservation directe doit-elle respecter le
+stop-sell (c'est une fermeture commerciale, qui ne concerne peut-être que les OTA)
+ou l'ignorer (l'hôte qui saisit sait ce qu'il fait) ? Aucune décision n'est prise
+à ce jour ; le comportement actuel est « ignore », par construction et non par
+choix.

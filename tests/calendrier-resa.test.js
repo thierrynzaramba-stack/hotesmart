@@ -192,3 +192,35 @@ test('endpoint : un conflit de disponibilite rend 409, pas 400', () => {
   assert.match(API, /nuits_completes/)
   assert.match(API, /409/)
 })
+
+// ─── Retouches du formulaire (7 septembre 2026) ─────────────────────────────
+
+test('formulaire : prenom et nom sont DEUX champs', () => {
+  assert.match(PAGE, /id="ajout-prenom"/)
+  assert.match(PAGE, /id="ajout-nom"/)
+  // L'ancienne version coupait « Prénom Nom » sur le premier espace : un nom
+  // compose partait de travers.
+  assert.ok(!PAGE.includes("nomComplet.split(' ')"), 'plus de decoupage a l\'espace')
+  assert.match(PAGE, /name: prenom/)
+  assert.match(PAGE, /surname: nom/)
+})
+
+test('formulaire : le TOTAL du sejour est affiche avant validation', () => {
+  assert.match(PAGE, /function rafraichirTotal/)
+  assert.match(PAGE, /Total du séjour/)
+  // Recalcule a chaque frappe, pas seulement a l'ouverture.
+  assert.match(PAGE, /\['ajout-prix','ajout-adultes','ajout-enfants'\]/)
+})
+
+test('formulaire : les voyageurs sont plafonnes a la CAPACITE du bien', () => {
+  assert.match(PAGE, /function depassementCapacite/)
+  assert.match(PAGE, /bien\.capacity/)
+  assert.match(PAGE, /au maximum/)
+})
+
+test('endpoint : le plafond de capacite est REVERIFIE cote serveur', () => {
+  // Une garde d'interface n'est pas une garde : rien n'empeche un appel direct.
+  assert.match(API, /capacite_depassee/)
+  assert.match(API, /adultes \+ enfants > capacite/)
+  assert.match(API, /capacity/)
+})

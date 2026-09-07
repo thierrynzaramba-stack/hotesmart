@@ -31,7 +31,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 async function bienDuCompte (accountUserId, propertyId) {
   const { data, error } = await supabase
     .from('properties')
-    .select('name, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, currency, base_price')
+    .select('name, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, currency, base_price, capacity')
     .eq('user_id', accountUserId)
     .eq('provider_property_id', String(propertyId))
     .maybeSingle()
@@ -96,6 +96,23 @@ module.exports = async (req, res) => {
     const parNuit = Number(prixParNuit ?? bien.base_price)
     if (!Number.isFinite(parNuit) || parNuit <= 0) {
       return res.status(400).json({ error: 'Prix par nuit invalide' })
+    }
+
+    // ⚠ PLAFOND DE VOYAGEURS REVERIFIE ICI. Le formulaire l'annonce et le bloque,
+    // mais une garde d'interface n'est pas une garde : rien n'empeche un appel
+    // direct. `capacity` = nombre de PERSONNES (a ne pas confondre avec
+    // `inventory_units`, qui compte les logements).
+    const adultes = Number(occupancy?.adults ?? 1)
+    const enfants = Number(occupancy?.children ?? 0)
+    if (!Number.isFinite(adultes) || adultes < 1) {
+      return res.status(400).json({ error: 'Il faut au moins un adulte.' })
+    }
+    const capacite = Number(bien.capacity) || 0
+    if (capacite > 0 && adultes + enfants > capacite) {
+      return res.status(400).json({
+        error: 'capacite_depassee',
+        message: `Ce bien accueille ${capacite} personne${capacite > 1 ? 's' : ''} au maximum — ${adultes + enfants} demandées.`
+      })
     }
     const days = {}
     listeNuits.forEach(n => { days[n] = parNuit.toFixed(2) })

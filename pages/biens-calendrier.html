@@ -179,8 +179,13 @@
       </div>
       <div style="padding:18px 24px;overflow-y:auto">
         <div id="ajout-recap" style="background:#f5f5f7;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px"></div>
-        <label style="font-size:12px;color:#86868b">Nom du voyageur *</label>
-        <input id="ajout-nom" type="text" placeholder="Prénom Nom" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
+        <div style="display:flex;gap:12px">
+          <div style="flex:1"><label style="font-size:12px;color:#86868b">Prénom *</label>
+            <input id="ajout-prenom" type="text" placeholder="Prénom" style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>
+          <div style="flex:1"><label style="font-size:12px;color:#86868b">Nom *</label>
+            <input id="ajout-nom" type="text" placeholder="Nom" style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>
+        </div>
+        <div style="height:12px"></div>
         <label style="font-size:12px;color:#86868b">Email</label>
         <input id="ajout-email" type="email" placeholder="facultatif" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
         <label style="font-size:12px;color:#86868b">Téléphone</label>
@@ -191,8 +196,12 @@
           <div style="flex:1"><label style="font-size:12px;color:#86868b">Enfants</label>
             <input id="ajout-enfants" type="number" min="0" value="0" style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>
         </div>
+        <div id="ajout-capacite" style="font-size:12px;color:#86868b;margin-top:6px"></div>
         <label style="font-size:12px;color:#86868b;display:block;margin-top:12px">Prix par nuit</label>
-        <input id="ajout-prix" type="number" step="0.01" min="0.01" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #d2d2d7;border-radius:8px">
+        <input id="ajout-prix" type="number" step="0.01" min="0.01" style="width:100%;padding:9px;margin:4px 0 8px;border:1px solid #d2d2d7;border-radius:8px">
+        <!-- Total du sejour : ce que l'hote annonce au voyageur. Le calcul est
+             refait cote serveur — celui-ci n'est qu'un affichage. -->
+        <div id="ajout-total" style="background:#f5f5f7;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:14px"></div>
         <label style="font-size:12px;color:#86868b">Note interne</label>
         <input id="ajout-ref" type="text" placeholder="facultatif — visible de vous seul" style="width:100%;padding:9px;margin:4px 0;border:1px solid #d2d2d7;border-radius:8px">
       </div>
@@ -616,6 +625,12 @@
       // `bien.base` : c'est le nom du champ dans mapBien (`base_price` cote API).
       const prix = (st && st[premier] && st[premier].rate) || bien.base || ''
       document.getElementById('ajout-prix').value = prix
+      // ⚠ `capacity` = nombre de PERSONNES (a ne pas confondre avec
+      // inventory_units, qui compte les logements). C'est bien elle qui plafonne
+      // le nombre de voyageurs.
+      document.getElementById('ajout-capacite').textContent =
+        'Capacité du bien : ' + bien.capacity + ' personne' + (bien.capacity > 1 ? 's' : '')
+      document.getElementById('ajout-prenom').value = ''
       document.getElementById('ajout-nom').value = ''
       document.getElementById('ajout-email').value = ''
       document.getElementById('ajout-tel').value = ''
@@ -626,22 +641,57 @@
       // impossible sans recharger la page.
       const btnV = document.getElementById('ajout-valider')
       btnV.disabled = false; btnV.textContent = 'Créer la réservation'
+      rafraichirTotal()
       document.getElementById('overlay-ajout').classList.add('visible')
-      document.getElementById('ajout-nom').focus()
+      document.getElementById('ajout-prenom').focus()
     }
 
     function fermerFormulaireAjout(){ document.getElementById('overlay-ajout').classList.remove('visible') }
+
+    // Total du sejour, recalcule a chaque frappe. C'est le montant que l'hote
+    // annonce au voyageur : le lui cacher jusqu'a la validation l'obligerait a
+    // le calculer de tete.
+    function rafraichirTotal(){
+      const b = bornesSelection(); if(!b) return
+      const prix = parseFloat(document.getElementById('ajout-prix').value)
+      const zone = document.getElementById('ajout-total')
+      if(!(prix>0)){ zone.textContent = '—'; return }
+      const total = prix * b.nuits
+      zone.innerHTML = '<strong>Total du séjour : ' + total.toFixed(2) + ' €</strong>'
+        + ' <span style="color:#86868b">(' + prix.toFixed(2) + ' € × ' + b.nuits + ' nuit' + (b.nuits>1?'s':'') + ')</span>'
+    }
+
+    // Voyageurs plafonnes a la capacite du bien, dit AVANT la validation.
+    function depassementCapacite(){
+      const bien = BIENS.find(x=>x.id===sel.bienId); if(!bien) return null
+      const a = parseInt(document.getElementById('ajout-adultes').value, 10) || 0
+      const e = parseInt(document.getElementById('ajout-enfants').value, 10) || 0
+      if(a < 1) return 'Il faut au moins un adulte.'
+      const total = a + e
+      return total > bien.capacity
+        ? 'Ce bien accueille ' + bien.capacity + ' personne' + (bien.capacity>1?'s':'') + ' au maximum — vous en avez saisi ' + total + '.'
+        : null
+    }
+
+    ;['ajout-prix','ajout-adultes','ajout-enfants'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('input', ()=>{
+        rafraichirTotal()
+        const pb = depassementCapacite()
+        document.getElementById('ajout-etat').textContent = pb || ''
+      })
+    })
 
     async function validerAjout(){
       const b = bornesSelection()
       const bien = BIENS.find(x=>x.id===sel.bienId)
       if(!b||!bien) return
-      const nomComplet = document.getElementById('ajout-nom').value.trim()
-      if(!nomComplet){ document.getElementById('ajout-etat').textContent='Le nom du voyageur est obligatoire.'; return }
+      const prenom = document.getElementById('ajout-prenom').value.trim()
+      const nom = document.getElementById('ajout-nom').value.trim()
+      if(!prenom || !nom){ document.getElementById('ajout-etat').textContent='Prénom et nom sont obligatoires.'; return }
       const prix = parseFloat(document.getElementById('ajout-prix').value)
       if(!(prix>0)){ document.getElementById('ajout-etat').textContent='Prix par nuit invalide.'; return }
-
-      const morceaux = nomComplet.split(' ')
+      const pbCap = depassementCapacite()
+      if(pbCap){ document.getElementById('ajout-etat').textContent = pbCap; return }
       const btn = document.getElementById('ajout-valider')
       btn.disabled = true; btn.textContent = 'Envoi…'
       // ⚠ CONFIRMATION EN DEUX TEMPS (spec §5). Premier temps : le canal a
@@ -655,8 +705,8 @@
           arrival: b.arrival, departure: b.departure,
           prixParNuit: prix,
           customer: {
-            name: morceaux[0] || nomComplet,
-            surname: morceaux.slice(1).join(' '),
+            name: prenom,
+            surname: nom,
             mail: document.getElementById('ajout-email').value.trim() || null,
             phone: document.getElementById('ajout-tel').value.trim() || null
           },

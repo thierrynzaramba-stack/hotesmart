@@ -179,6 +179,13 @@ Pas de paiement dans ce chantier (le paiement appartient au moteur, phase 3).
 
 ## 7. Hors périmètre
 
+- **Email de confirmation au voyageur** — décision de Thierry, 7 septembre 2026 :
+  reporté au **chantier suivant (phase 3, avec le moteur de réservation direct)**.
+  Une réservation saisie manuellement n'envoie donc **aucun message au voyageur** :
+  l'hôte l'a eu au téléphone ou au comptoir, c'est lui qui confirme. Le jour où le
+  moteur prendra des réservations sans intervention humaine, la confirmation
+  deviendra indispensable — elle sera construite là, pour les deux chemins à la
+  fois, avec le paiement (voir ci-dessous : les deux relèvent du même chantier).
 - Paiement voyageur (Stripe) — phase 3.
 - Page publique / moteur de réservation — phase 3 (réutilise §3 et §4 tels quels).
 - Chemin d'écriture Beds24 — jamais (les hôtes Beds24 ont Beds24).
