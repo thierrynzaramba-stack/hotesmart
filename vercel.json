@@ -17,6 +17,10 @@
   ],
   "rewrites": [
     {
+      "source": "/book/:token",
+      "destination": "/pages/book"
+    },
+    {
       "source": "/avis",
       "destination": "/pages/avis"
     },

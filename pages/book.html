@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Réservation</title>
+<!--
+  pages/book.html — page publique du moteur de reservation (etape 1).
+  DOC : docs/kb/moteur-reservation.md — Spec : docs/specs/spec-moteur-reservation.md §4
+
+  MARQUE BLANCHE (amendement §4 bis, grave) : AUCUNE marque HoteSmart nulle part.
+  Ni logo, ni nom, ni lien, ni mention. Le titre de l'onglet devient le nom du
+  bien des que l'API repond. C'est la marque de l'HOTE que le voyageur doit voir.
+
+  AUTONOME : aucun CSS ni JS externe, pas de /public/style.css. Deux raisons —
+  la marque blanche ne doit dependre d'aucune feuille de style HoteSmart, et la
+  page reste embarquable en iframe (v2) sans trainer le design system derriere.
+
+  LECTURE SEULE : rien n'est envoye, rien n'est stocke. Le formulaire est saisi
+  et valide dans le navigateur, et s'arrete la. Le paiement est l'etape 2.
+-->
+<style>
+  :root {
+    --fond: #fbfbfa; --carte: #ffffff; --trait: #e6e4e0;
+    --texte: #1f1e1c; --texte2: #6f6b65; --accent: #2f6f5e; --accent-doux: #e8f0ed;
+    --refuse: #b4342f; --rayon: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fond); color: var(--texte);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .enveloppe { max-width: 760px; margin: 0 auto; padding: 20px 16px 64px; }
+
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+  h1 { font-size: 21px; font-weight: 600; margin: 0 0 3px; letter-spacing: -0.01em; }
+  .lieu { font-size: 13px; color: var(--texte2); }
+
+  .langues { display: flex; gap: 2px; flex-shrink: 0; border: 1px solid var(--trait); border-radius: 8px; padding: 2px; background: var(--carte); }
+  .langues button {
+    border: 0; background: none; font: inherit; font-size: 12px; font-weight: 500;
+    color: var(--texte2); padding: 5px 9px; border-radius: 6px; cursor: pointer;
+  }
+  .langues button[aria-pressed="true"] { background: var(--accent-doux); color: var(--accent); }
+
+  .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: var(--rayon); padding: 18px; margin-bottom: 16px; }
+  .carte h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--texte2); margin: 0 0 14px; }
+
+  /* ─── Calendrier ─────────────────────────────────────────────────────── */
+  .mois + .mois { margin-top: 22px; }
+  .mois-titre { font-size: 14px; font-weight: 600; margin-bottom: 8px; text-transform: capitalize; }
+  .grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .entete-jour { font-size: 10px; color: var(--texte2); text-align: center; padding-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .jour {
+    aspect-ratio: 1 / 1; border: 1px solid transparent; border-radius: 7px; background: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font: inherit; padding: 0; cursor: pointer; color: var(--texte); min-height: 42px;
+  }
+  .jour .n { font-size: 13px; line-height: 1.1; }
+  .jour .p { font-size: 9.5px; color: var(--texte2); line-height: 1.2; margin-top: 1px; }
+  .jour.vide { visibility: hidden; }
+  .jour.libre:hover { background: var(--accent-doux); }
+  .jour.pris { color: #c3bfb8; cursor: not-allowed; text-decoration: line-through; text-decoration-thickness: 1px; }
+  .jour.pris .p { visibility: hidden; }
+  .jour.bord { background: var(--accent); color: #fff; }
+  .jour.bord .p { color: rgba(255,255,255,.82); }
+  .jour.entre { background: var(--accent-doux); border-radius: 0; }
+  .jour.entre .p { color: var(--accent); }
+
+  /* ─── Formulaire ─────────────────────────────────────────────────────── */
+  .champ { margin-bottom: 13px; }
+  .champ label { display: block; font-size: 12px; color: var(--texte2); margin-bottom: 5px; }
+  .champ input, .champ select {
+    width: 100%; font: inherit; font-size: 15px; padding: 9px 11px;
+    border: 1px solid var(--trait); border-radius: 8px; background: var(--carte); color: var(--texte);
+  }
+  .champ input:focus, .champ select:focus { outline: 2px solid var(--accent-doux); border-color: var(--accent); }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+
+  .ligne { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 5px 0; }
+  .ligne .lib { color: var(--texte2); }
+  .total { border-top: 1px solid var(--trait); margin-top: 9px; padding-top: 11px; font-weight: 600; font-size: 17px; }
+
+  .bouton {
+    width: 100%; font: inherit; font-size: 15px; font-weight: 500; padding: 12px;
+    border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer;
+  }
+  .bouton[disabled] { background: #d6d3ce; color: #8b867f; cursor: not-allowed; }
+
+  .note { font-size: 12px; color: var(--texte2); margin-top: 10px; text-align: center; }
+  .refus { font-size: 13px; color: var(--refuse); margin-top: 10px; }
+  .etat { padding: 40px 0; text-align: center; color: var(--texte2); font-size: 14px; }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 420px) {
+    .enveloppe { padding: 16px 12px 48px; }
+    .duo { grid-template-columns: 1fr; }
+    .jour .p { font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="enveloppe">
+  <div class="etat" id="etat">…</div>
+
+  <div id="contenu" hidden>
+    <header>
+      <div>
+        <h1 id="nom-bien"></h1>
+        <div class="lieu" id="lieu-bien"></div>
+      </div>
+      <div class="langues" role="group" id="langues">
+        <button type="button" data-lang="fr" lang="fr">FR</button>
+        <button type="button" data-lang="es" lang="es">ES</button>
+        <button type="button" data-lang="en" lang="en">EN</button>
+      </div>
+    </header>
+
+    <div class="carte" id="bloc-ferme" hidden>
+      <div id="texte-ferme" data-t="ferme" style="color:var(--texte2);font-size:14px"></div>
+    </div>
+
+    <div id="bloc-vente" hidden>
+      <div class="carte">
+        <h2 data-t="titre_dates"></h2>
+        <div class="champ" style="max-width:220px">
+          <label for="personnes" data-t="voyageurs"></label>
+          <select id="personnes"></select>
+        </div>
+        <div id="calendrier"></div>
+        <div class="note" data-t="aide_selection"></div>
+      </div>
+
+      <div class="carte" id="bloc-devis" hidden>
+        <h2 data-t="titre_sejour"></h2>
+        <div id="recap"></div>
+        <div class="refus" id="refus" hidden></div>
+      </div>
+
+      <div class="carte" id="bloc-form" hidden>
+        <h2 data-t="titre_coordonnees"></h2>
+        <div class="duo">
+          <div class="champ"><label for="prenom" data-t="prenom"></label><input id="prenom" autocomplete="given-name"></div>
+          <div class="champ"><label for="nom" data-t="nom"></label><input id="nom" autocomplete="family-name"></div>
+        </div>
+        <div class="champ"><label for="email" data-t="email"></label><input id="email" type="email" autocomplete="email" inputmode="email"></div>
+        <div class="champ"><label for="tel" data-t="telephone"></label><input id="tel" type="tel" autocomplete="tel" inputmode="tel"></div>
+        <button class="bouton" id="valider" disabled></button>
+        <div class="note" data-t="note_etape"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ─── Traductions ────────────────────────────────────────────────────────────
+// Les trois langues sont ICI, en un seul objet. Le serveur ne rend que des CODES
+// (`nuit_indisponible`, `sejour_trop_court`…) : il n'a aucune phrase a traduire,
+// et une langue s'ajoute sans toucher a l'API.
+var T = {
+  fr: {
+    _nom: 'Français', _loc: 'fr-FR',
+    chargement: 'Chargement…', introuvable: 'Ce lien de réservation n’est plus valide.',
+    panne: 'Le calendrier est momentanément indisponible. Merci de réessayer dans un instant.',
+    ferme: 'Ce logement n’est pas ouvert à la réservation en ligne pour le moment.',
+    titre_dates: 'Vos dates', titre_sejour: 'Votre séjour', titre_coordonnees: 'Vos coordonnées',
+    voyageurs: 'Voyageurs', voyageur_un: 'voyageur', voyageur_n: 'voyageurs',
+    aide_selection: 'Choisissez la date d’arrivée, puis la date de départ.',
+    prenom: 'Prénom', nom: 'Nom', email: 'E-mail', telephone: 'Téléphone',
+    arrivee: 'Arrivée', depart: 'Départ', nuits_un: 'nuit', nuits_n: 'nuits',
+    supplement: 'Supplément voyageurs', total: 'Total',
+    valider: 'Continuer', note_etape: 'Le paiement en ligne sera disponible prochainement.',
+    r_nuit_indisponible: 'Une des nuits choisies n’est plus disponible.',
+    r_sejour_trop_court: 'Séjour minimum : {n} nuits.',
+    r_sejour_trop_long: 'Séjour maximum : {n} nuits.',
+    r_arrivee_interdite: 'Les arrivées ne sont pas possibles à cette date.',
+    r_depart_interdit: 'Les départs ne sont pas possibles à cette date.',
+    r_trop_de_voyageurs: 'Ce logement accueille {n} voyageurs au maximum.',
+    r_hors_fenetre: 'Ces dates ne sont pas encore ouvertes à la réservation.',
+    r_defaut: 'Ces dates ne peuvent pas être réservées.',
+    mois: ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'],
+    jours: ['lun','mar','mer','jeu','ven','sam','dim']
+  },
+  es: {
+    _nom: 'Español', _loc: 'es-ES',
+    chargement: 'Cargando…', introuvable: 'Este enlace de reserva ya no es válido.',
+    panne: 'El calendario no está disponible en este momento. Inténtelo de nuevo en unos instantes.',
+    ferme: 'Este alojamiento no está abierto a reservas en línea por el momento.',
+    titre_dates: 'Sus fechas', titre_sejour: 'Su estancia', titre_coordonnees: 'Sus datos',
+    voyageurs: 'Huéspedes', voyageur_un: 'huésped', voyageur_n: 'huéspedes',
+    aide_selection: 'Elija la fecha de llegada y después la de salida.',
+    prenom: 'Nombre', nom: 'Apellidos', email: 'Correo electrónico', telephone: 'Teléfono',
+    arrivee: 'Llegada', depart: 'Salida', nuits_un: 'noche', nuits_n: 'noches',
+    supplement: 'Suplemento por huésped', total: 'Total',
+    valider: 'Continuar', note_etape: 'El pago en línea estará disponible próximamente.',
+    r_nuit_indisponible: 'Una de las noches elegidas ya no está disponible.',
+    r_sejour_trop_court: 'Estancia mínima: {n} noches.',
+    r_sejour_trop_long: 'Estancia máxima: {n} noches.',
+    r_arrivee_interdite: 'No se admiten llegadas en esta fecha.',
+    r_depart_interdit: 'No se admiten salidas en esta fecha.',
+    r_trop_de_voyageurs: 'Este alojamiento admite un máximo de {n} huéspedes.',
+    r_hors_fenetre: 'Estas fechas aún no están abiertas a reservas.',
+    r_defaut: 'Estas fechas no se pueden reservar.',
+    mois: ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],
+    jours: ['lun','mar','mié','jue','vie','sáb','dom']
+  },
+  en: {
+    _nom: 'English', _loc: 'en-GB',
+    chargement: 'Loading…', introuvable: 'This booking link is no longer valid.',
+    panne: 'The calendar is temporarily unavailable. Please try again shortly.',
+    ferme: 'This property is not open for online booking at the moment.',
+    titre_dates: 'Your dates', titre_sejour: 'Your stay', titre_coordonnees: 'Your details',
+    voyageurs: 'Guests', voyageur_un: 'guest', voyageur_n: 'guests',
+    aide_selection: 'Pick your arrival date, then your departure date.',
+    prenom: 'First name', nom: 'Last name', email: 'Email', telephone: 'Phone',
+    arrivee: 'Arrival', depart: 'Departure', nuits_un: 'night', nuits_n: 'nights',
+    supplement: 'Extra guest fee', total: 'Total',
+    valider: 'Continue', note_etape: 'Online payment will be available soon.',
+    r_nuit_indisponible: 'One of the selected nights is no longer available.',
+    r_sejour_trop_court: 'Minimum stay: {n} nights.',
+    r_sejour_trop_long: 'Maximum stay: {n} nights.',
+    r_arrivee_interdite: 'Arrivals are not possible on this date.',
+    r_depart_interdit: 'Departures are not possible on this date.',
+    r_trop_de_voyageurs: 'This property accommodates up to {n} guests.',
+    r_hors_fenetre: 'These dates are not open for booking yet.',
+    r_defaut: 'These dates cannot be booked.',
+    mois: ['January','February','March','April','May','June','July','August','September','October','November','December'],
+    jours: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+  }
+};
+
+var LANGUES = ['fr', 'es', 'en'];
+var lang = 'fr', t = T.fr;
+var jeton = null, bien = null, nuits = [], parDate = {}, departMax = null;
+var limiteDepart = null;   // recalculee a chaque rendu du calendrier
+var arrivee = null, depart = null, devis = null;
+
+// ─── Utilitaires ────────────────────────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+
+// Echappement systematique : `nom` et `ville` viennent de la base et sont saisis
+// par l'hote. Les injecter en innerHTML sans echapper ferait de la fiche d'un
+// bien un vecteur d'injection sur la page publique.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// ⚠ Les dates du calendrier sont des jours civils. On les manipule en UTC, comme
+// le serveur : `new Date('2026-09-07')` est minuit UTC, et lire `getDate()`
+// dessus rendrait le 6 pour un navigateur en UTC-3.
+function jourUTC(iso) { return new Date(iso + 'T00:00:00Z'); }
+function isoDe(d) { return d.toISOString().slice(0, 10); }
+function ajouter(iso, n) { var d = jourUTC(iso); d.setUTCDate(d.getUTCDate() + n); return isoDe(d); }
+function nbNuits(a, b) { return Math.round((jourUTC(b) - jourUTC(a)) / 86400000); }
+
+function argent(v) {
+  var dev = (bien && bien.devise) || 'EUR';
+  try {
+    return new Intl.NumberFormat(t._loc, { style: 'currency', currency: dev, maximumFractionDigits: 2 }).format(v);
+  } catch (e) { return v + ' ' + dev; }
+}
+function dateLongue(iso) {
+  var d = jourUTC(iso);
+  return d.getUTCDate() + ' ' + t.mois[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+}
+
+// ─── Langue ─────────────────────────────────────────────────────────────────
+// Priorite : ?lang= explicite, puis la langue du navigateur, puis le francais.
+// Aucun stockage : la page est publique et sans etat.
+function langueInitiale() {
+  var p = new URLSearchParams(location.search).get('lang');
+  if (p && LANGUES.indexOf(p.toLowerCase()) >= 0) return p.toLowerCase();
+  var nav = (navigator.languages || [navigator.language || 'fr']);
+  for (var i = 0; i < nav.length; i++) {
+    var code = String(nav[i]).slice(0, 2).toLowerCase();
+    if (LANGUES.indexOf(code) >= 0) return code;
+  }
+  return 'fr';
+}
+
+function appliquerLangue(code) {
+  lang = code; t = T[code];
+  document.documentElement.lang = code;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (el) {
+    el.textContent = t[el.getAttribute('data-t')] || '';
+  });
+  Array.prototype.forEach.call($('langues').querySelectorAll('button'), function (b) {
+    b.setAttribute('aria-pressed', b.dataset.lang === code ? 'true' : 'false');
+  });
+  $('valider').textContent = t.valider;
+  if (bien) {
+    remplirVoyageurs();
+    rendreCalendrier();
+    rendreDevis();
+  }
+}
+
+// ─── Chargement ─────────────────────────────────────────────────────────────
+function montrerEtat(msg) { $('etat').textContent = msg; $('etat').hidden = false; $('contenu').hidden = true; }
+
+async function charger() {
+  // Le jeton est dans le chemin : /book/<jeton>. Le `?token=` reste accepte pour
+  // le diagnostic direct de l'endpoint.
+  var m = location.pathname.match(/\/book\/([A-Za-z0-9_-]{43})$/);
+  jeton = m ? m[1] : new URLSearchParams(location.search).get('token');
+  if (!jeton) return montrerEtat(t.introuvable);
+
+  var r;
+  try {
+    r = await fetch('/api/book-public?token=' + encodeURIComponent(jeton), { headers: { Accept: 'application/json' } });
+  } catch (e) { return montrerEtat(t.panne); }
+
+  if (r.status === 404) return montrerEtat(t.introuvable);
+  if (!r.ok) return montrerEtat(t.panne);
+
+  var d;
+  try { d = await r.json(); } catch (e) { return montrerEtat(t.panne); }
+
+  bien = d.bien;
+  document.title = bien.nom;                       // marque blanche : le nom de l'hote
+  $('nom-bien').textContent = bien.nom;
+  $('lieu-bien').textContent = [bien.ville, bien.pays].filter(Boolean).join(', ');
+  $('etat').hidden = true; $('contenu').hidden = false;
+
+  if (!d.ouvert) { $('bloc-ferme').hidden = false; return; }   // texte pose par appliquerLangue (data-t)
+
+  nuits = d.nuits || [];
+  // Lendemain de la derniere nuit publiee : un depart valide, sur lequel on ne
+  // dort pas. Sans lui, la derniere nuit de la fenetre serait inreservable.
+  departMax = d.depart_max || null;
+  parDate = {};
+  nuits.forEach(function (n) { parDate[n.date] = n; });
+  $('bloc-vente').hidden = false;
+  remplirVoyageurs();
+  rendreCalendrier();
+}
+
+function remplirVoyageurs() {
+  var sel = $('personnes'), garde = Number(sel.value) || 2;
+  var max = Math.max(1, bien.capacite);
+  sel.innerHTML = '';
+  for (var i = 1; i <= max; i++) {
+    var o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = i + ' ' + (i === 1 ? t.voyageur_un : t.voyageur_n);
+    sel.appendChild(o);
+  }
+  sel.value = String(Math.min(garde, max));
+}
+
+// ─── Calendrier ─────────────────────────────────────────────────────────────
+// Ne sont rendus que les mois qui portent au moins une nuit de la fenetre.
+function rendreCalendrier() {
+  limiteDepart = calculerLimiteDepart();
+  var hote = $('calendrier');
+  hote.innerHTML = '';
+  if (!nuits.length) return;
+
+  var mois = {};
+  nuits.forEach(function (n) { (mois[n.date.slice(0, 7)] = mois[n.date.slice(0, 7)] || []).push(n); });
+  // `departMax` peut tomber dans un mois qui ne porte aucune nuit publiee (la
+  // fenetre se termine le dernier jour d'un mois). Sans lui, sa case n'est pas
+  // rendue du tout et la derniere nuit reste inreservable. On n'ouvre ce mois
+  // que lorsqu'il est reellement selectionnable — sinon la page afficherait un
+  // mois vide en permanence.
+  if (departMax && limiteDepart && limiteDepart >= departMax && !mois[departMax.slice(0, 7)]) {
+    mois[departMax.slice(0, 7)] = [];
+  }
+
+  Object.keys(mois).sort().forEach(function (cle) {
+    var premier = jourUTC(cle + '-01');
+    var bloc = document.createElement('div');
+    bloc.className = 'mois';
+
+    var titre = document.createElement('div');
+    titre.className = 'mois-titre';
+    titre.textContent = t.mois[premier.getUTCMonth()] + ' ' + premier.getUTCFullYear();
+    bloc.appendChild(titre);
+
+    var grille = document.createElement('div');
+    grille.className = 'grille';
+    t.jours.forEach(function (j) {
+      var e = document.createElement('div'); e.className = 'entete-jour'; e.textContent = j; grille.appendChild(e);
+    });
+
+    // Semaine commencant le lundi : getUTCDay() rend 0 pour dimanche.
+    var decalage = (premier.getUTCDay() + 6) % 7;
+    for (var i = 0; i < decalage; i++) {
+      var v = document.createElement('div'); v.className = 'jour vide'; grille.appendChild(v);
+    }
+
+    var joursDuMois = jourUTC(cle + '-01');
+    joursDuMois.setUTCMonth(joursDuMois.getUTCMonth() + 1);
+    joursDuMois.setUTCDate(0);
+    for (var d = 1; d <= joursDuMois.getUTCDate(); d++) {
+      var iso = cle + '-' + String(d).padStart(2, '0');
+      grille.appendChild(caseJour(iso, d));
+    }
+    bloc.appendChild(grille);
+    hote.appendChild(bloc);
+  });
+}
+
+function caseJour(iso, numero) {
+  var n = parDate[iso];
+  var el = document.createElement('button');
+  el.type = 'button';
+
+  // ─── Choix du DEPART ──────────────────────────────────────────────────────
+  // Le jour du depart se selectionne meme s'il n'est pas une nuit vendable : on
+  // n'y dort pas. Refuser cela interdirait de partir le lendemain d'une nuit
+  // vendue a quelqu'un d'autre — un depart parfaitement normal.
+  //
+  // Mais SEULEMENT jusqu'a `limiteDepart` : la premiere nuit fermee apres
+  // l'arrivee, celle-la incluse. Au-dela, aucun sejour continu n'existe.
+  var choixDepart = !!(arrivee && !depart && limiteDepart);
+  var departPossible = choixDepart && iso > arrivee && iso <= limiteDepart;
+
+  // Hors fenetre publiee. UN SEUL cas legitime : `departMax`, le lendemain de la
+  // derniere nuit publiee — on n'y dort pas, c'est un depart valide.
+  // ⚠ Ce chemin sortait AVANT le calcul du depart (constat de review) : la case
+  // de `departMax` restait morte, et la derniere nuit de la fenetre etait donc
+  // inreservable — precisement le defaut que `depart_max` disait corriger.
+  if (!n) {
+    if (!departPossible) { el.className = 'jour vide'; el.disabled = true; return el; }
+    el.className = 'jour libre';
+    el.innerHTML = '<span class="n">' + numero + '</span><span class="p"></span>';
+    el.setAttribute('aria-label', dateLongue(iso));
+    el.onclick = function () { choisir(iso); };
+    return el;
+  }
+
+  var classes = ['jour'];
+  if (!n.disponible) { classes.push('pris'); el.disabled = true; }
+  else classes.push('libre');
+
+  // ⚠ Pendant le choix du depart, on DESACTIVE aussi — pas seulement on
+  // reactive (constat de review). Les nuits libres situees APRES la premiere
+  // nuit fermee n'avaient jamais ete desactivees : le voyageur les cliquait, et
+  // le serveur repondait « une des nuits n'est plus disponible » sans aucun
+  // repere visuel de laquelle. On ne laisse cliquable que ce qui peut reellement
+  // former un sejour continu — et les dates <= arrivee, qui recommencent la
+  // selection.
+  if (choixDepart && iso > arrivee) el.disabled = !departPossible;
+  else if (n.disponible) el.disabled = false;
+
+  if (iso === arrivee || iso === depart) classes.push('bord');
+  else if (arrivee && depart && iso > arrivee && iso < depart) classes.push('entre');
+
+  el.className = classes.join(' ');
+  el.innerHTML = '<span class="n">' + numero + '</span>' +
+    (n.disponible && n.prix != null ? '<span class="p">' + esc(Math.round(n.prix)) + '</span>' : '<span class="p"></span>');
+  el.setAttribute('aria-label', dateLongue(iso));
+  el.onclick = function () { choisir(iso); };
+  return el;
+}
+
+// Derniere date selectionnable comme depart, pour l'arrivee courante.
+// On avance tant que la nuit est vendable : on peut toujours repartir le matin
+// de la premiere nuit fermee, puisqu'on n'y dort pas.
+// Calculee UNE FOIS par rendu (`limiteDepart`), pas a chaque case : elle ne
+// depend que de l'arrivee, et l'appeler pour 365 cases la rendait quadratique.
+function calculerLimiteDepart() {
+  if (!arrivee) return null;
+  var d = arrivee;
+  while (true) {
+    var n = parDate[d];
+    if (!n || !n.disponible) break;              // on repart ce matin-la
+    var suivant = ajouter(d, 1);
+    if (departMax && suivant > departMax) { d = departMax; break; }
+    d = suivant;
+    if (!parDate[d]) break;                      // fin de fenetre : depart valide
+  }
+  return d;
+}
+
+// Deux clics : arrivee, puis depart. Un clic anterieur ou egal a l'arrivee
+// recommence la selection — c'est ce que fait tout moteur de reservation, et
+// ca evite d'obliger le voyageur a chercher un bouton « effacer ».
+function choisir(iso) {
+  if (!arrivee || depart || iso <= arrivee) { arrivee = iso; depart = null; devis = null; }
+  else { depart = iso; }
+  rendreCalendrier();
+  if (arrivee && depart) demanderDevis(); else rendreDevis();
+}
+
+// ─── Devis ──────────────────────────────────────────────────────────────────
+// LE TOTAL VIENT DU SERVEUR. La page ne le calcule jamais : c'est le meme
+// chemin que celui qui verrouillera le montant a encaisser a l'etape 2, et un
+// montant affiche ici qui differerait de celui-la serait un mensonge au voyageur.
+var demandeEnCours = 0;
+async function demanderDevis() {
+  var mien = ++demandeEnCours;
+  var q = new URLSearchParams({
+    token: jeton, action: 'devis',
+    arrivee: arrivee, depart: depart, personnes: $('personnes').value
+  });
+  // ⚠ Une PANNE n'est pas un refus. Trouve en review : un 500 rendait
+  // « Ces dates ne peuvent pas etre reservees », et le voyageur concluait que
+  // ses dates etaient prises alors que le serveur etait en panne. Les deux cas
+  // sont desormais distingues.
+  var d = null, panne = false;
+  try {
+    var r = await fetch('/api/book-public?' + q.toString(), { headers: { Accept: 'application/json' } });
+    if (r.ok) d = await r.json(); else panne = true;
+  } catch (e) { panne = true; }
+  // Une reponse arrivee apres un nouveau choix de dates ne doit pas ecraser
+  // l'affichage courant.
+  if (mien !== demandeEnCours) return;
+  devis = panne ? { ok: false, raison: '_panne' } : d;
+  rendreDevis();
+}
+
+function messageRefus(d) {
+  if (!d) return t.r_defaut;
+  if (d.raison === '_panne') return t.panne;   // le serveur, pas les dates
+  var cle = 'r_' + d.raison;
+  var msg = t[cle] || t.r_defaut;
+  var n = d.minimum || d.maximum || (bien && bien.capacite);
+  return msg.replace('{n}', n);
+}
+
+function rendreDevis() {
+  var bloc = $('bloc-devis'), form = $('bloc-form'), refus = $('refus');
+  if (!arrivee || !depart) { bloc.hidden = true; form.hidden = true; return; }
+  bloc.hidden = false;
+
+  if (!devis || !devis.ok) {
+    $('recap').innerHTML = '';
+    refus.hidden = false; refus.textContent = messageRefus(devis);
+    form.hidden = true; majBouton();
+    return;
+  }
+  refus.hidden = true;
+
+  var n = devis.nuits;
+  var sup = devis.detail.length ? devis.detail[0].supplement : 0;
+  var nuitees = devis.detail.reduce(function (s, l) { return s + l.prix; }, 0);
+  var h = '';
+  h += ligne(t.arrivee, dateLongue(arrivee) + (bien.heure_arrivee ? ' · ' + esc(bien.heure_arrivee) : ''));
+  h += ligne(t.depart, dateLongue(depart) + (bien.heure_depart ? ' · ' + esc(bien.heure_depart) : ''));
+  h += ligne(n + ' ' + (n === 1 ? t.nuits_un : t.nuits_n), argent(nuitees));
+  if (sup > 0) h += ligne(t.supplement, argent(sup * n));
+  h += '<div class="ligne total"><span>' + esc(t.total) + '</span><span>' + esc(argent(devis.total)) + '</span></div>';
+  $('recap').innerHTML = h;
+
+  form.hidden = false;
+  majBouton();
+}
+
+function ligne(lib, val) {
+  return '<div class="ligne"><span class="lib">' + esc(lib) + '</span><span>' + esc(val) + '</span></div>';
+}
+
+// ─── Formulaire ─────────────────────────────────────────────────────────────
+// ETAPE 1 : saisi, valide, et rien de plus. Aucune donnee ne quitte le
+// navigateur — spec §4, « aucune donnee personnelle stockee a cette etape ».
+function formValide() {
+  var email = $('email').value.trim();
+  return !!($('prenom').value.trim() && $('nom').value.trim() &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && $('tel').value.trim().length >= 6);
+}
+function majBouton() {
+  $('valider').disabled = !(devis && devis.ok && formValide());
+}
+
+// ─── Demarrage ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function () {
+  appliquerLangue(langueInitiale());
+  montrerEtat(t.chargement);
+
+  Array.prototype.forEach.call($('langues').querySelectorAll('button'), function (b) {
+    b.onclick = function () { appliquerLangue(b.dataset.lang); };
+  });
+  $('personnes').onchange = function () {
+    if (arrivee && depart) demanderDevis();
+  };
+  ['prenom', 'nom', 'email', 'tel'].forEach(function (id) { $(id).oninput = majBouton; });
+  $('valider').onclick = function () { /* etape 2 : paiement */ };
+
+  charger();
+});
+</script>
+</body>
+</html>

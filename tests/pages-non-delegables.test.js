@@ -124,7 +124,11 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'pages/login.html', 'pages/forgot-password.html', 'pages/reset-password.html',
     'pages/airbnb-retour.html', 'pages/guide.html', 'pages/invitation.html',
     'pages/diagnostic.html', 'pages/channels-test.html',
-    'apps/menages/public.html'   // PWA prestataire : jeton, pas de session
+    'apps/menages/public.html',  // PWA prestataire : jeton, pas de session
+    'pages/book.html'            // moteur de reservation : page VOYAGEUR,
+                                 // jeton dans l'URL, aucune session, aucune
+                                 // donnee de compte. Marque blanche : elle ne
+                                 // doit meme pas savoir que HoteSmart existe.
   ]
 
   const classees = new Set([...NON_DELEGABLES, ...DELEGABLES, ...HORS_PERIMETRE])
