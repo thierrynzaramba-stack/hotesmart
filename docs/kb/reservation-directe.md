@@ -200,8 +200,52 @@ Sur un bien ouvert, sans conséquence. Sur un bien fermé, une saisie directe
 passerait outre une décision de l'hôte, et Channex l'accepterait en faisant
 descendre le stock à −1.
 
-**Choix produit à trancher** : une réservation directe doit-elle respecter le
-stop-sell (c'est une fermeture commerciale, qui ne concerne peut-être que les OTA)
-ou l'ignorer (l'hôte qui saisit sait ce qu'il fait) ? Aucune décision n'est prise
-à ce jour ; le comportement actuel est « ignore », par construction et non par
-choix.
+**Décision prise le 7 septembre 2026** (spec §6 bis), et elle diffère selon le
+chemin :
+
+| chemin | règle |
+|---|---|
+| **saisie manuelle** (hôte) | **prévenir et confirmer** — « dates fermées à la vente, créer quand même ? » |
+| **moteur public** (voyageur, phase 3) | **respect strict** — refus |
+
+L'hôte qui saisit sait ce qu'il fait : il a le voyageur au téléphone, et la
+fermeture ne vise souvent que les OTA. L'empêcher serait le corriger à tort ; ne
+rien lui dire serait le laisser passer outre une décision qu'il a peut-être
+oubliée. Un voyageur sur le moteur, lui, ne peut rien confirmer : des dates
+fermées ne doivent pas être réservables.
+
+⚠ **Non implémenté à ce jour.** Le comportement actuel reste « ignore », par
+construction. La vérification demande un appel supplémentaire au provider
+(`GET /restrictions`), à faire au moment de la confirmation — jamais à chaque
+frappe du formulaire.
+
+## 10. Clôture de la phase 2 — 7 septembre 2026
+
+Les quatre étapes de `docs/specs/spec-reservation-manuelle.md` sont closes.
+
+| étape | livré |
+|---|---|
+| 1 | primitive d'écriture CRS Channex — `createBooking` / `updateBooking` / `cancelBooking`, `ota_name: "Offline"`, validée 6/6 sur staging |
+| 2 | verrou `write_locks` + `inventory_units`, sonde au cycle, alarme récurrente, acquittement manuel |
+| 3 | fiche de réservation et formulaire de saisie **dans le calendrier existant** (desktop d'abord) |
+| 4 | **test réel sur Colomiers** — création, fiche, annulation depuis l'interface |
+
+**L'étape 4 tient au test réel, pas à une suite de tests.** Le pipeline complet a
+été traversé une fois de bout en bout par l'hôte lui-même : verrou → capacité →
+CRS → Channex → retour **par le feed** → affichage au calendrier. Aucune écriture
+directe du snapshot, à aucun moment.
+
+Photo à la clôture : 4/4 biens actifs, 1436 lignes dans `bookings_snapshot`,
+0 verrou résiduel, 0 alarme ouverte, Colomiers 12-15 novembre remis à stock 0 avec
+`stop_sell = true` vérifié par relecture.
+
+### Ce que la phase 2 ne fait PAS, et l'assume
+
+- **Aucun message au voyageur** (spec §7) : l'hôte l'a eu au téléphone, c'est lui
+  qui confirme. La confirmation sera construite en phase 3, pour les deux chemins
+  à la fois, avec le paiement.
+- **Le stop-sell n'est pas encore respecté** (§9) : les deux règles sont gravées,
+  l'implémentation vient avec l'audit des chemins d'inventaire.
+- **Jamais exercé sur un bien ouvert à la vente** : le seul test réel a eu lieu
+  sur un bien par ailleurs fermé. La propagation de la fermeture de disponibilité
+  vers les OTA reste à constater au premier usage réel.

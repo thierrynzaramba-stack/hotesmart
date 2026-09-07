@@ -165,7 +165,23 @@ Aucune écriture directe du snapshot par le formulaire, jamais.
 
 Pas de paiement dans ce chantier (le paiement appartient au moteur, phase 3).
 
-## 6. Étape 4 — validation
+## 6. Étape 4 — validation — ✅ CLOSE le 7 septembre 2026
+
+**Le test réel sur Colomiers vaut validation de la phase 2 entière.** Création,
+consultation de la fiche et annulation, faites **depuis l'interface** par Thierry,
+pipeline complet traversé : verrou → capacité → CRS → Channex → retour par le
+feed → affichage au calendrier. Aucune écriture directe du snapshot.
+
+Conditions du test : quatre nuits ouvertes en stock sur un bien par ailleurs fermé
+à la vente, `stop_sell` réaffirmé, aucune réservation OTA entrée pendant la
+fenêtre (vérifié sur les 19 réservations du bien), bien remis à son état d'origine
+après coup.
+
+Ce qui reste non exercé, et doit l'être au premier usage réel : une réservation
+directe **sur un bien ouvert à la vente**, où la fermeture de disponibilité se
+propage vraiment aux OTA.
+
+### Ce qui était prévu (pour mémoire)
 
 - Staging : parcours complet depuis le formulaire (création, modification,
   annulation), feed vérifié, `verifier-chaine.js` sur la résa de test.
@@ -176,6 +192,30 @@ Pas de paiement dans ce chantier (le paiement appartient au moteur, phase 3).
 - Les biens de Thierry ne consommeront ce module qu'après la migration (phase 4) —
   c'est prévu et assumé.
 - Review avant chaque push. KB dans le même commit.
+
+## 6 bis. Décision du 7 septembre 2026 — verrou et stop-sell
+
+Le verrou lit le cœur, pas la disponibilité du provider : sur des dates fermées à
+la vente, il répond « autorisé ». Deux règles, **différentes selon le chemin** :
+
+| chemin | règle |
+|---|---|
+| **saisie manuelle** (hôte, phase 2) | **prévenir et confirmer** — « Ces dates sont fermées à la vente. Créer quand même ? » |
+| **moteur public** (voyageur, phase 3) | **respect strict** — refus, sans confirmation possible |
+
+**Pourquoi cette asymétrie.** Un hôte qui saisit une réservation sait ce qu'il
+fait : il a le voyageur au téléphone, et une fermeture commerciale ne le concerne
+pas forcément — elle vise souvent les seules OTA. L'empêcher serait le corriger à
+tort ; ne rien lui dire serait le laisser passer outre une décision qu'il a
+peut-être oubliée. D'où l'avertissement, qu'il lève lui-même.
+
+Un voyageur sur le moteur public, lui, ne peut rien confirmer du tout : si les
+dates sont fermées, elles ne doivent pas être réservables. Aucune confirmation ne
+saurait remplacer la décision de l'hôte.
+
+Implémentation : la vérification du stop-sell chez le provider est un **appel
+supplémentaire** (`GET /restrictions`), à ne faire qu'au moment de la confirmation
+— pas à chaque frappe du formulaire.
 
 ## 7. Hors périmètre
 

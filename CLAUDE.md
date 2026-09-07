@@ -114,6 +114,20 @@ l'API Beds24 et viendront avec leur migration Channex (doc officielle).
 production. Détail et dettes : docs/kb/profils-et-droits.md §12.
 L'étape 6 (fiche prestataire) est fusionnée dans le chantier prestataires.
 
+**Chantier HISTORIQUE DES RÉSERVATIONS CLOS** : le cœur porte le payload
+provider intégral (`bookings_snapshot.raw` + empreinte), backfill one-shot
+214 → 1436 lignes, 11 ménages fantômes réconciliés, rattachement des avis
+5/28 → 24/28. Détail : docs/kb/bookings-snapshot.md §4 bis à §4 quater.
+
+**Chantier RÉSERVATION MANUELLE (phase 2) CLOS** (étapes 1-4) : primitive
+d'écriture CRS Channex (`ota_name: "Offline"`), verrou anti-surréservation
+(`write_locks` + `inventory_units`) et alarme récurrente qui ne s'éteint que par
+acquittement manuel, fiche de réservation et formulaire de saisie dans le
+calendrier. **Étape 4 validée par le test réel sur Colomiers le 7 septembre
+2026** : création, fiche et annulation depuis l'interface, pipeline complet
+traversé. Détail, incident stop_sell et règles gravées :
+docs/kb/reservation-directe.md.
+
 Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcours ;
 (b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
 
@@ -124,7 +138,14 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
-Prochain chantier : prestataires (fiche + convergence des deux populations +
+Prochain chantier (court, avant la phase 3) : **audit stop_sell des chemins
+d'inventaire** — `lib/channel-availability.js`, `lib/rate-sync.js`, ligne
+« Disponibilité » du calendrier — car écrire la disponibilité seule LÈVE le
+stop-sell chez Channex (constaté en production, docs/kb/reservation-directe.md
+§8) ; **plus** le fix des 6 tests à dates figées de
+tests/cleaning-sync-menages-entite.test.js.
+
+Ensuite : prestataires (fiche + convergence des deux populations +
 les 5 dettes du §12). La fiche prestataire consommera `ota_reviews` : décision
 déjà gravée dans docs/specs/spec-prestataires-menage.md §6 — l'extrait de
 propreté est montré à la prestataire, mais l'extrait SEUL, jamais le nom du
