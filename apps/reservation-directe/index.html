@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HôteSmart — Réservation directe</title>
+<link rel="stylesheet" href="/public/style.css">
+<!--
+  apps/reservation-directe/index.html
+  DOC : docs/kb/moteur-reservation.md §12 — Spec : §3 ter (ajout 3) et §6 bis
+
+  ⚠ L'ACTIVATION DU MOTEUR, C'EST LE LIEN. Il n'existe aucun interrupteur
+  « moteur actif » : un bien sans lien actif n'a pas de page publique, c'est
+  l'etat par defaut. Un second interrupteur creerait deux verites.
+
+  Desktop d'abord (spec §3 ter). Le mobile viendra si l'usage le demande.
+-->
+<style>
+  .bien { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:22px; margin-bottom:16px; }
+  .bien-tete { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:4px; }
+  .bien-nom { font-size:15px; font-weight:500; }
+  .bien-sous { font-size:12px; color:var(--text2); }
+  .pastille { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:500; white-space:nowrap; }
+  .p-ok { background:#E1F5EE; color:#085041; }
+  .p-off { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
+  .p-err { background:#fdecea; color:#E24B4A; }
+
+  .bloquant { background:#fdecea; border:0.5px solid #E24B4A; color:#8a2622; border-radius:var(--radius);
+              padding:10px 13px; font-size:12.5px; margin:14px 0; line-height:1.5; }
+
+  .section { margin-top:18px; padding-top:16px; border-top:0.5px solid var(--border); }
+  .section h3 { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--text2); margin:0 0 12px; }
+
+  table.liens { width:100%; border-collapse:collapse; font-size:13px; }
+  table.liens th { text-align:left; font-size:11px; font-weight:500; color:var(--text2); padding:0 8px 6px 0; }
+  table.liens td { padding:7px 8px 7px 0; border-top:0.5px solid var(--border); vertical-align:middle; }
+  table.liens tr.revoque td { color:var(--text2); }
+  .url { font-family:var(--font-mono, monospace); font-size:11px; color:var(--text2); word-break:break-all; }
+  .mini { font-size:11.5px; padding:4px 9px; }
+  .coef-input { width:64px; font-size:12.5px; padding:4px 6px; border:0.5px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); }
+  .label-input { width:100%; max-width:220px; font-size:12.5px; padding:4px 6px; border:0.5px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); }
+
+  .creer { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; }
+  .creer .champ { display:flex; flex-direction:column; gap:4px; }
+  .creer label { font-size:11px; color:var(--text2); }
+
+  select.politique { font-size:13px; padding:6px 9px; border:0.5px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); }
+  .aide { font-size:11.5px; color:var(--text2); margin-top:6px; line-height:1.5; }
+  .msg { padding:8px 13px; border-radius:var(--radius); font-size:12.5px; margin-top:12px; display:none; }
+  .msg.ok { background:#E1F5EE; color:#085041; border:0.5px solid var(--green); display:block; }
+  .msg.ko { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; display:block; }
+  .etat { padding:40px 0; text-align:center; color:var(--text2); font-size:14px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">🔗 Réservation directe</div>
+        <div class="page-sub">Vos liens de réservation, bien par bien</div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="etat" id="etat">Chargement…</div>
+      <div id="biens"></div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  // ⚠ `reglages` est delegable, mais cet ecran regle la VENTE : il reste sur le
+  // compte propre tant que la delegation du moteur n'est pas tranchee.
+  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  await exigerCompteProprePage({ nomPage: 'La réservation directe' })
+
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('reservation-directe')
+
+  const $ = id => document.getElementById(id)
+  const API = '/api/booking-links'
+  const entetes = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token }
+
+  const POLITIQUES = {
+    non_remboursable: 'Non remboursable',
+    j14: 'Remboursable jusqu’à J-14',
+    j7: 'Remboursable jusqu’à J-7',
+    flexible_j2: 'Flexible — jusqu’à J-2'
+  }
+  // Ces motifs viennent de `raisonNonVendable` : ils disent POURQUOI un bien ne
+  // peut pas vendre. « Non vendable » sans motif envoie l’hôte chercher au hasard.
+  const BLOQUANTS = {
+    sans_prix_de_base: 'Ce logement n’a pas de prix de base. Renseignez-le dans sa fiche : sans lui, aucune nuit n’a de prix et rien ne peut être vendu.',
+    sans_lien_provider: 'Ce logement n’est pas relié à votre gestionnaire de canaux. Sans ce lien, le calendrier ne verrait aucune réservation et vendrait des nuits déjà prises.',
+    multi_unites_non_supporte: 'Ce logement compte plusieurs unités. La réservation directe ne les gère pas encore.',
+    bien_inconnu: 'Logement introuvable.'
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  }
+  function message(t, sorte) { const m = $('msg'); m.className = 'msg ' + (sorte || 'ok'); m.textContent = t }
+
+  function ligneLien(l) {
+    return `<tr class="${l.active ? '' : 'revoque'}">
+      <td>${l.active ? '<span class="pastille p-ok">actif</span>' : '<span class="pastille p-off">révoqué</span>'}</td>
+      <td><input class="label-input" value="${esc(l.label)}" data-champ="label" data-id="${l.id}" ${l.active ? '' : 'disabled'}></td>
+      <td><input class="coef-input" type="number" min="1" max="1000" value="${l.coefficient}" data-champ="coefficient" data-id="${l.id}" ${l.active ? '' : 'disabled'}> %</td>
+      <td class="url">${l.active ? esc(l.url) : '—'}</td>
+      <td style="white-space:nowrap">
+        ${l.active ? `<button class="btn mini" data-copier="${esc(l.url)}">Copier</button>
+        <button class="btn mini" data-voir="${esc(l.url)}">Aperçu</button>
+        <button class="btn mini" data-revoquer="${l.id}">Révoquer</button>` : ''}
+      </td></tr>`
+  }
+
+  function rendre(d) {
+    // ⚠ UN COMPTE SANS BIEN N'EST PAS UNE PAGE BLANCHE. Constat de review : la
+    // liste vide masquait `#etat` sans rien afficher, et l'hote ouvrait un ecran
+    // muet.
+    if (!d.biens.length) {
+      $('etat').hidden = false
+      $('etat').textContent = 'Aucun logement pour l’instant. Ajoutez-en un pour ouvrir la réservation directe.'
+      $('biens').innerHTML = ''
+      return
+    }
+    $('etat').hidden = true
+    $('biens').innerHTML = d.biens.map(b => {
+      const actifs = b.liens.filter(l => l.active).length
+      return `<div class="bien" data-bien="${b.id}">
+        <div class="bien-tete">
+          <div>
+            <div class="bien-nom">${esc(b.nom)}</div>
+            <div class="bien-sous">${b.prix_de_base ? esc(b.prix_de_base) + ' ' + esc(b.devise) + ' par nuit' : 'aucun prix de base'} · ${esc(b.capacite)} voyageurs</div>
+          </div>
+          <span class="pastille ${b.bloquant ? 'p-err' : (actifs ? 'p-ok' : 'p-off')}">
+            ${b.bloquant ? 'ne peut pas vendre' : (actifs ? actifs + ' lien' + (actifs > 1 ? 's' : '') + ' actif' + (actifs > 1 ? 's' : '') : 'aucun lien actif')}
+          </span>
+        </div>
+        ${b.bloquant ? `<div class="bloquant">${esc(BLOQUANTS[b.bloquant] || b.bloquant)}</div>` : ''}
+
+        <div class="section">
+          <h3>Conditions d’annulation</h3>
+          <select class="politique" data-politique="${b.id}">
+            ${Object.entries(POLITIQUES).map(([k, v]) =>
+              `<option value="${k}" ${b.politique === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+          </select>
+          <div class="aide">Affichée au voyageur <strong>avant</strong> le paiement, et reprise dans son e-mail.
+          Elle est <strong>figée sur chaque réservation</strong> au moment de la vente : la changer ici n’affecte que les suivantes.</div>
+        </div>
+
+        <div class="section">
+          <h3>Liens de réservation</h3>
+          ${b.liens.length ? `<table class="liens">
+            <tr><th></th><th>Site</th><th>Prix</th><th>Adresse à coller</th><th></th></tr>
+            ${b.liens.map(ligneLien).join('')}
+          </table>` : '<div class="aide">Aucun lien. Créez-en un pour ouvrir ce logement à la réservation directe.</div>'}
+
+          ${b.bloquant ? `<div class="aide">Réglez d’abord le point ci-dessus : un lien créé maintenant
+          afficherait « ce logement n’est pas ouvert à la réservation » à chaque visiteur.</div>` : `
+          <div class="creer">
+            <div class="champ"><label>Site</label>
+              <input class="label-input" data-neuf-label="${b.id}" placeholder="Mon site vitrine"></div>
+            <div class="champ"><label>Coefficient de prix</label>
+              <input class="coef-input" type="number" min="1" max="1000" value="100" data-neuf-coef="${b.id}"> %</div>
+            <button class="btn btn-primary mini" data-creer="${b.id}">Créer un lien</button>
+          </div>`}
+          <div class="aide">Un lien par site. Le <strong>coefficient</strong> majore ou minore le prix pour ce site seulement —
+          il ne touche jamais vos tarifs. 110 % vend 10 % plus cher, 90 % vend 10 % moins cher.</div>
+        </div>
+      </div>`
+    }).join('')
+    brancher()
+  }
+
+  function brancher() {
+    document.querySelectorAll('[data-copier]').forEach(b => b.onclick = async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copier); message('Adresse copiée.') }
+      catch (e) { message('Copie impossible — sélectionnez l’adresse à la main.', 'ko') }
+    })
+    document.querySelectorAll('[data-voir]').forEach(b => b.onclick = () =>
+      window.open(b.dataset.voir, '_blank', 'noopener'))
+    document.querySelectorAll('[data-revoquer]').forEach(b => b.onclick = async () => {
+      if (!confirm('Révoquer ce lien ?\n\nL’adresse cessera de fonctionner immédiatement, y compris si elle est collée sur votre site.')) return
+      await envoyer('PATCH', bienDe(b), { id: b.dataset.revoquer, active: false }, 'Lien révoqué.')
+    })
+    document.querySelectorAll('[data-creer]').forEach(b => b.onclick = async () => {
+      const id = b.dataset.creer
+      await envoyer('POST', id, {
+        label: document.querySelector(`[data-neuf-label="${id}"]`).value,
+        coefficient: document.querySelector(`[data-neuf-coef="${id}"]`).value
+      }, 'Lien créé.')
+    })
+    document.querySelectorAll('[data-politique]').forEach(s => s.onchange = async () =>
+      envoyer('POST', s.dataset.politique, { action: 'politique', politique: s.value }, 'Conditions enregistrées.'))
+    // ⚠ UNE MODIFICATION DE CHAMP NE RE-REND PAS LA PAGE. Constat de review :
+    // chaque `change` rechargeait tout en `innerHTML` — l'etiquette qu'on etait
+    // en train de taper sur un AUTRE bien disparaissait, et le focus sautait en
+    // pleine frappe. La valeur affichee est deja celle que l'hote a saisie : il
+    // n'y a rien a re-rendre.
+    document.querySelectorAll('[data-champ]').forEach(i => i.onchange = async () =>
+      envoyer('PATCH', bienDe(i), { id: i.dataset.id, [i.dataset.champ]: i.value }, 'Modifié.', false))
+  }
+
+  const bienDe = el => el.closest('[data-bien]').dataset.bien
+
+  const ERREURS = {
+    coefficient_invalide: 'Le coefficient doit être un pourcentage entre 1 et 1000.',
+    titulaire_uniquement: 'Seul le titulaire du compte peut modifier les liens de vente.',
+    politique_invalide: 'Cette condition d’annulation n’existe pas.',
+    lien_inconnu: 'Ce lien n’existe plus.',
+    bien_requis: 'Aucun logement désigné.'
+  }
+
+  async function envoyer(methode, bien, corps, succes, recharger = true) {
+    try {
+      const r = await fetch(`${API}?bien=${encodeURIComponent(bien)}`,
+        { method: methode, headers: entetes, body: JSON.stringify({ ...corps, bien }) })
+      const d = await r.json()
+      if (!r.ok) return message(ERREURS[d.error] || 'Enregistrement impossible.', 'ko')
+      // Un lien cree sur un bien qui ne peut pas vendre : on le dit tout de
+      // suite, plutot que de laisser l'hote coller une URL morte.
+      message(d.bloquant
+        ? succes + ' Attention : ce logement ne peut pas encore vendre — l’adresse affichera « non ouvert à la réservation ».'
+        : succes, d.bloquant ? 'ko' : 'ok')
+      if (recharger) await charger()
+    } catch (e) { message('Enregistrement impossible.', 'ko') }
+  }
+
+  async function charger() {
+    try {
+      const r = await fetch(API, { headers: entetes })
+      if (!r.ok) throw new Error('lecture impossible')
+      rendre(await r.json())
+    } catch (e) {
+      // ⚠ `rendre()` masque `#etat` : sans le rendre visible, l'echec de
+      // rechargement etait INVISIBLE — l'hote lisait « enregistre » au-dessus
+      // d'une liste perimee. Constat de review.
+      $('etat').hidden = false
+      $('etat').textContent = 'Impossible de charger vos logements. Rechargez la page.'
+    }
+  }
+
+  await charger()
+</script>
+</body>
+</html>

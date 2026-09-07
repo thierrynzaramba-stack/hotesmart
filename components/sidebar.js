@@ -306,6 +306,9 @@ function renderApps(activePage) {
       // collaborateur ne branche pas le compte qui recoit l'argent — l'entree
       // ne s'affiche donc que pour le titulaire.
       subMenu = titulaire ? `
+        <a class="nav-sub ${activePage === 'reservation-directe' ? 'connected' : ''}" href="/apps/reservation-directe">
+          <div class="sub-dot ${activePage === 'reservation-directe' ? 'green' : 'gray'}"></div>Liens
+        </a>
         <a class="nav-sub ${activePage === 'reservation-directe-paiements' ? 'connected' : ''}" href="/apps/reservation-directe/paiements">
           <div class="sub-dot ${activePage === 'reservation-directe-paiements' ? 'green' : 'gray'}"></div>Paiements
         </a>` : ''

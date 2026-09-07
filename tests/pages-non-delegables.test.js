@@ -51,6 +51,9 @@ const NON_DELEGABLES = [
   'apps/agent-ai/messages.html',    // message_templates — `reglages`
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
   'apps/menages/prestataires.html', // public_tokens — réservé au titulaire
+    'apps/reservation-directe/index.html',     // liens de réservation et
+                                    // conditions d'annulation : réglage de la
+                                    // VENTE, sur le compte propre.
   'apps/reservation-directe/paiements.html'  // clé Stripe de l'hôte —
                                     // `facturation`, non délégable : un
                                     // collaborateur ne branche pas le

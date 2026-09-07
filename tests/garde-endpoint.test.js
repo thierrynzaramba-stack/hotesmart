@@ -1017,9 +1017,11 @@ test('l app de reservation directe porte son nom grave, pas un nom de marque', (
   assert.ok(!/BookFlow/i.test(config), 'aucun nom invente ne doit reapparaitre')
 })
 
-test('le sous-menu Paiements n existe QUE pour le titulaire', () => {
+test('le sous-menu de la reservation directe n existe QUE pour le titulaire', () => {
   // La cle Stripe releve de `facturation`, non delegable : un collaborateur ne
-  // branche pas le compte qui recoit l'argent.
+  // branche pas le compte qui recoit l'argent. Les liens et les conditions
+  // d'annulation reglent la VENTE : meme traitement tant que la delegation du
+  // moteur n'est pas tranchee.
   const sidebar = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
   const debut = sidebar.indexOf("app.id === 'reservation-directe'")
@@ -1027,6 +1029,7 @@ test('le sous-menu Paiements n existe QUE pour le titulaire', () => {
   const bloc = sidebar.slice(debut, sidebar.indexOf('return `', debut))
   assert.match(bloc, /subMenu = titulaire \?/, 'le sous-menu doit etre garde par `titulaire`')
   const libelles = [...bloc.matchAll(/><\/div>([A-Za-zÀ-ÿ]+)/g)].map(m => m[1])
-  assert.deepStrictEqual(libelles, ['Paiements'])
+  assert.deepStrictEqual(libelles, ['Liens', 'Paiements'])
+  assert.match(bloc, /href="\/apps\/reservation-directe"/)
   assert.match(bloc, /href="\/apps\/reservation-directe\/paiements"/)
 })
