@@ -45,6 +45,8 @@
   .droits li { font-size:12.5px; color:var(--text2); display:flex; gap:8px; align-items:baseline; }
   .droits code { font-family:var(--font-mono, monospace); }
   .oblig { color:var(--green); font-weight:600; font-size:11px; }
+  .attention { color:#8a5a00; }
+  .regle { margin-top:10px; padding:9px 12px; background:#fff4e0; border:1px solid #f0d9ae; border-radius:6px; color:#6b4b12; font-size:12.5px; line-height:1.55; }
 
   .champ { margin-top:16px; }
   .champ label { display:block; font-size:12px; color:var(--text2); margin-bottom:6px; }
@@ -88,41 +90,54 @@
             <div class="etape">
               <div class="num">1</div>
               <div class="txt">
-                Ouvrez <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener noreferrer">les clés API de Stripe</a>
-                et vérifiez que le bandeau <strong>« Mode test »</strong> est bien actif en haut à droite.
+                Dans Stripe : <strong>Développeurs → Clés API → onglet « Clés limitées »</strong>,
+                puis <strong>« Créer une clé limitée »</strong>.
+                <br><a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener noreferrer">Ouvrir les clés API</a>
               </div>
             </div>
             <div class="etape">
               <div class="num">2</div>
               <div class="txt">
-                Cliquez sur <strong>« Créer une clé restreinte »</strong> — pas « Révéler la clé secrète ».
-                <br>Nommez-la par exemple <code>HôteSmart — réservations</code>.
-                <br>Si Stripe propose des <strong>paquets</strong> (« Paiements ponctuels »…),
-                choisissez <strong>« Personnalisé »</strong> : un paquet accorde une trentaine
-                d’autorisations, là où quatre suffisent.
+                À la question <strong>« Comment utiliserez-vous cette clé ? »</strong> :
+                <br>choisissez <strong>« Envoi de cette clé à une application tierce »</strong>.
               </div>
             </div>
             <div class="etape">
               <div class="num">3</div>
               <div class="txt">
-                Donnez-lui <strong>exactement</strong> ces droits, et rien d’autre —
-                tout le reste sur <strong>Aucun</strong> :
-                <ul class="droits">
-                  <li><span class="oblig">LECTURE</span> <code>PaymentIntents</code> <span>— vérifier que la clé fonctionne</span></li>
-                  <li><span class="oblig">ÉCRITURE</span> <code>Checkout Sessions</code> <span>— créer la page de paiement</span></li>
-                  <li><span class="oblig">ÉCRITURE</span> <code>Webhook Endpoints</code> <span>— brancher la confirmation tout seul</span></li>
-                  <li><span class="oblig">ÉCRITURE</span> <code>Refunds</code> <span>— rembourser un voyageur si la réservation échoue</span></li>
-                </ul>
-                ⚠ <strong>« Webhook Endpoints » n’est pas rangé avec les autres</strong> :
-                cherchez-le côté <strong>Développeurs / Webhooks</strong>, pas dans les
-                ressources de paiement. C’est celui qu’on rate.
+                À l’écran des modèles (« Paiements ponctuels »…) :
+                <strong>choisissez « Personnalisé »</strong>, pas un paquet.
+                <br>Un paquet accorde une trentaine d’autorisations, là où <strong>quatre</strong> suffisent.
               </div>
             </div>
             <div class="etape">
               <div class="num">4</div>
               <div class="txt">
-                Créez la clé, copiez-la, et collez-la ci-dessous.
-                <br><strong>Stripe ne vous la montrera qu’une fois</strong> — et HôteSmart ne vous la remontrera jamais non plus.
+                <strong class="attention">⚠ La grille ne démarre pas vide.</strong>
+                Stripe pré-coche certaines lignes. <strong>Parcourez-la entièrement et
+                remettez sur « Aucun » tout ce qui est déjà coché</strong>, AVANT d’accorder
+                les quatre ci-dessous.
+                <ul class="droits">
+                  <li><span class="oblig">LECTURE</span> <code>Payment Intents</code></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Charges and Refunds</code> <span>— les remboursements sont dans cette ligne</span></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Checkout Sessions</code></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Webhook Endpoints, Event Destinations</code> <span>— tout en bas de la grille</span></li>
+                </ul>
+                <div class="regle">
+                  <strong>À vérifier avant de créer la clé :</strong> exactement
+                  <strong>4 lignes</strong> ont un droit — Payment Intents en lecture,
+                  Charges and Refunds, Checkout Sessions et Webhook Endpoints en écriture.
+                  <strong>Tout le reste est sur « Aucun ».</strong>
+                </div>
+              </div>
+            </div>
+            <div class="etape">
+              <div class="num">5</div>
+              <div class="txt">
+                Vérifiez le bandeau <strong>« Mode test »</strong>, nommez la clé
+                (par exemple <code>HôteSmart — réservations</code>), créez-la, puis copiez-la.
+                <br><strong>Stripe ne vous la montrera qu’une fois</strong> — et HôteSmart
+                ne vous la remontrera jamais non plus.
               </div>
             </div>
           </div>

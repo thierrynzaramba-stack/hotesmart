@@ -326,6 +326,19 @@ webhook **avec l'ancienne clé, AVANT** d'écrire la nouvelle. L'inverse rendrai
 l'ancien impossible à supprimer, et il continuerait de livrer des événements que
 plus aucun secret ne vérifie.
 
+✅ **Stripe accorde bien `Webhook Endpoints: write` à une clé RESTREINTE.**
+Vérifié en réel le 7 septembre 2026 sur le premier compte connecté : connexion
+réussie, webhook créé automatiquement. C'était la seule inconnue technique du
+chantier — elle est levée. Le repli manuel reste utile (ce droit est **tout en
+bas** de la grille Stripe et s'oublie facilement), mais ce n'est plus le cas
+nominal.
+
+⚠ Dans la grille Stripe, le droit se nomme
+**`Webhook Endpoints, Event Destinations`**, et les remboursements sont dans
+**`Charges and Refunds`** — il n'existe pas de ligne `Refunds` seule. Le
+parcours complet et à jour vit dans l'écran `apps/reservation-directe/paiements.html`
+et dans la spec §3 bis.
+
 Si `Webhook Endpoints: write` manque, la connexion **aboutit quand même** :
 `last_error = 'droit_webhook_manquant'`, et l'écran affiche l'URL exacte et les
 événements à créer à la main. **Aucune bascule silencieuse** vers une clé

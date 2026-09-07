@@ -168,24 +168,36 @@ précisément celui que Connect évitait. Décision prise en connaissance de cau
    7 septembre 2026. L'écran **refuse** une clé secrète complète `sk_…`, il ne
    se contente pas de l'avertir. Raison gravée : *« un avertissement qu'on
    clique pour passer n'est pas une protection »*. Une `sk_` donnerait à
-   HôteSmart les pleins pouvoirs sur le compte Stripe de l'hôte — créer des
-   clients, déplacer des fonds, lire toute son activité.
+   HôteSmart les pleins pouvoirs sur le compte Stripe de l'hôte.
    Le refus est **antérieur à l'appel Stripe** : une clé qu'on n'acceptera pas
    ne part même pas sur le réseau.
-   **Ne pas réintroduire l'avertissement** au motif qu'un hôte est bloqué :
-   l'écran le guide pas à pas pour créer une clé restreinte, c'est la réponse.
-   Droits nécessaires — **et rien de plus**, vérifiés contre les appels réels
-   du code : `PaymentIntents: read` (vérification de la clé),
-   `Checkout Sessions: write`, `Webhook Endpoints: write` (point 3),
-   `Refunds: write` (règle 4 du §2, utilisé à l'étape 3).
-   ⚠ `Charges: read` figurait ici « par précaution » et **le code ne l'appelle
-   jamais** : retiré le 7 septembre 2026. Accorder un droit inutilisé est
-   exactement ce contre quoi la clé restreinte existe. Ne rien ajouter sans un
-   appel qui le réclame.
-   ⚠ **À vérifier à la construction** : que ce dernier droit soit réellement
-   accordable à une clé restreinte. S'il ne l'est pas, repli explicite —
-   l'onboarding guide l'hôte pour créer le webhook à la main et coller le
-   `whsec_…`. Pas de repli silencieux vers une clé secrète complète.
+   **Ne pas réintroduire l'avertissement** au motif qu'un hôte est bloqué.
+
+   **PARCOURS STRIPE RÉEL** (traversé par Thierry le 7 septembre 2026 — c'est
+   celui-ci qui fait foi, pas une reconstitution) :
+   Développeurs → Clés API → onglet **« Clés limitées »** → « Créer une clé
+   limitée » → *« Comment utiliserez-vous cette clé ? »* → **« Envoi de cette
+   clé à une application tierce »** → écran des modèles → **« Personnalisé »**,
+   jamais un paquet (une trentaine d'autorisations pour quatre nécessaires).
+
+   ⚠ **La grille ne démarre PAS avec tout sur « Aucun »** : Stripe en pré-coche
+   certaines. Il faut la **parcourir entièrement et tout remettre sur « Aucun »
+   AVANT** d'accorder les quatre droits. Règle à vérifier avant de créer la
+   clé : **exactement 4 lignes ont un droit, tout le reste est sur « Aucun ».**
+
+   Les quatre droits, **nommés comme Stripe les écrit** :
+   | Ligne de la grille | Niveau |
+   |---|---|
+   | `Payment Intents` | Lecture |
+   | `Charges and Refunds` | Écriture |
+   | `Checkout Sessions` | Écriture |
+   | `Webhook Endpoints, Event Destinations` | Écriture *(tout en bas)* |
+
+   ⚠ **Il n'existe PAS de ligne `Refunds` séparée** : les remboursements sont
+   dans `Charges and Refunds`. Les versions précédentes de ce document
+   nommaient `Refunds: write` et `Charges: read` comme deux droits distincts —
+   la grille Stripe ne les sépare pas.
+
 3. **Webhook créé automatiquement sur le compte de l'hôte à la connexion.**
    `POST /v1/webhook_endpoints` avec sa clé. On garde l'`id` (pour le remplacer
    ou le supprimer) et le `secret` (chiffré, comme la clé).
