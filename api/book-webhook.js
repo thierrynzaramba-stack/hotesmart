@@ -35,6 +35,7 @@ const { secretWebhookParJeton, cleDeLHote, API_VERSION } = require('../lib/strip
 const { sansSecrets } = require('../lib/chiffrement')
 const { nuits, libererIntentions } = require('../lib/reservation-directe')
 const { reportIncident } = require('../lib/founder-notify')
+const { creerDepuisTentative, alerterReveil } = require('../lib/moteur-creation')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -206,16 +207,41 @@ async function traiter (evenement, hote) {
   }
 
   if (cible === ETAT.PAYE) {
-    // L'ETAT DANGEREUX : encaisse, pas encore reserve. A l'etape 3, la creation
-    // CRS s'enchainera ICI. En attendant, l'hote est prevenu — de l'argent qui
-    // dort sans reservation ne doit jamais rester invisible.
-    console.log('[book-webhook] tentative payee', tentative.id)
-    const bien = await bienDe(tentative.property_id)
-    await alerter('paiement_sans_reservation', tentative.user_id,
-      bien && bien.provider_property_id,
-      `Paiement encaisse (${(tentative.amount_cents / 100).toFixed(2)} ${tentative.currency}) ` +
-      `pour ${tentative.arrival} → ${tentative.departure}. La creation de la reservation est ` +
-      `l'etape 3 : elle n'existe pas encore. A traiter a la main.`)
+    // ─── LE POINT 3 DE L'ORDRE GRAVE (§2) ───────────────────────────────────
+    // `paid` est l'etat DANGEREUX : de l'argent est encaisse et aucune
+    // reservation n'existe. Il doit durer le moins longtemps possible, d'ou
+    // l'enchainement IMMEDIAT ici plutot qu'un passage par une file.
+    //
+    // `creerDepuisTentative` se reclame lui-meme (verrou `resa-crs:`) : deux
+    // livraisons simultanees de `completed` ne peuvent pas creer deux
+    // reservations. Il gere aussi ses trois issues — succes, refus certain
+    // (remboursement), issue incertaine (alarme qui reveille).
+    console.log('[book-webhook] tentative payee, creation', tentative.id)
+    let creation
+    try {
+      creation = await creerDepuisTentative(supabase, tentative.id)
+    } catch (e) {
+      // ⚠ UNE EXCEPTION ICI NE DOIT PAS FAIRE ECHOUER LE WEBHOOK. Stripe
+      // rejouerait `completed`, et le rejeu retomberait sur `transitionPermise`
+      // qui l'ignorerait (la tentative est deja `paid`) : la creation ne serait
+      // JAMAIS retentee, et personne ne le saurait. On alerte, et on rend 200.
+      // ⚠ `alerterReveil`, PAS `alerter`. Constat de review : `alerter` passe par
+      // `reportIncident`, qui se tait si une alerte du meme type et du meme bien
+      // est deja partie dans l'heure — deux paiements bloques sur le meme bien
+      // dans la meme heure, et LE SECOND VOYAGEUR EST SILENCIEUX. C'est
+      // exactement l'anti-spam que l'exigence gravee demande de contourner.
+      console.error('[book-webhook] creation', tentative.id, e.message)
+      const bien = await bienDe(tentative.property_id)
+      await alerterReveil(tentative, bien,
+        `Creation interrompue par une erreur (${e.message}). ` +
+        `${(tentative.amount_cents / 100).toFixed(2)} ${tentative.currency} encaisses. ` +
+        `Verifier chez le provider AVANT tout geste.`)
+      return
+    }
+
+    if (!creation.ok && creation.raison !== 'deja_en_cours') {
+      console.error('[book-webhook] creation non aboutie', tentative.id, creation.raison)
+    }
   }
 }
 
@@ -233,7 +259,7 @@ async function parColonne (colonne, valeur) {
 async function bienDe (uuid) {
   try {
     const { data } = await supabase
-      .from('properties').select('provider_property_id').eq('id', uuid).maybeSingle()
+      .from('properties').select('name, provider_property_id').eq('id', uuid).maybeSingle()
     return data
   } catch (e) { return null }
 }

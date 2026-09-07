@@ -453,13 +453,168 @@ sans réservation, ce que la règle 4 du §2 interdit. D'où deux protections :
 
 ## 6. Étape 3 — création, confirmation, échecs
 
-Le chemin complet de §2 (verrou → paiement → CRS → feed), la page de
-confirmation, l'email trilingue, **et le cron de purge des tentatives**
-(§5.2 bis : anonymisation à 30 jours des tentatives jamais payées). Tous les chemins d'échec testés un par un :
-paiement refusé (rien ne se passe), création CRS en échec après encaissement
-(remboursement auto + incident + alarme), double-clic/double soumission
-(idempotence), dates prises entre l'affichage et le paiement (verrou refuse
-AVANT l'encaissement — jamais après).
+Écrite le 7 septembre 2026, après validation en réel de l'étape 2 (§5.1 connecté,
+webhook automatique confirmé).
+
+C'est **la moitié qui manque au §2** : sans elle, un paiement réussi laisse de
+l'argent encaissé sans réservation. C'est pour cela que
+`BOOKING_ENGINE_PAYMENT` est fermée depuis l'étape 2 — elle ne s'ouvre qu'au
+bout de celle-ci.
+
+### 6.1 — La création, et le seul endroit où elle a le droit d'arriver
+
+Déclenchée par `checkout.session.completed`, dans `api/book-webhook.js`, juste
+après le passage à `paid`. Elle réutilise **la primitive CRS de la phase 2**
+(`lib/channels/channex.js`, `ota_name: "Offline"`) — aucune seconde
+implémentation d'écriture provider.
+
+> **RÈGLE HÉRITÉE, NON NÉGOCIABLE : le POST CRS n'est JAMAIS rejoué.**
+> Channex n'oppose aucune défense à la surréservation (mesure du 6 septembre :
+> HTTP 200 et stock à −1). Un POST dont on ignore l'issue — panne réseau,
+> délai dépassé — ne se retente pas : il devient un **incident**, jamais une
+> seconde tentative.
+
+**Le claim, avant le POST.** Stripe rejoue ses webhooks. Deux livraisons
+simultanées de `completed` créeraient deux réservations pour un seul paiement.
+La tentative est donc **réclamée** avant tout appel provider, par le verrou
+`write_locks` (clé `resa-crs:<attempt_id>`, TTL court) **et** par une écriture
+conditionnelle sur le statut lu. Celui qui perd le claim ne poste rien.
+
+Ce qui part dans le CRS :
+- les dates, le nombre de voyageurs, les coordonnées du voyageur ;
+- `days` = le **détail nuit par nuit figé sur la tentative**
+  (`price_detail`), coefficient déjà appliqué — pas un recalcul ;
+- `amount` = `amount_cents / 100`, exactement ce qui a été encaissé ;
+- `meta` = `{ source: 'hotesmart-engine', link_label: <provenance>,
+  attempt_id }` — l'ajout 4 du §3 ter, jusqu'au bout.
+
+**Après succès** : `status = booked`, `provider_booking_id` renseigné, les nuits
+tenues **libérées** (le feed prend le relais et la réservation occupe désormais
+le cœur pour de bon).
+
+### 6.2 — L'échec après encaissement : remboursement automatique
+
+C'est le **point 4 du §2**, et le seul endroit du produit où l'on rend de
+l'argent sans qu'un humain le demande.
+
+Si la création échoue de façon **certaine** (refus explicite du provider, bien
+sans `provider_rate_plan_id`, 422) :
+
+1. **remboursement immédiat et intégral** — `refunds.create({ payment_intent })`
+   avec la clé de l'hôte (droit `Charges and Refunds`), clé d'idempotence dérivée
+   de la tentative ;
+2. `status = refunded`, `last_error` renseigné ;
+3. **incident + alarme fondateur** ;
+4. **e-mail au voyageur** : la réservation n'a pas pu être confirmée, il est
+   remboursé, voici le contact de l'hôte.
+
+Si l'issue est **incertaine** (délai dépassé, panne réseau sur le POST) :
+**on ne rembourse PAS et on ne rejoue PAS.** Rembourser un séjour peut-être
+créé, c'est offrir un séjour ; le rejouer, c'est en créer deux. Seul un humain
+tranche, en regardant chez le provider.
+
+> **EXIGENCE GRAVÉE (Thierry, 7 septembre 2026) — CET INCIDENT RÉVEILLE.**
+> Pas une ligne en base : une **notification réelle**, SMS et e-mail au
+> fondateur. *« Un voyageur qui a payé ne doit jamais attendre qu'on
+> remarque. »*
+>
+> Techniquement, cela veut dire **contourner l'anti-spam**. `reportIncident`
+> se tait si une alerte du même type et du même bien est déjà partie dans
+> l'heure — juste pour un incident ordinaire, **faux ici** : deux paiements
+> incertains sur le même bien sont deux voyageurs différents, et le second
+> serait étouffé.
+>
+> Le chemin est donc **double** : `reportIncident` pour la trace et l'historique,
+> **et** `envoyerAlerteBrute` pour l'envoi garanti.
+>
+> ⚠ `envoyerAlerteBrute` porte un avertissement explicite : ne pas élargir son
+> usage sans la même justification que la surréservation. La justification est
+> ici la même — de l'argent encaissé sans réservation ne se rattrape pas tout
+> seul, et chaque occurrence est un voyageur distinct. Le troisième appelant de
+> cette fonction devra, lui aussi, se justifier.
+
+> **Aucun état ne reste silencieux.** `paid` sans `booked` au bout de quelques
+> minutes est une anomalie qui alerte, pas une ligne qui dort.
+
+### 6.3 — La page de confirmation
+
+Retour sur `/book/<token>?paiement=ok&t=<attempt_id>`. Un endpoint public rend un
+**minimum strict** pour cette tentative : dates, nombre de nuits, total, devise,
+statut, nom du bien, heures d'arrivée/départ, contact de l'hôte.
+
+⚠ **Rien d'autre.** Pas d'e-mail, pas de téléphone du voyageur, pas
+d'identifiant provider. L'`attempt_id` est un UUID non devinable, mais une URL
+se partage, se journalise et se retrouve dans un historique : ce qu'elle expose
+doit rester ce que le voyageur a déjà sous les yeux.
+
+Trois états à afficher franchement, dans sa langue :
+- **confirmée** (`booked`) — récapitulatif + référence ;
+- **en cours** (`paid`) — « paiement reçu, confirmation en cours » ; c'est vrai,
+  et ça vaut mieux qu'une confirmation qui n'existe pas encore ;
+- **remboursée** (`refunded`) — ce qui s'est passé, et le contact de l'hôte.
+
+### 6.4 — L'e-mail trilingue
+
+Envoyé après `booked`, dans la langue **figée sur la tentative** (`lang`), jamais
+celle du serveur. Contenu : récapitulatif, **politique d'annulation**, contact de
+l'hôte (`telephone_hote`), nom et adresse du bien.
+
+Le canal est **réutilisable** : la saisie manuelle (phase 2) et l'app avis en
+auront besoin. Il vit dans `lib/` et ne connaît pas le moteur.
+
+Un second modèle pour le **remboursement automatique** (§6.2).
+
+### 6.5 — La politique d'annulation (dette de l'étape 2)
+
+Le §2 la déclare « affichée clairement AVANT le paiement ». **L'étape 2 ne l'a
+pas construite.** Elle arrive ici, sinon le voyageur paie sans connaître ses
+conditions.
+
+- Colonne `properties.cancellation_policy`, quatre valeurs :
+  `non_remboursable | j14 | j7 | flexible_j2`. Défaut : `non_remboursable`
+  (le plus protecteur pour l'hôte, et le seul qui ne promet rien qu'on ne
+  tienne).
+- **Affichée sur la page publique avant le bouton de paiement**, dans la langue
+  du voyageur, et **reprise dans l'e-mail**.
+- **Figée sur la tentative** au moment de la vente : ce que l'hôte change après
+  ne s'applique pas rétroactivement à une réservation déjà vendue.
+- V1 : elle est **affichée et contractuelle**. Le remboursement d'une annulation
+  reste un geste manuel de l'hôte via Stripe — pas de self-service voyageur
+  (§8).
+
+### 6.6 — Le cron de purge (§5.2 bis)
+
+Quotidien, dans `api/cron.js`. Anonymise les tentatives **jamais payées**
+(`pending`, `failed`, `expired`) de plus de **30 jours** : `guest_first_name`,
+`guest_last_name`, `guest_email`, `guest_phone` écrasés. Le reste de la ligne
+survit — on garde de quoi mesurer les abandons sans garder de quoi identifier
+quelqu'un.
+
+Les tentatives **payées** (`paid`, `booked`, `refunded`) ne sont jamais touchées :
+conservation comptable.
+
+⚠ `api/cron.js` est TOUJOURS régénéré en fichier COMPLET, jamais rustiné
+partiellement (règle dure, CLAUDE.md).
+
+### 6.7 — Les chemins d'échec, éprouvés un par un
+
+Aucun n'est réputé bon parce que le chemin nominal marche :
+
+| Chemin | Attendu |
+|---|---|
+| paiement refusé | rien ne se passe ; la Session reste ouverte, le voyageur retente |
+| Session abandonnée | `expired`, **nuits rendues**, aucune trace chez le provider |
+| création CRS refusée après encaissement | remboursement auto + incident + alarme + e-mail |
+| POST CRS d'issue incertaine | **ni remboursement ni rejeu** ; incident maximal |
+| webhook rejoué après `booked` | ignoré ; **aucune seconde réservation** |
+| double soumission / double-clic | une seule tentative, une seule Session, un seul débit |
+| dates prises entre l'affichage et le paiement | refus **AVANT** l'encaissement |
+| e-mail non parti | la réservation **existe quand même** ; l'échec alerte, il ne bloque pas |
+
+### 6.8 — Ce qui ouvre la porte
+
+`BOOKING_ENGINE_PAYMENT = true` **seulement** quand §6.7 est passé en entier sur
+staging, puis en mode test sur Colomiers (§7). Pas avant.
 
 ## 6 bis. Étape 3 bis — l'app « Réservation directe »
 

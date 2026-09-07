@@ -36,6 +36,7 @@ const {
   validerSejour
 } = require('../lib/moteur-reservation')
 const { resoudreLien, chargerCalendrier } = require('../lib/moteur-coeur')
+const { nuits } = require('../lib/reservation-directe')
 const { paiementAutorise } = require('../lib/moteur-paiement')
 
 const supabase = createClient(
@@ -53,7 +54,9 @@ function bienPublic (bien) {
     voyageurs_inclus: Number(bien.included_guests) || Math.max(1, Number(bien.capacity) || 1),
     supplement_voyageur: Number(bien.extra_guest_fee) || 0,
     heure_arrivee: bien.checkin_time || null,
-    heure_depart: bien.checkout_time || null
+    heure_depart: bien.checkout_time || null,
+    // §6.5 : affichee AVANT le paiement, dans la langue du voyageur.
+    politique_annulation: bien.cancellation_policy || 'non_remboursable'
   }
 }
 
@@ -73,6 +76,49 @@ module.exports = async function handler (req, res) {
 
   const { lien, bien, erreur } = await resoudreLien(supabase, req.query.token)
   if (erreur) return res.status(erreur === 'indisponible' ? 500 : 404).json({ error: erreur })
+
+  // ─── Confirmation (retour depuis Stripe) ───────────────────────────────────
+  // ⚠ LE MINIMUM STRICT, ET RIEN D'AUTRE (§6.3).
+  // Ni e-mail, ni telephone du voyageur, ni identifiant provider, ni montant
+  // brut en centimes. L'`attempt_id` est un UUID non devinable, mais une URL se
+  // partage, se journalise et se retrouve dans un historique de navigateur : ce
+  // qu'elle expose doit rester ce que le voyageur a DEJA sous les yeux.
+  //
+  // ⚠ La tentative est confrontee au LIEN : sans ce filtre, un identifiant de
+  // tentative valide rendrait sa confirmation depuis n'importe quel lien, donc
+  // depuis n'importe quel bien d'un autre compte.
+  //
+  // ⚠ PLACEE AVANT `raisonNonVendable` ET AVANT LE CALENDRIER. Constat de
+  // review : plus bas, un hote qui desactive son lien ou un bien qui perd sa
+  // configuration juste apres le paiement rendaient la confirmation
+  // INACCESSIBLE — le voyageur revenait de Stripe et ne voyait jamais l'etat de
+  // sa reservation. Elle ne depend d'aucun des deux, et chaque affichage payait
+  // en plus une lecture de 365 nuits dont il n'utilise rien.
+  if (req.query.action === 'confirmation') {
+    const t = String(req.query.t || '')
+    if (!/^[0-9a-f-]{36}$/i.test(t)) return res.status(404).json({ error: 'introuvable' })
+    try {
+      const { data, error } = await supabase
+        .from('booking_attempts')
+        .select('status, arrival, departure, guests, amount_cents, currency, cancellation_policy, lang')
+        .eq('id', t).eq('link_id', lien.id).maybeSingle()
+      if (error) throw new Error(error.message)
+      if (!data) return res.status(404).json({ error: 'introuvable' })
+      return res.status(200).json({
+        statut: data.status,
+        arrivee: data.arrival, depart: data.departure,
+        nuits: nuits(data.arrival, data.departure).length,
+        voyageurs: data.guests,
+        total: Math.round(Number(data.amount_cents)) / 100,
+        devise: data.currency,
+        politique_annulation: data.cancellation_policy || 'non_remboursable',
+        bien: bienPublic(bien)
+      })
+    } catch (e) {
+      console.error('[book-public] confirmation', e.message)
+      return res.status(500).json({ error: 'indisponible' })
+    }
+  }
 
   const blocage = raisonNonVendable(bien)
   if (blocage) {

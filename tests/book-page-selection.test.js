@@ -205,3 +205,58 @@ test('la page est autonome : aucun CSS ni JS externe', () => {
   assert.ok(!/<link[^>]+stylesheet/i.test(html), 'feuille de style externe')
   assert.ok(!/<script[^>]+src=/i.test(html), 'script externe')
 })
+
+
+// ─── CONSTATS DE REVIEW (etape 3) ──────────────────────────────────────────
+
+test('la confirmation se RE-REND au changement de langue', () => {
+  // Elle est ecrite en innerHTML, donc invisible a `[data-t]` : sans re-rendu,
+  // un voyageur qui bascule en ES/EN voyait toute la page changer SAUF sa
+  // confirmation.
+  const ctx = contexte()
+  assert.equal(typeof ctx.rendreConfirmation, 'function')
+  const src = source.slice(source.indexOf('function appliquerLangue'),
+                           source.indexOf('function appliquerLangue') + 900)
+  assert.match(src, /rendreConfirmation\(\)/,
+    'appliquerLangue doit re-rendre la confirmation')
+})
+
+test('la devise de la confirmation vient de la REPONSE, pas de `bien`', () => {
+  // `chargerConfirmation` court en parallele de `charger()` : si elle gagne la
+  // course, `bien` est encore null et le total s'affichait en EUR.
+  assert.match(source, /function argent\(v, devise\)/)
+  assert.match(source, /argent\(d\.total, d\.devise\)/)
+})
+
+test('le jeton est resolu AVANT le traitement du retour de paiement', () => {
+  // `afficherRetour()` tourne avant `charger()` et a besoin du jeton pour lire
+  // la confirmation : le resoudre dans `charger()` le laissait nul.
+  assert.ok(source.indexOf('resoudreJeton();') < source.indexOf('afficherRetour();'))
+})
+
+test('le nettoyage d URL ne retire QUE les parametres de retour', () => {
+  // `location.pathname` tout sec effacait aussi `?token=`, et la page affichait
+  // « lien inconnu » au lieu du calendrier.
+  assert.match(source, /q\.delete\('paiement'\)/)
+  assert.match(source, /q\.delete\('t'\)/)
+  assert.ok(!/replaceState\(\{\}, '', location\.pathname\);/.test(source),
+    'le chemin nu ne doit plus etre ecrit tel quel')
+})
+
+test('les trois etats de confirmation ont un libelle dans les trois langues', () => {
+  const ctx = contexte()
+  for (const l of ['fr', 'es', 'en']) {
+    for (const k of ['conf_booked', 'conf_paid', 'conf_refunded']) {
+      assert.ok(ctx.T[l][k] && ctx.T[l][k].length > 10, `${l}.${k}`)
+    }
+  }
+})
+
+test('les quatre politiques d annulation sont dites dans les trois langues', () => {
+  const ctx = contexte()
+  for (const l of ['fr', 'es', 'en']) {
+    for (const p of ['non_remboursable', 'j14', 'j7', 'flexible_j2']) {
+      assert.ok(ctx.T[l]['pol_' + p], `${l}.pol_${p} manquant`)
+    }
+  }
+})

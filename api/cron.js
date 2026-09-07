@@ -53,6 +53,14 @@
 //   aurait envoyé un SMS par réservation historique à la première activation
 //   (REVIEW.md règle 2). Elle est posée à l'approche du départ, et c'est aussi
 //   le chemin d'escalade après un refus ou une expiration.
+// Session #36 (etape 3 du moteur de reservation) : purge des tentatives de
+//   reservation. Une tentative JAMAIS PAYEE porte le nom, l'e-mail et le
+//   telephone d'un voyageur qui n'a rien achete : ses champs personnels sont
+//   ecrases au bout de 30 jours. ANONYMISATION et non suppression — la ligne
+//   survit pour que les abandons restent mesurables (combien, sur quel lien, a
+//   quel prix) sans que personne ne reste identifiable. Une tentative PAYEE
+//   n'est jamais touchee : conservation comptable. Cadence quotidienne par
+//   marqueur cron_logs, le module la gere lui-meme.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -76,6 +84,8 @@ const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfi
 const { checkMessageVolume, checkEventProduction, checkTableGrowth } = require('../lib/cron-alerting')
 const { checkOverbooking } = require('../lib/cron-overbooking')
 const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
+const { purgerSiDue } = require('../lib/cron-purge-tentatives')
+const { rattraperBloquees } = require('../lib/moteur-creation')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -132,6 +142,8 @@ module.exports = async function handler(req, res) {
     totalMenagesRattaches: 0,
     totalMenagesCrees: 0,
     totalBeds24Materialized: 0,
+    totalTentativesAnonymisees: 0,
+    totalTentativesBloquees: 0,
     circuitBreakerTriggered: 0,
     errors: []
   }
@@ -360,6 +372,44 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur propositions dues:', err.message)
       results.errors.push({ context: 'propositions_dues', error: err.message })
+    }
+
+    // 4duodecies bis. TENTATIVES BLOQUÉES EN « PAYÉ » (moteur, §6.2).
+    // ⚠ TROU STRUCTUREL FERMÉ ICI. La création s'enchaîne dans le webhook après
+    // le passage à `paid`. Si la fonction meurt pendant le POST CRS, Stripe
+    // rejoue `completed` — mais le webhook sort aussitôt, la tentative étant
+    // déjà `paid`. Argent encaissé, aucune réservation, AUCUNE alarme, et rien
+    // ne relisait la file.
+    // ⚠ Ce rattrapage N'ESSAIE PAS DE CRÉER : on ignore si le POST est parti,
+    // et le rejouer risquerait deux réservations pour un paiement. Il ALERTE,
+    // une fois par tentative, et un humain tranche en cherchant le code
+    // déterministe `HSM-…` chez le provider.
+    try {
+      const bilanBloquees = await chrono.mesure('tentatives_bloquees', () => rattraperBloquees(supabase))
+      results.totalTentativesBloquees = bilanBloquees?.signalees || 0
+    }
+    catch (err) {
+      console.error('[Cron] Erreur rattrapage tentatives bloquées:', err.message)
+      results.errors.push({ context: 'tentatives_bloquees', error: err.message })
+    }
+
+    // 4duodecies. PURGE DES TENTATIVES DE RÉSERVATION (moteur, §5.2 bis).
+    // Anonymise les tentatives JAMAIS PAYÉES de plus de 30 jours : nom, e-mail
+    // et téléphone d'un voyageur qui n'a rien acheté n'ont pas à survivre.
+    // ⚠ ANONYMISATION, PAS SUPPRESSION : la ligne reste (dates, montant, lien,
+    // statut), pour que les abandons restent mesurables sans que personne ne
+    // reste identifiable. Supprimer perdrait les deux d'un coup.
+    // ⚠ Une tentative PAYÉE n'est jamais touchée par ce chemin — elle porte une
+    // transaction, et sa conservation relève du comptable.
+    // Cadence quotidienne : le module porte son propre marqueur cron_logs, le
+    // cycle tournant toutes les 5 minutes.
+    try {
+      const bilanPurge = await chrono.mesure('purge_tentatives', () => purgerSiDue(supabase))
+      results.totalTentativesAnonymisees = bilanPurge?.anonymisees || 0
+    }
+    catch (err) {
+      console.error('[Cron] Erreur purge tentatives:', err.message)
+      results.errors.push({ context: 'purge_tentatives', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

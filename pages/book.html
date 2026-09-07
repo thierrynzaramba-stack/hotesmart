@@ -90,6 +90,9 @@
   .bouton[disabled] { background: #d6d3ce; color: #8b867f; cursor: not-allowed; }
 
   .note { font-size: 12px; color: var(--texte2); margin-top: 10px; text-align: center; }
+  .politique { font-size: 12.5px; color: var(--texte2); background: var(--carte); border: 1px solid var(--trait);
+               border-radius: 8px; padding: 10px 13px; margin-bottom: 14px; line-height: 1.5; }
+  .politique strong { color: var(--texte); display: block; margin-bottom: 3px; }
   .refus { font-size: 13px; color: var(--refuse); margin-top: 10px; }
   .etat { padding: 40px 0; text-align: center; color: var(--texte2); font-size: 14px; }
 
@@ -159,6 +162,7 @@
         </div>
         <div class="champ"><label for="email" data-t="email"></label><input id="email" type="email" autocomplete="email" inputmode="email"></div>
         <div class="champ"><label for="tel" data-t="telephone"></label><input id="tel" type="tel" autocomplete="tel" inputmode="tel"></div>
+        <div class="politique" id="politique" hidden></div>
         <button class="bouton" id="valider" disabled></button>
         <div class="note" id="note-etape"></div>
       </div>
@@ -203,6 +207,16 @@ var T = {
     r_deja_rembourse: "Cette réservation a été remboursée. Contactez l’hôte pour réserver à nouveau.",
     r_trop_de_tentatives: "Trop de réservations sont en cours sur ce logement. Réessayez dans quelques minutes.",
     r_reessayez: "Une autre réservation est en cours sur ces dates. Réessayez dans un instant.",
+    conditions: "Conditions d’annulation",
+    pol_non_remboursable: "Cette réservation n’est pas remboursable.",
+    pol_j14: "Annulation gratuite jusqu’à 14 jours avant l’arrivée.",
+    pol_j7: "Annulation gratuite jusqu’à 7 jours avant l’arrivée.",
+    pol_flexible_j2: "Annulation gratuite jusqu’à 2 jours avant l’arrivée.",
+    conf_booked: "Votre réservation est confirmée. Un e-mail de confirmation vient de vous être envoyé.",
+    conf_paid: "Paiement reçu. Votre réservation est en cours de confirmation — vous recevrez un e-mail dans quelques instants.",
+    conf_refunded: "Cette réservation n’a pas pu être confirmée et vous avez été intégralement remboursé.",
+    nuits_label: "Nuits",
+    voyageurs_label: "Voyageurs",
     r_defaut: 'Ces dates ne peuvent pas être réservées.',
     mois: ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'],
     jours: ['lun','mar','mer','jeu','ven','sam','dim']
@@ -237,6 +251,16 @@ var T = {
     r_deja_rembourse: "Esta reserva fue reembolsada. Contacte con el anfitrión para reservar de nuevo.",
     r_trop_de_tentatives: "Hay demasiadas reservas en curso en este alojamiento. Inténtelo en unos minutos.",
     r_reessayez: "Otra reserva está en curso en estas fechas. Inténtelo en un instante.",
+    conditions: "Condiciones de cancelación",
+    pol_non_remboursable: "Esta reserva no es reembolsable.",
+    pol_j14: "Cancelación gratuita hasta 14 días antes de la llegada.",
+    pol_j7: "Cancelación gratuita hasta 7 días antes de la llegada.",
+    pol_flexible_j2: "Cancelación gratuita hasta 2 días antes de la llegada.",
+    conf_booked: "Su reserva está confirmada. Acabamos de enviarle un correo de confirmación.",
+    conf_paid: "Pago recibido. Su reserva se está confirmando — recibirá un correo en unos instantes.",
+    conf_refunded: "Esta reserva no ha podido confirmarse y se le ha reembolsado íntegramente.",
+    nuits_label: "Noches",
+    voyageurs_label: "Huéspedes",
     r_defaut: 'Estas fechas no se pueden reservar.',
     mois: ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],
     jours: ['lun','mar','mié','jue','vie','sáb','dom']
@@ -271,6 +295,16 @@ var T = {
     r_deja_rembourse: "This booking was refunded. Please contact the host to book again.",
     r_trop_de_tentatives: "Too many bookings are in progress on this property. Please try again in a few minutes.",
     r_reessayez: "Another booking is in progress for these dates. Please try again shortly.",
+    conditions: "Cancellation policy",
+    pol_non_remboursable: "This booking is non-refundable.",
+    pol_j14: "Free cancellation up to 14 days before arrival.",
+    pol_j7: "Free cancellation up to 7 days before arrival.",
+    pol_flexible_j2: "Free cancellation up to 2 days before arrival.",
+    conf_booked: "Your booking is confirmed. A confirmation email is on its way.",
+    conf_paid: "Payment received. Your booking is being confirmed — you will receive an email shortly.",
+    conf_refunded: "This booking could not be confirmed and you have been refunded in full.",
+    nuits_label: "Nights",
+    voyageurs_label: "Guests",
     r_defaut: 'These dates cannot be booked.',
     mois: ['January','February','March','April','May','June','July','August','September','October','November','December'],
     jours: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -280,6 +314,9 @@ var T = {
 var LANGUES = ['fr', 'es', 'en'];
 var lang = 'fr', t = T.fr;
 var jeton = null, bien = null, nuits = [], parDate = {}, departMax = null, paiement = { actif: false, mode: null };
+// La derniere confirmation recue, gardee pour pouvoir la RE-RENDRE au changement
+// de langue : elle est ecrite en innerHTML, donc invisible a `appliquerLangue`.
+var confirmation = null;
 var limiteDepart = null;   // recalculee a chaque rendu du calendrier
 var arrivee = null, depart = null, devis = null;
 
@@ -303,8 +340,11 @@ function isoDe(d) { return d.toISOString().slice(0, 10); }
 function ajouter(iso, n) { var d = jourUTC(iso); d.setUTCDate(d.getUTCDate() + n); return isoDe(d); }
 function nbNuits(a, b) { return Math.round((jourUTC(b) - jourUTC(a)) / 86400000); }
 
-function argent(v) {
-  var dev = (bien && bien.devise) || 'EUR';
+function argent(v, devise) {
+  // ⚠ `devise` explicite quand on l'a. Constat de review : `chargerConfirmation`
+  // court EN PARALLELE de `charger()`, et si elle gagne la course, `bien` est
+  // encore null — le total s'affichait en EUR quel que soit le vrai reglage.
+  var dev = devise || (bien && bien.devise) || 'EUR';
   try {
     return new Intl.NumberFormat(t._loc, { style: 'currency', currency: dev, maximumFractionDigits: 2 }).format(v);
   } catch (e) { return v + ' ' + dev; }
@@ -343,9 +383,24 @@ function appliquerLangue(code) {
     rendreCalendrier();
     rendreDevis();
   }
+  // ⚠ La confirmation est ecrite en innerHTML, donc invisible a `[data-t]` :
+  // sans ce re-rendu, un voyageur qui bascule en ES/EN voyait toute la page
+  // changer SAUF sa confirmation. Constat de review.
+  rendreConfirmation();
 }
 
 // ─── Chargement ─────────────────────────────────────────────────────────────
+// ⚠ RESOLU AU DEMARRAGE, avant tout le reste. `afficherRetour()` tourne AVANT
+// `charger()` et a besoin du jeton pour lire la confirmation : le resoudre dans
+// `charger()` le laissait nul, et la requete partait avec `token=null`.
+// Le jeton est dans le chemin : /book/<jeton>. Le `?token=` reste accepte pour
+// le diagnostic direct de l'endpoint.
+function resoudreJeton() {
+  var m = location.pathname.match(/\/book\/([A-Za-z0-9_-]{43})$/);
+  jeton = m ? m[1] : new URLSearchParams(location.search).get('token');
+  return jeton;
+}
+
 function montrerEtat(msg) { $('etat').textContent = msg; $('etat').hidden = false; $('contenu').hidden = true; }
 
 // Retour depuis la page de paiement Stripe. Traite AVANT le calendrier : le
@@ -353,12 +408,17 @@ function montrerEtat(msg) { $('etat').textContent = msg; $('etat').hidden = fals
 // ⚠ Ce parametre ne PROUVE RIEN — c'est le webhook qui fait foi. On confirme
 // une reception, jamais une reservation : la creation est l'etape 3.
 function afficherRetour() {
-  var p = new URLSearchParams(location.search).get('paiement');
+  var q0 = new URLSearchParams(location.search);
+  var p = q0.get('paiement');
+  var tentative = q0.get('t');
   if (!p) return;
   var el = $('resultat');
   el.hidden = false;
   el.className = 'resultat ' + (p === 'ok' ? 'ok' : 'ko');
   el.textContent = p === 'ok' ? t.retour_ok : t.retour_annule;
+  // La vraie reservation, si on sait laquelle. `?paiement=ok` ne PROUVE rien —
+  // c'est le webhook qui fait foi — d'ou l'affichage de l'etat REEL.
+  if (p === 'ok' && tentative) chargerConfirmation(tentative);
   // On retire le SEUL parametre `paiement` — un rechargement ne doit pas
   // re-afficher le message, et un lien partage ne doit pas porter le resultat de
   // quelqu'un d'autre.
@@ -369,16 +429,45 @@ function afficherRetour() {
   try {
     var q = new URLSearchParams(location.search);
     q.delete('paiement');
+    q.delete('t');
     var reste = q.toString();
     history.replaceState({}, '', location.pathname + (reste ? '?' + reste : ''));
   } catch (e) {}
 }
 
+// ⚠ TROIS ETATS DITS FRANCHEMENT (§6.3). « Paiement recu, confirmation en
+// cours » est vrai, et vaut mieux qu'une confirmation qui n'existe pas encore.
+async function chargerConfirmation(tentative) {
+  try {
+    var r = await fetch('/api/book-public?token=' + encodeURIComponent(jeton) +
+      '&action=confirmation&t=' + encodeURIComponent(tentative),
+      { headers: { Accept: 'application/json' } });
+    if (!r.ok) return;
+    confirmation = await r.json();
+    rendreConfirmation();
+  } catch (e) { /* le message generique reste affiche */ }
+}
+
+function rendreConfirmation() {
+    var d = confirmation;
+    if (!d) return;
+    var el = $('resultat');
+    var mot = { booked: t.conf_booked, paid: t.conf_paid, refunded: t.conf_refunded }[d.statut];
+    if (!mot) return;
+    el.hidden = false;
+    el.className = 'resultat ' + (d.statut === 'refunded' ? 'ko' : 'ok');
+    var h = '<div>' + esc(mot) + '</div>';
+    h += '<div class="ligne" style="margin-top:12px"><span class="lib">' + esc(t.arrivee) + '</span><span>' + esc(dateLongue(d.arrivee)) + '</span></div>';
+    h += '<div class="ligne"><span class="lib">' + esc(t.depart) + '</span><span>' + esc(dateLongue(d.depart)) + '</span></div>';
+    h += '<div class="ligne"><span class="lib">' + esc(t.nuits_label) + '</span><span>' + esc(d.nuits) + '</span></div>';
+    h += '<div class="ligne"><span class="lib">' + esc(t.voyageurs_label) + '</span><span>' + esc(d.voyageurs) + '</span></div>';
+    h += '<div class="ligne total"><span>' + esc(t.total) + '</span><span>' + esc(argent(d.total, d.devise)) + '</span></div>';
+    var pol = t['pol_' + d.politique_annulation] || t.pol_non_remboursable;
+    h += '<div style="margin-top:10px;font-size:12.5px"><strong>' + esc(t.conditions) + '</strong><br>' + esc(pol) + '</div>';
+    el.innerHTML = h;
+}
+
 async function charger() {
-  // Le jeton est dans le chemin : /book/<jeton>. Le `?token=` reste accepte pour
-  // le diagnostic direct de l'endpoint.
-  var m = location.pathname.match(/\/book\/([A-Za-z0-9_-]{43})$/);
-  jeton = m ? m[1] : new URLSearchParams(location.search).get('token');
   if (!jeton) return montrerEtat(t.introuvable);
 
   var r;
@@ -628,6 +717,7 @@ function rendreDevis() {
   $('recap').innerHTML = h;
 
   form.hidden = false;
+  rendrePolitique();
   majBouton();
 }
 
@@ -643,6 +733,17 @@ function formValide() {
   return !!($('prenom').value.trim() && $('nom').value.trim() &&
     /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && $('tel').value.trim().length >= 6);
 }
+// ⚠ AFFICHEE AVANT LE BOUTON DE PAIEMENT (§6.5). Le §2 la declare « affichee
+// clairement AVANT le paiement » : un voyageur ne doit pas payer sans connaitre
+// ses conditions. Elle est aussi reprise dans l'e-mail.
+function rendrePolitique() {
+  var el = $('politique');
+  if (!bien || !bien.politique_annulation) { el.hidden = true; return; }
+  var texte = t['pol_' + bien.politique_annulation] || t.pol_non_remboursable;
+  el.hidden = false;
+  el.innerHTML = '<strong>' + esc(t.conditions) + '</strong>' + esc(texte);
+}
+
 function majBouton() {
   var b = $('valider');
   b.textContent = paiement.actif ? t.payer : t.valider;
@@ -698,6 +799,7 @@ async function allerAuPaiement() {
 // ─── Demarrage ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
   appliquerLangue(langueInitiale());
+  resoudreJeton();          // ⚠ AVANT afficherRetour : il en a besoin
   afficherRetour();
   montrerEtat(t.chargement);
 

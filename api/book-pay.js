@@ -243,6 +243,10 @@ module.exports = async function handler (req, res) {
       amount_cents: montant, currency: bien.currency || 'EUR',
       price_coefficient: lien.price_coefficient,
       price_detail: devis2.detail,
+      // ⚠ FIGEE AU MOMENT DE LA VENTE (§6.5). Ce que l'hote change apres ne
+      // s'applique PAS a une reservation deja vendue : le voyageur a paye en
+      // lisant des conditions, ce sont celles-la qui l'engagent.
+      cancellation_policy: bien.cancellation_policy || 'non_remboursable',
       status: ETAT.EN_ATTENTE,
       idempotency_key: cle,
       hold_expires_at: tenue,
@@ -327,7 +331,10 @@ module.exports = async function handler (req, res) {
           }
         }
       }],
-      success_url: `${retour}?paiement=ok`,
+      // ⚠ `t` porte l'identifiant de tentative : c'est ce qui permet a la page
+      // de retour d'afficher la VRAIE reservation (§6.3) plutot qu'un message
+      // generique. Ce qu'il expose est borne par l'endpoint, pas par l'URL.
+      success_url: `${retour}?paiement=ok&t=${ligne.id}`,
       cancel_url: `${retour}?paiement=annule`,
       client_reference_id: ligne.id,
       customer_email: v.voyageur.email,
