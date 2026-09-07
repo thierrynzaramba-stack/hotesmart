@@ -33,8 +33,14 @@ sans code spécifique. L'hôte n'a rien à faire.
   trilingue, avec récapitulatif, politique d'annulation, contact hôte
   (`telephone_hote`). Prévoir le canal email réutilisable par la saisie
   manuelle plus tard.
-- **Stripe : compte propre de l'hôte-fondateur en v1** (pas de Connect
-  multi-hôtes — v2). Mode test d'abord, bascule live à la migration.
+- **Stripe : compte DÉDIÉ aux réservations** (pas de Connect multi-hôtes — v2).
+  Mode test d'abord, bascule live à la migration.
+  ⚠ **Corrigé le 7 septembre 2026** : la version initiale disait « compte propre
+  de l'hôte-fondateur », c'est-à-dire le même compte que la facturation SaaS —
+  l'argent des voyageurs et les revenus HôteSmart mélangés dans un seul tableau
+  de bord. Thierry a créé un **compte séparé**, qui isole l'argent qui ne lui
+  appartient pas. Contrepartie assumée : la bascule en live (phase 4) demande
+  **deux activations** (SIRET, IBAN, pièce d'identité, une fois par compte).
 - **Ordre paiement/création — la règle qui protège l'argent** :
   1. verrou + vérification capacité/stop-sell (rien n'est promis avant),
   2. paiement Stripe confirmé (PaymentIntent, 3DS),
@@ -124,9 +130,25 @@ dérivés décrivent ce que les OTA vendent, jamais ce que l'hôte vend en direc
 
 ### Stripe
 
-Le webhook des paiements de réservation est un **endpoint DÉDIÉ**, distinct de
-`api/stripe.js` (facturation SaaS). On ne touche pas au webhook existant : le
-casser couperait la facturation des abonnements.
+Le webhook des paiements de réservation est un **endpoint DÉDIÉ**,
+`api/book-webhook.js`, distinct de `api/stripe.js` (facturation SaaS). On ne
+touche pas au webhook existant : le casser couperait la facturation des
+abonnements.
+
+**Variables d'environnement du moteur** — préfixe `BOOKING_STRIPE_*`, suivant la
+convention de préfixe par domaine du dépôt (`ALERT_*`, `CHANNEL_*`,
+`OVERBOOKING_*`). Elles ne doivent JAMAIS remplacer `STRIPE_SECRET_KEY` ni
+`STRIPE_WEBHOOK_SECRET`, qui appartiennent au SaaS et pointent vers l'autre
+compte :
+
+| Variable | Valeur | Nature |
+|---|---|---|
+| `BOOKING_STRIPE_SECRET_KEY` | `sk_test_…` | secret |
+| `BOOKING_STRIPE_PUBLISHABLE_KEY` | `pk_test_…` | publique (atteint le navigateur) |
+| `BOOKING_STRIPE_WEBHOOK_SECRET` | `whsec_…` | secret |
+
+Webhook Stripe → `https://hotesmart.vercel.app/api/book-webhook`, événements
+`payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`.
 
 ## 3 ter. Amendement gravé (Thierry, 7 septembre 2026) — LIENS MULTIPLES, COEFFICIENT, APP DE CONFIG
 
