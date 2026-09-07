@@ -138,11 +138,14 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
-Prochain chantier (court, avant la phase 3) : **audit stop_sell des chemins
-d'inventaire** — `lib/channel-availability.js`, `lib/rate-sync.js`, ligne
-« Disponibilité » du calendrier — car écrire la disponibilité seule LÈVE le
-stop-sell chez Channex (constaté en production, docs/kb/reservation-directe.md
-§8) ; **plus** le fix des 6 tests à dates figées de
+Prochain chantier (court, avant la phase 3) : **audit stop_sell** —
+docs/specs/spec-audit-stop-sell.md. Principe grave : le coeur memorise
+l'INTENTION commerciale de l'hote par jour et par bien, toute poussee
+d'inventaire la restitue, seul un geste volontaire de l'hote la met a jour ;
+le stop_sell est une decision MEMORISEE, le stock une consequence CALCULEE.
+La memoire est `calendar_inventory` (writer unique : api/calendar.js POST) mais
+elle est vide d'intention (0 ligne stop_sell=true, 1 bien sur 4) — la rendre
+vraie est l'etape 0. Inclut le fix des 6 tests a dates figees de
 tests/cleaning-sync-menages-entite.test.js.
 
 Ensuite : prestataires (fiche + convergence des deux populations +

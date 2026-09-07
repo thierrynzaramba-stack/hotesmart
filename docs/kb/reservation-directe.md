@@ -180,6 +180,17 @@ Cela concerne tout code qui pousse de l'inventaire : `lib/channel-availability.j
 `lib/rate-sync.js`, la ligne « Disponibilité » du calendrier. **À auditer** — ce
 KB documente le fait, il ne prétend pas que tous les chemins le respectent.
 
+**Le principe de la correction est gravé** dans `docs/specs/spec-audit-stop-sell.md`
+§1 : le cœur mémorise l'**intention** de l'hôte par jour et par bien, toute poussée
+d'inventaire la restitue, et seul un geste volontaire de l'hôte la met à jour. Le
+stop_sell est une **décision mémorisée**, le stock une **conséquence calculée** —
+ne jamais les confondre.
+
+⚠ Mesuré le 7 septembre 2026 : la mémoire (`calendar_inventory`) porte **0 ligne
+`stop_sell = true`** alors que Colomiers est réellement fermé chez Channex, et
+n'existe que pour **1 bien sur 4**. Réaffirmer cette mémoire-là rejouerait
+l'incident automatiquement. La rendre vraie est l'étape 0 du chantier.
+
 ### Le champ local ne dit pas la vérité du provider
 
 `properties.ota_connect_status` valait `draft` sur Colomiers, ce qui m'a fait
