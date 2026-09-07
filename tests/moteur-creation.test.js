@@ -524,3 +524,16 @@ test('l heure d encaissement n est ecrite QUE sur le passage a paye', () => {
   assert.equal(ecritures.length, 1,
     `${ecritures.length} ecritures de paid_at en base — l'heure du paiement ne doit jamais bouger`)
 })
+
+
+test('l incident de REMBOURSEMENT porte aussi les faits', () => {
+  // Constat de Thierry a la reception du premier : « Reservation impossible —
+  // voyageur rembourse » disait la cause et le montant, mais pas les dates, pas
+  // le voyageur, pas l heure, pas le code. L exigence « trancher sans ouvrir un
+  // ecran » vaut pour TOUTE notification d argent.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib/moteur-creation.js'), 'utf8')
+  const bloc = src.slice(src.indexOf("reportIncident('reservation_remboursee'"))
+  assert.match(bloc.slice(0, 300), /faits\(t\)/,
+    'l incident de remboursement doit porter dates, montant, voyageur, heure et code')
+})

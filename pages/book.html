@@ -462,8 +462,16 @@ function rendreConfirmation() {
     h += '<div class="ligne"><span class="lib">' + esc(t.nuits_label) + '</span><span>' + esc(d.nuits) + '</span></div>';
     h += '<div class="ligne"><span class="lib">' + esc(t.voyageurs_label) + '</span><span>' + esc(d.voyageurs) + '</span></div>';
     h += '<div class="ligne total"><span>' + esc(t.total) + '</span><span>' + esc(argent(d.total, d.devise)) + '</span></div>';
-    var pol = t['pol_' + d.politique_annulation] || t.pol_non_remboursable;
-    h += '<div style="margin-top:10px;font-size:12.5px"><strong>' + esc(t.conditions) + '</strong><br>' + esc(pol) + '</div>';
+    // ⚠ PAS DE CONDITIONS D'ANNULATION SUR UNE RESERVATION QUI N'EXISTE PAS.
+    // Constate a la validation reelle : la page disait « vous avez ete
+    // integralement rembourse » PUIS « cette reservation n'est pas
+    // remboursable ». Absurde, et inquietant pour quelqu'un qu'on vient de
+    // rembourser. Une politique d'annulation n'a de sens que sur un sejour qui
+    // tient encore.
+    if (d.statut !== 'refunded') {
+      var pol = t['pol_' + d.politique_annulation] || t.pol_non_remboursable;
+      h += '<div style="margin-top:10px;font-size:12.5px"><strong>' + esc(t.conditions) + '</strong><br>' + esc(pol) + '</div>';
+    }
     el.innerHTML = h;
 }
 

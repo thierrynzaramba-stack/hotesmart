@@ -260,3 +260,16 @@ test('les quatre politiques d annulation sont dites dans les trois langues', () 
     }
   }
 })
+
+
+test('une reservation REMBOURSEE n affiche pas de conditions d annulation', () => {
+  // ⚠ Constate a la validation reelle : la page disait « vous avez ete
+  // integralement rembourse » PUIS « cette reservation n est pas remboursable ».
+  // Une politique d annulation n a de sens que sur un sejour qui tient encore.
+  const bloc = source.slice(source.indexOf('function rendreConfirmation'),
+                            source.indexOf('function ligne('))
+  assert.match(bloc, /if \(d\.statut !== 'refunded'\) \{/)
+  const posPol = bloc.indexOf("t['pol_' + d.politique_annulation]")
+  const posGarde = bloc.indexOf("d.statut !== 'refunded'")
+  assert.ok(posGarde >= 0 && posGarde < posPol, 'la garde doit preceder l affichage')
+})
