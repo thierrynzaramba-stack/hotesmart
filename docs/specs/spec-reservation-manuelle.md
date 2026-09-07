@@ -229,4 +229,9 @@ supplémentaire** (`GET /restrictions`), à ne faire qu'au moment de la confirma
 - Paiement voyageur (Stripe) — phase 3.
 - Page publique / moteur de réservation — phase 3 (réutilise §3 et §4 tels quels).
 - Chemin d'écriture Beds24 — jamais (les hôtes Beds24 ont Beds24).
-- Migration des biens de Thierry — phase 4.
+- Migration des biens de Thierry — phase 4. ⚠ Le basculement doit **amorcer la
+  mémoire d'intention commerciale** (`calendar_inventory.stop_sell`) depuis l'état
+  Beds24 réel, comme fait pour Colomiers depuis Channex le 7 septembre 2026 :
+  `docs/specs/spec-audit-stop-sell.md` §4. Avant la phase 4, ces biens n'ont
+  volontairement aucune mémoire — HôteSmart ne pilote pas leur inventaire, et une
+  intention sans effecteur divergerait.

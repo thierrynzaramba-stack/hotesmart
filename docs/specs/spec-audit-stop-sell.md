@@ -116,12 +116,36 @@ conversion, une fois :
    mauvaise colonne passe dans la bonne.
 3. `avail` **recalculé depuis le cœur** (`inventory_units` − réservations
    `confirmed` de la nuit), plus jamais interprété comme une intention.
-4. Couvrir les biens absents (les deux Beds24 : la mémoire doit-elle exister pour
-   eux, sachant que Beds24 n'a pas le même modèle d'inventaire ?).
-
 **Contrôle avant / après affiché, et validé par Thierry AVANT toute écriture.**
 Aucune écriture chez Channex à l'étape 0 : la réconciliation n'écrit que la
 mémoire locale.
+
+**Fait le 7 septembre 2026** — `scripts/audit-stop-sell.js` (lecture seule) puis
+`scripts/reconcilier-stop-sell.js --bien=<uuid> --ecrire`. Colomiers : 500 lignes
+converties, `stop_sell` false → true sur les 500, `avail` recalculé à 1 partout
+(aucune nuit occupée sur la fenêtre : le seul séjour à venir était le test du
+12-16 novembre, annulé). Contrôle après : 500 `stop_sell = true`, 0 `avail = 0`,
+aucune divergence avec le provider, 500 dates inchangées au second passage.
+
+⚠ Le provider porte encore `availability = 0` sur ces dates. C'est **le stock**,
+pas l'intention : il se réalignera à la prochaine poussée, qui portera
+`stop_sell = true` avec lui. La fermeture ne dépend plus d'un stock à zéro.
+
+### Périmètre de l'amorce — décidé le 7 septembre 2026
+
+**« colomier » (minuscule, `2ddfd913`) est HORS périmètre.** Bien du compte de
+test, **jamais provisionné**. Le provider répond pour lui (500 dates, 47 en
+`stop_sell`), mais il ne doit être ni réconcilié ni supprimé : sa suppression
+tombe sous la **cascade FK**, qui est un blocant beta à part entière.
+→ **bien de test, à purger au chantier cascade FK.**
+
+**Les deux biens Beds24 n'ont PAS de mémoire d'intention avant la phase 4.**
+HôteSmart ne pilote pas leur inventaire : une intention sans effecteur
+divergerait — on mémoriserait une décision que rien n'applique, et le premier
+écart serait invisible.
+→ **à graver dans le plan de migration** : *amorcer la mémoire d'intention depuis
+l'état Beds24 réel au moment du basculement, comme fait pour Colomiers depuis
+Channex.* L'amorce fait partie du basculement, pas d'un rattrapage ultérieur.
 
 **Étape 1 — la réaffirmation.** `pushAvailabilityOnce` lit la mémoire des dates
 touchées et pousse `/restrictions` dans la foulée. Même chose pour la branche
