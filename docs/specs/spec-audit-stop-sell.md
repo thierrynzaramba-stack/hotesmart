@@ -28,7 +28,29 @@ l'hôte ait à refaire un geste. C'est la mémoire qui parle, pas l'historique.
 Corollaire de méthode : la réaffirmation s'appuie sur **la mémoire du cœur**, pas
 sur une relecture de l'état Channex. Relire le provider pour savoir ce que l'hôte
 veut, c'est prendre la conséquence pour la cause — et hériter de tout écart déjà
-présent chez lui.
+présent chez lui. Le provider est une **amorce, une seule fois** (étape 0) ;
+jamais une source permanente ensuite.
+
+## 1 bis. UN RÔLE PAR COLONNE (décision de Thierry, 7 septembre 2026)
+
+| colonne | rôle | statut |
+|---|---|---|
+| `calendar_inventory.stop_sell` | **l'intention de l'hôte** | la **seule** chose mémorisée, et restituée à chaque poussée |
+| `calendar_inventory.avail` | **le stock** | **jamais** mémorisé comme intention — **calculé au moment de pousser** |
+
+Le stock se calcule depuis le cœur, à l'instant de la poussée :
+
+```
+avail(nuit) = inventory_units(bien) − réservations confirmed occupant cette nuit
+```
+
+La colonne `avail` devient **au plus une trace de la dernière valeur poussée**,
+jamais une source de vérité. Rien ne doit la lire pour décider quoi que ce soit.
+
+C'est ce qui rend vraie la conséquence du §1 : une réservation sur un jour d'abord
+fermé puis rouvert par l'hôte redevient vendable **dès que la réservation tombe** —
+le stock est recalculé, l'intention mémorisée dit « ouvert », et personne n'a eu
+à refaire un geste.
 
 ## 2. Où vit le stop_sell aujourd'hui, et ce qu'il vaut
 
@@ -84,15 +106,22 @@ de couverture.
 ## 4. Les étapes
 
 **Étape 0 — rendre la mémoire vraie.** Sans elle, rien d'autre ne tient.
-- Décider ce que porte `avail` (stock ? intention ? les deux ?) et, si les deux,
-  les séparer. **À trancher par Thierry** — c'est un choix de modèle, pas un détail.
-- Réconcilier une fois l'état réel du provider dans `calendar_inventory` pour les
-  biens Channex actifs : lecture unique de `GET /restrictions` + `/availability`,
-  écriture dans la mémoire, **puis plus jamais**. Le provider sert d'amorce, pas
-  de source permanente.
-- Couvrir les biens absents (les deux Beds24 : la mémoire doit-elle exister pour
-  eux, sachant que Beds24 n'a pas le même modèle d'inventaire ?).
-- Contrôle : afficher la mémoire face au provider avant / après, et faire valider.
+Le rôle des colonnes est tranché (§1 bis) ; la réconciliation applique cette
+conversion, une fois :
+
+1. `GET /restrictions` chez Channex → `stop_sell` local. C'est l'amorce, et la
+   seule fois où le provider parle d'intention.
+2. Les `avail = 0` qui **exprimaient une fermeture** basculent en
+   `stop_sell = true`. C'est la conversion du modèle : ce qui était dit dans la
+   mauvaise colonne passe dans la bonne.
+3. `avail` **recalculé depuis le cœur** (`inventory_units` − réservations
+   `confirmed` de la nuit), plus jamais interprété comme une intention.
+4. Couvrir les biens absents (les deux Beds24 : la mémoire doit-elle exister pour
+   eux, sachant que Beds24 n'a pas le même modèle d'inventaire ?).
+
+**Contrôle avant / après affiché, et validé par Thierry AVANT toute écriture.**
+Aucune écriture chez Channex à l'étape 0 : la réconciliation n'écrit que la
+mémoire locale.
 
 **Étape 1 — la réaffirmation.** `pushAvailabilityOnce` lit la mémoire des dates
 touchées et pousse `/restrictions` dans la foulée. Même chose pour la branche
