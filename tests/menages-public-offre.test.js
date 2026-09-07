@@ -107,7 +107,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             const bon = a.f.user_id === U &&
                         String(a.f.property_id) === '209413' &&
                         String(a.f.booking_id) === 'b1' &&
-                        a.f.departure_date === '2026-09-05'
+                        a.f.departure_date === DEPART
             return Promise.resolve({ data: bon ? menage : null, error: null })
           }
           return Promise.resolve({ data: null, error: null })
@@ -162,9 +162,18 @@ function reponse () {
   r.end = () => r
   return r
 }
+// ⚠ DATE RELATIVE. Un départ figé au 5 septembre 2026 est sorti de la fenêtre de
+// proposition (J-1 .. J+7) le 7 septembre, et quatre tests d'escalade sont passés
+// au rouge sans qu'une ligne de code ait bougé : l'endpoint lit l'horloge réelle.
+const DEPART = (() => {
+  const d = new Date()
+  d.setDate(d.getDate() + 3)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})()
+
 const post = (action, over = {}) => ({
   method: 'POST', query: { token: TOKEN }, headers: {},
-  body: { action, booking_id: 'b1', property_id: '209413', departure_date: '2026-09-05', ...over }
+  body: { action, booking_id: 'b1', property_id: '209413', departure_date: DEPART, ...over }
 })
 
 // ─── L'acceptation ─────────────────────────────────────────────────────────

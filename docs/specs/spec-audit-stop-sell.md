@@ -147,22 +147,101 @@ divergerait — on mémoriserait une décision que rien n'applique, et le premie
 l'état Beds24 réel au moment du basculement, comme fait pour Colomiers depuis
 Channex.* L'amorce fait partie du basculement, pas d'un rattrapage ultérieur.
 
-**Étape 1 — la réaffirmation.** `pushAvailabilityOnce` lit la mémoire des dates
-touchées et pousse `/restrictions` dans la foulée. Même chose pour la branche
-availability de `api/calendar.js`. Relecture systématique, jamais de supposition.
+**Étape 1 — la réaffirmation.** ✅ **Faite le 7 septembre 2026.**
 
-**Étape 2 — les écritures contre l'intention.** Retirer les `stop_sell:false` en
-dur du segment « nuits orphelines » (mobile) : un champ non touché par l'hôte ne
-doit **jamais** partir dans un segment.
+`lib/channel-availability.js` porte `reaffirmerStopSell` : après toute poussée de
+stock, il lit **la mémoire** (jamais le provider), coalesce les nuits en plages et
+pousse `/restrictions`. Les règles tenues :
 
-**Étape 3 — le test de non-régression.** Un test qui échoue si un `/availability`
-part sans `/restrictions` sur une date dont la mémoire dit `stop_sell = true`.
+- **La restitution suit la TENTATIVE, pas le succès.** `fetch` peut échouer après
+  que le serveur a traité l'écriture ; un stop-sell levé sans qu'on le sache est
+  précisément l'incident. Restituer deux fois ne coûte rien.
+- **Une date sans ligne en mémoire n'est pas poussée**, et **`stop_sell = NULL`
+  non plus**. Une ligne créée par une simple édition de tarif ne porte aucune
+  décision : la pousser en `false` inventerait une intention, et rouvrirait un
+  bien fermé hors HôteSmart au premier changement de prix.
+- **Une erreur de lecture ne vaut pas « rien à restituer ».** Incident
+  `stop_sell_perdu` — c'est le cas où l'on rouvrirait sans le savoir. Idem quand
+  le bien n'a pas de rate plan alors qu'une fermeture est mémorisée : le stock est
+  déjà parti, plus rien ne peut être restitué.
+- **Elle ne fait jamais tomber l'appelant.** Sur le chemin du cron,
+  `pollChannelFeed` acke la révision **après** ce retour : une panne réseau ici
+  bloquerait le feed, rejouerait la révision toutes les 5 minutes et laisserait le
+  reste de la page non traité. `try/catch` autour de l'appel.
 
-**Étape 4 — les 6 tests à dates figées.** `tests/cleaning-sync-menages-entite.test.js`
-porte ~40 dates en dur `2026-09-0x` contre une fenêtre de proposition à 7 jours.
-Passage en dates relatives calculées depuis un `AUJOURDHUI` unique, **sans toucher
-un seul assert**. Sans rapport avec le stop_sell, mais c'est la dette qui masque
-les vraies régressions à chaque `npm test`.
+**Le geste de fermeture de l'hôte écrit désormais l'intention.** `api/calendar.js` :
+« Disponibilité : Fermé » n'écrivait que `avail = 0`. C'est le geste le plus
+courant — et le **seul** du calendrier mobile, qui n'expose aucun contrôle « stop
+vente ». La mémoire restait donc à `false`, et la première annulation repoussait
+`availability: 1` en réaffirmant activement `stop_sell: false` : la fermeture de
+l'hôte s'effaçait toute seule. `avail === 0` pose maintenant `stop_sell = true`
+dans la mémoire ; un `stop_sell` explicite, réglé dans le même enregistrement,
+l'emporte. `avail` reste écrit — c'est la trace de la dernière valeur poussée.
+
+**L'ordre était inversé** dans `api/calendar.js` : les restrictions partaient
+d'abord, l'availability les effaçait ensuite. Availability d'abord désormais, puis
+restrictions, puis restitution de la mémoire sur **l'union des dates touchées** —
+en mode `keep` le bloc restrictions ne part pas du tout, et fermer des dates y
+laissait l'hôte devant un « enregistré » alors que rien n'était parti aux
+plateformes.
+
+### ⚠ Pas de relecture immédiate — et c'est un choix
+
+Le KB dit « vérifier, jamais supposer ». La vérification existe, mais elle **ne
+peut pas être en ligne** : le POST ARI rend un **id de tâche**, Channex applique
+en différé. Un `GET` lancé dans la foulée lit l'état d'**avant** et crierait
+« stop-sell perdu » à chaque fermeture légitime — une alerte fondateur par heure
+qui, par l'anti-spam, masquerait la vraie le jour où elle arrive. **Une
+vérification qui crie à tort ne vérifie rien.**
+
+La vérification est donc **délibérée et hors chemin chaud** :
+`node scripts/audit-stop-sell.js` compare la mémoire au provider, bien par bien,
+sur 500 jours et en plages de 100. À jouer après tout changement d'inventaire de
+grande ampleur.
+
+**Étape 1 bis — dette assumée.** `pushAvailabilityOnce` pousse encore un stock
+**binaire** (0 ou 1 selon le statut de la réservation) et non
+`inventory_units − réservations de la nuit`. Sans conséquence tant que tous les
+biens sont à 1 unité — c'est le cas de tout le parc. À corriger **le jour où un
+bien dépasse une unité**, pas avant.
+
+**Étape 2 — les écritures contre l'intention.** ✅ **Faite.**
+`pages/calendrier-mobile.html` : le segment « nuits orphelines » portait
+`stop_sell: false` en dur et l'envoyait à chaque autofix. Rendre une nuit isolée
+réservable, c'est lever un séjour minimum — pas rouvrir à la vente un jour que
+l'hôte a fermé. Un champ que l'hôte n'a pas touché ne voyage plus dans un segment.
+
+**Étape 3 — le test de non-régression.** ✅ **Faite.**
+
+`tests/stop-sell-reaffirmation.test.js`, 13 cas : la restitution a bien lieu,
+**dans le bon ordre**, une seule plage pour des nuits contiguës, rien n'est poussé
+sans mémoire ni sur des `NULL`, l'intention est restituée telle quelle (ouverte
+comme fermée), la restitution suit la tentative même quand `/availability` échoue,
+aucune exception ne remonte à l'appelant, et les chemins d'incident. Le double
+Supabase **enregistre les `.eq()`** : rien ne doit lire la mémoire sur le propId
+provider (TEXT) au lieu de l'UUID.
+
+`tests/endpoints-groupe3.test.js`, 3 cas de plus **sur `api/calendar.js`** — c'est
+là que l'inversion d'ordre vivait, et le test de `channel-availability` ne couvrait
+pas ce fichier : l'ordre des deux appels ARI, « Disponibilité : Fermé » qui écrit
+l'intention, et le `stop_sell` explicite qui l'emporte.
+
+**Étape 4 — les 6 tests à dates figées.** ✅ **Faite. La suite est à 1558/1558.**
+
+Les six échecs venaient de deux fichiers, et de la même cause : la fenêtre de
+proposition ne couvre que **J-1 à J+7** (`lib/cleaning/assign.js`), et un départ
+figé au 5 septembre 2026 en est sorti le 7. Aucune ligne de code n'avait bougé.
+
+- `tests/cleaning-sync-menages-entite.test.js` : 40 dates passées en `jour(n)`,
+  relatif au jour courant — **mais seulement avant la section « jours attitrés »**.
+  Les tests suivants injectent `maintenant` et **gardent leurs dates écrites** :
+  ils dépendent du **jour de la semaine** (règles RRULE), qu'une date glissante
+  rendrait aléatoire. Un test figé qui injecte son horloge est déterministe ; un
+  test figé qui lit l'horloge réelle est une bombe à retardement.
+- `tests/menages-public-offre.test.js` : l'endpoint lit l'horloge réelle, le
+  départ du corps de requête devient `aujourd'hui + 3`.
+
+Aucun assert de comportement n'a changé.
 
 ## 5. Déploiement
 

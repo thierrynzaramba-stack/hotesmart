@@ -626,7 +626,13 @@
         // appliquer la correction aux orphelines actuelles si autofix
         if(o.autofix && orphanSet.size){
           [...orphanSet].sort().forEach(iso=>{
-            const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false, stop_sell:false }
+            // stop_sell N'EST PAS DANS CE SEGMENT, et c'est delibere : rendre une
+            // nuit orpheline reservable, c'est lever un sejour minimum, pas rouvrir
+            // a la vente un jour que l'hote a ferme. Le `stop_sell:false` qui figurait
+            // ici partait a chaque autofix et effacait l'intention memorisee sans que
+            // personne ne l'ait demande. Un champ que l'hote n'a pas touche ne doit
+            // jamais voyager dans un segment.
+            const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false }
             if(o.price.enabled && o.price.value!=='' && !isNaN(parseFloat(o.price.value))){ seg.rate=computeFinal(rateFor(iso),o.price.mode,o.price.unit,parseFloat(o.price.value)) }
             segments.push(seg)
           })

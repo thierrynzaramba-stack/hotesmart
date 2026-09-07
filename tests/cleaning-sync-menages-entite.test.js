@@ -170,9 +170,22 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
   return etat
 }
 
+// ⚠ DATES RELATIVES, ET C'EST LA LEÇON D'UN ÉCHEC. Ces dates étaient figées au
+// 5 septembre 2026 ; la fenêtre de proposition ne couvre que J-1 à J+7, et le
+// 7 septembre six tests sont passés au rouge sans qu'une ligne de code ait bougé.
+// Un test qui lit l'horloge réelle doit calculer ses dates par rapport à elle.
+// Les tests d'après la section « Les jours attitrés » injectent `maintenant` :
+// ceux-là gardent leurs dates écrites, et le doivent — ils dépendent du JOUR DE
+// LA SEMAINE (règles RRULE), qu'une date glissante rendrait aléatoire.
+const jour = (n) => {
+  const d = new Date()
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const SNAP = (over = {}) => ({
   user_id: U, property_id: '209413', booking_id: 'b1',
-  snapshot: { status: 'confirmed', arrival: '2026-09-01', departure: '2026-09-05', ...over }
+  snapshot: { status: 'confirmed', arrival: jour(-1), departure: jour(3), ...over }
 })
 
 // ─── Les ménages fantômes ──────────────────────────────────────────────────
@@ -184,9 +197,9 @@ test('seul un séjour CONFIRMÉ produit un ménage', async () => {
   // sur un logement vide.
   const etat = preparer({ snaps: [
     SNAP({ status: 'confirmed' }),
-    { ...SNAP(), booking_id: 'b2', snapshot: { status: 'blocked', departure: '2026-09-06' } },
-    { ...SNAP(), booking_id: 'b3', snapshot: { status: 'request', departure: '2026-09-07' } },
-    { ...SNAP(), booking_id: 'b4', snapshot: { status: 'cancelled', departure: '2026-09-08' } }
+    { ...SNAP(), booking_id: 'b2', snapshot: { status: 'blocked', departure: jour(4) } },
+    { ...SNAP(), booking_id: 'b3', snapshot: { status: 'request', departure: jour(5) } },
+    { ...SNAP(), booking_id: 'b4', snapshot: { status: 'cancelled', departure: jour(6) } }
   ], liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }] })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
@@ -241,9 +254,9 @@ test('un bien SANS prestataire lié n\'alerte PAS', async () => {
 test('une seule alerte par BIEN, pas une par ménage', async () => {
   // Trois départs non assignables sur le même bien sont un seul problème.
   const etat = preparer({
-    snaps: [SNAP({ departure: '2026-09-05' }),
-            { ...SNAP(), booking_id: 'b2', snapshot: { status: 'confirmed', departure: '2026-09-06' } },
-            { ...SNAP(), booking_id: 'b3', snapshot: { status: 'confirmed', departure: '2026-09-07' } }],
+    snaps: [SNAP({ departure: jour(3) }),
+            { ...SNAP(), booking_id: 'b2', snapshot: { status: 'confirmed', departure: jour(4) } },
+            { ...SNAP(), booking_id: 'b3', snapshot: { status: 'confirmed', departure: jour(5) } }],
     // Une liaison existe mais elle est INACTIVE : `chargerLiaisons` ne la
     // ramène pas, donc `aucuneLiaison` est vrai — pas d'alerte non plus.
     liaisons: []
@@ -259,7 +272,7 @@ test('un ménage déjà en base n\'est pas réécrit', async () => {
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }],
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -274,7 +287,7 @@ test('une assignation MANUELLE n\'est jamais reprise par l\'automate', async () 
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted',
+                departure_date: jour(3), status: 'accepted',
                 provider_id: NOUVELLE, assigned_by: 'manual' }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
@@ -290,9 +303,9 @@ test('une réservation annulée annule le ménage — elle ne le supprime pas', 
   // Une prestataire a pu s'organiser autour, et l'historique de qualité s'appuie
   // dessus : on annule, on n'efface pas.
   const etat = preparer({
-    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: '2026-09-05' } }],
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }],
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -307,15 +320,15 @@ test('un départ DÉPLACÉ annule l\'ancien ménage et en crée un nouveau', asy
   // La date fait partie de l'identité : sans annulation, l'ancien resterait au
   // planning de la prestataire pour un séjour qui n'existe plus.
   const etat = preparer({
-    snaps: [SNAP({ departure: '2026-09-08' })],
+    snaps: [SNAP({ departure: jour(6) })],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }],
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
   assert.strictEqual(bilan.crees, 1)
-  assert.strictEqual(etat.inseres[0].departure_date, '2026-09-08')
+  assert.strictEqual(etat.inseres[0].departure_date, jour(6))
   assert.strictEqual(bilan.annules, 1)
   assert.deepStrictEqual(etat.majs[0].ids, ['m1'])
 })
@@ -348,7 +361,7 @@ test('une panne de lecture des snapshots N\'ANNULE RIEN', async () => {
   const etat = preparer({
     erreurSnaps: { message: 'timeout' },
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }]
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
@@ -390,13 +403,13 @@ const { LOT_MAX } = require('../lib/cleaning/sync-menages-entite')
 test('lecture TRONQUÉE : aucune annulation, et le bilan le dit', async () => {
   const beaucoup = Array.from({ length: LOT_MAX }, (_, i) => ({
     ...SNAP(), booking_id: `b${i}`,
-    snapshot: { status: 'confirmed', departure: '2026-09-05' }
+    snapshot: { status: 'confirmed', departure: jour(3) }
   }))
   const etat = preparer({
     snaps: beaucoup,
     // Ce ménage-là n'est dans aucune ligne lue : sans la garde, il serait annulé.
     menages: [{ id: 'm-hors-lot', user_id: U, property_id: '209413', booking_id: 'b-loin',
-                departure_date: '2026-09-20', status: 'accepted', provider_id: REGINA }],
+                departure_date: jour(18), status: 'accepted', provider_id: REGINA }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -422,7 +435,7 @@ test('un ménage annulé à tort est RESSUSCITÉ quand sa réservation est là',
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'cancelled', provider_id: null }],
+                departure_date: jour(3), status: 'cancelled', provider_id: null }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -443,7 +456,7 @@ test('la résurrection REND UNE LIGNE COHÉRENTE, elle ne repeint pas un statut'
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'cancelled',
+                departure_date: jour(3), status: 'cancelled',
                 provider_id: REGINA, assigned_by: 'auto' }],
     liaisons: []   // plus aucune liaison : le ménage doit redevenir SANS personne
   })
@@ -464,9 +477,9 @@ test('un snapshot ANTÉRIEUR à l\'unification n\'est pas pris pour une annulati
   // annulait son ménage, pendant que le planning de l'hôte continuait de
   // l'afficher, puisque lui lit le statut canonique.
   const etat = preparer({
-    snaps: [{ ...SNAP(), snapshot: { status: 'new', departure: '2026-09-05' } }],
+    snaps: [{ ...SNAP(), snapshot: { status: 'new', departure: jour(3) } }],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }],
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -480,7 +493,7 @@ test('un blocage propriétaire legacy (`black`) ne devient PAS un ménage', asyn
   // provider du bien ferait retomber 'black' sur 'confirmed', et le ménage
   // fantôme reviendrait par la porte qu'on vient d'ouvrir.
   const etat = preparer({
-    snaps: [{ ...SNAP(), snapshot: { status: 'black', departure: '2026-09-05' } }],
+    snaps: [{ ...SNAP(), snapshot: { status: 'black', departure: jour(3) } }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -510,7 +523,7 @@ test('un ménage resté SANS personne est assigné dès qu\'une liaison existe',
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'unassigned',
+                departure_date: jour(3), status: 'unassigned',
                 provider_id: null, assigned_by: null }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
@@ -526,11 +539,11 @@ test('le rattrapage ne touche NI un ménage manuel NI une offre en cours', async
   // Les réassigner reviendrait à défaire une décision — celle de l'hôte, ou
   // celle d'une prestataire qui a déjà été sollicitée.
   const etat = preparer({
-    snaps: [SNAP(), { ...SNAP(), booking_id: 'b2', snapshot: { status: 'confirmed', departure: '2026-09-06' } }],
+    snaps: [SNAP(), { ...SNAP(), booking_id: 'b2', snapshot: { status: 'confirmed', departure: jour(4) } }],
     menages: [
-      { id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1', departure_date: '2026-09-05',
+      { id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1', departure_date: jour(3),
         status: 'unassigned', provider_id: null, assigned_by: 'manual' },
-      { id: 'm2', user_id: U, property_id: '209413', booking_id: 'b2', departure_date: '2026-09-06',
+      { id: 'm2', user_id: U, property_id: '209413', booking_id: 'b2', departure_date: jour(4),
         status: 'offered', provider_id: NOUVELLE, assigned_by: 'auto' }
     ],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
@@ -543,9 +556,9 @@ test('le rattrapage ne touche NI un ménage manuel NI une offre en cours', async
 
 test('le rattrapage ne ressuscite pas un ménage annulé par la bande', async () => {
   const etat = preparer({
-    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: '2026-09-05' } }],
+    snaps: [{ ...SNAP(), snapshot: { status: 'cancelled', departure: jour(3) } }],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'cancelled', provider_id: null }],
+                departure_date: jour(3), status: 'cancelled', provider_id: null }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
@@ -595,7 +608,7 @@ test('un bien INCONNU de `properties` ne produit aucun ménage', async () => {
   // propriétaire redevenait donc un ménage dès que le bien n'avait plus de ligne
   // `properties` — cas atteignable, rien ne purge les snapshots d'un bien retiré.
   const etat = preparer({
-    snaps: [{ ...SNAP(), snapshot: { status: 'black', departure: '2026-09-05' } }],
+    snaps: [{ ...SNAP(), snapshot: { status: 'black', departure: jour(3) } }],
     biens: [],
     liaisons: []
   })
@@ -613,7 +626,7 @@ test('un bien inconnu ne fait pas non plus ANNULER ses ménages', async () => {
     snaps: [SNAP()],
     biens: [],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'accepted', provider_id: REGINA }]
+                departure_date: jour(3), status: 'accepted', provider_id: REGINA }]
   })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
@@ -627,7 +640,7 @@ test('un ménage REFUSÉ (orphaned) n\'est pas rendu à qui l\'a refusé', async
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'orphaned',
+                departure_date: jour(3), status: 'orphaned',
                 provider_id: null, assigned_by: 'auto' }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
@@ -647,7 +660,7 @@ test('un ménage REFUSÉ puis annulé puis revenu n\'est PAS re-proposé', async
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'cancelled',
+                departure_date: jour(3), status: 'cancelled',
                 provider_id: null, assigned_by: 'manual',
                 assignment_reason: 'Refuse par Marie.' }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
@@ -666,7 +679,7 @@ test('une résurrection ORDINAIRE recalcule bien l\'assignation', async () => {
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'cancelled',
+                departure_date: jour(3), status: 'cancelled',
                 provider_id: null, assigned_by: 'auto' }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
@@ -684,7 +697,7 @@ test('une résurrection ORDINAIRE recalcule bien l\'assignation', async () => {
 
 test('une proposition expirée s\'efface, et le porteur ne bouge pas', async () => {
   const etat = preparer({ expirees: [
-    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: jour(8),
       provider_id: REGINA, offered_to: NOUVELLE }
   ] })
   const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
@@ -702,7 +715,7 @@ test('une proposition expirée sur un ménage porté N\'ALERTE PAS', async () =>
   // Alerter serait du bruit : rien n'est découvert, et l'hôte finirait par ne
   // plus lire ces messages.
   const etat = preparer({ expirees: [
-    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: jour(8),
       provider_id: REGINA, offered_to: NOUVELLE }
   ] })
   const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
@@ -714,7 +727,7 @@ test('expirée SANS porteur : orphaned, et l\'hôte est alerté', async () => {
   // Là, un logement ne sera pas préparé : c'est le seul cas qui mérite une
   // alerte forte.
   const etat = preparer({ expirees: [
-    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: jour(8),
       provider_id: null, offered_to: NOUVELLE }
   ] })
   const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
@@ -726,7 +739,7 @@ test('expirée SANS porteur : orphaned, et l\'hôte est alerté', async () => {
 
 test('chaque expiration laisse une trace au journal', async () => {
   const etat = preparer({ expirees: [
-    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-10',
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: jour(8),
       provider_id: REGINA, offered_to: NOUVELLE }
   ] })
   const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
@@ -752,7 +765,7 @@ test('le writer ne réassigne PAS un ménage sous proposition', async () => {
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'unassigned',
+                departure_date: jour(3), status: 'unassigned',
                 provider_id: null, offered_to: NOUVELLE, assigned_by: 'auto' }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, requires_ack: false }]
   })
@@ -769,7 +782,7 @@ test('le rattrapage PROPOSE quand le bien n\'a qu\'un suppléant', async () => {
   const etat = preparer({
     snaps: [SNAP()],
     menages: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
-                departure_date: '2026-09-05', status: 'unassigned',
+                departure_date: jour(3), status: 'unassigned',
                 provider_id: null, offered_to: null, assigned_by: null }],
     liaisons: [{ user_id: U, property_id: '209413', provider_id: NOUVELLE, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS }]
   })
@@ -912,7 +925,7 @@ test('une PANNE de lecture des disponibilités COUPE le cycle', async () => {
   // ⚠ Retomber sur des maps vides ferait paraître TOUT LE MONDE disponible —
   // « aucune règle = disponible ». Les congés seraient ignorés et les ménages
   // partiraient à des gens absents, sans que rien ne le signale.
-  const etat = preparer({ snaps: [SNAP()], liaisons: BAGNERES,
+  const etat = preparer({ snaps: [SNAP({ arrival: '2026-09-01', departure: '2026-09-05' })], liaisons: BAGNERES,
                           erreurDispos: { message: 'timeout' } })
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages(null, { maintenant: T0 })

@@ -49,7 +49,10 @@ async function channelCall(method, path, body) {
 async function ownerOfProperty(providerPropertyId) {
   const { data } = await supabase
     .from('properties')
-    .select('user_id, provider_property_id, provider_room_type_id, inventory_type')
+    // `id` (UUID) et `provider_rate_plan_id` : requis par la reaffirmation du
+    // stop-sell, qui lit la memoire d'intention (calendar_inventory, cle = UUID)
+    // et pousse /restrictions sur le rate plan du bien.
+    .select('id, user_id, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_type')
     .eq('provider_property_id', providerPropertyId)
     .maybeSingle()
   return data || null

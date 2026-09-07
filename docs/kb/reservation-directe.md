@@ -177,8 +177,14 @@ GET  /restrictions                            ← et à vérifier, jamais suppos
 ```
 
 Cela concerne tout code qui pousse de l'inventaire : `lib/channel-availability.js`,
-`lib/rate-sync.js`, la ligne « Disponibilité » du calendrier. **À auditer** — ce
-KB documente le fait, il ne prétend pas que tous les chemins le respectent.
+`lib/rate-sync.js`, la ligne « Disponibilité » du calendrier.
+
+✅ **Audité et corrigé le 7 septembre 2026** (`docs/specs/spec-audit-stop-sell.md`).
+`reaffirmerStopSell` restitue l'intention mémorisée après toute poussée de stock ;
+`api/calendar.js` poussait les restrictions **avant** l'availability, qui les
+effaçait — l'ordre est inversé ; le `stop_sell: false` en dur des nuits orphelines
+mobile est retiré. `lib/rate-sync.js` ne pousse aucune disponibilité : hors sujet,
+vérifié.
 
 **Le principe de la correction est gravé** dans `docs/specs/spec-audit-stop-sell.md`
 §1 : le cœur mémorise l'**intention** de l'hôte par jour et par bien, toute poussée

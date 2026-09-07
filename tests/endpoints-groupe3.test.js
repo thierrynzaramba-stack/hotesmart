@@ -37,7 +37,13 @@ const BIEN_TIERS = { id: '9f3c0000-3333-4444-9999-bbbbbbbbbbbb', user_id: AUTRE,
 // ⚠ Un provider_property_id Channex EST un UUID : ce bien existe pour que la
 // resolution par reference canal soit reellement exercee.
 const BIEN_CHANNEX = { id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900', user_id: PROD, name: 'Colomiers',
-                       provider: 'channex', provider_property_id: '0544fd9a-6579-44e7-b75e-19c63a2019ba' }
+                       provider: 'channex', provider_property_id: '0544fd9a-6579-44e7-b75e-19c63a2019ba',
+                       // Ids canal presents : sans eux le bloc de poussee ARI ne
+                       // s'execute pas, et l'ordre des appels ne peut pas etre teste.
+                       provider_room_type_id: 'room-colomiers', provider_rate_plan_id: 'plan-colomiers',
+                       // 'managed' : sinon le bloc /restrictions est saute (mode 'keep'
+                       // par defaut) et l'ordre des deux appels ne s'observe pas.
+                       rate_sync_mode: 'managed' }
 const BIENS = [BIEN_A, BIEN_B, BIEN_TIERS, BIEN_CHANNEX]
 
 const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/calendar',
@@ -251,6 +257,56 @@ test('calendar POST : property_id envoye en propId Beds24 -> resolu, jamais pass
   const lignes = [].concat(...inv.map(e => e.row))
   assert.ok(lignes.every(l => l.property_id === BIEN_A.id),
     'calendar_inventory doit porter l\'UUID resolu, pas la valeur client')
+})
+
+test('calendar POST : /availability part AVANT /restrictions, et l\'intention est restituee', async () => {
+  // ⚠ DEFAUT TROUVE EN REVIEW, ET C'EST ICI QU'IL VIVAIT. Un POST /availability
+  // remet `stop_sell` a false sur les dates touchees (mesure du 7 septembre 2026
+  // en production). Les restrictions partaient EN PREMIER : on posait la fermeture,
+  // puis on l'effacait soi-meme dans la foulee. Le test de lib/channel-availability
+  // ne couvrait pas ce fichier-la.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', avail: 0, rate: 120 }]
+  } }), res)
+  assert.notStrictEqual(res.code, 403)
+
+  const ari = etat.appels.filter(a => a.method === 'POST' && /\/(availability|restrictions)/.test(a.url))
+    .map(a => (a.url.includes('/availability') ? 'availability' : 'restrictions'))
+  assert.ok(ari.length >= 2, 'les deux appels ARI doivent partir : ' + ari.join(', '))
+  assert.strictEqual(ari[0], 'availability', 'le stock d\'abord — sinon il efface la fermeture')
+  assert.ok(ari.lastIndexOf('restrictions') > 0, 'l\'intention est restituee apres')
+})
+
+test('calendar POST : « Disponibilite : ferme » ECRIT l\'intention, pas seulement le stock', async () => {
+  // ⚠ DEFAUT TROUVE EN REVIEW. C'est le geste de fermeture le plus courant — et le
+  // SEUL du calendrier mobile, qui n'expose aucun controle « stop vente ». Il
+  // n'ecrivait que `avail = 0` : la memoire d'intention restait a false, et la
+  // premiere annulation repoussait `availability: 1` en reaffirmant `stop_sell:
+  // false`. La fermeture de l'hote s'effacait toute seule.
+  const etat = preparer({ user: PROD })
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', avail: 0 }]
+  } }), reponse())
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  const l = lignes.find(x => x.date === '2026-09-10')
+  assert.ok(l, 'la ligne doit exister')
+  assert.strictEqual(l.avail, 0, 'le stock reste la trace de ce qui est pousse')
+  assert.strictEqual(l.stop_sell, true, 'et la DECISION va dans la colonne qui la porte')
+})
+
+test('calendar POST : un stop_sell explicite l\'emporte sur la ligne Disponibilite', async () => {
+  // Quand l'hote regle les deux dans le meme enregistrement, c'est lui qui tranche.
+  const etat = preparer({ user: PROD })
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-09-10', date_to: '2026-09-10', avail: 0, stop_sell: false }]
+  } }), reponse())
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  assert.strictEqual(lignes.find(x => x.date === '2026-09-10').stop_sell, false)
 })
 
 test('calendar GET : jeton invalide -> 401, meme quand aucun bien ne se resout', async () => {

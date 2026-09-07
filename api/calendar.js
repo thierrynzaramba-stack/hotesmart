@@ -9,6 +9,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
+const { reaffirmerStopSell } = require('../lib/channel-availability')
 const { readStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { peutLire, peutEcrire } = require('../lib/permissions')
@@ -505,7 +506,18 @@ module.exports = async function handler(req, res) {
         if (!rowsByDate[ds]) rowsByDate[ds] = { property_id: bienId, date: ds }
         const r = rowsByDate[ds]
         if (seg.rate != null) r.rate = seg.rate
-        if (seg.avail != null) r.avail = seg.avail
+        // ⚠ « DISPONIBILITE : FERME » EST UNE INTENTION, PAS UN STOCK.
+        // C'est le geste de fermeture le plus courant — et le SEUL disponible sur
+        // le calendrier mobile, qui n'expose aucun controle « stop vente ». Il
+        // n'ecrivait que `avail = 0`, donc la memoire d'intention restait a
+        // `false` : la premiere annulation repoussait `availability: 1` et
+        // reaffirmait activement `stop_sell: false`. La fermeture de l'hote
+        // s'effacait toute seule.
+        // `avail` reste ecrit — c'est la trace de la derniere valeur poussee — mais
+        // la DECISION va desormais dans la colonne qui la porte.
+        if (seg.avail != null) { r.avail = seg.avail; r.stop_sell = (seg.avail === 0) }
+        // Un stop_sell explicite passe APRES : quand l'hote regle les deux, c'est
+        // lui qui tranche.
         if (seg.stop_sell != null) r.stop_sell = seg.stop_sell
         if (seg.min_stay_arrival != null) r.min_stay_arrival = seg.min_stay_arrival
         if (seg.min_stay_through != null) r.min_stay_through = seg.min_stay_through
@@ -595,6 +607,17 @@ module.exports = async function handler(req, res) {
       const availabilityValues = coalesceRanges(availItems)
 
       try {
+        // ⚠ ORDRE : AVAILABILITY D'ABORD, RESTRICTIONS ENSUITE.
+        // Un POST /availability leve le stop_sell des dates touchees (mesure du
+        // 7 septembre 2026). Pousser les restrictions en premier, comme on le
+        // faisait, revenait a poser le stop-sell puis a l'effacer soi-meme dans
+        // la foulee. C'est l'ordre de lib/channel-fullsync.js, et le seul correct.
+        // Availability : TOUJOURS poussee (anti-surbooking, non negociable), quel que soit le mode.
+        if (availabilityValues.length) {
+          const a = await channelCall('POST', '/availability', { values: availabilityValues })
+          if (!a.ok) { pushWarnings.push('availability: HTTP ' + a.status) }
+          else { pushed = true; taskIdsSave.availability = a.json?.data?.[0]?.id || null }
+        }
         if (restrictionValues.length) {
           // SCISSION dispo/tarifs : /restrictions porte le rate (+ conditions de sejour).
           // On ne le pousse qu'en mode 'managed'. En 'keep', tout est deja enregistre en
@@ -607,11 +630,24 @@ module.exports = async function handler(req, res) {
             taskIdsSave.restrictions_skipped = 'mode_keep'
           }
         }
-        // Availability : TOUJOURS poussee (anti-surbooking, non negociable), quel que soit le mode.
-        if (availabilityValues.length) {
-          const a = await channelCall('POST', '/availability', { values: availabilityValues })
-          if (!a.ok) { pushWarnings.push('availability: HTTP ' + a.status) }
-          else { pushed = true; taskIdsSave.availability = a.json?.data?.[0]?.id || null }
+        // ⚠ RESTITUTION DE L'INTENTION MEMORISEE, quel que soit le mode.
+        // Le bloc ci-dessus ne suffit pas : en mode 'keep' il ne part rien, et meme
+        // en 'managed' il ne porte que les dates dont l'hote a touche une
+        // restriction. Une edition de la seule ligne « Disponibilite » sur des
+        // dates fermees les rouvrirait donc en silence — le geste exact qui a
+        // rendu quatre nuits vendables le 7 septembre. Les lignes viennent d'etre
+        // ecrites en base : la memoire porte deja la nouvelle volonte de l'hote.
+        // Sur l'UNION des dates touchees, pas seulement celles qui portent une
+        // disponibilite : en mode `keep` le bloc restrictions ne part pas du tout,
+        // et fermer des dates y laissait l'hote devant un « enregistre » alors que
+        // rien n'etait parti aux plateformes.
+        const datesTouchees = [...new Set([...Object.keys(availByDate), ...Object.keys(restByDate)])].sort()
+        if (datesTouchees.length && ratePlanId) {
+          await reaffirmerStopSell(
+            { id: bienId, user_id: compte, provider_rate_plan_id: ratePlanId },
+            propId, datesTouchees[0], datesTouchees[datesTouchees.length - 1], 'calendar',
+            new Set(datesTouchees)
+          )
         }
       } catch (e) {
         console.error('[calendar] push channel error', e.message)
