@@ -33,8 +33,9 @@ sans code spécifique. L'hôte n'a rien à faire.
   trilingue, avec récapitulatif, politique d'annulation, contact hôte
   (`telephone_hote`). Prévoir le canal email réutilisable par la saisie
   manuelle plus tard.
-- **Stripe : compte DÉDIÉ aux réservations** (pas de Connect multi-hôtes — v2).
-  Mode test d'abord, bascule live à la migration.
+- **Stripe : CHAQUE HÔTE APPORTE SES PROPRES CLÉS** (modèle SuperHote).
+  Mode test d'abord, bascule live à la migration. Voir §3 bis — cette ligne a
+  changé trois fois ; l'historique complet y est gardé exprès.
   ⚠ **Corrigé le 7 septembre 2026** : la version initiale disait « compte propre
   de l'hôte-fondateur », c'est-à-dire le même compte que la facturation SaaS —
   l'argent des voyageurs et les revenus HôteSmart mélangés dans un seul tableau
@@ -128,27 +129,106 @@ nommer son rate_plan refuserait au voyageur direct une nuit unique que l'hôte
 accepte — il appliquerait au canal direct une contrainte d'OTA. Les rate_plans
 dérivés décrivent ce que les OTA vendent, jamais ce que l'hôte vend en direct.
 
-### Stripe
+### Stripe — ARCHITECTURE REMPLACÉE LE 7 SEPTEMBRE 2026
 
-Le webhook des paiements de réservation est un **endpoint DÉDIÉ**,
-`api/book-webhook.js`, distinct de `api/stripe.js` (facturation SaaS). On ne
-touche pas au webhook existant : le casser couperait la facturation des
-abonnements.
+> **Historique des décisions, gardé exprès.** Ce point a changé trois fois dans
+> la même journée : (1) compte propre de l'hôte-fondateur, (2) compte dédié aux
+> réservations, (3) Stripe Connect *direct charges*. **Aucune n'a été
+> construite.** La décision qui tient est la quatrième, ci-dessous. Les
+> précédentes restent écrites pour qu'on ne les repropose pas comme neuves.
 
-**Variables d'environnement du moteur** — préfixe `BOOKING_STRIPE_*`, suivant la
-convention de préfixe par domaine du dépôt (`ALERT_*`, `CHANNEL_*`,
-`OVERBOOKING_*`). Elles ne doivent JAMAIS remplacer `STRIPE_SECRET_KEY` ni
-`STRIPE_WEBHOOK_SECRET`, qui appartiennent au SaaS et pointent vers l'autre
-compte :
+**DÉCISION FERME (Thierry) — CHAQUE HÔTE APPORTE SES PROPRES CLÉS STRIPE.**
+Modèle SuperHote. Pas de Connect, pas de compte plateforme, pas de commission
+technique. Le moteur encaisse avec **la clé du propriétaire du bien**.
 
-| Variable | Valeur | Nature |
+L'hôte-fondateur n'est **pas un cas particulier** : son compte « réservations »
+est la **première ligne** de la même table, ses biens passent par le **même
+chemin** que ceux de n'importe quel hôte. Aucune branche `si fondateur` n'a le
+droit d'exister dans ce code.
+
+**Ce que ça donne, et c'est le bon côté :** l'hôte est commerçant de plein droit.
+L'argent arrive directement chez lui, les litiges et les frais sont les siens,
+et **la page de paiement Stripe porte SA raison sociale** — ce qui sert la marque
+blanche mieux qu'une page à notre nom.
+
+**Le risque, dit une fois et assumé :** HôteSmart détient de quoi encaisser et
+rembourser sur le compte de chaque hôte. Les clés **restreintes** réduisent la
+portée, le chiffrement protège au repos, mais le risque ne disparaît pas — c'est
+précisément celui que Connect évitait. Décision prise en connaissance de cause.
+
+#### Les trois exigences gravées
+
+1. **Chiffrées en base, jamais loguées, jamais réaffichées.**
+   AES-256-GCM, clé dans `BOOKING_SECRET_ENCRYPTION_KEY`, format versionné
+   `v1:<iv>:<tag>:<chiffré>` pour permettre une rotation. **Aucun endpoint ne
+   rend une clé en clair, jamais** — l'écran n'affiche que le mode (test/live) et
+   les 4 derniers caractères. Une clé qui se réaffiche est une clé qui fuit par
+   copie d'écran, journal de navigateur ou capture de support.
+2. **SEULES les clés RESTREINTES sont acceptées** — décision durcie le
+   7 septembre 2026. L'écran **refuse** une clé secrète complète `sk_…`, il ne
+   se contente pas de l'avertir. Raison gravée : *« un avertissement qu'on
+   clique pour passer n'est pas une protection »*. Une `sk_` donnerait à
+   HôteSmart les pleins pouvoirs sur le compte Stripe de l'hôte — créer des
+   clients, déplacer des fonds, lire toute son activité.
+   Le refus est **antérieur à l'appel Stripe** : une clé qu'on n'acceptera pas
+   ne part même pas sur le réseau.
+   **Ne pas réintroduire l'avertissement** au motif qu'un hôte est bloqué :
+   l'écran le guide pas à pas pour créer une clé restreinte, c'est la réponse.
+   Droits nécessaires :
+   `Checkout Sessions: write`, `PaymentIntents: read`, `Charges: read`,
+   `Refunds: write` (règle 4 du §2), `Webhook Endpoints: write` (point 3).
+   ⚠ **À vérifier à la construction** : que ce dernier droit soit réellement
+   accordable à une clé restreinte. S'il ne l'est pas, repli explicite —
+   l'onboarding guide l'hôte pour créer le webhook à la main et coller le
+   `whsec_…`. Pas de repli silencieux vers une clé secrète complète.
+3. **Webhook créé automatiquement sur le compte de l'hôte à la connexion.**
+   `POST /v1/webhook_endpoints` avec sa clé. On garde l'`id` (pour le remplacer
+   ou le supprimer) et le `secret` (chiffré, comme la clé).
+
+#### La table `stripe_accounts` (une ligne par HÔTE, pas par bien)
+
+Un hôte encaisse pour **tous** ses biens : la clé se range sur le compte, pas sur
+le logement. Colonnes : `user_id` (unique), `secret_key_cipher`, `key_last4`,
+`mode` ('test'|'live', déduit du préfixe), `webhook_endpoint_id`,
+`webhook_secret_cipher`, `webhook_url_token` (opaque, 43 car.), `verified_at`,
+`last_error`, `created_at`, `updated_at`.
+
+**`webhook_url_token` n'est pas décoratif.** Un webhook posé sur le compte propre
+d'un hôte ne porte **aucun identifiant de compte** dans son corps — contrairement
+à Connect. La signature ne peut donc être vérifiée qu'avec le bon secret, et le
+bon secret ne se trouve que si l'**URL** dit de quel hôte il s'agit :
+`/api/book-webhook/<webhook_url_token>`. Une URL unique par hôte.
+
+#### Où l'écran de connexion vit
+
+Dans l'app **« Réservation directe »** (étape 3 bis), pas dans `/settings` ni
+`/connexions`.
+Test qui tranche (CLAUDE.md) : cette clé a-t-elle un sens si le moteur n'existait
+pas ? **Non** — elle ne sert qu'à encaisser des réservations directes.
+*(À trancher par Thierry s'il préfère `/connexions`, qui porte déjà les
+connexions PMS.)*
+
+#### Variables d'environnement
+
+| Variable | Valeur | État |
 |---|---|---|
-| `BOOKING_STRIPE_SECRET_KEY` | `sk_test_…` | secret |
-| `BOOKING_STRIPE_PUBLISHABLE_KEY` | `pk_test_…` | publique (atteint le navigateur) |
-| `BOOKING_STRIPE_WEBHOOK_SECRET` | `whsec_…` | secret |
+| `BOOKING_SECRET_ENCRYPTION_KEY` | 32 octets, base64 | **nouvelle, critique** |
+| `BOOKING_ENGINE_PAYMENT` | `false` jusqu'à l'étape 3 | garde de sécurité |
+| `APP_URL` | déjà posée | sert aux URLs de retour et de webhook |
+| ~~`BOOKING_STRIPE_SECRET_KEY`~~ | — | **caduque : par hôte, en base** |
+| ~~`BOOKING_STRIPE_PUBLISHABLE_KEY`~~ | — | **caduque : Checkout hébergé n'en a pas besoin** |
+| ~~`BOOKING_STRIPE_WEBHOOK_SECRET`~~ | — | **caduque : un secret par hôte, en base** |
 
-Webhook Stripe → `https://hotesmart.vercel.app/api/book-webhook`, événements
-`payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`.
+⚠ `BOOKING_SECRET_ENCRYPTION_KEY` **perdue** = toutes les connexions Stripe sont
+mortes et chaque hôte doit recoller sa clé. **Divulguée** = toutes les clés des
+hôtes sont exposées. Elle ne se régénère pas à la légère.
+
+#### Dette découverte au passage (hors périmètre de ce chantier)
+
+`api_keys` stocke **en clair** le jeton Beds24, la clé Brevo, la clé Seam et le
+`refresh_token`, et **aucun chiffrement n'existe dans le dépôt**. Les clés Stripe
+seront les premiers secrets chiffrés du produit. Aligner `api_keys` sur le même
+mécanisme est un chantier à part, à programmer.
 
 ## 3 ter. Amendement gravé (Thierry, 7 septembre 2026) — LIENS MULTIPLES, COEFFICIENT, APP DE CONFIG
 
@@ -196,7 +276,23 @@ autres apps du produit** — pas une page perdue dans `/settings`.
 *(Test qui tranche, CLAUDE.md : ce réglage a-t-il un sens si l'app n'existait
 pas ? Non → il vit dans l'app.)*
 
-**Nom à valider par Thierry** (ex. « BookFlow » — non tranché).
+**NOM GRAVÉ (Thierry, 7 septembre 2026) : « Réservation directe ».**
+
+Pas un nom de marque — un **libellé qui dit ce que ça fait**. Décision prise
+contre l'option « BookFlow », écartée.
+
+Ce que ça engage :
+- **l'entrée de menu** porte « Réservation directe », en toutes lettres ;
+- **le répertoire** est `apps/reservation-directe/` ;
+- **aucun nom inventé** ne se glisse ailleurs — ni dans une page, ni dans un
+  libellé de droit, ni dans une variable d'environnement.
+
+⚠ **À ne pas confondre avec `docs/kb/reservation-directe.md`**, qui documente la
+SAISIE MANUELLE d'une réservation par l'hôte (phase 2, primitive CRS). Les deux
+noms se ressemblent parce que les deux choses le sont : dans les deux cas une
+réservation entre par HôteSmart plutôt que par une OTA. La différence est **qui
+la saisit** — l'hôte lui-même dans la phase 2, le voyageur dans cette app-ci.
+Le KB de cette app est `docs/kb/moteur-reservation.md`.
 
 Contenu, **par bien** :
 - activation du moteur ;
@@ -243,22 +339,112 @@ tient aujourd'hui le widget Beds24.
   forme intégrée, pas une seconde implémentation. Un seul moteur, deux formes
   d'exposition.
 
-## 5. Étape 2 — paiement (Stripe mode test)
+## 5. Étape 2 — connexion Stripe de l'hôte, puis paiement (mode test)
 
-PaymentIntent au montant total (monnaie du bien), 3DS, webhook de confirmation.
-Idempotence stricte : une clé d'idempotence par tentative, jamais de double
-encaissement. Page de paiement aux couleurs sobres du bien (nom, photo v2).
+Réécrite le 7 septembre 2026 : le modèle « clés de l'hôte » (voir §3 bis) coupe
+cette étape en deux moitiés qui se livrent dans cet ordre.
+
+### 5.1 — Connecter le compte Stripe de l'hôte
+
+Sans compte connecté, il n'y a rien à encaisser : cette moitié vient d'abord.
+
+- Écran d'onboarding **guidé** : où trouver les clés restreintes chez Stripe,
+  quels droits cocher, comment vérifier qu'on est bien en **mode test**.
+- L'hôte colle sa clé `rk_test_…`. HôteSmart, dans l'ordre :
+  1. **vérifie** la clé par un appel en lecture (elle est valide, elle est du
+     bon mode) — une clé fausse est refusée tout de suite, pas au premier
+     voyageur ;
+  2. **chiffre** et stocke ; la clé en clair ne survit pas à la requête ;
+  3. **crée le webhook** sur le compte de l'hôte, stocke `id` et `secret` chiffré.
+- L'écran ne réaffiche **jamais** la clé : mode, 4 derniers caractères, date de
+  connexion, état du webhook. Un bouton « remplacer », jamais « afficher ».
+- **Reconnexion** : remplacer une clé supprime l'ancien webhook chez Stripe avant
+  d'en créer un nouveau. Deux webhooks vivants livreraient deux fois le même
+  événement.
+
+### 5.2 — Le paiement : Stripe Checkout HÉBERGÉ (v1)
+
+**Décision : page Checkout hébergée par Stripe.** Le voyageur est redirigé vers
+la page de paiement — qui porte la **raison sociale de l'hôte**, son compte étant
+le commerçant — puis revient sur la page de confirmation.
+
+Pourquoi hébergé plutôt qu'intégré, en v1 :
+- **Le 3DS, les moyens de paiement locaux et la conformité sont chez Stripe.**
+  Rien de sensible ne traverse notre page.
+- La réserve 3DS notée à l'étape 0 disparaît : plus de champ de carte chez nous,
+  donc plus de question d'iframe.
+- **Payment Element intégré = v2**, si et seulement si la redirection gêne.
+
+Le chemin, dans l'ordre du §2 :
+1. **verrou + vérification** capacité / stop-sell / prix — rien n'est promis
+   avant, et le refus arrive **avant** tout encaissement ;
+2. **tenue des nuits**, puis création de la **Checkout Session** avec la clé de
+   l'hôte, montant recalculé par le serveur, `idempotency_key` par tentative ;
+3. redirection ; retour par `success_url` / `cancel_url` sur `/book/<token>` ;
+4. le **webhook de l'hôte** confirme (`checkout.session.completed`).
+
+**Idempotence stricte** : une clé par tentative, jamais de double encaissement.
+Un double-clic, un rejeu réseau ou un retour arrière retombent sur la même
+tentative, donc la même Session.
+
+Événements écoutés : `checkout.session.completed`,
+`checkout.session.expired` (libère la tenue sans attendre l'expiration),
+`payment_intent.payment_failed`, `charge.refunded`.
+
+### 5.2 bis — Purge des tentatives (décision Thierry, 7 septembre 2026)
+
+`booking_attempts` stocke **nom, e-mail et téléphone** de voyageurs qui n'ont
+peut-être jamais payé. Deux régimes, et ils ne se confondent pas :
+
+| Cas | Règle |
+|---|---|
+| **Jamais payée** (`pending`, `failed`, `expired`) | **anonymisation à 30 jours** |
+| **Payée** (`paid`, `booked`, `refunded`) | **conservation comptable** |
+
+**Anonymisation, pas suppression.** La ligne reste — dates, montant, lien
+d'origine, statut — mais les champs personnels sont écrasés. On garde de quoi
+mesurer (combien de tentatives abandonnées, sur quel lien, à quel prix) sans
+garder de quoi identifier qui que ce soit. Supprimer la ligne perdrait la
+statistique en même temps que la donnée personnelle.
+
+Champs écrasés : `guest_first_name`, `guest_last_name`, `guest_email`,
+`guest_phone`. Champs conservés : tout le reste.
+
+Une tentative **payée ne s'anonymise jamais** par ce chemin : elle porte une
+transaction, et sa durée de conservation relève du comptable, pas de nous.
+
+**Le cron de purge est une tâche de l'étape 3** (`api/cron.js`, cadence
+quotidienne suffit). Il n'a rien à purger avant que 30 jours ne se soient
+écoulés, ce qui laisse le temps de le livrer avec l'étape 3 — mais il doit
+**exister avant que le moteur ne serve de vrais voyageurs** (phase 4).
+
+⚠ `api/cron.js` est TOUJOURS régénéré en fichier COMPLET, jamais rustiné
+partiellement (règle dure, CLAUDE.md).
+
+### 5.3 — Ce que l'étape 2 ne fait PAS
+
+Elle ne crée **aucune réservation** : c'est l'étape 3. Tant que celle-ci n'existe
+pas, un paiement réussi laisse une tentative en `paid` — de l'argent encaissé
+sans réservation, ce que la règle 4 du §2 interdit. D'où deux protections :
+
+- **`BOOKING_ENGINE_PAYMENT` fermée par défaut** : sans elle, l'endpoint de
+  paiement refuse. L'absence de la variable est le comportement sûr, sur le
+  modèle de `SENDVIABEDS24_ENABLED`.
+- **Alarme fondateur** sur toute tentative qui atteint `paid`, et sur tout
+  paiement orphelin. De l'argent qui dort sans réservation ne doit jamais être
+  silencieux.
 
 ## 6. Étape 3 — création, confirmation, échecs
 
 Le chemin complet de §2 (verrou → paiement → CRS → feed), la page de
-confirmation, l'email trilingue. Tous les chemins d'échec testés un par un :
+confirmation, l'email trilingue, **et le cron de purge des tentatives**
+(§5.2 bis : anonymisation à 30 jours des tentatives jamais payées). Tous les chemins d'échec testés un par un :
 paiement refusé (rien ne se passe), création CRS en échec après encaissement
 (remboursement auto + incident + alarme), double-clic/double soumission
 (idempotence), dates prises entre l'affichage et le paiement (verrou refuse
 AVANT l'encaissement — jamais après).
 
-## 6 bis. Étape 3 bis — l'app de configuration du moteur
+## 6 bis. Étape 3 bis — l'app « Réservation directe »
 
 Voir §3 ter ajout 3. Vient APRÈS le parcours voyageur (étapes 1 à 3), jamais
 avant : on configure ce qui existe et qu'on a vu fonctionner.
@@ -275,7 +461,13 @@ avant : on configure ce qui existe et qu'on a vu fonctionner.
 ## 8. Hors périmètre (v2 et au-delà)
 
 - Annulation/modification self-service par le voyageur.
-- Stripe Connect (encaissement au nom de chaque hôte) — v1 = compte propre.
+- **Stripe Connect — ÉCARTÉ, pas reporté.** Le modèle retenu est « chaque hôte
+  apporte ses clés » (§3 bis). Connect aurait évité que HôteSmart détienne les
+  secrets des hôtes ; le coût était un compte plateforme, une activation de plus,
+  et un rattachement OAuth à construire. Décision assumée — ne pas la reproposer
+  sans fait nouveau.
+- **Payment Element intégré** — v2, seulement si la redirection vers la page
+  Checkout hébergée gêne réellement à l'usage.
 - Acomptes, caution/dépôt de garantie, extras payants.
 - Taxe de séjour automatique — À TRANCHER (Thierry) : affichée comme mention
   informative en v1 ou intégrée au prix ; rien de calculé automatiquement.

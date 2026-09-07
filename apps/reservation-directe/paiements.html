@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HôteSmart — Réservation directe · Paiements</title>
+<link rel="stylesheet" href="/public/style.css">
+<!--
+  apps/reservation-directe/paiements.html
+  DOC : docs/kb/moteur-reservation.md §10 — Spec : §5.1
+  L'ecran de connexion du compte Stripe de l'HOTE.
+
+  ⚠ CET ECRAN NE REAFFICHE JAMAIS UNE CLE. L'endpoint ne la rend pas, et il
+  n'existe aucun bouton « afficher ». Un hote qui a perdu sa cle en cree une
+  neuve chez Stripe et la remplace ici.
+
+  ⚠ SEULES LES CLES RESTREINTES (rk_) SONT ACCEPTEES. Le serveur refuse une sk_ ;
+  le champ le signale avant meme l'envoi. Un avertissement qu'on clique pour
+  passer n'est pas une protection.
+-->
+<style>
+  .carte { background:var(--bg); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:24px; margin-bottom:16px; max-width:760px; }
+  .carte h2 { font-size:15px; font-weight:500; margin:0 0 4px; }
+  .carte .sous { font-size:13px; color:var(--text2); margin-bottom:18px; }
+
+  .etat { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .pastille { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:500; }
+  .p-ok   { background:#E1F5EE; color:#085041; }
+  .p-off  { background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); }
+  .p-warn { background:#FAEEDA; color:#633806; }
+  .p-err  { background:#fdecea; color:#E24B4A; }
+  .meta { font-size:12px; color:var(--text2); }
+  .meta code { background:var(--bg2); padding:1px 6px; border-radius:4px; border:0.5px solid var(--border); }
+
+  .etapes { display:flex; flex-direction:column; gap:14px; margin:18px 0; }
+  .etape { display:flex; gap:12px; align-items:flex-start; }
+  .num { width:24px; height:24px; border-radius:50%; background:var(--green); color:#fff; font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+  .txt { font-size:13px; color:var(--text2); line-height:1.65; flex:1; }
+  .txt strong { color:var(--text); }
+  .txt a { color:var(--green); text-decoration:none; }
+  .txt a:hover { text-decoration:underline; }
+  .txt code { background:var(--bg2); padding:1px 6px; border-radius:4px; font-size:12px; border:0.5px solid var(--border); }
+
+  .droits { list-style:none; padding:0; margin:8px 0 0; display:flex; flex-direction:column; gap:5px; }
+  .droits li { font-size:12.5px; color:var(--text2); display:flex; gap:8px; align-items:baseline; }
+  .droits code { font-family:var(--font-mono, monospace); }
+  .oblig { color:var(--green); font-weight:600; font-size:11px; }
+
+  .champ { margin-top:16px; }
+  .champ label { display:block; font-size:12px; color:var(--text2); margin-bottom:6px; }
+  .champ input { width:100%; font-family:var(--font-mono, monospace); font-size:12.5px; padding:9px 11px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); }
+  .champ input:focus { outline:2px solid #E1F5EE; border-color:var(--green); }
+  .aide { font-size:11.5px; color:var(--text2); margin-top:6px; }
+  .aide.mauvais { color:#E24B4A; }
+
+  .ligne-boutons { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+  .msg { padding:9px 14px; border-radius:var(--radius); font-size:12.5px; margin-top:14px; display:none; line-height:1.55; }
+  .msg.ok  { background:#E1F5EE; color:#085041; border:0.5px solid var(--green); display:block; }
+  .msg.ko  { background:#fdecea; color:#E24B4A; border:0.5px solid #E24B4A; display:block; }
+  .msg.info{ background:var(--bg2); color:var(--text2); border:0.5px solid var(--border); display:block; }
+
+  .repli { background:var(--bg2); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px; margin-top:14px; font-size:12.5px; color:var(--text2); line-height:1.6; display:none; }
+  .repli.show { display:block; }
+  .repli .url { font-family:var(--font-mono, monospace); font-size:11.5px; word-break:break-all; background:var(--bg); padding:8px 10px; border-radius:4px; border:0.5px solid var(--border); margin:8px 0; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">💳 Réservation directe · Paiements</div>
+        <div class="page-sub">Le compte Stripe qui encaisse vos réservations directes</div>
+      </div>
+    </div>
+    <div class="content">
+
+      <div class="carte">
+        <h2>Votre compte Stripe</h2>
+        <div class="sous">L’argent de vos voyageurs arrive <strong>directement chez vous</strong>. HôteSmart ne l’encaisse jamais à votre place.</div>
+
+        <div class="etat" id="etat"><span class="pastille p-off">Vérification…</span></div>
+
+        <div id="bloc-guide" hidden>
+          <div class="etapes">
+            <div class="etape">
+              <div class="num">1</div>
+              <div class="txt">
+                Ouvrez <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener noreferrer">les clés API de Stripe</a>
+                et vérifiez que le bandeau <strong>« Mode test »</strong> est bien actif en haut à droite.
+              </div>
+            </div>
+            <div class="etape">
+              <div class="num">2</div>
+              <div class="txt">
+                Cliquez sur <strong>« Créer une clé restreinte »</strong> — pas « Révéler la clé secrète ».
+                <br>Nommez-la par exemple <code>HôteSmart — réservations</code>.
+              </div>
+            </div>
+            <div class="etape">
+              <div class="num">3</div>
+              <div class="txt">
+                Donnez-lui <strong>exactement</strong> ces droits, et rien d’autre :
+                <ul class="droits">
+                  <li><span class="oblig">ÉCRITURE</span> <code>Checkout Sessions</code></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Refunds</code> <span>— pour vous rembourser un voyageur si une réservation échoue</span></li>
+                  <li><span class="oblig">ÉCRITURE</span> <code>Webhook Endpoints</code> <span>— pour que HôteSmart branche la confirmation tout seul</span></li>
+                  <li><span class="oblig">LECTURE</span> <code>PaymentIntents</code></li>
+                  <li><span class="oblig">LECTURE</span> <code>Charges</code></li>
+                </ul>
+              </div>
+            </div>
+            <div class="etape">
+              <div class="num">4</div>
+              <div class="txt">
+                Créez la clé, copiez-la, et collez-la ci-dessous.
+                <br><strong>Stripe ne vous la montrera qu’une fois</strong> — et HôteSmart ne vous la remontrera jamais non plus.
+              </div>
+            </div>
+          </div>
+
+          <div class="champ">
+            <label for="cle">Clé restreinte Stripe</label>
+            <input id="cle" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="rk_test_…" aria-describedby="aide-cle">
+            <div class="aide" id="aide-cle">Elle commence par <code>rk_</code>. Une clé secrète <code>sk_</code> est refusée : elle donnerait à HôteSmart les pleins pouvoirs sur votre compte Stripe.</div>
+          </div>
+
+          <div class="ligne-boutons">
+            <button class="btn btn-primary" id="btn-connecter">Connecter</button>
+            <button class="btn" id="btn-annuler" hidden>Annuler</button>
+          </div>
+        </div>
+
+        <div id="bloc-connecte" hidden>
+          <div class="ligne-boutons">
+            <button class="btn" id="btn-remplacer">Remplacer la clé</button>
+            <button class="btn" id="btn-deconnecter">Déconnecter</button>
+          </div>
+        </div>
+
+        <div class="msg" id="msg" hidden></div>
+
+        <div class="repli" id="repli">
+          <strong>Le webhook n’a pas pu être créé automatiquement.</strong>
+          Votre clé restreinte n’a pas le droit <code>Webhook Endpoints : écriture</code>.
+          Deux solutions : ajoutez ce droit à la clé et reconnectez-la, ou créez le webhook à la main —
+          <a href="https://dashboard.stripe.com/webhooks" target="_blank" rel="noopener noreferrer">Stripe → Webhooks → Ajouter un point de terminaison</a> :
+          <div class="url" id="repli-url"></div>
+          <div>Événements à cocher : <span id="repli-events"></span></div>
+          <div class="champ">
+            <label for="whsec">Puis collez ici le secret de signature</label>
+            <input id="whsec" type="password" autocomplete="off" spellcheck="false" placeholder="whsec_…">
+          </div>
+          <div class="ligne-boutons"><button class="btn btn-primary" id="btn-whsec">Enregistrer le secret</button></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  // ⚠ `facturation` est NON DELEGABLE : cet ecran n'a de sens que sur son propre
+  // compte. Le garde-fou de page l'impose avant tout affichage — sinon on
+  // travaillerait sur un compte partage en croyant regler le sien.
+  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  await exigerCompteProprePage({ nomPage: 'Les paiements de la réservation directe' })
+
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const session = await requireAuth()
+  if (!session) throw new Error('Non authentifié')
+  await renderSidebar('reservation-directe-paiements')
+
+  const $ = id => document.getElementById(id)
+  const API = '/api/stripe-hote'
+  const entetes = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token }
+
+  let connecte = false
+
+  function message(texte, sorte) {
+    const m = $('msg')
+    m.hidden = false
+    m.className = 'msg ' + (sorte || 'info')
+    m.textContent = texte
+  }
+  function effacerMessage() { $('msg').hidden = true; $('msg').className = 'msg' }
+
+  function pastille(etat) {
+    if (!etat.connecte) return '<span class="pastille p-off">Non connecté</span>'
+    const bouts = []
+    bouts.push(`<span class="pastille p-ok">Connecté</span>`)
+    bouts.push(`<span class="pastille ${etat.mode === 'live' ? 'p-warn' : 'p-off'}">Mode ${etat.mode === 'live' ? 'RÉEL' : 'test'}</span>`)
+    if (etat.webhook !== 'automatique') bouts.push('<span class="pastille p-err">Webhook manquant</span>')
+    // ⚠ 4 derniers caracteres seulement. La cle ne se reaffiche jamais.
+    bouts.push(`<span class="meta">clé <code>••••${etat.last4 || '????'}</code></span>`)
+    return bouts.join(' ')
+  }
+
+  function afficher(etat) {
+    connecte = !!etat.connecte
+    $('etat').innerHTML = pastille(etat)
+    $('bloc-connecte').hidden = !connecte
+    $('bloc-guide').hidden = connecte
+    $('btn-annuler').hidden = true
+
+    const manuel = etat.webhook_manuel
+    $('repli').classList.toggle('show', !!manuel)
+    if (manuel) {
+      $('repli-url').textContent = manuel.url
+      $('repli-events').textContent = (manuel.evenements || []).join(', ')
+    }
+  }
+
+  async function charger() {
+    try {
+      const r = await fetch(API, { headers: entetes })
+      if (!r.ok) throw new Error('lecture impossible')
+      afficher(await r.json())
+    } catch (e) {
+      $('etat').innerHTML = '<span class="pastille p-err">État indisponible</span>'
+    }
+  }
+
+  // Validation locale AVANT l'envoi : elle évite d'envoyer sur le réseau une clé
+  // qu'on sait refusée. Le serveur refait la vérification — c'est lui qui fait foi.
+  $('cle').addEventListener('input', () => {
+    const v = $('cle').value.trim()
+    const aide = $('aide-cle')
+    if (v.startsWith('sk_')) {
+      aide.className = 'aide mauvais'
+      aide.textContent = 'Clé secrète refusée. Créez une clé RESTREINTE (rk_) à l’étape 2 ci-dessus.'
+    } else {
+      aide.className = 'aide'
+      aide.innerHTML = 'Elle commence par <code>rk_</code>. Une clé secrète <code>sk_</code> est refusée : elle donnerait à HôteSmart les pleins pouvoirs sur votre compte Stripe.'
+    }
+  })
+
+  $('btn-connecter').onclick = async () => {
+    const cle = $('cle').value.trim()
+    if (!cle) return message('Collez votre clé restreinte.', 'ko')
+    if (cle.startsWith('sk_')) return message('Clé secrète refusée : créez une clé restreinte (rk_).', 'ko')
+
+    $('btn-connecter').disabled = true
+    message('Vérification de la clé chez Stripe…', 'info')
+    try {
+      const r = await fetch(API, { method: 'POST', headers: entetes, body: JSON.stringify({ cle }) })
+      const d = await r.json()
+      if (!r.ok) { message(d.message || 'Connexion refusée.', 'ko'); return }
+      // ⚠ Le champ est vidé immédiatement : la clé ne doit pas rester dans le DOM.
+      $('cle').value = ''
+      afficher({ ...d.etat, webhook_manuel: d.webhook_manuel })
+      message(d.webhook_manuel
+        ? 'Clé connectée. Le webhook n’a pas pu être créé automatiquement — voir ci-dessous.'
+        : 'Compte Stripe connecté. Le webhook a été créé automatiquement.',
+        d.webhook_manuel ? 'info' : 'ok')
+    } catch (e) {
+      message('Connexion impossible pour le moment.', 'ko')
+    } finally {
+      $('btn-connecter').disabled = false
+    }
+  }
+
+  $('btn-remplacer').onclick = () => {
+    effacerMessage()
+    $('bloc-guide').hidden = false
+    $('bloc-connecte').hidden = true
+    $('btn-annuler').hidden = false
+    $('cle').focus()
+    message('Le remplacement supprime l’ancien webhook chez Stripe et en crée un nouveau.', 'info')
+  }
+
+  $('btn-annuler').onclick = () => { $('cle').value = ''; effacerMessage(); charger() }
+
+  $('btn-deconnecter').onclick = async () => {
+    if (!confirm('Déconnecter votre compte Stripe ?\n\nVos pages de réservation cesseront d’accepter des paiements, et le webhook sera supprimé chez Stripe.')) return
+    try {
+      const r = await fetch(API, { method: 'DELETE', headers: entetes })
+      if (!r.ok) throw new Error()
+      message('Compte Stripe déconnecté.', 'ok')
+      await charger()
+    } catch (e) { message('Déconnexion impossible.', 'ko') }
+  }
+
+  $('btn-whsec').onclick = async () => {
+    const secret = $('whsec').value.trim()
+    if (!secret) return message('Collez le secret de signature.', 'ko')
+    try {
+      const r = await fetch(API, { method: 'POST', headers: entetes, body: JSON.stringify({ action: 'webhook_manuel', secret }) })
+      const d = await r.json()
+      if (!r.ok) { message(d.message || 'Secret refusé.', 'ko'); return }
+      $('whsec').value = ''
+      message('Secret enregistré. La confirmation des paiements est branchée.', 'ok')
+      await charger()
+    } catch (e) { message('Enregistrement impossible.', 'ko') }
+  }
+
+  await charger()
+</script>
+</body>
+</html>

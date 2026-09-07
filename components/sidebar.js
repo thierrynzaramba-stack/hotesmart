@@ -301,6 +301,14 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'menages-prestataires' ? 'connected' : ''}" href="/apps/menages/prestataires">
           <div class="sub-dot ${activePage === 'menages-prestataires' ? 'green' : 'gray'}"></div>Prestataires
         </a>` : ''}`
+    } else if (app.id === 'reservation-directe') {
+      // Ecran des cles Stripe : `facturation`, domaine NON DELEGABLE. Un
+      // collaborateur ne branche pas le compte qui recoit l'argent — l'entree
+      // ne s'affiche donc que pour le titulaire.
+      subMenu = titulaire ? `
+        <a class="nav-sub ${activePage === 'reservation-directe-paiements' ? 'connected' : ''}" href="/apps/reservation-directe/paiements">
+          <div class="sub-dot ${activePage === 'reservation-directe-paiements' ? 'green' : 'gray'}"></div>Paiements
+        </a>` : ''
     }
 
     return `

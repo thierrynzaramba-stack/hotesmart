@@ -902,6 +902,7 @@ test('sur un jour à PLUSIEURS ménages, la case montre le plus grave', async ()
 })
 
 // ─── Le nommage du sous-menu (tranché le 5 septembre 2026) ─────────────────
+// (voir aussi le sous-menu « Réservation directe », plus bas)
 
 test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async () => {
   // ⚠ « Planning » désignait l'écran d'AFFECTATION, et le calendrier de garde
@@ -911,8 +912,15 @@ test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async (
   // renommage partiel recréerait le doublon qu'on vient de lever.
   const sidebar = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
-  const bloc = sidebar.slice(sidebar.indexOf("app.id === 'menages'"),
-                             sidebar.indexOf('return `', sidebar.indexOf("app.id === 'menages'")))
+  // ⚠ La borne de fin s'arrete a la BRANCHE SUIVANTE, pas au prochain `return`.
+  // Une app ajoutee apres « menages » dans la meme chaine de `else if` tombait
+  // sinon dans la tranche, et son sous-menu comptait pour un libelle de menage
+  // (constate a l'ajout de « Reservation directe »).
+  const debut = sidebar.indexOf("app.id === 'menages'")
+  const suivante = sidebar.indexOf("} else if (app.id ===", debut)
+  const retour = sidebar.indexOf('return `', debut)
+  const fin = suivante !== -1 ? Math.min(suivante, retour) : retour
+  const bloc = sidebar.slice(debut, fin)
   const libelles = [...bloc.matchAll(/><\/div>([A-Za-zÀ-ÿ]+)/g)].map(m => m[1])
   assert.deepStrictEqual(libelles, ['Ménages', 'Planning', 'Prestataires'])
   // Et chacun pointe où il faut.
@@ -996,4 +1004,29 @@ test('un `resize` ne ramène pas l\'hôte sur aujourd\'hui', async () => {
   assert.match(bloc, /renderMonthBand\(\)/, 'seule la bande de mois est recalculée')
   assert.ok(!bloc.includes('rendre()'), 'jamais la grille entière')
   assert.match(bloc, /grilleAffichee/, 'et jamais par-dessus une erreur ou un chargement')
+})
+
+
+// ─── L'app « Réservation directe » (nom gravé le 7 septembre 2026) ─────────
+
+test('l app de reservation directe porte son nom grave, pas un nom de marque', () => {
+  // Spec §3 ter : « un libelle qui dit ce que ca fait ». « BookFlow » ecarte.
+  const config = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'shared/config.js'), 'utf8')
+  assert.match(config, /id: 'reservation-directe'[^}]*name: 'Réservation directe'/)
+  assert.ok(!/BookFlow/i.test(config), 'aucun nom invente ne doit reapparaitre')
+})
+
+test('le sous-menu Paiements n existe QUE pour le titulaire', () => {
+  // La cle Stripe releve de `facturation`, non delegable : un collaborateur ne
+  // branche pas le compte qui recoit l'argent.
+  const sidebar = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
+  const debut = sidebar.indexOf("app.id === 'reservation-directe'")
+  assert.ok(debut > 0, 'la branche de l app doit exister')
+  const bloc = sidebar.slice(debut, sidebar.indexOf('return `', debut))
+  assert.match(bloc, /subMenu = titulaire \?/, 'le sous-menu doit etre garde par `titulaire`')
+  const libelles = [...bloc.matchAll(/><\/div>([A-Za-zÀ-ÿ]+)/g)].map(m => m[1])
+  assert.deepStrictEqual(libelles, ['Paiements'])
+  assert.match(bloc, /href="\/apps\/reservation-directe\/paiements"/)
 })

@@ -92,6 +92,14 @@
   .note { font-size: 12px; color: var(--texte2); margin-top: 10px; text-align: center; }
   .refus { font-size: 13px; color: var(--refuse); margin-top: 10px; }
   .etat { padding: 40px 0; text-align: center; color: var(--texte2); font-size: 14px; }
+
+  .bandeau {
+    background: #fff4e0; border: 1px solid #f0d9ae; color: #6b4b12;
+    border-radius: 8px; padding: 10px 13px; font-size: 12.5px; margin-bottom: 16px; line-height: 1.5;
+  }
+  .resultat { border-radius: var(--rayon); padding: 18px; margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+  .resultat.ok { background: #e8f0ed; border: 1px solid var(--accent); color: #1d4c40; }
+  .resultat.ko { background: #fdecea; border: 1px solid var(--refuse); color: #7d201c; }
   [hidden] { display: none !important; }
 
   @media (max-width: 420px) {
@@ -118,6 +126,9 @@
         <button type="button" data-lang="en" lang="en">EN</button>
       </div>
     </header>
+
+    <div class="bandeau" id="bandeau-test" data-t="mode_test" hidden></div>
+    <div class="resultat" id="resultat" hidden></div>
 
     <div class="carte" id="bloc-ferme" hidden>
       <div id="texte-ferme" data-t="ferme" style="color:var(--texte2);font-size:14px"></div>
@@ -149,7 +160,7 @@
         <div class="champ"><label for="email" data-t="email"></label><input id="email" type="email" autocomplete="email" inputmode="email"></div>
         <div class="champ"><label for="tel" data-t="telephone"></label><input id="tel" type="tel" autocomplete="tel" inputmode="tel"></div>
         <button class="bouton" id="valider" disabled></button>
-        <div class="note" data-t="note_etape"></div>
+        <div class="note" id="note-etape"></div>
       </div>
     </div>
   </div>
@@ -173,7 +184,13 @@ var T = {
     prenom: 'Prénom', nom: 'Nom', email: 'E-mail', telephone: 'Téléphone',
     arrivee: 'Arrivée', depart: 'Départ', nuits_un: 'nuit', nuits_n: 'nuits',
     supplement: 'Supplément voyageurs', total: 'Total',
-    valider: 'Continuer', note_etape: 'Le paiement en ligne sera disponible prochainement.',
+    valider: 'Continuer',
+    paiement_indispo: "La réservation en ligne n’est pas encore ouverte sur ce logement.",
+    mode_test: "PAGE DE DÉMONSTRATION — aucun paiement réel ne sera prélevé. Aucune réservation ne sera enregistrée.",
+    vers_paiement: "Redirection vers le paiement sécurisé…",
+    retour_ok: "Merci ! Votre paiement a bien été reçu. Vous allez recevoir un e-mail de confirmation.",
+    retour_annule: "Le paiement a été annulé. Vos dates n’ont pas été réservées — vous pouvez recommencer.",
+    payer: "Payer et réserver",
     r_nuit_indisponible: 'Une des nuits choisies n’est plus disponible.',
     r_sejour_trop_court: 'Séjour minimum : {n} nuits.',
     r_sejour_trop_long: 'Séjour maximum : {n} nuits.',
@@ -181,6 +198,11 @@ var T = {
     r_depart_interdit: 'Les départs ne sont pas possibles à cette date.',
     r_trop_de_voyageurs: 'Ce logement accueille {n} voyageurs au maximum.',
     r_hors_fenetre: 'Ces dates ne sont pas encore ouvertes à la réservation.',
+    r_prix_modifie: "Le prix de ce séjour vient de changer. Reprenez la sélection pour voir le nouveau tarif.",
+    r_paiement_non_configure: "La réservation en ligne n’est pas encore ouverte sur ce logement.",
+    r_deja_rembourse: "Cette réservation a été remboursée. Contactez l’hôte pour réserver à nouveau.",
+    r_trop_de_tentatives: "Trop de réservations sont en cours sur ce logement. Réessayez dans quelques minutes.",
+    r_reessayez: "Une autre réservation est en cours sur ces dates. Réessayez dans un instant.",
     r_defaut: 'Ces dates ne peuvent pas être réservées.',
     mois: ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'],
     jours: ['lun','mar','mer','jeu','ven','sam','dim']
@@ -196,7 +218,13 @@ var T = {
     prenom: 'Nombre', nom: 'Apellidos', email: 'Correo electrónico', telephone: 'Teléfono',
     arrivee: 'Llegada', depart: 'Salida', nuits_un: 'noche', nuits_n: 'noches',
     supplement: 'Suplemento por huésped', total: 'Total',
-    valider: 'Continuar', note_etape: 'El pago en línea estará disponible próximamente.',
+    valider: 'Continuar',
+    paiement_indispo: "La reserva en línea aún no está disponible en este alojamiento.",
+    mode_test: "PÁGINA DE DEMOSTRACIÓN — no se cobrará ningún importe real. No se registrará ninguna reserva.",
+    vers_paiement: "Redirigiendo al pago seguro…",
+    retour_ok: "¡Gracias! Hemos recibido su pago. Recibirá un correo de confirmación.",
+    retour_annule: "El pago se ha cancelado. Sus fechas no se han reservado — puede volver a intentarlo.",
+    payer: "Pagar y reservar",
     r_nuit_indisponible: 'Una de las noches elegidas ya no está disponible.',
     r_sejour_trop_court: 'Estancia mínima: {n} noches.',
     r_sejour_trop_long: 'Estancia máxima: {n} noches.',
@@ -204,6 +232,11 @@ var T = {
     r_depart_interdit: 'No se admiten salidas en esta fecha.',
     r_trop_de_voyageurs: 'Este alojamiento admite un máximo de {n} huéspedes.',
     r_hors_fenetre: 'Estas fechas aún no están abiertas a reservas.',
+    r_prix_modifie: "El precio de esta estancia acaba de cambiar. Vuelva a elegir las fechas para ver la nueva tarifa.",
+    r_paiement_non_configure: "La reserva en línea aún no está disponible en este alojamiento.",
+    r_deja_rembourse: "Esta reserva fue reembolsada. Contacte con el anfitrión para reservar de nuevo.",
+    r_trop_de_tentatives: "Hay demasiadas reservas en curso en este alojamiento. Inténtelo en unos minutos.",
+    r_reessayez: "Otra reserva está en curso en estas fechas. Inténtelo en un instante.",
     r_defaut: 'Estas fechas no se pueden reservar.',
     mois: ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'],
     jours: ['lun','mar','mié','jue','vie','sáb','dom']
@@ -219,7 +252,13 @@ var T = {
     prenom: 'First name', nom: 'Last name', email: 'Email', telephone: 'Phone',
     arrivee: 'Arrival', depart: 'Departure', nuits_un: 'night', nuits_n: 'nights',
     supplement: 'Extra guest fee', total: 'Total',
-    valider: 'Continue', note_etape: 'Online payment will be available soon.',
+    valider: 'Continue',
+    paiement_indispo: "Online booking is not open on this property yet.",
+    mode_test: "DEMONSTRATION PAGE — no real payment will be taken. No booking will be recorded.",
+    vers_paiement: "Redirecting to secure payment…",
+    retour_ok: "Thank you! Your payment has been received. A confirmation email is on its way.",
+    retour_annule: "The payment was cancelled. Your dates have not been booked — you can try again.",
+    payer: "Pay and book",
     r_nuit_indisponible: 'One of the selected nights is no longer available.',
     r_sejour_trop_court: 'Minimum stay: {n} nights.',
     r_sejour_trop_long: 'Maximum stay: {n} nights.',
@@ -227,6 +266,11 @@ var T = {
     r_depart_interdit: 'Departures are not possible on this date.',
     r_trop_de_voyageurs: 'This property accommodates up to {n} guests.',
     r_hors_fenetre: 'These dates are not open for booking yet.',
+    r_prix_modifie: "The price for this stay has just changed. Re-select your dates to see the new rate.",
+    r_paiement_non_configure: "Online booking is not open on this property yet.",
+    r_deja_rembourse: "This booking was refunded. Please contact the host to book again.",
+    r_trop_de_tentatives: "Too many bookings are in progress on this property. Please try again in a few minutes.",
+    r_reessayez: "Another booking is in progress for these dates. Please try again shortly.",
     r_defaut: 'These dates cannot be booked.',
     mois: ['January','February','March','April','May','June','July','August','September','October','November','December'],
     jours: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -235,7 +279,7 @@ var T = {
 
 var LANGUES = ['fr', 'es', 'en'];
 var lang = 'fr', t = T.fr;
-var jeton = null, bien = null, nuits = [], parDate = {}, departMax = null;
+var jeton = null, bien = null, nuits = [], parDate = {}, departMax = null, paiement = { actif: false, mode: null };
 var limiteDepart = null;   // recalculee a chaque rendu du calendrier
 var arrivee = null, depart = null, devis = null;
 
@@ -304,6 +348,32 @@ function appliquerLangue(code) {
 // ─── Chargement ─────────────────────────────────────────────────────────────
 function montrerEtat(msg) { $('etat').textContent = msg; $('etat').hidden = false; $('contenu').hidden = true; }
 
+// Retour depuis la page de paiement Stripe. Traite AVANT le calendrier : le
+// voyageur doit lire le resultat tout de suite, pas apres un chargement.
+// ⚠ Ce parametre ne PROUVE RIEN — c'est le webhook qui fait foi. On confirme
+// une reception, jamais une reservation : la creation est l'etape 3.
+function afficherRetour() {
+  var p = new URLSearchParams(location.search).get('paiement');
+  if (!p) return;
+  var el = $('resultat');
+  el.hidden = false;
+  el.className = 'resultat ' + (p === 'ok' ? 'ok' : 'ko');
+  el.textContent = p === 'ok' ? t.retour_ok : t.retour_annule;
+  // On retire le SEUL parametre `paiement` — un rechargement ne doit pas
+  // re-afficher le message, et un lien partage ne doit pas porter le resultat de
+  // quelqu'un d'autre.
+  // ⚠ PAS `location.pathname` TOUT SEC : ca effacait aussi `?token=`, et sur la
+  // forme de diagnostic `/book?token=…&paiement=ok` le jeton disparaissait avant
+  // que `charger()` ne le lise — la page affichait « lien inconnu » au lieu du
+  // calendrier. Constat de review.
+  try {
+    var q = new URLSearchParams(location.search);
+    q.delete('paiement');
+    var reste = q.toString();
+    history.replaceState({}, '', location.pathname + (reste ? '?' + reste : ''));
+  } catch (e) {}
+}
+
 async function charger() {
   // Le jeton est dans le chemin : /book/<jeton>. Le `?token=` reste accepte pour
   // le diagnostic direct de l'endpoint.
@@ -329,6 +399,13 @@ async function charger() {
   $('etat').hidden = true; $('contenu').hidden = false;
 
   if (!d.ouvert) { $('bloc-ferme').hidden = false; return; }   // texte pose par appliquerLangue (data-t)
+
+  paiement = d.paiement || { actif: false, mode: null };
+  // ⚠ Un voyageur doit SAVOIR qu'il est sur une page de test, sinon il croit
+  // avoir paye et se presente le jour dit.
+  // Le texte est pose par `appliquerLangue` (data-t) : c'est le SEUL element
+  // qui empeche un voyageur de croire avoir paye, il doit suivre la langue.
+  if (paiement.mode === 'test') $('bandeau-test').hidden = false;
 
   nuits = d.nuits || [];
   // Lendemain de la derniere nuit publiee : un depart valide, sur lequel on ne
@@ -567,12 +644,61 @@ function formValide() {
     /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && $('tel').value.trim().length >= 6);
 }
 function majBouton() {
-  $('valider').disabled = !(devis && devis.ok && formValide());
+  var b = $('valider');
+  b.textContent = paiement.actif ? t.payer : t.valider;
+  b.disabled = !(devis && devis.ok && formValide() && paiement.actif);
+  $('note-etape').textContent = paiement.actif ? '' : t.paiement_indispo;
+}
+
+// ─── Vers le paiement ───────────────────────────────────────────────────────
+// La page n'affiche AUCUN champ de carte : elle redirige vers la page hebergee
+// par Stripe, qui porte la raison sociale de l'hote. Rien de sensible ne
+// traverse ce navigateur-ci, et la question du 3DS en iframe ne se pose pas.
+var envoiEnCours = false;
+async function allerAuPaiement() {
+  if (envoiEnCours) return;                    // double-clic : le serveur est
+  envoiEnCours = true;                         // idempotent, mais autant ne pas
+  $('valider').disabled = true;                // partir deux fois.
+  $('refus').hidden = true;
+  var el = $('resultat');
+  el.hidden = false; el.className = 'resultat ok'; el.textContent = t.vers_paiement;
+
+  try {
+    var r = await fetch('/api/book-pay', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: jeton, arrivee: arrivee, depart: depart,
+        personnes: $('personnes').value, lang: lang,
+        prenom: $('prenom').value.trim(), nom: $('nom').value.trim(),
+        email: $('email').value.trim(), tel: $('tel').value.trim()
+      })
+    });
+    var d = await r.json();
+    if (r.ok && d.url) { location.href = d.url; return; }   // ← page Stripe
+    if (r.ok && d.deja_paye) { el.textContent = t.retour_ok; return; }
+
+    // Un refus PORTE SA RAISON quand on en a une utile : « ces dates viennent
+    // d'etre prises » n'est pas « erreur ».
+    // ⚠ On regarde `raison` PUIS `error` : le serveur renvoie ses refus les plus
+    // frequents dans `error` (`prix_modifie`, `paiement_non_configure`), et la
+    // version precedente retombait sur « erreur » pour chacun d'eux. Constat de
+    // review.
+    el.className = 'resultat ko';
+    var cle = (d && d.raison && t['r_' + d.raison] && ('r_' + d.raison))
+           || (d && d.error && t['r_' + d.error] && ('r_' + d.error));
+    el.textContent = cle ? t[cle] : t.panne;
+  } catch (e) {
+    el.className = 'resultat ko'; el.textContent = t.panne;
+  } finally {
+    envoiEnCours = false;
+    majBouton();
+  }
 }
 
 // ─── Demarrage ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
   appliquerLangue(langueInitiale());
+  afficherRetour();
   montrerEtat(t.chargement);
 
   Array.prototype.forEach.call($('langues').querySelectorAll('button'), function (b) {
@@ -582,7 +708,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (arrivee && depart) demanderDevis();
   };
   ['prenom', 'nom', 'email', 'tel'].forEach(function (id) { $(id).oninput = majBouton; });
-  $('valider').onclick = function () { /* etape 2 : paiement */ };
+  $('valider').onclick = allerAuPaiement;
 
   charger();
 });

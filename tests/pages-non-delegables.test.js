@@ -50,7 +50,11 @@ const NON_DELEGABLES = [
   'apps/agent-ai/knowledge.html',   // knowledge — `reglages`
   'apps/agent-ai/messages.html',    // message_templates — `reglages`
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
-  'apps/menages/prestataires.html'  // public_tokens — réservé au titulaire
+  'apps/menages/prestataires.html', // public_tokens — réservé au titulaire
+  'apps/reservation-directe/paiements.html'  // clé Stripe de l'hôte —
+                                    // `facturation`, non délégable : un
+                                    // collaborateur ne branche pas le
+                                    // compte qui reçoit l'argent.
 ]
 
 // Pages qui fonctionnent RÉELLEMENT sur le compte courant : elles ne doivent

@@ -21,6 +21,18 @@
       "destination": "/pages/book"
     },
     {
+      "source": "/api/book-webhook/:jeton",
+      "destination": "/api/book-webhook?jeton=:jeton"
+    },
+    {
+      "source": "/apps/reservation-directe",
+      "destination": "/apps/reservation-directe/paiements"
+    },
+    {
+      "source": "/apps/reservation-directe/paiements",
+      "destination": "/apps/reservation-directe/paiements"
+    },
+    {
       "source": "/avis",
       "destination": "/pages/avis"
     },

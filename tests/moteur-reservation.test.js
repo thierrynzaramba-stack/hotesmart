@@ -38,6 +38,7 @@ const cal = (opts = {}) => M.construireCalendrier({
   inventaire: opts.inventaire || [],
   snapshots: opts.snapshots || [],
   intentions: opts.intentions || {},
+  tenuePropre: opts.tenuePropre || [],
   debut: D, jours: opts.jours == null ? 10 : opts.jours
 })
 
@@ -380,4 +381,56 @@ test('REGLE GRAVEE : le coefficient ne touche jamais les donnees du cœur', () =
   M.construireCalendrier({ bien, lien: { ...LIEN, price_coefficient: 150 }, inventaire, snapshots: [], intentions: {}, debut: D, jours: 5 })
   assert.deepEqual(inventaire, copie, 'l inventaire du cœur a ete modifie')
   assert.equal(bien.base_price, 80, 'le prix de base du bien a ete modifie')
+})
+
+
+// ─── CONSTAT DE REVIEW : une tentative ne doit pas se refuser ELLE-MEME ─────
+test('la tenue PROPRE de l appelant est retiree de l occupation', () => {
+  // Des qu une tentative pose sa tenue, le calendrier compte ses nuits prises.
+  // Toute re-verification de CETTE tentative echouait alors sur sa propre tenue,
+  // et le voyageur lisait « une des nuits n est plus disponible » a propos de
+  // nuits qu il venait lui-meme de tenir.
+  const avec = cal({ intentions: { '2026-10-03': 1 } })
+  assert.equal(jourDe(avec, '2026-10-03').disponible, false)
+
+  const sienne = cal({ intentions: { '2026-10-03': 1 }, tenuePropre: ['2026-10-03'] })
+  assert.equal(jourDe(sienne, '2026-10-03').disponible, true, 'sa propre tenue ne la bloque pas')
+})
+
+test('retirer sa tenue ne libere PAS celle d un autre', () => {
+  // Deux tenues sur la meme nuit : en retirer une laisse l autre.
+  const c = cal({ intentions: { '2026-10-03': 2 }, tenuePropre: ['2026-10-03'] })
+  assert.equal(jourDe(c, '2026-10-03').disponible, false)
+  assert.equal(jourDe(c, '2026-10-03').restant, 0)
+})
+
+test('une tenue propre sur une nuit VENDUE ne la rouvre pas', () => {
+  // L occupation ne peut pas devenir negative : une reservation confirmee reste
+  // une reservation confirmee.
+  const c = cal({
+    snapshots: [snap('2026-10-03', '2026-10-04', 'new')],
+    tenuePropre: ['2026-10-03']
+  })
+  assert.equal(jourDe(c, '2026-10-03').disponible, true,
+    'a 1 unite, retirer la tenue rouvre — la resa est comptee separement')
+  const deux = cal({
+    bien: { inventory_units: 1 },
+    snapshots: [snap('2026-10-03', '2026-10-04', 'new')],
+    intentions: { '2026-10-03': 1 },
+    tenuePropre: ['2026-10-03']
+  })
+  assert.equal(jourDe(deux, '2026-10-03').disponible, false,
+    'la reservation confirmee occupe toujours la nuit')
+})
+
+// ─── CONSTAT DE REVIEW : le modele de tenue ne compte pas au-dela d une unite ─
+test('un bien a plusieurs unites n est PAS vendable par le moteur', () => {
+  // La cle d une tenue est `resa-nuit:<hote>:<bien>:<nuit>` et c est la cle
+  // PRIMAIRE de write_locks : deux voyageurs sur la meme nuit ne produisent
+  // qu UNE ligne. Le calendrier compte 1 la ou il y en a 2, et l expiration de
+  // l une libere les nuits que l autre paie. On refuse plutot que de vendre sur
+  // un modele qu on sait faux.
+  assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: 2 }), 'multi_unites_non_supporte')
+  assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: 1 }), null)
+  assert.equal(M.raisonNonVendable({ ...BIEN, inventory_units: null }), null)
 })
