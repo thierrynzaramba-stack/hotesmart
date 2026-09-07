@@ -247,3 +247,33 @@ test('INTENTION : une lecture des intentions en echec REMONTE', async () => {
   await assert.rejects(() => verifierDisponibilite(sb,
     { userId: 'u', propertyId: 'p', arrival: '2026-10-12', departure: '2026-10-15' }), /write_locks/)
 })
+
+test('INTENTION : les marqueurs expires sont PURGES a chaque pose', async () => {
+  // Rien ne les supprimait : `poserVerrou` ne nettoie que sa propre cle, et
+  // l'upsert ne touche que les nuits demandees. Quatre marqueurs d'un test reel
+  // sont restes en base bien apres leur expiration.
+  const { poserIntentions } = require('../lib/reservation-directe')
+  const ops = []
+  const sb = {
+    from () {
+      const q = {
+        _del: false,
+        delete () { q._del = true; return q },
+        like (col, val) { q._like = [col, val]; return q },
+        lt (col, val) { q._lt = [col, val]; return q },
+        upsert: async (lignes) => { ops.push({ op: 'upsert', n: lignes.length }); return { error: null } },
+        then (res) {
+          if (q._del) ops.push({ op: 'purge', like: q._like, lt: q._lt })
+          return Promise.resolve({ error: null }).then(res)
+        }
+      }
+      return q
+    }
+  }
+  await poserIntentions(sb, { userId: 'u', propertyId: 'p', nuits: ['2026-11-12', '2026-11-13'] })
+  const purge = ops.find(o => o.op === 'purge')
+  assert.ok(purge, 'une purge doit avoir lieu')
+  assert.deepStrictEqual(purge.like, ['key', 'resa-nuit:%'], 'ne touche QUE les intentions')
+  assert.strictEqual(purge.lt[0], 'expire_at', 'et seulement les expirees')
+  assert.ok(ops.some(o => o.op === 'upsert' && o.n === 2), 'les nouvelles intentions sont posees')
+})

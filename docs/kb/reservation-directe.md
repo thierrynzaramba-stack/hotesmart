@@ -140,6 +140,18 @@ entier avec un filtre qu'aucun index ne sert. Marqueur `overbooking_probe` dans
 par relance suffisent à ne rien manquer.
 
 
+## 7 bis. Les intentions expirées sont purgées à chaque pose
+
+Les marqueurs `resa-nuit:*` (§4, fenêtre entre l'envoi et le retour du feed) ont un
+TTL de 20 minutes, mais **rien ne les supprimait** : `poserVerrou` ne nettoie que
+sa propre clé, et l'`upsert` ne touche que les nuits demandées. Après le premier
+test réel, quatre marqueurs sont restés en base longtemps après leur expiration.
+
+Sans conséquence fonctionnelle — la lecture filtre déjà sur `expire_at` — mais la
+table n'aurait fait que grossir. `poserIntentions` purge désormais les intentions
+expirées à chaque pose, et **elles seules** (`like 'resa-nuit:%'`) : les verrous de
+séquence ont leur propre cycle de vie.
+
 ## 8. ⚠ Écrire la disponibilité LÈVE le stop-sell (Channex)
 
 **Constaté en production le 7 septembre 2026, sur Colomiers.**
