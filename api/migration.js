@@ -1,0 +1,96 @@
+// api/migration.js
+// L'ASSISTANT DE MIGRATION — l'etat et les actions, par etape.
+// Spec : docs/specs/spec-assistant-migration.md (modif = MEME COMMIT)
+//
+// Regle de Thierry (9 septembre 2026) : chaque mecanisme du chantier migration
+// est une ETAPE de l'assistant, pas un script d'operateur. Thierry est le
+// testeur 0, pas un cas special : sa migration passe par ces endpoints, meme
+// tant que l'UI n'existe pas.
+//
+// ⚠ LA VERITE DE L'ETAT VIT DANS lib/migration-etapes.js, pas ici. Cet endpoint
+// expose, il ne decide pas — sinon un script et l'assistant finiraient par dire
+// deux choses differentes du meme bien.
+//
+//   GET  /api/migration?property_id=<provider_property_id>   -> etat des etapes
+//   GET  /api/migration                                       -> tous les biens
+//   POST /api/migration?property_id=...&action=<id>&dry_run=  -> execute UNE etape
+//
+// `dry_run` vaut TRUE par defaut sur toute action, sans exception : une etape
+// qui agit sans qu'on ait pu voir ce qu'elle ferait n'est pas une etape
+// d'assistant.
+
+const { createClient } = require('@supabase/supabase-js')
+const { requirePermission } = require('../lib/require-permission')
+const { etatMigration } = require('../lib/migration-etapes')
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+
+// Les colonnes que les etapes lisent. Une etape qui juge sur une colonne non
+// selectionnee lit `undefined` — piege rencontre trois fois sur ce chantier.
+const COLS = 'id, user_id, name, provider, provider_property_id, provider_room_type_id, '
+  + 'provider_rate_plan_id, base_price, capacity, included_guests, extra_guest_fee, '
+  + 'currency, property_type, timezone, inventory_units, rate_sync_mode'
+
+async function biensDuCompte (accountUserId, providerPropertyId) {
+  let q = supabase.from('properties').select(COLS).eq('user_id', accountUserId)
+  if (providerPropertyId) q = q.eq('provider_property_id', String(providerPropertyId))
+  const { data, error } = await q.order('name')
+  if (error) throw new Error(`properties : ${error.message}`)
+  return data || []
+}
+
+module.exports = async function handler (req, res) {
+  // ─── Etat ──────────────────────────────────────────────────────────────────
+  if (req.method === 'GET') {
+    const garde = await requirePermission(req, res, { domaine: 'reglages', niveau: 'read' })
+    if (!garde.ok) return
+    try {
+      const biens = await biensDuCompte(garde.accountUserId, req.query.property_id)
+      if (req.query.property_id && !biens.length) {
+        return res.status(404).json({ error: 'Bien introuvable pour ce compte' })
+      }
+      const out = []
+      for (const b of biens) out.push(await etatMigration(supabase, b))
+      return res.status(200).json({ biens: out })
+    } catch (e) {
+      console.error('[migration] GET', e.message)
+      return res.status(500).json({ error: 'Lecture impossible' })
+    }
+  }
+
+  // ─── Actions ───────────────────────────────────────────────────────────────
+  if (req.method === 'POST') {
+    const garde = await requirePermission(req, res, { domaine: 'reglages', niveau: 'write' })
+    if (!garde.ok) return
+
+    const action = String(req.query.action || '').trim()
+    const propertyId = String(req.query.property_id || '').trim()
+    // ⚠ `dry_run` par DEFAUT. Il faut le dire explicitement pour agir.
+    const dryRun = req.query.dry_run !== 'false'
+
+    if (!propertyId) return res.status(400).json({ error: 'property_id requis' })
+    if (!action) return res.status(400).json({ error: 'action requise' })
+
+    let biens
+    try { biens = await biensDuCompte(garde.accountUserId, propertyId) }
+    catch (e) { console.error('[migration] POST', e.message); return res.status(500).json({ error: 'Lecture impossible' }) }
+    const bien = biens[0]
+    if (!bien) return res.status(404).json({ error: 'Bien introuvable pour ce compte' })
+
+    // Les actions arrivent avec leur etape. Tant qu'une action n'est pas
+    // construite, on le DIT — on ne fait pas semblant de l'avoir.
+    const CONSTRUITES = new Set()
+    if (!CONSTRUITES.has(action)) {
+      const etat = await etatMigration(supabase, bien)
+      return res.status(501).json({
+        error: 'action_non_construite',
+        action,
+        message: `L'action « ${action} » n'est pas encore un geste de l'assistant. `
+          + 'Elle est disponible en script le temps de la construire.',
+        etat
+      })
+    }
+  }
+
+  return res.status(405).json({ error: 'Methode non supportee' })
+}
