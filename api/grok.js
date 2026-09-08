@@ -61,6 +61,11 @@ module.exports = async function handler(req, res) {
 
   } catch (err) {
     console.error('[Claude]', err)
+    // Une panne de FACTURATION n'est pas une erreur technique : le service est
+    // coupe et le restera jusqu'a une action humaine. Elle doit reveiller, pas
+    // finir dans un log. Fail-safe : ne change rien a la reponse rendue.
+    const { signalerSiPanneFacturation } = require('../lib/incident-facturation')
+    await signalerSiPanneFacturation('Anthropic (IA)', err)
     return res.status(500).json({ error: 'Erreur Claude API' })
   }
 }

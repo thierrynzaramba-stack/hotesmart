@@ -114,7 +114,14 @@ test('le prix de base sert de repli quand il existe', async () => {
 
 // Le module pousse 500 jours a partir d'aujourd'hui : dates relatives, car il
 // lit l'horloge (regle du depot).
+//
+// ⚠ EN HEURE LOCALE, comme `toLocalISO` du module — surtout pas `toISOString()`.
+// Constate en direct le 8 septembre 2026 a 22 h UTC : il etait deja le 9 a
+// Paris, `toISOString()` rendait « 2026-09-08 » quand le module poussait
+// « 2026-09-09 », et le test ne trouvait plus la date qu'il venait de fournir.
+// Un test qui ne trouve rien passe pour un test qui ne verifie rien.
 function prochaine (n) {
-  const d = new Date(); d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + n)
+  const p = x => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }

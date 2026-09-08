@@ -143,3 +143,38 @@ vrai numéro aurait été renseigné pour elle. Le titulaire se reconnaît à
 `telephone_hote` n'existe **que sur les deux biens Beds24**. Les biens Channex
 (Colomiers) n'ont pas d'entrée : un modèle de message qui utiliserait ce
 placeholder sur ces biens ne le résoudrait pas.
+
+## `api_credit` — un service tiers est coupé (crédit ou quota épuisé)
+
+**Vécu du 8 septembre 2026** : le crédit Anthropic s'est épuisé. Toute l'IA du
+produit s'est arrêtée — classification des messages entrants, réponses
+suggérées, agent, extraction de base de connaissance — et **rien ne le disait**.
+L'erreur ne vivait que dans `cron_logs.errors`, un champ que personne ne regarde.
+Elle a été trouvée par hasard, en vérifiant autre chose.
+
+Une panne de facturation n'est pas une erreur technique : c'est un service
+**coupé**, qui le restera jusqu'à une action humaine.
+
+**Trois services instrumentés**, au plus près de l'appel :
+
+| service | où | ce qui s'arrête |
+|---|---|---|
+| Anthropic | `lib/cron-shared.js` (client enveloppé) + `api/grok.js` | toute l'IA |
+| Brevo | `lib/platform-notify.js` | SMS et e-mails, **alertes comprises** |
+| Seam | `lib/providers/seam.js` | les codes d'accès — porte fermée au voyageur |
+
+**Anti-spam : 1 par jour**, et non l'heure habituelle. Un crédit épuisé est le
+même fait toute la journée ; une alerte horaire ferait du bruit là où une seule
+suffit, et le bruit finit par se faire ignorer. `reportIncident` accepte
+désormais `fenetreMs` — défaut inchangé à 1 h pour tous les autres incidents.
+
+**Ce qui n'alerte PAS, et c'est délibéré** : une clé révoquée (401), un
+dépassement de débit (429), une panne réseau. Alerter « crédit épuisé » sur une
+clé révoquée enverrait chercher au mauvais endroit — une alerte qui trompe est
+pire qu'une alerte absente. Hors 402 (explicite), il faut que le texte de
+l'erreur le dise.
+
+⚠ **Le cas Brevo se signale par le canal qui vient d'échouer.** Si Brevo est
+coupé, le SMS et l'e-mail d'alerte ne partiront pas non plus — l'incident reste
+en base (`automation_incidents`), visible, mais silencieux. C'est une limite
+connue : la seule sortie serait un second fournisseur d'alerte, hors périmètre.
