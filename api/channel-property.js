@@ -277,6 +277,7 @@ module.exports = async function handler(req, res) {
     // reconstruit le rate_plan EN PLACE (meme provider_rate_plan_id : les mappings de
     // canaux qui referencent cet id ne sont pas casses), de facon BLOQUANTE.
     let pricingTouched = false
+    let grilleSautee = false     // vrai si la grille n'a pas pu etre reconstruite (pas de prix de base)
     let effCap, effBase, effInc, effExtra
     if (capacity !== undefined || base_price !== undefined || included_guests !== undefined || extra_guest_fee !== undefined) {
       if (prop.provider !== 'channex' && prop.provider !== 'channel') {
@@ -286,8 +287,26 @@ module.exports = async function handler(req, res) {
       // Valeur effective = nouvelle valeur si fournie, sinon valeur actuelle en base.
       effCap = capacity !== undefined ? parseInt(capacity, 10) : Number(prop.capacity)
       if (!effCap || effCap < 1 || effCap > 20) return res.status(400).json({ error: 'Capacite invalide (1-20)' })
-      effBase = base_price !== undefined ? parseFloat(base_price) : Number(prop.base_price)
-      if (!effBase || effBase <= 0 || effBase > 100000) return res.status(400).json({ error: 'Prix de base invalide (>0)' })
+      // ⚠ `base_price` PEUT ETRE ABSENT, ET CE N'EST PLUS UNE ERREUR.
+      // Constat de review du 8 septembre 2026 : `Number(null)` vaut 0, donc un
+      // bien sans prix de base voyait sa fiche VERROUILLEE — impossible de
+      // toucher la capacite, les voyageurs inclus ou le supplement, avec un
+      // message qui lui reprochait un prix de base dont on venait de decider
+      // qu'il n'en a pas besoin (moteur direct, option A).
+      //
+      // Un prix de base FOURNI reste valide normalement. Ce qui change : son
+      // absence n'interdit plus de modifier le reste — elle interdit seulement
+      // de reconstruire la GRILLE tarifaire, qui n'aurait aucun montant a
+      // porter. Voir le bloc de poussee plus bas.
+      if (base_price !== undefined && base_price !== null && base_price !== '') {
+        effBase = parseFloat(base_price)
+        if (!effBase || effBase <= 0 || effBase > 100000) {
+          return res.status(400).json({ error: 'Prix de base invalide (>0)' })
+        }
+      } else {
+        const enBase = prop.base_price != null ? Number(prop.base_price) : null
+        effBase = (enBase && enBase > 0) ? enBase : null
+      }
       effInc = included_guests !== undefined
         ? ((included_guests === null || included_guests === '') ? effCap : parseInt(included_guests, 10))
         : (prop.included_guests != null ? Number(prop.included_guests) : effCap)
@@ -295,7 +314,30 @@ module.exports = async function handler(req, res) {
       effExtra = extra_guest_fee !== undefined
         ? ((extra_guest_fee === null || extra_guest_fee === '') ? null : parseFloat(extra_guest_fee))
         : (prop.extra_guest_fee != null ? Number(prop.extra_guest_fee) : null)
-      if (effExtra != null && (effExtra < 0 || effExtra > 100000)) return res.status(400).json({ error: 'Supplement invalide' })
+      // ⚠ `NaN` PASSAIT. Dette pre-existante relevee en review : `parseFloat('abc')`
+      // rend NaN, et `(NaN < 0 || NaN > 100000)` est FAUX — la garde laissait
+      // passer, puis supabase-js serialisait NaN en `null` : le supplement etait
+      // efface en silence au lieu de rendre un 400.
+      if (effExtra != null && (!Number.isFinite(effExtra) || effExtra < 0 || effExtra > 100000)) {
+        return res.status(400).json({ error: 'Supplement invalide' })
+      }
+
+      // ⚠ SANS PRIX DE BASE, LA GRILLE NE PEUT PAS ETRE RECONSTRUITE — et alors
+      // toucher a l'occupation ferait DIVERGER la DB et Channex.
+      // Constat de review : le room_type partirait a `occ_adults: 4` pendant que
+      // les options du rate plan s'arreteraient a 2, et la DB dirait 4. Le
+      // commentaire de ce bloc promet exactement l'inverse (« une ecriture DB
+      // seule ferait diverger DB et Channex »). On refuse plutot que de mentir.
+      grilleSautee = !effBase
+      const occupationBouge = capacity !== undefined || included_guests !== undefined || extra_guest_fee !== undefined
+      if (grilleSautee && occupationBouge && prop.provider_rate_plan_id) {
+        return res.status(409).json({
+          error: 'grille_non_reconstructible',
+          message: 'Ce logement n\'a pas de prix de base : la grille tarifaire ne peut pas etre reconstruite, '
+            + 'et modifier la capacite ou l\'occupation ferait diverger HoteSmart de la plateforme. '
+            + 'Renseignez un prix de base pour ce logement, ou modifiez ces champs avant de le connecter.'
+        })
+      }
       updates.capacity = effCap
       updates.base_price = effBase
       updates.included_guests = effInc
@@ -317,7 +359,17 @@ module.exports = async function handler(req, res) {
           return res.status(502).json({ error: 'Mise a jour de la capacite echouee cote plateforme' })
         }
       }
-      if (prop.provider_rate_plan_id) {
+      // ⚠ SANS PRIX DE BASE, ON NE RECONSTRUIT PAS LA GRILLE.
+      // `buildRatePlanOptions(null, …)` produirait `Math.round(null * 100)` = 0,
+      // donc une grille a 0 €. Et le staging l'a mesure : Channex IGNORE un
+      // rate a 0 et garde la grille precedente — on ecrirait donc soit du zero,
+      // soit rien, en croyant avoir mis a jour.
+      //
+      // Ce n'est pas une perte : depuis le 8 septembre 2026, `runFullSync`
+      // pousse chaque date avec son propre prix et FERME celles qui n'en ont
+      // pas. La grille du rate plan ne sert que de defaut aux dates non
+      // poussees — et il n'y en a plus.
+      if (prop.provider_rate_plan_id && !grilleSautee) {
         const rp = buildRatePlanOptions(effBase, effInc, effExtra, effCap)
         const rpRes = await channelCall('PUT', `/rate_plans/${prop.provider_rate_plan_id}`, {
           rate_plan: { sell_mode: rp.sell_mode, options: rp.options }
@@ -356,7 +408,16 @@ module.exports = async function handler(req, res) {
       console.error('[channel-property] UPDATE error', updErr.message)
       return res.status(500).json({ error: 'Erreur de mise a jour' })
     }
-    return res.status(200).json({ property: updated, channel_synced: channelSynced })
+    return res.status(200).json({
+      property: updated,
+      channel_synced: channelSynced,
+      // Dit a l'hote ce qui n'a PAS ete fait, plutot que de le laisser croire
+      // que sa grille tarifaire a suivi.
+      grille_non_reconstruite: grilleSautee || undefined,
+      note: grilleSautee
+        ? 'Ce logement n\'a pas de prix de base : la grille tarifaire n\'a pas ete reconstruite. Vos prix par date restent la seule source, et une date sans prix part fermee.'
+        : undefined
+    })
   }
 
   // ===== DELETE : suppression complete d'un bien =====

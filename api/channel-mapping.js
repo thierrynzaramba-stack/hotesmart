@@ -14,6 +14,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
+const { jugerPrixDuCoeur } = require('../lib/garde-activation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -100,7 +101,9 @@ module.exports = async function handler(req, res) {
   // ===== Ownership : le bien doit appartenir au user (par provider_property_id) =====
   const { data: prop, error: propErr } = await supabase
     .from('properties')
-    .select('id, provider, provider_property_id, provider_rate_plan_id, provider_room_type_id, name')
+    // ⚠ `base_price` EST LU PAR LE CRAN D'ARRET (lib/garde-activation.js).
+    // Une garde qui juge sur une colonne non selectionnee est une garde ouverte.
+    .select('id, provider, base_price, provider_property_id, provider_rate_plan_id, provider_room_type_id, name')
     .eq('user_id', compteBien)
     .eq('provider_property_id', providerPropertyId)
     .maybeSingle()
@@ -371,8 +374,27 @@ module.exports = async function handler(req, res) {
       const channelId = (req.query.channel_id || '').trim()
       if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
 
+      // ⚠ LE CRAN D'ARRET VIT ICI AUSSI, ET C'EST LE CHEMIN QUI COMPTE.
+      // Constat de review : la garde n'existait que dans channel-bcom-activate,
+      // qu'AUCUNE page n'appelle. `HS.api.channel.activate` (shared/api-client)
+      // vise cet endpoint-ci, avec `dryRun = false` par defaut. Une garde posee
+      // sur le chemin que personne n'emprunte ne garde rien.
+      const juge = await jugerPrixDuCoeur(supabase, prop)
+
       if (dryRun) {
-        return res.status(200).json({ dry_run: true, would_send: { method: 'POST', path: `/channels/${channelId}/activate`, body: {} } })
+        return res.status(200).json({
+          dry_run: true,
+          would_send: { method: 'POST', path: `/channels/${channelId}/activate`, body: {} },
+          pret_a_activer: juge.pret,
+          blocage: juge.pret ? null : { raison: juge.raison, message: juge.message },
+          prix_detenus: juge.prix_detenus
+        })
+      }
+
+      if (!juge.pret) {
+        return res.status(409).json({
+          error: 'activation_refusee', raison: juge.raison, message: juge.message
+        })
       }
 
       // Idempotent : canal deja actif -> no-op succes (cas multi-biens : on ajoute un

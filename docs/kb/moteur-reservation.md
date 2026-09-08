@@ -276,6 +276,39 @@ garde qui juge sur des colonnes non sélectionnées est une garde ouverte.
 
 À la migration, ces biens deviendront Channex et la garde s'ouvrira d'elle-même.
 
+## 7 ter. Le cran d'arrêt avant activation d'un canal
+
+**Règle gravée par Thierry** : aucun prix, aucune grille d'occupation ne part
+vers les OTA à la connexion sans sa validation explicite. La sync tarifaire est
+un acte séparé de la connexion.
+
+**Le juge est `lib/garde-activation.js` — point de vérité unique, consulté par
+`api/channel-mapping.js` ET `api/channel-bcom-activate.js`.** Il pose une seule
+question : *le cœur détient-il un prix pour ce bien ?* — un `base_price > 0`, ou
+au moins une ligne `calendar_inventory.rate > 0` sur 400 jours.
+
+⚠ **La première version de cette garde était INERTE, et c'est la leçon à garder.**
+Elle comptait les dates que Channex détient. Or **Channex rend une grille dense**
+— une entrée par date, remplie par le prix par défaut de l'option du rate plan —
+**même quand HôteSmart n'a jamais rien poussé**. Mesure directe :
+`docs/specs/protocole-staging-tarifs.md` question 3, où une date poussée sans
+champ `rate` relit `333.00`, le défaut du plan ; et `analyse.md` §1.2 l'avait
+déjà constaté (« 365 jours rendus sur 365, 365 avec un prix ») sur un bien en
+mode `keep` sans une seule ligne d'inventaire. **Compter ces dates, c'est lire
+comme preuve de sécurité la donnée qui est le danger.**
+
+⚠ **`last_fullsync_at` ne convient pas non plus** : il n'est posé que par le full
+sync du cron, jamais par les poussées delta d'`api/calendar.js`. Les quatre biens
+du parc le portent à `NULL`, Colomiers compris — un bien qui a pourtant vendu.
+
+⚠ **Et la garde doit vivre sur le chemin que l'UI emprunte.** Posée d'abord dans
+`channel-bcom-activate`, elle ne gardait rien : aucune page n'appelle cet
+endpoint. `HS.api.channel.activate` vise `channel-mapping`, avec `dryRun = false`
+par défaut. Une garde sur un chemin que personne n'emprunte est décorative.
+
+**Verdict sur le parc au 8 septembre 2026** : les deux biens de Bagnères sont
+refusés (aucun prix), Colomiers et colomier passent (`base_price`).
+
 ## 8. Dettes connues (étape 1)
 
 1. **Aucune limitation de débit** sur `/api/book-public`. Le jeton est la seule

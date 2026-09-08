@@ -20,6 +20,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
+const { jugerPrixDuCoeur } = require('../lib/garde-activation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -153,7 +154,10 @@ module.exports = async function handler(req, res) {
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
-      .select('id, name, provider_property_id, provider_rate_plan_id, provider_room_type_id')
+      // ⚠ `base_price` EST LU PAR LA GARDE : sans lui, jugerPrixDuCoeur le voit
+      // `undefined` et refuse tout, ou pire, si la garde changeait, laisserait
+      // passer. Une garde qui juge sur une colonne non selectionnee est ouverte.
+      .select('id, name, base_price, provider_property_id, provider_rate_plan_id, provider_room_type_id')
       .eq('user_id', compteBien)
       .eq('provider_property_id', providerPropertyId)
       .maybeSingle()
@@ -189,12 +193,36 @@ module.exports = async function handler(req, res) {
 
     // --- activate : bascule live + lecture ARI post-activation ---
     const dryRun = req.query.dry_run !== 'false'
+    // ⚠ L'APERCU MONTRE CE QUI PARTIRAIT, PAS SEULEMENT CE QU'ON ENVERRAIT.
+    // Thierry valide sur ce que Channex DETIENT — pas sur une intention. Sans
+    // cette lecture, « dry run » ne dit que « je vais appeler activate », ce qui
+    // n'aide personne a decider.
+    const ariAvant = await readAri(providerPropertyId, prop.provider_rate_plan_id, prop.provider_room_type_id)
+    // ⚠ L'ARI EST MONTRE, IL NE JUGE PAS. Channex rend une grille dense remplie
+    // par le defaut du rate plan meme si on n'a jamais rien pousse : compter ces
+    // dates reviendrait a prendre le danger pour la preuve qu'il n'y en a pas.
+    // Le juge lit le COEUR (lib/garde-activation.js).
+    const juge = await jugerPrixDuCoeur(supabase, prop)
+
     if (dryRun) {
       return res.status(200).json({
         dry_run: true,
         would_send: { method: 'POST', path: `/channels/${channelId}/activate` },
         current_is_active: isActive,
-        note: 'Sur envoi reel : POST activate, puis relecture is_active + lecture ARI (ce que Channex detient/propagerait).'
+        pret_a_activer: juge.pret,
+        blocage: juge.pret ? null : { raison: juge.raison, message: juge.message },
+        ari_detenu_par_channex: ariAvant,
+        note: 'Ce que Channex detient AUJOURD\'HUI est ce qui partira vers Booking a l\'activation. Verifiez les dates et les prix ci-dessus avant d\'activer.'
+      })
+    }
+
+    // Envoi reel : le cran d'arret. Un canal ne s'active pas sur un ARI vide.
+    if (!juge.pret) {
+      return res.status(409).json({
+        error: 'activation_refusee',
+        raison: juge.raison,
+        message: juge.message,
+        ari_detenu_par_channex: ariAvant
       })
     }
 
