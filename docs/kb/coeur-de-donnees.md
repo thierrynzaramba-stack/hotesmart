@@ -68,6 +68,57 @@ Les avis voyageurs sont du **cœur**, pas du domaine ménage — voir
 réservation, lue par la fiche prestataire **et** par le futur module de pricing.
 Jamais dupliquée dans une app.
 
+## La fiche du bien : `property_snapshots` (étape 1B)
+
+Même forme que `bookings_snapshot`, et c'est délibéré : un payload provider
+intégral, une empreinte pour savoir s'il a bougé sans le rapatrier, **un seul
+écrivain** (`lib/property-snapshot.js`). La leçon est acquise, on ne la
+réapprend pas.
+
+**Le rapatriement et la structuration sont deux gestes distincts.** Ce writer ne
+normalise rien, ne remplit aucune colonne de `properties`, ne décide de rien.
+Mélanger les deux, c'est perdre le brut le jour où la structure change d'avis.
+
+**Mesure du 8 septembre 2026**, les quatre biens rapatriés :
+
+| bien | provider | champs |
+|---|---|---|
+| Cœur de vie « La bulle » | beds24 | 331 |
+| coeur de vie 23 | beds24 | 334 |
+| Colomiers | channex | 112 |
+| colomier (test) | channex | 110 |
+
+Le fetch passe par `getProvider(...).getPropertyRaw()` — jamais un provider en
+dur. Côté Beds24 la fiche complète demande sept `include` (157 → 330 champs) ;
+côté Channex elle agrège la propriété, ses `room_types` et ses `rate_plans` —
+un bien sans ses plans tarifaires n'est pas une fiche, c'est un nom.
+
+**Ce que Beds24 ne sert pas, même en le demandant** : ni descriptions ni photos.
+`includeTexts` et `includePictures` sont acceptés (HTTP 200) mais aucune clé ne
+revient, et les 8 `templates` sont vides sur les deux biens. L'éditorial vient
+d'ailleurs — des annonces OTA, ou de la saisie.
+
+**Deux défauts trouvés en review, et ils valent d'être retenus :**
+
+1. **Une fiche partielle ne devient jamais la vérité du cœur.** `getPropertyRaw`
+   rendait l'objet amputé quand `/room_types` ou `/rate_plans` échouait. L'objet
+   n'était pas vide, il passait donc la garde `payload_vide` du writer et
+   **écrasait en base une fiche complète** — brut perdu, `updated_at` qui ment,
+   `raw_hash` qui oscille d'un passage à l'autre. Un rapatriement incomplet doit
+   ressembler à un échec : `getPropertyRaw` rend `null`.
+2. **Channex plafonne à 10 par défaut et ne le dit pas.** Les appels
+   `room_types`/`rate_plans` n'avaient aucune pagination. Colomiers en porte 5
+   aujourd'hui — la moitié du plafond, et une migration OTA multiplie les plans
+   par canal. La troncature aurait été **stable** : empreinte inchangée, compte
+   de champs plausible, fiche fausse pour toujours. C'est pire qu'une troncature
+   bruyante, et c'est la famille du bug de Régina.
+
+**RLS fermée, service uniquement.** Ce brut porte des emails, des téléphones,
+des réglages de passerelle de paiement et des identifiants de webhook. Aucune
+app ne le lit en direct : la fiche unifiée lira `properties`. Le brut est un
+filet de sécurité et une source de remplissage, pas une surface d'API — et rien
+dans le writer ni dans le script ne le journalise.
+
 ## Le corollaire de la migration : rapatrier n'oblige pas à migrer
 
 **Une fois la donnée d'un bien rapatriée dans le cœur, ce bien peut RESTER sur
