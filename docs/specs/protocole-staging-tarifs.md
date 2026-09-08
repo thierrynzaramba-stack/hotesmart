@@ -112,3 +112,81 @@ donc **ouverte** après ce protocole, et c'est une limite à assumer, pas à mas
 Un verdict **par question**, factuel, avec les codes HTTP et les corps de
 réponse observés. Une question sans réponse claire est rapportée comme telle,
 jamais comblée par une déduction.
+
+---
+
+# VERDICT — exécution du 8 septembre 2026
+
+Deux passages. Le premier portait deux défauts de méthode, corrigés avant de
+conclure : il manquait le `group_id` (le `POST /channels` rendait 422 « You not
+have access to requested group » — une erreur de **groupe**, muette sur le rate
+plan), et aucune disponibilité n'était poussée, si bien que les trois dates
+ressortaient `availability: 0` — **une date indisponible n'est pas vendable quel
+que soit son prix, le test ne mesurait rien.**
+
+Chiffres du second passage. 15 appels, tous vers `staging.channex.io/api/v1`.
+Propriété de test supprimée et **disparition vérifiée**.
+
+## Question 1 — la grille est-elle active dès la création ?
+
+**Réponse : rien ne peut partir sans canal, et il n'y en a aucun.**
+
+Le rate plan porte sa grille dès sa création (options à 111/222/333 relues
+telles quelles). Aucun attribut `is_active`, `published` ou `sync_category`
+n'apparaît sur un rate plan — cette notion n'existe pas à ce niveau. En
+revanche `GET /channels` rend **0 canal** : la grille n'a aucun destinataire.
+
+**Conséquence pour le chantier : le cran d'arrêt se place AVANT LE MAPPING, et
+`api/channel-property.js` — le provisioning, chemin certifié — n'a pas à être
+touché.** C'est la réponse que Thierry espérait.
+
+⚠ À dire comme tel : c'est une déduction structurelle (pas de canal, pas de
+destinataire), pas l'observation d'un drapeau « inactif ». Elle est solide, elle
+n'est pas une mesure directe.
+
+## Question 2 — un rate plan neutre traverse-t-il le mapping ?
+
+**NON TRANCHÉE.** Le rate plan neutre est créé sans difficulté (`per_room`, une
+option, HTTP 201). Mais le `POST /channels` rend **HTTP 500 Internal Server
+Error** — pas une erreur de validation. Cause probable : le `hotel_id` fictif
+(`0000000`) fait échouer Channex quand il tente de joindre Booking.com.
+
+Trancher cette question demanderait un vrai `hotel_id` Booking sur le staging,
+ce qu'on ne fera pas. **Elle reste ouverte — et elle n'a plus besoin d'être
+tranchée si la question 1 tient** : sans mapping, rien ne part, donc le rate
+plan neutre ne sert plus à rien.
+
+## Question 3 — une date poussée SANS champ `rate`
+
+**Réponse : acceptée, mais elle NE FERME RIEN. C'est le verdict important, et il
+contredit l'orientation.**
+
+| date | poussée | `rate` relu | `availability` |
+|---|---|---|---|
+| A | avec `rate: 11100` | **111.00** | 1 |
+| B | **sans champ `rate`** | **333.00** | 1 |
+| C | avec `rate: 0` | **333.00** | 1 |
+
+Les trois formes sont acceptées (HTTP 200). Mais :
+
+- **Omettre `rate` ne produit pas une date sans prix.** La date reste vendable,
+  **au prix par défaut de l'option du rate plan** (333 €) — un prix que l'hôte
+  n'a pas choisi pour cette date.
+- **`rate: 0` n'est pas appliqué** : la valeur reste 333. Le risque « un 0 €
+  part chez l'OTA » par ce chemin est donc **nul** — Channex l'ignore.
+
+**L'issue visée par Thierry ne produit pas l'effet attendu.** Omettre le champ ne
+protège pas : ça vend au tarif du rate plan.
+
+**Ce qui ferme réellement une date sans prix, c'est de la FERMER** —
+`stop_sell: true` ou `availability: 0`. C'est un arbitrage à lui rendre, parce
+qu'il touche une règle gravée : le `stop_sell` est une **intention mémorisée de
+l'hôte**, et une fermeture automatique « parce qu'il n'y a pas de prix » n'est
+pas son intention. Le compromis probable : pousser la fermeture au provider sans
+l'écrire dans la mémoire d'intention — mais c'est sa décision, pas la nôtre.
+
+## Ce que ce protocole n'a pas établi
+
+Ce que **l'OTA affiche** pour chacune de ces dates. Aucune annonce réelle n'était
+connectée, et le canal n'a pas pu être créé. La question reste ouverte et ne
+s'observera qu'à la migration, sur une date lointaine et sous surveillance.
