@@ -181,6 +181,17 @@ module.exports = async function handler (req, res) {
         active: true
       }).select('*').maybeSingle()
       if (error) throw new Error(error.message)
+      // ⚠ LE BIEN DE LA GARDE NE SUFFIT PAS. Constat de review, reproduit :
+      // `resoudreBien` ne selectionne que `id, user_id, name, provider,
+      // provider_property_id` — ni `base_price`, ni `inventory_units`.
+      // `raisonNonVendable` y voyait donc TOUJOURS `sans_prix_de_base`, et
+      // chaque creation de lien annoncait un bloquant sur un bien parfaitement
+      // configure. Le test ne le voyait pas : son faux `requirePermission`
+      // rendait un objet complet, la vraie garde non.
+      const { data: complet } = await supabase.from('properties')
+        .select('id, base_price, inventory_units, provider, provider_property_id')
+        .eq('id', bien.id).maybeSingle()
+
       // ⚠ ON CREE, MAIS ON PREVIENT. Constat de review : l'outil de service
       // remplace avertissait avant d'ecrire (« le lien serait cree mais la page
       // publique repondrait ferme »), et ce garde-fou s'etait perdu. Sans lui,
@@ -189,7 +200,7 @@ module.exports = async function handler (req, res) {
       // On n'INTERDIT pas : preparer un lien avant de renseigner le prix est
       // legitime. On le dit.
       return res.status(200).json({
-        ok: true, lien: lienPublic(data), bloquant: raisonNonVendable(bien) || null
+        ok: true, lien: lienPublic(data), bloquant: complet ? (raisonNonVendable(complet) || null) : null
       })
     }
 

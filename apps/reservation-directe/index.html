@@ -227,7 +227,16 @@
       const r = await fetch(`${API}?bien=${encodeURIComponent(bien)}`,
         { method: methode, headers: entetes, body: JSON.stringify({ ...corps, bien }) })
       const d = await r.json()
-      if (!r.ok) return message(ERREURS[d.error] || 'Enregistrement impossible.', 'ko')
+      if (!r.ok) {
+        // ⚠ L'ECRAN NE DOIT PAS RESTER SUR UNE VALEUR NON ENREGISTREE. Constat
+        // de review : un echec laissait le selecteur de politique sur le choix
+        // rejete — l'hote lisait « Flexible J-2 » a l'ecran pendant que la base
+        // vendait toujours en non remboursable, avec le message d'erreur en bas
+        // d'une page longue, souvent hors champ.
+        message(ERREURS[d.error] || 'Enregistrement impossible.', 'ko')
+        await charger()
+        return
+      }
       // Un lien cree sur un bien qui ne peut pas vendre : on le dit tout de
       // suite, plutot que de laisser l'hote coller une URL morte.
       message(d.bloquant

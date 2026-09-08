@@ -27,6 +27,10 @@ function table (nom) {
     update (m) { q.maj = m; etat.ecritures.push({ table: nom, maj: m, filtres: q.filtres }); return chaine },
     insert (r) { q.insert = r; etat.ecritures.push({ table: nom, insert: r }); return chaine },
     async maybeSingle () {
+      if (nom === 'properties') {
+        const b = etat.biens.find(x => x.id === q.filtres.id)
+        return { data: b || null, error: null }
+      }
       if (nom === 'booking_links') {
         if (q.insert) { const l = { id: 'neuf', created_at: 'now', ...q.insert }; etat.liens.push(l); return { data: l, error: null } }
         const l = etat.liens.find(x => Object.entries(q.filtres).every(([c, v]) => String(x[c]) === String(v)))
@@ -58,7 +62,11 @@ Module._load = function (d) {
       if (opts.bienRequis) {
         const b = etat.biens.find(x => x.id === opts.bien)
         if (!b) { res.status(404).json({ error: 'bien_introuvable' }); return { ok: false } }
-        return { ok: true, userId: etat.appelant || etat.garde, accountUserId: etat.garde, bien: b }
+        // ⚠ AUSSI PAUVRE QUE LA VRAIE GARDE. `resoudreBien` ne selectionne que
+        // ces cinq colonnes — un faux plus genereux avait laisse passer un bug
+        // ou `raisonNonVendable` voyait toujours `sans_prix_de_base`.
+        const pauvre = { id: b.id, user_id: b.user_id, name: b.name, provider: b.provider, provider_property_id: b.provider_property_id }
+        return { ok: true, userId: etat.appelant || etat.garde, accountUserId: etat.garde, bien: pauvre }
       }
       return { ok: true, userId: etat.appelant || etat.garde, accountUserId: etat.garde, bien: null }
     }
@@ -76,7 +84,7 @@ function appeler (methode, query, body) {
 }
 
 const BIEN = {
-  id: 'uuid-bien', name: 'Le Nid', base_price: 80, currency: 'EUR', capacity: 4,
+  id: 'uuid-bien', user_id: 'uuid-hote', name: 'Le Nid', base_price: 80, currency: 'EUR', capacity: 4,
   cancellation_policy: 'j7', provider: 'channex', provider_property_id: 'prop-1', inventory_units: 1
 }
 
