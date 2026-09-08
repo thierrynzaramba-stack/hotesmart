@@ -44,6 +44,10 @@ id uuid PK
 property_id uuid FK -> properties(id) ON DELETE CASCADE
 date date
 rate numeric            -- prix du jour (NULL = base_price du bien)
+                        -- ⚠ ALLER SIMPLE : le POST ignore `rate: null`
+                        --   (ligne 575), donc on ne revient JAMAIS à NULL
+                        --   depuis l'interface. Dette + trace prod :
+                        --   docs/kb/moteur-reservation.md §8 point 7.
 avail integer           -- dispo (NULL = défaut)
 stop_sell boolean       -- fermé à la vente
 min_stay_arrival integer

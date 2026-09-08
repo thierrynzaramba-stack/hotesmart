@@ -270,6 +270,38 @@ tous les biens.
    structurel — purger l'intention quand le feed confirme la réservation —
    appartient au **writer du feed** (phase 2), pas au moteur de lecture.
 
+7. **Une exception de prix ne peut pas être effacée, seulement remplacée.**
+
+   **Trace réelle en production, 8 septembre 2026** : quatre nuits de Colomiers —
+   17, 18, 19 et 20 septembre — portent `calendar_inventory.rate = 86` là où
+   elles portaient `NULL`. Elles sont **figées à 86 € et ne suivront pas un futur
+   changement de `properties.base_price`**, contrairement à toutes les autres
+   nuits du bien. Le 20 septembre n'a même jamais été vendu : il a été touché par
+   la ressaisie qui refermait la session de test.
+
+   **La cause**, `api/calendar.js` ligne 575 :
+
+   ```js
+   if (seg.rate != null) r.rate = seg.rate
+   ```
+
+   Un `rate: null` envoyé par le calendrier est **ignoré**. La ligne protège
+   contre l'écrasement involontaire d'un prix par un segment qui ne parle pas de
+   prix — mais elle rend du même coup le retour au prix de base **impossible
+   depuis l'interface**. L'hôte peut écrire 86, il ne peut pas écrire « plus
+   d'exception ».
+
+   **Pourquoi ça compte** : `rate = NULL` et `rate = 86` sont indiscernables à
+   l'œil sur un bien dont `base_price` vaut 86. Ils divergent le jour où le prix
+   de base change — silencieusement, sur les seules nuits qu'on avait « remises
+   comme avant ». C'est la forme calendrier du principe gravé du §3 :
+   `calendar_inventory` est une **mémoire d'exceptions**, et une mémoire qui ne
+   sait pas oublier finit par mentir.
+
+   **Le correctif** appartient à `api/calendar.js` (writer unique), pas au
+   moteur : distinguer « ce segment ne parle pas de prix » de « ce segment
+   efface le prix » — un marqueur explicite, pas un `null` ambigu.
+
 
 ---
 
