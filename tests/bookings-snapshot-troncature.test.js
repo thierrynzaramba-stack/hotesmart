@@ -83,7 +83,15 @@ function bornee (q) {
          /\.eq\('booking_id'/.test(q) ||
          /\.in\('booking_id'/.test(q) ||
          /\.range\(/.test(q) ||
-         /\.limit\(/.test(q)
+         /\.limit\(/.test(q) ||
+         // ⚠ UN COMPTAGE NE RAMENE AUCUNE LIGNE. `{ count: 'exact', head: true }`
+         // demande un nombre, pas des donnees : le plafond de 1000 lignes de
+         // PostgREST ne s'y applique pas, et exiger une borne dessus obligerait
+         // a inventer un filtre qui fausserait le compte. Ajoute le 9 septembre
+         // 2026 pour lib/migration-etapes.js, et valable pour tout comptage a
+         // venir — plutot qu'une exemption par fichier, qui rendrait invisible
+         // la prochaine vraie lecture ajoutee au meme endroit.
+         /head:\s*true/.test(q)
 }
 
 // ─── Les deux endpoints de l'incident ───────────────────────────────────────
