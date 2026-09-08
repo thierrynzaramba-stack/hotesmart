@@ -308,6 +308,16 @@ garde qui juge sur des colonnes non sélectionnées est une garde ouverte.
    structurel — purger l'intention quand le feed confirme la réservation —
    appartient au **writer du feed** (phase 2), pas au moteur de lecture.
 
+9. **UI : une fermeture calculée ne se distingue pas d'une fermeture de l'hôte.**
+   Depuis le 8 septembre 2026, une date sans prix part `stop_sell` vers les
+   plateformes sans que rien ne soit écrit dans `calendar_inventory.stop_sell`.
+   Le calendrier HôteSmart lit la mémoire d'intention : il affiche donc ces
+   dates comme **ouvertes**, alors qu'elles sont fermées côté OTA.
+
+   L'hôte doit pouvoir voir la différence entre « j'ai fermé cette date » et
+   « elle est fermée faute de prix ». **Noté au chantier UI**, à la demande de
+   Thierry — pas traité maintenant.
+
 8. **La fiche d'un bien Channex sans `base_price` ne sera pas modifiable.**
    `api/channel-property.js:289` calcule `effBase = Number(prop.base_price)`, et
    `Number(null)` vaut `0` : toucher `capacity`, `included_guests` ou

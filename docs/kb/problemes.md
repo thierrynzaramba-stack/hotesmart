@@ -23,3 +23,24 @@
 
 ## ⚠️ À VÉRIFIER
 - Compléter au fil des retours beta : ajouter chaque cause récurrente + sa réponse validée.
+
+## Des dates sont fermées sur Booking/Airbnb alors que je ne les ai pas fermées
+
+**Depuis le 8 septembre 2026**, une date sans aucun prix part **fermée à la vente** vers les
+plateformes. C'est voulu : le staging Channex a montré qu'une date poussée sans prix reste
+vendable **au prix par défaut du plan tarifaire** — donc à un prix que l'hôte n'a pas choisi.
+Entre fermer une date et la vendre au mauvais prix, on ferme.
+
+**Comment le reconnaître** : l'hôte n'a rien fermé dans son calendrier HôteSmart, et les dates
+concernées n'ont pas de prix. Le journal de synchronisation le dit :
+`[fullsync] bien <id> : N/500 dates fermees faute de prix`.
+
+**Comment le corriger** : saisir un prix (par date, ou un prix de base pour le logement). La
+date **rouvre d'elle-même** à la poussée suivante — rien à rouvrir à la main. La mémoire
+d'intention de l'hôte n'a jamais été touchée.
+
+**Si beaucoup de dates sont concernées** (seuil : 30 sur 500), une alerte fondateur part
+automatiquement — c'est le signe d'un amorçage de prix qui a échoué, pas d'un choix.
+
+⚠ **Dette UI connue** : dans le calendrier HôteSmart, ces dates ne se distinguent pas encore de
+celles que l'hôte a fermées lui-même. À traiter au chantier UI.

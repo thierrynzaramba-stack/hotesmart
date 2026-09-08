@@ -43,6 +43,22 @@ Une réservation sur un canal **bloque les mêmes dates sur l'autre canal**, et 
   (prix de base pour X voyageurs inclus + supplément par personne au-delà).
 - **Délai de propagation** vers les plateformes : de quelques secondes à quelques minutes après
   l'enregistrement (traitement asynchrone). ⚠️ À VÉRIFIER : ordre de grandeur exact à confirmer.
+- **Une date sans prix est FERMÉE sur les plateformes** (comportement du 8 septembre 2026).
+  Si une date n'a ni prix saisi ni prix de base, HôteSmart la pousse **fermée à la vente**
+  (`stop_sell`) plutôt que de la laisser partir sans tarif.
+
+  **Pourquoi** : mesuré sur le staging Channex — omettre le prix ne ferme rien, la date reste
+  vendable **au prix par défaut du plan tarifaire**, un prix que l'hôte n'a jamais choisi pour
+  cette date. Un `rate` à 0 n'est pas appliqué non plus. La seule façon de ne pas vendre une
+  date sans prix est de la fermer.
+
+  **Ce n'est PAS une fermeture de l'hôte.** Rien n'est écrit dans sa mémoire d'intention : dès
+  qu'il saisit un prix, la date **rouvre d'elle-même** à la poussée suivante, sans qu'il ait
+  rien à défaire. Voir `docs/kb/problemes.md`.
+
+  **Réponse type support** : « Cette date part fermée parce qu'elle n'a pas de prix. Saisissez
+  un prix pour cette date (ou un prix de base pour le logement) et elle rouvrira toute seule à
+  la prochaine synchronisation — vous n'avez rien à rouvrir manuellement. »
 
 ## 4. Réponses type support
 - « Mes prix ne sont pas à jour sur Booking » → **délai de propagation** normal (quelques minutes) ;
