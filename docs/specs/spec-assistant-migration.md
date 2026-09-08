@@ -57,11 +57,18 @@ chemin d'accès. Un prestataire n'y a rien à faire.
 | 3 | `fiche_unifiee` | les champs que le produit consomme sont remplis | `properties` |
 | 4 | `amorcage_prix` | les prix par date sont dans le cœur | `calendar_inventory.rate` |
 | 5 | `garde_activation` | le bien peut-il publier sans mentir sur ses prix | `lib/garde-activation.js` |
+| 6 | `provisionner_channex` | crée la propriété cible chez Channex et pose ses identifiants **sur le bien existant** | `properties.migration_target_property_id` |
 
 État réel au 9 septembre 2026, lu par l'endpoint : **5/5 étapes « fait »** sur
 les deux biens de Bagnères — 784 et 637 réservations avec payload brut complet,
 320 et 321 champs de fiche conservés, capacité/type/fuseau renseignés, 17 et 22
 nuits tarifées, publication autorisée.
+
+⚠ **L'étape 6 existe parce que le produit ne savait pas déménager un bien.**
+`POST /api/channel-property` fait un **INSERT** : il crée un bien neuf. L'utiliser
+pour une migration aurait créé un **second** bien à côté de celui qui porte
+l'historique — 784 réservations, 176 ménages, 783 messages, 117 codes d'accès sur
+La bulle. Le produit savait créer, pas déménager.
 
 **Restent à construire** (elles entreront ici avec leur endpoint) : validation de
 grille, création de la propriété Channex, connexion et mapping des canaux,

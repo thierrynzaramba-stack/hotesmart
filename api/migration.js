@@ -77,9 +77,24 @@ module.exports = async function handler (req, res) {
     const bien = biens[0]
     if (!bien) return res.status(404).json({ error: 'Bien introuvable pour ce compte' })
 
+    // ─── provisionner_channex ────────────────────────────────────────────────
+    // Cree la propriete cible chez Channex et pose ses identifiants sur le bien
+    // EXISTANT. Ne touche ni `provider`, ni `provider_property_id` : la bascule
+    // appartient au re-keying.
+    if (action === 'provisionner_channex') {
+      const { provisionner } = require('../lib/migration-provisionner')
+      try {
+        const r = await provisionner(supabase, bien, { dryRun })
+        return res.status(r.ok ? 200 : 409).json(r)
+      } catch (e) {
+        console.error('[migration] provisionner', e.message)
+        return res.status(500).json({ error: 'provisionnement_impossible', detail: e.message })
+      }
+    }
+
     // Les actions arrivent avec leur etape. Tant qu'une action n'est pas
     // construite, on le DIT — on ne fait pas semblant de l'avoir.
-    const CONSTRUITES = new Set()
+    const CONSTRUITES = new Set(['provisionner_channex'])
     if (!CONSTRUITES.has(action)) {
       const etat = await etatMigration(supabase, bien)
       return res.status(501).json({
