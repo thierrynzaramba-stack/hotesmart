@@ -20,6 +20,11 @@ const { STATUS } = require('../lib/bookings-snapshot-status')
 const BIEN = {
   id: 'uuid-bien', name: 'Test', currency: 'EUR', capacity: 4,
   provider_property_id: 'prop-1',
+  // ⚠ AUSSI PAUVRE QUE LA REALITE : un bien vendable est un bien qu'on sait
+  // ECRIRE. `raisonNonVendable` exige desormais le provider et les identifiants
+  // d'ecriture CRS, comme `lib/moteur-creation.js` avant de poster.
+  provider: 'channex',
+  provider_room_type_id: 'rt-1', provider_rate_plan_id: 'rp-1',
   included_guests: 2, extra_guest_fee: 10, base_price: 80,
   inventory_units: 1, paused_at: null
 }
@@ -64,10 +69,54 @@ test('un rate a 0 n est PAS un prix : on retombe sur le prix de base', () => {
   assert.equal(jourDe(c, '2026-10-03').prix, 80)
 })
 
-test('un bien sans base_price n est pas vendable — le cas se traite au niveau du BIEN', () => {
-  assert.equal(M.raisonNonVendable({ ...BIEN, base_price: null }), 'sans_prix_de_base')
-  assert.equal(M.raisonNonVendable({ ...BIEN, base_price: 0 }), 'sans_prix_de_base')
+test('CONSTAT DE REVIEW : un bien qu on ne sait pas ECRIRE ne vend pas', () => {
+  // Sans cette garde, la vente aboutit, Stripe encaisse, PUIS
+  // lib/moteur-creation.js refuse la creation CRS et rembourse — 360 € pris et
+  // rendus une minute plus tard sur « coeur de vie 23 », avec une alarme et un
+  // e-mail « reservation impossible » au voyageur. Les deux gardes portent donc
+  // exactement les memes conditions : un ecart entre elles est un interstice ou
+  // l'argent passe.
+  assert.equal(M.raisonNonVendable({ ...BIEN, provider: 'beds24' }), 'sans_ecriture_crs')
+  assert.equal(M.raisonNonVendable({ ...BIEN, provider: null }), 'sans_ecriture_crs')
+  assert.equal(M.raisonNonVendable({ ...BIEN, provider_room_type_id: null }), 'sans_ecriture_crs')
+  assert.equal(M.raisonNonVendable({ ...BIEN, provider_rate_plan_id: null }), 'sans_ecriture_crs')
+  assert.equal(M.raisonNonVendable(BIEN), null, 'un bien Channex complet vend')
+})
+
+test('la garde de vente et la garde d ecriture ne peuvent pas diverger', () => {
+  // Le test qui tient les deux ensemble dans le temps : si quelqu'un ajoute une
+  // condition a l'une, ce test tombe tant qu'il ne l'a pas ajoutee a l'autre.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib/moteur-creation.js'), 'utf8')
+  for (const champ of ['provider_room_type_id', 'provider_rate_plan_id']) {
+    assert.ok(src.includes(champ), `moteur-creation exige toujours ${champ}`)
+  }
+  assert.ok(/provider !== 'channex'/.test(src), 'moteur-creation exige toujours channex')
+})
+
+test('un bien SANS base_price reste vendable — le prix se juge NUIT PAR NUIT', () => {
+  // Decision de Thierry du 8 septembre 2026, qui revient sur la decision 1 de
+  // l'etape 0. Son modele : aucun prix de base, tous les prix saisis par date.
+  // Exiger `base_price` rendait ses deux biens definitivement invendables.
+  assert.equal(M.raisonNonVendable({ ...BIEN, base_price: null }), null)
+  assert.equal(M.raisonNonVendable({ ...BIEN, base_price: 0 }), null)
   assert.equal(M.raisonNonVendable(BIEN), null)
+})
+
+test('sans base_price : la nuit AVEC rate se vend, la nuit SANS rate ne se vend pas', () => {
+  // Le coeur de la decision : le filtre par nuit fait foi, et il existait deja.
+  const c = cal({
+    bien: { ...BIEN, base_price: null },
+    inventaire: [{ date: '2026-10-03', rate: 120 }]
+  })
+  const avec = jourDe(c, '2026-10-03')
+  assert.equal(avec.prix, 120, 'la nuit tarifee garde son prix')
+  assert.equal(avec.disponible, true)
+
+  const sans = jourDe(c, '2026-10-04')
+  assert.equal(sans.prix, null, 'aucun prix invente')
+  assert.equal(sans.disponible, false, 'et surtout : PAS vendable a zero')
+  assert.equal(sans.raison, 'sans_prix', 'la raison est dite, pas devinee')
 })
 
 test('CONSTAT DE REVIEW : le kill switch d automatisation ne ferme PAS la vente', () => {

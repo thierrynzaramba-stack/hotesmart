@@ -85,7 +85,8 @@ function appeler (methode, query, body) {
 
 const BIEN = {
   id: 'uuid-bien', user_id: 'uuid-hote', name: 'Le Nid', base_price: 80, currency: 'EUR', capacity: 4,
-  cancellation_policy: 'j7', provider: 'channex', provider_property_id: 'prop-1', inventory_units: 1
+  cancellation_policy: 'j7', provider: 'channex', provider_property_id: 'prop-1',
+  provider_room_type_id: 'rt-1', provider_rate_plan_id: 'rp-1', inventory_units: 1
 }
 
 function reinit (surBien) {
@@ -210,9 +211,11 @@ test('seules les quatre politiques du §2 sont acceptees', async () => {
 // ─── Ce que la liste dit a l hote ───────────────────────────────────────────
 test('un bien qui ne peut pas vendre dit POURQUOI', async () => {
   // « Non vendable » sans motif envoie l'hote chercher au hasard.
+  // ⚠ `base_price: null` N'EST PLUS BLOQUANT depuis le 8 septembre 2026 : le
+  // prix se juge nuit par nuit. Le motif de blocage se cherche donc ailleurs.
   reinit({ base_price: null })
   const r = await appeler('GET', {})
-  assert.equal(r.corps.biens[0].bloquant, 'sans_prix_de_base')
+  assert.equal(r.corps.biens[0].bloquant, null, 'sans prix de base, le bien peut vendre ses nuits tarifees')
 
   reinit({ provider_property_id: null })
   assert.equal((await appeler('GET', {})).corps.biens[0].bloquant, 'sans_lien_provider')
@@ -243,10 +246,10 @@ test('creer un lien sur un bien qui ne peut pas vendre PREVIENT', async () => {
   // L'outil de service remplace avertissait avant d'ecrire ; ce garde-fou
   // s'etait perdu dans le passage a l'app. Sans lui, l'hote voit « actif »,
   // colle l'URL, et chaque visiteur lit « ce logement n'est pas ouvert ».
-  reinit({ base_price: null })
+  reinit({ inventory_units: 4 })
   const r = await appeler('POST', { bien: 'uuid-bien' }, { bien: 'uuid-bien', label: 'x' })
-  assert.equal(r.code, 200, 'on n interdit pas : preparer un lien avant le prix est legitime')
-  assert.equal(r.corps.bloquant, 'sans_prix_de_base', 'mais on le DIT')
+  assert.equal(r.code, 200, 'on n interdit pas : preparer un lien avant est legitime')
+  assert.equal(r.corps.bloquant, 'multi_unites_non_supporte', 'mais on le DIT')
 
   reinit()
   assert.equal((await appeler('POST', { bien: 'uuid-bien' }, { bien: 'uuid-bien' })).corps.bloquant, null)

@@ -1,0 +1,69 @@
+-- Etape 2 : FICHE UNIFIEE
+-- Les seuls champs qui manquaient a la structure.
+-- Spec : docs/specs/spec-migration-channex.md
+--
+-- ⚠ LIGNES COURTES VOLONTAIRES.
+--
+-- ADDITIVE : DEUX colonnes nullables sur `properties`.
+-- Aucune valeur par defaut, aucune ligne reecrite.
+--
+-- REGLE APPLIQUEE (decision de Thierry, 8 septembre 2026) :
+-- un champ n'existe dans la structure que si quelque chose
+-- le CONSOMME aujourd'hui. Tout le reste vit dans le brut
+-- rapatrie (`property_snapshots`), disponible sans etre
+-- structure.
+--
+-- Chaque colonne, et son consommateur :
+--
+--   property_type
+--     -> la migration Channex. `POST /properties` ecrit
+--        'apartment' EN DUR. Or « coeur de vie 23 » est un
+--        `townhome` : migrer aujourd'hui creerait un bien du
+--        mauvais type chez Channex, donc chez les OTA.
+--
+--   timezone
+--     -> la migration Channex. 'Europe/Paris' est EN DUR dans
+--        le meme POST, avec un TODO dans le code.
+--
+-- CE QUI N'EST PAS AJOUTE, ET POURQUOI :
+--
+--   latitude, longitude, state
+--     Aucun consommateur : les annonces OTA ne sont pas
+--     recreees, elles sont CONNECTEES (Booking par hotel_id,
+--     Airbnb par OAuth) et portent deja leur adresse.
+--
+--   min_stay, max_stay  <- RETIRES APRES VERIFICATION
+--     Thierry a demande de verifier l'alignement avec le
+--     module per-occupancy pricing. Bien vu : la duree
+--     minimale a DEJA deux sources, et une troisieme au
+--     niveau du bien serait la « deuxieme source » a eviter.
+--       . `property_channel_rate_plans.min_stay` : par CANAL
+--         (Colomiers porte booking=2, airbnb=1) — la
+--         contrainte commerciale poussee a l'OTA.
+--       . `calendar_inventory.min_stay_arrival` : par NUIT,
+--         l'exception, avec un defaut de 1 en dur dans
+--         lib/channel-fullsync.js.
+--     Et surtout : le moteur de vente directe ne lit AUCUNE
+--     duree au niveau du bien aujourd'hui. Pas de
+--     consommateur = pas de colonne (regle du 8 septembre).
+--     Que le moteur n'ait pas de regle par defaut est un
+--     MANQUE a traiter le jour ou on le traitera, pas un
+--     consommateur qui justifie une colonne aujourd'hui.
+--
+--   included_guests, extra_guest_fee  <- DEJA LA
+--     Ils existent sur `properties` et sont deja consommes
+--     par lib/channel-pricing.js (buildOccupancyRates) via
+--     lib/channel-fullsync.js. La fiche unifiee s'aligne
+--     dessus : c'est la source, il n'y en a pas d'autre.
+--     Semantique verifiee dans le code :
+--       included_guests = voyageurs couverts par base_price
+--       extra_guest_fee = euros par voyageur supplementaire
+--                         ET PAR NUIT (rate = tarif nuitee)
+--       fee <= 0        = pas de supplement, le rate plan
+--                         reste mono-option (per_room)
+
+alter table public.properties
+  add column if not exists property_type text;
+
+alter table public.properties
+  add column if not exists timezone text;

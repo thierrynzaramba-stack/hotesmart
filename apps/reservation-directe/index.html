@@ -99,9 +99,9 @@
   // Ces motifs viennent de `raisonNonVendable` : ils disent POURQUOI un bien ne
   // peut pas vendre. « Non vendable » sans motif envoie l’hôte chercher au hasard.
   const BLOQUANTS = {
-    sans_prix_de_base: 'Ce logement n’a pas de prix de base. Renseignez-le dans sa fiche : sans lui, aucune nuit n’a de prix et rien ne peut être vendu.',
     sans_lien_provider: 'Ce logement n’est pas relié à votre gestionnaire de canaux. Sans ce lien, le calendrier ne verrait aucune réservation et vendrait des nuits déjà prises.',
     multi_unites_non_supporte: 'Ce logement compte plusieurs unités. La réservation directe ne les gère pas encore.',
+    sans_ecriture_crs: 'Ce logement n’est pas encore géré par Channex. La réservation directe encaisse puis écrit la réservation chez le gestionnaire de canaux : sans ce chemin, le paiement serait pris puis remboursé. Il s’ouvrira à la migration du logement.',
     bien_inconnu: 'Logement introuvable.'
   }
 

@@ -77,7 +77,8 @@ const BIEN = {
   name: 'Le Nid', city: 'Tarbes', country: 'FR', currency: 'EUR',
   capacity: 4, included_guests: 2, extra_guest_fee: 10, base_price: 80,
   inventory_units: 1, checkin_time: '16:00', checkout_time: '10:00',
-  provider: 'channex', provider_property_id: 'prop-123'
+  provider: 'channex', provider_property_id: 'prop-123',
+  provider_room_type_id: 'rt-1', provider_rate_plan_id: 'rp-1'
 }
 
 function reinit (sur, surLien) {
@@ -231,13 +232,16 @@ test('la reponse porte depart_max : le lendemain de la derniere nuit publiee', a
 })
 
 // ─── Bien non vendable ──────────────────────────────────────────────────────
-test('un bien sans base_price rend 200 ferme, pas un calendrier vide', async () => {
+test('un bien sans base_price OUVRE — ses nuits sans prix sont invendables', async () => {
+  // Avant le 8 septembre 2026 : la page rendait 200 ferme. Le modele « prix par
+  // date uniquement » de Thierry rendait ses biens definitivement invendables.
   reinit({ base_price: null })
   const r = await appeler({ token: JETON })
   assert.equal(r.code, 200)
-  assert.equal(r.corps.ouvert, false)
-  assert.equal(r.corps.raison, 'sans_prix_de_base')
-  assert.equal(r.corps.nuits, undefined)
+  assert.equal(r.corps.ouvert, true, 'la boutique ouvre')
+  assert.ok(Array.isArray(r.corps.nuits), 'le calendrier est rendu')
+  const vendables = r.corps.nuits.filter(n => n.disponible)
+  assert.equal(vendables.length, 0, 'mais aucune nuit sans prix n est vendable')
 })
 
 test('un bien kill-switche reste EN VENTE : le coupe-circuit coupe les messages', async () => {

@@ -85,7 +85,7 @@ module.exports = async function handler (req, res) {
     try {
       const { data: biens, error: eB } = await supabase
         .from('properties')
-        .select('id, name, base_price, currency, capacity, cancellation_policy, provider, provider_property_id, inventory_units')
+        .select('id, name, base_price, currency, capacity, cancellation_policy, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_units')
         .eq('user_id', garde.accountUserId).order('name')
       if (eB) throw new Error(eB.message)
 
@@ -189,7 +189,7 @@ module.exports = async function handler (req, res) {
       // configure. Le test ne le voyait pas : son faux `requirePermission`
       // rendait un objet complet, la vraie garde non.
       const { data: complet } = await supabase.from('properties')
-        .select('id, base_price, inventory_units, provider, provider_property_id')
+        .select('id, base_price, inventory_units, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id')
         .eq('id', bien.id).maybeSingle()
 
       // ⚠ ON CREE, MAIS ON PREVIENT. Constat de review : l'outil de service

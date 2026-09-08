@@ -238,6 +238,44 @@ Aucune policy RLS n'est ajoutée : la page n'interroge jamais Supabase depuis le
 navigateur. Exposer `booking_links` à `anon` permettrait d'énumérer les jetons de
 tous les biens.
 
+## 7 bis. Ce qui interdit de vendre (mis à jour le 8 septembre 2026)
+
+`raisonNonVendable` refuse trois choses, et une quatrième a disparu.
+
+| motif | pourquoi |
+|---|---|
+| `sans_lien_provider` | un calendrier qui ne voit pas les réservations vendrait des nuits prises |
+| `multi_unites_non_supporte` | la clé de tenue ne sait pas compter au-delà d'une unité |
+| **`sans_ecriture_crs`** | **on ne sait pas écrire la réservation : encaisser serait prendre l'argent pour le rendre** |
+| ~~`sans_prix_de_base`~~ | **retiré** — le prix se juge nuit par nuit |
+
+**`sans_prix_de_base` est retiré** (décision de Thierry, revenant sur la décision 1
+de l'étape 0). Cette décision supposait qu'un prix de base existe toujours ; le
+modèle réel — tous les prix saisis par date — rendait les deux biens de Bagnères
+définitivement invendables. Le filtre par nuit faisait déjà le travail :
+`prixDeBase` rend `null`, la nuit est marquée `sans_prix` et `disponible: false`.
+Aucune nuit ne peut partir à zéro.
+
+**`sans_ecriture_crs` le remplace, et il vaut mieux.** Constat de review :
+`lib/moteur-creation.js` refuse la création CRS d'un bien non-Channex ou privé de
+ses identifiants `room_type`/`rate_plan` — mais **après** le paiement. Scénario
+mesuré sur « coeur de vie 23 » : 3 nuits à 100 € plus 20 €/nuit de supplément,
+**360 € prélevés puis remboursés** une minute plus tard, avec une alarme et un
+e-mail « réservation impossible » au voyageur. Le trou préexistait — tout bien
+Beds24 tarifé y était exposé — mais la levée de `base_price` retirait la dernière
+barrière sur les deux biens visés, justement Beds24 aujourd'hui.
+
+**Les deux gardes portent exactement les mêmes conditions**, et un test tient
+cette égalité dans le temps : si l'une gagne une condition, le test tombe tant
+que l'autre ne l'a pas. Un écart entre elles est un interstice où l'argent passe.
+
+⚠ **Les trois `select` qui alimentent la garde ont dû être élargis**
+(`provider_room_type_id`, `provider_rate_plan_id`). Sans eux la garde lit
+`undefined` et laisse vendre — c'est le piège déjà rencontré deux fois : une
+garde qui juge sur des colonnes non sélectionnées est une garde ouverte.
+
+À la migration, ces biens deviendront Channex et la garde s'ouvrira d'elle-même.
+
 ## 8. Dettes connues (étape 1)
 
 1. **Aucune limitation de débit** sur `/api/book-public`. Le jeton est la seule
@@ -269,6 +307,23 @@ tous les biens.
    `inventory_units = 1`, et à 1 unité les deux calculs coïncident. Le correctif
    structurel — purger l'intention quand le feed confirme la réservation —
    appartient au **writer du feed** (phase 2), pas au moteur de lecture.
+
+8. **La fiche d'un bien Channex sans `base_price` ne sera pas modifiable.**
+   `api/channel-property.js:289` calcule `effBase = Number(prop.base_price)`, et
+   `Number(null)` vaut `0` : toucher `capacity`, `included_guests` ou
+   `extra_guest_fee` rendrait alors 400 « Prix de base invalide (>0) ».
+
+   **Pas encore visible** : le blocage ne concerne que les biens Channex, et les
+   deux qui n'ont pas de `base_price` sont Beds24 — pour eux, la garde de la
+   ligne 282 refuse ces champs bien avant, avec un autre message. La dette
+   s'ouvrira **le jour de la migration**, quand ces biens deviendront Channex.
+
+   **Volontairement différée** : la corriger demande de décider ce que devient
+   une grille tarifaire sans prix de base — exactement la question posée à
+   Channex par `docs/specs/protocole-staging-tarifs.md`. Même famille que le
+   `rate 0` poussé avec un simple warning par `lib/channel-fullsync.js:116`, et
+   même arbitrage. On ne choisit pas le comportement avant de savoir lequel
+   Channex accepte.
 
 7. **Une exception de prix ne peut pas être effacée, seulement remplacée.**
 
