@@ -14,7 +14,7 @@ const assert = require('node:assert')
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test'
 
-const { fetchBookings, fetchBookingsHistory } = require('../lib/cron-beds24')
+const { fetchBookings, fetchBookingsHistory, fetchBookingsIntegral } = require('../lib/cron-beds24')
 
 // Capture les URL appelees et rend les pages fournies, dans l'ordre.
 function mockFetch(pages) {
@@ -182,4 +182,59 @@ test('fetchBookingsHistory : un echec ne se deguise PAS en « plafond atteint »
     assert.ok(logs[0].startsWith('ERR '), 'une erreur, pas un warn de plafond')
     assert.ok(!logs[0].includes('plafond'), 'ne parle pas de plafond')
   } finally { console.error = vraiErr; console.warn = vraiWarn; m.restore() }
+})
+
+// ─── 3. Les trois `include` manquants au payload brut (sous-chantier A) ──────
+// Constat du 8 septembre 2026 : les `raw` conserves portaient 71 champs, l'API
+// en sert 74. `infoItems`, `guests` et `bookingGroup` n'etaient jamais demandes.
+
+const DETAILS = ['includeInfoItems', 'includeGuests', 'includeBookingGroup']
+
+test('fetchBookings demande les trois include de detail', async () => {
+  const m = mockFetch([{ success: true, data: [resa(1)] }])
+  try {
+    await fetchBookings('tok', 12345)
+    for (const p of DETAILS) assert.ok(m.urls[0].includes(`${p}=true`), `${p} demande`)
+  } finally { m.restore() }
+})
+
+test('fetchBookingsHistory les demande AUSSI — sinon les deux writers se battent', async () => {
+  // ⚠ LE TEST QUI COMPTE. `bookings_snapshot` a deux alimentateurs Beds24 :
+  // cron-bookings (fetchBookings) et cron-classify (fetchBookingsHistory ->
+  // syncBookings). Si un seul demande les details, `raw_hash` oscille a chaque
+  // cycle */5 : l'un enrichit, l'autre appauvrit, indefiniment.
+  const m = mockFetch([{ success: true, data: [resa(1)], pages: { nextPageExists: false } }])
+  try {
+    await fetchBookingsHistory('tok', 12345, 6)
+    for (const p of DETAILS) assert.ok(m.urls[0].includes(`${p}=true`), `${p} demande par l'autre writer`)
+  } finally { m.restore() }
+})
+
+test('les factures restent demandees en meme temps que les details', async () => {
+  // Regression possible en concatenant deux constantes : perdre la premiere.
+  const m = mockFetch([{ success: true, data: [resa(1)] }])
+  try {
+    await fetchBookings('tok', 12345, { includeCancelled: true })
+    assert.ok(m.urls[0].includes('includeInvoiceItems=true'), 'factures toujours la')
+    assert.ok(m.urls[0].includes('status=cancelled'), 'statuts toujours la')
+    for (const p of DETAILS) assert.ok(m.urls[0].includes(`${p}=true`), `${p} aussi`)
+  } finally { m.restore() }
+})
+
+test('fetchBookingsIntegral les demande aussi — c\'est lui qui rejoue le passe', async () => {
+  // Le cron ne revisite que -1j/+90j (nominal) et -6 mois (classify) : les
+  // reservations de 2022-2024 ne seront enrichies que par le backfill.
+  // fetchBookingsIntegral lit l'en-tete de credits : le mock doit le servir.
+  const urls = []
+  const vraiFetch = global.fetch
+  global.fetch = async (url) => {
+    urls.push(String(url))
+    return { headers: { get: () => '90' }, json: async () => ({ success: true, data: [resa(1)], pages: { nextPageExists: false } }) }
+  }
+  const m = { urls, restore: () => { global.fetch = vraiFetch } }
+  try {
+    await fetchBookingsIntegral('tok', 12345, { attendreCredits: async () => {} })
+    for (const p of DETAILS) assert.ok(m.urls[0].includes(`${p}=true`), `${p} demande par le backfill`)
+    assert.ok(m.urls[0].includes('status=cancelled'), 'annulations comprises')
+  } finally { m.restore() }
 })

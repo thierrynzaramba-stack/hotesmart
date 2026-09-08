@@ -68,6 +68,28 @@ Les avis voyageurs sont du **cœur**, pas du domaine ménage — voir
 réservation, lue par la fiche prestataire **et** par le futur module de pricing.
 Jamais dupliquée dans une app.
 
+## Le corollaire de la migration : rapatrier n'oblige pas à migrer
+
+**Une fois la donnée d'un bien rapatriée dans le cœur, ce bien peut RESTER sur
+son provider et être pleinement exploité par toutes les apps.** Le rapatriement
+et la migration sont deux gestes distincts : le premier est un prérequis
+non négociable, le second est un **choix par bien**.
+
+Ce qui motive légitimement une migration, ce n'est donc jamais « pour que la
+donnée arrive chez nous » — elle y est déjà. C'est uniquement le besoin d'une
+**capacité que seul le nouveau provider offre** : chez Channex, la vente directe
+avec écriture CRS, le remapping libre des canaux, l'inventaire piloté au jour.
+
+Conséquence pratique : un hôte équipé de son propre channel manager n'a **aucune
+raison d'en changer** pour utiliser HôteSmart. Le dual-provider permanent
+(`CLAUDE.md`, section STACK) n'est pas une étape transitoire vers Channex, c'est
+la forme définitive.
+
+**Décidé le 8 septembre 2026** : les deux biens de Bagnères (`169567`, `209413`)
+migrent — non parce que Beds24 les retiendrait, mais parce que la réservation
+directe sur `coeurdevie65.com` demande l'écriture CRS. Le rapatriement précède
+la migration, et lui survit : si la migration échouait, la donnée resterait.
+
 ## Rattachement TEXT / UUID
 
 Rappel qui vaut pour toute table du cœur : `properties.id` est un **UUID**, et le

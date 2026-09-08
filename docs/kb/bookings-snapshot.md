@@ -321,6 +321,73 @@ provider définitivement perdue.
 Le prefetch de lot relit `raw` (tranches de 200 → moins d'un mégaoctet par
 requête) pour que le writer compare sans seconde lecture.
 
+## 4 ter bis. Les trois `include` qui manquaient (8 septembre 2026)
+
+**Inventaire du chantier « migration Channex », volet A.** Les `raw` conservés
+portaient **71 champs** ; l'API Beds24 en sert **74**. Trois `include` n'avaient
+jamais été demandés :
+
+| `include` | ce qu'il porte | vide ? |
+|---|---|---|
+| `includeInfoItems` | drapeaux OTA (constaté : `BOOKINGCOMFLAG` / « booker is genius ») | **non** |
+| `includeGuests` | détail des occupants | souvent |
+| `includeBookingGroup` | rattachement à un groupe | souvent |
+
+**La décision de conception, et c'est elle qui compte : les trois `include` sont
+demandés dans les TROIS fetchs, pas seulement dans celui du writer nominal.**
+
+`bookings_snapshot` a **deux** alimentateurs Beds24 :
+
+- `lib/cron-bookings.js` → `fetchBookings` (fenêtre -1j/+90j)
+- `lib/cron-classify.js` → `fetchBookingsHistory` → `syncBookings` (-6 mois)
+
+N'enrichir que le premier ferait **osciller `raw_hash` à chaque cycle `*/5`** :
+l'un écrivant un payload riche, l'autre le remplaçant par un payload pauvre,
+indéfiniment — des UPDATE perpétuels sur des lignes qui ne changent pas. C'est la
+forme aiguë de la dette « double writer Beds24 » (mémoire projet). Le troisième
+fetch, `fetchBookingsIntegral`, les demande aussi : le cron ne revisite jamais
+2022-2024, seul le backfill enrichira ces lignes.
+
+**Coût mesuré** (bien 209413, page de 100 réservations) : 1,9 crédit par page au
+lieu de 1,6, soit **+0,3** ; +12 Ko sur 186 (+6 %). Pire cas par bien et par
+cycle : **8 pages, +2,4 crédits** — trois appelants de `fetchBookings`
+(cron-bookings, cron-messages, cron-arrival-code) plus les 5 pages de l'historique.
+Avec deux biens Beds24 : ~38 crédits sur 100 par fenêtre de 5 minutes.
+
+**Effet attendu au déploiement** : aucun événement. Le `raw` change, `merged` non
+— la règle du §5 bis s'applique, les lignes sont rafraîchies silencieusement,
+`updated_at` intact, par lots bornés. C'est le test d'acceptation.
+
+**Le budget de rafraîchissement est partagé par tout le cycle** — et il ne l'était
+pas. Constat de review du même jour : `budgetRaw` n'était fourni par **aucun**
+appelant, donc chaque appel de `saveBookingSnapshots` repartait à
+`RAW_PAR_CYCLE = 60`. Avec deux alimentateurs Beds24 par bien dans le même cycle,
+le plafond effectif était `60 × call sites × biens` d'UPDATE **séquentiels** —
+exactement le dépassement des 60 s de la fonction Vercel que ce budget prétend
+empêcher, et ce qui saute en bout de cycle c'est `dispatch_changements` : ménages,
+codes d'accès, messages. Le budget vit désormais dans le module
+(`budgetDuCycle()`), remis à zéro après 120 s d'inactivité — dans un cycle les
+appels sont espacés de moins de 60 s, entre deux cycles de plus de 240 s.
+Un appelant peut toujours imposer le sien : le backfill s'en sert pour ne pas
+être borné par le budget du cron.
+
+## 4 quinquies. Dette : les messages historiques n'ont jamais été rapatriés
+
+**Constat du 8 septembre 2026.** La table `messages` porte 268 messages pour
+`169567` et 513 pour `209413` — **tous datés 2026**, alors que les réservations
+de ces biens remontent à **2022**. La colonne `properties.messages_backfilled`
+est pourtant à `true` : le backfill n'a couvert que la période récente, et rien
+ne le disait.
+
+**Portée** : faible pour la vente et le pricing (les messages ne portent ni prix
+ni disponibilité), réelle pour tout ce qui voudrait un jour analyser la relation
+voyageur sur la durée. Beds24 conserve-t-il ces threads au-delà de sa propre
+fenêtre ? **Non vérifié** — et c'est la première chose à mesurer si on décide de
+les rapatrier.
+
+**À trancher AVANT toute déconnexion de Beds24** : une fois le compte coupé, la
+question ne se pose plus, elle est répondue par la négative.
+
 ## 4 quater. Backfill historique (sous-chantier B)
 
 `scripts/backfill-historique.js` — hors cron, idempotent, écrit **exclusivement**
