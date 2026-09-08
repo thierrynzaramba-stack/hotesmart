@@ -18,8 +18,19 @@
 
 ## 2. Faits établis (mesurés le 8 septembre 2026)
 
-**Périmètres Booking.com**, identiques sur les deux établissements
-(`8985969` et `10853342` — *reste à confirmer lequel est quel bien*) :
+**Correspondance `hotel_id` ↔ bien** (donnée par Thierry le 8 septembre 2026) :
+
+| `hotel_id` Booking | bien | `provider_property_id` Beds24 |
+|---|---|---|
+| **8985969** | coeur de vie 23 | `169567` |
+| **10853342** | Cœur de vie « La bulle » | `209413` |
+
+Une inversion mapperait le calendrier d'un bien sur l'annonce de l'autre : cette
+table est à relire **à voix haute** avant chaque `create channel`. Corroboration
+faible mais rassurante : le plus petit `hotel_id` va au bien le plus ancien
+(réservations depuis 2022 contre 2023).
+
+**Périmètres Booking.com**, identiques sur les deux établissements :
 
 | périmètre | détenteur | type |
 |---|---|---|
@@ -230,9 +241,8 @@ laquelle la fenêtre est courte et la phase 2 tenue sur un seul bien.
 
 ## 8. Ce qui reste à décider ou à établir
 
-1. **Quel `hotel_id` va avec quel bien** (`8985969` / `10853342`).
-2. L'écran d'approbation Booking : constaté en phase 1, pas avant.
-3. Le sort des **messages historiques** (dette ouverte) — à trancher **avant**
+1. L'écran d'approbation Booking : constaté en phase 1, pas avant.
+2. Le sort des **messages historiques** (dette ouverte) — à trancher **avant**
    toute déconnexion du compte Beds24, jamais après.
-4. L'ordre des deux biens : le moins chargé d'abord. À arrêter au vu du carnet
+3. L'ordre des deux biens : le moins chargé d'abord. À arrêter au vu du carnet
    le jour J.
