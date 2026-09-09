@@ -439,7 +439,7 @@ module.exports = async function handler(req, res) {
       try {
         const { runFullSync } = require('../lib/channel-fullsync')
         const { data: bien } = await supabase.from('properties')
-          .select('id, user_id, name, provider_property_id, provider_rate_plan_id, provider_room_type_id, base_price, capacity, included_guests, extra_guest_fee')
+          .select('id, user_id, name, provider, migration_target_property_id, provider_property_id, provider_rate_plan_id, provider_room_type_id, base_price, capacity, included_guests, extra_guest_fee')
           .eq('id', prop.id).single()
         const fs = await runFullSync(bien)
         materialize = { mode: 'base_repush', pushed: fs.pushed, warnings: fs.warnings }

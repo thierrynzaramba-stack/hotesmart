@@ -31,7 +31,8 @@ require('../lib/cron-shared').supabase = fauxSupabase
 const { runFullSync } = require('../lib/channel-fullsync')
 
 const BIEN = {
-  id: 'uuid-bien', user_id: 'uuid-hote', name: 'Test',
+  id: 'uuid-bien', user_id: 'uuid-hote', name: 'Test', provider: 'channex',
+  migration_target_property_id: null,
   provider_property_id: 'prop-1', provider_room_type_id: 'rt-1', provider_rate_plan_id: 'rp-1',
   capacity: 4, included_guests: 4, extra_guest_fee: 0
 }
@@ -125,3 +126,40 @@ function prochaine (n) {
   const p = x => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
+
+test('APERCU : les memes 500 dates sont calculees, et RIEN ne part', async () => {
+  // `dryRun` n'est pas un confort : c'est ce qui fait de la poussee une etape
+  // d'assistant. Une seconde source de calcul « pour l'apercu » aurait fini par
+  // montrer autre chose que ce qui part reellement.
+  const h = harnais({ inventaire: [] })
+  try {
+    const out = await runFullSync({ ...BIEN, base_price: null }, { dryRun: true })
+    assert.equal(h.envois.length, 0, 'aucun appel reseau')
+    assert.equal(out.dry_run, true)
+    assert.equal(out.pushed, false)
+    assert.equal(out.days, 500)
+    assert.equal(out.dates_fermees_faute_de_prix, 500, 'sans aucun prix, les 500 dates partiraient fermees')
+    assert.equal(out.dates_tarifees, 0)
+    assert.equal(out.cible, 'prop-1')
+  } finally { h.restore() }
+})
+
+test('APERCU : la destination affichee est la propriete CIBLE pendant la migration', async () => {
+  const h = harnais({ inventaire: [] })
+  try {
+    const out = await runFullSync({ ...BIEN, provider: 'beds24', provider_property_id: '209413',
+      migration_target_property_id: 'chx-cible' }, { dryRun: true })
+    assert.equal(out.cible, 'chx-cible')
+  } finally { h.restore() }
+})
+
+test('un appelant qui oublie `provider` dans son SELECT est REFUSE, pas devine', async () => {
+  const h = harnais({ inventaire: [] })
+  try {
+    const { provider, ...sansProvider } = BIEN
+    await assert.rejects(() => runFullSync(sansProvider), /provider.*selectionnee/)
+    // La destination depend de DEUX colonnes : l'autre est gardee pareil.
+    const { migration_target_property_id, ...sansCible } = BIEN
+    await assert.rejects(() => runFullSync(sansCible), /migration_target_property_id.*selectionnee/)
+  } finally { h.restore() }
+})

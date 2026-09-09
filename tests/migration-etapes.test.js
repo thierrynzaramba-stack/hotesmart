@@ -130,6 +130,10 @@ test('une action non construite le DIT (501), elle ne fait pas semblant', () => 
 const ETAPES_SRC = fs.readFileSync(path.join(__dirname, '..', 'lib/migration-etapes.js'), 'utf8')
 const PROV_SRC = fs.readFileSync(path.join(__dirname, '..', 'lib/migration-provisionner.js'), 'utf8')
 const GARDE_SRC = fs.readFileSync(path.join(__dirname, '..', 'lib/garde-activation.js'), 'utf8')
+// L'etape 7 a ajoute deux lecteurs du bien : le module d'etape, et le WRITER
+// lui-meme (`runFullSync` lit capacity, included_guests, extra_guest_fee…).
+const ARI_SRC = fs.readFileSync(path.join(__dirname, '..', 'lib/migration-ari.js'), 'utf8')
+const FULLSYNC_SRC = fs.readFileSync(path.join(__dirname, '..', 'lib/channel-fullsync.js'), 'utf8')
 
 // L'etape 6 ne lit que le bien : un faux client qui ne sert rien suffit.
 const RIEN = () => faux({
@@ -185,8 +189,8 @@ test('LE TEST QUI COMPTE : un bien deja chez la cible est « sans objet », jama
   const e = await etatMigration(RIEN(), { ...BIEN, provider: 'channex' })
   assert.equal(prov(e).etat, 'sans_objet')
   assert.equal(prov(e).action, null, 'aucune action proposee')
-  // Et l etape ne compte ni au numerateur ni au denominateur.
-  assert.equal(e.total, e.etapes.length - 1)
+  // Et une etape sans objet ne compte ni au numerateur ni au denominateur.
+  assert.equal(e.total, e.etapes.filter(x => x.etat !== 'sans_objet').length)
 })
 
 test('etape 6 : un type que la cible refuse BLOQUE, en nommant les types valides', async () => {
@@ -208,7 +212,7 @@ test('LE TEST QUI COMPTE : toute colonne lue par une etape est dans le SELECT de
       .match(/[a-z_][a-z0-9_]*/g).filter(x => x !== 'const' && x !== 'COLS')
   )
   const lues = new Set()
-  for (const src of [ETAPES_SRC, PROV_SRC]) {
+  for (const src of [ETAPES_SRC, PROV_SRC, ARI_SRC, FULLSYNC_SRC]) {
     for (const m of src.matchAll(/\bbien\.([a-z_][a-z0-9_]*)/g)) lues.add(m[1])
   }
   // L'etape 5 lit le bien sous un AUTRE nom de variable (`prop`), dans un autre

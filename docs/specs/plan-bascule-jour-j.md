@@ -51,8 +51,11 @@ casse, ça casse sur le bien le plus simple.
   les deux biens à migrer) : elles resteraient fermées. Hors périmètre du jour J.
   **État vérifiable** : `select stop_sell, count(*) from calendar_inventory where rate is not null` → aucun `NULL` sur les deux biens.
 
-- [ ] **A3. Les deux biens sont « prêts » sur les 5 étapes.**
-  **État vérifiable** : `GET /api/migration` → `pretes: 5, total: 5` sur les deux.
+- [x] **A3. Les deux biens sont « prêts » sur les étapes de l'assistant.**
+  **État vérifiable** : `GET /api/migration` → **`7/7` sur La bulle** et
+  **`6/7` sur coeur de vie 23** (9 septembre 2026) — la 7e étape, `poussee_ari`,
+  est bloquée sur ce bien par le mode `keep` : voir 0.3. Les six premières sont
+  « fait » sur les deux.
 
 - [ ] **A4. Accès administrateur confirmés** sur les extranets Booking et Airbnb.
 
@@ -62,16 +65,37 @@ casse, ça casse sur le bien le plus simple.
 
 ### Phase 0 — préparation (aucun impact, réversible sans trace)
 
-- [ ] **0.1 Créer la propriété Channex** depuis la fiche unifiée.
-  **Vérifiable** : `provider_property_id` renseigné sur `properties`, et
+- [x] **0.1 Créer la propriété Channex** depuis la fiche unifiée. **FAIT** sur
+  les deux biens (8c604b8). L'identifiant cible va dans
+  `migration_target_property_id`, pas dans `provider_property_id` : celui-ci est
+  la clé de 4 274 lignes d'historique, et seul le re-keying (2.8) le promeut.
+  **Vérifiable** : `migration_target_property_id` renseigné sur `properties`, et
   `GET /properties/<id>` chez Channex rend le bon titre, la bonne devise, le bon
   fuseau et le bon `property_type`.
-- [ ] **0.2 Créer room_type et rate_plan.** `count_of_rooms: 1`, `occ_adults: 2`.
+- [x] **0.2 Créer room_type et rate_plan.** **FAIT** sur les deux biens :
+  `count_of_rooms: 1`, `occ_adults: 2` (La bulle, `per_room`) et `occ_adults: 6`
+  (coeur de vie 23, `per_person`, 6 options).
   **Vérifiable** : `provider_room_type_id` et `provider_rate_plan_id` renseignés.
-- [ ] **0.3 Pousser l'ARI.** Les 17 nuits tarifées partent avec leur prix ; **les
-  autres partent fermées** (fermeture calculée) — c'est la gestion voulue.
-  **Vérifiable** : le journal dit `N/500 dates fermees faute de prix`, et
-  `GET /restrictions` chez Channex montre les 17 dates au bon prix.
+- [x] **0.3 Pousser l'ARI — FAIT ET VÉRIFIÉ sur La bulle (9 septembre 2026).**
+  Les 17 nuits tarifées portent leur prix chez la cible (09-09 → 09-25), les 97
+  autres de la fenêtre lue sont en `stop_sell` — fermeture calculée, aucune
+  intention écrite dans le cœur. C'est la gestion voulue.
+  **Vérifié** par lecture de la cible : `GET /restrictions` sur la propriété
+  Channex, 114 dates lues, 17 avec prix, 97 fermées. L'étape `poussee_ari` de
+  l'assistant rend « fait » sur cette même lecture.
+
+  ⚠ **« coeur de vie 23 » n'est PAS dans cet état** : sa cible a reçu une poussée
+  qui a tout fermé — 114 dates lues, **0 avec prix** — alors que le cœur détient
+  22 nuits tarifées (109 €, 110 €…). Le bien est en `rate_sync_mode = 'keep'` :
+  toute re-poussée tarifaire est refusée tant que l'hôte n'a pas choisi
+  « HôteSmart gère mes prix ». **C'est un bloquant du bien 2, pas du bien 1.**
+
+  ⚠ **Fait manquant, à mesurer à la première poussée réelle du bien 2** : la
+  lecture `filter[restrictions]=rate` rend le prix d'un rate plan `per_room`
+  (mesuré sur La bulle). Pour un `per_person` — les prix voyagent alors en
+  `rates[]` par occupation — on ne sait pas encore si ce même champ les rend. Si
+  non, l'étape 7 afficherait « à faire » sur un calendrier pourtant poussé : à
+  vérifier juste après la poussée, pas avant.
 - [ ] **0.4 Vérifier la garde d'activation.** **Vérifiable** :
   `POST /api/channel-mapping?action=activate&dry_run=true` → `pret_a_activer: true`.
 

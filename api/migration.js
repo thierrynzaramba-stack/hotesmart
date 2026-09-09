@@ -98,9 +98,27 @@ module.exports = async function handler (req, res) {
       }
     }
 
+    // ─── poussee_ari ─────────────────────────────────────────────────────────
+    // Pousse les 500 jours d'ARI vers la propriete CIBLE, par le writer unique
+    // (`runFullSync`). Aucun canal n'existe sur cette propriete : rien de ceci
+    // n'atteint un OTA. Plan de bascule, phase 0.3.
+    if (action === 'poussee_ari') {
+      const { pousserAri } = require('../lib/migration-ari')
+      try {
+        // ⚠ La cible peut porter des canaux ACTIFS entre les phases 2.6 et 2.8
+        // du plan de bascule : l'etape le verifie chez le provider avant d'agir,
+        // et refuse plutot que d'atteindre un OTA en le niant.
+        const r = await pousserAri(bien, { dryRun })
+        return res.status(r.ok ? 200 : 409).json(r)
+      } catch (e) {
+        console.error('[migration] poussee_ari', e.message)
+        return res.status(500).json({ error: 'poussee_impossible', detail: e.message })
+      }
+    }
+
     // Les actions arrivent avec leur etape. Tant qu'une action n'est pas
     // construite, on le DIT — on ne fait pas semblant de l'avoir.
-    const CONSTRUITES = new Set(['provisionner_channex'])
+    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari'])
     if (!CONSTRUITES.has(action)) {
       const etat = await etatMigration(supabase, bien)
       return res.status(501).json({
