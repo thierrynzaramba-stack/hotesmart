@@ -91,8 +91,8 @@ async function availabilityProvider (propId, roomTypeId, debut, fin) {
 // (elle etait ecrite ici ET dans l'autre script du chantier — deux copies d'une
 // regle metier finissent par diverger).
 const { nuitsOccupees: nuitsOccupeesDuCoeur } = require('../lib/nuits-occupees')
-const nuitsOccupees = (providerPropertyId, debut, fin) =>
-  nuitsOccupeesDuCoeur(supabase, providerPropertyId, debut, fin)
+const nuitsOccupees = (providerPropertyId, debut, fin, userId) =>
+  nuitsOccupeesDuCoeur(supabase, providerPropertyId, debut, fin, { userId })
 
 async function memoireLocale (bienId, debut, fin) {
   const par = {}
@@ -127,7 +127,7 @@ const resume = (l, max = 6) =>
 
 ;(async () => {
   const { data: biens, error } = await supabase.from('properties')
-    .select('id, name, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_units')
+    .select('id, user_id, name, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_units')
   if (error) throw new Error('properties : ' + error.message)
 
   const debut = new Date(); debut.setHours(0, 0, 0, 0)
@@ -141,7 +141,7 @@ const resume = (l, max = 6) =>
     console.log(`${b.name}  [${b.provider}]  unites=${b.inventory_units}`)
 
     const local = await memoireLocale(b.id, debut, fin)
-    const occ = await nuitsOccupees(b.provider_property_id, debut, fin)
+    const occ = await nuitsOccupees(b.provider_property_id, debut, fin, b.user_id)
 
     if (b.provider !== 'channex') {
       console.log('  provider non-Channex — pas de lecture d\'inventaire distante.')

@@ -112,3 +112,78 @@ suppose pas que l'appelant a gardé.
 contexte dans lequel elle a été posée. Pendant une migration, un même bien porte
 des identifiants de deux mondes ; toute garde qui déduit l'appartenance de la
 présence se trompe pendant toute la durée du chantier.
+
+## 8. Le stock est CALCULÉ, il n'est pas lu
+
+**Défaut trouvé le 9 septembre 2026, en préparant la migration — il valait aussi
+pour la production.**
+
+`lib/channel-fullsync.js` poussait `availability = 1` dès qu'une ligne
+`calendar_inventory` existait avec `avail` à `NULL`. Or `avail` vaut `NULL` sur
+tout bien amorcé : **11 nuits déjà vendues** sur les deux biens de Bagnères
+repartaient donc annoncées disponibles à chaque poussée. Et chez Channex, qui
+décrémente pourtant son stock à la confirmation
+(`allow_availability_autoupdate_on_confirmation`), la poussée **écrasait sa
+décrémentation** : le canal se serait retrouvé à revendre une nuit occupée.
+
+**Règle** (`docs/specs/spec-audit-stop-sell.md`) : `avail` est un **stock**,
+calculé au moment de pousser — jamais une source. `stop_sell` reste l'intention
+de l'hôte, et n'est pas touché par ce calcul.
+
+```
+availability = min( ce que la mémoire annonce , inventory_units − nuits vendues )
+```
+
+**Le calcul plafonne, il n'ouvre rien** — c'est ce qui le rend sûr à poser sur un
+writer déjà en production :
+
+| cas | avant | après |
+|---|---|---|
+| ligne `avail = NULL`, nuit vendue | 1 ⚠ | **0** |
+| ligne `avail = NULL`, nuit libre | 1 | 1 |
+| ligne `avail = 0` (l'hôte a fermé) | 0 | 0 |
+| aucune ligne | 0 | 0 |
+| 3 unités, 1 vendue | 1 | **2** |
+
+La nuit du **départ** se revend : un séjour 12 → 15 occupe le 12, le 13 et le 14
+(`lib/nuits-occupees.js`). Le nombre de nuits fermées pour cause de vente est dit
+dans les `warnings` et le journal — un chiffre inattendu doit se voir.
+
+La ligne « 3 unités, 1 vendue » mérite d'être lue pour ce qu'elle est : sur un
+bien **multi-unités**, le calcul annonce le stock réel là où l'ancienne règle
+annonçait 1. C'est le but, mais ce n'est plus « il ne peut que fermer ». Sur un
+bien mono-unité — `inventory_type: 'whole'`, le seul codé, et le cas des quatre
+biens actuels — il ne peut effectivement que fermer.
+
+**Ce qui occupe une nuit** : `confirmed` **et** `blocked`. Un blocage
+propriétaire (Beds24 `black`) ne génère pas de ménage mais retient la nuit : la
+revendre serait une surréservation. Une demande (`request`) ne retient rien. Le
+statut se lit par `readStatus` (`lib/bookings-snapshot-status.js`), **jamais en
+comparant à la chaîne `'confirmed'`** — un snapshot Beds24 `new` est une
+réservation confirmée, et serait passé pour libre.
+
+**La même règle vaut à l'édition du calendrier** (`api/calendar.js`), pas
+seulement au full sync : un hôte qui rouvre une nuit déjà vendue voit son stock
+plafonné, avec un avertissement nommant la date. Et si les séjours ne sont pas
+lisibles, la disponibilité **n'est pas poussée du tout** — ne pas savoir ce qui
+est vendu n'autorise pas à ouvrir.
+
+**Un seul writer de `avail`, et c'est l'hôte.** La colonne porte son intention
+(le calendrier l'expose « Ouvert / Fermé »). `scripts/reconcilier-stop-sell.js` y
+écrivait un stock calculé : la nuit vendue serait passée à 0, puis, l'annulation
+venue, le stock serait remonté sans que `avail` ne bouge — et le plafond l'aurait
+gardée fermée **pour toujours**, le canal ne la rouvrant pas non plus
+(`allow_availability_autoupdate_on_cancellation: false`). Le script ne touche
+plus `avail` : le stock n'a pas besoin d'être mémorisé, il est calculé à chaque
+poussée.
+
+**Conséquence de discipline** : tout appelant de `runFullSync` doit sélectionner
+`inventory_units` **et** `provider_property_id`. Le writer **refuse** de tourner
+sans, plutôt que de deviner un stock ou d'interroger `property_id = 'undefined'`
+— ce qui rendrait « zéro nuit vendue » sans la moindre erreur.
+
+**Dette connue** : la disponibilité OTA dépend maintenant de la fraîcheur de
+`bookings_snapshot`, et rien ne purge les snapshots disparus des fetchs Beds24
+(« fantômes actifs »). Un fantôme `confirmed` ferme une nuit réellement libre,
+indéfiniment, avec pour seule trace un avertissement « stock réduit car vendue ».
+À traiter avec la purge des snapshots.

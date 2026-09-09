@@ -15,22 +15,34 @@ process.env.CHANNEL_API_KEY = process.env.CHANNEL_API_KEY || 'cle-test'
 
 // ⚠ AVANT le require : `channel-fullsync` capture `supabase` a l'import.
 let INVENTAIRE = []
+let SEJOURS = []
 const fauxCoeur = {
   from () { return fauxCoeur }, select () { return fauxCoeur }, eq () { return fauxCoeur },
   gte () { return fauxCoeur }, lte () { return fauxCoeur }, not () { return fauxCoeur },
   order () { return fauxCoeur },
+  // Le writer calcule le stock : il lit aussi les sejours confirmes.
+  range: async () => ({ data: SEJOURS, error: null }),
   then (r) { return Promise.resolve({ data: INVENTAIRE, error: null }).then(r) }
 }
 require('../lib/cron-shared').supabase = fauxCoeur
 
 const { changerModeDePrix, etatModeDePrix, raisonDeNePasChanger } = require('../lib/migration-mode-prix')
 
+// ⚠ DATES RELATIVES, ET C'EST LA REGLE : le writer boucle sur 500 jours a
+// partir d'AUJOURD'HUI. Une date figee sort de la fenetre des le lendemain, et
+// le test passe alors a vide sans rien verifier.
+const jour = (n) => {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + n)
+  const p = x => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 const EN_MIGRATION = {
   id: 'uuid-23', user_id: 'uuid-hote', name: 'coeur de vie 23', provider: 'beds24',
   provider_property_id: '169567', migration_target_property_id: 'chx-cible',
   provider_room_type_id: 'chx-rt', provider_rate_plan_id: 'chx-rp',
   capacity: 6, included_guests: 4, extra_guest_fee: 10, base_price: null,
-  rate_sync_mode: 'keep'
+  inventory_units: 1, rate_sync_mode: 'keep'
 }
 
 // Faux Supabase : sert l'inventaire et les snapshots, et NOTE ce qu'on ecrit.
@@ -94,19 +106,18 @@ test('dry run par defaut : rien n est ecrit, et l apercu dit ce qui partirait', 
     'les dates sans prix partiraient fermees, et on le DIT')
 })
 
-test('LE TEST QUI COMPTE : l apercu nomme les nuits DEJA VENDUES', async () => {
-  // `calendar_inventory.avail` vaut NULL sur les biens amorces, et la poussee
-  // traduit NULL par « disponible ». Une nuit vendue peut donc etre remise en
-  // vente des qu'un canal existe. L'hote doit le voir avant de signer.
-  const inventaire = [{ date: '2026-09-11', rate: 110 }, { date: '2026-09-13', rate: 89 }]
+test('LE TEST QUI COMPTE : l apercu dit ce que deviennent les nuits VENDUES', async () => {
+  // Et il le LIT du calcul reel de la poussee. Le refaire a la main avait, le
+  // temps d'un commit, fait annoncer « elles partiraient DISPONIBLES » alors que
+  // le writer les fermait deja.
+  const inventaire = [{ date: jour(2), rate: 110, avail: null }, { date: jour(4), rate: 89, avail: null }]
   INVENTAIRE = inventaire
-  const b = fauxBase({ inventaire, sejours: [
-    { booking_id: 'b1', snapshot: { arrival: '2026-09-11', departure: '2026-09-12', status: 'confirmed' } }
-  ] })
+  SEJOURS = [{ booking_id: 'b1', snapshot: { arrival: jour(2), departure: jour(3), status: 'confirmed' } }]
+  const b = fauxBase({ inventaire, sejours: SEJOURS })
   const r = await changerModeDePrix(b.api, EN_MIGRATION, 'managed', { appel: canaux(0) })
   assert.equal(r.apercu.nuits_vendues.total, 1)
-  assert.deepEqual(r.apercu.nuits_vendues.dates, ['2026-09-11'])
-  assert.match(r.apercu.nuits_vendues.avertissement, /DISPONIBLES/)
+  assert.deepEqual(r.apercu.nuits_vendues.dates, [jour(2)])
+  assert.match(r.apercu.nuits_vendues.note, /FERMEES/)
 })
 
 test('passer en « je garde mes prix » n envoie rien : pas d apercu de poussee', async () => {
@@ -176,52 +187,50 @@ test('LE TEST QUI COMPTE : un bien a prix de base — toutes ses nuits vendues p
   // tarifees A L UNITE. Un bien qui n a qu un `base_price` en a zero — et
   // l apercu repondait « 0 nuit vendue » alors que la poussee tarife les 500
   // dates a ce prix et les ouvre toutes.
-  const inventaire = [{ date: '2026-09-11', rate: null, avail: null }]
+  const inventaire = [{ date: jour(2), rate: null, avail: null }]
   INVENTAIRE = inventaire
-  const b = fauxBase({ inventaire, sejours: [
-    { booking_id: 'b1', snapshot: { arrival: '2026-09-11', departure: '2026-09-12', status: 'confirmed' } }
-  ] })
+  // ⚠ ASSIGNE EXPLICITEMENT : le writer lit `SEJOURS`, pas le `sejours` du faux
+  // local. Sans cette ligne, le test heritait de l'etat laisse par le precedent
+  // et ne verifiait plus rien des qu'il passait en isolation.
+  SEJOURS = [{ booking_id: 'b1', snapshot: { arrival: jour(2), departure: jour(3), status: 'confirmed' } }]
+  const b = fauxBase({ inventaire, sejours: SEJOURS })
   const r = await changerModeDePrix(b.api, { ...EN_MIGRATION, base_price: 86 }, 'managed',
     { appel: canaux(0) })
   assert.equal(r.apercu.nuits_vendues.total, 1)
-  assert.deepEqual(r.apercu.nuits_vendues.dates, ['2026-09-11'])
+  assert.deepEqual(r.apercu.nuits_vendues.dates, [jour(2)])
 })
 
-test('une nuit que l hote a DEJA fermee n est pas signalee : la poussee enverra avail 0', async () => {
-  // Crier a tort use l avertissement, et le jour ou il compte on ne le lit plus.
-  const inventaire = [{ date: '2026-09-11', rate: 110, avail: 0 }]
+test('une nuit que l hote a DEJA fermee n est pas comptee deux fois', async () => {
+  // Son stock etait deja a 0 : la vente ne lui retire rien. Crier a tort use
+  // l avertissement, et le jour ou il compte on ne le lit plus.
+  const inventaire = [{ date: jour(2), rate: 110, avail: 0 }]
   INVENTAIRE = inventaire
-  const b = fauxBase({ inventaire, sejours: [
-    { booking_id: 'b1', snapshot: { arrival: '2026-09-11', departure: '2026-09-12', status: 'confirmed' } }
-  ] })
+  SEJOURS = [{ booking_id: 'b1', snapshot: { arrival: jour(2), departure: jour(3), status: 'confirmed' } }]
+  const b = fauxBase({ inventaire, sejours: SEJOURS })
   const r = await changerModeDePrix(b.api, EN_MIGRATION, 'managed', { appel: canaux(0) })
   assert.equal(r.apercu.nuits_vendues.total, 0)
 })
 
-test('une nuit vendue SANS prix ne part pas vendable : elle n est pas signalee', async () => {
-  // Sans prix, la date part en `stop_sell` — fermeture calculee. Elle est
-  // annoncee disponible mais invendable : ce n est pas le risque decrit.
-  const inventaire = [{ date: '2026-09-11', rate: null, avail: null }]
+test('une nuit vendue SANS prix est comptee aussi : son stock est reduit', async () => {
+  // Elle partait deja fermee faute de prix ; elle part maintenant fermee pour
+  // deux raisons. Le compte rendu suit la poussee, pas une regle parallele.
+  const inventaire = [{ date: jour(2), rate: null, avail: null }]
   INVENTAIRE = inventaire
-  const b = fauxBase({ inventaire, sejours: [
-    { booking_id: 'b1', snapshot: { arrival: '2026-09-11', departure: '2026-09-12', status: 'confirmed' } }
-  ] })
+  SEJOURS = [{ booking_id: 'b1', snapshot: { arrival: jour(2), departure: jour(3), status: 'confirmed' } }]
+  const b = fauxBase({ inventaire, sejours: SEJOURS })
   const r = await changerModeDePrix(b.api, EN_MIGRATION, 'managed', { appel: canaux(0) })
-  assert.equal(r.apercu.nuits_vendues.total, 0)
+  assert.equal(r.apercu.nuits_vendues.total, 1)
 })
 
-test('l apercu inspecte la fenetre REELLEMENT poussee, pas une plus courte', async () => {
-  // En inspecter moins, c est promettre sur ce qu on n a pas regarde : une
-  // reservation a J+450 serait remise en vente sans que rien ne l ait dit.
-  const { JOURS_POUSSES } = require('../lib/channel-fullsync')
-  INVENTAIRE = []
-  const b = fauxBase({ inventaire: [] })
-  await changerModeDePrix(b.api, EN_MIGRATION, 'managed', { appel: canaux(0) })
-  const attendu = new Date(); attendu.setHours(0, 0, 0, 0)
-  attendu.setDate(attendu.getDate() + JOURS_POUSSES)
-  const p = x => String(x).padStart(2, '0')
-  const iso = `${attendu.getFullYear()}-${p(attendu.getMonth() + 1)}-${p(attendu.getDate())}`
-  assert.ok(b.bornes.includes(iso), `la lecture va jusqu a J+${JOURS_POUSSES} (${iso})`)
+test('un blocage proprietaire retient la nuit comme une vente', async () => {
+  // Beds24 `black` -> canonique `blocked` : pas de menage, mais la nuit est
+  // retenue. La revendre serait une surreservation.
+  const inventaire = [{ date: jour(2), rate: 110, avail: null }]
+  INVENTAIRE = inventaire
+  SEJOURS = [{ booking_id: 'b1', snapshot: { arrival: jour(2), departure: jour(3), status: 'blocked' } }]
+  const b = fauxBase({ inventaire, sejours: SEJOURS })
+  const r = await changerModeDePrix(b.api, EN_MIGRATION, 'managed', { appel: canaux(0) })
+  assert.equal(r.apercu.nuits_vendues.total, 1)
 })
 
 test('un apercu impossible n empeche pas le geste : l ecriture n en depend pas', async () => {
@@ -229,7 +238,7 @@ test('un apercu impossible n empeche pas le geste : l ecriture n en depend pas',
   // d UNE colonne n a pas a en dependre.
   const casse = { from () { return casse }, select () { return casse }, eq () { return casse },
     gte () { return casse }, lte () { return casse }, not () { return casse }, order () { return casse },
-    range: async () => ({ data: [], error: null }),
+    range: async () => ({ data: SEJOURS, error: null }),
     limit: async () => ({ data: [], error: null }),
     update (patch) { casse.patch = patch; return { eq: async () => ({ error: null }) } },
     then (r) { return Promise.resolve({ data: null, error: { message: 'timeout' } }).then(r) } }

@@ -20,6 +20,8 @@ const fauxCoeur = {
   from () { return fauxCoeur }, select () { return fauxCoeur }, eq () { return fauxCoeur },
   gte () { return fauxCoeur }, lte () { return fauxCoeur }, not () { return fauxCoeur },
   order () { return fauxCoeur },
+  // Le writer calcule le stock : il lit aussi les sejours confirmes.
+  range: async () => ({ data: [], error: null }),
   then (r) { return Promise.resolve({ data: INVENTAIRE, error: null }).then(r) }
 }
 require('../lib/cron-shared').supabase = fauxCoeur
@@ -35,7 +37,7 @@ const EN_MIGRATION = {
   migration_target_property_id: 'chx-cible',
   provider_room_type_id: 'chx-rt', provider_rate_plan_id: 'chx-rp',
   capacity: 2, included_guests: 2, extra_guest_fee: 0, base_price: null,
-  rate_sync_mode: 'managed'
+  inventory_units: 1, rate_sync_mode: 'managed'
 }
 
 // Faux Supabase : rend l'inventaire demande, ne throw pas.
@@ -157,7 +159,7 @@ const BIEN_VIVANT = {
   provider_property_id: 'chx-colomiers',
   provider_room_type_id: 'chx-rt-vif', provider_rate_plan_id: 'chx-rp-vif',
   capacity: 4, included_guests: 4, extra_guest_fee: 0, base_price: 70,
-  rate_sync_mode: 'managed', migration_target_property_id: null
+  inventory_units: 1, rate_sync_mode: 'managed', migration_target_property_id: null
 }
 
 test('LE TEST QUI COMPTE : un bien VIVANT chez le canal est refuse, sans un seul appel', async () => {

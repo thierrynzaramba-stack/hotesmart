@@ -23,23 +23,27 @@ let INVENTAIRE = []
 const fauxSupabase = {
   from () { return fauxSupabase }, select () { return fauxSupabase },
   eq () { return fauxSupabase }, gte () { return fauxSupabase },
+  // Le stock est CALCULE : le writer lit aussi les sejours confirmes.
+  range: async () => ({ data: SEJOURS, error: null }),
   lte () { return fauxSupabase }, order () { return fauxSupabase },
   then (r) { return Promise.resolve({ data: INVENTAIRE, error: null }).then(r) }
 }
 require('../lib/cron-shared').supabase = fauxSupabase
+let SEJOURS = []
 
 const { runFullSync } = require('../lib/channel-fullsync')
 
 const BIEN = {
   id: 'uuid-bien', user_id: 'uuid-hote', name: 'Test', provider: 'channex',
-  migration_target_property_id: null,
+  migration_target_property_id: null, inventory_units: 1,
   provider_property_id: 'prop-1', provider_room_type_id: 'rt-1', provider_rate_plan_id: 'rp-1',
   capacity: 4, included_guests: 4, extra_guest_fee: 0
 }
 
 // Capture les payloads envoyes vers le canal.
-function harnais ({ inventaire = [] } = {}) {
+function harnais ({ inventaire = [], sejours = [] } = {}) {
   INVENTAIRE = inventaire
+  SEJOURS = sejours
   const envois = []
   const vraiFetch = global.fetch
   global.fetch = async (url, opts) => {
@@ -50,7 +54,7 @@ function harnais ({ inventaire = [] } = {}) {
       text: async () => JSON.stringify({ data: [{ id: 'task-1' }] })
     }
   }
-  return { envois, restore: () => { global.fetch = vraiFetch; INVENTAIRE = [] } }
+  return { envois, restore: () => { global.fetch = vraiFetch; INVENTAIRE = []; SEJOURS = [] } }
 }
 
 // ⚠ LES VALEURS SONT COALESCEES EN PLAGES : elles portent `date_from`/`date_to`,
@@ -161,5 +165,91 @@ test('un appelant qui oublie `provider` dans son SELECT est REFUSE, pas devine',
     // La destination depend de DEUX colonnes : l'autre est gardee pareil.
     const { migration_target_property_id, ...sansCible } = BIEN
     await assert.rejects(() => runFullSync(sansCible), /migration_target_property_id.*selectionnee/)
+  } finally { h.restore() }
+})
+
+// ─── LE STOCK EST CALCULE, IL N'EST PAS LU ──────────────────────────────────
+// Mesure du 9 septembre 2026 : 11 nuits VENDUES sur les deux biens de Bagneres
+// repartaient annoncees disponibles a chaque poussee, parce que `avail` vaut
+// NULL et que la regle traduisait NULL par « 1 place libre ». Chez Channex, qui
+// decremente pourtant son stock a la confirmation, la poussee ECRASAIT sa
+// decrementation.
+
+const demain = (n) => {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + n)
+  const p = x => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+function availPour (envois, date) {
+  const a = envois.find(e => e.url.includes('/availability'))
+  const v = (a ? a.corps.values : []).find(x => x.date_from <= date && date <= x.date_to)
+  return v ? v.availability : undefined
+}
+
+test('LE TEST QUI COMPTE : une nuit VENDUE part fermee, meme si le coeur la dit libre', async () => {
+  const h = harnais({
+    inventaire: [{ date: demain(3), rate: 120, avail: null }],
+    sejours: [{ booking_id: 'b1', snapshot: { arrival: demain(3), departure: demain(4), status: 'confirmed' } }]
+  })
+  try {
+    const out = await runFullSync({ ...BIEN, base_price: null })
+    assert.equal(availPour(h.envois, demain(3)), 0, 'la nuit vendue part a 0')
+    assert.ok(out.warnings.some(w => /vendue/.test(w)), 'et le journal le DIT')
+  } finally { h.restore() }
+})
+
+test('une nuit libre reste ouverte : le calcul plafonne, il n ouvre rien', async () => {
+  const h = harnais({ inventaire: [{ date: demain(3), rate: 120, avail: null }], sejours: [] })
+  try {
+    await runFullSync({ ...BIEN, base_price: null })
+    assert.equal(availPour(h.envois, demain(3)), 1)
+  } finally { h.restore() }
+})
+
+test('une date sans ligne reste fermee — le stock calcule ne l ouvre pas', async () => {
+  const h = harnais({ inventaire: [], sejours: [] })
+  try {
+    await runFullSync({ ...BIEN, base_price: null })
+    assert.equal(availPour(h.envois, demain(10)), 0)
+  } finally { h.restore() }
+})
+
+test('une nuit que l hote a fermee (avail 0) reste fermee', async () => {
+  const h = harnais({ inventaire: [{ date: demain(3), rate: 120, avail: 0 }], sejours: [] })
+  try {
+    await runFullSync({ ...BIEN, base_price: null })
+    assert.equal(availPour(h.envois, demain(3)), 0)
+  } finally { h.restore() }
+})
+
+test('la nuit du DEPART se revend : elle n est pas occupee', async () => {
+  const h = harnais({
+    inventaire: [{ date: demain(3), rate: 120, avail: null }, { date: demain(4), rate: 120, avail: null }],
+    sejours: [{ booking_id: 'b1', snapshot: { arrival: demain(3), departure: demain(4), status: 'confirmed' } }]
+  })
+  try {
+    await runFullSync({ ...BIEN, base_price: null })
+    assert.equal(availPour(h.envois, demain(3)), 0, 'la nuit du sejour est fermee')
+    assert.equal(availPour(h.envois, demain(4)), 1, 'la nuit du depart reste vendable')
+  } finally { h.restore() }
+})
+
+test('plusieurs unites : une vente en retire UNE, pas toutes', async () => {
+  const h = harnais({
+    inventaire: [{ date: demain(3), rate: 120, avail: null }],
+    sejours: [{ booking_id: 'b1', snapshot: { arrival: demain(3), departure: demain(4), status: 'confirmed' } }]
+  })
+  try {
+    await runFullSync({ ...BIEN, base_price: null, inventory_units: 3 })
+    assert.equal(availPour(h.envois, demain(3)), 2)
+  } finally { h.restore() }
+})
+
+test('un appelant qui oublie `inventory_units` est REFUSE : on ne devine pas un stock', async () => {
+  const h = harnais({ inventaire: [] })
+  try {
+    const { inventory_units, ...sansUnites } = BIEN
+    await assert.rejects(() => runFullSync(sansUnites), /inventory_units.*selectionnee/)
   } finally { h.restore() }
 })

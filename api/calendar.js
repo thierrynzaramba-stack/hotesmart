@@ -134,7 +134,7 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(uuids, compte) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
+      .select('id, name, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
       .eq('user_id', compte)
       .in('id', uuids)
     if (error) throw new Error('Erreur lecture biens')
@@ -153,7 +153,7 @@ module.exports = async function handler(req, res) {
     // alors que le POST sur le meme identifiant fonctionnait.
     const uuids = ids.filter(v => UUID_RE.test(v))
     const refs  = ids.filter(v => REF_SURE_RE.test(v))   // REF_SURE_RE accepte deja les UUID
-    const COLS = 'id, name, user_id, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
+    const COLS = 'id, name, user_id, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
     const paquets = []
     if (uuids.length) paquets.push(supabase.from('properties').select(COLS).in('id', uuids))
     if (refs.length)  paquets.push(supabase.from('properties').select(COLS).in('provider_property_id', refs))
@@ -672,6 +672,53 @@ module.exports = async function handler(req, res) {
       }))
 
       // 3) Availability : items tries par date -> coalescence (room_type uniquement)
+      //
+      // ⚠ LE STOCK EST PLAFONNE ICI AUSSI, ET POUR LA MEME RAISON QU'AU FULL SYNC.
+      // L'hote peut ouvrir une date depuis le calendrier (« Disponibilite :
+      // Ouvert »). Si la nuit est deja vendue, la pousser ouverte ecrase la
+      // decrementation du canal et produit une surreservation — que Channex
+      // accepte. Le geste de l'hote reste respecte partout ailleurs : le
+      // plafond ne peut que RETIRER du stock, jamais en ajouter.
+      // Regle unique : docs/kb/synchronisation.md §8.
+      const datesAvail = Object.keys(availByDate).sort()
+      // Sans room_type, `availItems` sera vide : rien ne partira, inutile de lire.
+      if (datesAvail.length && roomTypeId) {
+        const { nuitsOccupees } = require('../lib/nuits-occupees')
+        const unites = Math.max(1, Number(bien.inventory_units) || 1)
+        try {
+          const vendues = await nuitsOccupees(supabase, bien.provider_property_id,
+            datesAvail[0], datesAvail[datesAvail.length - 1], { userId: bien.user_id })
+          const plafonnees = []
+          for (const d of datesAvail) {
+            const stock = Math.max(0, unites - ((vendues[d] || []).length))
+            if (availByDate[d] > stock) { availByDate[d] = stock; plafonnees.push(d) }
+          }
+          // Un avertissement PAR DATE noierait les autres : les vues n'affichent
+          // que `warnings[0]`, et l'explication « ce bien est gere par Beds24 »
+          // disparaitrait derriere trente lignes. Un compte agrege suffit.
+          if (plafonnees.length) {
+            pushWarnings.push(`${plafonnees.length} nuit(s) deja vendue(s) : leur stock n'a pas ete rouvert`
+              + ` (${plafonnees.slice(0, 3).join(', ')}${plafonnees.length > 3 ? '…' : ''}).`)
+          }
+        } catch (e) {
+          // ⚠ ON NE RETIRE QUE LES OUVERTURES, JAMAIS LES FERMETURES.
+          // Ne pas savoir ce qui est vendu interdit d'OUVRIR, mais une fermeture
+          // (`avail = 0`) ne peut produire aucune surreservation : la retirer
+          // aussi ferait qu'une nuit fermee par l'hote ne partirait pas — et,
+          // `datesTouchees` etant construit sur ces memes dates, `reaffirmerStopSell`
+          // ne serait pas appele non plus. C'est la regression du 7 septembre.
+          console.error('[calendar] stock non verifiable :', e.message)
+          let retirees = 0
+          for (const d of datesAvail) {
+            if (availByDate[d] > 0) { delete availByDate[d]; retirees++ }
+          }
+          if (retirees) {
+            pushWarnings.push(`${retirees} ouverture(s) non poussee(s) : impossible de verifier les nuits deja vendues.`
+              + ' Les fermetures, elles, sont bien parties.')
+          }
+        }
+      }
+
       const availItems = roomTypeId
         ? Object.keys(availByDate).sort().map(d => ({
             date: d, sig: String(availByDate[d]),

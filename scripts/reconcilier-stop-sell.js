@@ -7,7 +7,9 @@
 //
 // Conversion appliquee (spec §1 bis) :
 //   stop_sell = provider.stop_sell OU (avail local = 0 ET aucune resa cette nuit)
-//   avail     = inventory_units − resas confirmed de la nuit   (le STOCK, calcule)
+//   avail     = NON TOUCHE : il porte l'intention de l'hote (le calendrier
+//               l'expose « Ouvert / Ferme »). Le STOCK est calcule a chaque
+//               poussee (lib/channel-fullsync.js) et ne se memorise pas.
 //
 // Les autres colonnes (rate, min_stay_*, max_stay, cta, ctd) sont RECOPIEES
 // telles quelles : la reconciliation ne touche que les deux colonnes du modele.
@@ -60,14 +62,14 @@ async function restrictionsProvider (propId, ratePlanId, debut, fin) {
 // (elle etait ecrite ici ET dans l'autre script du chantier — deux copies d'une
 // regle metier finissent par diverger).
 const { nuitsOccupees: nuitsOccupeesDuCoeur } = require('../lib/nuits-occupees')
-const nuitsOccupees = (providerPropertyId, debut, fin) =>
-  nuitsOccupeesDuCoeur(supabase, providerPropertyId, debut, fin)
+const nuitsOccupees = (providerPropertyId, debut, fin, userId) =>
+  nuitsOccupeesDuCoeur(supabase, providerPropertyId, debut, fin, { userId })
 
 ;(async () => {
   if (!BIEN) throw new Error('--bien=<uuid> requis')
 
   const { data: biens, error } = await supabase.from('properties')
-    .select('id, name, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_units')
+    .select('id, user_id, name, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_units')
     .eq('id', BIEN)
   if (error) throw new Error('properties : ' + error.message)
   const b = (biens || [])[0]
@@ -82,7 +84,7 @@ const nuitsOccupees = (providerPropertyId, debut, fin) =>
   console.log(ECRIRE ? 'Mode   : ECRITURE (calendar_inventory uniquement)\n' : 'Mode   : ESSAI A BLANC — aucune ecriture\n')
 
   const rest = await restrictionsProvider(b.provider_property_id, b.provider_rate_plan_id, debut, fin)
-  const occ = await nuitsOccupees(b.provider_property_id, debut, fin)
+  const occ = await nuitsOccupees(b.provider_property_id, debut, fin, b.user_id)
 
   const existantes = {}
   let de = 0
@@ -97,7 +99,7 @@ const nuitsOccupees = (providerPropertyId, debut, fin) =>
   }
 
   const lignes = []
-  let creees = 0, majStop = 0, majAvail = 0, sansProvider = 0
+  let creees = 0, majStop = 0, sansProvider = 0
   for (let i = 0; i < JOURS; i++) {
     const j = iso(jour(debut, i))
     const l = existantes[j]
@@ -107,19 +109,29 @@ const nuitsOccupees = (providerPropertyId, debut, fin) =>
 
     const ancienneFermeture = l && l.avail === 0 && nb === 0
     const stopSell = p !== undefined ? p : !!ancienneFermeture
-    const avail = Math.max(0, (b.inventory_units || 1) - nb)
 
+    // ⚠ CE SCRIPT N'ECRIT PLUS `avail`, ET C'EST UNE DECISION (9 septembre 2026).
+    // `avail` porte aujourd'hui l'INTENTION de l'hote — le calendrier l'expose
+    // comme « Ouvert / Ferme » (shared/calendar-core.js). Y ecrire un stock
+    // calcule en aurait fait un second writer, avec un effet vicieux : une nuit
+    // vendue serait passee a 0, puis, l'annulation venue, le stock serait remonte
+    // a 1 sans que `avail` ne bouge — et `runFullSync` plafonnant par `avail`,
+    // la nuit ne se serait JAMAIS rouverte. Les proprietes sont creees avec
+    // `allow_availability_autoupdate_on_cancellation: false` : le canal ne
+    // l'aurait pas rouverte non plus.
+    //
+    // Le stock n'a pas besoin d'etre memorise : il est CALCULE a chaque poussee
+    // (lib/channel-fullsync.js). La colonne reste a l'hote.
     if (!l) creees++
-    else {
-      if (!!l.stop_sell !== stopSell) majStop++
-      if (l.avail !== avail) majAvail++
-    }
+    else if (!!l.stop_sell !== stopSell) majStop++
 
     // Les autres colonnes sont recopiees : la reconciliation ne touche que
-    // stop_sell et avail. `id` est omis : l'upsert resout par (property_id,date).
+    // stop_sell. `id` est omis : l'upsert resout par (property_id,date).
     lignes.push({
       property_id: b.id, date: j,
-      stop_sell: stopSell, avail,
+      stop_sell: stopSell,
+      // `avail` est RECOPIE, jamais recalcule : il appartient a l'hote.
+      avail: l ? l.avail : null,
       rate: l ? l.rate : null,
       min_stay_arrival: l ? l.min_stay_arrival : 0,
       min_stay_through: l ? l.min_stay_through : 0,
@@ -133,10 +145,10 @@ const nuitsOccupees = (providerPropertyId, debut, fin) =>
   console.log(`lignes preparees        : ${lignes.length}`)
   console.log(`  a creer               : ${creees}`)
   console.log(`  stop_sell modifie     : ${majStop}`)
-  console.log(`  avail recalcule       : ${majAvail}`)
-  console.log(`  dates sans reponse provider (repli sur avail=0) : ${sansProvider}`)
+  console.log(`  dates sans reponse provider (repli sur l'ancienne fermeture) : ${sansProvider}`)
   console.log(`  stop_sell=true apres  : ${lignes.filter(l => l.stop_sell).length}`)
-  console.log(`  avail=0 apres         : ${lignes.filter(l => l.avail === 0).length}`)
+  console.log('  avail                 : NON TOUCHE (il appartient a l\'hote ;'
+    + ' le stock est calcule a la poussee)')
 
   if (!ECRIRE) return console.log('\nEssai a blanc — rien n\'a ete ecrit. Relancer avec --ecrire.')
 
