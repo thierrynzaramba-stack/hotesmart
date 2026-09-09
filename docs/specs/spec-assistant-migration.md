@@ -58,7 +58,8 @@ chemin d'accès. Un prestataire n'y a rien à faire.
 | 4 | `amorcage_prix` | les prix par date sont dans le cœur | `calendar_inventory.rate` |
 | 5 | `garde_activation` | le bien peut-il publier sans mentir sur ses prix | `lib/garde-activation.js` |
 | 6 | `provisionner_channex` | crée la propriété cible chez Channex et pose ses identifiants **sur le bien existant** | `properties.migration_target_property_id` |
-| 7 | `poussee_ari` | pousse les 500 jours de prix et disponibilités vers la propriété cible | **le calendrier de la cible** (`GET /restrictions`) |
+| 7 | `mode_de_prix` | choisit qui gère les prix, pour un bien **en migration** | `properties.rate_sync_mode` |
+| 8 | `poussee_ari` | pousse les 500 jours de prix et disponibilités vers la propriété cible | **le calendrier de la cible** (`GET /restrictions`) |
 
 État réel au 9 septembre 2026, lu par l'endpoint : **6/6 étapes « fait »** sur
 les deux biens de Bagnères — 784 et 637 réservations avec payload brut complet,
@@ -162,6 +163,38 @@ prix » ne pousse aucun tarif, même pour déménager : c'est une décision de l
 Le refus le dit, et prévient de la conséquence — après la bascule, l'ancien
 provider ne poussera plus rien, et un bien resté en `keep` ne serait vendable
 nulle part.
+
+### 3 quater. L'étape 7 existe parce qu'un réglage avait un angle mort
+
+`api/channel-property.js` sait changer `rate_sync_mode`, mais le refuse à tout
+bien qui n'est pas déjà chez le canal : *« Le mode de prix ne s'applique qu'aux
+biens connectés aux plateformes »*. Un bien **en cours de migration** est
+exactement dans cet angle : encore chez son ancien provider, déjà pourvu d'une
+propriété cible. Sans cette étape, le seul recours aurait été d'écrire en base à
+la main — le chemin de faveur que le §1 interdit, et sur lequel le prochain hôte
+migré aurait buté à son tour.
+
+Elle est placée **avant** la poussée, dont elle est le préalable : publier des
+tarifs suppose d'avoir choisi que HôteSmart les gère. Elle n'écrit qu'une
+colonne, ne touche ni le provider ni les identifiants, et **ne déclenche aucune
+poussée** — elle autorise, elle n'envoie pas.
+
+**Son aperçu montre trois choses**, parce qu'un hôte ne doit pas signer à
+l'aveugle : combien de nuits sont tarifées, combien partiraient **fermées** faute
+de prix (calcul réel de la poussée, pas une estimation), et — le point qui coûte
+cher — **quelles nuits déjà vendues partiraient annoncées disponibles**.
+`calendar_inventory.avail` vaut `NULL` sur les biens amorcés, et la poussée
+traduit `NULL` par « disponible » : tant que le stock n'est pas *calculé*
+(chantier audit stop_sell), une nuit vendue peut retourner en vente dès qu'un
+canal existe. Le réglage n'est pas bloqué pour autant — il n'envoie rien par
+lui-même — mais il est montré.
+
+*Au passage* : le calcul « quelles nuits sont vendues » existait **en double**,
+copié à l'identique dans `scripts/audit-stop-sell.js` et
+`scripts/reconcilier-stop-sell.js`. Il vit maintenant dans
+`lib/nuits-occupees.js`, avec sa règle de borne (un séjour 12 → 15 occupe le 12,
+le 13 et le 14, **pas** le 15) et sa pagination — un bien de Bagnères porte 784
+snapshots, et la limite implicite de postgrest est à 1000.
 
 **Restent à construire** (elles entreront ici avec leur endpoint) : connexion et
 mapping des canaux, import du carnet, re-keying, bascule, vérifications

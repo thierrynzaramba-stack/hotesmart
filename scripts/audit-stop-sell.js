@@ -87,33 +87,12 @@ async function availabilityProvider (propId, roomTypeId, debut, fin) {
   return out
 }
 
-// ─── Le coeur : les nuits reellement occupees ────────────────────────────────
-// Un sejour 12 → 15 occupe 12, 13 et 14 — pas le 15 (KB reservation-directe §3).
-async function nuitsOccupees (providerPropertyId, debut, fin) {
-  const par = {}
-  let de = 0
-  for (;;) {
-    const { data, error } = await supabase
-      .from('bookings_snapshot')
-      .select('booking_id, snapshot')
-      .eq('property_id', String(providerPropertyId))
-      .range(de, de + 999)
-    if (error) throw new Error('bookings_snapshot : ' + error.message)
-    for (const b of data || []) {
-      const s = b.snapshot || {}
-      if (s.status !== 'confirmed') continue
-      if (!s.arrival || !s.departure) continue
-      for (let d = new Date(s.arrival); iso(d) < s.departure; d = jour(d, 1)) {
-        const j = iso(d)
-        if (j < iso(debut) || j > iso(fin)) continue
-        ;(par[j] || (par[j] = [])).push(b.booking_id)
-      }
-    }
-    if (!data || data.length < 1000) break
-    de += 1000
-  }
-  return par
-}
+// Les nuits reellement occupees : la regle vit dans lib/nuits-occupees.js
+// (elle etait ecrite ici ET dans l'autre script du chantier — deux copies d'une
+// regle metier finissent par diverger).
+const { nuitsOccupees: nuitsOccupeesDuCoeur } = require('../lib/nuits-occupees')
+const nuitsOccupees = (providerPropertyId, debut, fin) =>
+  nuitsOccupeesDuCoeur(supabase, providerPropertyId, debut, fin)
 
 async function memoireLocale (bienId, debut, fin) {
   const par = {}

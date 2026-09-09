@@ -98,6 +98,25 @@ module.exports = async function handler (req, res) {
       }
     }
 
+    // ─── mode_de_prix ────────────────────────────────────────────────────────
+    // Change `rate_sync_mode` pour un bien EN MIGRATION — l'angle mort de
+    // `api/channel-property.js`, qui refuse ce reglage a tout bien pas encore
+    // chez le canal. Ne touche aucune autre colonne, et ne pousse rien.
+    if (action === 'mode_de_prix') {
+      const { changerModeDePrix } = require('../lib/migration-mode-prix')
+      const mode = String(req.query.mode || '').trim()
+      try {
+        const r = await changerModeDePrix(supabase, bien, mode, { dryRun })
+        // Un parametre absent ou invalide est une requete mal formee (400), pas
+        // un conflit d'etat (409) : l'appelant doit savoir lequel corriger.
+        const code = r.ok ? 200 : (r.raison === 'mode_invalide' ? 400 : 409)
+        return res.status(code).json(r)
+      } catch (e) {
+        console.error('[migration] mode_de_prix', e.message)
+        return res.status(500).json({ error: 'changement_impossible', detail: e.message })
+      }
+    }
+
     // ─── poussee_ari ─────────────────────────────────────────────────────────
     // Pousse les 500 jours d'ARI vers la propriete CIBLE, par le writer unique
     // (`runFullSync`). Aucun canal n'existe sur cette propriete : rien de ceci
@@ -118,7 +137,7 @@ module.exports = async function handler (req, res) {
 
     // Les actions arrivent avec leur etape. Tant qu'une action n'est pas
     // construite, on le DIT — on ne fait pas semblant de l'avoir.
-    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari'])
+    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari', 'mode_de_prix'])
     if (!CONSTRUITES.has(action)) {
       const etat = await etatMigration(supabase, bien)
       return res.status(501).json({

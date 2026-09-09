@@ -281,3 +281,18 @@ test('une grille per_person entierement a zero n est pas un prix', async () => {
   })
   assert.equal(r.etat, 'a_faire')
 })
+
+test('LE TEST QUI COMPTE : le mode « keep » n interdit pas de VOIR', async () => {
+  // Sinon on demande a l hote de changer son reglage a l aveugle, pour decouvrir
+  // apres coup ce que la publication fait de ses 500 dates.
+  const keep = { ...EN_MIGRATION, rate_sync_mode: 'keep' }
+  const vue = await pousserAri(keep, { dryRun: true, appel: canaux(0) })
+  assert.equal(vue.ok, true)
+  assert.equal(vue.dry_run, true)
+  assert.match(vue.avertissement, /Je garde mes prix/, 'l apercu rappelle que rien ne partira')
+
+  // Mais l ecriture, elle, reste refusee.
+  const ecriture = await pousserAri(keep, { dryRun: false, appel: canaux(0) })
+  assert.equal(ecriture.ok, false)
+  assert.equal(ecriture.raison, 'mode_keep')
+})
