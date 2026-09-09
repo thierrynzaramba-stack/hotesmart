@@ -15,6 +15,8 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
 const { jugerPrixDuCoeur } = require('../lib/garde-activation')
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
+const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -82,16 +84,6 @@ module.exports = async function handler(req, res) {
   if (!garde.ok) return
   const compteBien = garde.accountUserId
 
-  if (canalDemande && ACTIONS_A_CANAL.includes(action)) {
-    const gardeCanal = await requirePermissionPourCanal(req, res, { channelId: canalDemande, channelCall })
-    if (!gardeCanal.ok) return
-    // Le canal doit relever du MEME bien que celui annonce : sinon l'appelant
-    // ferait valider le bien A pour agir sur un canal du bien B.
-    if (String(gardeCanal.bienDuCanal) !== String(providerPropertyId)) {
-      console.log('[channel-mapping] refus : canal rattache a un autre bien')
-      return res.status(403).json({ error: 'Ce canal ne releve pas du bien indique' })
-    }
-  }
   // (Le cas « property_id absent » est deja traite par la garde ci-dessus,
   // bienRequis:true -> 400. Ce bloc reste comme filet, sans etre atteignable.)
   if (!providerPropertyId) {
@@ -99,19 +91,60 @@ module.exports = async function handler(req, res) {
   }
 
   // ===== Ownership : le bien doit appartenir au user (par provider_property_id) =====
-  const { data: prop, error: propErr } = await supabase
-    .from('properties')
-    // ⚠ `base_price` EST LU PAR LE CRAN D'ARRET (lib/garde-activation.js).
-    // Une garde qui juge sur une colonne non selectionnee est une garde ouverte.
-    .select('id, provider, base_price, provider_property_id, provider_rate_plan_id, provider_room_type_id, name')
-    .eq('user_id', compteBien)
-    .eq('provider_property_id', providerPropertyId)
-    .maybeSingle()
-  if (propErr) {
-    console.error('[channel-mapping] SELECT error', propErr.message)
+  // ⚠ SUR LES DEUX IDENTIFIANTS, comme la garde juste au-dessus. Un appelant qui
+  // designe le bien par sa propriete cible franchissait la garde puis recevait un
+  // 404 : deux resolutions qui divergent finissent toujours par se payer.
+  // `base_price` est LU PAR LE CRAN D'ARRET (lib/garde-activation.js) — une garde
+  // qui juge sur une colonne non selectionnee est une garde ouverte.
+  let prop
+  try {
+    prop = await trouverBienParIdProvider(supabase, providerPropertyId, {
+      userId: compteBien,
+      colonnes: 'id, provider, base_price, provider_property_id, migration_target_property_id, '
+        + 'provider_rate_plan_id, provider_room_type_id, name, inventory_units, user_id'
+    })
+  } catch (e) {
+    console.error('[channel-mapping] SELECT error', e.message)
     return res.status(500).json({ error: 'Erreur lecture' })
   }
   if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
+  if (prop.ambigu) return res.status(409).json({ error: 'Identifiant de bien ambigu' })
+
+  // ⚠ L'ADRESSE CHEZ LE PROVIDER N'EST PAS LA CLE D'OWNERSHIP.
+  // `providerPropertyId` identifie le bien DANS HoteSmart (et sert aux gardes) ;
+  // `idChezLeProvider` est l'endroit ou parler chez le provider. Pour un bien en
+  // cours de migration, ce sont DEUX identifiants differents : la cle source
+  // (Beds24) et la propriete cible (Channex). Les confondre adressait Channex
+  // avec « 209413 » — HTTP 422, et toute la phase 1 du plan de bascule
+  // inexecutable. Point unique : `proprieteChezLeProvider` (lib/rate-sync.js).
+  const idChezLeProvider = proprieteChezLeProvider(prop)
+
+  if (canalDemande && ACTIONS_A_CANAL.includes(action)) {
+    const gardeCanal = await requirePermissionPourCanal(req, res, { channelId: canalDemande, channelCall })
+    if (!gardeCanal.ok) return
+    // Le canal doit relever du MEME bien que celui annonce : sinon l'appelant
+    // ferait valider le bien A pour agir sur un canal du bien B.
+    //
+    // ⚠ LA COMPARAISON PORTE SUR LES DEUX IDENTIFIANTS DU BIEN. `bienDuCanal`
+    // vient du canal Channex, donc de la propriete CIBLE pendant une migration,
+    // tandis que le front envoie toujours la cle source : comparer a la seule
+    // cle source refusait TOUTES les actions a canal pendant la bascule — soit
+    // exactement la phase 1 du plan.
+    const identifiantsDuBien = [prop.provider_property_id, prop.migration_target_property_id]
+      .filter(Boolean).map(String)
+    if (!identifiantsDuBien.includes(String(gardeCanal.bienDuCanal))) {
+      console.log('[channel-mapping] refus : canal rattache a un autre bien')
+      return res.status(403).json({ error: 'Ce canal ne releve pas du bien indique' })
+    }
+  }
+
+  if (!idChezLeProvider) {
+    return res.status(409).json({
+      error: 'pas_de_propriete_chez_le_provider',
+      message: 'Ce logement n\'existe pas chez le canal de distribution : rien a y mapper. '
+        + 'Creer d\'abord sa propriete (assistant de migration, etape « Logement cree chez le nouveau provider »).'
+    })
+  }
 
   try {
     // --- groups : resout le group_id proprietaire du bien (requis au create channel) ---
@@ -120,7 +153,7 @@ module.exports = async function handler(req, res) {
       const groups = Array.isArray(r.json?.data) ? r.json.data : []
       const match = groups.find(g => {
         const rel = g.relationships?.properties?.data
-        return Array.isArray(rel) && rel.some(p => String(p.id) === String(providerPropertyId))
+        return Array.isArray(rel) && rel.some(p => String(p.id) === String(idChezLeProvider))
       })
       return res.status(r.ok ? 200 : 502).json({
         ok: r.ok,
@@ -136,7 +169,7 @@ module.exports = async function handler(req, res) {
 
     // --- channels : etat des canaux du bien (reserve 1 : OAuth cree-t-il un canal nu ?) ---
     if (action === 'channels') {
-      const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+      const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
       const rows = Array.isArray(r.json?.data) ? r.json.data : []
       const summary = rows.map(c => ({
         id: c.id,
@@ -156,7 +189,7 @@ module.exports = async function handler(req, res) {
     // --- mapping_details : rooms/rates Airbnb + codes entiers (reserve 2 + point 4) ---
     if (action === 'mapping_details') {
       let channelId = (req.query.channel_id || '').trim()
-      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
       const rows = Array.isArray(list.json?.data) ? list.json.data : []
       if (!channelId) channelId = rows[0]?.id
       if (!channelId) {
@@ -183,7 +216,7 @@ module.exports = async function handler(req, res) {
     // --- list_listings : le listing_id_dictionary Airbnb (ecran de choix d'annonce) ---
     if (action === 'list_listings') {
       let channelId = (req.query.channel_id || '').trim()
-      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
       const rows = Array.isArray(list.json?.data) ? list.json.data : []
       if (!channelId) channelId = rows[0]?.id
       if (!channelId) return res.status(404).json({ error: 'Aucun canal sur ce bien', channel_count: rows.length })
@@ -211,7 +244,7 @@ module.exports = async function handler(req, res) {
     if (action === 'action_listings') {
       let channelId = (req.query.channel_id || '').trim()
       if (!channelId) {
-        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
         const rows = Array.isArray(list.json?.data) ? list.json.data : []
         channelId = rows[0]?.id
       }
@@ -250,7 +283,7 @@ module.exports = async function handler(req, res) {
     if (action === 'mappings') {
       let channelId = (req.query.channel_id || '').trim()
       if (!channelId) {
-        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
         const rows = Array.isArray(list.json?.data) ? list.json.data : []
         channelId = rows[0]?.id
       }
@@ -278,7 +311,7 @@ module.exports = async function handler(req, res) {
     if (action === 'listings') {
       let channelId = (req.query.channel_id || '').trim()
       if (!channelId) {
-        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
         const rows = Array.isArray(list.json?.data) ? list.json.data : []
         channelId = rows[0]?.id
       }
@@ -315,7 +348,7 @@ module.exports = async function handler(req, res) {
 
       // Canal du bien courant = le canal cree par l'OAuth. Si absent, l'hote doit d'abord
       // connecter son compte (OAuth) -> on ne cree pas de canal from scratch ici.
-      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
       const rows = Array.isArray(list.json?.data) ? list.json.data : []
       if (!channelId) channelId = rows[0]?.id || ''
       if (!channelId) {
@@ -415,7 +448,7 @@ module.exports = async function handler(req, res) {
       const listingId = (req.query.listing_id || '').trim()
       let channelId = (req.query.channel_id || '').trim()
       if (!channelId) {
-        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
         const rows = Array.isArray(list.json?.data) ? list.json.data : []
         channelId = rows[0]?.id || ''
       }
@@ -472,7 +505,7 @@ module.exports = async function handler(req, res) {
       }
 
       if (!channelId) {
-        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerPropertyId)}`)
+        const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
         const rows = Array.isArray(list.json?.data) ? list.json.data : []
         channelId = rows[0]?.id || ''
       }

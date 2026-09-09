@@ -157,9 +157,15 @@ module.exports = async function handler(req, res) {
       // ⚠ `base_price` EST LU PAR LA GARDE : sans lui, jugerPrixDuCoeur le voit
       // `undefined` et refuse tout, ou pire, si la garde changeait, laisserait
       // passer. Une garde qui juge sur une colonne non selectionnee est ouverte.
-      .select('id, name, base_price, provider_property_id, provider_rate_plan_id, provider_room_type_id')
+      .select('id, name, base_price, provider_property_id, migration_target_property_id, provider_rate_plan_id, provider_room_type_id')
+      // ⚠ SUR LES DEUX COLONNES : `providerPropertyId` vient ici du CANAL
+      // Channex (`attrs.properties[0]`). Pour un bien en migration, c'est sa
+      // propriete CIBLE — la cle source ne le retrouverait pas.
+      // Ownership explicite : la garde a deja tranche, mais deux lignes qui
+      // matcheraient (l'une par la cle source, l'autre par la cible) feraient
+      // partir `.maybeSingle()` en PGRST116 — un 500 la ou il faut resoudre.
       .eq('user_id', compteBien)
-      .eq('provider_property_id', providerPropertyId)
+      .or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`)
       .maybeSingle()
     if (propErr) {
       console.error('[channel-bcom-activate] SELECT error', propErr.message)

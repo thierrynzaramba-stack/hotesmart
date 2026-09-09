@@ -32,8 +32,16 @@ function charger({ user = MEMBRE, biens = [BIEN_PROD, BIEN_AUTRE], profil = null
         // desormais toutes les lignes — le double doit etre « thenable ».
         then(ok, ko) {
           if (nom === 'properties') {
-            const v = q._f.provider_property_id
-            const rows = v == null ? [] : biens.filter(b => b.provider_property_id === v)
+            // La branche TEXTE passe desormais par `.or(provider_property_id.eq.X,
+            // migration_target_property_id.eq.X)` : un bien en migration se
+            // designe par sa propriete cible.
+            const ors = String(q._or || '')
+            const clause = (col) => (ors.match(new RegExp('(^|,)' + col + '\\.eq\\.([^,]+)')) || [])[2]
+            const v = clause('provider_property_id') || q._f.provider_property_id
+            const cible = clause('migration_target_property_id')
+            const rows = (v == null && cible == null) ? []
+              : biens.filter(b => (v && b.provider_property_id === v)
+                || (cible && b.migration_target_property_id === cible))
             return Promise.resolve({ data: rows, error: null }).then(ok, ko)
           }
           return Promise.resolve({ data: [], error: null }).then(ok, ko)
@@ -43,10 +51,20 @@ function charger({ user = MEMBRE, biens = [BIEN_PROD, BIEN_AUTRE], profil = null
             // Deux chemins : `.or(id.eq…,provider_property_id.eq…)` pour un UUID,
             // `.eq('provider_property_id', …)` sinon — la branche `id` ferait
             // echouer la requete sur une colonne de type uuid.
-            const m = String(q._or || '').match(/id\.eq\.([^,]+),provider_property_id\.eq\.(.+)/)
-            const v = m ? m[1] : q._f.provider_property_id
-            if (v == null) return { data: null }
-            return { data: biens.find(b => b.id === v || b.provider_property_id === v) || null }
+            // La garde interroge desormais TROIS colonnes possibles :
+            //   UUID     -> id.eq.X,provider_property_id.eq.X,migration_target_property_id.eq.X
+            //   non-UUID -> provider_property_id.eq.X,migration_target_property_id.eq.X
+            // `migration_target_property_id` en fait partie : pendant une migration,
+            // c'est par cet identifiant que le provider designe le bien.
+            const ors = String(q._or || '')
+            const clause = (col) => (ors.match(new RegExp('(^|,)' + col + '\\.eq\\.([^,]+)')) || [])[2]
+            const parId = clause('id')
+            const parRef = clause('provider_property_id') || q._f.provider_property_id
+            const parCible = clause('migration_target_property_id')
+            if (parId == null && parRef == null && parCible == null) return { data: null }
+            return { data: biens.find(b => (parId && b.id === parId)
+              || (parRef && b.provider_property_id === parRef)
+              || (parCible && b.migration_target_property_id === parCible)) || null }
           }
           if (nom === 'profiles') {
             if (!profil) return { data: null }
@@ -267,10 +285,20 @@ function chargerAvecBookings({ user = MEMBRE, bookings = [], biens = [BIEN_PROD,
             // Deux chemins : `.or(id.eq…,provider_property_id.eq…)` pour un UUID,
             // `.eq('provider_property_id', …)` sinon — la branche `id` ferait
             // echouer la requete sur une colonne de type uuid.
-            const m = String(q._or || '').match(/id\.eq\.([^,]+),provider_property_id\.eq\.(.+)/)
-            const v = m ? m[1] : q._f.provider_property_id
-            if (v == null) return { data: null }
-            return { data: biens.find(b => b.id === v || b.provider_property_id === v) || null }
+            // La garde interroge desormais TROIS colonnes possibles :
+            //   UUID     -> id.eq.X,provider_property_id.eq.X,migration_target_property_id.eq.X
+            //   non-UUID -> provider_property_id.eq.X,migration_target_property_id.eq.X
+            // `migration_target_property_id` en fait partie : pendant une migration,
+            // c'est par cet identifiant que le provider designe le bien.
+            const ors = String(q._or || '')
+            const clause = (col) => (ors.match(new RegExp('(^|,)' + col + '\\.eq\\.([^,]+)')) || [])[2]
+            const parId = clause('id')
+            const parRef = clause('provider_property_id') || q._f.provider_property_id
+            const parCible = clause('migration_target_property_id')
+            if (parId == null && parRef == null && parCible == null) return { data: null }
+            return { data: biens.find(b => (parId && b.id === parId)
+              || (parRef && b.provider_property_id === parRef)
+              || (parCible && b.migration_target_property_id === parCible)) || null }
           }
           if (nom === 'profiles') {
             if (!profil) return { data: null }

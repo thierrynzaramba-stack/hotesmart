@@ -28,6 +28,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -244,9 +245,9 @@ module.exports = async function handler(req, res) {
       const compteBien = garde.accountUserId
       const { data: prop, error: propErr } = await supabase
         .from('properties')
-        .select('id, name, provider_property_id, provider_room_type_id, provider_rate_plan_id')
+        .select('id, name, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id')
         .eq('user_id', compteBien)
-        .eq('provider_property_id', providerPropertyId)
+        .or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`)
         .maybeSingle()
       if (propErr) {
         console.error('[channel-bcom] SELECT error', propErr.message)
@@ -254,7 +255,9 @@ module.exports = async function handler(req, res) {
       }
       if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
-      const out = await actionOurOptions(providerPropertyId)
+      // ⚠ On adresse le provider par SA propriete, pas par la cle source :
+      // pendant une migration, `filter[property_id]=<cle Beds24>` rend HTTP 422.
+      const out = await actionOurOptions(proprieteChezLeProvider(prop) || providerPropertyId)
       out.our_property = {
         name: prop.name,
         provider_room_type_id: prop.provider_room_type_id,

@@ -58,12 +58,19 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
       }
       function rep (nom, q, tableau = false) {
         if (nom === 'properties') {
-          if (q._or && /^id\.eq\./.test(q._or)) {
-            const m = String(q._or).match(/^id\.eq\.([^,]+),provider_property_id\.eq\.(.+)$/)
-            assert.ok(m, 'filtre .or() inattendu : ' + q._or)
-            assert.match(m[1], /^[0-9a-f]{8}-/i, 'un identifiant non-UUID ne doit JAMAIS atteindre id.eq')
-            const b = BIENS.find(x => x.id === m[1] || x.provider_property_id === m[2]) || null
-            return { data: b, error: null }
+          if (q._or) {
+            // La garde interroge trois colonnes possibles ; `migration_target_property_id`
+            // en fait partie (un bien en migration se designe par sa propriete cible).
+            const clause = (col) => (String(q._or).match(new RegExp('(^|,)' + col + '\\.eq\\.([^,]+)')) || [])[2]
+            const parId = clause('id')
+            const parRef = clause('provider_property_id')
+            const parCible = clause('migration_target_property_id')
+            assert.ok(parRef || parCible, 'filtre .or() inattendu : ' + q._or)
+            if (parId) assert.match(parId, /^[0-9a-f]{8}-/i, 'un identifiant non-UUID ne doit JAMAIS atteindre id.eq')
+            const b = BIENS.find(x => (parId && x.id === parId)
+              || (parRef && x.provider_property_id === parRef)
+              || (parCible && x.migration_target_property_id === parCible)) || null
+            return { data: tableau ? (b ? [b] : []) : b, error: null }
           }
           if (q._f.id != null) assert.match(String(q._f.id), /^[0-9a-f]{8}-/i, '.eq(id) recoit un non-UUID')
           const cands = BIENS.filter(b =>

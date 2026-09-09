@@ -21,6 +21,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -121,9 +122,15 @@ module.exports = async function handler(req, res) {
       // Ownership + rate_plan_id Channex du bien.
       const { data: prop, error: propErr } = await supabase
         .from('properties')
-        .select('id, name, provider, provider_property_id, provider_rate_plan_id, capacity')
+        // ⚠ `migration_target_property_id` : un bien en migration se cree un canal
+        // sur sa propriete CIBLE, pas sur sa cle source (qui rend 422 chez Channex).
+        .select('id, name, provider, provider_property_id, migration_target_property_id, '
+          + 'provider_rate_plan_id, capacity')
         .eq('user_id', compteBien)
-        .eq('provider_property_id', providerPropertyId)
+        // Sur les DEUX identifiants, comme la garde : sinon un appelant qui
+        // designe le bien par sa propriete cible franchit la garde et recoit
+        // un 404.
+        .or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`)
         .maybeSingle()
       if (propErr) {
         console.error('[channel-bcom-write] SELECT error', propErr.message)
@@ -134,6 +141,15 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Bien sans provider_rate_plan_id (provisioning incomplet)' })
       }
 
+      // ⚠ L'ADRESSE CHEZ LE PROVIDER, PAS LA CLE D'OWNERSHIP. Voir
+      // `proprieteChezLeProvider` (lib/rate-sync.js) : pendant une migration, ce
+      // sont deux identifiants differents.
+      const idChezLeProvider = proprieteChezLeProvider(prop)
+      if (!idChezLeProvider) {
+        return res.status(409).json({ error: 'pas_de_propriete_chez_le_provider',
+          message: 'Ce logement n\'existe pas chez le canal de distribution : creer d\'abord sa propriete.' })
+      }
+
       // Champs de mapping (defauts = payload valide ; surchargables en query).
       const occupancy = Number.isInteger(parseInt(req.query.occupancy, 10))
         ? parseInt(req.query.occupancy, 10) : (prop.capacity || 1)
@@ -142,7 +158,7 @@ module.exports = async function handler(req, res) {
       const readonly = req.query.readonly === 'true'                       // defaut false
       const title = (req.query.title || `Booking.com — ${prop.name || ''}`).trim()
 
-      const grp = await resolveGroupId(providerPropertyId)
+      const grp = await resolveGroupId(idChezLeProvider)
       if (!grp.group_id) {
         return res.status(502).json({ error: 'group_id introuvable pour ce bien (GET /groups)', http: grp.http })
       }
@@ -155,7 +171,7 @@ module.exports = async function handler(req, res) {
           is_active: false,
           title,
           known_mappings_list: [],
-          properties: [providerPropertyId],
+          properties: [idChezLeProvider],
           rate_plans: [
             {
               rate_plan_id: prop.provider_rate_plan_id,

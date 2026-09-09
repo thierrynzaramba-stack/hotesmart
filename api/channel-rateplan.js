@@ -10,6 +10,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, requirePermissionPourCanal, verifierSession, REF_SURE_RE } = require('../lib/require-permission')
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -120,9 +121,9 @@ module.exports = async function handler(req, res) {
     // Ownership + ids base
     const { data: prop, error: propErr } = await supabase
       .from('properties')
-      .select('id, name, currency, capacity, provider_property_id, provider_rate_plan_id, provider_room_type_id')
+      .select('id, name, currency, capacity, provider, provider_property_id, migration_target_property_id, provider_rate_plan_id, provider_room_type_id')
       .eq('user_id', compteBien || user.id)
-      .eq('provider_property_id', providerPropertyId)
+      .or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`)
       .maybeSingle()
     if (propErr) { console.error('[channel-rateplan] SELECT', propErr.message); return res.status(500).json({ error: 'Erreur lecture' }) }
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
@@ -152,7 +153,7 @@ module.exports = async function handler(req, res) {
     // Creer l'enfant NEUTRE (derive +0%, min stay herite du base)
     const c = await channelCall('POST', '/rate_plans', {
       rate_plan: {
-        property_id: providerPropertyId,
+        property_id: proprieteChezLeProvider(prop) || providerPropertyId,
         room_type_id: roomType,
         title: `${prop.name || 'Bien'} — ${channel} (dérivé)`,
         currency: prop.currency || 'EUR',
@@ -200,8 +201,8 @@ module.exports = async function handler(req, res) {
     if (!providerPropertyId || !ratePlanId) return res.status(400).json({ error: 'property_id + rate_plan_id requis' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id, provider_rate_plan_id')
-      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .from('properties').select('id, provider, provider_property_id, migration_target_property_id, provider_rate_plan_id')
+      .eq('user_id', compteBien || user.id).or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     if (!REF_SURE_RE.test(ratePlanId)) return res.status(400).json({ error: 'rate_plan_id invalide' })
@@ -237,14 +238,15 @@ module.exports = async function handler(req, res) {
     const rp = await channelCall('GET', `/rate_plans/${encodeURIComponent(ratePlanId)}`)
     const a = rp.json?.data?.attributes || {}
     if (!rp.ok) return res.status(502).json({ error: 'Lecture rate plan echouee', http: rp.status })
-    if (a.property_id != null && String(a.property_id) !== String(providerPropertyId)) {
+    const idChezLeProvider = proprieteChezLeProvider(prop) || providerPropertyId
+    if (a.property_id != null && String(a.property_id) !== String(idChezLeProvider)) {
       console.log('[channel-rateplan] refus inspect : le canal rattache ce rate plan a un autre bien')
       return res.status(403).json({ error: 'Droits insuffisants' })
     }
 
     const from = new Date(); const to = new Date(from); to.setDate(to.getDate() + 3)
     const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-    const rd = await channelCall('GET', `/restrictions?filter[property_id]=${encodeURIComponent(providerPropertyId)}`
+    const rd = await channelCall('GET', `/restrictions?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`
       + `&filter[date][gte]=${ymd(from)}&filter[date][lte]=${ymd(to)}&filter[restrictions]=rate,min_stay_arrival,min_stay_through`)
     const ari = rd.json?.data || {}
 
@@ -273,8 +275,8 @@ module.exports = async function handler(req, res) {
     if (!channelId || !providerPropertyId) return res.status(400).json({ error: 'channel_id + property_id requis' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id, provider_rate_plan_id, rate_sync_mode')
-      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .from('properties').select('id, provider, provider_property_id, migration_target_property_id, provider_rate_plan_id, rate_sync_mode')
+      .eq('user_id', compteBien || user.id).or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     // Cible : base = provider_rate_plan_id du bien ; derived = ligne de liaison du canal.
@@ -357,8 +359,8 @@ module.exports = async function handler(req, res) {
     if (hasMinStay && (!Number.isInteger(minStay) || minStay < 1)) return res.status(400).json({ error: 'min_stay invalide (>=1)' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id, rate_sync_mode')
-      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .from('properties').select('id, provider, provider_property_id, migration_target_property_id, rate_sync_mode')
+      .eq('user_id', compteBien || user.id).or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     const { data: row } = await supabase
@@ -431,7 +433,7 @@ module.exports = async function handler(req, res) {
     if (hasMinStay) {
       // Pousse le min stay PROPRE de l'enfant sur l'horizon (rate non touche -> reste derive).
       const mr = await channelCall('POST', '/restrictions', {
-        values: [{ property_id: providerPropertyId, rate_plan_id: childId, date_from: toLocalISO(start), date_to: toLocalISO(end), min_stay_arrival: minStay, min_stay_through: minStay }]
+        values: [{ property_id: proprieteChezLeProvider(prop) || providerPropertyId, rate_plan_id: childId, date_from: toLocalISO(start), date_to: toLocalISO(end), min_stay_arrival: minStay, min_stay_through: minStay }]
       })
       materialize = { mode: 'child_min_stay', http: mr.status, ok: mr.ok }
     } else {
@@ -463,8 +465,8 @@ module.exports = async function handler(req, res) {
     if (!channelId || !providerPropertyId) return res.status(400).json({ error: 'channel_id + property_id requis' })
 
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id, rate_sync_mode')
-      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .from('properties').select('id, provider, provider_property_id, migration_target_property_id, rate_sync_mode')
+      .eq('user_id', compteBien || user.id).or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
 
     const { data: row } = await supabase
@@ -539,8 +541,8 @@ module.exports = async function handler(req, res) {
     const providerPropertyId = (req.query.property_id || '').trim()
     if (!providerPropertyId) return res.status(400).json({ error: 'property_id requis' })
     const { data: prop } = await supabase
-      .from('properties').select('id, provider_property_id')
-      .eq('user_id', compteBien || user.id).eq('provider_property_id', providerPropertyId).maybeSingle()
+      .from('properties').select('id, provider, provider_property_id, migration_target_property_id')
+      .eq('user_id', compteBien || user.id).or(`provider_property_id.eq.${providerPropertyId},migration_target_property_id.eq.${providerPropertyId}`).maybeSingle()
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
     const { data: rows } = await supabase
       .from('property_channel_rate_plans')

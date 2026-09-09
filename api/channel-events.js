@@ -22,6 +22,8 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { getProvider } = require('../lib/channels')
+const { proprieteChezLeProvider, estEnMigration } = require('../lib/rate-sync')
+const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 // Writer unique de bookings_snapshot (audit E3/E4/E5).
 const { saveBookingSnapshots } = require('../lib/bookings-snapshot')
 const billing = require('../lib/billing')
@@ -94,14 +96,13 @@ async function channelCall(method, path, body) {
   return { ok: res.ok, status: res.status, json }
 }
 
-// Bien HoteSmart proprietaire d'un provider_property_id (id property Channex).
+// Bien HoteSmart derriere un identifiant de propriete Channex.
+// Sur les DEUX colonnes : un bien en migration porte ses canaux sur sa propriete
+// cible (lib/bien-du-provider.js).
 async function ownerOfProperty(providerPropertyId) {
-  const { data } = await supabase
-    .from('properties')
-    .select('id, user_id, provider, provider_property_id, name')
-    .eq('provider_property_id', providerPropertyId)
-    .maybeSingle()
-  return data || null
+  return trouverBienParIdProvider(supabase, providerPropertyId, {
+    colonnes: 'id, user_id, provider, provider_property_id, migration_target_property_id, name'
+  })
 }
 
 // Snapshot bookings_snapshot : ecriture via le writer unique lib/bookings-snapshot.js.
@@ -110,14 +111,42 @@ async function ownerOfProperty(providerPropertyId) {
 
 // Chaine post-mapping, idempotente, pour un bien deja resolu.
 async function runPostMapping(owner) {
-  const providerPropertyId = owner.provider_property_id
-  const out = { property_id: providerPropertyId, bookings: 0, messages: null, ready: false }
-  const provider = getProvider(owner.provider || 'channex')
+  // ⚠ DEUX IDENTIFIANTS, DEUX ROLES — et les confondre ici a un cout immediat.
+  // `cleDuCoeur` est la cle sous laquelle le coeur range ses lignes ; `idChezLeProvider`
+  // est l'endroit ou l'on va chercher les reservations. Pendant une migration, ce
+  // sont deux valeurs differentes, et `owner.provider` vaut encore 'beds24' :
+  // interroger le provider INSCRIT SUR LE BIEN avec la cle source serait alle tirer
+  // les reservations CHEZ BEDS24 pour les ecrire avec `provider: 'channex'`, puis
+  // poser `channel_ready` et declencher la facturation. Ce chemin etait
+  // inatteignable avant que le bien soit retrouvable par sa propriete cible.
+  const cleDuCoeur = owner.provider_property_id
+  const idChezLeProvider = proprieteChezLeProvider(owner)
+
+  // ⚠ UN BIEN ENCORE EN MIGRATION NE DECLENCHE PAS LA CHAINE D'ACTIVATION.
+  // Depuis qu'il est retrouvable par sa propriete cible, la creation du canal
+  // Booking INACTIF (phase 1.1 du plan) atteint ce code : il poserait
+  // `channel_ready`, `active_at` — donc le DEBUT DE LA FACTURATION, dont le
+  // trial compte au premier `active_at` — et lancerait le rattrapage des messages
+  // chez Channex pour un bien dont les fils sont encore chez Beds24. La chaine
+  // post-mapping appartient a l'APRES-bascule (re-keying, phase 2.8).
+  if (estEnMigration(owner)) {
+    console.log('[channel-events] bien en migration : post-mapping differe jusqu au re-keying', cleDuCoeur)
+    out.reason = 'migration_en_cours'
+    return out
+  }
+  const out = { property_id: cleDuCoeur, bookings: 0, messages: null, ready: false }
+  // L'evenement vient de Channex : c'est Channex qu'on interroge, quel que soit
+  // le provider encore inscrit sur le bien.
+  const provider = getProvider('channex')
+  if (!idChezLeProvider) {
+    console.error('[channel-events] post-mapping impossible : aucune propriete chez le provider')
+    return out
+  }
 
   // 1) PULL bookings -> upsert bookings_snapshot (onConflict user_id,booking_id -> idempotent).
   let bookings = []
   try {
-    bookings = await provider.getReservations({ propertyId: providerPropertyId })
+    bookings = await provider.getReservations({ propertyId: idChezLeProvider })
   } catch (e) {
     console.error('[channel-events] getReservations echec', e.message)
   }
@@ -131,7 +160,9 @@ async function runPostMapping(owner) {
   // message de bienvenue a chaque reservation a venir prise il y a des mois.
   const saved = await saveBookingSnapshots(supabase, {
     userId:     owner.user_id,
-    propertyId: providerPropertyId,
+    // ⚠ La cle du COEUR, pas celle du provider : tous les lecteurs
+    // (calendrier, menage, `nuitsOccupees`) interrogent par `provider_property_id`.
+    propertyId: cleDuCoeur,
     provider:   'channex',
     bookings,
     initialImport: true
@@ -147,8 +178,11 @@ async function runPostMapping(owner) {
     try {
       const r = await provider.importMessages({
         userId: owner.user_id,
-        propertyId: providerPropertyId,
-        providerPropertyId
+        // `propertyId` sert de cle d'ecriture cote coeur ; `providerPropertyId`
+        // designe l'endroit ou lire chez le provider. Pendant une migration, ce
+        // ne sont pas les memes.
+        propertyId: cleDuCoeur,
+        providerPropertyId: idChezLeProvider
       })
       out.messages = r && typeof r === 'object' ? { imported: r.imported, skipped: r.skipped, error: r.error } : r
     } catch (e) {
@@ -458,6 +492,13 @@ module.exports = async function handler(req, res) {
       if (!owner) {
         console.warn('[channel-events] bien inconnu', ppid)
         results.push({ property_id: ppid, reason: 'unknown_property' })
+        continue
+      }
+      // Meme traitement que le webhook : l'ambiguite se refuse, elle ne se
+      // traverse pas en laissant partir des `undefined` dans les UPDATE.
+      if (owner.ambigu) {
+        console.error('[channel-events] identifiant AMBIGU, evenement non traite', ppid)
+        results.push({ property_id: ppid, reason: 'ambiguous_property' })
         continue
       }
       const r = await runPostMapping(owner)

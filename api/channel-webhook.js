@@ -19,6 +19,7 @@ const supabase = createClient(
 // Writer unique de bookings_snapshot (audit E3/E4/E5) : schema commun aux deux
 // providers, statut canonique, merge non destructif.
 const { saveBookingSnapshot, fromChannex, STATUS } = require('../lib/bookings-snapshot')
+const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
@@ -45,17 +46,23 @@ async function channelCall(method, path, body) {
   return { ok: res.ok, status: res.status, json }
 }
 
-// Retrouve le user_id HoteSmart proprietaire du bien channel (provider_property_id)
+// Retrouve le bien HoteSmart a partir de l'identifiant porte par le provider.
+//
+// ⚠ SUR LES DEUX COLONNES, ET C'EST VITAL PENDANT UNE MIGRATION.
+// Un bien en cours de bascule porte ses canaux sur sa propriete CIBLE : le
+// webhook arrive donc avec `migration_target_property_id`, pas avec
+// `provider_property_id`. Chercher sur la seule cle source faisait qu'aucun bien
+// ne reclamait la reservation — perdue en silence, alors que « une reservation
+// OTA qui n'arrive pas dans le coeur sous 30 min » est un critere de rollback du
+// plan de bascule. Point unique : lib/bien-du-provider.js.
 async function ownerOfProperty(providerPropertyId) {
-  const { data } = await supabase
-    .from('properties')
-    // `id` (UUID) et `provider_rate_plan_id` : requis par la reaffirmation du
-    // stop-sell, qui lit la memoire d'intention (calendar_inventory, cle = UUID)
-    // et pousse /restrictions sur le rate plan du bien.
-    .select('id, user_id, provider_property_id, provider_room_type_id, provider_rate_plan_id, inventory_type')
-    .eq('provider_property_id', providerPropertyId)
-    .maybeSingle()
-  return data || null
+  // `id` (UUID) et `provider_rate_plan_id` : requis par la reaffirmation du
+  // stop-sell, qui lit la memoire d'intention (calendar_inventory, cle = UUID)
+  // et pousse /restrictions sur le rate plan du bien.
+  return trouverBienParIdProvider(supabase, providerPropertyId, {
+    colonnes: 'id, user_id, provider_property_id, migration_target_property_id, '
+      + 'provider_room_type_id, provider_rate_plan_id, inventory_type'
+  })
 }
 
 // ---- BOOKING ----
@@ -113,6 +120,22 @@ async function saveRevision(rev, revisionId) {
     console.warn('[channel-webhook] bien inconnu', providerPropertyId)
     return { saved: false, reason: 'unknown_property' }
   }
+  // Deux biens pour un meme identifiant : on n'attribue pas la reservation au
+  // premier arrive. Elle reste non ackee et repassera dans le feed.
+  if (owner.ambigu) {
+    console.error('[channel-webhook] identifiant AMBIGU, reservation non attribuee', providerPropertyId)
+    return { saved: false, reason: 'ambiguous_property' }
+  }
+
+  // ⚠ LA CLE D'ECRITURE DU COEUR EST `provider_property_id`, PAS L'ID RECU.
+  // Pendant une migration, le webhook arrive avec la propriete CIBLE, alors que
+  // TOUS les lecteurs du coeur interrogent `bookings_snapshot.property_id` avec
+  // `bien.provider_property_id` — le calendrier, le planning menage, et surtout
+  // `nuitsOccupees`, qui alimente le verrou anti-surreservation. Ecrire sous
+  // l'identifiant recu aurait enregistre la reservation sous une cle que
+  // personne ne lit : la nuit vendue serait passee pour libre. Le re-keying
+  // (phase 2.8) deplacera ces lignes en meme temps que les 13 autres tables.
+  const cleDuCoeur = owner.provider_property_id
 
   // Statut Channex brut (new | modified | cancelled) normalise en canonique
   // (confirmed | cancelled) par le writer unique.
@@ -121,7 +144,7 @@ async function saveRevision(rev, revisionId) {
   const saved = await saveBookingSnapshot(supabase, {
     userId:     owner.user_id,
     bookingId,
-    propertyId: providerPropertyId,   // = provider_property_id (text)
+    propertyId: cleDuCoeur,   // = provider_property_id (text), JAMAIS l'id recu
     provider:   'channex',
     snapshot,
     // Le payload brut, avec `id` FORCE au booking id : la colonne `raw` doit
@@ -164,6 +187,13 @@ async function handleMessage(payload) {
     console.warn('[channel-webhook] message bien inconnu', providerPropertyId)
     return { ok: true, reason: 'unknown_property' }
   }
+  if (owner.ambigu) {
+    console.error('[channel-webhook] identifiant AMBIGU, message non attribue', providerPropertyId)
+    return { ok: false, reason: 'ambiguous_property' }
+  }
+  // Meme regle que pour les reservations : le coeur est keye par
+  // `provider_property_id`, pas par l'identifiant recu du provider.
+  const cleDuCoeur = owner.provider_property_id
 
   // On ne stocke que les messages voyageur (sender 'guest')
   if (payload.sender && payload.sender !== 'guest') {
@@ -191,7 +221,7 @@ async function handleMessage(payload) {
     .from('conversations')
     .insert({
       user_id:      owner.user_id,
-      property_id:  String(providerPropertyId),
+      property_id:  String(cleDuCoeur),
       book_id:      payload.booking_id || null,
       guest_message: payload.message || '',
       guest_name:   '',
@@ -216,7 +246,7 @@ async function handleMessage(payload) {
   await recordMessage({
     userId:        owner.user_id,
     provider:      'channex',
-    propertyId:    providerPropertyId,
+    propertyId:    cleDuCoeur,
     bookingId:     payload.booking_id || null,
     direction:     'inbound',
     sender:        'guest',
@@ -285,7 +315,14 @@ module.exports = async function handler(req, res) {
     }
 
     // 5xx -> Channex retente (backoff). 2xx -> traite/ignore.
-    if (!result.ok && result.reason === 'db_error') {
+    //
+    // ⚠ `ambiguous_property` DOIT ETRE REJOUE, comme `db_error`. Un identifiant
+    // porte par deux comptes n'est pas une donnee a jeter : on refuse de
+    // l'attribuer au hasard, mais le message doit revenir jusqu'a ce que
+    // l'ambiguite soit levee. Sans cette ligne, la reservation ambigue revenait
+    // dans le feed (non ackee) tandis que le MESSAGE du voyageur, lui, etait
+    // abandonne — deux chemins qui ne faisaient pas ce que leur commentaire disait.
+    if (!result.ok && (result.reason === 'db_error' || result.reason === 'ambiguous_property')) {
       return res.status(500).json({ ok: false })
     }
     return res.status(200).json({ ok: true })

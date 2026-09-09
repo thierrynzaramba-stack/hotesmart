@@ -27,7 +27,7 @@ const fauxCoeur = {
 require('../lib/cron-shared').supabase = fauxCoeur
 
 const { pousserAri, etatAri, raisonDeNePasPousser } = require('../lib/migration-ari')
-const { proprieteQuiRecoitLARI } = require('../lib/rate-sync')
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
 
 // L'etat EXACT de « La bulle » apres la phase 0 : ids de la propriete CIBLE,
 // cle Beds24 toujours en place, mode « HoteSmart gere mes prix ».
@@ -55,20 +55,20 @@ function fauxBase (lignes = []) {
 // ─── La destination ─────────────────────────────────────────────────────────
 
 test('LE TEST QUI COMPTE : l ARI vise la propriete CIBLE, jamais la cle source', () => {
-  assert.equal(proprieteQuiRecoitLARI(EN_MIGRATION), 'chx-cible')
-  assert.notEqual(proprieteQuiRecoitLARI(EN_MIGRATION), '209413')
+  assert.equal(proprieteChezLeProvider(EN_MIGRATION), 'chx-cible')
+  assert.notEqual(proprieteChezLeProvider(EN_MIGRATION), '209413')
 })
 
 test('apres le re-keying, la cle promue redevient la seule verite', () => {
   // `provider_property_id` porte alors l'UUID Channex, et la colonne cible garde
   // seulement la memoire du chantier : elle ne doit plus rien commander.
   const migre = { ...EN_MIGRATION, provider: 'channex', provider_property_id: 'chx-cible' }
-  assert.equal(proprieteQuiRecoitLARI(migre), 'chx-cible')
+  assert.equal(proprieteChezLeProvider(migre), 'chx-cible')
 })
 
 test('un bien ni chez le canal ni provisionne n a nulle part ou pousser', () => {
   const orphelin = { ...EN_MIGRATION, migration_target_property_id: null }
-  assert.equal(proprieteQuiRecoitLARI(orphelin), null)
+  assert.equal(proprieteChezLeProvider(orphelin), null)
   assert.equal(raisonDeNePasPousser(orphelin).raison, 'pas_de_destination')
 })
 

@@ -96,8 +96,29 @@ casse, ça casse sur le bien le plus simple.
   `rates[]` par occupation — on ne sait pas encore si ce même champ les rend. Si
   non, l'étape 7 afficherait « à faire » sur un calendrier pourtant poussé : à
   vérifier juste après la poussée, pas avant.
-- [ ] **0.4 Vérifier la garde d'activation.** **Vérifiable** :
-  `POST /api/channel-mapping?action=activate&dry_run=true` → `pret_a_activer: true`.
+- [x] **0.4 La garde d'activation est verte — mais elle se VÉRIFIE en 1.1.**
+  `jugerPrixDuCoeur` rend `pret_a_activer: true` sur les deux biens (17 et 22
+  prix détenus, mesuré le 9 septembre 2026). En revanche l'appel du plan —
+  `POST /api/channel-mapping?action=activate&dry_run=true` — **exige un
+  `channel_id`**, et aucun canal n'existe avant **1.1** : cette case était mal
+  placée. Elle se coche pour de bon au moment de créer le canal inactif.
+
+  ⚠ **Ce que 0.4 a révélé, et qui bloquait toute la phase 1** : les endpoints de
+  canal adressaient le provider avec l'identifiant reçu, c'est-à-dire la clé
+  **source**. Mesuré : `GET /channels?filter[property_id]=209413` → **HTTP 422**,
+  contre `200` sur la propriété cible. Créer le canal Booking aurait échoué.
+  Corrigé : `proprieteChezLeProvider` résout la destination (`channel-mapping`,
+  `channel-bcom-write`).
+
+  ⚠ **Et le sens inverse, plus grave encore** : un bien en migration porte ses
+  canaux sur sa propriété **cible**, donc tout ce qui remonte du provider —
+  webhook de réservation, événement, activation — le désigne par **cet**
+  identifiant. `channel-webhook`, `channel-events`, `channel-bcom-activate` et
+  **la garde d'autorisation elle-même** ne cherchaient que sur la clé source :
+  une réservation arrivée pendant la bascule n'aurait été réclamée par personne.
+  Or « une réservation OTA n'arrive pas dans le cœur sous 30 min » est un critère
+  de rollback. Corrigé : `lib/bien-du-provider.js`, point unique, les deux
+  colonnes.
 
 > **On peut s'arrêter ici sans conséquence.** Rien n'est publié : aucun canal.
 

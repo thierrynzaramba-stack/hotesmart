@@ -203,3 +203,34 @@ toujours par se contredire — c'est la même leçon que le writer unique du cœ
 de profil**. Les deux populations doivent fusionner : la création d'un
 prestataire devra passer par `profiles`, `public_tokens` n'en étant que la
 projection PWA. Non traité tant que la fiche prestataire n'existe pas.
+
+
+## Migration : un bien porte DEUX identifiants, et ils n'ont pas le même rôle
+
+**Écrit le 9 septembre 2026, après trois reviews sur le même chantier.**
+
+Pendant une bascule de provider, un bien porte sa clé **source** (`provider_property_id`,
+l'ancien provider) et sa propriété **cible** (`migration_target_property_id`, le
+nouveau, qui porte déjà les canaux). Le re-keying (phase 2.8) les réunit ; jusque-là,
+tout code qui les confond casse — et il casse dans les deux sens.
+
+**Cœur → provider : on résout la destination.** `proprieteChezLeProvider`
+(`lib/rate-sync.js`) dit où parler : la cible tant que la bascule n'a pas eu lieu,
+la clé promue après. Mesuré : adresser Channex avec la clé Beds24 rend **HTTP 422**.
+
+**Provider → cœur : on cherche sur les deux colonnes.** `trouverBienParIdProvider`
+(`lib/bien-du-provider.js`) — le provider désigne le bien par la propriété qui
+porte ses canaux, donc par la cible. La garde d'autorisation le fait aussi :
+sinon elle refusait l'accès au propriétaire légitime pendant toute la bascule.
+
+**Et l'écriture dans le cœur se fait TOUJOURS sous la clé du cœur.** C'est le
+piège le plus coûteux, parce qu'il ne produit aucune erreur : le webhook arrive
+avec la cible, mais tous les lecteurs — calendrier, planning ménage,
+`nuitsOccupees` qui alimente le verrou anti-surréservation — interrogent
+`bookings_snapshot.property_id` avec `provider_property_id`. Écrire sous
+l'identifiant reçu enregistre la réservation sous une clé que **personne ne lit** :
+elle existe, et la nuit vendue passe pour libre.
+
+**Règle qui en sort** : à chaque frontière avec un provider, se demander lequel
+des deux identifiants on manipule — *où je parle* (le provider) ou *sous quoi je
+range* (le cœur). Un même nom de variable pour les deux est le début du défaut.

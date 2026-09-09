@@ -100,7 +100,12 @@ test('les deux endpoints SELECTIONNENT base_price', () => {
   // Le piege deja rencontre trois fois : une garde qui juge sur une colonne non
   // selectionnee lit `undefined`.
   for (const [nom, src] of [['channel-mapping', MAPPING], ['channel-bcom-activate', BCOM]]) {
-    const select = src.match(/\.select\('id,[^']*'\)/g) || []
+    // ⚠ Tolerant aux SELECT ecrits sur plusieurs lignes, ET a la lecture passant
+    // par `trouverBienParIdProvider({ colonnes })` — le point unique qui cherche
+    // sur les deux identifiants du bien. Un test qui ne matche plus rien
+    // passerait pour un test qui ne verifie rien.
+    const select = src.match(/(\.select\(\s*'id,|colonnes:\s*'id,)[\s\S]{0,500}?\)/g) || []
+    assert.ok(select.length, `${nom} : aucune lecture de bien reconnue`)
     assert.ok(select.some(x => x.includes('base_price')), `${nom} selectionne base_price`)
   }
 })

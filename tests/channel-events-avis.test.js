@@ -57,6 +57,8 @@ function preparer ({ biens = [BIEN], snapshots = [], fetchStub = null } = {}) {
         _f: {},
         select () { return q },
         eq (c, v) { q._f[c] = v; return q },
+        in (c, v) { q._in = { col: c, valeurs: v }; return q },
+        or (expr) { q._or = expr; return q },
         is () { return q }, not () { return q }, order () { return q },
         limit () { return Promise.resolve(rep(nom, true)) },
         upsert (r, o) { etat.ecritures.push({ table: nom, row: r, opts: o }); return Promise.resolve({ error: null }) },
@@ -66,9 +68,18 @@ function preparer ({ biens = [BIEN], snapshots = [], fetchStub = null } = {}) {
       }
       function rep (nom, tableau) {
         if (nom === 'properties') {
+          // Le bien se resout desormais sur les DEUX identifiants (un bien en
+          // migration porte ses canaux sur sa propriete cible) et sur une LISTE
+          // de providers (il a encore celui de son ancien provider).
+          const clause = (col) => (String(q._or || '').match(new RegExp('(^|,)' + col + '\\.eq\\.([^,]+)')) || [])[2]
+          const parRef = clause('provider_property_id') || q._f.provider_property_id
+          const parCible = clause('migration_target_property_id')
           const c = biens.filter(b =>
-            (q._f.provider_property_id == null || b.provider_property_id === q._f.provider_property_id) &&
-            (q._f.provider == null || b.provider === q._f.provider))
+            ((parRef == null && parCible == null)
+              || (parRef && b.provider_property_id === parRef)
+              || (parCible && b.migration_target_property_id === parCible)) &&
+            (q._f.provider == null || b.provider === q._f.provider) &&
+            (q._in == null || q._in.valeurs.includes(b[q._in.col])))
           return { data: tableau ? c : (c[0] || null), error: null }
         }
         if (nom === 'bookings_snapshot') {

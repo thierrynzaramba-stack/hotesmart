@@ -92,11 +92,28 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
           // valeur non-UUID dans la branche `id.eq.` est une ERREUR Postgres, pas
           // un resultat vide — c'est ce qui avait casse l'envoi de SMS.
           if (q._or) {
-            const m = String(q._or).match(/^id\.eq\.([^,]+),provider_property_id\.eq\.(.+)$/)
-            assert.ok(m, 'filtre .or() inattendu : ' + q._or)
-            assert.match(m[1], /^[0-9a-f]{8}-/i, 'un identifiant non-UUID ne doit JAMAIS atteindre id.eq')
-            const b = BIENS.find(x => x.id === m[1] || x.provider_property_id === m[2]) || null
-            return { data: b, error: null }
+            // Deux formes, selon que la reference est un UUID ou un propId :
+            //   id.eq.X,provider_property_id.eq.X,migration_target_property_id.eq.X
+            //   provider_property_id.eq.X,migration_target_property_id.eq.X
+            // `migration_target_property_id` en fait partie : pendant une
+            // migration, c'est par CET identifiant que le provider designe le bien.
+            const avecId = String(q._or).match(
+              /^id\.eq\.([^,]+),provider_property_id\.eq\.([^,]+),migration_target_property_id\.eq\.(.+)$/)
+            const sansId = String(q._or).match(
+              /^provider_property_id\.eq\.([^,]+),migration_target_property_id\.eq\.(.+)$/)
+            assert.ok(avecId || sansId, 'filtre .or() inattendu : ' + q._or)
+            if (avecId) {
+              assert.match(avecId[1], /^[0-9a-f]{8}-/i, 'un identifiant non-UUID ne doit JAMAIS atteindre id.eq')
+            }
+            const ref = avecId ? avecId[1] : sansId[1]
+            const propId = avecId ? avecId[2] : sansId[1]
+            const cible = avecId ? avecId[3] : sansId[2]
+            const b = BIENS.find(x => x.id === ref || x.provider_property_id === propId
+              || (x.migration_target_property_id && x.migration_target_property_id === cible)) || null
+            // ⚠ La branche TEXTE de la garde lit une LISTE (elle refuse
+            // explicitement l'ambiguite au lieu d'un `.maybeSingle()` qui
+            // echouait en PGRST116 sur un doublon legitime).
+            return { data: tableau ? (b ? [b] : []) : b, error: null }
           }
           if (q._f.id != null) {
             assert.match(String(q._f.id), /^[0-9a-f]{8}-/i, '.eq(id) recoit un identifiant non-UUID')
