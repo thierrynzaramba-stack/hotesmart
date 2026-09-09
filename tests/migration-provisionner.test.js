@@ -130,3 +130,50 @@ test('le rate plan part a ZERO, jamais avec un prix invente', async () => {
   assert.deepEqual([...new Set(avecSupp.options.map(o => o.rate))], [0], 'tous a zero')
   assert.equal(avecSupp.options[5].is_primary, true)
 })
+
+// ─── Les refus qui protegent un bien VIVANT ─────────────────────────────────
+// Cette etape ECRIT sur une ligne existante : elle n'a pas le filet d'un INSERT.
+// Un refus qui manque, et c'est un bien en production qui perd ses identifiants
+// de canal au profit d'une propriete neuve et vide.
+
+const { motifDeRefus } = require('../lib/migration-provisionner')
+
+test('LE TEST QUI COMPTE : un bien deja chez la cible est refuse', async () => {
+  // Colomiers est chez Channex avec des canaux ACTIFS. Provisionner ecraserait
+  // `provider_room_type_id` / `provider_rate_plan_id` : son ARI partirait ensuite
+  // vers un room type neuf, et le vrai calendrier ne serait plus alimente.
+  const bienVivant = { ...BIEN, provider: 'channex', provider_property_id: 'chx-colomiers',
+    provider_room_type_id: 'chx-rt-vivant', provider_rate_plan_id: 'chx-rp-vivant' }
+  assert.equal(raisonDeRefus(bienVivant), 'deja_chez_la_cible')
+
+  const b = fauxBase()
+  const c = fauxCanal(OK)
+  const r = await provisionner(b.api, bienVivant, { dryRun: false, appel: c.appel })
+  assert.equal(r.ok, false)
+  assert.equal(c.appels.length, 0, 'aucun appel au provider')
+  assert.equal(b.ecrits.length, 0, 'aucune ecriture en base')
+})
+
+test('des identifiants de canal sans propriete cible : on ne les ecrase pas', async () => {
+  assert.equal(raisonDeRefus({ ...BIEN, provider_room_type_id: 'venu-d-ailleurs' }),
+    'ids_canal_deja_poses')
+  assert.equal(raisonDeRefus({ ...BIEN, provider_rate_plan_id: 'venu-d-ailleurs' }),
+    'ids_canal_deja_poses')
+})
+
+test('un refus dit QUOI FAIRE, pas seulement ce qui cloche', () => {
+  for (const raison of ['deja_chez_la_cible', 'deja_provisionne', 'ids_canal_deja_poses',
+    'sans_nom', 'sans_capacite', 'sans_type', 'sans_fuseau']) {
+    const m = motifDeRefus(raison)
+    assert.ok(m.length > 20 && m !== raison, `${raison} a un motif lisible`)
+  }
+  const m = motifDeRefus('type_non_supporte_par_la_cible', { property_type: 'townhome' })
+  assert.match(m, /townhome/)
+  assert.match(m, /apartment/, 'les types valides sont nommes')
+})
+
+test('le refus voyage avec son motif, jusqu au client', async () => {
+  const r = await provisionner(fauxBase().api, { ...BIEN, property_type: 'townhome' }, { dryRun: false })
+  assert.equal(r.raison, 'type_non_supporte_par_la_cible')
+  assert.match(r.message, /townhome/)
+})

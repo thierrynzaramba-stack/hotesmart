@@ -59,16 +59,46 @@ chemin d'accès. Un prestataire n'y a rien à faire.
 | 5 | `garde_activation` | le bien peut-il publier sans mentir sur ses prix | `lib/garde-activation.js` |
 | 6 | `provisionner_channex` | crée la propriété cible chez Channex et pose ses identifiants **sur le bien existant** | `properties.migration_target_property_id` |
 
-État réel au 9 septembre 2026, lu par l'endpoint : **5/5 étapes « fait »** sur
+État réel au 9 septembre 2026, lu par l'endpoint : **6/6 étapes « fait »** sur
 les deux biens de Bagnères — 784 et 637 réservations avec payload brut complet,
 320 et 321 champs de fiche conservés, capacité/type/fuseau renseignés, 17 et 22
-nuits tarifées, publication autorisée.
+nuits tarifées, publication autorisée, propriété cible en place. Sur les deux
+biens déjà chez Channex, l'étape 6 est `sans_objet` — et une étape `sans_objet`
+ne compte ni au numérateur ni au dénominateur : « 5/6 » sur un bien qui n'a rien
+à provisionner ferait chercher un manque qui n'existe pas.
 
 ⚠ **L'étape 6 existe parce que le produit ne savait pas déménager un bien.**
 `POST /api/channel-property` fait un **INSERT** : il crée un bien neuf. L'utiliser
 pour une migration aurait créé un **second** bien à côté de celui qui porte
 l'historique — 784 réservations, 176 ménages, 783 messages, 117 codes d'accès sur
 La bulle. Le produit savait créer, pas déménager.
+
+### 3 bis. Ce qu'une étape qui ÉCRIT SUR UN BIEN VIVANT doit garantir
+
+L'étape 6 fait un `UPDATE` sur une ligne existante. Elle n'a pas le filet d'un
+`INSERT`, qui créerait au pire une ligne de trop. Deux refus manquaient, trouvés
+en relisant le code avant de construire la suivante :
+
+- **Le SELECT de l'endpoint ne portait pas `migration_target_property_id`.** La
+  garde d'idempotence lisait donc `undefined` : relancer l'action aurait créé une
+  **seconde** propriété Channex et écrasé la première, devenue orpheline et muette.
+  C'est le piège « colonne non sélectionnée », payé une quatrième fois. Un test
+  le ferme désormais : *toute colonne lue par une étape est dans le SELECT de
+  l'endpoint*. Il balaie les trois lecteurs — `migration-etapes.js` et
+  `migration-provisionner.js` (motif `bien.<colonne>`), `garde-activation.js`
+  (motif `prop.<colonne>`, autre nom de variable, autre fichier) — plus les
+  colonnes lues **dynamiquement** par `CHAMPS_FICHE`, qu'aucun motif littéral ne
+  montre. Une étape écrite plus tard avec un troisième nom de variable
+  échapperait au filet : le test est à élargir en même temps qu'elle.
+- **`raisonDeRefus` ne regardait pas le provider.** Lancer l'action sur un bien
+  déjà chez Channex — Colomiers, canaux **actifs** — aurait écrasé ses
+  `provider_room_type_id` / `provider_rate_plan_id` par ceux d'une propriété neuve
+  et vide : son ARI serait ensuite parti dans le vide, sans rien pour le dire.
+
+**Règle qui en sort** : une étape qui écrit sur un bien vivant refuse d'abord sur
+l'identité du bien (est-il concerné ?), ensuite sur l'idempotence (est-ce déjà
+fait ?), ensuite seulement sur les champs manquants. Et **tout refus porte son
+motif en clair** — `motifDeRefus`, dans le même module que la règle qu'il explique.
 
 **Restent à construire** (elles entreront ici avec leur endpoint) : validation de
 grille, création de la propriété Channex, connexion et mapping des canaux,

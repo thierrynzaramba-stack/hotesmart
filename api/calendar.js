@@ -8,7 +8,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
-const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
+const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
 const { reaffirmerStopSell } = require('../lib/channel-availability')
 const { readStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
@@ -400,6 +400,12 @@ module.exports = async function handler(req, res) {
       if (!bienFs.provider_property_id || !bienFs.provider_rate_plan_id || !bienFs.provider_room_type_id) {
         return res.status(400).json({ error: 'Bien non connecte au canal (ids manquants)' })
       }
+      // ⚠ LE PROVIDER D'ABORD. Un bien Beds24 en cours de migration porte les ids
+      // de canal de sa propriete CIBLE mais garde sa cle Beds24 : les trois ids
+      // sont presents et le full sync partirait vers Channex sur « 209413 ».
+      if (!estRelieAuCanal(bienFs)) {
+        return res.status(200).json({ enqueued: false, ...CHANNEL_NOT_CONNECTED })
+      }
       // Garde 0 : le bien doit pouvoir pousser ses tarifs (mode 'managed'). En 'keep'
       // (defaut protecteur) on REFUSE la mise en file — aucun tarif ne part. Le bouton
       // "Publier" est deja masque en keep : ce garde couvre les appels hors UI (forge, rejeu).
@@ -618,7 +624,10 @@ module.exports = async function handler(req, res) {
     let localOnly = false
     const taskIdsSave = {}
 
-    if (propId && ratePlanId) {
+    // ⚠ `estRelieAuCanal` AVANT les ids : voir lib/rate-sync.js. Pendant la
+    // migration, les ids sont ceux de la propriete CIBLE et `propId` la cle du
+    // provider SOURCE — la poussee partirait avec une cle que la cible ignore.
+    if (estRelieAuCanal(bien) && propId && ratePlanId) {
       // Push NATIVEMENT conforme ("only send changes" #13) : on source directement depuis
       // les segments edites, qui ne portent QUE les champs reellement touches. Aucun champ
       // non edite n'est emis. expandDays respecte le filtre jours -> la coalescence ne peut
@@ -725,6 +734,8 @@ module.exports = async function handler(req, res) {
       // bien Beds24, l'hote doit editer ses prix/sejours min DANS Beds24 (source cote OTA).
       localOnly = true
       if (bien.provider === 'beds24') {
+        // Ce message redevient atteignable pour les biens en cours de migration :
+        // ils portent des ids de canal, mais leurs prix vivent encore chez Beds24.
         pushWarnings.push('Enregistré dans HôteSmart — ce bien est géré par Beds24 : modifiez prix et séjour minimum directement dans Beds24, ils ne sont pas envoyés aux plateformes depuis ici.')
       } else {
         pushWarnings.push('Bien non connecté au canal de distribution — modifications enregistrées dans HôteSmart uniquement, non envoyées aux plateformes.')

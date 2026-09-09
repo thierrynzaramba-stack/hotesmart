@@ -82,3 +82,33 @@ Une réservation sur un canal **bloque les mêmes dates sur l'autre canal**, et 
 → Normal pour un bien **Beds24** : HôteSmart affiche le calendrier mais **ne pousse pas** vers
 Beds24. **Modifiez le prix / séjour minimum directement dans Beds24** — c'est lui qui synchronise
 vers les plateformes. (Un message le rappelle à la sauvegarde.)
+
+## 7. « Des identifiants de canal ne disent pas où vit le bien »
+
+**Régression du 9 septembre 2026, trouvée en review, déjà active en production.**
+
+Le provisionnement de la migration (phase 0) pose sur un bien **Beds24** les
+identifiants de la propriété **Channex** qui l'accueillera : `provider_room_type_id`
+et `provider_rate_plan_id` pointent la cible, pendant que `provider_property_id`
+reste la clé Beds24 — seul le re-keying les bascule ensemble.
+
+Or les chemins de poussée ARI ne jugeaient que sur la **présence** des identifiants
+(`if (propId && ratePlanId)`). Les deux biens de Bagnères passaient donc le
+contrôle : une simple édition de prix partait en `POST /availability` +
+`/restrictions` vers Channex avec `property_id: "209413"`, la clé du provider
+*source*. Effet visible pour l'hôte : le message « ce bien est géré par Beds24 »
+disparaissait, remplacé par des `HTTP 4xx`.
+
+**Règle** : sur tout chemin qui écrit chez un provider, **le provider se teste
+avant les identifiants**. `estRelieAuCanal(bien)` — `lib/rate-sync.js`, à côté de
+`canPushRates` — est le point unique : deux questions différentes du même chemin
+(« l'hôte veut-il pousser ses prix ? » et « ce bien est-il seulement chez ce
+provider ? »), gardées au même endroit. Elle est appliquée aux trois portes :
+l'édition du calendrier, la mise en file du full sync, et le worker cron qui
+exécute réellement la poussée — ce dernier la **relit à l'exécution**, il ne
+suppose pas que l'appelant a gardé.
+
+**Ce qu'on en retient au-delà du cas** : une donnée présente ne prouve pas le
+contexte dans lequel elle a été posée. Pendant une migration, un même bien porte
+des identifiants de deux mondes ; toute garde qui déduit l'appartenance de la
+présence se trompe pendant toute la durée du chantier.

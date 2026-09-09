@@ -27,9 +27,15 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 
 // Les colonnes que les etapes lisent. Une etape qui juge sur une colonne non
 // selectionnee lit `undefined` — piege rencontre trois fois sur ce chantier.
+// ⚠ `migration_target_property_id` EST DANS CETTE LISTE POUR UNE RAISON DE SURETE.
+// Sans elle, `raisonDeRefus` lisait `undefined` et le refus « deja_provisionne »
+// ne se declenchait jamais : relancer le provisionnement creait une SECONDE
+// propriete Channex et ecrasait la premiere, devenue orpheline et muette.
+// `country` et `zip_code` sont lus par le payload de creation.
 const COLS = 'id, user_id, name, provider, provider_property_id, provider_room_type_id, '
   + 'provider_rate_plan_id, base_price, capacity, included_guests, extra_guest_fee, '
-  + 'currency, property_type, timezone, inventory_units, rate_sync_mode'
+  + 'currency, property_type, timezone, inventory_units, rate_sync_mode, '
+  + 'migration_target_property_id, migration_target_at, country, zip_code'
 
 async function biensDuCompte (accountUserId, providerPropertyId) {
   let q = supabase.from('properties').select(COLS).eq('user_id', accountUserId)
