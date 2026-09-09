@@ -40,6 +40,11 @@ function assertAllowed(method, path) {
   const ok =
     (method === 'GET' && (path === '/groups' || path.startsWith('/channels'))) ||
     (method === 'POST' && path === '/channels') ||
+    // Le mapping se pose APRES l'approbation dans l'extranet : les codes de
+    // l'OTA n'existent pas avant. Sans ce PUT, un canal cree sans mapping
+    // n'avait aucune sortie que DELETE + recreation — donc une NOUVELLE demande
+    // d'approbation, la boucle meme que la phase 1 cherche a eviter.
+    (method === 'PUT' && DELETE_CHANNEL_RE.test(path)) ||
     (method === 'DELETE' && DELETE_CHANNEL_RE.test(path))
   // Double barriere : meme si un chemin /channels... contenait un sous-verbe d'ecriture ARI.
   const forbidden = /availability|restrictions|load_and_save_ari|\/action\b|\/activate|\/deactivate|sync/i.test(path)
@@ -106,8 +111,38 @@ module.exports = async function handler(req, res) {
       const ratePlanCode = parseInt(req.query.rate_plan_code, 10)
       if (!providerPropertyId) return res.status(400).json({ error: 'property_id (provider_property_id) requis' })
       if (!hotelId) return res.status(400).json({ error: 'hotel_id requis' })
-      if (!Number.isInteger(roomTypeCode)) return res.status(400).json({ error: 'room_type_code (entier Booking) requis' })
-      if (!Number.isInteger(ratePlanCode)) return res.status(400).json({ error: 'rate_plan_code (entier Booking) requis' })
+
+      // ⚠ LES CODES SONT OPTIONNELS, ET C'EST LA SEQUENCE BOOKING QUI L'IMPOSE.
+      // Mesure du 9 septembre 2026 sur les deux hotels de Bagneres :
+      // `test_connection` rend `success: false` et `mapping_details` HTTP 422
+      // TANT QUE la connexion n'est pas approuvee dans l'extranet. Or c'est la
+      // CREATION du canal qui fait apparaitre la demande cote Booking
+      // (docs/specs/spec-migration-channex.md §3). Exiger les codes a la
+      // creation demandait donc une information qui n'existe pas encore :
+      // l'etape etait infaisable dans l'ordre reel.
+      //
+      // Sans codes : canal cree INACTIF et SANS mapping. Le mapping se pose
+      // ensuite, une fois l'approbation obtenue et `mapping_details` lisible.
+      // Les deux codes vont ensemble — en fournir un seul serait un mapping a
+      // moitie, donc un refus.
+      // ⚠ ON JUGE SUR LA PRESENCE DU PARAMETRE, PAS SUR `parseInt`.
+      // Juger sur le resultat de `parseInt` transformait une valeur ILLISIBLE en
+      // « pas de mapping demande » : `shared/api-client.js` interpole toujours
+      // les deux parametres, donc un code `undefined` partait en
+      // `room_type_code=undefined` -> NaN -> canal cree VIDE, puis active, et
+      // l'ecran annoncait « votre etablissement est connecte » alors que rien
+      // n'etait mappe. Avant ce diff, ce cas rendait 400 : il doit continuer.
+      const demandeMapping = req.query.room_type_code !== undefined
+        || req.query.rate_plan_code !== undefined
+      if (demandeMapping && !(Number.isInteger(roomTypeCode) && Number.isInteger(ratePlanCode))) {
+        return res.status(400).json({
+          error: 'room_type_code ET rate_plan_code, entiers, ou aucun des deux',
+          message: 'Un mapping a moitie — ou avec un code illisible — ne veut rien dire. Sans '
+            + 'aucun des deux, le canal est cree sans mapping : c\'est le cas nominal avant '
+            + 'l\'approbation dans l\'extranet.'
+        })
+      }
+      const avecMapping = demandeMapping
 
       const dryRun = req.query.dry_run !== 'false'
 
@@ -172,7 +207,9 @@ module.exports = async function handler(req, res) {
           title,
           known_mappings_list: [],
           properties: [idChezLeProvider],
-          rate_plans: [
+          // Vide tant que les codes de l'OTA ne sont pas lisibles : le mapping
+          // est un geste d'apres l'approbation.
+          rate_plans: avecMapping ? [
             {
               rate_plan_id: prop.provider_rate_plan_id,
               settings: {
@@ -185,7 +222,7 @@ module.exports = async function handler(req, res) {
                 room_type_code: roomTypeCode
               }
             }
-          ],
+          ] : [],
           settings: { hotel_id: String(hotelId) }
         }
       }
@@ -223,6 +260,94 @@ module.exports = async function handler(req, res) {
         proof,
         // Commande d'annulation prete a l'emploi.
         delete_hint: channelId ? `?action=delete&channel_id=${channelId}&dry_run=false` : null
+      })
+    }
+
+    // ================= MAP : poser le mapping APRES l'approbation =============
+    // ⚠ CETTE ACTION EXISTE PARCE QUE LA CREATION NE PEUT PLUS TOUT FAIRE.
+    // Les codes `room_type_code` / `rate_plan_code` ne sont lisibles chez l'OTA
+    // qu'UNE FOIS la connexion approuvee dans l'extranet — et c'est la creation
+    // du canal qui declenche cette demande. Sans cette action, un canal cree
+    // sans mapping n'avait pour seule sortie que DELETE + recreation, donc une
+    // NOUVELLE demande d'approbation : la boucle que la phase 1 cherche a eviter.
+    //
+    // Elle ne touche QUE le mapping : `is_active` n'est jamais envoye, et
+    // l'allowlist reseau interdit toujours tout push ARI.
+    if (action === 'map') {
+      const channelId = (req.query.channel_id || '').trim()
+      if (!channelId) return res.status(400).json({ error: 'channel_id requis' })
+      if (!DELETE_CHANNEL_RE.test(`/channels/${channelId}`)) {
+        return res.status(400).json({ error: 'channel_id invalide' })
+      }
+      const roomTypeCode = parseInt(req.query.room_type_code, 10)
+      const ratePlanCode = parseInt(req.query.rate_plan_code, 10)
+      if (!Number.isInteger(roomTypeCode) || !Number.isInteger(ratePlanCode)) {
+        return res.status(400).json({
+          error: 'room_type_code et rate_plan_code (entiers Booking) requis',
+          message: 'Ils se lisent chez l\'OTA par `POST /channels/mapping_details`, une fois '
+            + 'la connexion approuvee dans l\'extranet.'
+        })
+      }
+
+      const gardeCanal = await requirePermissionPourCanal(req, res, { channelId, channelCall })
+      if (!gardeCanal.ok) return
+
+      // Le rate plan Channex du bien porte par ce canal.
+      const bienDuCanal = String(gardeCanal.bienDuCanal || '')
+      const { data: propM, error: propMErr } = await supabase
+        .from('properties')
+        .select('id, name, provider, provider_property_id, migration_target_property_id, provider_rate_plan_id, capacity')
+        .or(`provider_property_id.eq.${bienDuCanal},migration_target_property_id.eq.${bienDuCanal}`)
+        .maybeSingle()
+      if (propMErr) {
+        console.error('[channel-bcom-write] SELECT error', propMErr.message)
+        return res.status(500).json({ error: 'Erreur lecture' })
+      }
+      if (!propM || !propM.provider_rate_plan_id) {
+        return res.status(404).json({ error: 'Bien du canal introuvable ou sans rate plan' })
+      }
+
+      const occupancyM = Number.isInteger(parseInt(req.query.occupancy, 10))
+        ? parseInt(req.query.occupancy, 10) : (propM.capacity || 1)
+      const payloadM = {
+        channel: {
+          rate_plans: [{
+            rate_plan_id: propM.provider_rate_plan_id,
+            settings: {
+              occ_changed: false,
+              occupancy: occupancyM,
+              pricing_type: (req.query.pricing_type || 'Standard').trim(),
+              primary_occ: req.query.primary_occ !== 'false',
+              rate_plan_code: ratePlanCode,
+              readonly: req.query.readonly === 'true',
+              room_type_code: roomTypeCode
+            }
+          }]
+        }
+      }
+
+      const dryRunM = req.query.dry_run !== 'false'
+      if (dryRunM) {
+        return res.status(200).json({
+          dry_run: true,
+          would_send: { method: 'PUT', path: `/channels/${channelId}`, payload: payloadM },
+          note: 'Le mapping seul. `is_active` n\'est pas envoye : l\'activation reste un geste a part.'
+        })
+      }
+
+      const wM = await channelCall('PUT', `/channels/${channelId}`, payloadM)
+      // PREUVE : on relit le canal et on rend son mapping.
+      const apres = await channelCall('GET', `/channels/${channelId}`)
+      const ratePlansApres = apres.json?.data?.attributes?.rate_plans || []
+      return res.status(wM.ok ? 200 : 502).json({
+        dry_run: false,
+        http: wM.status,
+        channel_id: channelId,
+        sent_payload: payloadM,
+        result: redact(wM.json),
+        rate_plans_count: ratePlansApres.length,
+        rate_plans_after: redact(ratePlansApres),
+        is_active_after: apres.json?.data?.attributes?.is_active ?? null
       })
     }
 

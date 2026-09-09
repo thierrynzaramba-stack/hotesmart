@@ -96,9 +96,19 @@ trou possible : on mappe pendant qu'il dort, on vérifie, on active ensuite.
 2. Poser le calendrier et les tarifs dans Channex, **sans aucun canal actif**.
 3. Airbnb : générer le lien OAuth, connecter le compte, lister les listings,
    mapper — le canal reste inactif.
-4. Booking : `test_connection` puis `mapping_details` sur le `hotel_id` pour
-   récupérer les `room_type_code` / `rate_plan_code` **depuis l'OTA** (rien à
-   relever à la main), créer le canal `is_active: false`, mapper.
+4. Booking : créer le canal `is_active: false` **et sans mapping**, attendre
+   l'approbation dans l'extranet, puis `mapping_details` pour récupérer les
+   `room_type_code` / `rate_plan_code` **depuis l'OTA** (rien à relever à la
+   main), et poser le mapping.
+
+   ⚠ **L'ordre a été corrigé le 9 septembre 2026, par la mesure.** Cette liste
+   disait « `test_connection` puis `mapping_details` … créer le canal, mapper ».
+   Or sur les deux hôtels de Bagnères, `test_connection` rend `success: false` et
+   `mapping_details` **HTTP 422** tant que la connexion n'est pas approuvée — ce
+   que le §3 annonçait déjà sans en tirer la conséquence : c'est la **création du
+   canal** qui fait apparaître la demande. Les codes n'existent donc pas avant
+   l'approbation, et le mapping est un geste d'après
+   (`POST /api/channel-bcom-write?action=map`).
 5. Préparer et **répéter à blanc** le script de re-keying (§5).
 
 **Rien n'est basculé. On peut s'arrêter ici sans conséquence.**

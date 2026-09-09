@@ -127,6 +127,24 @@ casse, ça casse sur le bien le plus simple.
 - [ ] **1.1 Créer le canal Booking INACTIF** sur `hotel_id` **10853342**.
   `POST /api/channel-bcom-write?action=create` (`dry_run=true` d'abord).
   **Vérifiable** : `GET /channels` → canal présent, `is_active: false`.
+
+  ⚠ **SANS MAPPING, et c'est la séquence Booking qui l'impose** — mesuré le
+  9 septembre 2026 sur les deux hôtels : `test_connection` rend `success: false`
+  et `mapping_details` **HTTP 422** tant que la connexion n'est pas approuvée
+  dans l'extranet. Or c'est la *création du canal* qui fait apparaître la demande
+  côté Booking (`spec-migration-channex.md` §3). Les codes `room_type_code` /
+  `rate_plan_code` **n'existent donc pas encore** au moment de créer : l'endpoint
+  les exigeait, l'étape était infaisable dans l'ordre réel. Ils sont désormais
+  optionnels — le mapping devient un geste **d'après l'approbation**, et un
+  mapping à moitié (un seul des deux codes) est refusé.
+
+- [ ] **1.1 bis Poser le mapping, une fois l'approbation obtenue.**
+  `POST /channels/mapping_details` devient alors lisible et rend les codes, puis
+  `POST /api/channel-bcom-write?action=map&channel_id=…&room_type_code=…&rate_plan_code=…`
+  (`dry_run=true` d'abord). Cette action ne touche **que** le mapping :
+  `is_active` n'est jamais envoyé, l'activation reste un geste à part.
+  **Vérifiable** : `mapping_details` répond 200, et la réponse rend
+  `rate_plans_count: 1` avec `is_active_after: false`.
 - [ ] **1.2 Approuver dans l'extranet Booking — Guest reviews + Reporting SEULEMENT.**
   Ce sont les deux périmètres « plusieurs fournisseurs » : Beds24 les garde.
   **Vérifiable** : la page Connectivité montre Channex **co-détenteur** de ces

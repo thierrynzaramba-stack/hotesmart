@@ -17,6 +17,8 @@ const path = require('node:path')
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test'
+process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'https://api.exemple'
+process.env.CHANNEL_API_KEY = process.env.CHANNEL_API_KEY || 'cle-test'
 
 const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 const { proprieteChezLeProvider } = require('../lib/rate-sync')
@@ -196,4 +198,67 @@ test('les endpoints jumeaux resolvent le bien comme la garde', () => {
   for (const f of ['api/channel-bcom.js', 'api/channel-rateplan.js', 'api/channel-bcom-write.js']) {
     assert.ok(lire(f).includes('migration_target_property_id.eq.'), `${f} resout sur les deux`)
   }
+})
+
+// ─── Phase 1 : la sequence Booking impose l ordre ───────────────────────────
+
+test('LE TEST QUI COMPTE : le canal se cree SANS mapping, parce que les codes n existent pas encore', () => {
+  // Mesure du 9 septembre 2026 sur les deux hotels de Bagneres :
+  // `test_connection` rend `success: false` et `mapping_details` HTTP 422 tant
+  // que la connexion n'est pas approuvee dans l'extranet. Or c'est la CREATION
+  // du canal qui fait apparaitre la demande cote Booking. Exiger les codes a la
+  // creation demandait une information qui n'existe pas encore : l'etape etait
+  // infaisable dans l'ordre reel.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(src.includes('const avecMapping ='), 'le mapping devient optionnel')
+  assert.ok(src.includes('rate_plans: avecMapping ?'), 'sans codes, aucun rate plan mappe')
+  assert.ok(!/room_type_code \(entier Booking\) requis/.test(src), 'les codes ne sont plus exiges')
+})
+
+test('LE TEST QUI COMPTE : un mapping A MOITIE est refuse — le handler, pas la source', async () => {
+  // Un test qui lit la source resterait vert si `||` devenait `&&` : la regle
+  // s'inverserait (un seul code -> canal cree sans mapping, en silence) sans que
+  // rien ne le dise. On appelle donc le handler.
+  const handler = require('../api/channel-bcom-write')
+  for (const query of [
+    { action: 'create', property_id: '209413', hotel_id: '10853342', room_type_code: '12' },
+    { action: 'create', property_id: '209413', hotel_id: '10853342', rate_plan_code: '7' },
+    // Le cas qui a cree la regression : le client interpole toujours les deux,
+    // donc un code absent arrive en chaine 'undefined'.
+    { action: 'create', property_id: '209413', hotel_id: '10853342',
+      room_type_code: 'undefined', rate_plan_code: 'undefined' }
+  ]) {
+    let code = null; let corps = null
+    const res = {
+      status (c) { code = c; return res },
+      json (b) { corps = b; return res },
+      setHeader () { return res }, end () { return res }
+    }
+    // Un token quelconque : la validation de forme precede la garde, et c'est
+    // voulu — un parametre illisible n'a pas a couter un aller-retour Supabase.
+    await handler({ method: 'POST', query, headers: { authorization: 'Bearer x' }, body: {} }, res)
+    assert.equal(code, 400, `refus attendu pour ${JSON.stringify(query)} (recu ${code})`)
+    assert.match(String(corps && corps.error), /room_type_code/)
+  }
+})
+
+test('le mapping peut etre POSE apres l approbation, sans recreer le canal', () => {
+  // Sans cette action, un canal cree sans mapping n avait pour seule sortie que
+  // DELETE + recreation — donc une NOUVELLE demande d approbation cote Booking,
+  // la boucle meme que la phase 1 cherche a eviter.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(src.includes("if (action === 'map')"), 'l action existe')
+  assert.ok(/method === 'PUT'/.test(src), 'et le reseau l autorise')
+  // Le PAYLOAD envoye ne porte jamais `is_active` : l activation reste un geste
+  // a part. (Le retour, lui, RELIT l etat du canal — c'est une lecture.)
+  const bloc = src.slice(src.indexOf('const payloadM = {'), src.indexOf('const dryRunM'))
+  assert.ok(!/is_active/.test(bloc), 'le mapping ne touche jamais l activation')
+})
+
+test('le canal reste INACTIF a la creation, quoi qu il arrive', () => {
+  // C'est ce qui rend la bascule sans trou possible : on mappe pendant qu il
+  // dort, on verifie, on active ensuite.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(/is_active: false/.test(src))
+  assert.ok(/FORCE cote serveur/i.test(src), 'et ce n est pas pilotable par l appelant')
 })
