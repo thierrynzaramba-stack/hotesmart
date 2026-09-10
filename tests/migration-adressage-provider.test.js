@@ -203,9 +203,9 @@ test('les endpoints jumeaux resolvent le bien comme la garde', () => {
 // ─── Phase 1 : la sequence Booking impose l ordre ───────────────────────────
 
 test('LE TEST QUI COMPTE : le canal se cree SANS mapping, parce que les codes n existent pas encore', () => {
-  // Mesure du 9 septembre 2026 sur les deux hotels de Bagneres :
+  // Mesure du 10 septembre 2026 sur les deux hotels de Bagneres :
   // `test_connection` rend `success: false` et `mapping_details` HTTP 422 tant
-  // que la connexion n'est pas approuvee dans l'extranet. Or c'est la CREATION
+  // que la connexion n'est pas activee dans l'extranet Booking. Or c'est la CREATION
   // du canal qui fait apparaitre la demande cote Booking. Exiger les codes a la
   // creation demandait une information qui n'existe pas encore : l'etape etait
   // infaisable dans l'ordre reel.
@@ -213,6 +213,38 @@ test('LE TEST QUI COMPTE : le canal se cree SANS mapping, parce que les codes n 
   assert.ok(src.includes('const avecMapping ='), 'le mapping devient optionnel')
   assert.ok(src.includes('rate_plans: avecMapping ?'), 'sans codes, aucun rate plan mappe')
   assert.ok(!/room_type_code \(entier Booking\) requis/.test(src), 'les codes ne sont plus exiges')
+})
+
+test('LE TEST QUI COMPTE : hotel_id en NOMBRE a la creation, en CHAINE a la lecture', () => {
+  // ⚠ L'EXIGENCE DE CHANNEX EST INVERSE SELON L'APPEL, ET MESUREE :
+  //   POST /channels                      -> hotel_id NOMBRE  (chaine  -> HTTP 500, sans detail)
+  //   POST /channels/mapping_details      -> hotel_id CHAINE   (nombre -> HTTP 422 {"errors":null})
+  //   idem test_connection / connection_details.
+  //
+  // Le 422 a corps vide est indiscernable d'un refus de l'OTA. Le 10 septembre
+  // 2026, il a fait conclure a tort que « Channex n'est pas autorise chez
+  // Booking » — et supprimer un canal correctement cree — alors que la
+  // connexion etait active et tous les scopes accordes. Une fois `hotel_id`
+  // envoye en chaine, le meme appel a rendu les codes de La bulle
+  // (room 1085334201 / rate 39174986) en HTTP 200.
+  //
+  // Aligner les deux cotes sur une seule forme casse donc l'un ou l'autre.
+  const write = lire('api/channel-bcom-write.js')
+  assert.ok(write.includes('hotel_id: Number(hotelId)'),
+    'la CREATION envoie un nombre')
+
+  const read = lire('api/channel-bcom.js')
+  assert.ok(/const settingsFor = \(hotelId\) => \(\{ hotel_id: String\(hotelId\) \}\)/.test(read),
+    'la LECTURE envoie une chaine')
+  // Les trois appels de lecture passent bien par settingsFor, sans reconstruire
+  // le settings a la main (c'est par la que le nombre reviendrait).
+  for (const ep of ['test_connection', 'mapping_details', 'connection_details']) {
+    // On cherche l'APPEL, pas l'allowlist : `'/channels/test_connection'`
+    // apparait d'abord dans ENDPOINTS_AUTORISES, ou il n'y a pas de settings.
+    const bloc = read.slice(read.indexOf(`channelCall('POST', '/channels/${ep}'`))
+    assert.ok(bloc.slice(0, 200).includes('settingsFor(hotelId)'),
+      `${ep} passe par settingsFor`)
+  }
 })
 
 test('LE TEST QUI COMPTE : un mapping A MOITIE est refuse — le handler, pas la source', async () => {
@@ -333,4 +365,24 @@ test('LE TEST QUI COMPTE : un bien EN MIGRATION est visible dans les ecrans de c
   const select = (api.match(/\.select\('id, name, provider[^']*'\)/) || [''])[0]
   assert.ok(select.includes('migration_target_property_id'),
     'la liste des biens porte la colonne cible : ' + select.slice(0, 80))
+})
+
+test('LE TEST QUI COMPTE : le mapping Booking cible le tarif DERIVE, pas la base', () => {
+  // Mesure du 10 septembre 2026 sur le canal Booking de Colomiers, le seul en
+  // production : il mappe `55b784ba-…` = « Colomiers — booking (derive) », et
+  // non `06a3f06c-…` = « Tarif Standard ». Or `action=map` envoyait
+  // `properties.provider_rate_plan_id`, qui porte justement la BASE.
+  // Consequence silencieuse : le prix non derive part chez l'OTA, la
+  // commission Booking et le `min_stay` de `property_channel_rate_plans`
+  // disparaissent, et la table devient decorative.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(src.includes("from('property_channel_rate_plans')"),
+    'le lien par canal est lu')
+  assert.ok(/\.eq\('channel', 'booking'\)[\s\S]{0,200}\.eq\('role', 'derived'\)/.test(src),
+    'on cherche bien le derive du canal booking')
+  assert.ok(src.includes('rate_plan_id: ratePlanCible'),
+    'le payload envoie la cible resolue, pas provider_rate_plan_id')
+  // Le repli existe, mais il se DIT : un mapping non derive doit etre visible.
+  assert.ok(src.includes('const derive = !!(lienRp'), 'le repli est trace')
+  assert.ok(src.includes('rate_plan_derive: derive'), 'la reponse le rend')
 })

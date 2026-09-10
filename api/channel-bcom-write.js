@@ -123,9 +123,10 @@ module.exports = async function handler(req, res) {
       if (!hotelId) return res.status(400).json({ error: 'hotel_id requis' })
 
       // ⚠ LES CODES SONT OPTIONNELS, ET C'EST LA SEQUENCE BOOKING QUI L'IMPOSE.
-      // Mesure du 9 septembre 2026 sur les deux hotels de Bagneres :
+      // Mesure du 10 septembre 2026 sur les deux hotels de Bagneres :
       // `test_connection` rend `success: false` et `mapping_details` HTTP 422
-      // TANT QUE la connexion n'est pas approuvee dans l'extranet. Or c'est la
+      // TANT QUE la connexion n'est pas activee dans l'extranet Booking
+      // (« Gestion des connexions »), et 200 des qu'elle l'est. Or c'est la
       // CREATION du canal qui fait apparaitre la demande cote Booking
       // (docs/specs/spec-migration-channex.md §3). Exiger les codes a la
       // creation demandait donc une information qui n'existe pas encore :
@@ -244,11 +245,17 @@ module.exports = async function handler(req, res) {
           // aurait donc echoue ici, juste apres une verification reussie — au
           // pire moment, et sans rien pour comprendre.
           //
-          // ⚠ PORTEE EXACTE DE LA MESURE : la CREATION seule est concernee.
-          // `test_connection` et `mapping_details` acceptent les deux formes —
-          // et rendent d'ailleurs le meme resultat pour un hotel CONNECTE
-          // (Colomiers) que pour un hotel non connecte : ces deux appels ne
-          // discriminent rien, ils ne peuvent pas servir d'indicateur.
+          // ⚠ ET L'EXIGENCE EST INVERSE SUR LES APPELS DE LECTURE.
+          // `test_connection`, `mapping_details` et `connection_details`
+          // veulent `hotel_id` en CHAINE : en NOMBRE, `mapping_details` rend
+          // HTTP 422 avec `{"errors":null}` — un corps vide, indiscernable
+          // d'un refus de l'OTA. C'est exactement ce piege qui a fait
+          // diagnostiquer a tort « Channex n'est pas autorise chez Booking »
+          // le 10 septembre, et supprimer un canal correctement cree.
+          // La creation veut un NOMBRE, la lecture veut une CHAINE : les deux
+          // formes ne sont donc jamais interchangeables, contrairement a ce
+          // qui etait note ici. `settingsFor` (api/channel-bcom.js) impose
+          // deja la chaine du cote lecture — ne pas l'aligner sur celui-ci.
           // Le comportement du `PUT /channels/:id` n'a pas ete mesure.
           settings: { hotel_id: Number(hotelId) }
         }
@@ -334,6 +341,32 @@ module.exports = async function handler(req, res) {
         return res.status(404).json({ error: 'Bien du canal introuvable ou sans rate plan' })
       }
 
+      // ⚠ ON MAPPE LE TARIF DERIVE DU CANAL, PAS LE TARIF DE BASE.
+      // Ce code envoyait `propM.provider_rate_plan_id` — le plan « Tarif
+      // Standard », celui du coeur. Mesure du 10 septembre sur le canal
+      // Booking de Colomiers, le seul qui fonctionne en production : il mappe
+      // `55b784ba-…` = « Colomiers — booking (derive) », pas
+      // `06a3f06c-…` = « Tarif Standard ». Mapper la base aurait envoye a
+      // l'OTA le prix NON derive : la commission Booking et le `min_stay: 2`
+      // portes par `property_channel_rate_plans` auraient ete perdus en
+      // silence, et toute la table serait devenue decorative.
+      // Repli sur la base seulement s'il n'existe aucun lien derive : mieux
+      // vaut un mapping non derive qu'un refus, mais on le dit dans la reponse.
+      const { data: lienRp, error: lienErr } = await supabase
+        .from('property_channel_rate_plans')
+        .select('provider_rate_plan_id, derive_mode, derive_value, min_stay')
+        .eq('property_id', propM.id)
+        .eq('channel', 'booking')
+        .eq('role', 'derived')
+        .eq('is_active', true)
+        .maybeSingle()
+      if (lienErr) {
+        console.error('[channel-bcom-write] property_channel_rate_plans', lienErr.message)
+        return res.status(500).json({ error: 'Erreur lecture' })
+      }
+      const ratePlanCible = (lienRp && lienRp.provider_rate_plan_id) || propM.provider_rate_plan_id
+      const derive = !!(lienRp && lienRp.provider_rate_plan_id)
+
       const occupancyM = Number.isInteger(parseInt(req.query.occupancy, 10))
         ? parseInt(req.query.occupancy, 10) : (propM.capacity || 1)
       const payloadM = {
@@ -350,7 +383,7 @@ module.exports = async function handler(req, res) {
           // l'ecriture. Une prudence non mesuree qui casse vaut moins que le
           // comportement qui marchait.
           rate_plans: [{
-            rate_plan_id: propM.provider_rate_plan_id,
+            rate_plan_id: ratePlanCible,
             settings: {
               occ_changed: false,
               occupancy: occupancyM,
@@ -369,7 +402,10 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           dry_run: true,
           would_send: { method: 'PUT', path: `/channels/${channelId}`, payload: payloadM },
+          rate_plan_derive: derive,
           note: 'Le mapping seul. `is_active` n\'est pas envoye : l\'activation reste un geste a part.'
+            + (derive ? '' : ' ⚠ AUCUN tarif derive booking pour ce bien : c\'est le tarif de BASE '
+              + 'qui serait mappe, donc le prix non derive qui partirait chez l\'OTA.')
         })
       }
 
@@ -383,6 +419,7 @@ module.exports = async function handler(req, res) {
         channel_id: channelId,
         sent_payload: payloadM,
         result: redact(wM.json),
+        rate_plan_derive: derive,
         rate_plans_count: ratePlansApres.length,
         rate_plans_after: redact(ratePlansApres),
         is_active_after: apres.json?.data?.attributes?.is_active ?? null

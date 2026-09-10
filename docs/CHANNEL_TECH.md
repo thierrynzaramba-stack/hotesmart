@@ -210,10 +210,50 @@ avant de trouver : sans `rate_plans`, sans `known_mappings_list`, sans `group_id
 avec `machine_account`. **Le seul changement qui fait passer la création de 500 à
 201 est le type de `hotel_id`** : `10853342` en nombre.
 
-**Périmètre exact, vérifié** : seule la création est concernée.
-`POST /channels/test_connection` et `POST /channels/mapping_details` acceptent
-les deux formes — ils échouent tant que Channex n'est pas autorisé dans
-l'extranet, quelle que soit la forme.
+**L'exigence est INVERSE sur les appels de lecture — et ça a coûté cher.**
+`POST /channels/test_connection`, `/channels/mapping_details` et
+`/channels/connection_details` veulent `hotel_id` en **chaîne**. En nombre,
+`mapping_details` rend :
+
+```
+HTTP 422  {"errors":null}
+```
+
+Un corps **vide** : rien ne distingue ce refus de forme d'un refus de l'OTA.
+C'est ce piège qui a fait conclure à tort, le 10 septembre, que « Channex n'est
+pas autorisé chez Booking » — et **supprimer un canal correctement créé** — alors
+que la connexion était active depuis 12:06:03 avec tous les scopes accordés.
+Le même appel, `hotel_id` en chaîne, a rendu HTTP 200 et les codes réels.
+
+Création = **nombre**. Lecture = **chaîne**. Les deux formes ne sont donc jamais
+interchangeables. `settingsFor` (`api/channel-bcom.js`) impose la chaîne côté
+lecture ; ne pas l'aligner sur l'écriture. Gardé par le test
+« hotel_id en NOMBRE a la creation, en CHAINE a la lecture »
+(`tests/migration-adressage-provider.test.js`).
+
+## Les trois appels de lecture Booking.com, et ce qu'ils valent comme indicateur
+
+**Mesuré le 10 septembre 2026 sur les deux hôtels de Bagnères**, `hotel_id` en
+chaîne, connexion Channex active côté Booking pour le premier seulement :
+
+| Appel | La bulle `10853342` | coeur de vie 23 `8985969` |
+|---|---|---|
+| `test_connection` | 200 — `success: true` | 200 — `success: false` |
+| `connection_details` | 200 — `connection_status: "XML Active"`, 8 types actifs, `currency: EUR` | **400** `bad_request` |
+| `mapping_details` | 200 — `rooms[]` / `rates[]` réels | **422** `{"errors":null}` |
+
+Les trois **discriminent bien** l'hôtel connecté du non connecté. `success: true`
+est le signal net ; `connection_details` dit en plus quels types de flux sont
+actifs et dans quelle devise (à comparer à celle du `rate_plan`, sinon les prix
+partent dans la mauvaise unité).
+
+`mapping_details` rend les codes à recopier dans `rate_plans[].settings` :
+`room_type_code` = `rooms[].id`, `rate_plan_code` = `rooms[].rates[].id`.
+Exemple réel de La bulle : `1085334201` / `39174986`, `pricing_type: "Standard"`,
+`max_persons: 2`, un tarif dérivé `41170866`.
+
+⚠ `pricing_type` est au niveau `data`, pas par tarif. `price_1` est un drapeau de
+structure (Standard uniquement), **pas un prix**.
 
 **Ce que ça coûtait** : `api/channel-bcom-write.js` envoyait `String(hotelId)`.
 L'écran de liaison Booking de l'hôte (`components/booking-connect.js`) aurait
