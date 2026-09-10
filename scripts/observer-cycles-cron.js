@@ -18,11 +18,29 @@ require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-const MINUTES = Number(process.argv[2]) || 12
+// ⚠ LES CIBLES SONT NOMMEES, PLUS CODEES EN DUR POUR UN SEUL BIEN.
+// La premiere version portait les constantes de La bulle : reutilisee telle
+// quelle pour le 23, elle aurait observe le mauvais bien et rendu un verdict
+// rassurant sans rapport.
+const CIBLES = {
+  'la-bulle': { nom: 'La bulle', abandonnee: '209413',
+    channex: '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4',
+    fiche: '091d9abf-ff86-45ce-8123-3425e6f3900f' },
+  'coeur-23': { nom: 'Cœur de vie l 23', abandonnee: '169567',
+    channex: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66',
+    fiche: 'efe1daf1-652c-4177-b29b-19f1db377c96' }
+}
+const CLE_ARG = process.argv.find(a => CIBLES[a])
+if (!CLE_ARG) {
+  console.error(`USAGE : node scripts/observer-cycles-cron.js <${Object.keys(CIBLES).join('|')}> [minutes]`)
+  process.exit(1)
+}
+const C = CIBLES[CLE_ARG]
+const MINUTES = Number(process.argv.find(a => /^\d+$/.test(a))) || 12
 const UTIL = '85e3a0ef-75bd-4c11-a3b7-e2811067dc36'
-const CLE_ABANDONNEE = '209413'
-const CLE_CHANNEX = '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4'
-const FICHE_NEUVE = '091d9abf-ff86-45ce-8123-3425e6f3900f'
+const CLE_ABANDONNEE = C.abandonnee
+const CLE_CHANNEX = C.channex
+const FICHE_NEUVE = C.fiche
 
 // Les tables ou le rapatriement s'est REELLEMENT produit, plus la fiche
 // elle-meme. On ne surveille pas tout : on surveille ce qui a saigne.
@@ -59,7 +77,7 @@ async function releve () {
 }
 
 async function main () {
-  console.log(`Observation sur ${MINUTES} min (cron toutes les 5 min).`)
+  console.log(`Observation de « ${C.nom} » sur ${MINUTES} min (cron toutes les 5 min).`)
   console.log(`Cle abandonnee : ${CLE_ABANDONNEE}   cible : ${CLE_CHANNEX}\n`)
 
   const debut = await releve()

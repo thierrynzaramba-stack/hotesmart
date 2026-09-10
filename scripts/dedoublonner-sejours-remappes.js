@@ -48,6 +48,17 @@ const CIBLES = {
     codes: ['HMXJPMDJEN', 'HMYSC3QK8X', 'HM4TMX5QXQ'],
     // Le provider dont la version est CONSERVEE.
     garder: 'channex'
+  },
+  // ⚠ LE 23 : deux sejours Airbnb livres pendant les ~5 h ou son canal Airbnb
+  // a ete actif le 10 septembre (de son OAuth a la deconnexion de test de
+  // Thierry). Ils existaient deja sous la cle Beds24 : deux versions, donc deux
+  // menages par depart si on ne tranche pas.
+  'coeur-23': {
+    nom: 'Cœur de vie l 23',
+    fiche: 'efe1daf1-652c-4177-b29b-19f1db377c96',
+    cle: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66',
+    codes: ['HMEA8PYCPM', 'HMADA4CMQR'],
+    garder: 'channex'
   }
 }
 const CLE = process.argv.find(a => CIBLES[a])
@@ -109,6 +120,7 @@ async function main () {
   // Les menages du cote neutralise : ils feront doublon.
   console.log('\n── menages a supprimer (cote neutralise)')
   const aSupprimer = []
+  const aReporter = []
   for (const p of plan) {
     const { data: m } = await supabase.from('menages')
       .select('id, departure_date, status, provider_id').eq('booking_id', String(p.neutralise.booking_id))
@@ -137,6 +149,21 @@ async function main () {
       console.log(`   ${x.id}  depart ${x.departure_date}  ${x.status}`
         + `  -> conserve cote garde : ${jumeau[0].id} ${jumeau[0].status}`
         + ` provider=${jumeau[0].provider_id ? 'oui' : 'AUCUN ⚠'}`)
+
+      // ⚠ ON REPORTE L'AFFECTATION PLUTOT QUE DE COMPTER SUR LE CRON.
+      // Le menage conserve peut etre `unassigned` sans prestataire : c'est le
+      // cas quand il a ete cree AVANT que `property_cleaning_providers` ne
+      // suive la fiche — la raison enregistree est litteralement « Aucun
+      // prestataire lie a ce bien ». Le lien a suivi depuis, donc le cron
+      // reaffecterait d'office (`requires_ack = false` sur le rang 1)… mais
+      // supprimer une affectation ACCEPTEE en pariant sur un cycle futur n'est
+      // pas acceptable sur des departs a deux jours. On la recopie.
+      const perdrait = x.provider_id && !jumeau[0].provider_id
+      if (perdrait) {
+        aReporter.push({ vers: jumeau[0].id, depuis: x, depart: x.departure_date })
+        console.log(`      -> AFFECTATION REPORTEE vers ${jumeau[0].id}`
+          + ` (prestataire ${String(x.provider_id).slice(0, 8)}, statut ${x.status})`)
+      }
       aSupprimer.push(x)
     }
   }
@@ -179,8 +206,34 @@ async function main () {
     console.log(`   ${p.code} : ${error ? 'ECHEC ' + error.message : `${avant} -> demapped (initialImport)`}`)
   }
 
+  // ── REPORT DES AFFECTATIONS, AVANT TOUTE SUPPRESSION ─────────────────────
+  // L'ordre compte : si le report echoue, on ne supprime pas la ligne qui
+  // porte encore l'affectation.
+  const reportOk = new Set()
+  for (const r of aReporter) {
+    const d = r.depuis
+    const { error } = await supabase.from('menages').update({
+      provider_id: d.provider_id,
+      status: d.status,
+      assigned_by: d.assigned_by,
+      assignment_reason: `Affectation reportee du sejour double ${d.id} (dedoublonnage remapping)`,
+      assignment_mode: d.assignment_mode,
+      accepted_at: d.accepted_at,
+      updated_at: new Date().toISOString()
+    }).eq('id', r.vers)
+    if (error) console.error(`   ECHEC report vers ${r.vers} : ${error.message}`)
+    else { reportOk.add(d.id); console.log(`   affectation reportee : depart ${r.depart} -> ${r.vers} (${d.status})`) }
+  }
+
   // ── MENAGES EN DOUBLON ────────────────────────────────────────────────────
   for (const x of aSupprimer) {
+    // ⚠ ON NE SUPPRIME PAS UNE LIGNE DONT LE REPORT A ECHOUE : ce serait perdre
+    // l'affectation de la prestataire pour de bon.
+    const devaitReporter = aReporter.some(r => r.depuis.id === x.id)
+    if (devaitReporter && !reportOk.has(x.id)) {
+      console.log(`   ${x.id} CONSERVE : son affectation n'a pas pu etre reportee`)
+      continue
+    }
     const { error } = await supabase.from('menages').delete().eq('id', x.id)
     console.log(`   menage ${x.id} depart ${x.departure_date} : ${error ? 'ECHEC ' + error.message : 'supprime'}`)
   }

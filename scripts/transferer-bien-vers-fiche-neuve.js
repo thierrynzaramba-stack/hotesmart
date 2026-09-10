@@ -157,8 +157,15 @@ async function main () {
   // portait `mode: 'auto'` et les destinataires d'alerte ; la fiche neuve
   // n'ayant rien, `getPropertyMode` retombait sur `'test'` et l'agent IA du
   // bien migre etait muet, sans une ligne de log.
-  if (src && src.provider_property_id) {
-    const faits = await rekeyerJson(src.provider_property_id, T.provider_property_id,
+  // ⚠ `T` N'EXISTAIT PAS ICI — nom de variable emprunte a un autre script.
+  // Le transfert du 23 s'est termine sur `T is not defined` APRES avoir tout
+  // deplace et enregistre la cle migree : le re-keying des cles JSON n'a donc
+  // pas eu lieu, et l'agent IA du bien serait reste muet. Trouve en production,
+  // le 11 septembre 2026. On relit la cible plutot que de supposer.
+  const { data: cib } = await supabase.from('properties')
+    .select('provider_property_id').eq('id', C.cible).maybeSingle()
+  if (src && src.provider_property_id && cib && cib.provider_property_id) {
+    const faits = await rekeyerJson(src.provider_property_id, cib.provider_property_id,
       { ecrire: true, userId: src.user_id })
     if (faits.length) {
       console.log('\n── references en cles JSON')
