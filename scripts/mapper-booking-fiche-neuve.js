@@ -25,10 +25,41 @@ const BASE = process.env.CHANNEL_BASE_URL
 const KEY = process.env.CHANNEL_API_KEY
 const ECRIRE = process.argv.includes('--ecrire')
 
-const ANCIEN_CANAL = '49528214-64fc-4f3a-8360-62b9859c23fe'
-const HOTEL_ID = '10853342'
-const PROPRIETE_NEUVE = '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4'
-const RATE_PLAN_DERIVE = 'd16d59b7-30fd-4783-b94f-7318502c3b3d'
+// ⚠ LES CIBLES SONT NOMMEES EN DUR, PAR BIEN. Un script de bascule qui prend
+// un identifiant libre en argument peut mapper le mauvais logement sur le
+// mauvais hotel — et un mapping errone envoie les prix d'un bien sur l'annonce
+// d'un autre. On choisit par un nom court, la liste est fermee.
+const CIBLES = {
+  'la-bulle': {
+    nom: 'La bulle',
+    hotel_id: '10853342',
+    propriete: '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4',
+    rate_plan_derive: 'd16d59b7-30fd-4783-b94f-7318502c3b3d',
+    // Le canal de la phase 0 occupait cet hotel_id : un seul canal Channex par
+    // hotel_id, la creation d'un second est refusee. Deja traite le
+    // 10 septembre 2026 — laisse pour memoire, le script tolere son absence.
+    ancien_canal: '49528214-64fc-4f3a-8360-62b9859c23fe'
+  },
+  'coeur-23': {
+    nom: 'Cœur de vie l 23',
+    hotel_id: '8985969',
+    propriete: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66',
+    rate_plan_derive: 'bc2eadea-60db-4b23-a0f1-e6ade92cfda0',
+    // Aucun canal de phase 0 sur cet hotel_id : rien a supprimer.
+    ancien_canal: null
+  }
+}
+
+const CLE = process.argv.find(a => CIBLES[a])
+if (!CLE) {
+  console.error(`USAGE : node scripts/mapper-booking-fiche-neuve.js <${Object.keys(CIBLES).join('|')}> [--ecrire]`)
+  process.exit(1)
+}
+const C = CIBLES[CLE]
+const ANCIEN_CANAL = C.ancien_canal
+const HOTEL_ID = C.hotel_id
+const PROPRIETE_NEUVE = C.propriete
+const RATE_PLAN_DERIVE = C.rate_plan_derive
 
 async function appel (methode, chemin, corps) {
   const r = await fetch(`${BASE}${chemin}`, {
@@ -61,14 +92,37 @@ async function main () {
   console.log(`   tarif    ${rate.id}  ${JSON.stringify(rate.title)}  max_persons=${rate.max_persons}`)
   console.log(`   pricing  ${d.pricing_type}`)
 
-  // 2) L'ancien canal, celui de la phase 0.
-  const vieux = await appel('GET', `/channels/${ANCIEN_CANAL}`)
-  const va = (vieux.json && vieux.json.data && vieux.json.data.attributes) || {}
-  console.log(`\n── ancien canal ${ANCIEN_CANAL}`)
-  console.log(`   HTTP ${vieux.status}  is_active=${va.is_active}  `
-    + `rate_plans=${(va.rate_plans || []).length}  proprietes=${JSON.stringify(va.properties || [])}`)
-  if (vieux.ok && va.is_active === true) {
-    throw new Error('l ancien canal est ACTIF — suppression refusee, verifier a la main')
+  // 2) L'ancien canal de la phase 0, s'il y en a un.
+  let vieux = null
+  let va = {}
+  if (ANCIEN_CANAL) {
+    vieux = await appel('GET', `/channels/${ANCIEN_CANAL}`)
+    va = (vieux.json && vieux.json.data && vieux.json.data.attributes) || {}
+    console.log(`\n── ancien canal ${ANCIEN_CANAL}`)
+    console.log(`   HTTP ${vieux.status}  is_active=${va.is_active}  `
+      + `rate_plans=${(va.rate_plans || []).length}  proprietes=${JSON.stringify(va.properties || [])}`)
+    if (vieux.ok && va.is_active === true) {
+      throw new Error('l ancien canal est ACTIF — suppression refusee, verifier a la main')
+    }
+    if (!vieux.ok) console.log('   (deja absent, rien a supprimer)')
+  } else {
+    console.log('\n── aucun ancien canal a supprimer sur cet hotel_id')
+  }
+
+  // ⚠ ET ON VERIFIE QU'AUCUN AUTRE CANAL N'OCCUPE DEJA CET hotel_id.
+  // Un seul canal Channex par hotel_id : sans ce controle, la creation part et
+  // se fait refuser sans dire pourquoi — c'est ce qui s'est passe le
+  // 10 septembre depuis l'ecran de liaison.
+  const tous = await appel('GET', '/channels?pagination[limit]=100')
+  const occupe = ((tous.json && tous.json.data) || []).filter(c => {
+    const a = c.attributes || {}
+    return String(a.channel).toLowerCase() === 'bookingcom'
+      && String((a.settings || {}).hotel_id) === String(HOTEL_ID)
+      && c.id !== ANCIEN_CANAL
+  })
+  if (occupe.length) {
+    throw new Error(`hotel_id ${HOTEL_ID} deja porte par le canal ${occupe[0].id} `
+      + `(${JSON.stringify(occupe[0].attributes.title)}) — ne pas creer de doublon`)
   }
 
   // 3) LE GROUP_ID DE LA PROPRIETE, LU CHEZ LE PROVIDER.
@@ -94,7 +148,7 @@ async function main () {
   const payload = {
     channel: {
       channel: 'BookingCom',
-      title: 'Booking.com — La bulle',
+      title: `Booking.com — ${C.nom}`,
       is_active: false,
       group_id: mien.id,
       properties: [PROPRIETE_NEUVE],
@@ -122,8 +176,10 @@ async function main () {
     return
   }
 
-  const sup = await appel('DELETE', `/channels/${ANCIEN_CANAL}`)
-  console.log(`\nDELETE ancien canal : HTTP ${sup.status}`)
+  if (ANCIEN_CANAL && vieux && vieux.ok) {
+    const sup = await appel('DELETE', `/channels/${ANCIEN_CANAL}`)
+    console.log(`\nDELETE ancien canal : HTTP ${sup.status}`)
+  }
 
   // ⚠ ON VERIFIE LA CONNEXION AVANT DE RECREER. Si la suppression avait fait
   // tomber l'autorisation cote Booking, mieux vaut le savoir ici que sur un
@@ -132,7 +188,7 @@ async function main () {
     { channel: 'BookingCom', settings: { hotel_id: HOTEL_ID } })
   const statut = cd.json && cd.json.data && cd.json.data.attributes
     && cd.json.data.attributes.connection_status
-  console.log(`connexion Booking apres suppression : HTTP ${cd.status}  statut=${statut}`)
+  console.log(`connexion Booking avant creation : HTTP ${cd.status}  statut=${statut}`)
   if (statut !== 'XML Active') {
     throw new Error('la connexion Booking n est plus active — NE PAS recreer, verifier l extranet')
   }

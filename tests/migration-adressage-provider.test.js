@@ -495,3 +495,50 @@ test('LE TEST QUI COMPTE : l\'ecran de liaison mappe un canal existant au lieu d
   // rejouer un refus definitif.
   assert.ok(ecran.includes('Détail :'), 'l\'ecran affiche la cause rendue par le serveur')
 })
+
+test('LE TEST QUI COMPTE : la CREATION mappe le derive, pas seulement `map`', () => {
+  // ⚠ J'AVAIS CORRIGE `map` ET OUBLIE `create` — la branche que l'ecran de
+  // liaison utilise reellement. Constate le 10 septembre 2026 sur le canal
+  // Booking de Cœur de vie 23, cree depuis le tableau de bord : mappe sur
+  // `ad0a594e-…` = « Tarif Standard », le plan de BASE. L'OTA aurait lu le
+  // prix non derive, et la commission comme le `min_stay` portes par
+  // `property_channel_rate_plans` auraient disparu en silence.
+  const src = lire('api/channel-bcom-write.js')
+
+  // Plus AUCUNE branche n'envoie `provider_rate_plan_id` dans un payload de
+  // mapping. C'est l'assertion qui aurait attrape l'oubli.
+  assert.ok(!/rate_plan_id: prop\.provider_rate_plan_id/.test(src),
+    'create n envoie plus le plan de base')
+  assert.ok(!/rate_plan_id: propM\.provider_rate_plan_id/.test(src),
+    'map non plus')
+
+  // Les deux branches passent par la MEME decision.
+  // Deux APPELS : un dans create, un dans map. La definition s'ecrit
+  // `function choisirTarifDerive (liens)` — espace avant la parenthese, donc
+  // elle n'est pas comptee ici, et l'export non plus (pas de parenthese).
+  assert.equal((src.match(/choisirTarifDerive\(/g) || []).length, 2,
+    'la meme decision est appelee par create ET par map')
+  assert.ok(/function choisirTarifDerive \(/.test(src), 'definie une seule fois')
+  assert.ok(src.includes('rate_plan_id: ratePlanCreate'), 'create utilise sa cible resolue')
+  assert.ok(src.includes('rate_plan_id: ratePlanCible'), 'map utilise la sienne')
+
+  // ⚠ MAIS SEULEMENT QUAND UN MAPPING EST DEMANDE. Sans codes, le canal se
+  // cree vide : exiger le derive rendrait impossible la creation AVANT
+  // l'approbation de l'OTA, ce que toute cette branche existe pour permettre.
+  assert.ok(src.includes('if (avecMapping) {'),
+    'la resolution du derive est conditionnee au mapping demande')
+
+  // ⚠ ET `create` N'EST PAS GATE PAR canPushRates, contrairement a `map`.
+  // `map` change la source de prix d'un canal deja en place ; `create` pose le
+  // premier mapping d'un canal cree INACTIF, rien n'est pousse avant
+  // l'activation. Gater ici refuserait l'onboarding de tout nouvel hote, dont
+  // le bien nait en `rate_sync_mode = 'keep'`.
+  // On retire les COMMENTAIRES avant de chercher : celui qui explique
+  // l'absence de la garde nomme `canPushRates`, et le test se declenchait sur
+  // sa propre justification.
+  const blocCreate = src.slice(src.indexOf("if (action === 'create')"),
+    src.indexOf('================= MAP'))
+    .split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.ok(!blocCreate.includes('canPushRates'),
+    'create ne gate pas : le canal nait inactif, et le bien neuf est en keep')
+})

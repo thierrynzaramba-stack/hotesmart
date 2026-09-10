@@ -282,6 +282,44 @@ module.exports = async function handler(req, res) {
         return res.status(502).json({ error: 'group_id introuvable pour ce bien (GET /groups)', http: grp.http })
       }
 
+      // ⚠ LA CREATION MAPPE LE DERIVE, COMME `action=map`.
+      // J'avais corrige `map` et OUBLIE `create` — la branche que l'ecran de
+      // liaison utilise reellement. Constate le 10 septembre 2026 sur le canal
+      // Booking de Cœur de vie 23, cree depuis le tableau de bord : mappe sur
+      // `ad0a594e-…` = « Tarif Standard », le plan de BASE. Consequence
+      // silencieuse : l'OTA lit le prix non derive, la commission Booking et le
+      // `min_stay` portes par `property_channel_rate_plans` disparaissent.
+      // Meme decision, meme fonction, meme refus que `map`.
+      //
+      // ⚠ SEULEMENT QUAND UN MAPPING EST DEMANDE. Sans codes, le canal se cree
+      // vide et il n'y a aucun tarif a choisir : exiger le derive la
+      // rendrait la creation impossible avant l'approbation de l'OTA, ce que
+      // toute cette branche existe pour permettre.
+      //
+      // ⚠ ET PAS DE GARDE `canPushRates` ICI, contrairement a `map`.
+      // `map` change la source de prix d'un canal DEJA en place : c'est un
+      // changement de comportement. `create` pose le PREMIER mapping d'un canal
+      // cree INACTIF — rien n'est pousse avant l'activation. Gater ici aurait
+      // refuse l'onboarding de tout nouvel hote, dont le bien nait en
+      // `rate_sync_mode = 'keep'`.
+      let ratePlanCreate = prop.provider_rate_plan_id
+      if (avecMapping) {
+        const { data: liensC, error: eLiensC } = await supabase
+          .from('property_channel_rate_plans')
+          .select('provider_rate_plan_id')
+          .eq('property_id', prop.id)
+          .eq('channel', 'booking')
+          .eq('role', 'derived')
+          .neq('is_active', false)
+        if (eLiensC) {
+          console.error('[channel-bcom-write] property_channel_rate_plans', eLiensC.message)
+          return res.status(500).json({ error: 'Erreur lecture' })
+        }
+        const choixC = choisirTarifDerive(liensC)
+        if (!choixC.ok) return res.status(choixC.http).json(choixC.corps)
+        ratePlanCreate = choixC.ratePlanId
+      }
+
       // is_active:false FORCE cote serveur — non pilotable par l'appelant.
       const payload = {
         channel: {
@@ -295,7 +333,7 @@ module.exports = async function handler(req, res) {
           // est un geste d'apres l'approbation.
           rate_plans: avecMapping ? [
             {
-              rate_plan_id: prop.provider_rate_plan_id,
+              rate_plan_id: ratePlanCreate,
               settings: {
                 occ_changed: false,
                 occupancy,
