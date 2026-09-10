@@ -498,7 +498,10 @@
       const date = conv.firstNight ? formatDateShort(conv.firstNight) + ' → ' + formatDateShort(conv.lastNight) : ''
       const flag = convFlag(conv.bookId)
       const isPinned = pinnedSet.has(conv.bookId)
-      const isCancelled = String(conv.status || '').toLowerCase() === 'cancelled'
+      // `demapped` (sejour neutralise par un demappage) se marque comme une
+      // annulation : le sejour ne compte plus, et le fil n'attend plus de reponse.
+      const st = String(conv.status || '').toLowerCase()
+      const isCancelled = st === 'cancelled' || st === 'demapped'
       const flagClass = flag ? `flag-${flag.type}` : ''
       const titleAttr = flag ? ` title="${escAttr(flag.label + (flag.summary ? ' — ' + flag.summary : ''))}"` : ''
       // Si tâche en attente : l'aperçu montre le libellé + résumé de la tâche

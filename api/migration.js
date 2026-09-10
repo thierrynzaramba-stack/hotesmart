@@ -151,6 +151,26 @@ module.exports = async function handler (req, res) {
       }
     }
 
+    // ─── purger_le_futur ─────────────────────────────────────────────────────
+    // Neutralise les sejours a venir et en cours (statut `demapped`) APRES le
+    // re-keying. Regle de Thierry : le passe reste, le futur ne compte plus — au
+    // remapping l'OTA rend ses propres identifiants, donc rien a rapprocher.
+    // Rien n'est supprime : la trace reste, et le geste se defait.
+    if (action === 'purger_le_futur') {
+      const { purgerLeFutur } = require('../lib/migration-purge-futur')
+      try {
+        const r = await purgerLeFutur(supabase, bien, { dryRun })
+        // Meme convention que `re_keying` : une indisponibilite ou un echec
+        // d'ecriture n'est pas un conflit d'etat.
+        const indispo = ['lecture_impossible', 'annulation_partielle']
+        const code = r.ok ? 200 : (indispo.includes(r.raison) ? 500 : 409)
+        return res.status(code).json(r)
+      } catch (e) {
+        console.error('[migration] purger_le_futur', e.message)
+        return res.status(500).json({ error: 'purge_impossible', detail: e.message })
+      }
+    }
+
     // ─── re_keying ───────────────────────────────────────────────────────────
     // Deplace les 18 tables enfants et le bien vers le nouveau provider, en UNE
     // transaction SQL. Refuse si l'automatisation n'est pas en pause.
@@ -171,7 +191,7 @@ module.exports = async function handler (req, res) {
 
     // Les actions arrivent avec leur etape. Tant qu'une action n'est pas
     // construite, on le DIT — on ne fait pas semblant de l'avoir.
-    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari', 'mode_de_prix', 're_keying'])
+    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari', 'mode_de_prix', 're_keying', 'purger_le_futur'])
     if (!CONSTRUITES.has(action)) {
       const etat = await etatMigration(supabase, bien)
       return res.status(501).json({

@@ -887,7 +887,11 @@
     function estOffline(src){ return String(src||'').toLowerCase()==='offline' }
 
     function mapResa(list){
-      return (list||[]).filter(function(b){return String(b.status||'').toLowerCase()!=='cancelled'}).map(b=>{
+      // ⚠ `demapped` EST MASQUE COMME `cancelled` : un sejour neutralise par un
+      // demappage n'occupe plus rien cote coeur (ses nuits repartent en vente).
+      // Le montrer comme une reservation aurait fait lire a l'hote une
+      // occupation sur des nuits disponibles.
+      return (list||[]).filter(function(b){var st=String(b.status||'').toLowerCase();return st!=='cancelled'&&st!=='demapped'}).map(b=>{
         const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
         const span=Math.max(1, Math.round((co-ci)/86400000))
         const src=familleSource(b.source)

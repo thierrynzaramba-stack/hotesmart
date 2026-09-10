@@ -323,7 +323,11 @@
         }
         const bk=(bkMap&&bkMap[currentBien.id])||[]
         const SRC=['airbnb','booking','direct']
-        bk.forEach((b,idx)=>{ if(String(b.status||'').toLowerCase()==='cancelled')return; if(String(b.status||'').toLowerCase()==='cancelled')return;
+        // ⚠ `demapped` SE MASQUE COMME `cancelled` : un sejour neutralise par un
+        // demappage n'occupe plus rien cote coeur, et ses nuits sont poussees en
+        // vente. L'afficher comme une reservation aurait montre a l'hote 15
+        // barres d'occupation sur des nuits a vendre.
+        bk.forEach((b,idx)=>{ const st=String(b.status||'').toLowerCase(); if(st==='cancelled'||st==='demapped')return;
           const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
           for(let d=new Date(ci); d<co; d.setDate(d.getDate()+1)) resaSet.add(toISO(d))
           // source variee pour la demo (en attendant la vraie source via webhooks)

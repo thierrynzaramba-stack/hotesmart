@@ -177,13 +177,77 @@ Channex. Les 14 tables enfants clées en TEXT doivent suivre, **en une fois**.
 - Le `provider` de `properties` passe à `channex` **dans la même opération** :
   un bien dont le provider dit Channex et dont les tables enfants disent encore
   Beds24 est un bien à moitié migré, et c'est l'état le plus dangereux.
-- **Déduplication du carnet** : `load_future_reservations` fera remonter les
-  séjours avec de **nouveaux** identifiants Channex. Le cœur les a déjà sous
-  leur identifiant Beds24. Sans dédoublonnage par `otaReservationCode` : ménage
-  en double, message envoyé deux fois, code d'accès posé deux fois. Le
-  rapprochement se fait sur `otaReservationCode`, et tout ce qui est importé
-  porte `initialImport` — le dispatcher ne consomme rien, exactement comme au
-  backfill historique.
+- **~~Déduplication du carnet~~ — REMPLACÉE par une règle de Thierry, le
+  10 septembre 2026.** L'ancienne approche : rapprocher par `otaReservationCode`
+  les séjours que l'OTA rend avec de *nouveaux* identifiants. La règle qui la
+  remplace :
+
+  > « Quand on démappe une propriété d'un OTA, les réservations à venir et en
+  > cours ne comptent plus. Seules les passées sont conservées. Comme ça, au
+  > remapping, pas de problème. »
+
+  **Si le futur ne compte plus sous l'ancien identifiant, il n'y a plus rien à
+  rapprocher** — et le rapprochement est précisément ce qui se trompe. Plus de
+  ménage en double, plus de message envoyé deux fois, plus de code posé deux
+  fois, sans écrire une ligne de dédoublonnage.
+
+  **On neutralise, on ne supprime pas** (deuxième précision de Thierry, meilleure
+  que ma première version qui détruisait les lignes) : un séjour neutralisé
+  n'occupe aucune nuit, fait annuler son ménage **tout seul** par le chemin
+  normal du produit — `sync-menages-entite` construit ses séjours « vivants »
+  avec `isActiveStatus` — et laisse la trace.
+
+  **Et le statut est `demapped`, pas `cancelled`** (troisième précision, et elle
+  évite un dégât définitif) : les annulations alimentent les **statistiques**.
+  Ranger sous le même mot « le voyageur s'est décommandé » et « nous avons
+  débranché ce logement d'un OTA » aurait faussé ces chiffres pour toujours, sans
+  aucun moyen de les séparer après coup. `estAnnulationVoyageur`
+  (`lib/bookings-snapshot-status.js`) porte la distinction.
+
+  **Quand le faire : APRÈS le re-keying, jamais avant.** Tant que le bien est
+  encore `provider = 'beds24'`, le cron de synchronisation réécrit ses snapshots
+  et remettrait « confirmé » au cycle suivant, en silence. La pause de
+  l'automatisation ne suffit pas — `isAutomationPaused` ne couvre pas les writers
+  de synchro.
+
+  **Un code déjà posé ne bloque pas** — arbitrage de Thierry : « il l'a déjà, et
+  impossible de le supprimer, donc pas d'impact ». Un code supplémentaire
+  n'empêche pas d'entrer, et le suivi se fait à la main pendant la fenêtre.
+  L'aperçu le **nomme** quand même, date par date : ne pas bloquer n'est pas la
+  même chose que ne pas dire.
+
+  **Seuls les `confirmed` sont neutralisés**, et l'oubli de `blocked` coûtait
+  cher : `lib/nuits-occupees.js` compte `confirmed` **et** `blocked`. Un blocage
+  propriétaire passé en `demapped` cessait d'occuper, et la poussée ARI **remettait
+  en vente les nuits que l'hôte s'était réservées**. Un blocage n'est pas une
+  réservation d'OTA : il n'est pas réimporté, donc il ne peut pas faire doublon.
+
+  **Un départ du jour est exclu** : avec `>=`, `sync-menages-entite` annulait au
+  passage suivant le ménage de ce départ — déjà attribué, peut-être en cours.
+
+  **L'ordre est vérifié, pas supposé** : l'étape refuse d'agir tant que le bien
+  est encore chez son ancien provider. Le cron */5 réécrirait le snapshot en
+  `confirmed`, et `detectChange` lirait `demapped → confirmed` comme un séjour
+  **neuf** — ménage recréé et re-notifié, message d'arrivée et code rejoués.
+  L'aperçu, lui, reste possible : montrer n'est pas agir.
+
+  **Et l'étape est `sans_objet` hors migration.** Sans ce repli, tout bien du
+  compte — y compris un bien Channex vif — ressortait « à faire » avec l'action
+  exposée : un clic mettait son carnet futur entier en `demapped`.
+
+  **Les vues masquent `demapped` comme `cancelled`** (`biens-calendrier`,
+  `calendrier-mobile`, `messagerie`) : le cœur considère ces nuits libres et les
+  pousse en vente ; les afficher comme occupées aurait fait lire à l'hôte une
+  réservation sur une nuit disponible.
+
+  ⚠ **RESTE OUVERT — les messages déjà envoyés.** L'anti-doublon des messages est
+  `(user_id, booking_id, template_id)` : au remapping, les nouveaux identifiants
+  ne sont pas dans le journal, et **13 messages déjà reçus repartiraient** aux
+  voyageurs des 11 séjours à venir (mesure du 10 septembre). La neutralisation ne
+  couvre pas ce cas — elle empêche le ménage en double, pas le message. Correctif
+  prévu : une **empreinte de séjour** stable (`logement | arrivée | départ`) dans
+  `message_sent_log`, vérifiée en plus de l'identifiant. C'est le dernier verrou
+  avant la bascule.
 
 ## 6. Vérifications post-bascule, par périmètre
 
