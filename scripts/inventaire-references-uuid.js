@@ -98,6 +98,38 @@ async function main () {
   console.log('\n══ REFERENCES PAR CLE PROVIDER (deja couvertes par rekeying_tables*)')
   for (const [t, c, n, f, ex] of texte.sort()) console.log(ligne(t, c, `${n} lues, ex. « ${String(ex).slice(0, 40)} »`))
 
+  // ── LES REFERENCES TENUES COMME CLES DANS UN JSONB ────────────────────────
+  // ⚠ TROISIEME ANGLE MORT, TROUVE EN REVIEW LE 10 SEPTEMBRE 2026.
+  // Ni le nom de la colonne (`config`) ni ses valeurs ne parlent de bien : la
+  // reference est une CLE d'objet JSON. `agent_alert_config.config` indexait
+  // ainsi `209413` avec le mode de l'agent IA et les destinataires d'alerte —
+  // invisible aux deux premiers inventaires, et perdu au transfert sans une
+  // ligne de log.
+  console.log('\n══ REFERENCES EN CLES DE JSONB — A DEPLACER AUSSI')
+  const refsJson = []
+  for (const [table, colonnes] of Object.entries(schema)) {
+    for (const col of colonnes) {
+      if (CANDIDATE(col)) continue   // deja couvert plus haut
+      const { data, error } = await supabase.from(table).select(col).limit(20)
+      if (error) continue
+      for (const ligne of data || []) {
+        const v = ligne[col]
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+        const cles = Object.keys(v)
+        const parlantes = cles.filter(k => uuidConnus.has(k)
+          || biens.some(b => String(b.provider_property_id) === k))
+        if (parlantes.length) {
+          refsJson.push([table, col, parlantes.length, cles.length, parlantes.slice(0, 4)])
+          break
+        }
+      }
+    }
+  }
+  for (const [t, c, n, tot, ex] of refsJson.sort()) {
+    console.log(ligne(t, c, `${n}/${tot} cle(s) designent un bien — ex. ${ex.join(', ')}`))
+  }
+  if (!refsJson.length) console.log('   (aucune)')
+
   console.log('\n══ INDETERMINEES — COLONNE VIDE, A TRANCHER A LA MAIN')
   console.log('   ⚠ Une colonne vide aujourd\'hui peut se remplir demain : ne pas conclure.')
   for (const [t, c] of indetermine.sort()) console.log(ligne(t, c, ''))

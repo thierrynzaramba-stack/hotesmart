@@ -21,19 +21,24 @@
 // 36 dates tarifees (99 a 180 €). La fermeture est donc une INTENTION
 // MEMORISEE dans `calendar_inventory`, pas un etat calcule.
 //
-// Consequence : on pousse le bien TEL QU'IL EST EN BASE. Aucun contournement,
-// et aucun piege arme — mon `base_price: null` en memoire aurait ferme les
-// dates aujourd'hui puis les aurait laissees rouvrir a 120 € a la premiere
-// poussee suivante, sans que rien ne le dise.
+// Consequence : on pousse les intentions de l'hote TELLES QU'ELLES SONT EN
+// BASE — prix et `stop_sell` — et on ne neutralise `base_price` (en memoire,
+// jamais en base) que pour les dates qu'il n'a NI tarifees NI fermees. Sans
+// cette neutralisation, ces dates partiraient ouvertes au prix de base, soit
+// l'ecrasement exact qu'on repare.
+// ⚠ Cet en-tete affirmait « aucun contournement » : c'etait faux, et releve en
+// review. La neutralisation en est un — borne, dit, et sans effet en base.
 //
 // Sur une date fermee, le `rate` pousse n'a aucun effet commercial : ce qui
 // ferme est `stop_sell`. On le laisse partir tel quel plutot que de fabriquer
 // un etat que l'hote n'a pas demande.
 //
-// ⚠ ET ON REFUSE S'IL RESTE UNE DATE OUVERTE SANS PRIX.
-// C'est le seul cas qui vendrait au prix par defaut de l'option du rate plan —
-// un prix que l'hote n'a jamais choisi. Le controle est en tete, avant tout
-// envoi.
+// ⚠ LES DATES NI TARIFEES NI FERMEES SONT NOMMEES AVANT TOUT ENVOI, puis
+// fermees par la fermeture CALCULEE du writer. L'en-tete annoncait un REFUS :
+// c'etait faux, releve en review — le script journalise et poursuit, ce qui est
+// le comportement voulu (la regle de l'hote est « le reste ferme faute de
+// prix », donc il n'y a rien a refuser). Le juge final reste la relecture
+// `GET /restrictions` : une date ouverte sans prix y compte comme un ECART.
 //
 // Le mecanisme de fermeture est celui du 8 septembre, mesure en staging
 // (docs/specs/protocole-staging-tarifs.md) : omettre `rate` NE FERME RIEN — la

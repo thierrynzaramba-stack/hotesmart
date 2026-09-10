@@ -26,6 +26,7 @@
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
 const { noterCleMigree } = require('../lib/cles-migrees')
+const { rekeyerJson } = require('./rekeyer-json-config')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const ECRIRE = process.argv.includes('--ecrire')
@@ -146,6 +147,22 @@ async function main () {
       console.error('   Le transfert est fait, mais le cron va rapatrier les donnees.')
       console.error('   Passer migrations/2026-09-10-cles-provider-migrees.sql, puis relancer.')
       process.exitCode = 1
+    }
+  }
+
+  // ⚠ LES REFERENCES TENUES COMME CLES DANS UN JSONB.
+  // Troisieme angle mort de mes inventaires, trouve en review : ni le nom de la
+  // colonne (`config`) ni ses valeurs ne parlent de bien — la reference est une
+  // CLE d'objet. Mesure : l'entree `209413` de `agent_alert_config.config`
+  // portait `mode: 'auto'` et les destinataires d'alerte ; la fiche neuve
+  // n'ayant rien, `getPropertyMode` retombait sur `'test'` et l'agent IA du
+  // bien migre etait muet, sans une ligne de log.
+  if (src && src.provider_property_id) {
+    const faits = await rekeyerJson(src.provider_property_id, T.provider_property_id,
+      { ecrire: true, userId: src.user_id })
+    if (faits.length) {
+      console.log('\n── references en cles JSON')
+      for (const f of faits) console.log('   ' + JSON.stringify(f))
     }
   }
 
