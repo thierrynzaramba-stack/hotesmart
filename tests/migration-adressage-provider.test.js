@@ -307,7 +307,21 @@ test('LE TEST QUI COMPTE : `hotel_id` part en NOMBRE, sinon la creation rend 500
   // verification reussie, et sans rien pour comprendre.
   const src = lire('api/channel-bcom-write.js')
   assert.ok(/settings: \{ hotel_id: Number\(hotelId\) \}/.test(src), 'la creation envoie un nombre')
-  assert.ok(!/settings: \{ hotel_id: String\(hotelId\) \}/.test(src), 'et jamais une chaine')
+
+  // ⚠ CETTE ASSERTION DISAIT « et jamais une chaine » DANS TOUT LE FICHIER.
+  // Elle etait juste tant qu'on ignorait la suite, et elle est devenue fausse le
+  // 10 septembre 2026 au soir : `POST /channels/:id/activate` REFUSE un
+  // `hotel_id` numerique (`422 {"settings":["invalid settings"]}`), donc un
+  // canal cree par cet endpoint etait INACTIVABLE pour toujours. Il faut
+  // desormais un `PUT` de normalisation en CHAINE juste apres la creation.
+  // On borne donc l'assertion au PAYLOAD DE CREATION, qui est ce qu'elle
+  // voulait proteger.
+  const iPayload = src.indexOf('const payload = {')
+  const blocCreation = src.slice(iPayload, src.indexOf("channelCall('POST', '/channels', payload)"))
+  assert.ok(!/hotel_id: String\(hotelId\)/.test(blocCreation),
+    'le payload de CREATION n envoie jamais une chaine')
+  assert.ok(/settings: \{ hotel_id: String\(hotelId\) \}/.test(src),
+    'mais la normalisation en chaine existe, sinon le canal est inactivable')
 })
 
 test('un `hotel_id` non numerique est refuse AVANT l appel', () => {

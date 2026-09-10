@@ -264,6 +264,47 @@ sans rien pour comprendre.
 `group_id` dans ses attributs, alors que la création l'exige. Ne pas conclure de
 son absence en lecture qu'il est optionnel en écriture.
 
+## `hotel_id` : NOMBRE à la création, CHAÎNE pour être activable — le piège se referme sur lui-même
+
+**Mesuré le 10 septembre 2026 sur l'hôtel `10853342`.** C'est le piège le plus
+coûteux de la journée, et il n'a pas d'issue si on ne le connaît pas :
+
+```
+POST /channels                   hotel_id CHAÎNE  -> HTTP 500, sans détail
+POST /channels                   hotel_id NOMBRE  -> HTTP 201  ✓
+POST /channels/<id>/activate     hotel_id NOMBRE  -> HTTP 422
+                                 {"errors":{"details":{"settings":["invalid settings"]}}}
+```
+
+Un canal créé par `POST /channels` est donc **inactivable pour toujours** : la
+création impose le type que l'activation refuse.
+
+**Les signes d'un canal pris dans ce piège**, tous vérifiables :
+`updated_at` à quelques centièmes de `inserted_at` (Channex ne l'a jamais
+touché), pas de bloc `settings.tax_settings`, et `hotel_id` de type `number`.
+Un canal sain porte une **chaîne** et un `tax_settings` tiré de Booking dans la
+minute ou les deux heures.
+
+**Le remède, mesuré** : `PUT /channels/<id>` avec `{ channel: { settings: {
+hotel_id: "10853342" } } }`.
+
+⚠ **Et ce PUT FUSIONNE — l'inconnue est levée.** Envoyer la seule clé `hotel_id`
+conserve `machine_account`, `mappingSettings` et les sept réglages de paiement ;
+les mappings restent en place. C'était l'inconnue qui faisait éviter d'y toucher
+dans `action=map` (« au cas où le PUT remplace l'objet »). Mieux : le PUT
+déclenche la poignée de main avec Booking dans la seconde — `tax_settings`
+apparaît, et l'activation passe alors en HTTP 200.
+
+`api/channel-bcom-write.js` normalise donc `hotel_id` en chaîne juste après
+chaque création, et rend `proof.activable` pour que l'appelant sache la
+différence entre « pas encore activé » et « jamais activable ».
+
+⚠ **Et j'ai affirmé le contraire pendant une journée** : « Channex active un
+canal de lui-même quand l'OTA confirme le mapping ». C'est **faux**. Je l'avais
+inféré de canaux vus passer à `is_active: true` — ils avaient été activés
+explicitement, depuis le tableau de bord ou l'interface Channex. L'activation
+est toujours un appel, jamais un effet de bord.
+
 ## Un canal MAPPÉ ne peut pas être désactivé
 
 **Mesuré le 10 septembre 2026** sur le canal Airbnb de Cœur de vie 23 :

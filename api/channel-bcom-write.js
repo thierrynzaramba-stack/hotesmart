@@ -384,15 +384,51 @@ module.exports = async function handler(req, res) {
       const w = await channelCall('POST', '/channels', payload)
       const channelId = w.json?.data?.id || w.json?.data?.attributes?.id || null
 
+      // ⚠ NORMALISATION DE `hotel_id` EN CHAINE, IMMEDIATEMENT APRES LA CREATION.
+      // C'EST LE PIEGE LE PLUS COUTEUX DE LA JOURNEE, ET IL SE REFERMAIT SUR
+      // LUI-MEME : `POST /channels` EXIGE un nombre (une chaine rend HTTP 500,
+      // sans detail), mais `POST /channels/:id/activate` REFUSE ce nombre —
+      // `422 {"settings":["invalid settings"]}`. Tout canal cree par cet
+      // endpoint etait donc INACTIVABLE, pour toujours, et l'ecran de liaison
+      // finissait sur « la connexion n'a pas pu etre finalisee ».
+      //
+      // Mesure du 10 septembre 2026 : les deux canaux Booking qui fonctionnent
+      // (Colomiers, Cœur de vie 23) portent une CHAINE ; celui de La bulle, cree
+      // par cet endpoint, portait un NOMBRE, n'avait jamais ete touche par
+      // Channex depuis sa creation (`updated_at` a 0,06 s de `inserted_at`) et
+      // n'avait pas de `tax_settings`.
+      //
+      // ⚠ ET LE PUT FUSIONNE — mesure, enfin. C'etait l'inconnue qui m'avait
+      // fait eviter d'y toucher dans `action=map` : envoyer la seule cle
+      // `hotel_id` conserve `machine_account`, `mappingSettings` et les sept
+      // reglages de paiement. Aucune cle perdue, mappings intacts. Mieux : le
+      // PUT declenche la poignee de main avec Booking dans la seconde —
+      // `tax_settings` apparait, et l'activation passe alors en HTTP 200.
+      let normalisation = null
+      if (channelId) {
+        const pn = await channelCall('PUT', `/channels/${channelId}`,
+          { channel: { settings: { hotel_id: String(hotelId) } } })
+        normalisation = { http: pn.status, ok: pn.ok }
+        if (!pn.ok) {
+          console.error('[channel-bcom-write] normalisation hotel_id echouee',
+            pn.status, JSON.stringify(pn.json).slice(0, 300))
+        }
+      }
+
       // PREUVE : relecture du canal cree (lecture pure). is_active doit etre false.
       let proof = null
       if (channelId) {
         const after = await channelCall('GET', `/channels/${channelId}`)
+        const sAfter = after.json?.data?.attributes?.settings || {}
         proof = {
           http: after.status,
           is_active: after.json?.data?.attributes?.is_active ?? null,
           rate_plans_count: Array.isArray(after.json?.data?.attributes?.rate_plans)
-            ? after.json.data.attributes.rate_plans.length : null
+            ? after.json.data.attributes.rate_plans.length : null,
+          // ⚠ CE CHAMP EST LA PREUVE QUI COMPTE : un canal dont `hotel_id` est
+          // encore un nombre ne pourra JAMAIS etre active.
+          hotel_id_type: typeof sAfter.hotel_id,
+          activable: typeof sAfter.hotel_id === 'string'
         }
       }
 
@@ -412,6 +448,7 @@ module.exports = async function handler(req, res) {
         channel_id: channelId,
         sent_payload: payload,
         result: redact(w.json),
+        normalisation_hotel_id: normalisation,
         proof,
         // Commande d'annulation prete a l'emploi.
         delete_hint: channelId ? `?action=delete&channel_id=${channelId}&dry_run=false` : null

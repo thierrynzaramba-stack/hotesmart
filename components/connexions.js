@@ -46,6 +46,12 @@ function ensureModal() {
     .cx-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
     .cx-dot.on { background:var(--green); }
     .cx-dot.off { background:var(--border); border:1px solid var(--text2); box-sizing:border-box; }
+    /* ⚠ TROISIEME ETAT, ET IL EN FALLAIT UN. Un canal mappe mais pas encore
+       active portait la pastille GRISE de « non connecte » : le texte disait
+       « Connexion en cours », l'oeil lisait « deconnecte ». Le 10 septembre 2026
+       a minuit, Thierry a conclu que son canal Booking avait disparu — il etait
+       la, mappe, en attente d'activation. */
+    .cx-dot.pending { background:#F5A623; }
     .cx-row .btn { flex-shrink:0; }
     .cx-rule { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 14px; margin-top:-8px; border:0.5px solid var(--border); border-top:none; border-radius:0 0 var(--radius) var(--radius); background:var(--bg2,#fafafa); font-size:13px; }
     .cx-rule-f { display:flex; align-items:center; gap:6px; }
@@ -184,9 +190,11 @@ function renderRows({ airbnb, booking, rules = {} }) {
         <div class="cx-info">
           <div class="cx-name">Booking.com</div>
           <div class="cx-state">
-            <span class="cx-dot ${bookingConnected ? 'on' : 'off'}"></span>
+            <span class="cx-dot ${bookingConnected ? 'on' : (bookingMappedInactive ? 'pending' : 'off')}"></span>
             ${bookingConnected ? 'Connecté'
-              : bookingMappedInactive ? 'Connexion en cours' : 'Non connecté'}
+              : bookingMappedInactive
+                ? 'Mappé — en attente d\'activation'
+                : 'Non connecté'}
           </div>
         </div>
         <button class="btn ${bookingConnected || bookingMappedInactive ? '' : 'btn-primary'}" id="cx-booking">${bookingConnected || bookingMappedInactive ? 'Gérer' : 'Connecter'}</button>

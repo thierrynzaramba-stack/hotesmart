@@ -241,7 +241,55 @@ module.exports = async function handler(req, res) {
     const after = await channelCall('GET', `/channels/${channelId}`)
     const ari = await readAri(providerPropertyId, prop.provider_rate_plan_id, prop.provider_room_type_id)
 
-    return res.status(w.ok ? 200 : 502).json({
+    // ⚠ UN REFUS DOIT DIRE POURQUOI, ET NE PAS SE DEGUISER EN PANNE.
+    // Cet endpoint rendait 502 avec la cause enfouie dans `result`, que le
+    // front jette (`shared/api-client.js` compose son message avec
+    // `data.error`). L'hote lisait donc « Erreur serveur » sur un refus
+    // parfaitement explicite.
+    //
+    // MESURE DU 10 SEPTEMBRE 2026, minuit. Thierry a clique pour connecter
+    // La bulle et recu un 502. La vraie reponse de Channex etait :
+    //   422 {"errors":{"code":"validation_error",
+    //                  "details":{"settings":["invalid settings"]}}}
+    // parce que le canal portait `hotel_id` en NOMBRE — `POST /channels` exige
+    // un nombre, `activate` refuse un nombre. Un 422 est un refus de
+    // validation, pas une panne de passerelle : le rendre en 502 fait chercher
+    // une panne reseau pendant une heure.
+    if (!w.ok) {
+      const d = w.json && w.json.errors && w.json.errors.details
+      const bouts = []
+      if (d && typeof d === 'object') {
+        for (const [champ, msgs] of Object.entries(d)) {
+          bouts.push(`${champ} : ${[].concat(msgs).join(', ')}`)
+        }
+      } else if (w.json && w.json.errors && w.json.errors.title) {
+        bouts.push(String(w.json.errors.title))
+      }
+
+      // ⚠ ET ON NOMME LA CAUSE CONNUE QUAND ON LA RECONNAIT.
+      // `settings: invalid settings` sur un canal dont `hotel_id` est un nombre
+      // a une seule explication et un seul remede.
+      const sAct = after.json?.data?.attributes?.settings || {}
+      const hotelNumerique = typeof sAct.hotel_id === 'number'
+      const causeConnue = hotelNumerique && /invalid settings/i.test(JSON.stringify(d || ''))
+        ? ' — ce canal porte un `hotel_id` NUMERIQUE, que Channex refuse a '
+          + 'l\'activation. Il doit etre normalise en chaine par '
+          + '`PUT /channels/:id` avant toute activation.'
+        : ''
+
+      return res.status(w.status === 422 ? 422 : 502).json({
+        error: `L'activation du canal a ete refusee${bouts.length ? ' : ' + bouts.join(' — ') : ''}.${causeConnue}`,
+        dry_run: false,
+        http: w.status,
+        channel_id: channelId,
+        hotel_id_type: typeof sAct.hotel_id,
+        is_active_after: after.json?.data?.attributes?.is_active ?? null,
+        result: redact(w.json),
+        ari
+      })
+    }
+
+    return res.status(200).json({
       dry_run: false,
       http: w.status,
       channel_id: channelId,

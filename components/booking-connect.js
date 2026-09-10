@@ -278,6 +278,52 @@ async function screenC() {
   }
 }
 
+// ---------- A' : canal deja mappe, il ne manque QUE l'activation ----------
+// ⚠ POURQUOI CET ECRAN EXISTE. Un canal mappe mais inactif renvoyait l'hote a
+// l'ecran A — celui qui redemande l'identifiant Booking depuis zero, alors que
+// le canal le porte deja. Combine a la pastille grise de l'ecran Connexions,
+// l'etat se lisait « deconnecte », et le parcours complet finissait par un
+// `activate` qui echouait. Mesure du 10 septembre 2026 a minuit : Thierry a
+// refait toute la saisie pour recevoir un 502.
+//
+// Ici il ne reste qu'un geste, et c'est celui qui manque.
+function screenPendingActivation() {
+  setStep(3)
+  setBody(`
+    <div class="bk-h">Votre établissement est mappé</div>
+    <div class="bk-sub">La liaison avec Booking.com est en place. Il ne reste qu'à
+      l'activer pour que vos prix et vos disponibilités commencent à partir.</div>
+    <div class="bk-actions">
+      <button class="btn btn-primary" id="bk-activate">Activer la connexion</button>
+      <button class="btn" id="bk-p-refaire">Refaire la liaison</button>
+    </div>
+  `)
+  document.getElementById('bk-p-refaire').addEventListener('click', screenA)
+  document.getElementById('bk-activate').addEventListener('click', async () => {
+    setBody(`<div class="bk-status"><div class="bk-spin"></div> Activation…</div>`)
+    try {
+      const act = await api.channel.bcom.activate(S.channelId, { dryRun: false })
+      if (act?.is_active_after !== true) throw new Error(act?.error || 'activation non confirmee')
+      screenD()
+    } catch (e) {
+      logger.error('booking-connect', 'activation echec', { e: e.message })
+      // ⚠ ON MONTRE LA CAUSE. L'endpoint rend desormais un `error` explicite
+      // (un `hotel_id` numerique, par exemple) : la cacher renverrait l'hote
+      // refaire une saisie qui n'y changera rien.
+      setBody(`
+        <div class="bk-err">L'activation n'a pas abouti. Vos tarifs Booking n'ont pas été modifiés.</div>
+        <div class="bk-note">Détail : ${escHtml(e.message || 'inconnu')}</div>
+        <div class="bk-actions">
+          <button class="btn btn-primary" id="bk-p-retry">Réessayer</button>
+          <button class="btn" id="bk-p-back">Refaire la liaison</button>
+        </div>
+      `)
+      document.getElementById('bk-p-retry').addEventListener('click', screenPendingActivation)
+      document.getElementById('bk-p-back').addEventListener('click', screenA)
+    }
+  })
+}
+
 // ---------- D : connecte ----------
 function screenD() {
   setStep(4)
@@ -358,5 +404,10 @@ export function openBookingConnect(property, _anchorEl, { existingChannel = null
   }
   document.getElementById('bk-modal').classList.add('show')
   if (existingChannel && existingChannel.is_active === true) screenAlreadyConnected()
+  // ⚠ UN CANAL MAPPE MAIS INACTIF NE REPART PAS DE ZERO.
+  // Il portait deja son `hotel_id` et son mapping : renvoyer l'hote a l'ecran A
+  // lui faisait resaisir ce que le canal contient, pour finir sur un `activate`
+  // qui pouvait echouer — c'est ce qui est arrive le 10 septembre a minuit.
+  else if (existingChannel && existingChannel.id) screenPendingActivation()
   else screenA()
 }
