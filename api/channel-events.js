@@ -527,6 +527,28 @@ module.exports = async function handler(req, res) {
         results.push({ property_id: ppid, reason: 'post_mapping_error', error: e.message })
       }
     }
+    // ⚠ SI TOUS LES BIENS ONT ECHOUE, ON LE SIGNALE.
+    // Le try par bien fait rendre 200 meme sur un echec total : Channex ne
+    // retente plus, et le `reportIncident('webhook_error')` du catch externe
+    // ne part plus sur ce chemin. C'est voulu pour un echec PARTIEL (le
+    // post-mapping est idempotent, le cron */5 resynchronise les
+    // reservations), mais un echec COMPLET est un signal qu'on ne doit pas
+    // perdre : c'est exactement ce que le `ReferenceError` sur `out`
+    // produisait, en silence. Releve a la seconde review du 10 septembre.
+    const echecs = results.filter(r => r && r.reason === 'post_mapping_error')
+    if (echecs.length && echecs.length === results.length) {
+      // Meme forme d'appel que le catch externe : `reportIncident(type, opts)`,
+      // et le meme `threshold: 3` — un hoquet isole ne reveille pas le
+      // fondateur, une panne installee si.
+      try {
+        await require('../lib/founder-notify').reportIncident('webhook_error', {
+          threshold: 3,
+          detail: `channel-events ${event} : post-mapping echoue sur les `
+            + `${results.length} bien(s) — `
+            + echecs.map(r => `${r.property_id}: ${r.error}`).join(' | ')
+        })
+      } catch (e) { console.error('[channel-events] reportIncident echoue', e.message) }
+    }
     return res.status(200).json({ ok: true, event, results })
   } catch (err) {
     console.error('[channel-events]', err.message)

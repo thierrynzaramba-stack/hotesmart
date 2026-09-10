@@ -348,6 +348,24 @@ begin
       v_src_cle, n_collision;
   end if;
 
+  -- ⚠ ET LE SYMETRIQUE COTE CIBLE, QUE `rekey_property` N'A PAS.
+  -- Dans le sens aller la cible est un UUID Channex : la
+  -- collision est invraisemblable. Mais ce fichier annonce le
+  -- ROLLBACK comme « le meme appel, source et cible
+  -- echangees » — et alors la cible est la cle Beds24
+  -- numerique, sans unicite globale. Les `access_codes` sans
+  -- compte atterriraient sous une cle qu'une autre fiche
+  -- porte aussi, et cet hote-la les verrait : ses lectures
+  -- tolerent `user_id is null`. La meme fuite, en sens
+  -- inverse. Relevee a la seconde review du 10 septembre.
+  select count(*) into n_collision from public.properties
+    where provider_property_id = v_cib_cle;
+  if n_collision > 1 then
+    raise exception 'transferer_bien : la cle CIBLE % est portee par % fiches — '
+      'transfert refuse (les lignes sans compte deviendraient lisibles par l''autre)',
+      v_cib_cle, n_collision;
+  end if;
+
   -- ⚠ LA CIBLE DOIT ETRE VIERGE SUR LES TABLES A CONTRAINTE UNIQUE.
   -- Une seule ligne cote cible sur l'une d'elles, et l'UPDATE
   -- viole l'index : TOUTE la transaction est annulee, avec un
@@ -363,13 +381,36 @@ begin
   -- lui pose une ligne `property_status` dans les cinq
   -- minutes qui suivent.
   --
-  -- `property_status` est donc PURGEE cote cible, et c'est le
-  -- seul cas ou on se le permet : c'est un etat RECALCULE par
-  -- `lib/cron-property-status.js`, il ne porte aucune
-  -- intention de l'hote et il repoussera au prochain cycle.
-  -- Les trois autres portent des decisions humaines
-  -- (calendrier, menages, prestataires assignees) : on refuse
-  -- et on les nomme, jamais on ne les efface.
+  -- `property_status` est donc PURGEE cote cible — mais PAS
+  -- parce qu'elle serait entierement recalculee : c'est ce que
+  -- j'avais ecrit, et c'est FAUX. `lib/cron-property-status.js`
+  -- refuse explicitement de reconstruire `status = 'ready'` et
+  -- `last_menage_at` : ils viennent du clic de la prestataire
+  -- (`markReady`, api/menages-public.js), et le cron ne
+  -- degrade jamais un `ready` tout seul. Cette table porte
+  -- donc bien une DECISION HUMAINE. Corrige a la seconde
+  -- review du 10 septembre.
+  --
+  -- Ce qu'on purge est donc borne : les lignes que le cron */5
+  -- vient de poser sur une fiche neuve (statut derive d'une
+  -- absence de reservation), jamais un `ready`. Un `ready`
+  -- cote cible signifierait qu'une prestataire a valide un
+  -- menage sur la fiche neuve avant le transfert : on refuse
+  -- et on le dit. La ligne qui porte la verite est celle de la
+  -- SOURCE, et elle est deplacee par la boucle famille A —
+  -- `property_status` est dans `rekeying_tables()`.
+  --
+  -- Les trois autres tables portent aussi des decisions
+  -- humaines (calendrier, menages, prestataires assignees) :
+  -- on refuse et on les nomme, jamais on ne les efface.
+  select count(*) into n_collision from public.property_status
+    where property_id = v_cib_cle and user_id = v_user
+      and status = 'ready';
+  if n_collision > 0 then
+    raise exception 'transferer_bien : la cible porte un statut « ready » — '
+      'une prestataire a valide un menage dessus, transfert refuse';
+  end if;
+
   delete from public.property_status
     where property_id = v_cib_cle and user_id = v_user;
 
@@ -645,6 +686,21 @@ begin
   -- la main les lignes d'un AUTRE hote.
   if v_user is null then
     raise exception 'supprimer_bien_vide : fiche sans compte, suppression refusee';
+  end if;
+
+  -- ⚠ MEME REFUS DE COLLISION QUE `transferer_bien`.
+  -- Sur `access_codes` et `automation_incidents`, la clause
+  -- tolerante compte encore les lignes SANS COMPTE d'un autre
+  -- hote si la cle est partagee. C'est fail-closed — une
+  -- suppression legitime serait REFUSEE — mais le message
+  -- enverrait l'operateur nettoyer a la main les lignes d'un
+  -- autre. On refuse en le nommant. Seconde review du
+  -- 10 septembre.
+  select count(*) into n from public.properties
+    where provider_property_id = v_cle;
+  if n > 1 then
+    raise exception 'supprimer_bien_vide : la cle % est portee par % fiches — '
+      'comptage impossible a attribuer, suppression refusee', v_cle, n;
   end if;
 
   foreach t in array public.rekeying_tables()
