@@ -89,9 +89,23 @@ test('creerDerive : idempotent — un derive existant ne declenche aucun appel p
   assert.equal(r.derivedRatePlanId, 'deja-la')
   assert.equal(vus.length, 0, 'aucun appel Channex : le provisionnement est rejouable')
   assert.equal(sb.journal.upserts.length, 0, 'et aucune ecriture')
-  // ⚠ `role=derived` DOIT etre dans le filtre : sans lui la ligne sentinelle
-  // `channel='base'` passerait pour un derive.
-  assert.ok(sb.journal.filtres.some(([c, v]) => c === 'role' && v === 'derived'))
+  // ⚠ LES TROIS FILTRES SONT ASSERTES, ET LA REVIEW A MONTRE POURQUOI.
+  // Ce test ne verifiait que `role='derived'`. La review a mute
+  // `.eq('property_id', bien.id)` en `.eq('property_id', bien.provider_property_id)`
+  // et LES HUIT TESTS SONT RESTES VERTS. Consequence reelle de cette
+  // mutation : l'idempotence ne reconnait plus jamais un derive existant,
+  // chaque re-provisionnement cree un enfant Channex de plus, et
+  // `choisirTarifDerive` (api/channel-bcom-write.js) finit par refuser en 409
+  // sur doublon — exactement le scenario que ce test pretend couvrir.
+  //
+  // `property_id` DOIT etre l'UUID DE LA FICHE, pas la cle provider :
+  // `property_channel_rate_plans.property_id` est une FK vers
+  // `properties.id` (mesuree par resolution d'embed PostgREST).
+  assert.deepEqual(sb.journal.filtres, [
+    ['property_id', BIEN.id],
+    ['channel', 'booking'],
+    ['role', 'derived']
+  ], 'les trois filtres, dans l ordre, avec l UUID de la fiche')
 })
 
 test('creerDerive : la base prend une ligne sentinelle, le canal son derive', async () => {
@@ -191,4 +205,47 @@ test('poserDerivesParDefaut : une exception est capturee, jamais propagee', asyn
   assert.equal(r.booking.ok, false)
   assert.equal(r.booking.raison, 'exception')
   assert.equal(r.airbnb.raison, 'exception')
+})
+
+test('LE TEST QUI COMPTE : un echec de LIAISON arrete la boucle, sinon deux orphelins par bien', async () => {
+  // ⚠ `liaison_db` SIGNALE UN PROBLEME DE SCHEMA, PAS DE CANAL.
+  // L'upsert exige l'index unique (property_id, channel) ; sans lui Postgres
+  // rend 42P10 sur l'`ON CONFLICT`. Continuer sur le canal suivant creerait un
+  // SECOND enfant chez le provider sans l'enregistrer — deux rate plans
+  // orphelins par creation de bien, deux de plus a chaque tentative, et
+  // `choisirTarifDerive` qui refuse ensuite en 409 sur doublon : le bien
+  // deviendrait DEFINITIVEMENT inconnectable. L'inverse exact du trou que ce
+  // module ferme. Releve en review le 10 septembre 2026.
+  const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
+  const sb = faussSupabase({ existant: null, erreurUpsert: { message: '42P10' } })
+  let posts = 0
+  const appel = async (methode) => {
+    if (methode === 'GET') {
+      return { ok: true, json: { data: { attributes: { sell_mode: 'per_room', options: [] } } } }
+    }
+    posts++
+    return { ok: true, json: { data: { id: 'enfant-' + posts } } }
+  }
+  const r = await poserDerivesParDefaut(sb, appel, BIEN)
+  assert.equal(posts, 1, 'UN seul enfant cree : la boucle s arrete avant airbnb')
+  assert.equal(r.booking.raison, 'liaison_db')
+  assert.equal(r.airbnb, undefined, 'airbnb n a pas ete tente')
+  assert.match(String(r.arret), /index unique/, 'la raison de l arret est dite')
+
+  // ⚠ ET UN ECHEC DE CANAL, LUI, N'ARRETE PAS L'AUTRE.
+  // Le test voisin le verifie deja ; on s'assure ici que la nouvelle garde ne
+  // l'a pas transforme en arret general.
+  const sb2 = faussSupabase({ existant: null })
+  let n2 = 0
+  const appel2 = async (methode) => {
+    if (methode === 'GET') {
+      return { ok: true, json: { data: { attributes: { sell_mode: 'per_room', options: [] } } } }
+    }
+    n2++
+    return n2 === 1 ? { ok: false, status: 502, json: {} } : { ok: true, json: { data: { id: 'e' + n2 } } }
+  }
+  const r2 = await poserDerivesParDefaut(sb2, appel2, BIEN)
+  assert.equal(r2.booking.ok, false)
+  assert.equal(r2.airbnb.ok, true, 'un echec de creation ne bloque pas l autre canal')
+  assert.equal(r2.arret, undefined)
 })

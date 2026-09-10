@@ -129,12 +129,22 @@ async function runPostMapping(owner) {
   // trial compte au premier `active_at` — et lancerait le rattrapage des messages
   // chez Channex pour un bien dont les fils sont encore chez Beds24. La chaine
   // post-mapping appartient a l'APRES-bascule (re-keying, phase 2.8).
+  // ⚠ `out` EST DECLARE AVANT LA PREMIERE SORTIE, ET C'EST LE CORRECTIF.
+  // Il etait declare APRES la garde de migration ci-dessous, qui lui ecrivait
+  // pourtant `out.reason` : `const` en zone morte temporelle, donc
+  // « ReferenceError: Cannot access 'out' before initialization » sur TOUT bien
+  // en migration — les deux biens de Bagneres aujourd'hui. L'exception etait
+  // rattrapee par le `catch` du handler : HTTP 500, Channex qui retente en
+  // boucle, un incident fondateur `webhook_error`, et surtout la boucle du
+  // batch ABANDONNEE — les autres biens du meme lot n'etaient pas traites.
+  // Trouve en review le 10 septembre 2026, introduit par 7467840.
+  const out = { property_id: cleDuCoeur, bookings: 0, messages: null, ready: false }
+
   if (estEnMigration(owner)) {
     console.log('[channel-events] bien en migration : post-mapping differe jusqu au re-keying', cleDuCoeur)
     out.reason = 'migration_en_cours'
     return out
   }
-  const out = { property_id: cleDuCoeur, bookings: 0, messages: null, ready: false }
   // L'evenement vient de Channex : c'est Channex qu'on interroge, quel que soit
   // le provider encore inscrit sur le bien.
   const provider = getProvider('channex')
@@ -501,9 +511,21 @@ module.exports = async function handler(req, res) {
         results.push({ property_id: ppid, reason: 'ambiguous_property' })
         continue
       }
-      const r = await runPostMapping(owner)
-      console.log('[channel-events]', event, 'traite', JSON.stringify(r))
-      results.push(r)
+      // ⚠ UN BIEN QUI ECHOUE N'EMPORTE PAS LE LOT.
+      // Sans ce try, une exception sur le premier bien abandonnait la boucle :
+      // les autres proprietes du meme canal n'etaient jamais traitees, et
+      // l'appelant recevait un 500 qui faisait retenter Channex en boucle sur
+      // l'ensemble. C'est ce qu'a produit le `ReferenceError` sur `out`
+      // (corrige plus haut) : un seul bien en migration suffisait a bloquer
+      // tous les autres. Trouve en review le 10 septembre 2026.
+      try {
+        const r = await runPostMapping(owner)
+        console.log('[channel-events]', event, 'traite', JSON.stringify(r))
+        results.push(r)
+      } catch (e) {
+        console.error('[channel-events] post-mapping echoue pour', ppid, ':', e.message)
+        results.push({ property_id: ppid, reason: 'post_mapping_error', error: e.message })
+      }
     }
     return res.status(200).json({ ok: true, event, results })
   } catch (err) {

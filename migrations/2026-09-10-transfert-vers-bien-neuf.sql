@@ -65,8 +65,14 @@
 -- meme choix que dans le re-keying.
 --
 -- `profile_permissions.property_refs` (text[]) : recalcule
--- par le trigger `properties_sync_refs`. On ne touche que
--- `property_ids` (uuid[]), la source de ce calcul.
+-- par le trigger `profile_permissions_sync_refs`
+-- (`before update of property_ids`), que l'UPDATE de
+-- `property_ids` declenche.
+-- ⚠ CE N'EST PAS `properties_sync_refs`, que ce commentaire
+-- citait a tort : celui-la ecoute
+-- `update of provider_property_id`, et cette fonction ne
+-- touche PAS cette colonne. Le raisonnement tenait, la
+-- reference etait fausse — corrige en review.
 --
 -- ─────────────────────────────────────────────────────────
 -- LE CLOISONNEMENT PAR COMPTE
@@ -160,6 +166,16 @@ begin
   end if;
   if v_user_src is distinct from v_user_cib then
     raise exception 'transfert_compter : les deux fiches ne sont pas du meme compte';
+  end if;
+  -- ⚠ UN COMPTE NUL EST REFUSE, COMME DANS `rekeying_compter`.
+  -- Je l'avais omis ici, trouve en review. Deux fiches sans
+  -- `user_id` passent le `is distinct from` (null vs null), et
+  -- la clause tolerante devient `(user_id = null or user_id is
+  -- null)` : l'audit qui AUTORISE le geste compterait alors
+  -- les lignes sans compte de TOUS les hotes et les
+  -- presenterait comme celles du bien.
+  if v_user_src is null then
+    raise exception 'transfert_compter : fiche sans compte, audit refuse';
   end if;
 
   -- Famille A : la cle PROVIDER (les listes du re-keying).
@@ -311,20 +327,88 @@ begin
     raise exception 'transferer_bien : automation_paused doit etre true sur la source (%)', p_source;
   end if;
 
-  -- ⚠ LA CIBLE DOIT ETRE VIERGE DE CALENDRIER.
-  -- `calendar_inventory` porte `UNIQUE (property_id, date)`
-  -- (docs/CALENDRIER_TECH.md) : si la cible a deja une ligne
-  -- sur une date que la source porte aussi, l'UPDATE echoue
-  -- et TOUT est annule. On refuse AVANT, avec le nombre en
-  -- clair, plutot que de laisser la contrainte parler — et
-  -- on ne supprime surtout pas les lignes de la cible, qui
-  -- sont une intention de l'hote.
+  -- ⚠ LA CLE SOURCE NE DOIT ETRE PORTEE QUE PAR UNE FICHE.
+  -- MEME REFUS QUE `rekey_property`, ET LA MEME RAISON — je
+  -- l'avais oublie ici, trouve en review le 10 septembre.
+  -- `provider_property_id` n'a AUCUNE unicite globale, et
+  -- cette base porte deja des doublons de `properties`. Le
+  -- filtre de compte ne ferme que la moitie du trou : sur
+  -- `access_codes` et `automation_incidents`, la clause
+  -- tolerante accepte `user_id is null` — et 96 des
+  -- 119 codes d'acces de la base sont dans ce cas. Les
+  -- lignes sans compte d'un AUTRE hote portant le meme
+  -- identifiant Beds24 auraient donc ete absorbees par la
+  -- fiche de celui-ci, ET recopiees dans `rekeying_backup`,
+  -- donc rendues lisibles.
+  select count(*) into n_collision from public.properties
+    where provider_property_id = v_src_cle;
+  if n_collision > 1 then
+    raise exception 'transferer_bien : la cle source % est portee par % fiches — '
+      'transfert refuse (impossible de savoir a qui sont les lignes sans compte)',
+      v_src_cle, n_collision;
+  end if;
+
+  -- ⚠ LA CIBLE DOIT ETRE VIERGE SUR LES TABLES A CONTRAINTE UNIQUE.
+  -- Une seule ligne cote cible sur l'une d'elles, et l'UPDATE
+  -- viole l'index : TOUTE la transaction est annulee, avec un
+  -- 23505 brut au lieu d'un compte en clair. Les quatre
+  -- tables concernees, relevees en review :
+  --   calendar_inventory          unique (property_id, date)
+  --   property_status             unique (user_id, property_id)
+  --   menages                     unique (user_id, property_id, booking_id, departure_date)
+  --   property_cleaning_providers unique (user_id, property_id, provider_id)
+  --
+  -- ⚠ ET LE CAS EST QUASI CERTAIN, PAS HYPOTHETIQUE : le plan
+  -- mappe la fiche cible AVANT le transfert, et le cron */5
+  -- lui pose une ligne `property_status` dans les cinq
+  -- minutes qui suivent.
+  --
+  -- `property_status` est donc PURGEE cote cible, et c'est le
+  -- seul cas ou on se le permet : c'est un etat RECALCULE par
+  -- `lib/cron-property-status.js`, il ne porte aucune
+  -- intention de l'hote et il repoussera au prochain cycle.
+  -- Les trois autres portent des decisions humaines
+  -- (calendrier, menages, prestataires assignees) : on refuse
+  -- et on les nomme, jamais on ne les efface.
+  delete from public.property_status
+    where property_id = v_cib_cle and user_id = v_user;
+
   select count(*) into n_collision from public.calendar_inventory
     where property_id = p_cible;
   if n_collision > 0 then
     raise exception 'transferer_bien : la cible porte deja % ligne(s) de calendrier — '
       'les traiter a la main avant le transfert', n_collision;
   end if;
+
+  select count(*) into n_collision from public.menages
+    where property_id = v_cib_cle and user_id = v_user;
+  if n_collision > 0 then
+    raise exception 'transferer_bien : la cible porte deja % menage(s) — '
+      'les traiter a la main avant le transfert', n_collision;
+  end if;
+
+  select count(*) into n_collision from public.property_cleaning_providers
+    where property_id = v_cib_cle and user_id = v_user;
+  if n_collision > 0 then
+    raise exception 'transferer_bien : la cible a deja % prestataire(s) assignee(s) — '
+      'les traiter a la main avant le transfert', n_collision;
+  end if;
+
+  -- ⚠ CE QUE CETTE FONCTION NE PEUT PAS GARDER, ET QUI SE
+  -- REGLE PAR L'ORDRE DES GESTES : le meme sejour peut
+  -- exister sous DEUX `booking_id` (celui de Beds24, celui de
+  -- Channex) si le canal de la fiche cible est ACTIVE avant
+  -- le transfert. `bookings_snapshot` est clee
+  -- `(user_id, booking_id)`, donc aucun UPDATE n'echouerait —
+  -- les deux vivraient sous la cle cible. `cron-messages` s'en
+  -- protege par `stay_key`, mais
+  -- `lib/cleaning/sync-menages-entite.js` n'a AUCUNE
+  -- deduplication par empreinte de sejour : ce serait DEUX
+  -- MENAGES pour un depart, en silence. C'est la classe des
+  -- « 11 menages fantomes ».
+  -- LA REGLE : le canal se mappe avant, s'ACTIVE apres le
+  -- transfert. Un canal inactif ne rapporte aucune
+  -- reservation.
 
   -- ── SAUVEGARDE, dans la meme transaction ────────────────
   insert into public.rekeying_backup (bien_id, source, cible, nom_table, lignes)
@@ -395,6 +479,23 @@ begin
   select p_source, v_src_cle, v_cib_cle, 'profile_permissions (uuid)',
          coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb)
     from public.profile_permissions x where p_source = any(x.property_ids);
+
+  -- ⚠ `property_snapshots` EST SAUVEGARDEE, MEME SI ELLE NE BOUGE PAS.
+  -- Elle reste volontairement attachee a Beds24 sous sa cle
+  -- d'origine (releve historique par provider). Mais la fiche
+  -- source, elle, finit SUPPRIMEE par `supprimer_bien_vide` :
+  -- la ligne `(user_id, 'beds24', '209413')` survivrait alors
+  -- qu'aucune fiche ne porte plus '209413' — le payload
+  -- Beds24 integral, tout l'objet du rapatriement, devenu
+  -- inatteignable par l'une comme par l'autre cle, sans
+  -- erreur et sans copie de secours. Le re-keying laissait au
+  -- moins la fiche vivante ; ici elle disparait. Trouve en
+  -- review le 10 septembre 2026.
+  insert into public.rekeying_backup (bien_id, source, cible, nom_table, lignes)
+  select p_source, v_src_cle, v_cib_cle, 'property_snapshots (conservee, non deplacee)',
+         coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb)
+    from public.property_snapshots x
+   where x.property_id = v_src_cle and x.user_id = v_user;
 
   -- ── FAMILLE A : la cle PROVIDER ─────────────────────────
   foreach t in array public.rekeying_tables()
@@ -523,6 +624,7 @@ declare
   paire text[];
   t text;
   n bigint;
+  cl text;
   v_cle text;
   v_user uuid;
   total bigint := 0;
@@ -533,25 +635,41 @@ begin
     raise exception 'supprimer_bien_vide : bien % introuvable', p_bien;
   end if;
 
+  -- ⚠ LE COMPTE EST REQUIS, ET LA FAMILLE A EST FILTREE PAR LUI.
+  -- Sans ce filtre — mon oubli, trouve en review — les
+  -- comptages voyaient les lignes de TOUT hote portant le
+  -- meme `provider_property_id` (aucune unicite globale).
+  -- Deux effets concrets, aucun theorique : une suppression
+  -- legitime REFUSEE a cause de lignes qui ne sont pas celles
+  -- du bien, et un message qui envoie l'operateur nettoyer a
+  -- la main les lignes d'un AUTRE hote.
+  if v_user is null then
+    raise exception 'supprimer_bien_vide : fiche sans compte, suppression refusee';
+  end if;
+
   foreach t in array public.rekeying_tables()
   loop
-    execute format('select count(*) from public.%I where property_id = $1', t)
-      into n using v_cle;
+    cl := format(public.rekeying_clause_compte(t), '$2');
+    execute format('select count(*) from public.%I where property_id = $1 and ' || cl, t)
+      into n using v_cle, v_user;
     if n > 0 then total := total + n; nom_table := t; restantes := n; return next; end if;
   end loop;
 
   foreach paire slice 1 in array public.rekeying_tables_ref()
   loop
-    execute format('select count(*) from public.%I where %I = $1', paire[1], paire[2])
-      into n using v_cle;
+    cl := format(public.rekeying_clause_compte(paire[1]), '$2');
+    execute format('select count(*) from public.%I where %I = $1 and ' || cl, paire[1], paire[2])
+      into n using v_cle, v_user;
     if n > 0 then total := total + n; nom_table := paire[1] || '.' || paire[2];
       restantes := n; return next; end if;
   end loop;
 
   foreach paire slice 1 in array public.rekeying_tables_tableau()
   loop
-    execute format('select count(*) from public.%I where $1 = any(%I)', paire[1], paire[2])
-      into n using v_cle;
+    cl := format(public.rekeying_clause_compte(paire[1]), '$2');
+    execute format('select count(*) from public.%I where $1 = any(%I) and ' || cl,
+      paire[1], paire[2])
+      into n using v_cle, v_user;
     if n > 0 then total := total + n; nom_table := paire[1] || '.' || paire[2];
       restantes := n; return next; end if;
   end loop;
