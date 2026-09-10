@@ -136,7 +136,12 @@ module.exports = async function handler(req, res) {
 
     let qProps = supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
+      // ⚠ `migration_target_property_id` : c'est elle qui rend un bien EN COURS
+      // DE MIGRATION eligible aux ecrans de connexion OTA. Sans elle, un bien
+      // encore `provider = 'beds24'` mais deja pourvu de sa propriete Channex
+      // n'apparaissait nulle part — l'hote ne pouvait pas le connecter, et il
+      // n'y avait aucun autre chemin dans le produit.
+      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', compteLecture)
     if (refsPerimetre) {
       // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS. `properties.id` est de type
@@ -164,9 +169,26 @@ module.exports = async function handler(req, res) {
     // en table (cron), on EXCLUT ici les lignes provider='beds24' pour ne pas les renvoyer
     // deux fois. provider null = ancien bien channex -> conserve. Sortie ainsi identique
     // a l'avant-materialisation : tous les consommateurs de cet endpoint restent corrects.
+    // ⚠ SAUF LES BIENS EN COURS DE MIGRATION, ET C'EST TOUT L'ENJEU.
+    // Un bien qui porte une `migration_target_property_id` a deja sa propriete
+    // chez le nouveau provider : il doit etre servi DEPUIS LA BASE, comme
+    // n'importe quel bien du canal. Servi par le fetch live Beds24, il arrivait
+    // sans cette colonne — donc invisible aux ecrans de connexion, et le
+    // correctif de leurs filtres restait inerte.
+    //
+    // Aggravant, et c'est le vrai risque : une fois le bien DEMAPPE de Beds24,
+    // l'API Beds24 ne le renvoie plus et sa ligne locale etait filtree ici — le
+    // bien DISPARAISSAIT purement et simplement de la liste de l'hote, au milieu
+    // de sa migration. Trouve en review.
+    const enMigration = (p) => !!p.migration_target_property_id
+      && String(p.provider_property_id) !== String(p.migration_target_property_id)
+
     const channexProps = (chanData || [])
-      .filter(p => p.provider !== 'beds24')
+      .filter(p => p.provider !== 'beds24' || enMigration(p))
       .map(p => ({ ...p, provider: p.provider || 'channex' }))
+    // Les identifiants deja servis depuis la base : le fetch live ne doit pas
+    // les rendre une seconde fois.
+    const dejaServis = new Set(channexProps.map(p => String(p.provider_property_id)))
     let beds24Props = []
     try {
       const { data: keyData } = await supabase
@@ -182,6 +204,8 @@ module.exports = async function handler(req, res) {
           // aucune RLS ne les borne. Le perimetre doit etre applique ICI, sinon
           // un membre restreint recevrait tous les biens Beds24 du titulaire.
           .filter(b => !refsPerimetre || refsPerimetre.includes(String(b.id)))
+          // Deja servi depuis la base (bien en migration) : pas deux fois.
+          .filter(b => !dejaServis.has(String(b.id)))
           .map(b => ({
           id: b.id,
           name: b.name,

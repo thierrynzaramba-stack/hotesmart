@@ -262,3 +262,75 @@ test('le canal reste INACTIF a la creation, quoi qu il arrive', () => {
   assert.ok(/is_active: false/.test(src))
   assert.ok(/FORCE cote serveur/i.test(src), 'et ce n est pas pilotable par l appelant')
 })
+
+// ─── Le type de `hotel_id`, mesure le 10 septembre 2026 ─────────────────────
+
+test('LE TEST QUI COMPTE : `hotel_id` part en NOMBRE, sinon la creation rend 500 muet', () => {
+  // Mesure reelle sur l hotel 10853342 : en CHAINE, `POST /channels` rend
+  // HTTP 500 « internal_server_error » sans aucun detail — pas un 422 qui
+  // nommerait le champ. Quatre variantes essayees avant de trouver ; le seul
+  // changement qui fait passer de 500 a 201 est le TYPE.
+  //
+  // L ecran de liaison Booking de l hote aurait echoue la, juste apres une
+  // verification reussie, et sans rien pour comprendre.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(/settings: \{ hotel_id: Number\(hotelId\) \}/.test(src), 'la creation envoie un nombre')
+  assert.ok(!/settings: \{ hotel_id: String\(hotelId\) \}/.test(src), 'et jamais une chaine')
+})
+
+test('un `hotel_id` non numerique est refuse AVANT l appel', () => {
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(/hotel_id invalide \(nombre de 1 a 15 chiffres attendu\)/.test(src))
+})
+
+test('`hotel_id` est BORNE : Number() ne doit pas arrondir en silence', () => {
+  // 17 chiffres passaient `/^\d+$/`, et `Number()` en perdait la fin : Channex
+  // recevait un identifiant DIFFERENT de celui saisi, avec un 201 en retour —
+  // donc un ecran qui annonce la reussite sur le mauvais hotel.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(/\^\[1-9\]\\d\{0,14\}\$/.test(src), 'borne a 15 chiffres, sans zero de tete')
+  // Contre-epreuve de la regle elle-meme.
+  const re = /^[1-9]\d{0,14}$/
+  assert.ok(re.test('10853342'), 'un hotel_id reel passe')
+  assert.ok(!re.test('123456789012345678'), '18 chiffres refuses')
+  assert.ok(!re.test('0'), 'zero refuse')
+  assert.ok(!re.test('0123'), 'zero de tete refuse')
+})
+
+test('LE TEST QUI COMPTE : le mapping n envoie QUE le mapping', () => {
+  // J avais ajoute `settings: { hotel_id }` « au cas ou le PUT remplace l objet
+  // comme la creation ». Non mesure, et casseur : renvoyer une seule cle de
+  // `settings` aurait efface les autres si le remplacement etait reel (Channex
+  // y met `machine_account` et sept reglages de paiement), et exiger de relire
+  // ce champ ouvrait un 502 sur une lecture non garantie.
+  const src = lire('api/channel-bcom-write.js')
+  const bloc = src.slice(src.indexOf('const payloadM = {'), src.indexOf('const dryRunM'))
+  // On ne regarde que le CODE : le commentaire, lui, parle de `settings`. Et
+  // c'est `hotel_id` qu'on traque — le `settings` du rate_plan (occupancy,
+  // codes Booking) EST le mapping, il a sa place ici.
+  const code = bloc.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.ok(!/hotel_id/.test(code), 'le PUT ne touche pas aux reglages du canal')
+  assert.ok(/rate_plans: \[\{/.test(bloc), 'seulement le mapping')
+})
+
+// ─── Le point d entree manquant, signale par Thierry ────────────────────────
+
+test('LE TEST QUI COMPTE : un bien EN MIGRATION est visible dans les ecrans de connexion', () => {
+  // Constat de Thierry, 10 septembre 2026 : « sur HoteSmart je ne peux pas
+  // deconnecter de Beds24 et remapper ensuite, je pensais que c'etait prevu ».
+  // Ce ne l'etait pas. Les deux filtres ne montraient que les biens DEJA chez
+  // le canal : un bien encore `beds24`, meme pourvu de sa propriete Channex par
+  // l'assistant, n'apparaissait nulle part — et il n'existait aucun autre
+  // chemin dans le produit pour le connecter. La migration butait sur une page
+  // vide et un bouton absent.
+  for (const f of ['pages/connexions.html', 'pages/biens.html']) {
+    const src = lire(f)
+    assert.ok(/migration_target_property_id/.test(src),
+      `${f} : un bien en migration doit passer le filtre`)
+  }
+  // Et l endpoint doit rendre la colonne, sinon le filtre lit `undefined`.
+  const api = lire('api/channel-property.js')
+  const select = (api.match(/\.select\('id, name, provider[^']*'\)/) || [''])[0]
+  assert.ok(select.includes('migration_target_property_id'),
+    'la liste des biens porte la colonne cible : ' + select.slice(0, 80))
+})

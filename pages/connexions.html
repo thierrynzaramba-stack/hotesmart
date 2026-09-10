@@ -455,7 +455,20 @@
         headers: { 'Authorization': `Bearer ${session.access_token}` }
       })
       const data = await res.json()
-      const props = (data.properties || []).filter(p => p.provider === 'channex' || p.provider === 'channel')
+      // ⚠ ET LES BIENS EN COURS DE MIGRATION.
+      // Constat de Thierry, 10 septembre 2026 : « sur HoteSmart je ne peux pas
+      // deconnecter de Beds24 et remapper ensuite, je pensais que c'etait
+      // prevu ». Ce ne l'etait pas : ce filtre ne montrait que les biens DEJA
+      // chez le canal, donc un bien encore `beds24` — meme pourvu de sa
+      // propriete Channex par l'assistant de migration — n'apparaissait nulle
+      // part. Il n'existait aucun autre chemin dans le produit pour le
+      // connecter : la migration butait sur une page vide.
+      //
+      // Le critere est la PROPRIETE CIBLE : un bien qui en a une est pret a
+      // etre connecte, quel que soit le provider encore inscrit. Les endpoints,
+      // eux, resolvent deja la bonne destination (`proprieteChezLeProvider`).
+      const props = (data.properties || []).filter(p =>
+        p.provider === 'channex' || p.provider === 'channel' || p.migration_target_property_id)
 
       if (!props.length) {
         box.innerHTML = `<div style="font-size:13px;color:var(--text2)">
@@ -481,7 +494,7 @@
 
       box.querySelectorAll('button[data-connect]').forEach(b =>
         b.addEventListener('click', () => {
-          const p = otaProps.find(x => x.id === b.dataset.connect)
+          const p = otaProps.find(x => String(x.id) === String(b.dataset.connect))
           if (p) openConnexions(p, b)
         }))
     } catch (e) {

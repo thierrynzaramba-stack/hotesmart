@@ -107,6 +107,16 @@ module.exports = async function handler(req, res) {
     if (action === 'create') {
       const providerPropertyId = (req.query.property_id || '').trim()
       const hotelId = (req.query.hotel_id || '').trim()
+      // Le `hotel_id` de Booking est numerique : on le valide comme tel, parce
+      // que la creation l'exige en NOMBRE (voir plus bas).
+      // ⚠ BORNE, PARCE QUE `Number()` ARRONDIT EN SILENCE.
+      // `/^\d+$/` laissait passer 17 chiffres : `Number()` en perd la fin, et
+      // Channex recevait un identifiant DIFFERENT de celui saisi — avec un 201
+      // en retour, donc un ecran qui annonce la reussite sur le mauvais hotel.
+      // 15 chiffres restent tres au-dela des identifiants Booking reels (8).
+      if (hotelId && !/^[1-9]\d{0,14}$/.test(hotelId)) {
+        return res.status(400).json({ error: 'hotel_id invalide (nombre de 1 a 15 chiffres attendu)' })
+      }
       const roomTypeCode = parseInt(req.query.room_type_code, 10)
       const ratePlanCode = parseInt(req.query.rate_plan_code, 10)
       if (!providerPropertyId) return res.status(400).json({ error: 'property_id (provider_property_id) requis' })
@@ -223,7 +233,24 @@ module.exports = async function handler(req, res) {
               }
             }
           ] : [],
-          settings: { hotel_id: String(hotelId) }
+          // ⚠ `hotel_id` EN NOMBRE, ET C'EST MESURE (10 septembre 2026).
+          // En CHAINE, `POST /channels` rend HTTP 500 « internal_server_error »
+          // SANS AUCUN detail — pas un 422 qui nommerait le champ. Trois autres
+          // variantes ont ete essayees avant de trouver (sans rate_plans, sans
+          // group_id, avec machine_account) : le seul changement qui fait passer
+          // la creation de 500 a 201 est le TYPE de cet identifiant.
+          //
+          // L'ecran de liaison Booking de l'hote (components/booking-connect.js)
+          // aurait donc echoue ici, juste apres une verification reussie — au
+          // pire moment, et sans rien pour comprendre.
+          //
+          // ⚠ PORTEE EXACTE DE LA MESURE : la CREATION seule est concernee.
+          // `test_connection` et `mapping_details` acceptent les deux formes —
+          // et rendent d'ailleurs le meme resultat pour un hotel CONNECTE
+          // (Colomiers) que pour un hotel non connecte : ces deux appels ne
+          // discriminent rien, ils ne peuvent pas servir d'indicateur.
+          // Le comportement du `PUT /channels/:id` n'a pas ete mesure.
+          settings: { hotel_id: Number(hotelId) }
         }
       }
 
@@ -311,6 +338,17 @@ module.exports = async function handler(req, res) {
         ? parseInt(req.query.occupancy, 10) : (propM.capacity || 1)
       const payloadM = {
         channel: {
+          // ⚠ ON N'ENVOIE QUE LE MAPPING, ET C'EST DELIBERE.
+          // J'avais ajoute `settings: { hotel_id }` « au cas ou le PUT remplace
+          // l'objet comme la creation ». Trois defauts, tous signales en review :
+          // le comportement du PUT n'est PAS mesure (il n'est atteignable
+          // qu'apres l'approbation extranet) ; renvoyer une seule cle de
+          // `settings` aurait EFFACE les autres si le remplacement etait reel
+          // (Channex y met `machine_account` et sept reglages de paiement) ; et
+          // exiger de relire ce champ ouvrait un 502 sur une lecture non
+          // garantie — le meme canal ne rend pas `group_id`, pourtant exige a
+          // l'ecriture. Une prudence non mesuree qui casse vaut moins que le
+          // comportement qui marchait.
           rate_plans: [{
             rate_plan_id: propM.provider_rate_plan_id,
             settings: {

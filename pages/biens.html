@@ -389,7 +389,14 @@
     // "HôteSmart" se lisait a tort comme un canal connecte.
     // Self-service : le bouton "Connexions" ouvre l'assistant marque blanche par bien
     // (Airbnb OAuth / Booking) via components/connexions.js -> Channex reste masque.
+    // ⚠ ET LES BIENS EN COURS DE MIGRATION : c'est ce bouton qui ouvre
+    // l'assistant de connexion. Masque pour un bien encore `beds24`, il ne
+    // laissait AUCUN point d'entree pour connecter un bien qu'on vient de
+    // demapper de son ancien provider — constat de Thierry, 10 septembre 2026.
+    // Le critere est la propriete cible : elle existe, donc il y a de quoi
+    // connecter.
     const isOta = p.provider === 'channex' || p.provider === 'channel'
+      || !!p.migration_target_property_id
 
     card.innerHTML = `
       <div>

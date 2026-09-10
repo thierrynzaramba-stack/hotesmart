@@ -264,16 +264,56 @@ test('les droits par bien selectionne ne sont PAS deplaces : un trigger les reca
 
 // ─── Le cloisonnement, sur une fonction qui contourne RLS ───────────────────
 
-test('LE TEST QUI COMPTE : le deplacement est cloisonne par COMPTE', () => {
+test('LE TEST QUI COMPTE : la tolerance « sans compte » est BORNEE a deux tables', () => {
+  // Mon correctif pour recuperer les 50 codes d'acces de La bulle avait etendu
+  // `or user_id is null` a TOUTES les tables — rouvrant la fuite que le filtre
+  // ferme : `provider_property_id` n'a aucune unicite globale, et les lignes
+  // sans compte d'un AUTRE hote portant le meme identifiant auraient ete
+  // absorbees. Mesure : seules `access_codes` (96/119) et
+  // `automation_incidents` (11/28) ont des lignes sans compte.
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations/2026-09-10-rekeying.sql'), 'utf8')
+  const liste = sql.slice(sql.indexOf('rekeying_tables_sans_compte()'), sql.indexOf('rekeying_clause_compte'))
+  assert.ok(/'access_codes', 'automation_incidents'/.test(liste), 'la liste est explicite')
+  assert.ok(!/'bookings_snapshot'/.test(liste), 'et ne contient pas les tables a compte plein')
+  // Le predicat est CALCULE par table, jamais ecrit en dur.
+  assert.ok(!/or user_id is null\)', t\)/.test(sql), 'plus de tolerance en dur dans les UPDATE')
+  const clauses = sql.match(/rekeying_clause_compte\(/g) || []
+  assert.ok(clauses.length >= 9, `le predicat est appele partout (vu ${clauses.length})`)
+})
+
+test('LE TEST QUI COMPTE : sans compte proprietaire, le deplacement REFUSE', () => {
+  // Si `v_user` etait nul, `user_id = $3` n'aurait jamais ete vrai : sur les
+  // tables tolerantes, le deplacement n'aurait retenu QUE les lignes sans
+  // compte — tous comptes confondus — en laissant derriere celles possedees.
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations/2026-09-10-rekeying.sql'), 'utf8')
+  assert.ok(/n''a pas de compte proprietaire/.test(sql))
+  assert.ok(/rekeying_compter : compte requis/.test(sql), 'le comptage aussi')
+})
+
+test('les lignes sans compte sont COMPTEES A PART, pas fondues dans le total', async () => {
+  // Le commentaire promettait « le comptage la rend a part » — il ne le faisait
+  // pas, et l'operateur ne pouvait pas savoir combien de lignes du total
+  // etaient dans ce cas.
+  const f = faux({ compter: [
+    { nom_table: 'access_codes', colonne: 'property_id', sous_source: 65, sous_cible: 0, sans_compte: 50 }
+  ] })
+  const r = await auditRekeying(f.api, EN_MIGRATION)
+  assert.equal(r.lignes_a_deplacer, 65)
+  assert.equal(r.lignes_sans_compte, 50)
+  assert.equal(r.par_table[0].sans_compte, 50)
+})
+
+test('le deplacement porte un filtre de compte sur chaque ecriture', () => {
   // La fonction est `security definer` : elle contourne RLS. Sans filtre de
   // compte, deux biens partageant un meme `provider_property_id` — qui n a
   // aucune unicite globale, et cette base porte deja des doublons de
   // `properties` — verraient les lignes de l un absorbees par la cible de l autre.
   const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations/2026-09-10-rekeying.sql'), 'utf8')
-  const updates = sql.match(/update public\.%I[\s\S]{0,220}?using/g) || []
+  const updates = sql.match(/update public\.%I[\s\S]{0,260}?using/g) || []
   assert.ok(updates.length >= 3, 'les trois formes de deplacement sont presentes')
   for (const u of updates) {
-    assert.ok(/user_id = \$3/.test(u), 'chaque UPDATE porte le filtre de compte : ' + u.slice(0, 80))
+    assert.ok(/rekeying_clause_compte\(/.test(u),
+      'chaque UPDATE passe par le predicat de compte : ' + u.slice(0, 90))
   }
 })
 
@@ -297,4 +337,25 @@ test('LE TEST QUI COMPTE : des lignes RESTEES sous l ancienne cle rendent le ges
   assert.equal(r.conforme, false)
   assert.equal(r.restant_sous_la_source, 2)
   assert.match(r.note, /automation_paused` ne l'arrete pas/)
+})
+
+test('LE TEST QUI COMPTE : un propId porte par DEUX biens fait refuser le deplacement', () => {
+  // C'est la fuite residuelle des deux tables tolerantes : la moitie
+  // « user_id is null » du predicat n a aucun filtre de compte. Borner la
+  // tolerance reduisait la surface ; ce refus ferme le cas.
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations/2026-09-10-rekeying.sql'), 'utf8')
+  assert.ok(/porte par plusieurs biens — deplacement refuse/.test(sql))
+  assert.ok(/select count\(\*\) from public\.properties[\s\S]{0,80}provider_property_id = p_source\) > 1/.test(sql))
+})
+
+test('les lignes sans compte NON deplacables sont annoncees a part', async () => {
+  // Compter partout laissait annoncer « dont N deplacees » pour des lignes qui
+  // ne bougeraient pas — abandonnees sous une cle morte, avec `conforme: true`.
+  const f = faux({ compter: [
+    { nom_table: 'access_codes', colonne: 'property_id', sous_source: 65, sous_cible: 0, sans_compte: 50 },
+    { nom_table: 'menages', colonne: 'property_id', sous_source: 98, sous_cible: 0, sans_compte: 3 }
+  ] })
+  const r = await auditRekeying(f.api, EN_MIGRATION)
+  assert.equal(r.lignes_sans_compte, 50, 'seules les tables tolerantes')
+  assert.equal(r.sans_compte_non_deplacees, 3, 'et les autres sont dites a part')
 })

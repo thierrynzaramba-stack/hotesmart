@@ -136,6 +136,28 @@ as $$
   ]::text[];
 $$;
 
+-- ⚠ LES SEULES TABLES OU UNE LIGNE PEUT N'AVOIR AUCUN COMPTE.
+-- Mesure du 10 septembre 2026 sur toute la base : `access_codes`
+-- (96 lignes sur 119) et `automation_incidents` (11 sur 28).
+-- Partout ailleurs, `user_id` est renseigne a 100 %.
+--
+-- POURQUOI CETTE LISTE EXISTE, ET POURQUOI ELLE EST COURTE.
+-- Les deux writers de codes d'acces ne posent pas `user_id`
+-- (bloquant (d) de CLAUDE.md). Un filtre strict aurait laisse
+-- 50 des 65 codes de La bulle sous une cle morte. Mais
+-- tolerer `user_id is null` PARTOUT rouvrait la fuite que le
+-- filtre ferme : `provider_property_id` n'a aucune unicite
+-- globale, et les lignes sans compte d'un AUTRE hote portant
+-- le meme identifiant auraient ete absorbees. La tolerance
+-- est donc bornee aux tables ou elle est MESUREE.
+create or replace function public.rekeying_tables_sans_compte()
+returns text[]
+language sql
+immutable
+as $$
+  select array['access_codes', 'automation_incidents']::text[];
+$$;
+
 -- Les tables dont la reference TEXT porte un AUTRE nom.
 -- Mesure du 10 septembre 2026 : 99 avis + 2 periodes de
 -- prestataire pour les deux biens de Bagneres.
@@ -179,12 +201,28 @@ $$;
 -- cible — c'est ce second chiffre qui rend le geste
 -- REPRENABLE : apres un passage reussi, tout est a droite.
 
+-- Le predicat de compte pour une table donnee : strict par
+-- defaut, tolerant seulement la ou c'est mesure.
+create or replace function public.rekeying_clause_compte(p_table text)
+returns text
+language sql
+immutable
+as $$
+  select case when p_table = any(public.rekeying_tables_sans_compte())
+    then '(user_id = %s or user_id is null)'
+    else 'user_id = %s'
+  end;
+$$;
+
+drop function if exists public.rekeying_compter(text, text, uuid);
+
 create or replace function public.rekeying_compter(
   p_source text,
   p_cible  text,
   p_user   uuid
 )
-returns table (nom_table text, colonne text, sous_source bigint, sous_cible bigint)
+returns table (nom_table text, colonne text, sous_source bigint,
+               sous_cible bigint, sans_compte bigint)
 language plpgsql
 security definer
 set search_path = public
@@ -194,46 +232,56 @@ declare
   paire text[];
   n_src bigint;
   n_cib bigint;
+  n_nul bigint;
+  cl text;
 begin
-  -- 1) Colonne `property_id` (TEXT).
+  if p_user is null then
+    raise exception 'rekeying_compter : compte requis (sans lui, le comptage traverserait les comptes)';
+  end if;
+
   foreach t in array public.rekeying_tables()
   loop
-    execute format(
-      'select count(*) from public.%I where property_id = $1 and user_id = $2', t)
+    cl := format(public.rekeying_clause_compte(t), '$2');
+    execute format('select count(*) from public.%I where property_id = $1 and ' || cl, t)
       into n_src using p_source, p_user;
-    execute format(
-      'select count(*) from public.%I where property_id = $1 and user_id = $2', t)
+    execute format('select count(*) from public.%I where property_id = $1 and ' || cl, t)
       into n_cib using p_cible, p_user;
+    -- ⚠ ISOLE, PARCE QU'UNE LIGNE SANS COMPTE MERITE D'ETRE VUE.
+    -- Le commentaire de ce fichier promettait « le comptage la rend a part » —
+    -- il ne le faisait pas, et l'operateur ne pouvait pas savoir combien de
+    -- lignes du total etaient dans ce cas.
+    execute format('select count(*) from public.%I where property_id = $1 and user_id is null', t)
+      into n_nul using p_source;
     nom_table := t; colonne := 'property_id';
-    sous_source := n_src; sous_cible := n_cib;
+    sous_source := n_src; sous_cible := n_cib; sans_compte := n_nul;
     return next;
   end loop;
 
-  -- 2) Colonne TEXT nommee autrement.
   foreach paire slice 1 in array public.rekeying_tables_ref()
   loop
-    execute format(
-      'select count(*) from public.%I where %I = $1 and user_id = $2', paire[1], paire[2])
+    cl := format(public.rekeying_clause_compte(paire[1]), '$2');
+    execute format('select count(*) from public.%I where %I = $1 and ' || cl, paire[1], paire[2])
       into n_src using p_source, p_user;
-    execute format(
-      'select count(*) from public.%I where %I = $1 and user_id = $2', paire[1], paire[2])
+    execute format('select count(*) from public.%I where %I = $1 and ' || cl, paire[1], paire[2])
       into n_cib using p_cible, p_user;
+    execute format('select count(*) from public.%I where %I = $1 and user_id is null', paire[1], paire[2])
+      into n_nul using p_source;
     nom_table := paire[1]; colonne := paire[2];
-    sous_source := n_src; sous_cible := n_cib;
+    sous_source := n_src; sous_cible := n_cib; sans_compte := n_nul;
     return next;
   end loop;
 
-  -- 3) Reference dans un TABLEAU de TEXT.
   foreach paire slice 1 in array public.rekeying_tables_tableau()
   loop
-    execute format(
-      'select count(*) from public.%I where $1 = any(%I) and user_id = $2', paire[1], paire[2])
+    cl := format(public.rekeying_clause_compte(paire[1]), '$2');
+    execute format('select count(*) from public.%I where $1 = any(%I) and ' || cl, paire[1], paire[2])
       into n_src using p_source, p_user;
-    execute format(
-      'select count(*) from public.%I where $1 = any(%I) and user_id = $2', paire[1], paire[2])
+    execute format('select count(*) from public.%I where $1 = any(%I) and ' || cl, paire[1], paire[2])
       into n_cib using p_cible, p_user;
+    execute format('select count(*) from public.%I where $1 = any(%I) and user_id is null', paire[1], paire[2])
+      into n_nul using p_source;
     nom_table := paire[1]; colonne := paire[2] || ' (tableau)';
-    sous_source := n_src; sous_cible := n_cib;
+    sous_source := n_src; sous_cible := n_cib; sans_compte := n_nul;
     return next;
   end loop;
 end;
@@ -258,8 +306,23 @@ $$;
 -- `provider_property_id` — ce qui n'a AUCUNE unicite
 -- globale, et cette base porte deja des doublons de
 -- `properties` — verraient les lignes de l'un absorbees par
--- la cible de l'autre. Toutes les tables visees portent
--- `user_id` : le filtre ne coute rien et ferme le cas.
+-- la cible de l'autre.
+--
+-- ⚠ IL ACCEPTE `user_id IS NULL` SUR DEUX TABLES SEULEMENT,
+-- ET C'EST MESURE.
+-- Les deux writers de codes d'acces ne renseignent pas cette
+-- colonne — c'est le bloquant (d) de CLAUDE.md, « user_id
+-- dans INSERT serrures ». Sur La bulle : 50 des 65
+-- `access_codes` sont sans compte. Un filtre strict les
+-- aurait LAISSES DERRIERE, sous une cle morte : les codes du
+-- logement migre auraient disparu de son historique.
+-- Une ligne sans compte est identifiee par `property_id` +
+-- `booking_id`, exactement comme le produit la lit
+-- aujourd'hui. La tolerance est BORNEE a
+-- `rekeying_tables_sans_compte()` — l'etendre a toutes les
+-- tables rouvrait la fuite inter-comptes que ce filtre
+-- ferme. Et le comptage rend `sans_compte` a part, pour que
+-- ces lignes se voient.
 
 create or replace function public.rekey_property(
   p_bien     uuid,
@@ -306,6 +369,25 @@ begin
     raise exception 'rekey_property : le bien porte % et non % — deja migre ?',
       v_actuel, p_source;
   end if;
+  -- ⚠ LA FUITE RESIDUELLE, FERMEE PAR UN REFUS.
+  -- Sur les deux tables tolerantes, la moitie « user_id is null » du predicat
+  -- n'a aucun filtre de compte : si DEUX biens partageaient le meme
+  -- `provider_property_id` (aucune unicite globale, et cette base porte deja des
+  -- doublons de `properties`), les lignes sans compte de l'autre hote seraient
+  -- passees sous la cle du bien migre — et recopiees dans la sauvegarde.
+  -- Borner la tolerance a deux tables reduisait la surface ; ce refus ferme le cas.
+  if (select count(*) from public.properties
+        where provider_property_id = p_source) > 1 then
+    raise exception 'rekey_property : % est porte par plusieurs biens — deplacement refuse (les lignes sans compte ne pourraient pas etre attribuees)', p_source;
+  end if;
+
+  -- ⚠ SANS COMPTE, ON NE DEPLACE RIEN. Si `v_user` etait nul, le predicat
+  -- `user_id = $3` ne serait jamais vrai : sur les tables tolerantes, le
+  -- deplacement n'aurait retenu QUE les lignes sans compte — tous comptes
+  -- confondus — en laissant derriere celles reellement possedees.
+  if v_user is null then
+    raise exception 'rekey_property : le bien % n''a pas de compte proprietaire', p_bien;
+  end if;
 
   -- 1) SAUVEGARDE, dans la meme transaction que le reste.
   --
@@ -324,7 +406,8 @@ begin
       'insert into public.rekeying_backup '
       '(bien_id, source, cible, nom_table, lignes) '
       'select $1, $2, $3, $4, coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) '
-      'from public.%I x where x.property_id = $2 and x.user_id = $5', t)
+      'from public.%I x where x.property_id = $2 and '
+      || replace(public.rekeying_clause_compte(t), 'user_id', 'x.user_id'), t, '$5')
       using p_bien, p_source, p_cible, t, v_user;
   end loop;
   foreach paire slice 1 in array public.rekeying_tables_ref()
@@ -333,7 +416,9 @@ begin
       'insert into public.rekeying_backup '
       '(bien_id, source, cible, nom_table, lignes) '
       'select $1, $2, $3, $4, coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) '
-      'from public.%I x where x.%I = $2 and x.user_id = $5', paire[1], paire[2])
+      'from public.%I x where x.%I = $2 and '
+      || replace(public.rekeying_clause_compte(paire[1]), 'user_id', 'x.user_id'),
+      paire[1], paire[2], '$5')
       using p_bien, p_source, p_cible, paire[1] || '.' || paire[2], v_user;
   end loop;
   foreach paire slice 1 in array public.rekeying_tables_tableau()
@@ -342,7 +427,9 @@ begin
       'insert into public.rekeying_backup '
       '(bien_id, source, cible, nom_table, lignes) '
       'select $1, $2, $3, $4, coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) '
-      'from public.%I x where $2 = any(x.%I) and x.user_id = $5', paire[1], paire[2])
+      'from public.%I x where $2 = any(x.%I) and '
+      || replace(public.rekeying_clause_compte(paire[1]), 'user_id', 'x.user_id'),
+      paire[1], paire[2], '$5')
       using p_bien, p_source, p_cible, paire[1] || '.' || paire[2], v_user;
   end loop;
 
@@ -351,7 +438,7 @@ begin
   loop
     execute format(
       'update public.%I set property_id = $1 '
-      'where property_id = $2 and user_id = $3', t)
+      'where property_id = $2 and ' || public.rekeying_clause_compte(t), t, '$3')
       using p_cible, p_source, v_user;
     get diagnostics n = row_count;
     nom_table := t; colonne := 'property_id'; deplacees := n;
@@ -362,7 +449,8 @@ begin
   loop
     execute format(
       'update public.%I set %I = $1 '
-      'where %I = $2 and user_id = $3', paire[1], paire[2], paire[2])
+      'where %I = $2 and ' || public.rekeying_clause_compte(paire[1]),
+      paire[1], paire[2], paire[2], '$3')
       using p_cible, p_source, v_user;
     get diagnostics n = row_count;
     nom_table := paire[1]; colonne := paire[2]; deplacees := n;
@@ -377,8 +465,8 @@ begin
   loop
     execute format(
       'update public.%I set %I = array_replace(%I, $2, $1) '
-      'where $2 = any(%I) and user_id = $3',
-      paire[1], paire[2], paire[2], paire[2])
+      'where $2 = any(%I) and ' || public.rekeying_clause_compte(paire[1]),
+      paire[1], paire[2], paire[2], paire[2], '$3')
       using p_cible, p_source, v_user;
     get diagnostics n = row_count;
     nom_table := paire[1]; colonne := paire[2] || ' (tableau)'; deplacees := n;
@@ -407,6 +495,8 @@ $$;
 revoke all on function public.rekey_property(uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.rekeying_compter(text, text, uuid) from public, anon, authenticated;
 revoke all on function public.rekeying_tables() from public, anon, authenticated;
+revoke all on function public.rekeying_tables_sans_compte() from public, anon, authenticated;
+revoke all on function public.rekeying_clause_compte(text) from public, anon, authenticated;
 revoke all on function public.rekeying_tables_ref() from public, anon, authenticated;
 revoke all on function public.rekeying_tables_tableau() from public, anon, authenticated;
 revoke all on table public.rekeying_backup from public, anon, authenticated;

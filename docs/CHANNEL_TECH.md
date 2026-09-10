@@ -192,3 +192,34 @@ channex de test tant qu'ils existent.
 6. Événements Airbnb spécifiques (reservation_request, inquiry, alteration_request) — à la 1re connexion Airbnb réelle
 7. Étage B (compte Channex payant) au premier vrai bien sans CM
 8. Nettoyer la propriété parasite "HoteSmart Test 01" 40330a78-d5c1-47aa-8be4-84f938f4f09a
+
+
+## `hotel_id` en NOMBRE à la création d'un canal Booking.com
+
+**Mesuré le 10 septembre 2026, sur l'hôtel `10853342` (La bulle).**
+
+`POST /channels` avec `settings: { hotel_id: "10853342" }` (chaîne) rend :
+
+```
+HTTP 500  {"errors":{"code":"internal_server_error","title":"Internal Server Error"}}
+```
+
+Aucun détail, aucun champ nommé — pas un 422. Quatre variantes ont été essayées
+avant de trouver : sans `rate_plans`, sans `known_mappings_list`, sans `group_id`
+(qui donne, lui, un 422 explicite « You not have access to requested group »), et
+avec `machine_account`. **Le seul changement qui fait passer la création de 500 à
+201 est le type de `hotel_id`** : `10853342` en nombre.
+
+**Périmètre exact, vérifié** : seule la création est concernée.
+`POST /channels/test_connection` et `POST /channels/mapping_details` acceptent
+les deux formes — ils échouent tant que Channex n'est pas autorisé dans
+l'extranet, quelle que soit la forme.
+
+**Ce que ça coûtait** : `api/channel-bcom-write.js` envoyait `String(hotelId)`.
+L'écran de liaison Booking de l'hôte (`components/booking-connect.js`) aurait
+donc échoué à son étape de création — juste après une vérification réussie, et
+sans rien pour comprendre.
+
+**Autre fait relevé au passage** : un canal Booking existant ne rend pas de
+`group_id` dans ses attributs, alors que la création l'exige. Ne pas conclure de
+son absence en lecture qu'il est optionnel en écriture.

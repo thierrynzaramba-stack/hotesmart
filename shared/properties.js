@@ -42,7 +42,14 @@ async function fetchToutesProprietes() {
     ...p,
     // `_source` reste la cle de provenance utilisee par les pages (badges,
     // canaux) : on la derive du provider renvoye par le serveur.
-    _source: p.provider === 'beds24' ? 'beds24' : 'channel'
+    // ⚠ UN BIEN EN COURS DE MIGRATION SE COMPORTE COMME UN BIEN DU CANAL.
+    // `_source` commande l'affichage : avec 'beds24', `renderProperty` sort tot
+    // (carte « gere via Beds24 », aucun bouton Connexions) et les badges de
+    // canaux ne sont meme pas charges. Un bien qui a deja sa propriete chez le
+    // nouveau provider doit donc etre traite comme tel — sinon il n'existe
+    // aucun chemin pour le connecter, ce que Thierry a constate le
+    // 10 septembre 2026.
+    _source: (p.provider === 'beds24' && !p.migration_target_property_id) ? 'beds24' : 'channel'
   }))
 }
 

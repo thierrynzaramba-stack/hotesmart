@@ -136,7 +136,11 @@ function screenA() {
   const cont = document.getElementById('bk-continue')
   const go = () => {
     const v = (input.value || '').trim()
-    if (!/^\d{6,}$/.test(v)) { input.focus(); return }
+    // ⚠ MEME REGLE QUE LE SERVEUR (api/channel-bcom-write.js) : sans zero de
+    // tete et borne a 15 chiffres, parce que la creation envoie `Number(hotelId)`
+    // et qu'au-dela il arrondit en silence. Plus laxiste ici, l'hote franchissait
+    // l'ecran A, attendait la verification, et se voyait refuse a la liaison.
+    if (!/^[1-9]\d{5,14}$/.test(v)) { input.focus(); return }
     S.hotelId = v
     screenB()
   }
