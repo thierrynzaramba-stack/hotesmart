@@ -33,6 +33,10 @@ const ECRIRE = process.argv.includes('--ecrire')
 // Liste fermee, nommee en dur : un script de bascule ne prend pas d'identifiant
 // libre en argument.
 const A_CORRIGER = [
+  // ⚠ LES DEUX PREMIERS SONT TRAITES ET LAISSES POUR MEMOIRE : le script est
+  // idempotent (il saute un canal deja sur son derive) et le canal Airbnb du 23
+  // a ete deconnecte depuis, par un test volontaire de Thierry — sa lecture
+  // rend simplement « AUCUN mapping ».
   {
     nom: 'Booking — Cœur de vie l 23',
     canal: '2b0f16df-c0c2-4e48-85fb-da4062168904',
@@ -40,10 +44,26 @@ const A_CORRIGER = [
     derive: 'bc2eadea-60db-4b23-a0f1-e6ade92cfda0'
   },
   {
-    nom: 'Airbnb — Cœur de vie l 23',
+    nom: 'Airbnb — Cœur de vie l 23 (canal deconnecte le 10/09)',
     canal: 'a42a7f18-e389-4903-b64f-e2e275adc690',
     type: 'airbnb',
     derive: '97462698-d3ea-4c70-84ec-67d0f71429ea'
+  },
+  // ⚠ LE PARCOURS AIRBNB POSE LE TARIF DE BASE, ET C'EST MESURE DEUX FOIS.
+  // Le mapping Airbnb de La bulle, fait par Thierry le 10 septembre au soir,
+  // pointait `5d35913a-…` = « Tarif Standard » au lieu de son derive. Meme
+  // defaut que le parcours Booking (corrige dans api/channel-bcom-write.js), et
+  // meme consequence : l'OTA lit le prix NON derive, donc la commission et le
+  // min_stay portes par `property_channel_rate_plans` disparaissent en silence.
+  //
+  // Remapper est sans risque ici : mesure du meme soir, le derive porte deja
+  // `stop_sell: true` ET `availability: 0` sur les 500 dates — la dispo est au
+  // niveau du room type, donc aucun tarif ne peut vendre.
+  {
+    nom: 'Airbnb — La bulle',
+    canal: '224cbb66-0e3f-4f4d-9a27-3071629ab27c',
+    type: 'airbnb',
+    derive: '6b34530e-4e2c-4232-91ba-174040d44a2b'
   }
 ]
 
