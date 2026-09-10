@@ -210,6 +210,21 @@ Channex. Les 14 tables enfants clées en TEXT doivent suivre, **en une fois**.
   l'automatisation ne suffit pas — `isAutomationPaused` ne couvre pas les writers
   de synchro.
 
+  **Seuls les séjours d'un OTA sont neutralisés, et le critère est la SOURCE —
+  pas le code.** Première version : « il a un `otaReservationCode`, donc il
+  reviendra ». Faux, et mesuré : les réservations créées par HôteSmart en portent
+  un aussi (`HS-…`, `HSM-…`, rendues par Channex en `ota_name: "Offline"`). Elles
+  auraient été neutralisées — nuits remises en vente, ménage annulé, voyageur
+  oublié — contre la règle qu'on venait de graver. Répartition réelle des
+  1 431 snapshots : airbnb 927, booking 311, **direct 199**, **Offline 3**,
+  **iCal 4**.
+
+  La liste des OTA est **fermée**, et le doute profite à la conservation : ne pas
+  neutraliser un séjour d'OTA produit un doublon — grave, mais visible et
+  réparable ; neutraliser une réservation vivante remet ses nuits en vente et
+  annule son ménage — pire, et silencieux. Une source non classée est donc
+  **conservée et signalée**, pour qu'un humain tranche au lieu d'un défaut.
+
   **Un code déjà posé ne bloque pas** — arbitrage de Thierry : « il l'a déjà, et
   impossible de le supprimer, donc pas d'impact ». Un code supplémentaire
   n'empêche pas d'entrer, et le suivi se fait à la main pendant la fenêtre.

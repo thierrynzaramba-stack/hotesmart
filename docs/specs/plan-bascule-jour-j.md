@@ -14,7 +14,7 @@
 | Cœur de vie « La bulle » | Beds24 `209413` · Booking `hotel_id` **10853342** · capacité 2 · pas de supplément · 17 nuits tarifées (9→25 sept) |
 | Périmètres Booking | 5 exclusifs chez Beds24 (Rates and availability, Reservations, Content, Photos, Guest messages) + 2 partageables (Guest reviews, Reporting) |
 | Réconciliation | `otaReservationCode` — identique des deux côtés |
-| À recréer à la main | la réservation directe `78671952` (La bulle, 24→27 sept) : aucun code OTA |
+| ~~À recréer à la main~~ | **RIEN À RECRÉER** (10 septembre 2026). La réservation directe `78671952` (La bulle, 24→27 sept) **reste et se poursuit** : aucun canal ne la rendra, et ses nuits restent fermées chez le nouveau provider par le **stock calculé**. Voir 2.10. |
 
 **Ordre des biens : La bulle d'abord.** Moins de nuits tarifées, pas de grille
 d'occupation (`per_room`, un seul tarif), carnet plus léger. Si quelque chose
@@ -211,11 +211,20 @@ casse, ça casse sur le bien le plus simple.
   Rapprochement par `otaReservationCode`, tout marqué `initialImport`.
   **Vérifiable** : chaque `otaReservationCode` à venir apparaît **une seule fois**
   dans `bookings_snapshot`.
-- [ ] **2.10 Recréer la réservation directe `78671952`** (La bulle, 24→27 sept)
-  **par le module de réservation manuelle** (`ota_name: "Offline"`, chemin CRS
-  éprouvé au chantier réservation manuelle). Elle n'a aucun code OTA : personne ne la
-  remontera.
-  **Vérifiable** : elle existe côté Channex et occupe ses nuits.
+- [x] **~~2.10 Recréer la réservation directe `78671952`~~ — ÉTAPE SUPPRIMÉE,
+  règle de Thierry du 10 septembre 2026** : « les réservations en direct doivent
+  tout simplement rester en base et se poursuivre ».
+
+  Elle est juste sur les deux plans. **Côté cœur** : aucun canal ne rendra cette
+  réservation, donc elle ne peut pas faire doublon — la neutralisation ne la
+  touche pas, et le critère technique qui en découle est net : *on ne neutralise
+  que ce qui porte un code OTA*, c'est-à-dire ce qui reviendra. **Côté canal** :
+  ses nuits restent fermées sans qu'on la recrée, parce que le **stock est
+  calculé** à chaque poussée (`lib/nuits-occupees.js` la compte comme occupée, la
+  poussée envoie `availability = 0`).
+
+  La recréer aurait été un second exemplaire de la même réservation, dans deux
+  systèmes, sans lien entre eux.
 - [ ] **2.11 `automation_paused = false`.**
 
 ### Phase 2 bis — vérifications, périmètre par périmètre

@@ -29,8 +29,17 @@ const AVANT_REKEYING = {
 }
 const AUJ = new Date('2026-09-10T12:00:00Z')
 
+// ⚠ C'EST LA SOURCE QUI DIT SI UN CANAL RENDRA LE SEJOUR, pas le code : les
+// reservations creees par HoteSmart portent un code elles aussi (`HS-…`).
+// Un sejour d'OTA par defaut ; `sejourDirect` pour l'autre cas.
 const sejour = (id, arrival, departure, status = 'confirmed') =>
-  ({ booking_id: id, snapshot: { arrival, departure, status } })
+  ({ booking_id: id, snapshot: { arrival, departure, status, source: 'airbnb',
+    otaReservationCode: 'CODE-' + id } })
+
+// Une reservation hors canal : celle qui doit se POURSUIVRE.
+const sejourDirect = (id, arrival, departure, source = 'direct', code = null) =>
+  ({ booking_id: id, snapshot: { arrival, departure, status: 'confirmed', source,
+    otaReservationCode: code } })
 
 // Faux client : pagine les snapshots, note les mises a jour.
 function faux ({ sejours = [], codes = 0 } = {}) {
@@ -246,4 +255,84 @@ test('aucun sejour a venir : l etape est FAITE', async () => {
   const f = faux({ sejours: [sejour('vieux', '2024-02-20', '2024-02-21')] })
   const r = await etatPurge(f.api, BIEN, { maintenant: AUJ })
   assert.equal(r.etat, 'fait')
+})
+
+// ─── Les reservations DIRECTES se poursuivent ───────────────────────────────
+
+test('LE TEST QUI COMPTE : une reservation DIRECTE a venir n est PAS neutralisee', async () => {
+  // Regle de Thierry : « les reservations en direct doivent tout simplement
+  // rester en base et se poursuivre ». Aucun canal ne les rendra, donc elles ne
+  // peuvent pas faire doublon — et les neutraliser aurait supprime une
+  // reservation VIVANTE du planning : nuits remises en vente, menage annule,
+  // voyageur oublie.
+  const f = faux({ sejours: [sejourDirect('directe', '2026-09-24', '2026-09-27')] })
+  const r = await auditPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(r.a_annuler, 0)
+  assert.equal(r.directes_conservees.length, 1)
+  assert.equal(r.directes_conservees[0].booking_id, 'directe')
+})
+
+test('LE TEST QUI COMPTE : une reservation CREEE PAR HOTESMART porte un code, et reste', async () => {
+  // Le defaut de ma premiere version : le critere etait « a-t-il un code OTA ».
+  // Or `api/reservation-directe.js` et `lib/moteur-creation.js` en posent un
+  // (`HS-…`, `HSM-…`), et Channex les rend en `ota_name: "Offline"`. Elles
+  // auraient donc ete neutralisees, contre la regle meme qu'on venait de graver.
+  const f = faux({ sejours: [
+    sejourDirect('crs1', '2026-09-24', '2026-09-27', 'Offline', 'HS-1788765359046-J2XC0'),
+    sejourDirect('crs2', '2026-09-28', '2026-09-29', 'Offline', 'HSM-98BCBDBC8A084978')
+  ] })
+  const r = await auditPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(r.a_annuler, 0, 'aucune neutralisation')
+  assert.equal(r.directes_conservees.length, 2)
+})
+
+test('un import iCal n est pas rendu par CE canal : il reste aussi', async () => {
+  const f = faux({ sejours: [sejourDirect('ical1', '2026-09-24', '2026-09-27', 'iCal import 1', '1785788531-6a7')] })
+  const r = await auditPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(r.a_annuler, 0)
+})
+
+test('un sejour d OTA, lui, est bien neutralise', async () => {
+  const f = faux({ sejours: [sejour('airbnb1', '2026-09-20', '2026-09-21')] })
+  const r = await auditPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(r.a_annuler, 1)
+  assert.equal(r.directes_conservees.length, 0)
+})
+
+test('LE TEST QUI COMPTE : une source INCONNUE est conservee, et SIGNALEE', async () => {
+  // Le doute profite a la reservation vivante : ne pas neutraliser un sejour
+  // d'OTA produit un doublon, visible et reparable ; neutraliser une
+  // reservation vivante remet ses nuits en vente et annule son menage, en
+  // silence. Mais l'inconnue doit se VOIR, sinon personne ne tranche.
+  const f = faux({ sejours: [sejourDirect('mystere', '2026-09-20', '2026-09-21', 'Expedia_v2', 'XYZ')] })
+  const r = await auditPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(r.a_annuler, 0, 'conservee')
+  assert.deepEqual(r.sources_inconnues, ['Expedia_v2'], 'et signalee')
+
+  const apercu = await purgerLeFutur(f.api, BIEN, { maintenant: AUJ })
+  assert.match(apercu.note, /non classee/)
+})
+
+test('les conservees sont dites PARTOUT, pas seulement en apercu', async () => {
+  // Apres un passage reussi, `a_annuler` tombe a 0 : dire « aucun sejour a
+  // venir » aurait fait passer les directes pour inexistantes.
+  const f = faux({ sejours: [sejourDirect('directe', '2026-09-24', '2026-09-27')] })
+
+  const apercu = await purgerLeFutur(f.api, BIEN, { maintenant: AUJ })
+  assert.match(apercu.note, /se poursuivent/)
+  assert.match(apercu.note, /2026-09-24→2026-09-27/)
+
+  const etat = await etatPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(etat.etat, 'fait')
+  assert.match(etat.message, /se poursuivent/, 'l etat aussi')
+  assert.ok(!/Aucun sejour a venir/.test(etat.message), 'et il ne dit plus « aucun sejour a venir »')
+})
+
+test('une directe VIVANTE n est pas comptee comme « hors jeu »', async () => {
+  // `hors_jeu_au_futur` veut dire « deja annule ou demappe » : y ranger une
+  // reservation reelle faisait annoncer « 1 hors jeu » pour un sejour bien vivant.
+  const f = faux({ sejours: [sejourDirect('directe', '2026-09-24', '2026-09-27')] })
+  const r = await auditPurge(f.api, BIEN, { maintenant: AUJ })
+  assert.equal(r.hors_jeu_au_futur, 0)
+  assert.equal(r.directes_conservees.length, 1)
 })
