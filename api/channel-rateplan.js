@@ -12,6 +12,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, requirePermissionPourCanal, verifierSession, REF_SURE_RE } = require('../lib/require-permission')
 const { proprieteChezLeProvider } = require('../lib/rate-sync')
 const { canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
+const { creerDerive } = require('../lib/rate-plans-derives')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
@@ -127,68 +128,41 @@ module.exports = async function handler(req, res) {
       .maybeSingle()
     if (propErr) { console.error('[channel-rateplan] SELECT', propErr.message); return res.status(500).json({ error: 'Erreur lecture' }) }
     if (!prop) return res.status(404).json({ error: 'Bien introuvable pour cet utilisateur' })
-    const base = prop.provider_rate_plan_id
-    const roomType = prop.provider_room_type_id
-    if (!base || !roomType) return res.status(400).json({ error: 'Bien sans base rate plan / room type (provisioning incomplet)' })
-
-    // Idempotence : un derive existe deja pour ce canal ? (role='derived' : ne pas
-    // confondre avec une eventuelle ligne base sentinelle du meme channel)
-    const { data: existing } = await supabase
-      .from('property_channel_rate_plans')
-      .select('id, provider_rate_plan_id')
-      .eq('property_id', prop.id).eq('channel', channel).eq('role', 'derived').maybeSingle()
-    if (existing?.provider_rate_plan_id) {
-      return res.status(200).json({ already: true, channel, derived_rate_plan_id: existing.provider_rate_plan_id })
-    }
-
-    // Lire le base pour cloner sell_mode + structure d'occupation
-    const b = await channelCall('GET', `/rate_plans/${base}`)
-    if (!b.ok) return res.status(502).json({ error: 'Lecture base rate plan echouee', http: b.status })
-    const battr = b.json?.data?.attributes || {}
-    const sellMode = battr.sell_mode || 'per_room'
-    const baseOptions = Array.isArray(battr.options) ? battr.options : []
-    const childOptions = (baseOptions.length ? baseOptions : [{ occupancy: prop.capacity || 4, is_primary: true }])
-      .map(o => ({ occupancy: o.occupancy, is_primary: !!o.is_primary, derived_option: { rate: [['increase_by_percent', '0']] } }))
-
-    // Creer l'enfant NEUTRE (derive +0%, min stay herite du base)
-    const c = await channelCall('POST', '/rate_plans', {
-      rate_plan: {
-        property_id: proprieteChezLeProvider(prop) || providerPropertyId,
-        room_type_id: roomType,
-        title: `${prop.name || 'Bien'} — ${channel} (dérivé)`,
-        currency: prop.currency || 'EUR',
-        sell_mode: sellMode,
-        rate_mode: 'derived',
-        parent_rate_plan_id: base,
-        inherit_rate: true,
-        inherit_min_stay_arrival: true,
-        inherit_min_stay_through: true,
-        options: childOptions
+    // ⚠ UNE SEULE LOGIQUE, DANS `lib/rate-plans-derives.js`.
+    // Elle vivait ici seulement, atteignable a la main : rien ne l'appelait a
+    // la creation d'un bien, donc un logement neuf naissait sans derive et
+    // etait INCONNECTABLE a Booking (le mapping doit pointer le derive, jamais
+    // la base). Le provisionnement l'appelle maintenant aussi
+    // (api/channel-property.js, etape 5) — la dupliquer aurait garanti la
+    // divergence des deux.
+    const r = await creerDerive(supabase, channelCall, prop, channel)
+    if (!r.ok) {
+      const messages = {
+        provisionnement_incomplet: 'Bien sans base rate plan / room type (provisioning incomplet)',
+        lecture: 'Erreur lecture',
+        lecture_base: 'Lecture base rate plan echouee',
+        creation_enfant: 'Creation enfant echouee',
+        pas_d_id: 'Pas d id enfant en reponse',
+        liaison_db: 'Enfant cree cote Channex mais liaison DB echouee'
       }
-    })
-    if (!c.ok) return res.status(502).json({ error: 'Creation enfant echouee', http: c.status, detail: c.json })
-    const childId = c.json?.data?.id
-    if (!childId) return res.status(502).json({ error: 'Pas d id enfant en reponse' })
-
-    // Lignes de liaison. Modele correct : la BASE n'est liee a AUCUN OTA -> sentinelle
-    // channel='base' (garde unique(property_id,channel) propre). Chaque OTA = un derive.
-    const rows = [
-      { property_id: prop.id, channel: 'base', role: 'base', provider_rate_plan_id: base, derive_mode: null, derive_value: 0, is_active: true },
-      { property_id: prop.id, channel, role: 'derived', provider_rate_plan_id: childId, derive_mode: 'percent', derive_value: 0, min_stay: null, is_active: true }
-    ]
-    const { error: upErr } = await supabase
-      .from('property_channel_rate_plans')
-      .upsert(rows, { onConflict: 'property_id,channel' })
-    if (upErr) {
-      console.error('[channel-rateplan] upsert liaison', upErr.message)
-      return res.status(500).json({ error: 'Enfant cree cote Channex mais liaison DB echouee', derived_rate_plan_id: childId, db_error: upErr.message })
+      return res.status(r.http || 500).json({
+        error: messages[r.raison] || r.raison,
+        http: r.http,
+        detail: r.detail,
+        ...(r.derivedRatePlanId ? { derived_rate_plan_id: r.derivedRatePlanId } : {})
+      })
+    }
+    if (r.deja) {
+      return res.status(200).json({
+        already: true, channel, derived_rate_plan_id: r.derivedRatePlanId
+      })
     }
 
     return res.status(201).json({
       ok: true, channel,
-      base_rate_plan_id: base,
-      derived_rate_plan_id: childId,
-      sell_mode: sellMode,
+      base_rate_plan_id: prop.provider_rate_plan_id,
+      derived_rate_plan_id: r.derivedRatePlanId,
+      sell_mode: r.sellMode,
       neutral: { derive: '+0%', min_stay: 'herite' },
       note: 'Enfant INERTE (aucun mapping canal). Migration remap = etape separee.'
     })

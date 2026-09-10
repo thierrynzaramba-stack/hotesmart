@@ -10,6 +10,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { refsDuPerimetre } = require('../lib/permissions')
+const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -813,7 +814,29 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: 'Sauvegarde echouee' })
       }
 
-      return res.status(201).json({ property: insertData, dispo_pushed: availRes.ok, messages_app: appRes.ok })
+      // Etape 5 : LES TARIFS DERIVES PAR CANAL.
+      // ⚠ SANS EUX, LE BIEN EST INCONNECTABLE A BOOKING.
+      // Le mapping doit pointer le tarif DERIVE du canal, jamais la base
+      // (mesure du 10 septembre 2026 sur le canal Booking de Colomiers, le seul
+      // en production ; `action=map` de api/channel-bcom-write.js refuse
+      // desormais en l'absence de derive). Jusqu'ici cette creation n'existait
+      // qu'en action manuelle `create_derived` : un bien neuf naissait avec son
+      // seul « Tarif Standard », donc sans regle de prix par canal ET sans
+      // rien a mapper. Le defaut touchait TOUT nouvel hote, pas seulement la
+      // migration de Bagneres — Colomiers ne l'avait pas revele parce que ses
+      // derives avaient ete crees a la main.
+      //
+      // Non bloquant, comme les installations d'applications ci-dessus : le
+      // bien reste utilisable, et l'echec est RENDU (`derives`) au lieu d'etre
+      // avale. C'est ce silence qui avait laisse le trou ouvert.
+      const derives = await poserDerivesParDefaut(supabase, channelCall, insertData)
+
+      return res.status(201).json({
+        property: insertData,
+        dispo_pushed: availRes.ok,
+        messages_app: appRes.ok,
+        derives
+      })
 
     } catch (err) {
       console.error('[channel-property] Internal error', err.message)
