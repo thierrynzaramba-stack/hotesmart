@@ -414,25 +414,49 @@ begin
   delete from public.property_status
     where property_id = v_cib_cle and user_id = v_user;
 
-  select count(*) into n_collision from public.calendar_inventory
-    where property_id = p_cible;
+  -- ⚠ ON TESTE LA COLLISION REELLE, PAS « LA CIBLE N'EST PAS VIDE ».
+  -- Ma premiere version refusait des que la cible portait UNE ligne de
+  -- calendrier. Elle supposait une cible vierge, et c'etait faux des le
+  -- deuxieme bien : le 10 septembre 2026 au soir, Thierry a ferme tout a la
+  -- vente SUR LA FICHE NEUVE — 875 lignes. La garde refusait donc un transfert
+  -- parfaitement legitime, en punissant l'hote d'avoir utilise son calendrier.
+  --
+  -- Ce qui casse la transaction n'est pas la presence de lignes, c'est une
+  -- DATE presente des deux cotes (`UNIQUE (property_id, date)`). On compte donc
+  -- l'intersection. Meme correction pour les deux autres tables, sur leur vraie
+  -- cle d'unicite.
+  select count(*) into n_collision
+    from public.calendar_inventory a
+    join public.calendar_inventory b
+      on b.property_id = p_cible and b.date = a.date
+   where a.property_id = p_source;
   if n_collision > 0 then
-    raise exception 'transferer_bien : la cible porte deja % ligne(s) de calendrier — '
-      'les traiter a la main avant le transfert', n_collision;
+    raise exception 'transferer_bien : % date(s) de calendrier existent DES DEUX COTES — '
+      'fusionner avant le transfert (UNIQUE (property_id, date))', n_collision;
   end if;
 
-  select count(*) into n_collision from public.menages
-    where property_id = v_cib_cle and user_id = v_user;
+  -- `menages` : unique (user_id, property_id, booking_id, departure_date).
+  select count(*) into n_collision
+    from public.menages a
+    join public.menages b
+      on b.property_id = v_cib_cle and b.user_id = a.user_id
+     and b.booking_id = a.booking_id and b.departure_date = a.departure_date
+   where a.property_id = v_src_cle and a.user_id = v_user;
   if n_collision > 0 then
-    raise exception 'transferer_bien : la cible porte deja % menage(s) — '
-      'les traiter a la main avant le transfert', n_collision;
+    raise exception 'transferer_bien : % menage(s) en collision (meme reservation, '
+      'meme depart) des deux cotes — les traiter avant le transfert', n_collision;
   end if;
 
-  select count(*) into n_collision from public.property_cleaning_providers
-    where property_id = v_cib_cle and user_id = v_user;
+  -- `property_cleaning_providers` : unique (user_id, property_id, provider_id).
+  select count(*) into n_collision
+    from public.property_cleaning_providers a
+    join public.property_cleaning_providers b
+      on b.property_id = v_cib_cle and b.user_id = a.user_id
+     and b.provider_id = a.provider_id
+   where a.property_id = v_src_cle and a.user_id = v_user;
   if n_collision > 0 then
-    raise exception 'transferer_bien : la cible a deja % prestataire(s) assignee(s) — '
-      'les traiter a la main avant le transfert', n_collision;
+    raise exception 'transferer_bien : % prestataire(s) assignee(s) des deux cotes — '
+      'les traiter avant le transfert', n_collision;
   end if;
 
   -- ⚠ CE QUE CETTE FONCTION NE PEUT PAS GARDER, ET QUI SE
