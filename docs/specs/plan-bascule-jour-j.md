@@ -186,10 +186,26 @@ casse, ça casse sur le bien le plus simple.
   **Vérifiable** : `is_active: true` sur les deux, et la garde n'a pas refusé.
 - [ ] **2.7 Importer le carnet.** `action/load_future_reservations` sur chaque canal.
   **Vérifiable** : les séjours à venir apparaissent côté Channex.
-- [ ] **2.8 Re-keying.** `169567`/`209413` → l'UUID Channex, sur les 14 tables,
-  **pendant que l'automatisation est en pause**, avec sauvegarde préalable et
-  répétition à blanc.
-  **Vérifiable** : comptes avant/après identiques table par table ; `properties.provider = 'channex'`.
+- [ ] **2.8 Re-keying — CONSTRUIT** (`POST /api/migration?action=re_keying`,
+  `dry_run=true` d'abord). `169567`/`209413` → l'UUID Channex, sur **21 tables**
+  (17 à `property_id`, 3 à référence TEXT nommée autrement, 1 tableau),
+  **pendant que l'automatisation est en pause**.
+  **4 322 + 106 lignes** pour les deux biens — dont 99 avis, qu'une première
+  version aurait laissés derrière.
+  **Vérifiable** : la réponse rend `conforme: true`, ce qui veut dire *deux*
+  choses — le nombre déplacé égale celui annoncé, **et** il ne reste plus rien
+  sous l'ancienne clé (recompté après le geste, parce que la pause n'arrête pas
+  les writers de synchro).
+
+  ⚠ **Une transaction unique** : la fonction SQL `rekey_property` passe
+  entièrement ou pas du tout. Un échec ne laisse aucune ligne déplacée — et le
+  dit.
+  ⚠ **Sauvegarde en base** (`rekeying_backup`), prise dans la même transaction,
+  ligne `properties` incluse : c'est elle qui garde le `provider` d'origine, donc
+  ce qu'il faut pour revenir.
+  ⚠ **Le retour** est le même appel, source et cible échangées, avec le provider
+  d'origine — mais il passe par SQL, pas par l'assistant (`estEnMigration` est
+  faux une fois la clé promue).
 - [ ] **2.9 Dédoublonner.** Les séjours importés portent de **nouveaux**
   identifiants Channex ; le cœur les a déjà sous leur identifiant Beds24.
   Rapprochement par `otaReservationCode`, tout marqué `initialImport`.

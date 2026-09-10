@@ -51,6 +51,9 @@ async function main() {
   console.log('-'.repeat(92))
 
   const sansUserId = []
+  // Les colonnes qui designent un bien SANS s'appeler `property_id` : le piege
+  // qui a fait manquer trois tables au re-keying.
+  const refsAutrementNommees = []
   for (const t of tables) {
     const { data, count, error } = await supabase.from(t).select('*', { count: 'exact' }).limit(200)
     if (error) { console.log(`${t.padEnd(32)}${'?'.padStart(7)}  (${error.message.slice(0, 40)})`); continue }
@@ -60,6 +63,23 @@ async function main() {
     const cols = new Set(schema[t] || [])
     const aUserId = cols.has('user_id')
     if (!aUserId) sansUserId.push(t)
+
+    // ⚠ TOUTE COLONNE QUI DESIGNE UN BIEN, PAS SEULEMENT `property_id`.
+    // Defaut paye le 10 septembre 2026 : cet inventaire a servi a etablir la
+    // liste des tables du re-keying, et il ne cherchait que la colonne NOMMEE
+    // `property_id`. Trois references TEXT nommees autrement etaient donc
+    // invisibles — `ota_reviews.property_id_ref` (99 avis),
+    // `prestataire_periodes.property_id_ref`, et `public_tokens.property_ids`
+    // (un tableau, par lequel le planning menage reconnait les biens d'une
+    // prestataire). Le re-keying les aurait laissees derriere.
+    // ⚠ CE FILET N'EST PAS EXHAUSTIF, ET IL FAUT LE SAVOIR : il ne reconnait que
+    // les colonnes dont le NOM contient « propert ». Une reference nommee
+    // `bien_id`, `listing_id` ou `logement_id` resterait invisible — le meme
+    // defaut de nature, d'un cran plus petit. Il attrape ce qui existe
+    // aujourd'hui ; toute colonne de reference future doit etre nommee dans cette
+    // famille, ou ajoutee ici a la main.
+    const autresRefs = [...cols].filter(c => /propert/i.test(c) && c !== 'property_id')
+    if (autresRefs.length) refsAutrementNommees.push(`${t} : ${autresRefs.join(', ')}`)
 
     let typePid = '—'
     if (cols.has('property_id')) {
@@ -79,6 +99,11 @@ async function main() {
     console.log(`${t.padEnd(32)}${String(count).padStart(7)}  ${aUserId ? '  oui  ' : '  NON  '}  ${typePid}`)
   }
 
+  if (refsAutrementNommees.length) {
+    console.log('\n⚠ Colonnes qui designent un bien SANS s\'appeler `property_id` :')
+    console.log('   (a verifier une par une avant tout re-keying — elles ne suivent PAS)')
+    for (const l of refsAutrementNommees) console.log('   - ' + l)
+  }
   console.log(`\nSans user_id (hors RLS par compte) : ${sansUserId.length}`)
   sansUserId.forEach(t => console.log('   -', t))
   console.log(`\nA user_id : ${tables.length - sansUserId.length}`)

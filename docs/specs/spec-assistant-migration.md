@@ -60,6 +60,7 @@ chemin d'accès. Un prestataire n'y a rien à faire.
 | 6 | `provisionner_channex` | crée la propriété cible chez Channex et pose ses identifiants **sur le bien existant** | `properties.migration_target_property_id` |
 | 7 | `mode_de_prix` | choisit qui gère les prix, pour un bien **en migration** | `properties.rate_sync_mode` |
 | 8 | `poussee_ari` | pousse les 500 jours de prix et disponibilités vers la propriété cible | **le calendrier de la cible** (`GET /restrictions`) |
+| 9 | `re_keying` | déplace les 18 tables enfants **et** le bien vers le nouveau provider, en une transaction | `rekeying_compter` (SQL) |
 
 État réel au 9 septembre 2026, lu par l'endpoint : **6/6 étapes « fait »** sur
 les deux biens de Bagnères — 784 et 637 réservations avec payload brut complet,
@@ -196,9 +197,103 @@ copié à l'identique dans `scripts/audit-stop-sell.js` et
 le 13 et le 14, **pas** le 15) et sa pagination — un bien de Bagnères porte 784
 snapshots, et la limite implicite de postgrest est à 1000.
 
+### 3 quinquies. L'étape 9 vit en SQL, et c'est la seule façon de tenir sa promesse
+
+« Un seul geste, ou rien » n'est pas une figure de style : un bien dont
+`properties.provider` dit Channex tandis que ses tables enfants disent encore
+Beds24 est l'état le plus dangereux du chantier. Or **PostgREST n'offre aucune
+transaction entre plusieurs requêtes** — 18 `UPDATE` lancés depuis Node, ce sont
+18 occasions de s'arrêter au milieu. Le déplacement est donc une fonction
+plpgsql (`rekey_property`), c'est-à-dire une transaction : elle passe
+entièrement, ou pas du tout. Le module `lib/` garde, montre et appelle.
+
+**Et trois références qui ne s'appellent pas `property_id`** — trouvées en
+review, après que la première version du fichier ait affirmé le contraire :
+`ota_reviews.property_id_ref` (**99 avis** des deux biens, qui auraient perdu
+leur rattachement — page `/avis` vide, extrait de propreté disparu des fiches
+prestataires), `prestataire_periodes.property_id_ref`, et surtout
+**`public_tokens.property_ids`**, un *tableau* — c'est par lui que le planning
+ménage reconnaît les biens d'une prestataire. L'oublier vidait son planning et
+faisait refuser `markDone` : l'écart E1/E2 de l'audit d'unification, réintroduit
+par la migration elle-même. Le tableau se corrige par **remplacement de
+l'élément** (`array_replace`), jamais par réécriture de la liste, qui aurait
+coupé la prestataire de ses autres logements.
+
+**Cause racine, corrigée** : `scripts/inventaire-tables.js` ne cherchait que la
+colonne *nommée* `property_id`. Il signale désormais toute colonne dont le nom
+parle de bien, à part — « à vérifier une par une avant tout re-keying ». ⚠ Ce
+filet n'est pas exhaustif pour autant : une colonne nommée `bien_id` ou
+`listing_id` lui échapperait — le même défaut de nature, d'un cran plus petit.
+Toute référence future doit être nommée dans cette famille, ou ajoutée à la main.
+
+**Deux choses que le re-keying ne déplace pas, et il faut savoir pourquoi** :
+`property_snapshots` (son identité est `unique (user_id, provider, property_id)` —
+la déplacer sans toucher `provider` produirait « beds24 + clé Channex », un
+couple qui ne décrit rien ; c'est un relevé *historique par provider*, la fiche
+Beds24 reste attachée à Beds24), et `profile_permissions.property_refs`, que le
+trigger recalcule.
+
+**Des lignes déjà sous la cible sont un blocage, pas une note** : plusieurs
+tables portent une contrainte d'unicité incluant `property_id` (`property_status`,
+`menages`, `menage_done`, `property_cleaning_providers`). Une seule ligne déjà à
+droite, et l'`UPDATE` lève une violation d'unicité qui annule **tout** le
+déplacement — après un aperçu qui annonçait « N lignes à déplacer » sans un mot.
+L'aperçu refuse désormais, table par table.
+
+**L'état de l'étape ne compte pas**, et c'est délibéré : `rekeying_compter` fait
+deux `count(*)` sur chacune des 21 tables, et `GET /api/migration` boucle sur
+tous les biens du compte — 42 comptages par bien en migration, sur l'endpoint
+qu'on rafraîchit le plus le jour J. Le comptage appartient à l'aperçu de
+l'action. En revanche l'étape dit **« fait »** après la bascule, et non « sans
+objet » : elle sortait sinon du décompte, et le succès du geste le plus
+irréversible du chantier n'était confirmé nulle part.
+
+**Ce qui ne se déplace pas, et pourquoi c'est écrit** :
+`profile_permissions.property_refs` est recalculé par le trigger
+`properties_sync_refs` à chaque changement de `provider_property_id` — donc dans
+cette transaction même. L'y ajouter ferait double emploi, et écraserait un calcul
+par une copie.
+
+**Le cloisonnement par compte n'est pas décoratif** : la fonction est
+`security definer`, elle contourne RLS. Sans filtre `user_id`, deux biens
+partageant un même `provider_property_id` — qui n'a aucune unicité globale, et
+cette base porte déjà des doublons de `properties` — verraient les lignes de l'un
+absorbées par la cible de l'autre.
+
+**Et le seul contrôle qui vaut est le recomptage d'APRÈS** : `automation_paused`
+n'arrête pas les writers de synchro (`isAutomationPaused` n'est consulté que par
+les crons de messages, de codes d'arrivée et de classification). Le cron de
+5 minutes peut avoir lu la clé source avant la transaction et inséré après, sous
+une clé morte. Comparer au seul audit d'avant ne l'aurait jamais vu.
+
+**18 tables, pas 14.** La spec de migration en annonçait 14 ; l'inventaire du
+schéma (`scripts/inventaire-tables.js`, qui lit le descripteur et non le code) en
+trouve **18** portant un `property_id` en TEXT — 4 322 lignes pour les deux biens
+de Bagnères. Deux pièges au passage : `property_status` n'a pas de colonne `id`
+(sa clé est `user_id` + `property_id`), et `automation_incidents` est **mixte**
+(19 lignes en clé provider, 5 en UUID) — le filtre sur la clé source ne touche
+que les premières, ce qui est voulu.
+
+**La sauvegarde est prise en base, pas dans un fichier.** La spec demandait « un
+fichier daté, hors dépôt » ; `rekeying_backup` est mieux : vérifiable,
+alimentée **dans la même transaction** que le déplacement, et directement
+exploitable par un rollback. D'un fichier sur un disque, personne ne peut
+affirmer qu'il existe au moment où l'on en a besoin.
+
+**Le rollback n'est pas un second programme** : c'est le même appel, source et
+cible échangées, avec le provider d'origine. Un second programme aurait divergé
+du premier — le défaut que ce dépôt a déjà payé plusieurs fois.
+
+**Deux refus valent d'être nommés** : la fonction refuse si le bien ne porte pas
+la clé source annoncée (un second passage échoue en le disant, plutôt que de
+rendre « 0 ligne » qu'on lirait comme « c'était déjà fait »), et le module refuse
+si `automation_paused` n'est pas `true` — une ligne peut être lue sous son
+ancienne clé et écrite sous la nouvelle, et un cron au milieu enverrait un
+message ou poserait un code d'accès sur un état transitoire.
+
 **Restent à construire** (elles entreront ici avec leur endpoint) : connexion et
-mapping des canaux, import du carnet, re-keying, bascule, vérifications
-post-bascule.
+mapping des canaux, import du carnet et son dédoublonnage par
+`otaReservationCode`, vérifications post-bascule.
 
 ## 4. Ce que l'assistant ne fera jamais
 

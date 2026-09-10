@@ -23,6 +23,9 @@ function faux (reponses = {}) {
     return (f && f.length) ? f.shift() : { data: [], error: null, count: 0 }
   }
   const api = {
+    // L'etape « deplacement des donnees » compte par une fonction SQL (RPC) :
+    // le double doit la connaitre, sinon l'etat entier tombe en erreur.
+    rpc: async () => ({ data: [], error: null }),
     from (t) { tableCourante = t; return api },
     select () { return api }, eq () { return api }, gte () { return api },
     lte () { return api }, not () { return api }, is () { return api },

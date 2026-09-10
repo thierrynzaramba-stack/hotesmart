@@ -20,7 +20,7 @@
 // d'assistant.
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, REF_SURE_RE, UUID_RE } = require('../lib/require-permission')
 const { etatMigration } = require('../lib/migration-etapes')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -35,11 +35,27 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const COLS = 'id, user_id, name, provider, provider_property_id, provider_room_type_id, '
   + 'provider_rate_plan_id, base_price, capacity, included_guests, extra_guest_fee, '
   + 'currency, property_type, timezone, inventory_units, rate_sync_mode, '
-  + 'migration_target_property_id, migration_target_at, country, zip_code'
+  + 'migration_target_property_id, migration_target_at, country, zip_code, automation_paused'
 
 async function biensDuCompte (accountUserId, providerPropertyId) {
   let q = supabase.from('properties').select(COLS).eq('user_id', accountUserId)
-  if (providerPropertyId) q = q.eq('provider_property_id', String(providerPropertyId))
+  // ⚠ SUR LES DEUX IDENTIFIANTS. Le re-keying PROMEUT la cle : sans cela,
+  // `GET /api/migration?property_id=209413` — la cle utilisee de bout en bout
+  // par le plan de bascule — repondait « bien introuvable » dans la minute qui
+  // suit le deplacement. Au pire moment, ca se lit comme une perte de donnees.
+  if (providerPropertyId) {
+    const ref = String(providerPropertyId)
+    // ⚠ FORMAT VALIDE AVANT TOUTE INTERPOLATION, comme partout ailleurs dans ce
+    // depot. Sans ce controle, `?property_id=a&property_id=b` donne « a,b » —
+    // PostgREST y lit une troisieme condition mal formee — et surtout un
+    // appelant pouvait ajouter ses propres termes OR (`...,name.neq.zzz`) pour
+    // elargir la correspondance DANS SON COMPTE : `biens[0]` devenait un bien
+    // arbitraire, et un `re_keying&dry_run=false` partait sur le mauvais logement.
+    if (!REF_SURE_RE.test(ref) && !UUID_RE.test(ref)) {
+      throw new Error('identifiant de bien au format refuse')
+    }
+    q = q.or(`provider_property_id.eq.${ref},migration_target_property_id.eq.${ref}`)
+  }
   const { data, error } = await q.order('name')
   if (error) throw new Error(`properties : ${error.message}`)
   return data || []
@@ -135,9 +151,27 @@ module.exports = async function handler (req, res) {
       }
     }
 
+    // ─── re_keying ───────────────────────────────────────────────────────────
+    // Deplace les 18 tables enfants et le bien vers le nouveau provider, en UNE
+    // transaction SQL. Refuse si l'automatisation n'est pas en pause.
+    if (action === 're_keying') {
+      const { deplacerLeBien } = require('../lib/migration-rekeying')
+      try {
+        const r = await deplacerLeBien(supabase, bien, { dryRun })
+        // Une indisponibilite (fonction SQL pas encore appliquee, base
+        // injoignable) n'est pas un conflit d'etat : l'operateur ne doit pas
+        // lire « 409 » pour « je n'ai pas pu lire ».
+        const code = r.ok ? 200 : (r.raison === 'lecture_impossible' ? 500 : 409)
+        return res.status(code).json(r)
+      } catch (e) {
+        console.error('[migration] re_keying', e.message)
+        return res.status(500).json({ error: 'deplacement_impossible', detail: e.message })
+      }
+    }
+
     // Les actions arrivent avec leur etape. Tant qu'une action n'est pas
     // construite, on le DIT — on ne fait pas semblant de l'avoir.
-    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari', 'mode_de_prix'])
+    const CONSTRUITES = new Set(['provisionner_channex', 'poussee_ari', 'mode_de_prix', 're_keying'])
     if (!CONSTRUITES.has(action)) {
       const etat = await etatMigration(supabase, bien)
       return res.status(501).json({
