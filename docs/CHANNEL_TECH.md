@@ -263,3 +263,57 @@ sans rien pour comprendre.
 **Autre fait relevé au passage** : un canal Booking existant ne rend pas de
 `group_id` dans ses attributs, alors que la création l'exige. Ne pas conclure de
 son absence en lecture qu'il est optionnel en écriture.
+
+## Un canal MAPPÉ ne peut pas être désactivé
+
+**Mesuré le 10 septembre 2026** sur le canal Airbnb de Cœur de vie 23 :
+
+```
+POST /channels/<id>/deactivate
+HTTP 422  {"errors":{"code":"validation_error",
+           "details":{"channel":["remove mappings before"]}}}
+```
+
+Il n'existe donc **pas** d'état « mappé mais inactif ». Un canal est soit
+inactif et non mappé, soit mappé et actif — désactiver exige de retirer les
+mappings d'abord.
+
+**Ce que ça change.** La règle « mapper d'abord, activer après le transfert des
+données » n'est applicable qu'à **Booking**, dont un canal se crée mappé et
+`is_active: false` (vérifié : `POST /channels` avec `is_active: false` et
+`rate_plans` renseigné donne bien un canal inactif mappé). Pour **Airbnb**, le
+retour de l'OAuth crée le canal **actif**, et il ne peut plus être désactivé
+sans se démapper. La fenêtre de doublon (le même séjour sous deux
+`booking_id`, l'ancien du CM sortant et le nouveau de Channex) ne peut donc pas
+être fermée côté Airbnb : elle se traite en **transférant vite**, puis en
+neutralisant les séjours OTA à venir de l'ancienne clé.
+
+## Le mapping Airbnb se pose par `/mappings`, jamais par `PUT /channels`
+
+Les `settings` d'un canal Airbnb contiennent les **jetons OAuth**
+(`settings.tokens`), plus `scope`, `token_invalid` et sept réglages de
+paiement. Un `PUT /channels/:id` les fait transiter et risque de les écraser.
+Le chemin est donc :
+
+```
+DELETE /channels/<id>/mappings/<mapping_id>
+POST   /channels/<id>/mappings  { mapping: { rate_plan_id, settings: { listing_id, primary_occ } } }
+```
+
+Airbnb impose **un mapping par annonce** : il faut retirer l'ancien avant
+d'ajouter le nouveau, donc prévoir le rollback (remettre l'ancien tarif) si
+l'ajout échoue — sinon l'annonce reste non mappée sur un canal actif.
+
+⚠ `GET /channels/<id>/mappings` rend **404** sur cette version de l'API :
+seuls `POST` et `DELETE` existent sur cette collection. Les mappings se lisent
+dans `channel.attributes.rate_plans[]`.
+
+⚠ **La lecture est différée après un POST.** Un `POST /mappings` rend 200 et le
+`GET` immédiat peut montrer le mapping, puis un `GET` quelques secondes plus
+tard montrer `rate_plans: []` — puis le mapping revenir, cette fois avec la
+configuration réelle de l'annonce tirée d'Airbnb (`published`,
+`default_daily_price`, `guests_included`, `promotions`, `availability_rule`).
+Le payload minimal (`listing_id` + `primary_occ`) suffit : Channex complète
+seul. **Ne pas conclure d'un `rate_plans: []` immédiat que le mapping a
+échoué** — le 10 septembre, cette lecture prématurée a fait diagnostiquer à
+tort un mapping perdu et un prix à 0.
