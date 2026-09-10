@@ -751,6 +751,27 @@ module.exports = async function handler(req, res) {
             else { pushed = true; taskIdsSave.restrictions = r.json?.data?.[0]?.id || null; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
           } else {
             taskIdsSave.restrictions_skipped = 'mode_keep'
+            // ⚠ ET ON LE DIT A L'HOTE. `restrictions_skipped` est un drapeau
+            // pour le code ; le front ne lit que `warnings`. Sans cette ligne,
+            // il affiche « Enregistre et publie » alors que RIEN n'est parti
+            // aux plateformes.
+            //
+            // MESURE DU 10 SEPTEMBRE 2026. Thierry a rouvert le samedi
+            // 31 octobre dans le calendrier, vu « Enregistre et publie », et
+            // attendu QUINZE MINUTES devant une date restee fermee sur Booking
+            // et Airbnb. Les trois maillons : le coeur portait bien
+            // `stop_sell = false` et 160 €, aucune poussee n'est partie
+            // (`rate_sync_mode = 'keep'`), et Channex detenait toujours
+            // `stop_sell: true`. Le defaut n'etait pas le mode — c'est un choix
+            // legitime — mais le SILENCE sur son effet.
+            //
+            // Les deux cas voisins avaient deja leur message (bien Beds24, bien
+            // non connecte) ; celui-ci, le plus courant sur un bien qui vient
+            // d'etre migre, n'en avait aucun.
+            pushWarnings.push('Enregistré dans HôteSmart — ce logement est en '
+              + '« je garde mes prix » : vos tarifs et vos réouvertures ne sont '
+              + 'PAS envoyés aux plateformes. Passez-le en « HôteSmart gère mes '
+              + 'prix » pour qu\'ils partent.')
           }
         }
         // ⚠ RESTITUTION DE L'INTENTION MEMORISEE, quel que soit le mode.
