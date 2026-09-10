@@ -122,9 +122,22 @@ async function main () {
       console.log(`      ${x.arrival_date}->${x.departure_date}  ${x.ota_reservation_code}  ${x.status}  insere ${String(x.inserted_at || '').slice(0, 19)}`)
     }
 
-    // Le carnet du coeur, pour comparer
-    const { data: bs } = await supabase.from('bookings_snapshot')
-      .select('snapshot').eq('property_id', B.cle)
+    // Le carnet du coeur, pour comparer.
+    // ⚠ PAGINE, ET UN TEST DU DEPOT L'EXIGE. Une lecture non bornee tronque a
+    // 1 000 lignes SANS ERREUR : le verdict de ce script serait alors faux sur
+    // un bien charge, et faux dans le sens rassurant — « ce sejour n'est pas
+    // dans le carnet » alors qu'il y est, page suivante. Le recensement
+    // `tests/bookings-snapshot-troncature.test.js` a attrape ce script.
+    const bs = []
+    let de = 0
+    for (;;) {
+      const { data, error } = await supabase.from('bookings_snapshot')
+        .select('snapshot').eq('property_id', B.cle).order('booking_id').range(de, de + 499)
+      if (error) { console.log(`   ⚠ lecture du carnet : ${error.message}`); break }
+      bs.push(...(data || []))
+      if (!data || data.length < 500) break
+      de += 500
+    }
     const auj2 = new Date().toISOString().slice(0, 10)
     const aVenirAbnb = (bs || []).map(x => x.snapshot || {})
       .filter(x => /airbnb/i.test(String(x.source || '')) && String(x.departure || '') > auj2
