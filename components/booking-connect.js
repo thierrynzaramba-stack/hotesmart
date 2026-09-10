@@ -224,15 +224,33 @@ async function screenC() {
 
   const pid = S.property.provider_property_id
   try {
-    const created = await api.channel.bcom.create(pid, {
-      hotelId: S.hotelId,
-      roomTypeCode: S.roomTypeCode,
-      ratePlanCode: S.ratePlanCode,
-      pricingType: S.pricingType,
-      dryRun: false
-    })
-    S.channelId = created?.channel_id
-    if (!S.channelId) throw new Error('channel_id manquant apres create')
+    // ⚠ CREER OU MAPPER : CE N'EST PAS LE MEME GESTE.
+    // Cet ecran appelait toujours `create`. Quand le bien a DEJA un canal
+    // Booking (cree hors de cet ecran, ou laisse inactif par une tentative
+    // precedente), Channex refuse le doublon : l'hote lisait « la connexion
+    // n'a pas pu etre finalisee » et « Reessayer » rejouait le meme refus,
+    // sans issue. Mesure du 10 septembre 2026 sur Cœur de vie « La bulle »,
+    // dont le canal avait ete cree par l'assistant de migration.
+    // `S.channelId` est renseigne par `openBookingConnect` a partir de
+    // `existingChannel` que lui passe le routeur connexions.js.
+    if (S.channelId) {
+      await api.channel.bcom.map(S.channelId, {
+        roomTypeCode: S.roomTypeCode,
+        ratePlanCode: S.ratePlanCode,
+        pricingType: S.pricingType,
+        dryRun: false
+      })
+    } else {
+      const created = await api.channel.bcom.create(pid, {
+        hotelId: S.hotelId,
+        roomTypeCode: S.roomTypeCode,
+        ratePlanCode: S.ratePlanCode,
+        pricingType: S.pricingType,
+        dryRun: false
+      })
+      S.channelId = created?.channel_id
+      if (!S.channelId) throw new Error('channel_id manquant apres create')
+    }
 
     setBody(`<div class="bk-status"><div class="bk-spin"></div> Activation et réouverture de vos dates…</div>`)
     const act = await api.channel.bcom.activate(S.channelId, { dryRun: false })
@@ -242,8 +260,14 @@ async function screenC() {
     screenD()
   } catch (e) {
     logger.error('booking-connect', 'liaison echec', { e: e.message })
+    // ⚠ ON MONTRE LA CAUSE. Le message seul ne disait jamais pourquoi, et
+    // « Reessayer » invitait a rejouer un refus definitif (doublon de canal,
+    // tarif derive absent, bien en mode « keep »). L'endpoint rend desormais
+    // un `error` lisible sur ses echecs d'ecriture : on l'affiche, en petit.
+    const cause = (e && e.message && e.message !== 'Erreur serveur') ? e.message : ''
     setBody(`
       <div class="bk-err">La connexion n'a pas pu être finalisée. Vos tarifs Booking n'ont pas été modifiés. Vous pouvez réessayer.</div>
+      ${cause ? `<div class="bk-note">Détail : ${escHtml(cause)}</div>` : ''}
       <div class="bk-actions">
         <button class="btn btn-primary" id="bk-c-retry">Réessayer</button>
         <button class="btn" id="bk-c-back">Revenir</button>

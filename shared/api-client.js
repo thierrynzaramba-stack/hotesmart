@@ -150,6 +150,20 @@ export const api = {
           + `&rate_plan_code=${encodeURIComponent(ratePlanCode)}`
           + (occupancy != null ? `&occupancy=${encodeURIComponent(occupancy)}` : '')
           + `&pricing_type=${encodeURIComponent(pricingType)}&dry_run=${dryRun}`, 'GET'),
+      // map : pose le mapping sur un canal DEJA CREE. Les codes viennent de
+      // l'ecran B, comme pour create.
+      // ⚠ CETTE METHODE MANQUAIT, et l'ecran de liaison en payait le prix : son
+      // ecran C appelait toujours `create`, meme quand le bien avait deja un
+      // canal Booking inactif. Channex refuse le doublon, le front affichait
+      // « la connexion n'a pas pu etre finalisee », et « Reessayer » rejouait le
+      // meme refus. `action=map` existait cote serveur depuis le debut de la
+      // phase 1 : il n'etait simplement branche nulle part.
+      map: (channelId, { roomTypeCode, ratePlanCode, occupancy, pricingType = 'Standard', dryRun = true } = {}) =>
+        apiCall(`channel-bcom-write?action=map&channel_id=${encodeURIComponent(channelId)}`
+          + `&room_type_code=${encodeURIComponent(roomTypeCode)}`
+          + `&rate_plan_code=${encodeURIComponent(ratePlanCode)}`
+          + (occupancy != null ? `&occupancy=${encodeURIComponent(occupancy)}` : '')
+          + `&pricing_type=${encodeURIComponent(pricingType)}&dry_run=${dryRun}`, 'GET'),
       remove: (channelId, { dryRun = true } = {}) =>
         apiCall(`channel-bcom-write?action=delete&channel_id=${encodeURIComponent(channelId)}&dry_run=${dryRun}`, 'GET'),
       activate: (channelId, { dryRun = true } = {}) =>

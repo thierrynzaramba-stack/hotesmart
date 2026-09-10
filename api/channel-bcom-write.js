@@ -21,7 +21,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, requirePermissionPourCanal } = require('../lib/require-permission')
-const { proprieteChezLeProvider } = require('../lib/rate-sync')
+const { proprieteChezLeProvider, canPushRates, RATE_PUSH_BLOCKED } = require('../lib/rate-sync')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -36,6 +36,79 @@ const OTA_CODE = 'BookingCom'
 // Allowlist reseau : (methode, matcher). Tout le reste => throw avant fetch.
 // Interdit de fait : /availability, /restrictions, /action/*, /activate, load_and_save_ari, sync.
 const DELETE_CHANNEL_RE = /^\/channels\/[0-9a-f-]{36}$/i
+
+// ⚠ POURQUOI CE TRADUCTEUR EXISTE. Un refus de Channex arrivait au front en
+// « Erreur serveur » : `shared/api-client.js` compose son message avec
+// `data.error`, et les branches d'ecriture rendaient 502 SANS ce champ — la
+// raison reelle dormait dans `result`, que le front jette. Mesure du
+// 10 septembre : la creation d'un second canal Booking sur un bien qui en a
+// deja un se refusait ainsi en silence, et le bouton « Reessayer » de l'ecran
+// de liaison rejouait indefiniment le meme refus.
+//
+// Channex n'a pas une seule forme d'erreur : `errors` peut etre une chaine, un
+// tableau, un objet `{ code, title, details }`, ou `details` un objet
+// { champ: [messages] }. On aplatit ce qu'on trouve, et on garde le libelle par
+// defaut si rien n'est lisible — jamais de message vide.
+function raisonChannex (corps, parDefaut) {
+  const e = corps && corps.errors
+  const bouts = []
+  const pousser = (v) => {
+    if (v == null) return
+    if (typeof v === 'string') { if (v.trim()) bouts.push(v.trim()); return }
+    if (Array.isArray(v)) { v.forEach(pousser); return }
+    if (typeof v === 'object') {
+      if (v.title) pousser(v.title)
+      if (v.details) pousser(v.details)
+      if (!v.title && !v.details) Object.values(v).forEach(pousser)
+      return
+    }
+    pousser(String(v))
+  }
+  pousser(e)
+  // Doublons frequents (`title` repete dans `details`).
+  const uniques = [...new Set(bouts)]
+  return uniques.length ? `${parDefaut} : ${uniques.join(' — ')}` : parDefaut
+}
+
+// ⚠ LA DECISION EST ICI, ET ELLE EST TESTABLE — C'EST LE POINT.
+// Elle etait en ligne dans `action=map`, derriere la garde d'autorisation et
+// deux allers-retours reseau : impossible a exercer sans tout simuler. Le test
+// se rabattait donc sur la LECTURE DE LA SOURCE, et la review l'a mis en
+// defaut — remplacer la cible par `propM.provider_rate_plan_id` laissait les
+// CINQ assertions vertes, alors que la regle s'inversait. Une fonction pure et
+// exportee rend l'inversion detectable.
+//
+// LA REGLE : le mapping pointe le tarif DERIVE du canal, jamais la base.
+// Mapper la base envoie a l'OTA le prix non derive — commission et `min_stay`
+// de `property_channel_rate_plans` perdus, en silence. On refuse plutot que de
+// replier.
+function choisirTarifDerive (liens) {
+  const utiles = (liens || []).filter(l => l && l.provider_rate_plan_id)
+  if (utiles.length > 1) {
+    return {
+      ok: false,
+      http: 409,
+      corps: {
+        error: 'Plusieurs tarifs derives booking pour ce bien — impossible de choisir',
+        message: 'Desactiver ou supprimer les liens en trop dans property_channel_rate_plans.',
+        trouves: utiles.length
+      }
+    }
+  }
+  if (!utiles.length) {
+    return {
+      ok: false,
+      http: 400,
+      corps: {
+        error: 'Aucun tarif derive booking pour ce bien',
+        message: 'Le mapping doit pointer le tarif DERIVE du canal, jamais le tarif de base : '
+          + 'sinon le prix non derive part chez l\'OTA. Creer le derive d\'abord '
+          + '(channel-rateplan, action=create_derived).'
+      }
+    }
+  }
+  return { ok: true, ratePlanId: utiles[0].provider_rate_plan_id }
+}
 function assertAllowed(method, path) {
   const ok =
     (method === 'GET' && (path === '/groups' || path.startsWith('/channels'))) ||
@@ -286,6 +359,16 @@ module.exports = async function handler(req, res) {
       }
 
       return res.status(w.ok ? 200 : 502).json({
+        // ⚠ `error` EST OBLIGATOIRE SUR UN ECHEC, ET SON ABSENCE A COUTE.
+        // `shared/api-client.js` construit son message avec `data.error` :
+        // sans ce champ, un refus de Channex arrivait au front en
+        // « Erreur serveur », et l'ecran de liaison affichait « la connexion
+        // n'a pas pu etre finalisee » sans jamais dire pourquoi. La raison
+        // reelle etait dans `result`, que le front jette. Mesure du
+        // 10 septembre : un second canal Booking sur un bien qui en a deja un
+        // se refusait ainsi en silence, et le bouton « Reessayer » rejouait
+        // indefiniment le meme refus.
+        ...(w.ok ? {} : { error: raisonChannex(w.json, 'La creation du canal a ete refusee') }),
         dry_run: false,
         http: w.status,
         channel_id: channelId,
@@ -346,26 +429,58 @@ module.exports = async function handler(req, res) {
       // Standard », celui du coeur. Mesure du 10 septembre sur le canal
       // Booking de Colomiers, le seul qui fonctionne en production : il mappe
       // `55b784ba-…` = « Colomiers — booking (derive) », pas
-      // `06a3f06c-…` = « Tarif Standard ». Mapper la base aurait envoye a
-      // l'OTA le prix NON derive : la commission Booking et le `min_stay: 2`
-      // portes par `property_channel_rate_plans` auraient ete perdus en
-      // silence, et toute la table serait devenue decorative.
-      // Repli sur la base seulement s'il n'existe aucun lien derive : mieux
-      // vaut un mapping non derive qu'un refus, mais on le dit dans la reponse.
-      const { data: lienRp, error: lienErr } = await supabase
+      // `06a3f06c-…` = « Tarif Standard ». Mapper la base envoie a l'OTA le
+      // prix NON derive : la commission Booking et le `min_stay` portes par
+      // `property_channel_rate_plans` disparaissent, et toute la table devient
+      // decorative.
+      //
+      // ⚠ ON REFUSE, ON NE RETOMBE PAS SUR LA BASE. J'avais mis un repli
+      // « mieux vaut un mapping non derive qu'un refus », signale par un
+      // booleen dans la reponse. Defaut releve en review : sur le chemin qui
+      // ECRIT, ce booleen est noye dans un JSON a cote de `http: 200` et de
+      // `rate_plans_after` — ca se lit comme un succes, et le prix non derive
+      // part chez l'OTA quand meme. C'est exactement le defaut que ce diff
+      // corrige, reintroduit par sa propre prudence. Le chemin jumeau tranche
+      // deja ainsi : `api/channel-rateplan.js` (`action=remap`, `to=derived`)
+      // rend HTTP 400 « Aucun rate plan derive booking en base ».
+      //
+      // ⚠ PAS DE `.eq('is_active', true)` : personne ne l'applique ailleurs
+      // (quatre lectures dans api/channel-rateplan.js filtrent channel+role
+      // seuls), le seul writer l'insere a `true` en dur et `set_rule` n'y
+      // touche jamais. Une ligne a `is_active` NULL — posee a la main, ou
+      // anterieure au defaut de colonne — serait donc invisible ICI et visible
+      // partout ailleurs : deux verites, et c'est la divergente qui ecrirait
+      // chez l'OTA. `.neq` laisse passer NULL, et n'exclut que le `false`
+      // explicite.
+      //
+      // ⚠ PAS DE `.maybeSingle()` : aucune migration du depot ne cree cette
+      // table, donc rien ne garantit `unique(property_id, channel)`. En cas de
+      // doublon, `maybeSingle` sortait en 500 « Erreur lecture » sans
+      // diagnostic. On lit, et on refuse en le disant.
+      const { data: liens, error: lienErr } = await supabase
         .from('property_channel_rate_plans')
         .select('provider_rate_plan_id, derive_mode, derive_value, min_stay')
         .eq('property_id', propM.id)
         .eq('channel', 'booking')
         .eq('role', 'derived')
-        .eq('is_active', true)
-        .maybeSingle()
+        .neq('is_active', false)
       if (lienErr) {
         console.error('[channel-bcom-write] property_channel_rate_plans', lienErr.message)
         return res.status(500).json({ error: 'Erreur lecture' })
       }
-      const ratePlanCible = (lienRp && lienRp.provider_rate_plan_id) || propM.provider_rate_plan_id
-      const derive = !!(lienRp && lienRp.provider_rate_plan_id)
+      const choix = choisirTarifDerive(liens)
+      if (!choix.ok) return res.status(choix.http).json(choix.corps)
+      const ratePlanCible = choix.ratePlanId
+
+      // ⚠ MEME GARDE TARIFAIRE QUE LE CHEMIN JUMEAU. Choisir le tarif que
+      // l'OTA lira EST une decision tarifaire : `api/channel-rateplan.js`
+      // gate son `remap` par `canPushRates` avec ce motif exact. Un bien en
+      // `keep` (Beds24 maitre des prix) ne doit pas voir son canal Booking
+      // pointe sur le derive HoteSmart. Le dry-run reste autorise : il n'ecrit
+      // rien, et c'est lui qui sert a montrer avant le geste.
+      if (req.query.dry_run === 'false' && !canPushRates(propM)) {
+        return res.status(200).json({ ...RATE_PUSH_BLOCKED })
+      }
 
       const occupancyM = Number.isInteger(parseInt(req.query.occupancy, 10))
         ? parseInt(req.query.occupancy, 10) : (propM.capacity || 1)
@@ -402,10 +517,8 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           dry_run: true,
           would_send: { method: 'PUT', path: `/channels/${channelId}`, payload: payloadM },
-          rate_plan_derive: derive,
+          rate_plan_id: ratePlanCible,
           note: 'Le mapping seul. `is_active` n\'est pas envoye : l\'activation reste un geste a part.'
-            + (derive ? '' : ' ⚠ AUCUN tarif derive booking pour ce bien : c\'est le tarif de BASE '
-              + 'qui serait mappe, donc le prix non derive qui partirait chez l\'OTA.')
         })
       }
 
@@ -414,12 +527,12 @@ module.exports = async function handler(req, res) {
       const apres = await channelCall('GET', `/channels/${channelId}`)
       const ratePlansApres = apres.json?.data?.attributes?.rate_plans || []
       return res.status(wM.ok ? 200 : 502).json({
+        ...(wM.ok ? {} : { error: raisonChannex(wM.json, 'Le mapping a ete refuse') }),
         dry_run: false,
         http: wM.status,
         channel_id: channelId,
         sent_payload: payloadM,
         result: redact(wM.json),
-        rate_plan_derive: derive,
         rate_plans_count: ratePlansApres.length,
         rate_plans_after: redact(ratePlansApres),
         is_active_after: apres.json?.data?.attributes?.is_active ?? null
@@ -476,3 +589,10 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: e.message })
   }
 }
+
+// ⚠ EXPORTS SECONDAIRES, SANS TOUCHER AU DEFAUT. `module.exports` reste la
+// fonction handler — Vercel l'appelle telle quelle. On accroche les deux
+// fonctions pures dessus pour que les tests les exercent directement, au lieu
+// de lire la source et de rester verts quand la regle s'inverse.
+module.exports.choisirTarifDerive = choisirTarifDerive
+module.exports.raisonChannex = raisonChannex

@@ -367,7 +367,7 @@ test('LE TEST QUI COMPTE : un bien EN MIGRATION est visible dans les ecrans de c
     'la liste des biens porte la colonne cible : ' + select.slice(0, 80))
 })
 
-test('LE TEST QUI COMPTE : le mapping Booking cible le tarif DERIVE, pas la base', () => {
+test('LE TEST QUI COMPTE : le mapping Booking cible le tarif DERIVE — la decision, pas la source', () => {
   // Mesure du 10 septembre 2026 sur le canal Booking de Colomiers, le seul en
   // production : il mappe `55b784ba-…` = « Colomiers — booking (derive) », et
   // non `06a3f06c-…` = « Tarif Standard ». Or `action=map` envoyait
@@ -375,14 +375,123 @@ test('LE TEST QUI COMPTE : le mapping Booking cible le tarif DERIVE, pas la base
   // Consequence silencieuse : le prix non derive part chez l'OTA, la
   // commission Booking et le `min_stay` de `property_channel_rate_plans`
   // disparaissent, et la table devient decorative.
+  //
+  // ⚠ PREMIERE VERSION DE CE TEST : FAUX VERT, DEMONTRE EN REVIEW.
+  // Il lisait la source (`from('property_channel_rate_plans')`,
+  // `rate_plan_id: ratePlanCible`, …). Remplacer la cible par
+  // `propM.provider_rate_plan_id` — donc inverser la regle — laissait les CINQ
+  // assertions vertes : les chaines cherchees etaient toujours la. On exerce
+  // donc la DECISION, extraite en fonction pure pour cette raison.
+  const { choisirTarifDerive } = require('../api/channel-bcom-write')
+
+  // Le cas nominal : un lien derive -> c'est LUI qui est mappe.
+  const ok = choisirTarifDerive([{ provider_rate_plan_id: '043297fc-derive' }])
+  assert.equal(ok.ok, true)
+  assert.equal(ok.ratePlanId, '043297fc-derive')
+
+  // ⚠ AUCUN DERIVE -> REFUS, PAS DE REPLI SUR LA BASE.
+  // J'avais mis un repli « mieux vaut un mapping non derive qu'un refus »,
+  // signale par un booleen dans la reponse. Sur le chemin qui ECRIT, ce
+  // booleen etait noye a cote de `http: 200` : ca se lisait comme un succes et
+  // le prix non derive partait quand meme. Le chemin jumeau
+  // (api/channel-rateplan.js, action=remap to=derived) rend 400 : on s'aligne.
+  const vide = choisirTarifDerive([])
+  assert.equal(vide.ok, false)
+  assert.equal(vide.http, 400)
+  assert.match(String(vide.corps.error), /Aucun tarif derive booking/)
+  assert.ok(!('ratePlanId' in vide), 'aucune cible rendue sur un refus')
+
+  // Une ligne presente mais sans identifiant ne vaut pas un derive.
+  assert.equal(choisirTarifDerive([{ provider_rate_plan_id: null }]).ok, false)
+  assert.equal(choisirTarifDerive([null, undefined]).ok, false)
+  assert.equal(choisirTarifDerive(null).ok, false)
+
+  // ⚠ DOUBLON -> 409, PAS UN CHOIX ARBITRAIRE. Aucune migration du depot ne
+  // cree cette table : rien ne garantit `unique(property_id, channel)`. Le
+  // `.maybeSingle()` d'origine sortait alors en 500 « Erreur lecture », sans
+  // diagnostic. Et prendre la premiere ligne aurait fait dependre le prix
+  // envoye a l'OTA de l'ordre de PostgREST.
+  const deux = choisirTarifDerive([
+    { provider_rate_plan_id: 'a' }, { provider_rate_plan_id: 'b' }
+  ])
+  assert.equal(deux.ok, false)
+  assert.equal(deux.http, 409)
+  assert.equal(deux.corps.trouves, 2)
+})
+
+test('LE TEST QUI COMPTE : un refus de Channex arrive au front avec sa raison', () => {
+  // `shared/api-client.js` compose son message avec `data.error`. Les branches
+  // d'ecriture rendaient 502 SANS ce champ : la raison dormait dans `result`,
+  // que le front jette. L'ecran de liaison affichait donc « la connexion n'a
+  // pas pu etre finalisee » sans jamais dire pourquoi, et « Reessayer »
+  // rejouait un refus definitif. Mesure du 10 septembre : un second canal
+  // Booking sur un bien qui en a deja un se refusait ainsi en silence.
+  const { raisonChannex } = require('../api/channel-bcom-write')
+
+  // Channex n'a pas une seule forme d'erreur. Les cinq rencontrees :
+  assert.equal(raisonChannex({ errors: null }, 'Refuse'), 'Refuse',
+    'corps vide -> le libelle par defaut, jamais un message vide')
+  assert.equal(raisonChannex(null, 'Refuse'), 'Refuse')
+  assert.match(raisonChannex(
+    { errors: { code: 'bad_request', title: 'Bad Request', details: null } }, 'Refuse'),
+    /Bad Request/)
+  assert.match(raisonChannex(
+    { errors: 'You not have access to requested group' }, 'Refuse'),
+    /requested group/)
+  // `details` en objet { champ: [messages] } : tout doit remonter.
+  const detaille = raisonChannex({ errors: {
+    code: 'x', title: 'Bad Request',
+    details: { settings: ["can't be blank"], channel: ['is invalid'] }
+  } }, 'Refuse')
+  assert.match(detaille, /can't be blank/)
+  assert.match(detaille, /is invalid/)
+
+  // Et les deux branches d'ecriture le posent bien dans `error`.
   const src = lire('api/channel-bcom-write.js')
-  assert.ok(src.includes("from('property_channel_rate_plans')"),
-    'le lien par canal est lu')
-  assert.ok(/\.eq\('channel', 'booking'\)[\s\S]{0,200}\.eq\('role', 'derived'\)/.test(src),
-    'on cherche bien le derive du canal booking')
-  assert.ok(src.includes('rate_plan_id: ratePlanCible'),
-    'le payload envoie la cible resolue, pas provider_rate_plan_id')
-  // Le repli existe, mais il se DIT : un mapping non derive doit etre visible.
-  assert.ok(src.includes('const derive = !!(lienRp'), 'le repli est trace')
-  assert.ok(src.includes('rate_plan_derive: derive'), 'la reponse le rend')
+  assert.equal((src.match(/error: raisonChannex\(/g) || []).length, 2,
+    'create ET map rendent la raison')
+})
+
+test('LE TEST QUI COMPTE : le mapping est une decision tarifaire, donc garde par canPushRates', () => {
+  // Le chemin jumeau le dit dans son propre commentaire : « le remap change la
+  // source de prix lue par l'OTA -> ecriture tarifaire. Refuse en 'keep' ».
+  // Depuis que `action=map` choisit entre base et derive, il fait la meme
+  // chose — un bien en `keep` (Beds24 maitre des prix) ne doit pas voir son
+  // canal Booking pointe sur le derive HoteSmart.
+  const src = lire('api/channel-bcom-write.js')
+  assert.ok(/canPushRates.*require\('\.\.\/lib\/rate-sync'\)/.test(src)
+    || /require\('\.\.\/lib\/rate-sync'\)/.test(src) && src.includes('canPushRates'),
+    'la garde est importee')
+  assert.ok(src.includes('!canPushRates(propM)'), 'et appliquee au bien du canal')
+  assert.ok(src.includes('{ ...RATE_PUSH_BLOCKED }'), 'avec le refus standard du depot')
+  // Le dry-run reste autorise : c'est lui qui sert a MONTRER avant le geste.
+  assert.ok(src.includes("req.query.dry_run === 'false' && !canPushRates(propM)"),
+    'le dry-run n\'est pas gate')
+})
+
+test('LE TEST QUI COMPTE : l\'ecran de liaison mappe un canal existant au lieu d\'en recreer un', () => {
+  // Mesure du 10 septembre sur Cœur de vie « La bulle », dont le canal avait
+  // ete cree par l'assistant de migration : l'ecran C appelait toujours
+  // `create`, Channex refusait le doublon, et le bouton « Reessayer » rejouait
+  // le meme refus sans issue. `action=map` existait cote serveur depuis le
+  // debut de la phase 1 — il n'etait branche nulle part.
+  const client = lire('shared/api-client.js')
+  assert.ok(/map: \(channelId, \{/.test(client), 'le client expose map')
+  assert.ok(client.includes('action=map&channel_id='), 'sur l\'action serveur')
+  // Le mapping s'adresse par channel_id, PAS par property_id : passer le bien
+  // aurait redemande une resolution que la garde du canal fait deja.
+  const bloc = client.slice(client.indexOf('map: (channelId, {'))
+  assert.ok(!bloc.slice(0, 400).includes('property_id='), 'map n\'envoie pas de property_id')
+
+  const ecran = lire('components/booking-connect.js')
+  assert.ok(ecran.includes('if (S.channelId) {'), 'l\'ecran distingue les deux cas')
+  const i = ecran.indexOf('if (S.channelId) {')
+  const suite = ecran.slice(i, i + 700)
+  assert.ok(suite.includes('api.channel.bcom.map('), 'canal existant -> map')
+  assert.ok(suite.includes('api.channel.bcom.create('), 'sinon -> create')
+  assert.ok(suite.indexOf('api.channel.bcom.map(') < suite.indexOf('api.channel.bcom.create('),
+    'map est bien la branche du canal existant')
+  // La cause du refus doit etre montree : sans elle, « Reessayer » invite a
+  // rejouer un refus definitif.
+  assert.ok(ecran.includes('Détail :'), 'l\'ecran affiche la cause rendue par le serveur')
 })
