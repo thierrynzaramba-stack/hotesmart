@@ -475,7 +475,16 @@ async function detectAndRoute() {
   setBody(`<div class="ab-status"><div class="ab-spin"></div> Vérification de la connexion…</div>`)
   try {
     const r = await api.channel.mapping.channels(S.property.provider_property_id)
-    const chans = r?.channels || []
+    // ⚠ FILTRE SUR L'OTA, ET C'EST LA CAUSE D'UN CANAL BOOKING SUPPRIME.
+    // `action=channels` rend TOUS les canaux du bien — il expose le champ `ota`,
+    // que cet ecran ignorait. Sur La bulle, le canal Booking etait actif et cree
+    // en premier : `find(c => c.is_active)` rendait donc LE CANAL BOOKING, cet
+    // ecran annoncait « Airbnb est deja connecte », et « Deconnecter cette
+    // annonce » envoyait `disconnect` sur le canal Booking — qui a retire son
+    // mapping, l'a trouve vide, et l'a SUPPRIME.
+    // Constate le 10 septembre 2026 : La bulle ouverte le 31 octobre restait
+    // fermee sur Booking, parce qu'il n'y avait plus de canal Booking.
+    const chans = (r?.channels || []).filter(c => /airbnb/i.test(String(c.ota || '')))
     const active = chans.find(c => c.is_active)
     if (active) { S.channelId = active.id; S.channelActive = true; return screenAlreadyConnected() }
     if (chans.length) { S.channelId = chans[0].id; S.channelActive = false; return screenB() }   // OAuth fait, mapping a finir

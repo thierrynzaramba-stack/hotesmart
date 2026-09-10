@@ -504,13 +504,28 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Bien sans provider_rate_plan_id (rien a deconnecter)' })
       }
 
+      // ⚠ ON NE DEVINE PLUS LE CANAL. `rows[0]` prenait le PREMIER canal du
+      // bien, quel que soit l'OTA : sur un bien connecte a Booking ET Airbnb,
+      // deconnecter l'un pouvait supprimer l'autre. C'est arrive le
+      // 10 septembre 2026 sur La bulle — son canal Booking a disparu, et la
+      // date rouverte le 31 octobre est restee fermee chez Booking faute de
+      // canal pour la porter.
+      // Cet endpoint est celui du mapping AIRBNB (`list_listings`,
+      // `action_listings`, `mappings`) : il ne doit toucher qu'un canal Airbnb.
       if (!channelId) {
         const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
         const rows = Array.isArray(list.json?.data) ? list.json.data : []
-        channelId = rows[0]?.id || ''
+        const abnb = rows.filter(c => /airbnb/i.test(String(c.attributes?.channel || c.attributes?.ota_name || '')))
+        if (abnb.length > 1) {
+          return res.status(409).json({
+            error: 'Plusieurs canaux Airbnb sur ce logement : precisez channel_id.',
+            channel_count: abnb.length
+          })
+        }
+        channelId = abnb[0]?.id || ''
       }
       if (!channelId) {
-        return res.status(404).json({ error: 'Aucun canal sur ce bien (deja deconnecte)' })
+        return res.status(404).json({ error: 'Aucun canal Airbnb sur ce bien (deja deconnecte)' })
       }
 
       // SOURCE CORRECTE du mapping_id : channel.attributes.rate_plans[].id (via GET /channels/:id),
@@ -521,12 +536,39 @@ module.exports = async function handler(req, res) {
         ?? rp?.relationships?.rate_plan?.data?.id ?? null
 
       const chBefore = await channelCall('GET', `/channels/${channelId}`)
+      // ⚠ ET ON VERIFIE QUE LE CANAL DESIGNE EST BIEN UN CANAL AIRBNB.
+      // Un `channel_id` peut venir de l'appelant : le filtre ci-dessus ne
+      // protege que le cas ou il est absent. C'est par la que le canal Booking
+      // de La bulle a ete supprime — l'ecran Airbnb lui avait passe l'id du
+      // canal Booking, faute de filtrer sur l'OTA de son cote.
+      const otaCanal = String(chBefore.json?.data?.attributes?.channel
+        || chBefore.json?.data?.attributes?.ota_name || '')
+      if (chBefore.json?.data && !/airbnb/i.test(otaCanal)) {
+        return res.status(409).json({
+          error: `Ce canal n'est pas un canal Airbnb (${otaCanal}) : deconnexion refusee.`,
+          channel_id: channelId, ota: otaCanal
+        })
+      }
       const rpsBefore = Array.isArray(chBefore.json?.data?.attributes?.rate_plans)
         ? chBefore.json.data.attributes.rate_plans : []
 
-      // Defensif multi-biens : match sur notre rate_plan_id ; a defaut, si UN SEUL mapping
-      // present, c'est forcement le notre (cas Colomiers). Plusieurs sans match -> ambigu (stop).
-      let mine = rpsBefore.filter(rp => rpUnderlying(rp) != null && String(rpUnderlying(rp)) === String(ratePlanId))
+      // ⚠ ON CHERCHE AUSSI LE TARIF DERIVE, ET C'EST DEVENU LE CAS NORMAL.
+      // `provider_rate_plan_id` est le tarif de BASE. Depuis que tous les
+      // mappings pointent le tarif DERIVE du canal (correctif du 10 septembre
+      // 2026 : mapper la base envoyait le prix non derive a l'OTA), ce match
+      // n'aboutit PLUS JAMAIS — et le repli `sole_entry` etait donc devenu le
+      // seul chemin. Un repli concu comme l'exception ne doit pas devenir la
+      // regle : il supprime un mapping que la fonction n'a PAS identifie comme
+      // le sien.
+      const { data: lienAbnb } = await supabase
+        .from('property_channel_rate_plans')
+        .select('provider_rate_plan_id')
+        .eq('property_id', prop.id).eq('channel', 'airbnb').eq('role', 'derived')
+        .neq('is_active', false)
+        .maybeSingle()
+      const cibles = [ratePlanId, lienAbnb?.provider_rate_plan_id].filter(Boolean).map(String)
+
+      let mine = rpsBefore.filter(rp => rpUnderlying(rp) != null && cibles.includes(String(rpUnderlying(rp))))
       let matchedBy = 'rate_plan_id'
       if (mine.length === 0 && rpsBefore.length === 1) { mine = rpsBefore; matchedBy = 'sole_entry' }
       const ambiguous = mine.length === 0 && rpsBefore.length > 1
