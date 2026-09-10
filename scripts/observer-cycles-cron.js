@@ -1,0 +1,95 @@
+// scripts/observer-cycles-cron.js
+// Observe si un cron Beds24 rapatrie encore les donnees d'un bien MIGRE.
+//
+// ⚠ CE QU'ON CHERCHE, ET POURQUOI. Le 10 septembre 2026, la fiche Beds24 de
+// La bulle s'est recreee toute seule apres son transfert, et 106 des
+// 786 sejours sont repartis sous l'ancienne cle — parce que `api/cron.js`
+// boucle sur la liste LIVE du compte Beds24, ou le bien reste volontairement.
+// Quatre gardes ont ete posees et une table `provider_keys_migrated` les
+// alimente. Ce script verifie SUR PLUSIEURS CYCLES REELS que ca tient : un
+// correctif de ce genre ne se declare pas bon sur un test unitaire.
+//
+// ⚠ IL N'ECRIT RIEN. Lecture seule, et il ne declenche aucun cron : il observe
+// ceux qui tournent d'eux-memes (Vercel, toutes les 5 minutes).
+//
+// USAGE : node scripts/observer-cycles-cron.js [minutes]
+
+require('dotenv').config({ path: '.env.local', quiet: true })
+const { createClient } = require('@supabase/supabase-js')
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+
+const MINUTES = Number(process.argv[2]) || 12
+const UTIL = '85e3a0ef-75bd-4c11-a3b7-e2811067dc36'
+const CLE_ABANDONNEE = '209413'
+const CLE_CHANNEX = '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4'
+const FICHE_NEUVE = '091d9abf-ff86-45ce-8123-3425e6f3900f'
+
+// Les tables ou le rapatriement s'est REELLEMENT produit, plus la fiche
+// elle-meme. On ne surveille pas tout : on surveille ce qui a saigne.
+const TABLES = ['bookings_snapshot', 'menages', 'sms_logs', 'agent_tasks',
+  'messages', 'conversations', 'property_status', 'access_codes']
+
+async function releve () {
+  const r = { horodatage: new Date().toISOString().slice(11, 19), sous_ancienne: {}, total_ancienne: 0 }
+
+  for (const t of TABLES) {
+    const { count, error } = await supabase.from(t)
+      .select('*', { count: 'exact', head: true }).eq('property_id', CLE_ABANDONNEE)
+    if (error) { r.sous_ancienne[t] = `ERR ${error.message.slice(0, 30)}`; continue }
+    if (count) { r.sous_ancienne[t] = count; r.total_ancienne += count }
+  }
+
+  // La fiche Beds24 a-t-elle ete recreee ?
+  const { data: fiche } = await supabase.from('properties')
+    .select('id, created_at, active_at').eq('user_id', UTIL)
+    .eq('provider', 'beds24').eq('provider_property_id', CLE_ABANDONNEE).maybeSingle()
+  r.fiche_recreee = fiche ? `${fiche.id} (creee ${String(fiche.created_at).slice(11, 19)})` : null
+
+  // Et la cible n'a rien perdu ?
+  const { count: cible } = await supabase.from('bookings_snapshot')
+    .select('*', { count: 'exact', head: true }).eq('property_id', CLE_CHANNEX)
+  r.sejours_cible = cible
+
+  // Le calendrier de la fiche neuve est-il intact ?
+  const { count: cal } = await supabase.from('calendar_inventory')
+    .select('*', { count: 'exact', head: true }).eq('property_id', FICHE_NEUVE)
+  r.calendrier_cible = cal
+
+  return r
+}
+
+async function main () {
+  console.log(`Observation sur ${MINUTES} min (cron toutes les 5 min).`)
+  console.log(`Cle abandonnee : ${CLE_ABANDONNEE}   cible : ${CLE_CHANNEX}\n`)
+
+  const debut = await releve()
+  console.log(`${debut.horodatage}  DEPART   ancienne=${debut.total_ancienne}  `
+    + `cible=${debut.sejours_cible} sejours / ${debut.calendrier_cible} dates  `
+    + `fiche_recreee=${debut.fiche_recreee || 'non'}`)
+
+  const alertes = []
+  const fin = Date.now() + MINUTES * 60 * 1000
+  while (Date.now() < fin) {
+    await new Promise(r => setTimeout(r, 60000))
+    const r = await releve()
+    const souci = r.total_ancienne > 0 || r.fiche_recreee
+      || r.sejours_cible !== debut.sejours_cible
+    console.log(`${r.horodatage}  ${souci ? '⚠' : 'ok'}       `
+      + `ancienne=${r.total_ancienne}  cible=${r.sejours_cible} sejours / ${r.calendrier_cible} dates  `
+      + `fiche_recreee=${r.fiche_recreee || 'non'}`
+      + (r.total_ancienne ? `  ${JSON.stringify(r.sous_ancienne)}` : ''))
+    if (souci) alertes.push(r)
+  }
+
+  console.log('\n══ VERDICT')
+  if (!alertes.length) {
+    console.log(`   Aucun rapatriement sur ${MINUTES} min (${Math.floor(MINUTES / 5)} cycle(s) au moins).`)
+    console.log(`   La fiche Beds24 n'a pas ete recreee, et la cible n'a rien perdu.`)
+  } else {
+    console.log(`   ⚠ ${alertes.length} releve(s) en anomalie — la garde ne tient pas :`)
+    for (const a of alertes) console.log(`      ${a.horodatage} ${JSON.stringify(a.sous_ancienne)} fiche=${a.fiche_recreee || 'non'}`)
+    process.exitCode = 1
+  }
+}
+
+main().catch(e => { console.error('\nECHEC :', e.message); process.exitCode = 1 })

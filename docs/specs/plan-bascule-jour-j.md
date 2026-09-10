@@ -6,6 +6,76 @@
 >
 > L'accélération supprime l'attente entre les étapes, **jamais une vérification.**
 
+## ⚠ CE PLAN A ÉTÉ DÉPASSÉ LE 10 SEPTEMBRE 2026 — lire ceci d'abord
+
+Thierry a retenu un **autre plan**, redit deux fois : *« je crée deux biens, tu
+leur transfères le rate plan et je les mappe, ensuite on transfère les données.
+Je ne souhaite pas garder des biens avec une structure hybride. »*
+
+Le re-keying décrit plus bas (phases 0 à 2) **rebaptise la fiche existante**.
+Le plan retenu crée des **fiches neuves** et y transfère les données
+(`migrations/2026-09-10-transfert-vers-bien-neuf.sql`). La section « faits
+établis » et les phases restent le compte rendu de ce qui était prévu ; ce qui
+suit est ce qui a été **mesuré**, et qui invalide plusieurs de leurs prémisses.
+
+### Ce que le plan supposait à tort
+
+**« Ce qui ne bouge pas : tout ce qui est clé en UUID. »** Vrai pour le
+re-keying, faux dès que la fiche change : les **6 clés étrangères** vers
+`properties.id` doivent suivre — `calendar_inventory`, `booking_links`,
+`booking_attempts`, `ota_reviews`, `airbnb_connect_sessions`,
+`property_channel_rate_plans`. Trois n'étaient dans **aucun** inventaire.
+`calendar_inventory` est la plus lourde : c'est la mémoire d'intention de
+l'hôte.
+
+**Trois angles morts d'inventaire, tous mesurés :**
+
+1. colonnes `property_id` en TEXT → `scripts/inventaire-tables.js` ;
+2. références par UUID dont le nom parle de bien →
+   `scripts/inventaire-references-uuid.js` (écrit ce jour-là) ;
+3. **références tenues comme CLÉS d'un JSONB** — `agent_alert_config.config`
+   indexait `209413` avec le mode de l'agent IA et les destinataires d'alerte.
+   Ni le nom de la colonne ni ses valeurs ne parlent de bien. Conséquence
+   réelle : l'agent IA du bien migré est resté **muet** (`mode: 'test'` par
+   défaut) sans une ligne de log.
+
+**« Mapper d'abord, activer après le transfert. »** Inapplicable à Airbnb, et
+seulement à moitié vrai pour Booking : **Channex active un canal de lui-même
+quand l'OTA confirme le mapping**, et il **refuse de désactiver un canal
+mappé** (`HTTP 422 {"channel":["remove mappings before"]}`). Il n'existe donc
+pas d'état « mappé mais inactif ». La fenêtre de doublon se traite en
+transférant vite, pas en gardant le canal éteint.
+
+**« Supprimer l'ancienne fiche suffit à clore. »** Faux. `api/cron.js` fait
+`fetchProperties(beds24Key)` — la liste **live** du compte Beds24, où le bien
+reste volontairement (règle N2) — puis boucle dessus. La fiche s'est **recréée**
+au cycle suivant avec `active_at` (donc refacturée), 106 des 786 séjours sont
+repartis sous l'ancienne clé, et **des messages repartaient** depuis la chaîne
+Beds24. `automation_paused` n'y change rien : la pause coupe le voyageur, jamais
+la synchro provider.
+
+Le correctif est la table `provider_keys_migrated` et **quatre** gardes au point
+d'écriture (`lib/cles-migrees.js`) : `materializeBeds24Properties`,
+`detectBookingChanges`, `processProperty` — le **second** writer de
+`bookings_snapshot` — et `processArrivalCodes`, qui crée un code réel sur la
+serrure et envoie le PIN. Les deux dernières avaient été manquées d'abord :
+corriger la seule matérialisation ne suffisait pas.
+
+**Le `hotel_id` n'est stocké dans aucune table.** Il ne vit que dans les
+réglages du canal chez Channex. Une resync ne peut donc pas l'écraser, et une
+correction manuelle n'a rien à reporter en base. Et son type est **inversé selon
+l'appel** : NOMBRE à `POST /channels`, CHAÎNE aux appels de lecture — en nombre,
+`mapping_details` rend un 422 à corps vide, indiscernable d'un refus de l'OTA
+(voir `docs/CHANNEL_TECH.md`).
+
+### Décision du 10 septembre au soir
+
+**Tout est fermé à la vente sur les deux biens** — vérifié chez Channex, 0 date
+ouverte — **jusqu'à la fin de la migration vérifiée**. La réouverture est la
+dernière étape. Plus d'urgence commerciale.
+
+---
+
 ## Les faits établis
 
 | | |
