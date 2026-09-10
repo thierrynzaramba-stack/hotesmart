@@ -14,7 +14,7 @@
 | Fiche source (Beds24) | `49b2d1f6-b8df-43ba-b636-fa4f73713c4b` — clé `169567` |
 | Fiche cible (Channex) | `efe1daf1-652c-4177-b29b-19f1db377c96` — clé `1655ab32-d339-413d-b8ff-b4ccbd2a7b66` |
 | Booking | `hotel_id 8985969` · canal `2b0f16df-…` **actif**, mappé sur le dérivé |
-| Airbnb | **aucun canal** — le précédent (`a42a7f18-…`) est en 404 depuis le 10/09 au soir |
+| Airbnb | **aucun canal** — Thierry a déconnecté le précédent (`a42a7f18-…`) le 10/09 au soir, **délibérément, pour un test**. Déconnexion propre : le canal est en 404, le lien `airbnb/derived` en base est intact. |
 | Tarif dérivé airbnb en base | `97462698-…`, lien `airbnb/derived` intact |
 
 ## État vérifié au 10 septembre, 21 h
@@ -106,8 +106,9 @@ inchangée.
 
 ### 4. Dédoublonner les 2 réservations Airbnb
 
-Le canal Airbnb du 23 a été actif ~5 h le 10 septembre : Channex a livré deux
-séjours qui existaient déjà sous la clé Beds24.
+Le canal Airbnb du 23 a été actif ~5 h le 10 septembre — de son OAuth à la
+déconnexion de test — et Channex a livré pendant ce temps deux séjours qui
+existaient déjà sous la clé Beds24.
 
 | Code OTA | Séjour | `booking_id` Beds24 | `booking_id` Channex |
 |---|---|---|---|
