@@ -57,11 +57,27 @@ async function releve () {
     if (count) { r.sous_ancienne[t] = count; r.total_ancienne += count }
   }
 
-  // La fiche Beds24 a-t-elle ete recreee ?
+  // La fiche Beds24 a-t-elle ete RECREEE ?
+  // ⚠ RETIREE N'EST PAS RECREEE, ET LA PREMIERE VERSION CONFONDAIT LES DEUX.
+  // Sur La bulle, l'ancienne fiche avait ete SUPPRIMEE : sa presence etait donc
+  // le signal. Sur le 23 elle est CONSERVEE et retiree — `automation_paused`,
+  // `active_at` vide, `paused_reason` posee par `transferer_bien`. C'est l'etat
+  // VOULU. Sans cette distinction, l'observateur criait a l'anomalie a chaque
+  // releve et le verdict aurait dit « la garde ne tient pas » sur un transfert
+  // parfaitement sain.
+  //
+  // Ce qui distingue une RE-MATERIALISATION : `materializeBeds24Properties` pose
+  // `active_at` a la premiere apparition et ne connait pas `paused_reason`.
   const { data: fiche } = await supabase.from('properties')
-    .select('id, created_at, active_at').eq('user_id', UTIL)
+    .select('id, created_at, active_at, automation_paused, paused_reason')
+    .eq('user_id', UTIL)
     .eq('provider', 'beds24').eq('provider_property_id', CLE_ABANDONNEE).maybeSingle()
-  r.fiche_recreee = fiche ? `${fiche.id} (creee ${String(fiche.created_at).slice(11, 19)})` : null
+  const retiree = !!fiche && fiche.active_at === null
+    && /transferee/i.test(String(fiche.paused_reason || ''))
+  r.fiche_retiree = retiree
+  r.fiche_recreee = (fiche && !retiree)
+    ? `${fiche.id} (creee ${String(fiche.created_at).slice(11, 19)}, active_at ${fiche.active_at ? 'POSE' : 'null'})`
+    : null
 
   // Et la cible n'a rien perdu ?
   const { count: cible } = await supabase.from('bookings_snapshot')
@@ -83,7 +99,7 @@ async function main () {
   const debut = await releve()
   console.log(`${debut.horodatage}  DEPART   ancienne=${debut.total_ancienne}  `
     + `cible=${debut.sejours_cible} sejours / ${debut.calendrier_cible} dates  `
-    + `fiche_recreee=${debut.fiche_recreee || 'non'}`)
+    + `fiche=${debut.fiche_recreee ? 'RECREEE ' + debut.fiche_recreee : (debut.fiche_retiree ? 'retiree (voulu)' : 'absente')}`)
 
   const alertes = []
   const fin = Date.now() + MINUTES * 60 * 1000
@@ -94,7 +110,7 @@ async function main () {
       || r.sejours_cible !== debut.sejours_cible
     console.log(`${r.horodatage}  ${souci ? '⚠' : 'ok'}       `
       + `ancienne=${r.total_ancienne}  cible=${r.sejours_cible} sejours / ${r.calendrier_cible} dates  `
-      + `fiche_recreee=${r.fiche_recreee || 'non'}`
+      + `fiche=${r.fiche_recreee ? 'RECREEE' : (r.fiche_retiree ? 'retiree' : 'absente')}`
       + (r.total_ancienne ? `  ${JSON.stringify(r.sous_ancienne)}` : ''))
     if (souci) alertes.push(r)
   }
