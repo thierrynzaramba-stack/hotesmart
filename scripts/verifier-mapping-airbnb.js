@@ -30,9 +30,15 @@ const ok = (b) => b ? '✓' : '⛔'
 
 const BIENS = [
   { nom: 'La bulle', fiche: '091d9abf-ff86-45ce-8123-3425e6f3900f',
-    cle: '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4', attendu: true },
+    cle: '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4', attendu: true,
+    // ⚠ LES DATES OUVERTES VOULUES, NOMMEES. Sans cette liste, le script ne
+    // peut pas distinguer « ouverte par decision de l'hote » de « ouverte par
+    // accident » : il criait sur le 31/10, la date de test de Thierry, et son
+    // code de sortie etait inexploitable.
+    ouvertesAttendues: ['2026-10-31'] },
   { nom: 'Cœur de vie l 23', fiche: 'efe1daf1-652c-4177-b29b-19f1db377c96',
-    cle: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66', attendu: true }
+    cle: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66', attendu: true,
+    ouvertesAttendues: [] }        // tout ferme : la reouverture est le geste de l'hote
 ]
 
 async function main () {
@@ -144,13 +150,18 @@ async function main () {
       const inconnues = dates.filter(d =>
         par[d].stop_sell === undefined || !Number.isFinite(Number(par[d].availability)))
       const ouvertes = dates.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
-      console.log(`   ${ok(ouvertes.length === 0)} ${ouvertes.length} date(s) ouverte(s) a la vente`)
-      if (ouvertes.length) console.log(`      ⚠ ${ouvertes.slice(0, 15).join(', ')}`)
+      const attendues = B.ouvertesAttendues || []
+      const enTrop = ouvertes.filter(d => !attendues.includes(d))
+      const manquantes = attendues.filter(d => !ouvertes.includes(d))
+      console.log(`   ${ok(enTrop.length === 0 && manquantes.length === 0)} ${ouvertes.length} date(s) ouverte(s) a la vente`
+        + `  (attendu : ${attendues.length ? attendues.join(', ') : 'AUCUNE'})`)
+      if (enTrop.length) console.log(`      ⛔ ouvertes NON VOULUES : ${enTrop.slice(0, 15).join(', ')}`)
+      if (manquantes.length) console.log(`      ⛔ attendues ouvertes mais FERMEES : ${manquantes.join(', ')}`)
       console.log(`   ${ok(inconnues.length === 0)} ${inconnues.length} date(s) au reglage ILLISIBLE (ni ouvertes ni fermees, indecidables)`)
       if (inconnues.length) console.log(`      ⚠ ${inconnues.slice(0, 15).join(', ')}`)
       console.log(`      dispo 0 : ${dates.filter(d => Number(par[d].availability) === 0).length}`
         + `   stop_sell true : ${dates.filter(d => par[d].stop_sell === true).length}`)
-      if (ouvertes.length || inconnues.length) process.exitCode = 1
+      if (enTrop.length || manquantes.length || inconnues.length) process.exitCode = 1
     }
 
     // 4. LE FEED

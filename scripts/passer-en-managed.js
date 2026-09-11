@@ -18,15 +18,20 @@
 // bien devient invendable partout — moteur direct et calendrier public
 // compris (option A). C'est la regle « tout par date, aucun defaut ».
 //
-// ⚠ UN SEUL BIEN A LA FOIS, NOMME EN DUR. Le 23 reste en `keep` jusqu'a sa
-// migration complete.
+// ⚠ UN SEUL BIEN A LA FOIS, NOMME EN DUR — avec l'etat de vente ATTENDU apres
+// la poussee (`ouvertesAttendues`). La bulle porte la date de test de Thierry
+// du 31/10 ; le 23 doit rester a ZERO date ouverte, la reouverture etant le
+// geste de l'hote et la derniere etape de la bascule. Ecrire la liste ici,
+// c'est refuser que « aucune date ouverte » et « je n'ai rien lu » se
+// ressemblent.
 //
 // DRY RUN par defaut.
-// USAGE : node scripts/passer-en-managed.js <la-bulle> [--ecrire]
+// USAGE : node scripts/passer-en-managed.js <la-bulle|coeur-23> [--ecrire]
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
-const { runFullSync } = require('../lib/channel-fullsync')
+const { runFullSync, JOURS_POUSSES } = require('../lib/channel-fullsync')
+const { buildOccupancyRates } = require('../lib/channel-pricing')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const BASE = process.env.CHANNEL_BASE_URL
@@ -34,7 +39,16 @@ const KEY = process.env.CHANNEL_API_KEY
 const ECRIRE = process.argv.includes('--ecrire')
 
 const CIBLES = {
-  'la-bulle': { nom: 'La bulle', fiche: '091d9abf-ff86-45ce-8123-3425e6f3900f' }
+  'la-bulle': {
+    nom: 'La bulle',
+    fiche: '091d9abf-ff86-45ce-8123-3425e6f3900f',
+    ouvertesAttendues: ['2026-10-31']        // la date de test de Thierry
+  },
+  'coeur-23': {
+    nom: 'Cœur de vie l 23',
+    fiche: 'efe1daf1-652c-4177-b29b-19f1db377c96',
+    ouvertesAttendues: []                    // tout ferme : la reouverture est le geste de l'hote
+  }
 }
 const CLE = process.argv.find(a => CIBLES[a])
 if (!CLE) {
@@ -120,36 +134,96 @@ async function main () {
   }
   const parDate = new Map(lignes.map(x => [x.date, x]))
 
+  // ⚠ RIEN LU N'EST PAS « TOUT CONFORME ». Le mode de panne de ce script etait
+  // son verdict le plus rassurant : sur un 429, un 401 ou un rate plan qui ne
+  // repond pas, `par` valait `{}` et TOUTES les lignes ci-dessous passaient au
+  // vert — zero date ouverte, zero ecart. On refuse de conclure.
+  console.log(`   HTTP ${rr.code}  ${Object.keys(par).length} dates lues`)
+  if (rr.code !== 200) throw new Error(`relecture impossible : HTTP ${rr.code} — AUCUN verdict`)
+  if (!Object.keys(par).length) {
+    throw new Error(`relecture vide pour le tarif ${apres.provider_rate_plan_id} — AUCUN verdict`
+      + ` (tarifs rendus : ${Object.keys(rr.json?.data || {}).join(', ') || 'aucun'})`)
+  }
+
+  // La couverture fait partie du verdict : une date de la fenetre poussee que
+  // Channex ne rend pas n'est pas conforme, elle est NON JUGEE.
+  const horizon = []
+  for (let i = 0; i < JOURS_POUSSES; i++) {
+    horizon.push(new Date(Date.now() + i * 86400000).toISOString().slice(0, 10))
+  }
+  const lues = new Set(Object.keys(par))
+  const nonJugees = horizon.filter(d => !lues.has(d))
+  console.log(`   ${ok(nonJugees.length === 0)} couverture : ${lues.size}/${horizon.length} date(s) de la fenetre poussee relues`)
+  if (nonJugees.length) console.log(`      ⛔ non jugees : ${nonJugees.slice(0, 20).join(', ')}${nonJugees.length > 20 ? ' …' : ''}`)
+
+  // ⚠ SUR UN BIEN VENDU PAR PERSONNE, `/restrictions` REND LE TARIF DE
+  // L'OCCUPATION PRIMAIRE, pas le prix du coeur. Sur le 23 (capacite 6,
+  // 4 inclus, 2 €/personne) l'attendu est `prix + 4 €`. On le calcule avec
+  // `buildOccupancyRates`, LA FONCTION DU WRITER : la verification et la
+  // poussee ne peuvent pas diverger. `null` = pas de supplement -> prix nu.
+  const attenduChezLeProvider = (prixEur) => {
+    const occ = buildOccupancyRates(
+      Math.round(prixEur * 100), apres.capacity, apres.included_guests,
+      Math.round((Number(apres.extra_guest_fee) || 0) * 100))
+    return occ ? occ[occ.length - 1].rate / 100 : prixEur
+  }
+
   const ouvertesChx = Object.keys(par).filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
-  const fermeesCoeur = lignes.filter(x => x.stop_sell === true).map(x => x.date)
-  const fermeesEncore = fermeesCoeur.filter(d => par[d] && (par[d].stop_sell === true || Number(par[d].availability) === 0))
+  const attendues = C.ouvertesAttendues || []
+  const enTrop = ouvertesChx.filter(d => !attendues.includes(d))
+  const manquantes = attendues.filter(d => !ouvertesChx.includes(d))
+  // ⚠ COMPARER DANS LA FENETRE, SINON C'EST MOI QUI MENS. Le coeur du 23 porte
+  // 875 dates fermees, dont 375 hors de la fenetre poussee (passe, ou au-dela
+  // de 500 jours) : les compter au denominateur affichait « 500/875 » et un ⛔
+  // sur un bien parfaitement ferme. Meme famille que les faux ecarts de prix —
+  // un verdict rendu sur deux fenetres differentes.
+  const fermeesCoeurFenetre = lignes.filter(x => x.stop_sell === true && lues.has(x.date)).map(x => x.date)
+  const fermeesCoeurHors = lignes.filter(x => x.stop_sell === true && !lues.has(x.date)).length
+  const fermeesCoeur = fermeesCoeurFenetre
+  const fermeesEncore = fermeesCoeur.filter(d => par[d].stop_sell === true || Number(par[d].availability) === 0)
   const sansLigne = Object.keys(par).filter(d => !parDate.has(d))
   const sansLigneVendables = sansLigne.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
 
-  console.log(`   HTTP ${rr.code}  ${Object.keys(par).length} dates lues`)
-  console.log(`\n   ${ok(ouvertesChx.length === 1 && ouvertesChx[0] === '2026-10-31')} `
-    + `dates OUVERTES chez Channex : ${ouvertesChx.length}  ${ouvertesChx.slice(0, 8).join(', ')}`)
-  const d31 = par['2026-10-31']
-  console.log(`   ${ok(d31 && d31.stop_sell !== true && Number(d31.availability) === 1 && Number(d31.rate) === 160)} `
-    + `le 31/10 : ${JSON.stringify(d31)}`)
+  console.log(`\n   ${ok(enTrop.length === 0 && manquantes.length === 0)} `
+    + `dates OUVERTES chez Channex : ${ouvertesChx.length}`
+    + `  (attendu : ${attendues.length ? attendues.join(', ') : 'AUCUNE'})`)
+  if (enTrop.length) console.log(`      ⛔ ouvertes NON VOULUES : ${enTrop.slice(0, 10).join(', ')}`)
+  if (manquantes.length) console.log(`      ⛔ attendues ouvertes mais FERMEES : ${manquantes.join(', ')}`)
+  for (const d of attendues) {
+    const v = par[d]
+    const voulu = parDate.get(d)
+    const prixVoulu = voulu && voulu.rate != null ? attenduChezLeProvider(Number(voulu.rate)) : null
+    const bon = v && v.stop_sell !== true && Number(v.availability) >= 1
+      && prixVoulu != null && Math.abs(Number(v.rate) - prixVoulu) < 0.005
+    console.log(`   ${ok(bon)} ${d} : ${JSON.stringify(v)}  (attendu rate ${prixVoulu} €, dispo >= 1)`)
+  }
   console.log(`   ${ok(fermeesEncore.length === fermeesCoeur.length)} `
-    + `dates fermees par l'hote toujours fermees : ${fermeesEncore.length}/${fermeesCoeur.length}`)
+    + `dates fermees par l'hote toujours fermees : ${fermeesEncore.length}/${fermeesCoeur.length}`
+    + ` (dans la fenetre poussee ; ${fermeesCoeurHors} autre(s) fermee(s) hors fenetre, non jugees)`)
   console.log(`   ${ok(sansLigneVendables.length === 0)} `
     + `dates sans ligne de calendrier vendables : ${sansLigneVendables.length} (sur ${sansLigne.length} sans ligne)`)
   if (sansLigneVendables.length) console.log(`      ⚠ ${sansLigneVendables.slice(0, 10).join(', ')}`)
 
-  // Et les prix, date par date, sur les tarifees.
-  let ecarts = 0
+  // Et les prix, date par date, sur les tarifees DE LA FENETRE.
+  let ecarts = 0; let juges = 0; let horsFenetre = 0
   for (const l of lignes) {
     if (!(l.rate != null && Number(l.rate) > 0)) continue
     const c = par[l.date]
-    if (!c) continue
-    if (Math.abs(Number(c.rate) - Number(l.rate)) > 0.005) {
+    if (!c) { horsFenetre++; continue }
+    juges++
+    const attendu = attenduChezLeProvider(Number(l.rate))
+    if (Math.abs(Number(c.rate) - attendu) > 0.005) {
       ecarts++
-      console.log(`      ✗ ${l.date}  coeur ${l.rate} €  Channex ${c.rate} €`)
+      console.log(`      ✗ ${l.date}  coeur ${l.rate} €  attendu ${attendu} €  Channex ${c.rate} €`)
     }
   }
-  console.log(`   ${ok(ecarts === 0)} prix conformes au coeur : ${ecarts} ecart(s)`)
+  console.log(`   ${ok(ecarts === 0)} prix conformes au coeur : ${ecarts} ecart(s) sur ${juges} date(s) tarifee(s) jugee(s)`)
+  if (horsFenetre) console.log(`      ⚠ ${horsFenetre} date(s) tarifee(s) hors de la fenetre poussee — hors verdict`)
+
+  if (ecarts || enTrop.length || manquantes.length || nonJugees.length
+    || sansLigneVendables.length || fermeesEncore.length !== fermeesCoeur.length) {
+    process.exitCode = 1
+  }
 }
 
 main().catch(e => { console.error('\nECHEC :', e.message); process.exitCode = 1 })
