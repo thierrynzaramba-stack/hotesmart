@@ -50,6 +50,20 @@ const redact = (v) => {
   return v
 }
 
+// ⚠ LE TARIF DE BASE FAIT PARTIE DES TARIFS DU BIEN, et l'oublier serait le
+// bug d'origine INVERSE. `action=map` mappe le tarif de BASE
+// (`provider_rate_plan_id`) : tout bien connecte par l'ecran lui-meme se
+// reconnait par lui. Sans cette ligne, chaque bien ainsi connecte rendrait
+// `mappe_pour_ce_bien: false` et repartirait dans le parcours de connexion.
+// Releve en review : la mutation « supprimer cette ligne » laissait les tests
+// verts tant que le `Set` etait construit dans le handler.
+function tarifsDuBienDe (prop, liens) {
+  const s = new Set()
+  if (prop && prop.provider_rate_plan_id) s.add(String(prop.provider_rate_plan_id))
+  for (const l of liens || []) if (l && l.provider_rate_plan_id) s.add(String(l.provider_rate_plan_id))
+  return s
+}
+
 // ─── RESUME DES CANAUX D'UN BIEN ──────────────────────────────────────────
 // Pure et exportee : c'est elle qui repond « ce bien est-il connecte ? », et la
 // reponse decide du parcours entier de l'ecran Airbnb.
@@ -224,8 +238,6 @@ module.exports = async function handler(req, res) {
       // porte-t-il un mapping vers un tarif DE CE BIEN ? ». On repond avec NOS
       // liens (`property_channel_rate_plans` + le tarif de base), pas avec ceux
       // du provider : c'est la meme source que celle qui cree les mappings.
-      const tarifsDuBien = new Set()
-      if (prop.provider_rate_plan_id) tarifsDuBien.add(String(prop.provider_rate_plan_id))
       const { data: liensRp, error: eRp } = await supabase
         .from('property_channel_rate_plans')
         .select('provider_rate_plan_id')
@@ -235,7 +247,7 @@ module.exports = async function handler(req, res) {
       // faire creer un second mapping. On le DIT, et on s'abstient de conclure.
       const liensLisibles = !eRp
       if (eRp) console.error('[channel-mapping] lecture des tarifs du bien', eRp.message)
-      for (const l of liensRp || []) if (l.provider_rate_plan_id) tarifsDuBien.add(String(l.provider_rate_plan_id))
+      const tarifsDuBien = tarifsDuBienDe(prop, liensRp)
 
       const summary = resumerCanaux(rows, tarifsDuBien, liensLisibles)
       return res.status(r.ok ? 200 : 502).json({
@@ -712,3 +724,4 @@ module.exports = async function handler(req, res) {
 
 // Export secondaire, sans toucher au defaut : la fonction que le test tient.
 module.exports.resumerCanaux = resumerCanaux
+module.exports.tarifsDuBienDe = tarifsDuBienDe

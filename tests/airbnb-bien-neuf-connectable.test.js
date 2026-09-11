@@ -122,3 +122,72 @@ test("l endpoint rend bien le champ que l ecran lit", () => {
   assert.match(src, /resumerCanaux\(rows, tarifsDuBien, liensLisibles\)/,
     "et l'action `channels` doit l'utiliser")
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES TARIFS DU BIEN — le tarif de BASE en fait partie
+// ═══════════════════════════════════════════════════════════════════════════
+const { tarifsDuBienDe } = require('../api/channel-mapping.js')
+
+test('le tarif de BASE compte : c est lui que `action=map` mappe', () => {
+  // Oublier cette ligne serait le bug d'origine INVERSE : tout bien connecte
+  // par l'ecran lui-meme rendrait `mappe_pour_ce_bien: false` et repartirait
+  // dans le parcours de connexion.
+  const s = tarifsDuBienDe({ provider_rate_plan_id: 'base-1' }, [{ provider_rate_plan_id: 'derive-1' }])
+  assert.ok(s.has('base-1'), 'le tarif de base doit etre reconnu comme un tarif du bien')
+  assert.ok(s.has('derive-1'))
+  assert.strictEqual(s.size, 2)
+})
+
+test('un bien mappe sur son tarif de BASE est reconnu connecte', () => {
+  const canal = { id: 'c', attributes: { channel: 'AirBNB', is_active: true,
+    rate_plans: [{ rate_plan_id: 'base-1' }] } }
+  const tarifs = tarifsDuBienDe({ provider_rate_plan_id: 'base-1' }, [])
+  const [r] = resumerCanaux([canal], tarifs, true)
+  assert.strictEqual(r.mappe_pour_ce_bien, true)
+})
+
+test('tarifsDuBienDe tolere l absence de tarif de base et de liens', () => {
+  assert.strictEqual(tarifsDuBienDe({}, null).size, 0)
+  assert.strictEqual(tarifsDuBienDe(null, undefined).size, 0)
+  assert.strictEqual(tarifsDuBienDe({ provider_rate_plan_id: null }, [{ provider_rate_plan_id: null }]).size, 0)
+})
+
+test("le handler construit le Set avec la fonction, pas a la main", () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/channel-mapping.js'), 'utf8')
+  assert.match(src, /const tarifsDuBien = tarifsDuBienDe\(prop, liensRp\)/,
+    'sinon la construction du Set n est couverte par aucun test')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES ECRANS — le bug se VOIT sur l'ecran Connexions, pas dans la modale
+// ═══════════════════════════════════════════════════════════════════════════
+test("l ecran Connexions ne confond plus « un canal existe » et « ce bien est connecte »", () => {
+  // C'est CET ecran que l'hote regarde. Avant : `airbnbConnected = !!airbnb`,
+  // donc pastille verte + « Connecte — <titre du canal d un AUTRE logement> »
+  // + bouton « Gerer » sur un bien neuf sans aucun mapping.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'components/connexions.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  assert.ok(!/airbnbConnected = !!airbnb\b/.test(src),
+    "« un canal existe » n'est pas « ce bien est connecte »")
+  assert.match(src, /airbnbConnected = airbnb\?\.mappe_pour_ce_bien === true/)
+  assert.match(src, /airbnbInconnu = .*mappe_pour_ce_bien === null/,
+    "un `null` ne doit pas s'afficher « Non connecte » : ca inviterait a reconnecter un bien connecte")
+})
+
+test('le badge de la fiche bien ne verdit pas sur un canal seulement rattache', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'shared/properties.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  assert.match(src, /active: c\.is_active === true && c\.mappe_pour_ce_bien === true/,
+    'le badge doit exiger un mapping POUR CE BIEN')
+})
+
+test('un `null` arrete le parcours au lieu de le laisser deviner', () => {
+  // Scenario : panne de lecture des tarifs sur un bien DEJA connecte. Sans ce
+  // garde-fou, l hote entrait dans « Choisissez votre annonce » et pouvait
+  // mapper son bien A sur l annonce du bien B — canal actif, force=1.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'components/airbnb-connect.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  const gardes = (src.match(/mappe_pour_ce_bien === null/g) || []).length
+  assert.ok(gardes >= 2,
+    `les deux chemins (entree et sondage d apres-OAuth) doivent refuser de conclure sur un null — trouve ${gardes}`)
+})

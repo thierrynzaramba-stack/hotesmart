@@ -28,10 +28,16 @@ test('LE TEST QUI COMPTE : l ecran Airbnb ne voit QUE les canaux Airbnb', () => 
   // du CANAL, pas du BIEN, et un canal partage entre plusieurs logements est
   // actif des qu'UN seul y est mappe. Ce qui est defendu ici reste le meme :
   // le filtre sur l'OTA precede TOUTE selection de canal.
+  // ⚠ RECHERCHE ABSOLUE, PAS A PARTIR DU FILTRE. Releve en review : chercher
+  // `.find(` A PARTIR de `iFiltre` rendait l'assertion structurellement vraie
+  // (l'index trouve est forcement superieur au point de depart). Verifie : en
+  // reintroduisant un `find(c => c.is_active)` AVANT le filtre, les tests
+  // restaient verts — la regression meme pour laquelle ce fichier existe.
   const iFiltre = bloc.indexOf('filter(c => /airbnb/i')
-  const iFind = bloc.indexOf('.find(', iFiltre)
-  assert.ok(iFiltre > 0 && iFind > iFiltre,
-    'le filtre precede la selection du canal')
+  const iFind = bloc.indexOf('.find(')
+  assert.ok(iFiltre > 0, 'le filtre sur l OTA existe')
+  assert.ok(iFind > iFiltre,
+    'AUCUNE selection de canal ne precede le filtre sur l OTA')
 })
 
 test('LE TEST QUI COMPTE : disconnect ne devine plus le canal, et refuse un canal non Airbnb', () => {

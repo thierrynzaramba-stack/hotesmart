@@ -115,7 +115,13 @@ export async function fetchPropertyChannels(p) {
         || c.title || c.ota || 'Canal',
     // Un canal mappe mais inactif reste affiche (grise) : le masquer rendrait
     // une activation ratee invisible, donc indebuggable cote utilisateur.
-    active: c.is_active === true
+    //
+    // ⚠ MAIS `is_active` EST UNE PROPRIETE DU CANAL, PAS DU BIEN. Un canal
+    // Airbnb porte plusieurs logements et devient actif des qu'UN seul y est
+    // mappe : un bien neuf, seulement RATTACHE, portait un badge vert.
+    // `mappe_pour_ce_bien === null` = le serveur n'a pas pu conclure : on
+    // n'affiche pas un badge vert sur une incertitude.
+    active: c.is_active === true && c.mappe_pour_ce_bien === true
   }))
 }
 

@@ -228,6 +228,12 @@ async function checkChannels(manual) {
     if (abnb.length) {
       if (S.pollTimer) clearInterval(S.pollTimer)
       // S'il y en a plusieurs, on prend celui qui reste a mapper pour CE bien.
+      // Meme regle qu'a l'entree : on ne devine pas sur un `null`.
+      if (abnb.some(x => x.mappe_pour_ce_bien === null)) {
+        if (S.pollTimer) clearInterval(S.pollTimer)
+        return screenBError('Impossible de vérifier l\'état de votre connexion Airbnb pour le moment. '
+          + 'Réessayez dans un instant — aucune modification n\'a été faite.')
+      }
       const c = abnb.find(x => x.mappe_pour_ce_bien !== true) || abnb[0]
       S.channelId = c.id
       S.channelActive = c.is_active === true
@@ -505,6 +511,17 @@ async function detectAndRoute() {
     // `mappe_pour_ce_bien` ; `null` = il n'a pas pu conclure, on ne devine pas.
     const connecte = chans.find(c => c.mappe_pour_ce_bien === true)
     if (connecte) { S.channelId = connecte.id; S.channelActive = !!connecte.is_active; return screenAlreadyConnected() }
+    // ⚠ `null` = LE SERVEUR N'A PAS PU CONCLURE, et ce n'est pas « non ».
+    // Releve en review : sans ce garde-fou, une panne de lecture des tarifs sur
+    // un bien DEJA connecte l'envoyait dans le parcours de connexion. Son
+    // annonce y est grisee (le grisage vient d'une autre source), mais s'il
+    // possede une SECONDE annonce libre, il pouvait mapper ce bien dessus — sur
+    // un canal actif, avec force=1. Et pendant la panne, « Deconnecter » etait
+    // inatteignable. On s'arrete plutot que de deviner.
+    if (chans.some(c => c.mappe_pour_ce_bien === null)) {
+      return screenBError('Impossible de vérifier l\'état de votre connexion Airbnb pour le moment. '
+        + 'Réessayez dans un instant — aucune modification n\'a été faite.')
+    }
     // Un canal existe pour ce bien mais sans mapping : l'OAuth est deja fait
     // (le canal peut meme etre actif pour d'autres logements), il reste a
     // choisir l'annonce. C'est le cas d'un second logement sur le meme compte.

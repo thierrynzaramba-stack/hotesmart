@@ -165,8 +165,22 @@ async function saveRule(channel, formEl, pid) {
 }
 
 function renderRows({ airbnb, booking, rules = {} }) {
-  const airbnbConnected = !!airbnb
-  const bookingConnected = !!(booking && booking.is_active === true)
+  // ⚠ « UN CANAL EXISTE » N'EST PAS « CE BIEN EST CONNECTE ». Releve en review
+  // le 11 septembre 2026 : c'est CET ecran que l'hote regarde, et il etait le
+  // seul non corrige. Un canal Airbnb porte PLUSIEURS logements, et
+  // `filter[property_id]` le rend pour tout bien RATTACHE, mappe ou non. Un
+  // logement neuf affichait donc pastille verte, « Connecte — <titre du canal
+  // d'un AUTRE logement> », un bouton « Gerer » au lieu de « Connecter », et le
+  // formulaire de regle tarifaire d'un canal ou il n'a aucun mapping.
+  //
+  // ⚠ `=== true` : `mappe_pour_ce_bien` peut valoir `null` quand le serveur n'a
+  // pas pu conclure. `null` n'est pas « connecte » — mais ce n'est pas non plus
+  // « non connecte », d'ou l'etat `inconnu` ci-dessous plutot qu'un faux
+  // « Non connecte » qui inviterait a reconnecter un bien deja connecte.
+  const airbnbConnected = airbnb?.mappe_pour_ce_bien === true
+  const airbnbInconnu = !!airbnb && airbnb.mappe_pour_ce_bien === null
+  const bookingConnected = !!(booking && booking.is_active === true
+    && booking.mappe_pour_ce_bien !== false)
   const bookingMappedInactive = !!(booking && booking.is_active !== true)
 
   setBody(`
@@ -176,13 +190,13 @@ function renderRows({ airbnb, booking, rules = {} }) {
         <div class="cx-info">
           <div class="cx-name">Airbnb</div>
           <div class="cx-state">
-            <span class="cx-dot ${airbnbConnected ? 'on' : 'off'}"></span>
+            <span class="cx-dot ${airbnbConnected ? 'on' : (airbnbInconnu ? 'pending' : 'off')}"></span>
             ${airbnbConnected
               ? `Connecté${airbnb.title ? ' — ' + escHtml(airbnb.title) : ''}`
-              : 'Non connecté'}
+              : (airbnbInconnu ? 'État indisponible — réessayez' : 'Non connecté')}
           </div>
         </div>
-        <button class="btn ${airbnbConnected ? '' : 'btn-primary'}" id="cx-airbnb">${airbnbConnected ? 'Gérer' : 'Connecter'}</button>
+        <button class="btn ${airbnbConnected || airbnbInconnu ? '' : 'btn-primary'}" id="cx-airbnb"${airbnbInconnu ? ' disabled' : ''}>${airbnbConnected ? 'Gérer' : 'Connecter'}</button>
       </div>
       ${airbnbConnected ? ruleForm('airbnb', rules.airbnb) : ''}
       <div class="cx-row">
