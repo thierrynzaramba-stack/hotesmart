@@ -171,22 +171,24 @@ module.exports = async function handler(req, res) {
   const idChezLeProvider = proprieteChezLeProvider(prop)
 
   if (canalDemande && ACTIONS_A_CANAL.includes(action)) {
-    const gardeCanal = await requirePermissionPourCanal(req, res, { channelId: canalDemande, channelCall })
+    // ⚠ ON NOMME LE BIEN, la garde ne le devine plus. Elle prenait
+    // `properties[0]` — le PREMIER bien du canal — ce qui refusait toute action
+    // sur un canal partage entre plusieurs logements des qu'on visait un autre
+    // que le premier. Les DEUX identifiants, parce qu'un bien en migration
+    // porte la cle de sa propriete cible cote canal et celle de sa source cote
+    // front.
+    const gardeCanal = await requirePermissionPourCanal(req, res, {
+      channelId: canalDemande,
+      channelCall,
+      biensAttendus: [prop.provider_property_id, prop.migration_target_property_id]
+    })
+    // ⚠ LE CONTROLE « ce canal releve-t-il bien de ce logement ? » EST DANS LA
+    // GARDE, pas ici. Il y etait en double, et la version d'ici comparait au
+    // seul `properties[0]` du canal : sur un canal partage entre plusieurs
+    // logements, elle refusait tout ce qui ne visait pas le premier. La garde
+    // cherche desormais le bien annonce PARMI ceux du canal, et verifie les
+    // droits sur celui-la — plus juste, et plus strict qu'avant.
     if (!gardeCanal.ok) return
-    // Le canal doit relever du MEME bien que celui annonce : sinon l'appelant
-    // ferait valider le bien A pour agir sur un canal du bien B.
-    //
-    // ⚠ LA COMPARAISON PORTE SUR LES DEUX IDENTIFIANTS DU BIEN. `bienDuCanal`
-    // vient du canal Channex, donc de la propriete CIBLE pendant une migration,
-    // tandis que le front envoie toujours la cle source : comparer a la seule
-    // cle source refusait TOUTES les actions a canal pendant la bascule — soit
-    // exactement la phase 1 du plan.
-    const identifiantsDuBien = [prop.provider_property_id, prop.migration_target_property_id]
-      .filter(Boolean).map(String)
-    if (!identifiantsDuBien.includes(String(gardeCanal.bienDuCanal))) {
-      console.log('[channel-mapping] refus : canal rattache a un autre bien')
-      return res.status(403).json({ error: 'Ce canal ne releve pas du bien indique' })
-    }
   }
 
   if (!idChezLeProvider) {

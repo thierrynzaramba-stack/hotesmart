@@ -191,3 +191,29 @@ test('un `null` arrete le parcours au lieu de le laisser deviner', () => {
   assert.ok(gardes >= 2,
     `les deux chemins (entree et sondage d apres-OAuth) doivent refuser de conclure sur un null — trouve ${gardes}`)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LA GARDE CANAL — un canal porte PLUSIEURS biens
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ TROISIEME OCCURRENCE DE LA MEME HYPOTHESE FAUSSE, 11 septembre 2026.
+// `requirePermissionPourCanal` faisait `bienDuCanal = attrs.properties[0]`.
+// Sur le canal Airbnb partage entre trois logements, elle rendait toujours La
+// bulle : l'ecran de connexion d'Ofuro recevait un 403 « Ce canal ne releve pas
+// du bien indique », que le front affichait « Impossible de recuperer vos
+// annonces ». L'hote voyait un incident passager la ou il y avait un refus.
+test('la garde canal cherche le bien annonce PARMI ceux du canal', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib/require-permission.js'), 'utf8')
+  assert.ok(!/attrs\.properties\[0\]/.test(src), 'plus de « premier bien du canal »')
+  assert.match(src, /biensDuCanal = Array\.isArray\(attrs\.properties\) \? attrs\.properties\.map\(String\)/)
+  assert.match(src, /const commun = attendus\.find\(id => biensDuCanal\.includes\(id\)\)/)
+  // Et le refus subsiste quand le bien annonce n'est PAS du canal : c'est la
+  // raison d'etre de la garde (agir sur le canal d'un autre compte).
+  assert.match(src, /res\.status\(403\)\.json\(\{ error: 'Ce canal ne releve pas du bien indique' \}\)/)
+})
+
+test("l ecran affiche le message du serveur au lieu de le deguiser en incident passager", () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'components/airbnb-connect.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  assert.match(src, /Détail : \$\{e\.message\}/,
+    "un refus definitif ne doit pas s'afficher « Reessayez dans un instant »")
+})

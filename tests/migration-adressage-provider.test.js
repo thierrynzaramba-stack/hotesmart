@@ -145,9 +145,26 @@ test('la garde canal compare aux DEUX identifiants du bien', () => {
   // `bienDuCanal` vient du canal Channex — donc de la propriete cible pendant
   // une migration — tandis que le front envoie la cle source. Comparer a la
   // seule cle source refusait TOUTES les actions a canal pendant la bascule.
+  //
+  // ⚠ DEPLACE LE 11 SEPTEMBRE 2026, ET ELARGI. Ce controle etait fait DEUX fois :
+  // dans `api/channel-mapping.js` (contre `properties[0]` du canal) et
+  // implicitement dans la garde. Un canal Airbnb PARTAGE entre plusieurs
+  // logements rend toujours le PREMIER : la version d'ici refusait donc tout ce
+  // qui ne visait pas ce premier bien. La garde recoit desormais les deux
+  // identifiants et cherche celui qui figure PARMI les biens du canal.
   const src = lire('api/channel-mapping.js')
-  assert.ok(src.includes('identifiantsDuBien'))
-  assert.ok(/identifiantsDuBien\.includes\(String\(gardeCanal\.bienDuCanal\)\)/.test(src))
+  assert.match(src, /biensAttendus: \[prop\.provider_property_id, prop\.migration_target_property_id\]/,
+    'l appelant nomme les DEUX identifiants du bien')
+  assert.ok(!/identifiantsDuBien\.includes\(String\(gardeCanal\.bienDuCanal\)\)/.test(src),
+    'le controle en double, qui ne regardait que properties[0], a disparu')
+
+  const garde = lire('lib/require-permission.js')
+  assert.match(garde, /const commun = attendus\.find\(id => biensDuCanal\.includes\(id\)\)/,
+    'la garde cherche le bien annonce PARMI ceux du canal, pas seulement le premier')
+  assert.match(garde, /bien: bienDuCanal/,
+    'et verifie les droits sur CE bien-la')
+  assert.ok(!/biensDuCanal = Array\.isArray\(attrs\.properties\) \? attrs\.properties\[0\]/.test(garde),
+    'plus de properties[0] comme « le » bien du canal')
 })
 
 test('le post-mapping lit chez Channex, jamais chez le provider source', () => {

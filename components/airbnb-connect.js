@@ -317,8 +317,18 @@ async function screenB() {
     listings = normListings(r?.listings)
     mapped = new Set((r?.mapped_listing_ids || []).map(String))
   } catch (e) {
-    logger.error('airbnb-connect', 'list_listings echec', { e: e.message })
-    return screenBError('Impossible de récupérer vos annonces Airbnb pour le moment. Réessayez dans un instant.')
+    logger.error('airbnb-connect', 'list_listings echec', { e: e.message, status: e.status })
+    // ⚠ LE MESSAGE DU SERVEUR EST AFFICHE, PAS AVALE. Le 11 septembre 2026, un
+    // 403 « Ce canal ne releve pas du bien indique » — la garde qui prenait le
+    // premier bien d'un canal partage — s'affichait « Impossible de recuperer
+    // vos annonces pour le moment. Reessayez dans un instant. » Un refus
+    // definitif deguise en incident passager : l'hote reessaie indefiniment, et
+    // la cause reste invisible.
+    const detail = e && e.message && e.status && e.status !== 500 && e.status !== 502
+      ? ` Détail : ${e.message}`
+      : ''
+    return screenBError('Impossible de récupérer vos annonces Airbnb pour le moment.'
+      + (detail || ' Réessayez dans un instant.'))
   }
   if (!listings.length) {
     return screenBError('Aucune annonce trouvée sur ce compte Airbnb.')
