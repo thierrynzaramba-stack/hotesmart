@@ -335,12 +335,33 @@ module.exports = async function handler(req, res) {
                    : (dict ?? data)
 
       // Annonces DEJA mappees sur ce canal (multi-biens : eviter de re-mapper listing1).
+      //
+      // ⚠ `GET /channels/:id/mappings` REND 404 SUR CETTE VERSION DE L'API —
+      // mesure du 11 septembre 2026, et c'est deja note dans docs/CHANNEL_TECH.md.
+      // La liste des annonces prises revenait donc VIDE, en silence : aucune
+      // annonce n'etait grisee, et l'ecran « toutes vos annonces sont deja
+      // reliees » ne pouvait jamais s'afficher. Un hote pouvait relier son
+      // logement neuf a l'annonce d'un logement DEJA connecte.
+      //
+      // Le canal lui-meme porte ses mappings (`attributes.rate_plans[]`), et
+      // c'est la source utilisee partout ailleurs dans le depot. On la prend en
+      // repli — et on le DIT dans la reponse, pour qu'un ecran ne prenne pas un
+      // silence pour une absence.
       const mp = await channelCall('GET', `/channels/${channelId}/mappings`)
       const mrows = Array.isArray(mp.json?.data) ? mp.json.data : []
-      const mappedListingIds = mrows
+      let mappedListingIds = mrows
         .map(m => m.attributes?.listing_id)
         .filter(v => v != null)
         .map(String)
+      let sourceMappings = 'mappings'
+      if (!mappedListingIds.length) {
+        const chMap = await channelCall('GET', `/channels/${channelId}`)
+        const rp = chMap.json?.data?.attributes?.rate_plans
+        if (Array.isArray(rp)) {
+          mappedListingIds = rp.map(m => m.settings?.listing_id).filter(v => v != null).map(String)
+          sourceMappings = 'channel.rate_plans'
+        }
+      }
 
       return res.status(r.ok ? 200 : 502).json({
         ok: r.ok,
@@ -348,6 +369,10 @@ module.exports = async function handler(req, res) {
         channel_id: channelId,
         listings: redact(values),
         mapped_listing_ids: mappedListingIds,
+        // D'ou vient la liste des annonces prises : `mappings` (endpoint dedie)
+        // ou `channel.rate_plans` (repli). Un ecran qui grise des annonces doit
+        // pouvoir dire sur quoi il se fonde.
+        mapped_source: sourceMappings,
         full: redact(data)
       })
     }

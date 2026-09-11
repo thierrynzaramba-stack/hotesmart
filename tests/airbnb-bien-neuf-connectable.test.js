@@ -217,3 +217,35 @@ test("l ecran affiche le message du serveur au lieu de le deguiser en incident p
   assert.match(src, /Détail : \$\{e\.message\}/,
     "un refus definitif ne doit pas s'afficher « Reessayez dans un instant »")
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES ANNONCES DEJA PRISES — le garde-fou etait vide en silence
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ `GET /channels/:id/mappings` REND 404 sur cette version de l'API (mesure du
+// 11 septembre 2026, deja notee dans docs/CHANNEL_TECH.md). `mapped_listing_ids`
+// revenait donc VIDE : aucune annonce grisee, et l'ecran « toutes vos annonces
+// sont deja reliees » ne pouvait JAMAIS s'afficher. Un hote pouvait relier son
+// logement neuf a l'annonce d'un logement deja connecte.
+test('les annonces prises sont lues sur le canal quand /mappings rend 404', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/channel-mapping.js'), 'utf8')
+  const i = src.indexOf("if (action === 'action_listings')")
+  assert.ok(i > 0)
+  const bloc = src.slice(i, src.indexOf("if (action === ", i + 10))
+  assert.match(bloc, /if \(!mappedListingIds\.length\)/,
+    'un resultat vide doit declencher le repli, pas se lire « aucune annonce prise »')
+  assert.match(bloc, /rp\.map\(m => m\.settings\?\.listing_id\)/,
+    'le repli lit les mappings portes par le canal lui-meme')
+  assert.match(bloc, /mapped_source: sourceMappings/,
+    "et la reponse dit sur quelle source l'ecran se fonde")
+})
+
+test("l ecran distingue « aucune annonce » de « toutes deja reliees »", () => {
+  // Sans `mapped_listing_ids`, ces deux messages etaient indiscernables : l hote
+  // voyait la liste complete de ses annonces, y compris celles d un autre
+  // logement, toutes selectionnables.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'components/airbnb-connect.js'), 'utf8')
+  assert.match(src, /Aucune annonce trouvée sur ce compte Airbnb/)
+  assert.match(src, /Toutes les annonces de ce compte Airbnb sont déjà reliées/)
+  assert.match(src, /const selectable = listings\.filter\(l => !mapped\.has\(String\(l\.id\)\)\)/,
+    'le tri « libre / prise » doit exister pour que ces deux messages aient un sens')
+})
