@@ -121,3 +121,86 @@ Ofuro Futari en porte 17 aujourd'hui. `jours_sans_prix` joue le même rôle pour
 la fermeture calculée — une valeur élevée est le signe d'un amorçage de prix
 raté, ce que l'alerte `poussee_dates_sans_prix` du full sync signale déjà côté
 poussée.
+
+
+## 8. Exceptions « hors référence » (lot 2.2)
+
+Table `yield_exceptions`, writer unique `lib/yield/exceptions.js`,
+endpoint `api/yield-exceptions.js`, saisie `scripts/declarer-exception-yield.js`.
+Migration : `2026-09-12-yield-exceptions.sql`.
+
+### À quoi ça sert
+
+Le moteur calcule sa référence sur 2-3 ans d'historique lissé. Des travaux, une
+fermeture personnelle, un confinement : ces mois-là ont vendu zéro nuit pour une
+raison qui **n'a rien de commercial**. Les laisser dans la référence ferait
+croire au moteur que la demande s'effondre à cette saison — et il suggérerait de
+brader l'an prochain.
+
+⚠ **Une exception ne concerne que le PASSÉ.** Le futur n'entre pas dans la
+référence : pour fermer des dates à venir, l'outil est le calendrier
+(`stop_sell`), que le §3 compte déjà correctement.
+
+Ce n'est **pas interdit** par le code, et c'est délibéré : une période à cheval
+sur aujourd'hui est légitime, et sa partie passée compte. Mais le script de
+saisie le **dit** — « période entièrement future : elle sera inerte », ou
+« à cheval : seule la partie passée comptera ». Un `201` muet sur juillet 2027
+laisserait l'hôte croire qu'il a fermé des dates alors que rien n'est fermé.
+L'écran de l'étape 4 héritera de cet avertissement.
+
+### Ce qui ne doit jamais rendre une liste vide
+
+Une exception manquée fait entrer dans la référence une période que l'hôte a
+explicitement écartée, **sans aucun signal**. Le module lève donc dans les trois
+cas où il ne peut pas répondre : bornes mal formées (`2026-6-1`, un paramètre
+répété que Vercel rend en tableau, une période inversée), fenêtre plus longue que
+`JOURS_MAX`, et erreur de lecture.
+
+La première version rendait `[]` sur une borne mal formée — tout en justifiant
+son `throw` sur erreur de lecture par ce même argument, trois lignes plus bas.
+Le même silence, par la porte d'à côté. L'endpoint rend `400 periode_invalide`
+plutôt qu'un `200 {exceptions: []}` trompeur, et sa fenêtre par défaut est
+**bornée** (2015-2035) : `1900-2999` coûtait 400 000 itérations par appel.
+
+### Deux domaines de droits, et ce n'est pas une hésitation
+
+Arbitrage de Thierry, 12 septembre 2026 :
+
+| accès | domaine | pourquoi |
+|---|---|---|
+| **écriture** | `reglages` (write) | une exception **altère la référence du pricing** : déclarer « juin 2025 hors référence » change ce que le moteur proposera en juin 2027. Même niveau de conséquence qu'un prix, donc même droit que le calendrier tarifaire. Sous `reservations`, un profil qui gère les séjours aurait pu modifier la stratégie tarifaire |
+| **lecture** | `reservations` (read) | les écrans de stats doivent pouvoir **afficher** les périodes écartées — sans quoi un TO amoindri reste inexplicable à qui le regarde. Exiger `reglages` en lecture aurait rendu les stats illisibles à un profil qui n'y a pas droit |
+
+**Aucune policy RLS d'écriture** sur la table : la RLS ne connaît pas les profils
+délégués (`docs/kb/profils-et-droits.md`). Une policy d'écriture
+court-circuiterait la garde `reglages` de l'endpoint. Le client lit, l'endpoint
+écrit.
+
+### Trois règles de calcul
+
+**Croisement, pas inclusion.** Une exception du 1er au 30 juin doit ressortir
+quand le moteur interroge la seule semaine du 15 au 21. La tester par inclusion
+(`date_debut >= debut AND date_fin <= fin`) la manquerait, et cette semaine
+entrerait dans la référence alors qu'elle en est explicitement exclue.
+
+**Bornes incluses**, comme partout ailleurs dans le produit : une exception du
+1er au 3 couvre trois jours. La contrainte `CHECK` de la table le dit aussi, pour
+que la règle tienne même si un autre chemin écrit un jour.
+
+**Le chevauchement est autorisé, et c'est délibéré.** « Travaux » du 1er au 30 et
+« fermeture personnelle » du 15 au 20 sont deux faits distincts, tous deux vrais.
+Les fusionner perdrait le motif de l'un. Le moteur ne calcule que sur l'**union**
+des jours exclus : un jour exclu deux fois est exclu une fois.
+
+### Ce qui n'est PAS fait
+
+**Le marquage par réservation** attend un besoin réel (décision de la spec §5).
+Une table qu'on remplit « au cas où » finit par porter deux sémantiques et aucune
+vérité.
+
+**Pas d'UI** : l'écran vivra dans l'app Yield (étape 4, amendement §2 bis — la
+config d'une app vit dans l'app). D'ici là, le script de saisie évite d'attendre
+l'interface pour déclarer des périodes déjà connues. Il écrit par la service key,
+donc **hors de la garde de l'endpoint** : c'est assumé pour un script lancé à la
+main par le titulaire, et c'est pourquoi il affiche le compte propriétaire du
+bien avant d'écrire.
