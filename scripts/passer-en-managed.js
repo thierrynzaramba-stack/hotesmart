@@ -48,6 +48,15 @@ const CIBLES = {
     nom: 'Cœur de vie l 23',
     fiche: 'efe1daf1-652c-4177-b29b-19f1db377c96',
     ouvertesAttendues: []                    // tout ferme : la reouverture est le geste de l'hote
+  },
+  // ⚠ OFURO : l'hote a DEJA sa grille et ses dates ouvertes dans le coeur. La
+  // liste attendue n'est donc pas ecrite a la main — elle se DEDUIT du coeur :
+  // « ouverte par l'hote ET tarifee ». Les dates ouvertes SANS prix doivent se
+  // fermer, c'est tout l'objet de l'operation : elles se vendaient a 199 €.
+  'ofuro': {
+    nom: 'Ofuro Futari',
+    fiche: '06d26200-14fd-4df4-8a1f-14e85fed1fb1',
+    ouvertesAttendues: 'tarifees'
   }
 }
 const CLE = process.argv.find(a => CIBLES[a])
@@ -195,7 +204,14 @@ async function main () {
   // 6. Une date attendue ouverte mais ECHUE sort de la fenetre lue : la
   // reclamer ferait crier le script tous les jours a partir du 01/11, et un
   // verificateur qui crie au loup cesse d'etre lu.
-  const attenduesToutes = C.ouvertesAttendues || []
+  // `'tarifees'` : la liste se deduit du coeur au lieu d'etre ecrite en dur.
+  // Une nuit DEJA VENDUE est exclue — son stock est plafonne a 0 par le writer,
+  // elle ne peut pas etre ouverte, et la reclamer ferait crier le controle.
+  const dejaVendues = new Set(res.dates_vendues || [])
+  const attenduesToutes = C.ouvertesAttendues === 'tarifees'
+    ? lignes.filter(x => x.stop_sell === false && x.rate != null && Number(x.rate) > 0
+        && !dejaVendues.has(x.date)).map(x => x.date)
+    : (C.ouvertesAttendues || [])
   const attendues = attenduesToutes.filter(d => dansFenetre.has(d))
   const echues = attenduesToutes.filter(d => !dansFenetre.has(d))
   const enTrop = ouvertesChx.filter(d => !attendues.includes(d))
@@ -216,6 +232,16 @@ async function main () {
   const sansLigne = Object.keys(par).filter(d => !parDate.has(d))
   const sansLigneVendables = sansLigne.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
 
+  // ⚠ CE QUI DOIT SE FERMER EST AUSSI UN RESULTAT. Les dates ouvertes par
+  // l'hote mais SANS prix se vendaient au `base_price` ; apres l'operation
+  // elles doivent etre fermees, pas bradees.
+  const ouvertesSansPrix = lignes.filter(x => x.stop_sell === false
+    && (x.rate == null || !(Number(x.rate) > 0)) && dansFenetre.has(x.date)).map(x => x.date)
+  const encoreVendables = ouvertesSansPrix.filter(d => par[d]
+    && par[d].stop_sell !== true && Number(par[d].availability) > 0)
+  console.log(`   ${ok(encoreVendables.length === 0)} dates ouvertes SANS prix : `
+    + `${ouvertesSansPrix.length} au coeur, ${encoreVendables.length} encore vendable(s) chez le canal`)
+  if (encoreVendables.length) console.log(`      ⛔ ${encoreVendables.slice(0, 10).join(', ')}`)
   console.log(`   ${ok(illisibles.length === 0)} ${illisibles.length} date(s) au reglage ILLISIBLE (indecidables)`)
   if (illisibles.length) console.log(`      ⛔ ${illisibles.slice(0, 15).join(', ')}`)
   if (echues.length) console.log(`   ⓘ ${echues.join(', ')} : date(s) ouverte(s) attendue(s) mais ECHUE(S) — hors fenetre, non reclamee(s)`)
@@ -256,6 +282,7 @@ async function main () {
   if (horsFenetre) console.log(`      ⚠ ${horsFenetre} date(s) tarifee(s) hors de la fenetre poussee — hors verdict`)
 
   if (ecarts || enTrop.length || manquantes.length || nonJugees.length || illisibles.length
+    || encoreVendables.length
     || sansLigneVendables.length || fermeesEncore.length !== fermeesCoeur.length) {
     process.exitCode = 1
   }
