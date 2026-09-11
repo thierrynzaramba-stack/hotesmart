@@ -814,6 +814,31 @@ module.exports = async function handler(req, res) {
           base_price: basePrice,
           included_guests: incGuests,
           extra_guest_fee: extraFee,
+          // ⚠ UN BIEN CREE ICI NAIT EN `managed`, ET CE N'EST PAS UN DEFAUT DE
+          // CONFORT. Sans cette ligne, le defaut de la base (`keep`) s'applique
+          // a un mode que l'hote n'a jamais choisi et que cet ecran ne nomme
+          // nulle part — il ne se voit qu'APRES, sur la fiche du bien.
+          //
+          // Ce que ca produisait, mesure sur un bien reel le 11 septembre 2026 :
+          // la disponibilite part TOUJOURS (anti-surreservation), les tarifs
+          // seulement en `managed`. Les dates s'ouvraient donc a la vente au
+          // `base_price` du provisionnement pendant que la grille de l'hote
+          // restait dans le coeur. 31 nuits vendues a 199 € a plat : 14
+          // sous-vendues, 4 sur-vendues de 30 € pour le voyageur, et 13 sans
+          // aucun prix saisi.
+          //
+          // ⚠ ET `keep` N'A AUCUN SENS ICI. Il veut dire « mes prix vivent sur
+          // la plateforme, n'y touche pas ». Or, constate par Thierry sur
+          // l'extranet Booking : des qu'un channel manager est lie, la
+          // plateforme REFUSE que l'hote edite ses tarifs (« modification
+          // obligatoire par le CM »). En `keep`, personne ne peut donc tarifer
+          // le logement — ni l'hote chez l'OTA, ni nous. Le seul prix qui
+          // subsiste est celui que NOUS avons pousse au provisionnement.
+          //
+          // `keep` reste pose par le parcours de MIGRATION
+          // (`lib/migration-mode-prix.js`), ou il a un sens : les prix vivent
+          // encore chez l'ancien channel manager, le temps de la bascule.
+          rate_sync_mode: 'managed',
           // Onboarding : l'hote demande la connexion en creant le bien. Sinon defaut DB 'draft'.
           ...(requestConnect ? { ota_connect_status: 'requested', ota_requested_at: new Date().toISOString() } : {})
         })
