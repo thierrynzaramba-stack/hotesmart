@@ -117,13 +117,62 @@ Projections calculées depuis le snapshot (vues ou tables dérivées recalculabl
 - Déploiements sensibles : biens en pause, premier cycle observé, réactivation.
 - KB : `docs/kb/` mis à jour dans le même commit que chaque feature.
 
-## 9. Correspondance prix voyageur (à remplir à l'étape 0)
+## 9. Correspondance prix voyageur (etabli a l'etape 0, par les faits)
+
+Mesure sur les **1 464 lignes** de `bookings_snapshot`, dont 1 463 portent le
+payload `raw`. Script : `node scripts/audit-prix-voyageur.js --detail`
+(lecture seule). Rapport d'ecart : `docs/kb/prix-voyageur.md`.
+
+**Le prix paye par le voyageur n'est PAS le meme champ selon le canal, et sur
+un canal il n'est pas servi du tout comme montant : il faut le reconstruire.**
 
 | Provider | Canal | Champ prix voyageur | Note |
 |---|---|---|---|
-| Beds24 | Airbnb | à établir | |
-| Beds24 | Booking | à établir | |
-| Beds24 | direct | à établir | |
-| Channex | Airbnb | à établir | |
-| Channex | Booking | à établir | |
-| Channex | Offline | à établir | |
+| Beds24 | Airbnb | `raw.price` | = `Base Price` de `rateDescription` (847/914) et = charges + commission (865/914). Airbnb en frais simplifies : le voyageur paie le tarif d'annonce, l'hote supporte les ~18 % (mediane mesuree). 47 lignes a 0. |
+| Beds24 | Booking | `raw.price` | = somme des `invoiceItems` de type charge (259/306). La commission (~16,2 %) est prelevee a l'hote, pas ajoutee au voyageur. 45 lignes a 0. |
+| Beds24 | direct | `raw.price`, repli somme des charges | Commission nulle sur 199/199 : les deux grandeurs se confondent. 95 lignes a 0 (blocages, sejours gratuits). |
+| Channex | Airbnb | **`amount` + `Listing Cancellation Host Fee` (lu dans `notes`)** | ⚠ **PAS `amount` seul** : `meta.amount_type = "Payout Amount"` sur 33/33, `amount` = nuits + services = **net hote**. Ecart median **+22,85 %**. Host Fee lisible sur 33/33. **Valide 5/5** contre le `price` Beds24 du meme sejour (§9 bis). Ne PAS utiliser `Listing Base Price` + `Cleaning Fee` : faux 2 fois sur 5. |
+| Channex | Booking | `rooms[].meta.price_details.guest_view.total` (centimes / `decimal_places`) | `amount` coincide sur les 3 confirmees, mais **diverge sur l'annulee** (90,90 contre 111,85) : `amount` suit la penalite, `guest_view` reste le prix vendu. Base etroite : 4 lignes. |
+| Channex | Offline | `amount` | = somme des nuits (3/3). Ecrit par HoteSmart lui-meme (primitive CRS), donc brut par construction. |
+
+### Regles qui en decoulent, a graver dans le moteur
+
+1. **`bookings_snapshot.snapshot.amount` n'est pas utilisable tel quel** par
+   YieldFlow. Son contrat annonce « total facture au VOYAGEUR, jamais le net
+   hote » (`lib/bookings-snapshot.js`) ; sur le canal Airbnb de Channex il porte
+   un net hote. 33 lignes concernees aujourd'hui, **toutes les futures ventes
+   Airbnb des biens migres** demain.
+2. Le moteur lit une fonction `prixVoyageur(provider, canal, raw)` unique, jamais
+   le champ `amount` en direct. Elle applique le tableau ci-dessus et **echoue
+   bruyamment** sur un couple (provider, canal) inconnu — jamais de repli
+   silencieux sur `amount`, qui rendrait un net pour un brut sans erreur.
+3. **Date de vente** : `raw.bookingTime` cote Beds24 (1 423/1 423, dont 164
+   posterieures a l'arrivee — a ecarter du calcul de delai) ; cote Channex
+   `raw.inserted_at` ne vaut **que pour les reservations nees dans Channex** :
+   sur les 22 lignes `meta.is_imported = true`, il porte la date de migration,
+   pas la date de vente. Le « a date » (§6) est donc aveugle sur l'historique
+   migre : il ne demarre qu'a la premiere vente post-bascule.
+4. La commission reste hors du pricing (§2), mais elle est la **preuve** que les
+   deux grandeurs different : ~18 % Airbnb, ~16,2 % Booking, 0 % direct.
+
+### 9 bis. Comment la ligne Channex/Airbnb a ete prouvee
+
+Les 5 reservations Airbnb dedoublonnees a la bascule (statut `demapped` cote
+Beds24, `confirmed` cote Channex) portent **le meme sejour reel vu par les deux
+providers**. Elles tranchent entre les deux reconstructions candidates :
+
+| code OTA | `beds24.price` | `amount` + Host Fee | `Listing Base Price` + `Cleaning Fee` |
+|---|---|---|---|
+| HMADA4CMQR | 134 | **134** ✓ | 125 ✗ (−9) |
+| HMEA8PYCPM | 485 | **485** ✓ | 413 ✗ (−72) |
+| HMXJPMDJEN | 130 | **130** ✓ | 130 ✓ |
+| HMYSC3QK8X | 160 | **160** ✓ | 160 ✓ |
+| HM4TMX5QXQ | 119 | **119** ✓ | 119 ✓ |
+
+**5/5 contre 3/5.** `Listing Base Price` est le tarif **de l'annonce**, pas le
+prix paye : remises, supplements voyageurs et frais additionnels n'y figurent
+pas. Le couple (net verse, retenue) est la seule paire qui se recompose
+exactement.
+
+Ce controle est reinjecte dans `scripts/audit-prix-voyageur.js` : s'il cesse un
+jour de dire 5/5, la ligne Channex/Airbnb du tableau est fausse.

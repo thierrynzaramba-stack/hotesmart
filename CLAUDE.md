@@ -159,6 +159,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
+- docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur, par provider et par canal : `amount` Channex/Airbnb est un NET HOTE, ecart +22,85 %).
 - docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
 
 ## VALIDATION
