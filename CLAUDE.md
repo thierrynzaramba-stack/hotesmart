@@ -159,6 +159,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
+- docs/kb/evenements-yield.md (vacances scolaires importees/cachees par zone ; jours feries CALCULES, aucune table ; OpenAgenda ecarte de la V1, sur mesure).
 - docs/kb/capacite-yield.md (denominateur du TO : jour ouvert = intention memorisee ; absence de ligne = ferme ; « non calculable » n'est JAMAIS zero).
 - docs/kb/price-log.md (journal des prix affiches : NON RETROACTIF, une ligne par changement REEL, une seule ligne courante par bien/nuit ; cle sur properties.id, exception raisonnee a la regle 10).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).

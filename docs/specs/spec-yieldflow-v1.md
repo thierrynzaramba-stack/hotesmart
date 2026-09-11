@@ -158,10 +158,27 @@ Deux points à connaître avant l'étape 3 :
 - **Exceptions (« hors référence »)** : marquage par l'hôte d'une période
   (bien + date début/fin + motif libre) et/ou d'une réservation, exclue du
   calcul de la référence. Table dédiée minimale, UUID, cascade bien.
-- **Événements** : vacances scolaires par zones (source officielle data.gouv,
-  importée et cachée), jours fériés, plus OpenAgenda (OpenDataSoft, sans clé)
-  pour les événements locaux. Saisonnalité V1 = **impact des vacances lu dans
-  les chiffres** (segments vacances/hors-vacances par zone), rien de plus.
+- **Événements** : vacances scolaires par zones (source officielle
+  data.education.gouv.fr, importée et cachée) et jours fériés. Saisonnalité V1 =
+  **impact des vacances lu dans les chiffres** (segments vacances/hors-vacances
+  par zone), rien de plus.
+
+  **OpenAgenda est ÉCARTÉ de la V1 — décision de Thierry, 12 septembre 2026,
+  prise sur mesure.** Le sondage de la source (OpenDataSoft, GET) donne
+  **57 897 événements en Haute-Garonne dont 1 684 à venir**, et 3 259 en
+  Hautes-Pyrénées dont 212 à venir. L'échantillon des huit premiers à venir près
+  des biens : « Atelier Dessiner au musée », « P'tits Artistes 6-12 ans »,
+  « Club des lecteurs », « Un métier à graver », « Visite Cité de l'Espace ».
+  Aucun ne déplace quelqu'un qui réserve un logement. C'est un agenda culturel
+  local — réunions d'information, ateliers, permanences — où le signal utile au
+  yield (festival, congrès, match qui remplit une ville) est noyé, et le dataset
+  ne porte **aucun champ de fréquentation attendue** permettant de l'en
+  distinguer.
+
+  Importer ~1 900 lignes dont aucune n'est garantie exploitable remplirait le
+  cœur sans rien apporter. **On y reviendra quand l'étape 3 aura montré des
+  écarts inexpliqués que les vacances ne couvrent pas** — c'est-à-dire quand le
+  besoin sera démontré par les chiffres, pas supposé.
 - **Découpe des longs séjours** : règle de calcul (pas de stockage) — au-delà
   de ~24 nuits, prorata mensuel du prix par nuit dans toutes les agrégations.
 
