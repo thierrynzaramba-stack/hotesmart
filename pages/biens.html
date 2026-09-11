@@ -204,8 +204,12 @@
     <label class="mode-card">
       <input type="radio" name="ratemode" value="keep">
       <div>
-        <div class="mode-title">Je garde mes prix <span class="mode-tag">recommandé pour démarrer</span></div>
-        <div class="mode-desc">HôteSmart synchronise vos disponibilités pour éviter les doubles réservations. Vos prix ne changent pas : vous les gérez sur chaque plateforme comme aujourd'hui.</div>
+        <div class="mode-title">Prix encore gérés par votre ancien channel manager <span class="mode-tag">migration en cours</span></div>
+        <div class="mode-desc"><strong>HôteSmart n'enverra aucun prix tant que ce mode est actif.</strong>
+          Vos disponibilités, elles, continuent d'être synchronisées.
+          Ce mode n'existe que le temps d'une migration : une fois votre logement connecté à une
+          plateforme, celle-ci refuse que vous modifiiez vos tarifs dans son extranet — c'est
+          HôteSmart qui les envoie.</div>
       </div>
     </label>
     <label class="mode-card">
@@ -412,7 +416,7 @@
       </div>
       ${isOta ? `
       <div class="rate-mode">
-        💶 Prix sur les plateformes : <strong>${p.rate_sync_mode === 'managed' ? 'Gérés par HôteSmart' : 'Je garde mes prix'}</strong>
+        💶 Prix sur les plateformes : <strong>${p.rate_sync_mode === 'managed' ? 'Gérés par HôteSmart' : 'Aucun prix envoyé (ancien channel manager)'}</strong>
         <button data-ratemode="${p.id}">Changer</button>
       </div>` : ''}
       <div class="card-actions">

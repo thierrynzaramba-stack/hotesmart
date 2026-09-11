@@ -100,6 +100,28 @@ function buildRatePlanOptions(basePrice, incGuests, extraFee, cap) {
   return { sell_mode: 'per_room', options: [{ occupancy: cap, rate: Math.round(basePrice * 100), is_primary: true }] }
 }
 
+// Les canaux ACTIFS d'un bien, par leur OTA. `null` = on n'a pas pu savoir.
+//
+// ⚠ `null` N'EST PAS « AUCUN ». Prendre une panne de lecture pour « ce bien
+// n'est connecte nulle part » laisserait passer le `keep` qu'on veut refuser —
+// et le refus existe precisement pour empecher un logement de se retrouver sans
+// personne pour le tarifer.
+async function canauxActifsDuBien (prop) {
+  const cle = prop && (prop.provider_property_id || prop.migration_target_property_id)
+  if (!cle) return []
+  try {
+    const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(cle)}`)
+    if (!r || !r.ok) return null
+    const rows = Array.isArray(r.json?.data) ? r.json.data : []
+    return rows
+      .filter(c => c.attributes?.is_active === true)
+      .map(c => String(c.attributes?.channel || c.attributes?.ota_name || 'canal'))
+  } catch (e) {
+    console.error('[channel-property] lecture des canaux echec', e.message)
+    return null
+  }
+}
+
 module.exports = async function handler(req, res) {
   // ===== AUTH (pattern beds24.js) =====
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -276,7 +298,11 @@ module.exports = async function handler(req, res) {
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
-      .select('id, provider, provider_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee')
+      // ⚠ `migration_target_property_id` EST LU PAR `canauxActifsDuBien` : une
+      // garde qui juge sur une colonne non selectionnee est une garde ouverte
+      // (lecon deja payee sur `base_price` et le cran d'arret). Un bien en
+      // cours de bascule porte ses canaux sous sa cle CIBLE.
+      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee')
       .eq('id', pid)
       .eq('user_id', compteBien)
       .single()
@@ -296,6 +322,33 @@ module.exports = async function handler(req, res) {
       }
       if (prop.provider !== 'channex' && prop.provider !== 'channel') {
         return res.status(400).json({ error: 'Le mode de prix ne s applique qu aux biens connectes aux plateformes' })
+      }
+      // ⚠ `keep` EST DEVENU IMPOSSIBLE SUR UN BIEN A CANAL ACTIF, ET CE N'EST
+      // PAS UN DURCISSEMENT ARBITRAIRE. Constat de terrain du 11 septembre 2026
+      // sur l'extranet Booking : des qu'un channel manager est lie, la
+      // plateforme REFUSE que l'hote edite ses tarifs (« modification
+      // obligatoire par le CM »). En `keep`, plus PERSONNE ne peut donc tarifer
+      // le logement — ni l'hote chez l'OTA, ni nous — et le seul prix qui
+      // subsiste est celui que nous avons pousse au provisionnement. Un bien
+      // reel s'est vendu ainsi 31 nuits a 199 € a plat.
+      //
+      // Le libelle « Je garde mes prix » promettait donc quelque chose que
+      // l'OTA interdit. On refuse, et on DIT pourquoi : un refus muet renverrait
+      // l'hote a l'ecran sans qu'il comprenne ce qui vient de lui etre epargne.
+      if (rate_sync_mode === 'keep') {
+        const canauxActifs = await canauxActifsDuBien(prop)
+        if (canauxActifs === null) {
+          return res.status(502).json({
+            error: 'Impossible de verifier l etat de vos connexions pour le moment. Reessayez.'
+          })
+        }
+        if (canauxActifs.length) {
+          return res.status(409).json({
+            error: 'Votre bien est connecté à une plateforme — vos prix ne peuvent plus être '
+              + 'modifiés dans son extranet, c\'est HôteSmart qui les envoie.',
+            canaux: canauxActifs
+          })
+        }
       }
       updates.rate_sync_mode = rate_sync_mode
     }
@@ -901,3 +954,6 @@ module.exports = async function handler(req, res) {
 
   return res.status(405).json({ error: 'Methode non autorisee' })
 }
+
+// Export secondaire, sans toucher au defaut : la fonction que le test tient.
+module.exports.canauxActifsDuBien = canauxActifsDuBien
