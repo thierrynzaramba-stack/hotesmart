@@ -106,6 +106,56 @@ async function main () {
     }
   }
 
+  // ─── 4 bis. Le CHECK des trois sources ────────────────────────────────────
+  // 'host' | 'engine' | 'seed'. Une source hors liste doit etre REFUSEE par la
+  // base, pas seulement par le writer : `scripts/amorcer-price-log.js` ecrit
+  // 'seed', et si la contrainte ne l'accepte pas, l'amorcage echouerait ligne
+  // par ligne. Inversement, si elle accepte n'importe quoi, la mesure « le
+  // moteur fait-il mieux que l'hote » perdrait son discriminant.
+  if (!SONDE) {
+    note('check_source', 'non-verifiable',
+      'demande un aller-retour d ecriture — relancer avec --sonde')
+  } else {
+    const { data: bien } = await supabase
+      .from('properties').select('id, user_id').limit(1).maybeSingle()
+    if (!bien) {
+      note('check_source', 'non-verifiable', 'aucun bien en base pour porter la sonde')
+    } else {
+      const nuit = '2099-12-30'
+      await supabase.from('price_display_log').delete()
+        .eq('property_id', bien.id).eq('stay_date', nuit)
+      const base = { user_id: bien.user_id, property_id: bien.id, stay_date: nuit, rate: 1 }
+      const acceptees = []
+      const refusees = []
+      for (const src of ['host', 'engine', 'seed']) {
+        const { error: e } = await supabase.from('price_display_log').insert({ ...base, source: src })
+        if (e) refusees.push(`${src} (${e.message.slice(0, 40)})`)
+        else {
+          acceptees.push(src)
+          await supabase.from('price_display_log').delete()
+            .eq('property_id', bien.id).eq('stay_date', nuit)
+        }
+      }
+      const { error: eHorsListe } = await supabase
+        .from('price_display_log').insert({ ...base, source: 'cron' })
+      if (!eHorsListe) {
+        await supabase.from('price_display_log').delete()
+          .eq('property_id', bien.id).eq('stay_date', nuit)
+      }
+      if (acceptees.length === 3 && eHorsListe) {
+        note('check_source', 'ok', 'host|engine|seed acceptees, une source hors liste refusee')
+      } else if (acceptees.length !== 3) {
+        note('check_source', 'echec', `source(s) refusee(s) a tort : ${refusees.join(', ')}`)
+      } else {
+        note('check_source', 'echec', 'une source HORS LISTE a ete acceptee : le CHECK manque')
+      }
+      const { error: eNet } = await supabase.from('price_display_log').delete()
+        .eq('property_id', bien.id).eq('stay_date', nuit)
+      if (eNet) console.error(`  ⚠ sonde NON nettoyee (${nuit}) : ${eNet.message}`)
+      else console.log(`  sonde nettoyee (${nuit})`)
+    }
+  }
+
   // ─── 5. RLS active (regle 5) ──────────────────────────────────────────────
   // La cle anonyme ne doit rien voir : le journal porte la strategie tarifaire.
   if (!process.env.SUPABASE_ANON_KEY) {

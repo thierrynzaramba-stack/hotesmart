@@ -87,9 +87,31 @@ create table if not exists public.price_display_log (
   -- si
   -- YieldFlow fait mieux que l'hote — ce qui est la seule
   -- question qui compte pour ce chantier.
+  -- 'host'   : prix decide par l'hote (calendrier, full
+  --            sync)
+  -- 'engine' : prix propose par YieldFlow et VALIDE par
+  --            l'hote (il valide toujours : spec §2)
+  -- 'seed'   : ligne d'AMORCAGE, recopiee du calendrier au
+  --            demarrage du journal. Son created_at est la
+  --            date du seed, PAS celle du premier
+  --            affichage :
+  --            toute analyse d'anciennete doit l'exclure.
   source text not null default 'host'
-    check (source in ('host', 'engine'))
+    check (source in ('host', 'engine', 'seed'))
 );
+
+-- ⚠ LE CHECK, REJOUABLE SI LA TABLE EXISTE DEJA.
+-- `create table if not exists` est un NO-OP si la table
+-- existe : une base creee avant l'ajout de 'seed' garderait
+-- un CHECK a deux valeurs, et l'amorcage y echouerait ligne
+-- par ligne. Le fichier doit pouvoir etre rejoue partout et
+-- donner le meme etat. Sur une base neuve, ce bloc ne fait
+-- que remplacer la contrainte par elle-meme.
+alter table public.price_display_log
+  drop constraint if exists price_display_log_source_check;
+alter table public.price_display_log
+  add constraint price_display_log_source_check
+  check (source in ('host', 'engine', 'seed'));
 
 -- ⚠ L'INDEX QUI PORTE TOUT LE MECANISME.
 -- Il y a AU PLUS UNE ligne courante (ni remplacee ni

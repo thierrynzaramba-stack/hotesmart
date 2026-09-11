@@ -31,6 +31,75 @@ Thierry après coût constaté), module rentabilité (commissions), multi-unité
 - Le moteur consomme des **paramètres** (saisonnalité, événements, exceptions,
   délai) sans connaître leur source — remplaçables par des données externes plus tard.
 
+## 2 bis. AMENDEMENT — YieldFlow est une APP, et le pilote tarifaire est exclusif
+
+**Décision produit de Thierry, 12 septembre 2026. Gravée avant l'étape 2 : elle
+gouverne les étapes 2 à 4.** Rien n'est implémenté à ce stade.
+
+### Ce qui est décidé
+
+1. **YieldFlow est une app séparée, avec son propre écran.** Tout le visuel yield
+   vit dans l'app : stats, projections, suggestions, journal des prix. **Rien
+   dans le calendrier.**
+2. **Chaque bien porte un PILOTE TARIFAIRE exclusif** :
+   - `'calendrier'` (défaut) — comportement actuel, inchangé ;
+   - `'yieldflow'` — les prix se travaillent et se **valident** dans l'app Yield,
+     qui écrit dans `calendar_inventory` et pousse par **la chaîne existante**
+     (donc journal alimenté, `source = 'engine'`).
+3. **Jamais deux écrivains de prix sur un même bien.** En mode `yieldflow`, le
+   calendrier passe en **consultation tarifaire** pour ce bien, avec un bandeau
+   explicatif.
+4. **Le sélecteur est une config d'APP** : il vit dans Yield, pas dans
+   `/settings` (règle du KB `coeur-de-donnees.md` — test qui tranche : ce réglage
+   a-t-il un sens si l'app n'existait pas ? Non → il vit dans l'app).
+5. **La règle « l'hôte valide chaque prix » demeure dans les deux modes.**
+   YieldFlow ne publie jamais seul (§2).
+
+### Arbitrages de Thierry, 12 septembre 2026 — GRAVÉS
+
+**A. La garde est SERVEUR, le bandeau n'est qu'une explication.**
+`api/calendar.js` **refuse** tout segment portant un `rate` pour un bien en mode
+`yieldflow`. Le bandeau explique à l'hôte pourquoi l'écran est en consultation ;
+il ne protège rien. Une restriction d'UI n'est pas une restriction — règle du
+repo, et sans la garde serveur « jamais deux écrivains » resterait un vœu qu'un
+appel direct suffirait à briser.
+
+**B. Le pilote n'emporte QUE le tarif.**
+La **disponibilité** et le **`stop_sell`** restent au calendrier **dans les deux
+modes** : la mémoire d'intention commerciale (chantier audit stop_sell) et
+l'anti-surréservation ne changent pas de mains. Le refus du point A porte donc
+sur le seul `rate` — un refus qui engloberait le segment entier empêcherait
+l'hôte de fermer une nuit, et c'est exactement la régression du 7 septembre.
+
+**B bis. Un bien en `rate_sync_mode = 'keep'` ne peut PAS passer en
+`yieldflow`.** Refus explicite, avec explication à l'hôte. Sinon l'app écrirait
+des prix que rien ne pousse : `calendar_inventory` porterait une stratégie
+tarifaire invisible des plateformes, et le journal ne verrait rien — il ne
+journalise que ce qui part réellement. Les deux réglages restent deux questions
+distinctes (`rate_sync_mode` = « HôteSmart pousse-t-il mes prix ? », pilote =
+« qui les décide ? »), mais cette combinaison-là est interdite.
+
+### Ce que l'amendement implique par ailleurs
+
+- **Où vit le réglage.** L'écran appartient à l'app ; le **stockage** naturel
+  reste une colonne de `properties` (comme `rate_sync_mode`), parce que la
+  couche de poussée doit le lire sans connaître l'app. « La config d'app vit
+  dans l'app » porte sur **qui la gère**, pas sur la table.
+- **`source = 'engine'` ne veut pas dire « poussé sans validation ».** Il veut
+  dire « prix proposé par le moteur, validé par l'hôte ». Sans cette précision,
+  la mesure « le moteur fait-il mieux que l'hôte ? » serait ininterprétable.
+- **Le basculement de mode ne change aucun prix** : les lignes
+  `calendar_inventory` en place restent, le journal continue. Basculer est un
+  changement d'écrivain, pas de tarif.
+
+### Conséquences sur les étapes suivantes
+
+- **Étape 2** : les référentiels (exceptions, événements) sont des données
+  d'app — ils se règlent dans Yield.
+- **Étape 3** : inchangée, le moteur lit le cœur.
+- **Étape 4** : « Appliquer » n'existe que pour un bien en pilote `yieldflow`,
+  et écrit par le chemin normal (`source = 'engine'`).
+
 ## 3. Étape 0 — Inspection prix voyageur (lecture seule, par les faits)
 
 Question unique : **pour chaque provider et chaque canal, quel champ du payload

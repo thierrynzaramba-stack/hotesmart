@@ -823,14 +823,22 @@ module.exports = async function handler(req, res) {
               else          o.rate  = rateCents
               prixParNuit[ds] = rateCents
             }
-            // ⚠ UNE NUIT FERMEE DANS LE MEME GESTE N'A JAMAIS ETE AFFICHEE.
-            // L'hote peut poser un tarif ET fermer la date (`stop_sell`, ou
-            // `avail: 0`) dans le meme segment. Et juste avant la poussee,
-            // `reaffirmerStopSell` repousse l'intention memorisee : les dates
-            // qu'il avait deja fermees repartent fermees. Journaliser leur prix
+            // ⚠ UNE NUIT FERMEE N'A JAMAIS ETE AFFICHEE.
+            // L'hote peut poser un tarif ET fermer la date dans le meme geste.
+            // Et juste apres, `reaffirmerStopSell` repousse l'intention
+            // memorisee : une date deja fermee EN BASE repart fermee, meme si
+            // le segment courant ne parle que de tarif. Journaliser son prix
             // ferait croire au moteur a une nuit proposee a 120 EUR pendant
             // trois mois, alors qu'aucun voyageur ne pouvait la reserver.
-            if (seg.stop_sell === true || seg.avail === 0) delete prixParNuit[ds]
+            //
+            // ⚠ ON LIT L'ETAT EFFECTIF, PAS LE SEGMENT.
+            // La premiere version ne regardait que `seg.stop_sell` / `seg.avail` :
+            // changer le seul tarif d'une date DEJA fermee journalisait donc un
+            // prix que personne ne pouvait voir. `rowsByDate` porte l'etat
+            // fusionne — la ligne relue en base, plus les modifications du
+            // segment — donc la verite de ce qui sera pousse.
+            const etat = rowsByDate[ds]
+            if (etat && (etat.stop_sell === true || etat.avail === 0)) delete prixParNuit[ds]
             if (seg.min_stay_arrival != null || seg.min_stay_through != null) {            // couplage miroir
               o.min_stay_arrival = seg.min_stay_arrival != null ? seg.min_stay_arrival : seg.min_stay_through
               o.min_stay_through = seg.min_stay_through != null ? seg.min_stay_through : seg.min_stay_arrival
@@ -983,6 +991,26 @@ module.exports = async function handler(req, res) {
       // Le journal dit ce que le VOYAGEUR a vu, pas ce que l'hote a voulu.
       if (Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok) {
         try {
+          // ⚠ UNE NUIT DEJA VENDUE N'EST PLUS AFFICHEE — releve en review.
+          // L'index unique partiel autorise une ligne courante A COTE d'une
+          // ligne vendue. Sans ce filtre, modifier le tarif d'une plage
+          // englobant une nuit vendue ouvrirait une courante neuve, et la nuit
+          // redeviendrait « affichee, jamais vendue » pour le moteur — alors
+          // qu'elle est occupee et que son stock est a zero.
+          // Lecture propre : `vendues`, calcule plus haut, est local au bloc de
+          // plafonnement et ne couvre que les dates portant une disponibilite.
+          const datesPrix = Object.keys(prixParNuit).sort()
+          const unitesBien = Math.max(1, Number(bien.inventory_units) || 1)
+          const { nuitsOccupees: occupees } = require('../lib/nuits-occupees')
+          const dejaVendues = await occupees(supabase, bien.provider_property_id,
+            datesPrix[0], datesPrix[datesPrix.length - 1], { userId: bien.user_id })
+          let retirees = 0
+          for (const d of datesPrix) {
+            if ((dejaVendues[d] || []).length >= unitesBien) { delete prixParNuit[d]; retirees++ }
+          }
+          if (retirees) console.log(`[calendar] journal des prix : ${retirees} nuit(s) vendue(s) ecartee(s)`)
+          if (!Object.keys(prixParNuit).length) throw new Error('__rien_a_journaliser__')
+
           const bilanJournal = await enregistrerPrixPousses(supabase, {
             userId: compte,
             propertyId: bienId,          // UUID : le journal est cle sur properties.id
@@ -991,12 +1019,16 @@ module.exports = async function handler(req, res) {
           })
           console.log('[calendar] journal des prix', JSON.stringify(bilanJournal))
         } catch (e) {
+          if (e.message === '__rien_a_journaliser__') {
+            console.log('[calendar] journal des prix : aucune nuit a journaliser apres filtrage')
+          } else {
           // Le journal ne fait JAMAIS echouer la poussee : le prix EST parti,
           // c'est la mesure qui a manque. Rendre une erreur ferait croire a
           // l'hote que ses prix ne sont pas partis, donc les repousser, donc
           // ecraser. On perd une ligne de journal, jamais une vente — mais on
           // le dit fort, parce qu'un journal muet est un journal faux.
           console.error('[calendar] JOURNAL DES PRIX NON ECRIT :', e.message)
+          }
         }
       }
 

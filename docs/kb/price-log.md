@@ -152,29 +152,108 @@ Zero ligne fermee a une vente **n'est pas une anomalie** : le journal n'est pas
 retroactif, et une nuit vendue sans prix pousse depuis la mise en service n'a
 rien a fermer.
 
-## 8. Dette connue, a trancher avant l'etape 3
+## 8. Annulation : on rouvre sans ressusciter la vente
 
-**L'annulation ne rouvre pas la ligne.** Une reservation annulee laisse ses
-nuits marquees `sold_at` : le journal continue d'affirmer « vendue » pour une
-nuit redevenue libre. Le moteur de stats (etape 3) compterait donc une vente qui
-n'existe plus.
+**Decision de Thierry, 12 septembre 2026. Ce n'est plus une dette, c'est un
+comportement defini.**
 
-Ce n'est pas traite ici parce que la sortie n'est pas evidente et merite d'etre
-tranchee, pas improvisee : rouvrir la ligne (`sold_at = null`) entrerait en
-conflit avec l'index unique si un nouveau prix a ete pousse entre-temps, et
-poser `replaced_at` a la place conserverait une vente fantome. Les deux options
-ont un cout, et le choix depend de ce que l'etape 3 veut compter.
+**On ne rouvre JAMAIS une ligne vendue — elle dit la verite.** Cette nuit a ete
+vendue, a ce prix, ce jour-la. Effacer `sold_at` reecrirait l'histoire, et le
+moteur perdrait la trace d'une vente qui a reellement eu lieu : un prix qui a
+trouve preneur reste un prix qui a trouve preneur, meme si le voyageur s'est
+decommande ensuite.
 
-**En attendant** : l'etape 3 doit croiser `sold_booking_uid` avec le statut
-canonique de `bookings_snapshot` et ne compter une nuit comme vendue que si sa
-reservation est `confirmed`. La verite du statut est dans le snapshot, pas dans
-ce journal.
+**Ce qu'on fait a la place** : a l'annulation d'une reservation portee par
+`sold_booking_uid`, on ouvre une **nouvelle ligne courante** au dernier prix
+connu du calendrier — `calendar_inventory.rate`, avec repli sur
+`properties.base_price` (meme regle que `runFullSync` : « un prix de base est un
+prix »). C'est ce que l'OTA re-affiche des que la dispo rouvre, donc la verite
+du moment, et la nuit redevient mesurable.
 
-**Ce qui EST traite** : les sejours prolonges. Un `modified` qui deplace
-`arrival` ou `departure` repasse par la cloture — sans quoi les nuits ajoutees
-(une resa allongee du 15 au 18) resteraient courantes indefiniment et seraient
-comptees « affichees, jamais vendues ». `cloturerVente` ne ferme que des lignes
-courantes, donc repasser sur les nuits deja figees ne les touche pas.
+Consommateur 4 du dispatcher, sur les evenements `cancelled`. **Aucun appel
+provider** : le prix vient du coeur.
+
+**Six garde-fous, tous testes** — les quatre derniers ajoutes apres review :
+
+| situation | comportement |
+|---|---|
+| une ligne courante existe deja (un full sync est passe entre-temps) | on ne touche a rien — c'est LUI la verite affichee |
+| aucun prix connu, ni calendrier ni base | on n'ouvre rien : sans prix, `runFullSync` ferme la date |
+| l'evenement est rejoue | idempotent : le second passage constate la ligne courante et n'ouvre rien |
+| la nuit est **fermee** (`stop_sell` ou `avail = 0`) | on n'ouvre rien : les biens de Bagneres sont « tout ferme jusqu'a verification », et rouvrir y aurait affirme un prix sur des nuits invendables |
+| la nuit n'a **aucune ligne de calendrier** | fermee elle aussi : `runFullSync` calcule `availability = r ? … : 0`. L'absence de ligne vaut zero, pas « prix de base » |
+| le bien n'est pas pousse par nous (`keep`, ou provider non relie) | on n'ecrit rien et on le DIT (`non_pousse`) : un prix que nous n'envoyons pas n'a jamais ete affiche |
+| la nuit est **passee** | on ne rouvre pas : une annulation arrive souvent apres le sejour, et une courante sur une date revolue ne serait JAMAIS fermee — ni par remplacement, ni par vente. Pollution permanente du denominateur |
+
+⚠ **`calendar_inventory` est clee sur l'UUID, PAS sur la cle provider.**
+C'est une **exception a la regle 10**, de la meme famille que celle de ce
+journal (§6) : la table est ecrite par NOUS — `api/calendar.js` y pose
+`property_id: bienId` — et non par la couche sync. Les deux tables que HoteSmart
+ecrit lui-meme sont clees sur l'UUID ; celles que la sync alimente portent la
+cle provider.
+
+**Ce piege s'est referme sur moi dans les deux sens.** La premiere version de ce
+module supposait la cle provider et interrogeait `calendar_inventory` avec
+`provider_property_id` : zero ligne, **aucune erreur**, et toutes les nuits
+retombaient sur `base_price` — qui vaut `null` sur quatre des cinq biens. Aucune
+nuit n'aurait ete rouverte, en silence. Ce KB affirmait meme le contraire de la
+verite, noir sur blanc.
+
+Ce n'est pas un test qui l'a trouve, c'est le **dry-run de l'amorcage** : « 500
+nuits sans prix » sur les deux biens qui vendent. Une mesure qui disqualifie de
+la donnee (regle 13) — sauf qu'ici c'etait le lecteur qui etait faux, pas la
+donnee. D'ou la valeur du dry-run devant un humain avant tout `--go`.
+
+⚠ **`base_price` doit etre dans le SELECT de `loadContext`** (`lib/cleaning/
+sync-menages.js`). L'oublier ne leve rien : toutes les nuits seraient comptees
+« sans prix » et jamais rouvertes.
+
+**Ce qui reste vrai** : l'etape 3 croise `sold_booking_uid` avec le statut
+canonique de `bookings_snapshot`. La verite du statut est dans le snapshot, pas
+dans ce journal — une ligne `sold_at` dont la reservation est `cancelled` est
+une vente passee, pas une vente courante.
+
+## 8 bis. L'amorcage, et pourquoi il est marque
+
+Le journal n'est pas retroactif : les nuits deja tarifees au demarrage n'y
+entrent qu'au prochain changement de prix, et `cloturerVente` y fermerait dans
+le vide jusque-la. `scripts/amorcer-price-log.js` ouvre donc une ligne courante
+par (bien, nuit tarifee **et ouverte**), recopiee de `calendar_inventory`.
+
+**Ces lignes portent `source = 'seed'`, et ce marqueur n'est pas cosmetique.**
+Leur `created_at` est la date du seed, pas celle du premier affichage : ces prix
+sont affiches depuis des semaines. Une ligne amorcee repond a « quel prix est
+affiche aujourd'hui », **jamais** a « depuis combien de temps ». Toute analyse
+d'anciennete — « tenue a 120 € pendant trois mois puis bradee », qui est
+precisement le §7 de la spec — **doit les exclure**.
+
+Le script n'amorce que les biens que **nous poussons reellement** — `managed`
+**et** relies au canal (`estRelieAuCanal`). Un bien Beds24 en `managed` passait
+la premiere garde alors que rien ne lui est envoye : le journal aurait demarre
+en affirmant des prix jamais affiches. Une nuit sans ligne de calendrier est
+traitee comme **fermee**, pas comme « prix de base » — sinon jusqu'a 500 nuits
+invendables par bien seraient entrees au journal. Les biens en `keep` sont
+exclus : en `keep`,
+le prix du coeur n'est pas celui que voit le voyageur, et l'amorcer inventerait
+un prix affiche. Il ignore les nuits fermees et celles sans prix, pour les
+memes raisons qu'au §4. Aucune poussee provider, idempotent, dry-run par defaut.
+
+## 8 ter. Une nuit VENDUE n'est plus une nuit affichee
+
+L'index unique partiel porte sur `(property_id, stay_date) where replaced_at is
+null and sold_at is null`. Il autorise donc une ligne **courante a cote d'une
+ligne vendue** — c'est ce qui permet la reouverture apres annulation (§8).
+
+Mais c'est aussi un piege, trouve en review : repousser le tarif d'une plage qui
+englobe une nuit deja vendue trouvait « aucune ligne courante » et en ouvrait une
+neuve. La nuit redevenait **« affichee, jamais vendue »** pour le moteur, alors
+qu'elle est occupee et que son stock est a zero.
+
+Les deux points de capture ecartent donc les nuits vendues, avec le meme calcul
+que le plafonnement de disponibilite (`nuitsOccupees` contre `inventory_units`) :
+`lib/channel-fullsync.js` reutilise son `vendues`, `api/calendar.js` fait sa
+propre lecture — la variable existante y est locale au bloc de plafonnement et
+ne couvre que les dates portant une disponibilite.
 
 ## 9. Une course a connaitre
 

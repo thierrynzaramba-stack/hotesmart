@@ -28,11 +28,42 @@ function fausseBase () {
   const base = {
     lignes,
     journal: { lectures: 0, insertions: 0, majs: 0 },
+    // Le writer touche aussi `calendar_inventory` et `properties` EN LECTURE
+    // pour la reouverture apres annulation. Les autres tables restent
+    // interdites : une ecriture ailleurs serait un writer de plus.
+    inventaire: [],   // { property_id, date, rate }  (rate en EUROS)
+    biens: [],        // { id, user_id, base_price }
     from (table) {
-      assert.equal(table, 'price_display_log', 'le writer ne touche que sa table')
+      if (table === 'calendar_inventory') return requeteSur(base.inventaire)
+      if (table === 'properties') return requeteSur(base.biens)
+      assert.equal(table, 'price_display_log', 'le writer n ECRIT que dans sa table')
       return requete()
     }
   }
+  // Lecture seule sur une table annexe (calendar_inventory, properties).
+  function requeteSur (source) {
+    const f = { eq: [], in: [] }
+    const q = {
+      select () { return q },
+      eq (c, v) { f.eq.push([c, v]); return q },
+      in (c, vs) { f.in.push([c, vs]); return q },
+      is () { return q },
+      maybeSingle () {
+        const r = filtrer()
+        return Promise.resolve({ data: r[0] || null, error: null })
+      },
+      then (resolve) { return Promise.resolve({ data: filtrer(), error: null }).then(resolve) }
+    }
+    function filtrer () {
+      return source.filter(l => {
+        for (const [c, v] of f.eq) if (String(l[c]) !== String(v)) return false
+        for (const [c, vs] of f.in) if (!vs.includes(l[c])) return false
+        return true
+      })
+    }
+    return q
+  }
+
   function requete () {
     const f = { eq: [], in: [], isNull: [] }
     let action = null
@@ -202,7 +233,7 @@ test('les entrees invalides sont ecartees, jamais ecrites', async () => {
   assert.equal(sb.lignes.length, 1)
 })
 
-test('la source est verrouillee sur host|engine', async () => {
+test('la source est verrouillee sur host|engine|seed', async () => {
   const sb = fausseBase()
   await assert.rejects(
     () => enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 100 }, source: 'cron' }),
@@ -227,6 +258,183 @@ test('centimesValides refuse ce qui casserait l INSERT en silence', () => {
   assert.ok(!centimesValides(-1))
   assert.ok(!centimesValides(NaN))
   assert.ok(!centimesValides('12000'), 'une chaine passerait puis comparerait mal a la relecture')
+})
+
+// ─── Annulation : rouvrir sans ressusciter la vente ──────────────────────────
+
+const { rouvrirApresAnnulation } = require('../lib/price-log')
+
+test('ANNULATION — la ligne vendue n est JAMAIS rouverte, une nouvelle s ouvre', async () => {
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  // Une nuit SANS ligne de calendrier est fermee (runFullSync pousse
+  // availability: 0) : les fixtures portent donc explicitement l'etat ouvert.
+  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: 95, stop_sell: false, avail: 1 })
+  sb.inventaire.push({ property_id: BIEN, date: '2026-10-02', rate: null, stop_sell: false, avail: 1 })
+
+  await enregistrerPrixPousses(sb, {
+    userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000, '2026-10-02': 12000 }
+  })
+  await cloturerVente(sb, {
+    propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-03', bookingUid: 'BK-7'
+  })
+  assert.equal(sb.lignes.filter(l => l.sold_at != null).length, 2)
+
+  const bilan = await rouvrirApresAnnulation(sb, {
+    propertyId: BIEN, bookingUid: 'BK-7', basePriceEur: 100
+  })
+
+  assert.equal(bilan.rouvertes, 2)
+  // La verite de la vente est intacte.
+  const vendues = sb.lignes.filter(l => l.sold_booking_uid === 'BK-7')
+  assert.equal(vendues.length, 2, 'les deux lignes vendues sont toujours la')
+  assert.ok(vendues.every(l => l.sold_at != null),
+    'sold_at n est pas efface : cette nuit A ETE vendue a ce prix')
+
+  // Et les nuits sont de nouveau mesurables, au prix du calendrier.
+  const cour = courantes(sb)
+  assert.equal(cour.length, 2)
+  const parDate = Object.fromEntries(cour.map(l => [l.stay_date, l.rate]))
+  assert.equal(parDate['2026-10-01'], 9500, 'prix du calendrier (95 EUR) pour la nuit tarifee')
+  assert.equal(parDate['2026-10-02'], 10000, 'repli sur le prix de base (100 EUR) sinon')
+})
+
+test('ANNULATION — idempotent : rejouer l evenement n ouvre pas de doublon', async () => {
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: null, stop_sell: false, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-8' })
+
+  const un = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-8', basePriceEur: 100 })
+  const deux = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-8', basePriceEur: 100 })
+
+  assert.equal(un.rouvertes, 1)
+  assert.equal(deux.rouvertes, 0, 'le second passage n ouvre rien')
+  assert.equal(deux.deja_courantes, 1, 'il constate la ligne deja courante')
+  assert.equal(courantes(sb).length, 1, 'UNE SEULE ligne courante — l invariant tient')
+})
+
+test('ANNULATION — un full sync passe entre-temps a la priorite', async () => {
+  // Si le calendrier a deja repousse un prix apres l annulation, c est LUI la
+  // verite affichee : on n ecrase pas.
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-9' })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 8000 } })
+
+  const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-9', basePriceEur: 100 })
+  assert.equal(bilan.rouvertes, 0)
+  assert.equal(courantes(sb)[0].rate, 8000, 'le prix du full sync reste en place')
+})
+
+test('ANNULATION — une nuit sans aucun prix connu n est pas inventee', async () => {
+  // Sans prix, runFullSync FERME la date : rien n est affiche, donc rien a
+  // journaliser. Ouvrir une ligne mentirait.
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: null, provider: 'channex', rate_sync_mode: 'managed' })
+  // Nuit OUVERTE mais sans tarif, et pas de prix de base : rien a afficher.
+  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: null, stop_sell: false, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-A' })
+
+  const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-A', basePriceEur: null })
+  assert.equal(bilan.rouvertes, 0)
+  assert.equal(bilan.sans_prix, 1)
+  assert.equal(courantes(sb).length, 0)
+})
+
+test('ANNULATION — une reservation inconnue du journal ne fait rien', async () => {
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'INCONNU', basePriceEur: 100 })
+  assert.deepEqual(bilan, { rouvertes: 0, deja_courantes: 0, sans_prix: 0 })
+})
+
+test('le dispatcher branche la reouverture sur les annulations', () => {
+  const fs2 = require('fs')
+  const dispatch = fs2.readFileSync(require('path').join(__dirname, '..', 'lib/booking-changes-dispatch.js'), 'utf8')
+  assert.ok(/rouvrirApresAnnulation\(/.test(dispatch), 'le consommateur appelle la reouverture')
+  assert.ok(/event\.type === 'cancelled'/.test(dispatch), 'sur les annulations')
+  // ⚠ `calendar_inventory` est clee sur l'UUID (exception a la regle 10, comme
+  // ce journal) : passer `event.property_id`, qui est la cle provider, rendrait
+  // zero ligne SANS ERREUR et aucune nuit ne serait rouverte.
+  assert.ok(!/providerPropertyId/.test(dispatch),
+    'le dispatcher ne passe PAS de cle provider : calendar_inventory est clee sur l uuid')
+  assert.ok(/propertyId:\s+bien\.id/.test(dispatch),
+    'il passe l uuid du bien')
+
+  // Le repli sur le prix de base exige que la colonne soit selectionnee.
+  const ctx = fs2.readFileSync(require('path').join(__dirname, '..', 'lib/cleaning/sync-menages.js'), 'utf8')
+  assert.ok(/base_price/.test(ctx),
+    'loadContext selectionne base_price, sinon toutes les nuits seraient « sans prix » en silence')
+})
+
+test('ANNULATION — une nuit FERMEE n est pas rouverte', async () => {
+  // Les biens de Bagneres sont « tout ferme a la vente jusqu'a verification » :
+  // rouvrir une ligne au tarif du calendrier pour une nuit qu'aucun voyageur ne
+  // peut reserver serait exactement le mensonge que ce module interdit.
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: 95, stop_sell: true, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-F' })
+
+  const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-F', basePriceEur: 100 })
+  assert.equal(bilan.rouvertes, 0)
+  assert.equal(bilan.fermees, 1)
+  assert.equal(courantes(sb).length, 0)
+})
+
+test('ANNULATION — une nuit SANS ligne de calendrier est fermee, pas au prix de base', async () => {
+  // `runFullSync` traite l'absence de ligne comme `availability: 0`. Retomber
+  // sur `base_price` ouvrirait une ligne pour une nuit invendable.
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-G' })
+
+  const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-G', basePriceEur: 100 })
+  assert.equal(bilan.rouvertes, 0)
+  assert.equal(bilan.fermees, 1)
+})
+
+test('ANNULATION — un bien dont HoteSmart ne pousse pas les prix n est pas journalise', async () => {
+  // `lib/rate-sync.js` : un prix ne compte comme AFFICHE que si nous l'envoyons.
+  // Un bien en `keep`, ou un bien Beds24, n'a jamais recu nos tarifs.
+  for (const bienNonPoussable of [
+    { provider: 'channex', rate_sync_mode: 'keep' },
+    { provider: 'beds24', rate_sync_mode: 'managed' }
+  ]) {
+    const sb = fausseBase()
+    sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, ...bienNonPoussable })
+    sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: 95, stop_sell: false, avail: 1 })
+    await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
+    await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-H' })
+
+    const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-H', basePriceEur: 100 })
+    assert.equal(bilan.rouvertes, 0, JSON.stringify(bienNonPoussable))
+    assert.equal(bilan.non_pousse, true, 'et il le DIT, plutot que de sortir en silence')
+  }
+})
+
+test('ANNULATION — les nuits PASSEES ne sont jamais rouvertes', async () => {
+  // Une annulation arrive souvent apres le debut du sejour. Une ligne courante
+  // sur une date revolue ne serait jamais fermee — ni par remplacement, ni par
+  // vente — et polluerait le denominateur « affichee / non vendue ».
+  const sb = fausseBase()
+  sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
+  const hier = new Date(); hier.setDate(hier.getDate() - 1)
+  const dHier = `${hier.getFullYear()}-${String(hier.getMonth() + 1).padStart(2, '0')}-${String(hier.getDate()).padStart(2, '0')}`
+  sb.inventaire.push({ property_id: BIEN, date: dHier, rate: 95, stop_sell: false, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [dHier]: 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: dHier, departure: '2099-01-01', bookingUid: 'BK-P' })
+
+  const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-P', basePriceEur: 100 })
+  assert.equal(bilan.rouvertes, 0)
+  assert.equal(bilan.passees, 1)
+  assert.equal(courantes(sb).length, 0, 'aucune ligne courante sur une nuit revolue')
 })
 
 // ─── Les POINTS DE CAPTURE ───────────────────────────────────────────────────
@@ -267,12 +475,24 @@ test('une nuit FERMEE n entre pas au journal, sur les deux chemins', () => {
   // ne voit ce prix : le journaliser ferait croire a une nuit « tenue a 120
   // pendant trois mois » alors qu'elle etait invendable.
   const fullsync = lireSrc('lib/channel-fullsync.js')
-  assert.ok(/if \(!obj\.stop_sell\) prixParNuitFs\[iso\] = rateCents/.test(fullsync),
-    'le full sync exclut les nuits fermees')
+  assert.ok(/if \(!obj\.stop_sell && !dejaVendue\) prixParNuitFs\[iso\] = rateCents/.test(fullsync),
+    'le full sync exclut les nuits fermees ET les nuits deja vendues')
+  assert.ok(/const dejaVendue = \(vendues\[iso\] \|\| \[\]\)\.length >= unites/.test(fullsync),
+    'la nuit vendue se juge sur le stock, comme le plafonnement de disponibilite')
 
   const calendrier = lireSrc('api/calendar.js')
-  assert.ok(/seg\.stop_sell === true \|\| seg\.avail === 0.*delete prixParNuit/s.test(calendrier),
-    'le calendrier retire les nuits que l hote ferme dans le meme geste')
+  // ⚠ L'ETAT EFFECTIF, PAS LE SEGMENT : une date DEJA fermee en base dont on ne
+  // change que le tarif doit rester hors du journal. `reaffirmerStopSell` la
+  // repoussera fermee, donc personne ne verra ce prix.
+  assert.ok(/const etat = rowsByDate\[ds\]/.test(calendrier),
+    'le calendrier lit l etat fusionne (base + segment)')
+  assert.ok(/etat\.stop_sell === true \|\| etat\.avail === 0.*delete prixParNuit/s.test(calendrier),
+    'et retire du journal toute nuit fermee, quelle que soit l origine de la fermeture')
+  // Une nuit VENDUE n'est plus affichee : l'index unique partiel autorise une
+  // courante a cote d'une vendue, donc sans ce filtre la nuit redeviendrait
+  // « affichee, jamais vendue ».
+  assert.ok(/dejaVendues\[d\] \|\| \[\]\)\.length >= unitesBien/.test(calendrier),
+    'le calendrier ecarte aussi les nuits deja vendues')
 })
 
 test('le journal ne peut pas faire echouer une poussee', () => {
@@ -299,4 +519,85 @@ test('la cloture a la vente suit aussi les sejours PROLONGES', () => {
     'le consommateur du journal traite les modifications')
   assert.ok(/changes\?\.arrival \|\| event\.changes\?\.departure/.test(dispatch),
     'et precisement quand les DATES bougent, comme le fait deja le code d acces')
+})
+
+test('RECENSEMENT : aucun chemin de poussee tarifaire n echappe au journal', () => {
+  // ⚠ CE TEST GARDE UNE PROPRIETE QUE LE CODE NE PORTE NULLE PART.
+  // Le journal n'est correct que si TOUT chemin poussant un tarif l'alimente.
+  // Rien, dans le code, n'empeche d'en ajouter un douzieme demain : ce
+  // recensement echoue alors, et force a trancher explicitement.
+  //
+  // Audit du 12 septembre 2026 (`grep -rn "POST', '/restrictions'"`), quatre
+  // emetteurs en production, deux seulement portent un prix.
+  const ATTENDUS = {
+    // Poussent un RATE par date -> DOIVENT journaliser.
+    'lib/channel-fullsync.js': 'tarifaire',
+    'api/calendar.js':         'tarifaire',
+    // Poussent /restrictions SANS aucun rate -> rien a journaliser.
+    // `reaffirmerStopSell` ne porte que `stop_sell` (lib/rate-sync.js le dit
+    // explicitement) ; `channel-rateplan` ne pousse que `min_stay` sur le rate
+    // plan enfant (« rate non touche -> reste derive »), et sa branche
+    // alternative repasse par runFullSync, donc par le journal.
+    'lib/channel-availability.js': 'sans-prix',
+    'api/channel-rateplan.js':     'sans-prix'
+  }
+
+  const racine = path.join(__dirname, '..')
+  const emetteurs = []
+  for (const dossier of ['lib', 'api']) {
+    const base = path.join(racine, dossier)
+    for (const f of fs.readdirSync(base)) {
+      if (!f.endsWith('.js')) continue
+      const rel = `${dossier}/${f}`
+      const src = fs.readFileSync(path.join(base, f), 'utf8')
+      // Un POST vers /restrictions, quelle que soit la forme de l'appel.
+      if (/(POST'|POST"|POST`)\s*,\s*['"`]\/restrictions/.test(src)) emetteurs.push(rel)
+    }
+  }
+
+  assert.ok(emetteurs.length, 'le recensement doit trouver au moins un emetteur')
+
+  // 1. Aucun emetteur inconnu.
+  const inconnus = emetteurs.filter(f => !ATTENDUS[f])
+  assert.deepEqual(inconnus, [],
+    `NOUVEAU chemin de poussee non recense : ${inconnus.join(', ')}. ` +
+    'S il porte un rate, il DOIT alimenter price_display_log ; sinon, l inscrire ' +
+    'comme « sans-prix » avec la raison.')
+
+  // 2. Aucun emetteur recense n a disparu (le branchement ne se perd pas en silence).
+  const disparus = Object.keys(ATTENDUS).filter(f => !emetteurs.includes(f))
+  assert.deepEqual(disparus, [],
+    `chemin recense qui ne POSTe plus /restrictions : ${disparus.join(', ')}. ` +
+    'Mettre le recensement a jour plutot que de le laisser mentir.')
+
+  // 3. Les emetteurs tarifaires journalisent reellement.
+  for (const [f, nature] of Object.entries(ATTENDUS)) {
+    const src = fs.readFileSync(path.join(racine, f), 'utf8')
+    if (nature === 'tarifaire') {
+      assert.ok(/enregistrerPrixPousses\(/.test(src),
+        `${f} pousse un tarif sans alimenter le journal`)
+    } else {
+      // Un « sans-prix » qui se mettrait a porter un rate doit reveiller le test.
+      assert.ok(!/\brate:\s*rateCents|\brates:\s*occRates/.test(src),
+        `${f} etait recense « sans prix » mais pousse desormais un rate : ` +
+        'il doit alimenter le journal, et changer de categorie ici.')
+    }
+  }
+})
+
+test('les scripts de poussee passent par runFullSync, donc par le journal', () => {
+  // Les scripts one-shot (amorcage, grille reelle, passage en managed) ne
+  // doivent jamais POSTer /restrictions eux-memes : ils appellent runFullSync,
+  // qui journalise. `staging-tarifs.js` est l'exception assumee — il travaille
+  // sur l'environnement de STAGING, jamais sur les biens reels.
+  const base = path.join(__dirname, '..', 'scripts')
+  const fautifs = []
+  for (const f of fs.readdirSync(base)) {
+    if (!f.endsWith('.js') || f === 'staging-tarifs.js') continue
+    const src = fs.readFileSync(path.join(base, f), 'utf8')
+    if (/(POST'|POST"|POST`)\s*,\s*['"`]\/restrictions/.test(src)) fautifs.push(f)
+  }
+  assert.deepEqual(fautifs, [],
+    `script(s) poussant /restrictions en direct : ${fautifs.join(', ')} — ` +
+    'passer par runFullSync, sinon le prix part sans entrer au journal.')
 })
