@@ -318,6 +318,42 @@ product owner a consultée le lendemain et qui donnait le paramètre en une lign
 
 ---
 
+## 13. Une mesure qui disqualifie de la donnée se vérifie deux fois
+
+**Règle : se tromper en jetant est silencieux, se tromper en gardant se voit.
+Toute mesure qui conclut « ces lignes sont fausses, écartons-les » doit être
+vérifiée deux fois plus qu'une mesure qui valide.**
+
+À vérifier :
+- [ ] la donnée écartée l'est-elle par un **défaut réel**, ou par la façon dont on la mesure ?
+- [ ] la comparaison porte-t-elle sur des grandeurs de même nature (un jour contre un jour, pas un instant contre un minuit) ?
+- [ ] une liste de référence (statuts canoniques, correspondance de champs) est-elle **importée de sa source**, ou recopiée — donc périmable en silence ?
+- [ ] un taux qui devrait être constant l'est-il d'un bien à l'autre ? Une divergence trahit la formule, pas la donnée ;
+- [ ] « champ absent » et « règle violée » sont-ils comptés séparément ?
+
+**Pourquoi.** Une mesure fausse qui *valide* laisse une trace : le chiffre aberrant
+finit par sauter aux yeux. Une mesure fausse qui *disqualifie* supprime sa propre
+preuve — la donnée écartée ne revient jamais plaider sa cause. Et le biais se
+présente comme de la rigueur : écarter des lignes douteuses a l'air sérieux.
+
+**Cas vécu.** L'étape 0 de YieldFlow (11 septembre 2026), un audit en lecture
+seule, a produit **trois** conclusions fausses, toutes dans le même sens :
+
+| conclusion | réalité |
+|---|---|
+| « 164 dates de vente corrompues, à écarter du calcul de délai » | **2**. Les 162 autres étaient les ventes du jour même — `bookingTime` porte une heure, `arrival` est un jour nu placé à minuit. Les écarter retirait de la courbe de pickup exactement les ventes de dernière minute que le yield existe pour mesurer. |
+| « écart de 6,78 % sur un bien, 22,85 % sur l'autre » | **22,85 %** partout. La retenue Airbnb est un taux unique : la divergence entre les deux biens était la signature de ma formule fausse, et je l'avais expliquée au lieu de la suspecter. |
+| « 5 lignes `demapped` hors canon » | **0**. `demapped` est canonique depuis le 10 septembre. Mon script portait la liste en dur, recopiée d'un commentaire périmé, et accusait des lignes valides. |
+
+Aucune des trois n'a validé à tort. Les trois ont disqualifié à tort. Deux
+étaient parties pour être **gravées dans une spec** comme règles du moteur.
+
+**Corollaire.** Ne jamais recopier une liste de référence : on l'importe de sa
+source. `lib/bookings-snapshot-status.js` fait foi pour les statuts — un
+commentaire qui la paraphrase est une copie, et se périme.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

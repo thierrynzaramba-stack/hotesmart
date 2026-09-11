@@ -9,6 +9,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
+const { enregistrerPrixPousses } = require('../lib/price-log')
 const { reaffirmerStopSell } = require('../lib/channel-availability')
 const { readStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
@@ -799,6 +800,14 @@ module.exports = async function handler(req, res) {
       // qu'une disponibilite ne partira pas.
       const resultatsPoussee = {}
       const restByDate = {}   // date -> objet restriction partiel (champs presents uniquement)
+      // ⚠ LE PRIX EST CAPTE ICI, PAS RELU DANS `restByDate`.
+      // Quand le bien a une tarification par occupation, `buildOccupancyRates`
+      // pose `o.rates` (un tableau) et NE pose PAS `o.rate`. Relire `o.rate`
+      // plus bas journaliserait donc `undefined` sur tous ces biens — soit
+      // exactement ceux qui ont la tarification la plus fine, et sans la
+      // moindre erreur. On retient le centime de base au moment ou on le
+      // calcule. Journal des prix affiches : docs/kb/price-log.md.
+      const prixParNuit = {}  // date -> rate en CENTIMES (prix de base)
       const availByDate = {}  // date -> availability (room_type)
       for (const seg of dateSegments) {
         const hasRest = seg.rate != null || seg.min_stay_arrival != null || seg.min_stay_through != null
@@ -812,7 +821,16 @@ module.exports = async function handler(req, res) {
               // occRates non-null -> rates[] par occupation ; null -> rate singulier (inchange).
               if (occRates) o.rates = occRates
               else          o.rate  = rateCents
+              prixParNuit[ds] = rateCents
             }
+            // ⚠ UNE NUIT FERMEE DANS LE MEME GESTE N'A JAMAIS ETE AFFICHEE.
+            // L'hote peut poser un tarif ET fermer la date (`stop_sell`, ou
+            // `avail: 0`) dans le meme segment. Et juste avant la poussee,
+            // `reaffirmerStopSell` repousse l'intention memorisee : les dates
+            // qu'il avait deja fermees repartent fermees. Journaliser leur prix
+            // ferait croire au moteur a une nuit proposee a 120 EUR pendant
+            // trois mois, alors qu'aucun voyageur ne pouvait la reserver.
+            if (seg.stop_sell === true || seg.avail === 0) delete prixParNuit[ds]
             if (seg.min_stay_arrival != null || seg.min_stay_through != null) {            // couplage miroir
               o.min_stay_arrival = seg.min_stay_arrival != null ? seg.min_stay_arrival : seg.min_stay_through
               o.min_stay_through = seg.min_stay_through != null ? seg.min_stay_through : seg.min_stay_arrival
@@ -940,9 +958,46 @@ module.exports = async function handler(req, res) {
             new Set(datesTouchees)
           )
         }
+
       } catch (e) {
         console.error('[calendar] push channel error', e.message)
         pushWarnings.push('push: ' + e.message)
+      }
+
+      // ─── JOURNAL DES PRIX AFFICHES (YieldFlow etape 1) ────────────────────
+      // docs/specs/spec-yieldflow-v1.md §4 — docs/kb/price-log.md
+      //
+      // ⚠ HORS DU `try` DE LA POUSSEE, ET C'EST LE POINT.
+      // Releve en review : ce bloc etait dans le meme `try` que
+      // `reaffirmerStopSell`, qui fait un appel reseau non protege (l'en-tete
+      // de `pousserAri` le dit : « le channelCall de ce fichier ne protege pas
+      // son fetch »). Un ECONNRESET pendant la reaffirmation sautait au `catch`
+      // et le journal n'etait jamais ecrit — alors que `/restrictions` avait
+      // rendu ok et que les prix ETAIENT partis aux plateformes. L'echec d'une
+      // etape ulterieure ne doit pas effacer la mesure d'une etape reussie.
+      //
+      // ⚠ SEULEMENT SI LES TARIFS SONT REELLEMENT PARTIS.
+      //   - mode « HoteSmart gere mes prix » : en `keep`, rien ne part ;
+      //   - `/restrictions` ok : un refus laisse l'ANCIEN prix chez l'OTA ;
+      //   - au moins un prix a journaliser.
+      // Le journal dit ce que le VOYAGEUR a vu, pas ce que l'hote a voulu.
+      if (Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok) {
+        try {
+          const bilanJournal = await enregistrerPrixPousses(supabase, {
+            userId: compte,
+            propertyId: bienId,          // UUID : le journal est cle sur properties.id
+            nuits: prixParNuit,
+            source: 'host'               // 'engine' viendra a l'etape 4
+          })
+          console.log('[calendar] journal des prix', JSON.stringify(bilanJournal))
+        } catch (e) {
+          // Le journal ne fait JAMAIS echouer la poussee : le prix EST parti,
+          // c'est la mesure qui a manque. Rendre une erreur ferait croire a
+          // l'hote que ses prix ne sont pas partis, donc les repousser, donc
+          // ecraser. On perd une ligne de journal, jamais une vente — mais on
+          // le dit fort, parce qu'un journal muet est un journal faux.
+          console.error('[calendar] JOURNAL DES PRIX NON ECRIT :', e.message)
+        }
       }
 
       // ⚠ UN REFUS DU CANAL EST UNE PANNE, PAS UN AVERTISSEMENT.

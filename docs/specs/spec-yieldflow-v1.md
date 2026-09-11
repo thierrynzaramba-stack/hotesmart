@@ -65,6 +65,21 @@ Table `price_display_log` (nom indicatif) :
 - Test d'acceptation : poussée réelle sur un bien en pause → une ligne exacte ;
   second cycle sans changement → zéro ligne ; vente simulée → clôture correcte.
 
+### Étape 1 — LIVRÉE le 12 septembre 2026
+
+Table `price_display_log` (migration `2026-09-12-price-display-log.sql`), writer
+unique `lib/price-log.js`, capture dans `api/calendar.js` au retour d'une
+poussée `/restrictions` réussie, clôture par le consommateur 4 du dispatcher
+`booking_change_events`. Les trois tests d'acceptation ci-dessus passent
+(`tests/price-log.test.js`). Détail et pièges : `docs/kb/price-log.md`.
+
+Deux points à connaître avant l'étape 3 :
+- **le nom de la colonne n'est pas indicatif, il est arrêté** : `property_id`
+  porte un **UUID** (`properties.id`), pas la clé provider ;
+- **l'annulation ne rouvre pas la ligne** (dette documentée au KB §8) : l'étape 3
+  ne compte une nuit comme vendue qu'après avoir croisé `sold_booking_uid` avec
+  le statut canonique du snapshot.
+
 ## 5. Étape 2 — Référentiels du moteur
 
 - **Capacité** : ne PAS créer de table nouvelle — la mémoire d'intention
@@ -93,6 +108,24 @@ Projections calculées depuis le snapshot (vues ou tables dérivées recalculabl
 - Alignement : jour de semaine + segment vacances/hors-vacances (jamais date à date).
 - Référence = historique (2-3 ans lissés) hors exceptions ; les annulées sont
   conservées mais exclues du CA réalisé (statut canonique).
+- **Filtrer en LISTE BLANCHE, jamais en liste noire.** Le CA et les nuitees ne
+  comptent que `confirmed`. Un filtre `status !== 'cancelled'` ferait entrer
+  `blocked`, `request` et `demapped` dans les ventes.
+- **Les lignes `demapped` sont une SOURCE DE DATE DE VENTE, jamais une vente.**
+  Elles portent le statut canonique des reservations neutralisees par une
+  migration (`lib/bookings-snapshot-status.js`, 10 septembre 2026) : le sejour a
+  bien eu lieu, mais il est desormais compte sous sa jumelle Channex. Or cette
+  jumelle est `is_imported = true`, donc son `inserted_at` vaut la date de
+  MIGRATION et non la date de vente (§9.3).
+  La ligne Beds24 demappee, elle, porte le vrai `bookingTime`. Le moteur
+  recupere donc la date de vente de la jumelle **par jointure sur
+  `ota_reservation_code`**, en ne retenant du cote demappe que cette date —
+  jamais son montant, jamais ses nuitees, jamais son statut.
+  Verifie sur les 5 paires existantes (§9 bis) : meme code OTA, meme bien, meme
+  sejour. Sans ce pont, le « a date » de ces sejours serait faux de plusieurs
+  semaines ; avec lui, il est exact.
+  ⚠ Garde a poser : la jointure doit exiger **le meme bien** en plus du meme
+  code OTA, et refuser d'apparier si plus de deux lignes partagent le code.
 - Projection à un an : référence par segment + trajectoire « à date » attendue
   (courbe de délai de réservation par saison).
 

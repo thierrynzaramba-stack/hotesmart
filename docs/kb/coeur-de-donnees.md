@@ -234,3 +234,53 @@ elle existe, et la nuit vendue passe pour libre.
 **Règle qui en sort** : à chaque frontière avec un provider, se demander lequel
 des deux identifiants on manipule — *où je parle* (le provider) ou *sous quoi je
 range* (le cœur). Un même nom de variable pour les deux est le début du défaut.
+
+## Après la bascule : le résidu, et pourquoi la fiche vide est le moins grave
+
+**Écrit le 12 septembre 2026, en traitant `coeur de vie 23 [beds24/169567]`.**
+
+Une fois l'historique transféré sous la clé du nouveau provider, l'ancienne
+fiche `properties` reste — vide, en pause, `active_at` à `null`. Elle paraît
+inoffensive : elle ne porte plus une seule ligne, et elle ne compte pas dans la
+facturation. Elle l'est **tant que la garde tient**.
+
+**Ce qui la rend dangereuse n'est pas ce qu'elle contient, c'est la clé qu'elle
+porte.** `clesMigrees` retombe volontairement OUVERT quand
+`provider_keys_migrated` devient illisible (une panne locale ne doit pas arrêter
+la synchro de tous les hôtes). Le jour où cela arrive, `fetchProperties` rend
+toujours le bien — il reste dans le compte Beds24, filet de rollback assumé — et
+le cron rebranche sous `169567` un historique déjà rangé sous la clé Channex.
+Toute agrégation le compte alors **deux fois**, sans qu'aucune erreur ne se
+déclenche.
+
+**L'ordre qui vaut, et il n'est pas intuitif :**
+
+1. **La clé migrée d'abord, la fiche ensuite.** Supprimer la fiche sans que
+   `provider_keys_migrated` porte la clé ne fait rien gagner : le cron la
+   recrée au cycle suivant, sous un nouvel UUID et avec un `active_at` neuf —
+   donc un bien refacturé alors qu'il l'est déjà sous sa fiche cible. C'est
+   exactement ce qui est arrivé à La bulle le 10 septembre.
+   `scripts/supprimer-residu-beds24.js` **refuse** de supprimer si la clé n'est
+   pas enregistrée.
+2. **On ne supprime JAMAIS la ligne `provider_keys_migrated`.** Elle a l'air
+   d'un résidu une fois la fiche partie ; elle est la garde elle-même. La
+   ranger dans le même geste de nettoyage rouvre le défaut en entier.
+3. **Rien côté provider.** Le bien reste dans le compte Beds24 jusqu'à ce
+   qu'une réservation réelle ait traversé la chaîne cible de bout en bout.
+   Supprimer la fiche HôteSmart ne coûte rien ; supprimer le bien chez le
+   provider supprimerait le rollback.
+4. **Sauvegarde avant suppression**, dans `rekeying_backup`. La table n'a
+   volontairement **aucune FK** vers `properties` : une sauvegarde qui
+   disparaît avec ce qu'elle sauvegarde ne sauvegarde rien.
+
+**Vérifier par l'observation, pas par le raisonnement.** La garde se prouve sur
+des cycles de cron réels (`scripts/observer-cycles-cron.js`), pas sur un test
+unitaire : le défaut d'origine venait de la liste LIVE du provider, que jamais
+aucun test n'interroge. Et vérifier au passage que le compteur de facturation
+n'a pas bougé — une re-matérialisation se trahit d'abord là.
+
+**Ce qui reste volontairement en place après le nettoyage** : la ligne
+`property_snapshots` de l'ancienne clé (la fiche du bien telle que le provider
+la servait, conservée par le transfert) et la ligne `provider_keys_migrated`.
+Ni l'une ni l'autre ne porte de réservation ; aucune ne peut doubler
+l'historique.

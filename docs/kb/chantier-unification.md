@@ -29,7 +29,8 @@ prestataires). Il fallait les traiter avant toute nouvelle table.
 
 **Commit 1 — writer unique** (`lib/bookings-snapshot.js`). Seul writer autorisé de
 `bookings_snapshot`. Schéma unique, `provider` toujours renseigné, statut canonique
-(`confirmed|cancelled|blocked|request`), merge non destructif. Les cinq writers
+(`confirmed|cancelled|blocked|request` — `demapped` s'y ajoute le 10 septembre
+2026, cf. lib/bookings-snapshot-status.js), merge non destructif. Les cinq writers
 d'origine passent par lui. Voir `docs/kb/bookings-snapshot.md`.
 
 **Commit 2 — changements de réservation** (`lib/booking-changes.js`,

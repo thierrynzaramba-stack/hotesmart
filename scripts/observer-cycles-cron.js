@@ -92,11 +92,62 @@ async function releve () {
   return r
 }
 
+// ⚠ « RIEN VU » N'EST PAS « RIEN ARRIVE » — il faut prouver que le cron a
+// TOURNE. Sans temoin, un verdict rassurant peut simplement vouloir dire que
+// le cron etait en panne pendant toute l'observation : on aurait alors conclu
+// « la garde tient » d'une fenetre ou rien ne l'a jamais sollicitee.
+//
+// ⚠ ET ON NE COMPTE PAS DES LIGNES — RELEVE EN REVIEW, ET LA PREMIERE VERSION
+// DE CE TEMOIN ETAIT FAUSSE DANS LES DEUX SENS.
+// `cron_logs` est une table de MARQUEURS a cle `id`, pas un journal : le cycle
+// principal fait `upsert({ id: 'agent-ai', last_run: now })` (api/cron.js), donc
+// la MEME ligne est reecrite a chaque passage. Compter les lignes dont
+// `last_run` tombe dans la fenetre comptait en realite des marqueurs SANS
+// RAPPORT — `table_growth_probe`, `overbooking_probe`, `channel_reviews_poll`…
+// Mesure du 11 septembre 2026 : les « 2 cycles » lus dans la fenetre etaient
+// deux sondes horodatees a la meme seconde (22:10:46.409 et .645), et le vrai
+// marqueur de cycle valait 22:15:47. Faux vert quand une sonde se declenche,
+// faux rouge (« 1 seul cycle ») le reste du temps.
+//
+// LA SEULE METHODE JUSTE : echantillonner `agent-ai.last_run` PENDANT
+// l'observation et compter les valeurs DISTINCTES. Un marqueur ecrase ne garde
+// que le dernier passage — l'historique ne se reconstruit pas apres coup, il se
+// releve au vol. REVIEW.md regle 13.
+const MARQUEUR_CYCLE = 'agent-ai'
+
+async function marqueurCycle () {
+  const { data, error } = await supabase
+    .from('cron_logs').select('last_run, errors')
+    .eq('id', MARQUEUR_CYCLE).maybeSingle()
+  if (error) return { lisible: false, detail: error.message }
+  if (!data) return { lisible: false, detail: `marqueur '${MARQUEUR_CYCLE}' absent` }
+  return { lisible: true, last_run: data.last_run, errors: data.errors || [] }
+}
+
 async function main () {
   console.log(`Observation de « ${C.nom} » sur ${MINUTES} min (cron toutes les 5 min).`)
   console.log(`Cle abandonnee : ${CLE_ABANDONNEE}   cible : ${CLE_CHANNEX}\n`)
 
+  // Echantillonnage du marqueur : un Set de `last_run` distincts vus au fil de
+  // l'observation. C'est le nombre de cycles REELLEMENT passes.
+  const cyclesVus = new Set()
+  let temoinLisible = true
+  let temoinDetail = null
+  let cyclesEnErreur = 0
+  async function echantillonner () {
+    const m = await marqueurCycle()
+    if (!m.lisible) { temoinLisible = false; temoinDetail = m.detail; return }
+    if (!cyclesVus.has(m.last_run)) {
+      cyclesVus.add(m.last_run)
+      if ((m.errors || []).length) cyclesEnErreur++
+    }
+  }
+
   const debut = await releve()
+  // Le premier relevé fixe la reference : le cycle deja passe AVANT le depart
+  // ne compte pas comme un cycle observe.
+  await echantillonner()
+  const cycleAuDepart = [...cyclesVus][0] || null
   console.log(`${debut.horodatage}  DEPART   ancienne=${debut.total_ancienne}  `
     + `cible=${debut.sejours_cible} sejours / ${debut.calendrier_cible} dates  `
     + `fiche=${debut.fiche_recreee ? 'RECREEE ' + debut.fiche_recreee : (debut.fiche_retiree ? 'retiree (voulu)' : 'absente')}`)
@@ -106,6 +157,7 @@ async function main () {
   while (Date.now() < fin) {
     await new Promise(r => setTimeout(r, 60000))
     const r = await releve()
+    await echantillonner()
     const souci = r.total_ancienne > 0 || r.fiche_recreee
       || r.sejours_cible !== debut.sejours_cible
     console.log(`${r.horodatage}  ${souci ? '⚠' : 'ok'}       `
@@ -115,10 +167,36 @@ async function main () {
     if (souci) alertes.push(r)
   }
 
+  // Cycles NOUVEAUX : on retire celui deja affiche au depart.
+  const nouveaux = [...cyclesVus].filter(v => v !== cycleAuDepart).sort()
+
   console.log('\n══ VERDICT')
-  if (!alertes.length) {
-    console.log(`   Aucun rapatriement sur ${MINUTES} min (${Math.floor(MINUTES / 5)} cycle(s) au moins).`)
+  if (!temoinLisible) {
+    console.log(`   ⚠ TEMOIN ILLISIBLE (cron_logs : ${temoinDetail}).`)
+    console.log(`   Impossible d'affirmer qu'un seul cycle a tourne : ce n'est`)
+    console.log(`   donc PAS une preuve que la garde tient, seulement une absence`)
+    console.log(`   d'anomalie observee.`)
+    process.exitCode = 1
+  } else if (nouveaux.length < 2) {
+    console.log(`   ⚠ SEULEMENT ${nouveaux.length} cycle(s) COMPLET(S) observe(s).`)
+    console.log(`   Le cron n'a pas assez tourne pour eprouver la garde : ne rien`)
+    console.log(`   voir ne prouve rien. Relancer une observation plus longue.`)
+    process.exitCode = 1
+  } else {
+    console.log(`   TEMOIN : ${nouveaux.length} cycle(s) COMPLET(S) observes au vol`)
+    console.log(`            (cron_logs '${MARQUEUR_CYCLE}'.last_run distincts :`)
+    console.log(`             ${nouveaux.map(v => String(v).slice(11, 19)).join(', ')})`)
+    console.log(`            ${cyclesEnErreur} portant des erreurs.`)
+  }
+
+  if (!alertes.length && temoinLisible && nouveaux.length >= 2) {
+    console.log(`   Aucun rapatriement, PROUVE PAR LECTURE : ${1 + Math.floor(MINUTES)} releve(s),`)
+    console.log(`   chacun ayant lu ${debut.sejours_cible} sejours et ${debut.calendrier_cible} dates`)
+    console.log(`   sur la cible — la base repondait bien, « absente » est un constat,`)
+    console.log(`   pas un silence.`)
     console.log(`   La fiche Beds24 n'a pas ete recreee, et la cible n'a rien perdu.`)
+  } else if (!alertes.length) {
+    console.log(`   Aucune anomalie observee, mais voir l'avertissement ci-dessus.`)
   } else {
     console.log(`   ⚠ ${alertes.length} releve(s) en anomalie — la garde ne tient pas :`)
     for (const a of alertes) console.log(`      ${a.horodatage} ${JSON.stringify(a.sous_ancienne)} fiche=${a.fiche_recreee || 'non'}`)

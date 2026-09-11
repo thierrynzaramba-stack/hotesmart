@@ -148,15 +148,19 @@ Etape 0 = lecture seule. Rien de ce qui suit n'a ete modifie.
    continue — mais c'est aussi exactement ce qui rend la rupture de semantique
    du §3 invisible : meme bien, meme cle, deux definitions du prix.
 
-3. **Statut `demapped` hors canon.** 5 lignes le portent, alors que les statuts
-   canoniques sont `confirmed | cancelled | blocked | request`. Tout lecteur
-   qui filtre par `status !== 'cancelled'` les comptera comme des ventes. Les
-   5 lignes sont les doublons Beds24 des resas Airbnb reprises par Channex
-   (`HMADA4CMQR`, `HMEA8PYCPM`, `HMXJPMDJEN`, `HMYSC3QK8X`, `HM4TMX5QXQ`) :
-   chaque code OTA est porte par exactement 2 lignes, 1 beds24 `demapped` +
-   1 channex `confirmed`, sous le meme bien. Le dedoublonnage a donc bien
-   opere ; c'est le **vocabulaire de statut** qui n'a pas suivi. YieldFlow doit
-   filtrer sur une liste blanche (`confirmed`), jamais sur une liste noire.
+3. **~~Statut `demapped` hors canon.~~ FAUSSE ALERTE — voir §5 bis.**
+   `demapped` **est** canonique depuis le 10 septembre 2026
+   (`lib/bookings-snapshot-status.js`), ajoute a la demande explicite de
+   Thierry pour que le taux d'annulation ne melange pas « le voyageur s'est
+   decommande » et « nous avons debranche ce logement d'un OTA ». Mon script
+   portait la liste en dur, copiee sur un commentaire perime de
+   `lib/bookings-snapshot.js`, et a donc accuse 5 lignes parfaitement valides.
+   Corrige : le script importe desormais `ALL_STATUSES`, et les deux
+   commentaires perimes renvoient vers la source de verite.
+
+   Ce qui reste vrai, et qui est le vrai point : **les lecteurs doivent filtrer
+   en liste blanche.** `status !== 'cancelled'` compterait ces 5 lignes comme
+   des ventes. YieldFlow ne compte que `confirmed`.
 
 4. **Le bien `coeur de vie 23 [beds24/169567]` existe encore avec 0 ligne de
    snapshot.** Son historique est parti sous la cle Channex (point 2). Si un
@@ -187,10 +191,21 @@ allaient dans le sens d'un moteur qui jette de la donnee saine :
 |---|---|
 | « 164 dates de vente corrompues, a ecarter » | **2** corrompues ; les 162 autres sont des ventes a delai 0 |
 | « ecart 6,78 % sur Cœur de vie l 23 » | **22,85 %**, identique a l'autre bien — la premiere formule etait fausse |
+| « 5 lignes `demapped` hors canon » | **0** : `demapped` est canonique depuis le 10/09, mon script recopiait un canon perime |
 
-La lecon vaut d'etre gardee : sur ce chantier, une mesure qui **disqualifie** de
-la donnee doit etre verifiee deux fois plus qu'une mesure qui la valide. Se
-tromper en jetant est silencieux ; se tromper en gardant se voit.
+**Les trois erreurs vont dans le meme sens** : chacune accusait de la donnee
+saine — des ventes a delai 0, un ecart reel, des statuts valides. Aucune n'a
+valide a tort ; toutes ont disqualifie a tort. C'est le biais propre a un audit,
+et il est dangereux parce qu'il se presente comme de la rigueur.
+
+La lecon est gravee en **regle 13 de REVIEW.md** : une mesure qui **disqualifie**
+de la donnee merite deux fois plus de verification qu'une mesure qui la valide.
+Se tromper en jetant est silencieux ; se tromper en gardant se voit.
+
+Corollaire concret, verifie deux fois sur ce seul rapport : **ne jamais recopier
+une liste de reference** (le canon des statuts, un tableau de correspondance).
+On l'importe de sa source, sinon elle se perime sans bruit et c'est la donnee
+qu'on accuse.
 
 ## 6. Ce que l'etape 1 doit retenir
 

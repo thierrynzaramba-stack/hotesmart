@@ -14,6 +14,7 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
+const { ALL_STATUSES } = require('../lib/bookings-snapshot-status')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const DETAIL = process.argv.includes('--detail')
@@ -280,8 +281,13 @@ async function main () {
     const s = l.snapshot?.status || '(vide)'; a[s] = (a[s] || 0) + 1; return a
   }, {})
   console.log(' statuts :', JSON.stringify(statuts))
-  const CANONIQUES = ['confirmed', 'cancelled', 'blocked', 'request']
-  const horsCanon = Object.keys(statuts).filter(s => !CANONIQUES.includes(s))
+  // ⚠ ON LIT LE CANON, ON NE LE RECOPIE PAS.
+  // La premiere version de ce script portait la liste en dur — copiee sur un
+  // commentaire perime de lib/bookings-snapshot.js — et a donc declare « hors
+  // canon » les 5 lignes `demapped`, qui y sont entrees le 10 septembre 2026 a
+  // la demande explicite de Thierry. Une liste dupliquee se perime en silence
+  // et accuse la donnee saine.
+  const horsCanon = Object.keys(statuts).filter(s => !ALL_STATUSES.includes(s))
   if (horsCanon.length) console.log(' STATUTS HORS CANON :', horsCanon.join(', '))
   const codes = {}
   for (const l of lignes) {
