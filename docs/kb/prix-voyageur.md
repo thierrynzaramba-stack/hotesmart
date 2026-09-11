@@ -101,18 +101,27 @@ directionnellement faux.
 
 ## 4. Date de vente
 
-- **Beds24** : `raw.bookingTime` present sur **1 423/1 423**. Mais **164 lignes**
-  le portent posterieur a la date d'arrivee, reparties sur 2022 a 2026. Sur
-  **42 d'entre elles** `bookingTime` est identique a `modifiedTime` a la seconde
-  (la date de creation a ete ecrasee par une modification) ; pour les 122 autres
-  la cause n'est pas etablie a ce stade. Dans les deux cas la date est
-  inexploitable pour une courbe de delai : ces lignes doivent etre **ecartees du
-  calcul**, pas corrigees — 11,5 % de l'historique Beds24.
+- **Beds24** : `raw.bookingTime` present sur **1 423/1 423**, delai median
+  **13 jours**. Seules **2 lignes** sont reellement posterieures a l'arrivee —
+  deux annulations `direct` de 2022, sejours d'une nuit, `bookingTime` au
+  lendemain. Negligeable.
+
+  ⚠ **Piege de mesure, corrige en cours d'etape 0.** La premiere version de ce
+  rapport annonçait **164** lignes corrompues et prescrivait de les ecarter.
+  C'etait un artefact : `bookingTime` porte une heure
+  (`2026-09-12T09:00:00Z`) tandis que `arrival` est un jour nu (`2026-09-12`)
+  que `new Date()` place a minuit UTC. Toute vente faite le matin meme de
+  l'arrivee etait donc declaree posterieure. Ces lignes sont en realite les
+  **162 ventes a delai 0**, soit 11 % de l'historique — les ecarter aurait
+  retire de la courbe de pickup precisement les ventes de derniere minute que
+  le yield existe pour mesurer. **Comparer les jours, jamais les instants.**
 - **Channex** : `raw.inserted_at` present sur 40/40, mais c'est la date
   d'insertion **chez Channex**, pas la date de vente. Sur les **22 lignes**
   `meta.is_imported = true`, elle vaut la date de migration : 15 lignes datees
-  du 11 septembre 2026 et 5 du 10 septembre, pour des sejours deja passes
-  (10 « ventes » posterieures a leur propre arrivee).
+  du 11 septembre 2026, 5 du 10 septembre. La preuve est dans les delais :
+  **11 jours** de delai apparent median pour les importees contre **2 jours**
+  pour les 18 reservations nees dans Channex. Les importees n'ont pas ete
+  vendues plus tot — elles ont ete inserees plus tard.
 
 Donc le « a date » / pickup de l'etape 3 **ne peut pas remonter avant la
 bascule** sur les biens migres. A assumer dans la restitution plutot qu'a
@@ -159,6 +168,29 @@ Etape 0 = lecture seule. Rien de ce qui suit n'a ete modifie.
 
 5. **1 ligne channex `cancelled` sans `raw`.** Marginal, mais le moteur doit
    traiter `raw` absent comme « prix inconnu », jamais comme zero.
+
+6. **`meta.amount_type` est un reglage HoteSmart, pas une constante Airbnb.**
+   `api/channel-airbnb-connect.js` pose `booking_amount_settings: 'Payout
+   Amount'` a la creation du canal — mais la branche `reuseChannelId` reutilise
+   un canal existant sans le garantir, et le reglage peut changer cote Channex.
+   Un canal servant un `amount` deja brut ferait rendre a la reconstruction
+   ~23 % **au-dessus** du prix paye, sans erreur. C'est pourquoi la regle du §9
+   se branche sur `meta.amount_type` lu dans le payload et non sur le nom du
+   canal. Aucune ligne dans ce cas aujourd'hui (33/33 en « Payout Amount »).
+
+## 5 bis. Ce que la review a corrige dans ce rapport
+
+Deux chiffres publies par la premiere version etaient faux, et tous deux
+allaient dans le sens d'un moteur qui jette de la donnee saine :
+
+| affirmation initiale | apres verification |
+|---|---|
+| « 164 dates de vente corrompues, a ecarter » | **2** corrompues ; les 162 autres sont des ventes a delai 0 |
+| « ecart 6,78 % sur Cœur de vie l 23 » | **22,85 %**, identique a l'autre bien — la premiere formule etait fausse |
+
+La lecon vaut d'etre gardee : sur ce chantier, une mesure qui **disqualifie** de
+la donnee doit etre verifiee deux fois plus qu'une mesure qui la valide. Se
+tromper en jetant est silencieux ; se tromper en gardant se voit.
 
 ## 6. Ce que l'etape 1 doit retenir
 

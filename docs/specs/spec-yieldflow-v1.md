@@ -131,8 +131,8 @@ un canal il n'est pas servi du tout comme montant : il faut le reconstruire.**
 | Beds24 | Airbnb | `raw.price` | = `Base Price` de `rateDescription` (847/914) et = charges + commission (865/914). Airbnb en frais simplifies : le voyageur paie le tarif d'annonce, l'hote supporte les ~18 % (mediane mesuree). 47 lignes a 0. |
 | Beds24 | Booking | `raw.price` | = somme des `invoiceItems` de type charge (259/306). La commission (~16,2 %) est prelevee a l'hote, pas ajoutee au voyageur. 45 lignes a 0. |
 | Beds24 | direct | `raw.price`, repli somme des charges | Commission nulle sur 199/199 : les deux grandeurs se confondent. 95 lignes a 0 (blocages, sejours gratuits). |
-| Channex | Airbnb | **`amount` + `Listing Cancellation Host Fee` (lu dans `notes`)** | ⚠ **PAS `amount` seul** : `meta.amount_type = "Payout Amount"` sur 33/33, `amount` = nuits + services = **net hote**. Ecart median **+22,85 %**. Host Fee lisible sur 33/33. **Valide 5/5** contre le `price` Beds24 du meme sejour (§9 bis). Ne PAS utiliser `Listing Base Price` + `Cleaning Fee` : faux 2 fois sur 5. |
-| Channex | Booking | `rooms[].meta.price_details.guest_view.total` (centimes / `decimal_places`) | `amount` coincide sur les 3 confirmees, mais **diverge sur l'annulee** (90,90 contre 111,85) : `amount` suit la penalite, `guest_view` reste le prix vendu. Base etroite : 4 lignes. |
+| Channex | Airbnb | **`amount` + `Listing Cancellation Host Fee` (lu dans `notes`), si `meta.amount_type = "Payout Amount"`** | ⚠ **PAS `amount` seul** : `meta.amount_type = "Payout Amount"` sur 33/33, `amount` = nuits + services = **net hote**. Ecart median **+22,85 %**. Host Fee lisible sur 33/33. **Valide 5/5** contre le `price` Beds24 du meme sejour (§9 bis). Ne PAS utiliser `Listing Base Price` + `Cleaning Fee` : faux 2 fois sur 5. |
+| Channex | Booking | **somme sur toutes les chambres** de `rooms[].meta.price_details.guest_view.total` (centimes / `decimal_places`) | `amount` coincide sur les 3 confirmees, mais **diverge sur l'annulee** (90,90 contre 111,85) : `amount` suit la penalite, `guest_view` reste le prix vendu. Ne PAS lire `rooms[0]` seul : sur une resa multi-chambres il manquerait une chambre entiere. Base etroite : 4 lignes. |
 | Channex | Offline | `amount` | = somme des nuits (3/3). Ecrit par HoteSmart lui-meme (primitive CRS), donc brut par construction. |
 
 ### Regles qui en decoulent, a graver dans le moteur
@@ -142,16 +142,33 @@ un canal il n'est pas servi du tout comme montant : il faut le reconstruire.**
    hote » (`lib/bookings-snapshot.js`) ; sur le canal Airbnb de Channex il porte
    un net hote. 33 lignes concernees aujourd'hui, **toutes les futures ventes
    Airbnb des biens migres** demain.
-2. Le moteur lit une fonction `prixVoyageur(provider, canal, raw)` unique, jamais
-   le champ `amount` en direct. Elle applique le tableau ci-dessus et **echoue
-   bruyamment** sur un couple (provider, canal) inconnu — jamais de repli
-   silencieux sur `amount`, qui rendrait un net pour un brut sans erreur.
-3. **Date de vente** : `raw.bookingTime` cote Beds24 (1 423/1 423, dont 164
-   posterieures a l'arrivee — a ecarter du calcul de delai) ; cote Channex
-   `raw.inserted_at` ne vaut **que pour les reservations nees dans Channex** :
-   sur les 22 lignes `meta.is_imported = true`, il porte la date de migration,
-   pas la date de vente. Le « a date » (§6) est donc aveugle sur l'historique
-   migre : il ne demarre qu'a la premiere vente post-bascule.
+2. Le moteur lit une fonction `prixVoyageur(provider, raw)` unique, jamais le
+   champ `amount` en direct. Elle **echoue bruyamment** sur un cas non prevu —
+   jamais de repli silencieux sur `amount`, qui rendrait un net pour un brut
+   sans erreur.
+   ⚠ **Le discriminant est `meta.amount_type`, pas le nom du canal.**
+   « Payout Amount » n'est pas une propriete d'Airbnb : c'est HoteSmart qui le
+   regle a la connexion (`booking_amount_settings`,
+   `api/channel-airbnb-connect.js`). Un canal repris via `reuseChannelId`, ou
+   reconfigure cote Channex, servirait un `amount` deja brut — y ajouter la
+   retenue rendrait alors ~23 % **au-dessus** du prix paye, en silence. La regle
+   se lit donc dans le payload : `amount_type = "Payout Amount"` -> reconstruire ;
+   toute autre valeur -> refuser, et traiter le cas explicitement.
+3. **Date de vente** : `raw.bookingTime` cote Beds24, present sur 1 423/1 423,
+   delai median 13 jours. **Seules 2 lignes** sont reellement posterieures a
+   l'arrivee (2 annulations directes de 2022) — negligeable. ⚠ **Comparer les
+   JOURS, jamais les instants** : `bookingTime` porte une heure et `arrival` est
+   un jour nu que `new Date()` place a minuit, si bien qu'une comparaison naive
+   declare « corrompues » les **162 ventes faites le jour meme de l'arrivee**
+   (delai 0, 11 % de l'historique). Les ecarter reviendrait a retirer de la
+   courbe de pickup exactement les ventes de derniere minute que le yield doit
+   mesurer.
+   Cote Channex, `raw.inserted_at` ne vaut **que pour les reservations nees dans
+   Channex** : sur les 22 lignes `meta.is_imported = true`, il porte la date de
+   migration (15 au 11 septembre 2026, 5 au 10). Preuve par les delais : 11 jours
+   de delai apparent pour les importees contre **2 jours pour les natives**. Le
+   « a date » (§6) est donc aveugle sur l'historique migre : il ne demarre qu'a
+   la premiere vente post-bascule.
 4. La commission reste hors du pricing (§2), mais elle est la **preuve** que les
    deux grandeurs different : ~18 % Airbnb, ~16,2 % Booking, 0 % direct.
 

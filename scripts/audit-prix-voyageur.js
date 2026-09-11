@@ -25,9 +25,23 @@ const mediane = a => {
   const s = [...a].sort((x, y) => x - y)
   return r2(s[Math.floor(s.length / 2)])
 }
-// Egalite monetaire : 1 centime de tolerance. Channex sert des chaines
-// ('82.21'), Beds24 des nombres — le cumul flottant derive.
+// Egalite monetaire a 2 centimes pres. Channex sert des chaines ('82.21'),
+// Beds24 des nombres, et on additionne des nuits : le cumul flottant derive.
 const egal = (a, b) => a != null && b != null && Math.abs(a - b) < 0.02
+
+// ⚠ COMPARER LES JOURS, PAS LES INSTANTS.
+// `bookingTime` porte une heure ('2026-09-12T09:00:00Z'), `arrival` est un jour
+// nu ('2026-09-12') que `new Date()` place a minuit UTC. Une vente faite le
+// matin meme de l'arrivee est alors « posterieure a l'arrivee » — or c'est le
+// delai 0, le cas le plus frequent des ventes de derniere minute. Les compter
+// comme dates corrompues reviendrait a retirer de la courbe de pickup
+// exactement ce que le yield doit mesurer.
+const jour = v => (typeof v === 'string' ? v.slice(0, 10) : null)
+const venduApresArrivee = (instant, arrivee) => {
+  const a = jour(instant)
+  const b = jour(arrivee)
+  return a != null && b != null && a > b
+}
 
 // ─── Reconstructions candidates, par provider ────────────────────────────────
 
@@ -57,7 +71,18 @@ function candidatsChannex (raw) {
     for (const v of Object.values(ro.days || {})) nuits += num(v) || 0
     for (const sv of ro.services || []) services += num(sv.total_price) || 0
   }
-  const gv = rooms[0]?.meta?.price_details?.guest_view?.total
+  // Somme sur TOUTES les chambres : `amount` couvre la reservation entiere, et
+  // `nuits`/`services` ci-dessus somment deja les chambres. Ne lire que
+  // rooms[0] ferait manquer une chambre entiere sur une resa multi-chambres.
+  let guestView = null
+  for (const ro of rooms) {
+    const t = ro.meta?.price_details?.guest_view?.total
+    const brutT = t ? num(t.amount) : null
+    // `null / 100` vaut 0 : sans ce test, un total illisible passerait pour
+    // une reservation a 0 € et degraderait le ratio publie.
+    if (brutT == null) continue
+    guestView = (guestView || 0) + brutT / Math.pow(10, t.decimal_places ?? 2)
+  }
   const lire = re => { const m = re.exec(raw.notes || ''); return m ? num(m[1]) : null }
   const base = lire(/Listing Base Price: ([\d.]+)/)
   const menage = lire(/Cleaning Fee: ([\d.]+)/)
@@ -68,7 +93,7 @@ function candidatsChannex (raw) {
     amountType: raw.meta?.amount_type || null,
     nuits: nuits || null,
     services: services || null,
-    guestView: gv ? num(gv.amount) / Math.pow(10, gv.decimal_places ?? 2) : null,
+    guestView,
     notesBase: base,
     notesMenage: menage,
     notesHostFee: hostFee,
@@ -84,7 +109,17 @@ function candidatsChannex (raw) {
     //
     // On garde les deux pour que l'ecart reste mesurable, mais seul `brut`
     // fait foi.
-    brut: amount == null || hostFee == null ? null : amount + hostFee,
+    //
+    // ⚠ LA RECONSTRUCTION NE VAUT QUE SI `amount` EST UN NET.
+    // « Payout Amount » n'est pas une fatalite Channex : c'est HoteSmart qui le
+    // regle (`booking_amount_settings`, api/channel-airbnb-connect.js). Un canal
+    // repris via `reuseChannelId`, ou reconfigure cote Channex, peut servir un
+    // `amount` deja brut — y ajouter la retenue rendrait ~23 % AU-DESSUS du prix
+    // paye, sans erreur. Le discriminant est donc le payload, jamais le nom du
+    // canal.
+    brut: raw.meta?.amount_type !== 'Payout Amount' || amount == null || hostFee == null
+      ? null
+      : amount + hostFee,
     brutNotes: base == null ? null : base + (menage || 0)
   }
 }
@@ -95,6 +130,11 @@ async function toutLeSnapshot () {
     const { data, error } = await supabase
       .from('bookings_snapshot')
       .select('booking_id, property_id, created_at, snapshot, raw')
+      // ⚠ SANS `order`, PostgreSQL ne garantit aucun ordre entre deux pages, et
+      // le cron reecrit la table toutes les 5 minutes : une ligne deplacee entre
+      // la page 1 et la page 2 est lue deux fois, ou pas du tout. La validation
+      // croisee afficherait alors 4/5 (ou un faux 5/5) sur un simple cycle cron.
+      .order('booking_id')
       .range(from, from + 999)
     if (error) throw error
     lignes = lignes.concat(data)
@@ -194,14 +234,12 @@ async function main () {
   console.log('\n## Date de vente')
   const btPresent = b24.filter(l => l.raw.bookingTime).length
   const btApresArrivee = b24.filter(l =>
-    l.raw.bookingTime && l.raw.arrival &&
-    new Date(l.raw.bookingTime) > new Date(l.raw.arrival)).length
+    venduApresArrivee(l.raw.bookingTime, l.raw.arrival)).length
   console.log(` beds24  bookingTime present ${btPresent}/${b24.length}` +
     `  posterieur a l'arrivee ${btApresArrivee} (date de vente fausse)`)
   const importees = chx.filter(l => l.raw.meta?.is_imported === true).length
   const iaApresArrivee = chx.filter(l =>
-    l.raw.inserted_at && l.raw.arrival_date &&
-    new Date(l.raw.inserted_at) > new Date(l.raw.arrival_date)).length
+    venduApresArrivee(l.raw.inserted_at, l.raw.arrival_date)).length
   console.log(` channex inserted_at present ${chx.filter(l => l.raw.inserted_at).length}/${chx.length}` +
     `  is_imported=true ${importees} (inserted_at = date de MIGRATION)` +
     `  posterieur a l'arrivee ${iaApresArrivee}`)
@@ -223,6 +261,15 @@ async function main () {
       ` beds24=${String(s.beds24).padStart(4)} channex=${String(s.channex).padStart(3)}` +
       ` demapped=${s.demapped}${mixte}`)
   }
+  // Les deux sections provider filtrent sur `snapshot.provider`. Une ligne qui
+  // ne le porte pas (backfill-snapshot-provider.js se declare lui-meme « PAS
+  // indispensable », donc jamais garanti applique) sortirait de tous les
+  // comptes sans que rien ne le dise, et les totaux publies seraient faux en
+  // silence. On l'affiche, meme a zero.
+  const sansProvider = lignes.length -
+    lignes.filter(l => ['beds24', 'channex'].includes(l.snapshot?.provider)).length
+  console.log(` lignes sans provider reconnu : ${sansProvider}` +
+    (sansProvider ? '  <-- EXCLUES DE TOUTES LES MESURES CI-DESSUS' : ''))
   const sansBien = biens.filter(b =>
     !lignes.some(l => l.property_id === b.provider_property_id))
   console.log(' biens sans aucune ligne snapshot :',
@@ -264,6 +311,7 @@ async function main () {
   }
   let croiseOk = 0
   let croiseTotal = 0
+  let croiseIncalculable = 0
   for (const [code, v] of Object.entries(parCode)) {
     const b = v.find(l => l.snapshot.provider === 'beds24')
     const c = v.find(l => l.snapshot.provider === 'channex')
@@ -271,15 +319,30 @@ async function main () {
     croiseTotal++
     const kb = candidatsBeds24(b.raw)
     const kc = candidatsChannex(c.raw)
-    const ok = egal(kc.brut, kb.price)
-    if (ok) croiseOk++
+    // Un `brut` nul n'est PAS un ecart : c'est une reconstruction impossible
+    // (Host Fee illisible, ou amount_type inattendu). Les confondre ferait
+    // s'allumer le garde-fou « 5/5 » sur un simple changement de libelle
+    // Airbnb, et imprimerait « ECART -134 » pour un calcul jamais fait.
+    let verdict
+    if (kc.brut == null || kb.price == null) {
+      croiseIncalculable++
+      verdict = `INCALCULABLE (amount_type=${kc.amountType || 'absent'},` +
+        ` hostFee=${kc.notesHostFee == null ? 'illisible' : kc.notesHostFee})`
+    } else if (egal(kc.brut, kb.price)) {
+      croiseOk++
+      verdict = 'CONCORDE'
+    } else {
+      verdict = 'ECART ' + r2(kc.brut - kb.price)
+    }
     const okNotes = egal(kc.brutNotes, kb.price)
     console.log(` ${code} arr=${b.raw.arrival}` +
       `  beds24.price=${kb.price}  channex.amount=${kc.amount} + hostFee=${kc.notesHostFee}` +
-      ` = ${r2(kc.brut)}  ${ok ? 'CONCORDE' : 'ECART ' + r2(kc.brut - kb.price)}` +
+      ` = ${r2(kc.brut)}  ${verdict}` +
       `  | via notes ${r2(kc.brutNotes)} ${okNotes ? 'ok' : 'FAUX'}`)
   }
-  console.log(` amount + Host Fee == beds24.price : ${croiseOk}/${croiseTotal}`)
+  const croiseComparables = croiseTotal - croiseIncalculable
+  console.log(` amount + Host Fee == beds24.price : ${croiseOk}/${croiseComparables}` +
+    ` comparables (${croiseIncalculable} incalculables sur ${croiseTotal})`)
 
   // ─── 5. Impact chiffre : la bascule casse-t-elle la serie de CA ? ──────────
   console.log('\n## Impact de la bascule sur la comparaison N / N-1 (canal airbnb)')
@@ -297,8 +360,11 @@ async function main () {
     const vu = now.reduce((s, l) => s + (num(l.raw.amount) || 0), 0)
     console.log(` ${bien.name} : historique beds24 ${hist.length} resas (brut),` +
       ` present channex ${now.length} resas (net hote)`)
+    // `perte / 0` imprimerait « Infinity % » dans un rapport d'ecart : un bien
+    // migre dont les resas Channex sont toutes a montant nul est atteignable.
+    const pct = vu > 0 ? `${r2(perte / vu * 100)} %` : 'incalculable (CA nul)'
     console.log(`   CA channex tel qu'enregistre ${r2(vu)} EUR,` +
-      ` manque ${r2(perte)} EUR (${r2(perte / vu * 100)} %) pour etre comparable`)
+      ` manque ${r2(perte)} EUR (${pct}) pour etre comparable`)
   }
 }
 
