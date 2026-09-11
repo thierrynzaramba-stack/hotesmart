@@ -39,6 +39,9 @@
 // le comportement voulu (la regle de l'hote est « le reste ferme faute de
 // prix », donc il n'y a rien a refuser). Le juge final reste la relecture
 // `GET /restrictions` : une date ouverte sans prix y compte comme un ECART.
+// Cette relecture couvre LES 500 JOURS POUSSES, et toute date de la fenetre
+// que Channex ne rend pas est comptee NON JUGEE — un echantillon ne vaut pas
+// un verdict.
 //
 // Le mecanisme de fermeture est celui du 8 septembre, mesure en staging
 // (docs/specs/protocole-staging-tarifs.md) : omettre `rate` NE FERME RIEN — la
@@ -50,7 +53,8 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
-const { runFullSync } = require('../lib/channel-fullsync')
+const { runFullSync, JOURS_POUSSES } = require('../lib/channel-fullsync')
+const { buildOccupancyRates } = require('../lib/channel-pricing')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const BASE = process.env.CHANNEL_BASE_URL
@@ -97,21 +101,39 @@ async function main () {
     if (!data || data.length < 500) break
     de += 500
   }
-  const attendus = new Map(lignes.filter(x => x.rate != null && Number(x.rate) > 0)
+  // ⚠ UNE SEULE FENETRE POUR TOUT LE SCRIPT, ET C'EST CELLE DU WRITER.
+  // Releve en review : les attendus etaient bati sur TOUT l'historique de
+  // `calendar_inventory` alors que `runFullSync` ne pousse que
+  // [aujourd'hui, +500 j], et la relecture ne couvrait que l'enveloppe des
+  // dates tarifees. Les deux moities du script ne parlaient donc pas de la
+  // meme fenetre : 2 dates tarifees passees sortaient du verdict EN SILENCE
+  // (36 au coeur, 34 juges), et ~400 dates poussees n'etaient jamais relues.
+  const auj = new Date()
+  const horizon = []
+  for (let i = 0; i < JOURS_POUSSES; i++) {
+    horizon.push(new Date(auj.getTime() + i * 86400000).toISOString().slice(0, 10))
+  }
+  const dansFenetre = new Set(horizon)
+
+  const tarifees = lignes.filter(x => x.rate != null && Number(x.rate) > 0)
+  const attendus = new Map(tarifees.filter(x => dansFenetre.has(x.date))
     .map(x => [x.date, Number(x.rate)]))
+  const horsFenetre = tarifees.filter(x => !dansFenetre.has(x.date))
   const fermees = new Set(lignes.filter(x => x.stop_sell === true).map(x => x.date))
   console.log(`\n── le coeur : ${lignes.length} date(s) reglee(s)`)
-  console.log(`   ${attendus.size} tarifee(s)  |  ${fermees.size} fermee(s) par l'hote (stop_sell)`)
+  console.log(`   ${attendus.size} tarifee(s) DANS la fenetre poussee  |  ${fermees.size} fermee(s) par l'hote (stop_sell)`)
   for (const [d, r] of attendus) console.log(`   ${d}  ${r} €`)
+  if (horsFenetre.length) {
+    // ⚠ NOMMEES, PAS TUES : ces dates portent un prix au coeur mais sortent de
+    // la fenetre du writer (passe, ou au-dela de 500 jours). Elles ne sont ni
+    // poussees ni relues — le verdict ne les couvre pas, et il doit le DIRE.
+    console.log(`\n   ⚠ ${horsFenetre.length} date(s) tarifee(s) HORS de la fenetre poussee — ni poussees ni jugees :`)
+    console.log('      ' + horsFenetre.map(x => `${x.date} (${x.rate} €)`).join(', '))
+  }
 
   // ⚠ LE CONTROLE QUI COMPTE, AVANT TOUT ENVOI.
   // Une date de la fenetre ni tarifee ni fermee partirait ouverte, et se
   // vendrait au prix par defaut de l'option du rate plan.
-  const auj = new Date()
-  const horizon = []
-  for (let i = 0; i < 500; i++) {
-    horizon.push(new Date(auj.getTime() + i * 86400000).toISOString().slice(0, 10))
-  }
   const niTarifeeNiFermee = horizon.filter(d => !attendus.has(d) && !fermees.has(d))
   if (niTarifeeNiFermee.length) {
     console.log(`\n── ${niTarifeeNiFermee.length} date(s) ni tarifee(s) ni fermee(s) par l'hote :`)
@@ -152,23 +174,53 @@ async function main () {
   // acceptee, pas qu'elle est appliquee : Channex traite en asynchrone.
   console.log('\n── relecture (GET /restrictions), apres 6 s de traitement')
   await new Promise(r => setTimeout(r, 6000))
-  const dates = [...attendus.keys()].sort()
-  const debut = dates[0]
-  const fin = new Date(new Date(dates[dates.length - 1]).getTime() + 20 * 86400000).toISOString().slice(0, 10)
+  // ⚠ ON RELIT TOUTE LA FENETRE POUSSEE, pas l'enveloppe des dates tarifees.
+  const debut = horizon[0]
+  const fin = horizon[horizon.length - 1]
   const rr = await get(`/restrictions?filter[property_id]=${bien.provider_property_id}`
     + `&filter[date][gte]=${debut}&filter[date][lte]=${fin}`
     + `&filter[restrictions]=rate,availability,stop_sell`)
+  console.log(`   HTTP ${rr.code}  fenetre ${debut} -> ${fin}`)
+  // ⚠ UN VIDE N'EST PAS UN SUCCES. Releve en review : sur un 429, un 401, un
+  // rate plan remappe ou un payload inattendu, `parRp` valait `{}`, la boucle
+  // ne tournait pas, le script imprimait « 0 conformes, 0 ecart » et sortait
+  // en 0. Le verdict le plus rassurant du script etait son mode de panne.
+  if (rr.code !== 200) throw new Error(`relecture impossible : HTTP ${rr.code} — AUCUN verdict`)
   const parRp = (rr.json && rr.json.data && rr.json.data[bien.provider_rate_plan_id]) || {}
+  if (!Object.keys(parRp).length) {
+    throw new Error(`relecture vide pour le tarif ${bien.provider_rate_plan_id}`
+      + ` — AUCUN verdict (tarifs rendus : ${Object.keys((rr.json && rr.json.data) || {}).join(', ') || 'aucun'})`)
+  }
   let bons = 0; let faux = 0; let fermes = 0
-  console.log(`   HTTP ${rr.code}`)
+  // ⚠ SUR UN BIEN VENDU PAR PERSONNE, LE PRIX DU COEUR N'EST PAS CELUI QUE
+  // `/restrictions` REND, ET MA PREMIERE VERSION CRIAIT 34 ECARTS INEXISTANTS.
+  // `/restrictions` rend le tarif de l'occupation PRIMAIRE. Sur Cœur de vie 23
+  // (`per_person`, capacite 6, 4 inclus, 2 €/personne), l'occupation primaire
+  // est 6 : Channex rend donc `prix + 4 €`. Mesure du 11 septembre : coeur 89 €,
+  // Channex 93 € — la poussee etait JUSTE, la verification fausse.
+  //
+  // On calcule l'attendu avec `buildOccupancyRates`, LA FONCTION DU WRITER :
+  // toute divergence future entre ce qu'on pousse et ce qu'on verifie devient
+  // impossible. `null` = pas de supplement (bien `per_room`) -> le prix nu.
+  const attenduChezLeProvider = (prixEur) => {
+    const occRates = buildOccupancyRates(
+      Math.round(prixEur * 100), bien.capacity, bien.included_guests,
+      Math.round((Number(bien.extra_guest_fee) || 0) * 100))
+    if (!occRates) return prixEur
+    const primaire = occRates[occRates.length - 1]   // l'occupation max = la primaire
+    return primaire.rate / 100
+  }
+
   for (const d of Object.keys(parRp).sort()) {
     const v = parRp[d]
-    const attendu = attendus.get(d)
+    const attenduCoeur = attendus.get(d)
     const chez = v.rate != null ? Number(v.rate) : null
-    if (attendu != null) {
+    if (attenduCoeur != null) {
+      const attendu = attenduChezLeProvider(attenduCoeur)
       const ok = chez !== null && Math.abs(chez - attendu) < 0.005
       if (ok) bons++; else faux++
-      console.log(`   ${d}  coeur ${attendu} €  Channex ${chez} €  stop_sell=${v.stop_sell}  ${ok ? '✓' : '✗ ECART'}`)
+      const sup = attendu !== attenduCoeur ? ` (dont ${(attendu - attenduCoeur).toFixed(2)} € de supplement occupation)` : ''
+      console.log(`   ${d}  coeur ${attenduCoeur} €  attendu ${attendu} €${sup}  Channex ${chez} €  stop_sell=${v.stop_sell}  ${ok ? '✓' : '✗ ECART'}`)
     } else {
       // ⚠ SUR UNE DATE FERMEE, LE PRIX N'EST PAS LE JUGE — `stop_sell` l'est.
       if (v.stop_sell === true) fermes++
@@ -178,8 +230,21 @@ async function main () {
       }
     }
   }
+  // ⚠ LA COUVERTURE FAIT PARTIE DU VERDICT. Une date de la fenetre que Channex
+  // ne rend pas n'est pas « conforme » : elle est NON JUGEE, et l'ignorer
+  // rendrait un vert sur un echantillon.
+  const lues = new Set(Object.keys(parRp))
+  const nonJugees = horizon.filter(d => !lues.has(d))
   console.log(`\n   ${bons} date(s) conformes, ${faux} ecart(s), ${fermes} date(s) fermees faute de prix`)
-  if (faux) process.exitCode = 1
+  console.log(`   couverture : ${lues.size}/${horizon.length} date(s) de la fenetre relues`)
+  if (nonJugees.length) {
+    console.log(`   ⛔ ${nonJugees.length} date(s) NON JUGEE(S) (absentes de la relecture) :`)
+    console.log('      ' + nonJugees.slice(0, 20).join(', ') + (nonJugees.length > 20 ? ' …' : ''))
+  }
+  if (horsFenetre.length) {
+    console.log(`   ⚠ ${horsFenetre.length} date(s) tarifee(s) hors fenetre restent hors du verdict`)
+  }
+  if (faux || nonJugees.length) process.exitCode = 1
 }
 
 main().catch(e => { console.error('\nECHEC :', e.message); process.exitCode = 1 })

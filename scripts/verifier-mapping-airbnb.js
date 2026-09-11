@@ -32,7 +32,7 @@ const BIENS = [
   { nom: 'La bulle', fiche: '091d9abf-ff86-45ce-8123-3425e6f3900f',
     cle: '0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4', attendu: true },
   { nom: 'Cœur de vie l 23', fiche: 'efe1daf1-652c-4177-b29b-19f1db377c96',
-    cle: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66', attendu: false }
+    cle: '1655ab32-d339-413d-b8ff-b4ccbd2a7b66', attendu: true }
 ]
 
 async function main () {
@@ -67,9 +67,18 @@ async function main () {
     if (!abnb.length) continue
     const c = abnb[0]
     const a = c.attributes
-    const m = (a.rate_plans || [])[0]
     console.log(`      canal ${c.id}  ${JSON.stringify(a.title)}  actif=${a.is_active}`)
-    console.log(`   ${ok((a.rate_plans || []).length === 1)} un seul mapping — ${(a.rate_plans || []).length}`)
+    console.log(`   ${ok(a.is_active === true)} canal ACTIF`)
+    // ⚠ UN CANAL AIRBNB PORTE PLUSIEURS BIENS : celui de Thierry (`224cbb66`)
+    // sert La bulle ET le 23, et il a donc DEUX mappings. Prendre
+    // `rate_plans[0]` verifierait le bien voisin en croyant verifier celui-ci
+    // — verdict vert sur le mauvais logement. On ne retient que les mappings
+    // dont le tarif appartient AU BIEN LU (`titreRp` vient de
+    // `/rate_plans?filter[property_id]`).
+    const miens = (a.rate_plans || []).filter(x => titreRp[x.rate_plan_id] !== undefined)
+    console.log(`   ${ok(miens.length === 1)} un seul mapping POUR CE BIEN — ${miens.length}`
+      + `   (le canal en porte ${(a.rate_plans || []).length} au total)`)
+    const m = miens[0]
     if (!m) continue
 
     // 1. LE BON TARIF
@@ -87,13 +96,26 @@ async function main () {
       .select('capacity, included_guests, extra_guest_fee').eq('id', B.fiche).single()
     const gi = Number(p.guests_included)
     const pex = Number(p.price_per_extra_person)
-    const risqueA1 = gi > 0 && gi < Number(bien.capacity) && pex > 0
     console.log(`\n   ── A1 : le supplement natif Airbnb`)
     console.log(`      guests_included        = ${p.guests_included}   (capacite HoteSmart : ${bien.capacity})`)
     console.log(`      price_per_extra_person = ${p.price_per_extra_person}`)
-    console.log(`   ${ok(!risqueA1)} ${risqueA1
-      ? `A1 A POSER : Airbnb facturerait ${pex} € par personne au-dela de ${gi}, EN PLUS du prix pousse`
-      : 'aucun double comptage possible'}`)
+    // ⚠ L'ABSENCE DE REGLAGE N'EST PAS UNE ABSENCE DE RISQUE. Releve en review :
+    // `s.pricing_setting || {}` rendait `gi`/`pex` a `NaN`, `NaN > 0` est faux,
+    // donc le contrele affichait « aucun double comptage possible » SANS AVOIR
+    // RIEN LU — sur le seul defaut de cette liste qui coute de l'argent au
+    // voyageur. Et l'absence est un etat normal : la lecture du mapping est
+    // DIFFEREE chez Channex, donc une verification lancee juste apres un
+    // mapping tombe precisement dessus.
+    if (!Number.isFinite(gi) || !Number.isFinite(pex)) {
+      console.log(`   ⛔ reglage Airbnb PAS ENCORE LISIBLE (pricing_setting absent)`
+        + ` — A1 NON VERIFIE, relancer dans quelques minutes`)
+    } else {
+      const risqueA1 = gi > 0 && gi < Number(bien.capacity) && pex > 0
+      console.log(`   ${ok(!risqueA1)} ${risqueA1
+        ? `A1 A POSER : Airbnb facturerait ${pex} € par personne au-dela de ${gi}, EN PLUS du prix pousse`
+        : 'aucun double comptage possible'}`)
+      if (risqueA1) process.exitCode = 1
+    }
 
     // 3. ZERO DATE OUVERTE
     const auj = new Date().toISOString().slice(0, 10)
@@ -105,13 +127,31 @@ async function main () {
     // qui est mappe, donc c'est lui qui decide ce qu'Airbnb affiche.
     const par = (rr.json?.data && rr.json.data[m.rate_plan_id]) || {}
     const dates = Object.keys(par)
-    const ouvertes = dates.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
     console.log(`\n   ── fermeture, sur le tarif MAPPE (${titreRp[m.rate_plan_id] || m.rate_plan_id})`)
-    console.log(`      ${dates.length} dates lues`)
-    console.log(`   ${ok(ouvertes.length === 0)} ${ouvertes.length} date(s) ouverte(s) a la vente`)
-    if (ouvertes.length) console.log(`      ⚠ ${ouvertes.slice(0, 15).join(', ')}`)
-    console.log(`      dispo 0 : ${dates.filter(d => Number(par[d].availability) === 0).length}`
-      + `   stop_sell true : ${dates.filter(d => par[d].stop_sell === true).length}`)
+    console.log(`      HTTP ${rr.code}  —  ${dates.length} dates lues`)
+    // ⚠ RIEN LU N'EST PAS « TOUT FERME ». Releve en review : le verdict etait
+    // `ouvertes.length === 0`, donc un tarif absent de la reponse (mapping sur
+    // le tarif d'un autre bien, rate plan remappe, HTTP != 200, corps vide)
+    // rendait `par = {}` et affichait ✓ sur LE controle qui compte — la
+    // decision « tout ferme jusqu'a verification ».
+    if (rr.code !== 200 || !dates.length) {
+      console.log(`   ⛔ AUCUNE date lue pour ce tarif — la fermeture N'EST PAS VERIFIEE`
+        + `  (tarifs rendus : ${Object.keys(rr.json?.data || {}).join(', ') || 'aucun'})`)
+      process.exitCode = 1
+    } else {
+      // Un champ absent vaut INCONNU, jamais « ferme » : `Number(undefined)`
+      // est `NaN` et `NaN > 0` est faux, ce qui comptait la date fermee.
+      const inconnues = dates.filter(d =>
+        par[d].stop_sell === undefined || !Number.isFinite(Number(par[d].availability)))
+      const ouvertes = dates.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
+      console.log(`   ${ok(ouvertes.length === 0)} ${ouvertes.length} date(s) ouverte(s) a la vente`)
+      if (ouvertes.length) console.log(`      ⚠ ${ouvertes.slice(0, 15).join(', ')}`)
+      console.log(`   ${ok(inconnues.length === 0)} ${inconnues.length} date(s) au reglage ILLISIBLE (ni ouvertes ni fermees, indecidables)`)
+      if (inconnues.length) console.log(`      ⚠ ${inconnues.slice(0, 15).join(', ')}`)
+      console.log(`      dispo 0 : ${dates.filter(d => Number(par[d].availability) === 0).length}`
+        + `   stop_sell true : ${dates.filter(d => par[d].stop_sell === true).length}`)
+      if (ouvertes.length || inconnues.length) process.exitCode = 1
+    }
 
     // 4. LE FEED
     const bk = await get(`/bookings?filter[property_id]=${B.cle}&pagination[limit]=100`)
