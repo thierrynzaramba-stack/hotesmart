@@ -11,6 +11,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
+const { clesMigrees } = require('../lib/cles-migrees')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -200,6 +201,24 @@ module.exports = async function handler(req, res) {
       if (keyData && keyData.api_key) {
         const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: keyData.api_key } })
         const d = await r.json()
+        // ⚠ CINQUIEME PORTE DE LA MEME FAMILLE, ET LA PREMIERE EN LECTURE.
+        // Le bien migre RESTE dans le compte Beds24 (filet de rollback, regle N2
+        // du plan) : l'API du provider le rend donc toujours, et cette liste le
+        // servait aux ecrans. Mesure du 11 septembre 2026 : Thierry voyait
+        // QUATRE biens au lieu de deux — « Cœur de vie « La bulle » » et
+        // « coeur de vie 23 » (les fantomes Beds24, qui portent les noms
+        // d'origine) a cote de « La bulle » et « Cœur de vie l 23 » (les vraies
+        // fiches). C'est exactement le piege qui lui avait coute une frayeur a
+        // minuit cote Channex, cette fois dans son propre tableau de bord.
+        //
+        // Conséquences au-dela de la confusion : le calendrier les exclut avec
+        // le bandeau « gere dans Beds24 », et la messagerie appelle
+        // `/api/beds24` pour eux.
+        //
+        // Les quatre autres portes sont cote ECRITURE (materialisation,
+        // snapshots, messages, codes d'acces) ; celle-ci ne fait que lire, et
+        // c'est pourquoi elle avait echappe a l'inventaire.
+        const migrees = await clesMigrees(supabase, compteLecture, 'beds24')
         beds24Props = (d.data || [])
           // ⚠ Les biens Beds24 arrivent de l'API du provider, pas de la base :
           // aucune RLS ne les borne. Le perimetre doit etre applique ICI, sinon
@@ -207,6 +226,8 @@ module.exports = async function handler(req, res) {
           .filter(b => !refsPerimetre || refsPerimetre.includes(String(b.id)))
           // Deja servi depuis la base (bien en migration) : pas deux fois.
           .filter(b => !dejaServis.has(String(b.id)))
+          // Migre : il ne doit plus apparaitre du tout.
+          .filter(b => !migrees.has(String(b.id)))
           .map(b => ({
           id: b.id,
           name: b.name,

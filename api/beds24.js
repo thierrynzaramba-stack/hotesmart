@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
+const { clesMigrees } = require('../lib/cles-migrees')
 const { requirePermission, verifierSession, resoudreBooking, resoudreBien } = require('../lib/require-permission')
 
 const supabase = createClient(
@@ -191,7 +192,20 @@ module.exports = async function handler(req, res) {
       case 'getProperties': {
         const r = await fetch('https://beds24.com/api/v2/properties', { headers: { token: beds24Key } })
         const d = await r.json()
-        return res.json({ properties: d.data || [] })
+        // ⚠ SIXIEME PORTE, ET LE MEME MOTIF : un bien migre RESTE dans le compte
+        // Beds24 (filet de rollback), donc l'API du provider le rend toujours.
+        // Cette action alimente notamment la messagerie, qui appellerait ensuite
+        // `getConversations` sur une cle abandonnee — et afficherait des fils
+        // rattaches a un bien qui n'existe plus cote HoteSmart.
+        // Le compte PROPRIETAIRE du bien, celui dont la cle Beds24 est utilisee —
+        // pas l'appelant. C'est le meme compte que `api_keys` ci-dessus, sinon le
+        // filtre porterait sur les cles migrees de quelqu'un d'autre.
+        const migrees = await clesMigrees(supabase, garde.accountUserId, 'beds24')
+        const gardees = (d.data || []).filter(b => !migrees.has(String(b.id)))
+        if (gardees.length !== (d.data || []).length) {
+          console.log(`[beds24] getProperties : ${(d.data || []).length - gardees.length} bien(s) migre(s) ecarte(s)`)
+        }
+        return res.json({ properties: gardees })
       }
 
       case 'getBookings': {

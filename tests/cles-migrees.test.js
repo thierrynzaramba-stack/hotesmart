@@ -223,3 +223,37 @@ test('LE TEST QUI COMPTE : un echec de lecture est mis en cache BRIEVEMENT', asy
   assert.ok(/CACHE_ECHEC_MS = 5 \* 1000/.test(src), 'et le cache d echec est COURT (5 s)')
   assert.ok(src.includes('echec: true'), 'l entree est marquee, pour ne pas durer 60 s')
 })
+
+test('LE TEST QUI COMPTE : les portes de LECTURE sont gardees aussi, pas seulement les ecritures', () => {
+  // ⚠ CINQUIEME ET SIXIEME PORTES, ET LES PREMIERES EN LECTURE.
+  // Le bien migre RESTE dans le compte Beds24 (filet de rollback, regle N2) :
+  // l'API du provider le rend donc toujours. Les deux endpoints qui listent les
+  // biens depuis ce fetch live les servaient aux ecrans.
+  //
+  // MESURE DU 11 SEPTEMBRE 2026 : Thierry voyait QUATRE biens au lieu de deux —
+  // « Cœur de vie « La bulle » » et « coeur de vie 23 » (les fantomes Beds24,
+  // qui portent les noms d'origine) a cote de « La bulle » et
+  // « Cœur de vie l 23 ». Le meme piege d'homonymie qui lui avait coute une
+  // frayeur a minuit cote Channex, cette fois dans son propre tableau de bord.
+  //
+  // Les quatre premieres portes sont cote ECRITURE (materialisation, snapshots,
+  // messages, codes d'acces) : c'est pourquoi celles-ci avaient echappe a
+  // l'inventaire. Un bien migre ne doit ni etre ecrit, ni etre MONTRE.
+  const listeBiens = lire('api/channel-property.js')
+  assert.ok(listeBiens.includes("require('../lib/cles-migrees')"), 'la liste importe la garde')
+  assert.ok(/clesMigrees\(supabase, compteLecture, 'beds24'\)/.test(listeBiens),
+    'et la lit pour le compte CONSULTE, pas pour l appelant')
+  assert.ok(/\.filter\(b => !migrees\.has\(String\(b\.id\)\)\)/.test(listeBiens),
+    'le fetch live ecarte les cles migrees')
+
+  const beds24 = lire('api/beds24.js')
+  assert.ok(beds24.includes("require('../lib/cles-migrees')"), 'getProperties importe la garde')
+  assert.ok(/clesMigrees\(supabase, garde\.accountUserId, 'beds24'\)/.test(beds24),
+    'et la lit pour le compte PROPRIETAIRE du bien — celui dont la cle Beds24 sert')
+  assert.ok(/gardees = \(d\.data \|\| \[\]\)\.filter\(b => !migrees\.has/.test(beds24),
+    'les biens migres sont ecartes de la reponse')
+  // ⚠ ET L'ECART EST DIT. Un filtre muet sur une liste rendait indiscernable
+  // « aucun bien migre » de « la garde est aveugle » — `clesMigrees` retombe
+  // volontairement ouvert sur un echec de lecture.
+  assert.ok(/bien\(s\) migre\(s\) ecarte\(s\)/.test(beds24), 'et journalise ce qu il ecarte')
+})
