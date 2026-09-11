@@ -112,6 +112,73 @@ function coalesceRanges(items) {
 // heurter.
 const MAX_BIENS = 200
 
+// ─── LA POUSSEE ARI D'UNE SAUVEGARDE DE CALENDRIER ────────────────────────
+// Extraite pour etre EXECUTEE par un test avec un double de `appel` : c'est
+// elle qui fait le lien entre la realite HTTP et `verdictPoussee`, et la review
+// a montre qu'une mutation d'une seule de ses lignes (n'enregistrer le resultat
+// que dans le `else` du succes) laissait treize tests verts en restaurant le
+// silence complet.
+//
+// ⚠ `resultats` est MUTE, pas rendu : si `appel` leve, l'appelant doit garder
+// ce qui a deja ete constate. Un objet rendu serait perdu avec l'exception.
+//
+// ⚠ ORDRE : AVAILABILITY D'ABORD, RESTRICTIONS ENSUITE. Un POST /availability
+// leve le stop_sell des dates touchees (mesure du 7 septembre 2026). Pousser
+// les restrictions en premier revenait a poser le stop-sell puis a l'effacer
+// soi-meme dans la foulee. C'est l'ordre de lib/channel-fullsync.js.
+async function pousserAri ({ availabilityValues, restrictionValues, pousserLesTarifs,
+                             appel, resultats, warnings, taskIds }) {
+  let pushed = false
+  // Availability : TOUJOURS poussee (anti-surbooking, non negociable), quel que soit le mode.
+  if (availabilityValues.length) {
+    // ⚠ L'ECHEC EST POSE AVANT L'APPEL, ET C'EST LE POINT ENTIER.
+    // Le `channelCall` de ce fichier ne protege pas son `fetch`. Une coupure
+    // reseau (ECONNRESET, EAI_AGAIN, timeout) LEVE — le mode de panne le plus
+    // probable en production — et la ligne qui enregistre le resultat n'etait
+    // alors jamais atteinte : `resultats` restait vide, `verdictPoussee({})`
+    // rendait « pas de panne », et l'incident du 11 septembre se reproduisait a
+    // l'identique. En posant l'echec d'abord, une exception le LAISSE en place.
+    resultats.availability = { tente: true, ok: false, status: 0 }
+    const a = await appel('POST', '/availability', { values: availabilityValues })
+    resultats.availability = { tente: true, ok: !!a.ok, status: a.status }
+    if (!a.ok) { warnings.push('availability: HTTP ' + a.status) }
+    else { pushed = true; taskIds.availability = a.json?.data?.[0]?.id || null }
+  }
+  if (restrictionValues.length) {
+    // SCISSION dispo/tarifs : /restrictions porte le rate (+ conditions de sejour).
+    // On ne le pousse qu'en mode 'managed'. En 'keep', tout est deja enregistre en
+    // base (brouillon local) mais rien ne part : l'hote garde ses prix cote plateforme.
+    if (pousserLesTarifs) {
+      resultats.restrictions = { tente: true, ok: false, status: 0 }
+      const r = await appel('POST', '/restrictions', { values: restrictionValues })
+      resultats.restrictions = { tente: true, ok: !!r.ok, status: r.status }
+      if (!r.ok) { warnings.push('restrictions: HTTP ' + r.status) }
+      else {
+        pushed = true
+        taskIds.restrictions = r.json?.data?.[0]?.id || null
+        const w = r.json?.meta?.warnings
+        if (Array.isArray(w) && w.length) warnings.push('restrictions: ' + w.length + ' avertissement(s)')
+      }
+    } else {
+      taskIds.restrictions_skipped = 'mode_keep'
+      // ⚠ ET ON LE DIT A L'HOTE. `restrictions_skipped` est un drapeau pour le
+      // code. Sans cette ligne, l'ecran affiche « Enregistre et publie » alors
+      // que RIEN n'est parti aux plateformes.
+      //
+      // MESURE DU 10 SEPTEMBRE 2026. Thierry a rouvert le samedi 31 octobre
+      // dans le calendrier, vu « Enregistre et publie », et attendu QUINZE
+      // MINUTES devant une date restee fermee sur Booking et Airbnb. Le defaut
+      // n'etait pas le mode — c'est un choix legitime — mais le SILENCE sur son
+      // effet.
+      warnings.push('Enregistré dans HôteSmart — ce logement est en '
+        + '« je garde mes prix » : vos tarifs et vos réouvertures ne sont '
+        + 'PAS envoyés aux plateformes. Passez-le en « HôteSmart gère mes '
+        + 'prix » pour qu\'ils partent.')
+    }
+  }
+  return pushed
+}
+
 // ─── VERDICT D'UNE POUSSEE DE CALENDRIER ──────────────────────────────────
 // ⚠ INCIDENT DU 11 SEPTEMBRE 2026, AU SOIR. Thierry ouvre 50 dates sur un bien
 // et 19 sur l'autre. Le coeur enregistre tout correctement. Les PRIX partent.
@@ -727,6 +794,10 @@ module.exports = async function handler(req, res) {
       // 1) Accumulation par date des champs edites
       // extra_guest_fee stocke en unite majeure sur properties -> cents.
       const feeCentsCal = Math.round((Number(bien.extra_guest_fee) || 0) * 100)
+      // Ce que la poussee a REELLEMENT donne — la matiere du verdict. Declare
+      // ici parce que le plafonnement du stock, plus bas, peut deja constater
+      // qu'une disponibilite ne partira pas.
+      const resultatsPoussee = {}
       const restByDate = {}   // date -> objet restriction partiel (champs presents uniquement)
       const availByDate = {}  // date -> availability (room_type)
       for (const seg of dateSegments) {
@@ -771,6 +842,14 @@ module.exports = async function handler(req, res) {
       // plafond ne peut que RETIRER du stock, jamais en ajouter.
       // Regle unique : docs/kb/synchronisation.md §8.
       const datesAvail = Object.keys(availByDate).sort()
+      // ⚠ SANS room_type, LA DISPONIBILITE NE PEUT PAS PARTIR — et l'hote en a
+      // demande une. Silence total avant la review : ni avertissement, ni
+      // incident, alors que ses dates restent invendables chez le canal.
+      if (datesAvail.length && !roomTypeId) {
+        resultatsPoussee.availability = { tente: true, ok: false, status: 0 }
+        pushWarnings.push('Disponibilites NON envoyees : ce logement n\'a pas de type de chambre '
+          + 'chez le canal de distribution.')
+      }
       // Sans room_type, `availItems` sera vide : rien ne partira, inutile de lire.
       if (datesAvail.length && roomTypeId) {
         const { nuitsOccupees } = require('../lib/nuits-occupees')
@@ -803,6 +882,12 @@ module.exports = async function handler(req, res) {
             if (availByDate[d] > 0) { delete availByDate[d]; retirees++ }
           }
           if (retirees) {
+            // ⚠ UNE OUVERTURE RETIREE EST UNE POUSSEE QUI N'ARRIVE PAS.
+            // Releve en review : ce repli produit EXACTEMENT l'etat redoute —
+            // les prix partent, les ouvertures non, donc des dates tarifees et
+            // invendables — sans qu'aucun POST n'ait ete refuse. Le verdict ne
+            // jugeait que les appels partis : il ne voyait rien.
+            resultatsPoussee.availability = { tente: true, ok: false, status: 0 }
             pushWarnings.push(`${retirees} ouverture(s) non poussee(s) : impossible de verifier les nuits deja vendues.`
               + ' Les fermetures, elles, sont bien parties.')
           }
@@ -818,8 +903,6 @@ module.exports = async function handler(req, res) {
 
       const restrictionValues = coalesceRanges(restItems)
       const availabilityValues = coalesceRanges(availItems)
-      // Ce que chaque appel a REELLEMENT donne — la matiere du verdict.
-      const resultatsPoussee = {}
 
       try {
         // ⚠ ORDRE : AVAILABILITY D'ABORD, RESTRICTIONS ENSUITE.
@@ -828,46 +911,16 @@ module.exports = async function handler(req, res) {
         // faisait, revenait a poser le stop-sell puis a l'effacer soi-meme dans
         // la foulee. C'est l'ordre de lib/channel-fullsync.js, et le seul correct.
         // Availability : TOUJOURS poussee (anti-surbooking, non negociable), quel que soit le mode.
-        if (availabilityValues.length) {
-          const a = await channelCall('POST', '/availability', { values: availabilityValues })
-          resultatsPoussee.availability = { tente: true, ok: !!a.ok, status: a.status }
-          if (!a.ok) { pushWarnings.push('availability: HTTP ' + a.status) }
-          else { pushed = true; taskIdsSave.availability = a.json?.data?.[0]?.id || null }
-        }
-        if (restrictionValues.length) {
-          // SCISSION dispo/tarifs : /restrictions porte le rate (+ conditions de sejour).
-          // On ne le pousse qu'en mode 'managed'. En 'keep', tout est deja enregistre en
-          // base (brouillon local) mais rien ne part : l'hote garde ses prix cote plateforme.
-          if (canPushRates(bien)) {
-            const r = await channelCall('POST', '/restrictions', { values: restrictionValues })
-            resultatsPoussee.restrictions = { tente: true, ok: !!r.ok, status: r.status }
-            if (!r.ok) { pushWarnings.push('restrictions: HTTP ' + r.status) }
-            else { pushed = true; taskIdsSave.restrictions = r.json?.data?.[0]?.id || null; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
-          } else {
-            taskIdsSave.restrictions_skipped = 'mode_keep'
-            // ⚠ ET ON LE DIT A L'HOTE. `restrictions_skipped` est un drapeau
-            // pour le code ; le front ne lit que `warnings`. Sans cette ligne,
-            // il affiche « Enregistre et publie » alors que RIEN n'est parti
-            // aux plateformes.
-            //
-            // MESURE DU 10 SEPTEMBRE 2026. Thierry a rouvert le samedi
-            // 31 octobre dans le calendrier, vu « Enregistre et publie », et
-            // attendu QUINZE MINUTES devant une date restee fermee sur Booking
-            // et Airbnb. Les trois maillons : le coeur portait bien
-            // `stop_sell = false` et 160 €, aucune poussee n'est partie
-            // (`rate_sync_mode = 'keep'`), et Channex detenait toujours
-            // `stop_sell: true`. Le defaut n'etait pas le mode — c'est un choix
-            // legitime — mais le SILENCE sur son effet.
-            //
-            // Les deux cas voisins avaient deja leur message (bien Beds24, bien
-            // non connecte) ; celui-ci, le plus courant sur un bien qui vient
-            // d'etre migre, n'en avait aucun.
-            pushWarnings.push('Enregistré dans HôteSmart — ce logement est en '
-              + '« je garde mes prix » : vos tarifs et vos réouvertures ne sont '
-              + 'PAS envoyés aux plateformes. Passez-le en « HôteSmart gère mes '
-              + 'prix » pour qu\'ils partent.')
-          }
-        }
+        if (await pousserAri({
+          availabilityValues,
+          restrictionValues,
+          pousserLesTarifs: canPushRates(bien),
+          appel: channelCall,
+          resultats: resultatsPoussee,
+          warnings: pushWarnings,
+          taskIds: taskIdsSave
+        })) pushed = true
+
         // ⚠ RESTITUTION DE L'INTENTION MEMORISEE, quel que soit le mode.
         // Le bloc ci-dessus ne suffit pas : en mode 'keep' il ne part rien, et meme
         // en 'managed' il ne porte que les dates dont l'hote a touche une
@@ -950,5 +1003,6 @@ module.exports = async function handler(req, res) {
 
 // ⚠ EXPORT SECONDAIRE, SANS TOUCHER AU DEFAUT : `module.exports` reste le
 // handler. C'est la fonction que le test tient.
+module.exports.pousserAri = pousserAri
 module.exports.verdictPoussee = verdictPoussee
 module.exports.signalerPousseeRefusee = signalerPousseeRefusee

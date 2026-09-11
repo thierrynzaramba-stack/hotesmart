@@ -172,9 +172,19 @@ test('les ecrans calendrier distinguent « non publie » de « enregistre »', (
   const path = require('node:path')
   for (const page of ['pages/biens-calendrier.html', 'pages/calendrier-mobile.html']) {
     const src = fs.readFileSync(path.join(__dirname, '..', page), 'utf8')
-    assert.ok(src.includes('resp.push_failed'),
-      `${page} doit lire le drapeau push_failed — sans lui, un refus du canal `
-      + "s'affiche « Enregistre »")
+    // ⚠ ON COMPTE, ON NE SE CONTENTE PAS D'UNE OCCURRENCE. Releve en review :
+    // `biens-calendrier.html` a DEUX points de sauvegarde (l'edition de prix en
+    // ligne et la barre d'action). Un `includes` au niveau du fichier restait
+    // vert si l'un des deux perdait sa branche — l'edition de prix redevenait
+    // « Enregistre » sur un refus. L'invariant est : tout point qui sait
+    // traiter `local_only` doit savoir traiter `push_failed`.
+    const pointsDeSauvegarde = (src.match(/resp\s*(?:&&)?\s*\.?local_only/g) || []).length
+      || (src.match(/resp\.local_only/g) || []).length
+    const traitent = (src.match(/resp\.push_failed/g) || []).length
+    assert.ok(pointsDeSauvegarde > 0, `${page} : aucun point de sauvegarde trouve`)
+    assert.strictEqual(traitent, pointsDeSauvegarde,
+      `${page} : ${traitent} point(s) traitent push_failed pour ${pointsDeSauvegarde} `
+      + 'point(s) de sauvegarde — un refus du canal s y afficherait « Enregistre »')
     assert.match(src, /NON PUBLIE/,
       `${page} doit le DIRE, pas le noyer dans une liste d'avertissements`)
   }
@@ -187,4 +197,107 @@ test("l'endpoint rend le drapeau push_failed", () => {
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
   assert.match(src, /push_failed:\s*pousseeRefusee/, 'le drapeau doit sortir dans la reponse')
   assert.match(src, /if\s*\(verdict\.panne\)\s*pousseeRefusee\s*=\s*true/, 'et etre pose par le verdict')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LA POUSSEE, EXECUTEE — le lien entre la realite HTTP et le verdict
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ RELEVE EN REVIEW : les tests ci-dessus ne touchaient jamais les deux lignes
+// qui enregistrent le resultat de chaque POST. Mutation proposee — ne noter le
+// resultat que dans le `else` du succes — : 13 tests verts, silence complet
+// restaure. On execute donc `pousserAri` avec un double de `appel`.
+
+const { pousserAri } = require('../api/calendar.js')
+
+const AV = [{ date: '2026-09-15' }]
+const RE = [{ date: '2026-09-15' }]
+const reponse = (ok, status) => ({ ok, status, json: { data: [{ id: 'task-1' }] } })
+
+test('un 422 sur /availability est ENREGISTRE, donc vu par le verdict', async () => {
+  const c = { resultats: {}, warnings: [], taskIds: {} }
+  await pousserAri({ availabilityValues: AV, restrictionValues: RE, pousserLesTarifs: true,
+    appel: async (m, chemin) => reponse(chemin !== '/availability', chemin === '/availability' ? 422 : 200),
+    ...c })
+  assert.deepStrictEqual(c.resultats.availability, { tente: true, ok: false, status: 422 })
+  assert.strictEqual(verdictPoussee(c.resultats).panne, true)
+})
+
+test('UNE COUPURE RESEAU laisse l echec pose — le cas le plus probable', async () => {
+  // `channelCall` ne protege pas son `fetch` : ECONNRESET, EAI_AGAIN et les
+  // timeouts LEVENT. Avant le correctif, la ligne qui note le resultat n'etait
+  // jamais atteinte, `verdictPoussee({})` rendait « pas de panne », et
+  // l'incident du 11 septembre se reproduisait sans la moindre alerte.
+  const c = { resultats: {}, warnings: [], taskIds: {} }
+  await assert.rejects(() => pousserAri({
+    availabilityValues: AV, restrictionValues: RE, pousserLesTarifs: true,
+    appel: async () => { throw new TypeError('fetch failed') }, ...c }))
+  assert.deepStrictEqual(c.resultats.availability, { tente: true, ok: false, status: 0 },
+    "l'echec doit rester pose malgre l'exception")
+  assert.strictEqual(verdictPoussee(c.resultats).panne, true,
+    'une coupure reseau DOIT lever un incident')
+})
+
+test('coupure reseau sur /restrictions seul : le cas inverse est vu aussi', async () => {
+  const c = { resultats: {}, warnings: [], taskIds: {} }
+  await assert.rejects(() => pousserAri({
+    availabilityValues: AV, restrictionValues: RE, pousserLesTarifs: true,
+    appel: async (m, chemin) => {
+      if (chemin === '/restrictions') throw new TypeError('fetch failed')
+      return reponse(true, 200)
+    }, ...c }))
+  assert.strictEqual(c.resultats.availability.ok, true)
+  assert.deepStrictEqual(c.resultats.restrictions, { tente: true, ok: false, status: 0 })
+  const v = verdictPoussee(c.resultats)
+  assert.strictEqual(v.panne, true)
+  assert.match(v.message, /ANCIEN PRIX/)
+})
+
+test('tout passe : aucune panne, les task_ids sont la', async () => {
+  const c = { resultats: {}, warnings: [], taskIds: {} }
+  const pushed = await pousserAri({ availabilityValues: AV, restrictionValues: RE,
+    pousserLesTarifs: true, appel: async () => reponse(true, 200), ...c })
+  assert.strictEqual(pushed, true)
+  assert.strictEqual(verdictPoussee(c.resultats).panne, false)
+  assert.strictEqual(c.taskIds.availability, 'task-1')
+  assert.strictEqual(c.taskIds.restrictions, 'task-1')
+  assert.deepStrictEqual(c.warnings, [])
+})
+
+test('mode keep : /restrictions n est pas appele, et ce n est pas une panne', async () => {
+  const c = { resultats: {}, warnings: [], taskIds: {} }
+  const chemins = []
+  await pousserAri({ availabilityValues: AV, restrictionValues: RE, pousserLesTarifs: false,
+    appel: async (m, chemin) => { chemins.push(chemin); return reponse(true, 200) }, ...c })
+  assert.deepStrictEqual(chemins, ['/availability'], 'aucun tarif ne part en mode keep')
+  assert.strictEqual(c.resultats.restrictions, undefined)
+  assert.strictEqual(verdictPoussee(c.resultats).panne, false, 'un choix de l hote n est pas une panne')
+  assert.match(c.warnings.join(' '), /je garde mes prix/, "mais l'hote est prevenu")
+})
+
+test('availability AVANT restrictions — un /availability leve le stop_sell', async () => {
+  const c = { resultats: {}, warnings: [], taskIds: {} }
+  const ordre = []
+  await pousserAri({ availabilityValues: AV, restrictionValues: RE, pousserLesTarifs: true,
+    appel: async (m, chemin) => { ordre.push(chemin); return reponse(true, 200) }, ...c })
+  assert.deepStrictEqual(ordre, ['/availability', '/restrictions'],
+    "l'ordre inverse posait le stop-sell puis l'effacait dans la foulee")
+})
+
+// ⚠ ET LES DEUX CHEMINS QUI PRODUISENT L'ETAT REDOUTE SANS AUCUN REFUS HTTP.
+// Releve en review : une ouverture retiree par le repli « stock non verifiable »,
+// ou un bien sans room_type, donnent des dates tarifees et invendables — et le
+// verdict ne voyait rien puisqu'aucun POST n'avait ete refuse.
+test('les deux chemins muets sont desormais traites comme des echecs', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  const repli = src.indexOf('let retirees = 0')
+  assert.ok(repli > 0)
+  assert.match(src.slice(repli, repli + 1200),
+    /resultats?Poussee\.availability = \{ tente: true, ok: false, status: 0 \}/,
+    'une ouverture retiree faute de pouvoir verifier le stock est une poussee qui n arrive pas')
+  const sansRoom = src.indexOf('datesAvail.length && !roomTypeId')
+  assert.ok(sansRoom > 0, 'le cas « pas de room_type » doit etre traite explicitement')
+  assert.match(src.slice(sansRoom, sansRoom + 500),
+    /resultatsPoussee\.availability = \{ tente: true, ok: false, status: 0 \}/)
 })

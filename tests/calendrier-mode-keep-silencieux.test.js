@@ -23,11 +23,16 @@ test('LE TEST QUI COMPTE : le mode `keep` PREVIENT l hote, il ne se contente pas
   // SILENCE ne l'etait pas.
   const src = lire('api/calendar.js')
 
-  const i = src.indexOf("taskIdsSave.restrictions_skipped = 'mode_keep'")
+  // ⚠ NOMS MIS A JOUR LE 11 SEPTEMBRE 2026 : la poussee a ete extraite dans
+  // `pousserAri` pour etre EXECUTEE par un test (review : la ligne qui relie la
+  // realite HTTP au verdict n'etait couverte par rien). `taskIdsSave` et
+  // `pushWarnings` y deviennent `taskIds` et `warnings` — le comportement
+  // defendu ici est inchange.
+  const i = src.indexOf("taskIds.restrictions_skipped = 'mode_keep'")
   assert.ok(i > 0, 'le drapeau existe toujours')
   // L'avertissement doit etre pose DANS la meme branche, juste apres le drapeau.
   const branche = src.slice(i, i + 1800)
-  assert.ok(/pushWarnings\.push\(/.test(branche),
+  assert.ok(/warnings\.push\(/.test(branche),
     'la branche mode_keep pousse un avertissement, pas seulement un drapeau')
   assert.ok(/je garde mes prix/.test(branche),
     'le message nomme le mode dans les mots de l hote')
