@@ -112,6 +112,94 @@ function coalesceRanges(items) {
 // heurter.
 const MAX_BIENS = 200
 
+// ─── VERDICT D'UNE POUSSEE DE CALENDRIER ──────────────────────────────────
+// ⚠ INCIDENT DU 11 SEPTEMBRE 2026, AU SOIR. Thierry ouvre 50 dates sur un bien
+// et 19 sur l'autre. Le coeur enregistre tout correctement. Les PRIX partent.
+// La DISPONIBILITE, non — et chez Channex les dates restent `availability: 0`
+// et `stop_sell: true` : **tarifees mais invendables**, sans le moindre signal.
+// L'echec n'avait produit qu'un `pushWarnings.push('availability: HTTP ...')`,
+// et le front n'affiche que `warnings[0]`.
+//
+// « Une erreur qui rend des dates tarifees mais invendables n'est pas un
+// avertissement, c'est une panne » — la regle posee par Thierry, la meme que
+// pour le cron qui rendait HTTP 200 en portant ses erreurs dans le corps.
+//
+// ⚠ ET LE CAS INVERSE CRIE AUSSI. Un `/restrictions` refuse pendant qu'un
+// `/availability` passe est PIRE dans un sens : les dates s'ouvrent a la vente
+// en gardant l'ANCIEN prix. C'est l'ecrasement du 10 septembre, par une autre
+// porte. Les deux sens sont des pannes.
+//
+// ⚠ ET UNE FERMETURE QUI N'EST PAS PARTIE EST UNE SURRESERVATION EN ATTENTE :
+// `/availability` porte aussi les mises a zero. Son echec n'est donc pas
+// seulement « on ne vend pas », c'est aussi « on peut vendre deux fois ».
+//
+// Pure et exportee : c'est elle que le test tient.
+function verdictPoussee (resultats) {
+  const av = resultats.availability || null
+  const re = resultats.restrictions || null
+  const echecs = []
+  if (av && av.tente && !av.ok) echecs.push({ appel: 'availability', status: av.status })
+  if (re && re.tente && !re.ok) echecs.push({ appel: 'restrictions', status: re.status })
+  if (!echecs.length) return { panne: false, echecs: [], type: null, message: null }
+
+  const nomme = echecs.map(e => `${e.appel} (HTTP ${e.status})`).join(' et ')
+  let consequence
+  const availKO = echecs.some(e => e.appel === 'availability')
+  const restKO = echecs.some(e => e.appel === 'restrictions')
+  if (availKO && restKO) consequence = 'ni les disponibilites ni les tarifs ne sont arrives chez le canal'
+  else if (availKO) consequence = 'les tarifs sont partis mais PAS les disponibilites : '
+    + 'les dates ouvertes restent INVENDABLES, et une fermeture non partie peut laisser passer une surreservation'
+  else consequence = 'les disponibilites sont parties mais PAS les tarifs : '
+    + 'les dates peuvent s ouvrir a la vente A L ANCIEN PRIX'
+
+  return {
+    panne: true,
+    echecs,
+    type: 'poussee_calendrier_refusee',
+    message: `Poussee refusee par le canal : ${nomme}. ${consequence}.`
+  }
+}
+
+// ─── REACTION A UN REFUS ──────────────────────────────────────────────────
+// Separee du handler pour etre tenue par un test : la lecon du 11 septembre au
+// matin est qu'une fonction pure admirablement testee ne prouve rien si ce qui
+// la CONSOMME ne l'est pas.
+//
+// `deps` permet au test d'injecter un double de `reportIncident` sans toucher
+// au reseau. En production, l'import reel.
+async function signalerPousseeRefusee (verdict, contexte, deps = {}) {
+  if (!verdict || !verdict.panne) return { signale: false }
+  const { warnings, userId, propertyId, propertyName, datesDisponibilite, datesTarifs } = contexte
+
+  console.error(`[calendar] ${verdict.message} (bien ${propertyId})`)
+  // EN TETE des avertissements : le front n'en montre qu'un, ce doit etre
+  // celui-la et pas « 6 nuits deja vendues ».
+  if (Array.isArray(warnings)) warnings.unshift(verdict.message)
+
+  // ⚠ L'ALERTE NE DOIT PAS POUVOIR CASSER LA SAUVEGARDE. Les lignes sont deja
+  // ecrites en base ; perdre la reponse HTTP ferait croire a l'hote que rien
+  // n'a ete enregistre, et il recommencerait.
+  try {
+    const reporter = deps.reportIncident || require('../lib/founder-notify').reportIncident
+    await reporter(verdict.type, {
+      userId,
+      propertyId,
+      propertyName,
+      threshold: 1,
+      detail: {
+        message: verdict.message,
+        echecs: verdict.echecs,
+        dates_disponibilite: datesDisponibilite,
+        dates_tarifs: datesTarifs
+      }
+    })
+    return { signale: true }
+  } catch (e) {
+    console.error('[calendar] incident non remonte :', e.message)
+    return { signale: false, erreur: e.message }
+  }
+}
+
 module.exports = async function handler(req, res) {
   // ⚠ SESSION VERIFIEE ICI, INCONDITIONNELLEMENT. Se reposer sur la garde des
   // biens ne suffisait pas : quand aucun identifiant ne se resolvait, la garde
@@ -622,6 +710,8 @@ module.exports = async function handler(req, res) {
     let pushWarnings = []
     let pushed = false
     let localOnly = false
+    // « Le canal a refuse quelque chose » : un drapeau, pas un texte a lire.
+    let pousseeRefusee = false
     const taskIdsSave = {}
 
     // ⚠ `estRelieAuCanal` AVANT les ids : voir lib/rate-sync.js. Pendant la
@@ -728,6 +818,8 @@ module.exports = async function handler(req, res) {
 
       const restrictionValues = coalesceRanges(restItems)
       const availabilityValues = coalesceRanges(availItems)
+      // Ce que chaque appel a REELLEMENT donne — la matiere du verdict.
+      const resultatsPoussee = {}
 
       try {
         // ⚠ ORDRE : AVAILABILITY D'ABORD, RESTRICTIONS ENSUITE.
@@ -738,6 +830,7 @@ module.exports = async function handler(req, res) {
         // Availability : TOUJOURS poussee (anti-surbooking, non negociable), quel que soit le mode.
         if (availabilityValues.length) {
           const a = await channelCall('POST', '/availability', { values: availabilityValues })
+          resultatsPoussee.availability = { tente: true, ok: !!a.ok, status: a.status }
           if (!a.ok) { pushWarnings.push('availability: HTTP ' + a.status) }
           else { pushed = true; taskIdsSave.availability = a.json?.data?.[0]?.id || null }
         }
@@ -747,6 +840,7 @@ module.exports = async function handler(req, res) {
           // base (brouillon local) mais rien ne part : l'hote garde ses prix cote plateforme.
           if (canPushRates(bien)) {
             const r = await channelCall('POST', '/restrictions', { values: restrictionValues })
+            resultatsPoussee.restrictions = { tente: true, ok: !!r.ok, status: r.status }
             if (!r.ok) { pushWarnings.push('restrictions: HTTP ' + r.status) }
             else { pushed = true; taskIdsSave.restrictions = r.json?.data?.[0]?.id || null; const w = r.json?.meta?.warnings; if (Array.isArray(w) && w.length) pushWarnings.push('restrictions: ' + w.length + ' avertissement(s)') }
           } else {
@@ -797,6 +891,24 @@ module.exports = async function handler(req, res) {
         console.error('[calendar] push channel error', e.message)
         pushWarnings.push('push: ' + e.message)
       }
+
+      // ⚠ UN REFUS DU CANAL EST UNE PANNE, PAS UN AVERTISSEMENT.
+      // Voir l'en-tete de `verdictPoussee`. Le 11 septembre 2026, un
+      // `/availability` refuse n'a produit qu'une ligne dans `pushWarnings`,
+      // le front n'affiche que `warnings[0]`, et 69 dates sont restees
+      // tarifees mais INVENDABLES sans que personne ne le sache.
+      const verdict = verdictPoussee(resultatsPoussee)
+      if (verdict.panne) pousseeRefusee = true
+      await signalerPousseeRefusee(verdict, {
+        warnings: pushWarnings,
+        userId: compte,
+        propertyId: propId,
+        propertyName: bien.name,
+        // ⚠ PAS `datesTouchees` : il est declare avec `const` DANS le `try`,
+        // donc hors de portee ici. Ces deux tableaux-la sont declares avant.
+        datesDisponibilite: availabilityValues.length,
+        datesTarifs: restrictionValues.length
+      })
     } else {
       // Aucun id canal (rate plan) -> rien n'est pousse. Message hote explicite : pour un
       // bien Beds24, l'hote doit editer ses prix/sejours min DANS Beds24 (source cote OTA).
@@ -820,6 +932,14 @@ module.exports = async function handler(req, res) {
       // vues n'en affichent que le nombre. Sans lui, l'hote lisait
       // « Enregistre (1 avertissement) » puis voyait sa valeur revenir en place.
       config_saved: !echecConfig,
+      // ⚠ DRAPEAU LISIBLE PAR LE CODE, pour la meme raison que `config_saved`.
+      // Le front joint bien TOUS les avertissements — ma premiere lecture etait
+      // fausse — mais il les prefixe « Enregistre — », un cadrage de SUCCES.
+      // Le 11 septembre 2026 une poussee refusee se lisait donc « Enregistre »
+      // alors que 69 dates restaient invendables. Sans ce drapeau, le front ne
+      // peut pas distinguer « enregistre avec une remarque » de « enregistre
+      // mais RIEN n'est parti au canal ».
+      push_failed: pousseeRefusee,
       warnings: pushWarnings,
       task_ids: taskIdsSave
     })
@@ -827,3 +947,8 @@ module.exports = async function handler(req, res) {
 
   return res.status(405).json({ error: 'Methode non autorisee' })
 }
+
+// ⚠ EXPORT SECONDAIRE, SANS TOUCHER AU DEFAUT : `module.exports` reste le
+// handler. C'est la fonction que le test tient.
+module.exports.verdictPoussee = verdictPoussee
+module.exports.signalerPousseeRefusee = signalerPousseeRefusee
