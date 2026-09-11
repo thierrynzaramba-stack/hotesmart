@@ -30,7 +30,7 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
-const { runFullSync, JOURS_POUSSES } = require('../lib/channel-fullsync')
+const { runFullSync, fenetrePoussee } = require('../lib/channel-fullsync')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -106,6 +106,18 @@ async function main () {
   // ── 3) LA POUSSEE ─────────────────────────────────────────────────────────
   const res = await runFullSync(apres, { dryRun: false })
   console.log(`\n── poussee : pushed=${res.pushed}`)
+  // ⚠ `pushed` EST VRAI DES QU'UN SEUL DES DEUX POST PASSE. Releve en review :
+  // si `/availability` est rejete (mauvais room_type, 429 apres les 4 retries)
+  // et `/restrictions` accepte, Channex garde son ANCIEN STOCK, le script
+  // imprimait `pushed=true` et sortait en 0. Les deux taches doivent exister.
+  const posteesKO = (res.warnings || []).filter(w => /HTTP/.test(String(w)))
+  const tachesManquantes = ['availability', 'restrictions']
+    .filter(k => !(res.task_ids || {})[k])
+  if (!res.pushed || posteesKO.length || tachesManquantes.length) {
+    console.log(`   ⛔ poussee INCOMPLETE — taches manquantes : `
+      + `${tachesManquantes.join(', ') || 'aucune'} ; refus : ${posteesKO.join(' | ') || 'aucun'}`)
+    process.exitCode = 1
+  }
   console.log(`   ${res.dates_tarifees} tarifee(s), ${res.dates_fermees_faute_de_prix} fermee(s) faute de prix`)
   console.log(`   nuits vendues fermees : ${res.nuits_vendues_fermees}`)
   for (const w of res.warnings || []) console.log(`   ⚠ ${w}`)
@@ -123,15 +135,22 @@ async function main () {
   const par = (rr.json?.data && rr.json.data[apres.provider_rate_plan_id]) || {}
 
   // Le coeur, pour comparer date par date.
+  // ⚠ UNE ERREUR DE LECTURE NE PEUT PAS ETRE AVALEE. Releve en review : sur un
+  // timeout ou un 5xx du pooler, `data` valait `null`, `lignes` restait vide, et
+  // les QUATRE controles qui en dependent passaient au vert — « 0 ecart sur 0
+  // date jugee », « 0/0 fermees toujours fermees », code de sortie 0. La regle
+  // est deja gravee ailleurs (tests/bookings-snapshot-troncature.test.js).
   const lignes = []
   let de = 0
   for (;;) {
-    const { data } = await supabase.from('calendar_inventory')
+    const { data, error: eCi } = await supabase.from('calendar_inventory')
       .select('date, rate, stop_sell').eq('property_id', C.fiche).order('date').range(de, de + 499)
+    if (eCi) throw new Error(`lecture du coeur (offset ${de}) : ${eCi.message} — AUCUN verdict`)
     lignes.push(...(data || []))
     if (!data || data.length < 500) break
     de += 500
   }
+  if (!lignes.length) throw new Error('le coeur ne rend aucune date pour ce bien — AUCUN verdict')
   const parDate = new Map(lignes.map(x => [x.date, x]))
 
   // ⚠ RIEN LU N'EST PAS « TOUT CONFORME ». Le mode de panne de ce script etait
@@ -147,10 +166,8 @@ async function main () {
 
   // La couverture fait partie du verdict : une date de la fenetre poussee que
   // Channex ne rend pas n'est pas conforme, elle est NON JUGEE.
-  const horizon = []
-  for (let i = 0; i < JOURS_POUSSES; i++) {
-    horizon.push(new Date(Date.now() + i * 86400000).toISOString().slice(0, 10))
-  }
+  const horizon = fenetrePoussee()
+  const dansFenetre = new Set(horizon)
   const lues = new Set(Object.keys(par))
   const nonJugees = horizon.filter(d => !lues.has(d))
   console.log(`   ${ok(nonJugees.length === 0)} couverture : ${lues.size}/${horizon.length} date(s) de la fenetre poussee relues`)
@@ -168,8 +185,19 @@ async function main () {
     return occ ? occ[occ.length - 1].rate / 100 : prixEur
   }
 
+  // ⚠ UN CHAMP ABSENT VAUT INCONNU, JAMAIS « FERME ». `Number(undefined)` est
+  // `NaN` et `NaN > 0` est faux : la date sortait du lot « ouvertes » sans avoir
+  // ete lue. La couverture ne rattrape pas — elle verifie que la CLE existe, pas
+  // que les CHAMPS sont lisibles.
+  const illisibles = Object.keys(par).filter(d =>
+    par[d].stop_sell === undefined || !Number.isFinite(Number(par[d].availability)))
   const ouvertesChx = Object.keys(par).filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
-  const attendues = C.ouvertesAttendues || []
+  // 6. Une date attendue ouverte mais ECHUE sort de la fenetre lue : la
+  // reclamer ferait crier le script tous les jours a partir du 01/11, et un
+  // verificateur qui crie au loup cesse d'etre lu.
+  const attenduesToutes = C.ouvertesAttendues || []
+  const attendues = attenduesToutes.filter(d => dansFenetre.has(d))
+  const echues = attenduesToutes.filter(d => !dansFenetre.has(d))
   const enTrop = ouvertesChx.filter(d => !attendues.includes(d))
   const manquantes = attendues.filter(d => !ouvertesChx.includes(d))
   // ⚠ COMPARER DANS LA FENETRE, SINON C'EST MOI QUI MENS. Le coeur du 23 porte
@@ -177,13 +205,20 @@ async function main () {
   // de 500 jours) : les compter au denominateur affichait « 500/875 » et un ⛔
   // sur un bien parfaitement ferme. Meme famille que les faux ecarts de prix —
   // un verdict rendu sur deux fenetres differentes.
-  const fermeesCoeurFenetre = lignes.filter(x => x.stop_sell === true && lues.has(x.date)).map(x => x.date)
-  const fermeesCoeurHors = lignes.filter(x => x.stop_sell === true && !lues.has(x.date)).length
+  // ⚠ « HORS FENETRE » EST UNE PROPRIETE DE L'HORIZON, PAS DE LA REPONSE.
+  // Le predicat etait `!lues.has(date)`, qui melangeait « au-dela des 500
+  // jours » et « Channex ne l'a pas rendue » : sur une relecture tronquee, le
+  // script etiquetait « hors fenetre » des dates qui y sont.
+  const fermeesCoeurFenetre = lignes.filter(x => x.stop_sell === true && dansFenetre.has(x.date) && lues.has(x.date)).map(x => x.date)
+  const fermeesCoeurHors = lignes.filter(x => x.stop_sell === true && !dansFenetre.has(x.date)).length
   const fermeesCoeur = fermeesCoeurFenetre
   const fermeesEncore = fermeesCoeur.filter(d => par[d].stop_sell === true || Number(par[d].availability) === 0)
   const sansLigne = Object.keys(par).filter(d => !parDate.has(d))
   const sansLigneVendables = sansLigne.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
 
+  console.log(`   ${ok(illisibles.length === 0)} ${illisibles.length} date(s) au reglage ILLISIBLE (indecidables)`)
+  if (illisibles.length) console.log(`      ⛔ ${illisibles.slice(0, 15).join(', ')}`)
+  if (echues.length) console.log(`   ⓘ ${echues.join(', ')} : date(s) ouverte(s) attendue(s) mais ECHUE(S) — hors fenetre, non reclamee(s)`)
   console.log(`\n   ${ok(enTrop.length === 0 && manquantes.length === 0)} `
     + `dates OUVERTES chez Channex : ${ouvertesChx.length}`
     + `  (attendu : ${attendues.length ? attendues.join(', ') : 'AUCUNE'})`)
@@ -220,7 +255,7 @@ async function main () {
   console.log(`   ${ok(ecarts === 0)} prix conformes au coeur : ${ecarts} ecart(s) sur ${juges} date(s) tarifee(s) jugee(s)`)
   if (horsFenetre) console.log(`      ⚠ ${horsFenetre} date(s) tarifee(s) hors de la fenetre poussee — hors verdict`)
 
-  if (ecarts || enTrop.length || manquantes.length || nonJugees.length
+  if (ecarts || enTrop.length || manquantes.length || nonJugees.length || illisibles.length
     || sansLigneVendables.length || fermeesEncore.length !== fermeesCoeur.length) {
     process.exitCode = 1
   }

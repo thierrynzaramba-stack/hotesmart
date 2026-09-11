@@ -16,6 +16,7 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
+const { fenetrePoussee } = require('../lib/channel-fullsync')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const BASE = process.env.CHANNEL_BASE_URL
 const KEY = process.env.CHANNEL_API_KEY
@@ -124,8 +125,13 @@ async function main () {
     }
 
     // 3. ZERO DATE OUVERTE
-    const auj = new Date().toISOString().slice(0, 10)
-    const fin = new Date(Date.now() + 499 * 86400000).toISOString().slice(0, 10)
+    // ⚠ LA MEME FENETRE QUE LE WRITER, ET CALCULEE PAR LUI. En UTC, entre 00 h
+    // et 02 h locales, elle est decalee d'un jour et la derniere date poussee
+    // echappe a tous les controles.
+    const horizon = fenetrePoussee()
+    const dansFenetre = new Set(horizon)
+    const auj = horizon[0]
+    const fin = horizon[horizon.length - 1]
     const rr = await get(`/restrictions?filter[property_id]=${B.cle}`
       + `&filter[date][gte]=${auj}&filter[date][lte]=${fin}`
       + `&filter[restrictions]=rate,availability,stop_sell`)
@@ -150,7 +156,13 @@ async function main () {
       const inconnues = dates.filter(d =>
         par[d].stop_sell === undefined || !Number.isFinite(Number(par[d].availability)))
       const ouvertes = dates.filter(d => par[d].stop_sell !== true && Number(par[d].availability) > 0)
-      const attendues = B.ouvertesAttendues || []
+      // Une date attendue ouverte mais ECHUE sort de la fenetre : la reclamer
+      // ferait crier ce script tous les jours a partir du 01/11/2026, et un
+      // verificateur qui crie au loup cesse d'etre lu.
+      const attenduesToutes = B.ouvertesAttendues || []
+      const attendues = attenduesToutes.filter(d => dansFenetre.has(d))
+      const echues = attenduesToutes.filter(d => !dansFenetre.has(d))
+      if (echues.length) console.log(`   ⓘ ${echues.join(', ')} : attendue(s) ouverte(s) mais ECHUE(S) — hors fenetre`)
       const enTrop = ouvertes.filter(d => !attendues.includes(d))
       const manquantes = attendues.filter(d => !ouvertes.includes(d))
       console.log(`   ${ok(enTrop.length === 0 && manquantes.length === 0)} ${ouvertes.length} date(s) ouverte(s) a la vente`
