@@ -206,6 +206,37 @@ async function main () {
     console.log(`   ${p.code} : ${error ? 'ECHEC ' + error.message : `${avant} -> demapped (initialImport)`}`)
   }
 
+  // ── LE FIL DE MESSAGES SUIT LE SEJOUR CONSERVE ───────────────────────────
+  // ⚠ TROUVE LE 11 SEPTEMBRE 2026, SUR UNE VOYAGEUSE REELLE.
+  // `api/messages.js` groupe les conversations par `booking_id`. Un sejour
+  // dedoublonne en a deux : son historique se coupe en DEUX FILS a l'ecran, et
+  // celui du jumeau neutralise devient invisible dans le bon. Sur Cassandra
+  // Garcia : 9 messages d'un cote, 2 de l'autre — dont son message de bienvenue
+  // et le « vous recevrez vos codes d'acces ».
+  //
+  // On rattache au survivant plutot que de faire lire deux ids par l'ecran :
+  // c'est la regle d'architecture du depot (le coeur d'abord, les apps lisent
+  // une seule verite). Faire lire deux ids ne reparerait QUE cet ecran, et
+  // laisserait l'agent IA et la classification sur un fil coupe.
+  //
+  // ⚠ `message_sent_log` N'EST PAS DEPLACE : il est clee (user, booking,
+  // template) et sa raison d'etre est de dire qu'un envoi a eu lieu sous CETTE
+  // cle. L'anti-doublon qui traverse le remapping est l'empreinte `stay_key`,
+  // pas le `booking_id`.
+  console.log('\n── report du fil de messages vers le sejour conserve')
+  for (const p of plan) {
+    const de = String(p.neutralise.booking_id)
+    const vers = String(p.garde.booking_id)
+    const { data: aDeplacer, error: eLire } = await supabase.from('messages')
+      .select('id').eq('booking_id', de)
+    if (eLire) { console.error(`   ${p.code} : lecture echec ${eLire.message}`); continue }
+    if (!aDeplacer.length) { console.log(`   ${p.code} : aucun message sous ${de}`); continue }
+    const { error } = await supabase.from('messages')
+      .update({ booking_id: vers }).eq('booking_id', de)
+    console.log(`   ${p.code} : ${error ? 'ECHEC ' + error.message
+      : `${aDeplacer.length} message(s) rattache(s) ${de} -> ${vers}`}`)
+  }
+
   // ── REPORT DES AFFECTATIONS, AVANT TOUTE SUPPRESSION ─────────────────────
   // L'ordre compte : si le report echoue, on ne supprime pas la ligne qui
   // porte encore l'affectation.
