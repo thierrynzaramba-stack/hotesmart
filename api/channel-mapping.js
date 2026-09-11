@@ -50,6 +50,43 @@ const redact = (v) => {
   return v
 }
 
+// ─── RESUME DES CANAUX D'UN BIEN ──────────────────────────────────────────
+// Pure et exportee : c'est elle qui repond « ce bien est-il connecte ? », et la
+// reponse decide du parcours entier de l'ecran Airbnb.
+//
+// ⚠ `is_active` EST UNE PROPRIETE DU CANAL, PAS DU BIEN. Defaut d'onboarding
+// trouve le 11 septembre 2026 sur un logement neuf. Un canal Airbnb porte
+// PLUSIEURS biens ; il est `is_active: true` des qu'UN seul y est mappe, et
+// `filter[property_id]` le rend pour TOUT bien rattache, mappe ou non.
+// L'ecran concluait donc « Airbnb est deja connecte » sur un logement sans
+// AUCUN mapping, et proposait de le DECONNECTER au lieu de le connecter.
+// Mesure sur « Ofuro Futari » : canal actif, bien rattache, zero mapping.
+//
+// La question juste est « ce canal porte-t-il un mapping vers un tarif DE CE
+// BIEN ? ». On y repond avec NOS liens, la meme source que celle qui cree les
+// mappings.
+//
+// ⚠ `liensLisibles = false` -> `mappe_pour_ce_bien: null`, jamais `false`.
+// Une lecture en echec qui se lirait « pas mappe » renverrait un bien deja
+// connecte dans le parcours de connexion, et lui ferait creer un SECOND
+// mapping. L'ecran ne doit conclure que sur un `true` franc.
+function resumerCanaux (rows, tarifsDuBien, liensLisibles) {
+  return (rows || []).map(c => {
+    const mappings = Array.isArray(c.attributes?.rate_plans) ? c.attributes.rate_plans : []
+    const pourCeBien = mappings.filter(m => tarifsDuBien.has(String(m.rate_plan_id)))
+    return {
+      id: c.id,
+      title: c.attributes?.title,
+      ota: c.attributes?.channel || c.attributes?.ota_name,
+      is_active: c.attributes?.is_active,
+      // Le champ que l'ecran doit lire pour decider s'il est connecte.
+      mappe_pour_ce_bien: liensLisibles ? pourCeBien.length > 0 : null,
+      mappings_pour_ce_bien: pourCeBien.length,
+      mappings_total: mappings.length
+    }
+  })
+}
+
 module.exports = async function handler(req, res) {
   if (!CHANNEL_API || !CHANNEL_KEY) {
     return res.status(503).json({ error: 'Gestionnaire de canaux non configure' })
@@ -171,12 +208,36 @@ module.exports = async function handler(req, res) {
     if (action === 'channels') {
       const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(idChezLeProvider)}`)
       const rows = Array.isArray(r.json?.data) ? r.json.data : []
-      const summary = rows.map(c => ({
-        id: c.id,
-        title: c.attributes?.title,
-        ota: c.attributes?.channel || c.attributes?.ota_name,
-        is_active: c.attributes?.is_active
-      }))
+
+      // ⚠ `is_active` EST UNE PROPRIETE DU CANAL, PAS DU BIEN. ET C'EST LE
+      // DEFAUT D'ONBOARDING TROUVE LE 11 SEPTEMBRE 2026 SUR UN BIEN NEUF.
+      //
+      // Un canal Airbnb porte PLUSIEURS biens : celui de Thierry en portait
+      // trois. Des qu'un seul y est mappe, le canal est `is_active: true` — et
+      // `filter[property_id]` le rend pour TOUT bien rattache, mappe ou non.
+      // L'ecran Airbnb concluait donc « Airbnb est deja connecte » sur un
+      // logement qui n'avait AUCUN mapping, et proposait de le deconnecter au
+      // lieu de le connecter. Mesure sur « Ofuro Futari » : canal actif, bien
+      // rattache, ZERO mapping.
+      //
+      // La question juste n'est pas « ce canal est-il actif ? » mais « ce canal
+      // porte-t-il un mapping vers un tarif DE CE BIEN ? ». On repond avec NOS
+      // liens (`property_channel_rate_plans` + le tarif de base), pas avec ceux
+      // du provider : c'est la meme source que celle qui cree les mappings.
+      const tarifsDuBien = new Set()
+      if (prop.provider_rate_plan_id) tarifsDuBien.add(String(prop.provider_rate_plan_id))
+      const { data: liensRp, error: eRp } = await supabase
+        .from('property_channel_rate_plans')
+        .select('provider_rate_plan_id')
+        .eq('property_id', prop.id)
+      // ⚠ UNE LECTURE EN ECHEC NE DOIT PAS SE LIRE « PAS MAPPE » : ce serait
+      // renvoyer un bien deja connecte dans le parcours de connexion, et lui
+      // faire creer un second mapping. On le DIT, et on s'abstient de conclure.
+      const liensLisibles = !eRp
+      if (eRp) console.error('[channel-mapping] lecture des tarifs du bien', eRp.message)
+      for (const l of liensRp || []) if (l.provider_rate_plan_id) tarifsDuBien.add(String(l.provider_rate_plan_id))
+
+      const summary = resumerCanaux(rows, tarifsDuBien, liensLisibles)
       return res.status(r.ok ? 200 : 502).json({
         ok: r.ok,
         http: r.status,
@@ -648,3 +709,6 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'Erreur interne' })
   }
 }
+
+// Export secondaire, sans toucher au defaut : la fonction que le test tient.
+module.exports.resumerCanaux = resumerCanaux

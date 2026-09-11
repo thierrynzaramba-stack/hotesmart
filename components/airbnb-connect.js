@@ -218,10 +218,19 @@ function attachReturnListener() {
 async function checkChannels(manual) {
   try {
     const r = await api.channel.mapping.channels(S.property.provider_property_id)
-    if ((r?.channel_count || 0) > 0) {
+    // ⚠ FILTRER SUR L'OTA ICI AUSSI. `channels[0]` prenait le PREMIER canal du
+    // bien, quel qu'il soit : sur un logement deja connecte a Booking, le
+    // sondage d'apres-OAuth retenait le canal BOOKING et enchainait sur l'ecran
+    // de choix d'annonce Airbnb avec un identifiant de canal Booking. C'est le
+    // meme defaut que celui corrige la veille dans `detectAndRoute` — il en
+    // restait une seconde occurrence, dans le chemin d'onboarding.
+    const abnb = (r?.channels || []).filter(c => /airbnb/i.test(String(c.ota || '')))
+    if (abnb.length) {
       if (S.pollTimer) clearInterval(S.pollTimer)
-      S.channelId = r.channels[0].id
-      S.channelActive = r.channels[0].is_active === true
+      // S'il y en a plusieurs, on prend celui qui reste a mapper pour CE bien.
+      const c = abnb.find(x => x.mappe_pour_ce_bien !== true) || abnb[0]
+      S.channelId = c.id
+      S.channelActive = c.is_active === true
       logger.info('airbnb-connect', 'canal detecte', { channelId: S.channelId })
       return screenB()
     }
@@ -485,9 +494,26 @@ async function detectAndRoute() {
     // Constate le 10 septembre 2026 : La bulle ouverte le 31 octobre restait
     // fermee sur Booking, parce qu'il n'y avait plus de canal Booking.
     const chans = (r?.channels || []).filter(c => /airbnb/i.test(String(c.ota || '')))
-    const active = chans.find(c => c.is_active)
-    if (active) { S.channelId = active.id; S.channelActive = true; return screenAlreadyConnected() }
-    if (chans.length) { S.channelId = chans[0].id; S.channelActive = false; return screenB() }   // OAuth fait, mapping a finir
+    // ⚠ ET « CONNECTE » NE VEUT PAS DIRE « CANAL ACTIF ».
+    // Un canal Airbnb porte PLUSIEURS logements ; il est actif des qu'UN seul
+    // y est mappe. Sur un bien neuf rattache a ce canal mais sans mapping,
+    // `find(c => c.is_active)` annoncait « Airbnb est deja connecte » et
+    // proposait de DECONNECTER — alors qu'il restait tout a connecter. C'est le
+    // parcours d'onboarding de tout hote ayant deja un logement chez nous.
+    // Mesure du 11 septembre 2026 sur « Ofuro Futari » : canal actif, bien
+    // rattache, zero mapping. Le serveur repond desormais
+    // `mappe_pour_ce_bien` ; `null` = il n'a pas pu conclure, on ne devine pas.
+    const connecte = chans.find(c => c.mappe_pour_ce_bien === true)
+    if (connecte) { S.channelId = connecte.id; S.channelActive = !!connecte.is_active; return screenAlreadyConnected() }
+    // Un canal existe pour ce bien mais sans mapping : l'OAuth est deja fait
+    // (le canal peut meme etre actif pour d'autres logements), il reste a
+    // choisir l'annonce. C'est le cas d'un second logement sur le meme compte.
+    if (chans.length) {
+      const c = chans[0]
+      S.channelId = c.id
+      S.channelActive = !!c.is_active
+      return screenB()
+    }
     // Aucun canal sur ce bien : le compte a-t-il deja une connexion Airbnb (autre bien) ?
     try {
       const acc = await api.channel.airbnbAccountStatus(S.property.id)

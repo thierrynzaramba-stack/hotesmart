@@ -22,10 +22,16 @@ test('LE TEST QUI COMPTE : l ecran Airbnb ne voit QUE les canaux Airbnb', () => 
   const bloc = src.slice(i, i + 1800)
   assert.ok(/filter\(c => \/airbnb\/i\.test\(String\(c\.ota \|\| ''\)\)\)/.test(bloc),
     'la liste est filtree sur l OTA avant toute selection')
+  // ⚠ ASSERTION ELARGIE LE 11 SEPTEMBRE 2026. Elle cherchait le littéral
+  // `.find(c => c.is_active)` ; ce predicat a ete REMPLACE le meme jour par
+  // `.find(c => c.mappe_pour_ce_bien === true)` — `is_active` est une propriete
+  // du CANAL, pas du BIEN, et un canal partage entre plusieurs logements est
+  // actif des qu'UN seul y est mappe. Ce qui est defendu ici reste le meme :
+  // le filtre sur l'OTA precede TOUTE selection de canal.
   const iFiltre = bloc.indexOf('filter(c => /airbnb/i')
-  const iFind = bloc.indexOf('.find(c => c.is_active)')
+  const iFind = bloc.indexOf('.find(', iFiltre)
   assert.ok(iFiltre > 0 && iFind > iFiltre,
-    'le filtre precede la selection du canal actif')
+    'le filtre precede la selection du canal')
 })
 
 test('LE TEST QUI COMPTE : disconnect ne devine plus le canal, et refuse un canal non Airbnb', () => {
