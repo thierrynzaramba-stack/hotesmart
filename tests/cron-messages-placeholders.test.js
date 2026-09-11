@@ -42,7 +42,13 @@ test('les horaires du bien voyagent avec lui sur le chemin Channex', () => {
   // Sans eux, `{checkin}`/`{checkout}` retombaient sur 18:00/10:00 en dur.
   assert.match(channexProps, /checkin_time: p\.checkin_time/)
   assert.match(channexProps, /checkout_time: p\.checkout_time/)
-  assert.match(channexProps, /select\('[^']*checkin_time[^']*checkout_time[^']*'\)/)
+  // ⚠ LE SELECT EST CONCATENE SUR PLUSIEURS LIGNES depuis que la surveillance
+  // des prix y a ajoute ses colonnes. On recolle les morceaux avant de juger,
+  // sinon le test rougit pour une mise en forme et pas pour le fond.
+  const selectRecolle = channexProps
+    .replace(/'\s*\+\s*'/g, '')            // '…' + '…'  ->  '……'
+  assert.match(selectRecolle, /select\('[^']*checkin_time[^']*checkout_time[^']*'\)/,
+    'les horaires doivent etre SELECTIONNES, pas seulement recopies')
 })
 
 test('les horaires ont trois replis, le defaut en dernier', () => {
