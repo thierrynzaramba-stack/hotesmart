@@ -513,3 +513,180 @@ test('LE TEST QUI COMPTE : une periode DEJA COMMENCEE n a plus de trajectoire', 
   const veille = R.projeter({ ...args, delaiJours: 1 })
   assert.ok(!veille.non_calculable.includes('periode_deja_commencee'))
 })
+
+test('LE TEST QUI COMPTE : la projection rend un INTERVALLE, jamais un point seul', () => {
+  // ⚠ DECISION DE THIERRY, spec §7.1 : « projection a terminaison avec
+  // intervalle, jamais un point unique, qui se lirait comme une prevision alors
+  // que c'est une extrapolation ». L'incertitude est reelle : entre J-14 et
+  // J-30, la part vendue du segment « hors vacances » passe de 45 % a 25 % —
+  // le meme portefeuille donne donc un final tres different selon le palier.
+  const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
+    '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-15']
+  const ref = R.construireReference(nNuits(mardis, 120),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  // Quatre nuits vendues a 100 jours, quatre a 20 jours : a J-21, le palier
+  // inferieur (J-14) et le superieur (J-30) different.
+  const courbe = R.courbeDeDelai([
+    ...mardis.slice(0, 4).map(d => ecl([d], { prix: 120, vente: decale(d, -100) })),
+    ...mardis.slice(4).map(d => ecl([d], { prix: 120, vente: decale(d, -20) }))
+  ], { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+
+  const p = R.projeter({
+    jours: ['2026-03-03', '2026-03-10', '2026-03-17', '2026-03-24'],
+    reference: ref, courbe, contexte: CTX, delaiJours: 21, nuiteesVendues: 2,
+    capacite: { calculable: true, jours_ouverts: 4 }
+  })
+  assert.ok(p.nuitees_finales_extrapolees != null, 'le point central existe')
+  assert.ok(p.nuitees_finales_min != null && p.nuitees_finales_max != null,
+    'et il est encadre')
+  // ⚠ LE SENS DES BORNES : une part ATTENDUE plus ELEVEE veut dire que le
+  // portefeuille actuel represente une plus grosse part du final, donc un final
+  // plus BAS. Les inverser rendrait la fourchette a l'envers — et personne ne
+  // le verrait, les deux nombres restant plausibles.
+  assert.ok(p.nuitees_finales_min <= p.nuitees_finales_max, 'min <= max')
+  // ⚠ ON ASSERTE LES PALIERS ATTENDUS, PAS LEUR RELATION — releve en review.
+  // La premiere version re-derivait la sortie depuis la sortie
+  // (`intervalle_paliers` vient des memes variables que `min`/`max`) : une
+  // implementation qui aurait pris J-0 et J-180, ou toujours le meme palier,
+  // serait passee. A J-21, les encadrants sont J-14 et J-30.
+  const c = courbe.par_segment.get(SEGMENTS.HORS_VACANCES)
+  const p14 = c.courbe.find(x => x.jours_avant === 14).part_vendue
+  const p30 = c.courbe.find(x => x.jours_avant === 30).part_vendue
+  assert.deepStrictEqual(p.intervalle_paliers,
+    [Math.round(Math.min(p14, p30) * 10000) / 10000,
+      Math.round(Math.max(p14, p30) * 10000) / 10000],
+    'les paliers retenus doivent etre ceux qui ENCADRENT le delai')
+  // ⚠ ET LE POINT CENTRAL EST UNE INTERPOLATION entre les deux, pas la borne
+  // basse : `part_vendue` decroit avec le delai, donc le palier inferieur donne
+  // toujours la part la plus haute. Le « point central » etait identiquement le
+  // minimum, et `avance_retard` — colore — tranchait systematiquement du cote
+  // « retard », meme quand la fourchette enjambait zero.
+  const attendue = p14 + (p30 - p14) * ((21 - 14) / (30 - 14))
+  assert.equal(p.part_attendue_a_ce_delai, Math.round(attendue * 10000) / 10000,
+    'la part attendue est INTERPOLEE entre les deux paliers')
+})
+
+test('un intervalle du simple au double se DIT trop large', () => {
+  // Une fourchette qui va du simple au double ne permet pas de decider : mieux
+  // vaut le dire que laisser l'hote croire a une prevision.
+  const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
+    '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-15']
+  const ref = R.construireReference(nNuits(mardis, 120),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  // Sept nuits vendues a 10 jours, une a 200 jours : a J-60 le palier inferieur
+  // (J-30) vaut 1/8 et le superieur (J-90) 1/8 aussi... on force l'ecart en
+  // repartissant sur les paliers encadrants.
+  const courbe = R.courbeDeDelai([
+    ...mardis.slice(0, 1).map(d => ecl([d], { prix: 120, vente: decale(d, -200) })),
+    ...mardis.slice(1, 2).map(d => ecl([d], { prix: 120, vente: decale(d, -80) })),
+    ...mardis.slice(2).map(d => ecl([d], { prix: 120, vente: decale(d, -10) }))
+  ], { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  const p = R.projeter({
+    jours: ['2026-03-03'], reference: ref, courbe, contexte: CTX,
+    delaiJours: 45, nuiteesVendues: 1,
+    capacite: { calculable: true, jours_ouverts: 31 }
+  })
+  // ⚠ PLUS DE `if` QUI REIMPLEMENTE LA CONDITION TESTEE — releve en review :
+  // si la branche ne se declenchait pas, le test passait en n'assertant RIEN.
+  // On assert inconditionnellement l'invariant : jamais une fourchette du
+  // simple au double SANS reserve.
+  assert.ok(p.nuitees_finales_min <= p.nuitees_finales_max)
+  const large = p.nuitees_finales_max != null &&
+    p.nuitees_finales_max > p.nuitees_finales_extrapolees * 2
+  assert.equal(large, p.non_calculable.includes('intervalle_trop_large'),
+    'une fourchette du simple au double DOIT porter sa reserve, et elle seule')
+})
+
+test('LE TEST QUI COMPTE : au-dela du dernier palier, on ne projette PAS', () => {
+  // ⚠ LE DEFAUT LE PLUS GRAVE DU RECADRAGE, releve en review. Quand le delai
+  // depasse le dernier palier (180 j), il n'existe plus de palier superieur :
+  // la premiere version repliait sur le palier inferieur des DEUX cotes, la
+  // fourchette se refermait sur un point, et `intervalle_trop_large` ne pouvait
+  // plus se declencher — precisement la ou l'incertitude est maximale.
+  //
+  // Mesure : aout 2027 vu en septembre 2026, 2 nuitees vendues, part 2 %
+  // → 100 nuitees finales « de 100 a 100 » sur un mois de 31 jours,
+  // soit 322 % d'occupation, affiche EN VERT sur la vue par defaut. Six a sept
+  // lignes sur treize etaient dans cette zone a chaque ouverture de l'app.
+  const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
+    '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-15']
+  const ref = R.construireReference(nNuits(mardis, 120),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  const courbe = R.courbeDeDelai([
+    ...mardis.slice(0, 1).map(d => ecl([d], { prix: 120, vente: decale(d, -200) })),
+    ...mardis.slice(1).map(d => ecl([d], { prix: 120, vente: decale(d, -10) }))
+  ], { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+
+  const p = R.projeter({
+    jours: ['2026-03-03'], reference: ref, courbe, contexte: CTX,
+    delaiJours: 322, nuiteesVendues: 2,
+    capacite: { calculable: true, jours_ouverts: 31 }
+  })
+  assert.ok(p.non_calculable.includes('delai_au_dela_du_dernier_palier'),
+    'on DIT que la periode est plus loin que tout ce qu on a observe')
+  assert.equal(p.nuitees_finales_extrapolees, undefined, 'et on ne projette rien')
+  assert.equal(p.nuitees_finales_min, undefined)
+  assert.equal(p.jours_hors_courbe, 1, 'et on compte les jours concernes')
+})
+
+test('LE TEST QUI COMPTE : une extrapolation ne depasse pas la capacite ouverte', () => {
+  // C'est arithmetiquement impossible : on ne vend pas 100 nuits sur un mois qui
+  // en compte 31. Quand le calcul y mene, c'est que le rythme observe ne
+  // s'applique pas a cette periode — on plafonne ET on le dit.
+  const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
+    '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-15']
+  const ref = R.construireReference(nNuits(mardis, 120),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  // Une seule vente lointaine : a J-45, la part attendue est minuscule.
+  const courbe = R.courbeDeDelai([
+    ...mardis.slice(0, 1).map(d => ecl([d], { prix: 120, vente: decale(d, -95) })),
+    ...mardis.slice(1).map(d => ecl([d], { prix: 120, vente: decale(d, -3) }))
+  ], { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  const p = R.projeter({
+    jours: ['2026-03-03'], reference: ref, courbe, contexte: CTX,
+    delaiJours: 45, nuiteesVendues: 3,
+    capacite: { calculable: true, jours_ouverts: 5 }
+  })
+  if (p.nuitees_finales_extrapolees != null) {
+    assert.ok(p.nuitees_finales_extrapolees <= 5, 'jamais plus que les jours ouverts')
+    assert.ok(p.taux_occupation_extrapole <= 1, 'et jamais plus de 100 % d occupation')
+    if (p.nuitees_finales_plafonnees) {
+      assert.ok(p.non_calculable.includes('extrapolation_au_dela_de_la_capacite'),
+        'un plafonnement se DIT : le rythme ne s applique visiblement pas')
+    }
+  }
+})
+
+test('LE TEST QUI COMPTE : une borne haute non calculable se DIT', () => {
+  // Quand le palier superieur vaut 0 — « rien ne s est jamais vendu a plus de
+  // N jours », le cas le plus courant — la premiere version sautait
+  // l'intervalle ENTIER sans le moindre motif : l'ecran affichait un point
+  // unique en gras, sans reserve. La violation litterale de la spec §7.1 que ce
+  // lot grave dans le meme commit, et elle etait silencieuse.
+  const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
+    '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-15']
+  const ref = R.construireReference(nNuits(mardis, 120),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  // Tout se vend a moins de 60 jours : a J-60, le palier J-90 vaut ZERO.
+  const courbe = R.courbeDeDelai(
+    mardis.map(d => ecl([d], { prix: 120, vente: decale(d, -40) })),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  // ⚠ LE DELAI DOIT TOMBER ENTRE UN PALIER NON NUL ET UN PALIER NUL.
+  // A J-75 les DEUX encadrants valent zero : c'est alors
+  // `rien_ne_se_vend_a_ce_delai` qui sort, un autre cas. Ici J-45 encadre
+  // J-30 (tout vendu) et J-60 (rien) — la borne haute seule est impossible.
+  const c = courbe.par_segment.get(SEGMENTS.HORS_VACANCES)
+  assert.ok(c.courbe.find(x => x.jours_avant === 30).part_vendue > 0)
+  assert.equal(c.courbe.find(x => x.jours_avant === 60).part_vendue, 0,
+    'le palier superieur doit valoir zero pour que le cas soit exerce')
+
+  const p = R.projeter({
+    jours: ['2026-03-03'], reference: ref, courbe, contexte: CTX,
+    delaiJours: 45, nuiteesVendues: 2,
+    capacite: { calculable: true, jours_ouverts: 31 }
+  })
+  assert.ok(p.nuitees_finales_min != null, 'la borne basse existe toujours')
+  assert.equal(p.nuitees_finales_max, undefined, 'la haute, non')
+  assert.ok(p.non_calculable.includes('borne_haute_non_calculable'),
+    'et son absence est DITE, jamais silencieuse')
+})

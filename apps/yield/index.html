@@ -6,16 +6,93 @@
   <title>HôteSmart — Tarification</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    .yf-barre { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+    /* ─── Barre de sélection ─────────────────────────────────────────────── */
+    /* ⚠ `hidden` NE MASQUE RIEN ICI SANS CETTE REGLE — relevé en review.
+       `public/style.css` ne porte pas de `[hidden] { display: none }`, et nos
+       propres règles posent `display: flex` sur `.yf-champ` et `inline-flex`
+       sur `.btn` : une règle d'auteur bat le `display: none` de la feuille du
+       navigateur. Résultat : en Pilotage et en Bilan, l'hôte voyait et pouvait
+       modifier « Du », « Au » et « Détail » — des champs que la vue IGNORE.
+       Il saisissait des dates, cliquait, et recevait les 12 mois glissants
+       sans que rien ne le lui dise. */
+    [hidden] { display: none !important; }
+    .yf-barre { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 18px; }
     .yf-champ { display: flex; flex-direction: column; gap: 4px; }
     .yf-champ label { font-size: 11px; color: var(--text3); font-weight: 500; }
-    .yf-etat { padding: 24px; border: 0.5px solid var(--border); border-radius: var(--radius-lg);
+    .yf-champ select, .yf-champ input { min-width: 130px; }
+
+    /* ─── Blocs ──────────────────────────────────────────────────────────── */
+    .yf-bloc { background: var(--bg); border: 0.5px solid var(--border);
+               border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
+    .yf-bloc h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+    .yf-bloc .yf-sous { font-size: 11px; color: var(--text3); margin: 0 0 14px; }
+
+    /* ─── Cartes d'indicateur ────────────────────────────────────────────── */
+    .yf-cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .yf-carte { border: 0.5px solid var(--border); border-radius: var(--radius);
+                padding: 12px; background: var(--bg2); min-width: 0; }
+    .yf-carte-titre { font-size: 11px; color: var(--text3); font-weight: 500; margin-bottom: 6px; }
+    .yf-valeur { font-size: 21px; font-weight: 600; line-height: 1.15; word-break: break-word; }
+    .yf-valeur.inconnu { font-size: 13px; font-weight: 500; color: #8A6D3B; }
+    .yf-compare { font-size: 11px; margin-top: 5px; color: var(--text2); }
+    .yf-hausse { color: #0F7B3E; font-weight: 600; }
+    .yf-baisse { color: #B02A37; font-weight: 600; }
+    .yf-neutre { color: var(--text3); }
+
+    /* ─── Le vocabulaire du « je ne sais pas » ───────────────────────────── */
+    /* ⚠ Un motif n'est JAMAIS une erreur rouge : c'est une limite honnête de
+       la donnée. Le rouge est réservé aux pannes. */
+    .yf-motif { display: inline-block; font-size: 10.5px; line-height: 1.45;
+                background: #FFF8E6; color: #8A6D3B; border: 0.5px solid #F0DFB0;
+                border-radius: 4px; padding: 2px 6px; margin: 3px 3px 0 0; cursor: help; }
+    .yf-motif.estime { background: #EEF2FF; color: #3A4A8A; border-color: #C9D2F5; }
+    .yf-motif.inconnu { background: #FDECEA; color: #842029; border-color: #F5C2C7; }
+    .yf-explications { margin-top: 10px; font-size: 11px; color: var(--text2); line-height: 1.6; }
+    .yf-explications li { margin-bottom: 5px; }
+    .yf-explications strong { color: var(--text); }
+
+    /* ─── Tableaux ───────────────────────────────────────────────────────── */
+    .yf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .yf-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 560px; }
+    .yf-table th { text-align: right; font-weight: 500; color: var(--text3); font-size: 10.5px;
+                   padding: 6px 8px; border-bottom: 0.5px solid var(--border); white-space: nowrap; }
+    .yf-table th:first-child, .yf-table td:first-child { text-align: left; }
+    .yf-table td { text-align: right; padding: 7px 8px; border-bottom: 0.5px solid var(--border);
+                   white-space: nowrap; }
+    .yf-table tr:last-child td { border-bottom: none; }
+    .yf-table .yf-inconnu { color: #8A6D3B; font-size: 10.5px; white-space: normal; }
+    /* ⚠ La colonne « Limites » peut porter trois badges : sans cette règle elle
+       héritait de `nowrap` et poussait le tableau bien au-delà de sa largeur
+       minimale, allongeant le défilement sur mobile pour rien. */
+    .yf-table td:last-child { white-space: normal; min-width: 120px; }
+    .yf-table tbody tr:hover { background: var(--bg2); }
+
+    /* ─── Onglets de vue ─────────────────────────────────────────────────── */
+    .yf-onglets { display: flex; gap: 2px; margin-bottom: 16px;
+                  border-bottom: 0.5px solid var(--border); }
+    .yf-onglet { background: none; border: none; border-bottom: 2px solid transparent;
+                 padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--text3);
+                 cursor: pointer; font-family: inherit; }
+    .yf-onglet:hover { color: var(--text2); }
+    .yf-onglet.actif { color: var(--text); border-bottom-color: var(--text); }
+    .yf-onglet:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+
+    /* ─── Fourchette de projection ───────────────────────────────────────── */
+    .yf-fourchette { font-size: 10.5px; color: var(--text3); white-space: nowrap; }
+
+    .yf-etat { padding: 20px; border: 0.5px solid var(--border); border-radius: var(--radius-lg);
                background: var(--bg); color: var(--text2); font-size: 13px; }
     .yf-etat.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
-    .yf-sources { margin-top: 16px; font-size: 11px; color: var(--text3); line-height: 1.7; }
-    .yf-sources code { font-size: 11px; }
-    .yf-alerte { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius);
-                 background: #FFF3CD; color: #856404; font-size: 12px; }
+    .yf-pied { font-size: 10.5px; color: var(--text3); line-height: 1.7; margin-top: 4px; }
+
+    @media (max-width: 640px) {
+      .yf-barre { gap: 8px; }
+      .yf-champ { flex: 1 1 46%; }
+      .yf-champ select, .yf-champ input { min-width: 0; width: 100%; }
+      .yf-cartes { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+      .yf-valeur { font-size: 18px; }
+      .yf-bloc { padding: 13px; }
+    }
   </style>
 </head>
 <body>
@@ -23,7 +100,17 @@
 <div class="main">
   <div class="header">
     <h1>Tarification dynamique</h1>
-    <p class="subtitle">Tarification pilotée par la donnée</p>
+    <p class="subtitle">Ce qui s’est passé, où on en est, et ce qui est normal</p>
+  </div>
+
+  <!-- ⚠ LE CADRAGE PAR DEFAUT EST PROSPECTIF — decision de Thierry, spec §7.1.
+       Au 20 decembre, l'annee en cours n'interesse plus le pilotage : les
+       decisions portent sur les mois qui sont devant. Une app qui ouvre sur le
+       realise de l'annee ouvre sur ce qu'on ne peut plus changer. -->
+  <div class="yf-onglets" role="tablist">
+    <button class="yf-onglet actif" id="yf-vue-pilotage" role="tab" data-vue="pilotage">Pilotage</button>
+    <button class="yf-onglet" id="yf-vue-bilan" role="tab" data-vue="bilan">Bilan</button>
+    <button class="yf-onglet" id="yf-vue-exploration" role="tab" data-vue="exploration">Exploration</button>
   </div>
 
   <div class="yf-barre">
@@ -31,57 +118,242 @@
       <label for="yf-bien">Logement</label>
       <select id="yf-bien"></select>
     </div>
-    <div class="yf-champ">
+    <div class="yf-champ yf-si-exploration">
       <label for="yf-debut">Du</label>
       <input type="date" id="yf-debut">
     </div>
-    <div class="yf-champ">
+    <div class="yf-champ yf-si-exploration">
       <label for="yf-fin">Au</label>
       <input type="date" id="yf-fin">
     </div>
-    <div class="yf-champ">
+    <div class="yf-champ yf-si-exploration">
       <label for="yf-granularite">Détail</label>
       <select id="yf-granularite">
         <option value="mois" selected>Par mois</option>
-        <option value="jour">Par jour</option>
         <option value="annee">Par année</option>
+        <option value="jour">Par jour</option>
       </select>
     </div>
-    <button class="btn" id="yf-charger">Charger</button>
+    <div class="yf-champ yf-si-bilan">
+      <label for="yf-annee">Année</label>
+      <select id="yf-annee"></select>
+    </div>
+    <button class="btn" id="yf-charger">Afficher</button>
   </div>
 
   <div id="yf-contenu"></div>
 </div>
 
 <script type="module">
-  // ⚠ LOT 4.1 : LE SOCLE, PAS L'ECRAN. Cette page prouve que le coeur alimente
-  // l'app — elle affiche ce que l'API a rendu, sans le mettre en forme. La
-  // restitution (« RM express ») est le lot 4.2, et elle a une exigence dure
-  // que cette coquille respecte deja : un indicateur `null` s'affiche comme
-  // « non calculable » AVEC SON MOTIF, jamais comme 0 ni comme un tiret muet.
+  // ⚠ LOT 4.2 — L'ECRAN DE RESTITUTION. LECTURE SEULE INTEGRALE : cette page
+  // n'ecrit rien, nulle part. La saisie des exceptions viendra au lot 4.3.
+  //
+  // ⚠ LA REGLE QUI GOUVERNE TOUT CE FICHIER : un indicateur `null` s'affiche
+  // « non calculable » AVEC SON MOTIF EN CLAIR, jamais 0, jamais un tiret muet.
+  // Tout le travail des lots 3.2 a 3.4 — « calculable » n'est pas « divisible »,
+  // le N-1 reconstruit, la capacite estimee, la cascade de repli — devient
+  // visible ici, ou se perd ici. L'ecran a le droit de dire « je ne sais pas ».
+  // Il n'a pas le droit de le cacher.
+  //
+  // SOURCE UNIQUE : /api/yield (lot 4.1). Aucune autre lecture serveur, sauf la
+  // liste des logements du selecteur.
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { motif, nomSegment, MOTIFS, DRAPEAUX_ECRAN, NIVEAUX_REFERENCE } from '/shared/yield-motifs.js'
 
   initErrorHandler()
 
   let session = null
   const el = id => document.getElementById(id)
 
+  // ─── Formatage ────────────────────────────────────────────────────────────
+  const euros = v => v == null ? null :
+    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR',
+      maximumFractionDigits: 0 }).format(v)
+  const eurosPrecis = v => v == null ? null :
+    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v)
+  const pourcent = v => v == null ? null : `${(v * 100).toFixed(1).replace('.', ',')} %`
+  const nombre = v => v == null ? null : new Intl.NumberFormat('fr-FR').format(v)
+  const jours = v => v == null ? null : `${new Intl.NumberFormat('fr-FR').format(v)} j`
+
+  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+    'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  function nomPeriode (cle) {
+    if (/^\d{4}$/.test(cle)) return cle
+    if (/^\d{4}-\d{2}$/.test(cle)) {
+      const [a, m] = cle.split('-')
+      return `${MOIS[Number(m) - 1]} ${a}`
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cle)) {
+      const [a, m, j] = cle.split('-')
+      return `${Number(j)} ${MOIS[Number(m) - 1]} ${a}`
+    }
+    return cle
+  }
+
+  function ech (s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  }
+
+  // ⚠ LE COEUR DE L'ECRAN. Une valeur absente ne rend JAMAIS une chaine vide :
+  // elle rend le motif, lisible, avec son explication en infobulle.
+  function badgeMotif (code, classe = '') {
+    const m = motif(code)
+    if (!m) return ''
+    const cl = m.inconnu ? 'inconnu' : classe
+    return `<span class="yf-motif ${cl}" title="${ech(m.quoi)}">${ech(m.titre)}</span>`
+  }
+
+  function badges (codes, classe = '') {
+    return (codes || []).map(c => badgeMotif(c, classe)).join('')
+  }
+
+  // ⚠ LES DRAPEAUX D'ÉCRAN NE SONT PAS DES MOTIFS DU MOTEUR. Ils ne vivent
+  // donc pas dans `MOTIFS` — le test des traductions orphelines a raison de
+  // les y refuser — mais ils s'affichent exactement pareil.
+  function badgeEcran (code) {
+    const d = DRAPEAUX_ECRAN[code]
+    if (!d) return ''
+    return `<span class="yf-motif estime" title="${ech(d.quoi)}">${ech(d.titre)}</span>`
+  }
+  const badgeEstimee = () => badgeEcran('capacite_estimee')
+
+  // ⚠ LE MOTEUR EST PUR : IL N'A PAS D'HORLOGE. Il calcule donc, à bon droit,
+  // un CA de 0 et une variation de −100 % sur décembre vu en septembre.
+  // L'écran, lui, connaît la date — et la fenêtre par défaut étant l'année
+  // civile, TOUT hôte voyait au premier affichage les mois à venir dans
+  // « ce qui s'est vendu », avec un −100 % rouge qui pousse à brader un mois
+  // qui n'a pas commencé. Relevé en review.
+  function situation (periode, aujourdhui) {
+    if (!aujourdhui) return null
+    const [debut, fin] = bornesPeriode(periode)
+    if (!debut) return null
+    if (debut > aujourdhui) return 'periode_a_venir'
+    if (fin >= aujourdhui) return 'periode_en_cours'
+    return null
+  }
+
+  function bornesPeriode (cle) {
+    if (/^\d{4}$/.test(cle)) return [`${cle}-01-01`, `${cle}-12-31`]
+    if (/^\d{4}-\d{2}$/.test(cle)) {
+      const [a, m] = cle.split('-').map(Number)
+      const dernier = new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10)
+      return [`${cle}-01`, dernier]
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cle)) return [cle, cle]
+    return [null, null]
+  }
+
+  // ─── Init ─────────────────────────────────────────────────────────────────
+  // ⚠ TROIS VUES, UNE SEULE PAR DEFAUT — spec §7.1.
+  //   pilotage    : les 12 prochains mois glissants. Ce qu'on peut encore changer.
+  //   bilan       : le realise d'une annee civile. Ce qu'on ne peut plus changer.
+  //   exploration : fenetre libre.
+  let vue = 'pilotage'
+
+  // Les 12 prochains mois glissants : du 1er du mois EN COURS au dernier jour
+  // du 11e mois suivant — soit DOUZE périodes mensuelles, pas treize. On part
+  // du 1er pour que le mois en cours soit entier : son portefeuille se compare
+  // au même délai N-1, pas à un bout de mois.
+  // ⚠ `m + 12` rendait le dernier jour du MÊME mois l'an prochain, donc treize
+  // périodes — quand le libellé, le commentaire et la spec §7.1 disent douze.
+  function fenetrePilotage () {
+    const d = new Date()
+    const debut = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+    const f = new Date(Date.UTC(d.getFullYear(), d.getMonth() + 12, 0))
+    return { debut, fin: f.toISOString().slice(0, 10) }
+  }
+
   async function init () {
     session = await requireAuth()
     if (!session) return
     renderSidebar('yield').catch(e => console.error('[yield] sidebar', e))
 
-    const auj = new Date()
-    el('yf-debut').value = `${auj.getFullYear()}-01-01`
-    el('yf-fin').value = `${auj.getFullYear()}-12-31`
+    const an = new Date().getFullYear()
+    el('yf-annee').innerHTML = [an, an - 1, an - 2]
+      .map(a => `<option value="${a}">${a}</option>`).join('')
+    const f = fenetrePilotage()
+    el('yf-debut').value = f.debut
+    el('yf-fin').value = f.fin
+
+    for (const b of document.querySelectorAll('.yf-onglet')) {
+      b.addEventListener('click', () => changerVue(b.dataset.vue))
+    }
+    appliquerVue()
 
     const ok = await chargerBiens()
     el('yf-charger').addEventListener('click', charger)
+    // ⚠ LE SELECTEUR PROPOSAIT UNE OPTION QUI NE POUVAIT PAS MARCHER. Le détail
+    // « par jour » sur l'année civile demande 730 périodes avec leurs N-1, au-delà
+    // de ce que l'endpoint accepte : l'hôte recevait une erreur sans savoir qu'il
+    // fallait d'abord réduire les dates. On l'en avertit avant, et on propose.
+    for (const id of ['yf-debut', 'yf-fin', 'yf-granularite']) {
+      el(id).addEventListener('change', verifierEtendue)
+    }
+    el('yf-annee').addEventListener('change', charger)
+    verifierEtendue()
     if (ok && el('yf-bien').value) charger()
+  }
+
+  function changerVue (nouvelle) {
+    if (!nouvelle || nouvelle === vue) return
+    vue = nouvelle
+    appliquerVue()
+    // ⚠ LES MEMES GARDES QU'AU PREMIER CHARGEMENT — relevé en review.
+    // `charger()` inconditionnel court-circuitait l'avertissement d'étendue
+    // (revenir en Exploration avec une fenêtre trop large repartait en 400) et
+    // écrasait le message honnête « aucun logement accessible » par une erreur
+    // technique.
+    if (!el('yf-bien').value) return
+    if (el('yf-charger').disabled) return
+    charger()
+  }
+
+  function appliquerVue () {
+    for (const b of document.querySelectorAll('.yf-onglet')) {
+      b.classList.toggle('actif', b.dataset.vue === vue)
+      b.setAttribute('aria-selected', b.dataset.vue === vue ? 'true' : 'false')
+    }
+    for (const e of document.querySelectorAll('.yf-si-exploration')) {
+      e.hidden = vue !== 'exploration'
+    }
+    for (const e of document.querySelectorAll('.yf-si-bilan')) {
+      e.hidden = vue !== 'bilan'
+    }
+    el('yf-charger').hidden = vue !== 'exploration'
+    if (vue === 'exploration') verifierEtendue()
+    else el('yf-charger').disabled = false
+  }
+
+  // La fenêtre effectivement demandée, selon la vue.
+  function fenetreCourante () {
+    if (vue === 'pilotage') return { ...fenetrePilotage(), granularite: 'mois' }
+    if (vue === 'bilan') {
+      const a = el('yf-annee').value
+      return { debut: `${a}-01-01`, fin: `${a}-12-31`, granularite: 'mois' }
+    }
+    return { debut: el('yf-debut').value, fin: el('yf-fin').value,
+      granularite: el('yf-granularite').value }
+  }
+
+  // Au plus 200 périodes côté serveur, N-1 compris : on prévient à 100.
+  const PERIODES_LISIBLES = 100
+  function verifierEtendue () {
+    const d = el('yf-debut').value, f = el('yf-fin').value
+    const g = el('yf-granularite').value
+    if (!d || !f || f < d) return
+    const jours = Math.round((Date.parse(f) - Date.parse(d)) / 86400000) + 1
+    const periodes = g === 'jour' ? jours : (g === 'mois' ? Math.ceil(jours / 28) : Math.ceil(jours / 365))
+    const trop = periodes > PERIODES_LISIBLES
+    el('yf-charger').disabled = trop
+    if (trop) {
+      etat(`${periodes} périodes demandées : c’est trop pour un seul écran, et trop `
+        + `pour être lu. Réduisez la fenêtre, ou choisissez un détail moins fin.`)
+    }
   }
 
   async function chargerBiens () {
@@ -90,27 +362,31 @@
     if (compte) q = q.eq('user_id', compte)
     const { data, error } = await q
     if (error) { etat('Impossible de lire la liste des logements.', true); return false }
-    // ⚠ UNE LISTE VIDE SE DIT — relevé en review. Un membre au périmètre
-    // restreint peut n'avoir aucun logement visible : sans message, `charger()`
-    // n'était jamais appelé et la page restait entièrement blanche, ce qui se
-    // lit comme une panne.
+    // ⚠ UNE LISTE VIDE SE DIT. Un membre au périmètre restreint peut n'avoir
+    // aucun logement visible : sans message, la page resterait blanche, ce qui
+    // se lit comme une panne.
     if (!data || !data.length) {
-      etat('Aucun logement accessible sur ce compte.', false)
+      etat('Aucun logement accessible sur ce compte.')
       el('yf-charger').disabled = true
       return false
     }
     el('yf-bien').innerHTML = data
-      .map(b => `<option value="${echapper(b.id)}">${echapper(b.name)}</option>`).join('')
+      .map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
     return true
   }
 
+  let enCours = 0
   async function charger () {
+    // ⚠ DEUX CLICS, DEUX REQUETES, ET LA DERNIERE ARRIVEE GAGNE — quelle que
+    // soit la fenêtre demandée. Un jeton de séquence tranche : seule la
+    // réponse de la dernière demande s'affiche.
+    const jeton = ++enCours
+    el('yf-charger').disabled = true
     etat('Lecture du cœur de données…')
+    const f = fenetreCourante()
     const p = new URLSearchParams({
       property_id: el('yf-bien').value,
-      debut: el('yf-debut').value,
-      fin: el('yf-fin').value,
-      granularite: el('yf-granularite').value
+      debut: f.debut, fin: f.fin, granularite: f.granularite
     })
     let r, data
     try {
@@ -119,52 +395,504 @@
       })
       data = await r.json()
     } catch (e) {
-      etat(`Lecture impossible : ${e.message}`, true); return
+      // Une requête obsolète qui échoue ne doit pas réactiver le bouton
+      // pendant qu'une requête plus récente est en vol.
+      if (jeton === enCours) {
+        etat(`Lecture impossible : ${e.message}`, true)
+        el('yf-charger').disabled = false
+      }
+      return
     }
+    if (jeton !== enCours) return          // une demande plus récente a pris la main
+    el('yf-charger').disabled = false
+    // ⚠ UNE ERREUR S'AFFICHE, on ne rend pas un ecran vide. Un ecran vide se
+    // lit « ce logement n'a rien vendu » — le faux negatif que tout ce
+    // chantier combat.
     if (!r.ok) { etat(data?.error || `Erreur ${r.status}`, true); return }
-    rendre(data)
+    el('yf-contenu').innerHTML = rendre(data)
   }
 
+  // ─── Le rendu ─────────────────────────────────────────────────────────────
+  // ⚠ L'ORDRE DES BLOCS DIT CE QU'ON REGARDE EN PREMIER, donc ce sur quoi on
+  // agit. En pilotage, le portefeuille et la projection passent devant : ce
+  // sont les seuls chiffres sur lesquels une décision est encore possible.
+  // Le réalisé y reste, en dernier — le mois en cours n'est pas fini.
   function rendre (d) {
-    const n = (x) => x == null ? '—' : x
-    const lignes = []
-    lignes.push(`<div class="yf-etat">`)
-    lignes.push(`<strong>${echapper(d.bien.name)}</strong> — ${d.fenetre.debut} → ${d.fenetre.fin},`
-      + ` par ${d.fenetre.granularite}. Pivot « à date » : ${d.fenetre.pivot}.`)
-    lignes.push(`<div class="yf-sources">`)
-    lignes.push(`Réalisé : <code>${d.realise.length}</code> période(s) · `
-      + `À date : <code>${d.a_date.length}</code> · `
-      + `Projection : <code>${d.projection.length}</code>`)
-    lignes.push(`<br>Référence sur ${d.historique.ans} ans `
-      + `(${d.historique.debut} → ${d.historique.fin}) : `
-      + `<code>${d.reference.nuits_vues}</code> nuits vues, `
-      + `<code>${Object.keys(d.reference.par_segment).length}</code> segments, `
-      + `seuils ${d.reference.seuil} nuits / ${d.reference.seuil_reservations} réservations`)
-    lignes.push(`<br>Sources : <code>${d.sources.reservations_du_bien}</code> réservations du bien `
-      + `sur <code>${d.sources.reservations}</code> du compte · `
-      + `<code>${d.sources.jours_hors_reference}</code> jour(s) hors référence`)
-    lignes.push(`</div>`)
-
-    // ⚠ LES DRAPEAUX DE SOURCE SE VOIENT DES CE LOT. La table des vacances
-    // s'arrête à la dernière année scolaire publiée : au-delà, tout serait
-    // classé « hors vacances » — un été entier en basse saison, sans erreur.
-    if (d.sources.vacances && !d.sources.vacances.complete) {
-      lignes.push(`<div class="yf-alerte">Vacances scolaires incomplètes : `
-        + `${echapper(d.sources.vacances.manque || '')}. `
-        + `La référence des périodes concernées est faussée.</div>`)
+    if (vue === 'bilan') {
+      return [blocSources(d), blocRealise(d), blocReference(d),
+        blocRythme(d), blocPickup(d)].join('')
     }
-    lignes.push(`</div>`)
-    el('yf-contenu').innerHTML = lignes.join('')
+    if (vue === 'pilotage') {
+      return [blocSources(d), blocPickup(d), blocProjection(d),
+        blocReference(d), blocRythme(d), blocRealise(d)].join('')
+    }
+    return [blocSources(d), blocRealise(d), blocPickup(d),
+      blocReference(d), blocRythme(d), blocProjection(d)].join('')
+  }
+
+  // 1. Ce sur quoi tout repose — affiché EN PREMIER, parce qu'une source
+  //    incomplète invalide tout ce qui suit.
+  function blocSources (d) {
+    const v = d.sources.vacances
+    const alertes = []
+    if (v && !v.complete) {
+      alertes.push(`<li><strong>Calendrier scolaire incomplet.</strong> ${ech(v.manque || '')}
+        Les périodes concernées sont classées « hors vacances » : leur référence est faussée.</li>`)
+    }
+    if (!d.sources.reservations_du_bien) {
+      alertes.push(`<li><strong>Aucune réservation sur ce logement.</strong>
+        Tous les indicateurs ci-dessous sont vides pour cette raison, et non parce que rien ne s’est vendu.</li>`)
+    }
+    // ⚠ LE SIGNAL LE PLUS ACTIONNABLE DU PILOTAGE, ET IL ETAIT NOYE.
+    // Un hôte dont huit des douze prochains mois sont fermés doit le savoir
+    // en premier : aucun prix, aucune projection, aucune suggestion ne servira
+    // tant que le calendrier est fermé. Le badge par ligne le disait
+    // trente-deux fois — donc plus du tout.
+    const fermes = (d.a_date || []).filter(a =>
+      (a.drapeaux || []).includes('periode_fermee_a_la_vente'))
+    if (fermes.length) {
+      const liste = fermes.slice(0, 4).map(a => nomPeriode(a.periode)).join(', ')
+      alertes.push(`<li><strong>${fermes.length} période(s) fermée(s) à la vente</strong>
+        sur ${d.a_date.length} — ${ech(liste)}${fermes.length > 4 ? '…' : ''}.
+        ${vue === 'bilan'
+          ? `Ces périodes n’étaient pas vendables : leur zéro n’est pas un résultat commercial.`
+          : `Aucun prix ne peut s’y vendre : c’est le premier geste à faire avant toute
+             décision tarifaire.`}</li>`)
+    }
+    if (d.sources.jours_hors_reference) {
+      alertes.push(`<li><strong>${nombre(d.sources.jours_hors_reference)} jour(s) hors référence.</strong>
+        Périodes que vous avez déclarées exceptionnelles : elles comptent dans le réalisé,
+        jamais dans ce qui est « normal ».</li>`)
+    }
+    // ⚠ TOUT CE QUI N'A PAS TROUVÉ SA PLACE AILLEURS S'AFFICHE ICI. Un motif
+    // sans chemin d'affichage est perdu aussi sûrement qu'un motif non traduit.
+    const restes = [...new Set([
+      ...(d.realise || []).flatMap(r => r.non_calculable || []),
+      ...(d.projection || []).flatMap(p => p.non_calculable || [])
+    ])].filter(c => ['hors_fenetre_du_contexte', 'date_invalide', 'fenetre_invalide',
+      'segment_non_reconnu', 'periode_trop_longue', 'parametres_invalides'].includes(c))
+    if (restes.length) {
+      alertes.push(`<li><strong>Limites de lecture.</strong> ${restes.map(c => badgeMotif(c)).join(' ')}</li>`)
+    }
+    const cadrage = vue === 'pilotage'
+      ? `<strong>Les 12 prochains mois</strong> — ce sur quoi vous pouvez encore agir`
+      : (vue === 'bilan'
+        ? `<strong>Bilan ${d.fenetre.debut.slice(0, 4)}</strong> — ce qui est joué`
+        : `Fenêtre libre`)
+    return `<div class="yf-bloc">
+      <h2>${ech(d.bien.name)}</h2>
+      <p class="yf-sous">${cadrage} · ${nomPeriode(d.fenetre.debut)} →
+        ${nomPeriode(d.fenetre.fin)} · portefeuille observé au
+        ${nomPeriode(d.fenetre.pivot)} · référence sur ${d.historique.ans} ans</p>
+      ${alertes.length ? `<ul class="yf-explications">${alertes.join('')}</ul>` : ''}
+      <p class="yf-pied">
+        ${nombre(d.sources.reservations_du_bien)} réservation(s) de ce logement ·
+        ${nombre(d.reference.nuits_vues)} nuit(s) d’historique ·
+        capacité ${d.bien.capacity ? `${d.bien.capacity} personne(s)` : 'non renseignée'}
+        ${d.bien.prix_minimum ? ` · prix plancher ${eurosPrecis(d.bien.prix_minimum / 100)}` : ''}
+      </p>
+    </div>`
+  }
+
+  // 2. Le réalisé, période par période, avec sa comparaison N-1.
+  function blocRealise (d) {
+    // ⚠ EN PILOTAGE, LE REALISE NE MONTRE PAS L'AVENIR. Sur douze mois devant,
+    // un tableau « ce qui s'est vendu » dont douze lignes sur treize portent
+    // « À venir » n'est pas une information, c'est du bruit — et il noyait les
+    // deux signaux qui comptent. Ces mois se lisent dans « À date ».
+    const source = vue === 'pilotage'
+      ? d.realise.filter(r => situation(r.periode, d.fenetre.aujourdhui) !== 'periode_a_venir')
+      : d.realise
+    if (!source.length) {
+      return bloc('Réalisé', 'Ce qui s’est vendu',
+        `<p class="yf-etat">Aucune période écoulée dans cette fenêtre —
+        tout est devant vous, dans « À date ».</p>`)
+    }
+    // ⚠ LES DRAPEAUX SE POSENT UNE FOIS PAR LIGNE, PAS PAR CELLULE.
+    // Première version : « Estimé » sur chaque colonne qui divise — 66 badges
+    // sur deux tableaux. Un drapeau qui crie partout ne dit plus rien, leçon de
+    // la review du lot 3.3. Une colonne « Limites » les regroupe.
+    const COUVERTS = ['aucun_jour_ouvert', 'capacite_non_calculable',
+      'aucune_nuit_a_prix_connu', 'aucune_date_de_vente_fiable', 'revpar_sur_ca_partiel',
+      'provider_sans_memoire_intention', 'memoire_non_amorcee',
+      'futur_sans_memoire_intention', 'base_price_non_selectionne', 'periode_trop_longue',
+      'parametres_invalides',
+      // ⚠ EN LÉGENDE, PAS SUR CHAQUE LIGNE. `capacite_en_personnes_inconnue`
+      // est poussé sur TOUTES les périodes ouvertes quand la capacité du
+      // logement n'est pas renseignée : douze badges par an pour expliquer
+      // l'absence d'une colonne que cet écran n'affiche pas.
+      'capacite_en_personnes_inconnue', 'aucune_nuit_avec_occupants',
+      'aucune_nuit_avec_occupants_partiel']
+    const lignes = source.map(r => {
+      const quand = situation(r.periode, d.fenetre.aujourdhui)
+      const restants = (r.non_calculable || []).filter(c => !COUVERTS.includes(c))
+      // ⚠ UNE COMPARAISON DONT UN TERME EST ESTIMÉ EST ELLE-MÊME ESTIMÉE.
+      // `comparerAN1` pose `estimee` si L'UN DES DEUX côtés l'est : l'écran ne
+      // regardait que la période courante, donc une ligne 2026 mesurée
+      // affichait « +18 % » en vert contre un dénominateur 2025 inventé par
+      // convention, sans le moindre drapeau.
+      const compEstimee = ['ca', 'taux_occupation'].some(c => r.vs_n1[c] && r.vs_n1[c].estimee)
+      return `<tr>
+        <td>${nomPeriode(r.periode)}</td>
+        <td>${cell(euros(r.ca), null, quand ? [quand] : null)}</td>
+        <td>${comparaison(r.vs_n1.ca, euros, quand)}</td>
+        <td>${cell(nombre(r.nuitees))}</td>
+        <td>${cell(pourcent(r.taux_occupation), motifsCapacite(r))}</td>
+        <td>${comparaison(r.vs_n1.taux_occupation, pourcent, quand, 'points')}</td>
+        <td>${cell(eurosPrecis(r.prix_moyen), motifsDe(r, ['aucune_nuit_a_prix_connu']))}</td>
+        <td>${cell(eurosPrecis(r.revpar), motifsCapacite(r),
+          motifsDe(r, ['revpar_sur_ca_partiel']))}</td>
+        <td>${cell(jours(r.delai_median), motifsDe(r, ['aucune_date_de_vente_fiable']))}</td>
+        <td>${quand ? badgeEcran(quand) : ''}${r.capacite_estimee ? badgeEstimee() : ''}${
+          compEstimee && !r.capacite_estimee ? badgeEcran('comparaison_estimee') : ''}${badges(restants)}</td>
+      </tr>`
+    }).join('')
+    // ⚠ LES TOTAUX N'ADDITIONNENT QUE LES PÉRIODES ÉCOULÉES. Additionner un
+    // mois qui n'a pas commencé à onze mois révolus donnerait un « total de
+    // l'année » qui n'est celui de rien.
+    const ecoulees = source.filter(r => !situation(r.periode, d.fenetre.aujourdhui))
+    const total = ecoulees.reduce((s, r) => s + (r.ca || 0), 0)
+    const nuitees = ecoulees.reduce((s, r) => s + (r.nuitees || 0), 0)
+    const aVenir = source.length - ecoulees.length
+    return bloc('Réalisé', 'Ce qui s’est vendu, et ce que ça valait l’an dernier',
+      `<div class="yf-scroll"><table class="yf-table">
+        <thead><tr>
+          <th>Période</th><th>CA</th><th>vs N-1</th><th>Nuitées</th>
+          <th>Occupation</th><th>vs N-1</th><th>Prix moyen</th><th>RevPAR</th>
+          <th>Délai médian</th><th>Limites</th>
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table></div>
+      <p class="yf-pied">${ecoulees.length
+        ? `Périodes écoulées : <strong>${euros(total)}</strong> sur ${nombre(nuitees)} nuitée(s).`
+        : `Aucune période écoulée dans cette fenêtre — un total n’aurait rien à additionner.`}${
+        aVenir ? ` ${aVenir} période(s) en cours ou à venir, exclues du total :
+      leur portefeuille se lit dans « À date ».` : ''}
+      ${legendeEstimee(source)}${legendePersonnes(source)}</p>`)
+  }
+
+  // ⚠ LE MOTIF PRÉCIS PLUTÔT QUE LE GÉNÉRIQUE — relevé en review.
+  // `indicateurs.js` pose `capacite_raison` avec la VRAIE cause, et l'écran
+  // n'affichait que « le calendrier n'a jamais été enregistré ». Sur un bien
+  // Beds24 la vérité est « ce logement n'est pas relié au canal » : l'hôte
+  // lisait qu'il avait oublié de renseigner un calendrier qui n'existe pas
+  // chez lui. Quatre traductions existaient et n'étaient jamais atteintes.
+  function motifsCapacite (r) {
+    const codes = (r.non_calculable || [])
+      .filter(c => ['aucun_jour_ouvert', 'capacite_non_calculable'].includes(c))
+    if (!codes.length) return null
+    if (codes.includes('aucun_jour_ouvert')) return ['aucun_jour_ouvert']
+    return [r.capacite_raison || 'capacite_non_calculable']
+  }
+
+  // 3. Le « à date » : le portefeuille déjà vendu, contre le même délai l'an
+  //    dernier. C'est le seul indicateur qui laisse encore le temps d'agir.
+  function blocPickup (d) {
+    const avenir = d.a_date.filter(a => a.a_date || a.a_date_n1)
+    if (!avenir.length) {
+      return bloc('À date', 'Le portefeuille déjà vendu', `<p class="yf-etat">Rien à comparer sur cette fenêtre.</p>`)
+    }
+    // ⚠ LES DRAPEAUX QUI DISQUALIFIENT LE N-1 DOIVENT NUANCER SES COLONNES.
+    // `pickup.js` annule `ecart` et `variation` quand le N-1 est aveugle,
+    // fermé ou sans capacité — mais `a_date_n1.ca` reste à 0. L'écran rendait
+    // « 0 € » en gras dans la colonne « CA N-1 », c'est-à-dire exactement ce
+    // que le module interdit de laisser croire : « son zéro ne veut pas dire
+    // rien vendu, il veut dire rien de visible ». Relevé en review.
+    const DISQUALIFIENT = ['aveugle_avant_bascule', 'periode_n1_fermee_a_la_vente',
+      'capacite_n1_non_amorcee']
+    const lignes = avenir.map(a => {
+      const n = a.a_date, n1 = a.a_date_n1
+      const dq = (a.drapeaux || []).filter(x => DISQUALIFIENT.includes(x))
+      const delai = a.delai_jours == null ? ''
+        : (a.delai_jours > 0 ? `à ${a.delai_jours} j du début` : 'période commencée')
+      // Ce qui a été écarté du portefeuille, avec son dénominateur : « 6 sur 9 »
+      // se lit, « 6 » ne se lit pas. `pickup.js` a été corrigé en review pour
+      // fournir ce dénominateur — encore faut-il l'afficher.
+      const perdues = a.ecartes_n1
+        ? (a.ecartes_n1.sans_date_de_vente || 0) + (a.ecartes_n1.date_de_vente_non_fiable || 0)
+        : 0
+      return `<tr>
+        <td>${nomPeriode(a.periode)}<div class="yf-pied">${delai}</div></td>
+        <td>${cell(euros(n ? n.ca : null))}</td>
+        <td>${dq.length ? `<span class="yf-inconnu">${badges(dq)}</span>`
+                        : cell(euros(n1 ? n1.ca : null))}</td>
+        <td>${comparaison(a.vs_n1.ca, euros)}</td>
+        <td>${cell(nombre(n ? n.nuitees : null))}</td>
+        <td>${dq.length ? '<span class="yf-inconnu">—</span>'
+                        : cell(nombre(n1 ? n1.nuitees : null))}</td>
+        <td>${badges((a.drapeaux || []).filter(x =>
+          x !== 'portefeuille_n1_reconstruit' && !DISQUALIFIENT.includes(x)))}${
+          perdues ? `<div class="yf-pied">${perdues} réservation(s) N-1 écartée(s) sur ${a.candidats_n1 || perdues}</div>` : ''}</td>
+      </tr>`
+    }).join('')
+    return bloc('À date', `Ce qui est déjà vendu, contre le même délai l’an dernier`,
+      `<div class="yf-scroll"><table class="yf-table">
+        <thead><tr>
+          <th>Période</th><th>CA à date</th><th>CA N-1</th><th>Écart</th>
+          <th>Nuitées</th><th>N-1</th><th>Ce qu’il faut savoir</th>
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table></div>
+      <ul class="yf-explications">
+        <li><strong>Le N-1 est reconstruit, jamais observé</strong> — sur toutes les lignes,
+        c’est pourquoi ce n’est pas répété dans la colonne. Une réservation vendue avant
+        cette date puis annulée depuis a disparu du portefeuille de comparaison :
+        le N-1 est sous-estimé, donc la progression affichée est flattée.</li>
+        <li><strong>« Fermé à la vente » n’est pas « rien vendu ».</strong> Un calendrier
+        fermé explique un zéro : ce n’est pas un échec commercial, c’est une décision.</li>
+      </ul>`)
+  }
+
+  // 4. La référence : ce qui est « normal » pour ce logement.
+  function blocReference (d) {
+    const segs = Object.entries(d.reference.par_segment || {})
+    if (!segs.length) {
+      return bloc('Référence', 'Ce qui est normal pour ce logement',
+        `<p class="yf-etat">${badgeMotif('aucun_historique')} Pas assez d’historique.</p>`)
+    }
+    const lignes = segs
+      .sort((a, b) => b[1].echantillon - a[1].echantillon)
+      .map(([code, v]) => {
+        // ⚠ LE VERDICT VIENT DU MOTEUR. La première version refaisait le test
+        // des deux seuils dans la page : si la règle change côté moteur,
+        // l'écran diverge en silence — l'esprit exact de la règle 13.
+        return `<tr>
+          <td>${ech(nomSegment(code))}</td>
+          <td>${cell(eurosPrecis(v.valeur),
+            v.non_calculable ? [v.non_calculable] : null)}</td>
+          <td>${v.min == null ? '<span class="yf-inconnu">—</span>'
+                              : `${eurosPrecis(v.min)} – ${eurosPrecis(v.max)}`}</td>
+          <td>${nombre(v.echantillon)}</td>
+          <td>${nombre(v.reservations)}</td>
+        </tr>`
+      }).join('')
+    return bloc('Référence', `Prix médian par type de période, sur ${d.historique.ans} ans`,
+      `<div class="yf-scroll"><table class="yf-table">
+        <thead><tr>
+          <th>Type de période</th><th>Prix médian</th><th>Étendue</th>
+          <th>Nuits</th><th>Réservations</th>
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table></div>
+      <ul class="yf-explications">
+        <li><strong>Médiane, pas moyenne.</strong> Une nuit bradée ne déplace pas la médiane.</li>
+        <li><strong>Seuil : ${d.reference.seuil} nuits et ${d.reference.seuil_reservations} réservations.</strong>
+        En dessous, la référence se tait : une médiane calculée sur si peu de nuits est un
+        accident, pas une norme. (Ces deux seuils viennent du moteur — ils ne sont recopiés
+        nulle part.)</li>
+        ${d.reference.nuits_long_sejour ? `<li><strong>${nombre(d.reference.nuits_long_sejour)} nuit(s)
+        de longs séjours</strong> écartées : un tarif dégressif sur quatre semaines fabriquerait la norme
+        au lieu de la mesurer.</li>` : ''}
+        ${d.reference.nuits_sans_prix ? `<li><strong>${nombre(d.reference.nuits_sans_prix)} nuit(s)
+        sans prix connu</strong> écartées du calcul.</li>` : ''}
+      </ul>`)
+  }
+
+  // 5. Le rythme de vente : quand une nuit se vend. ⚠ SANS CE BLOC, onze
+  //    motifs traduits n'avaient AUCUN chemin d'affichage — dont « dates de
+  //    vente non fiables », explicitement demandé. Un motif traduit mais
+  //    jamais affiché est aussi perdu qu'un motif non traduit.
+  function blocRythme (d) {
+    const segs = Object.entries((d.courbe && d.courbe.par_segment) || {})
+    if (!segs.length) {
+      return bloc('Rythme de vente', 'Quand une nuit se vend',
+        `<p class="yf-etat">${badgeMotif('aucun_historique')} Pas assez d’historique daté.</p>`)
+    }
+    const paliers = d.courbe.paliers.filter(j => j > 0)
+    const lignes = segs
+      .sort((a, b) => b[1].nuits_datees - a[1].nuits_datees)
+      .map(([code, v]) => `<tr>
+        <td>${ech(nomSegment(code))}</td>
+        ${paliers.map(j => {
+          const p = v.courbe.find(x => x.jours_avant === j)
+          return `<td>${v.fiable && p && p.part_vendue != null
+            ? pourcent(p.part_vendue) : '<span class="yf-inconnu">—</span>'}</td>`
+        }).join('')}
+        <td>${cell(jours(v.delai_median), v.non_calculable ? [v.non_calculable] : null)}</td>
+        <td>${nombre(v.nuits_datees)} / ${nombre(v.nuits)}</td>
+        <td>${v.nuits_sans_date_fiable ? badgeMotif('date_de_vente_non_fiable') : ''}${
+          v.non_calculable ? badgeMotif(v.non_calculable) : ''}</td>
+      </tr>`).join('')
+    return bloc('Rythme de vente', 'Part des ventes déjà faites, tant de jours avant la nuit',
+      `<div class="yf-scroll"><table class="yf-table">
+        <thead><tr>
+          <th>Type de période</th>
+          ${paliers.map(j => `<th>${j} j avant</th>`).join('')}
+          <th>Délai médian</th><th>Nuits datées</th><th>Limites</th>
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table></div>
+      <ul class="yf-explications">
+        <li><strong>Ce n’est pas un taux d’occupation.</strong> C’est la part des ventes
+        <em>finales</em> déjà réalisées à ce délai : « 36 % à 30 jours » veut dire qu’un tiers
+        de ce qui se vendra était vendu un mois avant.</li>
+        <li><strong>Seules les dates de vente fiables comptent.</strong> Une date recréée lors
+        d’une migration placerait toutes les ventes au même jour et écraserait la courbe.
+        ${d.courbe.nuits_sans_date_fiable
+          ? `<strong>${nombre(d.courbe.nuits_sans_date_fiable)} nuit(s)</strong> sont dans ce cas.`
+          : ''}</li>
+        <li>Un segment sous le seuil ne montre pas de courbe : un rythme calculé sur
+        quelques nuits est une anecdote.</li>
+      </ul>`)
+  }
+
+  // 6. La projection : prix attendu, trajectoire, et le biais assumé.
+  function blocProjection (d) {
+    const utiles = d.projection.filter(p => p.prix_attendu_moyen != null || p.non_calculable.length)
+    if (!utiles.length) {
+      return bloc('Projection', 'Ce que l’historique laisse attendre',
+        `<p class="yf-etat">Rien à projeter sur cette fenêtre.</p>`)
+    }
+    const lignes = utiles.map(p => {
+      const avance = p.avance_retard
+      const cls = avance == null ? 'yf-neutre' : (avance >= 0 ? 'yf-hausse' : 'yf-baisse')
+      // ⚠ LE NIVEAU DE REPLI SE NOMME, il ne se compte pas seulement — c'est
+      // l'un des drapeaux demandés. `NIVEAUX_REFERENCE` était traduit, testé,
+      // et jamais importé : seul un compteur nu survivait.
+      const niv = NIVEAUX_REFERENCE.segment_x_jour
+      const replis = p.jours_replies
+        ? `<div class="yf-pied" title="${ech(niv.quoi)}">${p.jours_replies}/${p.jours_projetes}
+           jour(s) sur ${ech(niv.titre.toLowerCase())}</div>` : ''
+      return `<tr>
+        <td>${nomPeriode(p.periode)}</td>
+        <td>${cell(eurosPrecis(p.prix_attendu_moyen))}${replis}</td>
+        <td>${cell(p.part_attendue_a_ce_delai == null ? null : pourcent(p.part_attendue_a_ce_delai))}</td>
+        <td>${p.nuitees_finales_extrapolees == null
+          ? cell(null)
+          : `<strong>${nombre(p.nuitees_finales_extrapolees)}</strong>${
+              p.nuitees_finales_min != null
+                ? `<div class="yf-fourchette">de ${nombre(p.nuitees_finales_min)}
+                   à ${nombre(p.nuitees_finales_max)}</div>` : ''}`}</td>
+        <td>${avance == null
+          ? cell(null)   // le POURQUOI est dans « Limites » : le répéter ici
+                         // doublerait le badge sur chaque ligne
+          : `<span class="${cls}">${(avance >= 0 ? '+' : '') + nombre(avance)}</span>`}</td>
+        <td>${badges((p.non_calculable || [])
+          .filter(x => x !== 'periode_fermee_a_la_vente'))}</td>
+      </tr>`
+    }).join('')
+    return bloc('Projection', 'Ce que l’historique laisse attendre',
+      `<div class="yf-scroll"><table class="yf-table">
+        <thead><tr>
+          <th>Période</th><th>Prix attendu / nuit</th><th>Part déjà vendue attendue</th>
+          <th>Nuitées à terminaison</th><th>Avance / retard</th><th>Limites</th>
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table></div>
+      <ul class="yf-explications">
+        <li><strong>« Part déjà vendue » est une part des ventes finales, pas un taux d’occupation.</strong>
+        On extrapole le total attendu depuis ce qui est déjà vendu — on ne multiplie jamais la capacité.</li>
+        <li><strong>L’avance ou le retard se mesure contre l’occupation de l’an dernier.</strong>
+        Sans elle, le moteur préfère ne rien dire plutôt que d’inventer une norme.</li>
+        <li><strong>C’est une fourchette, pas une prévision.</strong> Le chiffre en gras suppose
+        que la période se vendra au rythme habituel de son segment ; les bornes viennent des deux
+        paliers de la courbe qui encadrent le délai du jour. Entre 14 et 30 jours avant la nuit,
+        ce rythme varie fortement — la fourchette le dit plutôt que de le masquer.</li>
+        <li><strong>Aucune projection sur une période fermée</strong> : cela inventerait un manque à gagner
+        qui n’existe pas.</li>
+      </ul>`)
+  }
+
+  // ─── Briques ──────────────────────────────────────────────────────────────
+  function bloc (titre, sous, corps) {
+    return `<div class="yf-bloc"><h2>${titre}</h2><p class="yf-sous">${sous}</p>${corps}</div>`
+  }
+
+  // ⚠ LA BRIQUE QUI PORTE LA REGLE. Une valeur absente rend le MOTIF, jamais
+  // une case vide et jamais un zéro.
+  // ⚠ LA BRIQUE QUI PORTE LA RÈGLE, et sa moitié oubliée : une valeur qui
+  // EXISTE peut être NUANCÉE. `revpar_sur_ca_partiel` est poussé alors que le
+  // RevPAR vaut quelque chose — il est sous-estimé, pas absent. La première
+  // version jetait les motifs dès qu'une valeur était là : le moteur avait
+  // fait le travail de dire « ce chiffre est un minimum », l'écran l'avalait.
+  function cell (valeur, motifs = null, nuances = null) {
+    if (valeur != null) {
+      return `<strong>${valeur}</strong>${nuances && nuances.length ? badges(nuances) : ''}`
+    }
+    if (motifs && motifs.length) return `<span class="yf-inconnu">${badges(motifs)}</span>`
+    // Aucun motif fourni : on le DIT quand même, jamais une case vide.
+    return `<span class="yf-inconnu">non calculable</span>`
+  }
+
+  // Les motifs d'une ligne qui concernent CET indicateur — pas tous ceux de la
+  // période, sinon chaque colonne répéterait les mêmes badges.
+  function motifsDe (ligne, codes) {
+    const presents = (ligne.non_calculable || []).filter(c => codes.includes(c))
+    return presents.length ? presents : null
+  }
+
+  // ⚠ NI 0, NI « −100 % » QUAND ON NE SAIT PAS. Une comparaison non calculable
+  // rend son motif, pas un chiffre.
+  function comparaison (c, format, quand = null, unite = null) {
+    if (!c) return `<span class="yf-inconnu">non calculable</span>`
+    if (c.non_calculable) {
+      return `<span class="yf-inconnu">${badgeMotif(c.non_calculable)}</span>`
+    }
+    // ⚠ COMPARER UN MOIS NON COMMENCÉ À UN MOIS COMPLET DONNE TOUJOURS UNE
+    // CHUTE. Le moteur ne le sait pas — il n'a pas d'horloge — donc l'écran
+    // refuse la comparaison plutôt que d'afficher un −100 % qui n'a pas de sens.
+    // ⚠ ET « EN COURS » AUTANT QU'« À VENIR » — relevé en review. Le
+    // raisonnement est le même mot pour mot : un mois entamé se compare à un
+    // mois COMPLET de l'an dernier. En vue Pilotage c'est d'autant plus grave
+    // que le tableau Réalisé ne contient plus qu'une ligne — le mois en cours —
+    // donc ce −78 % rouge était l'unique chiffre de comparaison de la vue par
+    // défaut, et il était trompeur.
+    if (quand === 'periode_a_venir' || quand === 'periode_en_cours') {
+      return `<span class="yf-inconnu">${badgeEcran(quand)}</span>`
+    }
+    if (c.variation == null) {
+      // ⚠ N-1 À ZÉRO : « 0 € » à la place du pourcentage se lit « aucune
+      // évolution », alors que c'est l'inverse. Le moteur fournit l'écart.
+      if (c.ecart != null && c.ecart !== 0) {
+        const signe = c.ecart > 0 ? '+' : ''
+        return `<span class="${c.ecart > 0 ? 'yf-hausse' : 'yf-baisse'}">${signe}${format(c.ecart)}</span>
+          <div class="yf-pied">contre ${format(c.n1)} l’an dernier</div>`
+      }
+      return `<span class="yf-neutre">${format(c.n1)}</span>`
+    }
+    // ⚠ UN TAUX SE COMPARE EN POINTS, PAS EN POURCENTAGE DE POURCENTAGE.
+    // 20 % → 22,4 % affichait « +12 % » : l'hôte lit douze points. L'écart
+    // réel est de 2,4 points, et le moteur le calcule déjà.
+    if (unite === 'points' && c.ecart != null) {
+      const pts = c.ecart * 100
+      const cls = pts >= 0 ? 'yf-hausse' : 'yf-baisse'
+      return `<span class="${cls}">${pts >= 0 ? '+' : ''}${pts.toFixed(1).replace('.', ',')} pts</span>
+        <div class="yf-pied">${format(c.n1)}</div>`
+    }
+    const pct = (c.variation * 100)
+    const cls = pct >= 0 ? 'yf-hausse' : 'yf-baisse'
+    // ⚠ `toFixed(0)` rendait « +0 % » EN VERT pour +0,4 % : une décimale sous
+    // le demi-point, sinon l'arrondi invente une stabilité.
+    const texte = Math.abs(pct) < 1 ? pct.toFixed(1).replace('.', ',') : pct.toFixed(0)
+    // Le drapeau « estimé » est porté par la colonne « Limites » de la ligne.
+    return `<span class="${cls}">${pct >= 0 ? '+' : ''}${texte} %</span>
+      <div class="yf-pied">${format(c.n1)}</div>`
+  }
+
+  // ⚠ EN LÉGENDE, PAS SUR CHAQUE LIGNE. Poussé sur toutes les périodes
+  // ouvertes quand la capacité du logement n'est pas renseignée.
+  function legendePersonnes (lignes) {
+    const codes = ['capacite_en_personnes_inconnue', 'aucune_nuit_avec_occupants',
+      'aucune_nuit_avec_occupants_partiel']
+    const vus = [...new Set(lignes.flatMap(r => (r.non_calculable || [])
+      .filter(c => codes.includes(c))))]
+    if (!vus.length) return ''
+    return `<br>${vus.map(c => badgeMotif(c)).join(' ')}
+      L’occupation en personnes n’est pas affichée sur cet écran, mais ces limites
+      la concernent et vaudront pour les suggestions de prix.`
+  }
+
+  function legendeEstimee (lignes) {
+    const n = lignes.filter(r => r.capacite_estimee).length
+    if (!n) return ''
+    return `<br>${n} période(s) à <strong>capacité estimée</strong> : avant la mise en service du
+      calendrier, un jour passé sans trace est réputé ouvert, sauf exception déclarée.
+      Le taux d’occupation et le RevPAR y sont des estimations, pas des mesures.`
   }
 
   function etat (msg, erreur = false) {
     el('yf-contenu').innerHTML =
-      `<div class="yf-etat${erreur ? ' erreur' : ''}">${echapper(msg)}</div>`
-  }
-
-  function echapper (s) {
-    return String(s ?? '').replace(/[&<>"']/g, c =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+      `<div class="yf-etat${erreur ? ' erreur' : ''}">${ech(msg)}</div>`
   }
 
   init()

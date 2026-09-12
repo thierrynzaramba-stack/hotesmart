@@ -217,9 +217,38 @@ Projections calculées depuis le snapshot (vues ou tables dérivées recalculabl
 
 ## 7. Étape 4 — Restitution et suggestion
 
+### 7.1 LE CADRAGE PAR DÉFAUT EST PROSPECTIF — décision de Thierry, 12/09/2026
+
+**La vue par défaut de l'app Yield porte sur les 12 PROCHAINS MOIS GLISSANTS à
+partir d'aujourd'hui, jamais sur l'année civile.**
+
+Raison : **au 20 décembre, l'année en cours n'intéresse plus le pilotage.** Les
+décisions tarifaires portent sur les mois qui sont devant. Une app qui ouvre sur
+le réalisé de l'année ouvre sur ce qu'on ne peut plus changer — c'est un bilan
+comptable, pas un instrument de pilotage. Le cadrage n'est pas un détail
+d'affichage : il décide de ce que l'hôte regarde en premier, donc de ce sur quoi
+il agit.
+
+Pour chaque mois à venir, la vue de pilotage montre :
+- le **portefeuille déjà vendu** à date ;
+- sa **comparaison au même délai N-1**, avec les drapeaux existants (N-1
+  reconstruit, aveuglement pré-bascule, période fermée, capacité estimée) ;
+- la **projection à terminaison, avec intervalle** — jamais un point unique, qui
+  se lirait comme une prévision alors que c'est une extrapolation.
+
+### 7.2 Le rétrospectif reste, en vue SECONDAIRE
+
+Le réalisé de l'année et l'historique restent accessibles par un sélecteur de
+vue. C'est le bilan, pas le pilotage — et les deux ne se regardent pas au même
+moment ni pour les mêmes décisions.
+
+Le **sélecteur de fenêtre libre** reste disponible pour l'exploration.
+
+### 7.3 Le reste de l'étape 4
+
 - Écran de synthèse (concepts type « RM express », interface propre à HôteSmart,
-  jamais la structure des fichiers de formation) : réalisé vs N-1, à date vs N-1,
-  événements à venir, exceptions déclarées.
+  jamais la structure des fichiers de formation) : à date vs N-1 d'abord,
+  réalisé vs N-1 en second, événements à venir, exceptions déclarées.
 - Suggestions de prix par date (grille 5 niveaux, pipeline en couches, correction
   jour-de-semaine en dernier) présentées à l'hôte ; « Appliquer » écrit dans le
   calendrier existant (chemin normal, donc journal des prix alimenté, `source=engine`).

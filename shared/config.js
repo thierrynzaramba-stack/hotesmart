@@ -16,10 +16,10 @@ const CONFIG = {
     // ⚠ L'ID EST `yield` — celui du chantier (`lib/yield/`, `/api/yield`,
     // `apps/yield/`). Le LIBELLE, lui, dit ce que l'app FAIT : regle gravee
     // (spec-moteur-reservation.md §3 ter), « jamais un nom de marque ».
-    // `active: false` jusqu'au lot 4.2 : au lot 4.1 l'app n'a rien a montrer
-    // a un hote, et une entree de menu qui ouvre une page vide se lit comme
-    // une panne.
-    { id: 'yield', name: 'Tarification dynamique', icon: '💰', color: '#FBF0FF', active: false },
+    // ACTIVE au lot 4.2 : l'ecran de restitution est rendu et valide sur
+    // pieces (La bulle, 12 septembre 2026). L'app est en LECTURE SEULE — la
+    // saisie des exceptions vient au lot 4.3, l'application d'un prix au 4.6.
+    { id: 'yield', name: 'Tarification dynamique', icon: '💰', color: '#FBF0FF', active: true },
     // Nom GRAVE (spec-moteur-reservation.md §3 ter) : un libelle qui dit ce que
     // ca fait, jamais un nom de marque. Ne pas rebaptiser.
     { id: 'reservation-directe', name: 'Réservation directe', icon: '🔗', color: '#E6F1FB', active: true }
