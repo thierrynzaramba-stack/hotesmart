@@ -205,3 +205,33 @@ test('l alerte dit que le tarif RESTE dans le calendrier', () => {
   assert.ok(/LE TARIF RESTE DANS LE CALENDRIER/.test(src))
   assert.ok(/cette alerte reviendra/.test(src))
 })
+
+test('LE TEST QUI COMPTE : « pas de prix » ne s affiche jamais « 0 »', () => {
+  // ⚠ SIGNALE PAR THIERRY LE 12 SEPTEMBRE 2026 : « j'ai des nuits a 0 sur
+  // Ofuro ». Verification en base : AUCUNE nuit a zero. 966 nuits sans tarif
+  // (`rate = NULL`), toutes fermees (`stop_sell`, `avail = 0`), donc
+  // invendables — et zero nuit ouverte sans prix.
+  //
+  // Le calendrier mobile faisait `Number(currentBien.base_price) || 0` : sur un
+  // bien sans prix de base, `null` devenait 0 et l'ecran affichait « 0 € ».
+  // Zero est un PRIX — et le pire, puisque le canal ne l'applique pas et vend
+  // au tarif de la grille. L'absence de prix est un ETAT : la nuit est fermee.
+  // Les confondre a fait craindre a l'hote de brader son logement.
+  const mobile = fs.readFileSync(path.join(__dirname, '..', 'pages/calendrier-mobile.html'), 'utf8')
+  assert.ok(!/Number\(currentBien\.base_price\)\|\|0|Number\(currentBien\.base_price\) \|\| 0/.test(mobile),
+    'plus de `|| 0` qui fabrique un prix a zero')
+  assert.ok(/return \(b>0\)\?b:null/.test(mobile), 'sans prix de base, on rend null')
+  assert.ok(/function afficherTarif\(v,sym\)\{ return v==null \? '—'/.test(mobile),
+    'et l affichage montre « — »')
+  // Les calculs, eux, ont besoin d un nombre : ils passent par rateCalcul.
+  assert.ok(/function rateCalcul\(iso\)/.test(mobile))
+  assert.ok(!/computeFinal\(rateFor\(/.test(mobile),
+    'aucun calcul ne part de rateFor, qui peut valoir null')
+
+  const grille = fs.readFileSync(path.join(__dirname, '..', 'pages/biens-calendrier.html'), 'utf8')
+  assert.ok(/s\.rate == null \? '—'/.test(grille), 'meme regle dans la grille')
+
+  const core = fs.readFileSync(path.join(__dirname, '..', 'shared/calendar-core.js'), 'utf8')
+  assert.ok(/sansPrix: rate == null/.test(core),
+    'l etat porte explicitement « sans prix », pour que les vues n aient pas a deviner')
+})

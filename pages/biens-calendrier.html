@@ -326,7 +326,9 @@
     // curSym : deplace verbatim dans shared/calendar-core.js.
     function cellDisplay(param,s,bien){
       switch(param){
-        case 'rate': return s.rate+curSym(bien.currency)
+        // « — » quand aucun tarif n'est defini : la nuit est fermee faute de
+        // prix, elle n'est pas a vendre a zero.
+        case 'rate': return s.rate == null ? '—' : (s.rate+curSym(bien.currency))
         case 'maxRate': return maxRateOf(bien,s.rate)+curSym(bien.currency)
         case 'avail': return s.avail==='closed'?'<span style="color:#d52a44">Ferme</span>':'<span style="color:#d2d2d7">.</span>'
         case 'minStayArr': return s.minStayArr>0?'<span style="color:#6e6e73">&#127769;'+s.minStayArr+'</span>':'<span style="color:#d2d2d7">.</span>'

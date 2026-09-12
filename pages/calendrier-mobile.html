@@ -338,7 +338,17 @@
       renderGrid()
     }
 
-    function rateFor(iso){ const r=inv[iso]; return (r&&r.rate!=null)?Number(r.rate):(Number(currentBien.base_price)||0) }
+    // ⚠ `Number(null) || 0` RENDAIT 0 : sur un bien sans prix de base, toute
+    // nuit non tarifee s'affichait « 0 € ». Zero est un prix — et le canal ne
+    // l'applique meme pas, il vend au tarif de la grille — alors que l'absence
+    // de prix est un ETAT : la nuit est fermee, invendable. On rend `null`, et
+    // l'affichage montre « — ».
+    function rateFor(iso){ const r=inv[iso]; if(r&&r.rate!=null)return Number(r.rate);
+      const b=Number(currentBien.base_price); return (b>0)?b:null }
+    // Pour les CALCULS (augmenter de X %, etc.), il faut un nombre : sans prix
+    // de depart, il n'y a rien a augmenter.
+    function rateCalcul(iso){ const v=rateFor(iso); return v==null?0:v }
+    function afficherTarif(v,sym){ return v==null ? '—' : (v+(sym||'')) }
     function isUnavail(iso){ const r=inv[iso]; return !!(r&&(r.avail===0||r.stop_sell)) }
     function isConfigured(iso){ const r=inv[iso]; if(!r)return false; return (r.min_stay_arrival||r.min_stay_through||r.max_stay||r.cta||r.ctd||r.stop_sell||r.rate!=null) }
 
@@ -404,7 +414,7 @@
     function cellValue(iso){
       const r=inv[iso]||{}
       switch(currentView){
-        case 'rate': return rateFor(iso)+'\u20ac'
+        case 'rate': return afficherTarif(rateFor(iso),'\u20ac')
         case 'minStayArr': return r.min_stay_arrival>0?('\u{1F319}'+r.min_stay_arrival):''
         case 'minStayThrough': return r.min_stay_through>0?(''+r.min_stay_through+'n'):''
         case 'maxStay': return r.max_stay>0?('max '+r.max_stay):''
@@ -552,7 +562,7 @@
           body+='<div class="preview" id="pp-prev"></div>'
         } else if(p.type==='price'){
           // valeur actuelle pre-remplie (prix de la date cliquee), mode 'modifier' par defaut
-          if(!pending[p.key])pending[p.key]={mode:'set',unit:'eur',value:String(rateFor(sheetDate)),dow:defaultDow()}
+          if(!pending[p.key])pending[p.key]={mode:'set',unit:'eur',value:(rateFor(sheetDate)==null?'':String(rateFor(sheetDate))),dow:defaultDow()}
           const pv=pending[p.key]
           body+=dowChipsHtml(p.key,pv.dow)
           body+='<div class="price-row"><input class="fld" type="number" inputmode="decimal" data-val="'+p.key+'" value="'+pv.value+'"/><button class="mode-btn '+(pv.mode==='set'?'active-mod':'')+'" data-modebtn="'+p.key+'">'+(pv.mode==='set'?'Modifier':(pv.mode==='inc'?'+ Ajouter':'- Soustraire'))+'</button></div>'
@@ -637,7 +647,7 @@
             // personne ne l'ait demande. Un champ que l'hote n'a pas touche ne doit
             // jamais voyager dans un segment.
             const seg={ date_from:iso, date_to:iso, days:[], min_stay_arrival:1, min_stay_through:0, cta:false, ctd:false }
-            if(o.price.enabled && o.price.value!=='' && !isNaN(parseFloat(o.price.value))){ seg.rate=computeFinal(rateFor(iso),o.price.mode,o.price.unit,parseFloat(o.price.value)) }
+            if(o.price.enabled && o.price.value!=='' && !isNaN(parseFloat(o.price.value))){ seg.rate=computeFinal(rateCalcul(iso),o.price.mode,o.price.unit,parseFloat(o.price.value)) }
             segments.push(seg)
           })
         }
@@ -649,7 +659,7 @@
         if(p.type==='price'){
           if(pv.value===''||isNaN(parseFloat(pv.value)))return
           if(pv.mode==='set'&&pv.unit==='eur'){ segments.push({date_from:sISO,date_to:eISO,days:daysArr,rate:parseFloat(pv.value)}) }
-          else { const d=new Date(sISO+'T00:00:00'), last=new Date(eISO+'T00:00:00'); while(d<=last){ const dow=d.getDay(); if(!daysArr.length||daysArr.includes(dow)){ const iso=toISO(d); segments.push({date_from:iso,date_to:iso,rate:computeFinal(rateFor(iso),pv.mode,pv.unit,parseFloat(pv.value))}) } d.setDate(d.getDate()+1) } }
+          else { const d=new Date(sISO+'T00:00:00'), last=new Date(eISO+'T00:00:00'); while(d<=last){ const dow=d.getDay(); if(!daysArr.length||daysArr.includes(dow)){ const iso=toISO(d); segments.push({date_from:iso,date_to:iso,rate:computeFinal(rateCalcul(iso),pv.mode,pv.unit,parseFloat(pv.value))}) } d.setDate(d.getDate()+1) } }
         } else if(p.type==='num'){ if(pv.value==='')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='minStayArr')seg.min_stay_arrival=parseInt(pv.value,10)||0; else if(p.key==='minStayThrough')seg.min_stay_through=parseInt(pv.value,10)||0; else if(p.key==='maxStay')seg.max_stay=parseInt(pv.value,10)||0; segments.push(seg) }
         else if(p.type==='openclosed'){ if(pv.value==='keep')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='cta')seg.cta=(pv.value==='closed'); else if(p.key==='ctd')seg.ctd=(pv.value==='closed'); segments.push(seg) }
         else if(p.type==='avail'){ if(pv.value==='keep')return; segments.push({date_from:sISO,date_to:eISO,days:daysArr,avail:(pv.value==='closed')?0:1}) }

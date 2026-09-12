@@ -53,9 +53,20 @@ export function buildStateFromInventory(days, inv, base) {
   return days.map(d => {
     const iso = toISO(d)
     const r = src[iso]
-    const rate = (r && r.rate != null) ? Number(r.rate) : base
+    // ⚠ « PAS DE PRIX » N'EST PAS « PRIX A ZERO » — signale par Thierry le
+    // 12 septembre 2026. Sur un bien sans `base_price`, toute nuit non tarifee
+    // rendait `null`, que les ecrans affichaient « 0 ». L'hote lisait donc des
+    // « nuits a 0 € » sur un calendrier ou AUCUNE nuit n'est a zero : elles
+    // sont sans tarif, et de ce fait FERMEES (fermeture calculee de
+    // runFullSync). Zero est un prix, et un prix dangereux ; l'absence de prix
+    // est un etat. Les confondre a coute une inquietude legitime.
+    const brut = (r && r.rate != null) ? Number(r.rate) : base
+    const rate = (brut == null || Number.isNaN(Number(brut))) ? null : Number(brut)
     return {
       rate,
+      // `true` quand aucun tarif n'est defini, ni pour la nuit ni en prix de
+      // base : la nuit n'est vendable nulle part. A afficher « — », pas « 0 ».
+      sansPrix: rate == null,
       avail: (r && r.avail === 0) ? 'closed' : 'open',
       minStayArr: (r && r.min_stay_arrival) || 0,
       minStayThrough: (r && r.min_stay_through) || 0,
