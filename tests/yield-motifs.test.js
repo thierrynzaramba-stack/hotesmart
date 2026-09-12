@@ -17,7 +17,11 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const RACINE = path.join(__dirname, '..')
-const MODULES = ['indicateurs', 'capacite', 'pickup', 'reference', 'eclatement', 'vacances']
+// ⚠ TOUT MODULE QUI PRODUIT DES MOTIFS EST LISTE ICI. En oublier un fait
+// passer ses motifs pour des traductions orphelines — ce qui est le bon
+// signal : le test a refuse de passer quand `suggestion` (lot 4.4) est arrive.
+const MODULES = ['indicateurs', 'capacite', 'pickup', 'reference', 'eclatement',
+  'vacances', 'suggestion']
 
 let traduction = null
 test.before(async () => {
@@ -41,6 +45,8 @@ function motifsDuMoteur () {
   const pickup = require('../lib/yield/pickup')
   for (const v of Object.values(pickup.DRAPEAUX)) noter(v, 'pickup.DRAPEAUX')
   for (const v of Object.values(pickup.MOTIFS_ECART)) noter(v, 'pickup.MOTIFS_ECART')
+  const suggestion = require('../lib/yield/suggestion')
+  for (const v of Object.values(suggestion.MOTIFS)) noter(v, 'suggestion')
 
   // 2. Les chaines litterales poussees dans `non_calculable` ou rendues comme
   //    motif. ⚠ C'est la moitie qui ECHAPPE aux constantes — et c'est celle
@@ -321,4 +327,20 @@ test('LE TEST QUI COMPTE : les refus de l ecriture sont traduits, TOUS', () => {
   // Et le repli ne masque jamais : un code inconnu ressort tel quel.
   assert.equal(traduction.refus('code_du_futur'), 'code_du_futur')
   assert.equal(traduction.refus(null), 'Opération impossible.')
+})
+
+test('LE TEST QUI COMPTE : les motifs du MOTEUR DE SUGGESTION sont traduits', () => {
+  // Derives du module, jamais recopies — regle 13. Le lot 4.4 en ajoute cinq,
+  // et c'est l'ecran qui suggere un PRIX : un code technique y serait pire
+  // qu'ailleurs.
+  const { MOTIFS: M } = require('../lib/yield/suggestion')
+  const codes = Object.values(M)
+  // ⚠ LE COMPTE EXACT, PAS UN PLANCHER — releve en review. `>= 5` laissait
+  // disparaitre deux motifs sans que rien ne le dise, alors que le module en
+  // porte huit.
+  assert.equal(codes.length, Object.keys(M).length)
+  assert.ok(codes.length >= 8, `derivation cassee : ${codes.length} motifs`)
+  const muets = codes.filter(c => !traduction.MOTIFS[c])
+  assert.deepStrictEqual(muets, [],
+    'motifs du moteur de suggestion sans traduction')
 })

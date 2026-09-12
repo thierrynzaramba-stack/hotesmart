@@ -202,6 +202,34 @@ export const MOTIFS = {
     titre: 'Fourchette trop large',
     quoi: 'À ce délai, le rythme de vente historique est trop dispersé pour resserrer la prévision : la fourchette va du simple au double, elle ne permet pas de décider.'
   },
+  date_fermee_a_la_vente: {
+    titre: 'Fermée à la vente',
+    quoi: 'Aucun prix ne peut se vendre sur cette nuit tant qu’elle est fermée. Ouvrez-la au calendrier, la suggestion apparaîtra.'
+  },
+  ouverture_de_la_date_inconnue: {
+    titre: 'Date jamais renseignée',
+    quoi: 'Votre calendrier ne va pas jusqu’à cette nuit : nous ne savons pas si elle est ouverte à la vente. Suggérer un prix reviendrait à supposer qu’elle l’est.'
+  },
+  segment_sous_le_seuil: {
+    titre: 'Trop peu d’historique',
+    quoi: 'Ce type de période n’a pas assez de nuits vendues, ou pas assez de réservations distinctes, pour établir une grille de prix défendable.'
+  },
+  suggestion_sous_le_plancher: {
+    titre: 'Sous votre prix plancher',
+    quoi: 'Le prix que l’historique suggère passe sous le plancher que vous avez fixé. Nous ne le remontons pas à votre place : ce serait vous recommander un prix que le moteur n’a pas calculé.'
+  },
+  nuit_deja_passee: {
+    titre: 'Nuit déjà passée',
+    quoi: 'Cette nuit est derrière nous : un prix n’y changerait rien.'
+  },
+  deplacement_sans_effet_sur_le_prix: {
+    titre: 'Ajustement sans effet',
+    quoi: 'Les signaux justifiaient de monter ou de descendre, mais vos prix passés sur ce type de nuit sont trop resserrés pour que cela change un euro. Le prix proposé est le prix de référence.'
+  },
+  aucune_grille: {
+    titre: 'Aucune grille',
+    quoi: 'Ce type de période n’apparaît pas dans votre historique : aucun prix passé ne permet d’en proposer un.'
+  },
   segment_non_reconnu: {
     titre: 'Type de période inconnu',
     quoi: 'Ce jour n’a pas pu être rattaché à un type de période (vacances, férié, pont) : le calendrier scolaire ne le couvre pas.'
