@@ -1029,6 +1029,23 @@ module.exports = async function handler(req, res) {
       //   - `/restrictions` ok : un refus laisse l'ANCIEN prix chez l'OTA ;
       //   - au moins un prix a journaliser.
       // Le journal dit ce que le VOYAGEUR a vu, pas ce que l'hote a voulu.
+      // ⚠ DIAGNOSTIC PERMANENT, ET IL N'EST PAS DE TROP.
+      // Le 12 septembre 2026, trois prix reels sont partis aux plateformes sans
+      // que le journal n'ecrive une ligne. Writer, lecture des nuits occupees,
+      // deploiement : tout a ete verifie bon. Impossible de trancher a distance
+      // QUEL terme de la condition etait faux — parce qu'aucun des trois
+      // n'etait journalise. Un `if` muet sur un chemin non retroactif est une
+      // perte definitive : on dit desormais pourquoi on n'ecrit pas.
+      const journalPeut = {
+        nuits: Object.keys(prixParNuit).length,
+        managed: canPushRates(bien),
+        restrictions: resultatsPoussee.restrictions || null,
+        relie: estRelieAuCanal(bien), propId: !!propId, ratePlanId: !!ratePlanId
+      }
+      if (!(journalPeut.nuits && journalPeut.managed && resultatsPoussee.restrictions?.ok)) {
+        console.log('[calendar] journal des prix NON ecrit :', JSON.stringify(journalPeut))
+      }
+
       if (Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok) {
         try {
           // ⚠ UNE NUIT DEJA VENDUE N'EST PLUS AFFICHEE — releve en review.
