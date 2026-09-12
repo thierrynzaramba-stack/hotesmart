@@ -110,6 +110,76 @@ l'hote lui ferait croire que ses prix ne sont pas partis, donc les repousser,
 donc ecraser. On perd une ligne de journal, jamais une vente — mais on le dit
 fort dans les logs, parce qu'un journal muet est un journal faux.
 
+## 4 bis. Une TROISIEME origine : ouvrir une date deja tarifee
+
+Trouvee le 12 septembre 2026 en verifiant le journal de Cœur de vie 23.
+
+Le point de capture d'`api/calendar.js` ne voyait que les **poussees de prix**.
+Or une nuit peut devenir affichee **sans qu'un prix soit pousse** : elle portait
+deja un tarif en base — ecrit par un `runFullSync` ou une saisie anterieure —
+elle etait FERMEE, et l'hote se contente de l'**ouvrir**. Le prix devient alors
+visible du voyageur sans qu'aucune ligne de journal existe.
+
+Mesure : **14 nuits de week-end** portaient 110 ou 130 EUR depuis le
+10 septembre, etaient fermees lors de l'amorcage — donc legitimement non
+amorcees, « une nuit fermee n'a jamais ete affichee » — puis ont ete ouvertes le
+12 au matin par un segment qui ne portait que la disponibilite. Pour le moteur,
+ces nuits n'avaient jamais eu de prix. Rattrapage : 58 lignes `seed` posees le
+12 septembre sur les trois biens reels.
+
+`ouverturesDeDatesTarifees()` (fonction pure) detecte ces dates. Elle applique
+**mot pour mot les regles de `runFullSync`** — absence de ligne = fermee, `rate`
+nul ou <= 0 = repli sur `base_price`, et **plancher** : sous `prix_minimum` le
+full sync FERME la date, donc rien n'est affiche, donc rien a journaliser.
+
+### Un geste EXPLICITE de disponibilite est exige
+
+Releve en review du correctif lui-meme. La premiere version parcourait **toutes**
+les dates touchees par la requete. Une date sans ligne en base dont l'hote ne
+modifiait que le sejour minimum passait pour une ouverture : `etatAvant` absent
+valait « fermee », l'objet neuf n'avait ni `stop_sell` ni `avail` donc passait
+pour « ouvert », et le prix de base etait journalise.
+
+Or **le calendrier mobile pousse un segment PAR PARAMETRE sur la meme plage** :
+regler « sejour minimum 2 » sur octobre-novembre aurait fabrique une soixantaine
+de lignes « prix affiche » pour des nuits que personne ne peut reserver.
+
+Seules les dates dont le geste touche `avail` ou `stop_sell` sont candidates.
+
+### Chaque origine est validee contre LE FLUX QUI LA PORTE, et par date
+
+| origine | flux | ce qu'on exige |
+|---|---|---|
+| tarif pousse | `/restrictions` | `restrictions.ok` |
+| ouverture par `avail` | `/availability` | `availability.ok` **et** la date presente, ouverte, dans ce qui est REELLEMENT parti |
+| ouverture par levee de `stop_sell` | `/restrictions` | `restrictions.ok` |
+
+**`availability.ok` n'est pas un verdict par date.** `pousserAri` le pose des
+qu'un appel HTTP aboutit, quelle que soit la date qu'il portait. Le bloc de
+plafonnement peut avoir **retire** une ouverture (nuit deja vendue, ou
+`nuitsOccupees` en echec) tout en laissant partir une fermeture : l'appel
+reussit, `ok` vaut `true`, et la date retiree serait journalisee comme affichee
+alors qu'elle est restee fermee chez le provider. C'est le mode de panne du
+11-12 septembre — celui ou « les prix partent, les ouvertures non ».
+
+`nuitsAJournaliser()` compose l'ensemble final en exigeant que la date figure
+dans `availByDate` **apres** plafonnement, avec une valeur > 0.
+
+**Une ligne de trop est un mensonge definitif** dans un journal non retroactif ;
+une ligne manquante n'est qu'une donnee absente. Le defaut par defaut est donc
+de ne PAS journaliser.
+
+### Le cas laisse ouvert, deliberement
+
+Une date a la fois retarifee et ouverte dans le meme geste est exclue de
+l'origine « ouverture » (`dejaPousses`). Si `/restrictions` echoue et que
+`/availability` reussit, la nuit devient visible **a l'ancien prix** — celui de
+la grille provider, present dans `etatAvant[ds].rate` — et rien n'est
+journalise. Cas etroit, assume : journaliser le prix POUSSE serait faux (il
+n'est pas parti), et journaliser l'ancien demanderait de distinguer deux
+verites dans la meme requete. `etatAvant` rend le rattrapage possible si ce cas
+se revele frequent.
+
 ## 5. Deux pieges de cle, tous deux silencieux
 
 **Le prix ne se relit pas dans `restByDate`.** Quand le bien a une tarification

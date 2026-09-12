@@ -9,7 +9,9 @@
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
-const { enregistrerPrixPousses } = require('../lib/price-log')
+const {
+  enregistrerPrixPousses, ouverturesDeDatesTarifees, nuitsAJournaliser
+} = require('../lib/price-log')
 const { tarifAcceptable, messageRefus } = require('../lib/yield/prix-plancher')
 const { reaffirmerStopSell } = require('../lib/channel-availability')
 const { readStatus } = require('../lib/bookings-snapshot')
@@ -627,7 +629,13 @@ module.exports = async function handler(req, res) {
 
     // ---- 1) Upsert Supabase (source de verite) ----
     // On materialise chaque segment en lignes par date (en respectant le filtre days).
-    const rowsByDate = {} // 'YYYY-MM-DD' -> partial fields
+    const rowsByDate = {} // 'YYYY-MM-DD' -> partial fields (etat APRES fusion)
+    // ⚠ L'ETAT *AVANT* ECRITURE, GARDE A PART.
+    // `rowsByDate` est modifie juste apres par les segments : il portera l'etat
+    // d'APRES. Pour savoir qu'une date vient de PASSER de fermee a ouverte —
+    // donc que son tarif deja en base devient affiche — il faut les deux.
+    const etatAvant = {}  // 'YYYY-MM-DD' -> ligne telle qu'elle etait EN BASE
+    const gesteOuverture = {} // 'YYYY-MM-DD' -> { avail, stopSell } : ce que le geste touche
     const expandDays = (date_from, date_to, days) => {
       const out = []
       const d = new Date(date_from + 'T00:00:00')
@@ -782,7 +790,11 @@ module.exports = async function handler(req, res) {
           console.error('[calendar] relecture inventory echec', exErr.message)
           return res.status(503).json({ error: 'Enregistrement refuse : impossible de relire le calendrier existant' })
         }
-        ;(existingRows || []).forEach(er => { rowsByDate[er.date] = { ...er } })
+        ;(existingRows || []).forEach(er => {
+          rowsByDate[er.date] = { ...er }
+          // Une COPIE, pas une reference : les segments modifient `rowsByDate`.
+          etatAvant[er.date] = { ...er }
+        })
       }
     }
 
@@ -801,6 +813,16 @@ module.exports = async function handler(req, res) {
         // s'effacait toute seule.
         // `avail` reste ecrit — c'est la trace de la derniere valeur poussee — mais
         // la DECISION va desormais dans la colonne qui la porte.
+        // ⚠ ON NOTE QUE CETTE DATE PORTE UNE DECISION DE DISPONIBILITE.
+        // Le journal ne peut appeler « ouverture » qu'une date dont le geste
+        // touche vraiment `avail` ou `stop_sell` : sans cela, regler un simple
+        // sejour minimum sur une plage fabriquerait des « prix affiches » pour
+        // des nuits que personne ne peut reserver (releve en review).
+        if (seg.avail != null || seg.stop_sell != null) {
+          const g = gesteOuverture[ds] || (gesteOuverture[ds] = { avail: false, stopSell: false })
+          if (seg.avail != null) g.avail = true
+          if (seg.stop_sell != null) g.stopSell = true
+        }
         if (seg.avail != null) { r.avail = seg.avail; r.stop_sell = (seg.avail === 0) }
         // Un stop_sell explicite passe APRES : quand l'hote regle les deux, c'est
         // lui qui tranche.
@@ -915,6 +937,38 @@ module.exports = async function handler(req, res) {
         date: d, sig: JSON.stringify(restByDate[d]),
         value: { property_id: propId, rate_plan_id: ratePlanId, ...restByDate[d] }
       }))
+
+      // ⚠ OUVRIR UNE DATE DEJA TARIFEE, C'EST L'AFFICHER — lacune du
+      // 12 septembre 2026, trouvee en verifiant le journal de Coeur de vie 23.
+      //
+      // Le point de capture ne voyait que les POUSSEES DE PRIX. Or une date
+      // peut devenir affichee sans qu'un prix soit pousse : elle portait deja
+      // un tarif en base — ecrit par un `runFullSync` ou une saisie
+      // anterieure — et l'hote se contente de l'OUVRIR. Le prix devient alors
+      // visible du voyageur (il etait deja dans la grille du provider) sans
+      // qu'une ligne de journal existe.
+      //
+      // Constate : 14 nuits de week-end d'octobre et novembre portaient 110 ou
+      // 130 EUR depuis le 10 septembre, etaient fermees lors de l'amorcage —
+      // donc legitimement non amorcees, « une nuit fermee n'a jamais ete
+      // affichee » — puis ont ete ouvertes le 12 au matin par un segment qui
+      // ne portait que la disponibilite. Pour le moteur, ces nuits n'avaient
+      // jamais eu de prix.
+      //
+      // Le journal ne se rattrape pas : chaque ouverture non captee est une
+      // donnee perdue pour toujours.
+      // La detection vit dans `lib/price-log.js` : c'est une regle du journal,
+      // pas une regle du calendrier, et elle y est testable sans HTTP.
+      const ouverturesTarifees = ouverturesDeDatesTarifees(etatAvant, rowsByDate, {
+        gestes: gesteOuverture,      // sans geste explicite, rien n'est retenu
+        dejaPousses: prixParNuit,
+        basePrice: bien.base_price,
+        bien                         // pour le plancher : sous `prix_minimum`,
+      })                             // le full sync FERME la date, rien n'est affiche
+      if (Object.keys(ouverturesTarifees).length) {
+        console.log(`[calendar] journal des prix : ${Object.keys(ouverturesTarifees).length}`
+          + ` date(s) ouverte(s) avec un tarif deja en base`)
+      }
 
       // 3) Availability : items tries par date -> coalescence (room_type uniquement)
       //
@@ -1089,15 +1143,35 @@ module.exports = async function handler(req, res) {
       // ⚠ UN `if` MUET SUR UN CHEMIN NON RETROACTIF EST UNE PERTE DEFINITIVE.
       // Le journal ne se rattrape pas : une non-ecriture silencieuse perd le
       // prix pour toujours. On dit donc POURQUOI on n'ecrit pas, a chaque fois.
-      if (!(Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok)) {
+      // ⚠ CHAQUE ORIGINE CONTRE LE FLUX QUI LA PORTE, ET CONTRE CE QUI EST
+      // REELLEMENT PARTI. La composition vit dans `lib/price-log.js` : c'est
+      // une regle du journal, et elle y est testable sans HTTP.
+      //
+      // `availByDate` est passe APRES le plafonnement : c'est la que les
+      // ouvertures retirees (nuit deja vendue, ou stock non verifiable)
+      // disparaissent. Sans ce filtre, `availability.ok` — qui est vrai des
+      // qu'un appel HTTP aboutit, meme s'il ne portait qu'une FERMETURE —
+      // faisait journaliser des nuits restees fermees chez le provider.
+      const aJournaliser = nuitsAJournaliser({
+        prixPousses: prixParNuit,
+        ouvertures: ouverturesTarifees,
+        resultats: resultatsPoussee,
+        availEnvoyees: availByDate
+      })
+
+      if (!(Object.keys(aJournaliser).length && canPushRates(bien))) {
         console.log('[calendar] journal des prix NON ecrit :', JSON.stringify({
-          nuits: Object.keys(prixParNuit).length,
+          tarifs_pousses: Object.keys(prixParNuit).length,
+          ouvertures_tarifees: Object.keys(ouverturesTarifees).length,
+          gestes_disponibilite: Object.keys(gesteOuverture).length,
+          retenues: Object.keys(aJournaliser).length,
           managed: canPushRates(bien),
-          restrictions: resultatsPoussee.restrictions || null
+          restrictions: resultatsPoussee.restrictions || null,
+          availability: resultatsPoussee.availability || null
         }))
       }
 
-      if (Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok) {
+      if (Object.keys(aJournaliser).length && canPushRates(bien)) {
         try {
           // ⚠ UNE NUIT DEJA VENDUE N'EST PLUS AFFICHEE — releve en review.
           // L'index unique partiel autorise une ligne courante A COTE d'une
@@ -1107,7 +1181,7 @@ module.exports = async function handler(req, res) {
           // qu'elle est occupee et que son stock est a zero.
           // Lecture propre : `vendues`, calcule plus haut, est local au bloc de
           // plafonnement et ne couvre que les dates portant une disponibilite.
-          const datesPrix = Object.keys(prixParNuit).sort()
+          const datesPrix = Object.keys(aJournaliser).sort()
           const unitesBien = Math.max(1, Number(bien.inventory_units) || 1)
           const { nuitsOccupees: occupees } = require('../lib/nuits-occupees')
           // ⚠ `compte`, PAS `bien.user_id` — LE DEFAUT DU 12 SEPTEMBRE 2026.
@@ -1122,15 +1196,15 @@ module.exports = async function handler(req, res) {
             datesPrix[0], datesPrix[datesPrix.length - 1], { userId: compte })
           let retirees = 0
           for (const d of datesPrix) {
-            if ((dejaVendues[d] || []).length >= unitesBien) { delete prixParNuit[d]; retirees++ }
+            if ((dejaVendues[d] || []).length >= unitesBien) { delete aJournaliser[d]; retirees++ }
           }
           if (retirees) console.log(`[calendar] journal des prix : ${retirees} nuit(s) vendue(s) ecartee(s)`)
-          if (!Object.keys(prixParNuit).length) throw new Error('__rien_a_journaliser__')
+          if (!Object.keys(aJournaliser).length) throw new Error('__rien_a_journaliser__')
 
           const bilanJournal = await enregistrerPrixPousses(supabase, {
             userId: compte,
             propertyId: bienId,          // UUID : le journal est cle sur properties.id
-            nuits: prixParNuit,
+            nuits: aJournaliser,
             source: 'host'               // 'engine' viendra a l'etape 4
           })
           console.log('[calendar] journal des prix', JSON.stringify(bilanJournal))

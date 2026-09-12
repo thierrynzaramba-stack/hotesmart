@@ -14,7 +14,8 @@ const test = require('node:test')
 const assert = require('node:assert')
 
 const {
-  enregistrerPrixPousses, cloturerVente, nuitsDuSejour, centimesValides
+  enregistrerPrixPousses, cloturerVente, nuitsDuSejour, centimesValides,
+  ouverturesDeDatesTarifees, nuitsAJournaliser, estOuverte
 } = require('../lib/price-log')
 
 // ─── Faux Supabase, qui tient une vraie table en memoire ─────────────────────
@@ -630,7 +631,291 @@ test('une non-ecriture du journal est toujours DITE', () => {
   // quand il ne fait rien.
   const src = lireSrc('api/calendar.js')
   assert.ok(/journal des prix NON ecrit/.test(src))
-  assert.ok(/nuits: Object\.keys\(prixParNuit\)\.length/.test(src),
+  // ⚠ LES DEUX ORIGINES DOIVENT ETRE NOMMEES, pas seulement le total.
+  // Depuis le 12/09/2026 le journal a deux sources — un tarif pousse
+  // (`/restrictions`) et une date ouverte deja tarifee (`/availability`) — et
+  // chacune peut echouer seule. Un log qui ne dit que « 0 nuit » laisserait
+  // indiagnostiquable le cas ou seule la seconde a ete perdue.
+  assert.ok(/tarifs_pousses: Object\.keys\(prixParNuit\)\.length/.test(src),
     'et dit QUEL terme a echoue, pas seulement qu il a echoue')
+  assert.ok(/ouvertures_tarifees: Object\.keys\(ouverturesTarifees\)\.length/.test(src),
+    'y compris l origine « ouverture »')
+  assert.ok(/availability: resultatsPoussee\.availability/.test(src),
+    'et l etat du flux qui la porte')
   assert.ok(/JOURNAL DES PRIX NON ECRIT/.test(src), 'idem pour une exception')
+})
+
+// ⚠ UN GESTE EXPLICITE EST EXIGE : le journal ne peut appeler « ouverture »
+// qu'une date dont la requete touche vraiment `avail` ou `stop_sell`.
+// `G(objet)` declare que chaque date de cet objet porte un geste de
+// disponibilite — la situation normale d'une ouverture depuis le calendrier.
+const G = (o, quoi = { avail: true }) =>
+  Object.fromEntries(Object.keys(o).map(d => [d, quoi]))
+
+// ─── OUVRIR UNE DATE DEJA TARIFEE, C'EST L'AFFICHER ──────────────────────────
+// LE DEFAUT QU'ILS EMPECHENT : une nuit qui devient vendable avec un prix que
+// le journal ignore. Trouve le 12 septembre 2026 en verifiant Coeur de vie 23 —
+// 14 nuits de week-end portaient 110 ou 130 EUR depuis le 10 septembre, etaient
+// FERMEES lors de l'amorcage (donc legitimement non amorcees), puis ont ete
+// ouvertes par un segment qui ne portait que la disponibilite. Pour le moteur,
+// ces nuits n'avaient jamais eu de prix. Le journal ne se rattrape pas.
+
+test('LE TEST QUI COMPTE : fermee+tarifee qui s ouvre entre au journal', () => {
+  // Le cas reel, mot pour mot : 2026-11-07, samedi, 130 EUR en base depuis le
+  // 10 septembre, stop_sell=true, puis ouverte sans nouveau tarif.
+  const avant = { '2026-11-07': { date: '2026-11-07', rate: 130, avail: 0, stop_sell: true } }
+  const apres = { '2026-11-07': { date: '2026-11-07', rate: 130, avail: 1, stop_sell: false } }
+  const r = ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), dejaPousses: {} })
+  assert.deepStrictEqual(r, { '2026-11-07': { cents: 13000, flux: ['availability'] } },
+    'le prix devient affiche : il se journalise')
+})
+
+test('une date DEJA ouverte ne rejournalise rien', () => {
+  // Sans cette garde, chaque enregistrement du calendrier rouvrirait une ligne
+  // pour toutes les dates ouvertes de la plage — le bruit que ce journal evite.
+  const avant = { '2026-11-07': { rate: 130, avail: 1, stop_sell: false } }
+  const apres = { '2026-11-07': { rate: 130, avail: 1, stop_sell: false } }
+  assert.deepEqual(ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant) }), {})
+})
+
+test('une date qui reste FERMEE n est jamais affichee', () => {
+  const avant = { '2026-11-07': { rate: 130, avail: 0, stop_sell: true } }
+  assert.deepEqual(ouverturesDeDatesTarifees(avant,
+    { '2026-11-07': { rate: 130, avail: 0, stop_sell: true } }, { gestes: G(avant) }), {})
+  // Fermee par le stock seul, ou par l'intention seule : les deux comptent.
+  assert.deepEqual(ouverturesDeDatesTarifees(avant,
+    { '2026-11-07': { rate: 130, avail: 1, stop_sell: true } }, { gestes: G(avant) }), {})
+  assert.deepEqual(ouverturesDeDatesTarifees(avant,
+    { '2026-11-07': { rate: 130, avail: 0, stop_sell: false } }, { gestes: G(avant) }), {})
+})
+
+test('LE TEST QUI COMPTE : un tarif pousse dans le meme geste ne compte pas deux fois', () => {
+  // Les deux chemins se croisent sur une date a la fois ouverte ET retarifee.
+  // Sans cette garde, un seul changement ouvrirait deux lignes de journal.
+  const avant = { '2026-11-07': { rate: 130, avail: 0, stop_sell: true } }
+  const apres = { '2026-11-07': { rate: 160, avail: 1, stop_sell: false } }
+  const r = ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), dejaPousses: { '2026-11-07': 16000 } })
+  assert.deepEqual(r, {}, 'la poussee de tarif le journalise deja')
+})
+
+test('pas de ligne AVANT vaut FERMEE, jamais « inconnue »', () => {
+  // Meme regle que runFullSync et que l'amorcage : l'absence de memoire
+  // d'intention vaut `availability: 0`. Une date neuve qui s'ouvre avec un
+  // prix EST une date qui s'affiche.
+  const r = ouverturesDeDatesTarifees({},
+    { '2026-12-24': { rate: 200, avail: 1, stop_sell: false } },
+    { gestes: { '2026-12-24': { avail: true } } })
+  assert.deepStrictEqual(r, { '2026-12-24': { cents: 20000, flux: ['availability'] } })
+})
+
+test('LE TEST QUI COMPTE : sans prix du jour NI base_price, rien n est affiche', () => {
+  // ⚠ MEME REGLE QUE runFullSync, MOT POUR MOT : sans tarif, il FERME la date.
+  // Les deux biens de Bagneres ont `base_price` a null — journaliser un prix
+  // ici inventerait un affichage qui n'a pas eu lieu.
+  const avant = { '2026-11-06': { rate: null, avail: 0, stop_sell: true } }
+  const apres = { '2026-11-06': { rate: null, avail: 1, stop_sell: false } }
+  assert.deepEqual(ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), basePrice: null }), {})
+  assert.deepEqual(ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), basePrice: 0 }), {})
+  // Avec un prix de base, en revanche, c'est lui qui part aux plateformes.
+  assert.deepStrictEqual(
+    ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), basePrice: 95 }),
+    { '2026-11-06': { cents: 9500, flux: ['availability'] } })
+  // Un rate a 0 n'est pas un prix : c'est l'absence d'exception (regle du
+  // full sync), donc repli sur le prix de base.
+  assert.deepStrictEqual(ouverturesDeDatesTarifees(
+    { '2026-11-06': { rate: 0, avail: 0, stop_sell: true } },
+    { '2026-11-06': { rate: 0, avail: 1, stop_sell: false } },
+    { gestes: { '2026-11-06': { avail: true } }, basePrice: 95 }),
+  { '2026-11-06': { cents: 9500, flux: ['availability'] } })
+})
+
+test('le cas reel complet : 4 week-ends ouverts, 2 dates sans prix ignorees', () => {
+  // Le lot du 12 septembre 2026 a 11:12 sur Coeur de vie 23, reduit a sa
+  // structure : des samedis tarifes a 130 qui s'ouvrent, et des vendredis sans
+  // prix qui s'ouvrent aussi. Seuls les premiers sont affiches.
+  const avant = {}
+  const apres = {}
+  for (const d of ['2026-11-07', '2026-11-14', '2026-11-21', '2026-11-28']) {
+    avant[d] = { rate: 130, avail: 0, stop_sell: true }
+    apres[d] = { rate: 130, avail: 1, stop_sell: false }
+  }
+  for (const d of ['2026-11-06', '2026-11-13']) {
+    avant[d] = { rate: null, avail: 0, stop_sell: true }
+    apres[d] = { rate: null, avail: 1, stop_sell: false }
+  }
+  const r = ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), basePrice: null })
+  assert.deepEqual(Object.keys(r).sort(),
+    ['2026-11-07', '2026-11-14', '2026-11-21', '2026-11-28'])
+  assert.ok(Object.values(r).every(v => v.cents === 13000))
+})
+
+test('un prix aberrant est ecarte, comme partout ailleurs dans ce module', () => {
+  const avant = { '2026-11-07': { rate: 130, avail: 0, stop_sell: true } }
+  assert.deepEqual(ouverturesDeDatesTarifees(avant,
+    { '2026-11-07': { rate: -5, avail: 1, stop_sell: false } }, { gestes: G(avant), basePrice: null }), {},
+  'un rate negatif retombe sur base_price, absent ici')
+  assert.deepEqual(ouverturesDeDatesTarifees(avant,
+    { '2026-11-07': { rate: Infinity, avail: 1, stop_sell: false } }, { gestes: G(avant) }), {})
+})
+
+test('la fonction est PURE : elle ne modifie pas ses entrees', () => {
+  const avant = { '2026-11-07': { rate: 130, avail: 0, stop_sell: true } }
+  const apres = { '2026-11-07': { rate: 130, avail: 1, stop_sell: false } }
+  const dejaPousses = {}
+  const copieAvant = JSON.stringify(avant)
+  const copieApres = JSON.stringify(apres)
+  ouverturesDeDatesTarifees(avant, apres, { gestes: G(avant), dejaPousses })
+  assert.equal(JSON.stringify(avant), copieAvant)
+  assert.equal(JSON.stringify(apres), copieApres)
+  assert.deepEqual(dejaPousses, {})
+  assert.deepStrictEqual(ouverturesDeDatesTarifees(null, null, {}), {})
+})
+
+// ─── LA COMPOSITION FINALE : CHAQUE ORIGINE CONTRE SON FLUX ──────────────────
+// LE DEFAUT QU'ILS EMPECHENT : une ligne de journal pour une nuit qui est
+// restee FERMEE chez le provider. C'est le pire defaut possible ici — il
+// fausse durablement la mesure que ce journal existe pour rendre, et il ne se
+// rattrape pas. La premiere version du correctif en produisait trois ; ils ont
+// ete trouves en review, et AUCUN test de forme ne pouvait les voir.
+
+test('LE TEST QUI COMPTE : availability.ok n est PAS un verdict par date', () => {
+  // ⚠ LE MODE DE PANNE DU 11-12 SEPTEMBRE. Quand `nuitsOccupees` echoue, le
+  // repli retire TOUTES les ouvertures de la poussee mais laisse partir les
+  // fermetures — et `pousserAri` repose alors `availability.ok = true` parce
+  // que l'appel HTTP a abouti. La date retiree serait journalisee comme
+  // affichee alors qu'elle est restee fermee chez Channex.
+  const ouvertures = { '2026-11-07': { cents: 13000, flux: ['availability'] } }
+  const ok = { availability: { ok: true }, restrictions: { ok: true } }
+
+  // L'ouverture a ete RETIREE de la poussee : elle n'est pas dans availEnvoyees.
+  assert.deepStrictEqual(
+    nuitsAJournaliser({ ouvertures, resultats: ok, availEnvoyees: { '2026-11-08': 0 } }),
+    {}, 'une ouverture qui n est pas partie ne se journalise pas')
+
+  // Elle est partie, mais a stock ZERO (plafonnee : nuit deja vendue).
+  assert.deepStrictEqual(
+    nuitsAJournaliser({ ouvertures, resultats: ok, availEnvoyees: { '2026-11-07': 0 } }),
+    {}, 'poussee a stock zero = toujours invendable')
+
+  // Elle est partie, ouverte : la, et seulement la, on journalise.
+  assert.deepStrictEqual(
+    nuitsAJournaliser({ ouvertures, resultats: ok, availEnvoyees: { '2026-11-07': 1 } }),
+    { '2026-11-07': 13000 })
+
+  // Et sans la liste de ce qui est parti, on ne suppose pas.
+  assert.deepStrictEqual(nuitsAJournaliser({ ouvertures, resultats: ok }), {})
+})
+
+test('LE TEST QUI COMPTE : une levee de stop_sell se valide contre /restrictions', () => {
+  // ⚠ DEUX ERREURS SYMETRIQUES RELEVEES EN REVIEW. Une date `avail: 1` fermee
+  // par « stop vente » que l'hote rouvre part par /restrictions, pas par
+  // /availability. Classer par lot produisait :
+  //   - un faux NEGATIF : sans geste sur `avail`, `availability` n'est jamais
+  //     pose, donc rien n'etait journalise — le defaut d'origine, intact ;
+  //   - un faux POSITIF : si /restrictions echoue mais que /availability
+  //     reussit pour une AUTRE date, celle-ci etait journalisee alors qu'elle
+  //     reste en stop_sell chez le provider.
+  const ouvertures = { '2026-11-07': { cents: 13000, flux: ['restrictions'] } }
+
+  // /restrictions a abouti : journalisee, sans rien exiger d availability.
+  assert.deepStrictEqual(
+    nuitsAJournaliser({ ouvertures, resultats: { restrictions: { ok: true } } }),
+    { '2026-11-07': 13000 }, 'aucune poussee de dispo n est exigee')
+
+  // /restrictions a echoue pendant que /availability reussissait ailleurs.
+  assert.deepStrictEqual(
+    nuitsAJournaliser({
+      ouvertures,
+      resultats: { restrictions: { ok: false }, availability: { ok: true } },
+      availEnvoyees: { '2026-11-08': 1 }
+    }), {}, 'le succes d un AUTRE flux ne vaut pas preuve')
+})
+
+test('un geste qui touche les DEUX flux exige les deux', () => {
+  const ouvertures = { '2026-11-07': { cents: 13000, flux: ['availability', 'restrictions'] } }
+  const envoyees = { '2026-11-07': 1 }
+  assert.deepStrictEqual(nuitsAJournaliser({ ouvertures,
+    resultats: { availability: { ok: true }, restrictions: { ok: false } },
+    availEnvoyees: envoyees }), {})
+  assert.deepStrictEqual(nuitsAJournaliser({ ouvertures,
+    resultats: { availability: { ok: false }, restrictions: { ok: true } },
+    availEnvoyees: envoyees }), {})
+  assert.deepStrictEqual(nuitsAJournaliser({ ouvertures,
+    resultats: { availability: { ok: true }, restrictions: { ok: true } },
+    availEnvoyees: envoyees }), { '2026-11-07': 13000 })
+})
+
+test('les tarifs pousses restent conditionnes a /restrictions — aucune regression', () => {
+  const prixPousses = { '2026-11-07': 16000 }
+  assert.deepStrictEqual(
+    nuitsAJournaliser({ prixPousses, resultats: { restrictions: { ok: true } } }),
+    { '2026-11-07': 16000 })
+  assert.deepStrictEqual(
+    nuitsAJournaliser({ prixPousses, resultats: { restrictions: { ok: false },
+      availability: { ok: true } }, availEnvoyees: { '2026-11-07': 1 } }),
+    {}, 'une poussee de dispo ne prouve rien sur le tarif')
+  assert.deepStrictEqual(nuitsAJournaliser({ prixPousses, resultats: {} }), {})
+})
+
+test('LE TEST QUI COMPTE : sans geste de disponibilite, aucune ouverture', () => {
+  // ⚠ LE CALENDRIER MOBILE POUSSE UN SEGMENT PAR PARAMETRE sur la meme plage.
+  // Regler « sejour minimum 2 » sur octobre-novembre touche ~60 dates, dont
+  // beaucoup sans ligne en base : `etatAvant` absent valait « fermee », l objet
+  // neuf n avait ni `stop_sell` ni `avail` donc passait pour « ouvert », et le
+  // prix de base etait journalise. Soixante lignes « prix affiche » fabriquees
+  // pour des nuits que personne ne peut reserver.
+  const apres = {
+    '2026-10-03': { property_id: 'p', date: '2026-10-03', min_stay_arrival: 2 },
+    '2026-10-04': { property_id: 'p', date: '2026-10-04', min_stay_arrival: 2 }
+  }
+  assert.deepStrictEqual(
+    ouverturesDeDatesTarifees({}, apres, { gestes: {}, basePrice: 95 }), {},
+    'aucun geste de disponibilite : rien ne devient affiche')
+
+  // Le meme lot, mais l hote ouvre VRAIMENT le 3 : lui seul est retenu.
+  const r = ouverturesDeDatesTarifees({}, {
+    ...apres,
+    '2026-10-03': { property_id: 'p', date: '2026-10-03', min_stay_arrival: 2, avail: 1 }
+  }, { gestes: { '2026-10-03': { avail: true } }, basePrice: 95 })
+  assert.deepStrictEqual(Object.keys(r), ['2026-10-03'])
+  assert.equal(r['2026-10-03'].cents, 9500)
+})
+
+test('LE TEST QUI COMPTE : sous le plancher, la date part FERMEE — rien a journaliser', () => {
+  // ⚠ DESACCORD AVEC runFullSync RELEVE EN REVIEW. Le full sync FERME toute
+  // date dont le tarif est sous `prix_minimum` et ne pousse aucun prix. Sans
+  // ce test, le journal aurait inscrit 8 EUR pendant que le cycle suivant
+  // fermait la meme nuit : les deux points de capture se seraient contredits.
+  const avant = { '2026-11-07': { rate: 8, avail: 0, stop_sell: true } }
+  const apres = { '2026-11-07': { rate: 8, avail: 1, stop_sell: false } }
+  const gestes = { '2026-11-07': { avail: true } }
+  assert.deepStrictEqual(
+    ouverturesDeDatesTarifees(avant, apres, { gestes, bien: { prix_minimum: 1000 } }), {},
+    '8 EUR sous un plancher de 10 EUR : la date sera fermee, rien n est affiche')
+  // Au-dessus du plancher, elle passe.
+  assert.equal(
+    ouverturesDeDatesTarifees(avant,
+      { '2026-11-07': { rate: 15, avail: 1, stop_sell: false } },
+      { gestes, bien: { prix_minimum: 1000 } })['2026-11-07'].cents, 1500)
+})
+
+test('« ouverte » se lit sans comparaison stricte (regle 4)', () => {
+  // `etatApres` melange des lignes relues en base (Postgres rend un nombre) et
+  // des valeurs venues du corps de la requete, qui n est pas type. Un
+  // `avail: "0"` echappait a `=== 0` et faisait passer une date fermee pour
+  // ouverte.
+  assert.equal(estOuverte({ avail: 0 }), false)
+  assert.equal(estOuverte({ avail: '0' }), false)
+  assert.equal(estOuverte({ stop_sell: true }), false)
+  assert.equal(estOuverte({ stop_sell: 'true' }), false)
+  assert.equal(estOuverte({ avail: 1 }), true)
+  assert.equal(estOuverte({ avail: null }), true, 'null = jamais pousse, pas ferme')
+  assert.equal(estOuverte({}), true)
+  assert.equal(estOuverte(null), false)
+
+  const r = ouverturesDeDatesTarifees(
+    { '2026-11-07': { rate: 130, avail: 0, stop_sell: true } },
+    { '2026-11-07': { rate: 130, avail: '0', stop_sell: false } },
+    { gestes: { '2026-11-07': { avail: true } } })
+  assert.deepStrictEqual(r, {}, 'un stock a zero en CHAINE reste un stock a zero')
 })
