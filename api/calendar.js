@@ -815,7 +815,6 @@ module.exports = async function handler(req, res) {
     // n'affichent que warnings[0] dans le mode local_only, et le prendre en
     // premier faisait disparaitre l'explication « ce bien est gere par Beds24 ».
     let pushWarnings = []
-    let diagJournal = null      // TEMPORAIRE : diagnostic du journal des prix
     let pushed = false
     let localOnly = false
     // « Le canal a refuse quelque chose » : un drapeau, pas un texte a lire.
@@ -1037,20 +1036,16 @@ module.exports = async function handler(req, res) {
       // QUEL terme de la condition etait faux — parce qu'aucun des trois
       // n'etait journalise. Un `if` muet sur un chemin non retroactif est une
       // perte definitive : on dit desormais pourquoi on n'ecrit pas.
-      const journalPeut = {
-        nuits: Object.keys(prixParNuit).length,
-        managed: canPushRates(bien),
-        restrictions: resultatsPoussee.restrictions || null,
-        relie: estRelieAuCanal(bien), propId: !!propId, ratePlanId: !!ratePlanId
+      // ⚠ UN `if` MUET SUR UN CHEMIN NON RETROACTIF EST UNE PERTE DEFINITIVE.
+      // Le journal ne se rattrape pas : une non-ecriture silencieuse perd le
+      // prix pour toujours. On dit donc POURQUOI on n'ecrit pas, a chaque fois.
+      if (!(Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok)) {
+        console.log('[calendar] journal des prix NON ecrit :', JSON.stringify({
+          nuits: Object.keys(prixParNuit).length,
+          managed: canPushRates(bien),
+          restrictions: resultatsPoussee.restrictions || null
+        }))
       }
-      if (!(journalPeut.nuits && journalPeut.managed && resultatsPoussee.restrictions?.ok)) {
-        console.log('[calendar] journal des prix NON ecrit :', JSON.stringify(journalPeut))
-      }
-      // ⚠ REMONTE DANS LA REPONSE, ET C'EST TEMPORAIRE.
-      // Les logs Vercel ne sont pas accessibles depuis le poste de dev : sans
-      // ce champ, diagnostiquer une non-ecriture demande un aller-retour avec
-      // le product owner a chaque essai. A retirer une fois la cause trouvee.
-      diagJournal = journalPeut
 
       if (Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok) {
         try {
@@ -1065,8 +1060,16 @@ module.exports = async function handler(req, res) {
           const datesPrix = Object.keys(prixParNuit).sort()
           const unitesBien = Math.max(1, Number(bien.inventory_units) || 1)
           const { nuitsOccupees: occupees } = require('../lib/nuits-occupees')
+          // ⚠ `compte`, PAS `bien.user_id` — LE DEFAUT DU 12 SEPTEMBRE 2026.
+          // `bien` vient d'un SELECT qui ne porte pas `user_id` : la valeur
+          // etait `undefined`, `nuitsOccupees` levait « userId requis », et mon
+          // `catch` avalait l'exception dans un `console.error` invisible. Trois
+          // prix reels sont partis aux plateformes sans etre journalises, et il
+          // a fallu remonter l'erreur dans la reponse HTTP pour la voir.
+          // `compte` est le compte PROPRIETAIRE resolu par la garde — c'est
+          // celui que la ligne suivante utilise deja pour ecrire.
           const dejaVendues = await occupees(supabase, bien.provider_property_id,
-            datesPrix[0], datesPrix[datesPrix.length - 1], { userId: bien.user_id })
+            datesPrix[0], datesPrix[datesPrix.length - 1], { userId: compte })
           let retirees = 0
           for (const d of datesPrix) {
             if ((dejaVendues[d] || []).length >= unitesBien) { delete prixParNuit[d]; retirees++ }
@@ -1081,7 +1084,6 @@ module.exports = async function handler(req, res) {
             source: 'host'               // 'engine' viendra a l'etape 4
           })
           console.log('[calendar] journal des prix', JSON.stringify(bilanJournal))
-          if (diagJournal) diagJournal.bilan = bilanJournal
         } catch (e) {
           if (e.message === '__rien_a_journaliser__') {
             console.log('[calendar] journal des prix : aucune nuit a journaliser apres filtrage')
@@ -1092,9 +1094,6 @@ module.exports = async function handler(req, res) {
           // ecraser. On perd une ligne de journal, jamais une vente — mais on
           // le dit fort, parce qu'un journal muet est un journal faux.
           console.error('[calendar] JOURNAL DES PRIX NON ECRIT :', e.message)
-          // TEMPORAIRE : remonte la cause, les logs Vercel n'etant pas
-          // accessibles depuis le poste.
-          if (diagJournal) diagJournal.erreur = String(e && e.message || e).slice(0, 300)
           }
         }
       }
@@ -1135,7 +1134,6 @@ module.exports = async function handler(req, res) {
       saved: rows.length,
       pushed,
       local_only: localOnly,
-      journal_diag: diagJournal,   // TEMPORAIRE : voir plus haut
       // Drapeau LISIBLE PAR LE CODE : un texte dans `warnings` ne suffit pas, les
       // vues n'en affichent que le nombre. Sans lui, l'hote lisait
       // « Enregistre (1 avertissement) » puis voyait sa valeur revenir en place.

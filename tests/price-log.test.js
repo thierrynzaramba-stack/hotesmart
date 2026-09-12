@@ -601,3 +601,36 @@ test('les scripts de poussee passent par runFullSync, donc par le journal', () =
     `script(s) poussant /restrictions en direct : ${fautifs.join(', ')} — ` +
     'passer par runFullSync, sinon le prix part sans entrer au journal.')
 })
+
+test('LE TEST QUI COMPTE : le journal lit le compte de la GARDE, pas celui du bien', () => {
+  // ⚠ LE DEFAUT DU 12 SEPTEMBRE 2026, ET IL A COUTE TROIS PRIX REELS.
+  // `bien` vient d'un SELECT qui ne porte pas `user_id` : passer `bien.user_id`
+  // a `nuitsOccupees` lui donnait `undefined`, la fonction levait « userId
+  // requis », et le `catch` du bloc avalait l'exception dans un `console.error`
+  // invisible depuis le poste. Les prix partaient aux plateformes, le journal
+  // n'ecrivait rien, et RIEN ne le signalait.
+  //
+  // Il a fallu remonter l'erreur dans la reponse HTTP pour la voir. C'est le
+  // piege de la colonne non selectionnee — documente trois fois dans ce depot,
+  // et reproduit ici meme.
+  const src = lireSrc('api/calendar.js')
+  assert.ok(!/occupees\(supabase, bien\.provider_property_id,[\s\S]{0,200}userId: bien\.user_id/.test(src),
+    'le journal ne doit PAS lire bien.user_id : ce SELECT ne le porte pas')
+  assert.ok(/datesPrix\[datesPrix\.length - 1\], \{ userId: compte \}/.test(src),
+    'il lit `compte`, le compte proprietaire resolu par la garde')
+  // Et le writer ecrit sous le meme compte : les deux doivent s'accorder.
+  const bloc = src.slice(src.lastIndexOf('await enregistrerPrixPousses'))
+  assert.ok(/userId: compte/.test(bloc.slice(0, 300)),
+    'le writer ecrit sous ce meme compte')
+})
+
+test('une non-ecriture du journal est toujours DITE', () => {
+  // Le journal n'est pas retroactif : une non-ecriture silencieuse perd le prix
+  // pour toujours, et rend le defaut indiagnostiquable. Le `if` doit parler
+  // quand il ne fait rien.
+  const src = lireSrc('api/calendar.js')
+  assert.ok(/journal des prix NON ecrit/.test(src))
+  assert.ok(/nuits: Object\.keys\(prixParNuit\)\.length/.test(src),
+    'et dit QUEL terme a echoue, pas seulement qu il a echoue')
+  assert.ok(/JOURNAL DES PRIX NON ECRIT/.test(src), 'idem pour une exception')
+})
