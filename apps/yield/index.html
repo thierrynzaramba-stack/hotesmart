@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Tarification</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    .yf-barre { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+    .yf-champ { display: flex; flex-direction: column; gap: 4px; }
+    .yf-champ label { font-size: 11px; color: var(--text3); font-weight: 500; }
+    .yf-etat { padding: 24px; border: 0.5px solid var(--border); border-radius: var(--radius-lg);
+               background: var(--bg); color: var(--text2); font-size: 13px; }
+    .yf-etat.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
+    .yf-sources { margin-top: 16px; font-size: 11px; color: var(--text3); line-height: 1.7; }
+    .yf-sources code { font-size: 11px; }
+    .yf-alerte { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius);
+                 background: #FFF3CD; color: #856404; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div id="sidebar-root"></div>
+<div class="main">
+  <div class="header">
+    <h1>Tarification dynamique</h1>
+    <p class="subtitle">Tarification pilotée par la donnée</p>
+  </div>
+
+  <div class="yf-barre">
+    <div class="yf-champ">
+      <label for="yf-bien">Logement</label>
+      <select id="yf-bien"></select>
+    </div>
+    <div class="yf-champ">
+      <label for="yf-debut">Du</label>
+      <input type="date" id="yf-debut">
+    </div>
+    <div class="yf-champ">
+      <label for="yf-fin">Au</label>
+      <input type="date" id="yf-fin">
+    </div>
+    <div class="yf-champ">
+      <label for="yf-granularite">Détail</label>
+      <select id="yf-granularite">
+        <option value="mois" selected>Par mois</option>
+        <option value="jour">Par jour</option>
+        <option value="annee">Par année</option>
+      </select>
+    </div>
+    <button class="btn" id="yf-charger">Charger</button>
+  </div>
+
+  <div id="yf-contenu"></div>
+</div>
+
+<script type="module">
+  // ⚠ LOT 4.1 : LE SOCLE, PAS L'ECRAN. Cette page prouve que le coeur alimente
+  // l'app — elle affiche ce que l'API a rendu, sans le mettre en forme. La
+  // restitution (« RM express ») est le lot 4.2, et elle a une exigence dure
+  // que cette coquille respecte deja : un indicateur `null` s'affiche comme
+  // « non calculable » AVEC SON MOTIF, jamais comme 0 ni comme un tiret muet.
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+
+  let session = null
+  const el = id => document.getElementById(id)
+
+  async function init () {
+    session = await requireAuth()
+    if (!session) return
+    renderSidebar('yield').catch(e => console.error('[yield] sidebar', e))
+
+    const auj = new Date()
+    el('yf-debut').value = `${auj.getFullYear()}-01-01`
+    el('yf-fin').value = `${auj.getFullYear()}-12-31`
+
+    const ok = await chargerBiens()
+    el('yf-charger').addEventListener('click', charger)
+    if (ok && el('yf-bien').value) charger()
+  }
+
+  async function chargerBiens () {
+    const compte = compteCourant()
+    let q = supabase.from('properties').select('id, name').order('name')
+    if (compte) q = q.eq('user_id', compte)
+    const { data, error } = await q
+    if (error) { etat('Impossible de lire la liste des logements.', true); return false }
+    // ⚠ UNE LISTE VIDE SE DIT — relevé en review. Un membre au périmètre
+    // restreint peut n'avoir aucun logement visible : sans message, `charger()`
+    // n'était jamais appelé et la page restait entièrement blanche, ce qui se
+    // lit comme une panne.
+    if (!data || !data.length) {
+      etat('Aucun logement accessible sur ce compte.', false)
+      el('yf-charger').disabled = true
+      return false
+    }
+    el('yf-bien').innerHTML = data
+      .map(b => `<option value="${echapper(b.id)}">${echapper(b.name)}</option>`).join('')
+    return true
+  }
+
+  async function charger () {
+    etat('Lecture du cœur de données…')
+    const p = new URLSearchParams({
+      property_id: el('yf-bien').value,
+      debut: el('yf-debut').value,
+      fin: el('yf-fin').value,
+      granularite: el('yf-granularite').value
+    })
+    let r, data
+    try {
+      r = await fetch(`/api/yield?${p}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() }
+      })
+      data = await r.json()
+    } catch (e) {
+      etat(`Lecture impossible : ${e.message}`, true); return
+    }
+    if (!r.ok) { etat(data?.error || `Erreur ${r.status}`, true); return }
+    rendre(data)
+  }
+
+  function rendre (d) {
+    const n = (x) => x == null ? '—' : x
+    const lignes = []
+    lignes.push(`<div class="yf-etat">`)
+    lignes.push(`<strong>${echapper(d.bien.name)}</strong> — ${d.fenetre.debut} → ${d.fenetre.fin},`
+      + ` par ${d.fenetre.granularite}. Pivot « à date » : ${d.fenetre.pivot}.`)
+    lignes.push(`<div class="yf-sources">`)
+    lignes.push(`Réalisé : <code>${d.realise.length}</code> période(s) · `
+      + `À date : <code>${d.a_date.length}</code> · `
+      + `Projection : <code>${d.projection.length}</code>`)
+    lignes.push(`<br>Référence sur ${d.historique.ans} ans `
+      + `(${d.historique.debut} → ${d.historique.fin}) : `
+      + `<code>${d.reference.nuits_vues}</code> nuits vues, `
+      + `<code>${Object.keys(d.reference.par_segment).length}</code> segments, `
+      + `seuils ${d.reference.seuil} nuits / ${d.reference.seuil_reservations} réservations`)
+    lignes.push(`<br>Sources : <code>${d.sources.reservations_du_bien}</code> réservations du bien `
+      + `sur <code>${d.sources.reservations}</code> du compte · `
+      + `<code>${d.sources.jours_hors_reference}</code> jour(s) hors référence`)
+    lignes.push(`</div>`)
+
+    // ⚠ LES DRAPEAUX DE SOURCE SE VOIENT DES CE LOT. La table des vacances
+    // s'arrête à la dernière année scolaire publiée : au-delà, tout serait
+    // classé « hors vacances » — un été entier en basse saison, sans erreur.
+    if (d.sources.vacances && !d.sources.vacances.complete) {
+      lignes.push(`<div class="yf-alerte">Vacances scolaires incomplètes : `
+        + `${echapper(d.sources.vacances.manque || '')}. `
+        + `La référence des périodes concernées est faussée.</div>`)
+    }
+    lignes.push(`</div>`)
+    el('yf-contenu').innerHTML = lignes.join('')
+  }
+
+  function etat (msg, erreur = false) {
+    el('yf-contenu').innerHTML =
+      `<div class="yf-etat${erreur ? ' erreur' : ''}">${echapper(msg)}</div>`
+  }
+
+  function echapper (s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  }
+
+  init()
+</script>
+</body>
+</html>

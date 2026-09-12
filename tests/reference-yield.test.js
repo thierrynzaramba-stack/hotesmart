@@ -479,3 +479,37 @@ test('une date impossible ne casse rien et n invente rien', () => {
   assert.equal(r.valeur, null)
   assert.equal(r.non_calculable, 'aucun_historique')
 })
+
+test('LE TEST QUI COMPTE : une periode DEJA COMMENCEE n a plus de trajectoire', () => {
+  // ⚠ CONSTATE A LA PREMIERE LECTURE REELLE DE /api/yield. Septembre 2026, vu
+  // du 12 septembre, a un delai NEGATIF : aucun palier ne s'y applique, et le
+  // motif rendu accusait la DONNEE (`aucune_courbe_fiable`) alors que c'est la
+  // QUESTION qui ne se pose plus. Un lecteur en aurait conclu que son
+  // historique est trop mince.
+  const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
+    '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-15']
+  const ref = R.construireReference(nNuits(mardis, 120),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  const courbe = R.courbeDeDelai(
+    mardis.map(d => ecl([d], { prix: 120, vente: decale(d, -60) })),
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  const args = { jours: ['2026-03-03'], reference: ref, courbe, contexte: CTX,
+    nuiteesVendues: 12, capacite: { calculable: true, jours_ouverts: 31 } }
+
+  const commencee = R.projeter({ ...args, delaiJours: -11 })
+  assert.ok(commencee.non_calculable.includes('periode_deja_commencee'))
+  assert.ok(!commencee.non_calculable.includes('aucune_courbe_fiable'),
+    'on n accuse pas la donnee quand c est la question qui ne se pose plus')
+  assert.equal(commencee.nuitees_finales_extrapolees, undefined)
+
+  // ⚠ ET LE PREMIER JOUR AUSSI : delai ZERO attrapait le palier J-0, qui vaut
+  // 1 par construction. 12 nuitees vendues rendaient « 12 attendues au final »
+  // sur un mois qui commence — le chiffre faux et credible qu'on corrige.
+  const premierJour = R.projeter({ ...args, delaiJours: 0 })
+  assert.ok(premierJour.non_calculable.includes('periode_deja_commencee'))
+  assert.equal(premierJour.nuitees_finales_extrapolees, undefined)
+
+  // A un jour du debut, en revanche, la trajectoire existe encore.
+  const veille = R.projeter({ ...args, delaiJours: 1 })
+  assert.ok(!veille.non_calculable.includes('periode_deja_commencee'))
+})

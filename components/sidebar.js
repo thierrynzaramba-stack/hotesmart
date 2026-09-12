@@ -241,7 +241,12 @@ const escapeAttr = escapeHtml
 // autres apps (Serrures, GuestFlow AI) travaillent encore sur le compte de
 // l'appelant, donc restent masquees — un ecran qui annonce un compte et en montre
 // un autre est pire qu'une entree absente.
-const APPS_DELEGABLES = { menages: 'menages' }
+// ⚠ CE QUI REND UNE APP VISIBLE A UN MEMBRE DELEGUE, et rien d'autre.
+// `yield` suit le domaine `reservations` : c'est celui que garde `/api/yield`
+// (le realise, le portefeuille et les prix vendus sont de la donnee de
+// reservation). Les deux doivent rester d'accord — une app visible dont
+// l'endpoint refuse est un ecran d'erreur, l'inverse est une fuite.
+const APPS_DELEGABLES = { menages: 'menages', yield: 'reservations' }
 
 function renderApps(activePage) {
   const titulaire = estTitulaire()

@@ -53,6 +53,10 @@
       "destination": "/pages/index"
     },
     {
+      "source": "/apps/yield",
+      "destination": "/apps/yield/index"
+    },
+    {
       "source": "/apps/serrures",
       "destination": "/apps/serrures/index"
     },

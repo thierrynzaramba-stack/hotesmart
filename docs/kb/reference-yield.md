@@ -194,6 +194,20 @@ ne rien dire.
 Si `part_attendue` vaut 0 (à ce délai, l'historique n'avait jamais rien vendu),
 on ne divise pas : `rien_ne_se_vend_a_ce_delai`.
 
+### Une période déjà commencée n'a plus de trajectoire
+
+Constaté à la première lecture réelle de `/api/yield` : septembre 2026, vu du
+12 septembre, a un délai **négatif**. Aucun palier de la courbe ne pouvait s'y
+appliquer, et le motif rendu était `aucune_courbe_fiable` — qui accuse la
+**donnée** alors que c'est la **question** qui ne se pose plus. Un lecteur en
+aurait conclu que son historique est trop mince.
+
+Le motif est désormais `periode_deja_commencee`, et la garde teste
+**`delaiJours <= 0`**, pas `< 0` : le premier jour de la période a un délai de
+zéro et attrapait le palier J-0 — dont `courbeDeDelai` dit lui-même qu'il vaut
+1 *par construction*. Un portefeuille de 12 nuitées au 1er octobre rendait
+« 12 nuitées finales attendues, 9 de retard » sur un mois qui commence.
+
 ### « Fermé » et « je ne sais pas » ne sont pas la même chose
 
 `joursOuverts` rend `jours_ouverts: 0` sur ses **six** motifs de

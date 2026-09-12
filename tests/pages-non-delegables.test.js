@@ -70,7 +70,15 @@ const DELEGABLES = [
   'apps/menages/index.html',        // délégué en vague 1
   'apps/menages/garde.html',        // api/garde honore X-Compte (compteDelegue), domaine `menages`
   'apps/agent-ai/messagerie.html',  // délégué en vague 1
-  'pages/avis.html'                 // api/avis honore X-Compte (compteDelegue), domaine `avis`
+  'pages/avis.html',                // api/avis honore X-Compte (compteDelegue), domaine `avis`
+  // ⚠ DELEGABLE, comme le calendrier dont elle lit les memes chiffres.
+  // `/api/yield` garde `reservations` en LECTURE. La delegation passe par le
+  // BIEN, pas par `compteDelegue` : `property_id` designe le compte, donc la
+  // garde bascule dessus d'elle-meme et l'en-tete X-Compte ne peut rien
+  // detourner. Ne pas « corriger » en ajoutant `compteDelegue` — ce serait un
+  // parametre inutile sur un endpoint dont la ressource tranche deja.
+  // Ecrire un prix relevera de `reglages` (lot 4.6) et sera garde a part.
+  'apps/yield/index.html'
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────
