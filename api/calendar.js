@@ -925,34 +925,36 @@ module.exports = async function handler(req, res) {
       // accepte. Le geste de l'hote reste respecte partout ailleurs : le
       // plafond ne peut que RETIRER du stock, jamais en ajouter.
       // Regle unique : docs/kb/synchronisation.md §8.
-      // ─── OUVRIR, C'EST AUSSI REPOUSSER LA DISPONIBILITE ───────────────────
-      // ⚠ DEFAUT MESURE LE 12 SEPTEMBRE 2026, SIGNALE PAR THIERRY.
-      // Il tarife le 5 au 8 octobre a 199 € sur un bien dont ces nuits etaient
-      // fermees. Le coeur enregistre `stop_sell = false` — l'intention est bien
-      // « ouvert » — et le tarif part. Mais `availability` n'est poussee QUE
-      // pour les dates portant un `seg.avail` explicite : ces quatre-la n'en
-      // avaient pas, donc rien ne partait, et elles restaient a
-      // `availability: 0` chez Channex. Mesure : les 4 dates a 0, leurs
-      // voisines (4 et 9 octobre) a 1.
+      // ─── TARIFER N'EST PAS OUVRIR — ET ON NE LE SUPPOSE PAS ──────────────
+      // ⚠ REGLE CHANNEX « only send changes » (#13 de la certification),
+      // rappelee par Thierry le 12 septembre 2026 : seuls les elements
+      // REELLEMENT MODIFIES sont emis.
       //
-      // Resultat : des nuits TARIFEES et INVENDABLES, et un hote convaincu de
-      // les avoir ouvertes. C'est la symetrie de l'incident du 11 septembre —
-      // « les prix partent, la disponibilite non » — par l'autre bout.
+      // J'avais d'abord complete `availability` pour toute date tarifee dont
+      // l'intention etait ouverte. C'etait deux fautes en une : emettre un
+      // champ non touche, et SUPPOSER que tarifer une nuit signifie vouloir la
+      // vendre — alors qu'un hote prepare souvent ses prix a l'avance. C'est
+      // le principe meme que ce chantier defend ailleurs : la memoire
+      // d'intention n'appartient qu'a l'hote.
       //
-      // On complete donc `availByDate` pour toute date TOUCHEE dont l'intention
-      // resultante est ouverte et qui ne porte pas deja une disponibilite
-      // explicite. La valeur est laissee a `unites` : le plafonnement par le
-      // stock, juste en dessous, la ramenera a 0 sur une nuit vendue — c'est
-      // lui qui protege de la surreservation, et il n'est pas contourne.
-      if (roomTypeId) {
-        const unitesBien = Math.max(1, Number(bien.inventory_units) || 1)
-        for (const ds of Object.keys(restByDate)) {
-          if (availByDate[ds] != null) continue          // l'hote a deja tranche
-          const etat = rowsByDate[ds]
-          if (!etat || etat.stop_sell === true) continue // fermee : on n'ouvre pas
-          if (etat.avail === 0) continue                 // fermeture explicite en base
-          availByDate[ds] = unitesBien
-        }
+      // On ne pousse donc rien de plus. Mais on le DIT : une nuit tarifee qui
+      // reste fermee est invendable, et rien ne le signalait — l'ecran
+      // affichait « Enregistre et publie » sur des dates que personne ne peut
+      // reserver. L'hote ouvre lui-meme, d'un geste explicite.
+      const tarifeesMaisFermees = []
+      for (const ds of Object.keys(restByDate)) {
+        if (prixParNuit[ds] == null) continue          // pas de tarif touche
+        if (availByDate[ds] != null) continue          // l'hote a tranche
+        const etat = rowsByDate[ds]
+        if (etat && etat.stop_sell !== true && etat.avail !== 0) continue
+        tarifeesMaisFermees.push(ds)
+      }
+      if (tarifeesMaisFermees.length) {
+        const n = tarifeesMaisFermees.length
+        pushWarnings.push(`${n} nuit${n > 1 ? 's' : ''} ${n > 1 ? 'ont' : 'a'} bien recu `
+          + `${n > 1 ? 'leur' : 'son'} tarif mais reste${n > 1 ? 'nt' : ''} FERMEE${n > 1 ? 'S' : ''} `
+          + `a la vente (${tarifeesMaisFermees.slice(0, 3).join(', ')}${n > 3 ? '…' : ''}). `
+          + `Pour ${n > 1 ? 'les' : 'la'} mettre en vente, passez la disponibilite sur « Ouvert ».`)
       }
 
       const datesAvail = Object.keys(availByDate).sort()

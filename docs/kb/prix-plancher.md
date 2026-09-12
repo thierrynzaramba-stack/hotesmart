@@ -102,3 +102,37 @@ déclenche un incident `prix_sous_plancher`.
 
 Sans cet avertissement, l'écran afficherait « enregistré et publié » sur des
 dates fermées — le silence exact qui a déjà coûté deux incidents sur ce dépôt.
+
+
+## 7. Tarifer n'est pas ouvrir — règle Channex « only send changes »
+
+**Rappelée par Thierry le 12 septembre 2026, contre un correctif que je venais
+d'écrire.**
+
+Symptôme signalé : « le prix est poussé mais les dates restent fermées ». Mesuré
+sur Ofuro Futari — 5 au 8 octobre : `stop_sell = false` en base (intention
+ouverte), `availability = 0` chez Channex (invendable), voisines à `1`.
+
+Ma première correction complétait `availability` pour toute date tarifée dont
+l'intention était ouverte. **Deux fautes en une :**
+
+- elle émettait un champ que l'hôte **n'a pas touché**, ce que la certification
+  Channex interdit (exigence #13, « only send changes ») ;
+- elle **supposait l'intention** : tarifer une nuit ne signifie pas vouloir la
+  vendre — on prépare souvent ses prix à l'avance. C'est le principe que ce
+  chantier défend partout ailleurs, y compris contre lui-même quelques heures
+  plus tôt : *la mémoire d'intention n'appartient qu'à l'hôte*.
+
+**Ce qui est fait à la place** : on ne pousse rien de plus, mais on le **dit**.
+Une nuit tarifée qui reste fermée est invendable, et l'écran affichait
+« Enregistré et publié » sans rien signaler. L'avertissement nomme l'état réel,
+les dates concernées, et le geste exact qui résout — passer la disponibilité sur
+« Ouvert ».
+
+⚠ **La vraie cause de « les prix partent, la disponibilité non » était
+ailleurs**, et elle est corrigée : `loadOwnedProperties` ne sélectionnait pas
+`user_id`, donc `nuitsOccupees` levait à chaque appel, et le repli
+« impossible de vérifier les nuits déjà vendues » **retirait toutes les
+ouvertures** de la poussée. C'est l'incident du 11 septembre — « 69 dates
+tarifées mais invendables » — dont on avait ajouté les avertissements sans
+jamais trouver la cause.
