@@ -140,6 +140,13 @@
       <input type="number" id="edit-base-price" min="1" max="100000" step="1">
     </div>
     <div class="field">
+      <label for="edit-prix-min">Prix plancher par nuit (optionnel)</label>
+      <input type="number" id="edit-prix-min" min="1" max="100000" step="1" placeholder="10">
+      <small>Aucune nuit ne sera mise en vente sous ce prix. Une date dont le
+      tarif tombe en dessous est <strong>fermée</strong> et vous êtes prévenu —
+      le prix n'est jamais remonté d'office. Par défaut&nbsp;: 10&nbsp;€.</small>
+    </div>
+    <div class="field">
       <label for="edit-included">Voyageurs inclus dans le prix (optionnel)</label>
       <input type="number" id="edit-included" min="1" max="20" placeholder="Tous">
     </div>
@@ -493,6 +500,9 @@
     document.getElementById('edit-country').value = p.country || 'FR'
     document.getElementById('edit-capacity').value = p.capacity != null ? p.capacity : ''
     document.getElementById('edit-base-price').value = p.base_price != null ? p.base_price : ''
+    // Stocke en CENTIMES, saisi en euros : la conversion se fait aux deux bouts.
+    document.getElementById('edit-prix-min').value =
+      p.prix_minimum != null ? Math.round(Number(p.prix_minimum)) / 100 : ''
     document.getElementById('edit-included').value = p.included_guests != null ? p.included_guests : ''
     document.getElementById('edit-extra').value = p.extra_guest_fee != null ? p.extra_guest_fee : ''
     document.getElementById('edit-currency').value = p.currency || 'EUR'
@@ -524,6 +534,15 @@
       // le rate_plan Channex quand on ne touche qu'un champ cosmetique. Devise non editable.
       const norm = (v) => (v == null ? '' : String(v))
       const capV = g('edit-capacity'), baseV = g('edit-base-price'), incV = g('edit-included'), extraV = g('edit-extra')
+      // Le plancher est saisi en EUROS et stocke en CENTIMES. On compare donc
+      // sur la valeur affichee, pas sur la valeur brute : sinon le champ
+      // paraitrait modifie a chaque ouverture de la fiche.
+      const minV = g('edit-prix-min')
+      const minAffiche = currentEdit.prix_minimum != null
+        ? String(Math.round(Number(currentEdit.prix_minimum)) / 100) : ''
+      if (norm(minV) !== minAffiche) {
+        body.prix_minimum = minV === '' ? null : Math.round(Number(minV) * 100)
+      }
       if (norm(capV) !== norm(currentEdit.capacity)) body.capacity = Number(capV)
       if (norm(baseV) !== norm(currentEdit.base_price)) body.base_price = Number(baseV)
       if (norm(incV) !== norm(currentEdit.included_guests)) body.included_guests = incV === '' ? null : Number(incV)

@@ -10,6 +10,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
 const { enregistrerPrixPousses } = require('../lib/price-log')
+const { tarifAcceptable, messageRefus } = require('../lib/yield/prix-plancher')
 const { reaffirmerStopSell } = require('../lib/channel-availability')
 const { readStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
@@ -290,7 +291,7 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(uuids, compte) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
+      .select('id, name, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
       .eq('user_id', compte)
       .in('id', uuids)
     if (error) throw new Error('Erreur lecture biens')
@@ -309,7 +310,7 @@ module.exports = async function handler(req, res) {
     // alors que le POST sur le meme identifiant fonctionnait.
     const uuids = ids.filter(v => UUID_RE.test(v))
     const refs  = ids.filter(v => REF_SURE_RE.test(v))   // REF_SURE_RE accepte deja les UUID
-    const COLS = 'id, name, user_id, provider, capacity, base_price, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
+    const COLS = 'id, name, user_id, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
     const paquets = []
     if (uuids.length) paquets.push(supabase.from('properties').select(COLS).in('id', uuids))
     if (refs.length)  paquets.push(supabase.from('properties').select(COLS).in('provider_property_id', refs))
@@ -691,6 +692,44 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // ─── PRIX PLANCHER : ON REFUSE A LA PORTE ────────────────────────────
+    // ⚠ LA PREMIERE VERSION FERMAIT LA DATE, ET NE PROTEGEAIT RIEN.
+    // Relevee en review : l'upsert de `calendar_inventory` a lieu AVANT la
+    // construction de la charge ARI. Poser `stop_sell` dans cette charge
+    // laissait donc la MEMOIRE d'intention a `false`, et `reaffirmerStopSell`
+    // — qui relit cette memoire quelques lignes apres le push — repoussait
+    // `stop_sell: false` dans la meme requete. La date se rouvrait sans tarif :
+    // vente au prix de la GRILLE, exactement le defaut a fermer, pendant que
+    // l'ecran affichait « ces dates sont fermees ». Un segment voisin portant
+    // « Disponibilite : Ouvert » produisait le meme resultat, et le `continue`
+    // faisait au passage tomber la disponibilite du segment refuse.
+    //
+    // Refuser AVANT toute ecriture supprime ces trois chemins d'un coup, et
+    // respecte la regle du chantier stop_sell : la memoire d'intention
+    // n'appartient qu'a l'hote — nous n'y ecrivons pas une fermeture qu'il n'a
+    // pas demandee. Un tarif sous le plancher est une ERREUR DE SAISIE, pas un
+    // etat a rattraper : on le dit, et rien ne bouge.
+    const refuses = []
+    let detailRefus = null
+    for (const seg of dateSegments) {
+      if (seg.rate == null) continue
+      const cents = Math.round(Number(seg.rate) * 100)
+      const verdict = tarifAcceptable(cents, bien)
+      if (verdict.ok) continue
+      refuses.push(...expandDays(seg.date_from, seg.date_to, seg.days))
+      if (!detailRefus) detailRefus = { raison: verdict.raison, cents, plancher: verdict.plancher }
+    }
+    if (refuses.length) {
+      console.log(`[calendar] REFUS prix plancher : ${refuses.length} date(s), ` +
+        `${detailRefus.cents} centimes < ${detailRefus.plancher}`)
+      return res.status(400).json({
+        error: 'prix_sous_plancher',
+        message: messageRefus(detailRefus.raison, detailRefus.cents, detailRefus.plancher, refuses.length),
+        plancher_centimes: detailRefus.plancher,
+        dates: refuses.slice(0, 20)
+      })
+    }
+
     const allDates = new Set()
     for (const seg of dateSegments) {
       for (const ds of expandDays(seg.date_from, seg.date_to, seg.days)) allDates.add(ds)
@@ -816,7 +855,8 @@ module.exports = async function handler(req, res) {
           if (hasRest) {
             const o = restByDate[ds] || (restByDate[ds] = {})
             if (seg.rate != null) {
-              const rateCents = Math.round(Number(seg.rate) * 100)                         // euros -> cents
+              const rateCents = Math.round(Number(seg.rate) * 100)
+              // euros -> cents
               const occRates  = buildOccupancyRates(rateCents, bien.capacity, bien.included_guests, feeCentsCal)
               // occRates non-null -> rates[] par occupation ; null -> rate singulier (inchange).
               if (occRates) o.rates = occRates

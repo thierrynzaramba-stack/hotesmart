@@ -165,7 +165,7 @@ module.exports = async function handler(req, res) {
       // encore `provider = 'beds24'` mais deja pourvu de sa propriete Channex
       // n'apparaissait nulle part — l'hote ne pouvait pas le connecter, et il
       // n'y avait aucun autre chemin dans le produit.
-      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
+      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', compteLecture)
     if (refsPerimetre) {
       // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS. `properties.id` est de type
@@ -283,7 +283,8 @@ module.exports = async function handler(req, res) {
   // Devise volontairement NON modifiable (changement mal supporte cote Channex).
   if (req.method === 'PATCH') {
     const { property_id: pid, name, address, city, zip_code, country, rate_sync_mode,
-      ota_connect_status, ota_listing_urls, capacity, base_price, included_guests, extra_guest_fee } = req.body || {}
+      ota_connect_status, ota_listing_urls, capacity, base_price, included_guests, extra_guest_fee,
+      prix_minimum } = req.body || {}
     if (!pid) return res.status(400).json({ error: 'property_id requis' })
 
     // Modification d'un bien = domaine `reglages` en ecriture, sur CE bien.
@@ -314,6 +315,40 @@ module.exports = async function handler(req, res) {
     if (city !== undefined) updates.city = city ? String(city).trim().slice(0, 100) : null
     if (zip_code !== undefined) updates.zip_code = zip_code ? String(zip_code).trim().slice(0, 20) : null
     if (country !== undefined && country) updates.country = String(country).trim().slice(0, 2).toUpperCase()
+
+    // ─── Prix plancher, en CENTIMES ───────────────────────────────────────
+    // ⚠ NE TOUCHE NI LA GRILLE NI L'ARI : ce n'est pas un tarif, c'est un
+    // refus. Aucune poussee provider n'en decoule, contrairement a
+    // `base_price` — d'ou son traitement a part, hors du bloc prix/occupation.
+    // `null` est une valeur legitime : « pas de plancher propre, on retombe
+    // sur le plancher global du code ».
+    if (prix_minimum !== undefined) {
+      if (prix_minimum === null || prix_minimum === '') {
+        updates.prix_minimum = null
+      } else {
+        const cents = Math.round(Number(prix_minimum))
+        if (!Number.isFinite(cents) || cents <= 0 || cents > 10000000) {
+          return res.status(400).json({ error: 'prix_minimum invalide (centimes, > 0)' })
+        }
+        updates.prix_minimum = cents
+        // ⚠ UN PLANCHER AU-DESSUS DU PRIX DE BASE REND LE BIEN INVENDABLE.
+        // Releve en review : rien n'empechait un plancher a 120 EUR sur un bien
+        // dont le prix de base vaut 80. Le PATCH rendait 200, puis le full sync
+        // suivant fermait les 500 jours et declenchait l'incident — l'hote
+        // decouvrait son logement invendable sans lien avec sa saisie.
+        // On REFUSE, plutot que d'avertir : c'est une saisie, elle se corrige
+        // sur-le-champ.
+        const baseActuelle = base_price !== undefined ? Number(base_price) : Number(prop.base_price)
+        if (Number.isFinite(baseActuelle) && baseActuelle > 0 && cents > Math.round(baseActuelle * 100)) {
+          return res.status(400).json({
+            error: 'plancher_au_dessus_du_prix_de_base',
+            message: `Le prix plancher (${(cents / 100).toFixed(2)} €) depasse le prix de base `
+              + `(${baseActuelle.toFixed(2)} €) : toutes les nuits seraient fermees. `
+              + `Baissez le plancher, ou montez le prix de base.`
+          })
+        }
+      }
+    }
     // Mode de prix : reserve aux biens OTA/Channex (un bien Beds24 n'a pas de rate_sync_mode
     // pertinent). Valeurs contraintes en base, revalidees ici.
     if (rate_sync_mode !== undefined) {
