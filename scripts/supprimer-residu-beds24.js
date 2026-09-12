@@ -59,6 +59,31 @@ async function main () {
   // ─── Garde 2 : aucun enfant ne doit pointer sur cette fiche ───────────────
   // On verifie sur les DEUX formes de cle : l'uuid de la fiche et la cle
   // provider. Une table enfant oubliee ici deviendrait orpheline en silence.
+  // ⚠ ON DEMANDE AU SCHEMA CE QUI EXISTE, ON NE LE DEVINE PAS SUR L'ERREUR.
+  // La premiere version classait « colonne absente » d'apres le message
+  // d'erreur. Or PostgREST rend parfois un objet VIDE — ni code, ni message —
+  // et le script refusait alors de supprimer une fiche parfaitement nettoyable
+  // (constate sur `calendar_inventory.property_id_ref`, qui n'existe pas).
+  // Deviner dans un sens donne un faux vert, deviner dans l'autre bloque tout :
+  // le descripteur OpenAPI tranche sans ambiguite.
+  const rDesc = await fetch(`${process.env.SUPABASE_URL}/rest/v1/`, {
+    headers: { apikey: process.env.SUPABASE_SERVICE_KEY,
+               Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}` }
+  })
+  if (!rDesc.ok) throw new Error(`REFUS : schema illisible (HTTP ${rDesc.status})`)
+  const doc = await rDesc.json()
+  const defs = doc.definitions || doc.components?.schemas || {}
+  const colonnesDe = (t) => Object.keys(defs[t]?.properties || {})
+  // ⚠ LE TYPE AUSSI VIENT DU SCHEMA.
+  // Avec `head: true`, le client Supabase NE LIT PAS le corps de la reponse :
+  // une erreur PostgREST parfaitement explicite (22P02, « invalid input syntax
+  // for type uuid ») arrive VIDE — ni code, ni message. Impossible de
+  // distinguer « type incompatible » d'une vraie panne sur cette base.
+  // On compare donc les types AVANT d'interroger : une colonne `uuid` ne peut
+  // pas porter « 209413 », donc aucune reference n'est possible.
+  const UUID_STRICT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const estColonneUuid = (t, c) => (defs[t]?.properties?.[c]?.format || '') === 'uuid'
+
   const parUuid = ['calendar_inventory', 'booking_links', 'booking_attempts',
     'ota_reviews', 'airbnb_connect_sessions', 'prestataire_periodes']
   const parCle = ['bookings_snapshot', 'menages', 'messages', 'conversations',
@@ -71,6 +96,11 @@ async function main () {
   ]) {
     for (const t of tables) {
       for (const c of colonnes) {
+        // La colonne n'existe pas sur cette table : ce n'est pas une reference.
+        if (!colonnesDe(t).includes(c)) continue
+        // Type incompatible : la colonne existe mais ne peut PAS porter cette
+        // valeur, donc aucune ligne n'y pointe. Determine, pas devine.
+        if (estColonneUuid(t, c) && !UUID_STRICT.test(String(valeur))) continue
         const { count, error: e } = await supabase
           .from(t).select('*', { count: 'exact', head: true }).eq(c, valeur)
         // ⚠ ON NE CONFOND PAS « CETTE COLONNE N'EXISTE PAS » AVEC « LA LECTURE
@@ -81,18 +111,16 @@ async function main () {
         // laissant les lignes orphelines. C'est le faux vert de la regle 13,
         // sur le chemin ou il coute le plus cher.
         if (e) {
+          // La colonne EXISTE (verifie au schema) : une erreur ici est soit un
+          // type incompatible — un uuid compare a '169567', donc aucune
+          // reference possible — soit une vraie panne, et on refuse alors.
           const code = String(e.code || '')
           const msg = String(e.message || '').toLowerCase()
-          const colonneAbsente = code === '42703' || code === 'PGRST204' ||
-            /does not exist|could not find/.test(msg)
-          // Type incompatible (un uuid compare a '169567') : la colonne existe
-          // mais ne peut PAS porter cette valeur — donc aucune reference.
-          const typeIncompatible = code === '22P02' || /invalid input syntax/.test(msg)
-          if (colonneAbsente || typeIncompatible) continue
+          if (code === '22P02' || /invalid input syntax/.test(msg)) continue
           throw new Error(
             `REFUS : lecture de ${t}.${c} impossible (${e.code || 'sans code'} : ` +
-            `${e.message}). On ne supprime pas une fiche sans avoir pu verifier ` +
-            `qu'aucune ligne n'y pointe.`)
+            `${e.message || 'erreur vide'}). On ne supprime pas une fiche sans ` +
+            `avoir pu verifier qu'aucune ligne n'y pointe.`)
         }
         // `head: true` peut rendre un compte non numerique sur une table
         // absente sans lever d'erreur (mesure sur price_display_log).
