@@ -722,9 +722,16 @@ module.exports = async function handler(req, res) {
     if (refuses.length) {
       console.log(`[calendar] REFUS prix plancher : ${refuses.length} date(s), ` +
         `${detailRefus.cents} centimes < ${detailRefus.plancher}`)
+      // ⚠ LE MESSAGE LISIBLE VA DANS `error`, ET C'EST CE QUI COMPTE.
+      // `shared/api-client.js` construit son exception avec `data.error` — pas
+      // avec `data.message`. Mettre le code technique dans `error` affichait
+      // « prix_sous_plancher » a l'hote, et mon explication restait dans un
+      // champ que PERSONNE ne lit. Thierry a lu ce code et cru que sa saisie
+      // avait abouti.
       return res.status(400).json({
-        error: 'prix_sous_plancher',
-        message: messageRefus(detailRefus.raison, detailRefus.cents, detailRefus.plancher, refuses.length),
+        error: messageRefus(detailRefus.raison, detailRefus.cents, detailRefus.plancher,
+          refuses.length, 'saisie'),
+        code: 'prix_sous_plancher',
         plancher_centimes: detailRefus.plancher,
         dates: refuses.slice(0, 20)
       })

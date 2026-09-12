@@ -45,15 +45,50 @@ test('un bien sans plancher propre refuse quand meme l absurde', () => {
   assert.equal(tarifAcceptable(2500, {}).ok, true, '25 € : bas mais legitime, on ne l empeche pas')
 })
 
-test('le message dit le prix ET le plancher : l hote doit pouvoir agir', () => {
-  const m = messageRefus('sous_plancher', 500, 3000, 4)
-  assert.ok(m.includes('4 nuits'))
-  assert.ok(m.includes('30,00'), 'le plancher, en euros')
-  assert.ok(m.includes('5,00'), 'le tarif refuse')
-  assert.ok(/fermees/i.test(m), 'et ce qui a ete fait des dates')
-  const z = messageRefus('zero', 0, 3000, 1)
-  assert.ok(z.includes('1 nuit'))
-  assert.ok(/tarif par defaut|zero/i.test(z), 'explique POURQUOI 0 est dangereux')
+test('LE TEST QUI COMPTE : le message dit la VERITE selon le contexte', () => {
+  // ⚠ CAS REEL DU 12 SEPTEMBRE 2026. Thierry saisit 100 € sur un bien dont le
+  // plancher est 130 €. La garde fonctionne, rien n'est ecrit — mais le
+  // message annonçait « ces dates sont fermees », ce qui est FAUX au
+  // calendrier : on refuse la saisie sans rien fermer ni ecrire. Il a compris
+  // l'inverse de ce qui s'etait passe.
+  const saisie = messageRefus('sous_plancher', 10000, 13000, 1, 'saisie')
+  assert.ok(/NON enregistre/i.test(saisie), 'dit que RIEN n a ete enregistre')
+  assert.ok(/tarif precedent reste en place/i.test(saisie), 'et ce qui reste en vigueur')
+  assert.ok(!/ferm/i.test(saisie), 'ne parle PAS de fermeture : rien n est ferme')
+  assert.ok(saisie.includes('130,00') && saisie.includes('100,00'), 'plancher ET tarif refuse')
+  assert.ok(/baissez le plancher/i.test(saisie), 'et comment s en sortir')
+
+  // Au full sync, en revanche, la date EST fermee : le message doit le dire.
+  const poussee = messageRefus('sous_plancher', 500, 3000, 4, 'poussee')
+  assert.ok(/FERMEES/.test(poussee))
+  assert.ok(poussee.includes('4 nuits'))
+
+  // Accords : « 1 nuit est », « 4 nuits sont ».
+  assert.ok(/1 nuit est concernee/.test(saisie))
+  assert.ok(/4 nuits sont FERMEES/.test(poussee))
+
+  const z = messageRefus('zero', 0, 3000, 3, 'saisie')
+  assert.ok(/tarif par defaut/i.test(z), 'explique POURQUOI 0 est dangereux')
+  assert.ok(/3 nuits sont concernees/.test(z))
+})
+
+test('LE TEST QUI COMPTE : le message lisible va dans `error`, pas dans `message`', () => {
+  // ⚠ `shared/api-client.js` construit son exception avec `data.error` — PAS
+  // avec `data.message`. Mettre le code technique dans `error` affichait
+  // « prix_sous_plancher » a l'hote, et l'explication restait dans un champ
+  // que personne ne lit. C'est ce qui a fait croire a Thierry que sa saisie
+  // avait abouti.
+  const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  const bloc = cal.slice(cal.indexOf('prix_sous_plancher') - 800, cal.indexOf('prix_sous_plancher') + 400)
+  assert.ok(/error: messageRefus\(/.test(bloc),
+    'le message LISIBLE est dans `error`, le champ que le front affiche')
+  assert.ok(/code: 'prix_sous_plancher'/.test(bloc),
+    'et le code technique dans `code`, pour le code appelant')
+
+  // Le client lit bien `data.error` : si cela change, ce test doit le voir.
+  const client = fs.readFileSync(path.join(__dirname, '..', 'shared/api-client.js'), 'utf8')
+  assert.ok(/new Error\(data\.error \|\|/.test(client),
+    'api-client construit son erreur depuis data.error')
 })
 
 test('LE TEST QUI COMPTE : les deux chemins de poussee appliquent la garde', () => {
@@ -72,7 +107,10 @@ test('LE TEST QUI COMPTE : les deux chemins de poussee appliquent la garde', () 
   // `false`, et `reaffirmerStopSell` rouvrait la date dans la meme requete.
   // La nuit se vendait au prix de la grille pendant que l'ecran affichait
   // « fermee ».
-  assert.ok(/error: 'prix_sous_plancher'/.test(cal), 'il rend 400')
+  // Le code technique a migre de `error` vers `code` : c'est `error` qui porte
+  // desormais le message lisible, seul champ que le front affiche.
+  assert.ok(/code: 'prix_sous_plancher'/.test(cal), 'il rend 400 avec son code')
+  assert.ok(/res\.status\(400\)/.test(cal))
   assert.ok(!/refusesPlancher/.test(cal), 'plus de fermeture dans la charge ARI')
 })
 
