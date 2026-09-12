@@ -53,13 +53,22 @@
     /* Modales */
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
     .modal.show { display: flex; }
-    .modal-box { background: var(--bg); border-radius: var(--radius-lg); width: 100%; max-width: 460px; padding: 24px; }
+    /* ⚠ SANS max-height NI overflow, LE BOUTON « Enregistrer » DEVIENT
+       INATTEIGNABLE. La fiche d'edition porte 11 champs : des qu'un ecran est
+       un peu court — ou qu'un champ s'ajoute, comme le prix plancher le
+       12 septembre 2026 — le bas de la modale sort de la fenetre et rien ne
+       permet d'y acceder. Le formulaire paraissait « ne pas enregistrer ». */
+    .modal-box { background: var(--bg); border-radius: var(--radius-lg); width: 100%; max-width: 460px; padding: 24px; max-height: calc(100vh - 40px); overflow-y: auto; }
     .modal-box h2 { font-size: 16px; margin-bottom: 16px; color: var(--text); }
     .modal-box .field { margin-bottom: 14px; }
     .modal-box .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
     .modal-box .field input { width: 100%; padding: 10px 12px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); }
     .modal-box .field input:focus { outline: none; border-color: var(--green); }
-    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+    /* Les actions restent COLLEES EN BAS de la zone defilante : le bouton
+       d'enregistrement ne doit jamais dependre d'un scroll que l'utilisateur
+       ne devine pas. */
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; position: sticky; bottom: -24px; background: var(--bg); padding: 12px 0 0; }
+    .modal-box .field small { display: block; margin-top: 5px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted, #8A8A8E); }
     .modal-feedback { font-size: 13px; margin-top: 12px; display: none; }
     .modal-feedback.error { color: #E24B4A; display: block; }
     .danger-note { background: #fdecea; border: 0.5px solid #E24B4A; border-radius: var(--radius); padding: 12px; font-size: 13px; color: #8a1f1e; margin-bottom: 14px; line-height: 1.5; }
@@ -142,9 +151,7 @@
     <div class="field">
       <label for="edit-prix-min">Prix plancher par nuit (optionnel)</label>
       <input type="number" id="edit-prix-min" min="1" max="100000" step="1" placeholder="10">
-      <small>Aucune nuit ne sera mise en vente sous ce prix. Une date dont le
-      tarif tombe en dessous est <strong>fermée</strong> et vous êtes prévenu —
-      le prix n'est jamais remonté d'office. Par défaut&nbsp;: 10&nbsp;€.</small>
+      <small>Aucune nuit ne part en vente sous ce prix. Par défaut&nbsp;: 10&nbsp;€.</small>
     </div>
     <div class="field">
       <label for="edit-included">Voyageurs inclus dans le prix (optionnel)</label>

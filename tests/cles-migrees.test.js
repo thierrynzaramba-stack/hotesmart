@@ -257,3 +257,47 @@ test('LE TEST QUI COMPTE : les portes de LECTURE sont gardees aussi, pas seuleme
   // volontairement ouvert sur un echec de lecture.
   assert.ok(/bien\(s\) migre\(s\) ecarte\(s\)/.test(beds24), 'et journalise ce qu il ecarte')
 })
+
+test('LE TEST QUI COMPTE : une lecture en echec est MARQUEE, pas silencieuse', async () => {
+  // ⚠ MESURE DU 12 SEPTEMBRE 2026.
+  // Ce module retombe volontairement OUVERT quand la table est illisible, et
+  // son en-tete affirmait que « le seul degat serait un message renvoye a un
+  // voyageur ». C'etait faux : `materializeBeds24Properties` passait aussi et
+  // RECREAIT les fiches migrees avec un `active_at` neuf. Deux fiches Beds24
+  // sont revenues dans la nuit — a 03:00:58 et 06:00:39, deux cycles isoles
+  // sur une centaine — et la facturation est passee de 2 a 4 biens.
+  //
+  // « Lecture en echec » et « aucune cle migree » donnaient tous deux un
+  // ensemble vide : l'appelant ne pouvait pas les distinguer.
+  _vider()
+  const sb = faux({ lignes: [], error: { message: 'table illisible' } })
+  const enEchec = await clesMigrees(sb, 'hote-A')
+  assert.equal(enEchec.size, 0, 'le repli reste OUVERT : ensemble vide')
+  assert.equal(enEchec.lectureEnEchec, true, 'mais l echec est MARQUE')
+
+  _vider()
+  const vraimentVide = await clesMigrees(faux({ lignes: [] }), 'hote-B')
+  assert.equal(vraimentVide.size, 0)
+  assert.equal(vraimentVide.lectureEnEchec, undefined,
+    '« aucune cle migree » ne porte PAS le drapeau : les deux cas sont distincts')
+
+  // Le drapeau ne doit pas polluer une iteration ni une serialisation.
+  _vider()
+  const s2 = await clesMigrees(faux({ lignes: [], error: { message: 'x' } }), 'hote-C')
+  assert.deepEqual([...s2], [], 'non enumerable : l ensemble reste un ensemble vide')
+})
+
+test('LE TEST QUI COMPTE : une garde aveugle NE materialise RIEN', () => {
+  // Materialiser cree un bien FACTURE. Un bien non materialise pendant un
+  // cycle ne coute rien — le suivant le rattrape. Un bien refacture, si.
+  const src = lire('lib/cron-beds24-props.js')
+  assert.ok(/if \(migrees\.lectureEnEchec\) \{/.test(src),
+    'la materialisation refuse d agir quand la garde est aveugle')
+  // Le refus doit intervenir AVANT la boucle d'insertion.
+  const posGarde = src.indexOf('migrees.lectureEnEchec')
+  const posInsert = src.indexOf(".from('properties').insert(")
+  assert.ok(posGarde > 0 && posGarde < posInsert,
+    'et AVANT tout insert, sinon la protection arrive trop tard')
+  assert.ok(/return\s*$/m.test(src.slice(posGarde, posGarde + 600)),
+    'il sort, il ne se contente pas de journaliser')
+})
