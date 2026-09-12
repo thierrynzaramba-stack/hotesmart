@@ -311,3 +311,28 @@ test('LE TEST QUI COMPTE : un RevPAR sur CA ampute le DIT', () => {
   assert.equal(m.nuitees_sans_prix, 1)
   assert.equal(m.prix_moyen, 100, 'le prix moyen, lui, reste juste : il exclut les deux')
 })
+
+test('LE TEST QUI COMPTE : le numerateur suit le denominateur sur les exceptions', () => {
+  // ⚠ RELEVE EN REVIEW DU LOT 3.3. `joursOuverts` retire du denominateur tout
+  // jour couvert par une exception declaree par l'hote, mais les nuits vendues
+  // ces jours-la restaient au numerateur : 3 nuits dont 2 en exception sur
+  // 1 jour ouvert donnaient un taux d'occupation de 300 %, `calculable: true`,
+  // sans le moindre motif. Exactement le « 182 % » que la capacite raconte
+  // avoir corrige de son cote.
+  const e = ecl(['2025-03-01', '2025-03-02', '2025-03-03'],
+    { prix: 100, personnes: 2, exclues: ['2025-03-01', '2025-03-02'] })
+  const r = calculerIndicateurs([e], { granularite: 'mois', capacitePersonnes: 2,
+    capacites: new Map([['2025-03', cap(1)]]) })
+  const m = r[0]
+  assert.equal(m.taux_occupation, 1, '1 nuit de reference sur 1 jour ouvert')
+  assert.ok(m.taux_occupation <= 1, 'JAMAIS plus de 100 %')
+  assert.equal(m.revpar, 100, 'et le RevPAR sur le meme perimetre')
+  assert.equal(m.taux_occupation_personnes, 1)
+
+  // Le REALISE, lui, garde tout — exigence de Thierry au lot 3.2.
+  assert.equal(m.nuitees, 3)
+  assert.equal(m.ca, 300)
+  assert.equal(m.nuitees_hors_reference, 2)
+  assert.equal(m.nuitees_exclues_du_taux, 2, 'et le retrait est DIT')
+  assert.equal(m.ca_exclu_du_revpar, 200)
+})
