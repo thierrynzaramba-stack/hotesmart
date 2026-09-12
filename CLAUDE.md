@@ -165,6 +165,8 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/kb/eclatement-yield.md (socle du moteur : prix voyageur par provider/canal, repartition UNIFORME — le differentiel week-end vit dans price_display_log, pas dans l'eclatement ; pont demapped ; nuits en exception MARQUEES).
 - docs/kb/capacite-yield.md (denominateur du TO : jour ouvert = intention memorisee ; absence de ligne = ferme ; « non calculable » n'est JAMAIS zero).
 - docs/kb/price-log.md (journal des prix affiches : NON RETROACTIF, une ligne par changement REEL, une seule ligne courante par bien/nuit ; cle sur properties.id, exception raisonnee a la regle 10).
+- docs/kb/pickup-yield.md (le « a date » : pivot N-1 en JOURS pour une periode a venir, meme jour calendaire pour une periode commencee ; le N-1 est RECONSTRUIT donc sous-estime ; « ferme a la vente » n'est pas « n'a rien vendu », des DEUX cotes).
+- docs/kb/reference-yield.md (un jour = UN segment par priorite ; cascade de repli a 4 niveaux, plancher = jour de semaine ; deux seuils, 8 nuits ET 3 resas ; `part_vendue` est une part de VENTES, on extrapole le final, on ne multiplie jamais la capacite).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).
 - docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
 
