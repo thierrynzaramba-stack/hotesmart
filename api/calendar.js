@@ -815,6 +815,7 @@ module.exports = async function handler(req, res) {
     // n'affichent que warnings[0] dans le mode local_only, et le prendre en
     // premier faisait disparaitre l'explication « ce bien est gere par Beds24 ».
     let pushWarnings = []
+    let diagJournal = null      // TEMPORAIRE : diagnostic du journal des prix
     let pushed = false
     let localOnly = false
     // « Le canal a refuse quelque chose » : un drapeau, pas un texte a lire.
@@ -1045,6 +1046,11 @@ module.exports = async function handler(req, res) {
       if (!(journalPeut.nuits && journalPeut.managed && resultatsPoussee.restrictions?.ok)) {
         console.log('[calendar] journal des prix NON ecrit :', JSON.stringify(journalPeut))
       }
+      // ⚠ REMONTE DANS LA REPONSE, ET C'EST TEMPORAIRE.
+      // Les logs Vercel ne sont pas accessibles depuis le poste de dev : sans
+      // ce champ, diagnostiquer une non-ecriture demande un aller-retour avec
+      // le product owner a chaque essai. A retirer une fois la cause trouvee.
+      diagJournal = journalPeut
 
       if (Object.keys(prixParNuit).length && canPushRates(bien) && resultatsPoussee.restrictions?.ok) {
         try {
@@ -1125,6 +1131,7 @@ module.exports = async function handler(req, res) {
       saved: rows.length,
       pushed,
       local_only: localOnly,
+      journal_diag: diagJournal,   // TEMPORAIRE : voir plus haut
       // Drapeau LISIBLE PAR LE CODE : un texte dans `warnings` ne suffit pas, les
       // vues n'en affichent que le nombre. Sans lui, l'hote lisait
       // « Enregistre (1 avertissement) » puis voyait sa valeur revenir en place.
