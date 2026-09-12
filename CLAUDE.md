@@ -161,6 +161,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
 - docs/kb/prix-plancher.md (garde anti nuit a 0 : `properties.prix_minimum` par bien, repli 10 € ; on FERME la date, on ne remonte jamais le prix ; `rate: 0` n'est pas applique par Channex, il garde le prix de la grille).
 - docs/kb/evenements-yield.md (vacances scolaires importees/cachees par zone ; jours feries CALCULES, aucune table ; OpenAgenda ecarte de la V1, sur mesure).
+- docs/kb/eclatement-yield.md (socle du moteur : prix voyageur par provider/canal, repartition UNIFORME — le differentiel week-end vit dans price_display_log, pas dans l'eclatement ; pont demapped ; nuits en exception MARQUEES).
 - docs/kb/capacite-yield.md (denominateur du TO : jour ouvert = intention memorisee ; absence de ligne = ferme ; « non calculable » n'est JAMAIS zero).
 - docs/kb/price-log.md (journal des prix affiches : NON RETROACTIF, une ligne par changement REEL, une seule ligne courante par bien/nuit ; cle sur properties.id, exception raisonnee a la regle 10).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).
