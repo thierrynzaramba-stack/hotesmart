@@ -1081,6 +1081,7 @@ module.exports = async function handler(req, res) {
             source: 'host'               // 'engine' viendra a l'etape 4
           })
           console.log('[calendar] journal des prix', JSON.stringify(bilanJournal))
+          if (diagJournal) diagJournal.bilan = bilanJournal
         } catch (e) {
           if (e.message === '__rien_a_journaliser__') {
             console.log('[calendar] journal des prix : aucune nuit a journaliser apres filtrage')
@@ -1091,6 +1092,9 @@ module.exports = async function handler(req, res) {
           // ecraser. On perd une ligne de journal, jamais une vente — mais on
           // le dit fort, parce qu'un journal muet est un journal faux.
           console.error('[calendar] JOURNAL DES PRIX NON ECRIT :', e.message)
+          // TEMPORAIRE : remonte la cause, les logs Vercel n'etant pas
+          // accessibles depuis le poste.
+          if (diagJournal) diagJournal.erreur = String(e && e.message || e).slice(0, 300)
           }
         }
       }
