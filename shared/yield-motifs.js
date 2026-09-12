@@ -212,6 +212,33 @@ export const MOTIFS = {
   }
 }
 
+// ─── Les refus de l'endpoint d'écriture, en français d'hôte ─────────────────
+// ⚠ `api/yield-exceptions.js` rend des CODES (`periode_invalide`,
+// `exception_introuvable`…), pas des phrases. Sans cette table, l'hôte lirait
+// `exception_introuvable` — ce qui est exactement ce que tout ce fichier
+// combat, cette fois sur le seul écran de l'app qui écrit.
+export const REFUS_ECRITURE = {
+  periode_invalide: 'Les dates ne forment pas une période valide.',
+  periode_future: 'Une période hors référence porte sur le passé. Pour l’avenir, '
+    + 'fermez les dates au calendrier ou ajustez le prix : retirer de la référence '
+    + 'un jour encore vendable créerait deux vérités pour la même nuit.',
+  id_requis: 'Aucune période désignée.',
+  id_invalide: 'Cette période n’existe pas.',
+  exception_introuvable: 'Cette période a déjà été supprimée, ou appartient à un autre logement.',
+  bien_requis: 'Aucun logement désigné.',
+  lecture_impossible: 'Lecture impossible pour le moment. Réessayez dans un instant.',
+  ecriture_impossible: 'Enregistrement impossible pour le moment. Rien n’a été modifié.',
+  suppression_impossible: 'Suppression impossible pour le moment. Rien n’a été modifié.',
+  methode_non_supportee: 'Opération non prise en charge.'
+}
+
+// Un refus se lit toujours : code connu → phrase, sinon le message brut du
+// serveur (le writer, lui, rend déjà des phrases lisibles).
+export function refus (code) {
+  if (!code) return 'Opération impossible.'
+  return REFUS_ECRITURE[code] || String(code)
+}
+
 // ─── Drapeaux posés par l'ÉCRAN, pas par le moteur ──────────────────────────
 // ⚠ Le moteur est PUR : il n'a pas d'horloge, donc il ne peut pas savoir qu'une
 // période n'a pas encore commencé. Il calcule donc un CA de 0 et une variation

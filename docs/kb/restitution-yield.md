@@ -237,6 +237,44 @@ pouvait modifier « Du », « Au » et « Détail » — des champs que la vue *
 Il saisissait des dates, cliquait, et recevait les 12 mois glissants sans que
 rien ne le lui dise. La page déclare donc sa propre règle `[hidden]`.
 
+## 5 ter. Le seul écran de l'app qui écrit (lot 4.3)
+
+Deux blocs s'ajoutent en bas de page : **Événements à venir** (lecture seule) et
+**Périodes hors référence** (saisie et suppression).
+
+**L'écriture passe par `/api/yield-exceptions`**, qui appelle le writer unique
+`lib/yield/exceptions.js`. La page ne touche jamais la base directement : deux
+writers de `public_tokens.property_ids` ont déjà coûté l'écrasement silencieux
+des biens réglés dans l'app ménage.
+
+**Le rechargement complet EST la preuve.** Après une saisie ou une suppression,
+l'écran recharge tout : la référence se recalcule sous les yeux. Mettre à jour
+la seule liste laisserait les chiffres d'avant — l'hôte croirait que sa
+déclaration n'a rien changé.
+
+⚠ Et `charger()` **rend un booléen**. Relevé en review : il avalait ses propres
+échecs, donc l'écran annonçait « la référence a été recalculée » pendant qu'il
+gardait les chiffres d'avant, quand le rechargement échouait après une écriture
+réussie. Le message dit maintenant exactement ce qui s'est passé.
+
+**Une borne basse sur le formulaire**, sinon l'exception est écrite et
+invisible : la liste ne montre que la fenêtre d'historique, et une période
+déclarée avant s'enregistre sans rien changer ni pouvoir être supprimée depuis
+l'app. L'hôte recommencerait, croyant s'être trompé.
+
+**Les événements ne coûtent aucune requête** : vacances, fériés et ponts
+viennent du contexte déjà chargé pour la référence. ⚠ Le regroupement des jours
+consécutifs inclut **les zones** dans l'identité du groupe — `detail` vient du
+nom des vacances, mais les zones n'entrent ni ne sortent le même jour, et un
+groupe « 20 février → 8 mars » affichait « A, B, C » sur ses dix-sept jours
+alors que du 2 au 8 mars seule C est en vacances.
+
+**La dette du calendrier scolaire est dite comme une limite connue** : la table
+s'arrête à la dernière année publiée, et l'horizon se mesure sur **la zone du
+bien**, pas sur le maximum toutes zones — sinon la bannière se tait sur des mois
+déjà hors couverture pour ce logement. Table vide : bannière quand même, c'est
+le pire cas.
+
 ## 6. Mobile
 
 C'est là que l'hôte regarde. Sous 640 px : la barre de sélection passe en deux

@@ -80,6 +80,29 @@
     /* ─── Fourchette de projection ───────────────────────────────────────── */
     .yf-fourchette { font-size: 10.5px; color: var(--text3); white-space: nowrap; }
 
+    /* ─── Saisie des exceptions ──────────────────────────────────────────── */
+    /* ⚠ CES CLASSES N'EXISTAIENT NULLE PART — relevé en review. `yf-ok` et
+       `yf-ko` rendaient un texte IDENTIQUE : l'hôte ne distinguait pas
+       « Période déclarée » d'un refus. Et `yf-alerte` porte le bandeau de dette
+       du calendrier scolaire, qui s'affichait comme un paragraphe ordinaire. */
+    .yf-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+               padding: 12px; background: var(--bg2); border-radius: var(--radius);
+               margin-bottom: 12px; }
+    .yf-form .yf-champ { flex: 1 1 130px; }
+    .yf-form input { width: 100%; }
+    .yf-liste { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+    .yf-liste li { display: flex; gap: 10px; align-items: baseline; padding: 8px 0;
+                   border-bottom: 0.5px solid var(--border); flex-wrap: wrap; }
+    .yf-liste li:last-child { border-bottom: none; }
+    .yf-motif-texte { flex: 1 1 160px; color: var(--text2); }
+    .yf-sup { background: none; border: none; color: #B02A37; cursor: pointer;
+              font-size: 11px; padding: 2px 6px; border-radius: 4px; font-family: inherit; }
+    .yf-sup:hover { background: #FDECEA; }
+    .yf-ok { font-size: 12px; color: #0F7B3E; padding: 8px 0; font-weight: 500; }
+    .yf-ko { font-size: 12px; color: #842029; padding: 8px 0; font-weight: 500; }
+    .yf-alerte { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius);
+                 background: #FFF3CD; color: #856404; font-size: 12px; line-height: 1.6; }
+
     .yf-etat { padding: 20px; border: 0.5px solid var(--border); border-radius: var(--radius-lg);
                background: var(--bg); color: var(--text2); font-size: 13px; }
     .yf-etat.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
@@ -162,7 +185,7 @@
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { motif, nomSegment, MOTIFS, DRAPEAUX_ECRAN, NIVEAUX_REFERENCE } from '/shared/yield-motifs.js'
+  import { motif, nomSegment, refus, MOTIFS, DRAPEAUX_ECRAN, NIVEAUX_REFERENCE } from '/shared/yield-motifs.js'
 
   initErrorHandler()
 
@@ -401,15 +424,110 @@
         etat(`Lecture impossible : ${e.message}`, true)
         el('yf-charger').disabled = false
       }
-      return
+      return false
     }
-    if (jeton !== enCours) return          // une demande plus récente a pris la main
+    if (jeton !== enCours) return false    // une demande plus récente a pris la main
     el('yf-charger').disabled = false
     // ⚠ UNE ERREUR S'AFFICHE, on ne rend pas un ecran vide. Un ecran vide se
     // lit « ce logement n'a rien vendu » — le faux negatif que tout ce
     // chantier combat.
-    if (!r.ok) { etat(data?.error || `Erreur ${r.status}`, true); return }
+    // ⚠ `charger()` REND UN BOOLEEN — relevé en review. Il avalait ses propres
+    // échecs : sur `!r.ok` il affichait l'erreur et retournait sans toucher
+    // `yf-contenu`. L'appelant annonçait alors « la référence a été
+    // recalculée » pendant que l'écran gardait les chiffres d'AVANT.
+    if (!r.ok) { etat(data?.error || `Erreur ${r.status}`, true); return false }
     el('yf-contenu').innerHTML = rendre(data)
+    bienAffiche = data.bien.id
+    brancherExceptions()
+    return true
+  }
+
+  // ─── LE SEUL CHEMIN D'ÉCRITURE DE CETTE PAGE ──────────────────────────────
+  // ⚠ Il passe par `/api/yield-exceptions`, qui appelle le writer unique
+  // `lib/yield/exceptions.js`. La page n'écrit jamais en base directement.
+  //
+  // ⚠ ET ELLE RECHARGE TOUT APRÈS. C'est le test de vérité du lot : après une
+  // saisie, la référence doit bouger sous les yeux. Mettre à jour la seule
+  // liste laisserait les chiffres d'avant à l'écran — l'hôte croirait que sa
+  // déclaration n'a rien changé, alors qu'elle a changé la référence.
+  function brancherExceptions () {
+    const form = el('yf-exc-form')
+    if (form) form.addEventListener('submit', declarerException)
+    for (const b of document.querySelectorAll('.yf-sup')) {
+      b.addEventListener('click', () => supprimerException(b.dataset.exc))
+    }
+  }
+
+  function retourExc (msg, erreur = false) {
+    const z = el('yf-exc-retour')
+    if (z) z.innerHTML = `<div class="${erreur ? 'yf-ko' : 'yf-ok'}">${ech(msg)}</div>`
+  }
+
+  // Le bien sur lequel les données affichées portent — pas celui du sélecteur,
+  // qui peut avoir changé depuis. Écrire sur l'un en croyant voir l'autre
+  // donnerait un 404 au message trompeur.
+  let bienAffiche = null
+
+  async function declarerException (ev) {
+    ev.preventDefault()
+    if (bienAffiche && bienAffiche !== el('yf-bien').value) {
+      retourExc('Le logement sélectionné a changé : affichez-le d’abord.', true); return
+    }
+    const debut = el('yf-exc-debut').value
+    const fin = el('yf-exc-fin').value
+    const motif = el('yf-exc-motif').value.trim()
+    if (!debut || !fin || !motif) { retourExc('Remplissez les trois champs.', true); return }
+    if (fin < debut) { retourExc('La date de fin précède la date de début.', true); return }
+    el('yf-exc-ajouter').disabled = true
+    retourExc('Enregistrement…')
+    try {
+      const r = await fetch('/api/yield-exceptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`, ...enteteCompte() },
+        body: JSON.stringify({ property_id: bienAffiche, debut, fin, motif })
+      })
+      const data = await r.json()
+      if (!r.ok) { retourExc(refus(data?.error), true); return }
+      // Le rechargement complet EST la preuve : les chiffres changent.
+      const rendu = await charger()
+      retourExc(rendu
+        ? 'Période déclarée — la référence a été recalculée.'
+        : 'Période déclarée, mais l’écran n’a pas pu être rafraîchi : les chiffres'
+          + ' ci-dessus sont ceux d’AVANT. Rechargez la page.', !rendu)
+    } catch (e) {
+      retourExc(`Enregistrement impossible : ${e.message}`, true)
+    } finally {
+      const b = el('yf-exc-ajouter')
+      if (b) b.disabled = false
+    }
+  }
+
+  async function supprimerException (id) {
+    if (!id) return
+    if (bienAffiche && bienAffiche !== el('yf-bien').value) {
+      retourExc('Le logement sélectionné a changé : affichez-le d’abord.', true); return
+    }
+    // Une exception est une DÉCLARATION, pas une archive : la corriger fait
+    // partie de l'usage normal. On confirme quand même — elle change les
+    // chiffres de référence.
+    if (!window.confirm('Supprimer cette période ? La référence sera recalculée.')) return
+    try {
+      const p = new URLSearchParams({ property_id: bienAffiche, id })
+      const r = await fetch(`/api/yield-exceptions?${p}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() }
+      })
+      const data = await r.json()
+      if (!r.ok) { retourExc(refus(data?.error), true); return }
+      const rendu = await charger()
+      retourExc(rendu
+        ? 'Période supprimée — la référence a été recalculée.'
+        : 'Période supprimée, mais l’écran n’a pas pu être rafraîchi : les chiffres'
+          + ' ci-dessus sont ceux d’AVANT. Rechargez la page.', !rendu)
+    } catch (e) {
+      retourExc(`Suppression impossible : ${e.message}`, true)
+    }
   }
 
   // ─── Le rendu ─────────────────────────────────────────────────────────────
@@ -420,14 +538,19 @@
   function rendre (d) {
     if (vue === 'bilan') {
       return [blocSources(d), blocRealise(d), blocReference(d),
-        blocRythme(d), blocPickup(d)].join('')
+        blocRythme(d), blocPickup(d), blocExceptions(d)].join('')
     }
     if (vue === 'pilotage') {
+      // ⚠ LES EVENEMENTS JUSTE APRES LA REFERENCE : ils expliquent POURQUOI un
+      // mois vaut plus qu'un autre. Les exceptions ferment la vue — c'est une
+      // declaration sur le passe, pas un chiffre de pilotage.
       return [blocSources(d), blocPickup(d), blocProjection(d),
-        blocReference(d), blocRythme(d), blocRealise(d)].join('')
+        blocReference(d), blocEvenements(d), blocRythme(d),
+        blocRealise(d), blocExceptions(d)].join('')
     }
     return [blocSources(d), blocRealise(d), blocPickup(d),
-      blocReference(d), blocRythme(d), blocProjection(d)].join('')
+      blocReference(d), blocEvenements(d), blocRythme(d),
+      blocProjection(d), blocExceptions(d)].join('')
   }
 
   // 1. Ce sur quoi tout repose — affiché EN PREMIER, parce qu'une source
@@ -791,6 +914,133 @@
         <li><strong>Aucune projection sur une période fermée</strong> : cela inventerait un manque à gagner
         qui n’existe pas.</li>
       </ul>`)
+  }
+
+  // 7. Les evenements a venir : LECTURE SEULE.
+  //    ⚠ AUCUNE ECRITURE, et aucune lecture de plus : vacances, feries et ponts
+  //    viennent du contexte deja charge pour la reference. Ils expliquent
+  //    POURQUOI un mois vaut plus qu'un autre.
+  function blocEvenements (d) {
+    const ev = d.evenements || []
+    const horizon = d.sources.vacances && d.sources.vacances.horizon
+    // ⚠ LA DETTE DATEE, DITE COMME UNE LIMITE CONNUE. `school_holidays`
+    // s'arrete a la derniere annee scolaire publiee : au-dela, chaque jour
+    // serait classe « hors vacances » — un ete entier en basse saison, sans la
+    // moindre erreur. On le montre plutot que de le subir.
+    // ⚠ UNE TABLE VIDE EST LE PIRE CAS, ET IL NE DISAIT RIEN — relevé en
+    // review : `horizon` valait `null`, donc la condition tombait et aucune
+    // bannière ne s'affichait alors qu'AUCUN jour n'est couvert.
+    if (!d.sources.vacances || !d.sources.vacances.complete) {
+      if (!horizon) {
+        return bloc('Événements à venir', 'Vacances scolaires, jours fériés et ponts',
+          `<div class="yf-alerte">Le calendrier scolaire n’est pas chargé : aucune période
+           de vacances n’est connue. Tous les jours sont comptés « hors vacances »,
+           et la référence saisonnière est faussée sur toute la fenêtre.</div>`)
+      }
+    }
+    const limite = horizon && horizon < d.fenetre.fin
+      ? `<div class="yf-alerte">Le calendrier scolaire officiel s’arrête au
+         <strong>${nomPeriode(horizon)}</strong>. Au-delà, les vacances ne sont pas
+         connues : ces jours sont comptés « hors vacances », et la référence des
+         périodes concernées est faussée. À réimporter avant cette date.</div>`
+      : ''
+    if (!ev.length) {
+      return bloc('Événements à venir', 'Vacances scolaires, jours fériés et ponts',
+        `<p class="yf-etat">Aucun événement sur cette fenêtre.</p>${limite}`)
+    }
+    const lignes = ev.map(e => `<tr>
+      <td>${nomPeriode(e.debut)}${e.fin !== e.debut ? ` → ${nomPeriode(e.fin)}` : ''}</td>
+      <td>${e.jours}</td>
+      <td>${ech(e.libelle || nomSegment(e.detail))}</td>
+      <td>${ech(nomSegment(e.segment))}</td>
+      <td>${e.zones_en_vacances ? ech(e.zones_en_vacances.join(', ')) : ''}</td>
+    </tr>`).join('')
+    return bloc('Événements à venir', 'Vacances scolaires, jours fériés et ponts',
+      `<div class="yf-scroll"><table class="yf-table">
+        <thead><tr>
+          <th>Période</th><th>Jours</th><th>Événement</th>
+          <th>Compte comme</th><th>Zones en vacances</th>
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table></div>
+      <ul class="yf-explications">
+        <li><strong>Les vacances des autres zones comptent aussi</strong> — un logement
+        accueille des vacanciers de toute la France. Mais elles ne valent pas les vôtres :
+        sur ce logement, elles rapportent le même prix qu’une période hors vacances.</li>
+        <li>Ces dates sont en <strong>lecture seule</strong> : elles viennent du calendrier
+        officiel et du calcul des jours fériés, rien ici ne les modifie.</li>
+      </ul>${limite}`)
+  }
+
+  // 8. Les exceptions « hors référence » — LE SEUL ENDROIT DE L'APP QUI ÉCRIT.
+  //    ⚠ L'écriture passe par `/api/yield-exceptions`, qui appelle le writer
+  //    unique `lib/yield/exceptions.js`. Jamais une seconde voie depuis l'UI :
+  //    deux writers de `public_tokens.property_ids` ont déjà coûté l'écrasement
+  //    silencieux des biens réglés dans l'app ménage.
+  function blocExceptions (d) {
+    const ex = d.exceptions || []
+    const peutEcrire = !!d.droits_ecriture
+    const hier = veilleDe(d.fenetre.aujourdhui)
+    // ⚠ UNE BORNE BASSE, SINON L'EXCEPTION EST ECRITE ET INVISIBLE — relevé en
+    // review. La liste ne montre que la fenêtre d'historique : une période
+    // déclarée avant s'enregistre, n'apparaît nulle part, ne change aucun
+    // chiffre, et ne peut plus être supprimée depuis l'app. L'hôte recommence,
+    // croyant s'être trompé.
+    const plusTot = d.historique.debut
+    const form = peutEcrire
+      ? `<form class="yf-form" id="yf-exc-form" autocomplete="off">
+          <div class="yf-champ">
+            <label for="yf-exc-debut">Du</label>
+            <input type="date" id="yf-exc-debut" min="${plusTot}" max="${hier}" required>
+          </div>
+          <div class="yf-champ">
+            <label for="yf-exc-fin">Au</label>
+            <input type="date" id="yf-exc-fin" min="${plusTot}" max="${hier}" required>
+          </div>
+          <div class="yf-champ" style="flex:2 1 200px">
+            <label for="yf-exc-motif">Motif</label>
+            <input type="text" id="yf-exc-motif" maxlength="500" required
+                   placeholder="travaux, fermeture personnelle…">
+          </div>
+          <button class="btn" type="submit" id="yf-exc-ajouter">Déclarer</button>
+        </form>
+        <div id="yf-exc-retour"></div>`
+      : `<p class="yf-pied">Vous pouvez consulter ces périodes, pas les modifier :
+         déclarer une exception change ce que le moteur considère comme normal,
+         donc les prix qu’il suggérera.</p>`
+    const liste = ex.length
+      ? `<ul class="yf-liste">${ex.map(e => `<li>
+          <strong>${nomPeriode(e.date_debut)} → ${nomPeriode(e.date_fin)}</strong>
+          <span class="yf-motif-texte">${ech(e.motif)}</span>
+          ${peutEcrire ? `<button class="yf-sup" data-exc="${ech(e.id)}"
+            aria-label="Supprimer cette période">Supprimer</button>` : ''}
+        </li>`).join('')}</ul>`
+      : `<p class="yf-pied">Aucune période déclarée. Les mois exceptionnels —
+         travaux, fermeture personnelle — comptent donc comme des mois normaux
+         dans la référence.</p>`
+    return bloc('Périodes hors référence', 'Ce qui ne doit pas compter comme normal',
+      `${form}${liste}
+      <ul class="yf-explications">
+        <li><strong>Depuis le ${nomPeriode(plusTot)}.</strong> La référence se calcule sur
+        ${d.historique.ans} ans : une période déclarée avant cette date serait enregistrée
+        sans rien changer, et n’apparaîtrait pas dans cette liste.</li>
+        <li><strong>Le passé uniquement.</strong> Une exception relit ce qui a eu lieu.
+        Pour l’avenir, fermez la date au calendrier ou ajustez le prix : retirer de la
+        référence un jour encore vendable créerait deux vérités pour la même nuit —
+        son chiffre d’affaires dans le réalisé, ses nuits hors du normal.</li>
+        <li><strong>Ces nuits restent dans le réalisé.</strong> Une fermeture pour travaux
+        appartient à ce qui s’est passé ; elle est seulement écartée de ce qui est
+        « normal ».</li>
+        <li><strong>Sans elles, le moteur se trompe dans le bon sens.</strong> Un mois de
+        travaux à zéro nuit lui fait croire que la demande s’effondre à cette saison —
+        et il suggérera de brader l’an prochain.</li>
+      </ul>`)
+  }
+
+  function veilleDe (iso) {
+    const d = new Date(`${iso}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - 1)
+    return d.toISOString().slice(0, 10)
   }
 
   // ─── Briques ──────────────────────────────────────────────────────────────

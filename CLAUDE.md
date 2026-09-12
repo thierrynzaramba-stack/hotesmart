@@ -65,6 +65,18 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - Corollaire : `npm test` au vert n'autorise pas à pousser. Les tests disent que
   ce qu'on a pensé à vérifier fonctionne, pas que le code est correct.
 
+## RÈGLE ABSOLUE — LIRE AVANT D'ÉCRASER
+- **Un fichier existant se lit avant d'être réécrit.** `ls` / `git log -- <chemin>`
+  d'abord ; si le fichier existe, on l'ouvre EN ENTIER, et on édite de façon
+  ciblée plutôt que de réécrire.
+- Après une écriture : `git diff --stat`. Un diff de 90 lignes supprimées là où
+  on croyait en ajouter 15 signale qu'on a écrasé, pas complété.
+- Vécu (12 septembre 2026) : `api/yield-exceptions.js`, livré au lot 2.2 avec
+  ses gardes apprises en review, réécrit sans être lu — 97 insertions,
+  92 suppressions. C'est un TEST du lot 2.2 qui a refusé de passer, pas la
+  prudence. L'ajout réellement nécessaire faisait 17 lignes.
+- Détail et corollaire : REVIEW.md règle 14.
+
 ## RÈGLE ABSOLUE — UNE REVIEW PAR COMMIT, PAS DE BOUCLE
 - **Une review par commit.** Si elle trouve un problème de SÉCURITÉ (fuite entre
   comptes, contournement de garde, authentification), on corrige et on re-review

@@ -14,14 +14,23 @@ const {
   exceptionsDuBien, joursExclus, creerException, supprimerException, periodeValide
 } = require('../lib/yield/exceptions')
 
+// ⚠ HORLOGE INJECTEE, jamais l'horloge reelle. Une exception porte sur le
+// PASSE : avec des dates figees et une horloge reelle, ces tests deviendraient
+// faux le jour ou ils passent — c'est la leçon gravee au KB des tests.
+const AUJ = '2026-09-12'
+
 const BIEN = 'b-1'
 const HOTE = 'u-1'
 
 function fausseBase (lignes = []) {
   const table = [...lignes]
   let seq = 0
+  const ecritures = []
   return {
     table,
+    // ⚠ POUVOIR ASSERTER QU'UN REFUS N'ECRIT RIEN. Un writer qui leve APRES
+    // avoir insere serait passe : la garde n'aurait servi a rien.
+    ecritures,
     from (t) {
       assert.equal(t, 'yield_exceptions', 'le writer ne touche que sa table')
       const f = { eq: [], lte: null, gte: null }
@@ -29,7 +38,7 @@ function fausseBase (lignes = []) {
       let charge = null
       const q = {
         select () { return q },
-        insert (r) { action = 'insert'; charge = r; return q },
+        insert (r) { action = 'insert'; charge = r; ecritures.push(r); return q },
         delete () { action = 'delete'; return q },
         eq (c, v) { f.eq.push([c, v]); return q },
         lte (c, v) { f.lte = [c, v]; return q },
@@ -118,28 +127,28 @@ test('joursExclus : l union des jours, bornee a la fenetre demandee', async () =
 
 test('le chevauchement est AUTORISE : deux motifs distincts coexistent', async () => {
   const sb = fausseBase()
-  await creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: 'travaux' })
-  await creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-15', fin: '2026-06-20', motif: 'fermeture personnelle' })
+  await creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: 'travaux', aujourdHui: AUJ })
+  await creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-15', fin: '2026-06-20', motif: 'fermeture personnelle', aujourdHui: AUJ })
   const toutes = await exceptionsDuBien(sb, BIEN, '2026-06-01', '2026-06-30')
   assert.equal(toutes.length, 2, 'les fusionner perdrait le motif de l une')
 })
 
 test('la creation refuse ce que la base refuse', async () => {
   const sb = fausseBase()
-  await assert.rejects(() => creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-30', fin: '2026-06-01', motif: 'x' }),
+  await assert.rejects(() => creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-30', fin: '2026-06-01', motif: 'x', aujourdHui: AUJ }),
     /periode invalide/)
-  await assert.rejects(() => creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: '   ' }),
+  await assert.rejects(() => creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: '   ', aujourdHui: AUJ }),
     /motif requis/)
-  await assert.rejects(() => creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: 'x'.repeat(501) }),
+  await assert.rejects(() => creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: 'x'.repeat(501), aujourdHui: AUJ }),
     /motif trop long/)
-  await assert.rejects(() => creerException(sb, { userId: null, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: 'x' }),
+  await assert.rejects(() => creerException(sb, { userId: null, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: 'x', aujourdHui: AUJ }),
     /requis/)
   assert.equal(sb.table.length, 0, 'aucune ligne ecrite')
 })
 
 test('le motif est nettoye, jamais stocke avec ses espaces', async () => {
   const sb = fausseBase()
-  const c = await creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: '  travaux  ' })
+  const c = await creerException(sb, { userId: HOTE, propertyId: BIEN, debut: '2026-06-01', fin: '2026-06-30', motif: '  travaux  ', aujourdHui: AUJ })
   assert.equal(c.motif, 'travaux')
 })
 
@@ -256,10 +265,26 @@ test('le script de saisie compte les reservations DU BIEN, pas du compte', () =>
     'filtre sur la cle provider du bien')
   assert.ok(/provider_property_id/.test(src.slice(0, src.indexOf('main()'))),
     'et la colonne est selectionnee — sinon le filtre porterait sur undefined')
-  // Une periode future est SIGNALEE, pas refusee : une periode a cheval est
-  // legitime, mais un 201 muet laisserait croire a une fermeture.
-  assert.ok(/PERIODE ENTIEREMENT FUTURE/.test(src))
-  assert.ok(/a cheval sur aujourd/.test(src))
+  // ⚠ CE TEST ASSERTAIT LA PRESENCE D'UN TEXTE DEVENU FAUX — releve en review.
+  // Il verrouillait « une periode a cheval sur aujourd'hui : seule la partie
+  // PASSEE comptera », affirmation que le writer contredit depuis le lot 4.3
+  // (refus sec). Le test restait vert en garantissant un mensonge a l'hote :
+  // la forme contre la correction, regle 13.
+  //
+  // On verifie desormais le COMPORTEMENT : le script refuse, il ne signale pas,
+  // et il dit quoi faire a la place.
+  assert.ok(/fin >= aujourdHui/.test(src),
+    'le script refuse des que la periode touche aujourd hui')
+  assert.ok(/process\.exit\(1\)/.test(src.slice(src.indexOf('REFUSE'))),
+    'et il sort en erreur, sans ecrire')
+  assert.ok(!/a cheval sur aujourd/.test(src),
+    'l ancien message, devenu faux, ne doit plus exister')
+  assert.ok(/--fin=/.test(src), 'et il propose la correction a l hote')
+  // ⚠ LE CONTRAT DU WRITER EST HONORE : sans `aujourdHui`, `--go` levait
+  // « aujourdHui requis » et ce script — dernier chemin d'ecriture encore
+  // vivant — mourait en silence.
+  assert.ok(/aujourdHui\s*\n\s*\}\)/.test(src) || /aujourdHui,?\s*$/m.test(src),
+    'le writer recoit l horloge')
 })
 
 test('la table est clee sur l UUID, avec RLS et sans policy d ecriture', () => {
@@ -272,4 +297,108 @@ test('la table est clee sur l UUID, avec RLS et sans policy d ecriture', () => {
   assert.ok(!/for (insert|update|delete)/.test(sql), 'aucune policy d ecriture')
   assert.ok(/revoke insert, update, delete/.test(sql))
   for (const l of sql.split('\n')) assert.ok(l.length <= 60, `ligne > 60 : ${l}`)
+})
+
+// ─── UNE EXCEPTION PORTE SUR LE PASSE ────────────────────────────────────────
+// Arbitrage de Thierry au lot 4.3. Le futur se pilote par le CALENDRIER
+// (fermer la date) ou par les PRIX, jamais par une exception.
+//
+// LE DEFAUT QUE CETTE GARDE EMPECHE : une exception posee sur l'avenir est une
+// intention deguisee. Le moteur retirerait de sa reference des jours que l'hote
+// n'a pas fermes et qui peuvent encore se vendre ; le jour ou ils se vendent,
+// leur CA est dans le realise mais leurs nuits hors de la reference. Deux
+// verites pour la meme nuit, et aucune erreur nulle part.
+
+test('LE TEST QUI COMPTE : une exception dans le FUTUR est refusee', async () => {
+  const sb = fausseBase()
+  await assert.rejects(
+    () => creerException(sb, { userId: HOTE, propertyId: BIEN,
+      debut: '2026-10-01', fin: '2026-10-31', motif: 'travaux prevus', aujourdHui: AUJ }),
+    /futur/,
+    'une periode entierement a venir doit etre refusee')
+  assert.deepStrictEqual(sb.ecritures, [], 'et AUCUNE ecriture ne part')
+})
+
+test('LE TEST QUI COMPTE : une periode qui MORD sur aujourd hui est refusee', async () => {
+  // La borne est STRICTE : une periode qui finit aujourd'hui contient le jour en
+  // cours, qui n'est pas fini. On refuse a la porte plutot que de tronquer —
+  // tronquer changerait la declaration de l'hote sans le lui dire.
+  const sb = fausseBase()
+  await assert.rejects(
+    () => creerException(sb, { userId: HOTE, propertyId: BIEN,
+      debut: '2026-09-01', fin: AUJ, motif: 'fermeture', aujourdHui: AUJ }),
+    /futur/)
+  // Et la veille passe.
+  const ok = await creerException(sb, { userId: HOTE, propertyId: BIEN,
+    debut: '2026-09-01', fin: '2026-09-11', motif: 'fermeture', aujourdHui: AUJ })
+  assert.equal(ok.date_fin, '2026-09-11')
+})
+
+test('une periode a CHEVAL sur aujourd hui est refusee, pas tronquee', async () => {
+  const sb = fausseBase()
+  await assert.rejects(
+    () => creerException(sb, { userId: HOTE, propertyId: BIEN,
+      debut: '2026-09-01', fin: '2026-09-30', motif: 'travaux', aujourdHui: AUJ }),
+    /futur/)
+  assert.deepStrictEqual(sb.ecritures, [])
+})
+
+test('sans horloge fournie, on REFUSE plutot que de deviner', async () => {
+  // ⚠ CONTRAT D'APPEL. Retomber sur `new Date()` rendrait le module impur et
+  // ses tests faux le jour ou ils passent ; retomber sur « pas de garde »
+  // ouvrirait le futur en silence, ce qui est pire.
+  const sb = fausseBase()
+  await assert.rejects(
+    () => creerException(sb, { userId: HOTE, propertyId: BIEN,
+      debut: '2025-06-01', fin: '2025-06-30', motif: 'travaux' }),
+    /aujourdHui requis/)
+  await assert.rejects(
+    () => creerException(sb, { userId: HOTE, propertyId: BIEN,
+      debut: '2025-06-01', fin: '2025-06-30', motif: 'travaux', aujourdHui: 'hier' }),
+    /aujourdHui requis/)
+  assert.deepStrictEqual(sb.ecritures, [])
+})
+
+test('LE TEST QUI COMPTE : l endpoint accepte le nom de parametre que l ECRAN envoie', () => {
+  // ⚠ CE DEFAUT A TUE LE LOT 4.3 ENTIER, et `npm test` etait vert.
+  // Cet endpoint (lot 2.2) attend `bien` ; `/api/yield` (lot 4.1) attend
+  // `property_id`. L'ecran, ecrit contre le second, envoyait `property_id` au
+  // premier : `bienDemande` valait `undefined` et CHAQUE saisie repondait
+  // « bien_requis », AVANT meme la garde. Les deux boutons de la page —
+  // declarer et supprimer — etaient morts.
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api/yield-exceptions.js'), 'utf8')
+  const ecran = fs.readFileSync(path.join(__dirname, '..', 'apps/yield/index.html'), 'utf8')
+
+  // Les noms que l'ECRAN envoie a cet endpoint, derives de son code.
+  const bloc = ecran.slice(ecran.indexOf('/api/yield-exceptions'))
+  const envoyes = [...new Set([
+    ...[...bloc.matchAll(/JSON\.stringify\(\{\s*([a-z_]+):/g)].map(m => m[1]),
+    ...[...bloc.matchAll(/URLSearchParams\(\{\s*([a-z_]+):/g)].map(m => m[1])
+  ])]
+  assert.ok(envoyes.length, 'la derivation doit trouver ce que l ecran envoie')
+
+  // Les noms que l'ENDPOINT accepte pour designer le bien.
+  const ligne = api.slice(api.indexOf('const bienDemande'), api.indexOf('if (!bienDemande'))
+  for (const nom of envoyes) {
+    assert.ok(ligne.includes(nom),
+      `l ecran envoie « ${nom} » et l endpoint ne le lit pas : le bouton est mort`)
+  }
+})
+
+test('LE TEST QUI COMPTE : un groupe d evenements ne fige pas ses zones', () => {
+  // ⚠ RELEVE EN REVIEW. `detail` vient du NOM des vacances, `zones_en_vacances`
+  // se calcule jour par jour : les zones n'entrent ni ne sortent des vacances
+  // le meme jour, donc le nom restait stable pendant que la liste changeait.
+  // Un groupe « 20 fevrier → 8 mars » affichait « A, B, C » sur ses dix-sept
+  // jours alors que du 2 au 8 mars seule C est en vacances — et c'est
+  // precisement la colonne sur laquelle s'appuie l'explication du bloc.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/yield.js'), 'utf8')
+  const groupe = src.slice(src.indexOf('const evenements = []'),
+    src.indexOf('evenements.push('))
+  assert.ok(/memesZones\(dernier\.zones_en_vacances, seg\.zones_en_vacances\)/.test(groupe),
+    'les zones doivent faire partie de l identite du groupe')
+  // Et la comparaison porte sur le CONTENU, pas sur la reference d objet.
+  assert.ok(/JSON\.stringify/.test(src.slice(src.indexOf('const memesZones'),
+    src.indexOf('const memesZones') + 200)),
+  'deux tableaux egaux en contenu doivent etre juges egaux')
 })

@@ -307,3 +307,18 @@ test('les drapeaux d ecran ne polluent pas la table des motifs du moteur', () =>
       `« ${code} » doit rester affichable`)
   }
 })
+
+test('LE TEST QUI COMPTE : les refus de l ecriture sont traduits, TOUS', () => {
+  // ⚠ `api/yield-exceptions.js` rend des CODES, pas des phrases. Sans
+  // traduction, l'hote lit `exception_introuvable` sur le seul ecran de l'app
+  // qui ecrit. On DERIVE la liste de l'endpoint, on ne la recopie pas.
+  const src = fs.readFileSync(path.join(RACINE, 'api/yield-exceptions.js'), 'utf8')
+  const codes = [...new Set([...src.matchAll(/error:\s*'([a-z_]+)'/g)].map(m => m[1]))]
+  assert.ok(codes.length >= 6, `derivation cassee : ${codes.length} codes trouves`)
+  const muets = codes.filter(c => !traduction.REFUS_ECRITURE[c])
+  assert.deepStrictEqual(muets, [],
+    'codes d erreur sans traduction : l hote lirait du technique')
+  // Et le repli ne masque jamais : un code inconnu ressort tel quel.
+  assert.equal(traduction.refus('code_du_futur'), 'code_du_futur')
+  assert.equal(traduction.refus(null), 'Opération impossible.')
+})

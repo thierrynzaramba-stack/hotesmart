@@ -21,12 +21,13 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
+const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const {
   calculerIndicateurs, comparerAN1, clePeriode, periodePrecedente
 } = require('../lib/yield/indicateurs')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
-const { joursExclus } = require('../lib/yield/exceptions')
+const { joursExclus, exceptionsDuBien } = require('../lib/yield/exceptions')
 const { pickup } = require('../lib/yield/pickup')
 const { lireVacances, couverture, etendueSource } = require('../lib/yield/vacances')
 const R = require('../lib/yield/reference')
@@ -66,6 +67,13 @@ function jourLocal (d) {
 // traitement ne s'arretait que plus loin sur un 500 opaque. Une date de debut
 // parfaitement legitime mettait l'app en panne sans motif lisible.
 // On replie sur le 28, comme partout ailleurs dans ce depot.
+// Jour precedent, en UTC : sert au regroupement des evenements consecutifs.
+function veille (iso) {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
 function reculerAns (iso, n) {
   const [a, m, j] = iso.split('-')
   const candidat = `${Number(a) - n}-${m}-${j}`
@@ -249,7 +257,21 @@ module.exports = async (req, res) => {
     // tables que nous ecrivons nous-memes. Les confondre a deja rendu
     // « 500 nuits sans prix » sur des biens qui vendaient.
     const duBien = lignes.filter(l => l.property_id === bien.provider_property_id)
-    const exclus = await joursExclus(supabase, bien.id, debutHistorique, finDemandee)
+    // ⚠ UNE SEULE LECTURE POUR DEUX USAGES — releve en review : `joursExclus`
+    // appelait deja `exceptionsDuBien` en interne, et on la rappelait juste
+    // apres sur la MEME fenetre. Le commentaire voisin se felicitait de
+    // « aucune lecture de plus » pour les evenements pendant que ce bloc en
+    // ajoutait une.
+    // L'ecran a besoin des periodes ELLES-MEMES (pour les lister et les
+    // supprimer), le moteur des jours qu'elles excluent : on lit une fois, on
+    // derive les deux.
+    const exceptions = await exceptionsDuBien(supabase, bien.id, debutHistorique, finDemandee)
+    const exclus = new Set()
+    for (const p of exceptions) {
+      for (const j of joursDeLaPeriode(p.date_debut, p.date_fin) || []) {
+        if (j >= debutHistorique && j <= finDemandee) exclus.add(j)
+      }
+    }
     const eclatements = duBien.map(l => eclater(l, {
       pont, joursExclus: exclus, defaultProvider: bien.provider
     }))
@@ -363,6 +385,57 @@ module.exports = async (req, res) => {
       return { periode: cle, ...sansDetail }
     })
 
+    // ⚠ LE CONTEXTE EST DEJA EN MAIN — releve en review.
+    // La premiere version rappelait `requirePermission` avec un FAUX objet
+    // `res` : trois requetes Supabase de plus par affichage, et un pari sur le
+    // fait que la garde n'appellerait jamais rien d'autre que `status().json()`.
+    // Le jour ou quelqu'un y ajoute un `setHeader('Retry-After')`, le `catch`
+    // avale et le formulaire disparait pour tout le monde, sans un mot.
+    // `garde.contexte` porte deja les droits resolus.
+    const droitsEcriture = garde.contexte
+      ? peutEcrire(garde.contexte, 'reglages',
+        { id: bien.id, ref: bien.provider_property_id })
+      // Pas de contexte = titulaire du compte : il a tout.
+      : true
+
+    // ─── Evenements a venir : LECTURE SEULE ─────────────────────────────────
+    // ⚠ AUCUNE LECTURE DE PLUS. Vacances, feries et ponts sont deja dans le
+    // `contexte` charge pour la reference : les reservir coute zero requete.
+    // L'hote a besoin de voir ce qui arrive — c'est ce qui explique pourquoi
+    // un mois vaut plus qu'un autre, et ce sur quoi porteront les suggestions.
+    const evenements = []
+    for (const j of joursDeLaPeriode(auj, finContexte) || []) {
+      const seg = R.segmenterJour(j, contexte)
+      if (!seg || !seg.segment) continue
+      if (seg.segment === R.SEGMENTS.HORS_VACANCES) continue
+      const dernier = evenements[evenements.length - 1]
+      // On regroupe les jours consecutifs de meme nature : une liste de 60
+      // lignes « vacances d'ete » ne se lit pas, « du 4 juillet au 31 aout »
+      // se lit.
+      //
+      // ⚠ LES ZONES FONT PARTIE DE L'IDENTITE DU GROUPE — releve en review.
+      // `detail` vient du NOM des vacances, `zones_en_vacances` se calcule jour
+      // par jour : les zones n'entrent ni ne sortent des vacances le meme jour,
+      // donc le nom restait stable pendant que la liste changeait. Un groupe
+      // « 20 fevrier → 8 mars » affichait « A, B, C » sur ses dix-sept jours
+      // alors que du 2 au 8 mars seule C est en vacances — et c'est precisement
+      // la colonne sur laquelle s'appuie l'explication du bloc.
+      const memesZones = (a, b) =>
+        JSON.stringify(a || null) === JSON.stringify(b || null)
+      if (dernier && dernier.detail === seg.detail && dernier.fin === veille(j) &&
+          memesZones(dernier.zones_en_vacances, seg.zones_en_vacances)) {
+        dernier.fin = j
+        dernier.jours++
+        continue
+      }
+      evenements.push({
+        debut: j, fin: j, jours: 1,
+        segment: seg.segment, detail: seg.detail,
+        libelle: seg.libelle || null,
+        zones_en_vacances: seg.zones_en_vacances || null
+      })
+    }
+
     return res.status(200).json({
       bien: {
         id: bien.id,
@@ -395,6 +468,14 @@ module.exports = async (req, res) => {
         par_segment: Object.fromEntries(courbe.par_segment)
       },
       projection,
+      evenements,
+      exceptions,
+      // ⚠ LE DROIT D'ECRIRE EST TRANCHE PAR LE SERVEUR, JAMAIS DEDUIT PAR
+      // L'ECRAN. La page s'en sert pour MONTRER ou CACHER le formulaire —
+      // c'est du confort, pas une garde : `/api/yield-exceptions` revalide a
+      // chaque ecriture. Une interface qui decide seule des droits finit par
+      // les decider mal.
+      droits_ecriture: droitsEcriture,
       // ⚠ LES DRAPEAUX DE SOURCE REMONTENT JUSQU'A L'ECRAN. La table des
       // vacances s'arrete a la derniere annee scolaire publiee : au-dela, tout
       // serait classe « hors vacances » — un ete entier en basse saison, sans
@@ -403,7 +484,11 @@ module.exports = async (req, res) => {
         reservations: lignes.length,
         reservations_du_bien: duBien.length,
         jours_hors_reference: exclus ? (exclus.size ?? Object.keys(exclus).length) : 0,
-        vacances: couvertureVacances
+        // ⚠ LA DETTE DATEE, VISIBLE. `school_holidays` s'arrete a la derniere
+        // annee scolaire publiee : au-dela, chaque jour serait classe « hors
+        // vacances » — un ete entier en basse saison, sans la moindre erreur.
+        // L'ecran doit pouvoir le DIRE comme une limite connue, pas la subir.
+        vacances: { ...couvertureVacances, horizon: couvertureVacances.fin }
       }
     })
   } catch (e) {

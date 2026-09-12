@@ -354,6 +354,47 @@ commentaire qui la paraphrase est une copie, et se périme.
 
 ---
 
+## 14. Un fichier existant se LIT avant d'être réécrit
+
+**Règle : avant d'écrire par-dessus un fichier, on l'ouvre. Toujours. Une
+réécriture complète se justifie par ce qu'on a lu, jamais par ce qu'on croit
+savoir du nom du fichier.**
+
+À vérifier :
+- [ ] le fichier existe-t-il déjà ? (`ls`, `git log -- <chemin>`, `git status`)
+- [ ] si oui, a-t-il été **lu en entier** avant la réécriture ?
+- [ ] un test décrit-il déjà son contrat ? (chercher son chemin dans `tests/`)
+- [ ] la réécriture apporte-t-elle quelque chose que l'édition ciblée n'apporterait pas ?
+- [ ] après coup : `git diff --stat` — un diff de 90 lignes supprimées là où on
+      croyait en ajouter 15 est le signal qu'on a écrasé, pas complété.
+
+**Pourquoi.** Un fichier livré porte des correctifs de review, des cas limites
+appris à la production et des commentaires qui expliquent pourquoi le code a
+cette forme-là. Une réécriture « propre » les efface tous d'un coup, et le
+résultat compile, passe le linter, et a l'air neuf. Rien ne signale la perte :
+ce qui disparaît, ce sont précisément les défenses dont on ne se souvient plus.
+
+**Cas vécu.** Lot 4.3 de YieldFlow, 12 septembre 2026. `api/yield-exceptions.js`
+avait été livré au lot 2.2 (commit `1f68775`) avec ses gardes : un id non-UUID
+traité comme erreur d'appelant et non comme panne, les paramètres répétés de
+Vercel ramenés à une chaîne, une regex de validation **ancrée sur les trois
+messages réels** du writer parce que l'alternative nue capturait aussi les
+défauts de câblage serveur. J'ai écrit `cat > api/yield-exceptions.js` sans
+l'ouvrir : **97 insertions, 92 suppressions**. Ma version recréait
+approximativement la moitié de ces gardes et en perdait l'autre.
+
+Ce n'est pas la prudence qui a rattrapé l'erreur, c'est un **test du lot 2.2**
+qui décrivait le contrat de l'endpoint (`domaine: ecriture ? 'reglages' : …`) et
+qui a refusé de passer. Après restauration depuis git, l'ajout réel du lot 4.3
+faisait **17 lignes**.
+
+**Corollaire.** Un test qui décrit le contrat d'un fichier le protège aussi
+contre sa propre réécriture. C'est une raison de plus d'en écrire — et c'est
+pourquoi la règle 8 (« tester le cas dangereux ») vaut aussi pour les contrats
+d'interface, pas seulement pour les cas de données.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

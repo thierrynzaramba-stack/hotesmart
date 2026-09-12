@@ -132,20 +132,24 @@ async function main () {
   console.log('(indicatif, annulations comprises : le moteur exclura ces JOURS')
   console.log(' de la REFERENCE, jamais les reservations de l\'historique)')
 
-  // ⚠ UNE EXCEPTION NE CONCERNE QUE LE PASSE — dit, plutot que refuse.
-  // Le futur n'entre pas dans la reference : pour fermer des dates a venir,
-  // l'outil est le calendrier (`stop_sell`). On n'INTERDIT pas la saisie —
-  // une periode a cheval sur aujourd'hui est legitime, et sa partie passee
-  // compte — mais un 201 muet sur juillet 2027 laisserait croire a l'hote
-  // qu'il a ferme des dates alors que rien n'est ferme.
+  // ⚠ UNE EXCEPTION NE CONCERNE QUE LE PASSE — et depuis le lot 4.3, le writer
+  // la REFUSE au lieu de la signaler (arbitrage de Thierry).
+  //
+  // Le message d'avant annoncait qu'une periode chevauchant le jour courant
+  // etait legitime et que seule sa part passee compterait : c'est devenu faux,
+  // et un test
+  // qui assertait la PRESENCE de cette phrase restait vert en garantissant un
+  // mensonge a l'hote. Une exception posee sur l'avenir serait une intention
+  // deguisee — le moteur retirerait de sa reference des jours encore vendables,
+  // et le jour ou ils se vendent, leur CA serait au realise et leurs nuits hors
+  // du normal. Deux verites pour la meme nuit.
   const aujourdHui = jourLocal(new Date())
-  if (fin > aujourdHui) {
-    const entierementFutur = debut > aujourdHui
-    console.log(entierementFutur
-      ? `\n⚠ PERIODE ENTIEREMENT FUTURE (apres ${aujourdHui}) : elle sera INERTE.`
-      : `\n⚠ Periode a cheval sur aujourd'hui (${aujourdHui}) : seule la partie PASSEE comptera.`)
-    console.log('  La reference se calcule sur l\'historique. Pour fermer des')
-    console.log('  dates a venir, utiliser le calendrier (stop vente).')
+  if (fin >= aujourdHui) {
+    console.log(`\n⚠ REFUSE : une exception porte sur le PASSE (aujourd'hui : ${aujourdHui}).`)
+    console.log(`  La periode demandee finit le ${fin}${fin === aujourdHui ? " — aujourd'hui n'est pas fini" : ''}.`)
+    console.log('  Pour fermer des dates a venir, utiliser le calendrier (stop vente).')
+    console.log(`  Pour ne declarer que la partie passee : --fin=${veilleDe(aujourdHui)}`)
+    process.exit(1)
   }
 
   // Chevauchement avec une exception deja declaree : autorise, mais dit.
@@ -160,9 +164,20 @@ async function main () {
   if (!GO) { console.log('\nDRY-RUN — aucune ecriture. Relancer avec --go.'); return }
 
   const creee = await creerException(supabase, {
-    userId: bien.user_id, propertyId: bien.id, debut, fin, motif
+    userId: bien.user_id, propertyId: bien.id, debut, fin, motif,
+    // ⚠ CONTRAT D'APPEL DU WRITER depuis le lot 4.3. Sans lui, `--go` levait
+    // « aujourdHui requis » et sortait en erreur : ce script etait le dernier
+    // chemin d'ecriture encore vivant, et il est mort en silence — `npm test`
+    // etait vert. La valeur etait pourtant deja calculee vingt lignes plus haut.
+    aujourdHui
   })
   console.log(`\nDeclaree. id=${creee.id}`)
+}
+
+function veilleDe (iso) {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
 }
 
 main().catch(e => { console.error(String(e.message || e)); process.exit(1) })

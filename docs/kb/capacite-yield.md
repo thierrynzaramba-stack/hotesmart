@@ -123,11 +123,54 @@ raté, ce que l'alerte `poussee_dates_sans_prix` du full sync signale déjà cô
 poussée.
 
 
-## 8. Exceptions « hors référence » (lot 2.2)
+## 8. Exceptions « hors référence » (lot 2.2, saisie dans l'app au lot 4.3)
 
 Table `yield_exceptions`, writer unique `lib/yield/exceptions.js`,
-endpoint `api/yield-exceptions.js`, saisie `scripts/declarer-exception-yield.js`.
+endpoint `api/yield-exceptions.js`, saisie dans l'app `apps/yield/index.html`
+et en ligne de commande `scripts/declarer-exception-yield.js`.
 Migration : `2026-09-12-yield-exceptions.sql`.
+
+### ⚠ UNE EXCEPTION PORTE SUR LE PASSÉ — arbitrage de Thierry, lot 4.3
+
+**Le futur se pilote par le calendrier (fermer la date) ou par les prix, jamais
+par une exception.** Une exception dit « ces nuits ne comptent pas comme
+normales » : c'est une relecture de ce qui a eu lieu.
+
+Posée sur l'avenir, elle serait une **intention déguisée**. Le moteur retirerait
+de sa référence des jours que l'hôte n'a pas fermés et qui peuvent encore se
+vendre ; le jour où ils se vendent, leur chiffre d'affaires est dans le réalisé
+mais leurs nuits hors du normal — **deux vérités pour la même nuit**, sans
+erreur nulle part.
+
+La borne est **stricte** : une période qui finit aujourd'hui contient le jour en
+cours, qui n'est pas fini. On refuse à la porte plutôt que de tronquer —
+tronquer changerait la déclaration de l'hôte sans le lui dire.
+
+**La garde vit dans le writer**, pas dans l'écran : c'est le chemin unique.
+`aujourdHui` est un **contrat d'appel** — le module ne lit jamais l'horloge, et
+refuse plutôt que de deviner. L'endpoint la calcule **côté serveur** : laisser
+l'appelant la fournir reviendrait à lui laisser ouvrir l'avenir.
+
+### Le jour à Paris, pas le jour du process
+
+`jourLocal` utilise `Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })`.
+Relevé en review : `getFullYear()/getMonth()/getDate()` lisent le fuseau du
+**process**, et aucun `TZ` n'est posé dans `vercel.json` — la fonction tournait
+en UTC, donc le « minuit local » que le commentaire promettait n'existait pas.
+Le défaut était *fail-closed* (UTC ≤ Paris, aucune période future ne passait),
+mais il refusait à l'hôte une journée entièrement révolue : le 13 septembre à
+00 h 30 à Paris, le serveur est encore le 12.
+
+### Deux noms pour le même paramètre, et le lot entier était mort
+
+`api/yield-exceptions.js` (lot 2.2) attend `bien` ; `/api/yield` (lot 4.1)
+attend `property_id`. L'écran, écrit contre le second, envoyait `property_id` au
+premier : **chaque saisie répondait `bien_requis` avant même la garde**, et les
+deux boutons de la page étaient morts. `npm test` était vert.
+
+L'endpoint accepte désormais les deux noms — casser un appelant existant pour
+une question de vocabulaire serait payer deux fois — et un test **dérive** de
+l'écran les noms qu'il envoie, puis vérifie que l'endpoint les lit.
 
 ### À quoi ça sert
 
