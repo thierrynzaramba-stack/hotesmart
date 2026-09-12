@@ -291,7 +291,18 @@ module.exports = async function handler(req, res) {
   async function loadOwnedProperties(uuids, compte) {
     const { data, error } = await supabase
       .from('properties')
-      .select('id, name, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
+      // ⚠ `user_id` EST OBLIGATOIRE, ET SON ABSENCE A COUTE TRES CHER.
+      // `nuitsOccupees` l'exige (`provider_property_id` n'a pas d'unicite
+      // globale) et LEVE sans lui. Comme l'appel est dans un `try`, l'exception
+      // etait rattrapee par le repli « impossible de verifier les nuits deja
+      // vendues » : TOUTES les ouvertures etaient retirees de la poussee, a
+      // CHAQUE enregistrement du calendrier. Les tarifs partaient, les
+      // disponibilites non.
+      // C'est trait pour trait l'incident du 11 septembre 2026 — « 69 dates
+      // tarifees mais invendables » — dont on avait ajoute les avertissements
+      // sans jamais trouver la cause. Mesure du 12 septembre : HTTP 0 sur
+      // availability, « 1 ouverture(s) non poussee(s) », sur un appel normal.
+      .select('id, name, user_id, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
       .eq('user_id', compte)
       .in('id', uuids)
     if (error) throw new Error('Erreur lecture biens')

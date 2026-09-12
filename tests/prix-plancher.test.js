@@ -271,3 +271,34 @@ test('LE TEST QUI COMPTE : tarifer une nuit fermee la ROUVRE chez le canal', () 
   assert.ok(posPlafond > posComplement,
     'le plafonnement par nuits vendues passe APRES le complement')
 })
+
+test('LE TEST QUI COMPTE : `user_id` est selectionne — sans lui, AUCUNE ouverture ne part', () => {
+  // ⚠ LA CAUSE DE L'INCIDENT DU 11 SEPTEMBRE 2026, trouvee le 12.
+  // `loadOwnedProperties` ne selectionnait pas `user_id`. Or `nuitsOccupees`
+  // l'EXIGE — `provider_property_id` n'a pas d'unicite globale — et LEVE sans
+  // lui. L'appel etant dans un `try`, l'exception partait dans le repli
+  // « impossible de verifier les nuits deja vendues », qui RETIRE toutes les
+  // ouvertures de la poussee. Resultat, a CHAQUE enregistrement du
+  // calendrier : les tarifs partaient, les disponibilites non.
+  //
+  // C'est exactement « 69 dates tarifees mais invendables » du 11 septembre,
+  // dont on avait ajoute les avertissements sans jamais trouver la cause.
+  // Mesure du 12 : HTTP 0 sur availability, « 1 ouverture(s) non poussee(s) »,
+  // sur un appel parfaitement normal.
+  const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+
+  // Les deux chargements de bien du fichier doivent porter user_id.
+  const selects = cal.match(/\.select\('id, name,[^']*'\)|const COLS = 'id, name,[^']*'/g) || []
+  assert.ok(selects.length >= 2, `au moins 2 chargements attendus, trouve ${selects.length}`)
+  for (const sel of selects) {
+    assert.ok(/\buser_id\b/.test(sel),
+      `un chargement de bien sans user_id : ${sel.slice(0, 80)}…`)
+  }
+
+  // Et tout appel a nuitsOccupees doit recevoir un compte non vide.
+  const appels = cal.match(/nuitsOccupees\([\s\S]{0,200}?\)/g) || []
+  for (const a of appels) {
+    assert.ok(/userId: (bien\.user_id|compte)/.test(a),
+      `appel a nuitsOccupees sans compte : ${a.slice(0, 90)}…`)
+  }
+})
