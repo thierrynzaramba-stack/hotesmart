@@ -235,3 +235,39 @@ test('LE TEST QUI COMPTE : « pas de prix » ne s affiche jamais « 0 »', () =>
   assert.ok(/sansPrix: rate == null/.test(core),
     'l etat porte explicitement « sans prix », pour que les vues n aient pas a deviner')
 })
+
+test('LE TEST QUI COMPTE : tarifer une nuit fermee la ROUVRE chez le canal', () => {
+  // ⚠ DEFAUT MESURE LE 12 SEPTEMBRE 2026, SIGNALE PAR THIERRY.
+  // Il tarife le 5 au 8 octobre a 199 € sur des nuits fermees. Le coeur
+  // enregistre `stop_sell = false` — l'intention est « ouvert » — et le tarif
+  // part bien. Mais `availability` n'etait poussee QUE pour les dates portant
+  // un `seg.avail` explicite : ces quatre-la n'en avaient pas, donc rien ne
+  // partait et elles restaient a `availability: 0` chez Channex.
+  // Mesure : les 4 dates a 0, leurs voisines (4 et 9 octobre) a 1.
+  // Des nuits TARIFEES et INVENDABLES, et un hote convaincu de les avoir
+  // ouvertes — la symetrie de l'incident du 11 septembre, par l'autre bout.
+  const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  assert.ok(/OUVRIR, C'EST AUSSI REPOUSSER LA DISPONIBILITE/.test(cal))
+  assert.ok(/for \(const ds of Object\.keys\(restByDate\)\)/.test(cal),
+    'toute date TOUCHEE est consideree, pas seulement celles portant un avail')
+  assert.ok(/if \(availByDate\[ds\] != null\) continue/.test(cal),
+    'un choix explicite de l hote n est jamais ecrase')
+  assert.ok(/if \(!etat \|\| etat\.stop_sell === true\) continue/.test(cal),
+    'une nuit FERMEE n est jamais rouverte')
+  assert.ok(/if \(etat\.avail === 0\) continue/.test(cal),
+    'ni une fermeture explicite deja en base')
+
+  // ⚠ L'ORDRE COMPTE : le complement doit precede le calcul de `datesAvail`,
+  // sinon les dates ajoutees ne partent pas — c'est l'erreur que j'ai faite en
+  // ecrivant ce correctif.
+  const posComplement = cal.indexOf("OUVRIR, C'EST AUSSI REPOUSSER")
+  const posDates = cal.indexOf('const datesAvail = Object.keys(availByDate).sort()')
+  assert.ok(posComplement > 0 && posComplement < posDates,
+    'le complement doit s appliquer AVANT que datesAvail ne soit fige')
+
+  // Et le plafonnement par le stock reste en aval : c'est lui qui protege de
+  // la surreservation, il ne doit pas etre contourne.
+  const posPlafond = cal.indexOf('const stock = Math.max(0, unites -')
+  assert.ok(posPlafond > posComplement,
+    'le plafonnement par nuits vendues passe APRES le complement')
+})

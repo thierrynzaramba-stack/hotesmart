@@ -914,6 +914,36 @@ module.exports = async function handler(req, res) {
       // accepte. Le geste de l'hote reste respecte partout ailleurs : le
       // plafond ne peut que RETIRER du stock, jamais en ajouter.
       // Regle unique : docs/kb/synchronisation.md §8.
+      // ─── OUVRIR, C'EST AUSSI REPOUSSER LA DISPONIBILITE ───────────────────
+      // ⚠ DEFAUT MESURE LE 12 SEPTEMBRE 2026, SIGNALE PAR THIERRY.
+      // Il tarife le 5 au 8 octobre a 199 € sur un bien dont ces nuits etaient
+      // fermees. Le coeur enregistre `stop_sell = false` — l'intention est bien
+      // « ouvert » — et le tarif part. Mais `availability` n'est poussee QUE
+      // pour les dates portant un `seg.avail` explicite : ces quatre-la n'en
+      // avaient pas, donc rien ne partait, et elles restaient a
+      // `availability: 0` chez Channex. Mesure : les 4 dates a 0, leurs
+      // voisines (4 et 9 octobre) a 1.
+      //
+      // Resultat : des nuits TARIFEES et INVENDABLES, et un hote convaincu de
+      // les avoir ouvertes. C'est la symetrie de l'incident du 11 septembre —
+      // « les prix partent, la disponibilite non » — par l'autre bout.
+      //
+      // On complete donc `availByDate` pour toute date TOUCHEE dont l'intention
+      // resultante est ouverte et qui ne porte pas deja une disponibilite
+      // explicite. La valeur est laissee a `unites` : le plafonnement par le
+      // stock, juste en dessous, la ramenera a 0 sur une nuit vendue — c'est
+      // lui qui protege de la surreservation, et il n'est pas contourne.
+      if (roomTypeId) {
+        const unitesBien = Math.max(1, Number(bien.inventory_units) || 1)
+        for (const ds of Object.keys(restByDate)) {
+          if (availByDate[ds] != null) continue          // l'hote a deja tranche
+          const etat = rowsByDate[ds]
+          if (!etat || etat.stop_sell === true) continue // fermee : on n'ouvre pas
+          if (etat.avail === 0) continue                 // fermeture explicite en base
+          availByDate[ds] = unitesBien
+        }
+      }
+
       const datesAvail = Object.keys(availByDate).sort()
       // ⚠ SANS room_type, LA DISPONIBILITE NE PEUT PAS PARTIR — et l'hote en a
       // demande une. Silence total avant la review : ni avertissement, ni
