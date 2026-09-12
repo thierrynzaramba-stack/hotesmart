@@ -131,6 +131,8 @@ test('un sejour a cheval compte ses nuits dans CHAQUE mois, son delai dans UN se
 test('LE TEST QUI COMPTE : N-1 absent se DIT, il ne vaut pas -100 %', () => {
   // Un bien qui n'existait pas l'an dernier n'a pas fait 0 € : il n'a pas de
   // N-1. Afficher « -100 % » ferait croire a un effondrement.
+  // Ici l'appelant n'a fourni QUE 2025 : le N-1 est hors du perimetre demande,
+  // ce qui n'est pas la meme chose qu'un trou dans la donnee.
   const r = comparerAN1(calculerIndicateurs([ecl(['2025-03-01'], { prix: 100 })],
     { granularite: 'mois', capacites: new Map([['2025-03', cap(31)]]) }))
   const vs = r[0].vs_n1
@@ -138,8 +140,51 @@ test('LE TEST QUI COMPTE : N-1 absent se DIT, il ne vaut pas -100 %', () => {
   assert.equal(vs.disponible, false)
   assert.equal(vs.ca.variation, null)
   assert.equal(vs.ca.ecart, null)
-  assert.equal(vs.ca.non_calculable, 'periode_n1_absente')
+  assert.equal(vs.ca.non_calculable, 'n1_hors_perimetre')
   assert.equal(vs.ca.valeur, 100, 'la valeur de l annee en cours reste lisible')
+})
+
+test('« hors perimetre » n est pas « absente » : deux causes, deux motifs', () => {
+  // ⚠ RELEVE EN REVIEW. `comparerAN1` ne cherche le N-1 que dans le tableau
+  // recu. Demander 2026 seul rend « periode_n1_absente » PARTOUT — le lecteur
+  // conclut « le bien n'existait pas » alors que l'appelant n'a simplement pas
+  // demande 2025. Le motif distingue desormais les deux causes.
+  const r = comparerAN1(calculerIndicateurs([
+    ecl(['2024-01-05'], { prix: 100 }),
+    ecl(['2025-03-01'], { prix: 100 })
+  ], { granularite: 'mois',
+    capacites: new Map([['2024-01', cap(31)], ['2025-03', cap(31)]]) }))
+  const m = r.find(x => x.periode === '2025-03')
+  // 2024-01 est present, donc 2024-03 est DANS le perimetre : son absence est
+  // un vrai trou de donnee, pas un perimetre trop etroit.
+  assert.equal(m.vs_n1.periode_n1, '2024-03')
+  assert.equal(m.vs_n1.ca.non_calculable, 'periode_n1_absente')
+})
+
+test('LE TEST QUI COMPTE : un mois ouvert sans vente vaut 0 %, pas rien', () => {
+  // ⚠ RELEVE EN REVIEW. Les periodes ne naissaient que des eclatements : un
+  // mois ouvert ou rien ne s'est vendu ne produisait AUCUNE ligne. Le taux
+  // d'occupation de 0 % — le signal le plus fort d'un moteur de yield —
+  // disparaissait, et en N-1 il devenait « le bien n'existait pas ».
+  const r = calculerIndicateurs([ecl(['2025-03-01'], { prix: 100 })],
+    { granularite: 'mois',
+      capacites: new Map([['2025-02', cap(28)], ['2025-03', cap(31)]]) })
+  const fev = r.find(x => x.periode === '2025-02')
+  assert.ok(fev, 'le mois ouvert existe meme sans une seule vente')
+  assert.equal(fev.nuitees, 0)
+  assert.equal(fev.ca, 0)
+  assert.equal(fev.taux_occupation, 0, 'zero pour cent, pas null')
+  assert.equal(fev.revpar, 0)
+  assert.equal(fev.prix_moyen, null, 'aucune nuit tarifee : pas de prix moyen')
+
+  // Et le N-1 en beneficie : un fevrier vide reste comparable.
+  const c = comparerAN1(calculerIndicateurs([ecl(['2025-03-01'], { prix: 100 })],
+    { granularite: 'mois',
+      capacites: new Map([['2024-03', cap(31)], ['2025-03', cap(31)]]) }))
+  const m = c.find(x => x.periode === '2025-03')
+  assert.equal(m.vs_n1.disponible, true, 'mars 2024 ouvert et vide est un N-1')
+  assert.equal(m.vs_n1.ca.n1, 0)
+  assert.equal(m.vs_n1.ca.ecart, 100)
 })
 
 test('N-1 present : ecart et variation', () => {
@@ -218,4 +263,51 @@ test('le module est PUR', () => {
     require('path').join(__dirname, '..', 'lib/yield/indicateurs.js'), 'utf8')
   assert.ok(!/fetch\(|supabase|createClient/.test(src))
   assert.ok(!/\.insert\(|\.update\(/.test(src))
+})
+
+test('LE TEST QUI COMPTE : aucun occupant connu n est pas 0 % d occupation', () => {
+  // ⚠ RELEVE EN REVIEW. Le writer du snapshot ecrit `numAdult ?? null` et
+  // `occ.adults || null` : le nombre d'occupants MANQUE sur une part reelle de
+  // l'historique. Diviser un numerateur vide par une capacite pleine rendait
+  // « 0 % d'occupation en personnes » sur des nuits pourtant occupees — la
+  // regle « calculable ≠ divisible » enfreinte sur le seul indicateur ou elle
+  // ne l'etait pas encore.
+  const r = calculerIndicateurs(
+    [ecl(['2025-03-01', '2025-03-02'], { prix: 100, personnes: null })],
+    { granularite: 'mois', capacites: new Map([['2025-03', cap(31)]]), capacitePersonnes: 4 })
+  const m = r[0]
+  assert.equal(m.taux_occupation_personnes, null, 'pas de zero : pas de reponse')
+  assert.ok(m.non_calculable.includes(MOTIFS_NON_CALCULABLE.AUCUNE_DONNEE_PERSONNES))
+  assert.equal(m.taux_occupation, 0.0645, 'le TO en nuits, lui, reste mesure')
+  assert.equal(m.ca, 200, 'et le CA aussi')
+})
+
+test('occupants connus en PARTIE : le taux sort, mais il se declare ampute', () => {
+  const r = calculerIndicateurs([
+    ecl(['2025-03-01'], { prix: 100, personnes: 4 }),
+    ecl(['2025-03-02'], { prix: 100, personnes: null })
+  ], { granularite: 'mois', capacites: new Map([['2025-03', cap(31)]]), capacitePersonnes: 4 })
+  const m = r[0]
+  assert.ok(m.taux_occupation_personnes > 0, 'une nuit renseignee suffit a calculer')
+  assert.equal(m.personnes_partielles, 1, 'et la nuit manquante est COMPTEE')
+  assert.ok(m.non_calculable.some(x => x.endsWith('_partiel')))
+})
+
+test('LE TEST QUI COMPTE : un RevPAR sur CA ampute le DIT', () => {
+  // ⚠ RELEVE EN REVIEW. `prix_moyen` avait ete protege du biais des nuits sans
+  // prix (numerateur ET denominateur restreints), pas le RevPAR : il divisait
+  // un CA partiel par une capacite complete. Sur la mesure de reference de
+  // La bulle 2025 (315 nuitees dont 306 tarifees) il sous-estime d'environ
+  // 3 %. Le chiffre reste juste — le CA reel est celui-la — mais il ne doit
+  // pas se presenter comme complet.
+  const r = calculerIndicateurs([
+    ecl(['2025-03-01'], { prix: 100 }),
+    ecl(['2025-03-02'], { prix: null })
+  ], { granularite: 'mois', capacites: new Map([['2025-03', cap(31)]]) })
+  const m = r[0]
+  assert.equal(m.nuitees, 2)
+  assert.equal(m.revpar, 3.23, '100 € sur 31 jours, et non 200')
+  assert.ok(m.non_calculable.includes(MOTIFS_NON_CALCULABLE.REVPAR_PARTIEL))
+  assert.equal(m.nuitees_sans_prix, 1)
+  assert.equal(m.prix_moyen, 100, 'le prix moyen, lui, reste juste : il exclut les deux')
 })

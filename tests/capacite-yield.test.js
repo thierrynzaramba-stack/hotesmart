@@ -17,6 +17,13 @@ const {
 // ⚠ `base_price` FAIT PARTIE DU CONTRAT : sans elle, la fonction refuse de
 // repondre plutot que de lire `undefined` comme « pas de prix » et de fermer
 // tout le calendrier d'un bien qui vend.
+// ⚠ HORLOGE INJECTEE, DATES FIGEES — regle du depot.
+// Les dates de test sont en 2026-10 : sans injection, elles passent du futur au
+// passe le 1er octobre 2026, et la convention estimee change leur verdict. Deux
+// tests ont bascule ainsi en review. `aujourdHui` existe pour ca.
+const AUJ = '2026-09-12'
+const opts = (o = {}) => ({ aujourdHui: AUJ, ...o })
+
 const BIEN = { id: 'b-1', provider: 'channex', base_price: 100 }
 const BIEN_SANS_BASE = { id: 'b-1', provider: 'channex', base_price: null }
 
@@ -87,7 +94,7 @@ test('un jour sans stop_sell est OUVERT, un jour ferme ne l est pas', async () =
     { date: '2026-10-02', stop_sell: true, avail: 1 },
     { date: '2026-10-03', stop_sell: false, avail: 0 }
   ])
-  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-03')
+  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-03', opts())
   assert.equal(r.calculable, true)
   assert.equal(r.jours_ouverts, 1)
   assert.equal(r.jours_fermes, 2, 'stop_sell ET avail=0 ferment')
@@ -103,7 +110,7 @@ test('LE TEST QUI COMPTE : une nuit VENDUE reste une nuit OUVERTE', async () => 
     { date: '2026-10-01', stop_sell: false, avail: 1 },   // vendue : avail reste la trace de la derniere poussee
     { date: '2026-10-02', stop_sell: false, avail: 1 }
   ])
-  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-02')
+  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-02', opts())
   assert.equal(r.jours_ouverts, 2, 'les deux nuits comptent au denominateur')
 })
 
@@ -111,7 +118,7 @@ test('une nuit SANS LIGNE est fermee — convention runFullSync', async () => {
   // `runFullSync` calcule `availability = r ? Math.min(annonce, stock) : 0` :
   // l'absence de ligne vaut zero. Une nuit sans ligne n'est vendable nulle part.
   const sb = fausseBase([{ date: '2026-10-01', stop_sell: false, avail: 1 }])
-  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-05')
+  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-05', opts())
   assert.equal(r.calculable, true)
   assert.equal(r.jours_ouverts, 1)
   assert.equal(r.jours_fermes, 4)
@@ -123,9 +130,12 @@ test('LE TEST QUI COMPTE : memoire non amorcee -> NON CALCULABLE, jamais zero', 
   // ferait un TO de 0/0 — NaN ou Infinity selon l'ordre des operations — et le
   // moteur suggererait des prix sur un bien dont il ne sait rien.
   const sb = fausseBase([])
-  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-31')
+  const r = await joursOuverts(sb, BIEN, '2026-10-01', '2026-10-31', opts())
   assert.equal(r.calculable, false)
-  assert.equal(r.raison, NON_CALCULABLE.VIDE)
+  // ⚠ LA PERIODE EST FUTURE (horloge injectee au 2026-09-12) : on n'estime
+  // JAMAIS l'avenir. Une memoire vide y reste non calculable, et la raison le
+  // dit precisement.
+  assert.equal(r.raison, NON_CALCULABLE.FUTUR_NON_AMORCE)
   assert.equal(r.jours_ouverts, 0, 'le compteur est a zero, mais calculable dit de ne PAS l utiliser')
   assert.equal(r.jours_total, 31, 'la periode reste connue : le moteur sait ce qu il ignore')
 })
@@ -145,7 +155,7 @@ test('LE TEST QUI COMPTE : un bien Beds24 est NON CALCULABLE, pas ferme', async 
 
 test('une erreur de lecture LEVE, elle ne rend pas un denominateur invente', async () => {
   const sb = fausseBase([], { erreur: { message: 'timeout' } })
-  await assert.rejects(() => joursOuverts(sb, BIEN, '2026-10-01', '2026-10-31'),
+  await assert.rejects(() => joursOuverts(sb, BIEN, '2026-10-01', '2026-10-31', opts()),
     /lecture du calendrier/,
     'un denominateur invente est pire qu un trou declare')
 })
@@ -157,7 +167,7 @@ test('parametres invalides : rendus non calculables, sans exception', async () =
     [BIEN, '2026-10-02', '2026-10-01'],
     [BIEN, 'pas-une-date', '2026-10-02']
   ]) {
-    const r = await joursOuverts(sb, b, d, f)
+    const r = await joursOuverts(sb, b, d, f, opts())
     assert.equal(r.calculable, false)
     assert.equal(r.raison, 'parametres_invalides')
   }
@@ -187,13 +197,13 @@ test('LE TEST QUI COMPTE : une nuit SANS PRIX est fermee, pas ouverte', async ()
     { date: '2026-10-03', stop_sell: false, avail: 1, rate: 0 }
   ]
   // Sans prix de base : les deux nuits sans tarif sont fermees.
-  const sansBase = await joursOuverts(fausseBase(lignes), BIEN_SANS_BASE, '2026-10-01', '2026-10-03')
+  const sansBase = await joursOuverts(fausseBase(lignes), BIEN_SANS_BASE, '2026-10-01', '2026-10-03', opts())
   assert.equal(sansBase.jours_ouverts, 1)
   assert.equal(sansBase.jours_sans_prix, 2)
   assert.equal(sansBase.jours_fermes, 2)
 
   // Avec un prix de base : il prend le relais, les trois nuits sont ouvertes.
-  const avecBase = await joursOuverts(fausseBase(lignes), BIEN, '2026-10-01', '2026-10-03')
+  const avecBase = await joursOuverts(fausseBase(lignes), BIEN, '2026-10-01', '2026-10-03', opts())
   assert.equal(avecBase.jours_ouverts, 3, 'un prix de base EST un prix')
   assert.equal(avecBase.jours_sans_prix, 0)
 })
@@ -228,7 +238,7 @@ test('LE TEST QUI COMPTE : au-dela de 1000 jours, la lecture pagine', async () =
 })
 
 test('une periode trop longue est refusee, avec une raison exportee', async () => {
-  const r = await joursOuverts(fausseBase([]), BIEN, '2026-01-01', '2036-01-01')
+  const r = await joursOuverts(fausseBase([]), BIEN, '2026-01-01', '2036-01-01', opts())
   assert.equal(r.calculable, false)
   assert.equal(r.raison, NON_CALCULABLE.PERIODE_TROP_LONGUE)
 })
@@ -245,11 +255,89 @@ test('toutes les raisons de non-calculabilite sont exportees', async () => {
     [BIEN, '2026-01-01', '2036-01-01']             // trop longue
   ]
   for (const [b, d, f] of cas) {
-    const r = await joursOuverts(fausseBase([]), b, d, f)
+    const r = await joursOuverts(fausseBase([]), b, d, f, opts())
     assert.equal(r.calculable, false)
     assert.ok(connues.has(r.raison), `raison hors constante : ${r.raison}`)
   }
-  // Et le cas « memoire vide », qui passe par la lecture.
-  const vide = await joursOuverts(fausseBase([]), BIEN, '2026-10-01', '2026-10-02')
-  assert.equal(vide.raison, NON_CALCULABLE.VIDE)
+  // Et les deux cas « memoire vide », qui passent par la lecture.
+  const futur = await joursOuverts(fausseBase([]), BIEN, '2026-10-01', '2026-10-02', opts())
+  assert.equal(futur.raison, NON_CALCULABLE.FUTUR_NON_AMORCE, 'avenir : jamais estime')
+  const passe = await joursOuverts(fausseBase([]), BIEN, '2025-01-01', '2025-01-02',
+    opts({ estimerLePasse: false }))
+  assert.equal(passe.raison, NON_CALCULABLE.VIDE, 'passe, convention desactivee')
+})
+
+
+// ─── La convention « capacité estimée » ─────────────────────────────────────
+
+test('LE TEST QUI COMPTE : un jour PASSE sans memoire est repute OUVERT', () => {})
+
+test('convention estimee : le passe s estime, l avenir JAMAIS', async () => {
+  // ⚠ DECISION DE THIERRY, 12 septembre 2026. La memoire d'intention ne remonte
+  // pas dans le passe : 4 ans de ventes contre TROIS JOURS d'intention sur
+  // La bulle. Sans convention, TO et RevPAR n'existent sur aucun mois passe.
+  const passe = await joursOuverts(fausseBase([]), BIEN, '2025-03-01', '2025-03-31', opts())
+  assert.equal(passe.calculable, true)
+  assert.equal(passe.jours_ouverts, 31, 'tous les jours passes sont reputes ouverts')
+  assert.equal(passe.estimee, true, 'et le drapeau vit DANS la donnee')
+  assert.equal(passe.jours_estimes_ouverts, 31)
+
+  const futur = await joursOuverts(fausseBase([]), BIEN, '2027-03-01', '2027-03-31', opts())
+  assert.equal(futur.calculable, false, 'on n estime JAMAIS l avenir')
+  assert.equal(futur.raison, NON_CALCULABLE.FUTUR_NON_AMORCE)
+})
+
+test('LE TEST QUI COMPTE : une periode A CHEVAL ne melange pas les deux', async () => {
+  // ⚠ LE DEFAUT GRAVE TROUVE EN REVIEW. Desarmer la garde des que
+  // `debut < aujourd hui` laissait passer le MOIS EN COURS : un bien Beds24
+  // traversait la garde, on interrogeait sa memoire inexistante, et ses jours
+  // FUTURS repartaient « fermes ». Mesure du scenario : 11 jours estimes
+  // ouverts, 19 comptes fermes, 20 nuitees — un TO de 182 %, calculable: true.
+  const beds24 = { id: 'b-9', provider: 'beds24', base_price: 100 }
+  let interroge = false
+  const sb = { from () { interroge = true; throw new Error('ne doit pas etre interroge') } }
+  const r = await joursOuverts(sb, beds24, '2026-09-01', '2026-09-30', opts())
+  assert.equal(r.calculable, false, 'un bien sans memoire et du futur : non calculable')
+  assert.equal(r.raison, NON_CALCULABLE.PROVIDER)
+  assert.equal(interroge, false, 'et sa memoire inexistante n est meme pas lue')
+
+  // Le meme bien, sur une periode ENTIEREMENT passee : estimable.
+  const avant = await joursOuverts(fausseBase([]), beds24, '2025-03-01', '2025-03-31', opts())
+  assert.equal(avant.calculable, true)
+  assert.equal(avant.estimee, true)
+})
+
+test('une memoire VIDE a cheval ne rend pas les jours futurs « fermes »', async () => {
+  // Meme asymetrie, cote Channex : `calculable: true` avec les jours futurs
+  // comptes fermes, et SANS drapeau puisque `estimee` ne couvre que le passe.
+  // Denominateur faux, credible, silencieux.
+  const r = await joursOuverts(fausseBase([]), BIEN, '2026-09-01', '2026-09-30', opts())
+  assert.equal(r.calculable, false)
+  assert.equal(r.raison, NON_CALCULABLE.FUTUR_NON_AMORCE)
+})
+
+test('LE TEST QUI COMPTE : une exception declaree PRIME, meme sur une ligne reelle', async () => {
+  // Elle n etait consultee que pour les jours SANS ligne : une exception posee
+  // sur un jour passe portant une ligne perimee (ecrite a la migration,
+  // `avail: 1`) etait ignoree, et le jour comptait ouvert. « L hote sait
+  // mieux » ne souffre pas d exception.
+  const lignes = [
+    { date: '2025-03-01', stop_sell: false, avail: 1, rate: 100 },
+    { date: '2025-03-02', stop_sell: false, avail: 1, rate: 100 }
+  ]
+  const exclus = new Set(['2025-03-02'])
+  const r = await joursOuverts(fausseBase(lignes), BIEN, '2025-03-01', '2025-03-02',
+    opts({ joursExclus: exclus }))
+  assert.equal(r.jours_ouverts, 1, 'la nuit declaree fermee ne compte pas')
+  assert.equal(r.jours_estimes_fermes_par_exception, 1)
+  assert.deepEqual(r.detail, ['2025-03-01'])
+})
+
+test('la bascule est automatique : une ligne reelle fait foi', async () => {
+  // L estimation ne comble que les TROUS du passe.
+  const lignes = [{ date: '2025-03-02', stop_sell: true, avail: 0, rate: 100 }]
+  const r = await joursOuverts(fausseBase(lignes), BIEN, '2025-03-01', '2025-03-03', opts())
+  assert.equal(r.jours_ouverts, 2, 'les 1er et 3 sont estimes ouverts')
+  assert.equal(r.jours_estimes_ouverts, 2)
+  assert.ok(!r.detail.includes('2025-03-02'), 'le 2 est ferme PAR SA LIGNE REELLE')
 })

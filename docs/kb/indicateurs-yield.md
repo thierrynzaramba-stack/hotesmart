@@ -32,7 +32,8 @@ C'est la règle qui traverse tout le module.
 | capacité non calculable (mémoire non amorcée) | `null` + la **raison** remontée |
 | aucune nuit à prix connu | `prix_moyen: null`, motif explicite |
 | aucune date de vente fiable | `delai_median: null` |
-| capacité en personnes inconnue | `taux_occupation_personnes: null` |
+| capacité en personnes inconnue | `taux_occupation_personnes: null`, motif `capacite_en_personnes_inconnue` |
+| aucune nuit ne porte d'occupants | `taux_occupation_personnes: null`, motif `aucune_nuit_avec_occupants` |
 
 Un bien fermé toute la période n'a pas un TO de 0 % : **il n'en a pas**. Diviser
 donnerait `NaN` ou `Infinity`, et un moteur qui affiche 0 % d'occupation sur un
@@ -40,6 +41,29 @@ bien fermé suggérerait de brader.
 
 **Dans tous ces cas, le CA et les nuitées restent mesurés** : ce qui n'est pas
 calculable est l'indicateur qui *divise*, pas la matière.
+
+### Un mois ouvert sans vente vaut 0 %, et il doit exister
+
+Les périodes naissent des éclatements **et de la capacité**. Sans cela, un mois
+ouvert où rien ne s'est vendu ne produisait aucune ligne : le taux d'occupation
+de 0 % — le signal le plus fort d'un moteur de yield — disparaissait purement,
+et en N-1 le mois manquant devenait « le bien n'existait pas ». Toute clé
+présente dans `capacites` produit donc une ligne, vendue ou non.
+
+### Quand le numérateur est amputé, on le dit
+
+Deux indicateurs divisent une matière **partielle** par un dénominateur
+**complet**. On ne corrige pas — le CA réel est celui-là, les occupants connus
+sont ceux-là — mais la donnée le déclare :
+
+| indicateur | ce qui manque | ce qui est porté |
+|---|---|---|
+| `revpar` | les nuits sans prix (74 résas Beds24 à `price = 0`) | motif `revpar_sur_ca_partiel` + `nuitees_sans_prix` |
+| `taux_occupation_personnes` | les nuits sans occupants (`numAdult` absent du `raw`) | motif `aucune_nuit_avec_occupants_partiel` + `personnes_partielles` |
+
+Mesuré sur La bulle 2025 : 315 nuitées dont 306 tarifées, soit un RevPAR
+sous-estimé d'environ 3 %. `prix_moyen` avait été protégé de ce biais dès le
+premier jet (§3), pas le RevPAR — relevé en review.
 
 ## 3. Le prix moyen ignore les nuits sans prix
 
@@ -76,8 +100,20 @@ Un bien qui n'existait pas l'an dernier n'a pas fait 0 € : **il n'a pas de
 N-1**. Afficher « −100 % » ferait croire à un effondrement, et le moteur
 suggérerait de brader pour rattraper une perte imaginaire.
 
-Chaque comparaison porte donc `non_calculable` : `periode_n1_absente`,
-`n1_non_calculable`, ou `valeur_non_calculable`.
+Chaque comparaison porte donc `non_calculable` :
+
+| motif | ce qu'il veut dire |
+|---|---|
+| `n1_hors_perimetre` | la période N-1 précède la plus ancienne du tableau reçu — **l'appelant ne l'a pas demandée** |
+| `periode_n1_absente` | elle est dans le périmètre mais manque : trou de donnée réel |
+| `n1_non_calculable` | la période N-1 existe, mais cet indicateur-là n'y est pas calculable |
+| `valeur_non_calculable` | c'est l'année en cours qui n'est pas calculable |
+
+**`comparerAN1` ne cherche le N-1 que dans le tableau qu'on lui passe — c'est un
+contrat.** Qui veut comparer 2026 à 2025 doit passer les **deux** années.
+Demander 2026 seul rendait `periode_n1_absente` partout, indiscernable d'un bien
+qui n'existait pas : le faux négatif que tout ce module évite ailleurs. Les deux
+causes portent désormais deux motifs distincts.
 
 ## 7. La convention « capacité estimée »
 
