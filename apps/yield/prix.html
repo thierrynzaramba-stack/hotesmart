@@ -16,6 +16,49 @@
     #yp-mois { font-size: 15px; font-weight: 600; min-width: 132px; text-align: center;
                text-transform: capitalize; }
 
+    /* ─── LE RADAR : DOUZE MOIS EN UNE BANDE ─────────────────────────────── */
+    .yp-radar { display: flex; gap: 3px; margin-bottom: 12px; overflow-x: auto;
+                -webkit-overflow-scrolling: touch; padding-bottom: 3px; }
+    .yp-rm { flex: 1 0 62px; background: var(--bg); border: 0.5px solid var(--border);
+             border-radius: var(--radius); padding: 6px 5px 5px; cursor: pointer;
+             font-family: inherit; text-align: center; color: var(--text2);
+             position: relative; }
+    .yp-rm:hover { background: var(--bg2); }
+    .yp-rm[aria-current="true"] { border-color: var(--text2); background: var(--bg2);
+                                  box-shadow: inset 0 -2px 0 var(--text2); }
+    .yp-rm.passe { opacity: .62; }
+    .yp-rm .m { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
+                color: var(--text3); display: block; }
+    .yp-rm .g { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+                display: block; margin-top: 2px; line-height: 1.15; }
+    .yp-rm .a { font-size: 9.5px; color: var(--text3); display: block; margin-top: 1px;
+                white-space: nowrap; }
+    .yp-rm .a b { font-weight: 600; }
+    .yp-rm .a .up { color: #0F7B3E; } .yp-rm .a .dn { color: #B02A37; }
+    /* ⚠ L'ALERTE EST UN POINT, PAS UNE PHRASE : douze tuiles n'ont pas la place
+       d'une explication, et le survol la porte. */
+    .yp-al { position: absolute; top: 4px; right: 5px; width: 6px; height: 6px;
+             border-radius: 50%; }
+    .yp-al.rouge { background: #B02A37; }
+    .yp-al.ambre { background: #B8860B; }
+    .yp-al.gris { background: #C9C9C9; }
+    /* ⚠ TROIS ÉTATS SANS ACTION, ET ILS NE SE VALENT PAS.
+       « Fermé à la vente » est un manque à gagner : il porte la couleur d'une
+       alerte. « Incertain » est une réserve. « — » seul veut dire « rien à
+       faire », et c'est le seul qui reste neutre. */
+    .yp-rm .pourquoi { font-size: 10px; display: block; margin-top: 4px;
+                       line-height: 1.5; white-space: nowrap; overflow: hidden;
+                       text-overflow: ellipsis; }
+    .yp-rm.e-retard { background: #FDECEA; border-color: #F0C2BC; }
+    .yp-rm.e-retard .pourquoi { color: #96302B; font-weight: 600; }
+    .yp-rm.e-retard:hover { background: #FBE1DD; }
+    .yp-rm.e-ferme { background: #FBF1DA; border-color: #E6D3A8; }
+    .yp-rm.e-ferme .pourquoi { color: #8A6D3B; font-weight: 600; }
+    .yp-rm.e-ferme:hover { background: #F7E9C9; }
+    .yp-rm.e-incertain .pourquoi { color: #8A6D3B; }
+    .yp-rm.e-inconnu .pourquoi { color: var(--text3); }
+    .yp-rm.e-rien .pourquoi { color: var(--text3); }
+
     /* ─── ÉTAGE 1 : l'action ─────────────────────────────────────────────── */
     .yp-tete { background: var(--bg); border: 0.5px solid var(--border);
                border-radius: var(--radius-lg); padding: 13px 16px; margin-bottom: 12px; }
@@ -352,7 +395,87 @@
 
   // ─── La vue : action, tableau, pied ───────────────────────────────────────
   function vue (d) {
-    return action(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d)
+    return radar(d) + action(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d)
+  }
+
+  const ABREV = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.',
+    'août', 'sept.', 'oct.', 'nov.', 'déc.']
+
+  // ⚠ LA BANDE VIENT AVEC LE MOIS, SANS UNE REQUETE DE PLUS — contrainte de
+  // Thierry. Elle est calculée par le même endpoint, avec la MÊME fonction que
+  // les lignes : la tuile annonce exactement ce que le mois montrera au clic.
+  //
+  // ⚠ ET ELLE NE DIT QUE CE QU'IL Y A À FAIRE. Douze tuiles n'ont pas la place
+  // d'un tableau de bord : un gain, deux compteurs, un point d'alerte. Tout le
+  // reste vit au survol, et le détail au clic.
+  function radar (d) {
+    if (!d.radar || !d.radar.length) return ''
+    return `<div class="yp-radar">${d.radar.map(m => {
+      const nom = `${ABREV[Number(m.periode.slice(5)) - 1]} ${m.periode.slice(2, 4)}`
+      const a = m.alertes || {}
+      // ⚠ UNE SEULE ALERTE, LA PLUS GRAVE : deux points sur une tuile de 62 px
+      // ne se distinguent pas, et l'hôte n'agirait sur aucun des deux.
+      const alerte = a.en_retard > 0
+        ? { c: 'rouge', t: `${a.en_retard} nuit(s) en retard sur leur rythme : à ce délai, l’an dernier, la nuit comparable était déjà vendue.` }
+        : (a.segments_incertains > 0
+          ? { c: 'ambre', t: `${a.segments_incertains} nuit(s) hors de la couverture du calendrier scolaire : leurs segments sont incertains.` }
+          : (a.fermees > 0
+            ? { c: 'ambre', t: `${a.fermees} nuit(s) fermée(s) à la vente — aucun prix ne s’y vend.` }
+            : (a.non_renseignees > 0
+              ? { c: 'gris', t: `${a.non_renseignees} nuit(s) non renseignée(s) : votre calendrier ne va pas jusque-là.` }
+              : null)))
+      // ⚠ UNE TUILE SANS ACTION DOIT DIRE POURQUOI — demande de Thierry.
+      // « — » était ambigu : janvier à mai 2027 sont FERMÉS À LA VENTE, ce qui
+      // est un manque à gagner, pas un calme plat. Trois cas distincts, et un
+      // seul « — » : celui qui veut vraiment dire « rien à faire ».
+      const agit = m.a_monter > 0 || m.a_baisser > 0
+      // ⚠ « EN RETARD » PASSE AVANT « RIEN A FAIRE » — releve en review.
+      // Un mois dont les prix en place sont deja ceux du moteur affichait
+      // « — / Rien a changer » alors qu'il comptait des nuits en retard sur
+      // leur rythme N-1 : l'alerte la PLUS GRAVE etait la seule a pouvoir
+      // disparaitre, parce que le point rouge n'etait dessine que sur les
+      // tuiles qui agissent.
+      const etat = agit ? 'action'
+        : (a.en_retard > 0 ? 'retard'
+          : (a.fermees > 0 ? 'ferme'
+            : (a.segments_incertains > 0 ? 'incertain'
+              : (a.non_renseignees > 0 ? 'inconnu' : 'rien'))))
+      const POURQUOI = {
+        retard: {
+          court: `${a.en_retard} en retard`,
+          long: `${a.en_retard} nuit(s) en retard sur leur rythme : à ce délai, l’an dernier, la nuit comparable était déjà vendue. Les prix en place sont ceux que le moteur suggère — c’est donc le rythme de vente qu’il faut regarder, pas le tarif.`
+        },
+        ferme: {
+          court: `${a.fermees} fermée${a.fermees > 1 ? 's' : ''}`,
+          long: `${a.fermees} nuit(s) fermée(s) à la vente : aucun prix ne peut s’y vendre. C’est un manque à gagner, pas un mois calme — ouvrez-les au calendrier et les suggestions apparaîtront.`
+        },
+        incertain: {
+          court: 'incertain',
+          long: `${a.segments_incertains} nuit(s) hors de la couverture du calendrier scolaire : leurs segments sont incertains, donc aucune suggestion n’est proposée.`
+        },
+        inconnu: {
+          court: 'non renseigné',
+          long: `${a.non_renseignees} nuit(s) non renseignée(s) : votre calendrier ne va pas jusque-là, personne n’a encore dit si elles étaient ouvertes.`
+        },
+        rien: { court: '—', long: 'Rien à changer : les prix en place sont ceux que le moteur suggère.' }
+      }
+      const titre = [
+        `${nom} — ${m.nuits} nuit(s)`,
+        agit ? `${m.a_monter} à monter, ${m.a_baisser} à baisser` : null,
+        agit ? `${m.gain >= 0 ? '+' : ''}${m.gain} € si tout appliqué` : null,
+        m.vendues ? `${m.vendues} vendue(s)` : null,
+        agit ? (alerte ? alerte.t : null) : POURQUOI[etat].long
+      ].filter(Boolean).join(' · ')
+      return `<button class="yp-rm e-${etat} ${m.passe ? 'passe' : ''}" data-mois="${ech(m.periode)}"
+        aria-current="${m.affiche ? 'true' : 'false'}" title="${ech(titre)}">
+        ${alerte ? `<span class="yp-al ${alerte.c}"></span>` : ''}
+        <span class="m">${ech(nom)}</span>
+        ${agit
+          ? `<span class="g ${m.gain > 0 ? 'hausse' : (m.gain < 0 ? 'baisse' : '')}">${m.gain >= 0 ? '+' : ''}${m.gain}&nbsp;€</span>
+             <span class="a">${m.a_monter ? `<b class="up">↑${m.a_monter}</b>` : ''}${m.a_monter && m.a_baisser ? ' ' : ''}${m.a_baisser ? `<b class="dn">↓${m.a_baisser}</b>` : ''}</span>`
+          : `<span class="pourquoi">${ech(POURQUOI[etat].court)}</span>`}
+      </button>`
+    }).join('')}</div>`
   }
 
   // ⚠ UNE LÉGENDE, UNE FOIS. C'est le prix à payer pour que les lignes n'aient
@@ -803,6 +926,11 @@
   }
 
   function brancher () {
+    // ⚠ LE CLIC OUVRE LE MOIS, sans second aller-retour pour la bande : la
+    // reponse suivante la reconstruit avec le meme appel.
+    for (const b of document.querySelectorAll('.yp-rm')) {
+      b.addEventListener('click', () => { mois = b.dataset.mois; charger() })
+    }
     // ⚠ UNE SEULE OUVERTE A LA FOIS. Trente détails dépliés redonneraient
     // exactement la page que cette passe supprime.
     const basculer = (tr) => {

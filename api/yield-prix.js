@@ -24,7 +24,7 @@ const { exceptionsDuBien } = require('../lib/yield/exceptions')
 const { evenementsDuBien } = require('../lib/yield/evenements')
 const { datesCommerciales } = require('../lib/yield/dates-commerciales')
 const { reglagesDuBien, reglagePour } = require('../lib/yield/reglages-segment')
-const { lireVacances } = require('../lib/yield/vacances')
+const { lireVacances, etendueSource } = require('../lib/yield/vacances')
 const { pickup, DRAPEAUX } = require('../lib/yield/pickup')
 const { nuitsOccupees } = require('../lib/nuits-occupees')
 const R = require('../lib/yield/reference')
@@ -38,6 +38,8 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 // ⚠ FENETRE COURTE, ET C'EST LE SUJET. Cette page se regarde le matin : elle
 // repond a « que dois-je changer aujourd'hui ? », pas a « comment s'est passee
 // l'annee ». Une fenetre longue la rendrait illisible AVANT de la rendre lente.
+// Douze mois glissants : le cadrage PROSPECTIF de l'app (spec §7).
+const RADAR_MOIS = 12
 const JOURS_DEFAUT = 60
 const JOURS_MAX = 120
 const ANS_REFERENCE = 3
@@ -122,6 +124,61 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'fenetre_entierement_passee' })
     }
 
+    // ─── LE RADAR : DOUZE MOIS GLISSANTS, SANS UNE REQUETE DE PLUS ──────────
+    // ⚠ CONTRAINTE DE THIERRY : « aucune nouvelle lecture serveur ». Elle a
+    // decide de la forme, et c'est elle qui a rendu ce bloc possible.
+    //
+    // La voie naive — appeler `joursOuverts` pour chacun des douze mois et de
+    // leurs N-1 — coute 24 requetes. Mesure sur La bulle : 2 673 ms, sur une
+    // page qui s'ouvre chaque matin. On lit donc UNE fois le calendrier sur
+    // toute la fenetre, et `joursOuverts` recoit les lignes au lieu de les
+    // relire : 169 ms, et la regle « qu'est-ce qu'un jour ouvert » reste a un
+    // seul endroit (un test compare les deux chemins).
+    const moisRadar = []
+    for (let i = 0; i < RADAR_MOIS; i++) {
+      const d = new Date(Date.UTC(Number(auj.slice(0, 4)), Number(auj.slice(5, 7)) - 1 + i, 1))
+      moisRadar.push(d.toISOString().slice(0, 7))
+    }
+    // ⚠ LE MOIS CONSULTE PEUT ETRE HORS DU RADAR, ET IL SE RANGE A SA PLACE.
+    // Releve en review, et c'etait a UN CLIC : « mois precedent » ajoutait le
+    // mois passe EN FIN de tableau, donc `moisRadar[dernier]` devenait
+    // anterieur a `moisRadar[0]`. La fenetre de `nuitsOccupees` partait alors
+    // du 1er septembre au 31 aout — INVERSEE. Elle ne laissait passer aucune
+    // nuit : `vendues` valait {} pour TOUTE la reponse, chaque nuit vendue
+    // repartait « a vendre » et recevait une suggestion, et les douze tuiles
+    // annonçaient « 0 vendue » en comptant ces nuits dans le gain.
+    const cleAffichee = debut.slice(0, 7)
+    if (!moisRadar.includes(cleAffichee)) moisRadar.push(cleAffichee)
+    moisRadar.sort()
+    const finDeMois = c => {
+      const [a, m] = c.split('-').map(Number)
+      return new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10)
+    }
+    // La plage a lire couvre les mois du radar ET leurs N-1 (pour le pickup).
+    const clesCapacite = new Set()
+    for (const c of moisRadar) {
+      clesCapacite.add(c)
+      clesCapacite.add(`${Number(c.slice(0, 4)) - 1}-${c.slice(5)}`)
+    }
+    const triCap = [...clesCapacite].sort()
+    const debutCal = `${triCap[0]}-01`
+    const finCal = finDeMois(triCap[triCap.length - 1])
+
+    // ⚠ PAGINATION OBLIGATOIRE : PostgREST plafonne a 1000 lignes, et deux ans
+    // de calendrier les depassent des que le bien est provisionne chaque jour.
+    // Sans `order`, la pagination n'est meme pas deterministe.
+    const lignesCal = []
+    for (let from = 0; ; from += 1000) {
+      const { data, error: eInv } = await supabase
+        .from('calendar_inventory')
+        .select('date, rate, avail, stop_sell')
+        .eq('property_id', bien.id).gte('date', debutCal).lte('date', finCal)
+        .order('date').range(from, from + 999)
+      if (eInv) throw new Error(`calendar_inventory : ${eInv.message}`)
+      lignesCal.push(...(data || []))
+      if (!data || data.length < 1000) break
+    }
+
     // ⚠ LA FENETRE D'HISTORIQUE EST UNE PROPRIETE DU BIEN, PAS DU MOIS REGARDE.
     // Releve en review, 13 septembre 2026. Elle etait ancree sur le MOIS
     // demande (`reculerAns(debut, 3)`) alors que sa borne haute suivait
@@ -153,7 +210,14 @@ module.exports = async (req, res) => {
     // Consequence nouvelle : l'ecran des evenements, qui lit la grille par
     // `grille-du-bien.js` (sans ce defaut), annonçait des crans differents de
     // ceux de la page des prix. Deux ecrans, deux verites.
-    const finContexte = fin > auj ? fin : auj
+    // ⚠ ET IL DOIT COUVRIR LE RADAR, PAS SEULEMENT LE MOIS AFFICHE.
+    // Trouve en l'executant : le contexte s'arretait a la fin du mois
+    // consulte, donc TOUS les mois suivants du radar tombaient
+    // « hors_fenetre_du_contexte ». La tuile de decembre annonçait
+    // « 7 segments incertains » alors que le calendrier scolaire couvre
+    // jusqu'en juillet 2027 — un faux signal, sur le champ meme qui doit
+    // alerter l'hote.
+    const finContexte = [fin, auj, finCal].sort()[2]
 
     // ─── Le coeur ───────────────────────────────────────────────────────────
     let lignes = []
@@ -182,6 +246,13 @@ module.exports = async (req, res) => {
 
     // ─── La grille, sur l'historique ────────────────────────────────────────
     const vacances = await lireVacances(supabase, debutContexte, finContexte)
+    // ⚠ JUSQU'OU LE CALENDRIER SCOLAIRE EST-IL PUBLIE ? Au-dela, une nuit de
+    // vacances part silencieusement en « hors vacances » : `lireVacances` ne
+    // rend AUCUN motif pour les jours qu'elle ne couvre pas. C'est ce risque
+    // que l'alerte « segments incertains » doit porter.
+    const etendue = await etendueSource(supabase)
+    const couvertureVacances = (etendue || [])
+      .find(e => e.zone === bien.zone_scolaire) || null
     // ⚠ LES EVENEMENTS DE L'HOTE ENTRENT DANS LE CONTEXTE, comme les vacances.
     // Sans cette lecture, tout le mecanisme restait inerte : une nuit de saison
     // thermale etait segmentee « hors vacances », tarifee au niveau de la basse
@@ -215,37 +286,53 @@ module.exports = async (req, res) => {
 
     // ─── L'etat du calendrier, jour par jour ────────────────────────────────
     const capacite = await joursOuverts(supabase, bien, debut, fin,
-      { aujourdHui: auj, estimerLePasse: false })
-    const ouverts = new Set(capacite && capacite.detail ? capacite.detail : [])
-    const { data: inv, error: eInv } = await supabase
-      .from('calendar_inventory')
-      .select('date, rate, avail, stop_sell')
-      .eq('property_id', bien.id).gte('date', debut).lte('date', fin)
-    if (eInv) throw new Error(`calendar_inventory : ${eInv.message}`)
-    const parDate = new Map((inv || []).map(l => [l.date, l]))
+      { aujourdHui: auj, estimerLePasse: false, lignes: lignesCal })
+    // ⚠ L'OUVERTURE SE LIT SUR TOUTE LA FENETRE DU RADAR, PAS SUR LE MOIS.
+    // Trouve en l'executant : bornes au mois affiche, octobre rendait « 30
+    // nuits non renseignees » alors que la page d'octobre les tarifait —
+    // `parDate` n'avait aucune ligne hors du mois courant, donc `ouverte`
+    // valait `null` partout. La tuile disait le contraire du mois qu'elle
+    // annonce.
+    const capaciteRadar = await joursOuverts(supabase, bien, debutCal, finCal,
+      { aujourdHui: auj, estimerLePasse: false, lignes: lignesCal })
+    // ⚠ « JE NE SAIS PAS » NE DEVIENT PAS « FERME » — releve en review, et
+    // c'est l'inversion exacte que la regle cardinale interdit.
+    // `detail` vaut `null` quand la capacite n'est pas calculable : le `|| []`
+    // faisait alors de CHAQUE nuit portant une ligne au calendrier une nuit
+    // « fermee a la vente », c'est-a-dire une affirmation la ou la fonction
+    // disait explicitement qu'elle ne savait pas.
+    //
+    // Ce n'etait pas atteignable avant le radar : la fenetre valait un mois.
+    // Elle fait maintenant deux ans et traverse TOUJOURS le futur, donc la
+    // garde `estRelieAuCanal` tire sur tout bien Beds24, et au-dela de
+    // JOURS_MAX elle rend `periode_trop_longue`. Dans les deux cas la page
+    // entiere passait en « fermee », pendant que son propre pied annonçait
+    // « 3 jours ouverts ». Deux verites dans une seule reponse.
+    const ouvertureConnue = !!(capaciteRadar && capaciteRadar.calculable &&
+      capaciteRadar.detail)
+    const ouverts = new Set(ouvertureConnue ? capaciteRadar.detail : [])
+    const motifOuverture = ouvertureConnue ? null
+      : (capaciteRadar ? capaciteRadar.raison : 'capacite_non_calculable')
+    const parDate = new Map(lignesCal.map(l => [l.date, l]))
 
     // ⚠ UNE NUIT VENDUE N'A PLUS DE PRIX A CHANGER. Le montrer comme
     // « tarifiable » ferait perdre du temps a l'hote sur la seule ligne ou il
     // ne peut rien faire.
-    const vendues = await nuitsOccupees(supabase, bien.provider_property_id,
-      debut, fin, { userId: compte })
+    // ⚠ UNE SEULE LECTURE, SUR LA FENETRE DU RADAR. Elle servait le mois
+    // affiche ; le radar en a besoin sur douze. Elargir la fenetre coute la
+    // meme requete — la decouper par mois en aurait coute douze.
+    const venduesRadar = await nuitsOccupees(supabase, bien.provider_property_id,
+      debutCal, finCal, { userId: compte })
+    const vendues = venduesRadar
 
     // ─── La pression, par mois ──────────────────────────────────────────────
-    const moisVises = [...new Set(jours.map(j => j.slice(0, 7)))]
     const capacitesMois = new Map()
-    for (const cle of moisVises) {
-      const [a, m] = cle.split('-').map(Number)
-      const prec = `${a - 1}-${String(m).padStart(2, '0')}`
-      for (const c of [cle, prec]) {
-        if (capacitesMois.has(c)) continue
-        const [aa, mm] = c.split('-').map(Number)
-        capacitesMois.set(c, await joursOuverts(supabase, bien, `${c}-01`,
-          new Date(Date.UTC(aa, mm, 0)).toISOString().slice(0, 10),
-          { aujourdHui: auj, estimerLePasse: true }))
-      }
+    for (const c of triCap) {
+      capacitesMois.set(c, await joursOuverts(supabase, bien, `${c}-01`, finDeMois(c),
+        { aujourdHui: auj, estimerLePasse: true, lignes: lignesCal }))
     }
     const pressionParMois = new Map()
-    for (const cle of moisVises) {
+    for (const cle of moisRadar) {
       const pk = pickup(eclatements, { periode: cle, pivot: auj, granularite: 'mois',
         capacites: capacitesMois, capacitePersonnes: bien.capacity })
       const c = pk.vs_n1 && pk.vs_n1.ca ? pk.vs_n1.ca : null
@@ -302,13 +389,22 @@ module.exports = async (req, res) => {
     }
 
     // ─── Une ligne par nuit ─────────────────────────────────────────────────
-    const nuits = jours.map(date => {
+    // ⚠ UNE SEULE FONCTION POUR LA LIGNE ET POUR LA TUILE. Le radar doit
+    // annoncer EXACTEMENT ce que le mois affichera au clic : recalculer les
+    // compteurs autrement aurait fait deux verites, et c'est la tuile qu'on
+    // aurait crue.
+    const construireNuit = (date) => {
       const l = parDate.get(date) || null
       const vendue = (vendues[date] || []).length >= Math.max(1, Number(bien.inventory_units) || 1)
       // ⚠ `vendue` EST UN ETAT A PART, PAS UN `ouverte: false`. Le confondre
       // faisait porter « fermee a la vente » a dix nuits vendues — ce qui
       // aurait envoye l'hote ouvrir un calendrier qui n'a rien a ouvrir.
-      const ouverte = parDate.has(date) ? ouverts.has(date) : null
+      // ⚠ TROIS ETATS, PAS DEUX : ouverte, fermee, ET « je ne sais pas ».
+      // Sans ligne au calendrier, personne n'a rien decide. Et si la capacite
+      // elle-meme n'est pas calculable, on ne sait pas davantage — meme si la
+      // ligne existe.
+      const ouverte = !ouvertureConnue ? null
+        : (parDate.has(date) ? ouverts.has(date) : null)
       const delai = Math.round(
         (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${auj}T00:00:00Z`)) / 86400000)
       const seg = R.segmenterJour(date, contexte)
@@ -353,6 +449,8 @@ module.exports = async (req, res) => {
         // L'etat, dans l'ordre ou il compte pour l'hote.
         vendue,
         ouverte,
+        // Le motif voyage avec l'inconnue : « je ne sais pas » se justifie.
+        ouverture_non_calculable: ouvertureConnue ? null : motifOuverture,
         // ⚠ LE PRIX DE BASE N'EST PAS « LE PRIX AFFICHE » — releve en review.
         // Sans ligne au calendrier, `ouverte` vaut `null` (« ouverture
         // inconnue ») mais ce champ AFFIRMAIT un prix : l'ecran montrait un
@@ -454,6 +552,69 @@ module.exports = async (req, res) => {
           hors_reference: rn1 ? rn1.hors_reference : false
         }
       }
+    }
+    const nuits = jours.map(construireNuit)
+
+    // ─── LE RADAR, TUILE PAR TUILE ──────────────────────────────────────────
+    // ⚠ LES MEMES COMPTEURS QUE LE BANDEAU D'ACTION DU MOIS, par construction :
+    // la tuile appelle `construireNuit`, exactement comme la page. Recalculer
+    // autrement aurait fait deux verites, et l'hote aurait cru la tuile.
+    //
+    // ⚠ ET LES MEMES REGLES DE SILENCE. Une nuit passee ne compte pas ; une
+    // nuit fermee, non renseignee ou vendue n'a rien a monter. Ce sont les
+    // alertes qui les portent — elles disent pourquoi il n'y a rien a faire.
+    const radar = moisRadar.map(cle => {
+      const debutM = `${cle}-01`
+      const finM = finDeMois(cle)
+      const joursM = joursDeLaPeriode(debutM, finM) || []
+      const nuitsM = cle === cleAffichee ? nuits : joursM.map(construireNuit)
+      const aVenir = nuitsM.filter(n => n.delai_jours >= 0)
+      const avec = aVenir.filter(n => n.suggestion != null && n.prix_actuel != null)
+      const monter = avec.filter(n => n.suggestion > n.prix_actuel)
+      const baisser = avec.filter(n => n.suggestion < n.prix_actuel)
+      const gain = avec.reduce((t, n) => t + (n.suggestion - n.prix_actuel), 0)
+      const fermees = aVenir.filter(n => n.ouverte === false && !n.vendue)
+      const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue)
+      const retard = aVenir.filter(n => !n.vendue && n.ouverte === true &&
+        n.n1 && n.n1.vendue_a_ce_delai === true)
+      // ⚠ CE COMPTEUR ETAIT MORT, ET IL MESURAIT AUTRE CHOSE QUE SON NOM.
+      // Releve en review. Il comptait `hors_fenetre_du_contexte`, motif qui n'a
+      // qu'une origine — la garde de fenetre de `segmenterJour` — et que le
+      // correctif `finContexte` rend desormais inatteignable : le compteur
+      // valait 0 pour toujours, et le point ambre correspondant ne pouvait plus
+      // s'allumer.
+      //
+      // Or « segments incertains » designe un risque REEL et different :
+      // au-dela de la couverture du calendrier scolaire, une nuit de vacances
+      // part silencieusement en « hors vacances » — `lireVacances` ne rend
+      // aucun motif pour les jours qu'elle ne couvre pas. On mesure donc
+      // CELA : les nuits au-dela de la derniere date publiee pour la zone du
+      // bien.
+      // ⚠ LE CHAMP S'APPELLE `date_fin`, PAS `fin`. J'ai ecrit `.fin` dans le
+      // correctif meme qui remplaçait un compteur mort : l'alerte restait a
+      // zero, sans erreur, sans rien qui paraisse casse. C'est exactement la
+      // forme du defaut qu'on venait de corriger — un compteur qui ne compte
+      // rien se lit comme « tout va bien ». Trouve en verifiant le chiffre
+      // contre la couverture reelle (zone C, 2027-07-03), pas en relisant.
+      const incertains = couvertureVacances && couvertureVacances.date_fin
+        ? joursM.filter(j => j > couvertureVacances.date_fin && j >= auj).length
+        : 0
+      return {
+        periode: cle,
+        affiche: cle === cleAffichee,
+        passe: finM < auj,
+        nuits: nuitsM.length,
+        a_monter: monter.length,
+        a_baisser: baisser.length,
+        vendues: aVenir.filter(n => n.vendue).length,
+        gain: Math.round(gain),
+        alertes: {
+          fermees: fermees.length,
+          non_renseignees: inconnues.length,
+          en_retard: retard.length,
+          segments_incertains: incertains
+        }
+      }
     })
 
     // ─── LES SEJOURS, POUR LES DEUX COLONNES DE PLANNING ────────────────────
@@ -550,6 +711,9 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({
       pied,
+      // ⚠ SERVI PAR LE MEME APPEL : aucune requete de plus depuis le
+      // navigateur, aucun second endpoint. La bande vient avec le mois.
+      radar,
       sejours,
       // ⚠ LES EVENEMENTS SONT RENDUS A L'ECRAN, pas seulement consommes.
       // Un niveau « Haut » en plein mois de mai doit pouvoir s'expliquer par

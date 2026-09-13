@@ -47,7 +47,15 @@ function fausseBase (lignes, { erreur = null } = {}) {
           // Sans `order`, la pagination n'est pas deterministe : on refuse,
           // sinon le test validerait un code que la vraie base casse.
           assert.ok(f.ordonne, 'la lecture paginee doit etre ordonnee')
+          // ⚠ LE FAUX CLIENT FILTRE SUR LE BIEN, COMME POSTGREST — releve en
+          // review. Sans ce filtre, le test qui compare « lignes lues » et
+          // « lignes fournies » ne pouvait PAS voir le seul ecart qui compte :
+          // le chemin base filtre sur `property_id`, l'autre ne le faisait pas.
+          // Le garde-fou annonce etait structurellement invisible.
+          const parBien = f.eq.find(([c]) => c === 'property_id')
           const out = lignes
+            .filter(l => !parBien || l.property_id == null ||
+              String(l.property_id) === String(parBien[1]))
             .filter(l => (!f.gte || l.date >= f.gte) && (!f.lte || l.date <= f.lte))
             .sort((a, b) => a.date.localeCompare(b.date))
             .slice(f.from, f.to + 1)
@@ -340,4 +348,86 @@ test('la bascule est automatique : une ligne reelle fait foi', async () => {
   assert.equal(r.jours_ouverts, 2, 'les 1er et 3 sont estimes ouverts')
   assert.equal(r.jours_estimes_ouverts, 2)
   assert.ok(!r.detail.includes('2025-03-02'), 'le 2 est ferme PAR SA LIGNE REELLE')
+})
+
+// ─── Les lignes fournies par l'appelant ──────────────────────────────────────
+
+test('LE TEST QUI COMPTE : lignes FOURNIES et lignes LUES donnent le meme verdict', async () => {
+  // ⚠ POURQUOI CE CHEMIN EXISTE. Le radar douze mois appelle `joursOuverts`
+  // 24 fois — un mois et son N-1, douze fois. Mesure sur La bulle :
+  // 2 673 ms de requetes pour une page qui s'ouvre chaque matin. En fournissant
+  // les lignes lues UNE fois, on tombe a 169 ms.
+  //
+  // ⚠ ET C'EST EXACTEMENT LA QUE LE RISQUE EST. Dupliquer la classification
+  // dans l'appelant aurait fait DEUX verites sur « qu'est-ce qu'un jour
+  // ouvert » — le defaut que ce module existe pour empecher. Seule la SOURCE
+  // des lignes change ; ce test l'exige, sur des cas qui exercent chaque
+  // branche de la regle.
+  const lignes = [
+    { date: '2026-10-01', stop_sell: false, avail: 1, rate: 120 },   // ouvert
+    { date: '2026-10-02', stop_sell: true, avail: 1, rate: 120 },    // ferme : intention
+    { date: '2026-10-03', stop_sell: false, avail: 0, rate: 120 },   // ferme : stock
+    { date: '2026-10-04', stop_sell: false, avail: 1, rate: 0 },     // prix : base_price prend le relais
+    // le 5 n'a AUCUNE ligne : ferme (futur) ou estime ouvert (passe)
+    { date: '2026-10-06', stop_sell: false, avail: 1, rate: 95 },
+    { date: '2026-11-10', stop_sell: false, avail: 1, rate: 150 },   // hors fenetre d'octobre
+    { date: '2026-09-20', stop_sell: false, avail: 1, rate: 90 }     // hors fenetre, avant
+  ]
+  const base = fausseBase(lignes)
+  for (const [debut, fin] of [['2026-10-01', '2026-10-06'], ['2026-10-01', '2026-10-31'],
+    ['2026-11-01', '2026-11-30'], ['2026-09-01', '2026-09-30']]) {
+    for (const estimer of [true, false]) {
+      const lu = await joursOuverts(base, BIEN, debut, fin,
+        opts({ estimerLePasse: estimer }))
+      const fourni = await joursOuverts(null, BIEN, debut, fin,
+        opts({ estimerLePasse: estimer, lignes }))
+      assert.deepEqual(fourni, lu,
+        `${debut}→${fin} (estimerLePasse=${estimer}) : les deux chemins divergent`)
+    }
+  }
+})
+
+test('LE TEST QUI COMPTE : les lignes fournies sont filtrees sur le BIEN', async () => {
+  // ⚠ RELEVE EN REVIEW. Le chemin base fait `.eq('property_id', bien.id)` ;
+  // le chemin `lignes` ne classait que sur la date. Des lignes d'un AUTRE bien
+  // melees a l'appel gonflaient le denominateur du taux d'occupation, en
+  // silence — et le test cense comparer les deux chemins ne pouvait pas le
+  // voir, parce que le faux client ne filtrait pas non plus.
+  const lignes = [
+    { property_id: 'b-1', date: '2026-10-01', stop_sell: false, avail: 1, rate: 120 },
+    { property_id: 'b-2', date: '2026-10-02', stop_sell: false, avail: 1, rate: 120 },
+    { property_id: 'b-2', date: '2026-10-03', stop_sell: false, avail: 1, rate: 120 }
+  ]
+  const lu = await joursOuverts(fausseBase(lignes), BIEN, '2026-10-01', '2026-10-31',
+    opts({ estimerLePasse: false }))
+  const fourni = await joursOuverts(null, BIEN, '2026-10-01', '2026-10-31',
+    opts({ estimerLePasse: false, lignes }))
+  assert.equal(lu.jours_ouverts, 1, 'le chemin base ne voit qu\'une nuit de b-1')
+  assert.deepEqual(fourni, lu, 'les lignes d\'un autre bien ne doivent pas entrer')
+})
+
+test('les lignes fournies sont REFILTREES sur la fenetre', async () => {
+  // ⚠ SANS CE FILTRE, un mois compterait les jours ouverts de toute l'annee :
+  // l'appelant fournit une plage large, volontairement.
+  const lignes = [
+    { date: '2026-10-01', stop_sell: false, avail: 1, rate: 120 },
+    { date: '2026-10-02', stop_sell: false, avail: 1, rate: 120 },
+    { date: '2026-11-01', stop_sell: false, avail: 1, rate: 120 },
+    { date: '2026-11-02', stop_sell: false, avail: 1, rate: 120 }
+  ]
+  const oct = await joursOuverts(null, BIEN, '2026-10-01', '2026-10-31',
+    opts({ lignes, estimerLePasse: false }))
+  assert.equal(oct.jours_ouverts, 2, 'octobre ne compte que ses deux nuits')
+  assert.equal(oct.jours_total, 31)
+})
+
+test('lignes fournies VIDES : le meme refus que lignes lues vides', async () => {
+  // ⚠ « JE NE SAIS PAS » NE DOIT PAS DEPENDRE DU CHEMIN. Une plage sans aucune
+  // ligne sur la fenetre doit rendre le meme motif des deux cotes, sinon le
+  // radar afficherait « calculable » la ou la page mensuelle dit l'inverse.
+  const lu = await joursOuverts(fausseBase([]), BIEN, '2026-10-01', '2026-10-31', opts())
+  const fourni = await joursOuverts(null, BIEN, '2026-10-01', '2026-10-31',
+    opts({ lignes: [{ date: '2025-01-01', stop_sell: false, avail: 1, rate: 100 }] }))
+  assert.deepEqual(fourni, lu)
+  assert.equal(fourni.calculable, false)
 })
