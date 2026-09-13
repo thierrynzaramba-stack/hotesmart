@@ -278,6 +278,15 @@ function renderApps(activePage) {
         <a class="nav-sub ${activePage === 'agent-ai-config' ? 'connected' : ''}" href="/apps/agent-ai/config">
           <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Configuration
         </a>`
+    } else if (app.id === 'yield') {
+      // ⚠ DEUX ECRANS, DEUX QUESTIONS. La synthese repond a « ou j'en suis »,
+      // les prix jour par jour a « que dois-je changer aujourd'hui ». Les
+      // fondre en un seul ecran forcerait a faire defiler douze mois de
+      // contexte pour atteindre la seule ligne sur laquelle on agit.
+      subMenu = `
+        <a class="nav-sub ${activePage === 'yield-prix' ? 'connected' : ''}" href="/apps/yield/prix">
+          <div class="sub-dot ${activePage === 'yield-prix' ? 'green' : 'gray'}"></div>Prix jour par jour
+        </a>`
     } else if (app.id === 'menages') {
       // ⚠ NOMMAGE TRANCHE LE 5 SEPTEMBRE 2026. « Planning » designait l'ecran
       // d'AFFECTATION, et le calendrier de garde s'appelait « Garde » — deux

@@ -21,7 +21,7 @@ const RACINE = path.join(__dirname, '..')
 // passer ses motifs pour des traductions orphelines — ce qui est le bon
 // signal : le test a refuse de passer quand `suggestion` (lot 4.4) est arrive.
 const MODULES = ['indicateurs', 'capacite', 'pickup', 'reference', 'eclatement',
-  'vacances', 'suggestion']
+  'vacances', 'suggestion', 'comparable']
 
 let traduction = null
 test.before(async () => {
@@ -47,6 +47,12 @@ function motifsDuMoteur () {
   for (const v of Object.values(pickup.MOTIFS_ECART)) noter(v, 'pickup.MOTIFS_ECART')
   const suggestion = require('../lib/yield/suggestion')
   for (const v of Object.values(suggestion.MOTIFS)) noter(v, 'suggestion')
+  // ⚠ L'ALIGNEMENT N-1 PARLE A L'HOTE : « pas de comparable » et sa raison
+  // s'affichent dans la colonne « l'an dernier ». Les deux listes sont
+  // DERIVEES du module, jamais recopiees.
+  const comparable = require('../lib/yield/comparable')
+  for (const v of Object.values(comparable.RAISONS)) noter(v, 'comparable.RAISONS')
+  for (const v of Object.values(comparable.ALIGNEMENTS)) noter(v, 'comparable.ALIGNEMENTS')
 
   // 2. Les chaines litterales poussees dans `non_calculable` ou rendues comme
   //    motif. ⚠ C'est la moitie qui ECHAPPE aux constantes — et c'est celle

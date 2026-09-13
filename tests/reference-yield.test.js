@@ -44,25 +44,50 @@ function nNuits (dates, prix) {
 
 test('LE TEST QUI COMPTE : les ponts sont ceux du calendrier reel de 2025', () => {
   // ⚠ AUCUNE SOURCE OFFICIELLE NE PUBLIE LES PONTS — ils se calculent.
-  // Verifie contre le calendrier 2025 a la main : jeudi 1er mai ferie donc
-  // vendredi 2 pont ; jeudi 8 mai ferie donc vendredi 9 ; Ascension jeudi
-  // 29 mai donc vendredi 30 ; mardi 11 novembre ferie donc lundi 10 ;
-  // jeudi 25 decembre ferie donc vendredi 26.
+  //
+  // ⚠ CE TEST A CHANGE LE 13 SEPTEMBRE 2026, ET LE DIRE IMPORTE.
+  // Sa version precedente verrouillait la regle « chaque jour est juge seul »,
+  // qui refusait tout pont autour d'un ferie tombant un MERCREDI. Arbitrage de
+  // Thierry : l'usage francais fait bel et bien un pont du lundi-mardi comme du
+  // jeudi-vendredi autour d'un mercredi ferie. Le 11 novembre 2026 est un
+  // mercredi, le 14 juillet 2027 aussi : la regle d'origine etait defendable
+  // sur le papier et fausse sur le terrain.
+  //
+  // Verifie contre le calendrier 2025 a la main :
+  //   mercredi 1er janvier ferie → jeudi 2 ET vendredi 3 sont ponts (2 jours)
+  //   jeudi 1er mai ferie        → vendredi 2
+  //   jeudi 8 mai ferie          → vendredi 9
+  //   Ascension jeudi 29 mai     → vendredi 30
+  //   mardi 11 novembre ferie    → lundi 10
+  //   jeudi 25 decembre ferie    → vendredi 26
   const p = R.pontsEntre('2025-01-01', '2025-12-31')
   assert.deepEqual([...p.keys()],
-    ['2025-05-02', '2025-05-09', '2025-05-30', '2025-11-10', '2025-12-26'])
+    ['2025-01-02', '2025-01-03', '2025-05-02', '2025-05-09', '2025-05-30',
+      '2025-11-10', '2025-12-26'])
 
   // Un ferie ne devient pas son propre pont.
   assert.ok(!p.has('2025-05-01'))
-  // Un mercredi ferie ne fait pas de lundi-mardi des ponts : personne ne pose
-  // quatre jours par automatisme, et les compter gonflerait un segment maigre
-  // avec des jours ordinaires. Le 15 aout 2025 est un vendredi — donc pont
-  // d'aucun cote, mais le 14 (jeudi) n'en est pas un pour autant.
+  // ⚠ TROIS JOURS NE FONT PAS UN PONT. Le 15 aout 2025 est un VENDREDI : les
+  // quatre jours qui le precedent ne sont pas enclaves, et les compter
+  // gonflerait un segment maigre avec des nuits de semaine ordinaires.
   assert.ok(!p.has('2025-08-14'))
+  assert.ok(!p.has('2025-08-11'))
 
   // 2026 : Ascension jeudi 14 mai → vendredi 15 ; 14 juillet mardi → lundi 13.
   const p26 = R.pontsEntre('2026-01-01', '2026-12-31')
   assert.ok(p26.has('2026-05-15') && p26.has('2026-07-13'))
+  // ⚠ LE CAS QUI A MOTIVE LE CHANGEMENT : 11 novembre 2026, un mercredi.
+  // Les quatre jours qui l'encadrent sont des ponts, deux de chaque cote.
+  for (const j of ['2026-11-09', '2026-11-10', '2026-11-12', '2026-11-13']) {
+    assert.ok(p26.has(j), `${j} devrait etre un pont du 11 novembre`)
+  }
+  // 2027 : 14 juillet un mercredi, meme configuration.
+  const p27 = R.pontsEntre('2027-01-01', '2027-12-31')
+  for (const j of ['2027-07-12', '2027-07-13', '2027-07-15', '2027-07-16']) {
+    assert.ok(p27.has(j), `${j} devrait etre un pont du 14 juillet`)
+  }
+  // Un ferie deja colle au week-end ne cree rien : 1er mai 2027 est un samedi.
+  assert.ok(!p27.has('2027-04-30'))
 })
 
 test('LE TEST QUI COMPTE : un jour tombe dans UN segment, par priorite', () => {
@@ -125,14 +150,14 @@ test('LE TEST QUI COMPTE : le niveau de repli vit DANS la donnee', () => {
   // L'ete a 9 samedis : il tient au niveau le plus fin.
   const ete = R.referencePour(ref, '2025-07-19', CTX)
   assert.equal(ete.valeur, 160)
-  assert.equal(ete.niveau, NIVEAUX[0])
+  assert.equal(ete.niveau, 'segment_detaille_x_jour')
   assert.equal(ete.replie, null)
 
   // L'hiver n'en a que 3 : il replie sur « vacances de la zone x samedi »,
   // qui melange hiver et ete — donc une valeur entre les deux.
   const hiver = R.referencePour(ref, '2025-02-22', CTX)
-  assert.equal(hiver.niveau, NIVEAUX[1])
-  assert.equal(hiver.replie, NIVEAUX[1], 'le repli est NOMME')
+  assert.equal(hiver.niveau, 'segment_x_jour')
+  assert.equal(hiver.replie, 'segment_x_jour', 'le repli est NOMME')
   assert.equal(hiver.echantillon, 12, '3 samedis d hiver + 9 d ete')
   // ⚠ ET SA VALEUR — releve en review : c'est elle qui sera AFFICHEE.
   // Mediane de [200,200,200, 160x9] : la 6e et la 7e valeur triees valent 160.
@@ -146,18 +171,74 @@ test('LE TEST QUI COMPTE : le plancher est le jour de semaine, pas « tout le bi
   // saisons et tous jours confondus. Un chiffre sans aucun rapport avec un
   // vendredi de pont. Or le jour de semaine est le signal le plus stable du
   // parc : 145,80 € le samedi hors vacances contre 109,71 € le mardi.
-  const vendredis = ['2025-01-03', '2025-01-10', '2025-01-17', '2025-01-24',
-    '2025-01-31', '2025-03-07', '2025-03-14', '2025-03-21', '2025-03-28']
+  // ⚠ NI 3 JANVIER (pont du 1er, un mercredi), NI 7 MARS (vacances zone B).
+  // Chaque date est verifiee contre CTX, pas choisie de tete.
+  const vendredis = ['2025-02-07', '2025-01-10', '2025-01-17', '2025-01-24',
+    '2025-01-31', '2025-04-04', '2025-03-14', '2025-03-21', '2025-03-28']
   const mardis = ['2025-01-07', '2025-01-14', '2025-01-21', '2025-01-28',
     '2025-03-11', '2025-03-18', '2025-03-25', '2025-04-01', '2025-04-15']
+  // ⚠ ET AUCUN FERIE DANS L'ECHANTILLON : sans cela le pont EMPRUNTERAIT la
+  // mediane des feries (etage « segment_parent ») et ce test, qui porte sur le
+  // PLANCHER, mesurerait l'emprunt. Les deux regles sont testees separement.
   const ref = R.construireReference(
     [...nNuits(vendredis, 150), ...nNuits(mardis, 100), ...nNuits(['2025-05-02'], 999)],
     { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
 
   const pont = R.referencePour(ref, '2025-05-09', CTX)   // un autre pont, un vendredi
-  assert.equal(pont.niveau, NIVEAUX[3])
+  assert.equal(pont.niveau, 'jour_de_semaine')
   assert.equal(pont.valeur, 150, 'la mediane des VENDREDIS, pas celle de tout')
   assert.notEqual(pont.valeur, 125, 'surtout pas la mediane vendredis+mardis')
+})
+
+test('LE TEST QUI COMPTE : un pont EMPRUNTE la reference des feries', () => {
+  // ⚠ LA REGLE DE VALEUR, arbitree par Thierry le 13 septembre 2026.
+  // Le segment « pont » est structurellement maigre — six a sept nuits par an
+  // sur un logement, le seuil en demande huit. Il repliait donc sur « les
+  // vendredis », c'est-a-dire sur la mediane des vendredis ORDINAIRES.
+  //
+  // Or un jour enclave entre un ferie et un week-end se COMPORTE comme un
+  // ferie : c'est une nuit de pointe. Servir le tarif d'un vendredi ordinaire
+  // y fait perdre de l'argent a chaque occurrence, sans que rien ne paraisse
+  // casse. Le moteur ne doit JAMAIS se taire sur un pont.
+  const feries = ['2025-05-01', '2025-05-08', '2025-05-29', '2025-11-11',
+    '2025-12-25', '2025-07-14', '2025-04-21', '2025-06-09', '2025-01-01']
+  const vendredis = ['2025-02-07', '2025-01-10', '2025-01-17', '2025-01-24',
+    '2025-01-31', '2025-04-04', '2025-03-14', '2025-03-21', '2025-03-28']
+  const ref = R.construireReference(
+    [...nNuits(feries, 200), ...nNuits(vendredis, 150)],
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+
+  // 9 mai 2025 : un vendredi, et un pont du 8 mai.
+  const pont = R.referencePour(ref, '2025-05-09', CTX)
+  assert.equal(pont.segment, 'pont')
+  assert.equal(pont.niveau, 'segment_parent')
+  assert.equal(pont.valeur, 200, 'la mediane des FERIES, pas celle des vendredis')
+  // ⚠ L'EMPRUNT SE DIT, ET IL SE NOMME. « replie » dit qu'on a perdu en
+  // finesse ; `reference_empruntee` dit A QUI on a emprunte — ce n'est pas la
+  // meme information, et l'ecran doit pouvoir montrer la seconde.
+  assert.equal(pont.reference_empruntee, 'ferie')
+  assert.equal(pont.replie, 'segment_parent')
+
+  // ⚠ ET L'EMPRUNT NE VAUT QUE POUR LE PONT. Un jour hors vacances ne va pas
+  // se servir chez les feries parce que son echantillon est maigre.
+  const ordinaire = R.referencePour(ref, '2025-02-14', CTX)
+  assert.equal(ordinaire.reference_empruntee, null)
+})
+
+test('un pont AVEC assez d\'historique propre n\'emprunte rien', () => {
+  // La regle ne doit pas ecraser une mesure vraie : l'emprunt est un REPLI,
+  // pas une substitution. Neuf nuits de pont a 300 € doivent l'emporter sur la
+  // mediane des feries.
+  const ponts = ['2025-01-02', '2025-01-03', '2025-05-02', '2025-05-09',
+    '2025-05-30', '2025-11-10', '2025-12-26', '2024-05-10', '2024-11-01']
+  const feries = ['2025-05-01', '2025-05-08', '2025-05-29', '2025-11-11',
+    '2025-12-25', '2025-07-14', '2025-04-21', '2025-06-09', '2025-01-01']
+  const ref = R.construireReference(
+    [...nNuits(ponts, 300), ...nNuits(feries, 200)],
+    { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  const pont = R.referencePour(ref, '2026-05-15', CTX)   // pont de l'Ascension
+  assert.equal(pont.valeur, 300, 'sa propre mediane, pas celle du parent')
+  assert.equal(pont.reference_empruntee, null)
 })
 
 test('les nuits HORS REFERENCE ne fabriquent pas la norme', () => {
@@ -334,7 +415,17 @@ test('la projection compte les jours servis par REPLI', () => {
   // ⚠ TOUS HORS VACANCES DES TROIS ZONES. Le 7 mars tombe dans l'hiver de la
   // ZONE B (22/02 → 09/03) : il partirait en « vacances autre zone » et
   // l'echantillon des vendredis hors vacances tomberait a 7, sous le seuil.
-  const vendredis = ['2025-01-03', '2025-01-10', '2025-01-17', '2025-01-24',
+  // ⚠ PAS DE 3 JANVIER ICI. Depuis que le pont peut durer deux jours, le
+  // 3 janvier 2025 est un PONT du 1er janvier (un mercredi) : le garder faisait
+  // tomber l'echantillon des vendredis hors vacances a 7, sous le seuil de 8,
+  // et les deux jours projetes repliaient — le test mesurait alors autre chose
+  // que ce qu'il annonce.
+  // ⚠ ET PAS DE 7 MARS NON PLUS, pour la raison que le commentaire ci-dessus
+  // annonce : il tombe dans les vacances d'hiver de la zone B. Chaque date de
+  // cette liste a ete VERIFIEE contre ce contexte, pas choisie de tete — c'est
+  // le piege des fixtures qui traversent des vacances sans le savoir, deja paye
+  // trois fois sur ce chantier.
+  const vendredis = ['2025-02-07', '2025-01-10', '2025-01-17', '2025-01-24',
     '2025-01-31', '2025-03-14', '2025-03-21', '2025-03-28']
   const ref = R.construireReference(nNuits(vendredis, 150),
     { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
@@ -345,8 +436,8 @@ test('la projection compte les jours servis par REPLI', () => {
   assert.equal(p.jours_sans_reference, 0)
   assert.equal(p.jours_replies, 1, 'le repli est COMPTE, pas dilue dans la moyenne')
   assert.equal(p.prix_attendu_moyen, 150)
-  assert.equal(p.detail[1].niveau, NIVEAUX[3])
-  assert.equal(p.detail[1].replie, NIVEAUX[3])
+  assert.equal(p.detail[1].niveau, 'jour_de_semaine')
+  assert.equal(p.detail[1].replie, 'jour_de_semaine')
 })
 
 test('LE TEST QUI COMPTE : un contexte qui ne couvre pas le jour se DIT', () => {

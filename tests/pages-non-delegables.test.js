@@ -78,7 +78,10 @@ const DELEGABLES = [
   // detourner. Ne pas « corriger » en ajoutant `compteDelegue` — ce serait un
   // parametre inutile sur un endpoint dont la ressource tranche deja.
   // Ecrire un prix relevera de `reglages` (lot 4.6) et sera garde a part.
-  'apps/yield/index.html'
+  'apps/yield/index.html',
+  // Même garde que l'écran de synthèse : `/api/yield-prix` garde `reservations`
+  // en lecture, et la délégation passe par le BIEN.
+  'apps/yield/prix.html'
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────

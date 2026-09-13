@@ -192,6 +192,65 @@ Projections calculées depuis le snapshot (vues ou tables dérivées recalculabl
 - **« À date »** : mêmes indicateurs restreints aux réservations dont la date
   de vente ≤ date pivot ; comparaison au même délai N-1 (pickup).
 - Alignement : jour de semaine + segment vacances/hors-vacances (jamais date à date).
+  Détail de la cascade N-1 en quatre étages : §7.3 et `lib/yield/comparable.js`.
+
+### 6 bis. Les ponts : définition, et règle de valeur
+
+*Arbitré par Thierry le 13 septembre 2026. Implémenté dans
+`lib/yield/reference.js` (`pontsEntre`, `SEGMENT_PARENT`) et
+`lib/yield/suggestion.js`.*
+
+**Définition.** Un pont est **une suite de jours ouvrés et non fériés,
+entièrement enclavée entre un jour férié et un week-end** (dans un sens ou dans
+l'autre), longue d'**un ou deux jours**.
+
+| le férié tombe | les ponts |
+|---|---|
+| jeudi | le vendredi |
+| mardi | le lundi |
+| **mercredi** | **lundi + mardi, et jeudi + vendredi** |
+| vendredi ou lundi | aucun — le jour est déjà collé au week-end |
+
+**Trois jours ne font pas un pont, ils font une semaine de congés.** Sans ce
+plafond, un férié le lundi et un autre le vendredi feraient de mardi, mercredi
+et jeudi des « ponts » — trois nuits de semaine ordinaires payées au tarif d'un
+jour de pointe.
+
+Cette définition **remplace** la précédente (« chaque jour est jugé seul »), qui
+refusait tout pont autour d'un férié tombant un mercredi. Motif : le
+11 novembre 2026 et le 14 juillet 2027 sont des mercredis, et l'usage français
+y fait bel et bien le pont. La règle d'origine était défendable sur le papier et
+fausse sur le terrain. Éprouvée sur les fériés réels 2026-2027.
+
+**Règle de valeur — le moteur ne se tait JAMAIS sur un pont.** Le segment
+« pont » est structurellement maigre : six à sept nuits par an sur un logement,
+quand le seuil en demande huit. Il repliait donc sur « jour de semaine »,
+c'est-à-dire sur la médiane des vendredis **ordinaires**.
+
+> Quand le segment `pont` n'atteint pas le seuil, il **emprunte la référence du
+> segment `ferie`**, son parent naturel : un jour enclavé se comporte comme un
+> férié. L'emprunt porte le drapeau **`reference_empruntee`**, visible à
+> l'écran.
+
+C'est le pire endroit où se taire : le pont est précisément la nuit qui prend de
+la valeur, et un silence y coûte de l'argent à chaque occurrence sans que rien
+ne paraisse cassé.
+
+**Trois garde-fous :**
+
+- L'emprunt ne remplace **jamais** une mesure propre : il ne s'applique qu'au
+  segment déclaré non fiable.
+- Si le **parent est maigre lui aussi**, le moteur dit « segment sous le seuil »
+  plutôt que d'inventer. L'emprunt n'est pas une promesse inconditionnelle.
+- Les chiffres servis (échantillon, nombre de réservations) sont ceux **du
+  parent**, et l'échantillon propre du pont est conservé à part
+  (`echantillon_propre`) : annoncer neuf fériés comme neuf ponts serait faux.
+
+**Dans la cascade N-1**, un pont s'apparie au pont **du même jour férié**
+(étage b), jamais à un vendredi ordinaire.
+
+**À l'écran**, un badge « pont » marque la ligne ; la couleur reste celle du
+niveau suggéré, comme toutes les autres nuits.
 - Référence = historique (2-3 ans lissés) hors exceptions ; les annulées sont
   conservées mais exclues du CA réalisé (statut canonique).
 - **Filtrer en LISTE BLANCHE, jamais en liste noire.** Le CA et les nuitees ne
@@ -252,6 +311,62 @@ Le **sélecteur de fenêtre libre** reste disponible pour l'exploration.
 - Suggestions de prix par date (grille 5 niveaux, pipeline en couches, correction
   jour-de-semaine en dernier) présentées à l'hôte ; « Appliquer » écrit dans le
   calendrier existant (chemin normal, donc journal des prix alimenté, `source=engine`).
+  - ### UNE GRILLE PAR BIEN, DES NIVEAUX PAR CONTEXTE
+
+    *Arbitré par Thierry le 13 septembre 2026. Remplace le design « une grille
+    de cinq niveaux par segment ».*
+
+    **Le bien a UNE grille, et une seule** : cinq niveaux, **prix ronds**
+    (multiples de 5 €), construits sur **toutes** ses nuits vendues — 821 sur
+    La bulle, là où le segment le plus maigre en comptait sept. Une grille
+    unique n'est pas un appauvrissement : c'est le seul moyen d'avoir cinq
+    niveaux qui tiennent.
+
+    **Un contexte ne crée plus sa grille, il s'y POSITIONNE.** Vacances, férié,
+    pont, événement de l'hôte : chacun se place au niveau dont le prix est le
+    plus proche de sa médiane interne. Cela se lit dans les mots de l'hôte :
+
+    > « Vacances de la zone : **Haut**, sauf les samedis et vendredis
+    > **Très haut**. »
+
+    **Le jour de semaine n'est plus un multiplicateur, c'est un
+    positionnement plus fin.** À l'intérieur d'un contexte, les jours peuvent
+    différer de niveau — mais toujours des niveaux de LA grille.
+
+    **Le moteur garde sa précision interne.** Les médianes par segment et par
+    couple (segment, jour) sont toujours mesurées : elles servent désormais à
+    **choisir le niveau**, plus à fabriquer un prix.
+
+    **Le prix suggéré EST le prix du niveau.** Plus de centimes de
+    multiplicateur, plus de « 140,82 € ». Conséquence structurelle : le niveau
+    annoncé **ne peut plus mentir** sur l'euro servi — le défaut le plus
+    insidieux du lot 4.4 disparaît avec la mécanique qui le produisait.
+
+    **L'écart minimal de 5 % est tenu par ÉTIREMENT**, plus par fusion. Avec une
+    grille par segment, étirer aurait inventé un prix hors de ce que le segment
+    avait obtenu. Sur la grille du bien, l'étendue est bien plus large (35 à
+    295 € sur La bulle) et pousser un niveau de 120 à 125 € reste très à
+    l'intérieur du vendu. **Aucun niveau ne sort jamais de l'étendue réellement
+    vendue** : au-delà du prix maximum obtenu, le niveau reste confondu avec le
+    précédent et le dit. Chaque niveau étiré porte son drapeau.
+
+    L'emprunt au segment parent (§6 bis pour les ponts, §6 ter pour les
+    événements) devient un emprunt de **position**, pas de grille.
+
+  - **Nomenclature des niveaux, arbitrée par Thierry, valable partout** (écran,
+    badges, spec, KB, tests — aucun double vocabulaire) :
+    **Base / Moyen / Haut / Très haut / Exceptionnel**, sur les quantiles
+    P25 / P50 / P65 / P80 / P92. **Moyen est la médiane et le socle du moteur.**
+    Grille **asymétrique assumée** : un niveau sous la médiane, trois au-dessus —
+    on descend rarement, on monte souvent.
+  - **Espacement minimal ~5 % entre niveaux consécutifs.** « Moyen 117 / Haut 119
+    n'est pas deux niveaux. » Le moteur ne remonte JAMAIS un prix pour créer
+    l'écart — ce serait inventer un tarif jamais obtenu ; il marque les niveaux
+    confondus, et l'écran les fusionne en annonçant le nombre de décisions
+    réellement différentes. Détail : `docs/kb/suggestion-yield.md` §1.
+  - **L'écran de tarification jour par jour s'itère par petites corrections
+    validées une à une**, jamais par refonte globale — voir
+    `docs/kb/restitution-yield.md`, « on itère un écran comme on itère du code ».
 - Croisement journal des prix × délai : mettre en évidence les dates « tenues
   longtemps puis bradées » et les dates « vendues très tôt » (donc sous-tarifées).
 

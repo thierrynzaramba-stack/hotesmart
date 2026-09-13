@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Prix jour par jour</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    [hidden] { display: none !important; }
+    .yp-barre { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .yp-nav { display: flex; align-items: center; gap: 4px; }
+    .yp-nav button { background: var(--bg); border: 0.5px solid var(--border);
+                     border-radius: var(--radius); width: 30px; height: 30px; cursor: pointer;
+                     font-size: 14px; color: var(--text2); font-family: inherit; }
+    .yp-nav button:hover { background: var(--bg2); color: var(--text); }
+    #yp-mois { font-size: 15px; font-weight: 600; min-width: 132px; text-align: center;
+               text-transform: capitalize; }
+
+    /* ─── ÉTAGE 1 : l'action ─────────────────────────────────────────────── */
+    .yp-tete { background: var(--bg); border: 0.5px solid var(--border);
+               border-radius: var(--radius-lg); padding: 13px 16px; margin-bottom: 12px; }
+    .yp-chiffres { display: flex; gap: 24px; flex-wrap: wrap; }
+    .yp-chiffre .v { font-size: 19px; font-weight: 600; line-height: 1.1;
+                     font-variant-numeric: tabular-nums; }
+    .yp-chiffre .l { font-size: 10.5px; color: var(--text3); margin-top: 2px; }
+    .hausse { color: #0F7B3E; } .baisse { color: #B02A37; }
+    .yp-note { font-size: 11px; color: var(--text2); line-height: 1.6; margin: 10px 0 0; }
+    .yp-mois-dit { font-size: 12px; line-height: 1.6; margin: 11px 0 0;
+                   padding-top: 10px; border-top: 0.5px solid var(--border); }
+
+    /* ─── ÉTAGE 1 : le tableau du mois ───────────────────────────────────── */
+    .yp-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch;
+               background: var(--bg); border: 0.5px solid var(--border);
+               border-radius: var(--radius-lg); margin-bottom: 14px; }
+    .yp-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 560px; }
+    .yp-table th { text-align: left; font-weight: 500; color: var(--text3); font-size: 9.5px;
+                   text-transform: uppercase; letter-spacing: .04em; padding: 6px 10px;
+                   border-bottom: 0.5px solid var(--border); white-space: nowrap; }
+    .yp-table td { padding: 4px 10px; border-bottom: 0.5px solid var(--border);
+                   vertical-align: middle; white-space: nowrap; }
+    .yp-table tr:last-child td { border-bottom: none; }
+    .yp-table tr.off td { opacity: .72; }
+
+    /* ⚠ CINQ TEINTES GRADUEES, DU PLUS FRAIS AU PLUS CHAUD — demande de
+       Thierry : « le mois se lit comme une carte thermique ». Le fond de ligne
+       EST le niveau suggéré, donc l'intensité d'une nuit se voit avant d'être
+       lue. La rampe va du bleu au terracotta : elle est ordonnée, ce qu'un jeu
+       de couleurs non gradué ne serait pas.
+       ⚠ LA COULEUR NE PORTE JAMAIS SEULE : le badge texte du niveau reste sur
+       chaque ligne, et un liseré gauche double la teinte. Un hôte daltonien
+       lit le badge et l'ordre des lignes, pas la nuance. */
+    .n-base        { background: #E7F0F7; box-shadow: inset 3px 0 0 #4A7FA8; }
+    .n-moyen       { background: #EDF4EE; box-shadow: inset 3px 0 0 #5F8F6E; }
+    .n-haut        { background: #FBF4E2; box-shadow: inset 3px 0 0 #C89A2E; }
+    .n-tres-haut   { background: #FAEADA; box-shadow: inset 3px 0 0 #D2762E; }
+    .n-exceptionnel{ background: #F8E2DA; box-shadow: inset 3px 0 0 #BF4F32; }
+    /* ⚠ LES ÉTATS S'EXPRIMENT EN COULEUR, PAS EN TEXTE — règle de Thierry,
+       13 septembre 2026. « Vendue », « Fermée », « Non renseignée » répétés
+       trente fois occupaient une colonne entière pour dire ce qu'une teinte
+       dit sans être lue. La légende l'explique une fois, en tête. */
+    .yp-table tr.e-vendue  { background: #E8F2EC; box-shadow: inset 3px 0 0 #2E7D52; }
+    .yp-table tr.e-fermee  { background: #FBF1DA; box-shadow: inset 3px 0 0 #B8860B; }
+    .yp-table tr.e-inconnue{ background: var(--bg); box-shadow: inset 3px 0 0 #C9C9C9; }
+    .yp-table tr.e-inconnue td:first-child { border-left: 2px dashed #D8D8D8; }
+    /* ⚠ LE PASSÉ RESTE SOUS LES YEUX, ÉTEINT. C'est la base de réflexion de
+       l'hôte : le masquer lui retirerait le seul mois dont il connaît déjà la
+       réponse. Une nuit passée VENDUE garde sa couleur pleine et son prix ;
+       restée vide, elle s'éteint — sans un mot. */
+    .yp-table tr.passe td { color: var(--text3); }
+    .yp-table tr.passe.e-vide { background: #FAFAFA; box-shadow: inset 3px 0 0 #E4E4E4; }
+    .yp-table tr.passe.e-vendue { background: #EFF5F1; box-shadow: inset 3px 0 0 #9DC4AE; }
+    .yp-table tr.passe.e-vendue td { color: var(--text2); }
+    .yp-table tr.we.e-vide:not(.passe) { background: var(--bg2); }
+
+    /* ⚠ UNE SÉPARATION VISIBLE ENTRE LES DEUX MOITIÉS — demande de Thierry.
+       À gauche ce qui se décide, à droite ce sur quoi on s'appuie. Sans trait,
+       l'œil lisait une seule table de six colonnes et mélangeait les deux. */
+    .yp-table .sep-g { border-left: 1.5px solid var(--border2); }
+    .yp-table tr.yp-moities th { padding: 5px 10px 3px; font-size: 9px;
+                                 letter-spacing: .06em; border-bottom: none; }
+    .yp-table tr.yp-moities .m-pilotage { color: var(--text2);
+                                          border-left: 1.5px solid var(--border2); }
+    .yp-table tr.yp-moities .m-passe { color: var(--text3);
+                                       border-left: 1.5px solid var(--border2); }
+    .yp-table td.yp-realise { color: var(--text2); }
+
+    /* ─── Les deux colonnes de planning ──────────────────────────────────── */
+    /* ⚠ 18 px, PAS 14 : la barre ne faisait que 8 px de large et disparaissait
+       à l'impression. Un rail visible même vide dit que la colonne existe. */
+    .yp-table td.yp-bar { padding: 0; position: relative; width: 18px;
+                          min-width: 18px; border-bottom: none; }
+    .yp-table td.yp-bar::before { content: ''; position: absolute; left: 7px;
+                                  right: 7px; top: 0; bottom: 0;
+                                  background: rgba(0,0,0,.045); }
+    .yp-seg { position: absolute; left: 3px; right: 3px; top: 0; bottom: 0;
+              background: #4A7FA8; cursor: help; }
+    .yp-seg.grise { background: #D2DAE2; }
+    .yp-seg.debut { top: 2px; border-radius: 4px 4px 0 0; }
+    .yp-seg.fin { bottom: 2px; border-radius: 0 0 4px 4px; }
+    .yp-seg.debut.fin { border-radius: 4px; }
+    .yp-seg.n1 { background: #7C8B9A; }
+    .yp-seg.n1.grise { background: #D5DBE1; }
+    .yp-seg.chevauche { outline: 1.5px solid #B02A37; outline-offset: -1.5px; }
+
+    /* ─── La grille du bien, une fois, en tête ───────────────────────────── */
+    .yp-grille { background: var(--bg); border: 0.5px solid var(--border);
+                 border-radius: var(--radius-lg); padding: 10px 14px; margin-bottom: 10px; }
+    .yp-grille-tete { font-size: 11.5px; font-weight: 600; margin-bottom: 8px;
+                      display: flex; align-items: center; gap: 8px; }
+    .yp-grille-n { font-size: 9.5px; font-weight: 400; color: var(--text3); cursor: help; }
+    .yp-grille-note { font-size: 10px; color: var(--text3); margin-top: 6px; }
+    .yp-niv-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px;
+                    white-space: nowrap; border: 0.5px solid rgba(0,0,0,.08); }
+    .yp-niv-badge.n-base { background: #E7F0F7; } .yp-niv-badge.n-moyen { background: #EDF4EE; }
+    .yp-niv-badge.n-haut { background: #FBF4E2; } .yp-niv-badge.n-tres-haut { background: #FAEADA; }
+    .yp-niv-badge.n-exceptionnel { background: #F8E2DA; }
+    .yp-groupe-sauf { font-size: 10.5px; color: var(--text2); display: inline-flex;
+                      align-items: center; gap: 5px; flex-wrap: wrap; }
+    .yp-niv.n-base { background: #E7F0F7; } .yp-niv.n-moyen { background: #EDF4EE; }
+    .yp-niv.n-haut { background: #FBF4E2; } .yp-niv.n-tres-haut { background: #FAEADA; }
+    .yp-niv.n-exceptionnel { background: #F8E2DA; }
+    .yp-niv sup { font-size: 8px; }
+
+    /* ─── La légende, une fois, en tête ──────────────────────────────────── */
+    .yp-legende { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+                  font-size: 10.5px; color: var(--text2); margin-bottom: 10px;
+                  padding: 8px 12px; background: var(--bg); border-radius: var(--radius);
+                  border: 0.5px solid var(--border); }
+    .yp-lg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .yp-lg i { width: 12px; height: 12px; border-radius: 3px; display: inline-block;
+               flex: 0 0 auto; }
+    .yp-lg.barre i { width: 6px; height: 14px; border-radius: 3px; }
+    .yp-table tr.cliquable { cursor: pointer; }
+    .yp-table tr.cliquable:hover td { filter: brightness(0.975); }
+    .yp-table tr.ouverte-d td { box-shadow: inset 0 -1px 0 var(--border2); }
+    .yp-chev { color: var(--text3); font-size: 9px; margin-left: 6px; }
+    .yp-table tr.yp-detail-l td { padding: 0 12px 10px; border-bottom: none; white-space: normal; }
+    .yp-jour { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .yp-jour.we small { color: var(--text2); font-weight: 600; }
+    /* ⚠ LE PONT SE REPERE SUR SA LIGNE, pas seulement dans l'en-tête de son
+       groupe : c'est la nuit qui prend le plus de valeur de l'année, et elle
+       doit se voir en balayant le mois. La couleur reste celle du niveau. */
+    .yp-pont { font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+               background: #F3E8D0; color: #7A5B1E; border-radius: 3px;
+               padding: 1px 4px; margin-left: 5px; cursor: help; font-weight: 600; }
+    .yp-fleche { color: var(--text3); margin: 0 5px; }
+    .yp-jour small { font-weight: 400; color: var(--text3); margin-left: 5px; font-size: 10px; }
+    .yp-affiche { font-variant-numeric: tabular-nums; color: var(--text3); }
+    /* ⚠ LE RETARD SE LIT SUR LA COLONNE N-1 — demande de Thierry.
+       PLEIN : cette nuit comparable était DÉJÀ vendue au même délai l'an
+       dernier. Si la mienne ne l'est pas, je suis en retard, et le badge de
+       rythme dit la même chose au même endroit.
+       GRISÉ : elle s'était vendue plus tard. Aucune alarme à tirer. */
+    .yp-n1 { font-variant-numeric: tabular-nums; color: var(--text3); cursor: help; }
+    .yp-n1.plein { color: var(--text); font-weight: 600; }
+    /* ⚠ LE LISERÉ D'ALERTE S'ALLUME ICI, pas dans une colonne de texte : au
+       même endroit du regard que le chiffre qui le justifie. */
+    .yp-n1.alerte { box-shadow: inset 0 -2px 0 #B02A37; padding-bottom: 1px; }
+    .yp-niveau { font-size: 10px; text-transform: uppercase; letter-spacing: .03em;
+                 color: var(--text3); margin-right: 7px; }
+    .yp-niveau.hausse { color: #0F7B3E; } .yp-niveau.baisse { color: #B02A37; }
+    .yp-prix { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .yp-plus { color: #3A4A8A; font-weight: 700; margin-left: 5px; cursor: help; }
+    .yp-rien { font-size: 11px; color: #8A6D3B; cursor: help; }
+    .yp-vide { color: var(--text3); font-size: 11px; cursor: help; }
+    .yp-retard { font-size: 10px; color: #B02A37; font-weight: 600; cursor: help;
+                 margin-right: 6px; }
+    .yp-apparie { margin-top: 7px; padding-top: 7px; font-size: 11px;
+                  color: var(--text2); border-top: 0.5px solid var(--border); }
+    .yp-apparie sup { font-size: 8px; }
+    .yp-detail { background: var(--bg2); border-radius: var(--radius); padding: 10px 12px;
+                 font-size: 11.5px; line-height: 1.7; }
+    .yp-raisons { margin: 0; padding-left: 16px; }
+    .yp-raisons li { margin-bottom: 3px; }
+    .yp-audit { margin-top: 8px; }
+    .yp-audit summary { cursor: pointer; color: var(--text3); font-size: 10.5px; }
+    .yp-audit ol { margin: 6px 0 0; padding-left: 18px; color: var(--text2); }
+
+    /* ─── ÉTAGE 1 : LA GRILLE, EN TÊTE DE CHAQUE GROUPE DE DATES ─────────── */
+    .yp-table tr.yp-sep td { background: var(--bg3); padding: 8px 12px;
+                             white-space: normal; border-bottom: 0.5px solid var(--border); }
+    .yp-groupe { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .yp-groupe-nom { font-size: 11.5px; font-weight: 600; color: var(--text2);
+                     display: flex; align-items: center; gap: 7px; flex: 0 1 auto; }
+    .yp-indic { font-size: 9.5px; font-weight: 400; color: #8A6D3B; background: #FFF8E6;
+                border: 0.5px solid #F0DFB0; border-radius: 4px; padding: 1px 6px; cursor: help; }
+    .yp-carte-avert { font-size: 11.5px; color: #8A6D3B; }
+    .yp-niveaux { display: flex; gap: 1px; background: var(--border);
+                  border-radius: var(--radius); overflow: hidden;
+                  flex: 1 1 320px; max-width: 560px; }
+    .yp-niv { background: var(--bg); padding: 5px 6px; text-align: center; flex: 1 1 0;
+              min-width: 0; }
+    /* Le socle garde sa marque, mais discrètement : la teinte du niveau prime,
+       sinon la légende ne serait plus la légende des lignes. */
+    .yp-niv.socle .p { text-decoration: underline; text-underline-offset: 3px;
+                       text-decoration-thickness: 1.5px; }
+    .yp-niv .n { font-size: 9px; color: var(--text3); text-transform: uppercase;
+                 letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
+    .yp-niv .p { font-size: 13px; font-weight: 600; margin-top: 1px;
+                 font-variant-numeric: tabular-nums; }
+
+    /* ─── ÉTAGE 1 : les totaux ───────────────────────────────────────────── */
+    .yp-pied { background: var(--bg); border: 0.5px solid var(--border);
+               border-radius: var(--radius-lg); padding: 13px 16px; }
+    .yp-pied h3 { font-size: 13px; font-weight: 600; margin: 0 0 9px; }
+    .yp-totaux { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .yp-totaux th { text-align: left; font-weight: 500; color: var(--text3); font-size: 10px;
+                    text-transform: uppercase; letter-spacing: .03em; padding: 5px 0; }
+    .yp-totaux thead th:not(:first-child) { text-align: right; }
+    .yp-totaux tbody th { font-size: 12px; text-transform: none; letter-spacing: 0;
+                          color: var(--text2); font-weight: 400; }
+    .yp-totaux td { text-align: right; padding: 6px 0; font-variant-numeric: tabular-nums;
+                    border-top: 0.5px solid var(--border); }
+    .yp-totaux tbody th { border-top: 0.5px solid var(--border); }
+    .yp-totaux small { display: block; color: var(--text3); font-size: 10px; }
+
+    .yp-etat-page { padding: 20px; border: 0.5px solid var(--border);
+                    border-radius: var(--radius-lg); background: var(--bg);
+                    color: var(--text2); font-size: 13px; }
+    .yp-etat-page.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
+
+    @media (max-width: 640px) {
+      .yp-chiffres { gap: 16px; }
+      .yp-chiffre .v { font-size: 17px; }
+      .yp-barre { gap: 8px; }
+      #yp-bien { flex: 1 1 100%; }
+      .yp-niveaux { flex-basis: 100%; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-root"></div>
+<div class="main">
+  <div class="header">
+    <h1>Prix jour par jour</h1>
+    <p class="subtitle">Ce qu’il y a à changer aujourd’hui</p>
+  </div>
+
+  <div class="yp-barre">
+    <select id="yp-bien"></select>
+    <div class="yp-nav">
+      <button id="yp-prec" aria-label="Mois précédent">‹</button>
+      <span id="yp-mois"></span>
+      <button id="yp-suiv" aria-label="Mois suivant">›</button>
+    </div>
+  </div>
+
+  <div id="yp-contenu"></div>
+</div>
+
+<script type="module">
+  // ⚠ LA PAGE QUE L'HÔTE OUVRE LE MATIN — un MOIS à la fois, une LIGNE par nuit.
+  // Cette liste verticale est la base, et elle le reste : la refonte en matrice
+  // (jours en colonnes) a été abandonnée le 13 septembre 2026 — non parce que
+  // l'idée était mauvaise, mais parce qu'elle changeait tout d'un coup, donc
+  // sans qu'aucune correction ne puisse être jugée séparément. Les améliorations
+  // arrivent désormais une par une, validées sur aperçu. DOC : docs/kb/
+  // restitution-yield.md §« on itère un écran comme on itère du code ».
+  //
+  // ⚠ TROIS ÉTAGES STRICTS, et rien ne franchit son étage :
+  //   1. décision  — la grille du segment, la suggestion EN NIVEAU, le N-1 réel
+  //   2. confiance — un avertissement quand la grille est mince, rien d'autre
+  //   3. audit     — derrière « Pourquoi ? », la mécanique complète et intacte
+  //
+  // ⚠ CE QUI EST VRAI DU MOIS SE DIT UNE FOIS, DANS LE BANDEAU. Ce qui est vrai
+  // du SEGMENT se dit une fois, en tête de son groupe de dates. Seul ce qui est
+  // propre à LA NUIT vit sur sa ligne. Répéter « ce mois se vend moins bien »
+  // trente fois n'apprend rien la trentième fois, et noie ce qui, lui, change.
+  //
+  // ⚠ TOUT PARLE EN NIVEAUX DE LA GRILLE DE L'HÔTE. Aucun ratio, aucune
+  // médiane, aucun compte de nuits en vedette. Les multiplicateurs mesurés
+  // vivent dans l'audit — le calcul, lui, ne change pas.
+  //
+  // ⚠ LECTURE SEULE. « Appliquer » viendra au lot 4.6, par le calendrier.
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { motif, nomSegment, refus } from '/shared/yield-motifs.js'
+
+  initErrorHandler()
+
+  let session = null
+  let mois = null
+  let enCours = 0
+  const el = id => document.getElementById(id)
+  const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const euros = v => v == null ? null :
+    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR',
+      maximumFractionDigits: 0 }).format(v)
+  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+    'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  const JOURS = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam']
+  const JOURS_LONGS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi',
+    'vendredi', 'samedi']
+  const nomMois = c => `${MOIS[Number(c.slice(5)) - 1]} ${c.slice(0, 4)}`
+  const decalerMois = (c, n) => {
+    const d = new Date(Date.UTC(Number(c.slice(0, 4)), Number(c.slice(5)) - 1 + n, 1))
+    return d.toISOString().slice(0, 7)
+  }
+
+  async function init () {
+    session = await requireAuth()
+    if (!session) return
+    renderSidebar('yield-prix').catch(e => console.error('[yield-prix] sidebar', e))
+    mois = new Date().toISOString().slice(0, 7)
+    const ok = await chargerBiens()
+    el('yp-bien').addEventListener('change', charger)
+    el('yp-prec').addEventListener('click', () => { mois = decalerMois(mois, -1); charger() })
+    el('yp-suiv').addEventListener('click', () => { mois = decalerMois(mois, 1); charger() })
+    if (ok && el('yp-bien').value) charger()
+  }
+
+  async function chargerBiens () {
+    const compte = compteCourant()
+    let q = supabase.from('properties').select('id, name').order('name')
+    if (compte) q = q.eq('user_id', compte)
+    const { data, error } = await q
+    if (error) { etat('Impossible de lire la liste des logements.', true); return false }
+    if (!data || !data.length) {
+      etat('Aucun logement accessible sur ce compte.')
+      return false
+    }
+    el('yp-bien').innerHTML = data
+      .map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
+    return true
+  }
+
+  async function charger () {
+    const jeton = ++enCours
+    el('yp-mois').textContent = nomMois(mois)
+    etat('Lecture du cœur de données…')
+    const p = new URLSearchParams({ property_id: el('yp-bien').value, mois })
+    let r, data
+    try {
+      r = await fetch(`/api/yield-prix?${p}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() }
+      })
+      data = await r.json()
+    } catch (e) {
+      if (jeton === enCours) etat(`Lecture impossible : ${e.message}`, true)
+      return
+    }
+    if (jeton !== enCours) return
+    if (!r.ok) { etat(refus(data?.error), true); return }
+    el('yp-contenu').innerHTML = vue(data)
+    brancher()
+  }
+
+  // ─── La vue : action, tableau, pied ───────────────────────────────────────
+  function vue (d) {
+    return action(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d)
+  }
+
+  // ⚠ UNE LÉGENDE, UNE FOIS. C'est le prix à payer pour que les lignes n'aient
+  // aucun mot d'état : la couleur ne s'explique pas toute seule, mais elle ne
+  // s'explique qu'une fois — contre trente répétitions auparavant.
+  function legende (d) {
+    const p = d.nuits.some(n => n.delai_jours < 0)
+    const c = (couleur, texte, titre = '') =>
+      `<span class="yp-lg" title="${ech(titre)}"><i style="background:${couleur}"></i>${texte}</span>`
+    const b = (couleur, texte, titre = '') =>
+      `<span class="yp-lg barre" title="${ech(titre)}"><i style="background:${couleur}"></i>${texte}</span>`
+    return `<div class="yp-legende">
+      ${c('#E8F2EC', 'vendue', 'Cette nuit est vendue : son prix ne se change plus.')}
+      ${c('#EDF4EE', 'à vendre', 'Ouverte à la vente : la teinte de la ligne est le niveau suggéré, repris de votre grille ci-dessus.')}
+      ${c('#FBF1DA', 'fermée', 'Fermée à la vente. Aucun prix ne s’y vend — ouvrez-la au calendrier.')}
+      ${c('#FFFFFF', 'non renseignée', 'Votre calendrier ne va pas jusqu’à cette nuit.')}
+      ${p ? c('#FAFAFA', 'passée, restée vide', 'Nuit écoulée sans être vendue. Elle ne compte plus dans les actions, mais elle reste sous vos yeux.') : ''}
+      ${b('#4A7FA8', 'séjour', 'Un séjour confirmé, de l’arrivée au départ.')}
+      ${b('#D2DAE2', 'non confirmé', 'Une demande ou une option : elle n’occupe pas encore la nuit, mais elle est là.')}
+      ${b('#7C8B9A', 'séjour N-1 vendu à ce délai', 'L’an dernier, ce séjour était déjà vendu au nombre de jours où nous en sommes.')}
+      ${b('#D5DBE1', 'N-1 vendu plus tard', 'Il s’était vendu, mais plus tard que le délai actuel : rien à en conclure.')}
+      <span class="yp-lg"><b style="color:var(--text)">128&nbsp;€</b> l’an dernier, déjà vendue à ce délai</span>
+      <span class="yp-lg"><span style="color:var(--text3)">128&nbsp;€</span> l’an dernier, vendue plus tard</span>
+    </div>`
+  }
+
+  // ÉTAGE 1 — ce qu'il y a à faire ce mois-ci.
+  function action (d) {
+    // ⚠ LE PASSÉ EST VISIBLE MAIS NE COMPTE PAS — demande de Thierry.
+    // Un mois en cours porte ses jours écoulés : les inclure dans « X à
+    // monter » proposerait d'agir sur des nuits déjà consommées, et le
+    // « si tout appliqué » afficherait des euros que personne n'encaissera.
+    const aVenir = d.nuits.filter(n => n.delai_jours >= 0)
+    const av = aVenir.filter(n => n.suggestion != null)
+    const monter = av.filter(n => n.prix_actuel != null && n.suggestion > n.prix_actuel)
+    const baisser = av.filter(n => n.prix_actuel != null && n.suggestion < n.prix_actuel)
+    const vendues = aVenir.filter(n => n.vendue)
+    const fermees = aVenir.filter(n => n.ouverte === false && !n.vendue)
+    const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue)
+    const gain = av.filter(n => n.prix_actuel != null)
+      .reduce((s, n) => s + (n.suggestion - n.prix_actuel), 0)
+    const c = (v, l, cl = '') =>
+      `<div class="yp-chiffre"><div class="v ${cl}">${v}</div><div class="l">${l}</div></div>`
+    return `<div class="yp-tete">
+      <div class="yp-chiffres">
+        ${c(monter.length, 'à monter', monter.length ? 'hausse' : '')}
+        ${c(baisser.length, 'à baisser', baisser.length ? 'baisse' : '')}
+        ${c(vendues.length, 'vendues')}
+        ${fermees.length ? c(fermees.length, 'fermées') : ''}
+        ${inconnues.length ? c(inconnues.length, 'non renseignées') : ''}
+        ${c((gain >= 0 ? '+' : '') + euros(Math.round(gain)), 'si tout appliqué',
+          gain > 0 ? 'hausse' : (gain < 0 ? 'baisse' : ''))}
+      </div>
+      ${ceQueDitLeMois(d)}
+      ${fermees.length || inconnues.length ? `<p class="yp-note">
+        ${fermees.length ? `<strong>${fermees.length} nuit(s) fermée(s)</strong> — aucun prix ne s’y vend.
+          Ouvrez-les au calendrier, les suggestions apparaîtront. ` : ''}
+        ${inconnues.length ? `<strong>${inconnues.length} nuit(s) non renseignée(s)</strong> —
+          votre calendrier ne va pas jusque-là.` : ''}</p>` : ''}
+    </div>`
+  }
+
+  // ⚠ LA TENDANCE DU MOIS SE DIT ICI, ET NULLE PART AILLEURS.
+  // C'est la couche « pression » du moteur : elle vaut pour les trente nuits à
+  // la fois. Elle vivait dans la justification de CHAQUE ligne — trente fois la
+  // même phrase, qui noyait le seul motif propre à la nuit.
+  // ⚠ ET SEULEMENT QUAND ELLE AGIT. Une tendance « dans la fourchette » ne
+  // déplace aucun prix : l'annoncer serait une couche muette affichée.
+  function ceQueDitLeMois (d) {
+    const p = d.pression ? d.pression[d.pied ? d.pied.periode : ''] : null
+    if (!p || p.ecart == null) return ''
+    const exemple = d.nuits.find(n => (n.couches || [])
+      .some(c => c.nom === 'pression' && c.agit && c.resume))
+    if (!exemple) return ''
+    const couche = exemple.couches.find(c => c.nom === 'pression')
+    const sens = couche.deplacement > 0 ? 'hausse' : 'baisse'
+    return `<p class="yp-mois-dit"><strong class="${sens}">Ce mois-ci</strong> —
+      ${ech(couche.resume)}. Cela vaut pour toutes les nuits du mois.</p>`
+  }
+
+  // ÉTAGE 1 — une ligne par jour, précédée de LA GRILLE de son segment.
+  function tableau (d) {
+    let segCourant = null
+    const lignes = []
+    const sj = d.sejours || { annee: [], n1: [] }
+    d.nuits.forEach((n, i) => {
+      if (n.segment !== segCourant) {
+        segCourant = n.segment
+        lignes.push(`<tr class="yp-sep"><td colspan="6">${enTeteDeGroupe(d, n)}</td></tr>`)
+      }
+      lignes.push(ligne(n, sj.annee[i] || null, sj.n1[i] || null))
+    })
+    return `<div class="yp-wrap"><table class="yp-table">
+      <thead>
+        <tr class="yp-moities">
+          <th></th>
+          <th class="m-pilotage">Ce que je pilote</th>
+          <th class="m-passe" colspan="4">Ce sur quoi je m’appuie</th>
+        </tr>
+        <tr>
+          <th>Jour</th>
+          <th class="sep-g">Prix&nbsp;→&nbsp;suggestion</th>
+          <th class="sep-g">Réalisé</th>
+          <th>L’an dernier</th>
+          <th colspan="2" title="À gauche vos séjours, à droite ceux de l’an dernier ramenés sur les mêmes jours de semaine (décalage continu de 52 semaines).">Séjours</th>
+        </tr>
+      </thead>
+      <tbody>${lignes.join('')}</tbody>
+    </table></div>`
+  }
+
+  // ⚠ UNE SEULE TABLE DE TEINTES, pour la grille comme pour les lignes. Si la
+  // légende ne portait pas les couleurs du tableau, ce ne serait pas une
+  // légende.
+  const CLASSES = {
+    Base: 'n-base', Moyen: 'n-moyen', Haut: 'n-haut',
+    'Très haut': 'n-tres-haut', Exceptionnel: 'n-exceptionnel'
+  }
+
+  // ⚠ LA GRILLE DU BIEN, UNE FOIS, EN TÊTE DE PAGE — passe 5.
+  // Cinq cartes de prix différentes obligeaient l'hôte à retenir quelle grille
+  // s'appliquait à quelle ligne. Il n'y en a plus qu'une : c'est SA grille, et
+  // chaque période s'y positionne.
+  function grilleDuBien (d) {
+    const b = d.grille.base
+    if (!b || !b.fiable) {
+      return `<div class="yp-grille"><div class="yp-carte-avert">
+        Pas encore de grille — trop peu d’historique sur ce logement
+        (${b ? b.echantillon : 0} nuit(s)).</div></div>`
+    }
+    return `<div class="yp-grille">
+      <div class="yp-grille-tete">Votre grille
+        <span class="yp-grille-n" title="${ech(`Construite sur ${b.echantillon} nuits vendues et ${b.reservations} réservations, entre ${euros(b.min)} et ${euros(b.max)}.`)}">${b.echantillon} nuits</span></div>
+      <div class="yp-niveaux">
+        ${b.niveaux.map((n, i) => `<div class="yp-niv ${CLASSES[n.nom] || ''} ${i === 1 ? 'socle' : ''}"
+          title="${ech(`${n.nom} — ${n.etire
+            ? `mesuré à ${n.prix_mesure} €, étiré à ${n.prix} € pour garder au moins 5 % d’écart avec le niveau précédent (deux niveaux trop proches ne sont pas deux niveaux).`
+            : `mesuré à ${n.prix_mesure} €, arrondi à ${n.prix} €.`}${
+            n.confondu_avec ? ` Se confond avec ${n.confondu_avec} : au-delà, ce serait un prix jamais obtenu.` : ''}`)}">
+          <div class="n">${ech(n.nom)}${n.etire ? '<sup>*</sup>' : ''}</div>
+          <div class="p">${euros(n.prix)}</div>
+        </div>`).join('')}
+      </div>
+      ${b.niveaux.some(n => n.etire)
+        ? '<div class="yp-grille-note"><sup>*</sup> niveau étiré pour garder 5 % d’écart — il reste dans vos prix pratiqués.</div>'
+        : ''}
+    </div>`
+  }
+
+  // ⚠ UN CONTEXTE NE PORTE PLUS DE PRIX : IL PORTE UN NIVEAU.
+  // C'est la phrase de Thierry, rendue telle quelle : « Toussaint : niveau
+  // Haut, ses week-ends : Très haut. »
+  function enTeteDeGroupe (d, n) {
+    const seg = n.segment
+    const p = d.grille.positions ? d.grille.positions[seg] : null
+    const nom = n.libelle || nomSegment(seg)
+    if (!p || !p.fiable) {
+      return `<div class="yp-groupe"><div class="yp-groupe-nom">${ech(nom)}</div>
+        <div class="yp-carte-avert">Pas assez d’historique pour situer cette période sur votre grille.</div>
+      </div>`
+    }
+    // Les jours de la période qui se positionnent AILLEURS qu'elle.
+    const ecarts = []
+    for (const [cle, pj] of Object.entries(d.grille.positions_jour || {})) {
+      if (!pj.fiable || !cle.startsWith(`${seg}|`)) continue
+      if (pj.indice === p.indice) continue
+      ecarts.push({ jour: cle.split('|')[1], niveau: pj.niveau, indice: pj.indice })
+    }
+    // ⚠ ON GROUPE PAR NIVEAU. « sauf les samedis Haut, les vendredis Haut »
+    // énumère deux fois la même information : ce sont les vendredis ET les
+    // samedis qui sont Haut, et c'est une seule chose à retenir.
+    const parNiveau = new Map()
+    for (const e of ecarts.sort((a, b) => b.indice - a.indice)) {
+      if (!parNiveau.has(e.niveau)) parNiveau.set(e.niveau, [])
+      parNiveau.get(e.niveau).push(e.jour)
+    }
+    const pastille = niv => `<span class="yp-niv-badge ${CLASSES[niv] || ''}">${ech(niv)}</span>`
+    // ⚠ LE PLURIEL PORTE SUR CHAQUE JOUR, pas sur le dernier : « les samedi et
+    // vendredis » se lisait comme une faute, et une faute dans l'interface use
+    // la confiance aussi surement qu'un chiffre faux.
+    const etFr = l => {
+      const p = l.map(x => `${x}s`)
+      return p.length > 1 ? `${p.slice(0, -1).join(', ')} et ${p[p.length - 1]}` : p[0]
+    }
+    return `<div class="yp-groupe">
+      <div class="yp-groupe-nom">${ech(nom)} :</div>
+      ${pastille(p.niveau)}
+      ${p.reference_empruntee
+        ? `<span class="yp-indic" title="${ech(`Vous n’avez que ${p.echantillon_propre ?? 0} nuit(s) d’historique sur ce type de période — trop peu pour la situer. Le moteur reprend la position de « ${p.reference_empruntee} », le comportement le plus proche. Sans cet emprunt, il n’y aurait aucune suggestion ici.`)}">position empruntée</span>`
+        : ''}
+      ${parNiveau.size
+        ? `<span class="yp-groupe-sauf">sauf ${[...parNiveau].map(([niv, jours]) =>
+            `les ${ech(etFr(jours))} ${pastille(niv)}`).join(' · ')}</span>`
+        : ''}
+    </div>`
+  }
+
+  // ─── L'APPARIEMENT N-1, EN CLAIR ──────────────────────────────────────────
+  // ⚠ L'HÔTE DOIT POUVOIR VÉRIFIER CHAQUE APPARIEMENT. Sans la date exacte et
+  // l'étage qui l'a choisie, la colonne « l'an dernier » est une affirmation
+  // qu'on ne peut pas contredire.
+  // ⚠ CE BLOC A ÉTÉ PERDU puis rétabli en réécrivant la carte des prix : c'est
+  // le rendu sur données réelles qui l'a signalé, pas une relecture. Règle 14
+  // du dépôt, payée une fois de plus.
+  const ordinal = n => n === 1 ? '1<sup>re</sup>' : `${n}<sup>e</sup>`
+  const ETAGE_NOM = {
+    'a-bis': 'étage a-bis — votre propre événement',
+    a: 'étage a — date fixe',
+    b: 'étage b — position dans l’événement',
+    c: 'étage c — rang dans le mois',
+    d: 'étage d — aucun comparable'
+  }
+  function appariement (n1) {
+    if (!n1) return ''
+    const m = motif(n1.alignement)
+    if (!n1.date) {
+      const r = motif(n1.raison)
+      return `<strong>Pas de comparable</strong> — ${ech(r ? r.quoi : (m ? m.quoi : ''))}`
+    }
+    const d = new Date(`${n1.date}T00:00:00Z`)
+    const lisible = `${JOURS_LONGS[d.getUTCDay()]} ${d.getUTCDate()} ${MOIS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+    return `Comparé au <strong>${ech(lisible)}</strong>
+      ${n1.rang ? `— ${n1.rang_n1 === n1.rang ? ordinal(n1.rang) : `${ordinal(n1.rang_n1)} (et non ${ordinal(n1.rang)})`} de sa période ` : ''}
+      <span class="yp-vide" title="${ech(m ? m.quoi : '')}">(${ech(ETAGE_NOM[n1.etage] || '')})</span>.
+      ${n1.etage === 'b' && n1.ecart_jours
+        ? `L’événement a glissé de ${Math.abs(n1.ecart_jours)} jour${Math.abs(n1.ecart_jours) > 1 ? 's' : ''} d’une année sur l’autre.` : ''}
+      ${!n1.meme_segment && n1.segment
+        ? `Attention : cette nuit-là était <strong>${ech(nomSegment(n1.segment))}</strong>.` : ''}`
+  }
+
+  // ⚠ UN SEGMENT DE BARRE, PAS UN `rowspan`. Une barre posée en `rowspan`
+  // se décale dès qu'une ligne de détail s'intercale — et le détail s'ouvre au
+  // clic. Des segments contigus, collés bord à bord, donnent la même barre
+  // continue sans jamais dépendre du nombre de lignes.
+  function segment (x, n1 = false) {
+    if (!x) return ''
+    const t = [
+      `${x.nuits} nuit${x.nuits > 1 ? 's' : ''}`,
+      `${frDate(x.arrivee)} → ${frDate(x.depart)}`,
+      x.canal ? `canal ${x.canal}` : null,
+      x.prix_total != null ? `séjour ${euros(x.prix_total)}` : null,
+      !x.confirme ? `réservation non confirmée (${x.statut || '?'})` : null,
+      n1 && x.vendu_a_ce_delai === true ? 'déjà vendu à ce délai l’an dernier' : null,
+      n1 && x.vendu_a_ce_delai === false ? 'vendu plus tard que le délai actuel' : null,
+      n1 && x.vendu_a_ce_delai == null ? 'date de vente non exploitable' : null,
+      x.chevauchement ? '⚠ deux séjours se chevauchent sur cette nuit' : null
+    ].filter(Boolean).join(' · ')
+    return `<span class="yp-seg ${n1 ? 'n1' : ''} ${x.plein ? '' : 'grise'}
+      ${x.debut ? 'debut' : ''} ${x.fin ? 'fin' : ''}
+      ${x.chevauchement ? 'chevauche' : ''}" title="${ech(t)}"></span>`
+  }
+
+  const frDate = iso => {
+    if (!iso) return ''
+    const d = new Date(`${iso}T00:00:00Z`)
+    return `${d.getUTCDate()} ${MOIS[d.getUTCMonth()].slice(0, 4)}`
+  }
+
+  function ligne (n, barA, barN1) {
+    const j = new Date(`${n.date}T00:00:00Z`).getUTCDay()
+    const we = j === 0 || j === 6
+    const passe = n.delai_jours < 0
+
+    // ⚠ AUCUN MOT D'ÉTAT DANS LA LIGNE. L'état est une classe, donc une
+    // couleur, et la légende en tête l'explique une fois pour le mois entier.
+    let etat
+    if (n.vendue) etat = 'e-vendue'
+    else if (passe) etat = 'e-vide'
+    else if (n.ouverte === false) etat = 'e-fermee'
+    else if (n.ouverte == null) etat = 'e-inconnue'
+    else etat = 'e-vide'
+
+    // ⚠ DEUX COLONNES, PAS UNE — passe 5. « Ce que je pilote » à gauche : ce
+    // qui reste à décider. « Ce sur quoi je m'appuie » à droite : ce qui est
+    // déjà fait, cette année comme l'an dernier. Une seule colonne mélangeait
+    // une décision à prendre et un fait acquis, dans la même case.
+    let prix
+    if (n.vendue) {
+      // ⚠ LE PRIX D'UNE NUIT VENDUE EST CELUI QU'ELLE A RAPPORTÉ, pas celui
+      // qui était affiché. Sur le passé, le calendrier ne garde aucune trace :
+      // la ligne montrait un tiret sur la seule nuit dont le prix est certain.
+      const p = n.prix_vendu != null ? n.prix_vendu : n.prix_actuel
+      prix = p != null
+        ? `<span class="yp-prix" title="${ech(n.prix_vendu != null
+            ? 'Part de cette nuit dans le prix payé par le voyageur (répartition uniforme sur les nuits du séjour).'
+            : 'Prix affiché au calendrier pour cette nuit.')}">${euros(p)}</span>`
+        : `<span class="yp-vide" title="Cette nuit est vendue, mais son prix n’est pas exploitable — souvent une réservation recréée lors d’une migration de canal.">—</span>`
+    } else if (n.suggestion != null) {
+      const sens = n.prix_actuel == null ? ''
+        : (n.suggestion > n.prix_actuel ? 'hausse' : (n.suggestion < n.prix_actuel ? 'baisse' : ''))
+      prix = `${n.prix_actuel != null
+        ? `<span class="yp-affiche">${euros(n.prix_actuel)}</span><span class="yp-fleche">→</span>` : ''}
+        <span class="yp-prix ${sens}">${euros(n.suggestion)}</span>
+        <span class="yp-niveau ${sens}" title="${ech(n.etiquette_corrigee
+          ? `Niveau ${n.niveau} de votre grille, corrigé parce que les ${n.jour_semaine}s se vendent différemment sur ce type de période. C’est pourquoi le prix ne tombe pas exactement sur le niveau.`
+          : `Niveau ${n.niveau} de votre grille.`)}">${ech(n.etiquette || n.niveau)}</span>
+        ${n.cumul ? '<span class="yp-plus" title="Deux signaux vont dans le même sens : c’est l’écart le plus marqué du mois.">++</span>' : ''}`
+    } else if (passe) {
+      // Éteinte, et muette : le mois passé n'a rien à décider.
+      prix = n.prix_actuel != null
+        ? `<span class="yp-affiche">${euros(n.prix_actuel)}</span>` : ''
+    } else {
+      const m = motif(n.non_calculable[0])
+      prix = `${n.prix_actuel != null ? `<span class="yp-affiche">${euros(n.prix_actuel)}</span> ` : ''}
+        <span class="yp-rien" title="${ech(m ? m.quoi : '')}">${ech(m ? m.titre : '—')}</span>`
+    }
+
+    // ⚠ LE PARTAGE : ce qui est encore à décider reste à gauche, tout ce qui
+    // est acquis part à droite. Une nuit vendue ou passée n'a plus rien à
+    // piloter — sa case de gauche est donc vide, et ce vide est une réponse.
+    const acquis = n.vendue || passe
+    const pilotage = acquis ? '' : prix
+    const realise = acquis ? prix : ''
+
+    // ─── LA COLONNE N-1 : LA COULEUR DIT TOUT ──────────────────────────────
+    // ⚠ PLEIN = la nuit comparable était DÉJÀ vendue à ce délai. Si la mienne
+    // ne l'est pas, je suis en retard — et le liseré d'alerte s'allume ici, au
+    // même endroit du regard, plutôt que dans une colonne de texte à part.
+    const n1 = n.n1 || {}
+    const retard = !n.vendue && n.ouverte === true && n1.vendue_a_ce_delai === true
+    let reel
+    if (n1.prix_vendu != null) {
+      const plein = n1.vendue_a_ce_delai === true
+      reel = `<span class="yp-n1 ${plein ? 'plein' : ''} ${retard ? 'alerte' : ''}"
+        title="${ech(plein
+          ? `Au même délai l’an dernier, la nuit comparable était DÉJÀ vendue ${euros(n1.prix_vendu)}.${retard ? ' Celle-ci ne l’est pas : vous êtes en retard sur son rythme.' : ''}`
+          : `La nuit comparable s’est vendue ${euros(n1.prix_vendu)}, mais plus tard que le délai où nous sommes. Rien à en conclure.`)}">${euros(n1.prix_vendu)}</span>`
+    } else if (!n1.date) {
+      const r = motif(n1.raison) || motif('pas_de_comparable')
+      reel = `<span class="yp-rien" title="${ech(r ? r.quoi : '')}">—</span>`
+    } else {
+      reel = `<span class="yp-vide" title="La nuit comparable retenue n’a pas été vendue l’an dernier.">—</span>`
+    }
+
+    return `<tr class="${we ? 'we' : ''} ${etat} ${passe ? 'passe' : ''} cliquable"
+      data-jour="${n.date}" aria-expanded="false" tabindex="0" role="button">
+      <td class="yp-jour ${we ? 'we' : ''}">${Number(n.date.slice(8))}<small>${JOURS[j]}</small>
+        ${n.segment === 'pont'
+          ? `<span class="yp-pont" title="${ech(`Jour de pont${n.libelle ? ` — ${n.libelle}` : ''} : coincé entre un jour férié et un week-end. Ces nuits-là se vendent au tarif des jours fériés.`)}">pont</span>`
+          : ''}</td>
+      <td class="sep-g">${pilotage}</td>
+      <td class="sep-g yp-realise">${realise}</td>
+      <td>${reel}</td>
+      <td class="yp-bar">${segment(barA)}</td>
+      <td class="yp-bar">${segment(barN1, true)}</td>
+    </tr>
+    <tr class="yp-detail-l" id="d-${n.date}" hidden>
+      <td colspan="6"><div class="yp-detail">${pourquoi(n)}</div></td></tr>`
+  }
+
+  // ÉTAGE 1 (ce qui a bougé, PROPRE À CETTE NUIT) + ÉTAGE 3 (le reste, replié).
+  function pourquoi (n) {
+    const toutes = n.couches || []
+    // ⚠ UNE NUIT SANS SUGGESTION A QUAND MEME UN DETAIL : le motif du refus, et
+    // l'appariement N-1. C'est justement sur ces nuits-là que l'hôte se demande
+    // pourquoi il n'a rien à décider.
+    if (n.suggestion == null) {
+      const m = motif((n.non_calculable || [])[0])
+      return `<p class="yp-raisons">${m ? `<strong>${ech(m.titre)}</strong> — ${ech(m.quoi)}` : ''}</p>
+        <div class="yp-apparie">${appariement(n.n1)}</div>`
+    }
+    // ⚠ NI LES COUCHES MUETTES, NI CE QUI EST DÉJÀ DIT AILLEURS.
+    // `agit` écarte « inchangé » et « ×0,99 » ; `pression` est écartée parce
+    // qu'elle porte sur le MOIS et vit dans le bandeau. Ce qui reste est ce qui
+    // distingue cette nuit des vingt-neuf autres.
+    const agit = toutes.filter(c => c.agit && c.resume && c.nom !== 'pression')
+    const moisAgit = toutes.some(c => c.nom === 'pression' && c.agit)
+    let dites
+    if (agit.length) {
+      dites = `<ul class="yp-raisons">${agit.map(c => `<li>${ech(c.resume)}</li>`).join('')}</ul>`
+    } else if (moisAgit) {
+      // Le mois est la seule correction : on le rappelle sans le redire.
+      dites = `<p class="yp-raisons">Seule la tendance du mois déplace le prix —
+        c’est votre niveau <strong>${ech(n.etiquette || n.niveau)}</strong>.</p>`
+    } else {
+      dites = `<p class="yp-raisons">Aucun signal ne déplace le prix : c’est votre niveau
+        <strong>${ech(n.niveau)}</strong>.</p>`
+    }
+    // ⚠ PLUS D'ÉTENDUE NI DE MIN-MAX ICI — demande de Thierry.
+    // L'étendue de la grille est en tête du groupe, une fois. Et le min-max des
+    // prix observés n'y revient pas : « de 35 € à 206 € » fait peur pour rien,
+    // un extrême unique n'étant pas une borne de décision mais un accident.
+    return `${dites}
+      <div class="yp-apparie">${appariement(n.n1)}</div>
+      <details class="yp-audit"><summary>Tout le calcul</summary>
+        <ol>${toutes.map(c => `<li><strong>${ech(nomCouche(c.nom))}</strong> — ${ech(c.detail)}</li>`).join('')}</ol>
+      </details>`
+  }
+
+  const NOMS_COUCHE = {
+    socle: 'Point de départ', pression: 'Portefeuille du mois', delai: 'Délai',
+    jour_de_semaine: 'Jour de la semaine', cumul: 'Signaux cumulés',
+    neutralisation: 'Sans effet'
+  }
+  const nomCouche = c => NOMS_COUCHE[c] || c
+
+  // ÉTAGE 1 — les totaux du mois, comme un pied de tableau.
+  function pied (d) {
+    const p = d.pied || {}
+    const ad = p.a_date, n1 = p.a_date_n1
+    const proj = p.projection || {}
+    const cmp = p.vs_n1 && p.vs_n1.ca ? p.vs_n1.ca : null
+    const rp = p.vs_n1 && p.vs_n1.revpar ? p.vs_n1.revpar : null
+    const ligne = (l, v, comp) => `<tr><th>${l}</th><td>${v}</td><td>${comp}</td></tr>`
+    // ⚠ LE `title` DU DRAPEAU PASSE PAR `ligne`, DONC SANS ECHAPPEMENT ICI :
+    // les libelles de ce pied sont ecrits dans ce fichier, jamais recus.
+    const ecart = c => {
+      if (!c) return '<span class="yp-vide">—</span>'
+      if (c.non_calculable) {
+        const m = motif(c.non_calculable)
+        return `<span class="yp-rien" title="${ech(m ? m.quoi : '')}">${ech(m ? m.titre : '—')}</span>`
+      }
+      if (c.variation == null) return `<span class="yp-vide">${euros(c.n1)}</span>`
+      const v = Math.round(c.variation * 100)
+      return `<span class="${v >= 0 ? 'hausse' : 'baisse'}">${v >= 0 ? '+' : ''}${v} %</span>
+        <small>contre ${euros(c.n1)}</small>`
+    }
+    const fourchette = proj.nuitees_min != null && proj.nuitees_max != null
+      ? `entre <strong>${Math.round(proj.nuitees_min)}</strong> et
+         <strong>${Math.round(proj.nuitees_max)}</strong> nuitées`
+      : (proj.non_calculable && proj.non_calculable.length
+        ? `<span class="yp-rien" title="${ech((motif(proj.non_calculable[0]) || {}).quoi || '')}">${ech((motif(proj.non_calculable[0]) || {}).titre || '—')}</span>`
+        : '<span class="yp-vide">—</span>')
+    return `<div class="yp-pied">
+      <h3>Total du mois</h3>
+      <table class="yp-totaux">
+        <thead><tr><th></th><th>À ce jour</th><th>Au même moment l’an dernier</th></tr></thead>
+        <tbody>
+          ${ligne('Chiffre d’affaires vendu', ad ? euros(ad.ca) : '—', ecart(cmp))}
+          ${ligne(`RevPAR${rp && rp.estimee
+            ? ' <span class="yp-indic" title="La mémoire du calendrier ne remonte pas jusqu’à cette période : les nuits ouvertes sont estimées par convention (un jour passé sans mémoire est réputé ouvert, sauf exception déclarée). Le RevPAR l’est donc aussi.">capacité estimée</span>'
+            : ''}`,
+            ad && ad.revpar != null ? euros(ad.revpar)
+              : '<span class="yp-rien" title="Le RevPAR divise le chiffre d’affaires par les nuits ouvertes : sans savoir combien l’étaient, il n’existe pas. Ce n’est pas zéro.">—</span>',
+            ecart(rp))}
+          ${ligne('Nuitées vendues', ad ? ad.nuitees : '—',
+            n1 ? `<span class="yp-vide">${n1.nuitees}</span>` : '<span class="yp-vide">—</span>')}
+          ${ligne('Nuits ouvertes', p.jours_ouverts != null ? p.jours_ouverts
+            : `<span class="yp-rien" title="${ech((motif(p.capacite_non_calculable) || {}).quoi || '')}">${ech((motif(p.capacite_non_calculable) || {}).titre || '—')}</span>`, '')}
+          ${ligne('À terminaison', fourchette, '')}
+        </tbody>
+      </table>
+      <p class="yp-note">La comparaison porte sur le <strong>même délai</strong> l’an dernier
+      — ${p.delai_jours != null && p.delai_jours > 0 ? `${p.delai_jours} jour(s) avant le début du mois` : 'mois en cours'} —
+      et non sur le mois entier : comparer ce qui est vendu aujourd’hui à un mois déjà terminé
+      donnerait toujours une chute.</p>
+    </div>`
+  }
+
+  function brancher () {
+    // ⚠ UNE SEULE OUVERTE A LA FOIS. Trente détails dépliés redonneraient
+    // exactement la page que cette passe supprime.
+    const basculer = (tr) => {
+      const d = el(`d-${tr.dataset.jour}`)
+      if (!d) return
+      const ouvrir = d.hidden
+      for (const autre of document.querySelectorAll('.yp-detail-l')) autre.hidden = true
+      for (const autre of document.querySelectorAll('tr.cliquable')) {
+        autre.setAttribute('aria-expanded', 'false')
+        autre.classList.remove('ouverte-d')
+      }
+      d.hidden = !ouvrir
+      tr.setAttribute('aria-expanded', ouvrir ? 'true' : 'false')
+      tr.classList.toggle('ouverte-d', ouvrir)
+    }
+    for (const tr of document.querySelectorAll('tr.cliquable')) {
+      tr.addEventListener('click', () => basculer(tr))
+      tr.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); basculer(tr) }
+      })
+    }
+  }
+
+  function etat (msg, erreur = false) {
+    el('yp-contenu').innerHTML =
+      `<div class="yp-etat-page${erreur ? ' erreur' : ''}">${ech(msg)}</div>`
+  }
+
+  init()
+</script>
+</body>
+</html>

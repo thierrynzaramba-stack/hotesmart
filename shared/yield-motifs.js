@@ -72,6 +72,86 @@ export const MOTIFS = {
     titre: 'Voyageurs connus en partie',
     quoi: 'Une partie des nuits ne porte pas le nombre de voyageurs : l’occupation en personnes est sous-estimée.'
   },
+  // ─── L'appariement de la nuit comparable N-1 (lot 4.4, passe 3) ───────────
+  // ⚠ CETTE COLONNE EST LE SEUL CHIFFRE QUE L'HOTE PEUT CONFRONTER A SA
+  // MEMOIRE. Chaque appariement doit donc pouvoir se justifier en une phrase,
+  // et chaque refus dire POURQUOI il n'y a rien a comparer.
+  pas_de_comparable: {
+    titre: 'Pas de comparable',
+    quoi: 'Aucune nuit de l’an dernier ne se compare honnêtement à celle-ci. Afficher un prix quand même reviendrait à comparer deux nuits de nature différente — un chiffre crédible et faux.'
+  },
+  meme_evenement_de_l_hote: {
+    titre: 'Même événement',
+    quoi: 'Cette nuit se compare à votre propre événement de l’an dernier. C’est l’appariement le plus sûr du moteur : aucune règle de calendrier ne peut deviner qu’une saison thermale existe — vous seul le savez.'
+  },
+  meme_position_dans_l_evenement_de_l_hote: {
+    titre: 'Même position dans votre événement',
+    quoi: 'Votre événement ne tombe pas aux mêmes dates d’une année sur l’autre. La comparaison retient la même position à l’intérieur — le troisième samedi contre le troisième samedi.'
+  },
+  evenement_absent_de_l_an_dernier: {
+    titre: 'Événement non déclaré l’an dernier',
+    quoi: 'Vous n’avez pas déclaré cet événement sur l’année précédente. Le comparer à une nuit ordinaire donnerait un écart qui ne veut rien dire : déclarez l’occurrence passée et la comparaison apparaîtra.'
+  },
+  meme_date_ferie_fixe: {
+    titre: 'Même jour férié, même date',
+    quoi: 'Ce jour férié tombe à la même date chaque année : la comparaison se fait date à date, même si le jour de la semaine a changé.'
+  },
+  meme_date_reveillon: {
+    titre: 'Même réveillon',
+    quoi: 'Le 24 et le 31 décembre sont les deux nuits de l’année où la date fait le prix, pas le jour de la semaine : elles se comparent date à date.'
+  },
+  meme_ferie_mobile: {
+    titre: 'Même jour férié',
+    quoi: 'Ce jour férié se déplace d’une année sur l’autre (Pâques et ce qui en dépend). La comparaison suit le férié, pas le calendrier.'
+  },
+  meme_pont: {
+    titre: 'Même pont',
+    quoi: 'Le pont se compare au pont du même jour férié l’an dernier, où qu’il soit tombé.'
+  },
+  meme_position_dans_les_vacances: {
+    titre: 'Même position dans les vacances',
+    quoi: 'Les vacances scolaires glissent d’une année sur l’autre. La comparaison retient le même jour de la semaine à la même semaine de vacances — un premier samedi contre un premier samedi.'
+  },
+  meme_jour_de_semaine_dans_les_vacances: {
+    titre: 'Même jour, vacances plus courtes',
+    quoi: 'Les vacances de l’an dernier étaient plus courtes : cette position n’existait pas. La comparaison retient le dernier jour de même nom dans ces vacances.'
+  },
+  meme_rang_dans_le_mois: {
+    titre: 'Même rang dans le mois',
+    quoi: 'Hors vacances, la comparaison retient le même rang dans le mois — le deuxième vendredi contre le deuxième vendredi.'
+  },
+  rang_le_plus_proche_dans_le_mois: {
+    titre: 'Rang le plus proche',
+    quoi: 'Le mois de l’an dernier comptait moins de jours de ce nom : la comparaison retient le plus proche, et vous dit lequel.'
+  },
+  segment_de_la_nuit_inconnu: {
+    titre: 'Nature de la nuit inconnue',
+    quoi: 'Vacances et jours fériés ne sont pas connus sur cette date : sans savoir de quelle nature est la nuit, aucun appariement honnête n’est possible.'
+  },
+  ferie_absent_de_l_an_dernier: {
+    titre: 'Férié introuvable l’an dernier',
+    quoi: 'Ce jour férié n’a pas été retrouvé sur l’année précédente. Plutôt qu’un rapprochement approximatif, rien n’est affiché.'
+  },
+  pont_absent_de_l_an_dernier: {
+    titre: 'Pont sans équivalent',
+    quoi: 'Le pont correspondant n’existait pas l’an dernier — le férié tombait un jour qui n’en créait pas.'
+  },
+  periode_de_vacances_introuvable: {
+    titre: 'Vacances introuvables',
+    quoi: 'La période de vacances qui contient cette nuit n’a pas pu être retrouvée dans le calendrier scolaire importé.'
+  },
+  vacances_absentes_de_l_an_dernier: {
+    titre: 'Vacances sans équivalent',
+    quoi: 'Ces vacances n’existent pas dans le calendrier scolaire de l’an dernier. Comparer avec une nuit hors vacances donnerait un écart qui ne veut rien dire.'
+  },
+  jour_de_semaine_absent_des_vacances_n1: {
+    titre: 'Jour absent de ces vacances',
+    quoi: 'Les vacances de l’an dernier ne comptaient aucun jour de ce nom : il n’y a rien à comparer à l’intérieur de l’événement.'
+  },
+  aucun_jour_comparable_ce_mois_la: {
+    titre: 'Aucun jour comparable',
+    quoi: 'Le même mois de l’an dernier ne comptait aucun jour de même nature et de même jour de semaine.'
+  },
   revpar_sur_ca_partiel: {
     titre: 'RevPAR sous-estimé',
     quoi: 'Des nuits vendues n’ont pas de prix connu : elles comptent au taux d’occupation mais pas au chiffre d’affaires, donc le RevPAR est un minimum.'
@@ -218,6 +298,10 @@ export const MOTIFS = {
     titre: 'Sous votre prix plancher',
     quoi: 'Le prix que l’historique suggère passe sous le plancher que vous avez fixé. Nous ne le remontons pas à votre place : ce serait vous recommander un prix que le moteur n’a pas calculé.'
   },
+  nuit_deja_vendue: {
+    titre: 'Déjà vendue',
+    quoi: 'Cette nuit est réservée : son prix est figé. C’est une bonne nouvelle, pas un réglage à corriger.'
+  },
   nuit_deja_passee: {
     titre: 'Nuit déjà passée',
     quoi: 'Cette nuit est derrière nous : un prix n’y changerait rien.'
@@ -309,6 +393,10 @@ export const NIVEAUX_REFERENCE = {
   segment: {
     titre: 'Référence élargie à la saison',
     quoi: 'Élargi à toute la saison, tous jours de semaine confondus.'
+  },
+  segment_parent: {
+    titre: 'Référence empruntée',
+    quoi: 'Vous n’avez pas assez de nuits de pont dans votre historique pour en tirer une référence. Le moteur emprunte celle de vos jours fériés : un jour coincé entre un férié et un week-end se vend comme un férié. Sans cet emprunt, il n’y aurait aucune suggestion sur vos ponts — la nuit qui prend le plus de valeur de l’année.'
   },
   jour_de_semaine: {
     titre: 'Référence minimale',

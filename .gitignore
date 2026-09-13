@@ -172,3 +172,6 @@ _*.tmp.mjs
 
 # Curseur de reprise du backfill historique (etat local, jamais versionne)
 .backfill-historique.json
+
+# Apercus generes pour la validation sur pieces (hors depot).
+apercu-*.html

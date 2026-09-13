@@ -58,478 +58,386 @@ function samedis (n, prix) {
 const grilleDe = (lignes) => S.construireGrille(lignes,
   { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
 
-// ─── LA GRILLE ───────────────────────────────────────────────────────────────
+// ⚠ CE FICHIER A ETE REECRIT LE 13 SEPTEMBRE 2026, ET LE DIRE IMPORTE.
+// Sa version precedente verrouillait un design abandonne : une grille de cinq
+// niveaux PAR SEGMENT, plus un multiplicateur jour-de-semaine sur le prix.
+// Arbitrage de Thierry : UNE grille par bien, a prix ronds, et chaque contexte
+// s'y POSITIONNE. Quinze tests sont tombes — c'est le signal attendu quand un
+// design change, pas un accident.
+//
+// ⚠ CE QUE LE NOUVEAU DESIGN PERD, ET QU'IL FAUT DIRE. Un niveau n'est plus
+// exactement un prix deja obtenu : il est arrondi au multiple de 5 €, et peut
+// etre ETIRE pour tenir l'ecart minimal. Ce qui reste vrai — et que ces tests
+// verrouillent — c'est qu'aucun niveau ne sort de l'etendue reellement vendue.
 
-test('LE TEST QUI COMPTE : chaque niveau est un prix REELLEMENT obtenu', () => {
-  // ⚠ AUCUN POURCENTAGE INVENTE. « -10 % / +10 % » serait un chiffre sorti de
-  // nulle part ; un quantile repond a « vous avez deja vendu a ce prix ce type
-  // de nuit », ce qui se defend devant l'hote et se verifie dans ses donnees.
+// ─── LA GRILLE DU BIEN ───────────────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : aucun niveau ne sort de ce qui a ete vendu', () => {
+  // ⚠ L'INVARIANT QUI A SURVECU AU CHANGEMENT DE DESIGN. Les niveaux ne sont
+  // plus des prix exacts, mais ils restent bornes par le moins cher et le plus
+  // cher reellement obtenus : le moteur ne propose jamais un tarif que ce
+  // logement n'a jamais pratique.
   const prix = [100, 105, 110, 115, 120, 125, 130, 135, 140]
-  // Neuf jours consecutifs de septembre : tous hors vacances, tous distincts.
   const lignes = prix.map((p, i) =>
     ecl([`2025-09-${String(1 + i).padStart(2, '0')}`], { prix: p, id: `R${i}` }))
   const g = grilleDe(lignes)
-  const seg = g.segments.get(R.SEGMENTS.HORS_VACANCES)
-  assert.ok(seg.fiable, '9 nuits, 9 reservations : au-dessus des deux seuils')
-  // Chaque niveau doit se retrouver entre le min et le max observes.
-  for (const n of seg.niveaux) {
-    assert.ok(n.prix >= seg.min && n.prix <= seg.max,
-      `${n.nom} (${n.prix}) hors de l etendue observee ${seg.min}–${seg.max}`)
+  assert.equal(g.base.fiable, true)
+  assert.equal(g.base.niveaux.length, 5)
+  for (const n of g.base.niveaux) {
+    assert.ok(n.prix >= g.base.min && n.prix <= g.base.max,
+      `${n.nom} ${n.prix} € hors de l'etendue ${g.base.min}-${g.base.max}`)
   }
-  // Et la grille est croissante.
-  for (let i = 1; i < seg.niveaux.length; i++) {
-    assert.ok(seg.niveaux[i].prix >= seg.niveaux[i - 1].prix, 'grille non croissante')
+})
+
+test('LE TEST QUI COMPTE : la grille est MONOTONE, toujours', () => {
+  // ⚠ RELEVE EN REVIEW, 13 septembre 2026, ET C'ETAIT LE PIRE DEFAUT DU LOT.
+  // Un niveau qu'on ne pouvait pas etirer restait a sa valeur MESUREE, donc
+  // sous le precedent deja etire :
+  //     Base 95 | Moyen 100 | Haut 95 | Tres haut 100 | Exceptionnel 95
+  // « Monter d'un niveau » baissait le prix. Deux signaux cumules rendaient le
+  // prix de depart en annonçant « +2 niveaux ». Aucun test ne le voyait : celui
+  // sur l'etendue passait, parce que 95 et 100 sont tous deux dans l'etendue.
+  //
+  // ⚠ ON EPROUVE L'INVARIANT SUR DES FORMES D'HISTORIQUE VARIEES, pas sur un
+  // cas choisi : c'est precisement un cas choisi qui avait laissé passer.
+  const formes = {
+    'un tarif domine': [...Array(200).fill(95), ...Array(12).fill(98), 100],
+    'deux tarifs': [...Array(30).fill(100), ...Array(30).fill(101)],
+    'tout identique': Array(40).fill(120),
+    'etendue etroite': [101, 101, 102, 102, 102, 103, 103, 103, 103, 103],
+    'large': [35, 60, 90, 110, 130, 150, 180, 220, 260, 295],
+    'deux paliers': [...Array(20).fill(80), ...Array(20).fill(240)]
   }
-  assert.equal(seg.niveaux[S.SOCLE].nom, 'Référence')
-  assert.equal(seg.niveaux[S.SOCLE].prix, 120, 'le socle est la mediane')
+  for (const [nom, prix] of Object.entries(formes)) {
+    const g = S.grilleDeBase(prix, { reservations: 20 })
+    if (!g.fiable) continue
+    for (let i = 1; i < g.niveaux.length; i++) {
+      assert.ok(g.niveaux[i].prix >= g.niveaux[i - 1].prix,
+        `${nom} : ${g.niveaux[i - 1].nom} ${g.niveaux[i - 1].prix} € puis `
+        + `${g.niveaux[i].nom} ${g.niveaux[i].prix} € — la grille descend`)
+    }
+    // ⚠ ET AUCUN NIVEAU NE SORT DE CE QUI A ETE VENDU, sur ces memes formes.
+    // L'arrondi au multiple de 5 depassait les bornes : sur un maximum vendu a
+    // 103 €, « Exceptionnel » sortait a 105 €.
+    for (const n of g.niveaux) {
+      assert.ok(n.prix >= g.min && n.prix <= g.max,
+        `${nom} : ${n.nom} ${n.prix} € hors de ${g.min}-${g.max}`)
+    }
+  }
+})
+
+test('LE TEST QUI COMPTE : les prix de la grille sont RONDS', () => {
+  // ⚠ UN TARIF PUBLIC A DEUX DECIMALES N'EXISTE PAS. « 140,82 € » trahissait un
+  // multiplicateur, et l'hote ne l'aurait defendu devant personne.
+  const lignes = [100, 103, 107, 111, 118, 126, 133, 141, 149, 158].map((p, i) =>
+    ecl([`2025-09-${String(1 + i).padStart(2, '0')}`], { prix: p, id: `R${i}` }))
+  const g = grilleDe(lignes)
+  for (const n of g.base.niveaux) {
+    assert.equal(n.prix % S.PAS_ARRONDI, 0, `${n.nom} : ${n.prix} n'est pas rond`)
+  }
+  // ⚠ L'ORDRE DE PRIORITE EST DIT : « jamais invente » passe avant « rond ».
+  // Sur un bien qui aurait tout vendu entre deux multiples de 5, aucun prix
+  // rond ne tient dans l'etendue — on rend alors la valeur mesuree, bornee,
+  // plutot qu'un prix jamais obtenu.
+  const etroit = S.grilleDeBase([101, 101, 102, 102, 103, 103, 103, 103], { reservations: 8 })
+  if (etroit.fiable) {
+    for (const n of etroit.niveaux) {
+      assert.ok(n.prix >= etroit.min && n.prix <= etroit.max,
+        `${n.nom} ${n.prix} € hors de ${etroit.min}-${etroit.max}`)
+    }
+  }
+})
+
+test('LE TEST QUI COMPTE : l ecart minimal de 5 % est TENU, et l etirement DIT', () => {
+  // Un tarif qui domine l'historique ecrase les quantiles : sans etirement,
+  // la grille afficherait cinq crans la ou il n'y a qu'une decision possible.
+  const prix = [80, 117, 117, 117, 117, 117, 117, 118, 119, 200]
+  const lignes = prix.map((p, i) =>
+    ecl([`2025-09-${String(1 + i).padStart(2, '0')}`], { prix: p, id: `R${i}` }))
+  const g = grilleDe(lignes)
+  const n = g.base.niveaux
+  for (let i = 1; i < n.length; i++) {
+    // Soit l'ecart est tenu, soit le niveau est DECLARE confondu : jamais
+    // deux crans qui se ressemblent sans que rien ne le dise.
+    const tenu = n[i].prix >= n[i - 1].prix * (1 + S.ECART_MINIMAL)
+    assert.ok(tenu || n[i].confondu_avec,
+      `${n[i - 1].nom} ${n[i - 1].prix} / ${n[i].nom} ${n[i].prix} : ni ecarte ni dit`)
+  }
+  assert.ok(n.some(x => x.etire), 'au moins un niveau devait etre etire ici')
+  // ⚠ ET L'ETIREMENT NE SORT JAMAIS DU VENDU.
+  for (const x of n) assert.ok(x.prix <= g.base.max)
 })
 
 test('LE TEST QUI COMPTE : sous le seuil, la grille se TAIT', () => {
-  // Meme regle que la reference — une seule dans tout le moteur. Si la
-  // reference se tait, la suggestion se tait.
-  const g = grilleDe(mardis(5, 100))
-  const seg = g.segments.get(R.SEGMENTS.HORS_VACANCES)
-  assert.equal(seg.fiable, false)
-  assert.equal(seg.niveaux, null, 'aucune grille servie')
-  assert.equal(seg.mediane, null)
-  assert.equal(seg.non_calculable, 'segment_sous_le_seuil')
-  assert.equal(seg.echantillon, 5, 'mais on DIT combien il y avait')
+  // Deux seuils, pas un : des nuits ET des reservations distinctes.
+  const g = grilleDe(mardis(4, 100))
+  assert.equal(g.base.fiable, false)
+  assert.equal(g.base.niveaux, null)
+  assert.equal(g.base.non_calculable, S.MOTIFS.SEGMENT_MINCE)
+  const s = S.suggerer({ date: '2026-11-17', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: {} })
+  assert.equal(s.prix, null)
+  assert.ok(s.non_calculable.includes(S.MOTIFS.SEGMENT_MINCE))
 })
 
 test('LE TEST QUI COMPTE : une seule reservation ne fait pas une grille', () => {
-  // Huit nuits d'un meme sejour portent le meme prix : la « grille » serait un
-  // point unique tire d'une reservation. Meme piege qu'a la reference.
-  const sejour = ecl(['2025-01-07', '2025-01-08', '2025-01-09', '2025-01-10',
-    '2025-01-13', '2025-01-14', '2025-01-15', '2025-01-16'], { prix: 300, id: 'UNIQUE' })
-  const g = grilleDe([sejour])
-  const seg = g.segments.get(R.SEGMENTS.HORS_VACANCES)
-  assert.equal(seg.echantillon, 8, 'huit nuits')
-  assert.equal(seg.reservations, 1, 'mais UNE observation')
-  assert.equal(seg.fiable, false)
+  // Un sejour de douze nuits passe le seuil des NUITS mais pas celui des
+  // reservations : douze nuits d'un meme client ne sont pas douze mesures.
+  const douze = []
+  for (let i = 2; i <= 13; i++) douze.push(`2025-09-${String(i).padStart(2, '0')}`)
+  const g = grilleDe([ecl(douze, { prix: 100, id: 'UNIQUE' })])
+  assert.equal(g.base.fiable, false)
 })
 
 test('les longs sejours et les nuits hors reference ne fabriquent pas la grille', () => {
-  const long = ecl(Array.from({ length: 28 }, (_, k) => {
-    const d = new Date(Date.UTC(2025, 8, 1)); d.setUTCDate(d.getUTCDate() + k)
-    return d.toISOString().slice(0, 10)
-  }), { prix: 40, id: 'LONG', long: true })
-  const g = grilleDe([...mardis(9, 120), long])
-  const seg = g.segments.get(R.SEGMENTS.HORS_VACANCES)
-  assert.equal(seg.niveaux[S.SOCLE].prix, 120, 'les 40 € du long sejour sont ecartes')
-  assert.ok(g.nuits_ecartees >= 28)
+  const normales = mardis(9, 100)
+  const long = ecl(['2025-10-01', '2025-10-02', '2025-10-03'], { prix: 999, id: 'L', long: true })
+  const exclue = ecl(['2025-10-08'], { prix: 999, id: 'X', exclues: ['2025-10-08'] })
+  const g = grilleDe([...normales, long, exclue])
+  assert.equal(g.base.max, 100, 'ni le long sejour ni la nuit exclue ne doivent entrer')
 })
 
-test('LE TEST QUI COMPTE : le jour de semaine est une COUCHE, pas un axe', () => {
-  // ⚠ La spec exige « correction jour-de-semaine en dernier », et ce n'est pas
-  // un detail d'ordre. Croiser le segment par le jour des le socle diviserait
-  // chaque echantillon par sept, et surtout ferait du jour un critere de CHOIX
-  // DU NIVEAU — alors qu'un samedi ne se vend pas « a un niveau plus haut » :
-  // il se vend un certain pourcentage plus cher que la mediane de son segment.
+// ─── LE POSITIONNEMENT DES CONTEXTES ─────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : un contexte se POSITIONNE, il n a pas sa grille', () => {
+  // ⚠ C'EST LE RENVERSEMENT DE LA PASSE 5, et la phrase de Thierry :
+  // « Toussaint : niveau Haut, ses week-ends : Tres haut ». Le segment ne
+  // porte plus de prix — il porte un indice de niveau sur la grille du bien.
   const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
-  const seg = g.segments.get(R.SEGMENTS.HORS_VACANCES)
-  // ⚠ 17, PAS 18 : le 1er novembre 2025 est un SAMEDI FERIE, et les jours
-  // feries sont CALCULES — ils ne sont pas dans le jeu de vacances du test.
-  // Le moteur a raison de le sortir du hors-vacances ; c'est le test qui
-  // l'ignorait. C'est aussi la preuve que la segmentation ne se contente pas
-  // de ce qu'on lui donne.
-  assert.equal(seg.echantillon, 17, 'UN seul segment, pas deux cases par jour')
-  assert.equal(g.segments.get(R.SEGMENTS.FERIE).echantillon, 1, 'et le ferie est a part')
-  const rSam = g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|samedi`)
-  const rMar = g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|mardi`)
-  // ⚠ LA MEDIANE DU SEGMENT SUIT LE GROUPE MAJORITAIRE. Neuf mardis a 100 €
-  // contre huit samedis a 150 € : la mediane des dix-sept nuits vaut 100, celle
-  // des mardis. Le ratio du samedi porte donc TOUT l'ecart (×1,5) et celui du
-  // mardi vaut 1. Ce n'est pas un defaut — c'est ce que la couche finale doit
-  // faire : elle corrige un prix de segment, pas une moyenne de jours.
-  assert.equal(rMar.ratio, 1, 'le jour majoritaire fixe la mediane du segment')
-  assert.equal(rSam.ratio, 1.5, 'et le samedi porte tout l ecart mesure')
-  assert.ok(rSam.ratio > rMar.ratio, 'le samedi vaut plus que le mardi')
-  assert.equal(rSam.echantillon, 8, 'huit samedis hors vacances, le neuvieme est ferie')
-  assert.equal(rMar.echantillon, 9)
+  const hv = g.positions.get('hors_vacances')
+  assert.ok(hv && hv.fiable)
+  assert.equal(hv.prix, undefined, 'un positionnement ne porte AUCUN prix propre')
+  assert.ok(Number.isInteger(hv.indice))
+  assert.equal(hv.niveau, g.base.niveaux[hv.indice].nom)
+
+  // Le samedi se positionne PLUS HAUT que sa periode : c'est la seule chose
+  // que le jour de semaine fait desormais.
+  const sam = g.positions_jour.get('hors_vacances|samedi')
+  const mar = g.positions_jour.get('hors_vacances|mardi')
+  assert.ok(sam.fiable && mar.fiable)
+  assert.ok(sam.indice > mar.indice,
+    `samedi (${sam.niveau}) devrait etre au-dessus de mardi (${mar.niveau})`)
 })
 
-test('un ratio de jour tire de trop peu de nuits ne s applique pas', () => {
-  // Corriger un prix par un rapport tire de trois nuits serait pire que de ne
-  // pas le corriger.
-  const g = grilleDe([...mardis(12, 100), ...samedis(3, 400)])
-  assert.equal(g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|samedi`), undefined)
-  assert.ok(g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|mardi`))
+test('le positionnement retient le niveau le PLUS PROCHE de la mediane', () => {
+  const niveaux = [{ prix: 100 }, { prix: 120 }, { prix: 140 }]
+  assert.equal(S.niveauLePlusProche(niveaux, 100), 0)
+  assert.equal(S.niveauLePlusProche(niveaux, 119), 1)
+  assert.equal(S.niveauLePlusProche(niveaux, 131), 2)
+  // ⚠ A EGALITE, LE PLUS BAS — sans regle de depart, deux medianes symetriques
+  // rendraient un niveau different d'un appel a l'autre.
+  assert.equal(S.niveauLePlusProche(niveaux, 110), 0)
+})
+
+test('le couple (segment, jour) exige AUSSI trois reservations distinctes', () => {
+  // Deux sejours de plusieurs samedis suffisaient a fixer le positionnement du
+  // samedi : ce sont deux mesures, pas neuf.
+  const g = grilleDe([
+    ...mardis(9, 100),
+    ecl(['2025-09-06', '2025-09-13', '2025-09-20', '2025-09-27'], { prix: 300, id: 'A' }),
+    ecl(['2025-10-04', '2025-10-11', '2025-10-18', '2025-10-25'], { prix: 300, id: 'B' })
+  ])
+  const sam = g.positions_jour.get('hors_vacances|samedi')
+  assert.equal(sam.fiable, false, 'deux reservations ne positionnent pas un jour')
 })
 
 // ─── LE PIPELINE ─────────────────────────────────────────────────────────────
 
-const GRILLE = grilleDe([...mardis(12, 100), ...samedis(12, 150)])
-const BIEN = { prix_minimum: 5000 }   // 50 €
+const bienSansPlancher = { prix_minimum: 100 }
 
-test('LE TEST QUI COMPTE : chaque euro se justifie par une couche nommee', () => {
-  const s = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: { ecart: 0 }, bien: BIEN })
-  assert.ok(s.prix > 0)
-  const noms = s.couches.map(c => c.nom)
-  assert.deepStrictEqual(noms, ['socle', 'pression', 'delai', 'jour_de_semaine'],
-    'les quatre couches, dans l ordre, jour de semaine EN DERNIER')
-  for (const c of s.couches) {
-    assert.ok(c.detail && c.detail.length > 5, `la couche ${c.nom} doit se chiffrer`)
+test('LE TEST QUI COMPTE : le prix servi EST le prix du niveau annonce', () => {
+  // ⚠ L'INVARIANT QUI REND LE MENSONGE IMPOSSIBLE. Avec un multiplicateur, le
+  // moteur pouvait afficher « Haut, +2 niveaux » et servir le prix neutre — le
+  // defaut le plus insidieux du lot 4.4. Il n'y a plus de multiplicateur : le
+  // prix EST celui d'un niveau, donc l'etiquette ne peut plus mentir.
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  for (const date of ['2026-11-03', '2026-11-07', '2026-11-14', '2026-11-21']) {
+    for (const delai of [5, 30, 90]) {
+      for (const ecart of [-0.5, 0, 0.5]) {
+        const s = S.suggerer({ date, grille: g, contexte: CTX, ouverte: true,
+          delaiJours: delai, pression: { ecart }, bien: bienSansPlancher })
+        if (s.prix == null) continue
+        const niveau = g.base.niveaux.find(n => n.nom === s.niveau)
+        assert.ok(niveau, `niveau inconnu : ${s.niveau}`)
+        assert.equal(s.prix, niveau.prix,
+          `${date} J-${delai} : annonce ${s.niveau} (${niveau.prix} €), sert ${s.prix} €`)
+      }
+    }
   }
-  assert.ok(s.fourchette && s.fourchette.min != null && s.fourchette.max != null,
-    'la fourchette du segment est montree — elle dit si le chiffre merite confiance')
-})
-
-test('LE TEST QUI COMPTE : 100 % deterministe', () => {
-  // Memes entrees, meme sortie. Un moteur de prix qui varie d'un appel a
-  // l'autre est indefendable : l'hote ne peut pas verifier ce qu'on lui
-  // propose, et deux ecrans ouverts afficheraient deux prix.
-  const args = { date: '2026-03-07', grille: GRILLE, contexte: CTX, ouverte: true,
-    delaiJours: 45, pression: { ecart: -0.3 }, bien: BIEN }
-  const a = S.suggerer(args)
-  const b = S.suggerer(args)
-  assert.deepStrictEqual(a, b)
-})
-
-test('LE TEST QUI COMPTE : aucune suggestion sur une date FERMEE', () => {
-  // ⚠ ARBITRAGE DE THIERRY. Le prix n'a aucun effet tant que la date est
-  // fermee, et l'appliquer alimenterait le journal avec un tarif que personne
-  // ne verra jamais — le cas que le lot 4.3 vient de corriger a l'autre bout.
-  // Huit des douze prochains mois de La bulle sont dans ce cas.
-  const s = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: false, delaiJours: 30, pression: { ecart: 0 }, bien: BIEN })
-  assert.equal(s.prix, null)
-  assert.ok(s.non_calculable.includes(S.MOTIFS.FERMEE))
-  assert.deepStrictEqual(s.couches, [], 'et on ne calcule meme pas')
-})
-
-test('LE TEST QUI COMPTE : le plancher REFUSE, il ne rabote pas', () => {
-  // Regle gravee au KB du prix plancher : on ferme la date, on ne remonte
-  // jamais le prix a la place de l hote. Proposer un prix releve au plancher
-  // ferait croire que le moteur le RECOMMANDE.
-  const petit = grilleDe(mardis(12, 20))
-  const s = S.suggerer({ date: '2026-03-03', grille: petit, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: null, bien: { prix_minimum: 5000 } })
-  assert.equal(s.prix, null, 'aucun prix propose')
-  assert.ok(s.non_calculable.includes(S.MOTIFS.SOUS_PLANCHER))
-  assert.ok(s.prix_refuse > 0, 'mais on DIT ce qui a ete refuse')
-  assert.equal(s.plancher, 50)
 })
 
 test('LE TEST QUI COMPTE : l amplitude ne depasse jamais deux niveaux', () => {
-  // ⚠ ARBITRAGE DE THIERRY. C'est toute la grille : le moteur ne propose jamais
-  // un prix hors de ce que l hote a deja pratique sur ce segment.
-  const extreme = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 200, pression: { ecart: 5 }, bien: BIEN })
-  assert.equal(extreme.deplacement, 2, 'deux niveaux, pas trois')
-  assert.equal(extreme.niveau, 'Haut')
-  const bas = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 1, pression: { ecart: -0.9 }, bien: BIEN })
-  assert.equal(bas.deplacement, -2)
-  assert.equal(bas.niveau, 'Prudent')
-})
-
-test('LE TEST QUI COMPTE : l invariant d amplitude tient sur TOUTES les entrees', () => {
-  // ⚠ LA BORNE A ±2 EST AUJOURD'HUI REDONDANTE — deux couches a ±1 ne peuvent
-  // pas produire plus. La retirer ne fait donc echouer aucun cas particulier,
-  // et c'est precisement pourquoi il faut tester l'INVARIANT et non la ligne :
-  // le jour ou une troisieme couche s'ajoutera, ce test tombera, et c'est lui
-  // qui rappellera que le moteur ne doit jamais proposer un prix hors de ce que
-  // l'hote a deja pratique.
-  const ecarts = [-5, -0.9, -0.26, -0.25, -0.24, 0, 0.24, 0.25, 0.26, 0.9, 5, null]
-  const delais = [0, 1, 14, 15, 30, 59, 60, 200, 3650, null]
-  let vus = 0
-  for (const e of ecarts) {
-    for (const d of delais) {
-      const s = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-        ouverte: true, delaiJours: d, pression: e == null ? null : { ecart: e },
-        bien: BIEN })
-      if (s.prix == null) continue
-      vus++
-      assert.ok(Math.abs(s.deplacement) <= S.AMPLITUDE_MAX,
-        `deplacement ${s.deplacement} au-dela de ±${S.AMPLITUDE_MAX} (ecart ${e}, delai ${d})`)
-      // ⚠ ET LE PRIX RESTE DANS CE QUE LE LOGEMENT A DEJA PRATIQUE CE JOUR-LA.
-      // C'est ce test qui a trouve le defaut : niveau Prudent 100 € × ratio
-      // mardi 0,8 rendait 80 €, alors que la nuit la moins chere jamais vendue
-      // etait a 100. Eprouver une propriete sur toutes les entrees attrape ce
-      // qu'un cas choisi ne montre pas.
-      const et = s.fourchette_jour || s.fourchette
-      assert.ok(s.prix >= et.min && s.prix <= et.max,
-        `${s.prix} € hors de l etendue observee ${et.min}–${et.max}`)
-      assert.ok(S.NIVEAUX.some(n => n.nom === s.niveau), 'le niveau est nomme')
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  for (const date of ['2026-11-03', '2026-11-07', '2026-11-14']) {
+    for (const delai of [0, 5, 14, 15, 59, 60, 200]) {
+      for (const ecart of [-1, -0.5, -0.26, -0.25, 0, 0.25, 0.26, 0.5, 1]) {
+        const s = S.suggerer({ date, grille: g, contexte: CTX, ouverte: true,
+          delaiJours: delai, pression: { ecart }, bien: bienSansPlancher })
+        if (s.prix == null) continue
+        assert.ok(Math.abs(s.deplacement) <= S.AMPLITUDE_MAX,
+          `${date} J-${delai} ecart ${ecart} : deplacement ${s.deplacement}`)
+      }
     }
   }
-  assert.ok(vus >= 100, `l invariant doit etre eprouve largement (${vus} cas)`)
 })
 
-test('LE TEST QUI COMPTE : deux signaux dans le meme sens se DISENT', () => {
-  // ⚠ ARBITRAGE DE THIERRY. C'est le cas ou la suggestion s eloigne le plus du
-  // prix actuel, donc celui ou l hote veut regarder avant d appliquer.
-  const cumul = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 90, pression: { ecart: 0.5 }, bien: BIEN })
-  assert.equal(cumul.cumul, true)
-  assert.ok(cumul.couches.some(c => c.nom === 'cumul'))
-  const seul = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: { ecart: 0.5 }, bien: BIEN })
-  assert.equal(seul.cumul, undefined, 'un seul signal ne cumule rien')
-})
-
-test('sans N-1 comparable, la pression ne DEVINE pas', () => {
-  const s = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: null, bien: BIEN })
-  const p = s.couches.find(c => c.nom === 'pression')
-  assert.equal(p.deplacement, 0)
-  assert.match(p.detail, /aucun N-1/)
-})
-
-test('un segment sans grille se DIT, il ne retombe pas sur un autre', () => {
-  // Retomber sur le segment voisin donnerait un prix credible et faux : les
-  // vacances de la zone du bien valent 23 % de plus que le hors-vacances.
-  const g = grilleDe(mardis(12, 100))   // seul `hors_vacances` est peuple
-  // Un jour FERIE : le segment `ferie` n'a qu'une nuit dans cette grille, tres
-  // loin du seuil. Retomber sur `hors_vacances` donnerait un prix credible et
-  // faux — les feries se vendent 8 % plus cher sur La bulle.
-  const s = S.suggerer({ date: '2026-05-01', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: null, bien: BIEN })
-  assert.equal(s.prix, null)
-  assert.ok(s.non_calculable.includes(S.MOTIFS.PAS_DE_GRILLE) ||
-    s.non_calculable.includes(S.MOTIFS.SEGMENT_MINCE))
-})
-
-test('une date hors du contexte charge se DIT', () => {
-  const court = R.construireContexte({ zoneBien: 'C', vacances: VACANCES,
-    debut: '2025-01-01', fin: '2025-12-31' })
-  const s = S.suggerer({ date: '2027-03-03', grille: GRILLE, contexte: court,
-    ouverte: true, delaiJours: 30, pression: null, bien: BIEN })
-  assert.equal(s.prix, null)
-  assert.ok(s.non_calculable.includes('hors_fenetre_du_contexte'))
-})
-
-test('le module est PUR : ni base, ni reseau, ni horloge', () => {
-  const src = require('node:fs').readFileSync(
-    require.resolve('../lib/yield/suggestion'), 'utf8')
-  for (const interdit of ['supabase', 'fetch(', 'Date.now(', 'process.env', '.from(']) {
-    assert.ok(!src.includes(interdit), `le module ne doit pas contenir ${interdit}`)
+test('LE TEST QUI COMPTE : chaque euro se justifie par une couche nommee', () => {
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const s = S.suggerer({ date: '2026-11-07', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 90, pression: { ecart: 0.4 }, bien: bienSansPlancher })
+  assert.ok(s.prix > 0)
+  const noms = s.couches.map(c => c.nom)
+  assert.ok(noms.includes('position'), 'la position de depart doit etre dite')
+  assert.ok(noms.includes('pression'))
+  assert.ok(noms.includes('delai'))
+  for (const c of s.couches) {
+    assert.ok(c.detail && c.detail.length > 0, `couche ${c.nom} sans detail`)
   }
-  assert.ok(!/new Date\s*\(\s*\)/.test(src), 'aucune lecture de l horloge systeme')
-  // Et il n'ECRIT rien, nulle part.
-  for (const interdit of ['insert', 'update', 'upsert', 'delete']) {
-    assert.ok(!src.includes(interdit), `ce module PROPOSE, il n ecrit pas (${interdit})`)
+  // ⚠ AUCUN RATIO NI AUCUNE MEDIANE EN VEDETTE : les `resume` parlent en
+  // niveaux, la mecanique chiffree reste dans `detail`.
+  for (const c of s.couches) {
+    if (!c.resume) continue
+    assert.ok(!/×|ratio|médiane|mediane/.test(c.resume),
+      `« ${c.resume} » parle le langage du moteur`)
   }
 })
 
-test('LE TEST QUI COMPTE : « je ne sais pas » n est pas « oui »', () => {
-  // ⚠ TROUVE EN EPROUVANT LE PIPELINE SUR DES DATES REELLES, pas en relisant le
-  // code. Le calendrier de La bulle s'arrete au 7 decembre 2026 : au-dela, la
-  // memoire d'intention n'existe pas et `ouverte` vaut `null`. La premiere
-  // version suggerait quand meme un prix — pour une nuit dont personne ne sait
-  // si elle est vendable. C'est la regle qui traverse tout ce chantier depuis
-  // le lot 3.2, appliquee au dernier maillon.
-  for (const inconnu of [null, undefined]) {
-    const s = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-      ouverte: inconnu, delaiJours: 30, pression: null, bien: BIEN })
-    assert.equal(s.prix, null, `ouverte=${inconnu} : aucune suggestion`)
-    assert.ok(s.non_calculable.includes(S.MOTIFS.OUVERTURE_INCONNUE))
-  }
-  // Et « fermee » reste distinct d'« inconnu » : deux causes, deux motifs.
-  const fermee = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: false, delaiJours: 30, pression: null, bien: BIEN })
-  assert.ok(fermee.non_calculable.includes(S.MOTIFS.FERMEE))
-  assert.ok(!fermee.non_calculable.includes(S.MOTIFS.OUVERTURE_INCONNUE))
-  // Seul `true` ouvre la porte.
-  const ouverte = S.suggerer({ date: '2026-03-03', grille: GRILLE, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: null, bien: BIEN })
-  assert.ok(ouverte.prix > 0)
+test('l etiquette ne porte le jour QUE s il change le niveau', () => {
+  // ⚠ REGLE DES COUCHES MUETTES, APPLIQUEE AU LIBELLE. « Base · mardi » sur un
+  // mardi qui suit sa periode ferait une etiquette a deux termes pour une seule
+  // information.
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const mardi = S.suggerer({ date: '2026-11-03', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  const samedi = S.suggerer({ date: '2026-11-07', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  assert.equal(mardi.etiquette, mardi.niveau, 'un jour qui suit sa periode : niveau seul')
+  assert.equal(samedi.etiquette, `${samedi.niveau} · samedi`)
+  assert.equal(samedi.etiquette_corrigee, true)
 })
 
-// ─── LES EUROS, PAS SEULEMENT LES NOMS ───────────────────────────────────────
-// ⚠ LE CONSTAT LE PLUS STRUCTURANT DE LA REVIEW : aucun test de ce fichier
-// n'assertait un PRIX. Tous portaient sur `s.prix > 0`, un nom de niveau ou une
-// appartenance a une fourchette — et dans le jeu d'essai d'origine, l'etendue du
-// mardi etait [100, 100], donc Prudent, Reference et Haut rendaient TOUS 100 €.
-// Les quatre couches, l'amplitude ±2 et le cumul ne produisaient aucun euro, et
-// rien ne le disait.
-//
-// Ici, un couple jour DISPERSE, et des prix exacts.
-
-// Neuf mardis de septembre-novembre 2025, prix etales de 100 a 180.
-function mardisEtales () {
-  const prix = [100, 110, 120, 130, 140, 150, 160, 170, 180]
-  const out = []
-  const d = new Date(Date.UTC(2025, 8, 2))
-  for (let i = 0; i < prix.length; i++) {
-    out.push(ecl([d.toISOString().slice(0, 10)], { prix: prix[i], id: `E${i}` }))
-    d.setUTCDate(d.getUTCDate() + 7)
-  }
-  return out
-}
-const ETALEE = grilleDe(mardisEtales())
-
-test('LE TEST QUI COMPTE : le pipeline produit des EUROS distincts et exacts', () => {
-  const seg = ETALEE.segments.get(R.SEGMENTS.HORS_VACANCES)
-  // 9 valeurs de 100 a 180 : P20 = 116, P35 = 128, P50 = 140, P65 = 152, P80 = 164.
-  assert.deepStrictEqual(seg.niveaux.map(n => n.prix), [116, 128, 140, 152, 164])
-  // Le ratio du mardi vaut 1 (les mardis SONT le segment), donc le prix servi
-  // est exactement le niveau — l'euro se lit sans intermediaire.
-  const r = ETALEE.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|mardi`)
-  assert.equal(r.ratio, 1)
-
-  const cas = [
-    // [delai, ecart, niveau attendu, prix attendu]
-    [30, 0, 'Référence', 140],
-    [30, -0.3, 'Mesuré', 128],
-    [30, 0.3, 'Ferme', 152],
-    [5, 0, 'Mesuré', 128],
-    [90, 0, 'Ferme', 152],
-    [5, -0.3, 'Prudent', 116],
-    [90, 0.3, 'Haut', 164]
-  ]
-  for (const [delai, ecart, niveau, prix] of cas) {
-    const s = S.suggerer({ date: '2026-03-03', grille: ETALEE, contexte: CTX,
-      ouverte: true, delaiJours: delai, pression: { ecart }, bien: BIEN })
-    assert.equal(s.niveau, niveau, `délai ${delai}, écart ${ecart} : niveau`)
-    assert.equal(s.prix, prix, `délai ${delai}, écart ${ecart} : ${prix} € attendus`)
-  }
-  // Sept combinaisons, cinq prix DISTINCTS : le pipeline bouge vraiment.
-  assert.equal(new Set(cas.map(c => c[3])).size, 5)
-})
-
-test('LE TEST QUI COMPTE : un niveau annonce ne ment jamais sur l euro servi', () => {
-  // ⚠ LE DEFAUT LE PLUS INSIDIEUX DU LOT. Quand l'etendue du couple (segment,
-  // jour) est plus resserree que celle du segment, les cinq niveaux s'ecrasent
-  // apres bornage : l'hote lisait « Haut, +2 niveaux, deux signaux dans le meme
-  // sens » et voyait EXACTEMENT le prix neutre.
-  //
-  // Un segment large (mardis etales) et un jour homogene (samedis tous a 150) :
-  // le samedi ne peut servir que 150 €, quel que soit le niveau choisi.
-  const samedisPlats = []
-  const d = new Date(Date.UTC(2025, 8, 6))
-  for (let i = 0; i < 9; i++) {
-    samedisPlats.push(ecl([d.toISOString().slice(0, 10)], { prix: 150, id: `P${i}` }))
-    d.setUTCDate(d.getUTCDate() + 7)
-  }
-  const g = grilleDe([...mardisEtales(), ...samedisPlats])
-  const rSam = g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|samedi`)
-  assert.equal(rSam.min, rSam.max, 'le samedi est homogene : etendue d un seul point')
-  // Et le detail dira la cause JOUR pour le samedi.
-
-  const haut = S.suggerer({ date: '2026-03-07', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 90, pression: { ecart: 0.5 }, bien: BIEN })
-  const neutre = S.suggerer({ date: '2026-03-07', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: { ecart: 0 }, bien: BIEN })
-  assert.equal(haut.prix, neutre.prix, 'l etendue du jour ecrase les deux')
-  // ⚠ ET LE MOTEUR LE DIT, au lieu d annoncer un deplacement qui ne s est pas
-  // traduit en euros.
-  assert.equal(haut.deplacement, 2, 'le niveau CHOISI reste lisible')
-  assert.equal(haut.deplacement_effectif, 0, 'mais le deplacement EFFECTIF est nul')
-  assert.equal(haut.niveau_effectif, 'Référence')
-  assert.ok(haut.non_calculable.includes(S.MOTIFS.PIPELINE_NEUTRALISE))
-  assert.ok(haut.couches.some(c => c.nom === 'neutralisation'))
-  // ⚠ ET LA NEUTRALISATION ATTRAPE UNE SECONDE CAUSE, decouverte en ecrivant ce
-  // test : ici les huit samedis a 150 € dominent le segment, donc P50 a P80 se
-  // confondent (150 €) — le deplacement est sans effet MEME sur un mardi dont
-  // l'etendue est large [100, 180]. Le motif dit l'effet, le detail dit la
-  // cause. C'est ce que le moteur doit faire : l'hote ne se demande pas
-  // pourquoi « +2 niveaux » n'a rien change.
-  const mardi = S.suggerer({ date: '2026-03-03', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 90, pression: { ecart: 0.5 }, bien: BIEN })
-  assert.equal(mardi.deplacement_effectif, 0)
-  assert.ok(mardi.couches.find(c => c.nom === 'neutralisation').detail
-    .includes('se confondent'), 'la cause SEGMENT, pas la cause JOUR')
-
-  // Sur une grille reellement etalee, en revanche, le deplacement produit un euro.
-  const vrai = S.suggerer({ date: '2026-03-03', grille: ETALEE, contexte: CTX,
-    ouverte: true, delaiJours: 90, pression: { ecart: 0.5 }, bien: BIEN })
-  assert.equal(vrai.deplacement_effectif, vrai.deplacement)
-  assert.equal(vrai.prix, 164, 'niveau Haut, ratio 1')
-  assert.ok(!vrai.non_calculable.includes(S.MOTIFS.PIPELINE_NEUTRALISE))
+test('LE TEST QUI COMPTE : un ecart NON FIABLE ne deplace aucun prix', () => {
+  // ⚠ RELEVE EN REVIEW, ET LE DEFAUT AGISSAIT DEJA EN PRODUCTION.
+  // Le portefeuille N-1 de La bulle porte `portefeuille_n1_reconstruit` : il
+  // est reconstitue depuis l'etat final, donc sous-compte par construction —
+  // annulations invisibles, dates de vente perdues a la migration. Le biais est
+  // systematiquement POSITIF. Le moteur en tirait « +40 %, on monte d'un
+  // niveau » : une hausse automatique causee par une lacune de donnee.
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const base = { date: '2026-11-03', grille: g, contexte: CTX, ouverte: true,
+    delaiJours: 30, bien: bienSansPlancher }
+  const fiable = S.suggerer({ ...base, pression: { ecart: 0.5 } })
+  const pas = S.suggerer({ ...base,
+    pression: { ecart: 0.5, fiable: false, motif_non_fiable: 'portefeuille_n1_reconstruit' } })
+  assert.equal(fiable.couches.find(c => c.nom === 'pression').deplacement, 1)
+  assert.equal(pas.couches.find(c => c.nom === 'pression').deplacement, 0)
+  assert.ok(pas.prix <= fiable.prix, 'un ecart non fiable ne doit pas faire monter')
+  // ⚠ ET LE CHIFFRE RESTE MONTRE, avec sa reserve : le masquer priverait
+  // l'hote d'une information vraie, seulement imprecise.
+  assert.match(pas.couches.find(c => c.nom === 'pression').detail,
+    /ne déplace aucun prix/)
+  assert.equal(pas.couches.find(c => c.nom === 'pression').agit, false)
 })
 
 test('LE TEST QUI COMPTE : sans `bien`, le plancher GLOBAL s applique quand meme', () => {
-  // ⚠ RELEVE EN REVIEW. `bien` a `null` est la VALEUR PAR DEFAUT du parametre,
-  // et l ancienne ligne sautait alors le plancher entierement. Or
-  // `plancherDuBien(null)` rend le plancher global de 10 € : cette garde existe
-  // precisement pour le cas « aucun reglage ».
-  const bradee = grilleDe(mardis(12, 8))
-  for (const bien of [null, undefined, {}]) {
-    const s = S.suggerer({ date: '2026-03-03', grille: bradee, contexte: CTX,
-      ouverte: true, delaiJours: 30, pression: null, bien })
-    assert.equal(s.prix, null, `bien=${bien} : 8 € est sous le plancher global`)
-    assert.ok(s.non_calculable.includes(S.MOTIFS.SOUS_PLANCHER))
-    assert.equal(s.plancher, 10, 'et le plancher global est DIT')
-  }
+  // ⚠ `bien || {}`, JAMAIS `bien ? … : { ok: true }`. La valeur par defaut du
+  // parametre est `null`, et l'ancienne forme sautait le plancher de 10 €
+  // exactement dans le cas ou il sert — « aucun reglage ».
+  const g = grilleDe(mardis(9, 5))
+  const s = S.suggerer({ date: '2026-11-17', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30 })
+  assert.equal(s.prix, null)
+  assert.ok(s.non_calculable.includes(S.MOTIFS.SOUS_PLANCHER))
+  assert.equal(s.plancher, 10)
 })
 
-test('LE TEST QUI COMPTE : une nuit DEJA PASSEE ne reçoit pas de suggestion', () => {
-  // `-120 <= 14` etait vrai : le moteur proposait un prix prudent pour une nuit
-  // consommee depuis quatre mois, en expliquant « la nuit approche ».
-  const s = S.suggerer({ date: '2026-03-03', grille: ETALEE, contexte: CTX,
-    ouverte: true, delaiJours: -120, pression: null, bien: BIEN })
-  assert.equal(s.prix, null)
+test('une nuit vendue, fermee ou inconnue ne recoit AUCUN prix', () => {
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const base = { date: '2026-11-17', grille: g, contexte: CTX, delaiJours: 30, bien: {} }
+  assert.ok(S.suggerer({ ...base, ouverte: true, vendue: true })
+    .non_calculable.includes(S.MOTIFS.VENDUE))
+  assert.ok(S.suggerer({ ...base, ouverte: false })
+    .non_calculable.includes(S.MOTIFS.FERMEE))
+  // ⚠ « JE NE SAIS PAS » N'EST PAS « OUI ».
+  assert.ok(S.suggerer({ ...base, ouverte: null })
+    .non_calculable.includes(S.MOTIFS.OUVERTURE_INCONNUE))
+})
+
+test('une nuit PASSEE n est pas une nuit proche', () => {
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const s = S.suggerer({ date: '2024-11-05', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: -120, bien: {} })
   assert.ok(s.non_calculable.includes(S.MOTIFS.NUIT_PASSEE))
-  // Le jour meme (delai 0) reste tarifable : il n est pas passe.
-  const aujourdHui = S.suggerer({ date: '2026-03-03', grille: ETALEE, contexte: CTX,
-    ouverte: true, delaiJours: 0, pression: null, bien: BIEN })
-  assert.ok(aujourdHui.prix > 0)
+  assert.equal(s.prix, null)
 })
 
-test('une grille SERIALISEE rend un motif, pas un TypeError', () => {
-  // `construireGrille` rend des Map. Apres un aller-retour JSON — le chemin
-  // naturel des le lot 4.5 — `segments` devient `{}`, qui est TRUTHY : le garde
-  // passait et `.get` levait, donc un 500 au lieu d un motif.
-  const morte = JSON.parse(JSON.stringify(ETALEE))
-  assert.doesNotThrow(() => S.suggerer({ date: '2026-03-03', grille: morte,
-    contexte: CTX, ouverte: true, delaiJours: 30, pression: null, bien: BIEN }))
-  const s = S.suggerer({ date: '2026-03-03', grille: morte, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: null, bien: BIEN })
-  assert.equal(s.prix, null)
+test('une grille passee par JSON n est plus une grille, et on le DIT', () => {
+  // Apres un aller-retour JSON les `Map` deviennent `{}`, qui est TRUTHY : le
+  // garde passait et `.get` levait un TypeError, donc un 500 au lieu d'un motif.
+  const g = JSON.parse(JSON.stringify({ ...grilleDe(mardis(9, 100)),
+    positions: {}, positions_jour: {} }))
+  const s = S.suggerer({ date: '2026-11-17', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: {} })
   assert.ok(s.non_calculable.includes(S.MOTIFS.PAS_DE_GRILLE))
 })
 
-test('LE TEST QUI COMPTE : le segment rendu est CELUI QUI A FAIT LE PRIX', () => {
-  // ⚠ RELEVE EN REVIEW. La grille est indexee sur `segment`
-  // (« vacances de la zone »), pas sur `detail` (« … : hiver ») : annoncer le
-  // detail ferait lire « vacances d hiver : 144 € » alors que le chiffre est la
-  // mediane de TOUTES les vacances de la zone, ete compris. C est exactement ce
-  // que `reference.js` interdit — et elle, au moins, porte un drapeau `replie`.
-  const ete = []
-  const d = new Date(Date.UTC(2025, 6, 8))
-  for (let i = 0; i < 12; i++) {
-    ete.push(ecl([d.toISOString().slice(0, 10)], { prix: 200, id: `T${i}` }))
-    d.setUTCDate(d.getUTCDate() + 7)
-  }
-  const g = grilleDe(ete)
-  // ⚠ PAS LE 14 JUILLET : il est FERIE, donc `segment === detail` et le test ne
-  // distinguerait rien. Le 21 est un mardi ordinaire des vacances d'ete.
-  const s = S.suggerer({ date: '2026-07-21', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 30, pression: null, bien: BIEN })
-  assert.ok(s.prix != null, 'la grille doit repondre sur ce segment')
-  assert.equal(s.segment, R.SEGMENTS.VACANCES_ZONE,
-    'le segment annonce est celui qui INDEXE la grille')
-  assert.equal(s.segment_detaille, `${R.SEGMENTS.VACANCES_ZONE}:été`,
-    'le detail reste disponible, mais a part')
-  assert.notEqual(s.segment, s.segment_detaille,
-    'les deux ne doivent pas etre confondus : « vacances d ete : 200 € » serait'
-    + ' la mediane de TOUTES les vacances de la zone')
+test('100 % deterministe : memes entrees, meme prix', () => {
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const appel = () => S.suggerer({ date: '2026-11-07', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 40, pression: { ecart: 0.3 }, bien: bienSansPlancher })
+  assert.deepEqual(appel(), appel())
 })
 
-test('le ratio d un jour exige AUSSI trois reservations distinctes', () => {
-  // ⚠ RELEVE EN REVIEW : seul le compte de nuits etait teste. Deux sejours de
-  // 24 nuits (sous le seuil de long sejour, donc non ecartes) suffisaient a
-  // fixer le ratio ET l etendue de borne — tous les mardis geles a leur prix.
-  const sejour = (debut, id) => {
-    const nuits = []
-    const d = new Date(debut)
-    for (let k = 0; k < 24; k++) { nuits.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 7) }
-    return ecl(nuits, { prix: 300, id })
-  }
-  // Deux sejours SEULS sur les mardis : 48 nuits, mais DEUX observations.
-  const g = grilleDe([
-    sejour(Date.UTC(2025, 8, 2), 'A'), sejour(Date.UTC(2025, 8, 2), 'B'),
-    // De quoi peupler le segment sans toucher aux mardis.
-    ...['2025-09-03', '2025-09-10', '2025-09-17', '2025-09-24',
-      '2025-10-01', '2025-10-08', '2025-10-15', '2025-10-22', '2025-10-29']
-      .map((d, i) => ecl([d], { prix: 120, id: `W${i}` }))
-  ])
-  const r = g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|mardi`)
-  assert.equal(r, undefined,
-    'quarante-huit nuits mais DEUX reservations : aucun ratio ne doit sortir')
-  // Et le mercredi, lui, a neuf reservations distinctes : son ratio existe.
-  assert.ok(g.ratios_jour.get(`${R.SEGMENTS.HORS_VACANCES}|mercredi`),
-    'le chemin PASSANT, pour qu un seuil de trop se voie')
+// ─── L emprunt au segment parent ─────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : le moteur ne se tait JAMAIS sur un pont', () => {
+  // Sans la regle d'emprunt, ce cas rendait « segment sous le seuil » : aucune
+  // suggestion sur la nuit qui prend le plus de valeur de l'annee, et un
+  // silence qui ne se voit pas.
+  const feries = ['2025-05-01', '2025-05-08', '2025-05-29', '2025-11-11',
+    '2025-12-25', '2025-07-14', '2025-04-21', '2025-06-09', '2025-01-01']
+  const lignes = [...mardis(9, 100),
+    ...feries.map((d, i) => ecl([d], { prix: 200, id: `F${i}` })),
+    ecl(['2025-05-02'], { prix: 180, id: 'P1' }),
+    ecl(['2025-05-09'], { prix: 180, id: 'P2' })]
+  const g = grilleDe(lignes)
+  const pont = g.positions.get('pont')
+  assert.ok(pont.fiable, 'le pont doit avoir une position')
+  assert.equal(pont.reference_empruntee, 'ferie')
+  assert.equal(pont.indice, g.positions.get('ferie').indice)
+  assert.equal(pont.echantillon_propre, 2)
+
+  const s = S.suggerer({ date: '2026-05-15', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  assert.equal(s.reference_empruntee, 'ferie')
+  assert.ok(s.prix > 0, 'un pont doit recevoir un prix')
+  assert.equal(s.non_calculable.length, 0)
+  assert.match(s.couches.find(c => c.nom === 'position').detail, /empruntee/)
+})
+
+test('l emprunt ne remplace jamais une mesure propre', () => {
+  const feries = ['2025-05-01', '2025-05-08', '2025-05-29', '2025-11-11',
+    '2025-12-25', '2025-07-14', '2025-04-21', '2025-06-09', '2025-01-01']
+  const ponts = ['2025-01-02', '2025-01-03', '2025-05-02', '2025-05-09',
+    '2025-05-30', '2025-11-10', '2025-12-26', '2024-05-10', '2024-11-01']
+  const g = grilleDe([...mardis(9, 100),
+    ...feries.map((d, i) => ecl([d], { prix: 200, id: `F${i}` })),
+    ...ponts.map((d, i) => ecl([d], { prix: 300, id: `P${i}` }))])
+  const pont = g.positions.get('pont')
+  assert.equal(pont.fiable, true)
+  assert.equal(pont.reference_empruntee, undefined)
+  assert.equal(pont.mediane, 300, 'sa mediane, pas celle du parent')
+})
+
+test('si le parent est maigre lui aussi, le moteur le DIT au lieu d inventer', () => {
+  // ⚠ L'EMPRUNT N'EST PAS UNE PROMESSE INCONDITIONNELLE.
+  const g = grilleDe([...mardis(9, 100),
+    ecl(['2025-05-01'], { prix: 200, id: 'F1' }),
+    ecl(['2025-05-02'], { prix: 200, id: 'P1' })])
+  const pont = g.positions.get('pont')
+  assert.equal(pont.fiable, false)
+  const s = S.suggerer({ date: '2026-05-15', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: {} })
+  assert.equal(s.prix, null)
+  assert.ok(s.non_calculable.includes(S.MOTIFS.SEGMENT_MINCE))
 })

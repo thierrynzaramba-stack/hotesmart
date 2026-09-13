@@ -57,6 +57,10 @@
       "destination": "/apps/yield/index"
     },
     {
+      "source": "/apps/yield/prix",
+      "destination": "/apps/yield/prix"
+    },
+    {
       "source": "/apps/serrures",
       "destination": "/apps/serrures/index"
     },

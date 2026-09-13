@@ -1,0 +1,14 @@
+# ⚠ LA RACINE DU DEPOT EST LA RACINE STATIQUE SERVIE.
+# `vercel.json` pose `outputDirectory: "."` et `cleanUrls: true` : tout fichier
+# HTML depose a la racine devient une URL PUBLIQUE, sans session, sans garde,
+# et indexable. Aucun middleware ne protege les fichiers statiques.
+#
+# Vecu (13 septembre 2026, releve en review) : les apercus de validation sur
+# pieces etaient generes dans `apercu-prix.html`, A LA RACINE. Ils contiennent
+# des donnees reelles — dates de sejour, canaux, prix payes, chiffre d'affaires
+# du mois. Un `git add .` suivi d'un push les aurait mis en ligne pour tout le
+# monde. Le `.gitignore` seul ne suffit pas : il protege du versionnement, pas
+# du deploiement, et un `git add -f` ou un autre poste le contourne.
+#
+# Les apercus se generent desormais HORS du depot. Ce filet reste quand meme.
+apercu-*.html

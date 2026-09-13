@@ -304,3 +304,45 @@ complète et 2026 en cours), produit en **exécutant le code de rendu de la page
 sur la sortie réelle de `/api/yield` — jamais une maquette, sinon on validerait
 autre chose que ce qui part en production. Le générateur est
 `scratchpad/rendu.js`, hors dépôt.
+
+## 8. On itère un écran comme on itère du code
+
+**Leçon du 13 septembre 2026 — la refonte en matrice, abandonnée.**
+
+La page de tarification jour par jour a été réécrite d'un bloc en **matrice**
+(jours en colonnes, indicateurs en lignes), avec trois panneaux N-1, un radar de
+douze mois, un module `lib/yield/matrice.js` et une requête supplémentaire par
+ouverture. Tout marchait : trente et une colonnes alignées, chaque tiret portant
+son motif, aucun code technique visible. Thierry l'a abandonnée en la voyant.
+
+**Ce n'est pas la matrice qui a échoué, c'est la méthode.** Quinze décisions
+d'interface arrivaient en même temps — la densité, les blocs, les couleurs de
+segment, la fusion des niveaux, l'allègement des justifications, la colonne de
+synthèse, les jumeaux repliés. Aucune ne pouvait être jugée séparément : dire
+« non » à l'ensemble était la seule réponse possible, et tout le travail partait
+avec, y compris les corrections qui, elles, étaient bonnes.
+
+**La règle, désormais :**
+
+> Un écran s'améliore par **une correction à la fois, validée sur aperçu réel
+> avant la suivante** — exactement comme on n'empile pas quinze changements dans
+> un commit avant de le faire relire.
+
+C'est la même règle que « review avant push » et que « lire avant d'écraser »,
+appliquée à l'interface : **ce qui n'est pas jugeable séparément n'est pas
+jugeable du tout.**
+
+**Corollaires pratiques :**
+
+- La base est la version que l'hôte a déjà validée. On y revient, on ne repart
+  pas d'une page blanche — une refonte remet en jeu ce qui était acquis.
+- Une amélioration proposée se décrit en une phrase. S'il en faut cinq, c'est
+  cinq passes.
+- Le code écrit pour une refonte abandonnée **se retire** : `matrice.js`, le
+  calcul des trois matrices dans `api/yield-prix.js` et ses huit motifs ont été
+  supprimés le jour même. Un endpoint qui calcule ce que plus personne n'affiche
+  coûte une requête à chaque ouverture, et la prochaine review le signalera à
+  juste titre.
+- Ce qui, dans la refonte, était une vraie demande de l'hôte **survit à
+  l'abandon** et repart en passe isolée : ici la règle des 5 % entre niveaux et
+  la fusion des niveaux confondus, gardées ; la matrice, non.

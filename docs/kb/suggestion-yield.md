@@ -41,27 +41,29 @@ voit pas dans le code, il se voit dans le résultat.
 Cinq niveaux, chacun un **quantile des prix réellement obtenus** par ce logement
 sur ce type de nuit :
 
+### La nomenclature de Thierry fait foi — partout, sans double vocabulaire
+
 | niveau | quantile |
 |---|---|
-| Prudent | P20 |
-| Mesuré | P35 |
-| **Référence** *(socle)* | **P50 — la médiane** |
-| Ferme | P65 |
-| Haut | P80 |
+| Base | P25 |
+| **Moyen** *(socle)* | **P50 — la médiane** |
+| Haut | P65 |
+| Très haut | P80 |
+| Exceptionnel | P92 |
+
+Elle remplace « Prudent / Mesuré / Référence / Ferme / Haut », qui était le
+vocabulaire du **moteur**, pas celui de l'hôte. Un même niveau ne porte jamais
+deux noms selon l'endroit où on le lit : spec, écran, badges, KB, tests.
+
+**Grille asymétrique, et c'est assumé** : UN niveau sous la médiane, TROIS
+au-dessus. On descend rarement — le plancher borne le bas et une baisse se
+justifie par un signal fort — mais on monte souvent, et il faut de la place pour
+le faire. Une grille symétrique aurait donné deux crans de baisse qui ne servent
+jamais et un seul cran de hausse, là où est le potentiel.
 
 « −10 % / +10 % » aurait été un chiffre sorti de nulle part. Un quantile répond
 à **« vous avez déjà vendu à ce prix ce type de nuit »** : ça se défend devant
 l'hôte, et ça se vérifie dans ses données.
-
-La bulle, 3 ans :
-
-```
-                        Prudent    Mesuré  Référence     Ferme      Haut   n / résas
-hors_vacances          101,70 €  113,00 €   117,00 €  123,91 €  143,00 €   353 / 292
-vacances_zone_du_bien  117,00 €  128,60 €   144,00 €  150,47 €  160,00 €   239 / 186
-férié                  113,00 €  117,00 €   126,90 €  141,00 €  145,80 €    21 /  20
-pont                   trop peu d'historique (7 nuits) — aucune grille
-```
 
 **Le socle est la médiane** (arbitrage de Thierry) : le moteur part de ce que
 l'hôte a obtenu une fois sur deux, puis corrige. Neutre tant qu'aucun signal ne
@@ -69,8 +71,41 @@ justifie de bouger.
 
 **Les mêmes seuils que la référence** — 8 nuits *et* 3 réservations distinctes.
 Une seule règle dans tout le moteur : si la référence se tait, la suggestion se
-tait. Et **la fourchette est montrée** : elle dit si le segment est homogène ou
-dispersé, donc si le chiffre mérite confiance.
+tait.
+
+### Deux niveaux séparés de moins de 5 % ne sont pas deux niveaux
+
+Arbitrage de Thierry, 13 septembre 2026 : **« Moyen 117 / Haut 119 n'est pas
+deux niveaux »**. Sur un segment où un tarif domine l'historique, les quantiles
+tombent à quelques euros les uns des autres : la grille **affiche** alors cinq
+crans là où il n'y a qu'une décision possible, et l'hôte croit disposer d'une
+marge de manœuvre qui n'existe pas.
+
+**On marque, on ne remonte pas.** Forcer 5 % d'écart inventerait un prix que ce
+logement n'a jamais obtenu — exactement ce que la grille par quantiles existe
+pour interdire. Chaque niveau garde son prix mesuré ; `construireGrille` pose
+`distinct: false` et `confondu_avec`, et **l'écran fusionne** les cases
+confondues, en annonçant le nombre de décisions réellement différentes.
+
+La comparaison se fait **au dernier niveau retenu**, pas au voisin immédiat :
+sinon cinq paliers à +4 % chacun passeraient tous pour confondus deux à deux,
+alors que le dernier vaut 17 % de plus que le premier.
+
+La bulle, 3 ans, grille recalculée sur la nomenclature actuelle — **les cinq
+segments sont concernés** :
+
+```
+                        Base     Moyen      Haut  Très haut  Exceptionnel  distincts
+hors_vacances         109,00 €  117,00 €  119,49*  143,00 €     159,26 €       4
+vacances_zone_du_bien 122,00 €  145,80 €  157,00 €  162,99*     170,76 €       4
+férié                 113,78 €  127,45 €  140,25 €  145,80*     171,00 €       4
+vacances_autre_zone   109,71 €  117,00 €  145,92 €  150,74*     172,00 €       4
+pont                  125,29 €  139,25 €  144,93*   160,00 €     161,06*        3
+                                          (* à moins de 5 % du niveau retenu précédent)
+```
+
+Ce n'est pas un défaut de la grille : c'est **ce que dit l'historique**. Cinq
+niveaux affichés auraient été une promesse que les données ne tiennent pas.
 
 ## 2. Le jour de semaine est une COUCHE, pas un axe de la grille
 
@@ -90,7 +125,7 @@ matière : sinon on corrigerait un prix par un rapport tiré de trois nuits.
 ### Le prix final reste dans ce qui a déjà été pratiqué
 
 **Défaut trouvé par le test d'invariant**, pas par une relecture : niveau
-Prudent 100 € × ratio mardi 0,8 = **80 €**, alors que la nuit la moins chère
+Base 100 € × ratio mardi 0,8 = **80 €**, alors que la nuit la moins chère
 jamais vendue était à 100. Toute la conception repose sur « chaque niveau est un
 prix réellement obtenu » — un produit `niveau × ratio` peut en sortir.
 
@@ -216,7 +251,7 @@ suggère un **prix** : un code technique y serait pire qu'ailleurs.
 
 | date | segment | pipeline | suggestion | prix poussé |
 |---|---|---|---|---|
-| 2026-10-03 (sam) | hors vacances | pression −59 % → −1 niveau ; samedi ×1,2462 | **140,82 €** *[Mesuré]* | 130 € |
-| 2026-10-13 (mar) | hors vacances | idem ; mardi ×0,9377 | **105,96 €** *[Mesuré]* | 109 € |
+| 2026-10-03 (sam) | hors vacances | pression −59 % → −1 niveau ; samedi ×1,2462 | **140,82 €** *[Base]* | 130 € |
+| 2026-10-13 (mar) | hors vacances | idem ; mardi ×0,9377 | **105,96 €** *[Base]* | 109 € |
 | 2026-11-07 (sam) | hors vacances | pas de N-1 ; samedi ×1,2462 | **145,81 €** *[Référence]* | 130 € |
 | 2027-01-15 (ven) | — | calendrier non renseigné | **aucune** — `ouverture_de_la_date_inconnue` | — |
