@@ -453,6 +453,63 @@ se trouve le vrai coût, et c'est là qu'était le vrai défaut.
 
 ---
 
+## 16. Un vérificateur se contre-éprouve comme le reste
+
+**La règle, en une phrase :**
+
+> Un vérificateur qui valide l'état d'AVANT donne la permission de pousser.
+
+Un script de vérification n'est pas au-dessus du code qu'il vérifie : il est du
+code, avec les mêmes façons de se tromper — et une conséquence pire, parce qu'on
+lui fait confiance pour arrêter les autres.
+
+**Cas vécu, 13 septembre 2026.** Une migration remplaçait la colonne `niveau`
+par `crans` dans `yield_segment_reglages`. `scripts/verifier-yield-reglages.js`
+listait encore `niveau` dans les colonnes attendues. Résultat sur une base où la
+migration **n'avait pas été appliquée** :
+
+```
+✓ table — yield_segment_reglages interrogeable, 0 ligne(s)
+✓ colonnes — les 8 colonnes repondent
+✓ defaut actif — actif=true, niveau=null
+9 controle(s) : 9 ok, 0 non verifiable(s), 0 en echec
+```
+
+Neuf verts, code de sortie 0. Sur cette foi, j'ai annoncé la migration passée à
+Thierry — elle ne l'était pas. L'endpoint tombait en `column crans does not
+exist`, et c'est **l'erreur d'exécution** qui a révélé le mensonge, pas le
+vérificateur.
+
+### Ce qu'un vérificateur doit faire, et que celui-là ne faisait pas
+
+1. **Vérifier ce qui doit ÊTRE et ce qui ne doit PLUS être.** Une colonne
+   remplacée se contrôle des deux côtés : `crans` présente **et** `niveau`
+   disparue. Sans le second contrôle, l'ancien schéma satisfait pleinement le
+   nouveau script.
+2. **Se contre-éprouver.** On le lance contre l'état d'avant : s'il ne devient
+   pas rouge, il ne vérifie rien. C'est la règle 13 appliquée à l'outil qui
+   l'applique.
+3. **Distinguer « vérifié » de « pas vérifiable ».** Un contrôle qui n'a rien pu
+   lire n'est pas un contrôle réussi — il sort en `?`, et un script dont *tous*
+   les contrôles sont `?` doit sortir en erreur.
+
+### Le corollaire
+
+**Devant un doute sur l'état réel d'une base, on n'interroge pas son propre
+vérificateur : on interroge le catalogue.**
+
+```sql
+select table_name, column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name in (…)
+order by table_name, ordinal_position;
+```
+
+C'est la seule source qui ne peut pas avoir été écrite avec la même hypothèse
+fausse que le code qu'on teste.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).
