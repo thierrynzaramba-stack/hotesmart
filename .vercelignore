@@ -1,14 +1,40 @@
 # ⚠ LA RACINE DU DEPOT EST LA RACINE STATIQUE SERVIE.
 # `vercel.json` pose `outputDirectory: "."` et `cleanUrls: true` : tout fichier
-# HTML depose a la racine devient une URL PUBLIQUE, sans session, sans garde,
-# et indexable. Aucun middleware ne protege les fichiers statiques.
+# depose ici devient une URL PUBLIQUE, sans session, sans garde, indexable.
+# Aucun middleware ne protege les fichiers statiques.
 #
-# Vecu (13 septembre 2026, releve en review) : les apercus de validation sur
-# pieces etaient generes dans `apercu-prix.html`, A LA RACINE. Ils contiennent
-# des donnees reelles — dates de sejour, canaux, prix payes, chiffre d'affaires
-# du mois. Un `git add .` suivi d'un push les aurait mis en ligne pour tout le
-# monde. Le `.gitignore` seul ne suffit pas : il protege du versionnement, pas
-# du deploiement, et un `git add -f` ou un autre poste le contourne.
-#
-# Les apercus se generent desormais HORS du depot. Ce filet reste quand meme.
+# ⚠ LE .gitignore NE PROTEGE PAS DU DEPLOIEMENT. Il protege du versionnement.
+# Un fichier non versionne present sur la machine au moment du deploiement peut
+# partir quand meme, et un `git add -f` ou un autre poste contourne la regle.
+# Ce fichier-ci est le seul filet cote deploiement.
+
+# ─── Les artefacts de validation sur pieces ─────────────────────────────────
+# Vecu (13 septembre 2026, releve en review) : le generateur d'apercus ecrivait
+# `apercu-prix.html` A LA RACINE. Il contenait des donnees reelles — dates de
+# sejour, canaux, prix payes, chiffre d'affaires du mois. Il n'a jamais ete
+# versionne, donc jamais mis en ligne, mais rien ne l'en empechait.
+# Les apercus se generent desormais HORS du depot. Ce filet reste.
 apercu-*.html
+
+# ─── La documentation interne ────────────────────────────────────────────────
+# Vecu (13 septembre 2026, trouve en auditant la regle ci-dessus) : ces fichiers
+# etaient SERVIS EN PRODUCTION. Verifie par requete reelle :
+#   /REVIEW.md 200 (22 Ko) · /CLAUDE.md 200 (14 Ko)
+#   /analyse.md 200 (19 Ko) · /DECISIONS.md 200 · /docs/... 200
+# Soit l'architecture, la feuille de route, les identifiants de projet et de
+# biens, les arbitrages produit — lisibles par n'importe qui.
+# Aucune fonction `/api` ni aucun module `lib/` ne lit ces fichiers au runtime :
+# les exclure ne casse rien. Le guide utilisateur, lui, est `pages/guide.html`
+# et reste servi.
+*.md
+docs/
+
+# ─── Etats locaux ────────────────────────────────────────────────────────────
+# Curseur de reprise du backfill : porte des identifiants de biens et des
+# volumes de reservations. Ecrit a la racine par scripts/backfill-historique.js.
+.backfill-historique.json
+
+# ─── Ce qui n'a rien a faire en production ───────────────────────────────────
+tests/
+migrations/
+scripts/

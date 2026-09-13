@@ -395,6 +395,64 @@ d'interface, pas seulement pour les cas de données.
 
 ---
 
+## 15. Un artefact de validation ne transite JAMAIS par la racine servie
+
+**La règle, en une phrase :**
+
+> Le `.gitignore` protège du **versionnement**, pas du **déploiement**.
+
+`vercel.json` pose `outputDirectory: "."` : **la racine du dépôt EST la racine
+statique servie**, avec `cleanUrls`. Tout fichier qui s'y trouve au moment du
+déploiement devient une URL publique — sans session, sans garde, indexable.
+Aucun middleware ne protège les fichiers statiques.
+
+Un artefact de validation sur pièces se génère donc **hors du dépôt**. Pas
+« dans le dépôt mais gitignoré » : hors du dépôt.
+
+**Cas vécu, 13 septembre 2026.** Le générateur d'aperçus du lot 4.4 écrivait
+`apercu-prix.html` à la racine. Le fichier contenait des données réelles : dates
+de séjour, canaux, prix payés, chiffre d'affaires du mois, et jusqu'aux
+surréservations connues. Il n'a jamais été versionné — donc jamais mis en
+ligne — mais **rien ne l'en empêchait** : le geste de commit documenté au
+CLAUDE.md est `git add .`, et un `git add -f` ou un autre poste contourne le
+`.gitignore`. Relevé par une review de sécurité, pas par la prudence.
+
+**Le correctif tient en trois niveaux, et les trois sont nécessaires :**
+
+1. le générateur écrit hors du dépôt ;
+2. `.gitignore` empêche le versionnement accidentel ;
+3. **`.vercelignore`** empêche le déploiement — c'est le seul des trois qui
+   protège vraiment, et c'est celui qui manquait.
+
+### Le corollaire, et il coûte plus cher que la règle
+
+**En appliquant cette règle, on audite ce que la racine servie expose DÉJÀ.**
+Fait le même jour, par requête réelle sur la production :
+
+```
+/REVIEW.md     200  (22 Ko)
+/CLAUDE.md     200  (14 Ko)
+/analyse.md    200  (19 Ko)
+/DECISIONS.md  200
+/docs/...      200
+```
+
+Toute la documentation interne était publiquement lisible : architecture,
+feuille de route, arbitrages produit, identifiants de projet et de biens,
+constats d'audit sur les biens réels. Personne ne l'avait posé là
+volontairement — c'est le **défaut** d'une racine qui sert tout ce qu'elle
+contient.
+
+Aucune fonction `/api` ni aucun module `lib/` ne lit ces fichiers au runtime :
+les exclure ne casse rien. Le guide utilisateur, lui, est `pages/guide.html` et
+reste servi.
+
+**Ce que ce cas enseigne au-delà de lui-même :** une règle nouvelle ne se grave
+pas seule. On la grave, **puis on cherche qui l'enfreint déjà** — c'est là que
+se trouve le vrai coût, et c'est là qu'était le vrai défaut.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

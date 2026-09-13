@@ -150,6 +150,32 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
+## DETTE DATEE — 8 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
+
+**Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
+`tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
+13 septembre. **Ce ne sont pas des regressions** : les fixtures portent des
+dates FIGEES (sejour du 1er au 5 septembre 2026) et viennent de franchir la
+garde d'anciennete `JOURS_DE_GRACE = 7` de `lib/booking-changes.js`. Au-dela,
+`sejourTermine()` rend `true` et `detectChange()` rend `null` : les tests
+comparent donc `null.type` et levent.
+
+**Pourquoi ca ne peut pas rester.** Huit tests rouges en permanence, c'est une
+alarme qu'on apprend a ignorer — et le jour ou un NEUVIEME echec apparait,
+personne ne le voit. Une suite de tests ne vaut que si son vert veut dire
+quelque chose.
+
+**Comment les corriger** (meme famille que les 6 tests de
+`cleaning-sync-menages-entite.test.js`, deja notee ci-dessous) : ces tests
+n'injectent PAS `maintenant`, ils lisent l'horloge. Regle du depot : *dates
+relatives si le test lit l'horloge, dates figees s'il injecte le temps.* Deux
+voies, a trancher a la session dediee — rendre `detectChange` injectable comme
+`sejourTermine` l'est deja, ou calculer les fixtures relativement a aujourd'hui.
+
+**Session dediee AVANT la cloture de la V1 YieldFlow.** Ne pas les corriger a la
+volee dans un commit de lot : un test a dates figees se repare avec la regle en
+tete, pas en decalant les dates d'un mois.
+
 Prochain chantier (court, avant la phase 3) : **audit stop_sell** —
 docs/specs/spec-audit-stop-sell.md. Principe grave : le coeur memorise
 l'INTENTION commerciale de l'hote par jour et par bien, toute poussee
