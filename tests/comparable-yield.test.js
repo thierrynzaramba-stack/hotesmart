@@ -248,15 +248,18 @@ test('c) le 2e vendredi hors vacances ↔ le 2e vendredi hors vacances N-1', () 
 })
 
 test('c) les comptes different : on prend le plus proche, et on le DIT', () => {
-  const c = ctx()
-  // Mai 2026 : 5 vendredis (1, 8, 15, 22, 29) — mais le 1er est ferie et le 8
-  // aussi, donc ils ne sont pas « hors vacances ». On vise un mois a 5
-  // occurrences contre 4 : janvier 2027 a 5 dimanches, janvier 2026 en a 4.
-  const r = nuitComparable('2027-01-31', { contexte: ctx() })   // 5e dimanche
+  // ⚠ COMPTES VERIFIES CONTRE LA SEGMENTATION REELLE, pas comptes de tete.
+  // Janvier 2027 porte QUATRE dimanches hors vacances (10, 17, 24, 31) ;
+  // janvier 2026 n'en porte que TROIS (11, 18, 25) — le 4 janvier 2026 tombe
+  // dans le rayonnement du Jour de l'An, qui est un jeudi avec son pont.
+  // La version precedente de ce test annonçait « 5 contre 4 » et passait par
+  // accident : elle comptait les dimanches du calendrier, pas ceux que le
+  // moteur classe hors vacances.
+  const r = nuitComparable('2027-01-31', { contexte: ctx() })
   assert.strictEqual(r.etage, ETAGES.RANG_DANS_LE_MOIS)
   assert.strictEqual(r.alignement, ALIGNEMENTS.RANG_LE_PLUS_PROCHE)
-  assert.strictEqual(r.rang, 5)
-  assert.strictEqual(r.rang_n1, 4)
+  assert.strictEqual(r.rang, 4, 'le 31 janvier 2027 est le 4e dimanche hors vacances')
+  assert.strictEqual(r.rang_n1, 3, 'janvier 2026 n\'en compte que 3')
   assert.strictEqual(r.date, '2026-01-25')
 })
 
@@ -364,8 +367,14 @@ test('invariant : seul « hors vacances » atteint l\'etage c', () => {
   while (jour <= '2026-12-31') {
     const r = nuitComparable(jour, { contexte: c })
     if (r.etage === ETAGES.RANG_DANS_LE_MOIS) {
-      assert.strictEqual(segmenterJour(jour, c).segment, 'hors_vacances',
-        `${jour} atteint l'etage c sans etre hors vacances`)
+      // ⚠ DEUX SEGMENTS ATTEIGNENT L'ETAGE c, PAS UN. Feries, ponts, vacances
+      // et evenements sont tranches plus haut dans la cascade ; restent les
+      // nuits ordinaires ET les week-ends prolonges (segment derive, ajoute le
+      // 13 septembre 2026). Pour les deux, comparer `segment` ou `detail`
+      // donne le meme resultat : la distinction reste sans difference.
+      assert.ok(['hors_vacances', 'week_end_prolonge']
+        .includes(segmenterJour(jour, c).segment),
+      `${jour} atteint l'etage c avec un segment inattendu`)
     }
     jour = new Date(Date.parse(`${jour}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)
   }

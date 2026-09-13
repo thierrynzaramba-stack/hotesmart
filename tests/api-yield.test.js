@@ -422,7 +422,17 @@ test('LE TEST QUI COMPTE : la periode ENTIERE est segmentee, pas la seule fenetr
       assert.strictEqual(res.code, 200)
       const p = res.body.projection.find(x => x.periode === `${AN}-06`)
       assert.ok(p, 'la projection du mois doit exister')
-      assert.strictEqual(p.jours_sans_reference, 0,
+      // ⚠ L'ASSERTION PORTE SUR LE MOTIF, PAS SUR LE COMPTE — corrige le
+      // 13 septembre 2026. `jours_sans_reference` confond DEUX causes
+      // opposees : « ce jour est hors de la fenetre du contexte » (le defaut
+      // que ce test existe pour empecher) et « ce type de nuit n'a pas assez
+      // d'historique » (une reponse legitime du moteur). Le jeu d'essai ne
+      // porte que dix nuits : l'arrivee du segment « week-end prolonge » a
+      // suffi a amincir l'echantillon, et le test est passe au rouge pour une
+      // raison qui n'etait pas la sienne.
+      const horsContexte = (p.detail || [])
+        .filter(x => x.non_calculable === 'hors_fenetre_du_contexte')
+      assert.deepEqual(horsContexte.map(x => x.date), [],
         'aucun jour du mois ne doit tomber hors du contexte')
     })
 })

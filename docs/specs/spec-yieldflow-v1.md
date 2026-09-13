@@ -194,6 +194,98 @@ Projections calculées depuis le snapshot (vues ou tables dérivées recalculabl
 - Alignement : jour de semaine + segment vacances/hors-vacances (jamais date à date).
   Détail de la cascade N-1 en quatre étages : §7.3 et `lib/yield/comparable.js`.
 
+### 6 quinquies. Le modèle d'influence : des CRANS, pas des positions
+
+*Arbitré par Thierry le 13 septembre 2026. Remplace le positionnement à plat
+par contexte.*
+
+**Un contexte ne se positionne pas, il DÉCALE.** Vacances, férié, pont,
+événement, date commerciale : chacun **pousse la structure ordinaire du bien**
+en gardant ses reliefs.
+
+> Les vacances montent la semaine de **Base à Moyen** *et* le week-end de
+> **Haut à Très haut**. L'écart semaine/week-end se **déplace**, il ne s'écrase
+> pas.
+
+```
+crans(contexte)      = niveau(contexte) − niveau(hors vacances)
+niveau de la nuit    = niveau(hors vacances | son jour) + crans
+```
+
+**La force du cran vient de la médiane du SEGMENT**, pas du couple
+(segment, jour) : c'est l'échantillon le plus large, donc le plus solide. Le
+couple ne sert plus qu'à décrire la **structure ordinaire** (hors vacances par
+jour de semaine), où il a toujours de la matière.
+
+**Pourquoi ce renversement.** Avec une position à plat par (contexte, jour), le
+relief était mesuré deux fois et s'écrasait dès que le couple manquait de
+matière : des vacances sans assez de samedis rendaient le même niveau toute la
+semaine — c'est-à-dire effaçaient exactement l'écart qui fait le prix d'un
+samedi.
+
+**L'ajustement de l'hôte s'exprime en crans lui aussi**, et reste prioritaire :
+le moteur mesure, l'hôte sait. Le cran mesuré reste affiché à côté du sien, pour
+que l'écart se constate.
+
+**Sans influence mesurée, le moteur ne se tait pas** : la nuit garde son niveau
+ordinaire, et l'écran dit que l'influence reste à mesurer. Se taire serait le
+pire endroit pour le faire — un pont, un réveillon, un événement déclaré sont
+précisément les nuits qui prennent de la valeur.
+
+**Limite mesurée, et assumée.** Appliqué strictement, le décalage peut
+s'écarter du couple lorsque celui-ci existe et le contredit. Mesuré sur
+La bulle au 13 septembre 2026 :
+
+| | modèle | mesure du couple |
+|---|---|---|
+| dimanche de week-end prolongé | Base +2 = **Haut (145 €)** | **115,20 €** sur 8 nuits |
+
+Le modèle est plus robuste quand le couple manque de matière — c'est sa raison
+d'être — mais il peut surcoter là où le couple parle. L'hôte dispose du réglage
+en crans pour corriger, et l'écran montre les deux chiffres côte à côte.
+
+### 6 quater bis. Le rayonnement : le week-end prolongé
+
+*Arbitré par Thierry le 13 septembre 2026. Symétrique des ponts.*
+
+> **Un week-end est « prolongé » quand il touche un jour férié, directement ou
+> par un pont.**
+
+On part des fériés et des ponts déjà calculés, on suit la chaîne de jours
+contigus (férié, pont, week-end), et **toute nuit de week-end ainsi rattachée**
+devient « week-end prolongé ». Trois nuits possibles valent plus que deux.
+
+**Pourquoi cette formulation plutôt qu'une liste de cas** : elle fait tomber le
+férié du **mercredi** sans exception. Le 11 novembre 2026 produit quatre ponts,
+donc la chaîne va du samedi 7 au dimanche 15 — **neuf nuits consécutives**, et
+les **deux** week-ends adjacents sont prolongés. Une règle énumérant « lundi
+férié → week-end d'avant, vendredi férié → week-end d'après » aurait manqué ce
+cas ou l'aurait traité à part.
+
+Éprouvée sur les 22 jours fériés de 2026‑2027 :
+
+| férié | jour | ponts | rayonne sur |
+|---|---|---|---|
+| Lundi de Pâques 2026 | lundi | — | sam 4, dim 5 (avant) |
+| Fête du Travail 2026 | vendredi | — | sam 2, dim 3 (après) |
+| Ascension 2026 | jeudi | ven 15 | sam 16, dim 17 |
+| Fête nationale 2026 | mardi | lun 13 | sam 11, dim 12 |
+| **Armistice 2026** | **mercredi** | **4 ponts** | **sam 7, dim 8, sam 14, dim 15** |
+| Pentecôte 2027 | lundi | — | sam 15, dim 16 |
+| Victoire 1945 2027 | samedi | — | dim 9 seulement |
+
+**Un férié de milieu de semaine sans pont ne rayonne pas** : sans nuits
+supplémentaires à vendre, il n'y a rien à valoriser.
+
+**Le férié reste un férié, le pont reste un pont** : le rayonnement ne
+relabellise que les nuits de **week-end**. Et le segment se place **sous les
+vacances** — une nuit déjà en vacances scolaires se vend déjà haut, et la lui
+prendre amputerait l'échantillon des vacances (286 nuits sur La bulle) au
+profit d'un segment qui en compte 16.
+
+Son parent naturel pour l'emprunt est **`hors_vacances`**, dont la couche
+jour‑de‑semaine porte déjà le relief du samedi et du dimanche.
+
 ### 6 bis. Les ponts : définition, et règle de valeur
 
 *Arbitré par Thierry le 13 septembre 2026. Implémenté dans

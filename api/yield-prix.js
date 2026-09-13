@@ -21,6 +21,9 @@ const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
 const { exceptionsDuBien } = require('../lib/yield/exceptions')
+const { evenementsDuBien } = require('../lib/yield/evenements')
+const { datesCommerciales } = require('../lib/yield/dates-commerciales')
+const { reglagesDuBien, reglagePour } = require('../lib/yield/reglages-segment')
 const { lireVacances } = require('../lib/yield/vacances')
 const { pickup, DRAPEAUX } = require('../lib/yield/pickup')
 const { nuitsOccupees } = require('../lib/nuits-occupees')
@@ -140,6 +143,17 @@ module.exports = async (req, res) => {
     // plantage, donc invisible sans ce calcul explicite.
     const debutContexte = [debutHistorique, decaler(debut, -364 - 40)]
       .sort()[0]
+    // ⚠ ET LA BORNE HAUTE DOIT COUVRIR LA GRILLE, PAS SEULEMENT LE MOIS AFFICHE.
+    // Releve en review. Le contexte finissait a `fin` — la fin du mois
+    // consulte — alors que la grille court jusqu'a HIER. Sur un mois passe
+    // (autorise par `?mois=`), toutes les nuits posterieures a ce mois
+    // sortaient en « hors fenetre du contexte » et disparaissaient des
+    // segments : l'echantillon de `hors_vacances` tombait de 51 a 32 nuits
+    // pour la MEME grille, selon le mois qu'on regardait.
+    // Consequence nouvelle : l'ecran des evenements, qui lit la grille par
+    // `grille-du-bien.js` (sans ce defaut), annonçait des crans differents de
+    // ceux de la page des prix. Deux ecrans, deux verites.
+    const finContexte = fin > auj ? fin : auj
 
     // ─── Le coeur ───────────────────────────────────────────────────────────
     let lignes = []
@@ -157,7 +171,7 @@ module.exports = async (req, res) => {
     }
     const { pont } = construirePontDemapped(lignes, bien.provider)
     const duBien = lignes.filter(l => l.property_id === bien.provider_property_id)
-    const exceptions = await exceptionsDuBien(supabase, bien.id, debutContexte, fin)
+    const exceptions = await exceptionsDuBien(supabase, bien.id, debutContexte, finContexte)
     const exclus = new Set()
     for (const p of exceptions) {
       for (const j of joursDeLaPeriode(p.date_debut, p.date_fin) || []) exclus.add(j)
@@ -167,9 +181,33 @@ module.exports = async (req, res) => {
     }))
 
     // ─── La grille, sur l'historique ────────────────────────────────────────
-    const vacances = await lireVacances(supabase, debutContexte, fin)
+    const vacances = await lireVacances(supabase, debutContexte, finContexte)
+    // ⚠ LES EVENEMENTS DE L'HOTE ENTRENT DANS LE CONTEXTE, comme les vacances.
+    // Sans cette lecture, tout le mecanisme restait inerte : une nuit de saison
+    // thermale etait segmentee « hors vacances », tarifee au niveau de la basse
+    // saison, sans un mot. C'est le defaut exact que l'en-tete d'`evenements.js`
+    // annonce vouloir empecher — et il a vecu deux commits.
+    //
+    // ⚠ MEME FENETRE QUE LE RESTE DU CONTEXTE. Un evenement lu sur une fenetre
+    // plus etroite que l'historique ferait diverger la grille (qui compterait
+    // ses nuits en « hors vacances ») de la segmentation du mois affiche.
+    const declares = await evenementsDuBien(supabase, bien.id, debutContexte, finContexte)
+    // ⚠ CE QUE L'HOTE DECIDE DES CONTEXTES : ajustements de niveau et
+    // desactivations. Lu AVANT le contexte, parce qu'une date commerciale
+    // coupee ne doit pas entrer dans la segmentation du tout — la couper plus
+    // tard l'aurait laissee compter dans la grille.
+    const reglages = await reglagesDuBien(supabase, bien.id)
+    const coupees = new Set()
+    for (const [cle, r] of reglages) if (r.actif === false) coupees.add(cle)
+    // ⚠ LES TROIS FAMILLES ENTRENT PAR LA MEME PORTE. Vacances et feries sont
+    // deja dans le contexte ; les dates commerciales et les evenements de
+    // l'hote partagent la meme forme, donc la meme branche de `segmenterJour`.
+    // Deux portes auraient fait deux regles a tenir d'accord.
+    const commerciales = datesCommerciales(debutContexte, finContexte, { desactivees: coupees })
+    const evenements = [...declares, ...commerciales]
     const contexte = R.construireContexte({
-      zoneBien: bien.zone_scolaire, vacances, debut: debutContexte, fin
+      zoneBien: bien.zone_scolaire, vacances, evenements,
+      debut: debutContexte, fin: finContexte
     })
     const grille = S.construireGrille(eclatements, {
       contexte, debut: debutHistorique, fin: finRef
@@ -281,6 +319,9 @@ module.exports = async (req, res) => {
           ? { ecart: pr.ecart, fiable: pr.fiable !== false,
             motif_non_fiable: pr.motif_non_fiable || null }
           : null,
+        // ⚠ LE REGLAGE LE PLUS FIN QUI EXISTE : « ferie:toussaint » avant
+        // « ferie ». L'hote ajuste une periode precise, pas toute une famille.
+        reglage: reglagePour(reglages, seg),
         bien
       })
       // ⚠ NI LA DATE CALENDAIRE, NI 52 SEMAINES : LA CASCADE D'ALIGNEMENT.
@@ -364,6 +405,25 @@ module.exports = async (req, res) => {
             reference_empruntee: p.reference_empruntee || null }
         })(),
         niveau_de_depart: s.niveau_de_depart || null,
+        // ⚠ L'AJUSTEMENT SE VOIT. Un niveau surprenant doit s'expliquer par le
+        // reglage de l'hote plutot que de passer pour une erreur du moteur.
+        ajuste_par_l_hote: !!s.ajuste_par_l_hote,
+        // ⚠ L'INFLUENCE SE DIT EN CRANS, et le cran MESURE voyage a cote du
+        // cran applique : l'ecart entre les deux est exactement ce que l'hote
+        // a decide, et il doit pouvoir le constater.
+        crans: s.crans ?? null,
+        crans_mesures: s.crans_mesures ?? null,
+        niveau_structure: s.niveau_structure || null,
+        // ⚠ D'OU VIENT LE PRIX : mesure, modele, ou reglage de l'hote. Une
+        // deduction ne se presente pas comme une observation.
+        source_du_niveau: s.source_du_niveau || null,
+        niveau_mesure: s.niveau_mesure || null,
+        niveau_modele: s.niveau_modele || null,
+        echantillon_couple: s.echantillon_couple ?? 0,
+        mediane_couple: s.mediane_couple ?? null,
+        ecart_modele_mesure: s.ecart_modele_mesure ?? null,
+        anomalie_modele_mesure: s.anomalie_modele_mesure || null,
+        cle_reglage: s.cle_reglage || null,
         affine_par_le_jour: !!s.affine_par_le_jour,
         borne_par_la_grille: !!s.borne_par_la_grille,
         echantillon: s.echantillon ?? null,
@@ -491,6 +551,20 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       pied,
       sejours,
+      // ⚠ LES EVENEMENTS SONT RENDUS A L'ECRAN, pas seulement consommes.
+      // Un niveau « Haut » en plein mois de mai doit pouvoir s'expliquer par
+      // l'evenement qui l'a produit, sinon il passe pour une erreur.
+      // ⚠ LA LISTE SERVIE EST CELLE DU MOIS AFFICHE, pas celle du contexte.
+      // Le contexte couvre trois ans d'historique : le rendre tel quel donnait
+      // douze Saint-Valentin a un ecran qui en montre une.
+      evenements: evenements
+        .filter(e => e.date_fin >= debut && e.date_debut <= fin)
+        .map(e => ({
+        id: e.id || null, nom: e.nom, segment: e.segment,
+        debut: e.date_debut, fin: e.date_fin,
+        origine: e.origine || 'declare',
+        recurrence: e.recurrence || null, parent_segment: e.parent_segment || null
+        })),
       bien: {
         id: bien.id, name: bien.name, provider: bien.provider,
         capacity: bien.capacity ?? null, zone_scolaire: bien.zone_scolaire ?? null,
@@ -500,7 +574,7 @@ module.exports = async (req, res) => {
       // ⚠ LA FENETRE ANNONCEE EST CELLE REELLEMENT UTILISEE. Elle affirmait
       // « 3 ans » quelle que soit sa largeur reelle.
       historique: { debut: debutHistorique, fin: finRef, ans: ANS_REFERENCE,
-        contexte: { debut: debutContexte, fin } },
+        contexte: { debut: debutContexte, fin: finContexte } },
       grille: {
         seuil: grille.seuil,
         seuil_reservations: grille.seuil_reservations,

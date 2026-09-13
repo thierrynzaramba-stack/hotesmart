@@ -81,7 +81,12 @@ const DELEGABLES = [
   'apps/yield/index.html',
   // Même garde que l'écran de synthèse : `/api/yield-prix` garde `reservations`
   // en lecture, et la délégation passe par le BIEN.
-  'apps/yield/prix.html'
+  'apps/yield/prix.html',
+  // ⚠ CET ECRAN ECRIT, et c'est justement pour ça qu'il est ici : la ressource
+  // designee est le BIEN, donc `requirePermission` tranche le compte a partir
+  // de lui. Ajouter `compteDelegue` serait un parametre inutile sur un endpoint
+  // dont la ressource decide deja — et une seconde source de verite.
+  'apps/yield/evenements.html'
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────

@@ -61,6 +61,10 @@
       "destination": "/apps/yield/prix"
     },
     {
+      "source": "/apps/yield/evenements",
+      "destination": "/apps/yield/evenements"
+    },
+    {
       "source": "/apps/serrures",
       "destination": "/apps/serrures/index"
     },

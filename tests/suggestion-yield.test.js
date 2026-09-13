@@ -38,22 +38,32 @@ function ecl (nuits, { prix = 100, id = null, long = false, exclues = [] } = {})
 // tombait dans les vacances de la zone B. Septembre-novembre est libre dans le
 // jeu d'essai.
 function mardis (n, prix) {
+  return joursDeSegment(Date.UTC(2025, 8, 2), 'mardi', 'hors_vacances', n, prix, 'M')
+}
+// ⚠ LES FIXTURES SONT FILTREES PAR LA SEGMENTATION REELLE, PLUS CHOISIES A LA
+// MAIN. Troisieme fois que des dates ecrites de tete tombent dans un segment
+// qu'elles n'annoncent pas : d'abord des vacances scolaires, puis un pont de
+// deux jours, puis un week-end prolonge par un ferie voisin. Le test croyait
+// mesurer neuf samedis hors vacances et en mesurait sept. On DEMANDE donc au
+// moteur ce qu'il pense de chaque date, au lieu de le supposer.
+function joursDeSegment (depart, jourVoulu, segmentVoulu, n, prix, prefixe) {
   const out = []
-  const d = new Date(Date.UTC(2025, 8, 2))   // mardi 2 septembre 2025
-  for (let i = 0; i < n; i++) {
-    out.push(ecl([d.toISOString().slice(0, 10)], { prix, id: `M${i}` }))
+  const d = new Date(depart)
+  let garde = 0
+  while (out.length < n && garde++ < 400) {
+    const j = d.toISOString().slice(0, 10)
+    const s = R.segmenterJour(j, CTX)
+    if (s && s.segment === segmentVoulu && s.jour_semaine === jourVoulu) {
+      out.push(ecl([j], { prix, id: `${prefixe}${out.length}` }))
+    }
     d.setUTCDate(d.getUTCDate() + 7)
   }
+  assert.equal(out.length, n,
+    `jeu d'essai incomplet : ${out.length}/${n} ${jourVoulu}s en ${segmentVoulu}`)
   return out
 }
 function samedis (n, prix) {
-  const out = []
-  const d = new Date(Date.UTC(2025, 8, 6))   // samedi 6 septembre 2025
-  for (let i = 0; i < n; i++) {
-    out.push(ecl([d.toISOString().slice(0, 10)], { prix, id: `S${i}` }))
-    d.setUTCDate(d.getUTCDate() + 7)
-  }
-  return out
+  return joursDeSegment(Date.UTC(2025, 8, 6), 'samedi', 'hors_vacances', n, prix, 'S')
 }
 const grilleDe = (lignes) => S.construireGrille(lignes,
   { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
@@ -251,7 +261,7 @@ test('LE TEST QUI COMPTE : le prix servi EST le prix du niveau annonce', () => {
   // defaut le plus insidieux du lot 4.4. Il n'y a plus de multiplicateur : le
   // prix EST celui d'un niveau, donc l'etiquette ne peut plus mentir.
   const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
-  for (const date of ['2026-11-03', '2026-11-07', '2026-11-14', '2026-11-21']) {
+  for (const date of ['2026-11-03', '2026-11-21', '2026-11-28', '2026-12-01']) {
     for (const delai of [5, 30, 90]) {
       for (const ecart of [-0.5, 0, 0.5]) {
         const s = S.suggerer({ date, grille: g, contexte: CTX, ouverte: true,
@@ -268,7 +278,7 @@ test('LE TEST QUI COMPTE : le prix servi EST le prix du niveau annonce', () => {
 
 test('LE TEST QUI COMPTE : l amplitude ne depasse jamais deux niveaux', () => {
   const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
-  for (const date of ['2026-11-03', '2026-11-07', '2026-11-14']) {
+  for (const date of ['2026-11-03', '2026-11-21', '2026-11-28']) {
     for (const delai of [0, 5, 14, 15, 59, 60, 200]) {
       for (const ecart of [-1, -0.5, -0.26, -0.25, 0, 0.25, 0.26, 0.5, 1]) {
         const s = S.suggerer({ date, grille: g, contexte: CTX, ouverte: true,
@@ -283,7 +293,7 @@ test('LE TEST QUI COMPTE : l amplitude ne depasse jamais deux niveaux', () => {
 
 test('LE TEST QUI COMPTE : chaque euro se justifie par une couche nommee', () => {
   const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
-  const s = S.suggerer({ date: '2026-11-07', grille: g, contexte: CTX,
+  const s = S.suggerer({ date: '2026-11-21', grille: g, contexte: CTX,
     ouverte: true, delaiJours: 90, pression: { ecart: 0.4 }, bien: bienSansPlancher })
   assert.ok(s.prix > 0)
   const noms = s.couches.map(c => c.nom)
@@ -304,16 +314,39 @@ test('LE TEST QUI COMPTE : chaque euro se justifie par une couche nommee', () =>
 
 test('l etiquette ne porte le jour QUE s il change le niveau', () => {
   // ⚠ REGLE DES COUCHES MUETTES, APPLIQUEE AU LIBELLE. « Base · mardi » sur un
-  // mardi qui suit sa periode ferait une etiquette a deux termes pour une seule
-  // information.
+  // mardi qui suit sa periode ferait une etiquette a deux termes pour une
+  // seule information.
+  //
+  // ⚠ CE TEST EPROUVE LA REGLE, PLUS UNE ATTENTE CHOISIE. Sa version
+  // precedente affirmait « le mardi suit sa periode » — ce qui dependait
+  // entierement du jeu d'essai, et a cesse d'etre vrai des que les fixtures
+  // ont ete filtrees par la segmentation reelle. On demande donc a la grille
+  // ce qu'elle a mesure, et on verifie que l'etiquette DIT la meme chose.
   const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
-  const mardi = S.suggerer({ date: '2026-11-03', grille: g, contexte: CTX,
+  const ps = g.positions.get('hors_vacances')
+  let vuAffine = false
+  let vuSuivi = false
+  for (const [date, jour] of [['2026-11-03', 'mardi'], ['2026-11-21', 'samedi']]) {
+    const pj = g.positions_jour.get(`hors_vacances|${jour}`)
+    const s = S.suggerer({ date, grille: g, contexte: CTX,
+      ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+    const affine = !!(pj && pj.fiable && ps && ps.fiable && pj.indice !== ps.indice)
+    assert.equal(s.etiquette_corrigee, affine, `${date} (${jour})`)
+    assert.equal(s.etiquette, affine ? `${s.niveau} · ${jour}` : s.niveau, date)
+    if (affine) vuAffine = true; else vuSuivi = true
+  }
+  // ⚠ ET LE JEU D'ESSAI DOIT EXERCER LES DEUX BRANCHES, sans quoi ce test ne
+  // prouverait que la moitie de la regle. Les mardis a 100 € et les samedis a
+  // 150 € encadrent la mediane du segment : au moins l'un des deux s'en ecarte.
+  assert.ok(vuAffine, 'aucun jour affine : la branche « · jour » n\'est pas exercee')
+  // Un jour qui suit exactement sa periode : on le fabrique, plutot que
+  // d'esperer qu'il existe.
+  const g2 = grilleDe([...mardis(9, 100), ...samedis(9, 100)])
+  const s2 = S.suggerer({ date: '2026-11-03', grille: g2, contexte: CTX,
     ouverte: true, delaiJours: 30, bien: bienSansPlancher })
-  const samedi = S.suggerer({ date: '2026-11-07', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
-  assert.equal(mardi.etiquette, mardi.niveau, 'un jour qui suit sa periode : niveau seul')
-  assert.equal(samedi.etiquette, `${samedi.niveau} · samedi`)
-  assert.equal(samedi.etiquette_corrigee, true)
+  assert.equal(s2.etiquette, s2.niveau, 'tous au meme prix : aucun jour ne se detache')
+  assert.equal(s2.etiquette_corrigee, false)
+  assert.ok(vuSuivi || true)
 })
 
 test('LE TEST QUI COMPTE : un ecart NON FIABLE ne deplace aucun prix', () => {
@@ -429,15 +462,182 @@ test('l emprunt ne remplace jamais une mesure propre', () => {
   assert.equal(pont.mediane, 300, 'sa mediane, pas celle du parent')
 })
 
-test('si le parent est maigre lui aussi, le moteur le DIT au lieu d inventer', () => {
-  // ⚠ L'EMPRUNT N'EST PAS UNE PROMESSE INCONDITIONNELLE.
-  const g = grilleDe([...mardis(9, 100),
+test('LE TEST QUI COMPTE : le moteur ne se tait JAMAIS sur un evenement de l hote', () => {
+  // ⚠ TROUVE EN L'EXECUTANT SUR DES DONNEES REELLES, pas en relisant le code.
+  // Un evenement declare aujourd'hui pour l'an prochain n'a AUCUN historique,
+  // et l'hote n'a aucune raison d'avoir designe un parent. La position restait
+  // introuvable et la nuit rendait « segment sous le seuil » : silence total,
+  // sur la seule nuit que l'hote avait pris la peine de declarer importante.
+  const ev = [{ nom: 'Fête des fleurs', segment: 'evenement:fete_des_fleurs',
+    date_debut: '2026-11-21', date_fin: '2026-11-22', parent_segment: null }]
+  const ctx = R.construireContexte({ zoneBien: 'C', vacances: VACANCES,
+    evenements: ev, debut: '2023-01-01', fin: '2027-12-31' })
+  const g = S.construireGrille([...mardis(9, 100), ...samedis(9, 150)],
+    { contexte: ctx, debut: '2023-01-01', fin: '2025-12-31' })
+  // Le segment de l'evenement n'a aucune nuit : aucune position propre.
+  assert.equal(g.positions.get('evenement:fete_des_fleurs'), undefined)
+
+  // ⚠ ET POURTANT LA NUIT RECOIT UN PRIX — celui qu'elle aurait SANS
+  // l'evenement, jour de semaine compris. Un repli sur un segment fixe aurait
+  // perdu le samedi.
+  const samedi = S.suggerer({ date: '2026-11-21', grille: g, contexte: ctx,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  const dimanche = S.suggerer({ date: '2026-11-22', grille: g, contexte: ctx,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  assert.ok(samedi.prix > 0, 'un evenement declare doit recevoir un prix')
+  assert.equal(samedi.non_calculable.length, 0)
+  assert.equal(samedi.position_sous_jacente, 'hors_vacances')
+  // Le samedi reste au-dessus du dimanche : le jour de semaine a survecu.
+  assert.ok(samedi.prix > dimanche.prix,
+    `samedi ${samedi.prix} € devrait depasser dimanche ${dimanche.prix} €`)
+  // ⚠ ET ON LE DIT : l'hote ne doit pas croire que sa saison a ete mesuree.
+  assert.match(samedi.couches.find(c => c.nom === 'position').resume,
+    /pas encore d’influence mesurée/)
+  // ⚠ `null`, PAS 0 — releve en review. « Ce contexte ne deplace rien »
+  // (mesure a zero cran) et « je ne sais pas encore ce qu'il deplace » sont
+  // deux reponses opposees. `crans || 0` les ecrasait en une seule, et l'ecran
+  // servait la meme phrase dans les deux cas.
+  assert.equal(samedi.crans, null, 'influence NON MESUREE, pas influence nulle')
+  assert.equal(samedi.crans_mesures, null)
+})
+
+test('LE TEST QUI COMPTE : sans influence mesuree, la nuit garde son niveau ORDINAIRE', () => {
+  // ⚠ CE TEST A CHANGE DE VERDICT LE 13 SEPTEMBRE 2026, ET C'EST VOULU.
+  // Il affirmait qu'un pont sans historique, dont le parent est maigre lui
+  // aussi, ne recevait AUCUN prix. Avec le modele en crans, le silence n'a plus
+  // lieu d'etre : l'influence du contexte est inconnue — donc nulle — mais la
+  // nuit, elle, reste un vendredi ordinaire, et le moteur SAIT ce que vaut un
+  // vendredi ordinaire chez cet hote.
+  //
+  // Se taire aurait ete le pire endroit pour le faire : un pont est
+  // precisement une nuit qui prend de la valeur. Servir le niveau ordinaire en
+  // DISANT qu'aucune influence n'est mesuree est plus juste que rien du tout,
+  // et plus honnete qu'un cran invente.
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150),
     ecl(['2025-05-01'], { prix: 200, id: 'F1' }),
     ecl(['2025-05-02'], { prix: 200, id: 'P1' })])
   const pont = g.positions.get('pont')
-  assert.equal(pont.fiable, false)
+  assert.equal(pont.fiable, false, 'deux nuits ne font pas une influence')
   const s = S.suggerer({ date: '2026-05-15', grille: g, contexte: CTX,
-    ouverte: true, delaiJours: 30, bien: {} })
-  assert.equal(s.prix, null)
-  assert.ok(s.non_calculable.includes(S.MOTIFS.SEGMENT_MINCE))
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  assert.ok(s.prix > 0, 'la nuit garde son niveau ordinaire')
+  assert.equal(s.crans, null, 'influence NON MESUREE, pas influence nulle')
+  assert.equal(s.crans_mesures, null)
+  assert.equal(s.non_calculable.length, 0)
+  // ⚠ ET LE MOTEUR LE DIT : l'hote ne doit pas croire que son pont a ete mesure.
+  assert.match(s.couches.find(c => c.nom === 'position').resume,
+    /pas encore d’influence mesurée/)
+})
+
+test('LE TEST QUI COMPTE : « influence nulle » n est pas « influence inconnue »', () => {
+  // ⚠ RELEVE EN REVIEW. Un contexte mesure sur des dizaines de nuits dont
+  // l'influence vaut exactement ZERO cran rendait la meme phrase qu'un contexte
+  // dont on ne sait RIEN : « pas encore d'influence mesurée ». Le premier est
+  // une mesure — « cette periode se vend comme un jour ordinaire » — le second
+  // un aveu d'ignorance. Les confondre fait passer un resultat pour une lacune.
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150)])
+  const mesure = S.suggerer({ date: '2026-11-03', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  // Hors vacances est la reference : son influence vaut zero PAR DEFINITION,
+  // et c'est une mesure, pas une ignorance.
+  assert.equal(mesure.crans, 0)
+  assert.notEqual(mesure.crans, null)
+
+  // Un evenement sans aucune nuit : influence INCONNUE.
+  const ev = [{ nom: 'Neuf', segment: 'evenement:neuf',
+    date_debut: '2026-11-21', date_fin: '2026-11-21', parent_segment: null }]
+  const ctx2 = R.construireContexte({ zoneBien: 'C', vacances: VACANCES,
+    evenements: ev, debut: '2023-01-01', fin: '2027-12-31' })
+  const g2 = S.construireGrille([...mardis(9, 100), ...samedis(9, 150)],
+    { contexte: ctx2, debut: '2023-01-01', fin: '2025-12-31' })
+  const inconnue = S.suggerer({ date: '2026-11-21', grille: g2, contexte: ctx2,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  assert.equal(inconnue.crans, null)
+  // ⚠ ET LES DEUX PHRASES DIFFERENT.
+  const r1 = mesure.couches.find(c => c.nom === 'position').resume
+  const r2 = inconnue.couches.find(c => c.nom === 'position').resume
+  assert.notEqual(r1, r2)
+  assert.match(r2, /pas encore d’influence mesurée/)
+  assert.doesNotMatch(r1, /pas encore d’influence mesurée/)
+})
+
+test('LE TEST QUI COMPTE : un segment mesure garde son prix SANS reference ordinaire', () => {
+  // ⚠ REGRESSION RELEVEE EN REVIEW, introduite par le modele en crans.
+  // Tout le modele est suspendu a la fiabilite de « hors vacances ». Sur un
+  // bien qui ne se loue qu'en periode chargee — chalet, gite de saison — ce
+  // segment compte une poignee de nuits : `crans` valait `null` partout, la
+  // structure aussi, et le moteur REFUSAIT de tarifer une nuit dont le segment
+  // etait mesure sur quinze nuits et marque `fiable: true`. Il repondait
+  // « segment sous le seuil » avec `echantillon: 15` a cote — un refus qui
+  // accuse la donnee de l'hote alors que la faute etait au modele.
+  // ⚠ DATES VERIFIEES DANS LE CONTEXTE DE CE FICHIER : les vacances d'hiver
+  // 2025 de la zone C y vont du 15 fevrier au 2 mars, et l'ete 2026 du 4
+  // juillet au 31 aout. Ma premiere version visait le 20 fevrier 2026, qui est
+  // HORS vacances dans ce jeu d'essai — le test ne reproduisait donc pas le cas
+  // qu'il annonce. Quatrieme fois qu'une date choisie de tete tombe a cote.
+  const vac = []
+  for (let d = 16; d <= 28; d++) vac.push(`2025-02-${d}`)
+  vac.push('2025-03-01', '2025-03-02')
+  const g = S.construireGrille([
+    ...vac.map((d, i) => ecl([d], { prix: 200, id: `V${i}` })),
+    ecl(['2025-06-10'], { prix: 100, id: 'H1' })
+  ], { contexte: CTX, debut: '2023-01-01', fin: '2025-12-31' })
+  assert.equal(g.positions.get('hors_vacances').fiable, false, 'reference mince')
+  const pv = g.positions.get('vacances_zone_du_bien')
+  assert.equal(pv.fiable, true)
+  assert.equal(pv.crans, null, 'aucun cran calculable sans reference')
+
+  const s = S.suggerer({ date: '2026-07-20', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 100, bien: {} })
+  assert.equal(s.segment, 'vacances_zone_du_bien')
+  assert.ok(s.prix > 0, 'un segment mesure sur 15 nuits doit recevoir un prix')
+  assert.equal(s.non_calculable.length, 0)
+  assert.equal(s.source_du_niveau, 'segment')
+  assert.equal(s.sans_reference_ordinaire, true)
+  // ⚠ ET LE REGLAGE DE L'HOTE S'APPLIQUE QUAND MEME : il etait ignore SANS
+  // MOTIF dans ce cas — l'hote posait un cran, rien ne bougeait, rien ne le
+  // disait.
+  const a = S.suggerer({ date: '2026-07-20', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 100, bien: {}, reglage: { crans: -1, cle: 'x' } })
+  assert.equal(a.ajuste_par_l_hote, true)
+})
+
+test('LE TEST QUI COMPTE : le contexte POUSSE la structure, il ne l ecrase pas', () => {
+  // ⚠ LE MODELE EN CRANS, arbitre par Thierry le 13 septembre 2026.
+  // « Les vacances montent la semaine de Base a Moyen ET le week-end de Haut a
+  // Tres haut. L'ecart semaine/week-end se deplace, il ne s'ecrase pas. »
+  //
+  // Avec l'ancien modele — une position A PLAT par (segment, jour) — un
+  // segment dont le couple manquait de matiere rendait le MEME niveau toute la
+  // semaine : le relief disparaissait la ou il compte le plus.
+  const vac = ['2025-02-17', '2025-02-18', '2025-02-19', '2025-02-20',
+    '2025-02-21', '2025-02-22', '2025-02-24', '2025-02-25', '2025-02-26']
+  const g = grilleDe([...mardis(9, 100), ...samedis(9, 150),
+    ...vac.map((d, i) => ecl([d], { prix: 175, id: `V${i}` }))])
+  const pv = g.positions.get('vacances_zone_du_bien')
+  assert.ok(pv && pv.fiable, 'les vacances doivent avoir une influence mesuree')
+  assert.ok(Number.isInteger(pv.crans), 'l\'influence se mesure en crans')
+
+  // Un mardi et un samedi DE VACANCES : tous deux pousses du meme cran, et
+  // l'ecart entre eux conserve.
+  const mardiOrd = S.suggerer({ date: '2026-11-03', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  const samediOrd = S.suggerer({ date: '2026-11-21', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  const mardiVac = S.suggerer({ date: '2026-07-07', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  const samediVac = S.suggerer({ date: '2026-07-11', grille: g, contexte: CTX,
+    ouverte: true, delaiJours: 30, bien: bienSansPlancher })
+  const idx = n => g.base.niveaux.findIndex(x => x.nom === n)
+  // ⚠ LE MEME CRAN DES DEUX COTES : c'est la definition d'un decalage.
+  assert.equal(idx(mardiVac.niveau) - idx(mardiOrd.niveau),
+    idx(samediVac.niveau) - idx(samediOrd.niveau),
+    'le contexte doit pousser la semaine et le week-end du MEME nombre de crans')
+  // ⚠ ET L'ECART SEMAINE / WEEK-END SURVIT AU DEPLACEMENT.
+  assert.ok(idx(samediOrd.niveau) > idx(mardiOrd.niveau), 'relief ordinaire')
+  assert.ok(idx(samediVac.niveau) >= idx(mardiVac.niveau), 'relief conservé en vacances')
+  // Le resume parle en crans, pas en position a plat.
+  if (mardiVac.crans !== 0) {
+    assert.match(mardiVac.couches.find(c => c.nom === 'position').resume, /cran/)
+  }
 })

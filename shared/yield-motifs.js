@@ -408,6 +408,11 @@ export const NIVEAUX_REFERENCE = {
 export const SEGMENTS = {
   ferie: 'Jour férié',
   pont: 'Pont',
+  // ⚠ LE SYMETRIQUE DU PONT. Le pont couvre les jours OUVRÉS coincés entre un
+  // férié et un week-end ; celui-ci couvre les nuits de WEEK-END rattachées à
+  // un férié — directement ou par un pont. Trois nuits possibles valent plus
+  // que deux, et c'est ce que ce segment mesure.
+  week_end_prolonge: 'Week-end prolongé',
   vacances_zone_du_bien: 'Vacances de la zone du logement',
   vacances_autre_zone: 'Vacances d’une autre zone',
   hors_vacances: 'Hors vacances'

@@ -286,6 +286,9 @@ function renderApps(activePage) {
       subMenu = `
         <a class="nav-sub ${activePage === 'yield-prix' ? 'connected' : ''}" href="/apps/yield/prix">
           <div class="sub-dot ${activePage === 'yield-prix' ? 'green' : 'gray'}"></div>Prix jour par jour
+        </a>
+        <a class="nav-sub ${activePage === 'yield-evenements' ? 'connected' : ''}" href="/apps/yield/evenements">
+          <div class="sub-dot ${activePage === 'yield-evenements' ? 'green' : 'gray'}"></div>Vos événements
         </a>`
     } else if (app.id === 'menages') {
       // ⚠ NOMMAGE TRANCHE LE 5 SEPTEMBRE 2026. « Planning » designait l'ecran

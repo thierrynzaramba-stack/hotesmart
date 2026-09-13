@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Vos événements</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    [hidden] { display: none !important; }
+    .ye-barre { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .ye-bloc { background: var(--bg); border: 0.5px solid var(--border);
+               border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 12px; }
+    .ye-bloc h2 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+    .ye-bloc .st { font-size: 11.5px; color: var(--text3); margin: 0 0 12px; line-height: 1.6; }
+    .ye-liste { display: flex; flex-direction: column; gap: 8px; }
+    .ye-item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+               padding: 9px 12px; background: var(--bg2); border-radius: var(--radius);
+               font-size: 12px; }
+    .ye-nom { font-weight: 600; }
+    .ye-dates { color: var(--text2); font-variant-numeric: tabular-nums; }
+    .ye-tag { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
+              padding: 2px 7px; border-radius: 4px; background: var(--bg3);
+              color: var(--text2); white-space: nowrap; cursor: help; }
+    .ye-tag.rec { background: #EAF3FB; color: #2A5E86; }
+    .ye-tag.passe { background: var(--bg3); color: var(--text3); }
+    .ye-sup { margin-left: auto; background: none; border: 0.5px solid var(--border);
+              color: var(--text3); border-radius: var(--radius); cursor: pointer;
+              font-size: 11px; padding: 3px 9px; font-family: inherit; }
+    .ye-sup:hover { border-color: #F5C2C7; color: #B02A37; background: #FFF5F5; }
+
+    /* ─── La proposition de reconduction ─────────────────────────────────── */
+    .ye-prop { border: 0.5px solid #CFE0F0; background: #F4F9FD; border-radius: var(--radius);
+               padding: 11px 13px; display: flex; gap: 10px; align-items: center;
+               flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
+    .ye-prop .q { flex: 1 1 260px; line-height: 1.6; }
+    .ye-prop input[type="date"] { font-family: inherit; font-size: 12px; padding: 4px 6px;
+                                  border: 0.5px solid var(--border); border-radius: 4px;
+                                  background: var(--bg); color: var(--text); }
+    .ye-oui { background: #1F6F45; color: #fff; border: none; border-radius: var(--radius);
+              padding: 6px 13px; font-size: 12px; cursor: pointer; font-family: inherit;
+              font-weight: 600; }
+    .ye-oui:hover { background: #175738; }
+    .ye-prop.muette { background: #FFF8E6; border-color: #F0DFB0; }
+
+    /* ─── Le formulaire ──────────────────────────────────────────────────── */
+    .ye-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+               gap: 10px; align-items: end; }
+    .ye-champ { display: flex; flex-direction: column; gap: 4px; }
+    .ye-champ label { font-size: 10.5px; color: var(--text3); }
+    .ye-champ input, .ye-champ select {
+      font-family: inherit; font-size: 12.5px; padding: 7px 8px;
+      border: 0.5px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text); width: 100%; }
+    .ye-aide { font-size: 10.5px; color: var(--text3); margin-top: 8px; line-height: 1.6; }
+    .ye-envoi { background: var(--text); color: var(--bg); border: none;
+                border-radius: var(--radius); padding: 8px 16px; font-size: 12.5px;
+                cursor: pointer; font-family: inherit; font-weight: 600; }
+    .ye-msg { font-size: 12px; margin-top: 10px; padding: 9px 12px; border-radius: var(--radius);
+              line-height: 1.6; }
+    .ye-msg.ok { background: #E8F2EC; color: #1F6F45; }
+    .ye-msg.ko { background: #FFF5F5; color: #842029; border: 0.5px solid #F5C2C7; }
+    /* ─── La liste unique : trois origines, un seul endroit ──────────────── */
+    .ye-cal { display: flex; flex-direction: column; gap: 1px; background: var(--border);
+              border-radius: var(--radius); overflow: hidden; }
+    .ye-l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            padding: 9px 12px; background: var(--bg); font-size: 12px; }
+    .ye-l.coupe { background: var(--bg2); }
+    .ye-l.coupe .ye-nom, .ye-l.coupe .ye-quand { opacity: .5; }
+    .ye-quand { font-variant-numeric: tabular-nums; color: var(--text2);
+                min-width: 132px; font-size: 11.5px; }
+    .ye-o { font-size: 9px; text-transform: uppercase; letter-spacing: .05em;
+            padding: 2px 6px; border-radius: 3px; cursor: help; white-space: nowrap;
+            flex: 0 0 auto; }
+    .ye-o.officiel   { background: #EAF3FB; color: #2A5E86; }
+    .ye-o.calendrier { background: #FBF2E6; color: #8A6D3B; }
+    .ye-o.declare    { background: #E8F2EC; color: #1F6F45; }
+    .ye-niv { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+    .ye-niv select { font-family: inherit; font-size: 11.5px; padding: 3px 6px;
+                     border: 0.5px solid var(--border); border-radius: 4px;
+                     background: var(--bg); color: var(--text); }
+    .ye-niv select.ajuste { border-color: #2A5E86; background: #F4F9FD;
+                            font-weight: 600; color: #1B4A6B; }
+    .ye-tag.ye-rayon { background: #FDEFEA; color: #8A4B2A; }
+    .ye-calc { font-size: 10px; color: var(--text3); white-space: nowrap; cursor: help; }
+    .ye-bascule { background: none; border: 0.5px solid var(--border); border-radius: 4px;
+                  font-size: 10.5px; padding: 3px 8px; cursor: pointer; color: var(--text3);
+                  font-family: inherit; white-space: nowrap; }
+    .ye-bascule:hover { background: var(--bg2); color: var(--text); }
+    .ye-horizon { font-size: 11.5px; color: #8A6D3B; background: #FFF8E6;
+                  border: 0.5px solid #F0DFB0; border-radius: var(--radius);
+                  padding: 9px 12px; margin-top: 10px; line-height: 1.6; }
+    .ye-source { font-size: 10.5px; color: var(--text3); margin-top: 8px; line-height: 1.6; }
+
+    .ye-etat { padding: 20px; border: 0.5px solid var(--border); border-radius: var(--radius-lg);
+               background: var(--bg); color: var(--text2); font-size: 13px; }
+    .ye-etat.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
+    .ye-lecture { font-size: 11.5px; color: #8A6D3B; background: #FFF8E6;
+                  border: 0.5px solid #F0DFB0; border-radius: var(--radius);
+                  padding: 9px 12px; margin-bottom: 12px; line-height: 1.6; }
+    @media (max-width: 640px) { #ye-bien { flex: 1 1 100%; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-root"></div>
+<div class="main">
+  <div class="header">
+    <h1>Vos événements</h1>
+    <p class="subtitle">Ce qui remplit ce logement, et que seul vous savez</p>
+  </div>
+
+  <div class="ye-barre"><select id="ye-bien"></select></div>
+  <div id="ye-contenu"></div>
+</div>
+
+<script type="module">
+  // ⚠ CE QUE LE MOTEUR NE PEUT PAS DEVINER.
+  // Il connait les vacances scolaires et les jours feries — deux calendriers
+  // publics, les memes pour tout le monde. Il ignore tout d'une saison
+  // thermale, d'un festival, d'un salon. L'hote, lui, le sait depuis des
+  // annees : cet ecran est le seul endroit ou ce savoir entre dans le moteur.
+  //
+  // ⚠ AUCUNE RECONDUCTION SILENCIEUSE. L'ecran PROPOSE, l'hote CONFIRME.
+  // Un evenement mal date fausse le segment de toutes ses nuits — donc le
+  // niveau, donc le prix — et, contrairement a un evenement absent, ça ne se
+  // voit pas : le moteur repond avec le meme aplomb sur une periode qui
+  // n'existe pas.
+  //
+  // ⚠ ECRITURE GARDEE `reglages`, LECTURE `reservations` — meme arbitrage
+  // qu'aux exceptions. L'endpoint est la seule barriere : la cle service
+  // contourne la RLS.
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+  import { refus, nomSegment } from '/shared/yield-motifs.js'
+
+  initErrorHandler()
+
+  let session = null
+  let donnees = null
+  const el = id => document.getElementById(id)
+  const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+    'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  const frDate = iso => {
+    if (!iso) return '—'
+    const d = new Date(`${iso}T00:00:00Z`)
+    return `${d.getUTCDate()} ${MOIS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  }
+  // « de avril » se lit comme une faute, et une faute dans l'interface use la
+  // confiance aussi surement qu'un chiffre faux.
+  const deMois = m => {
+    const nom = MOIS[m - 1]
+    return /^[aeiouâéèêîô]/i.test(nom) ? `d’${nom}` : `de ${nom}`
+  }
+  const RECURRENCE_NOM = {
+    annuelle_fixe: 'chaque année, mêmes dates',
+    annuelle_ajustable: 'chaque année, même position',
+    ponctuelle: 'une seule fois'
+  }
+  const RECURRENCE_AIDE = {
+    annuelle_fixe: 'Un salon qui revient toujours du 14 au 16 novembre. La reconduction vous proposera les mêmes dates.',
+    annuelle_ajustable: 'Un festival qui tombe le deuxième week-end de juillet, quelle que soit la date. La reconduction suivra la position, pas le numéro du jour.',
+    ponctuelle: 'Un mariage, un chantier voisin : cela n’arrive qu’une fois, et rien ne vous sera proposé l’an prochain.'
+  }
+
+  async function init () {
+    session = await requireAuth()
+    if (!session) return
+    renderSidebar('yield-evenements').catch(e => console.error('[yield-evenements] sidebar', e))
+    if (await chargerBiens()) charger()
+    el('ye-bien').addEventListener('change', charger)
+  }
+
+  async function chargerBiens () {
+    const compte = compteCourant()
+    let q = supabase.from('properties').select('id, name').order('name')
+    if (compte) q = q.eq('user_id', compte)
+    const { data, error } = await q
+    if (error) { etat('Impossible de lire la liste des logements.', true); return false }
+    if (!data || !data.length) { etat('Aucun logement accessible sur ce compte.'); return false }
+    el('ye-bien').innerHTML = data
+      .map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
+    return true
+  }
+
+  const api = async (methode, corps = null, params = {}) => {
+    const q = new URLSearchParams({ property_id: el('ye-bien').value, ...params })
+    const r = await fetch(`/api/yield-evenements?${q}`, {
+      method: methode,
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        ...enteteCompte(),
+        ...(corps ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...(corps ? { body: JSON.stringify({ property_id: el('ye-bien').value, ...corps }) } : {})
+    })
+    return { ok: r.ok, statut: r.status, data: await r.json() }
+  }
+
+  async function charger (message = '') {
+    etat('Lecture…')
+    let r
+    try { r = await api('GET') } catch (e) { return etat(`Lecture impossible : ${e.message}`, true) }
+    if (!r.ok) return etat(refus(r.data && r.data.error), true)
+    donnees = r.data
+    el('ye-contenu').innerHTML = vue(r.data, message)
+    brancher()
+  }
+
+  function vue (d, message) {
+    return (d.droits_ecriture === false ? `<div class="ye-lecture">
+      Vous consultez ce calendrier en lecture seule : le modifier demande le
+      droit « réglages », parce qu’un événement change le niveau auquel vos
+      nuits seront tarifées.</div>` : '')
+      + reconductions(d) + calendrierComplet(d) + formulaire(d, message)
+  }
+
+  const ORIGINE_AIDE = {
+    officiel: 'Vacances scolaires et jours fériés. Mis à jour automatiquement depuis la source du ministère ; les ponts sont calculés. On ne les supprime pas — ils sont vrais — mais leur positionnement sur votre grille vous appartient.',
+    calendrier: 'Une date que le calendrier officiel ignore et que nous savons décisive pour un meublé. Fournie active ; vous pouvez la couper si elle ne vous concerne pas.',
+    declare: 'Ce que vous avez déclaré vous-même.'
+  }
+  const ORIGINE_NOM = { officiel: 'officiel', calendrier: 'calendrier', declare: 'déclaré' }
+
+  // ⚠ UNE SEULE LISTE, TRIEE PAR PROCHAINE OCCURRENCE. L'hôte ne raisonne pas
+  // en « sources de données » mais en « ce qui remplit mon gîte » : trois
+  // listes l'auraient obligé à savoir d'où vient chaque chose pour la
+  // retrouver. L'origine reste visible, parce qu'elle décide de ce qu'on peut
+  // en faire — pas de ce qu'on en voit.
+  function calendrierComplet (d) {
+    const sv = d.source_vacances || {}
+    const lignes = (d.calendrier || []).map(e => ligneCalendrier(e, d)).join('')
+    return `<div class="ye-bloc">
+      <h2>Ce qui pilote vos prix</h2>
+      <p class="st">Les douze prochains mois, dans l’ordre où vous les
+        rencontrerez. Le moteur traite les trois origines à l’identique :
+        chacune <strong>pousse vos prix d’un nombre de crans</strong>, mesuré
+        sur votre historique quand il existe. La semaine et le week-end montent
+        du même cran : l’écart entre eux est conservé, jamais écrasé. Et le cran
+        que <strong>vous</strong> posez l’emporte toujours sur celui qu’il
+        mesure.</p>
+      <div class="ye-cal">${lignes || '<div class="ye-l">Rien sur cette période.</div>'}</div>
+      ${sv.incertain_apres ? `<div class="ye-horizon">
+        <strong>Segments incertains après le ${ech(frDate(sv.incertain_apres))}.</strong>
+        Le calendrier scolaire publié s’arrête là : au-delà, les nuits de vacances
+        seront comptées comme des nuits ordinaires tant que le ministère n’aura
+        pas publié l’année suivante. Les jours fériés, eux, restent calculés.</div>` : ''}
+      <p class="ye-source">
+        Vacances scolaires ${sv.zone ? `de la zone <strong>${ech(sv.zone)}</strong> ` : ''}—
+        mises à jour automatiquement depuis
+        <strong>${ech(sv.nom || 'la source officielle')}</strong>${sv.couverture_fin
+          ? `, couverture jusqu’au ${ech(frDate(sv.couverture_fin))}` : ''}.
+        Jours fériés et ponts : calculés, aucune source à maintenir.</p>
+    </div>`
+  }
+
+  // ⚠ « +1 CRAN », PAS « NIVEAU HAUT » — arbitrage de Thierry.
+  // Un contexte POUSSE la structure du bien en gardant ses reliefs : les
+  // vacances montent la semaine de Base à Moyen ET le week-end de Haut à Très
+  // haut. Une position à plat aurait aplati la semaine sur le week-end, c'est-
+  // à-dire effacé exactement l'écart qui fait le prix d'un samedi.
+  // ⚠ TROIS CAUSES, TROIS PHRASES. Un message unique disait « pas assez
+  // d'historique » aussi bien quand l'échantillon existait — et que c'est la
+  // référence ordinaire du bien qui manquait — que quand la lecture des
+  // réservations avait échoué. L'hôte lisait alors un reproche à ses données
+  // pour une panne.
+  const MOTIF_INFLUENCE = {
+    pas_d_historique_propre: 'Cette période n’a pas encore de nuits vendues dans votre historique. Chaque nuit garde alors son niveau ordinaire — jamais le silence. Vous pouvez poser vous-même l’influence dès maintenant.',
+    reference_ordinaire_mince: 'Cette période EST mesurée, mais vos nuits ordinaires (hors vacances, hors férié) sont trop peu nombreuses pour servir de point de comparaison. Le moteur ne peut donc pas dire de combien de crans elle pousse : il utilise sa position mesurée telle quelle.',
+    grille_indisponible: 'Vos réservations n’ont pas pu être lues à l’instant. Ce n’est pas un manque d’historique — c’est une lecture qui a échoué. Rechargez la page ; si cela persiste, dites-le-nous.',
+    date_desactivee: 'Vous avez coupé cette date : elle ne compte plus comme un segment à part. Réactivez-la pour que le moteur la mesure.'
+  }
+  const crans = n => n == null ? '—' : (n === 0 ? 'sans effet' : `${n > 0 ? '+' : ''}${n} cran${Math.abs(n) > 1 ? 's' : ''}`)
+
+  function ligneCalendrier (e, d) {
+    const lecture = d.droits_ecriture === false
+    const niveaux = d.niveaux || []
+    const quand = e.debut === e.fin ? frDate(e.debut)
+      : `${frDate(e.debut)} → ${frDate(e.fin)}`
+    // ⚠ LE CALCUL RESTE VISIBLE A COTE DE L'AJUSTEMENT. Un niveau surprenant
+    // doit s'expliquer par ce que l'hôte a posé, pas passer pour une erreur.
+    // ⚠ LE CRAN MESURE RESTE VISIBLE A COTE DU VOTRE : l'écart entre les deux
+    // est exactement ce que vous avez décidé, et vous devez pouvoir le
+    // constater — puis revenir en arrière en le voyant.
+    const calc = e.crans_ajustes != null && e.crans_mesures != null && e.crans_ajustes !== e.crans_mesures
+      ? `<span class="ye-calc" title="${ech(`Le moteur mesure ${crans(e.crans_mesures)} sur ${e.echantillon} nuit(s) de ce type (médiane ${e.mediane} €). Votre réglage l’emporte.`)}">mesuré : ${ech(crans(e.crans_mesures))}</span>`
+      : (e.crans == null
+        ? `<span class="ye-calc" title="${ech(MOTIF_INFLUENCE[e.influence_non_calculable] || MOTIF_INFLUENCE.pas_d_historique_propre)}">${ech(e.influence_non_calculable === 'grille_indisponible' ? 'lecture indisponible' : 'influence à mesurer')}</span>`
+        : (e.niveau_calcule
+          ? `<span class="ye-calc" title="${ech(`Mesuré sur ${e.echantillon} nuit(s), médiane ${e.mediane} €. La période se situe au niveau ${e.niveau_calcule} ; chaque nuit part de son propre jour de semaine et monte du même nombre de crans.`)}">période : ${ech(e.niveau_calcule)}</span>`
+          : ''))
+    return `<div class="ye-l ${e.actif === false ? 'coupe' : ''}">
+      <span class="ye-quand">${ech(quand)}${e.nuits > 1 ? ` · ${e.nuits} n` : ''}</span>
+      <span class="ye-nom">${ech(e.nom)}</span>
+      <span class="ye-o ${ech(e.origine)}" title="${ech(ORIGINE_AIDE[e.origine] || '')}">${ech(ORIGINE_NOM[e.origine] || e.origine)}</span>
+      ${e.ferie_voisin ? `<span class="ye-tag ye-rayon" title="${ech(`Ces nuits de week-end touchent ${e.ferie_voisin} — directement ou par un pont. Trois nuits possibles valent plus que deux : c’est le symétrique du pont, qui couvre les jours ouvrés coincés entre un férié et un week-end.`)}">éclairé par ${ech(e.ferie_voisin)}</span>` : ''}
+      ${e.reference_empruntee ? `<span class="ye-tag" title="Pas assez d’historique propre : le moteur reprend l’influence de ce type de période.">influence empruntée</span>` : ''}
+      <span class="ye-niv">
+        ${calc}
+        ${lecture || e.actif === false
+          ? `<span class="ye-tag">${ech(crans(e.crans))}</span>`
+          : `<select data-reglage="${ech(e.cle)}" class="${e.crans_ajustes != null ? 'ajuste' : ''}"
+              title="De combien de crans cette période pousse vos prix. La semaine et le week-end montent du même cran : l’écart entre eux est conservé.">
+              <option value="">${ech(e.crans_mesures != null ? 'laisser mesurer' : 'à mesurer')}</option>
+              ${Array.from({ length: (d.crans_max || 4) * 2 + 1 }, (_, i) => i - (d.crans_max || 4))
+                .map(n => `<option value="${n}" ${n === e.crans_ajustes ? 'selected' : ''}>${ech(crans(n))}</option>`).join('')}
+            </select>`}
+        ${!lecture && e.droits && e.droits.desactivable
+          ? `<button class="ye-bascule" data-actif="${ech(e.cle)}" data-vers="${e.actif === false ? '1' : '0'}"
+              title="${ech(e.actif === false ? 'Réactiver : cette date redeviendra un segment à part.' : 'Couper : cette date redeviendra une nuit ordinaire pour le moteur.')}">${e.actif === false ? 'réactiver' : 'couper'}</button>`
+          : ''}
+        ${!lecture && e.droits && e.droits.supprimable && e.id
+          ? `<button class="ye-sup" data-sup="${ech(e.id)}" data-nom="${ech(e.nom)}">Supprimer</button>`
+          : ''}
+      </span>
+    </div>`
+  }
+
+  // ─── LES PROPOSITIONS — le cœur de la règle ───────────────────────────────
+  function reconductions (d) {
+    if (!d.reconductions || !d.reconductions.length) return ''
+    return `<div class="ye-bloc">
+      <h2>À reconduire ?</h2>
+      <p class="st">Ces événements sont déclarés récurrents et leur prochaine
+        édition approche. <strong>Rien n’est enregistré tant que vous n’avez pas
+        confirmé</strong> — et vous pouvez corriger les dates avant.</p>
+      ${d.reconductions.map((r, i) => r.debut ? `
+        <div class="ye-prop" data-prop="${i}">
+          <div class="q"><strong>${ech(r.nom)}</strong> —
+            l’an dernier du ${ech(frDate(r.depuis.debut))} au ${ech(frDate(r.depuis.fin))}.
+            ${r.position ? `Vous l’avez déclaré « même position » :
+              ${r.position.rang === 1 ? '1<sup>er</sup>' : `${r.position.rang}<sup>e</sup>`}
+              ${ech(r.position.jour)} ${ech(deMois(r.position.mois))}.` : ''}</div>
+          <input type="date" id="pd-${i}" value="${ech(r.debut)}" aria-label="Début proposé">
+          <input type="date" id="pf-${i}" value="${ech(r.fin)}" aria-label="Fin proposée">
+          <button class="ye-oui" data-confirme="${i}">Confirmer</button>
+        </div>` : `
+        <div class="ye-prop muette">
+          <div class="q"><strong>${ech(r.nom)}</strong> —
+            ${r.non_calculable === 'date_absente_l_annee_suivante'
+              ? 'cette date n’existe pas l’an prochain (un 29 février).'
+              : 'cette position n’existe pas l’an prochain — le mois ne compte pas assez de ce jour-là.'}
+            Saisissez les dates vous-même ci-dessous : proposer une date approchante
+            reviendrait à décaler votre événement sans vous le dire.</div>
+        </div>`).join('')}
+    </div>`
+  }
+
+  // ─── LA SAISIE ────────────────────────────────────────────────────────────
+  function formulaire (d, message) {
+    if (d.droits_ecriture === false) return ''
+    const parents = (d.parents || []).map(p =>
+      `<option value="${ech(p)}">${ech(nomSegment(p))}</option>`).join('')
+    return `<div class="ye-bloc">
+      <h2>Déclarer un événement</h2>
+      <p class="st">Une saison thermale, un festival, un salon, une course.
+        Le moteur en fera un segment à part : ces nuits cesseront d’être
+        comptées comme des nuits ordinaires.</p>
+      <div class="ye-form">
+        <div class="ye-champ" style="grid-column: span 2">
+          <label for="f-nom">Nom</label>
+          <input id="f-nom" maxlength="${d.limites ? d.limites.nom_max : 80}"
+            placeholder="Saison thermale" autocomplete="off">
+        </div>
+        <div class="ye-champ"><label for="f-debut">Du</label>
+          <input id="f-debut" type="date"></div>
+        <div class="ye-champ"><label for="f-fin">Au (inclus)</label>
+          <input id="f-fin" type="date"></div>
+        <div class="ye-champ"><label for="f-rec">Revient-il ?</label>
+          <select id="f-rec">
+            ${(d.recurrences || []).map(r =>
+              `<option value="${ech(r)}">${ech(RECURRENCE_NOM[r] || r)}</option>`).join('')}
+          </select></div>
+        <div class="ye-champ"><label for="f-parent">Se comporte comme</label>
+          <select id="f-parent"><option value="">— à déterminer —</option>${parents}</select></div>
+        <div><button class="ye-envoi" id="f-envoi">Déclarer</button></div>
+      </div>
+      <p class="ye-aide" id="f-aide"></p>
+      <p class="ye-aide">
+        <strong>« Se comporte comme »</strong> ne sert que la première année, tant
+        que l’événement n’a pas d’historique à lui. Laissé vide, le moteur garde
+        le niveau que chaque nuit aurait <em>sans</em> l’événement — jamais le
+        silence. Dès qu’il aura ses propres nuits, il se positionnera seul.
+      </p>
+      ${message ? `<div class="ye-msg ${message.startsWith('✓') ? 'ok' : 'ko'}">${ech(message)}</div>` : ''}
+    </div>`
+  }
+
+  // ⚠ LA LISTE « DECLARES » A DISPARU, et c'est le sujet de cette passe : les
+  // evenements de l'hote ne vivent plus a part, ils sont une origine parmi
+  // trois dans `calendrierComplet`. Deux endroits pour la meme chose auraient
+  // oblige l'hote a savoir lequel regarder.
+
+  function brancher () {
+    const aide = el('f-aide')
+    const rec = el('f-rec')
+    if (rec && aide) {
+      const maj = () => { aide.textContent = RECURRENCE_AIDE[rec.value] || '' }
+      rec.addEventListener('change', maj); maj()
+    }
+    const envoi = el('f-envoi')
+    if (envoi) envoi.addEventListener('click', declarer)
+    for (const b of document.querySelectorAll('[data-confirme]')) {
+      b.addEventListener('click', () => confirmer(Number(b.dataset.confirme)))
+    }
+    for (const b of document.querySelectorAll('[data-sup]')) {
+      b.addEventListener('click', () => supprimer(b.dataset.sup, b.dataset.nom))
+    }
+    for (const sel of document.querySelectorAll('[data-reglage]')) {
+      sel.addEventListener('change', () => regler(sel.dataset.reglage,
+        { crans: sel.value === '' ? null : Number(sel.value) }))
+    }
+    for (const b of document.querySelectorAll('[data-actif]')) {
+      b.addEventListener('click', () => regler(b.dataset.actif,
+        { actif: b.dataset.vers === '1' }))
+    }
+  }
+
+  // ⚠ PATCH, PAS POST. POST cree une occurrence ; PATCH regle un SEGMENT.
+  // Deux ressources, deux verbes : les fondre aurait fait un endpoint dont le
+  // corps décide de la nature de l'écriture.
+  async function regler (segment, champs) {
+    let r
+    try { r = await api('PATCH', { segment, ...champs }) } catch (e) {
+      return charger(`Échec : ${e.message}`)
+    }
+    if (!r.ok) return charger(refus(r.data && r.data.error) || r.data.error || 'Refusé.')
+    const quoi = 'actif' in champs
+      ? (champs.actif ? 'réactivé' : 'coupé')
+      : (champs.crans != null ? `posé à ${crans(champs.crans)}` : 'remis à la mesure du moteur')
+    charger(`✓ « ${segment} » ${quoi}.`)
+  }
+
+  async function declarer () {
+    const corps = {
+      nom: el('f-nom').value.trim(),
+      debut: el('f-debut').value,
+      fin: el('f-fin').value,
+      recurrence: el('f-rec').value,
+      parent_segment: el('f-parent').value || null
+    }
+    // ⚠ ON NE PRE-VALIDE PAS A LA PLACE DU SERVEUR. Une garde cote ecran est un
+    // confort ; c'est l'endpoint et la base qui refusent. Redire la regle ici
+    // ferait deux regles qui divergeront.
+    if (!corps.nom || !corps.debut || !corps.fin) {
+      return charger('Il manque le nom ou les dates.')
+    }
+    await envoyer(corps, `✓ « ${corps.nom} » déclaré.`)
+  }
+
+  async function confirmer (i) {
+    const r = donnees.reconductions[i]
+    if (!r) return
+    await envoyer({
+      nom: r.nom,
+      debut: el(`pd-${i}`).value,
+      fin: el(`pf-${i}`).value,
+      recurrence: r.recurrence,
+      parent_segment: r.parent_segment,
+      reconduit_de: r.depuis.id
+    }, `✓ « ${r.nom} » reconduit.`)
+  }
+
+  async function envoyer (corps, succes) {
+    let r
+    try { r = await api('POST', corps) } catch (e) { return charger(`Échec : ${e.message}`) }
+    if (r.ok) return charger(succes)
+    // ⚠ LE MESSAGE DU SERVEUR EST PREFERE AU NOTRE quand il est traduit : c'est
+    // lui qui sait POURQUOI il a refuse.
+    const m = refus(r.data && r.data.error)
+    charger(m && m !== r.data.error ? m : (r.data.detail || r.data.error || 'Refusé.'))
+  }
+
+  async function supprimer (id, nom) {
+    // ⚠ UNE SUPPRESSION CHANGE LA REFERENCE DU PRICING : on demande.
+    if (!window.confirm(`Supprimer « ${nom} » ?\n\nCes nuits redeviendront des nuits ordinaires pour le moteur, et les prix suggérés changeront.`)) return
+    let r
+    try { r = await api('DELETE', null, { id }) } catch (e) { return charger(`Échec : ${e.message}`) }
+    charger(r.ok ? `✓ « ${nom} » supprimé.` : (refus(r.data && r.data.error) || 'Refusé.'))
+  }
+
+  function etat (msg, erreur = false) {
+    el('ye-contenu').innerHTML = `<div class="ye-etat${erreur ? ' erreur' : ''}">${ech(msg)}</div>`
+  }
+
+  init()
+</script>
+</body>
+</html>
