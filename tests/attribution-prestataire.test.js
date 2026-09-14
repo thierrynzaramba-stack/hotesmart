@@ -62,8 +62,12 @@ function fauxClient (d = {}, journal = []) {
         eq (c, v) { a.f[c] = v; return chain },
         not () { return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
-        order () { return chain },
-        limit () { return Promise.resolve(rep()) },
+        // ⚠ `order` ET `limit` SONT HONORES. Le code TRONQUE apres avoir trie
+        // cote base : un double qui rend les lignes dans l'ordre d'insertion
+        // coupe les mauvaises, et le test echoue — ou pire, passe — pour une
+        // raison qui n'existe pas en production.
+        order (c, o) { a.order = { c, asc: !(o && o.ascending === false) }; return chain },
+        limit (n) { a.limit = n; return Promise.resolve(rep()) },
         maybeSingle () { const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error }) },
         then (r) { return Promise.resolve(rep()).then(r) }
       }
@@ -82,7 +86,18 @@ function fauxClient (d = {}, journal = []) {
         if (table === 'profiles') return { data: profils.filter(filtre), error: null }
         if (table === 'menage_events') return { data: menages.filter(filtre), error: null }
         if (table === 'prestataire_periodes') return { data: periodes.filter(filtre), error: null }
-        if (table === 'ota_reviews') return { data: avis.filter(l => filtre(l) && dansIn(l) && embed(l)), error: null }
+        if (table === 'ota_reviews') {
+          let d = avis.filter(l => filtre(l) && dansIn(l) && embed(l))
+          if (a.order) {
+            const k = a.order.c
+            d = [...d].sort((x, y) => {
+              const r = String(x[k] || '').localeCompare(String(y[k] || ''))
+              return a.order.asc ? r : -r
+            })
+          }
+          if (a.limit != null) d = d.slice(0, a.limit)
+          return { data: d, error: null }
+        }
         return { data: [], error: null }
       }
       return chain
@@ -295,5 +310,39 @@ test('la borne globale garde les plus RÉCENTS, toutes voies confondues', async 
   assert.strictEqual(r.ids.length, MAX_IDS)
   assert.ok(r.ids.includes('recent'),
     'l\'avis le plus récent doit entrer, même s\'il vient de la seconde voie')
+  assert.strictEqual(r.tronque, true)
+})
+
+test('la borne globale trie sur la MÊME clé que les requêtes', async () => {
+  // ⚠ CONSTAT DE REVIEW, et c'est la même famille que le défaut que le tri
+  // global venait corriger. Les deux voies trient et TRONQUENT côté base sur
+  // `received_at` ; le tri global se faisait sur `dateDeRattachement`
+  // (`stay_end ?? received_at`). Au-delà de la borne, les 150 gardés par une
+  // voie n'étaient donc pas les 150 premiers du tri final : la promesse « les
+  // plus récents » ne tenait toujours pas.
+  //
+  // Le cas qui les sépare : un avis RÉCEMMENT REÇU dont le séjour est ANCIEN.
+  // Trié par date de rattachement il part au fond ; par date de réception il
+  // remonte — et c'est la réception que la PWA affiche (`recuLe`).
+  const { MAX_IDS } = require('../lib/attribution-prestataire')
+  const remplissage = Array.from({ length: MAX_IDS }, (_, i) => ({
+    id: 'p' + i, user_id: U, statut: 'confirme', property_id_ref: 'COL',
+    stay_end: '2026-06-15', received_at: '2026-06-20T00:00:00Z'
+  }))
+  const recentMaisVieuxSejour = {
+    id: 'recu-hier', user_id: U, statut: 'confirme', property_id_ref: 'COL',
+    stay_end: '2020-01-01',                       // séjour très ancien
+    received_at: '2026-09-13T00:00:00Z'           // mais reçu hier
+  }
+  const r = await avisDuPrestataire(fauxClient({
+    profils: [REGINA],
+    menages: [],
+    periodes: [{ user_id: U, provider_id: P_REGINA, property_id_ref: 'COL',
+                 debut: null, fin: null }],
+    avis: [...remplissage, recentMaisVieuxSejour]
+  }), { userId: U, prestataireId: P_REGINA })
+  assert.strictEqual(r.ids.length, MAX_IDS)
+  assert.ok(r.ids.includes('recu-hier'),
+    'l\'avis reçu hier doit entrer, même si son séjour est de 2020')
   assert.strictEqual(r.tronque, true)
 })

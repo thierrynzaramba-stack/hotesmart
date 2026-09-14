@@ -22,7 +22,7 @@ const Module = require('node:module')
 // seconde lecture rendrait la garde indetectable : on pourrait la retirer sans
 // qu'un test bronche.
 function charger({ snapshots = [], tokens = [], profils = null, statut = null,
-                   erreurProfils = null }) {
+                   erreurProfils = null, erreurTokens = null, erreurStatut = null }) {
   const req = { order: null, lte: null, limit: null }
   // Par defaut, chaque jeton a un profil actif derriere lui : c'est l'etat
   // normal, et les tests ecrits AVANT cette garde doivent continuer de decrire
@@ -35,10 +35,15 @@ function charger({ snapshots = [], tokens = [], profils = null, statut = null,
       lte(col, val) { req.lte = { col, val }; return q },
       order(col, opts) { req.order = { col, ...opts }; return q },
       limit(n) { req.limit = n; return Promise.resolve({ data: snapshots }) },
-      maybeSingle: async () => ({ data: nom === 'property_status' ? statut : null }),
+      maybeSingle: async () => (nom === 'property_status' && erreurStatut)
+        ? { data: null, error: erreurStatut }
+        : { data: nom === 'property_status' ? statut : null, error: null },
       then(res, rej) {
         if (nom === 'profiles' && erreurProfils) {
           return Promise.resolve({ data: null, error: erreurProfils }).then(res, rej)
+        }
+        if (nom === 'public_tokens' && erreurTokens) {
+          return Promise.resolve({ data: null, error: erreurTokens }).then(res, rej)
         }
         const data = nom === 'public_tokens' ? tokens
                    : nom === 'profiles' ? vivants : []
@@ -184,6 +189,36 @@ test('PANNE de lecture des profils : le code ATTEND, il ne part pas', async () =
   assert.strictEqual(
     await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false,
     'sur une panne, on attend le menage — on n\'ouvre pas le logement')
+})
+
+test('PANNE de lecture des LIENS : le code attend aussi', async () => {
+  // ⚠ CONSTAT DE REVIEW : le commit precedent avait pose la garde sur la lecture
+  // qu'il AJOUTAIT (`profiles`) en laissant sa VOISINE ouverte, trois lignes plus
+  // haut. Elles se composent — `tokens` null donne exactement le meme resultat
+  // que `profils` null. Une garde vaut ce que vaut sa lecture la plus faible.
+  const { mod } = charger({
+    snapshots: [snap('2026-09-08')],
+    tokens: [{ token: 'vivant', property_ids: ['12345'] }],
+    profils: [{ pwa_token: 'vivant' }],
+    erreurTokens: { message: 'timeout' },
+    statut: null
+  })
+  assert.strictEqual(
+    await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false)
+})
+
+test('PANNE de lecture du STATUT du bien : le code attend aussi', async () => {
+  // Troisieme lecture de la meme garde : `propStatus` null se lit « aucun menage
+  // jamais valide », ce qui OUVRE la porte quand aucun prestataire ne couvre le
+  // bien. Une panne ne doit pas se lire comme un fait.
+  const { mod } = charger({
+    snapshots: [snap('2026-09-08')],
+    tokens: [],
+    erreurStatut: { message: 'timeout' }
+  })
+  assert.strictEqual(
+    await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false,
+    'sans cette garde, un bien sans prestataire laissait passer le code sur une panne')
 })
 
 test('les sejours non actifs sont ignores dans la recherche', async () => {
