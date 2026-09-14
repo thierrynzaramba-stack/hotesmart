@@ -846,7 +846,7 @@ async function rattraperMenagesSansPersonne (userId, refs) {
       const bien = {
         userId, propertyId: String(m.property_id),
         liaisons: liaisonsParBien.get(`${userId}|${String(m.property_id)}`) || [],
-        regles: dispos.regles, exceptions: dispos.exceptions
+        regles: dispos.regles, exceptions: dispos.exceptions, conges: dispos.conges
       }
       const choix = deciderParGarde(bien, m.departure_date, { maintenant })
       if (!choix.providerId && !choix.offeredTo) continue

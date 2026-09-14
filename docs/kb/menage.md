@@ -737,11 +737,24 @@ qu'on ne sait pas lire rend **indisponible** (on n'envoie pas quelqu'un sur une 
 incomprise) ; une plage qu'on ne sait pas lire ne doit pas effacer quelqu'un du planning **pour
 toujours**. On l'ignore, et les autres étages tranchent.
 
-⚠️ **Les congés se chargent partout où les règles se chargent.** `chargerDisponibilites`,
-`contexteDispo`, `api/garde.js`, `sync-menages-entite.js` : `estDisponible` sait les lire, mais il
-ne lit que ce qu'on lui donne. Les oublier dans le câblage aurait été la faute la plus silencieuse
-du lot — tous les tests d'unité seraient restés verts pendant que la garde du jour désignait
-quelqu'un en vacances.
+⚠️ **Les congés se chargent partout où les règles se chargent — SIX points de passage, pas
+quatre.** `estDisponible` sait les lire, mais il ne lit que ce qu'on lui **donne** :
+`chargerDisponibilites`, `contexteDispo`, `api/garde.js`, `sync-menages-entite.js`, **`api/menages.js`
+(rattrapage à la création d'une liaison)** et **`api/menages-public.js` (remplaçante après un
+refus)**.
+
+**Vécu, le jour même.** Le premier commit du lot en a câblé quatre et a affirmé « partout ». Les
+deux manquants ont été trouvés en review, classés **critiques** : une prestataire en congé tout
+septembre se voyait attribuer les ménages de septembre en `accepted` par le rattrapage — et le cron
+ne repassait pas dessus, puisqu'ils n'étaient plus `unassigned`. L'autre proposait un remplacement
+à quelqu'un en vacances, SMS compris.
+
+⚠️ **Aucun test d'unité ne pouvait le voir**, et c'est la leçon : `estDisponible` était juste,
+`congeCouvrant` était juste, la précédence était juste, tous leurs tests verts. Ce qui manquait
+n'était pas une règle, c'était un **câble**. Un défaut de câblage ne se teste pas en éprouvant les
+deux bouts — il se teste en vérifiant qu'ils sont **reliés** : `tests/dispos-cablage.test.js` lit
+le source, dérive la liste des appelants au lieu de la recopier, et échoue si l'un d'eux transmet
+`regles` sans `conges`.
 
 **Qui écrit quoi** — décision du 15 septembre 2026 :
 - **l'hôte** pose et retire tout : règles, exceptions, congés (`/api/disponibilites`) ;

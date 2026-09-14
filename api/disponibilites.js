@@ -48,6 +48,13 @@ function jourMoins (n) {
     .toISOString().slice(0, 10)
 }
 
+// Le jour de calendrier dans N jours. Meme normalisation, meme raison.
+function jourPlus (n) {
+  const d = new Date(Date.now() + n * 86400000)
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12))
+    .toISOString().slice(0, 10)
+}
+
 // Le prestataire designe par le client appartient-il A CE COMPTE ?
 //
 // ⚠ REVIEW.md regle 11 : une donnee client qui designe une ressource ne se
@@ -298,6 +305,25 @@ async function poserConge (req, res, userId, providerId) {
   const jours = Math.round((Date.parse(f + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 86400000) + 1
   if (jours > HORIZON_JOURS) {
     return res.status(400).json({ error: `Un congé ne peut pas dépasser ${HORIZON_JOURS} jours` })
+  }
+
+  // ⚠ UN CONGE ENTIEREMENT PASSE S'ECRIRAIT SANS JAMAIS POUVOIR SE RELIRE.
+  // `lire()` borne sur `gte('fin', jourMoins(30))` : une plage terminee avant
+  // J-30 est inseree avec succes, n'apparait dans aucune reponse, et son `id`
+  // devient introuvable — donc `retirerConge` est inatteignable depuis l'ecran.
+  // Une ligne indelebile, creee par un geste qui annonce « enregistre ».
+  // Le chemin prestataire avait deja cette garde ; celui-ci ne l'avait pas.
+  if (f < jourMoins(30)) {
+    return res.status(400).json({ error: 'Ces dates sont trop anciennes pour être enregistrées' })
+  }
+
+  // ⚠ ET LA DISTANCE, PAS SEULEMENT LA DUREE. `HORIZON_JOURS` bornait la LONGUEUR
+  // de la plage : un conge de cinq jours en 2099 passait, alors que le
+  // commentaire de cette constante annonce « l'ecran regle jusqu'a un an devant ».
+  // Une plage hors de portee de l'ecran est une ligne qu'on ne pourra ni voir ni
+  // retirer — le meme defaut que ci-dessus, par l'autre bout.
+  if (d > jourPlus(HORIZON_JOURS)) {
+    return res.status(400).json({ error: 'Ce congé est trop loin dans le futur' })
   }
 
   const { data, error } = await supabase.from('conges_plages')

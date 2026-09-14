@@ -436,3 +436,40 @@ test('retirerConge refuse un identifiant qui n\'est pas un UUID', async () => {
   assert.strictEqual(res.code, 400)
   assert.strictEqual(etat.ecritures.length, 0)
 })
+
+test('poserConge refuse une plage ENTIÈREMENT passée — elle serait indélébile', async () => {
+  // ⚠ CONSTAT DE REVIEW. `lire()` borne sur `gte('fin', jourMoins(30))` : une
+  // plage terminée avant J−30 s'insère avec succès, n'apparaît dans aucune
+  // réponse, et son `id` devient introuvable — donc `retirerConge` est
+  // inatteignable depuis l'écran. Une ligne indélébile, créée par un geste qui
+  // annonce « enregistré ».
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: '2020-01-01', fin: '2020-01-05' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('poserConge refuse une plage hors de portée de l\'écran', async () => {
+  // ⚠ LA DISTANCE, PAS SEULEMENT LA DURÉE. Le plafond bornait la LONGUEUR de la
+  // plage : un congé de cinq jours en 2099 passait, alors que l'écran ne règle
+  // qu'un an devant. Même défaut que le précédent, par l'autre bout.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: '2099-01-01', fin: '2099-01-05' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('poserConge accepte un congé EN COURS — commencé avant, pas terminé', async () => {
+  // Contre-épreuve des deux précédents : les gardes ne doivent pas refuser le cas
+  // légitime. Un congé commencé la semaine dernière et qui court encore doit
+  // pouvoir être saisi — c'est même le cas où l'hôte rattrape une absence.
+  const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const demain = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: hier, fin: demain }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 1)
+})

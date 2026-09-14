@@ -28,7 +28,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      droits = { self_availability: 'write' },
                      exceptions = [], regles = [], conges = [],
                      // Ce que le DELETE d'un congé touche : rien, ou sa ligne.
-                     congeSupprime = [{ id: 'c1' }], congeExistant = null,
+                     congeSupprime = [{ id: 'c1' }], congeExistant = null, congeJumeau = null,
                      erreurDroits = null, supprime = [{ id: 'e1' }],
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
@@ -96,6 +96,11 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           // Le congé relu après un DELETE qui n'a rien touché : existe-t-il, et
           // à qui est-il ?
           if (table === 'conges_plages') {
+            // Deux lectures `maybeSingle` sur cette table : la plage jumelle
+            // avant insertion (filtrée sur `debut`), et le congé relu après un
+            // DELETE sans effet (filtré sur `id`). Le double les distingue par
+            // leurs filtres — les confondre rendrait l'idempotence indétectable.
+            if (a.f.debut !== undefined) return Promise.resolve({ data: congeJumeau, error: null })
             return Promise.resolve({ data: congeExistant ? { id: 'c1' } : null, error: null })
           }
           // Ce qui occupe ce jour-là, relu après un DELETE qui n'a rien touché.
@@ -399,6 +404,10 @@ test('« aujourd\'hui » se lit en heure de PARIS, pas en UTC', async () => {
 // ─── Ses congés en PLAGE (15 septembre 2026) ───────────────────────────────
 
 const DANS_UN_MOIS = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+// ⚠ UN VRAI UUID. Un identifiant de fantaisie fait lever PostgREST en 22P02, et
+// le chemin rendrait 503 « panne » pour une saisie malformee : la garde de forme
+// existe justement pour ca, et une fixture hors format la contournerait.
+const CONGE_ID = 'cccc1111-1111-4111-8111-111111111111'
 
 test('elle voit ses congés, bornés sur la FIN', async () => {
   // ⚠ Un congé commencé le mois dernier et qui court encore doit apparaître.
@@ -434,7 +443,7 @@ test('elle ne peut PAS retirer un congé posé par son employeur', async () => {
   // retirée, sans qu'il l'apprenne.
   const { handler, etat } = preparer({ congeSupprime: [], congeExistant: 'hote' })
   const res = reponse()
-  await handler(ecrire({ action: 'retirerConge', id: 'c1' }), res)
+  await handler(ecrire({ action: 'retirerConge', id: CONGE_ID }), res)
   assert.strictEqual(res.code, 409)
   assert.match(res.body.error, /employeur/)
   const e = etat.ecritures.find(x => x.table === 'conges_plages' && x.op === 'delete')
@@ -446,7 +455,7 @@ test('retirer deux fois le même congé reste un SUCCÈS, pas une accusation', a
   // l'employeur a posé un congé qu'elle vient elle-même de retirer.
   const { handler } = preparer({ congeSupprime: [], congeExistant: null })
   const res = reponse()
-  await handler(ecrire({ action: 'retirerConge', id: 'c1' }), res)
+  await handler(ecrire({ action: 'retirerConge', id: CONGE_ID }), res)
   assert.strictEqual(res.code, 200)
   assert.strictEqual(res.body.retire, true)
 })
@@ -487,4 +496,33 @@ test('ses RÈGLES restent en lecture seule — aucune action ne les touche', asy
     assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0,
       `l'action ${a} ne doit rien écrire dans les règles`)
   }
+})
+
+test('retirerConge refuse un identifiant qui n\'est pas un UUID — 400, pas 503', async () => {
+  // ⚠ Sans la garde de forme, PostgREST lève en 22P02 et le chemin annonce
+  // « Service temporairement indisponible » : on accuse le serveur d'une panne
+  // pour une saisie malformée, et elle réessaie indéfiniment. L'homologue côté
+  // hôte validait déjà ; ce chemin ne le faisait pas.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'retirerConge', id: 'tout' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 0)
+})
+
+test('déclarer DEUX FOIS le même congé ne crée pas de doublon', async () => {
+  // ⚠ LE TÉLÉPHONE EN 3G, pas un cas d'école : un tap qui ne rend pas la main se
+  // rejoue. `conges_plages` n'a pas de contrainte d'unicité — et n'en veut pas,
+  // deux congés qui se chevauchent sont légitimes. C'est donc le chemin qui doit
+  // reconnaître sa propre plage : sinon elle en voit deux dans sa liste et croit
+  // sa première suppression sans effet.
+  const { handler, etat } = preparer({
+    congeJumeau: { id: CONGE_ID, debut: DEMAIN, fin: DANS_UN_MOIS, source: 'prestataire' }
+  })
+  const res = reponse()
+  await handler(ecrire({ action: 'declarerConge', debut: DEMAIN, fin: DANS_UN_MOIS }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.deja, true, 'le geste réussit, et dit qu\'il n\'a rien créé')
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages' && x.op === 'insert').length, 0,
+    'aucune seconde ligne')
 })

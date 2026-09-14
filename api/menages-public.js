@@ -956,7 +956,7 @@ async function remplacanteApresRefus ({ userId, propertyId, departureDate, menag
     const bien = {
       userId, propertyId: String(propertyId),
       liaisons: liaisonsParBien.get(`${userId}|${String(propertyId)}`) || [],
-      regles: dispos.regles, exceptions: dispos.exceptions
+      regles: dispos.regles, exceptions: dispos.exceptions, conges: dispos.conges
     }
     const choix = deciderParGarde(bien, departureDate, { exclus })
 
@@ -1294,7 +1294,14 @@ async function celleQuiDeclare (token, { ecriture }) {
 async function mesDisponibilites (req, res, token) {
   const qui = await celleQuiDeclare(token, { ecriture: false })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
-  if (qui.erreur === 403) return res.status(200).json({ autorise: false, exceptions: [], regles: [] })
+  // ⚠ LE MEME CONTRAT QUE LE CHEMIN NOMINAL, `conges` COMPRIS. Depuis que la
+  // reponse porte des conges, une branche qui les omet fait lever le front des
+  // qu'il itere `data.conges` : la prestataire sans droit verrait un ecran casse
+  // au lieu du message « gérées par votre employeur ». Une reponse partielle est
+  // un piege pose pour le lot d'apres.
+  if (qui.erreur === 403) {
+    return res.status(200).json({ autorise: false, exceptions: [], conges: [], regles: [] })
+  }
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
   // ⚠ FENETRE BORNEE. Sans borne, la PWA d'une prestataire de longue date
@@ -1369,7 +1376,14 @@ async function mesConges (req, res, token, { retirer }) {
 
   if (retirer) {
     const { id } = req.body || {}
-    if (!id) return res.status(400).json({ error: 'Congé inconnu' })
+    // ⚠ LA FORME SE VALIDE ICI, SINON LA PANNE MENT. Un identifiant qui n'est pas
+    // un UUID fait lever PostgREST en 22P02 : la branche `error` rend alors
+    // « Service temporairement indisponible » — on annonce une panne serveur pour
+    // une saisie malformee, et la prestataire reessaie indefiniment. L'homologue
+    // cote hote validait deja ; ce chemin ne le faisait pas.
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))) {
+      return res.status(400).json({ error: 'Congé inconnu' })
+    }
     const { data, error } = await supabase.from('conges_plages')
       .delete()
       .eq('id', String(id))
@@ -1407,6 +1421,25 @@ async function mesConges (req, res, token, { retirer }) {
   if (f < todayInParis()) return res.status(400).json({ error: 'Ces dates sont déjà passées' })
   const jours = Math.round((Date.parse(f + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 86400000) + 1
   if (jours > 400) return res.status(400).json({ error: 'Ce congé est trop long' })
+
+  // ⚠ IDEMPOTENT, COMME LE CHEMIN D'UN JOUR — et pour la meme raison, qui est
+  // physique : cette PWA tourne sur un telephone en 3G, ou un tap qui ne rend
+  // pas la main se rejoue. `mesIndisponibilites` s'appuie sur la contrainte
+  // `(provider_id, date)` ; `conges_plages` n'en a pas, et n'en veut pas — deux
+  // conges qui se chevauchent sont legitimes (prolonger en reposant par-dessus).
+  // On regarde donc s'il existe DEJA une plage identique DECLAREE PAR ELLE : deux
+  // taps produiraient deux lignes jumelles, elle en verrait deux dans sa liste,
+  // et croirait sa premiere suppression sans effet.
+  const { data: jumelle, error: errJ } = await supabase.from('conges_plages')
+    .select('id, debut, fin, motif, source')
+    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .eq('debut', d).eq('fin', f).eq('source', 'prestataire')
+    .maybeSingle()
+  if (errJ) {
+    console.error('[menages-public] lecture conge jumelle echec:', errJ.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (jumelle) return res.status(200).json({ success: true, conge: jumelle, deja: true })
 
   const { data, error } = await supabase.from('conges_plages')
     .insert({ user_id: qui.userId, provider_id: qui.profil.id, debut: d, fin: f,
