@@ -789,6 +789,30 @@ aucun chemin ne les recalcule — un engagement pris avec quelqu'un ne se rouvre
   « ménage fait » en attente de renvoi, et ferait passer une indisponibilité passagère pour un
   accès révoqué. La vue Avis ignorait d'ailleurs cette erreur — elle rendait `actif: false`,
   c'est-à-dire « droit retiré » — et c'est corrigé par la même fonction.
+  ⚠️ **DETTE — RIEN NE SAIT RANIMER UN PROFIL DONT LA LIGNE PWA A ÉTÉ SUPPRIMÉE (14 sept. 2026).**
+  `deactivate` supprime la ligne `public_tokens` — à raison, sans quoi le lien continuerait
+  d'ouvrir. Mais aucun chemin ne fait le geste inverse :
+  - `reactivate` teste `access_mode === 'lien' && profil.pwa_token`. Un profil **sans jeton**
+    saute tout le bloc : il repasse `active` sans lien, et **sans même l'avertissement** prévu.
+  - `regenerate` cherche la ligne portant l'**ancien** jeton, n'en trouve aucune, annule et rend
+    409 « Ce prestataire n'a pas encore de biens affectés ».
+  - L'écran Prestataires compose ses cartes depuis `public_tokens` : un profil sans ligne n'y
+    apparaît pas, donc on ne peut même pas lui affecter de biens.
+  ⚠️ **Ce n'est PAS le refus de deviner le périmètre qui est en cause — celui-là est juste**
+  (`basculerActivite` explique pourquoi : reconstruire depuis `profile_permissions` élargissait
+  en silence). Ce qui manque, c'est de pouvoir le **donner** : une action qui reçoit un
+  périmètre explicite, génère un jeton et réinsère la ligne PWA — exactement ce que
+  `synchroniserTokenPwa` fait déjà à la création. Ranimer un lien, c'est le créer.
+  **Vécu** : Tiphaine, profil historique inactif et sans jeton, devait redevenir prestataire.
+  Faute de chemin, un **second profil** a été créé — et son passé (81 avis) est resté sur le
+  premier. Voir la fusion ci-dessous.
+  ⚠️ **UNE PERSONNE, UN PROFIL — et la fusion se trace dans la donnée.**
+  Deux profils pour la même personne, c'est le « deux annuaires » que la spec profils et droits
+  existe pour éviter : la fiche prestataire aurait montré quelqu'un **sans passé** pendant que
+  81 avis dormaient sous une identité éteinte. Correctif retenu le 14 septembre 2026 : les
+  lignes `prestataire_periodes` ont été **repointées** vers le profil vivant, l'ancien profil
+  supprimé (plus rien ne le référençait), et **la note de chaque période porte la raison** —
+  sans quoi des avis de 2024 sous un profil créé en septembre 2026 se lisent comme un bug.
   ⚠️ **Dette, lot 2.5** : créer une personne se fait dans **Réglages → Équipe et droits**
   (`api/membres.js`, mode `lien`), qui pose le profil **et** le token. Le formulaire de l'app
   ménage ne crée qu'un lien de consultation — un encart le dit désormais à l'écran.
