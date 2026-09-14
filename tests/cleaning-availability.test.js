@@ -10,7 +10,7 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const {
-  estDisponible, jourUTC, cleJour, jourDeSemaine,
+  estDisponible, congeCouvrant, jourUTC, cleJour, jourDeSemaine,
   indexerParPrestataire, construireRrule, regleCouvre
 } = require('../lib/cleaning/availability')
 
@@ -205,4 +205,89 @@ test('plusieurs règles d\'une même personne se cumulent', async () => {
 test('une liste vide ou nulle ne casse rien', async () => {
   assert.strictEqual(indexerParPrestataire([]).size, 0)
   assert.strictEqual(indexerParPrestataire(null).size, 0)
+})
+
+// ─── Les congés en PLAGE — l'étage 1, posé le 15 septembre 2026 ────────────
+//
+// ⚠ POURQUOI UN ÉTAGE AU-DESSUS DE L'EXCEPTION, et pas à côté.
+// Une exception est une correction d'UN jour ; un congé est une PLAGE qu'on
+// supprime d'un geste. S'ils étaient au même rang, une exception « disponible »
+// posée par mégarde au milieu de vacances rendrait la personne assignable un
+// jour de congé — et rien à l'écran ne le montrerait, puisque le calendrier
+// verrouille ces jours.
+
+const CONGE = { debut: '2026-10-05', fin: '2026-10-12', motif: 'Vacances' }
+
+test('un congé rend indisponible, même sans aucune règle', async () => {
+  // Sans règle, on est disponible partout (étage 4). Le congé doit percer ça,
+  // sinon il ne sert à rien dans le cas le plus courant — celui de Régina.
+  assert.strictEqual(estDisponible('2026-10-07', { conges: [CONGE] }), false)
+  assert.strictEqual(estDisponible('2026-10-13', { conges: [CONGE] }), true, 'le lendemain, non')
+})
+
+test('les bornes du congé sont INCLUSIVES des deux côtés', async () => {
+  // Même convention que `prestataire_periodes` et que la contrainte SQL. Le
+  // dernier jour d'un congé est un jour de congé — un décalage d'un jour ici
+  // enverrait quelqu'un travailler le jour de son retour de vacances.
+  assert.strictEqual(estDisponible('2026-10-05', { conges: [CONGE] }), false, 'le premier jour')
+  assert.strictEqual(estDisponible('2026-10-12', { conges: [CONGE] }), false, 'le dernier jour')
+  assert.strictEqual(estDisponible('2026-10-04', { conges: [CONGE] }), true, 'la veille')
+  assert.strictEqual(estDisponible('2026-10-13', { conges: [CONGE] }), true, 'le lendemain')
+})
+
+test('le congé l\'emporte sur une exception « disponible »', async () => {
+  // ⚠ LE CAS DANGEREUX (REVIEW.md règle 8), et il n'est pas théorique : la
+  // prestataire déclare « exceptionnellement dispo ce lundi », puis pose ses
+  // vacances par-dessus. Si l'exception gagnait, elle serait assignable un jour
+  // où le calendrier la montre verrouillée.
+  const ctx = { conges: [CONGE],
+                exceptions: [{ date: '2026-10-07', available: true }] }
+  assert.strictEqual(estDisponible('2026-10-07', ctx), false)
+})
+
+test('hors du congé, l\'exception reprend la main', async () => {
+  // Contre-épreuve : le congé ne doit pas écraser l'étage 2 partout, seulement
+  // sur les jours qu'il couvre.
+  const ctx = { conges: [CONGE], regles: [REGLE],
+                exceptions: [{ date: '2026-09-08', available: true }] }
+  assert.strictEqual(estDisponible('2026-09-08', ctx), true, 'un mardi ouvert à la main')
+})
+
+test('deux congés qui se chevauchent : supprimer l\'un laisse l\'autre verrouiller', async () => {
+  // C'est pour ça qu'aucune contrainte d'anti-chevauchement n'a été posée :
+  // prolonger un congé en en posant un second par-dessus est un geste légitime.
+  const deux = [{ debut: '2026-10-05', fin: '2026-10-12' },
+                { debut: '2026-10-10', fin: '2026-10-20' }]
+  assert.strictEqual(estDisponible('2026-10-15', { conges: deux }), false)
+  assert.strictEqual(estDisponible('2026-10-15', { conges: [deux[0]] }), true,
+    'le premier seul ne couvre pas le 15')
+})
+
+test('une plage ILLISIBLE ne couvre rien — elle ne bloque pas tout', async () => {
+  // ⚠ Symétrique inverse de la règle RRULE illisible, et c'est voulu. Une règle
+  // illisible rend INDISPONIBLE (on n'envoie pas quelqu'un sur une règle qu'on
+  // ne comprend pas). Une plage illisible, elle, ne doit pas rendre quelqu'un
+  // indisponible POUR TOUJOURS : ce serait une panne qui efface une personne du
+  // planning sans un mot. On l'ignore, et les autres étages tranchent.
+  const abimee = [{ debut: 'jamais', fin: null }]
+  assert.strictEqual(estDisponible('2026-10-07', { conges: abimee }), true)
+})
+
+test('congeCouvrant rend LE congé, pour que l\'écran dise lequel', async () => {
+  // Le calendrier n'affiche pas seulement « verrouillé » : il doit pouvoir dire
+  // « Congé — Vacances », et renvoyer vers la ligne à supprimer.
+  const c = congeCouvrant('2026-10-07', [CONGE])
+  assert.ok(c, 'un congé est trouvé')
+  assert.strictEqual(c.motif, 'Vacances')
+  assert.strictEqual(congeCouvrant('2026-10-13', [CONGE]), null)
+})
+
+test('sans congés, le comportement est EXACTEMENT celui d\'avant', async () => {
+  // ⚠ L'invariant de non-régression du lot : un appelant qui ne passe pas
+  // `conges` doit obtenir le même verdict qu'avant le 15 septembre. Les étages
+  // 2, 3 et 4 n'ont pas bougé d'une ligne.
+  assert.strictEqual(estDisponible('2026-09-05', { regles: [REGLE] }), true)
+  assert.strictEqual(estDisponible('2026-09-12', { regles: [REGLE] }), false)
+  assert.strictEqual(estDisponible('2026-09-05', { regles: [REGLE], conges: [] }), true)
+  assert.strictEqual(estDisponible('2026-09-12', { regles: [REGLE], conges: [] }), false)
 })

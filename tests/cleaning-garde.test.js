@@ -26,7 +26,7 @@ const SECONDE = 'p-seconde'
 
 const WEEKEND_QUINZAINE = construireRrule({ jours: [0, 6], toutesLesNSemaines: 2, depuis: '2026-09-05' })
 
-function bagneres ({ exceptions = [], regles = null } = {}) {
+function bagneres ({ exceptions = [], regles = null, conges = [] } = {}) {
   return {
     userId: COMPTE,
     propertyId: '209413',
@@ -38,7 +38,11 @@ function bagneres ({ exceptions = [], regles = null } = {}) {
     regles: indexerParPrestataire(regles || [
       { user_id: COMPTE, provider_id: SECONDE, rrule: WEEKEND_QUINZAINE, active: true }
     ]),
-    exceptions: indexerParPrestataire(exceptions)
+    exceptions: indexerParPrestataire(exceptions),
+    // ⚠ La forme exacte d'une ligne `conges_plages` — `user_id` compris, sans
+    // quoi l'indexation par clé composite ne retrouverait rien et le test
+    // passerait pour la mauvaise raison.
+    conges: indexerParPrestataire(conges)
   }
 }
 
@@ -385,4 +389,45 @@ test('plus AUCUN chemin ne décide par `rang === 1`', async () => {
     { encoding: 'utf8' }).trim()
   const lignes = sortie ? sortie.split('\n') : []
   assert.deepStrictEqual(lignes, [], `le rang décide encore ici :\n${lignes.join('\n')}`)
+})
+
+// ─── Les congés traversent-ils vraiment jusqu'à la garde du jour ? ─────────
+
+test('une prestataire EN CONGÉ n\'est pas de garde, même sans aucune règle', async () => {
+  // ⚠ LE CÂBLAGE, PAS LA RÈGLE. `estDisponible` sait lire les congés depuis le
+  // 15 septembre — mais il ne lit que ce qu'on lui donne. Si `contexteDispo`
+  // oubliait de les transmettre, la garde du jour désignerait quelqu'un en
+  // vacances et rien à l'écran ne le dirait. C'est la faute la plus silencieuse
+  // du lot : tous les tests d'unité resteraient verts.
+  const r = responsableDuJour(bagneres({
+    conges: [{ user_id: COMPTE, provider_id: REGINA, debut: '2026-09-01', fin: '2026-09-30' }]
+  }), '2026-09-05')
+  assert.notStrictEqual(r.responsable && r.responsable.providerId, REGINA,
+    'Régina est en congé tout septembre : elle ne peut pas porter ce samedi')
+  assert.strictEqual(r.responsable.providerId, SECONDE,
+    'la seconde, attitrée le samedi et disponible, prend la garde')
+})
+
+test('les DEUX en congé : c\'est un trou de garde, pas un repli silencieux', async () => {
+  // Aucun forçage (§11.4) : si personne n'est disponible, le jour est un trou et
+  // l'hôte est alerté. Retomber sur quelqu'un « par défaut » enverrait une
+  // prestataire en vacances sur un logement.
+  const r = responsableDuJour(bagneres({
+    conges: [
+      { user_id: COMPTE, provider_id: REGINA,  debut: '2026-09-01', fin: '2026-09-30' },
+      { user_id: COMPTE, provider_id: SECONDE, debut: '2026-09-01', fin: '2026-09-30' }
+    ]
+  }), '2026-09-05')
+  assert.strictEqual(r.responsable, null)
+  assert.strictEqual(r.trou, true)
+})
+
+test('un congé d\'un AUTRE compte ne met personne en vacances ici', async () => {
+  // ⚠ REVIEW.md règle 1. Le moteur traite un lot multi-comptes en service key,
+  // qui contourne la RLS : une map indexée sur le seul `provider_id` ferait
+  // paraître Régina en congé parce qu'une homonyme d'un autre hôte l'est.
+  const r = responsableDuJour(bagneres({
+    conges: [{ user_id: 'AUTRE-COMPTE', provider_id: REGINA, debut: '2026-09-01', fin: '2026-09-30' }]
+  }), '2026-09-05')
+  assert.strictEqual(r.responsable.providerId, REGINA)
 })

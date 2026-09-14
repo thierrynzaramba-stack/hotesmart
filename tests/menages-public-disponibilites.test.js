@@ -26,7 +26,9 @@ const HIER = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
 
 function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      droits = { self_availability: 'write' },
-                     exceptions = [], regles = [],
+                     exceptions = [], regles = [], conges = [],
+                     // Ce que le DELETE d'un congé touche : rien, ou sa ligne.
+                     congeSupprime = [{ id: 'c1' }], congeExistant = null,
                      erreurDroits = null, supprime = [{ id: 'e1' }],
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
@@ -47,6 +49,9 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           }
           if (table === 'provider_availability_rules') {
             return Promise.resolve({ data: regles, error: null })
+          }
+          if (table === 'conges_plages') {
+            return Promise.resolve({ data: conges, error: null })
           }
           return Promise.resolve({ data: [], error: null })
         },
@@ -81,11 +86,18 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           const q = { table, op: 'delete', f: {} }
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
-            select () { etat.ecritures.push(q); return Promise.resolve({ data: supprime, error: null }) }
+            select () { etat.ecritures.push(q)
+              return Promise.resolve({ data: table === 'conges_plages' ? congeSupprime : supprime,
+                                       error: null }) }
           }
           return c2
         },
         maybeSingle () {
+          // Le congé relu après un DELETE qui n'a rien touché : existe-t-il, et
+          // à qui est-il ?
+          if (table === 'conges_plages') {
+            return Promise.resolve({ data: congeExistant ? { id: 'c1' } : null, error: null })
+          }
           // Ce qui occupe ce jour-là, relu après un DELETE qui n'a rien touché.
           if (table === 'provider_availability_exceptions') {
             return Promise.resolve({
@@ -382,4 +394,97 @@ test('« aujourd\'hui » se lit en heure de PARIS, pas en UTC', async () => {
   assert.ok(!bloc.includes("new Date().toISOString().slice(0, 10)"),
     'plus de date UTC dans les gardes de « Mes absences »')
   assert.ok(bloc.includes('todayInParis()'))
+})
+
+// ─── Ses congés en PLAGE (15 septembre 2026) ───────────────────────────────
+
+const DANS_UN_MOIS = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+
+test('elle voit ses congés, bornés sur la FIN', async () => {
+  // ⚠ Un congé commencé le mois dernier et qui court encore doit apparaître.
+  // Borné sur `debut`, il disparaîtrait de son écran et elle le reposerait
+  // par-dessus, croyant l'avoir perdu.
+  const { handler, etat } = preparer({
+    conges: [{ id: 'c1', debut: '2026-01-01', fin: DANS_UN_MOIS, motif: 'Congé', source: 'prestataire' }]
+  })
+  const res = reponse()
+  await handler(lire(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.conges.length, 1)
+  const l = etat.lectures.find(x => x.table === 'conges_plages')
+  assert.ok(l.f.fin_gte, 'le plancher porte sur `fin`')
+  assert.strictEqual(l.f.debut_gte, undefined, 'et surtout PAS sur `debut`')
+})
+
+test('elle déclare un congé, marqué à SA source', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'declarerConge', debut: DEMAIN, fin: DANS_UN_MOIS, motif: 'Vacances' }), res)
+  const e = etat.ecritures.find(x => x.table === 'conges_plages' && x.op === 'insert')
+  assert.ok(e, 'le congé est inséré')
+  assert.strictEqual(e.row.source, 'prestataire', 'c\'est ELLE qui déclare')
+  assert.strictEqual(e.row.user_id, U)
+  assert.strictEqual(e.row.provider_id, MARIE)
+})
+
+test('elle ne peut PAS retirer un congé posé par son employeur', async () => {
+  // ⚠ MÊME GARDE QUE LES ABSENCES D'UN JOUR. Un congé posé par l'hôte — « tu ne
+  // travailles pas cette semaine-là » — n'est pas le sien à défaire : le lui
+  // laisser effacer la remettrait candidate sur des jours dont il l'avait
+  // retirée, sans qu'il l'apprenne.
+  const { handler, etat } = preparer({ congeSupprime: [], congeExistant: 'hote' })
+  const res = reponse()
+  await handler(ecrire({ action: 'retirerConge', id: 'c1' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.match(res.body.error, /employeur/)
+  const e = etat.ecritures.find(x => x.table === 'conges_plages' && x.op === 'delete')
+  assert.strictEqual(e.f.source, 'prestataire', 'le DELETE filtre sur SA source')
+})
+
+test('retirer deux fois le même congé reste un SUCCÈS, pas une accusation', async () => {
+  // ⚠ Sur un téléphone en 3G, un double tap ne doit pas annoncer que
+  // l'employeur a posé un congé qu'elle vient elle-même de retirer.
+  const { handler } = preparer({ congeSupprime: [], congeExistant: null })
+  const res = reponse()
+  await handler(ecrire({ action: 'retirerConge', id: 'c1' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.retire, true)
+})
+
+test('un congé ENTIÈREMENT passé est refusé, un congé EN COURS passe', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'declarerConge', debut: '2020-01-01', fin: '2020-01-10' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 0)
+
+  // ⚠ La contre-épreuve doit rester DANS le plafond d'un an, sinon elle échoue
+  // pour la mauvaise raison — c'est le test qui me l'a appris.
+  const ILYA_DIX_JOURS = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10)
+  const b = preparer({})
+  const res2 = reponse()
+  await b.handler(ecrire({ action: 'declarerConge', debut: ILYA_DIX_JOURS, fin: DEMAIN }), res2)
+  assert.notStrictEqual(res2.code, 400, 'un congé commencé avant mais qui court encore est légitime')
+})
+
+test('sans le droit d\'écriture, elle ne pose aucun congé', async () => {
+  const { handler, etat } = preparer({ droits: { self_availability: 'read' } })
+  const res = reponse()
+  await handler(ecrire({ action: 'declarerConge', debut: DEMAIN, fin: DANS_UN_MOIS }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 0)
+})
+
+test('ses RÈGLES restent en lecture seule — aucune action ne les touche', async () => {
+  // ⚠ DÉCISION PRODUIT DU 15 SEPTEMBRE : ses jours de travail sont
+  // l'organisation du travail, réglée par l'hôte. Elle déclare ses ABSENCES.
+  // Le serveur n'expose aucune action sur les règles : ce test échouerait si
+  // quelqu'un en ajoutait une par commodité.
+  const { handler, etat } = preparer({})
+  for (const a of ['poserRegle', 'retirerRegle', 'declarerRegle']) {
+    const res = reponse()
+    await handler(ecrire({ action: a, jours: [1, 2] }), res)
+    assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0,
+      `l'action ${a} ne doit rien écrire dans les règles`)
+  }
 })

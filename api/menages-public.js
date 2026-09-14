@@ -13,6 +13,11 @@ const { extraitVerifie } = require('../lib/extrait-verifie')
 const { chargerLiaisons, chargerDisponibilites, chargerRefus,
         deciderParGarde, echeanceOffre } = require('../lib/cleaning/assign')
 const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
+// ⚠ `cleJour` normalise une date de calendrier a midi UTC. A minuit, le moindre
+// decalage de fuseau la fait basculer d'un jour — piege deja corrige deux fois
+// dans ce depot. C'est la MEME fonction que celle du moteur : deux
+// normalisations differentes pour la meme date finiraient par diverger.
+const { cleJour } = require('../lib/cleaning/availability')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -139,6 +144,10 @@ module.exports = async function handler(req, res) {
     // pouvoir s'en retirer elle-meme lui permettrait de quitter un bien sans
     // qu'il l'apprenne, alors qu'il compte sur elle pour le preparer. Decision du
     // product owner, 4 septembre 2026.
+    if (action === 'declarerConge' || action === 'retirerConge') {
+      return await mesConges(req, res, token, { retirer: action === 'retirerConge' })
+    }
+
     if (action === 'declarerIndisponibilite' || action === 'retirerIndisponibilite') {
       return await mesIndisponibilites(req, res, token, {
         retirer: action === 'retirerIndisponibilite'
@@ -1316,13 +1325,99 @@ async function mesDisponibilites (req, res, token) {
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
 
+  // ⚠ LES CONGES SONT BORNES SUR LEUR FIN, pas sur leur debut : un conge commence
+  // le mois dernier et qui court encore doit apparaitre, sinon elle croit l'avoir
+  // perdu et le repose par-dessus.
+  const { data: conges, error: errC } = await supabase.from('conges_plages')
+    .select('id, debut, fin, motif, source')
+    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .gte('fin', aujourdhui)
+    .order('debut', { ascending: true }).limit(200)
+  if (errC) {
+    console.error('[menages-public] lecture conges echec:', errC.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
   return res.status(200).json({
     autorise: true,
     modifiable: qui.niveau === 'write',
     prenom: qui.profil.first_name,
     exceptions: exceptions || [],
+    conges: conges || [],
+    // ⚠ LES REGLES SORTENT EN LECTURE SEULE, ET C'EST UNE DECISION PRODUIT
+    // (15 septembre 2026) : ses jours de travail sont l'ORGANISATION DU TRAVAIL,
+    // reglee par l'hote. Elle declare ses ABSENCES — un jour, ou une plage —
+    // elle ne redessine pas son planning. Le front n'affiche donc aucun controle
+    // sur ces lignes ; le serveur, lui, n'expose simplement aucune action.
     regles: (regles || []).map(r => ({ id: r.id, label: r.label }))
   })
+}
+
+// Elle pose ou retire un CONGE — une PLAGE (15 septembre 2026).
+//
+// ⚠ MEME GARDE QUE LES ABSENCES D'UN JOUR, pour la meme raison : elle ne retire
+// que ce qu'elle a declare (`source = 'prestataire'`). Un conge pose par l'HOTE
+// n'est pas le sien a defaire — le lui laisser effacer la remettrait candidate
+// sur des jours dont il l'avait retiree, sans qu'il l'apprenne.
+async function mesConges (req, res, token, { retirer }) {
+  const qui = await celleQuiDeclare(token, { ecriture: true })
+  if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
+  if (qui.erreur === 403) {
+    return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+  }
+  if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+
+  if (retirer) {
+    const { id } = req.body || {}
+    if (!id) return res.status(400).json({ error: 'Congé inconnu' })
+    const { data, error } = await supabase.from('conges_plages')
+      .delete()
+      .eq('id', String(id))
+      .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+      .eq('source', 'prestataire')
+      .select('id')
+    if (error) {
+      console.error('[menages-public] retrait conge echec:', error.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    if (!data || !data.length) {
+      // ⚠ « RIEN A SUPPRIMER » N'EST PAS « CE N'EST PAS A VOUS » — meme nuance
+      // que sur les absences d'un jour, et pour la meme raison : sur un telephone
+      // en 3G, un double tap ne doit pas accuser l'employeur.
+      const { data: reste, error: errLire } = await supabase.from('conges_plages')
+        .select('id').eq('id', String(id))
+        .eq('user_id', qui.userId).eq('provider_id', qui.profil.id).maybeSingle()
+      if (errLire) {
+        console.error('[menages-public] lecture conge echec:', errLire.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      if (!reste) return res.status(200).json({ success: true, retire: true })
+      return res.status(409).json({ error: 'Ce congé a été posé par votre employeur' })
+    }
+    return res.status(200).json({ success: true, retire: true })
+  }
+
+  const { debut, fin, motif } = req.body || {}
+  const d = cleJour(debut), f = cleJour(fin)
+  if (!d || !f) return res.status(400).json({ error: 'Dates invalides' })
+  if (d > f) return res.status(400).json({ error: 'La date de fin précède la date de début' })
+  // ⚠ PAS DE CONGE ENTIEREMENT PASSE. Un conge qui se termine hier ne change
+  // rien a ce qui a eu lieu, et reecrirait l'historique sur lequel s'appuie
+  // l'attribution des remarques de proprete. Un conge EN COURS, lui, passe.
+  if (f < todayInParis()) return res.status(400).json({ error: 'Ces dates sont déjà passées' })
+  const jours = Math.round((Date.parse(f + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 86400000) + 1
+  if (jours > 400) return res.status(400).json({ error: 'Ce congé est trop long' })
+
+  const { data, error } = await supabase.from('conges_plages')
+    .insert({ user_id: qui.userId, provider_id: qui.profil.id, debut: d, fin: f,
+              motif: motif ? String(motif).slice(0, 200) : null, source: 'prestataire' })
+    .select('id, debut, fin, motif, source')
+    .maybeSingle()
+  if (error) {
+    console.error('[menages-public] insert conge echec:', error.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  return res.status(200).json({ success: true, conge: data })
 }
 
 // Elle pose ou retire une INDISPONIBILITE. Une seule forme : un jour, absente.

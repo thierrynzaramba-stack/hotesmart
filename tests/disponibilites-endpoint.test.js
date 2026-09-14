@@ -22,7 +22,7 @@ const MARIE = 'bbbb2222-2222-4222-8222-222222222222'
 const AUTRE = 'cccc3333-3333-4333-8333-333333333333'
 
 function preparer ({ user = PROD, profil = { id: MARIE, first_name: 'Marie', active: true },
-                     regles = [], exceptions = [], erreurRegles = null } = {}) {
+                     regles = [], exceptions = [], conges = [], erreurRegles = null } = {}) {
   const etat = { ecritures: [], lectures: [], filtres: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -49,6 +49,9 @@ function preparer ({ user = PROD, profil = { id: MARIE, first_name: 'Marie', act
           }
           if (table === 'provider_availability_exceptions') {
             return Promise.resolve({ data: projeter(exceptions), error: null })
+          }
+          if (table === 'conges_plages') {
+            return Promise.resolve({ data: projeter(conges), error: null })
           }
           return Promise.resolve({ data: [], error: null })
         },
@@ -341,4 +344,95 @@ test('un jour envoyé DEUX FOIS ne produit pas un libellé bègue', async () => 
   await handler(post({ action: 'poserRegle', jours: [1, 1, 2] }), reponse())
   const e = etat.ecritures.find(x => x.op === 'insert')
   assert.strictEqual(e.row.label, 'Tous les lundi et mardi')
+})
+
+// ─── Les congés en PLAGE (15 septembre 2026) ───────────────────────────────
+
+test('GET rend les congés, bornés sur la FIN et pas sur le début', async () => {
+  // ⚠ LE PIÈGE, ET IL EST DATÉ. Un congé commencé en juin qui couvre juillet
+  // disparaîtrait de l'écran dès le 1er juillet s'il était filtré sur `debut` —
+  // alors qu'il verrouille encore des jours. L'hôte le croirait terminé et
+  // confierait des ménages pendant les vacances.
+  const { handler, etat } = preparer({
+    conges: [{ id: 'c1', debut: '2026-06-01', fin: '2026-07-31', motif: 'Été', source: 'hote' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.conges.length, 1)
+  const lecture = etat.lectures.find(l => l.table === 'conges_plages')
+  assert.ok(lecture, 'la table est bien interrogée')
+  assert.ok(lecture.f.fin_gte, 'le plancher porte sur `fin`')
+  assert.strictEqual(lecture.f.debut_gte, undefined, 'et surtout PAS sur `debut`')
+})
+
+test('GET : les congés sont cloisonnés par compte ET par prestataire', async () => {
+  const { handler, etat } = preparer({ conges: [] })
+  const res = reponse()
+  await handler(get(), res)
+  const l = etat.lectures.find(x => x.table === 'conges_plages')
+  assert.strictEqual(l.f.user_id, PROD)
+  assert.strictEqual(l.f.provider_id, MARIE)
+})
+
+test('poserConge enregistre la plage, et la marque « hote »', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: '2026-10-05', fin: '2026-10-12', motif: 'Vacances' }), res)
+  assert.strictEqual(res.code, 200)
+  const e = etat.ecritures.find(x => x.table === 'conges_plages')
+  assert.ok(e, 'une écriture a eu lieu')
+  assert.strictEqual(e.row.debut, '2026-10-05')
+  assert.strictEqual(e.row.fin, '2026-10-12')
+  assert.strictEqual(e.row.source, 'hote', 'posé depuis la fiche, pas depuis la PWA')
+  assert.strictEqual(e.row.user_id, PROD, 'le compte est écrit, pas déduit')
+  assert.strictEqual(e.row.provider_id, MARIE)
+})
+
+test('poserConge REFUSE une fin antérieure au début — il ne corrige pas en silence', async () => {
+  // ⚠ Inverser pour l'hôte enregistrerait une plage qu'il n'a pas demandée : il
+  // croirait poser un congé d'un jour et en poserait un de trois semaines.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: '2026-10-12', fin: '2026-10-05' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /précède/)
+  assert.strictEqual(etat.ecritures.length, 0, 'rien n\'est écrit')
+})
+
+test('poserConge refuse une plage absurde — plus d\'un an', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: '2026-01-01', fin: '2030-01-01' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('poserConge refuse des dates illisibles', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'poserConge', debut: 'demain', fin: '2026-10-12' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('retirerConge filtre sur les TROIS clés, jamais sur le seul identifiant', async () => {
+  // ⚠ REVIEW.md règle 11 : l'identifiant vient du client. Sans `user_id` et
+  // `provider_id`, il désignerait le congé de n'importe qui.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'retirerConge', id: 'aaaa1111-1111-4111-8111-111111111111' }), res)
+  const e = etat.ecritures.find(x => x.table === 'conges_plages' && x.op === 'delete')
+  assert.ok(e, 'une suppression a été tentée')
+  assert.strictEqual(e.f.user_id, PROD)
+  assert.strictEqual(e.f.provider_id, MARIE)
+  assert.ok(e.f.id, 'et l\'identifiant demandé')
+})
+
+test('retirerConge refuse un identifiant qui n\'est pas un UUID', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(post({ action: 'retirerConge', id: 'tout' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.length, 0)
 })

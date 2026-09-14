@@ -160,7 +160,7 @@ module.exports = async function handler (req, res) {
       biens: biens.map(b => ({
         userId, propertyId: b.id,
         liaisons: liaisonsParBien.get(`${userId}|${b.id}`) || [],
-        regles: dispos.regles, exceptions: dispos.exceptions
+        regles: dispos.regles, exceptions: dispos.exceptions, conges: dispos.conges
       }))
     })
 

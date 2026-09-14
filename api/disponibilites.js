@@ -32,6 +32,11 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 // tres largement dedans ; au-dela, c'est une anomalie qu'on veut voir.
 const LOT_REGLES = 200
 const LOT_EXCEPTIONS = 500
+// Un conge est une PLAGE : il en faut beaucoup moins pour couvrir une annee.
+const LOT_CONGES = 200
+// L'ecran regle jusqu'a un an devant (decision du 15 septembre 2026) : une plage
+// au-dela n'est pas un conge, c'est une saisie qui a derape.
+const HORIZON_JOURS = 400
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -122,9 +127,25 @@ async function lire (res, userId, providerId) {
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
 
+  // ⚠ BORNEE SUR `fin`, PAS SUR `debut`. Un conge commence en juin et couvre
+  // juillet : le filtrer sur sa date de DEBUT le ferait disparaitre de l'ecran
+  // des le 1er juillet, alors qu'il verrouille encore des jours. On garde tout ce
+  // qui n'est pas termine, plus un mois d'historique pour comprendre le passe
+  // recent — meme plancher que les exceptions, meme raison.
+  const { data: conges, error: errC } = await supabase.from('conges_plages')
+    .select('id, debut, fin, motif, source')
+    .eq('user_id', userId).eq('provider_id', providerId)
+    .gte('fin', plancher)
+    .order('debut', { ascending: true }).limit(LOT_CONGES)
+  if (errC) {
+    console.error('[disponibilites] lecture conges echec', errC.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
   return res.status(200).json({
     regles: regles || [],
     exceptions: exceptions || [],
+    conges: conges || [],
     // ⚠ Le compte se voit a l'ecran : c'est ce qui permet a l'hote de comprendre
     // « aucune regle = disponible » sans avoir a le deviner.
     aucune_regle: !(regles || []).some(r => r.active !== false)
@@ -139,6 +160,8 @@ async function ecrire (req, res, userId, providerId) {
   if (action === 'retirerRegle')    return await retirerRegle(req, res, userId, providerId)
   if (action === 'poserException')  return await poserException(req, res, userId, providerId)
   if (action === 'retirerException') return await retirerException(req, res, userId, providerId)
+  if (action === 'poserConge')      return await poserConge(req, res, userId, providerId)
+  if (action === 'retirerConge')    return await retirerConge(req, res, userId, providerId)
   return res.status(400).json({ error: 'Action inconnue' })
 }
 
@@ -249,6 +272,64 @@ async function retirerException (req, res, userId, providerId) {
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
   if (!data || !data.length) return res.status(404).json({ error: 'Exception introuvable' })
+  return res.status(200).json({ success: true })
+}
+
+// Un CONGE : une PLAGE de dates, posee et retiree d'un geste (15 septembre 2026).
+//
+// ⚠ POURQUOI PAS DES EXCEPTIONS EN SERIE. Huit lignes isolees ne disent pas
+// qu'elles formaient un conge : ni lesquelles verrouiller a l'ecran, ni quoi
+// supprimer ensemble. La plage est l'objet, pas ses jours.
+//
+// ⚠ IL PRIME SUR TOUT, exception « disponible » comprise (etage 1 de la
+// precedence). C'est pour ca que l'ecran verrouille les jours couverts : gratter
+// un jour au milieu laisserait une plage qui dit une chose et un calendrier qui
+// en montre une autre.
+async function poserConge (req, res, userId, providerId) {
+  const { debut, fin, motif } = req.body || {}
+  const d = cleJour(debut), f = cleJour(fin)
+  if (!d || !f) return res.status(400).json({ error: 'Dates invalides' })
+  // ⚠ ON NE CORRIGE PAS L'ORDRE EN SILENCE. Inverser pour l'hote ferait
+  // enregistrer une plage qu'il n'a pas demandee — il croirait avoir pose un
+  // conge d'un jour et en aurait pose un de trois semaines.
+  if (d > f) return res.status(400).json({ error: 'La date de fin précède la date de début' })
+  // Le plafond protege la lecture autant que la saisie : une plage de dix ans
+  // verrouillerait tout le calendrier sans qu'on voie ou elle commence.
+  const jours = Math.round((Date.parse(f + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 86400000) + 1
+  if (jours > HORIZON_JOURS) {
+    return res.status(400).json({ error: `Un congé ne peut pas dépasser ${HORIZON_JOURS} jours` })
+  }
+
+  const { data, error } = await supabase.from('conges_plages')
+    .insert({ user_id: userId, provider_id: providerId, debut: d, fin: f,
+              motif: motif ? String(motif).slice(0, 200) : null, source: 'hote' })
+    .select('id, debut, fin, motif, source')
+    .maybeSingle()
+  if (error) {
+    console.error('[disponibilites] insert conge echec', error.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  return res.status(200).json({ success: true, conge: data })
+}
+
+// ⚠ UN CONGE SE SUPPRIME, il ne se desactive pas — contrairement a une REGLE.
+// Une regle supprimee emporterait la raison pour laquelle des menages passes ont
+// ete attribues comme ils l'ont ete ; un conge, lui, ne decide de rien
+// retroactivement : il rend simplement ses jours a la recurrence.
+async function retirerConge (req, res, userId, providerId) {
+  const { id } = req.body || {}
+  if (!id || !UUID_RE.test(String(id))) return res.status(400).json({ error: 'Congé inconnu' })
+  // ⚠ Les trois filtres comptent : l'identifiant vient du CLIENT, et sans
+  // `user_id` + `provider_id` il designerait le conge de n'importe qui.
+  const { data, error } = await supabase.from('conges_plages')
+    .delete()
+    .eq('id', String(id)).eq('user_id', userId).eq('provider_id', providerId)
+    .select('id')
+  if (error) {
+    console.error('[disponibilites] suppression conge echec', error.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  if (!data || !data.length) return res.status(404).json({ error: 'Congé introuvable' })
   return res.status(200).json({ success: true })
 }
 

@@ -705,6 +705,57 @@ de la lier, ou son congé s'est terminé — n'écrire que la proposition laissa
 la candidate d'office ne le recevait jamais, et le rattrapage du writer sautait la ligne
 puisqu'une proposition y est posée.
 
+### Congés, exceptions, règles — la précédence à quatre étages (15 sept. 2026)
+
+Une personne est disponible un jour donné selon cet ordre, et il ne se discute pas :
+
+| Rang | Ce qui tranche | Effet |
+|---|---|---|
+| **1** | un **congé** (`conges_plages`) couvre le jour | **absente**, et le jour est **verrouillé** à l'écran |
+| **2** | une **exception** (`provider_availability_exceptions`) pour ce jour | ce qu'elle dit, dans les deux sens |
+| **3** | une **règle** (`provider_availability_rules`) couvre le jour | disponible |
+| **4** | **aucune règle** active | disponible |
+
+⚠️ **Les étages 2, 3 et 4 sont inchangés depuis le lot 3.1.** Le congé s'ajoute **au-dessus** :
+un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
+
+⚠️ **Pourquoi un étage, et pas un rang égal à l'exception.** Une exception est une correction
+d'**un** jour ; un congé est une **plage** qu'on supprime d'un geste. Au même rang, une exception
+« disponible » posée par mégarde au milieu de vacances rendrait la personne assignable un jour
+que le calendrier montre verrouillé — et rien ne le signalerait.
+
+⚠️ **Pourquoi une table, et pas des exceptions en série.** Huit lignes isolées ne disent pas
+qu'elles formaient un congé : ni lesquelles verrouiller, ni quoi supprimer ensemble. La plage est
+l'objet, pas ses jours.
+
+⚠️ **Aucune contrainte d'anti-chevauchement, et c'est réfléchi.** Deux congés qui se recouvrent ne
+sont pas une incohérence : la disponibilité est une **union**, et supprimer l'un laisse l'autre
+verrouiller ses jours. Prolonger un congé en en posant un second par-dessus est un geste légitime.
+
+⚠️ **Une plage ILLISIBLE ne couvre rien — symétrique inverse d'une règle illisible.** Une règle
+qu'on ne sait pas lire rend **indisponible** (on n'envoie pas quelqu'un sur une règle
+incomprise) ; une plage qu'on ne sait pas lire ne doit pas effacer quelqu'un du planning **pour
+toujours**. On l'ignore, et les autres étages tranchent.
+
+⚠️ **Les congés se chargent partout où les règles se chargent.** `chargerDisponibilites`,
+`contexteDispo`, `api/garde.js`, `sync-menages-entite.js` : `estDisponible` sait les lire, mais il
+ne lit que ce qu'on lui donne. Les oublier dans le câblage aurait été la faute la plus silencieuse
+du lot — tous les tests d'unité seraient restés verts pendant que la garde du jour désignait
+quelqu'un en vacances.
+
+**Qui écrit quoi** — décision du 15 septembre 2026 :
+- **l'hôte** pose et retire tout : règles, exceptions, congés (`/api/disponibilites`) ;
+- **la prestataire** déclare ses **absences** — un jour (`declarerIndisponibilite`) ou une plage
+  (`declarerConge`) — sous `self_availability = write`. Ses **règles récurrentes** sont
+  l'**organisation du travail** : elle les voit, elle ne les change pas. Le serveur n'expose
+  aucune action dessus, et un test l'exige.
+- **elle ne retire que ce qu'elle a déclaré** (`source = 'prestataire'`), congés compris. Un congé
+  posé par l'hôte n'est pas le sien à défaire : le lui laisser effacer la remettrait candidate sur
+  des jours dont il l'avait retirée, sans qu'il l'apprenne.
+- ⚠️ **Les congés sont bornés en lecture sur `fin`, jamais sur `debut`.** Un congé commencé en juin
+  qui couvre juillet disparaîtrait de l'écran dès le 1er juillet alors qu'il verrouille encore des
+  jours : l'hôte le croirait terminé et confierait des ménages pendant les vacances.
+
 ⚠️ **Les lectures du moteur se PAGINENT, elles ne se tronquent pas** (règles, exceptions,
 journal des refus). Lever à la première page pleine faisait rendre `interrompu:'db'` au writer —
 donc plus **aucune** création, annulation ni alerte, à chaque cycle et sans reprise ; trois
