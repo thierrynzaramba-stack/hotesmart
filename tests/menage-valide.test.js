@@ -21,7 +21,8 @@ const Module = require('node:module')
 // d'arrivee resterait bloque pour toujours. Un double qui ignorerait cette
 // seconde lecture rendrait la garde indetectable : on pourrait la retirer sans
 // qu'un test bronche.
-function charger({ snapshots = [], tokens = [], profils = null, statut = null }) {
+function charger({ snapshots = [], tokens = [], profils = null, statut = null,
+                   erreurProfils = null }) {
   const req = { order: null, lte: null, limit: null }
   // Par defaut, chaque jeton a un profil actif derriere lui : c'est l'etat
   // normal, et les tests ecrits AVANT cette garde doivent continuer de decrire
@@ -36,9 +37,12 @@ function charger({ snapshots = [], tokens = [], profils = null, statut = null })
       limit(n) { req.limit = n; return Promise.resolve({ data: snapshots }) },
       maybeSingle: async () => ({ data: nom === 'property_status' ? statut : null }),
       then(res, rej) {
+        if (nom === 'profiles' && erreurProfils) {
+          return Promise.resolve({ data: null, error: erreurProfils }).then(res, rej)
+        }
         const data = nom === 'public_tokens' ? tokens
                    : nom === 'profiles' ? vivants : []
-        return Promise.resolve({ data }).then(res, rej)
+        return Promise.resolve({ data, error: null }).then(res, rej)
       }
     }
     return q
@@ -161,6 +165,25 @@ test('CONTRE-EPREUVE : le MEME jeton, avec un profil actif, bloque bien', async 
   assert.strictEqual(
     await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false,
     'une prestataire reelle est affectee : le menage est exige')
+})
+
+test('PANNE de lecture des profils : le code ATTEND, il ne part pas', async () => {
+  // ⚠ CONSTAT DE REVIEW, SUR UNE LECTURE QUE CE CHANTIER VENAIT D'AJOUTER.
+  // Erreur avalee -> `profils` null -> aucun porteur actif -> `prestataireCouvre`
+  // faux -> « ni prestataire ni menage valide, on ne bloque pas » -> le CODE
+  // D'ARRIVEE part sans attendre le menage. Une garde qui s'ouvre sur une panne
+  // n'est pas une garde. Le cas est ici un bien AVEC une prestataire reelle et
+  // SANS `last_menage_at` : c'est celui qui tombe du mauvais cote.
+  const { mod } = charger({
+    snapshots: [snap('2026-09-08')],
+    tokens: [{ token: 'vivant', property_ids: ['12345'] }],
+    profils: [{ pwa_token: 'vivant' }],
+    erreurProfils: { message: 'timeout' },
+    statut: null
+  })
+  assert.strictEqual(
+    await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false,
+    'sur une panne, on attend le menage — on n\'ouvre pas le logement')
 })
 
 test('les sejours non actifs sont ignores dans la recherche', async () => {

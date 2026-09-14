@@ -338,6 +338,16 @@ module.exports = async function handler(req, res) {
     const userId         = tokenData.user_id
     const visibilityDays = tokenData.visibility_days || 30
 
+    // ⚠ LA GARDE DE PORTEUR PASSE AVANT LES LECTURES LOURDES — constat de review.
+    // Elle etait posee apres `properties` ET `bookings_snapshot` (la fenetre
+    // entiere) : un jeton orphelin ou revoque — le cas meme qui motive tout ce
+    // lot — payait donc le chemin de lecture complet avant son 401, sur un
+    // endpoint sans session qu'un porteur de lien peut marteler. Rien ne change
+    // dans la semantique, seulement dans ce qu'un refus coute.
+    const porteur = await profilActifDuJeton(userId, token)
+    if (porteur.statut) return refuserPorteur(res, porteur.statut)
+    const profilPresta = porteur.profil
+
     // Biens du prestataire : lecture de la table `properties` (dual-provider,
     // ZERO appel Beds24). Cle universelle = provider_property_id, deja utilisee par
     // les tokens (property_ids), menage_done, property_status et bookings_snapshot.
@@ -457,11 +467,8 @@ module.exports = async function handler(req, res) {
     //     des voyageurs, alors que ce profil est inactif et sans acces ;
     //   - un repli « par bien » est precisement ce que le lot 2.2 a remplace.
     //     Le garder en secours, c'etait garder la faille qu'on venait de fermer.
-    // Desormais : pas de profil actif, pas d'acces. Voir `profilActifDuJeton`.
-    const porteur = await profilActifDuJeton(userId, token)
-    if (porteur.statut) return refuserPorteur(res, porteur.statut)
-    const profilPresta = porteur.profil
-
+    // Desormais : pas de profil actif, pas d'acces. La garde elle-meme est posee
+    // PLUS HAUT, avant les lectures lourdes — voir `profilActifDuJeton`.
     let requete = supabase.from('menages')
       .select('booking_id, property_id, departure_date, status, provider_id, offered_to, offer_expires_at')
       .eq('user_id', userId)

@@ -1115,6 +1115,19 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   haute passe donc par `received_at.lt.<lendemain>`, jamais `lte.<fin>` ; la borne basse, elle,
   est déjà inclusive (`>= debut` vaut `>= debut 00:00:00`). Les bornes de `prestataire_periodes`
   sont inclusives des deux côtés (migration du 3 septembre).
+- ⚠️ **UNE LISTE QUI COUPE DOIT LE DIRE, SURTOUT DEPUIS QUE LE COMPTEUR EST EXACT.**
+  La voie « ménage précis » tronquait **sans** lever `tronque` (la voie « périodes » le faisait).
+  Tant que les deux venaient des mêmes 150 identifiants, la contradiction était invisible ;
+  compteur exact + liste muette donnait « 577 avis pris en compte » au-dessus d'une liste
+  amputée **présentée comme complète**. Elle lève désormais le drapeau, et la liste est
+  plafonnée sur les **avis** (triés par date) et non plus sur les `menage_events` — trier les
+  *événements* du plus récent choisissait ceux dont les avis ne sont pas encore arrivés, donc
+  les lignes les **moins** susceptibles d'en porter. La clé étrangère rend cette double lecture
+  inutile : on interroge `ota_reviews` directement.
+- ⚠️ **La borne globale trie par DATE, pas par ordre d'insertion.** La `Map` se remplit voie 1
+  puis voie 2 : trancher sur ses clés prenait toute la voie 1 avant de regarder la voie 2. Un
+  `order` posé dans chaque voie n'ordonne qu'à l'intérieur d'une voie — la promesse « les plus
+  récents » ne tenait pas dès qu'il y en avait deux.
 - ⚠️ **Le coût : une voie = QUATRE requêtes** (un comptage par verdict), et l'endpoint en lance
   jusqu'à deux séries. Une voie par bien donnait **88 requêtes** par chargement de PWA pour un
   hôte à cinq biens — sur un endpoint ouvert sans session. Les intervalles qui partagent les

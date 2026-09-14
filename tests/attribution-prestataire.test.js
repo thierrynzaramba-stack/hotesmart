@@ -49,6 +49,8 @@ test('dansLaPeriode : un avis sans date n\'est JAMAIS attribué', () => {
 })
 
 // ─── Le double ──────────────────────────────────────────────────────────────
+// La semantique PostgREST que ce double doit honorer (embed `!inner`), partagee.
+const FAUX = require('./faux-postgrest')
 function fauxClient (d = {}, journal = []) {
   const { profils = [], menages = [], periodes = [], avis = [] } = d
   return {
@@ -67,12 +69,20 @@ function fauxClient (d = {}, journal = []) {
       }
       function rep () {
         const filtre = (l) => Object.entries(a.f).every(([c, v]) =>
-          c === 'statut' ? (l.statut || 'confirme') === v : String(l[c]) === String(v))
+          // ⚠ Les colonnes de l'EMBED ne sont pas des colonnes d'`ota_reviews` :
+          // `passeEmbed` les traite. Les comparer ici rendait le filtre toujours
+          // faux — un test rouge pour la mauvaise raison.
+          c.startsWith('menage_events.') ? true
+          : c === 'statut' ? (l.statut || 'confirme') === v : String(l[c]) === String(v))
         const dansIn = (l) => a.ins.every(f => f.v.includes(String(l[f.c])))
+        // ⚠ L'embed `menage_events!inner(token, user_id)` : jointure INTERNE et
+        // cloisonnement par compte. Une seule implementation, partagee avec les
+        // autres doubles d'`ota_reviews` — trois copies auraient diverge.
+        const embed = (l) => FAUX.passeEmbed(l, a.f, menages)
         if (table === 'profiles') return { data: profils.filter(filtre), error: null }
         if (table === 'menage_events') return { data: menages.filter(filtre), error: null }
         if (table === 'prestataire_periodes') return { data: periodes.filter(filtre), error: null }
-        if (table === 'ota_reviews') return { data: avis.filter(l => filtre(l) && dansIn(l)), error: null }
+        if (table === 'ota_reviews') return { data: avis.filter(l => filtre(l) && dansIn(l) && embed(l)), error: null }
         return { data: [], error: null }
       }
       return chain
@@ -238,4 +248,52 @@ test('les avis d\'un AUTRE compte ne sont jamais attribués', async () => {
     ]
   }), { userId: U, prestataireId: P_TIPH })
   assert.deepStrictEqual(r.ids, ['mien'])
+})
+
+// ─── Ce que la LISTE promet : les plus récents, et elle le dit quand elle coupe ─
+
+test('voie 1 : la troncature lève le drapeau, elle ne se tait plus', async () => {
+  // ⚠ CONSTAT DE REVIEW, ET IL ANNULAIT LE CORRECTIF PRÉCÉDENT.
+  // La voie 1 tronquait sans jamais poser `tronque`, contrairement à la voie 2.
+  // Depuis que le COMPTEUR est exact, l'écran affichait « 577 avis pris en
+  // compte » au-dessus d'une liste amputée présentée comme complète — la
+  // contradiction exacte que ce chantier dit fermer.
+  const { MAX_IDS } = require('../lib/attribution-prestataire')
+  const avis = Array.from({ length: MAX_IDS + 5 }, (_, i) => ({
+    id: 'a' + i, user_id: U, statut: 'confirme', menage_event_id: 'e1',
+    received_at: '2026-08-' + String((i % 28) + 1).padStart(2, '0') + 'T00:00:00Z'
+  }))
+  const r = await avisDuPrestataire(fauxClient({
+    profils: [REGINA],
+    menages: [{ id: 'e1', user_id: U, token: 'regina-x' }],
+    periodes: [], avis
+  }), { userId: U, prestataireId: P_REGINA })
+  assert.strictEqual(r.ids.length, MAX_IDS, 'la liste reste bornée')
+  assert.strictEqual(r.tronque, true, 'et elle le DIT')
+})
+
+test('la borne globale garde les plus RÉCENTS, toutes voies confondues', async () => {
+  // ⚠ La `Map` se remplit voie 1 puis voie 2 : trancher sur ses clés prenait
+  // TOUTE la voie 1 avant de regarder la voie 2. Un avis de période plus récent
+  // qu'un avis de ménage n'entrait donc jamais dans la liste. Les `order` posés
+  // dans chaque voie n'ordonnent qu'à l'intérieur d'une voie.
+  const { MAX_IDS } = require('../lib/attribution-prestataire')
+  // La voie 1 sature la borne, mais avec des avis ANCIENS.
+  const anciens = Array.from({ length: MAX_IDS }, (_, i) => ({
+    id: 'vieux' + i, user_id: U, statut: 'confirme', menage_event_id: 'e1',
+    received_at: '2024-01-01T00:00:00Z'
+  }))
+  const recent = { id: 'recent', user_id: U, statut: 'confirme',
+                   property_id_ref: 'COL', received_at: '2026-09-01T00:00:00Z' }
+  const r = await avisDuPrestataire(fauxClient({
+    profils: [REGINA],
+    menages: [{ id: 'e1', user_id: U, token: 'regina-x' }],
+    periodes: [{ user_id: U, provider_id: P_REGINA, property_id_ref: 'COL',
+                 debut: null, fin: null }],
+    avis: [...anciens, recent]
+  }), { userId: U, prestataireId: P_REGINA })
+  assert.strictEqual(r.ids.length, MAX_IDS)
+  assert.ok(r.ids.includes('recent'),
+    'l\'avis le plus récent doit entrer, même s\'il vient de la seconde voie')
+  assert.strictEqual(r.tronque, true)
 })
