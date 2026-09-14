@@ -8,10 +8,12 @@
   <title>HôteSmart — Réglages</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
-    body { background: var(--bg2); padding: 24px; }
+    /* ⚠ PLUS DE `padding` SUR `body` : `.layout` est en `height:100vh` et le
+       retrait est porté par `.content` (24 px, comme partout). Le laisser ici
+       décalerait la sidebar elle-même et ferait déborder la hauteur. */
+    body { background: var(--bg2); }
+    .content { background: var(--bg2); }
     .wrap { max-width: 880px; margin: 0 auto; }
-    .back { display: inline-block; font-size: 12px; color: var(--text2); text-decoration: none; margin-bottom: 16px; }
-    .back:hover { color: var(--text); }
     .title-page { font-size: 22px; font-weight: 500; color: #C97B5C; margin-bottom: 4px; }
     .sub-page { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
 
@@ -108,8 +110,20 @@
 </head>
 <body>
 
+<!-- ⚠ LE MENU, COMME TOUTES LES PAGES DE NAVIGATION COURANTE.
+     Cette page n'en avait pas : elle offrait un « ← Retour » qui suppose qu'on
+     sait d'où l'on vient. Décision de Thierry, 14 septembre 2026 : « aucune page
+     de navigation courante n'est un cul-de-sac ». Le lien de retour disparaît,
+     le menu le remplace.
+     Contrat : `.layout > .sidebar#sidebar + .main > .content` — `.content` est le
+     seul à porter `flex:1; overflow-y:auto`, sans lui le contenu serait tronqué
+     à la hauteur de la fenêtre (leçon des pages YieldFlow, le même jour). -->
+<div class="layout">
+<div class="sidebar" id="sidebar"></div>
+<div class="main">
+<div class="content">
+
 <div class="wrap">
-  <a href="/pages/index.html" class="back">← Retour</a>
   <div class="title-page">Réglages</div>
   <div class="sub-page">Tout ce qui configure votre compte, au même endroit.</div>
 
@@ -197,12 +211,21 @@
   </div>
 </div>
 
+</div><!-- .content -->
+</div><!-- .main -->
+</div><!-- .layout -->
+
 <script type="module">
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
   // s'ouvrait par URL directe en mode basculé et affichait un contresens.
   import { exigerCompteProprePage } from '/shared/compte-courant.js'
   await exigerCompteProprePage({ nomPage: 'Les réglages' })
+
+  // Le menu. `renderSidebar` crie si son point de montage manque — c'est ce
+  // silence qui avait caché l'absence de menu sur les pages YieldFlow.
+  import { renderSidebar } from '/components/sidebar.js'
+  renderSidebar('settings').catch(e => console.error('[settings] sidebar', e))
 
 import { supabase } from '/shared/supabase.js'
 import { api } from '/shared/api-client.js'
