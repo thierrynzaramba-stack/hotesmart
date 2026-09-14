@@ -719,14 +719,49 @@ Une personne est disponible un jour donné selon cet ordre, et il ne se discute 
 ⚠️ **Les étages 2, 3 et 4 sont inchangés depuis le lot 3.1.** Le congé s'ajoute **au-dessus** :
 un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
 
-⚠️ **CE QUI EST LIVRÉ, ET CE QUI NE L'EST PAS ENCORE (lot 2a, 15 sept. 2026).**
-Le **cœur** est en place : précédence, endpoints hôte et PWA, câblage du moteur, tests. **Aucun
-écran ne consomme encore les congés** — ni `apps/menages/prestataires.html`, ni
-`apps/menages/public.html`. Concrètement : un congé n'est aujourd'hui créable que par appel API,
-et s'il en arrive un en base, l'écran affiche le jour comme normal pendant que le moteur le tient
-pour verrouillé, **sans bouton pour le retirer**. Le comportement serveur est juste ; c'est
-l'interface qui manque, et c'est l'objet du **lot 2b**. Les mentions de « verrouillage » dans les
-commentaires de code décrivent la cible, pas l'état livré.
+### L'écran hôte : le calendrier EST le formulaire (lot 2b, 15 sept. 2026)
+
+`apps/menages/prestataires.html` ne montre plus une liste de règles et un champ date, mais un
+**calendrier sur un an glissant** — c'est là que « verrouillé » cesse d'être une promesse.
+
+- **Un clic bascule un jour, un glissé bascule la plage**, et le sens est celui du **premier jour
+  touché** : basculer chaque jour selon son propre état donnerait un damier, l'inverse du geste
+  « je pose trois jours d'absence ».
+- **Un jour vert peut l'être pour deux raisons** — la récurrence le couvre, ou il a été réglé à la
+  main. Le **point** les distingue ; sans lui, retirer une récurrence laisserait des jours
+  inexplicables. Et recliquer un jour réglé à la main **le rend à la récurrence** : on retire
+  l'exception au lieu d'en empiler une redondante.
+- **Les jours d'un congé sont verrouillés** : barrés, hors du parcours clavier, insensibles au
+  clic, et leur infobulle dit *comment* les libérer — supprimer le congé. Un écran qui bloque sans
+  dire par où sortir envoie chercher un bouton qui n'existe pas.
+- **Semaine A / Semaine B** : le bouton « Une semaine sur deux… » dédouble la ligne des sept jours.
+  L'**ancrage est écrit** sous les lignes (« Cette semaine est une semaine A — du … au … (n° 38) »)
+  et **la lettre est rappelée à gauche de chaque semaine du calendrier**. Sans ça, « une semaine
+  sur deux » ne désigne rien : la règle s'ancre sur le jour du clic, une date que personne ne voit,
+  et deux prestataires réglées à quinze jours d'écart travaillent les semaines opposées sans
+  qu'aucun écran ne l'explique.
+- **Revenir à « toutes les semaines » garde la semaine A**, et l'écran le dit. Fusionner les deux
+  lots aurait inventé un rythme que personne n'a réglé.
+- ⚠️ **Chaque geste verrouille le bloc pendant son écriture.** Sur un calendrier, deux clics
+  rapides partent en parallèle : sans ce verrou, la seconde écriture se calcule sur un état que la
+  première vient de changer, et le résultat dépend de l'ordre d'arrivée des réponses.
+- ⚠️ **Une récurrence s'enregistre en REMPLAÇANT : on retire, puis on pose.** L'inverse laisserait,
+  sur une panne au milieu, deux récurrences actives qui s'additionnent — le moteur unit les règles,
+  et elle serait disponible les jours des deux.
+- ⚠️ **`lireRrule` est ce qui permet de recocher les cases sans qu'une RRULE atteigne l'écran.**
+  La règle du §2 interdit qu'une chaîne descende vers le client ou en remonte ; le serveur relit
+  donc la sienne et rend `jours` / `cadence` / `ancre`. Le libellé est pour l'œil, ceci est pour
+  les cases. ⚠️ **Les deux conventions de jours diffèrent** : `rrule` compte **lundi = 0**
+  (RFC 5545), l'application **dimanche = 0** (`getUTCDay()`, `weekdays`). Confondre les deux
+  décale toute la semaine d'un cran, en silence.
+- **Éprouvé dans un vrai DOM** (`tests/prestataires-calendrier-dom.test.js`, jsdom) : verrouillage,
+  clic, glissé, retour à la récurrence, lettres A/B, et l'absence de toute RRULE dans les échanges.
+  ⚠️ jsdom n'implémente pas `PointerEvent` — les tests dispatchent l'événement par son **type**,
+  ce que la page écoute réellement.
+
+⚠️ **CE QUI RESTE : la PWA.** `apps/menages/public.html` ne consomme pas encore les congés — son
+onglet « Mes absences » doit devenir « Mes jours », titre **« Mes jours de travail »**, avec le
+même calendrier en voix directe et ses lignes A/B **en lecture seule**.
 
 ⚠️ **Pourquoi un étage, et pas un rang égal à l'exception.** Une exception est une correction
 d'**un** jour ; un congé est une **plage** qu'on supprime d'un geste. Au même rang, une exception

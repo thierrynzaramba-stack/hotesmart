@@ -42,6 +42,76 @@
                    font-size: 12px; padding: 4px 0; border-bottom: 0.5px solid var(--border); }
     .dispo-ligne:last-child { border-bottom: none; }
     .dispo-vide { font-size: 12px; color: var(--text2); }
+
+    /* ── LE CALENDRIER DES JOURS DE TRAVAIL (lot 2b, 15 septembre 2026) ──
+       ⚠ PAIRE ROUGE AJOUTEE AU SYSTEME. `public/style.css` porte --green et
+       --amber ; il n'avait aucune couleur pour « absente », seulement un
+       #c0392b improvise dans un badge. Meme saturation que le vert, pour que
+       les trois etats se lisent comme une famille. */
+    .dispo-recur { display: flex; flex-direction: column; gap: 8px; }
+    .dispo-ligne-jours { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .dispo-tag { display: inline-flex; align-items: center; justify-content: center;
+                 min-width: 84px; height: 30px; border-radius: var(--radius); padding: 0 8px;
+                 font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+    .dispo-tag.a { background: var(--green-bg); color: var(--green); }
+    .dispo-tag.b { background: var(--amber-bg); color: var(--amber); }
+    .dispo-tag.simple { background: none; color: var(--text2); font-weight: 500; justify-content: flex-start; }
+    .dispo-j { display: inline-flex; align-items: center; justify-content: center;
+               width: 32px; height: 30px; border: 0.5px solid var(--border2);
+               border-radius: var(--radius); cursor: pointer; font-size: 12px;
+               font-weight: 600; color: var(--text2); background: var(--bg); }
+    .dispo-j input { position: absolute; opacity: 0; pointer-events: none; }
+    .dispo-j:has(input:checked) { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+    .dispo-j.b:has(input:checked) { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
+    .dispo-j:focus-within { outline: 2px solid var(--primary, #007aff); outline-offset: 1px; }
+    .dispo-ancre { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                   font-size: 11.5px; color: var(--text2); background: var(--bg2);
+                   border-radius: var(--radius); padding: 7px 10px; }
+    .dispo-ancre b { color: var(--text); }
+    .dispo-lien { border: none; background: none; color: var(--primary, #007aff);
+                  font-size: 11.5px; cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit; }
+    .dispo-hint { font-size: 11px; color: var(--text2); margin: 0; }
+    .dispo-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 8px; }
+    .dispo-titre-mois { font-size: 13px; font-weight: 600; text-transform: capitalize; }
+    .dispo-rond { width: 28px; height: 28px; border-radius: 50%; border: 0.5px solid var(--border2);
+                  background: var(--bg); color: var(--text); cursor: pointer; font-size: 14px;
+                  line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+    .dispo-rond[disabled] { opacity: .3; cursor: not-allowed; }
+    .dispo-months { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .dispo-mois h6 { font-size: 12px; font-weight: 600; margin-bottom: 6px; text-transform: capitalize; }
+    .dispo-grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .dispo-grille.alt { grid-template-columns: 16px repeat(7, 1fr); }
+    .dispo-sem { display: flex; align-items: center; justify-content: center;
+                 font-size: 9px; font-weight: 700; color: var(--text3); }
+    .dispo-sem.a { color: var(--green); } .dispo-sem.b { color: var(--amber); }
+    .dispo-dow { font-size: 9px; font-weight: 600; color: var(--text3); text-align: center; }
+    .dispo-case { aspect-ratio: 1; border: 1px solid transparent; border-radius: 6px;
+                  display: flex; align-items: center; justify-content: center;
+                  font-size: 11.5px; font-variant-numeric: tabular-nums; cursor: pointer;
+                  background: var(--green-bg); color: var(--green); font-weight: 600;
+                  position: relative; user-select: none; -webkit-user-select: none; }
+    .dispo-case.off { background: var(--dispo-red-bg, #FBE9E6); color: var(--dispo-red, #C0392B); }
+    .dispo-case.vide { background: transparent; cursor: default; }
+    .dispo-case.passe { opacity: .3; cursor: not-allowed; }
+    .dispo-case.conge { background: var(--bg3); color: var(--text3); cursor: not-allowed;
+                        border-style: dashed; border-color: var(--border2); }
+    .dispo-case.conge::after { content: "✕"; position: absolute; font-size: 13px;
+                               color: var(--text2); opacity: .7; }
+    .dispo-case.conge span { opacity: .25; }
+    .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary, #007aff); }
+    .dispo-case.manuel::before { content: ""; position: absolute; bottom: 3px;
+                                 width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+    .dispo-case.sel { outline: 2px solid var(--primary, #007aff); outline-offset: -2px; }
+    .dispo-case:focus-visible { outline: 2px solid var(--primary, #007aff); outline-offset: 1px; }
+    .dispo-legende { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px;
+                     color: var(--text2); margin-top: 8px; }
+    .dispo-legende i { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+                       margin-right: 4px; vertical-align: -1px; }
+    .dispo-conge-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+    .dispo-champ { display: flex; flex-direction: column; gap: 3px; font-size: 10px;
+                   color: var(--text2); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+    .dispo-champ .form-input { font-size: 12px; padding: 5px 8px; width: auto; }
+    .dispo-occupe { opacity: .55; pointer-events: none; }
     .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 12px;
                 font-size: 11px; color: var(--text2); padding: 2px 10px; cursor: pointer; }
     .avert-rang { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E;
@@ -146,39 +216,44 @@
                (pas au « Enregistrer » du formulaire), parce qu'ils ne dépendent
                d'aucun autre champ de la fiche. -->
           <div id="dispo-section" style="display:none">
-            <div style="font-size:11px;color:var(--text2);margin:16px 0 8px;font-weight:500">SES DISPONIBILITÉS</div>
+            <div style="font-size:11px;color:var(--text2);margin:16px 0 8px;font-weight:500">SES JOURS DE TRAVAIL</div>
             <div class="dispo-bloc">
-              <div style="font-size:12px;margin-bottom:6px">Quand elle travaille</div>
-              <div id="dispo-regles"><div class="dispo-vide">Chargement…</div></div>
-              <div class="jours-ligne" style="padding-left:0;margin-top:8px">
-                <span class="jours-titre">Ajouter</span>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="1"><span>L</span></label>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="2"><span>M</span></label>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="3"><span>M</span></label>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="4"><span>J</span></label>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="5"><span>V</span></label>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="6"><span>S</span></label>
-                <label class="jour-case"><input type="checkbox" class="dispo-jour" value="0"><span>D</span></label>
-                <select class="form-input rang-select" id="dispo-cadence" style="min-width:150px">
-                  <option value="1" selected>toutes les semaines</option>
-                  <option value="2">une semaine sur deux</option>
-                </select>
-                <button type="button" class="btn-mini" id="btn-ajouter-regle">Ajouter</button>
-              </div>
-              <div style="font-size:11px;color:var(--text2);margin-top:6px">
-                Aucune règle = disponible tous les jours. Une semaine sur deux part de la semaine en cours.
+
+              <!-- ⚠ LE CALENDRIER EST LE FORMULAIRE (maquette v3, validée le
+                   15 septembre 2026). Il n'y a plus de « liste de règles » d'un
+                   côté et un champ date de l'autre : on coche des jours en tête,
+                   on clique ou on glisse dans le calendrier, et l'état se lit
+                   d'un coup d'œil. Un réglage qu'on ne voit pas se vérifie mal. -->
+              <div id="dispo-recur" class="dispo-recur"><div class="dispo-vide">Chargement…</div></div>
+              <p class="dispo-hint" id="dispo-hint"></p>
+
+              <div class="dispo-nav">
+                <button type="button" class="dispo-rond" id="dispo-prec" aria-label="Mois précédent">‹</button>
+                <span class="dispo-titre-mois" id="dispo-titre"></span>
+                <button type="button" class="dispo-rond" id="dispo-suiv" aria-label="Mois suivant">›</button>
+                <button type="button" class="btn-mini" id="dispo-auj">Aujourd'hui</button>
+                <span class="dispo-hint" id="dispo-horizon" style="margin-left:auto"></span>
               </div>
 
-              <div style="font-size:12px;margin:14px 0 6px">Absences et exceptions</div>
-              <div id="dispo-exceptions"><div class="dispo-vide">Chargement…</div></div>
-              <div class="jours-ligne" style="padding-left:0;margin-top:8px">
-                <input type="date" class="form-input" id="dispo-date" style="width:auto;font-size:12px;padding:5px 8px">
-                <button type="button" class="btn-mini" id="btn-absente">Absente ce jour</button>
-                <button type="button" class="btn-mini" id="btn-presente">Présente exceptionnellement</button>
+              <div class="dispo-months" id="dispo-months"></div>
+              <div class="dispo-legende" id="dispo-legende"></div>
+
+              <!-- ⚠ UN CONGÉ EST UNE PLAGE, PAS UNE SUITE DE JOURS. Il se pose
+                   d'un geste et se retire d'un geste ; les jours qu'il couvre
+                   sont VERROUILLÉS dans le calendrier — gratter un jour au
+                   milieu laisserait une plage qui dit une chose et un
+                   calendrier qui en montre une autre. -->
+              <div style="font-size:12px;margin:14px 0 6px">Ses congés</div>
+              <div class="dispo-conge-form">
+                <label class="dispo-champ"><span>Du</span>
+                  <input type="date" class="form-input" id="conge-du"></label>
+                <label class="dispo-champ"><span>Au</span>
+                  <input type="date" class="form-input" id="conge-au"></label>
+                <label class="dispo-champ" style="flex:1;min-width:120px"><span>Motif (facultatif)</span>
+                  <input type="text" class="form-input" id="conge-motif" placeholder="Vacances"></label>
+                <button type="button" class="btn-mini" id="btn-conge">Poser le congé</button>
               </div>
-              <div style="font-size:11px;color:var(--text2);margin-top:6px">
-                Une exception l'emporte toujours sur la règle.
-              </div>
+              <div id="dispo-conges" style="margin-top:8px"><div class="dispo-vide">Chargement…</div></div>
 
               <!-- ⚠ SANS CE DROIT, L'ONGLET « Mes absences » N'EXISTE PAS dans sa
                    PWA. Il vaut « oui » pour toute personne créée depuis cet écran :
@@ -1177,15 +1252,27 @@
     return { self_availability: c.checked ? 'write' : 'none' }
   }
 
-  // ─── SES DISPONIBILITÉS (lot 3.5) ────────────────────────────────────────
+  // ─── SES JOURS DE TRAVAIL — LE CALENDRIER EST LE FORMULAIRE (lot 2b) ─────
   //
   // ⚠ ÉCRITURE IMMÉDIATE, pas au « Enregistrer » du formulaire. Ces réglages ne
-  // dépendent d'aucun autre champ de la fiche, et les empiler dans le
-  // formulaire aurait fait perdre un congé posé à quelqu'un qui referme sans
-  // enregistrer — exactement ce qu'on ne veut pas sur une absence.
+  // dépendent d'aucun autre champ de la fiche, et les empiler dans le formulaire
+  // aurait fait perdre un congé posé à quelqu'un qui referme sans enregistrer —
+  // exactement ce qu'on ne veut pas sur une absence.
   //
-  // ⚠ AUCUNE CHAÎNE RRULE NE TRANSITE PAR CET ÉCRAN. On envoie des jours et une
-  // cadence, le serveur produit le standard et renvoie un libellé lisible.
+  // ⚠ AUCUNE CHAÎNE RRULE NE TRANSITE PAR CET ÉCRAN, dans aucun sens. On envoie
+  // des jours et une cadence ; le serveur produit le standard, et il nous rend
+  // la forme relue (`jours`, `cadence`, `ancre`) pour que les cases se
+  // recochent. C'est la décision gravée au §2 de la spec.
+  const JOURS_SEM = [{ n: 1, c: 'L' }, { n: 2, c: 'M' }, { n: 3, c: 'M' }, { n: 4, c: 'J' },
+                     { n: 5, c: 'V' }, { n: 6, c: 'S' }, { n: 0, c: 'D' }]
+  const NOMS_SEM = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+  const HORIZON_MOIS = 12
+
+  // ⚠ L'ÉTAT EST CELUI DU SERVEUR, jamais une supposition locale. Chaque geste
+  // écrit puis RECHARGE : un calendrier qui se peint sur une écriture supposée
+  // réussie ment dès la première panne réseau.
+  let dispo = null   // { profilId, regles, exceptions, conges, mois }
+
   async function appelDispo(methode, corps, query) {
     const url = '/api/disponibilites' + (query || '')
     const res = await fetch(url, {
@@ -1198,47 +1285,403 @@
     return { ok: res.ok, status: res.status, data }
   }
 
-  async function chargerDisponibilites(profilId) {
-    const zoneR = document.getElementById('dispo-regles')
-    const zoneE = document.getElementById('dispo-exceptions')
-    zoneR.innerHTML = '<div class="dispo-vide">Chargement…</div>'
-    zoneE.innerHTML = ''
-    const { ok, data } = await appelDispo('GET', null, `?provider_id=${encodeURIComponent(profilId)}`)
-    // ⚠ ON LE DIT. Une panne qui laisse « Chargement… » à l'écran ferait croire
-    // à une prestataire sans aucune règle — donc disponible tous les jours.
-    if (!ok || !data) {
-      zoneR.innerHTML = '<div class="dispo-vide">⚠️ Disponibilités illisibles. Rouvrez la fiche.</div>'
-      return
-    }
-    const regles = (data.regles || []).filter(r => r.active !== false)
-    zoneR.innerHTML = regles.length
-      ? regles.map(r => `
-          <div class="dispo-ligne">
-            <span>${echapper(r.label || 'Règle')}</span>
-            <button type="button" class="btn-mini" data-regle="${r.id}">retirer</button>
-          </div>`).join('')
-      : '<div class="dispo-vide">Aucune règle : elle est disponible tous les jours.</div>'
-    zoneR.querySelectorAll('[data-regle]').forEach(b => {
-      b.addEventListener('click', () => retirerRegle(profilId, b.dataset.regle))
-    })
+  const isoJour = d => d.toISOString().slice(0, 10)
+  const jourDe = t => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(t || '')); return m
+    ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)) : null }
+  const AUJ = () => isoJour(new Date(Date.UTC(new Date().getUTCFullYear(),
+    new Date().getUTCMonth(), new Date().getUTCDate(), 12)))
+  // ⚠ Le lundi de la semaine, en UTC : à minuit local le calcul bascule d'un
+  // jour, et l'ancrage A/B se décalerait d'une semaine entière.
+  function lundiDe(t) { const d = jourDe(t); if (!d) return null
+    return isoJour(new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000)) }
+  function moisDe(n) { const b = jourDe(AUJ())
+    return new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth() + n, 1, 12)) }
+  const moisLisible = d => d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+  function numSemaine(t) { const d = jourDe(t)
+    const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+    x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7) + 3)
+    const p = new Date(Date.UTC(x.getUTCFullYear(), 0, 4))
+    return 1 + Math.round(((x - p) / 86400000 - 3 + ((p.getUTCDay() + 6) % 7)) / 7) }
 
-    const exceptions = data.exceptions || []
-    zoneE.innerHTML = exceptions.length
-      ? exceptions.map(e => `
-          <div class="dispo-ligne">
-            <span>${e.available ? '✅' : '🚫'} ${dateLisible(e.date)}
-              <span style="color:var(--text2)">— ${e.source === 'prestataire' ? 'déclarée par elle' : 'posée par vous'}</span>
-            </span>
-            <button type="button" class="btn-mini" data-exception="${e.id}">retirer</button>
-          </div>`).join('')
-      : '<div class="dispo-vide">Aucune absence déclarée.</div>'
-    zoneE.querySelectorAll('[data-exception]').forEach(b => {
-      b.addEventListener('click', () => retirerException(profilId, b.dataset.exception))
+  // Les règles actives, telles que le serveur les a relues.
+  const reglesActives = () => (dispo.regles || []).filter(r => r.active !== false && Array.isArray(r.jours))
+  // Deux règles actives = le rythme A/B. Une seule = toutes les semaines.
+  const estAlternee = () => reglesActives().some(r => r.cadence === 2)
+  function lotsAB() {
+    const act = reglesActives().filter(r => r.cadence === 2)
+      .sort((a, b) => String(a.ancre || '').localeCompare(String(b.ancre || '')))
+    return { a: act[0] || null, b: act[1] || null }
+  }
+
+  function congeDe(j) {
+    return (dispo.conges || []).find(c => j >= String(c.debut).slice(0, 10) &&
+                                          j <= String(c.fin).slice(0, 10)) || null
+  }
+  // ⚠ LA MÊME PRÉCÉDENCE QUE LE SERVEUR, dans le même ordre : congé, exception,
+  // règle, puis « aucune règle = disponible ». Une seconde règle écrite ici
+  // divergerait du moteur au premier ajustement — et l'écran montrerait un
+  // planning que le cron ne suit pas.
+  function estLibre(j) {
+    if (congeDe(j)) return false
+    const e = (dispo.exceptions || []).find(x => String(x.date).slice(0, 10) === j)
+    if (e) return e.available === true
+    const act = reglesActives()
+    if (!act.length) return true
+    const jour = jourDe(j).getUTCDay()
+    return act.some(r => {
+      if (!r.jours.includes(jour)) return false
+      if ((r.cadence || 1) < 2) return true
+      const ancre = lundiDe(r.ancre || AUJ())
+      const ecart = Math.round((jourDe(lundiDe(j)) - jourDe(ancre)) / (7 * 86400000))
+      return ((ecart % 2) + 2) % 2 === 0
+    })
+  }
+  const regleParJour = j => {
+    const { a } = lotsAB()
+    if (!a) return null
+    const ancre = lundiDe(a.ancre || AUJ())
+    const ecart = Math.round((jourDe(lundiDe(j)) - jourDe(ancre)) / (7 * 86400000))
+    return ((ecart % 2) + 2) % 2 === 0 ? 'A' : 'B'
+  }
+
+  async function chargerDisponibilites(profilId) {
+    dispo = { profilId, regles: [], exceptions: [], conges: [], mois: 0 }
+    document.getElementById('dispo-recur').innerHTML = '<div class="dispo-vide">Chargement…</div>'
+    document.getElementById('dispo-months').innerHTML = ''
+    await rechargerDispo()
+  }
+
+  async function rechargerDispo() {
+    const { ok, data } = await appelDispo('GET', null, `?provider_id=${encodeURIComponent(dispo.profilId)}`)
+    // ⚠ ON LE DIT. Une panne qui laisse « Chargement… » ferait croire à une
+    // prestataire sans aucune règle — donc disponible tous les jours, et
+    // assignable partout.
+    if (!ok || !data) {
+      document.getElementById('dispo-recur').innerHTML =
+        '<div class="dispo-vide">⚠️ Ses jours n\'ont pas pu être lus. Rouvrez la fiche.</div>'
+      document.getElementById('dispo-months').innerHTML = ''
+      document.getElementById('dispo-conges').innerHTML = ''
+      return false
+    }
+    dispo.regles = data.regles || []
+    dispo.exceptions = data.exceptions || []
+    dispo.conges = data.conges || []
+    peindreDispo()
+    return true
+  }
+
+  // ─── Rendu ───────────────────────────────────────────────────────────────
+  function peindreDispo() {
+    peindreRecurrence()
+    peindreMois()
+    peindreConges()
+  }
+
+  function ligneJours(cle, jours, tag, classe) {
+    const t = tag
+      ? `<span class="dispo-tag ${classe}">${tag}</span>`
+      : `<span class="dispo-tag simple">Elle travaille</span>`
+    return `<div class="dispo-ligne-jours">${t}` + JOURS_SEM.map(j =>
+      `<label class="dispo-j ${classe}"><input type="checkbox" data-lot="${cle}" value="${j.n}"` +
+      `${jours.includes(j.n) ? ' checked' : ''}><span>${j.c}</span></label>`).join('') + '</div>'
+  }
+
+  function peindreRecurrence() {
+    const zone = document.getElementById('dispo-recur')
+    const alt = estAlternee()
+    let h = ''
+    if (!alt) {
+      const simple = reglesActives()[0]
+      h += ligneJours('A', simple ? simple.jours : [], '', '')
+      h += `<div><button type="button" class="btn-mini" id="btn-alt">Une semaine sur deux…</button></div>`
+    } else {
+      const { a, b } = lotsAB()
+      h += ligneJours('A', a ? a.jours : [], 'Semaine A', 'a')
+      h += ligneJours('B', b ? b.jours : [], 'Semaine B', 'b')
+      // ⚠ L'ANCRAGE EST ÉCRIT, ET IL S'INVERSE D'UN CLIC. Sans cette phrase,
+      // « une semaine sur deux » ne désigne rien : la règle s'ancre sur le jour
+      // du clic, une date que personne ne voit. Deux prestataires réglées à
+      // quinze jours d'écart travailleraient les semaines opposées sans qu'aucun
+      // écran ne l'explique.
+      const l = lundiDe(AUJ()), f = isoJour(new Date(jourDe(l).getTime() + 6 * 86400000))
+      const q = regleParJour(AUJ()) || 'A'
+      h += `<div class="dispo-ancre"><span>Cette semaine est une <b>semaine ${q}</b> —
+            du ${dateLisible(l)} au ${dateLisible(f)} (n° ${numSemaine(AUJ())})</span>
+            <button type="button" class="dispo-lien" id="btn-inverser">c'est plutôt une semaine ${q === 'A' ? 'B' : 'A'}</button></div>`
+      h += `<div><button type="button" class="btn-mini" id="btn-simple">Revenir à toutes les semaines</button></div>`
+    }
+    zone.innerHTML = h
+
+    const bAlt = document.getElementById('btn-alt')
+    if (bAlt) bAlt.addEventListener('click', () => basculerAlternance(true))
+    const bSimple = document.getElementById('btn-simple')
+    if (bSimple) bSimple.addEventListener('click', () => basculerAlternance(false))
+    const bInv = document.getElementById('btn-inverser')
+    if (bInv) bInv.addEventListener('click', inverserAncrage)
+    zone.querySelectorAll('input[data-lot]').forEach(c =>
+      c.addEventListener('change', () => enregistrerRecurrence()))
+
+    const hint = document.getElementById('dispo-hint')
+    const act = reglesActives()
+    if (!act.length) {
+      // ⚠ LE PIÈGE, DIT LÀ OÙ ON LE TEND. « Aucune règle = disponible » est la
+      // règle du moteur depuis le lot 3.1 : tout décocher ne la rend pas
+      // indisponible, ça la rend disponible PARTOUT — l'inverse du geste.
+      hint.innerHTML = '<b style="color:var(--amber)">Aucun jour coché : elle est disponible TOUS les jours.</b> ' +
+        'Cochez ses jours de travail, ou cliquez directement les jours du calendrier.'
+    } else if (!estAlternee()) {
+      hint.textContent = 'Elle travaille ' + act[0].jours.map(j => NOMS_SEM[j]).join(', ') +
+        '. Tous les autres jours sont comptés absents.'
+    } else {
+      const { a, b } = lotsAB()
+      const dire = r => (r && r.jours.length) ? r.jours.map(j => NOMS_SEM[j]).join(', ') : 'aucun jour'
+      hint.innerHTML = `<b>Semaine A</b> : ${dire(a)} · <b>Semaine B</b> : ${dire(b)}. ` +
+        'La lettre est rappelée à gauche de chaque semaine du calendrier.'
+    }
+  }
+
+  function peindreMois() {
+    const a = moisDe(dispo.mois), b = moisDe(dispo.mois + 1)
+    document.getElementById('dispo-titre').textContent = moisLisible(a) + ' — ' + moisLisible(b)
+    document.getElementById('dispo-prec').disabled = dispo.mois === 0
+    document.getElementById('dispo-suiv').disabled = dispo.mois >= HORIZON_MOIS - 1
+    document.getElementById('dispo-horizon').textContent = 'réglable jusqu\'en ' + moisLisible(moisDe(HORIZON_MOIS))
+
+    const alt = estAlternee()
+    const auj = AUJ()
+    let out = ''
+    for (let k = 0; k < 2; k++) {
+      const premier = moisDe(dispo.mois + k)
+      const nb = new Date(Date.UTC(premier.getUTCFullYear(), premier.getUTCMonth() + 1, 0, 12)).getUTCDate()
+      const decal = (premier.getUTCDay() + 6) % 7
+      const cellules = []
+      for (let z = 0; z < decal; z++) cellules.push(null)
+      for (let d = 1; d <= nb; d++) cellules.push(isoJour(new Date(Date.UTC(
+        premier.getUTCFullYear(), premier.getUTCMonth(), d, 12))))
+      while (cellules.length % 7) cellules.push(null)
+
+      out += `<div class="dispo-mois"><h6>${moisLisible(premier)}</h6>` +
+             `<div class="dispo-grille${alt ? ' alt' : ''}">`
+      if (alt) out += '<div class="dispo-sem"></div>'
+      out += JOURS_SEM.map(j => `<div class="dispo-dow">${j.c}</div>`).join('')
+      for (let w = 0; w < cellules.length; w += 7) {
+        const sem = cellules.slice(w, w + 7)
+        if (alt) {
+          const reel = sem.find(Boolean)
+          const q = reel ? regleParJour(reel) : ''
+          out += `<div class="dispo-sem ${q === 'A' ? 'a' : 'b'}">${q || ''}</div>`
+        }
+        for (const j of sem) {
+          if (!j) { out += '<div class="dispo-case vide"></div>'; continue }
+          const c = congeDe(j), libre = estLibre(j)
+          const manuel = !c && (dispo.exceptions || []).some(x => String(x.date).slice(0, 10) === j)
+          const cls = 'dispo-case' + (c ? ' conge' : (libre ? '' : ' off')) +
+                      (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') + (manuel ? ' manuel' : '')
+          const titre = c ? ('Congé' + (c.motif ? ' — ' + c.motif : '') +
+                             ' : verrouillé, supprimez le congé pour le libérer')
+                          : (libre ? 'Elle travaille' : 'Elle est absente')
+          out += `<div class="${cls}" data-jour="${j}" title="${echapper(titre)}" ` +
+                 `tabindex="${(j < auj || c) ? -1 : 0}"><span>${+j.slice(8, 10)}</span></div>`
+        }
+      }
+      out += '</div></div>'
+    }
+    document.getElementById('dispo-months').innerHTML = out
+
+    document.getElementById('dispo-legende').innerHTML =
+      '<span><i style="background:var(--green-bg);border:1px solid var(--green)"></i>Elle travaille</span>' +
+      '<span><i style="background:#FBE9E6;border:1px solid #C0392B"></i>Elle est absente</span>' +
+      '<span><i style="background:var(--bg3);border:1px dashed var(--border2)"></i>Congé — verrouillé</span>' +
+      '<span><i style="background:var(--green-bg);border:1px solid var(--green)"></i>le point = réglé à la main</span>' +
+      (alt ? '<span><b style="color:var(--green)">A</b>/<b style="color:var(--amber)">B</b> à gauche de chaque semaine</span>' : '')
+  }
+
+  function peindreConges() {
+    const zone = document.getElementById('dispo-conges')
+    const liste = (dispo.conges || []).slice()
+      .sort((a, b) => String(a.debut).localeCompare(String(b.debut)))
+    zone.innerHTML = liste.length ? liste.map(c =>
+      `<div class="dispo-ligne"><span>✕ du <b>${dateLisible(c.debut)}</b> au <b>${dateLisible(c.fin)}</b>` +
+      `${c.motif ? ' — ' + echapper(c.motif) : ''}` +
+      `<span style="color:var(--text2)"> · ${c.source === 'prestataire' ? 'déclaré par elle' : 'posé par vous'}</span>` +
+      `</span><button type="button" class="btn-mini" data-conge="${c.id}">supprimer</button></div>`).join('')
+      : '<div class="dispo-vide">Aucun congé posé.</div>'
+    zone.querySelectorAll('[data-conge]').forEach(b =>
+      b.addEventListener('click', () => retirerConge(b.dataset.conge)))
+  }
+
+  // ─── Les gestes ──────────────────────────────────────────────────────────
+  //
+  // ⚠ CHAQUE GESTE VERROUILLE LE BLOC PENDANT SON ÉCRITURE. Sur un calendrier,
+  // deux clics rapides partent en parallèle : sans ce verrou, la seconde écriture
+  // se calcule sur un état que la première vient de changer, et le résultat
+  // dépend de l'ordre d'arrivée des réponses.
+  let dispoOccupe = false
+  async function geste(fn) {
+    if (dispoOccupe) return
+    dispoOccupe = true
+    const bloc = document.getElementById('dispo-section')
+    if (bloc) bloc.classList.add('dispo-occupe')
+    try { await fn() } finally {
+      dispoOccupe = false
+      if (bloc) bloc.classList.remove('dispo-occupe')
+    }
+  }
+
+  function joursCoches(lot) {
+    return [...document.querySelectorAll(`#dispo-recur input[data-lot="${lot}"]:checked`)]
+      .map(c => Number(c.value)).sort((a, b) => a - b)
+  }
+
+  // Une récurrence s'enregistre en REMPLAÇANT : on retire les règles actives,
+  // puis on pose ce que les cases disent.
+  //
+  // ⚠ ON RETIRE D'ABORD, ON POSE ENSUITE — et si la pose échoue, on le DIT.
+  // L'inverse (poser puis retirer) laisserait, sur une panne au milieu, deux
+  // récurrences actives qui s'additionnent : le moteur unit les règles, elle
+  // serait disponible les jours des deux.
+  async function enregistrerRecurrence() {
+    await geste(async () => {
+      const alt = estAlternee()
+      const lots = alt
+        ? [{ jours: joursCoches('A'), ancre: lundiDe(AUJ()) },
+           { jours: joursCoches('B'), ancre: isoJour(new Date(jourDe(lundiDe(AUJ())).getTime() + 7 * 86400000)) }]
+        : [{ jours: joursCoches('A'), ancre: lundiDe(AUJ()) }]
+      // On garde l'ancrage existant s'il y en a un : le déplacer inverserait
+      // son rythme à chaque modification.
+      const { a } = lotsAB()
+      if (alt && a && a.ancre) {
+        lots[0].ancre = lundiDe(a.ancre)
+        lots[1].ancre = isoJour(new Date(jourDe(lots[0].ancre).getTime() + 7 * 86400000))
+      }
+      for (const r of reglesActives()) {
+        const { ok } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
+        if (!ok) { alert('Ses jours n\'ont pas pu être modifiés. Rouvrez la fiche.'); await rechargerDispo(); return }
+      }
+      for (const lot of lots) {
+        if (!lot.jours.length) continue          // une ligne vide = aucun jour, c'est légitime
+        const { ok, data } = await appelDispo('POST', {
+          provider_id: dispo.profilId, action: 'poserRegle',
+          jours: lot.jours, toutes_les_n_semaines: alt ? 2 : 1, depuis: lot.ancre })
+        if (!ok) {
+          alert('Ses jours n\'ont pas pu être enregistrés : ' + ((data && data.error) || '') +
+                ' — rouvrez la fiche pour vérifier.')
+          break
+        }
+      }
+      await rechargerDispo()
+    })
+  }
+
+  async function basculerAlternance(vers) {
+    await geste(async () => {
+      const act = reglesActives()
+      const joursA = act.length ? act[0].jours : []
+      for (const r of act) await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
+      if (joursA.length) {
+        const lundi = lundiDe(AUJ())
+        // ⚠ REVENIR À « TOUTES LES SEMAINES » GARDE LA SEMAINE A, et l'écran le
+        // dit. Fusionner les deux lots aurait inventé un rythme que personne n'a
+        // réglé.
+        await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
+          jours: joursA, toutes_les_n_semaines: vers ? 2 : 1, depuis: lundi })
+      }
+      await rechargerDispo()
+      if (vers) showToast('Cochez les jours de la semaine B')
+      else if (joursA.length) showToast('Les jours de la semaine A sont conservés')
+    })
+  }
+
+  async function inverserAncrage() {
+    await geste(async () => {
+      const { a, b } = lotsAB()
+      if (!a) return
+      // Décaler l'ancrage d'une semaine échange A et B.
+      const nouvelA = isoJour(new Date(jourDe(lundiDe(a.ancre || AUJ())).getTime() + 7 * 86400000))
+      const joursA = a.jours, joursB = b ? b.jours : []
+      for (const r of reglesActives()) await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
+      if (joursA.length) await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
+        jours: joursA, toutes_les_n_semaines: 2, depuis: nouvelA })
+      if (joursB.length) await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
+        jours: joursB, toutes_les_n_semaines: 2,
+        depuis: isoJour(new Date(jourDe(nouvelA).getTime() + 7 * 86400000)) })
+      await rechargerDispo()
+    })
+  }
+
+  // Un clic bascule un jour ; un glissé bascule la plage. Le sens est celui du
+  // PREMIER jour touché — sinon une plage mi-verte mi-rouge donnerait un damier.
+  let ancreSel = null, cibleSel = null, glisseSel = false
+  function peindreSelection() {
+    let a = ancreSel, b = cibleSel
+    if (a && b && a > b) { const t = a; a = b; b = t }
+    document.querySelectorAll('#dispo-months .dispo-case').forEach(el => {
+      const j = el.dataset.jour
+      el.classList.toggle('sel', !!(j && a && j >= a && j <= b))
+    })
+  }
+  async function basculerPlage(a, b) {
+    if (a > b) { const t = a; a = b; b = t }
+    await geste(async () => {
+      const voulu = !estLibre(a)
+      let d = jourDe(a); const fin = jourDe(b)
+      const auj = AUJ()
+      while (d <= fin) {
+        const j = isoJour(d)
+        if (j >= auj && !congeDe(j)) {
+          // ⚠ ON RETIRE L'EXCEPTION QUAND LA RÈGLE DIT DÉJÀ LA BONNE CHOSE.
+          // Sinon on empile des exceptions redondantes, et retirer la récurrence
+          // laisserait des jours figés que plus rien n'explique.
+          const exc = (dispo.exceptions || []).find(x => String(x.date).slice(0, 10) === j)
+          const sansExc = (() => {
+            const gardees = dispo.exceptions
+            dispo.exceptions = gardees.filter(x => String(x.date).slice(0, 10) !== j)
+            const r = estLibre(j)
+            dispo.exceptions = gardees
+            return r
+          })()
+          if (sansExc === voulu) {
+            if (exc) await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerException', id: exc.id })
+          } else {
+            await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserException',
+              date: j, available: voulu })
+          }
+        }
+        d = new Date(d.getTime() + 86400000)
+      }
+      await rechargerDispo()
+    })
+  }
+
+  async function poserConge() {
+    await geste(async () => {
+      const du = document.getElementById('conge-du').value
+      const au = document.getElementById('conge-au').value
+      if (!du || !au) return alert('Choisissez une date de début et une date de fin.')
+      const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserConge',
+        debut: du, fin: au, motif: document.getElementById('conge-motif').value.trim() })
+      if (!ok) return alert((data && data.error) || 'Le congé n\'a pas pu être enregistré.')
+      document.getElementById('conge-motif').value = ''
+      // ⚠ ON SE PLACE SUR LE MOIS DU CONGÉ. Poser une date qu'on ne voit pas
+      // apparaître se lit comme un geste qui a échoué.
+      const b = jourDe(AUJ()), d = jourDe(du)
+      dispo.mois = Math.max(0, Math.min(HORIZON_MOIS - 1,
+        (d.getUTCFullYear() - b.getUTCFullYear()) * 12 + (d.getUTCMonth() - b.getUTCMonth())))
+      await rechargerDispo()
+      showToast('✓ Congé posé')
+    })
+  }
+
+  async function retirerConge(id) {
+    await geste(async () => {
+      const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerConge', id })
+      if (!ok) return alert((data && data.error) || 'Le congé n\'a pas pu être retiré.')
+      await rechargerDispo()
     })
   }
 
   function dateLisible(d) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''))
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ''))
     if (!m) return String(d || '')
     // ⚠ En UTC : une date de calendrier lue en heure locale se décale d'un jour
     // à l'ouest de Greenwich — le piège déjà corrigé deux fois dans ce dépôt.
@@ -1246,52 +1689,38 @@
       { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
   }
 
-  async function ajouterRegle() {
-    if (!editionEnCours) return
-    const jours = [...document.querySelectorAll('.dispo-jour')]
-      .filter(c => c.checked).map(c => Number(c.value))
-    if (!jours.length) return alert('Cochez au moins un jour.')
-    const cadence = Number(document.getElementById('dispo-cadence').value) || 1
-    const { ok, data } = await appelDispo('POST', {
-      provider_id: editionEnCours, action: 'poserRegle',
-      jours, toutes_les_n_semaines: cadence,
-      // L'ancrage décide quelle semaine est « on » pour une quinzaine.
-      depuis: new Date().toISOString().slice(0, 10)
-    })
-    if (!ok) return alert((data && data.error) || 'Enregistrement impossible.')
-    document.querySelectorAll('.dispo-jour').forEach(c => { c.checked = false })
-    await chargerDisponibilites(editionEnCours)
-    showToast('✓ Règle ajoutée')
-  }
+  // ─── Branchements, posés une seule fois ──────────────────────────────────
+  document.getElementById('dispo-prec').addEventListener('click', () => {
+    if (dispo && dispo.mois > 0) { dispo.mois--; peindreMois() } })
+  document.getElementById('dispo-suiv').addEventListener('click', () => {
+    if (dispo && dispo.mois < HORIZON_MOIS - 1) { dispo.mois++; peindreMois() } })
+  document.getElementById('dispo-auj').addEventListener('click', () => {
+    if (dispo) { dispo.mois = 0; peindreMois() } })
+  document.getElementById('btn-conge').addEventListener('click', poserConge)
 
-  async function retirerRegle(profilId, id) {
-    const { ok, data } = await appelDispo('POST', { provider_id: profilId, action: 'retirerRegle', id })
-    if (!ok) return alert((data && data.error) || 'Retrait impossible.')
-    await chargerDisponibilites(profilId)
-  }
-
-  async function poserException(available) {
-    if (!editionEnCours) return
-    const date = document.getElementById('dispo-date').value
-    if (!date) return alert('Choisissez une date.')
-    const { ok, data } = await appelDispo('POST', {
-      provider_id: editionEnCours, action: 'poserException', date, available
-    })
-    if (!ok) return alert((data && data.error) || 'Enregistrement impossible.')
-    document.getElementById('dispo-date').value = ''
-    await chargerDisponibilites(editionEnCours)
-    showToast(available ? '✓ Présence exceptionnelle' : '✓ Absence enregistrée')
-  }
-
-  async function retirerException(profilId, id) {
-    const { ok, data } = await appelDispo('POST', { provider_id: profilId, action: 'retirerException', id })
-    if (!ok) return alert((data && data.error) || 'Retrait impossible.')
-    await chargerDisponibilites(profilId)
-  }
-
-  document.getElementById('btn-ajouter-regle').addEventListener('click', ajouterRegle)
-  document.getElementById('btn-absente').addEventListener('click', () => poserException(false))
-  document.getElementById('btn-presente').addEventListener('click', () => poserException(true))
+  const zoneMois = document.getElementById('dispo-months')
+  zoneMois.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.dispo-case')
+    if (!el || el.classList.contains('vide') || dispoOccupe) return
+    const j = el.dataset.jour
+    if (!j || j < AUJ() || congeDe(j)) return
+    ancreSel = j; cibleSel = j; glisseSel = true
+    if (el.setPointerCapture) el.setPointerCapture(e.pointerId)
+    peindreSelection()
+  })
+  zoneMois.addEventListener('pointerover', e => {
+    if (!glisseSel) return
+    const el = e.target.closest('.dispo-case')
+    if (!el || !el.dataset.jour) return
+    cibleSel = el.dataset.jour; peindreSelection()
+  })
+  window.addEventListener('pointerup', () => {
+    if (!glisseSel) return
+    glisseSel = false
+    const a = ancreSel, b = cibleSel
+    ancreSel = cibleSel = null
+    if (a && b) basculerPlage(a, b)
+  })
 
   function showToast(msg = '✓ Lien copié !') {
     const toast = document.getElementById('copy-toast')

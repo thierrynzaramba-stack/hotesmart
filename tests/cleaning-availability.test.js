@@ -11,7 +11,7 @@ const test = require('node:test')
 const assert = require('node:assert')
 const {
   estDisponible, congeCouvrant, jourUTC, cleJour, jourDeSemaine,
-  indexerParPrestataire, construireRrule, regleCouvre
+  indexerParPrestataire, construireRrule, lireRrule, regleCouvre
 } = require('../lib/cleaning/availability')
 
 // Le cas réel : « les week-ends, une semaine sur deux », ancré au samedi
@@ -290,4 +290,58 @@ test('sans congés, le comportement est EXACTEMENT celui d\'avant', async () => 
   assert.strictEqual(estDisponible('2026-09-12', { regles: [REGLE] }), false)
   assert.strictEqual(estDisponible('2026-09-05', { regles: [REGLE], conges: [] }), true)
   assert.strictEqual(estDisponible('2026-09-12', { regles: [REGLE], conges: [] }), false)
+})
+
+// ─── La lecture inverse : ce que l'écran doit recocher ────────────────────
+
+test('lireRrule est l\'inverse exact de construireRrule', async () => {
+  // ⚠ ALLER ET RETOUR, sur les formes réelles. Séparées, les deux fonctions
+  // divergeraient au premier ajustement ; ce test les tient ensemble.
+  const cas = [
+    { jours: [0, 6], cadence: 2 },            // le week-end, une semaine sur deux
+    { jours: [1, 2, 3, 4, 5], cadence: 1 },   // la semaine
+    { jours: [0], cadence: 1 },               // le dimanche seul
+    { jours: [0, 1, 2, 3, 4, 5, 6], cadence: 2 }
+  ]
+  for (const c of cas) {
+    const chaine = construireRrule({ jours: c.jours, toutesLesNSemaines: c.cadence, depuis: '2026-09-14' })
+    const relu = lireRrule(chaine)
+    assert.deepStrictEqual(relu.jours, c.jours, `jours pour ${JSON.stringify(c)}`)
+    assert.strictEqual(relu.cadence, c.cadence)
+    assert.strictEqual(relu.ancre, '2026-09-14', 'l\'ancrage revient tel quel')
+  }
+})
+
+test('lireRrule traduit la convention de jours, elle ne la recopie pas', async () => {
+  // ⚠ LE PIÈGE EXACT, et il est silencieux. `rrule` compte LUNDI = 0 (RFC 5545) ;
+  // cette application compte DIMANCHE = 0 (`getUTCDay()`, et `weekdays` sur les
+  // liaisons). Sans traduction, toute la semaine se décale d'un cran : « le
+  // week-end » deviendrait « vendredi et lundi », et personne ne le verrait
+  // avant le jour J.
+  // On l'éprouve sur une chaîne écrite à la main, pas produite par notre code :
+  // un aller-retour maison pourrait se tromper deux fois et paraître juste.
+  const relu = lireRrule('DTSTART:20260914T120000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO')
+  assert.deepStrictEqual(relu.jours, [1], 'MO doit devenir 1 (lundi), pas 0')
+  const dimanche = lireRrule('DTSTART:20260914T120000Z\nRRULE:FREQ=WEEKLY;BYDAY=SU')
+  assert.deepStrictEqual(dimanche.jours, [0], 'SU doit devenir 0 (dimanche), pas 6')
+})
+
+test('une règle ILLISIBLE rend null — l\'écran se dégrade, il ne tombe pas', async () => {
+  assert.strictEqual(lireRrule('n\'importe quoi'), null)
+  assert.strictEqual(lireRrule(''), null)
+  assert.strictEqual(lireRrule(null), null)
+})
+
+test('sans BYDAY, le jour vient du DTSTART — c\'est la RFC, pas un défaut', async () => {
+  // ⚠ CE TEST A COMMENCÉ PAR ÊTRE FAUX, et c'est le code qui avait raison.
+  // J'attendais `null` pour une règle sans `BYDAY`. Or la RFC 5545 est claire :
+  // `FREQ=WEEKLY` sans jour explicite répète le JOUR DE LA SEMAINE du `DTSTART`.
+  // Le 14 septembre 2026 est un lundi, la règle vaut donc « tous les lundis »,
+  // et l'écran a raison de cocher lundi.
+  // `construireRrule` n'en produit jamais de cette forme ; une telle ligne
+  // viendrait d'une écriture à la main — raison de plus pour que la relecture
+  // dise ce que le MOTEUR en fera, et pas autre chose.
+  const relu = lireRrule('DTSTART:20260914T120000Z\nRRULE:FREQ=WEEKLY')
+  assert.deepStrictEqual(relu.jours, [1], 'le 14 septembre 2026 est un lundi')
+  assert.strictEqual(relu.cadence, 1)
 })

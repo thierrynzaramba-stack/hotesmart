@@ -24,7 +24,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
-const { construireRrule, cleJour } = require('../lib/cleaning/availability')
+const { construireRrule, lireRrule, cleJour } = require('../lib/cleaning/availability')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -109,7 +109,11 @@ module.exports = async function handler (req, res) {
 // chaine elle-meme ne sort jamais.
 async function lire (res, userId, providerId) {
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
-    .select('id, label, active, created_at')
+    // ⚠ `rrule` EST LUE ICI, ET NE SORT PAS D'ICI. L'ecran a besoin des JOURS et
+    // de la CADENCE pour recocher ses cases — pas de la chaine, qui reste une
+    // affaire de serveur (§2 de la spec). On la relit, on en extrait la forme,
+    // et on jette la chaine avant de repondre.
+    .select('id, label, active, created_at, rrule')
     .eq('user_id', userId).eq('provider_id', providerId)
     .order('created_at', { ascending: true }).limit(LOT_REGLES)
   if (errR) {
@@ -149,13 +153,26 @@ async function lire (res, userId, providerId) {
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
 
+  // ⚠ LA CHAINE NE PART PAS. `lireRrule` en tire ce que l'ecran doit recocher ;
+  // une regle qu'on ne sait pas relire sort sans `jours` — l'ecran affiche alors
+  // son libelle sans pouvoir la modifier, ce qui est degrade mais honnete.
+  const reglesLisibles = (regles || []).map(r => {
+    const forme = lireRrule(r.rrule)
+    return {
+      id: r.id, label: r.label, active: r.active, created_at: r.created_at,
+      jours: forme ? forme.jours : null,
+      cadence: forme ? forme.cadence : null,
+      ancre: forme ? forme.ancre : null
+    }
+  })
+
   return res.status(200).json({
-    regles: regles || [],
+    regles: reglesLisibles,
     exceptions: exceptions || [],
     conges: conges || [],
     // ⚠ Le compte se voit a l'ecran : c'est ce qui permet a l'hote de comprendre
     // « aucune regle = disponible » sans avoir a le deviner.
-    aucune_regle: !(regles || []).some(r => r.active !== false)
+    aucune_regle: !reglesLisibles.some(r => r.active !== false)
   })
 }
 
