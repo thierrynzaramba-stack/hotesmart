@@ -146,8 +146,8 @@ processChannelProperties(results) — appelé dans api/cron.js (section 3bis) :
 
 | Variable | Valeur actuelle | Environnements |
 |---|---|---|
-| CHANNEL_BASE_URL | https://staging.channex.io/api/v1 | Production + Preview |
-| CHANNEL_APP_BASE | https://staging.channex.io (racine SANS /api/v1) | Production + Preview |
+| CHANNEL_BASE_URL | https://app.channex.io/api/v1 | Production + Preview |
+| CHANNEL_APP_BASE | racine SANS /api/v1 (secret Vercel) | Production + Preview |
 | CHANNEL_API_KEY | clé API globale (sensible) | Production + Preview |
 | CHANNEL_WEBHOOK_SECRET | secret header webhook | Production + Preview |
 | VERCEL_BYPASS_TOKEN | bypass mur Vercel | Preview UNIQUEMENT |
@@ -159,15 +159,22 @@ CONVENTION WHITE-LABEL : variables CHANNEL_* (JAMAIS CHANNEX_*), aucune mention
 ### Bascule prod — état
 - ÉTAGE A (FAIT Session #16) : merge main, variables en Production, webhook prod,
   cron Vercel natif (vercel.json crons */5, auth Bearer stricte, GitHub Actions supprimé)
-- ÉTAGE B (au premier vrai bien sans CM) : compte Channex payant secure.channex.io
-  → changer les VALEURS de CHANNEL_BASE_URL / CHANNEL_APP_BASE / CHANNEL_API_KEY
-  → recréer les biens sur le compte prod → ré-enregistrer le webhook si l'orga change.
-  AUCUN changement de code. Coût/propriété + app Messages → pricing.
+- ÉTAGE B (FAIT) : la prod tourne sur le compte Channex payant **app.channex.io**.
+  Vérifié le 2026-09-14 par `vercel env pull` (environnement Production) :
+  CHANNEL_BASE_URL = https://app.channex.io/api/v1.
+  Ce que ce bloc annonçait, et qui est désormais derrière nous : la bascule
+  DEPUIS staging.channex.io VERS le compte payant, au premier vrai bien sans CM.
+  ⚠️ Le plan nommait `secure.channex.io` — cet hôte n'a JAMAIS servi. La bascule
+  s'est faite sur `app.channex.io`. Noté pour que personne n'aille chercher un
+  `secure.channex.io` qui n'existe pas dans nos variables.
+  Comme prévu, AUCUN changement de code n'a été nécessaire : seules les VALEURS
+  de CHANNEL_BASE_URL / CHANNEL_APP_BASE / CHANNEL_API_KEY ont changé.
 ⚠️ Base Supabase UNIQUE (preview + prod) : le cron prod traite aussi les biens
 channex de test tant qu'ils existent.
 
 ## 9. SANDBOX & TESTS
 
+- HISTORIQUE (époque staging.channex.io, avant bascule Étage B) :
 - Compte staging Channex : les biens test appartiennent au compte HôteSmart PROD
   (user 85e3a0ef / thierrynzaramba@gmail.com), PAS au compte test.
 - bellevue : property 10615ece-e11c-4e8c-82f8-cbe2e7acec19, id Supabase 90e2986f,
