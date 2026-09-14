@@ -5,7 +5,7 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 ## INTERACTION
 - Répondre en français. Étape par étape. UNE action à la fois.
 - Pas de postambules, récaps, félicitations, emoji. Finir sur du technique direct.
-- Ne JAMAIS afficher/coller une clé, un token ou un secret.
+- Ne JAMAIS afficher/coller une clé, un token ou un secret — règle absolue ci-dessous.
 
 ## RÉFLEXE MACHINE (multi-machines Mac bureau / PC portable)
 - AVANT toute modif quand on change d'ordi : `git checkout main && git pull origin main`.
@@ -76,6 +76,34 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
   92 suppressions. C'est un TEST du lot 2.2 qui a refusé de passer, pas la
   prudence. L'ajout réellement nécessaire faisait 17 lignes.
 - Détail et corollaire : REVIEW.md règle 14.
+
+## RÈGLE ABSOLUE — UN SECRET NE PASSE JAMAIS PAR LE TERMINAL
+
+- **Un secret s'écrit directement dans son fichier cible.** Il ne s'affiche pas,
+  ne se colle pas dans une réponse, ne transite pas par une sortie de commande.
+- Ce qu'on affiche d'un secret : le **nom de la variable** et sa **longueur**.
+  Rien d'autre. `CRON_SECRET écrit (64 caractères)` est un compte rendu complet.
+- Vaut aussi pour la LECTURE : `vercel env pull` écrit les valeurs en clair.
+  On ne lit jamais le fichier produit en entier — on liste les NOMS
+  (`vercel env ls`), et on supprime le fichier aussitôt.
+- Un secret généré pour être posé dans une interface se génère **dans cette
+  interface** quand elle le permet, sinon il est écrit dans un fichier local
+  hors dépôt que le product owner ouvre lui-même.
+
+**Pourquoi.** Un terminal n'est pas un canal privé : la sortie part dans
+l'historique du shell, dans les transcriptions de session, et dans tout ce qui
+les archive. Un secret affiché est un secret à faire tourner — le coût n'est pas
+l'affichage, c'est la rotation et la fenêtre pendant laquelle l'ancienne valeur
+reste valable.
+
+**Vécu (14-15 septembre 2026).** Pendant la préparation du chantier staging,
+`vercel env pull` puis la lecture du fichier produit ont exposé quatre secrets de
+production en clair, dont `BREVO_API_KEY` et `CLAUDE_API_KEY` — tous deux
+facturables. Le `CRON_SECRET` de remplacement, généré pour corriger la fuite, a
+été affiché à son tour : le correctif a reproduit le défaut. La règle
+« ne jamais afficher un secret » existait déjà en INTERACTION ; ce qui manquait
+était le GESTE de remplacement — écrire dans le fichier, rendre compte par le
+nom et la longueur.
 
 ## RÈGLE ABSOLUE — UNE REVIEW PAR COMMIT, PAS DE BOUCLE
 - **Une review par commit.** Si elle trouve un problème de SÉCURITÉ (fuite entre
@@ -237,4 +265,9 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.
+- **Lignes SQL courtes : seulement pour le collage manuel.** Du SQL collé à la
+  main dans l'éditeur Supabase se coupe en lignes < 60 caractères (trois échecs
+  de troncature). Une migration versionnée de `migrations/`, appliquée par
+  outillage, est en **format libre** : la contrainte ne la concerne pas.
+  Origine de la règle : docs/specs/spec-yieldflow-v1.md §470.
 - Après push : attendre que le Deployment ID Vercel change avant de tester le cron prod.
