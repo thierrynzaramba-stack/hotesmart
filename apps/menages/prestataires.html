@@ -907,7 +907,6 @@
     const name = document.getElementById('presta-name').value.trim()
     if (!name) return alert('Entrez un nom pour le prestataire')
 
-    const selectedProps = [...document.querySelectorAll('#prop-checkboxes input:checked')].map(cb => cb.value)
     const visibilityDays = parseInt(document.getElementById('visibility-days').value)
 
     // ⚠ LES BIENS APPARTIENNENT A `/api/membres` QUAND UN PROFIL EXISTE.
@@ -966,8 +965,24 @@
     // `public_tokens.property_ids` (text[]). Deux tables, deux representations,
     // le meme geste — c'est ce que l'en-tete d'api/membres.js demande de tenir
     // synchrone, et ce que la version precedente cassait dans l'autre sens.
+    //
+    // ⚠ LES BIENS VIENNENT DE `saisieDesBiens()`, PLUS D'UNE RELECTURE DU DOM.
+    // Cette ligne interrogeait `'#prop-checkboxes input:checked'` — un selecteur
+    // ecrit le 9 avril, quand ce conteneur ne portait QUE les cases de biens. Le
+    // lot 3.5 (b2f1011, 4 septembre) y a place les 7 cases de jours : depuis,
+    // chaque enregistrement ecrivait les JOURS dans `property_ids`. Mesure en
+    // production le 14 septembre : 23 entrees pour 2 biens chez Regina, 26 chez
+    // Tiphaine. Les cases d'un bien DECOCHE comptaient aussi — `disabled`
+    // n'empeche pas `:checked`.
+    //
+    // La correction n'est pas de resserrer le selecteur mais de le SUPPRIMER :
+    // `saisieDesBiens()` dit deja quels biens sont coches, et c'est elle qui
+    // alimente `/api/membres` et `enregistrerLiaisons`. Deux lectures du meme
+    // geste pouvaient diverger ; il n'y en a plus qu'une. La faute devient
+    // structurellement impossible, au lieu d'etre seulement corrigee.
     const champs = { label: name, visibility_days: visibilityDays,
-                     ratio_periode: periodeChoisie(), property_ids: selectedProps }
+                     ratio_periode: periodeChoisie(),
+                     property_ids: biens.map(b => b.ref) }
     const { error } = await supabase.from('public_tokens')
       .update(champs)
       .eq('id', id)

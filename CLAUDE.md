@@ -154,7 +154,18 @@ sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
-13 septembre. **Ce ne sont pas des regressions** : les fixtures portent des
+13 septembre.
+
+⚠️ **REPARTITION MISE A JOUR LE 14 SEPTEMBRE 2026 : les 8 sont desormais TOUS
+dans `tests/booking-changes.test.js`**, et `booking-changes-dispatch.test.js`
+est repasse a 20/20. Le TOTAL n'a pas bouge — la regle de comptage tient — mais
+la repartition, elle, a glisse : deux tests de dispatch ont gueri pendant que
+deux tests de `booking-changes` franchissaient a leur tour la garde
+d'anciennete. C'est le comportement attendu d'une dette a dates FIGEES : elle se
+deplace au fil des jours. La noter evite qu'on lise « dispatch est rouge » dans
+six semaines et qu'on cherche une panne la ou il n'y en a pas.
+
+**Ce ne sont pas des regressions** : les fixtures portent des
 dates FIGEES (sejour du 1er au 5 septembre 2026) et viennent de franchir la
 garde d'anciennete `JOURS_DE_GRACE = 7` de `lib/booking-changes.js`. Au-dela,
 `sejourTermine()` rend `true` et `detectChange()` rend `null` : les tests

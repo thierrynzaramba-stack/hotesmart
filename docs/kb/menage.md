@@ -481,6 +481,28 @@ seulement à l'app ménage.
   la seule source que lit la PWA. Il n'y a pas deux writers pour autant : `/api/membres` écrit
   `profile_permissions.property_ids` (uuid[]), l'écran écrit `public_tokens.property_ids`
   (text[]) — deux tables, deux représentations, le même geste.
+  ⚠️ **ET LES DEUX SORTENT DE `saisieDesBiens()`, PAS D'UNE RELECTURE DU DOM (14 sept. 2026).**
+  `saveEdit` lisait sa propre page pour composer `property_ids` :
+  `querySelectorAll('#prop-checkboxes input:checked')`. Ce sélecteur a été écrit le 9 avril,
+  quand ce conteneur ne portait **que** les cases de biens ; le lot 3.5 (b2f1011, 4 septembre) y
+  a placé **7 cases de jours par bien** sans le resserrer. Depuis, chaque enregistrement écrivait
+  les **jours de la semaine** dans un tableau de références de biens. Mesuré en production :
+  **23 entrées pour 2 biens** chez Régina, 26 chez Tiphaine — `["0db6b39b…","1","2","3","4","5","6","0", …]`.
+  Les cases d'un bien **décoché** comptaient aussi : `majEtatDesRangs` les *désactive* sans les
+  décocher, et `disabled` n'empêche pas `:checked`.
+  ⚠️ **Rien ne se voyait.** Les valeurs "0".."6" ne correspondent à aucune référence de bien :
+  les pastilles « BIENS ASSIGNÉS » restaient justes, le filtrage de la PWA aussi. Le jour où un
+  hôte Beds24 arrive, ses propIds sont numériques — et "1".."6" désigneraient alors de vrais
+  biens.
+  ⚠️ **La correction n'est pas de resserrer le sélecteur, c'est de le supprimer.**
+  `saisieDesBiens()` dit déjà quels biens sont cochés, et c'est elle qui alimente `/api/membres`
+  **et** `enregistrerLiaisons`. Deux lectures du même geste pouvaient diverger ; il n'y en a plus
+  qu'une, et les deux représentations restent synchrones **par construction**.
+  ⚠️ **Aucun des 1400 tests ne pouvait le voir**, et c'est la leçon : `pages-ids`,
+  `contrat-front-api` et `js-navigateur-parse` lisent le HTML comme du **texte**. Aucun
+  n'*exécutait* un `querySelectorAll`. `tests/prestataires-formulaire-dom.test.js` monte un vrai
+  DOM (jsdom), exécute le vrai script de la page, et sa contre-épreuve rejoue la ligne d'avril
+  pour vérifier qu'elle ramène bien les 21 jours — sinon le test ne prouverait rien.
   ⚠️ **Le corps envoyé à `/api/membres` DOIT porter `action`.** L'endpoint la lit **avant tout
   le reste** — avant même la session — et rejette en 400 « Action inconnue » ce qu'il ne
   reconnaît pas. La création l'avait oubliée : elle échouait **entièrement** en production,
