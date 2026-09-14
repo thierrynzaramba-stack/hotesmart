@@ -180,6 +180,37 @@ test('LE TEST QUI COMPTE : un instant qui diverge se CRIE, il ne se tait pas', a
   } finally { console.warn = original }
 })
 
+test('LE TEST QUI COMPTE : un instant SANS FUSEAU est lu en UTC, pas en heure locale', async () => {
+  // ⚠ LE DEFAUT QUI A DUPLIQUE 83 MESSAGES DE COLOMIERS, LE 14 SEPTEMBRE 2026.
+  // Channex rend `inserted_at` sans suffixe (« 2026-07-22T15:50:10.405 »).
+  // `new Date()` le lit en heure LOCALE : sur une machine a Paris, deux heures
+  // d'ecart avec la meme valeur relue depuis Postgres (« …+00:00 »). La
+  // reconciliation echouait donc systematiquement, et l'import inserait un
+  // doublon — alors que les deux lignes portaient le MEME instant en base.
+  //
+  // Le defaut etait entierement dans la comparaison en memoire : invisible en
+  // relisant les donnees, invisible aussi dans mon apercu, qui normalisait le
+  // fuseau alors que le code ne le faisait pas. Un apercu qui ne calcule pas
+  // comme le code ne prevoit pas ce que le code fera.
+  const existante = ligne({ id: 'ancienne', sent_at: '2026-07-22T15:50:10.405+00:00' })
+  const sb = faux([existante])
+  const r = await recordMessage({ supabase: sb, ...entrant({ sentAt: '2026-07-22T15:50:10.405' }) })
+
+  assert.equal(r.reason, 'echo_entrant_reconcilie',
+    'l instant nu du provider est reconnu comme le meme que celui de la base')
+  assert.equal(sb.journal.inserts.length, 0, 'aucun doublon')
+})
+
+test('LE TEST QUI COMPTE : le provider livre un instant SANS AMBIGUITE — lecture du code', () => {
+  // La normalisation existe aux DEUX bouts, et c'est voulu : a la source pour
+  // que personne n'ait a deviner, dans le writer parce qu'il recoit aussi
+  // d'autres producteurs.
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib/channels/channex.js'), 'utf8')
+  assert.ok(/function enUTC/.test(src), 'channex normalise l instant')
+  assert.ok(src.includes('sentAt:        ma.inserted_at ? enUTC(ma.inserted_at) : null'),
+    'et importMessages passe par cette normalisation')
+})
+
 test('la branche entrante compare des INSTANTS, pas des chaines — lecture du code', () => {
   // ⚠ FENETRE BORNEE AU BLOC ENTRANT. La review a releve que ma tranche de
   // 900 caracteres s arretait 63 caracteres avant le bloc SORTANT, qui porte les
@@ -191,8 +222,9 @@ test('la branche entrante compare des INSTANTS, pas des chaines — lecture du c
   assert.ok(debut > 0 && fin > debut, 'les deux blocs sont reperables et distincts')
   const bloc = src.slice(debut, fin)
 
-  assert.ok(bloc.includes("new Date(row.sent_at).getTime()"),
-    'la comparaison porte sur l instant : timestamptz se serialise de plusieurs facons')
+  assert.ok(bloc.includes('instantDe(row.sent_at)') && bloc.includes('instantDe(x.sent_at)'),
+    'la comparaison passe par la normalisation : timestamptz se serialise de trois '
+    + 'facons, et celle du provider n a pas de fuseau du tout')
   assert.ok(bloc.includes(".eq('user_id', row.user_id)"), 'cloisonnement par compte')
   assert.ok(bloc.includes(".eq('booking_id', row.booking_id)"), 'et par reservation')
   assert.ok(bloc.includes(".eq('provider', row.provider)"), 'et par provider')
