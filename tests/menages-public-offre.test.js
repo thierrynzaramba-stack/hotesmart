@@ -489,21 +489,22 @@ test('refuser une offre déjà retirée : 409, aucune alerte', async () => {
 
 test('un lien SANS profil ne peut pas répondre à une offre', async () => {
   // Il ne porte aucune assignation : le laisser faire écrirait une acceptation
-  // au nom de personne.
+  // au nom de personne. ⚠ 401 depuis la fermeture du pont de convergence : le
+  // lien est invalide, pas seulement insuffisant pour ce geste.
   const etat = preparer({ profil: null })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('accepterMenage'), res)
-  assert.strictEqual(res.code, 403)
+  assert.strictEqual(res.code, 401)
   assert.strictEqual(etat.majs.length, 0)
 })
 
 test('un profil DÉSACTIVÉ non plus', async () => {
-  const etat = preparer({ profil: { id: MARIE, first_name: 'Marie', active: false } })
+  const etat = preparer({ profil: { id: MARIE, first_name: 'Marie', active: false, access_mode: 'lien' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('accepterMenage'), res)
-  assert.strictEqual(res.code, 403)
+  assert.strictEqual(res.code, 401)
   assert.strictEqual(etat.majs.length, 0)
 })
 

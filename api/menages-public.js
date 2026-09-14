@@ -19,6 +19,55 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
+// ─── QUI PORTE CE LIEN — GARDE UNIQUE DE TOUT L'ENDPOINT ────────────────────
+//
+// ⚠ LA GARDE PAR PROFIL PRIME, ELLE NE COEXISTE PLUS AVEC CELLE PAR BIEN.
+// Jusqu'ici, un jeton sans profil gardait l'ANCIEN comportement — filtrage par
+// `public_tokens.property_ids` — sous le nom de « pont de convergence ». Le pont
+// etait une porte : audit du 14 septembre 2026, le lien de Tiphaine (profil
+// INACTIF, sans `pwa_token`, « identite historique SANS ACCES ») rendait 200
+// avec 11 reservations d'Ofuro Futari, noms et prenoms des voyageurs compris.
+// La ligne `public_tokens` d'avant la convergence lui survivait, et elle suffit
+// a ouvrir le planning : le filtre par personne ne s'appliquait justement pas,
+// faute de personne.
+//
+// La regle est desormais sans exception : PAS DE PROFIL ACTIF, PAS D'ACCES.
+// Un jeton ne vaut plus par lui-meme — il ne fait que DESIGNER quelqu'un, et
+// c'est cette personne qui porte le droit. Une ligne `public_tokens` orpheline
+// n'ouvre donc plus rien, quelle que soit sa presence en base.
+//
+// ⚠ `access_mode = 'lien'` EST EXIGE, comme dans lib/cleaning/notifier-prestataire.js.
+// Un profil de type `compte` n'a pas de `pwa_token` aujourd'hui, mais la garde
+// ne doit pas dependre de cet etat de fait : un jeton pose par erreur sur un
+// profil titulaire ouvrirait sinon la PWA a un compte entier.
+//
+// ⚠ UNE PANNE COUPE EN 503, ELLE NE SE FAIT PAS PASSER POUR UN LIEN INVALIDE.
+// Le front supprime une action de sa file d'attente sur tout 4xx : rendre 401
+// sur un timeout PostgREST detruirait un « menage fait » en attente de renvoi.
+//
+// Rend { statut } a rendre tel quel, ou { profil } utilisable.
+async function profilActifDuJeton (userId, token) {
+  const { data: profil, error } = await supabase.from('profiles')
+    .select('id, first_name, active')
+    .eq('account_user_id', userId).eq('pwa_token', token)
+    .eq('access_mode', 'lien').maybeSingle()
+  if (error) {
+    console.error('[menages-public] lecture du profil echec:', error.message)
+    return { statut: 503 }
+  }
+  if (!profil || profil.active === false) return { statut: 401 }
+  return { profil }
+}
+
+// Le meme refus, ecrit une seule fois : un lien sans personne derriere lui est
+// invalide, et il le dit comme n'importe quel jeton inconnu — on n'apprend pas
+// a un porteur de lien que la ligne existe encore en base.
+function refuserPorteur (res, statut) {
+  return statut === 503
+    ? res.status(503).json({ error: 'Service temporairement indisponible' })
+    : res.status(401).json({ error: 'Token invalide' })
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -41,8 +90,24 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const { action, event_ids, booking_id, property_id, departure_date } = req.body || {}
 
-    // --- markRead : inchange ---
+    // --- markRead ---
+    // ⚠ GARDE DE PORTEUR, COMME LES AUTRES ECRITURES. Ce chemin n'en avait
+    // aucune : il se contentait de `.eq('token', token)`, donc un lien orphelin
+    // — ou desactive — pouvait encore faire taire son fil d'actualites. Le
+    // cloisonnement tenait (on ne touche que les lignes de ce jeton), mais la
+    // regle « pas de profil actif, pas d'ecriture » ne souffre pas d'exception :
+    // c'est en laissant un seul chemin de cote qu'on rouvre une porte.
     if (action === 'markRead' && event_ids?.length) {
+      const { data: pt, error: errTok } = await supabase
+        .from('public_tokens').select('user_id').eq('token', token).maybeSingle()
+      if (errTok) {
+        console.error('[menages-public] lecture du token echec:', errTok.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      if (!pt) return res.status(401).json({ error: 'Token invalide' })
+      const porteur = await profilActifDuJeton(pt.user_id, token)
+      if (porteur.statut) return refuserPorteur(res, porteur.statut)
+
       await supabase.from('menage_events').update({ read: true })
         .in('id', event_ids).eq('token', token)
       return res.json({ success: true })
@@ -124,6 +189,8 @@ module.exports = async function handler(req, res) {
         const droit = await menageDeCePorteur(userId, token, {
           propertyId: property_id, bookingId: booking_id, departureDate: departure_date })
         if (droit.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+        // Lien sans profil actif : invalide, comme partout ailleurs.
+        if (droit.refus) return refuserPorteur(res, droit.refus)
         if (droit.autorise === 'perimetre') {
           const p = await bienDansLePerimetre(userId, token, property_id)
           if (p.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -194,6 +261,8 @@ module.exports = async function handler(req, res) {
         const droit = await menageDeCePorteur(userId, token, {
           propertyId: property_id, bookingId: booking_id, departureDate: departure_date })
         if (droit.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+        // Lien sans profil actif : invalide, comme partout ailleurs.
+        if (droit.refus) return refuserPorteur(res, droit.refus)
         if (droit.autorise === 'perimetre') {
           const p = await bienDansLePerimetre(userId, token, property_id)
           if (p.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -380,52 +449,25 @@ module.exports = async function handler(req, res) {
     // `public_tokens.property_ids`, deux prestataires sur un meme bien voyaient
     // chacune TOUS les menages de l'autre — le cas qui motive tout ce chantier.
     //
-    // ⚠ PONT DE CONVERGENCE — ET IL NE DOIT PAS ETRE UNE PORTE OUVERTE.
-    // Un token sans profil correspondant (`profiles.pwa_token`) ne peut pas etre
-    // filtre par personne. La premiere version gardait alors l'ANCIEN
-    // comportement — filtrage par bien — et c'etait une fuite : l'ecran
-    // `apps/menages/prestataires.html` cree un `public_tokens` SANS profil, si
-    // bien qu'une prestataire creee la aurait vu tous les menages de Regina sur
-    // les memes biens, noms des voyageurs compris. Exactement le scenario que ce
-    // chantier existe pour empecher.
-    //
-    // La regle retenue se derive du modele, pas d'une date de bascule : un token
-    // sans profil ne voit QUE ce qui n'est assigne a PERSONNE. Un lien legacy
-    // continue donc de fonctionner tant que personne d'autre n'intervient (cas
-    // de Colomiers, dont les 14 menages sont non assignes), et se ferme de
-    // lui-meme des qu'une personne est assignee sur ces biens.
-    const { data: profilPresta, error: errProfil } = await supabase.from('profiles')
-      .select('id, first_name, active')
-      .eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
-    // ⚠ La panne COUPE plutot que d'elargir : sans cette garde, un timeout
-    // PostgREST rendrait `profilPresta` null et la prestataire verrait de nouveau
-    // les menages de tout le monde sur ses biens.
-    if (errProfil) {
-      console.error('[menages-public] lecture du profil echec:', errProfil.message)
-      return res.status(503).json({ error: 'Service temporairement indisponible' })
-    }
+    // ⚠ LE PONT DE CONVERGENCE EST FERME (14 septembre 2026). Il laissait un
+    // jeton sans profil retomber sur l'ANCIEN filtrage — par bien — pour ne voir
+    // « que ce qui n'est assigne a personne ». Deux choses l'ont condamne :
+    //   - les RESERVATIONS, elles, n'etaient filtrees par rien d'autre : le lien
+    //     orphelin de Tiphaine rendait 11 sejours d'Ofuro Futari avec les noms
+    //     des voyageurs, alors que ce profil est inactif et sans acces ;
+    //   - un repli « par bien » est precisement ce que le lot 2.2 a remplace.
+    //     Le garder en secours, c'etait garder la faille qu'on venait de fermer.
+    // Desormais : pas de profil actif, pas d'acces. Voir `profilActifDuJeton`.
+    const porteur = await profilActifDuJeton(userId, token)
+    if (porteur.statut) return refuserPorteur(res, porteur.statut)
+    const profilPresta = porteur.profil
 
-    const identifiee = !!(profilPresta && profilPresta.active !== false)
     let requete = supabase.from('menages')
       .select('booking_id, property_id, departure_date, status, provider_id, offered_to, offer_expires_at')
       .eq('user_id', userId)
       .neq('status', 'cancelled')
       .gte('departure_date', dateFrom)
       .lte('departure_date', dateTo)
-    // Identifiee : ses menages. Non identifiee : ceux de personne, et rien
-    // d'autre — `.is('provider_id', null)`.
-    // ⚠ `.in()` sur une liste VIDE n'a pas de rendu PostgREST garanti (`id=in.()`)
-    // — c'est deja documente dans lib/stats-avis.js. Le cas est atteignable : un
-    // token qui ne pointe que des biens supprimes. Sans bien, il n'y a rien a
-    // montrer, et surtout rien a demander a la base.
-    const propIdsPresta = properties.map(p => p.id)
-    if (!identifiee && !propIdsPresta.length) {
-      return res.json({
-        bookings: [], label: tokenData.label, property_ids: allowedIds,
-        visibility_days: visibilityDays, comments: [], events: [], done: [],
-        menages: null, prenom: null
-      })
-    }
     // ⚠ DEUX FAMILLES DE MENAGES POUR UNE PRESTATAIRE IDENTIFIEE :
     //   - ceux qu'elle PORTE (`provider_id`), y compris ceux qu'on est en train
     //     de proposer a quelqu'un d'autre — ils restent les siens tant que
@@ -433,9 +475,7 @@ module.exports = async function handler(req, res) {
     //   - ceux qu'on lui PROPOSE (`offered_to`), qu'elle ne porte pas encore.
     // Les confondre, c'etait soit lui retirer un menage dont elle reste
     // responsable, soit lui en attribuer un qu'elle n'a pas accepte.
-    requete = identifiee
-      ? requete.or(`provider_id.eq.${profilPresta.id},offered_to.eq.${profilPresta.id}`)
-      : requete.is('provider_id', null).is('offered_to', null).in('property_id', propIdsPresta)
+    requete = requete.or(`provider_id.eq.${profilPresta.id},offered_to.eq.${profilPresta.id}`)
     const { data: mn, error: errMen } = await requete
     // ⚠ Une liste vide par panne serait indiscernable d'« aucun menage », et la
     // prestataire conclurait qu'elle n'a rien a faire aujourd'hui.
@@ -443,7 +483,11 @@ module.exports = async function handler(req, res) {
       console.error('[menages-public] lecture des menages echec:', errMen.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
-    const menagesAssignes = identifiee ? (mn || []) : null
+    // ⚠ TOUJOURS UN TABLEAU depuis la fermeture du pont de convergence : il n'y a
+    // plus de porteur non identifie, donc plus de `null` a distinguer d'« aucun
+    // menage ». Le front garde sa garde `Array.isArray` — elle ne coute rien et
+    // protege d'une reponse d'une version anterieure encore en cache.
+    const menagesAssignes = mn || []
     const siens = new Set((mn || []).map(m =>
       `${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`))
     // ⚠ LE FILTRE S'APPLIQUE DANS LES DEUX CAS. Un seul chemin non filtre
@@ -517,14 +561,14 @@ module.exports = async function handler(req, res) {
       // Le prenom de la personne sollicitee n'est PAS renvoye a la porteuse :
       // savoir qu'une proposition est en cours lui suffit, et le nom de sa
       // collegue ne la regarde pas plus que l'organisation de l'hote.
-      menages: menagesAssignes && menagesAssignes.map(m => ({
+      menages: menagesAssignes.map(m => ({
         booking_id: m.booking_id, property_id: m.property_id,
         departure_date: m.departure_date, status: m.status,
-        role: profilPresta && m.provider_id === profilPresta.id ? 'porteur' : 'propose',
+        role: m.provider_id === profilPresta.id ? 'porteur' : 'propose',
         propose: !!m.offered_to,
         expire_le: m.offered_to ? m.offer_expires_at : null
       })),
-      prenom: profilPresta ? profilPresta.first_name : null
+      prenom: profilPresta.first_name
     })
 
   } catch (err) {
@@ -592,11 +636,16 @@ const PERIODES_PWA = ['15j', '30j', '6mois', 'toujours']
 // client qui designe une ressource ne se valide pas, elle ne s'utilise pas.
 //
 // La regle est la meme que pour la LECTURE : le menage doit lui appartenir, ou
-// n'appartenir a personne (token sans profil, lien legacy). Une panne coupe.
+// n'appartenir a personne. Une panne coupe.
+//
+// ⚠ `profilActifDuJeton` D'ABORD, ET IL REFUSE : depuis la fermeture du pont de
+// convergence, un jeton sans profil actif n'ecrit plus rien du tout. La version
+// precedente le laissait marquer « fait » tout menage assigne a personne.
 async function menageDeCePorteur (userId, token, { propertyId, bookingId, departureDate }) {
-  const { data: profil, error: errProfil } = await supabase.from('profiles')
-    .select('id, active').eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
-  if (errProfil) return { erreur: true }
+  const porteur = await profilActifDuJeton(userId, token)
+  if (porteur.statut === 503) return { erreur: true }
+  if (porteur.statut) return { refus: porteur.statut }
+  const profil = porteur.profil
 
   const { data: menage, error: errMen } = await supabase.from('menages')
     .select('provider_id, status, offered_to')
@@ -612,11 +661,9 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   // arriere). Le cloisonnement par bien reste applique dans ce cas.
   if (!menage) return { autorise: 'perimetre' }
 
-  const identifiee = !!(profil && profil.active !== false)
-
   // ⚠ CELLE QUI PORTE LE MENAGE PEUT TOUJOURS LE MARQUER FAIT, meme si une
   // proposition est en cours : il reste le sien tant que personne n'a accepte.
-  if (identifiee && menage.provider_id === profil.id) return { autorise: true }
+  if (menage.provider_id === profil.id) return { autorise: true }
 
   // ⚠ ON NE FAIT PAS UN MENAGE QU'ON N'A PAS ACCEPTE.
   // La garde testait `status === 'offered'`, en supposant que proposition
@@ -627,7 +674,7 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   // avec le seul triplet (bien, reservation, date) qu'elle lit dans sa PWA.
   // C'est desormais `offered_to` qui tranche, comme partout ailleurs.
   if (menage.offered_to) {
-    return identifiee && menage.offered_to === profil.id
+    return menage.offered_to === profil.id
       ? { autorise: false, motif: 'offre' }   // a elle, mais pas encore acceptee
       : { autorise: false }
   }
@@ -666,15 +713,13 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // ⚠ Repondre a une offre suppose d'ETRE quelqu'un. Un lien sans profil ne
   // porte aucune assignation : il n'a rien a accepter, et le laisser faire
   // ecrirait une acceptation au nom de personne.
-  const { data: profil, error: errProfil } = await supabase.from('profiles')
-    .select('id, first_name, active').eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
-  if (errProfil) {
-    console.error('[menages-public] lecture du profil echec:', errProfil.message)
-    return res.status(503).json({ error: 'Service temporairement indisponible' })
-  }
-  if (!profil || profil.active === false) {
-    return res.status(403).json({ error: 'Ce lien ne permet pas de répondre à une offre' })
-  }
+  // ⚠ 401 ET NON PLUS 403 : le lien lui-meme est invalide, pas seulement
+  // insuffisant pour ce geste. Le distinguer laissait entendre qu'un jeton sans
+  // personne reste un jeton valable — c'est exactement ce que le pont de
+  // convergence supposait.
+  const porteur = await profilActifDuJeton(userId, token)
+  if (porteur.statut) return refuserPorteur(res, porteur.statut)
+  const profil = porteur.profil
 
   const { data: menage, error: errMen } = await supabase.from('menages')
     .select('id, provider_id, status, offered_to')
@@ -969,14 +1014,18 @@ async function avisDeLaPrestataire (req, res, token) {
   if (!pt) return res.status(401).json({ error: 'Token invalide' })
   const userId = pt.user_id
 
-  // Le profil derriere ce token. Sans profil, pas d'attribution possible : on
-  // rend une vue vide plutot que d'inventer un rattachement.
-  const { data: profil } = await supabase.from('profiles')
-    .select('id, first_name, active')
-    .eq('account_user_id', userId).eq('pwa_token', token).maybeSingle()
-  if (!profil || profil.active === false) {
-    return res.status(200).json({ actif: false, ratio: null, avis: [] })
-  }
+  // Le profil derriere ce token.
+  // ⚠ 401, ET NON PLUS UN 200 « actif: false ». Rendre 200 disait au porteur
+  // « ton lien marche, mais tu n'es personne » — et surtout, c'etait la meme
+  // tolerance que le pont de convergence : elle laissait vivre une ligne
+  // `public_tokens` orpheline. Un lien sans personne est un lien invalide.
+  // ⚠ L'erreur de lecture N'ETAIT PAS LUE ICI : une panne PostgREST rendait
+  // `profil` null et se lisait « droit retire » dans la PWA, qui masquait
+  // l'onglet. `profilActifDuJeton` coupe en 503, et l'onglet reste visible en
+  // etat de panne — c'est le contrat que `initAvis` attend deja.
+  const porteur = await profilActifDuJeton(userId, token)
+  if (porteur.statut) return refuserPorteur(res, porteur.statut)
+  const profil = porteur.profil
 
   // ⚠ `self_view_reviews` coupe la vue entiere. Le defaut est `true`
   // (lib/permissions.js) : l'absence de ligne de droits ne doit pas priver la
@@ -1181,11 +1230,12 @@ async function celleQuiDeclare (token, { ecriture }) {
   if (errTok) { console.error('[menages-public] lecture du token echec:', errTok.message); return { erreur: 503 } }
   if (!pt) return { erreur: 401 }
 
-  const { data: profil, error: errProfil } = await supabase.from('profiles')
-    .select('id, first_name, active').eq('account_user_id', pt.user_id)
-    .eq('pwa_token', token).maybeSingle()
-  if (errProfil) { console.error('[menages-public] lecture du profil echec:', errProfil.message); return { erreur: 503 } }
-  if (!profil || profil.active === false) return { erreur: 403 }
+  // ⚠ 401, ET NON PLUS 403 : sans personne derriere, le lien est invalide, pas
+  // seulement sans droit. Meme regle que partout depuis la fermeture du pont de
+  // convergence — voir `profilActifDuJeton`.
+  const porteur = await profilActifDuJeton(pt.user_id, token)
+  if (porteur.statut) return { erreur: porteur.statut }
+  const profil = porteur.profil
 
   const { data: droits, error: errDroits } = await supabase.from('profile_permissions')
     .select('self_availability').eq('profile_id', profil.id).maybeSingle()

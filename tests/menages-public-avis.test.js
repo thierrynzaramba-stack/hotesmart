@@ -45,6 +45,7 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
                      erreurBiens = null,
                      ratioPeriode = null,     // ce que porte public_tokens
                      erreurToken = null,      // panne de lecture du token
+                     erreurProfil = null,     // panne de lecture du profil
                      periodesDemandees = [],
                      journal = [] } = {}) {
   const client = {
@@ -75,7 +76,7 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
             }
             return Promise.resolve({ data: out, error: null })
           }
-          if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
+          if (table === 'profiles') return Promise.resolve({ data: profil, error: erreurProfil })
           if (table === 'profile_permissions') return Promise.resolve({ data: droits, error: erreurDroits })
           const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error })
         },
@@ -298,13 +299,38 @@ test('un token inconnu est refusé', async () => {
   assert.strictEqual(res.code, 401)
 })
 
-test('un profil désactivé ne voit rien', async () => {
-  preparer({ profil: { id: PROFIL, first_name: 'Régina', active: false } })
+test('un profil désactivé est REFUSÉ, il ne reçoit plus une vue vide', async () => {
+  // ⚠ 401 ET NON PLUS 200 « actif: false ». Le 200 disait au porteur « ton lien
+  // marche, mais tu n'es personne » — la même tolérance que le pont de
+  // convergence, et c'est elle qui a laissé un lien orphelin répondre en
+  // production. Un lien sans personne est un lien invalide.
+  preparer({ profil: { id: PROFIL, first_name: 'Régina', active: false, access_mode: 'lien' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req({ detail: '1' }), res)
-  assert.strictEqual(res.body.actif, false)
-  assert.deepStrictEqual(res.body.avis, [])
+  assert.strictEqual(res.code, 401)
+  assert.deepStrictEqual(res.body.avis, undefined)
+})
+
+test('un lien SANS profil est refusé sur la vue Avis', async () => {
+  preparer({ profil: null })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 401)
+})
+
+test('PANNE de lecture du profil : 503, jamais un refus de lien', async () => {
+  // ⚠ L'ERREUR N'ÉTAIT PAS LUE SUR CE CHEMIN. Un timeout PostgREST rendait
+  // `profil` null, donc « actif: false » : la PWA masquait l'onglet Avis, et une
+  // panne passagère se lisait comme un droit retiré. Pire depuis que le refus
+  // est un 401 — le lien lui-même aurait paru mort. Une panne coupe en 503, et
+  // `initAvis` sait afficher l'onglet en état de panne.
+  preparer({ erreurProfil: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req({ detail: '1' }), res)
+  assert.strictEqual(res.code, 503)
 })
 
 test('sans detail=1, le ratio sort mais pas la liste', async () => {

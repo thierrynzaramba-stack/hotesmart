@@ -706,14 +706,34 @@ aucun chemin ne les recalcule — un engagement pris avec quelqu'un ne se rouvre
 ### Ce que chaque écran montre
 
 - **PWA** : chaque prestataire ne voit que **ses** ménages (`menages.provider_id` = le profil
-  derrière son token). Un token **sans profil** ne voit que ce qui n'est **assigné à personne**.
-  ⚠️ **Pourquoi cette règle et pas « l'ancien filtrage par bien »** : `apps/menages/prestataires.html`
-  crée un `public_tokens` **sans profil**. Garder l'ancien comportement pour ces tokens-là
-  aurait montré à une prestataire créée depuis cet écran **tous** les ménages de Régina sur les
-  mêmes biens, noms des voyageurs compris — exactement ce que ce chantier existe pour empêcher.
-  La règle se dérive du modèle, pas d'une date de bascule : un lien legacy continue de
-  fonctionner tant que personne n'est assigné sur ses biens (cas de Colomiers), et se ferme de
-  lui-même dès qu'une personne l'est.
+  derrière son token).
+
+  ⚠️ **PAS DE PROFIL ACTIF, PAS D'ACCÈS — sans exception (14 septembre 2026).**
+  `api/menages-public.js` résout le porteur par `profilActifDuJeton(userId, token)` : un jeton
+  dont aucun `profiles` **actif**, de `access_mode = 'lien'`, ne porte le `pwa_token` rend
+  **401**, quelle que soit la ligne `public_tokens` qui existe encore en base. La même réponse
+  sur **tous** les chemins : planning, vue Avis, « Mes absences », acceptation d'offre,
+  `markDone` / `markUndone`, `markRead`.
+
+  ⚠️ **Ce que cette règle remplace, et pourquoi.** Il y avait un « **pont de convergence** » :
+  un jeton sans profil retombait sur l'ancien filtrage **par bien** pour ne voir « que ce qui
+  n'est assigné à personne ». Le pont était une porte. Audit du 14 septembre : le lien de
+  **Tiphaine** — profil **inactif**, sans `pwa_token`, décrit comme une identité historique
+  *sans accès* — répondait **200 avec 11 séjours d'Ofuro Futari, prénoms et noms des voyageurs
+  compris**. Le filtre par personne ne s'appliquait pas faute de personne, et les
+  **réservations** n'étaient filtrées par rien d'autre : seule la liste `menages` sortait à
+  `null`. Sa ligne `public_tokens` d'avant la convergence lui survivait, et elle suffisait.
+
+  ⚠️ **Le prix est assumé.** Un lien créé avant la convergence cesse de fonctionner, y compris
+  sur un bien dont personne n'est assigné. Le remède est de recréer la prestataire depuis sa
+  fiche, ce qui pose un profil. Décision du product owner, 14 septembre 2026 : *la garde par
+  profil prime, elle ne coexiste pas.*
+
+  ⚠️ **Une panne coupe en 503, jamais en 401.** Le front supprime une action de sa file
+  d'attente sur tout 4xx : rendre « lien invalide » sur un timeout PostgREST détruirait un
+  « ménage fait » en attente de renvoi, et ferait passer une indisponibilité passagère pour un
+  accès révoqué. La vue Avis ignorait d'ailleurs cette erreur — elle rendait `actif: false`,
+  c'est-à-dire « droit retiré » — et c'est corrigé par la même fonction.
   ⚠️ **Dette, lot 2.5** : créer une personne se fait dans **Réglages → Équipe et droits**
   (`api/membres.js`, mode `lien`), qui pose le profil **et** le token. Le formulaire de l'app
   ménage ne crée qu'un lien de consultation — un encart le dit désormais à l'écran.
@@ -846,7 +866,9 @@ false`) ne voit jamais ces boutons** : son ménage naît `accepted`, rien ne cha
   le serveur a peut-être déjà donné à quelqu'un d'autre. Hors ligne, l'écran le dit et ne
   promet rien.
 - **Un lien sans profil ne peut pas répondre** : il ne porte aucune assignation, et le laisser
-  faire écrirait une acceptation au nom de personne.
+  faire écrirait une acceptation au nom de personne. Depuis le 14 septembre 2026 la réponse est
+  **401** et non plus 403 : le lien est *invalide*, pas seulement insuffisant pour ce geste —
+  distinguer les deux laissait entendre qu'un jeton sans personne reste un jeton valable.
 
 - **Écran hôte** : une pastille par ménage — le prénom, en pointillés quand c'est `offered`
   (un suppléant qui n'a pas répondu n'est **pas** un ménage couvert), « personne » en clair

@@ -29,7 +29,7 @@ const SNAPS = [
                 firstName: 'Bruno', lastName: 'Durand', provider: 'beds24' } }
 ]
 
-function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true },
+function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true, access_mode: 'lien' },
                      menages = null, erreurProfil = null, erreurMenages = null,
                      tokenPropIds = ['209413'], done = [], events = [] } = {}) {
   const journal = []
@@ -54,7 +54,16 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true 
               ? { user_id: U, label: 'Régina', property_ids: tokenPropIds, visibility_days: 30, ratio_periode: 'toujours' }
               : null, error: null })
           }
-          if (table === 'profiles') return Promise.resolve({ data: profil, error: erreurProfil })
+          if (table === 'profiles') {
+            // ⚠ LE DOUBLE HONORE `access_mode`. Sans cela, le `.eq('access_mode','lien')`
+            // de `profilActifDuJeton` serait indetectable : on pourrait le retirer
+            // sans qu'un test bronche, et un jeton pose par erreur sur un profil
+            // titulaire ouvrirait la PWA a un compte entier.
+            if (a.f.access_mode !== undefined && profil && profil.access_mode !== a.f.access_mode) {
+              return Promise.resolve({ data: null, error: erreurProfil })
+            }
+            return Promise.resolve({ data: profil, error: erreurProfil })
+          }
           const r = rep(); return Promise.resolve({ data: (r.data || [])[0] || null, error: r.error })
         },
         then (ok, ko) { return Promise.resolve(rep()).then(ok, ko) }
@@ -215,15 +224,22 @@ test('un ménage PROPOSÉ à elle porte son délai, et le rôle « propose »', 
   assert.strictEqual(res.body.menages[0].expire_le, '2026-09-04T16:00:00Z')
 })
 
-// ─── Le pont de convergence, assumé ────────────────────────────────────────
+// ─── Le pont de convergence est FERMÉ (14 septembre 2026) ──────────────────
+//
+// ⚠ L'INCIDENT QUE CES TESTS FERMENT, ET IL S'EST PRODUIT.
+// Le pont laissait un jeton sans profil retomber sur l'ANCIEN filtrage — par
+// bien — pour ne voir « que ce qui n'est assigné à personne ». Mais les
+// RÉSERVATIONS, elles, n'étaient filtrées par rien d'autre : en production, le
+// lien de Tiphaine (profil inactif, sans `pwa_token`, « identité historique sans
+// accès ») rendait 200 avec 11 séjours d'Ofuro Futari, prénoms et noms des
+// voyageurs compris. Sa ligne `public_tokens` d'avant la convergence lui
+// survivait, et elle suffisait.
+// La règle n'a plus d'exception : PAS DE PROFIL ACTIF, PAS D'ACCÈS.
 
-test('un token SANS profil ne voit QUE ce qui n\'est assigné à personne', async () => {
-  // ⚠ LA FUITE QUE CE TEST FERME. `apps/menages/prestataires.html` crée un
-  // `public_tokens` SANS profil : garder l'ancien filtrage par bien pour ces
-  // tokens-là aurait montré à une prestataire nouvellement créée TOUS les
-  // ménages de Régina sur les mêmes biens, noms des voyageurs compris.
-  // La règle se dérive du modèle, pas d'une date de bascule : pas de profil,
-  // donc rien de ce qui appartient à quelqu'un.
+test('un jeton SANS profil est refusé — et ne laisse fuir AUCUN séjour', async () => {
+  // ⚠ LE CAS DANGEREUX, PAS SA VERSION CONFORTABLE (REVIEW.md règle 8) : le
+  // ménage `b2` n'est à personne. C'est précisément celui que l'ancien chemin
+  // laissait passer, et avec lui le séjour de Bruno Durand.
   preparer({ profil: null, menages: [
     MENAGE('b1', REGINA, '2026-09-05'),
     { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
@@ -231,16 +247,20 @@ test('un token SANS profil ne voit QUE ce qui n\'est assigné à personne', asyn
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
-  assert.deepStrictEqual(res.body.bookings.map(b => b.id), ['b2'],
-    'le ménage de Régina ne doit pas sortir ; celui de personne, si')
-  assert.ok(!JSON.stringify(res.body).includes('Alice'), 'ni le voyageur de Régina')
-  assert.strictEqual(res.body.menages, null, 'et aucun état d\'assignation n\'est affiché')
+  assert.strictEqual(res.code, 401)
+  const corps = JSON.stringify(res.body)
+  assert.ok(!corps.includes('Alice') && !corps.includes('Bruno'),
+    'aucun nom de voyageur ne sort d\'un lien sans personne')
+  assert.ok(!corps.includes('b1') && !corps.includes('b2'),
+    'ni aucune réservation')
 })
 
-test('un lien legacy sur un bien SANS assignation continue de fonctionner', async () => {
-  // Contre-épreuve : fermer la fuite ne doit pas vider l'écran de quelqu'un qui
-  // s'en sert tous les jours. Colomiers est dans ce cas — 14 ménages, personne
-  // d'assigné.
+test('un lien legacy SANS profil ne fonctionne plus, même sur un bien sans assignation', async () => {
+  // ⚠ CE TEST ACTE UNE DÉCISION, il ne constate pas un effet de bord. Le pont
+  // servait ce cas — un bien dont personne n'est assigné — et c'est lui qu'on
+  // ferme : un lien qui ne désigne personne n'ouvre plus rien. Le prix est
+  // connu et assumé (product owner, 14 septembre 2026) ; le remède est de
+  // recréer la prestataire depuis sa fiche, ce qui pose un profil.
   preparer({ profil: null, menages: [
     { ...MENAGE('b1', null, '2026-09-05'), status: 'unassigned' },
     { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
@@ -248,18 +268,32 @@ test('un lien legacy sur un bien SANS assignation continue de fonctionner', asyn
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
-  assert.strictEqual(res.body.bookings.length, 2)
+  assert.strictEqual(res.code, 401)
 })
 
-test('un profil DÉSACTIVÉ retombe sur la même règle, pas sur l\'ancienne', async () => {
-  // Un profil désactivé ne peut pas porter d'assignation : son token ne doit
-  // pas pour autant redevenir une clé passe-partout.
-  preparer({ profil: { id: REGINA, first_name: 'Régina', active: false },
+test('un profil DÉSACTIVÉ est refusé comme un profil absent', async () => {
+  // C'est l'état exact de Tiphaine et des deux profils de test en production :
+  // `active = false`. Un profil désactivé ne porte aucune assignation — son
+  // jeton ne doit pas pour autant redevenir une clé passe-partout.
+  preparer({ profil: { id: REGINA, first_name: 'Régina', active: false, access_mode: 'lien' },
              menages: [MENAGE('b1', REGINA, '2026-09-05')] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
-  assert.deepStrictEqual(res.body.bookings, [], 'rien qui appartienne à quelqu\'un')
+  assert.strictEqual(res.code, 401)
+  assert.ok(!JSON.stringify(res.body).includes('Alice'))
+})
+
+test('un profil de type `compte` portant un jeton n\'ouvre PAS la PWA', async () => {
+  // Défense en profondeur : aucun profil `compte` n'a de `pwa_token` aujourd'hui,
+  // mais la garde ne doit pas dépendre de cet état de fait — un jeton posé par
+  // erreur sur un titulaire ouvrirait sinon la PWA à un compte entier.
+  preparer({ profil: { id: REGINA, first_name: 'Régina', active: true, access_mode: 'compte' },
+             menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 401)
 })
 
 // ─── Les pannes coupent, elles n'élargissent pas ───────────────────────────
@@ -354,10 +388,9 @@ test('les notes de l\'hôte passent, elles ne désignent aucune réservation', a
   assert.deepStrictEqual(res.body.events.map(e => e.id), ['n1'])
 })
 
-test('un lien SANS profil ne voit pas un ménage SOUS PROPOSITION', async () => {
-  // ⚠ La garde `.is('offered_to', null)` du chemin legacy n'était couverte par
-  // rien : un ménage proposé à quelqu'un n'est pas « à personne », et le laisser
-  // voir par un lien anonyme rouvrirait la fuite que ce chemin ferme.
+test('un lien SANS profil ne voit pas davantage un ménage SOUS PROPOSITION', async () => {
+  // Le chemin legacy gardait ici une garde `.is('offered_to', null)` : elle
+  // n'existe plus, parce que le chemin n'existe plus. Le refus est en amont.
   preparer({ profil: null, menages: [
     { ...MENAGE('b1', null, '2026-09-05'), status: 'offered', offered_to: NOUVELLE,
       offer_expires_at: '2026-09-04T16:00:00Z' },
@@ -366,8 +399,7 @@ test('un lien SANS profil ne voit pas un ménage SOUS PROPOSITION', async () => 
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
-  assert.deepStrictEqual(res.body.bookings.map(b => b.id), ['b2'],
-    'seul le ménage qui n\'est ni porté ni proposé reste visible')
+  assert.strictEqual(res.code, 401)
 })
 
 test('le `.or()` ne ramène QUE ses deux colonnes', async () => {

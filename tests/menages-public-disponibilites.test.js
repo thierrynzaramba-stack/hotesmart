@@ -148,18 +148,22 @@ test('un token inconnu : 401, aucune écriture', async () => {
 test('un lien SANS PROFIL ne peut pas mettre quelqu\'un en congé', async () => {
   // ⚠ Un lien de consultation ne désigne personne : il n'y a pas de calendrier
   // dont ce serait celui-là.
+  // ⚠ 401 ET NON 403 depuis la fermeture du pont de convergence : le lien est
+  // INVALIDE, pas seulement sans droit. Un 403 disait « ton lien marche, mais
+  // pas pour ça » — et c'est cette tolérance qui a laissé vivre en production
+  // une ligne `public_tokens` orpheline servant 11 séjours.
   const { handler, etat } = preparer({ profil: null })
   const res = reponse()
   await handler(ecrire({ date: DEMAIN }), res)
-  assert.strictEqual(res.code, 403)
+  assert.strictEqual(res.code, 401)
   assert.strictEqual(etat.ecritures.length, 0)
 })
 
 test('un profil DÉSACTIVÉ ne déclare plus rien', async () => {
-  const { handler, etat } = preparer({ profil: { id: MARIE, active: false } })
+  const { handler, etat } = preparer({ profil: { id: MARIE, active: false, access_mode: 'lien' } })
   const res = reponse()
   await handler(ecrire({ date: DEMAIN }), res)
-  assert.strictEqual(res.code, 403)
+  assert.strictEqual(res.code, 401)
   assert.strictEqual(etat.ecritures.length, 0)
 })
 

@@ -107,14 +107,37 @@ test('son propre ménage passe', async () => {
   assert.strictEqual(etat.ecritures.length, 1)
 })
 
-test('un ménage qui n\'est à personne passe aussi', async () => {
-  // Un lien legacy sur un bien sans assignation doit continuer de fonctionner.
-  const etat = preparer({ profil: null, menage: { provider_id: null, status: 'unassigned' } })
+test('un ménage qui n\'est à personne passe aussi — le lien ayant bien une personne', async () => {
+  // Personne n'est assigné sur ce ménage : la prestataire identifiée du compte
+  // peut le marquer fait. C'est le rattrapage que la PWA permet sur 14 jours.
+  const etat = preparer({ menage: { provider_id: null, status: 'unassigned' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('markDone'), res)
   assert.notStrictEqual(res.code, 403)
   assert.strictEqual(etat.ecritures.length, 1)
+})
+
+test('un lien SANS profil n\'écrit plus rien, même sur un ménage à personne', async () => {
+  // ⚠ LE CAS DANGEREUX (REVIEW.md règle 8) : c'est EXACTEMENT celui que le pont
+  // de convergence laissait passer — un ménage assigné à personne, marqué fait
+  // par un lien qui ne désigne personne. Fermé le 14 septembre 2026.
+  const etat = preparer({ profil: null, menage: { provider_id: null, status: 'unassigned' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markDone'), res)
+  assert.strictEqual(res.code, 401)
+  assert.strictEqual(etat.ecritures.length, 0)
+})
+
+test('un profil DÉSACTIVÉ n\'écrit plus rien non plus', async () => {
+  const etat = preparer({ profil: { id: MARIE, active: false, access_mode: 'lien' },
+                          menage: { provider_id: null, status: 'unassigned' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('markDone'), res)
+  assert.strictEqual(res.code, 401)
+  assert.strictEqual(etat.ecritures.length, 0)
 })
 
 // ─── Le repli quand aucun ménage n'existe encore ───────────────────────────
