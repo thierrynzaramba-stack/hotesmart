@@ -17,39 +17,66 @@
 // on pourrait le casser sans qu'un test bronche. Deux formes seulement sont
 // émises par `bornerParDate` ; toute autre lève, et c'est le but.
 
-// `coalesce(stay_end, received_at)` — la date de rattachement d'un avis.
-// ⚠ `stay_end` d'abord : un ménage précède le séjour, l'avis peut tomber des
-// semaines après. Même règle que `dateDeRattachement` du lib.
-function dateDeRattachement (ligne) {
-  return ligne.stay_end || ligne.received_at || null
-}
+// ⚠ LES DEUX COLONNES N'ONT PAS LE MEME TYPE, ET CE DOUBLE DOIT LE SAVOIR.
+// `stay_end` est un `date`, `received_at` un `timestamptz`. Une premiere version
+// de ce fichier tronquait les DEUX a `slice(0,10)` avant de comparer : elle
+// reproduisait la semantique de `dansLaPeriode` (date pure), pas celle de
+// PostgREST. Consequence, relevee en review : le compteur excluait un avis recu
+// le dernier jour a 18 h — `received_at <= '2026-08-31'` vaut
+// `<= 2026-08-31 00:00:00` — pendant que la liste l'incluait, et AUCUN test ne
+// pouvait le voir. Un double plus indulgent que la base est un faux vert, et
+// c'est precisement ce que ce fichier existe pour empecher.
+//
+// On modelise donc chaque branche avec son type : `stay_end` en jour,
+// `received_at` en INSTANT (UTC, comme Supabase le rend).
+const JOUR = /^(\d{4})-(\d{2})-(\d{2})$/
+const instantDe = v => Date.parse(JOUR.test(String(v)) ? String(v) + 'T00:00:00Z' : String(v))
 
 // Les deux formes que `bornerParDate` produit, et elles seules.
-const BORNE = /^and\(stay_end\.not\.is\.null,stay_end\.(lte|gte)\.([^)]+)\),and\(stay_end\.is\.null,received_at\.\1\.\2\)$/
+const BORNE_HAUTE = /^and\(stay_end\.not\.is\.null,stay_end\.lte\.([^)]+)\),and\(stay_end\.is\.null,received_at\.lt\.([^)]+)\)$/
+const BORNE_BASSE = /^and\(stay_end\.not\.is\.null,stay_end\.gte\.([^)]+)\),and\(stay_end\.is\.null,received_at\.gte\.([^)]+)\)$/
 const A_UNE_DATE = 'stay_end.not.is.null,received_at.not.is.null'
 
 function evaluerOr (ligne, expression) {
-  const borne = BORNE.exec(String(expression))
-  if (borne) {
-    const d = dateDeRattachement(ligne)
-    if (!d) return false
-    const v = String(d).slice(0, 10)
-    return borne[1] === 'lte' ? v <= borne[2] : v >= borne[2]
+  const e = String(expression)
+
+  const haute = BORNE_HAUTE.exec(e)
+  if (haute) {
+    // La branche suivie depend de la ligne, exactement comme le `or` SQL.
+    if (ligne.stay_end) return String(ligne.stay_end).slice(0, 10) <= haute[1]
+    if (!ligne.received_at) return false
+    return instantDe(ligne.received_at) < instantDe(haute[2])   // `lt` lendemain
   }
-  // ⚠ Un avis SANS aucune date n'est dans aucune période, même non bornée :
+
+  const basse = BORNE_BASSE.exec(e)
+  if (basse) {
+    if (ligne.stay_end) return String(ligne.stay_end).slice(0, 10) >= basse[1]
+    if (!ligne.received_at) return false
+    return instantDe(ligne.received_at) >= instantDe(basse[2])
+  }
+
+  // ⚠ Un avis SANS aucune date n'est dans aucune periode, meme non bornee :
   // `dansLaPeriode` rend `false` quand la date de rattachement est nulle.
-  if (String(expression) === A_UNE_DATE) return dateDeRattachement(ligne) != null
-  throw new Error('faux-postgrest : expression or() non modélisée -> ' + expression)
+  if (e === A_UNE_DATE) return !!(ligne.stay_end || ligne.received_at)
+
+  throw new Error('faux-postgrest : expression or() non modelisee -> ' + e)
 }
 
 // L'embed `menage_events!inner(token)` : jointure INTERNE.
 // ⚠ Un avis sans ménage rattaché SORT du lot — c'est ce que `!inner` veut dire,
 // et c'est ce qui rend la voie 1 disjointe des avis attribués par période seule.
+// ⚠ `user_id` EST HONORE LUI AUSSI. C'est la defense en profondeur de la voie 1 :
+// un jeton n'a aucune unicite garantie entre comptes. Un double qui ignorerait ce
+// filtre le rendrait supprimable sans qu'un test bronche.
 function passeEmbed (ligne, filtres, evenements) {
-  const attendu = filtres['menage_events.token']
-  if (attendu === undefined) return true
+  const jeton = filtres['menage_events.token']
+  const compte = filtres['menage_events.user_id']
+  if (jeton === undefined && compte === undefined) return true
   const ev = (evenements || []).find(e => e.id === ligne.menage_event_id)
-  return !!ev && ev.token === attendu
+  if (!ev) return false                       // `!inner` : pas de menage, pas de ligne
+  if (jeton !== undefined && ev.token !== jeton) return false
+  if (compte !== undefined && ev.user_id !== compte) return false
+  return true
 }
 
-module.exports = { evaluerOr, passeEmbed, dateDeRattachement }
+module.exports = { evaluerOr, passeEmbed }

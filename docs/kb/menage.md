@@ -1107,6 +1107,21 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
   remarques ; un chiffre faux dans le sens flatteur reste un chiffre faux.
   **(b)** Deux périodes qui se chevauchent sur le **même bien** compteraient deux fois les
   mêmes avis : les intervalles sont **fusionnés par bien** avant tout comptage.
+- ⚠️ **LE JOUR DE BORD : `stay_end` est un `date`, `received_at` un `timestamptz`.**
+  `received_at <= '2026-08-31'` vaut `<= 2026-08-31 00:00:00` : un avis **reçu ce jour-là à
+  18 h était exclu du compteur**, pendant que `dansLaPeriode` — qui alimente la **liste** —
+  tronque à `slice(0,10)` et l'incluait. Les deux se contredisaient exactement sur le jour de
+  bord, et comme 136 avis sur 168 n'ont pas de `stay_end`, c'est la branche dominante. La borne
+  haute passe donc par `received_at.lt.<lendemain>`, jamais `lte.<fin>` ; la borne basse, elle,
+  est déjà inclusive (`>= debut` vaut `>= debut 00:00:00`). Les bornes de `prestataire_periodes`
+  sont inclusives des deux côtés (migration du 3 septembre).
+- ⚠️ **Le coût : une voie = QUATRE requêtes** (un comptage par verdict), et l'endpoint en lance
+  jusqu'à deux séries. Une voie par bien donnait **88 requêtes** par chargement de PWA pour un
+  hôte à cinq biens — sur un endpoint ouvert sans session. Les intervalles qui partagent les
+  **mêmes bornes** sont donc regroupés en un seul `.in('property_id_ref', …)` : même sémantique,
+  moins d'allers-retours. Mesuré : Régina passe de 5 voies à 3, Tiphaine de 2 à 1, résultats
+  identiques. La liste de références est tronçonnée à 100, pour la même raison d'URL que
+  `MAX_IDS` — l'oublier aurait recréé un cran plus loin le défaut qu'on venait de fermer.
 - ⚠️ **La voie « ménage précis » a besoin d'une relation DÉCLARÉE.** PostgREST n'expose un embed
   que si une clé étrangère existe : c'est l'objet de
   `migrations/2026-09-14-ota-reviews-menage-event-fk.sql`

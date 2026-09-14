@@ -37,7 +37,12 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         FAUX.passeEmbed(l, appel.filtres, (fauxClient.attribution || {}).menage_events)
       const retenir = (l) =>
         Object.entries(appel.filtres).every(([c, v]) =>
-          c === 'menage_events.token' ? true
+          // ⚠ Les colonnes de l'EMBED ne sont pas des colonnes d'`ota_reviews` :
+          // elles sont traitees par `passeEmbed`. Les comparer ici les rendait
+          // toutes fausses (`l['menage_events.user_id']` n'existe pas), et le
+          // filtre n'aurait plus rien retenu — un test rouge pour la mauvaise
+          // raison, ce qui est aussi trompeur qu'un test vert pour la mauvaise.
+          c.startsWith('menage_events.') ? true
           : c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
         passeEmbed(l) &&
         (!appel.gte || String(l[appel.gte.colonne] || '') >= String(appel.gte.valeur)) &&
@@ -416,5 +421,121 @@ test('ratio : un avis SANS aucune date n\'entre dans aucune période, même non 
                     ai_clean_verdict: 'positif' }]),
       { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
     assert.strictEqual(r.total, 0)
+  } finally { fauxClient.attribution = null }
+})
+
+// ─── Le jour de bord, où le compteur et la liste se contredisaient ─────────
+
+test('ratio : un avis reçu le DERNIER jour de la période y est compté', async () => {
+  // ⚠ CONSTAT DE REVIEW, ET LE DOUBLE LE CACHAIT.
+  // `received_at` est un `timestamptz` ; `fin` une date nue. `received_at <=
+  // '2026-08-31'` vaut `<= 2026-08-31 00:00:00` : un avis reçu ce jour-là à 18 h
+  // était EXCLU du compteur, pendant que `dansLaPeriode` — qui alimente la
+  // LISTE — tronque à `slice(0,10)` et l'INCLUT. Les deux se contredisaient
+  // exactement sur le jour de bord, et comme 136 avis sur 168 n'ont pas de
+  // `stay_end`, c'est la branche dominante.
+  // La première version de `tests/faux-postgrest.js` tronquait les deux colonnes
+  // avant de comparer : elle reproduisait la sémantique de `dansLaPeriode`, pas
+  // celle de PostgREST, donc ce test n'aurait pas pu échouer. Un double plus
+  // indulgent que la base est un faux vert.
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL',
+                             debut: null, fin: '2026-08-31' }],
+    menage_events: []
+  }
+  try {
+    const r = await ratioProprete(fauxClient([
+      // Pas de séjour résolu : c'est `received_at` qui date l'avis.
+      L({ id: 'bord', property_id_ref: 'COL', stay_end: null,
+          received_at: '2026-08-31T18:30:00Z', ai_clean_verdict: 'remarque' }),
+      // Le lendemain, lui, est bien DEHORS : sans cette contre-épreuve, un
+      // correctif trop large passerait aussi.
+      L({ id: 'apres', property_id_ref: 'COL', stay_end: null,
+          received_at: '2026-09-01T00:00:00Z', ai_clean_verdict: 'positif' })
+    ]), { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 1, 'le 31 août à 18 h est DANS une période qui finit le 31 août')
+    assert.strictEqual(r.remarque, 1)
+    assert.strictEqual(r.positif, 0, 'le 1er septembre reste dehors')
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : la borne BASSE inclut bien tout le premier jour', async () => {
+  // Contre-épreuve de la précédente : `>= debut` vaut `>= debut 00:00:00`, donc
+  // la journée entière. Corriger la borne haute ne doit pas déplacer celle-ci.
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL',
+                             debut: '2026-08-01', fin: null }],
+    menage_events: []
+  }
+  try {
+    const r = await ratioProprete(fauxClient([
+      L({ id: 'premier', property_id_ref: 'COL', stay_end: null,
+          received_at: '2026-08-01T00:00:01Z', ai_clean_verdict: 'positif' }),
+      L({ id: 'veille', property_id_ref: 'COL', stay_end: null,
+          received_at: '2026-07-31T23:59:59Z', ai_clean_verdict: 'remarque' })
+    ]), { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 1)
+    assert.strictEqual(r.positif, 1)
+    assert.strictEqual(r.remarque, 0, 'la veille reste dehors')
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : la voie 1 reste cloisonnée par COMPTE, pas seulement par jeton', async () => {
+  // ⚠ DEFENSE EN PROFONDEUR, retiree par megarde en passant a l'embed puis
+  // remise (constat de review). Un jeton n'a AUCUNE unicite garantie entre
+  // comptes : deux hotes d'un meme property manager peuvent porter le meme.
+  // Sans `menage_events.user_id`, seul `ota_reviews.user_id` contraignait.
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: 'jeton-partage' }],
+    prestataire_periodes: [],
+    menage_events: [{ id: 'e1', token: 'jeton-partage', user_id: 'u1' },
+                    { id: 'e2', token: 'jeton-partage', user_id: 'AUTRE-COMPTE' }]
+  }
+  try {
+    const r = await ratioProprete(fauxClient([
+      L({ id: 'sien', menage_event_id: 'e1', ai_clean_verdict: 'positif' }),
+      L({ id: 'autre', menage_event_id: 'e2', ai_clean_verdict: 'remarque' })
+    ]), { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 1, 'le menage de l\'autre compte ne compte pas')
+    assert.strictEqual(r.remarque, 0, 'et surtout pas sa remarque')
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : deux biens aux MÊMES bornes tiennent en une seule voie', async () => {
+  // ⚠ Chaque voie coûte QUATRE requêtes (une par verdict), et l'endpoint en
+  // lance jusqu'à deux séries. Une voie par bien donnait 88 requêtes par
+  // chargement pour un hôte à cinq biens — sur un endpoint ouvert sans session.
+  // Le regroupement ne change PAS le résultat, seulement la forme de la requête :
+  // ce test vérifie les deux à la fois.
+  const { filtresAttribution } = require('../lib/attribution-prestataire')
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [
+      { user_id: 'u1', provider_id: 'p1', property_id_ref: 'A', debut: null, fin: null },
+      { user_id: 'u1', provider_id: 'p1', property_id_ref: 'B', debut: null, fin: null },
+      // Bornes DIFFÉRENTES : celui-là reste une voie à part, et c'est voulu.
+      { user_id: 'u1', provider_id: 'p1', property_id_ref: 'C', debut: null, fin: '2026-08-31' }
+    ],
+    menage_events: []
+  }
+  try {
+    const f = await filtresAttribution(fauxClient([]), { userId: 'u1', prestataireId: 'p1' })
+    assert.strictEqual(f.voies.length, 2,
+      'A et B partagent leurs bornes — une seule voie ; C en a d\'autres — la sienne')
+
+    const r = await ratioProprete(fauxClient([
+      L({ id: 'a', property_id_ref: 'A', stay_end: '2026-07-01', ai_clean_verdict: 'positif' }),
+      L({ id: 'b', property_id_ref: 'B', stay_end: '2026-07-02', ai_clean_verdict: 'positif' }),
+      L({ id: 'c', property_id_ref: 'C', stay_end: '2026-07-03', ai_clean_verdict: 'remarque' }),
+      // Hors des bornes de C : ne doit pas être compté.
+      L({ id: 'c2', property_id_ref: 'C', stay_end: '2026-09-15', ai_clean_verdict: 'remarque' }),
+      // Un bien qui n'est à personne.
+      L({ id: 'z', property_id_ref: 'AILLEURS', ai_clean_verdict: 'positif' })
+    ]), { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 3, 'A, B et le C dans les bornes — rien d\'autre')
+    assert.strictEqual(r.positif, 2)
+    assert.strictEqual(r.remarque, 1)
   } finally { fauxClient.attribution = null }
 })

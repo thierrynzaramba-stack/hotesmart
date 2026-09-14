@@ -1128,7 +1128,12 @@ async function avisDeLaPrestataire (req, res, token) {
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
     if (att.ids.length) {
-      listeTronquee = att.tronque === true || att.ids.length > MAX_IDS
+      // ⚠ `att.tronque` SEUL. La seconde branche — `att.ids.length > MAX_IDS` —
+      // ne pouvait jamais etre vraie : `avisDuPrestataire` rend deja
+      // `toutes.slice(0, MAX_IDS)`. Une condition morte donne l'illusion d'une
+      // double garde et survit aux relectures ; celle-ci masquait que le
+      // drapeau n'a qu'une source.
+      listeTronquee = att.tronque === true
       // ⚠ La liste suit la periode CHOISIE, pas l'objectif : un compteur qui
       // annonce 30 jours au-dessus d'une liste qui en montre 15 est un ecran qui
       // se contredit.
