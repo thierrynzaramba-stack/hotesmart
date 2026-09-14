@@ -25,7 +25,7 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
-const { noterCleMigree, attendreFenetreDeCache } = require('../lib/cles-migrees')
+const { noterCleMigree, retirerCleMigree, attendreFenetreDeCache } = require('../lib/cles-migrees')
 const { rekeyerJson } = require('./rekeyer-json-config')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -77,7 +77,21 @@ const RAISON_SANS_ATTENTE = (() => {
   const brut = process.argv.find(a => a.startsWith('--sans-attente'))
   if (!brut) return false
   const raison = brut.includes('=') ? brut.slice(brut.indexOf('=') + 1).trim() : ''
-  return raison || true          // `true` = forme nue -> refus explicite plus bas
+  // ⚠ LE REFUS TOMBE ICI, AU PARSING — CORRECTIF DE REVIEW.
+  // Il etait leve par `attendreFenetreDeCache`, donc APRES la pause et APRES
+  // l'enregistrement de la cle migree : une garde posee pour empecher un geste
+  // par reflexe s'executait apres deux ecritures, dont l'une laisse un bien
+  // mort-vivant si on s'arrete la. Un refus d'argument se prononce avant tout
+  // appel reseau.
+  if (!raison) {
+    console.error('REFUS : --sans-attente exige une raison. Utiliser --sans-attente="<raison>".')
+    console.error('  Ce drapeau ne vaut QUE si le cron vient d\'etre redeploye : un demarrage a')
+    console.error('  froid part avec un cache vide, donc il relira la table immediatement.')
+    console.error('  Si une instance CHAUDE tourne encore, ses ecritures repartiront sous')
+    console.error('  l\'ANCIENNE cle et rapatrieront ce que ce script est en train de deplacer.')
+    process.exit(1)
+  }
+  return raison
 })()
 
 async function main () {
@@ -130,26 +144,64 @@ async function main () {
   // 106 des 786 sejours de La bulle etaient repartis sous `209413` dans les
   // minutes suivant un transfert pourtant verifie a 0 ligne restante.
   // Le transfert et cet enregistrement sont UN SEUL geste.
-  const { data: src } = await supabase.from('properties')
+  // ⚠ DEPUIS QUE LA CLE EST ENREGISTREE AVANT LE TRANSFERT, SON ECHEC ARRETE
+  // TOUT — CORRECTIF DE REVIEW. Le `catch` d'origine avait ete ecrit pour
+  // l'ordre ANCIEN : il journalisait « Le transfert est fait » (desormais faux),
+  // posait un code de sortie et CONTINUAIT. Le script attendait alors quinze
+  // minutes, affichait « ✓ fenetre ecoulee, le cron connait la cle migree » —
+  // un mensonge — puis deplacait les lignes SANS aucune garde enregistree.
+  // C'est le 10 septembre a l'identique, avec en prime un compte a rebours
+  // rassurant. L'enregistrement est la CONDITION du transfert : il leve.
+  //
+  // ⚠ ET L'ERREUR DU SELECT EST LUE. Sans `error`, une lecture en echec rendait
+  // `src = null`, le bloc entier etait saute SANS UN MOT, et le transfert
+  // partait non protege — en silence total. La panne qui produit ce cas est
+  // exactement celle que ce lot traite : une passerelle saturee.
+  const { data: src, error: eSrc } = await supabase.from('properties')
     .select('user_id, provider, provider_property_id').eq('id', C.source).maybeSingle()
-  if (src && src.provider_property_id) {
+  if (eSrc) throw new Error(`lecture de la fiche source : ${eSrc.message}`)
+  if (!src) throw new Error(`fiche source ${C.source} introuvable — transfert impossible`)
+  if (!src.provider_property_id) {
+    throw new Error(`la fiche source n'a pas de provider_property_id : rien a enregistrer `
+      + `comme migre, donc rien ne protegerait le transfert. Refus.`)
+  }
+
+  await noterCleMigree(supabase, {
+    userId: src.user_id,
+    provider: src.provider,
+    propId: src.provider_property_id,
+    cibleFiche: C.cible
+  })
+  console.log(`\n✓ cle ${src.provider} ${src.provider_property_id} enregistree comme MIGREE`)
+  console.log('   le cron ne la materialisera plus, ne la synchronisera plus,')
+  console.log('   et n\'enverra plus de message depuis cette chaine.')
+
+  // ⚠ TOUT ARRET ENTRE ICI ET LE TRANSFERT LAISSE UN BIEN MORT-VIVANT : marque
+  // migre, donc ignore par la synchro, les messages, les codes et les avis — et
+  // pourtant pas transfere. Invisible, sans alerte. On annule donc
+  // l'enregistrement sur TOUS les chemins de sortie, y compris un Ctrl-C
+  // pendant le decompte de quinze minutes, qui est precisement le moment ou un
+  // operateur croit le script fige.
+  const annulerEnregistrement = async (motif) => {
     try {
-      await noterCleMigree(supabase, {
-        userId: src.user_id,
-        provider: src.provider,
-        propId: src.provider_property_id,
-        cibleFiche: C.cible
+      await retirerCleMigree(supabase, {
+        userId: src.user_id, provider: src.provider, propId: src.provider_property_id
       })
-      console.log(`\n✓ cle ${src.provider} ${src.provider_property_id} enregistree comme MIGREE`)
-      console.log('   le cron ne la materialisera plus, ne la synchronisera plus,')
-      console.log('   et n\'enverra plus de message depuis cette chaine.')
+      console.error(`\n✓ enregistrement de la cle migree ANNULE (${motif})`)
+      console.error('   le bien redevient synchronise : il n\'est ni transfere ni mort-vivant.')
     } catch (e) {
-      console.error(`\n⚠ ENREGISTREMENT DE LA CLE MIGREE ECHOUE : ${e.message}`)
-      console.error('   Le transfert est fait, mais le cron va rapatrier les donnees.')
-      console.error('   Passer migrations/2026-09-10-cles-provider-migrees.sql, puis relancer.')
-      process.exitCode = 1
+      console.error(`\n⚠⚠ ANNULATION DE LA CLE MIGREE ECHOUEE : ${e.message}`)
+      console.error(`   ETAT A REPARER A LA MAIN : la cle ${src.provider_property_id} est`)
+      console.error('   enregistree comme migree alors que RIEN n\'a ete transfere. Le bien')
+      console.error('   est invisible du cron. Supprimer la ligne dans provider_keys_migrated.')
     }
   }
+  const surInterruption = () => {
+    console.error('\n\n⚠ INTERRUPTION pendant l\'attente — rien n\'a ete transfere.')
+    annulerEnregistrement('interruption').finally(() => process.exit(130))
+  }
+  process.on('SIGINT', surInterruption)
+  process.on('SIGTERM', surInterruption)
 
   await attendreFenetreDeCache({ sauter: RAISON_SANS_ATTENTE })
 
@@ -163,6 +215,10 @@ async function main () {
     await supabase.from('properties')
       .update({ automation_paused: false, paused_reason: null }).eq('id', C.source)
     console.error('pause rendue sur la source (aucune donnee deplacee)')
+    // ⚠ ET L'ENREGISTREMENT AUSSI. Rendre la pause sans annuler la cle laissait
+    // le bien « actif » a l'ecran alors que TOUT le cron l'ecarte — le pire des
+    // deux etats, puisqu'il ne se voit pas.
+    await annulerEnregistrement('transfert refuse')
     process.exitCode = 1
     return
   }

@@ -369,10 +369,22 @@ test('LE TEST QUI COMPTE : TOUTE fonction de la boucle par bien est gardee — l
 
 test('LE TEST QUI COMPTE : la garde des messages precede le kill switch, donc rien ne peut la contourner', () => {
   // Si elle venait apres, un bien migre mais NON en pause enverrait quand meme.
+  // ⚠ CETTE ASSERTION ETAIT DEVENUE TOUJOURS VRAIE, ET C'EST LE COMMIT DU
+  // 14 SEPTEMBRE QUI L'A VIDEE. Elle comparait `indexOf('estCleMigree')` a
+  // `indexOf('isAutomationPaused')` ; la fonction n'utilise plus `estCleMigree`
+  // (elle appelle `motifNonSyncPourBien`), donc le premier valait -1 et
+  // « -1 < 1393 » passait quoi qu'il arrive. Contre-epreuve de la review :
+  // garde DEPLACEE apres le kill switch -> suite verte.
+  // On cherche donc la forme REELLEMENT posee, et on exige que les DEUX
+  // positions existent avant de les comparer.
   const src = lire('lib/cron-messages.js')
   const i = src.indexOf('async function processMessageTemplates')
   const bloc = src.slice(i, i + 2200)
-  assert.ok(bloc.indexOf('estCleMigree') < bloc.indexOf('isAutomationPaused'),
+  const posGarde = bloc.indexOf('await motifNonSyncPourBien(')
+  const posPause = bloc.indexOf('isAutomationPaused')
+  assert.ok(posGarde > 0, 'la garde est bien dans la fonction')
+  assert.ok(posPause > 0, 'et le kill switch aussi — sinon la comparaison ne compare rien')
+  assert.ok(posGarde < posPause,
     'la garde de cle migree est la premiere sortie de la fonction')
 })
 

@@ -38,7 +38,7 @@ require.cache[cheminNotify] = {
   }
 }
 
-const { motifNonSyncPourBien, concerneLeProvider, statistiques, _vider } =
+const { motifNonSyncPourBien, concerneLeProvider, statistiques, _vider, _viderCompteurs } =
   require('../lib/cles-migrees')
 
 // Faux client qui APPLIQUE les filtres, et qui peut tomber en panne a la demande.
@@ -113,20 +113,34 @@ test('LE TEST QUI COMPTE : les echecs sont COMPTES, et le compte repart au succe
   // produit dans ce creneau », jamais « combien de fois ». Au premier incident
   // reel, c est exactement ce qu on n a pas pu etablir — et sans ce compte, on
   // ne saura pas si la portee reduite et le cache long ont regle le probleme.
-  _vider()
+  // ⚠ MA PREMIERE VERSION GRAVAIT LE DEFAUT COMME LA SPECIFICATION : trois
+  // echecs sur hote-1/2/3, un succes sur hote-4, et j'exigeais que le compteur
+  // reparte a zero. Autrement dit j'affirmais que le succes d'un hote efface les
+  // echecs d'un autre — ce que la review a releve comme un vrai defaut. Le
+  // compteur est desormais PAR COMPTE, comme l'incident qu'il alimente.
+  _vider(); _viderCompteurs()
+  const CLE = 'hote-1|beds24'
   const avant = statistiques().echecs
-  for (const compte of ['hote-1', 'hote-2', 'hote-3']) {
-    await motifNonSyncPourBien(faux({ error: { message: 'Gateway Timeout' } }), compte, BIEN_BEDS24_LIVE, 'beds24')
+  for (let i = 0; i < 3; i++) {
+    await motifNonSyncPourBien(faux({ error: { message: 'Gateway Timeout' } }), 'hote-1', BIEN_BEDS24_LIVE, 'beds24')
+    _vider()   // le cache d'echec masquerait les lectures suivantes
   }
-  const apres = statistiques()
-  assert.equal(apres.echecs - avant, 3, 'trois echecs, trois comptes')
-  assert.ok(apres.echecsDepuisSucces >= 3, 'et le compteur depuis le dernier succes suit')
+  const apres = statistiques(CLE)
+  assert.equal(apres.echecs - avant, 3, 'trois echecs comptes')
+  assert.equal(apres.echecsDepuisSucces, 3, 'et trois pour CE compte')
 
-  await motifNonSyncPourBien(faux({ lignes: [] }), 'hote-4', BIEN_BEDS24_LIVE, 'beds24')
-  const apresSucces = statistiques()
-  assert.equal(apresSucces.echecsDepuisSucces, 0, 'un succes remet le compteur a zero')
-  assert.ok(apresSucces.dernierSucces, 'et date le dernier succes')
-  assert.equal(apresSucces.echecs, apres.echecs, 'le cumul, lui, ne recule pas')
+  // Le succes d'un AUTRE compte ne doit RIEN effacer chez celui qui est en panne.
+  await motifNonSyncPourBien(faux({ lignes: [] }), 'hote-2', BIEN_BEDS24_LIVE, 'beds24')
+  assert.equal(statistiques(CLE).echecsDepuisSucces, 3,
+    'le succes de hote-2 n efface pas les echecs de hote-1 — sinon l incident rapporterait « 1 » indefiniment')
+  assert.ok(statistiques('hote-2|beds24').dernierSucces, 'et hote-2 a bien son propre dernier succes')
+
+  // Son propre succes, lui, remet son compteur a zero.
+  _vider()
+  await motifNonSyncPourBien(faux({ lignes: [] }), 'hote-1', BIEN_BEDS24_LIVE, 'beds24')
+  assert.equal(statistiques(CLE).echecsDepuisSucces, 0, 'son propre succes remet SON compteur a zero')
+  assert.ok(statistiques(CLE).dernierSucces, 'et date SON dernier succes')
+  assert.equal(statistiques().echecs, apres.echecs, 'le cumul d instance, lui, ne recule pas')
 })
 
 test('LE TEST QUI COMPTE : l incident PORTE le compte — c est toute sa raison d etre', async () => {
@@ -156,8 +170,14 @@ test('LE TEST QUI COMPTE : le cache long et l ordre du transfert sont UN SEUL ge
   // script rejouerait le 10 septembre en quinze fois plus long : 106 sejours
   // etaient repartis sous l ancienne cle « dans les minutes suivant un transfert
   // pourtant verifie a 0 ligne restante ».
+  // ⚠ ON N'ASSERTE PAS LA VALEUR, MAIS L'INVARIANT — releve en review.
+  // Le code et le KB autorisent explicitement de BAISSER `CACHE_MS` sous la
+  // duree d'un cycle si l'on retire l'attente. Verrouiller « 15 minutes »
+  // interdisait la sortie documentee. Ce qui doit tenir, c'est que le cache soit
+  // plus long qu'un cycle de cron — donc qu'il EXIGE l'attente.
   const { CACHE_MS } = require('../lib/cles-migrees')
-  assert.equal(CACHE_MS, 15 * 60 * 1000, 'quinze minutes')
+  assert.ok(CACHE_MS > 5 * 60 * 1000,
+    'le cache depasse un cycle de cron : c est ce qui rend l attente necessaire')
 
   const src = require('fs').readFileSync(
     require('path').join(__dirname, '..', 'scripts/transferer-bien-vers-fiche-neuve.js'), 'utf8')
@@ -183,8 +203,14 @@ test('LE TEST QUI COMPTE : l attente dure REELLEMENT la fenetre de cache', async
   let cumul = 0
   const dormir = async (ms) => { cumul += ms }   // horloge injectee : instantane
   const attendu = await attendreFenetreDeCache({ dormir, dire: () => {} })
-  assert.equal(cumul, CACHE_MS, 'la somme des pauses vaut exactement la fenetre du cache')
-  assert.equal(attendu, CACHE_MS, 'et la fonction rend ce qu elle a attendu')
+  assert.equal(cumul, attendu, 'la fonction rend exactement ce qu elle a fait dormir')
+  // ⚠ L'INVARIANT, PAS LA VALEUR : l'attente doit couvrir l'expiration du cache
+  // ET le cycle deja EN VOL. Une instance peut avoir lu le cache a la derniere
+  // milliseconde de la fenetre, puis passer 40 a 56 s a ecrire — pendant que le
+  // script deplace les lignes. Et sur ce chemin `detectBookingChanges` ne
+  // consulte pas `automation_paused` : la pause du script ne le couvre pas.
+  assert.ok(attendu >= CACHE_MS, 'elle couvre au moins l expiration du cache')
+  assert.ok(attendu >= CACHE_MS + 60 * 1000, 'et un cycle de cron par-dessus')
 })
 
 test('LE TEST QUI COMPTE : --sans-attente NU est REFUSE', async () => {

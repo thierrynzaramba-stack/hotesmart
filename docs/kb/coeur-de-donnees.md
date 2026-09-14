@@ -245,13 +245,21 @@ inoffensive : elle ne porte plus une seule ligne, et elle ne compte pas dans la
 facturation. Elle l'est **tant que la garde tient**.
 
 **Ce qui la rend dangereuse n'est pas ce qu'elle contient, c'est la clé qu'elle
-porte.** `clesMigrees` retombe volontairement OUVERT quand
-`provider_keys_migrated` devient illisible (une panne locale ne doit pas arrêter
-la synchro de tous les hôtes). Le jour où cela arrive, `fetchProperties` rend
-toujours le bien — il reste dans le compte Beds24, filet de rollback assumé — et
-le cron rebranche sous `169567` un historique déjà rangé sous la clé Channex.
-Toute agrégation le compte alors **deux fois**, sans qu'aucune erreur ne se
-déclenche.
+porte.** `fetchProperties` rend toujours le bien — il reste dans le compte
+Beds24, filet de rollback assumé. Si la garde laisse passer, le cron rebranche
+sous `169567` un historique déjà rangé sous la clé Channex, et toute agrégation
+le compte **deux fois**, sans qu'aucune erreur ne se déclenche.
+
+> ⚠ **Ce paragraphe disait l'inverse jusqu'au 14 septembre 2026 :** « `clesMigrees`
+> retombe volontairement OUVERT quand `provider_keys_migrated` devient
+> illisible ». **C'est faux depuis.** Le repli est **FERMÉ** : lecture
+> impossible ⇒ on ne traite pas le bien, et un incident
+> `cles_migrees_illisible` est levé. La raison est mesurée : lors de trois
+> cycles isolés, la garde aveugle a laissé rouvrir l'ancienne clé du 23 —
+> 82 séjours arrachés à la fiche Channex, et **seize ménages annulés** cinq
+> minutes plus tard par le writer, qui ne les voyait plus vivants.
+> Une synchro en pause se rattrape au cycle suivant ; un ménage annulé la veille
+> d'un départ, non.
 
 **L'ordre qui vaut, et il n'est pas intuitif :**
 
@@ -262,9 +270,20 @@ déclenche.
    exactement ce qui est arrivé à La bulle le 10 septembre.
    `scripts/supprimer-residu-beds24.js` **refuse** de supprimer si la clé n'est
    pas enregistrée.
-2. **On ne supprime JAMAIS la ligne `provider_keys_migrated`.** Elle a l'air
-   d'un résidu une fois la fiche partie ; elle est la garde elle-même. La
-   ranger dans le même geste de nettoyage rouvre le défaut en entier.
+2. **On ne supprime JAMAIS la ligne `provider_keys_migrated`** — avec **une
+   seule exception**, née le 14 septembre 2026. Elle a l'air d'un résidu une
+   fois la fiche partie ; elle est la garde elle-même, et la ranger dans le même
+   geste de nettoyage rouvre le défaut en entier.
+
+   **L'exception : le transfert avorté.** Depuis que la clé est enregistrée
+   **avant** que les lignes ne bougent (voir la section sur le cache long), un
+   transfert qui échoue ensuite laisse un bien **marqué migré sans avoir été
+   transféré** : plus rien ne le touche — ni synchro, ni message, ni code
+   d'accès, ni avis — et rien ne le signale. Un bien mort-vivant, invisible.
+   `scripts/transferer-bien-vers-fiche-neuve.js` annule donc l'enregistrement
+   sur tous ses chemins de sortie, y compris un Ctrl-C pendant l'attente. C'est
+   le pendant exact de la pause qu'il rend. **Toute autre suppression est un
+   défaut.**
 3. **Rien côté provider.** Le bien reste dans le compte Beds24 jusqu'à ce
    qu'une réservation réelle ait traversé la chaîne cible de bout en bout.
    Supprimer la fiche HôteSmart ne coûte rien ; supprimer le bien chez le
@@ -322,6 +341,14 @@ Le contournement `--sans-attente` **exige une raison écrite** et refuse sa form
 nue : il ne vaut que sur un cron fraîchement redéployé, dont le démarrage à froid
 part avec un cache vide. Un drapeau qui existe pour un cas précis finit toujours
 par être utilisé par réflexe.
+
+**Et la règle vaut pour TOUTE écriture dans `provider_keys_migrated`, pas
+seulement pour le script.** La clé peut aussi y entrer à la main — le message
+d'erreur du script conseille lui-même de passer la migration SQL, et la
+checklist de transfert décrit l'enregistrement comme une étape. **Après tout
+INSERT manuel dans cette table, attendre la fenêtre de cache (voir `CACHE_MS`)
+avant de toucher une seule ligne du bien.** Un INSERT suivi immédiatement d'un
+déplacement rejoue le 10 septembre, sur quinze minutes.
 
 **Corollaire, et c'est la règle générale :** une garde ne pose sa question qu'aux
 biens qu'elle concerne. Le même jour, une garde aveugle suspendait messages et
