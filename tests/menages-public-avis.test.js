@@ -13,6 +13,10 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 
 const test = require('node:test')
+// ⚠ La semantique PostgREST que ce double doit honorer : `or()` et l'embed
+// `menage_events!inner`. Depuis que le ratio compte par FILTRES, un double qui
+// les ignore est plus permissif que la base — donc vert sur du code faux.
+const FAUX = require('./faux-postgrest')
 const assert = require('node:assert')
 const path = require('node:path')
 const Module = require('node:module')
@@ -43,6 +47,11 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
                      periodes = [{ user_id: U, provider_id: PROFIL, property_id_ref: 'COL', debut: null, fin: null }],
                      biens = [{ user_id: U, provider_property_id: 'COL', name: 'Colomiers' }],
                      erreurBiens = null,
+                     // ⚠ Les `menage_events` du compte : sans eux, l'embed
+                     // `menage_events!inner(token)` de la voie 1 ne retient rien
+                     // et le test ne pourrait pas distinguer « aucun avis par
+                     // menage » de « la voie 1 ne marche plus ».
+                     evenements = [],
                      ratioPeriode = null,     // ce que porte public_tokens
                      erreurToken = null,      // panne de lecture du token
                      erreurProfil = null,     // panne de lecture du profil
@@ -57,6 +66,7 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
         eq (c, v) { a.f[c] = v; return chain },
         gte (c, v) { a.gte = [c, v]; if (table === 'ota_reviews') periodesDemandees.push(v); return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
+        or (e) { (a.ors = a.ors || []).push(String(e)); return chain },
         not () { return chain }, order () { return chain },
         // ⚠ Chainable, comme le vrai builder : `.limit()` est suivi d'un `.gte()`
         // quand une periode est reglee. Un double qui rendait une Promise ici
@@ -86,7 +96,7 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
         if (table === 'prestataire_periodes') return { data: periodes.filter(p =>
           (a.f.user_id == null || p.user_id === a.f.user_id) &&
           (a.f.provider_id == null || p.provider_id === a.f.provider_id)), error: null }
-        if (table === 'menage_events') return { data: [], error: null }
+        if (table === 'menage_events') return { data: evenements, error: null }
         if (table === 'properties') {
           if (erreurBiens) return { data: null, error: erreurBiens }
           return { data: biens.filter(b =>
@@ -100,6 +110,8 @@ function preparer ({ avis = [AVIS_BASE], droits = { self_view_reviews: true },
             (a.f.statut == null || (v.statut || 'confirme') === a.f.statut) &&
             (a.f.ai_clean_verdict == null || v.ai_clean_verdict === a.f.ai_clean_verdict) &&
             (a.f.property_id_ref == null || v.property_id_ref === a.f.property_id_ref) &&
+            FAUX.passeEmbed(v, a.f, evenements) &&
+            (a.ors || []).every(e => FAUX.evaluerOr(v, e)) &&
             a.ins.every(f => f.v.includes(String(v[f.c]))))
           return { data: a.head ? null : d, count: d.length, error: null }
         }

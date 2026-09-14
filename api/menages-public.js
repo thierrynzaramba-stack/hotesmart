@@ -4,7 +4,7 @@ const { markReady } = require('../lib/cron-property-status')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
-const { avisDuPrestataire, MAX_IDS } = require('../lib/attribution-prestataire')
+const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
@@ -1077,12 +1077,22 @@ async function avisDeLaPrestataire (req, res, token) {
   // resolvaient chacun de leur cote, avec les memes arguments : trois allers-
   // retours base identiques sur un endpoint ouvert sans session, qu'un porteur
   // de lien peut marteler. Une seule resolution, partagee.
-  const attribution = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id })
-  if (attribution.erreur) {
+  // ⚠ DEUX RESOLUTIONS, DEUX USAGES — ET C'EST LE FOND DU CORRECTIF DU 14 SEPT.
+  //   `filtresAttribution` -> des FILTRES, pour COMPTER. Exact, sans borne :
+  //       aucun identifiant ne transite, donc rien ne plafonne le chiffre.
+  //   `avisDuPrestataire`   -> des IDENTIFIANTS, pour LISTER. Borne a MAX_IDS
+  //       par la longueur d'URL, et c'est legitime : une liste s'affiche par
+  //       pages.
+  // Les confondre est ce qui rendait le ratio de Regina faux : il heritait de la
+  // borne de la liste, annoncait 150 sur 577, se declarait « tronque », et son
+  // en-tete restait masquee. Une liste plafonnee n'est pas un compteur plafonne.
+  const filtres = await filtresAttribution(supabase, { userId, prestataireId: profil.id })
+  if (filtres.erreur) {
     console.error('[menages-public] attribution echec')
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-  const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id, attribution })
+  const ratio = await ratioProprete(supabase, { userId, periode, prestataireId: profil.id,
+                                                voies: filtres.voies })
 
   // ⚠ CONTRAT A HONORER PAR L'INTERFACE PWA, QUI RESTE A ECRIRE.
   // `ratio` peut porter `erreur: true` : c'est une PANNE, pas un resultat. Le
@@ -1104,12 +1114,19 @@ async function avisDeLaPrestataire (req, res, token) {
   if (req.query.detail === '1') {
     ratioVue = periodeVue === periode
       ? ratio
-      : await ratioProprete(supabase, { userId, periode: periodeVue, prestataireId: profil.id, attribution })
+      : await ratioProprete(supabase, { userId, periode: periodeVue, prestataireId: profil.id,
+                                        voies: filtres.voies })
     // ⚠ UNE PANNE N'EST PAS « AUCUN AVIS » : elle coupe en 503 (garde posee plus
     // haut, a la resolution unique). Sauter silencieusement laissait partir un
     // 200 avec une liste vide, indiscernable de « elle n'a aucun avis » — alors
     // que la base en contient 98 pour Regina.
-    const att = attribution
+    // La LISTE, elle, a besoin des identifiants — et donc de la borne.
+    const att = await avisDuPrestataire(supabase, { userId, prestataireId: profil.id,
+                                                   contexte: filtres.contexte })
+    if (att.erreur) {
+      console.error('[menages-public] attribution (liste) echec')
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
     if (att.ids.length) {
       listeTronquee = att.tronque === true || att.ids.length > MAX_IDS
       // ⚠ La liste suit la periode CHOISIE, pas l'objectif : un compteur qui

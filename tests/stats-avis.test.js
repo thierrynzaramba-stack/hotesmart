@@ -7,6 +7,9 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const { ratioProprete, borneDepuis, PERIODES } = require('../lib/stats-avis')
+// La semantique PostgREST que ce double doit honorer — une seule implementation
+// pour les trois fichiers qui montent un double d'`ota_reviews`.
+const FAUX = require('./faux-postgrest')
 
 const T0 = Date.parse('2026-09-03T12:00:00Z')
 
@@ -28,13 +31,32 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
       // n'importe quelle table — y compris `profiles` — et le test « une
       // prestataire sans attribution voit zéro » ne testait rien de réel.
       const AUTRES = ['profiles', 'prestataire_periodes', 'menage_events']
+
+      const evaluerOr = (l, e) => FAUX.evaluerOr(l, e)
+      const passeEmbed = (l) =>
+        FAUX.passeEmbed(l, appel.filtres, (fauxClient.attribution || {}).menage_events)
+      const retenir = (l) =>
+        Object.entries(appel.filtres).every(([c, v]) =>
+          c === 'menage_events.token' ? true
+          : c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
+        passeEmbed(l) &&
+        (!appel.gte || String(l[appel.gte.colonne] || '') >= String(appel.gte.valeur)) &&
+        appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))) &&
+        (appel.ors || []).every(e => evaluerOr(l, e))
       // Jeu d'attribution optionnel : sans lui, `avisDuPrestataire` sort tout de
       // suite et la ligne `.in('id', idsAttribues)` n'est JAMAIS exercee — le
       // test de l'invariant central du §6 ne testait donc rien.
       const attrib = fauxClient.attribution || null
       const chain = {
-        select (_c, opts) { appel.head = !!(opts && opts.head); appel.count = opts && opts.count; return chain },
+        select (c, opts) { appel.select = c; appel.head = !!(opts && opts.head); appel.count = opts && opts.count; return chain },
         eq (c, v) { appel.filtres[c] = v; return chain },
+        // ⚠ LE DOUBLE EVALUE `or()`, IL NE L'IGNORE PAS — et il REFUSE ce qu'il
+        // ne sait pas evaluer. Un double qui laisserait passer une expression
+        // inconnue rendrait le bornage par dates indetectable : on pourrait le
+        // casser sans qu'un test bronche. Deux formes seulement sont emises par
+        // `bornerParDate`, ce sont les deux qui sont reconnues ; toute autre
+        // leve, et c'est voulu.
+        or (expr) { (appel.ors = appel.ors || []).push(String(expr)); return chain },
         gte (c, v) { appel.gte = { colonne: c, valeur: v }; return chain },
         in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
         not () { return chain },
@@ -45,11 +67,7 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
             const d = attrib && attrib[table] ? attrib[table] : []
             return Promise.resolve({ data: d, error: null })
           }
-          const d = lignes.filter(l =>
-            Object.entries(appel.filtres).every(([c, v]) =>
-              c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
-            appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))))
-          return Promise.resolve({ data: d, error: null })
+          return Promise.resolve({ data: lignes.filter(retenir), error: null })
         },
         maybeSingle () {
           if (AUTRES.includes(table)) {
@@ -64,11 +82,7 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
             return Promise.resolve({ data: d, count: d.length, error: null }).then(r)
           }
           if (erreur) return Promise.resolve({ data: null, count: null, error: erreur }).then(r)
-          const d = lignes.filter(l =>
-            Object.entries(appel.filtres).every(([c, v]) =>
-              c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
-            (!appel.gte || String(l[appel.gte.colonne] || '') >= String(appel.gte.valeur)) &&
-            appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))))
+          const d = lignes.filter(retenir)
           return Promise.resolve({ data: appel.head ? null : d, count: d.length, error: null }).then(r)
         }
       }
@@ -280,4 +294,127 @@ test('ratio : une prestataire ne voit QUE ses avis, jamais ceux de l\'hôte', as
   } finally {
     fauxClient.attribution = null
   }
+})
+
+// ─── Le comptage ne connaît plus la borne des identifiants ─────────────────
+//
+// ⚠ CE QUE CES TESTS FERMENT, mesuré en production le 14 septembre 2026.
+// Le ratio comptait `.in('id', idsAttribues)`, et cette liste est bornée à
+// MAX_IDS = 150 par la longueur d'URL. Régina avait **577** avis attribuables ;
+// sa PWA en affichait **150**, marqués « tronqués », donc son en-tête restait
+// masquée — 74 % de son travail invisible pour elle. Le chiffre n'était même pas
+// un sous-total : la borne s'appliquait DEUX fois (150 par période puis 150 au
+// global) sur des lignes qu'aucun `order` ne fixait, donc il pouvait changer
+// d'un appel à l'autre.
+
+const { MAX_IDS } = require('../lib/attribution-prestataire')
+
+function jeuDeLignes (n, ref) {
+  return Array.from({ length: n }, (_, i) =>
+    L({ id: 'a' + i, property_id_ref: ref,
+        ai_clean_verdict: i % 2 ? 'positif' : 'rien_signale' }))
+}
+
+test('ratio : EXACT au-delà de MAX_IDS, et plus aucun drapeau tronqué', async () => {
+  const N = MAX_IDS * 3 + 7            // très au-delà de la borne, comme Régina
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL',
+                             debut: null, fin: null }],
+    menage_events: []
+  }
+  try {
+    const r = await ratioProprete(fauxClient(jeuDeLignes(N, 'COL')),
+      { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, N, 'le compteur ne doit plus s\'arrêter à la borne')
+    assert.strictEqual(r.positif, Math.floor(N / 2))
+    assert.strictEqual(r.tronque, undefined,
+      'plus de drapeau : un compteur exact n\'a rien à signaler, et le drapeau masquait l\'en-tête')
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : un avis qui relève des DEUX voies n\'est compté qu\'une fois', async () => {
+  // ⚠ LE PIÈGE DU COMPTAGE PAR FILTRES. `avisDuPrestataire` ne pouvait pas avoir
+  // ce défaut — sa `Map` dédoublonnait par id. En comptant par filtres, un avis
+  // dont le ménage est précisément le sien ET qui tombe dans une période
+  // déclarée serait compté deux fois. Et gonfler le total ADOUCIT son ratio de
+  // remarques : un chiffre faux dans le sens flatteur reste un chiffre faux.
+  const DEUX_VOIES = L({ id: 'x', property_id_ref: 'COL', menage_event_id: 'e1',
+                         ai_clean_verdict: 'remarque' })
+  const PERIODE_SEULE = L({ id: 'y', property_id_ref: 'COL', ai_clean_verdict: 'positif' })
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: 'jeton-p1' }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL',
+                             debut: null, fin: null }],
+    menage_events: [{ id: 'e1', token: 'jeton-p1' }]
+  }
+  try {
+    const r = await ratioProprete(fauxClient([DEUX_VOIES, PERIODE_SEULE]),
+      { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 2, 'deux avis, pas trois')
+    assert.strictEqual(r.remarque, 1, 'la remarque ne compte qu\'une fois')
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : le ménage d\'une AUTRE prestataire ne lui est pas compté deux fois non plus', async () => {
+  // Contre-épreuve de la soustraction : si l'intersection retirait plus que la
+  // voie 1 ne rapporte, un avis légitime disparaîtrait du compte.
+  const AUTRE = L({ id: 'z', property_id_ref: 'COL', menage_event_id: 'e9',
+                    ai_clean_verdict: 'positif' })
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: 'jeton-p1' }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL',
+                             debut: null, fin: null }],
+    menage_events: [{ id: 'e9', token: 'jeton-de-quelqu-un-d-autre' }]
+  }
+  try {
+    const r = await ratioProprete(fauxClient([AUTRE]),
+      { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 1,
+      'la période déclarée le lui attribue — c\'est la règle en vigueur, on ne la change pas ici')
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : deux périodes qui se chevauchent sur le MÊME bien ne doublent pas le compte', async () => {
+  // ⚠ Les intervalles sont FUSIONNÉS avant comptage. Sans fusion, un avis
+  // couvert par les deux périodes est compté deux fois — c'est le second piège
+  // du comptage par filtres, et il n'existait pas avec la Map.
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [
+      { user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL', debut: null, fin: '2026-08-31' },
+      { user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL', debut: '2026-08-01', fin: null }
+    ],
+    menage_events: []
+  }
+  try {
+    const r = await ratioProprete(
+      fauxClient([L({ id: 'a', property_id_ref: 'COL', stay_end: '2026-08-15',
+                      ai_clean_verdict: 'positif' })]),
+      { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 1, 'un seul avis, même s\'il tombe dans les deux périodes')
+    assert.strictEqual(r.positif, 1)
+  } finally { fauxClient.attribution = null }
+})
+
+test('ratio : un avis SANS aucune date n\'entre dans aucune période, même non bornée', async () => {
+  // ⚠ `dansLaPeriode` rend `false` quand la date de rattachement est nulle.
+  // Un intervalle ouvert des deux côtés se traduirait par « aucun filtre », donc
+  // par l'inclusion de cet avis : la divergence entre les deux implémentations
+  // du même invariant. Aucun cas en base aujourd'hui — on ferme la divergence,
+  // pas le symptôme.
+  fauxClient.attribution = {
+    profiles: [{ id: 'p1', account_user_id: 'u1', pwa_token: null }],
+    prestataire_periodes: [{ user_id: 'u1', provider_id: 'p1', property_id_ref: 'COL',
+                             debut: null, fin: null }],
+    menage_events: []
+  }
+  try {
+    const r = await ratioProprete(
+      fauxClient([{ user_id: 'u1', statut: 'confirme', id: 'sansdate',
+                    property_id_ref: 'COL', stay_end: null, received_at: null,
+                    ai_clean_verdict: 'positif' }]),
+      { userId: 'u1', prestataireId: 'p1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(r.total, 0)
+  } finally { fauxClient.attribution = null }
 })

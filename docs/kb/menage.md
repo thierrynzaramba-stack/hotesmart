@@ -1085,8 +1085,33 @@ Un second onglet apparaît à côté de « Planning » **quand l'hôte le permet
 - **États distincts** : « chargement », « service indisponible, réessayez » (**panne** : 503 ou
   `ratio.erreur`), et « aucun avis pour l'instant » (**vrai** zéro). ⚠️ Une panne ne doit
   **jamais** s'afficher comme « 0 avis » : la prestataire en tirerait une conclusion fausse
-  sur son travail. Au-delà de 150 avis attribués, l'écran annonce qu'il n'en montre qu'une
-  partie (`ratio.tronque`, `listeTronquee`) plutôt que de laisser lire un total partiel.
+  sur son travail.
+- ⚠️ **LE COMPTEUR EST EXACT, LA LISTE EST PAGINÉE — CE SONT DEUX CHOSES (14 sept. 2026).**
+  Le ratio comptait `.in('id', idsAttribues)`, et cette liste est bornée à `MAX_IDS = 150` par
+  la longueur d'URL. Le compteur héritait donc de la borne de la **liste**. Mesuré en
+  production : **Régina a 577 avis attribuables, sa PWA en affichait 150**, marqués
+  « tronqués » — et `renderEnteteRatio` masque l'en-tête dès `tronque`, donc son rappel
+  quotidien **n'a jamais rien affiché**. 74 % de son travail invisible pour elle. Le chiffre
+  n'était même pas un sous-total : la borne s'appliquait **deux fois** (150 par période, puis
+  150 au global) sur des lignes qu'aucun `order` ne fixait — il pouvait changer d'un appel à
+  l'autre. Sa vue « 30 jours » annonçait 17 ; la vérité est 19.
+  **`filtresAttribution` rend désormais des FILTRES, pas des identifiants** : `ratioProprete`
+  les applique en `head: true` et somme leurs `count`. Aucun identifiant ne transite, le
+  compteur est exact quel qu'en soit le nombre, et `ratio.tronque` **n'existe plus**.
+  `listeTronquee` reste : une liste s'affiche par pages, et elle le dit.
+- ⚠️ **Deux pièges que le comptage par filtres crée et que la `Map` n'avait pas.**
+  `avisDuPrestataire` dédoublonnait par id ; une somme de `count`, non.
+  **(a)** Un avis qui relève des deux voies — son ménage est précisément le sien *et* il tombe
+  dans une période déclarée — serait compté deux fois : l'intersection est donc retirée, avec
+  un signe négatif porté par le filtre lui-même. Gonfler le total **adoucirait** son ratio de
+  remarques ; un chiffre faux dans le sens flatteur reste un chiffre faux.
+  **(b)** Deux périodes qui se chevauchent sur le **même bien** compteraient deux fois les
+  mêmes avis : les intervalles sont **fusionnés par bien** avant tout comptage.
+- ⚠️ **La voie « ménage précis » a besoin d'une relation DÉCLARÉE.** PostgREST n'expose un embed
+  que si une clé étrangère existe : c'est l'objet de
+  `migrations/2026-09-14-ota-reviews-menage-event-fk.sql`
+  (`ON DELETE SET NULL`, jamais `CASCADE` — un avis est un fait, il redevient non attribué, il
+  ne disparaît pas). Son absence est toute l'origine de la borne.
 
 ### Installation PWA (facultative)
 L'app est installable sur l'écran d'accueil :
