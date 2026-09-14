@@ -350,7 +350,16 @@ test('LE TEST QUI COMPTE : TOUTE fonction de la boucle par bien est gardee — l
     // donc les commentaires avant de chercher.
     const code = tete.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
       .filter(l => !l.trim().startsWith('//')).join('\n')
-    if (!code.includes('await estCleMigree(') && !code.includes('await motifNonSync(')) {
+    // ⚠ TROIS FORMES VALIDES, ET CHACUNE PORTE SA RAISON :
+    //   `estCleMigree`        — booleen, ferme par defaut ;
+    //   `motifNonSync`        — distingue « migre » de « aveugle » pour le journal ;
+    //   `motifNonSyncPourBien` — AJOUTE le 14 septembre : ne pose la question
+    //     qu'aux biens du provider concerne. C'est la forme qu'il FAUT pour une
+    //     fonction partagee entre la boucle Beds24 et la boucle Channex, sans
+    //     quoi une garde aveugle suspend des biens qui n'ont jamais eu de cle
+    //     Beds24 (messages et codes d'acces coupes sur des biens sains).
+    const gardes = ['await estCleMigree(', 'await motifNonSync(', 'await motifNonSyncPourBien(']
+    if (!gardes.some(g => code.includes(g))) {
       nonGardees.push(`${nom} (dans ${dans})`)
     }
   }

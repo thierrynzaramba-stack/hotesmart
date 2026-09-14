@@ -284,3 +284,48 @@ n'a pas bougé — une re-matérialisation se trahit d'abord là.
 la servait, conservée par le transfert) et la ligne `provider_keys_migrated`.
 Ni l'une ni l'autre ne porte de réservation ; aucune ne peut doubler
 l'historique.
+
+## Clé provider abandonnée : le cache long et l'attente sont UN SEUL geste
+
+**Ne jamais séparer les deux.** Gravé le 14 septembre 2026, après le premier
+« Gateway Timeout » réel sur la lecture de `provider_keys_migrated`.
+
+`lib/cles-migrees.js` met en cache le succès de cette lecture **15 minutes**, pour
+ne plus l'exposer 288 fois par jour à une passerelle saturée. Mais
+`noterCleMigree` ne vide que le cache du **processus courant** : il n'est appelé
+que depuis `scripts/transferer-bien-vers-fiche-neuve.js`, un script **local**.
+Le cron tourne sur Vercel — **son cache à lui n'expire que par TTL**.
+
+Conséquence : pendant un quart d'heure après l'enregistrement d'une clé migrée,
+le cron peut encore la croire vivante et **rapatrier les lignes qu'on vient de
+déplacer**. C'est exactement le défaut du 10 septembre 2026 — *106 des 786
+séjours de La bulle repartis sous `209413` dans les minutes suivant un transfert
+pourtant vérifié à 0 ligne restante* — mais avec une fenêtre **quinze fois plus
+large**.
+
+Le prix est payé dans le script de transfert, en deux gestes indissociables :
+
+1. **La clé est enregistrée comme migrée AVANT que la moindre ligne ne bouge.**
+   Elle l'était après jusqu'au 14 septembre ; c'était tenable à 60 s de cache,
+   plus à 15 minutes.
+2. **Le script attend la fenêtre de cache**, décompte à l'appui, entre
+   l'enregistrement et le déplacement. L'attente lit `CACHE_MS` : les deux
+   valeurs ne peuvent pas diverger.
+
+**Retirer l'attente « pour accélérer le transfert » est une RÉGRESSION**, pas une
+optimisation — et elle sera silencieuse, puisque le transfert affichera
+« 0 ligne restante » avant que le cron ne les ramène. Si vous voulez supprimer
+l'attente, il faut d'abord ramener `CACHE_MS` sous la durée d'un cycle de cron.
+**Les deux, ou aucun.**
+
+Le contournement `--sans-attente` **exige une raison écrite** et refuse sa forme
+nue : il ne vaut que sur un cron fraîchement redéployé, dont le démarrage à froid
+part avec un cache vide. Un drapeau qui existe pour un cas précis finit toujours
+par être utilisé par réflexe.
+
+**Corollaire, et c'est la règle générale :** une garde ne pose sa question qu'aux
+biens qu'elle concerne. Le même jour, une garde aveugle suspendait messages et
+codes d'accès sur des biens **Channex**, parce qu'on lui demandait si une clé
+Channex était une clé Beds24 migrée. Une garde qui suspend des biens sains faute
+de pouvoir répondre à une question qui ne les concerne pas est un défaut de
+conception, pas un problème de robustesse.

@@ -25,7 +25,7 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
-const { noterCleMigree } = require('../lib/cles-migrees')
+const { noterCleMigree, attendreFenetreDeCache } = require('../lib/cles-migrees')
 const { rekeyerJson } = require('./rekeyer-json-config')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -69,6 +69,17 @@ async function audit (etiquette) {
   return { data, par }
 }
 
+// ⚠ `--sans-attente` EXIGE UNE RAISON : `--sans-attente="cron redeploye a 14h02"`.
+// Sa forme nue est refusee par `attendreFenetreDeCache` — un drapeau qui existe
+// pour un cas precis finit toujours par etre utilise par reflexe, et celui-ci
+// contourne la garde qui empeche le cron de rapatrier ce qu'on deplace.
+const RAISON_SANS_ATTENTE = (() => {
+  const brut = process.argv.find(a => a.startsWith('--sans-attente'))
+  if (!brut) return false
+  const raison = brut.includes('=') ? brut.slice(brut.indexOf('=') + 1).trim() : ''
+  return raison || true          // `true` = forme nue -> refus explicite plus bas
+})()
+
 async function main () {
   console.log(`${ECRIRE ? 'MODE ECRITURE' : 'DRY RUN — audit seul'}  bien : ${C.nom}`)
   console.log(`   source ${C.source}\n   cible  ${C.cible}`)
@@ -97,31 +108,21 @@ async function main () {
   if (eP) throw new Error(`pause de la source : ${eP.message}`)
   console.log('\n✓ automation_paused = true sur la source')
 
-  // 2) Le transfert, en une transaction.
-  const { data, error } = await supabase.rpc('transferer_bien',
-    { p_source: C.source, p_cible: C.cible })
-  if (error) {
-    console.error(`\nTRANSFERT REFUSE : ${error.message}`)
-    // ⚠ ON REND LA PAUSE. Une source pausee sans transfert coupe les messages
-    // et les codes du voyageur pour rien.
-    await supabase.from('properties')
-      .update({ automation_paused: false, paused_reason: null }).eq('id', C.source)
-    console.error('pause rendue sur la source (aucune donnee deplacee)')
-    process.exitCode = 1
-    return
-  }
-
-  console.log('\n── lignes deplacees')
-  let total = 0
-  for (const r of data) {
-    total += Number(r.deplacees)
-    if (Number(r.deplacees)) {
-      console.log(`   ${String(r.famille).padEnd(16)} ${String(r.nom_table + '/' + r.colonne).padEnd(44)} ${r.deplacees}`)
-    }
-  }
-  console.log(`   TOTAL ${total}`)
-
-  // ⚠ ON ENREGISTRE LA CLE ABANDONNEE, ET C'EST LA MOITIE DU GESTE.
+  // ⚠ LA CLE EST ENREGISTREE AVANT QUE LA MOINDRE LIGNE NE BOUGE.
+  // Elle l'etait APRES le transfert jusqu'au 14 septembre 2026, et c'etait
+  // tenable tant que le cron relisait la table toutes les 60 s. Le cache du
+  // succes est passe a 15 minutes (voir [cles-migrees]) pour ne plus exposer
+  // cette lecture a une passerelle saturee — ce qui elargit d'autant la fenetre
+  // pendant laquelle le cron croit encore la cle vivante. Enregistrer apres le
+  // transfert reviendrait a rejouer le 10 septembre en quinze fois plus long :
+  // 106 sejours etaient repartis sous l'ancienne cle « dans les minutes suivant
+  // un transfert pourtant verifie a 0 ligne restante ».
+  //
+  // ⚠ ET ON ATTEND CETTE FENETRE. `noterCleMigree` vide le cache du processus
+  // COURANT — celui de ce script. Le cron tourne ailleurs : son cache a lui
+  // n'expire que par TTL. Tant qu'il n'a pas expire, il rapatriera ce qu'on
+  // deplace. L'attente est le prix du cache long, et elle se paie une fois par
+  // migration, pas une fois par cycle.
   // Sans cet enregistrement, `api/cron.js` — qui boucle sur la liste LIVE du
   // compte Beds24, ou le bien reste volontairement — rematerialise la fiche au
   // cycle suivant, reecrit les sejours sous l'ANCIENNE cle et renvoie des
@@ -149,6 +150,32 @@ async function main () {
       process.exitCode = 1
     }
   }
+
+  await attendreFenetreDeCache({ sauter: RAISON_SANS_ATTENTE })
+
+  // 2) Le transfert, en une transaction.
+  const { data, error } = await supabase.rpc('transferer_bien',
+    { p_source: C.source, p_cible: C.cible })
+  if (error) {
+    console.error(`\nTRANSFERT REFUSE : ${error.message}`)
+    // ⚠ ON REND LA PAUSE. Une source pausee sans transfert coupe les messages
+    // et les codes du voyageur pour rien.
+    await supabase.from('properties')
+      .update({ automation_paused: false, paused_reason: null }).eq('id', C.source)
+    console.error('pause rendue sur la source (aucune donnee deplacee)')
+    process.exitCode = 1
+    return
+  }
+
+  console.log('\n── lignes deplacees')
+  let total = 0
+  for (const r of data) {
+    total += Number(r.deplacees)
+    if (Number(r.deplacees)) {
+      console.log(`   ${String(r.famille).padEnd(16)} ${String(r.nom_table + '/' + r.colonne).padEnd(44)} ${r.deplacees}`)
+    }
+  }
+  console.log(`   TOTAL ${total}`)
 
   // ⚠ LES REFERENCES TENUES COMME CLES DANS UN JSONB.
   // Troisieme angle mort de mes inventaires, trouve en review : ni le nom de la
