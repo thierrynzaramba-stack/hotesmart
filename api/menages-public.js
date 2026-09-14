@@ -18,6 +18,11 @@ const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 // dans ce depot. C'est la MEME fonction que celle du moteur : deux
 // normalisations differentes pour la meme date finiraient par diverger.
 const { cleJour } = require('../lib/cleaning/availability')
+// ⚠ LE MEME PLAFOND QUE `api/disponibilites.js`, et pour la meme raison : l'ecran
+// regle jusqu'a un an devant. Une plage au-dela n'est pas un conge, c'est une
+// saisie qui a derape — et surtout une ligne que l'ecran ne montrera jamais,
+// donc impossible a retirer.
+const HORIZON_CONGE_JOURS = 400
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -1420,7 +1425,17 @@ async function mesConges (req, res, token, { retirer }) {
   // l'attribution des remarques de proprete. Un conge EN COURS, lui, passe.
   if (f < todayInParis()) return res.status(400).json({ error: 'Ces dates sont déjà passées' })
   const jours = Math.round((Date.parse(f + 'T12:00:00Z') - Date.parse(d + 'T12:00:00Z')) / 86400000) + 1
-  if (jours > 400) return res.status(400).json({ error: 'Ce congé est trop long' })
+  // ⚠ LE MEME PLAFOND QUE L'HOTE, IMPORTE ET NON RECOPIE. Deux writers de la
+  // meme table avec deux limites differentes, c'est l'ecart qui finit par se
+  // creuser : le 400 etait code en dur ici pendant que l'autre chemin lisait
+  // `HORIZON_JOURS`.
+  if (jours > HORIZON_CONGE_JOURS) return res.status(400).json({ error: 'Ce congé est trop long' })
+  // ⚠ ET LA DISTANCE, PAS SEULEMENT LA DUREE — garde que le chemin hote a recue
+  // en review et que celui-ci n'avait pas. Un conge de cinq jours en 2099 est
+  // accepte, stocke, et hors de portee de l'ecran : une ligne qu'on ne peut ni
+  // voir ni retirer.
+  const limite = new Date(Date.now() + HORIZON_CONGE_JOURS * 86400000).toISOString().slice(0, 10)
+  if (d > limite) return res.status(400).json({ error: 'Ce congé est trop loin dans le futur' })
 
   // ⚠ IDEMPOTENT, COMME LE CHEMIN D'UN JOUR — et pour la meme raison, qui est
   // physique : cette PWA tourne sur un telephone en 3G, ou un tap qui ne rend
@@ -1430,15 +1445,28 @@ async function mesConges (req, res, token, { retirer }) {
   // On regarde donc s'il existe DEJA une plage identique DECLAREE PAR ELLE : deux
   // taps produiraient deux lignes jumelles, elle en verrait deux dans sa liste,
   // et croirait sa premiere suppression sans effet.
-  const { data: jumelle, error: errJ } = await supabase.from('conges_plages')
+  // ⚠ JAMAIS `maybeSingle()` SUR UNE TABLE SANS CONTRAINTE D'UNICITE.
+  // C'etait le defaut de la premiere version de cette garde, et il etait PIRE que
+  // ce qu'elle corrigeait. Le controle est un TOCTOU : deux taps concurrents —
+  // exactement le scenario 3G qu'on invoque ici — passent tous deux « pas de
+  // jumelle » et inserent deux lignes. Des lors, `maybeSingle()` levait en
+  // PGRST116 (« multiple rows returned ») a CHAQUE declaration ulterieure de la
+  // meme plage, donc 503 « Service temporairement indisponible » — DEFINITIVEMENT.
+  // Et le front ne purge sa file que sur 4xx : elle aurait reessaye sans fin,
+  // sans jamais pouvoir reposer ce conge.
+  // On prend donc la PREMIERE, s'il y en a. Le doublon eventuel reste inerte —
+  // deux plages identiques verrouillent les memes jours — et se retire comme les
+  // autres depuis sa liste.
+  const { data: jumelles, error: errJ } = await supabase.from('conges_plages')
     .select('id, debut, fin, motif, source')
     .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
     .eq('debut', d).eq('fin', f).eq('source', 'prestataire')
-    .maybeSingle()
+    .order('created_at', { ascending: true }).limit(1)
   if (errJ) {
     console.error('[menages-public] lecture conge jumelle echec:', errJ.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
+  const jumelle = (jumelles || [])[0]
   if (jumelle) return res.status(200).json({ success: true, conge: jumelle, deja: true })
 
   const { data, error } = await supabase.from('conges_plages')

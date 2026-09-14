@@ -51,6 +51,16 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             return Promise.resolve({ data: regles, error: null })
           }
           if (table === 'conges_plages') {
+            // ⚠ DEUX LECTURES BORNÉES sur cette table, distinguées par leurs
+            // filtres : la liste de ses congés (bornée sur `fin`), et la plage
+            // JUMELLE cherchée avant insertion (filtrée sur `debut` et `fin`).
+            // Les confondre rendrait l'idempotence indétectable.
+            // ⚠ Et la jumelle sort en LISTE, jamais en `maybeSingle` : la table
+            // n'a aucune contrainte d'unicité, et `maybeSingle` y lève en
+            // PGRST116 dès qu'un doublon existe — c'était un 503 définitif.
+            if (a.f.debut !== undefined) {
+              return Promise.resolve({ data: congeJumeau ? [congeJumeau] : [], error: null })
+            }
             return Promise.resolve({ data: conges, error: null })
           }
           return Promise.resolve({ data: [], error: null })
@@ -96,11 +106,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           // Le congé relu après un DELETE qui n'a rien touché : existe-t-il, et
           // à qui est-il ?
           if (table === 'conges_plages') {
-            // Deux lectures `maybeSingle` sur cette table : la plage jumelle
-            // avant insertion (filtrée sur `debut`), et le congé relu après un
-            // DELETE sans effet (filtré sur `id`). Le double les distingue par
-            // leurs filtres — les confondre rendrait l'idempotence indétectable.
-            if (a.f.debut !== undefined) return Promise.resolve({ data: congeJumeau, error: null })
+            // Le congé relu après un DELETE sans effet, filtré sur `id`.
             return Promise.resolve({ data: congeExistant ? { id: 'c1' } : null, error: null })
           }
           // Ce qui occupe ce jour-là, relu après un DELETE qui n'a rien touché.
@@ -525,4 +531,31 @@ test('déclarer DEUX FOIS le même congé ne crée pas de doublon', async () => 
   assert.strictEqual(res.body.deja, true, 'le geste réussit, et dit qu\'il n\'a rien créé')
   assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages' && x.op === 'insert').length, 0,
     'aucune seconde ligne')
+})
+
+test('la plage jumelle se lit en LISTE, jamais en maybeSingle', async () => {
+  // ⚠ LE DÉFAUT QUE LA GARDE D'IDEMPOTENCE AVAIT INTRODUIT, ET IL ÉTAIT PIRE QUE
+  // CE QU'ELLE CORRIGEAIT. `conges_plages` n'a volontairement aucune contrainte
+  // d'unicité, et le contrôle est un TOCTOU : deux taps concurrents — le
+  // scénario 3G qu'on invoque — insèrent deux lignes. Ensuite `maybeSingle()`
+  // levait en PGRST116 à CHAQUE déclaration ultérieure de la même plage : 503
+  // « Service temporairement indisponible », définitivement. Et le front ne
+  // purge sa file que sur 4xx : elle aurait réessayé sans fin.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'declarerConge', debut: DEMAIN, fin: DANS_UN_MOIS }), res)
+  assert.strictEqual(res.code, 200)
+  const lecture = etat.lectures.find(l => l.table === 'conges_plages' && l.f.debut !== undefined)
+  assert.ok(lecture, 'la plage jumelle est bien cherchée avant d\'insérer')
+})
+
+test('la prestataire non plus ne pose pas de congé hors de portée de l\'écran', async () => {
+  // ⚠ ASYMÉTRIE ENTRE DEUX WRITERS DE LA MÊME TABLE : le chemin hôte avait reçu
+  // cette garde en review, celui-ci ne l'avait pas. Un congé de cinq jours en
+  // 2099 était accepté, stocké, et invisible — donc irretirable.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'declarerConge', debut: '2099-01-01', fin: '2099-01-05' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 0)
 })

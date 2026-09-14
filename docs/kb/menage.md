@@ -711,13 +711,22 @@ Une personne est disponible un jour donné selon cet ordre, et il ne se discute 
 
 | Rang | Ce qui tranche | Effet |
 |---|---|---|
-| **1** | un **congé** (`conges_plages`) couvre le jour | **absente**, et le jour est **verrouillé** à l'écran |
+| **1** | un **congé** (`conges_plages`) couvre le jour | **absente** — et le jour sera **verrouillé** à l'écran (lot 2b) |
 | **2** | une **exception** (`provider_availability_exceptions`) pour ce jour | ce qu'elle dit, dans les deux sens |
 | **3** | une **règle** (`provider_availability_rules`) couvre le jour | disponible |
 | **4** | **aucune règle** active | disponible |
 
 ⚠️ **Les étages 2, 3 et 4 sont inchangés depuis le lot 3.1.** Le congé s'ajoute **au-dessus** :
 un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
+
+⚠️ **CE QUI EST LIVRÉ, ET CE QUI NE L'EST PAS ENCORE (lot 2a, 15 sept. 2026).**
+Le **cœur** est en place : précédence, endpoints hôte et PWA, câblage du moteur, tests. **Aucun
+écran ne consomme encore les congés** — ni `apps/menages/prestataires.html`, ni
+`apps/menages/public.html`. Concrètement : un congé n'est aujourd'hui créable que par appel API,
+et s'il en arrive un en base, l'écran affiche le jour comme normal pendant que le moteur le tient
+pour verrouillé, **sans bouton pour le retirer**. Le comportement serveur est juste ; c'est
+l'interface qui manque, et c'est l'objet du **lot 2b**. Les mentions de « verrouillage » dans les
+commentaires de code décrivent la cible, pas l'état livré.
 
 ⚠️ **Pourquoi un étage, et pas un rang égal à l'exception.** Une exception est une correction
 d'**un** jour ; un congé est une **plage** qu'on supprime d'un geste. Au même rang, une exception

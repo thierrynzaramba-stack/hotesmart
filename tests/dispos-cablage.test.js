@@ -38,17 +38,29 @@ const racine = path.join(__dirname, '..')
 // ⚠ LISTE DÉRIVÉE, PAS RECOPIÉE : on la retrouve en cherchant les appelants de
 // `chargerDisponibilites`. Une liste tenue à la main aurait le défaut même
 // qu'elle prétend fermer — elle ne connaîtrait pas le septième appelant.
+function fichiersJs (dossier, out = []) {
+  for (const e of fs.readdirSync(dossier, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === '.git' || e.name === 'tests') continue
+    const chemin = path.join(dossier, e.name)
+    if (e.isDirectory()) fichiersJs(chemin, out)
+    else if (e.name.endsWith('.js')) out.push(chemin)
+  }
+  return out
+}
+
 function appelants () {
-  const dossiers = [path.join(racine, 'api'), path.join(racine, 'lib', 'cleaning')]
+  // ⚠ LE DEPOT ENTIER, PAS DEUX DOSSIERS. La premiere version ne balayait que
+  // `api/` et `lib/cleaning/` — alors que ce fichier existe precisement parce
+  // qu'un appelant avait ete oublie. Un septieme dans `scripts/` ou a la racine
+  // de `lib/` serait passe au travers, et le verificateur aurait eu l'angle mort
+  // exact qu'il pretend fermer.
   const out = []
-  for (const d of dossiers) {
-    for (const f of fs.readdirSync(d)) {
-      if (!f.endsWith('.js')) continue
-      const chemin = path.join(d, f)
-      const src = fs.readFileSync(chemin, 'utf8')
-      // On ignore le fournisseur lui-même : c'est lui qui rend les trois familles.
-      if (chemin.endsWith(path.join('lib', 'cleaning', 'assign.js'))) continue
-      if (/chargerDisponibilites\s*\(/.test(src)) out.push({ chemin, src, nom: path.relative(racine, chemin) })
+  for (const chemin of fichiersJs(racine)) {
+    const src = fs.readFileSync(chemin, 'utf8')
+    // On ignore le fournisseur lui-meme : c'est lui qui rend les trois familles.
+    if (chemin.endsWith(path.join('lib', 'cleaning', 'assign.js'))) continue
+    if (/chargerDisponibilites\s*\(/.test(src)) {
+      out.push({ chemin, src, nom: path.relative(racine, chemin) })
     }
   }
   return out
@@ -67,16 +79,30 @@ test('on trouve bien les appelants — sinon ce test ne teste rien', () => {
 test('CHAQUE appelant transmet `conges` en même temps que `regles`', () => {
   // La forme réelle dans le dépôt : un littéral
   //   { …, regles: dispos.regles, exceptions: dispos.exceptions, conges: dispos.conges }
-  // On vérifie que partout où `regles:` est transmis depuis un `chargerDisponibilites`,
-  // `conges:` l'est aussi. Le compte suffit : c'est un oubli qu'on cherche, pas
-  // une faute de frappe.
+  let total = 0
   for (const { src, nom } of appelants()) {
     const regles = (src.match(/regles:\s*\w+\.regles/g) || []).length
     const conges = (src.match(/conges:\s*\w+\.conges/g) || []).length
+    total += regles
     assert.strictEqual(conges, regles,
       `${nom} : ${regles} contexte(s) passent \`regles\` mais seulement ${conges} passent \`conges\` — ` +
       'une prestataire en congé y serait considérée disponible, et aucun test d\'unité ne le verrait')
+    // ⚠ UN APPELANT QUI NE CONSTRUIT AUCUN LITTÉRAL RECONNU N'EST PAS UN
+    // APPELANT SANS DÉFAUT : c'est un appelant qu'on ne sait pas lire. Un
+    // contexte bâti autrement — un spread `...dispos`, une variable
+    // intermédiaire — compterait 0 == 0 et passerait en ne vérifiant RIEN.
+    // Le faux vert exact que ce fichier dit fermer.
+    assert.match(src, /conges/,
+      `${nom} appelle chargerDisponibilites mais ne mentionne jamais \`conges\` : ` +
+      'soit il oublie de les transmettre, soit il le fait sous une forme que ce ' +
+      'vérificateur ne sait pas lire — dans les deux cas il faut regarder.')
   }
+  // ⚠ UN MINIMUM ABSOLU, pas seulement une égalité. Le jour où le littéral change
+  // de forme partout à la fois, tous les compteurs tomberaient à zéro et
+  // l'égalité serait vraie — vert sur du vide.
+  assert.ok(total >= 4,
+    `seulement ${total} contexte(s) de disponibilité reconnu(s) dans tout le dépôt : ` +
+    'la forme a changé, ce vérificateur ne lit plus rien')
 })
 
 test('`estDisponible` lit bien les trois familles, et le congé en premier', () => {
