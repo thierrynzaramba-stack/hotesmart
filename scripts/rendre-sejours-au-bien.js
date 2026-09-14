@@ -175,8 +175,17 @@ async function main () {
     const c = (codes || []).find(x => String(x.booking_id) === String(l.booking_id))
     console.log(`  ${l.booking_id}  ${s.arrival} -> ${s.departure}  ${String(s.firstName || '')} ${String(s.lastName || '')}`)
     console.log(`     canal ${s.source || '?'} | statut ${readStatus(s, s.provider)} | code OTA ${s.otaReservationCode || '-'}`)
-    console.log(`     menage   : ${m ? `${m.status} (depart ${m.departure_date})` : 'aucune ligne'}`
-      + `${m && m.status === 'cancelled' ? '  -> SERA RESSUSCITE' : ''}`)
+    // ⚠ « SERA RESSUSCITE » N'EST VRAI QUE SI LE SEJOUR EST ACTIF.
+    // Ma premiere version l'affichait pour TOUT menage annule : une reservation
+    // elle-meme annulee y apparaissait comme un menage a refaire. Le writer, lui,
+    // ne ressuscite que ce qui passe `isActiveStatus` — l'apercu promettait donc
+    // ce que le geste n'allait pas faire. Une piece qu'on valide en la lisant ne
+    // peut pas porter une ligne fausse.
+    const actif = readStatus(s, s.provider) === 'confirmed'
+    const suite = m && m.status === 'cancelled'
+      ? (actif ? '  -> SERA RESSUSCITE' : '  (reservation annulee : reste annule)')
+      : ''
+    console.log(`     menage   : ${m ? `${m.status} (depart ${m.departure_date})` : 'aucune ligne'}` + suite)
     console.log(`     code acces : ${c ? c.status : 'aucun'}`)
   }
 
