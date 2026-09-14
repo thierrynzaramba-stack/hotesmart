@@ -30,6 +30,7 @@ const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection depl
 const { pushAvailabilityOnce } = require('../lib/channel-availability')
 // Double ecriture vers la table source de verite `messages` (etape 2 messagerie unifiee).
 const { recordMessage } = require('../lib/record-message')
+const { enUTC } = require('../lib/channels/channex')
 
 async function channelCall(method, path, body) {
   const res = await fetch(`${CHANNEL_API}${path}`, {
@@ -253,7 +254,13 @@ async function handleMessage(payload) {
     body:          payload.message || '',
     providerMsgId: payload.message_id || null,
     ota:           null,
-    sentAt:        payload.inserted_at || payload.timestamp || null,
+    // ⚠ MEME NORMALISATION QUE L'IMPORT. Channex rend ses instants SANS fuseau,
+    // et ce chemin-ci est l'AUTOMATIQUE — celui qui tourne tous les jours, quand
+    // `importMessages` ne tourne que quelques fois par an. Le laisser nu ferait
+    // mentir le commentaire de `channex.js`, qui promet une frontiere : « on rend
+    // le fuseau explicite au point d'entree, une fois, plutot que dans chaque
+    // lecteur ». Releve en review le 14 septembre 2026.
+    sentAt:        enUTC(payload.inserted_at || payload.timestamp || null),
     kind:          'message'
   })
 

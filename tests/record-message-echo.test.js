@@ -13,6 +13,20 @@
 // POURQUOI CES TESTS COMPTENT MAINTENANT : le correctif de fond rend cet import
 // RECURRENT. Sans reconciliation, chaque passage dupliquerait le fil.
 
+// ⚠ LE FUSEAU EST FIGE, ET C'EST LA LECON LA PLUS DURE DE CE CHANTIER.
+// Ma contre-epreuve annoncait « les deux normalisations desarmees, les deux
+// rougissent ». Verifie en review : desarmer `instantDe` fait rougir sous
+// TZ=Europe/Paris et TZ=America/New_York, mais reste VERT sous TZ=UTC — c'est
+// le fuseau de Vercel et celui de la plupart des CI. Le test protegeait le
+// poste de Thierry, pas le depot.
+//
+// C'est la meme erreur que celle qui a duplique 83 messages : un controle qui
+// ne s'execute pas comme le code de production ne dit rien du code de
+// production. Troisieme forme de faux vert du depot, apres « l'assertion qui
+// trouve le jeton ailleurs » et « le faux client qui n'applique pas les
+// filtres » : LA CONTRE-EPREUVE QUI DEPEND DE L'ENVIRONNEMENT.
+process.env.TZ = 'Europe/Paris'
+
 // Convention du depot : le module cree son client au chargement, on lui donne
 // de quoi le construire. Les requetes, elles, passent par le client INJECTE.
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
@@ -201,14 +215,60 @@ test('LE TEST QUI COMPTE : un instant SANS FUSEAU est lu en UTC, pas en heure lo
   assert.equal(sb.journal.inserts.length, 0, 'aucun doublon')
 })
 
-test('LE TEST QUI COMPTE : le provider livre un instant SANS AMBIGUITE — lecture du code', () => {
-  // La normalisation existe aux DEUX bouts, et c'est voulu : a la source pour
-  // que personne n'ait a deviner, dans le writer parce qu'il recoit aussi
-  // d'autres producteurs.
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib/channels/channex.js'), 'utf8')
-  assert.ok(/function enUTC/.test(src), 'channex normalise l instant')
-  assert.ok(src.includes('sentAt:        ma.inserted_at ? enUTC(ma.inserted_at) : null'),
-    'et importMessages passe par cette normalisation')
+test('LE TEST QUI COMPTE : enUTC est eprouve par COMPORTEMENT, sur les formats reels', () => {
+  // ⚠ MON TEST PRECEDENT LISAIT LE FICHIER ET ASSERAIT HUIT ESPACES
+  // D'ALIGNEMENT du site d'appel. Verifie en review : il rougissait sur un
+  // simple reformatage, et restait VERT quand on vidait la fonction de son
+  // corps. L'inverse exact de ce qu'on demande a un test. La cause etait
+  // mecanique : `enUTC` n'etait pas exporte, donc aucun test ne POUVAIT
+  // l'appeler. Il l'est maintenant.
+  //
+  // Ces assertions portent sur des CHAINES, donc elles ne dependent d'aucun
+  // fuseau : elles valent la meme chose sur le poste de Thierry, sur Vercel et
+  // en CI.
+  const { enUTC } = require('../lib/channels/channex')
+
+  assert.equal(enUTC('2026-07-22T15:50:10.405'), '2026-07-22T15:50:10.405Z',
+    'un instant NU recoit son fuseau — le cas Channex, celui qui a duplique 83 messages')
+  assert.equal(enUTC('2026-07-22 15:50:10'), '2026-07-22 15:50:10Z',
+    'meme avec un espace au lieu du T — le format des avis Beds24')
+  assert.equal(enUTC('2026-07-22T15:50:10.405000'), '2026-07-22T15:50:10.405000Z',
+    'microsecondes comprises')
+
+  for (const deja of ['2026-07-22T15:50:10.405Z', '2026-07-22T15:50:10.405+00:00',
+                      '2026-07-22T15:50:10.405+02:00', '2026-07-22T15:50:10.405-05:00']) {
+    assert.equal(enUTC(deja), deja, `un instant qui porte deja son fuseau n est pas touche : ${deja}`)
+  }
+
+  // ⚠ LE DECALAGE AUX HEURES SEULES. « +02 » est legal en ISO 8601 et accepte
+  // par Postgres. Ma premiere version ne le reconnaissait pas et y collait un
+  // Z : « …+02Z », une valeur VALIDE transformee en valeur invalide, que la base
+  // refuse — donc un message PERDU. Un normalisateur pose a une frontiere
+  // provider ne parie pas sur la forme du lendemain.
+  assert.equal(enUTC('2026-07-22T15:50:10.405+02'), '2026-07-22T15:50:10.405+02',
+    'un decalage aux heures seules est laisse intact, jamais mutile')
+
+  // ⚠ UNE DATE SEULE N'EST PAS UN DECALAGE. « 2026-07-22 » finit par « -22 ».
+  assert.equal(enUTC('2026-07-22'), '2026-07-22', 'une date seule est rendue telle quelle')
+  assert.equal(new Date(enUTC('2026-07-22')).toISOString(), '2026-07-22T00:00:00.000Z',
+    'et elle vaut minuit UTC, quel que soit le fuseau de la machine')
+
+  assert.equal(enUTC(null), null, 'un nul reste nul — pas « nullZ »')
+})
+
+test('LE TEST QUI COMPTE : les deux normalisations rendent le MEME instant', () => {
+  // La source et le writer normalisent tous les deux, volontairement. S'ils
+  // divergeaient, la reconciliation comparerait deux verites differentes.
+  const { enUTC } = require('../lib/channels/channex')
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib/record-message.js'), 'utf8')
+  assert.ok(src.includes('function normaliserInstant'), 'le writer a sa propre normalisation')
+  assert.ok(src.includes('MEME REGLE QUE `enUTC`'), 'et elle se declare solidaire de celle de la source')
+
+  // Idempotence : appliquer la source puis le writer ne doit rien changer.
+  for (const v of ['2026-07-22T15:50:10.405', '2026-07-22T15:50:10.405Z',
+                   '2026-07-22T15:50:10.405+00:00', '2026-07-22']) {
+    assert.equal(enUTC(enUTC(v)), enUTC(v), `enUTC est idempotent sur ${v}`)
+  }
 })
 
 test('la branche entrante compare des INSTANTS, pas des chaines — lecture du code', () => {
