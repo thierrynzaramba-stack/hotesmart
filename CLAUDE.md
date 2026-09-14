@@ -176,6 +176,20 @@ voies, a trancher a la session dediee — rendre `detectChange` injectable comme
 volee dans un commit de lot : un test a dates figees se repare avec la regle en
 tete, pas en decalant les dates d'un mois.
 
+**REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
+Le nombre attendu est **8, et exactement 8**. Avant tout push : lire le compte,
+pas la couleur. **9 rouges = une regression, on ne pousse pas** tant qu'on ne
+l'a pas nommee ; 7 rouges = une dette s'est refermee, on met ce nombre a jour
+ici pour qu'elle reste protegee. C'est la meme discipline que le `ATTENDU` de
+`tests/bookings-snapshot-troncature.test.js` : une exemption se COMPTE, elle ne
+se decrit pas.
+
+Vecu le jour meme : le correctif de la garde des cles migrees a fait passer la
+suite a 9 rouges. Le neuvieme etait une vraie rechute — une lecture de
+`bookings_snapshot` ajoutee sans borne dans un script neuf, donc tronquee a
+1000 lignes sans erreur. Sans le comptage, elle se serait noyee dans « les 8
+rouges habituels ».
+
 Prochain chantier (court, avant la phase 3) : **audit stop_sell** —
 docs/specs/spec-audit-stop-sell.md. Principe grave : le coeur memorise
 l'INTENTION commerciale de l'hote par jour et par bien, toute poussee

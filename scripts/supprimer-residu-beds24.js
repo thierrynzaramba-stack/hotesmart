@@ -8,6 +8,11 @@
 // qu'a Supabase.
 //
 // ⚠ LA CLE MIGREE N'EST PAS SUPPRIMEE, ET C'EST TOUT L'INTERET.
+// ⚠ DEPUIS LE 14 SEPTEMBRE 2026, LA GARDE RETOMBE FERMEE : une lecture en
+// echec de `provider_keys_migrated` rend `estCleMigree` = true. Ce script
+// n'utilise donc PAS le booleen — ici « migre » AUTORISE une suppression, et une
+// garde fermee l'aurait ouverte. Il exige le motif 'migree'. Voir [cles-migrees].
+//
 // `provider_keys_migrated` est ce qui empeche `materializeBeds24Properties` de
 // recreer la fiche au cycle suivant. La supprimer « pour faire propre »
 // rouvrirait exactement le defaut du 10 septembre 2026 : fiche recreee sous un
@@ -25,7 +30,7 @@
 
 require('dotenv').config({ path: '.env.local', quiet: true })
 const { createClient } = require('@supabase/supabase-js')
-const { estCleMigree } = require('../lib/cles-migrees')
+const { motifNonSync } = require('../lib/cles-migrees')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const BIEN = (process.argv.find(a => a.startsWith('--bien=')) || '').split('=')[1] || null
@@ -45,16 +50,30 @@ async function main () {
   // ─── Garde 1 : la cle doit etre enregistree comme migree ──────────────────
   // Sans elle, supprimer la fiche est inutile ET dangereux : le cron la
   // recreerait au cycle suivant, avec un active_at neuf.
-  const migree = await estCleMigree(
+  // ⚠ ICI « MIGRE » N'EST PAS UNE ABSTENTION, C'EST UNE AUTORISATION DE
+  // SUPPRIMER — et c'est pourquoi cette garde ne peut PAS se contenter du
+  // booleen. Depuis le 14 septembre 2026, `estCleMigree` retombe FERME : une
+  // lecture en echec rend `true`, donc elle aurait ouvert la porte au lieu de
+  // la fermer, avec en prime la phrase « Cle migree enregistree : OUI », qui
+  // aurait ete un mensonge a l'operateur. Releve en review.
+  //
+  // On exige donc le FAIT, pas la valeur de verite : seul `'migree'` autorise.
+  const motif = await motifNonSync(
     supabase, fiche.user_id, fiche.provider_property_id, fiche.provider)
-  if (!migree) {
+  if (motif === 'illisible') {
+    throw new Error(
+      `REFUS : la table des cles migrees est ILLISIBLE. On ne supprime pas une ` +
+      `fiche sur une garde aveugle — le cron la recreerait avec un active_at ` +
+      `neuf, et elle serait refacturee. Reessayer dans un instant.`)
+  }
+  if (motif !== 'migree') {
     throw new Error(
       `REFUS : la cle ${fiche.provider_property_id} n'est PAS dans ` +
       `provider_keys_migrated pour ce compte. Supprimer la fiche maintenant la ` +
       `ferait recreer au prochain cycle (defaut du 10 septembre 2026). ` +
       `Enregistrer la cle d'abord (noterCleMigree).`)
   }
-  console.log(`Cle migree enregistree : OUI`)
+  console.log(`Cle migree enregistree : OUI (lecture confirmee)`)
 
   // ─── Garde 2 : aucun enfant ne doit pointer sur cette fiche ───────────────
   // On verifie sur les DEUX formes de cle : l'uuid de la fiche et la cle

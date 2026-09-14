@@ -8,7 +8,19 @@ const fs = require('fs')
 const path = require('path')
 const lire = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
 
-const { clesMigrees, estCleMigree, noterCleMigree, _vider } = require('../lib/cles-migrees')
+// ⚠ LE FAUX `founder-notify` DOIT ETRE POSE AVANT LE REQUIRE DE LA GARDE.
+// `cles-migrees` le charge PARESSEUSEMENT (dans la branche d'echec seulement),
+// mais le vrai module construit un client Supabase au chargement : sans ce
+// leurre, le test dependrait des variables d'environnement.
+const cheminNotify = require.resolve('../lib/founder-notify')
+const incidents = []
+require.cache[cheminNotify] = {
+  id: cheminNotify, filename: cheminNotify, loaded: true, exports: {
+    reportIncident: async (type, opts) => { incidents.push({ type, ...opts }); return true }
+  }
+}
+
+const { clesMigrees, motifNonSync, estCleMigree, noterCleMigree, _vider } = require('../lib/cles-migrees')
 
 // Faux client qui FILTRE REELLEMENT.
 // ⚠ MA PREMIERE VERSION RENDAIT LE MEME `data` QUELS QUE SOIENT LES FILTRES.
@@ -69,22 +81,172 @@ test('LE TEST QUI COMPTE : le filtre est CLOISONNE PAR COMPTE, et le faux client
   assert.equal(await estCleMigree(faux({ lignes }), 'hote-A', 'uuid-x', 'channex'), true)
 })
 
-test('LE TEST QUI COMPTE : un echec de lecture retombe OUVERT, pas ferme', async () => {
-  // ⚠ FERMER SUR UN ECHEC ARRETERAIT LA SYNCHRO DE TOUS LES BIENS DE TOUS LES
-  // HOTES des que cette table devient illisible — une panne locale devenue
-  // panne generale, pour une table vide chez 99 % des comptes.
+test('LE TEST QUI COMPTE : un echec de lecture retombe FERME — decision du 14 septembre 2026', async () => {
+  // ⚠ CE TEST AFFIRMAIT L'INVERSE, ET IL AVAIT TORT. Il gravait le repli OUVERT
+  // avec pour raison qu'une table illisible ne devait pas arreter la synchro de
+  // tous les hotes. L'argument reste vrai, mais le prix mesure du repli ouvert
+  // l'a emporte : lors de trois cycles isoles (12/09 14:15, 13/09 16:01,
+  // 14/09 05:00), la garde est passee aveugle, l'ancienne cle Beds24 du 23 s'est
+  // rouverte, 82 sejours ont quitte la fiche Channex — et cinq minutes plus tard
+  // le writer des menages en a ANNULE SEIZE, ne les voyant plus vivants.
+  //
+  // Une synchro en pause se rattrape au cycle suivant. Un menage annule la
+  // veille du depart, non.
   _vider()
   const sb = faux({ lignes: [], error: { message: 'table absente' } })
-  assert.equal(await estCleMigree(sb, 'hote-A', '209413', 'beds24'), false,
-    'sur echec, la cle n est PAS consideree migree : le cron continue')
+  assert.equal(await estCleMigree(sb, 'hote-A', '209413', 'beds24'), true,
+    'garde aveugle = on ne traite pas le bien')
+
+  // ⚠ ET C'EST VRAI DE N'IMPORTE QUELLE CLE, pas seulement d'une cle migree :
+  // aveugle, on ne sait rien de personne.
+  _vider()
+  assert.equal(await estCleMigree(faux({ lignes: [], error: { message: 'x' } }), 'hote-A', '999999', 'beds24'), true,
+    'aveugle, meme un bien jamais migre est laisse tranquille')
 
   // ⚠ ET LE REPLI N'EST PAS DEFINITIF. L'echec est cache 5 s seulement (teste
-  // a part) ; des que la table redevient lisible, la garde reprend. On le
-  // verifie en vidant le cache, ce que fait aussi le TTL.
+  // a part) ; des que la table redevient lisible, la garde reprend son vrai
+  // travail — elle ne reste pas bloquee sur « tout est migre ».
   _vider()
   const sb2 = faux({ lignes: [{ user_id: 'hote-A', provider: 'beds24', provider_property_id: '209413' }] })
-  assert.equal(await estCleMigree(sb2, 'hote-A', '209413', 'beds24'), true,
-    'la garde reprend des que la lecture repasse')
+  assert.equal(await estCleMigree(sb2, 'hote-A', '209413', 'beds24'), true)
+  _vider()
+  assert.equal(await estCleMigree(faux({ lignes: [] }), 'hote-A', '209413', 'beds24'), false,
+    'lecture rendue : un bien non migre redevient synchronisable')
+})
+
+test('LE TEST QUI COMPTE : « migre » et « aveugle » sont deux faits distincts', async () => {
+  // Les deux arretent le traitement, mais les confondre ecrit un message faux
+  // dans le journal — « cle migree » pour une panne passagere envoie le
+  // diagnostic dans la mauvaise direction. C'est la lecon de cron-beds24-props.
+  _vider()
+  const migre = faux({ lignes: [{ user_id: 'hote-A', provider: 'beds24', provider_property_id: '209413' }] })
+  assert.equal(await motifNonSync(migre, 'hote-A', '209413', 'beds24'), 'migree')
+  _vider()
+  assert.equal(await motifNonSync(faux({ lignes: [] }), 'hote-A', '209413', 'beds24'), null,
+    'un bien vivant n a AUCUN motif de ne pas etre traite')
+  _vider()
+  const aveugle = faux({ lignes: [], error: { message: 'timeout' } })
+  assert.equal(await motifNonSync(aveugle, 'hote-A', '209413', 'beds24'), 'illisible')
+})
+
+test('LE TEST QUI COMPTE : un echec de lecture laisse une trace DURABLE, pas un log', async () => {
+  // ⚠ PENDANT QUATRE JOURS L'ECHEC N'A EXISTE QUE DANS UN console.error.
+  // Donc dans des logs Vercel ephemeres, donc nulle part : impossible de dire
+  // si c'etait un timeout, le pooler ou le cache de schema. Un incident survit
+  // au cycle et se relit. C'est la lecon deja payee (« erreur avalee, cron a
+  // 200 ») : on ne diagnostique pas ce qui n'a pas ete ecrit.
+  incidents.length = 0
+  _vider()
+  await estCleMigree(faux({ lignes: [], error: { message: 'statement timeout', code: '57014' } }), 'hote-Z', '1', 'beds24')
+  await new Promise(r => setImmediate(r))
+  assert.equal(incidents.length, 1, 'un incident est leve')
+  assert.equal(incidents[0].type, 'cles_migrees_illisible')
+  assert.equal(incidents[0].userId, 'hote-Z', 'et il nomme le compte concerne')
+  assert.equal(incidents[0].detail.message, 'statement timeout',
+    'et le MESSAGE de la base, qui est la seule chose qui dira la cause')
+  assert.equal(incidents[0].detail.code, '57014', 'et son code')
+
+  // ⚠ UNE LECTURE QUI REUSSIT NE LEVE RIEN. Sans quoi l'incident deviendrait du
+  // bruit permanent, et un bruit permanent ne se lit plus.
+  incidents.length = 0
+  _vider()
+  await estCleMigree(faux({ lignes: [] }), 'hote-Z', '1', 'beds24')
+  await new Promise(r => setImmediate(r))
+  assert.equal(incidents.length, 0)
+})
+
+test('LE TEST QUI COMPTE : les deux portes de LECTURE refusent aussi quand la garde est aveugle', () => {
+  // ⚠ NI FANTOMES, NI LISTE VIDE. Servir la liste non filtree ramene les biens
+  // migres a l'ecran (mesure du 11 septembre : quatre biens au lieu de deux) ;
+  // rendre une liste vide dirait « vous n'avez aucun bien ». Les deux mentent.
+  const beds24 = lire('api/beds24.js')
+  // ⚠ MA PREMIERE VERSION CHERCHAIT `res.status(503)` DANS TOUT LE FICHIER.
+  // Il y en a un autre ailleurs : la contre-epreuve a remplace CELUI-CI par un
+  // 200 et la suite est restee VERTE. Un test qui passe pour la mauvaise raison
+  // ne protege rien. On lit donc le BLOC de la garde, pas le fichier.
+  const iGarde = beds24.indexOf('if (migrees.lectureEnEchec) {')
+  assert.ok(iGarde > 0, 'getProperties traite explicitement la garde aveugle')
+  const blocGarde = beds24.slice(iGarde, iGarde + 500)
+  assert.ok(blocGarde.includes('res.status(503)'), 'et REFUSE plutot que de repondre a moitie')
+  assert.ok(blocGarde.includes('momentanément indisponible'),
+    'avec une phrase en francais que l hote peut comprendre')
+  const posGarde = beds24.indexOf('migrees.lectureEnEchec')
+  const posFiltre = beds24.indexOf('const gardees = (d.data || [])')
+  assert.ok(posGarde > 0 && posGarde < posFiltre, 'le refus precede le filtrage')
+
+  // Ici la liste Beds24 n'est qu'un complement du coeur : on n'ajoute rien,
+  // mais on le DIT — « je ne sais pas » n'est pas « non ».
+  // ⚠ MON PREMIER TEST NE VERIFIAIT QUE DES `includes` SUR TOUT LE FICHIER.
+  // La review a deplace le bloc de garde APRES le remplissage de `beds24Props`
+  // — donc fantomes servis quand meme — et les trois assertions passaient.
+  // Le meme faux vert que sur l'autre porte, laisse intact sur celle-ci.
+  const cp = lire('api/channel-property.js')
+  const iCp = cp.indexOf('if (migrees.lectureEnEchec) {')
+  assert.ok(iCp > 0, 'le complement Beds24 est garde aussi')
+  const blocCp = cp.slice(iCp, iCp + 500)
+  assert.ok(blocCp.includes('res.status(503)'),
+    'et REFUSE la requete : un 200 a liste vide ferait dire « aucun bien » a l ecran')
+  assert.ok(blocCp.includes('momentanément indisponible'), 'avec une phrase en francais')
+  const iRemplissage = cp.indexOf('beds24Props = (d.data || [])')
+  assert.ok(iRemplissage > 0 && iCp < iRemplissage,
+    'et le refus PRECEDE le remplissage, sinon les fantomes sont deja servis')
+
+  // ⚠ ET LE DRAPEAU QUE PERSONNE NE LISAIT A DISPARU. `beds24_indisponible`
+  // n'etait consomme par AUCUN front : la reponse restait un 200 a liste vide,
+  // `shared/properties.js` rendait `allFailed: false`, et l onboarding
+  // reconciliait contre une liste amputee — donc creait des biens en double.
+  // Meme discipline qu au-dessus : on lit le CODE, pas les commentaires — le
+  // paragraphe qui explique pourquoi ce drapeau a ete retire le nomme forcement.
+  const cpCode = cp.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+    .filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.ok(!cpCode.includes('beds24_indisponible'),
+    'aucun drapeau muet ne remplace un refus')
+})
+
+test('LE TEST QUI COMPTE : la ou « migre » AUTORISE une action, le booleen ne suffit pas', () => {
+  // ⚠ LE DEFAUT QUE LE REPLI FERME A CREE, TROUVE EN REVIEW LE 14 SEPTEMBRE.
+  // Partout ailleurs « migre » veut dire « abstiens-toi », et fermer la garde
+  // protege. Dans `supprimer-residu-beds24.js`, « migre » veut dire
+  // « tu peux SUPPRIMER la fiche » : la meme fermeture y devient une
+  // AUTORISATION accordee sur une panne de lecture. Le script affichait alors
+  // « Cle migree enregistree : OUI » — un mensonge a l'operateur — puis
+  // DELETE FROM properties. Le cron recreait la fiche avec un `active_at`
+  // neuf : le defaut de facturation du 10 septembre, rouvert par son correctif.
+  const src = lire('scripts/supprimer-residu-beds24.js')
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+    .filter(l => !l.trim().startsWith('//')).join('\n')
+
+  assert.ok(!code.includes('estCleMigree('),
+    'le booleen n est PAS utilise ici : il rend true sur une lecture en echec')
+  assert.ok(code.includes('await motifNonSync('), 'le motif est demande explicitement')
+  assert.ok(/motif !== 'migree'/.test(code) || /motif === 'migree'/.test(code),
+    'et seul le FAIT « migree » autorise la suppression')
+  assert.ok(/motif === 'illisible'/.test(code),
+    'une garde aveugle a son propre refus, distinct de « pas migree »')
+
+  // Les deux refus doivent PRECEDER la suppression, sinon ils arrivent trop tard.
+  const posMotif = code.indexOf('await motifNonSync(')
+  const posDelete = code.indexOf(".from('properties')\n    .delete()") >= 0
+    ? code.indexOf(".from('properties')\n    .delete()")
+    : code.indexOf('.delete()')
+  assert.ok(posMotif > 0 && posDelete > 0 && posMotif < posDelete,
+    'la garde precede le DELETE')
+})
+
+test('LE TEST QUI COMPTE : le poll des avis Beds24 est garde comme les autres portes', () => {
+  // ⚠ SEPTIEME PORTE. Elle lit `properties` et non la liste live du provider,
+  // donc elle etait « protegee » seulement parce qu'aucune fiche ne porte
+  // `provider = 'beds24'` aujourd'hui. C'est la protection accidentelle que
+  // `processArrivalCodes` avait deja payee le 10 septembre : le jour ou une
+  // fiche migree se recree, ce poll ecrit des avis sous une cle abandonnee.
+  const src = lire('lib/cron-beds24-reviews.js')
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+    .filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.ok(code.includes('await motifNonSync('), 'le poll interroge la garde')
+  const posGarde = code.indexOf('await motifNonSync(')
+  const posAppel = code.indexOf('/channels/booking/reviews')
+  assert.ok(posGarde > 0 && posAppel > 0 && posGarde < posAppel,
+    'et AVANT d appeler le provider, sinon le credit est deja depense')
 })
 
 test('clesMigrees : sans supabase ou sans compte, ensemble vide et aucune lecture', async () => {
@@ -175,7 +337,22 @@ test('LE TEST QUI COMPTE : TOUTE fonction de la boucle par bien est gardee — l
     // La garde doit etre dans les premieres lignes du corps : posee apres un
     // fetch ou une ecriture, elle ne protege plus rien.
     const tete = src.slice(i, i + 2600)
-    if (!tete.includes('estCleMigree')) nonGardees.push(`${nom} (dans ${dans})`)
+    // Deux formes valides : `estCleMigree` (booleen, ferme par defaut) ou
+    // `motifNonSync` (qui distingue « migre » de « aveugle » pour le journal).
+    //
+    // ⚠ ON EXIGE L'APPEL `await`, PAS LE NOM. La contre-epreuve a desarme la
+    // garde par `const motif = null // motifNonSync desarme` : le nom restait
+    // dans le fichier, le test restait vert, et la garde ne s'executait plus.
+    // Chercher un identifiant, c'est chercher une intention ; on cherche un acte.
+    // ⚠ ET ON LIT DU CODE, PAS DES COMMENTAIRES — SECOND FAUX VERT DE LA REVIEW.
+    // `// DESARMEE : if (await estCleMigree(...)) return` laissait l appel dans
+    // le texte : le test restait vert, la garde ne s executait plus. On retire
+    // donc les commentaires avant de chercher.
+    const code = tete.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+      .filter(l => !l.trim().startsWith('//')).join('\n')
+    if (!code.includes('await estCleMigree(') && !code.includes('await motifNonSync(')) {
+      nonGardees.push(`${nom} (dans ${dans})`)
+    }
   }
   assert.deepEqual(nonGardees, [],
     'ces fonctions de la boucle par bien ne verifient pas la cle migree')
@@ -259,8 +436,9 @@ test('LE TEST QUI COMPTE : les portes de LECTURE sont gardees aussi, pas seuleme
 })
 
 test('LE TEST QUI COMPTE : une lecture en echec est MARQUEE, pas silencieuse', async () => {
-  // ⚠ MESURE DU 12 SEPTEMBRE 2026.
-  // Ce module retombe volontairement OUVERT quand la table est illisible, et
+  // ⚠ MESURE DU 12 SEPTEMBRE 2026 (le repli etait alors OUVERT ; il est FERME
+  // depuis le 14 — mais le besoin de DISTINGUER les deux cas, lui, n a pas bouge).
+  // Ce module retombait OUVERT quand la table est illisible, et
   // son en-tete affirmait que « le seul degat serait un message renvoye a un
   // voyageur ». C'etait faux : `materializeBeds24Properties` passait aussi et
   // RECREAIT les fiches migrees avec un `active_at` neuf. Deux fiches Beds24
@@ -272,7 +450,8 @@ test('LE TEST QUI COMPTE : une lecture en echec est MARQUEE, pas silencieuse', a
   _vider()
   const sb = faux({ lignes: [], error: { message: 'table illisible' } })
   const enEchec = await clesMigrees(sb, 'hote-A')
-  assert.equal(enEchec.size, 0, 'le repli reste OUVERT : ensemble vide')
+  assert.equal(enEchec.size, 0,
+    'l ensemble rendu reste VIDE — on n invente pas des cles migrees ; c est le drapeau qui ferme')
   assert.equal(enEchec.lectureEnEchec, true, 'mais l echec est MARQUE')
 
   _vider()

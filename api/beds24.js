@@ -201,6 +201,18 @@ module.exports = async function handler(req, res) {
         // pas l'appelant. C'est le meme compte que `api_keys` ci-dessus, sinon le
         // filtre porterait sur les cles migrees de quelqu'un d'autre.
         const migrees = await clesMigrees(supabase, garde.accountUserId, 'beds24')
+        // ⚠ GARDE AVEUGLE = ON REFUSE, ON NE SERT NI FANTOMES NI LISTE VIDE.
+        // Servir la liste non filtree ramene les biens migres a l'ecran (mesure
+        // du 11 septembre : quatre biens au lieu de deux) ; rendre une liste
+        // vide dirait « vous n'avez aucun bien », ce qui est faux. Les deux sont
+        // des mensonges. Un refus explicite est la seule reponse vraie, et
+        // l'ecran peut le reessayer.
+        if (migrees.lectureEnEchec) {
+          console.error('[beds24] garde AVEUGLE : liste des biens refusee (ni fantomes, ni liste vide)')
+          return res.status(503).json({
+            error: 'La liste de vos biens est momentanément indisponible. Réessayez dans un instant.'
+          })
+        }
         const gardees = (d.data || []).filter(b => !migrees.has(String(b.id)))
         if (gardees.length !== (d.data || []).length) {
           console.log(`[beds24] getProperties : ${(d.data || []).length - gardees.length} bien(s) migre(s) ecarte(s)`)

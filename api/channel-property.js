@@ -241,6 +241,32 @@ module.exports = async function handler(req, res) {
         // snapshots, messages, codes d'acces) ; celle-ci ne fait que lire, et
         // c'est pourquoi elle avait echappe a l'inventaire.
         const migrees = await clesMigrees(supabase, compteLecture, 'beds24')
+        // ⚠ GARDE AVEUGLE : on n'ajoute RIEN plutot que d'ajouter des fantomes.
+        // Ici la liste Beds24 n'est qu'un complement de `channexProps`, qui vient
+        // du coeur et reste juste : l'ecran garde donc les biens qu'on connait.
+        // Mais on ne se tait pas — « je ne sais pas » n'est pas « non » : la
+        // reponse porte le drapeau, et un hote purement Beds24 doit pouvoir
+        // comprendre pourquoi son bien manque au lieu de le croire disparu.
+        // ⚠ GARDE AVEUGLE : ON REFUSE LA REQUETE. NI FANTOMES, NI LISTE AMPUTEE.
+        // Ma premiere version omettait le complement Beds24 et posait un drapeau
+        // `beds24_indisponible` dans une reponse 200. Releve en review : AUCUN
+        // front ne lisait ce drapeau, et un 200 a liste vide est la pire des
+        // reponses — `shared/properties.js` rendait `allFailed: false`, donc
+        // la messagerie affichait « Connecter mon logement » a un hote deja
+        // connecte, et `pages/onboarding.html` reconciliait contre une liste
+        // amputee, ce qui CREE des biens en double chez le canal. Une lecture
+        // indisponible ne doit jamais declencher une ecriture.
+        //
+        // Un 503 est la seule reponse vraie : le client leve (shared/api-client.js),
+        // `allFailed` passe a true, et l'ecran dit « chargement casse » au lieu
+        // de « vous n'avez aucun bien ». La cecite dure au plus 5 s (cache
+        // d'echec), donc un rechargement suffit.
+        if (migrees.lectureEnEchec) {
+          console.error('[channel-property] garde AVEUGLE : liste refusee (ni fantomes, ni liste amputee)')
+          return res.status(503).json({
+            error: 'La liste de vos biens est momentanément indisponible. Réessayez dans un instant.'
+          })
+        }
         beds24Props = (d.data || [])
           // ⚠ Les biens Beds24 arrivent de l'API du provider, pas de la base :
           // aucune RLS ne les borne. Le perimetre doit etre applique ICI, sinon
