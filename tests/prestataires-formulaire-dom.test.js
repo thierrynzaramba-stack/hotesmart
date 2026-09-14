@@ -83,7 +83,8 @@ function monterPage ({ liaisons = [] } = {}) {
                                                 telephone: null, email: null,
                                                 permissions: { self_availability: 'write' } }]
                        rapprochementSur = true },
-      renderPropCheckboxes, renderPrestataires, editPrestataire, saisieDesBiens, saveEdit
+      renderPropCheckboxes, renderPrestataires, editPrestataire, saisieDesBiens,
+      saveEdit, createPrestataire, perimetreRefuse
     }
   `
 
@@ -120,6 +121,13 @@ function monterPage ({ liaisons = [] } = {}) {
   }
   vm.runInContext(src, dom.getInternalVMContext ? dom.getInternalVMContext() : w)
   return { w, t: w.__t || dom.window.__t, ecrits, envois, dom }
+}
+
+// Les appels qui ÉCRIVENT un périmètre — par opposition aux lectures que
+// l'ouverture d'une fiche déclenche (`/api/disponibilites`).
+function ecrituresDuPerimetre (envois) {
+  return envois.filter(e => String(e.url).includes('/api/membres') ||
+                            (e.corps && e.corps.action === 'liaisons'))
 }
 
 // ─── Le cas exact de la production ─────────────────────────────────────────
@@ -222,6 +230,79 @@ test('les jours confiés partent bien dans les LIAISONS, eux', async () => {
     assert.deepStrictEqual([...l.weekdays].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6],
       'les sept jours sont confiés, et ils passent par les liaisons')
   }
+})
+
+// ─── Le périmètre VIDE, qui veut dire « tous les biens » ───────────────────
+
+test('décocher TOUS les biens est refusé — un périmètre vide ouvre le compte entier', async () => {
+  // ⚠ RÉGRESSION INTRODUITE PAR LE CORRECTIF LUI-MÊME, trouvée en review.
+  // Tant que `saveEdit` relisait `#prop-checkboxes`, les sept cases de jours —
+  // cochées et seulement `disabled` — gardaient le tableau NON VIDE, donc
+  // restrictif. En retirant la pollution, on a rendu `[]` atteignable d'un geste
+  // naturel. Or `api/menages-public.js`, `lib/cleaning/sync-menages.js` et
+  // `lib/cron-arrival-code.js` lisent tous une liste vide comme « aucune
+  // restriction » : la prestataire obtenait le planning, les voyageurs et les
+  // codes d'arrivée de TOUS les biens du compte. La pollution masquait la faute.
+  const { w, ecrits, envois } = monterPage()
+  const t = w.__t
+  t.seed(BIENS, [], [LIGNE_TOKEN])
+  t.renderPrestataires()
+  t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE_TOKEN.id)
+
+  for (const b of BIENS) {
+    const c = w.document.getElementById('prop-' + b.id)
+    c.checked = false
+    c.dispatchEvent(new w.Event('change'))
+  }
+  await t.saveEdit(LIGNE_TOKEN.id)
+
+  // ⚠ RIEN N'EST ÉCRIT, NULLE PART. Refuser après l'appel à `/api/membres`
+  // laisserait `profile_permissions.property_ids` à `[]` pendant que
+  // `public_tokens` reste intact : deux périmètres contradictoires.
+  assert.deepStrictEqual(ecrits, [], 'aucune écriture dans public_tokens')
+  // ⚠ On n'exige pas `envois` VIDE : ouvrir la fiche charge les disponibilités
+  // (`/api/disponibilites`), et c'est légitime. Ce qui ne doit pas partir, c'est
+  // l'enregistrement lui-même.
+  assert.deepStrictEqual(ecrituresDuPerimetre(envois), [],
+    'ni le profil, ni les liaisons ne sont écrits')
+})
+
+test('un bien sans uuid est refusé, il n\'est plus filtré en silence', async () => {
+  // ⚠ `/api/membres` reçoit des UUID, `public_tokens` des références provider.
+  // Le `.filter(Boolean)` retirait un bien sans uuid d'un seul côté : les deux
+  // représentations du même périmètre divergeaient sans un mot — exactement ce
+  // que ce correctif prétend fermer.
+  const { w, ecrits, envois } = monterPage()
+  const t = w.__t
+  const abimes = BIENS.map((b, i) => i === 1 ? { ...b, uuid: null } : b)
+  t.seed(abimes, [], [LIGNE_TOKEN])
+  t.renderPrestataires()
+  t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE_TOKEN.id)
+  await t.saveEdit(LIGNE_TOKEN.id)
+
+  assert.deepStrictEqual(ecrits, [], 'aucune écriture tant que le périmètre est ambigu')
+  assert.deepStrictEqual(ecrituresDuPerimetre(envois), [])
+})
+
+test('la création refuse le même périmètre vide, avec le même message', async () => {
+  // La garde est partagée : deux formulations auraient divergé au premier
+  // ajustement, et c'est le geste de l'hôte qui est le même des deux côtés.
+  const { w, ecrits, envois } = monterPage()
+  const t = w.__t
+  t.seed(BIENS, [], [])
+  t.renderPropCheckboxes()
+  for (const b of BIENS) {
+    const c = w.document.getElementById('prop-' + b.id)
+    c.checked = false
+    c.dispatchEvent(new w.Event('change'))
+  }
+  w.document.getElementById('presta-name').value = 'Nouvelle'
+  await t.createPrestataire()
+  assert.deepStrictEqual(ecrituresDuPerimetre(envois), [],
+    'aucun profil créé sans périmètre exploitable')
+  assert.deepStrictEqual(ecrits, [])
 })
 
 // ─── La contre-épreuve : ce test échouerait-il sur le code fautif ? ─────────

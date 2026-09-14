@@ -498,6 +498,27 @@ seulement à l'app ménage.
   `saisieDesBiens()` dit déjà quels biens sont cochés, et c'est elle qui alimente `/api/membres`
   **et** `enregistrerLiaisons`. Deux lectures du même geste pouvaient diverger ; il n'y en a plus
   qu'une, et les deux représentations restent synchrones **par construction**.
+  ⚠️ **ET LE CORRECTIF A OUVERT UN AUTRE CHEMIN, que la review a vu.** Tant que
+  `saveEdit` relisait le DOM, les sept cases de jours — cochées et seulement
+  `disabled` — gardaient `property_ids` **non vide**, donc restrictif. En retirant
+  la pollution, on a rendu le tableau **vide** atteignable d'un geste naturel :
+  « je la retire de ses biens le temps d'un remplacement ». Or dans
+  `public_tokens` une liste vide veut dire **« aucune restriction »** — c'est ce
+  que lisent `api/menages-public.js`, `lib/cleaning/sync-menages.js` et
+  `lib/cron-arrival-code.js` — et ce geste donnait à la prestataire le planning,
+  les voyageurs et **les codes d'arrivée de tous les biens du compte**.
+  `api/membres.js` ne rattrape rien : `perimetrePwaExploitable` est explicitement
+  désactivée en édition. La garde est donc côté écran : `perimetreRefuse()`,
+  partagée par la création et la modification, **avant toute écriture** — refuser
+  après l'appel à `/api/membres` laisserait les deux tables en désaccord.
+  Retirer quelqu'un se fait avec **« Supprimer »**, pas en décochant.
+  ⚠️ **Leçon à garder** : « une seule source de vérité » ne suffit pas si la
+  valeur qu'elle produit peut être **lue à l'envers** en aval. La pollution
+  masquait la faute ; la supprimer l'a révélée.
+  ⚠️ **Un bien sans `uuid` est refusé, plus filtré.** `/api/membres` reçoit des
+  UUID et `public_tokens` des références provider : le `.filter(Boolean)` en
+  retirait un d'un seul côté, en silence — la divergence même que ce correctif
+  prétend fermer.
   ⚠️ **Aucun des 1400 tests ne pouvait le voir**, et c'est la leçon : `pages-ids`,
   `contrat-front-api` et `js-navigateur-parse` lisent le HTML comme du **texte**. Aucun
   n'*exécutait* un `querySelectorAll`. `tests/prestataires-formulaire-dom.test.js` monte un vrai

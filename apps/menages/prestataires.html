@@ -577,6 +577,47 @@
     zone.style.display = manquants.length ? '' : 'none'
   }
 
+  // ⚠ UN PERIMETRE VIDE N'EST PAS « AUCUN BIEN », C'EST « TOUS LES BIENS ».
+  //
+  // Dans `public_tokens`, une liste vide veut dire « aucune restriction » — c'est
+  // la convention que lisent `api/menages-public.js` (le planning et le
+  // perimetre d'ecriture), `lib/cleaning/sync-menages.js` (les notifications) et
+  // `lib/cron-arrival-code.js` (les codes d'arrivee). Elle est l'INVERSE de
+  // celle de `profile_permissions`, ou un `selected` vide vaut zero bien.
+  // api/membres.js le dit noir sur blanc, et sa garde `perimetrePwaExploitable`
+  // est explicitement DESACTIVEE en edition : rien ne rattrape en aval.
+  //
+  // ⚠ CE CAS EST DEVENU ATTEIGNABLE AVEC LE CORRECTIF DU 14 SEPTEMBRE, et c'est
+  // la review qui l'a vu. Tant que `saveEdit` relisait `#prop-checkboxes`, les
+  // sept cases de jours — cochees et seulement `disabled` — gardaient le tableau
+  // NON VIDE, donc restrictif : decocher tous les biens ne montrait rien. En
+  // retirant la pollution, on a rendu le tableau vide accessible d'un geste
+  // naturel (« je la retire de ses biens le temps d'un remplacement »), et ce
+  // geste donnait la prestataire le planning, les voyageurs et les codes
+  // d'arrivee de TOUS les biens du compte. La pollution masquait la faute.
+  //
+  // Retirer quelqu'un ne se fait donc pas en decochant : ca se fait avec
+  // « Supprimer », qui desactive le profil ET coupe ses liaisons.
+  //
+  // ⚠ `uuid` MANQUANT = ON REFUSE, ON NE FILTRE PAS. `/api/membres` recoit des
+  // UUID, `public_tokens` des references provider : un bien sans uuid etait
+  // silencieusement retire d'un cote et conserve de l'autre par le
+  // `.filter(Boolean)` — exactement la divergence entre les deux
+  // representations que ce correctif pretend fermer. C'est une anomalie
+  // serveur ; elle se voit.
+  function perimetreRefuse(biens) {
+    if (!biens.length) {
+      return 'Cochez au moins un bien. Un périmètre vide ne retire pas l\'accès : '
+           + 'il l\'ouvre à TOUS les biens du compte. Pour retirer cette personne, '
+           + 'utilisez « Supprimer ».'
+    }
+    if (biens.some(b => !b.uuid)) {
+      return 'Un des biens cochés n\'a pas pu être identifié. Rechargez la page et '
+           + 'réessayez : enregistrer maintenant écrirait deux périmètres différents.'
+    }
+    return null
+  }
+
   // Ce que le formulaire décrit : les biens cochés, et le rang sur chacun.
   function saisieDesBiens() {
     return properties
@@ -617,7 +658,8 @@
     if (!name) return alert('Entrez un nom pour le prestataire')
 
     const biens = saisieDesBiens()
-    if (!biens.length) return alert('Cochez au moins un bien : un prestataire sans bien ne verrait aucun ménage.')
+    const refusCreation = perimetreRefuse(biens)
+    if (refusCreation) return alert(refusCreation)
 
     // ⚠ Facultatifs, et envoyes MEME VIDES : `/api/membres` les normalise en
     // `null`. Ce sont les deux seuls canaux par lesquels une prestataire
@@ -916,6 +958,13 @@
     // qu'elles doivent rester synchrones. L'app garde `label`,
     // `visibility_days` et `ratio_periode` : des reglages d'affichage.
     const biens = saisieDesBiens()
+    // ⚠ AVANT TOUTE ECRITURE, `/api/membres` COMPRIS. Poser la garde plus bas
+    // laissait `profile_permissions.property_ids` passer a `[]` pendant que
+    // `public_tokens` restait intact : deux perimetres contradictoires, et le
+    // geste suivant de l'hote aurait fige le mauvais.
+    const refus = perimetreRefuse(biens)
+    if (refus) return alert(refus)
+
     // ⚠ LE NOM NE PART PAS VERS LE PROFIL, et c'est deliberé.
     // Ce champ est pre-rempli depuis `public_tokens.label`, qui vaut
     // « Prenom Nom » des qu'un nom de famille existe (`synchroniserTokenPwa`
@@ -978,8 +1027,13 @@
     // La correction n'est pas de resserrer le selecteur mais de le SUPPRIMER :
     // `saisieDesBiens()` dit deja quels biens sont coches, et c'est elle qui
     // alimente `/api/membres` et `enregistrerLiaisons`. Deux lectures du meme
-    // geste pouvaient diverger ; il n'y en a plus qu'une. La faute devient
-    // structurellement impossible, au lieu d'etre seulement corrigee.
+    // geste pouvaient diverger ; il n'y en a plus qu'une.
+    //
+    // ⚠ « STRUCTURELLEMENT IMPOSSIBLE » ETAIT DE TROP, et la review l'a prouve :
+    // supprimer la pollution a ouvert le cas du tableau VIDE, qui vaut « tous les
+    // biens ». Une seule source de verite ne suffit pas si la valeur qu'elle
+    // produit peut etre lue a l'envers en aval. C'est `perimetreRefuse`, posee
+    // plus haut dans `saveEdit`, qui ferme reellement ce chemin.
     const champs = { label: name, visibility_days: visibilityDays,
                      ratio_periode: periodeChoisie(),
                      property_ids: biens.map(b => b.ref) }
