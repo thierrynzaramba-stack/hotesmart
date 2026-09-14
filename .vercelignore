@@ -38,3 +38,8 @@ docs/
 tests/
 migrations/
 scripts/
+
+# Racine servie = racine du depot (vercel.json outputDirectory ".").
+# supabase/ contient le code des Edge Functions et la config locale :
+# rien n'y est lu au runtime, tout y etait lisible publiquement.
+supabase/
