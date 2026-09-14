@@ -772,6 +772,18 @@ aucun chemin ne les recalcule — un engagement pris avec quelqu'un ne se rouvre
   fiche, ce qui pose un profil. Décision du product owner, 14 septembre 2026 : *la garde par
   profil prime, elle ne coexiste pas.*
 
+  ⚠️ **CONSÉQUENCE EN AVAL, TROUVÉE EN REVIEW : les CODES D'ARRIVÉE.**
+  `lib/cron-arrival-code.js` comptait un `public_tokens` comme « prestataire
+  affecté » sur la seule foi de `property_ids`, sans regarder s'il y avait
+  quelqu'un derrière. Or `property_status.last_menage_at` n'a qu'un writer,
+  `markReady`, appelé uniquement par le `markDone` de cet endpoint — qui rend
+  désormais 401 pour un lien orphelin (le « marquer fait » de l'écran hôte ne
+  vit que dans le `localStorage` du navigateur). La garde aurait donc exigé un
+  ménage que **personne ne peut plus valider** : plus aucun code d'arrivée sur ce
+  bien, pour tous les séjours suivants, sans aucun écran pour débloquer.
+  La règle est maintenant la même des deux côtés : **un jeton ne couvre rien s'il
+  ne désigne personne**. Non atteint en production — aucun jeton orphelin ne
+  subsiste — mais silencieux le jour où il le serait.
   ⚠️ **Une panne coupe en 503, jamais en 401.** Le front supprime une action de sa file
   d'attente sur tout 4xx : rendre « lien invalide » sur un timeout PostgREST détruirait un
   « ménage fait » en attente de renvoi, et ferait passer une indisponibilité passagère pour un
@@ -912,6 +924,11 @@ false`) ne voit jamais ces boutons** : son ménage naît `accepted`, rien ne cha
   faire écrirait une acceptation au nom de personne. Depuis le 14 septembre 2026 la réponse est
   **401** et non plus 403 : le lien est *invalide*, pas seulement insuffisant pour ce geste —
   distinguer les deux laissait entendre qu'un jeton sans personne reste un jeton valable.
+- ⚠️ **Côté PWA, un 401 n'est PAS une panne.** `chargerAvis` ne distinguait que le 503 :
+  une prestataire désactivée pendant qu'elle avait l'onglet ouvert voyait « Service
+  indisponible — Réessayez dans un instant » et réessayait indéfiniment. 401 et 403 retombent
+  désormais sur le même geste que « droit retiré » — `masquerOngletAvis()`, une seule fonction
+  pour les deux chemins, sans quoi ils auraient divergé au premier ajustement.
 
 - **Écran hôte** : une pastille par ménage — le prénom, en pointillés quand c'est `offered`
   (un suppléant qui n'a pas répondu n'est **pas** un ménage couvert), « personne » en clair

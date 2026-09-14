@@ -15,16 +15,31 @@ const assert = require('node:assert')
 const path = require('node:path')
 const Module = require('node:module')
 
-function charger({ snapshots = [], tokens = [], statut = null }) {
+// ⚠ `profils` PORTE LA VRAIE COLONNE : `pwa_token`. Depuis le 14 septembre, un
+// jeton ne « couvre » un bien que si un profil ACTIF, en `access_mode = 'lien'`,
+// porte ce jeton — sans quoi personne ne peut plus valider le menage et le code
+// d'arrivee resterait bloque pour toujours. Un double qui ignorerait cette
+// seconde lecture rendrait la garde indetectable : on pourrait la retirer sans
+// qu'un test bronche.
+function charger({ snapshots = [], tokens = [], profils = null, statut = null }) {
   const req = { order: null, lte: null, limit: null }
+  // Par defaut, chaque jeton a un profil actif derriere lui : c'est l'etat
+  // normal, et les tests ecrits AVANT cette garde doivent continuer de decrire
+  // ce qu'ils decrivaient.
+  const vivants = profils !== null ? profils
+    : (tokens || []).map(t => ({ pwa_token: t.token })).filter(x => x.pwa_token)
   const table = (nom) => {
     const q = {
-      select() { return q }, eq() { return q },
+      select() { return q }, eq() { return q }, not() { return q },
       lte(col, val) { req.lte = { col, val }; return q },
       order(col, opts) { req.order = { col, ...opts }; return q },
       limit(n) { req.limit = n; return Promise.resolve({ data: snapshots }) },
       maybeSingle: async () => ({ data: nom === 'property_status' ? statut : null }),
-      then(res, rej) { return Promise.resolve({ data: nom === 'public_tokens' ? tokens : [] }).then(res, rej) }
+      then(res, rej) {
+        const data = nom === 'public_tokens' ? tokens
+                   : nom === 'profiles' ? vivants : []
+        return Promise.resolve({ data }).then(res, rej)
+      }
     }
     return q
   }
@@ -66,7 +81,7 @@ test('LE CAS PROTEGE : un depart precedent ancien bloque bien le code d\'acces',
   // Un prestataire couvre le bien et aucun menage n'a ete valide -> on bloque.
   const { mod } = charger({
     snapshots: [snap('2026-09-08'), snap('2026-09-01'), snap('2026-08-15')],
-    tokens: [{ property_ids: [] }],     // token « tous les biens »
+    tokens: [{ token: 'tk-1', property_ids: [] }],   // token « tous les biens »
     statut: { last_menage_at: null }
   })
   const r = await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24')
@@ -78,7 +93,7 @@ test('sans depart precedent trouve, le code partirait sans attendre le menage', 
   // les resas terminees sortent du lot, plus de depart precedent, envoi immediat.
   const { mod } = charger({
     snapshots: [],                       // aucun depart precedent remonte
-    tokens: [{ property_ids: [] }],
+    tokens: [{ token: 'tk-1', property_ids: [] }],
     statut: { last_menage_at: null }
   })
   assert.strictEqual(await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), true)
@@ -87,7 +102,7 @@ test('sans depart precedent trouve, le code partirait sans attendre le menage', 
 test('menage valide APRES le depart precedent -> code libere', async () => {
   const { mod } = charger({
     snapshots: [snap('2026-09-08')],
-    tokens: [{ property_ids: ['12345'] }],
+    tokens: [{ token: 'tk-1', property_ids: ['12345'] }],
     statut: { last_menage_at: '2026-09-09T10:00:00Z' }
   })
   assert.strictEqual(await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), true)
@@ -96,7 +111,7 @@ test('menage valide APRES le depart precedent -> code libere', async () => {
 test('menage valide AVANT le depart precedent -> code retenu', async () => {
   const { mod } = charger({
     snapshots: [snap('2026-09-08')],
-    tokens: [{ property_ids: ['12345'] }],
+    tokens: [{ token: 'tk-1', property_ids: ['12345'] }],
     statut: { last_menage_at: '2026-09-05T10:00:00Z' }
   })
   assert.strictEqual(await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false)
@@ -109,6 +124,43 @@ test('aucun suivi menage sur le bien -> le code n\'est pas bloque', async () => 
     statut: null
   })
   assert.strictEqual(await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), true)
+})
+
+test('un jeton SANS profil actif ne couvre rien — sinon le code reste bloque pour toujours', async () => {
+  // ⚠ LE CAS DANGEREUX, ET IL EST SILENCIEUX (REVIEW.md regle 8).
+  // Depuis la fermeture du pont de convergence (14 septembre),
+  // `api/menages-public.js` rend 401 a un lien sans profil actif : son porteur ne
+  // peut plus appeler `markDone`, donc plus rien n'ecrit
+  // `property_status.last_menage_at` — `markReady` en est le SEUL writer, et le
+  // « marquer fait » de l'ecran hote ne vit que dans le localStorage.
+  // Compter ce jeton comme « prestataire affecte » exigerait donc un menage que
+  // PERSONNE ne peut plus valider : aucun code d'arrivee ne partirait plus sur ce
+  // bien, pour tous les sejours suivants, et aucun ecran ne permettrait de
+  // debloquer. On ne bloque pas au nom de quelqu'un qui n'existe pas.
+  const { mod } = charger({
+    snapshots: [snap('2026-09-08')],
+    tokens: [{ token: 'orphelin', property_ids: ['12345'] }],
+    profils: [],                         // aucun profil actif ne porte ce jeton
+    statut: null
+  })
+  assert.strictEqual(
+    await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), true,
+    'un lien orphelin ne doit pas retenir le code d\'arrivee du voyageur')
+})
+
+test('CONTRE-EPREUVE : le MEME jeton, avec un profil actif, bloque bien', async () => {
+  // Sans ce test, le precedent passerait aussi si la couverture avait disparu
+  // pour une tout autre raison. Meme fixture, une seule difference : quelqu'un
+  // existe derriere le jeton.
+  const { mod } = charger({
+    snapshots: [snap('2026-09-08')],
+    tokens: [{ token: 'vivant', property_ids: ['12345'] }],
+    profils: [{ pwa_token: 'vivant' }],
+    statut: null
+  })
+  assert.strictEqual(
+    await mod.isMenageValidated('u1', '12345', { arrival: '2026-09-10', id: '77' }, 'beds24'), false,
+    'une prestataire reelle est affectee : le menage est exige')
 })
 
 test('les sejours non actifs sont ignores dans la recherche', async () => {

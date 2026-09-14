@@ -606,6 +606,18 @@
   // representations que ce correctif pretend fermer. C'est une anomalie
   // serveur ; elle se voit.
   function perimetreRefuse(biens) {
+    // ⚠ « AUCUNE CASE COCHEE » ET « AUCUNE CASE AFFICHEE » NE SE DISENT PAS PAREIL.
+    // `loadProperties` met `properties = []` sur panne reseau ou HTTP, et l'ecran
+    // affiche alors « Aucun bien trouve » : `saisieDesBiens()` rend `[]` sans que
+    // l'hote ait rien decoche. Lui repondre « Cochez au moins un bien » devant un
+    // formulaire vide de cases est un contresens — il chercherait une case qui
+    // n'existe pas. Le refus reste (il protege du perimetre vide), le motif
+    // change. Constat de review.
+    if (!properties.length) {
+      return 'Vos biens n\'ont pas pu être chargés : rien ne peut être enregistré '
+           + 'sans eux, faute de quoi le périmètre de cette personne serait vidé. '
+           + 'Rechargez la page et réessayez.'
+    }
     if (!biens.length) {
       return 'Cochez au moins un bien. Un périmètre vide ne retire pas l\'accès : '
            + 'il l\'ouvre à TOUS les biens du compte. Pour retirer cette personne, '

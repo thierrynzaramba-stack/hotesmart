@@ -2181,6 +2181,17 @@ if ("serviceWorker" in navigator) {
       return
     }
     if (jeton !== chargementCourant) return   // un chargement plus recent a pris la main
+    // ⚠ UN LIEN MORT N'EST PAS UNE PANNE, ET LE DIRE FAIT REESSAYER POUR RIEN.
+    // Depuis le 14 septembre, un profil desactive rend 401 sur ce chemin — avant,
+    // c'etait un 200 « actif: false » qui masquait proprement l'onglet. Traite
+    // comme les 503, il affichait « Réessayez dans un instant » a quelqu'un dont
+    // l'acces est revoque : elle reessaierait indefiniment. On retombe donc sur
+    // le meme geste que « droit retire » : on masque l'onglet, on revient au
+    // planning — qui, lui, dira l'etat du lien.
+    if (res.status === 401 || res.status === 403) {
+      masquerOngletAvis()
+      return
+    }
     if (!res.ok) {
       // 503 : panne serveur (droits, attribution ou liste). Surtout pas « aucun
       // avis » — la difference change ce qu'elle en conclut sur son travail.
@@ -2195,13 +2206,7 @@ if ("serviceWorker" in navigator) {
     if (jeton !== chargementCourant) return
     // Le droit a pu etre retire entre la sonde et le clic.
     if (data.actif === false || data.autorise !== true) {
-      // ⚠ ON MASQUE LE SEUL ONGLET AVIS, PAS LA BARRE. La masquer entierement
-      // emportait « Mes absences », parfaitement legitime, jusqu'au rechargement
-      // de la PWA : un droit retire sur les avis ne retire pas les autres.
-      const bouton = document.getElementById('tab-avis')
-      if (bouton) bouton.style.display = 'none'
-      renderEnteteRatio(null)
-      setTab('planning')
+      masquerOngletAvis()
       return
     }
     avisCharge = true
@@ -2210,6 +2215,19 @@ if ("serviceWorker" in navigator) {
     // La periode que le serveur dit avoir appliquee — pas celle qu'on croyait
     // demander : c'est elle qui est sous les yeux de la prestataire.
     montrerSelecteurPeriode(data.periodeVue || p)
+  }
+
+  // ⚠ ON MASQUE LE SEUL ONGLET AVIS, PAS LA BARRE. La masquer entierement
+  // emportait « Mes absences », parfaitement legitime, jusqu'au rechargement de
+  // la PWA : un droit retire sur les avis ne retire pas les autres.
+  // Deux chemins y menent — le droit retire entre la sonde et le clic, et le
+  // lien devenu mort (401) — et ils doivent faire EXACTEMENT la meme chose :
+  // deux versions du meme geste auraient diverge au premier ajustement.
+  function masquerOngletAvis () {
+    const bouton = document.getElementById('tab-avis')
+    if (bouton) bouton.style.display = 'none'
+    renderEnteteRatio(null)
+    setTab('planning')
   }
 
   function renderAvis (data) {

@@ -305,6 +305,28 @@ test('la création refuse le même périmètre vide, avec le même message', asy
   assert.deepStrictEqual(ecrits, [])
 })
 
+test('biens non chargés : le refus le DIT, il ne parle pas de cases à cocher', async () => {
+  // ⚠ `loadProperties` met `properties = []` sur panne réseau ou HTTP. L'écran
+  // affiche « Aucun bien trouvé » : répondre « Cochez au moins un bien » devant
+  // un formulaire sans aucune case est un contresens — l'hôte chercherait une
+  // case qui n'existe pas. Le refus protège toujours du périmètre vide ; c'est
+  // le motif qui doit être vrai. Constat de review.
+  const { w, ecrits, envois } = monterPage()
+  const t = w.__t
+  t.seed([], [], [LIGNE_TOKEN])
+  t.renderPrestataires()
+  t.renderPropCheckboxes()
+
+  const motif = t.perimetreRefuse(t.saisieDesBiens())
+  assert.ok(motif, 'on refuse toujours')
+  assert.match(motif, /chargés/, 'le motif parle du chargement, pas de cases à cocher')
+  assert.ok(!/Cochez/.test(motif))
+
+  await t.saveEdit(LIGNE_TOKEN.id)
+  assert.deepStrictEqual(ecrits, [], 'et rien n\'est écrit')
+  assert.deepStrictEqual(ecrituresDuPerimetre(envois), [])
+})
+
 // ─── La contre-épreuve : ce test échouerait-il sur le code fautif ? ─────────
 
 test('CONTRE-ÉPREUVE : le sélecteur d\'avril ramasse bien les jours, sur ce DOM', async () => {
