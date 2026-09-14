@@ -7,7 +7,19 @@ import { compteCourant, peutLire, doitAfficherSelecteur, comptes, basculerVers, 
 export async function renderSidebar(activePage = '') {
   const user = await getUser()
   const sidebar = document.getElementById('sidebar')
-  if (!sidebar) return
+  // ⚠ UN POINT DE MONTAGE ABSENT EST UN DEFAUT, PAS UN CAS NORMAL.
+  // Ce `return` etait MUET. Les trois pages YieldFlow portaient
+  // `id="sidebar-root"` : `renderSidebar` sortait sans un mot, le menu n'etait
+  // jamais rendu, et l'app devenait un cul-de-sac — on y entrait, on n'en
+  // sortait plus. Aucune erreur en console, donc rien a chercher.
+  // Une page qui APPELLE cette fonction veut un menu : ne pas pouvoir le poser
+  // doit se voir. Mesure du 14 septembre 2026.
+  if (!sidebar) {
+    console.error('[sidebar] point de montage #sidebar ABSENT — le menu ne sera pas rendu. '
+      + 'La page doit contenir `<div class="layout"><div class="sidebar" id="sidebar"></div>'
+      + '<div class="main">…</div></div>`.')
+    return
+  }
 
   const apiStatus = await getApiStatus(user)
 

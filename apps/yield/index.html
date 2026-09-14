@@ -119,8 +119,26 @@
   </style>
 </head>
 <body>
-<div id="sidebar-root"></div>
+<!-- ⚠ LE CONTRAT DE MISE EN PAGE EST `.layout > .sidebar + .main`, ET L'ID
+     DOIT ETRE `sidebar` : `components/sidebar.js` fait
+     `document.getElementById('sidebar')` puis `if (!sidebar) return`.
+     Ces pages portaient `sidebar-root` et n'avaient pas le conteneur : le menu
+     n'etait jamais rendu, SANS la moindre erreur, et l'app devenait un
+     cul-de-sac des qu'on y entrait. Mesure du 14 septembre 2026. -->
+<div class="layout">
+<div class="sidebar" id="sidebar"></div>
 <div class="main">
+<!-- ⚠ `.content` PORTE LE DEFILEMENT, ET C'EST LA MOITIE DU CONTRAT.
+     `.layout` est en `height:100vh; overflow:hidden` et `.main` aussi
+     (public/style.css) : sans `.content` — qui est le seul a porter
+     `flex:1; overflow-y:auto` — tout ce qui depasse la fenetre est TRONQUE,
+     sans barre de defilement. Ces pages vivaient hors du conteneur, donc le
+     body scrollait ; en les y ramenant pour retrouver le menu, on heritait
+     aussi de sa contrainte de hauteur. Releve en review le 14 septembre 2026,
+     avant livraison. `.content` apporte au passage le retrait de 24 px des
+     autres pages : `.header` n'est style NULLE PART, le titre etait colle au
+     rail de la sidebar. -->
+<div class="content">
   <div class="header">
     <h1>Tarification dynamique</h1>
     <p class="subtitle">Ce qui s’est passé, où on en est, et ce qui est normal</p>
@@ -165,7 +183,10 @@
   </div>
 
   <div id="yf-contenu"></div>
+</div><!-- .content -->
 </div>
+
+</div><!-- .layout -->
 
 <script type="module">
   // ⚠ LOT 4.2 — L'ECRAN DE RESTITUTION. LECTURE SEULE INTEGRALE : cette page
