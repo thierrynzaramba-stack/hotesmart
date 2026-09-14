@@ -1303,14 +1303,50 @@
     const p = new Date(Date.UTC(x.getUTCFullYear(), 0, 4))
     return 1 + Math.round(((x - p) / 86400000 - 3 + ((p.getUTCDay() + 6) % 7)) / 7) }
 
-  // Les règles actives, telles que le serveur les a relues.
-  const reglesActives = () => (dispo.regles || []).filter(r => r.active !== false && Array.isArray(r.jours))
-  // Deux règles actives = le rythme A/B. Une seule = toutes les semaines.
-  const estAlternee = () => reglesActives().some(r => r.cadence === 2)
+  // ⚠ DEUX LISTES, ET LA DIFFÉRENCE COÛTE CHER.
+  // `reglesLisibles` : celles dont on sait recocher les cases. C'est ce qu'on
+  //   AFFICHE et ce sur quoi on calcule.
+  // `reglesActives`  : TOUTES les règles actives, y compris celles que
+  //   `lireRrule` ne sait pas relire (`jours: null` — une `FREQ=DAILY` écrite à
+  //   la main, par exemple). C'est ce qu'on RETIRE.
+  // Ne retirer que les lisibles faisait du « remplacement » une ADDITION : la
+  // règle illisible restait active, invisible à l'écran, et sans aucune issue
+  // par l'interface.
+  const reglesActives = () => (dispo.regles || []).filter(r => r.active !== false)
+  const reglesLisibles = () => reglesActives().filter(r => Array.isArray(r.jours))
+  const reglesOpaques = () => reglesActives().filter(r => !Array.isArray(r.jours))
+
+  // ⚠ LE MODE N'EST PAS TOUJOURS DÉDUCTIBLE DES DONNÉES. Sans aucune règle, rien
+  // ne dit si l'hôte veut une quinzaine : le bouton « Une semaine sur deux… »
+  // semblait mort sur une prestataire qu'on vient de créer. Un drapeau d'écran
+  // porte l'intention jusqu'à ce qu'une règle existe.
+  const estAlternee = () => dispo.forceAlternee || reglesLisibles().some(r => (r.cadence || 1) >= 2)
+
+  // ⚠ « CETTE SEMAINE EST UNE SEMAINE A » DOIT ÊTRE VRAI PAR CONSTRUCTION.
+  // La première version désignait A par l'ordre des ancrages : vider la ligne A
+  // faisait donc remonter B en première position, et la phrase d'ancrage changeait
+  // de lettre sans que personne ne l'ait demandé. On définit A comme le lot qui
+  // couvre LA SEMAINE EN COURS — la phrase devient une tautologie, donc toujours
+  // juste, et le bouton d'inversion garde tout son sens : il déplace les ancrages.
+  function couvreCetteSemaine(r) {
+    const ecart = Math.round((jourDe(lundiDe(AUJ())) - jourDe(lundiDe(r.ancre || AUJ()))) / (7 * 86400000))
+    return ((ecart % 2) + 2) % 2 === 0
+  }
+  // ⚠ LES JOURS SE FUSIONNENT, ILS NE SE PERDENT PAS. L'écran d'avant posait
+  // autant de règles qu'on cliquait sur « Ajouter » : une prestataire peut donc
+  // porter « tous les lundis » ET « tous les samedis ». N'en montrer qu'une
+  // faisait un écran qui se contredit — les cases disaient lundi, le calendrier
+  // peignait aussi les samedis — puis le premier clic retirait toutes les règles
+  // et ne reposait que la ligne affichée : le samedi disparaissait en silence.
+  function fusionner(rs) {
+    if (!rs.length) return null
+    return { jours: [...new Set(rs.flatMap(r => r.jours))].sort((a, b) => a - b),
+             ancre: rs[0].ancre }
+  }
   function lotsAB() {
-    const act = reglesActives().filter(r => r.cadence === 2)
-      .sort((a, b) => String(a.ancre || '').localeCompare(String(b.ancre || '')))
-    return { a: act[0] || null, b: act[1] || null }
+    const act = reglesLisibles().filter(r => (r.cadence || 1) >= 2)
+    return { a: fusionner(act.filter(couvreCetteSemaine)),
+             b: fusionner(act.filter(r => !couvreCetteSemaine(r))) }
   }
 
   function congeDe(j) {
@@ -1325,7 +1361,7 @@
     if (congeDe(j)) return false
     const e = (dispo.exceptions || []).find(x => String(x.date).slice(0, 10) === j)
     if (e) return e.available === true
-    const act = reglesActives()
+    const act = reglesLisibles()
     if (!act.length) return true
     const jour = jourDe(j).getUTCDay()
     return act.some(r => {
@@ -1336,16 +1372,15 @@
       return ((ecart % 2) + 2) % 2 === 0
     })
   }
+  // La lettre d'une semaine, relative à la semaine EN COURS — donc cohérente par
+  // construction avec la phrase d'ancrage.
   const regleParJour = j => {
-    const { a } = lotsAB()
-    if (!a) return null
-    const ancre = lundiDe(a.ancre || AUJ())
-    const ecart = Math.round((jourDe(lundiDe(j)) - jourDe(ancre)) / (7 * 86400000))
+    const ecart = Math.round((jourDe(lundiDe(j)) - jourDe(lundiDe(AUJ()))) / (7 * 86400000))
     return ((ecart % 2) + 2) % 2 === 0 ? 'A' : 'B'
   }
 
   async function chargerDisponibilites(profilId) {
-    dispo = { profilId, regles: [], exceptions: [], conges: [], mois: 0 }
+    dispo = { profilId, regles: [], exceptions: [], conges: [], mois: 0, forceAlternee: false }
     document.getElementById('dispo-recur').innerHTML = '<div class="dispo-vide">Chargement…</div>'
     document.getElementById('dispo-months').innerHTML = ''
     await rechargerDispo()
@@ -1391,7 +1426,7 @@
     const alt = estAlternee()
     let h = ''
     if (!alt) {
-      const simple = reglesActives()[0]
+      const simple = fusionner(reglesLisibles())
       h += ligneJours('A', simple ? simple.jours : [], '', '')
       h += `<div><button type="button" class="btn-mini" id="btn-alt">Une semaine sur deux…</button></div>`
     } else {
@@ -1422,21 +1457,35 @@
       c.addEventListener('change', () => enregistrerRecurrence()))
 
     const hint = document.getElementById('dispo-hint')
-    const act = reglesActives()
-    if (!act.length) {
+    const act = reglesLisibles()
+    // ⚠ UNE RÈGLE QU'ON NE SAIT PAS RELIRE SE DIT, elle ne se cache pas. Elle
+    // compte pour le moteur mais n'apparaît dans aucune case : sans ce message,
+    // l'écran affirmerait « aucune règle » sur quelqu'un qui en a une.
+    const opaques = reglesOpaques()
+    const avertOpaque = opaques.length
+      ? `<br><b style="color:var(--amber)">⚠️ ${opaques.length} règle(s) d'un format que cet écran ` +
+        'ne sait pas afficher comptent aussi. Elles seront remplacées au prochain enregistrement.</b>'
+      : ''
+    if (!act.length && !opaques.length) {
       // ⚠ LE PIÈGE, DIT LÀ OÙ ON LE TEND. « Aucune règle = disponible » est la
       // règle du moteur depuis le lot 3.1 : tout décocher ne la rend pas
       // indisponible, ça la rend disponible PARTOUT — l'inverse du geste.
       hint.innerHTML = '<b style="color:var(--amber)">Aucun jour coché : elle est disponible TOUS les jours.</b> ' +
-        'Cochez ses jours de travail, ou cliquez directement les jours du calendrier.'
+        'Cochez ses jours de travail, ou cliquez directement les jours du calendrier.' + avertOpaque
     } else if (!estAlternee()) {
-      hint.textContent = 'Elle travaille ' + act[0].jours.map(j => NOMS_SEM[j]).join(', ') +
-        '. Tous les autres jours sont comptés absents.'
+      const tous = fusionner(act)
+      hint.innerHTML = (tous
+        ? 'Elle travaille ' + tous.jours.map(j => NOMS_SEM[j]).join(', ') +
+          '. Tous les autres jours sont comptés absents.'
+        : 'Aucun jour coché.') + avertOpaque
     } else {
       const { a, b } = lotsAB()
       const dire = r => (r && r.jours.length) ? r.jours.map(j => NOMS_SEM[j]).join(', ') : 'aucun jour'
+      // ⚠ UN LOT VIDE SE DIT EN TOUTES LETTRES. « Semaine A cochée, semaine B
+      // vide » veut dire : elle travaille une semaine sur deux et l'autre PAS DU
+      // TOUT. C'est le cas d'usage — et le piège si l'on oublie de remplir B.
       hint.innerHTML = `<b>Semaine A</b> : ${dire(a)} · <b>Semaine B</b> : ${dire(b)}. ` +
-        'La lettre est rappelée à gauche de chaque semaine du calendrier.'
+        'La lettre est rappelée à gauche de chaque semaine du calendrier.' + avertOpaque
     }
   }
 
@@ -1554,6 +1603,9 @@
         lots[0].ancre = lundiDe(a.ancre)
         lots[1].ancre = isoJour(new Date(jourDe(lots[0].ancre).getTime() + 7 * 86400000))
       }
+      // ⚠ TOUTES les règles actives, y compris celles qu'on ne sait pas relire :
+      // sans elles, le « remplacement » serait une ADDITION, et la règle opaque
+      // resterait active pour toujours, invisible et sans issue par l'écran.
       for (const r of reglesActives()) {
         const { ok } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
         if (!ok) { alert('Ses jours n\'ont pas pu être modifiés. Rouvrez la fiche.'); await rechargerDispo(); return }
@@ -1575,36 +1627,58 @@
 
   async function basculerAlternance(vers) {
     await geste(async () => {
-      const act = reglesActives()
-      const joursA = act.length ? act[0].jours : []
-      for (const r of act) await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
-      if (joursA.length) {
-        const lundi = lundiDe(AUJ())
-        // ⚠ REVENIR À « TOUTES LES SEMAINES » GARDE LA SEMAINE A, et l'écran le
-        // dit. Fusionner les deux lots aurait inventé un rythme que personne n'a
-        // réglé.
-        await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
-          jours: joursA, toutes_les_n_semaines: vers ? 2 : 1, depuis: lundi })
+      // ⚠ REVENIR À « TOUTES LES SEMAINES » GARDE LA SEMAINE A, et l'écran le dit.
+      // Fusionner les deux lots aurait inventé un rythme que personne n'a réglé.
+      const source = vers ? fusionner(reglesLisibles()) : lotsAB().a
+      const joursA = source ? source.jours : []
+      // ⚠ L'ÉCHEC DU RETRAIT SE LIT. Poser par-dessus une règle qu'on n'a pas su
+      // retirer laisse DEUX récurrences actives : le moteur les unit, et elle est
+      // disponible les jours des deux. C'est la raison même de l'ordre
+      // retirer-puis-poser, et deux chemins l'ignoraient.
+      for (const r of reglesActives()) {
+        const { ok } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
+        if (!ok) { alert('Ses jours n\'ont pas pu être modifiés. Rouvrez la fiche.'); await rechargerDispo(); return }
       }
+      if (joursA.length) {
+        const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
+          jours: joursA, toutes_les_n_semaines: vers ? 2 : 1, depuis: lundiDe(AUJ()) })
+        if (!ok) alert('Ses jours n\'ont pas pu être enregistrés : ' + ((data && data.error) || ''))
+      }
+      // ⚠ LE MODE SURVIT À L'ABSENCE DE RÈGLE. Sans ce drapeau, basculer en
+      // quinzaine sans aucun jour coché ne posait rien, donc `estAlternee()`
+      // restait faux, donc l'écran repeignait une ligne simple : le bouton
+      // paraissait mort — et c'est le parcours d'une prestataire qu'on vient de
+      // créer.
+      dispo.forceAlternee = !!vers
       await rechargerDispo()
       if (vers) showToast('Cochez les jours de la semaine B')
       else if (joursA.length) showToast('Les jours de la semaine A sont conservés')
     })
   }
 
+  // ⚠ INVERSER, C'EST ÉCHANGER LES ANCRAGES DES DEUX LOTS. La semaine A est,
+  // par définition, celle qui couvre la semaine en cours : pour que « c'est
+  // plutôt une semaine B » ait un effet, il faut que le contenu des deux lignes
+  // s'échange — pas qu'on renomme une étiquette.
   async function inverserAncrage() {
     await geste(async () => {
       const { a, b } = lotsAB()
-      if (!a) return
-      // Décaler l'ancrage d'une semaine échange A et B.
-      const nouvelA = isoJour(new Date(jourDe(lundiDe(a.ancre || AUJ())).getTime() + 7 * 86400000))
-      const joursA = a.jours, joursB = b ? b.jours : []
-      for (const r of reglesActives()) await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
-      if (joursA.length) await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
-        jours: joursA, toutes_les_n_semaines: 2, depuis: nouvelA })
-      if (joursB.length) await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
-        jours: joursB, toutes_les_n_semaines: 2,
-        depuis: isoJour(new Date(jourDe(nouvelA).getTime() + 7 * 86400000)) })
+      if (!a && !b) return
+      const cette = lundiDe(AUJ())
+      const suivante = isoJour(new Date(jourDe(cette).getTime() + 7 * 86400000))
+      const joursA = a ? a.jours : [], joursB = b ? b.jours : []
+      for (const r of reglesActives()) {
+        const { ok } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerRegle', id: r.id })
+        if (!ok) { alert('L\'inversion n\'a pas pu être enregistrée. Rouvrez la fiche.'); await rechargerDispo(); return }
+      }
+      // Ce qui était en A part sur la semaine SUIVANTE, ce qui était en B vient
+      // sur celle-ci : les deux lignes échangent leur contenu.
+      for (const [jours, ancre] of [[joursA, suivante], [joursB, cette]]) {
+        if (!jours.length) continue
+        const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserRegle',
+          jours, toutes_les_n_semaines: 2, depuis: ancre })
+        if (!ok) { alert('L\'inversion n\'a pas pu être enregistrée : ' + ((data && data.error) || '')); break }
+      }
       await rechargerDispo()
     })
   }
@@ -1620,10 +1694,18 @@
       el.classList.toggle('sel', !!(j && a && j >= a && j <= b))
     })
   }
-  async function basculerPlage(a, b) {
+  // ⚠ LE SENS VIENT DE L'ANCRE DU GESTE, PAS DE LA PLUS PETITE DATE.
+  // La première version échangeait `a` et `b` AVANT de calculer le sens : un
+  // glissé du vendredi vers le mercredi prenait donc son sens sur MERCREDI.
+  // Scénario réel : mercredi est déjà rouge, jeudi et vendredi verts ; l'hôte
+  // glisse de vendredi à mercredi pour poser trois absences — et les trois jours
+  // passaient VERTS, en effaçant l'absence du mercredi. L'inverse exact du geste,
+  // et l'inverse de la règle écrite dans le KB.
+  async function basculerPlage(ancre, autre) {
+    const voulu = !estLibre(ancre)
+    let a = ancre, b = autre
     if (a > b) { const t = a; a = b; b = t }
     await geste(async () => {
-      const voulu = !estLibre(a)
       let d = jourDe(a); const fin = jourDe(b)
       const auj = AUJ()
       while (d <= fin) {
@@ -1640,11 +1722,22 @@
             dispo.exceptions = gardees
             return r
           })()
+          // ⚠ L'ÉCHEC SE DIT, ET IL ARRÊTE. Sur un 503 au milieu d'une plage de
+          // dix jours, poursuivre laissait l'hôte devant un calendrier
+          // partiellement basculé, sans un mot — alors que tous les autres
+          // gestes de cet écran alertent.
+          let r
           if (sansExc === voulu) {
-            if (exc) await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerException', id: exc.id })
+            r = exc ? await appelDispo('POST', { provider_id: dispo.profilId, action: 'retirerException', id: exc.id })
+                    : { ok: true }
           } else {
-            await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserException',
+            r = await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserException',
               date: j, available: voulu })
+          }
+          if (!r.ok) {
+            alert('Ces jours n\'ont pas pu être enregistrés en entier : ' +
+                  ((r.data && r.data.error) || '') + ' — vérifiez le calendrier.')
+            break
           }
         }
         d = new Date(d.getTime() + 86400000)
@@ -1699,20 +1792,33 @@
   document.getElementById('btn-conge').addEventListener('click', poserConge)
 
   const zoneMois = document.getElementById('dispo-months')
+  // ⚠ PAS DE `setPointerCapture` — ET C'EST LE CONTRAIRE D'UN OUBLI.
+  // La capture retargette TOUS les événements suivants du pointeur vers
+  // l'élément capturant, `pointerover` compris : `e.target.closest()` rendait
+  // alors toujours la case de DÉPART, `cibleSel` ne bougeait jamais, et un
+  // glissé sur trois jours n'en basculait qu'un. Le test ne l'a pas vu parce que
+  // jsdom n'implémente pas `setPointerCapture` — un faux vert, dans le fichier
+  // même qui dit vouloir les fermer.
+  // Sans capture, `pointerover` se déclenche case par case : c'est ce que fait
+  // un navigateur, et ce que le test reproduit.
   zoneMois.addEventListener('pointerdown', e => {
     const el = e.target.closest('.dispo-case')
     if (!el || el.classList.contains('vide') || dispoOccupe) return
     const j = el.dataset.jour
     if (!j || j < AUJ() || congeDe(j)) return
     ancreSel = j; cibleSel = j; glisseSel = true
-    if (el.setPointerCapture) el.setPointerCapture(e.pointerId)
     peindreSelection()
   })
+  // ⚠ LE SURVOL FILTRE COMME L'APPUI. Sans ces deux gardes, `cibleSel` pouvait
+  // désigner un jour passé ou un jour de congé — des jours que la boucle ignore,
+  // mais qui étiraient la sélection bien au-delà de ce que le geste allait
+  // réellement changer.
   zoneMois.addEventListener('pointerover', e => {
     if (!glisseSel) return
     const el = e.target.closest('.dispo-case')
-    if (!el || !el.dataset.jour) return
-    cibleSel = el.dataset.jour; peindreSelection()
+    const j = el && el.dataset.jour
+    if (!j || j < AUJ() || congeDe(j)) return
+    cibleSel = j; peindreSelection()
   })
   window.addEventListener('pointerup', () => {
     if (!glisseSel) return

@@ -330,3 +330,153 @@ test('AUCUNE chaîne RRULE ne transite par l\'écran, dans aucun sens', async ()
   assert.ok(!w.document.getElementById('dispo-recur').textContent.includes('FREQ='),
     'et rien n\'en affiche')
 })
+
+// ─── Les huit constats de la review, chacun avec son test ─────────────────
+
+test('AUCUNE capture de pointeur — elle casserait le glissé dans un vrai navigateur', async () => {
+  // ⚠ LE FAUX VERT QUE CE FICHIER DISAIT VOULOIR FERMER, ET QU'IL PORTAIT.
+  // `setPointerCapture` retargette TOUS les événements suivants vers l'élément
+  // capturant, `pointerover` compris : `e.target.closest()` rendrait toujours la
+  // case de départ, et un glissé sur trois jours n'en basculerait qu'un. Le test
+  // passait parce que jsdom n'implémente pas cette méthode. On l'interdit donc
+  // par le source — c'est le seul endroit où un DOM ne peut pas nous aider.
+  const src = fs.readFileSync(FICHIER, 'utf8')
+  const vivants = src.split('\n').filter(l => l.includes('setPointerCapture') && !l.trim().startsWith('//'))
+  assert.deepStrictEqual(vivants, [],
+    'aucun appel vivant à setPointerCapture : il casserait le glissé en production')
+})
+
+test('le sens du glissé vient de l\'ANCRE, même en glissant vers le PASSÉ', async () => {
+  // ⚠ LE CAS QUI RENVERSAIT LE GESTE. Mercredi déjà rouge, jeudi et vendredi
+  // verts. L'hôte glisse de VENDREDI vers MERCREDI pour poser trois absences.
+  // En prenant le sens sur la plus petite date — mercredi, rouge — les trois
+  // jours passaient VERTS et l'absence du mercredi était effacée.
+  const mer = dans(2), jeu = dans(3), ven = dans(4)
+  const { w, t } = monterPage({ exceptions: [{ id: 'e1', date: mer, available: false, source: 'hote' }] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  assert.ok(caseDu(w, mer).classList.contains('off'), 'mercredi part rouge')
+
+  pointe(w, caseDu(w, ven), 'pointerdown')      // l'ancre est VENDREDI, qui est vert
+  pointe(w, caseDu(w, jeu), 'pointerover')
+  pointe(w, caseDu(w, mer), 'pointerover')
+  relacher(w)
+  await souffler(80)
+
+  for (const j of [mer, jeu, ven]) {
+    assert.ok(caseDu(w, j).classList.contains('off'),
+      `${j} doit être absent : le geste partait d'un jour vert, il pose des absences`)
+  }
+})
+
+test('le survol ne retient ni le passé ni un jour de congé', async () => {
+  // Sans ces gardes, `cibleSel` étirait la sélection sur des jours que la boucle
+  // ignore : l'hôte voyait un contour bien plus large que ce qui allait changer.
+  const { w, t } = monterPage({ conges: [{ id: 'c1', debut: dans(5), fin: dans(7), source: 'hote' }] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  pointe(w, caseDu(w, dans(2)), 'pointerdown')
+  pointe(w, caseDu(w, dans(6)), 'pointerover')   // en plein congé
+  const selectionnes = [...w.document.querySelectorAll('#dispo-months .dispo-case.sel')]
+  assert.ok(!selectionnes.some(e => e.dataset.jour === dans(6)),
+    'un jour de congé n\'entre pas dans la sélection')
+  relacher(w)
+  await souffler(40)
+})
+
+test('DEUX règles héritées fusionnent — aucun jour ne disparaît au premier clic', async () => {
+  // ⚠ L'ancien écran posait autant de règles qu'on cliquait sur « Ajouter ».
+  // N'en montrer qu'une faisait un écran qui se contredit — les cases disaient
+  // lundi, le calendrier peignait aussi les samedis — puis le premier changement
+  // retirait tout et ne reposait que la ligne affichée.
+  const { w, t } = monterPage({ regles: [
+    { id: 'r1', label: 'lundis', active: true, jours: [1], cadence: 1, ancre: dans(0) },
+    { id: 'r2', label: 'samedis', active: true, jours: [6], cadence: 1, ancre: dans(0) }
+  ] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  const coches = [...w.document.querySelectorAll('#dispo-recur input[data-lot="A"]:checked')]
+    .map(c => Number(c.value)).sort()
+  assert.deepStrictEqual(coches, [1, 6],
+    'les cases montrent l\'union — sinon elles contredisent le calendrier')
+})
+
+test('une règle qu\'on ne sait pas relire est DITE, et retirée au remplacement', async () => {
+  // ⚠ Elle compte pour le moteur mais n'apparaît dans aucune case. Sans message,
+  // l'écran affirmerait « aucune règle » sur quelqu'un qui en a une ; et sans
+  // retrait, le « remplacement » serait une addition définitive.
+  const { w, t } = monterPage({ regles: [
+    { id: 'opaque', label: 'tous les jours', active: true, jours: null, cadence: null, ancre: null }
+  ] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  assert.match(w.document.getElementById('dispo-hint').textContent, /ne sait pas afficher/,
+    'l\'écran dit qu\'une règle lui échappe')
+
+  const c = w.document.querySelector('#dispo-recur input[data-lot="A"]')
+  c.checked = true
+  c.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(60)
+  const retraits = t.appels.filter(a => a.corps && a.corps.action === 'retirerRegle')
+  assert.ok(retraits.some(r => r.corps.id === 'opaque'),
+    'la règle opaque est retirée comme les autres : un remplacement remplace')
+})
+
+test('« Une semaine sur deux… » fonctionne SANS aucun jour coché', async () => {
+  // ⚠ C'est le parcours d'une prestataire qu'on vient de créer : aucune règle.
+  // Le bouton ne posait rien, donc le mode n'était pas déduit, donc l'écran
+  // repeignait une ligne simple — il paraissait mort.
+  const { w, t } = monterPage({ regles: [] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  w.document.getElementById('btn-alt').click()
+  await souffler(60)
+  assert.strictEqual(w.document.querySelectorAll('#dispo-recur .dispo-ligne-jours').length, 2,
+    'les deux lignes apparaissent même sans règle préalable')
+})
+
+test('« Cette semaine est une semaine A » est vrai PAR CONSTRUCTION', async () => {
+  // ⚠ La première version désignait A par l'ordre des ancrages : vider la ligne A
+  // faisait remonter B, et la phrase changeait de lettre sans que personne ne
+  // l'ait demandé. A est désormais, par définition, le lot qui couvre la semaine
+  // en cours — la phrase devient une tautologie, donc toujours juste.
+  const lundiProchain = (() => { const d = new Date(AUJ)
+    const l = new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000)
+    return iso(new Date(l.getTime() + 7 * 86400000)) })()
+  // Une seule règle, ancrée sur la semaine SUIVANTE : elle ne couvre pas celle-ci.
+  const { w, t } = monterPage({ regles: [
+    { id: 'rB', label: 'B', active: true, jours: [1], cadence: 2, ancre: lundiProchain }
+  ] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  const txt = w.document.getElementById('dispo-recur').textContent
+  assert.match(txt, /Cette semaine est une\s+semaine A/,
+    'la phrase dit toujours A — c\'est la définition, pas une supposition')
+  const coches = [...w.document.querySelectorAll('#dispo-recur input[data-lot="B"]:checked')]
+  assert.strictEqual(coches.length, 1,
+    'et la règle qui ne couvre pas cette semaine est bien sur la ligne B')
+})
+
+test('un échec du serveur PENDANT un glissé est dit, il n\'est pas avalé', async () => {
+  const { w, t } = monterPage()
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  let dits = []
+  w.alert = m => dits.push(String(m))
+  // Le serveur refuse la deuxième écriture.
+  let n = 0
+  const vrai = w.fetch
+  w.fetch = async (url, opts) => {
+    const corps = opts && opts.body ? JSON.parse(opts.body) : null
+    if (corps && corps.action === 'poserException' && ++n === 2) {
+      return { ok: false, status: 503, json: async () => ({ error: 'Service temporairement indisponible' }) }
+    }
+    return vrai(url, opts)
+  }
+  pointe(w, caseDu(w, dans(2)), 'pointerdown')
+  pointe(w, caseDu(w, dans(3)), 'pointerover')
+  pointe(w, caseDu(w, dans(4)), 'pointerover')
+  relacher(w)
+  await souffler(80)
+  assert.ok(dits.length, 'l\'hôte est prévenu que la plage n\'est pas passée en entier')
+})

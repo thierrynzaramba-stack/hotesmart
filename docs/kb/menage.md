@@ -724,9 +724,18 @@ un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
 `apps/menages/prestataires.html` ne montre plus une liste de règles et un champ date, mais un
 **calendrier sur un an glissant** — c'est là que « verrouillé » cesse d'être une promesse.
 
-- **Un clic bascule un jour, un glissé bascule la plage**, et le sens est celui du **premier jour
-  touché** : basculer chaque jour selon son propre état donnerait un damier, l'inverse du geste
-  « je pose trois jours d'absence ».
+- **Un clic bascule un jour, un glissé bascule la plage**, et le sens est celui du **jour d'où
+  part le geste** — pas de la plus petite date. ⚠️ La première version échangeait les bornes avant
+  de calculer le sens : un glissé de **vendredi vers mercredi**, mercredi étant déjà rouge,
+  repassait les trois jours en **vert** et effaçait l'absence du mercredi. L'inverse exact du
+  geste. Le survol filtre comme l'appui (ni passé, ni congé), sinon la sélection s'étire bien
+  au-delà de ce qui va changer.
+- ⚠️ **AUCUNE capture de pointeur** (`setPointerCapture`), et c'est le contraire d'un oubli. La
+  capture retargette tous les événements suivants vers l'élément capturant, `pointerover` compris :
+  `e.target.closest()` rendrait toujours la case de départ, et un glissé de trois jours n'en
+  basculerait qu'un. **jsdom n'implémente pas cette méthode** — le test passait donc sur un faux
+  vert, dans le fichier même qui dit vouloir les fermer. Un test lit désormais le source pour
+  interdire tout appel vivant : c'est le seul cas où un DOM ne peut pas aider.
 - **Un jour vert peut l'être pour deux raisons** — la récurrence le couvre, ou il a été réglé à la
   main. Le **point** les distingue ; sans lui, retirer une récurrence laisserait des jours
   inexplicables. Et recliquer un jour réglé à la main **le rend à la récurrence** : on retire
@@ -747,7 +756,30 @@ un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
   première vient de changer, et le résultat dépend de l'ordre d'arrivée des réponses.
 - ⚠️ **Une récurrence s'enregistre en REMPLAÇANT : on retire, puis on pose.** L'inverse laisserait,
   sur une panne au milieu, deux récurrences actives qui s'additionnent — le moteur unit les règles,
-  et elle serait disponible les jours des deux.
+  et elle serait disponible les jours des deux. **L'échec du retrait est lu sur les trois chemins**
+  (enregistrement, bascule A/B, inversion) : deux d'entre eux l'ignoraient, ce qui produisait
+  exactement la situation que l'ordre retirer-puis-poser existe pour empêcher.
+- ⚠️ **On retire TOUTES les règles actives, y compris celles qu'on ne sait pas relire.** Le serveur
+  rend `jours: null` pour une règle d'un format que `lireRrule` n'interprète pas (`FREQ=DAILY`
+  écrite à la main). Ne retirer que les lisibles faisait du « remplacement » une **addition** : la
+  règle opaque restait active, invisible, sans issue par l'interface. L'écran la **compte et le
+  dit** plutôt que de prétendre qu'il n'y a aucune règle.
+- ⚠️ **Les règles multiples FUSIONNENT à l'affichage.** L'écran d'avant posait autant de règles
+  qu'on cliquait sur « Ajouter » : une prestataire peut porter « tous les lundis » **et** « tous
+  les samedis ». N'en montrer qu'une donnait un écran qui se contredit — les cases disaient lundi,
+  le calendrier peignait aussi les samedis — puis le premier clic retirait tout et ne reposait que
+  la ligne affichée. Les samedis disparaissaient en silence.
+- ⚠️ **« Cette semaine est une semaine A » est vrai PAR CONSTRUCTION** : A est *le lot qui couvre
+  la semaine en cours*, pas « la première règle par ordre d'ancrage ». Avec l'ancienne définition,
+  vider la ligne A faisait remonter B et la phrase changeait de lettre sans que personne ne l'ait
+  demandé. Inverser échange donc les **ancrages** des deux lots — le contenu des deux lignes
+  s'échange, on ne renomme pas une étiquette.
+- ⚠️ **Le mode « une semaine sur deux » survit à l'absence de règle.** Sans drapeau d'écran, le
+  bouton ne posait rien quand aucun jour n'était coché, donc le mode n'était pas déductible, donc
+  l'écran repeignait une ligne simple : il paraissait mort — et c'est le parcours d'une prestataire
+  qu'on vient de créer.
+- ⚠️ **Un échec pendant un glissé s'annonce et arrête.** Sur un 503 au milieu d'une plage de dix
+  jours, poursuivre laissait l'hôte devant un calendrier à moitié basculé, sans un mot.
 - ⚠️ **`lireRrule` est ce qui permet de recocher les cases sans qu'une RRULE atteigne l'écran.**
   La règle du §2 interdit qu'une chaîne descende vers le client ou en remonte ; le serveur relit
   donc la sienne et rend `jours` / `cadence` / `ancre`. Le libellé est pour l'œil, ceci est pour
