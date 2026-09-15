@@ -38,7 +38,13 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      erreurCompteRegles = null,
                      // Les regles ACTIVES relues avant un reglage, et les deux
                      // pannes possibles du chemin en un appel.
-                     reglesAvant = [{ id: 'r-vieille' }],
+                     // ⚠ UNE VRAIE RRULE, PAS UN `id` NU. Sans elle, `formeAvant`
+                     // valait toujours `[]`, donc `perdus` etait toujours vide,
+                     // donc le chemin de reprise n'etait JAMAIS emprunte depuis
+                     // l'endpoint — et le double, plus pauvre que la table,
+                     // masquait tout ce lot (REVIEW.md regle 8).
+                     reglesAvant = [{ id: 'r-vieille',
+                       rrule: 'DTSTART:20260907T120000Z\nRRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,SA' }],
                      erreurInsertRegles = null, erreurMajRegles = null,
                      erreurLireAvant = null,
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
@@ -67,6 +73,11 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         },
         eq (c, v) { a.f[c] = v; return chain },
         gte (c, v) { a.f[c + '_gte'] = v; return chain },
+        // ⚠ `lte` MANQUAIT, et `menagesAReprendre` l'appelle : des qu'une
+        // fixture porterait une vraie RRULE, c'etait une `TypeError` avalee par
+        // le `try/catch` best-effort — donc un test vert sur une alerte qui ne
+        // part pas.
+        lte (c, v) { a.f[c + '_lte'] = v; return chain },
         in (c, v) { a.f[c + '_in'] = v; return chain },
         order () { return chain },
         limit () {
@@ -743,6 +754,37 @@ test('le PLAFOND et la LECTURE sont la même borne', async () => {
   assert.match(src, /\.limit\(MAX_REGLES_ACTIVES\)/,
     'la lecture des règles doit être bornée par LA MÊME constante')
   assert.ok(!/\.limit\(50\)[\s\S]{0,80}provider_availability_rules/.test(src))
+})
+
+test('l\'HÔTE EST INFORMÉ quand elle retire un jour — de bout en bout', async () => {
+  // ⚠ LE TEST QUI MANQUAIT, et son absence masquait tout le lot. Les tests de
+  // `changement-regles` éprouvent les mots, ceux d'`apres-changement-regles` la
+  // reprise — mais rien ne vérifiait que l'endpoint les APPELLE. Le double était
+  // plus pauvre que la table (pas de `rrule`, pas de `lte`) : le chemin n'était
+  // jamais emprunté, et un `try/catch` best-effort aurait avalé l'erreur.
+  const appels = []
+  const path = require('node:path'), Module = require('node:module')
+  const absA = require.resolve(path.join(__dirname, '..', 'lib/cleaning/apres-changement-regles.js'))
+  const ma = new Module(absA)
+  ma.exports = { apresChangementDeRegles: async (o) => { appels.push(o); return { annonce: true } } }
+  ma.loaded = true
+
+  const { handler } = preparer({})
+  require.cache[absA] = ma
+  delete require.cache[require.resolve('../api/menages-public')]
+  const h = require('../api/menages-public')
+
+  // Elle portait lundi ET samedi ; elle ne garde que le lundi.
+  await h(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
+  assert.strictEqual(appels.length, 1, 'le pendant du lot est bien appelé')
+  const a = appels[0]
+  assert.strictEqual(a.providerId, MARIE)
+  assert.strictEqual(a.userId, U)
+  // ⚠ ET L'AVANT EST LU DEPUIS LA RRULE, pas depuis les identifiants : sans ça,
+  // on ne pourrait pas dire à l'hôte CE QUI a changé.
+  assert.deepStrictEqual(a.avant.map(x => x.jours), [[1, 6]], 'la forme d\'avant')
+  assert.deepStrictEqual(a.apres.map(x => x.jours), [[1]], 'et celle d\'après')
+  delete require.cache[absA]
 })
 
 test('le comptage des règles est CLOISONNÉ', async () => {

@@ -816,6 +816,22 @@ La décision de lui donner la main sur ses jours ouvrait une dette qui **n'étai
 elle peut se retirer d'un jour sur lequel l'hôte compte, et rien ne l'en prévenait. *La garde
 d'avant n'était pas un verrou de code, c'était cette décision-là.* Trois pièces la ferment.
 
+⚠️ **AUCUNE RÈGLE VEUT DIRE « DISPONIBLE TOUS LES JOURS », PAS « AUCUN JOUR ».** C'est l'étage 4
+de la précédence, et la première version du résumé l'avait **inversé** — donc le message disait
+l'inverse de la réalité sur les **deux gestes les plus fréquents** :
+- **premier réglage** (aucune règle → le samedi) : elle se retire **six jours sur sept**, et l'hôte
+  lisait « elle se déclare disponible le samedi ». Pire : `perdus` était vide, donc **aucun ménage
+  proposé n'était repris** — le trou que ce lot existe pour fermer restait ouvert *sur le cas
+  nominal*, puisque aucune prestataire n'a de règle en production ;
+- **tout décocher** : elle devient disponible 7/7, et l'hôte lisait « elle ne travaille plus le
+  lundi, le mardi et le mercredi ».
+
+Un lot **sans ligne** vaut donc la semaine entière. ⚠️ Mais des règles **toutes illisibles** ne sont
+pas « aucune règle » : `regleCouvre` rend `null`, le moteur les compte, et l'ensemble vide est alors
+juste. On distingue l'absence de **ligne** de l'absence de **jour lisible**. Et « les sept jours
+cochés » vaut « aucune règle » : les distinguer annonçait un changement de rythme à qui venait
+simplement de cocher ses sept cases.
+
 - **On le dit en JOURS, pas en règles** (`lib/cleaning/changement-regles.js`). « Règle #a4f2
   désactivée » ne dit rien à personne : l'hôte ne sait pas ce qu'il a perdu. On compare les
   **jours couverts** avant et après, jamais les lignes de la table → « **Lola ne travaille plus le
@@ -852,6 +868,34 @@ d'avant n'était pas un verrou de code, c'était cette décision-là.* Trois pi�
 - **Le canal est celui qui existe** (`alertReglesModifiees`, jumelle d'`alertMenageRefuse`) : une
   ligne dans les tâches de l'hôte, **qui reste**, plus l'envoi SMS/e-mail configuré, **qui peut se
   rater**. Les deux, parce qu'un SMS non lu ne doit pas effacer l'information.
+- ⚠️ **La ligne de tâche porte un `book_id` SYNTHÉTIQUE** (`prestataire:<id>`). Sans lui elle
+  n'existait **pour personne** : `apps/agent-ai/messagerie.html`, le seul écran qui rend
+  `agent_tasks`, écarte les lignes sans booking dans ses **deux** chemins — tout en les comptant
+  dans `pendingTasks`. L'hôte lisait « · 1 à traiter » et ne trouvait la tâche nulle part. C'est la
+  première tâche du dépôt sans réservation, et le rendu ne le prévoyait pas.
+- ⚠️ **L'agrégation AGRÈGE, elle n'écrase pas.** La première version **remplaçait** le résumé :
+  elle retire le samedi, le message part ; elle retire le dimanche, et le samedi **disparaissait**
+  du message. « Un seul message par jour » ne doit pas vouloir dire « un seul changement par jour ».
+  La tâche repasse aussi à `pending_validation` — sinon le second changement s'écrivait dans une
+  ligne déjà classée — et **on renotifie** : l'envoi n'était fait qu'à l'insert.
+- ⚠️ **Le marqueur du jour est en heure de PARIS**, comme la date affichée. En UTC, entre minuit et
+  2 h l'été, il portait **la veille** : deux alertes pour une même soirée, ou une agrégation
+  par-dessus la journée précédente.
+- ⚠️ **`maybeSingle` remplacé par `.order().limit(1)` + lecture de l'erreur.** Il lève en PGRST116
+  dès qu'il y a deux lignes — course, ou panne — et l'erreur non lue se déguisait en « aucune
+  ligne » : on insérait alors une ligne de plus à **chaque** appel du jour. Même piège que sur
+  `conges_plages`, déjà payé.
+- ⚠️ **On compte ce qui a RÉELLEMENT bougé** (`.select('id')` sur l'update). Sans lui, la garde
+  conditionnelle protégeait bien la base — elle a pu accepter entre-temps — mais on comptait quand
+  même la reprise : l'hôte lisait « 1 ménage repris, à réattribuer » sur un ménage qu'elle venait
+  d'accepter, et le confiait à quelqu'un d'autre. **Deux personnes sur le même départ.** *La garde
+  protégeait la base et le message la contredisait.*
+- ⚠️ **On INFORME avant de reprendre**, et la boucle est **bornée** (`MAX_REPRISES`). Cette
+  fonction est attendue avant la réponse, dans une fonction serverless qui peut être coupée : si
+  la coupure tombe au milieu, mieux vaut l'information partie et la reprise à moitié faite que
+  l'inverse — une reprise sans annonce laisse l'hôte devant des ménages rendus au moteur sans
+  savoir pourquoi, et son geste suivant (retaper la même chose) ne dirait plus rien puisque
+  `avant === apres`. **Le silence serait alors définitif.**
 - ⚠️ **Limite connue : sans bien, pas d'envoi.** `sendAlertNotifications` lit la configuration
   d'alerte **par bien** ; un changement de règles concerne la personne. On attache le message au
   bien d'un ménage repris — là où l'hôte a quelque chose à faire — et à défaut à l'un des siens.

@@ -27,7 +27,7 @@ function prochain (dow, dans = 1) {
 const SAMEDI = prochain(6), LUNDI = prochain(1)
 
 function preparer ({ menages = [], erreurLecture = null, alerte = () => true } = {}) {
-  const etat = { maj: [], alertes: [], filtres: null }
+  const etat = { maj: [], alertes: [], filtres: null, ordreDesGestes: [] }
   const client = {
     from (table) {
       const f = {}
@@ -37,6 +37,7 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
         is (c, v) { f[c + '_is'] = v; return chain },
         gte (c, v) { f[c + '_gte'] = v; return chain },
         lte (c, v) { f[c + '_lte'] = v; return chain },
+        order (c, o) { f.ordre = c + ':' + (o && o.ascending ? 'asc' : 'desc'); return chain },
         limit () {
           if (table === 'menages') { etat.filtres = f
             return Promise.resolve(erreurLecture
@@ -45,9 +46,21 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
         },
         update (row) {
           const q = { row, f: {} }
+          // ⚠ LE DOUBLE REJOUE LA GARDE CONDITIONNELLE, il ne dit pas « ok » a
+          // tout. `.select()` rend la ligne SEULEMENT si les conditions de
+          // l'update sont satisfaites — c'est exactement ce que fait PostgREST,
+          // et c'est la seule facon de voir qu'on ne compte pas une reprise qui
+          // n'a pas eu lieu.
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
             is (c, v) { q.f[c + '_is'] = v; return c2 },
+            select () {
+              etat.ordreDesGestes.push('reprise')
+              etat.maj.push(q)
+              const cible = menages.find(m => m.id === q.f.id)
+              const touche = cible && cible.offered_to === q.f.offered_to && !cible.provider_id
+              return Promise.resolve({ data: touche ? [{ id: q.f.id }] : [], error: null })
+            },
             then (res, rej) { etat.maj.push(q)
               return Promise.resolve({ data: [], error: null }).then(res, rej) }
           }
@@ -63,7 +76,8 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
 
   const absAlert = require.resolve(path.join(__dirname, '..', 'lib/alert-notify.js'))
   const ma = new Module(absAlert)
-  ma.exports = { alertReglesModifiees: async (o) => { etat.alertes.push(o); return alerte(o) } }
+  ma.exports = { alertReglesModifiees: async (o) => {
+    etat.ordreDesGestes.push('alerte'); etat.alertes.push(o); return alerte(o) } }
   ma.loaded = true
   require.cache[absAlert] = ma
 
@@ -73,6 +87,10 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
   return { etat, mod: require('../lib/cleaning/apres-changement-regles') }
 }
 
+// ⚠ UNE PERTE S'EXPRIME EN RETIRANT UN JOUR D'UN LOT, PAS EN VIDANT LE LOT.
+// `apres: []` ne veut pas dire « elle ne travaille plus » : aucune règle active
+// = DISPONIBLE TOUS LES JOURS (étage 4 de la précédence). Les premières
+// fixtures de ce fichier disaient donc l'inverse de ce qu'elles croyaient.
 const r = (jours, cadence = 1) => ({ jours, cadence })
 const propose = (o = {}) => ({ id: 'm1', property_id: '209413', departure_date: SAMEDI,
                                status: 'offered', provider_id: null, offered_to: LOLA,
@@ -85,6 +103,7 @@ test('une PROPOSITION sur un jour retiré revient au moteur', async () => {
   const { etat, mod } = preparer({ menages: [propose()] })
   const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(b.repris, 1)
+  assert.strictEqual(b.menages.length, 1, 'et le bilan ne compte QUE ce qui a bougé')
   const maj = etat.maj[0]
   assert.strictEqual(maj.row.offered_to, null, 'la proposition est retirée')
   assert.strictEqual(maj.row.status, 'unassigned', 'et le ménage redevient à attribuer')
@@ -96,7 +115,7 @@ test('la reprise est CONDITIONNELLE : elle a pu accepter entre-temps', async () 
   // Sans cette condition dans l'`update`, on effacerait une acceptation qui
   // vient d'arriver — et personne ne saurait qu'elle avait dit oui.
   const { etat, mod } = preparer({ menages: [propose()] })
-  await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   const maj = etat.maj[0]
   assert.strictEqual(maj.f.offered_to, LOLA, 'l\'offre doit être encore la sienne')
   assert.strictEqual(maj.f.provider_id_is, null, 'et personne ne doit porter le ménage')
@@ -108,7 +127,7 @@ test('un ménage ACCEPTÉ n\'est pas touché', async () => {
   // ⚠ LA GARDE CENTRALE. Un engagement ne se défait que par un humain : elle a
   // dit oui, quelqu'un compte dessus. L'alerte de refus existe déjà pour ce cas.
   const { etat, mod } = preparer({ menages: [propose({ provider_id: LOLA, status: 'accepted' })] })
-  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(b.repris, 0)
   assert.strictEqual(etat.maj.length, 0)
 })
@@ -117,7 +136,7 @@ test('un ménage VERROUILLÉ par l\'hôte n\'est pas touché', async () => {
   // `assigned_by = 'manual'` est le verrou du §3 : une décision humaine ne se
   // défait pas par un calcul.
   const { etat, mod } = preparer({ menages: [propose({ assigned_by: 'manual' })] })
-  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(b.repris, 0)
   assert.strictEqual(etat.maj.length, 0)
 })
@@ -125,7 +144,7 @@ test('un ménage VERROUILLÉ par l\'hôte n\'est pas touché', async () => {
 test('un ménage ANNULÉ ou ORPHELIN n\'est pas touché', async () => {
   for (const status of ['cancelled', 'orphaned']) {
     const { etat, mod } = preparer({ menages: [propose({ status })] })
-    await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+    await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
     assert.strictEqual(etat.maj.length, 0, status)
   }
 })
@@ -153,22 +172,32 @@ test('la lecture est CLOISONNÉE et BORNÉE', async () => {
   // date, une lecture sans plafond se ferait tronquer en silence — donc des
   // ménages laissés proposés sans que rien ne le dise.
   const { etat, mod } = preparer({ menages: [] })
-  await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(etat.filtres.user_id, U)
   assert.strictEqual(etat.filtres.offered_to, LOLA)
   assert.ok(etat.filtres.departure_date_gte, 'bornée au futur')
   assert.ok(etat.filtres.departure_date_lte, 'et bornée devant')
+  // ⚠ Sans ordre, la troncature à 500 serait arbitraire et muette : on
+  // reprendrait des ménages au hasard et on en laisserait d'autres.
+  assert.strictEqual(etat.filtres.ordre, 'departure_date:asc')
 })
 
 // ─── L'annonce ─────────────────────────────────────────────────────────────
 
 test('l\'hôte est informé, avec les ménages repris', async () => {
   const { etat, mod } = preparer({ menages: [propose()] })
-  await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(etat.alertes.length, 1)
   const a = etat.alertes[0]
   assert.match(a.texte, /ne travaille plus le samedi/)
   assert.strictEqual(a.menagesRepris.length, 1)
+  // ⚠ L'ANNONCE PART AVANT LA REPRISE. Cette fonction est attendue avant la
+  // réponse, dans une fonction serverless qui peut être coupée : mieux vaut
+  // l'information partie et la reprise à moitié faite que l'inverse — car son
+  // geste suivant, retaper la même chose, ne dirait plus rien (`avant ===
+  // apres`), et le silence serait définitif.
+  assert.strictEqual(etat.ordreDesGestes[0], 'alerte',
+    'l\'annonce précède la reprise')
   assert.strictEqual(a.propertyId, '209413', 'le bien vient du ménage repris')
 })
 
@@ -184,7 +213,7 @@ test('une panne de lecture n\'empêche pas d\'INFORMER', async () => {
   // ⚠ Best-effort, mais pas silencieux : si on ne sait pas quels ménages
   // reprendre, l'hôte doit au moins apprendre que ses jours ont changé.
   const { etat, mod } = preparer({ menages: [propose()], erreurLecture: { message: 'timeout' } })
-  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(b.repris, 0)
   assert.strictEqual(etat.alertes.length, 1, 'l\'annonce part quand même')
 })
@@ -193,6 +222,6 @@ test('une panne d\'annonce NE LÈVE PAS', async () => {
   // L'écriture des règles est déjà faite : un échec ici ne doit ni la défaire,
   // ni faire échouer la requête de la prestataire.
   const { mod } = preparer({ menages: [], alerte: () => { throw new Error('brevo') } })
-  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([6])], apres: [] })
+  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(b.annonce, false)
 })

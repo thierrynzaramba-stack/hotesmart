@@ -48,24 +48,56 @@ test('AUCUN changement réel : on se TAIT', async () => {
   // faut pas apprendre à ignorer.
   assert.strictEqual(resumerChangement({ avant: [r([1, 2])], apres: [r([2, 1])], prenom: 'L' }), null)
   assert.strictEqual(resumerChangement({ avant: [], apres: [], prenom: 'L' }), null)
+  // Et sept jours cochés équivalent à aucune règle : même couverture, rien à dire.
+  assert.strictEqual(
+    resumerChangement({ avant: [], apres: [r([0, 1, 2, 3, 4, 5, 6])], prenom: 'L' }), null)
 })
 
-test('la CADENCE seule qui bouge n\'annonce aucun jour perdu', async () => {
-  // « Le samedi une semaine sur deux » devenu « le samedi toutes les semaines »
-  // n'est pas une perte : l'hôte n'a rien à rattraper. L'annoncer comme un jour
-  // perdu serait faux.
-  const out = resumerChangement({ avant: [r([6], 2)], apres: [r([6], 1)], prenom: 'Lola' })
-  assert.deepStrictEqual(out.perdus, [])
-  assert.match(out.texte, /rythme/)
-  assert.ok(!/ne travaille plus/.test(out.texte))
+test('la CADENCE dit son SENS — les deux ne coûtent pas la même chose', async () => {
+  // ⚠ La première version rendait le MÊME texte dans les deux sens. Or passer à
+  // « une semaine sur deux » SUPPRIME la moitié de ses venues, et l'inverse les
+  // double : l'hôte ne pouvait pas savoir lequel venait de se produire.
+  const moins = resumerChangement({ avant: [r([6], 1)], apres: [r([6], 2)], prenom: 'Lola' })
+  assert.match(moins.texte, /ne vient plus qu'une semaine sur 2/)
+  assert.strictEqual(moins.cadenceReduite, true)
+
+  const plus = resumerChangement({ avant: [r([6], 2)], apres: [r([6], 1)], prenom: 'Lola' })
+  assert.match(plus.texte, /désormais toutes les semaines/)
+  assert.ok(!plus.cadenceReduite)
+
+  // Ni l'un ni l'autre n'annonce un jour perdu : les jours sont les mêmes.
+  assert.deepStrictEqual(moins.perdus, [])
+  assert.deepStrictEqual(plus.perdus, [])
 })
 
-test('TOUT décocher se dit comme la perte de tous ses jours', async () => {
-  // Le geste le plus lourd disponible dans sa PWA : zéro règle = disponible
-  // tous les jours pour le moteur, et plus aucun jour habituel pour l'hôte.
-  const out = resumerChangement({ avant: [r([1, 2, 3])], apres: [], prenom: 'Lola' })
-  assert.deepStrictEqual(out.perdus, [1, 2, 3])
-  assert.match(out.texte, /ne travaille plus le lundi, le mardi et le mercredi/)
+test('AUCUNE RÈGLE VEUT DIRE « TOUS LES JOURS », et le message le dit dans ce sens', async () => {
+  // ⚠ LE DÉFAUT QUE LA REVIEW A TROUVÉ, ET IL INVERSAIT LE SENS SUR LES DEUX
+  // GESTES LES PLUS FRÉQUENTS. `estDisponible` rend `true` quand aucune règle
+  // n'est active (étage 4 de la précédence), et la PWA le dit elle-même à la
+  // prestataire. Compter un lot vide comme l'ensemble VIDE faisait lire à l'hôte
+  // exactement l'inverse de ce qui venait de se passer.
+
+  // 1. PREMIER RÉGLAGE — le parcours nominal, puisque aucune prestataire n'a de
+  //    règle en production. Elle passe de « disponible 7/7 » à « le samedi » :
+  //    c'est une perte de six jours, pas un gain d'un jour.
+  const premier = resumerChangement({ avant: [], apres: [r([6])], prenom: 'Lola' })
+  assert.deepStrictEqual(premier.perdus, [0, 1, 2, 3, 4, 5],
+    'six jours perdus — et donc six jours de ménages proposés à reprendre')
+  assert.match(premier.texte, /ne travaille plus/)
+
+  // 2. TOUT DÉCOCHER — elle redevient disponible tous les jours.
+  const vide = resumerChangement({ avant: [r([1, 2, 3])], apres: [], prenom: 'Lola' })
+  assert.deepStrictEqual(vide.perdus, [], 'aucune perte : elle s\'ouvre, elle ne se ferme pas')
+  assert.match(vide.texte, /disponible/)
+})
+
+test('des règles ILLISIBLES ne sont pas « aucune règle »', async () => {
+  // ⚠ `regleCouvre` rend `null` sur une récurrence qu'on ne sait pas relire : le
+  // moteur la compte et ne la fait couvrir presque rien. L'ensemble vide est
+  // alors JUSTE — on distingue l'absence de LIGNE de l'absence de jour lisible.
+  const out = resumerChangement({ avant: [{ jours: null }], apres: [r([1])], prenom: 'Lola' })
+  assert.deepStrictEqual(out.perdus, [], 'elle ne couvrait rien de lisible')
+  assert.deepStrictEqual(out.gagnes, [1])
 })
 
 test('une règle ILLISIBLE ne compte pour aucun jour', async () => {
@@ -75,7 +107,7 @@ test('une règle ILLISIBLE ne compte pour aucun jour', async () => {
 })
 
 test('sans prénom, la phrase reste correcte', async () => {
-  const out = resumerChangement({ avant: [r([6])], apres: [], prenom: null })
+  const out = resumerChangement({ avant: [r([1, 6])], apres: [r([1])], prenom: null })
   assert.match(out.texte, /^Votre prestataire ne travaille plus le samedi/)
 })
 
