@@ -31,10 +31,14 @@ const { importMessages } = require('../lib/channels/channex')
 // ─── Un faux Channex, pilote par `fetch` ────────────────────────────────────
 let appels = 0
 function poserProvider ({ pagesDeFils = 1, filsParPage = 1, pagesDeMessages = 1,
-                         updatedAt = '2026-09-14T10:00:00', msParAppel = 0 }) {
+                         updatedAt = '2026-09-14T10:00:00', msParAppel = 0,
+                         avancer = null }) {
   appels = 0
   global.fetch = async (url) => {
     appels++
+    // ⚠ HORLOGE PILOTEE : chaque appel coute un pas EXACT, sans attendre
+    // reellement. C'est ce qui rend la coupure du budget reproductible.
+    if (avancer) avancer()
     // ⚠ CHAQUE APPEL COUTE DU TEMPS REEL. Sans ca, un faux provider instantane
     // ne peut JAMAIS faire expirer un budget mur pendant une passe : le
     // controle entre deux fils suffirait a tout arreter, et le test passerait
@@ -273,4 +277,111 @@ test('LE BLOQUANT 4 bis : une lecture des marqueurs en echec ne change pas l ord
   const biens = [{ user_id: 'u', provider_property_id: 'a' }, { user_id: 'u', provider_property_id: 'b' }]
   const ordre = (await ordonnerPourImport(api, biens)).map(b => b.provider_property_id)
   assert.deepEqual(ordre, ['a', 'b'], 'l ordre d origine est conserve, sans invention')
+})
+
+// ─── LE BLOCAGE DU 15 SEPTEMBRE 2026, ET SA SORTIE ──────────────────────────
+//
+// ⚠ CE QUI S'EST PASSE EN PRODUCTION. Quatre biens, marqueur d'anteriorite a
+// `null`, 125 abstentions D'AFFILEE, et l'annonce d'ecriture de masse repartie a
+// chaque cycle avec exactement le meme compte (« ~56 messages sur 1 fil »).
+// La cause : le marqueur n'avance que sur une passe COMPLETE, et un fil plus
+// long que le budget de 2,5 s ne peut jamais l'etre. Chaque cycle recommencait
+// le fil depuis sa page 1. L'import n'avancait pas d'une ligne, et la seule
+// alarme qui le disait s'etait tue au 3e cycle.
+//
+// ⚠ CE TEST PILOTE LE VRAI `importMessages`, il ne lit pas le source : c'est le
+// COMPORTEMENT sur plusieurs cycles qui est en cause, pas la presence d'une
+// ligne de code.
+//
+// ⚠ ET IL PILOTE AUSSI L'HORLOGE. Une premiere version mesurait un budget MUR
+// avec de vrais `setTimeout` : elle passait seule et rougissait une fois sur
+// trois dans la suite complete, ou les fichiers tournent en parallele et ou
+// quelques millisecondes de gigue deplacent la coupure. Un test instable
+// deviendrait un rouge de plus qu'on apprend a ignorer — la dette qu'on passe
+// deja son temps a compter. `Date.now` est donc remplace : chaque appel au
+// provider avance l'horloge d'un pas EXACT, et la coupure tombe toujours au
+// meme endroit, quelle que soit la charge de la machine.
+
+function avecHorlogePilotee (pasParAppel, corps) {
+  const vraiNow = Date.now
+  let horloge = 1000000
+  Date.now = () => horloge
+  const avancer = () => { horloge += pasParAppel }
+  return Promise.resolve(corps(avancer)).finally(() => { Date.now = vraiNow })
+}
+
+test('un fil plus long que le budget FINIT par entrer, cycle apres cycle', async () => {
+  // Un seul fil, six pages de messages, et un budget qui n'en laisse passer que
+  // deux ou trois par cycle : sans reprise, on resterait sur la page 1 a vie.
+  // ⚠ MARGES LARGES, ET C'EST DELIBERE. Ce test pilote un budget MUR : sur une
+  // suite qui tourne en parallele, quelques millisecondes de gigue suffisent a
+  // deplacer la coupure. Un test instable deviendrait un rouge de plus qu'on
+  // apprend a ignorer — la dette qu'on passe deja son temps a compter. On rend
+  // donc chaque appel franchement couteux devant le budget, et on laisse assez
+  // de cycles pour que le resultat ne depende pas de l'endroit exact de la
+  // coupure.
+  const CYCLES = 30
+  let reprise = null
+  let annonces = 0
+  let abouti = false
+  let interruptions = 0
+
+  await avecHorlogePilotee(25, async (avancer) => {
+    for (let c = 0; c < CYCLES && !abouti; c++) {
+      poserProvider({ pagesDeFils: 1, filsParPage: 1, pagesDeMessages: 6, avancer })
+      const r = await importMessages({
+        userId: 'u', propertyId: 'p', depuis: null, reprise,
+        echeance: Date.now() + 110,
+        avantEcriture: async () => { annonces++ }
+      })
+      reprise = r.reprise || reprise
+      if (r.interrompu) interruptions++
+      else abouti = true
+    }
+  })
+
+  // ⚠ LE TEST NE PROUVE RIEN SI RIEN N'A ETE COUPE. Sans interruption, le
+  // budget aura suffi d'un coup et la reprise n'aura jamais servi.
+  assert.ok(interruptions >= 1, 'le budget doit bien couper au moins une passe')
+  assert.ok(abouti, `l'import doit aboutir en ${CYCLES} cycles — il est resté bloqué`)
+  // ⚠ ET L'ANNONCE NE PART QU'UNE FOIS : c'est le meme lot qu'on continue.
+  assert.strictEqual(annonces, 1,
+    `l'ecriture de masse s'annonce au debut, pas a chaque cycle (${annonces} annonces)`)
+})
+
+test('CONTRE-EPREUVE : sans point de reprise, on reste sur la meme page a vie', async () => {
+  // ⚠ Sans cette contre-epreuve, le test ci-dessus passerait aussi sur le code
+  // fautif le jour ou le budget suffirait par accident. On rejoue ici le
+  // comportement d'avant — `reprise` jamais transmise — et on verifie qu'il ne
+  // sort PAS du premier fil.
+  const pages = []
+  await avecHorlogePilotee(25, async (avancer) => {
+    for (let c = 0; c < 5; c++) {
+      poserProvider({ pagesDeFils: 1, filsParPage: 1, pagesDeMessages: 6, avancer })
+      const r = await importMessages({
+        userId: 'u', propertyId: 'p', depuis: null, reprise: null,   // <- le defaut
+        echeance: Date.now() + 110
+      })
+      assert.ok(r.interrompu, 'la passe est bien tronquee')
+      pages.push(r.reprise ? r.reprise.page : null)
+    }
+  })
+  assert.strictEqual(pages.length, 5, 'les cinq passes sont tronquees')
+  assert.strictEqual(new Set(pages).size, 1,
+    `sans reprise, chaque cycle repart au meme point : ${pages.join(',')}`)
+})
+
+test('la reprise ne s\'applique QU\'AU fil quittee', async () => {
+  // ⚠ L'appliquer a un autre fil sauterait ses premieres pages — la perte
+  // definitive que le marqueur existe pour empecher.
+  poserProvider({ pagesDeFils: 1, filsParPage: 2, pagesDeMessages: 2, msParAppel: 1 })
+  const r = await importMessages({
+    userId: 'u', propertyId: 'p', depuis: null,
+    reprise: { fil: 'un-fil-qui-n-est-pas-la', page: 5 },
+    echeance: Date.now() + 5000
+  })
+  assert.ok(!r.interrompu, 'la passe va au bout')
+  assert.strictEqual(r.reprise, null, 'et le point de reprise est effacé')
+  // Les deux fils ont ete lus en entier : aucune page sautee.
+  assert.strictEqual(r.fils.lus, 2)
 })

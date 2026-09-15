@@ -152,9 +152,64 @@ test('LE TEST QUI COMPTE : une passe INTERROMPUE n avance PAS le marqueur', asyn
   const sync = lire('lib/cron-channel-messages-sync.js')
   const i = sync.indexOf('if (r?.interrompu)')
   assert.ok(i > 0, 'et l orchestrateur traite le cas')
-  const bloc = sync.slice(i, i + 300)
+  // ⚠ LE BLOC SE DELIMITE PAR SON ACCOLADE, PAS PAR 300 CARACTERES. La fenetre
+  // fixe a lache des qu'un commentaire a ete ajoute dans la branche : le test
+  // rougissait sur une modification parfaitement correcte, et il aurait aussi
+  // bien pu VERDIR sur une branche devenue trop longue pour tenir dedans.
+  const fin = sync.indexOf('\n  }', i)
+  const bloc = sync.slice(i, fin > i ? fin : i + 600)
   assert.ok(bloc.includes('sAbstenir'), 'il compte une abstention')
   assert.ok(!bloc.includes('ecrireEtat'), 'et n avance pas l etat lui-meme')
+})
+
+test('LE TEST QUI COMPTE : une passe interrompue GARDE son point de reprise', () => {
+  // ⚠ LE BLOCAGE MESURE EN PRODUCTION LE 15 SEPTEMBRE 2026. Le marqueur
+  // d'anteriorite ne bouge pas sur une passe tronquee — c'est juste — mais SANS
+  // POINT DE REPRISE, le cycle suivant recommence le fil depuis sa page 1. Sur
+  // un fil plus long que le budget de 2,5 s, il n'atteint JAMAIS la fin :
+  // 125 abstentions d'affilee sur quatre biens, marqueur a `null`, et l'annonce
+  // d'ecriture de masse repartie a chaque cycle avec le meme compte.
+  // « On recommencera » et « on reprendra » ne sont pas la meme chose.
+  const prov = lire('lib/channels/channex.js')
+  assert.ok(prov.includes('repriseSuivante = { fil:'),
+    'le provider dit OU il s est arrete')
+  assert.ok(prov.includes('reprise: repriseSuivante'),
+    'et il le rend a l appelant')
+  assert.ok(/msgPage = Math\.max\(1, Number\(reprise\.page\)/.test(prov),
+    'et il REPART de cette page')
+  assert.ok(prov.includes('String(th.id) === String(reprise.fil)'),
+    'mais seulement sur le MEME fil — l appliquer a un autre sauterait ses premieres pages')
+
+  const sync = lire('lib/cron-channel-messages-sync.js')
+  assert.ok(sync.includes('reprise: reprise || etat.reprise || null'),
+    'une abstention CONSERVE le point de reprise')
+  assert.ok(sync.includes('abstentions: 0, reprise: null'),
+    'et une passe complete l EFFACE — sinon on rejouerait a jamais un fil deja importe')
+})
+
+test('LE TEST QUI COMPTE : une REPRISE ne se re-annonce pas', () => {
+  // ⚠ Le preavis d'ecriture de masse prepare l'alerte de croissance. Le lot est
+  // le MEME a chaque reprise : le re-annoncer a chaque cycle est precisement ce
+  // qui a noye le signal pendant 125 cycles — 222 incidents en 24 h, dont un
+  // e-mail par bien et par heure, pendant que l'alarme qui disait le blocage
+  // etait muette depuis le 3e cycle.
+  const prov = lire('lib/channels/channex.js')
+  assert.ok(prov.includes('if (!annonceFaite && !reprise'),
+    'on annonce quand on COMMENCE, pas quand on continue')
+})
+
+test('LE TEST QUI COMPTE : un import bloque le REDIT, il ne se tait pas', () => {
+  // ⚠ « Une seule fois quand l etat s installe » a produit l inverse de ce qu on
+  // voulait : l incident est parti au 3e cycle, puis PLUS JAMAIS, pendant que
+  // l import restait bloque 125 cycles. Une alarme qui ne parle qu une fois
+  // laisse une panne s installer en silence.
+  const src = lire('lib/cron-channel-messages-sync.js')
+  assert.ok(/abstentions % RAPPEL_TOUS_LES === 0/.test(src),
+    'l incident se redit periodiquement tant que le blocage dure')
+  const m = /const RAPPEL_TOUS_LES = (\d+)/.exec(src)
+  assert.ok(m, 'la periode est nommee')
+  assert.ok(Number(m[1]) >= 6 && Number(m[1]) <= 24,
+    'assez rare pour ne pas faire de bruit, assez frequent pour rester visible')
 })
 
 test('LE TEST QUI COMPTE : l abstention est COMPTEE, et signalee quand elle s installe', () => {
