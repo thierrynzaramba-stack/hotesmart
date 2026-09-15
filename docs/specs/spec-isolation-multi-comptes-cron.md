@@ -1,0 +1,114 @@
+# spec — isolation multi-comptes dans la boucle cron
+
+**Priorité : PREMIER lot après la mise debout de l'environnement de recette.**
+
+Domaine : cœur & sync. Règle concernée : REVIEW.md **règle 1**.
+Origine : review de `7b8084f` (15 septembre 2026), constat 2.
+
+---
+
+## 1. La règle, et pourquoi elle ne se négocie pas ici
+
+> Dans un traitement multi-comptes, tout `select` est filtré par `user_id`, et
+> toute map est indexée par `user_id|identifiant` — jamais par l'identifiant
+> seul.
+
+Deux faits rendent la violation exploitable, et ils sont déjà écrits dans
+REVIEW.md :
+
+1. **La RLS ne protège pas le cron.** Il tourne en service key, qui la contourne
+   par conception. Les filtres explicites sont la seule défense.
+2. **`properties.provider_property_id` n'a aucune contrainte d'unicité
+   globale.** Deux hôtes d'un même property manager portent les mêmes propIds.
+
+Un `.eq('property_id', …)` sans `user_id` dans la boucle cron est donc une
+lecture inter-comptes, pas une lecture par bien.
+
+---
+
+## 2. Ce que le scan a trouvé
+
+Motif cherché : chaîne Supabase du chemin cron (`lib/cron-*`, `lib/channels/`,
+`lib/providers/`) filtrée par `property_id` **sans** `user_id`.
+
+| Fichier | Table | Nature | Gravité |
+|---|---|---|---|
+| `lib/cron-classify.js:194` | `bookings_snapshot` | fuite de données | **haute** |
+| `lib/cron-classify.js:200` | `conversations` | garde corrompue | **haute** |
+| `lib/cron-alerting.js:151` | `automation_incidents` | alerte étouffée | moyenne |
+| `lib/cron-alerting.js:188` | `automation_incidents` | faux positif | aucune |
+
+### 2.1 `cron-classify.js:194` — `bookings_snapshot`
+
+```js
+.from('bookings_snapshot').select('booking_id, snapshot')
+.eq('property_id', String(property.id))
+```
+
+`snapMap` peut porter le séjour d'un autre hôte, qui alimente ensuite le
+contexte de l'agent IA. C'est le cas vécu de la règle 1, mot pour mot : *« une
+map de snapshots indexée sur `booking_id` seul aurait envoyé le code d'accès
+d'un hôte pour la réservation d'un autre »*.
+
+### 2.2 `cron-classify.js:200` — `conversations`
+
+```js
+.from('conversations').select('book_id, created_at')
+.eq('property_id', String(property.id)).not('agent_reply', 'is', null)
+```
+
+`lastReplyAt` est la garde anti-double-réponse. Alimentée par les réponses d'un
+autre compte, elle peut **se relâcher** (on répond deux fois) ou **se
+resserrer** (on se tait à tort). Les deux sont silencieux.
+
+⚠ Ligne 265 du même fichier, une autre lecture de `conversations` filtre bien
+par `user_id`. C'est une incohérence entre deux lectures voisines, donc un
+oubli — pas une décision.
+
+### 2.3 `cron-alerting.js:151` — déduplication `event_loop`
+
+Pas une fuite de données : une **alerte étouffée**. L'alerte antérieure d'un
+hôte B supprime celle d'un hôte A sur le même propId. Une alarme qu'on n'entend
+pas est un bug (fiche messagerie, règle 9).
+
+### 2.4 `cron-alerting.js:188` — faux positif, à NE PAS « corriger »
+
+Ici `property_id` porte un **nom de table**, pas un identifiant de bien : c'est
+la clé d'anti-spam d'une alerte plateforme, volontairement globale. Ajouter un
+`user_id` casserait la déduplication.
+
+À documenter sur place, sinon la prochaine review « corrigera » ce qui est
+juste. Le vrai défaut de fond est la surcharge de `property_id` par une valeur
+qui n'est pas un bien — hors périmètre de ce lot.
+
+---
+
+## 3. Le travail
+
+1. Ajouter `.eq('user_id', userId)` aux trois lectures réelles (2.1, 2.2, 2.3).
+2. Commenter 2.4 comme volontairement global.
+3. **Garde durable** : un test qui scanne le chemin cron et échoue dès qu'une
+   chaîne filtrée par `property_id` sans `user_id` apparaît, avec une liste
+   d'exemptions NOMMÉES et COMPTÉES — comme l'`ATTENDU` de
+   `tests/bookings-snapshot-troncature.test.js`. Une exemption se compte, elle
+   ne se décrit pas.
+4. **Remplacer le test textuel par un test qui pilote l'unité.** Le
+   cloisonnement de `getPropertyMessages` n'est protégé que par un
+   `readFileSync` + `includes` dans `tests/messages-import-recurrent.test.js` :
+   il attrape une suppression du filtre, pas un filtrage sur la mauvaise
+   variable. Le motif à reprendre est celui de
+   `tests/messages-fenetre-recents.test.js` (faux PostgREST injecté, assertions
+   sur ce qui ressort). C'est la règle 8 appliquée aux contrats d'interface.
+
+## 4. Contre-épreuve exigée
+
+Chaque correctif doit être né rouge : désarmer le filtre doit faire tomber un
+test. Un correctif dont la suite reste verte des deux côtés ne prouve rien —
+c'est la leçon que `7b8084f` tire de ses propres tests, et elle vaut ici.
+
+## 5. Hors périmètre
+
+La scalabilité du module d'import (`.in()` sur tout le parc, une requête d'état
+par bien) est une **dette acceptée**, cohérente avec le modèle cron actuel.
+Elle sera résorbée par le chantier event-driven, pas ici. Fiche coeur-sync,
+règle 15.
