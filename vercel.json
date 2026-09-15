@@ -7,12 +7,19 @@
   "functions": {
     "api/cron.js": {
       "maxDuration": 60
+    },
+    "api/cron-messages.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/cron",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron-messages",
+      "schedule": "*/10 * * * *"
     }
   ],
   "rewrites": [

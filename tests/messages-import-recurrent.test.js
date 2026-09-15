@@ -101,45 +101,44 @@ test('LE TEST QUI COMPTE : la garde « dernier message de l hote » precede tout
 
 // ─── L'import recurrent : budget, abstention, annonce ───────────────────────
 
-test('LE TEST QUI COMPTE : l import passe APRES les codes d acces, et dans son PROPRE try', () => {
-  // ⚠ Exigence de Thierry, et elle vient du 10 septembre 2026 : un
-  // `ReferenceError` dans le premier appel d un `try` commun a emporte
+test('LE TEST QUI COMPTE : l import NE PEUT PLUS couter un code d acces', () => {
+  // ⚠ L'EXIGENCE N'A PAS CHANGE, SON LIEU SI. Elle vient du 10 septembre 2026 :
+  // un `ReferenceError` dans le premier appel d'un `try` commun a emporte
   // `processArrivalCodes` pendant 24 h — plus aucun code cree, une voyageuse
   // devant une porte fermee. Une synchro de messages ne doit jamais couter un
-  // code d acces.
-  // ⚠ DEPUIS LE CORRECTIF DU BLOQUANT 4, L'IMPORT EST UNE PHASE A PART, apres
-  // la boucle metier entiere — donc apres les codes d acces de TOUS les biens.
-  // C'est plus fort que l'exigence d'origine : meme un import qui deborde ne
-  // peut plus couter un code, ils sont tous deja poses.
-  const src = lire('lib/cron-channel-props.js')
-  const posCodes = src.indexOf('await processArrivalCodes(')
-  const posImport = src.indexOf('await importerMessagesDuBien(')
-  assert.ok(posCodes > 0 && posImport > posCodes, 'l import vient APRES les codes d acces')
-
-  // La boucle metier est REFERMEE avant la phase d import.
-  const posPhase = src.indexOf('SECONDE PASSE')
-  assert.ok(posPhase > posCodes && posPhase < posImport, 'une phase distincte les separe')
-
-  // Et l import garde son propre try, par bien.
-  const apres = src.slice(posImport - 500, posImport)
-  assert.ok(apres.lastIndexOf('try {') > apres.lastIndexOf('} catch'),
-    'l import ouvre son propre try')
+  // code d'acces.
+  //
+  // La premiere reponse a ete « apres les codes, dans son propre try », puis
+  // « une phase a part, apres la boucle entiere ». Depuis le 15 septembre 2026,
+  // c'est une AUTRE FONCTION : la garantie n'est plus un ordre a tenir dans un
+  // fichier, elle est structurelle. Ce test la verifie sous cette forme — il
+  // aurait ete faux de le supprimer en meme temps que ce qu'il gardait.
+  const props = lire('lib/cron-channel-props.js')
+  assert.ok(/await processArrivalCodes\(/.test(props), 'le cycle pose toujours les codes')
+  assert.ok(!/importerMessagesDuBien\s*\(/.test(props),
+    'et il n importe plus les messages : aucun partage de budget ni de try')
+  assert.ok(!/require\(.\.\/cron-channel-messages-sync.\)/.test(props),
+    'le cycle ne depend meme plus du module d import')
 })
 
 test('LE TEST QUI COMPTE : le budget est une echeance pour TOUT le parc, pas par bien', () => {
   // Si chaque bien s octroyait son budget, quatre biens suffiraient a faire
-  // deborder un cycle deja a 40-56 s pour un plafond de 60.
-  // ⚠ CE TEST AFFIRMAIT LE DEFAUT. Il exigeait que l'echeance soit posee AVANT
-  // la boucle par bien — c'est-a-dire exactement le bloquant 4 : elle mesurait
-  // alors le cycle entier, et les derniers biens s'abstenaient a chaque passage.
-  // Elle doit etre posee au debut de la PHASE d'import, pas du cycle.
-  const src = lire('lib/cron-channel-props.js')
-  assert.ok(src.includes('const echeanceImport = Date.now() + BUDGET_IMPORT_PARC_MS'),
-    'l echeance appartient a la phase d import')
-  const posMetier = src.indexOf('await processArrivalCodes(')
-  const posEcheance = src.indexOf('const echeanceImport =')
-  assert.ok(posEcheance > posMetier,
-    'et elle demarre APRES le travail metier : sinon elle mesure ce qu elle ne borne pas')
+  // deborder la fonction.
+  // ⚠ CE TEST A DEJA AFFIRME UN DEFAUT UNE FOIS : il exigeait que l'echeance
+  // soit posee AVANT la boucle par bien — c'est-a-dire le bloquant 4, ou elle
+  // mesurait le cycle entier et les derniers biens s'abstenaient a chaque
+  // passage. Elle doit mesurer CE QU'ELLE BORNE, et rien d'autre.
+  const src = lire('api/cron-messages.js')
+  const posEcheance = src.indexOf('const echeance = t0 + BUDGET_PARC_DEDIE_MS')
+  const posBoucle = src.indexOf('for (const p of aImporter)')
+  assert.ok(posEcheance > 0, 'l echeance de parc est nommee')
+  assert.ok(posBoucle > posEcheance, 'et posee AVANT la boucle des biens')
+  // ⚠ Et `t0` est bien le debut de CETTE fonction : une echeance calculee
+  // ailleurs mesurerait de nouveau autre chose qu'elle-meme.
+  assert.ok(src.indexOf('const t0 = Date.now()') < posEcheance)
+  // Un budget par bien EXISTE aussi, et il borne a l interieur du parc.
+  assert.match(src, /budgetBienMs: BUDGET_BIEN_DEDIE_MS/,
+    'chaque bien est borne a son tour, sinon le premier prend tout')
 })
 
 test('LE TEST QUI COMPTE : une passe INTERROMPUE n avance PAS le marqueur', async () => {

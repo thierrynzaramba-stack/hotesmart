@@ -72,7 +72,49 @@ alors que **rien n'a été lu**.
 finis et peut mourir **dedans** : le nouveau point désignerait un fil **antérieur**, et on
 n'arriverait jamais au bout.
 
-## Ce qui n'est PAS corrigé, et qui demande un arbitrage
+## L'arbitrage tranché : l'import a son propre cron (15 sept. 2026)
+
+**La mesure, sur quatre cycles consécutifs après le déploiement du point de reprise** — le `motif`
+étant désormais enregistré, il n'y a plus rien à déduire :
+
+| bien | abstentions (cycle 1 → 4) | motif | reprise |
+|---|---|---|---|
+| La bulle | 130 → **133** | `cycle_en_retard` | — |
+| Colomiers | 130 → **133** | `budget` | — |
+| Ofuro Futari | 131 → **134** | `budget` | — |
+| Cœur de vie | 127 → **130** | `cycle_en_retard` | — |
+
++1 par cycle sur les quatre, aucun marqueur qui bouge, **1189 messages en base d'un bout à
+l'autre**. La cause tient en une ligne : `BUDGET_IMPORT_PARC_MS = 8000` **pour tout le parc**. Les
+deux premiers biens la consomment sans aboutir, les deux suivants ne sont **même pas appelés**.
+
+⚠️ **Et `BUDGET_MS` n'était pas le levier** : `cycle_en_retard` se décide **avant** lui. C'est
+l'**ordre de passage** qui affame l'import, pas la durée qu'on lui accorde une fois appelé. Lui en
+donner plus dans ce cycle aurait pris le temps des codes d'accès — et ce qui saute quand ce cycle
+déborde, c'est *une voyageuse devant une porte* (10 septembre 2026). Le marchandage était interdit.
+
+**`api/cron-messages.js`**, cadence `*/10`, `maxDuration: 60`, garde `Bearer CRON_SECRET`
+identique. Budgets propres : **45 s pour le parc, 12 s par bien** — contre 8 s et 2,5 s dans le
+cycle. `BUDGET_MS` reste **inchangé** : il borne l'import *dans le cycle principal*, où la
+contrainte resterait entière s'il y revenait. Deux contextes, deux budgets.
+
+- **Cadence 10 min, pas 5** : l'import est un **rattrapage d'historique** ; le temps réel passe par
+  le webhook, qui fonctionne. Dix minutes laissent la place à une passe large sans jamais
+  chevaucher la précédente — deux passes concurrentes ne se corrompraient pas (marqueur en upsert,
+  `recordMessage` déduplique) mais doubleraient le coût pour rien.
+- ⚠️ **UN SEUL APPELANT.** L'import est **retiré** de `lib/cron-channel-props.js`, et un test lit
+  le source pour l'exiger. Le remettre « au cas où » rendrait les mesures illisibles et ramènerait
+  le défaut qu'on vient de mesurer.
+- ⚠️ **La garantie « l'import ne coûte pas un code d'accès » est désormais STRUCTURELLE.** Elle
+  était un ordre à tenir dans un fichier (« après les codes, dans son propre try », puis « une
+  phase à part ») ; c'est maintenant une autre fonction. Le test qui la gardait n'a pas été
+  supprimé — il a été **réécrit sur sa nouvelle forme**.
+- ⚠️ **Un endpoint sans entrée de cron est un fichier mort.** Un test vérifie la déclaration dans
+  `vercel.json` (chemin, cadence, `maxDuration`) : sans elle, l'import resterait bloqué en
+  silence, avec en prime l'illusion d'avoir corrigé. Même famille que « une migration écrite n'est
+  pas une migration appliquée ».
+
+## Ce qui restait à arbitrer — tranché ci-dessus
 
 Le budget de **2,5 s** reste la contrainte. L'import passe **après** les codes d'accès, dans un
 cycle déjà à 40-56 s pour un plafond de 60 : si le cycle arrive tard, `reste` est petit et l'import
