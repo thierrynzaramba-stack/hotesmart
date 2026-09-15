@@ -42,6 +42,22 @@ end $$;
 create temporary table _seed_ctx on commit drop as
 select id as user_id from auth.users limit 1;
 
+-- ─── FILET : le pivot des comptes ───────────────────────────────────────────
+-- ⚠ 20 tables ont leur FK sur `profiles_legacy(id)`, dont `properties`. Rien
+-- dans le schema ne la remplit : ni fonction, ni trigger, ni defaut — verifie
+-- sur le dump entier de la production. Les comptes existants y sont par un
+-- remplissage historique ; un compte NEUF n'y entre pas.
+-- Sans ce filet, l'insert de biens plus bas echoue sur
+-- `properties_user_id_fkey` — c'est exactement ce qui a plante la creation de
+-- bien sur staging le 15 septembre. Ma verification des colonnes obligatoires
+-- ne regardait pas les cles etrangeres : elle ne pouvait pas le voir.
+-- migrations/0001 ferme la cause pour les inscriptions futures ; ce filet
+-- couvre le compte deja cree.
+insert into public.profiles_legacy (id, email, full_name)
+select u.id, u.email, nullif(split_part(coalesce(u.email, ''), '@', 1), '')
+  from auth.users u
+    on conflict (id) do nothing;
+
 -- ─── Nettoyage des biens de seed (rejouabilite) ─────────────────────────────
 delete from public.bookings_snapshot
  where property_id in ('STG-BIEN-1', 'STG-BIEN-2');

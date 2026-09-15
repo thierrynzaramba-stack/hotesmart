@@ -175,6 +175,21 @@ par la racine statique (corrigé, mais la convention du dépôt est `migrations/
 Ces migrations couvrent l'incrémental depuis le 2026-08-31. Les 55 tables
 antérieures n'y sont pas : la base de départ vient d'un dump de la production.
 
+⚠ **`--schema=public` PERD les triggers attaches a `auth.users`.** C'est un
+defaut de cette procedure, decouvert le 15 septembre quand la creation de bien
+a plante sur staging. `on_auth_user_created` vit sur `auth.users` : il n'est
+pas dans un dump du seul schema public, et sans lui une inscription cree une
+ligne dans `auth.users` et RIEN d'autre. `migrations/0001-triggers-auth-users
+.sql` le rejoue — l'appliquer APRES le schema de depart, avant toute
+inscription.
+
+⚠ **`profiles_legacy` n'est remplie par personne, et ce n'est pas un probleme
+de staging.** 20 tables ont leur FK dessus, dont `properties`. Aucune fonction,
+aucun trigger, aucun defaut ne l'alimente dans tout le schema de production :
+les comptes existants y sont par un remplissage historique. Un compte cree
+aujourd'hui — en staging comme en PRODUCTION — ne peut donc posseder aucun
+bien. `migrations/0001` ajoute cette ligne a `handle_new_user()`.
+
 ⚠ **Un dump sans `--schema=public` n'est pas applicable.** Le premier dump
 (`pg_dump --schema-only --no-owner --no-privileges`, 326 Ko) embarquait les
 schémas gérés par Supabase — `auth` (23 tables), `storage` (8), `realtime` (3)
