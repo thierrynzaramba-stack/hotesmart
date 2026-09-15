@@ -29,15 +29,33 @@ const BIENS = [
   { id: 'u2', user_id: 'hote', provider_property_id: 'p2', name: 'Colomiers' }
 ]
 
-function preparer ({ biens = BIENS, erreurBiens = null, importJette = false } = {}) {
-  const etat = { imports: [], budgets: [] }
+function preparer ({ biens = BIENS, erreurBiens = null, importJette = false,
+                     surImport = null } = {}) {
+  const etat = { imports: [], budgets: [], filtres: {}, table: null, colonnes: null, borne: null }
+  // ⚠ LE DOUBLE MEMORISE LES FILTRES, et son mutisme a laisse passer le
+  // retrecissement du perimetre : il resolvait `not()` quel que soit le
+  // `select`, donc retirer le filtre de provider n'aurait fait rougir aucun
+  // test. Un double qui ne regarde pas ce qu'on lui demande ne teste pas la
+  // requete, il teste la plomberie (REVIEW.md regle 8).
   const client = {
-    from () {
+    from (table) {
+      etat.table = table
       const chain = {
-        select () { return chain },
-        eq () { return chain },
-        not () { return Promise.resolve(erreurBiens ? { data: null, error: erreurBiens }
-                                                     : { data: biens, error: null }) }
+        select (cols) { etat.colonnes = cols; return chain },
+        eq (c, v) { etat.filtres[c] = v; return chain },
+        in (c, v) { etat.filtres[c + '_in'] = v; return chain },
+        not (c, op, v) { etat.filtres[c + '_not'] = op + ' ' + v; return chain },
+        // ⚠ C'EST `limit` QUI RESOUT, parce que c'est le DERNIER maillon de la
+        // vraie requete. Faire resoudre `not` rendait la chaine plus courte que
+        // la vraie : `.limit()` n'existait plus, et le double levait au premier
+        // appel. Il vaut mieux qu'il leve que d'accepter une forme que
+        // PostgREST refuserait — mais il devait suivre la requete, pas
+        // l'inverse.
+        limit (n) {
+          etat.borne = n
+          return Promise.resolve(erreurBiens ? { data: null, error: erreurBiens }
+                                             : { data: biens, error: null })
+        }
       }
       return chain
     }
@@ -53,6 +71,7 @@ function preparer ({ biens = BIENS, erreurBiens = null, importJette = false } = 
     ...vrai,
     ordonnerPourImport: async (_s, props) => props,
     importerMessagesDuBien: async (_s, bien, opts) => {
+      if (surImport) surImport()
       if (importJette) throw new Error('panne ' + bien.provider_property_id)
       etat.imports.push(bien.provider_property_id)
       etat.budgets.push({ echeance: opts.echeance, budgetBienMs: opts.budgetBienMs })
@@ -71,6 +90,20 @@ const reponse = () => { const r = { code: null, body: null }
 const req = (o = {}) => ({ method: 'GET', headers: { authorization: 'Bearer secret-de-test' }, ...o })
 
 // ─── La garde ──────────────────────────────────────────────────────────────
+
+test('sans CRON_SECRET configure, l endpoint est FERME — 503, pas ouvert', async () => {
+  // ⚠ Sans cette garde, un deploiement ou la variable manque compare au
+  // litteral `Bearer undefined` — qu il suffit d envoyer.
+  const vrai = process.env.CRON_SECRET
+  delete process.env.CRON_SECRET
+  try {
+    const { etat, handler } = preparer({})
+    const res = reponse()
+    await handler({ method: 'GET', headers: { authorization: 'Bearer undefined' } }, res)
+    assert.strictEqual(res.code, 503)
+    assert.strictEqual(etat.imports.length, 0)
+  } finally { process.env.CRON_SECRET = vrai }
+})
 
 test('sans le secret, le cron ne fait RIEN — 401', async () => {
   // ⚠ Un import declenchable de l'exterieur serait un moyen de faire ecrire la
@@ -169,6 +202,52 @@ test('l import N EST PLUS dans le cycle principal — un seul appelant', async (
     'et le cron dedie, si')
 })
 
+test('le PERIMETRE couvre la marque blanche, pas seulement `channex`', async () => {
+  // ⚠ LE DEFAUT TROUVE EN REVIEW, ET C'ETAIT UNE PANNE MUETTE. `'channel'` est
+  // la valeur MARQUE BLANCHE, traitee en paire partout dans le depot, et
+  // `properties.provider` n'a aucune contrainte qui l'empeche. Filtrer sur le
+  // seul `'channex'` faisait disparaitre ces biens de la file : pas d'erreur,
+  // pas d'abstention, pas d'incident — leur marqueur n'aurait plus jamais bouge
+  // et `messages_import_suspendu` n'aurait pas pu partir.
+  const { etat, handler } = preparer({})
+  await handler(req(), reponse())
+  assert.strictEqual(etat.table, 'properties')
+  assert.deepStrictEqual(etat.filtres.provider_in, ['channex', 'channel'],
+    'les deux valeurs du couple channel-manager')
+  assert.strictEqual(etat.filtres.provider, undefined,
+    'et pas un `eq` sur une seule')
+  // ⚠ Et la lecture est BORNEE : Supabase tronque a 1000 lignes sans erreur.
+  assert.ok(etat.borne > 0, 'la lecture des biens est bornee explicitement')
+})
+
+test('passe l echeance du parc, les biens restants ne sont PAS touches', async () => {
+  // ⚠ Chaque bien non atteint faisait une lecture d etat PUIS un upsert
+  // d abstention `cycle_en_retard` — pour un bien qu on n a meme pas essaye.
+  // Ca pollue le compteur qui a servi a diagnostiquer le blocage, et ferait
+  // partir le rappel periodique pour une file d attente normale, pas pour une
+  // panne. Ne rien ecrire est mieux : `ordonnerPourImport` les fait passer en
+  // tete a la passe suivante.
+  //
+  // ⚠ HORLOGE PILOTEE, PAS DE MINUTERIE. Une premiere version avancait le temps
+  // avec un `setInterval` : le test ne rendait jamais la main. Ici c est le
+  // premier import qui consomme le budget, de facon exacte et reproductible.
+  const { BUDGET_PARC_DEDIE_MS } = require('../lib/cron-channel-messages-sync')
+  const vraiNow = Date.now
+  let horloge = 1000000
+  Date.now = () => horloge
+  try {
+    const { etat, handler } = preparer({
+      // Le premier bien brule tout le budget du parc.
+      surImport: () => { horloge += BUDGET_PARC_DEDIE_MS + 1 }
+    })
+    const res = reponse()
+    await handler(req(), res)
+    assert.deepStrictEqual(etat.imports, ['p1'], 'seul le premier bien est tente')
+    assert.strictEqual(res.body.traites, 1)
+    assert.strictEqual(res.body.non_atteints, 1, 'et le bilan le DIT')
+  } finally { Date.now = vraiNow }
+})
+
 test('le cron est DECLARE dans vercel.json, sinon il ne tourne jamais', async () => {
   // ⚠ Un endpoint sans entree de cron est un fichier mort : rien ne l appelle,
   // et l import resterait bloque en silence — avec, en plus, l illusion d avoir
@@ -181,6 +260,13 @@ test('le cron est DECLARE dans vercel.json, sinon il ne tourne jamais', async ()
   const f = (v.functions || {})['api/cron-messages.js']
   assert.ok(f && f.maxDuration >= 60,
     'avec sa duree maximale — sinon il est coupe avant la fin, comme avant')
+  // ⚠ LE BUDGET DU PARC DOIT TENIR DANS LA DUREE DECLAREE, avec de la marge
+  // pour repondre et ecrire les etats. Les deux valeurs vivent dans deux
+  // fichiers : rien ne les relie, sauf ce test.
+  const { BUDGET_PARC_DEDIE_MS } = require('../lib/cron-channel-messages-sync')
+  assert.ok(BUDGET_PARC_DEDIE_MS + 10000 <= f.maxDuration * 1000,
+    `budget parc ${BUDGET_PARC_DEDIE_MS} ms contre maxDuration ${f.maxDuration} s : `
+    + 'il faut au moins 10 s de marge')
   // Et le cycle principal garde la sienne.
   assert.ok((v.crons || []).some(x => x.path === '/api/cron'))
 })

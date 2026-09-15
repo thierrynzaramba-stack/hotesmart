@@ -135,7 +135,11 @@ test('LE TEST QUI COMPTE : le budget est une echeance pour TOUT le parc, pas par
   assert.ok(posBoucle > posEcheance, 'et posee AVANT la boucle des biens')
   // ⚠ Et `t0` est bien le debut de CETTE fonction : une echeance calculee
   // ailleurs mesurerait de nouveau autre chose qu'elle-meme.
-  assert.ok(src.indexOf('const t0 = Date.now()') < posEcheance)
+  const posT0 = src.indexOf('const t0 = Date.now()')
+  // ⚠ `indexOf` rend -1 quand la chaine est ABSENTE, et `-1 < posEcheance` est
+  // vrai : l'assertion passait donc aussi quand `t0` n'existait plus.
+  assert.ok(posT0 > 0 && posT0 < posEcheance,
+    '`t0` doit exister ET preceder l echeance')
   // Un budget par bien EXISTE aussi, et il borne a l interieur du parc.
   assert.match(src, /budgetBienMs: BUDGET_BIEN_DEDIE_MS/,
     'chaque bien est borne a son tour, sinon le premier prend tout')
