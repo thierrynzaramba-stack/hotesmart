@@ -1103,3 +1103,106 @@ test('le défaut « lien » ne s\'applique QU\'À LA CRÉATION', async () => {
   assert.match(source, /modeLien && !existant \? 'write' : 'none'/)
   assert.match(source, /validerPermissions\(b\.permissions, false, null, b\.access_mode === 'lien'\)/)
 })
+
+// ─── LES DEUX CANAUX DE NOTIFICATION (15 septembre 2026) ────────────────────
+//
+// ⚠ CE QUE CES TESTS PROTÈGENT. `notify_sms` / `notify_email` disent s'il faut
+// prévenir cette personne par SMS et par e-mail. L'envoi exige l'intention ET
+// la coordonnée (`lib/cleaning/notifier-prestataire.js`). Les deux fautes
+// possibles ne se valent pas :
+//   - ouvrir un canal que l'hôte avait coupé → un SMS de trop, ennuyeux ;
+//   - fermer un canal que personne n'a touché → le personnel devient MUET, et
+//     l'hôte ne l'apprend qu'au premier ménage non fait.
+// Toutes les règles ci-dessous penchent du côté sûr : on n'éteint que sur un
+// `false` explicite.
+
+test('creation : les deux canaux sont ecrits tels que demandes', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Nouvelle', access_mode: 'lien',
+    phone: '+33600000000', email: 'n@x.fr',
+    notify_sms: true, notify_email: false,
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const ins = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'insert')
+  assert.strictEqual(ins.row.notify_sms, true)
+  assert.strictEqual(ins.row.notify_email, false)
+})
+
+test('creation SANS les champs : quelqu\'un de JOIGNABLE, pas quelqu\'un de muet', async () => {
+  // ⚠ Un ancien ecran, un appel direct, un chemin qu'on oublie de mettre a jour :
+  // tous arrivent sans les champs. Naitre muet ferait du silence le defaut, et
+  // personne ne le verrait avant le premier menage rate.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Nouvelle', access_mode: 'lien', phone: '+33600000000',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const ins = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'insert')
+  assert.strictEqual(ins.row.notify_sms, true)
+  assert.strictEqual(ins.row.notify_email, true)
+})
+
+test('modification : un canal ABSENT du corps n\'est pas reecrit', async () => {
+  // ⚠ LE DEFAUT QUE CE TEST FERME. Le panneau reduit de certains ecrans
+  // n'affiche pas ces cases. Les reconduire a `true` par defaut RALLUMERAIT un
+  // canal que l'hote avait coupe, au premier enregistrement fait depuis un
+  // autre ecran — sans un mot, et sans que personne ait touche la fiche.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: REGINA.id, phone: '+33611111111',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.ok(maj, 'le profil est bien modifie')
+  assert.ok(!('notify_sms' in maj.row), '`notify_sms` ne doit pas etre touche')
+  assert.ok(!('notify_email' in maj.row), '`notify_email` ne doit pas etre touche')
+  assert.strictEqual(maj.row.phone, '+33611111111', 'le reste passe normalement')
+})
+
+test('modification : un canal coupe est bien coupe', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: REGINA.id, notify_sms: false, notify_email: true,
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.strictEqual(maj.row.notify_sms, false)
+  assert.strictEqual(maj.row.notify_email, true)
+})
+
+test('seul un `false` EXPLICITE ferme un canal', async () => {
+  // ⚠ Un JSON de navigateur peut porter `false`, `"false"`, `0` ou `"0"`. Tout
+  // le reste laisse ouvert : on ne rend jamais quelqu'un muet par
+  // interpretation. Couper une notification est un geste, pas un effet de bord.
+  const ferme = [false, 'false', 0, '0']
+  const ouvert = [true, 'true', 1, '1', 'oui', {}]
+  for (const v of ferme) {
+    const etat = preparer({ user: PROD })
+    await require('../api/membres')(req({ body: {
+      action: 'update', profile_id: REGINA.id, notify_sms: v,
+      permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), reponse())
+    const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+    assert.strictEqual(maj.row.notify_sms, false, `${JSON.stringify(v)} doit fermer`)
+  }
+  for (const v of ouvert) {
+    const etat = preparer({ user: PROD })
+    await require('../api/membres')(req({ body: {
+      action: 'update', profile_id: REGINA.id, notify_sms: v,
+      permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), reponse())
+    const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+    assert.strictEqual(maj.row.notify_sms, true, `${JSON.stringify(v)} doit laisser ouvert`)
+  }
+  // Et l'absence ne touche a rien — c'est le test precedent, rappele ici pour
+  // que les trois etats se lisent d'un coup : ferme / ouvert / pas touche.
+  const etat = preparer({ user: PROD })
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: REGINA.id, notify_sms: null,
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), reponse())
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.ok(!maj || !('notify_sms' in maj.row), '`null` ne touche a rien')
+})

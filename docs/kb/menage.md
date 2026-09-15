@@ -861,6 +861,61 @@ toujours. Seul le congé en plage restait utilisable.
   l'endpoint sans rougir ; et un test reproduit le cas de production — *avec* une règle, ses jours
   restent verts **et** déclarables.
 
+### Deux canaux de notification, pas une déduction (point 3, 15 sept. 2026)
+
+Jusqu'ici le canal se **déduisait** de la coordonnée : `notifier-prestataire.js` envoyait un SMS
+s'il y avait un `phone`, un e-mail s'il y avait un `email`. Renseigner un numéro, c'était accepter
+de le faire sonner — et **le seul moyen de ne pas notifier était d'effacer la coordonnée**, donc de
+perdre le moyen de l'appeler.
+
+`profiles.notify_sms` / `notify_email` (migration `2026-09-15-profiles-canaux-notification.sql`)
+portent maintenant l'intention. **L'envoi exige les deux** : `canalOuvert(prof, canal)` =
+coordonnée **ET** intention.
+
+- ⚠️ **Défaut `true` des deux côtés, et c'est ce qui rend la migration sans effet.** Avec
+  l'intention à `true` partout, « intention ET coordonnée » vaut exactement « coordonnée » — le
+  comportement d'avant, pour chaque ligne déjà en base. Un défaut `false` aurait rendu muet, en
+  silence, tout le personnel de ménage existant.
+- ⚠️ **`!== false`, jamais `=== true`**, aux quatre endroits (notifieur, `api/menages`,
+  `api/membres`, l'écran). Un champ absent — ligne d'avant la migration, `contacts=1` oublié,
+  profil construit à la main — doit valoir **oui**. Le lire « non » rendrait muet par omission.
+  C'est le défaut déjà payé sur `self_availability` : une case décochée par une panne, puis
+  **gravée** au premier enregistrement.
+- ⚠️ **À la modification, un canal absent du corps n'est PAS réécrit.** Le panneau réduit de
+  certains écrans n'affiche pas ces cases : les reconduire à `true` rallumerait un canal que
+  l'hôte avait coupé, au premier enregistrement fait depuis un autre écran. Absent = « je n'y
+  touche pas ».
+- ⚠️ **Seul un `false` explicite ferme un canal** (`false`, `"false"`, `0`, `"0"`). Tout le reste
+  laisse ouvert : couper une notification est un geste, pas une interprétation.
+- ⚠️ **L'intention se garde quand la coordonnée manque.** `notify_sms = true` sans numéro
+  n'envoie rien ; le jour où l'hôte saisit le numéro, le SMS part. Écrire `false` faute de numéro
+  aurait rendu muette une coordonnée ajoutée plus tard.
+- **L'écran** (`apps/menages/prestataires.html`) : la case **suit ce qu'on tape** (défaut = les
+  canaux qui ont une coordonnée), puis **se fige au premier clic** — un défaut qui s'applique
+  après un geste n'est plus un défaut, c'est un écrasement : décocher « SMS » puis corriger une
+  faute de frappe dans le numéro recochait la case. Une fiche existante arrive **figée** : son
+  état vient du serveur, jamais d'un recalcul.
+- **Ce qui est signalé, et ce qui ne l'est pas** : « coché sans coordonnée » est une promesse qui
+  ne sera pas tenue → avertissement. « Coordonnée sans sa case » est le **but du lot** (garder un
+  numéro pour l'appeler) → rien. Et **aucun canal ouvert** → avertissement séparé : l'assignation
+  d'urgence sera muette.
+- **Un seul point de passage** : `lib/cleaning/notifier-prestataire.js` est le seul chemin qui
+  notifie une prestataire — vérifié en balayant tous les appels à `sendSms` / `sendPlatformEmail`
+  du dépôt, pas supposé. (Leçon des six points de câblage des congés.)
+- **Éprouvé** : `tests/cleaning-notifier.test.js` (les quatre combinaisons + un test de **câblage**
+  qui lit le `select` — sans les colonnes, `undefined !== false` fait tout repartir comme avant et
+  aucun test de comportement ne le verrait), `tests/membres-endpoint.test.js`, et
+  `tests/prestataires-canaux-dom.test.js` (11 tests, vrai DOM : le réglage vit dans
+  l'interaction, pas dans un corps de requête).
+
+⚠️ **Le vérificateur de contrat lit 900 caractères de corps, et pas un de plus.**
+`tests/contrat-front-api.test.js` retrouve un `JSON.stringify({…})` par regex bornée : au-delà,
+l'appel n'est **pas retenu** et les contrôles de contrat de cet appel ne s'exécutent plus. Trois
+lignes de commentaire ajoutées dans le corps de `create` l'ont fait passer à 1046 caractères — le
+parcours de création n'était plus vérifié. Le défaut est bruyant, mais son message ne disait pas
+la cause. Un test garde désormais le vérificateur lui-même (`les corps de POST restent LISIBLES`).
+**Corollaire : les explications vont au-dessus de l'appel, pas dans le littéral.**
+
 **Dette notée, non corrigée ici** (partagée avec l'écran hôte, à solder ensemble) :
 - la lettre A/B se calcule en `% 2` en dur alors que la cadence va jusqu'à **4** : sur « toutes
   les 3 semaines », la colonne de gauche annonce un rythme que les cases (correctes) ne suivent

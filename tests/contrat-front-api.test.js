@@ -121,6 +121,42 @@ for (const ecran of ECRANS) {
   })
 }
 
+test('les corps de POST restent LISIBLES par ce vérificateur', () => {
+  // ⚠ CE TEST GARDE LE VÉRIFICATEUR LUI-MÊME. `appels()` lit un corps de
+  // `JSON.stringify` sur 900 caractères au plus : au-delà, la regex ne retrouve
+  // pas l'accolade fermante, l'appel n'est PAS retenu, et tous les tests
+  // ci-dessous cessent de vérifier ce corps-là. Vécu le 15 septembre 2026 :
+  // trois lignes de commentaire ajoutées dans le corps de `create` ont fait
+  // passer le littéral à 1046 caractères, et le parcours de création n'était
+  // plus contrôlé du tout.
+  //
+  // Le défaut est bruyant (deux assertions tombent), mais le MESSAGE ne disait
+  // pas la cause — on cherchait un appel disparu, alors que c'était le lecteur
+  // qui ne voyait plus. Ce test-ci nomme la cause, et laisse une marge.
+  const PLAFOND = 900
+  for (const ecran of ECRANS) {
+    const src = lire(ecran)
+    const re = /JSON\.stringify\(\s*\{/g
+    let m
+    while ((m = re.exec(src))) {
+      // La fin réelle du littéral, comptée par équilibrage d'accolades.
+      let profondeur = 0, i = m.index + m[0].length - 1, fin = -1
+      for (; i < src.length && i < m.index + 6000; i++) {
+        if (src[i] === '{') profondeur++
+        else if (src[i] === '}') { profondeur--; if (!profondeur) { fin = i; break } }
+      }
+      if (fin < 0) continue
+      const longueur = fin - (m.index + m[0].length)
+      assert.ok(longueur <= PLAFOND,
+        `${ecran} : un corps de POST fait ${longueur} caractères (plafond ${PLAFOND}). ` +
+        'Ce n\'est pas une limite de style — au-delà, `appels()` ne retrouve plus ' +
+        'l\'accolade fermante, l\'appel n\'est pas retenu, et les contrôles de contrat ' +
+        'de cet appel ne s\'exécutent plus. Sortez les commentaires du littéral, ' +
+        'ou relevez le plafond ICI ET dans `appels()`, ensemble.')
+    }
+  }
+})
+
 test('le parcours de création d\'un prestataire est complet, de bout en bout', () => {
   // ⚠ LE TEST QUI MANQUAIT. Il ne suffit pas que chaque action existe : le
   // parcours entier doit tenir — créer la personne, puis lui poser ses biens et

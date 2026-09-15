@@ -225,7 +225,12 @@ module.exports = async function handler(req, res) {
     // exactement ce qu'on veut, il ne pourrait de toute facon pas reassigner.
     if (peutLire(garde.contexte, 'prestataires', null)) {
       const { data: pr, error: errPr } = await supabase.from('profiles')
-        .select('id, first_name, active, pwa_token' + (avecContacts ? ', phone, email' : ''))
+        // ⚠ LES CANAUX VOYAGENT AVEC LES COORDONNEES, pas sans elles. « Prevenir
+        // par SMS : oui » ne veut rien dire sans le numero a cote — l'ecran ne
+        // saurait pas signaler le canal coche SANS coordonnee, qui est
+        // justement ce qu'il doit montrer.
+        .select('id, first_name, active, pwa_token' +
+                (avecContacts ? ', phone, email, notify_sms, notify_email' : ''))
         .eq('account_user_id', userId).eq('access_mode', 'lien')
         .order('first_name', { ascending: true })
       if (errPr) console.error('[menages] lecture prestataires echec', errPr.message)
@@ -298,7 +303,17 @@ module.exports = async function handler(req, res) {
           // `id`, `prenom` et `actif` ; sans cet opt-in, il recevait les numeros
           // personnels de tout le personnel de menage sans jamais les afficher.
           // Une donnee qu'un ecran n'utilise pas n'a pas a transiter par lui.
-          ...(avecContacts ? { telephone: x.phone || null, email: x.email || null } : {}),
+          ...(avecContacts ? {
+            telephone: x.phone || null, email: x.email || null,
+            // ⚠ `!== false`, PAS `=== true` : meme regle que le notifieur. Une
+            // ligne ecrite avant la migration, ou un champ absent d'une reponse
+            // tronquee, doit se lire « oui » — sinon l'ecran decoche une case
+            // que personne n'a touchee, et le premier enregistrement de la
+            // fiche GRAVE ce `false`. C'est le defaut deja paye sur
+            // `self_availability`.
+            notif_sms: x.notify_sms !== false,
+            notif_email: x.notify_email !== false
+          } : {}),
           public_token_id: x.pwa_token ? (parJeton.get(x.pwa_token) || null) : null,
           permissions: droitsLisibles
             ? { self_availability: dispoParProfil.get(x.id) || 'none' }

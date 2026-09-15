@@ -32,7 +32,20 @@ const nouveauJeton = () => crypto.randomBytes(32).toString('base64url')
 
 const CHAMPS_PROFIL = 'id, account_user_id, member_user_id, first_name, last_name, email, phone, ' +
                       'access_mode, pwa_token, is_owner, active, invited_at, accepted_at, ' +
-                      'invite_token, invite_expires_at, created_at'
+                      'invite_token, invite_expires_at, created_at, notify_sms, notify_email'
+
+// Un booleen tel qu'il arrive d'un client, ou `null` s'il n'a rien envoye.
+//
+// ⚠ SEUL UN `false` EXPLICITE FERME UN CANAL. Le JSON d'un navigateur peut
+// porter `false`, `"false"`, `0` ou `"0"` selon la facon dont la case a ete
+// lue ; tout le reste — y compris une valeur absente, `null` ou une chaine
+// vide — laisse le canal OUVERT. On ne rend jamais quelqu'un muet par
+// interpretation : couper une notification est un geste, pas un effet de bord.
+function drapeau (v) {
+  if (v === undefined || v === null || v === '') return null
+  if (v === false || v === 'false' || v === 0 || v === '0') return false
+  return true
+}
 
 // ─── Validation des droits soumis ────────────────────────────────────────────
 //
@@ -253,6 +266,13 @@ async function creer (req, res, compte, base) {
     last_name:       String(b.last_name || '').trim() || null,
     email,
     phone:           String(b.phone || '').trim() || null,
+    // ⚠ LE DEFAUT EST `true`, COMME LA COLONNE. Un client qui n'envoie rien —
+    // un ancien ecran, un appel direct — cree quelqu'un de JOIGNABLE. Le
+    // contraire ferait naitre du personnel muet a chaque chemin qu'on oublie
+    // de mettre a jour, et l'hote ne l'apprendrait qu'au premier menage non
+    // fait. L'envoi reste de toute facon conditionne a la coordonnee.
+    notify_sms:      drapeau(b.notify_sms) !== false,
+    notify_email:    drapeau(b.notify_email) !== false,
     access_mode:     mode,
     is_owner:        false,
     active:          true
@@ -409,6 +429,15 @@ async function modifier (req, res, compte) {
   if (b.email != null && !cible.profil.member_user_id) {
     maj.email = String(b.email).trim() || null
   }
+  // ⚠ LES CANAUX NE SE REECRIVENT QUE S'ILS SONT ENVOYES. Le panneau reduit de
+  // certains ecrans n'affiche pas ces cases : les reconduire a `true` par
+  // defaut RALLUMERAIT un canal que l'hote avait coupe, au premier
+  // enregistrement fait depuis un autre ecran. Absent veut dire « je n'y
+  // touche pas », jamais « remets-le a oui ».
+  const canalSms = drapeau(b.notify_sms)
+  if (canalSms !== null) maj.notify_sms = canalSms
+  const canalEmail = drapeau(b.notify_email)
+  if (canalEmail !== null) maj.notify_email = canalEmail
 
   if (Object.keys(maj).length) {
     const { error } = await supabase.from('profiles').update(maj).eq('id', cible.profil.id)

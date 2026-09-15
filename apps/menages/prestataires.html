@@ -195,11 +195,35 @@
             <input class="form-input" id="presta-email" type="email"
                    placeholder="Email (optionnel)">
           </div>
-          <div style="font-size:11px;color:var(--text2);margin:-4px 0 12px" id="aide-contact">
+          <div style="font-size:11px;color:var(--text2);margin:-4px 0 10px" id="aide-contact">
             Sert à la prévenir quand vous lui assignez un ménage en urgence,
             et quand un ménage lui est proposé — avec son délai de réponse.
             Sans aucun des deux, elle ne le verra qu'en ouvrant son lien.
           </div>
+
+          <!-- ⚠ DEUX CHOIX, PAS UNE DEDUCTION (15 septembre 2026).
+               Jusqu'ici le canal se DEDUISAIT de la coordonnee : renseigner un
+               numero, c'etait accepter de le faire sonner, et le seul moyen de
+               ne pas notifier etait d'EFFACER le numero — donc de perdre le
+               moyen de l'appeler. Les deux cases separent l'intention de la
+               coordonnee ; l'envoi exige les DEUX (`lib/cleaning/notifier-
+               prestataire.js`, `canalOuvert`).
+
+               ⚠ COCHEES PAR DEFAUT SELON CE QUI EST SAISI, tant que vous n'y
+               touchez pas : taper un numero coche « SMS ». Des que vous cochez
+               ou decochez vous-meme, la case ne bouge plus toute seule — sinon
+               un choix deliberé serait defait a la frappe suivante. -->
+          <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px">
+            <label class="prop-checkbox">
+              <input type="checkbox" id="presta-notif-sms">
+              <span style="font-size:12px">La prévenir par SMS</span>
+            </label>
+            <label class="prop-checkbox">
+              <input type="checkbox" id="presta-notif-email">
+              <span style="font-size:12px">La prévenir par e-mail</span>
+            </label>
+          </div>
+          <div style="font-size:11px;margin:0 0 12px" id="avert-canaux"></div>
 
           <div style="font-size:11px;color:var(--text2);margin-bottom:8px;font-weight:500">BIENS ACCESSIBLES</div>
           <div class="prop-checkboxes" id="prop-checkboxes">
@@ -751,6 +775,16 @@
     // ⚠ Facultatifs, et envoyes MEME VIDES : `/api/membres` les normalise en
     // `null`. Ce sont les deux seuls canaux par lesquels une prestataire
     // apprend un menage sans ouvrir sa PWA.
+    //
+    // ⚠ `notify_sms` / `notify_email` PARTENT AUSSI A LA CREATION. Omis, le
+    // serveur retombe sur son defaut `true` : une case decochee a l'ecran ne
+    // serait pas tenue, et l'hote croirait avoir coupe un canal reste ouvert.
+    //
+    // ⚠ CE COMMENTAIRE EST ICI, ET PAS DANS LE LITTERAL EN DESSOUS.
+    // `tests/contrat-front-api.test.js` lit le corps d'un `JSON.stringify` sur
+    // 900 caracteres : au-dela, il ne retrouve plus l'action `create` et le
+    // parcours de creation n'est plus verifie du tout. Le corps reste donc
+    // court, les explications au-dessus.
     const contact = contactSaisi()
 
     const btn = document.getElementById('btn-create')
@@ -770,6 +804,8 @@
           first_name: name,
           phone: contact.phone,
           email: contact.email,
+          notify_sms: contact.notify_sms,
+          notify_email: contact.notify_email,
           access_mode: 'lien',
           permissions: {
             property_scope: 'selected',
@@ -985,6 +1021,20 @@
     }
     document.getElementById('presta-phone').value = (profil && profil.telephone) || ''
     document.getElementById('presta-email').value = (profil && profil.email) || ''
+    // ⚠ L'ETAT VIENT DU SERVEUR, ET IL FIGE LES CASES. Une fiche existante porte
+    // deja un choix : le laisser se recalculer depuis les coordonnees
+    // RALLUMERAIT au premier affichage un canal que l'hote avait coupe, et le
+    // premier enregistrement le graverait. `canalTouche` sert ici a dire « ce
+    // n'est plus un defaut, c'est une valeur ».
+    // ⚠ `!== false` : un champ absent — reponse d'avant ce lot, `contacts=1`
+    // oublie — vaut « oui », jamais « non ». Meme regle que le serveur.
+    for (const canal of ['sms', 'email']) {
+      const cle = canal === 'sms' ? 'notif_sms' : 'notif_email'
+      document.getElementById(`presta-notif-${canal}`).checked =
+        !profil || profil[cle] !== false
+      canalTouche[canal] = !!profil
+    }
+    peindreAvertCanaux()
 
     properties.forEach(prop => {
       const cb = document.getElementById(`prop-${prop.id}`)
@@ -1076,6 +1126,7 @@
           // totalement inoperant. Meme faute sur `deactivate`.
           action: 'update', profile_id: editionEnCours,
           phone: contact.phone, email: contact.email,
+          notify_sms: contact.notify_sms, notify_email: contact.notify_email,
           permissions: { property_scope: 'selected',
                          property_ids: biens.map(b => b.uuid).filter(Boolean),
                          ...droitDispoSaisi() }
@@ -1189,11 +1240,16 @@
   // sans profil n'a aucun writer pour `profiles` : rien ne pourrait y etre ecrit.
   const AIDE_CONTACT = document.getElementById('aide-contact').innerHTML
   function coordonneesSaisissables(ouvert) {
-    for (const id of ['presta-phone', 'presta-email']) {
+    // ⚠ LES CASES SUIVENT LES CHAMPS. Un lien sans profil n'a aucun writer pour
+    // `profiles` : une case qui n'enregistre rien ne doit pas etre cliquable,
+    // exactement comme le numero a cote d'elle.
+    for (const id of ['presta-phone', 'presta-email', 'presta-notif-sms', 'presta-notif-email']) {
       const el = document.getElementById(id)
       el.disabled = !ouvert
       el.style.opacity = ouvert ? '' : '0.5'
     }
+    const avert = document.getElementById('avert-canaux')
+    if (avert && !ouvert) avert.textContent = ''
     // ⚠ « PAS DE PROFIL » ET « ON N'A PAS PU LE SAVOIR » NE SE DISENT PAS PAREIL.
     // `profilLie` rend `null` dans les deux cas, mais `rapprochementSur` les
     // separe — c'est deja la garde de `deletePrestataire`. Conseiller « recreez
@@ -1207,14 +1263,84 @@
           + 'enregistrés. Recréez le prestataire pour qu\'il puisse être prévenu et recevoir des ménages.'
   }
 
-  // Le telephone et l'email tels que saisis. Rendus meme vides : en edition,
-  // `/api/membres` ne touche a un champ que s'il est PRESENT dans le corps —
-  // ne pas l'envoyer rendrait un numero ineffacable une fois pose.
-  function contactSaisi() {
+  // ─── LES DEUX CANAUX DE NOTIFICATION ──────────────────────────────────────
+  //
+  // ⚠ LA CASE SUIT LA COORDONNEE, JUSQU'A CE QUE L'HOTE Y TOUCHE. Le defaut
+  // demande est « les canaux qui ont une coordonnee » : taper un numero coche
+  // « SMS », l'effacer la decoche. Mais un defaut qui continue de s'appliquer
+  // APRES un geste de l'hote n'est plus un defaut, c'est un ecrasement — il
+  // decocherait « e-mail » a la prochaine frappe dans le champ. `touchee` fige
+  // donc chaque case au premier clic, et seulement celle-la.
+  const canalTouche = { sms: false, email: false }
+
+  function ajusterCanauxDefaut() {
+    const c = { sms: document.getElementById('presta-phone').value.trim(),
+                email: document.getElementById('presta-email').value.trim() }
+    for (const canal of ['sms', 'email']) {
+      if (canalTouche[canal]) continue
+      document.getElementById(`presta-notif-${canal}`).checked = !!c[canal]
+    }
+    peindreAvertCanaux()
+  }
+
+  // ⚠ ON SIGNALE LA PROMESSE QUI NE SERA PAS TENUE, PAS LE CHOIX DELIBERE.
+  // « Coche sans coordonnee » annonce un envoi qui ne partira pas : c'est le cas
+  // a dire. « Coordonnee sans case » est un choix legitime — garder un numero
+  // pour l'APPELER sans lui envoyer de SMS est precisement ce que ce lot rend
+  // possible, et le signaler en ferait un reproche.
+  //
+  // ⚠ ET LE CAS QUI COMPTE VRAIMENT : aucun canal ouvert. L'assignation en
+  // urgence est alors MUETTE — elle ne l'apprendra qu'en ouvrant son lien. Ce
+  // n'est pas interdit (une prestataire qui ouvre sa PWA plusieurs fois par jour
+  // n'en a pas besoin), mais l'hote doit le savoir avant de compter dessus.
+  function peindreAvertCanaux() {
+    const zone = document.getElementById('avert-canaux')
+    if (!zone) return
+    const etat = canauxSaisis()
+    const vides = []
+    if (etat.notify_sms && !etat.phone) vides.push('aucun numéro n\'est renseigné')
+    if (etat.notify_email && !etat.email) vides.push('aucune adresse e-mail n\'est renseignée')
+    const ouverts = (etat.notify_sms && etat.phone) || (etat.notify_email && etat.email)
+
+    if (vides.length) {
+      zone.style.color = '#b45309'
+      zone.textContent = '⚠️ ' + vides.join(', et ') +
+        ' : rien ne partira par ce canal tant que la coordonnée manque.'
+      return
+    }
+    if (!ouverts) {
+      zone.style.color = '#b45309'
+      zone.textContent = '⚠️ Aucun canal actif : elle ne verra un ménage qu\'en ouvrant ' +
+        'son lien. Une assignation en urgence sera muette.'
+      return
+    }
+    zone.textContent = ''
+  }
+
+  function canauxSaisis() {
     return {
       phone: document.getElementById('presta-phone').value.trim(),
-      email: document.getElementById('presta-email').value.trim()
+      email: document.getElementById('presta-email').value.trim(),
+      notify_sms: document.getElementById('presta-notif-sms').checked,
+      notify_email: document.getElementById('presta-notif-email').checked
     }
+  }
+
+  for (const canal of ['sms', 'email']) {
+    document.getElementById(`presta-notif-${canal}`).addEventListener('change', () => {
+      canalTouche[canal] = true
+      peindreAvertCanaux()
+    })
+  }
+  for (const id of ['presta-phone', 'presta-email']) {
+    document.getElementById(id).addEventListener('input', ajusterCanauxDefaut)
+  }
+
+  // Le telephone, l'email et les deux canaux tels que saisis. Rendus meme vides :
+  // en edition, `/api/membres` ne touche a un champ que s'il est PRESENT dans le
+  // corps — ne pas l'envoyer rendrait un numero ineffacable une fois pose.
+  function contactSaisi() {
+    return canauxSaisis()
   }
 
   function resetForm() {
@@ -1224,6 +1350,14 @@
     document.getElementById('presta-name').value = ''
     document.getElementById('presta-phone').value = ''
     document.getElementById('presta-email').value = ''
+    // ⚠ LE FORMULAIRE REPART VIERGE, LES CASES AUSSI. Sans cette remise a zero,
+    // `canalTouche` gardait le figeage de la fiche precedente : la creation
+    // suivante n'aurait plus suivi ce qu'on tape.
+    canalTouche.sms = false
+    canalTouche.email = false
+    document.getElementById('presta-notif-sms').checked = false
+    document.getElementById('presta-notif-email').checked = false
+    peindreAvertCanaux()
     coordonneesSaisissables(true)   // la creation, elle, pose toujours un profil
     document.getElementById('visibility-days').value = '30'
     document.getElementById('ratio-periode').value = 'toujours'

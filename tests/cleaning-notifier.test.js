@@ -71,6 +71,95 @@ const BASE = { userId: U, providerId: MARIE, propertyName: 'La bulle',
                propertyId: '209413', departureDate: '2026-09-12',
                lien: 'https://hotesmart.vercel.app/apps/menages/public' }
 
+// ─── Les deux canaux : intention ET coordonnée (15 septembre 2026) ─────────
+
+test('le profil est lu AVEC ses deux canaux — sans eux, le réglage est mort-né', () => {
+  // ⚠ TEST DE CÂBLAGE, et il existe parce que l'oubli est invisible.
+  // Si `notify_sms` n'est pas dans le `select`, il vaut `undefined`, donc
+  // `!== false`, donc « oui » : tout repart comme avant, l'hôte décoche « SMS »
+  // et le SMS part quand même. Aucun test de comportement ne le verrait, puisque
+  // le comportement par défaut est justement celui-là.
+  const fs = require('node:fs')
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'lib', 'cleaning', 'notifier-prestataire.js'), 'utf8')
+  const sel = /\.select\('([^']*)'\)/.exec(src)
+  assert.ok(sel, 'le `select` du profil est introuvable')
+  for (const champ of ['phone', 'email', 'notify_sms', 'notify_email']) {
+    assert.match(sel[1], new RegExp(champ), `\`${champ}\` doit être lu`)
+  }
+})
+
+test('SMS décoché : le numéro reste, le SMS ne part pas', async () => {
+  // ⚠ LE CAS QUI MOTIVE TOUT LE LOT. Avant, le seul moyen de ne pas envoyer de
+  // SMS était d'EFFACER le numéro — donc de perdre le moyen de l'appeler.
+  const { etat, mod } = preparer({ profil: {
+    first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
+    active: true, pwa_token: 'j', notify_sms: false, notify_email: true } })
+  const r = await mod.notifierAssignation(BASE)
+  assert.strictEqual(etat.sms.length, 0, 'aucun SMS')
+  assert.strictEqual(r.sms, false)
+  assert.strictEqual(etat.emails.length, 1, 'l\'e-mail, lui, part')
+  assert.strictEqual(r.email, true)
+})
+
+test('e-mail décoché : l\'adresse reste, l\'e-mail ne part pas', async () => {
+  const { etat, mod } = preparer({ profil: {
+    first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
+    active: true, pwa_token: 'j', notify_sms: true, notify_email: false } })
+  const r = await mod.notifierAssignation(BASE)
+  assert.strictEqual(etat.emails.length, 0)
+  assert.strictEqual(r.email, false)
+  assert.strictEqual(etat.sms.length, 1)
+})
+
+test('les DEUX décochés : rien ne part, et le bilan ne le cache pas', async () => {
+  const { etat, mod } = preparer({ profil: {
+    first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
+    active: true, pwa_token: 'j', notify_sms: false, notify_email: false } })
+  const r = await mod.notifierProposition({ ...BASE, expireLe: '2026-09-11T18:00:00Z' })
+  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.strictEqual(etat.sms.length + etat.emails.length, 0)
+})
+
+test('coché SANS coordonnée : rien à envoyer, et rien ne casse', async () => {
+  // L'écran signale ce cas ; le module, lui, se tait simplement.
+  const { etat, mod } = preparer({ profil: {
+    first_name: 'Marie', phone: null, email: null,
+    active: true, pwa_token: 'j', notify_sms: true, notify_email: true } })
+  const r = await mod.notifierAssignation(BASE)
+  assert.deepStrictEqual(r, { sms: false, email: false })
+  assert.strictEqual(etat.sms.length + etat.emails.length, 0)
+})
+
+test('un champ ABSENT vaut OUI, jamais non', async () => {
+  // ⚠ `!== false`, PAS `=== true`. Les lignes d'avant la migration, un profil
+  // construit à la main par un futur appelant, une réponse tronquée : tous
+  // arrivent sans le champ. Les lire « non » rendrait muet, par omission, du
+  // personnel que personne n'a touché — exactement le silence que ce module
+  // existe pour empêcher.
+  const { etat, mod } = preparer({ profil: {
+    first_name: 'Marie', phone: '+33600000000', email: 'marie@x.fr',
+    active: true, pwa_token: 'j' } })
+  const r = await mod.notifierAssignation(BASE)
+  assert.deepStrictEqual(r, { sms: true, email: true })
+  assert.strictEqual(etat.sms.length, 1)
+  assert.strictEqual(etat.emails.length, 1)
+})
+
+test('`canalOuvert` exige les deux, dans les quatre combinaisons', () => {
+  const { mod } = preparer({})
+  const cas = [
+    [{ phone: '+336', notify_sms: true },  true,  'numéro + coché'],
+    [{ phone: '+336', notify_sms: false }, false, 'numéro mais décoché'],
+    [{ phone: null,   notify_sms: true },  false, 'coché mais pas de numéro'],
+    [{ phone: null,   notify_sms: false }, false, 'ni l\'un ni l\'autre'],
+    [{ phone: '',     notify_sms: true },  false, 'numéro vide, pas null']
+  ]
+  for (const [prof, attendu, quoi] of cas) {
+    assert.strictEqual(mod.canalOuvert(prof, 'sms'), attendu, quoi)
+  }
+})
+
 // ─── Le cloisonnement ──────────────────────────────────────────────────────
 
 test('la personne est cherchée SUR LE COMPTE, et en accès `lien`', async () => {
