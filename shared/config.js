@@ -43,6 +43,33 @@ const HOTE = (typeof location !== 'undefined' ? location.hostname : '').toLowerC
 export const CIBLE_SUPABASE =
   HOTES_STAGING.some(m => m.test(HOTE)) ? 'staging' : 'prod'
 
+// ⚠ LE SILENCE EST LE VRAI DANGER. Un hostname qui PARLE de staging sans
+// matcher les motifs ancres retombe sur la PROD — le navigateur d'un
+// deploiement de recette ecrit alors dans la base de production, sans que rien
+// ne le dise. On ne CHANGE PAS la cible pour autant (deviner serait pire),
+// mais on le dit fort : le repli sur la prod reste le comportement sur, il
+// cesse d'etre muet.
+//
+// ⚠ CE QUE CETTE GARDE N'ATTRAPE PAS, ET IL FAUT LE SAVOIR. Elle teste
+// `includes('staging')` : elle ne voit donc QUE les hostnames ou le mot
+// survit. Deux des trois formes dangereuses connues lui echappent, parce que
+// le mot n'y est plus :
+//   - un label DNS tronque par Vercel au-dela de 63 caracteres — et
+//     `hotesmart-staging-git-<branche>-<equipe>` depasse des une branche un
+//     peu longue : « hotesmart-stag-... » ne contient plus « staging » ;
+//   - un domaine propre hors motifs (recette.hotesmart.fr).
+// Contre ces deux-la, la seule defense reste le nom de domaine : il DOIT
+// commencer par `hotesmart-staging` ou `staging.` (docs/STAGING.md §2).
+// Reste attrape : le nom de projet suffixe (hotesmart-staging2), qui est le
+// cas le plus probable puisqu'il survient tout seul si le nom est deja pris.
+if (CIBLE_SUPABASE === 'prod' && HOTE.includes('staging')) {
+  console.error(
+    '[config] ATTENTION : hostname staging non reconnu, cible = PROD',
+    '| hostname =', HOTE,
+    '| motifs attendus = hotesmart-staging[-.] ou staging.'
+  )
+}
+
 export const ENV = CIBLES_SUPABASE[CIBLE_SUPABASE]
 
 // Trace la cible, jamais la cle : un ecran qui ment sur sa base est le pire

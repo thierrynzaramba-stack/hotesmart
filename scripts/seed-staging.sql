@@ -94,16 +94,28 @@ select c.user_id, null, null, null, false, null, false
    select 1 from public.api_keys k where k.user_id = c.user_id
  );
 
+-- ⚠ QUALIFIE, comme le delete de stripe_accounts plus bas et pour la meme
+-- raison : un UPDATE sans WHERE ne tient que par une garde posee quarante
+-- lignes plus haut. Le seed n'a le droit de toucher que ce qu'il gere.
 update public.api_keys
    set api_key = null, refresh_token = null,
        brevo_api_key = null, brevo_enabled = false,
-       seam_api_key = null, seam_enabled = false;
+       seam_api_key = null, seam_enabled = false
+ where user_id in (select user_id from _seed_ctx);
 
 -- ─── Stripe : AUCUNE ligne ──────────────────────────────────────────────────
 -- stripe_accounts.secret_key_cipher est NOT NULL avec une contrainte de forme
 -- ('v1:%'). Une ligne « neutralisee » y est donc IMPOSSIBLE : la neutralisation
 -- correcte est l'absence de ligne, pas une ligne a NULL.
-delete from public.stripe_accounts;
+--
+-- ⚠ QUALIFIE AU COMPTE DE RECETTE. La version precedente vidait la table
+-- ENTIERE. Les gardes garantissent qu'il n'y a qu'un compte ici, donc le
+-- resultat etait le meme — mais un `delete` non qualifie dans un script qu'on
+-- rejoue ne tient que par une garde posee quarante lignes plus haut. Si cette
+-- garde s'assouplit un jour, le `delete` emporte tout sans le dire.
+-- Portee explicite : ce que le seed a le droit d'effacer, c'est ce qu'il gere.
+delete from public.stripe_accounts
+ where user_id in (select user_id from _seed_ctx);
 
 -- ─── Quelques reservations ──────────────────────────────────────────────────
 -- Dates RELATIVES a aujourd'hui : des dates figees franchiraient la garde
