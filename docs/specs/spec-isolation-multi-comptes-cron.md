@@ -106,7 +106,54 @@ Chaque correctif doit être né rouge : désarmer le filtre doit faire tomber un
 test. Un correctif dont la suite reste verte des deux côtés ne prouve rien —
 c'est la leçon que `7b8084f` tire de ses propres tests, et elle vaut ici.
 
-## 5. Hors périmètre
+## 5. Constats liés, non traités
+
+Relevés par la même review de `7b8084f`, classés mineurs et non bloquants.
+Ils ne portent pas sur le cloisonnement : ils vivent dans
+`lib/cron-channel-messages-sync.js`, pas dans `cron-classify.js`. Ils sont
+rattachés à ce lot parce qu'ils se corrigent dans le même passage sur la boucle
+cron, et qu'aucun des deux ne mérite un lot à lui seul.
+
+### 5.1 Une panne installée n'est annoncée qu'une fois
+
+`sAbstenir` ne lève l'incident `messages_import_suspendu` qu'à l'**égalité
+stricte** avec `ABSTENTIONS_AVANT_INCIDENT` (3) :
+
+```js
+if (abstentions === ABSTENTIONS_AVANT_INCIDENT) { … }
+```
+
+Au quatrième cycle et au-delà, plus aucun signal. C'est délibéré et commenté —
+« un seul signal par installation » — et atténué par
+`results.messagesImportAbstentions`, visible dans le compte rendu du cycle.
+
+Mais si ce signal unique est manqué, l'import peut rester suspendu
+indéfiniment sans que rien ne le redise : les réponses écrites depuis l'app OTA
+n'entrent plus dans le cœur, et l'agent travaille sur un fil amputé. C'est
+exactement la « panne qui dort » que l'en-tête du module dit vouloir éviter.
+
+Piste : ré-annoncer à intervalle croissant (3, 12, 48 cycles) plutôt qu'une
+seule fois, ou rendre l'incident récurrent avec acquittement humain — le motif
+déjà retenu pour l'alarme de surréservation.
+
+### 5.2 Un cycle chargé est compté comme une panne
+
+Le motif `budget` incrémente le **même compteur** que les vraies pannes
+(`provider_*`, `cycle_en_retard`) :
+
+```js
+if (r?.interrompu) return sAbstenir(supabase, { …, motif: 'budget', … })
+```
+
+Trois cycles chargés d'affilée déclenchent donc `messages_import_suspendu`
+alors que rien n'est cassé — l'import fait précisément ce qu'on lui demande,
+rendre la main. Le correctif du bloquant 4 (phase séparée + ordre équitable)
+rend le cas moins fréquent, il ne le supprime pas.
+
+Piste : deux compteurs distincts, ou un seuil plus élevé pour `budget` — une
+interruption de budget est un régime normal, pas un incident.
+
+## 6. Hors périmètre
 
 La scalabilité du module d'import (`.in()` sur tout le parc, une requête d'état
 par bien) est une **dette acceptée**, cohérente avec le modèle cron actuel.
