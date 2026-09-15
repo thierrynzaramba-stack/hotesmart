@@ -174,15 +174,17 @@ test('une coordonnée gardée SANS sa case ne se fait pas reprocher', async () =
 
 // ─── Ce qui part au serveur ───────────────────────────────────────────────
 
-test('la CRÉATION envoie les deux canaux', async () => {
+test('la CRÉATION envoie les canaux TRANCHÉS, dans les deux sens', async () => {
   // Omis, le serveur retombe sur son défaut `true` : une case décochée à
   // l'écran ne serait pas tenue, et l'hôte croirait avoir coupé un canal
-  // resté ouvert.
+  // resté ouvert. Les deux cases sont donc touchées ici — c'est ce qui en fait
+  // des décisions, et non le défaut de l'écran (voir le test suivant).
   const { w, t, envois } = monter()
   t.seed(); t.renderPropCheckboxes(); t.resetForm()
   el(w, 'presta-name').value = 'Nouvelle'
   taper(w, 'presta-phone', '+33600000000')
   taper(w, 'presta-email', 'n@x.fr')
+  cocher(w, 'presta-notif-sms', true)
   cocher(w, 'presta-notif-email', false)
   const cb = el(w, `prop-${BIENS[0].id}`)
   if (cb) cb.checked = true
@@ -192,6 +194,59 @@ test('la CRÉATION envoie les deux canaux', async () => {
   assert.ok(creation, 'la création part')
   assert.strictEqual(creation.corps.notify_sms, true)
   assert.strictEqual(creation.corps.notify_email, false)
+})
+
+test('la création n\'envoie PAS un canal que personne n\'a tranché', async () => {
+  // ⚠ LE DÉFAUT TROUVÉ EN REVIEW, ET IL CONTREDISAIT L'INVARIANT DE LA MIGRATION.
+  // L'écran envoyait toujours l'état des deux cases — y compris celui qu'il
+  // avait lui-même déduit de la coordonnée. Créée avec son seul numéro, une
+  // prestataire partait donc avec `notify_email: false` GRAVÉ : le jour où
+  // l'hôte ajoutait son adresse — geste qui suffisait avant ce lot — plus rien
+  // ne partait, et rien ne le disait. C'est le cas le plus fréquent : presque
+  // personne n'a les deux coordonnées au moment de la création.
+  //
+  // Un champ absent laisse le serveur à son défaut `true`, c'est-à-dire
+  // « quand tu auras la coordonnée, sers-t'en ».
+  const { w, t, envois } = monter()
+  t.seed(); t.renderPropCheckboxes(); t.resetForm()
+  el(w, 'presta-name').value = 'Nouvelle'
+  taper(w, 'presta-phone', '+33600000000')      // aucune case touchée
+  const cb = el(w, `prop-${BIENS[0].id}`)
+  if (cb) cb.checked = true
+  await t.createPrestataire()
+
+  const creation = membres(envois).find(e => e.corps.action === 'create')
+  assert.ok(creation, 'la création part')
+  assert.ok(!('notify_sms' in creation.corps),
+    '`notify_sms` non tranché ne doit pas être envoyé')
+  assert.ok(!('notify_email' in creation.corps),
+    '`notify_email` non tranché ne doit pas être envoyé — sinon l\'adresse ' +
+    'ajoutée plus tard reste muette')
+})
+
+test('un canal tranché part, l\'autre non — les deux cas dans la même création', async () => {
+  const { w, t, envois } = monter()
+  t.seed(); t.renderPropCheckboxes(); t.resetForm()
+  el(w, 'presta-name').value = 'Nouvelle'
+  taper(w, 'presta-phone', '+33600000000')
+  cocher(w, 'presta-notif-sms', false)          // tranché : elle ne veut pas de SMS
+  const cb = el(w, `prop-${BIENS[0].id}`)
+  if (cb) cb.checked = true
+  await t.createPrestataire()
+
+  const creation = membres(envois).find(e => e.corps.action === 'create')
+  assert.strictEqual(creation.corps.notify_sms, false, 'la décision part')
+  assert.ok(!('notify_email' in creation.corps), 'le défaut, lui, reste au serveur')
+})
+
+test('un formulaire VIERGE n\'avertit de rien', async () => {
+  // ⚠ UN AVERTISSEMENT PERMANENT N'EN EST PAS UN. À l'ouverture du formulaire de
+  // création, « aucun canal actif » est vrai et sans objet : l'hôte le verrait à
+  // CHAQUE création et apprendrait à ne plus le lire — au moment même où il
+  // compte le plus.
+  const { w, t } = monter()
+  t.seed(); t.renderPropCheckboxes(); t.resetForm()
+  assert.strictEqual(avert(w), '')
 })
 
 test('la MODIFICATION envoie les deux canaux', async () => {
@@ -250,6 +305,13 @@ test('un lien SANS profil coupe les cases, comme les coordonnées à côté d\'e
   assert.strictEqual(el(w, 'presta-notif-sms').disabled, true)
   assert.strictEqual(el(w, 'presta-notif-email').disabled, true)
   assert.strictEqual(el(w, 'presta-phone').disabled, true, 'la garde existante n\'a pas bougé')
+  // ⚠ ET L'AVERTISSEMENT SE TAIT. Il se rallumait juste après la coupure :
+  // l'aide disait « ni téléphone ni email ne peuvent y être enregistrés » et,
+  // juste dessous, l'écran conseillait de saisir un numéro — un conseil
+  // d'action sur un écran où rien ne s'enregistre. Le test ne regardait que
+  // `disabled`, c'est ce qui l'avait laissé passer.
+  assert.strictEqual(avert(w), '',
+    'aucun conseil de saisie là où aucune saisie n\'est enregistrée')
 })
 
 test('rouvrir le formulaire vierge remet les cases à zéro', async () => {

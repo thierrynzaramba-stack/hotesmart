@@ -908,6 +908,22 @@ coordonnée **ET** intention.
   `tests/prestataires-canaux-dom.test.js` (11 tests, vrai DOM : le réglage vit dans
   l'interaction, pas dans un corps de requête).
 
+⚠️ **CE QUE LA REVIEW A TROUVÉ, ET QUI CONTREDISAIT L'INVARIANT CI-DESSUS.**
+L'écran envoyait **toujours** l'état des deux cases à la création — y compris celui qu'il avait
+lui-même déduit de la coordonnée. Une prestataire créée avec son **seul numéro** partait donc avec
+`notify_email: false` **gravé** : le jour où l'hôte ajoutait son adresse — geste qui suffisait
+avant ce lot — plus rien ne partait, et rien ne le disait. C'est le cas le plus fréquent : presque
+personne n'a les deux coordonnées au moment de la création. Le serveur respectait la règle, l'écran
+la défaisait en envoyant son **défaut** comme une décision.
+**`canauxTranches()` n'envoie qu'un canal réellement touché** ; un champ absent laisse le serveur à
+`true`, c'est-à-dire « quand tu auras la coordonnée, sers-t'en ». À la modification la question ne
+se pose pas : la fiche arrive figée depuis le serveur, chaque case y porte déjà une décision.
+
+⚠️ **Un avertissement permanent n'en est pas un.** Le formulaire vierge affichait « aucun canal
+actif » avant la moindre frappe : vu à **chaque** création, il s'apprend à ne plus se lire — au
+moment même où il compte. Il se tait aussi quand les cases sont **coupées** (lien sans profil) :
+conseiller de saisir un numéro sur un écran où rien ne s'enregistre est un mensonge d'écran.
+
 ⚠️ **Le vérificateur de contrat lit 900 caractères de corps, et pas un de plus.**
 `tests/contrat-front-api.test.js` retrouve un `JSON.stringify({…})` par regex bornée : au-delà,
 l'appel n'est **pas retenu** et les contrôles de contrat de cet appel ne s'exécutent plus. Trois
@@ -915,6 +931,15 @@ lignes de commentaire ajoutées dans le corps de `create` l'ont fait passer à 1
 parcours de création n'était plus vérifié. Le défaut est bruyant, mais son message ne disait pas
 la cause. Un test garde désormais le vérificateur lui-même (`les corps de POST restent LISIBLES`).
 **Corollaire : les explications vont au-dessus de l'appel, pas dans le littéral.**
+
+⚠️ **Et il a TROIS cécités, pas une.** (a) un corps de plus de 900 caractères ; (b) une fin de
+littéral au-delà de la fenêtre de 1400 caractères ouverte depuis `fetch(` — donc un commentaire
+placé **entre `fetch(` et `JSON.stringify`** y coûte plein tarif ; (c) un corps qui n'est pas un
+littéral. Mesurer la seule longueur laissait deux portes ouvertes. Le test porte maintenant
+d'abord une **contre-épreuve** — le lecteur retrouve-t-il encore les trois POST `/api/membres` de
+la fiche ? — qui ne dépend d'aucune limite interne. Contre-épreuve de la contre-épreuve faite :
+400 caractères ajoutés dans l'appel le plus serré (`update`, à 1047/1400) font bien rougir.
+*Un vérificateur qui n'a rien lu doit échouer, pas se taire.*
 
 **Dette notée, non corrigée ici** (partagée avec l'écran hôte, à solder ensemble) :
 - la lettre A/B se calcule en `% 2` en dur alors que la cadence va jusqu'à **4** : sur « toutes

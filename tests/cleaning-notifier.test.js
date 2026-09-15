@@ -82,7 +82,11 @@ test('le profil est lu AVEC ses deux canaux — sans eux, le réglage est mort-n
   const fs = require('node:fs')
   const src = fs.readFileSync(
     path.join(__dirname, '..', 'lib', 'cleaning', 'notifier-prestataire.js'), 'utf8')
-  const sel = /\.select\('([^']*)'\)/.exec(src)
+  // ⚠ ANCRE SUR `from('profiles')`, pas sur le premier `select` du fichier :
+  // un `select` ajoute plus haut un jour ferait controler le mauvais.
+  const depuis = src.indexOf("from('profiles')")
+  assert.ok(depuis > 0, "la lecture de `profiles` est introuvable")
+  const sel = /\.select\('([^']*)'\)/.exec(src.slice(depuis))
   assert.ok(sel, 'le `select` du profil est introuvable')
   for (const champ of ['phone', 'email', 'notify_sms', 'notify_email']) {
     assert.match(sel[1], new RegExp(champ), `\`${champ}\` doit être lu`)

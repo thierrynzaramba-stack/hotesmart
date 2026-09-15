@@ -133,6 +133,30 @@ test('les corps de POST restent LISIBLES par ce vérificateur', () => {
   // Le défaut est bruyant (deux assertions tombent), mais le MESSAGE ne disait
   // pas la cause — on cherchait un appel disparu, alors que c'était le lecteur
   // qui ne voyait plus. Ce test-ci nomme la cause, et laisse une marge.
+  // ⚠ TROIS CECITES, PAS UNE. `appels()` peut cesser de retenir un appel de
+  // trois facons : (a) un corps de plus de 900 caracteres, (b) une fin de
+  // litteral au-dela de la fenetre de 1400 caracteres ouverte a partir de
+  // `fetch(` — donc un commentaire place ENTRE `fetch(` et `JSON.stringify` y
+  // coute plein tarif —, (c) un corps qui n'est pas un litteral. Mesurer la
+  // seule longueur (a) laissait les deux autres portes ouvertes.
+  //
+  // ⚠ D'OU LA CONTRE-EPREUVE D'ABORD (REVIEW.md regle 16) : plutot que de
+  // deviner les limites internes du lecteur, on lui demande s'il retrouve
+  // encore ce qu'il est cense lire. Un verificateur qui n'a rien lu doit
+  // ECHOUER, pas se taire.
+  const retenus = appels(lire('apps/menages/prestataires.html'))
+    .filter(a => a.url === '/api/membres')
+  assert.ok(retenus.length >= 3,
+    `appels() ne retrouve plus que ${retenus.length} POST /api/membres dans la fiche ` +
+    'prestataire, au lieu des 3 attendus (create, update, deactivate). Les controles ' +
+    'de contrat de ces appels ne s\'executent donc PLUS — ils passent sur du vide. ' +
+    'Cause la plus probable : du texte ajoute entre `fetch(` et `JSON.stringify`, ou ' +
+    'un corps trop long. Sortez les commentaires de l\'appel.')
+  for (const action of ['create', 'update', 'deactivate']) {
+    assert.ok(retenus.some(a => a.litterale === action),
+      `appels() ne retrouve plus l'action '${action}' : ce parcours n'est plus verifie`)
+  }
+
   const PLAFOND = 900
   for (const ecran of ECRANS) {
     const src = lire(ecran)
@@ -146,6 +170,9 @@ test('les corps de POST restent LISIBLES par ce vérificateur', () => {
         else if (src[i] === '}') { profondeur--; if (!profondeur) { fin = i; break } }
       }
       if (fin < 0) continue
+      // ⚠ Le comptage d'accolades ignore chaines et gabarits : une accolade
+      // dans une chaine fausserait la mesure. Le risque est une fausse alarme,
+      // pas un faux vert — la contre-epreuve ci-dessus, elle, ne se trompe pas.
       const longueur = fin - (m.index + m[0].length)
       assert.ok(longueur <= PLAFOND,
         `${ecran} : un corps de POST fait ${longueur} caractères (plafond ${PLAFOND}). ` +

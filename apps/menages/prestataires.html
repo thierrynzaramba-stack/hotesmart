@@ -780,6 +780,14 @@
     // serveur retombe sur son defaut `true` : une case decochee a l'ecran ne
     // serait pas tenue, et l'hote croirait avoir coupe un canal reste ouvert.
     //
+    // ⚠ MAIS SEULEMENT CEUX QU'ON A REELLEMENT TRANCHES (`canauxTranches`).
+    // Envoyer systematiquement l'etat des cases GRAVAIT le defaut de l'ecran
+    // comme une decision : creee avec son seul numero, une prestataire partait
+    // avec `notify_email: false` — et le jour ou l'hote ajoutait son adresse,
+    // geste qui suffisait avant ce lot, plus rien ne partait et rien ne le
+    // disait. C'est exactement l'invariant que la migration grave :
+    // « l'intention se garde quand la coordonnee manque ».
+    //
     // ⚠ CE COMMENTAIRE EST ICI, ET PAS DANS LE LITTERAL EN DESSOUS.
     // `tests/contrat-front-api.test.js` lit le corps d'un `JSON.stringify` sur
     // 900 caracteres : au-dela, il ne retrouve plus l'action `create` et le
@@ -804,8 +812,7 @@
           first_name: name,
           phone: contact.phone,
           email: contact.email,
-          notify_sms: contact.notify_sms,
-          notify_email: contact.notify_email,
+          ...canauxTranches(),
           access_mode: 'lien',
           permissions: {
             property_scope: 'selected',
@@ -1296,7 +1303,20 @@
   function peindreAvertCanaux() {
     const zone = document.getElementById('avert-canaux')
     if (!zone) return
+    // ⚠ UN AVERTISSEMENT PERMANENT N'EN EST PAS UN. A l'ouverture du formulaire
+    // de creation, avant la moindre frappe, « aucun canal actif » est vrai et
+    // sans objet : l'hote le verrait a CHAQUE creation, et apprendrait a ne
+    // plus le lire — au moment meme ou il compte le plus.
+    // ⚠ Et si les cases sont COUPEES (lien sans profil), rien ne s'enregistre :
+    // conseiller de saisir un numero sur un ecran ou aucune donnee ne part est
+    // un mensonge d'ecran.
+    const caseSms = document.getElementById('presta-notif-sms')
+    if (caseSms && caseSms.disabled) { zone.textContent = ''; return }
     const etat = canauxSaisis()
+    const vierge = !etat.phone && !etat.email &&
+                   !document.getElementById('presta-name').value.trim() &&
+                   !canalTouche.sms && !canalTouche.email
+    if (vierge) { zone.textContent = ''; return }
     const vides = []
     if (etat.notify_sms && !etat.phone) vides.push('aucun numéro n\'est renseigné')
     if (etat.notify_email && !etat.email) vides.push('aucune adresse e-mail n\'est renseignée')
@@ -1315,6 +1335,20 @@
       return
     }
     zone.textContent = ''
+  }
+
+  // ⚠ CE QUI A ETE TRANCHE, PAR OPPOSITION A CE QUI EST AFFICHE.
+  // Une case jamais touchee ne porte pas une decision, elle porte un DEFAUT
+  // d'ecran qui suit la coordonnee. L'envoyer en creation ecrirait `false` sur
+  // un canal que personne n'a decoche — et le serveur, lui, sait quoi faire
+  // d'un champ absent : il laisse `true`, donc « quand tu auras la coordonnee,
+  // sers-t'en ». A la MODIFICATION la question ne se pose pas : la fiche arrive
+  // figee depuis le serveur, chaque case y porte deja une decision.
+  function canauxTranches() {
+    const out = {}
+    if (canalTouche.sms) out.notify_sms = document.getElementById('presta-notif-sms').checked
+    if (canalTouche.email) out.notify_email = document.getElementById('presta-notif-email').checked
+    return out
   }
 
   function canauxSaisis() {
