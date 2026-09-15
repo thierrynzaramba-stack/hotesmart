@@ -825,10 +825,50 @@ un geste qui part de travers ne se rattrape pas d'un Ctrl-Z.
   test DOM, pas à la relecture.
 - ⚠️ **Une panne ne s'affiche jamais comme « aucune absence »**, et une règle illisible ne peint
   pas le mois en vert : le cas prudent plutôt qu'un calendrier qui ment.
-- **Éprouvé dans un vrai DOM** (`tests/pwa-mes-jours-dom.test.js`, jsdom) : le **vrai** script de
-  la page est monté, pas une copie. ⚠️ jsdom n'implémente ni `matchMedia` ni `navigator.onLine`
-  en écriture — les deux sont posés par le test, et le double **rejoue les effets du serveur**,
-  pas seulement ses `ok` : un stub complaisant rendrait tout geste indétectable.
+- **Éprouvé dans un vrai DOM** (`tests/pwa-mes-jours-dom.test.js`, jsdom, 24 tests) : le **vrai**
+  script de la page est monté, pas une copie. ⚠️ jsdom n'implémente ni `matchMedia` ni
+  `navigator.onLine` en écriture — les deux sont posés par le test, et le double **rejoue les
+  effets du serveur**, pas seulement ses `ok` : un stub complaisant rendrait tout geste
+  indétectable.
+
+⚠️ **LE DÉFAUT QUI A FAILLI PARTIR EN PRODUCTION, ET CE QU'IL APPREND.**
+`mesDisponibilites` (`api/menages-public.js`) rendait `{ id, label }` : le **libellé seul**,
+ce qui suffisait tant que la PWA affichait une liste de phrases. Le calendrier, lui, lit
+`jours`/`cadence`/`ancre`. Conséquence pour une prestataire qui a **au moins une règle active** :
+mois entier peint en **rouge**, carte « Mes jours de travail » sans une seule pastille allumée, et
+**plus aucune absence d'un jour déclarable** (`basculerMonJour` bute sur « Vous ne travaillez déjà
+pas ce jour-là ») — une régression sur l'écran d'avant, où le champ date + « Déclarer » partait
+toujours. Seul le congé en plage restait utilisable.
+
+- **Pourquoi personne ne l'a vu.** Le seul profil qu'on regardait (Régina) n'a **aucune** règle,
+  et sans règle tout est disponible : l'écran était juste. Le défaut n'existait que pour les
+  profils qu'on ne testait pas.
+- **Pourquoi les 20 tests étaient verts.** Le double du test DOM rendait la forme de
+  `/api/disponibilites` (l'écran **hôte**), pas celle de `/api/menages-public`. *Un double plus
+  riche que le serveur* — REVIEW.md règle 8, et le troisième épisode de cette famille dans ce
+  dépôt. Pire : le test « une règle illisible ne peint pas le calendrier en vert » **assertait**
+  un mois entièrement rouge ; la production était en permanence dans le cas dégradé, et un test
+  le certifiait correct.
+- **Pourquoi un test d'endpoint le garantissait.**
+  `tests/menages-public-disponibilites.test.js` gravait
+  `deepStrictEqual(regles, [{ id, label }])`. **Deux tests verts affirmaient deux contrats
+  incompatibles.** Le contrat à tenir n'était pas « seulement id et label » — c'était « **la
+  chaîne RRULE ne descend pas** » (§2 de la spec). Rendre de quoi **dessiner** une règle n'est pas
+  rendre de quoi la **réécrire** : la forme sort, la chaîne non, et aucune action serveur ne la
+  prend en entrée.
+- **Correctif** : `lireRrule` côté PWA aussi, **la même projection** que l'écran hôte ; le double
+  du test DOM passe désormais par `construireRrule`/`lireRrule`, donc il ne peut plus diverger de
+  l'endpoint sans rougir ; et un test reproduit le cas de production — *avec* une règle, ses jours
+  restent verts **et** déclarables.
+
+**Dette notée, non corrigée ici** (partagée avec l'écran hôte, à solder ensemble) :
+- la lettre A/B se calcule en `% 2` en dur alors que la cadence va jusqu'à **4** : sur « toutes
+  les 3 semaines », la colonne de gauche annonce un rythme que les cases (correctes) ne suivent
+  pas ;
+- les jours **passés** du mois courant ignorent congés et exceptions (le serveur borne au futur,
+  le calendrier dessine le mois entier) — cosmétique, cases grisées et non cliquables ;
+- un jour de la **semaine d'ancrage** antérieur à l'ancre est peint travaillé alors que `rrule`
+  n'émet rien avant `DTSTART` — une seule semaine par règle.
 
 ⚠️ **Pourquoi un étage, et pas un rang égal à l'exception.** Une exception est une correction
 d'**un** jour ; un congé est une **plage** qu'on supprime d'un geste. Au même rang, une exception

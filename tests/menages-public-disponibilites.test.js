@@ -373,14 +373,50 @@ test('la lecture est BORNÉE au futur', async () => {
   assert.ok(l.f.date_gte, 'une borne de date doit être posée')
 })
 
-test('la PWA ne reçoit JAMAIS la chaîne RRULE, seulement le libellé', async () => {
+test('la PWA ne reçoit JAMAIS la chaîne RRULE — mais bien la FORME de la règle', async () => {
+  // ⚠ CE TEST A GRAVÉ UN CONTRAT TROP ÉTROIT, ET L'ÉCRAN L'A PAYÉ.
+  // Il assertait `deepStrictEqual(regles, [{ id, label }])`, ce qui était juste
+  // tant que la PWA n'affichait qu'une liste de phrases. Depuis « Mes jours de
+  // travail » (15 sept. 2026) elle PEINT un calendrier : sans `jours`, `cadence`
+  // et `ancre`, aucune journée n'est reconnue comme travaillée, le mois sort
+  // entièrement rouge, et plus aucune absence d'un jour n'est déclarable.
+  // Le test restait vert pendant que l'écran était inutilisable — il certifiait
+  // l'absence exacte qui cassait la page.
+  //
+  // ⚠ CE QUI EST INTERDIT N'A PAS CHANGÉ : la CHAÎNE ne descend pas (règle du
+  // §2 de la spec), et aucune action serveur ne la prend en entrée. Rendre de
+  // quoi DESSINER une règle n'est pas rendre de quoi la réécrire.
   const { handler } = preparer({
-    regles: [{ id: 'r1', label: 'Tous les samedis', rrule: 'RRULE:FREQ=WEEKLY' }]
+    regles: [{ id: 'r1', label: 'Tous les samedis',
+               rrule: 'DTSTART:20260907T120000Z\nRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SA' }]
   })
   const res = reponse()
   await handler(lire(), res)
-  assert.deepStrictEqual(res.body.regles, [{ id: 'r1', label: 'Tous les samedis' }])
-  assert.ok(!JSON.stringify(res.body).includes('FREQ=WEEKLY'))
+  assert.ok(!JSON.stringify(res.body).includes('FREQ=WEEKLY'),
+    'la chaîne RRULE ne doit jamais atteindre le téléphone')
+  assert.ok(!JSON.stringify(res.body).includes('DTSTART'))
+  assert.strictEqual(res.body.regles.length, 1)
+  const r = res.body.regles[0]
+  assert.strictEqual(r.id, 'r1')
+  assert.strictEqual(r.label, 'Tous les samedis')
+  // samedi = 6 dans la convention de l'app (dimanche = 0), là où `rrule`
+  // compte lundi = 0 : la conversion est faite par `lireRrule`, pas ici.
+  assert.deepStrictEqual(r.jours, [6])
+  assert.strictEqual(r.cadence, 2)
+  assert.strictEqual(r.ancre, '2026-09-07')
+})
+
+test('une règle ILLISIBLE sort avec `jours: null`, elle ne fait pas tomber la lecture', async () => {
+  // L'écran dit alors qu'il ne sait pas l'afficher, au lieu de peindre le mois
+  // en vert — « une panne coupe, elle n'ouvre pas ».
+  const { handler } = preparer({
+    regles: [{ id: 'r1', label: 'Le premier lundi du mois', rrule: 'ceci n\'est pas une rrule' }]
+  })
+  const res = reponse()
+  await handler(lire(), res)
+  assert.strictEqual(res.body.autorise, true)
+  assert.deepStrictEqual(res.body.regles,
+    [{ id: 'r1', label: 'Le premier lundi du mois', jours: null, cadence: null, ancre: null }])
 })
 
 test('sans le droit, la lecture répond « non autorisé » sans rien fuir', async () => {

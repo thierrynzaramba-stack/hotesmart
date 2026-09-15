@@ -17,7 +17,11 @@ const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 // decalage de fuseau la fait basculer d'un jour — piege deja corrige deux fois
 // dans ce depot. C'est la MEME fonction que celle du moteur : deux
 // normalisations differentes pour la meme date finiraient par diverger.
-const { cleJour } = require('../lib/cleaning/availability')
+// ⚠ `lireRrule` est l'INVERSE de `construireRrule` : elle rend les jours, la
+// cadence et l'ancre d'une regle SANS que la chaine RRULE ne descende vers le
+// client (regle du §2 de la spec). C'est la meme projection que l'ecran hote
+// — et elle doit l'etre : les deux calendriers peignent le meme mois.
+const { cleJour, lireRrule } = require('../lib/cleaning/availability')
 // ⚠ LE MEME PLAFOND QUE `api/disponibilites.js`, et pour la meme raison : l'ecran
 // regle jusqu'a un an devant. Une plage au-dela n'est pas un conge, c'est une
 // saisie qui a derape — et surtout une ligne que l'ecran ne montrera jamais,
@@ -1326,11 +1330,17 @@ async function mesDisponibilites (req, res, token) {
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
 
-  // Les regles recurrentes : leur LIBELLE seulement. La chaine RRULE n'a rien a
-  // faire dans une PWA, et son libelle suffit a dire « le week-end, une semaine
-  // sur deux ».
+  // Les regles recurrentes.
+  // ⚠ LE LIBELLE NE SUFFIT PAS, et l'avoir cru a rendu l'ecran inutilisable.
+  // Tant que la PWA n'affichait qu'une liste de phrases, « le week-end, une
+  // semaine sur deux » disait tout. Depuis « Mes jours de travail » (15 sept.
+  // 2026), elle PEINT un calendrier : sans `jours`, `cadence` et `ancre`, aucune
+  // journee n'est reconnue comme travaillee, le mois sort entierement rouge et
+  // plus aucune absence d'un jour n'est declarable — l'ecran precedent, lui,
+  // envoyait toujours. Le defaut ne se voyait pas sur un profil SANS regle,
+  // c'est-a-dire sur le seul qu'on regardait.
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
-    .select('id, label').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .select('id, label, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
     .eq('active', true).order('created_at', { ascending: true }).limit(50)
   if (errR) {
     console.error('[menages-public] lecture regles echec:', errR.message)
@@ -1361,7 +1371,21 @@ async function mesDisponibilites (req, res, token) {
     // reglee par l'hote. Elle declare ses ABSENCES — un jour, ou une plage —
     // elle ne redessine pas son planning. Le front n'affiche donc aucun controle
     // sur ces lignes ; le serveur, lui, n'expose simplement aucune action.
-    regles: (regles || []).map(r => ({ id: r.id, label: r.label }))
+    //
+    // ⚠ LECTURE SEULE N'EST PAS « SANS FORME ». On rend de quoi DESSINER la
+    // regle, jamais de quoi la reecrire : la chaine RRULE ne sort pas, et aucune
+    // action ne la prend en entree. Une regle illisible sort avec `jours: null`
+    // — l'ecran le dit au lieu de peindre un mois entier en vert.
+    regles: (regles || []).map(r => {
+      const forme = lireRrule(r.rrule)
+      return {
+        id: r.id,
+        label: r.label,
+        jours: forme ? forme.jours : null,
+        cadence: forme ? forme.cadence : null,
+        ancre: forme ? forme.ancre : null
+      }
+    })
   })
 }
 

@@ -2289,7 +2289,15 @@ if ("serviceWorker" in navigator) {
     // remettrait candidate sur un jour dont il l'avait retiree, sans qu'il
     // l'apprenne. L'ecran ne propose donc pas le geste.
     if (exc && exc.source !== 'prestataire') {
-      dire(msg, 'Cette absence a été posée par votre employeur. Pour la retirer, dites-le lui.')
+      // ⚠ DEUX SENS, DEUX PHRASES. L'hote peut poser « pas ce samedi-la »
+      // (`available: false`) MAIS AUSSI « viens exceptionnellement ce samedi »
+      // (`available: true`). Un libelle unique annoncait « cette absence a ete
+      // posee par votre employeur » a quelqu'un a qui on venait au contraire de
+      // DEMANDER de venir — elle n'y comprenait rien, et n'avait aucun moyen de
+      // dire qu'elle ne pouvait pas.
+      dire(msg, exc.available
+        ? 'Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
+        : 'Cette absence a été posée par votre employeur. Pour la retirer, dites-le lui.')
       return
     }
     if (!exc && !jourTravaille(j)) {
@@ -2309,6 +2317,11 @@ if ("serviceWorker" in navigator) {
       dire(msg, 'Connexion impossible. Réessayez.')
     } finally {
       envoiEnCours = false
+      // ⚠ LA CASE NE RESTE PAS « EN COURS D'ENVOI » SUR UN ECHEC. `.envoi` la
+      // met a 45 % d'opacite : laissee en place apres une coupure reseau, elle
+      // dit « c'est parti » alors que rien n'est parti. Le succes repeint le
+      // mois de toute facon.
+      if (el) el.classList.remove('envoi')
     }
   }
 
@@ -2341,7 +2354,10 @@ if ("serviceWorker" in navigator) {
 
   async function retirerMonConge (id) {
     const msg = document.getElementById('dispo-message')
-    if (envoiEnCours) return
+    // Le bouton n'existe que si `modifiable`, et le serveur refuse de toute
+    // facon — mais les trois chemins d'ecriture posent la meme garde, et une
+    // asymetrie est ce qui se perd au prochain remaniement.
+    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
     if (horsLigne(msg)) return
     envoiEnCours = true
     try {
@@ -2364,12 +2380,24 @@ if ("serviceWorker" in navigator) {
   }
 
   // ─── Branchements, poses une seule fois ──────────────────────────────────
+  // ⚠ CHANGER DE MOIS LEVE LE DRAPEAU. `dire()` le pose pour que la confirmation
+  // survive au repeint qui suit immediatement l'ecriture — mais il ne retombait
+  // jamais, et un « ✓ Absence enregistree » la suivait de mois en mois pendant
+  // que la phrase d'aide ne revenait plus. Une confirmation parle du geste qu'on
+  // vient de faire ; des qu'elle regarde ailleurs, elle a fait son travail.
+  // ⚠ ON NE LA LEVE PAS DANS `chargerDisponibilites` : la relecture suit
+  // immediatement chaque ecriture, et l'y mettre effacerait la confirmation
+  // exactement comme avant — essaye, teste, et remis ici.
+  function oublierLeMessage () {
+    const m = document.getElementById('dispo-message')
+    if (m) delete m.dataset.garde
+  }
   document.getElementById('dispo-prec').addEventListener('click', () => {
-    if (mesJours && mesJours.mois > 0) { mesJours.mois--; peindreMonMois() } })
+    if (mesJours && mesJours.mois > 0) { mesJours.mois--; oublierLeMessage(); peindreMesJours() } })
   document.getElementById('dispo-suiv').addEventListener('click', () => {
-    if (mesJours && mesJours.mois < DISPO_MOIS - 1) { mesJours.mois++; peindreMonMois() } })
+    if (mesJours && mesJours.mois < DISPO_MOIS - 1) { mesJours.mois++; oublierLeMessage(); peindreMesJours() } })
   document.getElementById('dispo-auj').addEventListener('click', () => {
-    if (mesJours) { mesJours.mois = 0; peindreMonMois() } })
+    if (mesJours) { mesJours.mois = 0; oublierLeMessage(); peindreMesJours() } })
   document.getElementById('btn-conge').addEventListener('click', poserMonConge)
 
   // ⚠ UNE TAPE, PAS UN GLISSE — et `click`, pas `pointerdown`. Sur un telephone,

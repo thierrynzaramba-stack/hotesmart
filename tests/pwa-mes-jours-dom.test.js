@@ -17,6 +17,14 @@ const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
 const { JSDOM } = require('jsdom')
+// ⚠ LA MEME PROJECTION QUE LE SERVEUR, pas une imitation. Le double rendait
+// jusqu'ici des regles deja mises en forme — la forme de l'ecran HOTE, pas celle
+// de `/api/menages-public?action=disponibilites`, qui ne rendait que `id` et
+// `label`. Les vingt tests etaient verts pendant que l'ecran sortait un mois
+// entierement rouge en production. Un double plus riche que le serveur est le
+// faux-vert exact que ce depot a deja paye trois fois (REVIEW.md regle 8) : on
+// passe donc par les MEMES fonctions que l'endpoint.
+const { construireRrule, lireRrule } = require('../lib/cleaning/availability')
 
 const FICHIER = path.join(__dirname, '..', 'apps', 'menages', 'public.html')
 
@@ -28,8 +36,27 @@ const iso = d => d.toISOString().slice(0, 10)
 const dans = n => iso(new Date(AUJ.getTime() + n * 86400000))
 const lundiCourant = (() => iso(new Date(AUJ.getTime() - ((AUJ.getUTCDay() + 6) % 7) * 86400000)))()
 
+// Une regle telle qu'elle vit EN BASE : un libelle et une chaine RRULE.
+// C'est l'endpoint qui en tire `jours`/`cadence`/`ancre`, et le double ci-dessous
+// refait exactement ce geste.
+const regle = (id, label, jours, cadence = 1, depuis = lundiCourant) =>
+  ({ id, label, rrule: construireRrule({ jours, toutesLesNSemaines: cadence, depuis }) })
+const regleIllisible = (id, label) => ({ id, label, rrule: 'ceci n\'est pas une rrule' })
+
+// ⚠ COPIE CONFORME de la projection de `mesDisponibilites` (api/menages-public.js).
+// Si l'endpoint change de forme, ce double doit changer avec lui — et c'est
+// justement ce qu'on veut : qu'ils ne puissent plus diverger en silence.
+const projeter = regles => (regles || []).map(r => {
+  const forme = lireRrule(r.rrule)
+  return { id: r.id, label: r.label,
+           jours: forme ? forme.jours : null,
+           cadence: forme ? forme.cadence : null,
+           ancre: forme ? forme.ancre : null }
+})
+
 function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
-                   autorise = true, enLigne = true, erreur = null } = {}) {
+                   autorise = true, enLigne = true, erreur = null,
+                   coupureEcriture = false } = {}) {
   const html = fs.readFileSync(FICHIER, 'utf8')
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
   assert.ok(m, 'le script de la page est introuvable')
@@ -79,6 +106,9 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       return { ok: false, status: erreur.status || 503,
                json: async () => ({ error: erreur.message || 'panne' }) }
     }
+    // ⚠ UNE COUPURE EN COURS D'ENVOI N'EST PAS UN 503 : `fetch` LEVE. C'est le
+    // chemin `catch`, celui qui laissait la case a moitie effacee.
+    if (coupureEcriture && corps && corps.action) throw new TypeError('Failed to fetch')
     if (corps && corps.action === 'declarerIndisponibilite') {
       etat.exceptions = etat.exceptions.concat([
         { id: 'e' + appels.length, date: corps.date, available: false, source: 'prestataire' }])
@@ -95,7 +125,8 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     }
     return { ok: true, status: 200, json: async () => ({
       autorise: etat.autorise, modifiable: etat.modifiable,
-      prenom: 'Régina', regles: etat.regles, exceptions: etat.exceptions, conges: etat.conges }) }
+      prenom: 'Régina', regles: projeter(etat.regles),
+      exceptions: etat.exceptions, conges: etat.conges }) }
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
@@ -120,8 +151,7 @@ test('l\'onglet dit « Mes jours » et la page « Mes jours de travail »', asyn
 })
 
 test('elle est tutoyée à la première personne, jamais désignée à la troisième', async () => {
-  const { w, t } = monter({ regles: [
-    { id: 'r1', label: 'semaine', active: true, jours: [1, 2], cadence: 1, ancre: lundiCourant } ] })
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
   t.seed()
   await t.chargerDisponibilites()
   const vue = w.document.getElementById('dispo-vue').textContent
@@ -136,8 +166,7 @@ test('ses jours habituels sont en LECTURE SEULE — aucune case à cocher', asyn
   // ⚠ DÉCISION PRODUIT DU 15 SEPTEMBRE. Ses jours habituels sont
   // l'organisation du travail, réglée par son employeur. Lui donner des cases
   // promettrait une action que le serveur n'expose même pas.
-  const { w, t } = monter({ regles: [
-    { id: 'r1', label: 'semaine', active: true, jours: [1, 2], cadence: 1, ancre: lundiCourant } ] })
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
   t.seed()
   await t.chargerDisponibilites()
   const zone = w.document.getElementById('dispo-recur')
@@ -153,8 +182,8 @@ test('en quinzaine, elle voit A et B — et OÙ ELLE EN EST cette semaine', asyn
   // vérifier elle-même, sans appeler son employeur.
   const lundiB = iso(new Date(new Date(lundiCourant + 'T12:00:00Z').getTime() + 7 * 86400000))
   const { w, t } = monter({ regles: [
-    { id: 'rA', label: 'A', active: true, jours: [6, 0], cadence: 2, ancre: lundiCourant },
-    { id: 'rB', label: 'B', active: true, jours: [1], cadence: 2, ancre: lundiB } ] })
+    regle('rA', 'A', [6, 0], 2, lundiCourant),
+    regle('rB', 'B', [1], 2, lundiB) ] })
   t.seed()
   await t.chargerDisponibilites()
   const tags = [...w.document.querySelectorAll('#dispo-recur .dispo-tag')].map(e => e.textContent.trim())
@@ -171,8 +200,8 @@ test('une règle HEBDOMADAIRE apparaît dans les DEUX semaines', async () => {
   // Même règle que sur l'écran de l'hôte : l'oublier ferait disparaître des
   // jours de son affichage.
   const { w, t } = monter({ regles: [
-    { id: 'hebdo', label: 'lundis', active: true, jours: [1], cadence: 1, ancre: lundiCourant },
-    { id: 'quinz', label: 'samedis', active: true, jours: [6], cadence: 2, ancre: lundiCourant } ] })
+    regle('hebdo', 'lundis', [1], 1),
+    regle('quinz', 'samedis', [6], 2) ] })
   t.seed()
   await t.chargerDisponibilites()
   const lignes = [...w.document.querySelectorAll('#dispo-recur .dispo-ligne-ab')]
@@ -244,8 +273,7 @@ test('un jour où elle ne travaille déjà pas n\'appelle pas le serveur', async
   // Elle déclare une ABSENCE, jamais une PRÉSENCE : se rendre disponible un jour
   // que son employeur ne lui a pas confié n'aurait aucun effet, et lui ferait
   // croire le contraire.
-  const { w, t } = monter({ regles: [
-    { id: 'r1', label: 'lundis', active: true, jours: [1], cadence: 1, ancre: lundiCourant } ] })
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
   t.seed()
   await t.chargerDisponibilites()
   const rouge = [...w.document.querySelectorAll('#dispo-months .dispo-case.off')]
@@ -268,6 +296,39 @@ test('le passé ne se modifie pas', async () => {
   assert.strictEqual(ecritures(t).length, 0)
 })
 
+test('AVEC une règle, ses jours de travail restent verts ET déclarables', async () => {
+  // ⚠ LE DÉFAUT EXACT QUE LA REVIEW A TROUVÉ, ET QU'AUCUN TEST NE VOYAIT.
+  // L'endpoint de la PWA ne rendait que `{ id, label }` : l'écran ne
+  // reconnaissait aucune journée comme travaillée, peignait le mois ENTIER en
+  // rouge, et `basculerMonJour` butait sur « Vous ne travaillez déjà pas ce
+  // jour-là » — donc plus aucune absence d'un jour déclarable, là où l'écran
+  // précédent envoyait toujours. Invisible sur un profil SANS règle, c'est-à-dire
+  // sur le seul qu'on regardait.
+  //
+  // On prend ici les jours de la semaine tels qu'ils tombent : la règle couvre
+  // TOUS les jours, donc le premier jour futur affiché est forcément travaillé.
+  const { w, t } = monter({ regles: [regle('tous', 'tous les jours', [0, 1, 2, 3, 4, 5, 6])] })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  // ⚠ Le dernier jour du mois, le mois courant n'a aucun jour futur : on passe
+  // au suivant. Un test qui lit l'horloge doit tenir tous les jours de l'année,
+  // pas seulement celui où on l'a écrit.
+  const joursFuturs = () => [...w.document.querySelectorAll('#dispo-months .dispo-case[data-jour]')]
+    .filter(e => e.dataset.jour > iso(AUJ))
+  if (!joursFuturs().length) w.document.getElementById('dispo-suiv').click()
+  const futures = joursFuturs()
+  assert.ok(futures.length > 0, 'le mois est bien peint')
+  assert.strictEqual(futures.filter(e => e.classList.contains('off')).length, 0,
+    'aucun jour ne doit être rouge : la règle les couvre tous')
+
+  futures[0].dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  const pose = t.appels.find(a => a.corps && a.corps.action === 'declarerIndisponibilite')
+  assert.ok(pose, 'elle doit pouvoir déclarer son absence sur un jour qu\'elle travaille')
+  assert.strictEqual(pose.corps.date, futures[0].dataset.jour)
+})
+
 // ─── Hors ligne : on ne promet rien ───────────────────────────────────────
 
 test('HORS LIGNE, rien ne part — et elle le sait', async () => {
@@ -282,6 +343,51 @@ test('HORS LIGNE, rien ne part — et elle le sait', async () => {
   await souffler(50)
   assert.strictEqual(t.appels.length, avant, 'aucune requête')
   assert.match(message(w), /Hors ligne/)
+})
+
+test('une COUPURE en cours d\'envoi ne laisse pas la case « en cours »', async () => {
+  // ⚠ `.envoi` met la case a 45 % d'opacite. Laissee en place apres une coupure,
+  // elle dit « c'est parti » alors que rien n'est parti — et sur un telephone en
+  // sous-sol, c'est le cas le plus frequent, pas le cas rare.
+  const j = dans(2)
+  const { w, t } = monter({ coupureEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  assert.ok(!caseDu(w, j).classList.contains('envoi'), 'la case ne reste pas grisée')
+  assert.match(message(w), /Connexion impossible/)
+})
+
+test('« viens exceptionnellement » ne se lit pas « votre employeur vous a retirée »', async () => {
+  // L'hote peut poser les DEUX sens sur une exception. Un libelle unique
+  // annoncait « cette absence a été posée par votre employeur » à quelqu'un à qui
+  // on venait au contraire de DEMANDER de venir.
+  const j = dans(2)
+  const { w, t } = monter({ exceptions: [
+    { id: 'e1', date: j, available: true, source: 'hote' } ] })
+  t.seed()
+  await t.chargerDisponibilites()
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  assert.strictEqual(ecritures(t).length, 0)
+  assert.match(message(w), /demandé de venir/)
+  assert.ok(!/absence a été posée/.test(message(w)))
+})
+
+test('la confirmation survit au repeint, puis s\'efface quand elle change de mois', async () => {
+  // ⚠ LES DEUX MOITIÉS DU MÊME RÉGLAGE, et elles se contredisent si on se trompe
+  // d'endroit. La relecture suit IMMÉDIATEMENT l'écriture : lever le drapeau là
+  // effacerait le « ✓ » dans la même seconde (c'est le défaut d'origine). Ne
+  // jamais le lever le faisait suivre de mois en mois, l'aide ne revenant plus.
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  caseDu(w, dans(2)).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  assert.match(message(w), /enregistrée/, 'elle survit au repeint')
+  w.document.getElementById('dispo-suiv').click()
+  assert.match(message(w), /Touchez un jour/, 'et l\'aide revient quand elle regarde ailleurs')
 })
 
 // ─── Les congés en plage ──────────────────────────────────────────────────
@@ -353,8 +459,7 @@ test('droit retiré : l\'écran le dit, il ne montre pas un calendrier vide', as
 test('une règle illisible ne peint pas le calendrier en vert', async () => {
   // « Une panne coupe, elle n'ouvre pas » : si l'écran ne sait pas lire sa seule
   // règle, il montre le cas prudent plutôt qu'un mois entièrement disponible.
-  const { w, t } = monter({ regles: [
-    { id: 'op', label: 'mensuelle', active: true, jours: null, cadence: null, ancre: null } ] })
+  const { w, t } = monter({ regles: [regleIllisible('op', 'Le premier lundi du mois')] })
   t.seed()
   await t.chargerDisponibilites()
   const vertes = [...w.document.querySelectorAll('#dispo-months .dispo-case[data-jour]')]
@@ -376,10 +481,13 @@ test('la navigation couvre un an, et s\'arrête là', async () => {
 
 test('AUCUNE chaîne RRULE n\'atteint la PWA', async () => {
   // Elle n'a rien à faire sur un téléphone, et la règle du §2 l'interdit.
-  const { w, t } = monter({ regles: [
-    { id: 'r1', label: 'semaine', active: true, jours: [1], cadence: 1, ancre: lundiCourant } ] })
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])] })
   t.seed()
   await t.chargerDisponibilites()
   const vue = w.document.getElementById('dispo-vue').textContent
   assert.ok(!/FREQ=|DTSTART|RRULE/.test(vue))
+  // ⚠ Et pas seulement a l'ecran : elle ne doit pas non plus etre dans ce que le
+  // serveur a rendu — c'est la que la fuite passerait inapercue.
+  const recu = JSON.stringify(projeter([regle('x', 'x', [1])]))
+  assert.ok(!/FREQ=|DTSTART/.test(recu))
 })
