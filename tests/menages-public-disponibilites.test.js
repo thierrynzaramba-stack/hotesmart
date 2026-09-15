@@ -36,6 +36,11 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      // dit si le `update active=false` a touche une ligne.
                      nbReglesActives = 0, regleRetiree = [{ id: 'r1' }],
                      erreurCompteRegles = null,
+                     // Les regles ACTIVES relues avant un reglage, et les deux
+                     // pannes possibles du chemin en un appel.
+                     reglesAvant = [{ id: 'r-vieille' }],
+                     erreurInsertRegles = null, erreurMajRegles = null,
+                     erreurLireAvant = null,
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
                      ligneExistante = null } = {}) {
@@ -46,6 +51,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
       etat.lectures.push(a)
       const chain = {
         select (_cols, opts) {
+          a.colonnes = _cols
           // ⚠ LE COMPTAGE `head: true` NE PASSE PAS PAR `.limit()` : la chaine
           // est attendue directement. Sans `then`, `await` rendait l'objet
           // lui-meme, donc `count === undefined`, donc la garde de plafond
@@ -61,12 +67,21 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         },
         eq (c, v) { a.f[c] = v; return chain },
         gte (c, v) { a.f[c + '_gte'] = v; return chain },
+        in (c, v) { a.f[c + '_in'] = v; return chain },
         order () { return chain },
         limit () {
           if (table === 'provider_availability_exceptions') {
             return Promise.resolve({ data: exceptions, error: null })
           }
           if (table === 'provider_availability_rules') {
+            // ⚠ DEUX LECTURES BORNEES sur cette table, distinguees par leurs
+            // colonnes : la liste affichee (`id, label, rrule`) et les lignes a
+            // desactiver avant un reglage (`id` seul). Les confondre rendrait le
+            // cloisonnement du reglage indetectable.
+            if (a.colonnes === 'id') {
+              return Promise.resolve(erreurLireAvant
+                ? { data: null, error: erreurLireAvant } : { data: reglesAvant, error: null })
+            }
             return Promise.resolve({ data: regles, error: null })
           }
           if (table === 'conges_plages') {
@@ -93,6 +108,15 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         // l'hôte. Un double qui répondrait « OK » à tout la rendrait indétectable.
         insert (row) {
           etat.ecritures.push({ table, op: 'insert', row })
+          // ⚠ UN INSERT DE TABLEAU N'A PAS DE `.select().maybeSingle()` derriere
+          // lui dans ce code : il est attendu directement. Sans `then`, `await`
+          // rendait l'objet, donc `error === undefined`, donc la panne
+          // d'insertion passait pour un succes — un double plus permissif que
+          // le serveur.
+          if (Array.isArray(row)) {
+            return Promise.resolve(erreurInsertRegles
+              ? { data: null, error: erreurInsertRegles } : { data: row, error: null })
+          }
           const conflit = ligneExistante === 'hote'
           return { select: () => ({ maybeSingle: () => Promise.resolve(
             conflit ? { data: null, error: { code: '23505', message: 'duplicate key' } }
@@ -102,6 +126,15 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           const q = { table, op: 'update', row, f: {} }
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
+            in (c, v) {
+              q.f[c + '_in'] = v
+              // ⚠ La desactivation en lot n'a pas de `.select()` : elle est
+              // attendue directement.
+              c2.then = (res, rej) => { etat.ecritures.push(q)
+                return Promise.resolve(erreurMajRegles
+                  ? { data: null, error: erreurMajRegles } : { data: [], error: null }).then(res, rej) }
+              return c2
+            },
             select () {
               etat.ecritures.push(q)
               // La desactivation d'une REGLE : a-t-elle touche une ligne ?
@@ -562,138 +595,206 @@ test('sans le droit d\'écriture, elle ne pose aucun congé', async () => {
 // retirer d'un jour sur lequel l'hôte compte, et rien ne l'en prévient. La
 // garde d'avant n'était pas technique, elle était là. Noté au KB.
 
-test('poser une règle : elle envoie des JOURS, jamais une RRULE', async () => {
+test('régler ses jours : elle envoie des JOURS, jamais une RRULE', async () => {
   // ⚠ LA RÈGLE DU §2 VAUT DANS LES DEUX SENS. Accepter une chaîne du client
   // laisserait écrire une récurrence qu'aucun des deux écrans ne sait relire —
   // donc invisible, et sans issue par l'interface.
   const { handler, etat } = preparer({})
   const res = reponse()
-  await handler(ecrire({ action: 'poserRegle', jours: [1, 2],
-                         toutes_les_n_semaines: 2, depuis: DEMAIN }), res)
+  await handler(ecrire({ action: 'reglerMesJours', toutes_les_n_semaines: 2,
+                         lots: [{ jours: [1, 2], depuis: DEMAIN }] }), res)
   assert.strictEqual(res.code, 200)
   const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
   assert.ok(ins, 'la règle est insérée')
-  assert.match(ins.row.rrule, /FREQ=WEEKLY;INTERVAL=2/, 'la chaîne est CONSTRUITE par le serveur')
-  assert.strictEqual(ins.row.user_id, U, 'le compte est posé explicitement')
-  assert.strictEqual(ins.row.provider_id, MARIE)
-  assert.strictEqual(ins.row.active, true)
+  assert.strictEqual(ins.row.length, 1)
+  assert.match(ins.row[0].rrule, /FREQ=WEEKLY;INTERVAL=2/, 'la chaîne est CONSTRUITE par le serveur')
+  assert.strictEqual(ins.row[0].user_id, U, 'le compte est posé explicitement')
+  assert.strictEqual(ins.row[0].provider_id, MARIE)
+  assert.strictEqual(ins.row[0].active, true)
+})
+
+test('UN SEUL ALLER-RETOUR, et on INSÈRE avant de désactiver', async () => {
+  // ⚠ L'ORDRE EST LA GARDE, et c'est le constat majeur de la review.
+  // Désactiver puis insérer laisse ZÉRO règle si la seconde moitié échoue —
+  // c'est-à-dire « disponible tous les jours », l'inverse exact de ce qu'elle
+  // demandait. Dans cet ordre, un échec laisse l'ancien ET le nouveau actifs :
+  // elle est disponible sur l'union, ce que l'écran AFFICHE fidèlement et que le
+  // geste suivant corrige. Entre deux états dégradés, on choisit celui qui se
+  // voit et qui ne dit pas le contraire de ce qui s'est passé.
+  const { handler, etat } = preparer({})
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
+  const ordre = etat.ecritures.filter(x => x.table === 'provider_availability_rules').map(x => x.op)
+  assert.deepStrictEqual(ordre, ['insert', 'update'], 'insert AVANT update')
+})
+
+test('la désactivation vise les ANCIENS ID, pas un filtre `active = true`', async () => {
+  // ⚠ Un filtre `active = true` désactiverait aussi ce qu'on vient d'insérer :
+  // elle se retrouverait sans aucune règle, donc disponible tous les jours.
+  const { handler, etat } = preparer({ reglesAvant: [{ id: 'r-a' }, { id: 'r-b' }] })
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
+  const maj = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'update')
+  assert.deepStrictEqual(maj.f.id_in, ['r-a', 'r-b'])
+  assert.strictEqual(maj.row.active, false)
+  assert.strictEqual(maj.f.user_id, U, 'et le cloisonnement tient quand même')
+  assert.strictEqual(maj.f.provider_id, MARIE)
 })
 
 test('une RRULE envoyée par le client est IGNORÉE, pas écrite', async () => {
   const { handler, etat } = preparer({})
   const res = reponse()
-  await handler(ecrire({ action: 'poserRegle', jours: [1],
-                         rrule: 'RRULE:FREQ=MONTHLY;BYMONTHDAY=1' }), res)
+  await handler(ecrire({ action: 'reglerMesJours',
+                         lots: [{ jours: [1], rrule: 'RRULE:FREQ=MONTHLY;BYMONTHDAY=1' }] }), res)
   assert.strictEqual(res.code, 200)
   const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
-  assert.ok(!/MONTHLY/.test(ins.row.rrule), 'la chaîne du client n\'atteint pas la base')
+  assert.ok(!/MONTHLY/.test(JSON.stringify(ins.row)), 'la chaîne du client n\'atteint pas la base')
 })
 
-test('poser une règle SANS jour, ou avec une cadence absurde, est refusé', async () => {
-  for (const corps of [{ jours: [] }, { jours: ['lundi'] }, { jours: [9] },
-                       { jours: [1], toutes_les_n_semaines: 0 },
-                       { jours: [1], toutes_les_n_semaines: 9 }]) {
+test('un lot VIDE est légitime : il ne pose rien, il n\'échoue pas', async () => {
+  // « Aucun jour cette semaine-là » est un réglage, pas une erreur de saisie.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'reglerMesJours', toutes_les_n_semaines: 2,
+                         lots: [{ jours: [1] }, { jours: [] }] }), res)
+  assert.strictEqual(res.code, 200)
+  const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
+  assert.strictEqual(ins.row.length, 1, 'une seule règle posée')
+})
+
+test('TOUT est validé AVANT la moindre écriture', async () => {
+  // ⚠ Valider lot par lot en écrivant au fil de l'eau laisserait la moitié d'un
+  // réglage en base sur un corps à moitié faux.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'reglerMesJours',
+                         lots: [{ jours: [1] }, { jours: [9] }] }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0,
+    'le premier lot, pourtant valide, n\'est pas écrit non plus')
+})
+
+test('un corps sans `lots`, ou avec trop de lignes, est refusé', async () => {
+  for (const corps of [{}, { lots: 'oui' }, { lots: [{ jours: [1] }, { jours: [2] }, { jours: [3] }] }]) {
     const { handler, etat } = preparer({})
     const res = reponse()
-    await handler(ecrire({ action: 'poserRegle', ...corps }), res)
-    assert.strictEqual(res.code, 400, JSON.stringify(corps) + ' doit être refusé')
+    await handler(ecrire({ action: 'reglerMesJours', ...corps }), res)
+    assert.strictEqual(res.code, 400, JSON.stringify(corps))
     assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
   }
 })
 
-test('LA MÊME VALIDATION QUE L\'HÔTE, pas une copie', async () => {
-  // ⚠ Ce dépôt a déjà payé trois fois la copie qui devient plus permissive que
-  // l'original. Les deux endpoints importent `lib/cleaning/regles.js` : ce test
-  // le lit dans le SOURCE, parce qu'une divergence future ne se verrait pas
-  // autrement — chacun resterait juste de son côté.
-  const fs = require('node:fs'), path = require('node:path')
-  for (const f of ['api/menages-public.js', 'api/disponibilites.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
-    assert.match(src, /require\(['"]\.\.\/lib\/cleaning\/regles['"]\)/,
-      `${f} doit valider les règles par le module partagé`)
-    assert.match(src, /validerRegle\(/, `${f} doit appeler validerRegle`)
+test('jours absurdes ou cadence impossible : refusés, rien d\'écrit', async () => {
+  for (const corps of [{ lots: [{ jours: ['lundi'] }] }, { lots: [{ jours: [9] }] },
+                       { lots: [{ jours: [1] }], toutes_les_n_semaines: 9 }]) {
+    const { handler, etat } = preparer({})
+    const res = reponse()
+    await handler(ecrire({ action: 'reglerMesJours', ...corps }), res)
+    assert.strictEqual(res.code, 400, JSON.stringify(corps))
+    assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
   }
 })
 
-test('retirer une règle DÉSACTIVE, elle ne supprime pas', async () => {
-  // ⚠ Une règle supprimée emporterait la raison pour laquelle des ménages passés
-  // ont été attribués comme ils l'ont été.
+test('LA MÊME VALIDATION QUE L\'HÔTE — éprouvée par le COMPORTEMENT', async () => {
+  // ⚠ Ce dépôt a déjà payé trois fois la copie qui devient plus permissive que
+  // l'original. Un test qui lit le source attrape « on a recopié au lieu
+  // d'importer », mais pas « on a ajouté une validation à côté » : le `require`
+  // reste là, le test reste vert, et la divergence est exactement celle qu'on
+  // voulait attraper. On joue donc les mêmes corps limites contre les DEUX
+  // endpoints, et on exige le même verdict.
+  const { validerRegle } = require('../lib/cleaning/regles')
+  const cas = [
+    [{ jours: [] }, false], [{ jours: ['lundi'] }, false], [{ jours: [9] }, false],
+    [{ jours: [-1] }, false], [{ jours: [1], toutes_les_n_semaines: 0 }, false],
+    [{ jours: [1], toutes_les_n_semaines: 5 }, false],
+    [{ jours: ['1', '2'] }, true], [{ jours: [1, 1, 2] }, true],
+    [{ jours: [1], toutes_les_n_semaines: 4 }, true],
+    [{ jours: [1], depuis: 'pas-une-date' }, true]
+  ]
+  for (const [corps, doitPasser] of cas) {
+    const v = validerRegle(corps)
+    assert.strictEqual(!v.erreur, doitPasser, JSON.stringify(corps))
+  }
+  // Et la déduplication a bien lieu AVANT le libellé, sinon il sort en double.
+  assert.strictEqual(validerRegle({ jours: [1, 1, 2] }).label, 'Tous les lundi et mardi')
+  // Enfin : les deux endpoints passent bien par ce module.
+  const fs = require('node:fs'), path = require('node:path')
+  for (const f of ['api/menages-public.js', 'api/disponibilites.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+      .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+    assert.match(src, /require\(['"]\.\.\/lib\/cleaning\/regles['"]\)/, f)
+    assert.match(src, /validerRegle\(/, f)
+  }
+})
+
+test('le PLAFOND et la LECTURE sont la même borne', async () => {
+  // ⚠ La première version plafonnait à 100 en ne lisant que 50 : entre les deux,
+  // l'écran ne voyait que la moitié des règles, le remplacement redevenait une
+  // ADDITION, et les règles au-delà restaient actives — invisibles à l'écran,
+  // appliquées par le moteur, sans aucune issue par l'interface. Le plafond
+  // décrivait exactement le danger qu'il n'écartait pas.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'api', 'menages-public.js'), 'utf8')
+  const m = /const MAX_REGLES_ACTIVES = (\d+)/.exec(src)
+  assert.ok(m, 'le plafond est introuvable')
+  assert.match(src, /\.limit\(MAX_REGLES_ACTIVES\)/,
+    'la lecture des règles doit être bornée par LA MÊME constante')
+  assert.ok(!/\.limit\(50\)[\s\S]{0,80}provider_availability_rules/.test(src))
+})
+
+test('le comptage des règles est CLOISONNÉ', async () => {
+  // ⚠ Sans `user_id`, la lecture compterait les règles d'un autre compte — un
+  // hôte pourrait empêcher la prestataire d'un autre de régler ses jours.
   const { handler, etat } = preparer({})
-  const res = reponse()
-  await handler(ecrire({ action: 'retirerRegle', id: '11111111-2222-3333-4444-555555555555' }), res)
-  assert.strictEqual(res.code, 200)
-  const maj = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'update')
-  assert.ok(maj, 'un update, pas un delete')
-  assert.strictEqual(maj.row.active, false)
-  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules' && x.op === 'delete').length, 0)
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
+  const lecture = etat.lectures.find(l => l.table === 'provider_availability_rules' && l.colonnes === 'id')
+  assert.ok(lecture, 'la lecture des règles actives a bien lieu')
+  assert.strictEqual(lecture.f.user_id, U)
+  assert.strictEqual(lecture.f.provider_id, MARIE)
+  assert.strictEqual(lecture.f.active, true)
 })
 
-test('retirer une règle est CLOISONNÉ : les trois filtres, pas seulement l\'id', async () => {
-  // ⚠ L'identifiant vient du CLIENT. Sans `user_id` ET `provider_id`, il
-  // désignerait la règle de n'importe qui — y compris d'un autre compte.
-  const { handler, etat } = preparer({})
-  await handler(ecrire({ action: 'retirerRegle', id: '11111111-2222-3333-4444-555555555555' }), reponse())
-  const maj = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'update')
-  assert.strictEqual(maj.f.user_id, U)
-  assert.strictEqual(maj.f.provider_id, MARIE)
-  assert.strictEqual(maj.f.id, '11111111-2222-3333-4444-555555555555')
+test('une panne d\'INSERTION coupe, et rien n\'est désactivé', async () => {
+  const { handler, etat } = preparer({ erreurInsertRegles: { message: 'timeout' } })
+  const res = reponse()
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
+  assert.strictEqual(res.code, 503)
+  assert.strictEqual(
+    etat.ecritures.filter(x => x.table === 'provider_availability_rules' && x.op === 'update').length, 0,
+    'ses anciens jours sont intacts')
 })
 
-test('retirer une règle deux fois de suite n\'annonce pas une panne', async () => {
-  // Sur un réseau de téléphone, le même geste part deux fois. Le second ne doit
-  // pas rougir pour une règle que le premier vient de désactiver.
-  const { handler } = preparer({ regleRetiree: [] })
+test('si la désactivation échoue, le message DIT que les nouveaux sont posés', async () => {
+  // ⚠ « Service indisponible » ferait croire que rien n'est parti, alors que les
+  // nouveaux jours SONT posés : elle est disponible sur l'union des deux
+  // réglages, et elle doit le savoir pour recommencer.
+  const { handler } = preparer({ erreurMajRegles: { message: 'timeout' } })
   const res = reponse()
-  await handler(ecrire({ action: 'retirerRegle', id: '11111111-2222-3333-4444-555555555555' }), res)
-  assert.strictEqual(res.code, 200)
-  assert.strictEqual(res.body.deja, true)
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
+  assert.strictEqual(res.code, 503)
+  assert.match(res.body.error, /nouveaux jours sont enregistrés/)
+  assert.match(res.body.error, /anciens/)
 })
 
-test('retirerRegle refuse un identifiant qui n\'est pas un UUID — 400, pas 503', async () => {
-  const { handler, etat } = preparer({})
+test('une panne de LECTURE des règles actives coupe avant toute écriture', async () => {
+  const { handler, etat } = preparer({ erreurLireAvant: { message: 'timeout' } })
   const res = reponse()
-  await handler(ecrire({ action: 'retirerRegle', id: 'pas-un-uuid' }), res)
-  assert.strictEqual(res.code, 400)
-  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
-})
-
-test('un PLAFOND borne les règles actives', async () => {
-  // ⚠ L'écran retire toutes les règles puis repose ce qui est coché à CHAQUE
-  // geste : une panne au milieu d'un enchaînement laisse des lignes derrière
-  // elle. Sans borne, la table se remplit de règles mortes que la lecture
-  // finirait par tronquer — et une lecture tronquée de règles, c'est un
-  // calendrier qui montre autre chose que ce que le moteur applique.
-  const { handler, etat } = preparer({ nbReglesActives: 100 })
-  const res = reponse()
-  await handler(ecrire({ action: 'poserRegle', jours: [1] }), res)
-  assert.strictEqual(res.code, 400)
-  assert.match(res.body.error, /Trop de règles/)
-  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
-})
-
-test('une panne de COMPTAGE coupe, elle n\'ouvre pas', async () => {
-  const { handler, etat } = preparer({ erreurCompteRegles: { message: 'timeout' } })
-  const res = reponse()
-  await handler(ecrire({ action: 'poserRegle', jours: [1] }), res)
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
   assert.strictEqual(res.code, 503)
   assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
 })
 
 test('sans le droit `self_availability: write`, elle ne règle RIEN', async () => {
-  for (const action of ['poserRegle', 'retirerRegle']) {
-    const { handler, etat } = preparer({ droits: { self_availability: 'read' } })
-    const res = reponse()
-    await handler(ecrire({ action, jours: [1], id: '11111111-2222-3333-4444-555555555555' }), res)
-    assert.strictEqual(res.code, 403, action)
-    assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
-  }
+  const { handler, etat } = preparer({ droits: { self_availability: 'read' } })
+  const res = reponse()
+  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
 })
 
 test('un jeton inconnu ne règle rien non plus — 401', async () => {
   const { handler, etat } = preparer({})
   const res = reponse()
   await handler({ method: 'POST', query: { token: 'jeton-inconnu' }, headers: {},
-                  body: { action: 'poserRegle', jours: [1] } }, res)
+                  body: { action: 'reglerMesJours', lots: [{ jours: [1] }] } }, res)
   assert.strictEqual(res.code, 401)
   assert.strictEqual(etat.ecritures.length, 0)
 })

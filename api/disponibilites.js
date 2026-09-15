@@ -216,7 +216,7 @@ async function poserRegle (req, res, userId, providerId) {
   // `api/menages-public.js` : recopier la validation ici aurait produit deux
   // regles pour la meme chose, et la copie finit toujours par etre la plus
   // permissive des deux.
-  const v = validerRegle(req.body || {}, cleJour)
+  const v = validerRegle(req.body || {})
   if (v.erreur) return res.status(400).json({ error: v.erreur })
 
   const { data, error } = await supabase.from('provider_availability_rules')

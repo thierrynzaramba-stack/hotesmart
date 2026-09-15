@@ -814,6 +814,38 @@ un geste qui part de travers ne se rattrape pas d'un Ctrl-Z.
   retirer d'un jour sur lequel l'hôte compte, et **rien ne l'en prévient**. La garde d'avant
   n'était pas un verrou de code, c'était cette décision-là. Ce qu'il faudrait : une notification à
   l'hôte quand une règle change côté PWA — ou, a minima, une trace lisible dans la fiche.
+- ⚠️ **UN SEUL ALLER-RETOUR POUR TOUT LE RÉGLAGE** (`reglerMesJours`), et c'est une correction de
+  review. La première version exposait `poserRegle` / `retirerRegle` et l'écran enchaînait
+  « retirer tout, puis reposer » : **le réseau d'un téléphone coupe au milieu**, le retrait passe,
+  la pose non, et **toutes ses règles disparaissent** — donc « aucune règle active », donc
+  **disponible tous les jours** (étage 4 de la précédence), l'inverse exact de ce qu'elle
+  demandait — pendant que l'écran annonçait une panne serveur. Un seul appel retire au client la
+  possibilité d'être interrompu au milieu.
+- ⚠️ **ON INSÈRE AVANT DE DÉSACTIVER, et l'ordre est la garde.** L'inverse laisse zéro règle si la
+  seconde moitié échoue. Dans cet ordre, un échec laisse l'ancien **et** le nouveau actifs : elle
+  est disponible sur l'union, ce que l'écran **affiche fidèlement** et que le geste suivant
+  corrige. *Entre deux états dégradés, on choisit celui qui se voit et qui ne dit pas le contraire
+  de ce qui s'est passé.* Et la désactivation vise les **id** relus, jamais un filtre
+  `active = true` — qui emporterait ce qu'on vient d'insérer.
+- ⚠️ **Le plafond et la lecture sont LA MÊME borne** (`MAX_REGLES_ACTIVES`). La première version
+  plafonnait à 100 en ne lisant que 50 : entre les deux, l'écran ne voyait que la moitié des
+  règles, le remplacement redevenait une **addition**, et les règles au-delà restaient actives —
+  invisibles, appliquées par le moteur, sans issue par l'interface. Le plafond décrivait
+  exactement le danger qu'il n'écartait pas.
+- ⚠️ **Les cases se verrouillent pendant l'envoi.** Sans ça, une seconde tape partait dans un
+  `return` **muet** : le navigateur avait coché la case, la requête ne partait pas, le repeint la
+  décochait — et le message affichait « ✓ » pour le geste précédent. *Une case grisée ne ment pas ;
+  un retour muet, si.*
+- ⚠️ **La phrase « vous êtes comptée disponible tous les jours » est REVENUE**, mais seulement
+  quand elle est vraie (zéro règle active) et sous des cases visibles. Elle avait été retirée
+  parce qu'elle était le seul contenu de la carte sur un profil vierge ; mais depuis que les cases
+  s'écrivent, **tout décocher est le geste le plus lourd disponible ici**, et c'est la seule ligne
+  qui dit ce qu'il veut dire. La retirer et rendre les cases écrivibles dans le même commit était
+  la combinaison malheureuse.
+- ⚠️ **Cocher un jour ne suffit pas à en recevoir du travail, et l'aide le taisait.** Deux filtres
+  distincts décident : `weekdays` dit quels jours l'hôte lui **confie** un bien, la récurrence dit
+  quels jours elle **est là**. Elle coche le mardi, l'écran le peint vert, et elle n'aura jamais un
+  ménage le mardi. C'est le geste naturel de qui veut plus de travail — l'aide le dit maintenant.
 - ⚠️ **La validation vit dans `lib/cleaning/regles.js`, partagée avec `api/disponibilites.js`.**
   Deux endpoints écrivent maintenant la même chose ; recopier la validation aurait produit deux
   règles pour un seul objet, et ce dépôt a déjà payé trois fois le prix de la copie qui devient

@@ -38,13 +38,15 @@ const HORIZON_CONGE_JOURS = 400
 // tenir a jour, dont un qu'on oublie.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// ⚠ UN PLAFOND SUR LES REGLES ACTIVES. L'ecran retire toutes les regles puis
-// repose ce qui est coche a CHAQUE geste : une panne au milieu d'un enchainement
-// laisse des lignes derriere elle. Sans borne, la table se remplit de regles
-// mortes que la lecture finirait par tronquer — et une lecture tronquee de
-// regles, c'est un calendrier qui montre autre chose que ce que le moteur
-// applique. Le meme ordre de grandeur que `LOT_REGLES` cote hote.
-const MAX_REGLES_ACTIVES = 100
+// ⚠ LE PLAFOND ET LA LECTURE SONT LA MEME BORNE, et c'est tout l'interet.
+// La premiere version plafonnait a 100 en ne lisant que 50 : entre 51 et 100
+// regles actives, l'ecran n'en voyait que la moitie, le « remplacement »
+// redevenait une ADDITION, et les regles au-dela restaient actives — invisibles
+// a l'ecran, appliquees par le moteur, sans aucune issue par l'interface. Le
+// plafond decrivait exactement le danger qu'il n'ecartait pas.
+// Une lecture tronquee de regles, c'est un calendrier qui montre autre chose que
+// ce que le moteur applique.
+const MAX_REGLES_ACTIVES = 50
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -185,8 +187,16 @@ module.exports = async function handler(req, res) {
     // desormais se retirer d'un jour sur lequel l'hote compte, et RIEN NE L'EN
     // PREVIENT. La garde d'avant n'etait pas technique, elle etait la. Noté au
     // KB comme dette ouverte.
-    if (action === 'poserRegle' || action === 'retirerRegle') {
-      return await mesRegles(req, res, token, { retirer: action === 'retirerRegle' })
+    //
+    // ⚠ UNE SEULE ACTION, ET C'EST UNE CORRECTION DE REVIEW. La premiere version
+    // exposait `poserRegle` et `retirerRegle` separement, et l'ecran enchainait
+    // « retirer tout, puis reposer ». Le reseau d'un telephone coupe entre les
+    // deux : le retrait passait, la pose non, et TOUTES ses regles
+    // disparaissaient — donc « aucune regle active », donc DISPONIBLE TOUS LES
+    // JOURS, pendant que l'ecran annoncait une panne serveur. Un seul appel
+    // retire au client la possibilite d'etre interrompu au milieu.
+    if (action === 'reglerMesJours') {
+      return await reglerMesJours(req, res, token)
     }
 
     if (action === 'declarerIndisponibilite' || action === 'retirerIndisponibilite') {
@@ -1373,7 +1383,7 @@ async function mesDisponibilites (req, res, token) {
   // c'est-a-dire sur le seul qu'on regardait.
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
     .select('id, label, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
-    .eq('active', true).order('created_at', { ascending: true }).limit(50)
+    .eq('active', true).order('created_at', { ascending: true }).limit(MAX_REGLES_ACTIVES)
   if (errR) {
     console.error('[menages-public] lecture regles echec:', errR.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -1398,11 +1408,8 @@ async function mesDisponibilites (req, res, token) {
     prenom: qui.profil.first_name,
     exceptions: exceptions || [],
     conges: conges || [],
-    // ⚠ LES REGLES SORTENT EN LECTURE SEULE, ET C'EST UNE DECISION PRODUIT
-    // (15 septembre 2026) : ses jours de travail sont l'ORGANISATION DU TRAVAIL,
-    // reglee par l'hote. Elle declare ses ABSENCES — un jour, ou une plage —
-    // elle ne redessine pas son planning. Le front n'affiche donc aucun controle
-    // sur ces lignes ; le serveur, lui, n'expose simplement aucune action.
+    // ⚠ ELLE REGLE SES JOURS ELLE-MEME depuis le 15 septembre 2026 (decision
+    // inversee le jour meme). L'action est `reglerMesJours`, ci-dessus.
     //
     // ⚠ LECTURE SEULE N'EST PAS « SANS FORME ». On rend de quoi DESSINER la
     // regle, jamais de quoi la reecrire : la chaine RRULE ne sort pas, et aucune
@@ -1423,6 +1430,15 @@ async function mesDisponibilites (req, res, token) {
 
 // Elle regle ses JOURS HABITUELS — la recurrence (15 septembre 2026).
 //
+// ⚠ UN SEUL ALLER-RETOUR POUR TOUT LE REGLAGE, et c'est une correction de
+// review. L'ecran enchainait « retirer tout, puis reposer » en autant d'appels
+// qu'il y avait de regles : le reseau d'un telephone coupe au milieu, le retrait
+// passait, la pose non, et TOUTES ses regles disparaissaient. « Aucune regle
+// active » veut dire DISPONIBLE TOUS LES JOURS (etage 4 de la precedence) —
+// exactement l'inverse de ce qu'elle venait de demander — pendant que l'ecran
+// annoncait une panne serveur. Un seul appel retire au client la possibilite
+// d'etre interrompu au milieu.
+//
 // ⚠ LE MEME GESTE QUE L'HOTE, LE MEME MODELE. L'ecran retire toutes les regles
 // actives puis repose ce qui est coche : c'est ce qui permet a une ligne vide de
 // vouloir dire « aucun jour », et non « je n'ai rien touche ». Le serveur, lui,
@@ -1434,7 +1450,7 @@ async function mesDisponibilites (req, res, token) {
 // ancre ; `validerRegle` construit la chaine. Accepter une RRULE du client
 // laisserait ecrire une recurrence qu'aucun des deux ecrans ne sait relire,
 // donc invisible et sans issue par l'interface.
-async function mesRegles (req, res, token, { retirer }) {
+async function reglerMesJours (req, res, token) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur) {
     if (qui.erreur === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -1442,60 +1458,78 @@ async function mesRegles (req, res, token, { retirer }) {
     return res.status(401).json({ error: 'Token invalide' })
   }
 
-  if (retirer) {
-    const { id } = req.body || {}
-    if (!id || !UUID_RE.test(String(id))) return res.status(400).json({ error: 'Règle inconnue' })
-    // ⚠ ON DESACTIVE, ON NE SUPPRIME PAS : une regle supprimee emporterait la
-    // raison pour laquelle des menages passes ont ete attribues comme ils l'ont
-    // ete. Meme choix que cote hote.
-    // ⚠ LES TROIS FILTRES COMPTENT. L'identifiant vient du CLIENT : sans
-    // `user_id` ET `provider_id`, il designerait la regle de n'importe qui — y
-    // compris d'un autre compte.
-    const { data, error } = await supabase.from('provider_availability_rules')
-      .update({ active: false })
-      .eq('id', String(id)).eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
-      .select('id')
-    if (error) {
-      console.error('[menages-public] retrait regle echec:', error.message)
+  // Les lots : une ligne en semaine simple, deux en quinzaine (A et B).
+  const lotsBruts = Array.isArray((req.body || {}).lots) ? req.body.lots : null
+  if (!lotsBruts) return res.status(400).json({ error: 'Rien à enregistrer' })
+  if (lotsBruts.length > 2) return res.status(400).json({ error: 'Trop de lignes' })
+  const cadence = Number((req.body || {}).toutes_les_n_semaines) || 1
+
+  // ⚠ ON VALIDE TOUT AVANT D'ECRIRE QUOI QUE CE SOIT. Valider lot par lot en
+  // ecrivant au fil de l'eau laisserait la moitie d'un reglage en base sur un
+  // corps a moitie faux.
+  // ⚠ UNE LIGNE VIDE EST LEGITIME — « aucun jour cette semaine-la » — et ne
+  // produit simplement aucune regle. Ce n'est pas une erreur de saisie.
+  const aPoser = []
+  for (const lot of lotsBruts) {
+    const jours = (lot && lot.jours) || []
+    if (!Array.isArray(jours)) return res.status(400).json({ error: 'Jours invalides' })
+    if (!jours.length) continue
+    const v = validerRegle({ jours, toutes_les_n_semaines: cadence, depuis: lot && lot.depuis })
+    if (v.erreur) return res.status(400).json({ error: v.erreur })
+    aPoser.push({ user_id: qui.userId, provider_id: qui.profil.id,
+                  rrule: v.rrule, label: v.label, active: true })
+  }
+
+  // Ce qui est actif AUJOURD'HUI : c'est ce qu'on desactivera, et rien d'autre.
+  // ⚠ ON DESIGNE LES LIGNES PAR LEUR ID, PAS PAR UN FILTRE `active = true`.
+  // Un filtre desactiverait aussi ce qu'on vient d'inserer.
+  const { data: avant, error: errLire } = await supabase.from('provider_availability_rules')
+    .select('id').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .eq('active', true).limit(MAX_REGLES_ACTIVES + 1)
+  if (errLire) {
+    console.error('[menages-public] lecture regles avant reglage echec:', errLire.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if ((avant || []).length > MAX_REGLES_ACTIVES) {
+    // Ne devrait pas arriver : la lecture et le plafond sont la meme borne.
+    console.error('[menages-public] plus de regles actives que le plafond')
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
+  // ⚠ ON INSERE AVANT DE DESACTIVER, ET L'ORDRE EST LA GARDE.
+  // L'inverse — desactiver puis inserer — laisse ZERO regle si la seconde
+  // moitie echoue, c'est-a-dire « disponible tous les jours » : le moteur lui
+  // attribue alors des menages n'importe quel jour, et personne ne l'a demande.
+  // Dans cet ordre, un echec laisse l'ANCIEN et le NOUVEAU actifs : elle est
+  // disponible sur l'union des deux, ce que l'ecran AFFICHE fidelement et que le
+  // geste suivant corrige. Entre deux etats degrades, on choisit celui qui se
+  // voit et qui ne dit pas le contraire de ce qui s'est passe.
+  if (aPoser.length) {
+    const { error: errIns } = await supabase.from('provider_availability_rules').insert(aPoser)
+    if (errIns) {
+      console.error('[menages-public] insert regles echec:', errIns.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
-    // ⚠ « RIEN A RETIRER » N'EST PAS UNE PANNE. Sur un reseau de telephone, le
-    // meme geste part deux fois : le second ne doit pas annoncer une erreur pour
-    // une regle que le premier vient de desactiver. Meme idempotence que les
-    // conges.
-    if (!data || !data.length) return res.status(200).json({ success: true, deja: true })
-    return res.status(200).json({ success: true })
   }
 
-  const v = validerRegle(req.body || {}, cleJour)
-  if (v.erreur) return res.status(400).json({ error: v.erreur })
+  const anciens = (avant || []).map(r => r.id)
+  if (anciens.length) {
+    const { error: errMaj } = await supabase.from('provider_availability_rules')
+      .update({ active: false })
+      .in('id', anciens).eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    if (errMaj) {
+      console.error('[menages-public] desactivation regles echec:', errMaj.message)
+      // ⚠ ON DIT CE QUI S'EST REELLEMENT PASSE. « Service indisponible » ferait
+      // croire que rien n'est parti, alors que les nouveaux jours SONT poses :
+      // elle est disponible sur l'union des deux reglages, et elle doit le
+      // savoir pour recommencer.
+      return res.status(503).json({
+        error: 'Vos nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
+               'Rouvrez cet onglet et vérifiez.' })
+    }
+  }
 
-  // ⚠ UN PLAFOND, parce que l'ecran retire-puis-repose a chaque geste : une
-  // panne au milieu d'un enchainement laisse des lignes derriere elle, et rien
-  // ne borne la table autrement. Le meme ordre de grandeur que la lecture.
-  const { count, error: errCount } = await supabase.from('provider_availability_rules')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id).eq('active', true)
-  if (errCount) {
-    console.error('[menages-public] comptage regles echec:', errCount.message)
-    return res.status(503).json({ error: 'Service temporairement indisponible' })
-  }
-  if ((count || 0) >= MAX_REGLES_ACTIVES) {
-    return res.status(400).json({ error: 'Trop de règles actives : rouvrez cet onglet.' })
-  }
-
-  const { data, error } = await supabase.from('provider_availability_rules')
-    .insert({ user_id: qui.userId, provider_id: qui.profil.id,
-              rrule: v.rrule, label: v.label, active: true })
-    .select('id, label')
-    .maybeSingle()
-  if (error) {
-    console.error('[menages-public] insert regle echec:', error.message)
-    return res.status(503).json({ error: 'Service temporairement indisponible' })
-  }
-  // ⚠ LA CHAINE NE REMONTE PAS NON PLUS. On rend l'identifiant et le libelle ;
-  // la forme relue arrive par la lecture suivante, projetee par `lireRrule`.
-  return res.status(200).json({ success: true, regle: data })
+  return res.status(200).json({ success: true, posees: aPoser.length, retirees: anciens.length })
 }
 
 // Elle pose ou retire un CONGE — une PLAGE (15 septembre 2026).

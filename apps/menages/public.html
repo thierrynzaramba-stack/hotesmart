@@ -2231,6 +2231,25 @@ if ("serviceWorker" in navigator) {
         ? 'Réglé par votre employeur — pour le changer, dites-le lui.'
         : 'Cochez les jours où vous travaillez habituellement.'
     }
+    // ⚠ LA PHRASE REVIENT, MAIS SEULEMENT QUAND ELLE EST VRAIE ET UTILE.
+    // Elle avait ete retiree parce qu'elle etait le SEUL contenu de la carte sur
+    // un profil vierge — ca se lisait comme un ecran qui n'a pas fini de
+    // charger. Mais depuis que les cases s'ecrivent, tout decocher est le geste
+    // le plus lourd disponible ici, et c'est la seule ligne qui dit ce qu'il
+    // veut dire. Elle suit une lecture REUSSIE, sous des cases visibles : elle
+    // ne peut plus passer pour un ecran en cours de chargement.
+    if (!act.length && !opaques.length) {
+      aide.textContent = 'Vous n\'avez aucun jour habituel : vous êtes comptée ' +
+        'disponible tous les jours.'
+    } else if (!fige) {
+      // ⚠ COCHER UN JOUR NE SUFFIT PAS A EN RECEVOIR DU TRAVAIL, et l'aide le
+      // taisait. Deux filtres distincts decident : `weekdays` dit quels jours
+      // l'hote lui CONFIE un bien, la recurrence dit quels jours elle EST LA.
+      // Elle coche le mardi, l'ecran le peint vert, et elle n'aura jamais un
+      // menage le mardi. C'est le geste naturel de qui veut plus de travail.
+      aide.textContent += ' Pour être proposée un jour de plus, dites-le aussi ' +
+        'à votre employeur : c\'est lui qui confie les logements.'
+    }
     if (opaques.length) {
       aide.innerHTML += '<br>Vous avez aussi ' + opaques.length +
         ' règle(s) que cet écran ne sait pas afficher. Demandez à votre employeur.'
@@ -2254,9 +2273,13 @@ if ("serviceWorker" in navigator) {
   function peindreMonMois () {
     const a = moisDe(mesJours.mois)
     const dernier = moisDe(Math.min(DISPO_MOIS - 1, mesJours.mois + DISPO_VISIBLES - 1))
-    document.getElementById('dispo-titre-mois').textContent =
-      moisLisible(a) === moisLisible(dernier) ? moisLisible(a)
-        : moisLisible(a).replace(/ \d{4}$/, '') + ' – ' + moisLisible(dernier)
+    // ⚠ L'ANNEE NE SE RETIRE QUE SI LES DEUX MOIS LA PARTAGENT. Sans ce test,
+    // « decembre 2026 – janvier 2027 » s'affichait « decembre – janvier 2027 »,
+    // qui se lit decembre 2027.
+    const memeAnnee = a.getUTCFullYear() === dernier.getUTCFullYear()
+    document.getElementById('dispo-titre-mois').textContent = memeAnnee
+      ? moisLisible(a).replace(/ \d{4}$/, '') + ' – ' + moisLisible(dernier)
+      : moisLisible(a) + ' – ' + moisLisible(dernier)
     document.getElementById('dispo-prec').disabled = mesJours.mois === 0
     document.getElementById('dispo-suiv').disabled = mesJours.mois >= DISPO_MOIS - DISPO_VISIBLES
 
@@ -2360,37 +2383,44 @@ if ("serviceWorker" in navigator) {
 
   // ─── SES JOURS HABITUELS : ecrire ─────────────────────────────────────────
   //
-  // ⚠ RETIRER PUIS REPOSER, et l'ordre compte. Poser par-dessus une regle qu'on
-  // n'a pas su retirer laisse DEUX recurrences actives : le moteur les unit, et
-  // elle se retrouve disponible les jours des deux. C'est la raison meme de
-  // l'ordre, et l'echec du retrait doit donc se LIRE.
-  //
-  // ⚠ ET ON RETIRE TOUT CE QUI EST ACTIF, y compris ce qu'on ne sait pas relire.
-  // Ne retirer que les regles lisibles ferait du « remplacement » une ADDITION :
-  // la regle opaque resterait active, invisible a l'ecran, et sans aucune issue
-  // par l'interface.
-  const toutesMesRegles = () => (mesJours.regles || [])
+  // ⚠ UN SEUL APPEL POUR TOUT LE REGLAGE. La premiere version enchainait
+  // « retirer tout, puis reposer » en autant d'appels qu'il y avait de regles :
+  // le reseau d'un telephone coupe au milieu, le retrait passait, la pose non,
+  // et TOUTES ses regles disparaissaient — donc « disponible tous les jours »,
+  // l'inverse exact de ce qu'elle venait de demander — pendant que l'ecran
+  // annoncait une panne serveur. Trouve en review, corrige a la racine.
 
   function joursCoches (lot) {
     return [...document.querySelectorAll(`#dispo-recur input[data-lot="${lot}"]:checked`)]
       .map(c => +c.value)
   }
 
-  async function remplacerMesRegles (lots, { alt }) {
-    const msg = document.getElementById('dispo-message')
-    for (const r of toutesMesRegles()) {
-      const { ok } = await envoyer({ action: 'retirerRegle', id: r.id })
-      if (!ok) { dire(msg, 'Vos jours n\'ont pas pu être modifiés. Rouvrez cet onglet.'); return false }
-    }
-    for (const lot of lots) {
-      // ⚠ UNE LIGNE VIDE N'EST PAS « RIEN A FAIRE » : c'est « aucun jour cette
-      // semaine-la », et c'est legitime. On ne pose simplement rien.
-      if (!lot.jours.length) continue
-      const { ok, data } = await envoyer({ action: 'poserRegle', jours: lot.jours,
-        toutes_les_n_semaines: alt ? 2 : 1, depuis: lot.ancre })
-      if (!ok) { dire(msg, (data && data.error) || 'Vos jours n\'ont pas pu être enregistrés.'); return false }
-    }
-    return true
+  // ⚠ LES CASES SE VERROUILLENT PENDANT L'ENVOI. Sans ca, une seconde tape
+  // partait dans un `return` MUET (`envoiEnCours`) : le navigateur avait deja
+  // coche la case, la requete ne partait pas, le repeint la decochait — et le
+  // message affichait « ✓ Vos jours sont enregistres » pour le geste PRECEDENT.
+  // Une case grisee ne ment pas ; un retour muet, si.
+  function verrouillerMesCases (verrou) {
+    document.querySelectorAll('#dispo-recur input[data-lot]').forEach(c => { c.disabled = verrou })
+  }
+
+  async function envoyerMesJours (lots, { alt }) {
+    const { ok, data } = await envoyer({ action: 'reglerMesJours', lots,
+                                         toutes_les_n_semaines: alt ? 2 : 1 })
+    return { ok, erreur: !ok ? ((data && data.error) || 'Vos jours n\'ont pas pu être enregistrés.') : null }
+  }
+
+  // Les deux lots tels que l'ecran les montre, ancrages compris.
+  function lotsASoumettre (alt) {
+    const cette = lundiDe(AUJ())
+    const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
+    if (!alt) return [{ jours: joursCoches('simple'), depuis: cette }]
+    // ⚠ ON GARDE L'ANCRAGE EXISTANT s'il y en a un : le deplacer a chaque
+    // modification inverserait son rythme une fois sur deux.
+    const { a } = lotsPwa()
+    const d0 = (a && a.ancre) ? lundiDe(a.ancre) : cette
+    const d1 = isoJ(new Date(dJour(d0).getTime() + 7 * 86400000))
+    return [{ jours: joursCoches('a'), depuis: d0 }, { jours: joursCoches('b'), depuis: d1 }]
   }
 
   async function enregistrerMesJours () {
@@ -2398,25 +2428,25 @@ if ("serviceWorker" in navigator) {
     if (!mesJours || !mesJours.modifiable || envoiEnCours) return
     if (horsLigne(msg)) return
     envoiEnCours = true
+    verrouillerMesCases(true)
     try {
       const alt = enQuinzaine()
-      const cette = lundiDe(AUJ())
-      const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
-      const lots = alt
-        ? [{ jours: joursCoches('a'), ancre: cette }, { jours: joursCoches('b'), ancre: suivante }]
-        : [{ jours: joursCoches('simple'), ancre: cette }]
-      // ⚠ ON GARDE L'ANCRAGE EXISTANT s'il y en a un : le deplacer a chaque
-      // modification inverserait son rythme une fois sur deux.
-      const { a } = lotsPwa()
-      if (alt && a && a.ancre) {
-        lots[0].ancre = lundiDe(a.ancre)
-        lots[1].ancre = isoJ(new Date(dJour(lots[0].ancre).getTime() + 7 * 86400000))
-      }
-      if (await remplacerMesRegles(lots, { alt })) dire(msg, '✓ Vos jours sont enregistrés.')
+      const voulu = lotsASoumettre(alt)
+      const { ok, erreur } = await envoyerMesJours(voulu, { alt })
+      dire(msg, ok ? '✓ Vos jours sont enregistrés.' : erreur)
       await chargerDisponibilites()
+      // ⚠ ET ON REGARDE SI LA COCHE A BOUGE PENDANT L'ENVOI. Les cases sont
+      // verrouillees, mais un clavier ou un second onglet peuvent encore agir :
+      // comparer l'etat voulu a l'etat courant evite d'avaler un geste en
+      // silence, ce qui est exactement ce qu'on vient de corriger.
+      if (ok) {
+        const apres = lotsASoumettre(enQuinzaine())
+        const change = JSON.stringify(apres.map(l => l.jours)) !== JSON.stringify(voulu.map(l => l.jours))
+        if (change) { envoiEnCours = false; verrouillerMesCases(false); return enregistrerMesJours() }
+      }
     } catch (err) {
       dire(msg, 'Connexion impossible. Réessayez.')
-    } finally { envoiEnCours = false }
+    } finally { envoiEnCours = false; verrouillerMesCases(false) }
   }
 
   async function basculerMonAlternance (vers) {
@@ -2424,30 +2454,37 @@ if ("serviceWorker" in navigator) {
     if (!mesJours || !mesJours.modifiable || envoiEnCours) return
     if (horsLigne(msg)) return
     envoiEnCours = true
+    verrouillerMesCases(true)
     try {
       // ⚠ REVENIR A « TOUTES LES SEMAINES » GARDE LA SEMAINE A, et l'ecran le
       // dit. Fusionner les deux lignes aurait invente un rythme que personne n'a
       // regle — et elle se serait retrouvee engagee des jours qu'elle n'avait
-      // cochés que pour une semaine sur deux.
+      // coches que pour une semaine sur deux.
       const source = vers ? fusion(reglesLues()) : lotsPwa().a
       const jours = source ? source.jours : []
-      const ok = await remplacerMesRegles([{ jours, ancre: lundiDe(AUJ()) }], { alt: !!vers })
-      // ⚠ LE MODE SURVIT A L'ABSENCE DE REGLE. Sans ce drapeau, basculer en
-      // quinzaine sans aucun jour coché ne posait rien, donc `enQuinzaine()`
-      // restait faux, donc l'ecran repeignait une ligne simple : le bouton
-      // paraissait mort. C'est le parcours de TOUS les profils aujourd'hui,
-      // puisque aucun ne porte de regle.
+      const { ok, erreur } = await envoyerMesJours(
+        [{ jours, depuis: lundiDe(AUJ()) }], { alt: !!vers })
       if (ok) {
+        // ⚠ LE MODE NE SE POSE QUE SI L'ECRITURE A REUSSI. Le poser dans tous les
+        // cas faisait basculer l'ecran en A/B alors que RIEN n'avait ete ecrit.
         mesJours.forceAlternee = !!vers
+        // ⚠ ET LE MESSAGE DIT CE QUI S'EST PASSE, pas ce qu'on esperait. Avec une
+        // semaine A vide, « les jours de la semaine A sont conserves » annoncait
+        // une conservation alors qu'on venait de tout effacer — donc
+        // « disponible tous les jours », sans un mot.
         dire(msg, vers ? 'Cochez les jours de la semaine B.'
-                       : 'Les jours de la semaine A sont conservés.')
+                       : (jours.length ? 'Les jours de la semaine A sont conservés.'
+                                       : 'Vous n\'avez plus aucun jour habituel : ' +
+                                         'vous êtes comptée disponible tous les jours.'))
+      } else {
+        dire(msg, erreur)
       }
       await chargerDisponibilites()
-      if (mesJours) mesJours.forceAlternee = !!vers
+      if (ok && mesJours) mesJours.forceAlternee = !!vers
       peindreMesJours()
     } catch (err) {
       dire(msg, 'Connexion impossible. Réessayez.')
-    } finally { envoiEnCours = false }
+    } finally { envoiEnCours = false; verrouillerMesCases(false) }
   }
 
   // ⚠ INVERSER, C'EST ECHANGER LES ANCRAGES DES DEUX LOTS. La semaine A est, par
@@ -2459,18 +2496,19 @@ if ("serviceWorker" in navigator) {
     if (!mesJours || !mesJours.modifiable || envoiEnCours) return
     if (horsLigne(msg)) return
     envoiEnCours = true
+    verrouillerMesCases(true)
     try {
       const { a, b } = lotsPwa()
       const cette = lundiDe(AUJ())
       const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
-      const ok = await remplacerMesRegles(
-        [{ jours: a ? a.jours : [], ancre: suivante },
-         { jours: b ? b.jours : [], ancre: cette }], { alt: true })
-      if (ok) dire(msg, '✓ Les deux semaines sont échangées.')
+      const { ok, erreur } = await envoyerMesJours(
+        [{ jours: a ? a.jours : [], depuis: suivante },
+         { jours: b ? b.jours : [], depuis: cette }], { alt: true })
+      dire(msg, ok ? '✓ Les deux semaines sont échangées.' : erreur)
       await chargerDisponibilites()
     } catch (err) {
       dire(msg, 'Connexion impossible. Réessayez.')
-    } finally { envoiEnCours = false }
+    } finally { envoiEnCours = false; verrouillerMesCases(false) }
   }
 
   let envoiEnCours = false

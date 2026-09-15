@@ -56,7 +56,7 @@ const projeter = regles => (regles || []).map(r => {
 
 function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    autorise = true, enLigne = true, erreur = null,
-                   coupureEcriture = false } = {}) {
+                   coupureEcriture = false, echecReglage = null } = {}) {
   const html = fs.readFileSync(FICHIER, 'utf8')
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
   assert.ok(m, 'le script de la page est introuvable')
@@ -109,6 +109,21 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     // ⚠ UNE COUPURE EN COURS D'ENVOI N'EST PAS UN 503 : `fetch` LEVE. C'est le
     // chemin `catch`, celui qui laissait la case a moitie effacee.
     if (coupureEcriture && corps && corps.action) throw new TypeError('Failed to fetch')
+    // ⚠ LE DOUBLE REJOUE AUSSI LE REGLAGE DES JOURS. Il ne le faisait pas : son
+    // en-tête promettait de rejouer les EFFETS du serveur, et l'action que ce
+    // lot introduit n'en avait aucun — `etat.regles` ne bougeait jamais, donc la
+    // relecture rendait l'état d'AVANT, donc rien de ce que l'écran montre après
+    // une écriture n'était éprouvable. REVIEW.md règle 8, dans le fichier même
+    // qui se donne pour mission de la fermer.
+    if (corps && corps.action === 'reglerMesJours') {
+      if (echecReglage) {
+        return { ok: false, status: echecReglage.status || 503,
+                 json: async () => ({ error: echecReglage.message || 'panne' }) }
+      }
+      const cad = corps.toutes_les_n_semaines || 1
+      etat.regles = (corps.lots || []).filter(l => l.jours && l.jours.length)
+        .map((l, i) => regle('neuve' + i, 'réglée', l.jours, cad, l.depuis))
+    }
     if (corps && corps.action === 'declarerIndisponibilite') {
       etat.exceptions = etat.exceptions.concat([
         { id: 'e' + appels.length, date: corps.date, available: false, source: 'prestataire' }])
@@ -178,25 +193,74 @@ test('elle RÈGLE ses jours habituels — de vraies cases à cocher', async () =
   assert.strictEqual(cases.filter(c => c.disabled).length, 0, 'et elles sont actives')
 })
 
-test('cocher un jour REMPLACE ses règles — retirer, puis reposer', async () => {
-  // ⚠ L'ORDRE COMPTE. Poser par-dessus une règle qu'on n'a pas su retirer
-  // laisse DEUX récurrences actives : le moteur les unit, et elle se retrouve
-  // disponible les jours des deux.
+test('cocher un jour envoie UN SEUL appel, et l\'écran suit', async () => {
+  // ⚠ UN SEUL ALLER-RETOUR, ET C'EST UNE CORRECTION DE REVIEW. L'écran
+  // enchaînait « retirer tout, puis reposer » en autant d'appels qu'il y avait
+  // de règles : le réseau d'un téléphone coupe au milieu, le retrait passe, la
+  // pose non, et TOUTES ses règles disparaissent — donc « disponible tous les
+  // jours », l'inverse exact de ce qu'elle demandait.
   const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
   t.seed()
   await t.chargerDisponibilites()
   const mercredi = w.document.querySelector('#dispo-recur input[data-lot][value="3"]')
   mercredi.checked = true
   mercredi.dispatchEvent(new w.Event('change', { bubbles: true }))
-  await souffler(120)
+  await souffler(150)
 
   const gestes = ecritures(t).map(a => a.corps.action)
-  assert.deepStrictEqual(gestes, ['retirerRegle', 'poserRegle'],
-    'on retire AVANT de poser, et une seule fois chacun')
-  const pose = t.appels.find(a => a.corps && a.corps.action === 'poserRegle')
-  assert.deepStrictEqual(pose.corps.jours.sort(), [1, 2, 3])
-  assert.strictEqual(pose.corps.toutes_les_n_semaines, 1)
+  assert.deepStrictEqual(gestes, ['reglerMesJours'], 'un seul appel, pas une séquence')
+  const envoi = t.appels.find(a => a.corps && a.corps.action === 'reglerMesJours')
+  assert.strictEqual(envoi.corps.lots.length, 1)
+  assert.deepStrictEqual(envoi.corps.lots[0].jours.sort(), [1, 2, 3])
+  assert.strictEqual(envoi.corps.toutes_les_n_semaines, 1)
   assert.match(message(w), /enregistrés/)
+  // ⚠ ET L'ÉCRAN MONTRE LE RÉSULTAT, pas l'état d'avant : le double rejoue
+  // l'effet, donc la relecture doit ramener les trois jours.
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort()
+  assert.deepStrictEqual(cochees, [1, 2, 3])
+})
+
+test('une panne d\'enregistrement NE LAISSE PAS croire que c\'est parti', async () => {
+  // ⚠ LE DÉFAUT QUE LA REVIEW A TROUVÉ, dans sa forme observable. Avec
+  // l'enchaînement d'avant, le message disait « Service temporairement
+  // indisponible » — c'est-à-dire « rien n'est parti » — alors que toutes les
+  // règles venaient d'être désactivées.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])],
+                            echecReglage: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  const mercredi = w.document.querySelector('#dispo-recur input[data-lot][value="3"]')
+  mercredi.checked = true
+  mercredi.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(150)
+
+  assert.strictEqual(ecritures(t).length, 1, 'un seul appel a été tenté')
+  // Ses règles d'origine sont intactes : rien n'a pu être effacé à moitié.
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort()
+  assert.deepStrictEqual(cochees, [1, 2], 'ses jours d\'avant sont toujours là')
+})
+
+test('pendant l\'envoi, les cases sont VERROUILLÉES — pas de geste avalé', async () => {
+  // ⚠ Une seconde tape partait dans un `return` MUET : le navigateur avait déjà
+  // coché la case, la requête ne partait pas, le repeint la décochait — et le
+  // message affichait « ✓ » pour le geste PRÉCÉDENT. Une case grisée ne ment
+  // pas ; un retour muet, si.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const mardi = w.document.querySelector('#dispo-recur input[data-lot][value="2"]')
+  mardi.checked = true
+  mardi.dispatchEvent(new w.Event('change', { bubbles: true }))
+  // Immédiatement après, avant la réponse : les cases doivent être figées.
+  assert.strictEqual(
+    [...w.document.querySelectorAll('#dispo-recur input[data-lot]')].every(c => c.disabled), true,
+    'toutes les cases sont verrouillées pendant l\'envoi')
+  await souffler(150)
+  assert.strictEqual(
+    [...w.document.querySelectorAll('#dispo-recur input[data-lot]')].some(c => c.disabled), false,
+    'et déverrouillées après')
 })
 
 test('AUCUNE chaîne RRULE ne remonte : elle envoie des JOURS', async () => {
@@ -209,9 +273,9 @@ test('AUCUNE chaîne RRULE ne remonte : elle envoie des JOURS', async () => {
   const c = w.document.querySelector('#dispo-recur input[data-lot][value="5"]')
   c.checked = true
   c.dispatchEvent(new w.Event('change', { bubbles: true }))
-  await souffler(120)
-  const pose = t.appels.find(a => a.corps && a.corps.action === 'poserRegle')
-  assert.ok(pose, 'la règle part')
+  await souffler(150)
+  const pose = t.appels.find(a => a.corps && a.corps.action === 'reglerMesJours')
+  assert.ok(pose, 'le réglage part')
   assert.ok(!/FREQ=|DTSTART|RRULE/.test(JSON.stringify(pose.corps)))
 })
 
@@ -291,10 +355,11 @@ test('revenir à « toutes les semaines » GARDE la semaine A', async () => {
   t.seed()
   await t.chargerDisponibilites()
   w.document.getElementById('dispo-simple').click()
-  await souffler(150)
-  const pose = t.appels.filter(a => a.corps && a.corps.action === 'poserRegle')
-  assert.strictEqual(pose.length, 1, 'une seule règle reposée')
-  assert.deepStrictEqual(pose[0].corps.jours, [1], 'les jours de A, pas ceux de B')
+  await souffler(180)
+  const pose = t.appels.filter(a => a.corps && a.corps.action === 'reglerMesJours')
+  assert.strictEqual(pose.length, 1, 'un seul appel')
+  assert.strictEqual(pose[0].corps.lots.length, 1, 'une seule ligne')
+  assert.deepStrictEqual(pose[0].corps.lots[0].jours, [1], 'les jours de A, pas ceux de B')
   assert.strictEqual(pose[0].corps.toutes_les_n_semaines, 1)
 })
 
@@ -306,20 +371,23 @@ test('inverser les semaines ÉCHANGE leur contenu, pas leur étiquette', async (
   t.seed()
   await t.chargerDisponibilites()
   w.document.getElementById('dispo-inverser').click()
-  await souffler(150)
-  const pose = t.appels.filter(a => a.corps && a.corps.action === 'poserRegle')
-  assert.strictEqual(pose.length, 2)
+  await souffler(180)
+  const pose = t.appels.filter(a => a.corps && a.corps.action === 'reglerMesJours')
+  assert.strictEqual(pose.length, 1, 'un seul appel porte les deux lignes')
   // Ce qui était en A part sur la semaine SUIVANTE, ce qui était en B vient sur
   // celle-ci : les deux lignes échangent leur contenu.
-  const parJours = Object.fromEntries(pose.map(x => [String(x.corps.jours), x.corps.depuis]))
+  const parJours = Object.fromEntries(pose[0].corps.lots.map(l => [String(l.jours), l.depuis]))
   assert.strictEqual(parJours['1'], lundiB, 'A part sur la semaine suivante')
   assert.strictEqual(parJours['6'], lundiCourant, 'B vient sur celle-ci')
 })
 
-test('une règle OPAQUE est retirée elle aussi — sinon le remplacement est une addition', async () => {
-  // ⚠ Ne retirer que les règles lisibles laisserait l'opaque active, invisible
-  // à l'écran et sans aucune issue par l'interface. Le moteur, lui, continue de
-  // l'appliquer.
+test('le REMPLACEMENT est décidé par le serveur, pas par la liste que l\'écran sait lire', async () => {
+  // ⚠ Une règle OPAQUE — que `lireRrule` ne sait pas relire — doit être retirée
+  // elle aussi, sinon le « remplacement » est une ADDITION : elle reste active,
+  // invisible à l'écran, appliquée par le moteur, sans aucune issue par
+  // l'interface. C'est maintenant le SERVEUR qui désactive tout ce qui était
+  // actif : l'écran n'a plus à connaître la liste, donc il ne peut plus en
+  // oublier une.
   const { w, t } = monter({ regles: [
     regle('lisible', 'lundis', [1]),
     regleIllisible('opaque', 'Le premier lundi du mois') ] })
@@ -329,9 +397,9 @@ test('une règle OPAQUE est retirée elle aussi — sinon le remplacement est un
   c.checked = true
   c.dispatchEvent(new w.Event('change', { bubbles: true }))
   await souffler(150)
-  const retires = t.appels.filter(a => a.corps && a.corps.action === 'retirerRegle')
-    .map(a => a.corps.id).sort()
-  assert.deepStrictEqual(retires, ['lisible', 'opaque'])
+  const gestes = ecritures(t).map(a => a.corps.action)
+  assert.deepStrictEqual(gestes, ['reglerMesJours'],
+    'aucun identifiant de règle ne transite : l\'écran ne choisit pas ce qu\'on retire')
 })
 
 test('HORS LIGNE, cocher un jour n\'envoie rien', async () => {
