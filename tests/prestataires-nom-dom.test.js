@@ -188,6 +188,84 @@ test('enregistrer une fiche SANS nom réclame le nom, et n\'écrit rien', async 
   assert.ok(alertes.some(a => /nom de famille/i.test(a)), alertes.join(' | '))
 })
 
+// ─── La population existante : le nom complet est dans le PRÉNOM ──────────
+//
+// ⚠ LA FIXTURE RÉELLE, PAS LA FIXTURE CONFORTABLE (REVIEW.md règle 8).
+// L'ancien écran n'avait qu'un champ et l'envoyait tel quel en `first_name` :
+// toute fiche créée depuis lui vaut `{ first_name: 'Régina Martin',
+// last_name: null }`. Écrire les tests avec `{ prenom: 'Régina', nom: null }`
+// aurait été la version confortable du cas dangereux — et le seul cas qui
+// n'existe PAS en production.
+
+const LEGACY = { prenom: 'Régina Martin', nom: null }
+
+test('une fiche d\'avant : le nom en un bloc est COUPÉ à l\'écran, et la coupe est dite', async () => {
+  const { w, t } = monter({ profil: LEGACY })
+  t.seed(); t.renderPrestataires(); t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE.id)
+  assert.strictEqual(el(w, 'presta-prenom').value, 'Régina')
+  assert.strictEqual(el(w, 'presta-nom').value, 'Martin')
+  assert.match(el(w, 'aide-nom').textContent, /un seul bloc/)
+  assert.match(el(w, 'aide-nom').textContent, /vérifiez la coupe/)
+})
+
+test('réparer une fiche d\'avant ne produit PAS « Régina Martin Martin »', async () => {
+  // ⚠ LE DÉFAUT EXACT QUE CE LOT ANNONCE FERMER, atteint par la porte qu'il
+  // ouvre. Sans la coupe, l'hôte voyait « Régina Martin » en prénom, tapait
+  // « Martin » en nom, et le libellé composé partait à rallonge — dans la liste
+  // ET dans l'en-tête de la PWA de la prestataire elle-même.
+  const { w, t, envois, ecrits } = monter({ profil: LEGACY })
+  t.seed(); t.renderPrestataires(); t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE.id)
+  await t.saveEdit(LIGNE.id)
+
+  const maj = membres(envois).find(e => e.corps.action === 'update')
+  assert.ok(maj, 'la modification part')
+  assert.strictEqual(maj.corps.first_name, 'Régina', 'le prénom est nettoyé')
+  assert.strictEqual(maj.corps.last_name, 'Martin')
+  const tok = ecrits.find(e => e.table === 'public_tokens')
+  assert.strictEqual(tok.champs.label, 'Régina Martin', 'pas de nom à rallonge')
+})
+
+test('et si la coupe est défaite, l\'écran REFUSE le libellé à rallonge', async () => {
+  // Le filet : l'hôte peut toujours recoller le nom dans le prénom à la main.
+  const { w, t, envois, alertes } = monter({ profil: LEGACY })
+  t.seed(); t.renderPrestataires(); t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE.id)
+  el(w, 'presta-prenom').value = 'Régina Martin'      // la coupe défaite
+  await t.saveEdit(LIGNE.id)
+
+  assert.strictEqual(membres(envois).length, 0, 'rien ne part')
+  assert.ok(alertes.some(a => /contient déjà/.test(a)), alertes.join(' | '))
+})
+
+test('un prénom COMPOSÉ se coupe aussi — mais l\'hôte peut le recoller', async () => {
+  // ⚠ ON PROPOSE LA COUPE, ON NE L'IMPOSE PAS. « Marie-Claire Dupont » se coupe
+  // bien, « Jean Pierre Martin » non, et la machine n'a aucun moyen de le
+  // savoir. C'est pour ça que la coupe se fait À L'ÉCRAN et jamais en base.
+  const { w, t, envois } = monter({ profil: { prenom: 'Jean Pierre Martin', nom: null } })
+  t.seed(); t.renderPrestataires(); t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE.id)
+  assert.strictEqual(el(w, 'presta-prenom').value, 'Jean Pierre')
+  assert.strictEqual(el(w, 'presta-nom').value, 'Martin')
+
+  el(w, 'presta-prenom').value = 'Jean Pierre Martin'
+  el(w, 'presta-nom').value = 'Dupont'               // le vrai nom de famille
+  await t.saveEdit(LIGNE.id)
+  const maj = membres(envois).find(e => e.corps.action === 'update')
+  assert.strictEqual(maj.corps.first_name, 'Jean Pierre Martin')
+  assert.strictEqual(maj.corps.last_name, 'Dupont')
+})
+
+test('un prénom d\'un seul mot n\'est pas coupé — il n\'y a rien à couper', async () => {
+  const { w, t } = monter({ profil: { prenom: 'Régina', nom: null } })
+  t.seed(); t.renderPrestataires(); t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE.id)
+  assert.strictEqual(el(w, 'presta-prenom').value, 'Régina')
+  assert.strictEqual(el(w, 'presta-nom').value, '')
+  assert.match(el(w, 'aide-nom').textContent, /Nom manquant/)
+})
+
 // ─── Ce que la règle ne fait PAS ──────────────────────────────────────────
 
 test('la fiche « nom manquant » est MARQUÉE, dans la fiche et dans la liste', async () => {
@@ -208,6 +286,25 @@ test('une fiche COMPLÈTE n\'est pas marquée', async () => {
   assert.ok(!/Nom manquant/.test(w.document.getElementById('presta-list').textContent))
   t.editPrestataire(LIGNE.id)
   assert.strictEqual(el(w, 'aide-nom').textContent, '')
+})
+
+test('le formulaire de CRÉATION n\'affiche aucune aide de nom', async () => {
+  // ⚠ `resetForm` passe `null` comme profil, tout comme un lien sans personne :
+  // déduire le cas de `profil === null` faisait afficher « ce lien n'est
+  // rattaché à aucune personne » sur un formulaire vierge.
+  const { w, t } = monter()
+  t.seed(); t.renderPropCheckboxes(); t.resetForm()
+  assert.strictEqual(el(w, 'aide-nom').textContent, '')
+})
+
+test('un lien SANS profil DIT où va le nom qu\'on y tape', async () => {
+  // Le téléphone et l'e-mail sont coupés dans ce cas ; le champ nom, lui, reste
+  // ouvert et enregistre quelque chose — mais dans le LIBELLÉ du lien, jamais
+  // dans `profiles`. Le taire laisserait croire qu'on nomme une personne.
+  const { w, t } = monter({ sansProfil: true })
+  t.seed(); t.renderPrestataires(); t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE.id)
+  assert.match(el(w, 'aide-nom').textContent, /étiquette au lien/)
 })
 
 test('un lien SANS profil n\'est pas marqué — ignorer n\'est pas constater', async () => {
@@ -233,6 +330,10 @@ test('un lien SANS profil reste enregistrable — pas de blocage rétroactif', a
 
   assert.ok(!alertes.some(a => /nom de famille/i.test(a)),
     'aucune réclamation de nom : ' + alertes.join(' | '))
-  assert.ok(ecrits.some(e => e.table === 'public_tokens'),
-    'le libellé du lien s\'enregistre toujours')
+  const tok = ecrits.find(e => e.table === 'public_tokens')
+  assert.ok(tok, 'le libellé du lien s\'enregistre toujours')
+  // ⚠ ET IL VAUT TOUJOURS CE QU'IL VALAIT. Le prénom est pré-rempli avec le
+  // libellé : une retouche de `libelleSaisi()` ou du pré-remplissage le
+  // tronquerait en silence pour TOUS les liens sans profil, test vert.
+  assert.strictEqual(tok.champs.label, 'Régina Martin')
 })

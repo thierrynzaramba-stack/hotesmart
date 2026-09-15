@@ -171,7 +171,8 @@
       <div class="bloc-titre">Identité</div>
       <div class="grid2">
         <div><label class="f" for="f-prenom">Prénom *</label><input class="f" id="f-prenom" autocomplete="off"></div>
-        <div><label class="f" for="f-nom">Nom *</label><input class="f" id="f-nom" autocomplete="off"></div>
+        <div><label class="f" for="f-nom">Nom *</label><input class="f" id="f-nom" autocomplete="off">
+          <div class="f" id="aide-f-nom" style="font-size:11px;color:#b45309"></div></div>
       </div>
       <div class="grid2">
         <div><label class="f" for="f-email">Email</label><input class="f" id="f-email" type="email" autocomplete="off"></div>
@@ -299,6 +300,18 @@ function resumeDroits (p) {
   return `${perimetre} · ${actifs.length ? actifs.join(', ') : 'aucun droit'}`
 }
 
+// ⚠ « NOM MANQUANT » SE VOIT AVANT LE REFUS, pas au clic sur « Enregistrer ».
+// Le nom de famille est requis depuis le 15 septembre 2026 : sans marqueur,
+// l'hote reglait dix cases de droits puis decouvrait le refus. L'app menage
+// porte le meme marqueur, et pour la meme raison.
+// ⚠ PAS SUR LE TITULAIRE : son profil n'est pas modifiable (aucun bouton
+// « Modifier », et l'API le refuse), et son nom vient du trigger d'inscription
+// qui n'en pose aucun. Le marquer designerait un defaut que personne ne peut
+// reparer depuis cet ecran.
+function nomManquant (p) {
+  return !p.is_owner && !String(p.last_name || '').trim()
+}
+
 function ligneProfil (p) {
     const [libelle, classe] = LIBELLE_STATUT[p.statut] || ['—', '']
     const nom = [p.first_name, p.last_name].filter(Boolean).join(' ')
@@ -307,7 +320,8 @@ function ligneProfil (p) {
       <div class="row-main">
         <div class="row-name">${esc(nom)}
           ${p.is_owner ? '<span class="badge">Titulaire</span>' : ''}
-          <span class="badge ${classe}">${libelle}</span></div>
+          <span class="badge ${classe}">${libelle}</span>
+          ${nomManquant(p) ? '<span class="badge" title="Le nom de famille est demandé au prochain enregistrement de ce profil.">⚠️ Nom manquant</span>' : ''}</div>
         <div class="row-meta">${mode}${p.email ? ' · ' + esc(p.email) : ''}<br>${esc(resumeDroits(p))}</div>
       </div>
       ${p.is_owner ? '' : `<button class="btn-ghost" data-ouvrir="${p.id}">Modifier</button>`}
@@ -495,6 +509,14 @@ function ouvrir (profil) {
   brouillon = profil && profil.permissions
     ? { ...VIDE, ...profil.permissions, property_ids: (profil.permissions.property_ids || []).map(String) }
     : { ...VIDE }
+  const aideNom = $('aide-f-nom')
+  if (aideNom) {
+    const manque = profil && nomManquant(profil)
+    aideNom.textContent = manque
+      ? '⚠️ Nom manquant sur ce profil. Il continue de fonctionner, mais son nom de ' +
+        'famille est demandé pour l\'enregistrer.'
+      : ''
+  }
   $('f-prenom').value = profil?.first_name || ''
   $('f-nom').value    = profil?.last_name || ''
   $('f-email').value  = profil?.email || ''

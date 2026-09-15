@@ -975,10 +975,54 @@ savoir si deux lignes parlaient de la même personne.
 - **Éprouvé** : `tests/prestataires-nom-dom.test.js` (10 tests, vrai DOM) et
   `tests/membres-endpoint.test.js` (les six cas : absent, vide, blanc, effacement refusé, champ
   absent toléré, réparation).
-- ⚠️ **QUESTION PRODUIT OUVERTE — LES SOCIÉTÉS.** Le placeholder disait « ex: Marie, Société
-  Propre+ » : une entreprise n'a pas de nom de famille. La règle la contraint aujourd'hui à
-  remplir les deux champs. À trancher : soit une case « c'est une société » qui lève l'obligation,
-  soit on assume que le second champ porte la raison sociale ou le nom du contact.
+⚠️ **TOUTE LA POPULATION EXISTANTE PORTE LE NOM COMPLET DANS `first_name`, ET C'EST LE CAS
+NOMINAL.** L'ancien écran n'avait qu'un champ et l'envoyait tel quel en `first_name` : chaque fiche
+créée depuis lui vaut `{ first_name: 'Régina Martin', last_name: null }`. Le commit corrigeait la
+**source** du pré-remplissage (le profil au lieu du libellé) — mais le profil était déjà pollué.
+L'hôte ouvrait la fiche, voyait « Régina Martin » en prénom et un nom vide, tapait « Martin », et
+le libellé composé devenait **« Régina Martin Martin »** : dans la liste, et dans l'en-tête de la
+PWA de la prestataire elle-même. Le défaut exact que ce lot annonce fermer, atteint par la porte
+qu'il ouvre. *Il n'y a pas d'autre population que celle-là.*
+
+- **`couperNomEnUnBloc()` propose la coupe à l'écran** (dernier mot → nom, le reste → prénom) et
+  **le dit**. ⚠️ **On propose, on n'impose pas** : « Marie-Claire Dupont » se coupe bien,
+  « Jean Pierre Martin » non, et la machine n'a aucun moyen de le savoir. L'hôte voit les deux
+  champs remplis et corrige — c'est pour ça que la coupe se fait **à l'écran et jamais en base**.
+- **Un filet au clic** : un prénom qui se termine déjà par le nom est refusé, avec le libellé
+  qu'il aurait produit.
+- ⚠️ **La fixture du test était la version confortable du cas dangereux** (REVIEW.md règle 8) :
+  `{ prenom: 'Régina', nom: null }` est le seul cas qui **n'existe pas** en production. Les tests
+  partent maintenant de `{ prenom: 'Régina Martin', nom: null }`.
+
+⚠️ **LE CAS « LIEN SANS PROFIL » DIT OÙ VA LE NOM.** Le téléphone et l'e-mail y sont coupés ; le
+champ nom reste ouvert et enregistre quelque chose — mais dans le **libellé du lien**, jamais dans
+`profiles`. Le taire laisserait croire qu'on nomme une personne. ⚠️ Le drapeau est **explicite**
+(`lienSansProfil`), pas déduit de `profil === null` : `resetForm` passe aussi `null`, et le
+formulaire de **création** aurait affiché « ce lien n'est rattaché à aucune personne » à vide.
+
+**Dettes constatées en review, non corrigées ici :**
+- **Le titulaire n'a jamais de nom de famille, et rien ne peut lui en donner.** Le trigger
+  `handle_new_user` pose `first_name = split_part(email, '@', 1)` et **aucun** `last_name`, alors
+  que `pages/login.html` collecte bien les deux à l'inscription et les met dans les métadonnées
+  auth — que le trigger ignore. Son profil est ensuite non modifiable (`is_owner` refusé par
+  l'API, pas de bouton dans `/settings`). La règle a donc un **trou permanent** sur le seul profil
+  que tous les autres voient : le sélecteur de comptes et la page d'invitation affichent
+  « thierrynzaramba ». Pré-existant. `/settings` ne marque pas le titulaire, justement pour ne pas
+  désigner un défaut que personne ne peut réparer de là.
+- **Réparer un nom depuis `/settings` ne met pas `public_tokens.label` à jour.** `modifier()` ne
+  touche volontairement pas cette table (un seul writer, `apps/menages/prestataires.html`). La
+  carte et l'en-tête de la PWA gardent donc l'ancien nom jusqu'au prochain enregistrement de la
+  fiche côté ménage. Divergence pré-existante, rendue atteignable plus souvent. **Ne pas la
+  corriger en ouvrant un second writer** sans trancher la règle d'architecture.
+
+⚠️ **QUESTION PRODUIT OUVERTE — LES SOCIÉTÉS, et elle a une conséquence technique.** Le placeholder
+disait « ex: Marie, Société Propre+ » : une entreprise n'a pas de nom de famille. Or **le SMS, la
+PWA et les motifs d'assignation saluent avec `first_name` SEUL** — jamais le nom, jamais le
+libellé (`notifier-prestataire.js`, `api/menages-public.js`). Couper « Société Propre+ » en deux
+donne donc « **Bonjour Société,** » dans le SMS et « Accepté par Société. » dans le planning, là où
+le champ unique donnait « Bonjour Société Propre+ ». Si l'on retient une case « c'est une
+société », **ces quatre points d'appel doivent retomber sur le nom complet**, sinon la case ne
+règle que l'obligation de saisie et pas le problème qu'elle vise.
 
 ⚠️ **Le garde-fou du vérificateur de contrat a servi le jour même.** En ajoutant un commentaire
 dans le corps de `update`, la suite est passée à 11 rouges et le test a **nommé la cause** —

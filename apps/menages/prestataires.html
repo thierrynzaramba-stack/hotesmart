@@ -1073,10 +1073,12 @@
     // le PROFIL, et le libelle en decoule.
     // ⚠ Repli sur le libelle quand il n'y a pas de profil : le champ n'est alors
     // pas enregistrable, mais il doit continuer de MONTRER de qui on parle.
+    const coupe = couperNomEnUnBloc(profil)
     document.getElementById('presta-prenom').value =
-      profil ? (profil.prenom || '') : (p.label || '')
-    document.getElementById('presta-nom').value = (profil && profil.nom) || ''
-    peindreAideNom(profil)
+      profil ? (coupe ? coupe.prenom : (profil.prenom || '')) : (p.label || '')
+    document.getElementById('presta-nom').value =
+      coupe ? coupe.nom : ((profil && profil.nom) || '')
+    peindreAideNom(profil, { coupeProposee: !!coupe, lienSansProfil: !profil })
     document.getElementById('presta-phone').value = (profil && profil.telephone) || ''
     document.getElementById('presta-email').value = (profil && profil.email) || ''
     // ⚠ L'ETAT VIENT DU SERVEUR, ET IL FIGE LES CASES. Une fiche existante porte
@@ -1176,15 +1178,6 @@
     const refus = perimetreRefuse(biens)
     if (refus) return alert(refus)
 
-    // ⚠ LE NOM NE PART PAS VERS LE PROFIL, et c'est deliberé.
-    // Ce champ est pre-rempli depuis `public_tokens.label`, qui vaut
-    // « Prenom Nom » des qu'un nom de famille existe (`synchroniserTokenPwa`
-    // le compose ainsi). Le renvoyer en `first_name` ecrirait « Regina Dupont »
-    // dans le prenom en laissant `last_name` a « Dupont » : le planning, le
-    // « Bonjour … » du SMS et /settings afficheraient « Regina Dupont Dupont »,
-    // et cet ecran n'a aucun champ `last_name` pour reparer. Le renommage du
-    // profil reste a la page Equipe. Dette assumee : label et prenom peuvent
-    // diverger — c'est deja le cas aujourd'hui, et c'est sans consequence.
     const contact = contactSaisi()
     if (editionEnCours) {
       const rp = await fetch('/api/membres', {
@@ -1434,15 +1427,43 @@
     if (!n.nom) return 'Entrez le nom de famille du prestataire. ' +
       'Un prénom seul ne suffit pas à la distinguer d\'une autre personne — ' +
       'dans le planning, dans les avis, et dans le SMS qu\'elle reçoit.'
+    // ⚠ LE FILET, si la coupe proposee a ete defaite ou ignoree. Un prenom qui
+    // se TERMINE deja par le nom compose un libelle a rallonge (« Regina Martin
+    // Martin ») — visible dans la liste et dans l'en-tete de sa PWA. On le
+    // refuse au lieu de l'ecrire.
+    if (n.prenom.toLowerCase().endsWith(' ' + n.nom.toLowerCase())) {
+      return 'Le prénom contient déjà « ' + n.nom + ' » : enregistrer donnerait ' +
+        '« ' + [n.prenom, n.nom].join(' ') + ' ». Retirez-le du prénom.'
+    }
     return null
   }
 
   // ⚠ « NOM MANQUANT » SE DIT, IL NE SE DEVINE PAS. Une fiche d'avant ce lot
   // continue de fonctionner — c'est la regle : pas de blocage retroactif — mais
   // l'hote doit savoir pourquoi l'enregistrement va lui reclamer un nom.
-  function peindreAideNom(profil) {
+  function peindreAideNom(profil, { coupeProposee = false, lienSansProfil = false } = {}) {
     const zone = document.getElementById('aide-nom')
     if (!zone) return
+    if (coupeProposee) {
+      zone.style.color = '#b45309'
+      zone.textContent = '⚠️ Ce nom était enregistré en un seul bloc. Nous l\'avons coupé ' +
+        'en prénom et nom — vérifiez la coupe avant d\'enregistrer, surtout si le prénom ' +
+        'est composé.'
+      return
+    }
+    // ⚠ SANS PROFIL, LE NOM NE VA PAS OU L'HOTE LE CROIT. Le telephone et
+    // l'email sont COUPES dans ce cas (« une case qui n'enregistre rien ne doit
+    // pas etre saisissable ») ; le champ nom, lui, reste ouvert et enregistre
+    // quelque chose — mais dans le LIBELLE du lien, jamais dans `profiles`.
+    // ⚠ `lienSansProfil` EST EXPLICITE, on ne le deduit pas de `profil === null` :
+    // `resetForm` passe aussi `null`, et le formulaire de CREATION aurait
+    // affiche « ce lien n'est rattache a aucune personne » a vide.
+    if (lienSansProfil) {
+      zone.style.color = 'var(--text2)'
+      zone.textContent = 'Ce lien n\'est rattaché à aucune personne : ce nom sert ' +
+        'd\'étiquette au lien, il n\'est pas enregistré comme identité.'
+      return
+    }
     if (profil && !profil.nom) {
       zone.style.color = '#b45309'
       zone.textContent = '⚠️ Nom manquant sur cette fiche. Elle continue de fonctionner, ' +
@@ -1450,6 +1471,28 @@
       return
     }
     zone.textContent = ''
+  }
+
+  // ⚠ LA POPULATION EXISTANTE PORTE LE NOM COMPLET DANS LE PRENOM.
+  // L'ancien ecran n'avait qu'un champ et l'envoyait tel quel en `first_name` :
+  // toute fiche creee depuis lui vaut `{ first_name: 'Regina Martin',
+  // last_name: null }`. Sans ce decoupage, l'hote ouvrait la fiche, voyait
+  // « Regina Martin » en prenom et un nom vide, tapait « Martin » — et le
+  // libelle composé devenait « Regina Martin Martin », dans la liste ET dans
+  // l'en-tete de la PWA de la prestataire. Le defaut exact que ce lot annonce
+  // fermer, atteint par la porte qu'il ouvre, et sur le cas NOMINAL : il n'y a
+  // pas d'autre population que celle-la.
+  //
+  // ⚠ ON PROPOSE LA COUPE, ON NE L'IMPOSE PAS. « Marie-Claire Dupont » se coupe
+  // bien, « Jean Pierre Martin » non — et la machine n'a aucun moyen de le
+  // savoir. L'hote VOIT les deux champs remplis et corrige si besoin ; c'est
+  // pour ca que la coupe se fait a l'ecran et jamais en base.
+  function couperNomEnUnBloc(profil) {
+    if (!profil || profil.nom) return null
+    const brut = String(profil.prenom || '').trim().replace(/\s+/g, ' ')
+    const bouts = brut.split(' ')
+    if (bouts.length < 2) return null
+    return { prenom: bouts.slice(0, -1).join(' '), nom: bouts[bouts.length - 1] }
   }
 
   // ⚠ CE QUI A ETE TRANCHE, PAR OPPOSITION A CE QUI EST AFFICHE.
