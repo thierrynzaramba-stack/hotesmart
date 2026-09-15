@@ -139,3 +139,31 @@ qui n'entrent jamais par le webhook.
 11 h 49 (date d'auteur : 14 septembre 19 h 56), avant le lot 2b : il est ancêtre de `ff32349`. La
 garde « tout ou rien » que la review avait retoquée est bien celle qui tournait en production, et
 c'est elle qui a produit le blocage.
+
+## Le cron dédié est mort en 504 à son premier appel réel (16 sept. 2026)
+
+`FUNCTION_INVOCATION_TIMEOUT` après **60 741 ms**, sur un `maxDuration` de 60 s — alors que le
+budget de parc était de 45 s et laissait « 15 s de marge ».
+
+⚠️ **LE BUDGET N'ÉTAIT CONSULTÉ QU'ENTRE DEUX PAGES.** Or une page fait jusqu'à 100 messages, et
+chaque message coûte ~3 aller-retours Supabase : **~300 appels sans un seul contrôle**. La marge ne
+protégeait rien, parce que le travail est **dans** la page, pas entre les pages.
+
+**Et une fonction qui meurt est pire qu'un budget trop court** : elle ne rend pas son bilan **et**
+n'écrit pas l'état du bien en cours. La passe ne laisse aucune trace, le cycle suivant recommence —
+exactement le défaut qu'on venait de corriger, par une autre porte.
+
+- **`depasse()` est maintenant consulté à chaque message.** La reprise désigne **la même page** : les
+  messages déjà écrits sont absorbés par la déduplication de `recordMessage`, et le coût du rejeu
+  est borné à **une** page. Une reprise au message près demanderait un curseur que l'API ne donne
+  pas.
+- **`BUDGET_PARC_DEDIE_MS` passe de 45 s à 30 s.** Mesure, pas prudence : 45 + un débordement de
+  page ne tenait pas sous 60.
+- **Le test fait porter le coût par l'ÉCRITURE**, pas par l'appel HTTP — c'est là qu'il est
+  réellement. Sans ça, aucun test ne peut faire expirer un budget à l'intérieur d'un lot, et c'est
+  précisément la garde qui manquait.
+
+**Dette nommée, non corrigée** : `channelCall` n'a **aucun timeout `fetch`** et honore `Retry-After`
+**sans plafond** — un `429` avec `Retry-After: 120` dort 120 s dans une fonction de 60. Le
+`depasse()` n'est pas consulté pendant ce sommeil. Préexistant, hors périmètre, mais c'est le
+prochain plafond qu'on touchera.

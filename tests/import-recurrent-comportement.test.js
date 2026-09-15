@@ -23,7 +23,15 @@ const cheminRecord = require.resolve('../lib/record-message')
 let ecritures = 0
 require.cache[cheminRecord] = {
   id: cheminRecord, filename: cheminRecord, loaded: true,
-  exports: { recordMessage: async () => { ecritures++; return { ok: true } } }
+  exports: { recordMessage: async () => {
+    ecritures++
+    // ⚠ CHAQUE ECRITURE COUTE DU TEMPS. C'est la ou il part reellement :
+    // ~3 aller-retours Supabase par message. Sans ca, aucun test ne peut faire
+    // expirer un budget A L'INTERIEUR d'un lot de messages — precisement la
+    // garde qui manquait, et qui a tue le cron dedie en production.
+    if (global.__coutEcriture) global.__coutEcriture()
+    return { ok: true }
+  } }
 }
 
 const { importMessages } = require('../lib/channels/channex')
@@ -32,7 +40,7 @@ const { importMessages } = require('../lib/channels/channex')
 let appels = 0
 function poserProvider ({ pagesDeFils = 1, filsParPage = 1, pagesDeMessages = 1,
                          updatedAt = '2026-09-14T10:00:00', msParAppel = 0,
-                         avancer = null }) {
+                         avancer = null, messagesParPage = 100 }) {
   appels = 0
   global.fetch = async (url) => {
     appels++
@@ -57,11 +65,11 @@ function poserProvider ({ pagesDeFils = 1, filsParPage = 1, pagesDeMessages = 1,
     }
     // messages d'un fil
     const page = Number((u.match(/pagination\[page\]=(\d+)/) || [])[1] || 1)
-    const data = page > pagesDeMessages ? [] : Array.from({ length: 100 }, (_, i) => ({
+    const data = page > pagesDeMessages ? [] : Array.from({ length: messagesParPage }, (_, i) => ({
       id: `msg-${page}-${i}`,
       attributes: { sender: i % 2 ? 'guest' : 'property', message: 'texte', inserted_at: '2026-09-14T09:00:00' }
     }))
-    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data, meta: { limit: 100 } }) }
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data, meta: { limit: messagesParPage } }) }
   }
 }
 
@@ -439,4 +447,38 @@ test('LE TEST QUI MANQUAIT : le point de reprise fait un ALLER-RETOUR par la bas
   assert.deepStrictEqual(recu.reprise, { fil: 'fil-X', page: 4, count: 56 },
     'le point de reprise ECRIT au cycle precedent doit etre RELU et transmis, `count` compris')
   assert.ok(journal.upserts.length >= 0)
+})
+
+test('LE BUDGET BORNE AUSSI L INTERIEUR D UNE PAGE', async () => {
+  // ⚠ MESURE EN REEL LE 16 SEPTEMBRE 2026 : le cron dedie est mort en
+  // `FUNCTION_INVOCATION_TIMEOUT` a 60 s. Le budget n'etait consulte qu'ENTRE
+  // deux pages — or une page de 100 messages, c'est ~300 aller-retours Supabase
+  // sans un seul controle. Une fonction qui meurt ne rend pas son bilan ET
+  // n'ecrit pas l'etat du bien en cours : la passe ne laisse AUCUNE trace, et le
+  // cycle suivant recommence. Une garde entre les pages ne borne rien quand le
+  // travail est DANS la page.
+  //
+  // ⚠ Le compteur d'ecritures est celui du double de `recordMessage`, en haut de
+  // ce fichier : c'est lui qui mesure le travail REELLEMENT fait.
+  const avant = ecritures
+  const vraiNow = Date.now
+  let horloge = 1000000
+  Date.now = () => horloge
+  global.__coutEcriture = () => { horloge += 10 }   // 10 ms par message ecrit
+  try {
+    poserProvider({ pagesDeFils: 1, filsParPage: 1, pagesDeMessages: 1, messagesParPage: 40 })
+    const r = await importMessages({
+      userId: 'u', propertyId: 'p', depuis: null,
+      echeance: Date.now() + 100          // dix messages, puis la coupure
+    })
+    assert.ok(r.interrompu, 'la passe est tronquee')
+    assert.ok(r.reprise && r.reprise.page === 1,
+      'et la reprise designe LA MEME page : les deja-ecrits sont dedupliques')
+  } finally {
+    Date.now = vraiNow
+    global.__coutEcriture = null
+  }
+  const faites = ecritures - avant
+  assert.ok(faites > 0 && faites < 40,
+    `le lot doit etre coupe EN COURS : ${faites} ecritures sur 40`)
 })
