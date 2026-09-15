@@ -810,10 +810,57 @@ un geste qui part de travers ne se rattrape pas d'un Ctrl-Z.
   bouton qui l'inverse), et la lettre revient à gauche de chaque semaine du calendrier.
   ⚠️ **Sans le droit d'écriture, les cases restent VISIBLES mais figées** : les cacher lui ferait
   croire qu'elle n'a aucun jour habituel.
-- ⚠️ **DETTE OUVERTE PAR CETTE INVERSION, ET ELLE N'EST PAS TECHNIQUE.** Elle peut désormais se
-  retirer d'un jour sur lequel l'hôte compte, et **rien ne l'en prévient**. La garde d'avant
-  n'était pas un verrou de code, c'était cette décision-là. Ce qu'il faudrait : une notification à
-  l'hôte quand une règle change côté PWA — ou, a minima, une trace lisible dans la fiche.
+### Le pendant de l'inversion : l'hôte l'apprend (15 sept. 2026)
+
+La décision de lui donner la main sur ses jours ouvrait une dette qui **n'était pas technique** :
+elle peut se retirer d'un jour sur lequel l'hôte compte, et rien ne l'en prévenait. *La garde
+d'avant n'était pas un verrou de code, c'était cette décision-là.* Trois pièces la ferment.
+
+- **On le dit en JOURS, pas en règles** (`lib/cleaning/changement-regles.js`). « Règle #a4f2
+  désactivée » ne dit rien à personne : l'hôte ne sait pas ce qu'il a perdu. On compare les
+  **jours couverts** avant et après, jamais les lignes de la table → « **Lola ne travaille plus le
+  samedi à partir du 16 septembre 2026.** »
+- ⚠️ **La perte se dit AVANT le gain** : c'est elle qui demande un geste. Et un jour **gagné** ne
+  promet pas de travail — on le dit explicitement, parce que `weekdays` (ce que l'hôte confie) et
+  la récurrence (où elle est) sont deux filtres distincts.
+- ⚠️ **On se TAIT quand rien n'a changé, et c'est une décision.** L'écran renvoie tout le réglage à
+  chaque geste : rouvrir l'onglet et recocher le même jour produit une écriture sans changement
+  réel. Alerter dessus apprendrait à l'hôte à ignorer ces messages — et *c'est précisément celui-là
+  qu'il ne faut pas apprendre à ignorer*. Même raison pour la **cadence seule** qui bouge : ce
+  n'est pas une perte de couverture, on ne nomme donc aucun jour perdu.
+- ⚠️ **Un seul message par personne et par jour.** Elle coche ses jours un par un : cinq cases
+  produiraient cinq alertes pour un seul changement. Le message du jour **s'agrège** au lieu de se
+  dupliquer ; le lendemain, un nouveau changement se dit.
+- **Le moteur reprend les PROPOSITIONS, jamais les engagements**
+  (`lib/cleaning/apres-changement-regles.js`). Un ménage `accepted` ne bouge pas : *un engagement
+  ne se défait que par un humain* — elle a dit oui, quelqu'un compte dessus, et l'alerte de refus
+  couvre déjà ce cas. Ni un `assigned_by: 'manual'` (le verrou de l'hôte), ni un ménage déjà porté
+  par quelqu'un d'autre.
+- ⚠️ **On ne recalcule pas, on REND LA MAIN.** `offered_to` et le statut repassent à zéro :
+  `sync-menages-entite` réévalue à chaque cycle tout ménage sans porteur, sans offre et sans
+  verrou, avec sa garde d'engagement, son escalade et sa mémoire des refus. Recopier
+  `deciderParGarde` ici aurait fait un **second moteur** — la faute que ce dépôt a déjà payée.
+- ⚠️ **La reprise est CONDITIONNELLE** (`.eq('offered_to', …).is('provider_id', null)` dans
+  l'`update`) : entre la lecture et l'écriture, elle a pu **accepter** depuis son téléphone. Sans
+  cette condition, on effacerait une acceptation qui vient d'arriver.
+- **Et la TRACE reste** : `provider_availability_rules.source` (migration du 15 sept., table alors
+  **vide** — 0 ligne, donc aucune requalification). La fiche affiche « ✎ Jours modifiés par elle
+  depuis son application, le … ». *Une notification se rate — SMS non lu, e-mail classé ; la trace,
+  elle, reste.* L'hôte qui découvre un trou de garde dans trois semaines remonte à la cause sans
+  dépendre d'un message qu'il n'a plus. Affichée **seulement si c'est elle** : « modifié par vous »
+  n'apprend rien, et une mention permanente s'apprend à ne plus se lire.
+- **Le canal est celui qui existe** (`alertReglesModifiees`, jumelle d'`alertMenageRefuse`) : une
+  ligne dans les tâches de l'hôte, **qui reste**, plus l'envoi SMS/e-mail configuré, **qui peut se
+  rater**. Les deux, parce qu'un SMS non lu ne doit pas effacer l'information.
+- ⚠️ **Limite connue : sans bien, pas d'envoi.** `sendAlertNotifications` lit la configuration
+  d'alerte **par bien** ; un changement de règles concerne la personne. On attache le message au
+  bien d'un ménage repris — là où l'hôte a quelque chose à faire — et à défaut à l'un des siens.
+  La ligne de tâche, elle, est posée dans tous les cas.
+
+**Dette restante, non fermée ici** : un ménage **déjà accepté** sur un jour qu'elle vient de
+retirer reste le sien, et ses deux onglets se contredisent — « Mes jours » peint le jour en rouge,
+« Planning » lui montre le ménage. C'est le choix assumé (un engagement ne se défait que par un
+humain), mais l'écran ne l'explique pas encore.
 - ⚠️ **UN SEUL ALLER-RETOUR POUR TOUT LE RÉGLAGE** (`reglerMesJours`), et c'est une correction de
   review. La première version exposait `poserRegle` / `retirerRegle` et l'écran enchaînait
   « retirer tout, puis reposer » : **le réseau d'un téléphone coupe au milieu**, le retrait passe,

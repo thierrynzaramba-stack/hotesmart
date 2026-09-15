@@ -27,6 +27,9 @@ const { cleJour, lireRrule } = require('../lib/cleaning/availability')
 // divergeraient au premier ajustement, et la copie finit toujours par etre la
 // plus permissive des deux.
 const { validerRegle } = require('../lib/cleaning/regles')
+// ⚠ LE PENDANT DE LA DECISION DU 15 SEPTEMBRE : elle regle ses jours, l'hote
+// l'apprend, et les menages PROPOSES des jours retires reviennent au moteur.
+const { apresChangementDeRegles } = require('../lib/cleaning/apres-changement-regles')
 // ⚠ LE MEME PLAFOND QUE `api/disponibilites.js`, et pour la meme raison : l'ecran
 // regle jusqu'a un an devant. Une plage au-dela n'est pas un conge, c'est une
 // saisie qui a derape — et surtout une ligne que l'ecran ne montrera jamais,
@@ -1470,21 +1473,32 @@ async function reglerMesJours (req, res, token) {
   // ⚠ UNE LIGNE VIDE EST LEGITIME — « aucun jour cette semaine-la » — et ne
   // produit simplement aucune regle. Ce n'est pas une erreur de saisie.
   const aPoser = []
+  // La FORME de ce qu'on pose, pour le comparer a l'existant en jours de semaine.
+  // ⚠ On ne compare pas des RRULE : l'hote doit lire « elle ne travaille plus le
+  // samedi », pas « regle #a4f2 desactivee ».
+  const formeAPoser = []
   for (const lot of lotsBruts) {
     const jours = (lot && lot.jours) || []
     if (!Array.isArray(jours)) return res.status(400).json({ error: 'Jours invalides' })
     if (!jours.length) continue
     const v = validerRegle({ jours, toutes_les_n_semaines: cadence, depuis: lot && lot.depuis })
     if (v.erreur) return res.status(400).json({ error: v.erreur })
+    // ⚠ `source: 'prestataire'` — c'est ELLE qui pose. La colonne sert a deux
+    // choses que rien d'autre ne porte : la notification a l'instant du
+    // changement, et la TRACE lisible dans sa fiche longtemps apres. Une
+    // notification se rate ; la trace, elle, reste.
     aPoser.push({ user_id: qui.userId, provider_id: qui.profil.id,
-                  rrule: v.rrule, label: v.label, active: true })
+                  rrule: v.rrule, label: v.label, active: true, source: 'prestataire' })
+    formeAPoser.push({ jours: v.jours, cadence: v.cadence })
   }
 
   // Ce qui est actif AUJOURD'HUI : c'est ce qu'on desactivera, et rien d'autre.
   // ⚠ ON DESIGNE LES LIGNES PAR LEUR ID, PAS PAR UN FILTRE `active = true`.
   // Un filtre desactiverait aussi ce qu'on vient d'inserer.
   const { data: avant, error: errLire } = await supabase.from('provider_availability_rules')
-    .select('id').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    // ⚠ `rrule` EN PLUS DE `id` : c'est la forme d'AVANT, et sans elle on ne peut
+    // pas dire a l'hote CE QUI a change — seulement que quelque chose a change.
+    .select('id, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
     .eq('active', true).limit(MAX_REGLES_ACTIVES + 1)
   if (errLire) {
     console.error('[menages-public] lecture regles avant reglage echec:', errLire.message)
@@ -1528,6 +1542,19 @@ async function reglerMesJours (req, res, token) {
                'Rouvrez cet onglet et vérifiez.' })
     }
   }
+
+  // ⚠ APRES L'ECRITURE, ET SANS POUVOIR LA DEFAIRE. La notification et la
+  // reprise des propositions sont best-effort : la verite est deja en base, et
+  // un echec d'alerte ne doit pas faire echouer le geste de la prestataire.
+  // C'est aussi pourquoi on n'attend PAS ce travail pour repondre… sauf qu'ici
+  // on l'attend : une fonction serverless qui rend sa reponse peut etre gelee
+  // avant d'avoir fini son travail de fond. Mieux vaut quelques centaines de
+  // millisecondes de plus qu'une alerte qui ne part qu'une fois sur deux.
+  const formeAvant = (avant || []).map(r => lireRrule(r.rrule)).filter(Boolean)
+  await apresChangementDeRegles({
+    userId: qui.userId, providerId: qui.profil.id, prenom: qui.profil.first_name,
+    avant: formeAvant, apres: formeAPoser
+  })
 
   return res.status(200).json({ success: true, posees: aPoser.length, retirees: anciens.length })
 }

@@ -1780,6 +1780,22 @@
       `${jours.includes(j.n) ? ' checked' : ''}><span>${j.c}</span></label>`).join('') + '</div>'
   }
 
+  // La derniere modification faite PAR ELLE, si elle existe.
+  function traceDesRegles() {
+    const siennes = reglesActives().filter(r => r.source === 'prestataire' && r.created_at)
+    if (!siennes.length) return ''
+    const quand = siennes.map(r => r.created_at).sort().pop()
+    const d = new Date(quand)
+    if (Number.isNaN(d.getTime())) return ''
+    // ⚠ EN HEURE DE PARIS : `created_at` est un INSTANT, et l'afficher en UTC
+    // annonce 23 h la veille pour un geste fait a 1 h du matin.
+    const lisible = d.toLocaleString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric',
+                                                hour: '2-digit', minute: '2-digit',
+                                                timeZone: 'Europe/Paris' })
+    return `<div class="dispo-ancre" style="color:var(--amber)">` +
+           `<span>✎ Jours modifiés par elle depuis son application, le ${echapper(lisible)}.</span></div>`
+  }
+
   function peindreRecurrence() {
     const zone = document.getElementById('dispo-recur')
     const alt = estAlternee()
@@ -1804,6 +1820,16 @@
             <button type="button" class="dispo-lien" id="btn-inverser">c'est plutôt une semaine ${q === 'A' ? 'B' : 'A'}</button></div>`
       h += `<div><button type="button" class="btn-mini" id="btn-simple">Revenir à toutes les semaines</button></div>`
     }
+    // ⚠ LA TRACE : QUI A REGLE CES JOURS, ET QUAND.
+    // Depuis le 15 septembre 2026, la prestataire peut les regler depuis sa PWA.
+    // Une notification part au moment du changement — mais un SMS se rate, un
+    // e-mail se classe. La trace, elle, RESTE : l'hote qui decouvre un trou de
+    // garde dans trois semaines doit pouvoir remonter a la cause sans dependre
+    // d'un message qu'il n'a plus.
+    // ⚠ ON NE L'AFFICHE QUE SI C'EST ELLE. « Modifie par vous » n'apprend rien a
+    // celui qui vient de le faire, et une mention permanente s'apprend a ne plus
+    // se lire.
+    h += traceDesRegles()
     zone.innerHTML = h
 
     const bAlt = document.getElementById('btn-alt')

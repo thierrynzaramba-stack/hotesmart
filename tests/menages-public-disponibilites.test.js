@@ -78,7 +78,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             // colonnes : la liste affichee (`id, label, rrule`) et les lignes a
             // desactiver avant un reglage (`id` seul). Les confondre rendrait le
             // cloisonnement du reglage indetectable.
-            if (a.colonnes === 'id') {
+            if (a.colonnes === 'id, rrule') {
               return Promise.resolve(erreurLireAvant
                 ? { data: null, error: erreurLireAvant } : { data: reglesAvant, error: null })
             }
@@ -193,8 +193,13 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
   const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
+  // ⚠ TOUT MODULE QUI CONSTRUIT SON PROPRE CLIENT DOIT ETRE PURGE ICI, sinon il
+  // garde le VRAI client de son premier chargement — et le test tape sur la
+  // production. `apres-changement-regles` en fait partie depuis le lot
+  // notification.
   for (const mod of ['../api/menages-public', '../lib/stats-avis', '../lib/attribution-prestataire',
-                     '../lib/cron-property-status', '../lib/alert-notify']) {
+                     '../lib/cron-property-status', '../lib/alert-notify',
+                     '../lib/cleaning/apres-changement-regles']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
   return { handler: require('../api/menages-public'), etat }
@@ -745,7 +750,7 @@ test('le comptage des règles est CLOISONNÉ', async () => {
   // hôte pourrait empêcher la prestataire d'un autre de régler ses jours.
   const { handler, etat } = preparer({})
   await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
-  const lecture = etat.lectures.find(l => l.table === 'provider_availability_rules' && l.colonnes === 'id')
+  const lecture = etat.lectures.find(l => l.table === 'provider_availability_rules' && l.colonnes === 'id, rrule')
   assert.ok(lecture, 'la lecture des règles actives a bien lieu')
   assert.strictEqual(lecture.f.user_id, U)
   assert.strictEqual(lecture.f.provider_id, MARIE)

@@ -116,7 +116,7 @@ async function lire (res, userId, providerId) {
     // de la CADENCE pour recocher ses cases — pas de la chaine, qui reste une
     // affaire de serveur (§2 de la spec). On la relit, on en extrait la forme,
     // et on jette la chaine avant de repondre.
-    .select('id, label, active, created_at, rrule')
+    .select('id, label, active, created_at, rrule, source')
     .eq('user_id', userId).eq('provider_id', providerId)
     // ⚠ LES INACTIVES NE REMONTENT PAS, ET CE N'EST PAS UN CONFORT.
     // Une regle « retiree » est DESACTIVEE, pas supprimee — elle porte la raison
@@ -174,6 +174,14 @@ async function lire (res, userId, providerId) {
     const forme = lireRrule(r.rrule)
     return {
       id: r.id, label: r.label, active: r.active, created_at: r.created_at,
+      // ⚠ QUI L'A POSEE. La fiche en fait une trace lisible (« jours modifies
+      // par elle le … ») : une notification se rate — SMS non lu, e-mail
+      // classe — mais la trace reste. L'hote qui decouvre un trou de garde dans
+      // trois semaines doit pouvoir remonter a la cause sans dependre d'un
+      // message qu'il n'a plus.
+      // ⚠ `|| 'hote'` : le seul writer d'avant ce lot etait l'hote, et une
+      // valeur absente ne doit pas se lire « elle ».
+      source: r.source || 'hote',
       jours: forme ? forme.jours : null,
       cadence: forme ? forme.cadence : null,
       ancre: forme ? forme.ancre : null
@@ -220,8 +228,11 @@ async function poserRegle (req, res, userId, providerId) {
   if (v.erreur) return res.status(400).json({ error: v.erreur })
 
   const { data, error } = await supabase.from('provider_availability_rules')
+    // ⚠ `source: 'hote'` — ici c'est l'hote qui pose, depuis la fiche. C'est ce
+    // qui permet a la fiche de distinguer ses propres reglages de ceux qu'elle a
+    // faits depuis sa PWA.
     .insert({ user_id: userId, provider_id: providerId, rrule: v.rrule,
-              label: v.label, active: true })
+              label: v.label, active: true, source: 'hote' })
     .select('id, label, active, created_at')
     .maybeSingle()
   if (error) {
