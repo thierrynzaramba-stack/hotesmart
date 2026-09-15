@@ -3,7 +3,7 @@
 Objectif : **plus aucun test sur la production**. Deuxième projet Supabase,
 deuxième projet Vercel, aucun secret réel de provider.
 
-État : socle applicatif livré (branche `staging-setup`). Les gestes
+État : socle applicatif livré (branche `env-recette-setup`). Les gestes
 d'interface et le schéma restent à faire — §5 et §6.
 
 ---
