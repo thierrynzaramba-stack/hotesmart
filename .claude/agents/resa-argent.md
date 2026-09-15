@@ -20,8 +20,9 @@ description: Chantiers moteur de réservation direct, CRS, Stripe, overbooking, 
 8. `booking_links` : coefficient de prix par lien, jamais de réécriture des prix du cœur.
 9. Saisie sur dates fermées à la vente = prévenir et confirmer. Le futur moteur public refuse strictement.
 10. Facturation : `properties.active_at` + `is_beta`, pricing dégressif 19/15/10 €, ancre au 1er du mois. Un bien recréé par erreur repose `active_at` — vigilance.
-11. SCALABILITÉ : HôteSmart vise 30 000 comptes. Aucun traitement global par cycle — tout périodique est incrémental (file, curseur, lots avec reprise), budget borné. Requêtes filtrées ET indexées, jamais de scan ni N+1. Écritures par lots. Le cron full-scan est condamné : ne rien bâtir de nouveau dessus, concevoir event-driven. Test : « et à 30 000 comptes × 5 biens ? »
-12. VITESSE : une requête agrégée au chargement, bornes en SQL, pagination sur toute liste qui grandira.
+11. SUPPRESSION DE COMPTE : REFUSÉE tant qu'un canal OTA est actif. Le contrôle est SERVEUR (Edge Function `delete-account`), message « Déconnectez d'abord vos canaux », et JAMAIS de cascade automatique chez le provider — on ne débranche pas un canal de vente à la place de l'hôte. Vérifié le 2026-09-15 : `delete-account` ne fait aucun appel provider, donc biens, room_types, rate_plans et canaux restent chez Channex, facturés, et le webhook global continue de livrer leurs événements. La base, elle, est bien nettoyée (`profiles_legacy.id` cascade depuis `auth.users`). Spec : docs/specs/spec-suppression-compte-ota.md.
+12. SCALABILITÉ : HôteSmart vise 30 000 comptes. Aucun traitement global par cycle — tout périodique est incrémental (file, curseur, lots avec reprise), budget borné. Requêtes filtrées ET indexées, jamais de scan ni N+1. Écritures par lots. Le cron full-scan est condamné : ne rien bâtir de nouveau dessus, concevoir event-driven. Test : « et à 30 000 comptes × 5 biens ? »
+13. VITESSE : une requête agrégée au chargement, bornes en SQL, pagination sur toute liste qui grandira.
 
 ## Avant de merger
 - Review locale + REVIEW.md (règle 8 : le test overbooking de référence existe — s'en inspirer). Staging → main → un cycle observé.

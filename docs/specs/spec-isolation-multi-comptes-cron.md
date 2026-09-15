@@ -106,6 +106,48 @@ Chaque correctif doit être né rouge : désarmer le filtre doit faire tomber un
 test. Un correctif dont la suite reste verte des deux côtés ne prouve rien —
 c'est la leçon que `7b8084f` tire de ses propres tests, et elle vaut ici.
 
+## 4 bis. La purge `public_tokens` qui échoue depuis toujours
+
+Trouvée le 15 septembre dans les logs de recette, sur deux suppressions de
+bien :
+
+```
+[channel-property] purge public_tokens echec
+column public_tokens.property_id does not exist
+```
+
+`api/channel-property.js:687` range `public_tokens` dans `tablesWithUser`,
+purgée par `.eq('property_id', propKey).eq('user_id', compteBien)`. Or la table
+n'a **pas** de colonne `property_id` : elle porte `property_ids text[]`, un
+tableau. La purge échoue à chaque suppression de bien.
+
+⚠ **Ce n'est pas un défaut de staging.** Le schéma vient de la production : la
+même erreur s'y produit, depuis que cette ligne existe.
+
+Deux conséquences. Le bien supprimé reste inscrit dans le `property_ids` des
+tokens prestataires — le périmètre n'est jamais nettoyé. Et l'échec est **logué
+puis avalé** (`if (delErr) console.error(...)`, rien d'autre) : la suppression
+rend un succès. Le commentaire trois lignes plus haut dit pourtant que la purge
+explicite est obligatoire, « sinon données orphelines (bug messages
+Colomiers) ».
+
+**Le correctif n'est pas un `.eq`.** Sur un tableau il faut RETIRER l'élément,
+pas supprimer la ligne : la ligne est le token, qui doit survivre à la
+suppression d'un de ses biens. Et `public_tokens.property_ids` a déjà eu un
+problème de second writer (fiche messagerie, config d'app vs config générale) —
+à traiter avec `spec-prestataires-menage.md` sous les yeux.
+
+**Pourquoi dans ce lot.** Même famille : une écriture par `property_id` qui ne
+fait pas ce qu'elle annonce, dans le même passage de correction. Et même
+exigence de garde durable — le test du §3.3 doit aussi attraper une colonne qui
+n'existe pas, pas seulement un filtre manquant.
+
+⚠ Un périmètre vide (`property_ids = '{}'`) signifie « TOUS les biens », pas
+« aucun » : la règle 1 de REVIEW.md en porte le cas vécu. Retirer le dernier
+élément d'un tableau le rend vide — donc **élargit** le token au lieu de le
+restreindre. Le correctif doit trancher ce cas explicitement, sinon il crée une
+fuite en fermant une négligence.
+
 ## 5. Constats liés, non traités
 
 Relevés par la même review de `7b8084f`, classés mineurs et non bloquants.
