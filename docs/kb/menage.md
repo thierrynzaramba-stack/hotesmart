@@ -411,11 +411,12 @@ lot, et l'hôte confie des ménages sur des jours d'absence en croyant qu'aucun 
 « disponible tous les jours », et l'afficher sur une panne ferait croire à l'hôte que sa
 prestataire n'a aucune contrainte.
 
-**« Mes absences » dans la PWA** (`api/menages-public.js`) :
+**« Mes jours » dans la PWA** (`api/menages-public.js` — l'onglet s'appelait « Mes absences »
+jusqu'au 15 septembre 2026) :
 - ⚠️ **Chaque sonde ne dévoile que SON onglet.** `initDisponibilites` affichait la barre entière,
   donc l'onglet **Avis** avec elle — y compris pour quelqu'un dont `self_view_reviews` est à
   `false`, l'inverse exact de ce que ce droit garantit. Et un droit retiré sur les avis masque le
-  **seul** bouton Avis, jamais la barre : elle emportait « Mes absences » jusqu'au rechargement ;
+  **seul** bouton Avis, jamais la barre : elle emportait « Mes jours » jusqu'au rechargement ;
 - ⚠️ **double garde, jamais l'une sans l'autre** — le **token** identifie la personne, le droit
   **`self_availability`** dit si elle gère ses absences. Le token seul autoriserait n'importe
   quel porteur de lien du compte ; le droit seul ne désignerait personne ;
@@ -791,9 +792,43 @@ un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
   ⚠️ jsdom n'implémente pas `PointerEvent` — les tests dispatchent l'événement par son **type**,
   ce que la page écoute réellement.
 
-⚠️ **CE QUI RESTE : la PWA.** `apps/menages/public.html` ne consomme pas encore les congés — son
-onglet « Mes absences » doit devenir « Mes jours », titre **« Mes jours de travail »**, avec le
-même calendrier en voix directe et ses lignes A/B **en lecture seule**.
+### L'écran prestataire : « Mes jours de travail » (lot 2b, 15 sept. 2026)
+
+`apps/menages/public.html`, onglet **« Mes jours »**. Le même calendrier sur un an glissant que
+côté hôte, mais réécrit pour un pouce, un téléphone et une personne qui n'a pas de seconde chance :
+un geste qui part de travers ne se rattrape pas d'un Ctrl-Z.
+
+- **Trois cartes, dans cet ordre** : *Mes jours de travail* (ses règles, en lecture), le
+  **calendrier**, puis *Je serai absente plusieurs jours* (le congé en plage, et la liste des
+  siens). Elle voit d'abord ce qui est convenu, ensuite ce qu'elle peut en retirer.
+- ⚠️ **Ses règles récurrentes sont en LECTURE SEULE** — décision du 15 septembre 2026 : *c'est
+  l'organisation du travail, pas une déclaration d'absence*. Des pastilles, aucune case à cocher :
+  une case promettrait une action que le serveur n'expose même pas. Les lignes **A/B** y sont
+  rappelées avec leur ancrage (« Cette semaine est une **semaine A** »), et la lettre revient à
+  gauche de chaque semaine du calendrier.
+- ⚠️ **Une tape, pas un glissé.** L'écran hôte sélectionne une plage au glissé ; sur un téléphone,
+  ce geste se bat avec le défilement. Ici un jour se touche (`click`, jamais `pointerdown`), et
+  une plage passe par le **formulaire de congé** — qui est justement l'objet fait pour ça.
+  Cibles tactiles de 44 px minimum.
+- ⚠️ **Elle ne défait que ce qu'elle a déclaré.** Une absence de `source: 'hote'` ne se retire
+  pas : l'écran refuse le geste et **dit pourquoi** plutôt que de partir chercher un 409. Un jour
+  de congé est verrouillé (`tabindex="-1"`), et un jour qu'elle ne travaille déjà pas n'appelle
+  personne — elle déclare une **absence**, jamais une présence.
+- ⚠️ **Hors ligne, rien ne part, et l'écran le dit.** Le planning a une file d'attente ; une
+  absence, non. La rejouer plus tard porterait sur un planning qui a bougé, et on ne peut pas
+  annoncer « c'est enregistré » quand rien n'est parti.
+- ⚠️ **Tout message survit au repeint** (`dire()`). Chaque écriture se termine par une relecture,
+  donc par `peindreMesJours()` : sans drapeau, la phrase d'accueil effaçait dans la même seconde
+  le « ✓ Absence enregistrée » qu'elle venait de déclencher. Elle touchait un jour, la case
+  virait au rouge, et **aucun mot ne confirmait** — sur un téléphone c'est exactement le moment
+  où l'on retouche pour être sûre, donc où l'on défait ce qu'on vient de faire. Trouvé par le
+  test DOM, pas à la relecture.
+- ⚠️ **Une panne ne s'affiche jamais comme « aucune absence »**, et une règle illisible ne peint
+  pas le mois en vert : le cas prudent plutôt qu'un calendrier qui ment.
+- **Éprouvé dans un vrai DOM** (`tests/pwa-mes-jours-dom.test.js`, jsdom) : le **vrai** script de
+  la page est monté, pas une copie. ⚠️ jsdom n'implémente ni `matchMedia` ni `navigator.onLine`
+  en écriture — les deux sont posés par le test, et le double **rejoue les effets du serveur**,
+  pas seulement ses `ok` : un stub complaisant rendrait tout geste indétectable.
 
 ⚠️ **Pourquoi un étage, et pas un rang égal à l'exception.** Une exception est une correction
 d'**un** jour ; un congé est une **plage** qu'on supprime d'un geste. Au même rang, une exception
@@ -895,7 +930,7 @@ aucun chemin ne les recalcule — un engagement pris avec quelqu'un ne se rouvre
   `api/menages-public.js` résout le porteur par `profilActifDuJeton(userId, token)` : un jeton
   dont aucun `profiles` **actif**, de `access_mode = 'lien'`, ne porte le `pwa_token` rend
   **401**, quelle que soit la ligne `public_tokens` qui existe encore en base. La même réponse
-  sur **tous** les chemins : planning, vue Avis, « Mes absences », acceptation d'offre,
+  sur **tous** les chemins : planning, vue Avis, « Mes jours », acceptation d'offre,
   `markDone` / `markUndone`, `markRead`.
 
   ⚠️ **Ce que cette règle remplace, et pourquoi.** Il y avait un « **pont de convergence** » :
