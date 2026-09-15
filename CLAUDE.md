@@ -12,6 +12,14 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - Workflow commit : checkout main && pull && add && commit && push origin main && checkout channex-phase1 && merge main && push origin channex-phase1.
 - Mac : repo /Users/thierry/Desktop/hotesmart, zsh, here-docs OK.
 - PC : repo ~/hotesmart, Git Bash (here-docs cassent), PowerShell `;` pas `&&`. WSL2 si dispo.
+- **Aucune branche dont le nom contient « staging »**, sauf la branche `staging`
+  elle-même (cible du projet Vercel staging, qui ne porte aucun code propre et
+  suit main). Une preview du projet de PRODUCTION porte le nom de branche dans
+  son hostname : `hotesmart-git-<branche>-<equipe>.vercel.app`. Une branche
+  `staging-xxx` y produit un hostname qui parle de staging alors que les
+  fonctions `/api` tournent sur la prod. Le résolveur de `shared/config.js`
+  ferme déjà ce cas par des motifs ancrés — cette règle est la seconde ligne,
+  pour le jour où un domaine propre changera la forme des hostnames.
 
 ## STACK
 - frontend = HTML/JS statique (/pages, /apps). Scope module ES → window.fn.

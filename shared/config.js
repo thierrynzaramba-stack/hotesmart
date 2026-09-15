@@ -27,12 +27,21 @@ const CIBLES_SUPABASE = {
   }
 }
 
+// Motifs ANCRES, jamais un simple « contient staging ». Les previews du projet
+// de PRODUCTION portent le nom de branche dans leur hostname
+// (hotesmart-git-<branche>-<equipe>.vercel.app) : une branche nommee
+// staging-quelque-chose y produirait un hostname contenant "staging", donc un
+// front sur la base staging pendant que les fonctions /api restent sur la
+// prod. Etat mixte, silencieux, et illisible depuis l'ecran.
+const HOTES_STAGING = [
+  /^hotesmart-staging[-.]/,  // projet Vercel staging, ses previews comprises
+  /^staging\./              // domaine propre eventuel : staging.hotesmart.fr
+]
+
+const HOTE = (typeof location !== 'undefined' ? location.hostname : '').toLowerCase()
+
 export const CIBLE_SUPABASE =
-  (typeof location !== 'undefined' ? location.hostname : '')
-    .toLowerCase()
-    .includes('staging')
-    ? 'staging'
-    : 'prod'
+  HOTES_STAGING.some(m => m.test(HOTE)) ? 'staging' : 'prod'
 
 export const ENV = CIBLES_SUPABASE[CIBLE_SUPABASE]
 
