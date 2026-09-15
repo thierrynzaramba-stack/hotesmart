@@ -24,7 +24,10 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
-const { construireRrule, lireRrule, cleJour } = require('../lib/cleaning/availability')
+const { lireRrule, cleJour } = require('../lib/cleaning/availability')
+// ⚠ LA REGLE RECURRENTE EST VALIDEE EN UN SEUL ENDROIT, partage avec la PWA
+// (`api/menages-public.js`) depuis le 15 septembre 2026.
+const { validerRegle, libelle } = require('../lib/cleaning/regles')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -208,37 +211,17 @@ async function ecrire (req, res, userId, providerId) {
 // `rrule` sur des donnees d'un autre compte, et un `COUNT=100000` suffirait a
 // faire tourner le moteur d'assignation pour rien a chaque cycle.
 async function poserRegle (req, res, userId, providerId) {
-  const { jours, toutes_les_n_semaines, depuis } = req.body || {}
-  if (!Array.isArray(jours) || !jours.length) {
-    return res.status(400).json({ error: 'Choisissez au moins un jour' })
-  }
-  const lus = jours.map(v =>
-    typeof v === 'number' ? v
-      : (typeof v === 'string' && /^[0-6]$/.test(v.trim()) ? Number(v) : NaN))
-  if (lus.some(j => !Number.isInteger(j) || j < 0 || j > 6)) {
-    return res.status(400).json({ error: 'Jours invalides' })
-  }
-  const cadence = toutes_les_n_semaines === undefined ? 1 : Number(toutes_les_n_semaines)
-  // Au-dela de 4, ce n'est plus une cadence de menage : c'est une saisie qui a
-  // derape, et la recurrence deviendrait illisible a l'ecran.
-  if (!Number.isInteger(cadence) || cadence < 1 || cadence > 4) {
-    return res.status(400).json({ error: 'Cadence invalide' })
-  }
-  // ⚠ L'ANCRAGE DECIDE QUELLE SEMAINE EST « ON ». Une date illisible retombe sur
-  // aujourd'hui plutot que d'echouer : c'est le comportement de
-  // `construireRrule`, et l'ecran envoie toujours une date.
-  const ancre = depuis && cleJour(depuis) ? cleJour(depuis) : null
-  // ⚠ DEDUPLIQUE AVANT LE LIBELLE. `construireRrule` deduplique de son cote, si
-  // bien qu'un corps `{jours:[1,1,2]}` produisait une RRULE correcte mais un
-  // libelle « Tous les lundi, lundi et mardi » — affiche tel quel dans les deux
-  // ecrans, et stocke pour toujours.
-  const joursUniques = [...new Set(lus)].sort((a, b) => a - b)
-  const rrule = construireRrule({ jours: joursUniques, toutesLesNSemaines: cadence, depuis: ancre })
-  if (!rrule) return res.status(400).json({ error: 'Règle impossible' })
+  // ⚠ LA VALIDATION VIT DANS `lib/cleaning/regles.js`, PARTAGEE AVEC LA PWA.
+  // Depuis le 15 septembre 2026, la prestataire regle aussi ses jours depuis
+  // `api/menages-public.js` : recopier la validation ici aurait produit deux
+  // regles pour la meme chose, et la copie finit toujours par etre la plus
+  // permissive des deux.
+  const v = validerRegle(req.body || {}, cleJour)
+  if (v.erreur) return res.status(400).json({ error: v.erreur })
 
   const { data, error } = await supabase.from('provider_availability_rules')
-    .insert({ user_id: userId, provider_id: providerId, rrule,
-              label: libelle(joursUniques, cadence), active: true })
+    .insert({ user_id: userId, provider_id: providerId, rrule: v.rrule,
+              label: v.label, active: true })
     .select('id, label, active, created_at')
     .maybeSingle()
   if (error) {
@@ -389,16 +372,7 @@ async function retirerConge (req, res, userId, providerId) {
 
 // Le libelle lisible, construit UNE FOIS a l'ecriture et stocke : l'ecran ne
 // doit jamais avoir a relire une RRULE pour dire ce qu'elle veut dire.
-const NOMS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
-function libelle (jours, cadence) {
-  const tries = [...jours].sort((a, b) => a - b)
-  const noms = tries.map(j => NOMS[j])
-  const liste = noms.length > 1
-    ? `${noms.slice(0, -1).join(', ')} et ${noms[noms.length - 1]}`
-    : noms[0]
-  if (cadence === 1) return `Tous les ${liste}`
-  if (cadence === 2) return `${liste.charAt(0).toUpperCase()}${liste.slice(1)}, une semaine sur deux`
-  return `${liste.charAt(0).toUpperCase()}${liste.slice(1)}, toutes les ${cadence} semaines`
-}
 
+// ⚠ REEXPORTE, PAS REDEFINI. Des tests et des scripts l'importent d'ici ; la
+// definition, elle, vit dans `lib/cleaning/regles.js` avec le reste de la regle.
 module.exports.libelle = libelle

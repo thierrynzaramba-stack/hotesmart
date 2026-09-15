@@ -162,18 +162,68 @@ test('elle est tutoyée à la première personne, jamais désignée à la troisi
 
 // ─── Ses règles : visibles, jamais modifiables ────────────────────────────
 
-test('ses jours habituels sont en LECTURE SEULE — aucune case à cocher', async () => {
-  // ⚠ DÉCISION PRODUIT DU 15 SEPTEMBRE. Ses jours habituels sont
-  // l'organisation du travail, réglée par son employeur. Lui donner des cases
-  // promettrait une action que le serveur n'expose même pas.
+test('elle RÈGLE ses jours habituels — de vraies cases à cocher', async () => {
+  // ⚠ DÉCISION PRODUIT DU 15 SEPTEMBRE, REVENANT SUR CELLE DU MÊME JOUR.
+  // La première version gardait la récurrence à l'hôte seul — « c'est
+  // l'organisation du travail, pas une déclaration d'absence » — et l'écran
+  // n'affichait que des pastilles mortes. Thierry a tranché l'inverse : les
+  // cases sont ici, et le serveur expose l'action.
   const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
   t.seed()
   await t.chargerDisponibilites()
   const zone = w.document.getElementById('dispo-recur')
-  assert.strictEqual(zone.querySelectorAll('input, button, select').length, 0,
-    'aucun contrôle dans la zone des règles')
-  assert.strictEqual(zone.querySelectorAll('.dispo-pastille.on').length, 2,
-    'mais ses deux jours sont bien montrés')
+  const cases = [...zone.querySelectorAll('input[type=checkbox][data-lot]')]
+  assert.strictEqual(cases.length, 7, 'les sept jours de la semaine')
+  assert.strictEqual(cases.filter(c => c.checked).length, 2, 'dont ses deux jours')
+  assert.strictEqual(cases.filter(c => c.disabled).length, 0, 'et elles sont actives')
+})
+
+test('cocher un jour REMPLACE ses règles — retirer, puis reposer', async () => {
+  // ⚠ L'ORDRE COMPTE. Poser par-dessus une règle qu'on n'a pas su retirer
+  // laisse DEUX récurrences actives : le moteur les unit, et elle se retrouve
+  // disponible les jours des deux.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const mercredi = w.document.querySelector('#dispo-recur input[data-lot][value="3"]')
+  mercredi.checked = true
+  mercredi.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(120)
+
+  const gestes = ecritures(t).map(a => a.corps.action)
+  assert.deepStrictEqual(gestes, ['retirerRegle', 'poserRegle'],
+    'on retire AVANT de poser, et une seule fois chacun')
+  const pose = t.appels.find(a => a.corps && a.corps.action === 'poserRegle')
+  assert.deepStrictEqual(pose.corps.jours.sort(), [1, 2, 3])
+  assert.strictEqual(pose.corps.toutes_les_n_semaines, 1)
+  assert.match(message(w), /enregistrés/)
+})
+
+test('AUCUNE chaîne RRULE ne remonte : elle envoie des JOURS', async () => {
+  // La règle du §2 vaut dans les deux sens. Accepter une RRULE du client
+  // laisserait écrire une récurrence qu'aucun des deux écrans ne sait relire —
+  // donc invisible, et sans issue par l'interface.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const c = w.document.querySelector('#dispo-recur input[data-lot][value="5"]')
+  c.checked = true
+  c.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(120)
+  const pose = t.appels.find(a => a.corps && a.corps.action === 'poserRegle')
+  assert.ok(pose, 'la règle part')
+  assert.ok(!/FREQ=|DTSTART|RRULE/.test(JSON.stringify(pose.corps)))
+})
+
+test('sans le droit d\'écriture, les cases sont VISIBLES mais figées', async () => {
+  // ⚠ Les cacher lui ferait croire qu'elle n'a aucun jour habituel ; les
+  // laisser actives promettrait une action que le serveur refuse en 403.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])], modifiable: false })
+  t.seed()
+  await t.chargerDisponibilites()
+  const cases = [...w.document.querySelectorAll('#dispo-recur input[data-lot]')]
+  assert.strictEqual(cases.length, 7)
+  assert.strictEqual(cases.filter(c => c.disabled).length, 7, 'toutes figées')
   assert.match(w.document.getElementById('dispo-recur-aide').textContent, /votre employeur/)
 })
 
@@ -188,7 +238,11 @@ test('en quinzaine, elle voit A et B — et OÙ ELLE EN EST cette semaine', asyn
   await t.chargerDisponibilites()
   const tags = [...w.document.querySelectorAll('#dispo-recur .dispo-tag')].map(e => e.textContent.trim())
   assert.deepStrictEqual(tags, ['Semaine A', 'Semaine B'])
-  assert.match(w.document.getElementById('dispo-recur-aide').textContent,
+  // ⚠ L'ancrage est DANS la carte quand elle peut y toucher (avec le bouton qui
+  // l'inverse), et dans l'aide quand elle ne peut pas. Les deux disent la même
+  // chose ; ce test accepte l'un ou l'autre, mais exige qu'il soit dit.
+  assert.match(w.document.getElementById('dispo-recur').textContent +
+               w.document.getElementById('dispo-recur-aide').textContent,
     /Cette semaine est une\s+semaine A/)
   const lettres = [...w.document.querySelectorAll('#dispo-months .dispo-sem')]
     .map(e => e.textContent.trim()).filter(Boolean)
@@ -208,6 +262,108 @@ test('une règle HEBDOMADAIRE apparaît dans les DEUX semaines', async () => {
   const on = l => [...l.querySelectorAll('.dispo-pastille.on')].map(e => e.textContent.trim())
   assert.deepStrictEqual(on(lignes[0]).sort(), ['L', 'S'], 'semaine A : le lundi ET le samedi')
   assert.deepStrictEqual(on(lignes[1]), ['L'], 'semaine B : le lundi seul')
+})
+
+test('« une semaine sur deux » marche sur un profil VIERGE', async () => {
+  // ⚠ LE PARCOURS DE TOUS LES PROFILS AUJOURD'HUI : aucun ne porte de règle.
+  // Sans le drapeau d'écran, basculer en quinzaine sans aucun jour coché ne
+  // posait rien, donc `enQuinzaine()` restait faux, donc l'écran repeignait une
+  // ligne simple — le bouton paraissait mort.
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  const bouton = w.document.getElementById('dispo-alterner')
+  assert.ok(bouton, 'le bouton existe même sans règle')
+  bouton.click()
+  await souffler(120)
+  const tags = [...w.document.querySelectorAll('#dispo-recur .dispo-tag')].map(e => e.textContent.trim())
+  assert.deepStrictEqual(tags, ['Semaine A', 'Semaine B'])
+})
+
+test('revenir à « toutes les semaines » GARDE la semaine A', async () => {
+  // ⚠ Fusionner les deux lignes aurait inventé un rythme que personne n'a
+  // réglé — et elle se serait retrouvée engagée des jours qu'elle n'avait
+  // cochés que pour une semaine sur deux.
+  const lundiB = iso(new Date(new Date(lundiCourant + 'T12:00:00Z').getTime() + 7 * 86400000))
+  const { w, t } = monter({ regles: [
+    regle('rA', 'A', [1], 2, lundiCourant),
+    regle('rB', 'B', [6], 2, lundiB) ] })
+  t.seed()
+  await t.chargerDisponibilites()
+  w.document.getElementById('dispo-simple').click()
+  await souffler(150)
+  const pose = t.appels.filter(a => a.corps && a.corps.action === 'poserRegle')
+  assert.strictEqual(pose.length, 1, 'une seule règle reposée')
+  assert.deepStrictEqual(pose[0].corps.jours, [1], 'les jours de A, pas ceux de B')
+  assert.strictEqual(pose[0].corps.toutes_les_n_semaines, 1)
+})
+
+test('inverser les semaines ÉCHANGE leur contenu, pas leur étiquette', async () => {
+  const lundiB = iso(new Date(new Date(lundiCourant + 'T12:00:00Z').getTime() + 7 * 86400000))
+  const { w, t } = monter({ regles: [
+    regle('rA', 'A', [1], 2, lundiCourant),
+    regle('rB', 'B', [6], 2, lundiB) ] })
+  t.seed()
+  await t.chargerDisponibilites()
+  w.document.getElementById('dispo-inverser').click()
+  await souffler(150)
+  const pose = t.appels.filter(a => a.corps && a.corps.action === 'poserRegle')
+  assert.strictEqual(pose.length, 2)
+  // Ce qui était en A part sur la semaine SUIVANTE, ce qui était en B vient sur
+  // celle-ci : les deux lignes échangent leur contenu.
+  const parJours = Object.fromEntries(pose.map(x => [String(x.corps.jours), x.corps.depuis]))
+  assert.strictEqual(parJours['1'], lundiB, 'A part sur la semaine suivante')
+  assert.strictEqual(parJours['6'], lundiCourant, 'B vient sur celle-ci')
+})
+
+test('une règle OPAQUE est retirée elle aussi — sinon le remplacement est une addition', async () => {
+  // ⚠ Ne retirer que les règles lisibles laisserait l'opaque active, invisible
+  // à l'écran et sans aucune issue par l'interface. Le moteur, lui, continue de
+  // l'appliquer.
+  const { w, t } = monter({ regles: [
+    regle('lisible', 'lundis', [1]),
+    regleIllisible('opaque', 'Le premier lundi du mois') ] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const c = w.document.querySelector('#dispo-recur input[data-lot][value="2"]')
+  c.checked = true
+  c.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(150)
+  const retires = t.appels.filter(a => a.corps && a.corps.action === 'retirerRegle')
+    .map(a => a.corps.id).sort()
+  assert.deepStrictEqual(retires, ['lisible', 'opaque'])
+})
+
+test('HORS LIGNE, cocher un jour n\'envoie rien', async () => {
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])], enLigne: false })
+  t.seed()
+  await t.chargerDisponibilites()
+  const avant = t.appels.length
+  const c = w.document.querySelector('#dispo-recur input[data-lot][value="2"]')
+  c.checked = true
+  c.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(120)
+  assert.strictEqual(t.appels.length, avant, 'aucune requête')
+  assert.match(message(w), /Hors ligne/)
+})
+
+test('la légende explique le POINT — elle ne le laisse pas deviner', async () => {
+  // La maquette portait quatre entrées, l'écran n'en avait que trois : un jour
+  // marqué d'un point ne ressemblait à rien de connu.
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.match(w.document.getElementById('dispo-legende').textContent, /choisi à la main/)
+})
+
+test('plus de « Aucun jour habituel n\'est réglé »', async () => {
+  // Retiré à la demande de Thierry : sur un profil vierge, c'était le seul
+  // contenu de la carte, et ça se lisait comme un écran qui n'a pas fini de
+  // charger.
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(!/Aucun jour habituel/.test(w.document.getElementById('dispo-vue').textContent))
 })
 
 // ─── Le geste : une tape ───────────────────────────────────────────────────
@@ -473,10 +629,14 @@ test('la navigation couvre un an, et s\'arrête là', async () => {
   t.seed()
   await t.chargerDisponibilites()
   assert.strictEqual(w.document.getElementById('dispo-prec').disabled, true)
+  // ⚠ DEUX MOIS AFFICHES : le dernier pas utile est `DISPO_MOIS - 2`, sinon le
+  // second mois sortirait de l'horizon d'un an que le serveur accepte.
+  assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-mois').length, 2,
+    'deux mois à la fois')
   const suiv = w.document.getElementById('dispo-suiv')
   let pas = 0
   while (!suiv.disabled && pas < 40) { suiv.click(); pas++ }
-  assert.strictEqual(pas, 11, 'onze pas depuis le mois courant, puis la borne')
+  assert.strictEqual(pas, 10, 'dix pas depuis le mois courant, puis la borne')
 })
 
 test('AUCUNE chaîne RRULE n\'atteint la PWA', async () => {

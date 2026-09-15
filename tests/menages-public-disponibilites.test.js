@@ -30,6 +30,12 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      // Ce que le DELETE d'un congé touche : rien, ou sa ligne.
                      congeSupprime = [{ id: 'c1' }], congeExistant = null, congeJumeau = null,
                      erreurDroits = null, supprime = [{ id: 'e1' }],
+                     // ⚠ CE QUE LE DOUBLE DOIT SAVOIR DES REGLES, depuis que la
+                     // PWA les ecrit (15 septembre 2026). `nbReglesActives` est
+                     // le COMPTE que lit la garde de plafond ; `regleRetiree`
+                     // dit si le `update active=false` a touche une ligne.
+                     nbReglesActives = 0, regleRetiree = [{ id: 'r1' }],
+                     erreurCompteRegles = null,
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
                      ligneExistante = null } = {}) {
@@ -39,7 +45,20 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
       const a = { table, f: {} }
       etat.lectures.push(a)
       const chain = {
-        select () { return chain },
+        select (_cols, opts) {
+          // ⚠ LE COMPTAGE `head: true` NE PASSE PAS PAR `.limit()` : la chaine
+          // est attendue directement. Sans `then`, `await` rendait l'objet
+          // lui-meme, donc `count === undefined`, donc la garde de plafond
+          // passait TOUJOURS — un double plus permissif que le serveur, le
+          // faux-vert exact que REVIEW.md regle 8 decrit.
+          if (opts && opts.head) {
+            a.compte = true
+            chain.then = (res, rej) => Promise.resolve(
+              erreurCompteRegles ? { count: null, error: erreurCompteRegles }
+                                 : { count: nbReglesActives, error: null }).then(res, rej)
+          }
+          return chain
+        },
         eq (c, v) { a.f[c] = v; return chain },
         gte (c, v) { a.f[c + '_gte'] = v; return chain },
         order () { return chain },
@@ -85,6 +104,10 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             eq (c, v) { q.f[c] = v; return c2 },
             select () {
               etat.ecritures.push(q)
+              // La desactivation d'une REGLE : a-t-elle touche une ligne ?
+              if (table === 'provider_availability_rules') {
+                return Promise.resolve({ data: regleRetiree, error: null })
+              }
               // Elle ne met à jour QUE sa propre ligne (`source = 'prestataire'`).
               const sienne = ligneExistante === 'prestataire' && q.f.source === 'prestataire'
               return Promise.resolve({ data: sienne ? [{ id: 'e1', ...row }] : [], error: null })
@@ -526,18 +549,153 @@ test('sans le droit d\'écriture, elle ne pose aucun congé', async () => {
   assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 0)
 })
 
-test('ses RÈGLES restent en lecture seule — aucune action ne les touche', async () => {
-  // ⚠ DÉCISION PRODUIT DU 15 SEPTEMBRE : ses jours de travail sont
-  // l'organisation du travail, réglée par l'hôte. Elle déclare ses ABSENCES.
-  // Le serveur n'expose aucune action sur les règles : ce test échouerait si
-  // quelqu'un en ajoutait une par commodité.
+// ─── SES JOURS HABITUELS : elle les règle elle-même (15 septembre 2026) ────
+//
+// ⚠ DÉCISION INVERSÉE LE JOUR MÊME. La première version gardait la récurrence à
+// l'hôte seul — « c'est l'organisation du travail, pas une déclaration
+// d'absence » — et un test de ce fichier vérifiait justement qu'aucune action
+// ne touchait les règles. Thierry a tranché l'inverse. Ce test-là est donc
+// remplacé par ceux qui suivent, et pas seulement supprimé : ce qui le
+// remplaçait devait être écrit avant de l'enlever.
+//
+// ⚠ CE QUE CE CHANGEMENT OUVRE, ET QUI N'EST PAS FERMÉ ICI : elle peut se
+// retirer d'un jour sur lequel l'hôte compte, et rien ne l'en prévient. La
+// garde d'avant n'était pas technique, elle était là. Noté au KB.
+
+test('poser une règle : elle envoie des JOURS, jamais une RRULE', async () => {
+  // ⚠ LA RÈGLE DU §2 VAUT DANS LES DEUX SENS. Accepter une chaîne du client
+  // laisserait écrire une récurrence qu'aucun des deux écrans ne sait relire —
+  // donc invisible, et sans issue par l'interface.
   const { handler, etat } = preparer({})
-  for (const a of ['poserRegle', 'retirerRegle', 'declarerRegle']) {
+  const res = reponse()
+  await handler(ecrire({ action: 'poserRegle', jours: [1, 2],
+                         toutes_les_n_semaines: 2, depuis: DEMAIN }), res)
+  assert.strictEqual(res.code, 200)
+  const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
+  assert.ok(ins, 'la règle est insérée')
+  assert.match(ins.row.rrule, /FREQ=WEEKLY;INTERVAL=2/, 'la chaîne est CONSTRUITE par le serveur')
+  assert.strictEqual(ins.row.user_id, U, 'le compte est posé explicitement')
+  assert.strictEqual(ins.row.provider_id, MARIE)
+  assert.strictEqual(ins.row.active, true)
+})
+
+test('une RRULE envoyée par le client est IGNORÉE, pas écrite', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'poserRegle', jours: [1],
+                         rrule: 'RRULE:FREQ=MONTHLY;BYMONTHDAY=1' }), res)
+  assert.strictEqual(res.code, 200)
+  const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
+  assert.ok(!/MONTHLY/.test(ins.row.rrule), 'la chaîne du client n\'atteint pas la base')
+})
+
+test('poser une règle SANS jour, ou avec une cadence absurde, est refusé', async () => {
+  for (const corps of [{ jours: [] }, { jours: ['lundi'] }, { jours: [9] },
+                       { jours: [1], toutes_les_n_semaines: 0 },
+                       { jours: [1], toutes_les_n_semaines: 9 }]) {
+    const { handler, etat } = preparer({})
     const res = reponse()
-    await handler(ecrire({ action: a, jours: [1, 2] }), res)
-    assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0,
-      `l'action ${a} ne doit rien écrire dans les règles`)
+    await handler(ecrire({ action: 'poserRegle', ...corps }), res)
+    assert.strictEqual(res.code, 400, JSON.stringify(corps) + ' doit être refusé')
+    assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
   }
+})
+
+test('LA MÊME VALIDATION QUE L\'HÔTE, pas une copie', async () => {
+  // ⚠ Ce dépôt a déjà payé trois fois la copie qui devient plus permissive que
+  // l'original. Les deux endpoints importent `lib/cleaning/regles.js` : ce test
+  // le lit dans le SOURCE, parce qu'une divergence future ne se verrait pas
+  // autrement — chacun resterait juste de son côté.
+  const fs = require('node:fs'), path = require('node:path')
+  for (const f of ['api/menages-public.js', 'api/disponibilites.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.match(src, /require\(['"]\.\.\/lib\/cleaning\/regles['"]\)/,
+      `${f} doit valider les règles par le module partagé`)
+    assert.match(src, /validerRegle\(/, `${f} doit appeler validerRegle`)
+  }
+})
+
+test('retirer une règle DÉSACTIVE, elle ne supprime pas', async () => {
+  // ⚠ Une règle supprimée emporterait la raison pour laquelle des ménages passés
+  // ont été attribués comme ils l'ont été.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'retirerRegle', id: '11111111-2222-3333-4444-555555555555' }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'update')
+  assert.ok(maj, 'un update, pas un delete')
+  assert.strictEqual(maj.row.active, false)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules' && x.op === 'delete').length, 0)
+})
+
+test('retirer une règle est CLOISONNÉ : les trois filtres, pas seulement l\'id', async () => {
+  // ⚠ L'identifiant vient du CLIENT. Sans `user_id` ET `provider_id`, il
+  // désignerait la règle de n'importe qui — y compris d'un autre compte.
+  const { handler, etat } = preparer({})
+  await handler(ecrire({ action: 'retirerRegle', id: '11111111-2222-3333-4444-555555555555' }), reponse())
+  const maj = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'update')
+  assert.strictEqual(maj.f.user_id, U)
+  assert.strictEqual(maj.f.provider_id, MARIE)
+  assert.strictEqual(maj.f.id, '11111111-2222-3333-4444-555555555555')
+})
+
+test('retirer une règle deux fois de suite n\'annonce pas une panne', async () => {
+  // Sur un réseau de téléphone, le même geste part deux fois. Le second ne doit
+  // pas rougir pour une règle que le premier vient de désactiver.
+  const { handler } = preparer({ regleRetiree: [] })
+  const res = reponse()
+  await handler(ecrire({ action: 'retirerRegle', id: '11111111-2222-3333-4444-555555555555' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.deja, true)
+})
+
+test('retirerRegle refuse un identifiant qui n\'est pas un UUID — 400, pas 503', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ action: 'retirerRegle', id: 'pas-un-uuid' }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
+})
+
+test('un PLAFOND borne les règles actives', async () => {
+  // ⚠ L'écran retire toutes les règles puis repose ce qui est coché à CHAQUE
+  // geste : une panne au milieu d'un enchaînement laisse des lignes derrière
+  // elle. Sans borne, la table se remplit de règles mortes que la lecture
+  // finirait par tronquer — et une lecture tronquée de règles, c'est un
+  // calendrier qui montre autre chose que ce que le moteur applique.
+  const { handler, etat } = preparer({ nbReglesActives: 100 })
+  const res = reponse()
+  await handler(ecrire({ action: 'poserRegle', jours: [1] }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /Trop de règles/)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
+})
+
+test('une panne de COMPTAGE coupe, elle n\'ouvre pas', async () => {
+  const { handler, etat } = preparer({ erreurCompteRegles: { message: 'timeout' } })
+  const res = reponse()
+  await handler(ecrire({ action: 'poserRegle', jours: [1] }), res)
+  assert.strictEqual(res.code, 503)
+  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
+})
+
+test('sans le droit `self_availability: write`, elle ne règle RIEN', async () => {
+  for (const action of ['poserRegle', 'retirerRegle']) {
+    const { handler, etat } = preparer({ droits: { self_availability: 'read' } })
+    const res = reponse()
+    await handler(ecrire({ action, jours: [1], id: '11111111-2222-3333-4444-555555555555' }), res)
+    assert.strictEqual(res.code, 403, action)
+    assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
+  }
+})
+
+test('un jeton inconnu ne règle rien non plus — 401', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler({ method: 'POST', query: { token: 'jeton-inconnu' }, headers: {},
+                  body: { action: 'poserRegle', jours: [1] } }, res)
+  assert.strictEqual(res.code, 401)
+  assert.strictEqual(etat.ecritures.length, 0)
 })
 
 test('retirerConge refuse un identifiant qui n\'est pas un UUID — 400, pas 503', async () => {

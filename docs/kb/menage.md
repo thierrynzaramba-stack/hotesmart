@@ -801,11 +801,38 @@ un geste qui part de travers ne se rattrape pas d'un Ctrl-Z.
 - **Trois cartes, dans cet ordre** : *Mes jours de travail* (ses règles, en lecture), le
   **calendrier**, puis *Je serai absente plusieurs jours* (le congé en plage, et la liste des
   siens). Elle voit d'abord ce qui est convenu, ensuite ce qu'elle peut en retirer.
-- ⚠️ **Ses règles récurrentes sont en LECTURE SEULE** — décision du 15 septembre 2026 : *c'est
-  l'organisation du travail, pas une déclaration d'absence*. Des pastilles, aucune case à cocher :
-  une case promettrait une action que le serveur n'expose même pas. Les lignes **A/B** y sont
-  rappelées avec leur ancrage (« Cette semaine est une **semaine A** »), et la lettre revient à
-  gauche de chaque semaine du calendrier.
+- ⚠️ **ELLE RÈGLE SES JOURS HABITUELS ELLE-MÊME — décision inversée le 15 septembre 2026.**
+  La première version les gardait à l'hôte seul (« c'est l'organisation du travail, pas une
+  déclaration d'absence ») et n'affichait que des pastilles mortes. Thierry a tranché l'inverse :
+  les **cases à cocher** sont dans « Mes jours », et `api/menages-public.js` expose `poserRegle` /
+  `retirerRegle`, gardés par le même `self_availability: 'write'` que ses absences. Les lignes
+  **A/B** y sont réglables avec leur ancrage (« Cette semaine est une **semaine A** », plus le
+  bouton qui l'inverse), et la lettre revient à gauche de chaque semaine du calendrier.
+  ⚠️ **Sans le droit d'écriture, les cases restent VISIBLES mais figées** : les cacher lui ferait
+  croire qu'elle n'a aucun jour habituel.
+- ⚠️ **DETTE OUVERTE PAR CETTE INVERSION, ET ELLE N'EST PAS TECHNIQUE.** Elle peut désormais se
+  retirer d'un jour sur lequel l'hôte compte, et **rien ne l'en prévient**. La garde d'avant
+  n'était pas un verrou de code, c'était cette décision-là. Ce qu'il faudrait : une notification à
+  l'hôte quand une règle change côté PWA — ou, a minima, une trace lisible dans la fiche.
+- ⚠️ **La validation vit dans `lib/cleaning/regles.js`, partagée avec `api/disponibilites.js`.**
+  Deux endpoints écrivent maintenant la même chose ; recopier la validation aurait produit deux
+  règles pour un seul objet, et ce dépôt a déjà payé trois fois le prix de la copie qui devient
+  plus permissive que l'original. Un test **lit le source** des deux fichiers pour l'exiger — une
+  divergence future ne se verrait pas autrement, chacun restant juste de son côté.
+  ⚠️ En déplaçant `libelle`, les noms de jours ont failli passer au **pluriel** : un libellé est
+  **stocké**, le changer aurait fait diverger les règles neuves des anciennes sans que personne
+  l'ait demandé.
+- **Deux mois à la fois**, côte à côte au-delà de 680 px, empilés en dessous — donc empilés sur un
+  téléphone, où cet écran vit le plus. La borne de navigation suit : le dernier pas utile est
+  `DISPO_MOIS - 2`, sinon le second mois sortirait de l'horizon d'un an que le serveur accepte.
+- ⚠️ **Le texte « Aucun jour habituel n'est réglé… » est RETIRÉ.** Sur un profil vierge — et
+  **aucune prestataire n'a de règle en production**, vérifié sur les six — c'était le seul contenu
+  de la carte : ça se lisait comme un écran qui n'a pas fini de charger.
+- ⚠️ **Le mode « une semaine sur deux » survit à l'absence de règle** (`forceAlternee`). Sans ce
+  drapeau, basculer en quinzaine sans aucun jour coché ne posait rien, donc l'écran repeignait une
+  ligne simple : le bouton paraissait mort. C'est le parcours de **tous** les profils aujourd'hui.
+- ⚠️ **La légende explique le point** (« le point = choisi à la main »). La maquette portait quatre
+  entrées, l'écran n'en avait que trois : le point était dessiné et jamais expliqué.
 - ⚠️ **Une tape, pas un glissé.** L'écran hôte sélectionne une plage au glissé ; sur un téléphone,
   ce geste se bat avec le défilement. Ici un jour se touche (`click`, jamais `pointerdown`), et
   une plage passe par le **formulaire de congé** — qui est justement l'objet fait pour ça.

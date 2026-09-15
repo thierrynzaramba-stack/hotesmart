@@ -22,11 +22,29 @@ const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 // client (regle du §2 de la spec). C'est la meme projection que l'ecran hote
 // — et elle doit l'etre : les deux calendriers peignent le meme mois.
 const { cleJour, lireRrule } = require('../lib/cleaning/availability')
+// ⚠ LA MEME VALIDATION QUE L'HOTE, pas une copie. `api/disponibilites.js`
+// importe exactement ce module : deux validations pour la meme regle
+// divergeraient au premier ajustement, et la copie finit toujours par etre la
+// plus permissive des deux.
+const { validerRegle } = require('../lib/cleaning/regles')
 // ⚠ LE MEME PLAFOND QUE `api/disponibilites.js`, et pour la meme raison : l'ecran
 // regle jusqu'a un an devant. Une plage au-dela n'est pas un conge, c'est une
 // saisie qui a derape — et surtout une ligne que l'ecran ne montrera jamais,
 // donc impossible a retirer.
 const HORIZON_CONGE_JOURS = 400
+
+// ⚠ UN SEUL MOTIF D'UUID POUR TOUT LE FICHIER. Il etait ecrit en clair dans le
+// retrait d'un conge ; le recopier pour les regles aurait fait deux motifs a
+// tenir a jour, dont un qu'on oublie.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// ⚠ UN PLAFOND SUR LES REGLES ACTIVES. L'ecran retire toutes les regles puis
+// repose ce qui est coche a CHAQUE geste : une panne au milieu d'un enchainement
+// laisse des lignes derriere elle. Sans borne, la table se remplit de regles
+// mortes que la lecture finirait par tronquer — et une lecture tronquee de
+// regles, c'est un calendrier qui montre autre chose que ce que le moteur
+// applique. Le meme ordre de grandeur que `LOT_REGLES` cote hote.
+const MAX_REGLES_ACTIVES = 100
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -155,6 +173,20 @@ module.exports = async function handler(req, res) {
     // product owner, 4 septembre 2026.
     if (action === 'declarerConge' || action === 'retirerConge') {
       return await mesConges(req, res, token, { retirer: action === 'retirerConge' })
+    }
+
+    // ⚠ ELLE REGLE SES JOURS HABITUELS DEPUIS SA PWA (decision du 15 septembre
+    // 2026, revenant sur celle du meme jour). La version precedente les gardait
+    // a l'hote seul — « c'est l'organisation du travail, pas une declaration
+    // d'absence ». Thierry a tranche l'inverse : l'ecran « Mes jours » porte les
+    // cases, donc le serveur doit exposer l'action.
+    //
+    // ⚠ CE QUE CE CHANGEMENT OUVRE, ET QUI N'EST PAS FERME ICI : elle peut
+    // desormais se retirer d'un jour sur lequel l'hote compte, et RIEN NE L'EN
+    // PREVIENT. La garde d'avant n'etait pas technique, elle etait la. Noté au
+    // KB comme dette ouverte.
+    if (action === 'poserRegle' || action === 'retirerRegle') {
+      return await mesRegles(req, res, token, { retirer: action === 'retirerRegle' })
     }
 
     if (action === 'declarerIndisponibilite' || action === 'retirerIndisponibilite') {
@@ -1389,6 +1421,83 @@ async function mesDisponibilites (req, res, token) {
   })
 }
 
+// Elle regle ses JOURS HABITUELS — la recurrence (15 septembre 2026).
+//
+// ⚠ LE MEME GESTE QUE L'HOTE, LE MEME MODELE. L'ecran retire toutes les regles
+// actives puis repose ce qui est coche : c'est ce qui permet a une ligne vide de
+// vouloir dire « aucun jour », et non « je n'ai rien touche ». Le serveur, lui,
+// ne connait que deux actions elementaires — poser, retirer — exactement comme
+// `api/disponibilites.js`. Une action « remplacer » cote serveur aurait fige
+// dans l'API une strategie d'ecran.
+//
+// ⚠ AUCUNE CHAINE RRULE N'ENTRE. Elle envoie des JOURS, une cadence et une
+// ancre ; `validerRegle` construit la chaine. Accepter une RRULE du client
+// laisserait ecrire une recurrence qu'aucun des deux ecrans ne sait relire,
+// donc invisible et sans issue par l'interface.
+async function mesRegles (req, res, token, { retirer }) {
+  const qui = await celleQuiDeclare(token, { ecriture: true })
+  if (qui.erreur) {
+    if (qui.erreur === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
+    if (qui.erreur === 403) return res.status(403).json({ error: 'Non autorisé' })
+    return res.status(401).json({ error: 'Token invalide' })
+  }
+
+  if (retirer) {
+    const { id } = req.body || {}
+    if (!id || !UUID_RE.test(String(id))) return res.status(400).json({ error: 'Règle inconnue' })
+    // ⚠ ON DESACTIVE, ON NE SUPPRIME PAS : une regle supprimee emporterait la
+    // raison pour laquelle des menages passes ont ete attribues comme ils l'ont
+    // ete. Meme choix que cote hote.
+    // ⚠ LES TROIS FILTRES COMPTENT. L'identifiant vient du CLIENT : sans
+    // `user_id` ET `provider_id`, il designerait la regle de n'importe qui — y
+    // compris d'un autre compte.
+    const { data, error } = await supabase.from('provider_availability_rules')
+      .update({ active: false })
+      .eq('id', String(id)).eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+      .select('id')
+    if (error) {
+      console.error('[menages-public] retrait regle echec:', error.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    // ⚠ « RIEN A RETIRER » N'EST PAS UNE PANNE. Sur un reseau de telephone, le
+    // meme geste part deux fois : le second ne doit pas annoncer une erreur pour
+    // une regle que le premier vient de desactiver. Meme idempotence que les
+    // conges.
+    if (!data || !data.length) return res.status(200).json({ success: true, deja: true })
+    return res.status(200).json({ success: true })
+  }
+
+  const v = validerRegle(req.body || {}, cleJour)
+  if (v.erreur) return res.status(400).json({ error: v.erreur })
+
+  // ⚠ UN PLAFOND, parce que l'ecran retire-puis-repose a chaque geste : une
+  // panne au milieu d'un enchainement laisse des lignes derriere elle, et rien
+  // ne borne la table autrement. Le meme ordre de grandeur que la lecture.
+  const { count, error: errCount } = await supabase.from('provider_availability_rules')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id).eq('active', true)
+  if (errCount) {
+    console.error('[menages-public] comptage regles echec:', errCount.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if ((count || 0) >= MAX_REGLES_ACTIVES) {
+    return res.status(400).json({ error: 'Trop de règles actives : rouvrez cet onglet.' })
+  }
+
+  const { data, error } = await supabase.from('provider_availability_rules')
+    .insert({ user_id: qui.userId, provider_id: qui.profil.id,
+              rrule: v.rrule, label: v.label, active: true })
+    .select('id, label')
+    .maybeSingle()
+  if (error) {
+    console.error('[menages-public] insert regle echec:', error.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ LA CHAINE NE REMONTE PAS NON PLUS. On rend l'identifiant et le libelle ;
+  // la forme relue arrive par la lecture suivante, projetee par `lireRrule`.
+  return res.status(200).json({ success: true, regle: data })
+}
+
 // Elle pose ou retire un CONGE — une PLAGE (15 septembre 2026).
 //
 // ⚠ MEME GARDE QUE LES ABSENCES D'UN JOUR, pour la meme raison : elle ne retire
@@ -1410,7 +1519,7 @@ async function mesConges (req, res, token, { retirer }) {
     // « Service temporairement indisponible » — on annonce une panne serveur pour
     // une saisie malformee, et la prestataire reessaie indefiniment. L'homologue
     // cote hote validait deja ; ce chemin ne le faisait pas.
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))) {
+    if (!id || !UUID_RE.test(String(id))) {
       return res.status(400).json({ error: 'Congé inconnu' })
     }
     const { data, error } = await supabase.from('conges_plages')

@@ -66,7 +66,14 @@
                   background: var(--bg); color: var(--text); font-size: 16px; line-height: 1;
                   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
     .dispo-rond[disabled] { opacity: .3; }
-    .dispo-months { display: grid; gap: 16px; }
+    /* ⚠ DEUX MOIS, ET LA MISE EN PAGE SUIT LA LARGEUR, pas le materiel : une
+       requete de media sur la largeur marche aussi bien sur une tablette et sur
+       une fenetre reduite. Sous 680 px ils s'empilent — c'est le cas du
+       telephone, ou cet ecran vit le plus. */
+    .dispo-months { display: grid; gap: 16px; grid-template-columns: 1fr; }
+    @media (min-width: 680px) { .dispo-months { grid-template-columns: 1fr 1fr; gap: 20px; } }
+    .dispo-mois-titre { font-size: 13px; font-weight: 600; margin-bottom: 8px;
+                        text-transform: capitalize; color: var(--text2); }
     .dispo-mois h6 { font-size: 13px; font-weight: 600; margin-bottom: 8px; text-transform: capitalize; }
     .dispo-grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
     .dispo-grille.alt { grid-template-columns: 18px repeat(7, 1fr); }
@@ -106,14 +113,27 @@
     .dispo-tag.a { background: var(--green-bg); color: var(--green); }
     .dispo-tag.b { background: var(--amber-bg); color: var(--amber); }
     .dispo-tag.simple { background: none; color: var(--text2); font-weight: 600; justify-content: flex-start; }
-    /* ⚠ LES JOURS HABITUELS NE SE CLIQUENT PAS : ce ne sont pas des cases a
-       cocher, ce sont des pastilles d'information. Leur donner l'apparence d'un
-       controle promettrait une action qui n'existe pas. */
+    /* ⚠ LES JOURS HABITUELS SE REGLENT ICI (decision du 15 septembre 2026,
+       revenant sur celle du meme jour). C'etaient des pastilles d'information ;
+       ce sont maintenant de vraies cases a cocher, avec une cible tactile de
+       44 px comme le reste de cet ecran. */
     .dispo-pastille { display: inline-flex; align-items: center; justify-content: center;
-                      width: 32px; height: 32px; border-radius: var(--radius);
-                      font-size: 12px; font-weight: 600; background: var(--bg2); color: var(--text3); }
-    .dispo-pastille.on { background: var(--green-bg); color: var(--green); }
-    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--amber-bg); color: var(--amber); }
+                      width: 44px; height: 44px; border-radius: var(--radius);
+                      font-size: 13px; font-weight: 600; background: var(--bg2); color: var(--text3);
+                      cursor: pointer; user-select: none; border: 1px solid transparent; }
+    .dispo-pastille input { position: absolute; opacity: 0; pointer-events: none; }
+    .dispo-pastille:focus-within { box-shadow: 0 0 0 2px var(--primary); }
+    .dispo-pastille.on { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--amber-bg); color: var(--amber);
+                                           border-color: var(--amber); }
+    .dispo-ligne-ab.fige .dispo-pastille { cursor: default; opacity: .55; }
+    .dispo-mini { font-size: 12.5px; padding: 8px 12px; border-radius: var(--radius);
+                  border: 0.5px solid var(--border); background: var(--bg); color: var(--text);
+                  cursor: pointer; }
+    .dispo-lien { background: none; border: 0; color: var(--primary); font-size: 12px;
+                  text-decoration: underline; cursor: pointer; padding: 4px 0; }
+    .dispo-ancre { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+                   margin-top: 10px; font-size: 12px; color: var(--text2); }
     .avis-etat strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 4px; }
     .ratio { display: flex; gap: 14px; align-items: center; }
     .ratio-item { display: flex; gap: 5px; align-items: center; font-size: 18px; font-weight: 600; }
@@ -2055,7 +2075,13 @@ if ("serviceWorker" in navigator) {
 
   const reglesLues = () => (mesJours.regles || []).filter(r => Array.isArray(r.jours))
   const reglesOpaquesPwa = () => (mesJours.regles || []).filter(r => !Array.isArray(r.jours))
-  const enQuinzaine = () => reglesLues().some(r => (r.cadence || 1) >= 2)
+  // ⚠ LE MODE N'EST PAS TOUJOURS DEDUCTIBLE DES DONNEES. Sans aucune regle, rien
+  // ne dit si elle veut une quinzaine : le bouton « Une semaine sur deux… »
+  // paraissait mort sur un profil vierge — c'est-a-dire sur tous les profils
+  // aujourd'hui. Un drapeau d'ecran porte l'intention jusqu'a ce qu'une regle
+  // existe. Meme mecanique que l'ecran de l'hote.
+  const enQuinzaine = () =>
+    (mesJours && mesJours.forceAlternee) || reglesLues().some(r => (r.cadence || 1) >= 2)
   function couvreSemaine (r) {
     const n = Math.max(1, Number(r.cadence) || 1)
     const e = Math.round((dJour(lundiDe(AUJ())) - dJour(lundiDe(r.ancre || AUJ()))) / (7 * 86400000))
@@ -2145,51 +2171,106 @@ if ("serviceWorker" in navigator) {
     }
   }
 
-  function ligneLecture (jours, tag, classe) {
+  function ligneLecture (jours, tag, classe, fige) {
     const t = tag ? `<span class="dispo-tag ${classe}">${tag}</span>`
                   : '<span class="dispo-tag simple">Je travaille</span>'
-    return `<div class="dispo-ligne-ab ${classe}">${t}` + JOURS_SEM.map(j =>
-      `<span class="dispo-pastille${jours.includes(j.n) ? ' on' : ''}">${j.c}</span>`).join('') + '</div>'
+    // ⚠ DE VRAIES CASES A COCHER, pas des pastilles. L'element cliquable est le
+    // `<label>` : il porte la cible tactile de 44 px, et le `<input>` caché
+    // dedans garde le clavier et les lecteurs d'écran — une `<div>` avec un
+    // `onclick` aurait perdu les deux.
+    return `<div class="dispo-ligne-ab ${classe}${fige ? ' fige' : ''}">${t}` + JOURS_SEM.map(j =>
+      `<label class="dispo-pastille${jours.includes(j.n) ? ' on' : ''}">` +
+      `<input type="checkbox" data-lot="${classe || 'simple'}" value="${j.n}"` +
+      `${jours.includes(j.n) ? ' checked' : ''}${fige ? ' disabled' : ''}>` +
+      `<span>${j.c}</span></label>`).join('') + '</div>'
   }
 
+  // ⚠ ELLE REGLE SES JOURS ELLE-MEME (decision du 15 septembre 2026, revenant
+  // sur celle du meme jour : « c'est l'organisation du travail, pas une
+  // declaration d'absence »). La carte est donc un FORMULAIRE, pas un resume.
+  //
+  // ⚠ CE QUE CA OUVRE, ET QUI N'EST PAS FERME ICI : elle peut se retirer d'un
+  // jour sur lequel son employeur compte, et rien ne l'en previent. Noté au KB.
   function peindreMesRegles () {
     const zone = document.getElementById('dispo-recur')
     const aide = document.getElementById('dispo-recur-aide')
     const act = reglesLues()
     const opaques = reglesOpaquesPwa()
-    if (!act.length && !opaques.length) {
-      zone.innerHTML = ''
-      aide.textContent = 'Aucun jour habituel n\'est réglé : vous êtes comptée disponible tous les jours.'
-      return
-    }
+    // ⚠ SANS DROIT D'ECRITURE, LES CASES SONT FIGEES MAIS VISIBLES. Les cacher
+    // lui ferait croire qu'elle n'a aucun jour habituel ; les laisser actives
+    // promettrait une action que le serveur refuse en 403.
+    const fige = !mesJours.modifiable
+
     if (enQuinzaine()) {
       const { a, b } = lotsPwa()
       zone.innerHTML = '<div class="dispo-lignes-ab">' +
-        ligneLecture(a ? a.jours : [], 'Semaine A', 'a') +
-        ligneLecture(b ? b.jours : [], 'Semaine B', 'b') + '</div>'
-      // ⚠ L'ANCRAGE SE DIT ICI AUSSI. « Une semaine sur deux » ne designe rien
-      // sans un repere : elle doit pouvoir verifier elle-meme ou elle en est.
-      aide.innerHTML = `Cette semaine est une <b>semaine ${lettreSemaine(AUJ())}</b>. ` +
-        'Réglé par votre employeur — pour le changer, dites-le lui.'
+        ligneLecture(a ? a.jours : [], 'Semaine A', 'a', fige) +
+        ligneLecture(b ? b.jours : [], 'Semaine B', 'b', fige) + '</div>' +
+        (fige ? '' :
+          '<div class="dispo-ancre">' +
+          `<span>Cette semaine est une <b>semaine ${lettreSemaine(AUJ())}</b>.</span>` +
+          '<button type="button" class="dispo-lien" id="dispo-inverser">' +
+          `C'est plutôt une semaine ${lettreSemaine(AUJ()) === 'A' ? 'B' : 'A'}</button></div>` +
+          '<div style="margin-top:8px"><button type="button" class="dispo-mini" id="dispo-simple">' +
+          'Revenir à toutes les semaines</button></div>')
+      // ⚠ L'ANCRAGE SE DIT MEME QUAND ELLE NE PEUT PAS Y TOUCHER. « Une semaine
+      // sur deux » ne designe rien sans un repere : elle doit pouvoir verifier
+      // elle-meme ou elle en est.
+      aide.innerHTML = fige
+        ? `Cette semaine est une <b>semaine ${lettreSemaine(AUJ())}</b>. ` +
+          'Réglé par votre employeur — pour le changer, dites-le lui.'
+        : 'Cochez les jours où vous travaillez habituellement.'
     } else {
       const tous = fusion(act)
-      zone.innerHTML = '<div class="dispo-lignes-ab">' + ligneLecture(tous ? tous.jours : [], '', 'simple') + '</div>'
-      aide.textContent = 'Réglé par votre employeur — pour le changer, dites-le lui.'
+      zone.innerHTML = '<div class="dispo-lignes-ab">' +
+        ligneLecture(tous ? tous.jours : [], '', 'simple', fige) + '</div>' +
+        (fige ? '' :
+          '<div style="margin-top:8px"><button type="button" class="dispo-mini" id="dispo-alterner">' +
+          'Une semaine sur deux…</button></div>')
+      aide.textContent = fige
+        ? 'Réglé par votre employeur — pour le changer, dites-le lui.'
+        : 'Cochez les jours où vous travaillez habituellement.'
     }
     if (opaques.length) {
       aide.innerHTML += '<br>Vous avez aussi ' + opaques.length +
         ' règle(s) que cet écran ne sait pas afficher. Demandez à votre employeur.'
     }
+    const bAlt = document.getElementById('dispo-alterner')
+    if (bAlt) bAlt.addEventListener('click', () => basculerMonAlternance(true))
+    const bSimple = document.getElementById('dispo-simple')
+    if (bSimple) bSimple.addEventListener('click', () => basculerMonAlternance(false))
+    const bInv = document.getElementById('dispo-inverser')
+    if (bInv) bInv.addEventListener('click', inverserMonAncrage)
   }
+
+  // ⚠ DEUX MOIS A LA FOIS, cote a cote ou empiles selon la largeur (le CSS s'en
+  // charge). Un seul mois obligeait a naviguer pour voir la fin d'une semaine a
+  // cheval, et un conge de fin de mois se posait a l'aveugle.
+  // ⚠ LA BORNE DE NAVIGATION SUIT : avec deux mois affiches, le dernier pas
+  // utile est `DISPO_MOIS - 2`, sinon le second mois sortirait de l'horizon d'un
+  // an que le serveur accepte.
+  const DISPO_VISIBLES = 2
 
   function peindreMonMois () {
     const a = moisDe(mesJours.mois)
-    document.getElementById('dispo-titre-mois').textContent = moisLisible(a)
+    const dernier = moisDe(Math.min(DISPO_MOIS - 1, mesJours.mois + DISPO_VISIBLES - 1))
+    document.getElementById('dispo-titre-mois').textContent =
+      moisLisible(a) === moisLisible(dernier) ? moisLisible(a)
+        : moisLisible(a).replace(/ \d{4}$/, '') + ' – ' + moisLisible(dernier)
     document.getElementById('dispo-prec').disabled = mesJours.mois === 0
-    document.getElementById('dispo-suiv').disabled = mesJours.mois >= DISPO_MOIS - 1
+    document.getElementById('dispo-suiv').disabled = mesJours.mois >= DISPO_MOIS - DISPO_VISIBLES
 
     const alt = enQuinzaine()
     const auj = AUJ()
+    let out = ''
+    for (let k = 0; k < DISPO_VISIBLES && mesJours.mois + k < DISPO_MOIS; k++) {
+      out += peindreUnMois(moisDe(mesJours.mois + k), alt, auj)
+    }
+    document.getElementById('dispo-months').innerHTML = out
+    peindreLegende(alt)
+  }
+
+  function peindreUnMois (a, alt, auj) {
     const nb = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + 1, 0, 12)).getUTCDate()
     const decal = (a.getUTCDay() + 6) % 7
     const cellules = []
@@ -2197,7 +2278,8 @@ if ("serviceWorker" in navigator) {
     for (let d = 1; d <= nb; d++) cellules.push(isoJ(new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), d, 12))))
     while (cellules.length % 7) cellules.push(null)
 
-    let out = `<div class="dispo-mois"><div class="dispo-grille${alt ? ' alt' : ''}">`
+    let out = `<div class="dispo-mois"><div class="dispo-mois-titre">${echapper(moisLisible(a))}</div>` +
+              `<div class="dispo-grille${alt ? ' alt' : ''}">`
     if (alt) out += '<div class="dispo-sem"></div>'
     out += JOURS_SEM.map(j => `<div class="dispo-dow">${j.c}</div>`).join('')
     for (let w = 0; w < cellules.length; w += 7) {
@@ -2221,12 +2303,20 @@ if ("serviceWorker" in navigator) {
       }
     }
     out += '</div></div>'
-    document.getElementById('dispo-months').innerHTML = out
+    return out
+  }
 
+  function peindreLegende (alt) {
     document.getElementById('dispo-legende').innerHTML =
       '<span><i style="background:var(--green-bg);border:1px solid var(--green)"></i>Je travaille</span>' +
       '<span><i style="background:#FBE9E6;border:1px solid #C0392B"></i>Je ne travaille pas</span>' +
       '<span><i style="background:var(--bg3);border:1px dashed var(--border)"></i>Congé</span>' +
+      // ⚠ LE POINT ETAIT DESSINE MAIS JAMAIS EXPLIQUE. La maquette portait quatre
+      // entrees, l'ecran n'en avait que trois : un jour marque d'un point ne
+      // ressemblait a rien de connu.
+      '<span><i style="background:var(--green-bg);border:1px solid var(--green);position:relative">' +
+      '<b style="position:absolute;left:4px;bottom:1px;width:4px;height:4px;border-radius:50%;' +
+      'background:var(--green)"></b></i>le point = choisi à la main</span>' +
       (alt ? '<span><b style="color:var(--green)">A</b>/<b style="color:var(--amber)">B</b> à gauche de chaque semaine</span>' : '')
   }
 
@@ -2266,6 +2356,121 @@ if ("serviceWorker" in navigator) {
     if (navigator.onLine) return false
     dire(msg, '⚠️ Hors ligne : rien n\'a été envoyé. Réessayez une fois connectée.')
     return true
+  }
+
+  // ─── SES JOURS HABITUELS : ecrire ─────────────────────────────────────────
+  //
+  // ⚠ RETIRER PUIS REPOSER, et l'ordre compte. Poser par-dessus une regle qu'on
+  // n'a pas su retirer laisse DEUX recurrences actives : le moteur les unit, et
+  // elle se retrouve disponible les jours des deux. C'est la raison meme de
+  // l'ordre, et l'echec du retrait doit donc se LIRE.
+  //
+  // ⚠ ET ON RETIRE TOUT CE QUI EST ACTIF, y compris ce qu'on ne sait pas relire.
+  // Ne retirer que les regles lisibles ferait du « remplacement » une ADDITION :
+  // la regle opaque resterait active, invisible a l'ecran, et sans aucune issue
+  // par l'interface.
+  const toutesMesRegles = () => (mesJours.regles || [])
+
+  function joursCoches (lot) {
+    return [...document.querySelectorAll(`#dispo-recur input[data-lot="${lot}"]:checked`)]
+      .map(c => +c.value)
+  }
+
+  async function remplacerMesRegles (lots, { alt }) {
+    const msg = document.getElementById('dispo-message')
+    for (const r of toutesMesRegles()) {
+      const { ok } = await envoyer({ action: 'retirerRegle', id: r.id })
+      if (!ok) { dire(msg, 'Vos jours n\'ont pas pu être modifiés. Rouvrez cet onglet.'); return false }
+    }
+    for (const lot of lots) {
+      // ⚠ UNE LIGNE VIDE N'EST PAS « RIEN A FAIRE » : c'est « aucun jour cette
+      // semaine-la », et c'est legitime. On ne pose simplement rien.
+      if (!lot.jours.length) continue
+      const { ok, data } = await envoyer({ action: 'poserRegle', jours: lot.jours,
+        toutes_les_n_semaines: alt ? 2 : 1, depuis: lot.ancre })
+      if (!ok) { dire(msg, (data && data.error) || 'Vos jours n\'ont pas pu être enregistrés.'); return false }
+    }
+    return true
+  }
+
+  async function enregistrerMesJours () {
+    const msg = document.getElementById('dispo-message')
+    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (horsLigne(msg)) return
+    envoiEnCours = true
+    try {
+      const alt = enQuinzaine()
+      const cette = lundiDe(AUJ())
+      const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
+      const lots = alt
+        ? [{ jours: joursCoches('a'), ancre: cette }, { jours: joursCoches('b'), ancre: suivante }]
+        : [{ jours: joursCoches('simple'), ancre: cette }]
+      // ⚠ ON GARDE L'ANCRAGE EXISTANT s'il y en a un : le deplacer a chaque
+      // modification inverserait son rythme une fois sur deux.
+      const { a } = lotsPwa()
+      if (alt && a && a.ancre) {
+        lots[0].ancre = lundiDe(a.ancre)
+        lots[1].ancre = isoJ(new Date(dJour(lots[0].ancre).getTime() + 7 * 86400000))
+      }
+      if (await remplacerMesRegles(lots, { alt })) dire(msg, '✓ Vos jours sont enregistrés.')
+      await chargerDisponibilites()
+    } catch (err) {
+      dire(msg, 'Connexion impossible. Réessayez.')
+    } finally { envoiEnCours = false }
+  }
+
+  async function basculerMonAlternance (vers) {
+    const msg = document.getElementById('dispo-message')
+    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (horsLigne(msg)) return
+    envoiEnCours = true
+    try {
+      // ⚠ REVENIR A « TOUTES LES SEMAINES » GARDE LA SEMAINE A, et l'ecran le
+      // dit. Fusionner les deux lignes aurait invente un rythme que personne n'a
+      // regle — et elle se serait retrouvee engagee des jours qu'elle n'avait
+      // cochés que pour une semaine sur deux.
+      const source = vers ? fusion(reglesLues()) : lotsPwa().a
+      const jours = source ? source.jours : []
+      const ok = await remplacerMesRegles([{ jours, ancre: lundiDe(AUJ()) }], { alt: !!vers })
+      // ⚠ LE MODE SURVIT A L'ABSENCE DE REGLE. Sans ce drapeau, basculer en
+      // quinzaine sans aucun jour coché ne posait rien, donc `enQuinzaine()`
+      // restait faux, donc l'ecran repeignait une ligne simple : le bouton
+      // paraissait mort. C'est le parcours de TOUS les profils aujourd'hui,
+      // puisque aucun ne porte de regle.
+      if (ok) {
+        mesJours.forceAlternee = !!vers
+        dire(msg, vers ? 'Cochez les jours de la semaine B.'
+                       : 'Les jours de la semaine A sont conservés.')
+      }
+      await chargerDisponibilites()
+      if (mesJours) mesJours.forceAlternee = !!vers
+      peindreMesJours()
+    } catch (err) {
+      dire(msg, 'Connexion impossible. Réessayez.')
+    } finally { envoiEnCours = false }
+  }
+
+  // ⚠ INVERSER, C'EST ECHANGER LES ANCRAGES DES DEUX LOTS. La semaine A est, par
+  // definition, celle qui couvre la semaine en cours : pour que « c'est plutot
+  // une semaine B » ait un effet, il faut que le CONTENU des deux lignes
+  // s'echange — pas qu'on renomme une etiquette.
+  async function inverserMonAncrage () {
+    const msg = document.getElementById('dispo-message')
+    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (horsLigne(msg)) return
+    envoiEnCours = true
+    try {
+      const { a, b } = lotsPwa()
+      const cette = lundiDe(AUJ())
+      const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
+      const ok = await remplacerMesRegles(
+        [{ jours: a ? a.jours : [], ancre: suivante },
+         { jours: b ? b.jours : [], ancre: cette }], { alt: true })
+      if (ok) dire(msg, '✓ Les deux semaines sont échangées.')
+      await chargerDisponibilites()
+    } catch (err) {
+      dire(msg, 'Connexion impossible. Réessayez.')
+    } finally { envoiEnCours = false }
   }
 
   let envoiEnCours = false
@@ -2399,6 +2604,14 @@ if ("serviceWorker" in navigator) {
   document.getElementById('dispo-auj').addEventListener('click', () => {
     if (mesJours) { mesJours.mois = 0; oublierLeMessage(); peindreMesJours() } })
   document.getElementById('btn-conge').addEventListener('click', poserMonConge)
+
+  // ⚠ UN SEUL ECOUTEUR, POSE UNE FOIS, SUR LE CONTENEUR. Les cases sont
+  // reconstruites a chaque repeint : un ecouteur par case aurait fui a chaque
+  // enregistrement, et le dernier geste serait parti en double.
+  document.getElementById('dispo-recur').addEventListener('change', e => {
+    if (!e.target.matches('input[data-lot]')) return
+    enregistrerMesJours()
+  })
 
   // ⚠ UNE TAPE, PAS UN GLISSE — et `click`, pas `pointerdown`. Sur un telephone,
   // un glisse de selection se bat avec le defilement de la page : on ne peut pas
