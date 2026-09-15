@@ -1328,9 +1328,13 @@
   // de lettre sans que personne ne l'ait demandé. On définit A comme le lot qui
   // couvre LA SEMAINE EN COURS — la phrase devient une tautologie, donc toujours
   // juste, et le bouton d'inversion garde tout son sens : il déplace les ancrages.
+  // ⚠ LA CADENCE N'EST PAS TOUJOURS 2. `poserRegle` en accepte jusqu'à 4 : coder
+  // `% 2` en dur faisait peindre une règle « toutes les 3 semaines » comme une
+  // quinzaine — un calendrier qui montre un rythme que le moteur ne suit pas.
   function couvreCetteSemaine(r) {
+    const n = Math.max(1, Number(r.cadence) || 1)
     const ecart = Math.round((jourDe(lundiDe(AUJ())) - jourDe(lundiDe(r.ancre || AUJ()))) / (7 * 86400000))
-    return ((ecart % 2) + 2) % 2 === 0
+    return ((ecart % n) + n) % n === 0
   }
   // ⚠ LES JOURS SE FUSIONNENT, ILS NE SE PERDENT PAS. L'écran d'avant posait
   // autant de règles qu'on cliquait sur « Ajouter » : une prestataire peut donc
@@ -1343,10 +1347,21 @@
     return { jours: [...new Set(rs.flatMap(r => r.jours))].sort((a, b) => a - b),
              ancre: rs[0].ancre }
   }
+  // ⚠ UNE RÈGLE DE CADENCE 1 APPARTIENT AUX DEUX SEMAINES, et l'oublier perdait
+  // des jours. Une prestataire peut porter « tous les lundis » (cadence 1,
+  // héritée de l'ancien écran) ET « samedi une semaine sur deux ». Ne garder que
+  // les cadences ≥ 2 donnait deux lignes qui n'affichaient que les samedis —
+  // pendant que le calendrier peignait aussi les lundis — puis le premier clic
+  // retirait tout et ne reposait que les lots affichés : les lundis
+  // disparaissaient sans un mot.
+  // Les règles hebdomadaires sont donc versées dans les DEUX lots : c'est ce
+  // qu'elles font réellement.
   function lotsAB() {
-    const act = reglesLisibles().filter(r => (r.cadence || 1) >= 2)
-    return { a: fusionner(act.filter(couvreCetteSemaine)),
-             b: fusionner(act.filter(r => !couvreCetteSemaine(r))) }
+    const act = reglesLisibles()
+    const quinzaine = act.filter(r => (r.cadence || 1) >= 2)
+    const chaqueSemaine = act.filter(r => (r.cadence || 1) < 2)
+    return { a: fusionner(quinzaine.filter(couvreCetteSemaine).concat(chaqueSemaine)),
+             b: fusionner(quinzaine.filter(r => !couvreCetteSemaine(r)).concat(chaqueSemaine)) }
   }
 
   function congeDe(j) {
@@ -1362,14 +1377,22 @@
     const e = (dispo.exceptions || []).find(x => String(x.date).slice(0, 10) === j)
     if (e) return e.available === true
     const act = reglesLisibles()
-    if (!act.length) return true
+    // ⚠ UNE RÈGLE QU'ON NE SAIT PAS RELIRE NE VAUT PAS « AUCUNE RÈGLE ».
+    // Si la seule règle active est opaque (`FREQ=MONTHLY`, par exemple), la
+    // traiter comme absente peignait le calendrier ENTIÈREMENT EN VERT — alors
+    // que le moteur, lui, la compte et ne la fait couvrir qu'un jour par mois :
+    // elle est indisponible presque partout. L'hôte lui confiait des ménages sur
+    // un calendrier qui ment. Une panne coupe, elle n'ouvre pas — et un écran
+    // qu'on ne sait pas peindre juste doit montrer le cas le plus prudent.
+    if (!act.length) return reglesOpaques().length === 0
     const jour = jourDe(j).getUTCDay()
     return act.some(r => {
       if (!r.jours.includes(jour)) return false
-      if ((r.cadence || 1) < 2) return true
+      const n = Math.max(1, Number(r.cadence) || 1)
+      if (n < 2) return true
       const ancre = lundiDe(r.ancre || AUJ())
       const ecart = Math.round((jourDe(lundiDe(j)) - jourDe(ancre)) / (7 * 86400000))
-      return ((ecart % 2) + 2) % 2 === 0
+      return ((ecart % n) + n) % n === 0
     })
   }
   // La lettre d'une semaine, relative à la semaine EN COURS — donc cohérente par
@@ -1387,7 +1410,15 @@
   }
 
   async function rechargerDispo() {
-    const { ok, data } = await appelDispo('GET', null, `?provider_id=${encodeURIComponent(dispo.profilId)}`)
+    // ⚠ LA RÉPONSE N'ÉCRIT QUE DANS LA FICHE QU'ELLE A INTERROGÉE.
+    // `editPrestataire` appelle `chargerDisponibilites` SANS `await` : ouvrir la
+    // fiche A puis vite la fiche B faisait revenir la réponse de A APRÈS celle de
+    // B, et elle s'écrivait dans l'objet de B. Le calendrier de B montrait alors
+    // les règles et congés de A — et le clic suivant écrivait une exception sur B
+    // calculée à partir de l'état de A.
+    const demande = dispo.profilId
+    const { ok, data } = await appelDispo('GET', null, `?provider_id=${encodeURIComponent(demande)}`)
+    if (!dispo || dispo.profilId !== demande) return false   // une autre fiche a pris la main
     // ⚠ ON LE DIT. Une panne qui laisse « Chargement… » ferait croire à une
     // prestataire sans aucune règle — donc disponible tous les jours, et
     // assignable partout.
@@ -1754,7 +1785,12 @@
       const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'poserConge',
         debut: du, fin: au, motif: document.getElementById('conge-motif').value.trim() })
       if (!ok) return alert((data && data.error) || 'Le congé n\'a pas pu être enregistré.')
+      // ⚠ LES DATES SE VIDENT AUSSI. Les laisser en place avec un bouton actif
+      // invite au second clic — et `conges_plages` n'a volontairement aucune
+      // contrainte d'unicité : le doublon serait accepté en silence.
       document.getElementById('conge-motif').value = ''
+      document.getElementById('conge-du').value = ''
+      document.getElementById('conge-au').value = ''
       // ⚠ ON SE PLACE SUR LE MOIS DU CONGÉ. Poser une date qu'on ne voit pas
       // apparaître se lit comme un geste qui a échoué.
       const b = jourDe(AUJ()), d = jourDe(du)
@@ -1820,6 +1856,21 @@
     if (!j || j < AUJ() || congeDe(j)) return
     cibleSel = j; peindreSelection()
   })
+  // ⚠ LES CASES SONT FOCALISABLES, DONC ELLES DOIVENT RÉPONDRE AU CLAVIER.
+  // Elles portaient `tabindex="0"` sans aucun gestionnaire : on traversait
+  // soixante cellules qui ne faisaient rien. Et le KB présente la SORTIE du
+  // parcours clavier pour les congés comme une garantie — ce qui suppose que le
+  // parcours serve à quelque chose pour les autres jours.
+  zoneMois.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    const el = e.target.closest('.dispo-case')
+    if (!el || !el.dataset.jour || dispoOccupe) return
+    const j = el.dataset.jour
+    if (j < AUJ() || congeDe(j)) return
+    e.preventDefault()          // sinon l'espace fait défiler la page
+    basculerPlage(j, j)
+  })
+
   window.addEventListener('pointerup', () => {
     if (!glisseSel) return
     glisseSel = false

@@ -480,3 +480,101 @@ test('un échec du serveur PENDANT un glissé est dit, il n\'est pas avalé', as
   await souffler(80)
   assert.ok(dits.length, 'l\'hôte est prévenu que la plage n\'est pas passée en entier')
 })
+
+// ─── Les sept constats de la passe de vérification ────────────────────────
+
+test('une règle HEBDOMADAIRE survit au passage en A/B — elle vaut les deux semaines', async () => {
+  // ⚠ LE CAS QUI PERDAIT DES JOURS. « Tous les lundis » (cadence 1, héritée) +
+  // « samedi une semaine sur deux ». Ne garder que les cadences ≥ 2 affichait
+  // deux lignes sans les lundis, pendant que le calendrier les peignait — puis
+  // le premier clic retirait tout et ne reposait que les lots affichés.
+  const lundi = (() => { const d = new Date(AUJ)
+    return iso(new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000)) })()
+  const { w, t } = monterPage({ regles: [
+    { id: 'hebdo', label: 'lundis', active: true, jours: [1], cadence: 1, ancre: lundi },
+    { id: 'quinz', label: 'samedis', active: true, jours: [6], cadence: 2, ancre: lundi }
+  ] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+
+  const lot = k => [...w.document.querySelectorAll(`#dispo-recur input[data-lot="${k}"]:checked`)]
+    .map(c => Number(c.value)).sort()
+  assert.deepStrictEqual(lot('A'), [1, 6], 'la semaine A porte le lundi ET le samedi')
+  assert.deepStrictEqual(lot('B'), [1], 'la semaine B garde le lundi — une règle hebdo vaut les deux')
+})
+
+test('une règle OPAQUE seule ne peint pas le calendrier en vert', async () => {
+  // ⚠ « Une panne coupe, elle n'ouvre pas ». Si la seule règle active est d'un
+  // format que l'écran ne sait pas relire, la traiter comme absente peignait
+  // TOUT en vert — alors que le moteur ne la fait couvrir qu'un jour par mois :
+  // elle est indisponible presque partout, et l'hôte lui confiait des ménages.
+  const { w, t } = monterPage({ regles: [
+    { id: 'opaque', label: 'mensuelle', active: true, jours: null, cadence: null, ancre: null }
+  ] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  const vertes = cases(w).filter(c => !c.classList.contains('off') && !c.classList.contains('conge'))
+  assert.strictEqual(vertes.length, 0,
+    'aucun jour n\'est annoncé disponible quand l\'écran ne sait pas lire la seule règle')
+  assert.match(w.document.getElementById('dispo-hint').textContent, /ne sait pas afficher/)
+})
+
+test('ouvrir une AUTRE fiche annule la réponse de la précédente', async () => {
+  // ⚠ `editPrestataire` n'attend pas le chargement. Ouvrir la fiche A puis vite
+  // la fiche B faisait revenir la réponse de A APRÈS celle de B, et elle
+  // s'écrivait dans l'objet de B : le calendrier de B montrait les congés de A,
+  // et le clic suivant écrivait sur B un état calculé à partir de A.
+  const { w, t } = monterPage({ conges: [{ id: 'cA', debut: dans(3), fin: dans(5), source: 'hote' }] })
+  t.seed()
+  const lente = t.chargerDisponibilites('profil-A')     // pas attendu, comme dans l'écran
+  await t.chargerDisponibilites('profil-B')
+  await lente
+  await souffler(30)
+  assert.strictEqual(t.etatDispo().profilId, 'profil-B',
+    'la fiche affichée reste celle qu\'on a ouverte en dernier')
+})
+
+test('une cadence 3 n\'est pas peinte comme une quinzaine', async () => {
+  // `poserRegle` accepte jusqu'à 4. Coder `% 2` en dur faisait montrer un rythme
+  // que le moteur ne suit pas.
+  const lundi = (() => { const d = new Date(AUJ)
+    return iso(new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000)) })()
+  const { w, t } = monterPage({ regles: [
+    { id: 'r3', label: '3 sem', active: true, jours: [1], cadence: 3, ancre: lundi } ] })
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  // Le lundi de cette semaine est couvert ; celui d'après deux semaines non.
+  const lundiPlus14 = iso(new Date(new Date(lundi + 'T12:00:00Z').getTime() + 14 * 86400000))
+  const c = caseDu(w, lundiPlus14)
+  if (c) assert.ok(c.classList.contains('off'),
+    'à cadence 3, la semaine +2 n\'est pas travaillée — une quinzaine dirait l\'inverse')
+})
+
+test('les jours répondent au CLAVIER, puisqu\'ils sont focalisables', async () => {
+  // ⚠ Ils portaient `tabindex="0"` sans aucun gestionnaire : soixante cellules
+  // traversables qui ne faisaient rien.
+  const { w, t } = monterPage()
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  const j = dans(2)
+  const el = caseDu(w, j)
+  assert.strictEqual(el.getAttribute('tabindex'), '0')
+  el.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await souffler(40)
+  assert.ok(t.appels.some(a => a.corps && a.corps.action === 'poserException' && a.corps.date === j),
+    'Entrée bascule le jour, comme le clic')
+})
+
+test('les dates du congé se vident après la pose', async () => {
+  // Les laisser en place avec un bouton actif invite au second clic — et la
+  // table n'a volontairement aucune contrainte d'unicité.
+  const { w, t } = monterPage()
+  t.seed()
+  await t.chargerDisponibilites(PROFIL)
+  w.document.getElementById('conge-du').value = dans(3)
+  w.document.getElementById('conge-au').value = dans(6)
+  w.document.getElementById('btn-conge').click()
+  await souffler(60)
+  assert.strictEqual(w.document.getElementById('conge-du').value, '')
+  assert.strictEqual(w.document.getElementById('conge-au').value, '')
+})

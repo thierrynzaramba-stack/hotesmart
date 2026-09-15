@@ -473,3 +473,18 @@ test('poserConge accepte un congé EN COURS — commencé avant, pas terminé', 
   assert.strictEqual(res.code, 200)
   assert.strictEqual(etat.ecritures.filter(x => x.table === 'conges_plages').length, 1)
 })
+
+test('GET ne rend QUE les règles actives — les désactivées ne mangent pas le plafond', async () => {
+  // ⚠ LE CALENDRIER DÉSACTIVE ET REPOSE À CHAQUE CHANGEMENT DE CASE. Les lignes
+  // mortes s'accumulent vite, et le plafond de 200 trié par date CROISSANTE
+  // finissait par ne rendre que les plus anciennes — toutes inactives. L'écran
+  // annonçait alors « aucune règle : disponible tous les jours » pendant que le
+  // moteur appliquait les vraies ; et l'enregistrement ne pouvait plus retirer
+  // des règles qu'il ne voyait plus, donc chaque geste AJOUTAIT au lieu de
+  // remplacer. L'addition définitive que ce code dit empêcher.
+  const { handler, etat } = preparer({ regles: [] })
+  const res = reponse()
+  await handler(get(), res)
+  const lecture = etat.lectures.find(l => l.table === 'provider_availability_rules')
+  assert.strictEqual(lecture.f.active, true, 'le filtre est posé côté base, pas côté écran')
+})

@@ -115,6 +115,17 @@ async function lire (res, userId, providerId) {
     // et on jette la chaine avant de repondre.
     .select('id, label, active, created_at, rrule')
     .eq('user_id', userId).eq('provider_id', providerId)
+    // ⚠ LES INACTIVES NE REMONTENT PAS, ET CE N'EST PAS UN CONFORT.
+    // Une regle « retiree » est DESACTIVEE, pas supprimee — elle porte la raison
+    // pour laquelle des menages passes ont ete attribues comme ils l'ont ete. Le
+    // calendrier, lui, desactive et repose a CHAQUE changement de case : les
+    // lignes mortes s'accumulent vite. Sans ce filtre, le plafond de 200 finissait
+    // par ne rendre QUE des inactives (tri par date croissante), et alors :
+    // l'ecran annoncait « aucune regle, disponible tous les jours » pendant que le
+    // moteur appliquait les vraies, et l'enregistrement ne pouvait plus retirer
+    // des regles qu'il ne voyait plus — chaque geste AJOUTAIT au lieu de
+    // remplacer. Exactement l'addition definitive que ce code dit empecher.
+    .eq('active', true)
     .order('created_at', { ascending: true }).limit(LOT_REGLES)
   if (errR) {
     console.error('[disponibilites] lecture regles echec', errR.message)
