@@ -123,10 +123,20 @@ update api_keys
        seam_enabled = false,
        brevo_enabled = false;
 
-update stripe_accounts
-   set secret_key_cipher = null,
-       webhook_secret_cipher = null;
+-- stripe_accounts.secret_key_cipher est NOT NULL, avec une contrainte de
+-- forme ('v1:%'). Une ligne « neutralisee » y est donc IMPOSSIBLE : la
+-- neutralisation correcte est l'absence de ligne.
+delete from stripe_accounts;
 ```
+
+⚠ `api_keys.brevo_enabled` et `seam_enabled` valent **`true` par défaut**. Une
+ligne créée sans les nommer est donc ACTIVE : le seed les pose explicitement à
+`false`.
+
+Le seed prêt à l'emploi est `scripts/seed-staging.sql` (protégé par
+`.vercelignore`). Il porte deux gardes qui refusent l'exécution ailleurs qu'en
+staging : présence du compte fondateur de production, et nombre de comptes
+différent de 1.
 
 Seul `lib/platform-notify.js` se protège par l'environnement seul.
 
@@ -162,9 +172,20 @@ global vers l'URL staging et générer une clé API dédiée.
 `.vercelignore`**. Ne pas créer `supabase/migrations/` : `supabase/` est servi
 par la racine statique (corrigé, mais la convention du dépôt est `migrations/`).
 
-Ces migrations couvrent l'incrémental depuis le 2026-08-31. Les 54 tables
-antérieures n'y sont pas : la base de départ vient d'un
-`supabase db dump --schema-only` de la production.
+Ces migrations couvrent l'incrémental depuis le 2026-08-31. Les 55 tables
+antérieures n'y sont pas : la base de départ vient d'un dump de la production.
+
+⚠ **Un dump sans `--schema=public` n'est pas applicable.** Le premier dump
+(`pg_dump --schema-only --no-owner --no-privileges`, 326 Ko) embarquait les
+schémas gérés par Supabase — `auth` (23 tables), `storage` (8), `realtime` (3)
+— plus huit `CREATE SCHEMA`. Appliqués sur un projet neuf, ils entrent en
+collision avec ce que Supabase provisionne lui-même. Les 34 clés étrangères de
+`public` vers `auth.users`, elles, sont à CONSERVER : `auth.users` existe
+nativement dans le projet cible.
+
+Note pg_dump 18 : la sortie commence par une méta-commande `\restrict`, que
+psql 17 et l'éditeur SQL de Supabase ne comprennent pas. À retirer si
+l'application ne se fait pas avec psql 18.
 
 Vérification de conformité staging/prod : interroger `information_schema`,
 jamais un script maison — REVIEW.md règle 16.
