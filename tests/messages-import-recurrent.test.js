@@ -249,8 +249,19 @@ test('LE TEST QUI COMPTE : un etat ILLISIBLE fait s abstenir, il ne relance pas 
   // Retomber sur `null` ferait repartir l import a zero — des centaines
   // d ecritures, et l alerte de croissance avec.
   const src = lire('lib/cron-channel-messages-sync.js')
+  // ⚠ LE BLOC SE DELIMITE PAR SA FONCTION, PAS PAR UN NOMBRE DE CARACTERES.
+  // Une fenetre fixe rougit des qu'on ajoute un commentaire — c'est arrive trois
+  // fois dans la meme journee — et, plus grave, elle VERDIT le jour ou la ligne
+  // qu'elle cherche sort de la fenetre sans avoir disparu du code.
   const i = src.indexOf('async function lireEtat')
-  const bloc = src.slice(i, i + 700)
+  const fin = src.indexOf('\nasync function ecrireEtat', i)
+  assert.ok(i > 0 && fin > i, 'les deux fonctions d etat sont introuvables')
+  const bloc = src.slice(i, fin)
   assert.ok(bloc.includes('illisible: true'), 'l echec de lecture est MARQUE, pas confondu avec « jamais importe »')
+  // ⚠ ET LA COLONNE LUE EST DEMANDEE. Son absence du `select` rendait tout le
+  // point de reprise inerte : PostgREST ne renvoie que ce qu'on demande, donc
+  // `data.errors` valait `undefined` et la reprise n'etait jamais relue.
+  assert.match(bloc, /select\('[^']*errors[^']*'\)/,
+    'le `select` doit demander `errors`, sinon le point de reprise n est jamais relu')
   assert.ok(src.includes("motif: 'etat_illisible'"), 'et il conduit a une abstention nommee')
 })

@@ -182,11 +182,28 @@ function fauxCronLogs ({ etat = null, lectureEnEchec = false } = {}) {
   const journal = { upserts: [] }
   const api = {
     from () {
+      // ⚠ LE DOUBLE PROJETTE LES COLONNES, COMME POSTGREST — ET SON ABSENCE DE
+      // PROJECTION A LAISSE PASSER LE DEFAUT CENTRAL DE CE LOT. Il rendait
+      // l'objet ENTIER quel que soit le `select`, donc le code pouvait lire
+      // `data.errors` sans jamais l'avoir demande : en production la colonne
+      // n'arrivait pas, le point de reprise n'etait jamais relu, et le correctif
+      // etait inerte. Un double plus riche que la vraie table (REVIEW.md
+      // regle 8), dans sa forme la plus cher payee.
+      let colonnes = null
       const q = {
-        select: () => q, eq: () => q,
-        maybeSingle: async () => lectureEnEchec
-          ? { data: null, error: { message: 'Gateway Timeout' } }
-          : { data: etat, error: null },
+        select: (cols) => {
+          colonnes = String(cols || '').split(',').map(c => c.trim()).filter(Boolean)
+          return q
+        },
+        eq: () => q,
+        maybeSingle: async () => {
+          if (lectureEnEchec) return { data: null, error: { message: 'Gateway Timeout' } }
+          if (!etat) return { data: null, error: null }
+          if (!colonnes || !colonnes.length) return { data: etat, error: null }
+          const projete = {}
+          for (const c of colonnes) if (c in etat) projete[c] = etat[c]
+          return { data: projete, error: null }
+        },
         upsert: async (row) => { journal.upserts.push(row); return { error: null } }
       }
       return q
@@ -367,6 +384,12 @@ test('CONTRE-EPREUVE : sans point de reprise, on reste sur la meme page a vie', 
     }
   })
   assert.strictEqual(pages.length, 5, 'les cinq passes sont tronquees')
+  // ⚠ `new Set([null,null,…]).size === 1` EST AUSSI VRAI, et la contre-epreuve
+  // restait donc VERTE sans le correctif — satisfaite par son absence. On exige
+  // d'abord qu'un point EXISTE, puis qu'il ne bouge pas.
+  assert.ok(pages[0] != null, 'un point de reprise est bien produit')
+  assert.ok(pages.every(p => p != null && p === pages[0]),
+    `sans reprise transmise, chaque cycle repart au meme point : ${pages.join(',')}`)
   assert.strictEqual(new Set(pages).size, 1,
     `sans reprise, chaque cycle repart au meme point : ${pages.join(',')}`)
 })
@@ -384,4 +407,36 @@ test('la reprise ne s\'applique QU\'AU fil quittee', async () => {
   assert.strictEqual(r.reprise, null, 'et le point de reprise est effacé')
   // Les deux fils ont ete lus en entier : aucune page sautee.
   assert.strictEqual(r.fils.lus, 2)
+})
+
+test('LE TEST QUI MANQUAIT : le point de reprise fait un ALLER-RETOUR par la base', async () => {
+  // ⚠ SANS CE TEST, LE CORRECTIF ETAIT INERTE ET LA SUITE VERTE. La persistance
+  // n'etait couverte que par un grep de source (`reprise: reprise || etat.reprise`)
+  // — une assertion que le defaut satisfaisait pleinement, puisqu'il portait sur
+  // le `select`, pas sur cette ligne. Les tests de comportement, eux, se
+  // passaient la reprise DE LA MAIN A LA MAIN entre deux appels. Personne ne
+  // relisait jamais ce qui avait ete ecrit.
+  const { api, journal } = fauxCronLogs({
+    etat: { last_run: null, total_messages: 4,
+            errors: [{ fil: 'fil-X', page: 4, count: 56, motif: 'budget' }] }
+  })
+  let recu = null
+  poserProvider({ pagesDeFils: 1, filsParPage: 1, pagesDeMessages: 1 })
+  const vraiFetch = global.fetch
+  global.fetch = async (url) => vraiFetch(url)
+
+  const { importerMessagesDuBien } = require('../lib/cron-channel-messages-sync')
+  const { getProvider } = require('../lib/channels')
+  const vrai = getProvider('channex').importMessages
+  getProvider('channex').importMessages = async (ctx) => { recu = ctx; return { imported: 0 } }
+  try {
+    await importerMessagesDuBien(api, { bien: BIEN, results: {}, echeance: Date.now() + 60000 })
+  } finally {
+    getProvider('channex').importMessages = vrai
+  }
+
+  assert.ok(recu, 'le provider est bien appele')
+  assert.deepStrictEqual(recu.reprise, { fil: 'fil-X', page: 4, count: 56 },
+    'le point de reprise ECRIT au cycle precedent doit etre RELU et transmis, `count` compris')
+  assert.ok(journal.upserts.length >= 0)
 })

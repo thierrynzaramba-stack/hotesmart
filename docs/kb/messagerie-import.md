@@ -43,6 +43,35 @@ moins informative, et l'informative était muette.**
 - **Le motif de l'abstention est enregistré.** Diagnostiquer a demandé de le *déduire* : l'état ne
   gardait que le compte, jamais la raison.
 
+⚠️ **ET LE CORRECTIF A D'ABORD ÉTÉ INERTE.** `lireEtat` faisait
+`select('last_run, total_messages')` puis lisait `data.errors` — une colonne qu'elle ne demandait
+pas. PostgREST ne renvoie que ce qu'on lui demande : `data.errors` valait `undefined`, le point de
+reprise n'était **jamais relu**, le fil repartait de sa page 1, et l'annonce repartait à chaque
+cycle. Le commit ajoutait du bruit et ne corrigeait rien. *Une écriture qui marche ne prouve pas
+qu'on saura la relire.*
+
+**Ce qui l'a laissé passer** : le double de `cron_logs` rendait l'objet **entier** quel que soit le
+`select`, et la persistance n'était couverte que par un grep de source — une assertion que le
+défaut satisfaisait pleinement, puisqu'il portait sur le `select`, pas sur la ligne lue. Les tests
+de comportement, eux, se passaient la reprise **de la main à la main**. Personne ne relisait jamais
+ce qui avait été écrit. Le double **projette** maintenant les colonnes, et un test fait
+l'**aller-retour** par la base.
+
+⚠️ **L'ordre des pages était une hypothèse, pas une mesure** — et ce même fichier mesure l'inverse à
+côté (« Channex plafonne ou ignore `pagination[limit]` »). Si les messages sortent du plus récent au
+plus ancien, ceux arrivés entre deux cycles passent **sous** l'offset : jamais lus, fil déclaré
+complet, perte définitive. Le point de reprise retient donc le **`message_count`** du fil — une
+valeur que le listing porte déjà, sans appel supplémentaire. Compte changé → on repart page 1. *Le
+pire cas redevient « on recommence », jamais « on perd ».*
+
+⚠️ **Une page vide à l'entrée d'une reprise ne prouve pas la complétude** : elle dit que l'offset
+désigne au-delà de la fin. Sortir avec `filComplet` ferait entrer l'instant du fil dans le marqueur
+alors que **rien n'a été lu**.
+
+⚠️ **Une reprise ne régresse pas.** Sur un bien à plusieurs fils, le cycle suivant relit ceux déjà
+finis et peut mourir **dedans** : le nouveau point désignerait un fil **antérieur**, et on
+n'arriverait jamais au bout.
+
 ## Ce qui n'est PAS corrigé, et qui demande un arbitrage
 
 Le budget de **2,5 s** reste la contrainte. L'import passe **après** les codes d'accès, dans un
