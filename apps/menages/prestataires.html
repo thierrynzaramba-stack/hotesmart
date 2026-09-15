@@ -168,9 +168,28 @@
       <div class="section-card" id="form-section" style="display:none">
         <div class="section-title" id="form-title">Nouveau prestataire</div>
         <div class="form-section">
+          <!-- ⚠ DEUX CHAMPS, ET LE NOM DE FAMILLE EST REQUIS (15 sept. 2026).
+               Il n'y avait qu'un champ, envoye en `first_name` a la creation et
+               PAS ENVOYE DU TOUT a la modification : le prenom et le libelle du
+               lien divergeaient, et rien sur cet ecran ne permettait de reparer
+               un nom.
+
+               ⚠ POURQUOI LE NOM EST OBLIGATOIRE, et ce n'est pas de l'etat
+               civil : un prenom seul ne DESIGNE personne des qu'il y a deux
+               Marie — ni dans cette liste, ni dans le planning, ni dans les
+               avis, ni dans le SMS qui arrive chez elle. Ce depot a deja paye
+               la fusion d'une identite dupliquee faute de savoir si deux lignes
+               parlaient de la meme personne.
+
+               ⚠ LA REGLE N'EST PAS RETROACTIVE : les fiches d'avant continuent
+               de fonctionner, elles sont seulement MARQUEES « nom manquant ».
+               Ce qu'elles ne peuvent plus, c'est etre enregistrees DEPUIS CET
+               ECRAN sans qu'on repare le nom au passage. -->
           <div class="form-row">
-            <input class="form-input" id="presta-name" placeholder="Nom (ex: Marie, Société Propre+)">
+            <input class="form-input" id="presta-prenom" placeholder="Prénom * (ex: Marie)">
+            <input class="form-input" id="presta-nom" placeholder="Nom * (ex: Dupont)">
           </div>
+          <div style="font-size:11px;color:var(--text2);margin:-4px 0 12px" id="aide-nom"></div>
 
           <!-- ⚠ SANS TELEPHONE, LA NOTIFIER NE NOTIFIE RIEN.
                `lib/cleaning/notifier-prestataire.js` envoie un SMS si le profil
@@ -365,7 +384,7 @@
       document.getElementById('form-section').style.display = 'block'
       document.getElementById('btn-show-form').style.display = 'none'
       document.getElementById('form-title').textContent = 'Nouveau prestataire'
-      document.getElementById('presta-name').focus()
+      document.getElementById('presta-prenom').focus()
     })
 
     document.getElementById('btn-cancel').addEventListener('click', resetForm)
@@ -470,6 +489,20 @@
         ? siens.map(prop => `<span class="prop-tag active">${echapper(prop.name)}</span>`).join('')
         : '<span class="prop-tag">Aucun bien — cette personne ne verra aucun ménage</span>'
 
+      // ⚠ « NOM MANQUANT » SE VOIT DANS LA LISTE, pas seulement dans la fiche.
+      // La regle n'est pas retroactive : ces fiches continuent de fonctionner.
+      // Mais il faut pouvoir les REPERER pour les solder une par une, sans
+      // ouvrir les dix fiches l'une apres l'autre.
+      // ⚠ Seulement quand on SAIT : sans profil rattache, ou si le rapprochement
+      // a echoue, l'absence de nom n'est pas un constat — c'est une ignorance,
+      // et l'afficher comme un defaut enverrait reparer ce qui va bien.
+      const profilCarte = profilLie(p)
+      const marqueNom = profilCarte && !profilCarte.nom
+        ? '<span class="prop-tag" style="color:#b45309;border-color:#b45309" ' +
+          'title="Un prénom seul ne distingue pas deux personnes. Son nom est demandé ' +
+          'au prochain enregistrement de sa fiche.">⚠️ Nom manquant</span>'
+        : ''
+
       return `
         <div class="presta-card">
           <div class="presta-card-header">
@@ -483,6 +516,7 @@
           <div class="presta-meta">
             <span class="presta-meta-item highlight">📅 ${visibilityDays} jours visibles</span>
             <span class="presta-meta-item">⭐ Ratio ${LIB_PERIODE_RATIO[p.ratio_periode] || 'non réglé (depuis le début)'}</span>
+            ${marqueNom}
             ${resumeRang(p)}
           </div>
           <div class="presta-link">
@@ -765,8 +799,13 @@
   // `ratio_periode`, qui sont des réglages d'affichage de l'app ménage et n'ont
   // rien à faire dans la gestion des personnes.
   async function createPrestataire() {
-    const name = document.getElementById('presta-name').value.trim()
-    if (!name) return alert('Entrez un nom pour le prestataire')
+    // ⚠ LE NOM DE FAMILLE EST REQUIS, ET L'ECRAN LE DIT AVANT L'ALLER-RETOUR.
+    // `/api/membres` refuse deja ; laisser partir la requete ferait remplir dix
+    // cases de droits pour se voir opposer un 400 sur la premiere.
+    const refusNom = refusDuNom()
+    if (refusNom) return alert(refusNom)
+    const { prenom, nom } = nomSaisi()
+    const name = libelleSaisi()
 
     const biens = saisieDesBiens()
     const refusCreation = perimetreRefuse(biens)
@@ -809,7 +848,8 @@
           // Le defaut n'etait visible qu'a l'usage reel — aucun test ne
           // confrontait le corps envoye par l'ecran aux actions du serveur.
           action: 'create',
-          first_name: name,
+          first_name: prenom,
+          last_name: nom,
           phone: contact.phone,
           email: contact.email,
           ...canauxTranches(),
@@ -973,7 +1013,6 @@
     const p = prestataires.find(p => p.id === id)
     if (!p) return
 
-    document.getElementById('presta-name').value = p.label || ''
     document.getElementById('visibility-days').value = p.visibility_days || 30
     // ⚠ Repli sur « toujours », le meme defaut que la colonne : une valeur
     // inconnue laisserait le <select> sur l'option precedemment affichee et
@@ -1026,6 +1065,18 @@
       }
       chargerDisponibilites(profil.id)
     }
+    // ⚠ PRE-REMPLI DEPUIS LE PROFIL, pas depuis `public_tokens.label`.
+    // Le libelle vaut « Prenom Nom » des qu'un nom existe : le recharger dans un
+    // champ « prenom » puis l'enregistrer ecrivait « Regina Dupont » dans le
+    // prenom en laissant `last_name` a « Dupont » — d'ou « Regina Dupont
+    // Dupont » dans le planning et dans le SMS. Avec deux champs, la source est
+    // le PROFIL, et le libelle en decoule.
+    // ⚠ Repli sur le libelle quand il n'y a pas de profil : le champ n'est alors
+    // pas enregistrable, mais il doit continuer de MONTRER de qui on parle.
+    document.getElementById('presta-prenom').value =
+      profil ? (profil.prenom || '') : (p.label || '')
+    document.getElementById('presta-nom').value = (profil && profil.nom) || ''
+    peindreAideNom(profil)
     document.getElementById('presta-phone').value = (profil && profil.telephone) || ''
     document.getElementById('presta-email').value = (profil && profil.email) || ''
     // ⚠ L'ETAT VIENT DU SERVEUR, ET IL FIGE LES CASES. Une fiche existante porte
@@ -1090,8 +1141,24 @@
   }
 
   async function saveEdit(id) {
-    const name = document.getElementById('presta-name').value.trim()
-    if (!name) return alert('Entrez un nom pour le prestataire')
+    // ⚠ LE NOM DE FAMILLE EST REQUIS, ET L'ECRAN LE DIT AVANT L'ALLER-RETOUR.
+    // `/api/membres` refuse deja ; laisser partir la requete ferait remplir dix
+    // cases de droits pour se voir opposer un 400 sur la premiere.
+    // ⚠ Sauf sur un lien SANS profil : rien n'y ecrit `profiles`, seul le
+    // libelle part — exiger le nom la figerait pour toujours.
+    // ⚠ LE NOM PART MAINTENANT VERS LE PROFIL (voir le corps de l'appel plus
+    // bas). Il ne partait pas du tout : le libelle du lien et le prenom du
+    // profil divergeaient, et cet ecran n'avait aucun moyen de reparer un nom —
+    // il fallait passer par la page Equipe. Avec deux champs, il n'y a plus
+    // d'ambiguite sur ce qu'on ecrit dans lequel.
+    //
+    // ⚠ CE COMMENTAIRE EST ICI ET PAS DANS LE LITTERAL : le verificateur de
+    // `tests/contrat-front-api.test.js` ne lit l'appel que sur une fenetre
+    // bornee. Il vient de le dire lui-meme, et c'est a ca qu'il sert.
+    const refusNom = refusDuNom({ avecProfil: !!editionEnCours })
+    if (refusNom) return alert(refusNom)
+    const { prenom, nom } = nomSaisi()
+    const name = libelleSaisi()
 
     const visibilityDays = parseInt(document.getElementById('visibility-days').value)
 
@@ -1132,6 +1199,7 @@
           // le lot 2.5 — donc tous ceux qui recoivent des menages — etait
           // totalement inoperant. Meme faute sur `deactivate`.
           action: 'update', profile_id: editionEnCours,
+          first_name: prenom, last_name: nom,
           phone: contact.phone, email: contact.email,
           notify_sms: contact.notify_sms, notify_email: contact.notify_email,
           permissions: { property_scope: 'selected',
@@ -1314,7 +1382,7 @@
     if (caseSms && caseSms.disabled) { zone.textContent = ''; return }
     const etat = canauxSaisis()
     const vierge = !etat.phone && !etat.email &&
-                   !document.getElementById('presta-name').value.trim() &&
+                   !libelleSaisi() &&
                    !canalTouche.sms && !canalTouche.email
     if (vierge) { zone.textContent = ''; return }
     const vides = []
@@ -1332,6 +1400,53 @@
       zone.style.color = '#b45309'
       zone.textContent = '⚠️ Aucun canal actif : elle ne verra un ménage qu\'en ouvrant ' +
         'son lien. Une assignation en urgence sera muette.'
+      return
+    }
+    zone.textContent = ''
+  }
+
+  // Le nom tel qu'il s'affiche partout : liste, planning, « Bonjour … » du SMS.
+  // ⚠ UNE SEULE COMPOSITION, ICI. `api/membres.js` compose le libelle du lien
+  // de la meme facon (`[first_name, last_name].join(' ')`) : deux compositions
+  // differentes pour le meme nom finiraient par diverger, et la liste
+  // afficherait autre chose que le SMS.
+  function nomSaisi() {
+    return { prenom: document.getElementById('presta-prenom').value.trim(),
+             nom: document.getElementById('presta-nom').value.trim() }
+  }
+  function libelleSaisi() {
+    const n = nomSaisi()
+    return [n.prenom, n.nom].filter(Boolean).join(' ')
+  }
+
+  // Rend le message de refus, ou `null`. ⚠ L'ECRAN REFUSE AVANT L'ALLER-RETOUR :
+  // le serveur refuse deja, mais laisser partir la requete ferait remplir dix
+  // cases de droits pour se voir opposer un 400 sur la premiere.
+  function refusDuNom({ avecProfil = true } = {}) {
+    const n = nomSaisi()
+    if (!n.prenom) return 'Entrez le prénom du prestataire.'
+    // ⚠ UN LIEN SANS PROFIL N'A PAS DE NOM DE FAMILLE A ECRIRE. Rien n'y a de
+    // writer pour `profiles` : seul le LIBELLE du lien part. Exiger le nom la
+    // rendrait cette fiche definitivement non enregistrable — le blocage
+    // retroactif exact qu'on refuse. Ces liens sont d'avant le lot 2.5, et le
+    // bandeau au-dessus dit deja de recreer le prestataire.
+    if (!avecProfil) return null
+    if (!n.nom) return 'Entrez le nom de famille du prestataire. ' +
+      'Un prénom seul ne suffit pas à la distinguer d\'une autre personne — ' +
+      'dans le planning, dans les avis, et dans le SMS qu\'elle reçoit.'
+    return null
+  }
+
+  // ⚠ « NOM MANQUANT » SE DIT, IL NE SE DEVINE PAS. Une fiche d'avant ce lot
+  // continue de fonctionner — c'est la regle : pas de blocage retroactif — mais
+  // l'hote doit savoir pourquoi l'enregistrement va lui reclamer un nom.
+  function peindreAideNom(profil) {
+    const zone = document.getElementById('aide-nom')
+    if (!zone) return
+    if (profil && !profil.nom) {
+      zone.style.color = '#b45309'
+      zone.textContent = '⚠️ Nom manquant sur cette fiche. Elle continue de fonctionner, ' +
+        'mais son nom de famille est demandé pour l\'enregistrer.'
       return
     }
     zone.textContent = ''
@@ -1381,7 +1496,9 @@
     editionEnCours = null
     const section = document.getElementById('dispo-section')
     if (section) section.style.display = 'none'
-    document.getElementById('presta-name').value = ''
+    document.getElementById('presta-prenom').value = ''
+    document.getElementById('presta-nom').value = ''
+    peindreAideNom(null)
     document.getElementById('presta-phone').value = ''
     document.getElementById('presta-email').value = ''
     // ⚠ LE FORMULAIRE REPART VIERGE, LES CASES AUSSI. Sans cette remise a zero,

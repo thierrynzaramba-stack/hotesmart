@@ -231,6 +231,21 @@ async function creer (req, res, compte, base) {
   const prenom = String(b.first_name || '').trim()
   if (!prenom) return res.status(400).json({ error: 'Le prénom est requis' })
 
+  // ⚠ LE NOM DE FAMILLE EST OBLIGATOIRE A LA CREATION (15 septembre 2026).
+  //
+  // POURQUOI, ET CE N'EST PAS DE L'ETAT CIVIL. Un prenom seul ne DESIGNE
+  // personne des qu'il y a deux Marie : ni dans la liste des prestataires, ni
+  // dans le planning, ni dans les avis, ni dans le SMS qui arrive chez elle. On
+  // a deja paye la fusion d'une identite dupliquee faute de savoir si deux
+  // lignes parlaient de la meme personne.
+  //
+  // ⚠ REFUSE MEME QUAND LE CHAMP EST ABSENT, pas seulement vide. Un client qui
+  // ne l'envoie pas — un ancien ecran, un appel direct — creerait sinon
+  // exactement les fiches que cette regle existe pour empecher, et c'est le
+  // chemin par lequel elles arriveraient toutes.
+  const nomFamille = String(b.last_name == null ? '' : b.last_name).trim()
+  if (!nomFamille) return res.status(400).json({ error: 'Le nom de famille est requis' })
+
   const mode = b.access_mode === 'lien' ? 'lien' : 'compte'
   const email = String(b.email || '').trim() || null
   if (mode === 'compte' && !email) {
@@ -263,7 +278,7 @@ async function creer (req, res, compte, base) {
     account_user_id: compte,
     member_user_id:  null,
     first_name:      prenom,
-    last_name:       String(b.last_name || '').trim() || null,
+    last_name:       nomFamille,
     email,
     phone:           String(b.phone || '').trim() || null,
     // ⚠ LE DEFAUT EST `true`, COMME LA COLONNE. Un client qui n'envoie rien —
@@ -414,7 +429,21 @@ async function modifier (req, res, compte) {
     if (!prenom) return res.status(400).json({ error: 'Le prénom est requis' })
     maj.first_name = prenom
   }
-  if (b.last_name != null) maj.last_name = String(b.last_name).trim() || null
+  // ⚠ ON NE PEUT PAS EFFACER UN NOM DE FAMILLE, MAIS ON NE FORCE PERSONNE A EN
+  // POSER UN. Les deux moities de la meme regle, et elles ne disent pas la meme
+  // chose :
+  //
+  //   - champ ENVOYE et vide  -> REFUS. Enregistrer une fiche en effacant le
+  //     nom la ramenerait a l'etat que la creation interdit desormais.
+  //   - champ ABSENT          -> on n'y touche pas. C'est ce qui rend la regle
+  //     NON RETROACTIVE : les fiches d'avant restent modifiables par tout
+  //     writer qui ne s'occupe pas du nom, rien de ce qui tourne ne casse.
+  //     L'obligation lie les FORMULAIRES, qui eux envoient toujours le champ.
+  if (b.last_name != null) {
+    const nomFamille = String(b.last_name).trim()
+    if (!nomFamille) return res.status(400).json({ error: 'Le nom de famille est requis' })
+    maj.last_name = nomFamille
+  }
   if (b.phone != null)     maj.phone     = String(b.phone).trim() || null
   // L'email n'est modifiable que tant qu'il n'identifie pas un compte auth
   // reellement rattache — c'est `member_user_id` qui le dit, pose dans le meme

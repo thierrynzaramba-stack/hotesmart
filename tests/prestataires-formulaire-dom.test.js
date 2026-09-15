@@ -78,7 +78,8 @@ function monterPage ({ liaisons = [] } = {}) {
       ecrits, envois,
       seed (b, l, p) { properties = b; liaisons = l; prestataires = p
                        currentSession = { access_token: 'jwt', user: { id: 'compte-1' } }
-                       prestatairesProfils = [{ id: '${PROFIL}', prenom: 'Régina', actif: true,
+                       prestatairesProfils = [{ id: '${PROFIL}', prenom: 'Régina', nom: 'Martin',
+                                                actif: true,
                                                 a_lien: true, public_token_id: '${LIGNE_TOKEN.id}',
                                                 telephone: null, email: null,
                                                 permissions: { self_availability: 'write' } }]
@@ -298,7 +299,8 @@ test('la création refuse le même périmètre vide, avec le même message', asy
     c.checked = false
     c.dispatchEvent(new w.Event('change'))
   }
-  w.document.getElementById('presta-name').value = 'Nouvelle'
+  w.document.getElementById('presta-prenom').value = 'Nouvelle'
+  w.document.getElementById('presta-nom').value = 'Dupont'
   await t.createPrestataire()
   assert.deepStrictEqual(ecrituresDuPerimetre(envois), [],
     'aucun profil créé sans périmètre exploitable')

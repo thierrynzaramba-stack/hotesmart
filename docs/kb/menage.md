@@ -941,6 +941,50 @@ la fiche ? — qui ne dépend d'aucune limite interne. Contre-épreuve de la con
 400 caractères ajoutés dans l'appel le plus serré (`update`, à 1047/1400) font bien rougir.
 *Un vérificateur qui n'a rien lu doit échouer, pas se taire.*
 
+### Le nom de famille est obligatoire (point 4, 15 sept. 2026)
+
+**Pourquoi, et ce n'est pas de l'état civil.** Un prénom seul ne **désigne** personne dès qu'il y a
+deux Marie : ni dans la liste des prestataires, ni dans le planning, ni dans les avis, ni dans le
+SMS qui arrive chez elle. Ce dépôt a déjà payé la **fusion d'une identité dupliquée**, faute de
+savoir si deux lignes parlaient de la même personne.
+
+- **Serveur** (`api/membres.js`, seul writer de `profiles` — vérifié, un seul INSERT dans tout le
+  dépôt) : `create` refuse un `last_name` **absent ou vide** ; `update` refuse un `last_name`
+  **envoyé et vide**.
+- ⚠️ **Et c'est cette asymétrie qui rend la règle NON RÉTROACTIVE.** À la modification, un champ
+  **absent** n'est pas touché : les fiches d'avant restent modifiables par tout writer qui ne
+  s'occupe pas du nom, rien de ce qui tourne ne casse. L'obligation lie les **formulaires**, qui
+  eux envoient toujours le champ. *Une obligation qui fige l'existant n'est pas une obligation,
+  c'est une panne.*
+- **L'écran prestataire avait UN seul champ**, envoyé en `first_name` à la création et **pas envoyé
+  du tout** à la modification. Le libellé du lien et le prénom du profil divergeaient donc, et rien
+  ici ne permettait de réparer un nom — il fallait passer par la page Équipe. Deux champs
+  maintenant, pré-remplis **depuis le profil** (jamais depuis `public_tokens.label`, qui vaut
+  « Prénom Nom » : le recharger dans un champ « prénom » écrivait « Régina Martin » dans le prénom
+  en laissant `last_name` à « Martin », d'où **« Régina Martin Martin »** dans le planning et dans
+  le SMS). **Le libellé est COMPOSÉ**, il n'est pas une troisième saisie — et par la même
+  composition que `api/membres.js`, sinon la liste dirait autre chose que le SMS.
+- **« Nom manquant » se voit dans la LISTE**, pas seulement dans la fiche : il faut pouvoir les
+  solder une par une sans ouvrir les dix fiches. ⚠️ **Seulement quand on SAIT** : sans profil
+  rattaché, ou si le rapprochement a échoué, l'absence de nom n'est pas un constat mais une
+  **ignorance** — l'afficher comme un défaut enverrait réparer ce qui va bien.
+- ⚠️ **Un lien SANS profil reste enregistrable.** Rien n'y écrit `profiles` : seul le libellé part.
+  Exiger un nom de famille rendrait ces liens **définitivement** non enregistrables — le blocage
+  rétroactif exact qu'on refuse.
+- **`/settings`** porte la même règle des deux côtés (libellé « Nom * » + refus avant l'aller-retour).
+- **Éprouvé** : `tests/prestataires-nom-dom.test.js` (10 tests, vrai DOM) et
+  `tests/membres-endpoint.test.js` (les six cas : absent, vide, blanc, effacement refusé, champ
+  absent toléré, réparation).
+- ⚠️ **QUESTION PRODUIT OUVERTE — LES SOCIÉTÉS.** Le placeholder disait « ex: Marie, Société
+  Propre+ » : une entreprise n'a pas de nom de famille. La règle la contraint aujourd'hui à
+  remplir les deux champs. À trancher : soit une case « c'est une société » qui lève l'obligation,
+  soit on assume que le second champ porte la raison sociale ou le nom du contact.
+
+⚠️ **Le garde-fou du vérificateur de contrat a servi le jour même.** En ajoutant un commentaire
+dans le corps de `update`, la suite est passée à 11 rouges et le test a **nommé la cause** —
+« appels() ne retrouve plus que 2 POST /api/membres … sortez les commentaires de l'appel » — au
+lieu de laisser chercher un appel disparu. C'est exactement ce qu'on lui demandait.
+
 **Dette notée, non corrigée ici** (partagée avec l'écran hôte, à solder ensemble) :
 - la lettre A/B se calcule en `% 2` en dur alors que la cadence va jusqu'à **4** : sur « toutes
   les 3 semaines », la colonne de gauche annonce un rythme que les cases (correctes) ne suivent

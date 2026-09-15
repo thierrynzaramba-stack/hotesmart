@@ -236,7 +236,7 @@ test('cobaye : ce qu\'il cree n\'atterrit QUE sur son propre compte', async () =
   const etat = preparer({ user: MEMBRE, profil: profilActif(), permissions: perms({ equipe: 'none' }) })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Chez lui', email: 'x@y.fr', permissions: droitsVides() } }), res)
+    action: 'create', first_name: 'Chez lui', last_name: 'Dupont', email: 'x@y.fr', permissions: droitsVides() } }), res)
   const ins = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'insert')
   if (ins) assert.strictEqual(ins.row.account_user_id, MEMBRE,
     'un profil cree par le compte test ne doit jamais porter le compte prod')
@@ -247,7 +247,7 @@ test('cobaye : rattacher un bien du compte prod a son profil -> refus', async ()
   const etat = preparer({ user: MEMBRE, profil: profilActif(), permissions: perms({ equipe: 'none' }) })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Complice', email: 'c@d.fr',
+    action: 'create', first_name: 'Complice', last_name: 'Dupont', email: 'c@d.fr',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
   assert.strictEqual(res.code, 403)
   assert.deepStrictEqual(etat.ecritures, [])
@@ -301,7 +301,7 @@ test('titulaire : creation d\'un acces par lien -> public_tokens alimente', asyn
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Nouveau', access_mode: 'lien',
+    action: 'create', first_name: 'Nouveau', last_name: 'Dupont', access_mode: 'lien',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id],
                    self_availability: 'write' } } }), res)
   assert.strictEqual(res.code, 200)
@@ -318,7 +318,7 @@ test('creation : un bien d\'un AUTRE compte est refuse', async () => {
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'X', email: 'x@y.fr',
+    action: 'create', first_name: 'X', last_name: 'Dupont', email: 'x@y.fr',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_TIERS.id] } } }), res)
   assert.strictEqual(res.code, 403)
   assert.deepStrictEqual(etat.ecritures, [])
@@ -329,7 +329,7 @@ test('creation : facturation ou equipe en ecriture -> refus', async () => {
     const etat = preparer({ user: PROD })
     const res = reponse()
     await require('../api/membres')(req({ body: {
-      action: 'create', first_name: 'X', email: 'x@y.fr',
+      action: 'create', first_name: 'X', last_name: 'Dupont', email: 'x@y.fr',
       permissions: { ...droitsVides(), [domaine]: 'write' } } }), res)
     assert.strictEqual(res.code, 400, domaine)
     assert.deepStrictEqual(etat.ecritures, [], domaine)
@@ -340,7 +340,7 @@ test('creation : niveau inconnu -> refus', async () => {
   preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'X', email: 'x@y.fr',
+    action: 'create', first_name: 'X', last_name: 'Dupont', email: 'x@y.fr',
     permissions: { ...droitsVides(), reservations: 'admin' } } }), res)
   assert.strictEqual(res.code, 400)
 })
@@ -349,7 +349,7 @@ test('creation : un acces par compte sans email est refuse', async () => {
   preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'X', access_mode: 'compte', permissions: droitsVides() } }), res)
+    action: 'create', first_name: 'X', last_name: 'Dupont', access_mode: 'compte', permissions: droitsVides() } }), res)
   assert.strictEqual(res.code, 400)
 })
 
@@ -584,7 +584,7 @@ test('PERIMETRE : « une sélection » sans aucun bien est REFUSEE pour un lien 
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    action: 'create', first_name: 'Presta', last_name: 'Dupont', access_mode: 'lien',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
   assert.strictEqual(res.code, 400)
   assert.match(res.body.error, /au moins un bien/)
@@ -597,7 +597,7 @@ test('PERIMETRE : des biens sans provider_property_id sont refuses pour un lien 
   const etat = preparer({ user: PROD, biensSansRef: true })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    action: 'create', first_name: 'Presta', last_name: 'Dupont', access_mode: 'lien',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
   assert.strictEqual(res.code, 400)
   assert.deepStrictEqual(etat.ecritures, [])
@@ -609,7 +609,7 @@ test('PERIMETRE : un acces par COMPTE accepte une selection vide (aucun bien)', 
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Sans bien', email: 's@b.fr', access_mode: 'compte',
+    action: 'create', first_name: 'Sans bien', last_name: 'Dupont', email: 's@b.fr', access_mode: 'compte',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [] } } }), res)
   assert.strictEqual(res.code, 200)
   void etat
@@ -753,7 +753,7 @@ test('CREATION PRESTATAIRE : les domaines sont forces a « rien », meme envoyes
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    action: 'create', first_name: 'Presta', last_name: 'Dupont', access_mode: 'lien',
     permissions: { property_scope: 'selected', property_ids: [BIEN_A.id],
                    reservations: 'write', menages: 'write', reglages: 'write',
                    self_availability: 'write', self_view_reviews: true } } }), res)
@@ -897,7 +897,7 @@ test('CREATION PRESTATAIRE : « tous les biens » est REFUSE', async () => {
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    action: 'create', first_name: 'Presta', last_name: 'Dupont', access_mode: 'lien',
     permissions: { self_availability: 'write', self_view_reviews: true } } }), res)
   assert.strictEqual(res.code, 400)
   assert.match(res.body.error, /tous les biens/)
@@ -908,7 +908,7 @@ test('CREATION PRESTATAIRE : avec des biens explicites -> accepte et perimetre P
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Presta', access_mode: 'lien',
+    action: 'create', first_name: 'Presta', last_name: 'Dupont', access_mode: 'lien',
     permissions: { property_scope: 'selected', property_ids: [BIEN_A.id],
                    self_availability: 'write', self_view_reviews: true } } }), res)
   assert.strictEqual(res.code, 200)
@@ -923,7 +923,7 @@ test('CREATION MEMBRE : « tous les biens » reste permis', async () => {
   preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Employé', email: 'e@f.fr', access_mode: 'compte',
+    action: 'create', first_name: 'Employé', last_name: 'Dupont', email: 'e@f.fr', access_mode: 'compte',
     permissions: { ...droitsVides(), property_scope: 'all', reservations: 'write' } } }), res)
   assert.strictEqual(res.code, 200)
 })
@@ -978,7 +978,7 @@ test('LIEN PWA : meme URL pour un profil CREE depuis /settings', async () => {
   preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Nadia', access_mode: 'lien',
+    action: 'create', first_name: 'Nadia', last_name: 'Dupont', access_mode: 'lien',
     permissions: { property_scope: 'selected', property_ids: [BIEN_A.id],
                    self_availability: 'write', self_view_reviews: true } } }), res)
   assert.strictEqual(res.code, 200)
@@ -1066,7 +1066,7 @@ test('un profil `lien` gère ses absences par DÉFAUT', async () => {
   const etat = preparer({ user: PROD, profil: null, permissions: null })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Marie', access_mode: 'lien',
+    action: 'create', first_name: 'Marie', last_name: 'Dupont', access_mode: 'lien',
     permissions: { property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
   const droits = etat.ecritures.find(e => e.table === 'profile_permissions')
   assert.ok(droits, 'les droits sont écrits à la création')
@@ -1077,7 +1077,7 @@ test('un profil de COMPTE, lui, n\'a pas d\'absences à déclarer', async () => 
   const etat = preparer({ user: PROD, profil: null, permissions: null })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Employé', email: 'e@x.fr',
+    action: 'create', first_name: 'Employé', last_name: 'Dupont', email: 'e@x.fr',
     permissions: { property_scope: 'all', property_ids: [] } } }), res)
   const droits = etat.ecritures.find(e => e.table === 'profile_permissions')
   assert.ok(droits)
@@ -1089,7 +1089,7 @@ test('le droit ENVOYÉ l\'emporte sur le défaut', async () => {
   const etat = preparer({ user: PROD, profil: null, permissions: null })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Marie', access_mode: 'lien',
+    action: 'create', first_name: 'Marie', last_name: 'Dupont', access_mode: 'lien',
     permissions: { property_scope: 'selected', property_ids: [BIEN_A.id], self_availability: 'none' } } }), res)
   const droits = etat.ecritures.find(e => e.table === 'profile_permissions')
   assert.strictEqual(droits.row.self_availability, 'none')
@@ -1120,7 +1120,7 @@ test('creation : les deux canaux sont ecrits tels que demandes', async () => {
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Nouvelle', access_mode: 'lien',
+    action: 'create', first_name: 'Nouvelle', last_name: 'Dupont', access_mode: 'lien',
     phone: '+33600000000', email: 'n@x.fr',
     notify_sms: true, notify_email: false,
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
@@ -1137,7 +1137,7 @@ test('creation SANS les champs : quelqu\'un de JOIGNABLE, pas quelqu\'un de muet
   const etat = preparer({ user: PROD })
   const res = reponse()
   await require('../api/membres')(req({ body: {
-    action: 'create', first_name: 'Nouvelle', access_mode: 'lien', phone: '+33600000000',
+    action: 'create', first_name: 'Nouvelle', last_name: 'Dupont', access_mode: 'lien', phone: '+33600000000',
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
   assert.strictEqual(res.code, 200)
   const ins = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'insert')
@@ -1205,4 +1205,101 @@ test('seul un `false` EXPLICITE ferme un canal', async () => {
     permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), reponse())
   const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
   assert.ok(!maj || !('notify_sms' in maj.row), '`null` ne touche a rien')
+})
+
+// ─── LE NOM DE FAMILLE EST OBLIGATOIRE (point 4, 15 septembre 2026) ─────────
+//
+// ⚠ POURQUOI, ET CE N'EST PAS DE L'ETAT CIVIL. Un prenom seul ne DESIGNE
+// personne des qu'il y a deux Marie : ni dans la liste des prestataires, ni
+// dans le planning, ni dans les avis, ni dans le SMS qui arrive chez elle. Ce
+// depot a deja paye la fusion d'une identite dupliquee, faute de savoir si deux
+// lignes parlaient de la meme personne.
+//
+// ⚠ ET LA REGLE N'EST PAS RETROACTIVE. C'est la moitie la plus facile a casser :
+// les fiches d'avant n'ont pas de nom, et rien de ce qui tourne ne doit
+// s'arreter parce qu'elles n'en ont pas.
+
+test('creation : sans nom de famille -> refus', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Marie', access_mode: 'lien',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /nom de famille/i)
+  assert.strictEqual(etat.ecritures.length, 0, 'rien n\'est ecrit')
+})
+
+test('creation : un nom de famille VIDE ou blanc -> refus', async () => {
+  // ⚠ Le champ envoye vide est le cas le plus probable : un formulaire qui
+  // envoie tous ses champs, et celui-la non rempli.
+  for (const valeur of ['', '   ', '\t']) {
+    const etat = preparer({ user: PROD })
+    const res = reponse()
+    await require('../api/membres')(req({ body: {
+      action: 'create', first_name: 'Marie', last_name: valeur, access_mode: 'lien',
+      permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+    assert.strictEqual(res.code, 400, `${JSON.stringify(valeur)} doit etre refuse`)
+    assert.strictEqual(etat.ecritures.length, 0)
+  }
+})
+
+test('creation : le nom est ECRIT tel quel, espaces en moins', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'create', first_name: 'Marie', last_name: '  Dupont  ', access_mode: 'lien',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const ins = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'insert')
+  assert.strictEqual(ins.row.last_name, 'Dupont')
+  // Et le libelle du lien PWA en herite : c'est lui que la liste affiche.
+  const pt = etat.ecritures.find(e => e.table === 'public_tokens')
+  assert.strictEqual(pt.row.label, 'Marie Dupont')
+})
+
+test('modification : EFFACER un nom de famille -> refus', async () => {
+  // Enregistrer en effacant le nom ramenerait la fiche a l'etat que la creation
+  // interdit desormais.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: REGINA.id, last_name: '',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /nom de famille/i)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.ok(!maj, 'aucune ecriture de profil : le refus est TOTAL, pas partiel')
+})
+
+test('modification : nom ABSENT du corps -> la fiche d\'avant reste enregistrable', async () => {
+  // ⚠ LA MOITIE NON RETROACTIVE DE LA REGLE, et c'est elle qui protege
+  // l'existant. `REGINA` n'a pas de `last_name` en base. Un writer qui ne
+  // s'occupe pas du nom — le panneau reduit d'un autre ecran, un appel qui ne
+  // change qu'un numero — ne doit pas se voir refuser son enregistrement a
+  // cause d'un champ qu'il ne touche pas. Sinon toute fiche d'avant ce lot
+  // deviendrait DEFINITIVEMENT non modifiable : c'est exactement le blocage
+  // retroactif qu'on refuse.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: REGINA.id, phone: '+33611111111',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.strictEqual(maj.row.phone, '+33611111111')
+  assert.ok(!('last_name' in maj.row), 'le nom n\'est pas touche')
+})
+
+test('modification : poser enfin un nom sur une fiche qui n\'en avait pas', async () => {
+  // Le chemin de REPARATION : c'est ainsi que les fiches marquees
+  // « nom manquant » se soldent, une par une.
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/membres')(req({ body: {
+    action: 'update', profile_id: REGINA.id, last_name: 'Martin',
+    permissions: { ...droitsVides(), property_scope: 'selected', property_ids: [BIEN_A.id] } } }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'profiles' && e.action === 'update')
+  assert.strictEqual(maj.row.last_name, 'Martin')
 })

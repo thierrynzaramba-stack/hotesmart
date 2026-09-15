@@ -44,7 +44,7 @@ function monter ({ profil = {} } = {}) {
   // ?contacts=1` qui rend `notif_sms` / `notif_email` : un double qui les
   // inventerait ne prouverait rien sur ce que l'écran reçoit vraiment.
   const p = Object.assign({
-    id: PROFIL, prenom: 'Régina', actif: true, a_lien: true,
+    id: PROFIL, prenom: 'Régina', nom: 'Martin', actif: true, a_lien: true,
     public_token_id: LIGNE.id, telephone: null, email: null,
     permissions: { self_availability: 'write' }
   }, profil)
@@ -181,7 +181,8 @@ test('la CRÉATION envoie les canaux TRANCHÉS, dans les deux sens', async () =>
   // des décisions, et non le défaut de l'écran (voir le test suivant).
   const { w, t, envois } = monter()
   t.seed(); t.renderPropCheckboxes(); t.resetForm()
-  el(w, 'presta-name').value = 'Nouvelle'
+  el(w, 'presta-prenom').value = 'Nouvelle'
+  el(w, 'presta-nom').value = 'Dupont'
   taper(w, 'presta-phone', '+33600000000')
   taper(w, 'presta-email', 'n@x.fr')
   cocher(w, 'presta-notif-sms', true)
@@ -209,7 +210,8 @@ test('la création n\'envoie PAS un canal que personne n\'a tranché', async () 
   // « quand tu auras la coordonnée, sers-t'en ».
   const { w, t, envois } = monter()
   t.seed(); t.renderPropCheckboxes(); t.resetForm()
-  el(w, 'presta-name').value = 'Nouvelle'
+  el(w, 'presta-prenom').value = 'Nouvelle'
+  el(w, 'presta-nom').value = 'Dupont'
   taper(w, 'presta-phone', '+33600000000')      // aucune case touchée
   const cb = el(w, `prop-${BIENS[0].id}`)
   if (cb) cb.checked = true
@@ -227,7 +229,8 @@ test('la création n\'envoie PAS un canal que personne n\'a tranché', async () 
 test('un canal tranché part, l\'autre non — les deux cas dans la même création', async () => {
   const { w, t, envois } = monter()
   t.seed(); t.renderPropCheckboxes(); t.resetForm()
-  el(w, 'presta-name').value = 'Nouvelle'
+  el(w, 'presta-prenom').value = 'Nouvelle'
+  el(w, 'presta-nom').value = 'Dupont'
   taper(w, 'presta-phone', '+33600000000')
   cocher(w, 'presta-notif-sms', false)          // tranché : elle ne veut pas de SMS
   const cb = el(w, `prop-${BIENS[0].id}`)

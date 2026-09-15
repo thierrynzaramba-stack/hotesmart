@@ -229,8 +229,13 @@ module.exports = async function handler(req, res) {
         // par SMS : oui » ne veut rien dire sans le numero a cote — l'ecran ne
         // saurait pas signaler le canal coche SANS coordonnee, qui est
         // justement ce qu'il doit montrer.
+        // ⚠ `last_name` SORT AVEC LES COORDONNEES, pas avec le prenom.
+        // La fiche en a besoin pour deux choses : pre-remplir le champ, et
+        // signaler « nom manquant ». Le planning, lui, n'affiche qu'un prenom
+        // et n'a pas a recevoir le nom de famille du personnel — meme regle
+        // que le numero a cote.
         .select('id, first_name, active, pwa_token' +
-                (avecContacts ? ', phone, email, notify_sms, notify_email' : ''))
+                (avecContacts ? ', last_name, phone, email, notify_sms, notify_email' : ''))
         .eq('account_user_id', userId).eq('access_mode', 'lien')
         .order('first_name', { ascending: true })
       if (errPr) console.error('[menages] lecture prestataires echec', errPr.message)
@@ -304,6 +309,7 @@ module.exports = async function handler(req, res) {
           // personnels de tout le personnel de menage sans jamais les afficher.
           // Une donnee qu'un ecran n'utilise pas n'a pas a transiter par lui.
           ...(avecContacts ? {
+            nom: x.last_name || null,
             telephone: x.phone || null, email: x.email || null,
             // ⚠ `!== false`, PAS `=== true` : meme regle que le notifieur. Une
             // ligne ecrite avant la migration, ou un champ absent d'une reponse

@@ -171,7 +171,7 @@
       <div class="bloc-titre">Identité</div>
       <div class="grid2">
         <div><label class="f" for="f-prenom">Prénom *</label><input class="f" id="f-prenom" autocomplete="off"></div>
-        <div><label class="f" for="f-nom">Nom</label><input class="f" id="f-nom" autocomplete="off"></div>
+        <div><label class="f" for="f-nom">Nom *</label><input class="f" id="f-nom" autocomplete="off"></div>
       </div>
       <div class="grid2">
         <div><label class="f" for="f-email">Email</label><input class="f" id="f-email" type="email" autocomplete="off"></div>
@@ -509,13 +509,21 @@ function fermer () { $('overlay').classList.remove('open'); edite = null; lienAf
 async function enregistrer () {
   const prenom = $('f-prenom').value.trim()
   if (!prenom) return message('Le prénom est requis.')
+  // ⚠ LE NOM DE FAMILLE EST REQUIS, DES DEUX COTES (15 septembre 2026).
+  // Le serveur refuse déjà (`api/membres.js`) ; l'écran le dit AVANT l'aller-
+  // retour, sinon l'hôte remplit dix cases de droits pour se voir opposer un
+  // 400 sur la première. Un prénom seul ne désigne personne dès qu'il y a
+  // deux Marie — ni ici, ni dans le planning, ni dans le SMS qui arrive chez
+  // elle.
+  const nomFamille = $('f-nom').value.trim()
+  if (!nomFamille) return message('Le nom de famille est requis.')
 
   const permissions = { ...brouillon, property_scope: $('f-scope').value }
   if (permissions.property_scope !== 'selected') permissions.property_ids = []
 
   const corps = {
     first_name: prenom,
-    last_name:  $('f-nom').value.trim(),
+    last_name:  nomFamille,
     email:      $('f-email').value.trim(),
     phone:      $('f-tel').value.trim(),
     permissions
