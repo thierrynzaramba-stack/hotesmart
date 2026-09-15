@@ -1,6 +1,45 @@
-export const ENV = {
-  supabaseUrl: 'https://cjmrizpdyhrcurmgyrhs.supabase.co',
-  supabaseKey: 'sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD'
+// ─── Cible Supabase : resolue au chargement, par hostname ────────────────────
+// Les deux projets Vercel servent la MEME branche et le MEME fichier : rien
+// dans le code ne distingue prod de staging, seul le domaine qui le sert.
+//
+// ⚠ CONTRAINTE DE DEPLOIEMENT : le domaine du projet staging DOIT contenir
+// "staging". C'est le seul signal disponible cote navigateur — vercel.json ne
+// declare aucun build (buildCommand: ""), donc aucune variable d'environnement
+// n'est injectable dans un fichier statique. Un domaine staging qui ne porte
+// pas ce mot ferait ecrire le navigateur dans la base de PRODUCTION, en
+// silence et sans rien casser d'apparent.
+//
+// Le defaut est la PROD, volontairement : les previews du projet de production
+// et localhost gardent le comportement actuel. Aucune regression.
+//
+// La cle publishable n'est PAS un secret : elle part dans le HTML de chaque
+// visiteur. C'est la RLS (28/28 actives) qui protege, jamais sa
+// confidentialite. La service_role, elle, ne vit que cote serveur.
+
+const CIBLES_SUPABASE = {
+  prod: {
+    supabaseUrl: 'https://cjmrizpdyhrcurmgyrhs.supabase.co',
+    supabaseKey: 'sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD'
+  },
+  staging: {
+    supabaseUrl: 'https://ortyofzzdsthlhqmzsnq.supabase.co',
+    supabaseKey: 'sb_publishable_zgxGBvd2yPd1fbYVJasJeA_vXSiCv-5'
+  }
+}
+
+export const CIBLE_SUPABASE =
+  (typeof location !== 'undefined' ? location.hostname : '')
+    .toLowerCase()
+    .includes('staging')
+    ? 'staging'
+    : 'prod'
+
+export const ENV = CIBLES_SUPABASE[CIBLE_SUPABASE]
+
+// Trace la cible, jamais la cle : un ecran qui ment sur sa base est le pire
+// des cas (REVIEW.md, passe 1 de la revue UI).
+if (typeof console !== 'undefined') {
+  console.info('[config] base Supabase =', CIBLE_SUPABASE)
 }
 
 const CONFIG = {

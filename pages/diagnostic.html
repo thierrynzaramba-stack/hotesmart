@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="supabase-url" content="https://cjmrizpdyhrcurmgyrhs.supabase.co">
-  <meta name="supabase-key" content="sb_publishable_cCOixH5aKHWUq5OzNPX7qw_ub0RQ5rD">
   <title>HôteSmart — Diagnostic</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
@@ -245,12 +243,15 @@
 
 <script type="module">
   import { supabase, getUser } from '/shared/supabase.js'
+  import { ENV } from '/shared/config.js'
 
   const user = await getUser()
   if (!user) { window.location.href = '/pages/login.html'; throw new Error('not auth') }
 
-  const SUPABASE_URL = document.querySelector('meta[name="supabase-url"]').content
-  const SUPABASE_KEY = document.querySelector('meta[name="supabase-key"]').content
+  // La cible vient du resolveur unique (shared/config.js), jamais d'une balise
+  // recopiee dans la page : une copie ne suit pas la bascule prod/staging.
+  const SUPABASE_URL = ENV.supabaseUrl
+  const SUPABASE_KEY = ENV.supabaseKey
 
   function card(n) { return document.querySelector(`.diag-card[data-test="${n}"]`) }
   function setStatus(n, ok, label) {
