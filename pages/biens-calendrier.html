@@ -1207,6 +1207,7 @@
           + ligneFiche('Voyageurs', voyageurs)
           + ligneFiche('Montant', montant)))
         + ligneFiche('Canal', canal)
+        + badgeSansEmail(resa)
         + ligneFiche('Commission', resa.commission!=null ? resa.commission+' '+(resa.currency||'EUR') : null)
         + ligneFiche('Référence OTA', resa.otaCode)
         + ligneFiche('Identifiant', resa.id)
@@ -1241,6 +1242,47 @@
         .forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input', rafraichirFiche) })
       if(modifiable) rafraichirFiche()
       document.getElementById('overlay-resa').classList.add('visible')
+    }
+
+    // ─── « Pas d'e-mail — messages non envoyés » ──────────────────────────────
+    // ⚠ UN ETAT QUI SE VOIT, PARCE QU'IL NE SE SIGNALE PAS AUTREMENT.
+    // Une réservation directe sans adresse ne reçoit RIEN : ni confirmation, ni
+    // consignes d'arrivée, ni code d'accès. Le cron n'écrit alors aucune ligne de
+    // journal et n'alerte pas — c'est un état, pas une panne, et une alarme qui
+    // sonnerait toutes les heures sans qu'aucun geste ne la fasse taire est une
+    // alarme qu'on apprend à ignorer.
+    //
+    // Reste donc à le MONTRER là où l'hôte regarde la réservation. Sans ce badge,
+    // il découvrirait le silence le jour de l'arrivée, devant un voyageur qui
+    // n'a jamais reçu son code.
+    //
+    // ⚠ SEULEMENT SUR LES RÉSERVATIONS SANS MESSAGERIE OTA. Une résa Airbnb n'a pas
+    // d'adresse non plus — la plateforme ne la communique jamais — et ses messages
+    // passent très bien par la messagerie de l'OTA. Le badge y serait faux, et un
+    // badge faux apprend à ignorer les vrais.
+    //
+    // ⚠ « OFFLINE » N'EST PAS LE SEUL CAS, et la première version le croyait.
+    // Une saisie directe côté Beds24 arrive avec `source: 'direct'` : elle n'a pas
+    // davantage de fil de messagerie (`lib/canal-voyageur.js` la classe
+    // `sans_canal`), elle ne reçoit rien non plus, et la fiche affichait « Canal :
+    // Direct » sans le moindre avertissement. L'hôte découvrait le silence le jour
+    // de l'arrivée — le scénario même que ce badge existe pour empêcher.
+    // Constat de review.
+    function sansMessagerieOta(resa){
+      if(resa.offline) return true
+      const src = String(resa.sourceBrute || resa.source || '').trim().toLowerCase()
+      return src === '' || src === 'direct'
+    }
+
+    function badgeSansEmail(resa){
+      if(!sansMessagerieOta(resa) || resa.aEmail) return ''
+      return '<div style="margin:10px 0;padding:10px 12px;border-radius:8px;'
+        + 'background:#fdf3e7;border:1px solid #e8c9a0;font-size:12px;line-height:1.55;color:#7a4b12">'
+        + '<strong>Pas d\'e-mail — messages non envoyés.</strong><br>'
+        + 'Cette réservation directe n\'a pas d\'adresse : ni confirmation, ni consignes '
+        + 'd\'arrivée, ni code d\'accès ne peuvent partir. Transmettez-les vous-même, '
+        + 'ou saisissez l\'adresse à la création pour les prochaines.'
+        + '</div>'
     }
 
     // ─── Acces a la conversation du voyageur ─────────────────────────────────
@@ -1519,7 +1561,10 @@
           statut:b.status||null,
           // Sous-origine : distingue une saisie de l'hote d'une vente du moteur
           // public, toutes deux `ota_name: "Offline"`. Voir `estModifiable`.
-          metaSource: b.metaSource || null
+          metaSource: b.metaSource || null,
+          // Le cœur porte-t-il une adresse pour ce voyageur ? Booléen : le
+          // serveur ne sert pas l'adresse elle-même pour un badge.
+          aEmail: b.aEmail === true
         }
       })
     }

@@ -622,3 +622,61 @@ quoi identifier quelqu'un — supprimer la ligne perdrait les deux d'un coup.
 Le cron est une tâche de **l'étape 3**. Il n'a rien à faire avant 30 jours, mais
 il doit exister **avant que le moteur ne serve de vrais voyageurs**.
 ⚠ `api/cron.js` se régénère en fichier COMPLET, jamais en patch partiel.
+
+## 12. L'e-mail au voyageur part de l'hôte (17 septembre 2026)
+
+`lib/email-voyageur.js` compose la confirmation et le message de remboursement
+(trilingues, marque blanche). Il les **envoyait par la clé plateforme**
+(`sendPlatformEmail`), donc sous « HôteSmart \<alertes@hotesmart.fr\> ».
+
+Le corps était en marque blanche — seul le nom du bien y figure — mais pas
+l'enveloppe. Un voyageur qui vient de payer chez un hôte recevait sa confirmation
+d'un tiers dont il n'a jamais entendu parler : le meilleur moyen de finir en
+indésirables, et de faire douter d'un paiement qui vient d'aboutir.
+
+Depuis l'étape 5 du chantier canal e-mail, il passe par **`envoyerHtmlVoyageur`**
+(`lib/email-guestflow.js`) : clé Brevo du compte propriétaire, expéditeur vérifié,
+`reply-to` vers l'hôte. `lib/moteur-creation.js` lui transmet `userId` et
+`propertyId` — sans eux, aucun compte n'est deviné.
+
+### ⚠️ Le repli plateforme reste, et c'est un arbitrage assumé
+
+Si le canal de l'hôte est indisponible (pas de clé Brevo, aucun expéditeur
+vérifié), **la confirmation part quand même**, par la plateforme.
+
+La règle du chantier est pourtant « la clé de l'hôte, jamais celle de la
+plateforme ». Elle vaut pleinement pour les messages de parcours, qui peuvent
+attendre. Pas pour celui-ci : ce n'est pas un message de parcours, c'est la
+**preuve qu'un paiement a abouti**. Ne pas le délivrer laisse un voyageur qui
+vient de payer sans rien — ni confirmation, ni dates, ni contact — et c'est un
+état bien pire qu'une enveloppe à la mauvaise enseigne.
+
+Le repli n'est **pas un silence** : un incident `email_confirmation_repli` est
+enregistré (seuil 1, sans SMS — rien n'est cassé), avec la cause et le geste.
+
+⚠️ **Mais il part au FONDATEUR, pas à l'hôte.** `reportIncident` écrit dans
+`automation_incidents` puis notifie `FOUNDER_EMAIL` / `FOUNDER_PHONE` ; aucun
+écran ne sert cette table à l'hôte. Une première version de cette doc affirmait
+que « l'hôte reçoit un incident » — c'était faux, et un filet documenté qui
+n'existe pas est pire que pas de filet : on cesse de le chercher.
+**Dette** : tant que l'hôte n'a pas d'écran d'incidents, c'est Thierry qui doit
+le prévenir.
+
+L'alerte est posée **après** le résultat du repli, et distingue trois issues :
+partie sous l'enseigne plateforme, **pas partie du tout** (le voyageur a payé et
+n'a rien reçu — à traiter à la main), ou **issue incertaine**. La consigne suit
+la cause : conseiller « réglez votre compte Brevo » sur une panne Supabase
+transitoire enverrait réparer ce qui n'est pas cassé.
+
+### ⚠️ Une issue incertaine ne se rejoue pas
+
+Si la connexion à Brevo est coupée **en cours d'appel**, le message a peut-être
+été accepté. On ne replie **pas** : envoyer une seconde confirmation pour un seul
+paiement est plus inquiétant, pour qui vient de payer, que de n'en recevoir
+qu'une tardivement — deux confirmations peuvent se lire comme deux réservations.
+C'est la même règle que le POST CRS d'issue incertaine (§ plus haut) : on ne
+rejoue pas ce dont on ignore s'il a abouti.
+
+**À trancher par le product owner** si la marque blanche doit primer sur la
+délivrabilité de cette preuve de paiement : il suffirait alors de retirer le
+repli, et l'incident deviendrait « confirmation NON envoyée ».

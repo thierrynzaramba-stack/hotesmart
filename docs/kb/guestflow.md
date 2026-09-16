@@ -218,6 +218,32 @@ Les colonnes d'expéditeur ont le même repli, côté lecture (`lib/email-guestf
 `/api/sms?action=config`) et côté écriture (`action=saveSender` répond « pas encore
 disponible » plutôt qu'un message PostgREST brut dans un toast).
 
+## Le badge « pas d'e-mail — messages non envoyés »
+
+Une réservation directe sans adresse ne reçoit **rien** : ni confirmation, ni consignes
+d'arrivée, ni code d'accès. Le cron n'écrit alors aucune ligne de journal et **n'alerte
+pas** — c'est un *état*, pas une panne, et une alarme qui sonnerait toutes les heures sans
+qu'aucun geste ne la fasse taire est une alarme qu'on apprend à ignorer.
+
+Restait à le **montrer** là où l'hôte regarde la réservation : la fiche du planning
+(`pages/biens-calendrier.html`, `badgeSansEmail`). Sans ce badge, il découvrirait le silence
+le jour de l'arrivée, devant un voyageur sans son code.
+
+- **Seulement sur les réservations sans messagerie OTA.** Une résa Airbnb n'a pas d'adresse
+  non plus — la plateforme ne la communique jamais — et ses messages passent très bien par la
+  messagerie de l'OTA. Le badge y serait faux, et un badge faux apprend à ignorer les vrais.
+- **Mais « Offline » n'est pas le seul cas.** Une saisie directe côté Beds24 arrive avec
+  `source: 'direct'` : `lib/canal-voyageur.js` la classe `sans_canal`, elle ne reçoit rien
+  non plus, et la fiche affichait « Canal : Direct » sans avertissement. Le badge couvre les
+  deux.
+- **`/api/calendar` sert un booléen `aEmail`, jamais l'adresse.** La fiche a besoin de savoir
+  si les messages peuvent partir, c'est tout ; faire transiter l'adresse de chaque voyageur
+  pour afficher un badge exposerait bien plus que le besoin, dans une réponse qui couvre des
+  mois et tous les biens du compte.
+- **La collecte existait déjà** : le formulaire de saisie manuelle porte le champ e-mail
+  (facultatif) depuis la phase 2 de la réservation manuelle, et il part bien jusqu'au
+  provider. C'est le badge qui manquait, pas la collecte.
+
 ### ⚠️ Ce qui reste HORS du routage : `lib/cron-classify.js`
 
 Les réponses **automatiques de l'IA** à un message entrant n'empruntent pas `canalPour` :

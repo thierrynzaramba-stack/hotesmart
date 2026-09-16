@@ -543,7 +543,13 @@ module.exports = async function handler(req, res) {
               numChild: s.numChild ?? null,
               otaReservationCode: s.otaReservationCode || null,
               arrivalHour: s.arrivalHour || null,
-              metaSource: row.metaSource || null
+              metaSource: row.metaSource || null,
+              // ⚠ UN BOOLEEN, PAS L'ADRESSE. La fiche a besoin de savoir si les
+              // messages peuvent partir — c'est tout. Faire transiter l'adresse
+              // de chaque voyageur de la fenetre pour afficher un badge
+              // exposerait bien plus que le besoin, dans une reponse qui couvre
+              // des mois et tous les biens du compte.
+              aEmail: !!s.guestEmail
             })
           })
         }

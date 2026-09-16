@@ -74,6 +74,23 @@ test('tout identifiant appele et exporte par un module de lib/ est importe', () 
     const src = fs.readFileSync(f, 'utf8')
     // Sans les commentaires ni les chaines : un nom cite dans un commentaire
     // (ils sont nombreux et detailles ici) n'est pas un appel.
+    //
+    // ⚠ LIMITE CONNUE : CE NETTOYEUR NE COMPREND PAS LES REGEX LITTERALES.
+    // Une apostrophe dans une regex — `.replace(/'/g, '&#39;')`, tout a fait
+    // legitime — ouvre une chaine aux yeux de la passe ci-dessous, qui avale
+    // alors tout le code jusqu'a l'apostrophe suivante. Les declarations qui s'y
+    // trouvaient disparaissent, et le test les signale comme « appelees sans
+    // import ».
+    //
+    // Constate le 17 septembre 2026 sur `lib/email-voyageur.js` : sa fonction
+    // locale `enveloppe()` etait invisible, et le test l'a confondue avec celle
+    // que `lib/email-guestflow.js` exporte. Diagnostic : une demi-heure, pour un
+    // faux positif.
+    //
+    // On ne corrige pas le nettoyeur — reconnaitre une regex litterale en regex
+    // demande de savoir si un `/` divise ou ouvre un motif, ce qui suppose un
+    // vrai analyseur. En cas de nouveau signalement, VERIFIER D'ABORD qu'il n'y
+    // a pas une apostrophe de regex en amont dans le fichier.
     const code = src
       .replace(/\/\*[\s\S]*?\*\//g, ' ')
       .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
