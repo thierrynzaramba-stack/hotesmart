@@ -41,8 +41,15 @@ export const ROW_DEFAULTS = { avail: 'open', minStayArr: 0, minStayThrough: 0, m
 
 // Genere les jours consecutifs de la grille. months = periode ; containerW = largeur
 // dispo en px (remplissage). Logique VERBATIM de l'ancien buildDays (partie calcul).
-export function computeDays(months, containerW) {
+// `decalageJours` : depart de la grille, en jours par rapport a AUJOURD'HUI.
+// Negatif = passe. Defaut 0 — le comportement d'origine est inchange, et le
+// mobile, qui n'appelle pas cette fonction, ne voit rien.
+// ⚠ Le jour 0 de la grille n'est donc plus forcement aujourd'hui : tout ce qui
+// en dependait (le reperage du jour courant) doit comparer des DATES.
+export function computeDays(months, containerW, decalageJours = 0) {
   const t = new Date(); t.setHours(0, 0, 0, 0)
+  const d = Number(decalageJours)
+  if (Number.isFinite(d) && d !== 0) t.setDate(t.getDate() + d)
   let n = Math.round(months * 30)
   // ⚠ `CELL_W`, jamais une copie : le 34 en dur ici comptait les colonnes avec
   // une largeur que le CSS n'utilisait plus. Elargir la colonne sans toucher a

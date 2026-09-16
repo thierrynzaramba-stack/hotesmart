@@ -153,6 +153,48 @@ calendar: {
   - Colonne élargie à **46 px** (`CELL_W`, `shared/calendar-core.js`) et ligne réservations à 36 px : à 34 px aucun nom n'était lisible.
   - Week-ends : fond de colonne `#eef1f6` + en-tête gras coloré, classes posées par le helper unique `classesJour(i)`.
   - Jours fermés à la vente : classe `jour-ferme` (hachures) sur **toutes** les lignes du bien. Détail et règles : `docs/kb/reservation-directe.md` §11.
+
+### Retouches du 16 septembre 2026
+
+**Plus de pastille OTA dans la bulle.** `platformLogo` a été supprimée de cette page : elle n'apportait rien que la couleur de la bulle ne disait déjà, et sur une bulle d'une nuit elle faisait disparaître le nom entièrement. La source reste lisible dans la fiche (ligne « Canal »). ⚠️ La grille **mobile** garde la sienne — elle n'affiche pas le même contenu.
+
+**La page défile enfin.** ⚠️ `.layout` est `height:100vh; overflow:hidden` et `.main` est `overflow:hidden` (`public/style.css`) : dans ce gabarit, **seul `.content` porte `flex:1; overflow-y:auto`**. Cette page utilise `.cal-main`, qui n'avait ni l'un ni l'autre — à partir de 3-4 biens le bas de page était **coupé et inaccessible**, sans barre de défilement. `.cal-main` porte maintenant `flex:1; min-height:0; overflow:hidden`, et `.scroll-area` devient l'unique conteneur de défilement (`overflow:auto`, les deux axes).
+
+⚠️ `min-height:0` n'est pas décoratif : sans lui un enfant flex refuse de descendre sous la hauteur de son contenu, et le débordement revient.
+
+⚠️ `overflow-x:auto` seul ne suffisait pas : quand un axe vaut `auto`, CSS force l'autre à `auto`. `.scroll-area` devenait un conteneur de défilement **vertical sans hauteur bornée** — les en-têtes collants s'y seraient ancrés au lieu de suivre la page.
+
+**En-têtes collants, deux étages** : la bande des mois à `top:0`, la ligne des jours à `top: var(--bande-h)` (27px). Avec plusieurs biens, la ligne de jours de chacun remplace la précédente quand on l'atteint. Tout en-tête collant porte un **fond opaque** — sinon le contenu défile visiblement dessous.
+
+⚠️ La colonne figée (`.row-label`) est passée en `z-index: 3`. Les bulles portent `z-index: 2` et vivent **toutes dans la première cellule** depuis la refonte du rendu : à égalité, le dernier du DOM gagnait, et la bulle recouvrait le libellé dès qu'on défilait horizontalement.
+
+**Navigation dans le passé.** `computeDays(months, containerW, decalageJours)` — négatif = passé, défaut 0 (signature rétrocompatible). Trois boutons : ‹ / Aujourd'hui / ›, pas de 30 jours. Le décalage n'est **pas persisté** : rouvrir le calendrier ramène sur aujourd'hui, sinon l'hôte retrouverait une fenêtre trois mois en arrière et lirait un planning « vide » qu'il croirait cassé.
+
+⚠️ `isToday(i)` comparait `i === 0`. C'était juste tant qu'on ne naviguait pas ; dès le premier pas en arrière, le repère bleu se posait sur la date du bord gauche. Il compare maintenant des **dates**, et `ISO_AUJOURDHUI` est relu à chaque construction (un onglet laissé ouvert la nuit doit repérer le bon jour au matin).
+
+⚠️ Un déplacement **rebâtit** la grille (`rebatirGrille`) : `states` est indexé par **position** dans `days`, le garder ferait lire les tarifs d'un jour sur un autre.
+
+**Séjours terminés grisés** (`.resa-bar.passee`, opacité 0.45, 0.9 au survol). `resaPassee` teste `checkout <= aujourd'hui` — la nuit de départ n'est pas occupée (règle des nuits, `docs/kb/reservation-directe.md` §3). La bulle reste **cliquable** : on consulte un séjour fini pour un litige, une facture ou un avis.
+
+**Le passé ne s'édite pas** (`jourPasse`, classe `jour-passe`). C'est la contrepartie de la navigation : avant elle, aucune cellule passée ne pouvait être sélectionnée puisqu'elles n'étaient pas à l'écran. `<` et non `<=` : la nuit du jour se vend encore.
+
+⚠️ **Une garde de ce genre tient à TROIS endroits, pas un.** Première version, attrapée en review : seule la classe `edit-cell` était retirée. Elle empêchait de *démarrer* un cliquer-glisser sur le passé — rien d'autre. Les deux fuites :
+
+1. **Le glisser.** `extendSelTo` remplissait `sel.idx` de tout l'intervalle `lo..hi`, jours passés compris, et **de façon invisible** puisque `updateSelectionUI` ne peint que les `edit-cell`. Partir d'un jour futur et glisser vers la gauche suffisait. Tout ce qui consomme `sel.idx` ensuite écrivait alors sur des nuits écoulées : tarif en ligne, « Fermer à la vente », formulaire d'ajout — qui aurait créé une vraie réservation avec une arrivée dans le passé.
+2. **La popup « Plus de paramètres ».** Ses segments portent `date_from: sISO` — la plage **brute** du champ de date, pas les jours filtrés. La plage était pré-remplie depuis la sélection, et rien n'empêchait non plus de taper une date passée à la main.
+
+Désormais : `extendSelTo` filtre cellule par cellule (et le survol pendant le glisser passe par lui, au lieu de recopier le remplissage), `sISO` est serré à aujourd'hui à l'enregistrement, une plage entièrement passée est refusée, et les deux boucles de matérialisation portent la même borne. L'attribut `min` des champs de date n'est qu'un confort — un attribut HTML ne garde rien.
+
+**Deux effets de bord du changement de fenêtre**, fermés en même temps :
+
+- `rebatirGrille` vide aussi **`undoStack`**. Il garde des snapshots de `states`, indexés par **position** dans `days` : conservé, il reposait les prix d'une plage sur d'autres dates. Pire en rétrécissant la période (1 an → 1 mois) : le tableau restitué était plus long que `days`, `classesJour` levait sur `days[i]` indéfini, et le bien ne s'affichait plus du tout.
+- `reloadInventory` **numérote ses lectures** et ignore les réponses périmées. Les flèches ne se désactivent pas pendant le chargement : deux clics rapides lancent deux lectures, sans garantie d'ordre d'arrivée. Celle de −30 revenant après celle de −60 écrasait l'inventaire, puis l'état était reconstruit contre les `days` de −60 — dates absentes retombant au prix de base, barres d'une autre plage. L'hôte lisait de faux tarifs.
+
+⚠️ **`ISO_AUJOURDHUI` est relu au retour sur l'onglet** (`visibilitychange`, `focus`), pas seulement dans `buildDays`. Le commentaire d'origine promettait qu'un onglet laissé ouvert la nuit repérerait le bon jour au matin : c'était faux, et passé minuit `jourPasse` tenait hier pour modifiable — précisément la garde qu'on venait d'ajouter.
+
+⚠️ **`box-shadow` et non `border-bottom` sur l'en-tête collant.** Sous `border-collapse: collapse`, la bordure appartient au **tableau**, pas à la cellule : une cellule collante ne l'emporte pas, et le trait de séparation disparaissait dès que la ligne se figeait. Corollaire : `box-shadow` **ne se cumule pas entre règles** — les cellules qui en portent déjà une (week-end, jour courant) recomposent le trait dans leur propre déclaration.
+
+`.bien-title` a été **supprimé** : plus aucun élément ne le portait, et son `z-index: 6` serait passé au-dessus de la ligne de jours désormais collante (z-index 3). Du CSS mort qui attendait de devenir un défaut.
 - Coloration cellule prix : `cell-closed` (rouge) si `avail==='closed' || stopSell==='closed'`, `cell-reserved` (bleuté) si date dans une résa.
 - Édition tableur : clic = sélection, taper un chiffre / Entrée / F2 = édition inline (`startInlineEdit`), propage à la sélection multiple. **Ne pas utiliser `setSelectionRange` sur input number** (InvalidStateError) → `try{input.select()}catch(e){}`.
 - Popup "Plus de paramètres" : rubriques avec filtre jours par rubrique, plage début/fin. Bouton Enregistrer → construit `segments` → `api.calendar.save` → `reloadInventory()`.

@@ -24,33 +24,80 @@
     .multi-select .ms-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 14px; color:#1d1d1f; }
     .multi-select .ms-option:hover { background: #f5f5f7; }
     .period-select { padding: 7px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; background: #fff; font-family: inherit; color:#1d1d1f; }
-    .cal-main { padding: 16px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 100px; color:#1d1d1f; }
+    .nav-periode { display: inline-flex; align-items: center; gap: 6px; }
+    /* « Aujourd'hui » porte un mot, pas un signe : il lui faut sa largeur. */
+    .nav-periode #btn-aujourdhui { width: auto; padding: 0 12px; font-size: 13px; font-weight: 500; }
+    /* ⚠ LE BAS DE PAGE ETAIT INACCESSIBLE A PARTIR DE 3-4 BIENS.
+       `.layout` est `height:100vh; overflow:hidden` et `.main` est
+       `overflow:hidden` (public/style.css) : dans ce gabarit, SEUL `.content`
+       porte `flex:1; overflow-y:auto`. Cette page utilise `.cal-main` a la
+       place et n'avait ni l'un ni l'autre — tout ce qui depassait la hauteur de
+       l'ecran etait donc coupe, sans barre de defilement pour y acceder.
+       `min-height:0` est OBLIGATOIRE : sans lui, un enfant flex refuse de
+       descendre sous la hauteur de son contenu et le debordement revient. */
+    .cal-main { padding: 16px; display: flex; flex-direction: column; gap: 12px; color:#1d1d1f;
+                flex: 1; min-height: 0; overflow: hidden; }
+    .month-pills { flex-shrink: 0; }
     .month-pills { display: flex; gap: 6px; flex-wrap: wrap; }
     .month-pill { background: #fff; border: 1px solid #d2d2d7; border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; color: #1d1d1f; font-weight: 500; text-transform: capitalize; }
     .month-pill:hover { background: #eef4ff; border-color: #007aff; }
     .month-pill.active { background: #007aff; color: #fff; border-color: #007aff; }
-    .scroll-shell { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; }
-    .scroll-area { overflow-x: auto; }
+    .scroll-shell { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); overflow: hidden;
+                    flex: 1; min-height: 0; display: flex; }
+    /* ⚠ UN SEUL CONTENEUR DE DEFILEMENT, POUR LES DEUX AXES.
+       `overflow-x:auto` seul ne suffisait pas : quand un axe vaut `auto`, CSS
+       force l'autre a `auto` aussi. `.scroll-area` devenait donc un conteneur
+       de defilement VERTICAL sans hauteur bornee — les en-tetes collants s'y
+       seraient ancres au lieu de suivre la page. On borne ici, et tout le
+       `position: sticky` ci-dessous s'y refere. */
+    .scroll-area { overflow: auto; flex: 1; min-height: 0; min-width: 0; }
+    /* Le dernier bien ne doit pas rester sous la barre d'action flottante. */
+    #blocks { padding-bottom: 96px; }
+    /* ─── EN-TETES COLLANTS ────────────────────────────────────────────────
+       Deux etages, dans cet ordre de haut en bas :
+         0px            la bande des mois (hauteur BANDE_H)
+         BANDE_H        la ligne des jours du bien en cours
+       Le second se cale SOUS le premier — d'ou le `top` non nul. Avec plusieurs
+       biens, la ligne de jours de chacun prend la place de la precedente quand
+       on l'atteint : c'est le comportement attendu d'un planning multi-biens.
+       ⚠ Un en-tete collant DOIT porter un fond opaque, sinon le contenu defile
+       visiblement dessous. Week-end et jour courant restent prioritaires (leur
+       selecteur est plus specifique, et `.today` porte `!important`). */
+    .cal-page { --bande-h: 27px; }
+    #month-band-wrap { position: sticky; top: 0; z-index: 8; background: #fff; width: max-content; min-width: 100%; }
     table.month-band { border-collapse: collapse; table-layout: fixed; }
-    table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; }
+    table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; background: #fff; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
-    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 5; border-bottom: 1px solid #e5e5e7; }
+    /* L'angle cumule les deux : colle a gauche ET fait partie de la bande. */
+    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 9; border-bottom: 1px solid #e5e5e7; }
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
-    .bien-title { font-size: 18px; font-weight: 700; margin: 16px 0 12px; padding: 0 14px; display: inline-flex; align-items: center; gap: 10px; position: sticky; left: 0; background: #fff; z-index: 6; max-width: 90vw; }
     table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; border-left: 4px solid #007aff; vertical-align: middle; line-height: 1.2; }
     table.cal .row-label.bien-head .cap-h { display: block; font-size: 10px; font-weight: 400; color: #86868b; margin-top: 2px; }
     .bien-section { padding-top: 18px; }
-    .bien-title::before { content: ''; width: 5px; height: 22px; background: #007aff; border-radius: 3px; display: inline-block; }
-    .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
+    /* `.bien-title` a ete supprime : plus aucun element ne le portait (le nom du
+       bien vit dans `.bien-head`, dans le thead). Son `z-index: 6` serait passe
+       AU-DESSUS de la ligne de jours desormais collante (z-index 3) — du CSS mort
+       qui attendait de devenir un defaut.
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     /* Colonne elargie (34 -> 46px) et lignes plus hautes : sans cela, une bulle
        d'une nuit n'affiche aucun nom. Doit rester d'accord avec CELL_W
        (shared/calendar-core.js), qui sert au calcul du nombre de jours. */
     table.cal th, table.cal td { padding: 11px 1px; text-align: center; white-space: nowrap; width: 46px; min-width: 46px; }
-    table.cal thead th { border-bottom: 1px solid #e5e5e7; }
-    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 2; border-right: 1px solid #e5e5e7; font-weight: 500; }
-    table.cal thead .row-label { z-index: 4; }
+    /* Ligne des jours : collee sous la bande des mois. Fond opaque obligatoire. */
+    /* ⚠ `box-shadow` ET NON `border-bottom` : sous `border-collapse: collapse`, la
+       bordure appartient au TABLEAU et non a la cellule — une cellule collante ne
+       l'emporte pas avec elle, et le trait de separation disparaissait des que la
+       ligne de jours se figeait. */
+    table.cal thead th { box-shadow: inset 0 -1px 0 #e5e5e7; background: #fff;
+                         position: sticky; top: var(--bande-h); z-index: 3; }
+    /* ⚠ z-index 3, pas 2 : les bulles de reservation portent z-index 2 et vivent
+       toutes dans la PREMIERE cellule, juste a droite de cette colonne figee.
+       A egalite, c'est le dernier dans le DOM qui gagne — la bulle passait donc
+       PAR-DESSUS le libelle des que l'on defilait horizontalement. */
+    table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 3; border-right: 1px solid #e5e5e7; font-weight: 500; }
+    /* L'angle du bien cumule les deux ancrages : gauche ET haut. */
+    table.cal thead .row-label { z-index: 6; top: var(--bande-h); }
     table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
     table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
     /* WEEK-ENDS — lisibles d'un coup d'œil sur un mois entier.
@@ -68,15 +115,25 @@
     table.cal .weekend.we-debut.we-fin { box-shadow: inset 2px 0 0 #c3d0e2, inset -2px 0 0 #c3d0e2; }
     table.cal .month-start { border-left: 2px solid #007aff; }
     table.cal .today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
+    /* ⚠ `box-shadow` NE SE CUMULE PAS ENTRE REGLES : la derniere gagne en entier.
+       Les cellules d'en-tete qui portent deja une ombre (week-end, jour courant)
+       perdraient donc le trait de separation du bas — on le rajoute a leur
+       declaration plutot que de compter sur une superposition qui n'existe pas. */
+    table.cal thead th.weekend.we-debut { box-shadow: inset 2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
+    table.cal thead th.weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
+    table.cal thead th.weekend.we-debut.we-fin { box-shadow: inset 2px 0 0 #c3d0e2, inset -2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
+    table.cal thead th.today { box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff, inset 0 -1px 0 #e5e5e7; }
     table.cal td.edit-cell { cursor: pointer; position: relative; }
     table.cal td.edit-cell:hover { background: #eef4ff; }
+    /* Jour revolu : consultable, pas modifiable. Le curseur le dit avant le clic. */
+    table.cal td.jour-passe { color: #a1a1a6; cursor: default; }
     table.cal td.edit-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
     table.cal td.rate-cell { font-weight: 600; }
     table.cal td.maxrate-cell { font-weight: 500; color: #6e6e73; }
     table.cal td.modified::after { content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; background: #f59e0b; border-radius: 50%; }
     .rate-input { width: 100%; border: none; background: #fff; text-align: center; font-size: 12px; font-weight: 600; font-family: inherit; padding: 3px 0; outline: 2px solid #007aff; border-radius: 3px; }
     table.cal .resa-cell { position: relative; padding: 0 !important; height: 36px; }
-    .resa-bar { position: absolute; top: 4px; bottom: 4px; color: white; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px; padding: 0 8px 0 4px; white-space: nowrap; overflow: hidden; border-radius: 14px; }
+    .resa-bar { position: absolute; top: 4px; bottom: 4px; color: white; font-size: 11px; font-weight: 600; display: flex; align-items: center; padding: 0 9px; white-space: nowrap; overflow: hidden; border-radius: 14px; }
     /* ⚠ LE NOM EST TRONQUE PAR LE CSS, PAS PAR LE JS.
        Une coupe a 16 caracteres ne sait rien de la largeur reelle : elle
        amputait « Marie-Christine » sur une bulle de dix nuits qui avait la place,
@@ -93,9 +150,11 @@
     .resa-bar.blue { background: #0d4ea6; } .resa-bar.green { background: #1f6f23; } .resa-bar.red { background: #d52a44; }
     .resa-bar.airbnb { background: #d52a44; } .resa-bar.booking { background: #0d4ea6; } .resa-bar.direct { background: #1f6f23; }
     .resa-bar.cliquable { cursor: pointer; }
+    /* Sejour termine : recule visuellement sans disparaitre. Le survol le
+       ramene a pleine opacite — on doit pouvoir le lire pour le consulter. */
+    .resa-bar.passee { opacity: 0.45; }
+    .resa-bar.passee:hover { opacity: 0.9; }
     .resa-bar.cliquable:hover { filter: brightness(1.15); box-shadow: 0 0 0 2px rgba(255,255,255,0.6) inset; }
-    .resa-bar .ava { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .resa-bar .ava svg { width: 10px; height: 10px; }
     td.cell-closed { background: #ffeced !important; }
     /* FERME A LA VENTE — hachures grises sur toute la colonne du bien.
        `stop_sell` est une INTENTION memorisee de l'hote (docs/kb/reservation-directe.md
@@ -176,6 +235,14 @@
           <div class="ms-panel" id="ms-panel"></div>
         </div>
         <select class="period-select" id="period-select"><option value="1">1 mois</option><option value="3">3 mois</option><option value="6">6 mois</option><option value="12">1 an</option></select>
+        <!-- Navigation dans le temps. La grille demarrait a AUJOURD'HUI sans
+             aucun moyen de reculer : les sejours passes etaient hors d'atteinte,
+             alors qu'on les consulte pour un litige ou une facture. -->
+        <div class="nav-periode">
+          <button class="icon-btn" id="btn-passe" title="Mois précédent">&#8249;</button>
+          <button class="icon-btn" id="btn-aujourdhui" title="Revenir à aujourd'hui">Aujourd'hui</button>
+          <button class="icon-btn" id="btn-futur" title="Mois suivant">&#8250;</button>
+        </div>
       </div>
       <div class="header-actions">
         <button class="icon-btn" id="btn-undo" title="Annuler" disabled>&#8634;</button>
@@ -328,6 +395,31 @@
     let MONTHS=1, days=[]
     // Constantes dates (dayNames..CELL_W) : deplacees verbatim dans shared/calendar-core.js.
 
+    // Depart de la grille, en jours par rapport a aujourd'hui. Negatif = passe.
+    // ⚠ NON PERSISTE, volontairement : rouvrir le calendrier doit ramener sur
+    // aujourd'hui. Un hote qui retrouverait sa fenetre trois mois en arriere sans
+    // s'en apercevoir lirait un planning « vide » et le croirait casse.
+    let DECALAGE=0
+    // ⚠ RELU AUSSI AU RETOUR SUR L'ONGLET, pas seulement a la construction.
+    // Ce commentaire promettait qu'un onglet laisse ouvert toute la nuit
+    // repererait le bon jour au matin — c'etait faux : `buildDays` ne tourne
+    // qu'au chargement, au changement de periode et a la navigation. Passe
+    // minuit, le repere bleu restait sur la veille, et `jourPasse` tenait hier
+    // pour modifiable — precisement la garde qu'on vient d'ajouter.
+    let ISO_AUJOURDHUI=toISO(new Date())
+
+    // Le jour a-t-il change depuis le dernier rendu ? Si oui, on redessine :
+    // seuls le repere du jour et les bulles grisees en dependent, un rendu
+    // suffit — inutile de relire l'inventaire, la plage n'a pas bouge.
+    function verifierChangementDeJour(){
+      const maintenant=toISO(new Date())
+      if(maintenant===ISO_AUJOURDHUI) return
+      ISO_AUJOURDHUI=maintenant
+      renderBlocks()
+    }
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) verifierChangementDeJour() })
+    window.addEventListener('focus', verifierChangementDeJour)
+
     function buildDays(){
       // Largeur dispo lue au DOM (specifique desktop), puis calcul PUR dans le coeur.
       // Fallback identique a l'ancien code : si le DOM echoue, containerW null -> pas de fit.
@@ -336,10 +428,24 @@
         const main=document.getElementById('main')
         containerW = (main && main.clientWidth) ? main.clientWidth : ((window.innerWidth||1200)-260)
       }catch(e){}
-      days=computeDays(MONTHS, containerW)
+      ISO_AUJOURDHUI=toISO(new Date())
+      days=computeDays(MONTHS, containerW, DECALAGE)
+      majBoutonsPeriode()
     }
     function isMonthStart(i){ return i===0||days[i].getDate()===1 }
-    function isToday(i){ return i===0 }
+    // ⚠ COMPARAISON DE DATES, plus `i===0`. Le jour 0 de la grille n'est
+    // aujourd'hui que tant qu'on ne navigue pas : des le premier pas dans le
+    // passe, l'ancien test peignait le repere bleu sur une date quelconque.
+    function isToday(i){ return toISO(days[i])===ISO_AUJOURDHUI }
+    // Un sejour est TERMINE quand sa nuit de depart est passee ou en cours :
+    // la nuit du depart n'est pas occupee (regle des nuits, KB §3).
+    function resaPassee(bk){ return bk.checkout <= ISO_AUJOURDHUI }
+    // ⚠ UN JOUR REVOLU NE S'EDITE PAS, et c'est la contrepartie de la navigation.
+    // Avant celle-ci, le passe etait hors d'atteinte : aucune cellule passee ne
+    // pouvait etre selectionnee. Maintenant qu'on peut y aller, une selection
+    // tiree un peu trop loin pousserait des tarifs sur des nuits deja vendues ou
+    // ecoulees — vers le canal, pour rien. On y regarde, on n'y ecrit pas.
+    function jourPasse(i){ return toISO(days[i]) < ISO_AUJOURDHUI }
 
     let BIENS=[]
     const ppConfig={}
@@ -453,12 +559,15 @@
         // ce sont des donnees externes, et un guillemet dans l'une d'elles
         // casserait l'attribut qui la porte. Le nom l'etait deja ; les autres
         // ne l'etaient pas.
+        // ⚠ GRISEE, PAS MASQUEE NI RENDUE INERTE : un sejour termine reste
+        // consultable au clic (litige, facture, avis). Seule l'opacite change.
+        const passee = resaPassee(bk)
         out+='<div class="resa-bar '+escapeHtmlLocal(bk.source)+(bk.id?' cliquable':'')
-           + (coupeG?' cont-left':'')+(coupeD?' cont-right':'')+'"'
+           + (coupeG?' cont-left':'')+(coupeD?' cont-right':'')+(passee?' passee':'')+'"'
            + ' data-resa="'+escapeHtmlLocal(bk.id||'')+'" data-bien="'+escapeHtmlLocal(bien.id)+'"'
-           + ' title="'+escapeHtmlLocal(bk.name||'')+' — '+escapeHtmlLocal(bk.startISO)+' au '+escapeHtmlLocal(bk.checkout)+(bk.id?' — cliquer pour le detail':'')+'"'
+           + ' title="'+escapeHtmlLocal(bk.name||'')+' — '+escapeHtmlLocal(bk.startISO)+' au '+escapeHtmlLocal(bk.checkout)
+           + (passee?' — séjour terminé':'')+(bk.id?' — cliquer pour le detail':'')+'"'
            + ' style="left:'+px(gauche)+'px;width:'+(px(droite-gauche)-2)+'px;z-index:2">'
-           + '<span class="ava">'+platformLogo(bk.source)+'</span>'
            + '<span class="nom">'+nameShort+'</span></div>'
       })
       return out
@@ -491,7 +600,7 @@
         const editable=(pk==='rate')
         const lbl = pk==='maxRate' ? 'Prix max' : paramLabel(pk)
         html+='<tr><td class="row-label">'+lbl+'</td>'
-        st.forEach((s,i)=>{const c=classesJour(i);if(editable)c.unshift('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');
+        st.forEach((s,i)=>{const c=classesJour(i);if(editable&&!jourPasse(i))c.unshift('edit-cell');else if(editable)c.push('jour-passe');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');
           if(ferme(i))c.push('jour-ferme')
           if(pk==='rate'){ const iso=toISO(days[i]); const closed=jourFerme(s); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
           if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
@@ -513,7 +622,7 @@
           ouvrirFicheResa(bar.dataset.bien, bar.dataset.resa)
         })
       })
-      if(LECTURE_SEULE) return; blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx);sel.idx=new Set();for(let i=lo;i<=hi;i++)sel.idx.add(i);updateSelectionUI()})})}) }
+      if(LECTURE_SEULE) return; blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;extendSelTo(idx)})})}) }
     let lastMouseX=0, autoScrollRAF=null
     let LECTURE_SEULE=false
     function colIndexUnderX(clientX){
@@ -524,7 +633,19 @@
       if(idx<0) idx=0; if(idx>days.length-1) idx=days.length-1
       return idx
     }
-    function extendSelTo(idx){ const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx); sel.idx=new Set(); for(let i=lo;i<=hi;i++)sel.idx.add(i); updateSelectionUI() }
+    // ⚠ LA PLAGE ECARTE LES JOURS REVOLUS, CELLULE PAR CELLULE.
+    // Retirer la classe `edit-cell` empechait seulement de DEMARRER un cliquer-
+    // glisser sur le passe. Partir d'un jour futur et glisser vers la gauche
+    // remplissait `sel.idx` de tout l'intervalle, jours passes compris — et de
+    // facon INVISIBLE, `updateSelectionUI` ne peignant que les `edit-cell`.
+    // Tout ce qui consomme `sel.idx` ensuite (tarif en ligne, « Fermer a la
+    // vente », formulaire d'ajout) ecrivait donc sur des nuits ecoulees.
+    function extendSelTo(idx){
+      const lo=Math.min(dragStart,idx),hi=Math.max(dragStart,idx)
+      sel.idx=new Set()
+      for(let i=lo;i<=hi;i++){ if(!jourPasse(i)) sel.idx.add(i) }
+      updateSelectionUI()
+    }
     function autoScrollStep(){
       if(!isDragging){ autoScrollRAF=null; return }
       const area=document.getElementById('scroll-area')
@@ -602,8 +723,13 @@
       popupBienId=sel.bienId; popupIdxs=[...sel.idx].sort((a,b)=>a-b)
       activeParam=(startParam==='maxRate')?'perPerson':(startParam||'rate')
       pending={}
-      document.getElementById('range-start').value=toISO(days[popupIdxs[0]])
-      document.getElementById('range-end').value=toISO(days[popupIdxs[popupIdxs.length-1]])
+      // `min` : le selecteur de date refuse lui-meme le passe. C'est un confort —
+      // la garde qui compte est le serrage de `sISO` a l'enregistrement, un
+      // attribut HTML ne protegeant rien.
+      const champDebut=document.getElementById('range-start'), champFin=document.getElementById('range-end')
+      champDebut.min=ISO_AUJOURDHUI; champFin.min=ISO_AUJOURDHUI
+      champDebut.value=toISO(days[popupIdxs[0]])
+      champFin.value=toISO(days[popupIdxs[popupIdxs.length-1]])
       renderPopupMenu(); renderPopupContent(); overlay.classList.add('visible')
     }
     function defaultDow(){ return {1:true,2:true,3:true,4:true,5:true,6:true,0:true} }
@@ -670,7 +796,20 @@
     document.getElementById('btn-apply').addEventListener('click',async ()=>{
       if(!popupBienId){overlay.classList.remove('visible');return}
       const st=states[popupBienId];const bien=BIENS.find(b=>b.id===popupBienId)
-      const sISO=document.getElementById('range-start').value,eISO=document.getElementById('range-end').value
+      // ⚠ LA BORNE BASSE EST RAMENEE A AUJOURD'HUI, ET C'EST ICI QUE CA COMPTE.
+      // Les segments envoyes au serveur portent `date_from: sISO` / `date_to: eISO`
+      // — la plage BRUTE, pas les jours filtres plus bas. Sans ce serrage, deux
+      // chemins poussaient des tarifs sur des nuits ecoulees : la plage
+      // pre-remplie depuis une selection faite apres navigation dans le passe,
+      // et une date saisie a la main dans le champ (rien ne l'en empeche).
+      const sSaisi=document.getElementById('range-start').value
+      const eISO=document.getElementById('range-end').value
+      const sISO=(sSaisi && sSaisi<ISO_AUJOURDHUI) ? ISO_AUJOURDHUI : sSaisi
+      if(eISO && eISO<ISO_AUJOURDHUI){
+        overlay.classList.remove('visible')
+        showToast('Ces dates sont passées : le planning ne s\'y modifie pas', 5000)
+        return
+      }
       pushUndo(popupBienId)
       let touched=0
       const segments=[]
@@ -683,7 +822,7 @@
         const hasVal = p.type==='price' ? (pv.value!==''&&!isNaN(parseFloat(pv.value))) : (p.type==='num' ? pv.value!=='' : pv.value!=='keep')
         if(!hasVal)return
         const daysArr=[]; for(const k in pv.dow){ if(pv.dow[k]) daysArr.push(parseInt(k,10)) }
-        days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&pv.dow[d.getDay()]){ if(p.type==='price'){st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value));st[i].modified=true}else if(p.type==='num'){st[i][p.key]=parseInt(pv.value,10)||0;st[i].modified=true}else{st[i][p.key]=pv.value;st[i].modified=true} } })
+        days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&iso>=ISO_AUJOURDHUI&&pv.dow[d.getDay()]){ if(p.type==='price'){st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value));st[i].modified=true}else if(p.type==='num'){st[i][p.key]=parseInt(pv.value,10)||0;st[i].modified=true}else{st[i][p.key]=pv.value;st[i].modified=true} } })
         const seg={ date_from:sISO, date_to:eISO, days:daysArr }
         if(p.key==='rate'){
           if(pv.mode==='set'&&pv.unit==='eur'){ seg.rate=parseFloat(pv.value) }
@@ -704,7 +843,7 @@
       segments.forEach(seg=>{
         if(seg.kind==='perPerson'){ finalSegments.push(seg); return }
         if(seg.__perDate){
-          days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=seg.date_from&&iso<=seg.date_to&&(!seg.days.length||seg.days.includes(d.getDay()))){ finalSegments.push({ date_from:iso, date_to:iso, rate:st[i].rate }) } })
+          days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=seg.date_from&&iso<=seg.date_to&&iso>=ISO_AUJOURDHUI&&(!seg.days.length||seg.days.includes(d.getDay()))){ finalSegments.push({ date_from:iso, date_to:iso, rate:st[i].rate }) } })
         } else { delete seg.__perDate; finalSegments.push(seg) }
       })
 
@@ -733,7 +872,46 @@
     const btnS=document.getElementById('btn-simple'),btnC=document.getElementById('btn-complete')
     btnS.addEventListener('click',()=>{showComplete=false;btnS.classList.add('active');btnC.classList.remove('active');renderBlocks()})
     btnC.addEventListener('click',()=>{showComplete=true;btnC.classList.add('active');btnS.classList.remove('active');renderBlocks()})
-    document.getElementById('period-select').addEventListener('change',async e=>{MONTHS=parseInt(e.target.value,10);savePrefsD();buildDays();Object.keys(states).forEach(k=>delete states[k]);sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderMonthPills();renderMonthBand();await reloadInventory()})
+    // Reconstruction complete de la grille : memes gestes pour un changement de
+    // periode et pour un deplacement dans le temps. Les `states` sont indexes par
+    // POSITION dans `days` : les garder apres un decalage ferait lire les tarifs
+    // d'un jour sur un autre.
+    async function rebatirGrille(){
+      buildDays()
+      Object.keys(states).forEach(k=>delete states[k])
+      // ⚠ L'HISTORIQUE D'ANNULATION TOMBE AVEC LES ETATS. `undoStack` garde des
+      // `JSON.stringify(states[bid])` indexes par POSITION dans `days`, comme
+      // `states` : le conserver apres un changement de fenetre faisait reposer
+      // les prix d'une plage sur des dates qui ne sont plus les memes. Pire en
+      // retrecissant la periode (1 an -> 1 mois) : le tableau restitue etait
+      // plus long que `days`, et `classesJour` levait sur `days[i]` indefini,
+      // laissant le bien sans rendu du tout.
+      undoStack.length=0
+      const bu=document.getElementById('btn-undo'); if(bu) bu.disabled=true
+      sel={bienId:null,idx:new Set(),row:'rate'}
+      hideFloatBar(); renderMonthPills(); renderMonthBand()
+      await reloadInventory()
+    }
+
+    document.getElementById('period-select').addEventListener('change',async e=>{
+      MONTHS=parseInt(e.target.value,10); savePrefsD(); await rebatirGrille()
+    })
+
+    // Un pas = 30 jours, quelle que soit la periode affichee : predictible, et
+    // aligne sur le pas de `computeDays` (MONTHS * 30).
+    const PAS_JOURS=30
+    async function deplacer(pas){ DECALAGE += pas; await rebatirGrille() }
+    document.getElementById('btn-passe').addEventListener('click',()=>deplacer(-PAS_JOURS))
+    document.getElementById('btn-futur').addEventListener('click',()=>deplacer(+PAS_JOURS))
+    document.getElementById('btn-aujourdhui').addEventListener('click',async()=>{
+      if(DECALAGE===0) return
+      DECALAGE=0; await rebatirGrille()
+    })
+    // « Aujourd'hui » n'a de sens que si on n'y est pas : eteint, il dit ou on est.
+    function majBoutonsPeriode(){
+      const b=document.getElementById('btn-aujourdhui')
+      if(b) b.disabled = (DECALAGE===0)
+    }
 
     let toastTimer=null
     // ═══════════════════════════════════════════════════════════════════════
@@ -1345,11 +1523,11 @@
         }
       })
     }
-    function platformLogo(src){
-      if(src==='airbnb') return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2c-1.1 0-2 .7-2.5 1.8C8 6.5 4 15 4 18a4 4 0 0 0 7 2.6A4 4 0 0 0 18 18c0-3-4-11.5-5.5-14.2C12 2.7 11.1 2 12 2zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>'
-      if(src==='booking') return '<svg viewBox="0 0 24 24" fill="#fff"><text x="12" y="17" font-size="15" font-weight="700" text-anchor="middle">B</text></svg>'
-      return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3l9 7v11h-6v-6H9v6H3V10z"/></svg>'
-    }
+    // `platformLogo` a ete SUPPRIMEE de cette page : la pastille OTA n'apportait
+    // aucune information que la couleur de la bulle ne donnait deja, et mangeait
+    // la place du nom du voyageur — sur une bulle d'une nuit, elle le faisait
+    // disparaitre entierement. La source reste lisible dans la fiche (« Canal »).
+    // La grille mobile garde la sienne : elle n'affiche pas le meme contenu.
 
     const PREF_KEY_D='hs_cal_desktop_prefs'
     function savePrefsD(){ try{ localStorage.setItem(PREF_KEY_D, JSON.stringify({ biens:selectedBiens, months:MONTHS })) }catch(e){} }
@@ -1444,16 +1622,29 @@
     function escapeHtmlLocal(v){ return String(v==null?'':v).replace(/[&<>"']/g, c =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
+    // ⚠ UNE REPONSE EN RETARD NE REPEINT PAS UNE FENETRE QU'ON A QUITTEE.
+    // Les fleches de navigation ne se desactivent pas pendant le chargement :
+    // deux clics rapides lancent deux lectures, et rien ne garantissait leur
+    // ordre d'arrivee. Si celle de -30 revenait apres celle de -60, elle
+    // ecrasait `invByBien` et les reservations, puis `renderBlocks` reconstruisait
+    // l'etat contre les `days` de -60 : dates absentes retombant au prix de base,
+    // barres de reservation d'une autre plage. L'hote lisait de faux tarifs.
+    let lectureEnCours=0
     async function reloadInventory(){
       if(!selectedBiens.length){ renderBlocks(); return }
+      const monTour=++lectureEnCours
       const {start,end}=rangeISO()
       try{
         const {inv,pp,propsById,bookings}=await loadCalendarData(selectedBiens, start, end)
+        if(monTour!==lectureEnCours) return   // une lecture plus recente a pris la main
         ;(selectedBiens).forEach(id=>{ invByBien[id]=inv[id] })
         if(bookings){ BIENS.forEach(b=>{ if(bookings[b.id]) b.resa=mapResa(bookings[b.id]) }) }
         for(const id in pp){ ppConfig[id]=pp[id]
           const bb=BIENS.find(x=>x.id===id); if(bb){ bb.base=propsById[id].base||bb.base; bb.included=pp[id].included; bb.extraFee=pp[id].extraFee } }
-      }catch(e){ showToast('Erreur chargement calendrier') }
+      }catch(e){
+        if(monTour!==lectureEnCours) return
+        showToast('Erreur chargement calendrier')
+      }
       Object.keys(states).forEach(k=>delete states[k])
       renderBlocks()
     }
