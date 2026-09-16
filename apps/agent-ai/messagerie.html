@@ -759,15 +759,11 @@
       const reply  = document.getElementById(`val-${taskId}`)?.value?.trim()
       if (!reply) return alert('La réponse est vide')
       validateBtn.disabled = true; validateBtn.textContent = '⏳ Envoi…'
-      // propertyId JOINT A L'ENVOI : /api/beds24 verifie desormais le perimetre du
-      // bien. Quand la reservation est trop ancienne pour figurer dans
-      // bookings_snapshot, c'est la seule reference dont dispose la garde (qui la
-      // reconfronte ensuite a Beds24).
-      const res = await fetch('/api/beds24', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => String(t.id) === String(taskId))?.property_id || null })
-      })
-      const data = await res.json()
+      // propertyId JOINT A L'ENVOI : la garde verifie le perimetre du bien. Quand
+      // la reservation est trop ancienne pour figurer dans bookings_snapshot,
+      // c'est la seule reference dont elle dispose.
+      const data = await posterMessage(bookId,
+        allTasks.find(t => String(t.id) === String(taskId))?.property_id || null, reply)
       if (data.success) {
         const task = allTasks.find(t => String(t.id) === String(taskId))
         if (task) await window._supabase.from('conversations').insert({
@@ -796,11 +792,8 @@
       const reply = document.getElementById(`reply-${taskId}-${idx}`)?.value?.trim()
       if (!reply) return alert('Entrez une réponse')
       sendBtn.disabled = true; sendBtn.textContent = '⏳ Envoi…'
-      const res = await fetch('/api/beds24', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
-        body: JSON.stringify({ action: 'sendMessage', bookingId: bookId, message: reply, propertyId: allTasks.find(t => String(t.id) === String(taskId))?.property_id || null })
-      })
-      const data = await res.json()
+      const data = await posterMessage(bookId,
+        allTasks.find(t => String(t.id) === String(taskId))?.property_id || null, reply)
       if (data.success) {
         const task = allTasks.find(t => String(t.id) === String(taskId))
         if (task) await window._supabase.from('conversations').insert({
@@ -981,6 +974,32 @@
   }
 
   // ── Envoyer (manuel) ────────────────────────────────────────────────────────
+  // ⚠ UN SEUL ENDROIT QUI CHOISIT L'ENDPOINT, ET IL A MANQUE A TROIS APPELS.
+  // « Valider et envoyer » (mode Test) et « Envoyer » (sous-tache) postaient en
+  // dur vers `/api/beds24` — un chemin Beds24 SEUL. Sur un bien Channex, le
+  // message validé par l'hôte partait donc du mauvais côté et n'arrivait jamais ;
+  // et avec le canal e-mail (résas Offline), il aurait été journalisé comme
+  // envoyé sans l'être. Seul `sendMessage` routait.
+  //
+  // `/api/channel-message` route désormais par la SOURCE de la réservation :
+  // messagerie OTA pour Airbnb/Booking, e-mail au voyageur pour les Offline.
+  const posterMessage = async (bookId, propertyId, texte) => {
+    // Un `property_id` en UUID désigne un bien Channex ; un propId Beds24 est
+    // numérique. Heuristique héritée, conservée telle quelle : la changer ici
+    // toucherait au routage OTA qui fonctionne.
+    const isChannex = String(propertyId || '').includes('-')
+    const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
+    const payload = isChannex
+      ? { bookingId: bookId, message: texte, propertyId: propertyId || null }
+      : { action: 'sendMessage', bookingId: bookId, message: texte, propertyId: propertyId || null }
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
+      body: JSON.stringify(payload)
+    })
+    return res.json()
+  }
+
   window.sendMessage = async (bookId) => {
     const textarea = document.getElementById('compose-text')
     const text = textarea?.value?.trim()
@@ -992,16 +1011,7 @@
     btn.disabled = true; btn.textContent = '⏳ Envoi…'; setStatus('Envoi en cours…')
     try {
       const convForSend = conversations.find(c => c.bookId === bookId)
-      const isChannex = String(convForSend?.propertyId || '').includes('-')
-      const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
-      const payload = isChannex
-        ? { bookingId: bookId, message: text, propertyId: convForSend?.propertyId || null }
-        : { action: 'sendMessage', bookingId: bookId, message: text, propertyId: convForSend?.propertyId || null }
-      const res = await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
-        body: JSON.stringify(payload)
-      })
-      const data = await res.json()
+      const data = await posterMessage(bookId, convForSend?.propertyId || null, text)
       if (data.success) {
         const conv = conversations.find(c => c.bookId === bookId)
         await window._supabase.from('conversations').insert({

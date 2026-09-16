@@ -1,7 +1,7 @@
 # KB — GuestFlow AI (agent voyageur)
 
 <!-- SOURCES (mapping inverse). ⚠️ DOC en tête de ces fichiers pointe ici. Modif = MÊME COMMIT. -->
-> Sources : `lib/cron-messages.js`, `lib/canal-voyageur.js`, `api/agent-config.js`, `api/grok.js`,
+> Sources : `lib/cron-messages.js`, `lib/canal-voyageur.js`, `lib/email-guestflow.js`, `api/agent-config.js`, `api/grok.js`,
 > `apps/agent-ai/config.html`, `apps/agent-ai/messagerie.html`, `apps/agent-ai/knowledge.html`
 
 ## Ce que fait l'agent
@@ -73,17 +73,74 @@ Ce que ce filet ne fait **pas**, depuis la review du 16 septembre 2026 :
   code d'accès comme délivré alors que rien n'était parti. Le même faux vert, reproduit sur
   le chemin du code d'accès. Le chemin OTA, lui, garde son ordre historique.
 
-### `ENVOI_EMAIL_BRANCHE` — l'interrupteur de l'étape 3
+## L'envoi e-mail (`lib/email-guestflow.js`)
 
-Tant qu'il vaut `false` (`lib/canal-voyageur.js`), le canal e-mail est **décidé mais jamais
-tenté**. Les deux moteurs sortent **avant** `generateAutoMessage` : sans cette sortie, un
-appel Claude Haiku partait par réservation Offline et par template, toutes les 5 minutes,
-sur toute la fenêtre −7 j/+30 j, pour un message qui ne part pas. Avant ce chantier, le
-journal écrit en amont court-circuitait dès le second passage ; en le déplaçant après
-l'envoi, on a ouvert la porte à une dépense répétée — sur le budget de cron qui vient de
-produire un 504.
+### La clé est celle de l'hôte, sans aucun repli
 
-À l'étape 3 : passer l'interrupteur à `true` **et** retirer les sorties anticipées qui le citent.
+`api_keys.brevo_api_key` du compte **propriétaire du bien** — jamais `process.env`, jamais
+l'appelant (qui peut être un membre délégué). Même règle que `api/sms.js` : ce sont ses
+crédits, son domaine, sa réputation d'expéditeur. Un repli sur une clé plateforme ferait
+partir les messages de tous les hôtes depuis la même adresse, et un seul signalement pour
+spam les couperait tous. Sans compte propriétaire résolu, **on n'envoie pas**.
+
+### L'expéditeur est un sender vérifié, pas un champ libre
+
+Brevo n'envoie qu'au nom d'un expéditeur vérifié : une adresse saisie librement rend `400`
+**à l'envoi**, pas à la configuration — l'hôte croirait avoir réglé son adresse et ne
+découvrirait l'échec qu'au premier message raté. On prend donc le premier expéditeur
+**actif** de son compte Brevo (`GET /senders`), mis en cache 10 minutes par process.
+L'écran de l'étape 4 donnera le choix ; ce comportement reste le défaut propre.
+
+**`reply-to` = l'adresse d'expédition.** Le voyageur répond, l'hôte reçoit dans sa boîte.
+L'ingestion de ces réponses dans la messagerie HôteSmart est un chantier séparé : tant
+qu'il n'existe pas, un `reply-to` pointant ailleurs ferait disparaître les réponses.
+
+### Le texte du template part tel quel
+
+Pas de refonte (spec §4). Il est **échappé** — c'est du texte, pas du HTML : une apostrophe
+ou un `<` ne doit ni casser la page ni ouvrir une injection dans la boîte du voyageur —
+puis une ligne vide devient un paragraphe et un saut simple un `<br>`. Marque blanche : le
+seul nom qui apparaît est celui du bien.
+
+**Le sujet est dérivé** de l'`event_type` et du nom du bien (`sujetPour`), parce qu'un
+template n'a pas de champ sujet et qu'on n'en ajoute pas un. En français, comme le corps :
+un sujet traduit devant un corps français serait un faux service.
+
+### ⚠️ Trois issues à un échec, et elles ne se confondent jamais
+
+| issue | exemples | ce qu'on fait |
+|---|---|---|
+| **permanent** | 4xx Brevo, adresse invalide, aucun expéditeur vérifié, Brevo non configuré | on abandonne **tout de suite**, on écrit `message_sent_log` (sinon ça repart toutes les 5 min) et on prévient l'hôte — c'est un geste de sa part qu'il faut |
+| **quota** | 429, **402** (crédits épuisés — un 402 est un quota, pas un refus définitif) | on repassera, **hors plafond** : un forfait journalier épuisé rend 429 toute la journée, un plafond abandonnerait le message en 20 minutes alors qu'il repart à minuit. Signalement propre, une seule fois |
+| **transitoire** | 5xx, réseau coupé | on repassera, et on **compte**. Au plafond (5 en 24 h), on abandonne et on le dit |
+
+Compter sans distinguer aurait fait attendre cinq échecs à une adresse qui ne marchera
+jamais, et abandonné un quota qui se rétablit tout seul.
+
+⚠️ **Le chemin one-shot n'utilise pas ce plafond.** `triggerTemplates`
+(`booking_confirmed`) n'aura jamais qu'une tentative : l'événement est marqué traité quoi
+qu'il arrive. Attendre cinq échecs qui ne viendront pas, c'est ne jamais alerter — alors
+qu'avant ce chantier `send_failure` remontait dès la deuxième occurrence. Un échec y est un
+abandon par nature, quota compris (le quota se rétablira, pas l'événement) : l'alerte part
+immédiatement.
+
+Le compteur vit dans `automation_incidents` (type `email_voyageur_echec`, clé
+`EMAILKEY:<booking>:<template>` interrogée via **`detail->>message`** — la colonne est du
+JSONB et `reportIncident` y range une chaîne sous `{ message }` ; un `ILIKE` sur la colonne
+entière fait lever Postgres, l'erreur est avalée par le fail-safe, le compte rend 0 et le
+plafond n'est jamais atteint), **sans nouvelle table** : les migrations
+de ce dépôt se collent à la main dans l'éditeur Supabase, et en demander une pour un
+compteur aurait fait attendre tout le chantier sur un geste humain. Ces lignes ne réveillent
+personne (seuil inatteignable) ; c'est l'abandon (`email_voyageur_abandon`) qui alerte, une
+fois, avec de quoi agir.
+
+### `ENVOI_EMAIL_BRANCHE` — devenu un kill switch de canal
+
+Ouvert depuis l'étape 3. Les sorties anticipées qui le citent sont **conservées** : le
+refermer coupe le canal e-mail sans déployer, et les deux moteurs sortent alors **avant**
+`generateAutoMessage` — sans quoi un appel Claude Haiku partirait par réservation Offline et
+par template, toutes les 5 minutes, sur toute la fenêtre −7 j/+30 j, pour un message qui ne
+part pas.
 
 ### ⚠️ « En attente » et « perdu » ne sont pas le même mot
 
@@ -99,19 +156,34 @@ Les deux moteurs n'ont pas la même physique, et c'est ce que la review a rattra
   **perdu pour cette réservation** — il part dans `results.errors` (`email_non_branche`), pas
   dans un log rassurant, et se rattrape à la main si le séjour compte.
 
-### Dettes ouvertes à traiter à l'étape 3
+### Le Mode Validation route enfin (corrigé à l'étape 3)
 
-1. **Le Mode Validation ne route pas.** `apps/agent-ai/messagerie.html` poste « Valider et
-   envoyer » en dur vers `/api/beds24` — un chemin Beds24 seul, qui ne connaît ni Channex ni
-   l'e-mail. Aujourd'hui sans conséquence (l'interrupteur ferme le canal e-mail avant la
-   création de la tâche), mais **le jour où il s'ouvre, un bien en mode validation écrira
-   `message_sent_log` pour un message que la validation ne saura pas envoyer** : condamné
-   des deux côtés. Cette correction n'est donc pas optionnelle à l'étape 3.
-2. **`recordMessage` étiquetterait un e-mail comme un message OTA** : `provider: 'channex'`,
-   `ota: 'Offline'`. Un envoi Brevo enregistré comme un message de la messagerie Channex.
-   Inatteignable tant que l'interrupteur est fermé.
-3. **Le plafond de tentatives** décidé pour ce canal : à l'étape 2 il n'y a aucune tentative
-   à plafonner.
+`apps/agent-ai/messagerie.html` postait **« Valider et envoyer » en dur vers `/api/beds24`** —
+un chemin Beds24 seul, qui ne connaît ni Channex ni l'e-mail. Sur un bien Channex, le message
+validé par l'hôte partait du mauvais côté et n'arrivait jamais ; avec le canal e-mail ouvert,
+il aurait en plus été journalisé comme envoyé sans l'être.
+
+L'endpoint ne refuse que ce qu'il sait impossible — une réservation Offline **sans
+adresse**. Une réservation dont la source ne dit rien (`sans_canal`) part quand même chez
+Channex, comme avant : le normaliseur écrit `source: ota_name || 'direct'`, et `'direct'`
+compte parmi les sources sans canal **côté Beds24** ; appliquer ce filtre à un snapshot
+Channex aurait retiré à l'hôte la possibilité d'écrire à son voyageur. En cas de doute,
+c'est le provider qui tranche.
+
+**Trois** appels postaient ainsi en dur (« Valider et envoyer », le bouton « Envoyer » d'une
+sous-tâche, et l'envoi manuel qui, lui, routait déjà) : ils passent tous par une seule
+fonction `posterMessage`. `/api/channel-message` route désormais par la source, comme le
+cron : messagerie OTA pour Airbnb/Booking, e-mail pour les Offline, et un refus **lisible**
+(422 + motif) quand la réservation n'a aucun canal — au lieu du 422 `not_supported` du
+provider, que personne ne pouvait interpréter.
+
+### Dette restante
+
+**`messages.provider` ne sait pas dire « e-mail ».** Un envoi Brevo y est enregistré avec le
+provider du bien (`channex`) ; le canal réel n'a pas de colonne. Le corriger demande une
+migration — donc un collage manuel dans Supabase — et c'est à faire avec celle de l'étape 4,
+qui portera les colonnes d'expéditeur. En attendant, `messages` dit *d'où vient la
+réservation*, pas *par où le message est sorti*.
 
 ## Kill switch (pause par bien) — détail dans `alertes.md`
 Bouton **Couper l'IA / Réactiver** sur `/biens` (miroir dans la config GuestFlow). Coupé = plus de
