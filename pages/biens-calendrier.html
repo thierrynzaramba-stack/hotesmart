@@ -44,13 +44,28 @@
     .bien-title::before { content: ''; width: 5px; height: 22px; background: #007aff; border-radius: 3px; display: inline-block; }
     .bien-title .cap { font-size: 12px; font-weight: 400; color: #86868b; }
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-    table.cal th, table.cal td { padding: 9px 1px; text-align: center; white-space: nowrap; width: 34px; min-width: 34px; }
+    /* Colonne elargie (34 -> 46px) et lignes plus hautes : sans cela, une bulle
+       d'une nuit n'affiche aucun nom. Doit rester d'accord avec CELL_W
+       (shared/calendar-core.js), qui sert au calcul du nombre de jours. */
+    table.cal th, table.cal td { padding: 11px 1px; text-align: center; white-space: nowrap; width: 46px; min-width: 46px; }
     table.cal thead th { border-bottom: 1px solid #e5e5e7; }
     table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 2; border-right: 1px solid #e5e5e7; font-weight: 500; }
     table.cal thead .row-label { z-index: 4; }
     table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
     table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
-    table.cal .weekend { background: rgba(0,0,0,0.022); }
+    /* WEEK-ENDS — lisibles d'un coup d'œil sur un mois entier.
+       L'ancien rgba(0,0,0,0.022) etait invisible au-dela de quelques colonnes :
+       reperer un samedi imposait de lire les en-tetes un a un. Fond de colonne
+       franc + en-tete en gras colore, les deux ensemble (le fond seul se perd
+       sous les cellules colorees, l'en-tete seul ne marque pas la colonne). */
+    table.cal .weekend { background: #eef1f6; }
+    table.cal thead th.weekend { background: #e3e9f2; }
+    table.cal thead th.weekend .day-name { color: #3a6ea5; font-weight: 700; }
+    table.cal thead th.weekend .day-num  { color: #1f4e79; font-weight: 700; }
+    /* Liseres lateraux : ils dessinent le bloc samedi-dimanche comme une unite. */
+    table.cal .weekend.we-debut { box-shadow: inset 2px 0 0 #c3d0e2; }
+    table.cal .weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2; }
+    table.cal .weekend.we-debut.we-fin { box-shadow: inset 2px 0 0 #c3d0e2, inset -2px 0 0 #c3d0e2; }
     table.cal .month-start { border-left: 2px solid #007aff; }
     table.cal .today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
     table.cal td.edit-cell { cursor: pointer; position: relative; }
@@ -60,8 +75,21 @@
     table.cal td.maxrate-cell { font-weight: 500; color: #6e6e73; }
     table.cal td.modified::after { content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; background: #f59e0b; border-radius: 50%; }
     .rate-input { width: 100%; border: none; background: #fff; text-align: center; font-size: 12px; font-weight: 600; font-family: inherit; padding: 3px 0; outline: 2px solid #007aff; border-radius: 3px; }
-    table.cal .resa-cell { position: relative; padding: 0 !important; height: 24px; }
-    .resa-bar { position: absolute; top: 3px; bottom: 3px; color: white; font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; white-space: nowrap; overflow: hidden; border-radius: 11px; }
+    table.cal .resa-cell { position: relative; padding: 0 !important; height: 36px; }
+    .resa-bar { position: absolute; top: 4px; bottom: 4px; color: white; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px; padding: 0 8px 0 4px; white-space: nowrap; overflow: hidden; border-radius: 14px; }
+    /* ⚠ LE NOM EST TRONQUE PAR LE CSS, PAS PAR LE JS.
+       Une coupe a 16 caracteres ne sait rien de la largeur reelle : elle
+       amputait « Marie-Christine » sur une bulle de dix nuits qui avait la place,
+       et debordait sur une bulle d'une nuit qui ne l'avait pas. L'ellipse suit la
+       place disponible ; le nom complet reste dans `title`.
+       `min-width:0` est OBLIGATOIRE — sans lui, un enfant flex refuse de
+       retrecir sous sa largeur de contenu et l'ellipse ne se declenche jamais. */
+    .resa-bar .nom { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+    /* Sejour coupe par le bord de la fenetre : bord droit, pas arrondi — l'arrondi
+       ferait lire « le sejour s'arrete ici » alors qu'il continue hors ecran.
+       Meme convention que la grille mobile. */
+    .resa-bar.cont-left  { border-top-left-radius: 0; border-bottom-left-radius: 0; padding-left: 8px; }
+    .resa-bar.cont-right { border-top-right-radius: 0; border-bottom-right-radius: 0; }
     .resa-bar.blue { background: #0d4ea6; } .resa-bar.green { background: #1f6f23; } .resa-bar.red { background: #d52a44; }
     .resa-bar.airbnb { background: #d52a44; } .resa-bar.booking { background: #0d4ea6; } .resa-bar.direct { background: #1f6f23; }
     .resa-bar.cliquable { cursor: pointer; }
@@ -69,6 +97,20 @@
     .resa-bar .ava { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .resa-bar .ava svg { width: 10px; height: 10px; }
     td.cell-closed { background: #ffeced !important; }
+    /* FERME A LA VENTE — hachures grises sur toute la colonne du bien.
+       `stop_sell` est une INTENTION memorisee de l'hote (docs/kb/reservation-directe.md
+       §8) : elle doit se voir sur toutes les lignes, pas seulement sur le tarif,
+       sans quoi un bien ferme se lit comme un bien simplement vide.
+       Les hachures, et non un aplat : un aplat gris se confondrait avec une
+       cellule desactivee, alors que la fermeture est une decision, pas une
+       absence. `background-image` laisse la couleur de fond (reservee, du jour,
+       week-end) visible dessous au lieu de l'ecraser. */
+    table.cal td.jour-ferme, table.cal th.jour-ferme {
+      background-image: repeating-linear-gradient(135deg,
+        rgba(110,110,115,0.26) 0, rgba(110,110,115,0.26) 2px,
+        transparent 2px, transparent 6px);
+    }
+    table.cal td.jour-ferme.rate-cell { color: #6e6e73; text-decoration: line-through; }
     td.cell-reserved { background: #dde7f5 !important; }
     .float-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(140%); background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px); }
     .float-bar.visible { transform: translateX(-50%) translateY(0); }
@@ -164,6 +206,10 @@
          seulement sur un bien Channex, avec le droit d'ecrire, et hors lecture
          seule. On ne propose pas un bouton qui echouerait. -->
     <button class="btn-params" id="btn-ajouter-resa" style="background:#1f6f23;display:none">+ Ajouter une réservation</button>
+    <!-- Fermeture / reouverture a la vente en un geste, sans passer par la
+         popup de parametres. Le libelle suit l'etat des jours selectionnes :
+         tous fermes -> « Rouvrir », sinon « Fermer ». Meme gardes que l'ajout. -->
+    <button class="btn-params" id="btn-stop-sell" style="background:#6e6e73;display:none">Fermer à la vente</button>
     <button class="btn-clear" id="btn-clear-sel">Annuler</button>
   </div>
 
@@ -354,22 +400,100 @@
 
     function renderBlocks(){ blocksEl.innerHTML=''; selectedBiens.forEach(bid=>{const b=BIENS.find(x=>x.id===bid);if(!b)return;if(!states[bid]||states[bid].length!==days.length)initState(b);blocksEl.appendChild(renderBienBlock(b))}); attachEvents() }
 
+    // Classes communes a l'en-tete et a toutes les lignes d'un meme jour.
+    // Les trois rendus les recopiaient : un marquage ajoute a l'un (le week-end,
+    // justement) manquait aux deux autres et la colonne se lisait de travers.
+    // `we-debut` / `we-fin` dessinent samedi-dimanche comme un bloc encadre.
+    function classesJour(i){
+      const j=days[i].getDay(), c=[]
+      if(j===6) c.push('weekend','we-debut')
+      else if(j===0) c.push('weekend','we-fin')
+      if(isToday(i)) c.push('today')
+      if(isMonthStart(i)) c.push('month-start')
+      return c
+    }
+
+    // ─── Geometrie des bulles de reservation ────────────────────────────────
+    // RENDU CHANNEL MANAGER : une resa du 15 au 16 part du MILIEU du 15 et finit
+    // au MILIEU du 16. Le jour d'arrivee et le jour de depart sont donc PARTAGES
+    // visuellement avec la resa voisine — c'est ce qui montre qu'une rotation le
+    // meme jour n'est pas un conflit.
+    //
+    // ⚠ L'ancien calcul `width:(span-0.5)*100%` avec `left:50%` s'arretait a la
+    // FIN du dernier jour occupe, soit une demi-cellule trop tot : la bulle ne
+    // touchait jamais le jour de depart, et deux sejours qui s'enchainent
+    // laissaient un blanc la ou ils doivent se croiser.
+    //
+    // ⚠ Une resa COMMENCEE AVANT la fenetre ne s'affichait pas du tout : la
+    // barre n'etait rendue que dans la cellule `startISO`, absente de la grille.
+    // La grille demarrant AUJOURD'HUI, tout sejour en cours etait invisible —
+    // un planning qui montre libre la nuit ou quelqu'un dort. On rend donc
+    // toutes les barres depuis la premiere cellule, en coordonnees de colonnes,
+    // ce qui gere le debordement des deux cotes.
+    function barresResa(bien){
+      if(!days.length) return ''
+      const iso0=toISO(days[0]), isoN=toISO(days[days.length-1])
+      const indexDe=(iso)=>{ for(let k=0;k<days.length;k++){ if(toISO(days[k])===iso) return k } return null }
+      let out=''
+      ;(bien.resa||[]).forEach(bk=>{
+        // Chevauchement avec la fenetre : depart APRES le premier jour affiche
+        // (la nuit de depart n'est pas occupee) et arrivee avant le dernier.
+        if(!(bk.startISO<=isoN && bk.checkout>iso0)) return
+        const iDebut = bk.startISO<iso0 ? -1 : indexDe(bk.startISO)
+        const iFin   = bk.checkout>isoN ? days.length : indexDe(bk.checkout)
+        if(iDebut===null||iFin===null) return
+        // Milieu de la cellule d'arrivee -> milieu de la cellule de depart.
+        const gauche=Math.max(0, iDebut+0.5), droite=Math.min(days.length, iFin+0.5)
+        if(droite<=gauche) return
+        const coupeG = iDebut<0, coupeD = iFin>days.length-1
+        const nameShort=escapeHtmlLocal(bk.name||'Reservation')
+        const px=(n)=>(n*CELL_W)
+        // ⚠ TOUT CE QUI VIENT DU PROVIDER EST ECHAPPE, pas seulement le nom.
+        // `source`, `booking_id` et les dates arrivent de `bookings_snapshot` :
+        // ce sont des donnees externes, et un guillemet dans l'une d'elles
+        // casserait l'attribut qui la porte. Le nom l'etait deja ; les autres
+        // ne l'etaient pas.
+        out+='<div class="resa-bar '+escapeHtmlLocal(bk.source)+(bk.id?' cliquable':'')
+           + (coupeG?' cont-left':'')+(coupeD?' cont-right':'')+'"'
+           + ' data-resa="'+escapeHtmlLocal(bk.id||'')+'" data-bien="'+escapeHtmlLocal(bien.id)+'"'
+           + ' title="'+escapeHtmlLocal(bk.name||'')+' — '+escapeHtmlLocal(bk.startISO)+' au '+escapeHtmlLocal(bk.checkout)+(bk.id?' — cliquer pour le detail':'')+'"'
+           + ' style="left:'+px(gauche)+'px;width:'+(px(droite-gauche)-2)+'px;z-index:2">'
+           + '<span class="ava">'+platformLogo(bk.source)+'</span>'
+           + '<span class="nom">'+nameShort+'</span></div>'
+      })
+      return out
+    }
+
+    // ⚠ UNE SEULE DEFINITION DE « FERME », partagee par les hachures, la cellule
+    // rouge du tarif et le libelle du bouton Fermer/Rouvrir. Les hachures ne
+    // regardaient que `stopSell` pendant que `cell-closed` regardait les deux :
+    // un jour ferme par « Disponibilité → Fermé » sortait rouge mais SANS
+    // hachures, et le bouton proposait « Fermer » sur un jour deja ferme.
+    const jourFerme = (s) => !!(s && (s.stopSell === 'closed' || s.avail === 'closed'))
+
     function renderBienBlock(bien){
       const st=states[bien.id]
+      // Fermeture a la vente : intention memorisee de l'hote, a montrer sur
+      // TOUTES les lignes du bien et pas seulement sur le tarif.
+      const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
       let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
-      days.forEach((d,idx)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(idx)?' month-start':'';html+='<th class="'+(we?'weekend':'')+(isToday(idx)?' today':'')+ms+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
+      days.forEach((d,idx)=>{const c=classesJour(idx);if(ferme(idx))c.push('jour-ferme');html+='<th class="'+c.join(' ')+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
       html+='</tr></thead><tbody>'
       html+='<tr><td class="row-label">Reservations</td>'
-      days.forEach((d,i)=>{const we=d.getDay()===0||d.getDay()===6;const ms=isMonthStart(i)?' month-start':'';html+='<td class="resa-cell '+(we?'weekend':'')+(isToday(i)?' today':'')+ms+'">';(bien.resa||[]).forEach(bk=>{if(toISO(d)===bk.startISO){const w=(bk.span-0.5)*100;const nameShort=escapeHtmlLocal(bk.name.length>16?bk.name.slice(0,15)+'.':bk.name);html+='<div class="resa-bar '+bk.source+(bk.id?' cliquable':'')+'" data-resa="'+(bk.id||'')+'" data-bien="'+bien.id+'" title="'+escapeHtmlLocal(bk.name||'')+' — cliquer pour le detail" style="left:50%;width:calc('+w+'% - 2px);z-index:2"><span class="ava">'+platformLogo(bk.source)+'</span>'+nameShort+'</div>'}});html+='</td>'})
+      // Toutes les barres vivent dans la PREMIERE cellule et sont positionnees en
+      // pixels-colonnes : voir `barresResa`. Les cellules suivantes ne portent
+      // plus que leur fond.
+      days.forEach((d,i)=>{const c=classesJour(i);c.unshift('resa-cell');if(ferme(i))c.push('jour-ferme');html+='<td class="'+c.join(' ')+'">'+(i===0?barresResa(bien):'')+'</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
         const editable=(pk==='rate')
         const lbl = pk==='maxRate' ? 'Prix max' : paramLabel(pk)
         html+='<tr><td class="row-label">'+lbl+'</td>'
-        st.forEach((s,i)=>{const we=days[i].getDay()===0||days[i].getDay()===6;const ms=isMonthStart(i)?' month-start':'';const c=[];if(editable)c.push('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');if(we)c.push('weekend');if(isToday(i))c.push('today');if(ms)c.push('month-start');
-          if(pk==='rate'){ const iso=toISO(days[i]); const closed=(s.avail==='closed'||s.stopSell==='closed'); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
+        st.forEach((s,i)=>{const c=classesJour(i);if(editable)c.unshift('edit-cell');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');
+          if(ferme(i))c.push('jour-ferme')
+          if(pk==='rate'){ const iso=toISO(days[i]); const closed=jourFerme(s); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
           if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
         html+='</tr>'
       })
@@ -442,13 +566,29 @@
       // write, et pas en lecture seule. Sinon il reste cache — un bouton qui
       // promet un pouvoir qu'on n'a pas est pire que pas de bouton.
       const btn=document.getElementById('btn-ajouter-resa')
-      if(btn){
-        const bien=BIENS.find(x=>x.id===sel.bienId)
-        const ok = bien && (bien.provider==='channex'||bien.provider==='channel')
-                   && peutEcrire('reservations') && !LECTURE_SEULE
-        btn.style.display = ok ? '' : 'none'
+      const bien=BIENS.find(x=>x.id===sel.bienId)
+      const ok = !!(bien && (bien.provider==='channex'||bien.provider==='channel')
+                 && peutEcrire('reservations') && !LECTURE_SEULE)
+      if(btn) btn.style.display = ok ? '' : 'none'
+      // Fermer / Rouvrir : memes gardes que l'ajout, et le libelle dit ce que le
+      // clic va FAIRE. Sur une selection ou tous les jours sont deja fermes, le
+      // seul geste utile est la reouverture.
+      const btnSS=document.getElementById('btn-stop-sell')
+      if(btnSS){
+        btnSS.style.display = ok ? '' : 'none'
+        if(ok){
+          btnSS.textContent = selectionToutFermee() ? 'Rouvrir à la vente' : 'Fermer à la vente'
+        }
       }
       floatBar.classList.add('visible')
+    }
+
+    // Vrai seulement si TOUS les jours selectionnes sont fermes. Sur une
+    // selection mixte, « Fermer » est le geste attendu : l'hote vient de tirer
+    // une plage pour la fermer, pas pour la basculer jour par jour.
+    function selectionToutFermee(){
+      const st=states[sel.bienId]; if(!st||!sel.idx.size) return false
+      return [...sel.idx].every(i => jourFerme(st[i]))
     }
     function hideFloatBar(){ if(floatBar) floatBar.classList.remove('visible') }
     document.getElementById('btn-clear-sel')?.addEventListener('click',()=>{sel={bienId:null,idx:new Set(),row:'rate'};updateSelectionUI();hideFloatBar()})
@@ -754,6 +894,75 @@
     }
 
     document.getElementById('btn-ajouter-resa')?.addEventListener('click', ouvrirFormulaireAjout)
+    document.getElementById('btn-stop-sell')?.addEventListener('click', basculerStopSell)
+
+    // ─── Fermer / Rouvrir a la vente, depuis la selection de dates ───────────
+    // ⚠ UI SEULEMENT : aucune logique nouvelle. On passe par `api.calendar.save`
+    // avec des segments `stop_sell`, exactement ce que fait deja la rubrique
+    // « Stop vente » de la popup — c'est le meme chemin serveur, qui memorise
+    // l'INTENTION dans `calendar_inventory` et la restitue apres toute poussee
+    // d'inventaire (docs/kb/reservation-directe.md §8). Ce bouton ne fait que
+    // supprimer trois clics.
+    async function basculerStopSell(){
+      if(!sel.bienId || !sel.idx.size) return
+      // Garde d'interface doublee cote serveur (api/calendar.js, droit
+      // `reservations` en ecriture) : celle-ci n'est qu'un confort.
+      if(!peutEcrire('reservations') || LECTURE_SEULE){
+        showToast('Vous n\'avez pas le droit de modifier la vente'); return
+      }
+      const bienId = sel.bienId, st = states[bienId]
+      const fermer = !selectionToutFermee()
+      const idxs = [...sel.idx].sort((a,b)=>a-b)
+
+      // Regroupement en PLAGES CONTIGUES : un segment par jour ferait autant de
+      // lignes a pousser que de jours selectionnes. Sur un mois entier, c'est la
+      // difference entre un appel et trente.
+      const plages=[]; let debut=idxs[0], prec=idxs[0]
+      for(let k=1;k<idxs.length;k++){
+        if(idxs[k]===prec+1){ prec=idxs[k]; continue }
+        plages.push([debut,prec]); debut=idxs[k]; prec=idxs[k]
+      }
+      plages.push([debut,prec])
+      // ⚠ ROUVRIR DOIT AUSSI RELEVER `avail`, SINON LE JOUR RESTE INVENDABLE.
+      // La rubrique « Disponibilité → Fermé » de la popup ecrit `avail = 0` ET
+      // `stop_sell = true` (api/calendar.js). Ne renvoyer que `stop_sell: false`
+      // laissait `avail = 0` : la relecture ramenait la cellule en rouge apres
+      // qu'un toast avait annonce « Rouvert à la vente ».
+      // Fermer, en revanche, n'envoie QUE `stop_sell` : c'est l'intention
+      // memorisee de l'hote, et la disponibilite reste une consequence calculee
+      // (docs/kb/reservation-directe.md §8) — on ne touche pas au stock.
+      const segments = plages.map(([a,b])=>{
+        const seg = { date_from: toISO(days[a]), date_to: toISO(days[b]), stop_sell: fermer }
+        if(!fermer) seg.avail = 1
+        return seg
+      })
+
+      pushUndo(bienId)
+      // Rendu optimiste : les hachures apparaissent tout de suite. On ne modifie
+      // localement QUE ce qui est reellement envoye — a la fermeture `avail`
+      // n'est pas touche, donc on ne le repeint pas non plus, sinon la relecture
+      // « annulerait » un changement que l'hote croyait acquis.
+      idxs.forEach(i=>{ st[i].stopSell = fermer?'closed':'open'
+                        if(!fermer) st[i].avail = 'open'
+                        st[i].modified = true })
+      const n = idxs.length
+      sel={bienId:null, idx:new Set(), row:'rate'}; hideFloatBar(); renderBlocks()
+      showToast((fermer?'Fermeture':'Réouverture')+' de '+n+' jour'+(n>1?'s':'')+'…')
+      try{
+        const resp = await api.calendar.save(bienId, segments)
+        if(resp && resp.config_saved === false){ showToast('Erreur: ' + resp.warnings.join(' · '), 6500) }
+        else if(resp && resp.push_failed){ showToast('NON PUBLIE — ' + resp.warnings.join(' · '), 12000) }
+        else if(resp && resp.local_only){ showToast(resp.warnings.join(' · '), 6500) }
+        else if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre — ' + resp.warnings.join(' · '), 6500) }
+        else { showToast(fermer?'Fermé à la vente':'Rouvert à la vente') }
+        // Relecture : l'etat affiche redevient celui du cœur, jamais le pari
+        // optimiste ci-dessus.
+        await reloadInventory()
+      }catch(err){
+        showToast('Erreur: ' + (err.message||'sauvegarde'), 6000)
+        await reloadInventory()
+      }
+    }
     document.getElementById('ajout-annuler')?.addEventListener('click', fermerFormulaireAjout)
     document.getElementById('ajout-valider')?.addEventListener('click', validerAjout)
 
@@ -796,15 +1005,30 @@
       const canal = resa.offline ? 'Direct (saisie HôteSmart)'
                                  : (LIBELLE_CANAL[resa.source] || resa.sourceBrute || resa.source)
 
+      const channex = (bien.provider==='channex'||bien.provider==='channel')
+      // ⚠ MODIFIABLE = LES MEMES QUATRE CONDITIONS QUE L'ANNULATION. Une resa OTA
+      // reste en consultation seule : Airbnb et Booking sont maitres de leurs
+      // reservations, et le CRS ne sert qu'a nos propres ecritures.
+      // ⚠ « Offline » NE VEUT PAS DIRE « saisie par l'hote ». Le moteur de
+      // reservation public cree lui aussi des sejours `ota_name: "Offline"`, mais
+      // PAYES par le voyageur : en deplacer dates ou prix depuis le planning ne
+      // declencherait ni remboursement ni complement. Le serveur les refuse (409
+      // `reservation_moteur`) ; on ne propose donc pas les champs.
+      const venteEnLigne = resa.metaSource === 'hotesmart-engine'
+      const modifiable = !!(resa.offline && channex && !venteEnLigne
+                            && peutEcrire('reservations') && !LECTURE_SEULE)
+
       document.getElementById('resa-titre').textContent = resa.name
       document.getElementById('resa-sous-titre').textContent = bien.name
       document.getElementById('resa-corps').innerHTML =
-          ligneFiche('Arrivée', resa.startISO + (resa.arrivalHour?' à '+resa.arrivalHour:''))
-        + ligneFiche('Départ', resa.checkout)
-        + ligneFiche('Nuits', nuits)
-        + ligneFiche('Voyageurs', voyageurs)
+          blocConversation(bien, resa)
+        + (modifiable ? champsModifiables(bien, resa, nuits) : (
+            ligneFiche('Arrivée', resa.startISO + (resa.arrivalHour?' à '+resa.arrivalHour:''))
+          + ligneFiche('Départ', resa.checkout)
+          + ligneFiche('Nuits', nuits)
+          + ligneFiche('Voyageurs', voyageurs)
+          + ligneFiche('Montant', montant)))
         + ligneFiche('Canal', canal)
-        + ligneFiche('Montant', montant)
         + ligneFiche('Commission', resa.commission!=null ? resa.commission+' '+(resa.currency||'EUR') : null)
         + ligneFiche('Référence OTA', resa.otaCode)
         + ligneFiche('Identifiant', resa.id)
@@ -813,11 +1037,14 @@
       const note = document.getElementById('resa-note')
       actions.innerHTML = '<button class="btn-cancel" id="resa-fermer">Fermer</button>'
 
-      const channex = (bien.provider==='channex'||bien.provider==='channel')
-      if(resa.offline && channex && peutEcrire('reservations') && !LECTURE_SEULE){
+      if(modifiable){
         actions.insertAdjacentHTML('afterbegin',
-          '<button class="btn-cancel" id="resa-annuler" style="color:#c0392b">Annuler la réservation</button>')
+          '<button class="btn-cancel" id="resa-annuler" style="color:#c0392b">Annuler la réservation</button>'
+          + '<button class="btn-apply" id="resa-enregistrer">Enregistrer</button>')
         note.textContent = 'Réservation directe : modifiable depuis HôteSmart.'
+      } else if(venteEnLigne && channex){
+        note.textContent = 'Vendue par votre moteur de réservation et payée en ligne : '
+                         + 'toute modification passe par un remboursement ou un complément.'
       } else if(resa.offline && channex){
         note.textContent = 'Réservation directe — vous n\'avez pas le droit de la modifier.'
       } else {
@@ -829,7 +1056,148 @@
       document.getElementById('resa-fermer').addEventListener('click', fermerFiche)
       const btnAnn = document.getElementById('resa-annuler')
       if(btnAnn) btnAnn.addEventListener('click', annulerResaCourante)
+      const btnEnr = document.getElementById('resa-enregistrer')
+      if(btnEnr) btnEnr.addEventListener('click', enregistrerResaCourante)
+      resoudreConversation(bien, resa)
+      if(modifiable) ['fiche-arrivee','fiche-depart','fiche-prix','fiche-adultes','fiche-enfants']
+        .forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input', rafraichirFiche) })
+      if(modifiable) rafraichirFiche()
       document.getElementById('overlay-resa').classList.add('visible')
+    }
+
+    // ─── Acces a la conversation du voyageur ─────────────────────────────────
+    // La messagerie s'ouvre sur `booking_id` : c'est la cle du cœur, la meme que
+    // `messages.booking_id` et que `conversations.book_id`.
+    //
+    // ⚠ GRISE QUAND IL N'Y A RIEN A OUVRIR, avec la raison : un bouton actif qui
+    // mene a une liste vide est pire qu'un bouton eteint, l'hote croit a une
+    // panne. Le cas le plus frequent est la reservation directe, ou le voyageur
+    // n'a jamais ecrit par le canal.
+    // Le bouton nait DESACTIVE et se resout a l'ouverture de la fiche
+    // (`resoudreConversation`). Naitre actif puis s'eteindre ferait rater un clic
+    // parti trop tot vers une page vide.
+    function blocConversation(bien, resa){
+      return '<div style="margin-bottom:14px">'
+        + '<button class="btn-apply" id="resa-conversation" disabled'
+        + ' style="width:100%;background:#e8e8ed;color:#86868b;cursor:progress">'
+        + '&#128172; Ouvrir la conversation</button>'
+        + '<div id="resa-conversation-note" style="font-size:12px;color:#86868b;margin-top:6px">Recherche du fil…</div>'
+        + '</div>'
+    }
+
+    // ⚠ INTERROGE A L'OUVERTURE, UNE RESERVATION A LA FOIS. L'endpoint calendrier
+    // servait ce booleen pour toute la fenetre : `messages` etant un journal, le
+    // rendu depassait le plafond de 1000 lignes de PostgREST sans erreur, et des
+    // fiches grisaient un bouton vers un fil bien reel.
+    async function resoudreConversation(bien, resa){
+      const btn = document.getElementById('resa-conversation')
+      const note = document.getElementById('resa-conversation-note')
+      if(!btn||!note) return
+      const eteindre = (texte)=>{ btn.style.cursor='not-allowed'; note.textContent = texte }
+      if(!resa.id){ eteindre('Réservation sans identifiant : aucune conversation rattachable.'); return }
+      let r
+      try { r = await api.messages.aUneConversation(resa.id) }
+      catch(e){
+        // ⚠ ON NE DIT PAS « aucun fil » QUAND ON N'A PAS PU REGARDER : ce serait
+        // affirmer au sujet du voyageur quelque chose qu'on ignore.
+        eteindre('Fil indisponible pour le moment — réessayez.'); return
+      }
+      // La fiche a pu etre fermee ou changee pendant l'appel : on ne touche que
+      // si c'est toujours la meme reservation qui est a l'ecran.
+      if(!resaCourante || String(resaCourante.resa.id)!==String(resa.id)) return
+      if(r && r.has_conversation){
+        btn.disabled=false; btn.style.background='#1f6f23'; btn.style.color='#fff'; btn.style.cursor='pointer'
+        note.textContent=''
+        btn.addEventListener('click', ()=>ouvrirConversation(bien, resa))
+      } else {
+        eteindre(resa.offline
+          ? 'Aucun message : cette réservation directe n\'a pas de fil voyageur.'
+          : 'Aucun message reçu pour cette réservation.')
+      }
+    }
+
+    function ouvrirConversation(bien, resa){
+      // `bien` accompagne `conv` : sans lui, un filtre de bien deja actif dans la
+      // messagerie peut masquer la conversation visee.
+      const url = '/apps/agent-ai/messagerie?conv=' + encodeURIComponent(resa.id)
+        + (bien.provider_property_id ? '&bien=' + encodeURIComponent(bien.provider_property_id) : '')
+      window.location.href = url
+    }
+
+    // ─── Champs modifiables (reservations « Offline » uniquement) ────────────
+    // Dates, prix vendu et voyageurs. Le reste de la fiche reste en consultation :
+    // le nom du client et la reference OTA ne se corrigent pas depuis un planning.
+    function champsModifiables(bien, resa, nuitsActuelles){
+      // ⚠ PRIX INCONNU : on laisse le champ VIDE, on n'invente pas le prix de
+      // base du bien. Pre-rempli, il partait a l'enregistrement comme s'il etait
+      // le prix de vente du sejour — et le repricait chez Channex alors que
+      // l'hote n'y avait pas touche. Vide, le serveur garde le montant du cœur.
+      const montantConnu = Number(resa.amount) > 0 && nuitsActuelles > 0
+      const parNuit = montantConnu ? (Number(resa.amount)/nuitsActuelles) : ''
+      const champ = (id,label,type,valeur,extra)=>
+        '<div style="flex:1"><label style="font-size:12px;color:#86868b">'+label+'</label>'
+        + '<input id="'+id+'" type="'+type+'" value="'+escapeHtmlLocal(valeur)+'" '+(extra||'')
+        + ' style="width:100%;padding:9px;margin-top:4px;border:1px solid #d2d2d7;border-radius:8px"></div>'
+      return '<div style="display:flex;gap:12px;margin-bottom:12px">'
+          + champ('fiche-arrivee','Arrivée','date',resa.startISO)
+          + champ('fiche-depart','Départ','date',resa.checkout)
+        + '</div>'
+        + '<div style="display:flex;gap:12px;margin-bottom:6px">'
+          + champ('fiche-adultes','Adultes','number',resa.numAdult||1,'min="1"')
+          + champ('fiche-enfants','Enfants','number',resa.numChild||0,'min="0"')
+        + '</div>'
+        + '<div id="fiche-alerte" style="font-size:12px;color:#c0392b;margin-bottom:8px"></div>'
+        + '<div style="display:flex;gap:12px;margin-bottom:6px">'
+          + champ('fiche-prix','Prix par nuit','number',
+                  montantConnu ? (Math.round(parNuit*100)/100) : '',
+                  'step="0.01" min="0.01" placeholder="inchangé"')
+        + '</div>'
+        + '<div id="fiche-total" style="background:#f5f5f7;border-radius:8px;padding:10px 12px;margin:10px 0 14px;font-size:14px"></div>'
+    }
+
+    // Nuits, total et plafond recalcules a chaque frappe. Affichage seulement :
+    // le serveur refait tout le calcul et revalide la capacite.
+    function rafraichirFiche(){
+      if(!resaCourante) return
+      const bien = resaCourante.bien
+      const a = document.getElementById('fiche-arrivee'), d = document.getElementById('fiche-depart')
+      const zone = document.getElementById('fiche-total'), alerte = document.getElementById('fiche-alerte')
+      if(!a||!d||!zone) return
+      const n = Math.round((new Date(d.value+'T00:00:00') - new Date(a.value+'T00:00:00'))/86400000)
+      const prix = parseFloat(document.getElementById('fiche-prix').value)
+      const adultes = parseInt(document.getElementById('fiche-adultes').value,10)||0
+      const enfants = parseInt(document.getElementById('fiche-enfants').value,10)||0
+      const sym = curSym(bien && bien.currency)
+      if(!(n>0)) zone.innerHTML = '<span style="color:#c0392b">Le départ doit suivre l\'arrivée.</span>'
+      else if(!(prix>0)){
+        // ⚠ CHAMP VIDE NE VEUT PAS DIRE « MEME TOTAL ». Le serveur ne conserve le
+        // montant exact du cœur que si la DUREE n'a pas bouge ; sinon il repart
+        // du prix par nuit actuel. Afficher « inchangé » avec le nouveau nombre
+        // de nuits faisait lire « 300 € (inchangé, 5 nuits) » a un hote qui
+        // allongeait un sejour de 3 nuits — pendant que 500 € partaient chez
+        // Channex et seraient factures au voyageur.
+        const montant = Number(resaCourante.resa.amount)
+        const nOrig = Math.round((new Date(resaCourante.resa.checkout+'T00:00:00')
+                                - new Date(resaCourante.resa.startISO+'T00:00:00'))/86400000)
+        if(!(montant>0) || !(nOrig>0)) zone.textContent = '—'
+        else if(n===nOrig) zone.innerHTML = '<strong>Total du séjour : '+montant.toFixed(2)+' '+sym+'</strong>'
+                          + ' <span style="color:#86868b">(inchangé, '+n+' nuit'+(n>1?'s':'')+')</span>'
+        else {
+          const parNuitActuel = montant/nOrig
+          zone.innerHTML = '<strong>Total du séjour : '+(Math.round(parNuitActuel*n*100)/100).toFixed(2)+' '+sym+'</strong>'
+            + ' <span style="color:#86868b">('+n+' nuit'+(n>1?'s':'')+' au tarif actuel de '
+            + (Math.round(parNuitActuel*100)/100).toFixed(2)+' '+sym+'/nuit)</span>'
+        }
+      }
+      else zone.innerHTML = '<strong>Total du séjour : '+(Math.round(prix*n*100)/100).toFixed(2)+' '+sym+'</strong>'
+                          + ' <span style="color:#86868b">('+n+' nuit'+(n>1?'s':'')+')</span>'
+      if(alerte){
+        const personnes = adultes+enfants
+        alerte.textContent = adultes<1 ? 'Il faut au moins un adulte.'
+          : (personnes>bien.capacity
+              ? 'Ce bien accueille '+bien.capacity+' personne'+(bien.capacity>1?'s':'')+' au maximum — vous en avez saisi '+personnes+'.'
+              : '')
+      }
     }
 
     async function annulerResaCourante(){
@@ -852,6 +1220,68 @@
       }catch(e){
         if(btn){ btn.disabled=false; btn.textContent='Annuler la réservation' }
         showToast('Erreur : '+(e.message||'annulation'), 6000)
+      }
+    }
+
+    // ─── Enregistrement d'une modification (Offline uniquement) ─────────────
+    // ⚠ CES CONTROLES SONT UN CONFORT, PAS UNE GARDE. Le serveur refait dates,
+    // prix et plafond de voyageurs, et repasse par le verrou anti-surreservation
+    // (api/reservation-directe.js, methode PUT). Les faire ici evite seulement
+    // un aller-retour pour une faute de frappe.
+    async function enregistrerResaCourante(){
+      if(!resaCourante) return
+      const { bien, resa } = resaCourante
+      const arrivee = document.getElementById('fiche-arrivee').value
+      const depart  = document.getElementById('fiche-depart').value
+      const prix    = parseFloat(document.getElementById('fiche-prix').value)
+      const adultes = parseInt(document.getElementById('fiche-adultes').value,10)||0
+      const enfants = parseInt(document.getElementById('fiche-enfants').value,10)||0
+      const n = Math.round((new Date(depart+'T00:00:00') - new Date(arrivee+'T00:00:00'))/86400000)
+      if(!(n>0))    { showToast('Le départ doit suivre l\'arrivée', 4000); return }
+      if(adultes<1) { showToast('Il faut au moins un adulte', 4000); return }
+      if(adultes+enfants>bien.capacity){
+        showToast('Ce bien accueille '+bien.capacity+' personne'+(bien.capacity>1?'s':'')+' au maximum', 5000); return
+      }
+      // ⚠ CHAMP VIDE = PRIX INCHANGE, ET ON NE L'ENVOIE PAS.
+      // Envoyer un prix « reconstitue » (montant du cœur / nuits, arrondi au
+      // centime) rejouait l'arrondi a chaque enregistrement : 100,00 sur 3 nuits
+      // repartait a 99,99. Omis, le serveur garde le montant exact du cœur.
+      const prixTouche = document.getElementById('fiche-prix').value.trim() !== ''
+      if(prixTouche && !(prix>0)){ showToast('Prix par nuit invalide', 4000); return }
+
+      const memePrix = !prixTouche
+        || (Number(resa.amount) > 0 && Math.abs(prix*n - Number(resa.amount)) < 0.005)
+      const rien = (arrivee===resa.startISO && depart===resa.checkout
+                    && (resa.numAdult||1)===adultes && (resa.numChild||0)===enfants
+                    && memePrix)
+      if(rien){ showToast('Aucune modification'); return }
+
+      const btn = document.getElementById('resa-enregistrer')
+      if(btn){ btn.disabled=true; btn.textContent='Envoi…' }
+      try{
+        const charge = {
+          propertyId: bien.provider_property_id, bookingId: resa.id,
+          arrival: arrivee, departure: depart,
+          occupancy: { adults: adultes, children: enfants }
+        }
+        // `prixParNuit` ABSENT quand l'hote n'y a pas touche : le serveur
+        // distingue « pas de prix fourni » de « ce prix-la », et garde alors le
+        // montant exact du cœur au lieu de le recalculer.
+        if(prixTouche) charge.prixParNuit = prix
+        await api.reservationDirecte.modifier(charge)
+        fermerFiche()
+        // ⚠ On ne redessine PAS la reservation avec les nouvelles valeurs : elle
+        // reviendra par le feed, comme a la creation et a l'annulation. L'afficher
+        // deja deplacee montrerait un etat que Channex n'a pas encore confirme.
+        showToast('Modification envoyée — visible dans HôteSmart au prochain rafraîchissement', 6000)
+      }catch(e){
+        if(btn){ btn.disabled=false; btn.textContent='Enregistrer' }
+        // 409 = refus METIER (nuits deja prises, sejour annule, vente du moteur,
+        // saisie concurrente). On le dit dans les mots du metier, comme le fait
+        // deja la creation — pas en « Erreur : » suivi d'un jargon.
+        showToast(e.status===409
+          ? (e.message || 'Ces dates ne sont plus disponibles.')
+          : ('Erreur : '+(e.message||'modification')), 7000)
       }
     }
 
@@ -908,7 +1338,10 @@
           commission:b.commission ?? null,
           numAdult:b.numAdult ?? null, numChild:b.numChild ?? null,
           otaCode:b.otaReservationCode||null, arrivalHour:b.arrivalHour||null,
-          statut:b.status||null
+          statut:b.status||null,
+          // Sous-origine : distingue une saisie de l'hote d'une vente du moteur
+          // public, toutes deux `ota_name: "Offline"`. Voir `estModifiable`.
+          metaSource: b.metaSource || null
         }
       })
     }

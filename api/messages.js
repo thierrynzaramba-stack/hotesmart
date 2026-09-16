@@ -70,6 +70,48 @@ module.exports = async function handler(req, res) {
   const filtreOr = filtrePerimetreSql(refsAutorisees)
   if (filtreOr === '') return res.status(200).json({ conversations: [] })
 
+  // ─── Existence d'un fil pour UNE reservation ───────────────────────────────
+  // Sert au bouton « Ouvrir la conversation » de la fiche du calendrier
+  // (docs/kb/reservation-directe.md §12) : un bouton actif qui ouvre une liste
+  // vide fait croire a une panne, donc la fiche a besoin de savoir AVANT.
+  //
+  // ⚠ UNE RESERVATION A LA FOIS, VOLONTAIREMENT. La version precedente demandait
+  // toute la fenetre d'un coup a `api/calendar.js` : `messages` etant un journal,
+  // le rendu depassait le plafond de 1000 lignes de PostgREST — silencieusement —
+  // et la liste d'identifiants faisait exploser la longueur d'URL. Ici, `limit(1)`
+  // sur un index (booking_id, sent_at) : exact, borne, et paye seulement quand
+  // l'hote ouvre une fiche.
+  //
+  // Memes barrieres que la collection : compte cible ET filtre de perimetre — un
+  // membre limite au bien A ne doit pas apprendre qu'un fil existe sur le bien B.
+  if (req.method === 'GET' && req.query && req.query.booking_id) {
+    const bookingId = String(req.query.booking_id)
+    try {
+      // ⚠ `.or()` SEULEMENT SI LE FILTRE EXISTE, comme les deux requetes de la
+      // collection juste en dessous. `refsDuPerimetre` rend `null` — pas `''` —
+      // pour un PROPRIETAIRE de compte (perimetre total), et `filtrePerimetreSql`
+      // propage ce `null` : la garde `=== ''` ne l'attrape pas. Un `.or(null)`
+      // inconditionnel partait en `or=(null)`, que PostgREST refuse — l'endpoint
+      // rendait donc 500 pour le cas NORMAL, et le bouton « Ouvrir la
+      // conversation » restait eteint sur « Fil indisponible » pour tout le monde.
+      let q = supabase
+        .from('messages')
+        .select('booking_id')
+        .eq('user_id', userId)
+        .eq('booking_id', bookingId)
+      if (filtreOr) q = q.or(filtreOr)
+      const { data, error } = await q.limit(1)
+      if (error) {
+        console.error('[messages] existence conversation', error.message)
+        return res.status(500).json({ error: 'Lecture impossible' })
+      }
+      return res.status(200).json({ booking_id: bookingId, has_conversation: (data || []).length > 0 })
+    } catch (e) {
+      console.error('[messages] existence conversation echec', e.message)
+      return res.status(500).json({ error: 'Lecture impossible' })
+    }
+  }
+
   try {
     // Fenetre 6 mois.
     const since = new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString()

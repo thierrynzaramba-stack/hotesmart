@@ -5,7 +5,13 @@
 import { api } from '/shared/api-client.js'
 
 // --- Constantes de dates / grille ---
-export const CELL_W = 34
+// Largeur d'une colonne-jour du planning DESKTOP, en px.
+// ⚠ Elargie de 34 a 46 le 15 septembre 2026 : a 34 px, une bulle de
+// reservation d'une nuit n'affichait aucun nom, et deux nuits en montraient
+// trois lettres. Le planning ne se lisait qu'au survol.
+// ⚠ Utilisee par `pages/biens-calendrier.html` UNIQUEMENT — le mobile n'importe
+// que `loadCalendarData` et garde sa grille mensuelle intacte.
+export const CELL_W = 46
 export const dayNames = ['DIM', 'LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM']
 export const dowOrder = [1, 2, 3, 4, 5, 6, 0]
 export const dowLabels = { 1: 'Lun', 2: 'Mar', 3: 'Mer', 4: 'Jeu', 5: 'Ven', 6: 'Sam', 0: 'Dim' }
@@ -38,7 +44,11 @@ export const ROW_DEFAULTS = { avail: 'open', minStayArr: 0, minStayThrough: 0, m
 export function computeDays(months, containerW) {
   const t = new Date(); t.setHours(0, 0, 0, 0)
   let n = Math.round(months * 30)
-  const COLW = 34, LABEL = 120, PAD = 48
+  // ⚠ `CELL_W`, jamais une copie : le 34 en dur ici comptait les colonnes avec
+  // une largeur que le CSS n'utilisait plus. Elargir la colonne sans toucher a
+  // cette ligne aurait genere trop de jours pour la place disponible, donc une
+  // barre de defilement horizontale la ou le remplissage devait tomber juste.
+  const COLW = CELL_W, LABEL = 120, PAD = 48
   const avail = Math.max(0, (containerW || 0) - LABEL - PAD)
   const fit = Math.floor(avail / COLW)
   if (fit > n) n = fit

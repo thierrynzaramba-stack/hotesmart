@@ -210,6 +210,14 @@
       opt.value = p.provider_property_id; opt.textContent = p.name
       select.appendChild(opt)
     })
+    // `?bien=<provider_property_id>` accompagne `?conv=` quand on arrive de la
+    // fiche du calendrier : sans lui, la conversation visee peut etre masquee
+    // par un filtre de bien deja actif. On ne l'applique que si le bien est
+    // reellement dans la liste — une valeur inconnue viderait l'ecran.
+    const bienDemande = new URLSearchParams(location.search).get('bien')
+    if (bienDemande && window._props.some(p => String(p.provider_property_id) === String(bienDemande))) {
+      select.value = bienDemande
+    }
     window.loadConversations()
   }
 </script>
@@ -377,13 +385,54 @@
         `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}` +
         (pendingTasks ? ` · ${pendingTasks} à traiter` : '')
       renderConvList()
+      // `true` = la liste reflete vraiment l'etat du compte. Voir
+      // `ouvrirConversationDemandee` : sur un echec, on ne conclut pas qu'un fil
+      // n'existe pas, et on ne consomme pas la cible d'ouverture directe.
+      return true
     } catch (err) {
       document.getElementById('conv-items').innerHTML = `<div class="loading">❌ ${err.message}</div>`
+      return false
     }
   }
 
+  // ─── Ouverture directe depuis la fiche du calendrier ──────────────────────
+  // `?conv=<booking_id>` : la fiche de reservation (pages/biens-calendrier.html)
+  // mene ici sur la conversation du voyageur. La cle est le `booking_id` du
+  // cœur — le meme que `messages.booking_id` et que `conversations.book_id` —,
+  // jamais le nom du voyageur, qui n'identifie rien.
+  //
+  // ⚠ CONSOMMEE UNE SEULE FOIS. Sans cela, chaque rafraichissement (envoi d'un
+  // message, changement de bien) ramenerait l'hote de force sur la conversation
+  // d'origine, y compris apres qu'il en a ouvert une autre.
+  let convDemandee = new URLSearchParams(location.search).get('conv')
+
+  // ⚠ `charge` DIT SI LA LISTE A REELLEMENT ETE CHARGEE. Les deux chemins de
+  // chargement rattrapent leur propre erreur pour peindre le panneau de gauche :
+  // la promesse tient donc meme quand /api/messages est tombe, et `conversations`
+  // reste vide. Sans ce drapeau, une panne se traduisait par « Conversation
+  // introuvable pour cette réservation » — on affirmait au sujet du voyageur
+  // quelque chose qu'on n'avait pas pu regarder.
+  function ouvrirConversationDemandee (charge) {
+    if (!convDemandee) return
+    const cible = String(convDemandee)
+    // ⚠ La cible n'est consommee que si on a pu conclure. Consommee sur un
+    // echec, un rechargement reussi n'aurait plus ouvert le fil vers lequel le
+    // calendrier envoyait l'hote.
+    if (!charge) return
+    convDemandee = null
+    if (conversations.some(c => String(c.bookId) === cible)) { selectConv(cible); return }
+    // Le calendrier grise deja le bouton quand aucune conversation n'existe.
+    // Y arriver quand meme veut dire que le fil a disparu entre-temps, ou qu'il
+    // appartient a un autre bien que celui filtre : on le DIT, plutot que de
+    // laisser l'hote devant une liste ou il ne comprend pas ce qu'il cherche.
+    const st = document.getElementById('topStatus')
+    if (st) st.textContent = 'Conversation introuvable pour cette réservation'
+  }
+
   // Dispatcher : par defaut V2 (table messages unifiee), ?legacy=1 -> ancien chemin.
-  window.loadConversations = () => LEGACY ? loadConversationsLegacy() : loadConversationsV2()
+  window.loadConversations = () =>
+    Promise.resolve(LEGACY ? loadConversationsLegacy() : loadConversationsV2())
+      .then(ouvrirConversationDemandee)
 
   // Nouveau chemin (etape 4c) : lit la table `messages` unifiee via /api/messages
   // (source unique de verite, doublon elimine). agent_tasks + conversation_flags
@@ -445,8 +494,13 @@
         `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}` +
         (pendingTasks ? ` · ${pendingTasks} à traiter` : '')
       renderConvList()
+      // `true` = la liste reflete vraiment l'etat du compte. Voir
+      // `ouvrirConversationDemandee` : sur un echec, on ne conclut pas qu'un fil
+      // n'existe pas, et on ne consomme pas la cible d'ouverture directe.
+      return true
     } catch (err) {
       document.getElementById('conv-items').innerHTML = `<div class="loading">❌ ${err.message}</div>`
+      return false
     }
   }
 

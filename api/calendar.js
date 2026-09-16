@@ -14,7 +14,7 @@ const {
 } = require('../lib/price-log')
 const { tarifAcceptable, messageRefus } = require('../lib/yield/prix-plancher')
 const { reaffirmerStopSell } = require('../lib/channel-availability')
-const { readStatus } = require('../lib/bookings-snapshot')
+const { readStatus, colonneRawAbsente } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { peutLire, peutEcrire } = require('../lib/permissions')
 
@@ -478,13 +478,35 @@ module.exports = async function handler(req, res) {
         // Condition de chevauchement, identique a celle appliquee plus bas :
         // le sejour touche la fenetre si depart >= start ET arrivee <= end.
         // Meme forme que lib/cron-overbooking.js.
-        const { data: snapRows, error: snapErr } = await supabase
+        // `metaSource` : la SOUS-origine, extraite de `raw` par chemin JSON (et
+        // non la colonne entiere — le payload provider integral sur toute une
+        // fenetre serait un transfert inutile). Elle distingue une saisie de
+        // l'hote (`hotesmart-manual`) d'une vente du moteur public
+        // (`hotesmart-engine`), toutes deux `ota_name: "Offline"` : sans elle,
+        // la fiche proposerait de modifier un sejour deja PAYE par un voyageur.
+        const lireReservations = (avecMeta) => supabase
           .from('bookings_snapshot')
-          .select('booking_id, property_id, snapshot')
+          .select('booking_id, property_id, snapshot' + (avecMeta ? ', metaSource:raw->meta->>source' : ''))
           .eq('user_id', gardeGet.compte)
           .in('property_id', provIds)
           .gte('snapshot->>departure', start)
           .lte('snapshot->>arrival', end)
+
+        let { data: snapRows, error: snapErr } = await lireReservations(true)
+
+        // ⚠ LA COLONNE `raw` PEUT MANQUER — migration pas encore appliquee, ou
+        // cache de schema PostgREST pas encore recharge apres l'avoir ete
+        // (`colonneRawAbsente`, cf. lib/bookings-snapshot.js, qui defend deja ce
+        // cas a l'ecriture). Sans ce repli, un hoquet de cache de schema faisait
+        // echouer TOUTE la lecture des reservations : calendrier a 500, alors
+        // que seul un confort d'interface depend de cette colonne. On relit donc
+        // sans elle — la fiche retombe sur la garde SERVEUR (409
+        // `reservation_moteur`), qui est de toute facon la seule qui compte.
+        if (snapErr && colonneRawAbsente(snapErr)) {
+          console.error('[calendar] colonne raw absente, lecture sans sous-origine — migration a appliquer')
+          ;({ data: snapRows, error: snapErr } = await lireReservations(false))
+        }
+
         // ⚠ Une erreur ici ne peut PAS etre avalee : sans reservations, le
         // calendrier s'affiche entierement LIBRE, et une simple panne transitoire
         // devient une surreservation. On echoue bruyamment.
@@ -520,7 +542,8 @@ module.exports = async function handler(req, res) {
               numAdult: s.numAdult ?? null,
               numChild: s.numChild ?? null,
               otaReservationCode: s.otaReservationCode || null,
-              arrivalHour: s.arrivalHour || null
+              arrivalHour: s.arrivalHour || null,
+              metaSource: row.metaSource || null
             })
           })
         }
@@ -531,6 +554,20 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: 'Erreur lecture reservations' })
       }
     }
+
+    // ⚠ L'EXISTENCE D'UNE CONVERSATION N'EST PAS CALCULEE ICI, et c'est delibere.
+    // Premiere version (attrapee en review) : un `.in('booking_id', tousLesIds)`
+    // sur `messages` pour toute la fenetre. Deux defauts, tous deux silencieux :
+    //   1. `messages` est un JOURNAL — une ligne par message, pas par sejour.
+    //      PostgREST plafonne un rendu a 1000 lignes SANS erreur : sur une boite
+    //      active, les sejours au-dela du plafond revenaient « sans conversation »
+    //      et la fiche grisait un bouton vers un fil qui existe. Exactement la
+    //      troncature muette documentee 60 lignes plus haut pour bookings_snapshot.
+    //   2. Sur « 1 an » et plusieurs biens, la liste d'identifiants depasse la
+    //      longueur d'URL admise par PostgREST en GET — le meme mur qui a fait
+    //      reecrire `intentionsSurFenetre` (lib/reservation-directe.js).
+    // La fiche interroge donc `api/messages?booking_id=…` a son ouverture : une
+    // seule reservation, une lecture indexee, un resultat exact.
 
     // `user_id` sert au controle de perimetre, pas au front : il ne ressort pas.
     const proprietesPubliques = owned.map(({ user_id, ...reste }) => reste)

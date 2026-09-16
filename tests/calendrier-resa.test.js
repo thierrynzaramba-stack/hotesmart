@@ -50,7 +50,9 @@ test('front : le bouton de validation est reinitialise a chaque ouverture', () =
 test('calendrier : chaque reservation porte son booking_id', () => {
   // Sans lui, le bandeau n'est qu'un rectangle : aucune fiche n'est possible.
   assert.match(CAL, /booking_id:\s*String\(row\.booking_id\)/)
-  assert.match(CAL, /\.select\('booking_id, property_id, snapshot'\)/)
+  // Liste de colonnes non figee : `metaSource` s'y est ajoutee le 15 septembre
+  // 2026. L'invariant teste reste que `booking_id` est bien lu et servi.
+  assert.match(CAL, /\.select\('booking_id, property_id, snapshot/)
 })
 
 test('calendrier : le detail necessaire a la fiche est servi', () => {

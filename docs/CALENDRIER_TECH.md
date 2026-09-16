@@ -148,7 +148,11 @@ calendar: {
 - `buildDays()` : génère `MONTHS*30` jours, **et ajoute des jours pour remplir la largeur écran** (calcul `(innerWidth - label - pad)/colW`).
 - `initState(b)` : construit `states` depuis l'inventory (sinon prix de base partout).
 - `maxRateOf(bien, dayRate)` : `dayRate + max(0, capacity-included)*extraFee`.
-- `renderBlocks()` → `renderBienBlock(b)` : génère le tableau. Réservations rendues en barres absolues : demi-journées (`left:50%`, `width:(span-0.5)*100%`), classe = source (airbnb/booking/direct), logo SVG inline `platformLogo(src)`, nom tronqué.
+- `renderBlocks()` → `renderBienBlock(b)` : génère le tableau. Réservations rendues en barres absolues par `barresResa(bien)`, classe = source (airbnb/booking/direct), logo SVG inline `platformLogo(src)`.
+  - ⚠️ **Mis à jour le 15 septembre 2026.** L'ancien rendu (`left:50%`, `width:(span-0.5)*100%`, une barre dans la cellule `startISO`) s'arrêtait une demi-cellule trop tôt et **n'affichait pas les séjours déjà commencés**. Désormais : toutes les barres sont posées dans la **première** cellule, positionnées en pixels-colonnes du **milieu du jour d'arrivée au milieu du jour de départ** (`iDebut+0.5` → `iFin+0.5`, `CELL_W`), avec `cont-left`/`cont-right` pour les séjours coupés par le bord de la fenêtre. Nom tronqué par le **CSS** (`.resa-bar .nom`, ellipse + `min-width:0`), nom complet en `title`.
+  - Colonne élargie à **46 px** (`CELL_W`, `shared/calendar-core.js`) et ligne réservations à 36 px : à 34 px aucun nom n'était lisible.
+  - Week-ends : fond de colonne `#eef1f6` + en-tête gras coloré, classes posées par le helper unique `classesJour(i)`.
+  - Jours fermés à la vente : classe `jour-ferme` (hachures) sur **toutes** les lignes du bien. Détail et règles : `docs/kb/reservation-directe.md` §11.
 - Coloration cellule prix : `cell-closed` (rouge) si `avail==='closed' || stopSell==='closed'`, `cell-reserved` (bleuté) si date dans une résa.
 - Édition tableur : clic = sélection, taper un chiffre / Entrée / F2 = édition inline (`startInlineEdit`), propage à la sélection multiple. **Ne pas utiliser `setSelectionRange` sur input number** (InvalidStateError) → `try{input.select()}catch(e){}`.
 - Popup "Plus de paramètres" : rubriques avec filtre jours par rubrique, plage début/fin. Bouton Enregistrer → construit `segments` → `api.calendar.save` → `reloadInventory()`.

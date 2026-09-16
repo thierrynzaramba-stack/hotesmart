@@ -514,6 +514,36 @@ valeurs. À confirmer au moment d'écrire sa politique.
 
 **Reste 7 endpoints.**
 
+### ⚠️ `filtrePerimetreSql` rend `null` pour un PROPRIÉTAIRE — jamais `''`
+
+Deux valeurs de retour, deux sens **opposés**, et elles se confondent si on teste
+mal :
+
+| retour | sens | ce qu'il faut faire |
+|---|---|---|
+| `null` | **aucune restriction** (propriétaire, ou `property_scope: 'all'`) | ne pas poser de `.or()` du tout |
+| `''` | **périmètre vide ou refusé** | échouer fermé, ne rien rendre |
+| une expression | périmètre restreint | `.or(expression)` |
+
+`refsDuPerimetre` rend `null` dès que `userId === accountUserId`, et
+`filtrePerimetreSql` propage ce `null`. Une garde écrite `if (filtreOr === '')`
+**ne l'attrape donc pas**, et un `.or(null)` inconditionnel part en `or=(null)`,
+que PostgREST refuse.
+
+**Vécu (15 septembre 2026, attrapé en review).** Le nouvel endpoint d'existence
+de conversation (`api/messages.js?booking_id=`) posait `.or(filtreOr)` sans
+condition. Résultat : **500 pour tout propriétaire de compte** — c'est-à-dire le
+cas normal — et le bouton « Ouvrir la conversation » de la fiche du calendrier
+restait éteint sur « Fil indisponible » pour tout le monde, y compris quand le
+fil existait. Les deux requêtes de la collection, 25 lignes plus bas, portaient
+déjà l'idiome correct.
+
+**L'idiome, une bonne fois :**
+```js
+let q = supabase.from('messages').select('…').eq('user_id', userId)
+if (filtreOr) q = q.or(filtreOr)      // ⚠ jamais .or(filtreOr) inconditionnel
+```
+
 ### ⚠️ Divergence assumée : `property_id` NULL dans un filtre de collection
 
 `in_scope` (SQL) et `dansPerimetre` (JS) considèrent qu'une donnée **sans bien**

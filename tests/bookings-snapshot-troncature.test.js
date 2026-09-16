@@ -116,7 +116,10 @@ test('api/calendar.js borne sa lecture des reservations par la FENETRE demandee'
   // Le cas le plus grave : le calendrier de l'hote. Une troncature y affiche
   // libres des nuits deja vendues — sans aucun signal.
   const q = requetes(lire('api/calendar.js'))
-  const lecture = q.find(x => /select\('booking_id, property_id, snapshot'\)/.test(x))
+  // Le motif ne fige PAS la liste complete des colonnes : `metaSource` s'y est
+  // ajoutee le 15 septembre 2026 (sous-origine du sejour, chemin JSON sur `raw`).
+  // Ce qui est verrouille ici, c'est le BORNAGE par la fenetre, pas le SELECT.
+  const lecture = q.find(x => /select\('booking_id, property_id, snapshot/.test(x))
   assert.ok(lecture, 'la lecture des reservations doit exister')
   assert.match(lecture, /\.gte\('snapshot->>departure', start\)/)
   assert.match(lecture, /\.lte\('snapshot->>arrival', end\)/)

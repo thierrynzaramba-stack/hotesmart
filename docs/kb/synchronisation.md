@@ -187,3 +187,25 @@ sans, plutôt que de deviner un stock ou d'interroger `property_id = 'undefined'
 (« fantômes actifs »). Un fantôme `confirmed` ferme une nuit réellement libre,
 indéfiniment, avec pour seule trace un avertissement « stock réduit car vendue ».
 À traiter avec la purge des snapshots.
+
+## 9. Existence d'une conversation : une réservation à la fois
+
+Ajouté le 15 septembre 2026 avec le bouton « Ouvrir la conversation » de la fiche
+de réservation. Détail et raisons : `docs/kb/reservation-directe.md` §12.
+
+⚠ **`api/calendar.js` ne sert PAS ce booléen**, et c'est le résultat d'une review.
+La première version lisait `messages` pour toute la fenêtre avec un
+`.in('booking_id', …)`. Deux ruptures silencieuses : `messages` est un **journal**
+(une ligne par message), donc le plafond de 1000 lignes de PostgREST tronquait le
+rendu **sans erreur** — la même troncature muette que ce fichier documente au §8
+pour `bookings_snapshot`, reproduite juste à côté d'elle ; et la liste
+d'identifiants sur « 1 an » dépassait la longueur d'URL admise en GET.
+
+La lecture vit donc dans `api/messages.js` (`GET ?booking_id=…`), où la table est
+déjà gardée : compte cible **et** filtre de périmètre par bien, `limit(1)` sur un
+index. Exact, borné, et payé seulement quand l'hôte ouvre une fiche.
+
+**Règle générale à en retenir** : une table-journal ne se lit jamais en lot pour
+répondre à une question d'**existence**. Le plafond de lignes ne prévient pas, et
+un `.in()` assez long échoue sur la longueur d'URL — deux pannes qui ressemblent
+à une réponse valide.

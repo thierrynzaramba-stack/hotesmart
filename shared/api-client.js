@@ -191,8 +191,20 @@ export const api = {
   // Passe par apiCall comme tout le reste : Authorization et X-Compte sont donc
   // poses automatiquement, et la delegation de compte fonctionne sans que la
   // page ait a y penser.
+  messages: {
+    // Existence d'un fil pour UNE reservation : sert a activer ou griser
+    // « Ouvrir la conversation » dans la fiche du calendrier. Une reservation a
+    // la fois — `messages` est un journal, un lot depasserait le plafond de
+    // lignes de PostgREST sans le dire.
+    aUneConversation: (bookingId) =>
+      apiCall(`messages?booking_id=${encodeURIComponent(bookingId)}`, 'GET')
+  },
   reservationDirecte: {
     creer:   (payload)   => apiCall('reservation-directe', 'POST', payload),
+    // `modifier` : dates, prix vendu et voyageurs d'une reservation « Offline ».
+    // Un champ absent du payload garde la valeur du cœur — le serveur repart du
+    // snapshot complet, Channex revalidant tout le payload a chaque ecriture.
+    modifier: (payload)  => apiCall('reservation-directe', 'PUT', payload),
     annuler: (payload)   => apiCall('reservation-directe', 'DELETE', payload)
   },
   calendar: {
