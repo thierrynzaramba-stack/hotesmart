@@ -89,7 +89,8 @@ module.exports = async function handler(req, res) {
         providerMsgId: envoi.id || null,
         ota:           null,
         sentAt:        null,
-        kind:          'message'
+        kind:          'message',
+        canal:         'email'
       })
       return res.status(200).json({ success: true, canal: 'email' })
     }

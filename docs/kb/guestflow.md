@@ -87,9 +87,29 @@ spam les couperait tous. Sans compte propriétaire résolu, **on n'envoie pas**.
 
 Brevo n'envoie qu'au nom d'un expéditeur vérifié : une adresse saisie librement rend `400`
 **à l'envoi**, pas à la configuration — l'hôte croirait avoir réglé son adresse et ne
-découvrirait l'échec qu'au premier message raté. On prend donc le premier expéditeur
-**actif** de son compte Brevo (`GET /senders`), mis en cache 10 minutes par process.
-L'écran de l'étape 4 donnera le choix ; ce comportement reste le défaut propre.
+découvrirait l'échec qu'au premier message raté, c'est-à-dire devant un voyageur.
+
+L'hôte choisit son adresse dans **`/connexions`**, carte « Brevo — SMS et e-mails »
+(`api_keys.brevo_sender_email` / `brevo_sender_name`) :
+
+- le menu est **alimenté par Brevo** (`GET /api/sms?action=senders`), filtré sur les
+  expéditeurs actifs. Jamais un champ texte ;
+- **le serveur revérifie le choix chez Brevo avant d'écrire** (`action=saveSender`). Se fier
+  au menu affiché reviendrait à accepter n'importe quelle adresse postée à la main — donc à
+  enregistrer une identité d'expéditeur que l'hôte ne possède pas. La comparaison ignore la
+  casse, et c'est la forme rendue par Brevo qui est stockée ;
+- Brevo injoignable → **on n'enregistre rien**. Pas de validation « au bénéfice du doute » ;
+- rien de choisi → premier expéditeur actif, et **l'écran l'annonce** (« Par défaut : … ») au
+  lieu de laisser croire à une sélection. Ce défaut n'est pas un provisoire.
+
+**L'expéditeur ne suit pas le toggle SMS.** Couper les SMS ne coupe pas les e-mails : deux
+canaux, un seul compte Brevo. Un hôte qui refuse les SMS doit pouvoir régler l'adresse que
+verront ses voyageurs.
+
+Si le choix cesse d'être valide (expéditeur supprimé chez Brevo), l'envoi rend `400`, traité
+en échec **permanent** : l'hôte est prévenu une fois et rouvre l'écran. Retomber en silence
+sur un autre expéditeur ferait partir ses messages sous une identité qu'il n'a pas choisie —
+pire que l'échec, parce que personne ne le verrait.
 
 **`reply-to` = l'adresse d'expédition.** Le voyageur répond, l'hôte reçoit dans sa boîte.
 L'ingestion de ces réponses dans la messagerie HôteSmart est un chantier séparé : tant
@@ -177,13 +197,42 @@ cron : messagerie OTA pour Airbnb/Booking, e-mail pour les Offline, et un refus 
 (422 + motif) quand la réservation n'a aucun canal — au lieu du 422 `not_supported` du
 provider, que personne ne pouvait interpréter.
 
-### Dette restante
+### `messages.canal` — par où le message est sorti (soldé à l'étape 4)
 
-**`messages.provider` ne sait pas dire « e-mail ».** Un envoi Brevo y est enregistré avec le
-provider du bien (`channex`) ; le canal réel n'a pas de colonne. Le corriger demande une
-migration — donc un collage manuel dans Supabase — et c'est à faire avec celle de l'étape 4,
-qui portera les colonnes d'expéditeur. En attendant, `messages` dit *d'où vient la
-réservation*, pas *par où le message est sorti*.
+`provider` dit d'où vient la **réservation** (`beds24` / `channex`) et commande le routage
+interne ; **`canal`** dit le chemin réellement emprunté (`ota` / `email`). Un envoi Brevo
+était enregistré « channex / Offline » : la table affirmait qu'il était passé par la
+messagerie du canal de vente — celle-là même qui rend 422 sur ces réservations.
+
+Défaut `'ota'`, exact pour tout l'existant : avant ce chantier, c'était le seul chemin,
+dans les deux sens. Aucune ligne historique n'a besoin d'être corrigée.
+
+⚠️ **`lib/record-message.js` retombe sans la colonne si elle manque encore.** La migration se
+colle à la main dans Supabase : entre le déploiement et ce geste, PostgREST rejetterait
+l'INSERT entier (`PGRST204`) — donc plus **aucun** message enregistré, entrants compris,
+sans qu'aucun envoi n'échoue pour autant. Le fil de l'hôte se viderait en silence. Même
+parade que pour `bookings_snapshot.raw` : on tente avec, on retombe sans, et on le dit. À
+retirer quand la migration `2026-09-17` sera passée.
+
+Les colonnes d'expéditeur ont le même repli, côté lecture (`lib/email-guestflow.js` et
+`/api/sms?action=config`) et côté écriture (`action=saveSender` répond « pas encore
+disponible » plutôt qu'un message PostgREST brut dans un toast).
+
+### ⚠️ Ce qui reste HORS du routage : `lib/cron-classify.js`
+
+Les réponses **automatiques de l'IA** à un message entrant n'empruntent pas `canalPour` :
+elles appellent le provider en direct, sans lire le retour, puis écrivent dans `messages`
+inconditionnellement.
+
+C'est **sans objet pour le canal e-mail en v1** — une réservation Offline n'a pas de fil, donc
+aucun message entrant, donc rien à classer : le chemin n'est pas atteignable. Mais deux
+choses restent vraies et méritent d'être écrites plutôt que supposées :
+
+1. le jour où l'ingestion des réponses e-mail existera (chantier séparé, hors périmètre),
+   ce producteur devra router comme les autres, sans quoi il rouvrira le faux vert ;
+2. son `recordMessage` inconditionnel après un envoi dont le retour n'est pas lu est le même
+   défaut que celui corrigé ailleurs — il concerne aujourd'hui les seuls canaux OTA, où
+   l'envoi fonctionne. **Dette notée, pas soldée.**
 
 ## Kill switch (pause par bien) — détail dans `alertes.md`
 Bouton **Couper l'IA / Réactiver** sur `/biens` (miroir dans la config GuestFlow). Coupé = plus de

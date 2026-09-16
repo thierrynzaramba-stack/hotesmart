@@ -261,3 +261,54 @@ test('un quota epuise s\'annonce AVEC le compte et le bien concernes', async () 
   assert.deepStrictEqual(etat.facturation[0].ctx,
     { userId: 'compte-A', propertyId: 'bien-1', propertyName: 'La bulle' })
 })
+
+test('le choix de l\'hote prime sur le defaut, sans relire la liste Brevo', async () => {
+  // La liste a deja ete verifiee a l'enregistrement (cote serveur, chez Brevo) :
+  // la redemander a chaque message serait un aller-retour reseau sur le chemin
+  // d'envoi, et empecherait de respecter un choix parmi plusieurs expediteurs.
+  remise({ senders: [{ email: 'premier@x.fr', name: 'Premier', active: true }] })
+  etat.cles = { api_keys: { brevo_api_key: 'cle', brevo_enabled: true,
+    brevo_sender_email: 'choisi@x.fr', brevo_sender_name: 'Choisi par l\'hôte' } }
+  await envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  const c = etat.envois[0].corps
+  assert.strictEqual(c.sender.email, 'choisi@x.fr')
+  assert.strictEqual(c.replyTo.email, 'choisi@x.fr', 'le reply-to suit le choix')
+})
+
+test('rien de choisi : le defaut reste le premier expediteur actif', async () => {
+  remise({ senders: [{ email: 'premier@x.fr', name: 'Premier', active: true }] })
+  await envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  assert.strictEqual(etat.envois[0].corps.sender.email, 'premier@x.fr')
+})
+
+test('LE TEST QUI COMPTE : un changement d\'adresse est pris en compte tout de suite', async () => {
+  // Le cache ne doit porter QUE la liste Brevo. Y ranger la configuration ferait
+  // envoyer sous l'ancienne adresse jusqu'a dix minutes apres le reglage : l'hote
+  // teste, voit l'ancienne, et conclut que ca n'a pas pris.
+  remise({ senders: [{ email: 'defaut@x.fr', name: 'Défaut', active: true }] })
+  etat.cles = { api_keys: { brevo_api_key: 'cle', brevo_enabled: true,
+    brevo_sender_email: 'avant@x.fr', brevo_sender_name: 'Avant' } }
+  await envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  assert.strictEqual(etat.envois[0].corps.sender.email, 'avant@x.fr')
+
+  // L'hote change d'avis dans /connexions — sans vider le cache.
+  etat.cles.api_keys.brevo_sender_email = 'apres@x.fr'
+  etat.cles.api_keys.brevo_sender_name = 'Après'
+  await envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  assert.strictEqual(etat.envois[1].corps.sender.email, 'apres@x.fr',
+    'le choix de l\'hote n\'est jamais servi depuis le cache')
+})
+
+test('le cache epargne bien l\'aller-retour Brevo quand il n\'y a pas de choix', async () => {
+  remise({ senders: [{ email: 'defaut@x.fr', name: 'Défaut', active: true }] })
+  let appelsSenders = 0
+  const f = global.fetch
+  global.fetch = async (url, opts) => {
+    if (String(url).includes('/senders')) appelsSenders++
+    return f(url, opts)
+  }
+  await envoyerEmailVoyageur({ userId: 'B', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  await envoyerEmailVoyageur({ userId: 'B', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  global.fetch = f
+  assert.strictEqual(appelsSenders, 1, 'c\'est l\'appel reseau externe qu\'on epargne')
+})

@@ -1,5 +1,13 @@
 // api/sms.js — Module SMS Brevo centralisé HôteSmart
 // Usage : POST /api/sms { to, message, property_id, context }
+//
+// ⚠ IL PORTE AUSSI LA CONFIGURATION BREVO DU COMPTE, e-mails compris.
+// Le nom du fichier dit « sms », mais la clé Brevo d'un hôte sert aux deux
+// canaux : les SMS d'alerte ET, depuis le chantier canal-email, les messages
+// e-mail aux voyageurs des réservations directes. Les actions `config`,
+// `senders`, `saveConfig`, `saveSender` et `toggleConfig` agissent donc sur la
+// connexion Brevo entière. Renommer le fichier casserait le front pour un gain
+// nul — un renommage n'est pas une correction.
 
 const { createClient } = require('@supabase/supabase-js');
 const { requirePermission } = require('../lib/require-permission');
@@ -158,15 +166,59 @@ module.exports = async (req, res) => {
     // Statut de configuration Brevo du propriétaire
     if (action === 'config') {
       if (!user) return res.status(401).json({ error: 'Non autorisé' });
-      const { data } = await supabase
+      // Repli si la migration 2026-09-17 n'est pas encore passee : sans lui, un
+      // SELECT qui nomme les colonnes d'expediteur echoue en entier et l'ecran
+      // annonce « Non configuré » a un hote dont la cle est pourtant enregistrée.
+      let { data, error: eCfg } = await supabase
         .from('api_keys')
-        .select('brevo_api_key, brevo_enabled')
+        .select('brevo_api_key, brevo_enabled, brevo_sender_email, brevo_sender_name')
         .eq('user_id', user.id)
         .maybeSingle();
+      if (eCfg) {
+        ({ data } = await supabase
+          .from('api_keys').select('brevo_api_key, brevo_enabled')
+          .eq('user_id', user.id).maybeSingle());
+      }
       return res.status(200).json({
         configured: !!data?.brevo_api_key,
-        enabled:    data?.brevo_enabled === true
+        enabled:    data?.brevo_enabled === true,
+        // L'expéditeur des e-mails voyageur. Vide = premier sender actif du
+        // compte Brevo (défaut propre, pas un provisoire).
+        senderEmail: data?.brevo_sender_email || null,
+        senderName:  data?.brevo_sender_name || null
       });
+    }
+
+    // ⚠ LA LISTE DES EXPEDITEURS VERIFIES, LUE CHEZ BREVO — JAMAIS UN CHAMP LIBRE.
+    // Brevo n'envoie qu'au nom d'un expéditeur vérifié : une adresse saisie
+    // librement rend 400 A L'ENVOI, pas à la configuration. L'hôte croirait son
+    // adresse réglée et découvrirait l'échec devant un voyageur.
+    // Lecture seule, avec SA clé, sur SON compte : rien d'un autre hôte ici.
+    if (action === 'senders') {
+      if (!user) return res.status(401).json({ error: 'Non autorisé' });
+      const { data } = await supabase
+        .from('api_keys').select('brevo_api_key').eq('user_id', user.id).maybeSingle();
+      if (!data?.brevo_api_key) {
+        return res.status(200).json({ configured: false, senders: [] });
+      }
+      try {
+        const r = await fetch('https://api.brevo.com/v3/senders', {
+          headers: { 'api-key': data.brevo_api_key }
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          // On rend la cause, pas un tableau vide : « aucun expéditeur » et
+          // « Brevo n'a pas répondu » demandent deux gestes différents.
+          return res.status(200).json({ configured: true, senders: [],
+            error: `Brevo ${r.status}`, detail: String(j.message || '').slice(0, 200) });
+        }
+        const senders = (j.senders || [])
+          .filter(x => x.email && x.active !== false)
+          .map(x => ({ email: x.email, name: x.name || x.email }));
+        return res.status(200).json({ configured: true, senders });
+      } catch (e) {
+        return res.status(200).json({ configured: true, senders: [], error: e.message });
+      }
     }
 
     // Historique : cloisonné par hôte (numéros voyageurs = données réelles)
@@ -205,6 +257,60 @@ module.exports = async (req, res) => {
       );
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ success: true });
+    }
+
+    // Choix de l'adresse d'expédition des e-mails voyageur.
+    //
+    // ⚠ LE SERVEUR REVERIFIE LE CHOIX CHEZ BREVO. Se fier à la liste affichée
+    // reviendrait à accepter n'importe quelle adresse postée à la main : on
+    // enregistrerait une identité d'expéditeur que l'hôte ne possède pas, et
+    // l'envoi échouerait plus tard, devant un voyageur. La liste vient de Brevo,
+    // la vérification aussi.
+    if (action === 'saveSender') {
+      const email = String(body.email || '').trim();
+      if (!email) return res.status(400).json({ error: 'Adresse requise' });
+
+      const { data } = await supabase
+        .from('api_keys').select('brevo_api_key').eq('user_id', user.id).maybeSingle();
+      if (!data?.brevo_api_key) {
+        return res.status(400).json({ error: 'Connectez d\'abord votre compte Brevo' });
+      }
+
+      let senders = [];
+      try {
+        const r = await fetch('https://api.brevo.com/v3/senders', {
+          headers: { 'api-key': data.brevo_api_key }
+        });
+        if (!r.ok) return res.status(502).json({ error: `Brevo n'a pas répondu (${r.status})` });
+        const j = await r.json().catch(() => ({}));
+        senders = (j.senders || []).filter(x => x.email && x.active !== false);
+      } catch (e) {
+        return res.status(502).json({ error: `Brevo injoignable : ${e.message}` });
+      }
+
+      const choisi = senders.find(x => String(x.email).toLowerCase() === email.toLowerCase());
+      if (!choisi) {
+        return res.status(400).json({
+          error: 'Cette adresse n\'est pas un expéditeur vérifié de votre compte Brevo.' });
+      }
+
+      const { error } = await supabase.from('api_keys').upsert(
+        { user_id: user.id, brevo_sender_email: choisi.email,
+          brevo_sender_name: choisi.name || choisi.email },
+        { onConflict: 'user_id' }
+      );
+      if (error) {
+        // Symétrie avec les replis de lecture : entre le déploiement et le
+        // collage de la migration, un hôte qui clique « Enregistrer » recevait le
+        // message PostgREST brut dans un toast. Il n'a rien fait de mal.
+        if (/brevo_sender|PGRST204|schema cache/i.test(`${error.code || ''} ${error.message || ''}`)) {
+          return res.status(503).json({
+            error: 'Ce réglage n\'est pas encore disponible sur votre compte. Réessayez plus tard.' });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ success: true,
+        senderEmail: choisi.email, senderName: choisi.name || choisi.email });
     }
 
     // Activer / désactiver l'envoi SMS

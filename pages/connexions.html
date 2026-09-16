@@ -132,16 +132,20 @@
         </div>
       </div>
 
-      <!-- Brevo SMS (par hôte : chaque hôte connecte son propre compte Brevo) -->
+      <!-- Brevo (par hôte : chaque hôte connecte son propre compte Brevo).
+           Une seule clé, deux usages : les SMS d'alerte et les e-mails envoyés
+           aux voyageurs de vos réservations directes. -->
       <div class="api-card" id="card-brevo">
         <div class="api-header">
-          <div class="api-name">💬 Brevo SMS</div>
+          <div class="api-name">💬 Brevo — SMS et e-mails</div>
           <div class="api-status status-off" id="status-brevo">Vérification…</div>
         </div>
 
         <div class="brevo-context">
-          Module SMS <strong>optionnel</strong>. Les crédits SMS sont facturés sur
+          Une seule clé, deux usages. Les <strong>SMS</strong> sont optionnels et facturés sur
           <strong>votre propre compte Brevo</strong> (~0,06 €/SMS), pas par HôteSmart.
+          Les <strong>e-mails aux voyageurs</strong> de vos réservations directes partent
+          également de votre compte, sous votre nom.
         </div>
 
         <div class="steps">
@@ -185,6 +189,30 @@
             <input type="checkbox" id="brevo-enabled">
             <span class="toggle-slider"></span>
           </label>
+        </div>
+
+        <!-- Adresse d'expédition des e-mails voyageur.
+             ⚠ JAMAIS UN CHAMP LIBRE : Brevo n'envoie qu'au nom d'un expéditeur
+             vérifié. Une adresse tapée à la main serait acceptée ici et refusée
+             à l'envoi — l'hôte croirait son adresse réglée et le découvrirait
+             devant un voyageur. On ne propose donc que ce que Brevo valide. -->
+        <div id="bloc-expediteur" style="margin-top:18px; padding-top:16px; border-top:0.5px solid var(--border);">
+          <div style="font-size:13px; font-weight:500; margin-bottom:6px;">
+            Adresse d'expédition des e-mails voyageur
+          </div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.6; margin-bottom:10px;">
+            Vos voyageurs verront cette adresse comme expéditeur, et leurs réponses
+            y arriveront directement. Seuls les expéditeurs <strong>vérifiés</strong>
+            dans votre compte Brevo peuvent être utilisés —
+            <a href="https://app.brevo.com/senders/list" target="_blank">gérer mes expéditeurs ↗</a>.
+          </div>
+          <div class="invite-row">
+            <select class="form-input" id="brevo-sender">
+              <option value="">Chargement…</option>
+            </select>
+            <button class="btn btn-primary" id="btn-save-sender">Enregistrer</button>
+          </div>
+          <div id="sender-aide" style="font-size:12px; color:var(--text2); margin-top:8px;"></div>
         </div>
 
         <div class="toast" id="toast-brevo"></div>
@@ -369,12 +397,22 @@
         document.getElementById('brevo-key').value = '••••••••••••••••••••'
         document.getElementById('brevo-enabled').checked = data.enabled
         setStatus('brevo', data.enabled ? 'ok' : 'off',
-          data.enabled ? 'Connecté ✓' : 'Clé enregistrée, envoi désactivé')
+          data.enabled ? 'Connecté ✓' : 'Clé enregistrée, envoi SMS désactivé')
+        // ⚠ L'EXPEDITEUR NE SUIT PAS LE TOGGLE SMS. Couper les SMS ne coupe pas
+        // les e-mails : ce sont deux canaux, et un hôte qui refuse les SMS doit
+        // pouvoir régler quand même l'adresse vue par ses voyageurs.
+        await loadSenders(data.senderEmail)
       } else {
         setStatus('brevo', 'off', 'Non configuré')
+        document.getElementById('bloc-expediteur').style.display = 'none'
       }
     } catch {
       setStatus('brevo', 'off', 'Erreur')
+      // Sans ça, le bloc expéditeur reste affiché avec « Chargement… » figé et un
+      // bouton actif qui ne peut rien faire : on ne laisse pas une UI morte
+      // prétendre attendre quelque chose.
+      const bloc = document.getElementById('bloc-expediteur')
+      if (bloc) bloc.style.display = 'none'
     }
   }
 
@@ -396,6 +434,97 @@
         document.getElementById('brevo-enabled').checked = true
         setStatus('brevo', 'ok', 'Connecté ✓')
         showToast('brevo', '✅ Clé Brevo enregistrée', 'success')
+        // La clé venant d'arriver, les expéditeurs deviennent lisibles.
+        await loadSenders(null)
+      } else {
+        showToast('brevo', '❌ ' + (data.error || 'Erreur'), 'error')
+      }
+    } catch (e) {
+      showToast('brevo', '❌ ' + e.message, 'error')
+    } finally {
+      btn.disabled = false; btn.textContent = 'Enregistrer'
+    }
+  })
+
+  // ===== Adresse d'expédition des e-mails voyageur =====
+  // La liste vient de Brevo, jamais d'une saisie. Le serveur la revérifie avant
+  // d'enregistrer : se fier au menu affiché reviendrait à accepter n'importe
+  // quelle adresse postée à la main, donc une identité d'expéditeur que l'hôte
+  // ne possède pas.
+  async function loadSenders(choisi) {
+    const sel = document.getElementById('brevo-sender')
+    const aide = document.getElementById('sender-aide')
+    const bloc = document.getElementById('bloc-expediteur')
+    try {
+      const res = await fetch('/api/sms?action=senders', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      })
+      const data = await res.json()
+
+      if (!data.configured) {
+        // Sans clé, ce réglage n'a pas de sens : on cache plutôt que de montrer
+        // un menu vide dont personne ne devinerait la cause.
+        bloc.style.display = 'none'
+        return
+      }
+      bloc.style.display = ''
+
+      if (data.error) {
+        sel.innerHTML = '<option value="">—</option>'
+        sel.disabled = true
+        aide.textContent = `Brevo n'a pas répondu (${data.error}). Réessayez dans un instant.`
+        return
+      }
+      if (!data.senders.length) {
+        sel.innerHTML = '<option value="">Aucun expéditeur vérifié</option>'
+        sel.disabled = true
+        aide.innerHTML = 'Votre compte Brevo n\'a aucun expéditeur vérifié. '
+          + 'Ajoutez-en un chez Brevo, puis revenez : sans lui, aucun e-mail ne peut partir.'
+        return
+      }
+
+      sel.disabled = false
+      sel.innerHTML = data.senders
+        .map(x => `<option value="${x.email}">${x.name} — ${x.email}</option>`).join('')
+      if (choisi && data.senders.some(x => x.email === choisi)) {
+        sel.value = choisi
+        aide.textContent = ''
+      } else if (choisi) {
+        // ⚠ L'ECRAN NE DOIT PAS AFFIRMER LE CONTRAIRE DU SERVEUR.
+        // L'adresse enregistrée n'est plus vérifiée chez Brevo (supprimée,
+        // désactivée). Le serveur continue de l'utiliser telle quelle : Brevo
+        // rend 400 et PLUS AUCUN e-mail ne part. Annoncer « Par défaut : … »
+        // ici laisserait croire que tout va bien, et l'hôte n'aurait aucune
+        // raison de recliquer. Constat de review.
+        aide.innerHTML = `⚠️ L'adresse enregistrée (<strong>${choisi}</strong>) n'est plus `
+          + 'un expéditeur vérifié de votre compte Brevo : <strong>vos e-mails aux voyageurs '
+          + 'ne partent plus</strong>. Choisissez-en une ci-dessus et enregistrez.'
+      } else {
+        // Rien de choisi : on annonce le défaut au lieu de laisser croire à une
+        // sélection. C'est bien cette adresse-là qui partira.
+        aide.textContent = `Par défaut : ${data.senders[0].name} — ${data.senders[0].email}`
+      }
+    } catch (e) {
+      bloc.style.display = ''
+      aide.textContent = 'Impossible de lire vos expéditeurs : ' + e.message
+    }
+  }
+
+  document.getElementById('btn-save-sender').addEventListener('click', async () => {
+    const email = document.getElementById('brevo-sender').value
+    if (!email) return showToast('brevo', 'Choisissez une adresse', 'error')
+    const btn = document.getElementById('btn-save-sender')
+    btn.disabled = true; btn.textContent = '⏳…'
+    try {
+      const res = await fetch('/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'saveSender', email })
+      })
+      const data = await res.json()
+      if (data.success) {
+        document.getElementById('sender-aide').textContent = ''
+        showToast('brevo', '✅ Adresse d\'expédition enregistrée', 'success')
       } else {
         showToast('brevo', '❌ ' + (data.error || 'Erreur'), 'error')
       }

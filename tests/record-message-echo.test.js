@@ -290,3 +290,39 @@ test('la branche entrante compare des INSTANTS, pas des chaines — lecture du c
   assert.ok(bloc.includes(".eq('provider', row.provider)"), 'et par provider')
   assert.ok(bloc.includes('sentAt'), 'la garde exige l instant fourni par le PRODUCTEUR')
 })
+
+// ─── resolveOta : le client se passe en argument ─────────────────────────────
+// Trouve en review le 17 septembre 2026, defaut anterieur (de18a64).
+// `resolveOta` lisait `db`, qui n'existe que dans la portee de `recordMessage` :
+// chaque appel levait une ReferenceError, avalee par son propre catch, et la
+// fonction rendait TOUJOURS null. Le lookup ecrit pour l'entrant Channex — le
+// seul appelant qui ne fournit pas `ota` — n'a donc jamais rien resolu.
+test('resolveOta lit le snapshot au lieu de lever en silence', async () => {
+  const lignes = []
+  const db = {
+    from (table) {
+      const b = {
+        select: () => b, eq: () => b, gte: () => b, limit: async () => ({ data: [] }),
+        maybeSingle: async () => ({ data: table === 'bookings_snapshot'
+          ? { snapshot: { source: 'AirBNB' } } : null }),
+        insert: async row => { lignes.push(row); return { error: null } }
+      }
+      return b
+    }
+  }
+  const avertissements = []
+  const err = console.warn
+  console.warn = (...a) => avertissements.push(a.join(' '))
+  await recordMessage({
+    supabase: db,
+    userId: 'U', provider: 'channex', propertyId: 'P', bookingId: 'B',
+    direction: 'inbound', sender: 'guest', body: 'bonjour', providerMsgId: 'm-1'
+  })
+  console.warn = err
+
+  assert.ok(!avertissements.some(l => /resolveOta echec/.test(l)),
+    'aucune ReferenceError avalee : ' + avertissements.join(' | '))
+  assert.strictEqual(lignes.length, 1)
+  assert.strictEqual(lignes[0].ota, 'AirBNB',
+    'l\'OTA vient de la reservation, comme la fonction le promet depuis toujours')
+})
