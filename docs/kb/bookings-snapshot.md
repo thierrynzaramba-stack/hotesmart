@@ -122,7 +122,7 @@ passer `request` (demande non confirmée) comme une réservation active.
 
 `provider`, `status`, `statusRaw`, `arrival`, `departure`, `arrivalHour`, `firstName`,
 `lastName`, `numAdult`, `numChild`, `source`, `otaReservationCode`, `amount`,
-`commission`, `currency`.
+`commission`, `currency`, `guestEmail`.
 
 `otaReservationCode` est la clé de rattachement des avis voyageurs
 (Beds24 : `apiReference` ; Channex : `ota_reservation_code`).
@@ -479,6 +479,99 @@ lui-même une entrée `automation_incidents` de type `table_growth` déjà marqu
 qu'on touche à son code. Un onboarding d'hôte avec reprise d'historique suivra la
 même voie.
 
+## 4 sexies. `guestEmail` — l'adresse du voyageur
+
+Ajoutée le 16 septembre 2026, étape 1 du chantier « canal e-mail pour les
+réservations directes » (`docs/specs/spec-canal-email-resa-directe.md`).
+
+| provider | champ lu dans `raw` |
+|---|---|
+| Channex | `customer.mail` (jamais `customer.email` : Channex ne l'a jamais servi) |
+| Beds24 | `email`, au premier niveau |
+
+**Pourquoi dans le cœur et pas ailleurs.** Le payload brut la portait déjà, mais
+le lecteur de GuestFlow (`lib/cron-messages.js fetchChannelBookings`) ne
+sélectionne que `booking_id, snapshot` : rapatrier `raw` pour une adresse
+coûterait ~6 Ko par ligne toutes les 5 minutes. `booking_attempts.guest_email`
+existe aussi, mais ne couvre que les réservations du **moteur** — pas celles
+saisies à la main — et se clé sur `properties.id` quand le snapshot se clé sur le
+propId provider. Le retenir aurait ouvert un second chemin.
+
+### ⚠ Elle ne décide pas du routage
+
+Booking.com sert un **alias de relais** dans ce même champ
+(`…@guest.booking.com`), et cet alias délivre. Router sur « une adresse existe »
+détournerait donc vers l'e-mail des réservations qui ont une messagerie OTA
+parfaitement fonctionnelle. C'est `source` qui tranche — `'Offline'` côté
+Channex — et jamais la présence de cette valeur. Mesure du 16 septembre 2026 sur
+les 148 lignes pourvues par le backfill : 114 d'entre elles sont des adresses
+d'OTA (107 `booking` Beds24, 7 `BookingCom` Channex), contre 7 Offline.
+
+### ⚠ Jamais `null` — exception raisonnée à la règle du §5
+
+Le merge non destructif traite ailleurs un `null` fourni comme une information
+qui écrase. Pas ici : le feed Channex sert des **révisions amputées** (l'annulation
+à `rooms: []` et dates nulles décrite dans `lib/booking-changes.js` en est la
+preuve déjà payée), et une révision rendant `customer.mail: null` effacerait
+l'adresse à laquelle il faut justement écrire.
+
+Le produit ne perd rien à ne pas distinguer « jamais fourni » de « effacé » : les
+deux se traitent pareil — aucun envoi, et un badge « pas d'e-mail » sur la fiche.
+Un écrasement, lui, coûte un message non délivré.
+
+### ⚠ Le cœur n'est pas un validateur
+
+`emailOuRien()` trime et rejette ce qui n'est pas une chaîne non vide. Il ne
+vérifie **pas** la forme de l'adresse : le cœur enregistre ce que le provider a
+dit. C'est la couche d'envoi qui refusera une adresse inexploitable, et qui le
+**dira**. Filtrer en silence ici rendrait « pas d'adresse » et « adresse
+invalide » indistinguables pour l'hôte.
+
+### Elle ne réveille personne
+
+`guestEmail` n'est pas dans les quatre `DIFF_FIELDS` de `lib/booking-changes.js`
+(`arrival`, `departure`, `numAdult`, `numChild`). Une adresse qui apparaît ou qui
+change ne produit donc **aucun** `booking_change_event` : ni ménage, ni code
+d'accès, ni message de bienvenue. C'est testé
+(`tests/bookings-snapshot-email.test.js`), pas supposé.
+
+### Backfill
+
+`node scripts/backfill-guest-email.js [--execute]` — dry run par défaut.
+Re-dérive l'adresse du `raw` **déjà en base**, sans aucun appel provider, et
+écrit par le writer unique un snapshot ne portant que `provider` et `guestEmail` :
+le merge laisse les 15 autres champs intacts, donc `detectChange` compare des
+valeurs identiques et ne rend rien. Repasser le `raw` entier au writer aurait
+re-dérivé tout le snapshot avec les mappers d'aujourd'hui — une correction
+silencieuse hors périmètre. Le script s'arrête net si le writer produit malgré
+tout un événement.
+
+**Ordre : le backfill d'abord, le push ensuite.** Une fois `guestEmail` déployé
+dans les mappers, toute réservation dont le payload porte une adresse rend un
+`merged` différent de l'existant : la garde « ligne inchangée » du §5 bis est
+contournée et chaque ligne repasse par un upsert séquentiel dans le cron `*/5`
+(le budget `budgetRaw` ne couvre **pas** ce chemin — seulement le rafraîchissement
+du `raw`). Lancé avant le push, le script rend le déploiement neutre : le code en
+place conserve les champs hors schéma au merge.
+
+L'écriture porte `initialImport: true`. Le raisonnement dit qu'aucun événement ne
+peut naître ; le drapeau est là pour le jour où il se trompe. `recordChangeEvent`
+écrit **avant** l'upsert : un événement constaté après coup est déjà en base et
+distribuable, et arrêter le script ne le défait pas.
+
+La lecture est **paginée par curseur (`id >`) et confrontée au compte exact** : PostgREST plafonne un
+rendu à 1000 lignes sans erreur, et il y a 1477 lignes. Un déficit entre le lu et
+l'annoncé arrête le script, au lieu de rendre un « rien à faire » tronqué. Le
+curseur plutôt qu'un offset : le cron écrit la table toutes les 5 minutes, et une
+suppression concurrente décalerait les offsets — une ligne sautée en silence, les
+pages restant pleines et la confrontation satisfaite.
+
+Une ligne dont le `snapshot.provider` manque est **écartée**, jamais devinée : le
+snapshot minimal le persisterait, et `readStatus` préfère `snapshot.provider` au
+défaut de l'appelant — une inférence fausse changerait la canonisation du statut
+pour tous les lecteurs. Ces lignes se réparent avec
+`scripts/backfill-snapshot-provider.js`, puis on repasse.
+
 ## 5. Merge non destructif
 
 Un champ **non fourni** (`undefined`) par un mapper ne remet jamais à `null` la valeur
@@ -537,4 +630,7 @@ ad hoc.
 `npm test` (`node --test`, aucune dépendance). `tests/bookings-snapshot.test.js` couvre
 le mapping de statuts des deux providers, les cas limites (vide, inconnu, casse,
 idempotence), la lecture des lignes antérieures à l'unification et le merge non
-destructif.
+destructif. `tests/bookings-snapshot-email.test.js` couvre `guestEmail` sur les
+quatre cas qui comptent — Offline avec adresse, Offline sans adresse, Airbnb
+(`mail: null`), Booking.com (alias de relais) — et l'invariant qui les relie :
+une adresse présente ne suffit jamais à choisir le canal.
