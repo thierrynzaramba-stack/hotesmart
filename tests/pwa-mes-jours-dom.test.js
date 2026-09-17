@@ -1000,25 +1000,29 @@ const offre = (date, propId = 'p1') =>
   ({ booking_id: 'x-' + date, property_id: propId, property_name: 'Colomiers',
      departure_date: date, status: 'unassigned' })
 
-test('un jour où elle a un ménage porte un POINT sous le numéro', async () => {
+test('un jour où elle a un ménage porte une PASTILLE CHIFFRÉE, et un fond vert', async () => {
+  // ⚠ Les points ne disaient qu'une chose — « il y en a » — et il fallait les
+  // compter un par un au-delà de deux. Le fond porte la silhouette du mois, la
+  // pastille répond à « et mardi, combien ».
   const j = dans(2)
   const { w, t } = monter({ bookings: [menage(j)] })
   t.seed()
   await t.charger()
   await t.chargerDisponibilites()
   const el = caseDu(w, j)
-  assert.strictEqual(el.querySelectorAll('.dispo-points i').length, 1)
+  assert.strictEqual(el.querySelector('.dispo-compte').textContent, '1')
+  assert.ok(el.classList.contains('a-moi'), 'le fond code le jour à ménage')
   assert.match(el.getAttribute('title'), /1 ménage à moi/)
 })
 
-test('deux ménages le même jour : DEUX points (aucun plafond)', async () => {
+test('deux ménages le même jour : la pastille dit DEUX (aucun plafond)', async () => {
   // Décision du 17 septembre : plusieurs ménages le même jour, c'est libre.
   const j = dans(2)
   const { w, t } = monter({ bookings: [menage(j), menage(j, 'p2')] })
   t.seed()
   await t.charger()
   await t.chargerDisponibilites()
-  assert.strictEqual(caseDu(w, j).querySelectorAll('.dispo-points i').length, 2)
+  assert.strictEqual(caseDu(w, j).querySelector('.dispo-compte').textContent, '2')
 })
 
 test('un ménage à prendre pose une BULLE avec le nombre', async () => {
@@ -1135,8 +1139,12 @@ test('un jour PASSÉ à prendre ne s\'ouvre pas', async (ctx) => {
 test('sans offre, le clic bascule l\'absence comme avant', async () => {
   // Non-régression : le calendrier fusionné ne doit pas avoir mangé le geste du
   // lot 1 sur les jours ordinaires.
+  // ⚠ UN JOUR VIDE, ET C'EST LE POINT. La fixture portait un ménage à elle —
+  // donc un jour où, depuis le lot A, la bascule est REFUSÉE. Le test éprouvait
+  // le geste ordinaire sur le seul cas qui ne l'est pas ; il passait par
+  // accident, et il aurait rougi le jour où la garde arriverait. C'est arrivé.
   const j = dans(2)
-  const { w, t } = monter({ bookings: [menage(j)] })
+  const { w, t } = monter({})
   t.seed()
   await t.charger()
   await t.chargerDisponibilites()
@@ -1146,12 +1154,22 @@ test('sans offre, le clic bascule l\'absence comme avant', async () => {
   assert.strictEqual(ecritures(t)[0].corps.action, 'declarerIndisponibilite')
 })
 
-test('un jour ABSENT n\'est plus ROUGE — il est éteint', async () => {
-  // ⚠ Un jour où elle ne travaille pas est un état normal, souvent choisi. Le
-  // rouge est réservé à ce qui ne va pas.
+test('un jour indisponible se dit par le NUMÉRO BARRÉ, pas par un fond', async () => {
+  // ⚠ Le fond ne code plus qu'UNE chose : le jour à ménage. Absence, repos et
+  // congé disent la même chose à qui regarde — « pas ce jour-là » — et reçoivent
+  // donc une seule marque. Un fond qui code plusieurs états oblige à tenir une
+  // grille de couleurs en tête pour lire un mois.
+  const j = dans(2)
+  const { w, t } = monter({ exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(el.classList.contains('off'), 'la case est marquée indisponible')
+  assert.ok(!el.classList.contains('a-moi'), 'et le fond vert lui reste étranger')
+
   const PAGE = fs.readFileSync(FICHIER, 'utf8')
-  assert.ok(!/\.dispo-case\.off \{ background: #FBE9E6/.test(PAGE), 'plus de fond rouge')
-  assert.match(PAGE, /\.dispo-case\.off \{ background: var\(--bg2\)/)
+  assert.ok(!/\.dispo-case\.off \{ background:/.test(PAGE), 'plus aucun fond sur l\'indisponible')
+  assert.match(PAGE, /\.dispo-case\.off \.dispo-num,[\s\S]{0,200}text-decoration: line-through/,
+    'le numéro est barré')
 })
 
 // ─── Mes 30 prochains jours (refonte v2, lot 3) ───────────────────────────
@@ -1741,4 +1759,110 @@ test('droit retiré en cours de route : l\'écran le DIT, il ne reste pas cliqua
     /gérées par votre employeur/, 'l\'écran dit ce qui se passe')
   assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, 'none',
     'et les cases ne sont plus là pour être retapées')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT A — LA GRILLE : UN SEUL FOND, UNE SEULE MARQUE D'INDISPONIBILITÉ
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('un jour qui porte un ménage est TRAVAILLÉ, même s\'il était barré', async () => {
+  // ⚠ L'INVARIANT DU LOT, et il se pose dans `jourTravaille` — pas dans le
+  // rendu. Sans lui, un jour sortait BARRÉ ET VERT à la fois : l'écran se
+  // contredisait sur la même case. Le cas est la situation NORMALE d'une
+  // prestataire dont l'hôte tient le planning — un ménage attribué d'office
+  // tombe sur un jour qu'elle n'avait pas ouvert.
+  // C'est la généralisation de la décision 5 : prendre un ménage débarre le
+  // jour, donc en RECEVOIR un le débarre aussi.
+  const j = dans(2)
+  const { w, t } = monter({
+    bookings: [menage(j)],
+    exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }]
+  })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(el.classList.contains('a-moi'), 'le ménage colore le jour')
+  assert.ok(!el.classList.contains('off'), 'et il ne peut pas être barré en même temps')
+})
+
+test('la bulle « à prendre » est NEUTRE, et garde sa pointe', async () => {
+  // ⚠ Elle était terracotta, donc la marque la plus criante de la grille — pour
+  // une PROPOSITION, c'est-à-dire ce qui n'engage personne. Le rapport de force
+  // était inversé : l'offre criait plus fort que le travail acquis. Elle garde
+  // sa FORME, qui suffit à la reconnaître, et perd sa couleur.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  const bloc = PAGE.slice(PAGE.indexOf('.dispo-bulle {'), PAGE.indexOf('.dispo-case.a-prendre'))
+  assert.ok(!/background: var\(--primary\)/.test(bloc), 'plus de fond terracotta')
+  // ⚠ `--bg2` ET NON `--bg` : depuis que la case est blanche, une bulle blanche
+  // ne s'en detachait plus que par un filet d'1 px.
+  assert.match(bloc, /background: var\(--bg2\)/)
+  assert.match(bloc, /border: 1px solid var\(--border2\)/)
+  // La pointe reste, en deux triangles : un seul laisserait la bulle percée sur
+  // son côté bas, sans filet.
+  assert.match(bloc, /\.dispo-bulle::before, \.dispo-bulle::after/)
+})
+
+test('le fond ne code QU\'UNE chose, et c\'est le ménage', async () => {
+  // Contre-épreuve de lecture : aucune règle ne doit repeindre le fond d'un
+  // jour éteint, sinon on réintroduit la grille de couleurs qu'on vient de
+  // retirer — et le lecteur doit de nouveau la tenir en tête.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  const css = PAGE.slice(PAGE.indexOf('.dispo-case {'), PAGE.indexOf('.dispo-bulle {'))
+  // ⚠ LE `{` DOIT SUIVRE LA CHAINE DE CLASSES, sans espace ni `::`. Un motif
+  // plus lache attrapait `.dispo-case.manuel::before` (le point d'absence) et
+  // `.dispo-case.passe .dispo-pastille` (la pastille) : deux fonds qui ne sont
+  // pas ceux d'une CASE. Un test qui compte trop large accuse le code de ce
+  // qu'il ne fait pas.
+  const fonds = [...css.matchAll(/\.dispo-case\.([a-z.-]+)\s*\{[^}]*background:\s*([^;]+);/g)]
+    .map(m => `${m[1]} -> ${m[2].trim()}`)
+    .filter(x => !/vide -> transparent/.test(x))
+  // ⚠ UN SEUL FOND, MAINTENANT. Le jour passé à ménage garde son vert : le
+  // repeindre en gris le rendait indistinguable d'un jour passé sans ménage —
+  // à 45 % d'opacité, l'écart tombe sous 2 % de luminance, et un mois écoulé ne
+  // disait plus rien de ce qu'elle y avait fait. L'opacité suffit à l'estomper.
+  assert.deepStrictEqual(fonds.sort(), ['a-moi -> var(--green-bg)'],
+    'le jour à ménage est le seul état que le fond code')
+})
+
+test('on ne se déclare pas absente un jour où on a un ménage', async () => {
+  // ⚠ GARDE NÉE DE L'INVARIANT, et sans elle il ouvrait une faille. Avant, un
+  // jour de repos portant un ménage sortait sur « vous ne travaillez déjà pas
+  // ce jour-là » et rien ne partait. Depuis que `jourTravaille` rend VRAI dès
+  // qu'un ménage est là — ce qui est juste — ce filet a sauté, et la bascule
+  // déclarait une absence sur une journée où elle est attendue.
+  // Corriger une lecture oblige à reprendre ce qu'elle protégeait par accident.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const avant = ecritures(t).length
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  assert.strictEqual(ecritures(t).length, avant, 'rien n\'est parti')
+  assert.match(message(w), /retirez-le d’abord/)
+  assert.ok(caseDu(w, j).classList.contains('a-moi'), 'et la journée n\'a pas bougé')
+})
+
+
+test('le compteur du calendrier ne PORTE PAS le nom d\'une case à cocher', () => {
+  // ⚠ DÉFAUT CRITIQUE ATTRAPÉ EN REVIEW, et il serait parti en production.
+  // Le badge s'appelait `.dispo-pastille` — nom DÉJÀ pris par la case à cocher
+  // 44×44 des jours habituels, déclarée plus bas dans la même feuille de style.
+  // Même sélecteur, même spécificité, déclarée après : elle gagnait toutes les
+  // propriétés partagées. Le compteur sortait en carré gris de 44 px dans une
+  // case de 44 px — la grille du mois entier se déformait.
+  // ⚠ AUCUN TEST DOM NE POUVAIT LE VOIR : jsdom lit le `textContent`, jamais la
+  // cascade. C'est l'angle mort d'un test de structure sur une question de style,
+  // et la raison pour laquelle celui-ci lit la feuille de style elle-même.
+  // ⚠ ON NE TESTE PAS « AUCUN DOUBLON », qui serait faux : redéclarer une classe
+  // est une pratique normale — media queries, surcharges progressives. Un test
+  // qui les interdit toutes crie au loup 22 fois et se fait désactiver.
+  // On teste la classe QUE CE LOT INTRODUIT, et elle seule : elle doit être
+  // déclarée une fois, et ne pas emprunter un nom déjà pris.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  const regle = n => (PAGE.match(new RegExp('^\\s*\\.' + n + '\\s*\\{', 'gm')) || []).length
+  assert.strictEqual(regle('dispo-compte'), 1, 'le compteur a sa règle, et une seule')
+  // Et le rendu du calendrier ne doit pas utiliser le nom de la case à cocher.
+  const rendu = PAGE.slice(PAGE.indexOf('function peindreUnMois'), PAGE.indexOf('AGENDA_JOURS'))
+  assert.ok(!/dispo-pastille/.test(rendu),
+    'le calendrier n\'emprunte pas le nom des cases à cocher des jours habituels')
+  assert.ok(/dispo-pastille/.test(PAGE), 'qui, elle, existe toujours ailleurs')
 })

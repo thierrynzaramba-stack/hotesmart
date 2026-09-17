@@ -87,35 +87,48 @@
        numero au lieu de dessous, poussant la date hors du centre — et a quatre
        menages le meme jour (aucun plafond, decision du 17 septembre) la ligne
        debordait la case. */
-    .dispo-case { min-height: 44px; aspect-ratio: 1; border: 1px solid transparent; border-radius: 8px;
-                  display: flex; flex-direction: column; gap: 1px;
+    /* ⚠ LA CASE EST BLANCHE, ET LE FOND NE CODE QU'UNE CHOSE : le jour a menage
+       (`.a-moi`, plus bas). Ni l'absence, ni le repos, ni le conge ne le
+       teintent — eux se disent par le NUMERO BARRE (lot A, 17 septembre 2026).
+       Avant : vert = je travaille, gris = eteint, et il fallait tenir cette
+       grille de couleurs en tete pour lire un mois. Un fond qui ne code qu'une
+       seule chose se lit sans decodeur.
+       Le filet clair ne porte aucune information : il tient la grille, sans quoi
+       un mois de cases blanches sur fond blanc n'aurait plus de structure. */
+    .dispo-case { min-height: 44px; aspect-ratio: 1; border: 1px solid var(--border); border-radius: 8px;
+                  display: flex; flex-direction: column; gap: 2px;
                   align-items: center; justify-content: center; font-size: 14px;
                   font-variant-numeric: tabular-nums; font-weight: 600; position: relative;
-                  background: var(--green-bg); color: var(--green); cursor: pointer;
+                  background: var(--bg); color: var(--text); cursor: pointer;
                   -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
-    /* ⚠ UN JOUR ABSENT EST UN JOUR ETEINT, PAS UNE ALERTE (refonte v2, lot 2).
-       Il etait rouge — la couleur qu'on reserve a ce qui ne va pas. Or ne pas
-       travailler un jour est un etat normal, souvent choisi. Le rouge ne sert
-       plus qu'aux erreurs, et la couleur du calendrier va a ce qui demande un
-       geste : les menages que personne ne fait. */
-    .dispo-case.off { background: var(--bg2); color: var(--text3); }
-    /* ⚠ CIBLER LE NUMERO, PAS « LE PREMIER SPAN ». La bulle est posee AVANT le
-       numero dans le balisage : `span:first-of-type` l'attrapait, et un jour
-       absent portant une offre estompait l'OFFRE en laissant la date en clair —
-       l'inverse exact de la decision « le jour recule, pas l'offre ». */
-    .dispo-case.off .dispo-num { opacity: .55; }
-    .dispo-case.vide { background: transparent; cursor: default; }
-    .dispo-case.passe { opacity: .3; cursor: not-allowed; }
-    .dispo-case.conge { background: var(--bg3); color: var(--text3); cursor: not-allowed;
-                        border-style: dashed; border-color: var(--border); }
-    .dispo-case.conge::after { content: "✕"; position: absolute; font-size: 16px; color: var(--text2); opacity: .7; }
-    /* ⚠ MEME PIEGE : `span` nu attrapait la bulle et les points du lot 2. Une
-       offre sur un jour de conge s'affichait a 25 % — quasi invisible — sur une
-       case que le lot 2 garde justement cliquable. */
-    .dispo-case.conge .dispo-num { opacity: .25; }
+    /* ⚠ INDISPONIBLE = LE NUMERO EST BARRE. Absence, repos, conge : une seule
+       marque pour les trois, parce qu'elles disent la meme chose a qui regarde —
+       « pas ce jour-la ». La nuance (qui l'a posee, pourquoi) vit dans la feuille
+       qu'on ouvre, pas dans la grille qu'on survole. */
+    .dispo-case.off .dispo-num,
+    .dispo-case.conge .dispo-num,
+    .dispo-case.passe .dispo-num { text-decoration: line-through;
+                                   text-decoration-thickness: 1.5px;
+                                   text-decoration-color: var(--text3);
+                                   color: var(--text3); }
+    .dispo-case.vide { background: transparent; border-color: transparent; cursor: default; }
+    /* ⚠ LE PASSE GARDE SON ESTOMPE EN PLUS DU BARRE. Barre seul, un jour passe
+       serait indistinguable d'une absence a venir — or l'un se touche encore,
+       l'autre non. */
+    .dispo-case.passe { opacity: .45; cursor: not-allowed; }
+    .dispo-case.conge { cursor: not-allowed; border-style: dashed; border-color: var(--border2); }
+    .dispo-case.conge::after { content: "✕"; position: absolute; top: 3px; right: 4px;
+                               font-size: 9px; color: var(--text3); opacity: .8; }
     /* Une case de conge PORTANT une offre redevient actionnable : le curseur
        doit le dire, sinon il annonce « interdit » sur le seul geste possible. */
     .dispo-case.conge.a-prendre { cursor: pointer; }
+    /* ⚠ UNE CASE QUI N'OUVRIRA RIEN N'EST PAS CLIQUABLE. La rendre touchable
+       serait promettre une reponse qui ne vient pas. */
+    /* ⚠ PAS DE `cursor` ICI. Declaree apres `.passe` et `.conge` a specificite
+       egale, cette regle annulait leur `not-allowed` : les deux commentaires qui
+       le justifient ne decrivaient plus rien. L'inertie se dit par l'absence de
+       `tabindex`, pas par un curseur qui ecrase celui d'a cote. */
+    .dispo-case.inerte:not(.passe):not(.conge) { cursor: default; }
     .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
     /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « cette absence, c'est
        moi qui l'ai posee » ; le lot 2 en a introduit d'autres, verts et centres
@@ -123,19 +136,46 @@
        different dans 44 px, c'est un seul point qu'on ne sait plus lire. Et sans
        `left`, celui-ci suivait le flux — donc bougeait au passage de la case en
        colonne. */
+    /* ⚠ COULEUR EXPLICITE, PLUS `currentColor`. Il heritait de `.dispo-case.off
+       { color: var(--text3) }`, regle que le lot A a supprimee : le point est
+       alors passe au quasi-noir — la marque la plus contrastee de la case, pour
+       l'information la plus accessoire. */
     .dispo-case.manuel::before { content: ""; position: absolute; top: 4px; left: 4px;
                                  width: 4px; height: 4px;
-                                 border-radius: 50%; background: currentColor; opacity: .7; }
+                                 border-radius: 50%; background: var(--text3); opacity: .8; }
 
-    /* ─── Ce que la case porte en plus (refonte v2, lot 2) ─────────────────
-       Mes menages : un POINT sous le numero, discret — c'est deja a moi, et le
-       detail vit dans la liste. */
-    .dispo-points { display: flex; gap: 3px; justify-content: center; align-items: center;
-                    height: 6px; margin-top: 2px; }
-    .dispo-points i { width: 5px; height: 5px; border-radius: 50%;
-                      background: var(--green); opacity: .75; }
-    .dispo-case.off .dispo-points i,
-    .dispo-case.conge .dispo-points i { background: var(--text3); opacity: 1; }
+    /* ─── MES MENAGES : FOND VERT + PASTILLE CHIFFREE (lot A) ──────────────
+       Les points ne disaient qu'une chose — « il y en a » — et il fallait les
+       compter un par un au-dela de deux. Le fond porte la silhouette du mois
+       (« ma semaine est-elle chargee »), la pastille repond a « et mardi,
+       combien » : deux distances de lecture, deux marques.
+       ⚠ PAS DE LISERE EN PLUS. Sur un fond deja vert, il ferait un troisieme
+       signal pour une seule idee. */
+    /* ⚠ `dispo-compte`, PAS `dispo-pastille` — ET C'EST UN DEFAUT QUI SERAIT
+       PARTI EN PRODUCTION. `.dispo-pastille` existe deja plus bas : c'est la case
+       a cocher 44x44 des jours habituels. Meme selecteur, meme specificite,
+       declaree APRES : elle gagnait toutes les proprietes partagees. Le compteur
+       sortait en carre gris de 44 px dans une case de 44 px — la grille du mois
+       entier se deformait, et le badge devenait indistinguable d'une case a
+       cocher. Les tests DOM ne pouvaient pas le voir : jsdom lit le
+       `textContent`, jamais la cascade. */
+    .dispo-compte { display: inline-flex; align-items: center; justify-content: center;
+                    height: 16px; min-width: 16px; padding: 0 4px; border-radius: 8px;
+                    background: var(--green); color: #fff; font-size: 10.5px;
+                    font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+    .dispo-case.a-moi { background: var(--green-bg); border-color: transparent; }
+    /* ⚠ SEULEMENT QUAND LE JOUR N'EST PAS ETEINT. Declaree apres le bloc du
+       numero barre a specificite egale, cette regle le rallumait en plein noir
+       gras sur les cases `conge.a-moi` et `a-moi.passe` — celles qui portent
+       deja le plus de marques. */
+    .dispo-case.a-moi:not(.off):not(.conge):not(.passe) .dispo-num {
+      color: var(--text); font-weight: 700; }
+    /* ⚠ LE PASSE GARDE SON VERT, et l'opacite fait le travail d'estompe.
+       Le repeindre en gris le rendait INDISTINGUABLE d'un jour passe sans
+       menage : a 45 % d'opacite, l'ecart entre `--bg2` et le blanc de la carte
+       tombe sous 2 % de luminance. Un mois ecoule ne disait plus rien de ce
+       qu'elle y avait fait. */
+    .dispo-case.passe .dispo-compte { background: var(--bg3); color: var(--text3); }
 
     /* A PRENDRE : bulle de dialogue posee AU-DESSUS de la case, avec une pointe
        qui designe la date — forme retenue le 17 septembre 2026. Elle dit « ce
@@ -147,17 +187,31 @@
     .dispo-bulle {
       position: absolute; top: -13px; left: -5px; z-index: 3;
       height: 18px; min-width: 24px; padding: 0 7px; border-radius: 6px;
-      background: var(--primary); color: #fff; font-size: 11px; font-weight: 700;
+      /* ⚠ NEUTRE (lot A). Elle etait terracotta, donc la marque la plus criante
+         de la grille — pour une PROPOSITION, c'est-a-dire ce qui n'engage
+         personne. Le rapport de force etait inverse : l'offre criait plus fort
+         que le travail acquis. Elle garde sa FORME, qui suffit a la reconnaitre,
+         et perd sa couleur. */
+      /* ⚠ `--bg2`, PAS `--bg` : depuis que la case est blanche elle aussi, une
+         bulle blanche ne s'en detachait plus que par un filet d'1 px — un
+         chiffre gras flottant au-dessus d'une date, qui se lit comme une
+         seconde date. Un gris tres clair suffit a la decoller sans lui rendre
+         la couleur qu'on vient de lui retirer. */
+      background: var(--bg2); color: var(--text2); border: 1px solid var(--border2);
+      font-size: 11px; font-weight: 700;
       display: inline-flex; align-items: center; justify-content: center;
       font-variant-numeric: tabular-nums; line-height: 1;
-      box-shadow: 0 1px 4px rgba(0,0,0,.22);
+      box-shadow: 0 1px 4px rgba(0,0,0,.14);
     }
-    .dispo-bulle::after {
-      content: ''; position: absolute; bottom: -5px; left: 7px;
-      width: 0; height: 0;
+    /* La pointe : deux triangles superposes — le fond par-dessus la bordure,
+       decale d'un pixel. Un seul triangle plein laisserait la pointe sans filet,
+       et la bulle paraitrait percee sur son cote bas. */
+    .dispo-bulle::before, .dispo-bulle::after {
+      content: ''; position: absolute; width: 0; height: 0;
       border-left: 5px solid transparent; border-right: 5px solid transparent;
-      border-top: 6px solid var(--primary);
     }
+    .dispo-bulle::before { bottom: -6px; left: 7px; border-top: 6px solid var(--border2); }
+    .dispo-bulle::after  { bottom: -5px; left: 7px; border-top: 6px solid var(--bg2); }
     .dispo-case.a-prendre { z-index: 2; }
     /* La bulle monte au-dessus de la case : la grille lui laisse la place. */
     .dispo-grille { row-gap: 12px; }
@@ -2486,6 +2540,19 @@ if ("serviceWorker" in navigator) {
   // ⚠ LES MENAGES A ELLE VIENNENT DES RESERVATIONS DEJA CHARGEES, filtrees par
   // le serveur sur son profil : on ne refait pas ce filtrage ici, on le lit.
   // Un menage annule ou hors de ses biens n'est jamais arrive jusqu'a nous.
+  // ⚠ SANS LE FILTRE DE BIENS, ET C'EST LA DIFFERENCE QUI COMPTE.
+  // `mesMenagesDu` honore `activeProps`, un filtre d'AFFICHAGE que la
+  // prestataire manipule pour alleger sa vue. Le faire entrer dans une REGLE de
+  // disponibilite avait deux effets, tous deux faux : decocher un logement
+  // re-barrait un jour qu'elle travaille reellement, et la garde d'ecriture se
+  // laissait contourner par ce meme filtre — vue reduite au bien 1, elle pouvait
+  // se declarer absente un jour ou elle a un menage sur le bien 2.
+  // Une regle ne se lit jamais a travers un reglage d'affichage.
+  function mesMenagesTousBiens (j) {
+    if (!Array.isArray(bookings)) return []
+    return bookings.filter(b => b.departure === j)
+  }
+
   function mesMenagesDu (j) {
     if (!Array.isArray(bookings)) return []
     return bookings.filter(b => b.departure === j && activeProps.has(b.propId))
@@ -2506,6 +2573,28 @@ if ("serviceWorker" in navigator) {
   // moteur au premier ajustement, et elle lirait un planning que le cron ne suit
   // pas.
   function jourTravaille (j) {
+    // ⚠ UN JOUR QUI PORTE UN MENAGE EST UN JOUR TRAVAILLE (lot A).
+    // L'invariant se pose ICI plutot que dans chaque rendu : sans lui, un jour
+    // pouvait sortir BARRE ET VERT a la fois — l'ecran se contredisait sur la
+    // meme case. Le cas se produit des qu'un menage est attribue d'office sur un
+    // jour qu'elle n'avait pas ouvert, ce qui est la situation NORMALE d'une
+    // prestataire dont l'hote tient le planning.
+    // C'est aussi la generalisation de la decision 5 : prendre un menage debarre
+    // le jour, donc en RECEVOIR un le debarre aussi.
+    //
+    // ⚠ ET CETTE REGLE NE VA PAS AU SERVEUR — C'EST VOULU, PAS UN OUBLI.
+    // `lib/cleaning/availability.js` continue de tenir un jour d'absence pour
+    // INDISPONIBLE, meme s'il porte deja un menage. L'ecart est deliberé :
+    //   · ici, on DECRIT une journee ou elle est attendue — dire « absente » sur
+    //     une case qui porte du travail serait faux pour celle qui la lit ;
+    //   · la-bas, on DECIDE d'en attribuer d'autres — et un menage tombe sur un
+    //     jour qu'elle avait ferme ne doit pas rouvrir ce jour a tout le reste.
+    // Propager l'invariant au moteur creerait une boucle : le premier menage
+    // rendrait le jour disponible, donc eligible au deuxieme, et ainsi de suite.
+    // Le commentaire d'en-tete (« la meme precedence que le serveur ») vaut pour
+    // la precedence conge > exception > regle, qui est intacte ; celle-ci est
+    // une couche d'AFFICHAGE posee par-dessus, et elle s'arrete a l'ecran.
+    if (mesMenagesTousBiens(j).length) return true
     if (congeDuJour(j)) return false
     const e = exceptionDuJour(j)
     if (e) return e.available === true
@@ -2731,12 +2820,20 @@ if ("serviceWorker" in navigator) {
         // personne ne fait (la bulle).
         const miens = mesMenagesDu(j)
         const libres = aPrendreDu(j)
-        const cls = 'dispo-case' + (c ? ' conge' : (libre ? '' : ' off')) +
+        // ⚠ LE CONGE AUSSI CEDE AU MENAGE (decision 1, 18 septembre). La branche
+        // `c ? ' conge' : …` etait choisie AVANT toute consultation de
+        // `jourTravaille` : un conge portant un menage sortait VERT ET BARRE,
+        // exactement la contradiction que l'invariant existe pour supprimer.
+        // Un ménage tombé sur un congé se produit des qu'un sejour survit aux
+        // vacances — ce n'est pas un cas de bord.
+        const congeVisible = c && !miens.length
+        const cls = 'dispo-case' + (congeVisible ? ' conge' : (libre ? '' : ' off')) +
                     (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') +
+                    (miens.length ? ' a-moi' : '') +
                     (exc && exc.source === 'prestataire' ? ' manuel' : '') +
                     (libres.length ? ' a-prendre' : '')
         const titre = [
-          c ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
+          congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
             : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
           libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : ''
@@ -2747,15 +2844,16 @@ if ("serviceWorker" in navigator) {
         // pas l'offre.
         const bulle = libres.length
           ? `<span class="dispo-bulle">${libres.length}</span>` : ''
-        // Un POINT par menage a elle, sous le numero. Le detail vit dans la
-        // liste, pas dans une case de 44 px.
+        // ⚠ UNE PASTILLE CHIFFREE, PLUS DES POINTS (lot A). Le chiffre porte la
+        // charge du jour — « 2 menages mardi » se lit sans reflechir, la ou des
+        // points se recomptent des trois.
         const points = miens.length
-          ? `<span class="dispo-points">${miens.map(() => '<i></i>').join('')}</span>` : ''
+          ? `<span class="dispo-compte">${miens.length}</span>` : ''
         // ⚠ UNE CASE QUI PORTE UNE OFFRE RESTE TOUCHABLE MEME PASSEE... non :
         // un menage passe n'est pas recuperable (decision du 17 septembre), et
         // le serveur le refuse. On ne l'ouvre donc pas non plus ici.
-        const inerte = (j < auj) || (c && !libres.length)
-        out += `<div class="${cls}" data-jour="${j}" title="${echapper(titre)}" ` +
+        const inerte = (j < auj) || (congeVisible && !libres.length)
+        out += `<div class="${cls}${inerte ? ' inerte' : ''}" data-jour="${j}" title="${echapper(titre)}" ` +
                `tabindex="${inerte ? -1 : 0}">${bulle}<span class="dispo-num">${+j.slice(8, 10)}</span>${points}</div>`
       }
     }
@@ -3262,6 +3360,26 @@ if ("serviceWorker" in navigator) {
       dire(msg, exc.available
         ? 'Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
         : 'Cette absence a été posée par votre employeur. Pour la retirer, dites-le lui.')
+      return
+    }
+    // ⚠ UN MENAGE FIXE LA JOURNEE (lot A). Se declarer absente pendant qu'on doit
+    // y etre n'est pas un reglage, c'est une contradiction — et le chemin de
+    // retour existe : il passe par le RETRAIT du menage, avec son delai.
+    // ⚠ CETTE GARDE EST NEE DE L'INVARIANT, et sans elle il ouvrait une faille.
+    // Avant, un jour de repos portant un menage sortait sur « vous ne travaillez
+    // deja pas ce jour-la » et rien ne partait. Depuis que `jourTravaille` rend
+    // VRAI des qu'un menage est la — ce qui est juste — ce filet a saute, et la
+    // bascule declarait une absence sur une journee ou elle est attendue.
+    // Corriger une lecture oblige a reprendre ce qu'elle protegeait par accident.
+    // ⚠ `!exc` EST DECISIF, ET SON ABSENCE PIEGEAIT LA PRESTATAIRE. La garde
+    // jouait dans les DEUX sens : elle empechait aussi de RETIRER une absence
+    // qu'elle avait posee elle-meme, si l'hote lui attribuait ensuite un menage
+    // ce jour-la. L'absence restait alors en base, invisible a l'ecran (le
+    // ménage la recouvre), et sans aucun moyen de la lever depuis l'interface.
+    // On interdit de POSER une absence sur un jour de travail ; on n'interdit
+    // jamais d'en retirer une.
+    if (!exc && mesMenagesTousBiens(j).length) {
+      dire(msg, 'Vous avez un ménage ce jour-là. Pour vous libérer, retirez-le d’abord.')
       return
     }
     if (!exc && !jourTravaille(j)) {
