@@ -1,5 +1,21 @@
 # Spec — Canal email pour les réservations directes (Offline)
 
+> ## ✅ LIVRÉ — 17 septembre 2026
+>
+> Les sept étapes sont closes et validées **en production**, dans les deux sens :
+> une réservation directe reçoit ses messages par e-mail depuis l'adresse de l'hôte,
+> et une réservation OTA continue de passer par sa messagerie sans rien changer.
+>
+> **Ce qui a été prouvé en réel** (observateur, deux cycles de cron, aucun point rouge) :
+> confirmation post-paiement reçue depuis « Cœur de vie », message de parcours validé en
+> Mode Test puis délivré en `canal=email`, témoin Booking.com inchangé en `canal=ota`,
+> aucun doublon, kill switch qui coupe, badge sur la seule réservation sans adresse,
+> et notification « Nouvelle réservation » reçue par l'hôte sur une vraie vente.
+>
+> Détail technique et règles gravées : `docs/kb/guestflow.md`.
+> Dettes ouvertes : §« Ce qui reste à faire » en fin de ce document.
+
+
 ## Objectif
 Les réservations directes (provider Channex, `ota_name: "Offline"`, vendues par le moteur) doivent bénéficier du même parcours de communication que les résas OTA — mêmes templates, mêmes automatisations GuestFlow, même messagerie unifiée côté hôte — mais avec l'**email du voyageur** comme canal de sortie, puisqu'il n'y a pas de messagerie OTA derrière.
 
@@ -126,3 +142,71 @@ Résa test Offline sur Colomiers (avec l'email de Thierry comme voyageur) : conf
 - PWA voyageur / livret d'accueil (v2)
 - Ingestion des réponses email dans la messagerie HôteSmart (chantier séparé)
 - Refonte des templates
+
+## Ce qui reste à faire (ouvert au 17 septembre 2026)
+
+Ces points ont été **décidés hors périmètre** ou **découverts en route**. Aucun n'empêche
+le chantier d'être clos ; tous méritent d'exister ailleurs que dans une mémoire.
+
+### 1. L'hôte n'a aucun écran d'incidents — et deux gardes en dépendent
+
+`reportIncident` écrit dans `automation_incidents` puis notifie le **fondateur**. L'hôte
+n'apprend donc jamais que sa configuration Brevo manque, que ses confirmations partent sous
+l'enseigne HôteSmart, ou qu'une annonce de vente n'est pas partie.
+
+Deux replis existent **uniquement** pour cette raison, et se retireront le jour où l'écran
+existera :
+
+- la **confirmation de réservation** se replie sur la clé plateforme (`email_confirmation_repli`) ;
+- la **notification de nouvelle réservation** fait de même.
+
+Le geste, ce jour-là : supprimer les blocs de repli, faire dire aux incidents « NON envoyée »,
+et **retourner les tests** qui défendent aujourd'hui « elle part toujours » — sans quoi ils
+défendront une règle abandonnée.
+
+### 2. L'ingestion des réponses e-mail (inbound parsing Brevo)
+
+Hors périmètre dès la spec d'origine. Conséquence assumée : le fil « messages envoyés » vit
+dans HôteSmart, les réponses arrivent dans la boîte mail de l'hôte (`reply-to` = son adresse
+d'expédition). Le jour où ce chantier s'ouvrira, `lib/cron-classify.js` devra router comme les
+autres (voir dette 3).
+
+### 3. `lib/cron-classify.js` reste hors du routage
+
+Les réponses automatiques de l'IA appellent le provider en direct, sans lire le retour, puis
+écrivent dans `messages` inconditionnellement. Sans objet aujourd'hui — une réservation
+Offline n'a pas de fil, donc aucun message entrant à classer. Mais le jour de l'inbound
+e-mail, ce producteur rouvrira le faux vert s'il n'est pas traité.
+
+### 4. Les trois lignes mensongères de `messages`
+
+La purge de l'étape 6 a nettoyé `message_sent_log`, qui **bloquait** les rejeux. Les trois
+lignes correspondantes de `messages` (`outbound/auto`, `canal=ota`, Offline des 12 et
+14 septembre) sont toujours là : le fil affiche trois messages que le 422 de Channex avait
+refusés. Les supprimer fait perdre une trace d'historique ; les marquer demanderait une
+colonne. À trancher.
+
+### 5. Les templates de test sur Colomiers
+
+`booking_confirmed` et `arrival` J-1, marqués `[[test-canal-email]]` — **et cette marque part
+dans les messages**. Soit on les garde en retirant la marque à la main, soit
+`node scripts/templates-test-colomiers.js --supprimer --execute`.
+
+### 6. Beds24 `direct` n'entre pas dans le canal e-mail
+
+Une saisie directe côté Beds24 (`source: 'direct'`) n'a pas plus de fil qu'une Offline, et
+son adresse dort dans `raw.email`. Elle reste sans canal en v1 : pour la faire entrer, il
+faudrait que son booking vienne du **cœur** et non du payload provider — la règle du cœur de
+données, prise par le bon bout. Le badge, lui, la couvre déjà.
+
+### 7. Le sujet des e-mails n'est pas traduit
+
+Le corps d'un template est écrit par l'hôte, dans sa langue, et part tel quel ; le sujet est
+dérivé en français. Un sujet traduit devant un corps français serait un faux service. Le jour
+où les templates seront multilingues, les deux suivront `customer.language`, qui est déjà
+dans le cœur.
+
+### 8. `emailOuRien` porte mal son nom
+
+Elle sert aussi au téléphone depuis `guestPhone`. La renommer toucherait ses appelants pour
+un gain de lecture seule : noté, pas fait.
