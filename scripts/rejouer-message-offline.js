@@ -49,6 +49,22 @@ const { canalPour, CANAL, MOTIF_LISIBLE } = require('../lib/canal-voyageur')
 const { generateAutoMessage, sendGuestMessage, noterEnvoi,
         knowledgeDuBien } = require('../lib/cron-messages')
 const { codeOtaBrut, isActiveStatus } = require('../lib/bookings-snapshot')
+// ⚠ LA GARDE DU CRON, PAS UNE RELECTURE DE LA COLONNE. Lire
+// `properties.automation_paused` soi-meme testerait sa propre lecture, pas celle
+// qui coupe reellement les envois : le jour ou le kill switch changera de forme
+// (un autre champ, une autre table), ce script continuerait d'affirmer qu'il
+// protege. On appelle donc la fonction que `processMessageTemplates` appelle.
+//
+// ⚠ MAIS ELLE EST FAIL-OPEN, ET CE SCRIPT NE PEUT PAS L'ETRE.
+// `isAutomationPaused` avale ses erreurs et rend `false` — choix assume pour le
+// cron, qui ne doit pas s'arreter en bloc sur un hoquet. Ici, c'est un one-shot
+// qui envoie un VRAI e-mail a un VRAI voyageur : sur une panne transitoire,
+// l'envoi partirait sur un bien en pause. On garde donc l'appel a la fonction du
+// cron, et on y ajoute une lecture dont l'echec ARRETE — la regle posee plus bas
+// dans ce meme fichier : une garde qui ne sait pas doit arreter.
+// Constat de review : la premiere version lisait la colonne (fail-closed), la
+// deuxieme appelait la fonction (fail-open). Il fallait les deux.
+const { isAutomationPaused } = require('../lib/cron-shared')
 
 // Le brouillon relu par `--execute`. Hors depot (.gitignore couvre les fichiers
 // de travail a la racine ; ce chemin est de toute facon ephemere).
@@ -86,7 +102,7 @@ async function main () {
   // ─── Le bien ───────────────────────────────────────────────────────────────
   const { data: bien, error: eb } = await supabase
     .from('properties')
-    .select('id, name, provider, provider_property_id, user_id, automation_paused, checkin_time, checkout_time, address')
+    .select('id, name, provider, provider_property_id, user_id, checkin_time, checkout_time, address')
     .eq('provider_property_id', String(row.property_id))
     .eq('user_id', row.user_id).maybeSingle()
   if (eb) throw new Error(`lecture bien : ${eb.message}`)
@@ -136,7 +152,11 @@ async function main () {
     process.exit(1)
   }
 
-  if (bien.automation_paused) {
+  const { data: pause, error: eP } = await supabase
+    .from('properties').select('automation_paused')
+    .eq('user_id', row.user_id).eq('provider_property_id', String(row.property_id)).maybeSingle()
+  if (eP) { console.log(`⚠ kill switch illisible : ${eP.message} — ARRET`); process.exit(1) }
+  if (pause?.automation_paused || await isAutomationPaused(row.user_id, String(row.property_id))) {
     console.log('⚠ KILL SWITCH ACTIF sur ce bien — le cron n\'enverrait rien. Arret.')
     process.exit(1)
   }
@@ -250,10 +270,20 @@ async function main () {
 
   // ⚠ LE JOURNAL APRES LE SUCCES, comme le canal e-mail le fait dans le cron :
   // sans lui, le message repartirait au prochain tick eligible.
-  await noterEnvoi(supabase, {
+  const journal = await noterEnvoi(supabase, {
     userId: row.user_id, bookingId: row.booking_id, templateId: tpl.id, empreinte
   })
-  console.log('journalise dans message_sent_log ✓')
+  if (journal === false) {
+    // `noterEnvoi` rend `false` quand meme le repli sans empreinte a echoue.
+    // L'ignorer ferait croire l'anti-doublon pose : le message repartirait au
+    // prochain tick eligible, au voyageur qui vient de le recevoir.
+    console.error('⚠⚠ MESSAGE ENVOYE MAIS NON JOURNALISE — il peut repartir au prochain')
+    console.error('   cycle. Poser la ligne a la main dans message_sent_log :')
+    console.error(`   user_id=${row.user_id} booking_id=${row.booking_id} template_id=${tpl.id}`)
+    process.exitCode = 1
+  } else {
+    console.log('journalise dans message_sent_log ✓')
+  }
 
   // Le brouillon a servi : on le retire, pour qu'un second `--execute` distrait
   // ne renvoie pas le meme message.
