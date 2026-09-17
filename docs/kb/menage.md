@@ -2331,3 +2331,175 @@ défaut du filtre.
 `libererLectures()`) : la fenêtre fautive de l'alternance s'ouvre **après**
 l'écriture, pendant la relecture. Tenir l'écriture ne l'atteint jamais — vérifié
 en réintroduisant le défaut, le test passait sur du vide.
+
+## Lot 5 — le délai de retrait, réglé par l'hôte (17 septembre 2026)
+
+Une prestataire qui a pris un ménage peut s'en retirer **seule** tant qu'il reste
+assez de temps ; passé le délai, elle prévient l'hôte. C'est lui qui fixe ce
+délai, pour tout son parc.
+
+### ⚠️ Le premier réglage ménage à portée COMPTE
+
+Table **`menage_reglages`**, une ligne par hôte (`user_id` en clé primaire).
+
+Tous les réglages ménage existants vivent sur `public_tokens`
+(`visibility_days`, `ratio_periode`) : ils sont **par prestataire**, et c'est
+juste — ils décrivent ce que *cette personne* voit. Le délai de retrait, lui, est
+une règle qui vaut pour tout le parc. Le poser sur `public_tokens` obligerait à
+le répliquer sur chaque jeton, et il **divergerait au premier prestataire
+ajouté** : l'hôte croirait avoir réglé une règle, il en aurait réglé N.
+
+**Défaut 24 h**, borné à `[0, 168]`. Le ménage est accroché à un départ ; ce
+qu'il faut protéger, c'est le temps pour l'hôte de trouver quelqu'un avant
+l'arrivée suivante. 24 h se dit « la veille », une unité qu'une prestataire
+comprend sans calcul. **0 est légitime** — l'hôte qui préfère savoir tôt qu'une
+prestataire ne viendra pas, plutôt que de la voir renoncer sans le dire. Au-delà
+d'une semaine, accepter un ménage « à prendre » reviendrait à s'engager sans
+pouvoir se dédire, et personne n'en prendrait.
+
+⚠️ **Un compte sans ligne applique le défaut. Ce n'est pas une panne** — c'est le
+cas de tous les comptes le jour où ce lot sort. Une **erreur de lecture**, en
+revanche, en est une, et les confondre serait prendre une décision à la place de
+l'hôte : appliquer 24 h sur une panne ouvrirait le retrait chez celui qui l'avait
+fermé, ou l'inverse. `delaiDeRetrait` distingue donc les deux, et le retrait
+répond **503** plutôt que de deviner.
+
+### Les quatre gardes du retrait
+
+1. **Être quelqu'un** — profil actif ;
+2. **Ses biens** — `property_ids` du jeton (vide = périmètre total) ;
+3. **C'est le sien, et seulement le sien** — se retirer du ménage d'une collègue
+   le laisserait sans personne à son insu ;
+4. **Le délai de l'hôte** — comparaison en **heures réelles** : « 24 h avant » ne
+   veut pas dire « la veille à minuit ».
+
+Plus la course, tranchée **dans** l'écriture (`.eq('provider_id', profil.id)`) :
+entre la lecture et l'écriture, l'hôte a pu réassigner.
+
+### Ce que le ménage devient
+
+`provider_id: null`, **`status: 'orphaned'`**, `assigned_by: 'manual'`.
+
+`orphaned` — pas `unassigned` — pour deux raisons qui vont ensemble : il repasse
+dans `a_prendre` (qui laisse passer `orphaned` quel que soit le verrou), **et** le
+cron ne le redistribue pas dans le dos de l'hôte. Ce statut appelle une décision
+humaine, et c'en est une.
+
+### ⚠️ La trace doit porter un événement que la CONTRAINTE accepte
+
+Premier jet : `event: 'released'`. Or `menage_assignment_log` a un `CHECK` qui ne
+le connaît pas — et comme **l'échec de la trace est volontairement non
+bloquant**, il aurait été refusé **en silence**. Le ménage aurait changé de main
+sans que l'hôte en soit informé, c'est-à-dire en cassant la seule chose que cette
+ligne garantit. `'orphaned'` est dans la liste, et dit exactement ce qui arrive.
+
+**Règle : un insert dont l'échec est toléré doit être vérifié contre son schéma,
+pas contre son intention.** Rien ne le dira à l'exécution.
+
+### L'écran, des deux côtés
+
+**Hôte** — `apps/menages/prestataires.html`, dans sa **propre carte**, hors de la
+fiche d'une prestataire : tous les autres réglages de cette page valent pour une
+personne, celui-ci pour le parc. Le mettre dans la fiche le ferait lire comme un
+réglage de personne. Écriture directe par RLS, comme le reste de la page.
+
+⚠️ **On ne montre pas un défaut qu'on n'a pas pu lire.** Sur une panne, le champ
+est désactivé et le dit : afficher « 24 h » ferait croire à l'hôte que c'est
+*son* réglage, et il repartirait sans rien changer en croyant l'avoir vérifié.
+
+**Prestataire** — le bouton n'apparaît que si le ménage est le sien, que le délai
+le permet, et que le délai a pu être **lu**. Deviner un défaut reviendrait à
+décider à la place de l'hôte. La garde reste serveur ; celle-ci ne sert qu'à ne
+pas promettre un geste refusé.
+
+⚠️ **Pas de rendu optimiste sur le retrait**, comme sur la prise et pour la même
+raison : le retrait rend le ménage à **tout le monde**. L'afficher comme acquis
+avant le verdict lui ferait libérer sa journée alors que le serveur peut refuser.
+
+### Ce que la review a trouvé, et la règle qui en sort
+
+**⚠️ `Number(null)` vaut 0, et 0 est fini.** Le défaut de 24 h était écrit, il
+n'était jamais **atteint** :
+
+```js
+const h = data && data.retrait_delai_heures   // data === null -> h === null
+return { heures: Number.isFinite(Number(h)) ? Number(h) : RETRAIT_DELAI_DEFAUT }
+```
+
+`maybeSingle()` rend `data === null` pour un compte sans ligne — c'est-à-dire
+**tous les comptes le jour de la sortie**. Le délai tombait donc à 0 h : retrait
+libre jusqu'à la dernière minute, l'inverse exact de la règle promise. Le même
+piège s'était glissé **deux fois de plus** : dans l'écran hôte, et dans la PWA,
+où le `null` envoyé *exprès* par le GET pour griser le bouton devenait 0, donc
+« aucun délai », donc bouton toujours offert — dans le seul cas pour lequel il
+avait été écrit.
+
+**Règle : on teste l'ABSENCE d'une valeur, jamais la finitude de sa conversion.**
+`Number()` accepte `null`, `''`, `false` et `[]` et les rend tous finis. Un
+`Number.isFinite(Number(x)) ? … : défaut` ne tombe sur son défaut que pour
+`undefined`, `NaN` et les chaînes non numériques — presque jamais les cas qu'on
+croit couvrir.
+
+**Corollaire sur les tests.** Les tests du lot cherchaient `RETRAIT_DELAI_DEFAUT`
+dans la source. Le nom y était : ils passaient. **Un test qui grepe atteste d'une
+présence, pas d'un comportement** — il vaut pour une garde qu'on craint de voir
+disparaître, jamais pour un calcul. Ceux du correctif exécutent la fonction
+livrée, extraite du fichier, avec un faux `supabase`.
+
+**⚠️ `provider_id` survit à l'annulation.** Une résa annulée laisse la ligne en
+`status: 'cancelled'` **avec son porteur** — c'est ce sur quoi s'appuie la
+résurrection. Le retrait ne testait que `provider_id` : il repassait cette ligne
+`orphaned`, donc proposée à toute l'équipe pour un séjour qui n'existe plus, et
+sortie **pour toujours** du chemin de résurrection, qui ne cherche que
+`cancelled`. Atteignable sans rien forger : la feuille est ouverte quand la sync
+annule la résa. Le retrait n'accepte désormais que `accepted` et `offered`.
+
+**⚠️ Une feuille partagée doit remettre à zéro CE QU'ELLE N'AFFICHE PAS.** Le
+modal de la PWA sert aux deux gestes. `openModal` remettait `modal-prendre` à
+zéro — le commentaire le disait déjà — mais la feuille « prendre » ne remettait
+pas `modal-retirer`. Elle ouvrait son ménage A, fermait, touchait une bulle B :
+le bouton de A restait affiché sur la feuille de B, et le toucher la retirait
+de A. `reinitialiserRetrait()` est appelée par les **deux** ouvertures et par la
+fermeture.
+
+**⚠️ Un message d'erreur posé avant une relecture est effacé par elle.** Le refus
+d'écriture s'affichait, puis `chargerReglageRetrait()` remettait `etat` à vide :
+l'hôte voyait le champ revenir au défaut **sans un mot**, soit précisément le
+« il repart en croyant avoir vérifié » que ce bloc existe pour empêcher.
+
+**⚠️ Minuit UTC n'est pas minuit à Paris.** Le délai se comptait depuis
+`T00:00:00Z` ; pour un compte à l'ouest, le « 24 h avant » de l'hôte valait
+~28 h réelles. `minuitParis()` calcule le décalage à cet instant — testé été et
+hiver. Et la borne du passé vit **hors** du `if (heures > 0)` : chez un hôte à
+délai zéro, rien d'autre ne borne la date, et un ménage du mois dernier pouvait
+basculer `orphaned`.
+
+**⚠️ L'écran et le serveur doivent compter dans le MÊME référentiel.** La passe
+ciblée a trouvé que les deux corrections ci-dessus n'avaient été faites **que
+côté serveur** : l'écran, lui, comptait toujours depuis minuit UTC et ne bornait
+le passé que dans la branche `retraitDelaiH > 0`. Résultat : 2 h de fenêtre l'été
+(1 h l'hiver) pendant lesquelles il offrait un bouton que le serveur renvoyait en
+409, et, chez un hôte à délai zéro, un ménage du mois dernier jamais marqué fait
+gardait son bouton.
+
+C'est le seul endroit de la PWA qui raisonne en Europe/Paris, et c'est voulu :
+tout le reste affiche des **jours de calendrier du bien** (`dateNueLocale`,
+`toDateStr`), alors que le délai de retrait n'est pas un affichage — c'est la
+**règle de l'hôte**, que le serveur applique à Paris. Le helper `minuitParis` est
+le même des deux côtés, et un test vérifie qu'ils rendent le **même instant** aux
+quatre dates qui comptent, changements d'heure inclus.
+
+**Règle : corriger un référentiel d'un seul côté crée une fenêtre, pas un
+correctif.** Une garde client plus permissive que la garde serveur promet
+exactement les gestes qu'elle était censée éviter.
+
+La garde de statut est **refaite dans l'écriture**, comme celle du porteur :
+entre la lecture et elle, la sync peut annuler la résa sans toucher à
+`provider_id`. Une garde lue et non réécrite laisse une fenêtre — étroite, mais
+qui rouvre exactement le défaut qu'elle ferme.
+
+Deux derniers points tenus : la lecture du délai part **avant** celle des ménages
+faits (un aller-retour en série de plus sur le chemin que le correctif de perf
+venait d'accélérer, pour une valeur qui ne sert qu'à griser un bouton), et une
+valeur stockée hors des cinq options de la liste s'ajoute à la liste au lieu de
+laisser un `select` vide que la première interaction écraserait.

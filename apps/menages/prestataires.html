@@ -165,6 +165,34 @@
         </div>
       </div>
 
+      <!-- ⚠ RÉGLAGE À PORTÉE COMPTE, ET IL EST SEUL DE SON ESPÈCE ICI.
+           Tous les autres réglages de cette page (jours confiés, visibilité,
+           période du ratio) valent pour UNE prestataire et vivent dans sa
+           fiche. Celui-ci vaut pour tout le parc : il a donc sa propre carte,
+           hors de la fiche, pour qu'on ne le lise pas comme un réglage de
+           personne.
+           La config d'une app vit DANS l'app (docs/kb/coeur-de-donnees.md) :
+           ce réglage n'a aucun sens si l'app ménage n'existe pas. -->
+      <div class="section-card" id="reglages-compte">
+        <div class="section-title">Retrait d'un ménage</div>
+        <div class="visibility-row">
+          <div class="visibility-label">
+            Jusqu'à quand une prestataire peut se retirer seule
+            <small>Passé ce délai, elle doit vous prévenir directement. Le ménage
+            qu'elle retire repasse « à prendre » pour vos autres prestataires, et
+            vous en êtes informé.</small>
+          </div>
+          <select class="form-input visibility-select" id="retrait-delai">
+            <option value="0">Jusqu'au dernier moment</option>
+            <option value="12">12 h avant</option>
+            <option value="24" selected>24 h avant</option>
+            <option value="48">48 h avant</option>
+            <option value="72">72 h avant</option>
+          </select>
+        </div>
+        <div id="retrait-etat" style="font-size:12px;color:var(--text2);margin-top:8px"></div>
+      </div>
+
       <div class="section-card" id="form-section" style="display:none">
         <div class="section-title" id="form-title">Nouveau prestataire</div>
         <div class="form-section">
@@ -379,6 +407,7 @@
     await loadProperties()
     await loadPrestataires()
     renderPropCheckboxes()
+    await chargerReglageRetrait()
 
     document.getElementById('btn-show-form').addEventListener('click', () => {
       document.getElementById('form-section').style.display = 'block'
@@ -2232,6 +2261,81 @@
     ancreSel = cibleSel = null
     if (a && b) basculerPlage(a, b)
   })
+
+  // ─── LE DELAI DE RETRAIT (refonte PWA v2, lot 5) ──────────────────────────
+  //
+  // Reglage a portee COMPTE : une ligne par hote dans `menage_reglages`. Il vaut
+  // pour tout le parc — le poser par prestataire obligerait a le repliquer sur
+  // chaque fiche, et il divergerait au premier prestataire ajoute.
+  //
+  // ⚠ ECRITURE DIRECTE PAR RLS, comme le reste de cette page. La policy
+  // `menage_reglages_write` porte le domaine `prestataires` : c'est elle qui
+  // garde l'ecriture, pas cet ecran.
+  const RETRAIT_DEFAUT = 24
+
+  async function chargerReglageRetrait (garderMessage) {
+    const champ = document.getElementById('retrait-delai')
+    const etat = document.getElementById('retrait-etat')
+    if (!champ || !etat) return
+    const { data, error } = await supabase.from('menage_reglages')
+      .select('retrait_delai_heures').eq('user_id', currentSession.user.id).maybeSingle()
+    if (error) {
+      // ⚠ ON NE MONTRE PAS UN DEFAUT QU'ON N'A PAS PU LIRE. Afficher « 24 h » sur
+      // une panne ferait croire a l'hote que c'est son reglage — et il repartirait
+      // sans rien changer, en croyant l'avoir verifie.
+      champ.disabled = true
+      etat.textContent = 'Réglage non lisible pour le moment. Rechargez la page.'
+      return
+    }
+    champ.disabled = false
+    // Aucune ligne = le compte applique le defaut. Ce n'est pas une panne.
+    // ⚠ `data && data.x` DONNE `null` QUAND `data` EST NUL, et `Number(null)`
+    // vaut 0 — un 0 qui est fini. On teste donc l'ABSENCE de valeur, jamais la
+    // finitude de sa conversion, sinon le defaut n'est jamais atteint.
+    const brut = data ? data.retrait_delai_heures : null
+    const heures = (brut === null || brut === undefined || !Number.isFinite(Number(brut)))
+      ? RETRAIT_DEFAUT : Number(brut)
+    // ⚠ LA COLONNE ACCEPTE 0 A 168, LA LISTE N'EN OFFRE QUE CINQ. Une valeur
+    // posee autrement (SQL, option retiree d'une version a l'autre) ne
+    // correspondrait a aucune option : le `select` s'afficherait VIDE, et la
+    // premiere interaction de l'hote ecraserait silencieusement son vrai
+    // reglage. On lui ajoute donc son option plutot que de la faire disparaitre.
+    if (!Array.prototype.some.call(champ.options, o => Number(o.value) === heures)) {
+      const opt = document.createElement('option')
+      opt.value = String(heures)
+      opt.textContent = `${heures} h avant`
+      champ.appendChild(opt)
+    }
+    champ.value = String(heures)
+    if (!garderMessage) etat.textContent = ''
+    champ.addEventListener('change', enregistrerReglageRetrait)
+  }
+
+  async function enregistrerReglageRetrait () {
+    const champ = document.getElementById('retrait-delai')
+    const etat = document.getElementById('retrait-etat')
+    const heures = parseInt(champ.value, 10)
+    if (!Number.isFinite(heures)) return
+    etat.textContent = 'Enregistrement…'
+    const { error } = await supabase.from('menage_reglages')
+      .upsert({ user_id: currentSession.user.id, retrait_delai_heures: heures,
+                updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+    if (error) {
+      // ⚠ ET ON REMET LE CHAMP sur la valeur reelle du compte : le laisser sur
+      // la valeur refusee afficherait un reglage qui n'est pas le sien.
+      // ⚠ MAIS LA RELECTURE NE DOIT PAS EFFACER LE REFUS. Premier jet : le
+      // message etait pose AVANT `chargerReglageRetrait()`, dont le chemin normal
+      // vide `etat` — l'hote voyait le champ revenir a 24 h SANS UN MOT, soit
+      // exactement le « il repart en croyant avoir verifie » que ce bloc existe
+      // pour empecher.
+      await chargerReglageRetrait(true)
+      etat.textContent = 'Non enregistré : ' + error.message
+      return
+    }
+    etat.textContent = heures === 0
+      ? '✓ Vos prestataires peuvent se retirer jusqu\'au dernier moment.'
+      : `✓ Vos prestataires peuvent se retirer jusqu'à ${heures} h avant le ménage.`
+  }
 
   function showToast(msg = '✓ Lien copié !') {
     const toast = document.getElementById('copy-toast')

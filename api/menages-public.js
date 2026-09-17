@@ -192,6 +192,23 @@ module.exports = async function handler(req, res) {
       })
     }
 
+    // --- SE RETIRER D'UN MENAGE QU'ELLE PORTE (refonte PWA v2, lot 5) ---
+    //
+    // Le pendant de `prendreMenage`. Avant le delai regle par l'hote, elle se
+    // retire seule et le menage repasse « a prendre » ; au-dela, elle passe par
+    // lui. Memes gardes refaites cote serveur.
+    if (action === 'retirerMonMenage') {
+      if (!booking_id || !property_id || !departure_date) {
+        return res.status(400).json({ error: 'Champs requis manquants (booking_id, property_id, departure_date)' })
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+        return res.status(400).json({ error: 'Date invalide' })
+      }
+      return await retirerMonMenage(req, res, token, {
+        propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+      })
+    }
+
     // --- « Mes disponibilites » (lot 3.5) : elle DECLARE, l'hote corrige ---
     //
     // ⚠ ELLE NE DECLARE QUE DES INDISPONIBILITES. Ses JOURS ATTITRES
@@ -712,6 +729,12 @@ module.exports = async function handler(req, res) {
     // Le front fera l'union avec son localStorage (offline) avant affichage.
     // On filtre uniquement sur les biens autorises ET la fenetre temporelle
     // pour eviter de balancer tout l'historique.
+    // ⚠ LANCE ICI, PAS PLUS BAS. Le chemin du planning est celui que f90874f
+    // vient d'accelerer : un aller-retour de plus, EN SERIE, pour une valeur qui
+    // ne sert qu'a griser un bouton, le rallongeait pour tout le monde. La
+    // promesse part avant la lecture des menages faits et se recupere apres.
+    const promesseDelai = delaiDeRetrait(userId)
+
     const propIdsForDone = (allowedIds.length ? allowedIds : properties.map(p => String(p.id)))
     let doneList = []
     if (propIdsForDone.length) {
@@ -729,11 +752,24 @@ module.exports = async function handler(req, res) {
         siens.has(`${String(d.property_id)}|${String(d.booking_id)}|${d.departure_date}`))
     }
 
+    // ⚠ UNE PANNE ICI NE COUPE PAS LE PLANNING, contrairement aux reservations :
+    // ne pas connaitre le delai grise un bouton de retrait, ce qui est prudent.
+    // Faire tomber tout l'ecran pour cela cacherait ses menages du jour.
+    const lu = await promesseDelai
+    const delaiRetrait = lu.erreur ? null : lu.heures
+
     return res.json({
       bookings: allBookings, label: tokenData.label,
       // Les menages que personne ne porte, sur ses biens. Voir le bloc plus haut
       // pour les trois gardes qui rendent cette lecture sure.
       a_prendre: aPrendre,
+      // ⚠ LE DELAI EST SERVI A L'ECRAN, sinon il propose un bouton qui echouera.
+      // Meme regle que partout ici : on ne montre pas une action dont on sait
+      // qu'elle sera refusee. La garde reste SERVEUR — ceci n'est qu'un
+      // affichage, et `retirerMonMenage` la refait entierement.
+      // `null` = on n'a pas pu la lire : l'ecran grise alors, plutot que de
+      // deviner un defaut qui n'est peut-etre pas celui de l'hote.
+      retrait_delai_heures: delaiRetrait,
       property_ids: allowedIds, visibility_days: visibilityDays,
       comments, events: eventsData || [],
       done: doneList,
@@ -1551,6 +1587,205 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
     console.error('[menages-public] trace de prise NON ECRITE:', menage.id, errLog.message)
   }
   return res.json({ success: true, status: 'accepted' })
+}
+
+// ─── LE DELAI DE RETRAIT, REGLE PAR L'HOTE (lot 5) ──────────────────────────
+//
+// ⚠ UN COMPTE SANS LIGNE APPLIQUE LE DEFAUT. L'absence de reglage n'est pas une
+// panne : c'est le cas de tous les comptes le jour ou ce lot sort. Une erreur de
+// LECTURE, en revanche, en est une — et on ne peut pas la confondre avec « pas
+// de reglage », sinon une panne base ouvrirait le retrait a un hote qui l'avait
+// ferme, ou le fermerait a un hote qui l'avait ouvert.
+// ⚠ MINUIT A PARIS, PAS MINUIT UTC. Premier jet : `new Date(jour + 'T00:00:00Z')`.
+// Tout ce fichier raisonne en Europe/Paris (`todayInParis`), et pour un compte a
+// l'ouest l'instant UTC est POSTERIEUR au debut local de la journee : le « 24 h
+// avant » de l'hote s'appliquait en realite avec ~28 h de marge. On calcule donc
+// le decalage de Paris a cet instant, et on le retire.
+function minuitParis (jour) {
+  const commeUTC = Date.parse(`${jour}T00:00:00Z`)
+  if (!Number.isFinite(commeUTC)) return NaN
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  })
+  const p = {}
+  for (const part of fmt.formatToParts(new Date(commeUTC))) p[part.type] = part.value
+  const heureParis = Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}:${p.second}Z`)
+  return commeUTC - (heureParis - commeUTC)
+}
+
+const RETRAIT_DELAI_DEFAUT = 24
+
+async function delaiDeRetrait (userId) {
+  const { data, error } = await supabase.from('menage_reglages')
+    .select('retrait_delai_heures').eq('user_id', userId).maybeSingle()
+  if (error) {
+    console.error('[menages-public] lecture du delai de retrait echec:', error.message)
+    return { erreur: true }
+  }
+  // ⚠ `Number(null)` VAUT 0, ET 0 EST FINI. Premier jet :
+  // `Number.isFinite(Number(h)) ? Number(h) : DEFAUT` — le defaut n'etait donc
+  // JAMAIS atteint, et tout compte sans ligne (c'est-a-dire TOUS, le jour ou ce
+  // lot sort) tombait a 0 h : retrait libre jusqu'a la derniere minute, soit
+  // l'inverse exact de la regle promise. On teste donc l'ABSENCE de valeur,
+  // pas la finitude de sa conversion.
+  const h = data ? data.retrait_delai_heures : null
+  if (h === null || h === undefined) return { heures: RETRAIT_DELAI_DEFAUT }
+  const n = Number(h)
+  return { heures: Number.isFinite(n) ? n : RETRAIT_DELAI_DEFAUT }
+}
+
+// ─── SE RETIRER D'UN MENAGE (refonte PWA v2, lot 5) ─────────────────────────
+//
+// Avant le delai, elle se retire seule : le menage repasse « a prendre », la
+// trace est ecrite, l'hote est informe. Au-dela, elle passe par lui — il a le
+// voyageur qui arrive, et il lui reste trop peu de temps pour qu'un depart
+// silencieux soit acceptable.
+async function retirerMonMenage (req, res, token, { propertyId, bookingId, departureDate }) {
+  const { data: pt, error: errTok } = await supabase.from('public_tokens')
+    .select('user_id, property_ids').eq('token', token).maybeSingle()
+  if (errTok) {
+    console.error('[menages-public] lecture du token echec:', errTok.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!pt) return res.status(401).json({ error: 'Token invalide' })
+
+  // GARDE 1 — ETRE QUELQU'UN.
+  const porteur = await profilActifDuJeton(pt.user_id, token)
+  if (porteur.statut) return refuserPorteur(res, porteur.statut)
+  const profil = porteur.profil
+
+  // GARDE 2 — SES BIENS. Un `property_ids` vide = perimetre total, comme partout.
+  const permis = (pt.property_ids || []).map(String)
+  if (permis.length && !permis.includes(String(propertyId))) {
+    return res.status(403).json({ error: 'Ce bien ne fait pas partie des vôtres.' })
+  }
+
+  const { data: menage, error: errMen } = await supabase.from('menages')
+    .select('id, provider_id, status, offered_to')
+    .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .maybeSingle()
+  if (errMen) {
+    console.error('[menages-public] lecture du menage echec:', errMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!menage) return res.status(404).json({ error: 'Ménage introuvable' })
+
+  // GARDE 3 — C'EST LE SIEN, ET SEULEMENT LE SIEN. Se retirer du menage d'une
+  // collegue le laisserait sans personne a son insu, et sans qu'elle l'apprenne.
+  if (String(menage.provider_id || '') !== String(profil.id)) {
+    return res.status(403).json({ error: 'Ce ménage n\'est pas le vôtre.' })
+  }
+
+  // GARDE 3 bis — IL DOIT ENCORE ETRE UN MENAGE A FAIRE.
+  // ⚠ `provider_id` SURVIT A L'ANNULATION : une resa annulee laisse la ligne en
+  // `status = 'cancelled'` AVEC son porteur, et c'est precisement ce sur quoi
+  // s'appuie la resurrection (`lib/cleaning/sync-menages-entite.js`). Sans ce
+  // test, un retrait sur cette ligne la repassait `orphaned` — donc proposee a
+  // toute l'equipe pour un sejour qui n'existe plus, ET definitivement sortie du
+  // chemin de resurrection, qui ne cherche que `cancelled`. Le cas s'atteint
+  // sans rien forger : la feuille est ouverte quand la sync annule la resa.
+  // `started` / `completed` sont exclus pour la raison symetrique : on ne se
+  // retire pas d'un menage qu'on a commence.
+  if (menage.status !== 'accepted' && menage.status !== 'offered') {
+    return res.status(409).json({ error: 'Ce ménage n\'est plus à faire.' })
+  }
+
+  // GARDE 3 ter — IL NE DOIT PAS DEJA ETRE MARQUE FAIT. L'ecran le verifie
+  // (`!m.done`), mais une feuille restee ouverte, une file hors ligne rejouee ou
+  // un reessai apres coup arrivent ici sans lui. Un retrait sur un menage fait
+  // laissait la ligne `menage_done` en place pendant que `provider_id` passait a
+  // `null` : le menage reparaissait « a prendre » alors qu'il etait termine, et
+  // disparaissait de SA liste des faits, qui est filtree par `provider_id`.
+  const { data: dejaFait, error: errFait } = await supabase.from('menage_done')
+    .select('id').eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .limit(1)
+  if (errFait) {
+    console.error('[menages-public] lecture menage_done echec:', errFait.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (dejaFait && dejaFait.length) {
+    return res.status(409).json({ error: 'Ce ménage est déjà marqué fait.' })
+  }
+
+  // GARDE 4 — LE DELAI DE L'HOTE. Comparaison en heures reelles, pas en jours :
+  // « 24 h avant » ne veut pas dire « la veille a minuit ».
+  const reglage = await delaiDeRetrait(pt.user_id)
+  if (reglage.erreur) {
+    // ⚠ ON NE DEVINE PAS. Un defaut applique sur une panne ouvrirait le retrait
+    // a un hote qui l'avait ferme — ou l'inverse. Les deux sont des decisions
+    // qu'on prendrait a sa place.
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ LE PASSE NE SE RETIRE PAS, et ce test doit vivre HORS du `if (heures > 0)` :
+  // chez un hote qui a choisi « jusqu'au dernier moment », rien d'autre ne borne
+  // la date, et un menage du mois dernier pouvait basculer `orphaned`.
+  if (departureDate < todayInParis()) {
+    return res.status(409).json({ error: 'Ce ménage est passé : prévenez votre hôte directement.' })
+  }
+  if (reglage.heures > 0) {
+    // Le ménage commence au plus tôt le jour du départ. Sans heure precise en
+    // base, on prend le DEBUT de la journee : c'est la borne la plus prudente
+    // pour l'hote, et la seule qu'on puisse defendre.
+    const debut = minuitParis(departureDate)
+    const restantH = (debut - Date.now()) / 3600000
+    if (restantH < reglage.heures) {
+      return res.status(409).json({
+        error: `Il reste moins de ${reglage.heures} h avant ce ménage : prévenez votre hôte directement.`,
+        code: 'delai_depasse'
+      })
+    }
+  }
+
+  // ⚠ L'ECRITURE EST CONDITIONNEE SUR LE PORTEUR, et c'est la garde contre la
+  // course : entre la lecture ci-dessus et ici, l'hote a pu reassigner.
+  // `orphaned` — pas `unassigned` — pour que le menage reparaisse dans
+  // `a_prendre` (qui laisse passer `orphaned` quel que soit le verrou) ET que le
+  // cron ne le redistribue pas dans le dos de l'hote : ce statut appelle une
+  // decision humaine, et c'en est une.
+  const { data: maj, error: errMaj } = await supabase.from('menages')
+    .update({ provider_id: null, status: 'orphaned',
+              offered_to: null, offered_at: null, offer_expires_at: null,
+              accepted_at: null,
+              assigned_by: 'manual',
+              assignment_reason: `Retire par ${profil.first_name} depuis son application.`,
+              updated_at: new Date().toISOString() })
+    // ⚠ LE STATUT EST REFAIT ICI AUSSI, et pas seulement en garde 3 bis : entre
+    // la lecture et l'ecriture, la sync peut annuler la resa sans toucher a
+    // `provider_id`. Sans cette condition, la fenetre — etroite mais reelle —
+    // rouvrait exactement le defaut que la garde ferme.
+    .eq('id', menage.id).eq('provider_id', profil.id)
+    .in('status', ['accepted', 'offered'])
+    .select('id')
+  if (errMaj) {
+    console.error('[menages-public] retrait echec:', errMaj.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!maj || !maj.length) {
+    return res.status(409).json({ error: 'Ce ménage ne vous est plus attribué.' })
+  }
+
+  // La trace informe l'hote — meme regle qu'a la prise : elle ne peut pas etre
+  // muette, mais son echec ne defait pas un retrait qui a eu lieu.
+  const { error: errLog } = await supabase.from('menage_assignment_log').insert({
+    // ⚠ `orphaned`, PAS `released` : la contrainte CHECK de `menage_assignment_log`
+    // ne connait pas ce dernier (migrations/2026-09-03-menages-entite.sql). Comme
+    // l'echec de la trace est volontairement non bloquant, un `released` aurait
+    // ete refuse EN SILENCE — le menage changeait de main sans que l'hote en soit
+    // informe, c'est-a-dire en cassant la seule chose que cette ligne garantit.
+    // `orphaned` est dans la liste, et dit exactement ce qui arrive au menage.
+    user_id: pt.user_id, menage_id: menage.id, event: 'orphaned',
+    from_provider_id: profil.id, to_provider_id: null,
+    actor: 'provider',
+    reason: 'Retire depuis la PWA, dans le delai autorise.'
+  })
+  if (errLog) {
+    console.error('[menages-public] trace de retrait NON ECRITE:', menage.id, errLog.message)
+  }
+  return res.json({ success: true, status: 'orphaned' })
 }
 
 // ─── « MES DISPONIBILITÉS » (lot 3.5) ───────────────────────────────────────

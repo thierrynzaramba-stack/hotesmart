@@ -935,6 +935,7 @@
     <div class="modal-warning" id="modal-warning"></div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="modal-prendre" style="display:none">Je prends ce ménage</button>
+      <button class="btn" id="modal-retirer" style="display:none">Je ne peux plus le faire</button>
       <button class="btn btn-primary" id="modal-accepter" style="display:none">✓ J'accepte</button>
       <button class="btn" id="modal-refuser" style="display:none">Je ne peux pas</button>
       <button class="btn btn-primary" id="modal-done">✓ Marquer fait</button>
@@ -977,6 +978,10 @@ if ("serviceWorker" in navigator) {
   // menage a prendre », qui est un tableau vide. Sans cette distinction, un
   // ecran encore vide se lit « il n'y a rien », ce qui est faux.
   let aPrendre = null
+  // Delai de retrait regle par l'hote, servi par le GET. `null` = non lisible :
+  // l'ecran grise alors le retrait plutot que de deviner un defaut qui n'est
+  // peut-etre pas le sien.
+  let retraitDelaiH = null
   let pendingQueue = []                // file actions en attente
   let readSet = new Set()              // ids d evenements acquittes (persistes en local + syncs)
   let commentsMap = {}
@@ -1249,6 +1254,7 @@ if ("serviceWorker" in navigator) {
     document.getElementById('modal-close').addEventListener('click', closeModal)
     document.getElementById('modal-done').addEventListener('click', onModalDoneClick)
     document.getElementById('modal-prendre').addEventListener('click', prendreLeMenage)
+    document.getElementById('modal-retirer').addEventListener('click', retirerLeMenage)
     document.getElementById('modal-accepter').addEventListener('click', () => repondreOffre(true))
     document.getElementById('modal-refuser').addEventListener('click', () => repondreOffre(false))
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
@@ -1465,6 +1471,13 @@ if ("serviceWorker" in navigator) {
     // Les menages sans responsable, tels que le serveur les a filtres (profil
     // actif, ses biens, statuts `orphaned`/`unassigned`, hors verrou de l'hote).
     aPrendre = Array.isArray(data.a_prendre) ? data.a_prendre : null
+    // ⚠ MEME PIEGE QU'AU SERVEUR : `Number(null)` vaut 0, et 0 est fini. Le GET
+    // envoie `null` EXPRES quand il n'a pas pu lire le delai, pour que l'ecran
+    // grise le bouton ; le convertir en 0 le rendait au contraire toujours
+    // possible, c'est-a-dire l'inverse, dans le seul cas pour lequel il existe.
+    const brut = data.retrait_delai_heures
+    retraitDelaiH = (brut === null || brut === undefined || !Number.isFinite(Number(brut)))
+      ? null : Number(brut)
 
     // Verite serveur : on remplace le miroir local
     if (Array.isArray(data.done)) {
@@ -1782,9 +1795,16 @@ if ("serviceWorker" in navigator) {
   // envoie meme pas — c'est exactement ce qui separe cette lecture de celle qui
   // a fuite le 14 septembre. L'ecran ne doit donc rien inventer non plus.
   let priseEnCours = null
+  let retraitEnCours = null
   function ouvrirPriseDeMenage (jour, libres) {
     const m = libres[0]
     priseEnCours = m
+    // ⚠ LE MODAL EST PARTAGE, et le retrait doit se remettre a zero ici comme
+    // `modal-prendre` le fait dans `openModal`. Sans cela : elle ouvre SON menage
+    // A (bouton affiche, `retraitEnCours = A`), ferme, puis ouvre une bulle « a
+    // prendre » B — le bouton de A restait visible sur la feuille de B, et le
+    // toucher la retirait de A.
+    reinitialiserRetrait()
     const absente = !jourTravaille(jour)
     document.getElementById('modal-title').textContent = 'Prendre ce ménage'
     document.getElementById('modal-sub').textContent = formatDate(dateNueLocale(jour))
@@ -1878,6 +1898,88 @@ if ("serviceWorker" in navigator) {
     if (mesJours) peindreMesJours()
   }
 
+  // ⚠ PAS DE RENDU OPTIMISTE ICI NON PLUS, et pour la meme raison qu'a la prise :
+  // le retrait rend le menage a TOUT LE MONDE. L'afficher comme acquis avant le
+  // verdict lui ferait liberer sa journee alors que le serveur peut refuser —
+  // delai depasse, menage deja reassigne par l'hote.
+  async function retirerLeMenage () {
+    if (!retraitEnCours) return
+    const m = retraitEnCours
+    const btn = document.getElementById('modal-retirer')
+    hideModalMessages()
+    if (!navigator.onLine) {
+      showModalError('Hors ligne : impossible de vous retirer pour le moment.')
+      return
+    }
+    if (!w_confirmerRetrait(m)) return
+    btn.disabled = true
+    btn.textContent = 'Envoi…'
+    try {
+      const res = await fetch(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'retirerMonMenage', property_id: m.propId,
+                               booking_id: String(m.bookId), departure_date: m.dateStr })
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        // Le serveur envoie une PHRASE (delai depasse, plus a vous) : on
+        // l'affiche telle quelle plutot que d'en inventer une qui dirait moins.
+        showModalError((data && data.error) || 'Ce ménage n\'a pas pu être retiré.')
+        btn.disabled = false
+        btn.textContent = 'Je ne peux plus le faire'
+        await rechargerApresPrise()
+        return
+      }
+      closeModal()
+      await rechargerApresPrise()
+    } catch (err) {
+      showModalError('Connexion impossible. Réessayez dans un instant.')
+      btn.disabled = false
+      btn.textContent = 'Je ne peux plus le faire'
+    }
+  }
+
+  // ⚠ LE RETRAIT SE COMPTE A PARIS, PAS EN HEURE DE L'APPAREIL, et c'est la
+  // SEULE chose de cet ecran qui le fasse. Tout le planning raisonne en local —
+  // `dateNueLocale`, `toDateStr` — parce qu'il affiche des jours de calendrier
+  // du bien. Le delai de retrait, lui, n'est pas un affichage : c'est la REGLE
+  // DE L'HOTE, que le serveur applique en Europe/Paris. Les deux referentiels
+  // doivent coincider, sinon l'ecran offre un bouton que le serveur refuse —
+  // 2 h de fenetre l'ete, 1 h l'hiver, pour une prestataire aux Antilles.
+  function jourParis () {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  }
+  function minuitParis (jour) {
+    const commeUTC = Date.parse(`${jour}T00:00:00Z`)
+    if (!Number.isFinite(commeUTC)) return NaN
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const p = {}
+    for (const part of fmt.formatToParts(new Date(commeUTC))) p[part.type] = part.value
+    const h = p.hour === '24' ? '00' : p.hour
+    const heureParis = Date.parse(`${p.year}-${p.month}-${p.day}T${h}:${p.minute}:${p.second}Z`)
+    return commeUTC - (heureParis - commeUTC)
+  }
+
+  // Remise a zero du retrait sur une feuille partagee. Appelee par les DEUX
+  // ouvertures de modal, et par la fermeture : un bouton laisse affiche agit sur
+  // le menage de la feuille precedente.
+  function reinitialiserRetrait () {
+    retraitEnCours = null
+    const b = document.getElementById('modal-retirer')
+    if (b) { b.style.display = 'none'; b.disabled = false; b.textContent = 'Je ne peux plus le faire' }
+  }
+
+  // ⚠ UNE CONFIRMATION, PARCE QUE LE GESTE ENGAGE QUELQU'UN D'AUTRE. Se retirer
+  // rend le logement a l'hote, qui devra trouver une remplacante.
+  function w_confirmerRetrait (m) {
+    return window.confirm(
+      `Vous retirer du ménage de ${m.propName} le ${jourLisible(m.dateStr)} ?\n\n` +
+      'Il repassera « à prendre » et votre hôte en sera informé.')
+  }
+
   function openModal(m) {
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
@@ -1907,6 +2009,32 @@ if ("serviceWorker" in navigator) {
     // d'une feuille precedente restait visible sur la fiche d'un menage a elle.
     document.getElementById('modal-prendre').style.display = 'none'
     priseEnCours = null
+
+    // ─── SE RETIRER D'UN MENAGE (lot 5) ────────────────────────────────────
+    // ⚠ ON NE PROPOSE PAS UN BOUTON QUI ECHOUERAIT. La garde est SERVEUR
+    // (`retirerMonMenage` la refait entierement) ; celle-ci ne sert qu'a ne pas
+    // promettre un geste refuse. Trois cas ou il n'apparait pas : le menage
+    // n'est pas a elle, le delai est depasse, ou on n'a pas pu LIRE le delai —
+    // deviner un defaut qui n'est peut-etre pas celui de l'hote reviendrait a
+    // decider a sa place.
+    const btnRet = document.getElementById('modal-retirer')
+    reinitialiserRetrait()
+    if (btnRet) {
+      const aElle = !!(m.assign && m.assign.role === 'porteur')
+      let possible = aElle && retraitDelaiH !== null && !m.done
+      // ⚠ LE PASSE, HORS DU TEST DE DELAI — comme au serveur. Chez un hote qui
+      // a choisi « jusqu'au dernier moment », rien d'autre ne borne la date : un
+      // menage du mois dernier jamais marque fait offrait le bouton, et le
+      // serveur repondait « ce menage est passe ».
+      if (possible && m.dateStr < jourParis()) possible = false
+      if (possible && retraitDelaiH > 0) {
+        possible = (minuitParis(m.dateStr) - Date.now()) / 3600000 >= retraitDelaiH
+      }
+      btnRet.style.display = possible ? '' : 'none'
+      btnRet.disabled = false
+      btnRet.textContent = 'Je ne peux plus le faire'
+      if (possible) retraitEnCours = m
+    }
     btn.style.opacity = ''
 
     // ⚠ TANT QUE L'OFFRE N'EST PAS ACCEPTEE, il n'y a rien a marquer fait :
@@ -1957,7 +2085,7 @@ if ("serviceWorker" in navigator) {
     document.getElementById('modal').style.display = 'flex'
   }
 
-  function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null; hideModalMessages() }
+  function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null; reinitialiserRetrait(); hideModalMessages() }
 
   // ─── Helpers messages modal ────────────────────────────────────────────────
   function showModalError(msg)   { setModalMessage('error',   msg) }
