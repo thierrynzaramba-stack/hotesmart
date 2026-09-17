@@ -237,3 +237,181 @@ nombre ne se lit pas en base.
 **Dette toujours ouverte** : `channelCall` n'a aucun timeout `fetch` et honore
 `Retry-After` sans plafond (voir la section précédente). L'incident est clos ;
 ce plafond-là ne l'est pas.
+
+## Le niveau de log portait une information, et elle était fausse (17 sept. 2026)
+
+Constaté en vérifiant tout autre chose : `GET /api/menages-public` ressortait
+étiqueté **`error`** dans les logs Vercel alors que la requête avait réussi.
+
+⚠️ **Vercel étiquette « error » toute invocation qui écrit sur `stderr`**, quel
+que soit le statut HTTP. `console.warn` et `console.error` y vont ; `console.log`
+non.
+
+### Ce qui n'était pas la cause, et pourquoi le dire
+
+Deux fausses pistes, écartées par la mesure :
+
+- **la ligne `[cron-shared] runtime TZ = …`** est déjà sur `console.log`. Son
+  `temoin nu = 2026-07-22` est une **constante écrite en dur**, et son immobilité
+  est sa raison d'être — elle révèle si le runtime lit un instant sans fuseau en
+  UTC ou en local. Je l'avais d'abord prise pour un **point de reprise gelé** et
+  j'en avais tiré une dette qui n'existait pas ;
+- **le `DeprecationWarning` sur `url.parse()`** vient du pont Vercel, pas de
+  notre code ni de nos dépendances (vérifié : aucune occurrence au chargement de
+  nos modules). Et Node **déduplique** ces alertes : une par processus. Elle
+  marque donc les **démarrages à froid**, pas chaque invocation — j'avais
+  surestimé sa portée avant de la mesurer.
+
+### La vraie dette, et elle est à nous
+
+**Une abstention pour `budget` ou `cycle_en_retard` est le fonctionnement
+NORMAL** d'un rattrapage à point de reprise : elle se produit à chaque cycle tant
+que le fil est plus long que le budget, par construction. Elle partait sur
+`console.warn`. Le cron dédié ressortait donc en « error » à **chaque passage**
+d'un rattrapage qui se déroulait exactement comme prévu. Idem pour
+« *N bien(s) non atteints dans le budget* » : le budget est **fait** pour ne pas
+tout atteindre, et `ordonnerPourImport` fait passer devant ceux qu'on n'a pas
+servis.
+
+**Le contenu du journal n'a pas changé d'un caractère. C'est le niveau qui
+mentait.**
+
+### ⚠️ Le seuil ne suffisait pas — c'est le PROGRÈS qui tranche
+
+Premier correctif : niveau `log` pour un motif attendu **sous**
+`ABSTENTIONS_AVANT_INCIDENT`, `warn` au-delà. La review l'a démoli, et elle a
+raison : **le correctif était inerte sur le cas même qui l'a motivé.** Un
+rattrapage sur un fil plus long que le budget s'abstient à *chaque* cycle, et le
+compteur ne repartait à zéro que sur une passe complète — donc dès le 3e cycle la
+ligne repassait sur `stderr` pour **tout le reste** du rattrapage, c'est-à-dire
+l'essentiel de sa durée.
+
+Pire : `reportIncident('messages_import_suspendu')` partait au 3e cycle puis tous
+les 13, en disant *« Import des messages suspendu »* alors que `r.imported > 0`
+et que le point de reprise avait avancé à chaque passe. **C'est littéralement
+faux — et c'est l'alarme reçue sur Colomiers pendant que l'import
+convergeait.**
+
+**Ce qui distingue une file qui avance d'une file bloquée, c'est le PROGRÈS, pas
+le nombre de tours.** Le compteur repart donc de zéro dès qu'il y a progrès :
+messages écrits, **ou** point de reprise déplacé. Ce qu'il mesure désormais est
+la question qu'on croyait déjà poser — *« combien de cycles d'affilée rien n'a
+bougé »*.
+
+⚠️ **ET « DIFFÉRENT » N'EST PAS « AVANCÉ ».** J'ai d'abord écrit
+`a.page !== b.page`, et affirmé ici même que le blocage de 125 cycles alerterait
+encore. **C'était faux**, et la review l'a démontré : cette égalité rend vrai
+pour un **recul** — or le recul est la signature exacte du blocage. `reprise
+ecartee` jette le point de reprise, le fil repart de sa page 1, le cycle suivant
+coupe plus **bas**. La page oscillait, chaque oscillation passait pour un
+progrès, le compteur restait à zéro, et le journal affichait « ça AVANCE »
+pendant que rien n'entrait. **On aurait remplacé une alarme qui crie au loup par
+une alarme qui ne crie jamais — strictement pire.**
+
+Ma garantie ne tenait que si la coupure tombait sur le même fil **et** la même
+page à chaque cycle, ce que rien ne garantit : sur un bien à 22 fils avec
+`depuis = null`, le fil où le budget coupe dérive d'un cycle à l'autre.
+
+⚠️ **Et `imported > 0` ne suffit pas seul.** C'est une somme **sur tout le
+bien** : un fil coincé derrière le budget ne converge jamais, mais la moindre
+réponse écrite depuis l'app OTA pendant le cycle la fait remonter. Plus le bien
+est actif, plus l'alarme devient impossible. Le 15 septembre n'avait
+`imported === 0` que parce que le bien était calme — de la chance, pas une
+propriété du dispositif.
+
+**Ce qui compte comme progrès, et rien d'autre :**
+
+| Situation | Progrès ? |
+|---|---|
+| même fil, page **strictement** plus haute | oui |
+| même fil, même page, **et** des messages écrits | oui — le budget coupe *dans* la page depuis `d67c3b7` |
+| fil différent **et** des messages écrits | oui |
+| fil différent, rien écrit | **non** — c'est la dérive elle-même |
+| page qui **recule** | **non**, jamais, même avec des écritures ailleurs |
+| état de reprise illisible (`!a`) | **non** — on ne sait pas d'où on vient |
+
+Ce dernier point est à lui seul un piège : `ecrireEtat` avale son échec, donc un
+upsert refusé rend `etat.reprise` nul à **chaque** lecture. Un `!a → true`
+déclarait le bien « en progrès » pour toujours, en affirmant l'inverse de la
+vérité dans le journal censé la dire.
+
+**Règle : un critère d'arrêt d'alarme se teste sur ce qui doit ENCORE la
+déclencher, pas sur ce qui doit la taire.** Mes trois premiers tests ne
+couvraient que le second.
+
+### ⚠️ Un échec TOTAL garde sa voix
+
+« *N biens non atteints dans le budget* » a d'abord été démoté sans condition.
+Or l'échec **total** de la passe est le seul cas où personne d'autre ne parlera : les biens sautés n'écrivent volontairement aucun
+état, donc aucun compteur d'abstention ne monte et `messages_import_suspendu` ne
+peut **pas** partir pour eux. Un budget mangé par un pooler qui pend produirait
+un bilan d'apparence saine. Le `warn` reste pour ce cas-là.
+
+⚠️ **Et il se compte sur les RÉSULTATS, pas sur les tentatives.** `traites++` se
+fait *avant* le `try` : il compte les biens **entrés**, y compris celui qui lève
+aussitôt. Le scénario nommé — un pooler qui pend — donnait donc `traites: 1` dès
+que le blocage est dans le premier bien, et la ligne restait sur `stdout`. C'est
+`aboutis` (passe terminée sans abstention ni exception) qui tranche.
+
+### ⚠️ Le seuil compte autant que le motif
+
+Un motif attendu qui se répète **au-delà de `ABSTENTIONS_AVANT_INCIDENT`** n'est
+plus attendu : le budget ne suffit alors pas structurellement, et c'est bien une
+alerte. Le niveau suit donc les deux — la nature de l'abstention **et** sa durée.
+Sans ce second critère, le blocage de 125 cycles du 15 septembre serait devenu
+parfaitement silencieux : on aurait remplacé une alarme toujours allumée par une
+alarme jamais allumée, ce qui est pire.
+
+⚠️ **Ce qui n'a PAS été démoté, volontairement** : `[channel] reprise ecartee,
+le fil a bouge` (`lib/channels/channex.js`). La review proposait de le démoter
+aussi, puisqu'un fil actif grossit entre deux cycles. Mais cette ligne est la
+**signature exacte de la boucle qui a causé l'incident** — reprise rejetée, fil
+relu depuis sa page 1. La taire économiserait une étiquette `error` au prix du
+seul témoin direct du défaut. On garde la ligne et on rétrécit la promesse : le
+cron peut encore ressortir en `error` sur ce chemin-là.
+
+`MOTIFS_ATTENDUS` est une liste **explicite**, exportée et testée : ajouter un
+motif au cron sans décider de son niveau doit être un choix, pas un défaut
+hérité. Un `provider_*` n'y entre jamais — une panne du provider reste une panne,
+quel que soit le nombre de fois qu'elle survient.
+
+**Règle : une alarme toujours allumée est une alarme morte.** Même mécanique que
+les huit tests rouges permanents du CLAUDE.md, et que l'incident documenté plus
+haut, où « l'alerte la plus bruyante était la moins informative ».
+
+### Ce que les contre-épreuves ont corrigé dans les tests
+
+Deux fois, une contre-épreuve n'a **pas** rougi, et c'est le test qui était en
+cause :
+
+- **`aProgresse` était testée en pur, jamais son EFFET.** Retirer
+  `progres ? 0 : …` de `sAbstenir` ne faisait rougir aucun test. Un test qui
+  vérifie un calcul sans vérifier qu'on s'en sert ne protège rien — il fallait un
+  double qui **mémorise ce qu'on lui écrit**, et une assertion sur le compteur
+  réellement persisté ;
+- **le cas de progrès faisait avancer les DEUX signaux à la fois** (reprise *et*
+  messages), donc cesser de transmettre `imported` ne changeait rien. Il faut un
+  cas où `imported` est le **seul** signal, reprise identique.
+
+**Règle : une contre-épreuve n'éprouve que ce qu'elle isole.** Un scénario qui
+active deux mécanismes en même temps ne dit rien sur aucun des deux.
+
+### ⚠️ Un test qui alerte pour de vrai
+
+Deux de ces tests poussent le compteur jusqu'à `ABSTENTIONS_AVANT_INCIDENT` :
+sans leurre, `reportIncident` partait **réellement**. Son anti-spam échoue
+**ouvert** (une lecture ratée rend `alreadyAlerted = false`), donc sur toute
+machine où `ALERT_BREVO_API_KEY` et `FOUNDER_PHONE` sont dans l'environnement —
+un shell après un `vercel env pull`, ou la CI — `npm test` **envoyait deux SMS et
+deux e-mails réels au fondateur**. Mesure au passage : 7,1 s par test en échecs
+DNS purs. Le faux `founder-notify` est posé avant tout autre `require`, comme
+dans `tests/cles-migrees.test.js`.
+
+**Règle : un test qui peut joindre quelqu'un doit être muselé avant d'être
+écrit.** La lenteur n'était que le symptôme visible.
+
+**Corollaire pour les tests : on teste le NIVEAU, pas le texte.** Un test sur la
+phrase passerait tout aussi bien avec le mauvais canal — et c'est précisément le
+défaut qu'on corrige. Les quatre contre-épreuves (niveau forcé, seuil oublié,
+`provider_*` admis dans les attendus, budget nominal remis sur `warn`) font
+chacune rougir le test qui la couvre.

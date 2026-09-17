@@ -121,6 +121,8 @@ module.exports = async function handler (req, res) {
   // ⚠ NE RIEN ECRIRE POUR EUX EST MIEUX QUE DE LES COMPTER ABSTENUS :
   // `ordonnerPourImport` les fait passer EN TETE a la passe suivante.
   let traites = 0
+  // Biens dont la passe s'est terminee sans abstention ni exception.
+  let aboutis = 0
   let nonAtteints = 0
   for (const p of aImporter) {
     if (!p.provider_property_id) continue
@@ -129,23 +131,49 @@ module.exports = async function handler (req, res) {
     // ⚠ SON PROPRE `try`, PAR BIEN. Une panne sur un bien ne doit pas priver les
     // suivants de leur import — meme regle que dans le cycle principal.
     try {
-      await importerMessagesDuBien(supabase, p, {
+      const r = await importerMessagesDuBien(supabase, p, {
         echeance, results, budgetBienMs: BUDGET_BIEN_DEDIE_MS
       })
+      if (r && !r.abstenu) aboutis++
     } catch (err) {
       console.error(`[cron-messages] ${p.provider_property_id}:`, err.message)
       results.errors.push({ property_id: p.provider_property_id, error: err.message })
     }
   }
   if (nonAtteints) {
-    console.warn(`[cron-messages] ${nonAtteints} bien(s) non atteints dans le budget — `
-      + 'ils passeront en tete a la prochaine passe')
+    // ⚠ `log`, PAS `warn` — LE BUDGET EST FAIT POUR NE PAS TOUT ATTEINDRE.
+    // Cette phrase decrit le fonctionnement prevu : le budget borne la passe et
+    // `ordonnerPourImport` fait passer devant ceux qu'on n'a pas servis. La dire
+    // sur `stderr` faisait etiqueter « error » par Vercel toute invocation d'un
+    // parc plus grand qu'une passe — c'est-a-dire le cas NOMINAL. Une alarme
+    // toujours allumee est une alarme morte.
+    // ⚠ MAIS PAS QUAND LA PASSE N'A RIEN FAIT DU TOUT. `nonAtteints` est nominal
+    // tant que la rotation tourne ; `traites === 0` est l'echec TOTAL de la
+    // passe, et il est le seul cas ou personne d'autre ne parlera : les biens
+    // sautes n'ecrivent volontairement aucun etat, donc aucun compteur
+    // d'abstention ne monte et `messages_import_suspendu` ne peut PAS partir
+    // pour eux. Sans cette ligne sur stderr, un budget mange par un pooler qui
+    // pend produirait un bilan « traites: 0 » d'apparence saine.
+    // C'est le meme critere que pour les abstentions : ce qui compte est qu'il
+    // se passe QUELQUE CHOSE, pas le nombre de tours.
+    // ⚠ « RIEN FAIT » SE COMPTE SUR LES RESULTATS, PAS SUR LES TENTATIVES.
+    // `traites++` se fait AVANT le `try` : il compte les biens ENTRES, y compris
+    // celui qui leve aussitot ou s'abstient sur `etat_illisible`. Le scenario
+    // nomme — un pooler qui pend — donne donc `traites: 1` des que le blocage est
+    // dans le premier bien, et la ligne restait sur stdout. On compte ce qui a
+    // REELLEMENT abouti.
+    const rienFait = aboutis === 0
+    const dire = rienFait ? console.warn : console.log
+    dire(`[cron-messages] ${nonAtteints} bien(s) non atteints dans le budget — `
+      + (rienFait ? 'et AUCUN bien traite dans cette passe'
+                  : 'ils passeront en tete a la prochaine passe'))
   }
 
   const bilan = {
     biens: aImporter.length,
     traites,
     non_atteints: nonAtteints,
+    aboutis,
     importes: results.messagesImportes || 0,
     abstentions: results.messagesImportAbstentions || 0,
     erreurs: results.errors.length,

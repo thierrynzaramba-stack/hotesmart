@@ -184,7 +184,15 @@ test('LE TEST QUI COMPTE : une passe interrompue GARDE son point de reprise', ()
     'mais seulement sur le MEME fil — l appliquer a un autre sauterait ses premieres pages')
 
   const sync = lire('lib/cron-channel-messages-sync.js')
-  assert.ok(sync.includes('reprise: reprise || etat.reprise || null'),
+  // ⚠ LA POSITION CONSERVEE EST NOMMEE UNE FOIS, PUIS UTILISEE DEUX FOIS —
+  // l'ecriture et le journal. Ce test cherchait le litteral
+  // `reprise: reprise || etat.reprise || null` ; il a rougi sur un remaniement
+  // qui ne changeait RIEN au comportement, seulement sa forme. C'est la
+  // fragilite d'un test qui grepe une expression plutot que la verite qu'elle
+  // porte : on epingle donc la definition ET son emploi.
+  assert.ok(sync.includes('const posee = reprise || etat.reprise || null'),
+    'la position conservee est bien « la nouvelle, sinon celle d avant »')
+  assert.ok(/ecrireEtat\(supabase, cle, \{[^}]*reprise: posee/s.test(sync),
     'une abstention CONSERVE le point de reprise')
   assert.ok(sync.includes('abstentions: 0, reprise: null'),
     'et une passe complete l EFFACE — sinon on rejouerait a jamais un fil deja importe')
