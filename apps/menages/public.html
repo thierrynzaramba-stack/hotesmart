@@ -98,7 +98,10 @@
     .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
     .dispo-case.manuel::before { content: ""; position: absolute; bottom: 5px; width: 4px; height: 4px;
                                  border-radius: 50%; background: currentColor; }
-    .dispo-case.envoi { opacity: .45; }
+    /* `.dispo-case.envoi` a ete SUPPRIMEE : elle mettait la case a 45 %
+       d'opacite pendant l'attente reseau. Depuis le rendu optimiste, la case
+       change d'ETAT immediatement — il n'y a plus d'attente a signaler, et une
+       case grisee pendant que son etat a deja bascule n'aurait plus aucun sens. */
     .dispo-legende { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px;
                      color: var(--text2); margin-top: 12px; }
     .dispo-legende i { display: inline-block; width: 12px; height: 12px; border-radius: 4px;
@@ -2156,6 +2159,12 @@ if ("serviceWorker" in navigator) {
     mesJours = { regles: data.regles || [], exceptions: data.exceptions || [],
                  conges: data.conges || [], modifiable: data.modifiable === true,
                  mois: moisCourant }
+    // ⚠ CE QUI EST EN VOL SURVIT AU RECHARGEMENT. Le serveur rend l'etat qu'il
+    // connait ; il ne connait pas encore les ecritures parties a l'instant.
+    // Sans cette ligne, revenir sur l'onglet — ou poser un conge — pendant
+    // qu'une absence s'envoie faisait retomber la case a son ancien etat, avec
+    // « ✓ Absence enregistree » toujours affiche au-dessus.
+    reappliquerEnVol()
     peindreMesJours()
   }
 
@@ -2521,9 +2530,16 @@ if ("serviceWorker" in navigator) {
     return { ok: res.ok, data }
   }
 
+  // Jours dont l'ecriture est en vol, avec la valeur VOULUE (`true` = absente).
+  // Remplace le verrou d'ecran pour CE geste seul : les autres ecritures de la
+  // page (regles, conges) gardent le leur, elles portent sur tout le reglage et
+  // non sur une case. La valeur sert a `reappliquerEnVol` quand un rechargement
+  // tombe au milieu.
+  const enVolParJour = new Map()
+
   async function basculerMonJour (j) {
     const msg = document.getElementById('dispo-message')
-    if (!mesJours.modifiable || envoiEnCours) return
+    if (!mesJours.modifiable) return
     if (j < AUJ() || congeDuJour(j)) return
     if (horsLigne(msg)) return
     const exc = exceptionDuJour(j)
@@ -2547,25 +2563,139 @@ if ("serviceWorker" in navigator) {
       dire(msg, 'Vous ne travaillez déjà pas ce jour-là.')
       return
     }
-    envoiEnCours = true
-    const el = document.querySelector(`#dispo-months .dispo-case[data-jour="${j}"]`)
-    if (el) el.classList.add('envoi')
+    // ─── RENDU OPTIMISTE ────────────────────────────────────────────────
+    // ⚠ C'EST LE REPROCHE N° 1 DES UTILISATRICES, ET IL ETAIT MERITE.
+    // L'ancien chemin attendait DEUX allers-retours reseau avant de changer
+    // quoi que ce soit a l'ecran : l'ecriture, puis `chargerDisponibilites()`
+    // — une relecture COMPLETE qui coute 6 requetes base enchainees pour des
+    // donnees qu'on a deja. Mesure du 17 septembre 2026 sur la production :
+    // le plancher de cet endpoint (jeton invalide, donc UNE seule requete base
+    // avant le refus) tient deja 0,42 a 1,07 s depuis un poste filaire. Le vrai
+    // clic en faisait dix fois plus, deux fois de suite, sur un telephone.
+    // Pendant tout ce temps la case ne changeait pas d'etat — elle passait a
+    // 45 % d'opacite — et `envoiEnCours` bloquait TOUT le calendrier, si bien
+    // qu'une seconde tape ne faisait rien du tout.
+    //
+    // Desormais : on bascule l'affichage TOUT DE SUITE, on envoie derriere, et
+    // on NE RELIT PAS. Un basculement d'un jour ne change ni les regles ni les
+    // conges : la relecture ne rapportait rien que l'ecran ne sache deja.
+    //
+    // ⚠ LE RATTRAPAGE EST LA CONTREPARTIE, PAS UNE OPTION. Un rendu optimiste
+    // qui ne sait pas revenir en arriere ne rend pas l'ecran rapide : il le
+    // rend MENTEUR, ce qui est pire que lent. En cas d'echec on remet l'etat
+    // EXACT d'avant et on le dit.
+    // ⚠ VERROU PAR JOUR, PLUS PAR ECRAN — ET AVANT LA BASCULE, PAS APRES.
+    // `envoiEnCours` gelait le calendrier entier : taper un second jour pendant
+    // l'envoi du premier ne faisait rien, sans le moindre signe. On n'empeche
+    // plus que la course sur LE MEME jour, qui seule peut partir en double.
+    //
+    // ⚠ LA PLACE DE CE TEST EST LE PIEGE. Pose APRES la bascule optimiste, il
+    // produisait exactement le mensonge que le rattrapage existe pour empecher :
+    // deuxieme tape sur le meme jour -> l'ecran s'inversait, puis on sortait
+    // sans rien envoyer. La premiere ecriture aboutissait, et l'ecran affichait
+    // durablement l'INVERSE de ce que le serveur avait enregistre. On sort donc
+    // AVANT de toucher quoi que ce soit : la seconde tape ne fait rien du tout,
+    // ce qui est juste — l'envoi qu'elle voudrait annuler est deja parti.
+    if (enVolParJour.has(j)) return
+
+    // ⚠ ON NE GARDE QUE CE JOUR-LA, PAS UN INSTANTANE DU TABLEAU.
+    // Premiere version : `avant = exceptions.slice()`, restitue en bloc sur
+    // echec. Avec un verrou PAR JOUR, deux ecritures peuvent etre en vol en
+    // meme temps : l'echec de la premiere rendait alors le tableau d'AVANT la
+    // seconde, effacant une absence pourtant enregistree cote serveur. Un
+    // verrou par jour impose un rattrapage par jour — c'est la contrepartie
+    // qu'on doit a la levee du verrou d'ecran.
+    const excAvant = exc ? Object.assign({}, exc) : null
+    // Identite de l'objet d'etat, pour reconnaitre un RECHARGEMENT survenu
+    // entre-temps (`chargerDisponibilites` remplace `mesJours` en entier).
+    // Sans ce reperage, un rattrapage tardif reecrivait des donnees fraiches
+    // par-dessus, effacant a l'ecran une absence que l'employeur venait de poser.
+    const monEtat = mesJours
+
+    appliquerJour(j, !exc)
+    peindreMesJours()
+    dire(msg, exc ? '✓ Absence annulée.' : '✓ Absence enregistrée.')
+
+    // La valeur VOULUE, retenue le temps du vol : si un rechargement tombe au
+    // milieu, il la remet par-dessus l'etat serveur qui ne la connait pas encore
+    // (voir `reappliquerEnVol`). Sans cela, la case retombait toute seule a son
+    // ancien etat pendant que « ✓ Absence enregistree » restait affiche.
+    enVolParJour.set(j, !exc)
+
+    const rattraperCeJour = (texte) => {
+      // Rechargement passe par la : l'etat courant vient du serveur, il est plus
+      // frais que tout ce qu'on pourrait restituer. On ne touche a rien.
+      if (mesJours === monEtat) {
+        mesJours.exceptions = (mesJours.exceptions || [])
+          .filter(e => String(e.date).slice(0, 10) !== j)
+        if (excAvant) mesJours.exceptions = mesJours.exceptions.concat([excAvant])
+        peindreMesJours()
+      }
+      dire(msg, texte)
+    }
+
     try {
       const { ok, data } = await envoyer({
         action: exc ? 'retirerIndisponibilite' : 'declarerIndisponibilite', date: j })
-      if (!ok) dire(msg, (data && data.error) || 'Impossible d\'enregistrer.')
-      else dire(msg, exc ? '✓ Absence annulée.' : '✓ Absence enregistrée.')
-      await chargerDisponibilites()
+      enVolParJour.delete(j)
+      // Le serveur a REPONDU non : l'issue est connue, on peut l'affirmer.
+      if (!ok) rattraperCeJour((data && data.error) || 'Pas enregistré. Votre journée n\'a pas changé.')
     } catch (err) {
-      dire(msg, 'Connexion impossible. Réessayez.')
-    } finally {
-      envoiEnCours = false
-      // ⚠ LA CASE NE RESTE PAS « EN COURS D'ENVOI » SUR UN ECHEC. `.envoi` la
-      // met a 45 % d'opacite : laissee en place apres une coupure reseau, elle
-      // dit « c'est parti » alors que rien n'est parti. Le succes repeint le
-      // mois de toute facon.
-      if (el) el.classList.remove('envoi')
+      enVolParJour.delete(j)
+      // ⚠ ON NE SAIT PAS SI L'ECRITURE A ABOUTI. `fetch` leve aussi bien quand la
+      // requete n'est jamais partie que quand c'est la REPONSE qui s'est perdue —
+      // et `declarerIndisponibilite` est idempotent cote serveur, donc le second
+      // cas laisse l'absence enregistree. Affirmer « votre journee n'a pas
+      // change » serait donc un mensonge une fois sur deux, et depuis que la
+      // relecture systematique a disparu, plus rien ne viendrait le corriger.
+      // On redemande au serveur ; si lui non plus ne repond pas, alors seulement
+      // on restitue, et on le dit sans rien affirmer de plus.
+      const relu = await relireSilencieusement()
+      if (relu) dire(msg, 'Envoi interrompu — votre journée a été rechargée.')
+      else rattraperCeJour('Connexion impossible. Réessayez dans un instant.')
     }
+  }
+
+  // Pose ou retire l'absence d'UN jour dans l'etat courant. Un seul endroit
+  // ecrit cette ligne : la bascule, le rattrapage et la reapplication apres
+  // rechargement diraient sinon trois fois la meme chose, de trois facons.
+  function appliquerJour (j, absente) {
+    const reste = (mesJours.exceptions || []).filter(e => String(e.date).slice(0, 10) !== j)
+    // Pas d'`id` : le serveur le donnera. Les deux ecritures se font PAR DATE
+    // (`declarer`/`retirerIndisponibilite`), et le rendu ne lit que `date`,
+    // `available` et `source` — la ligne locale porte donc tout ce qu'il faut.
+    mesJours.exceptions = absente
+      ? reste.concat([{ date: j, available: false, source: 'prestataire' }])
+      : reste
+  }
+
+  // ⚠ UN RECHARGEMENT NE DOIT PAS DEFAIRE CE QUI EST ENCORE EN VOL.
+  // `chargerDisponibilites` peut tomber au milieu d'une ecriture (retour sur
+  // l'onglet, pose d'un conge, reglage des jours) : le serveur rend alors l'etat
+  // d'AVANT, la case retombe toute seule, et « ✓ Absence enregistree » reste
+  // affiche au-dessus. On remet donc par-dessus les jours dont l'ecriture n'a
+  // pas encore rendu son verdict.
+  function reappliquerEnVol () {
+    if (!mesJours || !enVolParJour.size) return
+    enVolParJour.forEach((absente, j) => appliquerJour(j, absente))
+  }
+
+  // Relecture SANS panneau d'erreur : sert au rattrapage, ou afficher « vos
+  // jours n'ont pas pu etre lus » par-dessus une absence qu'on vient peut-etre
+  // d'enregistrer ajouterait de la confusion a l'incertitude.
+  async function relireSilencieusement () {
+    try {
+      const res = await fetch(`/api/menages-public?action=disponibilites&token=${currentToken}`)
+      if (!res.ok) return false
+      const data = await res.json()
+      if (data.autorise !== true) return false
+      mesJours = { regles: data.regles || [], exceptions: data.exceptions || [],
+                   conges: data.conges || [], modifiable: data.modifiable === true,
+                   mois: mesJours ? mesJours.mois : 0 }
+      reappliquerEnVol()
+      peindreMesJours()
+      return true
+    } catch (err) { return false }
   }
 
   async function poserMonConge () {

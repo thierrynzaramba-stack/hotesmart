@@ -56,7 +56,9 @@ const projeter = regles => (regles || []).map(r => {
 
 function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    autorise = true, enLigne = true, erreur = null,
-                   coupureEcriture = false, echecReglage = null } = {}) {
+                   coupureEcriture = false, echecReglage = null,
+                   retardEcriture = 0, suspendreEcriture = false,
+                   coupureTotale = false } = {}) {
   const html = fs.readFileSync(FICHIER, 'utf8')
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
   assert.ok(m, 'le script de la page est introuvable')
@@ -67,13 +69,21 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
 
   const appels = []
   const etat = { regles, exceptions, conges, modifiable, autorise }
+  // ⚠ SUSPENSION DETERMINISTE, PLUTOT QU'UNE TEMPORISATION.
+  // Tester « l'ecran a bascule AVANT la reponse » avec un `setTimeout` de 120 ms
+  // et un `souffler(10)` marche sur un poste au repos et lache sur une machine
+  // chargee : le test devient un des-truque. Ici, l'ecriture reste en vol tant
+  // que le test n'appelle pas `libererEcritures()` — aucune horloge dans la
+  // boucle, donc aucun aleas.
+  const enAttente = []
 
   src += `
     globalThis.__p = {
       appels,
       seed () { currentToken = 'jeton-test'; dispoCharge = false },
       chargerDisponibilites, basculerMonJour, poserMonConge,
-      etat: () => mesJours
+      etat: () => mesJours,
+      enVol: () => enVolParJour
     }
   `
 
@@ -108,7 +118,20 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     }
     // ⚠ UNE COUPURE EN COURS D'ENVOI N'EST PAS UN 503 : `fetch` LEVE. C'est le
     // chemin `catch`, celui qui laissait la case a moitie effacee.
+    // Coupure TOTALE : ni l'ecriture ni la relecture ne passent. C'est le cas
+    // du sous-sol, celui ou le rattrapage doit rendre la main a l'etat d'avant.
+    if (coupureTotale) throw new TypeError('Failed to fetch')
     if (coupureEcriture && corps && corps.action) throw new TypeError('Failed to fetch')
+    if (suspendreEcriture && corps && corps.action) {
+      await new Promise(r => enAttente.push(r))
+    }
+    // ⚠ SERT A PROUVER LE RENDU OPTIMISTE. Sans retard, la reponse revient dans
+    // la meme microtache et on ne peut pas distinguer « l'ecran a bascule tout
+    // de suite » de « l'ecran a attendu le serveur » — c'est-a-dire qu'on ne
+    // peut pas tester le defaut qu'on vient de corriger.
+    if (retardEcriture && corps && corps.action) {
+      await new Promise(r => setTimeout(r, retardEcriture))
+    }
     // ⚠ LE DOUBLE REJOUE AUSSI LE REGLAGE DES JOURS. Il ne le faisait pas : son
     // en-tête promettait de rejouer les EFFETS du serveur, et l'action que ce
     // lot introduit n'en avait aucun — `etat.regles` ne bougeait jamais, donc la
@@ -145,6 +168,8 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
+  // `libererEcritures` : rend la main aux ecritures suspendues, dans l'ordre.
+  w.__p.libererEcritures = () => { while (enAttente.length) enAttente.shift()() }
   return { w, t: w.__p, etat }
 }
 
@@ -569,18 +594,50 @@ test('HORS LIGNE, rien ne part — et elle le sait', async () => {
   assert.match(message(w), /Hors ligne/)
 })
 
-test('une COUPURE en cours d\'envoi ne laisse pas la case « en cours »', async () => {
-  // ⚠ `.envoi` met la case a 45 % d'opacite. Laissee en place apres une coupure,
-  // elle dit « c'est parti » alors que rien n'est parti — et sur un telephone en
-  // sous-sol, c'est le cas le plus frequent, pas le cas rare.
+test('une COUPURE en cours d\'envoi REMET la journée comme elle était', async () => {
+  // ⚠ LA CONTREPARTIE DU RENDU OPTIMISTE, et elle n'est pas optionnelle.
+  // L'écran bascule AVANT de savoir si l'envoi passe : s'il ne sait pas revenir
+  // en arrière, il ne devient pas rapide, il devient MENTEUR — et sur un
+  // téléphone en sous-sol, la coupure est le cas fréquent, pas le cas rare.
+  // (Avant le rendu optimiste, ce test surveillait `.envoi`, qui grisait la case
+  // pendant l'attente. Cette classe n'existe plus : il n'y a plus d'attente à
+  // signaler, puisque l'état bascule tout de suite.)
   const j = dans(2)
   const { w, t } = monter({ coupureEcriture: true })
   t.seed()
   await t.chargerDisponibilites()
+  assert.ok(!caseDu(w, j).classList.contains('off'), 'travaillé au départ')
+
   caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(60)
-  assert.ok(!caseDu(w, j).classList.contains('envoi'), 'la case ne reste pas grisée')
+
+  assert.ok(!caseDu(w, j).classList.contains('off'), 'le jour est REVENU à son état d\'avant')
+  // ⚠ ON N'AFFIRME PAS CE QU'ON NE SAIT PAS. `fetch` lève aussi bien quand la
+  // requête n'est jamais partie que quand c'est la RÉPONSE qui s'est perdue — et
+  // `declarerIndisponibilite` est idempotent côté serveur. Plutôt que de jurer
+  // « votre journée n'a pas changé », on redemande au serveur : ici il répond, et
+  // c'est SA vérité qui s'affiche.
+  assert.match(message(w), /rechargée/, 'on redemande au serveur au lieu d\'affirmer')
+})
+
+test('coupure TOTALE : on restitue, et on ne jure de rien', async () => {
+  // Quand même la relecture ne passe pas, il ne reste que la restitution — et
+  // une phrase qui n'affirme rien sur ce que le serveur a ou n'a pas reçu.
+  const j = dans(2)
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  const avant = caseDu(w, j).className
+
+  // On coupe TOUT après le chargement initial.
+  w.fetch = async () => { throw new TypeError('Failed to fetch') }
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(80)
+
+  assert.strictEqual(caseDu(w, j).className, avant, 'la journée est remise comme avant')
   assert.match(message(w), /Connexion impossible/)
+  assert.ok(!/n['’]a pas changé/.test(message(w)),
+    'on n\'affirme plus ce qu\'on ne peut pas savoir')
 })
 
 test('« viens exceptionnellement » ne se lit pas « votre employeur vous a retirée »', async () => {
@@ -601,9 +658,10 @@ test('« viens exceptionnellement » ne se lit pas « votre employeur vous a ret
 
 test('la confirmation survit au repeint, puis s\'efface quand elle change de mois', async () => {
   // ⚠ LES DEUX MOITIÉS DU MÊME RÉGLAGE, et elles se contredisent si on se trompe
-  // d'endroit. La relecture suit IMMÉDIATEMENT l'écriture : lever le drapeau là
-  // effacerait le « ✓ » dans la même seconde (c'est le défaut d'origine). Ne
-  // jamais le lever le faisait suivre de mois en mois, l'aide ne revenant plus.
+  // d'endroit. Le repeint suit IMMÉDIATEMENT le geste (rendu optimiste) : lever
+  // le drapeau là effacerait le « ✓ » dans la même seconde (c'est le défaut
+  // d'origine, du temps où c'était la relecture qui repeignait). Ne jamais le
+  // lever le faisait suivre de mois en mois, l'aide ne revenant plus.
   const { w, t } = monter()
   t.seed()
   await t.chargerDisponibilites()
@@ -612,6 +670,225 @@ test('la confirmation survit au repeint, puis s\'efface quand elle change de moi
   assert.match(message(w), /enregistrée/, 'elle survit au repeint')
   w.document.getElementById('dispo-suiv').click()
   assert.match(message(w), /Touchez un jour/, 'et l\'aide revient quand elle regarde ailleurs')
+})
+
+// ─── Le clic disponibilité : ce que le lot 1 a corrigé ────────────────────
+//
+// Verdict des utilisatrices sur la v1 : « trop lent ». Mesure du 17 septembre
+// 2026 : un clic coûtait DEUX allers-retours réseau enchaînés — l'écriture,
+// puis `chargerDisponibilites()`, une relecture complète à 6 requêtes base pour
+// des données déjà en mémoire. Plancher mesuré de l'endpoint en production
+// (jeton invalide, donc UNE requête base) : 0,42 à 1,07 s depuis un poste
+// filaire. Pendant tout ce temps la case ne changeait pas d'état et
+// `envoiEnCours` gelait le calendrier entier.
+
+test('un clic = UNE écriture, et AUCUNE relecture', async () => {
+  // ⚠ LE TEST QUI AURAIT ATTRAPÉ LA LENTEUR. La relecture ne rapportait rien :
+  // basculer un jour ne change ni les règles ni les congés, et l'écran a déjà
+  // tout ce qu'il affiche.
+  const j = dans(2)
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  const avant = t.appels.length
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(80)
+
+  const apres = t.appels.slice(avant)
+  assert.strictEqual(apres.length, 1, 'une seule requête, pas deux')
+  assert.strictEqual(apres[0].corps.action, 'declarerIndisponibilite')
+  assert.ok(!apres.some(a => /action=disponibilites/.test(a.url)),
+    'aucune relecture complète ne suit l\'écriture')
+})
+
+test('la case bascule AVANT que le serveur ait répondu', async () => {
+  // Le cœur du lot : l'écran ne demande pas la permission au réseau.
+  const j = dans(2)
+  const { w, t } = monter({ suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)                       // l'écriture est TENUE, pas minutée
+
+  assert.ok(caseDu(w, j).classList.contains('off'), 'le jour est DÉJÀ absent')
+  assert.match(message(w), /enregistrée/, 'et la confirmation est déjà là')
+  assert.strictEqual(ecritures(t).length, 1, 'pendant que l\'envoi est encore en vol')
+  t.libererEcritures()
+})
+
+test('le calendrier n\'est plus GELÉ pendant l\'envoi', async () => {
+  // ⚠ `envoiEnCours` verrouillait TOUT l'écran. Taper un second jour pendant
+  // l'envoi du premier ne faisait rien — sans le moindre signe, ce qui se lit
+  // « l'application ne répond pas ».
+  const j1 = dans(2), j2 = dans(3)
+  const { w, t } = monter({ suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  caseDu(w, j1).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)
+  caseDu(w, j2).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)
+
+  assert.ok(caseDu(w, j1).classList.contains('off'), 'le premier jour a basculé')
+  assert.ok(caseDu(w, j2).classList.contains('off'), 'le second AUSSI')
+  assert.strictEqual(ecritures(t).length, 2, 'les deux écritures sont parties')
+  t.libererEcritures()
+})
+
+test('deux tapes sur LE MÊME jour : une seule écriture, et l\'écran DIT la vérité', async () => {
+  // La contrepartie de la levée du verrou : on n'empêche plus que la course sur
+  // le même jour, la seule qui puisse partir en double.
+  //
+  // ⚠ COMPTER LES ÉCRITURES NE SUFFIT PAS, et c'est ce qui a laissé passer le
+  // défaut. Première version du correctif : le verrou était testé APRÈS la
+  // bascule optimiste. La seconde tape inversait donc l'écran puis sortait sans
+  // rien envoyer — une seule écriture, test au vert, et l'écran affichait
+  // durablement l'INVERSE de ce que le serveur avait enregistré. Exactement le
+  // mensonge que le rendu optimiste doit éviter. On vérifie donc l'ÉTAT FINAL,
+  // pas seulement le trafic.
+  const j = dans(2)
+  const { w, t } = monter({ suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)
+  t.libererEcritures()
+  await souffler(40)
+
+  assert.strictEqual(ecritures(t).length, 1, 'une seule écriture pour ce jour')
+  assert.strictEqual(ecritures(t)[0].corps.action, 'declarerIndisponibilite')
+  assert.ok(caseDu(w, j).classList.contains('off'),
+    'et l\'écran montre bien l\'absence qui a été envoyée')
+})
+
+test('un REFUS du serveur remet la journée comme elle était', async () => {
+  // Le pendant de la coupure réseau, côté métier : le serveur répond, mais non.
+  // ⚠ La lecture initiale doit réussir — on ne casse QUE l'écriture, après le
+  // chargement, sinon l'écran afficherait « vos jours n'ont pas pu être lus » et
+  // le test ne parlerait plus du geste qu'il prétend éprouver.
+  const j = dans(2)
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+  const avant = caseDu(w, j).className
+
+  const vrai = w.fetch
+  w.fetch = async (url, opts) => {
+    const corps = opts && opts.body ? JSON.parse(opts.body) : null
+    if (corps && corps.action) {
+      t.appels.push({ url: String(url), corps })
+      return { ok: false, status: 403, json: async () => ({ error: 'Droit retiré' }) }
+    }
+    return vrai(url, opts)
+  }
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(80)
+
+  assert.strictEqual(caseDu(w, j).className, avant, 'le jour est revenu à son état d\'avant')
+  assert.match(message(w), /Droit retiré/, 'et la raison du serveur est affichée')
+})
+
+test('l\'échec d\'un jour n\'EFFACE PAS l\'absence d\'un autre', async () => {
+  // ⚠ LA CONTREPARTIE OUBLIÉE DE LA LEVÉE DU VERROU D'ÉCRAN, trouvée en review.
+  // Le rattrapage restituait un instantané de TOUT le tableau, pris avant la
+  // bascule de CE jour. Avec un verrou par jour, deux écritures peuvent être en
+  // vol : l'échec de la première remettait alors l'état d'avant la seconde, et
+  // effaçait de l'écran une absence pourtant bien enregistrée côté serveur.
+  // Un verrou par jour impose un rattrapage par jour.
+  const jA = dans(2), jB = dans(3)
+  const { w, t } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+
+  // A échoue, B réussit.
+  const vrai = w.fetch
+  w.fetch = async (url, opts) => {
+    const corps = opts && opts.body ? JSON.parse(opts.body) : null
+    if (corps && corps.action && corps.date === jA) {
+      t.appels.push({ url: String(url), corps })
+      return { ok: false, status: 500, json: async () => ({ error: 'Panne' }) }
+    }
+    return vrai(url, opts)
+  }
+
+  caseDu(w, jA).dispatchEvent(new w.Event('click', { bubbles: true }))
+  caseDu(w, jB).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(90)
+
+  assert.ok(!caseDu(w, jA).classList.contains('off'), 'A est revenu : son écriture a échoué')
+  assert.ok(caseDu(w, jB).classList.contains('off'),
+    'mais B RESTE absent — son écriture, elle, a abouti')
+})
+
+test('un RECHARGEMENT en cours d\'envoi ne fait pas retomber la case', async () => {
+  // ⚠ Le serveur rend l'état qu'il CONNAÎT ; il ne connaît pas encore l'écriture
+  // partie à l'instant. Revenir sur l'onglet — ou poser un congé — pendant qu'une
+  // absence s'envoie faisait donc retomber la case à son ancien état, avec
+  // « ✓ Absence enregistrée » toujours affiché au-dessus.
+  const j = dans(2)
+  const { w, t } = monter({ suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)
+  assert.ok(caseDu(w, j).classList.contains('off'), 'basculé')
+
+  // Rechargement complet pendant que l'écriture est encore tenue.
+  await t.chargerDisponibilites()
+  assert.ok(caseDu(w, j).classList.contains('off'),
+    'le jour en vol SURVIT au rechargement')
+
+  t.libererEcritures()
+  await souffler(40)
+  assert.ok(caseDu(w, j).classList.contains('off'), 'et il y est toujours après')
+})
+
+test('un rattrapage TARDIF n\'écrase pas des données fraîches', async () => {
+  // ⚠ `chargerDisponibilites` remplace `mesJours` EN ENTIER. Un rattrapage qui
+  // restituerait son instantané par-dessus effacerait ce que le rechargement
+  // vient d'apprendre — par exemple une absence que l'employeur venait de poser.
+  // ⚠ L'ÉCRITURE DOIT ÉCHOUER, sinon le rattrapage n'est jamais exercé et le test
+  // passe sur du vide — première version de ce test, attrapée en contre-épreuve.
+  const j = dans(2), jHote = dans(5)
+  const { w, t, etat } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+
+  // L'écriture de `j` est tenue, puis refusée — on garde la main sur l'instant.
+  let refuser = null
+  const vrai = w.fetch
+  w.fetch = async (url, opts) => {
+    const corps = opts && opts.body ? JSON.parse(opts.body) : null
+    if (corps && corps.action) {
+      t.appels.push({ url: String(url), corps })
+      await new Promise(r => { refuser = r })
+      return { ok: false, status: 500, json: async () => ({ error: 'Panne' }) }
+    }
+    return vrai(url, opts)
+  }
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(20)
+
+  // L'employeur pose une absence ailleurs, et l'écran la reçoit.
+  etat.exceptions = etat.exceptions.concat([
+    { id: 'h1', date: jHote, available: false, source: 'hote' }])
+  await t.chargerDisponibilites()
+  assert.ok(caseDu(w, jHote).classList.contains('off'), 'l\'absence de l\'employeur est là')
+
+  refuser()                       // l'écriture de `j` est refusée MAINTENANT
+  await souffler(60)
+
+  assert.ok(caseDu(w, jHote).classList.contains('off'),
+    'et elle SURVIT au rattrapage de l\'écriture refusée')
 })
 
 // ─── Les congés en plage ──────────────────────────────────────────────────

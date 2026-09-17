@@ -1804,3 +1804,157 @@ Rendu explicite :
 - **Mobile** : la page les *proposait* dans son sélecteur, et l'hôte découvrait
   le refus seulement à l'enregistrement (`local_only`). Ils en sont désormais
   exclus, et leur absence est expliquée.
+
+## Le clic « je ne suis pas disponible » — refonte v2, lot 1 (17 septembre 2026)
+
+Verdict des prestataires sur la v1 : **« trop lent »**, reproche n° 1. Il était
+mérité, et la cause n'était pas celle qu'on suppose.
+
+### La mesure, avant tout correctif
+
+Un clic coûtait **deux allers-retours réseau enchaînés**, pas un :
+
+```
+envoiEnCours = true              ← tout le calendrier gelé
+la case passe à 45 % d'opacité   ← elle ne change PAS d'état
+await envoyer(...)               ← requête 1 : l'écriture
+await chargerDisponibilites()    ← requête 2 : relecture COMPLÈTE
+```
+
+La relecture coûte **6 requêtes base enchaînées** côté serveur (`public_tokens`
+→ `profiles` → `profile_permissions` → exceptions → règles → congés) pour des
+données déjà en mémoire. L'écriture en refait 3 pour son propre contrôle de
+droits : **~10 allers-retours base par clic**.
+
+Plancher mesuré en production le 17 septembre, jeton invalide — donc **une
+seule** requête base avant le refus :
+
+```
+401  1,073 s    401  0,708 s    401  0,787 s    401  0,798 s    401  0,422 s
+```
+
+**~0,8 s médian pour le cas le plus court possible**, depuis un poste filaire.
+Le vrai clic en faisait dix fois plus, deux fois de suite, sur un téléphone.
+
+⚠️ **Ce n'était PAS le repeint.** `peindreMesJours` redessine 31 cases en DOM
+local : négligeable. Chercher du côté du rendu aurait fait perdre le lot.
+
+### Le correctif : rendu optimiste, et rien de plus
+
+L'état bascule **tout de suite**, l'envoi part derrière, et **on ne relit plus** —
+basculer un jour ne change ni les règles ni les congés, la relecture ne
+rapportait rien que l'écran ne sache déjà.
+
+⚠️ **Le rattrapage est la contrepartie, pas une option.** Un rendu optimiste qui
+ne sait pas revenir en arrière ne rend pas l'écran rapide : il le rend
+**menteur**, ce qui est pire que lent. Sur échec on remet l'état exact d'avant et
+on le dit — « Connexion impossible. Votre journée n'a pas changé. »
+
+⚠️ **Verrou par jour, plus par écran.** `envoiEnCours` gelait tout le
+calendrier : taper un second jour pendant l'envoi du premier ne faisait rien,
+sans le moindre signe — ce qui se lit « l'application ne répond pas ». On
+n'empêche plus que la course sur **le même jour**, la seule qui puisse partir en
+double.
+
+La ligne créée localement ne porte **pas d'`id`** : les deux écritures se font
+par DATE (`declarer`/`retirerIndisponibilite`) et le rendu ne lit que `date`,
+`available` et `source`. La classe `.dispo-case.envoi` (45 % d'opacité) est
+supprimée : il n'y a plus d'attente à signaler puisque l'état bascule.
+
+### ⚠️ La place du verrou est le piège
+
+Première version du correctif, attrapée en me relisant : `enVolParJour` était
+testé **après** la bascule optimiste. Une seconde tape sur le même jour
+inversait donc l'écran, puis sortait **sans rien envoyer**. La première écriture
+aboutissait, et l'écran affichait durablement **l'inverse** de ce que le serveur
+avait enregistré — exactement le mensonge que le rattrapage existe pour
+empêcher, réintroduit par la garde censée protéger l'écriture.
+
+Le test ne l'avait pas vu parce qu'il **comptait les écritures** sans regarder
+l'état final : une seule écriture, test au vert, écran faux. Il vérifie
+désormais les deux, et la contre-épreuve a été refaite en réintroduisant le
+défaut — il tombe.
+
+**Règle à retenir : un verrou qui protège une écriture se pose AVANT la
+mutation qu'il garde, jamais entre les deux.**
+
+### ⚠️ Un verrou par jour impose un rattrapage PAR JOUR
+
+Trois défauts trouvés en review, tous la même racine : le rattrapage restituait
+un **instantané de tout le tableau** alors que le verrou était devenu par jour.
+
+1. **L'échec d'un jour effaçait l'absence d'un autre.** Deux écritures peuvent
+   être en vol en même temps ; l'échec de la première remettait l'état d'avant la
+   seconde, effaçant de l'écran une absence pourtant enregistrée côté serveur.
+2. **Un rattrapage tardif écrasait des données fraîches.**
+   `chargerDisponibilites` remplace `mesJours` **en entier** : restituer un
+   instantané par-dessus effaçait ce que le rechargement venait d'apprendre —
+   par exemple une absence que l'employeur venait de poser.
+3. **Un rechargement en cours d'envoi faisait retomber la case.** Le serveur rend
+   l'état qu'il *connaît* ; il ne connaît pas encore l'écriture partie à
+   l'instant. Revenir sur l'onglet pendant un envoi faisait retomber la case,
+   avec « ✓ Absence enregistrée » toujours affiché au-dessus.
+
+Le correctif tient en trois pièces : le rattrapage ne touche **que le jour
+concerné**, il **ne fait rien** si `mesJours` a été remplacé entre-temps
+(comparaison d'identité), et `enVolParJour` est devenu une **Map** portant la
+valeur voulue, que `reappliquerEnVol()` repose après chaque rechargement.
+
+**Règle : lever un verrou global oblige à reprendre tout ce qu'il protégeait
+implicitement.** Ici il garantissait qu'aucune autre écriture ni aucun
+rechargement ne pouvait s'intercaler — trois invariants, gratuits tant qu'il
+était là, à reconstruire un par un dès qu'il est parti.
+
+### ⚠️ On n'affirme pas ce qu'on ne sait pas
+
+Le chemin `catch` annonçait « Connexion impossible. Votre journée n'a pas
+changé. » Or `fetch` lève aussi bien quand la requête n'est **jamais partie** que
+quand c'est la **réponse** qui s'est perdue — et `declarerIndisponibilite` est
+idempotent côté serveur, donc le second cas laisse l'absence bien enregistrée.
+La phrase était donc fausse une fois sur deux, et depuis la disparition de la
+relecture systématique, plus rien ne venait la corriger.
+
+Désormais : on **redemande au serveur** (`relireSilencieusement`, sans panneau
+d'erreur), et c'est sa vérité qui s'affiche. Si lui non plus ne répond pas, alors
+seulement on restitue, avec une phrase qui n'affirme rien de plus —
+« Connexion impossible. Réessayez dans un instant. »
+
+⚠️ Distinction qui porte tout : un **`!ok`** est un refus **connu** (le serveur a
+répondu non) — on restitue et on l'affirme. Un **`catch`** est une issue
+**inconnue** — on va vérifier avant de parler.
+
+### La contre-épreuve
+
+Les tests neufs ont été passés **contre l'ancien code** (`git stash` du seul
+`public.html`) : 4 des 5 tombent.
+
+```
+✖ un clic = UNE écriture, et AUCUNE relecture
+✖ la case bascule AVANT que le serveur ait répondu
+✖ le calendrier n'est plus GELÉ pendant l'envoi
+✖ une COUPURE en cours d'envoi REMET la journée comme elle était
+```
+
+Les deux autres passaient déjà : ils **gardent un acquis** (pas de double envoi
+sur le même jour, rattrapage sur refus serveur) plutôt que de prouver un ajout —
+et c'est dit dans leur commentaire, pour qu'on ne les lise pas comme des preuves.
+
+⚠️ Le harnais a reçu une **suspension d'écriture déterministe**
+(`suspendreEcriture` + `libererEcritures()`). Sans elle, on ne peut pas
+distinguer « l'écran a basculé tout de suite » de « l'écran a attendu le
+serveur » — c'est-à-dire qu'on ne peut pas tester le défaut qu'on vient de
+corriger. Une première version minutait (`souffler(10)` contre un délai de
+120 ms) : ça tient sur un poste au repos et lâche sur une machine chargée, ce
+qui fait d'un test un tirage au sort. L'écriture reste désormais en vol tant que
+le test ne la libère pas — aucune horloge dans la boucle.
+
+⚠️ **Deux contre-épreuves ont trouvé des tests faux avant de valider du code.**
+L'un comptait les écritures sans regarder l'état final : il passait alors que
+l'écran affichait l'inverse du serveur. L'autre laissait l'écriture **réussir**,
+donc n'exerçait jamais le rattrapage qu'il prétendait éprouver. Un test qui ne
+tombe pas sur le code défectueux ne prouve rien — c'est la seule façon de le
+savoir.
+
+Deux tests existants protégeaient une mécanique disparue (`.envoi`). Ils ont été
+**réorientés sur le vrai invariant** — le rattrapage — plutôt que supprimés : le
+cas qu'ils décrivaient (une coupure en sous-sol) reste le cas fréquent.
