@@ -18,12 +18,13 @@ function stub(relPath, exports) {
   return abs
 }
 
-function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed' }) {
+function chargerDispatcher({ events, menageThrows = false, accessThrows = false, templateThrows = false, snapshotStatus = 'confirmed', notifHoteThrows = false, notifHoteRetour = null }) {
   const etat = {
     updates: [],
     incidents: [],
     menageWrites: 0,
-    appels: { menages: 0, access: 0, templates: 0 }
+    notifsHote: [],
+    appels: { menages: 0, access: 0, templates: 0, notifHote: 0 }
   }
 
   const table = (nom) => {
@@ -92,6 +93,21 @@ function chargerDispatcher({ events, menageThrows = false, accessThrows = false,
   stub('lib/cron-messages.js', {
     triggerTemplates: async () => { etat.appels.templates++; if (templateThrows) throw new Error('brevo down') },
     processMessageTemplates: async () => {}
+  })
+  // Consommateur « prevenir l'hote d'une nouvelle reservation directe ».
+  // ⚠ SANS CE STUB, le vrai module se charge et cree un client Supabase a
+  // l'import : 20 tests de ce fichier sont tombes d'un coup sur
+  // « supabaseUrl is required ». Le dispatcher le requiert desormais de facon
+  // paresseuse — un consommateur ne doit pas imposer ses dependances au
+  // chargement du module qui l'appelle — mais le stub reste necessaire pour
+  // observer son comportement.
+  stub('lib/notif-hote-resa.js', {
+    notifierNouvelleResa: async (o) => {
+      etat.appels.notifHote++
+      etat.notifsHote.push(o)
+      if (notifHoteThrows) throw new Error('brevo down')
+      return notifHoteRetour || { ok: true }
+    }
   })
 
   delete require.cache[require.resolve('../lib/booking-changes-dispatch')]
@@ -366,4 +382,57 @@ test('ni Connaissances ni heures synchronisees : null (defauts appliques en aval
   )
   assert.strictEqual(p.checkInStart, null)
   assert.strictEqual(p.checkOutEnd, null)
+})
+
+// ─── Le consommateur « prevenir l'hote » ─────────────────────────────────────
+// Une reservation Airbnb ou Booking, l'hote l'apprend par la plateforme. Une
+// reservation DIRECTE, personne ne la lui annoncait.
+
+test('nouvelle reservation : l\'hote est prevenu, avec ce qu\'il faut pour agir', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev()] })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.appels.notifHote, 1)
+  const o = etat.notifsHote[0]
+  assert.strictEqual(o.bookingId, ev().booking_id)
+  assert.strictEqual(o.userId, 'u1')
+  assert.ok(o.snapshot, 'le snapshot, d\'ou sortent voyageur, dates et prix')
+  assert.ok('politique' in o, 'et la politique d\'annulation du bien')
+})
+
+test('LE TEST QUI COMPTE : l\'annonce ne part QUE sur une nouveaute', async () => {
+  // « Nouvelle reservation » sur une modification serait faux, et sur une
+  // annulation, absurde.
+  for (const type of ['modified', 'cancelled']) {
+    const { mod, etat } = chargerDispatcher({ events: [ev({ type })] })
+    await mod.dispatchBookingChanges({})
+    assert.strictEqual(etat.appels.notifHote, 0, `type ${type}`)
+  }
+})
+
+test('LE TEST QUI COMPTE : une annonce ratee est un ECHEC, jamais un silence', async () => {
+  // L'hote croit etre prevenu de ses ventes : s'il ne l'est pas, il doit
+  // l'apprendre autrement que par un client a sa porte.
+  const { mod, etat } = chargerDispatcher({
+    events: [ev()], notifHoteRetour: { ok: false, raison: 'brevo_non_configure' }
+  })
+  const out = await mod.dispatchBookingChanges({})
+  assert.strictEqual(out.echecs, 1)
+  assert.ok(etat.incidents.some(i => i.type === 'notif_hote_non_envoyee'),
+    'un incident nomme, pas une ligne de log')
+  assert.strictEqual(etat.updates[0].payload.processing_errors[0].consommateur, 'notif_hote')
+})
+
+test('une annonce ratee n\'emporte ni le menage, ni le code, ni le message', async () => {
+  const { mod, etat } = chargerDispatcher({ events: [ev()], notifHoteThrows: true })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.appels.menages, 1)
+  assert.strictEqual(etat.appels.templates, 1)
+  assert.ok(etat.updates[0].payload.processed_at, 'et l\'evenement est marque quand meme')
+})
+
+test('reservation annulee entre la detection et l\'effet : rien n\'est annonce', async () => {
+  // Annoncer une vente defaite serait pire que ne rien annoncer.
+  const { mod, etat } = chargerDispatcher({ events: [ev()], snapshotStatus: 'cancelled' })
+  await mod.dispatchBookingChanges({})
+  assert.strictEqual(etat.appels.notifHote, 0)
 })

@@ -122,7 +122,7 @@ passer `request` (demande non confirmée) comme une réservation active.
 
 `provider`, `status`, `statusRaw`, `arrival`, `departure`, `arrivalHour`, `firstName`,
 `lastName`, `numAdult`, `numChild`, `source`, `otaReservationCode`, `amount`,
-`commission`, `currency`, `guestEmail`.
+`commission`, `currency`, `guestEmail`, `guestPhone`.
 
 `otaReservationCode` est la clé de rattachement des avis voyageurs
 (Beds24 : `apiReference` ; Channex : `ota_reservation_code`).
@@ -535,9 +535,21 @@ change ne produit donc **aucun** `booking_change_event` : ni ménage, ni code
 d'accès, ni message de bienvenue. C'est testé
 (`tests/bookings-snapshot-email.test.js`), pas supposé.
 
+### `guestPhone`, même régime
+
+`customer.phone` côté Channex ; côté Beds24, `mobile` **puis** `phone` — le mobile d'abord,
+c'est celui qu'on compose le jour d'une arrivée. Jamais `null`, comme l'adresse, et pour la
+même raison.
+
+Il **n'ouvre aucun canal** : les SMS au voyageur ne sont pas du périmètre. Il sert à la
+notification de nouvelle réservation envoyée à l'hôte (`lib/notif-hote-resa.js`), qui doit
+pouvoir joindre son client sans ouvrir trois écrans.
+
 ### Backfill
 
-`node scripts/backfill-guest-email.js [--execute]` — dry run par défaut.
+`node scripts/backfill-guest-email.js [--execute]` — dry run par défaut. Il pose les **deux**
+champs (le nom du fichier ne parle que de l'e-mail : le téléphone l'a rejoint quand la
+notification hôte en a eu besoin, et un second script aurait dupliqué tout le reste).
 Re-dérive l'adresse du `raw` **déjà en base**, sans aucun appel provider, et
 écrit par le writer unique un snapshot ne portant que `provider` et `guestEmail` :
 le merge laisse les 15 autres champs intacts, donc `detectChange` compare des

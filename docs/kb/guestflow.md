@@ -244,6 +244,78 @@ le jour de l'arrivée, devant un voyageur sans son code.
   (facultatif) depuis la phase 2 de la réservation manuelle, et il part bien jusqu'au
   provider. C'est le badge qui manquait, pas la collecte.
 
+## « Vous avez une nouvelle réservation » — l'e-mail à l'HÔTE
+
+`lib/notif-hote-resa.js`, branché comme **consommateur du dispatcher** (`3 bis`).
+
+Une réservation Airbnb ou Booking, l'hôte l'apprend par la plateforme. Une réservation
+**directe**, personne ne la lui annonçait : il devait ouvrir HôteSmart pour savoir qu'il
+avait vendu.
+
+**Dans le dispatcher, pas dans le moteur ni dans la saisie manuelle.** Les deux créent des
+réservations `Offline` et passent toutes deux par le feed : brancher une fois ici couvre les
+deux sources, et la prochaine. Deux branchements en amont auraient donné deux
+implémentations — et un jour, une seule des deux corrigée.
+
+- **Offline seulement, en v1.** Notifier aussi les OTA doublerait ce que les plateformes
+  font déjà : deux e-mails pour un même fait, et on apprend à les ignorer tous les deux.
+  Le filtre vit dans le module, **pas** aussi dans le dispatcher : deux gardes d'accord
+  aujourd'hui, c'est une garde oubliée demain.
+- **Sur `new` seulement.** « Nouvelle réservation » sur une modification serait faux ; sur
+  une annulation, absurde. Et si la réservation a été annulée entre la détection et l'effet,
+  rien ne part — annoncer une vente défaite est pire que ne rien annoncer.
+- **Même canal host-owned** : la clé Brevo du compte propriétaire, son expéditeur vérifié.
+  L'hôte s'écrit à lui-même sous son propre nom — et surtout, sa notification de vente ne
+  dépend pas d'une clé plateforme qu'il ne contrôle pas.
+- **Mais avec repli plateforme, et ici il va de soi.** Sans lui, un hôte qui n'a jamais
+  connecté Brevo n'aurait *jamais* été prévenu de ses ventes directes — exactement le manque
+  que cette fonction comble — pendant que le fondateur recevait un SMS à chaque vente. Les
+  deux moitiés du défaut se tenaient : l'hôte muet, l'alarme bruyante. Et la question est
+  plus simple que pour le voyageur : le destinataire est **l'hôte**, qui sait parfaitement ce
+  qu'est HôteSmart. La marque blanche protège l'illusion du voyageur, pas la sienne.
+- **Destinataire** : le profil `is_owner` du compte. `notify_email = false` est un refus
+  explicite, respecté — et ce n'est **pas** une panne, donc aucun incident.
+
+### ⚠️ La dédup passe par `message_sent_log`, avec un `template_id` sentinelle
+
+La table porte un index unique `(user_id, booking_id, template_id)` et `template_id` n'a
+**aucune clé étrangère** : un UUID constant y tient la place d'un template, et c'est la base
+qui garantit l'unicité — pas notre vigilance. Le dispatcher peut rejouer un événement (échec
+d'un consommateur, reprise après coupure) ; sans cette garde, l'hôte recevrait deux fois la
+même annonce.
+
+**La ligne est posée AVANT l'envoi.** Contrepartie assumée, et c'est l'**inverse** du canal
+voyageur : un doublon « nouvelle réservation » inquiète plus qu'un manque, que l'écran des
+réservations comble.
+
+Avec une exception : quand les deux canaux échouent et que l'échec est **transitoire** (un
+quota Brevo se rétablit à minuit), la ligne est **retirée**. Sans ce geste, la sentinelle
+condamnerait l'annonce pour toujours — rattrapage manuel compris. Un échec **permanent**, lui,
+garde sa ligne : rien ne sert de réessayer ce qui ne peut pas marcher.
+
+### Ce qui manque au voyageur est dit à l'hôte
+
+Si la réservation n'a pas d'adresse, l'e-mail le dit en clair : aucun message automatique ne
+partira, ni confirmation, ni consignes, ni code d'accès. C'est le pendant du badge sur la
+fiche — l'hôte l'apprend quand il peut encore appeler son client, pas le jour de l'arrivée.
+
+### Une annonce ratée est un échec, jamais un silence
+
+Incident `notif_hote_non_envoyee` (seuil 1, **sans SMS**) et trace dans `processing_errors`.
+Sans SMS parce que la réservation, elle, est bien enregistrée : c'est son annonce qui manque.
+Un SMS par vente et par bien sur un compte mal configuré, c'est l'alarme qu'on apprend à
+ignorer — et le jour d'une vraie panne, elle s'y noie. L'hôte croit
+être prévenu de ses ventes : s'il ne l'est pas, il doit l'apprendre autrement que par un
+client à sa porte. L'échec **n'emporte pas** les autres consommateurs — ni le ménage, ni le
+code d'accès, ni le message de bienvenue.
+
+### `guestPhone` a rejoint le cœur
+
+Même régime que `guestEmail` (jamais `null`, cf. `emailOuRien`) : `customer.phone` côté
+Channex, `mobile` puis `phone` côté Beds24. Il **n'ouvre aucun canal** — les SMS au voyageur
+ne sont pas du périmètre. Il sert à cette notification, pour que l'hôte puisse joindre son
+client sans ouvrir trois écrans, et il dormait dans `raw` comme l'adresse y dormait.
+
 ## Rattraper un message que le 422 avait condamné
 
 `scripts/rejouer-message-offline.js <bookingId> <templateId> [--execute]`.

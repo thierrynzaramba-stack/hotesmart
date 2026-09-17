@@ -2,8 +2,12 @@
 // Etape 1 du chantier « canal e-mail pour les reservations directes » :
 // docs/specs/spec-canal-email-resa-directe.md.
 //
-// Pose `snapshot.guestEmail` sur les lignes DEJA en base, en le re-derivant du
-// payload provider conserve dans `raw`.
+// Pose `snapshot.guestEmail` et `snapshot.guestPhone` sur les lignes DEJA en
+// base, en les re-derivant du payload provider conserve dans `raw`.
+//
+// (Le nom du fichier ne parle que de l'e-mail : le telephone l'a rejoint quand la
+// notification de nouvelle reservation a l'hote en a eu besoin. Meme derivation,
+// meme ecriture chirurgicale — un second script aurait duplique tout le reste.)
 //
 // HORS CRON. One-shot, idempotent, rejouable.
 //
@@ -129,7 +133,11 @@ async function main () {
 
   for (const l of lignes) {
     const snap = l.snapshot || {}
-    if (snap.guestEmail) { bilan.deja++; continue }
+    // ⚠ « DEJA POURVUE » SE TESTE AVANT « SANS PAYLOAD ». Dans l'autre ordre,
+    // une ligne complete mais sans `raw` etait comptee en « sans payload brut » :
+    // aucune ecriture fausse, mais le bilan d'un backfill est ce sur quoi on
+    // decide de le relancer. Constat de review.
+    if (snap.guestEmail && snap.guestPhone) { bilan.deja++; continue }
     if (!l.raw) { bilan.sansRaw++; continue }
 
     // ⚠ ON NE DEVINE PAS LE PROVIDER. Le snapshot minimal ecrit plus bas le
@@ -141,20 +149,29 @@ async function main () {
     // Constat de review, 16 septembre 2026.
     if (!snap.provider) { bilan.sansProvider++; continue }
     const provider = snap.provider
-    let email
+    let derive
     try {
-      email = mapBooking(provider, l.raw).guestEmail
+      derive = mapBooking(provider, l.raw)
     } catch (e) {
       log(`⚠ mapping impossible pour ${l.booking_id} (${provider}) : ${e.message}`)
       bilan.echecs++
       continue
     }
-    if (!email) { bilan.sansAdresse++; continue }
+    // On ne pose que ce qui MANQUE : une ligne deja pourvue des deux champs est
+    // sautee, et le merge ne touchera de toute facon pas a un champ absent du
+    // snapshot minimal.
+    const email = snap.guestEmail ? undefined : derive.guestEmail
+    const phone = snap.guestPhone ? undefined : derive.guestPhone
+    if (!email && !phone) {
+      if (snap.guestEmail || snap.guestPhone) bilan.deja++
+      else bilan.sansAdresse++
+      continue
+    }
 
     bilan.aPoser++
     const src = snap.source || '(sans source)'
     bilan.parSource[src] = (bilan.parSource[src] || 0) + 1
-    aEcrire.push({ l, provider, email })
+    aEcrire.push({ l, provider, email, phone })
   }
 
   console.log('')
@@ -162,7 +179,7 @@ async function main () {
   log(`sans payload brut    : ${bilan.sansRaw}`)
   log(`provider inconnu     : ${bilan.sansProvider}`
     + (bilan.sansProvider ? '  ⚠ lancer scripts/backfill-snapshot-provider.js d\'abord' : ''))
-  log(`payload sans adresse : ${bilan.sansAdresse}`)
+  log(`payload sans rien    : ${bilan.sansAdresse}`)
   log(`mapping en echec     : ${bilan.echecs}`)
   log(`A POSER              : ${bilan.aPoser}`)
   console.log('')
@@ -174,7 +191,14 @@ async function main () {
     console.log('')
     log(`dont ${offline.length} Offline :`)
     for (const x of offline) {
-      log(`  ${x.l.booking_id.slice(0, 8)} ${x.l.snapshot.arrival}->${x.l.snapshot.departure} ${masque(x.email)}`)
+      // ⚠ « adresse deja posee » etait affiche des que `x.email` etait vide —
+      // y compris quand le payload n'en porte tout simplement PAS et qu'on ne
+      // pose que le telephone. La sortie affirmait l'inverse de la realite, et
+      // c'est elle qu'on lit pour decider de passer en --execute.
+      const etatAdresse = x.email ? masque(x.email)
+        : (x.l.snapshot.guestEmail ? '(adresse deja posee)' : '(aucune adresse)')
+      log(`  ${x.l.booking_id.slice(0, 8)} ${x.l.snapshot.arrival}->${x.l.snapshot.departure} `
+        + `${etatAdresse}${x.phone ? ' +tel' : ''}`)
     }
   }
 
@@ -185,14 +209,16 @@ async function main () {
   }
 
   console.log('')
-  for (const { l, provider, email } of aEcrire) {
+  for (const { l, provider, email, phone } of aEcrire) {
     const r = await saveBookingSnapshot(supabase, {
       userId:     l.user_id,
       bookingId:  l.booking_id,
       propertyId: l.property_id,
       provider,
-      // Le snapshot MINIMAL : le merge non destructif ne touchera que guestEmail.
-      snapshot:   { provider, guestEmail: email },
+      // Le snapshot MINIMAL : le merge non destructif ne touchera que les champs
+      // cites. `undefined` en laisse un intact — c'est la regle du merge, et
+      // c'est ce qui permet de ne reparer que ce qui manque.
+      snapshot:   { provider, guestEmail: email, guestPhone: phone },
       existing:   l.snapshot || null,
       existingPropertyId: l.property_id,
       existingRawHash:    l.raw_hash ?? null,

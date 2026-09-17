@@ -19,7 +19,7 @@ const etat = { hote: null, plateforme: [], incidents: [] }
 const origine = Module._load
 Module._load = function (d, ...reste) {
   if (d === './email-guestflow') return {
-    envoyerHtmlVoyageur: async o => {
+    envoyerHtml: async o => {
       etat.hote = o
       if (etat.leveHote) throw new Error('supabase injoignable')
       return etat.reponseHote || { ok: true, id: 'msg-hote' }
