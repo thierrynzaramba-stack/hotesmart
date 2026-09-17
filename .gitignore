@@ -175,3 +175,4 @@ _*.tmp.mjs
 
 # Apercus generes pour la validation sur pieces (hors depot).
 apercu-*.html
+.rejeu-message.json

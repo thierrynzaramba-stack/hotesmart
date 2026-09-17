@@ -244,6 +244,49 @@ le jour de l'arrivée, devant un voyageur sans son code.
   (facultatif) depuis la phase 2 de la réservation manuelle, et il part bien jusqu'au
   provider. C'est le badge qui manquait, pas la collecte.
 
+## Rattraper un message que le 422 avait condamné
+
+`scripts/rejouer-message-offline.js <bookingId> <templateId> [--execute]`.
+
+`booking_confirmed` passe par `triggerTemplates`, déclenché par un événement **one-shot**
+que le dispatcher marque `processed_at` : supprimer la ligne de `message_sent_log` ne suffit
+pas à le faire repartir, rien ne relira cet événement. Ce script est le rejeu manuel.
+
+Il emprunte **les fonctions du cron**, jamais des copies (`knowledgeDuBien`,
+`generateAutoMessage`, `canalPour`, `sendGuestMessage`, `noterEnvoi`) : un script de
+rattrapage qui réimplémenterait le chemin ne prouverait rien du chemin réel. Une première
+version recopiait la lecture de `knowledge` et y perdait son filtre `type = 'fixed'` — le
+voyageur aurait reçu une adresse que le cron n'aurait jamais envoyée.
+
+Les gardes, dans l'ordre du cron : séjour **actif** (une confirmation de bienvenue sur un
+séjour annulé n'a pas de sens), arrivée **dans la fenêtre −7 j/+30 j**, kill switch, canal
+e-mail, `message_sent_log`, empreinte de séjour. Chacune **arrête** si sa lecture échoue :
+`supabase-js` ne lève pas, et une garde qui ignore `error` conclut « rien trouvé » — donc
+« envoie » — sur une panne. C'est la seule barrière entre l'opérateur et un doublon.
+
+**Le texte envoyé est celui qui a été lu.** `generateAutoMessage` finit par un appel Haiku
+sans température figée : deux générations ne rendent pas le même texte, et un `--execute`
+qui régénérerait enverrait autre chose que ce que le dry run a montré. Le dry run écrit donc
+un brouillon (`.rejeu-message.json`, hors dépôt) que `--execute` envoie **tel quel**, après
+avoir vérifié qu'il concerne la même réservation et le même template.
+
+**Le dry run n'alerte personne** : `generateAutoMessage` appelle `prevenirManque` quand un
+placeholder manque, ce qui réveille le fondateur par SMS. Un mode « rien ne part » qui envoie
+un SMS n'en est pas un — on lui passe `userId = null`, seule condition que cette alerte
+regarde.
+
+### Purger une ligne de journal qui ment
+
+`scripts/purger-faux-envois-offline.js [--execute]` supprime, **par `id` et par `id` seul**,
+les lignes de `message_sent_log` posées avant l'envoi et jamais délivrées.
+
+⚠️ **Il vérifie `event_type` en base avant de supprimer.** Un `booking_confirmed` ne sera pas
+rejoué (événement one-shot consommé), mais un `arrival` ou un `departure` est rejoué par le
+cron **toutes les 5 minutes** tant que le séjour est dans la fenêtre : supprimer sa ligne
+enverrait un vrai message à un vrai voyageur, en quelques minutes, sans que personne l'ait
+demandé. La première version se fiait à un `template_id` relevé à la main pour affirmer que
+les trois étaient des `booking_confirmed` — c'était vrai ce jour-là, et ça ne prouvait rien.
+
 ### ⚠️ Ce qui reste HORS du routage : `lib/cron-classify.js`
 
 Les réponses **automatiques de l'IA** à un message entrant n'empruntent pas `canalPour` :

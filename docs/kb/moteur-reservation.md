@@ -677,6 +677,26 @@ qu'une tardivement — deux confirmations peuvent se lire comme deux réservatio
 C'est la même règle que le POST CRS d'issue incertaine (§ plus haut) : on ne
 rejoue pas ce dont on ignore s'il a abouti.
 
-**À trancher par le product owner** si la marque blanche doit primer sur la
-délivrabilité de cette preuve de paiement : il suffirait alors de retirer le
-repli, et l'incident deviendrait « confirmation NON envoyée ».
+**Tranché par Thierry le 17 septembre 2026 : le repli RESTE**, et il reste
+*tant que l'hôte n'a pas d'écran d'incidents*. Une confirmation qui part avec la
+mauvaise enveloppe vaut mieux qu'une confirmation qui ne part pas en silence —
+et aujourd'hui, le silence serait total du côté de l'hôte, qui n'a aucun endroit
+où voir que quelque chose a manqué.
+
+### DETTE — retirer le repli, le jour où l'hôte voit ses incidents
+
+Les deux moitiés du problème sont liées, et c'est pour ça qu'elles se soldent
+ensemble :
+
+1. l'hôte n'a **aucun écran** servant `automation_incidents` : il n'apprend
+   jamais que ses confirmations partent sous l'enseigne HôteSmart ;
+2. tant qu'il ne l'apprend pas, retirer le repli transformerait une enveloppe
+   mal signée en **message jamais envoyé**, et personne ne le saurait non plus.
+
+Le jour où cet écran existe, le repli n'a plus de raison d'être : l'hôte verra
+« votre compte Brevo n'est pas configuré » et pourra agir. Le geste sera alors
+de supprimer le bloc 2 de `envoyer()` dans `lib/email-voyageur.js` et de faire
+dire à `prevenirDuRepli` « confirmation NON envoyée ». Les tests
+`tests/confirmation-hote.test.js` qui défendent aujourd'hui « elle PART
+TOUJOURS » devront changer de sens dans le même commit — sans quoi ils
+défendront une règle abandonnée.

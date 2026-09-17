@@ -204,5 +204,11 @@ test('le moteur de reservation transmet le compte et le bien', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib/moteur-creation.js'), 'utf8')
   const bloc = src.split('async function prevenirVoyageur')[1].slice(0, 1600)
   assert.ok(/userId: t\.user_id/.test(bloc), 'le compte proprietaire')
-  assert.ok(/propertyId: bien \? bien\.id : null/.test(bloc), 'et le bien')
+  // ⚠ LE PROPID PROVIDER, PAS L'UUID. Cette valeur descend jusqu'a
+  // `reportIncident`, dont l'anti-spam filtre sur `property_id` : deux identites
+  // pour un meme bien, et une panne de quota Brevo alerte deux fois par heure au
+  // lieu d'une. Le reste du module passe deja `provider_property_id`.
+  assert.ok(/propertyId: bien \? String\(bien\.provider_property_id\) : null/.test(bloc),
+    'et le bien, sous la meme identite que partout ailleurs dans ce module')
+  assert.ok(!/propertyId: bien \? bien\.id\b/.test(bloc), 'jamais l\'UUID ici')
 })
