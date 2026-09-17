@@ -102,7 +102,20 @@ async function main () {
       const ok = e.status === true ? '✓ deja en place' : '— a poser'
       console.log(`  ${String(e.type).padEnd(6)} ${String(e.host_name).padEnd(26)} ${e.value}   ${ok}`)
     }
-    console.log('\nPuis relancer --creer. L\'authentification peut demander quelques heures.')
+    // ⚠ BREVO NE VALIDE PAS TOUT SEUL — en tout cas pas tout de suite.
+    // Les trois enregistrements etaient en place et resolus par trois resolveurs
+    // publics, et le domaine restait `authenticated: false` : la creation du
+    // webhook echouait encore. C'est `PUT /senders/domains/<d>/authenticate` qui
+    // declenche la verification, et elle a repondu dans la seconde.
+    // Sans cet appel, on attend un cycle qu'on ne maitrise pas en croyant que le
+    // DNS n'a pas propage.
+    if (!dInbound || !dInbound.authenticated) {
+      console.log('\nDeclenchement de la verification chez Brevo...')
+      const v = await brevo('PUT', `/senders/domains/${DOMAINE_INBOUND}/authenticate`)
+      console.log(`  HTTP ${v.status} ${String(v.json.message || JSON.stringify(v.json)).slice(0, 120)}`)
+      if (v.status < 400) console.log('  Relancer --creer.')
+      else console.log('  Les enregistrements ci-dessus ne sont pas encore vus : reessayer plus tard.')
+    }
     return
   }
 

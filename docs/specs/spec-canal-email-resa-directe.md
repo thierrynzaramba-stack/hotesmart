@@ -164,9 +164,12 @@ Le geste, ce jour-là : supprimer les blocs de repli, faire dire aux incidents �
 et **retourner les tests** qui défendent aujourd'hui « elle part toujours » — sans quoi ils
 défendront une règle abandonnée.
 
-### 2. L'ingestion des réponses e-mail (inbound parsing Brevo)
+### 2. L'ingestion des réponses e-mail (inbound parsing Brevo) — CHANTIER OUVERT
 
-Hors périmètre dès la spec d'origine. Conséquence assumée : le fil « messages envoyés » vit
+Hors périmètre dès la spec d'origine, **repris le 17 septembre 2026** : voir
+l'étude et le plan dans l'échange du chantier « inbound e-mail ». Infrastructure
+posée le 18 septembre (sous-domaine `reply.hotesmart.fr`, MX, webhook Brevo
+`id=2191668`). Ce qui suit reste vrai jusqu'à la bascule du `reply-to`. Conséquence assumée : le fil « messages envoyés » vit
 dans HôteSmart, les réponses arrivent dans la boîte mail de l'hôte (`reply-to` = son adresse
 d'expédition). Le jour où ce chantier s'ouvrira, `lib/cron-classify.js` devra router comme les
 autres (voir dette 3).
