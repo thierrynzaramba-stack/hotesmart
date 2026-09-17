@@ -2216,3 +2216,118 @@ côté DOM. `tests/pwa-prendre-menage.test.js` tient désormais les cinq gardes 
 l'écriture, le filtre de lecture, l'absence de donnée voyageur, le verrou posé à
 la prise — avec une contre-épreuve sur `poserPropositionsDues`, pour que le jour
 où son filtre `'auto'` changera, la protection posée ici soit revue.
+
+## Lots 3 et 4, et le vrai coupable de la lenteur (17 septembre 2026)
+
+### Le clic sur une date n'était pas en cause
+
+Test humain en production : « toujours beaucoup trop lent ». Vérification faite
+sur le code **réellement servi** : `basculerMonJour` y est bien optimiste
+(`appliquerJour()` puis `peindreMesJours()` avant tout `await`). Le lot 1
+fonctionnait.
+
+**Cinq autres chemins de la même vue avaient gardé l'ancien circuit** — écriture
+puis `await chargerDisponibilites()`, la relecture à 6 requêtes base, écran
+verrouillé pendant les deux :
+
+| fonction | ce qu'elle pilote |
+|---|---|
+| **`enregistrerMesJours`** | **les 7 cases de jours** — le reproche |
+| `basculerMonAlternance` | semaine A/B |
+| `inverserMonAncrage` | inverser A↔B |
+| `poserMonConge` / `retirerMonConge` | les congés |
+
+⚠️ **Le service worker est hors de cause** : il est en *network-first*, un
+navigateur en ligne ne sert jamais d'ancien code. `CACHE_VERSION` a quand même
+été bumpé — une PWA **installée**, ouverte hors ligne puis revenue, garde
+l'ancienne coquille dans l'ancien cache.
+
+### Le verrou était lui-même un correctif
+
+`verrouillerMesCases` avait été posé pour un vrai défaut : une seconde tape
+partait dans un `return` **muet** — le navigateur avait déjà coché, la requête ne
+partait pas, le repeint décochait, et le message affichait « ✓ » pour le geste
+**précédent**. Il rendait l'attente **visible** ; il ne la supprimait pas.
+
+Il est donc **remplacé, pas supprimé** : chaque geste part, et un **numéro
+d'ordre** décide qui a le dernier mot — `reglerMesJours` envoie l'état complet lu
+à l'instant de l'envoi, donc le dernier envoi est la vérité. Aucun geste avalé,
+rien ne gèle.
+
+### ⚠️ Rendre la main tôt n'est PAS généralisable — deux constats critiques
+
+J'avais appliqué le même « rendre la main, réconcilier derrière » aux quatre
+autres chemins. **C'était faux, et coûteux.**
+
+**Alternance A/B — perte de tous les jours récurrents.** `forceAlternee` est posé
+*avant* la relecture : pendant toute la fenêtre, `enQuinzaine()` rend déjà `true`
+alors que le DOM ne contient encore que des cases `data-lot="simple"`. Une tape
+dans cet intervalle appelle `lotsASoumettre(true)`, qui lit les lots « a » et
+« b » — **tous deux vides** — et envoie deux lots vides. Elle perdait **tous** ses
+jours récurrents, donc était comptée **disponible tous les jours**, pendant que
+l'écran affichait « ✓ Vos jours sont enregistrés ».
+
+**Ancrage et congés**, même famille : les lignes A/B affichent encore l'ancien
+arrangement (une tape réécrit l'ancrage d'avant) ; la ligne de congé reste
+cliquable (une seconde tape transforme une annulation **réussie** en
+« Impossible d'annuler »).
+
+**La règle : on ne peut rendre la main avant la relecture que si rien dans le DOM
+ne peut produire une écriture fausse pendant la fenêtre.** Sur ces quatre
+chemins, le DOM **est** la source de l'écriture suivante, et il affiche encore
+l'état d'avant. Seul `enregistrerMesJours` s'en passe — là, le DOM est déjà la
+vérité qu'on envoie, et un numéro d'ordre départage.
+
+⚠️ **Et lever `envoiEnCours` rendait les autres écrivains aveugles.** Ils gardent
+tous leur `if (… || envoiEnCours) return` : cocher mercredi puis toucher « une
+semaine sur deux » faisait calculer l'alternance sur un `mesJours` d'**avant** —
+mercredi disparaissait sans un mot. D'où `ecrituresRegles`, un **compteur** (la
+fonction se rappelle elle-même : un booléen serait baissé par l'appel interne
+pendant que l'externe est encore en vol).
+
+### Lot 4 — la porte des avis
+
+Le ratio remplace l'onglet. ⚠️ **La porte et les chiffres n'ont pas la même
+condition**, et les confondre enferme dehors :
+
+| situation | chiffres | porte |
+|---|---|---|
+| comptage sûr | affichés | ouverte |
+| panne / comptage tronqué | **tus** — jamais un faux chiffre | **ouverte** (« Mes avis › ») |
+| sonde en 503 | tus | **ouverte** — le serveur parle, donc le droit existe |
+| droit absent ou **retiré** | — | **fermée** — un ratio survivant au retrait du droit serait une fuite |
+
+Deux défauts trouvés en review sur ce seul point : la porte **survivait au
+retrait du droit**, et sur un 503 elle s'ouvrait **vide** (l'`innerHTML` du
+premier chargement) pendant que l'onglet avait disparu — plus aucun accès aux
+avis, sur le cas même où la vue sait expliquer la panne.
+
+### Lot 3 — la liste des 30 jours
+
+Sous le calendrier : il dit **où** et **quand**, elle dit **quoi**. Ses ménages et
+ceux à prendre **mêlés**, triés par date — les séparer obligeait à comparer deux
+colonnes pour savoir ce qu'il y a mardi. Ce qui les distingue est leur **allure**.
+
+Trois défauts : les bornes étant inclusives des deux côtés, « 30 prochains
+jours » en couvrait **31** ; `data-jour` interpolait une date **serveur** sans
+échappement, alors que les bornes de fenêtre sont des comparaisons de chaînes ;
+et une **redéclaration de `jourLisible`** cassait le parsing du bloc entier —
+attrapée par `js-navigateur-parse` avant le navigateur. La fonction existait
+déjà, en plus robuste.
+
+⚠️ **Le filtre de biens ne filtrait qu'une vue sur deux.** Ses gestionnaires
+n'appelaient que `routeRender()`, qui ne repeint pas « Mes jours » : masquer un
+bien y laissait ses bulles et ses lignes jusqu'au prochain changement d'onglet.
+
+### ⚠️ Un test qui n'assertait rien, et qui couvrait un comportement absent
+
+« La liste suit le filtre de biens » cherchait `input[value="p9"]` — or
+`renderFilters` n'émet **pas** d'attribut `value`. Le sélecteur ne trouvait jamais
+rien, le `if (c)` sautait tout le corps, et le test passait à vide **sur un
+comportement qui n'existait pas**. C'est en le corrigeant qu'on a trouvé le
+défaut du filtre.
+
+⚠️ Le harnais a reçu une **suspension de lecture** (`suspendreLectures()` /
+`libererLectures()`) : la fenêtre fautive de l'alternance s'ouvre **après**
+l'écriture, pendant la relecture. Tenir l'écriture ne l'atteint jamais — vérifié
+en réintroduisant le défaut, le test passait sur du vide.

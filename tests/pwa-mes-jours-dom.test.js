@@ -59,6 +59,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    bookings = [], aPrendre = null,
                    coupureEcriture = false, echecReglage = null,
                    retardEcriture = 0, suspendreEcriture = false,
+
                    coupureTotale = false } = {}) {
   const html = fs.readFileSync(FICHIER, 'utf8')
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
@@ -77,6 +78,11 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   // que le test n'appelle pas `libererEcritures()` — aucune horloge dans la
   // boucle, donc aucun aleas.
   const enAttente = []
+  // ⚠ ET UNE SUSPENSION DE LECTURE. La fenetre fautive de `basculerMonAlternance`
+  // s'ouvre APRES l'ecriture, pendant la relecture : tenir l'ecriture ne permet
+  // donc pas de l'observer, et le test passait sur du vide.
+  const lecturesEnAttente = []
+  let lecturesSuspendues = false
 
   src += `
     globalThis.__p = {
@@ -126,6 +132,9 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     if (coupureEcriture && corps && corps.action) throw new TypeError('Failed to fetch')
     if (suspendreEcriture && corps && corps.action) {
       await new Promise(r => enAttente.push(r))
+    }
+    if (lecturesSuspendues && !corps && /action=disponibilites/.test(String(url))) {
+      await new Promise(r => lecturesEnAttente.push(r))
     }
     // ⚠ SERT A PROUVER LE RENDU OPTIMISTE. Sans retard, la reponse revient dans
     // la meme microtache et on ne peut pas distinguer « l'ecran a bascule tout
@@ -179,6 +188,8 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   vm.runInContext(src, dom.getInternalVMContext())
   // `libererEcritures` : rend la main aux ecritures suspendues, dans l'ordre.
   w.__p.libererEcritures = () => { while (enAttente.length) enAttente.shift()() }
+  w.__p.suspendreLectures = () => { lecturesSuspendues = true }
+  w.__p.libererLectures   = () => { lecturesSuspendues = false; while (lecturesEnAttente.length) lecturesEnAttente.shift()() }
   return { w, t: w.__p, etat }
 }
 
@@ -276,25 +287,83 @@ test('une panne d\'enregistrement NE LAISSE PAS croire que c\'est parti', async 
   assert.deepStrictEqual(cochees, [1, 2], 'ses jours d\'avant sont toujours là')
 })
 
-test('pendant l\'envoi, les cases sont VERROUILLÉES — pas de geste avalé', async () => {
-  // ⚠ Une seconde tape partait dans un `return` MUET : le navigateur avait déjà
-  // coché la case, la requête ne partait pas, le repeint la décochait — et le
-  // message affichait « ✓ » pour le geste PRÉCÉDENT. Une case grisée ne ment
-  // pas ; un retour muet, si.
-  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])] })
+test('pendant l\'envoi, AUCUN geste n\'est avalé — et rien ne gèle', async () => {
+  // ⚠ L'INVARIANT N'A PAS CHANGÉ, LE MOYEN SI. Le défaut d'origine : une seconde
+  // tape partait dans un `return` MUET — le navigateur avait déjà coché la case,
+  // la requête ne partait pas, le repeint la décochait, et le message affichait
+  // « ✓ » pour le geste PRÉCÉDENT. Le verrou rendait l'attente visible ; il ne
+  // la supprimait pas, et les cases restaient grisées pendant DEUX allers-retours
+  // (écriture + relecture complète) — le reproche n° 1 des utilisatrices, resté
+  // sur ce chemin-là après le lot 1.
+  // Désormais chaque geste PART, et un numéro d'ordre décide qui a le dernier
+  // mot : `reglerMesJours` envoie l'état COMPLET lu à l'instant de l'envoi.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  const coche = v => w.document.querySelector(`#dispo-recur input[data-lot][value="${v}"]`)
+
+  coche(2).checked = true
+  coche(2).dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(20)
+
+  // RIEN N'EST GRISÉ : l'écran reste utilisable pendant l'envoi.
+  assert.strictEqual(
+    [...w.document.querySelectorAll('#dispo-recur input[data-lot]')].some(c => c.disabled), false,
+    'aucune case n\'est figée')
+  // Et la confirmation est déjà là — elle ne se fait pas attendre.
+  assert.match(message(w), /enregistrés/)
+
+  // Un SECOND geste pendant que le premier est en vol : il part aussi.
+  coche(3).checked = true
+  coche(3).dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(20)
+  assert.strictEqual(ecritures(t).length, 2, 'les deux gestes sont partis — aucun avalé')
+
+  t.libererEcritures()
+  await souffler(80)
+
+  // Le DERNIER envoi fait foi : il porte l'état complet, mardi ET mercredi.
+  const dernier = ecritures(t)[ecritures(t).length - 1]
+  const jours = dernier.corps.lots.flatMap(l => l.jours).sort()
+  assert.deepStrictEqual(jours, [1, 2, 3], 'le dernier envoi porte tout')
+})
+
+test('un REFUS du serveur remet les cases comme elles étaient', async () => {
+  // La contrepartie de la levée du verrou : sans lui, une case refusée resterait
+  // cochée à l'écran. On remet ce que le serveur connaît, et on le dit.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])],
+                            echecReglage: { status: 503, message: 'Panne' } })
   t.seed()
   await t.chargerDisponibilites()
   const mardi = w.document.querySelector('#dispo-recur input[data-lot][value="2"]')
   mardi.checked = true
   mardi.dispatchEvent(new w.Event('change', { bubbles: true }))
-  // Immédiatement après, avant la réponse : les cases doivent être figées.
-  assert.strictEqual(
-    [...w.document.querySelectorAll('#dispo-recur input[data-lot]')].every(c => c.disabled), true,
-    'toutes les cases sont verrouillées pendant l\'envoi')
-  await souffler(150)
-  assert.strictEqual(
-    [...w.document.querySelectorAll('#dispo-recur input[data-lot]')].some(c => c.disabled), false,
-    'et déverrouillées après')
+  await souffler(120)
+
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort()
+  assert.deepStrictEqual(cochees, [1], 'mardi est revenu décoché')
+  assert.match(message(w), /Panne/)
+})
+
+test('HORS LIGNE, la case cochée est REMISE comme avant', async () => {
+  // ⚠ Le navigateur a déjà coché : sortir sans repeindre laisserait à l'écran un
+  // réglage qui n'est parti nulle part — exactement le mensonge que le rendu
+  // optimiste doit éviter.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], enLigne: false })
+  t.seed()
+  await t.chargerDisponibilites()
+  const avant = t.appels.length
+  const mardi = w.document.querySelector('#dispo-recur input[data-lot][value="2"]')
+  mardi.checked = true
+  mardi.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(60)
+
+  assert.strictEqual(t.appels.length, avant, 'rien n\'est parti')
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort()
+  assert.deepStrictEqual(cochees, [1], 'la case est revenue décochée')
+  assert.match(message(w), /Hors ligne/)
 })
 
 test('AUCUNE chaîne RRULE ne remonte : elle envoie des JOURS', async () => {
@@ -1071,6 +1140,174 @@ test('un jour ABSENT n\'est plus ROUGE — il est éteint', async () => {
   const PAGE = fs.readFileSync(FICHIER, 'utf8')
   assert.ok(!/\.dispo-case\.off \{ background: #FBE9E6/.test(PAGE), 'plus de fond rouge')
   assert.match(PAGE, /\.dispo-case\.off \{ background: var\(--bg2\)/)
+})
+
+// ─── Mes 30 prochains jours (refonte v2, lot 3) ───────────────────────────
+
+const agenda = w => w.document.getElementById('agenda-liste')
+
+test('la liste montre ses ménages ET ceux à prendre, triés par date', async () => {
+  // ⚠ MELES, PAS EN DEUX LISTES. Les separer obligeait a comparer deux colonnes
+  // pour savoir ce qu'il y a mardi. Ce qui les distingue est leur ALLURE.
+  const j1 = dans(1), j3 = dans(3)
+  const { w, t } = monter({ bookings: [menage(j3)], aPrendre: [offre(j1)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+
+  const jours = Array.from(agenda(w).querySelectorAll('.agenda-date')).map(e => e.textContent)
+  assert.strictEqual(jours.length, 2)
+  assert.ok(jours[0].includes(String(Number(j1.slice(8, 10)))), 'le plus proche en premier')
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item.offre').length, 1)
+})
+
+test('le jour MEME est mis en évidence', async () => {
+  const j = dans(0)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const bloc = agenda(w).querySelector('.agenda-jour')
+  assert.ok(bloc.classList.contains('auj'))
+  assert.match(bloc.textContent, /Aujourd/)
+})
+
+test('la liste s\'arrête à 30 jours', async () => {
+  const dedans = dans(29), dehors = dans(40)
+  const { w, t } = monter({ bookings: [menage(dedans), menage(dehors)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-jour').length, 1)
+})
+
+test('un jour d\'absence portant un ménage le DIT dans la liste', async () => {
+  // Sinon elle lit « j'ai un ménage mardi » sans voir qu'elle s'est dite absente.
+  const j = dans(2)
+  const { w, t } = monter({
+    exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }],
+    aPrendre: [offre(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  assert.match(agenda(w).querySelector('.agenda-date').textContent, /absente/)
+})
+
+test('une offre de la liste ouvre la MEME feuille que la bulle', async () => {
+  // Deux chemins vers deux feuilles differentes finiraient par dire deux choses
+  // differentes du meme menage.
+  const j = dans(2)
+  const { w, t } = monter({ aPrendre: [offre(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  agenda(w).querySelector('.agenda-item.offre').dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex')
+  assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/)
+})
+
+test('SES ménages ne sont pas cliquables dans la liste', async () => {
+  // Leur detail vit dans le planning : deux portes vers la meme fiche se
+  // contrediraient au premier changement.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const item = agenda(w).querySelector('.agenda-item')
+  assert.ok(item)
+  assert.strictEqual(item.tagName, 'DIV', 'pas un bouton')
+  assert.ok(!item.classList.contains('offre'))
+})
+
+test('la liste suit le filtre de biens, comme le calendrier', async () => {
+  // ⚠ CE TEST N'ASSERTAIT RIEN. Il cherchait `input[value="p9"]` — or
+  // `renderFilters` n'émet PAS d'attribut `value` : le sélecteur ne trouvait
+  // jamais rien, le `if (c)` sautait tout le corps, et le test passait à vide.
+  // Il couvrait d'ailleurs un comportement ABSENT : les gestionnaires de filtre
+  // n'appelaient que `routeRender()`, qui ne repeint pas la vue « Mes jours ».
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j, 'p1')], aPrendre: [offre(j, 'p9')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item').length, 2)
+
+  // On masque p9 : son offre quitte la liste, le ménage de p1 reste.
+  const c = w.document.getElementById('filter-p9')
+  assert.ok(c, 'le bien connu par les seules offres est bien filtrable')
+  c.checked = false
+  c.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(40)
+
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item.offre').length, 0,
+    'l\'offre du bien masqué quitte la liste SANS changer d\'onglet')
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item').length, 1)
+  assert.ok(!caseDu(w, j).querySelector('.dispo-bulle'), 'et la bulle quitte le calendrier')
+})
+
+test('« Mes 30 prochains jours » en couvre exactement 30', async () => {
+  // Les bornes sont inclusives des deux côtés : sans `- 1`, la liste couvrait
+  // aujourd'hui PLUS trente, soit trente et un.
+  const { w, t } = monter({ bookings: [menage(dans(0)), menage(dans(29)), menage(dans(30))] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const jours = agenda(w).querySelectorAll('.agenda-jour')
+  assert.strictEqual(jours.length, 2, 'J+0 et J+29 — pas J+30')
+})
+
+test('rien de prévu : on le dit pour les 30 JOURS, pas en général', async () => {
+  const { w, t } = monter()
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  assert.match(agenda(w).textContent, /30 prochains jours/)
+})
+
+test('A/B : aucune tape ne peut passer AVANT que l\'écran soit repeint', async () => {
+  // ⚠ CONSTAT CRITIQUE DE LA REVIEW. J'avais rendu la main avant la relecture,
+  // comme sur les autres chemins. Mais `forceAlternee` est posé AVANT :
+  // `enQuinzaine()` rendait déjà `true` pendant que le DOM ne contenait encore
+  // que des cases `data-lot="simple"`. Une tape dans cette fenêtre appelait
+  // `lotsASoumettre(true)`, qui lit les lots « a » et « b » — tous deux VIDES —
+  // et envoyait deux lots vides : elle perdait TOUS ses jours récurrents, donc
+  // était comptée disponible tous les jours, pendant que l'écran affichait
+  // « ✓ Vos jours sont enregistrés ».
+  // ⚠ L'ÉCRITURE EST TENUE : sans ça, elle se résout avant qu'on puisse observer
+  // la fenêtre, et le test passe sur du vide.
+  // ⚠ C'EST LA LECTURE QU'ON TIENT, PAS L'ECRITURE. La fenetre fautive s'ouvre
+  // APRES que l'ecriture a abouti, pendant la relecture : tenir l'ecriture ne
+  // l'atteint jamais, et le test passait sur du vide — verifie en reintroduisant
+  // le defaut.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  t.suspendreLectures()
+
+  const bouton = w.document.getElementById('dispo-alterner')
+  assert.ok(bouton, 'le bouton « une semaine sur deux » est là')
+  bouton.click()
+  await souffler(40)
+
+  // Pendant l'envoi ET la relecture, les cases restent figées : aucune tape ne
+  // peut produire une écriture bâtie sur un DOM qui ne correspond pas encore.
+  const figees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]')]
+  assert.ok(figees.length && figees.every(c => c.disabled),
+    'les cases restent verrouillées jusqu\'au repeint')
+
+  t.libererLectures()
+  await souffler(120)
+  const jours = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')].map(c => +c.value)
+  assert.ok(jours.length > 0, 'ses jours n\'ont pas été effacés')
+})
+
+test('une écriture de JOURS en vol bloque les quatre autres écrivains', async () => {
+  // ⚠ En cessant de lever `envoiEnCours`, je les rendais aveugles : cocher
+  // mercredi puis toucher « une semaine sur deux » faisait calculer l'alternance
+  // sur un `mesJours` d'AVANT — mercredi disparaissait, sans un mot.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  const mercredi = w.document.querySelector('#dispo-recur input[data-lot][value="3"]')
+  mercredi.checked = true
+  mercredi.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(20)
+  const apresCoche = ecritures(t).length
+
+  const bouton = w.document.getElementById('dispo-alterner')
+  if (bouton) {
+    bouton.click()
+    await souffler(20)
+    assert.strictEqual(ecritures(t).length, apresCoche,
+      'l\'alternance ne part pas tant que l\'écriture de jours est en vol')
+  }
+  t.libererEcritures()
+  await souffler(80)
 })
 
 // ─── Les congés en plage ──────────────────────────────────────────────────

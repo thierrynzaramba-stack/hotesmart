@@ -445,19 +445,29 @@ test('la période réglée par l\'hôte est ÉCRITE à côté du ratio', async (
   }
 })
 
-test('PANNE de compteurs : l\'en-tête reste VIDE, jamais un faux chiffre', async () => {
+test('PANNE de compteurs : aucun chiffre — mais la PORTE reste', async () => {
+  // ⚠ L'INVARIANT TIENT, SON MOYEN A CHANGÉ (refonte v2, lot 4). Jamais un faux
+  // chiffre : ça, c'est intact. Mais depuis que les avis vivent DERRIÈRE ce
+  // bouton — l'onglet a disparu —, masquer l'en-tête sur une panne de comptage
+  // l'enfermerait dehors : elle n'aurait plus aucun moyen d'atteindre ses avis,
+  // alors même que la vue sait expliquer la panne. Les chiffres se taisent, la
+  // porte reste.
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: { total: 0, positif: 0, remarque: 0, erreur: true }, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('entete-ratio').style.display, 'none')
-  assert.strictEqual(get('entete-ratio').innerHTML, '')
+  assert.strictEqual(get('entete-ratio').style.display, '', 'la porte est là')
+  const html = get('entete-ratio').innerHTML
+  assert.ok(!/ratio-item/.test(html), 'et elle ne porte AUCUN chiffre')
+  assert.match(html, /Mes avis/, 'elle dit seulement où elle mène')
 })
 
-test('comptage TRONQUÉ : pas de ratio permanent non plus', async () => {
-  // Un chiffre partiel affiché en permanence, sans place pour l'expliquer,
-  // se lirait comme le total. L'onglet Avis, lui, le dit.
+test('comptage TRONQUÉ : pas de chiffre non plus, et la porte tient', async () => {
+  // Un chiffre partiel affiché en permanence, sans place pour l'expliquer, se
+  // lirait comme le total. La vue Avis, elle, le dit — encore faut-il pouvoir
+  // l'atteindre.
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: { ...RATIO_OK, tronque: true }, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('entete-ratio').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').style.display, '')
+  assert.ok(!/ratio-item/.test(get('entete-ratio').innerHTML), 'aucun chiffre partiel')
 })
 
 test('self_view_reviews coupé : ni onglet NI ratio permanent', async () => {

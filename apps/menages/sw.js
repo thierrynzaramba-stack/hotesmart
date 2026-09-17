@@ -1,7 +1,11 @@
 // HôteSmart Clean - Service Worker
 // Strategie: network-first avec fallback cache
 // Bumper CACHE_VERSION a chaque deploiement majeur force le refresh
-const CACHE_VERSION = 'hotesmart-clean-v2';
+// ⚠ BUMPE A LA REFONTE v2 (17 septembre 2026). La strategie est network-first,
+// donc un navigateur EN LIGNE ne sert jamais d'ancien code — mais une PWA
+// installee, ouverte hors ligne puis revenue, garde l'ancienne coquille dans
+// l'ancien cache. Bumper force son eviction a l'activation.
+const CACHE_VERSION = 'hotesmart-clean-v3-refonte';
 const OFFLINE_URLS = [
   './public.html',
   './icons/icon-192.png',

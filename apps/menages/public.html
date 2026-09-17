@@ -165,6 +165,34 @@
        d'opacite pendant l'attente reseau. Depuis le rendu optimiste, la case
        change d'ETAT immediatement — il n'y a plus d'attente a signaler, et une
        case grisee pendant que son etat a deja bascule n'aurait plus aucun sens. */
+    /* ─── Mes 30 prochains jours (refonte v2, lot 3) ──────────────────────── */
+    .agenda-jour + .agenda-jour { margin-top: 14px; }
+    .agenda-date { font-size: 12.5px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
+    .agenda-date em { font-style: normal; font-weight: 400; color: var(--text3); }
+    /* ⚠ SEUL LE JOUR MEME PORTE UN FOND PLEIN. C'est ce qu'elle fait
+       MAINTENANT ; tout mettre en avant, c'est ne rien mettre en avant. */
+    .agenda-jour.auj .agenda-date { color: var(--primary); }
+    .agenda-jour.auj .agenda-item { background: var(--primary-bg); border-color: rgba(201,123,92,.3); }
+    .agenda-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      width: 100%; text-align: left; font-family: inherit; color: var(--text);
+      background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius);
+      padding: 10px 12px; font-size: 13.5px;
+    }
+    .agenda-item + .agenda-item { margin-top: 6px; }
+    /* Une offre est CLIQUABLE ; un menage a elle ne l'est pas ici — son detail
+       vit dans le planning, et deux portes vers la meme fiche se contredisent. */
+    .agenda-item.offre { border: 1px dashed var(--primary); cursor: pointer; }
+    .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
+    .agenda-bien { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .agenda-tag {
+      font-size: 9.5px; font-weight: 700; letter-spacing: .3px; border-radius: 999px;
+      padding: 2px 8px; flex-shrink: 0;
+    }
+    .agenda-tag.offre { background: var(--primary); color: #fff; }
+    .agenda-tag.fait { background: var(--green-bg); color: var(--green); }
+    .agenda-vide { font-size: 12.5px; color: var(--text2); }
+
     .dispo-legende { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px;
                      color: var(--text2); margin-top: 12px; }
     .dispo-legende i { display: inline-block; width: 12px; height: 12px; border-radius: 4px;
@@ -214,7 +242,12 @@
     .avis-meta .pos { color: #1E7B34; }
     .avis-meta .neg { color: #A85B12; }
     .avis-texte { font-size: 13px; line-height: 1.5; }
-    .entete-ratio { text-align: right; line-height: 1.3; }
+    .entete-ratio { text-align: right; line-height: 1.3; cursor: pointer;
+                    border-radius: var(--radius); padding: 4px 6px; margin: -4px -6px; }
+    .entete-ratio:hover { background: var(--bg2); }
+    .entete-ratio:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+    /* Repli quand les chiffres ne sont pas surs : la porte reste, pas le chiffre. */
+    .ratio-porte { font-size: 13px; font-weight: 600; color: var(--primary); white-space: nowrap; }
     .entete-ratio .ratio { justify-content: flex-end; gap: 10px; }
     .entete-ratio .ratio-item { font-size: 14px; }
     .entete-ratio .entete-periode { font-size: 11px; color: var(--text2); }
@@ -680,7 +713,11 @@
            c'est le rappel d'objectif quotidien. Masque tant que le serveur n'a
            pas confirme le droit — et sur panne de compteurs, car un ratio faux
            en permanence vaut moins que pas de ratio. -->
-      <div class="entete-ratio" id="entete-ratio" style="display:none"></div>
+      <!-- ⚠ LE RATIO EST LA PORTE DES AVIS (lot 4) : plus d'onglet. `role` et
+           `tabindex` parce qu'un `<div>` cliquable n'est atteignable ni au
+           clavier ni au lecteur d'ecran. -->
+      <div class="entete-ratio" id="entete-ratio" style="display:none"
+           role="button" tabindex="0" title="Voir mes avis"></div>
     </div>
 
     <div class="content">
@@ -759,6 +796,14 @@
                  avoir les deux. Une tape bascule un jour ; pour plusieurs jours
                  d'affilee, le conge ci-dessous est fait pour ca. -->
             <div class="dispo-aide" id="dispo-message"></div>
+          </div>
+
+          <!-- MES 30 PROCHAINS JOURS (refonte v2, lot 3). Sous le calendrier :
+               il dit OU et QUAND d'un coup d'oeil, la liste dit QUOI. Celle du
+               jour est mise en evidence — c'est ce qu'elle fait maintenant. -->
+          <div class="dispo-carte" id="carte-agenda">
+            <div class="dispo-titre">Mes 30 prochains jours</div>
+            <div id="agenda-liste"></div>
           </div>
 
           <div class="dispo-carte">
@@ -1132,6 +1177,7 @@ if ("serviceWorker" in navigator) {
       el.addEventListener('change', (e) => {
         if (e.target.checked) activeProps.add(p.id); else activeProps.delete(p.id)
         if (typeof routeRender === 'function') routeRender()
+        if (mesJours) peindreMesJours()   // meme raison que ci-dessus
         renderFilters()  // garde aussi la version desktop synchro
       })
     })
@@ -1483,6 +1529,12 @@ if ("serviceWorker" in navigator) {
         if (e.target.checked) activeProps.add(p.id)
         else activeProps.delete(p.id)
         routeRender()
+        // ⚠ ET LA VUE « MES JOURS » AUSSI, depuis le lot 2. Le calendrier fusionne
+        // et l'agenda lisent `activeProps` : `routeRender` ne repeint que le
+        // planning, donc masquer un bien y laissait ses bulles et ses lignes
+        // jusqu'au prochain changement d'onglet. Un filtre qui ne filtre qu'une
+        // vue sur deux se lit comme un filtre casse.
+        if (mesJours) peindreMesJours()
       })
     })
   }
@@ -2382,6 +2434,7 @@ if ("serviceWorker" in navigator) {
   function peindreMesJours () {
     peindreMesRegles()
     peindreMonMois()
+    peindreMonAgenda()
     peindreMesConges()
     const msg = document.getElementById('dispo-message')
     if (!mesJours.modifiable) {
@@ -2574,6 +2627,82 @@ if ("serviceWorker" in navigator) {
     return out
   }
 
+  // ─── MES 30 PROCHAINS JOURS (refonte v2, lot 3) ──────────────────────────
+  //
+  // Le calendrier dit OU et QUAND d'un coup d'oeil ; la liste dit QUOI. Elle
+  // reprend `getMenages()` — la meme source que le planning — pour qu'un ecran
+  // ne puisse pas contredire l'autre.
+  //
+  // ⚠ ELLE MELE SES MENAGES ET CEUX A PRENDRE, tries par date. Les separer en
+  // deux listes obligeait a comparer deux colonnes pour savoir ce qu'il y a
+  // mardi. Ce qui les distingue est leur ALLURE, pas leur emplacement.
+  const AGENDA_JOURS = 30
+
+  function peindreMonAgenda () {
+    const zone = document.getElementById('agenda-liste')
+    if (!zone) return
+    const debut = AUJ()
+    // ⚠ `- 1` : la borne est INCLUSIVE des deux cotes. Sans lui, « mes 30
+    // prochains jours » en couvrait 31 — aujourd'hui plus trente.
+    const fin = isoJ(new Date(Date.UTC(
+      Number(debut.slice(0, 4)), Number(debut.slice(5, 7)) - 1,
+      Number(debut.slice(8, 10)) + AGENDA_JOURS - 1, 12)))
+
+    const lignes = []
+    ;(Array.isArray(bookings) ? bookings : []).forEach(b => {
+      if (!b.departure || b.departure < debut || b.departure > fin) return
+      if (!activeProps.has(b.propId)) return
+      lignes.push({ jour: b.departure, bien: b.propName || '', mien: true,
+                    fait: doneSet.has(`${b.id}-${b.departure}`) })
+    })
+    ;(Array.isArray(aPrendre) ? aPrendre : []).forEach(m => {
+      if (m.departure_date < debut || m.departure_date > fin) return
+      if (!activeProps.has(m.property_id)) return
+      lignes.push({ jour: m.departure_date, bien: m.property_name || '', mien: false,
+                    offre: m })
+    })
+    if (!lignes.length) {
+      // ⚠ « Rien de prevu » n'est pas « rien a faire » : on ne le dit que pour
+      // les 30 jours qu'on regarde, pas en general.
+      zone.innerHTML = '<div class="agenda-vide">Rien de prévu dans les 30 prochains jours.</div>'
+      return
+    }
+    lignes.sort((a, b) => a.jour < b.jour ? -1 : a.jour > b.jour ? 1 : (a.bien < b.bien ? -1 : 1))
+
+    const parJour = new Map()
+    lignes.forEach(l => { if (!parJour.has(l.jour)) parJour.set(l.jour, []); parJour.get(l.jour).push(l) })
+
+    let out = ''
+    for (const [jour, items] of parJour) {
+      const auj = jour === debut
+      // Un jour ou elle s'est dite absente porte des menages : elle doit le voir
+      // ici aussi, pas seulement sur le calendrier.
+      const eteint = !jourTravaille(jour)
+      out += `<div class="agenda-jour${auj ? ' auj' : ''}">` +
+             `<div class="agenda-date">${auj ? "Aujourd’hui — " : ''}${echapper(jourLisible(jour))}` +
+             (eteint ? ' <em>· vous êtes absente</em>' : '') + '</div>' +
+             items.map(l => l.mien
+               ? `<div class="agenda-item${l.fait ? ' fait' : ''}">` +
+                 `<span class="agenda-bien">${echapper(l.bien)}</span>` +
+                 (l.fait ? '<span class="agenda-tag fait">FAIT</span>' : '') + '</div>'
+               // ⚠ ECHAPPEE COMME TOUT CE QUI VIENT DU SERVEUR. Ailleurs dans
+               // ce fichier, `data-jour` porte une date fabriquee localement ;
+               // ici elle vient de `departure_date`, et les bornes de la fenetre
+               // sont des comparaisons de CHAINES — une valeur qui sort de
+               // l'attribut y passerait.
+               : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}">` +
+                 `<span class="agenda-bien">${echapper(l.bien)}</span>` +
+                 '<span class="agenda-tag offre">À PRENDRE</span></button>').join('') +
+             '</div>'
+    }
+    zone.innerHTML = out
+  }
+
+  // Le libelle de date vient de `jourLisible` (plus bas) : elle fait deja
+  // exactement ca, en validant le format et en lisant la date en UTC. En
+  // ecrire une seconde a produit une REDECLARATION — le bloc entier ne parsait
+  // plus, et le test `js-navigateur-parse` l'a dit avant le navigateur.
+
   function peindreLegende (alt) {
     document.getElementById('dispo-legende').innerHTML =
       // ⚠ LA LEGENDE SUIT LA CASE. Elle decrivait encore le rouge des jours
@@ -2651,6 +2780,17 @@ if ("serviceWorker" in navigator) {
   // coche la case, la requete ne partait pas, le repeint la decochait — et le
   // message affichait « ✓ Vos jours sont enregistres » pour le geste PRECEDENT.
   // Une case grisee ne ment pas ; un retour muet, si.
+  // ⚠ `reconcilierEnFond` A ETE RETIRE, et c'est la lecon du lot.
+  // L'idee — rendre la main des que l'ecriture aboutit, reconcilier derriere —
+  // ne vaut QUE si rien dans le DOM ne peut produire une ecriture fausse pendant
+  // la fenetre. Sur ces quatre chemins, c'est faux : les cases A/B et la liste
+  // des conges SONT la source de l'ecriture suivante, et elles affichent encore
+  // l'etat d'avant. Deverrouiller tot y faisait perdre tous ses jours recurrents
+  // (alternance), annuler l'echange (ancrage), ou transformer une annulation
+  // reussie en erreur (conges).
+  // Seul `enregistrerMesJours` peut s'en passer : la ou le DOM est deja la
+  // verite qu'on envoie, et ou un numero d'ordre departage les envois.
+
   function verrouillerMesCases (verrou) {
     document.querySelectorAll('#dispo-recur input[data-lot]').forEach(c => { c.disabled = verrou })
   }
@@ -2674,35 +2814,84 @@ if ("serviceWorker" in navigator) {
     return [{ jours: joursCoches('a'), depuis: d0 }, { jours: joursCoches('b'), depuis: d1 }]
   }
 
+  // ⚠ LE VERROU A ETE REMPLACE, PAS SUPPRIME (17 septembre 2026).
+  //
+  // Mesure en reel : ces cases gardaient le circuit d'AVANT le lot 1 — ecriture,
+  // PUIS relecture complete (6 requetes base pour des donnees deja en memoire),
+  // le tout cases GRISEES. Deux allers-retours pendant lesquels l'ecran ne
+  // repond pas : c'est le meme reproche que le clic sur une date, au meme
+  // endroit, resté sur ce chemin-la.
+  //
+  // ⚠ CE QUE LE VERROU PROTEGEAIT RESTE PROTEGE, et c'est le point. Il avait ete
+  // pose pour un vrai defaut : une seconde tape partait dans un `return` MUET —
+  // le navigateur avait deja coche la case, la requete ne partait pas, le repeint
+  // la decochait, et le message affichait « ✓ » pour le geste PRECEDENT. Griser
+  // rendait l'attente visible ; ca ne la supprimait pas.
+  // Desormais chaque geste PART, et un NUMERO D'ORDRE decide qui a le dernier
+  // mot : `reglerMesJours` envoie l'etat COMPLET lu a l'instant de l'envoi, donc
+  // le dernier envoi est la verite. Aucun geste n'est avale, et rien ne gele.
+  let seqRegles = 0
+  // Nombre d'ecritures de jours actuellement en vol. Les quatre autres chemins
+  // s'y refusent l'entree — voir plus bas.
+  let ecrituresRegles = 0
   async function enregistrerMesJours () {
     const msg = document.getElementById('dispo-message')
-    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
-    if (horsLigne(msg)) return
-    envoiEnCours = true
-    verrouillerMesCases(true)
+    if (!mesJours || !mesJours.modifiable) return
+    // ⚠ HORS LIGNE : la case est DEJA cochee par le navigateur. Sortir sans
+    // repeindre laisserait a l'ecran un reglage qui n'est parti nulle part.
+    if (horsLigne(msg)) { peindreMesRegles(); return }
+
+    const monTour = ++seqRegles
+    const alt = enQuinzaine()
+    const voulu = lotsASoumettre(alt)
+    // ⚠ LES AUTRES ECRIVAINS DOIVENT ENCORE NOUS VOIR. Ils gardent tous leur
+    // `if (… || envoiEnCours) return`, et en cessant de lever ce drapeau on les
+    // rendait aveugles : cocher mercredi puis toucher « une semaine sur deux »
+    // faisait calculer l'alternance sur un `mesJours` d'AVANT — mercredi
+    // disparaissait, sans un mot. Le numero d'ordre ne departage que les
+    // ecritures de jours entre elles ; il ne dit rien aux quatre autres.
+    // ⚠ UN COMPTEUR, PAS UN BOOLEEN : cette fonction se rappelle elle-meme
+    // (reprise quand la coche a bouge pendant l'envoi), et un booleen serait
+    // baisse par l'appel interne pendant que l'externe est encore en vol.
+    ecrituresRegles++
+    // L'ecran a deja bouge — la case est cochee. On le confirme tout de suite.
+    dire(msg, '✓ Vos jours sont enregistrés.')
+
     try {
-      const alt = enQuinzaine()
-      const voulu = lotsASoumettre(alt)
       const { ok, erreur } = await envoyerMesJours(voulu, { alt })
-      dire(msg, ok ? '✓ Vos jours sont enregistrés.' : erreur)
-      await chargerDisponibilites()
-      // ⚠ ET ON REGARDE SI LA COCHE A BOUGE PENDANT L'ENVOI. Les cases sont
-      // verrouillees, mais un clavier ou un second onglet peuvent encore agir :
-      // comparer l'etat voulu a l'etat courant evite d'avaler un geste en
-      // silence, ce qui est exactement ce qu'on vient de corriger.
-      if (ok) {
-        const apres = lotsASoumettre(enQuinzaine())
-        const change = JSON.stringify(apres.map(l => l.jours)) !== JSON.stringify(voulu.map(l => l.jours))
-        if (change) { envoiEnCours = false; verrouillerMesCases(false); return enregistrerMesJours() }
+      // Un geste plus recent a pris la main : sa reponse fera foi, pas celle-ci.
+      if (monTour !== seqRegles) return
+      if (!ok) {
+        // ⚠ RATTRAPAGE HONNETE : on remet ce que le serveur connait, et on le
+        // dit. Laisser la case cochee apres un refus, c'est un ecran qui ment.
+        dire(msg, erreur)
+        await chargerDisponibilites()
+        return
       }
+      // ⚠ LA RELECTURE RESTE, MAIS ELLE NE FAIT PLUS ATTENDRE. Le serveur decide
+      // du REMPLACEMENT (une regle que la PWA ne sait pas relire n'est pas
+      // ecrasee par ce qu'elle affiche) : sans elle, l'ecran finirait par
+      // diverger de ce qui est reellement enregistre.
+      await chargerDisponibilites()
+      if (monTour !== seqRegles) return
+      // Et on regarde si la coche a bouge pendant l'envoi — un clavier, un
+      // second onglet. Comparer l'etat voulu a l'etat courant evite d'avaler un
+      // geste en silence, ce qui est exactement ce que le verrou empechait.
+      const apres = lotsASoumettre(enQuinzaine())
+      const change = JSON.stringify(apres.map(l => l.jours)) !== JSON.stringify(voulu.map(l => l.jours))
+      if (change) return enregistrerMesJours()
     } catch (err) {
+      if (monTour !== seqRegles) return
       dire(msg, 'Connexion impossible. Réessayez.')
-    } finally { envoiEnCours = false; verrouillerMesCases(false) }
+      await chargerDisponibilites()
+    } finally {
+      ecrituresRegles = Math.max(0, ecrituresRegles - 1)
+    }
   }
 
   async function basculerMonAlternance (vers) {
     const msg = document.getElementById('dispo-message')
-    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (!mesJours || !mesJours.modifiable || envoiEnCours || ecrituresRegles) return
     if (horsLigne(msg)) return
     envoiEnCours = true
     verrouillerMesCases(true)
@@ -2730,6 +2919,17 @@ if ("serviceWorker" in navigator) {
       } else {
         dire(msg, erreur)
       }
+      // ⚠ LE VERROU TIENT JUSQU'AU REPEINT, ET C'EST VITAL ICI.
+      // J'avais rendu la main avant la relecture, comme ailleurs. Mais
+      // `forceAlternee` est pose AVANT : pendant toute la fenetre, `enQuinzaine()`
+      // rend deja `true` alors que le DOM ne contient encore que des cases
+      // `data-lot="simple"`. Une tape dans cet intervalle appelle
+      // `lotsASoumettre(true)`, qui lit `joursCoches('a')` et `joursCoches('b')`
+      // — tous deux VIDES — et envoie deux lots vides : elle perd TOUS ses jours
+      // recurrents, donc elle est comptee disponible tous les jours, pendant que
+      // l'ecran affiche « ✓ Vos jours sont enregistres ».
+      // Ce chemin change la STRUCTURE de l'ecran ; on ne peut pas rendre la main
+      // avant que l'ecran corresponde a la structure annoncee.
       await chargerDisponibilites()
       if (ok && mesJours) mesJours.forceAlternee = !!vers
       peindreMesJours()
@@ -2744,7 +2944,7 @@ if ("serviceWorker" in navigator) {
   // s'echange — pas qu'on renomme une etiquette.
   async function inverserMonAncrage () {
     const msg = document.getElementById('dispo-message')
-    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (!mesJours || !mesJours.modifiable || envoiEnCours || ecrituresRegles) return
     if (horsLigne(msg)) return
     envoiEnCours = true
     verrouillerMesCases(true)
@@ -2756,6 +2956,10 @@ if ("serviceWorker" in navigator) {
         [{ jours: a ? a.jours : [], depuis: suivante },
          { jours: b ? b.jours : [], depuis: cette }], { alt: true })
       dire(msg, ok ? '✓ Les deux semaines sont échangées.' : erreur)
+      // ⚠ MEME PIEGE QUE L'ALTERNANCE : tant que la relecture n'a pas atterri,
+      // les lignes A/B affichent encore l'ANCIEN arrangement. Une tape dans
+      // cette fenetre reecrit l'ancrage d'avant et annule silencieusement
+      // l'echange qu'on vient de confirmer.
       await chargerDisponibilites()
     } catch (err) {
       dire(msg, 'Connexion impossible. Réessayez.')
@@ -2951,7 +3155,7 @@ if ("serviceWorker" in navigator) {
 
   async function poserMonConge () {
     const msg = document.getElementById('dispo-message')
-    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (!mesJours || !mesJours.modifiable || envoiEnCours || ecrituresRegles) return
     const du = document.getElementById('conge-du').value
     const au = document.getElementById('conge-au').value
     if (!du || !au) { dire(msg, 'Choisissez un début et une fin.'); return }
@@ -2981,13 +3185,18 @@ if ("serviceWorker" in navigator) {
     // Le bouton n'existe que si `modifiable`, et le serveur refuse de toute
     // facon — mais les trois chemins d'ecriture posent la meme garde, et une
     // asymetrie est ce qui se perd au prochain remaniement.
-    if (!mesJours || !mesJours.modifiable || envoiEnCours) return
+    if (!mesJours || !mesJours.modifiable || envoiEnCours || ecrituresRegles) return
     if (horsLigne(msg)) return
     envoiEnCours = true
     try {
       const { ok, data } = await envoyer({ action: 'retirerConge', id })
       if (!ok) { dire(msg, (data && data.error) || 'Impossible d\'annuler.'); return }
       dire(msg, '✓ Congé annulé.')
+      // ⚠ LA LIGNE RESTE A L'ECRAN TANT QUE LA RELECTURE N'A PAS ATTERRI, et
+      // elle reste cliquable. Rendre la main avant laissait une seconde tape
+      // renvoyer le meme identifiant : le serveur refusait, et « ✓ Congé
+      // annulé. » se changeait en « Impossible d'annuler. » pour une annulation
+      // qui avait REUSSI.
       await chargerDisponibilites()
     } catch (err) {
       dire(msg, 'Connexion impossible. Réessayez.')
@@ -3041,6 +3250,17 @@ if ("serviceWorker" in navigator) {
     if (!el || !el.dataset.jour) return
     basculerMonJour(el.dataset.jour)
   })
+  // ⚠ UN SEUL ECOUTEUR, POSE UNE FOIS, SUR LE CONTENEUR — meme raison que pour
+  // les cases : la liste est reconstruite a chaque repeint.
+  // ⚠ ET LA MEME FEUILLE QUE LA BULLE. Deux chemins vers deux feuilles
+  // differentes finiraient par dire deux choses differentes du meme menage.
+  document.getElementById('agenda-liste').addEventListener('click', e => {
+    const el = e.target.closest('.agenda-item.offre')
+    if (!el || !el.dataset.jour) return
+    const libres = aPrendreDu(el.dataset.jour)
+    if (libres.length) ouvrirPriseDeMenage(el.dataset.jour, libres)
+  })
+
   document.getElementById('dispo-months').addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return
     const el = e.target.closest('.dispo-case')
@@ -3077,7 +3297,10 @@ if ("serviceWorker" in navigator) {
     try {
       res = await fetch(`/api/menages-public?action=avis&token=${currentToken}`)
     } catch (err) { return }
-    if (res.status === 503) { montrerOnglets(); montrerOngletAvis(); return }
+    // ⚠ 503 : le serveur nous PARLE, le droit existe donc — mais il ne peut rien
+    // compter. La porte s'ouvre avec son libelle, jamais vide : la vue Avis sait
+    // dire la panne, encore faut-il pouvoir l'atteindre.
+    if (res.status === 503) { montrerOnglets(); montrerOngletAvis(); porteSansChiffre(); return }
     if (!res.ok) return
     let data
     try { data = await res.json() } catch (err) { return }
@@ -3098,11 +3321,26 @@ if ("serviceWorker" in navigator) {
   function renderEnteteRatio (data) {
     const el = document.getElementById('entete-ratio')
     if (!el) return
+    // ⚠ DEUX ECHECS QUI N'ONT PAS LA MEME REPONSE, et les confondre rouvrait une
+    // fuite. `data` absente veut dire LE DROIT N'EST PAS (ou PLUS) LA : la porte
+    // doit disparaitre avec lui — un ratio survivant au retrait du droit en
+    // serait une. Des CHIFFRES douteux, eux, ne disent rien du droit : la porte
+    // reste, seuls les chiffres se taisent.
+    if (!data) {
+      avisOuvert = false
+      el.style.display = 'none'
+      el.innerHTML = ''
+      return
+    }
     const r = data && data.ratio
     const sur = v => Number.isFinite(v)
     if (!r || r.erreur || r.tronque || !sur(r.total) || !sur(r.positif) || !sur(r.remarque)) {
-      el.style.display = 'none'
-      el.innerHTML = ''
+      // ⚠ LES CHIFFRES SE TAISENT, PAS LA PORTE (lot 4). Depuis que les avis
+      // vivent derriere ce bouton, le masquer sur une panne de comptage
+      // l'enfermerait dehors : elle n'aurait plus aucun moyen de les atteindre.
+      // On retire donc les chiffres — un faux ratio vaut moins que pas de ratio —
+      // et on garde un libelle qui dit ou l'on va.
+      porteSansChiffre()
       return
     }
     const lib = LIB_PERIODE[r.periode] || LIB_PERIODE[data.periode] || ''
@@ -3112,7 +3350,7 @@ if ("serviceWorker" in navigator) {
         <span class="ratio-item neg" title="Remarques sur la propreté">${POUCE_BAS}${r.remarque}</span>
       </div>
       <div class="entete-periode">sur ${r.total} avis${lib ? ' · ' + echapper(lib) : ''}</div>`
-    el.style.display = ''
+    majPorteAvis()
   }
 
   // ⚠ IDEMPOTENT. Les ecouteurs sont poses UNE FOIS. `initAvis` ne tournait
@@ -3123,9 +3361,51 @@ if ("serviceWorker" in navigator) {
   // (`avisCharge` ne passe a true qu'apres le premier `await`, donc aucun ne
   // s'arrete). Mesure sur le vrai bloc : 3 sondes = 3 fetchs pour un clic.
   // Chaque sonde devoile SON onglet, et lui seul.
+  // ─── LES AVIS PASSENT DERRIERE LE RATIO (refonte v2, lot 4) ───────────────
+  //
+  // Plus d'onglet : le ratio en haut a droite EST la porte. Il etait deja le
+  // rappel permanent ; en faire l'acces supprime un onglet sans rien cacher.
+  //
+  // ⚠ LA PORTE ET LES CHIFFRES N'ONT PAS LA MEME CONDITION, et les confondre
+  // l'enfermerait dehors. Le ratio ne montre ses chiffres que s'ils sont SURS
+  // (un rappel qui annoncerait un faux chiffre vaut moins que pas de rappel) ;
+  // le DROIT, lui, existe ou non. Sur une panne de comptage, l'ancien ecran
+  // gardait l'onglet et expliquait dedans — si la porte disparaissait avec les
+  // chiffres, elle n'aurait plus aucun moyen d'atteindre ses avis.
+  // `avisOuvert` retient donc le droit, independamment des chiffres.
+  let avisOuvert = false
   function montrerOngletAvis () {
+    avisOuvert = true
     const b = document.getElementById('tab-avis')
-    if (b) b.style.display = ''
+    if (b) b.style.display = 'none'      // l'onglet ne revient pas
+    majPorteAvis()
+  }
+
+  // ⚠ LA PORTE NE S'AFFICHE JAMAIS VIDE. Sur une sonde en 503, `initAvis`
+  // devoilait la porte sans passer par `renderEnteteRatio` : elle s'ouvrait avec
+  // l'`innerHTML` du premier chargement — c'est-a-dire RIEN — pendant que
+  // l'onglet, lui, avait disparu. Plus aucun acces aux avis, sur le cas meme
+  // (panne serveur) ou la vue sait expliquer ce qui se passe.
+  function porteSansChiffre () {
+    const el = document.getElementById('entete-ratio')
+    if (el) el.innerHTML = '<div class="ratio-porte">Mes avis ›</div>'
+    majPorteAvis()
+  }
+
+  // La porte s'affiche des que le droit est la ; son CONTENU depend des chiffres.
+  function majPorteAvis () {
+    const el = document.getElementById('entete-ratio')
+    if (!el) return
+    if (!avisOuvert) { el.style.display = 'none'; return }
+    el.style.display = ''
+    if (!el.dataset.branche) {
+      el.dataset.branche = '1'
+      el.addEventListener('click', () => setTab('avis'))
+      el.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault(); setTab('avis')
+      })
+    }
   }
 
   let ongletsBranches = false
