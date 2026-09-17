@@ -4,9 +4,21 @@
 // DECLARE (ou relit) LE WEBHOOK INBOUND BREVO.
 //
 // USAGE
-//   node scripts/inbound-webhook-brevo.js            # etat, lecture seule
-//   node scripts/inbound-webhook-brevo.js --creer    # cree le webhook
+//   node scripts/inbound-webhook-brevo.js               # etat, lecture seule
+//   node scripts/inbound-webhook-brevo.js --declarer    # declare le sous-domaine
+//   node scripts/inbound-webhook-brevo.js --creer       # cree le webhook
 //   node scripts/inbound-webhook-brevo.js --supprimer <id>
+//
+// ⚠ TROIS TEMPS, ET LES DEUX PREMIERS NE SUFFISENT PAS.
+// Poser les MX ne suffit pas : Brevo veut que le SOUS-DOMAINE soit declare dans
+// le compte (`POST /senders/domains`) ET AUTHENTIFIE par ses propres
+// enregistrements DNS. Tant qu'il ne l'est pas, la creation du webhook rend
+// « Domain is not found or is inactive » — un message qui ne dit ni lequel des
+// deux manque, ni ou regarder. Mesure du 18 septembre 2026 : MX propages sur
+// trois resolveurs publics, domaine declare, webhook refuse quand meme.
+//
+// `reply.hotesmart.fr` est pour Brevo un domaine A PART ENTIERE : authentifier
+// `hotesmart.fr` ne l'authentifie pas.
 //
 // ⚠ LA CLE PLATEFORME, PAS CELLE D'UN HOTE. `ALERT_BREVO_API_KEY`, jamais
 // `api_keys.brevo_api_key`. Les deux pointent AUJOURD'HUI sur le meme compte
@@ -27,6 +39,7 @@ const DOMAINE_INBOUND = 'reply.hotesmart.fr'
 const URL_WEBHOOK = 'https://hotesmart.vercel.app/api/inbound-email'
 
 const CREER = process.argv.includes('--creer')
+const DECLARER = process.argv.includes('--declarer')
 const iSupp = process.argv.indexOf('--supprimer')
 const A_SUPPRIMER = iSupp >= 0 ? process.argv[iSupp + 1] : null
 
@@ -64,6 +77,35 @@ async function main () {
   console.log(`\nwebhooks inbound : ${w.status === 400 ? 'aucun' : liste.length}`)
   for (const x of liste) console.log(`  id=${x.id} ${x.url} domaine=${x.domain || '—'} events=${(x.events||[]).join(',')}`)
 
+  // ─── Le sous-domaine inbound, et son authentification ──────────────────────
+  const dInbound = (dom.json.domains || []).find(d => d.domain_name === DOMAINE_INBOUND)
+  console.log(`${DOMAINE_INBOUND} :`, dInbound
+    ? `declare, authentifie=${dInbound.authenticated} verifie=${dInbound.verified}`
+    : 'NON DECLARE dans ce compte')
+
+  if (DECLARER) {
+    if (dInbound) {
+      console.log('\ndeja declare — rien a faire')
+    } else {
+      const r = await brevo('POST', '/senders/domains', { name: DOMAINE_INBOUND })
+      console.log(`\ndeclaration : HTTP ${r.status}`)
+      if (r.status >= 400) { console.log(JSON.stringify(r.json).slice(0, 300)); process.exitCode = 1; return }
+    }
+    // Les enregistrements a poser, tels que Brevo les demande. On les REDEMANDE
+    // plutot que de les recopier : ils sont propres au domaine, et une valeur
+    // recopiee de memoire est une valeur qui finira par etre fausse.
+    const detail = await brevo('GET', `/senders/domains/${DOMAINE_INBOUND}`)
+    const dns = detail.json?.dns_records || detail.json
+    console.log('\nA POSER CHEZ LE REGISTRAR :')
+    for (const [nom, e] of Object.entries(dns || {})) {
+      if (!e || !e.type) continue
+      const ok = e.status === true ? '✓ deja en place' : '— a poser'
+      console.log(`  ${String(e.type).padEnd(6)} ${String(e.host_name).padEnd(26)} ${e.value}   ${ok}`)
+    }
+    console.log('\nPuis relancer --creer. L\'authentification peut demander quelques heures.')
+    return
+  }
+
   if (A_SUPPRIMER) {
     const r = await brevo('DELETE', `/webhooks/${A_SUPPRIMER}`)
     console.log(`\nsuppression ${A_SUPPRIMER} : HTTP ${r.status}`)
@@ -72,6 +114,14 @@ async function main () {
 
   if (!CREER) {
     console.log('\nLecture seule. --creer pour declarer le webhook.')
+    return
+  }
+
+  if (!dInbound || !dInbound.authenticated) {
+    console.log('\n⚠ Le sous-domaine n\'est pas authentifie : Brevo refusera le webhook')
+    console.log('  (« Domain is not found or is inactive »). Lancer --declarer pour voir')
+    console.log('  les enregistrements DNS attendus.')
+    process.exitCode = 1
     return
   }
 
