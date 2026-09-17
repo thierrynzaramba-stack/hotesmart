@@ -169,6 +169,29 @@ module.exports = async function handler(req, res) {
       })
     }
 
+    // --- PRENDRE UN MENAGE QUE PERSONNE NE PORTE (refonte PWA v2, lot 2) ---
+    //
+    // Le pendant en ecriture de la liste `a_prendre` servie au GET. Les gardes y
+    // sont REFAITES, une par une : celles de la lecture disent ce qu'on affiche,
+    // elles ne protegent rien d'un appel forge.
+    if (action === 'prendreMenage') {
+      if (!booking_id || !property_id || !departure_date) {
+        return res.status(400).json({ error: 'Champs requis manquants (booking_id, property_id, departure_date)' })
+      }
+      // ⚠ LE FORMAT SE VERIFIE ICI, comme pour `accepterMenage` et `markDone`.
+      // Sans lui, la garde « pas un menage passe » — une comparaison de CHAINES —
+      // se contourne avec une date non normalisee : « 2026-9-7 » est
+      // lexicographiquement SUPERIEUR a « 2026-09-17 » (parce que '9' > '0'),
+      // alors que Postgres le lit comme le 7 septembre pour retrouver la ligne.
+      // Un menage passe devenait prenable par un appel forge ou un client bugue.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+        return res.status(400).json({ error: 'Date invalide' })
+      }
+      return await prendreUnMenage(req, res, token, {
+        propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+      })
+    }
+
     // --- « Mes disponibilites » (lot 3.5) : elle DECLARE, l'hote corrige ---
     //
     // ⚠ ELLE NE DECLARE QUE DES INDISPONIBILITES. Ses JOURS ATTITRES
@@ -595,6 +618,96 @@ module.exports = async function handler(req, res) {
       e.event_type === 'note' ||
       bookingsSiens.has(`${String(e.property_id)}|${String(e.booking_id)}`))
 
+    // ─── MENAGES A PRENDRE (refonte PWA v2, lot 2) ─────────────────────────
+    //
+    // Ceux que PERSONNE ne porte, sur SES biens. C'est la resolution humaine qui
+    // manque a des menages ou l'automatisme est bloque :
+    //   `orphaned`   — quelqu'un a REFUSE, ou toutes les candidates ont ete
+    //                  sollicitees sans suite. Le cron ne les reassigne jamais
+    //                  (« une boucle dont personne ne sortirait »).
+    //   `unassigned` — aucune candidate disponible ce jour-la. Le cron reessaie
+    //                  toutes les cinq minutes, sans succes, par conception.
+    // Dans les deux cas l'hote a deja ete alerte, et rien ne se debloque seul.
+    //
+    // ⚠ ON ROUVRE ICI, DELIBEREMENT, UNE FORME DE LECTURE FERMEE LE 14 SEPTEMBRE.
+    // Le « pont de convergence » laissait un jeton SANS PROFIL voir « ce qui
+    // n'est assigne a personne » — et le lien orphelin de Tiphaine rendait
+    // 11 sejours avec les NOMS DES VOYAGEURS. Ce qui rend cette lecture-ci sure
+    // n'est pas qu'elle soit plus petite, c'est qu'elle porte les trois gardes
+    // qui manquaient a l'autre :
+    //   1. PROFIL ACTIF EXIGE — `profilActifDuJeton`, verifie bien plus haut ;
+    //   2. SES BIENS UNIQUEMENT — `propIds`, deja resolu depuis le token ;
+    //   3. AUCUNE DONNEE VOYAGEUR — ni nom, ni occupation, ni arrivee. Un menage
+    //      qui n'est pas le sien lui dit OU et QUAND, jamais QUI. C'est
+    //      exactement la difference avec ce qui a fuite.
+    //
+    // ⚠ `assigned_by = 'manual'` NE SUFFIT PAS A RECONNAITRE LA DECISION DE
+    // L'HOTE. Trois ecrivains posent ce verrou, avec DEUX sens :
+    //   api/menages.js         -> `unassigned` + manual : l'hote DESASSIGNE ;
+    //   ce fichier (refus)     -> `orphaned`   + manual : quelqu'un a REFUSE et
+    //                             plus personne ne porte le menage ;
+    //   sync-menages-entite.js -> `orphaned`   + manual : resurrection, qui
+    //                             conserve le verrou d'avant, quel qu'il soit.
+    // Un refus n'est PAS une decision de l'hote. C'est donc le STATUT qui
+    // tranche : `unassigned` + manual = on n'y touche pas ; `orphaned` = personne
+    // ne porte, on propose.
+    //
+    // ⚠ IMPRECISION CONNUE ET ASSUMEE : une resurrection force `orphaned` meme
+    // sur un verrou d'hote, qui redevient donc proposable. Il faut qu'une
+    // reservation disparaisse puis revienne sur un menage desassigne a la main.
+    // Se tromper dans ce sens-la rend un menage a quelqu'un ; se tromper dans
+    // l'autre laisse un logement sale. Le vrai correctif est un marqueur distinct
+    // en base — `assigned_by` melange « decision de l'hote » et « refus ».
+    //
+    // ⚠ `provider_id` ET `offered_to` DOIVENT ETRE NULS. Un menage propose a
+    // quelqu'un d'autre n'est pas libre : l'afficher « a prendre » lancerait une
+    // course avec une collegue qui s'apprete peut-etre a repondre.
+    //
+    // ⚠ PAS DE MENAGE PASSE (decision du 17 septembre) : un depart d'hier ne se
+    // reprend pas. Borne en heure de PARIS — entre minuit et 2 h l'ete, l'UTC est
+    // encore la veille et proposerait un jour deja ecoule.
+    let aPrendre = []
+    if (propIds.length) {
+      const debutPrise = todayInParis()
+      const { data: libres, error: errLibres } = await supabase.from('menages')
+        .select('booking_id, property_id, departure_date, status')
+        .eq('user_id', userId)
+        .in('property_id', propIds)
+        .in('status', ['orphaned', 'unassigned'])
+        .is('provider_id', null)
+        .is('offered_to', null)
+        // ⚠ ON N'ECARTE QUE LE COUPLE `unassigned` + `manual` : la desassignation
+        // par l'hote. `orphaned` passe quel que soit `assigned_by` — un REFUS pose
+        // lui aussi ce verrou, et c'est precisement le cas qu'on veut proposer.
+        // S'y fier seul vidait la fonctionnalite de son cas principal.
+        // (`assigned_by <> 'manual'` en SQL vaut NULL, donc faux, quand la colonne
+        // est nulle : il faut nommer le NULL explicitement.)
+        .or('status.eq.orphaned,assigned_by.is.null,assigned_by.neq.manual')
+        .gte('departure_date', debutPrise > dateFrom ? debutPrise : dateFrom)
+        .lte('departure_date', dateTo)
+        .order('departure_date', { ascending: true })
+        .limit(200)
+      // Meme regle que les autres lectures de ce chemin : on coupe plutot que de
+      // rendre une liste faussement vide. « Rien a prendre » et « la lecture a
+      // echoue » ne doivent pas se ressembler — c'est ce que ce fichier repete
+      // partout ailleurs, et une reponse partielle serait un piege pose pour le
+      // lot d'apres.
+      if (errLibres) {
+        console.error('[menages-public] lecture des menages a prendre echec:', errLibres.message)
+        return res.status(503).json({ error: 'Service temporairement indisponible' })
+      }
+      aPrendre = (libres || [])
+        .map(m => ({
+          booking_id: String(m.booking_id),
+          property_id: String(m.property_id),
+          // Le NOM du bien, parce qu'un identifiant ne se lit pas. Rien d'autre
+          // du sejour : ni voyageur, ni occupation.
+          property_name: propNameById[String(m.property_id)] || '',
+          departure_date: m.departure_date,
+          status: m.status
+        }))
+    }
+
     // NOUVEAU : on renvoie aussi la liste des menages deja faits cote serveur.
     // Le front fera l'union avec son localStorage (offline) avant affichage.
     // On filtre uniquement sur les biens autorises ET la fenetre temporelle
@@ -618,6 +731,9 @@ module.exports = async function handler(req, res) {
 
     return res.json({
       bookings: allBookings, label: tokenData.label,
+      // Les menages que personne ne porte, sur ses biens. Voir le bloc plus haut
+      // pour les trois gardes qui rendent cette lecture sure.
+      a_prendre: aPrendre,
       property_ids: allowedIds, visibility_days: visibilityDays,
       comments, events: eventsData || [],
       done: doneList,
@@ -1297,6 +1413,145 @@ function todayInParis() {
 // (lib/cron-arrival-code processArrivalCodes), déclenchée quand le ménage passe
 // le logement en statut 'ready'. Les anciens helpers d'envoi direct Beds24/Seam
 // (saveAndSend, generateSeamCode) ont été retirés (bloc 2b) : ils étaient morts.
+
+// ─── PRENDRE UN MENAGE QUE PERSONNE NE PORTE (refonte PWA v2, lot 2) ────────
+//
+// Elle se saisit d'un menage sans responsable. Ce n'est PAS une demande : le
+// menage lui est attribue, et l'hote en est informe par la trace d'assignation.
+//
+// ⚠ LES GARDES DE LA LECTURE NE PROTEGENT RIEN ICI. `a_prendre` dit ce qu'on
+// AFFICHE ; un appel forge ne passe pas par elle. Les cinq conditions sont donc
+// refaites, et la derniere est atomique.
+async function prendreUnMenage (req, res, token, { propertyId, bookingId, departureDate }) {
+  const { data: pt, error: errTok } = await supabase.from('public_tokens')
+    .select('user_id, property_ids, visibility_days').eq('token', token).maybeSingle()
+  // Une panne n'est pas un jeton invalide — meme regle que partout ici.
+  if (errTok) {
+    console.error('[menages-public] lecture du token echec:', errTok.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!pt) return res.status(401).json({ error: 'Token invalide' })
+
+  // GARDE 1 — ETRE QUELQU'UN. Un lien sans profil actif ne porte aucune
+  // assignation : le laisser prendre un menage l'attribuerait a personne.
+  const porteur = await profilActifDuJeton(pt.user_id, token)
+  if (porteur.statut) return refuserPorteur(res, porteur.statut)
+  const profil = porteur.profil
+
+  // GARDE 2 — SES BIENS UNIQUEMENT (decision du 17 septembre). Un `property_ids`
+  // vide signifie « tous les biens du compte », comme partout ailleurs sur cet
+  // endpoint : ce n'est pas une absence de perimetre, c'est un perimetre total.
+  const permis = (pt.property_ids || []).map(String)
+  if (permis.length && !permis.includes(String(propertyId))) {
+    return res.status(403).json({ error: 'Ce bien ne fait pas partie des vôtres.' })
+  }
+
+  // GARDE 3 — DANS LA FENETRE, ET PAS DANS LE PASSE (decision du 17 septembre).
+  //
+  // ⚠ LES DEUX BORNES, PAS SEULEMENT LA BASSE. La lecture `a_prendre` borne en
+  // haut a `visibility_days` ; l'ecriture ne bornait rien de ce cote. « Lisible
+  // donc prenable » etait vrai, mais pas l'inverse : un appel forge pouvait
+  // prendre un menage au-dela de la fenetre que l'hote lui a ouverte. Ce n'est
+  // pas une fuite — aucune donnee n'en sort — mais une garde d'ecriture plus
+  // large que sa lecture finit toujours par etre celle qui compte.
+  //
+  // ⚠ En heure de PARIS : entre minuit et 2 h l'ete, l'UTC est encore la veille
+  // et laisserait prendre un jour deja ecoule.
+  const jour = String(departureDate)
+  if (jour < todayInParis()) {
+    return res.status(400).json({ error: 'Ce ménage est déjà passé.' })
+  }
+  const jours = Number(pt.visibility_days) || 30
+  const finFenetre = new Date(Date.now() + jours * 86400000).toISOString().slice(0, 10)
+  if (jour > finFenetre) {
+    return res.status(400).json({ error: 'Ce ménage est trop loin pour être pris.' })
+  }
+
+  const { data: menage, error: errMen } = await supabase.from('menages')
+    .select('id, provider_id, status, offered_to, assigned_by')
+    .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .maybeSingle()
+  if (errMen) {
+    console.error('[menages-public] lecture du menage echec:', errMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!menage) return res.status(404).json({ error: 'Ménage introuvable' })
+
+  // GARDE 4 — IL DOIT VRAIMENT N'ETRE A PERSONNE. On le DIT dans les mots du
+  // metier plutot que de rendre un refus muet : elle voit ce menage a l'ecran,
+  // et doit comprendre pourquoi il lui echappe.
+  // ⚠ SEULE LA DESASSIGNATION PAR L'HOTE FERME LA PORTE, et elle se reconnait
+  // au couple `unassigned` + `manual`. Tester `assigned_by` seul renvoyait
+  // « votre hote gere ce menage lui-meme » a quelqu'un qui regardait un menage
+  // REFUSE, auquel l'hote n'avait jamais touche — une phrase fausse, sur le cas
+  // meme que cette fonctionnalite existe pour resoudre.
+  if (menage.assigned_by === 'manual' && menage.status === 'unassigned') {
+    return res.status(403).json({ error: 'Votre hôte gère ce ménage lui-même.' })
+  }
+  if (menage.provider_id) return res.status(409).json({ error: 'Quelqu\'un s\'occupe déjà de ce ménage.' })
+  if (menage.offered_to)  return res.status(409).json({ error: 'Ce ménage est proposé à quelqu\'un d\'autre.' })
+  if (menage.status !== 'orphaned' && menage.status !== 'unassigned') {
+    return res.status(409).json({ error: 'Ce ménage n\'est plus disponible.' })
+  }
+
+  // GARDE 5 — LA COURSE. Deux prestataires peuvent toucher la meme bulle a la
+  // meme seconde ; les tests ci-dessus ont deja une fenetre derriere eux. La
+  // condition est donc REFAITE DANS L'ECRITURE, ou elle est atomique : les
+  // `.is(...)` garantissent qu'on n'ecrit que si personne n'a pris la place.
+  const { data: maj, error: errMaj } = await supabase.from('menages')
+    .update({ provider_id: profil.id, status: 'accepted',
+              offered_to: null, offered_at: null, offer_expires_at: null,
+              // ⚠ `manual` = DECISION HUMAINE, et c'en est une.
+              // Ne rien ecrire laissait `assigned_by` a 'auto' sur les orphelins
+              // par epuisement — or `poserPropositionsDues` selectionne
+              // exactement `assigned_by = 'auto'`, et ne protege le porteur que
+              // s'il est la personne de garde du jour. Ce qu'elle vient de
+              // prendre n'a par construction personne de garde : le cron le
+              // proposait donc a quelqu'un d'autre, dont l'acceptation le lui
+              // retirait sans un mot. Le verrou dit « quelqu'un a decide », pas
+              // « l'hote a decide » — le sens que lui donne deja la resurrection
+              // (« Decision humaine, conservee »).
+              assigned_by: 'manual',
+              assignment_reason: `Pris par ${profil.first_name}.`,
+              accepted_at: new Date().toISOString(),
+              updated_at: new Date().toISOString() })
+    .eq('id', menage.id)
+    .is('provider_id', null)
+    .is('offered_to', null)
+    .in('status', ['orphaned', 'unassigned'])
+    .select('id')
+  if (errMaj) {
+    console.error('[menages-public] prise de menage echec:', errMaj.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // Zero ligne : course perdue, pas panne. On le DIT — sinon elle s'organise
+  // autour d'un menage qui ne lui revient pas.
+  if (!maj || !maj.length) {
+    return res.status(409).json({ error: 'Quelqu\'un vient de prendre ce ménage.' })
+  }
+
+  // ⚠ LA TRACE EST CE QUI INFORME L'HOTE. Sans elle, un menage changerait de
+  // main sans que personne ne puisse dire quand ni par qui — et la decision du
+  // 17 septembre dit « assignation ferme, journalisee, hote notifie ».
+  const { error: errLog } = await supabase.from('menage_assignment_log').insert({
+    user_id: pt.user_id, menage_id: menage.id, event: 'accepted',
+    from_provider_id: null, to_provider_id: profil.id,
+    actor: 'provider',
+    reason: `Menage sans responsable pris depuis la PWA (statut ${menage.status}).`
+  })
+  // ⚠ L'ECHEC DE LA TRACE NE PEUT PAS ETRE MUET. C'est le seul canal par lequel
+  // l'hote apprend que ce menage a change de main — la decision du 17 septembre
+  // dit « assignation ferme, JOURNALISEE, hote notifie ». Le menage, lui, EST
+  // pris : l'ecriture atomique a abouti, et rendre une erreur ferait croire le
+  // contraire a celle qui vient de le prendre. On rend donc le succes, mais on
+  // crie dans les logs — sinon un transfert sans trace passe inapercu des deux
+  // cotes.
+  if (errLog) {
+    console.error('[menages-public] trace de prise NON ECRITE:', menage.id, errLog.message)
+  }
+  return res.json({ success: true, status: 'accepted' })
+}
 
 // ─── « MES DISPONIBILITÉS » (lot 3.5) ───────────────────────────────────────
 //

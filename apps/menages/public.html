@@ -83,21 +83,84 @@
     .dispo-dow { font-size: 10px; font-weight: 600; color: var(--text3); text-align: center; padding-bottom: 2px; }
     /* ⚠ 44 px MINIMUM : c'est la cible tactile recommandee, et cet ecran est
        fait pour un pouce, pas pour une souris. */
+    /* ⚠ `column` : sans elle, les points ajoutes au lot 2 se posaient A COTE du
+       numero au lieu de dessous, poussant la date hors du centre — et a quatre
+       menages le meme jour (aucun plafond, decision du 17 septembre) la ligne
+       debordait la case. */
     .dispo-case { min-height: 44px; aspect-ratio: 1; border: 1px solid transparent; border-radius: 8px;
-                  display: flex; align-items: center; justify-content: center; font-size: 14px;
+                  display: flex; flex-direction: column; gap: 1px;
+                  align-items: center; justify-content: center; font-size: 14px;
                   font-variant-numeric: tabular-nums; font-weight: 600; position: relative;
                   background: var(--green-bg); color: var(--green); cursor: pointer;
                   -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
-    .dispo-case.off { background: #FBE9E6; color: #C0392B; }
+    /* ⚠ UN JOUR ABSENT EST UN JOUR ETEINT, PAS UNE ALERTE (refonte v2, lot 2).
+       Il etait rouge — la couleur qu'on reserve a ce qui ne va pas. Or ne pas
+       travailler un jour est un etat normal, souvent choisi. Le rouge ne sert
+       plus qu'aux erreurs, et la couleur du calendrier va a ce qui demande un
+       geste : les menages que personne ne fait. */
+    .dispo-case.off { background: var(--bg2); color: var(--text3); }
+    /* ⚠ CIBLER LE NUMERO, PAS « LE PREMIER SPAN ». La bulle est posee AVANT le
+       numero dans le balisage : `span:first-of-type` l'attrapait, et un jour
+       absent portant une offre estompait l'OFFRE en laissant la date en clair —
+       l'inverse exact de la decision « le jour recule, pas l'offre ». */
+    .dispo-case.off .dispo-num { opacity: .55; }
     .dispo-case.vide { background: transparent; cursor: default; }
     .dispo-case.passe { opacity: .3; cursor: not-allowed; }
     .dispo-case.conge { background: var(--bg3); color: var(--text3); cursor: not-allowed;
                         border-style: dashed; border-color: var(--border); }
     .dispo-case.conge::after { content: "✕"; position: absolute; font-size: 16px; color: var(--text2); opacity: .7; }
-    .dispo-case.conge span { opacity: .25; }
+    /* ⚠ MEME PIEGE : `span` nu attrapait la bulle et les points du lot 2. Une
+       offre sur un jour de conge s'affichait a 25 % — quasi invisible — sur une
+       case que le lot 2 garde justement cliquable. */
+    .dispo-case.conge .dispo-num { opacity: .25; }
+    /* Une case de conge PORTANT une offre redevient actionnable : le curseur
+       doit le dire, sinon il annonce « interdit » sur le seul geste possible. */
+    .dispo-case.conge.a-prendre { cursor: pointer; }
     .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
-    .dispo-case.manuel::before { content: ""; position: absolute; bottom: 5px; width: 4px; height: 4px;
-                                 border-radius: 50%; background: currentColor; }
+    /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « cette absence, c'est
+       moi qui l'ai posee » ; le lot 2 en a introduit d'autres, verts et centres
+       sous le numero, qui disent « j'ai un menage ». Deux points de sens
+       different dans 44 px, c'est un seul point qu'on ne sait plus lire. Et sans
+       `left`, celui-ci suivait le flux — donc bougeait au passage de la case en
+       colonne. */
+    .dispo-case.manuel::before { content: ""; position: absolute; top: 4px; left: 4px;
+                                 width: 4px; height: 4px;
+                                 border-radius: 50%; background: currentColor; opacity: .7; }
+
+    /* ─── Ce que la case porte en plus (refonte v2, lot 2) ─────────────────
+       Mes menages : un POINT sous le numero, discret — c'est deja a moi, et le
+       detail vit dans la liste. */
+    .dispo-points { display: flex; gap: 3px; justify-content: center; align-items: center;
+                    height: 6px; margin-top: 2px; }
+    .dispo-points i { width: 5px; height: 5px; border-radius: 50%;
+                      background: var(--green); opacity: .75; }
+    .dispo-case.off .dispo-points i,
+    .dispo-case.conge .dispo-points i { background: var(--text3); opacity: 1; }
+
+    /* A PRENDRE : bulle de dialogue posee AU-DESSUS de la case, avec une pointe
+       qui designe la date — forme retenue le 17 septembre 2026. Elle dit « ce
+       jour-la », la ou une pastille ronde dirait « ce compteur ».
+       ⚠ PLEINE OPACITE MEME SUR UN JOUR ETEINT : une offre reste saisissable un
+       jour d'absence. Le jour recule, pas l'offre.
+       ⚠ `z-index` : sans lui, la case voisine — plus loin dans le DOM — passerait
+       par-dessus la partie qui deborde. */
+    .dispo-bulle {
+      position: absolute; top: -13px; left: -5px; z-index: 3;
+      height: 18px; min-width: 24px; padding: 0 7px; border-radius: 6px;
+      background: var(--primary); color: #fff; font-size: 11px; font-weight: 700;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-variant-numeric: tabular-nums; line-height: 1;
+      box-shadow: 0 1px 4px rgba(0,0,0,.22);
+    }
+    .dispo-bulle::after {
+      content: ''; position: absolute; bottom: -5px; left: 7px;
+      width: 0; height: 0;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 6px solid var(--primary);
+    }
+    .dispo-case.a-prendre { z-index: 2; }
+    /* La bulle monte au-dessus de la case : la grille lui laisse la place. */
+    .dispo-grille { row-gap: 12px; }
     /* `.dispo-case.envoi` a ete SUPPRIMEE : elle mettait la case a 45 %
        d'opacite pendant l'attente reseau. Depuis le rendu optimiste, la case
        change d'ETAT immediatement — il n'y a plus d'attente a signaler, et une
@@ -826,6 +889,7 @@
     <div class="modal-success" id="modal-success"></div>
     <div class="modal-warning" id="modal-warning"></div>
     <div class="modal-actions">
+      <button class="btn btn-primary" id="modal-prendre" style="display:none">Je prends ce ménage</button>
       <button class="btn btn-primary" id="modal-accepter" style="display:none">✓ J'accepte</button>
       <button class="btn" id="modal-refuser" style="display:none">Je ne peux pas</button>
       <button class="btn btn-primary" id="modal-done">✓ Marquer fait</button>
@@ -863,6 +927,11 @@ if ("serviceWorker" in navigator) {
   // quand ce lien n'a pas de profil : l'ecran n'affiche alors AUCUN etat
   // d'assignation plutot qu'un etat faux.
   let assignations = null
+  // ⚠ LES MENAGES QUE PERSONNE NE PORTE, sur ses biens (refonte v2, lot 2).
+  // `null` tant que le serveur n'a pas repondu — a ne pas confondre avec « aucun
+  // menage a prendre », qui est un tableau vide. Sans cette distinction, un
+  // ecran encore vide se lit « il n'y a rien », ce qui est faux.
+  let aPrendre = null
   let pendingQueue = []                // file actions en attente
   let readSet = new Set()              // ids d evenements acquittes (persistes en local + syncs)
   let commentsMap = {}
@@ -1133,6 +1202,7 @@ if ("serviceWorker" in navigator) {
     document.getElementById('mini-next').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1); renderMiniCal() })
     document.getElementById('modal-close').addEventListener('click', closeModal)
     document.getElementById('modal-done').addEventListener('click', onModalDoneClick)
+    document.getElementById('modal-prendre').addEventListener('click', prendreLeMenage)
     document.getElementById('modal-accepter').addEventListener('click', () => repondreOffre(true))
     document.getElementById('modal-refuser').addEventListener('click', () => repondreOffre(false))
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
@@ -1320,6 +1390,17 @@ if ("serviceWorker" in navigator) {
     ;(data.bookings || []).forEach(b => {
       if (!propMap.has(b.propId)) propMap.set(b.propId, { id: b.propId, name: b.propName })
     })
+    // ⚠ LES BIENS DES MENAGES A PRENDRE COMPTENT AUSSI (refonte v2, lot 2).
+    // Cette liste ne venait que de SES reservations : un bien ou elle n'a rien
+    // d'assigne — le cas le plus frequent pour un menage que personne ne fait —
+    // n'y figurait pas. Il etait donc absent du filtre de biens, donc jamais
+    // coche, donc ses bulles disparaissaient de l'ecran. La fonctionnalite se
+    // vidait precisement la ou elle sert.
+    ;(data.a_prendre || []).forEach(m => {
+      if (!propMap.has(m.property_id)) {
+        propMap.set(m.property_id, { id: m.property_id, name: m.property_name || '' })
+      }
+    })
     properties = [...propMap.values()]
     activeProps = new Set(properties.map(p => p.id))
     bookings = data.bookings || []
@@ -1334,6 +1415,10 @@ if ("serviceWorker" in navigator) {
       ? Object.fromEntries(data.menages.map(m =>
           [`${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`, m]))
       : null
+
+    // Les menages sans responsable, tels que le serveur les a filtres (profil
+    // actif, ses biens, statuts `orphaned`/`unassigned`, hors verrou de l'hote).
+    aPrendre = Array.isArray(data.a_prendre) ? data.a_prendre : null
 
     // Verite serveur : on remplace le miroir local
     if (Array.isArray(data.done)) {
@@ -1638,6 +1723,109 @@ if ("serviceWorker" in navigator) {
     return ''
   }
 
+  // ─── PRENDRE UN MENAGE QUE PERSONNE NE PORTE (refonte v2, lot 2) ──────────
+  //
+  // ⚠ CE QU'ELLE VOIT D'UN MENAGE QUI N'EST PAS LE SIEN : le bien et la date,
+  // rien d'autre. Ni voyageur, ni occupation, ni arrivee. Le serveur ne les
+  // envoie meme pas — c'est exactement ce qui separe cette lecture de celle qui
+  // a fuite le 14 septembre. L'ecran ne doit donc rien inventer non plus.
+  let priseEnCours = null
+  function ouvrirPriseDeMenage (jour, libres) {
+    const m = libres[0]
+    priseEnCours = m
+    const absente = !jourTravaille(jour)
+    document.getElementById('modal-title').textContent = 'Prendre ce ménage'
+    document.getElementById('modal-sub').textContent = formatDate(dateNueLocale(jour))
+    document.getElementById('modal-body').innerHTML =
+      `<div class="modal-row"><span>Logement</span><span>${echapper(m.property_name || '—')}</span></div>` +
+      `<div class="modal-row"><span>Départ</span><span>${echapper(m.departure_date)}</span></div>` +
+      (libres.length > 1
+        ? `<div class="modal-row"><span>Ce jour-là</span><span>${libres.length} ménages à prendre</span></div>`
+        : '')
+    // ⚠ LES DEUX PHRASES NE DISENT PAS LA MEME CHOSE, et c'est la decision du
+    // 17 septembre : prendre un menage un jour d'absence ne la rend disponible
+    // QUE pour celui-la. Le reste de sa journee ne bouge pas, et il faut le lui
+    // dire — sinon elle croit annuler son absence entiere.
+    document.getElementById('modal-note').innerHTML = absente
+      ? '<div class="admin-note"><div class="admin-note-title">Vous êtes absente ce jour-là</div>' +
+        'Prendre ce ménage vous rend disponible <b>pour lui seul</b>. Le reste de votre journée ne change pas.</div>'
+      : '<div class="admin-note"><div class="admin-note-title">Une fois pris, il est à vous</div>' +
+        'Ce n\'est pas une demande : le ménage vous est attribué, et votre hôte en est informé.</div>'
+    hideModalMessages()
+    document.getElementById('modal-done').style.display = 'none'
+    document.getElementById('modal-accepter').style.display = 'none'
+    document.getElementById('modal-refuser').style.display = 'none'
+    const btn = document.getElementById('modal-prendre')
+    btn.style.display = ''
+    btn.disabled = false
+    btn.textContent = 'Je prends ce ménage'
+    document.getElementById('modal').style.display = 'flex'
+  }
+
+  // ⚠ PAS DE RENDU OPTIMISTE ICI, ET C'EST DELIBERE — contrairement au clic
+  // « je ne suis pas disponible » du lot 1. Une absence ne concerne qu'elle : si
+  // l'envoi echoue, on remet sa journee comme avant et personne d'autre n'a rien
+  // vu. Prendre un menage est une COURSE avec ses collegues : afficher « il est
+  // a vous » avant que le serveur ait tranche lui ferait organiser sa journee
+  // autour d'un menage qu'une autre vient peut-etre de prendre. On attend donc
+  // le verdict — et comme l'appel est unique (pas de relecture derriere), il
+  // reste court.
+  async function prendreLeMenage () {
+    if (!priseEnCours) return
+    const m = priseEnCours
+    const btn = document.getElementById('modal-prendre')
+    hideModalMessages()
+    if (!navigator.onLine) {
+      showModalError('Hors ligne : impossible de prendre un ménage pour le moment.')
+      return
+    }
+    btn.disabled = true
+    btn.textContent = 'Envoi…'
+    try {
+      const res = await fetch(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'prendreMenage', property_id: m.property_id,
+                               booking_id: m.booking_id, departure_date: m.departure_date })
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        // 409 = course perdue, 403 = pas son bien ou verrou de l'hote. Dans les
+        // deux cas le serveur envoie une PHRASE : on l'affiche telle quelle
+        // plutot que d'en inventer une qui dirait moins.
+        showModalError((data && data.error) || 'Ce ménage n\'a pas pu être pris.')
+        btn.disabled = false
+        btn.textContent = 'Je prends ce ménage'
+        // ⚠ ON RECHARGE QUAND MEME : si quelqu'un vient de le prendre, la bulle
+        // doit disparaitre de son calendrier. La laisser inviterait a reessayer
+        // indefiniment un geste qui echouera toujours.
+        await rechargerApresPrise()
+        return
+      }
+      closeModal()
+      await rechargerApresPrise()
+    } catch (err) {
+      showModalError('Connexion impossible. Réessayez dans un instant.')
+      btn.disabled = false
+      btn.textContent = 'Je prends ce ménage'
+    }
+  }
+
+  // Relecture complete apres une prise : le menage change de camp, la bulle
+  // decroit et un point apparait sous la date. C'est le seul endroit du lot ou
+  // une relecture se justifie — l'etat a vraiment change cote serveur, et
+  // ailleurs qu'a l'endroit qu'on a touche.
+  async function rechargerApresPrise () {
+    const r = await loadData(currentToken, { silencieux: true })
+    // ⚠ L'ECRAN GARDE CE QU'IL A si la relecture echoue — meme regle que le
+    // rafraichissement au retour au premier plan. Repeindre sur une reponse
+    // ratee viderait le planning d'une prestataire dont le reseau a bronche.
+    if (!r || r.ok === false) return
+    rebuildDoneSet()
+    renderFilters()        // les filtres de biens sont reconstruits par loadData
+    routeRender()          // la vue courante, quelle qu'elle soit
+    if (mesJours) peindreMesJours()
+  }
+
   function openModal(m) {
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
@@ -1663,6 +1851,10 @@ if ("serviceWorker" in navigator) {
     const btn = document.getElementById('modal-done')
     const btnOui = document.getElementById('modal-accepter')
     const btnNon = document.getElementById('modal-refuser')
+    // ⚠ Le modal est PARTAGE : sans cette remise a zero, le bouton « Je prends »
+    // d'une feuille precedente restait visible sur la fiche d'un menage a elle.
+    document.getElementById('modal-prendre').style.display = 'none'
+    priseEnCours = null
     btn.style.opacity = ''
 
     // ⚠ TANT QUE L'OFFRE N'EST PAS ACCEPTEE, il n'y a rien a marquer fait :
@@ -2110,6 +2302,25 @@ if ("serviceWorker" in navigator) {
   const exceptionDuJour = j => (mesJours.exceptions || [])
     .find(e => String(e.date).slice(0, 10) === j) || null
 
+  // ─── Ce que le calendrier fusionne (refonte v2, lot 2) ────────────────────
+  // ⚠ LES MENAGES A ELLE VIENNENT DES RESERVATIONS DEJA CHARGEES, filtrees par
+  // le serveur sur son profil : on ne refait pas ce filtrage ici, on le lit.
+  // Un menage annule ou hors de ses biens n'est jamais arrive jusqu'a nous.
+  function mesMenagesDu (j) {
+    if (!Array.isArray(bookings)) return []
+    return bookings.filter(b => b.departure === j && activeProps.has(b.propId))
+  }
+  // ⚠ `null` (pas encore charge) et `[]` (rien a prendre) ne se confondent pas :
+  // le premier ne doit dessiner aucune bulle, pas une bulle a zero.
+  function aPrendreDu (j) {
+    if (!Array.isArray(aPrendre)) return []
+    // ⚠ LE FILTRE DE BIENS S'APPLIQUE ICI AUSSI. `mesMenagesDu` l'honorait, pas
+    // celle-ci : en reduisant l'affichage a un logement, ses points
+    // disparaissaient des autres mais les bulles y restaient — et toucher l'une
+    // ouvrait la prise d'un logement qu'elle venait explicitement de masquer.
+    return aPrendre.filter(m => m.departure_date === j && activeProps.has(m.property_id))
+  }
+
   // ⚠ LA MEME PRECEDENCE QUE LE SERVEUR : conge, exception, regle, puis
   // « aucune regle = disponible ». Une seconde regle ecrite ici divergerait du
   // moteur au premier ajustement, et elle lirait un planning que le cron ne suit
@@ -2325,13 +2536,38 @@ if ("serviceWorker" in navigator) {
         if (!j) { out += '<div class="dispo-case vide"></div>'; continue }
         const c = congeDuJour(j), libre = jourTravaille(j)
         const exc = !c && exceptionDuJour(j)
+        // ⚠ LE CALENDRIER FUSIONNE PLANNING ET DISPONIBILITES (refonte v2,
+        // lot 2). La meme case porte desormais trois informations : si elle
+        // travaille (le fond), ce qu'elle a a faire (les points), et ce que
+        // personne ne fait (la bulle).
+        const miens = mesMenagesDu(j)
+        const libres = aPrendreDu(j)
         const cls = 'dispo-case' + (c ? ' conge' : (libre ? '' : ' off')) +
                     (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') +
-                    (exc && exc.source === 'prestataire' ? ' manuel' : '')
-        const titre = c ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
-                        : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là'))
+                    (exc && exc.source === 'prestataire' ? ' manuel' : '') +
+                    (libres.length ? ' a-prendre' : '')
+        const titre = [
+          c ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
+            : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
+          miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
+          libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : ''
+        ].filter(Boolean).join(' · ')
+        // ⚠ LA BULLE EST POSEE MEME SUR UN JOUR ETEINT, et c'est une decision :
+        // une offre reste saisissable un jour ou elle s'est dite absente — la
+        // prendre vaut « je me rends disponible pour celui-la ». Le jour recule,
+        // pas l'offre.
+        const bulle = libres.length
+          ? `<span class="dispo-bulle">${libres.length}</span>` : ''
+        // Un POINT par menage a elle, sous le numero. Le detail vit dans la
+        // liste, pas dans une case de 44 px.
+        const points = miens.length
+          ? `<span class="dispo-points">${miens.map(() => '<i></i>').join('')}</span>` : ''
+        // ⚠ UNE CASE QUI PORTE UNE OFFRE RESTE TOUCHABLE MEME PASSEE... non :
+        // un menage passe n'est pas recuperable (decision du 17 septembre), et
+        // le serveur le refuse. On ne l'ouvre donc pas non plus ici.
+        const inerte = (j < auj) || (c && !libres.length)
         out += `<div class="${cls}" data-jour="${j}" title="${echapper(titre)}" ` +
-               `tabindex="${(j < auj || c) ? -1 : 0}"><span>${+j.slice(8, 10)}</span></div>`
+               `tabindex="${inerte ? -1 : 0}">${bulle}<span class="dispo-num">${+j.slice(8, 10)}</span>${points}</div>`
       }
     }
     out += '</div></div>'
@@ -2340,15 +2576,21 @@ if ("serviceWorker" in navigator) {
 
   function peindreLegende (alt) {
     document.getElementById('dispo-legende').innerHTML =
+      // ⚠ LA LEGENDE SUIT LA CASE. Elle decrivait encore le rouge des jours
+      // absents — une couleur que le lot 2 a retiree — et ne disait rien des deux
+      // marques qu'il a ajoutees. Une legende qui montre des couleurs absentes de
+      // l'ecran est pire qu'une legende absente : elle fait douter de ce qu'on voit.
       '<span><i style="background:var(--green-bg);border:1px solid var(--green)"></i>Je travaille</span>' +
-      '<span><i style="background:#FBE9E6;border:1px solid #C0392B"></i>Je ne travaille pas</span>' +
+      '<span><i style="background:var(--bg2);border:1px solid var(--border)"></i>Je ne travaille pas</span>' +
       '<span><i style="background:var(--bg3);border:1px dashed var(--border)"></i>Congé</span>' +
-      // ⚠ LE POINT ETAIT DESSINE MAIS JAMAIS EXPLIQUE. La maquette portait quatre
-      // entrees, l'ecran n'en avait que trois : un jour marque d'un point ne
-      // ressemblait a rien de connu.
+      '<span><i style="background:var(--green-bg);border:1px solid var(--green);position:relative">' +
+      '<b style="position:absolute;left:1px;top:1px;width:4px;height:4px;border-radius:50%;' +
+      'background:var(--green);opacity:.7"></b></i>absence posée à la main</span>' +
+      // Les deux marques du lot 2 : ce que j'ai a faire, et ce que personne ne fait.
       '<span><i style="background:var(--green-bg);border:1px solid var(--green);position:relative">' +
       '<b style="position:absolute;left:4px;bottom:1px;width:4px;height:4px;border-radius:50%;' +
-      'background:var(--green)"></b></i>le point = choisi à la main</span>' +
+      'background:var(--green)"></b></i>mon ménage</span>' +
+      '<span><i style="background:var(--primary);border-radius:3px"></i>à prendre</span>' +
       (alt ? '<span><b style="color:var(--green)">A</b>/<b style="color:var(--amber)">B</b> à gauche de chaque semaine</span>' : '')
   }
 
@@ -2539,6 +2781,15 @@ if ("serviceWorker" in navigator) {
 
   async function basculerMonJour (j) {
     const msg = document.getElementById('dispo-message')
+    // ⚠ UNE OFFRE PASSE AVANT TOUT LE RESTE, Y COMPRIS UN JOUR D'ABSENCE OU DE
+    // CONGE (decision du 17 septembre). C'est ce qui demande une decision ; le
+    // reste du jour, lui, ne change pas. Ce test vient donc avant les gardes de
+    // la bascule — sinon un jour eteint ou en conge ressortait ici sans jamais
+    // montrer la seule chose qui s'y passe.
+    if (j >= AUJ()) {
+      const libres = aPrendreDu(j)
+      if (libres.length) { ouvrirPriseDeMenage(j, libres); return }
+    }
     if (!mesJours.modifiable) return
     if (j < AUJ() || congeDuJour(j)) return
     if (horsLigne(msg)) return

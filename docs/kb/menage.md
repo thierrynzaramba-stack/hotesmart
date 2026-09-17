@@ -1958,3 +1958,261 @@ savoir.
 Deux tests existants protégeaient une mécanique disparue (`.envoi`). Ils ont été
 **réorientés sur le vrai invariant** — le rattrapage — plutôt que supprimés : le
 cas qu'ils décrivaient (une coupure en sous-sol) reste le cas fréquent.
+
+## Le calendrier fusionné de la PWA — refonte v2, lot 2 (17 septembre 2026)
+
+Le calendrier au mois porte désormais **trois informations dans la même case** :
+si elle travaille (le fond), ce qu'elle a à faire (les points), et ce que
+**personne** ne fait (la bulle).
+
+### Ce qu'est un « ménage à prendre »
+
+Ceux que **personne ne porte**, sur **ses biens**. Trois états produisent un
+ménage durablement sans responsable, et deux seulement sont proposés :
+
+| état | proposé ? | pourquoi |
+|---|---|---|
+| `orphaned` | **oui**, quel que soit `assigned_by` | quelqu'un a refusé, ou toutes les candidates ont été sollicitées sans suite. Le cron ne le réassigne jamais — « une boucle dont personne ne sortirait » |
+| `unassigned` sans verrou | **oui** | aucune candidate disponible ce jour-là. Le cron réessaie toutes les 5 min, sans succès, par conception |
+| `unassigned` + `assigned_by = 'manual'` | **NON** | l'hôte a **désassigné à la main**. Laisser un ménage sans personne **est** une décision (§3) : on ne la défait pas par une bulle |
+
+Dans les deux cas proposés, l'hôte a déjà été alerté et **rien ne se débloque
+seul**. Cette fonctionnalité est la résolution humaine qui manquait.
+
+### ⚠️ `assigned_by = 'manual'` a DEUX sens, et s'y fier seul vide la fonctionnalité
+
+**Attrapé en review, et c'était le défaut central.** Trois écrivains posent ce
+verrou :
+
+| écrivain | statut écrit | ce que ça veut dire |
+|---|---|---|
+| `api/menages.js` — l'hôte désassigne | `unassigned` | **décision de l'hôte** |
+| `api/menages-public.js` — un refus, et personne ne porte | `orphaned` | **un refus**, l'hôte n'y est pour rien |
+| `sync-menages-entite.js` — résurrection | `orphaned` | conserve le verrou d'avant, quel qu'il soit |
+
+Filtrer sur `assigned_by <> 'manual'` écartait donc **tous les ménages refusés** —
+c'est-à-dire le cas principal, celui qui a le plus besoin d'un preneur. Et la
+prise répondait « Votre hôte gère ce ménage lui-même » à quelqu'un qui regardait
+un ménage auquel l'hôte n'avait jamais touché.
+
+**C'est le STATUT qui tranche** : `unassigned` + `manual` = l'hôte a désassigné,
+on n'y touche pas ; `orphaned` = personne ne porte, on propose.
+
+⚠️ **Imprécision connue et assumée** : une résurrection force `orphaned` même sur
+un verrou d'hôte, qui redevient donc proposable. Il faut qu'une réservation
+disparaisse puis revienne sur un ménage désassigné à la main. Se tromper dans ce
+sens-là **rend un ménage à quelqu'un** ; se tromper dans l'autre **laisse un
+logement sale**. Le vrai correctif est un marqueur distinct en base —
+`assigned_by` mélange « décision de l'hôte » et « refus ». **Dette ouverte.**
+
+### ⚠️ On rouvre ici, délibérément, une lecture fermée le 14 septembre
+
+Le « pont de convergence » laissait un jeton **sans profil** voir « ce qui n'est
+assigné à personne » — et le lien orphelin de Tiphaine rendait **11 séjours avec
+les noms des voyageurs**. Servir « ce qui n'est assigné à personne » est
+littéralement la forme de données qui a fuité.
+
+Ce qui rend cette lecture-ci sûre n'est pas qu'elle soit plus petite, c'est
+qu'elle porte les **trois gardes qui manquaient à l'autre** :
+
+1. **Profil actif exigé** — `profilActifDuJeton`, vérifié avant les lectures lourdes ;
+2. **Ses biens uniquement** — `propIds`, déjà résolu depuis le token ;
+3. **Aucune donnée voyageur** — ni nom, ni occupation, ni arrivée. Un ménage qui
+   n'est pas le sien lui dit **où** et **quand**, jamais **qui**.
+
+C'est la troisième qui fait la différence, et un test la garde : la feuille
+d'une offre ne doit contenir aucun des mots « Voyageur », « Adultes »,
+« Enfants », « Arrivée ».
+
+### ⚠️ Deux pièges SQL sur le même filtre
+
+**Le NULL.** `assigned_by <> 'manual'` vaut NULL — donc faux — quand la colonne
+est nulle. Une ligne **sans** `assigned_by` est pourtant le cas le plus courant.
+Il faut nommer le NULL : `assigned_by.is.null,assigned_by.neq.manual`.
+
+**Le refiltrage en JS ne rattrape rien.** Le premier jet refiltrait après coup —
+ce qui ne peut pas récupérer des lignes que SQL n'a jamais rendues. Un filtre
+trop large se corrige en JS ; un filtre trop étroit, jamais.
+
+### Les cinq gardes de la prise (`prendreMenage`)
+
+Les gardes de la **lecture** disent ce qu'on **affiche** ; elles ne protègent
+rien d'un appel forgé. Elles sont donc toutes refaites à l'écriture :
+
+1. **Être quelqu'un** — profil actif, sinon l'assignation se ferait au nom de personne ;
+2. **Ses biens** — `property_ids` du token (vide = périmètre total, comme partout ici) ;
+3. **Pas un ménage passé** — en heure de **Paris** : entre minuit et 2 h l'été, l'UTC est encore la veille ;
+4. **Il doit vraiment n'être à personne** — ni porteur, ni proposition en cours, ni verrou de l'hôte, et un statut proposable ;
+5. **La course** — la condition est **refaite dans l'écriture**, où elle est atomique (`.is('provider_id', null)`…). Zéro ligne mise à jour = course perdue, donc **409**, jamais un faux succès : sinon elle s'organise autour d'un ménage qui ne lui revient pas.
+
+⚠️ **La prise pose `assigned_by = 'manual'`** — et ne pas l'écrire était un
+défaut, trouvé en review. `poserPropositionsDues` sélectionne exactement
+`assigned_by = 'auto'` et ne protège le porteur que **s'il est la personne de
+garde du jour**. Or ce qu'elle vient de prendre n'a, par construction, personne
+de garde : le cron le proposait donc à quelqu'un d'autre, dont l'acceptation le
+lui **retirait sans un mot**.
+
+Le verrou dit « quelqu'un a décidé », pas « l'hôte a décidé » — c'est le sens que
+lui donne déjà la résurrection (« Décision humaine, conservée »).
+
+### ⚠️ Pas de rendu optimiste sur la prise — contrairement au clic d'absence
+
+Une absence ne concerne qu'elle : si l'envoi échoue, on remet sa journée comme
+avant et personne d'autre n'a rien vu. **Prendre un ménage est une course avec
+ses collègues.** Afficher « il est à vous » avant que le serveur ait tranché lui
+ferait organiser sa journée autour d'un ménage qu'une autre vient peut-être de
+prendre. On attend donc le verdict — et comme l'appel est unique, il reste court.
+
+C'est la limite du rendu optimiste, et elle vaut d'être dite : il convient quand
+l'écriture ne peut **pas** être refusée pour une raison qu'on ignore.
+
+### Un jour d'absence garde ses offres
+
+La bulle reste à **pleine opacité** sur un jour éteint : le jour recule, pas
+l'offre. Prendre ce ménage la rend disponible **pour lui seul** — le reste de sa
+journée ne change pas, et la feuille le lui dit explicitement. Sans cette phrase,
+elle croit annuler son absence entière.
+
+### ⚠️ Le piège du harnais de test
+
+Une première version des tests posait `bookings` et `aPrendre` à la main après le
+montage. Le boot du module appelle `loadData`, qui les **écrasait aussitôt** avec
+la réponse du double — les tests échouaient sans que le code soit en cause. Les
+données sont désormais servies **par le double**, ce qui fait passer le test par
+le vrai chemin de chargement.
+
+⚠️ Et un commentaire contenant des **backticks**, écrit à l'intérieur d'un
+template literal, en ferme la chaîne : le fichier de test entier ne compilait
+plus. Le message (`Unexpected identifier`) ne désigne pas l'endroit fautif.
+
+### Ce que la review a fermé d'autre sur le lot 2
+
+**La bulle était estompée par des sélecteurs qui l'attrapaient sans le savoir.**
+`.dispo-case.off > span:first-of-type` visait le numéro du jour — mais la bulle
+est posée **avant** lui dans le balisage, donc c'est elle que le sélecteur
+atteignait : un jour absent portant une offre estompait **l'offre** et laissait la
+date en clair, l'inverse exact de la décision. Même piège sur
+`.dispo-case.conge span`, qui rendait l'offre invisible à 25 % sur une case que le
+lot garde justement cliquable. Le numéro porte désormais une classe.
+
+⚠️ **Règle** : dès qu'une case reçoit un second enfant, tout sélecteur qui disait
+« le span » ou « le premier span » désigne autre chose qu'avant.
+
+**Les points ne se posaient pas sous le numéro.** `.dispo-case` est `display:flex`
+sans `flex-direction: column` : les points s'alignaient **à côté** de la date, la
+poussant hors du centre — et à quatre ménages le même jour (aucun plafond) la
+ligne débordait la case de 44 px.
+
+**Le marqueur « absence posée à la main » entrait en collision.** Il dessine un
+point ; le lot 2 en a ajouté d'autres. Deux points de sens différent dans 44 px,
+c'est un seul point qu'on ne sait plus lire. Il est passé en haut à gauche, et
+**ancré** — sans `left`, il suivait le flux, donc bougeait au passage en colonne.
+
+**La légende décrivait des couleurs disparues.** Elle montrait encore le rouge des
+jours absents et ignorait les deux marques ajoutées. Une légende qui montre des
+couleurs absentes de l'écran est pire qu'une légende absente : elle fait douter de
+ce qu'on voit.
+
+**Le filtre de biens ignorait les offres**, puis les a fait disparaître. Première
+version : `aPrendreDu` ne filtrait pas, donc masquer un logement laissait ses
+bulles. Le correctif les a fait disparaître **partout** — parce que la liste des
+biens ne venait que de **ses** réservations, et qu'un bien où elle n'a rien
+d'assigné est justement le cas le plus fréquent d'un ménage que personne ne fait.
+Les biens des offres entrent donc désormais dans cette liste.
+
+**La garde de format manquait sur `prendreMenage`.** Ses voisines
+(`accepterMenage`, `markDone`) vérifient `^\d{4}-\d{2}-\d{2}$`. Sans elle, la
+garde « pas un ménage passé » — une comparaison de **chaînes** — se contourne :
+`"2026-9-7"` est lexicographiquement **supérieur** à `"2026-09-17"` (parce que
+`'9' > '0'`), alors que Postgres le lit comme le 7 septembre pour retrouver la
+ligne.
+
+**L'échec de la trace d'assignation était muet.** C'est le seul canal par lequel
+l'hôte apprend le transfert. Le ménage, lui, **est** pris — l'écriture atomique a
+abouti — donc on rend le succès, mais on crie dans les logs : un transfert sans
+trace ne doit pas passer inaperçu des deux côtés.
+
+### ⚠️ Deux tests qui ne testaient rien
+
+**Un test à sortie silencieuse.** « Un jour passé à prendre ne s'ouvre pas »
+contenait `if (!el) return` : le 1er ou le 2 du mois, le jour visé tombe hors du
+calendrier rendu et le test passait **sans rien éprouver** — la garde aurait pu
+régresser deux jours par mois sans un mot.
+
+**Et sa correction a introduit un bug de fuseau.** `new Date(y, m, 1)` est minuit
+**local**, `iso()` formate en **UTC** : à l'est de Greenwich, le 1er du mois
+retombait sur le dernier jour du mois précédent. Le test échouait pour une raison
+qui n'était pas la sienne. Il construit désormais sa date par la même arithmétique
+que le reste du fichier.
+
+## DETTE — `assigned_by` mélange deux décisions (lot à venir)
+
+**Constat du 17 septembre 2026, à la refonte PWA v2 lot 2.**
+
+La colonne `assigned_by = 'manual'` sert aujourd'hui de verrou pour **deux
+décisions qui n'ont rien à voir** :
+
+| écrivain | statut écrit | décision réelle |
+|---|---|---|
+| `api/menages.js` | `unassigned` | l'**hôte** a désassigné à la main |
+| `api/menages-public.js` (refus) | `orphaned` | une **prestataire** a refusé, personne ne porte |
+| `api/menages-public.js` (prise, lot 2) | inchangé | une **prestataire** s'est saisie du ménage |
+| `lib/cleaning/sync-menages-entite.js` | `orphaned` | résurrection : conserve le verrou d'avant, **quel qu'il soit** |
+
+Le lot 2 s'en sort en lisant le **statut** : `unassigned` + `manual` = l'hôte,
+`orphaned` = personne ne porte. Ça tient pour les trois premiers écrivains.
+
+⚠️ **Ça ne tient pas après une résurrection.** Elle force `orphaned` même sur un
+verrou d'hôte, qui redevient donc proposable dans les bulles. Il faut qu'une
+réservation disparaisse puis revienne sur un ménage que l'hôte avait désassigné
+à la main — rare, mais réel.
+
+**Pourquoi on a choisi cette imprécision-là.** Les deux erreurs ne coûtent pas la
+même chose : se tromper dans ce sens **rend un ménage à quelqu'un** ; se tromper
+dans l'autre **laisse un logement sale**. Entre proposer à tort un ménage que
+l'hôte voulait garder et faire disparaître tous les ménages refusés, le choix
+n'était pas difficile — mais c'est un choix, pas une solution.
+
+### Ce que le lot devra faire
+
+Distinguer la décision en base plutôt que la déduire. Deux pistes :
+
+1. **Une valeur par décideur** — `assigned_by` passe de `'auto' | 'manual'` à
+   `'auto' | 'hote' | 'prestataire'`. Le plus direct, mais il touche tous les
+   lecteurs de la colonne (`poserPropositionsDues` filtre sur `'auto'`, la
+   résurrection teste `=== 'manual'`).
+2. **Une colonne `verrou_par`** à côté, que la résurrection conserve telle
+   quelle. Plus additive, moins de lecteurs à reprendre.
+
+⚠️ **Le test qui tranchera** : un ménage désassigné par l'hôte, dont la
+réservation disparaît puis revient, ne doit **jamais** réapparaître dans
+`a_prendre`. Aucun test ne couvre ce chemin aujourd'hui.
+
+### Passe de vérification des correctifs — ce qu'elle a encore trouvé
+
+Deux constats mineurs, corrigés :
+
+**Les bornes d'écriture étaient plus larges que celles de lecture.** `a_prendre`
+borne en haut à `visibility_days` ; `prendreMenage` ne bornait que le passé.
+« Lisible donc prenable » était vrai, l'inverse non — un appel forgé pouvait
+prendre un ménage au-delà de la fenêtre que l'hôte a ouverte. Aucune donnée n'en
+sortait, mais **une garde d'écriture plus large que sa lecture finit toujours par
+être celle qui compte**.
+
+**Un test rouge à partir d'UTC+12.** `AUJ` est ancré en UTC (`Date.UTC(…, 12)`)
+mais `getDate()` est un getter **local** : au-delà d'UTC+12, midi UTC bascule au
+jour local suivant et la date visée retombait hors du calendrier rendu. Corrigé
+en `getUTCDate()`, vérifié en local, à UTC+12 et à UTC−11. Et la sortie
+silencieuse du 1er du mois passe par `ctx.skip()` : un test qui ne s'exécute pas
+doit le dire.
+
+⚠️ **Dette repérée au passage, hors lot** : `le passé ne se modifie pas`
+(`tests/pwa-mes-jours-dom.test.js`) échoue à **UTC−11**, et c'est **antérieur au
+lot 2** — vérifié en remisant le lot. Même famille que ci-dessus : le fichier
+mélange des dates ancrées en UTC et des getters locaux.
+
+**Couverture serveur ajoutée.** La passe a relevé que le lot n'était éprouvé que
+côté DOM. `tests/pwa-prendre-menage.test.js` tient désormais les cinq gardes de
+l'écriture, le filtre de lecture, l'absence de donnée voyageur, le verrou posé à
+la prise — avec une contre-épreuve sur `poserPropositionsDues`, pour que le jour
+où son filtre `'auto'` changera, la protection posée ici soit revue.

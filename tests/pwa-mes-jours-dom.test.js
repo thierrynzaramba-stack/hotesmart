@@ -56,6 +56,7 @@ const projeter = regles => (regles || []).map(r => {
 
 function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    autorise = true, enLigne = true, erreur = null,
+                   bookings = [], aPrendre = null,
                    coupureEcriture = false, echecReglage = null,
                    retardEcriture = 0, suspendreEcriture = false,
                    coupureTotale = false } = {}) {
@@ -68,7 +69,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     .replace(/^\s*initErrorHandler\(\)\s*$/gm, '')
 
   const appels = []
-  const etat = { regles, exceptions, conges, modifiable, autorise }
+  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre }
   // ⚠ SUSPENSION DETERMINISTE, PLUTOT QU'UNE TEMPORISATION.
   // Tester « l'ecran a bascule AVANT la reponse » avec un `setTimeout` de 120 ms
   // et un `souffler(10)` marche sur un poste au repos et lache sur une machine
@@ -81,6 +82,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     globalThis.__p = {
       appels,
       seed () { currentToken = 'jeton-test'; dispoCharge = false },
+      charger: () => loadData('jeton-test', { silencieux: true }),
       chargerDisponibilites, basculerMonJour, poserMonConge,
       etat: () => mesJours,
       enVol: () => enVolParJour
@@ -164,7 +166,14 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     return { ok: true, status: 200, json: async () => ({
       autorise: etat.autorise, modifiable: etat.modifiable,
       prenom: 'Régina', regles: projeter(etat.regles),
-      exceptions: etat.exceptions, conges: etat.conges }) }
+      exceptions: etat.exceptions, conges: etat.conges,
+      // ⚠ SERVIS PAR LE DOUBLE, PAS INJECTES. Une premiere version posait
+      // `bookings` et `aPrendre` a la main apres le montage : le boot du module
+      // appelle `loadData`, qui les ECRASAIT aussitot avec la reponse du double.
+      // Les servir ici fait passer le test par le vrai chemin de chargement.
+      bookings: etat.bookings, a_prendre: etat.aPrendre,
+      label: 'Regina', property_ids: [], visibility_days: 30,
+      comments: [], events: [], done: [], menages: [] }) }
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
@@ -440,13 +449,21 @@ test('HORS LIGNE, cocher un jour n\'envoie rien', async () => {
   assert.match(message(w), /Hors ligne/)
 })
 
-test('la légende explique le POINT — elle ne le laisse pas deviner', async () => {
+test('la légende explique CHAQUE marque — elle n\'en laisse deviner aucune', async () => {
   // La maquette portait quatre entrées, l'écran n'en avait que trois : un jour
   // marqué d'un point ne ressemblait à rien de connu.
+  // ⚠ Le lot 2 a ajouté DEUX marques (mon ménage, à prendre) et retiré le rouge
+  // des jours absents. Une légende qui montre des couleurs absentes de l'écran
+  // est pire qu'une légende absente : elle fait douter de ce qu'on voit.
   const { w, t } = monter()
   t.seed()
   await t.chargerDisponibilites()
-  assert.match(w.document.getElementById('dispo-legende').textContent, /choisi à la main/)
+  const txt = w.document.getElementById('dispo-legende').textContent
+  const html = w.document.getElementById('dispo-legende').innerHTML
+  assert.match(txt, /posée à la main/)
+  assert.match(txt, /mon ménage/)
+  assert.match(txt, /à prendre/)
+  assert.ok(!/#FBE9E6|#C0392B/.test(html), 'plus aucune couleur retirée de la grille')
 })
 
 test('plus de « Aucun jour habituel n\'est réglé »', async () => {
@@ -889,6 +906,171 @@ test('un rattrapage TARDIF n\'écrase pas des données fraîches', async () => {
 
   assert.ok(caseDu(w, jHote).classList.contains('off'),
     'et elle SURVIT au rattrapage de l\'écriture refusée')
+})
+
+// ─── Le calendrier FUSIONNÉ (refonte v2, lot 2) ───────────────────────────
+//
+// La même case porte désormais trois informations : si elle travaille (le fond),
+// ce qu'elle a à faire (les points), et ce que personne ne fait (la bulle).
+
+const menage = (date, propId = 'p1') =>
+  ({ id: 'b-' + date, propId, propName: 'Colomiers', departure: date, arrival: date })
+const offre = (date, propId = 'p1') =>
+  ({ booking_id: 'x-' + date, property_id: propId, property_name: 'Colomiers',
+     departure_date: date, status: 'unassigned' })
+
+test('un jour où elle a un ménage porte un POINT sous le numéro', async () => {
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.strictEqual(el.querySelectorAll('.dispo-points i').length, 1)
+  assert.match(el.getAttribute('title'), /1 ménage à moi/)
+})
+
+test('deux ménages le même jour : DEUX points (aucun plafond)', async () => {
+  // Décision du 17 septembre : plusieurs ménages le même jour, c'est libre.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j), menage(j, 'p2')] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  assert.strictEqual(caseDu(w, j).querySelectorAll('.dispo-points i').length, 2)
+})
+
+test('un ménage à prendre pose une BULLE avec le nombre', async () => {
+  const j = dans(2)
+  const { w, t } = monter({ aPrendre: [offre(j), offre(j, 'p2')] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const b = caseDu(w, j).querySelector('.dispo-bulle')
+  assert.ok(b, 'la bulle existe')
+  assert.strictEqual(b.textContent, '2')
+  assert.ok(caseDu(w, j).classList.contains('a-prendre'))
+})
+
+test('la bulle reste sur un jour d\'ABSENCE — le jour recule, pas l\'offre', async () => {
+  // ⚠ DÉCISION DU 17 SEPTEMBRE. Une offre reste saisissable un jour où elle
+  // s'est dite absente : la prendre vaut « je me rends disponible pour
+  // celui-là ». Masquer la bulle lui ferait rater un ménage que personne ne fait.
+  const j = dans(2)
+  const { w, t } = monter(Object.assign({ exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }] }, { aPrendre: [offre(j)] }))
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(el.classList.contains('off'), 'le jour est bien éteint')
+  assert.ok(el.querySelector('.dispo-bulle'), 'et la bulle y est quand même')
+})
+
+test('toucher un jour à prendre OUVRE l\'offre au lieu de basculer l\'absence', async () => {
+  // L'offre est ce qui demande une décision : elle passe avant tout le reste,
+  // y compris sur un jour où elle s'est dite absente.
+  const j = dans(2)
+  const { w, t } = monter({ aPrendre: [offre(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+
+  assert.strictEqual(ecritures(t).length, 0, 'aucune absence déclarée')
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex')
+  assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/)
+  assert.strictEqual(w.document.getElementById('modal-prendre').style.display, '')
+})
+
+test('un jour d\'absence AVEC offre le DIT dans la feuille', async () => {
+  // Sinon elle croit annuler son absence entière en prenant le ménage.
+  const j = dans(2)
+  const { w, t } = monter(Object.assign({ exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }] }, { aPrendre: [offre(j)] }))
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  const note = w.document.getElementById('modal-note').textContent
+  assert.match(note, /absente ce jour-là/)
+  assert.match(note, /pour lui seul/)
+})
+
+test('un ménage qui n\'est pas le sien ne montre AUCUNE donnée voyageur', async () => {
+  // ⚠ C'est ce qui sépare cette lecture de celle qui a fuité le 14 septembre :
+  // un lien orphelin y voyait 11 séjours avec les NOMS DES VOYAGEURS. Elle
+  // apprend OÙ et QUAND, jamais QUI.
+  const j = dans(2)
+  const { w, t } = monter({ aPrendre: [offre(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  const corps = w.document.getElementById('modal-body').textContent
+  assert.match(corps, /Colomiers/, 'le logement, oui')
+  for (const interdit of ['Voyageur', 'Adultes', 'Enfants', 'Arrivée']) {
+    assert.ok(!corps.includes(interdit), `${interdit} ne doit PAS apparaître`)
+  }
+})
+
+test('un jour PASSÉ à prendre ne s\'ouvre pas', async (ctx) => {
+  // Décision du 17 septembre : un ménage passé n'est pas récupérable. Le serveur
+  // le refuse ; l'écran ne le propose même pas.
+  // ⚠ LE JOUR CHOISI DOIT ETRE DANS LA FENETRE AFFICHEE. Une premiere version
+  // prenait `dans(-2)` et sortait par `if (!el) return` : le 1er ou le 2 du mois,
+  // ce jour tombe hors du calendrier rendu, et le test passait sans rien
+  // eprouver — la garde « un ménage passé ne s'ouvre pas » aurait pu régresser
+  // deux jours par mois sans que rien ne le dise. On prend donc le PREMIER jour
+  // du mois courant, toujours rendu, et passé dès que nous ne sommes pas le 1er.
+  // ⚠ CONSTRUIT PAR LA MEME ARITHMETIQUE QUE `dans()`. Un `new Date(y, m, 1)`
+  // est minuit LOCAL, et `iso()` formate en UTC : a l'est de Greenwich le
+  // 1er du mois retombait sur le dernier jour du mois PRECEDENT, hors du
+  // calendrier rendu — le test echouait pour une raison qui n'etait pas la sienne.
+  // ⚠ `getUTCDate`, PAS `getDate`. `AUJ` est ancré en UTC (`Date.UTC(..., 12)`)
+  // et `getDate()` est un getter LOCAL : à partir d'UTC+12, midi UTC bascule au
+  // jour local suivant, le compte vaut un de trop, et la date visée retombe sur
+  // le dernier jour du mois précédent — hors du calendrier rendu. Le test virait
+  // au rouge en Nouvelle-Zélande et nulle part ailleurs.
+  const joursDepuisLe1er = AUJ.getUTCDate() - 1
+  // Le 1er du mois, aucun jour passé n'est rendu : il n'y a rien à éprouver, et
+  // on le DIT plutôt que de sortir en silence.
+  if (joursDepuisLe1er < 1) { ctx.skip('le 1er du mois, aucun jour passé à l\'écran'); return }
+  const j = dans(-joursDepuisLe1er)
+  const { w, t } = monter({ aPrendre: [offre(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(el, 'le jour passé est bien rendu dans le calendrier')
+  assert.ok(el.classList.contains('passe'))
+  el.dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  assert.notStrictEqual(w.document.getElementById('modal').style.display, 'flex')
+})
+
+test('sans offre, le clic bascule l\'absence comme avant', async () => {
+  // Non-régression : le calendrier fusionné ne doit pas avoir mangé le geste du
+  // lot 1 sur les jours ordinaires.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  assert.strictEqual(ecritures(t).length, 1)
+  assert.strictEqual(ecritures(t)[0].corps.action, 'declarerIndisponibilite')
+})
+
+test('un jour ABSENT n\'est plus ROUGE — il est éteint', async () => {
+  // ⚠ Un jour où elle ne travaille pas est un état normal, souvent choisi. Le
+  // rouge est réservé à ce qui ne va pas.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  assert.ok(!/\.dispo-case\.off \{ background: #FBE9E6/.test(PAGE), 'plus de fond rouge')
+  assert.match(PAGE, /\.dispo-case\.off \{ background: var\(--bg2\)/)
 })
 
 // ─── Les congés en plage ──────────────────────────────────────────────────
