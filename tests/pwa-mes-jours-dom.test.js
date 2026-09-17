@@ -30,8 +30,20 @@ const FICHIER = path.join(__dirname, '..', 'apps', 'menages', 'public.html')
 
 // ⚠ DATES RELATIVES, jamais figées : cet écran lit l'horloge, et ce fichier ne
 // doit pas rougir tout seul dans un mois (règle du dépôt).
+//
+// ⚠ ET SUR LA MEME HORLOGE QUE L'ECRAN — c'est-a-dire l'heure LOCALE.
+// `AUJ` se construisait sur `getUTCDate()`, alors que la page calcule « aujourd'hui »
+// en heure locale. Entre minuit et 2 h a Paris, les deux ne designent pas le meme
+// jour : le test posait un menage « aujourd'hui » au sens UTC (la veille), l'ecran
+// le rangeait dans le passe et ne l'affichait pas. Mesure du 18 septembre 2026 a
+// 00 h 16 — 79/79 sous TZ=UTC, 78/79 sous TZ=Europe/Paris.
+//
+// Le piege est celui que `tests/record-message-echo.test.js` decrit, pris a
+// l'envers : un test VERT sous le fuseau de la CI (UTC) et de Vercel, rouge sur
+// le poste de qui travaille tard. Il ne protegeait donc pas ce qu'il pretendait —
+// il se contentait de ne pas gener, aux heures ouvrables.
 const brut = new Date()
-const AUJ = new Date(Date.UTC(brut.getUTCFullYear(), brut.getUTCMonth(), brut.getUTCDate(), 12))
+const AUJ = new Date(Date.UTC(brut.getFullYear(), brut.getMonth(), brut.getDate(), 12))
 const iso = d => d.toISOString().slice(0, 10)
 const dans = n => iso(new Date(AUJ.getTime() + n * 86400000))
 const lundiCourant = (() => iso(new Date(AUJ.getTime() - ((AUJ.getUTCDay() + 6) % 7) * 86400000)))()
