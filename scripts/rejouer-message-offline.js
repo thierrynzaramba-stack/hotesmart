@@ -48,6 +48,7 @@ const path = require('path')
 const { canalPour, CANAL, MOTIF_LISIBLE } = require('../lib/canal-voyageur')
 const { generateAutoMessage, sendGuestMessage, noterEnvoi,
         knowledgeDuBien } = require('../lib/cron-messages')
+const { recordMessage } = require('../lib/record-message')
 const { codeOtaBrut, isActiveStatus } = require('../lib/bookings-snapshot')
 // ⚠ LA GARDE DU CRON, PAS UNE RELECTURE DE LA COLONNE. Lire
 // `properties.automation_paused` soi-meme testerait sa propre lecture, pas celle
@@ -267,6 +268,26 @@ async function main () {
   }
 
   console.log(`ENVOYE — canal ${envoi.canal}, expediteur ${envoi.expediteur || '(defaut)'}`)
+
+  // ⚠ LE FIL DOIT MONTRER CE QUI EST PARTI, et ce script l'oubliait.
+  // Constate en production le 17 septembre : le rejeu de c87f24ce a bien atteint
+  // le voyageur, mais `messages` n'en portait AUCUNE trace — pendant que la
+  // ligne mensongere du 12 septembre, elle, y figurait toujours en `canal=ota`.
+  // L'hote voyait donc un message qui n'etait jamais parti, et ne voyait pas
+  // celui qui venait de partir : l'exact inverse de la verite.
+  //
+  // Le cron ecrit cette ligne, ce script doit l'ecrire aussi — sinon « il passe
+  // par les memes fonctions que le cron » est une phrase, pas un fait.
+  await recordMessage({
+    userId: row.user_id,
+    provider: bien.provider === 'channex' || bien.provider === 'channel' ? 'channex' : 'beds24',
+    propertyId: row.property_id,
+    bookingId: row.booking_id,
+    direction: 'outbound', sender: 'auto', body: message,
+    providerMsgId: null, ota: s.source || null, sentAt: null,
+    kind: 'auto', canal: envoi.canal === 'email' ? 'email' : 'ota'
+  })
+  console.log('inscrit dans le fil (`messages`) ✓')
 
   // ⚠ LE JOURNAL APRES LE SUCCES, comme le canal e-mail le fait dans le cron :
   // sans lui, le message repartirait au prochain tick eligible.

@@ -347,6 +347,22 @@ placeholder manque, ce qui réveille le fondateur par SMS. Un mode « rien ne pa
 un SMS n'en est pas un — on lui passe `userId = null`, seule condition que cette alerte
 regarde.
 
+⚠️ **Et il inscrit ce qu'il envoie dans le fil.** Constaté en production le 17 septembre : le
+rejeu de `c87f24ce` a bien atteint le voyageur, mais `messages` n'en portait **aucune trace**
+— pendant que la ligne mensongère du 12 septembre y figurait toujours en `canal=ota`. L'hôte
+voyait un message jamais parti, et ne voyait pas celui qui venait de partir : l'exact inverse
+de la vérité. Le cron écrit cette ligne ; ce script doit l'écrire aussi, sinon « il passe par
+les mêmes fonctions que le cron » est une phrase, pas un fait.
+
+### Dette : les lignes mensongères de `messages` n'ont pas été purgées
+
+La purge de l'étape 6 a nettoyé `message_sent_log` — ce qui **bloquait** les rejeux. Les trois
+lignes correspondantes de `messages` (`outbound/auto`, `canal=ota`, réservations Offline du 12
+et du 14 septembre) sont **toujours là** : le fil de l'hôte affiche donc encore trois messages
+que le 422 de Channex avait refusés. Les corriger demande de trancher entre les supprimer
+(l'historique perd une trace) et les marquer (aucune colonne ne le permet aujourd'hui).
+À décider avec le product owner.
+
 ### Purger une ligne de journal qui ment
 
 `scripts/purger-faux-envois-offline.js [--execute]` supprime, **par `id` et par `id` seul**,

@@ -338,3 +338,15 @@ test('la politique d\'abandon teste le quota, et il peut l\'atteindre', () => {
   assert.ok(iPermanent < iQuota && iQuota < iCompte,
     'un quota ne doit jamais atteindre le compteur')
 })
+
+test('LE TEST QUI COMPTE : le rejeu inscrit ce qu\'il envoie dans le fil', () => {
+  // Constate en production : le rejeu atteignait le voyageur sans laisser de
+  // trace dans `messages`, pendant que la ligne mensongere d'un envoi jamais
+  // parti y figurait toujours. L'hote voyait l'inverse de la verite.
+  const rejeu = fs.readFileSync(path.join(__dirname, '..', 'scripts/rejouer-message-offline.js'), 'utf8')
+  assert.ok(/require\('\.\.\/lib\/record-message'\)/.test(rejeu), 'il importe le writer du fil')
+  const apresEnvoi = rejeu.split('ENVOYE — canal')[1]
+  assert.ok(/await recordMessage\(/.test(apresEnvoi), 'et l\'appelle APRES l\'envoi reussi')
+  assert.ok(/canal: envoi\.canal === 'email' \? 'email' : 'ota'/.test(apresEnvoi),
+    'avec le canal reellement emprunte')
+})
