@@ -8,6 +8,8 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
+const fs = require('node:fs')
+const path = require('node:path')
 
 process.env.SUPABASE_URL = 'http://localhost'
 process.env.SUPABASE_SERVICE_KEY = 'test'
@@ -46,4 +48,22 @@ test('le SMS est saute pour ce type, jamais l e-mail ni la trace', () => {
   assert.match(src, /if \(FOUNDER_EMAIL\) out\.email/)
   // Et l'insertion en base precede tout envoi.
   assert.ok(src.indexOf("from('automation_incidents').insert") < src.indexOf('out.sms'))
+})
+
+test('le ménage sans personne est en PAUSE de SMS — mais pas silencieux', () => {
+  // ⚠ C'EST UNE DETTE, PAS UN ACQUIS (17 septembre 2026). Un ménage sans
+  // personne EXIGE un geste : c'est précisément ce que le SMS existe pour
+  // porter. On le met en pause quand même, parce qu'il part aujourd'hui trop
+  // souvent pour rester audible — et une alarme qu'on apprend à ignorer ne
+  // protège plus rien le jour où elle dit vrai.
+  // Ce qu'on accepte en échange : un trou de garde peut passer une nuit sans
+  // réveiller personne.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'founder-notify.js'), 'utf8')
+  const bloc = src.slice(src.indexOf('const SANS_SMS'), src.indexOf('const LABELS'))
+  assert.match(bloc, /'menage_non_assigne'/)
+  // ⚠ ET L'E-MAIL DOIT PARTIR QUAND MÊME. C'est ce qui sépare « en pause » de
+  // « supprimé » : sans lui, l'incident deviendrait invisible hors de la base,
+  // et la dette cesserait d'être payable parce qu'on ne la verrait plus.
+  assert.ok(!/SANS_EMAIL|sansEmail/.test(src), 'aucun mécanisme ne coupe l\'e-mail')
+  assert.match(src, /menage_non_assigne:\s*'/, 'et le type garde son libellé lisible')
 })
