@@ -167,3 +167,73 @@ exactement le défaut qu'on venait de corriger, par une autre porte.
 **sans plafond** — un `429` avec `Retry-After: 120` dort 120 s dans une fonction de 60. Le
 `depasse()` n'est pas consulté pendant ce sommeil. Préexistant, hors périmètre, mais c'est le
 prochain plafond qu'on touchera.
+
+## ✅ INCIDENT CLOS — convergence constatée le 17 septembre 2026
+
+**5 biens sur 5 convergés, 0 bloqué, plus une seule alarme.** L'import s'est
+résolu **seul**, par `d67c3b7`. Aucun rattrapage n'a été nécessaire, et aucun
+n'a été écrit.
+
+### La cause racine, en deux étages
+
+Ce n'était pas une panne, c'était une **famine**, puis un **mur** :
+
+1. **Famine.** L'import partageait le cycle commun avec tout le reste. Il
+   n'échouait pas — il n'avait jamais son tour. Corrigé par un **cron dédié**
+   (`d86e107`), dont le périmètre avait ensuite rétréci en silence (`1f1763e`).
+2. **Mur.** Le cron dédié est mort en 504 à son premier appel réel : le budget
+   n'était consulté **qu'entre deux pages**, alors que le travail est *dans* la
+   page — ~300 allers-retours Supabase sans un seul contrôle. Corrigé par une
+   **garde par message** et un budget ramené à 30 s (`d67c3b7`).
+
+### La preuve
+
+`scripts/diagnostic-import-colomiers.js`, lecture seule, exécuté le 17 septembre
+2026 : marqueur d'antériorité posé partout, `abstentions = 0` partout, aucune
+alarme `messages_import_suspendu` active.
+
+⚠️ **Le script est conservé comme OUTIL PERMANENT**, pas comme trace de
+l'incident. C'est le seul endroit qui répond à « où en est l'import ? » sans
+écrire une ligne, et la question se reposera : trois mécanismes distincts
+(marqueur, point de reprise, abstentions) décident du sort d'un bien, et aucun
+écran ne les montre.
+
+### ⚠️ Ce qu'un chiffre passé de 4 à 5 doit déclencher
+
+Les mesures du 15-16 septembre portaient sur **quatre** biens. Le diagnostic du
+17 en voit **cinq** — parce qu'il lit `provider in ('channex', 'channel')`, la
+paire marque blanche, et non le seul `'channex'`.
+
+**À vérifier avant de considérer la page tournée** : si ce cinquième bien est
+bien un `'channel'`, alors il était hors de toutes les mesures précédentes, et sa
+convergence n'a jamais été observée avant aujourd'hui. Il est convergé
+aujourd'hui, donc rien n'est en souffrance — mais le compte de référence de cet
+incident était incomplet, et c'est le genre d'écart qu'on ne voit qu'en le
+cherchant.
+
+### Les règles que cet incident laisse
+
+**⚠️ Un diagnostic plus étroit que ce qu'il diagnostique conclut « tout va
+bien ».** La première version du script filtrait sur le seul `'channex'` —
+exactement le défaut que `api/cron-messages.js` documente avoir corrigé en
+review, réintroduit dans l'outil chargé de détecter ce silence-là. Corrigé avant
+le premier lancement.
+
+**⚠️ Une abstention n'est pas une panne.** Une passe tronquée par le budget en
+incrémente une **à chaque cycle** : c'est le fonctionnement normal d'un
+rattrapage à point de reprise. Le verdict criait « BLOQUÉ » dès la première,
+alors que le cron n'en fait un état qu'à trois. Un diagnostic qui crie à la panne
+sur une file qui avance fait lancer un rattrapage dont personne n'a besoin — et
+c'est précisément ce qui a failli se produire ici.
+
+**⚠️ Un nombre qu'on ne peut pas établir ne se calcule pas quand même.** Une
+version du script affichait un « messages restants, borne haute » qui soustrayait
+l'estimation de l'annonce préalable — une seule page de fils, émise une seule
+fois, jamais sur une reprise — d'un compte de lignes global et actuel. Deux
+périmètres, deux instants, et un `Math.max(0, …)` qui écrasait la contradiction
+en « 0 » sous une étiquette promettant l'inverse. Supprimé, pas corrigé : ce
+nombre ne se lit pas en base.
+
+**Dette toujours ouverte** : `channelCall` n'a aucun timeout `fetch` et honore
+`Retry-After` sans plafond (voir la section précédente). L'incident est clos ;
+ce plafond-là ne l'est pas.
