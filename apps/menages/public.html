@@ -2539,11 +2539,7 @@ if ("serviceWorker" in navigator) {
       etat.style.display = ''; contenu.style.display = 'none'
       return
     }
-    if (data.autorise !== true) {
-      etat.innerHTML = '<strong>Vos absences sont gérées par votre employeur</strong>Prévenez-le directement.'
-      etat.style.display = ''; contenu.style.display = 'none'
-      return
-    }
+    if (data.autorise !== true) { ecranNonAutorisee(); return }
     dispoCharge = true
     etat.style.display = 'none'; contenu.style.display = ''
     const moisCourant = mesJours ? mesJours.mois : 0
@@ -2595,6 +2591,14 @@ if ("serviceWorker" in navigator) {
   function peindreMesRegles () {
     const zone = document.getElementById('dispo-recur')
     const aide = document.getElementById('dispo-recur-aide')
+    // ⚠ LE FOCUS SURVIT AU REPEINT. Ces cases se reconstruisent desormais a
+    // CHAQUE tape (rendu optimiste) et non plus une fois par aller-retour : au
+    // clavier, la case qu'on vient de cocher disparaissait sous le doigt et le
+    // `Tab` suivant repartait du haut de la page. On note laquelle avait le
+    // focus, et on le lui rend.
+    const actif = document.activeElement
+    const focus = actif && actif.matches && actif.matches('#dispo-recur input[data-lot]')
+      ? { lot: actif.dataset.lot, valeur: actif.value } : null
     const act = reglesLues()
     const opaques = reglesOpaquesPwa()
     // ⚠ SANS DROIT D'ECRITURE, LES CASES SONT FIGEES MAIS VISIBLES. Les cacher
@@ -2661,6 +2665,10 @@ if ("serviceWorker" in navigator) {
     if (bSimple) bSimple.addEventListener('click', () => basculerMonAlternance(false))
     const bInv = document.getElementById('dispo-inverser')
     if (bInv) bInv.addEventListener('click', inverserMonAncrage)
+    if (focus) {
+      const rendu = zone.querySelector(`input[data-lot="${focus.lot}"][value="${focus.valeur}"]`)
+      if (rendu) rendu.focus()
+    }
   }
 
   // ⚠ DEUX MOIS A LA FOIS, cote a cote ou empiles selon la largeur (le CSS s'en
@@ -2958,6 +2966,88 @@ if ("serviceWorker" in navigator) {
   // Desormais chaque geste PART, et un NUMERO D'ORDRE decide qui a le dernier
   // mot : `reglerMesJours` envoie l'etat COMPLET lu a l'instant de l'envoi, donc
   // le dernier envoi est la verite. Aucun geste n'est avale, et rien ne gele.
+  // ─── LE RENDU OPTIMISTE DES JOURS HABITUELS (18 septembre 2026) ───────────
+  //
+  // ⚠ MESURE AVANT CORRECTIF, dans le vrai DOM, ecriture et relecture tenues
+  // separement : apres la tape sur « mardi », `input.checked` passe bien a vrai
+  // — mais l'`<input>` est en `opacity: 0`, et le SEUL signal visible est la
+  // classe `.dispo-pastille.on`, posee par `peindreMesRegles`. Or ce repeint
+  // n'arrive qu'apres `chargerDisponibilites()`, c'est-a-dire apres DEUX
+  // requetes en serie (l'ecriture, puis une relecture complete qui coute six
+  // allers-retours base). Pastille grise et case du calendrier `off` pendant
+  // toute cette fenetre : le plancher reseau mesure en prod est de 0,39 s par
+  // requete, sans le travail base. Le lot 1 n'avait corrige que le clic sur une
+  // DATE ; ce chemin-ci etait reste entier.
+  //
+  // ⚠ CE CHEMIN REMPLACE TOUTES LES REGLES EN UNE ACTION, et c'est ce qui rend
+  // son rattrapage different de celui d'un jour. Le serveur desactive TOUT ce
+  // qui etait actif puis insere le nouveau lot : il n'y a pas « une case » a
+  // remettre, il y a un LOT DE REGLES d'avant a restaurer. On en prend donc une
+  // photo complete avant de muter.
+  let enVolRegles = null
+  // ⚠ LA CIBLE DU RATTRAPAGE EST LE DERNIER LOT CONFIRME, PAS `mesJours`.
+  // Deux defauts trouves en review, et ils ont la meme racine : photographier
+  // `mesJours.regles` a l'entree suppose qu'il porte la verite du serveur, ce
+  // qui est faux des qu'un envoi est deja en vol.
+  //   1) DEUXIEME TAPE PENDANT UN VOL : ce chemin laisse passer le second geste
+  //      (pas de verrou par case, c'est voulu). Sa photo capturait alors le lot
+  //      OPTIMISTE du premier — hors ligne, le rattrapage rendait des jours que
+  //      personne n'avait jamais enregistres.
+  //   2) RELECTURE PENDANT UN VOL : `reappliquerEnVol` re-tamponne le lot en vol
+  //      sur chaque objet fraichement lu. Un `mesJours` remplace ne porte donc
+  //      PAS la verite du serveur — il porte l'optimiste. La garde d'identite
+  //      qui sautait le rattrapage dans ce cas laissait la case verte sous
+  //      « Panne ».
+  // On ne prend donc la photo qu'au PREMIER envoi d'une rafale : `enVolRegles`
+  // nul est exactement l'etat « rien d'optimiste en attente ».
+  //
+  // ⚠ CE QUE CETTE PHOTO NE SAIT PAS, ET QU'IL FAUT LIRE EN FACE : elle rend
+  // l'etat d'AVANT LA RAFALE, pas « ce que le serveur a ». Si une tape de la
+  // rafale a ete COMMISE en base mais que sa reponse s'est perdue (la suivante
+  // a pris la main, donc son `catch` est avale), le rattrapage rend moins de
+  // jours qu'il n'y en a reellement d'enregistres — et si la relecture qui suit
+  // echoue aussi, rien ne le corrige avant le prochain chargement.
+  // C'est le prix ASSUME du correctif : photographier a chaque tape rendait,
+  // lui, des jours que PERSONNE n'avait enregistres — un mensonge dans l'autre
+  // sens, et celui-la est le pire des deux, parce qu'il fait croire a une
+  // disponibilite qu'elle n'a pas donnee.
+  let reglesAvantVol = null
+
+  // Un seul endroit ecrit le modele local des regles — la bascule optimiste et
+  // la reapplication apres relecture diraient sinon deux fois la meme chose, de
+  // deux facons, et c'est ainsi qu'elles finissent par diverger.
+  // ⚠ ON REPRODUIT CE QUE LE SERVEUR FAIT, pas ce qui arrangerait l'ecran : il
+  // desactive toutes les regles actives, les opaques COMPRISES (`avant` n'a
+  // aucun filtre de lisibilite), puis insere les lots recus. Le modele local
+  // remplace donc en entier, lui aussi.
+  function appliquerRegles (lots, alt) {
+    if (!mesJours) return
+    const cadence = alt ? 2 : 1
+    mesJours.regles = (lots || []).filter(l => l.jours && l.jours.length)
+      .map((l, i) => ({ id: 'local-' + i, label: 'Mes jours',
+                        jours: l.jours.slice().sort((a, b) => a - b),
+                        cadence, ancre: l.depuis }))
+    mesJours.forceAlternee = alt
+  }
+
+  // ⚠ RATTRAPAGE HONNETE : on remet le LOT d'avant, tout de suite, sans reseau.
+  // Le faire par une relecture obligerait a un troisieme aller-retour — et hors
+  // ligne, il n'aboutirait pas : l'ecran resterait sur des jours qui ne sont
+  // partis nulle part.
+  function rendreLesRegles () {
+    // ⚠ D'ABORD COUPER L'ALIMENTATION. Tant que `enVolRegles` porte un lot, la
+    // moindre relecture le re-tamponnerait par-dessus ce qu'on vient de rendre.
+    enVolRegles = null
+    if (!mesJours || !reglesAvantVol) return
+    // ⚠ SUR L'OBJET COURANT, QUEL QU'IL SOIT — pas seulement sur celui qu'on a
+    // mute. Un `mesJours` remplace pendant le vol porte l'etat optimiste, pas
+    // celui du serveur : le sauter laissait precisement le mensonge qu'on veut
+    // defaire.
+    mesJours.regles = reglesAvantVol.regles
+    mesJours.forceAlternee = reglesAvantVol.forceAlternee
+    peindreMesJours()
+  }
+
   let seqRegles = 0
   // Nombre d'ecritures de jours actuellement en vol. Les quatre autres chemins
   // s'y refusent l'entree — voir plus bas.
@@ -2982,20 +3072,47 @@ if ("serviceWorker" in navigator) {
     // (reprise quand la coche a bouge pendant l'envoi), et un booleen serait
     // baisse par l'appel interne pendant que l'externe est encore en vol.
     ecrituresRegles++
-    // L'ecran a deja bouge — la case est cochee. On le confirme tout de suite.
-    dire(msg, '✓ Vos jours sont enregistrés.')
-
+    // ⚠ LE VERROU EST POSE AVANT LA MUTATION QU'IL GARDE (regle du KB, apprise
+    // au lot 1) — ET LA MUTATION EST DANS LE `try`. Entre l'increment et le
+    // `try`, il n'y avait plus qu'un `dire()` ; ce lot y avait glisse un
+    // `peindreMesJours()` complet (regles, deux mois, agenda, conges). Une
+    // exception la-dedans laissait le compteur en l'air pour de bon, et les
+    // quatre autres ecrivains — alternance, ancrage, pose et retrait de conge —
+    // sortaient en silence pour le reste de la session.
     try {
+      // ⚠ LA PHOTO NE SE PREND QU'AU PREMIER ENVOI D'UNE RAFALE. `enVolRegles`
+      // nul = rien d'optimiste en attente = `mesJours` porte bien le confirme.
+      if (!enVolRegles) {
+        reglesAvantVol = { regles: (mesJours.regles || []).slice(),
+                           forceAlternee: !!mesJours.forceAlternee }
+      }
+
+      // ⚠ L'ECRAN BASCULE MAINTENANT, PAS DANS DEUX ALLERS-RETOURS. La case cochee
+      // par le navigateur est INVISIBLE (`opacity: 0`) : seule la classe `on`, et
+      // la couleur du calendrier, disent ce qui vient d'etre regle.
+      appliquerRegles(voulu, alt)
+      enVolRegles = { lots: voulu, alt }
+      peindreMesJours()
+      dire(msg, '✓ Vos jours sont enregistrés.')
+
       const { ok, erreur } = await envoyerMesJours(voulu, { alt })
       // Un geste plus recent a pris la main : sa reponse fera foi, pas celle-ci.
+      // ⚠ ET ON NE TOUCHE PAS A `enVolRegles` : il porte deja le geste du
+      // suivant, encore en vol. L'effacer ici ferait retomber SON ecran a la
+      // premiere relecture.
       if (monTour !== seqRegles) return
       if (!ok) {
-        // ⚠ RATTRAPAGE HONNETE : on remet ce que le serveur connait, et on le
-        // dit. Laisser la case cochee apres un refus, c'est un ecran qui ment.
+        // ⚠ RATTRAPAGE HONNETE : on remet le LOT d'avant — pas une case — et on
+        // dit ce que le serveur a repondu. Laisser les jours affiches apres un
+        // refus, c'est un ecran qui ment sur ce qui est enregistre.
+        rendreLesRegles()
         dire(msg, erreur)
-        await chargerDisponibilites()
+        // Et on se recale derriere, sans panneau d'erreur par-dessus le refus
+        // qu'on vient d'afficher.
+        await relireSilencieusement()
         return
       }
+      enVolRegles = null
       // ⚠ LA RELECTURE RESTE, MAIS ELLE NE FAIT PLUS ATTENDRE. Le serveur decide
       // du REMPLACEMENT (une regle que la PWA ne sait pas relire n'est pas
       // ecrasee par ce qu'elle affiche) : sans elle, l'ecran finirait par
@@ -3010,8 +3127,13 @@ if ("serviceWorker" in navigator) {
       if (change) return enregistrerMesJours()
     } catch (err) {
       if (monTour !== seqRegles) return
+      // ⚠ UN `catch` EST UNE ISSUE INCONNUE : on ne sait pas si l'ecriture est
+      // passee. On remet donc l'etat d'avant — le seul qu'on sache vrai — et on
+      // le dit. La restauration est LOCALE : hors ligne, une relecture
+      // n'aboutirait pas, et l'ecran resterait sur des jours partis nulle part.
+      rendreLesRegles()
       dire(msg, 'Connexion impossible. Réessayez.')
-      await chargerDisponibilites()
+      await relireSilencieusement()
     } finally {
       ecrituresRegles = Math.max(0, ecrituresRegles - 1)
     }
@@ -3259,19 +3381,39 @@ if ("serviceWorker" in navigator) {
   // affiche au-dessus. On remet donc par-dessus les jours dont l'ecriture n'a
   // pas encore rendu son verdict.
   function reappliquerEnVol () {
-    if (!mesJours || !enVolParJour.size) return
+    if (!mesJours) return
+    // ⚠ LES REGLES AUSSI, et avant les jours : une relecture qui atterrit
+    // pendant qu'un reglage s'envoie rendait les jours d'AVANT, les pastilles
+    // redevenaient grises toutes seules, et « ✓ Vos jours sont enregistres »
+    // restait affiche au-dessus.
+    if (enVolRegles) appliquerRegles(enVolRegles.lots, enVolRegles.alt)
+    if (!enVolParJour.size) return
     enVolParJour.forEach((absente, j) => appliquerJour(j, absente))
   }
 
   // Relecture SANS panneau d'erreur : sert au rattrapage, ou afficher « vos
   // jours n'ont pas pu etre lus » par-dessus une absence qu'on vient peut-etre
   // d'enregistrer ajouterait de la confusion a l'incertitude.
+  // ⚠ UN SEUL ENDROIT ECRIT CET ECRAN, parce que les DEUX chemins de lecture y
+  // arrivent : la lecture normale et le rattrapage.
+  function ecranNonAutorisee () {
+    const etat = document.getElementById('dispo-etat')
+    const contenu = document.getElementById('dispo-contenu')
+    etat.innerHTML = '<strong>Vos absences sont gérées par votre employeur</strong>Prévenez-le directement.'
+    etat.style.display = ''; contenu.style.display = 'none'
+  }
+
   async function relireSilencieusement () {
     try {
       const res = await fetch(`/api/menages-public?action=disponibilites&token=${currentToken}`)
       if (!res.ok) return false
       const data = await res.json()
-      if (data.autorise !== true) return false
+      // ⚠ UN DROIT RETIRE N'EST PAS UN ECHEC DE LECTURE. Rendre `false` en
+      // silence laissait les cases ACTIVES sous un « Non autorisé » seul :
+      // chaque tape suivante repartait vers le meme 403. Quand l'employeur
+      // reprend la main, l'ecran doit le dire — c'est le seul cas ou le
+      // rattrapage a le droit de remplacer le panneau.
+      if (data.autorise !== true) { ecranNonAutorisee(); return false }
       mesJours = { regles: data.regles || [], exceptions: data.exceptions || [],
                    conges: data.conges || [], modifiable: data.modifiable === true,
                    mois: mesJours ? mesJours.mois : 0 }

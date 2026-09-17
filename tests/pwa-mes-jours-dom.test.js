@@ -1415,3 +1415,318 @@ test('AUCUNE chaîne RRULE n\'atteint la PWA', async () => {
   const recu = JSON.stringify(projeter([regle('x', 'x', [1])]))
   assert.ok(!/FREQ=|DTSTART/.test(recu))
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES JOURS HABITUELS BASCULENT TOUT DE SUITE (18 septembre 2026)
+//
+// ⚠ MESURE AVANT CORRECTIF, écriture et relecture tenues séparément : la case
+// `input.checked` passait bien à vrai, mais l'`<input>` est en `opacity: 0` —
+// le SEUL signal visible est la classe `.dispo-pastille.on`, posée par
+// `peindreMesRegles`, qui n'arrivait qu'après `chargerDisponibilites()`. Soit
+// après DEUX requêtes en série. Pastille grise et calendrier `off` pendant
+// toute la fenêtre.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const pastilleOn = (w, n, lot = 'simple') => {
+  const i = w.document.querySelector(`#dispo-recur input[data-lot="${lot}"][value="${n}"]`)
+  return i ? i.closest('.dispo-pastille').classList.contains('on') : null
+}
+// Le premier jour À VENIR du calendrier peint qui tombe sur ce jour de semaine.
+const jourPeintDe = (w, dow) => {
+  const cases = [...w.document.querySelectorAll('#dispo-months .dispo-case[data-jour]')]
+  return cases.find(c => !c.classList.contains('passe') &&
+    new Date(c.dataset.jour + 'T12:00:00Z').getUTCDay() === dow) || null
+}
+const coche = (w, n, lot = 'simple') =>
+  w.document.querySelector(`#dispo-recur input[data-lot="${lot}"][value="${n}"]`)
+const taper = (w, n, versCoche, lot = 'simple') => {
+  const c = coche(w, n, lot)
+  c.checked = versCoche
+  c.dispatchEvent(new w.Event('change', { bubbles: true }))
+}
+
+test('cocher un jour de la semaine colore AVANT que le serveur ait répondu', async () => {
+  // Elle travaille le lundi. Elle ajoute le mardi.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  const mardiAvant = jourPeintDe(w, 2)
+  assert.ok(mardiAvant, 'un mardi est peint')
+  assert.strictEqual(mardiAvant.classList.contains('off'), true, 'et il est gris au départ')
+
+  taper(w, 2, true)
+  await souffler(40)
+
+  // ⚠ RIEN N'EST REVENU : l'écriture est tenue en vol, la relecture n'est même
+  // pas partie. C'est exactement la fenêtre où l'écran ne bougeait pas.
+  assert.strictEqual(ecritures(t).length, 1, 'l\'envoi est parti')
+  assert.ok(!t.appels.slice(-1)[0].url.includes('action=disponibilites'),
+    'et aucune relecture n\'a eu lieu')
+  assert.strictEqual(pastilleOn(w, 2), true, 'la pastille est verte tout de suite')
+  assert.strictEqual(jourPeintDe(w, 2).classList.contains('off'), false,
+    'et le mardi du calendrier n\'est plus gris')
+  assert.match(message(w), /enregistrés/)
+
+  // Et après la réconciliation, l'écran dit EXACTEMENT la même chose : une
+  // bascule optimiste qui clignote au retour du serveur est un aveu qu'elle
+  // n'était pas fidèle.
+  t.libererEcritures()
+  await souffler(80)
+  assert.strictEqual(pastilleOn(w, 2), true)
+  assert.strictEqual(jourPeintDe(w, 2).classList.contains('off'), false)
+})
+
+test('décocher aussi : la pastille s\'éteint sans attendre le serveur', async () => {
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.strictEqual(pastilleOn(w, 2), true)
+
+  taper(w, 2, false)
+  await souffler(40)
+  assert.strictEqual(pastilleOn(w, 2), false, 'éteinte tout de suite')
+  assert.strictEqual(jourPeintDe(w, 2).classList.contains('off'), true,
+    'et le calendrier la montre grise')
+})
+
+test('un refus restaure TOUT LE LOT d\'avant, pas seulement la case touchée', async () => {
+  // ⚠ CE CHEMIN REMPLACE TOUTES LES RÈGLES EN UNE ACTION : le serveur désactive
+  // tout l'existant puis insère le lot reçu. Le rattrapage doit donc rendre le
+  // LOT d'avant. Restaurer « la case » laisserait les trois autres jours dans
+  // l'état optimiste — c'est-à-dire un écran qui affiche des jours que personne
+  // n'a enregistrés.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 3, 5])],
+                            echecReglage: { status: 503, message: 'Panne base' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  // ⚠ LA RELECTURE EST TENUE EN VOL. Sans cela, ce test passait aussi bien
+  // SANS rattrapage local : c'est la relecture qui remettait les jours, et il
+  // n'éprouvait donc pas ce qu'il prétend (contre-épreuve du 18 septembre).
+  t.suspendreLectures()
+  taper(w, 3, false)                       // elle retire le mercredi
+  await souffler(120)
+
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort((a, b) => a - b)
+  assert.deepStrictEqual(cochees, [1, 3, 5], 'les trois jours d\'avant sont revenus')
+  assert.strictEqual(pastilleOn(w, 1), true)
+  assert.strictEqual(pastilleOn(w, 3), true, 'le mercredi retiré est bien revenu')
+  assert.strictEqual(pastilleOn(w, 5), true)
+  assert.strictEqual(jourPeintDe(w, 3).classList.contains('off'), false,
+    'et le calendrier aussi est revenu')
+  assert.match(message(w), /Panne base/, 'et le message dit ce que le serveur a répondu')
+  t.libererLectures()
+})
+
+test('COUPURE TOTALE : le lot d\'avant revient quand même, sans réseau', async () => {
+  // ⚠ Un `catch` est une issue INCONNUE. Le rattrapage doit être LOCAL : le
+  // faire par une relecture n'aboutirait pas ici, et l'écran resterait sur des
+  // jours partis nulle part, sous un « ✓ enregistrés » mensonger.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 3])], coupureEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  // ⚠ ET LA RELECTURE EST TENUE EN VOL : c'est ce qui rend la preuve honnête.
+  // Si le rattrapage passait par le réseau, l'écran resterait ici sur des jours
+  // qui ne sont partis nulle part — sous un « ✓ enregistrés » mensonger.
+  t.suspendreLectures()
+  taper(w, 5, true)
+  await souffler(120)
+
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort((a, b) => a - b)
+  assert.deepStrictEqual(cochees, [1, 3], 'le vendredi ajouté est reparti, sans réseau')
+  assert.strictEqual(pastilleOn(w, 5), false)
+  assert.strictEqual(jourPeintDe(w, 5).classList.contains('off'), true,
+    'et le calendrier est revenu lui aussi')
+  assert.match(message(w), /Connexion impossible/)
+  t.libererLectures()
+})
+
+test('une relecture qui atterrit pendant l\'envoi ne défait pas la bascule', async () => {
+  // ⚠ Même défaut que pour les jours d'absence : le serveur rend l'état
+  // d'AVANT, les pastilles redevenaient grises toutes seules, et « ✓ Vos jours
+  // sont enregistrés » restait affiché au-dessus.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  taper(w, 2, true)
+  await souffler(40)
+  assert.strictEqual(pastilleOn(w, 2), true)
+
+  await t.chargerDisponibilites()          // retour sur l'onglet, pendant l'envoi
+  await souffler(40)
+  assert.strictEqual(pastilleOn(w, 2), true, 'la bascule a survécu à la relecture')
+  assert.strictEqual(jourPeintDe(w, 2).classList.contains('off'), false)
+
+  t.libererEcritures()
+  await souffler(80)
+  assert.strictEqual(pastilleOn(w, 2), true)
+})
+
+// ⚠ PAS DE TEST « LE VERROU EST POSE AVANT LA MUTATION » ICI, et c'est un
+// constat, pas un oubli. La contre-épreuve l'a montré : déplacer
+// `ecrituresRegles++` APRÈS `appliquerRegles` ne fait rougir AUCUN test — et ne
+// PEUT pas, parce que les deux vivent dans le même bloc synchrone. Rien ne
+// s'exécute entre elles, donc aucune fenêtre n'est observable.
+// L'ordre reste celui de la règle du KB (un verrou se pose avant la mutation
+// qu'il garde), par discipline et parce que le jour où un `await` se glissera
+// là, la fenêtre s'ouvrira pour de bon. Ce qui EST vérifiable — que les quatre
+// autres écrivains sont fermés pendant le vol — l'est déjà par le test « une
+// écriture de JOURS en vol bloque les quatre autres écrivains », qui rougit
+// bien quand on retire le compteur.
+
+test('deux tapes rapides : la DERNIÈRE fait foi, et rien n\'est avalé', async () => {
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  taper(w, 2, true)
+  await souffler(20)
+  taper(w, 4, true)
+  await souffler(20)
+
+  assert.strictEqual(ecritures(t).length, 2, 'les deux gestes sont partis')
+  assert.strictEqual(pastilleOn(w, 2), true)
+  assert.strictEqual(pastilleOn(w, 4), true)
+  const dernier = ecritures(t).slice(-1)[0]
+  assert.deepStrictEqual(dernier.corps.lots[0].jours.slice().sort((a, b) => a - b), [1, 2, 4],
+    'le dernier envoi porte l\'état complet')
+
+  t.libererEcritures()
+  await souffler(100)
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort((a, b) => a - b)
+  assert.deepStrictEqual(cochees, [1, 2, 4])
+})
+
+test('le focus reste sur la case cochée malgré le repeint immédiat', async () => {
+  // ⚠ Ces cases se reconstruisent désormais à CHAQUE tape. Au clavier, la case
+  // qu'on venait de cocher disparaissait sous le doigt.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])], suspendreEcriture: true })
+  t.seed()
+  await t.chargerDisponibilites()
+  const c = coche(w, 2)
+  c.focus()
+  taper(w, 2, true)
+  await souffler(40)
+  const actif = w.document.activeElement
+  assert.ok(actif && actif.matches('#dispo-recur input[data-lot]'), 'le focus est sur une case')
+  assert.strictEqual(actif.value, '2', 'et c\'est bien celle qu\'elle venait de cocher')
+})
+
+// ── Les quatre défauts trouvés en review du lot 6 ──────────────────────────
+
+test('une relecture pendant le vol PUIS un refus : la case repart quand même', async () => {
+  // ⚠ LE CAS QUE LES DEUX MÉCANISMES NE COUVRAIENT PAS ENSEMBLE. Chacun était
+  // éprouvé seul : la relecture en vol sur le chemin du SUCCÈS, le refus avec
+  // les lectures suspendues. Entre les deux vivait le défaut : `reappliquerEnVol`
+  // re-tamponne le lot optimiste sur chaque objet fraîchement lu, donc un
+  // `mesJours` remplacé ne porte PAS la vérité du serveur — et la garde
+  // d'identité sautait le rattrapage exactement là.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])],
+                            suspendreEcriture: true,
+                            echecReglage: { status: 503, message: 'Panne base' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  taper(w, 2, true)
+  await souffler(40)
+  assert.strictEqual(pastilleOn(w, 2), true, 'la bascule a bien eu lieu')
+
+  await t.chargerDisponibilites()          // elle revient sur l'onglet, pendant l'envoi
+  await souffler(40)
+  assert.strictEqual(pastilleOn(w, 2), true, 'et elle a survécu à la relecture')
+
+  t.suspendreLectures()                    // le rattrapage doit être LOCAL
+  t.libererEcritures()                     // …et le serveur refuse
+  await souffler(120)
+
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort((a, b) => a - b)
+  assert.deepStrictEqual(cochees, [1], 'le mardi est reparti malgré la relecture intercalée')
+  assert.strictEqual(pastilleOn(w, 2), false)
+  assert.match(message(w), /Panne base/)
+  t.libererLectures()
+})
+
+test('deux tapes qui se chevauchent : on revient au lot d\'AVANT LA RAFALE, pas au précédent optimiste', async () => {
+  // ⚠ Ce chemin laisse passer le second geste — c'est voulu, rien n'est avalé.
+  // Mais sa photo de « l'avant » capturait alors le lot OPTIMISTE du premier :
+  // le rattrapage rendait des jours que personne n'avait jamais enregistrés.
+  // ⚠ LES DEUX ENVOIS DOIVENT SE CHEVAUCHER, sinon le test ne prouve rien : une
+  // coupure qui rejette tout de suite fait rattraper la première tape AVANT que
+  // la seconde ne parte, et la photo de la seconde est alors déjà propre.
+  // C'est ce que la contre-épreuve a montré. On TIENT donc les deux envois, puis
+  // on les fait refuser ensemble.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])],
+                            suspendreEcriture: true,
+                            echecReglage: { status: 503, message: 'Panne base' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  t.suspendreLectures()
+  taper(w, 2, true)
+  await souffler(20)
+  taper(w, 4, true)
+  await souffler(20)
+  assert.strictEqual(ecritures(t).length, 2, 'les deux envois sont bien en vol ensemble')
+  t.libererEcritures()
+  await souffler(140)
+
+  const cochees = [...w.document.querySelectorAll('#dispo-recur input[data-lot]:checked')]
+    .map(c => +c.value).sort((a, b) => a - b)
+  // ⚠ « AVANT LA RAFALE », pas « ce que le serveur a » : ici les deux coïncident
+  // (aucune tape n'a été commise). Quand une tape de la rafale EST passée en
+  // base mais que sa réponse s'est perdue, ce rattrapage rend moins de jours
+  // qu'il n'y en a — prix assumé, expliqué au commentaire de `reglesAvantVol`.
+  assert.deepStrictEqual(cochees, [1], 'le lot d\'avant la rafale est rendu')
+  assert.strictEqual(pastilleOn(w, 2), false, 'le mardi de la PREMIÈRE tape est reparti aussi')
+  assert.strictEqual(pastilleOn(w, 4), false)
+  t.libererLectures()
+})
+
+test('un repeint qui lève ne condamne pas les quatre autres écrivains', async () => {
+  // ⚠ `ecrituresRegles` ferme l'entrée à l'alternance, l'ancrage et les congés.
+  // Le lot 6 a glissé un `peindreMesJours()` complet entre l'incrément et le
+  // `try` : une exception là-dedans laissait le compteur en l'air POUR DE BON,
+  // et ces quatre chemins sortaient en silence pour le reste de la session.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const mois = w.document.getElementById('dispo-months')
+  const vrai = Object.getOwnPropertyDescriptor(w.Element.prototype, 'innerHTML')
+  let explose = true
+  Object.defineProperty(mois, 'innerHTML', {
+    configurable: true,
+    get () { return vrai.get.call(this) },
+    set (v) { if (explose) { explose = false; throw new Error('repeint cassé') } vrai.set.call(this, v) }
+  })
+  taper(w, 2, true)
+  await souffler(120)
+  explose = false
+  delete mois.innerHTML
+
+  // Le compteur est retombé : l'alternance peut de nouveau écrire.
+  const avant = ecritures(t).length
+  const bAlt = w.document.getElementById('dispo-alterner')
+  assert.ok(bAlt, 'le bouton d\'alternance est toujours là')
+  bAlt.dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(120)
+  assert.ok(ecritures(t).length > avant,
+    'l\'alternance n\'est pas condamnée pour le reste de la session')
+})
+
+test('droit retiré en cours de route : l\'écran le DIT, il ne reste pas cliquable', async () => {
+  // ⚠ Le rattrapage silencieux ne rendait rien quand `autorise` passait à faux :
+  // cases actives sous un « Non autorisé » seul, et chaque tape suivante
+  // repartait vers le même 403.
+  const { w, t, etat } = monter({ regles: [regle('r1', 'semaine', [1])],
+                                  echecReglage: { status: 403, message: 'Non autorisé' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  etat.autorise = false                    // l'employeur reprend la main
+  taper(w, 2, true)
+  await souffler(140)
+
+  assert.match(w.document.getElementById('dispo-etat').textContent,
+    /gérées par votre employeur/, 'l\'écran dit ce qui se passe')
+  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, 'none',
+    'et les cases ne sont plus là pour être retapées')
+})

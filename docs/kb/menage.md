@@ -2503,3 +2503,144 @@ faits (un aller-retour en série de plus sur le chemin que le correctif de perf
 venait d'accélérer, pour une valeur qui ne sert qu'à griser un bouton), et une
 valeur stockée hors des cinq options de la liste s'ajoute à la liste au lieu de
 laisser un `select` vide que la première interaction écraserait.
+
+## Lot 6 — les jours habituels basculent tout de suite (18 septembre 2026)
+
+Test humain en prod après le lot 1 : *« cocher un jour de la semaine met du
+temps avant de colorer la case »*. Le lot 1 n'avait rendu optimiste que le clic
+sur une **date** du calendrier ; le chemin des **règles récurrentes** était resté
+entier.
+
+### La mesure, avant de toucher à quoi que ce soit
+
+Dans le vrai DOM, écriture et relecture **tenues séparément** :
+
+| après la tape sur « mardi » | avant | après |
+|---|---|---|
+| `input.checked` | `true` | `true` |
+| pastille `.on` (le seul signal **visible**) | `false` | **`true`** |
+| mardi du calendrier | `off` | **coloré** |
+| requêtes revenues | **0** | 0 |
+
+⚠️ **L'`<input>` est en `opacity: 0`.** Le navigateur cochait bien la case — mais
+personne ne pouvait le voir : la seule marque visible est la classe
+`.dispo-pastille.on`, posée par `peindreMesRegles()`, appelée uniquement par
+`chargerDisponibilites()`. Soit **après deux requêtes en série** : l'écriture,
+puis une relecture complète qui coûte **six allers-retours base**
+(`public_tokens`, `profiles`, `profile_permissions`, exceptions, règles, congés).
+Plancher réseau mesuré en production : **0,39 s par requête**, avant tout travail
+de base.
+
+**Règle : le signal visible n'est pas toujours celui que le navigateur met à
+jour.** Une case à cocher masquée derrière un style rend l'état natif inutile —
+c'est le repeint qui fait foi, et c'est donc lui qu'il faut avancer.
+
+### Ce que ce chemin a de particulier : il remplace TOUT
+
+`reglerMesJours` désactive **toutes** les règles actives (les opaques comprises —
+la lecture `avant` n'a aucun filtre de lisibilité) puis insère le lot reçu. Il
+n'y a donc pas *une case* à remettre en cas d'échec : il y a un **lot de règles**
+d'avant à restaurer. On en prend une photo complète (`regles` + `forceAlternee`)
+avant de muter, et `rendreLesRegles()` la repose.
+
+⚠️ **Le rattrapage est LOCAL, pas une relecture.** Le faire par le réseau
+demanderait un troisième aller-retour — et sur un `catch`, il n'aboutirait pas :
+l'écran resterait sur des jours partis nulle part, sous un « ✓ enregistrés »
+mensonger. La relecture suit quand même, **derrière**, et sans panneau d'erreur
+par-dessus le refus qu'on vient d'afficher (`relireSilencieusement`).
+
+⚠️ **On ne restaure que l'état qu'on a muté** (`mesJours === monEtat`). Si une
+relecture a remplacé l'objet entre-temps, il porte déjà la vérité du serveur, et
+y réécrire un « avant » vieux d'un aller-retour le ferait régresser. Même garde
+d'identité qu'au lot 1.
+
+`enVolRegles` fait pour les règles ce que `enVolParJour` fait pour les jours : une
+relecture qui atterrit pendant l'envoi ne défait pas la bascule. Sans lui, les
+pastilles redevenaient grises toutes seules avec « ✓ Vos jours sont enregistrés »
+affiché au-dessus.
+
+### Un effet de bord à traiter, pas à subir
+
+Ces cases se reconstruisent désormais à **chaque tape** et non plus une fois par
+aller-retour. Au clavier, la case qu'on venait de cocher disparaissait sous le
+doigt et le `Tab` suivant repartait du haut de la page. `peindreMesRegles()`
+note laquelle avait le focus et le lui rend.
+
+### ⚠️ Deux tests que la contre-épreuve a démasqués
+
+**Un test qui ne pouvait rien prouver.** J'avais écrit « le verrou est posé AVANT
+la mutation ». Déplacer `ecrituresRegles++` après `appliquerRegles` ne fait
+rougir **aucun** test — et ne *peut* pas : les deux vivent dans le même bloc
+synchrone, rien ne s'exécute entre elles, aucune fenêtre n'est observable.
+L'ordre reste celui du KB, par discipline et pour le jour où un `await` s'y
+glissera ; le test a été retiré et remplacé par la raison de son absence. Ce qui
+est vérifiable — les quatre autres écrivains fermés pendant le vol — l'était déjà.
+
+**Un test qui passait sur le mauvais mécanisme.** « Un refus restaure tout le
+lot » passait aussi bien **sans** rattrapage local : c'était la relecture qui
+remettait les jours. Il ne testait donc pas ce qu'il annonçait. Relecture tenue
+en vol, il rougit quand on retire la restauration.
+
+**Règle : une contre-épreuve qui ne rougit pas accuse le test, pas le
+correctif.** Deux fois sur ce lot, c'est le test qui était faux.
+
+### Ce que la review du lot 6 a trouvé : la cible du rattrapage
+
+Quatre constats, dont deux graves, et les deux graves ont **la même racine** :
+photographier `mesJours.regles` à l'entrée suppose qu'il porte la vérité du
+serveur. C'est faux dès qu'un envoi est déjà en vol.
+
+**⚠️ Deuxième tape pendant un vol.** Ce chemin laisse passer le second geste —
+c'est voulu, rien n'est avalé. Mais sa photo capturait alors le lot **optimiste**
+du premier : au refus, le rattrapage rendait des jours que personne n'avait
+jamais enregistrés.
+
+**⚠️ Relecture pendant un vol.** `reappliquerEnVol` re-tamponne le lot en vol sur
+chaque objet fraîchement lu — c'est sa raison d'être. Donc un `mesJours` remplacé
+ne porte **pas** la vérité du serveur : il porte l'optimiste. La garde d'identité
+`mesJours === monEtat`, écrite sur la prémisse inverse, sautait le rattrapage
+exactement là : elle revient sur l'onglet pendant l'envoi, le serveur refuse, et
+le mardi reste vert sous « Panne ».
+
+**La correction est une seule idée : on ne rend pas « l'état d'avant », on rend le
+dernier lot CONFIRMÉ.** `reglesAvantVol` n'est photographié qu'au **premier**
+envoi d'une rafale — `enVolRegles` nul est exactement l'état « rien d'optimiste
+en attente ». Et `rendreLesRegles()` l'applique sur l'objet courant, quel qu'il
+soit, après avoir coupé `enVolRegles` (sinon la relecture suivante re-tamponnerait
+par-dessus ce qu'on vient de rendre).
+
+**⚠️ Un compteur de verrou se relâche dans un `finally`, donc sa montée doit être
+suivie d'un `try`.** Entre `ecrituresRegles++` et le `try`, il n'y avait qu'un
+`dire()` ; ce lot y avait glissé un `peindreMesJours()` complet — règles, deux
+mois de calendrier, agenda, congés. Une exception là-dedans laissait le compteur
+en l'air **pour de bon**, et les quatre autres écrivains (alternance, ancrage,
+pose et retrait de congé) sortaient en silence pour le reste de la session.
+
+**⚠️ Un droit retiré n'est pas un échec de lecture.** `relireSilencieusement`
+rendait `false` sans rien afficher quand `autorise` passait à faux : les cases
+restaient actives sous un « Non autorisé » seul, et chaque tape repartait vers le
+même 403. C'est le seul cas où le rattrapage silencieux a le droit de remplacer
+le panneau. Un seul endroit écrit cet écran désormais (`ecranNonAutorisee`), parce
+que les deux chemins de lecture y arrivent.
+
+⚠️ **Ce que cette photo ne sait pas, et qu'il faut lire en face.** Elle rend
+l'état d'**avant la rafale**, pas « ce que le serveur a ». Si une tape de la
+rafale a été commise en base mais que sa réponse s'est perdue (la suivante a
+pris la main, donc son `catch` est avalé), le rattrapage rend **moins** de jours
+qu'il n'y en a d'enregistrés — et si la relecture qui suit échoue aussi, rien ne
+le corrige avant le prochain chargement. C'est le **prix assumé** : photographier
+à chaque tape rendait, lui, des jours que *personne* n'avait enregistrés. Des
+deux mensonges, celui-là est le pire, parce qu'il fait croire à une disponibilité
+qu'elle n'a pas donnée.
+
+**Et un cinquième constat, sur les tests.** Les deux mécanismes — bascule
+optimiste et survie à la relecture — étaient éprouvés **chacun seul** : la
+relecture en vol sur le chemin du succès, le refus avec les lectures suspendues.
+Le défaut vivait entre les deux. **Règle : deux mécanismes qui se croisent se
+testent croisés**, pas l'un après l'autre.
+
+Là encore la contre-épreuve a corrigé un test avant le code : « deux tapes hors
+ligne » passait quoi qu'on fasse, parce qu'une coupure qui rejette tout de suite
+rattrape la première tape **avant** que la seconde ne parte — les deux envois ne
+se chevauchaient jamais. Il faut les **tenir** tous les deux, puis les faire
+refuser ensemble.
