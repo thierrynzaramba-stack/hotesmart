@@ -223,6 +223,24 @@
        d'opacite pendant l'attente reseau. Depuis le rendu optimiste, la case
        change d'ETAT immediatement — il n'y a plus d'attente a signaler, et une
        case grisee pendant que son etat a deja bascule n'aurait plus aucun sens. */
+    /* ─── L'ENGRENAGE, DANS LES CASES MORTES DE LA DERNIERE SEMAINE (lot C) ──
+       Un mois laisse presque toujours deux a six cases vides en fin de grille :
+       c'est la seule place de cet ecran qui ne coute rien a personne. Le reglage
+       s'y pose sans repousser la liste des 30 jours, et sans se donner l'air
+       d'une seconde action principale a egalite avec le calendrier. */
+    .dispo-case-config { display: flex; align-items: center; justify-content: flex-end;
+                         padding-right: 2px; }
+    .dispo-lien-config { background: none; border: 0; padding: 6px 2px; cursor: pointer;
+                         display: inline-flex; align-items: center; gap: 6px;
+                         font-size: 12px; color: var(--text3); font-family: inherit;
+                         line-height: 1.25; text-align: right; }
+    .dispo-lien-config svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .dispo-lien-config:hover { color: var(--text2); }
+    /* ⚠ L'ENGRENAGE SEUL GARDE UNE CIBLE DE 40 px. Sans libelle, le bouton se
+       reduirait a l'icone — 13 px a viser au pouce, un tiers du minimum tenu
+       partout ailleurs sur cet ecran. */
+    .dispo-lien-config.seul { min-width: 40px; min-height: 40px; justify-content: center; padding: 0; }
+
     /* ─── LA FEUILLE DU JOUR (lot B) ────────────────────────────────────────
        Un seul geste ouvre TOUT ce qui concerne la journee : ce qu'on lui
        propose, ce qu'elle porte deja, et sa disponibilite.
@@ -341,7 +359,25 @@
     .ratio-porte { font-size: 13px; font-weight: 600; color: var(--primary); white-space: nowrap; }
     .entete-ratio .ratio { justify-content: flex-end; gap: 10px; }
     .entete-ratio .ratio-item { font-size: 14px; }
-    .entete-ratio .entete-periode { font-size: 11px; color: var(--text2); }
+    /* ⚠ SOULIGNE, PARCE QUE RIEN D'AUTRE NE DIT QU'ON PEUT LE TOUCHER (lot E).
+       Depuis que l'onglet « Avis » a disparu, ce ratio est le SEUL chemin vers
+       eux : deux chiffres et une phrase grise ne se lisent pas comme un bouton,
+       et une porte qu'on ne voit pas est une porte fermee. Le souligne est le
+       seul signe de cliquabilite que tout le monde connait, et il ne coute pas
+       une ligne de plus a l'ecran.
+       ⚠ SUR LA PHRASE, PAS SUR LES CHIFFRES : souligner « 21 » et « 2 » les
+       abimerait — ce sont des donnees qu'on lit, pas un libelle. La phrase, elle,
+       nomme la destination. */
+    .entete-ratio .entete-periode { font-size: 11px; color: var(--text2);
+                                    text-decoration: underline;
+                                    text-decoration-thickness: 1px;
+                                    text-underline-offset: 2px;
+                                    text-decoration-color: var(--text3); }
+    .entete-ratio:hover .entete-periode { color: var(--text);
+                                          text-decoration-color: var(--text2); }
+    /* Le repli sans chiffre est deja une phrase-porte : il se souligne aussi. */
+    .ratio-porte { text-decoration: underline; text-decoration-thickness: 1px;
+                   text-underline-offset: 2px; }
     @media (max-width: 500px) {
       .entete-ratio .ratio-item { font-size: 13px; }
       .entete-ratio .entete-periode { font-size: 10px; }
@@ -862,7 +898,17 @@
         <div class="avis-etat" id="dispo-etat">Chargement…</div>
         <div id="dispo-contenu" style="display:none">
 
-          <div class="dispo-carte">
+          <!-- ⚠ LES REGLAGES VIVENT DANS UNE FEUILLE (lot C), pas en pleine page.
+               Ils commandent tout le calendrier — les jours habituels barrent ou
+               debarrent des semaines entieres — mais on les ouvre trois fois par
+               an. En pleine page, ils repoussaient la liste des 30 jours d'un
+               ecran entier a chaque visite.
+               ⚠ LES NOEUDS SONT DEPLACES, PAS RECREES : `appendChild` demenage
+               l'element AVEC ses ecouteurs. Les recopier dans le modal aurait
+               oblige a reposer tous les gestes — et a les dupliquer a la
+               deuxieme ouverture. -->
+          <div id="dispo-reglages" style="display:none">
+          <div class="dispo-carte" id="carte-regles">
             <div class="dispo-titre">Mes jours de travail</div>
             <!-- ⚠ EN LECTURE SEULE, ET C'EST UNE DECISION PRODUIT (15 sept. 2026).
                  Ses jours habituels sont l'ORGANISATION DU TRAVAIL, reglee par son
@@ -872,6 +918,21 @@
             <div id="dispo-recur"></div>
             <div class="dispo-aide" id="dispo-recur-aide"></div>
           </div>
+          <div class="dispo-carte" id="carte-conges">
+            <div class="dispo-titre">Je serai absente plusieurs jours</div>
+            <div class="dispo-saisie">
+              <label class="dispo-champ"><span>Du</span>
+                <input type="date" id="conge-du" class="dispo-input"></label>
+              <label class="dispo-champ"><span>Au</span>
+                <input type="date" id="conge-au" class="dispo-input"></label>
+            </div>
+            <div class="dispo-saisie" style="margin-top:8px">
+              <input type="text" id="conge-motif" class="dispo-input" placeholder="Motif (facultatif)">
+              <button id="btn-conge" class="btn btn-primary">Poser</button>
+            </div>
+            <div id="dispo-conges" style="margin-top:10px"></div>
+          </div>
+          </div><!-- /#dispo-reglages -->
 
           <div class="dispo-carte">
             <div class="dispo-nav">
@@ -893,23 +954,12 @@
                il dit OU et QUAND d'un coup d'oeil, la liste dit QUOI. Celle du
                jour est mise en evidence — c'est ce qu'elle fait maintenant. -->
           <div class="dispo-carte" id="carte-agenda">
-            <div class="dispo-titre">Mes 30 prochains jours</div>
+            <!-- ⚠ PAS DE TITRE (lot E). « Mes 30 prochains jours » nommait ce que
+                 la liste montre deja : des dates, dans l'ordre, a la suite du
+                 calendrier. Un intitule qui paraphrase son contenu occupe une
+                 ligne pour n'apprendre rien — et sur un telephone, cette ligne
+                 est une carte de moins visible sans defiler. -->
             <div id="agenda-liste"></div>
-          </div>
-
-          <div class="dispo-carte">
-            <div class="dispo-titre">Je serai absente plusieurs jours</div>
-            <div class="dispo-saisie">
-              <label class="dispo-champ"><span>Du</span>
-                <input type="date" id="conge-du" class="dispo-input"></label>
-              <label class="dispo-champ"><span>Au</span>
-                <input type="date" id="conge-au" class="dispo-input"></label>
-            </div>
-            <div class="dispo-saisie" style="margin-top:8px">
-              <input type="text" id="conge-motif" class="dispo-input" placeholder="Motif (facultatif)">
-              <button id="btn-conge" class="btn btn-primary">Poser</button>
-            </div>
-            <div id="dispo-conges" style="margin-top:10px"></div>
           </div>
 
         </div>
@@ -1664,24 +1714,49 @@ if ("serviceWorker" in navigator) {
     })
   }
 
+  // ⚠ UNE ANNONCE PERIME A 72 h (lot D). Une nouvelle qui reste indefiniment
+  // cesse d'etre une nouvelle : au bout d'une semaine on ne la lit plus, et elle
+  // pousse vers le bas ce qui vient VRAIMENT d'arriver. Trois jours couvrent un
+  // week-end sans regarder son telephone, ce qui est le cas reel qu'on protege.
+  // ⚠ COTE ECRAN, PAS COTE SERVEUR : la ligne reste en base — c'est la trace,
+  // et l'hote la consulte. Ce qui perime, c'est son affichage a elle.
+  const PEREMPTION_H = 72
+  function annonceFraiche (n) {
+    const t = Date.parse(n.created_at)
+    if (!Number.isFinite(t)) return true   // date illisible : on montre, on ne cache pas
+    return (Date.now() - t) / 3600000 < PEREMPTION_H
+  }
+
   function renderNews() {
     // Réconcilie le miroir local d acquittement (offline-safe) : une notif acquittee reste lue
     // même si la sync serveur n a pas encore eu lieu (empêche la réapparition au reload).
     newsItems.forEach(n => { if (readSet.has(String(n.id))) n.read = true })
-    const unread = newsItems.filter(n => !n.read)
+    // ⚠ UN SEUL ENDROIT DECIDE DE CE QUI S'AFFICHE : peremption ET acquittement.
+    // Deux filtres separes auraient diverge au premier ajout — et le compteur
+    // aurait annonce des nouvelles qu'aucune liste ne montre.
+    const visibles = newsItems.filter(annonceFraiche)
+    const unread = visibles.filter(n => !n.read)
     const panel  = document.getElementById('news-panel')
     const count  = document.getElementById('news-count')
     const list   = document.getElementById('news-list')
 
-    if (newsItems.length === 0) { panel.style.display = 'none'; return }
+    if (visibles.length === 0) { panel.style.display = 'none'; return }
     panel.style.display = 'block'
     count.textContent = unread.length
     count.style.display = unread.length === 0 ? 'none' : 'inline'
 
-    const icons  = { new: '🆕', modified: '✏️', cancelled: '❌', note: '📝' }
-    const labels = { new: 'Nouvelle réservation', modified: 'Réservation modifiée', cancelled: 'Annulation', note: "Note de l'employeur" }
+    // ⚠ « NOUVEAU MENAGE », PAS « NOUVELLE RESERVATION » (lot D).
+    // La reservation est le fait de l'hote ; ce qu'elle change POUR ELLE, c'est
+    // qu'un menage apparait — dans tel logement, tel jour. Lui annoncer une
+    // reservation l'obligeait a traduire elle-meme en travail, date et adresse,
+    // depuis un vocabulaire qui n'est pas le sien. C'est la regle du coeur de
+    // donnees appliquee a l'ecrit : la source est une reservation, l'app en
+    // montre ce qu'elle sert.
+    const icons  = { new: '🧹', modified: '✏️', cancelled: '❌', note: '📝' }
+    const labels = { new: 'Nouveau ménage', modified: 'Ménage modifié',
+                     cancelled: 'Ménage annulé', note: "Note de l'employeur" }
 
-    list.innerHTML = newsItems.map(n => {
+    list.innerHTML = visibles.map(n => {
       const d = new Date(n.created_at)
       const timeStr = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })
 
@@ -1690,7 +1765,14 @@ if ("serviceWorker" in navigator) {
         if (n.event_type === 'note') {
           detail = `${n.property_name} · ${n.event_data.guestName || ''}\nArrivée : ${n.event_data.arrival || '—'} · Départ : ${n.event_data.departure || '—'}\n📝 ${n.event_data.comment || ''}`
         } else {
-          detail = `${n.property_name} · ${n.event_data.guestName || ''} · ${n.event_data.arrival || ''} → ${n.event_data.departure || ''}`
+          // ⚠ LE LOGEMENT ET LE JOUR, RIEN D'AUTRE. On y mettait le nom du
+          // voyageur et les deux bornes du sejour : trois informations dont
+          // aucune ne repond a « ou dois-je aller, et quand ». Le jour du menage
+          // est le DEPART — c'est lui qui la concerne, pas l'arrivee.
+          const jour = n.event_data.departure
+            ? jourLisible(String(n.event_data.departure).slice(0, 10))
+            : ''
+          detail = `${n.property_name || ''}${jour ? ' · ' + jour : ''}`
           if (n.event_type === 'modified' && n.event_data.changes) {
             const changes = []
             if (n.event_data.changes.arrival)   changes.push(`arrivée : ${n.event_data.changes.arrival.before} → ${n.event_data.changes.arrival.after}`)
@@ -1913,6 +1995,7 @@ if ("serviceWorker" in navigator) {
   // Depuis que la feuille du jour les liste toutes et les nomme, chacune doit
   // ouvrir la sienne.
   function ouvrirPriseDeMenage (jour, libres, idx = 0) {
+    rendreLesCartes()
     // ⚠ ON QUITTE LA FEUILLE DU JOUR : `jourOuvert` doit retomber. Sans cela,
     // `feuilleOuverteSur` repondait encore vrai, et le rattrapage d'une bascule
     // partie juste avant effacait la feuille de PRISE sous son doigt.
@@ -1983,6 +2066,7 @@ if ("serviceWorker" in navigator) {
 
   function ouvrirJour (j) {
     if (!jourOuvrable(j)) return
+    rendreLesCartes()
     jourOuvert = j
     // ⚠ LE FILTRE DE BIENS NE TRAVERSE PAS CETTE FEUILLE, NULLE PART.
     // Une premiere correction avait deplace la seule section « disponibilite »
@@ -2095,6 +2179,69 @@ if ("serviceWorker" in navigator) {
   function feuilleOuverteSur (j) {
     return jourOuvert === j &&
            document.getElementById('modal').style.display === 'flex'
+  }
+
+  // ─── LA FEUILLE DES REGLAGES (lot C) ────────────────────────────────────
+  //
+  // ⚠ ON DEMENAGE LES NOEUDS, ON NE LES RECREE PAS. `appendChild` deplace
+  // l'element AVEC ses ecouteurs : les cases a cocher, l'alternance A/B et les
+  // conges continuent de marcher sans qu'on repose un seul geste. Les recopier
+  // aurait oblige a tout rebrancher — et a le dupliquer a la deuxieme ouverture.
+  let reglagesOuverts = false
+  function ouvrirReglages () {
+    // ⚠ ON RAPATRIE AVANT D'EFFACER. Le bouton garde le focus apres activation :
+    // un second Entree relançait la fonction, `innerHTML = ''` DETRUISAIT les
+    // deux cartes — qui sont alors filles du modal — et l'`appendChild` suivant
+    // recevait `null`. Les reglages disparaissaient pour le reste de la session.
+    rendreLesCartes()
+    // ⚠ GARDE DE PROFONDEUR, VOLONTAIREMENT NON ATTEIGNABLE PAR L'INTERFACE.
+    // L'engrenage n'est pas rendu quand elle ne regle rien, donc aucun test ne
+    // peut faire rougir cette ligne — et c'est la raison de ce commentaire : elle
+    // n'est pas morte, elle est la SECONDE serrure. Le jour ou un autre chemin
+    // menera ici (un lien, un raccourci clavier), elle sera deja en place.
+    if (!mesJours || !mesJours.modifiable) return
+    const corps = document.getElementById('modal-body')
+    corps.innerHTML = ''
+    corps.appendChild(document.getElementById('carte-regles'))
+    corps.appendChild(document.getElementById('carte-conges'))
+    document.getElementById('modal-title').textContent = 'Mes jours'
+    document.getElementById('modal-sub').textContent =
+      'Ce que vous réglez ici vaut pour toutes les semaines à venir.'
+    document.getElementById('modal-note').innerHTML = ''
+    hideModalMessages()
+    reinitialiserRetrait()
+    priseEnCours = null
+    jourOuvert = null
+    for (const id of ['modal-done', 'modal-prendre', 'modal-accepter', 'modal-refuser']) {
+      document.getElementById(id).style.display = 'none'
+    }
+    reglagesOuverts = true
+    document.getElementById('modal').style.display = 'flex'
+    // ⚠ LE FOCUS ENTRE DANS LA FEUILLE. Il restait sur l'engrenage, DERRIERE
+    // l'overlay : au clavier, la tabulation suivante parcourait la page cachee
+    // au lieu du panneau qu'on vient d'ouvrir. Et cet engrenage est repeint —
+    // donc detruit — des qu'un geste de la feuille recharge le calendrier, ce qui
+    // laissait le focus retomber sur `<body>`.
+    const premier = document.querySelector('#modal-body input, #modal-body button')
+    if (premier) premier.focus()
+  }
+
+  // ⚠ LES CARTES RENTRENT CHEZ ELLES A LA FERMETURE. Les laisser dans le modal
+  // marcherait tant qu'on ne le reouvre pas sur autre chose — puis
+  // `innerHTML = ''` les DETRUIRAIT, avec leurs ecouteurs, et les reglages
+  // seraient perdus pour le reste de la session.
+  function rendreLesCartes () {
+    if (!reglagesOuverts) return
+    reglagesOuverts = false
+    // ⚠ ET LE FOCUS REVIENT D'OU IL VENAIT. Sans cela, refermer la feuille le
+    // laisse sur un noeud qu'on vient de demenager hors de l'ecran.
+    const ancre = document.getElementById('btn-reglages')
+    const foyer = document.getElementById('dispo-reglages')
+    const r = document.getElementById('carte-regles')
+    const c = document.getElementById('carte-conges')
+    if (foyer && r) foyer.appendChild(r)
+    if (foyer && c) foyer.appendChild(c)
+    if (ancre && document.body.contains(ancre)) ancre.focus()
   }
 
   function resumeDuJour (nLibres, nMiens, dispo, passe) {
@@ -2252,6 +2399,11 @@ if ("serviceWorker" in navigator) {
   }
 
   function openModal(m) {
+    // ⚠ LE DERNIER ECRIVAIN DE `#modal-body`. Il n'est pas atteignable
+    // aujourd'hui — l'overlay couvre les cartes de menage, qui n'ont pas de
+    // `tabindex` — mais il est a un attribut pres de detruire les reglages.
+    // Une asymetrie dans une regle de surete finit toujours par etre le trou.
+    rendreLesCartes()
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
     document.getElementById('modal-body').innerHTML = `
@@ -2359,7 +2511,7 @@ if ("serviceWorker" in navigator) {
   // ⚠ `jourOuvert` RETOMBE ICI. Sans cela, le segment d'une feuille restait lie
   // a un jour qu'elle avait quitte : un rattrapage tardif ecrivait alors sur ce
   // jour-la, pas sur celui qu'elle regarde.
-  function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null; jourOuvert = null; reinitialiserRetrait(); hideModalMessages() }
+  function closeModal() { rendreLesCartes(); document.getElementById('modal').style.display = 'none'; selectedMenage = null; jourOuvert = null; reinitialiserRetrait(); hideModalMessages() }
 
   // ─── Helpers messages modal ────────────────────────────────────────────────
   function showModalError(msg)   { setModalMessage('error',   msg) }
@@ -2879,7 +3031,11 @@ if ("serviceWorker" in navigator) {
     if (!mesJours.modifiable) {
       msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre employeur qui pose vos absences.'
     } else if (!msg.dataset.garde) {
-      msg.textContent = 'Touchez un jour pour dire que vous n\'êtes pas là. Pour plusieurs jours d\'affilée, posez un congé ci-dessous.'
+      // ⚠ « CI-DESSOUS » NE DESIGNAIT PLUS RIEN. Depuis le lot C, le formulaire
+      // de conge vit derriere l'engrenage : la phrase envoyait defiler vers un
+      // espace vide. Un mode d'emploi qui pointe a cote est pire que pas de mode
+      // d'emploi — il fait douter de ce qu'on a sous les yeux.
+      msg.textContent = 'Touchez un jour pour voir ce qui s\'y passe. Pour plusieurs jours d\'affilée, posez un congé dans « Mes jours ».'
     }
   }
 
@@ -3011,19 +3167,35 @@ if ("serviceWorker" in navigator) {
     const auj = AUJ()
     let out = ''
     for (let k = 0; k < DISPO_VISIBLES && mesJours.mois + k < DISPO_MOIS; k++) {
-      out += peindreUnMois(moisDe(mesJours.mois + k), alt, auj)
+      // Le dernier mois PEINT, pas le dernier de l'horizon : c'est lui qui porte
+      // les cases mortes ou l'engrenage se pose.
+      const dernier = (k === DISPO_VISIBLES - 1) || (mesJours.mois + k + 1 >= DISPO_MOIS)
+      out += peindreUnMois(moisDe(mesJours.mois + k), alt, auj, dernier)
     }
     document.getElementById('dispo-months').innerHTML = out
     peindreLegende(alt)
   }
 
-  function peindreUnMois (a, alt, auj) {
+  function peindreUnMois (a, alt, auj, dernierMois = false) {
     const nb = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + 1, 0, 12)).getUTCDate()
     const decal = (a.getUTCDay() + 6) % 7
     const cellules = []
     for (let z = 0; z < decal; z++) cellules.push(null)
     for (let d = 1; d <= nb; d++) cellules.push(isoJ(new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), d, 12))))
-    while (cellules.length % 7) cellules.push(null)
+    // ⚠ LE RESTE SE MESURE AVANT LE BOURRAGE. `while (length % 7) push(null)`
+    // rendait `length % 7` nul par construction : le calcul des cases libres
+    // sortait TOUJOURS zero, la variante « engrenage seul » etait du code mort,
+    // et l'engrenage prenait une rangee de plus SOUS les cases vides — l'inverse
+    // exact de ce qu'il vient faire.
+    const casesMortes = (7 - (cellules.length % 7)) % 7
+    // ⚠ ON NE BOURRE PAS QUAND L'ENGRENAGE VA PRENDRE LA PLACE. Mesurer
+    // `casesMortes` avant le bourrage ne suffisait pas : les `null` etaient
+    // toujours rendus en `.dispo-case vide`, qui sont de VRAIS elements de
+    // grille. L'engrenage se placait donc APRES eux, sur une rangee neuve —
+    // exactement ce qu'il vient eviter, et 44 px + la gouttiere de perdus a
+    // chaque peinture.
+    const engrenageIci = !!(dernierMois && mesJours && mesJours.modifiable)
+    if (!engrenageIci) { while (cellules.length % 7) cellules.push(null) }
 
     let out = `<div class="dispo-mois"><div class="dispo-mois-titre">${echapper(moisLisible(a))}</div>` +
               `<div class="dispo-grille${alt ? ' alt' : ''}">`
@@ -3090,8 +3262,52 @@ if ("serviceWorker" in navigator) {
                `tabindex="${inerte ? -1 : 0}">${bulle}<span class="dispo-num">${+j.slice(8, 10)}</span>${points}</div>`
       }
     }
+    // ⚠ TROIS CAS, PARCE QUE LA PLACE VARIE D'UN MOIS A L'AUTRE. « Mes jours »
+    // ne tient pas dans une case de 44 px :
+    //   · 3 cases ou plus -> engrenage + libelle, cale a droite ;
+    //   · 1 ou 2 cases    -> engrenage SEUL. Un mois sur deux finit ainsi, et
+    //     prendre une rangee entiere a chaque fois repousserait la liste ;
+    //   · 0 case (mois finissant un dimanche) -> une rangee a lui.
+    // Dans tous les cas il porte son `aria-label` : l'engrenage seul est muet
+    // pour un lecteur d'ecran, et c'est le seul acces aux reglages.
+    // ⚠ PAS D'ENGRENAGE POUR QUI NE REGLE RIEN : une porte qui ne mene qu'a
+    // relire ce qu'on voit deja n'est pas une porte.
+    // ⚠ UN SEUL ENGRENAGE, SUR LE DERNIER MOIS PEINT. `peindreUnMois` est appelee
+    // deux fois (`DISPO_VISIBLES = 2`) : l'id etait donc emis EN DOUBLE — HTML
+    // invalide, `getElementById` prenant le premier en silence, et deux portes
+    // pour un reglage que le dessin annonce unique.
+    if (engrenageIci) {
+      const large = (casesMortes === 0 || casesMortes >= 3)
+      // ⚠ LA COLONNE DES SEMAINES COMPTE. En quinzaine la grille fait HUIT
+      // colonnes (`18px repeat(7, 1fr)`) : un element de 7 de large ne peut pas
+      // commencer en colonne 8, il retombait sur une rangee neuve et l'engrenage
+      // se calait a droite du SAMEDI, une case trop tot.
+      const colonnes = alt ? 8 : 7
+      const large7 = casesMortes === 0 ? colonnes : casesMortes
+      out += `<div class="dispo-case-config" style="grid-column: span ${large7}">` +
+             boutonReglages(large) + '</div>'
+    }
     out += '</div></div>'
     return out
+  }
+
+  // ⚠ RECONSTRUIT A CHAQUE PEINTURE, donc son ecouteur vit sur le conteneur —
+  // un ecouteur par bouton aurait fui a chaque changement de mois.
+  function boutonReglages (avecLibelle) {
+    return '<button type="button" class="dispo-lien-config' + (avecLibelle ? '' : ' seul') +
+      '" id="btn-reglages" title="Mes jours" aria-label="Mes jours">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<circle cx="12" cy="12" r="3"></circle>' +
+        '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 ' +
+          '1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 ' +
+          '19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 ' +
+          '15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 ' +
+          '0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 ' +
+          '1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 ' +
+          '2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.37.5.66.87.83H21a2 2 0 1 1 0 ' +
+          '4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>' +
+      '</svg>' + (avecLibelle ? 'Mes jours' : '') + '</button>'
   }
 
   // ─── MES 30 PROCHAINS JOURS (refonte v2, lot 3) ──────────────────────────
@@ -3214,6 +3430,15 @@ if ("serviceWorker" in navigator) {
   // Elle touchait un jour, la case virait au rouge, et aucun mot ne confirmait
   // que c'etait parti — sur un telephone, c'est exactement le moment ou l'on
   // retouche pour etre sur, donc ou l'on defait ce qu'on vient de faire.
+  // ⚠ LA OU ELLE REGARDE. Depuis le lot C, le formulaire de conge vit DANS la
+  // feuille des reglages : `dire()` ecrivait alors dans le bandeau du
+  // calendrier, derriere l'overlay. Elle tapait « Poser » sans date et ne voyait
+  // RIEN — ni le refus, ni le hors-ligne, ni le « ✓ enregistre ».
+  function direReglages (el, texte, type = 'erreur') {
+    if (!reglagesOuverts) { dire(el, texte); return }
+    if (type === 'ok') showModalSuccess(texte); else showModalError(texte)
+  }
+
   function dire (msg, texte) {
     msg.dataset.garde = '1'
     msg.textContent = texte
@@ -3222,9 +3447,14 @@ if ("serviceWorker" in navigator) {
   // ⚠ HORS LIGNE, ON NE PROMET RIEN. Le planning a une file d'attente ; une
   // absence, non — la rejouer plus tard porterait sur un planning qui a bouge, et
   // l'ecran ne peut pas dire « c'est enregistre » quand rien n'est parti.
+  // ⚠ IL ROUTE, IL N'ECRIT PLUS EN DUR. Depuis que les reglages vivent dans une
+  // feuille, `dire()` depose ses messages dans le bandeau du calendrier —
+  // derriere l'overlay. Corriger les deux fonctions de conge ne suffisait pas :
+  // les jours habituels, l'alternance et l'ancrage passent tous par ici.
+  // Une seule porte de sortie, et elle sait ou regarde la personne.
   function horsLigne (msg) {
     if (navigator.onLine) return false
-    dire(msg, '⚠️ Hors ligne : rien n\'a été envoyé. Réessayez une fois connectée.')
+    direReglages(msg, '⚠️ Hors ligne : rien n\'a été envoyé. Réessayez une fois connectée.')
     return true
   }
 
@@ -3424,7 +3654,7 @@ if ("serviceWorker" in navigator) {
       appliquerRegles(voulu, alt)
       enVolRegles = { lots: voulu, alt }
       peindreMesJours()
-      dire(msg, '✓ Vos jours sont enregistrés.')
+      direReglages(msg, '✓ Vos jours sont enregistrés.', 'ok')
 
       const { ok, erreur } = await envoyerMesJours(voulu, { alt })
       // Un geste plus recent a pris la main : sa reponse fera foi, pas celle-ci.
@@ -3437,7 +3667,7 @@ if ("serviceWorker" in navigator) {
         // dit ce que le serveur a repondu. Laisser les jours affiches apres un
         // refus, c'est un ecran qui ment sur ce qui est enregistre.
         rendreLesRegles()
-        dire(msg, erreur)
+        direReglages(msg, erreur)
         // Et on se recale derriere, sans panneau d'erreur par-dessus le refus
         // qu'on vient d'afficher.
         await relireSilencieusement()
@@ -3463,7 +3693,7 @@ if ("serviceWorker" in navigator) {
       // le dit. La restauration est LOCALE : hors ligne, une relecture
       // n'aboutirait pas, et l'ecran resterait sur des jours partis nulle part.
       rendreLesRegles()
-      dire(msg, 'Connexion impossible. Réessayez.')
+      direReglages(msg, 'Connexion impossible. Réessayez.')
       await relireSilencieusement()
     } finally {
       ecrituresRegles = Math.max(0, ecrituresRegles - 1)
@@ -3493,12 +3723,12 @@ if ("serviceWorker" in navigator) {
         // semaine A vide, « les jours de la semaine A sont conserves » annoncait
         // une conservation alors qu'on venait de tout effacer — donc
         // « disponible tous les jours », sans un mot.
-        dire(msg, vers ? 'Cochez les jours de la semaine B.'
+        direReglages(msg, vers ? 'Cochez les jours de la semaine B.'
                        : (jours.length ? 'Les jours de la semaine A sont conservés.'
                                        : 'Vous n\'avez plus aucun jour habituel : ' +
                                          'vous êtes comptée disponible tous les jours.'))
       } else {
-        dire(msg, erreur)
+        direReglages(msg, erreur)
       }
       // ⚠ LE VERROU TIENT JUSQU'AU REPEINT, ET C'EST VITAL ICI.
       // J'avais rendu la main avant la relecture, comme ailleurs. Mais
@@ -3515,7 +3745,7 @@ if ("serviceWorker" in navigator) {
       if (ok && mesJours) mesJours.forceAlternee = !!vers
       peindreMesJours()
     } catch (err) {
-      dire(msg, 'Connexion impossible. Réessayez.')
+      direReglages(msg, 'Connexion impossible. Réessayez.')
     } finally { envoiEnCours = false; verrouillerMesCases(false) }
   }
 
@@ -3536,14 +3766,14 @@ if ("serviceWorker" in navigator) {
       const { ok, erreur } = await envoyerMesJours(
         [{ jours: a ? a.jours : [], depuis: suivante },
          { jours: b ? b.jours : [], depuis: cette }], { alt: true })
-      dire(msg, ok ? '✓ Les deux semaines sont échangées.' : erreur)
+      direReglages(msg, ok ? '✓ Les deux semaines sont échangées.' : erreur)
       // ⚠ MEME PIEGE QUE L'ALTERNANCE : tant que la relecture n'a pas atterri,
       // les lignes A/B affichent encore l'ANCIEN arrangement. Une tape dans
       // cette fenetre reecrit l'ancrage d'avant et annule silencieusement
       // l'echange qu'on vient de confirmer.
       await chargerDisponibilites()
     } catch (err) {
-      dire(msg, 'Connexion impossible. Réessayez.')
+      direReglages(msg, 'Connexion impossible. Réessayez.')
     } finally { envoiEnCours = false; verrouillerMesCases(false) }
   }
 
@@ -3791,6 +4021,12 @@ if ("serviceWorker" in navigator) {
   // ⚠ UN SEUL ENDROIT ECRIT CET ECRAN, parce que les DEUX chemins de lecture y
   // arrivent : la lecture normale et le rattrapage.
   function ecranNonAutorisee () {
+    // ⚠ ET ON FERME LA FEUILLE. Les deux cartes de reglages en sont sorties : les
+    // laisser ouvertes, avec un bouton « Poser » vivant, au-dessus d'une page qui
+    // vient d'annoncer que ses absences sont gerees par son employeur, lui
+    // promettait un geste que le serveur refuse desormais en 403 — et refermer
+    // ensuite les rangeait dans un conteneur devenu invisible.
+    closeModal()
     const etat = document.getElementById('dispo-etat')
     const contenu = document.getElementById('dispo-contenu')
     etat.innerHTML = '<strong>Vos absences sont gérées par votre employeur</strong>Prévenez-le directement.'
@@ -3822,17 +4058,20 @@ if ("serviceWorker" in navigator) {
     if (!mesJours || !mesJours.modifiable || envoiEnCours || ecrituresRegles) return
     const du = document.getElementById('conge-du').value
     const au = document.getElementById('conge-au').value
-    if (!du || !au) { dire(msg, 'Choisissez un début et une fin.'); return }
-    if (horsLigne(msg)) return
+    if (!du || !au) { direReglages(msg, 'Choisissez un début et une fin.'); return }
+    if (!navigator.onLine) {
+      direReglages(msg, '\u26a0\ufe0f Hors ligne : rien n\'a \u00e9t\u00e9 envoy\u00e9. R\u00e9essayez une fois connect\u00e9e.')
+      return
+    }
     envoiEnCours = true
     try {
       const { ok, data } = await envoyer({ action: 'declarerConge', debut: du, fin: au,
         motif: document.getElementById('conge-motif').value.trim() })
-      if (!ok) { dire(msg, (data && data.error) || 'Impossible d\'enregistrer.'); return }
+      if (!ok) { direReglages(msg, (data && data.error) || 'Impossible d\'enregistrer.'); return }
       // ⚠ Les trois champs se vident : les laisser remplis avec un bouton actif
       // invite au second appui, et la table n'a aucune contrainte d'unicite.
       for (const id of ['conge-du', 'conge-au', 'conge-motif']) document.getElementById(id).value = ''
-      dire(msg, data && data.deja ? '✓ Ce congé était déjà posé.' : '✓ Congé enregistré.')
+      direReglages(msg, data && data.deja ? '✓ Ce congé était déjà posé.' : '✓ Congé enregistré.', 'ok')
       // ⚠ On se place sur le mois du conge : poser une date qu'on ne voit pas
       // apparaitre se lit comme un geste qui a echoue.
       const b = dJour(AUJ()), d = dJour(du)
@@ -3840,7 +4079,7 @@ if ("serviceWorker" in navigator) {
         (d.getUTCFullYear() - b.getUTCFullYear()) * 12 + (d.getUTCMonth() - b.getUTCMonth())))
       await chargerDisponibilites()
     } catch (err) {
-      dire(msg, 'Connexion impossible. Réessayez.')
+      direReglages(msg, 'Connexion impossible. Réessayez.')
     } finally { envoiEnCours = false }
   }
 
@@ -3850,12 +4089,15 @@ if ("serviceWorker" in navigator) {
     // facon — mais les trois chemins d'ecriture posent la meme garde, et une
     // asymetrie est ce qui se perd au prochain remaniement.
     if (!mesJours || !mesJours.modifiable || envoiEnCours || ecrituresRegles) return
-    if (horsLigne(msg)) return
+    if (!navigator.onLine) {
+      direReglages(msg, '\u26a0\ufe0f Hors ligne : rien n\'a \u00e9t\u00e9 envoy\u00e9. R\u00e9essayez une fois connect\u00e9e.')
+      return
+    }
     envoiEnCours = true
     try {
       const { ok, data } = await envoyer({ action: 'retirerConge', id })
-      if (!ok) { dire(msg, (data && data.error) || 'Impossible d\'annuler.'); return }
-      dire(msg, '✓ Congé annulé.')
+      if (!ok) { direReglages(msg, (data && data.error) || 'Impossible d\'annuler.'); return }
+      direReglages(msg, '✓ Congé annulé.', 'ok')
       // ⚠ LA LIGNE RESTE A L'ECRAN TANT QUE LA RELECTURE N'A PAS ATTERRI, et
       // elle reste cliquable. Rendre la main avant laissait une seconde tape
       // renvoyer le meme identifiant : le serveur refusait, et « ✓ Congé
@@ -3863,7 +4105,7 @@ if ("serviceWorker" in navigator) {
       // qui avait REUSSI.
       await chargerDisponibilites()
     } catch (err) {
-      dire(msg, 'Connexion impossible. Réessayez.')
+      direReglages(msg, 'Connexion impossible. Réessayez.')
     } finally { envoiEnCours = false }
   }
 
@@ -3910,6 +4152,7 @@ if ("serviceWorker" in navigator) {
   // avoir les deux, et c'est le defilement qui gagne dans l'usage reel. Pour
   // plusieurs jours d'affilee, le conge est fait pour ca.
   document.getElementById('dispo-months').addEventListener('click', e => {
+    if (e.target.closest('#btn-reglages')) { ouvrirReglages(); return }
     const el = e.target.closest('.dispo-case')
     if (!el || !el.dataset.jour) return
     // ⚠ LE MEME GESTE NE PEUT PAS FAIRE DEUX CHOSES SELON UN ETAT QU'IL FAUT

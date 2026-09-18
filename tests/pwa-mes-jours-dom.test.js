@@ -69,6 +69,11 @@ const projeter = regles => (regles || []).map(r => {
 function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    autorise = true, enLigne = true, erreur = null,
                    bookings = [], aPrendre = null,
+                   // ⚠ LE FIL D'ACTUALITES ETAIT SERVI EN DUR A `[]` : aucun test
+                   // ne pouvait donc rien dire de ce que la prestataire LIT en
+                   // arrivant — ni de ce qu'on lui cache. Le double doit pouvoir
+                   // rendre ce que le serveur rend.
+                   events = [],
                    coupureEcriture = false, echecReglage = null,
                    // ⚠ UN REFUS SERVEUR SUR N'IMPORTE QUELLE ECRITURE, applique
                    // APRES la suspension. `coupureEcriture` leve tout de suite,
@@ -90,7 +95,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     .replace(/^\s*initErrorHandler\(\)\s*$/gm, '')
 
   const appels = []
-  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre }
+  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events }
   // ⚠ SUSPENSION DETERMINISTE, PLUTOT QU'UNE TEMPORISATION.
   // Tester « l'ecran a bascule AVANT la reponse » avec un `setTimeout` de 120 ms
   // et un `souffler(10)` marche sur un poste au repos et lache sur une machine
@@ -211,7 +216,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       // Les servir ici fait passer le test par le vrai chemin de chargement.
       bookings: etat.bookings, a_prendre: etat.aPrendre,
       label: 'Regina', property_ids: [], visibility_days: 30,
-      comments: [], events: [], done: [], menages: [] }) }
+      comments: [], events: etat.events, done: [], menages: [] }) }
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
@@ -2168,4 +2173,260 @@ test('un rattrapage ne balaie pas la feuille de PRISE ouverte par-dessus', async
   await souffler(120)
   assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/,
     'la feuille de prise a survécu au retour de l\'écriture')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT C — LES RÉGLAGES DERRIÈRE UN ENGRENAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const engrenage = w => w.document.getElementById('btn-reglages')
+
+test('les réglages sont dans une feuille, pas en pleine page', async () => {
+  // ⚠ Ils commandent tout le calendrier — les jours habituels barrent ou
+  // débarrent des semaines entières — mais on les ouvre trois fois par an. En
+  // pleine page, ils repoussaient la liste des 30 jours d'un écran à chaque
+  // visite.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed(); await t.chargerDisponibilites()
+  assert.strictEqual(w.document.getElementById('dispo-reglages').style.display, 'none',
+    'les cartes sont rangées')
+  assert.ok(engrenage(w), 'l\'engrenage est dans la grille')
+
+  engrenage(w).dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex')
+  assert.ok(w.document.querySelector('#modal-body #carte-regles'), 'ses jours habituels')
+  assert.ok(w.document.querySelector('#modal-body #carte-conges'), 'et ses congés')
+  assert.strictEqual(w.document.querySelectorAll('#modal-body input[data-lot]').length, 7,
+    'les sept cases sont là, vivantes')
+})
+
+test('les cartes rentrent chez elles — sinon elles sont DÉTRUITES', async () => {
+  // ⚠ LE PIÈGE DU DÉMÉNAGEMENT. On déplace les nœuds pour garder leurs
+  // écouteurs ; les laisser dans le modal marcherait tant qu'on ne le rouvre pas
+  // sur autre chose — puis `innerHTML = ''` les détruirait, avec leurs gestes,
+  // et les réglages seraient perdus pour le reste de la session.
+  const j = dans(2)
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+
+  engrenage(w).dispatchEvent(new w.Event('click', { bubbles: true }))
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.ok(w.document.querySelector('#dispo-reglages #carte-regles'), 'rentrée au bercail')
+
+  // Et le chemin sournois : on ouvre une AUTRE feuille sans fermer celle-ci.
+  engrenage(w).dispatchEvent(new w.Event('click', { bubbles: true }))
+  taperJour(w, j)
+  assert.ok(w.document.querySelector('#dispo-reglages #carte-regles'),
+    'la feuille du jour ne les a pas emportées')
+  assert.strictEqual(w.document.querySelectorAll('#dispo-reglages input[data-lot]').length, 7,
+    'et les cases ont survécu')
+})
+
+test('sans droit d\'écriture, pas d\'engrenage du tout', async () => {
+  // ⚠ Une porte qui ne mène qu'à relire ce qu'on voit déjà n'est pas une porte,
+  // et elle occupe la seule place libre de la grille.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])], modifiable: false })
+  t.seed(); await t.chargerDisponibilites()
+  assert.strictEqual(engrenage(w), null)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT E — CE QUI RESTE À DIRE, ET CE QUI N'A PLUS À L'ÊTRE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('le ratio d\'avis se DONNE pour cliquable', async () => {
+  // ⚠ Depuis que l'onglet « Avis » a disparu, ce ratio est le SEUL chemin vers
+  // eux. Deux chiffres et une phrase grise ne se lisent pas comme un bouton, et
+  // une porte qu'on ne voit pas est une porte fermée.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  const bloc = PAGE.slice(PAGE.indexOf('.entete-ratio .entete-periode'),
+                          PAGE.indexOf('@media (max-width: 500px)'))
+  assert.match(bloc, /text-decoration: underline/)
+  // ⚠ SUR LA PHRASE, PAS SUR LES CHIFFRES : souligner « 21 » et « 2 » les
+  // abîmerait — ce sont des données qu'on lit, pas un libellé.
+  const chiffres = PAGE.slice(PAGE.indexOf('.entete-ratio .ratio-item'),
+                              PAGE.indexOf('.entete-ratio .entete-periode'))
+  assert.ok(!/text-decoration: underline/.test(chiffres),
+    'les chiffres du ratio restent intacts')
+})
+
+test('la liste des 30 jours n\'a plus de titre qui se paraphrase', async () => {
+  // ⚠ « Mes 30 prochains jours » nommait ce que la liste montre déjà : des
+  // dates, dans l'ordre, à la suite du calendrier. Sur un téléphone, cette ligne
+  // est une carte de moins visible sans défiler.
+  const { w, t } = monter({ bookings: [menage(dans(2))] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const carte = w.document.getElementById('carte-agenda')
+  assert.ok(carte, 'la carte est là')
+  assert.strictEqual(carte.querySelectorAll('.dispo-titre').length, 0, 'sans titre')
+  assert.ok(carte.querySelectorAll('.agenda-jour').length > 0, 'mais avec son contenu')
+})
+
+test('l\'onglet montre bien le calendrier — le foyer des réglages ne l\'avale pas', async () => {
+  // ⚠ DÉFAUT CRITIQUE ATTRAPÉ EN REVIEW, ET QU'AUCUN TEST NE VOYAIT. Le
+  // conteneur `display:none` des réglages englobait aussi le calendrier ET la
+  // liste des 30 jours : un vrai navigateur n'aurait affiché qu'un onglet vide,
+  // sans même l'engrenage pour en sortir.
+  // ⚠ jsdom NE FAIT PAS DE MISE EN PAGE : il lit le DOM, jamais ce qui est
+  // visible. C'est l'angle mort de tous les tests de ce fichier sur une question
+  // de structure — on éprouve donc l'IMBRICATION, qui est vérifiable.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed(); await t.chargerDisponibilites()
+  const foyer = w.document.getElementById('dispo-reglages')
+  assert.ok(!foyer.contains(w.document.getElementById('dispo-months')),
+    'le calendrier est hors du conteneur caché')
+  assert.ok(!foyer.contains(w.document.getElementById('carte-agenda')),
+    'la liste des 30 jours aussi')
+  assert.ok(foyer.contains(w.document.getElementById('carte-regles')))
+  assert.ok(foyer.contains(w.document.getElementById('carte-conges')))
+})
+
+test('un SEUL engrenage, et il tient dans les cases mortes', async () => {
+  // ⚠ `peindreUnMois` est appelée deux fois (deux mois affichés) : l'id sortait
+  // EN DOUBLE — HTML invalide, `getElementById` prenant le premier en silence,
+  // et deux portes pour un réglage que le dessin annonce unique.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed(); await t.chargerDisponibilites()
+  assert.strictEqual(w.document.querySelectorAll('#btn-reglages').length, 1)
+  // ⚠ ET IL OCCUPE LES CASES LIBRES, il n'ajoute pas une rangée. `reste` était
+  // calculé APRÈS le bourrage `while (length % 7) push(null)` : il valait donc
+  // toujours zéro, la variante « engrenage seul » était morte, et la ligne
+  // tombait sous les cases vides — l'inverse de ce qu'elle vient faire.
+  const conteneur = w.document.querySelector('.dispo-case-config')
+  assert.ok(conteneur, 'le conteneur est là')
+
+  // ⚠ CETTE ASSERTION ÉTAIT MORTE, et c'est elle qui devait garder le correctif.
+  // `attendu` était calculé puis jamais utilisé ; il ne restait qu'un
+  // `span <= 7` qui, en plus d'être vide de sens, CONTREDIT le code (en
+  // quinzaine la grille fait 8 colonnes). Le défaut est donc passé en vert.
+  // Ce qu'il faut épingler tient en une phrase : l'engrenage PREND les cases
+  // mortes, il n'ajoute pas une rangée sous elles.
+  const grille = conteneur.parentElement
+  const enfants = [...grille.children].filter(e => e.classList.contains('dispo-case') ||
+                                                   e.classList.contains('dispo-case-config'))
+  const avant = enfants[enfants.indexOf(conteneur) - 1]
+  assert.ok(avant && avant.dataset.jour,
+    'la case juste avant l\'engrenage est un JOUR — donc aucune case vide de fin')
+  assert.strictEqual(grille.querySelectorAll('.dispo-case.vide[data-jour]').length, 0)
+  // Et la place qu'il prend est exactement ce qui restait de la semaine.
+  const span = Number(conteneur.style.gridColumn.replace('span ', ''))
+  const jours = grille.querySelectorAll('.dispo-case[data-jour]').length
+  const decal = grille.querySelectorAll('.dispo-case.vide').length
+  assert.strictEqual(span, (7 - ((decal + jours) % 7)) % 7 || 7,
+    'l\'engrenage occupe précisément les cases mortes')
+})
+
+test('rouvrir la feuille des réglages ne DÉTRUIT pas les cartes', async () => {
+  // ⚠ Le bouton garde le focus après activation : un second Entrée relançait la
+  // fonction, `innerHTML = ''` détruisait les deux cartes — alors filles du
+  // modal — et l'`appendChild` suivant recevait `null`. Les réglages
+  // disparaissaient pour le reste de la session.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed(); await t.chargerDisponibilites()
+  const g = w.document.getElementById('btn-reglages')
+  g.dispatchEvent(new w.Event('click', { bubbles: true }))
+  g.dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.ok(w.document.getElementById('carte-regles'), 'la carte des règles existe encore')
+  assert.ok(w.document.getElementById('carte-conges'), 'celle des congés aussi')
+  assert.strictEqual(w.document.querySelectorAll('#modal-body #carte-regles').length, 1,
+    'et elle n\'est pas en double')
+})
+
+test('un congé refusé se dit DANS la feuille, pas derrière elle', async () => {
+  // ⚠ Le formulaire vit désormais dans la feuille ; `dire()` écrivait dans le
+  // bandeau du calendrier, derrière l'overlay. Elle tapait « Poser » sans date
+  // et ne voyait absolument rien.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed(); await t.chargerDisponibilites()
+  w.document.getElementById('btn-reglages').dispatchEvent(new w.Event('click', { bubbles: true }))
+  w.document.getElementById('btn-conge').dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  const vus = ['modal-error', 'modal-warning']
+    .map(id => w.document.getElementById(id))
+    .filter(el => el.classList.contains('visible'))
+    .map(el => el.textContent).join(' ')
+  assert.match(vus, /début et une fin/, 'le refus se lit dans la feuille')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT D — LES ANNONCES : CE QU'ELLES DISENT, ET COMBIEN DE TEMPS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const annonce = (id, heuresAvant, extra = {}) => ({
+  id, event_type: 'new', property_name: 'Colomiers', read: false,
+  created_at: new Date(Date.now() - heuresAvant * 3600000).toISOString(),
+  event_data: { guestName: 'Mme Durand', arrival: dans(1), departure: dans(3) },
+  ...extra
+})
+
+test('une annonce dit « nouveau MÉNAGE », avec le logement et le jour', async () => {
+  // ⚠ La réservation est le fait de l'hôte ; ce qu'elle change POUR ELLE, c'est
+  // qu'un ménage apparaît — dans tel logement, tel jour. Lui annoncer une
+  // réservation l'obligeait à traduire elle-même en travail, date et adresse,
+  // depuis un vocabulaire qui n'est pas le sien.
+  const { w, t } = monter({ events: [annonce('n1', 2)] })
+  t.seed(); await t.charger()
+  const panneau = w.document.getElementById('news-list')
+  assert.match(panneau.textContent, /Nouveau ménage/)
+  assert.ok(!/Nouvelle réservation/.test(panneau.textContent))
+  assert.match(panneau.textContent, /Colomiers/, 'le logement')
+  assert.match(panneau.textContent, new RegExp(jourAttendu(dans(3))), 'et le jour du ménage')
+  // ⚠ NI LE VOYAGEUR NI L'ARRIVEE : trois informations dont aucune ne répond à
+  // « où dois-je aller, et quand ». Le jour du ménage est le DÉPART.
+  assert.ok(!/Durand/.test(panneau.textContent), 'pas le nom du voyageur')
+})
+
+const jourAttendu = j => new Date(j + 'T12:00:00Z')
+  .toLocaleDateString('fr-FR', { weekday: 'long', timeZone: 'UTC' })
+
+test('une annonce de plus de 72 h ne s\'affiche plus', async () => {
+  // ⚠ Une nouvelle qui reste indéfiniment cesse d'être une nouvelle : au bout
+  // d'une semaine on ne la lit plus, et elle pousse vers le bas ce qui vient
+  // VRAIMENT d'arriver. Trois jours couvrent un week-end sans téléphone.
+  const { w, t } = monter({ events: [annonce('recente', 5), annonce('perimee', 80)] })
+  t.seed(); await t.charger()
+  const items = [...w.document.querySelectorAll('#news-list .news-item')]
+  assert.deepStrictEqual(items.map(e => e.dataset.id), ['recente'],
+    'seule la récente reste')
+  assert.strictEqual(w.document.getElementById('news-count').textContent, '1',
+    'et le compteur ne promet pas ce que la liste ne montre pas')
+})
+
+test('rien que des annonces périmées : le panneau disparaît', async () => {
+  // ⚠ Le panneau se décidait sur la liste COMPLÈTE : il restait ouvert, vide,
+  // avec un compteur à zéro. Un seul endroit décide de ce qui s'affiche.
+  const { w, t } = monter({ events: [annonce('vieille', 100)] })
+  t.seed(); await t.charger()
+  assert.strictEqual(w.document.getElementById('news-panel').style.display, 'none')
+})
+
+test('hors ligne, l\'alternance A/B le dit DANS la feuille', async () => {
+  // ⚠ Corriger les deux fonctions de congé ne suffisait pas : les jours
+  // habituels, l'alternance et l'ancrage passent tous par `horsLigne()`, qui
+  // écrivait en dur dans le bandeau du calendrier — derrière l'overlay. Elle
+  // ouvrait l'engrenage hors ligne, tapait « Une semaine sur deux… », et il ne
+  // se passait rien du tout.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])], enLigne: false })
+  t.seed(); await t.chargerDisponibilites()
+  w.document.getElementById('btn-reglages').dispatchEvent(new w.Event('click', { bubbles: true }))
+  const alterner = w.document.getElementById('dispo-alterner')
+  assert.ok(alterner, 'le bouton d\'alternance est dans la feuille')
+  alterner.dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  const vus = ['modal-error', 'modal-warning']
+    .map(id => w.document.getElementById(id))
+    .filter(el => el.classList.contains('visible'))
+    .map(el => el.textContent).join(' ')
+  assert.match(vus, /Hors ligne/, 'le refus se lit là où elle regarde')
+})
+
+test('la phrase d\'accueil ne renvoie plus vers le vide', async () => {
+  // ⚠ « posez un congé ci-dessous » : depuis le lot C le formulaire vit derrière
+  // l'engrenage. La phrase envoyait défiler vers un espace vide — un mode
+  // d'emploi qui pointe à côté fait douter de ce qu'on a sous les yeux.
+  const { w, t } = monter({})
+  t.seed(); await t.chargerDisponibilites()
+  const aide = w.document.getElementById('dispo-message').textContent
+  assert.ok(!/ci-dessous/.test(aide))
+  assert.match(aide, /Mes jours/, 'elle nomme la porte')
 })
