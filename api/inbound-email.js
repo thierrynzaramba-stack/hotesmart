@@ -23,6 +23,15 @@
 const { createClient } = require('@supabase/supabase-js')
 const { bookingDepuisAdresse, estAdresseDeReponse, compacter } = require('../lib/jeton-reponse')
 const { recordMessage } = require('../lib/record-message')
+const { envoyerHtml } = require('../lib/email-guestflow')
+// ⚠ LE MEME HELPER QUE LA NOTIFICATION DE VENTE, pas une recopie. Il fait la
+// meme lecture (profil proprietaire, `notify_email`, `active`), il est
+// fail-CLOSED, et il rend un MOTIF distinct par cause. La version recopiee ici
+// soldait ses cinq causes par un `return` nu : dans les journaux, « l'hote a
+// refuse les notifications » etait indiscernable de « la lecture est tombee ».
+// Ce helper a deja ete corrige une fois pour cette raison.
+const { destinataire: destinataireHote } = require('../lib/notif-hote-resa')
+const { isActiveStatus } = require('../lib/bookings-snapshot')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const CLE_BREVO = process.env.ALERT_BREVO_API_KEY
@@ -140,6 +149,85 @@ async function mettreEnAttente ({ userId, propertyId, de, sujet, corps, raison }
   }
 }
 
+// ─── La copie a l'hote ───────────────────────────────────────────────────────
+// ⚠ C'EST UN FILET, PAS UN SECOND FIL. Tant que l'application n'a pas de
+// notifications, un hote qui ne l'ouvre pas ne saurait pas qu'un voyageur a
+// ecrit — il perdrait l'habitude de sa boite avant d'avoir celle de l'app.
+//
+// ⚠ ET ELLE DIT DE NE PAS Y REPONDRE. Sans ca, l'hote repondrait depuis sa
+// messagerie : sa reponse partirait de SON adresse, hors du fil, et le voyageur
+// aurait deux interlocuteurs pour une meme conversation. Le `reply-to` de cette
+// copie pointe donc vers lui-meme — repondre a la copie se repond a soi.
+//
+// ⚠ ELLE NE FAIT JAMAIS ECHOUER L'INGESTION. Le message est deja dans le cœur
+// quand on l'envoie : une copie ratee est un confort en moins, pas un message
+// perdu.
+async function copieALhote ({ userId, propertyId, bienNom, resa, de, sujet, corps }) {
+  try {
+    const qui = await destinataireHote(userId)
+    if (!qui.ok) {
+      // Un refus de l'hote n'est pas une panne : rien a dire.
+      if (qui.choix) return
+      console.error('[inbound-email] copie impossible :', qui.raison)
+      await mettreEnAttente({ userId, propertyId, de, sujet, corps,
+        raison: `copie a l'hote impossible (${qui.raison})` })
+      return
+    }
+
+    const esc = v => String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    const nom = [resa.firstName, resa.lastName].filter(Boolean).join(' ') || 'Votre voyageur'
+
+    const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;`
+      + `max-width:560px;margin:0 auto;color:#1f1e1c;line-height:1.6;font-size:15px">`
+      + `<div style="padding:10px 12px;border-radius:8px;background:#fdf3e7;border:1px solid #e8c9a0;`
+      + `font-size:13px;color:#7a4b12;margin-bottom:18px">`
+      + `<strong>Copie — répondez depuis HôteSmart.</strong><br>`
+      + `Ce message est une copie pour information. Si vous répondez à cet e-mail, `
+      + `votre voyageur ne le recevra pas dans le fil de sa réservation.</div>`
+      + `<h2 style="font-size:18px;font-weight:600;margin:0 0 4px">${esc(nom)} vous a répondu</h2>`
+      + `<p style="margin:0 0 18px;color:#6f6b65;font-size:14px">`
+      + `${esc(bienNom || 'votre logement')} · ${esc(resa.arrival || '')} → ${esc(resa.departure || '')}</p>`
+      + (sujet ? `<p style="font-size:13px;color:#6f6b65">Objet : ${esc(sujet)}</p>` : '')
+      + `<div style="padding:12px 14px;border-left:3px solid #e6e4e0;white-space:pre-wrap">`
+      + `${esc(corps)}</div>`
+      + `<p style="margin-top:20px;font-size:13px;color:#6f6b65">Adresse du voyageur : ${esc(de)}</p>`
+      + `</div>`
+
+    // ⚠ PAS DE `bookingId` ICI. Le reply-to retombe donc sur l'adresse de
+    // l'hote : repondre a cette copie lui revient, au lieu de partir au
+    // voyageur depuis un fil qu'il croit lire.
+    const sujetCopie = `Réponse de ${nom} — ${bienNom || 'votre logement'}`
+    const envoi = await envoyerHtml({
+      userId, destinataire: qui.email, sujet: sujetCopie,
+      html, propertyId, propertyName: bienNom
+    })
+    if (envoi.ok) return
+
+    // ⚠ CE FILET A BESOIN DU SIEN, et il tombe precisement quand on en a besoin.
+    // La copie part par la cle Brevo de l'HOTE : quota epuise, cle absente,
+    // expediteur non verifie — et il ne recoit alors PLUS RIEN. Ni la reponse du
+    // voyageur (le reply-to pointe desormais vers HoteSmart), ni la copie. Le
+    // seul canal restant serait qu'il ouvre l'application, c'est-a-dire
+    // l'hypothese meme que ce filet existe pour couvrir.
+    //
+    // On replie donc sur la plateforme, comme le fait la notification de vente,
+    // et si ca tombe aussi on depose une tache : l'information ne se perd pas,
+    // elle attend qu'il ouvre son ecran.
+    console.error('[inbound-email] copie par la cle de l\'hote refusee :', envoi.raison)
+    const { sendPlatformEmail } = require('../lib/platform-notify')
+    const repli = await sendPlatformEmail(qui.email, sujetCopie, html)
+    if (repli && repli.ok !== false) return
+
+    console.error('[inbound-email] copie plateforme refusee aussi :', repli && repli.error)
+    await mettreEnAttente({ userId, propertyId, de, sujet, corps,
+      raison: 'copie e-mail impossible — message reçu, mais non transmis par e-mail' })
+  } catch (e) {
+    console.error('[inbound-email] copie hote exception', e.message)
+  }
+}
+
 module.exports = async function handler (req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
 
@@ -225,9 +313,42 @@ module.exports = async function handler (req, res) {
       return fini('reservation_introuvable')
     }
 
+    // ⚠ UNE RESERVATION MORTE NE REVEILLE PAS L'AGENT.
+    // `lib/jeton-reponse.js` le grave : « la validite reelle se decide a la
+    // lecture de la RESERVATION, pas du jeton ». Rien ne le faisait. Un voyageur
+    // dont le sejour est annule depuis trois mois — ou son client mail qui
+    // renvoie un vieux fil — entrait dans `conversations`, que l'agent IA lit et
+    // a quoi il peut repondre, et l'hote recevait une copie facturee sur sa cle
+    // pour un sejour qui n'existe plus. Constat de review.
+    //
+    // Le message ne se PERD pas pour autant : il va dans la file, ou l'hote le
+    // voit. Un voyageur qui ecrit a droit a une trace, meme quand son sejour
+    // n'existe plus.
+    if (!isActiveStatus(resa.snapshot || {}, (resa.snapshot || {}).provider)) {
+      await mettreEnAttente({
+        userId: resa.user_id, propertyId: resa.property_id, de: expediteur, sujet, corps,
+        raison: `réservation ${(resa.snapshot || {}).status || 'inactive'}`
+      })
+      return fini('reservation_inactive', { statut: (resa.snapshot || {}).status })
+    }
+
     // 4. Le cœur : le fil de l'hote, et la table que l'agent IA lit.
     const s = resa.snapshot || {}
     const nom = [s.firstName, s.lastName].filter(Boolean).join(' ') || 'Voyageur'
+
+    // Le nom du bien, pour que la copie dise DE QUEL logement il s'agit. Son
+    // absence ne bloque rien : on retombe sur « votre logement ».
+    // ⚠ PAS DE try/catch : supabase-js NE LEVE PAS, il resout `{ data, error }`.
+    // Le `catch` ne protegeait rien et l'`error` n'etait pas lu : deux biens
+    // portant le meme `provider_property_id` (aucune unicite globale) font
+    // rendre PGRST116 a `maybeSingle`, et la copie disait « votre logement »
+    // sans une ligne pour dire pourquoi.
+    let bienNom = null
+    const { data: b, error: eBien } = await supabase.from('properties')
+      .select('name').eq('user_id', resa.user_id)
+      .eq('provider_property_id', String(resa.property_id)).maybeSingle()
+    if (eBien) console.error('[inbound-email] nom du bien illisible', eBien.message)
+    else bienNom = b?.name || null
 
     // Dedup : Brevo peut rejouer un webhook. Meme corps, meme reservation, deux
     // minutes — c'est le meme e-mail.
@@ -260,6 +381,12 @@ module.exports = async function handler (req, res) {
       sentAt: e.Date || e.date || null,
       kind: 'message',
       canal: 'email'
+    })
+
+    // Le filet, apres l'ingestion : le message est deja dans le cœur.
+    await copieALhote({
+      userId: resa.user_id, propertyId: resa.property_id,
+      bienNom: bienNom, resa: s, de: expediteur, sujet, corps
     })
 
     return fini('ok', { booking: String(resa.booking_id).slice(0, 8) })

@@ -71,7 +71,9 @@ module.exports = async function handler(req, res) {
         userId: garde.accountUserId,
         destinataire: decision.destinataire,
         sujet: sujetPour(null, garde.bien?.name),
-        texte: message
+        texte: message,
+        // Le fil doit revenir ici, pas dans la boite de l'hote.
+        bookingId
       })
       if (!envoi.ok) {
         console.error('[channel-message] echec e-mail', bookingId, envoi.raison)

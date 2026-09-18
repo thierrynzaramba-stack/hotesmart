@@ -375,6 +375,45 @@ enverrait un vrai message à un vrai voyageur, en quelques minutes, sans que per
 demandé. La première version se fiait à un `template_id` relevé à la main pour affirmer que
 les trois étaient des `booking_confirmed` — c'était vrai ce jour-là, et ça ne prouvait rien.
 
+## Le `reply-to` pointe vers HôteSmart (bascule du 18 septembre 2026)
+
+Quand on écrit **au voyageur**, le `reply-to` est `<jeton>@reply.hotesmart.fr` : sa réponse
+entre dans le fil de la réservation au lieu d'arriver dans la boîte de l'hôte.
+
+⚠️ **Au moindre doute, on retombe sur l'adresse de l'hôte** — pas de `bookingId`, pas de
+secret de jeton. Une réponse doit arriver *quelque part* : un `reply-to` cassé ne se remarque
+que le jour où un voyageur attend une réponse à une question qu'on n'a jamais lue.
+
+⚠️ **Les trois chemins d'envoi doivent transmettre le `bookingId`**, et l'un d'eux a failli ne
+pas le faire : `envoyerEmailVoyageur` ne le déclarait pas dans sa signature. Les appelants le
+passaient consciencieusement et il tombait là, silencieusement — la bascule était inopérante
+pour **deux des trois chemins** (templates GuestFlow et envoi manuel), pendant que l'encart
+client annonçait le contraire.
+
+Ce qui l'a laissé passer mérite d'être retenu : mes « tests qui comptent » étaient des **greps
+de source**. Ils vérifiaient que `bookingId` apparaissait dans les fichiers appelants — ce qui
+était vrai — sans jamais traverser la fonction qui le jetait. Un test qui lit du code ne voit
+pas ce que le code fait. Les cas d'exécution (`tests/email-guestflow.test.js`) assèrent
+désormais `replyTo.email`, et la contre-épreuve a été faite : le bug réintroduit, ils rougissent.
+
+## La copie à l'hôte
+
+Chaque réponse de voyageur est **aussi** envoyée à l'hôte, marquée « Copie — répondez depuis
+HôteSmart » avec la conséquence dite : *votre voyageur ne le recevra pas*. C'est un filet
+tant que l'application n'a pas de notifications — sans lui, un hôte qui ne l'ouvre pas ne
+saurait pas qu'on lui a écrit, et il perdrait l'habitude de sa boîte avant d'avoir celle de
+l'app. `notify_email = false` la désactive.
+
+⚠️ **Elle ne porte pas de `bookingId`** : son `reply-to` retombe donc sur l'hôte. Sans ça,
+répondre à la copie enverrait vraiment au voyageur, depuis un fil que l'hôte croit seulement
+lire.
+
+⚠️ **Ce filet a besoin du sien.** Il part par la clé Brevo de l'hôte : quota épuisé, clé
+absente, expéditeur non vérifié — et l'hôte ne reçoit alors **plus rien**, ni la réponse (le
+`reply-to` pointe vers HôteSmart) ni la copie. On replie donc sur la plateforme, et si elle
+tombe aussi, on dépose une tâche. Le seul canal restant serait qu'il ouvre l'application,
+c'est-à-dire l'hypothèse même que ce filet couvre.
+
 ## Les réponses des voyageurs entrent dans le cœur (`api/inbound-email.js`)
 
 Brevo POSTe sur `/api/inbound-email` quand un e-mail arrive sur `*@reply.hotesmart.fr`.
@@ -423,6 +462,16 @@ On écarte sur les **en-têtes normalisés** (`Auto-Submitted` ≠ `no` au sens 
 `X-Autoreply`, `Precedence: bulk|junk|list`, `List-Id`, `List-Unsubscribe`, `X-Loop`) et sur
 un `Spam.Score ≥ 5` — jamais sur une heuristique de sujet, qui varierait avec la langue.
 `Auto-Submitted: no` désigne explicitement un message humain : il passe.
+
+### ⚠️ Une réservation morte ne réveille pas l'agent
+
+`lib/jeton-reponse.js` le grave : « la validité réelle se décide à la lecture de la
+**réservation**, pas du jeton ». Un voyageur dont le séjour est annulé depuis trois mois — ou
+son client mail qui renvoie un vieux fil — entrait dans `conversations`, que l'IA lit et à
+quoi elle peut répondre, et déclenchait une copie facturée sur la clé de l'hôte.
+
+Le message **ne se perd pas** pour autant : il va dans la file, avec son statut. Un voyageur
+qui écrit a droit à une trace, même quand son séjour n'existe plus.
 
 ### La file des non-rattachables
 

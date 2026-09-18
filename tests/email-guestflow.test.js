@@ -312,3 +312,43 @@ test('le cache epargne bien l\'aller-retour Brevo quand il n\'y a pas de choix',
   global.fetch = f
   assert.strictEqual(appelsSenders, 1, 'c\'est l\'appel reseau externe qu\'on epargne')
 })
+
+// ─── La bascule du reply-to, EPROUVEE (etape 7) ─────────────────────────────
+// ⚠ Ces cas existent parce que les premiers ne suffisaient pas : mes « tests
+// qui comptent » etaient des greps de source, et ils sont restes VERTS pendant
+// que `envoyerEmailVoyageur` jetait le `bookingId` un cran plus loin. Un test
+// qui lit du code ne voit pas ce que le code fait.
+
+test('LE TEST QUI COMPTE : le reply-to porte l\'adresse-jeton, pour de vrai', async () => {
+  process.env.REPLY_TOKEN_SECRET = 'secret-de-test-suffisamment-long-pour-passer'
+  remise()
+  await envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T',
+    bookingId: 'c87f24ce-9587-4d5e-841f-e8ef6d34edfd' })
+  const c = etat.envois[0].corps
+  assert.match(c.replyTo.email, /@reply\.hotesmart\.fr$/,
+    'la reponse doit revenir dans le fil, pas dans la boite de l\'hote')
+  assert.notStrictEqual(c.replyTo.email, c.sender.email)
+})
+
+test('LE TEST QUI COMPTE : sans bookingId, le reply-to retombe sur l\'hote', async () => {
+  // Une reponse doit arriver QUELQUE PART. Un reply-to casse ne se remarque que
+  // le jour ou un voyageur attend une reponse a une question jamais lue.
+  remise()
+  await envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T' })
+  assert.strictEqual(etat.envois[0].corps.replyTo.email, etat.envois[0].corps.sender.email)
+})
+
+test('sans secret de jeton, on retombe aussi sur l\'hote', async () => {
+  const sauve = process.env.REPLY_TOKEN_SECRET
+  delete process.env.REPLY_TOKEN_SECRET
+  delete require.cache[require.resolve('../lib/jeton-reponse')]
+  delete require.cache[require.resolve('../lib/email-guestflow')]
+  const sans = require('../lib/email-guestflow')
+  remise()
+  await sans.envoyerEmailVoyageur({ userId: 'A', destinataire: 'v@x.fr', sujet: 'S', texte: 'T',
+    bookingId: 'c87f24ce-9587-4d5e-841f-e8ef6d34edfd' })
+  assert.strictEqual(etat.envois[0].corps.replyTo.email, etat.envois[0].corps.sender.email)
+  process.env.REPLY_TOKEN_SECRET = sauve
+  delete require.cache[require.resolve('../lib/jeton-reponse')]
+  delete require.cache[require.resolve('../lib/email-guestflow')]
+})
