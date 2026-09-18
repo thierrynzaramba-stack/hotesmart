@@ -266,6 +266,34 @@ Le circuit complet fonctionne en production : réponse d'un voyageur → webhook
 `api/inbound-email.js` → `messages` (`canal=email`, `inbound`) + `conversations` + copie à
 l'hôte → réponse possible depuis la messagerie, par le bon canal.
 
+### Ce qui est réellement parti en production, et comment
+
+**Il faut le lire avant le reste de cette section.** Le commit de clôture `4aeed3d` annonce
+« trois choses, aucune de code ». C'est **faux** : un `git add -A` passé dans un clone
+partagé y a emporté `api/inbound-email.js` (+92) et `tests/inbound-email.test.js` (+128) —
+les six correctifs qu'une autre session écrivait au même moment, **avant sa re-review**.
+Le message du commit, lui, ne se corrige plus : il ment dans l'historique.
+
+C'est exactement le geste que la règle « aucun push tant qu'une review est en cours »
+interdit en première ligne. La leçon pratique tient en une phrase : **dans un clone partagé,
+on commite par chemins explicites — `git add <fichiers>`, jamais `-a` ni `add .`.**
+« Je n'y touche pas » est une intention ; `add -A` ne la lit pas.
+
+La review a rattrapé ce code une heure plus tard (`5aa0b1e`), et elle y a trouvé **une
+régression introduite par le correctif lui-même** : `cle_plateforme_absente` classée parmi
+les causes passagères rendait 503, donc rejeu — alors que ce motif est rendu *avant* qu'on
+regarde l'`uuid`. Une `ALERT_BREVO_API_KEY` manquante (rotation, preview, nouvel
+environnement) aurait envoyé **100 % des e-mails entrants** en rejeu d'une panne qui ne
+guérit pas seule, jusqu'à épuisement des tentatives de Brevo : chaque réponse de voyageur
+perdue, là où le code d'avant les acquittait au moins et les journalisait. Corrigée en 200,
+avec un test qui recharge le module sans la clé.
+
+Deux gardes de l'endpoint ne mordaient pas non plus en production au moment du test réel :
+le score de spam était lu au mauvais endroit (`Spam.Score` au lieu de `SpamScore`), et
+l'`uuid` — un **tableau** chez Brevo, lu comme un scalaire — rendait la garde « pas d'uuid,
+pas de traitement » inopérante, `[]` étant *truthy*. **Le circuit marchait ; il n'était pas
+sûr.** Détail des trois écarts de forme du payload : `docs/kb/guestflow.md`.
+
 ### Ce que ce chantier a appris, et qui vaut au-delà de lui
 
 1. **Un faux client qui n'imite pas la forme du vrai ne prouve rien du vrai.** Mes tests
@@ -294,3 +322,10 @@ l'hôte → réponse possible depuis la messagerie, par le bon canal.
 | 8 | **Le jeton de réponse ne se révoque pas** | HMAC sans table ; la validité se décide à la lecture de la réservation, ce qui suffit aujourd'hui |
 | 9 | **Risque résiduel de substitution de corps** | disparaîtra le jour où Brevo signera ses webhooks (§ « Risque résiduel ») |
 | 10 | **`scripts/cloture-annuler-resas-test.js` ne peut pas annuler** | `TEST_EMAIL` est un membre délégué, pas le propriétaire — et c'est la garde qui fonctionne, pas un défaut à corriger |
+| 11 | **Les quatre dettes de la seconde review** | écrites dans `docs/kb/guestflow.md` § « Dettes connues de l'inbound », pas recopiées ici |
+
+**Un arbitrage produit attend Thierry, et il n'est pas tranché ici.** La garde
+`SpamScore >= 5` jette en silence, et elle vient seulement de devenir vivante. Un faux
+positif fera disparaître un vrai message de voyageur, sans que personne ne le sache — ni
+l'hôte, ni le voyageur qui croira avoir écrit. Jeter, classer dans la file, ou laisser
+passer en marquant : c'est une décision produit, elle ne se prend pas dans une spec.
