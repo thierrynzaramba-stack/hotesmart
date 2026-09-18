@@ -6,19 +6,37 @@
 //
 // Brevo POSTe ici quand un e-mail arrive sur `*@reply.hotesmart.fr`.
 //
-// ⚠ CE WEBHOOK N'EST PAS AUTHENTIFIABLE, DONC ON NE LE CROIT PAS.
-// Channex accepte un en-tete personnalise (`X-Channel-Webhook-Secret`) ; Brevo
-// n'en propose aucun, et un secret glisse dans l'URL fuirait dans les journaux.
-// La reponse n'est pas de filtrer mieux : c'est de ne rien tirer du corps recu.
+// ⚠ CE WEBHOOK N'EST PAS AUTHENTIFIABLE. Channex accepte un en-tete personnalise
+// (`X-Channel-Webhook-Secret`) ; Brevo n'en propose aucun, et un secret glisse
+// dans l'URL fuirait dans les journaux.
 //
-// Le POST ne sert que de DECLENCHEUR. Le contenu, on va le relire chez Brevo
-// avec NOTRE cle (`GET /inbound/events/<uuid>`). Un faux POST ne peut donc rien
-// injecter : au pire il nous fait relire un e-mail qui existe, ou aucun.
-// C'est la regle 11 prise au mot — la ressource se construit cote serveur.
+// PREMIERE CONCEPTION, VALIDEE PUIS DEMENTIE PAR LES FAITS : « le POST n'est
+// qu'un declencheur, on relit TOUT chez Brevo ». Elle supposait que
+// `GET /inbound/events/<uuid>` rende ce que le webhook envoie. Il n'en est rien
+// — mesure du 18 septembre 2026, cet endpoint ne rend que des METADONNEES :
+//   receivedAt, deliveredAt, messageId, sender, recipient, subject, attachments, logs
+// Aucun corps. Ni `RawTextBody`, ni `ExtractedMarkdownMessage` ; ni
+// `?includeBody=true`, ni `/body`, ni `/content`, ni `/raw`. Le contenu d'un
+// e-mail entrant n'existe QUE dans le POST.
+//
+// ⚠ CONCEPTION RETENUE : LE WEBHOOK APPORTE LE CONTENU, LA RELECTURE
+// L'AUTHENTIFIE. Ce qui DESIGNE une ressource vient de Brevo ; ce qui la
+// DECRIT peut venir du POST, une fois corrobore.
+//   - le RATTACHEMENT se fait sur le `recipient` RELU, jamais sur celui du
+//     payload : c'est lui qui porte le jeton, donc la reservation, donc le
+//     compte. C'est la regle 11 sur ce qui compte.
+//   - `sender`, `subject` et `messageId` du payload sont CONFRONTES aux valeurs
+//     relues. Une divergence est un refus.
+//   - le corps vient du payload, faute d'alternative, et c'est ecrit.
+//
+// ⚠ RISQUE RESIDUEL ACCEPTE (Thierry, 18 septembre 2026). Qui connaitrait un
+// `uuid` reel pourrait substituer le corps de CE message-la. Les uuid sont
+// aleatoires et ne transitent que dans le webhook, en HTTPS : le risque suppose
+// une fuite prealable. Il est nomme plutot que noye — spec §« risque residuel ».
 //
 // ⚠ ET LE COMPTE NE VIENT JAMAIS DU MESSAGE. Il vient du jeton signe de
-// l'adresse de reponse, resolu en base. Un expediteur choisit ce qu'il ecrit,
-// pas a qui il l'ecrit.
+// l'adresse de reponse relue, resolu en base. Un expediteur choisit ce qu'il
+// ecrit, pas a qui il l'ecrit.
 
 const { createClient } = require('@supabase/supabase-js')
 const { bookingDepuisAdresse, estAdresseDeReponse, compacter } = require('../lib/jeton-reponse')
@@ -102,23 +120,43 @@ const premiereAdresse = v => {
   return String(v)
 }
 
-// ─── La relecture chez Brevo, seule source de verite ────────────────────────
+// ─── La relecture chez Brevo : les METADONNEES de reference ─────────────────
+// ⚠ SANS `uuid`, ON NE RELIT RIEN. La version precedente retombait sur
+// `/inbound/events?limit=5` et prenait le premier venu — c'est-a-dire qu'un POST
+// sans uuid faisait authentifier un e-mail SANS RAPPORT, dont le `recipient`
+// aurait servi au rattachement. On refuse : pas d'uuid, pas de traitement.
 async function relireChezBrevo (uuid) {
   if (!CLE_BREVO) return { ok: false, raison: 'cle_plateforme_absente' }
-  const chemin = uuid
-    ? `/inbound/events/${encodeURIComponent(uuid)}`
-    : '/inbound/events?limit=5'
+  if (!uuid) return { ok: false, raison: 'uuid_absent' }
   try {
-    const r = await fetch('https://api.brevo.com/v3' + chemin, { headers: { 'api-key': CLE_BREVO } })
+    const r = await fetch(
+      `https://api.brevo.com/v3/inbound/events/${encodeURIComponent(uuid)}`,
+      { headers: { 'api-key': CLE_BREVO } })
     const j = await r.json().catch(() => ({}))
     if (!r.ok) return { ok: false, raison: `brevo_${r.status}` }
-    // Le detail rend l'evenement ; la liste rend `{ events: [...] }`.
-    const e = Array.isArray(j?.events) ? j.events[0] : (j?.event || j)
-    if (!e) return { ok: false, raison: 'evenement_introuvable' }
-    return { ok: true, evenement: e }
+    if (!j || !j.recipient) return { ok: false, raison: 'evenement_introuvable' }
+    return { ok: true, reference: j }
   } catch (err) {
     return { ok: false, raison: `brevo_injoignable: ${err.message}` }
   }
+}
+
+// ⚠ LA CONFRONTATION. Ce que le POST raconte doit correspondre a ce que Brevo a
+// enregistre. On compare ce que Brevo EXPOSE — expediteur, sujet, identifiant de
+// message — en tolerant l'absence cote payload (tous les champs ne sont pas
+// garantis) mais jamais la CONTRADICTION.
+function divergence (payload, ref) {
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase()
+  const paires = [
+    ['sender', premiereAdresse(payload.From || payload.from), norm(ref.sender)],
+    ['subject', payload.Subject ?? payload.subject, ref.subject],
+    ['messageId', payload.MessageId ?? payload.messageId, ref.messageId]
+  ]
+  for (const [nom, duPost, deBrevo] of paires) {
+    if (duPost == null || duPost === '') continue
+    if (norm(duPost) !== norm(deBrevo)) return `${nom} (POST « ${norm(duPost).slice(0, 60)} » ≠ Brevo « ${norm(deBrevo).slice(0, 60)} »)`
+  }
+  return null
 }
 
 // ─── La file des non-rattachables ───────────────────────────────────────────
@@ -241,33 +279,50 @@ module.exports = async function handler (req, res) {
   }
 
   try {
-    // Du corps recu, on ne retient QU'UN INDICE : de quel e-mail Brevo parle.
     const brut = req.body || {}
     const item = Array.isArray(brut.items) ? brut.items[0] : brut
-    const uuid = item?.Uuid || item?.uuid || item?.MessageId || item?.messageId || null
+    // ⚠ `Uuid` SEUL, PAS `MessageId` EN REPLI. Le premier est l'identifiant
+    // Brevo de l'evenement, le second celui que le client mail de l'expediteur
+    // a choisi — donc une valeur qu'on nous donne. Les confondre revenait a
+    // accepter que l'appelant designe lui-meme ce qu'on va relire.
+    const uuid = item?.Uuid || item?.uuid || null
 
     const lu = await relireChezBrevo(uuid)
     if (!lu.ok) return fini('relecture_impossible', { raison: lu.raison })
-    const e = lu.evenement
+    const ref = lu.reference
 
-    // 1. Ce qui ne doit jamais reveiller l'agent.
-    const auto = motifAutomatique(e)
+    // 1. Le POST dit-il la meme chose que Brevo ?
+    const ecart = divergence(item, ref)
+    if (ecart) return fini('payload_incoherent', { ecart })
+
+    // 2. Ce qui ne doit jamais reveiller l'agent. Les en-tetes ne sont QUE dans
+    // le payload : Brevo ne les expose pas a la relecture. On les lit donc du
+    // POST — un attaquant qui les omettrait ferait seulement passer son message
+    // pour humain, ce qu'il serait de toute facon en n'en mettant aucun.
+    const auto = motifAutomatique(item)
     if (auto) return fini('automatique_ignore', { motif: auto })
 
-    // 2. De quelle reservation s'agit-il ? Du JETON, jamais du message.
-    const destinataires = []
-    for (const champ of [e.To, e.to, e.Cc, e.cc]) {
-      if (Array.isArray(champ)) champ.forEach(x => destinataires.push(premiereAdresse([x])))
-      else if (champ) destinataires.push(premiereAdresse(champ))
-    }
-    const cible = destinataires.find(a => estAdresseDeReponse(a))
-    const expediteur = premiereAdresse(e.From || e.from)
-    const sujet = e.Subject || e.subject || ''
-    const corps = corpsUtile(e)
+    // 3. De quelle reservation s'agit-il ? Du `recipient` RELU CHEZ BREVO,
+    // jamais du payload : c'est lui qui porte le jeton, donc le compte.
+    const cible = estAdresseDeReponse(ref.recipient) ? ref.recipient : null
+    const expediteur = ref.sender || premiereAdresse(item.From || item.from)
+    const sujet = ref.subject || ''
+    // Le corps, lui, n'existe QUE dans le POST (voir l'en-tete du fichier).
+    const corps = corpsUtile(item)
 
     if (!cible) {
       await mettreEnAttente({ de: expediteur, sujet, corps, raison: 'aucune adresse de réponse' })
       return fini('sans_adresse_de_reponse')
+    }
+    // ⚠ UN CORPS VIDE N'EST PAS UN MESSAGE. Le payload peut ne rien porter
+    // d'exploitable (pieces jointes seules, format inattendu) : l'ecrire dans le
+    // fil donnerait une ligne muette que l'agent IA lirait comme une question
+    // sans contenu. On met en attente, avec le sujet — l'hote voit qu'on lui a
+    // ecrit, et quoi.
+    if (!corps) {
+      await mettreEnAttente({ de: expediteur, sujet, corps: '',
+        raison: 'message reçu sans texte exploitable' })
+      return fini('corps_vide')
     }
     const jeton = bookingDepuisAdresse(cible)
     if (!jeton.ok) {
@@ -275,7 +330,7 @@ module.exports = async function handler (req, res) {
       return fini('jeton_refuse', { raison: jeton.raison })
     }
 
-    // 3. La reservation, resolue EN BASE. C'est elle qui designe le compte et
+    // 4. La reservation, resolue EN BASE. C'est elle qui designe le compte et
     // le bien — jamais le message.
     //
     // ⚠ UNE REQUETE CIBLEE, PAS UN BALAYAGE. Le jeton porte l'identifiant
@@ -332,7 +387,7 @@ module.exports = async function handler (req, res) {
       return fini('reservation_inactive', { statut: (resa.snapshot || {}).status })
     }
 
-    // 4. Le cœur : le fil de l'hote, et la table que l'agent IA lit.
+    // 5. Le cœur : le fil de l'hote, et la table que l'agent IA lit.
     const s = resa.snapshot || {}
     const nom = [s.firstName, s.lastName].filter(Boolean).join(' ') || 'Voyageur'
 
@@ -378,7 +433,10 @@ module.exports = async function handler (req, res) {
       body: corps,
       providerMsgId: uuid || null,
       ota: s.source || null,
-      sentAt: e.Date || e.date || null,
+      // ⚠ L'INSTANT DE BREVO, pas celui que le POST annonce. `receivedAt` est
+      // le moment ou l'e-mail est REELLEMENT arrive chez lui ; une date venue du
+      // payload serait choisie par l'expediteur, et ferait mentir l'ordre du fil.
+      sentAt: ref.receivedAt || null,
       kind: 'message',
       canal: 'email'
     })

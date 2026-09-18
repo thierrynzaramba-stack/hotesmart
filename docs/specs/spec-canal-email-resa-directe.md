@@ -164,6 +164,47 @@ Le geste, ce jour-là : supprimer les blocs de repli, faire dire aux incidents �
 et **retourner les tests** qui défendent aujourd'hui « elle part toujours » — sans quoi ils
 défendront une règle abandonnée.
 
+## Inbound e-mail — la conception, révisée par les faits (18 septembre 2026)
+
+### ⚠️ Ce que l'API Brevo ne fait pas
+
+La conception validée à l'étape 0 était : *« le webhook n'est qu'un déclencheur, on relit tout
+chez Brevo avec notre clé »*. Elle reposait sur la documentation, qui décrit bien un payload
+riche **côté webhook** — j'ai supposé que l'API de relecture rendait la même chose.
+
+Mesure du 18 septembre : `GET /inbound/events/<uuid>` ne rend que des **métadonnées** —
+`receivedAt`, `deliveredAt`, `messageId`, `sender`, `recipient`, `subject`, `attachments`,
+`logs`. **Aucun corps.** Ni `?includeBody=true`, ni `/body`, ni `/content`, ni `/raw`. Le
+contenu d'un e-mail entrant n'existe que dans le POST.
+
+### La conception retenue
+
+**Le webhook apporte le contenu ; la relecture l'authentifie.** Ce qui *désigne* une ressource
+vient de Brevo ; ce qui la *décrit* peut venir du POST, une fois corroboré.
+
+| élément | source | pourquoi |
+|---|---|---|
+| **rattachement** (`recipient`) | **Brevo, relu** | il porte le jeton, donc la réservation, donc le compte |
+| `sender`, `subject`, `messageId` | **confrontés** | une divergence POST/Brevo est un refus |
+| en-têtes (anti-boucle) | payload | Brevo ne les expose pas ; les omettre ferait seulement passer un message pour humain |
+| **corps** | payload | aucune alternative |
+| horodatage | **Brevo** (`receivedAt`) | une date du payload est choisie par l'expéditeur et ferait mentir l'ordre du fil |
+
+Sans `uuid`, **on ne relit rien et on ne traite rien** : la première version retombait sur
+« le dernier e-mail reçu », c'est-à-dire qu'un POST sans `uuid` faisait authentifier un
+message sans rapport, dont le `recipient` aurait servi au rattachement.
+
+### ⚠️ Risque résiduel — accepté par le product owner le 18 septembre 2026
+
+Qui connaîtrait un `uuid` réel pourrait **substituer le corps de ce message-là**. Ce qu'il ne
+peut pas faire : inventer un `uuid` (aléatoire, transitant seulement dans le webhook en
+HTTPS), détourner le message vers une autre réservation (le `recipient` vient de Brevo), ni
+écrire dans un fil arbitraire.
+
+Le risque suppose donc une fuite préalable de l'`uuid`. Il est nommé ici plutôt que noyé : le
+jour où Brevo exposera une signature de webhook, c'est ce paragraphe qu'il faudra venir
+supprimer.
+
 ### 2. L'ingestion des réponses e-mail (inbound parsing Brevo) — CHANTIER OUVERT
 
 Hors périmètre dès la spec d'origine, **repris le 17 septembre 2026** : voir

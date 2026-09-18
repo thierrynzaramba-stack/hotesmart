@@ -61,6 +61,14 @@ Module._load = function (d, ...reste) {
   return origine.apply(this, [d, ...reste])
 }
 
+// ⚠ LE FAUX BREVO REND CE QUE LE VRAI REND, ET RIEN DE PLUS.
+// Premiere version : il servait `{ events: [ { To, RawTextBody, Headers… } ] }`,
+// c'est-a-dire la forme du PAYLOAD du webhook. Le vrai
+// `GET /inbound/events/<uuid>` ne rend que des METADONNEES — `recipient`,
+// `sender`, `subject`, `messageId` — et AUCUN corps. Mes tests eprouvaient donc
+// une API imaginaire, et ils sont restes verts pendant que le rattachement
+// echouait en production sur les deux e-mails de Thierry.
+// Un faux client qui n'imite pas la forme du vrai ne prouve rien du vrai.
 const fetchOrigine = global.fetch
 global.fetch = async (url) => {
   etat.appelsBrevo = (etat.appelsBrevo || 0) + 1
@@ -89,13 +97,23 @@ function reponse () {
 }
 const appel = async (body) => {
   const res = reponse()
-  await handler({ method: 'POST', body }, res)
+  await handler({ method: 'POST', body: body === undefined ? etat.payload : body }, res)
   return res
 }
 
-function remise (evenement, o = {}) {
+// `payload` = ce que Brevo POSTe. La reference relue en est derivee, pour que
+// les deux concordent par defaut — une divergence se demande explicitement.
+function remise (payload, o = {}) {
+  etat.payload = payload
   etat.resas = o.resas !== undefined ? o.resas : [RESA]
-  etat.brevo = evenement ? { events: [evenement] } : null
+  etat.brevo = payload ? {
+    receivedAt: '2026-09-18T19:34:28.000+02:00',
+    messageId: o.refMessageId ?? payload.MessageId ?? '<msg-1@exemple.test>',
+    sender: o.refSender ?? payload.From ?? 'marie@exemple.test',
+    recipient: o.recipient !== undefined ? o.recipient : ADRESSE,
+    subject: o.refSubject ?? payload.Subject ?? 'Re: votre séjour',
+    attachments: [], logs: []
+  } : null
   etat.brevoStatus = o.brevoStatus || 200
   etat.conversations = []; etat.taches = []; etat.messages = []; etat.dejaVu = []
   etat.copies = []; etat.copiesPlateforme = []
@@ -106,26 +124,66 @@ function remise (evenement, o = {}) {
   etat.reponsePlateforme = o.reponsePlateforme || null
   etat.appelsBrevo = 0
 }
+// Ce que Brevo POSTe : l'uuid, le corps, les en-tetes. Pas d'autorite sur le
+// destinataire — c'est la relecture qui le donne.
 const mail = (o = {}) => ({
-  Uuid: 'uuid-1', From: 'marie@exemple.test', To: [{ Address: ADRESSE }],
+  Uuid: 'uuid-1', From: 'marie@exemple.test',
   Subject: 'Re: votre séjour', ExtractedMarkdownMessage: 'Bonjour, une question.',
   Headers: o.headers || {}, Spam: { Score: o.spam ?? 0 }, ...o.champs
 })
 
 // ─── 1. Le corps n'est jamais cru ───────────────────────────────────────────
-test('LE TEST QUI COMPTE : le contenu vient de BREVO, pas du POST', async () => {
-  // Le webhook n'est pas authentifiable : si on lisait son corps, n'importe qui
-  // pourrait injecter un message dans le fil de n'importe quel hote.
-  remise(mail())
-  const res = await appel({ Uuid: 'uuid-1', ExtractedMarkdownMessage: 'TEXTE INJECTE PAR L ATTAQUANT' })
+test('LE TEST QUI COMPTE : le RATTACHEMENT vient de Brevo, pas du POST', async () => {
+  // ⚠ L'INTENTION A CHANGE AVEC LES FAITS. Elle etait « le contenu vient de
+  // Brevo » : impossible, son API ne rend aucun corps (mesure du 18 septembre).
+  // Ce qui reste — et qui est l'essentiel — c'est que ce qui DESIGNE une
+  // ressource vienne de lui. Le payload peut mentir sur son destinataire : il
+  // n'est pas lu.
+  remise(mail(), { recipient: ADRESSE })
+  const res = await appel({ ...mail(), To: [{ Address: 'autre-jeton@reply.hotesmart.fr' }],
+    recipient: 'encore-autre@reply.hotesmart.fr' })
   assert.strictEqual(res.corps.reason, 'ok')
-  assert.strictEqual(etat.messages[0].body, 'Bonjour, une question.', 'le corps relu, pas le corps poste')
+  assert.strictEqual(etat.messages[0].bookingId, BOOKING,
+    'la reservation vient du recipient RELU, pas de celui annonce')
   assert.ok(etat.appelsBrevo >= 1, 'Brevo a bien ete interroge')
+})
+
+test('LE TEST QUI COMPTE : un POST qui CONTREDIT Brevo est refuse', async () => {
+  // La contrepartie de « le corps vient du payload » : on verifie que ce payload
+  // parle bien du meme e-mail. Divergence sur l'expediteur, le sujet ou
+  // l'identifiant de message = refus.
+  for (const [champ, valeur] of [['From', 'attaquant@ailleurs.test'],
+                                 ['Subject', 'Un tout autre sujet'],
+                                 ['MessageId', '<forge@ailleurs.test>']]) {
+    remise(mail())
+    const res = await appel({ ...mail(), [champ]: valeur })
+    assert.strictEqual(res.corps.reason, 'payload_incoherent', champ)
+    assert.strictEqual(etat.messages.length, 0)
+  }
+})
+
+test('sans Uuid, on ne relit rien et on ne traite rien', async () => {
+  // La version precedente retombait sur « le dernier e-mail recu » : un POST
+  // sans uuid faisait authentifier un message SANS RAPPORT, dont le recipient
+  // aurait servi au rattachement.
+  remise(mail())
+  const res = await appel({ ExtractedMarkdownMessage: 'Bonjour' })
+  assert.strictEqual(res.corps.reason, 'relecture_impossible')
+  assert.strictEqual(res.corps.raison, 'uuid_absent')
+  assert.strictEqual(etat.messages.length, 0)
+})
+
+test('un corps vide ne devient pas un message muet', async () => {
+  remise(mail({ champs: { ExtractedMarkdownMessage: '', RawTextBody: '', RawHtmlBody: '' } }))
+  const res = await appel()
+  assert.strictEqual(res.corps.reason, 'corps_vide')
+  assert.strictEqual(etat.messages.length, 0)
+  assert.strictEqual(etat.taches.length, 1, 'mais l\'hote voit qu\'on lui a ecrit')
 })
 
 test('relecture impossible : on n\'ecrit RIEN', async () => {
   remise(mail(), { brevoStatus: 503 })
-  const res = await appel({ Uuid: 'uuid-1' })
+  const res = await appel()
   assert.strictEqual(res.corps.reason, 'relecture_impossible')
   assert.strictEqual(etat.messages.length, 0)
   assert.strictEqual(etat.conversations.length, 0)
@@ -144,7 +202,7 @@ test('on acquitte TOUJOURS en 200, meme quand on ignore', async () => {
 // ─── 2. Le compte vient du jeton ────────────────────────────────────────────
 test('LE TEST QUI COMPTE : le compte et le bien viennent de la RESERVATION', async () => {
   remise(mail())
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.messages[0].userId, 'compte-A')
   assert.strictEqual(etat.messages[0].propertyId, 'prop-1')
   assert.strictEqual(etat.messages[0].canal, 'email')
@@ -152,10 +210,13 @@ test('LE TEST QUI COMPTE : le compte et le bien viennent de la RESERVATION', asy
   assert.strictEqual(etat.messages[0].sender, 'guest')
 })
 
-test('LE TEST QUI COMPTE : une adresse SIGNEE POUR AUTRE CHOSE est refusee', async () => {
+test('LE TEST QUI COMPTE : une signature forgee est refusee, meme venue de Brevo', async () => {
+  // Le `recipient` vient de Brevo, mais Brevo accepte TOUTE adresse locale sur
+  // le sous-domaine (wildcard) : n'importe qui peut ecrire a un jeton invente.
+  // C'est la signature, et elle seule, qui tranche.
   const forgee = 'c87f24ce95874d5e841fe8ef6d34edfd-000000000000@reply.hotesmart.fr'
-  remise(mail({ champs: { To: [{ Address: forgee }] } }))
-  const res = await appel({ Uuid: 'uuid-1' })
+  remise(mail(), { recipient: forgee })
+  const res = await appel()
   assert.strictEqual(res.corps.reason, 'jeton_refuse')
   assert.strictEqual(etat.messages.length, 0, 'rien n\'entre dans le cœur')
   assert.strictEqual(etat.taches.length, 1, 'mais ca ne se perd pas')
@@ -165,7 +226,7 @@ test('deux reservations pour un meme identifiant : on REFUSE de choisir', async 
   // `booking_id` n'est unique que par compte : repondre au hasard ferait entrer
   // le message d'un voyageur dans le fil d'un autre hote.
   remise(mail(), { resas: [RESA, { ...RESA, user_id: 'compte-B' }] })
-  const res = await appel({ Uuid: 'uuid-1' })
+  const res = await appel()
   assert.strictEqual(res.corps.reason, 'reservation_ambigue')
   assert.strictEqual(etat.messages.length, 0)
   assert.strictEqual(etat.taches.length, 1)
@@ -185,7 +246,7 @@ test('LE TEST QUI COMPTE : une reponse automatique ne reveille pas l\'agent', as
   ]
   for (const headers of cas) {
     remise(mail({ headers }))
-    const res = await appel({ Uuid: 'uuid-1' })
+    const res = await appel()
     assert.strictEqual(res.corps.reason, 'automatique_ignore', JSON.stringify(headers))
     assert.strictEqual(etat.messages.length, 0)
   }
@@ -195,20 +256,20 @@ test('`Auto-Submitted: no` est un message HUMAIN, il passe', async () => {
   // La RFC 3834 le dit explicitement : rejeter sur la seule presence de
   // l'en-tete etoufferait de vraies reponses.
   remise(mail({ headers: { 'Auto-Submitted': 'no' } }))
-  const res = await appel({ Uuid: 'uuid-1' })
+  const res = await appel()
   assert.strictEqual(res.corps.reason, 'ok')
 })
 
 test('un score de spam eleve est ignore', async () => {
   remise(mail({ spam: 9 }))
-  assert.strictEqual((await appel({ Uuid: 'uuid-1' })).corps.reason, 'automatique_ignore')
+  assert.strictEqual((await appel()).corps.reason, 'automatique_ignore')
 })
 
 test('les en-tetes sont lus quelle que soit leur casse et leur forme', async () => {
   for (const headers of [{ 'AUTO-SUBMITTED': 'auto-generated' },
                          [{ Name: 'Precedence', Value: 'junk' }]]) {
     remise(mail({ headers }))
-    assert.strictEqual((await appel({ Uuid: 'uuid-1' })).corps.reason, 'automatique_ignore')
+    assert.strictEqual((await appel()).corps.reason, 'automatique_ignore')
   }
 })
 
@@ -216,8 +277,8 @@ test('les en-tetes sont lus quelle que soit leur casse et leur forme', async () 
 test('LE TEST QUI COMPTE : un e-mail non rattachable NE SE PERD PAS', async () => {
   // Un voyageur qui repond depuis une autre adresse disparaitrait en silence,
   // et l'hote ne saurait jamais qu'on lui a ecrit.
-  remise(mail({ champs: { To: [{ Address: 'contact@hotesmart.fr' }] } }))
-  const res = await appel({ Uuid: 'uuid-1' })
+  remise(mail(), { recipient: 'contact@hotesmart.fr' })
+  const res = await appel()
   assert.strictEqual(res.corps.reason, 'sans_adresse_de_reponse')
   assert.strictEqual(etat.taches.length, 1)
   const t = etat.taches[0]
@@ -229,7 +290,7 @@ test('LE TEST QUI COMPTE : un e-mail non rattachable NE SE PERD PAS', async () =
 
 test('reservation introuvable : en attente, pas a la poubelle', async () => {
   remise(mail(), { resas: [] })
-  const res = await appel({ Uuid: 'uuid-1' })
+  const res = await appel()
   assert.strictEqual(res.corps.reason, 'reservation_introuvable')
   assert.strictEqual(etat.taches.length, 1)
 })
@@ -242,19 +303,19 @@ test('on garde le MESSAGE, pas la conversation citee', async () => {
     ExtractedMarkdownMessage: 'Ma question.',
     RawTextBody: 'Ma question.\n\n> Le 12 sept, vous avez écrit :\n> tout le fil…'
   } }))
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.messages[0].body, 'Ma question.')
 })
 
 test('sans message extrait, on retombe sur le texte brut', async () => {
   remise(mail({ champs: { ExtractedMarkdownMessage: '', RawTextBody: 'Texte brut.' } }))
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.messages[0].body, 'Texte brut.')
 })
 
 test('le fil de l\'hote recoit la meme chose que le cœur', async () => {
   remise(mail())
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.conversations.length, 1)
   assert.strictEqual(etat.conversations[0].guest_name, 'Marie Durand')
   assert.strictEqual(etat.conversations[0].book_id, BOOKING)
@@ -296,7 +357,7 @@ test('un refus de notification de l\'hote est respecte', async () => {
   // La lecture du profil est DELEGUEE au helper de `notif-hote-resa`, qui rend
   // un motif distinct par cause : un refus (`choix`) n'est pas une panne.
   remise(mail(), { profil: { email: 'h@x.fr', notify_email: false, active: true } })
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.copies.length, 0, 'aucune copie')
   assert.strictEqual(etat.taches.length, 0, 'et aucune tache : ce n\'est pas une panne')
   assert.strictEqual(etat.messages.length, 1, 'le message entre quand meme dans le cœur')
@@ -308,7 +369,7 @@ test('LE TEST QUI COMPTE : une reservation ANNULEE ne reveille pas l\'agent', as
   // declenchait une copie facturee sur la cle de l'hote.
   for (const status of ['cancelled', 'blocked', 'request']) {
     remise(mail(), { resas: [{ ...RESA, snapshot: { ...RESA.snapshot, status } }] })
-    const res = await appel({ Uuid: 'uuid-1' })
+    const res = await appel()
     assert.strictEqual(res.corps.reason, 'reservation_inactive', status)
     assert.strictEqual(etat.messages.length, 0, 'rien dans le cœur')
     assert.strictEqual(etat.conversations.length, 0, 'rien dans le fil')
@@ -319,7 +380,7 @@ test('LE TEST QUI COMPTE : une reservation ANNULEE ne reveille pas l\'agent', as
 
 test('LE TEST QUI COMPTE : la copie part vraiment, avec l\'avertissement', async () => {
   remise(mail())
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.copies.length, 1)
   assert.strictEqual(etat.copies[0].destinataire, 'hote@exemple.test')
   assert.ok(/Copie — répondez depuis HôteSmart/.test(etat.copies[0].html))
@@ -331,7 +392,7 @@ test('LE TEST QUI COMPTE : copie refusee -> repli plateforme', async () => {
   // Quota Brevo epuise : sans repli, l'hote ne recoit PLUS RIEN — ni la reponse
   // (le reply-to pointe vers HoteSmart), ni la copie.
   remise(mail(), { reponseCopie: { ok: false, raison: 'brevo_429' } })
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.copiesPlateforme.length, 1)
   assert.strictEqual(etat.taches.length, 0, 'la plateforme a pris le relais')
   assert.strictEqual(etat.messages.length, 1, 'et le message est bien dans le cœur')
@@ -340,7 +401,7 @@ test('LE TEST QUI COMPTE : copie refusee -> repli plateforme', async () => {
 test('les DEUX canaux muets -> une tache, jamais un silence', async () => {
   remise(mail(), { reponseCopie: { ok: false, raison: 'brevo_429' },
                    reponsePlateforme: { ok: false, error: 'quota plateforme' } })
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.taches.length, 1)
   assert.ok(/copie e-mail impossible/.test(etat.taches[0].summary))
   assert.strictEqual(etat.messages.length, 1, 'le message reste dans le cœur')
@@ -348,7 +409,7 @@ test('les DEUX canaux muets -> une tache, jamais un silence', async () => {
 
 test('profil illisible : une tache, pas un silence', async () => {
   remise(mail(), { profil: null, erreurProfil: { message: 'timeout' } })
-  await appel({ Uuid: 'uuid-1' })
+  await appel()
   assert.strictEqual(etat.copies.length, 0)
   assert.strictEqual(etat.taches.length, 1)
 })

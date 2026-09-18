@@ -418,15 +418,27 @@ c'est-à-dire l'hypothèse même que ce filet couvre.
 
 Brevo POSTe sur `/api/inbound-email` quand un e-mail arrive sur `*@reply.hotesmart.fr`.
 
-### ⚠️ Le webhook n'est pas authentifiable, donc on ne le croit pas
+### ⚠️ Le webhook apporte le contenu, la relecture l'authentifie
 
 Channex accepte un en-tête personnalisé (`X-Channel-Webhook-Secret`) ; **Brevo n'en propose
-aucun**, et un secret glissé dans l'URL fuirait dans les journaux. La réponse n'est pas de
-filtrer mieux : c'est de **ne rien tirer du corps reçu**.
+aucun**, et un secret glissé dans l'URL fuirait dans les journaux.
 
-Le POST ne sert que de **déclencheur**. Le contenu est relu chez Brevo avec notre clé
-(`GET /inbound/events/<uuid>`). Un faux POST ne peut donc rien injecter — au pire il nous
-fait relire un e-mail qui existe, ou aucun. C'est la règle 11 prise au mot.
+La première conception — « le POST n'est qu'un déclencheur, on relit tout chez Brevo » — a
+été **démentie par les faits** : `GET /inbound/events/<uuid>` ne rend que des métadonnées,
+**aucun corps**. Le contenu d'un e-mail entrant n'existe que dans le POST. Détail et risque
+résiduel accepté : `docs/specs/spec-canal-email-resa-directe.md`.
+
+Ce qui **désigne** une ressource vient donc de Brevo ; ce qui la **décrit** peut venir du
+POST, une fois corroboré :
+
+- le **rattachement** se fait sur le `recipient` **relu**, jamais sur celui du payload ;
+- `sender`, `subject` et `messageId` sont **confrontés** — divergence = refus ;
+- l'horodatage vient de Brevo : une date du payload est choisie par l'expéditeur et ferait
+  mentir l'ordre du fil ;
+- **sans `uuid`, on ne relit rien et on ne traite rien.**
+
+C'est la règle 11 appliquée à ce qui compte : le compte et la réservation ne viennent jamais
+du message.
 
 **On acquitte toujours en 200**, même quand on ignore : un 4xx/5xx ferait rejouer Brevo
 indéfiniment sur un e-mail qu'on a décidé d'écarter. Ce qu'on ne traite pas se journalise,
