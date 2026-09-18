@@ -56,20 +56,25 @@ function elem (id, dataset = {}) {
 // `style="display:none"` supprime par megarde doit faire tomber un test, pas
 // etre recopie ici a la main.
 const DEPART = {}
-for (const id of ['tabs', 'avis-vue', 'avis-ratio', 'entete-ratio', 'avis-periode-ligne']) {
+for (const id of ['avis-vue', 'avis-ratio', 'entete-ratio', 'avis-periode-ligne', 'dispo-vue']) {
   const m = HTML.match(new RegExp('id="' + id + '"[^>]*'))
   DEPART[id] = (m && /style="display:none"/.test(m[0])) ? 'none' : ''
 }
 
-test('le HTML masque les onglets et la vue Avis AU DEPART', async () => {
-  // La garantie centrale du commit — self_view_reviews coupe ⇒ pas d'onglet —
-  // repose d'abord sur cet attribut : si le HTML les affiche, tout le monde
-  // voit l'onglet avant meme qu'une ligne de script ne tourne.
-  assert.strictEqual(DEPART['tabs'], 'none', '#tabs doit partir masque')
+test('le HTML masque la vue Avis AU DEPART, et n\'a plus d\'onglets du tout', async () => {
+  // La garantie centrale du commit — self_view_reviews coupe ⇒ aucun acces aux
+  // avis — repose d'abord sur ces attributs : si le HTML les affiche, tout le
+  // monde y accede avant meme qu'une ligne de script ne tourne.
+  // ⚠ LA BARRE D'ONGLETS N'EXISTE PLUS (18 septembre 2026). Le calendrier est la
+  // page ; la vue Avis se rejoint par la porte de l'en-tete. On verifie son
+  // ABSENCE plutot que son masquage : un `#tabs` qui reviendrait un jour
+  // rouvrirait un second chemin vers cet ecran, et deux chemins divergent.
+  assert.ok(!/id="tabs"/.test(HTML), 'plus aucune barre d\'onglets dans le HTML')
   assert.strictEqual(DEPART['avis-vue'], 'none', '#avis-vue doit partir masque')
   assert.strictEqual(DEPART['avis-ratio'], 'none', '#avis-ratio doit partir masque')
   assert.strictEqual(DEPART['entete-ratio'], 'none', '#entete-ratio doit partir masque')
   assert.strictEqual(DEPART['avis-periode-ligne'], 'none', '#avis-periode-ligne doit partir masque')
+  assert.strictEqual(DEPART['dispo-vue'], '', '#dispo-vue est LA page : elle ne part pas masquee')
 })
 
 // Un DOM juste assez reel pour que le bloc tourne, et qui garde ce qui a ete
@@ -78,16 +83,18 @@ function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {},
   const els = new Map()
   const get = id => { if (!els.has(id)) els.set(id, elem(id)); return els.get(id) }
   const appels = []
-  // Les deux vrais boutons d'onglet : sans eux, `setTab` n'est exerce par aucun
-  // test et sept mutations du basculement passaient inapercues.
-  const boutons = [elem('btn-planning', { tab: 'planning' }), elem('btn-avis', { tab: 'avis' })]
-  els.set('tabs', Object.assign(elem('tabs'), { querySelectorAll: () => boutons }))
+  // ⚠ PLUS DE BOUTONS D'ONGLET : LA PORTE EST `#entete-ratio`. C'est elle que
+  // `majPorteAvis` branche, et c'est le SEUL chemin vers la vue Avis depuis la
+  // suppression de la barre. Sans element reel ici, le branchement de la porte
+  // ne serait exerce par aucun test — exactement le trou que les faux boutons
+  // d'onglet comblaient avant.
+  const porte = get('entete-ratio')
   const ctx = {
     console,
     document: {
       getElementById: get,
       querySelector: sel => get(sel.replace(/^[.#]/, '')),
-      querySelectorAll: sel => /button/.test(sel) ? boutons : [],
+      querySelectorAll: () => [],
       // Le vrai listener de re-sonde est branche ici : on le retient pour
       // pouvoir le declencher, au lieu de faire semblant de le couvrir.
       addEventListener (ev, fn) { if (ev === 'visibilitychange') reveils.push(fn) },
@@ -125,7 +132,7 @@ function contexte ({ reponses = [], enLigne = true, reveils = [], stockage = {},
   const lire = expr => vm.runInContext(expr, ctx)
   // Un reveil comme le navigateur en produit : l'onglet redevient visible.
   const reveiller = () => { reveils.forEach(fn => fn()) }
-  return { ctx, els, get, appels, lire, boutons, reveils, reveiller, stockage }
+  return { ctx, els, get, appels, lire, porte, reveils, reveiller, stockage }
 }
 
 const RATIO_OK = { total: 98, positif: 10, remarque: 15, rien_signale: 73, periode: 'toujours' }
@@ -237,44 +244,47 @@ test('l\'identifiant technique du bien ne s\'affiche pas quand le nom manque', a
   assert.ok(!get('avis-liste').innerHTML.includes('287031'), '« 287031 » ne dit rien a une femme de menage')
 })
 
-// ─── La sonde de demarrage : qui voit l'onglet ─────────────────────────────
+// ─── La sonde de demarrage : qui voit la PORTE des avis ────────────────────
+// ⚠ CES TESTS PARLAIENT DE L'ONGLET. La barre a disparu le 18 septembre 2026 :
+// la porte est `#entete-ratio`, dans l'en-tete, et c'est le seul acces. Ce qui
+// est garde n'a pas change — un droit coupe ne doit ouvrir AUCUN chemin.
 
-test('self_view_reviews coupe : PAS d\'onglet', async () => {
+test('self_view_reviews coupe : PAS de porte', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'Régina', autorise: false, ratio: null, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, 'none', 'l\'onglet ne doit meme pas apparaitre')
+  assert.strictEqual(get('entete-ratio').style.display, 'none', 'la porte ne doit meme pas apparaitre')
 })
 
-test('profil desactive : PAS d\'onglet', async () => {
+test('profil desactive : PAS de porte', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { actif: false, ratio: null, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
 })
 
-test('hors ligne : PAS d\'onglet, et surtout aucune exception', async () => {
+test('hors ligne : PAS de porte, et surtout aucune exception', async () => {
   const { ctx, get } = contexte({ reponses: [{ jete: true }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
 })
 
-test('token refuse : PAS d\'onglet', async () => {
+test('token refuse : PAS de porte', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 401, body: { error: 'Token invalide' } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, 'none')
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
 })
 
-test('autorisee : l\'onglet apparait', async () => {
+test('autorisee : la porte apparait', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'Régina', autorise: true, ratio: RATIO_OK, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, '')
+  assert.strictEqual(get('entete-ratio').style.display, '')
 })
 
-test('503 a la sonde : l\'onglet apparait, en etat de panne', async () => {
+test('503 a la sonde : la porte apparait, en etat de panne', async () => {
   // Masquer sur 503 ferait passer une panne pour un droit retire — et la
   // prestataire n'aurait aucun moyen de savoir qu'il faut reessayer.
   const { ctx, get } = contexte({ reponses: [{ status: 503, body: { error: 'Service temporairement indisponible' } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, '')
+  assert.strictEqual(get('entete-ratio').style.display, '')
 })
 
 test('la sonde ne demande PAS la liste : un seul aller-retour, sans detail', async () => {
@@ -300,11 +310,24 @@ test('panne reseau au chargement : etat de panne, pas « aucun avis »', async (
   assert.ok(!/Aucun avis/.test(get('avis-etat').innerHTML))
 })
 
-test('droit retire ENTRE la sonde et le clic : l\'onglet disparait', async () => {
-  const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'R', autorise: false, ratio: null, avis: [] } }] })
-  await ctx.chargerAvis()
-  assert.strictEqual(get('tabs').style.display, 'none')
+test('droit retire ENTRE la sonde et le clic : la porte se referme, et on revient au calendrier', async () => {
+  // ⚠ ET ON REVIENT AU CALENDRIER. Fermer le seul acces sans rendre l'ecran
+  // d'origine laissait la prestataire sur une vue Avis vide qu'aucun geste ne
+  // quittait — la barre d'onglets etait son seul chemin de retour.
+  // ⚠ IL FAUT Y ETRE POUR EN REVENIR. Une premiere version lisait `dispo-vue`
+  // sans jamais l'avoir masque : l'assertion etait vraie par construction, et la
+  // contre-epreuve — retirer le retour au calendrier — ne faisait rien rougir.
+  // On la met donc VRAIMENT dans la vue Avis d'abord.
+  const { ctx, get, lire } = contexte({ reponses: [{ status: 200, body: { prenom: 'R', autorise: false, ratio: null, avis: [] } }] })
+  lire('avisCharge = true')          // deja chargee : `montrerAvis` ne refetch pas
+  ctx.montrerAvis()
+  assert.strictEqual(get('dispo-vue').style.display, 'none', 'elle est bien dans la vue Avis')
+
+  await ctx.chargerAvis()            // le droit tombe pendant qu'elle y est
+  assert.strictEqual(get('entete-ratio').style.display, 'none')
   assert.strictEqual(get('avis-liste').innerHTML, '', 'et rien n\'est affiche')
+  assert.strictEqual(get('avis-vue').style.display, 'none', 'la vue Avis se referme')
+  assert.strictEqual(get('dispo-vue').style.display, '', 'et le calendrier revient')
 })
 
 test('chargement reussi : la liste est demandee AVEC detail=1', async () => {
@@ -314,48 +337,50 @@ test('chargement reussi : la liste est demandee AVEC detail=1', async () => {
   assert.ok(appels[0].includes('action=avis'))
 })
 
-// ─── Le basculement d'onglet ───────────────────────────────────────────────
-// Sept mutations du basculement survivaient aux tests : `setTab` n'etait exerce
-// par aucun d'eux, faute de boutons dans le DOM factice.
+// ─── Aller aux avis, et EN REVENIR ─────────────────────────────────────────
+// Sept mutations du basculement survivaient aux tests tant qu'aucun element
+// reel ne l'exercait. Depuis le 18 septembre, ce n'est plus un onglet : c'est
+// une porte dans l'en-tete, et un bouton de retour.
 
-test('passer sur Avis masque le planning et son bouton de filtres', async () => {
+test('passer sur Avis masque le CALENDRIER, qui est desormais la page', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
-  ctx.setTab('avis')
-  assert.strictEqual(get('menage-layout').style.display, 'none', 'le planning ne doit pas rester affiche sous la vue Avis')
+  ctx.montrerAvis()
+  assert.strictEqual(get('dispo-vue').style.display, 'none', 'le calendrier ne reste pas affiche sous la vue Avis')
   assert.strictEqual(get('avis-vue').style.display, '')
-  assert.strictEqual(get('fab-filters').style.display, 'none', 'le bouton Filtres n\'a rien a filtrer ici')
 })
 
-test('revenir sur Planning re-rend le planning et rend le bouton de filtres', async () => {
+test('revenir au calendrier le REPEINT', async () => {
+  // ⚠ Il n'est pas detruit quand on le masque, mais `bookings` peut avoir bouge
+  // pendant qu'elle lisait ses avis. Revenir sur un ecran fige a l'etat d'il y a
+  // dix minutes est le mensonge que le reste de cette page s'interdit.
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
   let rendus = 0
   ctx.routeRender = () => { rendus++ }
-  ctx.setTab('avis')
-  ctx.setTab('planning')
-  assert.strictEqual(get('menage-layout').style.display, '')
+  ctx.montrerAvis()
+  ctx.montrerCalendrier()
+  assert.strictEqual(get('dispo-vue').style.display, '')
   assert.strictEqual(get('avis-vue').style.display, 'none')
-  assert.strictEqual(get('fab-filters').style.display, '')
-  assert.ok(rendus >= 1, 'le planning doit etre re-rendu au retour')
+  assert.ok(rendus >= 1, 'le calendrier doit etre repeint au retour')
 })
 
 test('le premier passage sur Avis DECLENCHE le chargement', async () => {
   // Sans cet appel, l'ecran reste sur « Chargement… » indefiniment.
   const { ctx, appels } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
-  ctx.setTab('avis')
+  ctx.montrerAvis()
   await new Promise(r => setImmediate(r))
   assert.strictEqual(appels.length, 1)
   assert.ok(appels[0].includes('detail=1'))
 })
 
-test('les boutons d\'onglet sont REELLEMENT branches', async () => {
-  // `dataset.tab` renomme d'un cote et pas de l'autre rendait les deux onglets
-  // inertes sans qu'aucun test ne bronche.
-  const { ctx, get, boutons } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
+test('la PORTE de l\'en-tete est REELLEMENT branchee', async () => {
+  // C'etait `dataset.tab` renomme d'un cote et pas de l'autre qui rendait les
+  // onglets inertes sans qu'aucun test ne bronche ; c'est maintenant
+  // `dataset.branche` de `majPorteAvis`. Meme piege, meme garde.
+  const { ctx, get, porte } = contexte({ reponses: [{ status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }] })
   await ctx.initAvis()
-  boutons.find(b => b.dataset.tab === 'avis').click()
-  assert.strictEqual(get('avis-vue').style.display, '', 'un clic sur « Avis » doit ouvrir la vue')
-  boutons.find(b => b.dataset.tab === 'planning').click()
-  assert.strictEqual(get('avis-vue').style.display, 'none')
+  porte.click()
+  assert.strictEqual(get('avis-vue').style.display, '', 'un clic sur la porte doit ouvrir la vue')
+  assert.strictEqual(get('dispo-vue').style.display, 'none')
 })
 
 // ─── Un avis sans extrait ──────────────────────────────────────────────────
@@ -470,10 +495,9 @@ test('comptage TRONQUÉ : pas de chiffre non plus, et la porte tient', async () 
   assert.ok(!/ratio-item/.test(get('entete-ratio').innerHTML), 'aucun chiffre partiel')
 })
 
-test('self_view_reviews coupé : ni onglet NI ratio permanent', async () => {
+test('self_view_reviews coupé : ni porte NI ratio permanent', async () => {
   const { ctx, get } = contexte({ reponses: [{ status: 200, body: { prenom: 'R', autorise: false, ratio: null, avis: [] } }] })
   await ctx.initAvis()
-  assert.strictEqual(get('tabs').style.display, 'none')
   assert.strictEqual(get('entete-ratio').style.display, 'none')
   assert.strictEqual(get('entete-ratio').innerHTML, '')
 })
@@ -617,20 +641,23 @@ test('la sonde vide l\'en-tête quand le droit n\'est pas là', async () => {
 
 // ─── Le re-sondage au retour au premier plan ───────────────────────────────
 
-test('re-sonder n\'empile pas les écouteurs d\'onglets', async () => {
+test('re-sonder n\'empile pas les écouteurs de la porte', async () => {
   // ⚠ UN SEUL TAP LANÇAIT AUTANT DE CHARGEMENTS QU'IL Y AVAIT EU DE RÉVEILS.
   // `montrerOnglets` posait une flèche anonyme par appel, et `avisCharge` ne
   // passe à true qu'après le premier `await` : aucun des appels concurrents ne
   // s'arrêtait. Mesuré avant correctif : 3 sondes = 3 fetchs pour un clic.
+  // La barre a disparu ; `majPorteAvis` garde la porte par `dataset.branche`,
+  // et c'est la MEME faute qui se rejouerait sans ce garde-fou.
   const ok = { status: 200, body: { autorise: true, ratio: RATIO_OK, avis: [] } }
-  const { ctx, boutons, appels } = contexte({ reponses: [ok, ok, ok, ok, ok, ok] })
+  const { ctx, porte, appels } = contexte({ reponses: [ok, ok, ok, ok, ok, ok] })
   await ctx.initAvis()
   await ctx.initAvis()
   await ctx.initAvis()
-  const btnAvis = boutons.find(b => b.dataset.tab === 'avis')
-  assert.strictEqual(btnAvis.listeners.length, 1, 'un seul écouteur, quel que soit le nombre de sondes')
+  // Un clic et un clavier — jamais deux jeux, quel que soit le nombre de sondes.
+  assert.strictEqual(porte.listeners.filter(l => l[0] === 'click').length, 1,
+    'un seul écouteur de clic, quel que soit le nombre de sondes')
   const avant = appels.length
-  btnAvis.click()
+  porte.click()
   await new Promise(r => setImmediate(r))
   assert.strictEqual(appels.length - avant, 1, 'un clic = un chargement')
 })
@@ -648,7 +675,7 @@ test('hors ligne, le retour au premier plan NE VIDE PAS la liste affichée', asy
     ] } }]
   })
   await ctx.chargerAvis()
-  ctx.setTab('avis')
+  ctx.montrerAvis()
   const avant = get('avis-liste').innerHTML
   assert.ok(avant.includes('bouilloire sale'))
   await ctx.resonder()
@@ -665,7 +692,7 @@ test('en ligne, le retour au premier plan RAFRAÎCHIT bien', async () => {
       { id: '2', verdict: 'remarque', extrait: 'nouveau', bien: 'C', bienNom: 'C', recuLe: '2026-09-01T00:00:00Z' }] } }
   ] })
   await ctx.chargerAvis()
-  ctx.setTab('avis')
+  ctx.montrerAvis()
   assert.ok(get('avis-liste').innerHTML.includes('ancien'))
   await ctx.resonder()
   assert.ok(get('avis-liste').innerHTML.includes('nouveau'), get('avis-liste').innerHTML)

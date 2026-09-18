@@ -74,6 +74,16 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    // arrivant — ni de ce qu'on lui cache. Le double doit pouvoir
                    // rendre ce que le serveur rend.
                    events = [],
+                   // ⚠ SERVIS EN DUR A `[]` COMME LES EVENEMENTS : les consignes
+                   // de l'hote n'etaient eprouvables nulle part, alors qu'elles
+                   // sont la seule chose qu'on lui DEMANDE de lire avant d'entrer.
+                   comments = [],
+                   // ⚠ SERVIES EN DUR A `[]` COMME LES EVENEMENTS ET LES CONSIGNES.
+                   // `menages` porte les ASSIGNATIONS — dont le role `propose` et
+                   // sa date d'expiration : sans elles, aucun test ne pouvait
+                   // parler d'une proposition a confirmer. `done` est la verite
+                   // serveur des menages faits, que `isMenageObsolete` consulte.
+                   menages = [], done = [],
                    coupureEcriture = false, echecReglage = null,
                    // ⚠ UN REFUS SERVEUR SUR N'IMPORTE QUELLE ECRITURE, applique
                    // APRES la suspension. `coupureEcriture` leve tout de suite,
@@ -93,9 +103,21 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   let src = m[1]
     .replace(/^\s*import .*$/gm, '')
     .replace(/^\s*initErrorHandler\(\)\s*$/gm, '')
+  // ⚠ LA PAGE CHARGE SON CALENDRIER TOUTE SEULE DEPUIS QU'ELLE EST LA PAGE.
+  // Avant, c'etait le clic sur l'onglet « Mes jours » qui appelait
+  // `chargerDisponibilites`, donc le test etait le seul a la declencher. Le
+  // demarrage la declenche desormais : un test qui en lance une SECONDE met deux
+  // lectures en vol, et la plus ancienne peut ecrire `mesJours` en dernier — ce
+  // qui fait au passage renoncer au rattrapage toute ecriture en cours
+  // (`basculerMonJour` reconnait un rechargement a l'identite de `mesJours`).
+  // On accroche donc la promesse du demarrage pour pouvoir l'ATTENDRE, au lieu
+  // de courir contre elle. Reecriture cote test, page inchangee.
+  const AVANT_BOOT = "chargerDisponibilites().catch("
+  assert.ok(src.includes(AVANT_BOOT), 'le chargement du calendrier au demarrage est introuvable')
+  src = src.replace(AVANT_BOOT, 'globalThis.__pret = chargerDisponibilites().catch(')
 
   const appels = []
-  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events }
+  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events, comments, menages, done }
   // ⚠ SUSPENSION DETERMINISTE, PLUTOT QU'UNE TEMPORISATION.
   // Tester « l'ecran a bascule AVANT la reponse » avec un `setTimeout` de 120 ms
   // et un `souffler(10)` marche sur un poste au repos et lache sur une machine
@@ -115,7 +137,18 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       seed () { currentToken = 'jeton-test'; dispoCharge = false },
       charger: () => loadData('jeton-test', { silencieux: true }),
       chargerDisponibilites, basculerMonJour, poserMonConge,
+      // ⚠ EXPOSEE POUR SON JETON. Elle ecrit mesJours en entier comme
+      // chargerDisponibilites, mais on ne l'atteint que par l'echec d'une
+      // bascule — impossible d'en tenir une en vol et d'en lancer une autre par
+      // ce chemin. Sans ce fil, la garde de peremption de CETTE fonction
+      // n'etait eprouvee par personne.
+      // (Pas de guillemets obliques ici : ce bloc est une chaine gabarit.)
+      relireSilencieusement,
       etat: () => mesJours,
+      // ⚠ EXPOSE POUR QUE « LA FICHE FERME LA FEUILLE » SOIT EPROUVABLE. Sans
+      // lui, le seul temoin serait un rattrapage qui repeint par-dessus — c'est
+      // a dire un defaut qu'on ne peut declencher qu'en changeant la page.
+      jourOuvert: () => jourOuvert,
       enVol: () => enVolParJour,
       // ⚠ EXPOSE POUR QUE LE FILTRE SOIT EPROUVABLE. Sans lui, un test qui
       // croyait decocher un bien ne decochait rien : il passait quoi qu'on
@@ -216,15 +249,32 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       // Les servir ici fait passer le test par le vrai chemin de chargement.
       bookings: etat.bookings, a_prendre: etat.aPrendre,
       label: 'Regina', property_ids: [], visibility_days: 30,
-      comments: [], events: etat.events, done: [], menages: [] }) }
+      comments: etat.comments, events: etat.events, done: etat.done, menages: etat.menages }) }
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
+  // ⚠ ON ATTEND LA LECTURE DU DEMARRAGE AVANT D'EN DEMANDER UNE AUTRE (voir
+  // AVANT_BOOT plus haut). L'attente porte sur un ETAT — la promesse existe et
+  // elle est tenue — jamais sur une duree : un `setTimeout` de N millisecondes
+  // serait vert au repos et rouge sur une machine chargee.
+  const chargerBrut = w.__p.chargerDisponibilites
+  w.__p.chargerDisponibilites = async () => { await attendreBoot(w); return chargerBrut() }
   // `libererEcritures` : rend la main aux ecritures suspendues, dans l'ordre.
   w.__p.libererEcritures = () => { while (enAttente.length) enAttente.shift()() }
   w.__p.suspendreLectures = () => { lecturesSuspendues = true }
   w.__p.libererLectures   = () => { lecturesSuspendues = false; while (lecturesEnAttente.length) lecturesEnAttente.shift()() }
   return { w, t: w.__p, etat }
+}
+
+// ⚠ UNE ATTENTE BORNEE, ET QUI ACCUSE. Sans borne, une page qui ne charge plus
+// son calendrier au demarrage ne fait pas ROUGIR le test : elle le fait tourner
+// indefiniment, et une suite qui pend ne dit rien a personne. Le compteur est
+// large — on attend un ETAT, pas une duree — mais il finit par rendre la main
+// avec la phrase qui nomme le defaut.
+const attendreBoot = async w => {
+  for (let i = 0; i < 20000 && !w.__pret; i++) await new Promise(r => setImmediate(r))
+  assert.ok(w.__pret, 'la page n\'a pas lancé la lecture du calendrier au démarrage')
+  await w.__pret
 }
 
 const caseDu = (w, j) => w.document.querySelector(`#dispo-months .dispo-case[data-jour="${j}"]`)
@@ -268,13 +318,74 @@ const ecritures = t => t.appels.filter(a => a.corps && a.corps.action &&
 
 // ─── Les mots, d'abord ─────────────────────────────────────────────────────
 
-test('l\'onglet dit « Mes jours » et la page « Mes jours de travail »', async () => {
-  // ⚠ Pas « Disponibilités » : c'est un mot d'informaticien. Et l'onglet reste
-  // court — la barre porte déjà « Planning » et « Avis », et « Mes jours de
-  // travail » y déborderait sur un téléphone.
+test('la PWA s\'ouvre SUR le calendrier — plus d\'onglets, plus de page planning', async () => {
+  // ⚠ CE TEST PARLAIT DE L'ONGLET « Mes jours » JUSQU'AU 18 SEPTEMBRE 2026.
+  // Le calendrier est la page : une barre à un onglet n'est pas un choix, c'est
+  // un titre déguisé. On garde la vérification des MOTS — « Mes jours de
+  // travail », jamais « Disponibilités », qui est un mot d'informaticien.
   const { w } = monter()
-  assert.strictEqual(w.document.getElementById('tab-dispo').textContent.trim(), 'Mes jours')
+  assert.strictEqual(w.document.getElementById('tabs'), null, 'plus de barre d\'onglets')
+  assert.strictEqual(w.document.querySelector('.menage-layout'), null,
+    'et plus de page planning')
+  assert.notStrictEqual(w.document.getElementById('dispo-vue').style.display, 'none',
+    'le calendrier est la vue par défaut, sans qu\'on ait rien à toucher')
   assert.match(w.document.getElementById('dispo-vue').textContent, /Mes jours de travail/)
+})
+
+test('le calendrier se charge TOUT SEUL au démarrage', async () => {
+  // ⚠ C'est `setTab('dispo')` qui appelait `chargerDisponibilites` : le clic sur
+  // l'onglet. Sans onglet et sans cet appel au démarrage, la PWA s'ouvrait sur
+  // « Chargement… » définitif — l'écran le plus vide qui soit.
+  const j = dans(2)
+  const { w } = monter({ exceptions: [{ id: 'e1', date: j, available: false,
+                                        source: 'prestataire' }] })
+  // ⚠ AUCUN `t.seed()`, AUCUN `t.chargerDisponibilites()` : c'est tout l'objet
+  // du test. Un test qui déclenche lui-même le chargement ne peut pas prouver
+  // que la page le déclenche.
+  await attendreBoot(w)
+  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, '',
+    'le calendrier est affiché sans qu\'elle ait rien touché')
+  assert.ok(caseDu(w, j) && caseDu(w, j).classList.contains('off'),
+    'et il porte déjà ses absences : les données sont vraiment arrivées')
+})
+
+test('le sélecteur de bien et le fil d\'actualités sont AU-DESSUS du calendrier', async () => {
+  // ⚠ DEMANDE EXPLICITE DE THIERRY à la suppression du planning : le sélecteur
+  // vivait dans la barre latérale de la page qui disparaît, il reste.
+  // ⚠ ET HORS DE `#dispo-contenu` : ce conteneur est masqué tant que la sonde
+  // des disponibilités n'a pas répondu. Les y laisser faisait disparaître
+  // l'annonce d'un nouveau ménage parce qu'un AUTRE endpoint était tombé.
+  const { w } = monter()
+  const vue = w.document.getElementById('dispo-vue')
+  const contenu = w.document.getElementById('dispo-contenu')
+  for (const id of ['filter-list', 'news-panel']) {
+    const el = w.document.getElementById(id)
+    assert.ok(el, `#${id} est sur la page`)
+    assert.ok(vue.contains(el), `#${id} est dans la vue calendrier`)
+    assert.ok(!contenu.contains(el),
+      `#${id} ne dépend pas de la sonde des disponibilités`)
+    assert.ok(el.compareDocumentPosition(contenu) & w.Node.DOCUMENT_POSITION_FOLLOWING,
+      `#${id} est AU-DESSUS du calendrier`)
+  }
+})
+
+test('depuis les avis, un bouton RAMENE au calendrier', async () => {
+  // ⚠ LA BARRE D'ONGLETS ÉTAIT LE SEUL RETOUR. Sans elle, la vue Avis devenait
+  // un cul-de-sac dont on ne sortait qu'en rechargeant la PWA — et le bouton
+  // système d'Android ne compte pas : cette vue ne change pas l'URL, il
+  // quitterait l'application.
+  const { w } = monter()
+  // Les écouteurs sont posés dans `init`, après le chargement des ménages.
+  await attendreBoot(w)
+  const retour = w.document.getElementById('avis-retour')
+  assert.ok(retour, 'le bouton de retour existe')
+  w.document.getElementById('avis-vue').style.display = ''
+  w.document.getElementById('dispo-vue').style.display = 'none'
+  retour.dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.strictEqual(w.document.getElementById('dispo-vue').style.display, '',
+    'le calendrier revient')
+  assert.strictEqual(w.document.getElementById('avis-vue').style.display, 'none',
+    'et les avis se referment')
 })
 
 test('elle est tutoyée à la première personne, jamais désignée à la troisième', async () => {
@@ -1516,23 +1627,100 @@ test('sans le droit d\'écriture, elle consulte mais n\'écrit pas', async () =>
   assert.strictEqual(ecritures(t2).length, 0)
 })
 
-test('une PANNE ne s\'affiche jamais comme « aucune absence »', async () => {
+test('une PANNE ne s\'affiche jamais comme « aucune absence » — et n\'emporte pas ses ménages', async () => {
   // ⚠ La différence change ce qu'elle en conclut : « rien à déclarer » et « je
   // n'ai pas pu lire » ne se ressemblent pas.
-  const { w, t } = monter({ erreur: { status: 503 } })
+  // ⚠ CE TEST CACHAIT LE CALENDRIER JUSQU'AU 18 SEPTEMBRE 2026, et il avait
+  // raison tant que la page planning existait. `#dispo-months` et
+  // `#carte-agenda` sont désormais les SEULS endroits où ses ménages
+  // s'affichent : masquer `#dispo-contenu` sur un 503 de `action=disponibilites`
+  // lui retirait tous ses ménages, alors qu'ils viennent de `loadData`, qui a
+  // répondu. Une panne sur ses ABSENCES n'emporte pas son travail du jour.
+  const j = dans(2)
+  const { w, t } = monter({ erreur: { status: 503 },
+                            bookings: [{ id: 'b1', propId: 'p1', propName: 'Colomiers',
+                                         departure: j, arrival: dans(0) }] })
   t.seed()
   await t.chargerDisponibilites()
-  assert.notStrictEqual(w.document.getElementById('dispo-etat').style.display, 'none')
-  assert.match(w.document.getElementById('dispo-etat').textContent, /n'ont pas pu être lus/)
-  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, 'none')
+
+  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, '',
+    'le calendrier reste, avec ses ménages')
+  assert.ok(caseDu(w, j), 'et le mois est bien peint')
+  assert.match(w.document.getElementById('dispo-message').textContent,
+    /n'ont pas pu être lues/, 'la panne est DITE')
+  const cases = [...w.document.querySelectorAll('#dispo-months .dispo-case[data-jour]')]
+  assert.ok(!cases.some(c => c.classList.contains('off')),
+    'et aucun jour ne se donne pour une absence : on ne SAIT pas')
 })
 
-test('droit retiré : l\'écran le dit, il ne montre pas un calendrier vide', async () => {
+test('une panne ne se déclare qu\'une fois — un rafraîchissement raté n\'efface pas ce qui a été lu', async () => {
+  // ⚠ LA CONTREPARTIE. Repeindre un calendrier VIDE sur un accroc de réseau
+  // ferait disparaître des absences bien enregistrées — un mensonge de plus,
+  // dans l'autre sens. Une lecture qui échoue garde ce qu'une lecture réussie
+  // avait posé, et dit seulement que ça peut dater.
+  const j = dans(2)
+  const { w, t } = monter({ exceptions: [{ id: 'e1', date: j, available: false,
+                                           source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(caseDu(w, j).classList.contains('off'), 'l\'absence est là')
+
+  w.fetch = async () => { throw new TypeError('Failed to fetch') }
+  await t.chargerDisponibilites()
+  assert.ok(caseDu(w, j).classList.contains('off'),
+    'et elle SURVIT au rafraîchissement raté')
+  assert.match(message(w), /peut dater/, 'mais l\'écran prévient que ça peut dater')
+})
+
+test('sans droit sur ses absences, elle GARDE son calendrier et ses ménages', async () => {
+  // ⚠ CE TEST DISAIT L'INVERSE JUSQU'AU 18 SEPTEMBRE 2026, et il avait raison
+  // tant que « Mes jours » etait un onglet : on remplaçait l'onglet par un
+  // message, et la prestataire gardait la page planning. Le calendrier EST la
+  // page depuis la suppression du planning — le même message la laisserait
+  // devant une PWA entièrement vide. Or c'est Régina, `self_availability` à
+  // 'none', ménages attribués d'office : celle qui a le PLUS de ménages à lire.
+  // Ce qui disparaît est le geste, pas l'écran.
+  const j = dans(2)
+  const { w, t } = monter({ autorise: false,
+                            bookings: [{ id: 'b1', propId: 'p1', propName: 'Colomiers',
+                                         departure: j, arrival: dans(0) }] })
+  t.seed()
+  await t.chargerDisponibilites()
+
+  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, '',
+    'le calendrier reste affiché')
+  assert.ok(caseDu(w, j), 'et il porte bien ses jours')
+  assert.match(w.document.getElementById('dispo-message').textContent,
+    /gérées par votre employeur/, 'la raison est dite, à sa place')
+})
+
+test('sans droit, AUCUN jour n\'est barré — le serveur se tait, il ne dit pas « absente »', async () => {
+  // ⚠ VIDE N'EST PAS « TOUT BARRÉ ». Le serveur refuse de répondre sur ses
+  // absences ; il ne dit pas qu'elle ne travaille pas. Un mois entièrement rayé
+  // lui apprendrait quelque chose de faux sur son propre planning.
   const { w, t } = monter({ autorise: false })
   t.seed()
   await t.chargerDisponibilites()
-  assert.match(w.document.getElementById('dispo-etat').textContent, /gérées par votre employeur/)
-  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, 'none')
+  const cases = [...w.document.querySelectorAll('#dispo-months .dispo-case[data-jour]')]
+  assert.ok(cases.length > 20, 'le mois est bien peint')
+  assert.ok(!cases.some(c => c.classList.contains('off')),
+    'aucune case ne se donne pour un jour d\'absence')
+})
+
+test('sans droit, aucun geste d\'absence n\'est proposé — ni engrenage, ni bascule', async () => {
+  // ⚠ LA CONTREPARTIE DE L'ÉCRAN CONSERVÉ. Montrer le calendrier sans fermer les
+  // gestes lui promettrait des actions que le serveur refuse en 403 — c'est le
+  // défaut d'origine, pris à l'envers.
+  const j = dans(2)
+  const { w, t } = monter({ autorise: false })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.strictEqual(w.document.getElementById('dispo-reglages').style.display, 'none',
+    'les réglages restent fermés')
+  assert.ok(!engrenage(w), 'et rien ne les ouvre : pas d\'engrenage')
+  taperJour(w, j)
+  assert.strictEqual(segments(w).length, 0,
+    'la feuille du jour ne propose aucune bascule de disponibilité')
 })
 
 test('une règle illisible ne peint pas le calendrier en vert', async () => {
@@ -1872,10 +2060,13 @@ test('un repeint qui lève ne condamne pas les quatre autres écrivains', async 
     'l\'alternance n\'est pas condamnée pour le reste de la session')
 })
 
-test('droit retiré en cours de route : l\'écran le DIT, il ne reste pas cliquable', async () => {
+test('droit retiré en cours de route : l\'écran le DIT, et les cases se figent', async () => {
   // ⚠ Le rattrapage silencieux ne rendait rien quand `autorise` passait à faux :
   // cases actives sous un « Non autorisé » seul, et chaque tape suivante
   // repartait vers le même 403.
+  // ⚠ CE QUI A CHANGÉ LE 18 SEPTEMBRE : l'écran ne DISPARAÎT plus, il se fige.
+  // Le calendrier est la page ; le faire disparaître au milieu d'une session
+  // laisserait la PWA vide. Ce qu'on doit fermer, ce sont les GESTES.
   const { w, t, etat } = monter({ regles: [regle('r1', 'semaine', [1])],
                                   echecReglage: { status: 403, message: 'Non autorisé' } })
   t.seed()
@@ -1884,10 +2075,13 @@ test('droit retiré en cours de route : l\'écran le DIT, il ne reste pas cliqua
   taper(w, 2, true)
   await souffler(140)
 
-  assert.match(w.document.getElementById('dispo-etat').textContent,
+  assert.match(w.document.getElementById('dispo-message').textContent,
     /gérées par votre employeur/, 'l\'écran dit ce qui se passe')
-  assert.strictEqual(w.document.getElementById('dispo-contenu').style.display, 'none',
-    'et les cases ne sont plus là pour être retapées')
+  const avant = ecritures(t).length
+  taper(w, 3, true)
+  await souffler(80)
+  assert.strictEqual(ecritures(t).length, avant,
+    'et les cases ne repartent plus vers le même 403')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2262,7 +2456,7 @@ test('la liste des 30 jours n\'a plus de titre qui se paraphrase', async () => {
   assert.ok(carte.querySelectorAll('.agenda-jour').length > 0, 'mais avec son contenu')
 })
 
-test('l\'onglet montre bien le calendrier — le foyer des réglages ne l\'avale pas', async () => {
+test('la page montre bien le calendrier — le foyer des réglages ne l\'avale pas', async () => {
   // ⚠ DÉFAUT CRITIQUE ATTRAPÉ EN REVIEW, ET QU'AUCUN TEST NE VOYAIT. Le
   // conteneur `display:none` des réglages englobait aussi le calendrier ET la
   // liste des 30 jours : un vrai navigateur n'aurait affiché qu'un onglet vide,
@@ -2429,4 +2623,262 @@ test('la phrase d\'accueil ne renvoie plus vers le vide', async () => {
   const aide = w.document.getElementById('dispo-message').textContent
   assert.ok(!/ci-dessous/.test(aide))
   assert.match(aide, /Mes jours/, 'elle nomme la porte')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE CHANTIER BLOQUANT : SES MÉNAGES S'OUVRENT DEPUIS LA FEUILLE DU JOUR
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('un de ses ménages s\'ouvre depuis la feuille, et porte « Marquer fait »', async () => {
+  // ⚠ SANS CE CHEMIN, SUPPRIMER LA PAGE PLANNING RETIRAIT LE SEUL BOUTON
+  // « Marquer fait ». `openModal` n'avait que deux entrées — la grille semaine
+  // et la vue jour — toutes deux dans la page qui disparaît. Le lot B rendait
+  // ses ménages en `<div>` inertes, et la liste des 30 jours les rend
+  // délibérément non cliquables.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  taperJour(w, j)
+  const ligne = w.document.querySelector('#modal-body [data-mien]')
+  assert.ok(ligne, 'la ligne de son ménage est touchable')
+  assert.strictEqual(ligne.tagName, 'BUTTON', 'et c\'est un vrai bouton')
+
+  ligne.dispatchEvent(new w.Event('click', { bubbles: true }))
+  const corps = w.document.getElementById('modal-body').textContent
+  assert.match(corps, /Voyageur/, 'la fiche du planning, pas une copie')
+  assert.match(corps, /Adultes/)
+  assert.match(corps, /Arrivée/)
+  assert.strictEqual(w.document.getElementById('modal-done').style.display, '',
+    'et le bouton « Marquer fait » est offert')
+})
+
+test('les quatre marques des cartes survivent à la page qui les portait', async () => {
+  // ⚠ ⏳ en attente d'envoi, 📝 consigne de l'hôte, ✓ fait, ⏭ réservation qui a
+  // bougé : elles vivaient sur les cartes du planning et NULLE PART ailleurs.
+  // Sans elles, elle ne distingue plus « enregistré » de « dans la file », et ne
+  // sait plus qu'il y a une consigne à lire.
+  const j = dans(2)
+  const { w, t } = monter({
+    bookings: [menage(j)],
+    comments: [{ booking_id: 'b-' + j, departure_date: j, comment: 'Laisser les clés au voisin' }]
+  })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  taperJour(w, j)
+  const ligne = w.document.querySelector('#modal-body [data-mien]')
+  assert.match(ligne.innerHTML, /📝/, 'la consigne se signale')
+
+  // Et le style qui les porte existe bien — un test de structure ne le verrait
+  // pas (leçon du chantier : pour le visuel, on lit la feuille de style).
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  assert.match(PAGE, /\.jmarque\s*\{/)
+  assert.match(PAGE, /\.jmarque\.fait\s*\{[^}]*var\(--green\)/)
+  assert.match(PAGE, /\.jligne\s*\{[^}]*cursor: pointer/,
+    'la ligne se donne pour cliquable')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUE LA PAGE PLANNING PORTAIT SEULE, ET QUI DEVAIT SUIVRE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('une proposition À CONFIRMER le dit dans la feuille du jour, avec son délai', async () => {
+  // ⚠ PERTE SILENCIEUSE TROUVÉE À LA RELECTURE DU CHANTIER. `badgeOffre` vivait
+  // sur les cartes du planning et NULLE PART ailleurs : un ménage qu'elle doit
+  // confirmer avant un délai ne se distinguait plus d'un ménage acquis. La fiche
+  // le disait encore — mais il fallait déjà savoir qu'il y avait quelque chose
+  // à y lire, et le délai, lui, court.
+  const j = dans(2)
+  const { w, t } = monter({
+    bookings: [{ id: 'b1', propId: 'p1', propName: 'Colomiers', departure: j, arrival: dans(0) }],
+    menages: [{ property_id: 'p1', booking_id: 'b1', departure_date: j, role: 'propose',
+                expire_le: new Date(Date.now() + 2 * 86400000).toISOString() }]
+  })
+  t.seed()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /À CONFIRMER/, 'la ligne annonce qu\'il faut répondre')
+  assert.match(feuille(w), /restants|restantes/, 'et combien de temps il reste')
+})
+
+test('la marque ⏭ ne dépend PAS du filtre de biens — une règle ne lit pas un réglage d\'affichage', async () => {
+  // ⚠ `isMenageObsolete` cherche un ménage PLUS TARD et DÉJÀ FAIT sur le même
+  // bien. La feuille du jour lui passait `getMenages()`, qui honore
+  // `activeProps` : décocher une case d'AFFICHAGE effaçait la marque « la
+  // réservation a changé ». La feuille est sans filtre partout, ses règles
+  // aussi.
+  const jTot = dans(-3), jTard = dans(-1)
+  const { w, t } = monter({
+    bookings: [
+      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-6) },
+      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(-4) }
+    ],
+    done: [{ booking_id: 'b2', departure_date: jTard }]
+  })
+  t.seed()
+  await t.chargerDisponibilites()
+  t.filtrer([])                     // elle masque TOUS ses biens
+  taperJour(w, jTot)
+  assert.match(feuille(w), /⏭/,
+    'la réservation qui a bougé reste signalée, filtre ou pas')
+})
+
+test('deux lectures en vol : la plus ANCIENNE n\'écrase pas la plus fraîche', async () => {
+  // ⚠ `chargerDisponibilites` remplace `mesJours` EN ENTIER. Depuis que la page
+  // se charge elle-même au démarrage, deux lectures peuvent se croiser — et
+  // c'est la plus LENTE qui écrivait en dernier. Pire : `basculerMonJour`
+  // reconnaît un rechargement à l'IDENTITÉ de `mesJours` et renonce alors à
+  // restituer, si bien qu'un refus serveur laissait l'absence affichée.
+  // ⚠ LA RÉPONSE RETENUE EST FIGÉE, pas celle du double : le double lit son état
+  // au moment du `json()`, donc il aurait rendu la donnée FRAÎCHE et le test
+  // n'aurait rien prouvé.
+  const j = dans(2)
+  const { w, t, etat } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+
+  const vrai = w.fetch
+  const perime = { autorise: true, modifiable: true, prenom: 'Régina',
+                   regles: [], exceptions: [], conges: [] }
+  let relacher = null
+  let premiere = true
+  w.fetch = async (url, opts) => {
+    const corps = opts && opts.body ? JSON.parse(opts.body) : null
+    if (!corps && premiere && /action=disponibilites/.test(String(url))) {
+      premiere = false
+      await new Promise(r => { relacher = r })
+      return { ok: true, status: 200, json: async () => perime }
+    }
+    return vrai(url, opts)
+  }
+
+  const ancienne = t.chargerDisponibilites()     // part la première, retenue
+  await souffler(20)
+  etat.exceptions = [{ id: 'e1', date: j, available: false, source: 'prestataire' }]
+  await t.chargerDisponibilites()                // plus récente, arrive avant
+  assert.ok(caseDu(w, j).classList.contains('off'), 'la lecture fraîche est à l\'écran')
+
+  relacher()
+  await ancienne
+  await souffler(20)
+  assert.ok(caseDu(w, j).classList.contains('off'),
+    'et la lecture PÉRIMÉE ne l\'a pas effacée')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUE LA REVIEW A TROUVÉ — un test par constat, sinon le correctif n'est
+// gardé par personne et la prochaine réécriture le défait en silence.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('la FICHE d\'un ménage obsolète le reste quand un bien est décoché', async () => {
+  // ⚠ CONSTAT DE REVIEW. La ligne de la feuille avait été convertie sur la liste
+  // non filtrée ; son SEUL consommateur, la fiche, ne l'avait pas été. Le même
+  // écran marquait le ménage ⏭ et proposait « ✓ Marquer fait ».
+  const jTot = dans(-3), jTard = dans(-1)
+  const { w, t } = monter({
+    bookings: [
+      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-6) },
+      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(-4) }
+    ],
+    done: [{ booking_id: 'b2', departure_date: jTard }]
+  })
+  t.seed()
+  await t.chargerDisponibilites()
+  t.filtrer([])                      // elle masque TOUS ses biens
+  taperJour(w, jTot)
+  const ligne = w.document.querySelector('#modal-body [data-mien]')
+  assert.ok(ligne, 'la ligne du ménage est bien là')
+  ligne.dispatchEvent(new w.Event('click', { bubbles: true }))
+
+  const btn = w.document.getElementById('modal-done')
+  assert.match(btn.textContent, /Obsolète/, 'la fiche dit que le ménage est dépassé')
+  assert.strictEqual(btn.disabled, true, 'et ne laisse PAS le marquer fait')
+})
+
+test('ouvrir la fiche d\'un ménage FERME la feuille du jour', async () => {
+  // ⚠ CONSTAT DE REVIEW (latent). `ouvrirPriseDeMenage`, `ouvrirReglages` et
+  // `closeModal` remettent tous `jourOuvert` à null ; ce chemin ne le faisait
+  // pas. Un rattrapage trouvant `feuilleOuverteSur(j)` vrai repeindrait la
+  // feuille du jour PAR-DESSUS la fiche ouverte.
+  const j = dans(2)
+  const { w, t } = monter({
+    bookings: [{ id: 'b1', propId: 'p1', propName: 'Colomiers', departure: j, arrival: dans(0) }]
+  })
+  t.seed()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  w.document.querySelector('#modal-body [data-mien]')
+    .dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.strictEqual(t.jourOuvert(), null,
+    'la feuille du jour ne se croit plus ouverte sous la fiche')
+})
+
+test('un échange de semaines RÉUSSI se dit en vert, jamais dans le bandeau d\'erreur', async () => {
+  // ⚠ CONSTAT DE REVIEW. `direReglages` retombe sur `'erreur'` par défaut, et
+  // depuis le lot C ces boutons ne vivent que dans la feuille : l'écriture
+  // réussissait et sa confirmation s'affichait comme un échec.
+  const lundiB = iso(new Date(new Date(lundiCourant + 'T12:00:00Z').getTime() + 7 * 86400000))
+  const { w, t } = monter({ regles: [
+    regle('rA', 'A', [1], 2, lundiCourant),
+    regle('rB', 'B', [6], 2, lundiB) ] })
+  t.seed()
+  await t.chargerDisponibilites()
+  w.document.getElementById('btn-reglages').dispatchEvent(new w.Event('click', { bubbles: true }))
+  w.document.getElementById('dispo-inverser').dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(200)
+  const err = w.document.getElementById('modal-error')
+  const ok = w.document.getElementById('modal-success')
+  assert.ok(ok.classList.contains('visible'), 'la réussite se dit en vert')
+  assert.match(ok.textContent, /échangées/)
+  assert.ok(!err.classList.contains('visible'), 'et le bandeau rouge reste fermé')
+})
+
+test('passer en « une semaine sur deux » se dit en vert, pas en rouge', async () => {
+  // ⚠ MÊME CONSTAT, l'autre branche : le mode d'emploi « Cochez les jours de la
+  // semaine B » s'affichait comme une erreur après une écriture réussie.
+  const { w, t } = monter({ regles: [regle('r1', 'semaine', [1, 2])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  w.document.getElementById('btn-reglages').dispatchEvent(new w.Event('click', { bubbles: true }))
+  w.document.getElementById('dispo-alterner').dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(200)
+  const err = w.document.getElementById('modal-error')
+  const ok = w.document.getElementById('modal-success')
+  assert.ok(ok.classList.contains('visible'), 'la réussite se dit en vert')
+  assert.ok(!err.classList.contains('visible'), 'et le bandeau rouge reste fermé')
+})
+
+test('une relecture silencieuse PÉRIMÉE n\'écrase pas un chargement plus frais', async () => {
+  // ⚠ LE PENDANT DU JETON, SUR L'AUTRE ECRIVAIN. Les deux remplacent `mesJours`
+  // en entier ; poser la garde sur un seul n'en garde que la moitié. Ici c'est
+  // la relecture qui part la première et atterrit la dernière.
+  const j = dans(2)
+  const { w, t, etat } = monter()
+  t.seed()
+  await t.chargerDisponibilites()
+
+  const vrai = w.fetch
+  const perime = { autorise: true, modifiable: true, prenom: 'Régina',
+                   regles: [], exceptions: [], conges: [] }
+  let relacher = null
+  let premiere = true
+  w.fetch = async (url, opts) => {
+    const corps = opts && opts.body ? JSON.parse(opts.body) : null
+    if (!corps && premiere && /action=disponibilites/.test(String(url))) {
+      premiere = false
+      await new Promise(r => { relacher = r })
+      return { ok: true, status: 200, json: async () => perime }
+    }
+    return vrai(url, opts)
+  }
+
+  const ancienne = t.relireSilencieusement()     // part la première, retenue
+  await souffler(20)
+  etat.exceptions = [{ id: 'e1', date: j, available: false, source: 'prestataire' }]
+  await t.chargerDisponibilites()                // plus récent, arrive avant
+  assert.ok(caseDu(w, j).classList.contains('off'), 'le chargement frais est à l\'écran')
+
+  relacher()
+  await ancienne
+  await souffler(20)
+  assert.ok(caseDu(w, j).classList.contains('off'),
+    'et la relecture PÉRIMÉE ne l\'a pas effacée')
 })

@@ -19,26 +19,6 @@
       --primary-bg: #FAECE7;
     }
 
-    /* Toggle 3 vues - cache par defaut (visible seulement sur mobile) */
-    .view-toggle { display: none; }
-
-    /* Vues Mois et Jour - cachees sur desktop */
-    .month-view, .day-view { display: none; }
-
-    /* Bouton flottant Filtres - cache sur desktop */
-    .fab-filters { display: none; }
-
-    /* Bottom sheet - cache sur desktop */
-    .bottom-sheet, .bottom-sheet-overlay { display: none; }
-
-    .menage-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
-
-    /* Onglets Planning / Avis. Masques tant que le serveur n'a pas dit si la
-       vue Avis est ouverte a cette prestataire (self_view_reviews). */
-    .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
-    .tabs button { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 7px 14px; cursor: pointer; font-size: 13px; color: var(--text2); }
-    .tabs button.active { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); font-weight: 600; }
-
     .avis-etat { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; line-height: 1.6; }
     .dispo-carte { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg);
                    padding: 16px; margin-bottom: 12px; }
@@ -253,12 +233,27 @@
     .jsect-t { font-size: 11px; font-weight: 700; letter-spacing: .5px;
                text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
     .jsect-vide { font-size: 12.5px; color: var(--text3); padding: 2px 0 4px; }
+    /* ⚠ 44 px DE HAUT. Depuis que le planning a disparu, cette ligne est le SEUL
+       chemin vers la fiche du menage — donc vers « Marquer fait ». `padding:
+       10px 12px` sur 13 px de texte donnait 40 px : sous la cible tactile, sur
+       le geste le plus frequent de l'ecran. */
     .jligne { display: flex; align-items: center; gap: 10px; width: 100%;
               background: var(--bg); border: 0.5px solid var(--border);
-              border-radius: var(--radius); padding: 10px 12px; text-align: left;
+              border-radius: var(--radius); padding: 10px 12px; min-height: 44px;
+              text-align: left; cursor: pointer;
               font-family: inherit; color: inherit; font-size: 13px; }
     .jligne + .jligne { margin-top: 6px; }
-    .jligne.offre { border: 1px dashed var(--primary); cursor: pointer; }
+    .jligne.offre { border: 1px dashed var(--primary); }
+    /* ⚠ `cursor: pointer` EST DANS LA REGLE DE BASE ci-dessus, pas sur la seule
+       `.offre` : depuis ce lot, les lignes de SES menages s'ouvrent aussi, et
+       annoncer « rien a faire ici » sur la ligne qui porte son unique geste
+       serait exactement l'inverse. */
+    .jmarque { flex-shrink: 0; font-size: 11px; color: var(--text2); margin-left: 6px; }
+    .jmarque.fait { color: var(--green); font-weight: 700; }
+    /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
+       c'est justement la qu'on va lire ce qui a change. */
+    .jligne.obsolete { opacity: .55; }
+    .jligne.obsolete .jligne-bien { text-decoration: line-through; }
     .jligne-bien { flex: 1; min-width: 0; font-weight: 600; }
     /* ⚠ LE CHOIX MONTRE LES DEUX FACES, ET LAQUELLE EST VRAIE. Deux boutons
        d'action (« me declarer absente ») obligeaient a savoir ou on en est pour
@@ -389,73 +384,40 @@
                      margin-top: 3px; }
     .badge-offre { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
                    border: 1px dashed currentColor; border-radius: 999px; padding: 0 5px; margin-top: 3px; }
-    .menage-card.offre { border: 1px dashed var(--primary); }
+    /* ⚠ 44 px DE HAUT, C'EST LA CIBLE TACTILE, pas une marge decorative. C'est
+       le SEUL chemin de retour vers le calendrier depuis que la barre d'onglets
+       n'existe plus : rate sur un telephone, il n'y a pas de second essai
+       ailleurs sur l'ecran. Meme grammaire que `.dispo-mini` (fond, bordure,
+       rayon) pour qu'il se lise comme un bouton et non comme un titre. */
+    .avis-retour { display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+                   padding: 0 14px; margin-bottom: 12px; font-size: 13px; font-family: inherit;
+                   border: 0.5px solid var(--border); border-radius: var(--radius);
+                   background: var(--bg); color: var(--text); cursor: pointer; }
+    .avis-retour:hover { background: var(--bg2); }
+    .avis-retour:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
     .avis-periode { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--text2); }
     .avis-periode select { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 5px 8px; font-size: 12px; color: var(--text); }
     .avis-sans-detail { color: var(--text2); font-style: italic; }
     .badge-prive { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--text2); }
 
-    .mini-cal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; position: sticky; top: 0; }
-    .mini-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .mini-cal-title { font-size: 13px; font-weight: 500; }
-    .mini-cal-nav { background: none; border: none; cursor: pointer; color: var(--text2); font-size: 14px; padding: 2px 6px; border-radius: var(--radius); }
-    .mini-cal-nav:hover { background: var(--bg2); }
-    .mini-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-    .mini-cal-day-label { font-size: 9px; color: var(--text3); text-align: center; padding: 2px 0; font-weight: 500; }
-    .mini-cal-day { font-size: 10px; text-align: center; padding: 3px 0; border-radius: 4px; cursor: pointer; color: var(--text2); position: relative; }
-    .mini-cal-day:hover { background: var(--bg2); }
-    .mini-cal-day.today { background: var(--primary); color: white; font-weight: 600; }
-    .mini-cal-day.has-menage { background: #FFF3CD; color: #856404; font-weight: 500; }
-    .mini-cal-day.has-menage.done { background: #D1FAE5; color: #065F46; }
-    .mini-cal-day.selected-week { background: var(--bg2); border: 0.5px solid var(--border2); }
-    .mini-cal-day.other-month { opacity: 0.3; }
-
-    .cal-tooltip { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--text); color: white; font-size: 10px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; z-index: 200; pointer-events: none; display: none; line-height: 1.5; text-align: left; }
-    .mini-cal-day:hover .cal-tooltip { display: block; }
-
     .filter-title { font-size: 10px; color: var(--text2); font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .filter-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
-    .filter-item input { cursor: pointer; accent-color: var(--primary); }
-    .filter-label { font-size: 12px; color: var(--text); }
-    .filter-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
-    .planning-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .week-nav { display: flex; align-items: center; gap: 8px; }
-    .week-nav button { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 6px 10px; cursor: pointer; font-size: 13px; color: var(--text); }
-    .week-nav button:hover { background: var(--bg2); }
-    .week-label { font-size: 14px; font-weight: 500; min-width: 200px; text-align: center; }
-
-    .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
-    .day-col { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; min-height: 200px; }
-    .day-col.today { border-color: var(--primary); }
-    .day-header { padding: 8px 10px; border-bottom: 0.5px solid var(--border); background: var(--bg2); }
-    .day-name { font-size: 10px; color: var(--text2); font-weight: 500; text-transform: uppercase; }
-    .day-number { font-size: 18px; font-weight: 600; color: var(--text); line-height: 1.2; }
-    .day-col.today .day-number { color: var(--primary); }
-    .day-body { padding: 6px; display: flex; flex-direction: column; gap: 4px; }
-
-    .menage-card { border-radius: var(--radius); padding: 6px 8px; font-size: 11px; cursor: pointer; transition: opacity 0.15s; position: relative; }
-    .menage-card:hover { opacity: 0.85; }
-    .menage-card.done { opacity: 0.6; }
-    .menage-card.done .menage-card-title { text-decoration: line-through; }
-    .menage-card.obsolete { opacity: 0.4; background: #E5E7EB !important; color: #6B7280 !important; cursor: not-allowed; }
-    .menage-card.obsolete .menage-card-title { text-decoration: line-through; }
-    .menage-card.obsolete::after { content: "⏭"; position: absolute; top: 4px; right: 4px; font-size: 10px; }
-    .menage-card-prop { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; opacity: 0.8; margin-bottom: 2px; }
-    .menage-card-title { font-weight: 500; line-height: 1.3; }
-    .menage-card-time { font-size: 9px; opacity: 0.7; margin-top: 2px; }
-    .menage-card-check { position: absolute; top: 4px; right: 4px; font-size: 10px; }
-    .menage-card-comment { position: absolute; bottom: 4px; right: 4px; font-size: 9px; }
-    .menage-card-pending { position: absolute; top: 4px; left: 4px; font-size: 9px; opacity: 0.8; }
-
-    .prop-color-0 { background: #DBEAFE; color: #1E40AF; }
-    .prop-color-1 { background: #D1FAE5; color: #065F46; }
-    .prop-color-2 { background: #FEF3C7; color: #92400E; }
-    .prop-color-3 { background: #FCE7F3; color: #9D174D; }
-    .prop-color-0.done { background: #EFF6FF; }
-    .prop-color-1.done { background: #ECFDF5; }
-
-    .day-empty { font-size: 11px; color: var(--text3); text-align: center; padding: 20px 8px; }
+    /* ⚠ 44 px DE HAUT, PARCE QUE CE N'EST PLUS UNE BARRE LATERALE DE BUREAU.
+       Ces lignes vivaient dans la colonne gauche du planning, masquee sur
+       telephone au profit d'une feuille a gros boutons ; la feuille est partie
+       avec la page, et le meme `padding: 4px 0` donne desormais une cible de
+       20 px sous le pouce — sur le SEUL filtre qui reste. Meme cible que
+       `.dispo-pastille` et que les cases du calendrier.
+       ⚠ ET AUCUNE PASTILLE DE COULEUR. Chaque bien en portait une, heritee du
+       planning ou la meme couleur teintait ses cartes (`.prop-color-*`). Ces
+       cartes ont disparu : la pastille ne renvoyait plus a rien. Decision de
+       Thierry au meme chantier — la couleur par logement ne revient pas. */
+    .filter-item { display: flex; align-items: center; gap: 10px; min-height: 44px;
+                   padding: 2px 0; cursor: pointer;
+                   border-bottom: 0.5px solid var(--border); }
+    .filter-item:last-child { border-bottom: none; }
+    .filter-item input { cursor: pointer; accent-color: var(--primary);
+                         width: 18px; height: 18px; flex-shrink: 0; }
+    .filter-label { font-size: 13px; color: var(--text); }
 
     .week-stats { display: flex; gap: 12px; margin-bottom: 16px; }
     .week-stat { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; }
@@ -501,42 +463,11 @@
     .news-content-title { font-size: 12px; font-weight: 500; }
     .news-content-sub { font-size: 11px; color: var(--text2); margin-top: 2px; line-height: 1.4; }
     .news-time { font-size: 10px; color: var(--text2); flex-shrink: 0; white-space: nowrap; }
-    .news-empty { font-size: 12px; color: var(--text2); text-align: center; padding: 16px; }
 
     /* ============================================ */
     /* RESPONSIVE MOBILE - breakpoint 900px         */
     /* ============================================ */
     @media (max-width: 900px) {
-      /* Layout principal en colonne unique */
-      .menage-layout { grid-template-columns: 1fr; gap: 12px; }
-
-      /* Sidebar (mini-cal + filtres) masquee sur mobile */
-      .menage-layout > div:first-child { display: none; }
-
-      /* Header planning : stack vertical */
-      .planning-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 10px;
-        margin-bottom: 12px;
-      }
-      .week-nav {
-        justify-content: space-between;
-        width: 100%;
-      }
-      .week-nav button {
-        font-size: 12px;
-        padding: 8px 10px;
-        flex-shrink: 0;
-      }
-      .week-label {
-        flex: 1;
-        min-width: 0;
-        font-size: 13px;
-      }
-      .planning-header > .btn {
-        width: 100%;
-      }
 
       /* Stats semaine : passe en wrap */
       .week-stats {
@@ -550,88 +481,6 @@
         padding: 8px 10px;
       }
       .week-stat strong { font-size: 16px; }
-
-      /* Grille semaine : 1 colonne, jours empiles */
-      .week-grid {
-        grid-template-columns: 1fr;
-        gap: 10px;
-      }
-
-      /* Cartes jour adaptees mobile */
-      .day-col {
-        min-height: auto;
-        border-radius: var(--radius-lg);
-      }
-      /* Jours vides masques en mobile vue Semaine */
-      .day-col.is-empty {
-        display: none;
-      }
-      .day-header {
-        padding: 10px 14px;
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-      }
-      .day-name {
-        font-size: 12px;
-      }
-      .day-number {
-        font-size: 16px;
-      }
-      .day-body {
-        padding: 8px;
-        gap: 6px;
-      }
-
-      /* Cartes menage : taille tactile minimale */
-      .menage-card {
-        padding: 10px 12px;
-        font-size: 13px;
-        min-height: 44px;
-      }
-      .menage-card-prop {
-        font-size: 10px;
-      }
-      .menage-card-time {
-        font-size: 10px;
-      }
-
-      /* Toggle 3 vues (mobile uniquement) */
-      .view-toggle {
-        display: flex;
-        background: var(--bg);
-        border: 0.5px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 3px;
-        margin-bottom: 12px;
-        gap: 0;
-      }
-      .view-toggle button {
-        flex: 1;
-        padding: 8px 4px;
-        border: none;
-        background: transparent;
-        font-size: 12px;
-        color: var(--text2);
-        font-family: inherit;
-        cursor: pointer;
-        border-radius: calc(var(--radius-lg) - 4px);
-        font-weight: 500;
-        transition: all 0.15s;
-      }
-      .view-toggle button.active,
-      .view-toggle button.active:hover,
-      .view-toggle button.active:focus,
-      .view-toggle button.active:active {
-        background: var(--primary);
-        color: white !important;
-        outline: none;
-      }
-      .view-toggle button:focus { outline: none; }
-      .view-toggle button:not(.active):hover {
-        background: var(--bg2);
-        color: var(--text);
-      }
 
       /* News panel : compact mobile */
       .news-panel {
@@ -667,163 +516,6 @@
       .page-sub {
         font-size: 11px;
       }
-
-      /* ======= VUE MOIS ======= */
-      .month-view {
-        background: var(--bg);
-        border: 0.5px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 12px;
-      }
-      .month-grid-header {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 4px;
-        margin-bottom: 6px;
-      }
-      .month-grid-header > div {
-        font-size: 11px;
-        color: var(--text2);
-        text-align: center;
-        padding: 4px 0;
-        font-weight: 500;
-      }
-      .month-grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 4px;
-      }
-      .month-cell {
-        aspect-ratio: 1;
-        border-radius: 8px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        position: relative;
-        font-size: 11px;
-        color: var(--text2);
-        background: transparent;
-        border: none;
-        font-family: inherit;
-        padding: 0;
-      }
-      .month-cell.other-month { opacity: 0.25; }
-      .month-cell.has-todo { background: #FFF3CD; color: #856404; }
-      .month-cell.all-done { background: #D1FAE5; color: #065F46; }
-      .month-cell.today { background: var(--primary); color: white; }
-      .month-cell.today.has-todo,
-      .month-cell.today.all-done { background: var(--primary); color: white; }
-      .month-cell-num { font-size: 11px; line-height: 1.1; opacity: 0.75; }
-      .month-cell-count { font-size: 16px; font-weight: 600; line-height: 1.1; }
-      .month-legend {
-        display: flex;
-        justify-content: center;
-        gap: 14px;
-        margin-top: 12px;
-        font-size: 11px;
-        color: var(--text2);
-      }
-      .month-legend span { display: flex; align-items: center; gap: 4px; }
-      .legend-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-      .legend-todo { background: #FFF3CD; }
-      .legend-done { background: #D1FAE5; }
-      .legend-today { background: var(--primary); }
-
-      /* ======= VUE JOUR ======= */
-      .day-view-list { display: flex; flex-direction: column; gap: 12px; }
-      .day-card {
-        background: var(--bg);
-        border: 0.5px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 14px;
-      }
-      .day-card.is-done { background: #F0FDF4; border-color: #BBF7D0; }
-      .day-card-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
-      .day-card-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
-      .day-card.is-done .day-card-dot {
-        width: 24px; height: 24px;
-        background: #5DCAA5 !important;
-        margin-top: 0;
-        display: flex; align-items: center; justify-content: center;
-        color: white; font-size: 13px;
-      }
-      .day-card-info { flex: 1; min-width: 0; }
-      .day-card-title { font-size: 15px; font-weight: 500; line-height: 1.3; }
-      .day-card.is-done .day-card-title { text-decoration: line-through; color: var(--text2); }
-      .day-card-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
-      .day-card-meta { font-size: 11px; color: var(--text2); margin-top: 6px; }
-      .day-card.is-done .day-card-meta { color: #0F6E56; }
-      .day-card-action {
-        width: 100%; padding: 12px; border-radius: 10px;
-        border: none; background: var(--primary); color: white;
-        font-weight: 500; font-size: 14px;
-        cursor: pointer; font-family: inherit;
-      }
-      .day-card-undo {
-        border: none; background: transparent; color: var(--text2);
-        font-size: 11px; padding: 4px 8px;
-        cursor: pointer; font-family: inherit;
-      }
-      .day-view-empty { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; }
-      .day-view-nav {
-        display: flex; align-items: center; justify-content: space-between;
-        background: var(--bg); border: 0.5px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 8px 12px; margin-bottom: 12px;
-      }
-      .day-view-nav button {
-        background: var(--bg); border: 0.5px solid var(--border);
-        border-radius: var(--radius);
-        padding: 6px 10px; cursor: pointer;
-        font-size: 14px; font-family: inherit;
-      }
-      .day-view-nav-label { text-align: center; flex: 1; }
-      .day-view-nav-day { font-size: 11px; color: var(--text2); text-transform: uppercase; }
-      .day-view-nav-date { font-size: 14px; font-weight: 500; }
-
-      /* ======= BOUTON FLOTTANT FILTRES ======= */
-      .fab-filters {
-        display: flex;
-        position: fixed; bottom: 20px; right: 16px;
-        width: 52px; height: 52px;
-        border-radius: 50%;
-        background: var(--primary); color: white;
-        border: none; font-size: 22px; cursor: pointer;
-        box-shadow: 0 4px 12px rgba(201, 123, 92, 0.4);
-        z-index: 50;
-        align-items: center; justify-content: center;
-        font-family: inherit;
-      }
-
-      /* ======= BOTTOM SHEET ======= */
-      .bottom-sheet-overlay {
-        display: none;
-        position: fixed; inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        z-index: 99;
-      }
-      .bottom-sheet-overlay.visible { display: block; }
-      .bottom-sheet {
-        display: none;
-        position: fixed; bottom: 0; left: 0; right: 0;
-        background: var(--bg);
-        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-        padding: 16px;
-        z-index: 100;
-        max-height: 70vh; overflow-y: auto;
-      }
-      .bottom-sheet.visible { display: flex; flex-direction: column; gap: 12px; }
-      .bottom-sheet-handle {
-        width: 36px; height: 4px;
-        background: var(--border2);
-        border-radius: 2px;
-        margin: 0 auto 8px;
-      }
-      .bottom-sheet-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
-      .bottom-sheet-content { display: flex; flex-direction: column; gap: 4px; }
-      .bottom-sheet-close { margin-top: 8px; width: 100%; }
     }
   </style>
 </head>
@@ -853,25 +545,22 @@
            disparaissait quand la vue Avis masquait le planning. -->
       <div class="sync-banner" id="sync-banner" style="display:none"></div>
 
-      <!-- Onglets. `display:none` et non l'attribut `hidden` : le CSS de la page
-           pose des `display` sur des classes voisines, et `hidden` y avait deja
-           ete rendu inoperant une fois. -->
-      <div class="tabs" id="tabs" style="display:none">
-        <button data-tab="planning" class="active">Planning</button>
-        <!-- ⚠ MASQUE PAR DEFAUT, comme « Mes jours ». Sans cela, la sonde des
-             absences affichait la barre et l'onglet Avis apparaissait avec elle —
-             y compris pour une prestataire dont `self_view_reviews` est a false,
-             c'est-a-dire l'inverse exact de ce que ce droit garantit. Chaque
-             sonde ne devoile QUE son propre onglet. -->
-        <button data-tab="avis" id="tab-avis" style="display:none">Avis</button>
-        <!-- ⚠ N'APPARAIT QUE SI LE DROIT EST LA (`self_availability`). A 'none',
-             ses absences sont gerees par son hote : un onglet qui repondrait
-             403 a chaque geste vaudrait moins que pas d'onglet. -->
-        <button data-tab="dispo" id="tab-dispo" style="display:none">Mes jours</button>
-      </div>
+      <!-- ⚠ PLUS D'ONGLETS — LE CALENDRIER EST LA PAGE (18 septembre 2026).
+           La barre portait « Planning », « Avis » et « Mes jours ». La page
+           planning a disparu ; « Mes jours » etait son seul voisin, donc une
+           barre a un onglet, c'est-a-dire un titre qui se fait passer pour un
+           choix. Les avis se rejoignent par leur porte dans l'en-tete
+           (`#entete-ratio`, « Mes avis › »), qui existe depuis le lot E et dit
+           deja le chiffre : deux chemins vers le meme ecran auraient diverge. -->
 
-      <!-- Vue Avis (masquee par defaut, y compris quand l'onglet n'existe pas) -->
+      <!-- Vue Avis (masquee par defaut : on y entre par la porte de l'en-tete) -->
       <section id="avis-vue" style="display:none">
+        <!-- ⚠ LE RETOUR EST UN ELEMENT DE LA PAGE, pas le bouton du telephone.
+             La barre d'onglets ramenait au planning ; sans elle, la vue Avis
+             etait un cul-de-sac dont on ne sortait qu'en rechargeant la PWA. Le
+             bouton systeme d'Android ne compte pas : cette vue ne change pas
+             l'URL, il quitterait l'application. -->
+        <button type="button" class="avis-retour" id="avis-retour">‹ Mon calendrier</button>
         <!-- Consultation libre : ce selecteur ne touche QUE le dossier. Le ratio
              de l'en-tete garde la periode reglee par l'hote — c'est l'objectif,
              il ne se deplace pas depuis ici. -->
@@ -889,15 +578,48 @@
         <div id="avis-liste"></div>
       </section>
 
-      <!-- Mes jours de travail (masquee par defaut, comme la vue Avis) -->
-      <!-- ⚠ LE TITRE EST CELUI QUE LA PRESTATAIRE COMPRENDRA, pas celui du
-           modele de donnees. « Disponibilites » est un mot d'informaticien ;
-           « Mes jours de travail » dit ce que la page fait. L'onglet, lui, reste
-           court — la barre porte deja « Planning » et « Avis ». -->
-      <section id="dispo-vue" style="display:none">
+      <!-- ⚠ CETTE SECTION EST LA PAGE (18 septembre 2026). Elle ne s'ouvre plus
+           sur un onglet : c'est ce que la PWA affiche au demarrage. Son id garde
+           le nom « dispo » parce que c'est l'endpoint qui la remplit et que le
+           renommer aurait touche une trentaine d'appels pour ne rien changer a
+           l'ecran — le CHANGEMENT est qu'elle n'attend plus d'etre choisie. -->
+      <section id="dispo-vue">
+
+        <!-- ⚠ LE SELECTEUR DE BIEN REMONTE AVEC LE CALENDRIER (decision de
+             Thierry). Il vivait dans la barre laterale du planning : la page
+             disparait, lui reste. Elle doit toujours pouvoir ne regarder qu'un
+             logement — ou tous.
+             ⚠ ET LE FIL D'ACTUALITES AUSSI. Il etait dans la colonne droite du
+             planning ; c'est ce qui a change depuis sa derniere visite, et la
+             seule chose de cet ecran qui perime. Le laisser tomber avec la page
+             aurait supprime en silence le seul endroit ou un nouveau menage
+             s'annonce.
+             ⚠ ET LES DEUX SONT HORS DE `#dispo-contenu`, DELIBEREMENT. Ce
+             conteneur-la est cache tant que la sonde des disponibilites n'a pas
+             repondu, et remplace par un message quand elle echoue. Or ni le
+             filtre de biens ni les nouveautes ne viennent de cette sonde : les
+             laisser dedans faisait disparaitre l'annonce d'un nouveau menage
+             parce qu'un AUTRE endpoint etait tombe. -->
+        <div class="news-panel" id="news-panel" style="display:none">
+          <div class="news-header">
+            <div class="news-title">
+              🔔 Nouveautés
+              <span class="news-badge" id="news-count" style="display:none">0</span>
+            </div>
+            <button class="news-close" id="news-close">✓ Tout marquer lu</button>
+          </div>
+          <div class="news-list" id="news-list"></div>
+        </div>
+
+        <div class="dispo-carte" id="carte-biens">
+          <div class="filter-title">Biens affichés</div>
+          <div id="filter-list">
+            <div style="font-size:11px;color:var(--text2)">Chargement...</div>
+          </div>
+        </div>
+
         <div class="avis-etat" id="dispo-etat">Chargement…</div>
         <div id="dispo-contenu" style="display:none">
-
           <!-- ⚠ LES REGLAGES VIVENT DANS UNE FEUILLE (lot C), pas en pleine page.
                Ils commandent tout le calendrier — les jours habituels barrent ou
                debarrent des semaines entieres — mais on les ouvre trois fois par
@@ -965,101 +687,6 @@
         </div>
       </section>
 
-      <div class="menage-layout">
-
-        <div>
-          <div class="mini-cal">
-            <div class="mini-cal-header">
-              <button class="mini-cal-nav" id="mini-prev">‹</button>
-              <div class="mini-cal-title" id="mini-cal-title"></div>
-              <button class="mini-cal-nav" id="mini-next">›</button>
-            </div>
-            <div class="mini-cal-grid" id="mini-cal-grid">
-              <div class="mini-cal-day-label">L</div>
-              <div class="mini-cal-day-label">M</div>
-              <div class="mini-cal-day-label">M</div>
-              <div class="mini-cal-day-label">J</div>
-              <div class="mini-cal-day-label">V</div>
-              <div class="mini-cal-day-label">S</div>
-              <div class="mini-cal-day-label">D</div>
-            </div>
-          </div>
-
-          <div class="mini-cal" style="margin-top:12px">
-            <div class="filter-title">Biens affichés</div>
-            <div id="filter-list">
-              <div style="font-size:11px;color:var(--text2)">Chargement...</div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <!-- Fil d'actualités -->
-          <div class="news-panel" id="news-panel" style="display:none">
-            <div class="news-header">
-              <div class="news-title">
-                🔔 Nouveautés
-                <span class="news-badge" id="news-count" style="display:none">0</span>
-              </div>
-              <button class="news-close" id="news-close">✓ Tout marquer lu</button>
-            </div>
-            <div class="news-list" id="news-list"></div>
-          </div>
-
-          <!-- Toggle 3 vues (mobile uniquement, cache en CSS sur desktop) -->
-          <div class="view-toggle" id="view-toggle">
-            <button data-view="mois">Mois</button>
-            <button data-view="semaine" class="active">Semaine</button>
-            <button data-view="jour">Jour</button>
-          </div>
-
-          <div class="planning-header">
-            <div class="week-nav">
-              <button id="btn-prev-week">← Semaine préc.</button>
-              <div class="week-label" id="week-label"></div>
-              <button id="btn-next-week">Semaine suiv. →</button>
-            </div>
-            <button class="btn" id="btn-today">Aujourd'hui</button>
-          </div>
-
-          <div class="week-stats" id="week-stats"></div>
-
-          <div class="week-grid" id="week-grid">
-            <div style="grid-column:span 7;text-align:center;padding:40px;color:var(--text2)">Chargement...</div>
-          </div>
-
-          <!-- Vue Mois (mobile only) -->
-          <div class="month-view" id="month-view" style="display:none">
-            <div class="month-grid-header">
-              <div>L</div><div>M</div><div>M</div><div>J</div><div>V</div><div>S</div><div>D</div>
-            </div>
-            <div class="month-grid" id="month-grid"></div>
-            <div class="month-legend">
-              <span><span class="legend-dot legend-todo"></span>À faire</span>
-              <span><span class="legend-dot legend-done"></span>Tout fait</span>
-              <span><span class="legend-dot legend-today"></span>Aujourd'hui</span>
-            </div>
-          </div>
-
-          <!-- Vue Jour (mobile only) -->
-          <div class="day-view" id="day-view" style="display:none">
-            <div class="day-view-list" id="day-view-list"></div>
-          </div>
-
-          <!-- Bouton flottant Filtres (mobile only) -->
-          <button class="fab-filters" id="fab-filters" type="button" aria-label="Filtres">⚙</button>
-
-          <!-- Bottom sheet Filtres (mobile only) -->
-          <div class="bottom-sheet-overlay" id="filters-overlay" style="display:none"></div>
-          <div class="bottom-sheet" id="filters-sheet" style="display:none">
-            <div class="bottom-sheet-handle"></div>
-            <div class="bottom-sheet-title">Biens affichés</div>
-            <div class="bottom-sheet-content" id="filter-list-mobile"></div>
-            <button class="btn btn-primary bottom-sheet-close" id="filters-close-btn">Fermer</button>
-          </div>
-        </div>
-
-      </div>
     </div>
   </div>
 </div>
@@ -1096,9 +723,6 @@ if ("serviceWorker" in navigator) {
   import { initErrorHandler } from '/shared/error-handler.js'
   initErrorHandler()
 
-  const PROP_COLORS = ['prop-color-0', 'prop-color-1', 'prop-color-2', 'prop-color-3']
-  const JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
-  const MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
 
   // Cles localStorage. v2 pour ne pas etre pollue par l ancienne clef qui
   // melangeait verite serveur et clic visuel.
@@ -1127,216 +751,29 @@ if ("serviceWorker" in navigator) {
   let readSet = new Set()              // ids d evenements acquittes (persistes en local + syncs)
   let commentsMap = {}
   let visibilityDays = 30
-  let currentWeekStart = getMonday(new Date())
-  let miniCalDate = new Date()
   let activeProps = new Set()
   let selectedMenage = null
   let newsItems = []
   let currentToken = null
   let isFlushingQueue = false
-  // Vue active mobile : 'mois' | 'semaine' | 'jour'. Persistee en localStorage.
-  let currentView = (() => {
-    try {
-      const v = localStorage.getItem('menages-current-view')
-      return (v === 'mois' || v === 'semaine' || v === 'jour') ? v : 'semaine'
-    } catch (e) { return 'semaine' }
-  })()
-  function setCurrentView(v) {
-    if (v !== 'mois' && v !== 'semaine' && v !== 'jour') return
-    currentView = v
-    try { localStorage.setItem('menages-current-view', v) } catch (e) {}
-    document.querySelectorAll('#view-toggle button').forEach(b => {
-      b.classList.toggle('active', b.dataset.view === v)
-    })
-    // re-rendu route selon la vue active (branche en Patch 9b)
-    if (typeof routeRender === 'function') routeRender()
-  }
-
-  // Jour selectionne en vue Jour mobile (default = aujourd hui)
-  let selectedDay = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
-
+  // ⚠ IL NE ROUTE PLUS RIEN — IL REPEINT LE CALENDRIER, qui est desormais la
+  // page. `routeRender` distribuait entre trois vues (Semaine, Mois, Jour) et un
+  // mini-calendrier lateral ; toutes disparaissent avec la page planning
+  // (decision du 18 septembre : la conception se centre sur les menages du jour
+  // et les menages a venir).
+  // ⚠ ON GARDE LE NOM ET LA SIGNATURE plutot que de reprendre ses sept
+  // appelants : « apres un changement, redessine » reste vrai, seul le
+  // destinataire change. Les toucher un par un aurait multiplie les occasions
+  // d'en oublier un — et un appelant oublie ne se voit qu'en production.
   function routeRender() {
-    const week = document.getElementById('week-grid')
-    const month = document.getElementById('month-view')
-    const day = document.getElementById('day-view')
-    const planningHeader = document.querySelector('.planning-header')
-    const weekStats = document.getElementById('week-stats')
-    const isMobile = window.matchMedia('(max-width: 900px)').matches
-    if (!isMobile) {
-      // Desktop : seule la vue Semaine est utilisee
-      if (week) week.style.display = ''
-      if (month) month.style.display = 'none'
-      if (day) day.style.display = 'none'
-      if (planningHeader) planningHeader.style.display = ''
-      if (weekStats) weekStats.style.display = ''
-      renderWeek(); renderMiniCal()
-      return
-    }
-    // Mobile : on affiche selon currentView
-    if (currentView === 'mois') {
-      if (week) week.style.display = 'none'
-      if (month) month.style.display = 'block'
-      if (day) day.style.display = 'none'
-      if (planningHeader) planningHeader.style.display = 'none'
-      if (weekStats) weekStats.style.display = 'none'
-      renderMonth()
-    } else if (currentView === 'jour') {
-      if (week) week.style.display = 'none'
-      if (month) month.style.display = 'none'
-      if (day) day.style.display = 'block'
-      if (planningHeader) planningHeader.style.display = 'none'
-      if (weekStats) weekStats.style.display = 'none'
-      renderDay()
-    } else {
-      // Semaine (default)
-      if (week) week.style.display = ''
-      if (month) month.style.display = 'none'
-      if (day) day.style.display = 'none'
-      if (planningHeader) planningHeader.style.display = ''
-      if (weekStats) weekStats.style.display = ''
-      renderWeek(); renderMiniCal()
-    }
+    if (mesJours) peindreMesJours()
   }
 
   // ======= VUE MOIS =======
-  function renderMonth() {
-    const grid = document.getElementById('month-grid')
-    if (!grid) return
-    const today = new Date(); today.setHours(0,0,0,0)
-    const ref = new Date(miniCalDate); ref.setDate(1); ref.setHours(0,0,0,0)
-    const monthIdx = ref.getMonth(); const yearIdx = ref.getFullYear()
-    // Premier lundi affiche : on recule jusqu au lundi precedent
-    const start = new Date(ref)
-    const dow = (start.getDay() + 6) % 7  // 0 = lundi
-    start.setDate(start.getDate() - dow)
-    // 6 lignes x 7 jours = 42 cellules
-    const allMenages = getMenages()
-    const cells = []
-    for (let i = 0; i < 42; i++) {
-      const d = new Date(start); d.setDate(start.getDate() + i); d.setHours(0,0,0,0)
-      cells.push(d)
-    }
-    // Ajout d un header de navigation mois
-    const monthLabel = MOIS[monthIdx] + ' ' + yearIdx
-    const navHtml = '<div class="day-view-nav"><button id="month-prev">‹</button>'
-      + '<div class="day-view-nav-label"><div class="day-view-nav-date">' + monthLabel + '</div></div>'
-      + '<button id="month-next">›</button></div>'
-    grid.parentElement.querySelector('.month-grid-nav-wrap')?.remove()
-    const wrap = document.createElement('div'); wrap.className = 'month-grid-nav-wrap'; wrap.innerHTML = navHtml
-    grid.parentElement.insertBefore(wrap, grid.parentElement.firstChild)
-    grid.innerHTML = cells.map(d => {
-      const dayMenages = allMenages.filter(m => {
-        const md = new Date(m.date); md.setHours(0,0,0,0)
-        return md.getTime() === d.getTime()
-      })
-      const total = dayMenages.length
-      const allDone = total > 0 && dayMenages.every(m => m.done)
-      const isToday = d.getTime() === today.getTime()
-      const otherMonth = d.getMonth() !== monthIdx
-      const classes = ['month-cell']
-      if (otherMonth) classes.push('other-month')
-      if (total > 0 && !allDone) classes.push('has-todo')
-      if (total > 0 && allDone) classes.push('all-done')
-      if (isToday) classes.push('today')
-      const dStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0')
-      return '<button type="button" class="' + classes.join(' ') + '" data-date="' + dStr + '">'
-        + (total > 0 ? '<div class="month-cell-num">' + d.getDate() + '</div><div class="month-cell-count">' + total + '</div>' : '<div>' + d.getDate() + '</div>')
-        + '</button>'
-    }).join('')
-    grid.querySelectorAll('.month-cell[data-date]').forEach(el => {
-      el.addEventListener('click', () => {
-        const [y,m,dy] = el.dataset.date.split('-').map(Number)
-        selectedDay = new Date(y, m-1, dy); selectedDay.setHours(0,0,0,0)
-        setCurrentView('jour')
-      })
-    })
-    document.getElementById('month-prev')?.addEventListener('click', () => {
-      miniCalDate = new Date(yearIdx, monthIdx - 1, 1); renderMonth()
-    })
-    document.getElementById('month-next')?.addEventListener('click', () => {
-      miniCalDate = new Date(yearIdx, monthIdx + 1, 1); renderMonth()
-    })
-  }
 
   // ======= VUE JOUR =======
-  function renderDay() {
-    const list = document.getElementById('day-view-list')
-    if (!list) return
-    const allMenages = getMenages()
-    const dayMenages = allMenages.filter(m => {
-      const md = new Date(m.date); md.setHours(0,0,0,0)
-      return md.getTime() === selectedDay.getTime()
-    })
-    const dayLabel = JOURS[(selectedDay.getDay()+6)%7] + (selectedDay.getDay() === 0 ? 'anche' : 'di')
-    const fullLabel = selectedDay.getDate() + ' ' + MOIS[selectedDay.getMonth()].toLowerCase() + ' ' + selectedDay.getFullYear()
-    const navHtml = '<div class="day-view-nav"><button id="day-prev">\u2039</button>'
-      + '<div class="day-view-nav-label"><div class="day-view-nav-day">' + dayLabel + '</div><div class="day-view-nav-date">' + fullLabel + '</div></div>'
-      + '<button id="day-next">\u203a</button></div>'
-    let body = ''
-    if (dayMenages.length === 0) {
-      body = '<div class="day-view-empty">Aucun m\u00e9nage ce jour</div>'
-    } else {
-      body = '<div class="day-body" style="padding:0;gap:8px">' + dayMenages.map(m => {
-        const obs = isMenageObsolete(m, allMenages)
-        const propClass = PROP_COLORS[m.propIdx % 4]
-        const doneClass = m.done ? ' done' : ''
-        const obsClass = obs ? ' obsolete' : ''
-        return '<div class="menage-card ' + propClass + doneClass + obsClass + '" data-id="' + m.id + '" style="cursor:pointer;font-size:13px;padding:10px 12px">'
-          + '<div class="menage-card-prop">' + m.propName + '</div>'
-          + '<div class="menage-card-title">M\u00e9nage d\u00e9part</div>'
-          + '<div class="menage-card-time">' + m.guestName + '</div>'
-          + badgeOffre(m)
-          + (m.done ? '<div class="menage-card-check">\u2713</div>' : '')
-          + (m.pending ? '<div class="menage-card-pending">\u23f3</div>' : '')
-          + (m.comment ? '<div class="menage-card-comment">\ud83d\udcac</div>' : '')
-          + '</div>'
-      }).join('') + '</div>'
-    }
-    list.innerHTML = navHtml + body
-    document.getElementById('day-prev')?.addEventListener('click', () => {
-      selectedDay = new Date(selectedDay); selectedDay.setDate(selectedDay.getDate() - 1); renderDay()
-    })
-    document.getElementById('day-next')?.addEventListener('click', () => {
-      selectedDay = new Date(selectedDay); selectedDay.setDate(selectedDay.getDate() + 1); renderDay()
-    })
-    // Reutilise le meme mecanisme que la vue Semaine : clic sur carte = ouverture modal
-    list.querySelectorAll('.menage-card').forEach(card => {
-      card.addEventListener('click', () => {
-        selectedMenage = getMenages().find(m => m.id === card.dataset.id)
-        openModal(selectedMenage)
-      })
-    })
-  }
 
   // ======= FILTRES MOBILE (bottom sheet) =======
-  function renderFiltersMobile() {
-    const list = document.getElementById('filter-list-mobile')
-    if (!list) return
-    list.innerHTML = properties.map((p, i) => '<div class="filter-item">'
-      + '<input type="checkbox" id="filter-mob-' + p.id + '" ' + (activeProps.has(p.id) ? 'checked' : '') + '>'
-      + '<div class="filter-dot" style="background:' + getDotColor(i) + '"></div>'
-      + '<label class="filter-label" for="filter-mob-' + p.id + '">' + p.name + '</label>'
-      + '</div>').join('')
-    properties.forEach(p => {
-      const el = document.getElementById('filter-mob-' + p.id)
-      if (!el) return
-      el.addEventListener('change', (e) => {
-        if (e.target.checked) activeProps.add(p.id); else activeProps.delete(p.id)
-        if (typeof routeRender === 'function') routeRender()
-        if (mesJours) peindreMesJours()   // meme raison que ci-dessus
-        renderFilters()  // garde aussi la version desktop synchro
-      })
-    })
-  }
-  function openFilters() {
-    renderFiltersMobile()
-    document.getElementById('filters-overlay').classList.add('visible')
-    document.getElementById('filters-sheet').classList.add('visible')
-  }
-  function closeFilters() {
-    document.getElementById('filters-overlay').classList.remove('visible')
-    document.getElementById('filters-sheet').classList.remove('visible')
-  }
 
   function getToken() {
     const fromUrl = new URLSearchParams(window.location.search).get('token');
@@ -1354,25 +791,12 @@ if ("serviceWorker" in navigator) {
   })();
 
   async function init() {
-    // Listener du toggle 3 vues + restauration de la vue persistee
-    document.querySelectorAll('#view-toggle button').forEach(b => {
-      b.addEventListener('click', () => setCurrentView(b.dataset.view))
-    })
-    setCurrentView(currentView)
-    // FAB filtres + bottom sheet
-    document.getElementById('fab-filters')?.addEventListener('click', openFilters)
-    document.getElementById('filters-overlay')?.addEventListener('click', closeFilters)
-    document.getElementById('filters-close-btn')?.addEventListener('click', closeFilters)
-    // Re-render au resize (passage mobile <-> desktop)
-    let resizeT
-    // Le re-rendu de resize ne concerne que le planning. Sans ce garde-fou, il
-    // reste inoffensif par accident (tout ce que touche `routeRender` est sous
-    // `.menage-layout`, masquee) — et rien ne garantit que ca dure.
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeT)
-      resizeT = setTimeout(() => { if (currentTab !== 'avis') routeRender() }, 150)
-    })
-
+    // ⚠ PLUS DE RE-RENDU AU RESIZE. Il existait pour la bascule mobile/desktop
+    // entre les vues Semaine, Mois et Jour du planning : trois mises en page
+    // differentes du meme mois, choisies en JavaScript. Le calendrier qui reste
+    // est une grille de sept colonnes reglee en CSS — elle suit la largeur sans
+    // qu'on la repeigne, et un ecouteur de resize qui ne sert plus finit par
+    // rappeler du code supprime.
     currentToken = getToken()
     if (!currentToken) {
       document.querySelector('.content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">❌ Lien invalide</div>'
@@ -1384,14 +808,8 @@ if ("serviceWorker" in navigator) {
     rebuildDoneSet()
     renderFilters()
     renderNews()
-    routeRender()
     renderSyncBanner()
 
-    document.getElementById('btn-prev-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, -7); routeRender() })
-    document.getElementById('btn-next-week').addEventListener('click', () => { currentWeekStart = addDays(currentWeekStart, 7); routeRender() })
-    document.getElementById('btn-today').addEventListener('click', () => { currentWeekStart = getMonday(new Date()); miniCalDate = new Date(); routeRender() })
-    document.getElementById('mini-prev').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() - 1, 1); renderMiniCal() })
-    document.getElementById('mini-next').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1); renderMiniCal() })
     // ⚠ UN SEUL ECOUTEUR SUR LE CORPS, pose une fois : la feuille est reconstruite
   // a chaque ouverture, un ecouteur par bouton aurait fui a chaque tape.
   document.getElementById('modal-body').addEventListener('click', e => {
@@ -1400,6 +818,15 @@ if ("serviceWorker" in navigator) {
       const libres = aPrendreDu(o.dataset.offre)
       const i = Number(o.dataset.offreI) || 0
       if (libres.length) ouvrirPriseDeMenage(o.dataset.offre, libres, Math.min(i, libres.length - 1))
+      return
+    }
+    const mi = e.target.closest('[data-mien]')
+    if (mi) {
+      // ⚠ LA MEME FICHE QUE LE PLANNING, pas une copie. Deux fiches du meme
+      // menage finiraient par dire deux choses differentes.
+      const m = tousMesMenagesEnrichis().concat(menagesEnrichisDu(jourOuvert || ''))
+        .find(x => x.id === mi.dataset.mien)
+      if (m) { selectedMenage = m; openModal(m) }
       return
     }
     const sg = e.target.closest('[data-dispo]')
@@ -1421,6 +848,7 @@ if ("serviceWorker" in navigator) {
     document.getElementById('modal-refuser').addEventListener('click', () => repondreOffre(false))
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
     document.getElementById('news-close').addEventListener('click', markAllNewsRead)
+    document.getElementById('avis-retour').addEventListener('click', montrerCalendrier)
 
     // Sync au retour de connexion
     window.addEventListener('online',  () => { console.log('[Sync] Online');  flushPendingQueue() })
@@ -1429,9 +857,14 @@ if ("serviceWorker" in navigator) {
     // Tentative de flush au demarrage si on a des actions en attente
     if (pendingQueue.length > 0) flushPendingQueue()
 
-    // Non bloquant : le planning ne doit dependre d'aucune des deux vues.
+    // Non bloquant : la porte des avis et le calendrier ne s'attendent pas.
     initAvis().catch(err => console.warn('[Avis] sonde impossible', err))
-    initDisponibilites().catch(err => console.warn('[Dispo] sonde impossible', err))
+    // ⚠ LE CALENDRIER SE CHARGE AU DEMARRAGE, sans onglet pour le declencher.
+    // C'est `setTab('dispo')` qui appelait ceci quand il fallait cliquer « Mes
+    // jours » ; la PWA ouvre desormais dessus. Non bloquant lui aussi : le
+    // filtre de biens et les nouveautes sont deja peints et ne dependent pas de
+    // cette reponse.
+    chargerDisponibilites().catch(err => console.warn('[Dispo] chargement impossible', err))
 
     brancherResonde()
   }
@@ -1664,46 +1097,76 @@ if ("serviceWorker" in navigator) {
     return d
   }
 
+  // ⚠ UN SEUL ENDROIT FABRIQUE UN MENAGE COMPLET. La feuille du jour doit
+  // ouvrir la MEME fiche que le planning — donc lui passer le MEME objet, avec
+  // son `done`, son `pending`, son commentaire et ses infos voyageur. Le
+  // reconstruire a cote aurait diverge au premier champ ajoute.
+  function enrichirMenage (b) {
+    if (!b || !b.departure) return null
+    const dep = dateNueLocale(b.departure)
+    if (!dep) return null
+    const assign = assignations
+      ? (assignations[`${b.propId}|${String(b.id)}|${b.departure}`] || null)
+      : null
+    const propIdx = properties.findIndex(p => p.id === b.propId)
+    const id = `${b.id}-${b.departure}`
+    const isPending = pendingQueue.some(a => a.booking_id === String(b.id) && a.departure_date === b.departure)
+    return {
+      id, date: dep, dateStr: b.departure, assign,
+      propId: b.propId, propName: b.propName, propIdx,
+      guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
+      arrival: b.arrival, departure: b.departure,
+      numAdult: b.numAdult || 0, numChild: b.numChild || 0,
+      bookId: b.id, done: doneSet.has(id), pending: isPending,
+      comment: commentsMap[`${b.id}-${b.departure}`] || ''
+    }
+  }
+
   function getMenages() {
     const menages = []
     for (const b of bookings) {
+      // ⚠ LE FILTRE D'AFFICHAGE RESTE ICI, et nulle part ailleurs.
       if (!activeProps.has(b.propId)) continue
-      if (!b.departure) continue
-      const dep = dateNueLocale(b.departure)
-      if (!dep) continue
-      const assign = assignations
-        ? (assignations[`${b.propId}|${String(b.id)}|${b.departure}`] || null)
-        : null
-      const propIdx = properties.findIndex(p => p.id === b.propId)
-      const id = `${b.id}-${b.departure}`
-      const isPending = pendingQueue.some(a => a.booking_id === String(b.id) && a.departure_date === b.departure)
-      menages.push({
-        id, date: dep, dateStr: b.departure, assign,
-        propId: b.propId, propName: b.propName, propIdx,
-        guestName: b.firstName ? `${b.firstName} ${b.lastName || ''}`.trim() : 'Voyageur',
-        arrival: b.arrival, departure: b.departure,
-        numAdult: b.numAdult || 0, numChild: b.numChild || 0,
-        bookId: b.id, done: doneSet.has(id), pending: isPending,
-        comment: commentsMap[`${b.id}-${b.departure}`] || ''
-      })
+      const m = enrichirMenage(b)
+      if (m) menages.push(m)
     }
     return menages
   }
 
+  // Les menages ENRICHIS d'un jour, sans le filtre de biens : la feuille d'une
+  // journee montre ce qui s'y passe (lot B).
+  function menagesEnrichisDu (j) {
+    return mesMenagesTousBiens(j).map(enrichirMenage).filter(Boolean)
+  }
+
+  // ⚠ TOUS SES MENAGES, SANS LE FILTRE DE BIENS. `getMenages()` honore
+  // `activeProps`, qui est un reglage d'AFFICHAGE : le passer a une REGLE la
+  // fait dependre d'une case a cocher. `isMenageObsolete` cherche un menage plus
+  // tard et deja fait sur le meme bien — reduire la vue a un logement effacait
+  // la marque ⏭ sur tous les autres.
+  function tousMesMenagesEnrichis () {
+    return bookings.map(enrichirMenage).filter(Boolean)
+  }
+
   function renderFilters() {
     const list = document.getElementById('filter-list')
-    list.innerHTML = properties.map((p, i) => `
-      <div class="filter-item">
-        <input type="checkbox" id="filter-${p.id}" ${activeProps.has(p.id) ? 'checked' : ''}>
-        <div class="filter-dot" style="background:${getDotColor(i)}"></div>
-        <label class="filter-label" for="filter-${p.id}">${p.name}</label>
-      </div>
+    // ⚠ LE `<label>` PORTE TOUTE LA LIGNE, l'`<input>` vit dedans. Un `for=` sur
+    // un libelle a cote laissait la case comme seule cible reelle : 18 px de
+    // large, au pouce. Meme geste que les cases de `.dispo-pastille`.
+    list.innerHTML = properties.map(p => `
+      <label class="filter-item">
+        <input type="checkbox" id="filter-${echapper(p.id)}" ${activeProps.has(p.id) ? 'checked' : ''}>
+        <span class="filter-label">${echapper(p.name)}</span>
+      </label>
     `).join('')
     properties.forEach(p => {
       document.getElementById(`filter-${p.id}`).addEventListener('change', (e) => {
         if (e.target.checked) activeProps.add(p.id)
         else activeProps.delete(p.id)
-        routeRender()
+        // ⚠ UN SEUL REPEINT. `routeRender` distribuait entre le planning et le
+        // calendrier ; depuis que le planning n'existe plus, il EST
+        // `peindreMesJours`. Garder les deux appels repeignait le mois entier
+        // deux fois a chaque case cochee.
         // ⚠ ET LA VUE « MES JOURS » AUSSI, depuis le lot 2. Le calendrier fusionne
         // et l'agenda lisent `activeProps` : `routeRender` ne repeint que le
         // planning, donc masquer un bien y laissait ses bulles et ses lignes
@@ -1810,119 +1273,7 @@ if ("serviceWorker" in navigator) {
     markEventsRead(unreadIds)
   }
 
-  function renderWeek() {
-    const today = new Date(); today.setHours(0,0,0,0)
-    const weekEnd = addDays(currentWeekStart, 6)
-    const menages = getMenages()
 
-    document.getElementById('week-label').textContent = `${formatDate(currentWeekStart)} — ${formatDate(weekEnd)}`
-
-    const weekMenages = menages.filter(m => m.date >= currentWeekStart && m.date <= weekEnd)
-    const done = weekMenages.filter(m => m.done).length
-    document.getElementById('week-stats').innerHTML = `
-      <div class="week-stat"><strong>${weekMenages.length}</strong>ménages cette semaine</div>
-      <div class="week-stat"><strong>${done}</strong>effectués</div>
-      <div class="week-stat"><strong>${weekMenages.length - done}</strong>restants</div>
-    `
-
-    const grid = document.getElementById('week-grid')
-    grid.innerHTML = ''
-
-    for (let i = 0; i < 7; i++) {
-      const day = addDays(currentWeekStart, i)
-      day.setHours(0,0,0,0)
-      const isToday = day.getTime() === today.getTime()
-      const dayMenages = menages.filter(m => { const md = new Date(m.date); md.setHours(0,0,0,0); return md.getTime() === day.getTime() })
-
-      const col = document.createElement('div')
-      col.className = `day-col${isToday ? ' today' : ''}${dayMenages.length === 0 ? ' is-empty' : ''}`
-      col.innerHTML = `
-        <div class="day-header">
-          <div class="day-name">${JOURS[i]}</div>
-          <div class="day-number">${day.getDate()}</div>
-        </div>
-        <div class="day-body">
-          ${dayMenages.length === 0 ? '<div class="day-empty">—</div>' :
-            dayMenages.map(m => {
-              const obs = isMenageObsolete(m, menages)
-              return `
-              <div class="menage-card ${PROP_COLORS[m.propIdx % 4]} ${m.done ? 'done' : ''} ${obs ? 'obsolete' : ''}" data-id="${m.id}" style="cursor:pointer">
-                <div class="menage-card-prop">${m.propName}</div>
-                <div class="menage-card-title">Ménage départ</div>
-                <div class="menage-card-time">${m.guestName}</div>
-                ${badgeOffre(m)}
-                ${m.done ? '<div class="menage-card-check">✓</div>' : ''}
-                ${m.pending ? '<div class="menage-card-pending">⏳</div>' : ''}
-                ${m.comment ? '<div class="menage-card-comment">📝</div>' : ''}
-              </div>
-            `
-            }).join('')
-          }
-        </div>
-      `
-      grid.appendChild(col)
-    }
-
-    grid.querySelectorAll('.menage-card').forEach(card => {
-      card.addEventListener('click', () => {
-        selectedMenage = getMenages().find(m => m.id === card.dataset.id)
-        openModal(selectedMenage)
-      })
-    })
-  }
-
-  function renderMiniCal() {
-    const menages = getMenages()
-    const menageDates = new Map()
-    menages.forEach(m => {
-      if (!menageDates.has(m.dateStr)) menageDates.set(m.dateStr, [])
-      menageDates.get(m.dateStr).push(m)
-    })
-
-    document.getElementById('mini-cal-title').textContent = `${MOIS[miniCalDate.getMonth()]} ${miniCalDate.getFullYear()}`
-
-    const grid = document.getElementById('mini-cal-grid')
-    const headers = Array.from(grid.children).slice(0, 7)
-    grid.innerHTML = ''; headers.forEach(h => grid.appendChild(h))
-
-    const firstDay = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth(), 1)
-    const lastDay  = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 0)
-    const today    = new Date(); today.setHours(0,0,0,0)
-
-    let startOffset = (firstDay.getDay() + 6) % 7
-    for (let i = 0; i < startOffset; i++) {
-      const prev = new Date(firstDay); prev.setDate(prev.getDate() - (startOffset - i))
-      const d = document.createElement('div')
-      d.className = 'mini-cal-day other-month'; d.textContent = prev.getDate()
-      grid.appendChild(d)
-    }
-
-    for (let d = 1; d <= lastDay.getDate(); d++) {
-      const date = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth(), d)
-      date.setHours(0,0,0,0)
-      const dateStr    = toDateStr(date)
-      const dayMenages = menageDates.get(dateStr) || []
-      const hasMenage  = dayMenages.length > 0
-      const isDone     = hasMenage && dayMenages.every(m => m.done)
-      const isToday    = date.getTime() === today.getTime()
-      const weekEnd    = addDays(currentWeekStart, 6)
-      const inWeek     = date >= currentWeekStart && date <= weekEnd
-
-      const el = document.createElement('div')
-      el.className = ['mini-cal-day', isToday ? 'today' : '', hasMenage && !isToday ? (isDone ? 'has-menage done' : 'has-menage') : '', inWeek && !isToday ? 'selected-week' : ''].filter(Boolean).join(' ')
-      el.textContent = d
-
-      if (hasMenage) {
-        const tooltip = document.createElement('div')
-        tooltip.className = 'cal-tooltip'
-        tooltip.textContent = dayMenages.map(m => `${m.propName} · ${m.guestName}`).join('\n')
-        el.appendChild(tooltip)
-      }
-
-      el.addEventListener('click', () => { currentWeekStart = getMonday(date); routeRender() })
-      grid.appendChild(el)
-    }
-  }
 
   function isMenageObsolete(m, allMenages) {
     if (m.done) return false
@@ -2082,6 +1433,9 @@ if ("serviceWorker" in navigator) {
     const libres = aPrendreTousBiens(j)
     const miensTous = mesMenagesTousBiens(j)
     const miens = miensTous
+    // Les memes menages, enrichis : c'est ce que la fiche attend.
+    const enrichis = menagesEnrichisDu(j)
+    const tousEnrichis = tousMesMenagesEnrichis()
     const passe = j < AUJ()
     const e = mesJours ? exceptionDuJour(j) : null
     const c = mesJours ? congeDuJour(j) : null
@@ -2107,11 +1461,33 @@ if ("serviceWorker" in navigator) {
     if (miens.length) {
       html += '<div class="jsect"><div class="jsect-t">' +
         (miens.length > 1 ? `${miens.length} ménages à vous` : 'Votre ménage') + '</div>' +
-        miens.map(m => `<div class="jligne">` +
-          `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
-          (doneSet.has(`${m.id}-${m.departure}`)
-            ? '<span style="color:var(--green);font-weight:700;font-size:11px">FAIT</span>' : '') +
-          '</div>').join('') + '</div>'
+        // ⚠ UN BOUTON, PAS UNE LIGNE MORTE — ET C'EST LE CHANTIER BLOQUANT.
+        // Le lot B les rendait en `<div>` inertes : `openModal` n'avait plus que
+        // DEUX entrees, toutes deux dans la page planning. Supprimer celle-ci
+        // aurait retire le seul chemin vers la fiche d'un de ses menages, donc
+        // le seul bouton « Marquer fait » — le geste central de qui ne regle
+        // rien d'autre.
+        // ⚠ ET LES QUATRE MARQUES SUIVENT, parce qu'elles vivaient sur les
+        // cartes du planning et nulle part ailleurs : fait, en attente d'envoi,
+        // commentaire de l'hote, reservation qui a bouge.
+        enrichis.map(m => {
+          const obs = isMenageObsolete(m, tousEnrichis)
+          const marques =
+            // ⚠ LA PROPOSITION QUI EXPIRE PASSE DEVANT LE RESTE. `badgeOffre`
+            // vivait sur les cartes du planning et nulle part ailleurs : sans
+            // lui, un menage qu'elle doit CONFIRMER avant un delai ne se
+            // distinguait plus d'un menage acquis — ni ici, ni dans le
+            // calendrier. La fiche le disait encore, mais il fallait deja
+            // savoir qu'il y avait quelque chose a y lire.
+            badgeOffre(m) +
+            (m.done ? '<span class="jmarque fait">✓ FAIT</span>' : '') +
+            (m.pending ? '<span class="jmarque" title="En attente d’envoi">⏳</span>' : '') +
+            (m.comment ? '<span class="jmarque" title="Consigne de votre hôte">📝</span>' : '') +
+            (obs ? '<span class="jmarque" title="La réservation a changé">⏭</span>' : '')
+          return `<button class="jligne${obs ? ' obsolete' : ''}" data-mien="${echapper(m.id)}">` +
+            `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
+            marques + '</button>'
+        }).join('') + '</div>'
     }
 
     // 3 — SA DISPONIBILITE.
@@ -2421,8 +1797,24 @@ if ("serviceWorker" in navigator) {
       : ''
 
     hideModalMessages()
+    // ⚠ LA FEUILLE DU JOUR N'EST PLUS OUVERTE : on le DIT. `ouvrirPriseDeMenage`,
+    // `ouvrirReglages` et `closeModal` remettent tous `jourOuvert` a null ; ce
+    // chemin-ci ne le faisait pas. Aujourd'hui rien ne casse — `ouvrirJour`
+    // n'emet le segment de disponibilite que si elle n'a AUCUN menage ce
+    // jour-la, et les lignes `data-mien` que si elle en a — donc aucune ecriture
+    // `depuisFeuille` ne peut etre en vol sur ce jour. Le jour ou cette
+    // exclusion bougera, le rattrapage trouverait `feuilleOuverteSur(j)` vrai et
+    // repeindrait la feuille du jour PAR-DESSUS la fiche ouverte.
+    jourOuvert = null
 
-    const obsolete = isMenageObsolete(m, getMenages())
+    // ⚠ SANS LE FILTRE DE BIENS, COMME LA LIGNE QUI OUVRE CETTE FICHE.
+    // `getMenages()` honore `activeProps`. La feuille du jour, elle, est sans
+    // filtre : un bien decoche laissait la ligne marquee ⏭ ouvrir une fiche qui,
+    // faute de pouvoir recalculer `laterDone`, proposait « ✓ Marquer fait » — le
+    // meme ecran signalait le menage perime ET laissait le faire. Une regle ne se
+    // lit jamais a travers un reglage d'affichage ; c'etait le dernier
+    // consommateur a convertir.
+    const obsolete = isMenageObsolete(m, tousMesMenagesEnrichis())
     const future   = isMenageFuture(m)
 
     const btn = document.getElementById('modal-done')
@@ -2765,7 +2157,12 @@ if ("serviceWorker" in navigator) {
   const POUCE_BAS  = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 3h-4v12h4V3zM1 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3a1.5 1.5 0 0 0 .4 1L10 23l6.4-6.4a2 2 0 0 0 .6-1.4V5a2 2 0 0 0-2-2H6a2 2 0 0 0-1.8 1.2l-3 7.1c-.1.2-.2.5-.2.7v2z"/></svg>'
 
   let avisCharge = false          // la liste a deja ete chargee une fois
-  let currentTab = 'planning'
+  // ⚠ DEUX ECRANS, PLUS TROIS ONGLETS. Le calendrier est la page ; les avis sont
+  // un detour qu'on ouvre par la porte de l'en-tete et dont on revient. Un
+  // booleen plutot que l'ancien `currentTab` a trois valeurs : « planning »
+  // n'existe plus, et garder une variable qui peut valoir un ecran supprime,
+  // c'est garder la branche qui l'affiche.
+  let vueAvis = false
 
   // La periode est reglee par l'hote (public_tokens.ratio_periode) ; l'ecran la
   // DIT, sinon « 10 / 11 » ne veut rien dire — sur 15 jours ou depuis toujours,
@@ -2797,29 +2194,36 @@ if ("serviceWorker" in navigator) {
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
-  function setTab (t) {
-    currentTab = (t === 'avis' || t === 'dispo') ? t : 'planning'
-    document.querySelectorAll('#tabs button').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === currentTab)
-    })
-    const planning = document.querySelector('.menage-layout')
-    const vue = document.getElementById('avis-vue')
-    const vueDispo = document.getElementById('dispo-vue')
-    if (planning) planning.style.display = (currentTab === 'planning') ? '' : 'none'
-    if (vue) vue.style.display = (currentTab === 'avis') ? '' : 'none'
-    if (vueDispo) vueDispo.style.display = (currentTab === 'dispo') ? '' : 'none'
-    // Le bouton flottant Filtres appartient au planning : il n'a rien a filtrer
-    // ailleurs et resterait sinon en travers de l'ecran sur mobile.
-    const fab = document.getElementById('fab-filters')
-    if (fab) fab.style.display = (currentTab === 'planning') ? '' : 'none'
-    if (currentTab === 'planning') routeRender()
-    if (currentTab === 'dispo') chargerDisponibilites()
-    if (currentTab === 'avis' && !avisCharge) {
+  // ⚠ LE CALENDRIER N'EST JAMAIS MASQUE « EN ATTENDANT » : on l'affiche ou on
+  // affiche les avis, et le retour est un geste explicite. L'ancien `setTab`
+  // reglait trois `display` a partir d'une chaine ; avec un ecran de moins, la
+  // chaine ne designait plus qu'un booleen deguise.
+  function montrerAvis () {
+    vueAvis = true
+    document.getElementById('avis-vue').style.display = ''
+    document.getElementById('dispo-vue').style.display = 'none'
+    if (!avisCharge) {
       chargerAvis().catch(err => {
         console.warn('[Avis] chargement impossible', err)
         etatAvis('Service indisponible', 'Réessayez dans un instant.')
       })
     }
+  }
+
+  // ⚠ ET IL Y A UN RETOUR. Sans la barre d'onglets, la vue Avis etait un
+  // cul-de-sac : une fois dedans, plus rien ne ramenait au calendrier sinon
+  // recharger la PWA. C'est la seule chose que la suppression des onglets
+  // enlevait vraiment, et elle se remplace par un bouton qui dit ou il mene.
+  function montrerCalendrier () {
+    vueAvis = false
+    document.getElementById('avis-vue').style.display = 'none'
+    document.getElementById('dispo-vue').style.display = ''
+    // ⚠ ET ON REPEINT. `setTab('planning')` le faisait ; le calendrier n'est pas
+    // detruit quand on le masque, mais `bookings` peut avoir bouge pendant
+    // qu'elle lisait ses avis (file hors ligne vidée, rechargement silencieux).
+    // Revenir sur un ecran fige a l'etat d'il y a dix minutes est exactement le
+    // mensonge que le reste de cette page s'interdit.
+    routeRender()
   }
 
   function etatAvis (titre, message) {
@@ -2856,7 +2260,6 @@ if ("serviceWorker" in navigator) {
   // rouge l'annule. Un jour rouge par la recurrence ne bouge pas.
   const JOURS_SEM = [{ n: 1, c: 'L' }, { n: 2, c: 'M' }, { n: 3, c: 'M' }, { n: 4, c: 'J' },
                      { n: 5, c: 'V' }, { n: 6, c: 'S' }, { n: 0, c: 'D' }]
-  const NOMS_SEM = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
   const DISPO_MOIS = 12
 
   let mesJours = null   // { regles, exceptions, conges, mois, modifiable }
@@ -2990,7 +2393,18 @@ if ("serviceWorker" in navigator) {
     })
   }
 
+  // ⚠ JETON DE LECTURE — SEULE LA DERNIERE DEMANDE ECRIT A L'ECRAN.
+  // Meme garde que `chargementCourant` cote avis, et pour la meme raison : deux
+  // lectures peuvent etre en vol en meme temps (le chargement du demarrage et
+  // celui qui suit une ecriture, par exemple), et c'est la reponse la plus LENTE
+  // qui ecrivait en dernier. `chargerDisponibilites` remplace `mesJours` en
+  // entier : une reponse perimee qui arrive apres remet un etat d'avant, et fait
+  // au passage rater son rattrapage a toute ecriture en cours — `basculerMonJour`
+  // reconnait un rechargement a l'IDENTITE de `mesJours` et renonce alors a
+  // restituer. Un refus serveur laissait donc l'absence affichee.
+  let lectureDispoCourante = 0
   async function chargerDisponibilites () {
+    const mien = ++lectureDispoCourante
     const etat = document.getElementById('dispo-etat')
     const contenu = document.getElementById('dispo-contenu')
     if (!dispoCharge) { etat.textContent = 'Chargement…'; etat.style.display = ''; contenu.style.display = 'none' }
@@ -3000,13 +2414,70 @@ if ("serviceWorker" in navigator) {
       if (!res.ok) throw new Error(String(res.status))
       data = await res.json()
     } catch (err) {
-      // ⚠ On le DIT plutot que d'afficher un calendrier vide : « aucune absence »
-      // sur une panne lui ferait croire qu'elle a bien declare.
-      etat.innerHTML = '<strong>Vos jours n\'ont pas pu être lus</strong>Vérifiez votre connexion, puis rouvrez cet onglet.'
-      etat.style.display = ''; contenu.style.display = 'none'
+      // Une panne perimee ne remplace pas un ecran deja repeint par une lecture
+      // plus recente : elle annoncerait une coupure qui n'a plus cours.
+      if (mien !== lectureDispoCourante) return
+      // ⚠ ON NE CACHE PLUS LE CALENDRIER SUR UNE PANNE — ET C'EST LA SECONDE
+      // CONSEQUENCE LOURDE DE LA SUPPRESSION DE LA PAGE PLANNING.
+      // `#dispo-months` et `#carte-agenda` vivent tous deux dans
+      // `#dispo-contenu`, et ce sont desormais les SEULS endroits ou ses menages
+      // s'affichent. Masquer ce conteneur sur un 503 de `action=disponibilites`
+      // lui retirait donc TOUS ses menages — alors qu'ils viennent de `loadData`,
+      // qui a repondu. Une panne sur ses ABSENCES ne doit pas emporter son
+      // travail de la journee.
+      // ⚠ ET UNE LECTURE QUI ECHOUE N'EFFACE PAS CELLE QUI A REUSSI : si un etat
+      // est deja peint, on le GARDE et on signale seulement l'echec du
+      // rafraichissement. Le remplacer par des jours vides ferait disparaitre des
+      // absences bien enregistrees, sur un simple accroc de reseau.
+      // ⚠ ET UNE PANNE APRES UNE PANNE RESTE UNE PANNE, pas une donnee qui date.
+      // Sur un etat deja marque `panneLecture`, « ce que vous voyez peut dater »
+      // laisserait croire qu'on a lu quelque chose un jour. On n'a rien lu.
+      if (mesJours && !mesJours.panneLecture) {
+        // ⚠ ET ON REMET L'ECRAN, que le placeholder « Chargement… » vient
+        // peut-etre de masquer quelques lignes plus haut : on a bien de quoi
+        // peindre, c'est le RAFRAICHISSEMENT qui a echoue.
+        etat.style.display = 'none'; contenu.style.display = ''
+        // ⚠ ET LA OU ELLE REGARDE. `direIci` est local a `basculerMonJour` ; ici
+        // on ecrit dans le bandeau du calendrier, ET dans la feuille si elle est
+        // ouverte — sinon le message atterrit DERRIERE l'overlay, ce que cet
+        // ecran a deja paye une fois sur tous les chemins de reglage.
+        const alerte = '⚠️ Vos jours n\'ont pas pu être rafraîchis. Ce que vous voyez peut dater.'
+        dire(document.getElementById('dispo-message'), alerte)
+        if (document.getElementById('modal').style.display === 'flex') showModalWarning(alerte)
+        return
+      }
+      // ⚠ ET ON NE PREND PAS LA PANNE POUR UNE REPONSE : disponibilites vides et
+      // `modifiable` a false. Aucun jour barre — on ne SAIT pas — et aucun geste
+      // propose, parce qu'ecrire contre un etat qu'on n'a pas pu lire, c'est
+      // ecrire a l'aveugle. Le message, lui, dit exactement ce qui manque.
+      etat.style.display = 'none'; contenu.style.display = ''
+      mesJours = { regles: [], exceptions: [], conges: [], modifiable: false,
+                   sansDroit: true, panneLecture: true,
+                   // Le mois qu'elle REGARDE survit a la panne : la replier sur
+                   // le mois courant lui ferait perdre sa navigation a chaque
+                   // accroc de reseau.
+                   mois: (mesJours ? mesJours.mois : 0) }
+      dispoCharge = true
+      peindreMesJours()
       return
     }
-    if (data.autorise !== true) { ecranNonAutorisee(); return }
+    // ⚠ SANS LE DROIT `self_availability`, LE CALENDRIER RESTE — ET C'EST LE
+    // CHANGEMENT LE PLUS LOURD DE LA SUPPRESSION DE LA PAGE PLANNING.
+    // Avant, `autorise: false` remplacait l'onglet « Mes jours » par un message
+    // et la prestataire gardait le planning. L'onglet EST la page maintenant :
+    // le meme message aurait laisse Regina — `self_availability = 'none'`, ses
+    // menages attribues d'office — devant une PWA entierement vide, alors que
+    // c'est justement elle qui a le plus de menages a lire.
+    // Ses menages ne viennent pas de cette sonde (`loadData`, deja fait) : on
+    // peint donc le calendrier avec des disponibilites VIDES et `modifiable` a
+    // false, ce qui ferme deja partout les gestes d'absence (l'engrenage, la
+    // bascule de la feuille du jour, le formulaire de conge).
+    // ⚠ VIDE, PAS « TOUT BARRE ». `jourTravaille` sans aucune regle ni exception
+    // rend `true` : aucun jour n'est raye. C'est le seul affichage honnete — le
+    // serveur ne dit pas qu'elle ne travaille pas, il refuse de repondre sur ses
+    // absences. Barrer le mois entier lui apprendrait quelque chose de faux.
+    if (mien !== lectureDispoCourante) return
+    if (data.autorise !== true) { calendrierSansDroit(); return }
     dispoCharge = true
     etat.style.display = 'none'; contenu.style.display = ''
     const moisCourant = mesJours ? mesJours.mois : 0
@@ -3028,7 +2499,20 @@ if ("serviceWorker" in navigator) {
     peindreMonAgenda()
     peindreMesConges()
     const msg = document.getElementById('dispo-message')
-    if (!mesJours.modifiable) {
+    if (mesJours.panneLecture) {
+      // ⚠ QUATRE ETATS, ET CELUI-CI EST LE PLUS DELICAT : ON NE SAIT PAS.
+      // « Vos absences sont gerees par votre employeur » serait FAUX — personne
+      // ne les gere, la lecture a echoue. Le calendrier reste pour ses menages,
+      // et la phrase dit exactement ce qui manque.
+      msg.textContent = 'Vos absences n\'ont pas pu être lues. Vos ménages, eux, sont à jour — '
+                      + 'rouvrez l\'application pour réessayer.'
+    } else if (mesJours.sansDroit) {
+      // ⚠ TROIS ETATS, PAS DEUX. « Lecture seule » et « pas de droit du tout »
+      // ne disent pas la meme chose : dans le premier cas elle CONSULTE ses
+      // jours, dans le second le serveur ne les lui envoie meme pas. Une seule
+      // phrase pour les deux lui aurait fait chercher une liste absente.
+      msg.textContent = 'Vos absences sont gérées par votre employeur. Prévenez-le directement.'
+    } else if (!mesJours.modifiable) {
       msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre employeur qui pose vos absences.'
     } else if (!msg.dataset.garde) {
       // ⚠ « CI-DESSOUS » NE DESIGNAIT PLUS RIEN. Depuis le lot C, le formulaire
@@ -3723,10 +3207,14 @@ if ("serviceWorker" in navigator) {
         // semaine A vide, « les jours de la semaine A sont conserves » annoncait
         // une conservation alors qu'on venait de tout effacer — donc
         // « disponible tous les jours », sans un mot.
+        // ⚠ `'ok'`, SINON C'EST LE BANDEAU ROUGE. `direReglages` retombe sur
+        // `'erreur'` par defaut, et depuis le lot C ces boutons ne vivent que
+        // dans la feuille : l'ecriture reussissait et son mode d'emploi
+        // s'affichait comme un echec.
         direReglages(msg, vers ? 'Cochez les jours de la semaine B.'
                        : (jours.length ? 'Les jours de la semaine A sont conservés.'
                                        : 'Vous n\'avez plus aucun jour habituel : ' +
-                                         'vous êtes comptée disponible tous les jours.'))
+                                         'vous êtes comptée disponible tous les jours.'), 'ok')
       } else {
         direReglages(msg, erreur)
       }
@@ -3766,7 +3254,10 @@ if ("serviceWorker" in navigator) {
       const { ok, erreur } = await envoyerMesJours(
         [{ jours: a ? a.jours : [], depuis: suivante },
          { jours: b ? b.jours : [], depuis: cette }], { alt: true })
-      direReglages(msg, ok ? '✓ Les deux semaines sont échangées.' : erreur)
+      // ⚠ MEME DEFAUT QUE L'ALTERNANCE : un succes passe par le bandeau d'ERREUR
+      // tant qu'on ne dit pas `'ok'`.
+      if (ok) direReglages(msg, '✓ Les deux semaines sont échangées.', 'ok')
+      else direReglages(msg, erreur)
       // ⚠ MEME PIEGE QUE L'ALTERNANCE : tant que la relecture n'a pas atterri,
       // les lignes A/B affichent encore l'ANCIEN arrangement. Une tape dans
       // cette fenetre reecrit l'ancrage d'avant et annule silencieusement
@@ -4018,32 +3509,54 @@ if ("serviceWorker" in navigator) {
   // Relecture SANS panneau d'erreur : sert au rattrapage, ou afficher « vos
   // jours n'ont pas pu etre lus » par-dessus une absence qu'on vient peut-etre
   // d'enregistrer ajouterait de la confusion a l'incertitude.
+  // ⚠ SANS LE DROIT `self_availability`, LE CALENDRIER RESTE — ET C'EST LA
+  // CONSEQUENCE LA PLUS LOURDE DE LA SUPPRESSION DE LA PAGE PLANNING.
+  // Avant, `autorise: false` remplacait l'onglet « Mes jours » par un message et
+  // la prestataire gardait le planning. L'onglet EST la page maintenant : le
+  // meme message aurait laisse Regina — `self_availability = 'none'`, ses
+  // menages attribues d'office — devant une PWA entierement vide, alors que
+  // c'est precisement elle qui a le plus de menages a lire.
+  // Ses menages ne viennent pas de cette sonde (`loadData` les a deja) : on
+  // peint le calendrier avec des disponibilites VIDES et `modifiable` a false,
+  // ce qui ferme deja partout les gestes d'absence — l'engrenage, la bascule de
+  // la feuille du jour, le formulaire de conge.
   // ⚠ UN SEUL ENDROIT ECRIT CET ECRAN, parce que les DEUX chemins de lecture y
   // arrivent : la lecture normale et le rattrapage.
-  function ecranNonAutorisee () {
-    // ⚠ ET ON FERME LA FEUILLE. Les deux cartes de reglages en sont sorties : les
-    // laisser ouvertes, avec un bouton « Poser » vivant, au-dessus d'une page qui
-    // vient d'annoncer que ses absences sont gerees par son employeur, lui
-    // promettait un geste que le serveur refuse desormais en 403 — et refermer
-    // ensuite les rangeait dans un conteneur devenu invisible.
+  function calendrierSansDroit () {
+    // ⚠ ET ON FERME LA FEUILLE. Elle peut etre ouverte sur un geste que le
+    // serveur vient de refuser (droit retire en cours de session) : la laisser
+    // ouverte avec un bouton vivant promettrait une action qui repond 403.
     closeModal()
-    const etat = document.getElementById('dispo-etat')
-    const contenu = document.getElementById('dispo-contenu')
-    etat.innerHTML = '<strong>Vos absences sont gérées par votre employeur</strong>Prévenez-le directement.'
-    etat.style.display = ''; contenu.style.display = 'none'
+    document.getElementById('dispo-etat').style.display = 'none'
+    document.getElementById('dispo-contenu').style.display = ''
+    // ⚠ VIDE, PAS « TOUT BARRE ». `jourTravaille` sans aucune regle ni exception
+    // rend `true` : aucun jour n'est raye. C'est le seul affichage honnete — le
+    // serveur ne dit pas qu'elle ne travaille pas, il REFUSE de repondre sur ses
+    // absences. Barrer le mois entier lui apprendrait quelque chose de faux.
+    mesJours = { regles: [], exceptions: [], conges: [], modifiable: false,
+                 sansDroit: true, mois: (mesJours ? mesJours.mois : 0) }
+    dispoCharge = true
+    peindreMesJours()
   }
 
   async function relireSilencieusement () {
+    // ⚠ LE MEME JETON QUE `chargerDisponibilites`, sinon il n'en garde que la
+    // moitie. Les deux ecrivent `mesJours` en entier, et les deux peuvent etre
+    // en vol ensemble : un chargement parti avant, mais qui atterrit apres ce
+    // rattrapage, se croyait encore le plus recent et reinstallait l'etat
+    // d'avant — exactement l'ecriture perimee que le jeton existe pour empecher.
+    const mien = ++lectureDispoCourante
     try {
       const res = await fetch(`/api/menages-public?action=disponibilites&token=${currentToken}`)
       if (!res.ok) return false
       const data = await res.json()
+      if (mien !== lectureDispoCourante) return false
       // ⚠ UN DROIT RETIRE N'EST PAS UN ECHEC DE LECTURE. Rendre `false` en
       // silence laissait les cases ACTIVES sous un « Non autorisé » seul :
       // chaque tape suivante repartait vers le meme 403. Quand l'employeur
       // reprend la main, l'ecran doit le dire — c'est le seul cas ou le
       // rattrapage a le droit de remplacer le panneau.
-      if (data.autorise !== true) { ecranNonAutorisee(); return false }
+      if (data.autorise !== true) { calendrierSansDroit(); return false }
       mesJours = { regles: data.regles || [], exceptions: data.exceptions || [],
                    conges: data.conges || [], modifiable: data.modifiable === true,
                    mois: mesJours ? mesJours.mois : 0 }
@@ -4179,28 +3692,11 @@ if ("serviceWorker" in navigator) {
     ouvrirJour(el.dataset.jour)
   })
 
-  // Sonde au demarrage : sert UNIQUEMENT a savoir si l'onglet doit exister.
-  // `self_view_reviews` a false => pas d'onglet du tout. Hors ligne ou token
-  // refuse => pas d'onglet non plus : on ne sait rien, on n'affiche rien.
-  // Un 503 en revanche fait apparaitre l'onglet, en etat de panne : le serveur
-  // nous parle, et masquer la vue ferait passer une panne pour un droit retire.
-  // ⚠ MEME LOGIQUE QUE L'ONGLET AVIS : l'onglet n'existe que si le serveur dit
-  // que le droit est la. Un onglet qui repondrait 403 a chaque geste vaudrait
-  // moins que pas d'onglet — et une panne ne doit pas le faire disparaitre non
-  // plus, sinon une indisponibilite passagere ressemble a un droit retire.
-  async function initDisponibilites () {
-    let res
-    try {
-      res = await fetch(`/api/menages-public?action=disponibilites&token=${currentToken}`)
-    } catch (err) { return }
-    if (res.status === 503) { montrerOnglets(); document.getElementById('tab-dispo').style.display = ''; return }
-    if (!res.ok) return
-    let data
-    try { data = await res.json() } catch (err) { return }
-    if (data.autorise !== true) return
-    montrerOnglets()
-    document.getElementById('tab-dispo').style.display = ''
-  }
+  // ⚠ LA SONDE DES DISPONIBILITES A DISPARU AVEC L'ONGLET QU'ELLE DEVOILAIT.
+  // Elle appelait `action=disponibilites` au demarrage pour savoir s'il fallait
+  // afficher « Mes jours » ; `chargerDisponibilites` appelle le MEME endpoint
+  // juste apres, avec la meme reponse. Deux appels identiques au chargement,
+  // dont un pour regler un onglet qui n'existe plus.
 
   async function initAvis () {
     let res
@@ -4210,7 +3706,7 @@ if ("serviceWorker" in navigator) {
     // ⚠ 503 : le serveur nous PARLE, le droit existe donc — mais il ne peut rien
     // compter. La porte s'ouvre avec son libelle, jamais vide : la vue Avis sait
     // dire la panne, encore faut-il pouvoir l'atteindre.
-    if (res.status === 503) { montrerOnglets(); montrerOngletAvis(); porteSansChiffre(); return }
+    if (res.status === 503) { montrerOngletAvis(); porteSansChiffre(); return }
     if (!res.ok) return
     let data
     try { data = await res.json() } catch (err) { return }
@@ -4219,7 +3715,6 @@ if ("serviceWorker" in navigator) {
     // qu'une fois — qui protege ici, pas le code. Un second appel ajoute plus
     // tard laisserait sinon un ratio perime en en-tete.
     if (data.actif === false || data.autorise !== true) { renderEnteteRatio(null); return }
-    montrerOnglets()
     montrerOngletAvis()
     renderEnteteRatio(data)
   }
@@ -4286,8 +3781,6 @@ if ("serviceWorker" in navigator) {
   let avisOuvert = false
   function montrerOngletAvis () {
     avisOuvert = true
-    const b = document.getElementById('tab-avis')
-    if (b) b.style.display = 'none'      // l'onglet ne revient pas
     majPorteAvis()
   }
 
@@ -4310,24 +3803,12 @@ if ("serviceWorker" in navigator) {
     el.style.display = ''
     if (!el.dataset.branche) {
       el.dataset.branche = '1'
-      el.addEventListener('click', () => setTab('avis'))
+      el.addEventListener('click', montrerAvis)
       el.addEventListener('keydown', e => {
         if (e.key !== 'Enter' && e.key !== ' ') return
-        e.preventDefault(); setTab('avis')
+        e.preventDefault(); montrerAvis()
       })
     }
-  }
-
-  let ongletsBranches = false
-  function montrerOnglets () {
-    const tabs = document.getElementById('tabs')
-    if (!tabs) return
-    tabs.style.display = ''
-    if (ongletsBranches) return
-    ongletsBranches = true
-    tabs.querySelectorAll('button').forEach(b => {
-      b.addEventListener('click', () => setTab(b.dataset.tab))
-    })
   }
 
   // ⚠ UN RAPPEL QUOTIDIEN CALCULE UNE SEULE FOIS N'EN EST PAS UN. Une PWA reste
@@ -4350,7 +3831,7 @@ if ("serviceWorker" in navigator) {
     // ecrivent tous deux l'en-tete : sur un droit retire entre les deux
     // reponses, l'ordre d'arrivee decidait de ce qui restait affiche.
     await initAvis()
-    if (currentTab !== 'avis') return
+    if (!vueAvis) return
     // ⚠ ET SEULEMENT SI ON PEUT ABOUTIR. Hors ligne, `chargerAvis` remplace la
     // liste par « service indisponible » — la prestataire qui lisait ses
     // extraits en sous-sol, met l'appli en fond et revient, perdait l'ecran
@@ -4420,17 +3901,20 @@ if ("serviceWorker" in navigator) {
     montrerSelecteurPeriode(data.periodeVue || p)
   }
 
-  // ⚠ ON MASQUE LE SEUL ONGLET AVIS, PAS LA BARRE. La masquer entierement
-  // emportait « Mes jours », parfaitement legitime, jusqu'au rechargement de
-  // la PWA : un droit retire sur les avis ne retire pas les autres.
+  // ⚠ ON FERME LA PORTE DES AVIS, ET ON RAMENE AU CALENDRIER. La barre d'onglets
+  // n'existe plus : masquer le seul acces sans rendre l'ecran d'origine laissait
+  // la prestataire sur une vue Avis vide qu'aucun geste ne quittait.
   // Deux chemins y menent — le droit retire entre la sonde et le clic, et le
   // lien devenu mort (401) — et ils doivent faire EXACTEMENT la meme chose :
   // deux versions du meme geste auraient diverge au premier ajustement.
   function masquerOngletAvis () {
-    const bouton = document.getElementById('tab-avis')
-    if (bouton) bouton.style.display = 'none'
+    // ⚠ `avisOuvert` A FAUX, SINON LA PORTE REVIENT. `renderEnteteRatio` la
+    // repeint a chaque sonde ; sans ce drapeau, le prochain reveil rouvrait un
+    // acces que le serveur vient de refuser.
+    avisOuvert = false
     renderEnteteRatio(null)
-    setTab('planning')
+    majPorteAvis()
+    montrerCalendrier()
   }
 
   function renderAvis (data) {
@@ -4592,8 +4076,6 @@ if ("serviceWorker" in navigator) {
   }
 
   // ─── Helpers dates ─────────────────────────────────────────────────────────
-  function getMonday(date) { const d = new Date(date); d.setHours(0,0,0,0); const day = d.getDay(); d.setDate(d.getDate() + ((day === 0) ? -6 : 1 - day)); return d }
-  function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }
   function formatDate(date) { return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) }
   function toDateStr(date) {
     // YYYY-MM-DD en heure locale (pas UTC, pour rester coherent avec departure
@@ -4604,7 +4086,6 @@ if ("serviceWorker" in navigator) {
     const d = String(date.getDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
-  function getDotColor(i) { return ['#3B82F6', '#10B981', '#F59E0B', '#EC4899'][i % 4] }
 
   init()
 </script>

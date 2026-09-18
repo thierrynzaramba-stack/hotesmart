@@ -2677,3 +2677,254 @@ Les écrans qui règlent ces deux choses sont les étapes **3.4 (planning de gar
 **3.5 (jours attitrés et « Mes disponibilités »)** du chantier prestataires, **non livrées**.
 D'ici là, ces réglages se posent en base — et c'est pour ça que l'alerte tourne en boucle sur
 un fait que l'hôte ne peut pas corriger depuis son écran.
+## Refonte v7 — le calendrier devient LA page de la PWA prestataire (18 septembre 2026)
+
+Cinq lots de présentation (A à E), puis un sixième chantier qui **supprime la
+page planning** : la PWA s'ouvre sur le calendrier, il n'y a plus d'onglets.
+
+### Les cinq lots de présentation
+
+- **Lot A — une seule grammaire visuelle.** La case du calendrier ne code plus
+  qu'UN état par un fond. Jour indisponible ou passé : le **numéro est barré**,
+  pas la case colorée. Jour où elle a un ménage : **fond vert + une pastille
+  chiffrée** (`.dispo-compte`). Ménage à prendre : la **bulle neutre à pointe**
+  reste, et elle reste sur un jour d'absence — le jour recule, pas l'offre.
+- **Lot B — une tape ouvre la feuille du jour.** Elle n'écrit plus directement :
+  la feuille montre ce qui s'y passe (ses ménages, les propositions, et la
+  bascule de disponibilité quand elle y a droit), et c'est là que le geste se
+  fait. **La feuille ignore le filtre de biens**, partout : une première version
+  l'avait déplacée sur la liste non filtrée pour une seule section, et les deux
+  se sont mises à diverger — la feuille s'ouvrait complètement VIDE en annonçant
+  « rien de prévu » sur une journée travaillée.
+- **Lot C — les réglages derrière un engrenage**, posé dans les cases mortes de
+  la dernière semaine. Les cartes sont **déplacées** par `appendChild`, pas
+  recréées : l'élément déménage AVEC ses écouteurs.
+- **Lot D — « Nouveau ménage », pas « Nouvelle réservation »**, et une annonce
+  **périme à 72 h** côté écran (la ligne reste en base : c'est la trace).
+- **Lot E — le ratio d'avis se donne pour cliquable** (souligné sur la PHRASE,
+  pas sur les chiffres), et la liste des 30 jours perd son titre.
+
+### ⚠️ Trois défauts de mise en page que les tests de structure n'ont pas vus
+
+C'est la leçon la plus chère du chantier, et elle s'est répétée **trois fois** :
+
+1. `.dispo-pastille` — le compteur du calendrier avait pris le nom de la case à
+   cocher 44×44 des jours de semaine, déclarée plus loin. Elle gagnait la
+   cascade et déformait toute la grille du mois. Renommé `.dispo-compte`.
+2. Le conteneur `display:none` des réglages **englobait le calendrier et la
+   liste** : un vrai navigateur n'aurait affiché qu'un onglet VIDE. 96 tests au
+   vert.
+3. Supprimer un bloc d'écran **sans supprimer son style** laisse une règle
+   orpheline qui continue de gagner en silence (`.lien-config`).
+
+**Règle : jsdom lit le DOM, jamais ce qui est visible.** Tout changement de
+présentation se relit **dans la feuille de style**, pas dans les tests.
+
+### Le sixième chantier : la page planning disparaît
+
+**La perte se dit avant le gain.** L'inventaire a été rendu à Thierry AVANT toute
+suppression. Ses décisions : **pas** de compteurs de semaine, **pas** de couleur
+par logement, **pas** de vues Semaine ni Jour, **pas** de mini-calendrier
+latéral. « La conception se centre sur les ménages du jour et les ménages à
+venir. » Un seul manque était bloquant, et il a été comblé d'abord.
+
+**Ce qui était bloquant : la fiche du ménage n'avait plus de porte.** Le planning
+était le SEUL endroit d'où l'on ouvrait `openModal` — donc « Marquer fait », les
+infos voyageur, le commentaire de l'hôte. Ses ménages dans la feuille du jour
+sont devenus des **boutons** (`data-mien`) qui ouvrent **la même fiche**, pas une
+copie : deux fiches du même ménage finiraient par dire deux choses différentes.
+Les quatre marques (`✓ FAIT`, `⏳` en attente d'envoi, `📝` consigne de l'hôte,
+`⏭` réservation changée) sont portées par la ligne.
+
+### ⚠️ La conséquence la plus lourde : `self_availability = 'none'`
+
+Tant que « Mes jours » était un ONGLET, `autorise: false` le remplaçait par
+« Vos absences sont gérées par votre employeur » et la prestataire gardait la
+page planning. **L'onglet est devenu la page** : le même message aurait laissé
+Régina — droit à `'none'`, ménages attribués d'office — devant une PWA
+**entièrement vide**, alors que c'est justement elle qui a le plus de ménages à
+lire.
+
+Le calendrier reste donc affiché, avec des disponibilités **vides** et
+`modifiable: false`, ce qui ferme déjà partout les gestes d'absence (engrenage,
+bascule de la feuille du jour, formulaire de congé). Ses ménages, eux, ne
+viennent pas de cette sonde : `loadData` les a déjà.
+
+**⚠️ VIDE N'EST PAS « TOUT BARRÉ ».** `jourTravaille` sans aucune règle ni
+exception rend `true` : aucun jour n'est rayé. Le serveur ne dit pas qu'elle ne
+travaille pas — il **refuse de répondre** sur ses absences. Barrer le mois entier
+lui apprendrait quelque chose de faux sur son propre planning. C'est la même
+règle que « une panne ne s'affiche jamais comme *aucune absence* », prise du côté
+du droit plutôt que de la panne.
+
+Trois états, donc, et trois phrases distinctes : **écriture** (le mode d'emploi),
+**lecture seule** (« vous pouvez consulter vos jours, mais c'est votre employeur
+qui pose vos absences »), **aucun droit** (« vos absences sont gérées par votre
+employeur »). Une seule phrase pour les deux derniers lui aurait fait chercher
+une liste absente.
+
+### ⚠️ Un écran supprimé emporte ses SORTIES, pas seulement ses entrées
+
+La barre d'onglets était le seul **retour** depuis la vue Avis. Sans elle, cette
+vue devenait un cul-de-sac dont on ne sortait qu'en rechargeant la PWA — et le
+bouton système d'Android ne compte pas : la vue ne change pas l'URL, il
+quitterait l'application. Un bouton « ‹ Mon calendrier » (44 px de haut) a été
+ajouté ; `masquerOngletAvis` ramène au calendrier au lieu de masquer le seul
+accès.
+
+### ⚠️ Le sélecteur de bien et le fil d'actualités sont HORS de `#dispo-contenu`
+
+Demande explicite de Thierry : le sélecteur remonte avec le calendrier. Le fil
+d'actualités aussi — c'est le seul endroit où un nouveau ménage s'annonce.
+Mais `#dispo-contenu` est masqué tant que la sonde des disponibilités n'a pas
+répondu : les y laisser aurait fait disparaître l'annonce d'un nouveau ménage
+**parce qu'un AUTRE endpoint était tombé**. Ils vivent donc directement sous
+`#dispo-vue`, au-dessus du message d'état.
+
+### ⚠️ Jeton de lecture sur `chargerDisponibilites`
+
+`chargerDisponibilites` remplace `mesJours` **en entier**. Deux lectures peuvent
+être en vol en même temps ; la plus LENTE écrivait en dernier, remettant un état
+d'avant. Pire : `basculerMonJour` reconnaît un rechargement à l'**identité** de
+`mesJours` et renonce alors à restituer — un refus serveur laissait donc
+l'absence affichée à l'écran. Même garde que `chargementCourant` côté avis :
+seule la dernière demande a le droit d'écrire.
+
+### ⚠️ Le filtre de biens n'était plus dimensionné pour un pouce
+
+`.filter-item { padding: 4px 0 }` donnait une cible de ~20 px. C'était une barre
+latérale de BUREAU, masquée sur téléphone au profit d'une feuille à gros boutons
+— feuille partie avec la page. Le même style est devenu celui du seul filtre qui
+reste, sur l'écran le plus tactile du produit. Passé à `min-height: 44px`, le
+`<label>` portant toute la ligne.
+
+Et la **pastille de couleur par bien a disparu** : elle renvoyait aux cartes du
+planning (`.prop-color-*`), qui n'existent plus. Une couleur qui ne code plus
+rien est une décoration qui ressemble à une information. `PROP_COLORS` et
+`getDotColor` étaient d'ailleurs déjà morts.
+
+### ⚠️ Trois pertes de plus, trouvées à la relecture — pas par les tests
+
+Le chantier bloquant (la fiche du ménage) avait été inventorié avant de
+supprimer. Ces trois-là ne l'avaient pas été, et aucune n'aurait fait rougir quoi
+que ce soit :
+
+1. **Le badge « À CONFIRMER · 2 j restants » vivait sur les cartes du
+   planning.** Un ménage qu'elle doit **confirmer avant un délai** ne se
+   distinguait plus d'un ménage acquis — ni dans la feuille du jour, ni dans le
+   calendrier. La fiche le disait encore, mais il fallait déjà savoir qu'il y
+   avait quelque chose à y lire, et le délai, lui, court. `badgeOffre` est
+   réintroduit en tête des marques de la ligne.
+2. **`.jligne` faisait 40 px.** Cette ligne est devenue le SEUL chemin vers la
+   fiche, donc vers « Marquer fait » — le geste le plus fréquent de l'écran.
+3. **`isMenageObsolete` lisait le filtre d'affichage.** La feuille du jour lui
+   passait `getMenages()`, qui honore `activeProps` : **décocher un bien effaçait
+   la marque ⏭ sur tous les autres**. C'est la règle du lot 2 reprise à l'envers
+   — *une règle ne se lit jamais à travers un réglage d'affichage* — et elle
+   s'est réintroduite par une variable, pas par une décision.
+
+**Règle qui en sort : quand un écran disparaît, on inventorie ce qu'il portait
+SEUL — ses entrées, ses sorties, et ses SIGNAUX.** La sortie manquante était le
+retour depuis la vue Avis ; le signal manquant était le délai d'une proposition.
+
+### Ce que le ménage a coûté en code mort
+
+La suppression a emporté 10 fonctions (7 de rendu, plus `setCurrentView`,
+`initDisponibilites` et `montrerOnglets`), une dizaine d'écouteurs, 39 `<div>` de
+mise en page et **122 règles CSS** devenues inatteignables. Le repérage s'est fait par
+comparaison : toutes les classes définies dans `<style>` contre tous les jetons
+présents ailleurs dans le fichier (HTML et JS confondus) — puis, pour les règles
+composées, *un sélecteur qui contient une classe morte ne peut jamais
+s'appliquer*. Un `@media` vidé de toutes ses règles est supprimé avec elles.
+
+### ⚠️ Deux contre-épreuves qui n'ont pas mordu, et ce qu'elles ont appris
+
+Onze défauts réintroduits, un par un. Deux n'ont rien fait rougir :
+
+- **Le jeton de lecture** (`lectureDispoCourante`) : le supprimer ne cassait
+  aucun test. Le harnais attendait désormais la lecture du démarrage, donc plus
+  aucun test ne mettait deux lectures en vol. Un test a été écrit pour ça — il
+  **fige** la réponse retenue, parce que le double lit son état au moment du
+  `json()` et aurait rendu la donnée FRAÎCHE, ne prouvant rien.
+- **Le premier défaut « le sélecteur redescend dans `#dispo-contenu` »** ne
+  faisait qu'inverser deux frères que le test ne regarde pas : **le défaut était
+  mal choisi, pas le test.** Refait en déplaçant vraiment les deux blocs, il a
+  mordu. *Une contre-épreuve qui ne rougit pas accuse le test — à condition que
+  le défaut soit bien celui que le test prétend voir.*
+
+### ⚠️ Un second fichier de tests parlait de la barre, et je ne l'avais pas ouvert
+
+`tests/menages-public-vue-avis.test.js` — 14 rouges, découverts par la suite
+COMPLÈTE, pas par le fichier que je relisais. Il éprouve la vue Avis avec un DOM
+factice et deux faux boutons d'onglet, et il vérifiait `#tabs` au départ,
+`setTab('avis')`, `setTab('planning')`, `menage-layout`, `fab-filters`.
+
+**Règle : avant de supprimer un élément d'écran, `grep` sur TOUT le dépôt — pas
+seulement sur le fichier qu'on modifie ni sur les tests qu'on connaît.** Ce qui
+garde une chose vit rarement à côté d'elle.
+
+Les tests ont été réécrits sur la nouvelle vérité, pas supprimés : « PAS
+d'onglet » devient « PAS de porte » (`#entete-ratio`), et le double expose la
+porte réelle là où il posait deux faux boutons — sinon le branchement de la
+porte ne serait exercé par personne, exactement le trou que ces faux boutons
+comblaient.
+
+**Et une assertion vraie par construction y a été trouvée par contre-épreuve** :
+« le droit retiré ramène au calendrier » lisait `#dispo-vue` sans l'avoir jamais
+masqué. Il faut y ÊTRE pour en revenir.
+
+### Ce que le harnais de test a dû apprendre
+
+La page **charge son calendrier toute seule** depuis qu'elle est la page. Un test
+qui en lançait une SECONDE mettait deux lectures en vol, et la plus ancienne
+pouvait écrire `mesJours` en dernier — quatre tests de rattrapage sont devenus
+rouges sans qu'aucun défaut n'ait été introduit. Le harnais accroche désormais la
+promesse du démarrage et l'**attend** au lieu de courir contre elle.
+
+⚠️ **Et l'attente est BORNÉE, et elle accuse.** Sans borne, une page qui ne charge
+plus son calendrier au démarrage ne fait pas rougir le test : elle le fait
+tourner indéfiniment, et une suite qui pend ne dit rien à personne.
+
+### Ce que la review a trouvé — six constats, dont deux qui vidaient l'écran
+
+**1. Une panne de la sonde effaçait TOUS ses ménages.** `#dispo-months` et
+`#carte-agenda` vivent dans `#dispo-contenu` et sont désormais les seuls endroits
+où ses ménages s'affichent. Un 503 sur `action=disponibilites` masquait ce
+conteneur — alors que les ménages viennent de `loadData`, qui a répondu. C'est la
+JUMELLE du constat `self_availability = 'none'` : j'avais traité la branche du
+droit et pas celle de la panne. **Une panne sur ses absences n'emporte pas son
+travail de la journée.**
+
+Trois états distincts en sortent, et trois phrases : *pas de droit* (« gérées par
+votre employeur »), *lecture échouée* (« n'ont pas pu être lues — vos ménages,
+eux, sont à jour »), *rafraîchissement échoué sur un état déjà lu* (« ce que vous
+voyez peut dater »). Et **une panne après une panne reste une panne** : sur un
+état déjà marqué `panneLecture`, « ce que vous voyez peut dater » laisserait
+croire qu'on a lu quelque chose un jour.
+
+**2. La fiche relisait l'obsolescence à travers le filtre.** J'avais converti la
+ligne de la feuille sur la liste non filtrée ; son SEUL consommateur, la fiche,
+ne l'avait pas été. Le même écran marquait le ménage ⏭ et proposait
+« ✓ Marquer fait ». *Quand on convertit un lecteur, on convertit tous ses
+consommateurs — sinon la contradiction se déplace, elle ne disparaît pas.*
+
+**3 et 4. Deux réussites annoncées dans le bandeau rouge.** `direReglages`
+retombe sur `'erreur'` par défaut ; depuis le lot C ces boutons ne vivent que
+dans la feuille. L'écriture réussissait et sa confirmation s'affichait comme un
+échec. Défaut antérieur à ce chantier, trouvé à son occasion.
+
+**5. Le jeton de lecture n'était posé qu'à moitié.** `relireSilencieusement`
+écrit `mesJours` en entier lui aussi, et ne passait ni par l'incrément ni par la
+vérification : un chargement parti avant, atterrissant après, se croyait encore
+le plus récent.
+
+**6 (latent). `openModal` était le seul écrivain de `#modal-body` à laisser
+`jourOuvert` posé.** Sauvé aujourd'hui par un accident de mise en page — la
+feuille n'émet le segment de disponibilité que si elle n'a AUCUN ménage ce
+jour-là, et les lignes `data-mien` que si elle en a. Le jour où cette exclusion
+bougera, le rattrapage repeindrait la feuille du jour par-dessus la fiche.
+
+**Trois de ces correctifs n'étaient gardés par personne** : la contre-épreuve
+n'a rien fait rougir pour les constats 1, 3/4 et 6. Un test par constat a été
+écrit — un correctif sans test se défait à la prochaine réécriture, en silence.
+
