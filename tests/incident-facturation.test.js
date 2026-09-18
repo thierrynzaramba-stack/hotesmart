@@ -72,5 +72,16 @@ test('l enveloppe Anthropic RELANCE l erreur, elle ne l avale pas', () => {
 test('reportIncident accepte une fenetre d anti-spam, et garde 1 h par defaut', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib/founder-notify.js'), 'utf8')
   assert.ok(/fenetreMs = 3600 \* 1000/.test(src), 'defaut inchange pour tous les autres incidents')
-  assert.ok(/Date\.now\(\) - fenetreMs/.test(src), 'la fenetre est reellement utilisee')
+
+  // ⚠ LA FENETRE DEMANDEE EST LA BASE, PLUS LA VALEUR FINALE.
+  // Depuis l'escalade (18 septembre 2026), un fait qui persiste voit sa fenetre
+  // doubler jusqu'a 24 h. Ce qui compte n'est donc plus « fenetreMs est utilisee
+  // telle quelle » mais « fenetreMs commande le calcul » : un appelant qui passe
+  // 12 h ne doit pas retomber a une heure.
+  assert.ok(/fenetreEscaladee\(type, pid, messageDe\(detail\), fenetreMs\)/.test(src),
+    'la fenetre demandee est passee au calcul d escalade')
+  assert.ok(/Date\.now\(\) - fenetreEffective/.test(src),
+    'et c est le resultat de ce calcul qui borne la requete')
+  assert.ok(/Math\.min\(base \* Math\.pow\(2, consecutives\), PLAFOND_ESCALADE_MS\)/.test(src),
+    'l escalade part de la base fournie, pas d une constante')
 })

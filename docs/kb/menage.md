@@ -2644,3 +2644,36 @@ ligne » passait quoi qu'on fasse, parce qu'une coupure qui rejette tout de suit
 rattrape la première tape **avant** que la seconde ne parte — les deux envois ne
 se chevauchaient jamais. Il faut les **tenir** tous les deux, puis les faire
 refuser ensemble.
+
+## « Personne n'est de garde » — le réglage qui manque, et lequel exactement
+
+Constaté sur Colomiers le 18 septembre 2026, à propos d'un ménage du **22 (un mardi)**.
+L'alerte disait vrai ; voici comment la lire.
+
+Pour porter un ménage, une prestataire doit franchir **deux filtres, dans cet ordre** :
+
+1. **attitrée ce jour-là** — `property_cleaning_providers.weekdays` (0 = dimanche … 6 =
+   samedi). `null` veut dire « tous les jours » ; **`[]` veut dire AUCUN jour** ;
+2. **disponible ce jour-là** — sa RRULE active (`provider_availability_rules`), moins ses
+   exceptions et ses congés.
+
+État de Colomiers ce jour-là :
+
+| prestataire | attitrée le mardi | disponible le mardi |
+|---|---|---|
+| Tiphaine | oui (`[0..6]`) | **non** — RRULE actives `SU,WE,TH,FR,SA` et `SU,FR,SA` |
+| Lola | **non** (`weekdays = []`) | oui — sa RRULE active inclut `TU` |
+| Lena Lou | **non** (`weekdays = []`) | — |
+
+Personne ne franchit donc les deux filtres. **Le réglage qui manque** : confier Colomiers à
+Lola sur des jours incluant le mardi (`weekdays` contenant `2`), ou élargir la disponibilité
+de Tiphaine au mardi.
+
+⚠️ **`weekdays = []` est un piège de lecture** : c'est le geste « je ne lui confie ce bien
+aucun jour », pas « je n'ai rien réglé ». Une liaison active avec `[]` ressemble à une
+prestataire rattachée, et n'en est pas une pour le moteur.
+
+Les écrans qui règlent ces deux choses sont les étapes **3.4 (planning de garde)** et
+**3.5 (jours attitrés et « Mes disponibilités »)** du chantier prestataires, **non livrées**.
+D'ici là, ces réglages se posent en base — et c'est pour ça que l'alerte tourne en boucle sur
+un fait que l'hôte ne peut pas corriger depuis son écran.

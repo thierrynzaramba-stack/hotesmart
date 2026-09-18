@@ -178,3 +178,53 @@ l'erreur le dise.
 coupé, le SMS et l'e-mail d'alerte ne partiront pas non plus — l'incident reste
 en base (`automation_incidents`), visible, mais silencieux. C'est une limite
 connue : la seule sortie serait un second fournisseur d'alerte, hors périmètre.
+
+## L'escalade — un incident qui dure doit s'espacer
+
+⚠️ **Vécu le 18 septembre 2026.** Colomiers avait un ménage du 22 sans personne de garde —
+un fait vrai, stable, que personne ne pouvait corriger sur-le-champ. L'anti-spam horaire a
+réexpédié la **même phrase toutes les heures** : 235 e-mails transactionnels sur le compte,
+au point de noyer un e-mail de test qu'on cherchait. C'est littéralement l'alarme qu'on
+apprend à ignorer, et c'est la faute que ce dépôt combat partout ailleurs.
+
+Une alerte utile dit deux choses : « ça ne va pas » et « ça ne va **toujours** pas ». La
+première mérite l'heure ; la seconde, de plus en plus d'espace.
+
+**La règle** : `1 h → 2 → 4 → 8 → 16`, plafonnées à **24 h**. La fenêtre passée en
+`fenetreMs` est la **base** du doublement, pas une valeur fixe.
+
+⚠️ **Aujourd'hui, un seul appelant escalade réellement : le défaut à 1 h.** `api_credit`
+(`lib/incident-facturation.js`) passe déjà 24 h, qui *est* le plafond — pour lui,
+`min(24 h × 2, 24 h)` vaut toujours 24 h et la mention « élargi » n'apparaît jamais. Ce n'est
+pas un défaut, c'est une conséquence : un crédit épuisé est le même fait toute la journée.
+Mais la doc l'annonçait comme l'exemple d'un appelant qui escalade — c'était faux.
+
+**Le compteur repart de zéro** quand le fait **se tait** : deux alertes séparées de plus de
+**48 h** n'appartiennent pas au même épisode. L'hôte corrige, trois jours passent, le même
+message revient — et il réveille tout de suite au lieu d'hériter du silence de l'ancien.
+
+⚠️ **La remise à zéro « par acquittement » ne suffit pas, et elle était même du code mort** :
+`acquitted_at` n'est posé que sur les incidents `overbooking`, qui n'empruntent pas
+`reportIncident`. Le test existe toujours (il coûte une ligne et servira le jour où
+l'acquittement s'élargira), mais c'est la **rupture par le silence** qui fait le travail.
+
+⚠️ **Un autre fait sur le même bien n'efface pas l'ancienneté du nôtre.** On compte les
+lignes qui disent la *même* chose, sans s'arrêter à la première qui dit autre chose.
+Rompre au premier message différent paraissait juste : `menage_non_assigne` a **deux
+producteurs** sur un même bien (`synchroniserMenages` et `expirerPropositions`), avec des
+phrases différentes, dans la même passe de cron. Le fait A, escaladé à 8 h, voyait la ligne
+de B arriver en tête, repartait à 1 h — et les deux s'étouffaient mutuellement à l'heure,
+exactement le mode de panne à 235 e-mails que ce lot corrige.
+
+**Fail-safe** : une lecture en échec rend la fenêtre de base. On préfère une alerte de trop à
+une alerte manquante — c'est le sens même d'une alerte.
+
+L'e-mail **dit** quand la fenêtre a été élargie (« élargi parce que ce fait persiste »), sinon
+le fondateur croit l'alerte perdue alors qu'elle est seulement espacée.
+
+### Ce que l'escalade ne remplace pas
+
+Elle rend le bruit supportable ; elle ne corrige pas sa cause. Pour Colomiers, la cause était
+réelle : le 22 septembre est un **mardi**, et sur ce bien aucune prestataire n'est à la fois
+*attitrée* ce jour-là et *disponible*. Voir `docs/kb/menage.md` — l'escalade ne doit pas
+servir à ne plus voir un réglage qui manque.
