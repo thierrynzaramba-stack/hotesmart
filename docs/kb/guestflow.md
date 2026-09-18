@@ -529,6 +529,19 @@ et l'hôte ne saurait jamais qu'on lui a écrit. Il atterrit dans `agent_tasks`
 (`task_type: 'email_non_rattache'`, `pending_validation`), là où l'hôte regarde déjà — avec
 la raison et le message conservé.
 
+### Dettes connues de l'inbound (seconde review, 18 septembre 2026)
+
+Deux reviews, aucune fuite entre comptes ni contournement d'authentification — donc on
+pousse, et ce qui reste se **note** plutôt que de relancer une review de plus (règle
+« une review par commit, pas de boucle »).
+
+| # | dette | pourquoi elle attend |
+|---|---|---|
+| 1 | **Un e-mail à DEUX adresses-jeton ne nourrit qu'un fil** | `items[0]` et `uuid[0]` : les destinataires suivants sont jetés avec un `200 {ok}`, donc sans rejeu possible. La seconde réservation n'aura jamais le message. Traiter la liste entière est une refonte de la boucle, pas une retouche |
+| 2 | **Un `SpamScore ≥ 5` jette en silence** | la garde vient de devenir vivante : un faux positif (réponse relayée ou transférée, SPF-DKIM cassé) fait maintenant disparaître un vrai message. Mettre en file ne servirait à rien ici — le compte n'est pas encore résolu, la tâche serait invisible (voir ci-dessous). **Arbitrage produit à trancher par Thierry** : perdre un vrai message, ou laisser du courrier indésirable réveiller l'agent IA |
+| 3 | **`evenement_introuvable` / `404` rejouent en boucle** | un évènement purgé par la rétention Brevo, ou un POST tiers portant un `Uuid` inventé (l'endpoint n'est pas authentifiable), produisent des 503 jusqu'à épuisement des tentatives de Brevo. Borné, mais bruyant |
+| 4 | **Un `ref.sender` vide fait afficher l'adresse du payload** | conséquence de la tolérance symétrique : l'adresse montrée à l'hôte n'est plus corroborée sur ce chemin. Elle est informative — le rattachement, lui, vient toujours du `recipient` relu |
+
 ⚠️ **Une tâche sans `user_id` n'est visible de personne** : l'écran lit `agent_tasks` filtré
 sur le compte courant, et la RLS ne laisserait rien passer non plus. La branche « corps vide »
 se décide donc **après** la résolution de la réservation, pour que la tâche porte son compte

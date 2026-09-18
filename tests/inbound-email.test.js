@@ -128,7 +128,12 @@ function remise (payload, o = {}) {
   etat.brevo = payload ? {
     receivedAt: '2026-09-18T19:34:28.000+02:00',
     messageId: o.refMessageId ?? payload.MessageId ?? '<msg-1@exemple.test>',
-    sender: o.refSender ?? adr(payload.From) ?? 'marie@exemple.test',
+    // ⚠ `||`, PAS `??` : `adr` rend TOUJOURS une chaine, donc le repli en `??`
+    // etait du code mort. Un payload sans `From` donnait `ref.sender = ''`, et
+    // sous la tolerance symetrique la comparaison d'expediteur etait SAUTEE :
+    // le test passait au vert sans rien verifier. Constat de la seconde review,
+    // et c'est la meme famille que tout ce chantier — un faux qui ment.
+    sender: o.refSender ?? (adr(payload.From) || 'marie@exemple.test'),
     recipient: o.recipient !== undefined ? o.recipient : ADRESSE,
     subject: o.refSubject ?? payload.Subject ?? 'Re: votre séjour',
     attachments: [], logs: []
@@ -278,6 +283,25 @@ test('un refus DECIDE reste acquitte en 200 : le rejeu n\'y changerait rien', as
   // Une cle refusee non plus : c'est notre configuration, pas un alea.
   remise(mail(), { brevoStatus: 401 })
   assert.strictEqual((await appel()).code, 200)
+
+  // ⚠ ET SURTOUT LA CLE ABSENTE. Elle est rendue AVANT qu'on regarde l'uuid :
+  // la classer « passagere » envoyait 100 % des e-mails entrants en 503 sur une
+  // panne de configuration qui ne se repare pas toute seule. Regression du
+  // premier correctif, attrapee par la seconde review.
+  const cle = process.env.ALERT_BREVO_API_KEY
+  delete process.env.ALERT_BREVO_API_KEY
+  try {
+    delete require.cache[require.resolve('../api/inbound-email.js')]
+    const sansCle = require('../api/inbound-email.js')
+    remise(mail())
+    const res = reponse()
+    await sansCle({ method: 'POST', body: { items: [mail()] } }, res)
+    assert.strictEqual(res.code, 200, 'une cle absente s\'acquitte, elle ne se rejoue pas')
+    assert.strictEqual(res.corps.raison, 'cle_plateforme_absente')
+  } finally {
+    process.env.ALERT_BREVO_API_KEY = cle
+    delete require.cache[require.resolve('../api/inbound-email.js')]
+  }
 })
 
 // ─── `Uuid` est un TABLEAU (constat de review) ──────────────────────────────

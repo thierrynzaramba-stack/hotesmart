@@ -139,8 +139,15 @@ const premiereAdresse = v => {
 // 429 ou une coupure reseau PERDAIT DEFINITIVEMENT la reponse d'un voyageur —
 // sans trace, et l'hote ne l'apprenait pas. Ces raisons-la se reessayent :
 // l'evenement peut aussi n'etre pas encore interrogeable a l'instant du POST.
-// Les autres (pas d'uuid, cle refusee) ne guerissent pas en recommencant.
-const RAISON_PASSAGERE = /^(cle_plateforme_absente|evenement_introuvable|brevo_injoignable|brevo_(404|408|425|429|5\d\d))/
+// Les autres ne guerissent pas en recommencant, et `cle_plateforme_absente` est
+// la PIRE a y mettre : elle est rendue AVANT meme qu'on regarde l'uuid, donc
+// une variable d'environnement manquante enverrait 100 % des e-mails entrants
+// en 503 — Brevo rejoue une panne de configuration qui ne peut pas se reparer
+// seule, epuise ses tentatives, et chaque reponse de voyageur est perdue. Avant
+// ce chantier elles etaient au moins acquittees et journalisees. Constat de la
+// SECONDE review : c'est une regression du correctif lui-meme, pas du code
+// d'origine — le genre que ce depot a deja paye deux fois.
+const RAISON_PASSAGERE = /^(evenement_introuvable|brevo_injoignable|brevo_(404|408|425|429|5\d\d))/
 
 async function relireChezBrevo (uuid) {
   if (!CLE_BREVO) return { ok: false, raison: 'cle_plateforme_absente' }
