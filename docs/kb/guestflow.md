@@ -437,7 +437,11 @@ Ce qui **désigne** une ressource vient donc de Brevo ; ce qui la **décrit** pe
 POST, une fois corroboré :
 
 - le **rattachement** se fait sur le `recipient` **relu**, jamais sur celui du payload ;
-- `sender`, `subject` et `messageId` sont **confrontés** — divergence = refus ;
+- `sender`, `subject` et `messageId` sont **confrontés** — divergence = refus. La tolérance
+  est **symétrique** : Brevo documente tous les champs relus comme optionnels, et comparer une
+  valeur à une absence n'est pas constater une contradiction. Une première version ne tolérait
+  l'absence que du côté POST, et refusait donc un e-mail légitime dès que Brevo ne rendait pas
+  le sujet ;
 - l'horodatage vient de Brevo : une date du payload est choisie par l'expéditeur et ferait
   mentir l'ordre du fil ;
 - **sans `uuid`, on ne relit rien et on ne traite rien.**
@@ -445,9 +449,35 @@ POST, une fois corroboré :
 C'est la règle 11 appliquée à ce qui compte : le compte et la réservation ne viennent jamais
 du message.
 
-**On acquitte toujours en 200**, même quand on ignore : un 4xx/5xx ferait rejouer Brevo
-indéfiniment sur un e-mail qu'on a décidé d'écarter. Ce qu'on ne traite pas se journalise,
-ça ne se renvoie pas au facteur.
+**On acquitte en 200 tout ce qu'on a décidé**, même quand on ignore : un 4xx/5xx ferait
+rejouer Brevo indéfiniment sur un e-mail qu'on a décidé d'écarter. Ce qu'on ne traite pas se
+journalise, ça ne se renvoie pas au facteur.
+
+**Une seule exception, et elle va dans l'autre sens : ce qu'on n'a pas pu décider se
+redemande.** Quand la relecture tombe pour une cause passagère — `429`, `5xx`, coupure
+réseau, événement pas encore interrogeable, clé absente — on rend **503** et Brevo rejoue.
+Constat de review, et le défaut était grave : *toute* relecture ratée rendait 200, donc Brevo
+ne rejouait jamais, donc un simple incident réseau **perdait définitivement** la réponse d'un
+voyageur, sans trace et sans que l'hôte l'apprenne. L'alternative — mettre le message en file
+— a été écartée par Thierry le 18 septembre 2026 : le rejeu **réessaie** l'authentification,
+la mise en attente y **renoncerait**. Les causes qui ne guérissent pas en recommençant (pas
+d'`uuid`, clé refusée) restent en 200.
+
+### ⚠️ La forme réelle du payload Brevo — trois écarts qui passaient au vert
+
+Le faux client des tests servait une forme **inventée**, et trois gardes reposaient dessus :
+
+| ce que le code lisait | ce que Brevo envoie | conséquence |
+|---|---|---|
+| `Spam.Score` | **`SpamScore`**, flottant, **à la racine** | `NaN` → seuil jamais atteint : **l'anti-spam était mort en production** |
+| `Uuid` scalaire | **`Uuid` est un tableau** (un par destinataire) | marchait par accident à un destinataire ; à deux, l'URL devenait `a%2Cb` → 404 → message perdu. Et `[]` est *truthy* : la garde « pas d'uuid, pas de traitement » était contournée |
+| `From` chaîne | **`From` est `{Address, Name}`** | la confrontation comparait une chaîne à un objet |
+
+**La leçon, pour la quatrième fois dans ce dépôt : un faux client qui n'imite pas la forme du
+vrai ne prouve rien du vrai.** Le commit précédent avait réparé le faux de la *relecture* et
+laissé celui du *payload* — or depuis que le payload porte le corps, les en-têtes et le spam,
+c'est **lui** qui doit être imité fidèlement. La contre-épreuve est désormais systématique :
+on réintroduit le défaut et on vérifie que le test rougit.
 
 ### L'adresse de réponse porte sa preuve (`lib/jeton-reponse.js`)
 
@@ -477,7 +507,8 @@ le permettent.
 
 On écarte sur les **en-têtes normalisés** (`Auto-Submitted` ≠ `no` au sens de la RFC 3834,
 `X-Autoreply`, `Precedence: bulk|junk|list`, `List-Id`, `List-Unsubscribe`, `X-Loop`) et sur
-un `Spam.Score ≥ 5` — jamais sur une heuristique de sujet, qui varierait avec la langue.
+un **`SpamScore` ≥ 5** (à la racine du payload — voir le tableau des trois écarts
+ci-dessus) — jamais sur une heuristique de sujet, qui varierait avec la langue.
 `Auto-Submitted: no` désigne explicitement un message humain : il passe.
 
 ### ⚠️ Une réservation morte ne réveille pas l'agent
@@ -497,6 +528,15 @@ autre adresse, ou dont le client mail a mangé l'adresse de réponse, disparaît
 et l'hôte ne saurait jamais qu'on lui a écrit. Il atterrit dans `agent_tasks`
 (`task_type: 'email_non_rattache'`, `pending_validation`), là où l'hôte regarde déjà — avec
 la raison et le message conservé.
+
+⚠️ **Une tâche sans `user_id` n'est visible de personne** : l'écran lit `agent_tasks` filtré
+sur le compte courant, et la RLS ne laisserait rien passer non plus. La branche « corps vide »
+se décide donc **après** la résolution de la réservation, pour que la tâche porte son compte
+et son bien — « l'hôte voit qu'on lui a écrit » était sinon une phrase, pas une garantie.
+Effet de bord réglé au passage : un corps vide ne masque plus le diagnostic `jeton_refuse`.
+**Dette connue** : les mises en attente qui surviennent *avant* cette résolution
+(`sans_adresse_de_reponse`, `jeton_refuse`, `reservation_ambigue`, `reservation_introuvable`)
+restent sans `user_id` — là c'est structurel, le compte n'est pas encore connu.
 
 ### La réponse de l'IA emprunte le routage commun (dette 3, soldée le 18 septembre 2026)
 
