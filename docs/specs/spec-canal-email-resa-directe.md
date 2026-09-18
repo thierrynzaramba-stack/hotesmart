@@ -174,12 +174,11 @@ dans HôteSmart, les réponses arrivent dans la boîte mail de l'hôte (`reply-t
 d'expédition). Le jour où ce chantier s'ouvrira, `lib/cron-classify.js` devra router comme les
 autres (voir dette 3).
 
-### 3. `lib/cron-classify.js` reste hors du routage
+### 3. ~~`lib/cron-classify.js` hors du routage~~ — SOLDÉE le 18 septembre 2026
 
-Les réponses automatiques de l'IA appellent le provider en direct, sans lire le retour, puis
-écrivent dans `messages` inconditionnellement. Sans objet aujourd'hui — une réservation
-Offline n'a pas de fil, donc aucun message entrant à classer. Mais le jour de l'inbound
-e-mail, ce producteur rouvrira le faux vert s'il n'est pas traité.
+Fermée par l'étape 6 du chantier inbound : la réponse de l'IA passe par `sendGuestMessage`,
+son retour est lu, et un échec n'écrit plus ni fil ni `messages`. Détail :
+`docs/kb/guestflow.md`.
 
 ### 4. Les trois lignes mensongères de `messages`
 

@@ -432,21 +432,34 @@ et l'hôte ne saurait jamais qu'on lui a écrit. Il atterrit dans `agent_tasks`
 (`task_type: 'email_non_rattache'`, `pending_validation`), là où l'hôte regarde déjà — avec
 la raison et le message conservé.
 
-### ⚠️ Ce qui reste HORS du routage : `lib/cron-classify.js`
+### La réponse de l'IA emprunte le routage commun (dette 3, soldée le 18 septembre 2026)
 
-Les réponses **automatiques de l'IA** à un message entrant n'empruntent pas `canalPour` :
-elles appellent le provider en direct, sans lire le retour, puis écrivent dans `messages`
-inconditionnellement.
+`lib/cron-classify.js` appelait `channex.sendMessage` **lui-même**, sans lire le retour, puis
+écrivait dans `messages` inconditionnellement. Sur une réservation `Offline`, Channex rend
+`HTTP 422 not_supported` : le voyageur ne recevait rien, et le cœur affirmait le contraire.
 
-C'est **sans objet pour le canal e-mail en v1** — une réservation Offline n'a pas de fil, donc
-aucun message entrant, donc rien à classer : le chemin n'est pas atteignable. Mais deux
-choses restent vraies et méritent d'être écrites plutôt que supposées :
+C'était sans objet tant qu'aucune Offline n'avait de fil. **L'inbound e-mail vient d'en
+créer un** : la dette devenait une panne, d'où sa fermeture dans ce chantier.
 
-1. le jour où l'ingestion des réponses e-mail existera (chantier séparé, hors périmètre),
-   ce producteur devra router comme les autres, sans quoi il rouvrira le faux vert ;
-2. son `recordMessage` inconditionnel après un envoi dont le retour n'est pas lu est le même
-   défaut que celui corrigé ailleurs — il concerne aujourd'hui les seuls canaux OTA, où
-   l'envoi fonctionne. **Dette notée, pas soldée.**
+Ce qui change :
+
+- l'envoi passe par **`sendGuestMessage`**, avec le **booking** et non l'identifiant nu —
+  sans lui, le routage ne peut se faire que par provider, c'est-à-dire comme avant ;
+- les deux chemins le fournissent : Channex depuis le snapshot du cœur (`source`,
+  `guestEmail`), Beds24 depuis le booking brut de l'API (`channel` / `apiSource`) ;
+- **le retour est lu.** Un échec ne produit ni fil ni ligne dans `messages` — rien ne doit
+  affirmer qu'une réponse est partie quand elle ne l'est pas — et il remonte en erreur de
+  cycle *et* en incident `send_failure` : « le voyageur attend toujours » ;
+- `messages.canal` porte le chemin réellement emprunté.
+
+Le **kill switch** et le **Mode Test** restent en amont de l'envoi : les déplacer sous le
+routage les rendrait contournables par le canal e-mail. Un test le vérifie par la position
+dans le fichier.
+
+⚠️ Ce module parle encore au provider pour **lire** (`syncMessages`, `syncBookings`,
+`getPropertyMessages`), et c'est sain. Le test `tests/reponse-ia-routee.test.js` en tient la
+liste exhaustive et échoue si elle change — y compris pour un appel qui ne serait pas un
+envoi : on veut le voir passer et le qualifier, pas le découvrir en production.
 
 ## Kill switch (pause par bien) — détail dans `alertes.md`
 Bouton **Couper l'IA / Réactiver** sur `/biens` (miroir dans la config GuestFlow). Coupé = plus de
