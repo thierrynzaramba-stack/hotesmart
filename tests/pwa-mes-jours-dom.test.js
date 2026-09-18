@@ -696,21 +696,41 @@ test('HORS LIGNE, cocher un jour n\'envoie rien', async () => {
   assert.match(message(w), /Hors ligne/)
 })
 
-test('la légende explique CHAQUE marque — elle n\'en laisse deviner aucune', async () => {
-  // La maquette portait quatre entrées, l'écran n'en avait que trois : un jour
-  // marqué d'un point ne ressemblait à rien de connu.
-  // ⚠ Le lot 2 a ajouté DEUX marques (mon ménage, à prendre) et retiré le rouge
-  // des jours absents. Une légende qui montre des couleurs absentes de l'écran
-  // est pire qu'une légende absente : elle fait douter de ce qu'on voit.
+test('plus de légende du tout sous le calendrier', async () => {
+  // ⚠ CE TEST EXIGEAIT LA LÉGENDE JUSQU'AU 18 SEPTEMBRE 2026 — six entrées, et
+  // il gardait qu'aucune marque ne reste à deviner. Thierry l'a fait retirer en
+  // deux temps : d'abord les six entrées, puis l'explication A/B que j'avais
+  // gardée — « le texte en légende est inutile ». Chaque case s'ouvre d'une tape
+  // et DIT ce qu'elle porte ; la légende paraphrasait la feuille du jour sur six
+  // lignes de téléphone.
+  // ⚠ ON VÉRIFIE L'ABSENCE DE L'ÉLÉMENT, pas son contenu vide : un conteneur qui
+  // reste garde sa marge, et surtout il invite à le re-remplir.
   const { w, t } = monter()
   t.seed()
   await t.chargerDisponibilites()
-  const txt = w.document.getElementById('dispo-legende').textContent
-  const html = w.document.getElementById('dispo-legende').innerHTML
-  assert.match(txt, /posée à la main/)
-  assert.match(txt, /mon ménage/)
-  assert.match(txt, /à prendre/)
-  assert.ok(!/#FBE9E6|#C0392B/.test(html), 'plus aucune couleur retirée de la grille')
+  assert.strictEqual(w.document.getElementById('dispo-legende'), null,
+    'la légende n\'existe plus dans la page')
+  const vue = w.document.getElementById('dispo-vue').textContent
+  for (const mot of ['Je ne travaille pas', 'posée à la main', 'mon ménage',
+                     'à gauche de chaque semaine']) {
+    assert.ok(!vue.includes(mot), `« ${mot} » a bien disparu de l'écran`)
+  }
+})
+
+test('même en quinzaine, rien ne revient sous le calendrier', async () => {
+  // ⚠ C'ÉTAIT LA SEULE EXCEPTION QUE J'AVAIS GARDÉE, et elle est tombée avec le
+  // reste. CE QUE ÇA EMPORTE : les lettres A/B à gauche de chaque semaine n'ont
+  // plus d'explication sur cet écran. Le repérage « cette semaine est une
+  // semaine A » reste derrière l'engrenage, dans la carte où l'alternance se
+  // règle — c'est-à-dire là où on vient quand on se demande ce que A veut dire.
+  const lundiB = iso(new Date(new Date(lundiCourant + 'T12:00:00Z').getTime() + 7 * 86400000))
+  const { w, t } = monter({ regles: [
+    regle('rA', 'A', [1], 2, lundiCourant),
+    regle('rB', 'B', [6], 2, lundiB) ] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.strictEqual(w.document.getElementById('dispo-legende'), null)
+  assert.ok(!/à gauche de chaque semaine/.test(w.document.getElementById('dispo-vue').textContent))
 })
 
 test('plus de « Aucun jour habituel n\'est réglé »', async () => {
@@ -939,24 +959,24 @@ test('« viens exceptionnellement » ne se lit pas « votre employeur vous a ret
   assert.ok(segments(w).every(b => b.disabled), 'et elle ne peut pas la défaire seule')
 })
 
-test('la confirmation survit au repeint, puis s\'efface quand elle change de mois', async () => {
-  // ⚠ LES DEUX MOITIÉS DU MÊME RÉGLAGE, et elles se contredisent si on se trompe
-  // d'endroit. Le repeint suit IMMÉDIATEMENT le geste (rendu optimiste) : lever
-  // le drapeau là effacerait le « ✓ » dans la même seconde (c'est le défaut
-  // d'origine, du temps où c'était la relecture qui repeignait). Ne jamais le
-  // lever le faisait suivre de mois en mois, l'aide ne revenant plus.
+test('la confirmation d\'une bascule survit au repeint immédiat', async () => {
+  // ⚠ LE REPEINT SUIT IMMÉDIATEMENT LE GESTE (rendu optimiste). Poser le drapeau
+  // au mauvais endroit effacerait le « ✓ » dans la même seconde — c'est le
+  // défaut d'origine, du temps où c'était la relecture qui repeignait.
+  // ⚠ CE TEST S'APPELAIT « …puis s'efface quand elle change de mois » et lisait
+  // le retour de la phrase d'aide dans le bandeau. La phrase a été retirée le
+  // 18 septembre 2026, et sans elle cette seconde moitié devenait VRAIE PAR
+  // CONSTRUCTION : la confirmation d'une bascule vit dans la FEUILLE depuis le
+  // lot B, le bandeau ne l'a jamais portée. La contre-épreuve l'a dit — supprimer
+  // la remise à zéro du bandeau ne faisait rien rougir. L'effacement au
+  // changement de mois est désormais gardé là où il se produit vraiment : sur le
+  // refus arrivé après la fermeture, plus haut.
   const { w, t } = monter()
   t.seed()
   await t.chargerDisponibilites()
   basculerDispo(w, dans(2))
   await souffler(60)
   assert.match(message(w), /enregistrée/, 'elle survit au repeint')
-  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
-  // ⚠ LA CONFIRMATION VIT DANS LA FEUILLE (lot B) : on la ferme avant de juger
-  // le bandeau de la carte, sinon on lit celle de la feuille et le test ne parle
-  // plus de ce qu'il croit.
-  w.document.getElementById('dispo-suiv').click()
-  assert.match(message(w), /Touchez un jour/, 'et l\'aide revient quand elle regarde ailleurs')
 })
 
 // ─── Le clic disponibilité : ce que le lot 1 a corrigé ────────────────────
@@ -2292,6 +2312,16 @@ test('un refus arrivé après la fermeture se dit dans le BANDEAU, pas dans le v
     'la feuille reste fermée')
   assert.match(w.document.getElementById('dispo-message').textContent, /interrompu|rechargée/,
     'et le bandeau de la carte reprend la parole')
+
+  // ⚠ ET CE MESSAGE NE LA SUIT PAS DE MOIS EN MOIS. `dire()` pose un drapeau pour
+  // que le message survive au repeint qui suit le geste ; `oublierLeMessage` le
+  // lève au changement de mois, et le bandeau se VIDE. Sans cette remise à zéro,
+  // « Envoi interrompu » resterait affiché au-dessus d'un mois où elle n'a rien
+  // fait. C'est le seul endroit où l'effacement est éprouvable : c'est le seul
+  // chemin qui écrit vraiment dans ce bandeau.
+  w.document.getElementById('dispo-suiv').click()
+  assert.strictEqual(w.document.getElementById('dispo-message').textContent.trim(), '',
+    'le bandeau se vide dès qu\'elle regarde ailleurs')
 })
 
 test('la feuille d\'un jour filtré n\'est jamais VIDE', async () => {
@@ -2614,15 +2644,17 @@ test('hors ligne, l\'alternance A/B le dit DANS la feuille', async () => {
   assert.match(vus, /Hors ligne/, 'le refus se lit là où elle regarde')
 })
 
-test('la phrase d\'accueil ne renvoie plus vers le vide', async () => {
-  // ⚠ « posez un congé ci-dessous » : depuis le lot C le formulaire vit derrière
-  // l'engrenage. La phrase envoyait défiler vers un espace vide — un mode
-  // d'emploi qui pointe à côté fait douter de ce qu'on a sous les yeux.
+test('plus de phrase d\'accueil du tout — le bandeau part VIDE', async () => {
+  // ⚠ CE TEST GARDAIT LA CIBLE DE LA PHRASE : « posez un congé ci-dessous »
+  // envoyait défiler vers un espace vide depuis que le formulaire vit derrière
+  // l'engrenage, et il vérifiait qu'elle nommait bien la porte. Thierry a fait
+  // retirer la phrase entière le 18 septembre 2026 — une phrase qui n'existe pas
+  // ne peut plus pointer à côté, et ce qu'elle décrivait (« touchez un jour »)
+  // est le geste le plus évident d'un calendrier dont chaque case est un bouton.
   const { w, t } = monter({})
   t.seed(); await t.chargerDisponibilites()
   const aide = w.document.getElementById('dispo-message').textContent
-  assert.ok(!/ci-dessous/.test(aide))
-  assert.match(aide, /Mes jours/, 'elle nomme la porte')
+  assert.strictEqual(aide.trim(), '', 'aucun mode d\'emploi au repos')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

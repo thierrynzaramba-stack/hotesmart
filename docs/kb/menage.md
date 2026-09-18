@@ -2928,3 +2928,46 @@ bougera, le rattrapage repeindrait la feuille du jour par-dessus la fiche.
 n'a rien fait rougir pour les constats 1, 3/4 et 6. Un test par constat a été
 écrit — un correctif sans test se défait à la prochaine réécriture, en silence.
 
+### La légende disparaît (18 septembre 2026)
+
+Six entrées — « Je travaille », « Je ne travaille pas », « Congé », « absence
+posée à la main », « mon ménage », « à prendre » — et la phrase d'accueil
+« Touchez un jour pour voir ce qui s'y passe ». Retirées à la demande de
+Thierry : **chaque case s'ouvre d'une tape et DIT ce qu'elle porte.** La légende
+paraphrasait la feuille du jour sur six lignes de téléphone, entre le mois et la
+liste des 30 prochains jours.
+
+J'avais d'abord gardé une exception — l'explication des lettres **A/B** à gauche
+de chaque semaine, la seule marque qui ne s'explique nulle part ailleurs sur cet
+écran. Thierry l'a fait tomber aussi (« le texte en légende est inutile »).
+
+⚠️ **Ce que ça emporte, et c'est assumé** : en mode quinzaine, les lettres A et B
+n'ont plus d'explication sur le calendrier. Le repérage « cette semaine est une
+semaine A » reste derrière l'engrenage, dans la carte des jours habituels —
+c'est-à-dire à l'endroit même où l'alternance se règle, et où l'on vient quand on
+se demande ce que A veut dire.
+
+⚠️ **Le bandeau `#dispo-message`, lui, RESTE.** Ce qui a disparu est son mode
+d'emploi *au repos*. Il porte encore les confirmations (« ✓ Absence
+enregistrée »), les trois états qu'elle ne peut pas déduire de l'écran (pas de
+droit, lecture échouée, rafraîchissement échoué) et les refus. **Et il se VIDE**
+au lieu de sauter : sans cette remise à zéro, `oublierLeMessage` n'aurait plus
+rien pour remplacer la confirmation, qui suivrait la prestataire de mois en mois.
+
+⚠️ **Le style part avec l'élément** (`.dispo-legende`, deux règles) — la règle du
+dépôt : supprimer un bloc d'écran sans supprimer son style laisse une règle
+orpheline qui continue de gagner en silence.
+
+⚠️ **Et la contre-épreuve a démasqué une assertion devenue vide de sens.** Le
+test « la confirmation survit au repeint, **puis s'efface quand elle change de
+mois** » lisait le RETOUR de la phrase d'aide dans le bandeau. Sans la phrase, sa
+seconde moitié devenait **vraie par construction** : la confirmation d'une
+bascule vit dans la FEUILLE depuis le lot B, le bandeau ne l'a jamais portée.
+Supprimer la remise à zéro ne faisait donc rien rougir.
+
+L'effacement est maintenant gardé **là où le bandeau parle vraiment** — sur le
+refus qui arrive après la fermeture de la feuille, seul chemin qui y écrit.
+**Règle : quand on retire un contenu, on vérifie ce que les tests qui le
+lisaient prouvaient encore — supprimer la phrase a suffi à vider une assertion
+sans la faire rougir.**
+

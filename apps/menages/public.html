@@ -297,10 +297,6 @@
     .agenda-tag.fait { background: var(--green-bg); color: var(--green); }
     .agenda-vide { font-size: 12.5px; color: var(--text2); }
 
-    .dispo-legende { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px;
-                     color: var(--text2); margin-top: 12px; }
-    .dispo-legende i { display: inline-block; width: 12px; height: 12px; border-radius: 4px;
-                       margin-right: 5px; vertical-align: -2px; }
     .dispo-champ { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
                    color: var(--text2); font-weight: 600; flex: 1; min-width: 120px; }
     .dispo-lignes-ab { display: flex; flex-direction: column; gap: 8px; }
@@ -664,11 +660,20 @@
               <button type="button" class="btn-mini" id="dispo-auj">Ce mois-ci</button>
             </div>
             <div class="dispo-months" id="dispo-months"></div>
-            <div class="dispo-legende" id="dispo-legende"></div>
-            <!-- ⚠ UNE TAPE, PAS UN GLISSE. Sur un telephone, un glisse de
-                 selection se bat avec le defilement de la page : on ne peut pas
-                 avoir les deux. Une tape bascule un jour ; pour plusieurs jours
-                 d'affilee, le conge ci-dessous est fait pour ca. -->
+            <!-- ⚠ PLUS DE LEGENDE (demande de Thierry, 18 septembre 2026).
+                 Six entrees — « Je travaille », « Je ne travaille pas »,
+                 « Conge », « absence posee a la main », « mon menage »,
+                 « a prendre » — pour un calendrier dont chaque case s'ouvre
+                 d'une tape et DIT ce qu'elle porte. Elle paraphrasait la feuille
+                 du jour sur six lignes de telephone, entre le mois et la liste
+                 des 30 prochains jours.
+                 ⚠ CE QUE CA EMPORTE, ET C'EST ASSUME : les lettres A/B a gauche
+                 de chaque semaine n'ont plus d'explication SUR CET ECRAN. Le
+                 reperage « cette semaine est une semaine A » reste, derriere
+                 l'engrenage, dans la carte des jours habituels — c'est-a-dire a
+                 l'endroit meme ou l'alternance se regle.
+                 ⚠ LE BANDEAU, LUI, RESTE : il porte les confirmations et les
+                 pannes. Ce qui a disparu est son mode d'emploi au repos. -->
             <div class="dispo-aide" id="dispo-message"></div>
           </div>
 
@@ -2515,11 +2520,15 @@ if ("serviceWorker" in navigator) {
     } else if (!mesJours.modifiable) {
       msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre employeur qui pose vos absences.'
     } else if (!msg.dataset.garde) {
-      // ⚠ « CI-DESSOUS » NE DESIGNAIT PLUS RIEN. Depuis le lot C, le formulaire
-      // de conge vit derriere l'engrenage : la phrase envoyait defiler vers un
-      // espace vide. Un mode d'emploi qui pointe a cote est pire que pas de mode
-      // d'emploi — il fait douter de ce qu'on a sous les yeux.
-      msg.textContent = 'Touchez un jour pour voir ce qui s\'y passe. Pour plusieurs jours d\'affilée, posez un congé dans « Mes jours ».'
+      // ⚠ PLUS DE MODE D'EMPLOI (demande de Thierry, 18 septembre 2026). « Touchez
+      // un jour pour voir ce qui s'y passe » decrivait le geste le plus evident
+      // de l'ecran, sous un calendrier ou chaque case est un bouton.
+      // ⚠ MAIS ON VIDE, ON NE SAUTE PAS. Sans cette ligne, le « ✓ Absence
+      // enregistree » d'un geste precedent resterait affiche de mois en mois :
+      // c'est ce que `oublierLeMessage` leve, et il n'a plus rien pour le
+      // remplacer. Les trois phrases au-dessus, elles, restent — elles disent
+      // quelque chose qu'elle ne peut PAS deduire de l'ecran.
+      msg.textContent = ''
     }
   }
 
@@ -2657,7 +2666,6 @@ if ("serviceWorker" in navigator) {
       out += peindreUnMois(moisDe(mesJours.mois + k), alt, auj, dernier)
     }
     document.getElementById('dispo-months').innerHTML = out
-    peindreLegende(alt)
   }
 
   function peindreUnMois (a, alt, auj, dernierMois = false) {
@@ -2869,26 +2877,6 @@ if ("serviceWorker" in navigator) {
   // exactement ca, en validant le format et en lisant la date en UTC. En
   // ecrire une seconde a produit une REDECLARATION — le bloc entier ne parsait
   // plus, et le test `js-navigateur-parse` l'a dit avant le navigateur.
-
-  function peindreLegende (alt) {
-    document.getElementById('dispo-legende').innerHTML =
-      // ⚠ LA LEGENDE SUIT LA CASE. Elle decrivait encore le rouge des jours
-      // absents — une couleur que le lot 2 a retiree — et ne disait rien des deux
-      // marques qu'il a ajoutees. Une legende qui montre des couleurs absentes de
-      // l'ecran est pire qu'une legende absente : elle fait douter de ce qu'on voit.
-      '<span><i style="background:var(--green-bg);border:1px solid var(--green)"></i>Je travaille</span>' +
-      '<span><i style="background:var(--bg2);border:1px solid var(--border)"></i>Je ne travaille pas</span>' +
-      '<span><i style="background:var(--bg3);border:1px dashed var(--border)"></i>Congé</span>' +
-      '<span><i style="background:var(--green-bg);border:1px solid var(--green);position:relative">' +
-      '<b style="position:absolute;left:1px;top:1px;width:4px;height:4px;border-radius:50%;' +
-      'background:var(--green);opacity:.7"></b></i>absence posée à la main</span>' +
-      // Les deux marques du lot 2 : ce que j'ai a faire, et ce que personne ne fait.
-      '<span><i style="background:var(--green-bg);border:1px solid var(--green);position:relative">' +
-      '<b style="position:absolute;left:4px;bottom:1px;width:4px;height:4px;border-radius:50%;' +
-      'background:var(--green)"></b></i>mon ménage</span>' +
-      '<span><i style="background:var(--primary);border-radius:3px"></i>à prendre</span>' +
-      (alt ? '<span><b style="color:var(--green)">A</b>/<b style="color:var(--amber)">B</b> à gauche de chaque semaine</span>' : '')
-  }
 
   function peindreMesConges () {
     const zone = document.getElementById('dispo-conges')
