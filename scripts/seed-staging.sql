@@ -59,10 +59,15 @@ select u.id, u.email, nullif(split_part(coalesce(u.email, ''), '@', 1), '')
     on conflict (id) do nothing;
 
 -- ─── Nettoyage des biens de seed (rejouabilite) ─────────────────────────────
+-- ⚠ UN MOTIF, PAS UNE LISTE. La liste explicite ('STG-BIEN-1',
+-- 'STG-BIEN-2') a survecu a l'ajout d'un troisieme bien au lot 4.5 : le
+-- nettoyage ne le voyait pas, et rejouer le seed le DOUBLAIT — alors que la
+-- rejouabilite est justement ce que ce bloc promet en tete de fichier.
+-- Le prefixe 'STG-BIEN-' n'appartient qu'a ce script.
 delete from public.bookings_snapshot
- where property_id in ('STG-BIEN-1', 'STG-BIEN-2');
+ where property_id like 'STG-BIEN-%';
 delete from public.properties
- where provider_property_id in ('STG-BIEN-1', 'STG-BIEN-2');
+ where provider_property_id like 'STG-BIEN-%';
 
 -- ─── Profil titulaire ───────────────────────────────────────────────────────
 -- access_mode 'compte' impose pwa_token NULL (contrainte profiles_token_coherent).
@@ -78,9 +83,18 @@ select c.user_id, c.user_id, 'Recette', 'HoteSmart',
     where p.account_user_id = c.user_id and p.is_owner
  );
 
--- ─── Deux biens ─────────────────────────────────────────────────────────────
+-- ─── Trois biens ────────────────────────────────────────────────────────────
 -- rate_sync_mode 'keep' : aucun prix ne part vers un OTA sans geste explicite.
 -- automation_paused true : rien ne s'envoie tant qu'on n'a pas depause a la main.
+--
+-- ⚠ LE TROISIEME EST EN 'managed', ET C'EST DELIBERE (lot 4.5).
+-- Les deux premiers sont en 'keep' : ils prouvent le REFUS de bascule vers
+-- YieldFlow (spec §2 bis, B bis). Mais ce refus etant le seul cas jouable, la
+-- pièce principale — « ecriture tarifaire refusee sur un bien PILOTE par
+-- YieldFlow » — n'avait aucun bien sur lequel se jouer : un bien 'keep' ne
+-- peut pas basculer, donc ne peut jamais etre pilote.
+-- 'STG-BIEN-3' existe pour ça, et pour ça seulement. Il reste
+-- `automation_paused` comme les autres : rien ne part de staging.
 insert into public.properties
   (user_id, name, provider_property_id, provider, currency,
    city, country, capacity, inventory_type, inventory_units,
@@ -88,12 +102,13 @@ insert into public.properties
    automation_paused, paused_reason, checkin_time, checkout_time)
 select c.user_id, v.nom, v.propid, 'channex', 'EUR',
        v.ville, 'FR', v.cap, 'whole', 1,
-       'keep', 'draft', false,
+       v.mode, 'draft', false,
        true, 'environnement de recette', '16:00', '11:00'
   from _seed_ctx c,
-       (values ('Recette — Studio Centre', 'STG-BIEN-1', 'Toulouse', 2),
-               ('Recette — Maison Jardin', 'STG-BIEN-2', 'Colomiers', 6))
-         as v(nom, propid, ville, cap);
+       (values ('Recette — Studio Centre', 'STG-BIEN-1', 'Toulouse', 2, 'keep'),
+               ('Recette — Maison Jardin', 'STG-BIEN-2', 'Colomiers', 6, 'keep'),
+               ('Recette — Loft Pilotable', 'STG-BIEN-3', 'Blagnac', 4, 'managed'))
+         as v(nom, propid, ville, cap, mode);
 
 -- ─── Cles provider : AUCUNE, et desactivees explicitement ───────────────────
 -- ⚠ api_keys.brevo_enabled et seam_enabled valent true PAR DEFAUT. Une ligne

@@ -277,7 +277,14 @@ test('LE TEST QUI COMPTE : `user_id` est selectionne — sans lui, AUCUNE ouvert
   const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
 
   // Les deux chargements de bien du fichier doivent porter user_id.
-  const selects = cal.match(/\.select\('id, name,[^']*'\)|const COLS = 'id, name,[^']*'/g) || []
+  // ⚠ LE MOTIF SUIT LES CONSTANTES, PAS LES LITTERAUX INLINE. Au lot 4.5, la
+  // liste de colonnes de `loadOwnedProperties` est devenue la constante
+  // `COLS_BIEN` (pour qu'un repli sans `pilote_tarifaire` la reutilise) : le
+  // motif qui ne cherchait que `.select('id, name, …')` n'en voyait plus qu'un
+  // seul et rougissait, alors que `user_id` etait toujours la. L'invariant
+  // defendu ici est « tout chargement de bien porte user_id » — il doit donc
+  // se lire quelle que soit la forme du chargement.
+  const selects = cal.match(/\.select\('id, name,[^']*'\)|const COLS(_BIEN)? = 'id, name,[^']*'/g) || []
   assert.ok(selects.length >= 2, `au moins 2 chargements attendus, trouve ${selects.length}`)
   for (const sel of selects) {
     assert.ok(/\buser_id\b/.test(sel),

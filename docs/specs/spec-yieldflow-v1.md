@@ -92,6 +92,53 @@ distinctes (`rate_sync_mode` = « HôteSmart pousse-t-il mes prix ? », pilote =
   `calendar_inventory` en place restent, le journal continue. Basculer est un
   changement d'écrivain, pas de tarif.
 
+### ✅ LIVRÉ le 18 septembre 2026 — lot 4.5
+
+Le pilote existe, et **la garde qui le tient est serveur**.
+
+| Ce qui est livré | Où |
+|---|---|
+| La règle, en un seul endroit | `lib/pilote-tarifaire.js` |
+| La colonne, défaut `'calendrier'`, deux contraintes | `migrations/2026-09-18-pilote-tarifaire.sql` |
+| **La garde serveur** : tout segment portant un `rate` est refusé (409) pour un bien en `yieldflow` | `api/calendar.js`, avant toute écriture |
+| Le refus de bascule d'un bien `keep`, en français | `api/yield-pilote.js` |
+| Le sélecteur exclusif, **dans l'app Yield** | `apps/yield/prix.html` |
+| L'explication côté calendrier (qui ne garde rien) | `pages/biens-calendrier.html` |
+| Le vérificateur d'invariant | `scripts/verifier-pilote-tarifaire.js` |
+
+**La garde est placée avant la première écriture du handler**, et un test lit la
+tranche entière entre l'entrée dans `save` et le refus pour qu'aucun `.upsert(`,
+`.insert(`, `.update(` ni `.delete(` ne s'y glisse plus tard. Comparer deux index
+connus n'aurait prouvé que ces deux-là.
+
+**L'arbitrage B est tenu et testé** : `datesTarifees()` ne collecte que les
+segments portant un `rate`. Disponibilité, `stop_sell` et séjour minimum passent
+en mode `yieldflow` — un hôte peut toujours **fermer une nuit**. C'est la
+régression du 7 septembre, et elle ne peut plus revenir sans faire rougir un test.
+
+#### Une décision que cet amendement ne portait pas : la porte inverse
+
+B bis interdit `keep → yieldflow`. **Rien n'interdisait le chemin symétrique** :
+repasser en `rate_sync_mode = 'keep'` un bien **déjà** piloté par YieldFlow, ce
+qui atteint exactement l'état interdit par l'autre côté — l'app écrit des prix
+que plus rien ne pousse.
+
+**Décidé le 18 septembre 2026 : on refuse**, avec un message qui nomme le geste
+qui débloque (« Repassez-le en pilotage par le calendrier avant de désactiver
+l'envoi des prix »). L'alternative — faire retomber le pilote sur `'calendrier'`
+tout seul — a été écartée : le choix de l'écrivain appartient à l'hôte, et un
+mode qui change sans geste est précisément ce que ce lot s'interdit. La garde est
+dans `api/channel-property.js`, **avant** la vérification réseau des canaux.
+
+#### Ce que le lot 4.5 ne fait PAS
+
+Basculer un bien en `yieldflow` **ferme la saisie tarifaire du calendrier** et
+n'ouvre encore **aucune écriture** côté Yield : l'app ne propose ni ne publie de
+prix avant le lot 4.6. Un bien basculé aujourd'hui est donc un bien **dont les
+prix ne bougent plus** jusque-là — les tarifs déjà en place restent, rien n'est
+poussé, rien n'est perdu. À dire à l'hôte avant de lui proposer le mode ; le
+sélecteur est livré, l'invitation à s'en servir ne l'est pas.
+
 ### Conséquences sur les étapes suivantes
 
 - **Étape 2** : les référentiels (exceptions, événements) sont des données

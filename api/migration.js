@@ -34,7 +34,11 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 // `country` et `zip_code` sont lus par le payload de creation.
 const COLS = 'id, user_id, name, provider, provider_property_id, provider_room_type_id, '
   + 'provider_rate_plan_id, base_price, prix_minimum, capacity, included_guests, extra_guest_fee, '
-  + 'currency, property_type, timezone, inventory_units, rate_sync_mode, '
+  // ⚠ `pilote_tarifaire` : la garde du lot 4.5 (porte inverse de B bis) la lit
+  // dans `changerModeDePrix`. Absente du select, elle vaudrait `undefined`,
+  // donc « pas pilote », donc la garde serait OUVERTE — le piege que ce
+  // commentaire annonce deja trois fois.
+  + 'currency, property_type, timezone, inventory_units, rate_sync_mode, pilote_tarifaire, '
   + 'migration_target_property_id, migration_target_at, country, zip_code, automation_paused'
 
 async function biensDuCompte (accountUserId, providerPropertyId) {

@@ -628,6 +628,7 @@
     document.getElementById('btn-save').addEventListener('click', async ()=>{
       if(!currentBien)return
       const sISO=document.getElementById('r-start').value, eISO=document.getElementById('r-end').value
+      let tarifIgnore=false
       const segments=[]
       if(pending.perPerson) segments.push({ kind:'perPerson', included:pending.perPerson.included, extra_guest_fee:pending.perPerson.extraFee })
       const computeFinal=(cur,mode,unit,val)=>{ if(isNaN(val))return cur; if(mode==='set')return unit==='pct'?Math.round(cur*(1+val/100)):val; if(mode==='inc')return unit==='pct'?Math.round(cur*(1+val/100)):cur+val; return unit==='pct'?Math.round(cur*(1-val/100)):cur-val }
@@ -656,6 +657,14 @@
         if(p.type==='perperson')return
         const pv=pending[p.key]; if(!pv)return
         const daysArr=[]; for(const k in pv.dow){ if(pv.dow[k]) daysArr.push(parseInt(k,10)) }
+        // ⚠ LOT 4.5 : en mode YieldFlow, le tarif ne part pas d'ici — et le
+        // RESTE part quand meme. Le serveur refuse toute la requete des qu'elle
+        // porte un `rate` : envoyer le tarif ferait perdre, dans le meme refus,
+        // la fermeture saisie au meme moment. L'arbitrage B (fermer une nuit
+        // reste possible dans les deux modes) se tient ici aussi.
+        // `currentBien` vient de `api.channel.listProperties()`, dont le GET
+        // porte `pilote_tarifaire` — sans quoi cette garde lirait `undefined`.
+        if(p.type==='price'&&currentBien&&currentBien.pilote_tarifaire==='yieldflow'){ tarifIgnore=true; return }
         if(p.type==='price'){
           if(pv.value===''||isNaN(parseFloat(pv.value)))return
           if(pv.mode==='set'&&pv.unit==='eur'){ segments.push({date_from:sISO,date_to:eISO,days:daysArr,rate:parseFloat(pv.value)}) }
@@ -664,11 +673,12 @@
         else if(p.type==='openclosed'){ if(pv.value==='keep')return; const seg={date_from:sISO,date_to:eISO,days:daysArr}; if(p.key==='cta')seg.cta=(pv.value==='closed'); else if(p.key==='ctd')seg.ctd=(pv.value==='closed'); segments.push(seg) }
         else if(p.type==='avail'){ if(pv.value==='keep')return; segments.push({date_from:sISO,date_to:eISO,days:daysArr,avail:(pv.value==='closed')?0:1}) }
       })
-      if(!segments.length){ showToast('Aucune modification'); return }
+      if(tarifIgnore){ showToast('Le tarif n\'a pas été enregistré : les prix de ce logement sont pilotés par YieldFlow. Le reste de votre saisie, lui, est bien pris en compte.',8000) }
+      if(!segments.length){ if(!tarifIgnore) showToast('Aucune modification'); return }
       pushUndo()
       showToast('Enregistrement...')
       try{ const resp=await api.calendar.save(currentBien.id, segments); if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.push_failed){showToast('NON PUBLIE — '+resp.warnings.join(' · '),12000)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre',6500)} closeSheet(); await loadMonth() }
-      catch(err){ showToast('Erreur: '+(err.message||'sauvegarde')) }
+      catch(err){ showToast('Erreur: '+(err.message||'sauvegarde'),8000); await loadMonth() }
     })
 
     await loadBiens()

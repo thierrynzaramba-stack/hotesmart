@@ -75,7 +75,15 @@ test('le parcours de MIGRATION garde le droit de poser `keep`', () => {
 test('poser `keep` sur un bien a canal ACTIF est refuse, et explique pourquoi', () => {
   const i = src.indexOf("if (rate_sync_mode !== undefined)")
   assert.ok(i > 0)
-  const bloc = src.slice(i, i + 2400)
+  // ⚠ LA TRANCHE SE FERME SUR UNE ANCRE, PAS SUR UN NOMBRE D'OCTETS.
+  // `slice(i, i + 2400)` a rougi au lot 4.5 : une garde de 14 lignes inseree
+  // dans cette branche a repousse le message hors de la fenetre, alors que le
+  // comportement defendu n'avait pas bouge. Un test qui compte des caracteres
+  // mesure la longueur des commentaires, pas le code. On lit donc jusqu'a la
+  // FIN de la branche — la ligne qui suit l'ecriture du mode.
+  const fin = src.indexOf('updates.rate_sync_mode = rate_sync_mode', i)
+  assert.ok(fin > i, 'la branche se termine par l ecriture du mode')
+  const bloc = src.slice(i, fin)
   assert.match(bloc, /if \(rate_sync_mode === 'keep'\)/, 'le refus ne vise QUE `keep`')
   assert.match(bloc, /canauxActifsDuBien\(prop\)/)
   assert.match(bloc, /Votre bien est connecté à une plateforme/,

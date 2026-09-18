@@ -675,7 +675,15 @@
     // Le serveur refuse deja en 403, mais l'hote aurait tape un prix, vu le champ
     // se fermer et un message d'erreur — sans comprendre qu'il n'y avait jamais eu
     // de droit d'ecrire.
-    function startInlineEdit(cell,idx,initial){ if(!peutEcrire('reservations'))return; if(!cell||!sel.bienId)return;const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="text" inputmode="decimal" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}else{try{input.select()}catch(e){}};let done=false;const commit=async(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const bienId=sel.bienId;const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;const segs=targets.map(i=>({date_from:toISO(days[i]),date_to:toISO(days[i]),rate:st[i].rate}));sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Enregistrement '+n+' jours...':'Enregistrement...');try{const resp=await api.calendar.save(bienId,segs);if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.push_failed){showToast('NON PUBLIE — '+resp.warnings.join(' · '),12000)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre et publie',6500)}await reloadInventory()}catch(err){showToast('Erreur: '+(err.message||'sauvegarde'))}return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
+    // ⚠ LOT 4.5 : en mode YieldFlow, le TARIF ne se saisit plus ici — mais la
+    // disponibilite et la fermeture a la vente, si (spec §2 bis, arbitrage B).
+    // Ce refus-ci est une EXPLICATION : le vrai est serveur. Sans lui, l'hote
+    // taperait un prix, verrait le champ s'ouvrir, puis recevrait un 409 sans
+    // comprendre — pire que de ne pas pouvoir cliquer.
+    function estPiloteYield(bienId){ const b=BIENS.find(x=>x.id===bienId); return !!b&&b.pilote==='yieldflow' }
+    function startInlineEdit(cell,idx,initial){ if(!peutEcrire('reservations'))return; if(!cell||!sel.bienId)return;
+      if(sel.row==='rate'&&estPiloteYield(sel.bienId)){ showToast('Les prix de ce logement sont pilotés par YieldFlow — modifiez-les dans YieldFlow. La disponibilité et la fermeture à la vente se règlent toujours ici.',7000); return }
+      const st=states[sel.bienId];const field=sel.row;const current=st[idx][field];const sv=(initial!==undefined&&initial!=='')?initial:current;cell.innerHTML='<input class="rate-input" type="text" inputmode="decimal" value="'+sv+'" />';const input=cell.querySelector('input');input.focus();if(initial!==undefined&&initial!==''){try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}else{try{input.select()}catch(e){}};let done=false;const commit=async(apply)=>{if(done)return;done=true;if(apply){const v=parseFloat(input.value);if(!isNaN(v)&&v>0){pushUndo(sel.bienId);const bienId=sel.bienId;const targets=sel.idx.size>0?[...sel.idx]:[idx];targets.forEach(i=>{st[i][field]=v;st[i].modified=true});const n=targets.length;const segs=targets.map(i=>({date_from:toISO(days[i]),date_to:toISO(days[i]),rate:st[i].rate}));sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks();showToast(n>1?'Enregistrement '+n+' jours...':'Enregistrement...');try{const resp=await api.calendar.save(bienId,segs);if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.push_failed){showToast('NON PUBLIE — '+resp.warnings.join(' · '),12000)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre et publie',6500)}await reloadInventory()}catch(err){showToast('Erreur: '+(err.message||'sauvegarde'),8000);await reloadInventory()}return}}renderBlocks()};input.addEventListener('blur',()=>commit(true));input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit(true)}else if(e.key==='Escape'){commit(false)}}) }
 
     const floatBar=document.getElementById('float-bar')
     function showFloatBar(){
@@ -795,6 +803,7 @@
 
     document.getElementById('btn-apply').addEventListener('click',async ()=>{
       if(!popupBienId){overlay.classList.remove('visible');return}
+      let tarifIgnore=false
       const st=states[popupBienId];const bien=BIENS.find(b=>b.id===popupBienId)
       // ⚠ LA BORNE BASSE EST RAMENEE A AUJOURD'HUI, ET C'EST ICI QUE CA COMPTE.
       // Les segments envoyes au serveur portent `date_from: sISO` / `date_to: eISO`
@@ -823,6 +832,13 @@
         if(!hasVal)return
         const daysArr=[]; for(const k in pv.dow){ if(pv.dow[k]) daysArr.push(parseInt(k,10)) }
         days.forEach((d,i)=>{ const iso=toISO(d); if(iso>=sISO&&iso<=eISO&&iso>=ISO_AUJOURDHUI&&pv.dow[d.getDay()]){ if(p.type==='price'){st[i][p.key]=computeNewRate(st[i][p.key],pv.mode,pv.unit,parseFloat(pv.value));st[i].modified=true}else if(p.type==='num'){st[i][p.key]=parseInt(pv.value,10)||0;st[i].modified=true}else{st[i][p.key]=pv.value;st[i].modified=true} } })
+        // ⚠ EN MODE YIELDFLOW, ON N'ENVOIE PAS LE TARIF — ET ON ENVOIE LE
+        // RESTE. Le serveur refuse TOUTE la requete des qu'elle porte un
+        // `rate` : laisser passer le tarif ici ferait perdre, dans le meme
+        // refus, la fermeture ou le sejour minimum saisis dans la meme popup.
+        // L'arbitrage B promet que fermer une nuit reste possible : c'est ici
+        // qu'il se tient, en retirant le seul tarif. Releve en review.
+        if(p.key==='rate'&&estPiloteYield(popupBienId)){ tarifIgnore=true; return }
         const seg={ date_from:sISO, date_to:eISO, days:daysArr }
         if(p.key==='rate'){
           if(pv.mode==='set'&&pv.unit==='eur'){ seg.rate=parseFloat(pv.value) }
@@ -849,6 +865,11 @@
 
       overlay.classList.remove('visible');sel={bienId:null,idx:new Set(),row:'rate'};hideFloatBar();renderBlocks()
 
+      // ⚠ UN TARIF RETIRE EN SILENCE EST UN TARIF QUE L'HOTE CROIT AVOIR POSE.
+      // On le dit AVANT l'enregistrement du reste, pour qu'il ne lise pas
+      // « Enregistre » en pensant que son prix en faisait partie.
+      if(tarifIgnore){ showToast('Le tarif n\'a pas été enregistré : les prix de ce logement sont pilotés par YieldFlow. Le reste de votre saisie, lui, est bien pris en compte.',8000) }
+      if(finalSegments.length===0){ if(tarifIgnore) return }
       if(touched>0){
         showToast('Enregistrement...')
         try{
@@ -864,7 +885,16 @@
           else if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre — ' + resp.warnings.join(' · ') + (tids.length?' — task ID copie':''), 6500) }
           else { showToast('Enregistre et publie' + (tids.length?' — task ID copie : '+tids[0]:'')) }
           await reloadInventory()
-        }catch(err){ showToast('Erreur: ' + (err.message||'sauvegarde')) }
+        }catch(err){
+          showToast('Erreur: ' + (err.message||'sauvegarde'), 8000)
+          // ⚠ ON RELIT LE CŒUR APRES UN ECHEC — releve en review.
+          // L'etat local a deja ete mute et re-rendu AVANT l'envoi : sans cette
+          // relecture, l'hote lit un message d'erreur en VOYANT ses nouveaux
+          // prix a l'ecran. Il les croit enregistres. Le chemin fermeture /
+          // reouverture le faisait deja ; celui-ci l'avait oublie, et le refus
+          // du pilote tarifaire le rend routinier.
+          await reloadInventory()
+        }
       } else { showToast('Aucune modification') }
     })
 
@@ -1518,7 +1548,11 @@
       return { id:p.id, name:p.name, capacity:p.capacity||1, base:Number(p.base_price)||0,
         included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0,
         currency:p.currency||'EUR', provider:p.provider||'channex',
-        provider_property_id:p.provider_property_id||null, resa:[] }
+        provider_property_id:p.provider_property_id||null,
+        // ⚠ LOT 4.5 — QUI ECRIT LES PRIX DE CE BIEN (spec §2 bis).
+        // Sert a EXPLIQUER, jamais a garder : le refus est tenu par
+        // `api/calendar.js`. Une restriction d'UI n'est pas une restriction.
+        pilote:p.pilote_tarifaire==='yieldflow'?'yieldflow':'calendrier', resa:[] }
     }
     // ⚠ LA SOURCE EST CELLE DU CŒUR, PAS UNE COULEUR TIREE AU SORT.
     // L'ancienne version faisait `SRC[idx % 3]` : airbnb, booking et direct en

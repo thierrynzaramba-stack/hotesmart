@@ -9,6 +9,28 @@
 const { createClient } = require('@supabase/supabase-js')
 const { buildOccupancyRates } = require('../lib/channel-pricing')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
+const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
+
+// ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
+// review. `pilote_tarifaire` est desormais dans les deux selects de biens. Si
+// le code arrive sur Vercel AVANT que la migration soit appliquee, PostgREST
+// fait echouer le SELECT ENTIER : plus de lecture, plus d'affichage, tout
+// l'ecran tombe — et pas seulement l'ecriture qu'on voulait garder.
+//
+// L'ordre correct reste « migration d'abord, deploiement ensuite ». Mais un
+// ordre est un geste humain, et un geste s'oublie : le repli relit sans la
+// colonne. `piloteDuBien` rend alors 'calendrier' (son defaut), donc le
+// calendrier fonctionne exactement comme avant le lot.
+const COLS_BIEN = 'id, name, user_id, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, pilote_tarifaire, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
+const COLONNE_PILOTE = 'pilote_tarifaire, '
+const sansPilote = cols => cols.replace(COLONNE_PILOTE, '')
+const colonneAbsente = err =>
+  !!err && /pilote_tarifaire/.test(String(err.message || ''))
+function journaliserRepli (ou) {
+  console.error(`[calendar] ${ou} : colonne pilote_tarifaire ABSENTE — `
+    + 'migration 2026-09-18-pilote-tarifaire.sql non appliquee. '
+    + 'Lecture repliee, le pilote est lu « calendrier » pour tous les biens.')
+}
 const {
   enregistrerPrixPousses, ouverturesDeDatesTarifees, nuitsAJournaliser
 } = require('../lib/price-log')
@@ -304,9 +326,16 @@ module.exports = async function handler(req, res) {
       // tarifees mais invendables » — dont on avait ajoute les avertissements
       // sans jamais trouver la cause. Mesure du 12 septembre : HTTP 0 sur
       // availability, « 1 ouverture(s) non poussee(s) », sur un appel normal.
-      .select('id, name, user_id, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at')
+      .select(COLS_BIEN)
       .eq('user_id', compte)
       .in('id', uuids)
+    if (error && colonneAbsente(error)) {
+      journaliserRepli('loadOwnedProperties')
+      const repli = await supabase.from('properties')
+        .select(sansPilote(COLS_BIEN)).eq('user_id', compte).in('id', uuids)
+      if (repli.error) throw new Error('Erreur lecture biens')
+      return repli.data || []
+    }
     if (error) throw new Error('Erreur lecture biens')
     return data || []
   }
@@ -323,11 +352,18 @@ module.exports = async function handler(req, res) {
     // alors que le POST sur le meme identifiant fonctionnait.
     const uuids = ids.filter(v => UUID_RE.test(v))
     const refs  = ids.filter(v => REF_SURE_RE.test(v))   // REF_SURE_RE accepte deja les UUID
-    const COLS = 'id, name, user_id, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
+    const COLS = 'id, name, user_id, provider, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, currency, provider_property_id, provider_room_type_id, provider_rate_plan_id, rate_sync_mode, pilote_tarifaire, inventory_units, orphan_autofix, orphan_price_enabled, orphan_price_mode, orphan_price_unit, orphan_price_value, last_fullsync_at'
     const paquets = []
     if (uuids.length) paquets.push(supabase.from('properties').select(COLS).in('id', uuids))
     if (refs.length)  paquets.push(supabase.from('properties').select(COLS).in('provider_property_id', refs))
-    const res2 = await Promise.all(paquets)
+    let res2 = await Promise.all(paquets)
+    if (res2.some(r => colonneAbsente(r.error))) {
+      journaliserRepli('resoudreListe')
+      const sans = []
+      if (uuids.length) sans.push(supabase.from('properties').select(sansPilote(COLS)).in('id', uuids))
+      if (refs.length)  sans.push(supabase.from('properties').select(sansPilote(COLS)).in('provider_property_id', refs))
+      res2 = await Promise.all(sans)
+    }
     const vus = new Set()
     const out = []
     for (const r of res2) {
@@ -736,6 +772,36 @@ module.exports = async function handler(req, res) {
       })
       if (!gardeReglages.ok) return
     }
+    // ─── PILOTE TARIFAIRE : LE CALENDRIER N'ECRIT PAS LE PRIX D'UN BIEN
+    //     PILOTE PAR YIELDFLOW ────────────────────────────────────────────
+    // Spec §2 bis, arbitrage A : LA GARDE EST SERVEUR, le bandeau n'est qu'une
+    // explication. L'ecran passe en consultation tarifaire pour ce bien, mais
+    // une restriction d'UI n'est pas une restriction : sans ce refus,
+    // « jamais deux ecrivains de prix » resterait un vœu qu'un appel direct
+    // suffirait a briser.
+    //
+    // ⚠ ET LE REFUS PORTE SUR LE SEUL `rate`. La disponibilite et le
+    // `stop_sell` restent au calendrier DANS LES DEUX MODES (arbitrage B) : un
+    // refus qui engloberait le segment entier empecherait l'hote de FERMER une
+    // nuit, et c'est la regression du 7 septembre. Un segment qui ne porte pas
+    // de tarif passe donc normalement, meme en mode yieldflow.
+    //
+    // ⚠ PLACE ICI, ET PAS PLUS BAS. Le bloc suivant ecrit `propUpdates` dans
+    // `properties` : refuser apres lui laisserait passer une ecriture. On
+    // refuse AVANT toute ecriture, comme le prix plancher, et rien ne bouge.
+    if (pilotParYield(bien)) {
+      const tarifees = datesTarifees(dateSegments, expandDays)
+      if (tarifees.length) {
+        console.log(`[calendar] REFUS pilote yieldflow : ${tarifees.length} date(s) tarifees`)
+        // Le message lisible va dans `error` : `shared/api-client.js` construit
+        // son exception avec `data.error`, jamais avec `data.message`.
+        return res.status(409).json({
+          ...refusEcritureTarifaire(tarifees.length),
+          dates: tarifees.slice(0, 20)
+        })
+      }
+    }
+
     // ⚠ Un echec ici ne peut pas se solder par un 200 muet : l'hote lit
     // « enregistre » alors que la configuration du bien n'a pas bouge. Mais il ne
     // doit pas non plus faire perdre les TARIFS de la meme sauvegarde, qui sont

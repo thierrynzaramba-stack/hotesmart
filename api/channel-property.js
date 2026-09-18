@@ -8,6 +8,7 @@
 //   room / hotel             -> multi-unites, tarifs mutualisables (NON encore supporte)
 
 const { createClient } = require('@supabase/supabase-js')
+const { peutCouperLaPousseeDesPrix } = require('../lib/pilote-tarifaire')
 const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
@@ -165,7 +166,7 @@ module.exports = async function handler(req, res) {
       // encore `provider = 'beds24'` mais deja pourvu de sa propriete Channex
       // n'apparaissait nulle part — l'hote ne pouvait pas le connecter, et il
       // n'y avait aucun autre chemin dans le produit.
-      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
+      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, pilote_tarifaire, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
       .eq('user_id', compteLecture)
     if (refsPerimetre) {
       // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS. `properties.id` est de type
@@ -329,7 +330,7 @@ module.exports = async function handler(req, res) {
       // garde qui juge sur une colonne non selectionnee est une garde ouverte
       // (lecon deja payee sur `base_price` et le cran d'arret). Un bien en
       // cours de bascule porte ses canaux sous sa cle CIBLE.
-      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee')
+      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee, pilote_tarifaire')
       .eq('id', pid)
       .eq('user_id', compteBien)
       .single()
@@ -397,6 +398,20 @@ module.exports = async function handler(req, res) {
       // l'OTA interdit. On refuse, et on DIT pourquoi : un refus muet renverrait
       // l'hote a l'ecran sans qu'il comprenne ce qui vient de lui etre epargne.
       if (rate_sync_mode === 'keep') {
+        // ⚠ LA PORTE INVERSE DE B BIS (lot 4.5). Le §2 bis interdit de faire
+        // passer un bien « Je garde mes prix » sous YieldFlow. Rien n'y
+        // interdisait le chemin SYMETRIQUE : couper la poussee d'un bien DEJA
+        // pilote par YieldFlow atteint le meme etat interdit — l'app ecrit des
+        // prix que plus rien n'envoie, `calendar_inventory` porte une strategie
+        // invisible des plateformes, et le journal ne voit rien.
+        //
+        // On REFUSE plutot que de retomber en 'calendrier' tout seul : le choix
+        // de l'ecrivain appartient a l'hote, et « rien ne change sans son
+        // geste » est la regle du lot.
+        const verrou = peutCouperLaPousseeDesPrix(prop)
+        if (!verrou.ok) {
+          return res.status(409).json({ error: verrou.error, code: verrou.code })
+        }
         const canauxActifs = await canauxActifsDuBien(prop)
         if (canauxActifs === null) {
           return res.status(502).json({
