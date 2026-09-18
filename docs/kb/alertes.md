@@ -228,3 +228,90 @@ Elle rend le bruit supportable ; elle ne corrige pas sa cause. Pour Colomiers, l
 réelle : le 22 septembre est un **mardi**, et sur ce bien aucune prestataire n'est à la fois
 *attitrée* ce jour-là et *disponible*. Voir `docs/kb/menage.md` — l'escalade ne doit pas
 servir à ne plus voir un réglage qui manque.
+
+## Écran d'incidents hôte — chantier EN PAUSE au 18 septembre 2026
+
+Branche `chantier-incidents`, arrêtée après l'étude, **avant toute implémentation**.
+Cette section existe pour reprendre sans réétudier.
+
+### Pourquoi ce chantier
+
+C'est la dette la plus lourde du chantier canal e-mail : **l'hôte n'a aucun endroit où voir
+ce qui s'est mal passé**. Deux replis plateforme (la confirmation de réservation et la
+notification de vente, qui partent sous l'identité HôteSmart quand l'identité de l'hôte
+échoue) n'existent que parce que cet écran n'existe pas. Le jour où il existe, on les retire
+et on **retourne les tests** qui défendent aujourd'hui « elle part toujours ».
+
+### Ce que l'étude a trouvé (production, 18 septembre 2026)
+
+`automation_incidents` existe déjà et porte **12 348 lignes, dont 12 347 jamais acquittées**.
+23 types déclarés dans `lib/founder-notify.js`. Sur 30 jours :
+
+| type | 30 j | 7 j | sans `user_id` |
+|---|---|---|---|
+| `api_credit` | 11 196 | 11 196 | **11 196** |
+| `ecriture_de_masse_annoncee` | 332 | 332 | 0 |
+| `menage_non_assigne` | 601 | 601 | 0 |
+| `table_growth` | 128 | 121 | **121** |
+| `messages_import_suspendu` | 19 | 19 | 0 |
+| `send_failure` | 16 | 9 | 0 |
+| `cles_migrees_illisible` | 5 | 5 | 0 |
+| `overbooking` | 1 | 0 | 0 |
+
+⚠ **Trois constats qui commandent la conception. Ne pas les redécouvrir.**
+
+1. **Ce ne sont pas 12 348 incidents, c'est une poignée de faits réémis toutes les cinq
+   minutes.** Les 601 `menage_non_assigne` sont *un* ménage, sur *un* bien, répété 601 fois.
+   Un écran qui liste les LIGNES est inutilisable dès le premier jour.
+2. **Seul `overbooking` sait se refermer.** `api/incidents-acquitter.js` ne traite que lui.
+   Les 22 autres types n'ont **aucun cycle de vie** : rien ne dit jamais « c'est réglé ».
+3. **Deux types ne portent aucun compte** (`api_credit`, `table_growth` : `user_id` nul
+   partout) : ils sont structurellement invisibles d'un écran hôte.
+
+### La structure proposée (validée par Thierry, non implémentée)
+
+**L'écran montre des FAITS, pas des lignes.** Un fait = (type + bien + message), avec
+« depuis le… », « n fois », « dernière fois… ».
+
+**Deux familles, et c'est la distinction qui décide de tout :**
+
+- **Faits récurrents** — le cron les réémet tant que ça dure (`menage_non_assigne`,
+  `stop_sell_perdu`, `cles_migrees_illisible`, `messages_import_suspendu`). Le silence vaut
+  résolution : après ~6 h sans récidive, le fait descend dans « réglé tout seul ».
+- **Faits ponctuels** — émis une fois, jamais réémis (`paiement_orphelin`,
+  `reservation_remboursee`, `email_voyageur_abandon`, `notif_hote_non_envoyee`,
+  `email_confirmation_repli`). Le silence **ne vaut pas** résolution : sans acquittement
+  explicite, un paiement orphelin disparaîtrait de lui-même.
+
+Chaque type porte deux phrases en français d'hôte — ce que ça veut dire, ce qu'on peut
+faire. Aujourd'hui le libellé le plus clair dit `cles_migrees_illisible`.
+
+### ⚠ Les trois décisions sont POSÉES, pas tranchées
+
+Elles ont été soumises à Thierry le 18 septembre ; le chantier a été mis en pause **avant
+qu'il y réponde**. Ne pas les traiter comme acquises à la reprise :
+
+1. **Les incidents de plateforme** (`api_credit`, `table_growth`,
+   `ecriture_de_masse_annoncee`, `webhook_error`) : masqués de l'écran hôte, ou vue
+   fondateur séparée ?
+2. **« J'ai vu » sur un fait récurrent** : mise en sourdine avec retour après 24 h si le fait
+   persiste, ou disparition jusqu'à extinction réelle ? *Recommandation : la sourdine —
+   l'inverse de la leçon des 235 e-mails, pour qu'un hôte ne puisse pas éteindre durablement
+   un fait qui dure.*
+3. **L'entrée** : page `/incidents` à part, ou bandeau permanent sur `/index` avec le détail
+   derrière ? Aujourd'hui seule la surréservation a un bandeau, dans `pages/index.html`.
+
+### Dette découverte en chemin : `api_credit` n'est attribué à personne
+
+Les 11 196 lignes portent `user_id = null`. Or ce type dit « vos SMS sont coupés, crédit
+épuisé » — exactement ce qu'un hôte doit savoir. **Tel quel, l'hôte dont les envois
+s'arrêtent ne l'apprendra jamais par cet écran.** À trancher au moment de l'implémenter :
+attribuer l'incident au compte dont la clé a échoué, ou l'assumer comme un fait de
+plateforme. Voir aussi § « `api_credit` » plus haut.
+
+### Ce que l'étude a mis au jour, et qui vit encore
+
+`menage_non_assigne` tournait toujours le 18 septembre à 21 h 31 : le ménage du
+**24 septembre** sur Colomiers n'a personne de garde — ni attitrée, ni disponible. Ce ménage
+découle des réservations de test du chantier canal e-mail ; leur annulation l'éteint.
+
