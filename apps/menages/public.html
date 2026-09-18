@@ -128,7 +128,11 @@
        egale, cette regle annulait leur `not-allowed` : les deux commentaires qui
        le justifient ne decrivaient plus rien. L'inertie se dit par l'absence de
        `tabindex`, pas par un curseur qui ecrase celui d'a cote. */
-    .dispo-case.inerte:not(.passe):not(.conge) { cursor: default; }
+    /* ⚠ L'INERTIE PRIME SUR `passe` ET `conge`, parce qu'elle est desormais la
+       VERITE : une case passee qui porte un menage s'ouvre, et son curseur doit
+       le dire. `not-allowed` ne reste que sur ce qui n'ouvre vraiment rien. */
+    .dispo-case.inerte { cursor: not-allowed; }
+    .dispo-case.passe:not(.inerte), .dispo-case.conge:not(.inerte) { cursor: pointer; }
     .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
     /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « cette absence, c'est
        moi qui l'ai posee » ; le lot 2 en a introduit d'autres, verts et centres
@@ -219,6 +223,39 @@
        d'opacite pendant l'attente reseau. Depuis le rendu optimiste, la case
        change d'ETAT immediatement — il n'y a plus d'attente a signaler, et une
        case grisee pendant que son etat a deja bascule n'aurait plus aucun sens. */
+    /* ─── LA FEUILLE DU JOUR (lot B) ────────────────────────────────────────
+       Un seul geste ouvre TOUT ce qui concerne la journee : ce qu'on lui
+       propose, ce qu'elle porte deja, et sa disponibilite.
+       ⚠ AVANT, LA CASE DECIDAIT A SA PLACE. Une tape valait « je ne suis pas
+       la » sur un jour vide, et « ouvre l'offre » sur un jour qui en portait
+       une : il fallait savoir ce que le jour CONTENAIT avant de le toucher pour
+       savoir ce qu'on declenchait. Et sur un jour d'absence portant une offre,
+       la bascule de disponibilite etait purement inatteignable. */
+    .jsect { margin-bottom: 16px; }
+    .jsect-t { font-size: 11px; font-weight: 700; letter-spacing: .5px;
+               text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+    .jsect-vide { font-size: 12.5px; color: var(--text3); padding: 2px 0 4px; }
+    .jligne { display: flex; align-items: center; gap: 10px; width: 100%;
+              background: var(--bg); border: 0.5px solid var(--border);
+              border-radius: var(--radius); padding: 10px 12px; text-align: left;
+              font-family: inherit; color: inherit; font-size: 13px; }
+    .jligne + .jligne { margin-top: 6px; }
+    .jligne.offre { border: 1px dashed var(--primary); cursor: pointer; }
+    .jligne-bien { flex: 1; min-width: 0; font-weight: 600; }
+    /* ⚠ LE CHOIX MONTRE LES DEUX FACES, ET LAQUELLE EST VRAIE. Deux boutons
+       d'action (« me declarer absente ») obligeaient a savoir ou on en est pour
+       lire ce qu'on allait faire. Un segment dit l'etat ET l'alternative dans la
+       meme image. */
+    .jseg { display: flex; border: 1px solid var(--border2); border-radius: var(--radius);
+            overflow: hidden; }
+    .jseg button { flex: 1; border: 0; background: var(--bg); color: var(--text2);
+                   padding: 11px 8px; font-size: 13px; font-weight: 600;
+                   cursor: pointer; font-family: inherit; line-height: 1.25; }
+    .jseg button + button { border-left: 1px solid var(--border2); }
+    .jseg button[aria-pressed="true"] { background: var(--green-bg); color: var(--green); }
+    .jseg button[aria-pressed="true"].non { background: var(--bg3); color: var(--text); }
+    .jseg button:disabled { opacity: .45; cursor: not-allowed; }
+
     /* ─── Mes 30 prochains jours (refonte v2, lot 3) ──────────────────────── */
     .agenda-jour + .agenda-jour { margin-top: 14px; }
     .agenda-date { font-size: 12.5px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
@@ -1305,7 +1342,28 @@ if ("serviceWorker" in navigator) {
     document.getElementById('btn-today').addEventListener('click', () => { currentWeekStart = getMonday(new Date()); miniCalDate = new Date(); routeRender() })
     document.getElementById('mini-prev').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() - 1, 1); renderMiniCal() })
     document.getElementById('mini-next').addEventListener('click', () => { miniCalDate = new Date(miniCalDate.getFullYear(), miniCalDate.getMonth() + 1, 1); renderMiniCal() })
-    document.getElementById('modal-close').addEventListener('click', closeModal)
+    // ⚠ UN SEUL ECOUTEUR SUR LE CORPS, pose une fois : la feuille est reconstruite
+  // a chaque ouverture, un ecouteur par bouton aurait fui a chaque tape.
+  document.getElementById('modal-body').addEventListener('click', e => {
+    const o = e.target.closest('[data-offre]')
+    if (o) {
+      const libres = aPrendreDu(o.dataset.offre)
+      const i = Number(o.dataset.offreI) || 0
+      if (libres.length) ouvrirPriseDeMenage(o.dataset.offre, libres, Math.min(i, libres.length - 1))
+      return
+    }
+    const sg = e.target.closest('[data-dispo]')
+    if (sg && !sg.disabled) {
+      // ⚠ RIEN A FAIRE SI C'EST DEJA L'ETAT. Renvoyer une ecriture identique
+      // ferait clignoter la feuille et partir une requete pour rien — et sur un
+      // reseau qui lache, echouer un geste qu'elle n'a pas demande.
+      if (sg.getAttribute('aria-pressed') !== 'true' && jourOuvert) {
+        basculerMonJour(jourOuvert, { depuisFeuille: true })
+      }
+    }
+  })
+
+  document.getElementById('modal-close').addEventListener('click', closeModal)
     document.getElementById('modal-done').addEventListener('click', onModalDoneClick)
     document.getElementById('modal-prendre').addEventListener('click', prendreLeMenage)
     document.getElementById('modal-retirer').addEventListener('click', retirerLeMenage)
@@ -1850,8 +1908,16 @@ if ("serviceWorker" in navigator) {
   // a fuite le 14 septembre. L'ecran ne doit donc rien inventer non plus.
   let priseEnCours = null
   let retraitEnCours = null
-  function ouvrirPriseDeMenage (jour, libres) {
-    const m = libres[0]
+  // ⚠ `idx` : LAQUELLE des propositions du jour. Tant qu'il n'y avait qu'un
+  // chemin d'entree — la bulle du calendrier — prendre la premiere suffisait.
+  // Depuis que la feuille du jour les liste toutes et les nomme, chacune doit
+  // ouvrir la sienne.
+  function ouvrirPriseDeMenage (jour, libres, idx = 0) {
+    // ⚠ ON QUITTE LA FEUILLE DU JOUR : `jourOuvert` doit retomber. Sans cela,
+    // `feuilleOuverteSur` repondait encore vrai, et le rattrapage d'une bascule
+    // partie juste avant effacait la feuille de PRISE sous son doigt.
+    jourOuvert = null
+    const m = libres[idx] || libres[0]
     priseEnCours = m
     // ⚠ LE MODAL EST PARTAGE, et le retrait doit se remettre a zero ici comme
     // `modal-prendre` le fait dans `openModal`. Sans cela : elle ouvre SON menage
@@ -1886,6 +1952,157 @@ if ("serviceWorker" in navigator) {
     btn.disabled = false
     btn.textContent = 'Je prends ce ménage'
     document.getElementById('modal').style.display = 'flex'
+  }
+
+  // ─── LA FEUILLE DU JOUR (lot B) ─────────────────────────────────────────
+  //
+  // ⚠ UNE TAPE SUR UNE DATE OUVRE SA FEUILLE, TOUJOURS. Elle ne DECIDE plus
+  // rien, elle MONTRE. Trois sections, dans cet ordre : ce qu'on lui PROPOSE
+  // (en premier — c'est la seule chose qui peut lui echapper si elle tarde), les
+  // menages qui sont DEJA A ELLE, puis sa DISPONIBILITE.
+  let jourOuvert = null
+
+  // ⚠ UN JOUR QUI N'A RIEN A DIRE NE S'OUVRE PAS. Une feuille « rien de prevu /
+  // fermer » demande deux gestes pour apprendre qu'il n'y a rien, et laisse le
+  // doute d'avoir mal tape. Elle est pire qu'une absence de reponse, parce
+  // qu'elle fait douter du GESTE au lieu de renseigner.
+  function jourOuvrable (j) {
+    // ⚠ LE PASSE D'ABORD, ET AVANT LES OFFRES. Un menage passe n'est pas
+    // recuperable (decision du 17 septembre) : le serveur le refuse, et l'ecran
+    // ne doit pas l'ouvrir. Tester les offres en premier rouvrait exactement ce
+    // que la regle ferme — une proposition d'hier restait saisissable.
+    // Un jour passe ne s'ouvre donc que pour CONSULTER ce qu'elle y a fait.
+    // ⚠ SUR LES LISTES NON FILTREES, COMME LA FEUILLE ELLE-MEME — sinon les deux
+    // divergent et la feuille s'ouvre vide (voir `ouvrirJour`).
+    if (j < AUJ()) return mesMenagesTousBiens(j).length > 0
+    if (aPrendreTousBiens(j).length || mesMenagesTousBiens(j).length) return true
+    // Sinon il reste la disponibilite — y compris pour LIRE pourquoi le jour est
+    // barre (conge, absence posee par l'hote).
+    return !!(mesJours && mesJours.modifiable)
+  }
+
+  function ouvrirJour (j) {
+    if (!jourOuvrable(j)) return
+    jourOuvert = j
+    // ⚠ LE FILTRE DE BIENS NE TRAVERSE PAS CETTE FEUILLE, NULLE PART.
+    // Une premiere correction avait deplace la seule section « disponibilite »
+    // sur la liste non filtree, en laissant le reste — et `jourOuvrable` — sur la
+    // liste filtree. Les deux se sont mises a diverger : vue reduite au bien 1,
+    // un menage sur le bien 2 rendait le jour ouvrable (liste filtree vide) tout
+    // en supprimant la section (liste complete non vide), et la feuille s'ouvrait
+    // COMPLETEMENT VIDE en annoncant « rien de prevu » sur une journee ou elle
+    // travaille. Un bouton muet etait devenu une feuille qui ment.
+    // Le filtre allege la SILHOUETTE du mois ; une journee qu'elle ouvre
+    // explicitement montre ce qui s'y passe, sinon l'ecran cache du travail a
+    // celle qui le fera.
+    const libres = aPrendreTousBiens(j)
+    const miensTous = mesMenagesTousBiens(j)
+    const miens = miensTous
+    const passe = j < AUJ()
+    const e = mesJours ? exceptionDuJour(j) : null
+    const c = mesJours ? congeDuJour(j) : null
+    const dispo = jourTravaille(j)
+
+    // 1 — CE QU'ON LUI PROPOSE.
+    let html = ''
+    if (libres.length) {
+      html += '<div class="jsect"><div class="jsect-t">' +
+        (libres.length > 1 ? `${libres.length} propositions` : 'Une proposition') + '</div>' +
+        // ⚠ UN INDEX PAR PROPOSITION, PAS LE JOUR. Toutes portaient `data-offre=j`
+        // et le handler refaisait `aPrendreDu(j)` puis prenait `libres[0]` :
+        // deux menages a prendre le meme jour, elle touchait le second, la
+        // feuille de prise annoncait le PREMIER. Si elle validait, elle prenait
+        // le mauvais logement — et le second n'etait jamais atteignable.
+        libres.map((m, i) => `<button class="jligne offre" data-offre="${echapper(j)}" data-offre-i="${i}">` +
+          `<span class="jligne-bien">${echapper(m.property_name || '—')}</span>` +
+          '<span style="color:var(--primary);font-weight:700;font-size:11px">À PRENDRE</span>' +
+          '</button>').join('') + '</div>'
+    }
+
+    // 2 — CE QU'ELLE PORTE DEJA.
+    if (miens.length) {
+      html += '<div class="jsect"><div class="jsect-t">' +
+        (miens.length > 1 ? `${miens.length} ménages à vous` : 'Votre ménage') + '</div>' +
+        miens.map(m => `<div class="jligne">` +
+          `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
+          (doneSet.has(`${m.id}-${m.departure}`)
+            ? '<span style="color:var(--green);font-weight:700;font-size:11px">FAIT</span>' : '') +
+          '</div>').join('') + '</div>'
+    }
+
+    // 3 — SA DISPONIBILITE.
+    // ⚠ PAS DE SECTION DU TOUT QUAND ELLE PORTE UN MENAGE. Un menage FIXE la
+    // journee : se declarer absente pendant qu'on doit y etre n'est pas un
+    // reglage, c'est une contradiction. Un segment grise aurait suggere un droit
+    // qui lui manque ; or c'est elle qui est attendue, et le chemin de retour
+    // passe par le retrait du menage, avec son delai.
+    // ⚠ NI QUAND ELLE NE REGLE RIEN. Chez une prestataire dont l'hote tient le
+    // planning, montrer un segment fige ferait chercher un droit qu'on ne lui
+    // promet pas.
+    if (!miensTous.length && !passe && mesJours && mesJours.modifiable) {
+      // ⚠ FIGE AUSSI SUR UN JOUR DE REPOS, et c'est une limite ASSUMEE.
+      // La maquette ouvrait le segment sur un jour habituellement chome : se
+      // rendre disponible « pour ce jour-la » y etait une exception positive.
+      // Le serveur ne l'accepte pas aujourd'hui — `declarerIndisponibilite` ne
+      // sait poser que des ABSENCES. Ouvrir le segment promettrait donc un geste
+      // qui echouerait, ce qui est exactement ce que cet ecran s'interdit.
+      // Ses jours habituels se reglent dans la carte « Mes jours » ; la feuille
+      // le dit plutot que de faire semblant.
+      const repos = !c && !e && !jourTravaille(j)
+      // ⚠ ET PENDANT L'ENVOI. `basculerMonJour` sort sur `enVolParJour.has(j)`
+      // sans un mot : elle touchait la seconde face, rien ne bougeait, et le
+      // « ✓ » du geste precedent restait affiche.
+      const enVol = enVolParJour.has(j)
+      const fige = !!(c || repos || enVol || (e && e.source !== 'prestataire'))
+      html += '<div class="jsect"><div class="jsect-t">Disponibilité</div>' +
+        '<div class="jseg">' +
+        `<button data-dispo="1" aria-pressed="${dispo ? 'true' : 'false'}"${fige ? ' disabled' : ''}>` +
+        'Je suis disponible</button>' +
+        `<button class="non" data-dispo="0" aria-pressed="${dispo ? 'false' : 'true'}"${fige ? ' disabled' : ''}>` +
+        'Je ne suis pas disponible</button></div>' +
+        (c ? '<div class="jsect-vide" style="padding-top:8px">Vous êtes en congé — réglez-le dans la carte « Mes jours ».</div>'
+           : repos
+             ? '<div class="jsect-vide" style="padding-top:8px">Ce jour n’est pas dans vos jours habituels — réglez-les dans la carte « Mes jours ».</div>'
+             : (e && e.source !== 'prestataire'
+                // ⚠ DEUX SENS, DEUX PHRASES. L'hote peut poser « pas ce samedi »
+                // (`available: false`) MAIS AUSSI « viens exceptionnellement »
+                // (`available: true`). Un libelle unique annoncait une absence a
+                // quelqu'un a qui on venait au contraire de DEMANDER de venir.
+                // C'est la regression que `basculerMonJour` avait deja corrigee
+                // une fois ; la feuille ne doit pas la reintroduire.
+                ? (e.available
+                   ? '<div class="jsect-vide" style="padding-top:8px">Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.</div>'
+                   : '<div class="jsect-vide" style="padding-top:8px">Absence posée par votre employeur — pour la retirer, dites-le lui.</div>')
+                : '')) +
+        '</div>'
+    }
+
+    document.getElementById('modal-title').textContent = jourLisible(j)
+    document.getElementById('modal-sub').textContent = resumeDuJour(libres.length, miens.length, dispo, passe)
+    document.getElementById('modal-body').innerHTML = html
+    document.getElementById('modal-note').innerHTML = ''
+    hideModalMessages()
+    reinitialiserRetrait()
+    priseEnCours = null
+    for (const id of ['modal-done', 'modal-prendre', 'modal-accepter', 'modal-refuser']) {
+      document.getElementById(id).style.display = 'none'
+    }
+    document.getElementById('modal').style.display = 'flex'
+  }
+
+  // Vrai quand la feuille est visible ET porte ce jour-la. Un rattrapage qui
+  // arrive apres coup n'a rien a redessiner si elle regarde autre chose.
+  function feuilleOuverteSur (j) {
+    return jourOuvert === j &&
+           document.getElementById('modal').style.display === 'flex'
+  }
+
+  function resumeDuJour (nLibres, nMiens, dispo, passe) {
+    const p = []
+    if (nLibres) p.push(nLibres + (nLibres > 1 ? ' propositions' : ' proposition'))
+    if (nMiens) p.push(nMiens + (nMiens > 1 ? ' ménages à vous' : ' ménage à vous'))
+    if (!p.length) p.push(passe ? 'Aucun ménage' : (dispo ? 'Rien de prévu' : 'Vous n’êtes pas disponible'))
+    return p.join(' · ')
   }
 
   // ⚠ PAS DE RENDU OPTIMISTE ICI, ET C'EST DELIBERE — contrairement au clic
@@ -2139,7 +2356,10 @@ if ("serviceWorker" in navigator) {
     document.getElementById('modal').style.display = 'flex'
   }
 
-  function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null; reinitialiserRetrait(); hideModalMessages() }
+  // ⚠ `jourOuvert` RETOMBE ICI. Sans cela, le segment d'une feuille restait lie
+  // a un jour qu'elle avait quitte : un rattrapage tardif ecrivait alors sur ce
+  // jour-la, pas sur celui qu'elle regarde.
+  function closeModal() { document.getElementById('modal').style.display = 'none'; selectedMenage = null; jourOuvert = null; reinitialiserRetrait(); hideModalMessages() }
 
   // ─── Helpers messages modal ────────────────────────────────────────────────
   function showModalError(msg)   { setModalMessage('error',   msg) }
@@ -2552,6 +2772,12 @@ if ("serviceWorker" in navigator) {
     if (!Array.isArray(bookings)) return []
     return bookings.filter(b => b.departure === j)
   }
+  // Idem pour les propositions : la feuille d'un jour montre ce qui S'Y PASSE,
+  // que le filtre d'affichage les montre au calendrier ou non.
+  function aPrendreTousBiens (j) {
+    if (!Array.isArray(aPrendre)) return []
+    return aPrendre.filter(m => m.departure_date === j)
+  }
 
   function mesMenagesDu (j) {
     if (!Array.isArray(bookings)) return []
@@ -2852,7 +3078,14 @@ if ("serviceWorker" in navigator) {
         // ⚠ UNE CASE QUI PORTE UNE OFFRE RESTE TOUCHABLE MEME PASSEE... non :
         // un menage passe n'est pas recuperable (decision du 17 septembre), et
         // le serveur le refuse. On ne l'ouvre donc pas non plus ici.
-        const inerte = (j < auj) || (congeVisible && !libres.length)
+        // ⚠ LA MEME REGLE QUE L'OUVERTURE, ET UNE SEULE. `inerte` etait calcule a
+        // part : il ne suivait plus `jourOuvrable`, qui ouvre desormais un jour
+        // PASSE portant un de ses menages et un jour de CONGE. Ces cases
+        // recevaient `tabindex="-1"` et un curseur « interdit » alors qu'elles
+        // s'ouvrent — inatteignables au clavier, mensongeres a la souris. Et
+        // symetriquement, chez une prestataire qui ne regle rien, un jour futur
+        // vide restait focusable et « cliquable » sans rien ouvrir.
+        const inerte = !jourOuvrable(j)
         out += `<div class="${cls}${inerte ? ' inerte' : ''}" data-jour="${j}" title="${echapper(titre)}" ` +
                `tabindex="${inerte ? -1 : 0}">${bulle}<span class="dispo-num">${+j.slice(8, 10)}</span>${points}</div>`
       }
@@ -3331,8 +3564,25 @@ if ("serviceWorker" in navigator) {
   // tombe au milieu.
   const enVolParJour = new Map()
 
-  async function basculerMonJour (j) {
+  // ⚠ `depuisFeuille` : appelee DEPUIS la feuille du jour (lot B), le raccourci
+  // « une offre passe avant tout » ne doit pas rejouer — la feuille montre deja
+  // les propositions dans leur propre section, et y renvoyer ferait sauter la
+  // feuille sous le doigt de qui touchait le segment de disponibilite.
+  async function basculerMonJour (j, { depuisFeuille = false } = {}) {
     const msg = document.getElementById('dispo-message')
+    // ⚠ LE MESSAGE DOIT ATTERRIR LA OU ELLE REGARDE. Depuis le lot B, ce chemin
+    // n'est plus appele QUE depuis la feuille — et `dire()` ecrit dans le bandeau
+    // de la carte, recouvert par l'overlay. Hors ligne, elle touchait le segment,
+    // rien ne bougeait, et l'explication s'affichait derriere le modal : il ne se
+    // passait rien, sans un mot. On route donc vers les messages de la feuille.
+    // ⚠ ET IL FAUT QUE LA FEUILLE SOIT ENCORE LA, SUR CE JOUR-LA. Router sur le
+    // seul `depuisFeuille` ecrivait dans un modal ferme — la journee revenait
+    // toute seule dans le calendrier, sans un mot nulle part — ou pire, affichait
+    // le refus du jour A sur la feuille du jour B qu'elle venait d'ouvrir.
+    const direIci = (texte, type = 'erreur') => {
+      if (!depuisFeuille || !feuilleOuverteSur(j)) { dire(msg, texte); return }
+      if (type === 'ok') { showModalSuccess(texte) } else { showModalError(texte) }
+    }
     // ⚠ UNE OFFRE PASSE AVANT TOUT LE RESTE, Y COMPRIS UN JOUR D'ABSENCE OU DE
     // CONGE (decision du 17 septembre). C'est ce qui demande une decision ; le
     // reste du jour, lui, ne change pas. Ce test vient donc avant les gardes de
@@ -3340,11 +3590,17 @@ if ("serviceWorker" in navigator) {
     // montrer la seule chose qui s'y passe.
     if (j >= AUJ()) {
       const libres = aPrendreDu(j)
-      if (libres.length) { ouvrirPriseDeMenage(j, libres); return }
+      if (!depuisFeuille && libres.length) { ouvrirPriseDeMenage(j, libres); return }
     }
     if (!mesJours.modifiable) return
     if (j < AUJ() || congeDuJour(j)) return
-    if (horsLigne(msg)) return
+    // ⚠ HORS LIGNE PASSE AUSSI PAR `direIci`. `horsLigne()` ecrit directement
+    // dans le bandeau de la carte : depuis la feuille, elle touchait le segment,
+    // rien ne bougeait, et l'explication s'affichait derriere l'overlay.
+    if (!navigator.onLine) {
+      direIci('⚠️ Hors ligne : rien n\'a été envoyé. Réessayez une fois connectée.')
+      return
+    }
     const exc = exceptionDuJour(j)
     // ⚠ ELLE N'ANNULE QUE CE QU'ELLE A DECLARE. Une absence posee par son
     // employeur n'est pas la sienne a defaire : la lui laisser effacer la
@@ -3357,7 +3613,7 @@ if ("serviceWorker" in navigator) {
       // posee par votre employeur » a quelqu'un a qui on venait au contraire de
       // DEMANDER de venir — elle n'y comprenait rien, et n'avait aucun moyen de
       // dire qu'elle ne pouvait pas.
-      dire(msg, exc.available
+      direIci(exc.available
         ? 'Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
         : 'Cette absence a été posée par votre employeur. Pour la retirer, dites-le lui.')
       return
@@ -3379,11 +3635,11 @@ if ("serviceWorker" in navigator) {
     // On interdit de POSER une absence sur un jour de travail ; on n'interdit
     // jamais d'en retirer une.
     if (!exc && mesMenagesTousBiens(j).length) {
-      dire(msg, 'Vous avez un ménage ce jour-là. Pour vous libérer, retirez-le d’abord.')
+      direIci('Vous avez un ménage ce jour-là. Pour vous libérer, retirez-le d’abord.')
       return
     }
     if (!exc && !jourTravaille(j)) {
-      dire(msg, 'Vous ne travaillez déjà pas ce jour-là.')
+      direIci('Vous ne travaillez déjà pas ce jour-là.')
       return
     }
     // ─── RENDU OPTIMISTE ────────────────────────────────────────────────
@@ -3435,15 +3691,27 @@ if ("serviceWorker" in navigator) {
     // par-dessus, effacant a l'ecran une absence que l'employeur venait de poser.
     const monEtat = mesJours
 
+    // ⚠ LE DRAPEAU SE POSE AVANT CE QU'IL GARDE, et avant le redessin qui le LIT.
+    // Il etait pose apres `ouvrirJour` : la feuille se redessinait sur un etat ou
+    // rien n'etait encore « en vol », donc le segment ressortait ACTIF alors que
+    // l'ecriture partait. La seconde tape sortait ensuite sur
+    // `enVolParJour.has(j)` sans un mot.
+    // Meme lecon qu'au lot 1 : un verrou qui protege une ecriture se pose AVANT
+    // la mutation qu'il garde — ici, avant le rendu qui s'en sert.
+    enVolParJour.set(j, !exc)
+
     appliquerJour(j, !exc)
     peindreMesJours()
-    dire(msg, exc ? '✓ Absence annulée.' : '✓ Absence enregistrée.')
+    // ⚠ ET LA FEUILLE SE REDESSINE, si le geste vient d'elle. Sans cela, le
+    // segment resterait sur la face qu'on vient de quitter : le calendrier
+    // derriere aurait bascule, la feuille par-dessus dirait le contraire, et
+    // c'est celle-ci qu'elle regarde.
+    if (depuisFeuille && feuilleOuverteSur(j)) ouvrirJour(j)
+    direIci(exc ? '✓ Absence annulée.' : '✓ Absence enregistrée.', 'ok')
 
-    // La valeur VOULUE, retenue le temps du vol : si un rechargement tombe au
-    // milieu, il la remet par-dessus l'etat serveur qui ne la connait pas encore
-    // (voir `reappliquerEnVol`). Sans cela, la case retombait toute seule a son
-    // ancien etat pendant que « ✓ Absence enregistree » restait affiche.
-    enVolParJour.set(j, !exc)
+    // (La valeur VOULUE est retenue le temps du vol, plus haut : si un
+    // rechargement tombe au milieu, `reappliquerEnVol` la remet par-dessus
+    // l'etat serveur qui ne la connait pas encore.)
 
     const rattraperCeJour = (texte) => {
       // Rechargement passe par la : l'etat courant vient du serveur, il est plus
@@ -3453,8 +3721,15 @@ if ("serviceWorker" in navigator) {
           .filter(e => String(e.date).slice(0, 10) !== j)
         if (excAvant) mesJours.exceptions = mesJours.exceptions.concat([excAvant])
         peindreMesJours()
+        // ⚠ SEULEMENT SI LA FEUILLE EST ENCORE OUVERTE SUR CE JOUR-LA.
+        // `ouvrirJour` finit par `display = 'flex'` : appele apres coup, il
+        // ROUVRAIT une feuille qu'elle avait fermee, ou — pire — remplacait sous
+        // ses yeux le contenu du jour qu'elle venait d'ouvrir par celui du jour
+        // en echec, ET reprenait `jourOuvert` : sa tape suivante ecrivait alors
+        // sur le mauvais jour.
+        if (depuisFeuille && feuilleOuverteSur(j)) ouvrirJour(j)
       }
-      dire(msg, texte)
+      direIci(texte)
     }
 
     try {
@@ -3474,7 +3749,8 @@ if ("serviceWorker" in navigator) {
       // On redemande au serveur ; si lui non plus ne repond pas, alors seulement
       // on restitue, et on le dit sans rien affirmer de plus.
       const relu = await relireSilencieusement()
-      if (relu) dire(msg, 'Envoi interrompu — votre journée a été rechargée.')
+      if (relu && depuisFeuille && feuilleOuverteSur(j)) ouvrirJour(j)
+      if (relu) direIci('Envoi interrompu — votre journée a été rechargée.')
       else rattraperCeJour('Connexion impossible. Réessayez dans un instant.')
     }
   }
@@ -3636,7 +3912,10 @@ if ("serviceWorker" in navigator) {
   document.getElementById('dispo-months').addEventListener('click', e => {
     const el = e.target.closest('.dispo-case')
     if (!el || !el.dataset.jour) return
-    basculerMonJour(el.dataset.jour)
+    // ⚠ LE MEME GESTE NE PEUT PAS FAIRE DEUX CHOSES SELON UN ETAT QU'IL FAUT
+    // DEVINER (lot B). La tape ouvre la feuille ; c'est la feuille qui porte les
+    // gestes, chacun nomme.
+    ouvrirJour(el.dataset.jour)
   })
   // ⚠ UN SEUL ECOUTEUR, POSE UNE FOIS, SUR LE CONTENEUR — meme raison que pour
   // les cases : la liste est reconstruite a chaque repeint.
@@ -3654,7 +3933,7 @@ if ("serviceWorker" in navigator) {
     const el = e.target.closest('.dispo-case')
     if (!el || !el.dataset.jour) return
     e.preventDefault()
-    basculerMonJour(el.dataset.jour)
+    ouvrirJour(el.dataset.jour)
   })
 
   // Sonde au demarrage : sert UNIQUEMENT a savoir si l'onglet doit exister.

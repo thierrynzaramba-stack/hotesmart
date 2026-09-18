@@ -70,6 +70,14 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    autorise = true, enLigne = true, erreur = null,
                    bookings = [], aPrendre = null,
                    coupureEcriture = false, echecReglage = null,
+                   // ⚠ UN REFUS SERVEUR SUR N'IMPORTE QUELLE ECRITURE, applique
+                   // APRES la suspension. `coupureEcriture` leve tout de suite,
+                   // donc on ne peut rien faire entre l'envoi et son echec ;
+                   // `echecReglage` ne couvre que `reglerMesJours`. Sans cette
+                   // option, aucun test ne pouvait tenir une ecriture en vol,
+                   // agir a l'ecran, PUIS la faire echouer — et c'est
+                   // exactement la fenetre ou les rattrapages font des degats.
+                   echecEcriture = null,
                    retardEcriture = 0, suspendreEcriture = false,
 
                    coupureTotale = false } = {}) {
@@ -103,7 +111,12 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       charger: () => loadData('jeton-test', { silencieux: true }),
       chargerDisponibilites, basculerMonJour, poserMonConge,
       etat: () => mesJours,
-      enVol: () => enVolParJour
+      enVol: () => enVolParJour,
+      // ⚠ EXPOSE POUR QUE LE FILTRE SOIT EPROUVABLE. Sans lui, un test qui
+      // croyait decocher un bien ne decochait rien : il passait quoi qu'on
+      // fasse au code, et la regle « une regle ne se lit pas a travers un
+      // reglage d'affichage » n'etait gardee par personne.
+      filtrer: (ids) => { activeProps.clear(); ids.forEach(x => activeProps.add(x)) }
     }
   `
 
@@ -144,6 +157,10 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
     if (coupureEcriture && corps && corps.action) throw new TypeError('Failed to fetch')
     if (suspendreEcriture && corps && corps.action) {
       await new Promise(r => enAttente.push(r))
+    }
+    if (echecEcriture && corps && corps.action) {
+      return { ok: false, status: echecEcriture.status || 503,
+               json: async () => ({ error: echecEcriture.message || 'panne' }) }
     }
     if (lecturesSuspendues && !corps && /action=disponibilites/.test(String(url))) {
       await new Promise(r => lecturesEnAttente.push(r))
@@ -206,7 +223,40 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
 }
 
 const caseDu = (w, j) => w.document.querySelector(`#dispo-months .dispo-case[data-jour="${j}"]`)
-const message = w => w.document.getElementById('dispo-message').textContent
+
+// ⚠ DEPUIS LE LOT B, UNE TAPE SUR UNE DATE N'ECRIT PLUS : elle OUVRE la feuille
+// du jour, et c'est le segment de disponibilite qui bascule. Le geste utilisateur
+// compte donc deux temps, et les tests doivent les faire tous les deux — sinon
+// ils eprouveraient une interaction qui n'existe plus.
+// Ce helper est le geste REEL, pas un raccourci : il passe par les memes
+// ecouteurs que le pouce.
+const taperJour = (w, j) => {
+  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+}
+const feuille = w => String(w.document.getElementById('modal-body').innerHTML)
+const segments = w => [...w.document.querySelectorAll('#modal-body [data-dispo]')]
+
+const basculerDispo = (w, j) => {
+  taperJour(w, j)
+  const seg = [...w.document.querySelectorAll('#modal-body [data-dispo]')]
+    .find(b => b.getAttribute('aria-pressed') !== 'true')
+  if (seg) seg.dispatchEvent(new w.Event('click', { bubbles: true }))
+  return !!seg
+}
+// ⚠ CE QU'ELLE VOIT, PAS UN ELEMENT PARTICULIER. Depuis le lot B, la bascule de
+// disponibilite se fait DANS la feuille, et son retour s'affiche dans les
+// messages de la feuille — le bandeau de la carte est recouvert par l'overlay.
+// Un helper qui lirait toujours `#dispo-message` epreuverait un panneau que
+// personne ne regarde, et laisserait passer un ecran devenu muet.
+const message = w => {
+  if (w.document.getElementById('modal').style.display === 'flex') {
+    const vus = ['modal-error', 'modal-success', 'modal-warning']
+      .map(id => w.document.getElementById(id))
+      .filter(el => el && el.classList.contains('visible') && el.textContent)
+    if (vus.length) return vus.map(el => el.textContent).join(' ')
+  }
+  return w.document.getElementById('dispo-message').textContent
+}
 const souffler = (ms = 50) => new Promise(r => setTimeout(r, ms))
 const ecritures = t => t.appels.filter(a => a.corps && a.corps.action &&
   a.corps.action !== 'disponibilites')
@@ -566,7 +616,7 @@ test('toucher un jour travaillé déclare une absence', async () => {
   await t.chargerDisponibilites()
   assert.ok(!caseDu(w, j).classList.contains('off'), 'vert au départ')
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(60)
 
   const pose = t.appels.find(a => a.corps && a.corps.action === 'declarerIndisponibilite')
@@ -583,7 +633,7 @@ test('retoucher SA propre absence l\'annule', async () => {
     { id: 'e1', date: j, available: false, source: 'prestataire' } ] })
   t.seed()
   await t.chargerDisponibilites()
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(60)
   assert.ok(t.appels.some(a => a.corps && a.corps.action === 'retirerIndisponibilite'))
   assert.ok(!caseDu(w, j).classList.contains('off'), 'le jour redevient travaillé')
@@ -598,10 +648,10 @@ test('une absence posée par L\'EMPLOYEUR ne s\'annule pas, et l\'écran dit pou
     { id: 'e1', date: j, available: false, source: 'hote' } ] })
   t.seed()
   await t.chargerDisponibilites()
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  taperJour(w, j)
   await souffler(60)
   assert.strictEqual(ecritures(t).length, 0, 'rien ne part')
-  assert.match(message(w), /votre employeur/)
+  assert.match(feuille(w), /votre employeur/)
 })
 
 test('un jour de CONGÉ ne bouge pas à la tape', async () => {
@@ -610,10 +660,16 @@ test('un jour de CONGÉ ne bouge pas à la tape', async () => {
   await t.chargerDisponibilites()
   const el = caseDu(w, dans(4))
   assert.ok(el.classList.contains('conge'))
-  assert.strictEqual(el.getAttribute('tabindex'), '-1')
+  // ⚠ IL S'OUVRE DESORMAIS (lot B) : la feuille dit POURQUOI il ne bouge pas,
+  // au lieu de laisser une case muette. Ce que le test épingle — rien ne part —
+  // n'a pas changé.
+  // ⚠ ET L'ORDRE COMPTE : la feuille n'existe qu'APRÈS la tape. Asserter avant,
+  // c'était lire un corps de modal vide et croire l'avoir éprouvé.
   el.dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(50)
   assert.strictEqual(ecritures(t).length, 0)
+  assert.ok(segments(w).every(b => b.disabled), 'le segment est figé')
+  assert.match(feuille(w), /congé/i)
 })
 
 test('un jour où elle ne travaille déjà pas n\'appelle pas le serveur', async () => {
@@ -629,7 +685,11 @@ test('un jour où elle ne travaille déjà pas n\'appelle pas le serveur', async
   rouge.dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(50)
   assert.strictEqual(ecritures(t).length, 0, 'aucun appel')
-  assert.match(message(w), /déjà pas/)
+  // ⚠ LE REFUS A CHANGE DE CANAL, PAS DE SENS (lot B). Il se disait dans le
+  // bandeau ; il se dit maintenant DANS la feuille, avec le segment figé — donc
+  // avant même qu'elle touche quoi que ce soit, au lieu d'après.
+  assert.match(feuille(w), /jours habituels/)
+  assert.ok(segments(w).every(b => b.disabled), 'le segment est figé')
 })
 
 test('le passé ne se modifie pas', async () => {
@@ -643,7 +703,7 @@ test('le passé ne se modifie pas', async () => {
   assert.strictEqual(ecritures(t).length, 0)
 })
 
-test('AVEC une règle, ses jours de travail restent verts ET déclarables', async () => {
+test('AVEC une règle, ses jours de travail ne sont pas barrés, ET restent déclarables', async () => {
   // ⚠ LE DÉFAUT EXACT QUE LA REVIEW A TROUVÉ, ET QU'AUCUN TEST NE VOYAIT.
   // L'endpoint de la PWA ne rendait que `{ id, label }` : l'écran ne
   // reconnaissait aucune journée comme travaillée, peignait le mois ENTIER en
@@ -666,10 +726,14 @@ test('AVEC une règle, ses jours de travail restent verts ET déclarables', asyn
   if (!joursFuturs().length) w.document.getElementById('dispo-suiv').click()
   const futures = joursFuturs()
   assert.ok(futures.length > 0, 'le mois est bien peint')
+  // ⚠ « PAS BARRE », plus « pas rouge » ni « vert » : depuis le lot A le fond ne
+  // code QUE le jour à ménage, et l'indisponibilité se dit par le numéro barré.
+  // Ce que le test épingle n'a pas changé — la règle couvre tous les jours, donc
+  // aucun ne doit passer pour indisponible.
   assert.strictEqual(futures.filter(e => e.classList.contains('off')).length, 0,
-    'aucun jour ne doit être rouge : la règle les couvre tous')
+    'aucun jour ne doit être barré : la règle les couvre tous')
 
-  futures[0].dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, futures[0].dataset.jour)
   await souffler(60)
   const pose = t.appels.find(a => a.corps && a.corps.action === 'declarerIndisponibilite')
   assert.ok(pose, 'elle doit pouvoir déclarer son absence sur un jour qu\'elle travaille')
@@ -686,7 +750,7 @@ test('HORS LIGNE, rien ne part — et elle le sait', async () => {
   t.seed()
   await t.chargerDisponibilites()
   const avant = t.appels.length
-  caseDu(w, dans(2)).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, dans(2))
   await souffler(50)
   assert.strictEqual(t.appels.length, avant, 'aucune requête')
   assert.match(message(w), /Hors ligne/)
@@ -706,7 +770,7 @@ test('une COUPURE en cours d\'envoi REMET la journée comme elle était', async 
   await t.chargerDisponibilites()
   assert.ok(!caseDu(w, j).classList.contains('off'), 'travaillé au départ')
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(60)
 
   assert.ok(!caseDu(w, j).classList.contains('off'), 'le jour est REVENU à son état d\'avant')
@@ -729,7 +793,7 @@ test('coupure TOTALE : on restitue, et on ne jure de rien', async () => {
 
   // On coupe TOUT après le chargement initial.
   w.fetch = async () => { throw new TypeError('Failed to fetch') }
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(80)
 
   assert.strictEqual(caseDu(w, j).className, avant, 'la journée est remise comme avant')
@@ -747,11 +811,16 @@ test('« viens exceptionnellement » ne se lit pas « votre employeur vous a ret
     { id: 'e1', date: j, available: true, source: 'hote' } ] })
   t.seed()
   await t.chargerDisponibilites()
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  taperJour(w, j)
   await souffler(60)
   assert.strictEqual(ecritures(t).length, 0)
-  assert.match(message(w), /demandé de venir/)
-  assert.ok(!/absence a été posée/.test(message(w)))
+  // ⚠ LA NUANCE SURVIT AU DEPLACEMENT : l'hôte peut poser « pas ce samedi » MAIS
+  // AUSSI « viens exceptionnellement ». Un libellé unique annonçait « cette
+  // absence a été posée par votre employeur » à quelqu'un à qui on venait au
+  // contraire de DEMANDER de venir.
+  assert.match(feuille(w), /demandé de venir/)
+  assert.ok(!/[Aa]bsence posée/.test(feuille(w)))
+  assert.ok(segments(w).every(b => b.disabled), 'et elle ne peut pas la défaire seule')
 })
 
 test('la confirmation survit au repeint, puis s\'efface quand elle change de mois', async () => {
@@ -763,9 +832,13 @@ test('la confirmation survit au repeint, puis s\'efface quand elle change de moi
   const { w, t } = monter()
   t.seed()
   await t.chargerDisponibilites()
-  caseDu(w, dans(2)).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, dans(2))
   await souffler(60)
   assert.match(message(w), /enregistrée/, 'elle survit au repeint')
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+  // ⚠ LA CONFIRMATION VIT DANS LA FEUILLE (lot B) : on la ferme avant de juger
+  // le bandeau de la carte, sinon on lit celle de la feuille et le test ne parle
+  // plus de ce qu'il croit.
   w.document.getElementById('dispo-suiv').click()
   assert.match(message(w), /Touchez un jour/, 'et l\'aide revient quand elle regarde ailleurs')
 })
@@ -790,7 +863,7 @@ test('un clic = UNE écriture, et AUCUNE relecture', async () => {
   await t.chargerDisponibilites()
   const avant = t.appels.length
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(80)
 
   const apres = t.appels.slice(avant)
@@ -807,7 +880,7 @@ test('la case bascule AVANT que le serveur ait répondu', async () => {
   t.seed()
   await t.chargerDisponibilites()
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(20)                       // l'écriture est TENUE, pas minutée
 
   assert.ok(caseDu(w, j).classList.contains('off'), 'le jour est DÉJÀ absent')
@@ -825,9 +898,9 @@ test('le calendrier n\'est plus GELÉ pendant l\'envoi', async () => {
   t.seed()
   await t.chargerDisponibilites()
 
-  caseDu(w, j1).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j1)
   await souffler(20)
-  caseDu(w, j2).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j2)
   await souffler(20)
 
   assert.ok(caseDu(w, j1).classList.contains('off'), 'le premier jour a basculé')
@@ -852,9 +925,9 @@ test('deux tapes sur LE MÊME jour : une seule écriture, et l\'écran DIT la v�
   t.seed()
   await t.chargerDisponibilites()
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(20)
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(20)
   t.libererEcritures()
   await souffler(40)
@@ -886,7 +959,7 @@ test('un REFUS du serveur remet la journée comme elle était', async () => {
     return vrai(url, opts)
   }
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(80)
 
   assert.strictEqual(caseDu(w, j).className, avant, 'le jour est revenu à son état d\'avant')
@@ -916,8 +989,8 @@ test('l\'échec d\'un jour n\'EFFACE PAS l\'absence d\'un autre', async () => {
     return vrai(url, opts)
   }
 
-  caseDu(w, jA).dispatchEvent(new w.Event('click', { bubbles: true }))
-  caseDu(w, jB).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, jA)
+  basculerDispo(w, jB)
   await souffler(90)
 
   assert.ok(!caseDu(w, jA).classList.contains('off'), 'A est revenu : son écriture a échoué')
@@ -935,7 +1008,7 @@ test('un RECHARGEMENT en cours d\'envoi ne fait pas retomber la case', async () 
   t.seed()
   await t.chargerDisponibilites()
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(20)
   assert.ok(caseDu(w, j).classList.contains('off'), 'basculé')
 
@@ -973,7 +1046,7 @@ test('un rattrapage TARDIF n\'écrase pas des données fraîches', async () => {
     return vrai(url, opts)
   }
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(20)
 
   // L'employeur pose une absence ailleurs, et l'écran la reçoit.
@@ -996,9 +1069,13 @@ test('un rattrapage TARDIF n\'écrase pas des données fraîches', async () => {
 
 const menage = (date, propId = 'p1') =>
   ({ id: 'b-' + date, propId, propName: 'Colomiers', departure: date, arrival: date })
+// ⚠ UN NOM ET UN IDENTIFIANT PAR BIEN, sinon deux propositions du meme jour
+// sont indistinguables — et le test qui verifie « chacune ouvre la sienne »
+// passe quoi qu'on fasse au code. C'est arrive : rendre `ouvrirPriseDeMenage`
+// a `libres[0]` laissait le test vert.
 const offre = (date, propId = 'p1') =>
-  ({ booking_id: 'x-' + date, property_id: propId, property_name: 'Colomiers',
-     departure_date: date, status: 'unassigned' })
+  ({ booking_id: 'x-' + date + '-' + propId, property_id: propId,
+     property_name: 'Bien ' + propId, departure_date: date, status: 'unassigned' })
 
 test('un jour où elle a un ménage porte une PASTILLE CHIFFRÉE, et un fond vert', async () => {
   // ⚠ Les points ne disaient qu'une chose — « il y en a » — et il fallait les
@@ -1060,11 +1137,19 @@ test('toucher un jour à prendre OUVRE l\'offre au lieu de basculer l\'absence',
   await t.charger()
   await t.chargerDisponibilites()
 
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  taperJour(w, j)
   await souffler(40)
 
   assert.strictEqual(ecritures(t).length, 0, 'aucune absence déclarée')
   assert.strictEqual(w.document.getElementById('modal').style.display, 'flex')
+  // ⚠ LA TAPE OUVRE DESORMAIS LA FEUILLE DU JOUR, qui porte la proposition dans
+  // sa propre section — au lieu de sauter directement sur la prise. La feuille
+  // MONTRE, elle ne décide pas ; c'est un second geste qui prend.
+  assert.match(feuille(w), /proposition/i)
+  const offreEl = w.document.querySelector('#modal-body [data-offre]')
+  assert.ok(offreEl, 'la proposition est là, et elle est touchable')
+  offreEl.dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
   assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/)
   assert.strictEqual(w.document.getElementById('modal-prendre').style.display, '')
 })
@@ -1076,7 +1161,14 @@ test('un jour d\'absence AVEC offre le DIT dans la feuille', async () => {
   t.seed()
   await t.charger()
   await t.chargerDisponibilites()
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  taperJour(w, j)
+  await souffler(40)
+  // ⚠ DEUX TEMPS DEPUIS LE LOT B : la tape ouvre la feuille du JOUR, qui porte
+  // la proposition ; c'est en la touchant qu'on arrive à la prise, et c'est là
+  // que la mention d'absence doit se lire.
+  const o = w.document.querySelector('#modal-body [data-offre]')
+  assert.ok(o, 'la proposition est dans la feuille du jour')
+  o.dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(40)
   const note = w.document.getElementById('modal-note').textContent
   assert.match(note, /absente ce jour-là/)
@@ -1092,10 +1184,20 @@ test('un ménage qui n\'est pas le sien ne montre AUCUNE donnée voyageur', asyn
   t.seed()
   await t.charger()
   await t.chargerDisponibilites()
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  // ⚠ IL FAUT ALLER JUSQU'A LA FEUILLE DE PRISE. Le lot B avait fait s'arreter
+  // ce test a la feuille du JOUR, qui n'a jamais porte de champ voyageur : la
+  // garde posee apres la fuite du 14 septembre ne couvrait plus l'ecran pour
+  // lequel elle avait ete ecrite, et une fuite reintroduite dans
+  // `ouvrirPriseDeMenage` serait restee verte.
+  taperJour(w, j)
+  const o = w.document.querySelector('#modal-body [data-offre]')
+  assert.ok(o, 'la proposition est dans la feuille du jour')
+  o.dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(40)
+  assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/,
+    'on est bien sur la feuille de prise, celle que la garde vise')
   const corps = w.document.getElementById('modal-body').textContent
-  assert.match(corps, /Colomiers/, 'le logement, oui')
+  assert.match(corps, /Bien p1/, 'le logement, oui')
   for (const interdit of ['Voyageur', 'Adultes', 'Enfants', 'Arrivée']) {
     assert.ok(!corps.includes(interdit), `${interdit} ne doit PAS apparaître`)
   }
@@ -1131,6 +1233,10 @@ test('un jour PASSÉ à prendre ne s\'ouvre pas', async (ctx) => {
   const el = caseDu(w, j)
   assert.ok(el, 'le jour passé est bien rendu dans le calendrier')
   assert.ok(el.classList.contains('passe'))
+  // ⚠ ET IL EST INERTE (lot B) : une case qui n'ouvrira rien n'est pas
+  // touchable. La rendre cliquable serait promettre une réponse qui ne vient pas.
+  assert.ok(el.classList.contains('inerte'))
+  assert.strictEqual(el.getAttribute('tabindex'), '-1')
   el.dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(40)
   assert.notStrictEqual(w.document.getElementById('modal').style.display, 'flex')
@@ -1148,7 +1254,7 @@ test('sans offre, le clic bascule l\'absence comme avant', async () => {
   t.seed()
   await t.charger()
   await t.chargerDisponibilites()
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  basculerDispo(w, j)
   await souffler(40)
   assert.strictEqual(ecritures(t).length, 1)
   assert.strictEqual(ecritures(t)[0].corps.action, 'declarerIndisponibilite')
@@ -1382,9 +1488,27 @@ test('sans le droit d\'écriture, elle consulte mais n\'écrit pas', async () =>
   t.seed()
   await t.chargerDisponibilites()
   assert.match(message(w), /votre employeur qui pose/)
-  caseDu(w, dans(2)).dispatchEvent(new w.Event('click', { bubbles: true }))
+  // ⚠ CE TEST NE PROUVAIT PLUS RIEN. Depuis le lot B, un jour vide est INERTE
+  // chez qui ne règle rien : la feuille ne s'ouvre pas, `basculerDispo` ne
+  // trouve aucun segment et ne clique rien — « zéro écriture » était vrai par
+  // construction, quoi qu'on fasse au code.
+  // On éprouve donc les deux moitiés séparément : le jour vide ne s'ouvre même
+  // pas, et le jour qui S'OUVRE (parce qu'il porte un ménage) n'offre aucun
+  // réglage.
+  const vide = dans(2)
+  assert.ok(caseDu(w, vide).classList.contains('inerte'), 'un jour vide n\'ouvre rien')
+  taperJour(w, vide)
+  assert.notStrictEqual(w.document.getElementById('modal').style.display, 'flex')
+
+  const { w: w2, t: t2 } = monter({ modifiable: false, bookings: [menage(dans(3))] })
+  t2.seed(); await t2.charger(); await t2.chargerDisponibilites()
+  taperJour(w2, dans(3))
+  assert.strictEqual(w2.document.getElementById('modal').style.display, 'flex',
+    'son ménage, lui, s\'ouvre')
+  assert.deepStrictEqual(segments(w2), [], 'mais aucun réglage ne lui est proposé')
   await souffler(50)
   assert.strictEqual(ecritures(t).length, 0)
+  assert.strictEqual(ecritures(t2).length, 0)
 })
 
 test('une PANNE ne s\'affiche jamais comme « aucune absence »', async () => {
@@ -1834,10 +1958,14 @@ test('on ne se déclare pas absente un jour où on a un ménage', async () => {
   const { w, t } = monter({ bookings: [menage(j)] })
   t.seed(); await t.charger(); await t.chargerDisponibilites()
   const avant = ecritures(t).length
-  caseDu(w, j).dispatchEvent(new w.Event('click', { bubbles: true }))
+  taperJour(w, j)
   await souffler(60)
   assert.strictEqual(ecritures(t).length, avant, 'rien n\'est parti')
-  assert.match(message(w), /retirez-le d’abord/)
+  // ⚠ IL N'Y A PLUS DE SEGMENT DU TOUT (lot B) : un ménage FIXE la journée, et
+  // un segment grisé aurait suggéré un droit qui lui manque — or c'est elle qui
+  // est attendue, et le chemin de retour passe par le retrait du ménage.
+  assert.deepStrictEqual(segments(w), [], 'aucune disponibilité à régler')
+  assert.match(feuille(w), /ménage/i, 'mais son ménage est bien là')
   assert.ok(caseDu(w, j).classList.contains('a-moi'), 'et la journée n\'a pas bougé')
 })
 
@@ -1865,4 +1993,179 @@ test('le compteur du calendrier ne PORTE PAS le nom d\'une case à cocher', () =
   assert.ok(!/dispo-pastille/.test(rendu),
     'le calendrier n\'emprunte pas le nom des cases à cocher des jours habituels')
   assert.ok(/dispo-pastille/.test(PAGE), 'qui, elle, existe toujours ailleurs')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT B — CE QUE LA REVIEW A TROUVÉ
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('chaque proposition du jour ouvre LA SIENNE, pas la première', async () => {
+  // ⚠ DÉFAUT GRAVE DE LA PREMIÈRE VERSION. Toutes les lignes portaient
+  // `data-offre = le JOUR`, et le handler refaisait `aPrendreDu(j)` puis prenait
+  // `libres[0]`. Deux ménages à prendre le même jour : elle touchait le second,
+  // la feuille de prise annonçait le PREMIER. Si elle validait, elle prenait le
+  // mauvais logement — et le second n'était jamais atteignable.
+  const j = dans(2)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p1'), offre(j, 'p2')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  taperJour(w, j)
+  const lignes = [...w.document.querySelectorAll('#modal-body [data-offre]')]
+  assert.strictEqual(lignes.length, 2, 'les deux propositions sont listées')
+  assert.deepStrictEqual(lignes.map(l => l.dataset.offreI), ['0', '1'],
+    'et chacune porte son propre index')
+
+  lignes[1].dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(40)
+  assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/)
+  assert.match(w.document.getElementById('modal-body').textContent, /Bien p2/,
+    'la feuille de prise annonce celle qu\'elle a touchée')
+  assert.ok(!/Bien p1/.test(w.document.getElementById('modal-body').textContent),
+    'et pas la première de la liste')
+})
+
+test('un ménage hors du filtre de biens masque quand même la disponibilité', async () => {
+  // ⚠ La section se décidait sur `mesMenagesDu`, qui honore le filtre
+  // d'affichage, pendant que la garde d'écriture lit la liste NON filtrée : vue
+  // réduite au bien 1, un ménage sur le bien 2 laissait le segment ACTIF, et la
+  // garde le refusait ensuite dans un bandeau caché sous le modal. Un bouton
+  // actif qui ne fait rien, sans un mot.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j, 'p2'), menage(dans(5), 'p1')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  t.filtrer(['p1'])            // elle réduit sa vue au bien 1
+  w.__p.chargerDisponibilites && null
+  taperJour(w, j)
+  assert.deepStrictEqual(segments(w), [],
+    'aucun segment : elle a un ménage ce jour-là, filtré ou non')
+})
+
+test('hors ligne, le refus se lit DANS la feuille — pas derrière elle', async () => {
+  // ⚠ Depuis le lot B, `basculerMonJour` n'est plus appelée que depuis la
+  // feuille, et tous ses `dire()` écrivaient dans le bandeau de la carte,
+  // recouvert par l'overlay. Elle touchait le segment, rien ne bougeait, et
+  // l'explication s'affichait derrière le modal : il ne se passait rien, sans un
+  // mot.
+  const j = dans(2)
+  const { w, t } = monter({ enLigne: false })
+  t.seed(); await t.chargerDisponibilites()
+  basculerDispo(w, j)
+  await souffler(50)
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex',
+    'la feuille est restée ouverte')
+  const dansLaFeuille = ['modal-error', 'modal-warning', 'modal-success']
+    .map(id => w.document.getElementById(id))
+    .filter(el => el.classList.contains('visible'))
+    .map(el => el.textContent).join(' ')
+  assert.match(dansLaFeuille, /Hors ligne/, 'et elle le dit là où elle regarde')
+  // ⚠ ET PAS DERRIERE : le bandeau de la carte ne doit pas porter le message,
+  // sinon le test passerait aussi avec l'ancien routage.
+  assert.ok(!/Hors ligne/.test(w.document.getElementById('dispo-message').textContent),
+    'le bandeau de la carte n\'est plus le canal')
+})
+
+test('un rattrapage tardif ne rouvre pas une feuille qu\'elle a fermée', async () => {
+  // ⚠ `ouvrirJour` finit par `display = 'flex'`. Appelé après coup depuis le
+  // rattrapage, il ROUVRAIT une feuille fermée — ou, pire, remplaçait sous ses
+  // yeux le contenu du jour qu'elle venait d'ouvrir par celui du jour en échec,
+  // ET reprenait `jourOuvert` : sa tape suivante écrivait sur le mauvais jour.
+  const j = dans(2)
+  const { w, t } = monter({ coupureEcriture: true })
+  t.seed(); await t.chargerDisponibilites()
+  basculerDispo(w, j)
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(120)
+  assert.notStrictEqual(w.document.getElementById('modal').style.display, 'flex',
+    'la feuille reste fermée')
+})
+
+test('un refus arrivé après la fermeture se dit dans le BANDEAU, pas dans le vide', async () => {
+  // ⚠ `direIci` routait sur le seul `depuisFeuille` : le message atterrissait
+  // dans un modal fermé — la journée revenait toute seule dans le calendrier,
+  // sans un mot nulle part. C'est exactement la panne silencieuse que ce lot
+  // existe pour supprimer. La garde doit être la même que pour le redessin.
+  const j = dans(2)
+  const { w, t } = monter({ coupureEcriture: true })
+  t.seed(); await t.chargerDisponibilites()
+  basculerDispo(w, j)
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(120)
+  assert.notStrictEqual(w.document.getElementById('modal').style.display, 'flex',
+    'la feuille reste fermée')
+  assert.match(w.document.getElementById('dispo-message').textContent, /interrompu|rechargée/,
+    'et le bandeau de la carte reprend la parole')
+})
+
+test('la feuille d\'un jour filtré n\'est jamais VIDE', async () => {
+  // ⚠ Mon premier correctif avait déplacé la seule section « disponibilité » sur
+  // la liste non filtrée, en laissant `jourOuvrable` et les deux autres sections
+  // sur la liste filtrée. Vue réduite au bien 1, un ménage sur le bien 2 rendait
+  // le jour ouvrable ET supprimait la section : la feuille s'ouvrait
+  // COMPLÈTEMENT VIDE, en annonçant « rien de prévu » sur une journée où elle
+  // travaille. Un bouton muet était devenu une feuille qui ment.
+  const j = dans(2)
+  const { w, t } = monter({ bookings: [menage(j, 'p2'), menage(dans(6), 'p1')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  t.filtrer(['p1'])
+  taperJour(w, j)
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex')
+  assert.ok(feuille(w).trim().length > 0, 'la feuille n\'est pas vide')
+  assert.match(feuille(w), /ménage/i, 'elle montre le ménage du jour')
+  assert.ok(!/Rien de prévu/.test(w.document.getElementById('modal-sub').textContent),
+    'et elle ne prétend pas que la journée est libre')
+})
+
+test('le segment se fige pendant l\'envoi — il ne reste pas actif pour rien', async () => {
+  // ⚠ `basculerMonJour` sort sur `enVolParJour.has(j)` SANS UN MOT : elle
+  // touchait la seconde face, rien ne bougeait, et le « ✓ » du geste précédent
+  // restait affiché. C'est le « bouton actif qui ne fait rien » que ce lot
+  // s'interdit partout ailleurs.
+  const j = dans(2)
+  const { w, t } = monter({ suspendreEcriture: true })
+  t.seed(); await t.chargerDisponibilites()
+  basculerDispo(w, j)
+  await souffler(40)
+  assert.strictEqual(ecritures(t).length, 1, 'l\'envoi est parti et reste en vol')
+  assert.ok(segments(w).length > 0, 'le segment est toujours affiché')
+  assert.ok(segments(w).every(b => b.disabled), 'mais figé tant que rien n\'est revenu')
+  t.libererEcritures()
+})
+
+test('un ménage filtré ouvre quand même sa journée, même sans droit d\'écriture', async () => {
+  // ⚠ `jourOuvrable` lisait la liste FILTRÉE. Chez une prestataire qui ne règle
+  // rien, le repli « elle peut au moins régler sa disponibilité » n'existe pas :
+  // vue réduite au bien 1, une journée portant un ménage sur le bien 2 devenait
+  // purement INERTE — son travail lui était caché par un réglage d'affichage.
+  const j = dans(2)
+  const { w, t } = monter({ modifiable: false, bookings: [menage(j, 'p2'), menage(dans(6), 'p1')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  t.filtrer(['p1'])
+  taperJour(w, j)
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex',
+    'la journée s\'ouvre : elle y travaille')
+  assert.match(feuille(w), /ménage/i)
+})
+
+test('un rattrapage ne balaie pas la feuille de PRISE ouverte par-dessus', async () => {
+  // ⚠ `ouvrirPriseDeMenage` ne remettait pas `jourOuvert` à zéro : après elle,
+  // `feuilleOuverteSur` répondait encore vrai. Une bascule de disponibilité
+  // partie juste avant, puis échouée, effaçait la feuille de prise sous son
+  // doigt — titre, bouton « je prends » et tout.
+  const j = dans(2)
+  // ⚠ IL FAUT QUE L'ECRITURE ECHOUE : c'est le RATTRAPAGE qui redessinait, pas
+  // le succès. Avec une simple suspension, le test ne pouvait rien distinguer —
+  // il passait avec et sans le correctif.
+  const { w, t } = monter({ aPrendre: [offre(j)], suspendreEcriture: true,
+                            echecEcriture: { status: 503, message: 'Panne' } })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  basculerDispo(w, j)                       // l'écriture part et reste en vol
+  taperJour(w, j)                           // on rouvre la journée
+  const o = w.document.querySelector('#modal-body [data-offre]')
+  assert.ok(o, 'la proposition est là')
+  o.dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/)
+
+  t.libererEcritures()
+  await souffler(120)
+  assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/,
+    'la feuille de prise a survécu au retour de l\'écriture')
 })
