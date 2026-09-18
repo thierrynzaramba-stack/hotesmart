@@ -418,6 +418,11 @@ c'est-à-dire l'hypothèse même que ce filet couvre.
 
 Brevo POSTe sur `/api/inbound-email` quand un e-mail arrive sur `*@reply.hotesmart.fr`.
 
+**Validé de bout en bout en production le 18 septembre 2026** sur une réservation Offline
+réelle : confirmation partie par e-mail à 17 h 33, réponse du voyageur dans le fil à 18 h 20
+(`canal=email`, `inbound`), réponse de l'hôte depuis la messagerie à 18 h 21 — un seul fil,
+au même endroit que les messages OTA.
+
 ### ⚠️ Le webhook apporte le contenu, la relecture l'authentifie
 
 Channex accepte un en-tête personnalisé (`X-Channel-Webhook-Secret`) ; **Brevo n'en propose

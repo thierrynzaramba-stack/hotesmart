@@ -73,6 +73,13 @@ const fetchOrigine = global.fetch
 global.fetch = async (url) => {
   etat.appelsBrevo = (etat.appelsBrevo || 0) + 1
   etat.derniereUrl = String(url)
+  // ⚠ L'URL RELUE EST INSPECTEE, pas seulement comptee. Sans ca, rien ne
+  // verifiait que l'uuid interroge est bien celui du POST : `Uuid` est un
+  // TABLEAU chez Brevo, et `encodeURIComponent(['a','b'])` rend « a%2Cb » —
+  // une URL qui part en 404 pendant que le compteur d'appels reste vert.
+  etat.uuidsRelus = etat.uuidsRelus || []
+  etat.uuidsRelus.push(decodeURIComponent(String(url).split('/inbound/events/')[1] || ''))
+  if (etat.brevoJette) throw new Error('socket hang up')
   return { ok: etat.brevoStatus === 200, status: etat.brevoStatus,
            json: async () => etat.brevo || {} }
 }
@@ -95,11 +102,23 @@ function reponse () {
   r.json = o => { r.corps = o; return r }
   return r
 }
+// ⚠ BREVO POSTE `{ items: [ … ] }`. Chaque test part donc de la forme reelle :
+// on enveloppe ici. Un test qui veut eprouver l'enveloppe elle-meme passe un
+// objet qui porte deja `items`.
 const appel = async (body) => {
   const res = reponse()
-  await handler({ method: 'POST', body: body === undefined ? etat.payload : body }, res)
+  const donne = body === undefined ? etat.payload : body
+  const enveloppe = donne && typeof donne === 'object' && !('items' in donne)
+    ? { items: [donne] } : donne
+  await handler({ method: 'POST', body: enveloppe }, res)
   return res
 }
+
+// L'adresse d'un champ Brevo : `From` est un objet `{Address, Name}`, `To` un
+// tableau de ces objets. Jamais une chaine nue.
+const adr = v => Array.isArray(v)
+  ? String(v[0]?.Address || '')
+  : String(v?.Address || v || '')
 
 // `payload` = ce que Brevo POSTe. La reference relue en est derivee, pour que
 // les deux concordent par defaut — une divergence se demande explicitement.
@@ -109,7 +128,7 @@ function remise (payload, o = {}) {
   etat.brevo = payload ? {
     receivedAt: '2026-09-18T19:34:28.000+02:00',
     messageId: o.refMessageId ?? payload.MessageId ?? '<msg-1@exemple.test>',
-    sender: o.refSender ?? payload.From ?? 'marie@exemple.test',
+    sender: o.refSender ?? adr(payload.From) ?? 'marie@exemple.test',
     recipient: o.recipient !== undefined ? o.recipient : ADRESSE,
     subject: o.refSubject ?? payload.Subject ?? 'Re: votre séjour',
     attachments: [], logs: []
@@ -123,13 +142,28 @@ function remise (payload, o = {}) {
   etat.reponseCopie = o.reponseCopie || null
   etat.reponsePlateforme = o.reponsePlateforme || null
   etat.appelsBrevo = 0
+  etat.uuidsRelus = []
+  etat.brevoJette = o.brevoJette || false
 }
-// Ce que Brevo POSTe : l'uuid, le corps, les en-tetes. Pas d'autorite sur le
-// destinataire — c'est la relecture qui le donne.
+// ⚠ CE QUE BREVO POSTE VRAIMENT — et c'est la deuxieme moitie de la lecon.
+// Le commit precedent a repare le faux de la RELECTURE et laisse celui du
+// PAYLOAD : `Uuid: 'uuid-1'` (chaine) la ou Brevo envoie un TABLEAU,
+// `From: 'marie@…'` (chaine) la ou il envoie `{Address, Name}`,
+// `Spam: {Score}` la ou le champ s'appelle `SpamScore` et vit A LA RACINE.
+// Trois ecarts, trois gardes qui passaient au vert contre une API imaginaire :
+// l'anti-spam etait MORT en production et le tableau d'uuid marchait par
+// accident. Depuis que le payload porte le corps, les en-tetes et le spam,
+// c'est LUI qu'il faut imiter fidelement.
+const UUID_EVT = '0f4a6b22-1c3d-4e5f-8a9b-0c1d2e3f4a5b'
 const mail = (o = {}) => ({
-  Uuid: 'uuid-1', From: 'marie@exemple.test',
+  Uuid: o.uuid !== undefined ? o.uuid : [UUID_EVT],
+  MessageId: '<msg-1@exemple.test>',
+  From: { Name: 'Marie Durand', Address: 'marie@exemple.test' },
+  To: [{ Name: '', Address: ADRESSE }],
+  SentAtDate: 'Fri, 18 Sep 2026 19:34:20 +0200',
   Subject: 'Re: votre séjour', ExtractedMarkdownMessage: 'Bonjour, une question.',
-  Headers: o.headers || {}, Spam: { Score: o.spam ?? 0 }, ...o.champs
+  Attachments: [],
+  Headers: o.headers || {}, SpamScore: o.spam ?? 0, ...o.champs
 })
 
 // ─── 1. Le corps n'est jamais cru ───────────────────────────────────────────
@@ -152,13 +186,25 @@ test('LE TEST QUI COMPTE : un POST qui CONTREDIT Brevo est refuse', async () => 
   // La contrepartie de « le corps vient du payload » : on verifie que ce payload
   // parle bien du meme e-mail. Divergence sur l'expediteur, le sujet ou
   // l'identifiant de message = refus.
-  for (const [champ, valeur] of [['From', 'attaquant@ailleurs.test'],
+  for (const [champ, valeur] of [['From', { Address: 'attaquant@ailleurs.test' }],
                                  ['Subject', 'Un tout autre sujet'],
                                  ['MessageId', '<forge@ailleurs.test>']]) {
     remise(mail())
     const res = await appel({ ...mail(), [champ]: valeur })
     assert.strictEqual(res.corps.reason, 'payload_incoherent', champ)
     assert.strictEqual(etat.messages.length, 0)
+  }
+})
+
+test('un champ que BREVO ne rend pas n\'est pas une contradiction', async () => {
+  // Constat de review : la tolerance ne couvrait que l'absence cote POST. Or
+  // Brevo documente tous les champs de la relecture comme optionnels — un
+  // `subject` qu'il ne rend pas valait `''`, donc « different », donc refus.
+  // Un e-mail legitime disparaissait sur un champ manquant chez le fournisseur.
+  for (const absent of [{ refSubject: '' }, { refMessageId: '' }, { refSender: '' }]) {
+    remise(mail(), absent)
+    const res = await appel()
+    assert.strictEqual(res.corps.reason, 'ok', JSON.stringify(absent))
   }
 })
 
@@ -179,6 +225,21 @@ test('un corps vide ne devient pas un message muet', async () => {
   assert.strictEqual(res.corps.reason, 'corps_vide')
   assert.strictEqual(etat.messages.length, 0)
   assert.strictEqual(etat.taches.length, 1, 'mais l\'hote voit qu\'on lui a ecrit')
+  // ⚠ ET IL LE VOIT VRAIMENT. Constat de review : la tache partait sans
+  // `user_id`, alors que l'ecran lit `agent_tasks` filtre sur le compte courant
+  // — elle n'etait visible de personne. « L'hote voit » etait une phrase, pas
+  // une garantie.
+  assert.strictEqual(etat.taches[0].user_id, 'compte-A', 'la tache a un proprietaire')
+  assert.strictEqual(etat.taches[0].property_id, 'prop-1', 'et un bien')
+})
+
+test('un corps vide ne masque plus le diagnostic du jeton', async () => {
+  // Il se decidait AVANT la resolution du jeton : une adresse forgee doublee
+  // d'un corps vide se soldait par « corps_vide », et la vraie cause se perdait.
+  const forgee = 'c87f24ce95874d5e841fe8ef6d34edfd-000000000000@reply.hotesmart.fr'
+  remise(mail({ champs: { ExtractedMarkdownMessage: '', RawTextBody: '', RawHtmlBody: '' } }),
+    { recipient: forgee })
+  assert.strictEqual((await appel()).corps.reason, 'jeton_refuse')
 })
 
 test('relecture impossible : on n\'ecrit RIEN', async () => {
@@ -189,14 +250,59 @@ test('relecture impossible : on n\'ecrit RIEN', async () => {
   assert.strictEqual(etat.conversations.length, 0)
 })
 
-test('on acquitte TOUJOURS en 200, meme quand on ignore', async () => {
-  // Un 4xx/5xx fait rejouer Brevo indefiniment sur un e-mail qu'on a decide
-  // d'ignorer. Ce qu'on ne traite pas se journalise, ca ne se renvoie pas.
-  for (const cas of [{}, { Uuid: 'x' }, { items: [] }]) {
+test('LE TEST QUI COMPTE : une panne PASSAGERE se redemande, elle ne se jette pas',
+  async () => {
+    // Constat de review. Rendre 200 sur un 429 ou une coupure reseau, c'est
+    // PERDRE DEFINITIVEMENT la reponse d'un voyageur : Brevo ne rejoue que ce
+    // qu'on n'a pas acquitte. Sans trace, et l'hote ne l'apprend jamais.
+    for (const cas of [{ brevoStatus: 429 }, { brevoStatus: 500 },
+                       { brevoStatus: 503 }, { brevoStatus: 404 },
+                       { brevoJette: true }]) {
+      remise(mail(), cas)
+      const res = await appel()
+      assert.strictEqual(res.code, 503, JSON.stringify(cas))
+      assert.strictEqual(res.corps.reason, 'relecture_impossible')
+      assert.strictEqual(etat.messages.length, 0, 'et rien n\'entre non authentifie')
+      assert.strictEqual(etat.taches.length, 0, 'ni en file : on redemande, on ne renonce pas')
+    }
+  })
+
+test('un refus DECIDE reste acquitte en 200 : le rejeu n\'y changerait rien', async () => {
+  // La contrepartie. Un webhook qui rend 5xx sur ce qu'on a DECIDE d'ignorer
+  // fait rejouer Brevo indefiniment. Pas d'uuid ne guerit pas en recommencant.
+  for (const cas of [{}, { items: [] }, { Uuid: [] }]) {
     remise(null, { brevoStatus: 500 })
     const res = await appel(cas)
     assert.strictEqual(res.code, 200, JSON.stringify(cas))
   }
+  // Une cle refusee non plus : c'est notre configuration, pas un alea.
+  remise(mail(), { brevoStatus: 401 })
+  assert.strictEqual((await appel()).code, 200)
+})
+
+// ─── `Uuid` est un TABLEAU (constat de review) ──────────────────────────────
+test('LE TEST QUI COMPTE : l\'uuid relu est CELUI du POST, pas la liste entiere',
+  async () => {
+    // Brevo envoie un uuid PAR DESTINATAIRE. Lu comme un scalaire, ca marchait
+    // par accident a un seul : `encodeURIComponent(['a'])` rend « a ». A deux
+    // (To + Cc sur le sous-domaine), l'URL devenait « a%2Cb » — 404, donc
+    // message perdu.
+    remise(mail({ uuid: [UUID_EVT, '11111111-2222-3333-4444-555555555555'] }))
+    const res = await appel()
+    assert.strictEqual(res.corps.reason, 'ok')
+    assert.strictEqual(etat.uuidsRelus[0], UUID_EVT, 'le premier uuid, pas « a,b »')
+    assert.strictEqual(etat.messages[0].providerMsgId, UUID_EVT,
+      'et c\'est lui qui est trace, pas la liste concatenee')
+  })
+
+test('un tableau d\'uuid VIDE est une absence, pas une valeur', async () => {
+  // `[]` est truthy : la garde « pas d'uuid, pas de traitement » etait
+  // contournee, et l'URL relue finissait par une chaine vide.
+  remise(mail({ uuid: [] }))
+  const res = await appel()
+  assert.strictEqual(res.corps.reason, 'relecture_impossible')
+  assert.strictEqual(res.corps.raison, 'uuid_absent')
+  assert.strictEqual(etat.appelsBrevo, 0, 'et on n\'a interroge personne')
 })
 
 // ─── 2. Le compte vient du jeton ────────────────────────────────────────────

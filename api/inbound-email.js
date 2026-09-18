@@ -95,7 +95,16 @@ function motifAutomatique (evenement) {
   for (const [cle, test] of ENTETES_AUTOMATIQUES) {
     if (h[cle] !== undefined && test(h[cle])) return `en-tete ${cle}`
   }
-  const score = Number(evenement?.Spam?.Score ?? evenement?.spam?.score)
+  // ⚠ `SpamScore`, A LA RACINE — PAS `Spam.Score`. Constat de review, et la
+  // garde etait MORTE : Brevo envoie un flottant `SpamScore` au meme niveau que
+  // `Subject`. La lecture precedente rendait `undefined`, donc `NaN`, donc
+  // `Number.isFinite` faux, donc le seuil JAMAIS atteint. Un mailing ecrivant a
+  // une adresse de reponse valide entrait dans le fil, l'agent IA repondait, et
+  // la boucle se facturait sur la cle de l'hote. Les deux anciennes formes
+  // restent en repli : elles ne coutent rien et ne mentent pas.
+  const score = Number(
+    evenement?.SpamScore ?? evenement?.spamScore
+    ?? evenement?.Spam?.Score ?? evenement?.spam?.score)
   if (Number.isFinite(score) && score >= SCORE_SPAM_MAX) return `score de spam ${score}`
   return null
 }
@@ -125,6 +134,14 @@ const premiereAdresse = v => {
 // `/inbound/events?limit=5` et prenait le premier venu — c'est-a-dire qu'un POST
 // sans uuid faisait authentifier un e-mail SANS RAPPORT, dont le `recipient`
 // aurait servi au rattachement. On refuse : pas d'uuid, pas de traitement.
+// ⚠ UNE PANNE PASSAGERE N'EST PAS UN REFUS. Constat de review : toute
+// relecture ratee rendait 200, donc Brevo ne rejouait jamais, donc un simple
+// 429 ou une coupure reseau PERDAIT DEFINITIVEMENT la reponse d'un voyageur —
+// sans trace, et l'hote ne l'apprenait pas. Ces raisons-la se reessayent :
+// l'evenement peut aussi n'etre pas encore interrogeable a l'instant du POST.
+// Les autres (pas d'uuid, cle refusee) ne guerissent pas en recommencant.
+const RAISON_PASSAGERE = /^(cle_plateforme_absente|evenement_introuvable|brevo_injoignable|brevo_(404|408|425|429|5\d\d))/
+
 async function relireChezBrevo (uuid) {
   if (!CLE_BREVO) return { ok: false, raison: 'cle_plateforme_absente' }
   if (!uuid) return { ok: false, raison: 'uuid_absent' }
@@ -143,17 +160,24 @@ async function relireChezBrevo (uuid) {
 
 // ⚠ LA CONFRONTATION. Ce que le POST raconte doit correspondre a ce que Brevo a
 // enregistre. On compare ce que Brevo EXPOSE — expediteur, sujet, identifiant de
-// message — en tolerant l'absence cote payload (tous les champs ne sont pas
-// garantis) mais jamais la CONTRADICTION.
+// message — en tolerant l'ABSENCE, d'un cote comme de l'autre, mais jamais la
+// CONTRADICTION.
+//
+// ⚠ LA TOLERANCE EST SYMETRIQUE. Constat de review : elle ne couvrait que
+// l'absence cote POST. Or Brevo documente TOUS les champs de la relecture comme
+// optionnels — un `subject` qu'il ne rend pas valait `''`, donc « different »
+// du sujet reellement envoye, donc refus. Un e-mail parfaitement legitime
+// disparaissait sur un champ manquant chez le fournisseur. Comparer une valeur
+// a une absence, ce n'est pas constater une contradiction.
 function divergence (payload, ref) {
   const norm = v => String(v == null ? '' : v).trim().toLowerCase()
   const paires = [
-    ['sender', premiereAdresse(payload.From || payload.from), norm(ref.sender)],
+    ['sender', premiereAdresse(payload.From || payload.from), ref.sender],
     ['subject', payload.Subject ?? payload.subject, ref.subject],
     ['messageId', payload.MessageId ?? payload.messageId, ref.messageId]
   ]
   for (const [nom, duPost, deBrevo] of paires) {
-    if (duPost == null || duPost === '') continue
+    if (norm(duPost) === '' || norm(deBrevo) === '') continue
     if (norm(duPost) !== norm(deBrevo)) return `${nom} (POST « ${norm(duPost).slice(0, 60)} » ≠ Brevo « ${norm(deBrevo).slice(0, 60)} »)`
   }
   return null
@@ -269,13 +293,23 @@ async function copieALhote ({ userId, propertyId, bienNom, resa, de, sujet, corp
 module.exports = async function handler (req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
 
-  // ⚠ ON ACQUITTE TOUJOURS EN 200, MEME QUAND ON NE FAIT RIEN.
+  // ⚠ ON ACQUITTE EN 200 TOUT CE QU'ON A DECIDE, MEME QUAND ON NE FAIT RIEN.
   // Un webhook qui rend 4xx/5xx fait rejouer Brevo, encore et encore, sur un
   // e-mail qu'on a deja decide d'ignorer. Ce qu'on ne traite pas se JOURNALISE
   // — ca ne se renvoie pas au facteur.
   const fini = (raison, extra = {}) => {
     if (raison !== 'ok') console.log('[inbound-email]', raison, JSON.stringify(extra).slice(0, 200))
     return res.status(200).json({ ok: true, reason: raison, ...extra })
+  }
+
+  // ⚠ ET UNE SEULE EXCEPTION : CE QU'ON N'A PAS PU DECIDER SE REDEMANDE.
+  // Decision de Thierry (18 septembre 2026) : quand la relecture tombe pour une
+  // cause passagere, on rend 503 pour que Brevo rejoue — plutot que de mettre en
+  // file un message qu'on n'a PAS pu authentifier. Le rejeu reessaie
+  // l'authentification ; la mise en attente y renoncerait.
+  const rejouer = (raison, extra = {}) => {
+    console.error('[inbound-email] rejeu demande —', raison, JSON.stringify(extra).slice(0, 200))
+    return res.status(503).json({ ok: false, reason: raison, ...extra })
   }
 
   try {
@@ -285,10 +319,23 @@ module.exports = async function handler (req, res) {
     // Brevo de l'evenement, le second celui que le client mail de l'expediteur
     // a choisi — donc une valeur qu'on nous donne. Les confondre revenait a
     // accepter que l'appelant designe lui-meme ce qu'on va relire.
-    const uuid = item?.Uuid || item?.uuid || null
+    //
+    // ⚠ ET C'EST UN TABLEAU. Constat de review : Brevo envoie `"Uuid": ["…"]`,
+    // un identifiant PAR DESTINATAIRE. Lu comme un scalaire, ca marchait par
+    // ACCIDENT a un seul destinataire (`encodeURIComponent(['a'])` rend « a ») ;
+    // des qu'un e-mail arrivait en To + Cc sur le sous-domaine, l'URL devenait
+    // « a%2Cb » — 404, donc relecture impossible, donc message perdu. Et
+    // `Uuid: []` est TRUTHY : la garde « pas d'uuid, pas de traitement » etait
+    // contournee et l'URL relue finissait par une chaine vide.
+    const uuidBrut = item?.Uuid ?? item?.uuid
+    const uuid = (Array.isArray(uuidBrut) ? uuidBrut[0] : uuidBrut) || null
 
     const lu = await relireChezBrevo(uuid)
-    if (!lu.ok) return fini('relecture_impossible', { raison: lu.raison })
+    if (!lu.ok) {
+      return RAISON_PASSAGERE.test(lu.raison)
+        ? rejouer('relecture_impossible', { raison: lu.raison })
+        : fini('relecture_impossible', { raison: lu.raison })
+    }
     const ref = lu.reference
 
     // 1. Le POST dit-il la meme chose que Brevo ?
@@ -313,16 +360,6 @@ module.exports = async function handler (req, res) {
     if (!cible) {
       await mettreEnAttente({ de: expediteur, sujet, corps, raison: 'aucune adresse de réponse' })
       return fini('sans_adresse_de_reponse')
-    }
-    // ⚠ UN CORPS VIDE N'EST PAS UN MESSAGE. Le payload peut ne rien porter
-    // d'exploitable (pieces jointes seules, format inattendu) : l'ecrire dans le
-    // fil donnerait une ligne muette que l'agent IA lirait comme une question
-    // sans contenu. On met en attente, avec le sujet — l'hote voit qu'on lui a
-    // ecrit, et quoi.
-    if (!corps) {
-      await mettreEnAttente({ de: expediteur, sujet, corps: '',
-        raison: 'message reçu sans texte exploitable' })
-      return fini('corps_vide')
     }
     const jeton = bookingDepuisAdresse(cible)
     if (!jeton.ok) {
@@ -385,6 +422,25 @@ module.exports = async function handler (req, res) {
         raison: `réservation ${(resa.snapshot || {}).status || 'inactive'}`
       })
       return fini('reservation_inactive', { statut: (resa.snapshot || {}).status })
+    }
+
+    // ⚠ UN CORPS VIDE N'EST PAS UN MESSAGE, ET IL SE RANGE ICI — PAS PLUS HAUT.
+    // Le payload peut ne rien porter d'exploitable (pieces jointes seules,
+    // format inattendu) : l'ecrire dans le fil donnerait une ligne muette que
+    // l'agent IA lirait comme une question sans contenu.
+    //
+    // Constat de review : teste avant la resolution du jeton, la tache partait
+    // SANS `user_id` — or l'ecran lit `agent_tasks` filtre sur le compte
+    // courant, et la RLS ne laisserait rien passer non plus. « L'hote voit
+    // qu'on lui a ecrit » etait donc faux : la tache n'etait visible de
+    // personne. Ici, la reservation est connue : la tache porte son compte et
+    // son bien. Au passage, un corps vide ne masque plus le diagnostic
+    // `jeton_refuse`, qui se decide maintenant avant.
+    if (!corps) {
+      await mettreEnAttente({
+        userId: resa.user_id, propertyId: resa.property_id, de: expediteur, sujet, corps: '',
+        raison: 'message reçu sans texte exploitable' })
+      return fini('corps_vide')
     }
 
     // 5. Le cœur : le fil de l'hote, et la table que l'agent IA lit.

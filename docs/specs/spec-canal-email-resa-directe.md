@@ -205,17 +205,21 @@ Le risque suppose donc une fuite préalable de l'`uuid`. Il est nommé ici plut�
 jour où Brevo exposera une signature de webhook, c'est ce paragraphe qu'il faudra venir
 supprimer.
 
-### 2. L'ingestion des réponses e-mail (inbound parsing Brevo) — CHANTIER OUVERT
+### 2. ~~L'ingestion des réponses e-mail~~ — ✅ LIVRÉE le 18 septembre 2026
 
-Hors périmètre dès la spec d'origine, **repris le 17 septembre 2026** : voir
-l'étude et le plan dans l'échange du chantier « inbound e-mail ». Infrastructure
-posée le 18 septembre (sous-domaine `reply.hotesmart.fr`, MX, webhook Brevo
-`id=2191668`). Ce qui suit reste vrai jusqu'à la bascule du `reply-to`. Conséquence assumée : le fil « messages envoyés » vit
+Hors périmètre dès la spec d'origine, reprise le 17 et **validée en production le 18** :
+une réponse envoyée à l'adresse-jeton entre dans le fil de la réservation
+(`canal=email`, `inbound`), l'hôte en reçoit une copie, et il peut répondre
+depuis la messagerie — vérifié de bout en bout sur une réservation réelle.
+
+Infrastructure : sous-domaine `reply.hotesmart.fr`, MX Brevo, webhook `id=2191668`,
+jetons HMAC sans table (`lib/jeton-reponse.js`), endpoint `api/inbound-email.js`.
+Conception et risque résiduel : § « Inbound e-mail » ci-dessus. Conséquence assumée : le fil « messages envoyés » vit
 dans HôteSmart, les réponses arrivent dans la boîte mail de l'hôte (`reply-to` = son adresse
 d'expédition). Le jour où ce chantier s'ouvrira, `lib/cron-classify.js` devra router comme les
 autres (voir dette 3).
 
-### 3. ~~`lib/cron-classify.js` hors du routage~~ — SOLDÉE le 18 septembre 2026
+### 3. ~~`lib/cron-classify.js` hors du routage~~ — ✅ SOLDÉE le 18 septembre 2026
 
 Fermée par l'étape 6 du chantier inbound : la réponse de l'IA passe par `sendGuestMessage`,
 son retour est lu, et un échec n'écrit plus ni fil ni `messages`. Détail :
@@ -253,3 +257,40 @@ dans le cœur.
 
 Elle sert aussi au téléphone depuis `guestPhone`. La renommer toucherait ses appelants pour
 un gain de lecture seule : noté, pas fait.
+
+---
+
+## Clôture du chantier inbound — 18 septembre 2026
+
+Le circuit complet fonctionne en production : réponse d'un voyageur → webhook Brevo →
+`api/inbound-email.js` → `messages` (`canal=email`, `inbound`) + `conversations` + copie à
+l'hôte → réponse possible depuis la messagerie, par le bon canal.
+
+### Ce que ce chantier a appris, et qui vaut au-delà de lui
+
+1. **Un faux client qui n'imite pas la forme du vrai ne prouve rien du vrai.** Mes tests
+   servaient la forme du *payload* du webhook là où l'API de relecture rend des métadonnées
+   plates. Ils sont restés verts pendant que le rattachement échouait en production.
+   Troisième occurrence de cette famille dans le dépôt.
+2. **Un test qui lit du code ne voit pas ce que le code fait.** Le « test qui compte » de la
+   bascule du `reply-to` était un grep de source : il vérifiait que `bookingId` apparaissait
+   chez les appelants — vrai — sans traverser la fonction qui le jetait. La contre-épreuve
+   (réintroduire le bug et vérifier que le test rougit) est devenue systématique.
+3. **Une décision d'architecture validée peut être démentie par les faits.** « On ne croit
+   pas le payload » était juste en principe et impraticable en pratique. Le dire tôt vaut
+   mieux que le contourner.
+
+### Dettes restantes — backlog
+
+| # | dette | pourquoi elle attend |
+|---|---|---|
+| 1 | **L'hôte n'a aucun écran d'incidents** | deux replis plateforme (confirmation, notification de vente) n'existent que pour ça ; le jour de cet écran, on les retire et on **retourne les tests** qui défendent « elle part toujours » |
+| 2 | **Aucune sonde sur l'authentification du domaine Brevo** | elle a disparu une fois entre le 16 et le 17 septembre, sans que rien ne le dise. Le jour où elle tombe en production, les e-mails s'arrêtent en silence |
+| 3 | **Les 3 lignes mensongères de `messages`** | `outbound/auto`, `canal=ota`, Offline des 12 et 14 septembre — messages que le 422 avait refusés. Supprimer perd une trace, marquer demande une colonne |
+| 4 | **Templates de test sur Colomiers** | marqués `[[test-canal-email]]`, et cette marque part dans les messages |
+| 5 | **Beds24 `direct` hors canal e-mail** | son booking vient du payload provider, pas du cœur ; le badge le couvre déjà |
+| 6 | **Sujets d'e-mail non traduits** | le corps ne l'est pas non plus ; les deux suivront `customer.language` ensemble |
+| 7 | **`emailOuRien` porte mal son nom** | elle sert au téléphone depuis `guestPhone` |
+| 8 | **Le jeton de réponse ne se révoque pas** | HMAC sans table ; la validité se décide à la lecture de la réservation, ce qui suffit aujourd'hui |
+| 9 | **Risque résiduel de substitution de corps** | disparaîtra le jour où Brevo signera ses webhooks (§ « Risque résiduel ») |
+| 10 | **`scripts/cloture-annuler-resas-test.js` ne peut pas annuler** | `TEST_EMAIL` est un membre délégué, pas le propriétaire — et c'est la garde qui fonctionne, pas un défaut à corriger |

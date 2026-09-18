@@ -41,8 +41,15 @@ const BASE = process.env.HOTESMART_URL || 'https://hotesmart.vercel.app'
 const COLOMIERS = '0544fd9a-6579-44e7-b75e-19c63a2019ba'
 
 // Les adresses du product owner : c'est ce qui distingue un test d'une vente.
+// ⚠ CETTE LISTE NE SE DEVINE PAS, ELLE SE DECLARE. Le script a refuse de
+// toucher une reservation portant `thierry.nzaramba@spltmie.fr` — inconnue de
+// la liste — alors que c'etait bien un essai. Il a eu RAISON : Colomiers est un
+// bien reel, et « ca ressemble a une adresse du proprietaire » n'est pas une
+// preuve. L'adresse est ajoutee ici parce que Thierry l'a nommee, pas parce que
+// le script l'a deduite.
 const ADRESSES_DE_TEST = [/@exemple\.test$/i, /^thierrynzaramba@gmail\.com$/i,
-                          /^nzaramba/i, /^coeurdevie65@/i]
+                          /^nzaramba/i, /^coeurdevie65@/i,
+                          /^thierry\.nzaramba@spltmie\.fr$/i]
 
 const masque = e => { const s = String(e || ''); const i = s.indexOf('@')
   return i < 1 ? '(aucune)' : s.slice(0, 2) + '***@' + s.slice(i + 1) }
