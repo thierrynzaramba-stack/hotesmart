@@ -375,6 +375,63 @@ enverrait un vrai message à un vrai voyageur, en quelques minutes, sans que per
 demandé. La première version se fiait à un `template_id` relevé à la main pour affirmer que
 les trois étaient des `booking_confirmed` — c'était vrai ce jour-là, et ça ne prouvait rien.
 
+## Les réponses des voyageurs entrent dans le cœur (`api/inbound-email.js`)
+
+Brevo POSTe sur `/api/inbound-email` quand un e-mail arrive sur `*@reply.hotesmart.fr`.
+
+### ⚠️ Le webhook n'est pas authentifiable, donc on ne le croit pas
+
+Channex accepte un en-tête personnalisé (`X-Channel-Webhook-Secret`) ; **Brevo n'en propose
+aucun**, et un secret glissé dans l'URL fuirait dans les journaux. La réponse n'est pas de
+filtrer mieux : c'est de **ne rien tirer du corps reçu**.
+
+Le POST ne sert que de **déclencheur**. Le contenu est relu chez Brevo avec notre clé
+(`GET /inbound/events/<uuid>`). Un faux POST ne peut donc rien injecter — au pire il nous
+fait relire un e-mail qui existe, ou aucun. C'est la règle 11 prise au mot.
+
+**On acquitte toujours en 200**, même quand on ignore : un 4xx/5xx ferait rejouer Brevo
+indéfiniment sur un e-mail qu'on a décidé d'écarter. Ce qu'on ne traite pas se journalise,
+ça ne se renvoie pas au facteur.
+
+### L'adresse de réponse porte sa preuve (`lib/jeton-reponse.js`)
+
+`<booking>-<signature>@reply.hotesmart.fr`. **Pas de plus-adressage** : le `+` est réécrit ou
+refusé par une partie des clients mail, et surtout un identifiant nu **se devine** — quiconque
+connaît un `booking_id` écrirait dans le fil d'autrui. Le sous-domaine acceptant n'importe
+quelle adresse locale (wildcard), elle porte identifiant *et* signature HMAC.
+
+**Aucune table**, et c'est délibéré : un jeton aléatoire stocké aurait demandé une migration,
+donc un collage manuel, donc un chantier suspendu à un geste humain. Contrepartie assumée —
+un jeton ne se révoque pas ; la validité réelle se décide à la lecture de la réservation.
+
+Minuscules partout (les relais réécrivent la partie locale sans prévenir), comparaison à
+temps constant, et **sans secret on ne fabrique ni ne valide rien**.
+
+La réservation est retrouvée par une **requête ciblée** : on reconstruit la forme canonique
+d'un UUID *uniquement* sur 32 caractères hexadécimaux, où elle est sans ambiguïté. Un
+identifiant Beds24, numérique, passe tel quel. Deux lignes pour un même identifiant →
+**on refuse de choisir** : `booking_id` n'est unique que par compte, et répondre au hasard
+ferait entrer le message d'un voyageur dans le fil d'un autre hôte.
+
+### ⚠️ L'anti-boucle : une réponse automatique n'en déclenche pas une autre
+
+L'agent IA lit `messages`. Y écrire un « je suis en vacances » le ferait répondre, ce qui
+déclencherait un nouvel automatique — une boucle qui tourne aussi vite que les deux serveurs
+le permettent.
+
+On écarte sur les **en-têtes normalisés** (`Auto-Submitted` ≠ `no` au sens de la RFC 3834,
+`X-Autoreply`, `Precedence: bulk|junk|list`, `List-Id`, `List-Unsubscribe`, `X-Loop`) et sur
+un `Spam.Score ≥ 5` — jamais sur une heuristique de sujet, qui varierait avec la langue.
+`Auto-Submitted: no` désigne explicitement un message humain : il passe.
+
+### La file des non-rattachables
+
+Un e-mail qu'on ne sait pas ranger **ne se jette pas**. Un voyageur qui répond depuis une
+autre adresse, ou dont le client mail a mangé l'adresse de réponse, disparaîtrait en silence
+et l'hôte ne saurait jamais qu'on lui a écrit. Il atterrit dans `agent_tasks`
+(`task_type: 'email_non_rattache'`, `pending_validation`), là où l'hôte regarde déjà — avec
+la raison et le message conservé.
+
 ### ⚠️ Ce qui reste HORS du routage : `lib/cron-classify.js`
 
 Les réponses **automatiques de l'IA** à un message entrant n'empruntent pas `canalPour` :
