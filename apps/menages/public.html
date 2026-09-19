@@ -277,18 +277,39 @@
        MAINTENANT ; tout mettre en avant, c'est ne rien mettre en avant. */
     .agenda-jour.auj .agenda-date { color: var(--primary); }
     .agenda-jour.auj .agenda-item { background: var(--primary-bg); border-color: rgba(201,123,92,.3); }
+    /* ⚠ TOUTE LIGNE EST UN BOUTON, ET FAIT 44 px. Les siennes etaient des
+       `<div>` inertes : le commentaire qui suivait renvoyait leur detail « au
+       planning » — la page qui a disparu. La ligne de la liste et la case du
+       calendrier sont depuis ce jour les deux seuls chemins vers la fiche d'un
+       de ses menages, donc vers « Marquer fait ». Meme cible tactile que
+       `.jligne`, pour la meme raison : c'est le geste le plus frequent de
+       l'ecran, au pouce. */
     .agenda-item {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       width: 100%; text-align: left; font-family: inherit; color: var(--text);
       background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius);
-      padding: 10px 12px; font-size: 13.5px;
+      padding: 10px 12px; min-height: 44px; font-size: 13.5px; cursor: pointer;
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
-    /* Une offre est CLIQUABLE ; un menage a elle ne l'est pas ici — son detail
-       vit dans le planning, et deux portes vers la meme fiche se contredisent. */
-    .agenda-item.offre { border: 1px dashed var(--primary); cursor: pointer; }
+    .agenda-item.offre { border: 1px dashed var(--primary); }
     .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
-    .agenda-bien { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
+       c'est justement la qu'on va lire ce qui a change (meme regle que
+       `.jligne.obsolete` dans la feuille du jour). */
+    .agenda-item.obsolete { opacity: .55; }
+    .agenda-item.obsolete .agenda-bien { text-decoration: line-through; }
+    /* Les marques ⏳ 📝 ⏭ et le badge d'offre sont ceux de la feuille du jour
+       (`.jmarque`, `.badge-offre`) : une seule fabrique, donc une seule verite. */
+    .agenda-marques { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    /* ⚠ `flex: 1` ET `nowrap`, COMME `.jligne-bien`. L'ellipse ne se declenche
+       jamais sans `white-space: nowrap` : le nom revenait a la ligne au lieu
+       d'etre coupe. Inoffensif tant que la droite ne portait qu'une pastille
+       « FAIT » ; depuis qu'elle peut porter « A CONFIRMER · 3 j restants » et
+       trois glyphes dans un `flex-shrink: 0`, toute la compression retombe sur
+       le nom — et une ligne sur trois hauteurs, au telephone, chasse le reste
+       de la liste hors de l'ecran. */
+    .agenda-bien { flex: 1; font-weight: 600; min-width: 0;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .agenda-tag {
       font-size: 9.5px; font-weight: 700; letter-spacing: .3px; border-radius: 999px;
       padding: 2px 8px; flex-shrink: 0;
@@ -856,6 +877,16 @@ if ("serviceWorker" in navigator) {
     document.getElementById('avis-retour').addEventListener('click', montrerCalendrier)
 
     // Sync au retour de connexion
+    // ⚠ LE DELAI D'UNE OFFRE VIEILLIT DANS UNE LISTE QU'ON NE REFERME PAS.
+    // La feuille du jour s'ouvre et se referme en quelques secondes ; la liste
+    // des 30 jours, elle, reste affichee des heures sur un telephone pose.
+    // Depuis qu'elle porte « A CONFIRMER · 3 h restantes », ce chiffre est
+    // calcule au repeint : sans ce reveil, elle reprend son telephone le matin
+    // et lit un delai qui a expire dans la nuit. Un simple repeint, aucune
+    // requete — donc pas de garde de quart d'heure comme la sonde des avis.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && mesJours) peindreMonAgenda()
+    })
     window.addEventListener('online',  () => { console.log('[Sync] Online');  flushPendingQueue() })
     window.addEventListener('offline', () => { console.log('[Sync] Offline'); renderSyncBanner() })
 
@@ -1338,6 +1369,21 @@ if ("serviceWorker" in navigator) {
     return ''
   }
 
+  // ⚠ UNE SEULE FABRIQUE POUR LES MARQUES D'UN MENAGE. Elles vivaient dans la
+  // feuille du jour et nulle part ailleurs ; la liste des 30 jours en a besoin
+  // des qu'on peut y ouvrir la fiche. Les recopier la-bas, c'etait garantir
+  // qu'une cinquieme marque n'apparaisse un jour que d'un seul cote.
+  // `fait` est passe par l'appelant : les deux surfaces l'ecrivent differemment
+  // (un `.jmarque` vert dans la feuille, une pastille dans la liste), et c'est
+  // la seule chose qui les separe.
+  function marquesDuMenage (m, obs, fait) {
+    return badgeOffre(m) +
+      (m.done ? fait : '') +
+      (m.pending ? '<span class="jmarque" title="En attente d’envoi">⏳</span>' : '') +
+      (m.comment ? '<span class="jmarque" title="Consigne de votre hôte">📝</span>' : '') +
+      (obs ? '<span class="jmarque" title="La réservation a changé">⏭</span>' : '')
+  }
+
   // ─── PRENDRE UN MENAGE QUE PERSONNE NE PORTE (refonte v2, lot 2) ──────────
   //
   // ⚠ CE QU'ELLE VOIT D'UN MENAGE QUI N'EST PAS LE SIEN : le bien et la date,
@@ -1477,18 +1523,13 @@ if ("serviceWorker" in navigator) {
         // commentaire de l'hote, reservation qui a bouge.
         enrichis.map(m => {
           const obs = isMenageObsolete(m, tousEnrichis)
-          const marques =
-            // ⚠ LA PROPOSITION QUI EXPIRE PASSE DEVANT LE RESTE. `badgeOffre`
-            // vivait sur les cartes du planning et nulle part ailleurs : sans
-            // lui, un menage qu'elle doit CONFIRMER avant un delai ne se
-            // distinguait plus d'un menage acquis — ni ici, ni dans le
-            // calendrier. La fiche le disait encore, mais il fallait deja
-            // savoir qu'il y avait quelque chose a y lire.
-            badgeOffre(m) +
-            (m.done ? '<span class="jmarque fait">✓ FAIT</span>' : '') +
-            (m.pending ? '<span class="jmarque" title="En attente d’envoi">⏳</span>' : '') +
-            (m.comment ? '<span class="jmarque" title="Consigne de votre hôte">📝</span>' : '') +
-            (obs ? '<span class="jmarque" title="La réservation a changé">⏭</span>' : '')
+          // ⚠ LA PROPOSITION QUI EXPIRE PASSE DEVANT LE RESTE. `badgeOffre`
+          // vivait sur les cartes du planning et nulle part ailleurs : sans lui,
+          // un menage qu'elle doit CONFIRMER avant un delai ne se distinguait
+          // plus d'un menage acquis — ni ici, ni dans le calendrier. La fiche
+          // le disait encore, mais il fallait deja savoir qu'il y avait quelque
+          // chose a y lire.
+          const marques = marquesDuMenage(m, obs, '<span class="jmarque fait">✓ FAIT</span>')
           return `<button class="jligne${obs ? ' obsolete' : ''}" data-mien="${echapper(m.id)}">` +
             `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
             marques + '</button>'
@@ -2823,12 +2864,29 @@ if ("serviceWorker" in navigator) {
       Number(debut.slice(0, 4)), Number(debut.slice(5, 7)) - 1,
       Number(debut.slice(8, 10)) + AGENDA_JOURS - 1, 12)))
 
+    // ⚠ SANS LE FILTRE DE BIENS, comme partout ou une REGLE se calcule.
+    // `isMenageObsolete` cherche un menage plus tard et deja fait sur le meme
+    // bien : le lui donner filtre effacerait la marque ⏭ des que la vue est
+    // reduite a un logement (meme raison qu'a l'ouverture de la fiche).
+    const tousEnrichis = tousMesMenagesEnrichis()
     const lignes = []
     ;(Array.isArray(bookings) ? bookings : []).forEach(b => {
       if (!b.departure || b.departure < debut || b.departure > fin) return
       if (!activeProps.has(b.propId)) return
+      // ⚠ LE MEME OBJET QUE LA FEUILLE DU JOUR, par la meme fabrique : c'est
+      // lui qu'on passera a `openModal`, et c'est lui qui porte `done`,
+      // `pending`, le commentaire de l'hote et l'assignation.
+      const m = enrichirMenage(b)
+      // ⚠ UNE DATE DE DEPART ILLISIBLE FAIT DISPARAITRE LA LIGNE, ET C'EST
+      // ASSUME. Avant, la liste la dessinait depuis la chaine brute ; elle ne
+      // peut plus, puisque la ligne ouvre desormais une fiche — et une fiche
+      // sans date n'a ni « Marquer fait » ni retrait possibles. En pratique le
+      // filtre de fenetre ci-dessus (comparaison de CHAINES) a deja ecarte
+      // presque toutes les valeurs mal formees.
+      if (!m) return
       lignes.push({ jour: b.departure, bien: b.propName || '', mien: true,
-                    fait: doneSet.has(`${b.id}-${b.departure}`) })
+                    fait: m.done, menage: m,
+                    obsolete: isMenageObsolete(m, tousEnrichis) })
     })
     ;(Array.isArray(aPrendre) ? aPrendre : []).forEach(m => {
       if (m.departure_date < debut || m.departure_date > fin) return
@@ -2857,9 +2915,21 @@ if ("serviceWorker" in navigator) {
              `<div class="agenda-date">${auj ? "Aujourd’hui — " : ''}${echapper(jourLisible(jour))}` +
              (eteint ? ' <em>· vous êtes absente</em>' : '') + '</div>' +
              items.map(l => l.mien
-               ? `<div class="agenda-item${l.fait ? ' fait' : ''}">` +
+               // ⚠ UN BOUTON, PAS UNE LIGNE MORTE — ET C'EST LE BLOQUANT QUI A
+               // SURVECU A LA SUPPRESSION DU PLANNING. Le detail de ses menages
+               // « vivait dans le planning » ; cette page n'existe plus, et la
+               // ligne est restee inerte. Elle voyait donc le menage du jour
+               // sous son calendrier sans pouvoir l'ouvrir, ni le marquer fait
+               // — le seul geste qu'on lui demande.
+               // ⚠ LA MEME FICHE QUE LA FEUILLE DU JOUR, par le meme chemin.
+               // Deux fiches du meme menage finiraient par dire deux choses
+               // differentes.
+               ? `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
+                 `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
-                 (l.fait ? '<span class="agenda-tag fait">FAIT</span>' : '') + '</div>'
+                 '<span class="agenda-marques">' +
+                 marquesDuMenage(l.menage, l.obsolete, '<span class="agenda-tag fait">FAIT</span>') +
+                 '</span></button>'
                // ⚠ ECHAPPEE COMME TOUT CE QUI VIENT DU SERVEUR. Ailleurs dans
                // ce fichier, `data-jour` porte une date fabriquee localement ;
                // ici elle vient de `departure_date`, et les bornes de la fenetre
@@ -3667,9 +3737,23 @@ if ("serviceWorker" in navigator) {
   // differentes finiraient par dire deux choses differentes du meme menage.
   document.getElementById('agenda-liste').addEventListener('click', e => {
     const el = e.target.closest('.agenda-item.offre')
-    if (!el || !el.dataset.jour) return
-    const libres = aPrendreDu(el.dataset.jour)
-    if (libres.length) ouvrirPriseDeMenage(el.dataset.jour, libres)
+    if (el && el.dataset.jour) {
+      const libres = aPrendreDu(el.dataset.jour)
+      if (libres.length) ouvrirPriseDeMenage(el.dataset.jour, libres)
+      return
+    }
+    // ⚠ ET SES MENAGES A ELLE OUVRENT LA FICHE — LE GESTE CENTRAL DE L'ECRAN.
+    // Sans cette branche, la ligne etait un bouton muet : le menage du jour
+    // s'affichait sous le calendrier, et le toucher ne faisait rien. Le detour
+    // par la case du calendrier puis la feuille du jour restait le seul chemin
+    // vers « Marquer fait ».
+    const mi = e.target.closest('.agenda-item[data-mien]')
+    if (!mi) return
+    // ⚠ SANS LE FILTRE DE BIENS, comme dans la feuille du jour : `openModal`
+    // recalcule ⏭ sur la liste complete, et la ligne qu'on vient de toucher
+    // doit s'y retrouver.
+    const m = tousMesMenagesEnrichis().find(x => x.id === mi.dataset.mien)
+    if (m) { selectedMenage = m; openModal(m) }
   })
 
   document.getElementById('dispo-months').addEventListener('keydown', e => {

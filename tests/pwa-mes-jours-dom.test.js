@@ -172,6 +172,12 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   // ⚠ `navigator.onLine` est en lecture seule dans jsdom : on le redéfinit, car
   // la garde hors-ligne est l'une des plus importantes de cet écran.
   Object.defineProperty(w.navigator, 'onLine', { value: enLigne, configurable: true })
+  // ⚠ jsdom rend `visibilityState === 'prerender'`, valeur qu'un téléphone
+  // n'atteint jamais : les deux réveils de cet écran (la sonde des avis et le
+  // repeint de la liste) sortent tous deux sur `!== 'visible'` et ne
+  // s'exécutaient donc JAMAIS sous test. On pose la condition réelle, comme
+  // pour `matchMedia` : écran au premier plan.
+  Object.defineProperty(w.document, 'visibilityState', { value: 'visible', configurable: true })
 
   // ⚠ LE DOUBLE REJOUE LES EFFETS DU SERVEUR, pas seulement ses « ok ». Un stub
   // complaisant rendrait tous les gestes indétectables : on repeindrait toujours
@@ -1469,16 +1475,117 @@ test('une offre de la liste ouvre la MEME feuille que la bulle', async () => {
   assert.match(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/)
 })
 
-test('SES ménages ne sont pas cliquables dans la liste', async () => {
-  // Leur detail vit dans le planning : deux portes vers la meme fiche se
-  // contrediraient au premier changement.
-  const j = dans(2)
+// ════════════════════════════════════════════════════════════════════════════
+// LE BLOQUANT SIGNALÉ EN PRODUCTION : LA LIGNE DE LA LISTE OUVRE LA FICHE
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CE TEST REMPLACE SON CONTRAIRE. Il en existait un qui ASSERTAIT l'inverse
+// — « SES ménages ne sont pas cliquables dans la liste », au motif que « leur
+// detail vit dans le planning ». La page planning a été supprimée (d40b0f8) ;
+// le motif est tombé avec elle, et le test s'est mis à garder le défaut :
+// Régina voyait le ménage du jour sous son calendrier et le toucher ne faisait
+// RIEN. Un test vert qui verrouille un bloquant de production coûte plus cher
+// que pas de test du tout.
+
+test('le ménage du jour s\'ouvre d\'une tape DEPUIS LA LISTE, avec « Marquer fait »', async () => {
+  // Le geste central de Régina, sur la surface où elle le cherche : la ligne
+  // « Aujourd'hui » sous le calendrier.
+  const j = dans(0)
   const { w, t } = monter({ bookings: [menage(j)] })
   t.seed(); await t.charger(); await t.chargerDisponibilites()
-  const item = agenda(w).querySelector('.agenda-item')
-  assert.ok(item)
-  assert.strictEqual(item.tagName, 'DIV', 'pas un bouton')
-  assert.ok(!item.classList.contains('offre'))
+
+  const item = agenda(w).querySelector('.agenda-item[data-mien]')
+  assert.ok(item, 'la ligne de son ménage porte son identifiant')
+  assert.strictEqual(item.tagName, 'BUTTON', 'et c\'est un vrai bouton')
+
+  item.dispatchEvent(new w.Event('click', { bubbles: true }))
+
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'flex',
+    'la fiche s\'ouvre — sans écouteur, elle reste fermée et ce test rougit')
+  assert.match(w.document.getElementById('modal-title').textContent, /Ménage — Colomiers/)
+  const corps = w.document.getElementById('modal-body').textContent
+  assert.match(corps, /Voyageur/, 'les infos voyageur, pas une ligne nue')
+  assert.match(corps, /Arrivée/)
+  const btn = w.document.getElementById('modal-done')
+  assert.strictEqual(btn.style.display, '', '« Marquer fait » est offert')
+  assert.strictEqual(btn.disabled, false)
+  assert.match(btn.textContent, /Marquer fait/)
+})
+
+test('la ligne de la liste ouvre LA MÊME fiche que la feuille du jour', async () => {
+  // Deux portes vers deux fiches différentes finiraient par dire deux choses
+  // du même ménage. On compare les deux rendus, pas leur intention.
+  const j = dans(0)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+
+  taperJour(w, j)
+  w.document.querySelector('#modal-body [data-mien]').dispatchEvent(new w.Event('click', { bubbles: true }))
+  const parLaFeuille = w.document.getElementById('modal-body').innerHTML
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+
+  agenda(w).querySelector('.agenda-item[data-mien]').dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.strictEqual(w.document.getElementById('modal-body').innerHTML, parLaFeuille,
+    'la même fiche, au caractère près')
+})
+
+test('les marques ⏳ \ud83d\udcdd ⏭ suivent la ligne dans la liste', async () => {
+  // ⚠ ELLES NE VIVAIENT QUE DANS LA FEUILLE DU JOUR. Une liste qui ouvre la
+  // fiche mais ne dit pas qu'il y a une consigne à lire renvoie à l'écran
+  // précédent pour le savoir — or c'est celui-ci qu'elle regarde en premier.
+  const j = dans(0)
+  const { w, t } = monter({
+    bookings: [menage(j)],
+    comments: [{ booking_id: 'b-' + j, departure_date: j, comment: 'Laisser les clés au voisin' }]
+  })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const item = agenda(w).querySelector('.agenda-item[data-mien]')
+  assert.match(item.innerHTML, /\ud83d\udcdd/, 'la consigne de l\'hôte se signale dès la liste')
+
+  // Une seule fabrique pour les deux surfaces : si la feuille gagne une
+  // cinquième marque, la liste l'a aussi.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  assert.match(PAGE, /function marquesDuMenage/, 'les marques ont une fabrique unique')
+  assert.strictEqual((PAGE.match(/title="La réservation a changé"/g) || []).length, 1,
+    'la marque ⏭ n\'est écrite qu\'une fois dans toute la page')
+})
+
+test('la ligne de la liste se donne pour touchable, et tient la cible du pouce', async () => {
+  // Un test de structure ne voit pas un bouton qui ressemble à du texte mort
+  // (leçon du chantier : pour le visuel, on lit la feuille de style). 44 px,
+  // comme `.jligne` — c'est le même geste, sur l'autre surface.
+  const PAGE = fs.readFileSync(FICHIER, 'utf8')
+  // ⚠ ANCRE EN DEBUT DE LIGNE : sans elle, la regexp attrapait
+  // `.agenda-jour.auj .agenda-item {`, qui ne porte que la couleur du jour meme.
+  const bloc = /^\s*\.agenda-item \{([^}]*)\}/m.exec(PAGE)
+  assert.ok(bloc, 'la règle `.agenda-item` existe')
+  assert.match(bloc[1], /min-height: 44px/)
+  assert.match(bloc[1], /cursor: pointer/)
+  // ⚠ L'ELLIPSE SANS `nowrap` NE FAIT RIEN. Depuis que la droite de la ligne
+  // peut porter « À CONFIRMER · 3 j restants » et trois glyphes, le nom du bien
+  // absorbe toute la compression — il doit être coupé, pas revenir à la ligne.
+  const nom = /^\s*\.agenda-bien \{([^}]*)\}/m.exec(PAGE)
+  assert.ok(nom, 'la règle `.agenda-bien` existe')
+  assert.match(nom[1], /white-space: nowrap/)
+  assert.match(nom[1], /flex: 1/)
+})
+
+test('la liste se repeint au retour au premier plan — le délai d\'une offre vieillit', async () => {
+  // ⚠ UNE PWA RESTE OUVERTE DES JOURS SUR UN TÉLÉPHONE. La feuille du jour
+  // s'ouvre et se referme ; cette liste-ci, non. Depuis qu'elle affiche
+  // « À CONFIRMER · 3 h restantes », calculé au repeint, elle reprend son
+  // téléphone le matin et lit un délai expiré dans la nuit.
+  const j = dans(0)
+  const { w, t } = monter({ bookings: [menage(j)] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  assert.ok(agenda(w).querySelector('.agenda-item[data-mien]'))
+
+  // On vide la liste à la main : si le réveil repeint, elle revient.
+  agenda(w).innerHTML = ''
+  w.document.dispatchEvent(new w.Event('visibilitychange'))
+  await souffler(20)
+  assert.ok(agenda(w).querySelector('.agenda-item[data-mien]'),
+    'le retour au premier plan recalcule la liste')
 })
 
 test('la liste suit le filtre de biens, comme le calendrier', async () => {
