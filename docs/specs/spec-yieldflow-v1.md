@@ -147,6 +147,152 @@ sélecteur est livré, l'invitation à s'en servir ne l'est pas.
 - **Étape 4** : « Appliquer » n'existe que pour un bien en pilote `yieldflow`,
   et écrit par le chemin normal (`source = 'engine'`).
 
+## 2 ter. AMENDEMENT — LE MODE AUTO-PILOTÉ (lot 4.6)
+
+**Dessin arrêté par Thierry, 19 septembre 2026.** Il étend le §2 bis : le pilote
+`yieldflow` cesse d'être une simple exclusivité d'écriture pour devenir un
+**mode automatique**. Rien n'est implémenté à ce stade — ce paragraphe est la
+conception, et il nomme les arbitrages qui restent ouverts.
+
+### 1. Ce que le mode fait
+
+Un bien en `yieldflow` est **entièrement tenu par Yield** :
+
+- **l'ouverture des dates à la vente**, sur un **intervalle glissant** choisi à
+  l'activation — en jours (ex. 120 jours) ou en mois (ex. 6 mois) ;
+- **les prix**, calculés **sur un an d'avance** et entretenus **chaque jour**,
+  que les nuits soient déjà ouvertes ou non.
+
+Première activation = **écriture complète de l'année**. Ensuite, **entretien
+quotidien**. Une nuit qui entre dans la fenêtre glissante s'ouvre donc **avec
+son prix déjà prêt**, calculé depuis des mois.
+
+Le calcul est **100 % déterministe** — mêmes entrées, même sortie, aucun appel
+d'IA dans la boucle. Les garde-fous existants restent armés : **plancher
+toujours** (`docs/kb/prix-plancher.md`), **jamais d'écriture sur une date
+fermée**, journal `price_display_log` avec `source = 'engine'`.
+
+### 2. Le canal interne — le chemin que toute app empruntera
+
+**Yield ne touche jamais les tables du calendrier, ni un provider.** Il parle au
+calendrier par un **contrat formel** — « ouvre ces dates, pose ces prix » — et le
+calendrier **seul** exécute, mémorise l'intention et pousse par la couche sync
+existante (ARI).
+
+C'est l'application directe de `docs/kb/coeur-de-donnees.md` : un seul écrivain
+par table, aucun module métier ne parle à un provider. Ce canal est conçu comme
+**le chemin standard de toute future app HôteSmart** vers le calendrier — pas
+comme une tuyauterie du lot 4.6.
+
+⚠ **LE CANAL EST INTERNE, ET CE N'EST PAS UN DÉTAIL D'IMPLÉMENTATION.**
+Le §2 bis (arbitrage A) fait refuser par `api/calendar.js` tout segment portant
+un `rate` pour un bien `yieldflow`. Le moteur doit précisément écrire ces prix-là.
+Si l'autorisation prenait la forme d'un **champ du corps HTTP** (`source:
+'engine'`, `interne: true`…), n'importe quel appelant pourrait le poser : la
+garde du 4.5 tomberait par sa propre porte de service. Le canal est donc un
+**module appelé en processus** par le cron, jamais une requête HTTP. La garde
+HTTP reste absolue, sans exception ni dérogation.
+
+**Conséquence structurante** : le cœur d'écriture de `api/calendar.js` doit être
+**extrait dans `lib/`**, pour que l'endpoint HTTP (porte de l'hôte) et le canal
+interne (porte du moteur) partagent **le même writer**. Un writer unique, deux
+portes, deux gardes distinctes. Recopier la logique d'écriture en ferait deux —
+c'est le défaut que le chantier « writer unique » a fermé.
+
+### 3. Les trois états d'une nuit
+
+| état | ce que c'est | ce qui existe en base |
+|---|---|---|
+| **OUVERTE** | dans la fenêtre glissante, en vente, prix Yield posé | une ligne `calendar_inventory`, `stop_sell = false`, `rate` posé |
+| **PAS ENCORE OUVERTE** | au-delà de la fenêtre | **rien** — aucun objet créé. La fenêtre glisse, la nuit s'ouvre seule |
+| **FERMÉE** | l'hôte a verrouillé la période | une **fermeture** (début, fin, raison) |
+
+⚠ **« PAS ENCORE OUVERTE » N'EST PAS UNE FERMETURE.** Aucun objet n'est créé, et
+surtout **aucune intention n'est mémorisée** : l'hôte n'a rien décidé pour ces
+nuits-là. C'est l'absence de geste, pas un geste négatif.
+
+### 4. Les fermetures de l'hôte
+
+Une **fermeture** est un stop-sell **en dur** : date de début, date de fin,
+**raison**. L'hôte la pose pour verrouiller proprement une période (travaux,
+usage personnel, indisponibilité).
+
+**Yield ne touche JAMAIS une fermeture de l'hôte.** Ni pour ouvrir, ni pour
+tarifer. C'est la frontière du mode automatique.
+
+Les fermetures sont **exclues des statistiques de vente et des mesures de
+référence** : ce ne sont pas des ventes, et une période fermée n'a pas « mal
+vendu » — elle n'était pas à vendre. (`docs/kb/capacite-yield.md` : une nuit
+fermée ne compte pas au dénominateur.)
+
+### 5. ⚠ UNE NUIT N'A QU'UNE SEULE RÉPONSE À « SUIS-JE VENDABLE ? »
+
+C'est la question que Thierry a posée en arrêtant le dessin, et elle commande
+toute l'articulation avec l'existant.
+
+**La réponse vit dans `calendar_inventory`, et nulle part ailleurs.** La table
+de lecture de `docs/kb/capacite-yield.md` §3 **ne change pas** :
+`stop_sell = true` → fermé ; `avail = 0` → fermé ; aucune ligne → non vendable ;
+aucun prix → fermé (fermeture calculée) ; tout le reste → ouvert.
+
+**Une fermeture n'est donc pas une seconde source de vérité : c'est la
+représentation de l'intention, et ce qui l'ÉCRIT.** Poser une fermeture du 12 au
+20 revient à mémoriser `stop_sell = true` sur ces neuf nuits, par le writer
+unique. L'objet fermeture porte le **pourquoi** et les **bornes** — ce que
+`calendar_inventory`, ligne à ligne, ne sait pas dire.
+
+Faire de la fermeture une source parallèle — lue en plus de `calendar_inventory`
+pour décider de la vendabilité — donnerait **deux réponses divergentes** dès le
+premier désaccord entre les deux tables. C'est exactement le défaut que le
+chantier « writer unique » a fermé, et l'incident du 7 septembre (une poussée de
+disponibilité seule qui lève le stop_sell) montre ce qu'il coûte.
+
+**Distinguer « fermé » de « pas encore ouvert » à la lecture.** Les deux se
+présentent comme « non vendable », et pour la **vente** c'est identique — rien ne
+part. Mais pour les **mesures**, les confondre serait faux : un bien auto-piloté
+avec une fenêtre de 120 jours aurait 245 nuits « fermées » par an, son taux
+d'occupation s'effondrerait mécaniquement, et Yield conclurait qu'il faut baisser
+les prix. C'est la règle `docs/kb/capacite-yield.md` : **« non calculable » n'est
+jamais zéro.**
+
+La fenêtre du bien (type + valeur, portée par `properties`) tranche sans
+ambiguïté : une nuit **au-delà** est hors fenêtre — exclue du dénominateur ; une
+nuit **en deçà** et sans ligne est une **anomalie** — le moteur aurait dû
+l'ouvrir, et ça mérite une alarme, pas un silence.
+
+### 6. Ce que ce mode impose à l'existant
+
+- **Garde serveur du §2 bis** : inchangée et toujours absolue côté HTTP. Le
+  moteur passe par le canal interne, pas par elle.
+- **Mémoire d'intention** (`docs/specs/spec-audit-stop-sell.md`) : inchangée
+  dans son principe. Le moteur devient un **second geste d'ouverture**, à côté de
+  celui de l'hôte — et il ne rouvre jamais ce que l'hôte a fermé.
+- **Journal des prix** (`docs/kb/price-log.md`) : non rétroactif, **une ligne par
+  changement RÉEL**. Un entretien quotidien qui recalcule 365 nuits ne doit
+  produire des lignes que pour les prix qui **changent** — sinon le journal gagne
+  365 lignes par bien et par jour, et « une ligne de trop est un mensonge
+  définitif ».
+- **Poussée ARI** : l'entretien quotidien pousse un **delta**, jamais un full
+  sync (cooldown 24 h, file d'attente, coût provider).
+
+### 7. Arbitrages ENCORE OUVERTS au 19 septembre 2026
+
+Ils sont nommés ici plutôt que tranchés en écrivant du code.
+
+1. **La forme de la fermeture.** Un statut de réservation `fermé` dans
+   `bookings_snapshot` (le dessin dit « nouveau statut de réservation »), ou une
+   table dédiée projetée dans `calendar_inventory` ? ⚠ Le vocabulaire canonique
+   porte **déjà** `blocked` — « blocage propriétaire / maintenance, occupe le
+   calendrier, PAS de ménage » (`lib/bookings-snapshot-status.js`). La question
+   est donc aussi : nouveau statut, ou usage de celui-là ?
+2. **La réouverture d'une nuit à l'intérieur d'une fermeture.** L'hôte rouvre le
+   15 dans une fermeture du 12 au 20 : on **scinde** la fermeture (le dernier
+   geste gagne, conforme à « la nouvelle configuration remplace l'ancienne »), ou
+   on **refuse** en renvoyant à la fermeture ?
+3. **Les nuits hors fenêtre au dénominateur.** Exclues (« non calculable »), ou
+   comptées fermées ? Le §5 argumente pour l'exclusion ; la décision appartient à
+   Thierry car elle change **tous** les indicateurs d'un bien auto-piloté.
+
 ## 3. Étape 0 — Inspection prix voyageur (lecture seule, par les faits)
 
 Question unique : **pour chaque provider et chaque canal, quel champ du payload
