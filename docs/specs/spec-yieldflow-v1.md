@@ -275,23 +275,41 @@ l'ouvrir, et ça mérite une alarme, pas un silence.
 - **Poussée ARI** : l'entretien quotidien pousse un **delta**, jamais un full
   sync (cooldown 24 h, file d'attente, coût provider).
 
-### 7. Arbitrages ENCORE OUVERTS au 19 septembre 2026
+### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
-Ils sont nommés ici plutôt que tranchés en écrivant du code.
+**A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**
+Le dessin disait « nouveau statut de réservation » ; Thierry a retenu l'objet
+propre à HôteSmart — début, fin, raison — qui **projette `stop_sell = true`** par
+le writer unique.
 
-1. **La forme de la fermeture.** Un statut de réservation `fermé` dans
-   `bookings_snapshot` (le dessin dit « nouveau statut de réservation »), ou une
-   table dédiée projetée dans `calendar_inventory` ? ⚠ Le vocabulaire canonique
-   porte **déjà** `blocked` — « blocage propriétaire / maintenance, occupe le
-   calendrier, PAS de ménage » (`lib/bookings-snapshot-status.js`). La question
-   est donc aussi : nouveau statut, ou usage de celui-là ?
-2. **La réouverture d'une nuit à l'intérieur d'une fermeture.** L'hôte rouvre le
-   15 dans une fermeture du 12 au 20 : on **scinde** la fermeture (le dernier
-   geste gagne, conforme à « la nouvelle configuration remplace l'ancienne »), ou
-   on **refuse** en renvoyant à la fermeture ?
-3. **Les nuits hors fenêtre au dénominateur.** Exclues (« non calculable »), ou
-   comptées fermées ? Le §5 argumente pour l'exclusion ; la décision appartient à
-   Thierry car elle change **tous** les indicateurs d'un bien auto-piloté.
+*Pourquoi pas un statut dans `bookings_snapshot`* : cette table est alimentée par
+la **couche sync depuis les providers**. Y écrire un objet purement HôteSmart en
+ferait un second writer, et il faudrait ensuite l'exclure **à la main** de chaque
+statistique, du dispatch de changements et de la génération des ménages — cinq
+endroits, dont on en oublierait un.
+
+*Pourquoi pas `blocked`* : il existe déjà et dit presque la même chose, mais il
+vient des providers (Beds24 `black`). Le réutiliser rendrait indistinguables une
+fermeture **décidée dans HôteSmart** et un blocage **importé**, et il ne porte ni
+raison ni bornes.
+
+**B. Une réouverture SCINDE la fermeture.** L'hôte rouvre le 15 dans une
+fermeture du 12 au 20 : elle devient 12-14 et 16-20, le 15 redevient vendable.
+C'est la règle déjà gravée de la mémoire d'intention — « la nouvelle
+configuration remplace l'ancienne, jamais de restauration contre la volonté de
+l'hôte ». Le dernier geste gagne, sans dialogue et sans refus : le calendrier
+obéit.
+
+**C. Une nuit hors fenêtre est EXCLUE du calcul, pas comptée fermée.**
+Ni au numérateur, ni au dénominateur : l'hôte n'a rien décidé pour elle.
+`docs/kb/capacite-yield.md` — « non calculable » n'est jamais zéro. Le taux
+d'occupation d'un bien auto-piloté reste ainsi **comparable** à celui d'un bien
+tenu à la main.
+
+Et le mot compte autant que le calcul : afficher « fermée » sur 245 nuits que
+personne n'a fermées ferait chercher à l'hôte une décision qu'il n'a jamais
+prise. L'écran dit **« pas encore ouverte »**, avec la date à laquelle la fenêtre
+l'atteindra.
 
 ## 3. Étape 0 — Inspection prix voyageur (lecture seule, par les faits)
 
