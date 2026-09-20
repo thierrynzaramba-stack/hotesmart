@@ -334,7 +334,15 @@ test('LES JOURS DU MOIS NE SONT RENDUS QU UNE FOIS, sous le mois', () => {
   assert.match(bande, /class="day-name"/, 'avec le nom du jour')
   assert.match(bande, /class="day-num"/, 'et son numero')
   assert.match(bande, /classesJour\(idx\)/, 'avec les memes classes que l ancien thead (week-end, jour courant, debut de mois)')
-  assert.match(bande, /<colgroup>/, 'et un colgroup : table-layout fixed ne lit pas les colspans')
+  // ⚠ STRUCTUREL, PAS TEXTUEL — releve en review : `<colgroup>` present dans
+  // la source ne prouve rien s'il est ecrit AVANT `<table>` (le parseur
+  // l'ignore, et c'est ce que ma premiere version faisait). On l'exige juste
+  // apres la balise d'ouverture, avec l'angle au gabarit de `.row-label`.
+  assert.match(bande, /<table class="month-band"><colgroup><col style="width:129px">/,
+    'le colgroup est DANS la table, et l angle fait 120 + 8 + 1 comme .row-label')
+  assert.match(bande, /w\.offsetHeight/, 'la hauteur de bande est mesuree apres rendu')
+  assert.match(bande, /setProperty\('--bande-h'/, 'et posee sur la page : 74px n est qu un repli')
+  assert.ok(!/table\.cal tr\.jours td\.weekend \.day-name/.test(PAGE), 'plus de CSS mort pour des jours qui ne sont plus dans le thead')
 
   const bien = PAGE.slice(PAGE.indexOf('function renderBienBlock'), PAGE.indexOf('const rows=visibleRows(bien)'))
   assert.ok(!/day-name|day-num/.test(bien), 'le thead d un bien ne rend plus les jours')
