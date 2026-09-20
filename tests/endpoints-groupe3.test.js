@@ -1237,7 +1237,9 @@ test('LE TEST QUI COMPTE : rouvrir quand les fermetures sont ILLISIBLES -> 503 n
   // La migration pas encore collee, ou PostgREST en retard : les seules
   // sauvegardes qui rouvrent tombaient en 500 sans message, les tarifs
   // passaient — une panne selective, indiagnosticable.
-  const etat = preparer({ user: PROD, erreurFermetures: 'relation "fermetures" does not exist' })
+  // ⚠ « Illisible » = une PANNE (timeout, refus). La table ABSENTE, elle,
+  // est « aucune fermeture » et laisse passer : voir le test suivant.
+  const etat = preparer({ user: PROD, erreurFermetures: 'canceling statement due to statement timeout' })
   const res = reponse()
   await require('../api/calendar')(req({ method: 'POST', body: {
     action: 'save', property_id: BIEN_CHANNEX.id,
@@ -1284,4 +1286,15 @@ test('rouvrir_fermeture : une nuit encore couverte par une AUTRE fermeture reste
   const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
   assert.deepStrictEqual(lignes.map(l => l.date).sort(), ['2026-10-12', '2026-10-13', '2026-10-14'], 'seules les nuits que rien d autre ne couvre')
   assert.ok(res.body.warnings.some(w => /restent fermées/.test(w)))
+})
+
+test('rouvrir quand la table fermetures est ABSENTE (migration pas collee) -> passe : vide est exact', async () => {
+  const etat = preparer({ user: PROD, erreurFermetures: 'relation "public.fermetures" does not exist' })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: false, avail: 1 }]
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'), 'la nuit est rouverte : aucune fermeture ne peut exister')
 })
