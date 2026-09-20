@@ -589,7 +589,10 @@
         : (a.en_retard > 0 ? 'retard'
           : (a.fermees > 0 ? 'ferme'
             : (a.segments_incertains > 0 ? 'incertain'
-              : (a.non_renseignees > 0 ? 'inconnu' : 'rien'))))
+              // ⚠ AVANT « inconnu » : un mois entierement au-dela de la fenetre
+              // n'est pas « non renseigne » — personne n'a rien oublie.
+              : (a.pas_encore_ouvertes > 0 ? 'attente'
+                : (a.non_renseignees > 0 ? 'inconnu' : 'rien')))))
       const POURQUOI = {
         retard: {
           court: `${a.en_retard} en retard`,
@@ -602,6 +605,10 @@
         incertain: {
           court: 'incertain',
           long: `${a.segments_incertains} nuit(s) hors de la couverture du calendrier scolaire : leurs segments sont incertains, donc aucune suggestion n’est proposée.`
+        },
+        attente: {
+          court: `${a.pas_encore_ouvertes} pas encore ouverte${a.pas_encore_ouvertes > 1 ? 's' : ''}`,
+          long: `${a.pas_encore_ouvertes} nuit(s) au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et elles s’ouvriront seules${a.premiere_ouverture ? `, la première le ${dateFr(a.premiere_ouverture)}` : ''}, avec leur prix déjà prêt.`
         },
         inconnu: {
           court: 'non renseigné',

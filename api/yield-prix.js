@@ -590,7 +590,16 @@ module.exports = async (req, res) => {
       const baisser = avec.filter(n => n.suggestion < n.prix_actuel)
       const gain = avec.reduce((t, n) => t + (n.suggestion - n.prix_actuel), 0)
       const fermees = aVenir.filter(n => n.ouverte === false && !n.vendue)
-      const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue)
+      // ⚠ LE RADAR AVAIT SA PROPRE COPIE DU COMPTE — trouve en recette par
+      // Thierry sur staging, 20 septembre 2026. Le resume du mois affiche (dans
+      // la page) separait deja « pas encore ouverte » de « non renseignee » ;
+      // celui-ci, calcule ici pour les douze tuiles, comptait encore toute
+      // nuit `ouverte == null` comme non renseignee. Les tuiles disaient
+      // « votre calendrier ne va pas jusque-la » sur des mois entiers que la
+      // fenetre glissante n'a simplement pas encore atteints. Une quatrieme
+      // recopie du meme compte, apres les trois que la review avait nommees.
+      const attente = aVenir.filter(n => n.hors_fenetre && !n.vendue)
+      const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue && !n.hors_fenetre)
       const retard = aVenir.filter(n => !n.vendue && n.ouverte === true &&
         n.n1 && n.n1.vendue_a_ce_delai === true)
       // ⚠ CE COMPTEUR ETAIT MORT, ET IL MESURAIT AUTRE CHOSE QUE SON NOM.
@@ -627,6 +636,9 @@ module.exports = async (req, res) => {
         alertes: {
           fermees: fermees.length,
           non_renseignees: inconnues.length,
+          pas_encore_ouvertes: attente.length,
+          // La premiere date d'ouverture du mois : la tuile peut dire QUAND.
+          premiere_ouverture: attente.map(n => n.ouverture_prevue).filter(Boolean).sort()[0] || null,
           en_retard: retard.length,
           segments_incertains: incertains
         }

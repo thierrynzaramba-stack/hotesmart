@@ -259,3 +259,34 @@ test('la migration pose des fenetres NULLES par defaut, et trois contraintes', (
   const trop = sql.split('\n').filter(l => l.length > 60)
   assert.deepEqual(trop, [], 'aucune ligne de plus de 60 caracteres (collage manuel)')
 })
+
+test('LE TEST QUI COMPTE : le RADAR compte « pas encore ouvertes » a part, lui aussi', () => {
+  // ⚠ TROUVE EN RECETTE PAR THIERRY, 20 septembre 2026. Le resume du mois
+  // affiche separait les trois etats ; celui des douze tuiles, calcule par
+  // l'API, comptait encore toute nuit `ouverte == null` comme non renseignee.
+  // Les tuiles disaient « votre calendrier ne va pas jusque-la » sur des mois
+  // que la fenetre n'a simplement pas encore atteints. Quatrieme recopie du
+  // meme compte — la review en avait nomme trois.
+  const api = lire('api/yield-prix.js')
+  assert.ok(/const attente = aVenir\.filter\(n => n\.hors_fenetre && !n\.vendue\)/.test(api))
+  const blocRadar = api.split('alertes: {')[1].slice(0, 400)
+  assert.ok(/pas_encore_ouvertes: attente\.length/.test(blocRadar), 'le compte est expose a la tuile')
+  assert.ok(/premiere_ouverture/.test(blocRadar), 'et la premiere date, pour dire QUAND')
+  // Et « non renseignees » les EXCLUT, dans les DEUX resumes.
+  assert.equal((api.match(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/g) || []).length, 1,
+    'le resume du radar exclut les hors fenetre')
+  const page = lire('apps/yield/prix.html')
+  assert.equal((page.match(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/g) || []).length, 1,
+    'le resume du mois affiche aussi')
+  // La tuile a un etat dedie, decide AVANT « inconnu ».
+  const iAttente = page.indexOf("a.pas_encore_ouvertes > 0 ? 'attente'")
+  const iInconnu = page.indexOf("a.non_renseignees > 0 ? 'inconnu'")
+  assert.ok(iAttente > 0 && iInconnu > 0 && iAttente < iInconnu,
+    'un mois hors fenetre n est pas « non renseigne »')
+  assert.ok(/attente: \{\s*court: `\$\{a\.pas_encore_ouvertes\} pas encore ouverte/.test(page),
+    'la tuile dit pourquoi elle n agit pas')
+  // Et ce n'est PAS une alerte : aucun point ne s'allume pour une nuit qui
+  // s'ouvrira seule.
+  const blocAlerte = page.split('const alerte = a.en_retard > 0')[1].split('const agit')[0]
+  assert.ok(!/pas_encore_ouvertes/.test(blocAlerte), 'pas de point d alerte : rien a faire')
+})
