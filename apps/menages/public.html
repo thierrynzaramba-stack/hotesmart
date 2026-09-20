@@ -2935,7 +2935,18 @@ if ("serviceWorker" in navigator) {
                // ici elle vient de `departure_date`, et les bornes de la fenetre
                // sont des comparaisons de CHAINES — une valeur qui sort de
                // l'attribut y passerait.
-               : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}">` +
+               // ⚠ ET L'IDENTIFIANT DE L'OFFRE, PAS SEULEMENT LE JOUR — le
+               // defaut trouve en review le 20 septembre 2026. Deux menages
+               // « a prendre » le meme jour : chaque ligne NOMME son bien, mais
+               // toutes portaient le seul `data-jour`, et le gestionnaire
+               // prenait `libres[0]`. Elle tapait « Bagneres », la feuille
+               // ouvrait « Colomiers », et « Je prends ce menage » lui
+               // attribuait le mauvais bien. La feuille du jour avait resolu
+               // ce cas avec un indice ; ici un indice serait FAUX — cette
+               // liste est triee par nom de bien, `aPrendreDu` rend l'ordre du
+               // serveur. L'identifiant, lui, ne depend d'aucun ordre.
+               : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}"` +
+                 ` data-offre-id="${echapper(l.offre.booking_id || '')}">` +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                  '<span class="agenda-tag offre">À PRENDRE</span></button>').join('') +
              '</div>'
@@ -3739,7 +3750,15 @@ if ("serviceWorker" in navigator) {
     const el = e.target.closest('.agenda-item.offre')
     if (el && el.dataset.jour) {
       const libres = aPrendreDu(el.dataset.jour)
-      if (libres.length) ouvrirPriseDeMenage(el.dataset.jour, libres)
+      // ⚠ CELLE QU'ELLE A TOUCHEE, PAS LA PREMIERE DU JOUR. On la retrouve par
+      // son identifiant dans ce que `aPrendreDu` rend a l'instant du clic : si
+      // l'offre a disparu entre le rendu et le geste (prise par une autre,
+      // fenetre glissee), on ne lui ouvre PAS une voisine a la place — c'est
+      // exactement le defaut qu'on ferme — on repeint, et elle voit la liste
+      // telle qu'elle est.
+      const i = libres.findIndex(m => String(m.booking_id) === String(el.dataset.offreId))
+      if (i >= 0) ouvrirPriseDeMenage(el.dataset.jour, libres, i)
+      else peindreMonAgenda()
       return
     }
     // ⚠ ET SES MENAGES A ELLE OUVRENT LA FICHE — LE GESTE CENTRAL DE L'ECRAN.

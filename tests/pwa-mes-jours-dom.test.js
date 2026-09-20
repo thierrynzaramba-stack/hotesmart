@@ -1529,6 +1529,61 @@ test('la ligne de la liste ouvre LA MÊME fiche que la feuille du jour', async (
     'la même fiche, au caractère près')
 })
 
+test('LE TEST QUI COMPTE : deux ménages à prendre le même jour — la ligne touchée ouvre LE SIEN', async () => {
+  // ⚠ LE DEFAUT TROUVE EN REVIEW LE 20 SEPTEMBRE 2026, chez une vraie
+  // prestataire. La liste rend UN bouton par offre — chacun nomme son bien —
+  // mais tous portaient le seul `data-jour`, et le gestionnaire ouvrait
+  // `libres[0]`. Elle tapait « Bien p2 », la feuille disait « Bien p1 », et
+  // « Je prends ce ménage » lui attribuait l'autre logement.
+  //
+  // ⚠ ET UN INDICE DE POSITION SERAIT FAUX ICI : la liste est triée par nom
+  // de bien, `aPrendreDu` rend l'ordre du serveur. On met donc l'offre p2 EN
+  // PREMIER côté serveur : triée, elle passe en second dans la liste — si le
+  // code confondait les deux ordres, le test le verrait.
+  const j = dans(1)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p2'), offre(j, 'p1')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+
+  const lignes = [...agenda(w).querySelectorAll('.agenda-item.offre')]
+  assert.strictEqual(lignes.length, 2, 'deux lignes, une par offre')
+  assert.deepStrictEqual(lignes.map(l => l.querySelector('.agenda-bien').textContent),
+    ['Bien p1', 'Bien p2'], 'triées par nom de bien')
+
+  // Elle touche la SECONDE ligne : « Bien p2 ».
+  lignes[1].dispatchEvent(new w.Event('click', { bubbles: true }))
+  const fiche = w.document.getElementById('modal-body').textContent
+  assert.match(fiche, /Bien p2/, 'la fiche ouverte est celle du bien touché')
+  assert.doesNotMatch(fiche, /Bien p1/, 'et pas celle de la première offre du jour')
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+
+  // Et la première ligne ouvre bien la sienne — le correctif n'a pas inversé.
+  lignes[0].dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.match(w.document.getElementById('modal-body').textContent, /Bien p1/)
+})
+
+test('une offre disparue entre le rendu et le geste n ouvre PAS une voisine', async () => {
+  // Si l'offre touchée n'est plus dans `aPrendreDu` (prise par une autre entre
+  // le rendu et le geste), lui ouvrir la première du jour serait le défaut même
+  // qu'on ferme. On repeint, et rien ne s'ouvre.
+  // ⚠ La page garde SA copie des offres (chargée par `loadData`) : on ne peut
+  // pas la faire disparaître par le harnais sans repeindre. On simule donc le
+  // cas au niveau du geste — un bouton dont l'identifiant ne correspond plus à
+  // rien — ce qui est exactement ce que voit le gestionnaire.
+  const j = dans(1)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p1'), offre(j, 'p2')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const ligneP2 = [...agenda(w).querySelectorAll('.agenda-item.offre')]
+    .find(l => /Bien p2/.test(l.textContent))
+  assert.ok(ligneP2)
+  ligneP2.dataset.offreId = 'x-disparue'
+  ligneP2.dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'none',
+    'aucune fiche ne s ouvre — surtout pas celle de p1 à la place de p2')
+  // Et la liste a été repeinte : le bouton p2 est de nouveau là, avec son vrai identifiant.
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item.offre[data-offre-id="x-' + j + '-p2"]').length, 1,
+    'la liste est repeinte depuis les données')
+})
+
 test('les marques ⏳ \ud83d\udcdd ⏭ suivent la ligne dans la liste', async () => {
   // ⚠ ELLES NE VIVAIENT QUE DANS LA FEUILLE DU JOUR. Une liste qui ouvre la
   // fiche mais ne dit pas qu'il y a une consigne à lire renvoie à l'écran
