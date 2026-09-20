@@ -633,6 +633,12 @@
   // s'explique qu'une fois — contre trente répétitions auparavant.
   function legende (d) {
     const p = d.nuits.some(n => n.delai_jours < 0)
+    // ⚠ NE PARLER DE LA FENETRE QUE SI ELLE EXISTE — releve en review. Un
+    // hote en mode calendrier (tous les biens aujourd'hui) lisait une legende
+    // sur une « fenetre de vente pilotee par YieldFlow » qu'il n'a pas, et
+    // cherchait la ligne bleue qui n'existe pas.
+    const a = (d.nuits || []).some(n => n.hors_fenetre)
+
     const c = (couleur, texte, titre = '') =>
       `<span class="yp-lg" title="${ech(titre)}"><i style="background:${couleur}"></i>${texte}</span>`
     const b = (couleur, texte, titre = '') =>
@@ -642,7 +648,7 @@
       ${c('#EDF4EE', 'à vendre', 'Ouverte à la vente : la teinte de la ligne est le niveau suggéré, repris de votre grille ci-dessus.')}
       ${c('#FBF1DA', 'fermée', 'Fermée à la vente. Aucun prix ne s’y vend — ouvrez-la au calendrier.')}
       ${c('#FFFFFF', 'non renseignée', 'Votre calendrier ne va pas jusqu’à cette nuit.')}
-      ${c('#B5C9DA', 'pas encore ouverte', 'Au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et la nuit s’ouvrira seule, avec son prix déjà prêt.')}
+      ${a ? b('#B5C9DA', 'pas encore ouverte', 'Au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et la nuit s’ouvrira seule, avec son prix déjà prêt.') : ''}
       ${p ? c('#FAFAFA', 'passée, restée vide', 'Nuit écoulée sans être vendue. Elle ne compte plus dans les actions, mais elle reste sous vos yeux.') : ''}
       ${b('#4A7FA8', 'séjour', 'Un séjour confirmé, de l’arrivée au départ.')}
       ${b('#D2DAE2', 'non confirmé', 'Une demande ou une option : elle n’occupe pas encore la nuit, mais elle est là.')}

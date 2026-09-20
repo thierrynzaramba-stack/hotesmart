@@ -46,7 +46,11 @@ test('LE TEST QUI COMPTE : un bien sans fenetre n a PAS de « hors fenetre »', 
     { ...PILOTE_JOURS, pilote_fenetre_valeur: 0 },
     { ...PILOTE_JOURS, pilote_fenetre_valeur: -3 },
     { ...PILOTE_JOURS, pilote_fenetre_valeur: 2.5 },
-    { ...PILOTE_JOURS, pilote_fenetre_valeur: 'dix' }
+    { ...PILOTE_JOURS, pilote_fenetre_valeur: 'dix' },
+    // ⚠ `Number(true)` vaut 1 : une case cochee transmise par un formulaire
+    // d'activation aurait donne une fenetre d'UN jour, valide. Releve en review.
+    { ...PILOTE_JOURS, pilote_fenetre_valeur: true },
+    { ...PILOTE_JOURS, pilote_fenetre_valeur: '10' }
   ]) assert.equal(fenetreDuBien(b), null, JSON.stringify(b))
   assert.deepEqual(FENETRE_TYPES, ['jours', 'mois'], 'deux types, pas trois')
 })
@@ -78,10 +82,32 @@ test('LE TEST QUI COMPTE : l ecran peut dire QUAND — la date d ouverture est c
   assert.equal(dateOuverture(PILOTE_JOURS, '2026-10-15', AUJ), '2026-10-05')
   // Et ce jour-la, elle est bien la derniere nuit de la fenetre.
   assert.equal(finDeFenetre(PILOTE_JOURS, '2026-10-05'), '2026-10-15', 'coherence des deux sens')
-  // 1 mois : la nuit du 31 mars s'ouvre le 28 fevrier... et ce 28 fevrier
-  // + 1 mois donne bien le 28 mars, pas le 31 : la coherence ne peut pas etre
-  // exacte en fin de mois, et c'est le calendrier, pas un defaut.
-  assert.equal(dateOuverture(PILOTE_MOIS, '2026-03-31', '2026-01-15'), '2026-02-28')
+  // ⚠ LA DATE ANNONCEE EST UNE PROMESSE — releve en review. Ma premiere
+  // version rendait « le 28 fevrier » pour la nuit du 31 mars, en excusant
+  // l'ecart (« c'est le calendrier ») : or le 28 fevrier + 1 mois = le 28
+  // mars, la nuit etait ENCORE hors fenetre ce jour-la, et l'hote revenu le
+  // jour dit lisait toujours « pas encore ouverte » — la lecture « panne »
+  // que la date existe pour empecher. La promesse se verifie dans l'autre
+  // sens : le jour annonce, la fenetre ATTEINT la nuit.
+  for (const [bien, nuit, auj] of [
+    [PILOTE_MOIS, '2026-03-31', '2026-01-15'],
+    [PILOTE_MOIS, '2026-03-30', '2026-01-15'],
+    [PILOTE_MOIS, '2026-03-29', '2026-01-15'],
+    [{ ...PILOTE_MOIS, pilote_fenetre_valeur: 3 }, '2026-05-31', '2026-01-15'],
+    [{ ...PILOTE_MOIS, pilote_fenetre_valeur: 1 }, '2028-02-29', '2027-12-01'],
+    [PILOTE_JOURS, '2026-12-31', AUJ]
+  ]) {
+    const o = dateOuverture(bien, nuit, auj)
+    assert.ok(o, `${nuit} : une date`)
+    assert.ok(finDeFenetre(bien, o) >= nuit, `${nuit} : le ${o}, la fenetre l atteint`)
+    assert.equal(estHorsFenetre(bien, nuit, o), false, `${nuit} : plus hors fenetre le ${o}`)
+    // Et c'est le PREMIER jour ou c'est vrai : la veille, elle etait encore dehors.
+    const veille = new Date(`${o}T00:00:00Z`); veille.setUTCDate(veille.getUTCDate() - 1)
+    const v = veille.toISOString().slice(0, 10)
+    assert.equal(estHorsFenetre(bien, nuit, v), true, `${nuit} : la veille (${v}) elle etait encore dehors`)
+  }
+  assert.equal(dateOuverture(PILOTE_MOIS, '2026-03-31', '2026-01-15'), '2026-03-01',
+    'le 31 mars s ouvre le 1er mars, pas le 28 fevrier')
   // Une nuit deja dans la fenetre n'a pas de date d'ouverture a venir.
   assert.equal(dateOuverture(PILOTE_JOURS, '2026-09-25', AUJ), null)
   assert.equal(dateOuverture(PILOTE_JOURS, '2026-09-01', AUJ), null, 'ni une nuit passee')
@@ -124,6 +150,46 @@ test('LE TEST QUI COMPTE : le meme calcul sur un bien CALENDRIER ne change pas',
   assert.deepEqual([r2.jours_fermes, r2.jours_hors_fenetre, r2.jours_attendus_sans_ligne], [17, 0, 0])
 })
 
+test('LE TEST QUI COMPTE : une periode ENTIEREMENT hors fenetre a son propre motif, pas « calendrier non enregistre »', async () => {
+  // Releve en review : la garde « aucune ligne + futur » tirait AVANT la
+  // fenetre. Un mois affiche a +6 mois n'a aucune ligne : la tuile disait
+  // « son calendrier n'a pas encore ete enregistre » pendant que chaque ligne
+  // du meme mois disait « pas encore ouverte ». Deux verites dans une page.
+  const { NON_CALCULABLE } = require('../lib/yield/capacite')
+  const r = await joursOuverts(null, PILOTE_JOURS, '2026-11-01', '2026-11-30',
+    { aujourdHui: AUJ, estimerLePasse: false, lignes: [] })
+  assert.equal(r.calculable, false, 'ni au numerateur ni au denominateur : 0/0, non calculable')
+  assert.equal(r.raison, NON_CALCULABLE.HORS_FENETRE)
+  assert.equal(r.jours_hors_fenetre, 30, 'et le compteur dit que c est la fenetre, pas un oubli')
+  assert.equal(r.detail_hors_fenetre.length, 30, 'chaque nuit est nommee, pour l endpoint')
+  // Le meme mois pour un bien CALENDRIER : la garde historique, inchangee.
+  const r2 = await joursOuverts(null, CALENDRIER, '2026-11-01', '2026-11-30',
+    { aujourdHui: AUJ, estimerLePasse: false, lignes: [] })
+  assert.equal(r2.raison, NON_CALCULABLE.FUTUR_NON_AMORCE)
+  assert.equal(r2.jours_hors_fenetre, 0)
+  // Et le motif est TRADUIT : la liste de l'ecran derive du moteur.
+  const motifs = lire('shared/yield-motifs.js')
+  assert.ok(/periode_hors_fenetre: \{/.test(motifs), 'le motif a sa traduction')
+})
+
+test('la classification par nuit est PORTEE par le resultat : l endpoint ne la redecide pas', async () => {
+  // Releve en review : « sans ligne et au-dela » etait recalcule dans
+  // l'endpoint. Deux endroits encodaient « une ligne reelle prime sur la
+  // fenetre » — trois recopies, trois verites.
+  const lignes = [ligne('2026-10-05')]
+  const r = await joursOuverts(null, PILOTE_JOURS, '2026-10-01', '2026-10-10',
+    { aujourdHui: AUJ, estimerLePasse: false, lignes })
+  assert.deepEqual(r.detail_hors_fenetre,
+    ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-06',
+     '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'],
+    'toutes sauf le 5, qui porte une ligne reelle')
+  assert.equal(r.jours_hors_fenetre, r.detail_hors_fenetre.length)
+  // Un bien sans fenetre rend une liste vide, jamais null sur un calcul reussi.
+  const r2 = await joursOuverts(null, CALENDRIER, '2026-10-01', '2026-10-10',
+    { aujourdHui: AUJ, estimerLePasse: false, lignes })
+  assert.deepEqual(r2.detail_hors_fenetre, [])
+})
+
 test('une ligne REELLE hors fenetre fait foi : la bascule ne change pas', async () => {
   // L'hote a touche une nuit au-dela de la fenetre (fermee a la main, ou
   // ouverte) : c'est SA ligne, elle prime. Seule l'absence de ligne est lue
@@ -145,12 +211,15 @@ test('le passe n est jamais « hors fenetre », meme pour un bien pilote', async
 })
 
 // ─── 4. L endpoint et l ecran ───────────────────────────────────────────────
-test('chaque nuit porte hors_fenetre et ouverture_prevue, calcules par la regle', () => {
+test('l endpoint LIT detail_hors_fenetre, il ne recalcule pas la fenetre par nuit', () => {
+  // Le comportement est teste en EXECUTANT la capacite (tests ci-dessus) ;
+  // ici on ne verifie que le branchement — et qu'aucune seconde decision n'y
+  // survit. Releve en review : le test precedent verrouillait la forme exacte
+  // d'une ligne, et aurait rougi sur une factorisation sans changement.
   const src = lire('api/yield-prix.js')
-  assert.ok(/require\('\.\.\/lib\/pilote-tarifaire'\)/.test(src), 'la regle vient du module')
-  assert.ok(/hors_fenetre: !parDate\.has\(date\) && estHorsFenetre\(bien, date, auj\)/.test(src),
-    'hors fenetre = sans ligne ET au-dela : une ligne reelle prime')
-  assert.ok(/ouverture_prevue: !parDate\.has\(date\) \? dateOuverture\(bien, date, auj\) : null/.test(src))
+  assert.ok(/detail_hors_fenetre/.test(src), 'la classification vient de la capacite')
+  assert.ok(!/estHorsFenetre\(/.test(src), 'aucune seconde decision « hors fenetre » dans l endpoint')
+  assert.ok(/dateOuverture\(/.test(src), 'seule la DATE est demandee a la regle, et seulement pour une nuit hors fenetre')
 })
 
 test('LE TEST QUI COMPTE : l ecran dit « pas encore ouverte », jamais « fermee » ni « non renseignee »', () => {
@@ -167,8 +236,10 @@ test('LE TEST QUI COMPTE : l ecran dit « pas encore ouverte », jamais « ferme
   assert.ok(/const attente = aVenir\.filter\(n => n\.hors_fenetre && !n\.vendue\)/.test(src))
   assert.ok(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/.test(src),
     'une nuit hors fenetre n est pas comptee « non renseignee »')
-  // La legende l'explique une fois pour le mois.
-  assert.ok(/'pas encore ouverte', 'Au-delà de la fenêtre de vente/.test(src))
+  // La legende l'explique une fois pour le mois — et SEULEMENT si l'etat peut
+  // apparaitre : un hote en mode calendrier n'a pas de fenetre a lire.
+  assert.ok(/\$\{a \? b\('#B5C9DA', 'pas encore ouverte'/.test(src), 'legende conditionnelle')
+  assert.ok(/const a = \(d\.nuits \|\| \[\]\)\.some\(n => n\.hors_fenetre\)/.test(src))
   // Et son style existe : un etat sans style est invisible (lecon des trois
   // defauts de mise en page du chantier prestataires).
   assert.ok(/\.yp-table tr\.e-attente \{/.test(src), 'la classe a un style')

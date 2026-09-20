@@ -38,6 +38,10 @@ export const MOTIFS = {
     titre: 'Calendrier à venir non renseigné',
     quoi: 'Cette période est dans le futur et son calendrier n’a pas encore été enregistré. Nous n’estimons jamais l’avenir.'
   },
+  periode_hors_fenetre: {
+    titre: 'Pas encore ouverte',
+    quoi: 'Toute la période est au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et ces nuits s’ouvriront seules, avec leur prix déjà prêt.',
+  },
   parametres_invalides: {
     titre: 'Période invalide',
     quoi: 'Les dates demandées ne forment pas une période valide.'

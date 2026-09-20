@@ -19,7 +19,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
-const { estHorsFenetre, dateOuverture } = require('../lib/pilote-tarifaire')
+const { dateOuverture } = require('../lib/pilote-tarifaire')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
 const { exceptionsDuBien } = require('../lib/yield/exceptions')
 const { evenementsDuBien } = require('../lib/yield/evenements')
@@ -312,6 +312,11 @@ module.exports = async (req, res) => {
     const ouvertureConnue = !!(capaciteRadar && capaciteRadar.calculable &&
       capaciteRadar.detail)
     const ouverts = new Set(ouvertureConnue ? capaciteRadar.detail : [])
+    // ⚠ « HORS FENETRE » VIENT DE LA CAPACITE, PAS D'UNE SECONDE DECISION ICI
+    // — releve en review. `detail_hors_fenetre` est porte par le resultat, y
+    // compris quand la periode entiere est hors fenetre (raison dediee, non
+    // calculable). Une seule regle, un seul endroit qui l'applique.
+    const horsFenetre = new Set((capaciteRadar && capaciteRadar.detail_hors_fenetre) || [])
     const motifOuverture = ouvertureConnue ? null
       : (capaciteRadar ? capaciteRadar.raison : 'capacite_non_calculable')
     const parDate = new Map(lignesCal.map(l => [l.date, l]))
@@ -460,8 +465,8 @@ module.exports = async (req, res) => {
         // s'ouvrira seule. L'ecran doit pouvoir dire QUAND, sinon un
         // calendrier vide sur huit mois se lit comme une panne. La regle et
         // la date viennent de lib/pilote-tarifaire.js, en un seul endroit.
-        hors_fenetre: !parDate.has(date) && estHorsFenetre(bien, date, auj),
-        ouverture_prevue: !parDate.has(date) ? dateOuverture(bien, date, auj) : null,
+        hors_fenetre: horsFenetre.has(date),
+        ouverture_prevue: horsFenetre.has(date) ? dateOuverture(bien, date, auj) : null,
         // ⚠ LE PRIX DE BASE N'EST PAS « LE PRIX AFFICHE » — releve en review.
         // Sans ligne au calendrier, `ouverte` vaut `null` (« ouverture
         // inconnue ») mais ce champ AFFIRMAIT un prix : l'ecran montrait un
