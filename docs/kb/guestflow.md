@@ -606,4 +606,40 @@ réponses de l'IA.
   `/biens` + miroir config — confirmé.)
 
 ## Fix août 2026 — garde anti-reclassification (conso tokens)
-Garde temporelle commune Beds24+Channex (hasNewerTaskOrConv) : toute tâche ou conversation créée après le dernier message guest fait skipper le thread AVANT l'appel IA. Le chemin Channex n'avait aucune garde basée sur les tâches (~3500 classifications/jour inutiles). Skip également si le dernier message du thread est du host.
+Garde temporelle commune Beds24+Channex (hasNewerTaskOrConv) : toute tâche ou conversation **avec réponse** créée après le dernier message guest fait skipper le thread AVANT l'appel IA. Le chemin Channex n'avait aucune garde basée sur les tâches (~3500 classifications/jour inutiles). Skip également si le dernier message du thread est du host.
+
+**Correctif du 20 septembre 2026 — l'écho n'est pas une réponse.** Les webhooks entrants
+(`api/channel-webhook.js`, `api/inbound-email.js`) écrivent une ligne `conversations` sans
+`agent_reply` à la réception de chaque message du voyageur, datée de la réception, donc
+toujours après l'instant du message. Lue sans filtre, la garde prenait cet écho pour un
+traitement : depuis sa pose le 20 août, **aucun fil Channex n'a jamais atteint l'IA** (0 réponse
+IA sur Channex en 45 jours ; 56 fils sur 58 portaient l'écho sur 7 jours). Symptôme déclencheur :
+« je peux venir avec mon chien ? » reçu par e-mail sur une Offline du 23, base à jour, mode auto,
+ni réponse ni tâche ni log. La garde filtre désormais `agent_reply IS NOT NULL` sur
+`conversations`. Le chemin Beds24 n'était pas touché (aucun écho : il lit l'API Beds24).
+
+Deux décisions de Thierry attachées au correctif :
+- **Reprise bornée** : `REPRISE_DEPUIS` (`lib/cron-classify.js`) ferme le passé — aucun
+  message antérieur à l'instant du push n'est classifié, donc aucune réponse IA tardive sur un
+  séjour terminé (le déploiement suit le push de une à deux minutes ; un message reçu dans cet
+  intervalle est classifié en Mode Test, donc proposé, jamais envoyé). Les fils réels encore
+  ouverts à cette date ont été traités à la main. La constante devient du code mort après le
+  21 octobre 2026 (fenêtre de lecture de 30 jours) : à retirer alors.
+- La garde ne compte plus que les tâches de la **classification** (`TYPES_CLASSIFICATION`) : une
+  tâche `auto_message` déposée par un modèle ou un code d'accès dans le même cycle faisait taire
+  le fil de la même façon (constat de review). Et le pré-scan « dernière réponse par booking »,
+  qui lisait `conversations` sans `user_id`, a disparu : la réponse d'un autre compte sur la même
+  clé provider pouvait faire taire ce fil-ci.
+
+**Dette (altitude, constat de review du 20 septembre 2026).** La cause racine est que les deux
+webhooks entrants écrivent l'écho du voyageur dans `conversations`, une table dont tous les
+autres writers signifient « nous avons répondu ». Le correctif protège un lecteur ; tout autre
+lecteur de `conversations` (messagerie, analyse, KPI) peut refaire la même erreur. Le vrai
+correctif : ne plus écrire l'écho et dédupliquer sur `messages`, comme `api/inbound-email.js` le
+fait déjà — `api/channel-webhook.js` déduplique encore sur l'écho, et l'écran messagerie le lit.
+À traiter dans un chantier propre, pas dans ce correctif.
+- **Mode Test 24-48 h** sur les quatre biens Channex (Colomiers, Ofuro Futari, Le 23, La bulle) :
+  l'agent n'a jamais parlé sur un fil OTA Channex, ses premières propositions se lisent avant de
+  le laisser répondre seul. Retour en auto par Thierry lui-même.
+
+Test : `tests/garde-echo-conversation.test.js`.

@@ -214,7 +214,7 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
-## DETTE DATEE — 21 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
+## DETTE DATEE — 25 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
@@ -263,6 +263,7 @@ vert, sans toucher une ligne de production.
 | 1 | `tests/booking-changes.test.js` | **8** | garde d'anciennete `JOURS_DE_GRACE = 7` (sejour termine) |
 | 2 | `tests/avis-endpoint.test.js` | **3** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir |
 | 3 | `tests/messages-classify.test.js` | **10** | meme fenetre : le message du 20 aout est ecarte AVANT la garde de panne DB, donc la garde n'est jamais appelee — elle mord toujours |
+| 4 | `tests/menages-public-filtre-presta.test.js` | **4** | fenetre glissante de 14 jours du fil d'actualites (`api/menages-public.js`, « on remonte aussi les 14 derniers jours ») : le menage `b1` du 6 septembre en est sorti le 21 (constate le 21 septembre 2026, contre-epreuve +1 mois : 20/20) |
 
 Les familles 2 et 3 franchissent une FENETRE DE LECTURE, pas une garde
 d'anciennete — c'est ce qui les rend penibles : elles se declenchent a des
@@ -273,10 +274,10 @@ V1.** Un chiffre qui bouge tout seul avec le calendrier est un mauvais
 garde-fou : l'actualiser n'est qu'un sursis.
 
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
-Le nombre attendu est **21, et exactement 21** (8 + 3 + 10, au 20 septembre
-2026 — il etait 8 jusqu'au 18). Avant tout push : lire le compte,
-pas la couleur. **22 rouges = une regression, on ne pousse pas** tant qu'on ne
-l'a pas nommee ; 20 rouges = une dette s'est refermee, on met ce nombre a jour
+Le nombre attendu est **25, et exactement 25** (8 + 3 + 10 + 4, au 21 septembre
+2026 — il etait 8 jusqu'au 18, 21 le 20). Avant tout push : lire le compte,
+pas la couleur. **26 rouges = une regression, on ne pousse pas** tant qu'on ne
+l'a pas nommee ; 24 rouges = une dette s'est refermee, on met ce nombre a jour
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
 se contre-eprouve avant d'etre pris pour une regression : decaler les fixtures
 d'un mois, relancer, restaurer l'arbre — si tout repasse au vert, c'est le
