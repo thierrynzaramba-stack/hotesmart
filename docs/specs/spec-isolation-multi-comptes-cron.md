@@ -61,6 +61,10 @@ d'un hôte pour la réservation d'un autre »*.
 autre compte, elle peut **se relâcher** (on répond deux fois) ou **se
 resserrer** (on se tait à tort). Les deux sont silencieux.
 
+**Résolu le 20 septembre 2026** (commit « l'écho du voyageur n'est pas une
+réponse ») : le pré-scan a été supprimé. La question qu'il posait est portée par
+`hasNewerTaskOrConv`, qui filtre `user_id`. Voir `docs/kb/guestflow.md`.
+
 ⚠ Ligne 265 du même fichier, une autre lecture de `conversations` filtre bien
 par `user_id`. C'est une incohérence entre deux lectures voisines, donc un
 oubli — pas une décision.
