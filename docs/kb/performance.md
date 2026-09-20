@@ -24,28 +24,43 @@ le scratchpad de session, pas dans le dépôt (il porte une session).
 | sans jeton (401 avant tout accès base) | 170 ms | 180 ms | 190 ms |
 | jeton invalide (401 après `auth.getUser`) | 500 ms | 510 ms | 490 ms |
 
-**Ce que ça dit.** Le statique et le refus sans jeton tiennent en 170-190 ms :
-c'est le plancher réseau poste → Vercel. Un appel qui ne fait QUE vérifier le
-jeton coûte 500 ms : **un seul aller-retour fonction → Supabase vaut ~300 ms.**
-`yield-pilote`, qui n'a que la garde et une lecture, en fait quatre en série
-(jeton, profil, périmètre, bien) : 1,3 s. Tout endpoint est la somme de ses
-aller-retours, et chacun coûte 300 ms.
+**Ce que ça dit.** Le refus sans jeton tient en 170-190 ms — et ce 401 est
+émis PAR LA FONCTION (la garde vit dans `lib/require-permission.js`, il n'y a
+pas de middleware) : ces 180 ms contiennent déjà le saut Paris → Washington →
+Paris et l'invocation, pas seulement poste → Vercel. Ils baisseront donc eux
+aussi après le correctif. Un appel qui ne fait QUE vérifier le jeton coûte
+500 ms : **un seul aller-retour fonction → Supabase vaut ~300 ms.**
+`yield-pilote` en fait cinq en série quand un profil existe (jeton, bien,
+profil, permissions du profil, puis sa propre relecture de `properties`) :
+1,3 s. Tout endpoint est la somme de ses aller-retours, et chacun coûte 300 ms.
 
 **La cause.** L'en-tête `x-vercel-id` des réponses dit `cdg1::iad1::…` : la
 requête entre par Paris (`cdg1`) mais **la fonction s'exécute à Washington
 (`iad1`, la région Vercel par défaut)**. Les deux projets Supabase (prod
-`cjmrizpdyhrcurmgyrhs`, staging `ortyofzzdsthlhqmzsnq`) répondent sur des
-adresses AWS `2a05:d018::/32`, **eu-west-3, Paris**. Chaque requête à la base
-traverse donc l'Atlantique deux fois, avec sa poignée de main TLS. Ce n'est pas
-le code qui est lent, c'est la distance.
+`cjmrizpdyhrcurmgyrhs`, staging `ortyofzzdsthlhqmzsnq`) sont en **eu-west-3,
+Paris** : c'est `db.<ref>.supabase.co` (le serveur Postgres) qui le montre,
+avec des adresses AWS `2a05:d018::/32`. ⚠ Ne pas vérifier sur
+`<ref>.supabase.co` : ce hôte, celui que `supabase-js` appelle, résout sur
+Cloudflare (anycast) — le TLS se termine près de la fonction, mais la requête
+continue jusqu'à l'origine à Paris, et la réponse refait le chemin. Chaque
+lecture traverse donc l'Atlantique aller et retour. Ce n'est pas le code qui
+est lent, c'est la distance.
 
 ## 2. Le correctif : `"regions": ["cdg1"]` dans `vercel.json`
 
 Les fonctions s'exécutent à Paris, à côté de la base. Un aller-retour devrait
-passer de ~300 ms à ~10-20 ms ; un endpoint à quatre aller-retours de 1,3 s à
-moins de 400 ms. Aucune ligne de code métier ne change. Les autres services
-appelés par les fonctions (Beds24, Channex, Brevo) sont en Europe ; Seam est aux
-États-Unis, et n'est appelé que par le cron.
+passer de ~300 ms à ~10-20 ms ; un endpoint à cinq aller-retours de 1,3 s à
+moins de 500 ms. Aucune ligne de code métier ne change. Beds24, Channex et
+Brevo sont en Europe. **Trois services sont aux États-Unis et perdent
+80-100 ms par appel** : Seam (`api/serrures.js` en interactif, et le cron),
+Anthropic (`api/grok.js`, `cron-messages`) et Stripe. C'est à mettre en
+regard des ~300 ms gagnés par lecture Supabase — un écran serrures fait une
+lecture Seam pour plusieurs lectures base — mais un ralentissement de
+`/apps/serrures` ou de l'agent IA après ce changement aura cette cause-là.
+
+⚠ `vercel.json` sert les DEUX projets Vercel (prod et staging) et toutes les
+previews : la région change partout à la fois. La preuve se fait sur staging
+avant le merge, mais le merge l'applique à la prod dans le même geste.
 
 **Comment vérifier après déploiement** : `curl -sI https://<hôte>/api/avis |
 grep x-vercel-id` doit montrer `cdg1::cdg1::…`, puis rejouer la mesure du §1.
@@ -53,9 +68,12 @@ grep x-vercel-id` doit montrer `cdg1::cdg1::…`, puis rejouer la mesure du §1.
 ## 3. Ce qui reste, par ordre de gain attendu (à mesurer après le §2)
 
 1. **La garde fait ses aller-retours en série** (`lib/require-permission.js` :
-   `auth.getUser`, puis profil, puis périmètre). Le profil et le périmètre ne
-   dépendent que de l'identifiant : ils pourraient partir ensemble. À Paris,
-   ça vaut 20-40 ms ; à Washington, ça valait 600 ms.
+   `auth.getUser`, puis `profiles`, puis `profile_permissions` par
+   `profil.id`). ⚠ Les deux dernières sont DÉPENDANTES, on ne les
+   parallélise pas : le gain est une seule requête avec la relation imbriquée
+   (`profiles` + `profile_permissions`). Et l'endpoint relit souvent le bien
+   que la garde vient de résoudre (`yield-pilote`) : une lecture de trop. À
+   Paris, tout ça vaut 20-40 ms ; à Washington, ça valait 600 ms.
 2. **Les écrans enchaînent leurs appels** (calendrier : liste des biens, PUIS
    inventaire ; yield : pilote, PUIS prix). Deux appels indépendants peuvent
    partir ensemble.
