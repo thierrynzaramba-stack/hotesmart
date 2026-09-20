@@ -46,7 +46,11 @@ const BIEN_CHANNEX = { id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900', user_id: PROD
                        rate_sync_mode: 'managed' }
 const BIENS = [BIEN_A, BIEN_B, BIEN_TIERS, BIEN_CHANNEX]
 
+// ⚠ `../lib/calendrier-writer` EST RECHARGE AVEC `../api/calendar` : depuis le
+// lot 4.6.1 il porte le cœur d'ecriture, et ses requires internes (journal,
+// nuits occupees, reaffirmation) doivent voir les doubles de CHAQUE test.
 const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/calendar',
+                 '../lib/calendrier-writer',
                  '../api/channel-rateplan', '../api/beds24', '../api/messages',
                  '../api/channel-import-messages', '../lib/record-message', '../lib/channels']
 

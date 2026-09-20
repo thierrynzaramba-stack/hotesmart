@@ -466,7 +466,9 @@ test('LE TEST QUI COMPTE : le FULL SYNC alimente le journal, pas seulement le ca
   assert.ok(/propertyId: bien\.id/.test(fullsync),
     'avec l UUID du bien, pas la cle provider')
 
-  const calendrier = lireSrc('api/calendar.js')
+  // ⚠ DEPUIS LE LOT 4.6.1, le calendrier journalise par son WRITER
+  // (lib/calendrier-writer.js), appele par la porte HTTP et par le canal interne.
+  const calendrier = lireSrc('lib/calendrier-writer.js')
   assert.ok(/enregistrerPrixPousses\(/.test(calendrier),
     'le calendrier journalise aussi ses poussees directes')
 })
@@ -481,7 +483,7 @@ test('une nuit FERMEE n entre pas au journal, sur les deux chemins', () => {
   assert.ok(/const dejaVendue = \(vendues\[iso\] \|\| \[\]\)\.length >= unites/.test(fullsync),
     'la nuit vendue se juge sur le stock, comme le plafonnement de disponibilite')
 
-  const calendrier = lireSrc('api/calendar.js')
+  const calendrier = lireSrc('lib/calendrier-writer.js')
   // ⚠ L'ETAT EFFECTIF, PAS LE SEGMENT : une date DEJA fermee en base dont on ne
   // change que le tarif doit rester hors du journal. `reaffirmerStopSell` la
   // repoussera fermee, donc personne ne verra ce prix.
@@ -499,7 +501,7 @@ test('une nuit FERMEE n entre pas au journal, sur les deux chemins', () => {
 test('le journal ne peut pas faire echouer une poussee', () => {
   // Le prix EST parti : c'est la mesure qui a manque. Une erreur rendue a
   // l'hote lui ferait repousser, donc ecraser.
-  for (const f of ['lib/channel-fullsync.js', 'api/calendar.js']) {
+  for (const f of ['lib/channel-fullsync.js', 'lib/calendrier-writer.js']) {
     const src = lireSrc(f)
     // ⚠ `lastIndexOf`, PAS `indexOf` : la premiere occurrence est la ligne
     // d'import, et le test passait alors a cote de l'appel qu'il pretend
@@ -532,8 +534,12 @@ test('RECENSEMENT : aucun chemin de poussee tarifaire n echappe au journal', () 
   // emetteurs en production, deux seulement portent un prix.
   const ATTENDUS = {
     // Poussent un RATE par date -> DOIVENT journaliser.
-    'lib/channel-fullsync.js': 'tarifaire',
-    'api/calendar.js':         'tarifaire',
+    'lib/channel-fullsync.js':    'tarifaire',
+    // ⚠ DEPUIS LE LOT 4.6.1, LA PORTE HTTP NE POUSSE PLUS RIEN ELLE-MEME : le
+    // cœur d'ecriture du calendrier — poussee ARI et journal compris — vit dans
+    // le writer, appele par deux portes (api/calendar.js et le canal interne).
+    // `api/calendar.js` sort donc du recensement, et le writer y entre.
+    'lib/calendrier-writer.js':  'tarifaire',
     // Poussent /restrictions SANS aucun rate -> rien a journaliser.
     // `reaffirmerStopSell` ne porte que `stop_sell` (lib/rate-sync.js le dit
     // explicitement) ; `channel-rateplan` ne pousse que `min_stay` sur le rate
@@ -614,7 +620,7 @@ test('LE TEST QUI COMPTE : le journal lit le compte de la GARDE, pas celui du bi
   // Il a fallu remonter l'erreur dans la reponse HTTP pour la voir. C'est le
   // piege de la colonne non selectionnee — documente trois fois dans ce depot,
   // et reproduit ici meme.
-  const src = lireSrc('api/calendar.js')
+  const src = lireSrc('lib/calendrier-writer.js')
   assert.ok(!/occupees\(supabase, bien\.provider_property_id,[\s\S]{0,200}userId: bien\.user_id/.test(src),
     'le journal ne doit PAS lire bien.user_id : ce SELECT ne le porte pas')
   assert.ok(/datesPrix\[datesPrix\.length - 1\], \{ userId: compte \}/.test(src),
@@ -629,7 +635,7 @@ test('une non-ecriture du journal est toujours DITE', () => {
   // Le journal n'est pas retroactif : une non-ecriture silencieuse perd le prix
   // pour toujours, et rend le defaut indiagnostiquable. Le `if` doit parler
   // quand il ne fait rien.
-  const src = lireSrc('api/calendar.js')
+  const src = lireSrc('lib/calendrier-writer.js')
   assert.ok(/journal des prix NON ecrit/.test(src))
   // ⚠ LES DEUX ORIGINES DOIVENT ETRE NOMMEES, pas seulement le total.
   // Depuis le 12/09/2026 le journal a deux sources — un tarif pousse

@@ -156,7 +156,10 @@ test("une alerte qui echoue ne casse pas la sauvegarde", async () => {
 test('le handler du calendrier appelle bien le verdict ET la reaction', () => {
   const fs = require('node:fs')
   const path = require('node:path')
-  const src = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  // ⚠ DEPUIS LE LOT 4.6.1, verdict et reaction vivent dans le writer
+  // (lib/calendrier-writer.js), appele par la porte HTTP ET le canal interne :
+  // les deux portes en heritent, aucune ne peut l'oublier.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
   assert.match(src, /const\s+verdict\s*=\s*verdictPoussee\(/, 'le verdict doit etre calcule')
   assert.match(src, /await\s+signalerPousseeRefusee\(\s*verdict\s*,/, 'et la reaction declenchee')
@@ -193,10 +196,15 @@ test('les ecrans calendrier distinguent « non publie » de « enregistre »', (
 test("l'endpoint rend le drapeau push_failed", () => {
   const fs = require('node:fs')
   const path = require('node:path')
-  const src = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-  assert.match(src, /push_failed:\s*pousseeRefusee/, 'le drapeau doit sortir dans la reponse')
-  assert.match(src, /if\s*\(verdict\.panne\)\s*pousseeRefusee\s*=\s*true/, 'et etre pose par le verdict')
+  const nettoyer = t => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  // Le drapeau SORT par la porte HTTP…
+  const api = nettoyer(fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8'))
+  assert.match(api, /push_failed:\s*pousseeRefusee/, 'le drapeau doit sortir dans la reponse')
+  assert.match(api, /pushFailed:\s*pousseeRefusee/, 'et il vient du writer, pas d une seconde decision')
+  // …et il est POSE par le verdict, dans le writer (lot 4.6.1).
+  const w = nettoyer(fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8'))
+  assert.match(w, /if\s*\(verdict\.panne\)\s*pousseeRefusee\s*=\s*true/, 'et etre pose par le verdict')
+  assert.match(w, /pushFailed:\s*pousseeRefusee/, 'que le writer rend a ses deux portes')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -290,7 +298,9 @@ test('availability AVANT restrictions — un /availability leve le stop_sell', a
 test('les deux chemins muets sont desormais traites comme des echecs', () => {
   const fs = require('node:fs')
   const path = require('node:path')
-  const src = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  // Le plafonnement du stock et le cas « sans room_type » vivent dans le
+  // writer depuis le lot 4.6.1 — donc pour les deux portes.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8')
   const repli = src.indexOf('let retirees = 0')
   assert.ok(repli > 0)
   assert.match(src.slice(repli, repli + 1200),

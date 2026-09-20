@@ -78,7 +78,10 @@ test('LE TEST QUI COMPTE : le message lisible va dans `error`, pas dans `message
   // « prix_sous_plancher » a l'hote, et l'explication restait dans un champ
   // que personne ne lit. C'est ce qui a fait croire a Thierry que sa saisie
   // avait abouti.
-  const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  // ⚠ Le refus du plancher vit dans le writer depuis le lot 4.6.1 : il rend
+  // `{ refus: { status, body } }`, et la porte HTTP le traduit tel quel en
+  // reponse. Le message lisible est donc toujours dans `body.error`.
+  const cal = fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8')
   const bloc = cal.slice(cal.indexOf('prix_sous_plancher') - 800, cal.indexOf('prix_sous_plancher') + 400)
   assert.ok(/error: messageRefus\(/.test(bloc),
     'le message LISIBLE est dans `error`, le champ que le front affiche')
@@ -99,8 +102,8 @@ test('LE TEST QUI COMPTE : les deux chemins de poussee appliquent la garde', () 
   assert.ok(/sousPlancher/.test(fullsync))
   assert.ok(/reportIncident\('prix_sous_plancher'/.test(fullsync), 'et alerte l hote')
 
-  const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
-  assert.ok(/tarifAcceptable\(cents, bien\)/.test(cal), 'le calendrier aussi')
+  const cal = fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8')
+  assert.ok(/tarifAcceptable\(cents, bien\)/.test(cal), 'le calendrier aussi — par son writer, donc par ses deux portes')
   // ⚠ LE CALENDRIER REFUSE, IL NE FERME PAS — et c'est tout le correctif.
   // Fermer la date dans la charge ARI ne protegeait RIEN : l'upsert de
   // `calendar_inventory` a lieu AVANT, la memoire d'intention restait a
@@ -110,7 +113,9 @@ test('LE TEST QUI COMPTE : les deux chemins de poussee appliquent la garde', () 
   // Le code technique a migre de `error` vers `code` : c'est `error` qui porte
   // desormais le message lisible, seul champ que le front affiche.
   assert.ok(/code: 'prix_sous_plancher'/.test(cal), 'il rend 400 avec son code')
-  assert.ok(/res\.status\(400\)/.test(cal))
+  // Le writer ne connait pas `res` : il rend `{ refus: { status: 400, body } }`
+  // et la porte HTTP le traduit tel quel (lot 4.6.1).
+  assert.ok(/refus: \{ status: 400, body: \{/.test(cal), 'un refus 400, rendu comme valeur')
   assert.ok(!/refusesPlancher/.test(cal), 'plus de fermeture dans la charge ARI')
 })
 
@@ -245,7 +250,7 @@ test('LE TEST QUI COMPTE : tarifer n ouvre PAS — regle Channex « only send ch
   // nuit signifie vouloir la vendre, alors qu'on prepare souvent ses prix a
   // l'avance. C'est le principe que ce chantier defend partout ailleurs : la
   // memoire d'intention n'appartient qu'a l'hote.
-  const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  const cal = fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8')
   assert.ok(/only send changes/.test(cal), 'la regle est citee la ou elle s applique')
   assert.ok(!/availByDate\[ds\] = unitesBien/.test(cal),
     'aucune disponibilite n est fabriquee pour une date non touchee')
@@ -275,6 +280,9 @@ test('LE TEST QUI COMPTE : `user_id` est selectionne — sans lui, AUCUNE ouvert
   // Mesure du 12 : HTTP 0 sur availability, « 1 ouverture(s) non poussee(s) »,
   // sur un appel parfaitement normal.
   const cal = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+  // ⚠ DEUX FICHIERS DEPUIS LE LOT 4.6.1 : les chargements de bien restent dans
+  // la porte HTTP, les appels a `nuitsOccupees` sont partis dans le writer.
+  const writer = fs.readFileSync(path.join(__dirname, '..', 'lib/calendrier-writer.js'), 'utf8')
 
   // Les deux chargements de bien du fichier doivent porter user_id.
   // ⚠ LE MOTIF SUIT LES CONSTANTES, PAS LES LITTERAUX INLINE. Au lot 4.5, la
@@ -292,7 +300,8 @@ test('LE TEST QUI COMPTE : `user_id` est selectionne — sans lui, AUCUNE ouvert
   }
 
   // Et tout appel a nuitsOccupees doit recevoir un compte non vide.
-  const appels = cal.match(/nuitsOccupees\([\s\S]{0,200}?\)/g) || []
+  const appels = writer.match(/nuitsOccupees\([\s\S]{0,200}?\)/g) || []
+  assert.ok(appels.length >= 1, 'le writer appelle nuitsOccupees (plafonnement du stock)')
   for (const a of appels) {
     assert.ok(/userId: (bien\.user_id|compte)/.test(a),
       `appel a nuitsOccupees sans compte : ${a.slice(0, 90)}…`)

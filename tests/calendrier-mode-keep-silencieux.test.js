@@ -21,7 +21,9 @@ test('LE TEST QUI COMPTE : le mode `keep` PREVIENT l hote, il ne se contente pas
   // un drapeau POUR LE CODE. Le front ne lit que `warnings`, vide, donc il
   // affichait le message de succes. Le mode `keep` est un choix legitime ; son
   // SILENCE ne l'etait pas.
-  const src = lire('api/calendar.js')
+  // `pousserAri` — et son drapeau `mode_keep` — vit dans le writer depuis le
+  // lot 4.6.1 (un writer, deux portes).
+  const src = lire('lib/calendrier-writer.js')
 
   // ⚠ NOMS MIS A JOUR LE 11 SEPTEMBRE 2026 : la poussee a ete extraite dans
   // `pousserAri` pour etre EXECUTEE par un test (review : la ligne qui relie la

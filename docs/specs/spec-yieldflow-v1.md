@@ -302,6 +302,56 @@ la fenêtre est un geste de l'activation (4.6.3), pas de ce lot.
 donc une nuit hors fenêtre n'y était pas. Ce qui change, c'est qu'elle n'est
 plus comptée dans `jours_fermes` — et le **mot** à l'écran.
 
+### ✅ 4.6.1 LIVRÉ le 20 septembre 2026 — le canal interne
+
+**Aucun changement visible.** Ce sous-lot ne change rien pour l'hôte : il
+déplace le cœur d'écriture du calendrier dans un module que deux portes
+appellent, et pose la seconde porte.
+
+| ce qui est livré | où |
+|---|---|
+| **Le writer unique** : plancher, relecture, fusion, upsert, poussée ARI, plafonnement du stock, réaffirmation du stop_sell, journal, verdict — extrait de `api/calendar.js` **à l'identique, commentaires compris** | `lib/calendrier-writer.js` |
+| **La porte de l'hôte** : droits, tri des segments, garde du pilote tarifaire, configuration du bien — puis appel du writer, `origine: 'host'` | `api/calendar.js` |
+| **La porte du moteur** : le contrat « ouvre ces dates, pose ces prix » | `lib/canal-calendrier.js` |
+
+**Le contrat**, tel qu'une app le parle :
+
+```
+demanderAuCalendrier(supabase, bien, {
+  nuits: [ { date, ouvrir?: true, prix_centimes?: n } ],
+  aujourdHui?: 'YYYY-MM-DD'
+}, { appel })
+→ { ok, refus?, message?, ecrit?, ignorees: { hors_fenetre, deja_fermees, invalides } }
+```
+
+Une nuit dit ce qu'elle veut, rien d'autre. Le canal **traduit** (centimes →
+euros, `ouvrir` → `avail: 1, stop_sell: false`), le writer **exécute**. Un refus
+est une valeur rendue, jamais une exception : le cron journalise et passe au
+bien suivant.
+
+**Les gardes de la porte du moteur**, miroir de celles de la porte de l'hôte :
+- un bien **non piloté** est refusé — le calendrier n'accepte de lui que la main
+  de l'hôte ;
+- une nuit **au-delà de la fenêtre** est **ignorée et comptée**, pas refusée en
+  bloc — le cron doit pouvoir dire « 3 nuits ignorées : hors fenêtre » ;
+- une nuit **déjà fermée** en base n'est **pas rouverte** — son prix, lui, passe
+  et attend, prêt. C'est plus strict que la règle finale (« Yield ne touche
+  jamais une fermeture de l'hôte »), jamais moins : d'ici le 4.6.2, une
+  fermeture est un `stop_sell` indistinguable d'une fermeture calculée, et ce
+  canal préfère ne pas ouvrir plutôt qu'ouvrir à tort ;
+- le plancher tient **par le writer**, donc par les deux portes.
+
+**Pourquoi le canal n'a pas d'endpoint, et n'en aura jamais** : la garde du
+§2 bis refuse par HTTP tout `rate` sur un bien piloté. Une origine venue du
+corps d'une requête l'aurait contournée. Un test parcourt `api/` et vérifie
+qu'aucun endpoint ne connaît le canal, et que la seule porte HTTP du writer
+dit `origine: 'host'` en dur.
+
+**Le journal des prix retient l'origine** : `source: 'engine'` par le canal,
+`'host'` par l'endpoint — plus un `'host'` recopié. Le recensement des
+émetteurs de `/restrictions` (`tests/price-log.test.js`) déclare le writer
+comme tarifaire ; la porte HTTP, qui ne pousse plus rien elle-même, en sort.
+
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
 **A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**

@@ -45,7 +45,8 @@ test('les deux ecritures du provider chez le canal poussent', () => {
 })
 
 test('calendrier : le push delta juge le PROVIDER avant les ids', () => {
-  const src = lire('api/calendar.js')
+  // Le push delta vit dans le writer depuis le lot 4.6.1 (un writer, deux portes).
+  const src = lire('lib/calendrier-writer.js')
   assert.ok(/if \(estRelieAuCanal\(bien\) && propId && ratePlanId\)/.test(src),
     'la condition du push ARI porte la garde de provider')
 })

@@ -105,14 +105,21 @@ test('LE TEST QUI COMPTE : la garde refuse AVANT la moindre ecriture', () => {
   // Une garde posee apres l'ecriture de la configuration du bien laisserait
   // passer une ecriture — et le prix plancher a deja paye cette lecon
   // (l'upsert avait lieu avant la construction de la charge ARI).
+  //
+  // ⚠ DEPUIS LE LOT 4.6.1, LE CŒUR D'ECRITURE VIT DANS LE WRITER. La porte
+  // HTTP n'ecrit plus rien elle-meme : elle garde, puis APPELLE. L'invariant
+  // devient donc : la garde du pilote precede l'ecriture de la configuration
+  // du bien ET l'appel du writer, et rien n'ecrit entre l'entree dans `save`
+  // et le refus. Le plancher, lui, se verifie dans le writer — par les deux
+  // portes (tests/canal-calendrier.test.js l'EXECUTE).
   const src = lire('api/calendar.js')
   const iGarde = src.indexOf('PILOTE TARIFAIRE : LE CALENDRIER N\'ECRIT PAS')
   assert.ok(iGarde > 0, 'la garde existe')
   const iConfig = src.indexOf("from('properties').update(propUpdates)")
-  const iPlancher = src.indexOf('PRIX PLANCHER : ON REFUSE A LA PORTE')
-  assert.ok(iConfig > 0 && iPlancher > 0)
+  const iWriter = src.indexOf('await ecrireCalendrier({')
+  assert.ok(iConfig > 0 && iWriter > 0, 'la configuration du bien et l appel du writer existent')
   assert.ok(iGarde < iConfig, 'AVANT l ecriture de la configuration du bien')
-  assert.ok(iGarde < iPlancher, 'et avant le bloc du prix plancher')
+  assert.ok(iGarde < iWriter, 'et avant l appel du writer, qui porte tout le reste')
 
   // ⚠ ET RIEN N'ECRIT ENTRE L'ENTREE DANS `save` ET LA GARDE. Comparer deux
   // index connus ne prouve que ces deux-la ; ce qui compte est qu'AUCUNE
@@ -120,10 +127,13 @@ test('LE TEST QUI COMPTE : la garde refuse AVANT la moindre ecriture', () => {
   const iSave = src.indexOf("if (action !== 'save')")
   assert.ok(iSave > 0 && iSave < iGarde)
   const avant = src.slice(iSave, iGarde)
-  for (const ecriture of ['.upsert(', '.insert(', '.update(', '.delete(']) {
+  for (const ecriture of ['.upsert(', '.insert(', '.update(', '.delete(', 'ecrireCalendrier(']) {
     assert.ok(!avant.includes(ecriture),
       `aucun ${ecriture} entre l entree dans save et le refus`)
   }
+  // Et le plancher est bien dans le writer, la ou les deux portes passent.
+  const w = lire('lib/calendrier-writer.js')
+  assert.ok(w.indexOf('PRIX PLANCHER : ON REFUSE A LA PORTE') > 0, 'le plancher vit dans le writer')
 })
 
 test('LE TEST QUI COMPTE : la garde juge sur une colonne REELLEMENT chargee', () => {
