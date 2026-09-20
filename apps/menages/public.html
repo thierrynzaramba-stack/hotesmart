@@ -842,8 +842,9 @@ if ("serviceWorker" in navigator) {
     const o = e.target.closest('[data-offre]')
     if (o) {
       const libres = aPrendreDu(o.dataset.offre)
-      const i = Number(o.dataset.offreI) || 0
-      if (libres.length) ouvrirPriseDeMenage(o.dataset.offre, libres, Math.min(i, libres.length - 1))
+      // Introuvable (prise entre-temps) : la feuille reste, rien ne s'ouvre a
+      // la place — et on la repeint pour qu'elle dise l'etat reel.
+      if (!ouvrirPriseDeMenage(o.dataset.offre, libres, o.dataset.offreCle)) ouvrirJour(o.dataset.offre)
       return
     }
     const mi = e.target.closest('[data-mien]')
@@ -1396,13 +1397,28 @@ if ("serviceWorker" in navigator) {
   // chemin d'entree — la bulle du calendrier — prendre la premiere suffisait.
   // Depuis que la feuille du jour les liste toutes et les nomme, chacune doit
   // ouvrir la sienne.
-  function ouvrirPriseDeMenage (jour, libres, idx = 0) {
+  // ⚠ L'IDENTITE D'UNE OFFRE EST (property_id, booking_id) — le jour, l'appel
+  // le fixe deja. Pas `booking_id` seul : le cœur identifie un menage par
+  // (user_id, property_id, booking_id, departure_date), et la migration de
+  // transfert anticipe le MEME booking_id sous deux biens. Releve en review.
+  // C'est la meme cle que celle des assignations, plus haut dans ce fichier.
+  const cleOffre = m => `${String(m.property_id)}|${String(m.booking_id)}`
+
+  // ⚠ PAR IDENTITE, PAS PAR POSITION — et SANS REPLI. `idx` avec `|| libres[0]`
+  // ouvrait la voisine quand l'offre touchee avait disparu entre le rendu et le
+  // geste (prise par une autre, liste rechargee) : la feuille du jour faisait
+  // `Math.min(i, libres.length - 1)`, la liste prenait `libres[0]`. Le meme
+  // defaut par deux portes. Les trois appelants passent desormais une CLE ;
+  // introuvable, on n'ouvre rien — ouvrir une autre offre a la place est
+  // precisement ce qu'on ferme.
+  function ouvrirPriseDeMenage (jour, libres, cle) {
+    const m = libres.find(x => cleOffre(x) === cle)
+    if (!m) return false
     rendreLesCartes()
     // ⚠ ON QUITTE LA FEUILLE DU JOUR : `jourOuvert` doit retomber. Sans cela,
     // `feuilleOuverteSur` repondait encore vrai, et le rattrapage d'une bascule
     // partie juste avant effacait la feuille de PRISE sous son doigt.
     jourOuvert = null
-    const m = libres[idx] || libres[0]
     priseEnCours = m
     // ⚠ LE MODAL EST PARTAGE, et le retrait doit se remettre a zero ici comme
     // `modal-prendre` le fait dans `openModal`. Sans cela : elle ouvre SON menage
@@ -1437,6 +1453,11 @@ if ("serviceWorker" in navigator) {
     btn.disabled = false
     btn.textContent = 'Je prends ce ménage'
     document.getElementById('modal').style.display = 'flex'
+    // ⚠ `true` EXPLICITE : les appelants font `if (!ouvrirPriseDeMenage(...))`
+    // pour repeindre quand l'offre est introuvable. Un `undefined` de fin de
+    // fonction se lisait « introuvable » et rouvrait la feuille du jour
+    // PAR-DESSUS la prise — sept tests l'ont vu.
+    return true
   }
 
   // ─── LA FEUILLE DU JOUR (lot B) ─────────────────────────────────────────
@@ -1502,7 +1523,7 @@ if ("serviceWorker" in navigator) {
         // deux menages a prendre le meme jour, elle touchait le second, la
         // feuille de prise annoncait le PREMIER. Si elle validait, elle prenait
         // le mauvais logement — et le second n'etait jamais atteignable.
-        libres.map((m, i) => `<button class="jligne offre" data-offre="${echapper(j)}" data-offre-i="${i}">` +
+        libres.map(m => `<button class="jligne offre" data-offre="${echapper(j)}" data-offre-cle="${echapper(cleOffre(m))}">` +
           `<span class="jligne-bien">${echapper(m.property_name || '—')}</span>` +
           '<span style="color:var(--primary);font-weight:700;font-size:11px">À PRENDRE</span>' +
           '</button>').join('') + '</div>'
@@ -2900,7 +2921,14 @@ if ("serviceWorker" in navigator) {
       zone.innerHTML = '<div class="agenda-vide">Rien de prévu dans les 30 prochains jours.</div>'
       return
     }
-    lignes.sort((a, b) => a.jour < b.jour ? -1 : a.jour > b.jour ? 1 : (a.bien < b.bien ? -1 : 1))
+    // ⚠ UN ORDRE TOTAL — releve en review. `a.bien < b.bien ? -1 : 1` ne
+    // rendait jamais 0 : deux lignes de meme jour et meme bien (ou deux offres
+    // sans nom) se rangeaient dans un ordre arbitraire, differents d'un repeint
+    // a l'autre. Le departage final est l'identite du menage ou de l'offre.
+    const cleLigne = l => l.mien ? `m|${l.menage.id}` : `o|${cleOffre(l.offre)}`
+    lignes.sort((a, b) => a.jour < b.jour ? -1 : a.jour > b.jour ? 1
+      : a.bien < b.bien ? -1 : a.bien > b.bien ? 1
+      : cleLigne(a) < cleLigne(b) ? -1 : cleLigne(a) > cleLigne(b) ? 1 : 0)
 
     const parJour = new Map()
     lignes.forEach(l => { if (!parJour.has(l.jour)) parJour.set(l.jour, []); parJour.get(l.jour).push(l) })
@@ -2935,7 +2963,18 @@ if ("serviceWorker" in navigator) {
                // ici elle vient de `departure_date`, et les bornes de la fenetre
                // sont des comparaisons de CHAINES — une valeur qui sort de
                // l'attribut y passerait.
-               : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}">` +
+               // ⚠ ET L'IDENTIFIANT DE L'OFFRE, PAS SEULEMENT LE JOUR — le
+               // defaut trouve en review le 20 septembre 2026. Deux menages
+               // « a prendre » le meme jour : chaque ligne NOMME son bien, mais
+               // toutes portaient le seul `data-jour`, et le gestionnaire
+               // prenait `libres[0]`. Elle tapait « Bagneres », la feuille
+               // ouvrait « Colomiers », et « Je prends ce menage » lui
+               // attribuait le mauvais bien. La feuille du jour avait resolu
+               // ce cas avec un indice ; ici un indice serait FAUX — cette
+               // liste est triee par nom de bien, `aPrendreDu` rend l'ordre du
+               // serveur. L'identifiant, lui, ne depend d'aucun ordre.
+               : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}"` +
+                 ` data-offre-cle="${echapper(cleOffre(l.offre))}">` +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                  '<span class="agenda-tag offre">À PRENDRE</span></button>').join('') +
              '</div>'
@@ -3369,7 +3408,10 @@ if ("serviceWorker" in navigator) {
     // montrer la seule chose qui s'y passe.
     if (j >= AUJ()) {
       const libres = aPrendreDu(j)
-      if (!depuisFeuille && libres.length) { ouvrirPriseDeMenage(j, libres); return }
+      // Au niveau du JOUR (la case ne nomme aucun bien), c'est la premiere offre
+      // qui s'ouvre — explicitement, pas par un repli. Le choix entre plusieurs
+      // offres d'un meme jour se fait par la feuille du jour ou par la liste.
+      if (!depuisFeuille && libres.length) { ouvrirPriseDeMenage(j, libres, cleOffre(libres[0])); return }
     }
     if (!mesJours.modifiable) return
     if (j < AUJ() || congeDuJour(j)) return
@@ -3739,7 +3781,13 @@ if ("serviceWorker" in navigator) {
     const el = e.target.closest('.agenda-item.offre')
     if (el && el.dataset.jour) {
       const libres = aPrendreDu(el.dataset.jour)
-      if (libres.length) ouvrirPriseDeMenage(el.dataset.jour, libres)
+      // ⚠ CELLE QU'ELLE A TOUCHEE, PAS LA PREMIERE DU JOUR. On la retrouve par
+      // son identifiant dans ce que `aPrendreDu` rend a l'instant du clic : si
+      // l'offre a disparu entre le rendu et le geste (prise par une autre,
+      // fenetre glissee), on ne lui ouvre PAS une voisine a la place — c'est
+      // exactement le defaut qu'on ferme — on repeint, et elle voit la liste
+      // telle qu'elle est.
+      if (!ouvrirPriseDeMenage(el.dataset.jour, libres, el.dataset.offreCle)) peindreMonAgenda()
       return
     }
     // ⚠ ET SES MENAGES A ELLE OUVRENT LA FICHE — LE GESTE CENTRAL DE L'ECRAN.

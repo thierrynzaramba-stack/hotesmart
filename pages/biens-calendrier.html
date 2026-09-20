@@ -54,20 +54,41 @@
     /* Le dernier bien ne doit pas rester sous la barre d'action flottante. */
     #blocks { padding-bottom: 96px; }
     /* ─── EN-TETES COLLANTS ────────────────────────────────────────────────
-       Deux etages, dans cet ordre de haut en bas :
-         0px            la bande des mois (hauteur BANDE_H)
-         BANDE_H        la ligne des jours du bien en cours
+       Deux etages, dans cet ordre de haut en bas (depuis le 21 septembre 2026) :
+         0px            la bande : les MOIS, puis les JOURS (une seule fois)
+         BANDE_H        le NOM du bien en cours (son thead, cellules de jour vides)
        Le second se cale SOUS le premier — d'ou le `top` non nul. Avec plusieurs
-       biens, la ligne de jours de chacun prend la place de la precedente quand
-       on l'atteint : c'est le comportement attendu d'un planning multi-biens.
+       biens, le nom de chacun prend la place du precedent quand on l'atteint ;
+       les jours, eux, ne bougent pas : ils sont dans la bande, pour tous.
        ⚠ Un en-tete collant DOIT porter un fond opaque, sinon le contenu defile
        visiblement dessous. Week-end et jour courant restent prioritaires (leur
        selecteur est plus specifique, et `.today` porte `!important`). */
-    .cal-page { --bande-h: 27px; }
+    /* ⚠ LA BANDE PORTE DESORMAIS DEUX LIGNES : les mois, puis les JOURS (nom et
+       numero), UNE SEULE FOIS. Demande de Thierry, 21 septembre 2026 : chaque
+       bien repetait la ligne des jours dans son propre thead — sur trois biens,
+       trois fois les memes « lun 21 mar 22 … ». Les jours vivent sous le mois ;
+       le thead d'un bien ne garde que son nom, toujours collant.
+       74 px = 27 (mois) + 47 (jours) n'est qu'un REPLI : `renderMonthBand`
+       MESURE la bande rendue et pose la vraie valeur (un pixel d'ecart ferait
+       glisser les noms de biens sous la bande). */
+    .cal-page { --bande-h: 74px; }
     #month-band-wrap { position: sticky; top: 0; z-index: 8; background: #fff; width: max-content; min-width: 100%; }
     table.month-band { border-collapse: collapse; table-layout: fixed; }
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; background: #fff; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
+    /* La ligne des jours de la bande : la meme grammaire que l'ancien thead des
+       biens (week-end, jour courant, debut de mois), au meme endroit du regard. */
+    table.month-band tr.jours td { height: 46px; padding: 0 1px; font-weight: 400; text-align: center;
+                                    text-transform: none; border-bottom: 1px solid #e5e5e7; }
+    table.month-band tr.jours td.corner { height: 46px; }
+    table.month-band tr.jours .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
+    table.month-band tr.jours .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
+    table.month-band tr.jours td.weekend { background: #e3e9f2; }
+    table.month-band tr.jours td.weekend .day-name { color: #3a6ea5; font-weight: 700; }
+    table.month-band tr.jours td.weekend .day-num  { color: #1f4e79; font-weight: 700; }
+    table.month-band tr.jours td.weekend.we-debut { box-shadow: inset 2px 0 0 #c3d0e2; }
+    table.month-band tr.jours td.weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2; }
+    table.month-band tr.jours td.today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
     /* L'angle cumule les deux : colle a gauche ET fait partie de la bande. */
     table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 9; border-bottom: 1px solid #e5e5e7; }
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
@@ -98,8 +119,9 @@
     table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 3; border-right: 1px solid #e5e5e7; font-weight: 500; }
     /* L'angle du bien cumule les deux ancrages : gauche ET haut. */
     table.cal thead .row-label { z-index: 6; top: var(--bande-h); }
-    table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
-    table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
+    /* Les cellules de jour du thead d'un bien sont VIDES : la ligne ne porte
+       plus que le nom du bien. Elles restent pour l'alignement des colonnes. */
+    table.cal thead th.jour-vide { padding: 0; height: 0; }
     /* WEEK-ENDS — lisibles d'un coup d'œil sur un mois entier.
        L'ancien rgba(0,0,0,0.022) etait invisible au-dela de quelques colonnes :
        reperer un samedi imposait de lire les en-tetes un a un. Fond de colonne
@@ -107,8 +129,6 @@
        sous les cellules colorees, l'en-tete seul ne marque pas la colonne). */
     table.cal .weekend { background: #eef1f6; }
     table.cal thead th.weekend { background: #e3e9f2; }
-    table.cal thead th.weekend .day-name { color: #3a6ea5; font-weight: 700; }
-    table.cal thead th.weekend .day-num  { color: #1f4e79; font-weight: 700; }
     /* Liseres lateraux : ils dessinent le bloc samedi-dimanche comme une unite. */
     table.cal .weekend.we-debut { box-shadow: inset 2px 0 0 #c3d0e2; }
     table.cal .weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2; }
@@ -486,7 +506,31 @@
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
 
     function renderMonthPills(){ const w=document.getElementById('month-pills');w.innerHTML='';const seen=new Set();days.forEach((d,idx)=>{const k=d.getFullYear()+'-'+d.getMonth();if(!seen.has(k)){seen.add(k);const p=document.createElement('button');p.className='month-pill';p.textContent=monthFull[d.getMonth()];p.addEventListener('click',()=>{document.getElementById('scroll-area').scrollTo({left:idx*CELL_W,behavior:'smooth'});w.querySelectorAll('.month-pill').forEach(x=>x.classList.remove('active'));p.classList.add('active')});w.appendChild(p)}});const f=w.querySelector('.month-pill');if(f)f.classList.add('active') }
-    function renderMonthBand(){ const w=document.getElementById('month-band-wrap');let h='<table class="month-band"><tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr></table>';w.innerHTML=h }
+    function renderMonthBand(){ const w=document.getElementById('month-band-wrap');
+      // ⚠ LE `colgroup` DANS LA TABLE, APRES SA BALISE — releve en review. Ma
+      // premiere version le prefixait AVANT `<table>` : le parseur HTML ignore
+      // un colgroup hors table, la bande n'avait donc aucune largeur de colonne,
+      // et ses jours derivaient d'une colonne par trimestre — la seule chose que
+      // ce lot doit livrer. `table-layout: fixed` lit les `col`, pas les colspans.
+      // ⚠ 129 px POUR L'ANGLE, PAS 120 : `.row-label` fait 120 de largeur + 8 de
+      // padding + 1 de bordure en content-box ; un `col` fixe la colonne entiere.
+      // Un chiffre different decalerait TOUS les jours d'un cinquieme de case.
+      let h='<table class="month-band"><colgroup><col style="width:129px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup><tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr>';
+      // ⚠ LA LIGNE DES JOURS, UNE FOIS POUR TOUS LES BIENS. Meme `days`, memes
+      // classes (`classesJour`) que l'ancien thead : week-end, jour courant,
+      // debut de mois se lisent au meme endroit qu'avant, mais une seule fois.
+      // Le `colgroup` fixe la largeur de chaque colonne : avec `table-layout:
+      // fixed`, une premiere ligne faite de colspans ne dit rien des colonnes.
+      h+='<tr class="jours"><td class="corner"></td>'
+      days.forEach((d,idx)=>{const c=classesJour(idx);h+='<td class="'+c.join(' ')+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></td>'})
+      h+='</tr></table>';w.innerHTML=h
+      // ⚠ LA HAUTEUR EST MESUREE, PAS SOMMEE A LA MAIN — releve en review. Les
+      // theads des biens se calent a `top: var(--bande-h)` : 74 px en CSS n'est
+      // qu'un repli, la police et l'arrondi des bordures peuvent rendre 73 ou
+      // 75, et un pixel d'ecart fait glisser les noms de biens sous la bande.
+      // jsdom n'a pas de mise en page (offsetHeight = 0) : on ne remplace le
+      // repli que par une vraie mesure.
+      const mesure=w.offsetHeight; if(mesure>0){ const page=document.querySelector('.cal-page'); if(page) page.style.setProperty('--bande-h', mesure+'px') } }
 
     const blocksEl=document.getElementById('blocks')
     let showComplete=false
@@ -604,7 +648,16 @@
       const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
       let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
-      days.forEach((d,idx)=>{const c=classesJour(idx);if(ferme(idx))c.push('jour-ferme');const rs=ferme(idx)?raisonFermeture(bien.id,toISO(d)):null;html+='<th class="'+c.join(' ')+'"'+(rs?' title="Fermé : '+echapper(rs)+'"':'')+'><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
+      // ⚠ PLUS DE JOURS ICI : ils sont dans la bande, sous le mois, une seule
+      // fois (demande de Thierry). Les cellules restent, vides, pour aligner
+      // les colonnes ; les classes de colonne (week-end, jour courant) aussi,
+      // pour que le fond de colonne ne s'interrompe pas sous le nom du bien.
+      // ⚠ ET LA FERMETURE DU BIEN RESTE ICI : elle est PROPRE AU BIEN, la bande
+      // commune ne peut pas la porter. Sur ces cellules vides, `jour-ferme`
+      // dessine le liseré sous le nom du bien — un bien ferme ne doit pas se
+      // lire comme un bien simplement vide (test « TOUTES les lignes »).
+      // La raison d'une fermeture de l'hote (lot 4.6.2) y reste en TITRE.
+      days.forEach((d,idx)=>{const c=classesJour(idx);c.push('jour-vide');if(ferme(idx))c.push('jour-ferme');const rs=ferme(idx)?raisonFermeture(bien.id,toISO(d)):null;html+='<th class="'+c.join(' ')+'"'+(rs?' title="Fermé : '+echapper(rs)+'"':'')+'></th>'})
       html+='</tr></thead><tbody>'
       html+='<tr><td class="row-label">Reservations</td>'
       // Toutes les barres vivent dans la PREMIERE cellule et sont positionnees en

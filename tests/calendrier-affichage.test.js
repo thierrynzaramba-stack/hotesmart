@@ -83,7 +83,10 @@ test('en-tetes : deux etages collants, le second SOUS le premier', () => {
   // La bande des mois a 0, la ligne des jours a sa hauteur. Le second `top`
   // doit etre non nul, sinon les deux se superposent.
   assert.match(PAGE, /#month-band-wrap \{[^}]*position: sticky; top: 0/)
-  assert.match(PAGE, /--bande-h: 27px/)
+  // ⚠ 74 px depuis le 21 septembre 2026 : la bande porte les mois ET la ligne
+  // des jours (27 + 46 + 1 de trait). Un chiffre faux ferait glisser les theads
+  // des biens sous la bande.
+  assert.match(PAGE, /--bande-h: 74px/)
   assert.match(PAGE, /table\.cal thead th \{[^}]*position: sticky; top: var\(--bande-h\)/)
   assert.match(PAGE, /table\.cal thead \.row-label \{[^}]*top: var\(--bande-h\)/,
     'l\'angle du bien cumule les deux ancrages')
@@ -320,4 +323,38 @@ test('DESKTOP SEUL : le decalage de computeDays est optionnel', () => {
   // retrocompatible pour tout appelant existant.
   assert.match(CORE, /export function computeDays\(months, containerW, decalageJours = 0\)/)
   assert.ok(!MOBILE.includes('computeDays'))
+})
+
+test('LES JOURS DU MOIS NE SONT RENDUS QU UNE FOIS, sous le mois', () => {
+  // Demande de Thierry, 21 septembre 2026 : chaque bien repetait la ligne des
+  // jours (nom + numero) dans son propre thead — trois biens, trois fois les
+  // memes « lun 21 mar 22 … ». Les jours vivent dans la bande, sous le mois.
+  const bande = PAGE.slice(PAGE.indexOf('function renderMonthBand'), PAGE.indexOf('const blocksEl'))
+  assert.match(bande, /tr class="jours"/, 'la bande porte une ligne de jours')
+  assert.match(bande, /class="day-name"/, 'avec le nom du jour')
+  assert.match(bande, /class="day-num"/, 'et son numero')
+  assert.match(bande, /classesJour\(idx\)/, 'avec les memes classes que l ancien thead (week-end, jour courant, debut de mois)')
+  // ⚠ STRUCTUREL, PAS TEXTUEL — releve en review : `<colgroup>` present dans
+  // la source ne prouve rien s'il est ecrit AVANT `<table>` (le parseur
+  // l'ignore, et c'est ce que ma premiere version faisait). On l'exige juste
+  // apres la balise d'ouverture, avec l'angle au gabarit de `.row-label`.
+  assert.match(bande, /<table class="month-band"><colgroup><col style="width:129px">/,
+    'le colgroup est DANS la table, et l angle fait 120 + 8 + 1 comme .row-label')
+  assert.match(bande, /w\.offsetHeight/, 'la hauteur de bande est mesuree apres rendu')
+  assert.match(bande, /setProperty\('--bande-h'/, 'et posee sur la page : 74px n est qu un repli')
+  assert.ok(!/table\.cal tr\.jours td\.weekend \.day-name/.test(PAGE), 'plus de CSS mort pour des jours qui ne sont plus dans le thead')
+
+  const bien = PAGE.slice(PAGE.indexOf('function renderBienBlock'), PAGE.indexOf('const rows=visibleRows(bien)'))
+  assert.ok(!/day-name|day-num/.test(bien), 'le thead d un bien ne rend plus les jours')
+  assert.match(bien, /jour-vide/, 'ses cellules de jour restent, vides, pour l alignement')
+  assert.match(bien, /bien-head/, 'et le nom du bien y reste')
+
+  // Une seule fois dans tout le rendu : deux fabriques de jours divergeraient.
+  const rendu = PAGE.slice(PAGE.indexOf('<script type="module">'))
+  assert.strictEqual((rendu.match(/class="day-num"/g) || []).length, 1, 'day-num n est ecrit qu une fois dans le JS')
+  // Le style suit : une bande a deux lignes, des theads sans jours.
+  assert.match(PAGE, /table\.month-band tr\.jours td \{[^}]*height: 46px/)
+  assert.match(PAGE, /table\.cal thead th\.jour-vide \{[^}]*height: 0/)
+  assert.match(PAGE, /table\.month-band tr\.jours td\.today \{/, 'le jour courant se lit sur la bande')
+  assert.match(PAGE, /table\.month-band tr\.jours td\.weekend \{/, 'le week-end aussi')
 })

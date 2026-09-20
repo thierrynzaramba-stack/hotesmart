@@ -590,11 +590,13 @@ test('stop-sell : « fermé » a UNE seule definition dans toute la page', () =>
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('week-ends : fond de colonne franc ET en-tete distinct', () => {
+  // Depuis le 21 septembre 2026, l'en-tete des jours vit dans la bande
+  // (`tr.jours`), plus dans le thead de chaque bien : l'ancre suit.
   // L'ancien rgba(0,0,0,0.022) etait invisible au-dela de quelques colonnes.
   assert.ok(!/\.weekend \{ background: rgba\(0,0,0,0\.022\)/.test(PAGE), 'l\'ancien fond a disparu')
   assert.match(PAGE, /table\.cal \.weekend \{ background: #eef1f6/)
-  assert.match(PAGE, /thead th\.weekend \.day-name \{[^}]*font-weight: 700/)
-  assert.match(PAGE, /thead th\.weekend \.day-num\s+\{[^}]*font-weight: 700/)
+  assert.match(PAGE, /tr\.jours td\.weekend \.day-name \{[^}]*font-weight: 700/)
+  assert.match(PAGE, /tr\.jours td\.weekend \.day-num\s+\{[^}]*font-weight: 700/)
 })
 
 test('week-ends : le marquage est pose par UN seul helper, pour les trois lignes', () => {
