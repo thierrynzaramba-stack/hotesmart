@@ -90,15 +90,25 @@ test('LE TEST QUI COMPTE : aucun endpoint n expose le canal interne', () => {
   // La garde du §2 bis refuse par HTTP tout `rate` sur un bien pilote. Si un
   // endpoint appelait `demanderAuCalendrier` ou `ecrireCalendrier` avec une
   // origine venue du corps, la garde tomberait par sa porte de service.
+  // ⚠ LA GARDE VISE LES HANDLERS DE L'HOTE, PAS LE DOSSIER — relevee en
+  // review. `api/cron.js` est sous api/ mais n'est pas une porte de l'hote :
+  // il est garde par CRON_SECRET, et c'est LUI qui appellera le canal au
+  // 4.6.3. L'interdire ici aurait force un module intermediaire pour
+  // contourner le motif. Ce qui est interdit : qu'un handler lise l'ORIGINE
+  // dans la requete, et qu'un handler autre que la porte du calendrier
+  // appelle le writer.
+  const PEUT_APPELER_LE_CANAL = new Set(['cron.js'])
   for (const f of fs.readdirSync(path.join(__dirname, '..', 'api'))) {
     if (!f.endsWith('.js')) continue
     const src = lire(`api/${f}`)
-    assert.ok(!/canal-calendrier/.test(src), `${f} n a pas a connaitre le canal interne`)
+    if (/canal-calendrier/.test(src)) {
+      assert.ok(PEUT_APPELER_LE_CANAL.has(f), `${f} n a pas a connaitre le canal interne`)
+    }
     if (/calendrier-writer/.test(src)) {
       assert.equal(f, 'calendar.js', `${f} : seule la porte HTTP du calendrier appelle le writer`)
       assert.ok(/origine: 'host'/.test(src), 'et elle dit qui elle est')
-      assert.ok(!/origine: (req|body|String\(|\()/.test(src), 'l origine ne vient JAMAIS de la requete')
     }
+    assert.ok(!/origine:\s*\(?\s*(req|body|query)\b/.test(src), `${f} : l origine ne vient JAMAIS de la requete`)
   }
   const canal = lire('lib/canal-calendrier.js')
   assert.ok(/ORIGINE = 'engine'/.test(canal))
@@ -227,4 +237,85 @@ test('le writer est recense comme emetteur TARIFAIRE, et la porte HTTP ne l est 
   const t = lire('tests/price-log.test.js')
   assert.ok(/'lib\/calendrier-writer\.js':\s*'tarifaire'/.test(t), 'le writer journalise ses poussees')
   assert.ok(!/'api\/calendar\.js':\s*'tarifaire'/.test(t), 'la porte ne POSTe plus /restrictions elle-meme')
+})
+
+// ─── 5. Ce que la review a trouve ───────────────────────────────────────────
+test('LE TEST QUI COMPTE : la relecture du canal est PAGINEE — une nuit fermee au-dela de 1000 ne se rouvre pas', async () => {
+  // PostgREST tronque a 1000 lignes SANS erreur. Une demande de 1200 nuits dont
+  // la 1100e est fermee : sans pagination, elle n'entrait pas dans `fermees`
+  // et `ouvrir` la rouvrait — la regle exacte que ce canal existe pour tenir.
+  const jours = []
+  const d = new Date('2026-09-21T00:00:00Z')
+  for (let i = 0; i < 1200; i++) { jours.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1) }
+  const fermeeLoin = jours[1100]
+  const bien = { ...BIEN, pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 1300 }
+  const sb = fausseBase([ligne(fermeeLoin, { stop_sell: true, avail: 0 })])
+  // Le faux client note la taille de chaque `.in()` : la vraie base refuse
+  // au-dela, ce faux ne doit pas etre plus tolerant qu'elle.
+  const tailles = []
+  const from = sb.from.bind(sb)
+  sb.from = (t) => { const q = from(t); const inn = q.in; q.in = (c, v) => { if (c === 'date') tailles.push(v.length); return inn(c, v) }; return q }
+  const r = await demanderAuCalendrier(sb, bien, { aujourdHui: AUJ,
+    nuits: jours.map(j => ({ date: j, ouvrir: true })) }, { appel: fauxAppel() })
+  assert.equal(r.ok, true)
+  assert.ok(tailles.length >= 3, `relecture paginee : ${tailles.length} page(s)`)
+  assert.ok(tailles.every(n => n <= 500), `aucune page de plus de 500 : ${Math.max(...tailles)}`)
+  assert.deepEqual(r.ignorees.deja_fermees, [fermeeLoin], 'la nuit fermee loin dans la liste est vue, donc pas rouverte')
+})
+
+test('sans client canal, un bien RELIE au canal est refuse AVANT toute ecriture', async () => {
+  // Sinon : upsert en base, puis « appel is not a function » dans le try du
+  // writer — le cœur porte des prix jamais partis, et un incident fondateur
+  // part par bien traite.
+  const sb = fausseBase([])
+  const r = await demanderAuCalendrier(sb, BIEN, { aujourdHui: AUJ, nuits: [{ date: '2026-09-25', prix_centimes: 15000 }] })
+  assert.equal(r.ok, false)
+  assert.equal(r.refus, REFUS.DEMANDE_INVALIDE)
+  assert.ok(/appel/.test(r.message))
+  assert.equal(sb.ecritures.length, 0, 'RIEN n est ecrit')
+})
+
+test('un bien charge SANS user_id est refuse : le writer ecrirait sous un compte vide', async () => {
+  // Le defaut du 12 septembre : `compte = undefined` traverse tout le writer,
+  // le journal n'est pas ecrit (perte definitive), l'alerte part sans compte.
+  const { user_id, ...sansCompte } = BIEN
+  const sb = fausseBase([])
+  const r = await demanderAuCalendrier(sb, sansCompte, { aujourdHui: AUJ, nuits: [{ date: '2026-09-25', prix_centimes: 15000 }] }, { appel: fauxAppel() })
+  assert.equal(r.refus, REFUS.DEMANDE_INVALIDE)
+  assert.ok(/user_id/.test(r.message))
+  assert.equal(sb.ecritures.length, 0)
+})
+
+test('une nuit PASSEE est ignoree et comptee, pas poussee', async () => {
+  // Une nuit d'hier poussee : Channex la refuse, le verdict crie « panne », un
+  // incident part pour une nuit qui ne peut plus se vendre.
+  const sb = fausseBase([])
+  const r = await demanderAuCalendrier(sb, BIEN, { aujourdHui: AUJ, nuits: [
+    { date: '2026-09-19', ouvrir: true, prix_centimes: 15000 },
+    { date: '2026-09-25', ouvrir: true, prix_centimes: 15000 }
+  ] }, { appel: fauxAppel() })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.ignorees.passees, ['2026-09-19'])
+  const up = sb.ecritures.find(e => e.table === 'calendar_inventory')
+  assert.deepEqual(up.rows.map(x => x.date), ['2026-09-25'])
+})
+
+test('ouvrir suit le stock du bien, pas un « 1 » en dur', async () => {
+  const sb = fausseBase([])
+  await demanderAuCalendrier(sb, { ...BIEN, inventory_units: 3 }, { aujourdHui: AUJ,
+    nuits: [{ date: '2026-09-25', ouvrir: true }] }, { appel: fauxAppel() })
+  const up = sb.ecritures.find(e => e.table === 'calendar_inventory')
+  assert.equal(up.rows[0].avail, 3, 'les trois unites : le plafond du writer ne peut que retirer, jamais ajouter')
+})
+
+test('un prix invalide n annule PAS l ouverture de la meme nuit', async () => {
+  const sb = fausseBase([])
+  const r = await demanderAuCalendrier(sb, BIEN, { aujourdHui: AUJ,
+    nuits: [{ date: '2026-09-25', ouvrir: true, prix_centimes: 0 }] }, { appel: fauxAppel() })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.ignorees.invalides, ['2026-09-25'], 'le prix est compte invalide')
+  const up = sb.ecritures.find(e => e.table === 'calendar_inventory')
+  assert.ok(up, 'mais l ouverture, valide et independante, est ecrite')
+  assert.equal(up.rows[0].stop_sell, false)
+  assert.equal(up.rows[0].rate, undefined, 'sans le prix')
 })

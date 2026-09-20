@@ -8,7 +8,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
-const { ecrireCalendrier, expandDays, pousserAri, verdictPoussee, signalerPousseeRefusee } = require('../lib/calendrier-writer')
+const { ecrireCalendrier, expandDays } = require('../lib/calendrier-writer')
 const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
 
 // ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
@@ -624,10 +624,8 @@ module.exports = async function handler(req, res) {
   return res.status(405).json({ error: 'Methode non autorisee' })
 }
 
-// ⚠ EXPORT SECONDAIRE, SANS TOUCHER AU DEFAUT : `module.exports` reste le
-// handler. Ces trois fonctions vivent dans lib/calendrier-writer.js depuis le
-// lot 4.6.1 ; elles restent exposees ici parce que des tests les tiennent par
-// cette porte.
-module.exports.pousserAri = pousserAri
-module.exports.verdictPoussee = verdictPoussee
-module.exports.signalerPousseeRefusee = signalerPousseeRefusee
+// `pousserAri`, `verdictPoussee` et `signalerPousseeRefusee` vivent dans
+// lib/calendrier-writer.js depuis le lot 4.6.1, et c'est la que les tests les
+// tiennent. Aucun re-export ici : deux chemins d'import pour la meme fonction,
+// dont l'un passe par un handler qui instancie un client Supabase au
+// chargement, feraient croire qu'elle est encore definie dans cette porte.

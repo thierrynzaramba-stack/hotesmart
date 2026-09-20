@@ -29,7 +29,8 @@ process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'test-key'
 const test = require('node:test')
 const assert = require('node:assert')
 
-const { verdictPoussee } = require('../api/calendar.js')
+// Les trois fonctions tenues ici vivent dans le writer depuis le lot 4.6.1.
+const { verdictPoussee } = require('../lib/calendrier-writer.js')
 
 const OK = { tente: true, ok: true, status: 200 }
 const KO = (status) => ({ tente: true, ok: false, status })
@@ -91,7 +92,7 @@ test('la consequence distingue les trois situations', () => {
 // qu'un `for (…of…)` remplace par `[0]` laissait 8 tests verts et restaurait
 // l'incident a l'identique. On tient donc aussi la reaction.
 
-const { signalerPousseeRefusee } = require('../api/calendar.js')
+const { signalerPousseeRefusee } = require('../lib/calendrier-writer.js')
 
 function double () {
   const appels = []
@@ -215,7 +216,7 @@ test("l'endpoint rend le drapeau push_failed", () => {
 // resultat que dans le `else` du succes — : 13 tests verts, silence complet
 // restaure. On execute donc `pousserAri` avec un double de `appel`.
 
-const { pousserAri } = require('../api/calendar.js')
+const { pousserAri } = require('../lib/calendrier-writer.js')
 
 const AV = [{ date: '2026-09-15' }]
 const RE = [{ date: '2026-09-15' }]
