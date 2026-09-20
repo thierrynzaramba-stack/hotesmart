@@ -23,7 +23,11 @@ const assert = require('node:assert')
 const path = require('node:path')
 const Module = require('node:module')
 
-const PROD = 'compte-prod', AUTRE = 'compte-autre', MEMBRE = 'membre'
+// ⚠ LE COMPTE DE PRODUCTION EST UN UUID, comme `auth.uid()` : depuis le lot
+// 4.6.2, `lib/fermetures.js` refuse tout compte qui n'en soit pas un (la
+// colonne est uuid, un texte quelconque serait une erreur Postgres, pas un
+// vide). Le harnais impose ce que la base impose.
+const PROD = 'cccccccc-0000-4000-8000-00000000c0de', AUTRE = 'compte-autre', MEMBRE = 'membre'
 
 const BIEN_A = { id: '58001ed1-e194-498a-94b4-606eece8f33d', user_id: PROD, name: 'La bulle',
                  provider: 'beds24', provider_property_id: '209413',
@@ -57,7 +61,7 @@ const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/cale
 // `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
                      snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null,
-                     erreurUpdateProperties = null } = {}) {
+                     erreurUpdateProperties = null, fermetures = [] } = {}) {
   const etat = { ecritures: [], filtresIn: [], appels: [] }
 
   const client = {
@@ -77,7 +81,22 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         // pagination a l'infini sur la meme page. Une seule page suffit ici — le
         // harnais ne sert pas a eprouver la pagination elle-meme.
         range () { return Promise.resolve({ data: q._data || [], error: null }) },
-        insert (r) { etat.ecritures.push({ table: nom, row: r }); return { select: () => ({ single: async () => ({ data: { id: 'q1' }, error: null }) }) } },
+        insert (r) { etat.ecritures.push({ table: nom, row: r }); return { select: () => ({ single: async () => ({ data: { id: 'q1', ...r }, error: null }) }) } },
+        delete () {
+          const d = { _f: {} }
+          d.eq = (c, v) => { d._f[c] = v; return d }
+          d.select = () => d
+          d.then = (ok, ko) => {
+            etat.ecritures.push({ table: nom, op: 'delete', f: { ...d._f } })
+            if (nom === 'fermetures') {
+              const visees = fermetures.filter(f => Object.entries(d._f).every(([c, v]) => String(f[c]) === String(v)))
+              for (const f of visees) fermetures.splice(fermetures.indexOf(f), 1)
+              return Promise.resolve({ data: visees, error: null }).then(ok, ko)
+            }
+            return Promise.resolve({ data: [], error: null }).then(ok, ko)
+          }
+          return d
+        },
         upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
         update (r) {
           etat.ecritures.push({ table: nom, row: r })
@@ -160,6 +179,17 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         }
         if (nom === 'channel_sync_queue') return { data: tableau ? [] : null, error: null }
         if (nom === 'calendar_inventory') return { data: tableau ? [] : null, error: null }
+        // Les fermetures de l'hote (lot 4.6.2) : croisement de periode et
+        // filtres eq, comme la vraie table. `delete` les retire de la liste
+        // servie, pour que la scission se lise dans `etat.ecritures` ET dans ce
+        // que la lecture suivante rend.
+        if (nom === 'fermetures') {
+          const rows = fermetures.filter(f =>
+            (q._f.property_id == null || f.property_id === q._f.property_id) &&
+            (q._f.id == null || f.id === q._f.id) &&
+            (q._f.user_id == null || f.user_id === q._f.user_id))
+          return { data: tableau ? rows : (rows[0] || null), error: null }
+        }
         return { data: tableau ? [] : null, error: null }
       }
       return q
@@ -1069,4 +1099,123 @@ test('import-messages : bien d\'un AUTRE compte -> 403', async () => {
   const res = reponse()
   await require('../api/channel-import-messages')(req({ method: 'POST', body: { property_id: BIEN_TIERS.id } }), res)
   assert.strictEqual(res.code, 403)
+})
+
+// ─── calendar : LES FERMETURES DE L'HOTE (lot 4.6.2) ─────────────────────────
+// Spec : docs/specs/spec-yieldflow-v1.md §2 ter §4-§5, §7-A, §7-B.
+// Une fermeture ECRIT stop_sell par le writer du calendrier ; elle n'est pas une
+// seconde source de verite. Une reouverture la SCINDE (arbitrage B).
+
+const FERMETURE = () => ({ id: 'f0f0f0f0-0000-4000-8000-000000000001', user_id: PROD,
+  property_id: BIEN_CHANNEX.id, date_debut: '2026-10-12', date_fin: '2026-10-20', raison: 'travaux' })
+
+test('fermetures GET : le calendrier RECOIT les fermetures par bien, avec leur raison', async () => {
+  preparer({ user: PROD, fermetures: [FERMETURE()] })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: { property_ids: BIEN_CHANNEX.id, start: '2026-10-01', end: '2026-10-31' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(res.body.fermetures, 'la reponse porte `fermetures`')
+  assert.strictEqual(res.body.fermetures[BIEN_CHANNEX.id].length, 1)
+  assert.strictEqual(res.body.fermetures[BIEN_CHANNEX.id][0].raison, 'travaux')
+})
+
+test('LE TEST QUI COMPTE : `fermer` pose la fermeture ET memorise stop_sell sur chaque nuit — par le writer', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'fermer', property_id: BIEN_CHANNEX.id, debut: '2026-10-12', fin: '2026-10-14', raison: '  travaux  '
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  assert.strictEqual(res.body.fermeture.raison, 'travaux')
+  const ins = etat.ecritures.find(e => e.table === 'fermetures' && e.row)
+  assert.ok(ins, 'la fermeture est inseree')
+  assert.strictEqual(ins.row.user_id, PROD); assert.strictEqual(ins.row.property_id, BIEN_CHANNEX.id)
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  assert.deepStrictEqual(lignes.map(l => l.date).sort(), ['2026-10-12', '2026-10-13', '2026-10-14'], 'les trois nuits, bornes incluses')
+  assert.ok(lignes.every(l => l.stop_sell === true), 'l intention est memorisee')
+  assert.ok(lignes.every(l => l.rate == null), 'AUCUN tarif : fermer n est pas tarifer')
+})
+
+test('fermer : sans raison -> 400, AUCUNE ecriture', async () => {
+  const etat = preparer({ user: PROD })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'fermer', property_id: BIEN_CHANNEX.id, debut: '2026-10-12', fin: '2026-10-14', raison: '   '
+  } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(res.body.code, 'raison_manquante')
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('fermer : membre reservations=read -> 403, AUCUNE ecriture', async () => {
+  const etat = preparer({ profil: profilActif(), permissions: perms({ reservations: 'read' }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'fermer', property_id: BIEN_A.id, debut: '2026-10-12', fin: '2026-10-14', raison: 'x'
+  } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('fermer : bien HORS perimetre -> 403, AUCUNE ecriture', async () => {
+  const etat = preparer({ profil: profilActif(),
+    permissions: perms({ reservations: 'write', property_scope: 'selected',
+                         property_ids: [BIEN_B.id], property_refs: [BIEN_B.provider_property_id] }) })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'fermer', property_id: BIEN_A.id, debut: '2026-10-12', fin: '2026-10-14', raison: 'x'
+  } }), res)
+  assert.strictEqual(res.code, 403)
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('rouvrir_fermeture : retire l objet ET rouvre toute la periode, avail releve', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'rouvrir_fermeture', property_id: BIEN_CHANNEX.id, id: FERMETURE().id
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const del = etat.ecritures.find(e => e.table === 'fermetures' && e.op === 'delete')
+  assert.ok(del, 'la fermeture est retiree')
+  assert.strictEqual(del.f.user_id, PROD, 'le compte est dans le WHERE'); assert.strictEqual(del.f.property_id, BIEN_CHANNEX.id, 'et le bien')
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  assert.strictEqual(lignes.length, 9, 'du 12 au 20 : neuf nuits')
+  assert.ok(lignes.every(l => l.stop_sell === false && Number(l.avail) >= 1), 'rouvert ET vendable — sans avail la nuit resterait invendable')
+})
+
+test('rouvrir_fermeture : une fermeture inconnue -> 404, AUCUNE ecriture du calendrier', async () => {
+  const etat = preparer({ user: PROD, fermetures: [] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'rouvrir_fermeture', property_id: BIEN_CHANNEX.id, id: FERMETURE().id
+  } }), res)
+  assert.strictEqual(res.code, 404)
+  assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'calendar_inventory'), [])
+})
+
+test('LE TEST QUI COMPTE : rouvrir UNE nuit dans une fermeture la SCINDE — le dernier geste gagne', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: false, avail: 1 }]
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const del = etat.ecritures.filter(e => e.table === 'fermetures' && e.op === 'delete')
+  const ins = etat.ecritures.filter(e => e.table === 'fermetures' && e.row)
+  assert.strictEqual(del.length, 1, 'l ancienne fermeture est retiree')
+  assert.deepStrictEqual(ins.map(i => [i.row.date_debut, i.row.date_fin]), [['2026-10-12', '2026-10-14'], ['2026-10-16', '2026-10-20']])
+  assert.ok(ins.every(i => i.row.raison === 'travaux' && i.row.user_id === PROD), 'la raison suit les morceaux, sous le meme compte')
+  const iDel = etat.ecritures.indexOf(del[0]), iInv = etat.ecritures.findIndex(e => e.table === 'calendar_inventory')
+  assert.ok(iDel < iInv, 'la scission precede l ecriture du calendrier : si elle echoue, rien n est ecrit')
+})
+
+test('fermer une nuit deja dans une fermeture ne scinde RIEN', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: true }]
+  } }), reponse())
+  assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'fermetures'), [], 'aucune ecriture de fermetures')
 })

@@ -336,9 +336,13 @@ bien suivant.
   bloc — le cron doit pouvoir dire « 3 nuits ignorées : hors fenêtre » ;
 - une nuit **déjà fermée** en base n'est **pas rouverte** — son prix, lui, passe
   et attend, prêt. C'est plus strict que la règle finale (« Yield ne touche
-  jamais une fermeture de l'hôte »), jamais moins : d'ici le 4.6.2, une
-  fermeture est un `stop_sell` indistinguable d'une fermeture calculée, et ce
-  canal préfère ne pas ouvrir plutôt qu'ouvrir à tort ;
+  jamais une fermeture de l'hôte »), jamais moins : jusqu'au 4.6.2, une
+  fermeture était un `stop_sell` indistinguable d'une fermeture calculée, et ce
+  canal préfère ne pas ouvrir plutôt qu'ouvrir à tort. **Depuis le 4.6.2**, une
+  nuit couverte par une fermeture de l'hôte est comptée à part
+  (`fermees_par_l_hote`) et **rien** n'y est écrit, pas même un prix ; la nuit
+  fermée sans fermeture reste `deja_fermees`, et c'est le 4.6.3 qui décidera
+  d'elle ;
 - le plancher tient **par le writer**, donc par les deux portes.
 
 **Pourquoi le canal n'a pas d'endpoint, et n'en aura jamais** : la garde du
@@ -351,6 +355,39 @@ dit `origine: 'host'` en dur.
 `'host'` par l'endpoint — plus un `'host'` recopié. Le recensement des
 émetteurs de `/restrictions` (`tests/price-log.test.js`) déclare le writer
 comme tarifaire ; la porte HTTP, qui ne pousse plus rien elle-même, en sort.
+
+### ✅ 4.6.2 LIVRÉ le 21 septembre 2026 — les fermetures de l'hôte
+
+**Ce qui est livré.** La table `fermetures` (migration
+`migrations/2026-09-21-fermetures.sql`, à coller ; RLS lecture seule sur son
+compte, l'écriture passe par l'endpoint), son seul writer `lib/fermetures.js`,
+deux actions de `api/calendar.js` — `fermer` (crée l'objet **puis** écrit
+`stop_sell = true` par `ecrireCalendrier` ; si le writer refuse, l'objet est
+retiré) et `rouvrir_fermeture` (retire l'objet puis rouvre **toute** la période,
+`avail` relevé) —, la scission dans `save` (arbitrage B : une réouverture qui
+touche une fermeture la coupe autour, **avant** le writer, même raison sur les
+morceaux), l'exclusion des statistiques par `joursExclus` (exceptions ∪
+fermetures, une lecture en échec **lève**), le canal interne qui compte
+`fermees_par_l_hote` et n'y écrit rien, l'écran (liste sous la grille avec la
+raison et « Retirer », raison en titre sur le jour, et sur un bien piloté
+« Fermer à la vente » demande la raison et pose une fermeture), et
+`scripts/verifier-fermetures.js` (chaque fermeture est portée par la mémoire
+d'intention, sinon échec).
+
+**Ce qui est assumé.**
+- Sur un bien **calendrier**, « Fermer à la vente » reste un `stop_sell` nu :
+  aucun moteur n'y rouvrira jamais rien, la fermeture n'y apporte que la raison.
+  On pourra l'offrir plus tard ; on n'a pas voulu ajouter une question à un
+  geste qui marche.
+- **Retirer rouvre toute la période**, y compris une nuit que l'hôte avait
+  fermée à la main avant de poser la fermeture par-dessus. Le calendrier le dit
+  au clic. S'il veut garder une nuit fermée, il la referme.
+- Le **calendrier mobile** ne connaît pas encore les fermetures : sa rubrique
+  « Disponibilité → Fermé » écrit `avail = 0` + `stop_sell = true` sans objet.
+  Sur un bien piloté, cette nuit sera donc « fermée calculée » aux yeux du
+  4.6.3. Dette notée, à traiter avec la refonte mobile.
+- La raison est demandée par `window.prompt` : suffisant pour la recette, à
+  remplacer par un formulaire en ligne si la recette le demande.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 

@@ -115,8 +115,14 @@ test('LE TEST QUI COMPTE : la garde refuse AVANT la moindre ecriture', () => {
   const src = lire('api/calendar.js')
   const iGarde = src.indexOf('PILOTE TARIFAIRE : LE CALENDRIER N\'ECRIT PAS')
   assert.ok(iGarde > 0, 'la garde existe')
-  const iConfig = src.indexOf("from('properties').update(propUpdates)")
-  const iWriter = src.indexOf('await ecrireCalendrier({')
+  // ⚠ DEPUIS LE LOT 4.6.2, LA PORTE APPELLE LE WRITER AUSSI POUR `fermer` ET
+  // `rouvrir_fermeture`, AVANT `save` — sans tarif, donc hors du champ de la
+  // garde. L'appel qui compte est celui de `save` : on cherche a partir de son
+  // entree, pas depuis le debut du fichier.
+  const iSave = src.indexOf("if (action !== 'save')")
+  assert.ok(iSave > 0, 'l entree dans save existe')
+  const iConfig = src.indexOf("from('properties').update(propUpdates)", iSave)
+  const iWriter = src.indexOf('await ecrireCalendrier({', iSave)
   assert.ok(iConfig > 0 && iWriter > 0, 'la configuration du bien et l appel du writer existent')
   assert.ok(iGarde < iConfig, 'AVANT l ecriture de la configuration du bien')
   assert.ok(iGarde < iWriter, 'et avant l appel du writer, qui porte tout le reste')
@@ -124,8 +130,7 @@ test('LE TEST QUI COMPTE : la garde refuse AVANT la moindre ecriture', () => {
   // ⚠ ET RIEN N'ECRIT ENTRE L'ENTREE DANS `save` ET LA GARDE. Comparer deux
   // index connus ne prouve que ces deux-la ; ce qui compte est qu'AUCUNE
   // ecriture ne se glisse avant le refus. On lit donc la tranche entiere.
-  const iSave = src.indexOf("if (action !== 'save')")
-  assert.ok(iSave > 0 && iSave < iGarde)
+  assert.ok(iSave < iGarde)
   const avant = src.slice(iSave, iGarde)
   for (const ecriture of ['.upsert(', '.insert(', '.update(', '.delete(', 'ecrireCalendrier(']) {
     assert.ok(!avant.includes(ecriture),

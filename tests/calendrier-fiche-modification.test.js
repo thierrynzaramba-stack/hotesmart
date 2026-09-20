@@ -623,3 +623,49 @@ test('DESKTOP SEUL : CELL_W n\'est consomme que par le desktop', () => {
   // planning ne doit pas pouvoir deplacer la grille mensuelle.
   assert.ok(!MOBILE.includes('CELL_W'))
 })
+
+// ─── Lot 4.6.2 : les fermetures de l'hote dans l'ecran ──────────────────────
+test('fermetures : sur un bien pilote par YieldFlow, FERMER pose une fermeture avec sa raison', () => {
+  // Un simple stop_sell y serait indistinguable d'une fermeture CALCULEE, que
+  // le moteur pourrait rouvrir. La fermeture est la frontiere.
+  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
+  assert.match(bloc, /if\(fermer && estPiloteYield\(bienId\)\)/, 'la bifurcation ne vaut que pour FERMER un bien pilote')
+  assert.ok(bloc.includes('window.prompt('), 'la raison est demandee')
+  assert.ok(bloc.includes('poserFermeture(bienId, idxs, raison.trim())'))
+  const poser = PAGE.slice(PAGE.indexOf('async function poserFermeture'), PAGE.indexOf('async function retirerFermeture'))
+  assert.ok(poser.includes('api.calendar.fermer('), 'un seul chemin serveur : l action `fermer`')
+  assert.ok(!poser.includes('api.calendar.save('), 'jamais un stop_sell nu sur un bien pilote')
+})
+
+test('fermetures : sur un bien calendrier, le chemin reste celui d avant (aucune raison demandee)', () => {
+  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
+  const apres = bloc.slice(bloc.indexOf('poserFermeture(bienId, idxs, raison.trim())'))
+  assert.ok(apres.includes('api.calendar.save'), 'le stop_sell nu existe toujours')
+  assert.match(apres, /stop_sell: fermer/)
+})
+
+test('fermetures : l ecran les AFFICHE avec leur raison, et ne les lit JAMAIS pour dire si une nuit est vendable', () => {
+  assert.ok(PAGE.includes('class="fermetures-liste"'))
+  assert.ok(PAGE.includes('fermByBien[id]=(fermetures&&fermetures[id])||[]'), 'rangees a la relecture, par bien')
+  // La vendabilite vient de `states` (calendar_inventory) : `jourFerme` ne
+  // consulte pas les fermetures.
+  const jf = PAGE.slice(PAGE.indexOf('function jourFerme'), PAGE.indexOf('function jourFerme') + 400)
+  assert.ok(!jf.includes('fermByBien'), 'jourFerme ne lit pas les fermetures')
+  assert.ok(!PAGE.includes('raisonFermeture(') || PAGE.includes("title=\"Fermé : '"), 'la raison est un TITRE sur le jour, pas une decision')
+})
+
+test('fermetures : retirer est garde, previent que TOUTE la periode rouvre, et passe par l action dediee', () => {
+  const bloc = PAGE.slice(PAGE.indexOf('async function retirerFermeture'), PAGE.indexOf('async function basculerStopSell'))
+  assert.ok(bloc.includes("peutEcrire('reservations')") && bloc.includes('LECTURE_SEULE'))
+  assert.ok(bloc.includes('window.confirm(') && bloc.includes('TOUTE la période'))
+  assert.ok(bloc.includes('api.calendar.rouvrirFermeture(bienId, id)'))
+  // Le bouton n'est rendu que si l'ecriture est possible.
+  assert.ok(PAGE.includes("const peutRetirer = peutEcrire('reservations') && !LECTURE_SEULE"))
+})
+
+test('fermetures : la raison est ECHAPPEE avant d entrer dans le HTML', () => {
+  // Texte libre de l'hote, rendu par innerHTML : sans echappement, une raison
+  // « <img onerror> » executerait dans la page de tous les membres du compte.
+  assert.ok(PAGE.includes('echapper(f.raison)'))
+  assert.ok(PAGE.includes("title=\"Fermé : '+echapper(rs)"))
+})

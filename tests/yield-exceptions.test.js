@@ -19,10 +19,12 @@ const {
 // faux le jour ou ils passent — c'est la leçon gravee au KB des tests.
 const AUJ = '2026-09-12'
 
-const BIEN = 'b-1'
-const HOTE = 'u-1'
+// ⚠ DES UUID : `joursExclus` lit aussi la table `fermetures` (lot 4.6.2), dont
+// le lecteur refuse tout identifiant qui ne soit pas un uuid — comme la base.
+const BIEN = 'b1b1b1b1-0000-4000-8000-000000000001'
+const HOTE = 'u1u1u1u1-0000-4000-8000-000000000001'.replace(/u/g, 'a')
 
-function fausseBase (lignes = []) {
+function fausseBase (lignes = [], { fermetures = [] } = {}) {
   const table = [...lignes]
   let seq = 0
   const ecritures = []
@@ -32,6 +34,20 @@ function fausseBase (lignes = []) {
     // avoir insere serait passe : la garde n'aurait servi a rien.
     ecritures,
     from (t) {
+      // Les fermetures de l'hote (lot 4.6.2) : `joursExclus` les lit EN PLUS
+      // des exceptions. Le faux client les sert, avec le meme croisement de
+      // periode que la vraie table, et n'accepte rien d'autre.
+      if (t === 'fermetures') {
+        const g = { _lte: null, _gte: null, _eq: [] }
+        g.select = () => g; g.order = () => g
+        g.eq = (c, v) => { g._eq.push([c, v]); return g }
+        g.lte = (c, v) => { g._lte = [c, v]; return g }
+        g.gte = (c, v) => { g._gte = [c, v]; return g }
+        g.then = (res) => Promise.resolve({ data: fermetures.filter(l =>
+          g._eq.every(([c, v]) => l[c] === v) &&
+          (!g._lte || l[g._lte[0]] <= g._lte[1]) && (!g._gte || l[g._gte[0]] >= g._gte[1])), error: null }).then(res)
+        return g
+      }
       assert.equal(t, 'yield_exceptions', 'le writer ne touche que sa table')
       const f = { eq: [], lte: null, gte: null }
       let action = 'select'
@@ -401,4 +417,24 @@ test('LE TEST QUI COMPTE : un groupe d evenements ne fige pas ses zones', () => 
   assert.ok(/JSON\.stringify/.test(src.slice(src.indexOf('const memesZones'),
     src.indexOf('const memesZones') + 200)),
   'deux tableaux egaux en contenu doivent etre juges egaux')
+})
+
+// ─── Lot 4.6.2 : les fermetures de l'hote sortent AUSSI de la reference ────
+test('joursExclus : une fermeture de l hote exclut ses nuits comme une exception, sans recopie', async () => {
+  // Une fermeture passee (travaux en juin) n'est PAS recopiee dans
+  // yield_exceptions : le pont est dans la lecture. Sans lui, ces nuits
+  // fermees gonfleraient le denominateur du taux d'occupation.
+  const sb = fausseBase(
+    [{ id: 'e1', property_id: BIEN, date_debut: '2026-06-01', date_fin: '2026-06-03', motif: 'travaux' }],
+    { fermetures: [{ id: 'f1', property_id: BIEN, date_debut: '2026-06-10', date_fin: '2026-06-30', raison: 'perso' }] })
+  const exclus = await joursExclus(sb, BIEN, '2026-06-01', '2026-06-12')
+  assert.deepEqual([...exclus].sort(), ['2026-06-01', '2026-06-02', '2026-06-03', '2026-06-10', '2026-06-11', '2026-06-12'],
+    'l union des deux tables, bornee a la fenetre : la fermeture qui deborde n elargit pas')
+})
+
+test('joursExclus : une lecture de fermetures en echec LEVE — un vide par erreur gonflerait le denominateur', async () => {
+  const sb = fausseBase([])
+  const from = sb.from.bind(sb)
+  sb.from = (t) => { if (t === 'fermetures') return { select: () => ({ eq: () => ({ lte: () => ({ gte: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'timeout' } }) }) }) }) }) }; return from(t) }
+  await assert.rejects(() => joursExclus(sb, BIEN, '2026-06-01', '2026-06-12'), /fermetures.*timeout/)
 })

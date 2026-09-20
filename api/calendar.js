@@ -9,6 +9,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
 const { ecrireCalendrier, expandDays } = require('../lib/calendrier-writer')
+const { fermeturesDuBien, creerFermeture, supprimerFermeture, scinderAutour } = require('../lib/fermetures')
 const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
 
 // ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
@@ -395,7 +396,17 @@ module.exports = async function handler(req, res) {
 
     // `user_id` sert au controle de perimetre, pas au front : il ne ressort pas.
     const proprietesPubliques = owned.map(({ user_id, ...reste }) => reste)
-    return res.status(200).json({ properties: proprietesPubliques, inventory, bookings })
+    // ⚠ LES FERMETURES DE L'HOTE (lot 4.6.2), par bien, sur la fenetre. L'ecran
+    // les affiche avec leur raison et permet de les retirer ; il ne les lit
+    // JAMAIS pour decider si une nuit est vendable — ca, c'est `inventory`.
+    // Une lecture en echec ne fait pas tomber le calendrier : on rend un objet
+    // vide et on le dit, l'inventaire reste la verite.
+    const fermetures = {}
+    for (const id of ownedIds) {
+      try { fermetures[id] = await fermeturesDuBien(supabase, id, start, end) }
+      catch (e) { console.error('[calendar] fermetures illisibles', id, e.message); fermetures[id] = [] }
+    }
+    return res.status(200).json({ properties: proprietesPubliques, inventory, bookings, fermetures })
   }
 
   // ===== POST : sauvegarde (Supabase puis push channel) =====
@@ -476,6 +487,43 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: 'Mise en file echouee' })
       }
       return res.status(200).json({ enqueued: true, queue_id: inserted.id })
+    }
+
+    // ===== FERMER UNE PERIODE : l'objet, PUIS la memoire (lot 4.6.2) =====
+    // Une fermeture n'est pas une seconde source de verite : on pose l'objet
+    // (debut, fin, raison), et on ECRIT `stop_sell` par le writer unique, comme
+    // n'importe quel geste du calendrier. Si le writer refuse, l'objet est
+    // retire : pas de fermeture qui existe sans que ses nuits soient fermees.
+    if (action === 'fermer') {
+      const { debut, fin, raison } = req.body || {}
+      const owned = await loadOwnedProperties([bienId], compte)
+      const bien = owned[0]
+      if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
+      const cree = await creerFermeture(supabase, { userId: compte, propertyId: bienId, debut, fin, raison })
+      if (!cree.ok) return res.status(400).json({ error: cree.message, code: cree.raison })
+      const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: cree.segments, origine: 'host', appel: channelCall })
+      if (r.refus) {
+        await supabase.from('fermetures').delete().eq('id', cree.fermeture.id).eq('user_id', compte)
+        return res.status(r.refus.status).json(r.refus.body)
+      }
+      return res.status(200).json({ fermeture: cree.fermeture, saved: r.saved, pushed: r.pushed,
+        local_only: r.localOnly, push_failed: r.pushFailed, warnings: r.warnings })
+    }
+    // ===== RETIRER UNE FERMETURE : rouvre TOUTE sa periode (assume, dit) =====
+    if (action === 'rouvrir_fermeture') {
+      const { id } = req.body || {}
+      const owned = await loadOwnedProperties([bienId], compte)
+      const bien = owned[0]
+      if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
+      const sup = await supprimerFermeture(supabase, { userId: compte, propertyId: bienId, id })
+      if (!sup.ok) return res.status(sup.raison === 'introuvable' ? 404 : 400).json({ error: sup.message, code: sup.raison })
+      // Rouvrir releve aussi `avail` : sans lui la nuit reste invendable
+      // (regle deja gravee pour le bouton « Rouvrir a la vente »).
+      const segs = sup.segments.map(x => ({ ...x, avail: Math.max(1, Number(bien.inventory_units) || 1) }))
+      const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: segs, origine: 'host', appel: channelCall })
+      if (r.refus) return res.status(r.refus.status).json(r.refus.body)
+      return res.status(200).json({ retiree: sup.fermeture, saved: r.saved, pushed: r.pushed,
+        local_only: r.localOnly, push_failed: r.pushFailed, warnings: r.warnings })
     }
 
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })
@@ -566,6 +614,25 @@ module.exports = async function handler(req, res) {
           dates: tarifees.slice(0, 20)
         })
       }
+    }
+
+    // ─── ARBITRAGE B (lot 4.6.2) : UNE REOUVERTURE SCINDE LA FERMETURE ─────
+    // L'hote rouvre le 15 dans une fermeture du 12 au 20 : elle devient 12-14
+    // et 16-20. « La nouvelle configuration remplace l'ancienne, jamais de
+    // restauration contre la volonte de l'hote » — le dernier geste gagne, le
+    // calendrier obeit. Ici, AVANT le writer : si la scission echoue, rien
+    // n'est ecrit, et une fermeture ne peut pas rester en desaccord avec la
+    // memoire qu'elle est censee porter.
+    const nuitsRouvertes = []
+    for (const seg of dateSegments) {
+      if (seg.stop_sell === false || (seg.avail != null && Number(seg.avail) > 0)) {
+        nuitsRouvertes.push(...expandDays(seg.date_from, seg.date_to, seg.days))
+      }
+    }
+    if (nuitsRouvertes.length) {
+      const sc = await scinderAutour(supabase, { userId: compte, propertyId: bienId, nuitsRouvertes })
+      if (!sc.ok) return res.status(503).json({ error: sc.message, code: sc.raison })
+      if (sc.touchees.length) console.log(`[calendar] ${sc.touchees.length} fermeture(s) scindee(s) par une reouverture`)
     }
 
     // ⚠ Un echec ici ne peut pas se solder par un 200 muet : l'hote lit

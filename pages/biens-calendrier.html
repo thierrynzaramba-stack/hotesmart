@@ -170,6 +170,12 @@
         transparent 2px, transparent 6px);
     }
     table.cal td.jour-ferme.rate-cell { color: #6e6e73; text-decoration: line-through; }
+    /* Les fermetures de l'hote (lot 4.6.2) : sous la grille du bien, la periode
+       et sa raison — ce que la memoire ligne a ligne ne sait pas dire. */
+    .fermetures-liste { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 6px 8px 10px 120px; font-size: 12px; color: #6e6e73; }
+    .fermetures-liste .fermeture { display: inline-flex; align-items: center; gap: 6px; background: #fff3f3; border: 1px solid #f3c9c9; border-radius: 8px; padding: 3px 8px; color: #1d1d1f; }
+    .fermetures-liste .fermeture .raison { color: #6e6e73; font-style: italic; }
+    .fermetures-liste .fermeture-retirer { border: none; background: transparent; color: #007aff; cursor: pointer; font-size: 12px; font-weight: 600; padding: 0 2px; }
     td.cell-reserved { background: #dde7f5 !important; }
     .float-bar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(140%); background: #1d1d1f; color: #fff; border-radius: 14px; padding: 12px 16px; display: flex; align-items: center; gap: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); transition: transform 0.22s ease; z-index: 50; max-width: calc(100% - 32px); }
     .float-bar.visible { transform: translateX(-50%) translateY(0); }
@@ -453,6 +459,17 @@
 
     const states={}
     function initState(b){ states[b.id]=buildStateFromInventory(days, invByBien[b.id]||{}, b.base) }
+    // Les fermetures de l'hote (lot 4.6.2), par bien, telles que le cœur les rend.
+    // ⚠ AFFICHAGE SEULEMENT : la vendabilite d'une nuit se lit dans `states`
+    // (calendar_inventory), jamais ici. Une nuit fermee sans fermeture est
+    // simplement fermee ; une fermeture porte en plus le POURQUOI.
+    const fermByBien={}
+    function raisonFermeture(bienId, iso){
+      const f=(fermByBien[bienId]||[]).find(x=>iso>=x.date_debut && iso<=x.date_fin)
+      return f ? f.raison : null
+    }
+    const fmtJourFr=(iso)=>{ const [y,m,d]=iso.split('-'); return d+'/'+m+'/'+y.slice(2) }
+    function echapper(t){ return String(t==null?'':t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
     function maxRateOf(bien, dayRate){ const cfg=ppConfig[bien.id]||{included:bien.included,extraFee:bien.extraFee}; const extra=Math.max(0, bien.capacity-cfg.included); return dayRate + extra*(cfg.extraFee||0) }
     // configuredRowParams : deplace dans shared/calendar-core.js (appele avec selectedBiens, states).
@@ -587,7 +604,7 @@
       const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
       let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
-      days.forEach((d,idx)=>{const c=classesJour(idx);if(ferme(idx))c.push('jour-ferme');html+='<th class="'+c.join(' ')+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
+      days.forEach((d,idx)=>{const c=classesJour(idx);if(ferme(idx))c.push('jour-ferme');const rs=ferme(idx)?raisonFermeture(bien.id,toISO(d)):null;html+='<th class="'+c.join(' ')+'"'+(rs?' title="Fermé : '+echapper(rs)+'"':'')+'><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
       html+='</tr></thead><tbody>'
       html+='<tr><td class="row-label">Reservations</td>'
       // Toutes les barres vivent dans la PREMIERE cellule et sont positionnees en
@@ -607,6 +624,16 @@
         html+='</tr>'
       })
       html+='</tbody></table>'
+      // Les fermetures de l'hote sur la fenetre affichee : periode, raison, et le
+      // retrait. Retirer rouvre TOUTE la periode (assume, dit au clic).
+      const fs=fermByBien[bien.id]||[]
+      if(fs.length){
+        const peutRetirer = peutEcrire('reservations') && !LECTURE_SEULE
+        html+='<div class="fermetures-liste">'
+        fs.forEach(f=>{ html+='<span class="fermeture" data-fermeture-id="'+echapper(f.id)+'">Fermé du '+fmtJourFr(f.date_debut)+' au '+fmtJourFr(f.date_fin)+' <span class="raison">— '+echapper(f.raison)+'</span>'
+          +(peutRetirer?' <button type="button" class="fermeture-retirer" data-bien="'+bien.id+'" data-fermeture-id="'+echapper(f.id)+'" title="Rouvre toute la période">Retirer</button>':'')+'</span>' })
+        html+='</div>'
+      }
       section.innerHTML=html
       return section
     }
@@ -621,6 +648,9 @@
           e.preventDefault(); e.stopPropagation()
           ouvrirFicheResa(bar.dataset.bien, bar.dataset.resa)
         })
+      })
+      blocksEl.querySelectorAll('.fermeture-retirer').forEach(btn=>{
+        btn.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); retirerFermeture(btn.dataset.bien, btn.dataset.fermetureId) })
       })
       if(LECTURE_SEULE) return; blocksEl.querySelectorAll('.bien-section').forEach(section=>{const bid=section.dataset.bienId;section.querySelectorAll('.edit-cell').forEach(cell=>{const idx=parseInt(cell.dataset.idx,10);const row=cell.dataset.row;cell.addEventListener('mousedown',e=>{e.preventDefault();isDragging=true;dragStart=idx;dragBien=bid;dragRow=row;sel={bienId:bid,idx:new Set([idx]),row};updateSelectionUI()});cell.addEventListener('mouseenter',()=>{if(!isDragging||dragBien!==bid||dragRow!==row)return;extendSelTo(idx)})})}) }
     let lastMouseX=0, autoScrollRAF=null
@@ -1124,6 +1154,50 @@
     // l'INTENTION dans `calendar_inventory` et la restitue apres toute poussee
     // d'inventaire (docs/kb/reservation-directe.md §8). Ce bouton ne fait que
     // supprimer trois clics.
+    // Regroupement en PLAGES CONTIGUES d'indices : [[a,b], ...]
+    function plagesContigues(idxs){
+      const plages=[]; let debut=idxs[0], prec=idxs[0]
+      for(let k=1;k<idxs.length;k++){
+        if(idxs[k]===prec+1){ prec=idxs[k]; continue }
+        plages.push([debut,prec]); debut=idxs[k]; prec=idxs[k]
+      }
+      plages.push([debut,prec]); return plages
+    }
+    function afficherVerdict(resp, sinon){
+      if(resp && resp.config_saved === false){ showToast('Erreur: ' + resp.warnings.join(' · '), 6500) }
+      else if(resp && resp.push_failed){ showToast('NON PUBLIE — ' + resp.warnings.join(' · '), 12000) }
+      else if(resp && resp.local_only){ showToast(resp.warnings.join(' · '), 6500) }
+      else if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre — ' + resp.warnings.join(' · '), 6500) }
+      else { showToast(sinon) }
+    }
+    // Poser une fermeture par plage contigue : `api.calendar.fermer` cree
+    // l'objet ET memorise stop_sell par le writer — un seul chemin serveur.
+    async function poserFermeture(bienId, idxs, raison){
+      const plages = plagesContigues(idxs)
+      pushUndo(bienId)
+      const st = states[bienId]
+      idxs.forEach(i=>{ st[i].stopSell='closed'; st[i].modified=true })
+      sel={bienId:null, idx:new Set(), row:'rate'}; hideFloatBar(); renderBlocks()
+      showToast('Fermeture de '+idxs.length+' jour'+(idxs.length>1?'s':'')+'…')
+      try{
+        let dernier=null
+        for(const [a,b] of plages){ dernier = await api.calendar.fermer(bienId, toISO(days[a]), toISO(days[b]), raison) }
+        afficherVerdict(dernier, 'Fermé à la vente — '+raison)
+      }catch(err){ showToast('Erreur: ' + (err.message||'fermeture'), 6000) }
+      await reloadInventory()
+    }
+    // Retirer une fermeture : rouvre TOUTE sa periode, et le dit avant.
+    async function retirerFermeture(bienId, id){
+      if(!peutEcrire('reservations') || LECTURE_SEULE){ showToast('Vous n\'avez pas le droit de modifier la vente'); return }
+      const f=(fermByBien[bienId]||[]).find(x=>x.id===id); if(!f) return
+      if(!window.confirm('Retirer cette fermeture rouvre à la vente TOUTE la période du '+fmtJourFr(f.date_debut)+' au '+fmtJourFr(f.date_fin)+'. Continuer ?')) return
+      showToast('Réouverture…')
+      try{
+        const resp = await api.calendar.rouvrirFermeture(bienId, id)
+        afficherVerdict(resp, 'Rouvert à la vente')
+      }catch(err){ showToast('Erreur: ' + (err.message||'réouverture'), 6000) }
+      await reloadInventory()
+    }
     async function basculerStopSell(){
       if(!sel.bienId || !sel.idx.size) return
       // Garde d'interface doublee cote serveur (api/calendar.js, droit
@@ -1134,6 +1208,20 @@
       const bienId = sel.bienId, st = states[bienId]
       const fermer = !selectionToutFermee()
       const idxs = [...sel.idx].sort((a,b)=>a-b)
+
+      // ⚠ SUR UN BIEN PILOTE PAR YIELDFLOW, FERMER = POSER UNE FERMETURE (lot
+      // 4.6.2). Un simple stop_sell y serait indistinguable d'une fermeture
+      // CALCULEE par le moteur, qui pourrait la rouvrir au prochain passage. La
+      // fermeture (debut, fin, raison) est la frontiere que Yield ne franchit
+      // jamais — et la raison est ce que le calendrier affichera. Rouvrir, lui,
+      // reste le chemin commun : le serveur scinde la fermeture touchee.
+      if(fermer && estPiloteYield(bienId)){
+        const raison = window.prompt('Pourquoi fermez-vous ces dates ? (travaux, usage personnel…)\nYieldFlow ne rouvrira jamais cette période.')
+        if(raison==null) return
+        if(!raison.trim()){ showToast('Dites pourquoi vous fermez : c\'est ce que le calendrier affichera.'); return }
+        await poserFermeture(bienId, idxs, raison.trim())
+        return
+      }
 
       // Regroupement en PLAGES CONTIGUES : un segment par jour ferait autant de
       // lignes a pousser que de jours selectionnes. Sur un mois entier, c'est la
@@ -1727,9 +1815,9 @@
       const monTour=++lectureEnCours
       const {start,end}=rangeISO()
       try{
-        const {inv,pp,propsById,bookings}=await loadCalendarData(selectedBiens, start, end)
+        const {inv,pp,propsById,bookings,fermetures}=await loadCalendarData(selectedBiens, start, end)
         if(monTour!==lectureEnCours) return   // une lecture plus recente a pris la main
-        ;(selectedBiens).forEach(id=>{ invByBien[id]=inv[id] })
+        ;(selectedBiens).forEach(id=>{ invByBien[id]=inv[id]; fermByBien[id]=(fermetures&&fermetures[id])||[] })
         if(bookings){ BIENS.forEach(b=>{ if(bookings[b.id]) b.resa=mapResa(bookings[b.id]) }) }
         for(const id in pp){ ppConfig[id]=pp[id]
           const bb=BIENS.find(x=>x.id===id); if(bb){ bb.base=propsById[id].base||bb.base; bb.included=pp[id].included; bb.extraFee=pp[id].extraFee } }

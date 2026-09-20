@@ -117,5 +117,8 @@ export async function loadCalendarData(selectedBiens, start, end) {
     propsById[p.id] = { base: Number(p.base_price), included: pp[p.id].included, extraFee: pp[p.id].extraFee }
     rawProps[p.id] = p   // objet propriete brut (capacity, orphan_*, etc.) -> superset pour mobile
   })
-  return { inv, pp, propsById, bookings: (r && r.bookings) || null, rawProps }
+  // Les fermetures de l'hote (lot 4.6.2), par bien : l'ecran les affiche avec
+  // leur raison et permet de les retirer. Il ne les lit JAMAIS pour decider si
+  // une nuit est vendable — ca, c'est `inv` (calendar_inventory).
+  return { inv, pp, propsById, bookings: (r && r.bookings) || null, rawProps, fermetures: (r && r.fermetures) || {} }
 }
