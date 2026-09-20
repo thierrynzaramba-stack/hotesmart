@@ -279,3 +279,16 @@ test('nuitsFermees ne TRONQUE jamais : une fermeture plus longue que la borne re
   assert.ok(nuitsFermees([longue], '2029-12-01', '2030-01-01').has('2030-01-01'))
   assert.equal(scinder(longue, ['2030-01-01']).length, 1, 'scinder non plus')
 })
+
+test('LE TEST QUI COMPTE : la table ABSENTE rend « aucune fermeture », une PANNE leve — ce sont deux choses', async () => {
+  // Staging, 21 septembre 2026 : deploye avant la migration, tout le radar
+  // yield repondait 500. Une table qui n'existe pas ne contient aucune
+  // fermeture : vide est exact. Un timeout, lui, ouvrirait a tort : il leve.
+  const absente = { code: 'PGRST205', message: "Could not find the table 'public.fermetures' in the schema cache" }
+  assert.deepEqual(await fermeturesDuBien(fausseBase([], { erreur: absente }), BIEN, '2026-10-01', '2026-10-31'), [])
+  const parBien = await fermeturesDesBiens(fausseBase([], { erreur: { code: '42P01', message: 'relation "public.fermetures" does not exist' } }), [BIEN], '2026-10-01', '2026-10-31')
+  assert.deepEqual(parBien, { [BIEN]: [] })
+  await assert.rejects(() => fermeturesDuBien(fausseBase([], { erreur: { code: '57014', message: 'canceling statement due to statement timeout' } }), BIEN, '2026-10-01', '2026-10-31'), /lecture : canceling/)
+  // Une relation absente qui n'est PAS la notre (une jointure cassee) reste une panne.
+  await assert.rejects(() => fermeturesDuBien(fausseBase([], { erreur: { message: 'relation "autre" does not exist' } }), BIEN, '2026-10-01', '2026-10-31'), /lecture/)
+})
