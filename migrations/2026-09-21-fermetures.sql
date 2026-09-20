@@ -35,7 +35,10 @@
 -- consulte avant d'ouvrir, et n'ouvre pas dedans.
 --
 -- ADDITIVE : cree une table, ne touche a aucune
--- existante.
+-- existante. btree_gist sert a la contrainte
+-- d'exclusion (egalite sur uuid dans un index gist).
+
+create extension if not exists btree_gist;
 
 create table if not exists public.fermetures (
   id uuid primary key default gen_random_uuid(),
@@ -63,8 +66,21 @@ create table if not exists public.fermetures (
 
   constraint fermetures_periode_valide
     check (date_fin >= date_debut),
+  -- Meme borne que NUITS_MAX dans lib/fermetures.js :
+  -- 1000 nuits au plus. Le code refuse, la base aussi.
+  constraint fermetures_periode_bornee
+    check (date_fin - date_debut < 1000),
   constraint fermetures_raison_non_vide
-    check (length(btrim(raison)) > 0)
+    check (length(btrim(raison)) > 0),
+  -- ⚠ UNE NUIT N'APPARTIENT QU'A UNE SEULE FERMETURE.
+  -- La lecture avant insertion du code ne tient pas
+  -- sous concurrence (deux onglets) ; cette contrainte
+  -- tient. Son refus (23P01) est rendu « chevauchement ».
+  constraint fermetures_sans_chevauchement
+    exclude using gist (
+      property_id with =,
+      daterange(date_debut, date_fin, '[]') with &&
+    )
 );
 
 -- Les deux acces prevus : les fermetures d'un bien qui
@@ -126,8 +142,13 @@ select
      where conrelid = 'public.fermetures'::regclass
        and contype = 'c')
     as checks,
+  (select count(*) from pg_constraint
+     where conrelid = 'public.fermetures'::regclass
+       and contype = 'x')
+    as exclusions,
   (select relrowsecurity from pg_class
      where relname = 'fermetures')
     as rls_active;
--- Attendu : lignes 0, index_poses 3 (pkey + 2),
--- policies 1, checks 2, rls_active true.
+-- Attendu : lignes 0, index_poses 4 (pkey + 2 +
+-- l'index de l'exclusion), policies 1, checks 3,
+-- exclusions 1, rls_active true.

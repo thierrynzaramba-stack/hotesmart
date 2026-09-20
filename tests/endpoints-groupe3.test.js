@@ -1272,3 +1272,16 @@ test('fermetures GET : une seule requete pour tous les biens, et user_id n en so
   assert.strictEqual(res.body.fermetures[BIEN_CHANNEX.id].length, 1)
   void etat
 })
+
+test('rouvrir_fermeture : une nuit encore couverte par une AUTRE fermeture reste fermee, et la reponse le dit', async () => {
+  const F2 = { ...FERMETURE(), id: 'f0f0f0f0-0000-4000-8000-000000000002', date_debut: '2026-10-15', date_fin: '2026-10-25', raison: 'perso' }
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE(), F2] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'rouvrir_fermeture', property_id: BIEN_CHANNEX.id, id: FERMETURE().id
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  assert.deepStrictEqual(lignes.map(l => l.date).sort(), ['2026-10-12', '2026-10-13', '2026-10-14'], 'seules les nuits que rien d autre ne couvre')
+  assert.ok(res.body.warnings.some(w => /restent fermées/.test(w)))
+})

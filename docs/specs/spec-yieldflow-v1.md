@@ -389,6 +389,25 @@ d'intention, sinon échec).
 - La raison est demandée par `window.prompt` : suffisant pour la recette, à
   remplacer par un formulaire en ligne si la recette le demande.
 
+**Ce que la review a ajouté (21 septembre 2026, deux passes).**
+- **Une nuit n'appartient qu'à une seule fermeture** : le chevauchement est
+  refusé (409) par une lecture avant insertion, et **tenu sous concurrence**
+  par une contrainte d'exclusion en base (`btree_gist`, `daterange` inclusif) ;
+  son refus `23P01` est rendu comme le même « chevauchement ».
+- **Retirer une fermeture ne rouvre que les nuits qu'aucune autre ne couvre**,
+  et le dit ; avec une relecture en échec, rien n'est rouvert. C'est ce qui rend
+  inoffensif le seul doublon possible (une scission dont le DELETE échoue après
+  les inserts).
+- **La scission insère les morceaux avant de retirer l'ancienne** : au pire un
+  doublon, jamais une nuit ouverte à tort.
+- **`joursExclus` est la seule porte** vers « quels jours sortent de la
+  référence », et les trois chemins de prod y passent — sa fenêtre est un
+  filtre, pas une énumération : elle accepte les 2 000+ jours du radar.
+- **Une fermeture couvre au plus 1 000 nuits** (code et CHECK) ; rien ne tronque
+  en silence, une date qui n'existe pas (30 février) est une période invalide.
+- **Une réouverture avec fermetures illisibles est refusée en 503 nommé**, pas
+  en 500 muet ; un tarif seul passe.
+
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
 **A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**
