@@ -349,3 +349,37 @@ test('l ecran ne promet pas ce que le lot 4.6 apportera', () => {
     'et l etat bascule le redit')
   assert.ok(/enCoursPilote/.test(src), 'le jeton anti-course protege l affichage du pilote')
 })
+
+test('LE TEST QUI COMPTE : le refus intercepte AVANT que l ecran ne peigne', () => {
+  // ⚠ DEFAUT TROUVE PAR THIERRY EN RECETTE SUR STAGING, 20 septembre 2026.
+  // La garde de la popup etait posee APRES la boucle qui mute l etat local :
+  // elle empechait bien l ENVOI, mais `st[i].rate` etait deja ecrase et
+  // `renderBlocks()` avait peint le nouveau prix. Comme plus aucune requete ne
+  // partait, aucun `catch` ne se declenchait, donc aucune relecture du cœur —
+  // le prix refuse restait AFFICHE jusqu au prochain rechargement. « Un hote
+  // croirait son prix pris en compte. »
+  //
+  // La lecon depasse ce fichier : empecher l envoi ne suffit pas quand l ecran
+  // a deja peint. Un refus doit intercepter AVANT la mutation, sinon il faut
+  // defaire — et defaire, ca s oublie.
+  const src = lire('pages/biens-calendrier.html')
+  const iGarde = src.indexOf("p.key==='rate'&&estPiloteYield(popupBienId)")
+  const iMutation = src.indexOf("st[i][p.key]=computeNewRate")
+  assert.ok(iGarde > 0, 'la garde de la popup existe')
+  assert.ok(iMutation > 0, 'la mutation de l etat local existe')
+  assert.ok(iGarde < iMutation,
+    'la garde doit preceder la mutation : sinon l ecran peint un prix refuse')
+
+  // La saisie en ligne refuse avant meme d ouvrir le champ.
+  const iInline = src.indexOf("sel.row==='rate'&&estPiloteYield(sel.bienId)")
+  const iChamp = src.indexOf("cell.innerHTML='<input class=\"rate-input\"")
+  assert.ok(iInline > 0 && iChamp > 0 && iInline < iChamp,
+    'la saisie en ligne refuse avant d ouvrir le champ')
+
+  // Le mobile ne mute aucun etat local : sa garde precede le seul push.
+  const mob = lire('pages/calendrier-mobile.html')
+  const iGardeMob = mob.indexOf("p.type==='price'&&currentBien")
+  const iPush = mob.indexOf('segments.push({date_from:sISO,date_to:eISO,days:daysArr,rate:')
+  assert.ok(iGardeMob > 0 && iPush > 0 && iGardeMob < iPush,
+    'le mobile refuse avant de construire le segment tarifaire')
+})
