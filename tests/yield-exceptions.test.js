@@ -460,3 +460,12 @@ test('LE TEST QUI COMPTE : les trois chemins de prod passent par joursExclus —
     assert.ok(!/for \(const p of exceptions\) \{/.test(src), `${f} : plus de Set maison`)
   }
 })
+
+test('joursExclus ACCEPTE la fenetre de contexte du radar (plus de 2000 jours) : la fenetre est un filtre, pas une enumeration', async () => {
+  // Re-review du 4.6.2 : brancher api/yield-prix.js sur joursExclus avec la
+  // borne stricte le faisait tomber en 500 des ?mois=2029-04 (2048 jours).
+  const sb = fausseBase([{ id: 'e1', property_id: BIEN, date_debut: '2029-04-01', date_fin: '2029-04-03', motif: 'x' }])
+  const exclus = await joursExclus(sb, BIEN, '2023-09-21', '2029-04-30')
+  assert.equal(exclus.size, 3)
+  await assert.rejects(() => joursExclus(sb, BIEN, '2026-04-30', '2026-04-01'), /fenetre invalide/)
+})

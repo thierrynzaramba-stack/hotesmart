@@ -521,10 +521,19 @@ module.exports = async function handler(req, res) {
       // Rouvrir releve aussi `avail` : sans lui la nuit reste invendable
       // (regle deja gravee pour le bouton « Rouvrir a la vente »).
       const segs = sup.segments.map(x => ({ ...x, avail: Math.max(1, Number(bien.inventory_units) || 1) }))
+      // Aucune nuit a rouvrir (toutes couvertes par une autre fermeture, ou
+      // relecture en echec) : l'objet est retire, le calendrier ne bouge pas,
+      // et on le DIT.
+      if (!segs.length) {
+        return res.status(200).json({ retiree: sup.fermeture, saved: 0, pushed: false, local_only: false, push_failed: false,
+          warnings: [sup.avertissement || 'Aucune nuit à rouvrir.'] })
+      }
       const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: segs, origine: 'host', appel: channelCall })
       if (r.refus) return res.status(r.refus.status).json(r.refus.body)
+      const warnings = [...(r.warnings || [])]
+      if (sup.avertissement) warnings.push(sup.avertissement)
       return res.status(200).json({ retiree: sup.fermeture, saved: r.saved, pushed: r.pushed,
-        local_only: r.localOnly, push_failed: r.pushFailed, warnings: r.warnings })
+        local_only: r.localOnly, push_failed: r.pushFailed, warnings })
     }
 
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })

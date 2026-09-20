@@ -22,7 +22,7 @@ const BIEN = '22222222-2222-4222-8222-222222222222'
 const F1 = '33333333-3333-4333-8333-333333333333'
 
 // Faux client : ne sert QUE la table `fermetures`, enregistre tout.
-function fausseBase (lignes = [], { erreur = null } = {}) {
+function fausseBase (lignes = [], { erreur = null, erreurPour = {} } = {}) {
   const journal = []
   const client = {
     journal,
@@ -41,9 +41,11 @@ function fausseBase (lignes = [], { erreur = null } = {}) {
       const executer = () => {
         journal.push({ op: q.op, f: q.f, ligne: q.ligne, lte: q.lte, gte: q.gte, cols: q.cols, dans: q.dans })
         if (erreur) return { data: null, error: erreur }
+        if (erreurPour[q.op]) return { data: null, error: erreurPour[q.op] }
         if (q.op === 'insert') return { data: { id: 'neuf-' + journal.length, ...q.ligne }, error: null }
         if (q.op === 'delete') {
           const cible = lignes.filter(l => q.f.every(([c, v]) => String(l[c]) === String(v)))
+          for (const l of cible) lignes.splice(lignes.indexOf(l), 1)   // comme la base : retiree
           return { data: cible, error: null }
         }
         // select : croisement de periode + filtres eq + in
@@ -221,4 +223,59 @@ test('fermeturesDesBiens : UNE requete, groupee par bien, chaque bien a sa cle m
   assert.deepEqual(sb.journal[0].dans[0], 'property_id')
   assert.equal(r[BIEN].length, 1); assert.deepEqual(r[AUTRE], [], 'hors periode'); assert.deepEqual(r['55555555-5555-4555-8555-555555555555'], [])
   await assert.rejects(() => fermeturesDesBiens(sb, [BIEN, 'pas-un-uuid'], '2026-10-01', '2026-10-31'), /uuid/)
+})
+
+// ─── 6. Correctifs de re-review ─────────────────────────────────────────────
+test('une date qui a la forme mais n existe pas (30 fevrier) est une periode INVALIDE, pas une panne', async () => {
+  const sb = fausseBase()
+  const r = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-02-30', fin: '2026-03-02', raison: 'x' })
+  assert.equal(r.ok, false); assert.equal(r.raison, 'periode_invalide')
+  assert.equal(sb.journal.length, 0, 'rien n est parti en base — surtout pas une lecture qui echouerait en 503')
+  await assert.rejects(() => fermeturesDuBien(sb, BIEN, '2026-02-30', '2026-03-02'), /periode invalide/)
+})
+
+test('LE TEST QUI COMPTE : sous concurrence, c est la base qui refuse le chevauchement — et on le dit pareil', async () => {
+  // Deux onglets passent tous deux la lecture vide ; le second insert heurte la
+  // contrainte d'exclusion (23P01). Ce n'est pas une panne : c'est un
+  // chevauchement, dit par la base.
+  // Par le CODE seul (PostgREST le rend toujours) et par le MESSAGE seul (un
+  // client qui ne rend pas le code) : les deux chemins disent « chevauchement ».
+  for (const err of [{ code: '23P01', message: 'conflicting key value' },
+                     { message: 'violates exclusion constraint "fermetures_sans_chevauchement"' }]) {
+    const sb = fausseBase([], { erreurPour: { insert: err } })
+    const r = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-10-12', fin: '2026-10-20', raison: 'x' })
+    assert.equal(r.ok, false); assert.equal(r.raison, 'chevauchement', JSON.stringify(err))
+  }
+  // Une autre erreur d'ecriture reste une panne, pas un chevauchement.
+  const sb2 = fausseBase([], { erreurPour: { insert: { code: '57014', message: 'canceling statement' } } })
+  assert.equal((await creerFermeture(sb2, { userId: COMPTE, propertyId: BIEN, debut: '2026-10-12', fin: '2026-10-20', raison: 'x' })).raison, 'ecriture_impossible')
+})
+
+test('LE TEST QUI COMPTE : retirer une fermeture ne rouvre QUE ce qu aucune autre ne couvre', async () => {
+  // Un doublon laisse par une scission dont le DELETE a echoue : retirer l'un
+  // des jumeaux ne doit pas rouvrir des nuits que l'autre dit fermees.
+  const F2 = '66666666-6666-4666-8666-666666666666'
+  const sb = fausseBase([fermeture(), fermeture({ id: F2, date_debut: '2026-10-15', date_fin: '2026-10-25', raison: 'perso' })])
+  const r = await supprimerFermeture(sb, { userId: COMPTE, propertyId: BIEN, id: F1 })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.segments, [{ date_from: '2026-10-12', date_to: '2026-10-14', stop_sell: false }], 'seules 12-14 rouvrent')
+  assert.match(r.avertissement, /6 nuit\(s\) restent fermées/)
+  // Retirer la seconde rouvre le reste : l'etat se repare par le geste normal.
+  const r2 = await supprimerFermeture(sb, { userId: COMPTE, propertyId: BIEN, id: F2 })
+  assert.deepEqual(r2.segments, [{ date_from: '2026-10-15', date_to: '2026-10-25', stop_sell: false }])
+  assert.equal(r2.avertissement, undefined)
+})
+
+test('retirer avec une relecture en echec ne rouvre RIEN, et le dit', async () => {
+  const sb = fausseBase([fermeture()], { erreurPour: { select: { message: 'timeout' } } })
+  const r = await supprimerFermeture(sb, { userId: COMPTE, propertyId: BIEN, id: F1 })
+  assert.equal(r.ok, true); assert.deepEqual(r.segments, []); assert.match(r.avertissement, /pas été rouverte/)
+})
+
+test('nuitsFermees ne TRONQUE jamais : une fermeture plus longue que la borne rend toutes ses nuits', () => {
+  // Une nuit absente du Set est une nuit que le canal interne peut ouvrir.
+  const longue = fermeture({ date_debut: '2026-01-01', date_fin: '2030-01-01' })   // 1462 nuits > NUITS_MAX
+  assert.equal(nuitsFermees([longue], '2026-01-01', '2030-01-01').size, 1462)
+  assert.ok(nuitsFermees([longue], '2029-12-01', '2030-01-01').has('2030-01-01'))
+  assert.equal(scinder(longue, ['2030-01-01']).length, 1, 'scinder non plus')
 })
