@@ -7,6 +7,34 @@ SaaS LCD modulaire (App Store hôtes francophones). Product owner = Thierry (non
 - Pas de postambules, récaps, félicitations, emoji. Finir sur du technique direct.
 - Ne JAMAIS afficher/coller une clé, un token ou un secret — règle absolue ci-dessous.
 
+## RÈGLE ABSOLUE — LE CLONE EST PARTAGÉ PAR PLUSIEURS SESSIONS
+
+- **Avant de commiter : `git status --short`.** Un fichier modifié qu'on n'a pas
+  touché soi-même appartient à quelqu'un d'autre. On commite **par chemins
+  explicites** — `git add <fichiers>` — et **jamais** `git add -A`, `git add .`
+  ni `git commit -a`.
+- **Aucun `git checkout` / `switch` / `stash` sans prévenir Thierry.** L'arbre de
+  travail est COMMUN : changer de branche change le sol sous les pieds de
+  l'autre session, en plein milieu de son édition.
+- **Un chantier long se fait dans un worktree séparé** (`git worktree add`), pas
+  dans le clone principal. `/home/thierry/hotesmart-b` le fait déjà pour
+  `prestataires-lot3`.
+- **On se prévient par `SendMessage`** dès qu'on ouvre un fichier : lequel, et
+  pour combien de temps. `ListAgents` dit qui tourne.
+
+**Vécu (18 septembre 2026), deux fois dans la même soirée.** Une session a fait
+`git add -A` pendant qu'une autre corrigeait six constats de review dans
+`api/inbound-email.js` : son commit a emporté 220 lignes de correctifs de
+sécurité **non re-reviewés** et les a poussées sur `main` et `channex-phase1`,
+donc en production, au moment précis où l'autre retenait le push en attendant la
+review. Le message du commit annonçait « aucune de code ». Le même soir, un
+`checkout` pour lire un fichier a changé la branche des deux sessions.
+
+**Pourquoi c'est une règle absolue.** Le code emporté était juste — cette fois.
+Ce qui ne se répare pas, c'est la ligne de journal : elle dira faux à qui la
+lira dans six mois, et l'historique est la seule chose qu'on ne peut pas
+corriger sans réécrire ce que deux branches ont déjà tiré.
+
 ## RÉFLEXE MACHINE (multi-machines Mac bureau / PC portable)
 - AVANT toute modif quand on change d'ordi : `git checkout main && git pull origin main`.
 - Workflow commit : checkout main && pull && add && commit && push origin main && checkout channex-phase1 && merge main && push origin channex-phase1.
