@@ -19,6 +19,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
+const { estHorsFenetre, dateOuverture } = require('../lib/pilote-tarifaire')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
 const { exceptionsDuBien } = require('../lib/yield/exceptions')
 const { evenementsDuBien } = require('../lib/yield/evenements')
@@ -451,6 +452,16 @@ module.exports = async (req, res) => {
         ouverte,
         // Le motif voyage avec l'inconnue : « je ne sais pas » se justifie.
         ouverture_non_calculable: ouvertureConnue ? null : motifOuverture,
+        // ⚠ LOT 4.6.0 — « PAS ENCORE OUVERTE » A SA PROPRE REPONSE, et sa
+        // DATE. Sans ligne au calendrier, `ouverte` vaut `null` : pour un bien
+        // en mode calendrier, c'est « non renseignee, votre calendrier ne va
+        // pas jusque-la ». Pour un bien auto-pilote au-dela de sa fenetre,
+        // c'est faux : personne n'a rien oublie, la fenetre glisse et la nuit
+        // s'ouvrira seule. L'ecran doit pouvoir dire QUAND, sinon un
+        // calendrier vide sur huit mois se lit comme une panne. La regle et
+        // la date viennent de lib/pilote-tarifaire.js, en un seul endroit.
+        hors_fenetre: !parDate.has(date) && estHorsFenetre(bien, date, auj),
+        ouverture_prevue: !parDate.has(date) ? dateOuverture(bien, date, auj) : null,
         // ⚠ LE PRIX DE BASE N'EST PAS « LE PRIX AFFICHE » — releve en review.
         // Sans ligne au calendrier, `ouverte` vaut `null` (« ouverture
         // inconnue ») mais ce champ AFFIRMAIT un prix : l'ecran montrait un

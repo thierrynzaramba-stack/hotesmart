@@ -124,6 +124,12 @@
     .yp-table tr.e-vendue  { background: #E8F2EC; box-shadow: inset 3px 0 0 #2E7D52; }
     .yp-table tr.e-fermee  { background: #FBF1DA; box-shadow: inset 3px 0 0 #B8860B; }
     .yp-table tr.e-inconnue{ background: var(--bg); box-shadow: inset 3px 0 0 #C9C9C9; }
+    /* ⚠ « PAS ENCORE OUVERTE » A SA COULEUR (lot 4.6.0) : ni l'ambre de
+       « fermée » (l'hôte n'a rien fermé), ni le gris de « non renseignée »
+       (personne n'a rien oublié). La fenêtre glisse, la nuit s'ouvrira seule. */
+    .yp-table tr.e-attente { background: var(--bg); box-shadow: inset 3px 0 0 #B5C9DA; }
+    .yp-table tr.e-attente td:first-child { border-left: 2px dotted #B5C9DA; }
+    .yp-attente { font-size: 11.5px; color: var(--text3); }
     .yp-table tr.e-inconnue td:first-child { border-left: 2px dashed #D8D8D8; }
     /* ⚠ LE PASSÉ RESTE SOUS LES YEUX, ÉTEINT. C'est la base de réflexion de
        l'hôte : le masquer lui retirerait le seul mois dont il connaît déjà la
@@ -375,6 +381,10 @@
   let mois = null
   let enCours = 0
   const el = id => document.getElementById(id)
+  // JJ/MM/AAAA depuis un jour ISO, sans passer par Date : un jour ISO reste
+  // un jour ISO, aucun fuseau n'entre en jeu.
+  const dateFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))
+    ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : ''
   const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   const euros = v => v == null ? null :
@@ -632,6 +642,7 @@
       ${c('#EDF4EE', 'à vendre', 'Ouverte à la vente : la teinte de la ligne est le niveau suggéré, repris de votre grille ci-dessus.')}
       ${c('#FBF1DA', 'fermée', 'Fermée à la vente. Aucun prix ne s’y vend — ouvrez-la au calendrier.')}
       ${c('#FFFFFF', 'non renseignée', 'Votre calendrier ne va pas jusqu’à cette nuit.')}
+      ${c('#B5C9DA', 'pas encore ouverte', 'Au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et la nuit s’ouvrira seule, avec son prix déjà prêt.')}
       ${p ? c('#FAFAFA', 'passée, restée vide', 'Nuit écoulée sans être vendue. Elle ne compte plus dans les actions, mais elle reste sous vos yeux.') : ''}
       ${b('#4A7FA8', 'séjour', 'Un séjour confirmé, de l’arrivée au départ.')}
       ${b('#D2DAE2', 'non confirmé', 'Une demande ou une option : elle n’occupe pas encore la nuit, mais elle est là.')}
@@ -654,7 +665,14 @@
     const baisser = av.filter(n => n.prix_actuel != null && n.suggestion < n.prix_actuel)
     const vendues = aVenir.filter(n => n.vendue)
     const fermees = aVenir.filter(n => n.ouverte === false && !n.vendue)
-    const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue)
+    // ⚠ TROIS COMPTES, PAS DEUX — arbitrage C du §2 ter. « Pas encore
+    // ouverte » n'est ni « fermée » (l'hôte n'a rien fermé) ni « non
+    // renseignée » (rien n'a été oublié). Afficher « fermée » sur 245 nuits
+    // que personne n'a fermées ferait chercher à l'hôte une décision qu'il
+    // n'a jamais prise.
+    const attente = aVenir.filter(n => n.hors_fenetre && !n.vendue)
+    const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue && !n.hors_fenetre)
+    const prochaine = attente.map(n => n.ouverture_prevue).filter(Boolean).sort()[0] || null
     const gain = av.filter(n => n.prix_actuel != null)
       .reduce((s, n) => s + (n.suggestion - n.prix_actuel), 0)
     const c = (v, l, cl = '') =>
@@ -666,15 +684,19 @@
         ${c(vendues.length, 'vendues')}
         ${fermees.length ? c(fermees.length, 'fermées') : ''}
         ${inconnues.length ? c(inconnues.length, 'non renseignées') : ''}
+        ${attente.length ? c(attente.length, 'pas encore ouvertes') : ''}
         ${c((gain >= 0 ? '+' : '') + euros(Math.round(gain)), 'si tout appliqué',
           gain > 0 ? 'hausse' : (gain < 0 ? 'baisse' : ''))}
       </div>
       ${ceQueDitLeMois(d)}
-      ${fermees.length || inconnues.length ? `<p class="yp-note">
+      ${fermees.length || inconnues.length || attente.length ? `<p class="yp-note">
         ${fermees.length ? `<strong>${fermees.length} nuit(s) fermée(s)</strong> — aucun prix ne s’y vend.
           Ouvrez-les au calendrier, les suggestions apparaîtront. ` : ''}
         ${inconnues.length ? `<strong>${inconnues.length} nuit(s) non renseignée(s)</strong> —
-          votre calendrier ne va pas jusque-là.` : ''}</p>` : ''}
+          votre calendrier ne va pas jusque-là. ` : ''}
+        ${attente.length ? `<strong>${attente.length} nuit(s) pas encore ouverte(s)</strong> —
+          au-delà de la fenêtre de vente pilotée par YieldFlow. Rien à faire : elles
+          s’ouvriront seules${prochaine ? `, la première le ${dateFr(prochaine)}` : ''}.` : ''}</p>` : ''}
     </div>`
   }
 
@@ -885,6 +907,10 @@
     if (n.vendue) etat = 'e-vendue'
     else if (passe) etat = 'e-vide'
     else if (n.ouverte === false) etat = 'e-fermee'
+    // ⚠ AVANT « inconnue » : une nuit hors fenêtre porte aussi `ouverte: null`
+    // (aucune ligne au calendrier), mais elle n'est pas « non renseignée » —
+    // personne n'a rien oublié, c'est la fenêtre glissante du pilote.
+    else if (n.hors_fenetre) etat = 'e-attente'
     else if (n.ouverte == null) etat = 'e-inconnue'
     else etat = 'e-vide'
 
@@ -903,6 +929,12 @@
             ? 'Part de cette nuit dans le prix payé par le voyageur (répartition uniforme sur les nuits du séjour).'
             : 'Prix affiché au calendrier pour cette nuit.')}">${euros(p)}</span>`
         : `<span class="yp-vide" title="Cette nuit est vendue, mais son prix n’est pas exploitable — souvent une réservation recréée lors d’une migration de canal.">—</span>`
+    } else if (!passe && n.hors_fenetre) {
+      // ⚠ LA DATE, PAS SEULEMENT LE MOT. « Pas encore ouverte » sans « quand »
+      // se lit comme une panne sur huit mois de calendrier vide. La date vient
+      // du serveur (lib/pilote-tarifaire.js), l'écran ne la recalcule pas.
+      const q = n.ouverture_prevue ? dateFr(n.ouverture_prevue) : null
+      prix = `<span class="yp-attente" title="${ech(`Cette nuit est au-delà de la fenêtre de vente de ce logement, pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour, et cette nuit s’ouvrira seule${q ? ` le ${q}` : ''}, avec son prix déjà prêt.`)}">pas encore ouverte${q ? ` · s’ouvrira le ${q}` : ''}</span>`
     } else if (n.suggestion != null) {
       const sens = n.prix_actuel == null ? ''
         : (n.suggestion > n.prix_actuel ? 'hausse' : (n.suggestion < n.prix_actuel ? 'baisse' : ''))

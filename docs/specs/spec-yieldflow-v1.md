@@ -275,6 +275,33 @@ l'ouvrir, et ça mérite une alarme, pas un silence.
 - **Poussée ARI** : l'entretien quotidien pousse un **delta**, jamais un full
   sync (cooldown 24 h, file d'attente, coût provider).
 
+### ✅ 4.6.0 LIVRÉ le 20 septembre 2026 — la fenêtre et les trois états
+
+**Aucune écriture.** Ce sous-lot ne pose que la lecture : là où le dessin dit
+« pas encore ouverte », le code sait désormais le dire, et le mesurer.
+
+| ce qui est livré | où |
+|---|---|
+| La fenêtre du bien : `pilote_fenetre_type` (`jours` \| `mois`), `pilote_fenetre_valeur`, **nulles par défaut**, trois contraintes | `migrations/2026-09-20-pilote-fenetre.sql` |
+| La règle, en un seul endroit : `fenetreDuBien`, `finDeFenetre`, `estHorsFenetre`, `dateOuverture` | `lib/pilote-tarifaire.js` |
+| Le dénominateur : `jours_hors_fenetre` (ni ouvertes ni fermées), `jours_attendus_sans_ligne` (l'anomalie, comptée sans alarmer) | `lib/yield/capacite.js` |
+| Chaque nuit porte `hors_fenetre` et `ouverture_prevue` | `api/yield-prix.js` |
+| L'écran dit « pas encore ouverte — s'ouvrira le … », jamais « fermée » ni « non renseignée » | `apps/yield/prix.html` |
+
+**Ce que « N mois glissants » veut dire, gravé** : le même jour calendaire, N
+mois plus loin, **borné au dernier jour du mois d'arrivée**. Le 31 janvier + 1
+mois donne le 28 février, jamais le 3 mars — un `setMonth` nu déborde, et une
+fenêtre « d'un mois » aurait fait 31 jours en janvier et 34 en février.
+
+**La garantie du lot** : un bien sans fenêtre — mode calendrier, ou yieldflow
+pas encore réglé — n'a pas de « hors fenêtre ». `finDeFenetre` rend `null`, la
+capacité ne tire jamais la branche neuve, l'écran ne change pas. Le réglage de
+la fenêtre est un geste de l'activation (4.6.3), pas de ce lot.
+
+**Ce que le TO ne change pas** : il lisait déjà `jours_ouverts` au dénominateur,
+donc une nuit hors fenêtre n'y était pas. Ce qui change, c'est qu'elle n'est
+plus comptée dans `jours_fermes` — et le **mot** à l'écran.
+
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
 **A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**
