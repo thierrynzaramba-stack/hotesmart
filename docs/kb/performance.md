@@ -65,6 +65,26 @@ avant le merge, mais le merge l'applique à la prod dans le même geste.
 **Comment vérifier après déploiement** : `curl -sI https://<hôte>/api/avis |
 grep x-vercel-id` doit montrer `cdg1::cdg1::…`, puis rejouer la mesure du §1.
 
+## 2 bis. La mesure APRÈS, sur staging (21 septembre 2026, même méthode)
+
+`x-vercel-id` dit désormais `cdg1::cdg1::…`.
+
+| Endpoint | avant (3e appel) | après (3e appel) |
+|---|---|---|
+| `channel-property` | 1 376 ms | 316 ms |
+| `calendar` 3 biens, 60 jours | 1 069 ms | 449 ms |
+| `menages` 30 jours | 1 237 ms | 458 ms |
+| `yield-pilote` | 1 366 ms | 326 ms |
+| `avis` | 2 169 ms | 524 ms |
+| jeton invalide (garde seule) | 490 ms | 130 ms |
+| sans jeton | 190 ms | 85 ms |
+
+**Lecture.** Un aller-retour fonction → Supabase est passé de ~300 ms à
+~45 ms (130 − 85). Les endpoints authentifiés sont **trois à quatre fois plus
+rapides**, sans une ligne de code métier. Ce qui reste (300-500 ms) est la
+somme des aller-retours en série du §3 : c'est là que se joue le prochain
+gain, et il est désormais mesurable.
+
 ## 3. Ce qui reste, par ordre de gain attendu (à mesurer après le §2)
 
 1. **La garde fait ses aller-retours en série** (`lib/require-permission.js` :
