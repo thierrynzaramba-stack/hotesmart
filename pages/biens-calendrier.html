@@ -1179,11 +1179,19 @@
       idxs.forEach(i=>{ st[i].stopSell='closed'; st[i].modified=true })
       sel={bienId:null, idx:new Set(), row:'rate'}; hideFloatBar(); renderBlocks()
       showToast('Fermeture de '+idxs.length+' jour'+(idxs.length>1?'s':'')+'…')
-      try{
-        let dernier=null
-        for(const [a,b] of plages){ dernier = await api.calendar.fermer(bienId, toISO(days[a]), toISO(days[b]), raison) }
-        afficherVerdict(dernier, 'Fermé à la vente — '+raison)
-      }catch(err){ showToast('Erreur: ' + (err.message||'fermeture'), 6000) }
+      // ⚠ UNE PLAGE = UN APPEL, ET LE VERDICT EST CELUI DU PIRE — releve en
+      // review : montrer la derniere reponse cachait un `push_failed` sur la
+      // premiere plage derriere un toast vert. On continue apres un echec pour
+      // que l'hote sache ce qui a ete pose et ce qui ne l'a pas ete.
+      const reponses=[], echecs=[]
+      for(const [a,b] of plages){
+        const libelle=fmtJourFr(toISO(days[a]))+(a!==b?'→'+fmtJourFr(toISO(days[b])):'')
+        try{ reponses.push(await api.calendar.fermer(bienId, toISO(days[a]), toISO(days[b]), raison)) }
+        catch(err){ echecs.push(libelle+' : '+(err.message||'fermeture')) }
+      }
+      const pire = reponses.find(r=>r&&r.push_failed) || reponses.find(r=>r&&r.local_only) || reponses.find(r=>r&&r.warnings&&r.warnings.length) || reponses[0]
+      if(echecs.length) showToast((reponses.length?reponses.length+' plage(s) fermée(s). ':'')+'NON FERMÉ — '+echecs.join(' · '), 12000)
+      else afficherVerdict(pire, 'Fermé à la vente — '+raison)
       await reloadInventory()
     }
     // Retirer une fermeture : rouvre TOUTE sa periode, et le dit avant.

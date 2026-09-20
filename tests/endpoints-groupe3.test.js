@@ -61,7 +61,7 @@ const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/cale
 // `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
                      snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null,
-                     erreurUpdateProperties = null, fermetures = [] } = {}) {
+                     erreurUpdateProperties = null, fermetures = [], erreurFermetures = null } = {}) {
   const etat = { ecritures: [], filtresIn: [], appels: [] }
 
   const client = {
@@ -184,8 +184,10 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         // servie, pour que la scission se lise dans `etat.ecritures` ET dans ce
         // que la lecture suivante rend.
         if (nom === 'fermetures') {
+          if (erreurFermetures) return { data: null, error: { message: erreurFermetures } }
           const rows = fermetures.filter(f =>
             (q._f.property_id == null || f.property_id === q._f.property_id) &&
+            (q._in == null || q._in.v.includes(f[q._in.c])) &&
             (q._f.id == null || f.id === q._f.id) &&
             (q._f.user_id == null || f.user_id === q._f.user_id))
           return { data: tableau ? rows : (rows[0] || null), error: null }
@@ -1218,4 +1220,55 @@ test('fermer une nuit deja dans une fermeture ne scinde RIEN', async () => {
     segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: true }]
   } }), reponse())
   assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'fermetures'), [], 'aucune ecriture de fermetures')
+})
+
+test('fermer : des dates qui croisent une fermeture existante -> 409, AUCUNE ecriture', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'fermer', property_id: BIEN_CHANNEX.id, debut: '2026-10-18', fin: '2026-10-25', raison: 'perso'
+  } }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.code, 'chevauchement')
+  assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('LE TEST QUI COMPTE : rouvrir quand les fermetures sont ILLISIBLES -> 503 nomme, jamais un 500 muet ni une ecriture', async () => {
+  // La migration pas encore collee, ou PostgREST en retard : les seules
+  // sauvegardes qui rouvrent tombaient en 500 sans message, les tarifs
+  // passaient — une panne selective, indiagnosticable.
+  const etat = preparer({ user: PROD, erreurFermetures: 'relation "fermetures" does not exist' })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: false, avail: 1 }]
+  } }), res)
+  assert.strictEqual(res.code, 503)
+  assert.strictEqual(res.body.code, 'fermetures_illisibles')
+  assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'calendar_inventory'), [], 'rien n est rouvert a l aveugle')
+  // Un tarif seul, lui, passe : il ne rouvre rien.
+  const res2 = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id, segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', rate: 90 }]
+  } }), res2)
+  assert.strictEqual(res2.code, 200, JSON.stringify(res2.body))
+})
+
+test('un segment qui FERME et releve le stock ne scinde rien : pour le writer, la nuit reste fermee', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: BIEN_CHANNEX.id,
+    segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: true, avail: 1 }]
+  } }), reponse())
+  assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'fermetures'), [])
+})
+
+test('fermetures GET : une seule requete pour tous les biens, et user_id n en sort pas', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  const res = reponse()
+  await require('../api/calendar')(req({ query: { property_ids: `${BIEN_CHANNEX.id},${BIEN_A.id}`, start: '2026-10-01', end: '2026-10-31' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.fermetures[BIEN_A.id], [], 'chaque bien a sa cle, meme vide')
+  assert.strictEqual(res.body.fermetures[BIEN_CHANNEX.id].length, 1)
+  void etat
 })

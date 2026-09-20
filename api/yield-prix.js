@@ -21,7 +21,7 @@ const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const { dateOuverture } = require('../lib/pilote-tarifaire')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
-const { exceptionsDuBien } = require('../lib/yield/exceptions')
+const { exceptionsDuBien, joursExclus } = require('../lib/yield/exceptions')
 const { evenementsDuBien } = require('../lib/yield/evenements')
 const { datesCommerciales } = require('../lib/yield/dates-commerciales')
 const { reglagesDuBien, reglagePour } = require('../lib/yield/reglages-segment')
@@ -237,10 +237,8 @@ module.exports = async (req, res) => {
     const { pont } = construirePontDemapped(lignes, bien.provider)
     const duBien = lignes.filter(l => l.property_id === bien.provider_property_id)
     const exceptions = await exceptionsDuBien(supabase, bien.id, debutContexte, finContexte)
-    const exclus = new Set()
-    for (const p of exceptions) {
-      for (const j of joursDeLaPeriode(p.date_debut, p.date_fin) || []) exclus.add(j)
-    }
+    // ⚠ PAR `joursExclus` : exceptions ∪ FERMETURES de l'hote (lot 4.6.2).
+    const exclus = await joursExclus(supabase, bien.id, debutContexte, finContexte, { exceptions })
     const eclatements = duBien.map(l => eclater(l, {
       pont, joursExclus: exclus, defaultProvider: bien.provider
     }))

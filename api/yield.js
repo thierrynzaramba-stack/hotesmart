@@ -266,12 +266,10 @@ module.exports = async (req, res) => {
     // supprimer), le moteur des jours qu'elles excluent : on lit une fois, on
     // derive les deux.
     const exceptions = await exceptionsDuBien(supabase, bien.id, debutHistorique, finDemandee)
-    const exclus = new Set()
-    for (const p of exceptions) {
-      for (const j of joursDeLaPeriode(p.date_debut, p.date_fin) || []) {
-        if (j >= debutHistorique && j <= finDemandee) exclus.add(j)
-      }
-    }
+    // ⚠ PAR `joursExclus`, PAS PAR UN Set MAISON : c'est lui qui sait que les
+    // FERMETURES de l'hote (lot 4.6.2) sortent aussi de la reference. Les
+    // exceptions deja lues lui sont passees — une lecture, deux usages.
+    const exclus = await joursExclus(supabase, bien.id, debutHistorique, finDemandee, { exceptions })
     const eclatements = duBien.map(l => eclater(l, {
       pont, joursExclus: exclus, defaultProvider: bien.provider
     }))

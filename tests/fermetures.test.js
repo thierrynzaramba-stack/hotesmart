@@ -14,7 +14,7 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const {
-  fermeturesDuBien, nuitsFermees, creerFermeture, supprimerFermeture, scinder, scinderAutour
+  fermeturesDuBien, fermeturesDesBiens, nuitsFermees, creerFermeture, supprimerFermeture, scinder, scinderAutour, NUITS_MAX
 } = require('../lib/fermetures')
 
 const COMPTE = '11111111-1111-4111-8111-111111111111'
@@ -28,9 +28,10 @@ function fausseBase (lignes = [], { erreur = null } = {}) {
     journal,
     from (table) {
       assert.equal(table, 'fermetures', 'ce module ne touche que sa table')
-      const q = { table, op: 'select', f: [], ligne: null, lte: null, gte: null }
-      q.select = () => q
+      const q = { table, op: 'select', f: [], ligne: null, lte: null, gte: null, cols: null, dans: null }
+      q.select = (cols) => { q.cols = cols; return q }
       q.eq = (c, v) => { q.f.push([c, v]); return q }
+      q.in = (c, v) => { q.dans = [c, v]; return q }
       q.lte = (c, v) => { q.lte = [c, v]; return q }
       q.gte = (c, v) => { q.gte = [c, v]; return q }
       q.order = () => q
@@ -38,15 +39,16 @@ function fausseBase (lignes = [], { erreur = null } = {}) {
       q.delete = () => { q.op = 'delete'; return q }
       q.single = () => q
       const executer = () => {
-        journal.push({ op: q.op, f: q.f, ligne: q.ligne, lte: q.lte, gte: q.gte })
+        journal.push({ op: q.op, f: q.f, ligne: q.ligne, lte: q.lte, gte: q.gte, cols: q.cols, dans: q.dans })
         if (erreur) return { data: null, error: erreur }
         if (q.op === 'insert') return { data: { id: 'neuf-' + journal.length, ...q.ligne }, error: null }
         if (q.op === 'delete') {
           const cible = lignes.filter(l => q.f.every(([c, v]) => String(l[c]) === String(v)))
           return { data: cible, error: null }
         }
-        // select : croisement de periode + filtres eq
+        // select : croisement de periode + filtres eq + in
         let out = lignes.filter(l => q.f.every(([c, v]) => String(l[c]) === String(v)))
+        if (q.dans) out = out.filter(l => q.dans[1].includes(l[q.dans[0]]))
         if (q.lte) out = out.filter(l => l[q.lte[0]] <= q.lte[1])
         if (q.gte) out = out.filter(l => l[q.gte[0]] >= q.gte[1])
         return { data: out, error: null }
@@ -162,4 +164,61 @@ test('supprimer une fermeture d un AUTRE compte ne trouve rien, et le dit', asyn
   const sb = fausseBase([fermeture({ user_id: '99999999-9999-4999-8999-999999999999' })])
   const r = await supprimerFermeture(sb, { userId: COMPTE, propertyId: BIEN, id: F1 })
   assert.equal(r.ok, false); assert.equal(r.raison, 'introuvable')
+})
+
+// ─── 5. Correctifs de review ────────────────────────────────────────────────
+test('LE TEST QUI COMPTE : deux fermetures ne se CHEVAUCHENT jamais — la seconde est refusee, sans ecriture', async () => {
+  // Sinon retirer l'une rouvrait des nuits que l'autre dit fermees : l'objet
+  // et la memoire en desaccord, dans le sens interdit.
+  const sb = fausseBase([fermeture()])
+  const r = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-10-18', fin: '2026-10-25', raison: 'perso' })
+  assert.equal(r.ok, false); assert.equal(r.raison, 'chevauchement')
+  assert.match(r.message, /2026-10-12 au 2026-10-20/)
+  assert.ok(sb.journal.every(j => j.op === 'select'), 'rien n est ecrit')
+  // Le lendemain de la fin, c'est libre : les bornes sont incluses, pas plus.
+  const r2 = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-10-21', fin: '2026-10-25', raison: 'perso' })
+  assert.equal(r2.ok, true)
+})
+
+test('une lecture en echec AVANT de creer refuse, et le dit — on ne cree pas a l aveugle', async () => {
+  const sb = fausseBase([], { erreur: { message: 'timeout' } })
+  const r = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-10-12', fin: '2026-10-20', raison: 'x' })
+  assert.equal(r.ok, false); assert.equal(r.raison, 'lecture_impossible')
+})
+
+test('une fermeture trop longue est refusee — on ne tronque pas', async () => {
+  const sb = fausseBase()
+  const r = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-01-01', fin: '2999-12-31', raison: 'x' })
+  assert.equal(r.ok, false); assert.equal(r.raison, 'periode_trop_longue')
+  assert.equal(sb.journal.length, 0)
+  const ok = await creerFermeture(sb, { userId: COMPTE, propertyId: BIEN, debut: '2026-01-01', fin: '2028-09-26', raison: 'x' })
+  assert.equal(ok.ok, true, `${NUITS_MAX} nuits exactement passent`)
+})
+
+test('LE TEST QUI COMPTE : scinderAutour INSERE les morceaux AVANT de retirer l ancienne', () => {
+  // Sans transaction, l'ordre inverse laissait sur un insert en echec une
+  // fermeture disparue : nuits fermees en memoire, sans objet — rouvrables.
+  return (async () => {
+    const sb = fausseBase([fermeture()])
+    await scinderAutour(sb, { userId: COMPTE, propertyId: BIEN, nuitsRouvertes: ['2026-10-15'] })
+    const ops = sb.journal.map(j => j.op).filter(o => o !== 'select')
+    assert.deepEqual(ops, ['insert', 'insert', 'delete'])
+  })()
+})
+
+test('la lecture ne rapporte JAMAIS user_id : ces lignes partent telles quelles au calendrier', async () => {
+  const sb = fausseBase([fermeture()])
+  await fermeturesDuBien(sb, BIEN, '2026-10-01', '2026-10-31')
+  await fermeturesDesBiens(sb, [BIEN], '2026-10-01', '2026-10-31')
+  for (const j of sb.journal) assert.ok(!/user_id/.test(j.cols), `colonnes lues : ${j.cols}`)
+})
+
+test('fermeturesDesBiens : UNE requete, groupee par bien, chaque bien a sa cle meme vide', async () => {
+  const AUTRE = '44444444-4444-4444-8444-444444444444'
+  const sb = fausseBase([fermeture(), fermeture({ id: 'f2', property_id: AUTRE, date_debut: '2026-10-01', date_fin: '2026-10-02' })])
+  const r = await fermeturesDesBiens(sb, [BIEN, AUTRE, '55555555-5555-4555-8555-555555555555'], '2026-10-10', '2026-10-31')
+  assert.equal(sb.journal.length, 1, 'une seule requete')
+  assert.deepEqual(sb.journal[0].dans[0], 'property_id')
+  assert.equal(r[BIEN].length, 1); assert.deepEqual(r[AUTRE], [], 'hors periode'); assert.deepEqual(r['55555555-5555-4555-8555-555555555555'], [])
+  await assert.rejects(() => fermeturesDesBiens(sb, [BIEN, 'pas-un-uuid'], '2026-10-01', '2026-10-31'), /uuid/)
 })

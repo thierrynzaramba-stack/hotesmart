@@ -669,3 +669,10 @@ test('fermetures : la raison est ECHAPPEE avant d entrer dans le HTML', () => {
   assert.ok(PAGE.includes('echapper(f.raison)'))
   assert.ok(PAGE.includes("title=\"Fermé : '+echapper(rs)"))
 })
+
+test('fermetures : plusieurs plages -> le verdict affiche est celui du PIRE, et un echec nomme sa plage', () => {
+  const poser = PAGE.slice(PAGE.indexOf('async function poserFermeture'), PAGE.indexOf('async function retirerFermeture'))
+  assert.ok(poser.includes('reponses.find(r=>r&&r.push_failed)'), 'un push_failed sur une plage ne se cache pas derriere la suivante')
+  assert.ok(poser.includes('NON FERMÉ — '), 'un echec se dit')
+  assert.ok(!/let dernier/.test(poser), 'plus de « derniere reponse »')
+})

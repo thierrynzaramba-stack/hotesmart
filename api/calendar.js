@@ -9,7 +9,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
 const { ecrireCalendrier, expandDays } = require('../lib/calendrier-writer')
-const { fermeturesDuBien, creerFermeture, supprimerFermeture, scinderAutour } = require('../lib/fermetures')
+const { fermeturesDesBiens, creerFermeture, supprimerFermeture, scinderAutour } = require('../lib/fermetures')
 const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
 
 // ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
@@ -401,11 +401,9 @@ module.exports = async function handler(req, res) {
     // JAMAIS pour decider si une nuit est vendable — ca, c'est `inventory`.
     // Une lecture en echec ne fait pas tomber le calendrier : on rend un objet
     // vide et on le dit, l'inventaire reste la verite.
-    const fermetures = {}
-    for (const id of ownedIds) {
-      try { fermetures[id] = await fermeturesDuBien(supabase, id, start, end) }
-      catch (e) { console.error('[calendar] fermetures illisibles', id, e.message); fermetures[id] = [] }
-    }
+    let fermetures = {}
+    try { fermetures = await fermeturesDesBiens(supabase, ownedIds, start, end) }
+    catch (e) { console.error('[calendar] fermetures illisibles', e.message); for (const id of ownedIds) fermetures[id] = [] }
     return res.status(200).json({ properties: proprietesPubliques, inventory, bookings, fermetures })
   }
 
@@ -500,7 +498,10 @@ module.exports = async function handler(req, res) {
       const bien = owned[0]
       if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
       const cree = await creerFermeture(supabase, { userId: compte, propertyId: bienId, debut, fin, raison })
-      if (!cree.ok) return res.status(400).json({ error: cree.message, code: cree.raison })
+      if (!cree.ok) {
+        const status = cree.raison === 'lecture_impossible' ? 503 : cree.raison === 'chevauchement' ? 409 : 400
+        return res.status(status).json({ error: cree.message, code: cree.raison })
+      }
       const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: cree.segments, origine: 'host', appel: channelCall })
       if (r.refus) {
         await supabase.from('fermetures').delete().eq('id', cree.fermeture.id).eq('user_id', compte)
@@ -620,17 +621,37 @@ module.exports = async function handler(req, res) {
     // L'hote rouvre le 15 dans une fermeture du 12 au 20 : elle devient 12-14
     // et 16-20. « La nouvelle configuration remplace l'ancienne, jamais de
     // restauration contre la volonte de l'hote » — le dernier geste gagne, le
-    // calendrier obeit. Ici, AVANT le writer : si la scission echoue, rien
-    // n'est ecrit, et une fermeture ne peut pas rester en desaccord avec la
-    // memoire qu'elle est censee porter.
+    // calendrier obeit.
+    //
+    // ⚠ AVANT LE WRITER, ET C'EST UN CHOIX ENTRE DEUX ECHECS (releve en
+    // review). Si la scission echoue, rien n'est ecrit au calendrier. Si c'est
+    // le writer qui refuse APRES la scission, la fermeture est deja coupee et la
+    // nuit reste fermee en memoire — sans objet, donc comme un stop_sell pose a
+    // la main : rien ne s'ouvre a tort, l'hote refait son geste. L'ordre
+    // inverse laisserait une fermeture COUVRANT une nuit ouverte — l'invariant
+    // que le verificateur defend (« si elle existe, ses nuits sont fermees »).
+    // Entre une raison perdue et une nuit vendue contre l'intention, on perd
+    // la raison.
+    //
+    // Une reouverture, c'est `stop_sell: false`, ou un stock releve sans
+    // `stop_sell: true` explicite — un segment qui ferme ET releve le stock
+    // reste ferme pour le writer, il ne scinde rien.
     const nuitsRouvertes = []
     for (const seg of dateSegments) {
-      if (seg.stop_sell === false || (seg.avail != null && Number(seg.avail) > 0)) {
-        nuitsRouvertes.push(...expandDays(seg.date_from, seg.date_to, seg.days))
-      }
+      const rouvre = seg.stop_sell === false || (seg.stop_sell !== true && seg.avail != null && Number(seg.avail) > 0)
+      if (rouvre) nuitsRouvertes.push(...expandDays(seg.date_from, seg.date_to, seg.days))
     }
     if (nuitsRouvertes.length) {
-      const sc = await scinderAutour(supabase, { userId: compte, propertyId: bienId, nuitsRouvertes })
+      // ⚠ `fermeturesDuBien` LEVE si la table est illisible (ou absente : la
+      // migration pas encore collee). Une reouverture sans savoir ce qu'elle
+      // rouvre ecrirait a l'aveugle ; on refuse, EN LE DISANT — un 500 muet
+      // sur les seules sauvegardes qui rouvrent serait indiagnosticable.
+      let sc
+      try { sc = await scinderAutour(supabase, { userId: compte, propertyId: bienId, nuitsRouvertes }) }
+      catch (e) {
+        console.error('[calendar] fermetures illisibles, reouverture refusee :', e.message)
+        return res.status(503).json({ error: 'Les fermetures de ce logement sont illisibles : la réouverture est refusée pour ne pas rouvrir à l\'aveugle. Réessayez.', code: 'fermetures_illisibles' })
+      }
       if (!sc.ok) return res.status(503).json({ error: sc.message, code: sc.raison })
       if (sc.touchees.length) console.log(`[calendar] ${sc.touchees.length} fermeture(s) scindee(s) par une reouverture`)
     }

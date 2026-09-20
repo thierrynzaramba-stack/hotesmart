@@ -438,3 +438,25 @@ test('joursExclus : une lecture de fermetures en echec LEVE — un vide par erre
   sb.from = (t) => { if (t === 'fermetures') return { select: () => ({ eq: () => ({ lte: () => ({ gte: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'timeout' } }) }) }) }) }) }; return from(t) }
   await assert.rejects(() => joursExclus(sb, BIEN, '2026-06-01', '2026-06-12'), /fermetures.*timeout/)
 })
+
+test('joursExclus : des exceptions deja lues lui sont passees — une lecture, deux usages', async () => {
+  const sb = fausseBase([{ id: 'e1', property_id: BIEN, date_debut: '2026-06-01', date_fin: '2026-06-03', motif: 'travaux' }])
+  let lectures = 0
+  const from = sb.from.bind(sb)
+  sb.from = (t) => { if (t === 'yield_exceptions') lectures++; return from(t) }
+  const exclus = await joursExclus(sb, BIEN, '2026-06-01', '2026-06-12', { exceptions: [{ date_debut: '2026-06-05', date_fin: '2026-06-06' }] })
+  assert.equal(lectures, 0, 'aucune relecture de yield_exceptions')
+  assert.deepEqual([...exclus].sort(), ['2026-06-05', '2026-06-06'], 'ce sont les exceptions PASSEES qui comptent, pas celles de la base')
+})
+
+test('LE TEST QUI COMPTE : les trois chemins de prod passent par joursExclus — aucun Set maison depuis exceptionsDuBien', () => {
+  // Releve en review : le pont exceptions ∪ fermetures ne vivait que dans
+  // `joursExclus`, que personne n'appelait. Les fermetures ne sortaient donc
+  // jamais du denominateur.
+  const fs = require('node:fs'), path = require('node:path')
+  for (const f of ['api/yield.js', 'api/yield-prix.js', 'lib/yield/grille-du-bien.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.match(src, /await joursExclus\(supabase, bien\.id, [^)]*\{ exceptions \}\)/, `${f} : joursExclus avec les exceptions deja lues`)
+    assert.ok(!/for \(const p of exceptions\) \{/.test(src), `${f} : plus de Set maison`)
+  }
+})
