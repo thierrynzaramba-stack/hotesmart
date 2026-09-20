@@ -234,5 +234,36 @@ fonction.
 
 ## 8. Jeu de données de test
 
-1 compte, 2 biens, quelques lignes de `bookings_snapshot` pour que les écrans
+1 compte, **3 biens**, quatre lignes de `bookings_snapshot` pour que les écrans
 aient quelque chose à afficher. Créé de zéro (§4), clés provider à `null`.
+Script : `scripts/seed-staging.sql` (lignes courtes, sans table temporaire,
+rejouable : il purge les biens `STG-BIEN-%` et leurs onze tables enfant clées
+en TEXT avant de recréer).
+
+| bien | `provider_property_id` | `rate_sync_mode` | rôle |
+|---|---|---|---|
+| Recette — Studio Centre | `STG-BIEN-1` | `keep` | prouve le **refus** de bascule vers YieldFlow (§2 bis B bis) |
+| Recette — Maison Jardin | `STG-BIEN-2` | `keep` | idem, et porte les réservations |
+| Recette — Loft Pilotable | `STG-BIEN-3` | `managed` | le seul **basculable** : c'est sur lui que se jouent les pièces du pilote |
+
+### État de recette VOULU depuis le 20 septembre 2026 — ne pas « remettre propre »
+
+**Loft Pilotable est laissé en `pilote_tarifaire = 'yieldflow'` avec une
+fenêtre `jours / 30`**, posée en SQL (le réglage n'a pas d'écran avant le
+4.6.3). Décision de Thierry à la clôture de la recette du 4.6.0 : les lots
+**4.6.1** (canal interne) et **4.6.3** (moteur d'ouverture) ont besoin d'un
+bien piloté à fenêtre pour leurs propres pièces. Le repasser en calendrier
+entre deux lots ferait refaire ce geste à chaque recette.
+
+Ce que cet état implique, pour ne pas le lire comme une panne :
+- dans *Prix jour par jour*, les 30 premiers jours de Loft sont « non
+  renseignés » — ils sont **dans** la fenêtre, sans ligne, *attendus* : le
+  moteur ne les a pas encore ouverts ; au-delà, « pas encore ouverte ·
+  s'ouvrira le … » ;
+- au calendrier, la saisie d'un **prix** sur Loft est refusée (garde serveur
+  du 4.5) ; disponibilité et fermeture passent ;
+- le vérificateur `scripts/verifier-pilote-tarifaire.js` annonce
+  **1 yieldflow** sur staging — c'est attendu, pas une anomalie.
+
+Pour revenir à l'état du seed : rejouer `scripts/seed-staging.sql` (il
+recrée Loft en `calendrier`, fenêtre `NULL`).
