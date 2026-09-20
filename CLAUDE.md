@@ -214,7 +214,7 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
-## DETTE DATEE — 8 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
+## DETTE DATEE — 21 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
@@ -251,11 +251,36 @@ voies, a trancher a la session dediee — rendre `detectChange` injectable comme
 volee dans un commit de lot : un test a dates figees se repare avec la regle en
 tete, pas en decalant les dates d'un mois.
 
+⚠️ **COMPTE ACTUALISE LE 20 SEPTEMBRE 2026 : 21, EN TROIS FAMILLES.**
+Le 18 septembre la suite etait a 8 ; le 20, a 21 — sur le MEME commit, sans
+qu'une ligne ait change. Les 13 nouveaux ne sont pas des regressions : c'est la
+meme maladie des dates figees, sous une autre forme. Contre-epreuve faite par
+deux sessions independamment : decaler les fixtures d'un mois les remet TOUS au
+vert, sans toucher une ligne de production.
+
+| famille | fichier | rouges | ce qui se declenche |
+|---|---|---|---|
+| 1 | `tests/booking-changes.test.js` | **8** | garde d'anciennete `JOURS_DE_GRACE = 7` (sejour termine) |
+| 2 | `tests/avis-endpoint.test.js` | **3** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir |
+| 3 | `tests/messages-classify.test.js` | **10** | meme fenetre : le message du 20 aout est ecarte AVANT la garde de panne DB, donc la garde n'est jamais appelee — elle mord toujours |
+
+Les familles 2 et 3 franchissent une FENETRE DE LECTURE, pas une garde
+d'anciennete — c'est ce qui les rend penibles : elles se declenchent a des
+dates qu'aucun de nous n'a en tete. La regle du depot vaut pour les trois :
+*dates relatives si le test lit l'horloge, dates figees s'il injecte le temps.*
+**La session dediee pour solder les TROIS familles reste due avant la cloture
+V1.** Un chiffre qui bouge tout seul avec le calendrier est un mauvais
+garde-fou : l'actualiser n'est qu'un sursis.
+
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
-Le nombre attendu est **8, et exactement 8**. Avant tout push : lire le compte,
-pas la couleur. **9 rouges = une regression, on ne pousse pas** tant qu'on ne
-l'a pas nommee ; 7 rouges = une dette s'est refermee, on met ce nombre a jour
-ici pour qu'elle reste protegee. C'est la meme discipline que le `ATTENDU` de
+Le nombre attendu est **21, et exactement 21** (8 + 3 + 10, au 20 septembre
+2026 — il etait 8 jusqu'au 18). Avant tout push : lire le compte,
+pas la couleur. **22 rouges = une regression, on ne pousse pas** tant qu'on ne
+l'a pas nommee ; 20 rouges = une dette s'est refermee, on met ce nombre a jour
+ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
+se contre-eprouve avant d'etre pris pour une regression : decaler les fixtures
+d'un mois, relancer, restaurer l'arbre — si tout repasse au vert, c'est le
+calendrier, et on l'ajoute au tableau ci-dessus avec sa cause. C'est la meme discipline que le `ATTENDU` de
 `tests/bookings-snapshot-troncature.test.js` : une exemption se COMPTE, elle ne
 se decrit pas.
 
