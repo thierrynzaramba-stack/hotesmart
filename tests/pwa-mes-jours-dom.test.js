@@ -1575,13 +1575,54 @@ test('une offre disparue entre le rendu et le geste n ouvre PAS une voisine', as
   const ligneP2 = [...agenda(w).querySelectorAll('.agenda-item.offre')]
     .find(l => /Bien p2/.test(l.textContent))
   assert.ok(ligneP2)
-  ligneP2.dataset.offreId = 'x-disparue'
+  ligneP2.dataset.offreCle = 'p2|x-disparue'
   ligneP2.dispatchEvent(new w.Event('click', { bubbles: true }))
   assert.strictEqual(w.document.getElementById('modal').style.display, 'none',
     'aucune fiche ne s ouvre — surtout pas celle de p1 à la place de p2')
   // Et la liste a été repeinte : le bouton p2 est de nouveau là, avec son vrai identifiant.
-  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item.offre[data-offre-id="x-' + j + '-p2"]').length, 1,
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item.offre[data-offre-cle="p2|x-' + j + '-p2"]').length, 1,
     'la liste est repeinte depuis les données')
+})
+
+test('LE TEST QUI COMPTE : le MEME booking_id sous deux biens le meme jour — chaque ligne ouvre le sien', async () => {
+  // ⚠ RELEVE EN REVIEW. L'identite d'un menage est (property_id, booking_id,
+  // departure_date) : la migration de transfert anticipe le MEME booking_id
+  // sous le bien source et le bien cible. Matcher par booking_id seul aurait
+  // rouvert le defaut qu'on ferme, par une autre porte.
+  const j = dans(1)
+  const commun = { booking_id: 'x-commun', departure_date: j, status: 'unassigned' }
+  const { w, t } = monter({ aPrendre: [
+    { ...commun, property_id: 'p2', property_name: 'Bien p2' },
+    { ...commun, property_id: 'p1', property_name: 'Bien p1' }
+  ] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const lignes = [...agenda(w).querySelectorAll('.agenda-item.offre')]
+  assert.strictEqual(lignes.length, 2)
+  const p2 = lignes.find(l => /Bien p2/.test(l.textContent))
+  p2.dispatchEvent(new w.Event('click', { bubbles: true }))
+  const fiche = w.document.getElementById('modal-body').textContent
+  assert.match(fiche, /Bien p2/)
+  assert.doesNotMatch(fiche, /Bien p1/, 'le booking_id commun n a pas suffi a la confondre avec p1')
+})
+
+test('la feuille du jour n ouvre plus une VOISINE quand l offre touchee a disparu', async () => {
+  // ⚠ RELEVE EN REVIEW : la feuille resolvait par indice avec un repli
+  // `Math.min(i, libres.length - 1)`, et `ouvrirPriseDeMenage` gardait
+  // `libres[idx] || libres[0]`. Le meme defaut que la liste, par l'autre porte.
+  const j = dans(1)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p1'), offre(j, 'p2')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  taperJour(w, j)
+  const bouton = [...w.document.querySelectorAll('#modal-body [data-offre]')].find(b => /Bien p2/.test(b.textContent))
+  assert.ok(bouton, 'la feuille du jour propose p2')
+  assert.match(bouton.dataset.offreCle, /^p2\|/, 'la feuille porte l identite, pas un indice')
+  bouton.dataset.offreCle = 'p2|x-disparue'
+  bouton.dispatchEvent(new w.Event('click', { bubbles: true }))
+  // La feuille du jour est repeinte (elle LISTE toujours p1 comme offre, c'est
+  // normal) ; ce qui ne doit pas arriver, c'est une PRISE ouverte a la place.
+  assert.doesNotMatch(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/,
+    'aucune prise ne s ouvre a la place de l offre disparue')
+  assert.ok(w.document.querySelector('#modal-body [data-offre]'), 'la feuille du jour est bien la, repeinte')
 })
 
 test('les marques ⏳ \ud83d\udcdd ⏭ suivent la ligne dans la liste', async () => {
@@ -2392,8 +2433,11 @@ test('chaque proposition du jour ouvre LA SIENNE, pas la première', async () =>
   taperJour(w, j)
   const lignes = [...w.document.querySelectorAll('#modal-body [data-offre]')]
   assert.strictEqual(lignes.length, 2, 'les deux propositions sont listées')
-  assert.deepStrictEqual(lignes.map(l => l.dataset.offreI), ['0', '1'],
-    'et chacune porte son propre index')
+  // Depuis le 21 septembre 2026, c'est l'IDENTITE (property_id|booking_id) qui
+  // est portee, pas un indice : un indice avec repli ouvrait la voisine quand
+  // l'offre touchee avait disparu.
+  assert.deepStrictEqual(lignes.map(l => l.dataset.offreCle), ['p1|x-' + j + '-p1', 'p2|x-' + j + '-p2'],
+    'et chacune porte sa propre identite')
 
   lignes[1].dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(40)
