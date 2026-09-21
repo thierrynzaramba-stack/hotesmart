@@ -73,7 +73,12 @@
        glisser les noms de biens sous la bande). */
     .cal-page { --bande-h: 74px; }
     #month-band-wrap { position: sticky; top: 0; z-index: 8; background: #fff; width: max-content; min-width: 100%; }
+    /* ⚠ `table-layout: fixed` NE S'APPLIQUE QU'A UNE TABLE DE LARGEUR NON AUTO
+       (Chromium et Gecko retombent sinon sur l'algorithme automatique, ou les
+       `col` ne sont que des preferences). La largeur est posee en ligne par
+       `tableStyle()` : LABEL_W + jours * CELL_W. Les deux tables la portent. */
     table.month-band { border-collapse: collapse; table-layout: fixed; }
+    table.month-band tr:first-child td { overflow: hidden; text-overflow: ellipsis; }
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; background: #fff; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
     /* La ligne des jours de la bande : la meme grammaire que l'ancien thead des
@@ -90,10 +95,17 @@
     table.month-band tr.jours td.weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2; }
     table.month-band tr.jours td.today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
     /* L'angle cumule les deux : colle a gauche ET fait partie de la bande. */
-    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 9; border-bottom: 1px solid #e5e5e7; }
+    /* Meme bordure droite que `.row-label` : sous border-collapse, une bordure
+       absente d'un cote decale la grille d'un demi-pixel. */
+    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 9; border-bottom: 1px solid #e5e5e7; border-right: 1px solid #e5e5e7; }
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
-    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; border-left: 4px solid #007aff; vertical-align: middle; line-height: 1.2; }
+    /* ⚠ `box-shadow`, PAS `border-left` : sous border-collapse, une bordure de
+       4 px sur la colonne 0 entre pour moitie dans la boite de la table AVANT
+       la colonne, et decale toute la grille de 2 px par rapport a la bande.
+       Le nom est tronque plutot que d'elargir la colonne : en `fixed`, un nom
+       long deborderait ; en automatique, il decalerait tous les jours du bien. */
+    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; box-shadow: inset 4px 0 0 #007aff; vertical-align: middle; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
     table.cal .row-label.bien-head .cap-h { display: block; font-size: 10px; font-weight: 400; color: #86868b; margin-top: 2px; }
     .bien-section { padding-top: 18px; }
     /* `.bien-title` a ete supprime : plus aucun element ne le portait (le nom du
@@ -389,7 +401,7 @@
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
     import { peutEcrire } from '/shared/compte-courant.js'
-    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
+    import { PARAMS, ROW_DEFAULTS, CELL_W, LABEL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -489,10 +501,13 @@
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
 
     function renderMonthPills(){ const w=document.getElementById('month-pills');w.innerHTML='';const seen=new Set();days.forEach((d,idx)=>{const k=d.getFullYear()+'-'+d.getMonth();if(!seen.has(k)){seen.add(k);const p=document.createElement('button');p.className='month-pill';p.textContent=monthFull[d.getMonth()];p.addEventListener('click',()=>{document.getElementById('scroll-area').scrollTo({left:idx*CELL_W,behavior:'smooth'});w.querySelectorAll('.month-pill').forEach(x=>x.classList.remove('active'));p.classList.add('active')});w.appendChild(p)}});const f=w.querySelector('.month-pill');if(f)f.classList.add('active') }
-    // Un seul jeu de colonnes pour la bande ET pour chaque bien : 120 px pour le
-    // libelle (= `.row-label`, border-box), CELL_W par jour.
-    const LABEL_W=120
-    function colonnesHtml(){ return '<colgroup><col style="width:'+LABEL_W+'px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup>' }
+    // Un seul jeu de colonnes pour la bande ET pour chaque bien : LABEL_W pour le
+    // libelle (= `.row-label`, border-box, shared/calendar-core.js), CELL_W par
+    // jour. Memorise par nombre de jours : la chaine ne depend que de `days`.
+    let colsCache={ n:-1, html:'' }
+    function colonnesHtml(){ if(colsCache.n!==days.length){ colsCache={ n:days.length, html:'<colgroup><col style="width:'+LABEL_W+'px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup>' } } return colsCache.html }
+    // La largeur en ligne qui rend `table-layout: fixed` reellement actif.
+    function tableStyle(){ return ' style="width:'+(LABEL_W+days.length*CELL_W)+'px"' }
     function renderMonthBand(){ const w=document.getElementById('month-band-wrap');
       // ⚠ LE `colgroup` DANS LA TABLE, APRES SA BALISE — releve en review. Ma
       // premiere version le prefixait AVANT `<table>` : le parseur HTML ignore
@@ -500,13 +515,13 @@
       // et ses jours derivaient d'une colonne par trimestre — la seule chose que
       // ce lot doit livrer. `table-layout: fixed` lit les `col`, pas les colspans.
       // ⚠ LES DEUX TABLES PARTAGENT LE MEME `colgroup` (`colonnesHtml`), OU RIEN
-      // NE LES ALIGNE. Constate par Thierry sur staging le 22 septembre 2026 :
+      // NE LES ALIGNE. Constate par Thierry sur staging le 21 septembre 2026 :
       // l'angle de la bande faisait 129 px (un calcul « content-box » alors que
       // `.cal-page *` est en border-box, donc `.row-label` fait 120 tout compris)
       // et la grille des biens n'avait pas de colgroup du tout : neuf pixels de
       // decalage constant entre le jour et la case. Avec `table-layout: fixed`,
       // ce sont les `col` qui font les colonnes — les memes, dans les deux tables.
-      let h='<table class="month-band">'+colonnesHtml()+'<tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr>';
+      let h='<table class="month-band"'+tableStyle()+'>'+colonnesHtml()+'<tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr>';
       // ⚠ LA LIGNE DES JOURS, UNE FOIS POUR TOUS LES BIENS. Meme `days`, memes
       // classes (`classesJour`) que l'ancien thead : week-end, jour courant,
       // debut de mois se lisent au meme endroit qu'avant, mais une seule fois.
@@ -638,7 +653,8 @@
       // TOUTES les lignes du bien et pas seulement sur le tarif.
       const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
-      let html='<table class="cal">'+colonnesHtml()+'<thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
+      // ⚠ `bien.name` vient du provider : ECHAPPE, comme dans `barresResa`.
+      let html='<table class="cal"'+tableStyle()+'>'+colonnesHtml()+'<thead><tr><th class="row-label bien-head" title="'+escapeHtmlLocal(bien.name)+'">'+escapeHtmlLocal(bien.name)+'<span class="cap-h">cap. '+escapeHtmlLocal(bien.capacity)+'</span></th>'
       // ⚠ PLUS DE JOURS ICI : ils sont dans la bande, sous le mois, une seule
       // fois (demande de Thierry). Les cellules restent, vides, pour aligner
       // les colonnes ; les classes de colonne (week-end, jour courant) aussi,
@@ -688,7 +704,7 @@
     function colIndexUnderX(clientX){
       const area=document.getElementById('scroll-area')
       const rect=area.getBoundingClientRect()
-      const xInContent = (clientX - rect.left) + area.scrollLeft - 120
+      const xInContent = (clientX - rect.left) + area.scrollLeft - LABEL_W
       let idx = Math.floor(xInContent / CELL_W)
       if(idx<0) idx=0; if(idx>days.length-1) idx=days.length-1
       return idx
@@ -713,7 +729,7 @@
       const EDGE=60, SPEED=18
       let scrolled=false
       if(lastMouseX > rect.right - EDGE){ area.scrollLeft += SPEED; scrolled=true }
-      else if(lastMouseX < rect.left + 120 + EDGE){ area.scrollLeft -= SPEED; scrolled=true }
+      else if(lastMouseX < rect.left + LABEL_W + EDGE){ area.scrollLeft -= SPEED; scrolled=true }
       if(scrolled){ extendSelTo(colIndexUnderX(lastMouseX)) }
       autoScrollRAF=requestAnimationFrame(autoScrollStep)
     }
