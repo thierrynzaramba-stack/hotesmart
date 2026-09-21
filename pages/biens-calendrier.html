@@ -176,9 +176,12 @@
        par JS sur les cellules qui portent le meme `data-col`. Sobre : un bleu
        gris tres pale, sous les couleurs qui portent un sens (aujourd'hui,
        selection, ferme, reserve) qui restent prioritaires. */
-    table.cal th, table.cal td, table.month-band tr.jours td { border-right: 1px solid #e8e8ec; }
-    table.cal td.col-hover, table.cal th.col-hover { background: #e9f0fa; }
-    table.month-band tr.jours td.col-hover { background: #d9e6f7; }
+    table.cal th, table.cal td, table.month-band tr.jours td:not(.corner) { border-right: 1px solid #e8e8ec; }
+    /* `background-color`, pas `background` : le raccourci effacerait les
+       hachures (background-image) d'un jour ferme pendant le survol. Le thead
+       est nomme a part : `thead th.weekend` est plus specifique que `th.col-hover`. */
+    table.cal td.col-hover, table.cal th.col-hover, table.cal thead th.col-hover { background-color: #e9f0fa; }
+    table.month-band tr.jours td.col-hover { background-color: #d9e6f7; }
     table.month-band tr.jours td.col-hover .day-name, table.month-band tr.jours td.col-hover .day-num { color: #1d4f91; }
     table.cal td.edit-cell { cursor: pointer; position: relative; }
     table.cal td.edit-cell:hover { background: #dbe7f8; }
@@ -533,7 +536,7 @@
     function colonnesHtml(){ if(colsCache.n!==days.length){ colsCache={ n:days.length, html:'<colgroup><col style="width:'+LABEL_W+'px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup>' } } return colsCache.html }
     // La largeur en ligne qui rend `table-layout: fixed` reellement actif.
     function tableStyle(){ return ' style="width:'+(LABEL_W+days.length*CELL_W)+'px"' }
-    function renderMonthBand(){ const w=document.getElementById('month-band-wrap');
+    function renderMonthBand(){ reinitSurvol(); const w=document.getElementById('month-band-wrap');
       // ⚠ LE `colgroup` DANS LA TABLE, APRES SA BALISE — releve en review. Ma
       // premiere version le prefixait AVANT `<table>` : le parseur HTML ignore
       // un colgroup hors table, la bande n'avait donc aucune largeur de colonne,
@@ -596,7 +599,7 @@
       return rows
     }
 
-    function renderBlocks(){ blocksEl.innerHTML=''; selectedBiens.forEach(bid=>{const b=BIENS.find(x=>x.id===bid);if(!b)return;if(!states[bid]||states[bid].length!==days.length)initState(b);blocksEl.appendChild(renderBienBlock(b))}); attachEvents() }
+    function renderBlocks(){ reinitSurvol(); blocksEl.innerHTML=''; selectedBiens.forEach(bid=>{const b=BIENS.find(x=>x.id===bid);if(!b)return;if(!states[bid]||states[bid].length!==days.length)initState(b);blocksEl.appendChild(renderBienBlock(b))}); attachEvents() }
 
     // Classes communes a l'en-tete et a toutes les lignes d'un meme jour.
     // Les trois rendus les recopiaient : un marquage ajoute a l'un (le week-end,
@@ -1845,17 +1848,29 @@
     // ─── Survol de colonne : la date et toutes ses cases s'eclairent ensemble.
     // Delegue sur la zone de defilement, donc survit aux re-rendus ; on ne
     // touche au DOM que quand la colonne change.
+    // ⚠ PAR LA GEOMETRIE (`colIndexUnderX`), pas par la cellule sous le curseur :
+    // les barres de reservation vivent toutes dans la PREMIERE cellule, et
+    // `closest('[data-col]')` y rendait toujours la colonne 0. `mousemove` plutot
+    // que `mouseover` : le long d'une barre, aucun element ne change.
+    // Un index colonne -> cellules est construit une fois par rendu (invalide par
+    // `reinitSurvol`, appele des re-rendus), pour ne pas parcourir 10 000 nœuds a
+    // chaque changement de colonne. Souris seulement : au doigt, `mouseleave` ne
+    // vient jamais et la colonne resterait allumee a cote de la selection.
+    let survolCourante=null, survolIndex=null
+    function reinitSurvol(){ survolCourante=null; survolIndex=null }
     (function survolColonne(){
       const area=document.getElementById('scroll-area'); if(!area) return
-      let courante=null
-      const peindre=(col,on)=>{ area.querySelectorAll('[data-col="'+col+'"]').forEach(el=>el.classList.toggle('col-hover',on)) }
-      area.addEventListener('mouseover', e=>{
-        const cell=e.target.closest('[data-col]'); const col=cell?cell.dataset.col:null
-        if(col===courante) return
-        if(courante!==null) peindre(courante,false)
-        courante=col; if(col!==null) peindre(col,true)
+      if(!(window.matchMedia && window.matchMedia('(hover: hover)').matches)) return
+      const index=()=>{ if(!survolIndex){ survolIndex=new Map(); area.querySelectorAll('[data-col]').forEach(el=>{ const k=el.dataset.col; (survolIndex.get(k)||survolIndex.set(k,[]).get(k)).push(el) }) } return survolIndex }
+      const peindre=(col,on)=>{ (index().get(String(col))||[]).forEach(el=>el.classList.toggle('col-hover',on)) }
+      area.addEventListener('mousemove', e=>{
+        const dansGrille=e.target.closest('[data-col], .resa-bar')
+        const col=dansGrille?colIndexUnderX(e.clientX):null
+        if(col===survolCourante) return
+        if(survolCourante!==null) peindre(survolCourante,false)
+        survolCourante=col; if(col!==null) peindre(col,true)
       })
-      area.addEventListener('mouseleave', ()=>{ if(courante!==null){ peindre(courante,false); courante=null } })
+      area.addEventListener('mouseleave', ()=>{ if(survolCourante!==null){ peindre(survolCourante,false); survolCourante=null } })
     })()
     buildDays(); renderMonthPills(); renderMonthBand()
     await loadData()
