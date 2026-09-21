@@ -6,8 +6,8 @@
 //      sur laquelle une intention existe (fermee a la main, fermee calculee) ;
 //   2. il n'ouvre jamais une nuit sans prix ;
 //   3. il ouvre TOUTE la fenetre a l'activation, puis la nuit qui entre ;
-//   4. il ecrit par le canal, une fois par jour et par bien, et un echec sur
-//      un bien n'empeche pas le suivant.
+//   4. il ecrit par le canal — la boucle « une fois par jour et par bien »
+//      vit dans lib/pilote-quotidien.js (tests/pilote-quotidien.test.js).
 //
 // ⚠ HORLOGE INJECTEE (`aujourdHui`), dates figees : regle du depot.
 
@@ -17,13 +17,13 @@ const assert = require('node:assert')
 // des valeurs factices suffisent, aucun reseau n'est touche ici.
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test'
-const { nuitsAOuvrir, prixDOuverture, ouvrirLaFenetreDuBien, ouvrirFenetres, PREFIXE_MARQUEUR } = require('../lib/moteur-ouverture')
+const { nuitsAOuvrir, prixDOuverture, ouvrirLaFenetreDuBien } = require('../lib/moteur-ouverture')
 const { validerFenetre } = require('../lib/pilote-tarifaire')
 
 const AUJ = '2026-10-01'
 const ID = 'b1b1b1b1-0000-4000-8000-000000000001'
 const COMPTE = 'a1a1a1a1-0000-4000-8000-000000000001'
-const bien = (o = {}) => ({ id: ID, user_id: COMPTE, name: 'Loft', provider: 'channex', pilote_tarifaire: 'yieldflow',
+const bien = (o = {}) => ({ id: ID, user_id: COMPTE, name: 'Loft', provider: 'channex', provider_property_id: 'STG-1', pilote_tarifaire: 'yieldflow',
   pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 5, base_price: 90, inventory_units: 1, rate_sync_mode: 'managed', ...o })
 
 // ─── 1. La decision, pure ───────────────────────────────────────────────────
@@ -37,7 +37,7 @@ test('LE TEST QUI COMPTE : le moteur ne touche JAMAIS une indisponibilite de l h
   const r = nuitsAOuvrir({ bien: bien(), aujourdHui: AUJ, lignes, fermetures })
   assert.equal(r.fin, '2026-10-06', 'fenetre : aujourd hui + 5 jours')
   assert.deepEqual(r.nuits.map(n => n.date), ['2026-10-01'], 'la seule nuit sans intention ni indisponibilite')
-  assert.deepEqual(r.comptes, { a_ouvrir: 1, deja_ouvertes: 1, fermees_par_l_hote: 2, intention_existante: 2, sans_prix: 0, sous_plancher: 0 })
+  assert.deepEqual(r.comptes, { a_ouvrir: 1, deja_ouvertes: 1, fermees_par_l_hote: 2, intention_existante: 2, sans_prix: 0, sous_plancher: 0, vendues: 0 })
   assert.ok(r.nuits.every(n => n.ouvrir === true), 'une demande d ouverture, rien d autre')
 })
 
@@ -101,7 +101,7 @@ function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [],
       q.gte = (c, v) => { q.gte_ = v; return q }; q.lte = (c, v) => { q.lte_ = v; return q }
       q.upsert = (row) => { q.op = 'upsert'; q.ligne = row; return q }
       q.insert = (row) => { q.op = 'insert'; q.ligne = row; return q }
-      q.in = ch
+      q.in = ch; q.range = ch; q.lt = ch; q.gt = ch; q.or = ch; q.neq = ch
       q.delete = () => { q.op = 'delete'; return q }
       q.maybeSingle = () => { q.un = true; return q }
       const exec = () => {
@@ -110,6 +110,7 @@ function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [],
         if (table === 'fermetures') return { data: fermetures.filter(f => f.property_id === q.f.property_id && f.date_debut <= q.lte_ && f.date_fin >= q.gte_), error: null }
         if (table === 'calendar_inventory') return { data: lignes.filter(l => l.date >= q.gte_ && l.date <= q.lte_), error: null }
         if (table === 'properties') return { data: biens, error: null }
+        if (table === 'bookings_snapshot') return { data: [], error: null }
         if (table === 'channel_sync_queue') { if (q.op === 'insert') { (marqueurs.__file || (marqueurs.__file = [])).push(q.ligne); return { data: null, error: null } } return { data: [], error: null } }
         if (table === 'cron_logs') {
           if (q.op === 'upsert') { marqueurs[q.ligne.id] = { last_run: q.ligne.last_run, errors: q.ligne.errors }; return { data: null, error: null } }
@@ -166,53 +167,6 @@ test('un refus du canal est rendu tel quel, avec son message', async () => {
   assert.equal(r.ok, false); assert.equal(r.refus, 'prix_plancher'); assert.match(r.message, /plancher/)
 })
 
-// ─── 3. Tous les biens, une fois par jour ────────────────────────────────────
-test('LE TEST QUI COMPTE : une fois par jour et par bien — le marqueur est pose APRES le succes, et un echec se retente', async () => {
-  const B2 = 'b2b2b2b2-0000-4000-8000-000000000002'
-  const sb = fausseBase({ biens: [bien(), bien({ id: B2, name: 'Studio' })] })
-  let n = 0
-  const canal = async (s, b, demande) => { n++; if (b.id === B2) return { ok: false, refus: 'writer', message: 'panne' }; return { ok: true, ecrit: {}, ignorees: null } }
-  const t = Date.parse('2026-10-01T10:00:00Z')
-  const b1 = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, demander: canal, biensParPassage: 2 })
-  assert.equal(b1.biens, 2); assert.equal(b1.traites, 1); assert.equal(b1.erreurs.length, 1, 'le Studio a echoue, le Loft est passe')
-  assert.ok(sb.marqueurs[PREFIXE_MARQUEUR + ID], 'marqueur pose pour le Loft')
-  assert.deepEqual(sb.marqueurs[PREFIXE_MARQUEUR + ID].errors[0].fenetre, { type: 'jours', valeur: 5 }, 'et il porte la fenetre avec laquelle il a tourne')
-  assert.ok(!sb.marqueurs[PREFIXE_MARQUEUR + B2], 'PAS pour le Studio : il se retentera')
-  // Second passage le meme jour : le Loft est saute, le Studio retente.
-  const b2 = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 300000, demander: canal, biensParPassage: 2 })
-  assert.equal(b2.sautes, 1); assert.equal(n, 3, 'un appel de plus, pour le Studio seul')
-  // Le lendemain : le Loft repart (la fenetre a glisse).
-  const b3 = await ouvrirFenetres(sb, { aujourdHui: '2026-10-02', maintenant: () => t + 86400000, demander: canal, biensParPassage: 2 })
-  assert.equal(b3.sautes, 0)
-})
-
-test('LE TEST QUI COMPTE : une fenetre CHANGEE fait repasser le moteur le jour meme, quel que soit l ordre des ecritures', async () => {
-  // Effacer le marqueur a l'activation ne suffisait pas : un tick deja en
-  // train d'ouvrir ce bien le reposait apres l'effacement.
-  const sb = fausseBase({ biens: [bien()] })
-  const canal = fauxCanal()
-  const t = Date.parse('2026-10-01T10:00:00Z')
-  await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, demander: canal })
-  assert.equal((await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 1000, demander: canal })).sautes, 1, 'meme fenetre : saute')
-  sb.from = ((from) => (table) => { const q = from(table); if (table === 'properties') { const then = q.then; q.then = (ok, ko) => Promise.resolve({ data: [bien({ pilote_fenetre_valeur: 30 })], error: null }).then(ok, ko) } return q })(sb.from)
-  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 2000, demander: canal })
-  assert.equal(b.sautes, 0); assert.equal(b.traites, 1, 'fenetre elargie : le moteur repasse')
-})
-
-test('un bien par passage : le second attend le tick suivant, sans erreur', async () => {
-  const sb = fausseBase({ biens: [bien(), bien({ id: 'b2b2b2b2-0000-4000-8000-000000000002' })] })
-  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => 0, demander: fauxCanal() })
-  assert.equal(b.traites, 1); assert.equal(b.reportes, 1); assert.equal(b.erreurs.length, 0)
-})
-
-test('le budget mur reporte les biens restants au tick suivant, sans erreur', async () => {
-  const sb = fausseBase({ biens: [bien(), bien({ id: 'b2b2b2b2-0000-4000-8000-000000000002' })] })
-  let t = 0
-  const canal = async () => { t += 30000; return { ok: true, ecrit: {}, ignorees: null } }
-  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, budgetMs: 25000, demander: canal, biensParPassage: 5 })
-  assert.equal(b.traites, 1); assert.equal(b.reportes, 1); assert.equal(b.erreurs.length, 0)
-})
-
 // ─── 4. La fenetre demandee a l activation ───────────────────────────────────
 test('validerFenetre : jours ou mois, entier > 0, bornes ; une case cochee n est pas une fenetre d un jour', () => {
   assert.deepEqual(validerFenetre({ type: 'jours', valeur: 120 }), { ok: true, fenetre: { type: 'jours', valeur: 120 } })
@@ -227,4 +181,26 @@ test('validerFenetre : jours ou mois, entier > 0, bornes ; une case cochee n est
   assert.equal(validerFenetre({ type: 'jours', valeur: 500 }).ok, true)
   assert.equal(validerFenetre({ type: 'mois', valeur: 17 }).code, 'fenetre_trop_longue')
   for (const r of [validerFenetre(null), validerFenetre({ type: 'jours', valeur: 501 })]) assert.match(r.error, /[àâéèêçùô]/, 'le refus parle francais a l hote')
+})
+
+test('LE TEST QUI COMPTE : une nuit VENDUE ne s ouvre jamais, meme sans ligne — et le prix de la REGLE prime sur la memoire et le prix de base', () => {
+  const vendues = new Set(['2026-10-02'])
+  const prixCalcule = new Map([['2026-10-01', 13000]])
+  const r = nuitsAOuvrir({ bien: bien(), aujourdHui: AUJ, lignes: [{ date: '2026-10-03', rate: 70 }], fermetures: [], vendues, prixCalcule })
+  assert.ok(!r.nuits.some(n => n.date === '2026-10-02'), 'la nuit vendue n est pas demandee')
+  assert.equal(r.comptes.vendues, 1)
+  assert.equal(r.nuits.find(n => n.date === '2026-10-01').prix_centimes, 13000, 'la regle d abord')
+  assert.equal(r.nuits.find(n => n.date === '2026-10-03').prix_centimes, 7000, 'sinon la memoire')
+  assert.equal(r.nuits.find(n => n.date === '2026-10-04').prix_centimes, 9000, 'sinon le prix de base')
+})
+
+test('ouvrirLaFenetreDuBien lit les nuits vendues lui-meme quand l appelant n en fournit pas', async () => {
+  const sb = fausseBase()
+  const from = sb.from.bind(sb)
+  // Le faux client rend un sejour confirme sur le 02 (nuitsOccupees lit bookings_snapshot).
+  sb.from = (t) => { const q = from(t); if (t === 'bookings_snapshot') { q.then = (ok) => Promise.resolve({ data: [{ booking_id: 'r1', property_id: ID, snapshot: { arrival: '2026-10-02', departure: '2026-10-03', status: 'confirmed' } }], error: null }).then(ok) } return q }
+  const canal = fauxCanal()
+  const r = await ouvrirLaFenetreDuBien(sb, bien(), { aujourdHui: AUJ, demander: canal })
+  assert.equal(r.ok, true)
+  assert.ok(!canal.appels[0].demande.nuits.some(n => n.date === '2026-10-02'), 'la nuit occupee n est pas ouverte')
 })

@@ -357,15 +357,16 @@ test('le second ecrivain de `rate_sync_mode` est garde lui aussi', () => {
     'l appelant charge la colonne, sinon la garde lit undefined et s ouvre')
 })
 
-test('l ecran ne promet pas ce que le lot 4.6 apportera', () => {
-  // « Les prix se travaillent ici, et vous validez chaque tarif » etait faux :
-  // le lot 4.5 n ouvre aucune ecriture cote Yield. Un hote qui bascule FIGE ses
-  // prix, et rien ne l en avertissait.
+test('l ecran dit ce que le mode fait AUJOURD HUI — et plus la promesse d avant le 4.6', () => {
+  // Au 4.5, « basculer FIGE les prix » etait la verite, et l ecran la disait.
+  // Depuis les 4.6.3-4.6.5, YieldFlow ouvre les dates et entretient les prix :
+  // garder l ancienne phrase serait devenu le mensonge inverse.
   const src = lire('apps/yield/prix.html')
-  assert.ok(/basculer FIGE les prix de ce logement/.test(src),
-    'le choix dit ce qu il fait AUJOURD HUI')
-  assert.ok(/YieldFlow ne propose pas\s*'\s*\+\s*'\s*encore de tarifs|ne propose pas/.test(src),
-    'et l etat bascule le redit')
+  assert.ok(!/basculer FIGE les prix/.test(src), 'la phrase du 4.5 est partie avec ce qu elle decrivait')
+  assert.ok(!/ne propose pas\s*'\s*\+\s*'\s*encore de tarifs/.test(src))
+  assert.ok(/ouvre les '\s*\+\s*'dates de la fenêtre et entretient leurs prix chaque jour/.test(src) || /ouvre les dates de la fenêtre et entretient leurs prix/.test(src.replace(/'\s*\+\s*'/g, '')),
+    'le choix dit ce qu il fait : ouvrir et tarifer')
+  assert.ok(/indisponibilités ne sont jamais touchées/.test(src), 'et ce qu il ne touche pas')
   assert.ok(/enCoursPilote/.test(src), 'le jeton anti-course protege l affichage du pilote')
 })
 

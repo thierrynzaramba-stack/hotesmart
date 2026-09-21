@@ -91,8 +91,12 @@ calendrier par le canal interne (`lib/canal-calendrier.js`), et c'est le
 writer unique (`lib/calendrier-writer.js`) qui mémorise l'intention, journalise
 le prix (`source = 'engine'`) et pousse. Il n'ouvre que les nuits sur
 lesquelles personne n'a rien décidé ; une indisponibilité de l'hôte n'est
-jamais touchée. Son seul appelant est `api/cron.js`. Détail :
-docs/specs/spec-yieldflow-v1.md §2 ter « 4.6.3 livré ».
+jamais touchée. Son seul appelant est `api/cron.js`. Le **moteur de prix**
+(`lib/moteur-prix.js`, lot 4.6.4) suit la même règle : il lit la matière
+(`lib/yield/contexte-du-bien.js`), décide, et ne demande au canal que les
+prix qui changent. Le **pilote quotidien** (`lib/pilote-quotidien.js`, lot
+4.6.5) les enchaîne une fois par jour et par bien. Détail :
+docs/specs/spec-yieldflow-v1.md §2 ter « 4.6.3 » à « 4.6.5 livré ».
 
 ## La fiche du bien : `property_snapshots` (étape 1B)
 
