@@ -213,7 +213,15 @@ export const api = {
     save: (propertyId, segments) =>
       apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments }),
     fullsync: (propertyId) =>
-      apiCall('calendar', 'POST', { action: 'fullsync', property_id: propertyId })
+      apiCall('calendar', 'POST', { action: 'fullsync', property_id: propertyId }),
+    // Les fermetures de l'hote (lot 4.6.2) : l'objet (debut, fin, raison) qui
+    // ECRIT stop_sell par le meme chemin que tout geste du calendrier.
+    fermer: (propertyId, debut, fin, raison) =>
+      apiCall('calendar', 'POST', { action: 'fermer', property_id: propertyId, debut, fin, raison }),
+    modifierFermeture: (propertyId, id, debut, fin, raison) =>
+      apiCall('calendar', 'POST', { action: 'modifier_fermeture', property_id: propertyId, id, debut, fin, raison }),
+    rouvrirFermeture: (propertyId, id) =>
+      apiCall('calendar', 'POST', { action: 'rouvrir_fermeture', property_id: propertyId, id })
   },
   // Page « Equipe et droits ». Toutes les actions passent par POST : un jeton
   // d'acces n'a rien a faire dans une URL, qui finit dans les journaux du serveur

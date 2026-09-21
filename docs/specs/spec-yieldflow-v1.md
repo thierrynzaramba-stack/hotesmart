@@ -336,9 +336,13 @@ bien suivant.
   bloc — le cron doit pouvoir dire « 3 nuits ignorées : hors fenêtre » ;
 - une nuit **déjà fermée** en base n'est **pas rouverte** — son prix, lui, passe
   et attend, prêt. C'est plus strict que la règle finale (« Yield ne touche
-  jamais une fermeture de l'hôte »), jamais moins : d'ici le 4.6.2, une
-  fermeture est un `stop_sell` indistinguable d'une fermeture calculée, et ce
-  canal préfère ne pas ouvrir plutôt qu'ouvrir à tort ;
+  jamais une fermeture de l'hôte »), jamais moins : jusqu'au 4.6.2, une
+  fermeture était un `stop_sell` indistinguable d'une fermeture calculée, et ce
+  canal préfère ne pas ouvrir plutôt qu'ouvrir à tort. **Depuis le 4.6.2**, une
+  nuit couverte par une fermeture de l'hôte est comptée à part
+  (`fermees_par_l_hote`) et **rien** n'y est écrit, pas même un prix ; la nuit
+  fermée sans fermeture reste `deja_fermees`, et c'est le 4.6.3 qui décidera
+  d'elle ;
 - le plancher tient **par le writer**, donc par les deux portes.
 
 **Pourquoi le canal n'a pas d'endpoint, et n'en aura jamais** : la garde du
@@ -351,6 +355,43 @@ dit `origine: 'host'` en dur.
 `'host'` par l'endpoint — plus un `'host'` recopié. Le recensement des
 émetteurs de `/restrictions` (`tests/price-log.test.js`) déclare le writer
 comme tarifaire ; la porte HTTP, qui ne pousse plus rien elle-même, en sort.
+
+### ✅ 4.6.2 LIVRÉ le 21 septembre 2026 — les fermetures de l'hôte (dessin révisé le même jour)
+
+**Ce qui est livré.** La table `fermetures` (migration
+`migrations/2026-09-21-fermetures.sql` : RLS lecture seule sur son compte,
+l'écriture passe par l'endpoint, contrainte d'exclusion contre le chevauchement,
+CHECK de longueur), son seul writer `lib/fermetures.js` (lire, créer,
+**modifier**, supprimer — pas de scission), trois actions de `api/calendar.js` :
+`fermer` (crée l'objet **puis** écrit `stop_sell = true` par `ecrireCalendrier` ;
+si le writer refuse, l'objet est retiré), `modifier_fermeture` (dates et raison ;
+les nuits ajoutées se ferment, les nuits retirées rouvrent avec `avail` relevé,
+sauf celles qu'une autre fermeture couvre encore) et `rouvrir_fermeture` (retire
+l'objet, rouvre ce qu'aucune autre ne couvre). Dans `save`, **une réouverture
+qui touche une nuit couverte est refusée** (409 `nuit_fermee_par_fermeture`,
+la fermeture à modifier est nommée) ; une lecture en échec refuse aussi (503
+nommé), une table absente vaut « aucune fermeture ». L'exclusion des
+statistiques passe par `joursExclus` (exceptions ∪ fermetures, les trois chemins
+de prod y passent), le canal interne compte `fermees_par_l_hote` et n'y écrit
+rien. `scripts/verifier-fermetures.js` : chaque fermeture est portée par la
+mémoire d'intention, sinon échec.
+
+**L'écran.** Le parcours « nouvelle réservation » porte un type
+« Indisponible » (dates + raison) et s'ouvre sur tout bien — la réservation
+directe reste Channex-only et le formulaire le dit. Une fermeture est une
+**barre foncée** (anthracite) de la première à la dernière nuit, avec sa raison ;
+cliquer ouvre sa **fiche** : dates et raison modifiables, suppression après
+confirmation. Sur un bien piloté, « Fermer à la vente » ouvre ce parcours
+pré-rempli ; sur un bien calendrier, il reste un `stop_sell` nu. « Rouvrir à la
+vente » sur une nuit couverte n'écrit rien et ouvre la fiche.
+
+**Ce qui est assumé.**
+- **Supprimer rouvre toute la période** (hors nuits couvertes par une autre
+  fermeture), y compris une nuit fermée à la main avant. Dit au clic.
+- Le **calendrier mobile** ne connaît pas les fermetures (dette).
+- Une fermeture ne peut ni chevaucher une autre (409, tenu en base sous
+  concurrence) ni dépasser 1 000 nuits ; une date qui n'existe pas est une
+  période invalide.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
@@ -370,12 +411,24 @@ vient des providers (Beds24 `black`). Le réutiliser rendrait indistinguables un
 fermeture **décidée dans HôteSmart** et un blocage **importé**, et il ne porte ni
 raison ni bornes.
 
-**B. Une réouverture SCINDE la fermeture.** L'hôte rouvre le 15 dans une
-fermeture du 12 au 20 : elle devient 12-14 et 16-20, le 15 redevient vendable.
-C'est la règle déjà gravée de la mémoire d'intention — « la nouvelle
-configuration remplace l'ancienne, jamais de restauration contre la volonté de
-l'hôte ». Le dernier geste gagne, sans dialogue et sans refus : le calendrier
-obéit.
+**B. ~~Une réouverture SCINDE la fermeture.~~ ANNULÉ le 21 septembre 2026 —
+une fermeture est un objet manipulé COMME UNE RÉSERVATION.** Décision de
+Thierry après la première recette sur staging :
+- elle se **crée** par le parcours « nouvelle réservation », type
+  « indisponible », avec dates et raison ;
+- elle s'**affiche** dans le calendrier comme une barre de réservation, en
+  couleur **foncée** (distincte des vraies résas), avec sa raison ;
+- elle se **modifie uniquement à la main par l'hôte** — dates et raison, comme
+  il modifierait une réservation. **Aucune app ne peut la modifier** — ni
+  Yield ni aucune autre, jamais. Le calendrier non plus : **rouvrir directement
+  une nuit couverte est refusé** (409), et l'hôte est renvoyé vers la
+  modification de la fermeture ;
+- elle vaut bien piloté YieldFlow ou non.
+
+La scission du 19 septembre supposait que le calendrier avait le droit de
+toucher l'objet ; le nouveau dessin le lui retire, comme à tout le monde. La
+table dédiée et le writer ne changent pas : c'est l'UX et le comportement qui
+changent. La migration n'a pas bougé.
 
 **C. Une nuit hors fenêtre est EXCLUE du calcul, pas comptée fermée.**
 Ni au numérateur, ni au dénominateur : l'hôte n'a rien décidé pour elle.

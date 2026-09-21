@@ -41,8 +41,13 @@ const { demanderAuCalendrier, REFUS } = require('../lib/canal-calendrier')
 test.after(() => { Module._load = origine })
 
 const AUJ = '2026-09-20'
+// ⚠ DES UUID, comme en base : `fermeturesDuBien` refuse tout autre
+// identifiant (un non-UUID sur une colonne uuid est une ERREUR Postgres, pas un
+// resultat vide), et le faux client doit imposer ce que la vraie base impose.
+const ID_BIEN = 'b1b1b1b1-0000-4000-8000-000000000001'
+const COMPTE = 'a1a1a1a1-0000-4000-8000-000000000001'
 const BIEN = {
-  id: 'b-uuid-1', user_id: 'compte-A', name: 'Loft', provider: 'channex',
+  id: ID_BIEN, user_id: COMPTE, name: 'Loft', provider: 'channex',
   provider_property_id: 'P1', provider_room_type_id: 'RT1', provider_rate_plan_id: 'RP1',
   rate_sync_mode: 'managed', pilote_tarifaire: 'yieldflow',
   pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 10,
@@ -53,18 +58,24 @@ const CALENDRIER = { ...BIEN, pilote_tarifaire: 'calendrier' }
 
 // Faux client : `calendar_inventory` en lecture (lignes fournies) et en
 // ecriture (enregistree). Tout le reste rend vide.
-function fausseBase (lignes = []) {
+function fausseBase (lignes = [], { fermetures = [] } = {}) {
   const ecritures = []
   const client = {
     ecritures,
     from (table) {
-      const q = { _f: {}, _in: null }
+      const q = { _f: {}, _in: null, _lte: null, _gte: null }
       q.select = () => q
       q.eq = (c, v) => { q._f[c] = v; return q }
       q.in = (c, v) => { q._in = [c, v]; return q }
-      q.gte = () => q; q.lte = () => q; q.order = () => q; q.limit = () => q
+      q.gte = (c, v) => { q._gte = [c, v]; return q }; q.lte = (c, v) => { q._lte = [c, v]; return q }
+      q.order = () => q; q.limit = () => q
       q.maybeSingle = async () => ({ data: null, error: null })
       q.then = (res) => {
+        // Les fermetures de l'hote : croisement de periode, comme la vraie table.
+        if (table === 'fermetures') {
+          const out = fermetures.filter(f => (!q._lte || f[q._lte[0]] <= q._lte[1]) && (!q._gte || f[q._gte[0]] >= q._gte[1]))
+          return Promise.resolve({ data: out, error: null }).then(res)
+        }
         if (table !== 'calendar_inventory') return Promise.resolve({ data: [], error: null }).then(res)
         const dates = q._in && q._in[0] === 'date' ? new Set(q._in[1]) : null
         const data = lignes.filter(l => !dates || dates.has(l.date))
@@ -137,7 +148,7 @@ test('le writer ecrit, pousse et journalise — avec l origine qu on lui donne',
   const sb = fausseBase([ligne('2026-09-25')])
   const appel = fauxAppel()
   const r = await ecrireCalendrier({
-    supabase: sb, bien: BIEN, compte: 'compte-A', origine: 'engine', appel,
+    supabase: sb, bien: BIEN, compte: COMPTE, origine: 'engine', appel,
     dateSegments: [{ date_from: '2026-09-25', date_to: '2026-09-26', rate: 150, avail: 1, stop_sell: false }]
   })
   assert.ok(!r.refus, JSON.stringify(r.refus))
@@ -159,7 +170,7 @@ test('le writer ecrit, pousse et journalise — avec l origine qu on lui donne',
 test('le plancher tient par les deux portes : c est un refus du writer, pas de l endpoint', async () => {
   const sb = fausseBase([])
   const r = await ecrireCalendrier({
-    supabase: sb, bien: BIEN, compte: 'compte-A', origine: 'engine', appel: fauxAppel(),
+    supabase: sb, bien: BIEN, compte: COMPTE, origine: 'engine', appel: fauxAppel(),
     dateSegments: [{ date_from: '2026-09-25', date_to: '2026-09-25', rate: 20 }]
   })
   assert.ok(r.refus, 'refuse')
@@ -318,4 +329,43 @@ test('un prix invalide n annule PAS l ouverture de la meme nuit', async () => {
   assert.ok(up, 'mais l ouverture, valide et independante, est ecrite')
   assert.equal(up.rows[0].stop_sell, false)
   assert.equal(up.rows[0].rate, undefined, 'sans le prix')
+})
+
+// ─── 6. Les fermetures de l'hote (lot 4.6.2) ────────────────────────────────
+test('LE TEST QUI COMPTE : Yield ne touche JAMAIS une fermeture de l hote — ni ouverture, ni prix', async () => {
+  const fermeture = { id: 'f1', property_id: BIEN.id, date_debut: '2026-09-24', date_fin: '2026-09-26', raison: 'travaux' }
+  const sb = fausseBase([], { fermetures: [fermeture] })
+  etat.journal = []
+  const r = await demanderAuCalendrier(sb, BIEN, { aujourdHui: AUJ, nuits: [
+    { date: '2026-09-23', ouvrir: true, prix_centimes: 15000 },
+    { date: '2026-09-25', ouvrir: true, prix_centimes: 15000 },   // dans la fermeture
+    { date: '2026-09-27', ouvrir: true, prix_centimes: 15000 }
+  ] }, { appel: fauxAppel() })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.ignorees.fermees_par_l_hote, ['2026-09-25'], 'comptee a part, nommee')
+  const up = sb.ecritures.find(e => e.table === 'calendar_inventory')
+  assert.deepEqual(up.rows.map(x => x.date), ['2026-09-23', '2026-09-27'], 'RIEN n est ecrit sur la nuit fermee — pas meme un prix')
+})
+
+test('une fermeture illisible REFUSE la demande — un vide par erreur ferait ouvrir dedans', async () => {
+  const sb = fausseBase([])
+  const from = sb.from.bind(sb)
+  sb.from = (t) => { if (t === 'fermetures') { const q = from(t); q.then = (res) => Promise.resolve({ data: null, error: { message: 'timeout' } }).then(res); return q } return from(t) }
+  const r = await demanderAuCalendrier(sb, BIEN, { aujourdHui: AUJ, nuits: [{ date: '2026-09-25', ouvrir: true }] }, { appel: fauxAppel() })
+  assert.equal(r.ok, false)
+  assert.equal(r.refus, REFUS.DEMANDE_INVALIDE)
+  assert.match(r.message, /fermetures/)
+  assert.equal(sb.ecritures.length, 0)
+})
+
+test('fermee par l hote et fermee « calculee » sont deux comptes distincts', async () => {
+  // Le cron doit savoir lequel il regarde : l'un est une frontiere (jamais
+  // touchee), l'autre attend la regle du moteur d'ouverture (4.6.3).
+  const fermeture = { id: 'f1', property_id: BIEN.id, date_debut: '2026-09-25', date_fin: '2026-09-25', raison: 'perso' }
+  const sb = fausseBase([ligne('2026-09-24', { stop_sell: true, avail: 0 })], { fermetures: [fermeture] })
+  const r = await demanderAuCalendrier(sb, BIEN, { aujourdHui: AUJ, nuits: [
+    { date: '2026-09-24', ouvrir: true }, { date: '2026-09-25', ouvrir: true }
+  ] }, { appel: fauxAppel() })
+  assert.deepEqual(r.ignorees.deja_fermees, ['2026-09-24'])
+  assert.deepEqual(r.ignorees.fermees_par_l_hote, ['2026-09-25'])
 })

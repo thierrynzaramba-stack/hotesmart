@@ -68,6 +68,21 @@ Les avis voyageurs sont du **cœur**, pas du domaine ménage — voir
 réservation, lue par la fiche prestataire **et** par le futur module de pricing.
 Jamais dupliquée dans une app.
 
+## Cas tranché : `fermetures` (lot 4.6.2, 21 septembre 2026)
+
+Une fermeture de l'hôte (début, fin, raison) vit dans une table **dédiée**,
+écrite par **un seul writer** (`lib/fermetures.js`), et n'est **pas une seconde
+source de vérité** : la réponse à « cette nuit est-elle vendable ? » reste dans
+`calendar_inventory.stop_sell`, écrite par `lib/calendrier-writer.js`. La
+fermeture est ce qui ÉCRIT cette intention (par la porte `api/calendar.js`,
+actions `fermer` / `modifier_fermeture` / `rouvrir_fermeture`), et ce qui porte
+en plus le pourquoi et les bornes. **Une fermeture ne change que par la main de
+l'hôte** (dessin du 21 septembre 2026) : aucune app ne la modifie, le
+calendrier refuse de rouvrir une nuit qu'elle couvre. Aucune app ne lit `fermetures` pour décider de la vendabilité ; le
+calendrier l'affiche, le moteur de capacité l'exclut du dénominateur, le canal
+interne la respecte. Détail : docs/specs/spec-yieldflow-v1.md §2 ter §4-§5 et
+« 4.6.2 livré ».
+
 ## La fiche du bien : `property_snapshots` (étape 1B)
 
 Même forme que `bookings_snapshot`, et c'est délibéré : un payload provider

@@ -9,6 +9,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED } = require('../lib/rate-sync')
 const { ecrireCalendrier, expandDays } = require('../lib/calendrier-writer')
+const { fermeturesDesBiens, fermeturesDuBien, nuitsFermees, creerFermeture, modifierFermeture, supprimerFermeture } = require('../lib/fermetures')
 const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
 
 // ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
@@ -395,7 +396,15 @@ module.exports = async function handler(req, res) {
 
     // `user_id` sert au controle de perimetre, pas au front : il ne ressort pas.
     const proprietesPubliques = owned.map(({ user_id, ...reste }) => reste)
-    return res.status(200).json({ properties: proprietesPubliques, inventory, bookings })
+    // ⚠ LES FERMETURES DE L'HOTE (lot 4.6.2), par bien, sur la fenetre. L'ecran
+    // les affiche avec leur raison et permet de les retirer ; il ne les lit
+    // JAMAIS pour decider si une nuit est vendable — ca, c'est `inventory`.
+    // Une lecture en echec ne fait pas tomber le calendrier : on rend un objet
+    // vide et on le dit, l'inventaire reste la verite.
+    let fermetures = {}
+    try { fermetures = await fermeturesDesBiens(supabase, ownedIds, start, end) }
+    catch (e) { console.error('[calendar] fermetures illisibles', e.message); for (const id of ownedIds) fermetures[id] = [] }
+    return res.status(200).json({ properties: proprietesPubliques, inventory, bookings, fermetures })
   }
 
   // ===== POST : sauvegarde (Supabase puis push channel) =====
@@ -476,6 +485,89 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: 'Mise en file echouee' })
       }
       return res.status(200).json({ enqueued: true, queue_id: inserted.id })
+    }
+
+    // ===== FERMER UNE PERIODE : l'objet, PUIS la memoire (lot 4.6.2) =====
+    // Une fermeture n'est pas une seconde source de verite : on pose l'objet
+    // (debut, fin, raison), et on ECRIT `stop_sell` par le writer unique, comme
+    // n'importe quel geste du calendrier. Si le writer refuse, l'objet est
+    // retire : pas de fermeture qui existe sans que ses nuits soient fermees.
+    if (action === 'fermer') {
+      const { debut, fin, raison } = req.body || {}
+      const owned = await loadOwnedProperties([bienId], compte)
+      const bien = owned[0]
+      if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
+      const cree = await creerFermeture(supabase, { userId: compte, propertyId: bienId, debut, fin, raison })
+      if (!cree.ok) {
+        const status = cree.raison === 'lecture_impossible' ? 503 : cree.raison === 'chevauchement' ? 409 : 400
+        return res.status(status).json({ error: cree.message, code: cree.raison })
+      }
+      const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: cree.segments, origine: 'host', appel: channelCall })
+      if (r.refus) {
+        await supabase.from('fermetures').delete().eq('id', cree.fermeture.id).eq('user_id', compte)
+        return res.status(r.refus.status).json(r.refus.body)
+      }
+      return res.status(200).json({ fermeture: cree.fermeture, saved: r.saved, pushed: r.pushed,
+        local_only: r.localOnly, push_failed: r.pushFailed, warnings: r.warnings })
+    }
+    // ===== RETIRER UNE FERMETURE : rouvre TOUTE sa periode (assume, dit) =====
+    if (action === 'rouvrir_fermeture') {
+      const { id } = req.body || {}
+      const owned = await loadOwnedProperties([bienId], compte)
+      const bien = owned[0]
+      if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
+      const sup = await supprimerFermeture(supabase, { userId: compte, propertyId: bienId, id })
+      if (!sup.ok) return res.status(sup.raison === 'introuvable' ? 404 : 400).json({ error: sup.message, code: sup.raison })
+      // Rouvrir releve aussi `avail` : sans lui la nuit reste invendable
+      // (regle deja gravee pour le bouton « Rouvrir a la vente »).
+      const segs = sup.segments.map(x => ({ ...x, avail: Math.max(1, Number(bien.inventory_units) || 1) }))
+      // Aucune nuit a rouvrir (toutes couvertes par une autre fermeture, ou
+      // relecture en echec) : l'objet est retire, le calendrier ne bouge pas,
+      // et on le DIT.
+      if (!segs.length) {
+        return res.status(200).json({ retiree: sup.fermeture, saved: 0, pushed: false, local_only: false, push_failed: false,
+          warnings: [sup.avertissement || 'Aucune nuit à rouvrir.'] })
+      }
+      const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: segs, origine: 'host', appel: channelCall })
+      if (r.refus) return res.status(r.refus.status).json(r.refus.body)
+      const warnings = [...(r.warnings || [])]
+      if (sup.avertissement) warnings.push(sup.avertissement)
+      return res.status(200).json({ retiree: sup.fermeture, saved: r.saved, pushed: r.pushed,
+        local_only: r.localOnly, push_failed: r.pushFailed, warnings })
+    }
+
+    // ===== MODIFIER UNE FERMETURE : dates et raison, a la main, par l'hote =====
+    // Le SEUL chemin par lequel une fermeture change. Les nuits ajoutees se
+    // ferment, les nuits retirees rouvrent (avail releve), par le writer.
+    if (action === 'modifier_fermeture') {
+      const { id, debut, fin, raison } = req.body || {}
+      const owned = await loadOwnedProperties([bienId], compte)
+      const bien = owned[0]
+      if (!bien) return res.status(403).json({ error: 'Bien non autorise' })
+      const mod = await modifierFermeture(supabase, { userId: compte, propertyId: bienId, id, debut, fin, raison })
+      if (!mod.ok) {
+        const status = mod.raison === 'introuvable' ? 404 : mod.raison === 'chevauchement' ? 409 : mod.raison === 'lecture_impossible' ? 503 : 400
+        return res.status(status).json({ error: mod.message, code: mod.raison })
+      }
+      const segs = mod.segments.map(x => x.stop_sell ? x : ({ ...x, avail: Math.max(1, Number(bien.inventory_units) || 1) }))
+      const warnings = []
+      if (mod.avertissement) warnings.push(mod.avertissement)
+      if (!segs.length) {
+        return res.status(200).json({ fermeture: mod.fermeture, saved: 0, pushed: false, local_only: false, push_failed: false, warnings })
+      }
+      const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: segs, origine: 'host', appel: channelCall })
+      if (r.refus) {
+        // ⚠ COMME `fermer` : si le writer refuse, l'objet REVIENT a son etat
+        // d'avant. Sinon la fermeture dirait 12-25 alors que 21-25 restent
+        // vendables — et la garde de `save` refuserait de rouvrir des nuits que
+        // la memoire dit ouvertes.
+        const a = mod.avant
+        await supabase.from('fermetures').update({ date_debut: a.date_debut, date_fin: a.date_fin, raison: a.raison })
+          .eq('id', id).eq('user_id', compte).eq('property_id', bienId)
+        return res.status(r.refus.status).json(r.refus.body)
+      }
+      return res.status(200).json({ fermeture: mod.fermeture, saved: r.saved, pushed: r.pushed,
+        local_only: r.localOnly, push_failed: r.pushFailed, warnings: [...(r.warnings || []), ...warnings] })
     }
 
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })
@@ -564,6 +656,44 @@ module.exports = async function handler(req, res) {
         return res.status(409).json({
           ...refusEcritureTarifaire(tarifees.length),
           dates: tarifees.slice(0, 20)
+        })
+      }
+    }
+
+    // ─── UNE NUIT COUVERTE PAR UNE FERMETURE NE SE ROUVRE PAS ICI ──────────
+    // Changement de dessin du 21 septembre 2026 (Thierry) : la fermeture est
+    // un objet manipule comme une reservation, modifie A LA MAIN par l'hote
+    // seul. L'arbitrage « une reouverture scinde la fermeture » est annule :
+    // rouvrir une nuit couverte est REFUSE, et l'hote est renvoye vers la
+    // modification de la fermeture (fiche). Le calendrier n'a pas le droit
+    // de toucher l'objet — aucune app ne l'a.
+    //
+    // Une reouverture, c'est `stop_sell: false`, ou un stock releve sans
+    // `stop_sell: true` explicite.
+    const nuitsRouvertes = []
+    for (const seg of dateSegments) {
+      const rouvre = seg.stop_sell === false || (seg.stop_sell !== true && seg.avail != null && Number(seg.avail) > 0)
+      if (rouvre) nuitsRouvertes.push(...expandDays(seg.date_from, seg.date_to, seg.days))
+    }
+    if (nuitsRouvertes.length) {
+      const tri = [...new Set(nuitsRouvertes)].sort()
+      // ⚠ Une lecture en echec REFUSE (503 nomme) : rouvrir sans savoir ce
+      // qu'on rouvre ecrirait a l'aveugle. Une table absente, elle, rend vide.
+      let couvrantes
+      try { couvrantes = await fermeturesDuBien(supabase, bienId, tri[0], tri[tri.length - 1]) }
+      catch (e) {
+        console.error('[calendar] fermetures illisibles, reouverture refusee :', e.message)
+        return res.status(503).json({ error: 'Les fermetures de ce logement sont illisibles : la réouverture est refusée pour ne pas rouvrir à l\'aveugle. Réessayez.', code: 'fermetures_illisibles' })
+      }
+      const couvertes = nuitsFermees(couvrantes, tri[0], tri[tri.length - 1])
+      const bloquees = tri.filter(j => couvertes.has(j))
+      if (bloquees.length) {
+        const f = couvrantes.find(x => bloquees[0] >= x.date_debut && bloquees[0] <= x.date_fin) || couvrantes[0]
+        return res.status(409).json({
+          code: 'nuit_fermee_par_fermeture',
+          error: `${bloquees.length > 1 ? bloquees.length + ' nuits sont couvertes' : 'Cette nuit est couverte'} par la fermeture du ${f.date_debut} au ${f.date_fin} (« ${f.raison} »). Modifiez ou supprimez cette fermeture pour rouvrir.`,
+          fermeture: { id: f.id, date_debut: f.date_debut, date_fin: f.date_fin, raison: f.raison },
+          dates: bloquees.slice(0, 20)
         })
       }
     }

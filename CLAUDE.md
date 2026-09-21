@@ -207,6 +207,14 @@ docs/kb/reservation-directe.md.
 Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcours ;
 (b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
 
+**Chantier YIELDFLOW 4.5-4.6 EN COURS.** Livrés en prod : 4.5 pilote
+tarifaire par bien (53c06eb), 4.6.0 fenêtre glissante et trois états d'une nuit
+(3d2e8f2), 4.6.1 canal interne (e7cd289). Sur branche `lot-4-6-2-fermetures`,
+recette staging en attente : 4.6.2 fermetures de l'hôte (table `fermetures`,
+scission à la réouverture, exclusion des stats). Restent 4.6.3 moteur
+d'ouverture, 4.6.4 moteur de prix, 4.6.5 rythme et alarmes. Spec :
+docs/specs/spec-yieldflow-v1.md §2 ter. Dettes : docs/kb/dettes-v1.md.
+
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
 remplace `rang === 1` partout, proposition posee a l'approche du depart
@@ -311,6 +319,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
+- docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 25 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
 - docs/kb/prix-plancher.md (garde anti nuit a 0 : `properties.prix_minimum` par bien, repli 10 € ; on FERME la date, on ne remonte jamais le prix ; `rate: 0` n'est pas applique par Channex, il garde le prix de la grille).
 - docs/kb/evenements-yield.md (vacances scolaires importees/cachees par zone ; jours feries CALCULES, aucune table ; OpenAgenda ecarte de la V1, sur mesure).

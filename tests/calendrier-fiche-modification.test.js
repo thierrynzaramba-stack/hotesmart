@@ -590,11 +590,13 @@ test('stop-sell : « fermé » a UNE seule definition dans toute la page', () =>
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('week-ends : fond de colonne franc ET en-tete distinct', () => {
+  // Depuis le 21 septembre 2026, l'en-tete des jours vit dans la bande
+  // (`tr.jours`), plus dans le thead de chaque bien : l'ancre suit.
   // L'ancien rgba(0,0,0,0.022) etait invisible au-dela de quelques colonnes.
   assert.ok(!/\.weekend \{ background: rgba\(0,0,0,0\.022\)/.test(PAGE), 'l\'ancien fond a disparu')
   assert.match(PAGE, /table\.cal \.weekend \{ background: #eef1f6/)
-  assert.match(PAGE, /thead th\.weekend \.day-name \{[^}]*font-weight: 700/)
-  assert.match(PAGE, /thead th\.weekend \.day-num\s+\{[^}]*font-weight: 700/)
+  assert.match(PAGE, /tr\.jours td\.weekend \.day-name \{[^}]*font-weight: 700/)
+  assert.match(PAGE, /tr\.jours td\.weekend \.day-num\s+\{[^}]*font-weight: 700/)
 })
 
 test('week-ends : le marquage est pose par UN seul helper, pour les trois lignes', () => {
@@ -622,4 +624,77 @@ test('DESKTOP SEUL : CELL_W n\'est consomme que par le desktop', () => {
   // Le mobile importe `loadCalendarData` uniquement : elargir la colonne du
   // planning ne doit pas pouvoir deplacer la grille mensuelle.
   assert.ok(!MOBILE.includes('CELL_W'))
+})
+
+// ─── Lot 4.6.2 : les fermetures de l'hote dans l'ecran ──────────────────────
+// Dessin du 21 septembre 2026 (Thierry) : une fermeture est un objet manipule
+// COMME UNE RESERVATION — creee par le parcours « nouvelle reservation » (type
+// « indisponible »), affichee comme une barre FONCEE, modifiee a la main par
+// l'hote seul, jamais scindee par le calendrier.
+
+test('fermetures : le parcours « nouvelle reservation » porte un type « indisponible » avec dates et raison', () => {
+  assert.match(PAGE, /<input type="radio" name="ajout-type" value="reservation" id="ajout-type-resa">/)
+  assert.match(PAGE, /<input type="radio" name="ajout-type" value="indisponible" id="ajout-type-indispo">/)
+  assert.match(PAGE, /<input id="ajout-raison" type="text" maxlength="200"/)
+  const valider = PAGE.slice(PAGE.indexOf('async function validerIndisponibilite'), PAGE.indexOf('async function validerAjout'))
+  assert.ok(valider.includes('api.calendar.fermer(bien.id, b.arrival, derniereNuit, raison)'), 'un seul chemin serveur : l action fermer')
+  assert.ok(valider.includes('toISO(days[tries[tries.length-1]])'), 'la derniere NUIT, pas le jour de depart')
+  assert.ok(!valider.includes('api.calendar.save('), 'jamais un stop_sell nu')
+  assert.match(PAGE, /if\(typeAjout\(\)==='indisponible'\) return validerIndisponibilite\(b, bien\)/)
+})
+
+test('fermetures : le parcours s ouvre sur TOUT bien ; la reservation directe reste Channex-only et le dit', () => {
+  assert.match(PAGE, /const okAjout = !!\(bien && peutEcrire\('reservations'\) && !LECTURE_SEULE\)/)
+  const ouvrir = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout(mode)'), PAGE.indexOf('function fermerFormulaireAjout'))
+  assert.ok(ouvrir.includes('rResa.disabled = !channex'))
+  assert.ok(ouvrir.includes("(typeof mode==='string') ? mode : (channex ? 'reservation' : 'indisponible')"))
+})
+
+test('fermetures : une INDISPONIBILITE est une barre FONCEE, avec sa raison, de la premiere a la derniere nuit', () => {
+  assert.match(PAGE, /\.resa-bar\.fermeture \{ background: #3a3a3c/, 'anthracite, hors de la palette des canaux')
+  const barres = PAGE.slice(PAGE.indexOf('function barresResa'), PAGE.indexOf('const jourFerme'))
+  assert.ok(barres.includes("'<div class=\"resa-bar fermeture cliquable'"), 'une barre, cliquable')
+  assert.ok(barres.includes('escapeHtmlLocal(f.raison)'), 'la raison, echappee')
+  assert.ok(barres.includes('px(iFin+1-iDebut)'), 'bornes incluses : pas de demi-cellule d arrivee')
+  // ⚠ `px` vit en tete de barresResa, AVANT les deux boucles (review : declare
+  // dans la boucle des reservations, il etait hors de portee des fermetures et
+  // un ReferenceError faisait tomber tout le rendu).
+  const iPx = barres.indexOf('const px=(n)=>(n*CELL_W)'), iFerm = barres.indexOf("(fermByBien[bien.id]||[]).forEach"), iResa = barres.indexOf('(bien.resa||[]).forEach')
+  assert.ok(iPx > 0 && iPx < iFerm && iPx < iResa, 'px declare avant les deux boucles')
+  assert.equal(barres.split('const px=').length, 2, 'une seule declaration de px')
+  assert.ok(iFerm < iResa, 'les fermetures se dessinent AVANT les reservations : la demi-cellule de depart d un sejour reste lisible')
+  assert.ok(PAGE.includes('if(bar.dataset.fermeture) ouvrirFicheFermeture(bar.dataset.bien, bar.dataset.fermeture)'), 'le clic ouvre SA fiche')
+  assert.ok(!PAGE.includes('fermetures-liste'), 'plus de liste sous la grille')
+})
+
+test('LE TEST QUI COMPTE : la fiche modifie dates et raison par l action dediee, et supprime — a la main, par l hote seul', () => {
+  const fiche = PAGE.slice(PAGE.indexOf('function ouvrirFicheFermeture'), PAGE.indexOf('async function basculerStopSell'))
+  assert.ok(fiche.includes("const modifiable = peutEcrire('reservations') && !LECTURE_SEULE"))
+  assert.ok(fiche.includes("champ('ferm-debut','Première nuit','date',f.date_debut)") && fiche.includes("champ('ferm-raison','Raison','text',f.raison"))
+  assert.ok(fiche.includes('api.calendar.modifierFermeture(bien.id, f.id, debut, fin, raison)'))
+  assert.ok(fiche.includes('api.calendar.rouvrirFermeture(bien.id, f.id)') && fiche.includes('window.confirm('), 'supprimer previent que toute la periode rouvre')
+  assert.ok(!PAGE.includes('window.prompt('), 'plus de prompt')
+  assert.match(PAGE, /function fermerFiche\(\)\{[^\n]*resaCourante=null; fermetureCourante=null/, 'fermer la fiche oublie les deux objets')
+  // Le libelle du bouton suit le type, APRES la reinitialisation du formulaire.
+  const ouvrir = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout(mode)'), PAGE.indexOf('function fermerFormulaireAjout'))
+  assert.ok(!/btnV\.textContent = 'Créer la réservation'/.test(ouvrir), 'plus d ecrasement du libelle')
+  assert.ok(ouvrir.lastIndexOf('appliquerTypeAjout()') > ouvrir.indexOf('btnV.disabled = false'))
+})
+
+test('LE TEST QUI COMPTE : rouvrir une nuit couverte est REFUSE par l ecran, qui renvoie vers la fiche — plus de scission', () => {
+  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
+  assert.ok(bloc.includes("if(fermer && estPiloteYield(bienId)){ ouvrirFormulaireAjout('indisponible'); return }"), 'fermer un bien pilote = le parcours, pre-rempli')
+  assert.ok(bloc.includes('const f=fermetureCouvrant(bienId, toISO(days[i])); if(f){'), 'chaque nuit selectionnee est verifiee')
+  assert.ok(bloc.includes('ouvrirFicheFermeture(bienId, f.id); return'), 'renvoi vers la fiche, sans ecrire')
+  assert.ok(!/scind/i.test(PAGE), 'le mot meme a disparu de la page')
+  // Sur un bien calendrier, fermer reste un stop_sell nu (inchange).
+  const apres = bloc.slice(bloc.indexOf("ouvrirFormulaireAjout('indisponible'); return }"))
+  assert.ok(apres.includes('api.calendar.save') && /stop_sell: fermer/.test(apres))
+})
+
+test('fermetures : l ecran les affiche mais ne les lit JAMAIS pour dire si une nuit est vendable', () => {
+  assert.ok(PAGE.includes('fermByBien[id]=(fermetures&&fermetures[id])||[]'), 'rangees a la relecture, par bien')
+  const jf = PAGE.slice(PAGE.indexOf('function jourFerme'), PAGE.indexOf('function jourFerme') + 400)
+  assert.ok(!jf.includes('fermByBien'), 'jourFerme ne lit pas les fermetures')
+  assert.ok(PAGE.includes("title=\"Fermé : '+echapper(rs)"), 'la raison est un TITRE sur le jour, pas une decision')
 })
