@@ -338,8 +338,15 @@ test('LES JOURS DU MOIS NE SONT RENDUS QU UNE FOIS, sous le mois', () => {
   // la source ne prouve rien s'il est ecrit AVANT `<table>` (le parseur
   // l'ignore, et c'est ce que ma premiere version faisait). On l'exige juste
   // apres la balise d'ouverture, avec l'angle au gabarit de `.row-label`.
-  assert.match(bande, /<table class="month-band"><colgroup><col style="width:129px">/,
-    'le colgroup est DANS la table, et l angle fait 120 + 8 + 1 comme .row-label')
+  assert.match(bande, /<table class="month-band">'\+colonnesHtml\(\)\+'/,
+    'le colgroup est DANS la table, par le meme generateur que les biens')
+  // ⚠ LE MEME colgroup DANS LES DEUX TABLES — decalage constate par Thierry sur
+  // staging (22 septembre 2026) : l'angle faisait 129 px alors que `.row-label`
+  // fait 120 en border-box, et la grille des biens n'avait aucun colgroup.
+  assert.match(PAGE, /const LABEL_W=120/, 'l angle = .row-label, border-box')
+  assert.match(PAGE, /function colonnesHtml\(\)\{ return '<colgroup><col style="width:'\+LABEL_W\+'px">'/)
+  assert.match(PAGE, /<table class="cal">'\+colonnesHtml\(\)\+'<thead>/, 'chaque bien porte les memes colonnes')
+  assert.match(PAGE, /\.cal-page \* \{ box-sizing: border-box; \}/, 'la regle qui rend 120 exact')
   assert.match(bande, /w\.offsetHeight/, 'la hauteur de bande est mesuree apres rendu')
   assert.match(bande, /setProperty\('--bande-h'/, 'et posee sur la page : 74px n est qu un repli')
   assert.ok(!/table\.cal tr\.jours td\.weekend \.day-name/.test(PAGE), 'plus de CSS mort pour des jours qui ne sont plus dans le thead')

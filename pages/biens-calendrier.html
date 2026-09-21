@@ -489,16 +489,24 @@
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
 
     function renderMonthPills(){ const w=document.getElementById('month-pills');w.innerHTML='';const seen=new Set();days.forEach((d,idx)=>{const k=d.getFullYear()+'-'+d.getMonth();if(!seen.has(k)){seen.add(k);const p=document.createElement('button');p.className='month-pill';p.textContent=monthFull[d.getMonth()];p.addEventListener('click',()=>{document.getElementById('scroll-area').scrollTo({left:idx*CELL_W,behavior:'smooth'});w.querySelectorAll('.month-pill').forEach(x=>x.classList.remove('active'));p.classList.add('active')});w.appendChild(p)}});const f=w.querySelector('.month-pill');if(f)f.classList.add('active') }
+    // Un seul jeu de colonnes pour la bande ET pour chaque bien : 120 px pour le
+    // libelle (= `.row-label`, border-box), CELL_W par jour.
+    const LABEL_W=120
+    function colonnesHtml(){ return '<colgroup><col style="width:'+LABEL_W+'px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup>' }
     function renderMonthBand(){ const w=document.getElementById('month-band-wrap');
       // ⚠ LE `colgroup` DANS LA TABLE, APRES SA BALISE — releve en review. Ma
       // premiere version le prefixait AVANT `<table>` : le parseur HTML ignore
       // un colgroup hors table, la bande n'avait donc aucune largeur de colonne,
       // et ses jours derivaient d'une colonne par trimestre — la seule chose que
       // ce lot doit livrer. `table-layout: fixed` lit les `col`, pas les colspans.
-      // ⚠ 129 px POUR L'ANGLE, PAS 120 : `.row-label` fait 120 de largeur + 8 de
-      // padding + 1 de bordure en content-box ; un `col` fixe la colonne entiere.
-      // Un chiffre different decalerait TOUS les jours d'un cinquieme de case.
-      let h='<table class="month-band"><colgroup><col style="width:129px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup><tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr>';
+      // ⚠ LES DEUX TABLES PARTAGENT LE MEME `colgroup` (`colonnesHtml`), OU RIEN
+      // NE LES ALIGNE. Constate par Thierry sur staging le 22 septembre 2026 :
+      // l'angle de la bande faisait 129 px (un calcul « content-box » alors que
+      // `.cal-page *` est en border-box, donc `.row-label` fait 120 tout compris)
+      // et la grille des biens n'avait pas de colgroup du tout : neuf pixels de
+      // decalage constant entre le jour et la case. Avec `table-layout: fixed`,
+      // ce sont les `col` qui font les colonnes — les memes, dans les deux tables.
+      let h='<table class="month-band">'+colonnesHtml()+'<tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr>';
       // ⚠ LA LIGNE DES JOURS, UNE FOIS POUR TOUS LES BIENS. Meme `days`, memes
       // classes (`classesJour`) que l'ancien thead : week-end, jour courant,
       // debut de mois se lisent au meme endroit qu'avant, mais une seule fois.
@@ -630,7 +638,7 @@
       // TOUTES les lignes du bien et pas seulement sur le tarif.
       const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
-      let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
+      let html='<table class="cal">'+colonnesHtml()+'<thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
       // ⚠ PLUS DE JOURS ICI : ils sont dans la bande, sous le mois, une seule
       // fois (demande de Thierry). Les cellules restent, vides, pour aligner
       // les colonnes ; les classes de colonne (week-end, jour courant) aussi,
