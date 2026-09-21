@@ -3,8 +3,20 @@
 // Spec : docs/specs/spec-yieldflow-v1.md §2 bis
 // Regle : lib/pilote-tarifaire.js — DOC : docs/kb/coeur-de-donnees.md
 //
-// GET  ?bien=<uuid>  -> { pilote, peut_basculer, raison }
-// POST { bien, pilote: 'calendrier' | 'yieldflow' }
+// GET  ?bien=<uuid>  -> { pilote, peut_basculer, raison, fenetre, ouverture }
+// POST { bien, pilote: 'calendrier' | 'yieldflow', fenetre?: { type, valeur } }
+// POST { bien, fenetre: { type, valeur } }   (changer la fenetre, bien pilote)
+//
+// ⚠ L'ACTIVATION (lot 4.6.3) = passer en yieldflow AVEC une fenetre. Sans
+// fenetre, le mode n'ouvre rien (4.6.0 : un bien yieldflow sans fenetre n'a
+// pas de « hors fenetre »). On la rend donc OBLIGATOIRE a la bascule, et
+// modifiable ensuite. Repasser en calendrier l'efface : la fenetre est une
+// propriete du pilote, pas du bien.
+//
+// ⚠ CET ENDPOINT N'OUVRE RIEN. Il regle, et il EFFACE le marqueur quotidien
+// du moteur (`cron_logs` ouverture:<bien>) pour que le cron ouvre au tick
+// suivant (5 min) et non le lendemain. Le moteur reste en processus, appele
+// par le cron seul : cet endpoint n'importe que le marqueur, jamais le moteur.
 //
 // ⚠ POURQUOI CET ENDPOINT EXISTE, ET PAS UNE LIGNE DANS `/api/yield`.
 // `api/yield.js` grave en tete qu'il n'ecrit RIEN — « lecture seule » y est un
@@ -28,8 +40,9 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const {
-  MODES, piloteDuBien, peutPasserEnYieldflow
+  MODES, piloteDuBien, peutPasserEnYieldflow, fenetreDuBien, validerFenetre
 } = require('../lib/pilote-tarifaire')
+const { effacerMarqueur, PREFIXE_MARQUEUR } = require('../lib/ouverture-marqueur')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -70,7 +83,7 @@ module.exports = async (req, res) => {
   // garde qui juge sur une colonne non selectionnee est une garde ouverte ».
   // Elle vaut aussi pour une garde qui juge sur une colonne ABSENTE.
   const { data: bien, error: eBien } = await supabase.from('properties')
-    .select('id, name, rate_sync_mode, pilote_tarifaire')
+    .select('id, name, rate_sync_mode, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')
     .eq('id', bienGarde.id).eq('user_id', compte).maybeSingle()
   if (eBien) {
     console.error('[yield-pilote] lecture bien', eBien.message)
@@ -84,12 +97,17 @@ module.exports = async (req, res) => {
   // la regle vit dans `lib/pilote-tarifaire.js`, en un seul endroit.
   if (req.method === 'GET') {
     const possible = peutPasserEnYieldflow(bien)
+    // La derniere ouverture du moteur, pour que l'ecran dise « ouvert jusqu'au
+    // … le … » plutot que de laisser l'hote deviner si le cron est passe.
+    const { data: marqueur } = await supabase.from('cron_logs').select('last_run').eq('id', PREFIXE_MARQUEUR + bien.id).maybeSingle()
     return res.status(200).json({
       bien: bien.id,
       pilote: piloteDuBien(bien),
       rate_sync_mode: bien.rate_sync_mode || null,
       peut_basculer: possible.ok,
-      raison: possible.ok ? null : possible.error
+      raison: possible.ok ? null : possible.error,
+      fenetre: fenetreDuBien(bien),
+      ouverture: { derniere: marqueur && marqueur.last_run ? marqueur.last_run : null }
     })
   }
 
@@ -98,8 +116,9 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Methode non autorisee' })
   }
 
-  // ─── POST : basculer ───────────────────────────────────────────────────
-  const voulu = String(body.pilote || '').trim()
+  // ─── POST : basculer, et/ou regler la fenetre ─────────────────────────
+  const actuel = piloteDuBien(bien)
+  const voulu = body.pilote == null ? actuel : String(body.pilote || '').trim()
   if (!MODES.includes(voulu)) {
     return res.status(400).json({
       error: 'Mode de pilotage inconnu.',
@@ -107,16 +126,28 @@ module.exports = async (req, res) => {
     })
   }
 
-  const actuel = piloteDuBien(bien)
+  // La fenetre : obligatoire pour ENTRER en yieldflow, modifiable tant qu'on y
+  // est, ignoree (et effacee) en calendrier.
+  let fenetre = null
+  if (voulu === 'yieldflow') {
+    const entreeEnYieldflow = actuel !== 'yieldflow'
+    if (entreeEnYieldflow || body.fenetre != null) {
+      const v = validerFenetre(body.fenetre)
+      if (!v.ok) return res.status(400).json({ error: v.error, code: v.code })
+      fenetre = v.fenetre
+    }
+  }
+
   // Rien a faire n'est pas une erreur : l'ecran peut renvoyer l'etat courant.
-  if (voulu === actuel) {
-    return res.status(200).json({ bien: bien.id, pilote: actuel, change: false })
+  const memeFenetre = !fenetre || (fenetreDuBien(bien) && fenetreDuBien(bien).type === fenetre.type && fenetreDuBien(bien).valeur === fenetre.valeur)
+  if (voulu === actuel && memeFenetre) {
+    return res.status(200).json({ bien: bien.id, pilote: actuel, fenetre: fenetreDuBien(bien), change: false })
   }
 
   // ⚠ B BIS. Un bien en `rate_sync_mode = 'keep'` ne peut pas passer en
   // yieldflow : l'app ecrirait des prix que rien ne pousse. Le refus est
   // EXPLICITE et en francais — la regle et son message vivent dans le module.
-  if (voulu === 'yieldflow') {
+  if (voulu === 'yieldflow' && actuel !== 'yieldflow') {
     const possible = peutPasserEnYieldflow(bien)
     if (!possible.ok) {
       console.log('[yield-pilote] REFUS bascule keep :', bien.id)
@@ -127,8 +158,11 @@ module.exports = async (req, res) => {
   // ⚠ LE COMPTE DANS LE `WHERE`, PAS SEULEMENT DANS LA GARDE. La garde a deja
   // tranche, mais une requete qui ne porte pas son cloisonnement finit par
   // etre recopiee dans un contexte qui n'en a plus.
+  const maj = { pilote_tarifaire: voulu }
+  if (voulu === 'calendrier') { maj.pilote_fenetre_type = null; maj.pilote_fenetre_valeur = null }
+  else if (fenetre) { maj.pilote_fenetre_type = fenetre.type; maj.pilote_fenetre_valeur = fenetre.valeur }
   const { error } = await supabase.from('properties')
-    .update({ pilote_tarifaire: voulu })
+    .update(maj)
     .eq('id', bien.id).eq('user_id', compte)
 
   if (error) {
@@ -147,6 +181,15 @@ module.exports = async (req, res) => {
   // ⚠ BASCULER NE CHANGE AUCUN PRIX (§2 bis). Les lignes `calendar_inventory`
   // en place restent, le journal continue. C'est un changement d'ECRIVAIN, pas
   // de tarif — et rien n'est pousse ici.
-  console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}`)
-  return res.status(200).json({ bien: bien.id, pilote: voulu, change: true })
+  //
+  // ⚠ CE QUI OUVRE, C'EST LE CRON. On efface le marqueur quotidien du moteur
+  // pour que la fenetre s'ouvre (ou s'etende) au tick suivant. Un echec ici
+  // n'annule pas le reglage : au pire, l'ouverture attend le lendemain.
+  if (voulu === 'yieldflow') {
+    const { error: eM } = await effacerMarqueur(supabase, bien.id)
+    if (eM) console.error('[yield-pilote] marqueur non efface', bien.id, eM.message)
+  }
+  console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}${fenetre ? ` (fenetre ${fenetre.valeur} ${fenetre.type})` : ''}`)
+  return res.status(200).json({ bien: bien.id, pilote: voulu, fenetre: voulu === 'yieldflow' ? (fenetre || fenetreDuBien(bien)) : null, change: true,
+    ouverture: voulu === 'yieldflow' ? 'Les dates s\'ouvriront automatiquement dans les 5 minutes, puis chaque jour.' : null })
 }

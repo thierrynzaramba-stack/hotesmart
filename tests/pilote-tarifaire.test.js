@@ -239,9 +239,13 @@ test('l endpoint ne pousse aucun prix et ne touche a aucun autre reglage', () =>
   // Basculer est un changement d ECRIVAIN, pas de tarif : les lignes
   // `calendar_inventory` en place restent, le journal continue.
   const src = lire('api/yield-pilote.js')
-  const update = src.match(/\.update\(\{[^}]*\}\)/g) || []
+  const update = src.match(/\.update\(maj\)/g) || []
   assert.equal(update.length, 1, 'une seule ecriture')
-  assert.ok(/pilote_tarifaire: voulu/.test(update[0]), 'et elle ne porte que le pilote')
+  // Depuis le 4.6.3, l ecriture porte le pilote ET sa fenetre (type, valeur) —
+  // rien d autre : ni prix, ni rate_sync_mode, ni disponibilite.
+  const maj = src.slice(src.indexOf('const maj = {'), src.indexOf('.update(maj)'))
+  assert.ok(/pilote_tarifaire: voulu/.test(maj), 'elle porte le pilote')
+  assert.deepEqual([...new Set(maj.match(/maj\.(\w+)/g))].sort(), ['maj.pilote_fenetre_type', 'maj.pilote_fenetre_valeur'], 'et la seule autre chose est la fenetre')
   // ⚠ ON CHERCHE UN APPEL, PAS UN MOT. La premiere version testait
   // `/channel/i` sur toute la source : elle a rougi sur un COMMENTAIRE citant
   // `api/channel-property.js`. Un test qui lit des mots dans des commentaires
@@ -285,7 +289,7 @@ test('LE TEST QUI COMPTE : l endpoint de bascule RELIT le bien', () => {
   const perm = lire('lib/require-permission.js')
   assert.ok(!/select\('id, user_id, name, provider, provider_property_id, migration_target_property_id, pilote/.test(perm),
     'la garde ne charge toujours pas le pilote : la relecture reste donc necessaire')
-  const iRelecture = src.indexOf("select('id, name, rate_sync_mode, pilote_tarifaire')")
+  const iRelecture = src.indexOf("select('id, name, rate_sync_mode, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')")
   assert.ok(iRelecture > 0, 'l endpoint relit le bien avec les colonnes qu il juge')
   const iDecision = src.indexOf('peutPasserEnYieldflow(bien)')
   assert.ok(iRelecture < iDecision, 'AVANT de decider')

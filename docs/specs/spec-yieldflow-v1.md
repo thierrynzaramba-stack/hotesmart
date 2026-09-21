@@ -393,6 +393,45 @@ vente » sur une nuit couverte n'écrit rien et ouvre la fiche.
   concurrence) ni dépasser 1 000 nuits ; une date qui n'existe pas est une
   période invalide.
 
+### ✅ 4.6.3 LIVRÉ le 22 septembre 2026 — le moteur d'ouverture
+
+**Ce qui est livré.**
+
+| ce qui est livré | où |
+|---|---|
+| **L'activation** : passer en `yieldflow` exige une fenêtre (`jours` 1-730 ou `mois` 1-24), modifiable ensuite, effacée au retour en calendrier ; la règle et son français dans `validerFenetre` | `lib/pilote-tarifaire.js`, `api/yield-pilote.js` |
+| **La décision, pure** : `nuitsAOuvrir` — dans la fenêtre, pas dans le passé, pas couverte par une indisponibilité, sans intention en mémoire, avec un prix | `lib/moteur-ouverture.js` |
+| **Le moteur** : un bien à la fois, par le canal interne, une fois par jour et par bien (marqueur `cron_logs` `ouverture:<bien>` posé après le travail, effacé par l'endpoint à l'activation pour que la première ouverture parte au tick suivant), budget mur 25 s, un échec se retente et n'arrête pas les autres | `lib/moteur-ouverture.js`, `lib/ouverture-marqueur.js`, `api/cron.js` (poste `moteur_ouverture`, avant le dispatch) |
+| **L'écran** : la fenêtre demandée à l'activation, affichée et modifiable en mode YieldFlow, avec la dernière ouverture | `apps/yield/prix.html` |
+| **La recette sans cron** : `scripts/ouvrir-fenetres.js` (dry-run par défaut, `--go`, `--bien=`, `--jour=`) — staging n'a pas de cron planifié | `scripts/` |
+
+**Les règles gravées.**
+- **Le moteur n'ouvre que ce sur quoi personne n'a rien décidé.** Une nuit
+  couverte par une indisponibilité de l'hôte n'est même pas demandée au canal ;
+  une nuit `stop_sell = true` ou `avail = 0` en mémoire (fermée à la main sans
+  objet, ou fermée « calculée ») est laissée telle quelle et **comptée**
+  (`intention_existante`) — « il ne rouvre jamais ce que l'hôte a fermé » (§6).
+  Le `deja_fermees` du canal est donc tranché : le moteur ne le franchit pas.
+- **Une nuit ne s'ouvre jamais sans prix.** Une date sans prix part fermée
+  vers les plateformes (8 septembre 2026) : l'ouvrir nue la ferait refermer, ou
+  vendre au prix par défaut. D'ici le 4.6.4, le prix d'ouverture est celui que
+  la nuit porte en mémoire, sinon le **prix de base** du bien ; sans l'un ni
+  l'autre, la nuit reste fermée et est comptée (`sans_prix`).
+- **Première activation = toute la fenêtre ; ensuite, la nuit qui entre.** Le
+  prix est posé par le canal (journal `source = 'engine'`, plancher par le
+  writer, poussée ARI en delta).
+- **Réduire la fenêtre ne ferme rien.** Le moteur ne pose jamais de geste
+  négatif : une nuit déjà ouverte au-delà de la nouvelle fenêtre reste ouverte,
+  et l'hôte la ferme s'il le veut. L'écran la dira « pas encore ouverte » par
+  la seule règle de la fenêtre — dette notée, à traiter avec le 4.6.4.
+- **Le cron est le seul appelant du canal.** L'endpoint du pilote n'importe que
+  le marqueur (`lib/ouverture-marqueur.js`), jamais le moteur.
+
+**Ce qui est assumé.**
+- Le prix de base comme prix d'ouverture est un **intérim** jusqu'au moteur de
+  prix (4.6.4), qui posera les prix calculés sur un an et les entretiendra.
+- Sur staging, l'ouverture se prouve par le script, faute de cron planifié.
+
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
 **A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**
