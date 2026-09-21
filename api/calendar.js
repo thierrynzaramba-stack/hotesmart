@@ -556,7 +556,16 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ fermeture: mod.fermeture, saved: 0, pushed: false, local_only: false, push_failed: false, warnings })
       }
       const r = await ecrireCalendrier({ supabase, bien, compte, dateSegments: segs, origine: 'host', appel: channelCall })
-      if (r.refus) return res.status(r.refus.status).json(r.refus.body)
+      if (r.refus) {
+        // ⚠ COMME `fermer` : si le writer refuse, l'objet REVIENT a son etat
+        // d'avant. Sinon la fermeture dirait 12-25 alors que 21-25 restent
+        // vendables — et la garde de `save` refuserait de rouvrir des nuits que
+        // la memoire dit ouvertes.
+        const a = mod.avant
+        await supabase.from('fermetures').update({ date_debut: a.date_debut, date_fin: a.date_fin, raison: a.raison })
+          .eq('id', id).eq('user_id', compte).eq('property_id', bienId)
+        return res.status(r.refus.status).json(r.refus.body)
+      }
       return res.status(200).json({ fermeture: mod.fermeture, saved: r.saved, pushed: r.pushed,
         local_only: r.localOnly, push_failed: r.pushFailed, warnings: [...(r.warnings || []), ...warnings] })
     }

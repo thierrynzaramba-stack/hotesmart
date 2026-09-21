@@ -654,6 +654,13 @@ test('fermetures : une INDISPONIBILITE est une barre FONCEE, avec sa raison, de 
   assert.ok(barres.includes("'<div class=\"resa-bar fermeture cliquable'"), 'une barre, cliquable')
   assert.ok(barres.includes('escapeHtmlLocal(f.raison)'), 'la raison, echappee')
   assert.ok(barres.includes('px(iFin+1-iDebut)'), 'bornes incluses : pas de demi-cellule d arrivee')
+  // ⚠ `px` vit en tete de barresResa, AVANT les deux boucles (review : declare
+  // dans la boucle des reservations, il etait hors de portee des fermetures et
+  // un ReferenceError faisait tomber tout le rendu).
+  const iPx = barres.indexOf('const px=(n)=>(n*CELL_W)'), iFerm = barres.indexOf("(fermByBien[bien.id]||[]).forEach"), iResa = barres.indexOf('(bien.resa||[]).forEach')
+  assert.ok(iPx > 0 && iPx < iFerm && iPx < iResa, 'px declare avant les deux boucles')
+  assert.equal(barres.split('const px=').length, 2, 'une seule declaration de px')
+  assert.ok(iFerm < iResa, 'les fermetures se dessinent AVANT les reservations : la demi-cellule de depart d un sejour reste lisible')
   assert.ok(PAGE.includes('if(bar.dataset.fermeture) ouvrirFicheFermeture(bar.dataset.bien, bar.dataset.fermeture)'), 'le clic ouvre SA fiche')
   assert.ok(!PAGE.includes('fermetures-liste'), 'plus de liste sous la grille')
 })
@@ -665,6 +672,11 @@ test('LE TEST QUI COMPTE : la fiche modifie dates et raison par l action dediee,
   assert.ok(fiche.includes('api.calendar.modifierFermeture(bien.id, f.id, debut, fin, raison)'))
   assert.ok(fiche.includes('api.calendar.rouvrirFermeture(bien.id, f.id)') && fiche.includes('window.confirm('), 'supprimer previent que toute la periode rouvre')
   assert.ok(!PAGE.includes('window.prompt('), 'plus de prompt')
+  assert.match(PAGE, /function fermerFiche\(\)\{[^\n]*resaCourante=null; fermetureCourante=null/, 'fermer la fiche oublie les deux objets')
+  // Le libelle du bouton suit le type, APRES la reinitialisation du formulaire.
+  const ouvrir = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout(mode)'), PAGE.indexOf('function fermerFormulaireAjout'))
+  assert.ok(!/btnV\.textContent = 'Créer la réservation'/.test(ouvrir), 'plus d ecrasement du libelle')
+  assert.ok(ouvrir.lastIndexOf('appliquerTypeAjout()') > ouvrir.indexOf('btnV.disabled = false'))
 })
 
 test('LE TEST QUI COMPTE : rouvrir une nuit couverte est REFUSE par l ecran, qui renvoie vers la fiche — plus de scission', () => {

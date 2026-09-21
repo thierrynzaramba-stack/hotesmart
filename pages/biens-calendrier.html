@@ -476,10 +476,10 @@
     // (calendar_inventory), jamais ici. Une nuit fermee sans fermeture est
     // simplement fermee ; une fermeture porte en plus le POURQUOI.
     const fermByBien={}
-    function raisonFermeture(bienId, iso){
-      const f=(fermByBien[bienId]||[]).find(x=>iso>=x.date_debut && iso<=x.date_fin)
-      return f ? f.raison : null
-    }
+    // La fermeture qui couvre une nuit ISO d'un bien, s'il y en a une — LA regle,
+    // une fois : la raison en titre et le refus de reouverture en dependent.
+    function fermetureCouvrant(bienId, iso){ return (fermByBien[bienId]||[]).find(f=>iso>=f.date_debut && iso<=f.date_fin) || null }
+    function raisonFermeture(bienId, iso){ const f=fermetureCouvrant(bienId, iso); return f ? f.raison : null }
     const fmtJourFr=(iso)=>{ const [y,m,d]=iso.split('-'); return d+'/'+m+'/'+y.slice(2) }
     function echapper(t){ return String(t==null?'':t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
@@ -569,7 +569,28 @@
       if(!days.length) return ''
       const iso0=toISO(days[0]), isoN=toISO(days[days.length-1])
       const indexDe=(iso)=>{ for(let k=0;k<days.length;k++){ if(toISO(days[k])===iso) return k } return null }
+      // ⚠ `px` EN TETE DE FONCTION, pas dans la boucle des reservations : la
+      // boucle des fermetures s'en sert aussi (releve en review : un
+      // ReferenceError y faisait tomber TOUT le rendu des qu'une fermeture
+      // existait — et les tests statiques ne l'executent pas).
+      const px=(n)=>(n*CELL_W)
       let out=''
+      // LES FERMETURES DE L'HOTE D'ABORD, sous les reservations : une barre
+      // foncee court de la premiere a la derniere nuit (bornes incluses), une
+      // reservation de mi-cellule a mi-cellule ; dessinee en premier, la
+      // fermeture laisse la demi-cellule de depart d'un sejour lisible.
+      ;(fermByBien[bien.id]||[]).forEach(f=>{
+        if(!(f.date_debut<=isoN && f.date_fin>=iso0)) return
+        const iDebut = f.date_debut<iso0 ? 0 : indexDe(f.date_debut)
+        const iFin   = f.date_fin>isoN ? days.length-1 : indexDe(f.date_fin)
+        if(iDebut===null||iFin===null) return
+        const coupeG = f.date_debut<iso0, coupeD = f.date_fin>isoN
+        out+='<div class="resa-bar fermeture cliquable'+(coupeG?' cont-left':'')+(coupeD?' cont-right':'')+'"'
+           + ' data-fermeture="'+escapeHtmlLocal(f.id)+'" data-bien="'+escapeHtmlLocal(bien.id)+'"'
+           + ' title="Indisponible du '+escapeHtmlLocal(f.date_debut)+' au '+escapeHtmlLocal(f.date_fin)+' — '+escapeHtmlLocal(f.raison)+' — cliquer pour modifier"'
+           + ' style="left:'+px(iDebut)+'px;width:'+(px(iFin+1-iDebut)-2)+'px;z-index:1">'
+           + '<span class="nom">'+escapeHtmlLocal(f.raison)+'</span></div>'
+      })
       ;(bien.resa||[]).forEach(bk=>{
         // Chevauchement avec la fenetre : depart APRES le premier jour affiche
         // (la nuit de depart n'est pas occupee) et arrivee avant le dernier.
@@ -582,7 +603,6 @@
         if(droite<=gauche) return
         const coupeG = iDebut<0, coupeD = iFin>days.length-1
         const nameShort=escapeHtmlLocal(bk.name||'Reservation')
-        const px=(n)=>(n*CELL_W)
         // ⚠ TOUT CE QUI VIENT DU PROVIDER EST ECHAPPE, pas seulement le nom.
         // `source`, `booking_id` et les dates arrivent de `bookings_snapshot` :
         // ce sont des donnees externes, et un guillemet dans l'une d'elles
@@ -598,22 +618,6 @@
            + (passee?' — séjour terminé':'')+(bk.id?' — cliquer pour le detail':'')+'"'
            + ' style="left:'+px(gauche)+'px;width:'+(px(droite-gauche)-2)+'px;z-index:2">'
            + '<span class="nom">'+nameShort+'</span></div>'
-      })
-      // LES FERMETURES DE L'HOTE : des barres FONCEES, de la premiere a la
-      // derniere nuit (bornes incluses, pas de demi-cellule d'arrivee), avec la
-      // raison. Cliquer ouvre la fiche : dates et raison se modifient la, a la
-      // main, et nulle part ailleurs.
-      ;(fermByBien[bien.id]||[]).forEach(f=>{
-        if(!(f.date_debut<=isoN && f.date_fin>=iso0)) return
-        const iDebut = f.date_debut<iso0 ? 0 : indexDe(f.date_debut)
-        const iFin   = f.date_fin>isoN ? days.length-1 : indexDe(f.date_fin)
-        if(iDebut===null||iFin===null) return
-        const coupeG = f.date_debut<iso0, coupeD = f.date_fin>isoN
-        out+='<div class="resa-bar fermeture cliquable'+(coupeG?' cont-left':'')+(coupeD?' cont-right':'')+'"'
-           + ' data-fermeture="'+escapeHtmlLocal(f.id)+'" data-bien="'+escapeHtmlLocal(bien.id)+'"'
-           + ' title="Indisponible du '+escapeHtmlLocal(f.date_debut)+' au '+escapeHtmlLocal(f.date_fin)+' — '+escapeHtmlLocal(f.raison)+' — cliquer pour modifier"'
-           + ' style="left:'+px(iDebut)+'px;width:'+(px(iFin+1-iDebut)-2)+'px;z-index:2">'
-           + '<span class="nom">'+escapeHtmlLocal(f.raison)+'</span></div>'
       })
       return out
     }
@@ -1055,7 +1059,6 @@
       rInd.checked = (voulu==='indisponible' || !channex); rResa.checked = !rInd.checked
       document.getElementById('ajout-type-note').textContent = channex ? '' : 'Réservation directe indisponible sur ce bien (synchronisé hors HôteSmart) : seule l\'indisponibilité est possible.'
       document.getElementById('ajout-raison').value = ''
-      appliquerTypeAjout()
 
       document.getElementById('ajout-sous-titre').textContent = bien.name
       document.getElementById('ajout-recap').innerHTML =
@@ -1088,7 +1091,8 @@
       // desactive et affiche « Envoi… », rendant toute deuxieme saisie
       // impossible sans recharger la page.
       const btnV = document.getElementById('ajout-valider')
-      btnV.disabled = false; btnV.textContent = 'Créer la réservation'
+      btnV.disabled = false
+      appliquerTypeAjout()   // libelle et champs selon le type — APRES la reinitialisation, sinon elle l'ecrase
       rafraichirTotal()
       verifierCapaciteAffichee()
       document.getElementById('overlay-ajout').classList.add('visible')
@@ -1232,8 +1236,6 @@
       else if(resp && resp.warnings && resp.warnings.length){ showToast('Enregistre — ' + resp.warnings.join(' · '), 6500) }
       else { showToast(sinon) }
     }
-    // La fermeture qui couvre une nuit ISO d'un bien, s'il y en a une.
-    function fermetureCouvrant(bienId, iso){ return (fermByBien[bienId]||[]).find(f=>iso>=f.date_debut && iso<=f.date_fin) || null }
 
     // ═══ FICHE D'UNE INDISPONIBILITE (dessin du 21 septembre 2026) ═══════════
     // La fermeture se manipule COMME UNE RESERVATION : cliquer sa barre ouvre
@@ -1395,7 +1397,7 @@
     // biens Beds24 : le module est Channex-only par spec.
     let resaCourante = null
 
-    function fermerFiche(){ document.getElementById('overlay-resa').classList.remove('visible'); resaCourante=null }
+    function fermerFiche(){ document.getElementById('overlay-resa').classList.remove('visible'); resaCourante=null; fermetureCourante=null }
 
     function ligneFiche(label, valeur){
       if(valeur===null||valeur===undefined||valeur==='') return ''
@@ -1411,6 +1413,7 @@
       const resa = (bien&&bien.resa||[]).find(r=>String(r.id)===String(resaId))
       if(!bien||!resa) { showToast('Réservation introuvable'); return }
       resaCourante = { bien, resa }
+      fermetureCourante = null
 
       const nuits = Math.max(1, Math.round((new Date(resa.checkout+'T00:00:00') - new Date(resa.startISO+'T00:00:00'))/86400000))
       const voyageurs = [resa.numAdult?resa.numAdult+' adulte'+(resa.numAdult>1?'s':''):null,

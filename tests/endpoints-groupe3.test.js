@@ -61,7 +61,7 @@ const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/cale
 // `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
                      snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null,
-                     erreurUpdateProperties = null, fermetures = [], erreurFermetures = null } = {}) {
+                     erreurUpdateProperties = null, fermetures = [], erreurFermetures = null, erreurInventaire = null } = {}) {
   const etat = { ecritures: [], filtresIn: [], appels: [] }
 
   const client = {
@@ -178,7 +178,7 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
           return { data: tableau ? rows : (rows[0] || null), error: null }
         }
         if (nom === 'channel_sync_queue') return { data: tableau ? [] : null, error: null }
-        if (nom === 'calendar_inventory') return { data: tableau ? [] : null, error: null }
+        if (nom === 'calendar_inventory') return erreurInventaire ? { data: null, error: { message: erreurInventaire } } : { data: tableau ? [] : null, error: null }
         // Les fermetures de l'hote (lot 4.6.2) : croisement de periode et
         // filtres eq, comme la vraie table. `delete` les retire de la liste
         // servie, pour que la scission se lise dans `etat.ecritures` ET dans ce
@@ -1329,4 +1329,20 @@ test('modifier_fermeture : introuvable -> 404 ; membre reservations=read -> 403 
     action: 'modifier_fermeture', property_id: BIEN_A.id, id: FERMETURE().id, debut: '2026-10-15', fin: '2026-10-22', raison: 'x'
   } }), res)
   assert.strictEqual(res.code, 403); assert.deepStrictEqual(etat.ecritures, [])
+})
+
+test('modifier_fermeture : si le writer refuse, l objet REVIENT a son etat d avant (comme fermer)', async () => {
+  // Sinon la fermeture dirait 12-25 alors que 21-25 restent vendables.
+  // Faire refuser le writer : la relecture de calendar_inventory en erreur
+  // (503 « impossible de relire »). Un tarif sous le plancher n'est pas
+  // possible ici : modifier ne porte pas de rate.
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()], erreurInventaire: 'timeout' })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'modifier_fermeture', property_id: BIEN_CHANNEX.id, id: FERMETURE().id, debut: '2026-10-12', fin: '2026-10-25', raison: 'travaux'
+  } }), res)
+  assert.ok(res.code >= 500, `le writer a refuse (${res.code})`)
+  const maj = etat.ecritures.filter(e => e.table === 'fermetures' && e.row)
+  assert.strictEqual(maj.length, 2, 'un update aller, un update retour')
+  assert.deepStrictEqual([maj[1].row.date_debut, maj[1].row.date_fin], ['2026-10-12', '2026-10-20'], 'l etat d avant est restaure')
 })
