@@ -23,6 +23,9 @@
 
 | 14 | **Le prix d'ouverture est le prix de base** (`lib/moteur-ouverture.js`, `prixDOuverture`) tant que le moteur de prix n'existe pas. | Un bien sans prix de base ni mémoire n'ouvre rien (compté `sans_prix`) ; un bien piloté vend au prix de base, pas à un prix calculé. | **4.6.4** (moteur de prix) le remplace. |
 
+| 15 | **Fenêtre de course entre le moteur et une indisponibilité posée au même instant** : le moteur lit `fermetures` puis le writer upserte quelques secondes plus tard ; une indisponibilité créée entre les deux serait écrasée (`stop_sell = false`) sur ses nuits. Une fois par jour et par bien, quelques secondes. | Une nuit fermée par l'hôte vendue. | Au writer (vérifier `fermetures` juste avant l'upsert pour l'origine `engine`), avec le 4.6.4 qui rendra le moteur quotidien plus lourd. |
+| 16 | **Le moteur relit ce que le canal et le writer relisent** (`calendar_inventory` trois fois, `fermetures` deux fois par bien). | Aller-retours redondants dans un cron à 60 s. | Quand le canal acceptera un instantané fourni par l'appelant. |
+
 ## Règle du registre
 
 Une dette se **note** au moment où on décide de ne pas la solder, pas au moment

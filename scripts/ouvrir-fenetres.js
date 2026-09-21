@@ -30,6 +30,12 @@ const args = process.argv.slice(2)
 const GO = args.includes('--go')
 const bienVoulu = (args.find(a => a.startsWith('--bien=')) || '').slice(7) || null
 const jour = (args.find(a => a.startsWith('--jour=')) || '').slice(7) || null
+// ⚠ DEUX GARDES — relevees en review. `--go` sur la PROD exige `--prod` (le
+// cron y tourne deja, un passage manuel est un geste de production). Et
+// `--go` avec `--jour` est refuse : le marqueur serait pose a la date REELLE
+// pour un travail fait a une date injectee, et le cron sauterait le bien.
+if (GO && jour) { console.error('REFUS : --go et --jour ensemble poseraient un marqueur faux. Le dry-run accepte --jour.'); process.exit(1) }
+if (GO && projet === 'cjmrizpdyhrcurmgyrhs' && !args.includes('--prod')) { console.error('REFUS : --go sur la PRODUCTION exige --prod (le cron y tourne deja).'); process.exit(1) }
 
 // Le client canal, si le bien est relie : meme fonction que le fullsync et le
 // cron. Sans variables CHANNEL_*, on le dit et on ne l'invente pas.

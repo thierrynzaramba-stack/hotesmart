@@ -37,7 +37,7 @@ test('LE TEST QUI COMPTE : le moteur ne touche JAMAIS une indisponibilite de l h
   const r = nuitsAOuvrir({ bien: bien(), aujourdHui: AUJ, lignes, fermetures })
   assert.equal(r.fin, '2026-10-06', 'fenetre : aujourd hui + 5 jours')
   assert.deepEqual(r.nuits.map(n => n.date), ['2026-10-01'], 'la seule nuit sans intention ni indisponibilite')
-  assert.deepEqual(r.comptes, { a_ouvrir: 1, deja_ouvertes: 1, fermees_par_l_hote: 2, intention_existante: 2, sans_prix: 0 })
+  assert.deepEqual(r.comptes, { a_ouvrir: 1, deja_ouvertes: 1, fermees_par_l_hote: 2, intention_existante: 2, sans_prix: 0, sous_plancher: 0 })
   assert.ok(r.nuits.every(n => n.ouvrir === true), 'une demande d ouverture, rien d autre')
 })
 
@@ -51,8 +51,20 @@ test('LE TEST QUI COMPTE : une nuit ne s ouvre JAMAIS sans prix — memoire, sin
   const sansBase = nuitsAOuvrir({ bien: bien({ base_price: null }), aujourdHui: AUJ, lignes, fermetures: [] })
   assert.deepEqual(sansBase.nuits.map(n => n.date), ['2026-10-02'], 'sans prix de base, seule la nuit qui porte un prix s ouvre')
   assert.equal(sansBase.comptes.sans_prix, 5, 'et les autres sont COMPTEES, pas oubliees')
-  assert.equal(prixDOuverture(bien({ base_price: 0 }), { rate: null }), null)
-  assert.equal(prixDOuverture(bien(), { rate: '85.5' }), 8550)
+  assert.deepEqual(prixDOuverture(bien({ base_price: 0 }), { rate: null }), { prix: null, raison: 'sans_prix' })
+  assert.deepEqual(prixDOuverture(bien(), { rate: '85.5' }), { prix: 8550 })
+})
+
+test('LE TEST QUI COMPTE : une nuit sous le PLANCHER reste fermee et est comptee — les autres s ouvrent quand meme', () => {
+  // Le writer refuse la demande ENTIERE des qu'un tarif est sous le plancher :
+  // un seul prix de base trop bas aurait bloque toute la fenetre a chaque tick.
+  // `prix_minimum` est en CENTIMES (lib/yield/prix-plancher.js) : 5000 = 50 EUR.
+  const lignes = [{ date: '2026-10-02', stop_sell: null, avail: null, rate: 5 }]
+  const r = nuitsAOuvrir({ bien: bien({ prix_minimum: 5000 }), aujourdHui: AUJ, lignes, fermetures: [] })
+  assert.ok(!r.nuits.some(n => n.date === '2026-10-02'), 'la nuit a 5 EUR n est pas demandee')
+  assert.equal(r.comptes.sous_plancher, 1); assert.equal(r.nuits.length, 5, 'les cinq autres, au prix de base 90, s ouvrent')
+  const tout = nuitsAOuvrir({ bien: bien({ prix_minimum: 13000 }), aujourdHui: AUJ, lignes: [], fermetures: [] })
+  assert.equal(tout.nuits.length, 0); assert.equal(tout.comptes.sous_plancher, 6, 'prix de base sous le plancher : rien ne s ouvre, et c est DIT')
 })
 
 test('la premiere activation ouvre TOUTE la fenetre ; le lendemain, seule la nuit qui entre', () => {
@@ -88,6 +100,8 @@ function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [],
       q.eq = (c, v) => { q.f[c] = v; return q }
       q.gte = (c, v) => { q.gte_ = v; return q }; q.lte = (c, v) => { q.lte_ = v; return q }
       q.upsert = (row) => { q.op = 'upsert'; q.ligne = row; return q }
+      q.insert = (row) => { q.op = 'insert'; q.ligne = row; return q }
+      q.in = ch
       q.delete = () => { q.op = 'delete'; return q }
       q.maybeSingle = () => { q.un = true; return q }
       const exec = () => {
@@ -96,10 +110,11 @@ function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [],
         if (table === 'fermetures') return { data: fermetures.filter(f => f.property_id === q.f.property_id && f.date_debut <= q.lte_ && f.date_fin >= q.gte_), error: null }
         if (table === 'calendar_inventory') return { data: lignes.filter(l => l.date >= q.gte_ && l.date <= q.lte_), error: null }
         if (table === 'properties') return { data: biens, error: null }
+        if (table === 'channel_sync_queue') { if (q.op === 'insert') { (marqueurs.__file || (marqueurs.__file = [])).push(q.ligne); return { data: null, error: null } } return { data: [], error: null } }
         if (table === 'cron_logs') {
-          if (q.op === 'upsert') { marqueurs[q.ligne.id] = q.ligne.last_run; return { data: null, error: null } }
+          if (q.op === 'upsert') { marqueurs[q.ligne.id] = { last_run: q.ligne.last_run, errors: q.ligne.errors }; return { data: null, error: null } }
           if (q.op === 'delete') { delete marqueurs[q.f.id]; return { data: null, error: null } }
-          return { data: marqueurs[q.f.id] ? { last_run: marqueurs[q.f.id] } : null, error: null }
+          return { data: marqueurs[q.f.id] || null, error: null }
         }
         return { data: [], error: null }
       }
@@ -130,6 +145,20 @@ test('une lecture des indisponibilites en echec REFUSE — rien n est demande au
   assert.equal(canal.appels.length, 0)
 })
 
+test('LE TEST QUI COMPTE : « ok » du canal n est pas « parti » — une poussee refusee est un echec, et met un full sync en file', async () => {
+  // Le writer a deja memorise l'ouverture : au tick suivant ces nuits seraient
+  // « deja ouvertes » et jamais redemandees, fermees chez le provider a jamais.
+  const sb = fausseBase()
+  const canal = fauxCanal({ ok: true, ecrit: { saved: 6, pushed: false, pushFailed: true, warnings: ['availability HTTP 503'] }, ignorees: null })
+  const r = await ouvrirLaFenetreDuBien(sb, bien(), { aujourdHui: AUJ, demander: canal })
+  assert.equal(r.ok, false); assert.equal(r.refus, 'poussee_refusee'); assert.match(r.message, /full sync/)
+  assert.equal((sb.marqueurs.__file || []).length, 1, 'un full sync en file pour ce bien')
+  assert.equal(sb.marqueurs.__file[0].property_id, ID)
+  // Un bien non relie (local seul) est un succes : rien a pousser.
+  const local = fauxCanal({ ok: true, ecrit: { saved: 6, pushed: false, localOnly: true, warnings: ['non relie'] }, ignorees: null })
+  assert.equal((await ouvrirLaFenetreDuBien(fausseBase(), bien(), { aujourdHui: AUJ, demander: local })).ok, true)
+})
+
 test('un refus du canal est rendu tel quel, avec son message', async () => {
   const sb = fausseBase()
   const canal = fauxCanal({ ok: false, refus: 'prix_plancher', message: 'sous le plancher', ignorees: null })
@@ -144,23 +173,43 @@ test('LE TEST QUI COMPTE : une fois par jour et par bien — le marqueur est pos
   let n = 0
   const canal = async (s, b, demande) => { n++; if (b.id === B2) return { ok: false, refus: 'writer', message: 'panne' }; return { ok: true, ecrit: {}, ignorees: null } }
   const t = Date.parse('2026-10-01T10:00:00Z')
-  const b1 = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, demander: canal })
+  const b1 = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, demander: canal, biensParPassage: 2 })
   assert.equal(b1.biens, 2); assert.equal(b1.traites, 1); assert.equal(b1.erreurs.length, 1, 'le Studio a echoue, le Loft est passe')
   assert.ok(sb.marqueurs[PREFIXE_MARQUEUR + ID], 'marqueur pose pour le Loft')
+  assert.deepEqual(sb.marqueurs[PREFIXE_MARQUEUR + ID].errors[0].fenetre, { type: 'jours', valeur: 5 }, 'et il porte la fenetre avec laquelle il a tourne')
   assert.ok(!sb.marqueurs[PREFIXE_MARQUEUR + B2], 'PAS pour le Studio : il se retentera')
   // Second passage le meme jour : le Loft est saute, le Studio retente.
-  const b2 = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 300000, demander: canal })
+  const b2 = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 300000, demander: canal, biensParPassage: 2 })
   assert.equal(b2.sautes, 1); assert.equal(n, 3, 'un appel de plus, pour le Studio seul')
   // Le lendemain : le Loft repart (la fenetre a glisse).
-  const b3 = await ouvrirFenetres(sb, { aujourdHui: '2026-10-02', maintenant: () => t + 86400000, demander: canal })
+  const b3 = await ouvrirFenetres(sb, { aujourdHui: '2026-10-02', maintenant: () => t + 86400000, demander: canal, biensParPassage: 2 })
   assert.equal(b3.sautes, 0)
+})
+
+test('LE TEST QUI COMPTE : une fenetre CHANGEE fait repasser le moteur le jour meme, quel que soit l ordre des ecritures', async () => {
+  // Effacer le marqueur a l'activation ne suffisait pas : un tick deja en
+  // train d'ouvrir ce bien le reposait apres l'effacement.
+  const sb = fausseBase({ biens: [bien()] })
+  const canal = fauxCanal()
+  const t = Date.parse('2026-10-01T10:00:00Z')
+  await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, demander: canal })
+  assert.equal((await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 1000, demander: canal })).sautes, 1, 'meme fenetre : saute')
+  sb.from = ((from) => (table) => { const q = from(table); if (table === 'properties') { const then = q.then; q.then = (ok, ko) => Promise.resolve({ data: [bien({ pilote_fenetre_valeur: 30 })], error: null }).then(ok, ko) } return q })(sb.from)
+  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t + 2000, demander: canal })
+  assert.equal(b.sautes, 0); assert.equal(b.traites, 1, 'fenetre elargie : le moteur repasse')
+})
+
+test('un bien par passage : le second attend le tick suivant, sans erreur', async () => {
+  const sb = fausseBase({ biens: [bien(), bien({ id: 'b2b2b2b2-0000-4000-8000-000000000002' })] })
+  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => 0, demander: fauxCanal() })
+  assert.equal(b.traites, 1); assert.equal(b.reportes, 1); assert.equal(b.erreurs.length, 0)
 })
 
 test('le budget mur reporte les biens restants au tick suivant, sans erreur', async () => {
   const sb = fausseBase({ biens: [bien(), bien({ id: 'b2b2b2b2-0000-4000-8000-000000000002' })] })
   let t = 0
   const canal = async () => { t += 30000; return { ok: true, ecrit: {}, ignorees: null } }
-  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, budgetMs: 25000, demander: canal })
+  const b = await ouvrirFenetres(sb, { aujourdHui: AUJ, maintenant: () => t, budgetMs: 25000, demander: canal, biensParPassage: 5 })
   assert.equal(b.traites, 1); assert.equal(b.reportes, 1); assert.equal(b.erreurs.length, 0)
 })
 
@@ -173,7 +222,9 @@ test('validerFenetre : jours ou mois, entier > 0, bornes ; une case cochee n est
   assert.equal(validerFenetre({ type: 'jours', valeur: true }).code, 'fenetre_valeur_invalide')
   assert.equal(validerFenetre({ type: 'jours', valeur: 0 }).code, 'fenetre_valeur_invalide')
   assert.equal(validerFenetre({ type: 'jours', valeur: 1.5 }).code, 'fenetre_valeur_invalide')
-  assert.equal(validerFenetre({ type: 'jours', valeur: 731 }).code, 'fenetre_trop_longue')
-  assert.equal(validerFenetre({ type: 'mois', valeur: 25 }).code, 'fenetre_trop_longue')
-  for (const r of [validerFenetre(null), validerFenetre({ type: 'jours', valeur: 731 })]) assert.match(r.error, /[àâéèêçùô]/, 'le refus parle francais a l hote')
+  // L'horizon du canal : 500 jours (JOURS_POUSSES), 16 mois au plus.
+  assert.equal(validerFenetre({ type: 'jours', valeur: 501 }).code, 'fenetre_trop_longue')
+  assert.equal(validerFenetre({ type: 'jours', valeur: 500 }).ok, true)
+  assert.equal(validerFenetre({ type: 'mois', valeur: 17 }).code, 'fenetre_trop_longue')
+  for (const r of [validerFenetre(null), validerFenetre({ type: 'jours', valeur: 501 })]) assert.match(r.error, /[àâéèêçùô]/, 'le refus parle francais a l hote')
 })

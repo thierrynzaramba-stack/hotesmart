@@ -510,10 +510,19 @@
   const dateFrCourte = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }
   function fenetreHtml (d) {
     const f = d.fenetre
-    const derniere = d.ouverture && d.ouverture.derniere ? `Dernière ouverture par YieldFlow : ${ech(dateFrCourte(d.ouverture.derniere))}.` : 'YieldFlow n’a pas encore ouvert de dates : il passe dans les 5 minutes qui suivent l’activation, puis chaque jour.'
+    // Le bilan du dernier passage voyage avec le marqueur : « 0 ouverte, 24
+    // sans prix » ne doit pas se lire « YieldFlow est passe ».
+    const b = d.ouverture && d.ouverture.bilan
+    const c = b && b.comptes ? b.comptes : null
+    let derniere = 'YieldFlow n’a pas encore ouvert de dates : il passe dans les 5 minutes qui suivent l’activation, puis chaque jour.'
+    if (d.ouverture && d.ouverture.derniere) {
+      derniere = `Dernier passage de YieldFlow : ${ech(dateFrCourte(d.ouverture.derniere))}` + (b ? ` — ${b.ouvertes} nuit${b.ouvertes > 1 ? 's' : ''} ouverte${b.ouvertes > 1 ? 's' : ''}` : '') + '.'
+      if (c && c.sans_prix) derniere += ` ⚠ ${c.sans_prix} nuit${c.sans_prix > 1 ? 's' : ''} sans prix : renseignez un prix de base pour ce logement.`
+      if (c && c.sous_plancher) derniere += ` ⚠ ${c.sous_plancher} nuit${c.sous_plancher > 1 ? 's' : ''} sous le prix plancher, laissée${c.sous_plancher > 1 ? 's' : ''} fermée${c.sous_plancher > 1 ? 's' : ''}.`
+    }
     return '<div class="yp-fenetre" id="yp-fenetre">'
       + `<span><b>Fenêtre d’ouverture :</b> ${f ? ech(libelleFenetre(f)) : '<span class="raison">non réglée</span>'}</span>`
-      + '<label>ouvrir <input type="number" id="yp-fen-valeur" min="1" max="730" value="' + (f ? f.valeur : 120) + '"></label>'
+      + '<label>ouvrir <input type="number" id="yp-fen-valeur" min="1" max="500" value="' + (f ? f.valeur : 120) + '"></label>'
       + '<select id="yp-fen-type"><option value="jours"' + (!f || f.type === 'jours' ? ' selected' : '') + '>jours</option><option value="mois"' + (f && f.type === 'mois' ? ' selected' : '') + '>mois</option></select>'
       + ' <span>à l’avance</span>'
       + '<button type="button" id="yp-fen-enregistrer">' + (f ? 'Modifier' : 'Régler') + '</button>'
@@ -552,7 +561,7 @@
     if (el('yp-fenetre-activation')) return
     bloc.insertAdjacentHTML('beforeend', '<div class="yp-fenetre" id="yp-fenetre-activation">'
       + '<span><b>Jusqu’où YieldFlow ouvre-t-il vos dates ?</b></span>'
-      + '<label>ouvrir <input type="number" id="yp-act-valeur" min="1" max="730" value="120"></label>'
+      + '<label>ouvrir <input type="number" id="yp-act-valeur" min="1" max="500" value="120"></label>'
       + '<select id="yp-act-type"><option value="jours" selected>jours</option><option value="mois">mois</option></select>'
       + ' <span>à l’avance</span>'
       + '<button type="button" id="yp-act-valider">Activer YieldFlow</button>'

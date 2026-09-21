@@ -42,7 +42,7 @@ const { requirePermission } = require('../lib/require-permission')
 const {
   MODES, piloteDuBien, peutPasserEnYieldflow, fenetreDuBien, validerFenetre
 } = require('../lib/pilote-tarifaire')
-const { effacerMarqueur, PREFIXE_MARQUEUR } = require('../lib/ouverture-marqueur')
+const { effacerMarqueur, lireMarqueur } = require('../lib/ouverture-marqueur')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -99,7 +99,7 @@ module.exports = async (req, res) => {
     const possible = peutPasserEnYieldflow(bien)
     // La derniere ouverture du moteur, pour que l'ecran dise « ouvert jusqu'au
     // … le … » plutot que de laisser l'hote deviner si le cron est passe.
-    const { data: marqueur } = await supabase.from('cron_logs').select('last_run').eq('id', PREFIXE_MARQUEUR + bien.id).maybeSingle()
+    const marqueur = await lireMarqueur(supabase, bien.id)
     return res.status(200).json({
       bien: bien.id,
       pilote: piloteDuBien(bien),
@@ -107,7 +107,7 @@ module.exports = async (req, res) => {
       peut_basculer: possible.ok,
       raison: possible.ok ? null : possible.error,
       fenetre: fenetreDuBien(bien),
-      ouverture: { derniere: marqueur && marqueur.last_run ? marqueur.last_run : null }
+      ouverture: { derniere: marqueur ? marqueur.derniere : null, bilan: marqueur ? marqueur.bilan : null }
     })
   }
 
@@ -129,6 +129,11 @@ module.exports = async (req, res) => {
   // La fenetre : obligatoire pour ENTRER en yieldflow, modifiable tant qu'on y
   // est, ignoree (et effacee) en calendrier.
   let fenetre = null
+  // Une fenetre seule sur un bien en calendrier n'a pas de sens : on le dit,
+  // plutot que de repondre 200 « rien a faire » (releve en review).
+  if (voulu === 'calendrier' && body.fenetre != null) {
+    return res.status(400).json({ error: 'La fenêtre d\'ouverture ne se règle qu\'en mode YieldFlow.', code: 'fenetre_hors_yieldflow' })
+  }
   if (voulu === 'yieldflow') {
     const entreeEnYieldflow = actuel !== 'yieldflow'
     if (entreeEnYieldflow || body.fenetre != null) {
