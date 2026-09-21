@@ -167,8 +167,21 @@
     table.cal thead th.weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
     table.cal thead th.weekend.we-debut.we-fin { box-shadow: inset 2px 0 0 #c3d0e2, inset -2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
     table.cal thead th.today { box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff, inset 0 -1px 0 #e5e5e7; }
+    /* ─── SEPARATION DES COLONNES ET SURVOL (demande de Thierry, 21 septembre
+       2026) ─────────────────────────────────────────────────────────────────
+       Un trait vertical discret entre les jours, dans les DEUX tables : sous
+       border-collapse la bordure est partagee, et poser la meme des deux cotes
+       garde la bande et la grille alignees. Le survol eclaire toute la COLONNE
+       (la date dans la bande et chaque case des biens) : `col-hover` est pose
+       par JS sur les cellules qui portent le meme `data-col`. Sobre : un bleu
+       gris tres pale, sous les couleurs qui portent un sens (aujourd'hui,
+       selection, ferme, reserve) qui restent prioritaires. */
+    table.cal th, table.cal td, table.month-band tr.jours td { border-right: 1px solid #e8e8ec; }
+    table.cal td.col-hover, table.cal th.col-hover { background: #e9f0fa; }
+    table.month-band tr.jours td.col-hover { background: #d9e6f7; }
+    table.month-band tr.jours td.col-hover .day-name, table.month-band tr.jours td.col-hover .day-num { color: #1d4f91; }
     table.cal td.edit-cell { cursor: pointer; position: relative; }
-    table.cal td.edit-cell:hover { background: #eef4ff; }
+    table.cal td.edit-cell:hover { background: #dbe7f8; }
     /* Jour revolu : consultable, pas modifiable. Le curseur le dit avant le clic. */
     table.cal td.jour-passe { color: #a1a1a6; cursor: default; }
     table.cal td.edit-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
@@ -540,7 +553,7 @@
       // Le `colgroup` fixe la largeur de chaque colonne : avec `table-layout:
       // fixed`, une premiere ligne faite de colspans ne dit rien des colonnes.
       h+='<tr class="jours"><td class="corner"></td>'
-      days.forEach((d,idx)=>{const c=classesJour(idx);h+='<td class="'+c.join(' ')+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></td>'})
+      days.forEach((d,idx)=>{const c=classesJour(idx);h+='<td class="'+c.join(' ')+'" data-col="'+idx+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></td>'})
       h+='</tr></table>';w.innerHTML=h
       // ⚠ LA HAUTEUR EST MESUREE, PAS SOMMEE A LA MAIN — releve en review. Les
       // theads des biens se calent a `top: var(--bande-h)` : 74 px en CSS n'est
@@ -675,13 +688,13 @@
       // commune ne peut pas la porter. Sur ces cellules vides, `jour-ferme`
       // dessine le liseré sous le nom du bien — un bien ferme ne doit pas se
       // lire comme un bien simplement vide (test « TOUTES les lignes »).
-      days.forEach((d,idx)=>{const c=classesJour(idx);c.push('jour-vide');if(ferme(idx))c.push('jour-ferme');html+='<th class="'+c.join(' ')+'"></th>'})
+      days.forEach((d,idx)=>{const c=classesJour(idx);c.push('jour-vide');if(ferme(idx))c.push('jour-ferme');html+='<th class="'+c.join(' ')+'" data-col="'+idx+'"></th>'})
       html+='</tr></thead><tbody>'
       html+='<tr><td class="row-label">Reservations</td>'
       // Toutes les barres vivent dans la PREMIERE cellule et sont positionnees en
       // pixels-colonnes : voir `barresResa`. Les cellules suivantes ne portent
       // plus que leur fond.
-      days.forEach((d,i)=>{const c=classesJour(i);c.unshift('resa-cell');if(ferme(i))c.push('jour-ferme');html+='<td class="'+c.join(' ')+'">'+(i===0?barresResa(bien):'')+'</td>'})
+      days.forEach((d,i)=>{const c=classesJour(i);c.unshift('resa-cell');if(ferme(i))c.push('jour-ferme');html+='<td class="'+c.join(' ')+'" data-col="'+i+'">'+(i===0?barresResa(bien):'')+'</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
@@ -691,7 +704,7 @@
         st.forEach((s,i)=>{const c=classesJour(i);if(editable&&!jourPasse(i))c.unshift('edit-cell');else if(editable)c.push('jour-passe');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');
           if(ferme(i))c.push('jour-ferme')
           if(pk==='rate'){ const iso=toISO(days[i]); const closed=jourFerme(s); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
-          if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
+          if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=(editable?' data-idx="'+i+'" data-row="'+pk+'"':'')+' data-col="'+i+'"';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
         html+='</tr>'
       })
       html+='</tbody></table>'
@@ -1829,6 +1842,21 @@
       renderBlocks()
     }
 
+    // ─── Survol de colonne : la date et toutes ses cases s'eclairent ensemble.
+    // Delegue sur la zone de defilement, donc survit aux re-rendus ; on ne
+    // touche au DOM que quand la colonne change.
+    (function survolColonne(){
+      const area=document.getElementById('scroll-area'); if(!area) return
+      let courante=null
+      const peindre=(col,on)=>{ area.querySelectorAll('[data-col="'+col+'"]').forEach(el=>el.classList.toggle('col-hover',on)) }
+      area.addEventListener('mouseover', e=>{
+        const cell=e.target.closest('[data-col]'); const col=cell?cell.dataset.col:null
+        if(col===courante) return
+        if(courante!==null) peindre(courante,false)
+        courante=col; if(col!==null) peindre(col,true)
+      })
+      area.addEventListener('mouseleave', ()=>{ if(courante!==null){ peindre(courante,false); courante=null } })
+    })()
     buildDays(); renderMonthPills(); renderMonthBand()
     await loadData()
   </script>
