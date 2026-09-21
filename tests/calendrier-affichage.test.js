@@ -395,3 +395,33 @@ test('LES JOURS DU MOIS NE SONT RENDUS QU UNE FOIS, sous le mois', () => {
   assert.match(PAGE, /table\.month-band tr\.jours td\.today \{/, 'le jour courant se lit sur la bande')
   assert.match(PAGE, /table\.month-band tr\.jours td\.weekend \{/, 'le week-end aussi')
 })
+
+test('SEPARATION ET SURVOL DE COLONNE (demande de Thierry, 21 septembre 2026) : un trait entre les jours, la colonne entiere s eclaire', () => {
+  // Le trait est pose dans les DEUX tables : sous border-collapse il est
+  // partage, et une bordure d'un seul cote desalignerait la bande et la grille.
+  assert.match(PAGE, /table\.cal th, table\.cal td, table\.month-band tr\.jours td:not\(\.corner\) \{ border-right: 1px solid #e8e8ec; \}/, 'l angle garde le gris des libelles')
+  // Chaque cellule de jour porte sa colonne : bande, thead, reservations, lignes.
+  assert.match(PAGE, /'<td class="'\+c\.join\(' '\)\+'" data-col="'\+idx\+'"><div class="day-name">/, 'la bande')
+  assert.match(PAGE, /c\.push\('jour-vide'\)[^\n]*data-col="'\+idx\+'"/, 'le thead du bien')
+  assert.match(PAGE, /c\.unshift\('resa-cell'\)[^\n]*data-col="'\+i\+'"/, 'la ligne des reservations')
+  assert.match(PAGE, /\+' data-col="'\+i\+'"';html\+='<td class="'\+c\.join/, 'chaque case de tarif')
+  // Un ecouteur delegue, qui ne repeint que quand la colonne change.
+  const bloc = PAGE.slice(PAGE.indexOf('function survolColonne'), PAGE.indexOf('buildDays(); renderMonthPills(); renderMonthBand()\n'))
+  // Par la geometrie : les barres de reservation vivent toutes dans la premiere
+  // cellule, `closest('[data-col]')` y rendrait toujours la colonne 0.
+  assert.ok(bloc.includes("area.addEventListener('mousemove'") && bloc.includes('colIndexUnderX(e.clientX)'))
+  assert.ok(bloc.includes('if(col===survolCourante) return'), 'ne repeint que quand la colonne change')
+  assert.ok(bloc.includes("addEventListener('mouseleave'"), 'et s eteint en sortant')
+  assert.ok(bloc.includes("matchMedia('(hover: hover)')"), 'souris seulement : au doigt, mouseleave ne vient jamais')
+  // Un re-rendu remplace les cellules : l'etat du survol et son index sont remis a zero.
+  assert.match(PAGE, /function renderBlocks\(\)\{ reinitSurvol\(\);/)
+  assert.match(PAGE, /function renderMonthBand\(\)\{ reinitSurvol\(\);/)
+  // background-color, pas background : les hachures d'un jour ferme survivent au survol ;
+  // et le thead est nomme, car `thead th.weekend` est plus specifique.
+  assert.match(PAGE, /table\.cal td\.col-hover, table\.cal th\.col-hover, table\.cal thead th\.col-hover \{ background-color: #e9f0fa; \}/)
+  assert.match(PAGE, /table\.month-band tr\.jours td\.col-hover \{ background-color: #d9e6f7; \}/)
+  // Les couleurs qui portent un sens restent prioritaires : aujourd'hui et la
+  // selection sont en !important, la case fermee en rouge aussi.
+  assert.match(PAGE, /table\.cal \.today \{ background: #e6f0ff !important/)
+  assert.match(PAGE, /td\.edit-cell\.selected \{ background: #d4e4ff !important/)
+})
