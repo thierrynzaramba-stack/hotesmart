@@ -83,6 +83,17 @@ calendrier l'affiche, le moteur de capacité l'exclut du dénominateur, le canal
 interne la respecte. Détail : docs/specs/spec-yieldflow-v1.md §2 ter §4-§5 et
 « 4.6.2 livré ».
 
+## Cas tranché : le moteur d'ouverture (lot 4.6.3, 22 septembre 2026)
+
+Le moteur (`lib/moteur-ouverture.js`) **n'écrit rien lui-même** : il lit
+`calendar_inventory` et `fermetures` pour décider, puis **demande** au
+calendrier par le canal interne (`lib/canal-calendrier.js`), et c'est le
+writer unique (`lib/calendrier-writer.js`) qui mémorise l'intention, journalise
+le prix (`source = 'engine'`) et pousse. Il n'ouvre que les nuits sur
+lesquelles personne n'a rien décidé ; une indisponibilité de l'hôte n'est
+jamais touchée. Son seul appelant est `api/cron.js`. Détail :
+docs/specs/spec-yieldflow-v1.md §2 ter « 4.6.3 livré ».
+
 ## La fiche du bien : `property_snapshots` (étape 1B)
 
 Même forme que `bookings_snapshot`, et c'est délibéré : un payload provider

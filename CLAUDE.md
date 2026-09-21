@@ -209,10 +209,16 @@ Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcour
 
 **Chantier YIELDFLOW 4.5-4.6 EN COURS.** Livrés en prod : 4.5 pilote
 tarifaire par bien (53c06eb), 4.6.0 fenêtre glissante et trois états d'une nuit
-(3d2e8f2), 4.6.1 canal interne (e7cd289). Sur branche `lot-4-6-2-fermetures`,
-recette staging en attente : 4.6.2 fermetures de l'hôte (table `fermetures`,
-scission à la réouverture, exclusion des stats). Restent 4.6.3 moteur
-d'ouverture, 4.6.4 moteur de prix, 4.6.5 rythme et alarmes. Spec :
+(3d2e8f2), 4.6.1 canal interne (e7cd289), **4.6.2 fermetures de l'hôte
+(95619a5, 22 septembre 2026)** — une fermeture se manipule comme une
+réservation : créée par « nouvelle réservation » type « Indisponible », barre
+foncée, modifiée à la main par l'hôte seul, jamais par une app ; rouvrir une
+nuit couverte est refusé. Migration `fermetures` appliquée staging et prod.
+Aussi en prod : UI calendrier (bande de jours unique, colonnes partagées,
+survol de colonne) et fonctions Vercel en région Paris (`docs/kb/performance.md`,
+appels API trois à quatre fois plus rapides). Restent 4.6.3 moteur
+d'ouverture (**migration `2026-09-20-pilote-fenetre.sql` à coller en prod
+AVANT**), 4.6.4 moteur de prix, 4.6.5 rythme et alarmes. Spec :
 docs/specs/spec-yieldflow-v1.md §2 ter. Dettes : docs/kb/dettes-v1.md.
 
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos

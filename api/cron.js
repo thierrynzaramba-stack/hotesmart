@@ -61,6 +61,16 @@
 //   quel prix) sans que personne ne reste identifiable. Une tentative PAYEE
 //   n'est jamais touchee : conservation comptable. Cadence quotidienne par
 //   marqueur cron_logs, le module la gere lui-meme.
+// Session #37 (lot 4.6.3) : LE MOTEUR D'OUVERTURE. Pour chaque bien pilote par
+//   YieldFlow dont la fenetre est reglee (N jours / N mois glissants), il ouvre
+//   a la vente, PAR LE CANAL INTERNE (lib/canal-calendrier.js), les nuits de
+//   la fenetre sur lesquelles personne n'a rien decide — jamais une
+//   indisponibilite de l'hote, jamais une nuit fermee, jamais sans prix. Une
+//   fois par jour et par bien (marqueur cron_logs `ouverture:<bien>`, pose
+//   apres le travail ; efface par l'endpoint du pilote a l'activation pour que
+//   la premiere ouverture parte au tick suivant). ⚠ Ce cron est le SEUL
+//   appelant du canal : la garde HTTP du §2 bis tient parce qu'aucun endpoint
+//   ne l'appelle (tests/canal-calendrier.test.js).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -86,6 +96,8 @@ const { checkOverbooking } = require('../lib/cron-overbooking')
 const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 const { purgerSiDue } = require('../lib/cron-purge-tentatives')
 const { rattraperBloquees } = require('../lib/moteur-creation')
+const { ouvrirFenetres } = require('../lib/moteur-ouverture')
+const { channelCall } = require('../lib/channel-fullsync')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -144,6 +156,7 @@ module.exports = async function handler(req, res) {
     totalBeds24Materialized: 0,
     totalTentativesAnonymisees: 0,
     totalTentativesBloquees: 0,
+    totalNuitsOuvertes: 0,
     circuitBreakerTriggered: 0,
     errors: []
   }
@@ -410,6 +423,26 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur purge tentatives:', err.message)
       results.errors.push({ context: 'purge_tentatives', error: err.message })
+    }
+
+    // 4terdecies. LE MOTEUR D'OUVERTURE (lot 4.6.3, spec §2 ter).
+    // Ouvre a la vente, par le canal interne, les nuits de la fenetre glissante
+    // de chaque bien pilote par YieldFlow sur lesquelles PERSONNE n'a rien
+    // decide : jamais une indisponibilite de l'hote, jamais une nuit fermee
+    // (a la main ou calculee), jamais une nuit sans prix. Le writer fait le
+    // reste : plancher, journal source 'engine', poussee ARI en delta.
+    // ⚠ Une fois par jour et par bien, budget mur 25 s, le reliquat au tick
+    // suivant. Un bien en echec n'arrete pas les autres, et se retente.
+    // ⚠ Placé AVANT le dispatch (le poste le plus couteux) et APRES les
+    // sondes : il ecrit, et les filets anti-boucle doivent le voir.
+    try {
+      const bilanOuverture = await chrono.mesure('moteur_ouverture', () => ouvrirFenetres(supabase, { appel: channelCall }))
+      results.totalNuitsOuvertes = bilanOuverture?.ouvertes || 0
+      for (const e of (bilanOuverture?.erreurs || [])) results.errors.push({ context: 'moteur_ouverture', ...e })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur moteur d ouverture:', err.message)
+      results.errors.push({ context: 'moteur_ouverture', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.
