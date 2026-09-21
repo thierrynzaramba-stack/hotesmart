@@ -37,7 +37,16 @@ test('LE TEST QUI COMPTE : jamais sur une indisponibilite, une nuit fermee, une 
   const r = calculerPrix({ aujourdHui: AUJ, fin: FIN, lignes, fermetures, prix })
   assert.deepEqual(r.changements.map(c => c.date), ['2026-10-01'], 'une seule nuit tarifable')
   assert.deepEqual(r.comptes, { calculees: 1, changees: 1, inchangees: 0, non_calculables: 0, sous_plancher: 0,
-    fermees: 2, fermees_par_l_hote: 1, vendues: 1, sans_ligne: 2 })
+    fermees: 2, fermees_par_l_hote: 1, vendues: 1, sans_ligne: 2, ouverture_inconnue: 0 })
+})
+
+test('LE TEST QUI COMPTE : l ouverture se lit PAR LA CAPACITE, comme l ecran — une ligne sans intention ni prix n est pas tarifee', () => {
+  // `{ stop_sell: null, avail: null, rate: null }` est « ouverture inconnue »
+  // a l'ecran (joursOuverts) : le moteur ne doit pas y poser un prix.
+  const lignes = [ouverte('2026-10-01', 80), { date: '2026-10-02', stop_sell: null, avail: null, rate: null }]
+  const r = calculerPrix({ aujourdHui: AUJ, fin: '2026-10-02', lignes, fermetures: [], prix: regle({}), ouverts: new Set(['2026-10-01']) })
+  assert.deepEqual(r.changements.map(c => c.date), ['2026-10-01'])
+  assert.equal(r.comptes.ouverture_inconnue, 1)
 })
 
 test('LE TEST QUI COMPTE : diff avant journal — un prix egal au centime n est pas demande', () => {
@@ -76,27 +85,33 @@ function fausseBase ({ fermetures = [], lignes = [] } = {}) {
     return q
   } }
 }
-const fauxCtx = (table) => ({ parDate: new Map(), auj: AUJ, __table: table })
+const fauxCtx = (table) => ({ parDate: new Map(), auj: AUJ, ouvertureConnue: true, ouverts: null, __table: table })
 const fauxCanal = (rep) => { const appels = []; const fn = async (sb, b, demande, deps) => { appels.push(demande); return rep || { ok: true, ecrit: { saved: demande.nuits.length }, ignorees: null } }; fn.appels = appels; return fn }
 
 test('LE TEST QUI COMPTE : ce qui part au canal est le DELTA, en centimes, sans `ouvrir`', async () => {
   const lignes = [ouverte('2026-10-01', 100), ouverte('2026-10-02', 80)]
   const canal = fauxCanal()
-  const r = await entretenirLesPrix(fausseBase(), bien(), { aujourdHui: AUJ, ctx: fauxCtx(), lignes, demander: canal, prix: regle({}) })
+  const r = await entretenirLesPrix(fausseBase(), bien(), { aujourdHui: AUJ, ctx: fauxCtx(), lignes, demander: canal, prix: regle({}), ouverts: null })
   assert.equal(r.ok, true); assert.equal(r.changees, 1)
   assert.deepEqual(canal.appels[0].nuits, [{ date: '2026-10-02', prix_centimes: 10000 }], 'seul le 02 change ; aucun `ouvrir`')
 })
 
 test('rien a changer : aucune demande au canal, et c est un succes', async () => {
   const canal = fauxCanal()
-  const r = await entretenirLesPrix(fausseBase(), bien(), { aujourdHui: AUJ, ctx: fauxCtx(), lignes: [ouverte('2026-10-01', 100)], demander: canal, prix: regle({}) })
+  const r = await entretenirLesPrix(fausseBase(), bien(), { aujourdHui: AUJ, ctx: fauxCtx(), lignes: [ouverte('2026-10-01', 100)], demander: canal, prix: regle({}), ouverts: null })
   assert.equal(r.ok, true); assert.equal(r.changees, 0); assert.equal(canal.appels.length, 0)
 })
 
-test('une poussee refusee est un ECHEC nomme, pas un succes', async () => {
+test('LE TEST QUI COMPTE : une poussee refusee est un ECHEC nomme, et met un full sync en file', async () => {
+  // Le writer a deja memorise le prix : au passage suivant le diff dirait
+  // « inchange » et le provider garderait l'ancien prix pour toujours.
   const canal = fauxCanal({ ok: true, ecrit: { pushFailed: true, warnings: ['restrictions HTTP 503'] }, ignorees: null })
-  const r = await entretenirLesPrix(fausseBase(), bien(), { aujourdHui: AUJ, ctx: fauxCtx(), lignes: [ouverte('2026-10-01', 80)], demander: canal, prix: regle({}) })
-  assert.equal(r.ok, false); assert.equal(r.refus, 'poussee_refusee'); assert.match(r.message, /503/)
+  const file = []
+  const sb = fausseBase(); const from = sb.from.bind(sb)
+  sb.from = (t) => { const q = from(t); if (t === 'channel_sync_queue') { q.insert = (row) => { file.push(row); return q }; q.in = () => q; q.then = (ok) => Promise.resolve({ data: [], error: null }).then(ok) } return q }
+  const r = await entretenirLesPrix(sb, bien(), { aujourdHui: AUJ, ctx: fauxCtx(), lignes: [ouverte('2026-10-01', 80)], demander: canal, prix: regle({}), ouverts: null })
+  assert.equal(r.ok, false); assert.equal(r.refus, 'poussee_refusee'); assert.match(r.message, /503.*full sync/)
+  assert.equal(file.length, 1); assert.equal(file[0].property_id, ID)
 })
 
 test('un bien non pilote, ou sans fenetre, est refuse sans lecture', async () => {
