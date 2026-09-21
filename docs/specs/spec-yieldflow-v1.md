@@ -398,8 +398,12 @@ d'intention, sinon échec).
   et le dit ; avec une relecture en échec, rien n'est rouvert. C'est ce qui rend
   inoffensif le seul doublon possible (une scission dont le DELETE échoue après
   les inserts).
-- **La scission insère les morceaux avant de retirer l'ancienne** : au pire un
-  doublon, jamais une nuit ouverte à tort.
+- **La scission raccourcit l'ancienne (UPDATE) puis insère le reste** : trouvé
+  par le scénario réel sur staging, « insérer avant de retirer » heurtait la
+  contrainte d'exclusion (les morceaux chevauchent l'ancienne tant qu'elle
+  existe). Un UPDATE qui rétrécit ne se heurte jamais à lui-même ; au pire un
+  second morceau sans objet, jamais deux objets sur une nuit, jamais une nuit
+  ouverte à tort.
 - **`joursExclus` est la seule porte** vers « quels jours sortent de la
   référence », et les trois chemins de prod y passent — sa fenêtre est un
   filtre, pas une énumération : elle accepte les 2 000+ jours du radar.

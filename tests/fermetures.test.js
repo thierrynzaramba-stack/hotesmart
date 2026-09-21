@@ -36,6 +36,7 @@ function fausseBase (lignes = [], { erreur = null, erreurPour = {} } = {}) {
       q.gte = (c, v) => { q.gte = [c, v]; return q }
       q.order = () => q
       q.insert = (row) => { q.op = 'insert'; q.ligne = row; return q }
+      q.update = (row) => { q.op = 'update'; q.ligne = row; return q }
       q.delete = () => { q.op = 'delete'; return q }
       q.single = () => q
       const executer = () => {
@@ -43,6 +44,11 @@ function fausseBase (lignes = [], { erreur = null, erreurPour = {} } = {}) {
         if (erreur) return { data: null, error: erreur }
         if (erreurPour[q.op]) return { data: null, error: erreurPour[q.op] }
         if (q.op === 'insert') return { data: { id: 'neuf-' + journal.length, ...q.ligne }, error: null }
+        if (q.op === 'update') {
+          const cible = lignes.filter(l => q.f.every(([c, v]) => String(l[c]) === String(v)))
+          for (const l of cible) Object.assign(l, q.ligne)   // comme la base : la ligne change
+          return { data: cible[0] || null, error: null }
+        }
         if (q.op === 'delete') {
           const cible = lignes.filter(l => q.f.every(([c, v]) => String(l[c]) === String(v)))
           for (const l of cible) lignes.splice(lignes.indexOf(l), 1)   // comme la base : retiree
@@ -135,12 +141,14 @@ test('scinderAutour : retire l ancienne, recree les morceaux avec la MEME raison
   assert.equal(r.touchees.length, 1)
   assert.deepEqual(r.touchees[0].rouvertes, ['2026-10-15'])
   assert.deepEqual(r.touchees[0].apres.map(m => [m.date_debut, m.date_fin]), [['2026-10-12', '2026-10-14'], ['2026-10-16', '2026-10-20']])
-  const del = sb.journal.find(j => j.op === 'delete')
-  assert.ok(del.f.some(([c, v]) => c === 'user_id' && v === COMPTE), 'le compte est dans le WHERE du delete')
-  assert.ok(del.f.some(([c, v]) => c === 'property_id' && v === BIEN), 'et le bien')
+  const maj = sb.journal.find(j => j.op === 'update')
+  assert.ok(maj.f.some(([c, v]) => c === 'user_id' && v === COMPTE), 'le compte est dans le WHERE de l update')
+  assert.ok(maj.f.some(([c, v]) => c === 'property_id' && v === BIEN), 'et le bien')
+  assert.deepEqual([maj.ligne.date_debut, maj.ligne.date_fin], ['2026-10-12', '2026-10-14'], 'l ancienne est RACCOURCIE au premier morceau')
   const ins = sb.journal.filter(j => j.op === 'insert')
-  assert.equal(ins.length, 2)
+  assert.equal(ins.length, 1, 'un seul insert : le second morceau')
   assert.ok(ins.every(i => i.ligne.raison === 'travaux' && i.ligne.user_id === COMPTE), 'la raison suit les morceaux')
+  assert.ok(!sb.journal.some(j => j.op === 'delete'), 'aucun delete : l ancienne survit, retrecie')
 })
 
 test('scinderAutour sans fermeture touchee ne fait RIEN en base', async () => {
@@ -197,15 +205,21 @@ test('une fermeture trop longue est refusee — on ne tronque pas', async () => 
   assert.equal(ok.ok, true, `${NUITS_MAX} nuits exactement passent`)
 })
 
-test('LE TEST QUI COMPTE : scinderAutour INSERE les morceaux AVANT de retirer l ancienne', () => {
-  // Sans transaction, l'ordre inverse laissait sur un insert en echec une
-  // fermeture disparue : nuits fermees en memoire, sans objet — rouvrables.
-  return (async () => {
-    const sb = fausseBase([fermeture()])
-    await scinderAutour(sb, { userId: COMPTE, propertyId: BIEN, nuitsRouvertes: ['2026-10-15'] })
-    const ops = sb.journal.map(j => j.op).filter(o => o !== 'select')
-    assert.deepEqual(ops, ['insert', 'insert', 'delete'])
-  })()
+test('LE TEST QUI COMPTE : scinderAutour RACCOURCIT l ancienne puis insere le reste — jamais deux objets sur une nuit', async () => {
+  // Scenario reel sur staging (21 septembre 2026) : inserer les morceaux avant
+  // de retirer l'ancienne heurtait la contrainte d'exclusion (23P01). Un
+  // UPDATE qui retrecit ne se heurte jamais a lui-meme ; le second morceau,
+  // insere ensuite, ne chevauche plus rien. Zero morceau = delete.
+  const milieu = fausseBase([fermeture()])
+  await scinderAutour(milieu, { userId: COMPTE, propertyId: BIEN, nuitsRouvertes: ['2026-10-15'] })
+  assert.deepEqual(milieu.journal.map(j => j.op).filter(o => o !== 'select'), ['update', 'insert'])
+  const bord = fausseBase([fermeture()])
+  await scinderAutour(bord, { userId: COMPTE, propertyId: BIEN, nuitsRouvertes: ['2026-10-12'] })
+  assert.deepEqual(bord.journal.map(j => j.op).filter(o => o !== 'select'), ['update'], 'un seul morceau : un seul geste, atomique')
+  const tout = fausseBase([fermeture({ date_fin: '2026-10-12' })])
+  const r = await scinderAutour(tout, { userId: COMPTE, propertyId: BIEN, nuitsRouvertes: ['2026-10-12'] })
+  assert.deepEqual(tout.journal.map(j => j.op).filter(o => o !== 'select'), ['delete'])
+  assert.deepEqual(r.touchees[0].apres, [])
 })
 
 test('la lecture ne rapporte JAMAIS user_id : ces lignes partent telles quelles au calendrier', async () => {

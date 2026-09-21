@@ -1204,13 +1204,13 @@ test('LE TEST QUI COMPTE : rouvrir UNE nuit dans une fermeture la SCINDE — le 
     segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: false, avail: 1 }]
   } }), res)
   assert.strictEqual(res.code, 200, JSON.stringify(res.body))
-  const del = etat.ecritures.filter(e => e.table === 'fermetures' && e.op === 'delete')
-  const ins = etat.ecritures.filter(e => e.table === 'fermetures' && e.row)
-  assert.strictEqual(del.length, 1, 'l ancienne fermeture est retiree')
-  assert.deepStrictEqual(ins.map(i => [i.row.date_debut, i.row.date_fin]), [['2026-10-12', '2026-10-14'], ['2026-10-16', '2026-10-20']])
-  assert.ok(ins.every(i => i.row.raison === 'travaux' && i.row.user_id === PROD), 'la raison suit les morceaux, sous le meme compte')
-  const iDel = etat.ecritures.indexOf(del[0]), iInv = etat.ecritures.findIndex(e => e.table === 'calendar_inventory')
-  assert.ok(iDel < iInv, 'la scission precede l ecriture du calendrier : si elle echoue, rien n est ecrit')
+  const ecrits = etat.ecritures.filter(e => e.table === 'fermetures' && e.row)
+  assert.deepStrictEqual(ecrits.map(i => [i.row.date_debut, i.row.date_fin]), [['2026-10-12', '2026-10-14'], ['2026-10-16', '2026-10-20']],
+    'l ancienne est raccourcie (update), le second morceau insere')
+  assert.ok(!etat.ecritures.some(e => e.table === 'fermetures' && e.op === 'delete'), 'aucun delete : jamais deux objets sur une nuit, jamais zero')
+  assert.strictEqual(ecrits[1].row.raison, 'travaux'); assert.strictEqual(ecrits[1].row.user_id, PROD)
+  const iSc = etat.ecritures.indexOf(ecrits[0]), iInv = etat.ecritures.findIndex(e => e.table === 'calendar_inventory')
+  assert.ok(iSc < iInv, 'la scission precede l ecriture du calendrier : si elle echoue, rien n est ecrit')
 })
 
 test('fermer une nuit deja dans une fermeture ne scinde RIEN', async () => {
