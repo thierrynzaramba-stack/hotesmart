@@ -1106,7 +1106,8 @@ test('import-messages : bien d\'un AUTRE compte -> 403', async () => {
 // ─── calendar : LES FERMETURES DE L'HOTE (lot 4.6.2) ─────────────────────────
 // Spec : docs/specs/spec-yieldflow-v1.md §2 ter §4-§5, §7-A, §7-B.
 // Une fermeture ECRIT stop_sell par le writer du calendrier ; elle n'est pas une
-// seconde source de verite. Une reouverture la SCINDE (arbitrage B).
+// seconde source de verite. Une reouverture d'une nuit couverte est REFUSEE
+// (dessin du 21 septembre 2026) : l'hote modifie la fermeture, a la main.
 
 const FERMETURE = () => ({ id: 'f0f0f0f0-0000-4000-8000-000000000001', user_id: PROD,
   property_id: BIEN_CHANNEX.id, date_debut: '2026-10-12', date_fin: '2026-10-20', raison: 'travaux' })
@@ -1196,24 +1197,23 @@ test('rouvrir_fermeture : une fermeture inconnue -> 404, AUCUNE ecriture du cale
   assert.deepStrictEqual(etat.ecritures.filter(e => e.table === 'calendar_inventory'), [])
 })
 
-test('LE TEST QUI COMPTE : rouvrir UNE nuit dans une fermeture la SCINDE — le dernier geste gagne', async () => {
+test('LE TEST QUI COMPTE : rouvrir UNE nuit dans une fermeture est REFUSE (409), et renvoie vers la fermeture', async () => {
+  // Changement de dessin du 21 septembre 2026 : aucune app ne modifie une
+  // fermeture, le calendrier non plus. La scission est annulee.
   const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
   const res = reponse()
   await require('../api/calendar')(req({ method: 'POST', body: {
     action: 'save', property_id: BIEN_CHANNEX.id,
     segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', stop_sell: false, avail: 1 }]
   } }), res)
-  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
-  const ecrits = etat.ecritures.filter(e => e.table === 'fermetures' && e.row)
-  assert.deepStrictEqual(ecrits.map(i => [i.row.date_debut, i.row.date_fin]), [['2026-10-12', '2026-10-14'], ['2026-10-16', '2026-10-20']],
-    'l ancienne est raccourcie (update), le second morceau insere')
-  assert.ok(!etat.ecritures.some(e => e.table === 'fermetures' && e.op === 'delete'), 'aucun delete : jamais deux objets sur une nuit, jamais zero')
-  assert.strictEqual(ecrits[1].row.raison, 'travaux'); assert.strictEqual(ecrits[1].row.user_id, PROD)
-  const iSc = etat.ecritures.indexOf(ecrits[0]), iInv = etat.ecritures.findIndex(e => e.table === 'calendar_inventory')
-  assert.ok(iSc < iInv, 'la scission precede l ecriture du calendrier : si elle echoue, rien n est ecrit')
+  assert.strictEqual(res.code, 409, JSON.stringify(res.body))
+  assert.strictEqual(res.body.code, 'nuit_fermee_par_fermeture')
+  assert.strictEqual(res.body.fermeture.id, FERMETURE().id, 'la fermeture a modifier est nommee')
+  assert.match(res.body.error, /Modifiez ou supprimez/)
+  assert.deepStrictEqual(etat.ecritures, [], 'RIEN n est ecrit : ni la fermeture, ni le calendrier')
 })
 
-test('fermer une nuit deja dans une fermeture ne scinde RIEN', async () => {
+test('fermer une nuit deja dans une fermeture passe : ce n est pas une reouverture', async () => {
   const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
   await require('../api/calendar')(req({ method: 'POST', body: {
     action: 'save', property_id: BIEN_CHANNEX.id,
@@ -1256,7 +1256,7 @@ test('LE TEST QUI COMPTE : rouvrir quand les fermetures sont ILLISIBLES -> 503 n
   assert.strictEqual(res2.code, 200, JSON.stringify(res2.body))
 })
 
-test('un segment qui FERME et releve le stock ne scinde rien : pour le writer, la nuit reste fermee', async () => {
+test('un segment qui FERME et releve le stock n est pas une reouverture : il passe', async () => {
   const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
   await require('../api/calendar')(req({ method: 'POST', body: {
     action: 'save', property_id: BIEN_CHANNEX.id,
@@ -1297,4 +1297,36 @@ test('rouvrir quand la table fermetures est ABSENTE (migration pas collee) -> pa
   } }), res)
   assert.strictEqual(res.code, 200, JSON.stringify(res.body))
   assert.ok(etat.ecritures.some(e => e.table === 'calendar_inventory'), 'la nuit est rouverte : aucune fermeture ne peut exister')
+})
+
+test('LE TEST QUI COMPTE : modifier_fermeture ecrit les nuits ajoutees (fermees) et retirees (rouvertes, avail releve)', async () => {
+  const etat = preparer({ user: PROD, fermetures: [FERMETURE()] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'modifier_fermeture', property_id: BIEN_CHANNEX.id, id: FERMETURE().id, debut: '2026-10-15', fin: '2026-10-22', raison: 'travaux prolongés'
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const maj = etat.ecritures.find(e => e.table === 'fermetures' && e.row)
+  assert.deepStrictEqual([maj.row.date_debut, maj.row.date_fin, maj.row.raison], ['2026-10-15', '2026-10-22', 'travaux prolongés'])
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  const fermees = lignes.filter(l => l.stop_sell === true).map(l => l.date).sort()
+  const rouvertes = lignes.filter(l => l.stop_sell === false).map(l => l.date).sort()
+  assert.deepStrictEqual(fermees, ['2026-10-21', '2026-10-22'])
+  assert.deepStrictEqual(rouvertes, ['2026-10-12', '2026-10-13', '2026-10-14'])
+  assert.ok(lignes.filter(l => l.stop_sell === false).every(l => Number(l.avail) >= 1), 'rouvert ET vendable')
+})
+
+test('modifier_fermeture : introuvable -> 404 ; membre reservations=read -> 403 ; AUCUNE ecriture', async () => {
+  let etat = preparer({ user: PROD, fermetures: [] })
+  let res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'modifier_fermeture', property_id: BIEN_CHANNEX.id, id: FERMETURE().id, debut: '2026-10-15', fin: '2026-10-22', raison: 'x'
+  } }), res)
+  assert.strictEqual(res.code, 404); assert.deepStrictEqual(etat.ecritures, [])
+  etat = preparer({ profil: profilActif(), permissions: perms({ reservations: 'read' }), fermetures: [FERMETURE()] })
+  res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'modifier_fermeture', property_id: BIEN_A.id, id: FERMETURE().id, debut: '2026-10-15', fin: '2026-10-22', raison: 'x'
+  } }), res)
+  assert.strictEqual(res.code, 403); assert.deepStrictEqual(etat.ecritures, [])
 })

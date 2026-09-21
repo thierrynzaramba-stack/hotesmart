@@ -356,61 +356,42 @@ dit `origine: 'host'` en dur.
 émetteurs de `/restrictions` (`tests/price-log.test.js`) déclare le writer
 comme tarifaire ; la porte HTTP, qui ne pousse plus rien elle-même, en sort.
 
-### ✅ 4.6.2 LIVRÉ le 21 septembre 2026 — les fermetures de l'hôte
+### ✅ 4.6.2 LIVRÉ le 21 septembre 2026 — les fermetures de l'hôte (dessin révisé le même jour)
 
 **Ce qui est livré.** La table `fermetures` (migration
-`migrations/2026-09-21-fermetures.sql`, à coller ; RLS lecture seule sur son
-compte, l'écriture passe par l'endpoint), son seul writer `lib/fermetures.js`,
-deux actions de `api/calendar.js` — `fermer` (crée l'objet **puis** écrit
-`stop_sell = true` par `ecrireCalendrier` ; si le writer refuse, l'objet est
-retiré) et `rouvrir_fermeture` (retire l'objet puis rouvre **toute** la période,
-`avail` relevé) —, la scission dans `save` (arbitrage B : une réouverture qui
-touche une fermeture la coupe autour, **avant** le writer, même raison sur les
-morceaux), l'exclusion des statistiques par `joursExclus` (exceptions ∪
-fermetures, une lecture en échec **lève**), le canal interne qui compte
-`fermees_par_l_hote` et n'y écrit rien, l'écran (liste sous la grille avec la
-raison et « Retirer », raison en titre sur le jour, et sur un bien piloté
-« Fermer à la vente » demande la raison et pose une fermeture), et
-`scripts/verifier-fermetures.js` (chaque fermeture est portée par la mémoire
-d'intention, sinon échec).
+`migrations/2026-09-21-fermetures.sql` : RLS lecture seule sur son compte,
+l'écriture passe par l'endpoint, contrainte d'exclusion contre le chevauchement,
+CHECK de longueur), son seul writer `lib/fermetures.js` (lire, créer,
+**modifier**, supprimer — pas de scission), trois actions de `api/calendar.js` :
+`fermer` (crée l'objet **puis** écrit `stop_sell = true` par `ecrireCalendrier` ;
+si le writer refuse, l'objet est retiré), `modifier_fermeture` (dates et raison ;
+les nuits ajoutées se ferment, les nuits retirées rouvrent avec `avail` relevé,
+sauf celles qu'une autre fermeture couvre encore) et `rouvrir_fermeture` (retire
+l'objet, rouvre ce qu'aucune autre ne couvre). Dans `save`, **une réouverture
+qui touche une nuit couverte est refusée** (409 `nuit_fermee_par_fermeture`,
+la fermeture à modifier est nommée) ; une lecture en échec refuse aussi (503
+nommé), une table absente vaut « aucune fermeture ». L'exclusion des
+statistiques passe par `joursExclus` (exceptions ∪ fermetures, les trois chemins
+de prod y passent), le canal interne compte `fermees_par_l_hote` et n'y écrit
+rien. `scripts/verifier-fermetures.js` : chaque fermeture est portée par la
+mémoire d'intention, sinon échec.
+
+**L'écran.** Le parcours « nouvelle réservation » porte un type
+« Indisponible » (dates + raison) et s'ouvre sur tout bien — la réservation
+directe reste Channex-only et le formulaire le dit. Une fermeture est une
+**barre foncée** (anthracite) de la première à la dernière nuit, avec sa raison ;
+cliquer ouvre sa **fiche** : dates et raison modifiables, suppression après
+confirmation. Sur un bien piloté, « Fermer à la vente » ouvre ce parcours
+pré-rempli ; sur un bien calendrier, il reste un `stop_sell` nu. « Rouvrir à la
+vente » sur une nuit couverte n'écrit rien et ouvre la fiche.
 
 **Ce qui est assumé.**
-- Sur un bien **calendrier**, « Fermer à la vente » reste un `stop_sell` nu :
-  aucun moteur n'y rouvrira jamais rien, la fermeture n'y apporte que la raison.
-  On pourra l'offrir plus tard ; on n'a pas voulu ajouter une question à un
-  geste qui marche.
-- **Retirer rouvre toute la période**, y compris une nuit que l'hôte avait
-  fermée à la main avant de poser la fermeture par-dessus. Le calendrier le dit
-  au clic. S'il veut garder une nuit fermée, il la referme.
-- Le **calendrier mobile** ne connaît pas encore les fermetures : sa rubrique
-  « Disponibilité → Fermé » écrit `avail = 0` + `stop_sell = true` sans objet.
-  Sur un bien piloté, cette nuit sera donc « fermée calculée » aux yeux du
-  4.6.3. Dette notée, à traiter avec la refonte mobile.
-- La raison est demandée par `window.prompt` : suffisant pour la recette, à
-  remplacer par un formulaire en ligne si la recette le demande.
-
-**Ce que la review a ajouté (21 septembre 2026, deux passes).**
-- **Une nuit n'appartient qu'à une seule fermeture** : le chevauchement est
-  refusé (409) par une lecture avant insertion, et **tenu sous concurrence**
-  par une contrainte d'exclusion en base (`btree_gist`, `daterange` inclusif) ;
-  son refus `23P01` est rendu comme le même « chevauchement ».
-- **Retirer une fermeture ne rouvre que les nuits qu'aucune autre ne couvre**,
-  et le dit ; avec une relecture en échec, rien n'est rouvert. C'est ce qui rend
-  inoffensif le seul doublon possible (une scission dont le DELETE échoue après
-  les inserts).
-- **La scission raccourcit l'ancienne (UPDATE) puis insère le reste** : trouvé
-  par le scénario réel sur staging, « insérer avant de retirer » heurtait la
-  contrainte d'exclusion (les morceaux chevauchent l'ancienne tant qu'elle
-  existe). Un UPDATE qui rétrécit ne se heurte jamais à lui-même ; au pire un
-  second morceau sans objet, jamais deux objets sur une nuit, jamais une nuit
-  ouverte à tort.
-- **`joursExclus` est la seule porte** vers « quels jours sortent de la
-  référence », et les trois chemins de prod y passent — sa fenêtre est un
-  filtre, pas une énumération : elle accepte les 2 000+ jours du radar.
-- **Une fermeture couvre au plus 1 000 nuits** (code et CHECK) ; rien ne tronque
-  en silence, une date qui n'existe pas (30 février) est une période invalide.
-- **Une réouverture avec fermetures illisibles est refusée en 503 nommé**, pas
-  en 500 muet ; un tarif seul passe.
+- **Supprimer rouvre toute la période** (hors nuits couvertes par une autre
+  fermeture), y compris une nuit fermée à la main avant. Dit au clic.
+- Le **calendrier mobile** ne connaît pas les fermetures (dette).
+- Une fermeture ne peut ni chevaucher une autre (409, tenu en base sous
+  concurrence) ni dépasser 1 000 nuits ; une date qui n'existe pas est une
+  période invalide.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
@@ -430,12 +411,24 @@ vient des providers (Beds24 `black`). Le réutiliser rendrait indistinguables un
 fermeture **décidée dans HôteSmart** et un blocage **importé**, et il ne porte ni
 raison ni bornes.
 
-**B. Une réouverture SCINDE la fermeture.** L'hôte rouvre le 15 dans une
-fermeture du 12 au 20 : elle devient 12-14 et 16-20, le 15 redevient vendable.
-C'est la règle déjà gravée de la mémoire d'intention — « la nouvelle
-configuration remplace l'ancienne, jamais de restauration contre la volonté de
-l'hôte ». Le dernier geste gagne, sans dialogue et sans refus : le calendrier
-obéit.
+**B. ~~Une réouverture SCINDE la fermeture.~~ ANNULÉ le 21 septembre 2026 —
+une fermeture est un objet manipulé COMME UNE RÉSERVATION.** Décision de
+Thierry après la première recette sur staging :
+- elle se **crée** par le parcours « nouvelle réservation », type
+  « indisponible », avec dates et raison ;
+- elle s'**affiche** dans le calendrier comme une barre de réservation, en
+  couleur **foncée** (distincte des vraies résas), avec sa raison ;
+- elle se **modifie uniquement à la main par l'hôte** — dates et raison, comme
+  il modifierait une réservation. **Aucune app ne peut la modifier** — ni
+  Yield ni aucune autre, jamais. Le calendrier non plus : **rouvrir directement
+  une nuit couverte est refusé** (409), et l'hôte est renvoyé vers la
+  modification de la fermeture ;
+- elle vaut bien piloté YieldFlow ou non.
+
+La scission du 19 septembre supposait que le calendrier avait le droit de
+toucher l'objet ; le nouveau dessin le lui retire, comme à tout le monde. La
+table dédiée et le writer ne changent pas : c'est l'UX et le comportement qui
+changent. La migration n'a pas bougé.
 
 **C. Une nuit hors fenêtre est EXCLUE du calcul, pas comptée fermée.**
 Ni au numérateur, ni au dénominateur : l'hôte n'a rien décidé pour elle.

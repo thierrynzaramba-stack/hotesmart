@@ -625,54 +625,62 @@ test('DESKTOP SEUL : CELL_W n\'est consomme que par le desktop', () => {
 })
 
 // ─── Lot 4.6.2 : les fermetures de l'hote dans l'ecran ──────────────────────
-test('fermetures : sur un bien pilote par YieldFlow, FERMER pose une fermeture avec sa raison', () => {
-  // Un simple stop_sell y serait indistinguable d'une fermeture CALCULEE, que
-  // le moteur pourrait rouvrir. La fermeture est la frontiere.
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  assert.match(bloc, /if\(fermer && estPiloteYield\(bienId\)\)/, 'la bifurcation ne vaut que pour FERMER un bien pilote')
-  assert.ok(bloc.includes('window.prompt('), 'la raison est demandee')
-  assert.ok(bloc.includes('poserFermeture(bienId, idxs, raison.trim())'))
-  const poser = PAGE.slice(PAGE.indexOf('async function poserFermeture'), PAGE.indexOf('async function retirerFermeture'))
-  assert.ok(poser.includes('api.calendar.fermer('), 'un seul chemin serveur : l action `fermer`')
-  assert.ok(!poser.includes('api.calendar.save('), 'jamais un stop_sell nu sur un bien pilote')
+// Dessin du 21 septembre 2026 (Thierry) : une fermeture est un objet manipule
+// COMME UNE RESERVATION — creee par le parcours « nouvelle reservation » (type
+// « indisponible »), affichee comme une barre FONCEE, modifiee a la main par
+// l'hote seul, jamais scindee par le calendrier.
+
+test('fermetures : le parcours « nouvelle reservation » porte un type « indisponible » avec dates et raison', () => {
+  assert.match(PAGE, /<input type="radio" name="ajout-type" value="reservation" id="ajout-type-resa">/)
+  assert.match(PAGE, /<input type="radio" name="ajout-type" value="indisponible" id="ajout-type-indispo">/)
+  assert.match(PAGE, /<input id="ajout-raison" type="text" maxlength="200"/)
+  const valider = PAGE.slice(PAGE.indexOf('async function validerIndisponibilite'), PAGE.indexOf('async function validerAjout'))
+  assert.ok(valider.includes('api.calendar.fermer(bien.id, b.arrival, derniereNuit, raison)'), 'un seul chemin serveur : l action fermer')
+  assert.ok(valider.includes('toISO(days[tries[tries.length-1]])'), 'la derniere NUIT, pas le jour de depart')
+  assert.ok(!valider.includes('api.calendar.save('), 'jamais un stop_sell nu')
+  assert.match(PAGE, /if\(typeAjout\(\)==='indisponible'\) return validerIndisponibilite\(b, bien\)/)
 })
 
-test('fermetures : sur un bien calendrier, le chemin reste celui d avant (aucune raison demandee)', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  const apres = bloc.slice(bloc.indexOf('poserFermeture(bienId, idxs, raison.trim())'))
-  assert.ok(apres.includes('api.calendar.save'), 'le stop_sell nu existe toujours')
-  assert.match(apres, /stop_sell: fermer/)
+test('fermetures : le parcours s ouvre sur TOUT bien ; la reservation directe reste Channex-only et le dit', () => {
+  assert.match(PAGE, /const okAjout = !!\(bien && peutEcrire\('reservations'\) && !LECTURE_SEULE\)/)
+  const ouvrir = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout(mode)'), PAGE.indexOf('function fermerFormulaireAjout'))
+  assert.ok(ouvrir.includes('rResa.disabled = !channex'))
+  assert.ok(ouvrir.includes("(typeof mode==='string') ? mode : (channex ? 'reservation' : 'indisponible')"))
 })
 
-test('fermetures : l ecran les AFFICHE avec leur raison, et ne les lit JAMAIS pour dire si une nuit est vendable', () => {
-  assert.ok(PAGE.includes('class="fermetures-liste"'))
+test('fermetures : une INDISPONIBILITE est une barre FONCEE, avec sa raison, de la premiere a la derniere nuit', () => {
+  assert.match(PAGE, /\.resa-bar\.fermeture \{ background: #3a3a3c/, 'anthracite, hors de la palette des canaux')
+  const barres = PAGE.slice(PAGE.indexOf('function barresResa'), PAGE.indexOf('const jourFerme'))
+  assert.ok(barres.includes("'<div class=\"resa-bar fermeture cliquable'"), 'une barre, cliquable')
+  assert.ok(barres.includes('escapeHtmlLocal(f.raison)'), 'la raison, echappee')
+  assert.ok(barres.includes('px(iFin+1-iDebut)'), 'bornes incluses : pas de demi-cellule d arrivee')
+  assert.ok(PAGE.includes('if(bar.dataset.fermeture) ouvrirFicheFermeture(bar.dataset.bien, bar.dataset.fermeture)'), 'le clic ouvre SA fiche')
+  assert.ok(!PAGE.includes('fermetures-liste'), 'plus de liste sous la grille')
+})
+
+test('LE TEST QUI COMPTE : la fiche modifie dates et raison par l action dediee, et supprime — a la main, par l hote seul', () => {
+  const fiche = PAGE.slice(PAGE.indexOf('function ouvrirFicheFermeture'), PAGE.indexOf('async function basculerStopSell'))
+  assert.ok(fiche.includes("const modifiable = peutEcrire('reservations') && !LECTURE_SEULE"))
+  assert.ok(fiche.includes("champ('ferm-debut','Première nuit','date',f.date_debut)") && fiche.includes("champ('ferm-raison','Raison','text',f.raison"))
+  assert.ok(fiche.includes('api.calendar.modifierFermeture(bien.id, f.id, debut, fin, raison)'))
+  assert.ok(fiche.includes('api.calendar.rouvrirFermeture(bien.id, f.id)') && fiche.includes('window.confirm('), 'supprimer previent que toute la periode rouvre')
+  assert.ok(!PAGE.includes('window.prompt('), 'plus de prompt')
+})
+
+test('LE TEST QUI COMPTE : rouvrir une nuit couverte est REFUSE par l ecran, qui renvoie vers la fiche — plus de scission', () => {
+  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
+  assert.ok(bloc.includes("if(fermer && estPiloteYield(bienId)){ ouvrirFormulaireAjout('indisponible'); return }"), 'fermer un bien pilote = le parcours, pre-rempli')
+  assert.ok(bloc.includes('const f=fermetureCouvrant(bienId, toISO(days[i])); if(f){'), 'chaque nuit selectionnee est verifiee')
+  assert.ok(bloc.includes('ouvrirFicheFermeture(bienId, f.id); return'), 'renvoi vers la fiche, sans ecrire')
+  assert.ok(!/scind/i.test(PAGE), 'le mot meme a disparu de la page')
+  // Sur un bien calendrier, fermer reste un stop_sell nu (inchange).
+  const apres = bloc.slice(bloc.indexOf("ouvrirFormulaireAjout('indisponible'); return }"))
+  assert.ok(apres.includes('api.calendar.save') && /stop_sell: fermer/.test(apres))
+})
+
+test('fermetures : l ecran les affiche mais ne les lit JAMAIS pour dire si une nuit est vendable', () => {
   assert.ok(PAGE.includes('fermByBien[id]=(fermetures&&fermetures[id])||[]'), 'rangees a la relecture, par bien')
-  // La vendabilite vient de `states` (calendar_inventory) : `jourFerme` ne
-  // consulte pas les fermetures.
   const jf = PAGE.slice(PAGE.indexOf('function jourFerme'), PAGE.indexOf('function jourFerme') + 400)
   assert.ok(!jf.includes('fermByBien'), 'jourFerme ne lit pas les fermetures')
-  assert.ok(!PAGE.includes('raisonFermeture(') || PAGE.includes("title=\"Fermé : '"), 'la raison est un TITRE sur le jour, pas une decision')
-})
-
-test('fermetures : retirer est garde, previent que TOUTE la periode rouvre, et passe par l action dediee', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('async function retirerFermeture'), PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(bloc.includes("peutEcrire('reservations')") && bloc.includes('LECTURE_SEULE'))
-  assert.ok(bloc.includes('window.confirm(') && bloc.includes('TOUTE la période'))
-  assert.ok(bloc.includes('api.calendar.rouvrirFermeture(bienId, id)'))
-  // Le bouton n'est rendu que si l'ecriture est possible.
-  assert.ok(PAGE.includes("const peutRetirer = peutEcrire('reservations') && !LECTURE_SEULE"))
-})
-
-test('fermetures : la raison est ECHAPPEE avant d entrer dans le HTML', () => {
-  // Texte libre de l'hote, rendu par innerHTML : sans echappement, une raison
-  // « <img onerror> » executerait dans la page de tous les membres du compte.
-  assert.ok(PAGE.includes('echapper(f.raison)'))
-  assert.ok(PAGE.includes("title=\"Fermé : '+echapper(rs)"))
-})
-
-test('fermetures : plusieurs plages -> le verdict affiche est celui du PIRE, et un echec nomme sa plage', () => {
-  const poser = PAGE.slice(PAGE.indexOf('async function poserFermeture'), PAGE.indexOf('async function retirerFermeture'))
-  assert.ok(poser.includes('reponses.find(r=>r&&r.push_failed)'), 'un push_failed sur une plage ne se cache pas derriere la suivante')
-  assert.ok(poser.includes('NON FERMÉ — '), 'un echec se dit')
-  assert.ok(!/let dernier/.test(poser), 'plus de « derniere reponse »')
+  assert.ok(PAGE.includes("title=\"Fermé : '+echapper(rs)"), 'la raison est un TITRE sur le jour, pas une decision')
 })
