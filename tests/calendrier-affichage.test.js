@@ -14,8 +14,13 @@ const fs = require('fs')
 const path = require('path')
 
 const lire = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
-const sansCommentaires = (s) => s.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
-const PAGE = sansCommentaires(lire('pages', 'biens-calendrier.html'))
+// ⚠ LES COMMENTAIRES CSS AUSSI — re-review du 21 septembre 2026 : une regle
+// `table.cal { table-layout: fixed }` avalee par un `/*` jamais ferme passait
+// tous les tests au vert. Une regex sur la source ne distingue pas une regle
+// vivante d'une regle commentee : on retire les blocs AVANT de matcher.
+const sansCommentaires = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+const PAGE_BRUTE = lire('pages', 'biens-calendrier.html')
+const PAGE = sansCommentaires(PAGE_BRUTE)
 const MOBILE = lire('pages', 'calendrier-mobile.html')
 const CORE = lire('shared', 'calendar-core.js')
 
@@ -83,7 +88,10 @@ test('en-tetes : deux etages collants, le second SOUS le premier', () => {
   // La bande des mois a 0, la ligne des jours a sa hauteur. Le second `top`
   // doit etre non nul, sinon les deux se superposent.
   assert.match(PAGE, /#month-band-wrap \{[^}]*position: sticky; top: 0/)
-  assert.match(PAGE, /--bande-h: 27px/)
+  // ⚠ 74 px depuis le 21 septembre 2026 : la bande porte les mois ET la ligne
+  // des jours (27 + 46 + 1 de trait). Un chiffre faux ferait glisser les theads
+  // des biens sous la bande.
+  assert.match(PAGE, /--bande-h: 74px/)
   assert.match(PAGE, /table\.cal thead th \{[^}]*position: sticky; top: var\(--bande-h\)/)
   assert.match(PAGE, /table\.cal thead \.row-label \{[^}]*top: var\(--bande-h\)/,
     'l\'angle du bien cumule les deux ancrages')
@@ -320,4 +328,100 @@ test('DESKTOP SEUL : le decalage de computeDays est optionnel', () => {
   // retrocompatible pour tout appelant existant.
   assert.match(CORE, /export function computeDays\(months, containerW, decalageJours = 0\)/)
   assert.ok(!MOBILE.includes('computeDays'))
+})
+
+test('LES JOURS DU MOIS NE SONT RENDUS QU UNE FOIS, sous le mois', () => {
+  // Demande de Thierry, 21 septembre 2026 : chaque bien repetait la ligne des
+  // jours (nom + numero) dans son propre thead — trois biens, trois fois les
+  // memes « lun 21 mar 22 … ». Les jours vivent dans la bande, sous le mois.
+  const bande = PAGE.slice(PAGE.indexOf('function renderMonthBand'), PAGE.indexOf('const blocksEl'))
+  assert.match(bande, /tr class="jours"/, 'la bande porte une ligne de jours')
+  assert.match(bande, /class="day-name"/, 'avec le nom du jour')
+  assert.match(bande, /class="day-num"/, 'et son numero')
+  assert.match(bande, /classesJour\(idx\)/, 'avec les memes classes que l ancien thead (week-end, jour courant, debut de mois)')
+  // ⚠ STRUCTUREL, PAS TEXTUEL — releve en review : `<colgroup>` present dans
+  // la source ne prouve rien s'il est ecrit AVANT `<table>` (le parseur
+  // l'ignore, et c'est ce que ma premiere version faisait). On l'exige juste
+  // apres la balise d'ouverture, avec l'angle au gabarit de `.row-label`.
+  assert.match(bande, /<table class="month-band"'\+tableStyle\(\)\+'>'\+colonnesHtml\(\)\+'/,
+    'le colgroup est DANS la table, par le meme generateur que les biens, avec la meme largeur en ligne')
+  // ⚠ LE MEME colgroup DANS LES DEUX TABLES — decalage constate par Thierry sur
+  // staging (21 septembre 2026) : l'angle faisait 129 px alors que `.row-label`
+  // fait 120 en border-box, et la grille des biens n'avait aucun colgroup.
+  // On teste la PROPRIETE, pas la forme : les deux tables passent par le meme
+  // generateur de colonnes ET la meme largeur en ligne (sans largeur non auto,
+  // `table-layout: fixed` n'est pas en vigueur et les `col` ne sont que des
+  // preferences).
+  assert.match(PAGE, /<table class="cal"'\+tableStyle\(\)\+'>'\+colonnesHtml\(\)\+'<thead>/, 'chaque bien : largeur + colonnes')
+  assert.match(PAGE, /<table class="month-band"'\+tableStyle\(\)\+'>'\+colonnesHtml\(\)\+'/, 'la bande : idem')
+  assert.match(PAGE, /LABEL_W\+days\.length\*CELL_W/, 'la largeur est la somme des colonnes')
+  assert.match(PAGE, /table\.cal \{[^}]*table-layout: fixed/)
+  assert.match(PAGE, /table\.cal \{[^}]*border-collapse: collapse/, 'sans collapse, border-spacing ajoute 2 px par jour')
+  assert.match(PAGE, /table\.month-band \{[^}]*table-layout: fixed/)
+  // Chaque `/*` du style est ferme : un commentaire ouvert avale la regle suivante.
+  const style = PAGE_BRUTE.slice(PAGE_BRUTE.indexOf('<style>'), PAGE_BRUTE.indexOf('</style>'))
+  assert.equal((style.match(/\/\*/g) || []).length, (style.match(/\*\//g) || []).length, 'un commentaire CSS non ferme')
+  // Le nom du bien : ellipsis dans sa propre boite, trait bas conserve, texte a 12 px du lisere.
+  assert.match(PAGE, /\.bien-head \{[^}]*box-shadow: inset 4px 0 0 #007aff, inset 0 -1px 0 #e5e5e7/)
+  assert.match(PAGE, /\.bien-head \{[^}]*padding-left: 12px/)
+  assert.match(PAGE, /\.bien-head \.nom \{ display: block; overflow: hidden; text-overflow: ellipsis; \}/)
+  assert.match(PAGE, /<span class="nom">'\+escapeHtmlLocal\(bien\.name\)\+'<\/span>/)
+  // Un mois d'une ou deux colonnes prend son nom court, sans deborder sur le voisin.
+  assert.match(PAGE, /span<3\?monthShort\[m\]:monthFull\[m\]/)
+  assert.match(PAGE, /\.cal-page \* \{ box-sizing: border-box; \}/, 'la regle qui rend 120 exact')
+  assert.ok(!/const LABEL_W=/.test(PAGE), 'LABEL_W vient du core, pas d une copie locale')
+  assert.match(PAGE, /area\.scrollLeft - LABEL_W/, 'la selection a la souris compte depuis la meme colonne')
+  // Les liseres qui entreraient dans la boite de la table : en box-shadow.
+  assert.match(PAGE, /\.row-label\.bien-head \{[^}]*box-shadow: inset 4px 0 0 #007aff/)
+  assert.ok(!/\.row-label\.bien-head \{[^}]*border-left/.test(PAGE))
+  assert.match(PAGE, /table\.month-band \.corner \{[^}]*border-right: 1px solid #e5e5e7/)
+  // Le nom du bien est ECHAPPE (XSS stocke via le titre provider).
+  assert.match(PAGE, /escapeHtmlLocal\(bien\.name\)\+'<\/span><span class="cap-h">/)
+  assert.match(bande, /w\.offsetHeight/, 'la hauteur de bande est mesuree apres rendu')
+  assert.match(bande, /setProperty\('--bande-h'/, 'et posee sur la page : 74px n est qu un repli')
+  assert.ok(!/table\.cal tr\.jours td\.weekend \.day-name/.test(PAGE), 'plus de CSS mort pour des jours qui ne sont plus dans le thead')
+
+  const bien = PAGE.slice(PAGE.indexOf('function renderBienBlock'), PAGE.indexOf('const rows=visibleRows(bien)'))
+  assert.ok(!/day-name|day-num/.test(bien), 'le thead d un bien ne rend plus les jours')
+  assert.match(bien, /jour-vide/, 'ses cellules de jour restent, vides, pour l alignement')
+  assert.match(bien, /bien-head/, 'et le nom du bien y reste')
+
+  // Une seule fois dans tout le rendu : deux fabriques de jours divergeraient.
+  const rendu = PAGE.slice(PAGE.indexOf('<script type="module">'))
+  assert.strictEqual((rendu.match(/class="day-num"/g) || []).length, 1, 'day-num n est ecrit qu une fois dans le JS')
+  // Le style suit : une bande a deux lignes, des theads sans jours.
+  assert.match(PAGE, /table\.month-band tr\.jours td \{[^}]*height: 46px/)
+  assert.match(PAGE, /table\.cal thead th\.jour-vide \{[^}]*height: 0/)
+  assert.match(PAGE, /table\.month-band tr\.jours td\.today \{/, 'le jour courant se lit sur la bande')
+  assert.match(PAGE, /table\.month-band tr\.jours td\.weekend \{/, 'le week-end aussi')
+})
+
+test('SEPARATION ET SURVOL DE COLONNE (demande de Thierry, 21 septembre 2026) : un trait entre les jours, la colonne entiere s eclaire', () => {
+  // Le trait est pose dans les DEUX tables : sous border-collapse il est
+  // partage, et une bordure d'un seul cote desalignerait la bande et la grille.
+  assert.match(PAGE, /table\.cal th, table\.cal td, table\.month-band tr\.jours td:not\(\.corner\) \{ border-right: 1px solid #e8e8ec; \}/, 'l angle garde le gris des libelles')
+  // Chaque cellule de jour porte sa colonne : bande, thead, reservations, lignes.
+  assert.match(PAGE, /'<td class="'\+c\.join\(' '\)\+'" data-col="'\+idx\+'"><div class="day-name">/, 'la bande')
+  assert.match(PAGE, /c\.push\('jour-vide'\)[^\n]*data-col="'\+idx\+'"/, 'le thead du bien')
+  assert.match(PAGE, /c\.unshift\('resa-cell'\)[^\n]*data-col="'\+i\+'"/, 'la ligne des reservations')
+  assert.match(PAGE, /\+' data-col="'\+i\+'"';html\+='<td class="'\+c\.join/, 'chaque case de tarif')
+  // Un ecouteur delegue, qui ne repeint que quand la colonne change.
+  const bloc = PAGE.slice(PAGE.indexOf('function survolColonne'), PAGE.indexOf('buildDays(); renderMonthPills(); renderMonthBand()\n'))
+  // Par la geometrie : les barres de reservation vivent toutes dans la premiere
+  // cellule, `closest('[data-col]')` y rendrait toujours la colonne 0.
+  assert.ok(bloc.includes("area.addEventListener('mousemove'") && bloc.includes('colIndexUnderX(e.clientX)'))
+  assert.ok(bloc.includes('if(col===survolCourante) return'), 'ne repeint que quand la colonne change')
+  assert.ok(bloc.includes("addEventListener('mouseleave'"), 'et s eteint en sortant')
+  assert.ok(bloc.includes("matchMedia('(hover: hover)')"), 'souris seulement : au doigt, mouseleave ne vient jamais')
+  // Un re-rendu remplace les cellules : l'etat du survol et son index sont remis a zero.
+  assert.match(PAGE, /function renderBlocks\(\)\{ reinitSurvol\(\);/)
+  assert.match(PAGE, /function renderMonthBand\(\)\{ reinitSurvol\(\);/)
+  // background-color, pas background : les hachures d'un jour ferme survivent au survol ;
+  // et le thead est nomme, car `thead th.weekend` est plus specifique.
+  assert.match(PAGE, /table\.cal td\.col-hover, table\.cal th\.col-hover, table\.cal thead th\.col-hover \{ background-color: #e9f0fa; \}/)
+  assert.match(PAGE, /table\.month-band tr\.jours td\.col-hover \{ background-color: #d9e6f7; \}/)
+  // Les couleurs qui portent un sens restent prioritaires : aujourd'hui et la
+  // selection sont en !important, la case fermee en rouge aussi.
+  assert.match(PAGE, /table\.cal \.today \{ background: #e6f0ff !important/)
+  assert.match(PAGE, /td\.edit-cell\.selected \{ background: #d4e4ff !important/)
 })

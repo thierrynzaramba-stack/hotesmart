@@ -1529,6 +1529,102 @@ test('la ligne de la liste ouvre LA MÊME fiche que la feuille du jour', async (
     'la même fiche, au caractère près')
 })
 
+test('LE TEST QUI COMPTE : deux ménages à prendre le même jour — la ligne touchée ouvre LE SIEN', async () => {
+  // ⚠ LE DEFAUT TROUVE EN REVIEW LE 20 SEPTEMBRE 2026, chez une vraie
+  // prestataire. La liste rend UN bouton par offre — chacun nomme son bien —
+  // mais tous portaient le seul `data-jour`, et le gestionnaire ouvrait
+  // `libres[0]`. Elle tapait « Bien p2 », la feuille disait « Bien p1 », et
+  // « Je prends ce ménage » lui attribuait l'autre logement.
+  //
+  // ⚠ ET UN INDICE DE POSITION SERAIT FAUX ICI : la liste est triée par nom
+  // de bien, `aPrendreDu` rend l'ordre du serveur. On met donc l'offre p2 EN
+  // PREMIER côté serveur : triée, elle passe en second dans la liste — si le
+  // code confondait les deux ordres, le test le verrait.
+  const j = dans(1)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p2'), offre(j, 'p1')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+
+  const lignes = [...agenda(w).querySelectorAll('.agenda-item.offre')]
+  assert.strictEqual(lignes.length, 2, 'deux lignes, une par offre')
+  assert.deepStrictEqual(lignes.map(l => l.querySelector('.agenda-bien').textContent),
+    ['Bien p1', 'Bien p2'], 'triées par nom de bien')
+
+  // Elle touche la SECONDE ligne : « Bien p2 ».
+  lignes[1].dispatchEvent(new w.Event('click', { bubbles: true }))
+  const fiche = w.document.getElementById('modal-body').textContent
+  assert.match(fiche, /Bien p2/, 'la fiche ouverte est celle du bien touché')
+  assert.doesNotMatch(fiche, /Bien p1/, 'et pas celle de la première offre du jour')
+  w.document.getElementById('modal-close').dispatchEvent(new w.Event('click', { bubbles: true }))
+
+  // Et la première ligne ouvre bien la sienne — le correctif n'a pas inversé.
+  lignes[0].dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.match(w.document.getElementById('modal-body').textContent, /Bien p1/)
+})
+
+test('une offre disparue entre le rendu et le geste n ouvre PAS une voisine', async () => {
+  // Si l'offre touchée n'est plus dans `aPrendreDu` (prise par une autre entre
+  // le rendu et le geste), lui ouvrir la première du jour serait le défaut même
+  // qu'on ferme. On repeint, et rien ne s'ouvre.
+  // ⚠ La page garde SA copie des offres (chargée par `loadData`) : on ne peut
+  // pas la faire disparaître par le harnais sans repeindre. On simule donc le
+  // cas au niveau du geste — un bouton dont l'identifiant ne correspond plus à
+  // rien — ce qui est exactement ce que voit le gestionnaire.
+  const j = dans(1)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p1'), offre(j, 'p2')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const ligneP2 = [...agenda(w).querySelectorAll('.agenda-item.offre')]
+    .find(l => /Bien p2/.test(l.textContent))
+  assert.ok(ligneP2)
+  ligneP2.dataset.offreCle = 'p2|x-disparue'
+  ligneP2.dispatchEvent(new w.Event('click', { bubbles: true }))
+  assert.strictEqual(w.document.getElementById('modal').style.display, 'none',
+    'aucune fiche ne s ouvre — surtout pas celle de p1 à la place de p2')
+  // Et la liste a été repeinte : le bouton p2 est de nouveau là, avec son vrai identifiant.
+  assert.strictEqual(agenda(w).querySelectorAll('.agenda-item.offre[data-offre-cle="p2|x-' + j + '-p2"]').length, 1,
+    'la liste est repeinte depuis les données')
+})
+
+test('LE TEST QUI COMPTE : le MEME booking_id sous deux biens le meme jour — chaque ligne ouvre le sien', async () => {
+  // ⚠ RELEVE EN REVIEW. L'identite d'un menage est (property_id, booking_id,
+  // departure_date) : la migration de transfert anticipe le MEME booking_id
+  // sous le bien source et le bien cible. Matcher par booking_id seul aurait
+  // rouvert le defaut qu'on ferme, par une autre porte.
+  const j = dans(1)
+  const commun = { booking_id: 'x-commun', departure_date: j, status: 'unassigned' }
+  const { w, t } = monter({ aPrendre: [
+    { ...commun, property_id: 'p2', property_name: 'Bien p2' },
+    { ...commun, property_id: 'p1', property_name: 'Bien p1' }
+  ] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  const lignes = [...agenda(w).querySelectorAll('.agenda-item.offre')]
+  assert.strictEqual(lignes.length, 2)
+  const p2 = lignes.find(l => /Bien p2/.test(l.textContent))
+  p2.dispatchEvent(new w.Event('click', { bubbles: true }))
+  const fiche = w.document.getElementById('modal-body').textContent
+  assert.match(fiche, /Bien p2/)
+  assert.doesNotMatch(fiche, /Bien p1/, 'le booking_id commun n a pas suffi a la confondre avec p1')
+})
+
+test('la feuille du jour n ouvre plus une VOISINE quand l offre touchee a disparu', async () => {
+  // ⚠ RELEVE EN REVIEW : la feuille resolvait par indice avec un repli
+  // `Math.min(i, libres.length - 1)`, et `ouvrirPriseDeMenage` gardait
+  // `libres[idx] || libres[0]`. Le meme defaut que la liste, par l'autre porte.
+  const j = dans(1)
+  const { w, t } = monter({ aPrendre: [offre(j, 'p1'), offre(j, 'p2')] })
+  t.seed(); await t.charger(); await t.chargerDisponibilites()
+  taperJour(w, j)
+  const bouton = [...w.document.querySelectorAll('#modal-body [data-offre]')].find(b => /Bien p2/.test(b.textContent))
+  assert.ok(bouton, 'la feuille du jour propose p2')
+  assert.match(bouton.dataset.offreCle, /^p2\|/, 'la feuille porte l identite, pas un indice')
+  bouton.dataset.offreCle = 'p2|x-disparue'
+  bouton.dispatchEvent(new w.Event('click', { bubbles: true }))
+  // La feuille du jour est repeinte (elle LISTE toujours p1 comme offre, c'est
+  // normal) ; ce qui ne doit pas arriver, c'est une PRISE ouverte a la place.
+  assert.doesNotMatch(w.document.getElementById('modal-title').textContent, /Prendre ce ménage/,
+    'aucune prise ne s ouvre a la place de l offre disparue')
+  assert.ok(w.document.querySelector('#modal-body [data-offre]'), 'la feuille du jour est bien la, repeinte')
+})
+
 test('les marques ⏳ \ud83d\udcdd ⏭ suivent la ligne dans la liste', async () => {
   // ⚠ ELLES NE VIVAIENT QUE DANS LA FEUILLE DU JOUR. Une liste qui ouvre la
   // fiche mais ne dit pas qu'il y a une consigne à lire renvoie à l'écran
@@ -2337,8 +2433,11 @@ test('chaque proposition du jour ouvre LA SIENNE, pas la première', async () =>
   taperJour(w, j)
   const lignes = [...w.document.querySelectorAll('#modal-body [data-offre]')]
   assert.strictEqual(lignes.length, 2, 'les deux propositions sont listées')
-  assert.deepStrictEqual(lignes.map(l => l.dataset.offreI), ['0', '1'],
-    'et chacune porte son propre index')
+  // Depuis le 21 septembre 2026, c'est l'IDENTITE (property_id|booking_id) qui
+  // est portee, pas un indice : un indice avec repli ouvrait la voisine quand
+  // l'offre touchee avait disparu.
+  assert.deepStrictEqual(lignes.map(l => l.dataset.offreCle), ['p1|x-' + j + '-p1', 'p2|x-' + j + '-p2'],
+    'et chacune porte sa propre identite')
 
   lignes[1].dispatchEvent(new w.Event('click', { bubbles: true }))
   await souffler(40)

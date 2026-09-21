@@ -12,6 +12,11 @@ import { api } from '/shared/api-client.js'
 // ⚠ Utilisee par `pages/biens-calendrier.html` UNIQUEMENT — le mobile n'importe
 // que `loadCalendarData` et garde sa grille mensuelle intacte.
 export const CELL_W = 46
+// Largeur de la colonne des libelles (`.row-label`, border-box). C'est LA
+// valeur d'alignement entre la bande des jours et la grille des biens : elle
+// vit ici, une fois, et sert a computeDays, au colgroup des deux tables et a la
+// selection a la souris.
+export const LABEL_W = 120
 export const dayNames = ['DIM', 'LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM']
 export const dowOrder = [1, 2, 3, 4, 5, 6, 0]
 export const dowLabels = { 1: 'Lun', 2: 'Mar', 3: 'Mer', 4: 'Jeu', 5: 'Ven', 6: 'Sam', 0: 'Dim' }
@@ -55,7 +60,7 @@ export function computeDays(months, containerW, decalageJours = 0) {
   // une largeur que le CSS n'utilisait plus. Elargir la colonne sans toucher a
   // cette ligne aurait genere trop de jours pour la place disponible, donc une
   // barre de defilement horizontale la ou le remplissage devait tomber juste.
-  const COLW = CELL_W, LABEL = 120, PAD = 48
+  const COLW = CELL_W, LABEL = LABEL_W, PAD = 48
   const avail = Math.max(0, (containerW || 0) - LABEL - PAD)
   const fit = Math.floor(avail / COLW)
   if (fit > n) n = fit

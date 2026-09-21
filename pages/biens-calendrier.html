@@ -54,31 +54,76 @@
     /* Le dernier bien ne doit pas rester sous la barre d'action flottante. */
     #blocks { padding-bottom: 96px; }
     /* ─── EN-TETES COLLANTS ────────────────────────────────────────────────
-       Deux etages, dans cet ordre de haut en bas :
-         0px            la bande des mois (hauteur BANDE_H)
-         BANDE_H        la ligne des jours du bien en cours
+       Deux etages, dans cet ordre de haut en bas (depuis le 21 septembre 2026) :
+         0px            la bande : les MOIS, puis les JOURS (une seule fois)
+         BANDE_H        le NOM du bien en cours (son thead, cellules de jour vides)
        Le second se cale SOUS le premier — d'ou le `top` non nul. Avec plusieurs
-       biens, la ligne de jours de chacun prend la place de la precedente quand
-       on l'atteint : c'est le comportement attendu d'un planning multi-biens.
+       biens, le nom de chacun prend la place du precedent quand on l'atteint ;
+       les jours, eux, ne bougent pas : ils sont dans la bande, pour tous.
        ⚠ Un en-tete collant DOIT porter un fond opaque, sinon le contenu defile
        visiblement dessous. Week-end et jour courant restent prioritaires (leur
        selecteur est plus specifique, et `.today` porte `!important`). */
-    .cal-page { --bande-h: 27px; }
+    /* ⚠ LA BANDE PORTE DESORMAIS DEUX LIGNES : les mois, puis les JOURS (nom et
+       numero), UNE SEULE FOIS. Demande de Thierry, 21 septembre 2026 : chaque
+       bien repetait la ligne des jours dans son propre thead — sur trois biens,
+       trois fois les memes « lun 21 mar 22 … ». Les jours vivent sous le mois ;
+       le thead d'un bien ne garde que son nom, toujours collant.
+       74 px = 27 (mois) + 47 (jours) n'est qu'un REPLI : `renderMonthBand`
+       MESURE la bande rendue et pose la vraie valeur (un pixel d'ecart ferait
+       glisser les noms de biens sous la bande). */
+    .cal-page { --bande-h: 74px; }
     #month-band-wrap { position: sticky; top: 0; z-index: 8; background: #fff; width: max-content; min-width: 100%; }
+    /* ⚠ `table-layout: fixed` NE S'APPLIQUE QU'A UNE TABLE DE LARGEUR NON AUTO
+       (Chromium et Gecko retombent sinon sur l'algorithme automatique, ou les
+       `col` ne sont que des preferences). La largeur est posee en ligne par
+       `tableStyle()` : LABEL_W + jours * CELL_W. Les deux tables la portent. */
     table.month-band { border-collapse: collapse; table-layout: fixed; }
+    /* Un mois qui n'occupe qu'une ou deux colonnes en bord de grille prend son
+       nom COURT (voir renderMonthBand) : ni debordement sur le mois voisin, ni
+       troncature illisible. */
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; background: #fff; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
+    /* La ligne des jours de la bande : la meme grammaire que l'ancien thead des
+       biens (week-end, jour courant, debut de mois), au meme endroit du regard. */
+    table.month-band tr.jours td { height: 46px; padding: 0 1px; font-weight: 400; text-align: center;
+                                    text-transform: none; border-bottom: 1px solid #e5e5e7; }
+    table.month-band tr.jours td.corner { height: 46px; }
+    table.month-band tr.jours .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
+    table.month-band tr.jours .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
+    table.month-band tr.jours td.weekend { background: #e3e9f2; }
+    table.month-band tr.jours td.weekend .day-name { color: #3a6ea5; font-weight: 700; }
+    table.month-band tr.jours td.weekend .day-num  { color: #1f4e79; font-weight: 700; }
+    table.month-band tr.jours td.weekend.we-debut { box-shadow: inset 2px 0 0 #c3d0e2; }
+    table.month-band tr.jours td.weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2; }
+    table.month-band tr.jours td.today { background: #e6f0ff !important; box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff; }
     /* L'angle cumule les deux : colle a gauche ET fait partie de la bande. */
-    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 9; border-bottom: 1px solid #e5e5e7; }
+    /* Meme bordure droite que `.row-label` : sous border-collapse, une bordure
+       absente d'un cote decale la grille d'un demi-pixel. */
+    table.month-band .corner { width: 120px; min-width: 120px; position: sticky; left: 0; background: #fff; z-index: 9; border-bottom: 1px solid #e5e5e7; border-right: 1px solid #e5e5e7; }
     .bien-section { padding: 0 0 16px; margin-bottom: 4px; }
     .bien-section:not(:last-child) { border-bottom: 3px solid #eef0f3; }
-    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; border-left: 4px solid #007aff; vertical-align: middle; line-height: 1.2; }
+    /* ⚠ `box-shadow`, PAS `border-left` : sous border-collapse, une bordure de
+       4 px sur la colonne 0 entre pour moitie dans la boite de la table AVANT
+       la colonne, et decale toute la grille de 2 px par rapport a la bande.
+       Le nom est tronque plutot que d'elargir la colonne : en `fixed`, un nom
+       long deborderait ; en automatique, il decalerait tous les jours du bien. */
+    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; box-shadow: inset 4px 0 0 #007aff, inset 0 -1px 0 #e5e5e7; padding-left: 12px; vertical-align: middle; line-height: 1.2; }
+    /* Le nom seul porte l'ellipsis, dans sa propre boite bloc : `text-overflow`
+       ne s'herite pas et ne vaut rien sur la boite anonyme d'un `th`. */
+    table.cal .row-label.bien-head .nom { display: block; overflow: hidden; text-overflow: ellipsis; }
     table.cal .row-label.bien-head .cap-h { display: block; font-size: 10px; font-weight: 400; color: #86868b; margin-top: 2px; }
     .bien-section { padding-top: 18px; }
     /* `.bien-title` a ete supprime : plus aucun element ne le portait (le nom du
        bien vit dans `.bien-head`, dans le thead). Son `z-index: 6` serait passe
        AU-DESSUS de la ligne de jours desormais collante (z-index 3) — du CSS mort
-       qui attendait de devenir un defaut.
+       qui attendait de devenir un defaut. */
+    /* ⚠ CE COMMENTAIRE N'ETAIT PAS FERME (re-review du 21 septembre 2026) : la
+       regle ci-dessous etait AVALEE. La grille des biens vivait donc en layout
+       automatique ET en bordures separees (border-spacing 2 px) : 48 px par jour
+       contre 46 dans la bande, deux pixels de derive PAR JOUR. C'etait la vraie
+       cause du decalage constate par Thierry — l'angle a 129 px n'en etait
+       qu'une partie. Un test compte desormais les ouvertures et les fermetures
+       de commentaire du style : elles doivent etre en nombre egal. */
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     /* Colonne elargie (34 -> 46px) et lignes plus hautes : sans cela, une bulle
        d'une nuit n'affiche aucun nom. Doit rester d'accord avec CELL_W
@@ -98,8 +143,9 @@
     table.cal .row-label { text-align: left; padding-left: 8px; font-size: 11px; color: #6e6e73; width: 120px; min-width: 120px; background: #fff; position: sticky; left: 0; z-index: 3; border-right: 1px solid #e5e5e7; font-weight: 500; }
     /* L'angle du bien cumule les deux ancrages : gauche ET haut. */
     table.cal thead .row-label { z-index: 6; top: var(--bande-h); }
-    table.cal .day-num { font-weight: 600; font-size: 12px; color: #1d1d1f; }
-    table.cal .day-name { font-size: 9px; color: #86868b; text-transform: uppercase; }
+    /* Les cellules de jour du thead d'un bien sont VIDES : la ligne ne porte
+       plus que le nom du bien. Elles restent pour l'alignement des colonnes. */
+    table.cal thead th.jour-vide { padding: 0; height: 0; }
     /* WEEK-ENDS — lisibles d'un coup d'œil sur un mois entier.
        L'ancien rgba(0,0,0,0.022) etait invisible au-dela de quelques colonnes :
        reperer un samedi imposait de lire les en-tetes un a un. Fond de colonne
@@ -107,8 +153,6 @@
        sous les cellules colorees, l'en-tete seul ne marque pas la colonne). */
     table.cal .weekend { background: #eef1f6; }
     table.cal thead th.weekend { background: #e3e9f2; }
-    table.cal thead th.weekend .day-name { color: #3a6ea5; font-weight: 700; }
-    table.cal thead th.weekend .day-num  { color: #1f4e79; font-weight: 700; }
     /* Liseres lateraux : ils dessinent le bloc samedi-dimanche comme une unite. */
     table.cal .weekend.we-debut { box-shadow: inset 2px 0 0 #c3d0e2; }
     table.cal .weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2; }
@@ -123,8 +167,24 @@
     table.cal thead th.weekend.we-fin   { box-shadow: inset -2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
     table.cal thead th.weekend.we-debut.we-fin { box-shadow: inset 2px 0 0 #c3d0e2, inset -2px 0 0 #c3d0e2, inset 0 -1px 0 #e5e5e7; }
     table.cal thead th.today { box-shadow: inset 2px 0 0 #007aff, inset -2px 0 0 #007aff, inset 0 -1px 0 #e5e5e7; }
+    /* ─── SEPARATION DES COLONNES ET SURVOL (demande de Thierry, 21 septembre
+       2026) ─────────────────────────────────────────────────────────────────
+       Un trait vertical discret entre les jours, dans les DEUX tables : sous
+       border-collapse la bordure est partagee, et poser la meme des deux cotes
+       garde la bande et la grille alignees. Le survol eclaire toute la COLONNE
+       (la date dans la bande et chaque case des biens) : `col-hover` est pose
+       par JS sur les cellules qui portent le meme `data-col`. Sobre : un bleu
+       gris tres pale, sous les couleurs qui portent un sens (aujourd'hui,
+       selection, ferme, reserve) qui restent prioritaires. */
+    table.cal th, table.cal td, table.month-band tr.jours td:not(.corner) { border-right: 1px solid #e8e8ec; }
+    /* `background-color`, pas `background` : le raccourci effacerait les
+       hachures (background-image) d'un jour ferme pendant le survol. Le thead
+       est nomme a part : `thead th.weekend` est plus specifique que `th.col-hover`. */
+    table.cal td.col-hover, table.cal th.col-hover, table.cal thead th.col-hover { background-color: #e9f0fa; }
+    table.month-band tr.jours td.col-hover { background-color: #d9e6f7; }
+    table.month-band tr.jours td.col-hover .day-name, table.month-band tr.jours td.col-hover .day-num { color: #1d4f91; }
     table.cal td.edit-cell { cursor: pointer; position: relative; }
-    table.cal td.edit-cell:hover { background: #eef4ff; }
+    table.cal td.edit-cell:hover { background: #dbe7f8; }
     /* Jour revolu : consultable, pas modifiable. Le curseur le dit avant le clic. */
     table.cal td.jour-passe { color: #a1a1a6; cursor: default; }
     table.cal td.edit-cell.selected { background: #d4e4ff !important; box-shadow: inset 0 0 0 1px #007aff; }
@@ -387,7 +447,7 @@
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
     import { peutEcrire } from '/shared/compte-courant.js'
-    import { PARAMS, ROW_DEFAULTS, CELL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
+    import { PARAMS, ROW_DEFAULTS, CELL_W, LABEL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -498,7 +558,42 @@
     document.addEventListener('click',e=>{const ms=document.getElementById('multi-select');if(!ms.contains(e.target))ms.classList.remove('open')})
 
     function renderMonthPills(){ const w=document.getElementById('month-pills');w.innerHTML='';const seen=new Set();days.forEach((d,idx)=>{const k=d.getFullYear()+'-'+d.getMonth();if(!seen.has(k)){seen.add(k);const p=document.createElement('button');p.className='month-pill';p.textContent=monthFull[d.getMonth()];p.addEventListener('click',()=>{document.getElementById('scroll-area').scrollTo({left:idx*CELL_W,behavior:'smooth'});w.querySelectorAll('.month-pill').forEach(x=>x.classList.remove('active'));p.classList.add('active')});w.appendChild(p)}});const f=w.querySelector('.month-pill');if(f)f.classList.add('active') }
-    function renderMonthBand(){ const w=document.getElementById('month-band-wrap');let h='<table class="month-band"><tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr></table>';w.innerHTML=h }
+    // Un seul jeu de colonnes pour la bande ET pour chaque bien : LABEL_W pour le
+    // libelle (= `.row-label`, border-box, shared/calendar-core.js), CELL_W par
+    // jour. Memorise par nombre de jours : la chaine ne depend que de `days`.
+    let colsCache={ n:-1, html:'' }
+    function colonnesHtml(){ if(colsCache.n!==days.length){ colsCache={ n:days.length, html:'<colgroup><col style="width:'+LABEL_W+'px">'+days.map(()=>'<col style="width:'+CELL_W+'px">').join('')+'</colgroup>' } } return colsCache.html }
+    // La largeur en ligne qui rend `table-layout: fixed` reellement actif.
+    function tableStyle(){ return ' style="width:'+(LABEL_W+days.length*CELL_W)+'px"' }
+    function renderMonthBand(){ reinitSurvol(); const w=document.getElementById('month-band-wrap');
+      // ⚠ LE `colgroup` DANS LA TABLE, APRES SA BALISE — releve en review. Ma
+      // premiere version le prefixait AVANT `<table>` : le parseur HTML ignore
+      // un colgroup hors table, la bande n'avait donc aucune largeur de colonne,
+      // et ses jours derivaient d'une colonne par trimestre — la seule chose que
+      // ce lot doit livrer. `table-layout: fixed` lit les `col`, pas les colspans.
+      // ⚠ LES DEUX TABLES PARTAGENT LE MEME `colgroup` (`colonnesHtml`), OU RIEN
+      // NE LES ALIGNE. Constate par Thierry sur staging le 21 septembre 2026 :
+      // l'angle de la bande faisait 129 px (un calcul « content-box » alors que
+      // `.cal-page *` est en border-box, donc `.row-label` fait 120 tout compris)
+      // et la grille des biens n'avait pas de colgroup du tout : neuf pixels de
+      // decalage constant entre le jour et la case. Avec `table-layout: fixed`,
+      // ce sont les `col` qui font les colonnes — les memes, dans les deux tables.
+      let h='<table class="month-band"'+tableStyle()+'>'+colonnesHtml()+'<tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start">'+(span<3?monthShort[m]:monthFull[m]+' '+days[i].getFullYear())+'</td>';i+=span}h+='</tr>';
+      // ⚠ LA LIGNE DES JOURS, UNE FOIS POUR TOUS LES BIENS. Meme `days`, memes
+      // classes (`classesJour`) que l'ancien thead : week-end, jour courant,
+      // debut de mois se lisent au meme endroit qu'avant, mais une seule fois.
+      // Le `colgroup` fixe la largeur de chaque colonne : avec `table-layout:
+      // fixed`, une premiere ligne faite de colspans ne dit rien des colonnes.
+      h+='<tr class="jours"><td class="corner"></td>'
+      days.forEach((d,idx)=>{const c=classesJour(idx);h+='<td class="'+c.join(' ')+'" data-col="'+idx+'"><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></td>'})
+      h+='</tr></table>';w.innerHTML=h
+      // ⚠ LA HAUTEUR EST MESUREE, PAS SOMMEE A LA MAIN — releve en review. Les
+      // theads des biens se calent a `top: var(--bande-h)` : 74 px en CSS n'est
+      // qu'un repli, la police et l'arrondi des bordures peuvent rendre 73 ou
+      // 75, et un pixel d'ecart fait glisser les noms de biens sous la bande.
+      // jsdom n'a pas de mise en page (offsetHeight = 0) : on ne remplace le
+      // repli que par une vraie mesure.
+      const mesure=w.offsetHeight; if(mesure>0){ const page=document.querySelector('.cal-page'); if(page) page.style.setProperty('--bande-h', mesure+'px') } }
 
     const blocksEl=document.getElementById('blocks')
     let showComplete=false
@@ -533,7 +628,7 @@
       return rows
     }
 
-    function renderBlocks(){ blocksEl.innerHTML=''; selectedBiens.forEach(bid=>{const b=BIENS.find(x=>x.id===bid);if(!b)return;if(!states[bid]||states[bid].length!==days.length)initState(b);blocksEl.appendChild(renderBienBlock(b))}); attachEvents() }
+    function renderBlocks(){ reinitSurvol(); blocksEl.innerHTML=''; selectedBiens.forEach(bid=>{const b=BIENS.find(x=>x.id===bid);if(!b)return;if(!states[bid]||states[bid].length!==days.length)initState(b);blocksEl.appendChild(renderBienBlock(b))}); attachEvents() }
 
     // Classes communes a l'en-tete et a toutes les lignes d'un meme jour.
     // Les trois rendus les recopiaient : un marquage ajoute a l'un (le week-end,
@@ -635,14 +730,24 @@
       // TOUTES les lignes du bien et pas seulement sur le tarif.
       const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
-      let html='<table class="cal"><thead><tr><th class="row-label bien-head">'+bien.name+'<span class="cap-h">cap. '+bien.capacity+'</span></th>'
-      days.forEach((d,idx)=>{const c=classesJour(idx);if(ferme(idx))c.push('jour-ferme');const rs=ferme(idx)?raisonFermeture(bien.id,toISO(d)):null;html+='<th class="'+c.join(' ')+'"'+(rs?' title="Fermé : '+echapper(rs)+'"':'')+'><div class="day-name">'+dayNames[d.getDay()]+'</div><div class="day-num">'+d.getDate()+'</div></th>'})
+      // ⚠ `bien.name` vient du provider : ECHAPPE, comme dans `barresResa`.
+      let html='<table class="cal"'+tableStyle()+'>'+colonnesHtml()+'<thead><tr><th class="row-label bien-head" title="'+escapeHtmlLocal(bien.name)+'"><span class="nom">'+escapeHtmlLocal(bien.name)+'</span><span class="cap-h">cap. '+escapeHtmlLocal(bien.capacity)+'</span></th>'
+      // ⚠ PLUS DE JOURS ICI : ils sont dans la bande, sous le mois, une seule
+      // fois (demande de Thierry). Les cellules restent, vides, pour aligner
+      // les colonnes ; les classes de colonne (week-end, jour courant) aussi,
+      // pour que le fond de colonne ne s'interrompe pas sous le nom du bien.
+      // ⚠ ET LA FERMETURE DU BIEN RESTE ICI : elle est PROPRE AU BIEN, la bande
+      // commune ne peut pas la porter. Sur ces cellules vides, `jour-ferme`
+      // dessine le liseré sous le nom du bien — un bien ferme ne doit pas se
+      // lire comme un bien simplement vide (test « TOUTES les lignes »).
+      // La raison d'une fermeture de l'hote (lot 4.6.2) y reste en TITRE.
+      days.forEach((d,idx)=>{const c=classesJour(idx);c.push('jour-vide');if(ferme(idx))c.push('jour-ferme');const rs=ferme(idx)?raisonFermeture(bien.id,toISO(d)):null;html+='<th class="'+c.join(' ')+'" data-col="'+idx+'"'+(rs?' title="Fermé : '+echapper(rs)+'"':'')+'></th>'})
       html+='</tr></thead><tbody>'
       html+='<tr><td class="row-label">Reservations</td>'
       // Toutes les barres vivent dans la PREMIERE cellule et sont positionnees en
       // pixels-colonnes : voir `barresResa`. Les cellules suivantes ne portent
       // plus que leur fond.
-      days.forEach((d,i)=>{const c=classesJour(i);c.unshift('resa-cell');if(ferme(i))c.push('jour-ferme');html+='<td class="'+c.join(' ')+'">'+(i===0?barresResa(bien):'')+'</td>'})
+      days.forEach((d,i)=>{const c=classesJour(i);c.unshift('resa-cell');if(ferme(i))c.push('jour-ferme');html+='<td class="'+c.join(' ')+'" data-col="'+i+'">'+(i===0?barresResa(bien):'')+'</td>'})
       html+='</tr>'
       const rows=visibleRows(bien)
       rows.forEach(pk=>{
@@ -652,7 +757,7 @@
         st.forEach((s,i)=>{const c=classesJour(i);if(editable&&!jourPasse(i))c.unshift('edit-cell');else if(editable)c.push('jour-passe');if(pk==='rate')c.push('rate-cell');if(pk==='maxRate')c.push('maxrate-cell');
           if(ferme(i))c.push('jour-ferme')
           if(pk==='rate'){ const iso=toISO(days[i]); const closed=jourFerme(s); const reserved=(bien.resa||[]).some(bk=>iso>=bk.startISO && iso<bk.checkout); if(closed)c.push('cell-closed'); else if(reserved)c.push('cell-reserved') }
-          if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=editable?' data-idx="'+i+'" data-row="'+pk+'"':'';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
+          if(editable&&sel.bienId===bien.id&&sel.row===pk&&sel.idx.has(i))c.push('selected');const da=(editable?' data-idx="'+i+'" data-row="'+pk+'"':'')+' data-col="'+i+'"';html+='<td class="'+c.join(' ')+'"'+da+'>'+cellDisplay(pk,s,bien)+'</td>'})
         html+='</tr>'
       })
       html+='</tbody></table>'
@@ -678,7 +783,7 @@
     function colIndexUnderX(clientX){
       const area=document.getElementById('scroll-area')
       const rect=area.getBoundingClientRect()
-      const xInContent = (clientX - rect.left) + area.scrollLeft - 120
+      const xInContent = (clientX - rect.left) + area.scrollLeft - LABEL_W
       let idx = Math.floor(xInContent / CELL_W)
       if(idx<0) idx=0; if(idx>days.length-1) idx=days.length-1
       return idx
@@ -703,7 +808,7 @@
       const EDGE=60, SPEED=18
       let scrolled=false
       if(lastMouseX > rect.right - EDGE){ area.scrollLeft += SPEED; scrolled=true }
-      else if(lastMouseX < rect.left + 120 + EDGE){ area.scrollLeft -= SPEED; scrolled=true }
+      else if(lastMouseX < rect.left + LABEL_W + EDGE){ area.scrollLeft -= SPEED; scrolled=true }
       if(scrolled){ extendSelTo(colIndexUnderX(lastMouseX)) }
       autoScrollRAF=requestAnimationFrame(autoScrollStep)
     }
@@ -1939,6 +2044,33 @@
       renderBlocks()
     }
 
+    // ─── Survol de colonne : la date et toutes ses cases s'eclairent ensemble.
+    // Delegue sur la zone de defilement, donc survit aux re-rendus ; on ne
+    // touche au DOM que quand la colonne change.
+    // ⚠ PAR LA GEOMETRIE (`colIndexUnderX`), pas par la cellule sous le curseur :
+    // les barres de reservation vivent toutes dans la PREMIERE cellule, et
+    // `closest('[data-col]')` y rendait toujours la colonne 0. `mousemove` plutot
+    // que `mouseover` : le long d'une barre, aucun element ne change.
+    // Un index colonne -> cellules est construit une fois par rendu (invalide par
+    // `reinitSurvol`, appele des re-rendus), pour ne pas parcourir 10 000 nœuds a
+    // chaque changement de colonne. Souris seulement : au doigt, `mouseleave` ne
+    // vient jamais et la colonne resterait allumee a cote de la selection.
+    let survolCourante=null, survolIndex=null
+    function reinitSurvol(){ survolCourante=null; survolIndex=null }
+    (function survolColonne(){
+      const area=document.getElementById('scroll-area'); if(!area) return
+      if(!(window.matchMedia && window.matchMedia('(hover: hover)').matches)) return
+      const index=()=>{ if(!survolIndex){ survolIndex=new Map(); area.querySelectorAll('[data-col]').forEach(el=>{ const k=el.dataset.col; (survolIndex.get(k)||survolIndex.set(k,[]).get(k)).push(el) }) } return survolIndex }
+      const peindre=(col,on)=>{ (index().get(String(col))||[]).forEach(el=>el.classList.toggle('col-hover',on)) }
+      area.addEventListener('mousemove', e=>{
+        const dansGrille=e.target.closest('[data-col], .resa-bar')
+        const col=dansGrille?colIndexUnderX(e.clientX):null
+        if(col===survolCourante) return
+        if(survolCourante!==null) peindre(survolCourante,false)
+        survolCourante=col; if(col!==null) peindre(col,true)
+      })
+      area.addEventListener('mouseleave', ()=>{ if(survolCourante!==null){ peindre(survolCourante,false); survolCourante=null } })
+    })()
     buildDays(); renderMonthPills(); renderMonthBand()
     await loadData()
   </script>
