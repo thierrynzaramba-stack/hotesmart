@@ -37,11 +37,19 @@ const jour = (args.find(a => a.startsWith('--jour=')) || '').slice(7) || null
 if (GO && jour) { console.error('REFUS : --go et --jour ensemble poseraient un marqueur faux. Le dry-run accepte --jour.'); process.exit(1) }
 if (GO && projet === 'cjmrizpdyhrcurmgyrhs' && !args.includes('--prod')) { console.error('REFUS : --go sur la PRODUCTION exige --prod (le cron y tourne deja).'); process.exit(1) }
 
-// Le client canal, si le bien est relie : meme fonction que le fullsync et le
-// cron. Sans variables CHANNEL_*, on le dit et on ne l'invente pas.
-let appel = null
+// Le client canal : meme fonction que le fullsync et le cron. Sans variables
+// CHANNEL_* (un poste qui n'a que la base), on fournit un client qui REFUSE
+// honnetement : le canal exige un client pour tout bien Channex (precondition
+// du 4.6.1), le writer ne l'appelle que si le bien porte des ids de canal —
+// un bien de recette sans mapping reste « HoteSmart seulement » et s'ouvre ;
+// un bien reellement relie verrait sa poussee refusee, donc un full sync en
+// file et pas de marqueur : rien n'est ouvert en memoire sans que ce soit dit.
+let appel
 if (process.env.CHANNEL_BASE_URL && process.env.CHANNEL_API_KEY) {
   appel = require('../lib/channel-fullsync').channelCall
+} else {
+  console.log('⚠ CHANNEL_* absents : client canal de refus (les biens sans mapping s ouvrent en local, les biens relies partent en full sync).\n')
+  appel = async (method, path) => ({ ok: false, status: 0, json: { error: `client canal absent (script sans CHANNEL_*) : ${method} ${path} non envoye` } })
 }
 
 ;(async () => {
@@ -62,7 +70,7 @@ if (process.env.CHANNEL_BASE_URL && process.env.CHANNEL_API_KEY) {
     if (eL) { console.error(`ECHEC lecture memoire ${bien.name} :`, eL.message); process.exit(1) }
     const d = nuitsAOuvrir({ bien, aujourdHui: auj, lignes: lignes || [], fermetures })
     const { data: m } = await sb.from('cron_logs').select('last_run').eq('id', PREFIXE_MARQUEUR + bien.id).maybeSingle()
-    console.log(`${bien.name} — fenetre ${bien.pilote_fenetre_valeur} ${bien.pilote_fenetre_type}, jusqu'au ${fin}${appel || !bien.provider_room_type_id ? '' : ' (relie au canal, sans client : refusera)'}`)
+    console.log(`${bien.name} — fenetre ${bien.pilote_fenetre_valeur} ${bien.pilote_fenetre_type}, jusqu'au ${fin}`)
     console.log(`  a ouvrir ${d.comptes.a_ouvrir} · deja ouvertes ${d.comptes.deja_ouvertes} · indisponibilites ${d.comptes.fermees_par_l_hote} · intention existante ${d.comptes.intention_existante} · sans prix ${d.comptes.sans_prix}`)
     console.log(`  derniere ouverture par le moteur : ${m && m.last_run ? m.last_run : 'jamais'}`)
   }
