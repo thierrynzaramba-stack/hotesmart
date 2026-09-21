@@ -21,10 +21,12 @@
 | 13 | **`lib/fermetures.js` réimplémente des helpers existants** (`UUID_RE`, `estJour`, `decaler`, énumération de jours) déjà présents dans `lib/yield/capacite.js` / `reference.js`, avec une borne différente (`NUITS_MAX` 1000 vs `JOURS_MAX` 2000). | Un correctif d'arithmétique de dates (UTC, borne) fait à un endroit n'atteint pas les autres. | Quand un helper de dates commun sortira de `lib/yield/` (le cœur ne doit pas dépendre du yield). |
 | 12 | **`fermer` avec refus du writer** : l'objet est retiré, mais ce chemin n'a pas de test — aucun refus du writer n'est déclenchable sans tarif, et `fermer` n'en porte pas. | Faible : le seul refus possible est un échec d'écriture, déjà rendu en 4xx/5xx. | Quand le writer aura un refus sans tarif à tester. |
 
-| 14 | **Le prix d'ouverture est le prix de base** (`lib/moteur-ouverture.js`, `prixDOuverture`) tant que le moteur de prix n'existe pas. | Un bien sans prix de base ni mémoire n'ouvre rien (compté `sans_prix`) ; un bien piloté vend au prix de base, pas à un prix calculé. | **4.6.4** (moteur de prix) le remplace. |
+| 14 | ~~Le prix d'ouverture est le prix de base~~ **Soldée le 22 septembre 2026** : le pilote quotidien ouvre au prix de la règle (4.6.4) ; la mémoire puis le prix de base ne sont plus que des replis. | — | — |
 
 | 15 | **Fenêtre de course entre le moteur et une indisponibilité posée au même instant** : le moteur lit `fermetures` puis le writer upserte quelques secondes plus tard ; une indisponibilité créée entre les deux serait écrasée (`stop_sell = false`) sur ses nuits. Une fois par jour et par bien, quelques secondes. | Une nuit fermée par l'hôte vendue. | Au writer (vérifier `fermetures` juste avant l'upsert pour l'origine `engine`), avec le 4.6.4 qui rendra le moteur quotidien plus lourd. |
 | 16 | **Le moteur relit ce que le canal et le writer relisent** (`calendar_inventory` trois fois, `fermetures` deux fois par bien). | Aller-retours redondants dans un cron à 60 s. | Quand le canal acceptera un instantané fourni par l'appelant. |
+
+| 17 | **Deux assemblées de la matière du prix** : `api/yield-prix.js` (écran, lot 4.4) et `lib/yield/contexte-du-bien.js` (moteur, lot 4.6.4), copie fidèle aux mêmes constantes. | Le jour où l'une change une borne et pas l'autre, l'écran suggère un prix et le moteur en pose un autre. | Premier geste du lot suivant : l'endpoint appelle `preparerContexte`. |
 
 ## Règle du registre
 

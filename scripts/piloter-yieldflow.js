@@ -1,13 +1,17 @@
 #!/usr/bin/env node
-// scripts/ouvrir-fenetres.js — lot 4.6.3.
-// Fait tourner le moteur d'ouverture (lib/moteur-ouverture.js) sur la base
-// visee, comme le cron le fait en prod — utile sur staging, ou AUCUN cron
-// n'est planifie (docs/STAGING.md §1), et pour une recette.
+// scripts/piloter-yieldflow.js — lots 4.6.3 a 4.6.5.
+// Fait tourner le PILOTE QUOTIDIEN (lib/pilote-quotidien.js : ouverture puis
+// prix, alarmes) sur la base visee, comme le cron le fait en prod — utile sur
+// staging, ou AUCUN cron n'est planifie (docs/STAGING.md §1), et en recette.
 //
 // Usage :
-//   node --env-file=.env.staging scripts/ouvrir-fenetres.js            (dry-run)
-//   node --env-file=.env.staging scripts/ouvrir-fenetres.js --go       (ecrit)
+//   node --env-file=.env.staging scripts/piloter-yieldflow.js            (dry-run)
+//   node --env-file=.env.staging scripts/piloter-yieldflow.js --go       (ecrit)
 //   ... --bien=<uuid>   (un seul bien)   --jour=YYYY-MM-DD   (horloge injectee)
+//
+// Le dry-run dit, par bien : ce que l'ouverture ferait, et ce que la regle
+// des prix dirait de chaque nuit ouverte (changes, inchanges, non calculables
+// et leurs motifs). `--go` fait le passage complet et pose le marqueur.
 //
 // ⚠ DRY-RUN PAR DEFAUT. Le moteur ecrit par le canal interne, donc par le
 // writer : plancher, journal des prix, poussee ARI si le bien est relie. Un
@@ -17,7 +21,10 @@
 // fenetre est un compte rendu, une lecture en echec est une sortie 1.
 
 const { createClient } = require('@supabase/supabase-js')
-const { ouvrirFenetres, nuitsAOuvrir, PREFIXE_MARQUEUR } = require('../lib/moteur-ouverture')
+const { nuitsAOuvrir, PREFIXE_MARQUEUR } = require('../lib/moteur-ouverture')
+const { calculerPrix } = require('../lib/moteur-prix')
+const { piloterLesBiens } = require('../lib/pilote-quotidien')
+const { preparerContexte, prixDeLaNuit } = require('../lib/yield/contexte-du-bien')
 const { fermeturesDuBien } = require('../lib/fermetures')
 const { finDeFenetre } = require('../lib/pilote-tarifaire')
 
@@ -68,16 +75,37 @@ if (process.env.CHANNEL_BASE_URL && process.env.CHANNEL_API_KEY) {
     const { data: lignes, error: eL } = await sb.from('calendar_inventory').select('date, rate, avail, stop_sell')
       .eq('property_id', bien.id).gte('date', auj).lte('date', fin).limit(2000)
     if (eL) { console.error(`ECHEC lecture memoire ${bien.name} :`, eL.message); process.exit(1) }
-    const d = nuitsAOuvrir({ bien, aujourdHui: auj, lignes: lignes || [], fermetures })
-    const { data: m } = await sb.from('cron_logs').select('last_run').eq('id', PREFIXE_MARQUEUR + bien.id).maybeSingle()
+    // La matiere, pour dire ce que la regle ferait — lecture seule.
+    let ctx = null, prixCalcule = new Map(), erreurCtx = null
+    try {
+      ctx = await preparerContexte(sb, bien, bien.user_id, { aujourdHui: auj, debut: auj, fin })
+      for (let j = auj; j <= fin; j = new Date(Date.parse(j + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)) {
+        const s = prixDeLaNuit(ctx, j, { ouverte: true }); if (s && s.prix != null) prixCalcule.set(j, Math.round(s.prix * 100))
+      }
+    } catch (e) { erreurCtx = e.message }
+    const d = nuitsAOuvrir({ bien, aujourdHui: auj, lignes: lignes || [], fermetures, prixCalcule })
+    const { data: m } = await sb.from('cron_logs').select('last_run, errors').eq('id', PREFIXE_MARQUEUR + bien.id).maybeSingle()
     console.log(`${bien.name} — fenetre ${bien.pilote_fenetre_valeur} ${bien.pilote_fenetre_type}, jusqu'au ${fin}`)
-    console.log(`  a ouvrir ${d.comptes.a_ouvrir} · deja ouvertes ${d.comptes.deja_ouvertes} · indisponibilites ${d.comptes.fermees_par_l_hote} · intention existante ${d.comptes.intention_existante} · sans prix ${d.comptes.sans_prix}`)
-    console.log(`  derniere ouverture par le moteur : ${m && m.last_run ? m.last_run : 'jamais'}`)
+    console.log(`  OUVERTURE : a ouvrir ${d.comptes.a_ouvrir} · deja ouvertes ${d.comptes.deja_ouvertes} · indisponibilites ${d.comptes.fermees_par_l_hote} · intention existante ${d.comptes.intention_existante} · sans prix ${d.comptes.sans_prix} · sous plancher ${d.comptes.sous_plancher}`)
+    if (ctx) {
+      const p = calculerPrix({ aujourdHui: auj, fin, lignes: lignes || [], fermetures, prix: (date, o) => prixDeLaNuit(ctx, date, o) })
+      console.log(`  PRIX (nuits ouvertes) : calculables ${p.comptes.calculees} (a changer ${p.comptes.changees}, inchanges ${p.comptes.inchangees}) · non calculables ${p.comptes.non_calculables} · sous plancher ${p.comptes.sous_plancher} · vendues ${p.comptes.vendues} · fermees ${p.comptes.fermees}`)
+      if (Object.keys(p.motifs).length) console.log(`  motifs : ${Object.entries(p.motifs).map(([k, v]) => `${k} ×${v}`).join(', ')}`)
+      if (p.changements.length) console.log(`  exemples : ${p.changements.slice(0, 5).map(c => `${c.date} ${c.avant_centimes == null ? '—' : (c.avant_centimes / 100) + ' €'} → ${c.prix_centimes / 100} €`).join(' · ')}`)
+      console.log(`  grille : ${ctx.grille && ctx.grille.base ? (ctx.grille.base.fiable ? `fiable (${ctx.grille.base.echantillon} nuits, ${ctx.grille.base.reservations} resas)` : `NON FIABLE (${ctx.grille.base.echantillon || 0} nuits)`) : 'absente'}`)
+    } else console.log(`  PRIX : matiere illisible — ${erreurCtx}`)
+    console.log(`  dernier passage du pilote : ${m && m.last_run ? m.last_run : 'jamais'}`)
   }
 
   if (!GO) { console.log('\nDry-run : rien n a ete ecrit. Relancer avec --go pour ouvrir.'); return }
-  const bilan = await ouvrirFenetres(sb, { appel, aujourdHui: auj })
-  console.log('\nBilan :', JSON.stringify({ jour: bilan.jour, biens: bilan.biens, traites: bilan.traites, ouvertes: bilan.ouvertes, sautes: bilan.sautes, reportes: bilan.reportes, erreurs: bilan.erreurs }))
-  for (const d of bilan.details) console.log(`  ${d.nom} : ${d.ok ? `${d.ouvertes} nuit(s) ouverte(s)` : `REFUS ${d.refus} — ${d.message}`}${d.ignorees ? ' · ignorees ' + JSON.stringify(Object.fromEntries(Object.entries(d.ignorees).filter(([, v]) => v && v.length).map(([k, v]) => [k, v.length]))) : ''}`)
+  // Tous les biens en un passage (le cron en fait un par tick) ; les alarmes
+  // partent au fondateur comme en prod (reportIncident), on le dit.
+  console.log('\n⚠ Les alarmes partent au fondateur comme en production.')
+  const bilan = await piloterLesBiens(sb, { appel, aujourdHui: auj, biensParPassage: 50, budgetMs: 120000 })
+  console.log('\nBilan :', JSON.stringify({ jour: bilan.jour, biens: bilan.biens, traites: bilan.traites, ouvertes: bilan.ouvertes, prix_changes: bilan.prix_changes, sautes: bilan.sautes, reportes: bilan.reportes, erreurs: bilan.erreurs, alarmes: bilan.alarmes, retards: bilan.retards }))
+  for (const d of bilan.details) {
+    const o = d.ouverture || {}, p = d.prix || {}
+    console.log(`  ${d.nom} : ouverture ${o.ok ? `${o.ouvertes} nuit(s)` : `REFUS ${o.refus} — ${o.message}`} · prix ${p.ok ? `${p.changees} changé(s)` : `REFUS ${p.refus} — ${p.message}`}`)
+  }
   if (bilan.erreurs.length) process.exit(1)
 })().catch(e => { console.error('ECHEC :', e.message); process.exit(1) })

@@ -432,6 +432,48 @@ vente » sur une nuit couverte n'écrit rien et ouvre la fiche.
   prix (4.6.4), qui posera les prix calculés sur un an et les entretiendra.
 - Sur staging, l'ouverture se prouve par le script, faute de cron planifié.
 
+### ✅ 4.6.4 LIVRÉ le 22 septembre 2026 — le moteur de prix
+
+| ce qui est livré | où |
+|---|---|
+| **La matière, lue une fois** : grille du bien (historique 3 ans ancré sur aujourd'hui), contexte (vacances, fériés, événements, dates commerciales, réglages), pression par mois, ouverture, nuits vendues — et `prixDeLaNuit`, qui applique **la même règle que l'écran** (`S.suggerer`) | `lib/yield/contexte-du-bien.js` |
+| **La décision, pure** : `calculerPrix` — jamais une indisponibilité, jamais une nuit fermée, vendue ou sans ligne ; « non calculable » et « sous le plancher » **gardent le prix en place** et sont comptés avec leur motif ; **diff au centime** avant de demander | `lib/moteur-prix.js` |
+| **L'entretien** : par le canal interne, `prix_centimes` seuls (jamais `ouvrir`), une poussée refusée est un échec nommé | `lib/moteur-prix.js` |
+| **L'ouverture tarifée** : le moteur d'ouverture reçoit le prix calculé de chaque nuit (sinon la mémoire, sinon le prix de base) | `lib/moteur-ouverture.js` (`prixCalcule`) |
+
+**Les règles gravées.**
+- **Déterministe** : mêmes entrées (historique, contexte, réglages, pression du
+  jour), même prix. Aucun appel d'IA. Le prix est celui que la page *Prix jour
+  par jour* suggère.
+- **Le plancher est armé par la règle** : `S.suggerer` refuse une suggestion
+  sous le plancher (motif `suggestion_sous_le_plancher`), il ne rabote jamais ;
+  le writer le vérifie encore derrière le canal.
+- **Diff avant journal** : un prix égal au centime n'est pas demandé. Ce qui
+  part au canal est le **delta** ; le journal des prix ne voit que les
+  changements réels, par sa propre règle.
+- **« Non calculable » n'est pas zéro ni « on baisse »** : le prix en place
+  reste, le motif est compté, l'écran et l'alarme le disent.
+
+**Ce qui est assumé.**
+- `api/yield-prix.js` garde sa propre assemblée de la matière (lot 4.4) ;
+  `contexte-du-bien.js` en est la copie fidèle, mêmes constantes. L'unifier
+  est le premier geste du lot suivant (dette 17).
+
+### ✅ 4.6.5 LIVRÉ le 22 septembre 2026 — le rythme quotidien, le delta, les alarmes
+
+| ce qui est livré | où |
+|---|---|
+| **Le pilote quotidien** : par bien et par jour, un bien par tick du cron, dans l'ordre matière → ouverture (au prix de la règle) → prix des nuits ouvertes → marqueur avec le bilan des deux moteurs | `lib/pilote-quotidien.js`, `api/cron.js` (poste `pilote_yieldflow`) |
+| **Le delta ARI, par construction** : le canal ne reçoit que les nuits à ouvrir et les prix qui changent, le writer ne pousse que cela ; un jour sans changement ne pousse rien. Le full sync (500 jours) reste la réconciliation de secours, mis en file quand une poussée a échoué | `lib/moteur-prix.js`, `lib/moteur-ouverture.js` |
+| **Les alarmes fondateur**, persistées (`automation_incidents`), anti-spam 24 h : `pilote_poussee_refusee`, `pilote_sans_prix`, `pilote_regle_muette` (aucune des ≥ 7 nuits ouvertes n'est tarifable), `pilote_en_retard` (plus de 36 h sans passage, sonde quotidienne) | `lib/pilote-quotidien.js`, `lib/founder-notify.js` |
+| **La matière illisible n'empêche pas l'ouverture** : elle retombe sur la mémoire et le prix de base, l'échec des prix est dit, le marqueur n'est pas posé (retente) | `lib/pilote-quotidien.js` |
+| **La recette sans cron** : `scripts/piloter-yieldflow.js` (dry-run des deux moteurs avec motifs et exemples, `--go`) | `scripts/` |
+
+**Ce qui n'alarme pas, et c'est voulu** : une nuit non calculable parmi
+d'autres, une indisponibilité, une nuit fermée à la main. C'est le bilan à
+l'écran (« dernier passage : 24 nuits ouvertes, 3 prix modifiés, 2 non
+calculables ») qui le dit.
+
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
 **A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**

@@ -71,6 +71,12 @@
 //   la premiere ouverture parte au tick suivant). ⚠ Ce cron est le SEUL
 //   appelant du canal : la garde HTTP du §2 bis tient parce qu'aucun endpoint
 //   ne l'appelle (tests/canal-calendrier.test.js).
+// Session #38 (lots 4.6.4-4.6.5) : LE PILOTE QUOTIDIEN (lib/pilote-quotidien.js)
+//   remplace l'appel direct du moteur d'ouverture. Par bien et par jour, dans
+//   l'ordre : la matiere (grille, contexte, pression), l'OUVERTURE avec le prix
+//   de la regle, les PRIX des nuits ouvertes (seuls les changements partent :
+//   delta ARI par construction), le marqueur avec le bilan, les ALARMES au
+//   fondateur (poussee refusee, nuits sans prix, regle muette, retard > 36 h).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -96,7 +102,7 @@ const { checkOverbooking } = require('../lib/cron-overbooking')
 const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 const { purgerSiDue } = require('../lib/cron-purge-tentatives')
 const { rattraperBloquees } = require('../lib/moteur-creation')
-const { ouvrirFenetres } = require('../lib/moteur-ouverture')
+const { piloterLesBiens } = require('../lib/pilote-quotidien')
 const { channelCall } = require('../lib/channel-fullsync')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
@@ -157,6 +163,7 @@ module.exports = async function handler(req, res) {
     totalTentativesAnonymisees: 0,
     totalTentativesBloquees: 0,
     totalNuitsOuvertes: 0,
+    totalPrixChanges: 0,
     circuitBreakerTriggered: 0,
     errors: []
   }
@@ -425,24 +432,28 @@ module.exports = async function handler(req, res) {
       results.errors.push({ context: 'purge_tentatives', error: err.message })
     }
 
-    // 4terdecies. LE MOTEUR D'OUVERTURE (lot 4.6.3, spec §2 ter).
-    // Ouvre a la vente, par le canal interne, les nuits de la fenetre glissante
-    // de chaque bien pilote par YieldFlow sur lesquelles PERSONNE n'a rien
-    // decide : jamais une indisponibilite de l'hote, jamais une nuit fermee
-    // (a la main ou calculee), jamais une nuit sans prix. Le writer fait le
-    // reste : plancher, journal source 'engine', poussee ARI en delta.
-    // ⚠ Une fois par jour et par bien, budget mur 25 s, le reliquat au tick
-    // suivant. Un bien en echec n'arrete pas les autres, et se retente.
+    // 4terdecies. LE PILOTE QUOTIDIEN YIELDFLOW (lots 4.6.3 a 4.6.5, spec §2 ter).
+    // Pour chaque bien pilote par YieldFlow, une fois par jour et UN bien par
+    // tick : la matiere (grille, contexte, pression), l'OUVERTURE des nuits de
+    // la fenetre sur lesquelles personne n'a rien decide (avec le prix de la
+    // regle, sinon la memoire, sinon le prix de base), puis les PRIX des nuits
+    // ouvertes — seuls les changements partent au canal (delta ARI). Jamais
+    // une indisponibilite de l'hote, jamais une nuit fermee, jamais sous le
+    // plancher. Le writer fait le reste : journal source 'engine', poussee.
+    // ⚠ Budget mur 20 s, un bien en echec n'arrete pas les autres et se
+    // retente au tick suivant. Alarmes fondateur : poussee refusee (full sync
+    // en file), nuits sans prix, regle muette, retard > 36 h.
     // ⚠ Placé AVANT le dispatch (le poste le plus couteux) et APRES les
     // sondes : il ecrit, et les filets anti-boucle doivent le voir.
     try {
-      const bilanOuverture = await chrono.mesure('moteur_ouverture', () => ouvrirFenetres(supabase, { appel: channelCall }))
-      results.totalNuitsOuvertes = bilanOuverture?.ouvertes || 0
-      for (const e of (bilanOuverture?.erreurs || [])) results.errors.push({ context: 'moteur_ouverture', ...e })
+      const bilanPilote = await chrono.mesure('pilote_yieldflow', () => piloterLesBiens(supabase, { appel: channelCall }))
+      results.totalNuitsOuvertes = bilanPilote?.ouvertes || 0
+      results.totalPrixChanges = bilanPilote?.prix_changes || 0
+      for (const e of (bilanPilote?.erreurs || [])) results.errors.push({ context: 'pilote_yieldflow', ...e })
     }
     catch (err) {
-      console.error('[Cron] Erreur moteur d ouverture:', err.message)
-      results.errors.push({ context: 'moteur_ouverture', error: err.message })
+      console.error('[Cron] Erreur pilote YieldFlow:', err.message)
+      results.errors.push({ context: 'pilote_yieldflow', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

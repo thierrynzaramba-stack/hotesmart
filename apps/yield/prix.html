@@ -483,17 +483,15 @@
       + ligne('calendrier', 'Le calendrier',
         'Vous saisissez vos prix à la main, comme aujourd’hui.', !yf, false)
       + ligne('yieldflow', 'YieldFlow',
-        'Les prix ne se saisissent plus dans le calendrier. '
-        + '<b style="font-weight:600">Tant que la proposition de tarifs n’est pas '
-        + 'livrée, basculer FIGE les prix de ce logement</b> : ceux déjà en place '
-        + 'restent, et plus rien ne les modifie.', yf, bloque)
+        'Les prix ne se saisissent plus dans le calendrier : YieldFlow ouvre les '
+        + 'dates de la fenêtre et entretient leurs prix chaque jour, par la règle '
+        + 'de cette page. Vos indisponibilités ne sont jamais touchées.', yf, bloque)
       + '</div>'
       + (bloque ? `<p class="raison">${ech(d.raison || '')}</p>` : '')
       // ⚠ CE QUE LE MODE N'EMPORTE PAS SE DIT AUSSI. Sans cette phrase, l'hote
       // qui bascule croit son calendrier mort et n'ose plus fermer une nuit.
-      + (yf ? '<p class="dit">Les prix de ce logement sont figés : ils ne se '
-        + 'saisissent plus dans le calendrier, et YieldFlow ne propose pas '
-        + 'encore de tarifs. La disponibilité et la fermeture à la vente, elles, '
+      + (yf ? '<p class="dit">Les prix de ce logement sont tenus par YieldFlow : ils ne se '
+        + 'saisissent plus dans le calendrier. La disponibilité et la fermeture à la vente, elles, '
         + 'se règlent toujours dans le calendrier.</p>' : '')
       // LA FENETRE D'OUVERTURE (lot 4.6.3). En yieldflow : la fenetre reglee, la
       // derniere ouverture du moteur, et le moyen de la changer. Le moteur
@@ -516,7 +514,9 @@
     const c = b && b.comptes ? b.comptes : null
     let derniere = 'YieldFlow n’a pas encore ouvert de dates : il passe dans les 5 minutes qui suivent l’activation, puis chaque jour.'
     if (d.ouverture && d.ouverture.derniere) {
-      derniere = `Dernier passage de YieldFlow : ${ech(dateFrCourte(d.ouverture.derniere))}` + (b ? ` — ${b.ouvertes} nuit${b.ouvertes > 1 ? 's' : ''} ouverte${b.ouvertes > 1 ? 's' : ''}` : '') + '.'
+      const px = b && b.prix ? b.prix : null
+      derniere = `Dernier passage de YieldFlow : ${ech(dateFrCourte(d.ouverture.derniere))}` + (b ? ` — ${b.ouvertes} nuit${b.ouvertes > 1 ? 's' : ''} ouverte${b.ouvertes > 1 ? 's' : ''}` : '')
+        + (px ? `, ${px.changees} prix modifié${px.changees > 1 ? 's' : ''}` + (px.comptes && px.comptes.non_calculables ? ` (${px.comptes.non_calculables} nuit${px.comptes.non_calculables > 1 ? 's' : ''} non calculable${px.comptes.non_calculables > 1 ? 's' : ''} : prix en place conservé)` : '') : '') + '.'
       if (c && c.sans_prix) derniere += ` ⚠ ${c.sans_prix} nuit${c.sans_prix > 1 ? 's' : ''} sans prix : renseignez un prix de base pour ce logement.`
       if (c && c.sous_plancher) derniere += ` ⚠ ${c.sous_plancher} nuit${c.sous_plancher > 1 ? 's' : ''} sous le prix plancher, laissée${c.sous_plancher > 1 ? 's' : ''} fermée${c.sous_plancher > 1 ? 's' : ''}.`
     }

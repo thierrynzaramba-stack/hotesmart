@@ -265,12 +265,15 @@ Ce que cet état implique, pour ne pas le lire comme une panne :
 - le vérificateur `scripts/verifier-pilote-tarifaire.js` annonce
   **1 yieldflow** sur staging — c'est attendu, pas une anomalie.
 
-**Depuis le 4.6.3 (22 septembre 2026)** : la fenêtre se règle à l'écran
-(*Prix jour par jour*, bloc « Qui décide les prix »), et le moteur ouvre les
-30 jours de Loft — **par le script**, puisque staging n'a pas de cron :
-`node --env-file=.env.staging scripts/ouvrir-fenetres.js` (dry-run), puis
-`--go`. Après quoi les 30 premiers jours de Loft sont « ouverts » au prix de
-base, et une indisponibilité posée sur Loft reste fermée.
+**Depuis les 4.6.3-4.6.5 (22 septembre 2026)** : la fenêtre se règle à
+l'écran (*Prix jour par jour*, bloc « Qui décide les prix »), et le pilote
+ouvre les 30 jours de Loft puis entretient leurs prix — **par le script**,
+puisque staging n'a pas de cron :
+`node --env-file=.env.staging scripts/piloter-yieldflow.js` (dry-run des deux
+moteurs, avec motifs), puis `--go`. Après quoi les 30 premiers jours de Loft
+sont ouverts au prix de la règle (sinon au prix de base — le seed n'a pas
+d'historique, la grille n'y est pas fiable), et une indisponibilité posée sur
+Loft reste fermée. Les alarmes partent au fondateur comme en prod.
 
 Pour revenir à l'état du seed : rejouer `scripts/seed-staging.sql` (il
 recrée Loft en `calendrier`, fenêtre `NULL`).
