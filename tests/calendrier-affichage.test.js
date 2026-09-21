@@ -14,8 +14,13 @@ const fs = require('fs')
 const path = require('path')
 
 const lire = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
-const sansCommentaires = (s) => s.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
-const PAGE = sansCommentaires(lire('pages', 'biens-calendrier.html'))
+// ⚠ LES COMMENTAIRES CSS AUSSI — re-review du 21 septembre 2026 : une regle
+// `table.cal { table-layout: fixed }` avalee par un `/*` jamais ferme passait
+// tous les tests au vert. Une regex sur la source ne distingue pas une regle
+// vivante d'une regle commentee : on retire les blocs AVANT de matcher.
+const sansCommentaires = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+const PAGE_BRUTE = lire('pages', 'biens-calendrier.html')
+const PAGE = sansCommentaires(PAGE_BRUTE)
 const MOBILE = lire('pages', 'calendrier-mobile.html')
 const CORE = lire('shared', 'calendar-core.js')
 
@@ -338,8 +343,40 @@ test('LES JOURS DU MOIS NE SONT RENDUS QU UNE FOIS, sous le mois', () => {
   // la source ne prouve rien s'il est ecrit AVANT `<table>` (le parseur
   // l'ignore, et c'est ce que ma premiere version faisait). On l'exige juste
   // apres la balise d'ouverture, avec l'angle au gabarit de `.row-label`.
-  assert.match(bande, /<table class="month-band"><colgroup><col style="width:129px">/,
-    'le colgroup est DANS la table, et l angle fait 120 + 8 + 1 comme .row-label')
+  assert.match(bande, /<table class="month-band"'\+tableStyle\(\)\+'>'\+colonnesHtml\(\)\+'/,
+    'le colgroup est DANS la table, par le meme generateur que les biens, avec la meme largeur en ligne')
+  // ⚠ LE MEME colgroup DANS LES DEUX TABLES — decalage constate par Thierry sur
+  // staging (21 septembre 2026) : l'angle faisait 129 px alors que `.row-label`
+  // fait 120 en border-box, et la grille des biens n'avait aucun colgroup.
+  // On teste la PROPRIETE, pas la forme : les deux tables passent par le meme
+  // generateur de colonnes ET la meme largeur en ligne (sans largeur non auto,
+  // `table-layout: fixed` n'est pas en vigueur et les `col` ne sont que des
+  // preferences).
+  assert.match(PAGE, /<table class="cal"'\+tableStyle\(\)\+'>'\+colonnesHtml\(\)\+'<thead>/, 'chaque bien : largeur + colonnes')
+  assert.match(PAGE, /<table class="month-band"'\+tableStyle\(\)\+'>'\+colonnesHtml\(\)\+'/, 'la bande : idem')
+  assert.match(PAGE, /LABEL_W\+days\.length\*CELL_W/, 'la largeur est la somme des colonnes')
+  assert.match(PAGE, /table\.cal \{[^}]*table-layout: fixed/)
+  assert.match(PAGE, /table\.cal \{[^}]*border-collapse: collapse/, 'sans collapse, border-spacing ajoute 2 px par jour')
+  assert.match(PAGE, /table\.month-band \{[^}]*table-layout: fixed/)
+  // Chaque `/*` du style est ferme : un commentaire ouvert avale la regle suivante.
+  const style = PAGE_BRUTE.slice(PAGE_BRUTE.indexOf('<style>'), PAGE_BRUTE.indexOf('</style>'))
+  assert.equal((style.match(/\/\*/g) || []).length, (style.match(/\*\//g) || []).length, 'un commentaire CSS non ferme')
+  // Le nom du bien : ellipsis dans sa propre boite, trait bas conserve, texte a 12 px du lisere.
+  assert.match(PAGE, /\.bien-head \{[^}]*box-shadow: inset 4px 0 0 #007aff, inset 0 -1px 0 #e5e5e7/)
+  assert.match(PAGE, /\.bien-head \{[^}]*padding-left: 12px/)
+  assert.match(PAGE, /\.bien-head \.nom \{ display: block; overflow: hidden; text-overflow: ellipsis; \}/)
+  assert.match(PAGE, /<span class="nom">'\+escapeHtmlLocal\(bien\.name\)\+'<\/span>/)
+  // Un mois d'une ou deux colonnes prend son nom court, sans deborder sur le voisin.
+  assert.match(PAGE, /span<3\?monthShort\[m\]:monthFull\[m\]/)
+  assert.match(PAGE, /\.cal-page \* \{ box-sizing: border-box; \}/, 'la regle qui rend 120 exact')
+  assert.ok(!/const LABEL_W=/.test(PAGE), 'LABEL_W vient du core, pas d une copie locale')
+  assert.match(PAGE, /area\.scrollLeft - LABEL_W/, 'la selection a la souris compte depuis la meme colonne')
+  // Les liseres qui entreraient dans la boite de la table : en box-shadow.
+  assert.match(PAGE, /\.row-label\.bien-head \{[^}]*box-shadow: inset 4px 0 0 #007aff/)
+  assert.ok(!/\.row-label\.bien-head \{[^}]*border-left/.test(PAGE))
+  assert.match(PAGE, /table\.month-band \.corner \{[^}]*border-right: 1px solid #e5e5e7/)
+  // Le nom du bien est ECHAPPE (XSS stocke via le titre provider).
+  assert.match(PAGE, /escapeHtmlLocal\(bien\.name\)\+'<\/span><span class="cap-h">/)
   assert.match(bande, /w\.offsetHeight/, 'la hauteur de bande est mesuree apres rendu')
   assert.match(bande, /setProperty\('--bande-h'/, 'et posee sur la page : 74px n est qu un repli')
   assert.ok(!/table\.cal tr\.jours td\.weekend \.day-name/.test(PAGE), 'plus de CSS mort pour des jours qui ne sont plus dans le thead')
