@@ -218,6 +218,8 @@ export const api = {
     // ECRIT stop_sell par le meme chemin que tout geste du calendrier.
     fermer: (propertyId, debut, fin, raison) =>
       apiCall('calendar', 'POST', { action: 'fermer', property_id: propertyId, debut, fin, raison }),
+    modifierFermeture: (propertyId, id, debut, fin, raison) =>
+      apiCall('calendar', 'POST', { action: 'modifier_fermeture', property_id: propertyId, id, debut, fin, raison }),
     rouvrirFermeture: (propertyId, id) =>
       apiCall('calendar', 'POST', { action: 'rouvrir_fermeture', property_id: propertyId, id })
   },
