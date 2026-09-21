@@ -275,5 +275,14 @@ sont ouverts au prix de la règle (sinon au prix de base — le seed n'a pas
 d'historique, la grille n'y est pas fiable), et une indisponibilité posée sur
 Loft reste fermée. Les alarmes partent au fondateur comme en prod.
 
+**L'historique de recette (22 septembre 2026)** : le seed ne crée aucune
+réservation passée, donc la grille du moteur de prix n'y est jamais fiable.
+`scripts/seed-staging-historique.js --bien=<uuid> --go` pose deux ans de
+séjours synthétiques (77 séjours, 268 nuits, saisonnalité lisible, format
+Channex/Airbnb exact, `booking_id` préfixé `RECETTE-`, `--purge` pour les
+retirer). Posé sur le Loft : la grille y est fiable et le pilote y calcule
+des prix (90 € en semaine, 105 € le week-end en septembre, davantage l'été).
+Le script refuse la production sans option.
+
 Pour revenir à l'état du seed : rejouer `scripts/seed-staging.sql` (il
 recrée Loft en `calendrier`, fenêtre `NULL`).
