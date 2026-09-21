@@ -78,7 +78,9 @@
        `col` ne sont que des preferences). La largeur est posee en ligne par
        `tableStyle()` : LABEL_W + jours * CELL_W. Les deux tables la portent. */
     table.month-band { border-collapse: collapse; table-layout: fixed; }
-    table.month-band tr:first-child td { overflow: hidden; text-overflow: ellipsis; }
+    /* Un mois qui n'occupe qu'une ou deux colonnes en bord de grille prend son
+       nom COURT (voir renderMonthBand) : ni debordement sur le mois voisin, ni
+       troncature illisible. */
     table.month-band td { height: 26px; font-size: 12px; font-weight: 700; color: #1d1d1f; text-align: left; padding-left: 8px; white-space: nowrap; border-bottom: 1px solid #e5e5e7; text-transform: capitalize; background: #fff; }
     table.month-band td.month-start { border-left: 2px solid #007aff; }
     /* La ligne des jours de la bande : la meme grammaire que l'ancien thead des
@@ -105,13 +107,23 @@
        la colonne, et decale toute la grille de 2 px par rapport a la bande.
        Le nom est tronque plutot que d'elargir la colonne : en `fixed`, un nom
        long deborderait ; en automatique, il decalerait tous les jours du bien. */
-    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; box-shadow: inset 4px 0 0 #007aff; vertical-align: middle; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
+    table.cal .row-label.bien-head { font-size: 14px; font-weight: 700; color: #1d1d1f; box-shadow: inset 4px 0 0 #007aff, inset 0 -1px 0 #e5e5e7; padding-left: 12px; vertical-align: middle; line-height: 1.2; }
+    /* Le nom seul porte l'ellipsis, dans sa propre boite bloc : `text-overflow`
+       ne s'herite pas et ne vaut rien sur la boite anonyme d'un `th`. */
+    table.cal .row-label.bien-head .nom { display: block; overflow: hidden; text-overflow: ellipsis; }
     table.cal .row-label.bien-head .cap-h { display: block; font-size: 10px; font-weight: 400; color: #86868b; margin-top: 2px; }
     .bien-section { padding-top: 18px; }
     /* `.bien-title` a ete supprime : plus aucun element ne le portait (le nom du
        bien vit dans `.bien-head`, dans le thead). Son `z-index: 6` serait passe
        AU-DESSUS de la ligne de jours desormais collante (z-index 3) — du CSS mort
-       qui attendait de devenir un defaut.
+       qui attendait de devenir un defaut. */
+    /* ⚠ CE COMMENTAIRE N'ETAIT PAS FERME (re-review du 21 septembre 2026) : la
+       regle ci-dessous etait AVALEE. La grille des biens vivait donc en layout
+       automatique ET en bordures separees (border-spacing 2 px) : 48 px par jour
+       contre 46 dans la bande, deux pixels de derive PAR JOUR. C'etait la vraie
+       cause du decalage constate par Thierry — l'angle a 129 px n'en etait
+       qu'une partie. Un test compte desormais les ouvertures et les fermetures
+       de commentaire du style : elles doivent etre en nombre egal. */
     table.cal { border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     /* Colonne elargie (34 -> 46px) et lignes plus hautes : sans cela, une bulle
        d'une nuit n'affiche aucun nom. Doit rester d'accord avec CELL_W
@@ -521,7 +533,7 @@
       // et la grille des biens n'avait pas de colgroup du tout : neuf pixels de
       // decalage constant entre le jour et la case. Avec `table-layout: fixed`,
       // ce sont les `col` qui font les colonnes — les memes, dans les deux tables.
-      let h='<table class="month-band"'+tableStyle()+'>'+colonnesHtml()+'<tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start" style="width:'+(span*CELL_W)+'px;min-width:'+(span*CELL_W)+'px">'+monthFull[m]+' '+days[i].getFullYear()+'</td>';i+=span}h+='</tr>';
+      let h='<table class="month-band"'+tableStyle()+'>'+colonnesHtml()+'<tr><td class="corner"></td>';let i=0;while(i<days.length){const m=days[i].getMonth();let span=0;while(i+span<days.length&&days[i+span].getMonth()===m)span++;h+='<td colspan="'+span+'" class="month-start">'+(span<3?monthShort[m]:monthFull[m]+' '+days[i].getFullYear())+'</td>';i+=span}h+='</tr>';
       // ⚠ LA LIGNE DES JOURS, UNE FOIS POUR TOUS LES BIENS. Meme `days`, memes
       // classes (`classesJour`) que l'ancien thead : week-end, jour courant,
       // debut de mois se lisent au meme endroit qu'avant, mais une seule fois.
@@ -654,7 +666,7 @@
       const ferme=(i)=>jourFerme(st[i])
       const section=document.createElement('div'); section.className='bien-section'; section.dataset.bienId=bien.id
       // ⚠ `bien.name` vient du provider : ECHAPPE, comme dans `barresResa`.
-      let html='<table class="cal"'+tableStyle()+'>'+colonnesHtml()+'<thead><tr><th class="row-label bien-head" title="'+escapeHtmlLocal(bien.name)+'">'+escapeHtmlLocal(bien.name)+'<span class="cap-h">cap. '+escapeHtmlLocal(bien.capacity)+'</span></th>'
+      let html='<table class="cal"'+tableStyle()+'>'+colonnesHtml()+'<thead><tr><th class="row-label bien-head" title="'+escapeHtmlLocal(bien.name)+'"><span class="nom">'+escapeHtmlLocal(bien.name)+'</span><span class="cap-h">cap. '+escapeHtmlLocal(bien.capacity)+'</span></th>'
       // ⚠ PLUS DE JOURS ICI : ils sont dans la bande, sous le mois, une seule
       // fois (demande de Thierry). Les cellules restent, vides, pour aligner
       // les colonnes ; les classes de colonne (week-end, jour courant) aussi,
