@@ -30,6 +30,8 @@
 
 | 18 | **Migration `2026-09-22-prix-hote.sql`** : staging avant la recette, prod avant le merge (avec `2026-09-20-pilote-fenetre.sql`). | Sans elle, la main de l'hôte répond « Enregistrement impossible » ; le moteur, lui, ne casse pas (table absente = aucune main). | Staging maintenant ; prod avant le merge du 4.6. |
 
+| 19 | **Un mois fermé à la vente affiche « -100 % » contre son N-1** : le drapeau `periode_fermee_a_la_vente` de `lib/yield/pickup.js` (« zéro vendu n'est pas un échec ») n'est pas dans `DISQUALIFIENT_LE_N1`, et `drapeaux` n'est lu nulle part dans `apps/yield/prix.html`. Déjà vrai au pied de mois ; le CA dans le bandeau (f6a6050) le rend plus visible. | L'hôte lit une chute là où il a fermé lui-même. | Avec le 4.6.5 (alarmes) : lire `drapeaux` à l'écran et remplacer le pourcentage par « fermé à la vente ». |
+
 ## Règle du registre
 
 Une dette se **note** au moment où on décide de ne pas la solder, pas au moment

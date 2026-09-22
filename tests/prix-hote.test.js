@@ -144,3 +144,13 @@ test('une nuit NON OUVERTE montre les memes informations qu une nuit ouverte : l
   assert.ok(PAGE.includes("const proj = n.projection && n.ouverte !== true"), 'le depliant « pourquoi » la dit')
   assert.ok(PAGE.includes("projete ? 'pas encore en vente : prix prévu' : ''"), 'la case de la pop-up la dit')
 })
+
+test('le bandeau du mois porte le CA vendu a ce jour et le N-1 au meme delai, lus dans le pied — sans requete de plus', () => {
+  assert.ok(PAGE.includes('<span id="yp-ca"></span>'), 'la place dans le bandeau')
+  assert.ok(PAGE.includes("el('yp-ca').innerHTML = bandeauCa(data)"), 'rempli a chaque mois charge')
+  assert.ok(PAGE.includes("el('yp-ca').innerHTML = ''"), 'et vide pendant la lecture (jamais le CA du mois precedent)')
+  const fn = PAGE.slice(PAGE.indexOf('function bandeauCa (d)'), PAGE.indexOf('function vue (d)'))
+  assert.ok(fn.includes('const ad = p.a_date') && fn.includes("if (!ad || ad.ca == null) return ''"), 'le CA du mois vient du pied ; sans chiffre, rien')
+  assert.ok(fn.includes('p.a_date_n1 && p.a_date_n1.ca != null && !(cmp && cmp.non_calculable)'), 'le N-1 seulement s il existe et n est pas disqualifie')
+  assert.ok(!/fetch\(/.test(fn), 'aucune requete de plus')
+})

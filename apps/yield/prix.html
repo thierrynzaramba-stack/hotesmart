@@ -15,6 +15,16 @@
     .yp-nav button:hover { background: var(--bg2); color: var(--text); }
     #yp-mois { font-size: 15px; font-weight: 600; min-width: 132px; text-align: center;
                text-transform: capitalize; }
+    /* LE CA DANS LE BANDEAU — demande de Thierry (22 septembre 2026) : le
+       chiffre d'affaires du mois affiche, et celui de l'an dernier au meme
+       delai s'il existe. Ce sont les nombres du pied de mois, sans requete de
+       plus : le bandeau les lit dans la meme reponse. */
+    #yp-ca { font-size: 12.5px; color: var(--text2); display: inline-flex; gap: 10px;
+             align-items: baseline; white-space: nowrap; }
+    #yp-ca b { color: var(--text); font-weight: 600; font-size: 13.5px; }
+    #yp-ca .n1 { color: var(--text2); }
+    #yp-ca .n1.hausse b { color: #1B7F3B; }
+    #yp-ca .n1.baisse b { color: #B23A2A; }
 
     /* ─── LE PILOTE TARIFAIRE : QUI ECRIT LES PRIX DE CE LOGEMENT ─────────
        Spec §2 bis. C'est une CONFIG D'APP : elle vit ici, pas dans /settings.
@@ -416,6 +426,7 @@
       <span id="yp-mois"></span>
       <button id="yp-suiv" aria-label="Mois suivant">›</button>
     </div>
+    <span id="yp-ca"></span>
     <button class="yp-btn-ev" id="yp-ouvrir-ev" title="Le calendrier du mois, avec ce qui pilote vos prix : vacances, fériés, dates commerciales, vos événements.">Événements</button>
   </div>
 
@@ -698,6 +709,7 @@
   async function charger () {
     const jeton = ++enCours
     el('yp-mois').textContent = nomMois(mois)
+    el('yp-ca').innerHTML = ''
     etat('Lecture du cœur de données…')
     const p = new URLSearchParams({ property_id: el('yp-bien').value, mois })
     let r, data
@@ -713,9 +725,36 @@
     if (jeton !== enCours) return
     if (!r.ok) { etat(refus(data?.error), true); return }
     donnees = data
+    el('yp-ca').innerHTML = bandeauCa(data)
     el('yp-contenu').innerHTML = vue(data)
     brancher()
     if (popupOuverte) rendrePopup()
+  }
+
+  // ⚠ LE CA DU BANDEAU EST CELUI DU PIED, PAS UN SECOND CALCUL : `pied.a_date`
+  // (vendu a ce jour sur le mois affiche) et `pied.a_date_n1` (l'an dernier au
+  // MEME delai, jamais le mois entier — comparer a un mois termine donnerait
+  // toujours une chute). Sans N-1 exploitable, on ne montre que le mois : un
+  // « 0 € » d'an dernier se lirait comme une chute.
+  function bandeauCa (d) {
+    const p = d.pied || {}
+    const ad = p.a_date
+    if (!ad || ad.ca == null) return ''
+    // Le delai est compte avant le DEBUT du mois : negatif des que le mois a
+    // commence, donc il ne distingue pas « en cours » de « termine ».
+    const moisParis = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date()).slice(0, 7)
+    const periode = p.periode || mois
+    const quand = periode < moisParis ? 'mois terminé'
+      : (periode === moisParis ? 'mois en cours'
+        : (p.delai_jours != null ? `${p.delai_jours} jour(s) avant le début du mois` : 'mois à venir'))
+    let n1 = ''
+    const cmp = p.vs_n1 && p.vs_n1.ca ? p.vs_n1.ca : null
+    if (p.a_date_n1 && p.a_date_n1.ca != null && !(cmp && cmp.non_calculable)) {
+      const v = cmp && cmp.variation != null ? Math.round(cmp.variation * 100) : null
+      const sens = v == null ? '' : (v >= 0 ? 'hausse' : 'baisse')
+      n1 = `<span class="n1 ${sens}" title="${ech(`L’an dernier, au même délai (${quand}) : ${euros(p.a_date_n1.ca)} vendus sur ce mois.`)}">N-1 <b>${euros(p.a_date_n1.ca)}</b>${v != null ? ` (${v >= 0 ? '+' : ''}${v} %)` : ''}</span>`
+    }
+    return `<span title="${ech(`Chiffre d’affaires vendu à ce jour sur ${nomMois(p.periode || mois)} (${quand}).`)}">CA <b>${euros(ad.ca)}</b></span>${n1}`
   }
 
   // ─── La vue : action, tableau, pied ───────────────────────────────────────
