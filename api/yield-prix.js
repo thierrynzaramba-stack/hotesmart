@@ -661,7 +661,10 @@ module.exports = async (req, res) => {
         passe: finM < auj,
         ca: prM && prM.ca_a_date != null
           ? { a_date: prM.ca_a_date, n1: prM.ca_a_date_n1,
-            variation: prM.ecart, non_calculable: prM.ca_non_calculable }
+            variation: prM.ecart, non_calculable: prM.ca_non_calculable,
+            // Sous-compte par construction (dates de vente perdues a la
+            // migration, portefeuille reconstruit) : la tuile le DIT.
+            fiable: prM.fiable !== false }
           : null,
         nuits: nuitsM.length,
         a_monter: monter.length,

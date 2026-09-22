@@ -845,10 +845,14 @@
       const ca = m.ca && m.ca.a_date != null ? m.ca : null
       const caN1 = ca && ca.n1 != null && !ca.non_calculable ? ca.n1 : null
       const caV = caN1 != null && ca.variation != null ? Math.round(ca.variation * 100) : null
+      // ⚠ « MOIS ENTIER » N'EST PROMIS QUE SUR LES VENTES DATEES : une
+      // reservation importee sans date de vente fiable n'entre pas dans ce
+      // chiffre (releve en relecture). Quand le mois en porte, le survol le dit.
+      const caReserve = ca && ca.fiable === false ? ' — sur les ventes datées seulement, les réservations importées sans date de vente n’y sont pas' : ''
       const caTitre = ca
         ? (m.passe
-          ? `CA du mois ${euros(ca.a_date)}${caN1 != null ? ` contre ${euros(caN1)} l’an dernier${caV != null ? ` (${caV >= 0 ? '+' : ''}${caV} %)` : ''}` : ''}`
-          : `CA vendu à ce jour ${euros(ca.a_date)}${caN1 != null ? ` contre ${euros(caN1)} l’an dernier au même délai${caV != null ? ` (${caV >= 0 ? '+' : ''}${caV} %)` : ''}` : ''}`)
+          ? `CA du mois ${euros(ca.a_date)}${caN1 != null ? ` contre ${euros(caN1)} l’an dernier${caV != null ? ` (${caV >= 0 ? '+' : ''}${caV} %)` : ''}` : ''}${caReserve}`
+          : `CA vendu à ce jour ${euros(ca.a_date)}${caN1 != null ? ` contre ${euros(caN1)} l’an dernier au même délai${caV != null ? ` (${caV >= 0 ? '+' : ''}${caV} %)` : ''}` : ''}${caReserve}`)
         : null
       const titre = [
         `${nom} — ${m.nuits} nuit(s)`,
