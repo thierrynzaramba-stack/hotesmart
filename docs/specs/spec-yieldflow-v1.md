@@ -526,6 +526,22 @@ calculables ») qui le dit.
    2026 = 31 ouvertes, 0 projetée ; mars 2027 = 24 projetées avec prix et
    niveau, ouverture prévue 4 mois avant, 7 nuits ouvertes à la main restent
    ouvertes. Commits 7069731 et 9a80bd7.
+6. **Le CA sur le bandeau du mois et sur chaque tuile du radar** : vendu à ce
+   jour contre l'an dernier au même délai ; mois passé = mois entier contre
+   mois entier, par construction du `pickup` (le pivot N-1 dépasse la fin du
+   mois). Mêmes nombres que le pied, aucune requête de plus. Un N-1
+   disqualifié ne s'affiche pas ; un CA sous-compté (ventes non datées) le dit
+   au survol. Dette 19 : un mois fermé à la vente se lit « -100 % ».
+7. **L'écran s'appelle « Prédiction de prix »**, sans sous-titre. L'état du
+   pilote est un bouton « activé » / « désactivé » à côté du logement, à la
+   place des deux cartes de choix. Le clic n'écrit jamais directement : il
+   ouvre une confirmation dans les deux sens — activer : « L'IA de prédiction
+   des prix va modifier vos tarifs. Vérifiez la configuration et les tarifs
+   proposés avant d'enclencher », avec la fenêtre d'ouverture ; désactiver :
+   YieldFlow s'arrête, les prix en place restent, l'hôte reprend la main. Un
+   logement qui ne peut pas activer (`peut_basculer` faux) a un bouton inerte
+   et la raison au survol. La fenêtre et le bilan du dernier passage restent
+   sous la barre quand le pilote est activé.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
