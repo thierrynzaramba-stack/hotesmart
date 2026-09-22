@@ -496,6 +496,21 @@ calculables ») qui le dit.
    ce drapeau) — aucune porte de service, rien de plus que ce que l'hôte a déjà
    sur un bien non piloté, sous ses propres droits. La règle A tient : un seul
    décideur par nuit, et sur ces nuits-là c'est l'hôte.
+   **Désactiver le pilote ne l'efface pas** (dette 22, décision (a) de Thierry,
+   23 septembre 2026 — la recette a montré qu'un aller-retour du bouton
+   faisait perdre deux prix de l'hôte, que le moteur aurait écrasés). Les
+   marques survivent, inertes ; à la réactivation, chacune reprend le prix
+   affiché au calendrier, et les deux confirmations disent « N nuits gardent
+   votre prix ». Le recalage passe **avant** la bascule (après, un tick du
+   cron pouvait ouvrir une nuit marquée à l'ancien montant) et son échec
+   refuse l'activation. Un refus du writer **défait** la pose (la marque
+   d'avant retrouve son prix, seulement si personne ne l'a reposée
+   entre-temps) ; une exception du writer, elle, **garde** la marque — le prix
+   est peut-être déjà écrit, et une marque en trop se voit à l'écran quand une
+   marque perdue ne se voit pas. Chaque événement d'une marque
+   — posée, remplacée, retirée, annulée, recalée, purgée — laisse une ligne
+   dans `prix_hote_journal` (`migrations/2026-09-23-prix-hote-journal.sql`),
+   avec son geste : la cause d'une perte se lit, elle ne se déduit plus.
 3. **Une fenêtre réglée « et rien ne se passe »** : staging n'a pas de cron ;
    le passage manuel a ouvert 92 nuits. Aucun défaut.
 4. **Les événements en pop-up** depuis Prix jour par jour : un calendrier en

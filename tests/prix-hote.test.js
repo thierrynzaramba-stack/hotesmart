@@ -21,13 +21,14 @@ const lire = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
 function fausseBase (lignes = [], { erreur = null } = {}) {
   const journal = []
   return { journal, from (table) {
-    assert.equal(table, 'prix_hote', 'ce module ne touche que sa table')
+    assert.ok(['prix_hote', 'prix_hote_journal'].includes(table), 'ce module ne touche que ses tables')
     const q = { op: 'select', f: [], ligne: null }
     q.select = () => q; q.eq = (c, v) => { q.f.push([c, v]); return q }
     q.gte = () => q; q.lte = () => q; q.lt = (c, v) => { q.lt_ = v; return q }
     q.in = (c, v) => { q.in_ = [c, v]; return q }
     q.upsert = (rows, o) => { q.op = 'upsert'; q.ligne = rows; q.opts = o; return q }
     q.delete = () => { q.op = 'delete'; return q }
+    q.insert = rows => { q.op = 'insert'; q.ligne = rows; return q }
     q.then = (res, rej) => {
       journal.push({ op: q.op, f: q.f, ligne: q.ligne, opts: q.opts, in_: q.in_, lt_: q.lt_ })
       if (erreur) return Promise.resolve({ data: null, error: erreur }).then(res, rej)
@@ -118,7 +119,7 @@ test('LE TEST QUI COMPTE : la pop-up Evenements — un calendrier en tableau, la
   assert.match(lire('components/sidebar.js'), /href="\/apps\/yield\/prix\?evenements=1"/)
 })
 
-test('correctifs de review : prix REEL affiche et ecart marque, clavier sans propagation, evenements du MOIS, plusieurs evenements par jour, retour en calendrier vide la main', () => {
+test('correctifs de review : prix REEL affiche et ecart marque, clavier sans propagation, evenements du MOIS, plusieurs evenements par jour', () => {
   const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
   assert.ok(ligne.includes('const ecart = n.prix_actuel != null && Math.round(n.prix_actuel * 100) !== Math.round(n.prix_hote * 100)'), 'l ecart memoire / calendrier se voit')
   assert.ok(ligne.includes('euros(n.prix_actuel != null ? n.prix_actuel : n.prix_hote)'), 'le prix affiche est celui du calendrier')
@@ -128,7 +129,6 @@ test('correctifs de review : prix REEL affiche et ecart marque, clavier sans pro
   assert.ok(pop.includes("apiEv('GET', null, { debut: `${mois}-01`, fin })"), 'la fenetre du mois affiche, pas les 12 mois a venir')
   assert.ok(pop.includes('if (!parJour.has(j)) parJour.set(j, [])'), 'plusieurs evenements par jour')
   assert.ok(pop.includes('sv.incertain_apres'), 'l horizon du calendrier scolaire se dit')
-  assert.match(lire('api/yield-pilote.js'), /if \(voulu === 'calendrier' && actuel === 'yieldflow'\) await viderPrixHote/)
   assert.match(lire('scripts/piloter-yieldflow.js'), /prixHote = await prixHoteDuBien\(sb, bien\.id, auj, fin\)/, 'le dry-run voit la main')
 })
 

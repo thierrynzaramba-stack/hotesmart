@@ -321,9 +321,14 @@ module.exports = async (req, res) => {
     const parDate = new Map(lignesCal.map(l => [l.date, l]))
     // La main de l'hote (arbitrage A bis) : « votre prix » a cote de ce que
     // YieldFlow proposait. Table absente = aucune main ; panne = on le dit.
+    // ⚠ SEULEMENT SUR UN BIEN PILOTE (dette 22) : les marques survivent a la
+    // desactivation, inertes. En mode calendrier, l'hote tient tous ses prix
+    // a la main — « votre prix » ou « ✎ » sur quelques nuits n'y veut rien dire.
     let prixHote = new Map()
-    try { prixHote = await prixHoteDuBien(supabase, bien.id, debutCal, finCal) }
-    catch (e) { console.error('[yield-prix] prix_hote illisibles', e.message) }
+    if (piloteDuBien(bien) === 'yieldflow') {
+      try { prixHote = await prixHoteDuBien(supabase, bien.id, debutCal, finCal) }
+      catch (e) { console.error('[yield-prix] prix_hote illisibles', e.message) }
+    }
 
     // ⚠ UNE NUIT VENDUE N'A PLUS DE PRIX A CHANGER. Le montrer comme
     // « tarifiable » ferait perdre du temps a l'hote sur la seule ligne ou il
