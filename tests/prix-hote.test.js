@@ -140,6 +140,7 @@ test('une nuit NON OUVERTE montre les memes informations qu une nuit ouverte : l
   const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
   assert.ok(ligne.includes('} else if (!passe && n.projection && n.suggestion != null) {'), 'la ligne montre la projection')
   assert.ok(ligne.includes('s’ouvrira') && ligne.includes('si vous l’ouvrez'), 'et dit quand, ou a quelle condition')
-  // Une nuit fermee par l'hote n'est PAS projetee : c'est sa decision.
-  assert.ok(!/ouverte === false[^\n]*projection/.test(src))
+  // La projection se DIT partout ou elle s'affiche : ligne, depliant, pop-up.
+  assert.ok(PAGE.includes("const proj = n.projection && n.ouverte !== true"), 'le depliant « pourquoi » la dit')
+  assert.ok(PAGE.includes("projete ? 'pas encore en vente : prix prévu' : ''"), 'la case de la pop-up la dit')
 })

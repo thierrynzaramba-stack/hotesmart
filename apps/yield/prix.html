@@ -1249,7 +1249,12 @@
     // L'étendue de la grille est en tête du groupe, une fois. Et le min-max des
     // prix observés n'y revient pas : « de 35 € à 206 € » fait peur pour rien,
     // un extrême unique n'étant pas une borne de décision mais un accident.
-    return `${dites}
+    // La projection se dit aussi ici (relecture) : « mêmes informations », mais
+    // l'hôte sait qu'il lit une nuit qui n'est pas encore en vente.
+    const proj = n.projection && n.ouverte !== true
+      ? `<p class="yp-raisons"><em>${n.hors_fenetre ? 'Cette nuit n’est pas encore en vente : voici le prix auquel YieldFlow l’ouvrira.' : 'Cette nuit n’est pas au calendrier : voici ce que YieldFlow proposerait si vous l’ouvriez.'}</em></p>`
+      : ''
+    return `${proj}${dites}
       <div class="yp-apparie">${appariement(n.n1)}</div>
       <details class="yp-audit"><summary>Tout le calcul</summary>
         <ol>${toutes.map(c => `<li><strong>${ech(nomCouche(c.nom))}</strong> — ${ech(c.detail)}</li>`).join('')}</ol>
@@ -1463,10 +1468,11 @@
       const premierDuEv = e && (iso === e.debut || iso === debutMois)
       const dernierDuEv = e && (iso === e.fin || iso === finMois)
       const prix = n ? (n.prix_actuel != null ? n.prix_actuel : n.suggestion) : null
+      const projete = !!(n && n.projection && n.prix_actuel == null && n.suggestion != null)
       const barres = ids.map(k => { const x = entrees[k]; return `<i class="ev-barre ${iso === x.debut ? 'g' : ''} ${iso === x.fin ? 'd' : ''}" style="background:${EV_COULEUR[x.origine] || '#555'}" title="${ech(x.nom)}"></i>` }).join('')
-      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
+      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', projete ? 'pas encore en vente : prix prévu' : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
         <span class="j">${jour}</span>
-        ${prix != null ? `<span class="p">${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
+        ${prix != null ? `<span class="p">${projete ? '~' : ''}${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
         ${n && n.etiquette ? `<span class="n">${ech(n.etiquette)}</span>` : ''}
         ${e && (premierDuEv || (premier.getUTCDay() + 6 + jour - 1) % 7 === 0) ? `<span class="ev-nom">${ech(e.nom)}</span>` : ''}
         ${barres ? `<span class="ev-barres">${barres}</span>` : ''}
