@@ -541,7 +541,14 @@ calculables ») qui le dit.
    YieldFlow s'arrête, les prix en place restent, l'hôte reprend la main. Un
    logement qui ne peut pas activer (`peut_basculer` faux) a un bouton inerte
    et la raison au survol. La fenêtre et le bilan du dernier passage restent
-   sous la barre quand le pilote est activé.
+   sous la barre quand le pilote est activé. Puis, sur demande, la fenêtre
+   d'ouverture descend en bas de page « pour le moment » ; la confirmation
+   reste sous le bouton.
+8. **Le bloc des compteurs du mois est supprimé** (« 0 à monter, 0 à baisser,
+   2 fermées, +0 € si tout appliqué » et sa note) : « il n'a pas d'intérêt ».
+   Les tuiles du radar portent ces comptes mois par mois, le tableau les
+   détaille. Seule reste la tendance du mois, dans son bloc, et seulement
+   quand elle agit.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 

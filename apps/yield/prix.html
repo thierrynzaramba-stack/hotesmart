@@ -109,17 +109,12 @@
     .yp-rm.e-inconnu .pourquoi { color: var(--text3); }
     .yp-rm.e-rien .pourquoi { color: var(--text3); }
 
-    /* ─── ÉTAGE 1 : l'action ─────────────────────────────────────────────── */
+    /* ─── ÉTAGE 1 : la tendance du mois (seulement quand elle agit) ──────── */
     .yp-tete { background: var(--bg); border: 0.5px solid var(--border);
-               border-radius: var(--radius-lg); padding: 13px 16px; margin-bottom: 12px; }
-    .yp-chiffres { display: flex; gap: 24px; flex-wrap: wrap; }
-    .yp-chiffre .v { font-size: 19px; font-weight: 600; line-height: 1.1;
-                     font-variant-numeric: tabular-nums; }
-    .yp-chiffre .l { font-size: 10.5px; color: var(--text3); margin-top: 2px; }
+               border-radius: var(--radius-lg); padding: 10px 16px; margin-bottom: 12px; }
     .hausse { color: #0F7B3E; } .baisse { color: #B02A37; }
     .yp-note { font-size: 11px; color: var(--text2); line-height: 1.6; margin: 10px 0 0; }
-    .yp-mois-dit { font-size: 12px; line-height: 1.6; margin: 11px 0 0;
-                   padding-top: 10px; border-top: 0.5px solid var(--border); }
+    .yp-mois-dit { font-size: 12px; line-height: 1.6; margin: 0; }
 
     /* ─── ÉTAGE 1 : le tableau du mois ───────────────────────────────────── */
     .yp-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -397,8 +392,6 @@
     .yp-btn-ev:hover { background: var(--bg2); }
 
     @media (max-width: 640px) {
-      .yp-chiffres { gap: 16px; }
-      .yp-chiffre .v { font-size: 17px; }
       .yp-barre { gap: 8px; }
       #yp-bien { flex: 1 1 100%; }
       .yp-niveaux { flex-basis: 100%; max-width: none; }
@@ -822,7 +815,7 @@
 
   // ─── La vue : action, tableau, pied ───────────────────────────────────────
   function vue (d) {
-    return radar(d) + action(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d)
+    return radar(d) + tendanceDuMois(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d)
   }
 
   const ABREV = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.',
@@ -961,60 +954,17 @@
     </div>`
   }
 
-  // ÉTAGE 1 — ce qu'il y a à faire ce mois-ci.
-  function action (d) {
-    // ⚠ LE PASSÉ EST VISIBLE MAIS NE COMPTE PAS — demande de Thierry.
-    // Un mois en cours porte ses jours écoulés : les inclure dans « X à
-    // monter » proposerait d'agir sur des nuits déjà consommées, et le
-    // « si tout appliqué » afficherait des euros que personne n'encaissera.
-    const aVenir = d.nuits.filter(n => n.delai_jours >= 0)
-    const av = aVenir.filter(n => n.suggestion != null)
-    const monter = av.filter(n => n.prix_actuel != null && n.suggestion > n.prix_actuel)
-    const baisser = av.filter(n => n.prix_actuel != null && n.suggestion < n.prix_actuel)
-    const vendues = aVenir.filter(n => n.vendue)
-    const fermees = aVenir.filter(n => n.ouverte === false && !n.vendue)
-    // ⚠ TROIS COMPTES, PAS DEUX — arbitrage C du §2 ter. « Pas encore
-    // ouverte » n'est ni « fermée » (l'hôte n'a rien fermé) ni « non
-    // renseignée » (rien n'a été oublié). Afficher « fermée » sur 245 nuits
-    // que personne n'a fermées ferait chercher à l'hôte une décision qu'il
-    // n'a jamais prise.
-    const attente = aVenir.filter(n => n.hors_fenetre && !n.vendue)
-    const inconnues = aVenir.filter(n => n.ouverte == null && !n.vendue && !n.hors_fenetre)
-    const prochaine = attente.map(n => n.ouverture_prevue).filter(Boolean).sort()[0] || null
-    const gain = av.filter(n => n.prix_actuel != null)
-      .reduce((s, n) => s + (n.suggestion - n.prix_actuel), 0)
-    const c = (v, l, cl = '') =>
-      `<div class="yp-chiffre"><div class="v ${cl}">${v}</div><div class="l">${l}</div></div>`
-    return `<div class="yp-tete">
-      <div class="yp-chiffres">
-        ${c(monter.length, 'à monter', monter.length ? 'hausse' : '')}
-        ${c(baisser.length, 'à baisser', baisser.length ? 'baisse' : '')}
-        ${c(vendues.length, 'vendues')}
-        ${fermees.length ? c(fermees.length, 'fermées') : ''}
-        ${inconnues.length ? c(inconnues.length, 'non renseignées') : ''}
-        ${attente.length ? c(attente.length, 'pas encore ouvertes') : ''}
-        ${c((gain >= 0 ? '+' : '') + euros(Math.round(gain)), 'si tout appliqué',
-          gain > 0 ? 'hausse' : (gain < 0 ? 'baisse' : ''))}
-      </div>
-      ${ceQueDitLeMois(d)}
-      ${fermees.length || inconnues.length || attente.length ? `<p class="yp-note">
-        ${fermees.length ? `<strong>${fermees.length} nuit(s) fermée(s)</strong> — aucun prix ne s’y vend.
-          Ouvrez-les au calendrier, les suggestions apparaîtront. ` : ''}
-        ${inconnues.length ? `<strong>${inconnues.length} nuit(s) non renseignée(s)</strong> —
-          votre calendrier ne va pas jusque-là. ` : ''}
-        ${attente.length ? `<strong>${attente.length} nuit(s) pas encore ouverte(s)</strong> —
-          au-delà de la fenêtre de vente pilotée par YieldFlow. Rien à faire : elles
-          s’ouvriront seules${prochaine ? `, la première le ${dateFr(prochaine)}` : ''}.` : ''}</p>` : ''}
-    </div>`
-  }
-
+  // ⚠ LE BLOC DES COMPTEURS DU MOIS (« 0 à monter, 0 à baisser, 2 fermées,
+  // +0 € si tout appliqué » et sa note) A ETE SUPPRIME — demande de Thierry,
+  // recette du 22 septembre 2026 : « il n'a pas d'intérêt ». Les tuiles du
+  // radar portent deja ces comptes, mois par mois, et le tableau les detaille.
   // ⚠ LA TENDANCE DU MOIS SE DIT ICI, ET NULLE PART AILLEURS.
   // C'est la couche « pression » du moteur : elle vaut pour les trente nuits à
   // la fois. Elle vivait dans la justification de CHAQUE ligne — trente fois la
   // même phrase, qui noyait le seul motif propre à la nuit.
   // ⚠ ET SEULEMENT QUAND ELLE AGIT. Une tendance « dans la fourchette » ne
   // déplace aucun prix : l'annoncer serait une couche muette affichée.
-  function ceQueDitLeMois (d) {
+  function tendanceDuMois (d) {
     const p = d.pression ? d.pression[d.pied ? d.pied.periode : ''] : null
     if (!p || p.ecart == null) return ''
     const exemple = d.nuits.find(n => (n.couches || [])
@@ -1022,8 +972,8 @@
     if (!exemple) return ''
     const couche = exemple.couches.find(c => c.nom === 'pression')
     const sens = couche.deplacement > 0 ? 'hausse' : 'baisse'
-    return `<p class="yp-mois-dit"><strong class="${sens}">Ce mois-ci</strong> —
-      ${ech(couche.resume)}. Cela vaut pour toutes les nuits du mois.</p>`
+    return `<div class="yp-tete"><p class="yp-mois-dit"><strong class="${sens}">Ce mois-ci</strong> —
+      ${ech(couche.resume)}. Cela vaut pour toutes les nuits du mois.</p></div>`
   }
 
   // ÉTAGE 1 — une ligne par jour, précédée de LA GRILLE de son segment.
