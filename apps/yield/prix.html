@@ -72,6 +72,15 @@
     .yp-rm .a { font-size: 9.5px; color: var(--text3); display: block; margin-top: 1px;
                 white-space: nowrap; }
     .yp-rm .a b { font-weight: 600; }
+    /* LE CA SUR LA TUILE — demande de Thierry (22 septembre 2026) : vendu a ce
+       jour, et l'an dernier au meme delai ; mois passe = mois entier contre
+       mois entier. Deux lignes courtes, le survol porte l'explication. */
+    .yp-rm .ca { display: block; margin-top: 4px; padding-top: 3px; font-size: 10.5px;
+                 border-top: 0.5px dashed var(--border); color: var(--text);
+                 font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .yp-rm .ca b { font-weight: 600; }
+    .yp-rm .ca .n1 { display: block; font-size: 9.5px; color: var(--text3); }
+    .yp-rm .ca .n1.up { color: #0F7B3E; } .yp-rm .ca .n1.dn { color: #B02A37; }
     .yp-rm .a .up { color: #0F7B3E; } .yp-rm .a .dn { color: #B02A37; }
     /* ⚠ L'ALERTE EST UN POINT, PAS UNE PHRASE : douze tuiles n'ont pas la place
        d'une explication, et le survol la porte. */
@@ -830,8 +839,24 @@
         },
         rien: { court: '—', long: 'Rien à changer : les prix en place sont ceux que le moteur suggère.' }
       }
+      // Le CA de la tuile : vendu a ce jour, contre l'an dernier au meme delai
+      // (mois passe : mois entier contre mois entier). Sans N-1 exploitable,
+      // le montant seul — jamais « 0 € » d'an dernier.
+      const ca = m.ca && m.ca.a_date != null ? m.ca : null
+      const caN1 = ca && ca.n1 != null && !ca.non_calculable ? ca.n1 : null
+      const caV = caN1 != null && ca.variation != null ? Math.round(ca.variation * 100) : null
+      // ⚠ « MOIS ENTIER » N'EST PROMIS QUE SUR LES VENTES DATEES : une
+      // reservation importee sans date de vente fiable n'entre pas dans ce
+      // chiffre (releve en relecture). Quand le mois en porte, le survol le dit.
+      const caReserve = ca && ca.fiable === false ? ' — sur les ventes datées seulement, les réservations importées sans date de vente n’y sont pas' : ''
+      const caTitre = ca
+        ? (m.passe
+          ? `CA du mois ${euros(ca.a_date)}${caN1 != null ? ` contre ${euros(caN1)} l’an dernier${caV != null ? ` (${caV >= 0 ? '+' : ''}${caV} %)` : ''}` : ''}${caReserve}`
+          : `CA vendu à ce jour ${euros(ca.a_date)}${caN1 != null ? ` contre ${euros(caN1)} l’an dernier au même délai${caV != null ? ` (${caV >= 0 ? '+' : ''}${caV} %)` : ''}` : ''}${caReserve}`)
+        : null
       const titre = [
         `${nom} — ${m.nuits} nuit(s)`,
+        caTitre,
         agit ? `${m.a_monter} à monter, ${m.a_baisser} à baisser` : null,
         agit ? `${m.gain >= 0 ? '+' : ''}${m.gain} € si tout appliqué` : null,
         m.vendues ? `${m.vendues} vendue(s)` : null,
@@ -845,6 +870,8 @@
           ? `<span class="g ${m.gain > 0 ? 'hausse' : (m.gain < 0 ? 'baisse' : '')}">${m.gain >= 0 ? '+' : ''}${m.gain}&nbsp;€</span>
              <span class="a">${m.a_monter ? `<b class="up">↑${m.a_monter}</b>` : ''}${m.a_monter && m.a_baisser ? ' ' : ''}${m.a_baisser ? `<b class="dn">↓${m.a_baisser}</b>` : ''}</span>`
           : `<span class="pourquoi">${ech(POURQUOI[etat].court)}</span>`}
+        ${ca ? `<span class="ca"><b>${euros(ca.a_date)}</b>${caN1 != null
+          ? `<span class="n1 ${caV == null ? '' : (caV >= 0 ? 'up' : 'dn')}">vs ${euros(caN1)}</span>` : ''}</span>` : ''}
       </button>`
     }).join('')}</div>`
   }

@@ -364,6 +364,11 @@ module.exports = async (req, res) => {
       pressionParMois.set(cle, {
         ecart: c && c.variation != null ? c.variation : null,
         ca: c ? c.valeur : null, ca_n1: c ? c.n1 : null,
+        // Le CA vendu A CE JOUR sur le mois, meme sans N-1 comparable : la
+        // tuile du radar le montre (demande de Thierry, 22 septembre 2026).
+        ca_a_date: pk.a_date && pk.a_date.ca != null ? pk.a_date.ca : null,
+        ca_a_date_n1: pk.a_date_n1 && pk.a_date_n1.ca != null ? pk.a_date_n1.ca : null,
+        ca_non_calculable: c && c.non_calculable ? c.non_calculable : null,
         fiable: !degrade,
         motif_non_fiable: degrade || null,
         drapeaux: pk.drapeaux || []
@@ -644,10 +649,23 @@ module.exports = async (req, res) => {
       const incertains = couvertureVacances && couvertureVacances.date_fin
         ? joursM.filter(j => j > couvertureVacances.date_fin && j >= auj).length
         : 0
+      // ⚠ LE CA DE LA TUILE EST CELUI DU PIED DE MOIS, PAS UN SECOND CALCUL :
+      // `pickup` par mois, pivot aujourd'hui. Mois a venir ou en cours :
+      // vendu a ce jour CONTRE l'an dernier au MEME delai. Mois passe : le
+      // pivot N-1 depasse la fin du mois, donc c'est le mois entier contre le
+      // mois entier de l'an dernier — sans regle de plus, par construction.
+      const prM = pressionParMois.get(cle) || null
       return {
         periode: cle,
         affiche: cle === cleAffichee,
         passe: finM < auj,
+        ca: prM && prM.ca_a_date != null
+          ? { a_date: prM.ca_a_date, n1: prM.ca_a_date_n1,
+            variation: prM.ecart, non_calculable: prM.ca_non_calculable,
+            // Sous-compte par construction (dates de vente perdues a la
+            // migration, portefeuille reconstruit) : la tuile le DIT.
+            fiable: prM.fiable !== false }
+          : null,
         nuits: nuitsM.length,
         a_monter: monter.length,
         a_baisser: baisser.length,
