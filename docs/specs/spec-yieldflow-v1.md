@@ -474,7 +474,7 @@ d'autres, une indisponibilité, une nuit fermée à la main. C'est le bilan à
 l'écran (« dernier passage : 24 nuits ouvertes, 3 prix modifiés, 2 non
 calculables ») qui le dit.
 
-### ✅ Recette du 22 septembre 2026 — quatre retours de Thierry, livrés
+### ✅ Recette du 22 septembre 2026 — les retours de Thierry, livrés
 
 1. **La couleur du niveau, en bulle sur le badge** (Prix jour par jour) : une
    nuit à vendre porte la teinte de son niveau (Base → Exceptionnel, la
