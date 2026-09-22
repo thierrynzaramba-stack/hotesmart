@@ -26,6 +26,7 @@ const { calculerPrix } = require('../lib/moteur-prix')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
 const { preparerContexte, prixDeLaNuit } = require('../lib/yield/contexte-du-bien')
 const { fermeturesDuBien } = require('../lib/fermetures')
+const { prixHoteDuBien } = require('../lib/prix-hote')
 const { finDeFenetre } = require('../lib/pilote-tarifaire')
 
 const URL = process.env.SUPABASE_URL
@@ -83,12 +84,14 @@ if (process.env.CHANNEL_BASE_URL && process.env.CHANNEL_API_KEY) {
         const s = prixDeLaNuit(ctx, j, { ouverte: true }); if (s && s.prix != null) prixCalcule.set(j, Math.round(s.prix * 100))
       }
     } catch (e) { erreurCtx = e.message }
-    const d = nuitsAOuvrir({ bien, aujourdHui: auj, lignes: lignes || [], fermetures, prixCalcule })
+    const prixHote = await prixHoteDuBien(sb, bien.id, auj, fin)
+    const d = nuitsAOuvrir({ bien, aujourdHui: auj, lignes: lignes || [], fermetures, prixCalcule, prixHote })
     const { data: m } = await sb.from('cron_logs').select('last_run, errors').eq('id', PREFIXE_MARQUEUR + bien.id).maybeSingle()
     console.log(`${bien.name} — fenetre ${bien.pilote_fenetre_valeur} ${bien.pilote_fenetre_type}, jusqu'au ${fin}`)
     console.log(`  OUVERTURE : a ouvrir ${d.comptes.a_ouvrir} · deja ouvertes ${d.comptes.deja_ouvertes} · indisponibilites ${d.comptes.fermees_par_l_hote} · intention existante ${d.comptes.intention_existante} · sans prix ${d.comptes.sans_prix} · sous plancher ${d.comptes.sous_plancher}`)
     if (ctx) {
-      const p = calculerPrix({ aujourdHui: auj, fin, lignes: lignes || [], fermetures, prix: (date, o) => prixDeLaNuit(ctx, date, o) })
+      const p = calculerPrix({ aujourdHui: auj, fin, lignes: lignes || [], fermetures, prixHote, prix: (date, o) => prixDeLaNuit(ctx, date, o) })
+      if (prixHote.size) console.log(`  main de l'hote : ${prixHote.size} nuit(s) tenue(s), jamais recalculees`)
       console.log(`  PRIX (nuits ouvertes) : calculables ${p.comptes.calculees} (a changer ${p.comptes.changees}, inchanges ${p.comptes.inchangees}) · non calculables ${p.comptes.non_calculables} · sous plancher ${p.comptes.sous_plancher} · vendues ${p.comptes.vendues} · fermees ${p.comptes.fermees}`)
       if (Object.keys(p.motifs).length) console.log(`  motifs : ${Object.entries(p.motifs).map(([k, v]) => `${k} ×${v}`).join(', ')}`)
       if (p.changements.length) console.log(`  exemples : ${p.changements.slice(0, 5).map(c => `${c.date} ${c.avant_centimes == null ? '—' : (c.avant_centimes / 100) + ' €'} → ${c.prix_centimes / 100} €`).join(' · ')}`)

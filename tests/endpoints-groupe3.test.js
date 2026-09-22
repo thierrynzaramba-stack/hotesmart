@@ -1390,3 +1390,16 @@ test('retirer_prix_hote : le compte et le bien sont dans le WHERE, et un membre 
   await require('../api/calendar')(req({ method: 'POST', body: { action: 'retirer_prix_hote', property_id: BIEN_A.id, dates: ['2026-10-15'] } }), res)
   assert.strictEqual(res.code, 403); assert.deepStrictEqual(etat.ecritures, [])
 })
+
+test('LE TEST QUI COMPTE : la main de l hote n est PAS memorisee quand un refus precede le writer (nuit couverte par une fermeture)', async () => {
+  // Releve en review : posee avant le 409 « nuit couverte », la ligne prix_hote
+  // restait orpheline et le moteur sautait la nuit pour toujours.
+  const pilote = { ...BIEN_CHANNEX, pilote_tarifaire: 'yieldflow' }
+  const etat = preparer({ user: PROD, biens: [pilote], fermetures: [{ ...FERMETURE(), property_id: pilote.id }] })
+  const res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: pilote.id, prix_hote: true, segments: [{ date_from: '2026-10-15', date_to: '2026-10-15', rate: 130, stop_sell: false, avail: 1 }]
+  } }), res)
+  assert.strictEqual(res.code, 409); assert.strictEqual(res.body.code, 'nuit_fermee_par_fermeture')
+  assert.ok(!etat.ecritures.some(e => e.table === 'prix_hote'), 'aucune main orpheline')
+})

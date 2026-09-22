@@ -115,3 +115,17 @@ test('LE TEST QUI COMPTE : la pop-up Evenements — un calendrier en tableau, la
   assert.match(lire('apps/yield/evenements.html'), /location\.replace\('\/apps\/yield\/prix\?evenements=1'\)/)
   assert.match(lire('components/sidebar.js'), /href="\/apps\/yield\/prix\?evenements=1"/)
 })
+
+test('correctifs de review : prix REEL affiche et ecart marque, clavier sans propagation, evenements du MOIS, plusieurs evenements par jour, retour en calendrier vide la main', () => {
+  const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
+  assert.ok(ligne.includes('const ecart = n.prix_actuel != null && Math.round(n.prix_actuel * 100) !== Math.round(n.prix_hote * 100)'), 'l ecart memoire / calendrier se voit')
+  assert.ok(ligne.includes('euros(n.prix_actuel != null ? n.prix_actuel : n.prix_hote)'), 'le prix affiche est celui du calendrier')
+  const editer = PAGE.slice(PAGE.indexOf('function editerPrix (date, bouton)'), PAGE.indexOf('async function retirerPrix'))
+  assert.ok(editer.includes("input.addEventListener('keydown', e => { e.stopPropagation();"), 'Entree ne deplie pas la ligne')
+  const pop = PAGE.slice(PAGE.indexOf('async function lireEvenements'), PAGE.indexOf('function decalerJour (iso, n)'))
+  assert.ok(pop.includes("apiEv('GET', null, { debut: `${mois}-01`, fin })"), 'la fenetre du mois affiche, pas les 12 mois a venir')
+  assert.ok(pop.includes('if (!parJour.has(j)) parJour.set(j, [])'), 'plusieurs evenements par jour')
+  assert.ok(pop.includes('sv.incertain_apres'), 'l horizon du calendrier scolaire se dit')
+  assert.match(lire('api/yield-pilote.js'), /if \(voulu === 'calendrier' && actuel === 'yieldflow'\) await viderPrixHote/)
+  assert.match(lire('scripts/piloter-yieldflow.js'), /prixHote = await prixHoteDuBien\(sb, bien\.id, auj, fin\)/, 'le dry-run voit la main')
+})

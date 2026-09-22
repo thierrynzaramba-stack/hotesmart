@@ -346,8 +346,14 @@
     .yp-cal td.ev.ev-g { border-left-color: var(--ev); border-radius: 6px 0 0 6px; }
     .yp-cal td.ev.ev-d { border-right-color: var(--ev); border-radius: 0 6px 6px 0; }
     .yp-cal td.ev.ev-g.ev-d { border-radius: 6px; }
-    .yp-cal td .ev-nom { position: absolute; left: 4px; bottom: 2px; right: 2px; font-size: 9px; font-weight: 600;
-                         color: var(--ev); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .yp-cal td .ev-nom { position: absolute; left: 4px; top: 3px; right: 22px; font-size: 9px; font-weight: 600;
+                         color: var(--ev); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+    /* Une barre par evenement au bas de la case : les chevauchements se voient,
+       et chaque barre court d'un bout a l'autre de son evenement. */
+    .yp-cal td .ev-barres { position: absolute; left: -2px; right: -2px; bottom: 0; display: flex; flex-direction: column; gap: 1px; }
+    .yp-cal td .ev-barre { display: block; height: 3px; }
+    .yp-cal td .ev-barre.g { margin-left: 4px; border-radius: 2px 0 0 2px; }
+    .yp-cal td .ev-barre.d { margin-right: 4px; border-radius: 0 2px 2px 0; }
     .yp-ev-liste { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
     .yp-ev-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px;
                padding: 6px 8px; border-radius: var(--radius); background: var(--bg2); border-left: 4px solid var(--ev); }
@@ -1120,7 +1126,12 @@
       // ⚠ LA MAIN DE L'HOTE : son prix est le prix retenu, le conseil de
       // YieldFlow reste a cote, et un geste le retire (le moteur reprend la
       // nuit a son passage suivant).
-      prix = `<span class="yp-prix">${euros(n.prix_hote)}</span><span class="yp-hote" title="Ce prix est le vôtre : YieldFlow ne le modifie pas. Il tient jusqu’à la nuit, ou jusqu’à ce que vous le retiriez.">votre prix</span>
+      // ⚠ LE PRIX AFFICHE EST CELUI DU CALENDRIER (prix_actuel), pas la memoire de
+      // la main : si les deux divergent (poussee refusee, course avec le moteur),
+      // l'ecart se voit — releve en review.
+      const ecart = n.prix_actuel != null && Math.round(n.prix_actuel * 100) !== Math.round(n.prix_hote * 100)
+      prix = `<span class="yp-prix">${euros(n.prix_actuel != null ? n.prix_actuel : n.prix_hote)}</span><span class="yp-hote" title="Ce prix est le vôtre : YieldFlow ne le modifie pas. Il tient jusqu’à la nuit, ou jusqu’à ce que vous le retiriez.">votre prix</span>
+        ${ecart ? `<span class="yp-rien" title="Vous aviez fixé ${euros(n.prix_hote)}, mais le calendrier affiche ${euros(n.prix_actuel)} : la dernière écriture n’a pas abouti. Ressaisissez votre prix, ou retirez-le.">⚠ fixé à ${euros(n.prix_hote)}</span>` : ''}
         ${n.suggestion != null ? `<span class="yp-hote-conseil" title="Ce que YieldFlow proposerait pour cette nuit.">YieldFlow : ${euros(n.suggestion)}</span>` : ''}
         <button class="yp-editer" data-editer="${n.date}" title="Modifier votre prix">✎</button>
         <button class="yp-hote-x" data-retirer="${n.date}" title="Retirer votre prix : YieldFlow reprend cette nuit à son prochain passage.">×</button>`
@@ -1359,7 +1370,7 @@
     }
     cellule.querySelector('[data-valider]').addEventListener('click', valider)
     cellule.querySelector('[data-annuler]').addEventListener('click', annuler)
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); valider() } else if (e.key === 'Escape') annuler() })
+    input.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); valider() } else if (e.key === 'Escape') annuler() })
   }
   async function retirerPrix (date) {
     if (!window.confirm(`Retirer votre prix du ${dateFr(date)} ? YieldFlow reprendra cette nuit à son prochain passage.`)) return
@@ -1384,20 +1395,28 @@
     })
     return { ok: r.ok, data: await r.json() }
   }
+  // ⚠ LES EVENEMENTS DU MOIS AFFICHE — releve en review : sans debut/fin,
+  // l'endpoint sert [aujourd'hui, +12 mois], donc ni le passe du mois courant
+  // ni les mois hors de cette fenetre. On lit la fenetre de la grille.
+  let evenementsMois = null
+  async function lireEvenements () {
+    const [a, m] = mois.split('-').map(Number)
+    const fin = `${mois}-${String(new Date(Date.UTC(a, m, 0)).getUTCDate()).padStart(2, '0')}`
+    const r = await apiEv('GET', null, { debut: `${mois}-01`, fin })
+    if (!r.ok) throw new Error(refus(r.data && r.data.error) || 'Lecture impossible.')
+    evenements = r.data; evenementsMois = mois
+  }
   async function ouvrirPopup () {
     popupOuverte = true
     el('yp-ov-ev').classList.add('visible')
     el('yp-pop-ev').innerHTML = '<p class="yp-attente">Lecture des événements…</p>'
-    try {
-      const r = await apiEv('GET')
-      if (!r.ok) throw new Error(refus(r.data && r.data.error) || 'Lecture impossible.')
-      evenements = r.data
-    } catch (e) { el('yp-pop-ev').innerHTML = `<p class="yp-rien">${ech(e.message)}</p>`; return }
+    try { await lireEvenements() } catch (e) { el('yp-pop-ev').innerHTML = `<p class="yp-rien">${ech(e.message)}</p>`; return }
     rendrePopup()
   }
   function fermerPopup () { popupOuverte = false; el('yp-ov-ev').classList.remove('visible') }
-  function rendrePopup (message = '') {
+  async function rendrePopup (message = '') {
     if (!popupOuverte || !donnees) return
+    if (evenementsMois !== mois) { try { await lireEvenements() } catch (e) { el('yp-pop-ev').innerHTML = `<p class="yp-rien">${ech(e.message)}</p>`; return } }
     const d = donnees, ev = evenements || {}
     const [a, m] = mois.split('-').map(Number)
     const premier = new Date(Date.UTC(a, m - 1, 1)), nbJours = new Date(Date.UTC(a, m, 0)).getUTCDate()
@@ -1407,26 +1426,37 @@
     // Les evenements qui touchent le mois, dans l'ordre du calendrier ; la
     // semaine et le week-end n'y sont pas : ce sont des couches, pas des periodes.
     const entrees = (ev.calendrier || []).filter(e => e.debut <= finMois && e.fin >= debutMois)
+    // ⚠ PLUSIEURS EVENEMENTS PAR JOUR (releve en review : un Salon dans les
+    // vacances de Toussaint ecrasait la Toussaint). Chaque jour porte la liste
+    // de ses evenements ; le CONTOUR est celui du plus long (le cadre), et une
+    // barre par evenement, au bas de la case, montre les autres.
     const parJour = new Map()
     entrees.forEach((e, i) => {
-      for (let j = e.debut < debutMois ? debutMois : e.debut; j <= (e.fin > finMois ? finMois : e.fin); j = decalerJour(j, 1)) parJour.set(j, i)
+      for (let j = e.debut < debutMois ? debutMois : e.debut; j <= (e.fin > finMois ? finMois : e.fin); j = decalerJour(j, 1)) {
+        if (!parJour.has(j)) parJour.set(j, [])
+        parJour.get(j).push(i)
+      }
     })
+    const duree = e => Math.round((Date.parse(e.fin) - Date.parse(e.debut)) / 86400000)
     let cases = ''
     for (let k = 0; k < decalage; k++) cases += '<td class="vide"></td>'
     for (let jour = 1; jour <= nbJours; jour++) {
       const iso = `${mois}-${String(jour).padStart(2, '0')}`
       const n = parDate.get(iso)
       const niveau = n && n.suggestion != null && n.ouverte === true && !n.vendue ? (CLASSES[n.niveau] || '') : ''
-      const i = parJour.get(iso)
-      const e = i != null ? entrees[i] : null
+      const ids = parJour.get(iso) || []
+      const cadre = ids.length ? entrees[ids.slice().sort((x, y) => duree(entrees[y]) - duree(entrees[x]))[0]] : null
+      const e = cadre
       const premierDuEv = e && (iso === e.debut || iso === debutMois)
       const dernierDuEv = e && (iso === e.fin || iso === finMois)
-      const prix = n ? (n.prix_hote != null ? n.prix_hote : (n.suggestion != null ? n.suggestion : n.prix_actuel)) : null
-      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', e ? e.nom : ''].filter(Boolean).join(' · '))}">
+      const prix = n ? (n.prix_actuel != null ? n.prix_actuel : n.suggestion) : null
+      const barres = ids.map(k => { const x = entrees[k]; return `<i class="ev-barre ${iso === x.debut ? 'g' : ''} ${iso === x.fin ? 'd' : ''}" style="background:${EV_COULEUR[x.origine] || '#555'}" title="${ech(x.nom)}"></i>` }).join('')
+      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
         <span class="j">${jour}</span>
         ${prix != null ? `<span class="p">${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
         ${n && n.etiquette ? `<span class="n">${ech(n.etiquette)}</span>` : ''}
         ${e && (premierDuEv || (premier.getUTCDay() + 6 + jour - 1) % 7 === 0) ? `<span class="ev-nom">${ech(e.nom)}</span>` : ''}
+        ${barres ? `<span class="ev-barres">${barres}</span>` : ''}
       </td>`
       if ((decalage + jour) % 7 === 0 && jour < nbJours) cases += '</tr><tr>'
     }
@@ -1434,10 +1464,15 @@
     if (reste) for (let k = reste; k < 7; k++) cases += '<td class="vide"></td>'
     const lecture = ev.droits_ecriture === false
     const crans = v => v == null ? '—' : (v === 0 ? 'sans effet' : `${v > 0 ? '+' : ''}${v} cran${Math.abs(v) > 1 ? 's' : ''}`)
+    const sv = ev.source_vacances || {}
+    const horizon = sv.incertain_apres && sv.incertain_apres <= finMois
+      ? `<div class="yp-ev-l" style="--ev:#B8860B"><strong>Calendrier scolaire publié jusqu’au ${dateFr(sv.incertain_apres)}.</strong><span class="o">Au-delà, les vacances ne sont pas encore connues : les nuits sont comptées ordinaires tant que le ministère n’a pas publié. Les fériés, eux, restent calculés.</span></div>`
+      : ''
     const liste = entrees.map((e, i) => `<div class="yp-ev-l" style="--ev:${EV_COULEUR[e.origine] || '#555'}">
         <strong>${ech(e.nom)}</strong>
         <span>${dateFr(e.debut)}${e.fin !== e.debut ? ` → ${dateFr(e.fin)}` : ''}</span>
         <span class="o">${ech(EV_NOM[e.origine] || e.origine)}</span>
+        ${e.ferie_voisin ? `<span class="o" title="Ces nuits de week-end touchent un jour férié, directement ou par un pont.">éclairé par ${ech(e.ferie_voisin)}</span>` : ''}
         ${lecture ? `<span class="o">${ech(crans(e.crans))}</span>`
           : `<select data-ev-reglage="${ech(e.cle)}" title="De combien de crans cette période pousse vos prix. Semaine et week-end montent du même cran.">
               <option value="">${ech(e.crans_mesures != null ? `laisser mesurer (${crans(e.crans_mesures)})` : 'à mesurer')}</option>
@@ -1470,7 +1505,7 @@
       </div>
       <table class="yp-cal"><thead><tr>${['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].map(j => `<th>${j}</th>`).join('')}</tr></thead>
         <tbody><tr>${cases}</tr></tbody></table>
-      <div class="yp-ev-liste">${reconductions}${liste || '<div class="yp-ev-l" style="--ev:#ccc">Aucun événement ce mois-ci.</div>'}</div>
+      <div class="yp-ev-liste">${horizon}${reconductions}${liste || '<div class="yp-ev-l" style="--ev:#ccc">Aucun événement ce mois-ci.</div>'}</div>
       ${formulaire}`
     el('ev-fermer').addEventListener('click', fermerPopup)
     el('ev-prec').addEventListener('click', () => { mois = decalerMois(mois, -1); charger() })

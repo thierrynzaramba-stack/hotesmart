@@ -681,9 +681,6 @@ module.exports = async function handler(req, res) {
           const cents = Math.round(Number(seg.rate) * 100)
           for (const d of expandDays(seg.date_from, seg.date_to, seg.days)) nuitsPrixHote.push({ date: d, cents })
         }
-        const pose = await poserPrixHote(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote })
-        if (!pose.ok) return res.status(pose.raison === 'nuit_invalide' ? 400 : 503).json({ error: pose.message, code: pose.raison })
-        console.log(`[calendar] prix de l'hote sur ${nuitsPrixHote.length} nuit(s) d'un bien pilote`)
       }
     }
 
@@ -749,11 +746,24 @@ module.exports = async function handler(req, res) {
     // lib/calendrier-writer.js, et le canal interne du moteur appelle LA MEME
     // fonction. Cette porte n'a fait que ce qui lui revient : les droits, le
     // tri des segments, la garde du pilote tarifaire, la configuration du bien.
-    const r = await ecrireCalendrier({
-      supabase, bien, compte, dateSegments, origine: 'host', appel: channelCall
-    })
-    // Le writer refuse (plancher, relecture) : la main posee sans prix ecrit
-    // ferait sauter ces nuits au moteur pour toujours — on la retire.
+    // ⚠ LA MAIN SE POSE ICI, APRES TOUS LES REFUS (releve en review : posee
+    // plus haut, un 409 « nuit couverte par une fermeture » la laissait
+    // orpheline, et le moteur sautait la nuit pour toujours sans qu'un prix de
+    // l'hote ait jamais ete ecrit). Et si le writer refuse ou leve, on la retire.
+    if (nuitsPrixHote.length) {
+      const pose = await poserPrixHote(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote })
+      if (!pose.ok) return res.status(pose.raison === 'nuit_invalide' ? 400 : 503).json({ error: pose.message, code: pose.raison })
+      console.log(`[calendar] prix de l'hote sur ${nuitsPrixHote.length} nuit(s) d'un bien pilote`)
+    }
+    let r
+    try {
+      r = await ecrireCalendrier({
+        supabase, bien, compte, dateSegments, origine: 'host', appel: channelCall
+      })
+    } catch (e) {
+      if (nuitsPrixHote.length) await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: nuitsPrixHote.map(n => n.date) })
+      throw e
+    }
     if (r.refus && nuitsPrixHote.length) {
       await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: nuitsPrixHote.map(n => n.date) })
     }

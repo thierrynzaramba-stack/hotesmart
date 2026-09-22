@@ -504,7 +504,10 @@ calculables ») qui le dit.
    (semaine, week-end) restent un seul événement ; **la semaine et le week-end
    ne sont jamais des événements** (ce sont des couches, pas des segments).
    « Ajouter un événement », réglage des crans, couper, supprimer, reconduire :
-   tout ce que l'ancienne page savait faire. L'ancienne URL redirige.
+   tout ce que l'ancienne page savait faire. L'ancienne URL redirige. Deux
+   événements qui se chevauchent : le contour est celui du plus long, et une
+   barre par événement au bas de la case montre les autres ; l'horizon du
+   calendrier scolaire se dit quand le mois le dépasse.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 

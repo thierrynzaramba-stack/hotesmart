@@ -43,6 +43,7 @@ const {
   MODES, piloteDuBien, peutPasserEnYieldflow, fenetreDuBien, validerFenetre
 } = require('../lib/pilote-tarifaire')
 const { effacerMarqueur, lireMarqueur } = require('../lib/ouverture-marqueur')
+const { viderPrixHote } = require('../lib/prix-hote')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -194,6 +195,9 @@ module.exports = async (req, res) => {
     const { error: eM } = await effacerMarqueur(supabase, bien.id)
     if (eM) console.error('[yield-pilote] marqueur non efface', bien.id, eM.message)
   }
+  // Retour en calendrier : la main de l'hote n'a plus d'objet — ses prix vivent
+  // dans le calendrier, qu'il tient lui-meme.
+  if (voulu === 'calendrier' && actuel === 'yieldflow') await viderPrixHote(supabase, { userId: compte, propertyId: bien.id })
   console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}${fenetre ? ` (fenetre ${fenetre.valeur} ${fenetre.type})` : ''}`)
   return res.status(200).json({ bien: bien.id, pilote: voulu, fenetre: voulu === 'yieldflow' ? (fenetre || fenetreDuBien(bien)) : null, change: true,
     ouverture: voulu === 'yieldflow' ? 'Les dates s\'ouvriront automatiquement dans les 5 minutes, puis chaque jour.' : null })
