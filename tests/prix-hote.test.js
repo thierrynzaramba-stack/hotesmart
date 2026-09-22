@@ -195,3 +195,12 @@ test('l ecran s appelle « Prédiction de prix », l etat est un bouton activé 
   const dem = PAGE.slice(PAGE.indexOf('function demanderFenetre'), PAGE.indexOf('async function basculerPilote'))
   assert.ok(dem.includes("const bloc = el('yp-confirm')"), 'l activation aussi')
 })
+
+test('le bloc des compteurs du mois a disparu ; seule la tendance du mois reste, quand elle agit', () => {
+  assert.ok(!PAGE.includes('function action (d)'), 'plus de fonction action')
+  assert.ok(!PAGE.includes("'si tout appliqué',") && !PAGE.includes('Ouvrez-les au calendrier'), 'ni ses libelles')
+  assert.ok(PAGE.includes('return radar(d) + tendanceDuMois(d) + grilleDuBien(d)'), 'la vue enchaine radar puis tendance')
+  const t = PAGE.slice(PAGE.indexOf('function tendanceDuMois (d)'), PAGE.indexOf('function tableau (d)'))
+  assert.ok(t.includes("if (!p || p.ecart == null) return ''") && t.includes("if (!exemple) return ''"), 'la tendance se tait quand elle n agit pas')
+  assert.ok(!/\.yp-chiffres \{/.test(PAGE), 'le CSS des compteurs est parti avec')
+})

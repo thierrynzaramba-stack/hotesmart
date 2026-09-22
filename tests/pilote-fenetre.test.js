@@ -232,10 +232,11 @@ test('LE TEST QUI COMPTE : l ecran dit « pas encore ouverte », jamais « ferme
   // Le libelle porte la DATE.
   assert.ok(/s’ouvrira le \$\{q\}/.test(src), 'le libelle dit quand')
   assert.ok(/pas encore ouverte/.test(src))
-  // Le resume compte a part, et « non renseignee » exclut les hors fenetre.
-  assert.ok(/const attente = aVenir\.filter\(n => n\.hors_fenetre && !n\.vendue\)/.test(src))
-  assert.ok(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/.test(src),
-    'une nuit hors fenetre n est pas comptee « non renseignee »')
+  // Le resume du mois (compteurs) a ete supprime le 22 septembre 2026 : le
+  // compte a part vit dans l'API (radar), teste plus bas. La page ne recompte
+  // plus rien.
+  assert.ok(!/const attente = aVenir\.filter\(n => n\.hors_fenetre && !n\.vendue\)/.test(src),
+    'aucun compte recopie dans la page')
   // La legende l'explique une fois pour le mois — et SEULEMENT si l'etat peut
   // apparaitre : un hote en mode calendrier n'a pas de fenetre a lire.
   assert.ok(/\$\{a \? b\('#B5C9DA', 'pas encore ouverte'/.test(src), 'legende conditionnelle')
@@ -276,8 +277,12 @@ test('LE TEST QUI COMPTE : le RADAR compte « pas encore ouvertes » a part, lui
   assert.equal((api.match(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/g) || []).length, 1,
     'le resume du radar exclut les hors fenetre')
   const page = lire('apps/yield/prix.html')
-  assert.equal((page.match(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/g) || []).length, 1,
-    'le resume du mois affiche aussi')
+  // Le resume du mois affiche (compteurs « a monter / fermees / non
+  // renseignees ») a ete supprime par Thierry le 22 septembre 2026 : seul le
+  // radar compte encore, et il est calcule par l'API. Aucune recopie du compte
+  // ne doit reapparaitre dans la page.
+  assert.equal((page.match(/n\.ouverte == null && !n\.vendue && !n\.hors_fenetre/g) || []).length, 0,
+    'la page ne recompte plus : le radar est la seule verite')
   // La tuile a un etat dedie, decide AVANT « inconnu ».
   const iAttente = page.indexOf("a.pas_encore_ouvertes > 0 ? 'attente'")
   const iInconnu = page.indexOf("a.non_renseignees > 0 ? 'inconnu'")
