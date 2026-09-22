@@ -476,10 +476,11 @@ calculables ») qui le dit.
 
 ### ✅ Recette du 22 septembre 2026 — quatre retours de Thierry, livrés
 
-1. **La couleur du niveau sur toute la ligne** (Prix jour par jour) : une nuit
-   à vendre porte la teinte de son niveau (Base → Exceptionnel, les cinq
-   teintes de la grille) sur la ligne entière ; vendue, fermée, passée gardent
-   leur état.
+1. **La couleur du niveau, en bulle sur le badge** (Prix jour par jour) : une
+   nuit à vendre porte la teinte de son niveau (Base → Exceptionnel, la
+   pastille de la grille) sur le mot du niveau. Le premier essai colorait toute
+   la ligne ; second retour de Thierry le même jour : « pas agréable ». La
+   ligne garde la couleur de son état (vendue, fermée, passée).
 2. **La main de l'hôte sur un bien piloté — arbitrage A bis.** Sur la ligne
    d'une nuit ouverte, l'hôte modifie le prix ; le conseil YieldFlow reste
    affiché à côté de la saisie. Son prix devient le prix retenu, écrit par le
