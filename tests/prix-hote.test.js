@@ -183,4 +183,8 @@ test('l ecran s appelle « Prédiction de prix », l etat est un bouton activé 
   assert.ok(PAGE.includes('Désactiver la prédiction de prix ?') && PAGE.includes("el('yp-des-valider').addEventListener('click', () => basculerPilote('calendrier'))"), 'desactiver : confirme aussi')
   assert.ok(PAGE.includes("etat.disabled = bloque"), 'un logement qui ne peut pas activer a un bouton inerte, et la raison au survol')
   assert.ok(lire('components/sidebar.js').includes('Prédiction de prix'), 'la sidebar suit')
+  // Le refus du serveur se lit dans le panneau, qui reste en place (relecture :
+  // le bloc est cache en mode calendrier, une raison ajoutee apres etait invisible).
+  assert.ok(PAGE.includes("const zone = el('yp-act-etat') || el('yp-des-etat')") && PAGE.includes('zone.textContent = message'), 'le refus s affiche la ou l hote regarde')
+  assert.ok(PAGE.includes('<span class="etat" id="yp-des-etat"></span>'), 'la desactivation a sa zone de message')
 })

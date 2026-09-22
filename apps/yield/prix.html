@@ -32,7 +32,6 @@
        pas ? Non. */
     .yp-pilote { border: 0.5px solid var(--border); border-radius: var(--radius);
                  padding: 10px 12px; margin-bottom: 14px; background: var(--bg); }
-    .yp-pilote h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
     /* L'ETAT DU PILOTE EST UN BOUTON A COTE DU LOGEMENT : « activé » ou
        « désactivé » (demande de Thierry, 22 septembre 2026, a la place des deux
        cartes de choix). Le clic ouvre une confirmation, jamais la bascule. */
@@ -46,7 +45,7 @@
     .yp-etat.on:hover { background: #DDF0E3; }
     .yp-etat:disabled { cursor: not-allowed; opacity: .7; }
     .yp-pilote .raison { font-size: 12px; color: #B02A37; margin: 8px 0 0; }
-    .yp-pilote .avertir { font-size: 13px; color: var(--text); margin: 0 0 8px; }
+    .yp-pilote .avertir { font-size: 13px; color: var(--text); margin: 0; flex-basis: 100%; }
     .yp-pilote .avertir b { color: #B02A37; }
     .yp-pilote .dit { font-size: 12px; color: var(--text3); margin: 8px 0 0; }
     /* LA FENETRE D'OUVERTURE (lot 4.6.3) : jusqu'ou YieldFlow ouvre les dates. */
@@ -571,6 +570,9 @@
     const bien = el('yp-bien').value
     const bloc = el('yp-pilote')
     const etat = el('yp-etat')
+    // Pendant la lecture, le bouton ne repond pas : il porte encore l'etat du
+    // bien precedent (releve en relecture).
+    etat.disabled = true
     if (!bien) { bloc.hidden = true; etat.hidden = true; return }
     let d
     try {
@@ -587,6 +589,7 @@
       // il en est, et un clic ecrirait par-dessus une valeur jamais lue.
       etat.hidden = false; etat.disabled = true; etat.className = 'yp-etat'
       etat.textContent = 'réglage illisible'
+      etat.removeAttribute('aria-pressed'); etat.onclick = null
       etat.title = 'Réglage illisible pour le moment. Rechargez la page.'
       bloc.hidden = true
       return
@@ -635,6 +638,7 @@
       + 'Les prix en place restent au calendrier ; vous les saisissez à nouveau vous-même.</p>'
       + '<button type="button" id="yp-des-valider">Désactiver</button>'
       + '<button type="button" class="secondaire" id="yp-des-annuler">Annuler</button>'
+      + '<span class="etat" id="yp-des-etat"></span>'
       + '</div>'
     el('yp-des-annuler').addEventListener('click', () => chargerPilote())
     el('yp-des-valider').addEventListener('click', () => basculerPilote('calendrier'))
@@ -730,10 +734,24 @@
       // ⚠ LE REFUS DU SERVEUR S'AFFICHE TEL QUEL. C'est lui qui porte la regle
       // et le message en francais ; le reecrire ici ferait deux verites.
       if (!r.ok) {
+        // ⚠ LE REFUS SE LIT DANS LE PANNEAU DE CONFIRMATION, QUI RESTE EN PLACE
+        // — releve en relecture : en mode calendrier, `chargerPilote` cache le
+        // bloc, donc une raison ajoutee apres etait invisible et l'hote ne
+        // savait jamais pourquoi l'activation avait ete refusee.
+        const zone = el('yp-act-etat') || el('yp-des-etat')
+        const message = d && d.error ? d.error : 'Changement refusé.'
+        if (zone) {
+          zone.textContent = message
+          zone.classList.add('raison')
+          for (const i of bloc.querySelectorAll('input, button')) i.disabled = false
+          el('yp-etat').disabled = false
+          return
+        }
         await chargerPilote()
+        bloc.hidden = false
         const p = document.createElement('p')
         p.className = 'raison'
-        p.textContent = d && d.error ? d.error : 'Changement refusé.'
+        p.textContent = message
         bloc.appendChild(p)
         return
       }
