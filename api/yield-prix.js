@@ -19,7 +19,8 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { peutEcrire } = require('../lib/permissions')
 const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
-const { dateOuverture } = require('../lib/pilote-tarifaire')
+const { dateOuverture, piloteDuBien } = require('../lib/pilote-tarifaire')
+const { prixHoteDuBien } = require('../lib/prix-hote')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
 const { exceptionsDuBien, joursExclus } = require('../lib/yield/exceptions')
 const { evenementsDuBien } = require('../lib/yield/evenements')
@@ -318,6 +319,11 @@ module.exports = async (req, res) => {
     const motifOuverture = ouvertureConnue ? null
       : (capaciteRadar ? capaciteRadar.raison : 'capacite_non_calculable')
     const parDate = new Map(lignesCal.map(l => [l.date, l]))
+    // La main de l'hote (arbitrage A bis) : « votre prix » a cote de ce que
+    // YieldFlow proposait. Table absente = aucune main ; panne = on le dit.
+    let prixHote = new Map()
+    try { prixHote = await prixHoteDuBien(supabase, bien.id, debutCal, finCal) }
+    catch (e) { console.error('[yield-prix] prix_hote illisibles', e.message) }
 
     // ⚠ UNE NUIT VENDUE N'A PLUS DE PRIX A CHANGER. Le montrer comme
     // « tarifiable » ferait perdre du temps a l'hote sur la seule ligne ou il
@@ -464,6 +470,7 @@ module.exports = async (req, res) => {
         // calendrier vide sur huit mois se lit comme une panne. La regle et
         // la date viennent de lib/pilote-tarifaire.js, en un seul endroit.
         hors_fenetre: horsFenetre.has(date),
+        prix_hote: prixHote.has(date) ? prixHote.get(date) / 100 : null,
         ouverture_prevue: horsFenetre.has(date) ? dateOuverture(bien, date, auj) : null,
         // ⚠ LE PRIX DE BASE N'EST PAS « LE PRIX AFFICHE » — releve en review.
         // Sans ligne au calendrier, `ouverte` vaut `null` (« ouverture
@@ -756,6 +763,8 @@ module.exports = async (req, res) => {
         recurrence: e.recurrence || null, parent_segment: e.parent_segment || null
         })),
       bien: {
+        pilote: piloteDuBien(bien),
+        
         id: bien.id, name: bien.name, provider: bien.provider,
         capacity: bien.capacity ?? null, zone_scolaire: bien.zone_scolaire ?? null,
         prix_minimum: bien.prix_minimum ?? null, base_price: bien.base_price ?? null

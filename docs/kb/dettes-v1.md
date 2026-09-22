@@ -28,6 +28,8 @@
 
 | 17 | **Deux assemblées de la matière du prix** : `api/yield-prix.js` (écran, lot 4.4) et `lib/yield/contexte-du-bien.js` (moteur, lot 4.6.4), copie fidèle aux mêmes constantes. | Le jour où l'une change une borne et pas l'autre, l'écran suggère un prix et le moteur en pose un autre. | Premier geste du lot suivant : l'endpoint appelle `preparerContexte`. |
 
+| 18 | **Migration `2026-09-22-prix-hote.sql`** : staging avant la recette, prod avant le merge (avec `2026-09-20-pilote-fenetre.sql`). | Sans elle, la main de l'hôte répond « Enregistrement impossible » ; le moteur, lui, ne casse pas (table absente = aucune main). | Staging maintenant ; prod avant le merge du 4.6. |
+
 ## Règle du registre
 
 Une dette se **note** au moment où on décide de ne pas la solder, pas au moment

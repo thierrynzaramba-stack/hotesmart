@@ -75,7 +75,9 @@ function genererSejours () {
   if (error) { console.error('ECHEC lecture bien :', error.message); process.exit(1) }
   if (!bien) { console.error('Bien introuvable sur', projet); process.exit(1) }
   console.log(`Projet ${projet} — ${bien.name} (${bien.provider} ${bien.provider_property_id})`)
-  const { data: deja } = await sb.from('bookings_snapshot').select('booking_id').eq('user_id', bien.user_id).eq('property_id', bien.provider_property_id).like('booking_id', 'RECETTE-%')
+  // ⚠ LECTURE BORNEE (regle du depot, tests/bookings-snapshot-troncature) : les
+  // sejours de recette sont au plus une centaine, la page de 1000 les couvre.
+  const { data: deja } = await sb.from('bookings_snapshot').select('booking_id').eq('user_id', bien.user_id).eq('property_id', bien.provider_property_id).like('booking_id', 'RECETTE-%').range(0, 999)
   console.log(`${(deja || []).length} sejour(s) de recette deja en place`)
   if (PURGE) {
     if (!(deja || []).length) { console.log('Rien a purger.'); return }

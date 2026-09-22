@@ -21,7 +21,7 @@ const COMPTE = 'a1a1a1a1-0000-4000-8000-000000000001'
 const bien = (o = {}) => ({ id: ID, user_id: COMPTE, name: 'Loft', provider: 'channex', provider_property_id: 'STG-1', pilote_tarifaire: 'yieldflow',
   pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 3, base_price: 90, inventory_units: 1, ...o })
 
-function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [] } = {}) {
+function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [], prixHote = null } = {}) {
   const journal = []
   return { journal, marqueurs, lignes,
     from (table) {
@@ -31,6 +31,7 @@ function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [] 
       q.gte = (c, v) => { q.g = v; return q }; q.lte = (c, v) => { q.l = v; return q }
       q.upsert = (row) => { q.op = 'upsert'; q.ligne = row; return q }
       q.insert = (row) => { q.op = 'insert'; q.ligne = row; return q }
+      q.delete = () => { q.op = 'delete'; return q }
       q.maybeSingle = () => { q.un = true; return q }
       const exec = () => {
         journal.push({ table, op: q.op, f: { ...q.f }, ligne: q.ligne })
@@ -38,6 +39,7 @@ function fausseBase ({ lignes = [], fermetures = [], marqueurs = {}, biens = [] 
         if (table === 'calendar_inventory') return { data: lignes.filter(x => x.date >= q.g && x.date <= q.l), error: null }
         if (table === 'properties') return { data: biens, error: null }
         if (table === 'bookings_snapshot') return { data: [], error: null }
+        if (table === 'prix_hote') return { data: q.op === 'select' ? (prixHote || []) : null, error: null }
         if (table === 'cron_logs') {
           if (q.op === 'upsert') { marqueurs[q.ligne.id] = { last_run: q.ligne.last_run, errors: q.ligne.errors }; return { data: null, error: null } }
           return { data: marqueurs[q.f.id] || null, error: null }
@@ -161,4 +163,17 @@ test('un bien par tick, une fois par jour ; un echec se retente au tick suivant'
   t += 300000
   const b3 = await piloterLesBiens(sb, deps())
   assert.equal(b3.sautes, 2); assert.equal(b3.traites, 0)
+})
+
+test('LE TEST QUI COMPTE : la main de l hote est sautee par les DEUX moteurs — a l ouverture elle donne son prix, a l entretien elle n est pas recalculee', async () => {
+  const lignes = [{ date: '2026-10-02', stop_sell: false, avail: 1, rate: 200 }]   // la nuit de l hote, a 200
+  const sb = fausseBase({ biens: [bien()], lignes, prixHote: [{ stay_date: '2026-10-02', rate_cents: 20000 }, { stay_date: '2026-10-03', rate_cents: 15000 }] })
+  const canal = canalQuiEcrit(sb)
+  const b = await piloterLesBiens(sb, { aujourdHui: AUJ, maintenant: () => Date.parse('2026-10-01T10:00:00Z'), demander: canal, preparer: preparerFactice(), prix: regleDe({}), alerter: async () => {}, sonderRetards: false })
+  assert.equal(b.ouvertes, 3, '01, 03 et 04 s ouvrent (02 etait deja ouverte)')
+  const ouv = canal.appels[0].nuits.find(n => n.date === '2026-10-03')
+  assert.equal(ouv.prix_centimes, 15000, 'le 03 s ouvre AU PRIX DE L HOTE, pas a celui de la regle (12000)')
+  const demandesPrix = canal.appels.filter(d => d.nuits.every(n => !n.ouvrir))
+  assert.ok(!demandesPrix.some(d => d.nuits.some(n => n.date === '2026-10-02')), 'le 02 a 200 EUR n est jamais redemande a 120')
+  assert.equal(b.prix_changes, 0)
 })

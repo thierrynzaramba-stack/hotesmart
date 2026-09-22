@@ -210,8 +210,12 @@ export const api = {
   calendar: {
     load: (propertyIds, start, end) =>
       apiCall(`calendar?property_ids=${encodeURIComponent(propertyIds.join(','))}&start=${start}&end=${end}`, 'GET'),
-    save: (propertyId, segments) =>
-      apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments }),
+    // `extra` : { prix_hote: true } — la main de l'hote sur un bien pilote par
+    // YieldFlow (arbitrage A bis), envoyee par la page « Prix jour par jour ».
+    save: (propertyId, segments, extra = {}) =>
+      apiCall('calendar', 'POST', { action: 'save', property_id: propertyId, segments, ...extra }),
+    retirerPrixHote: (propertyId, dates) =>
+      apiCall('calendar', 'POST', { action: 'retirer_prix_hote', property_id: propertyId, dates }),
     fullsync: (propertyId) =>
       apiCall('calendar', 'POST', { action: 'fullsync', property_id: propertyId }),
     // Les fermetures de l'hote (lot 4.6.2) : l'objet (debut, fin, raison) qui

@@ -297,6 +297,75 @@
                     color: var(--text2); font-size: 13px; }
     .yp-etat-page.erreur { border-color: #F5C2C7; background: #FFF5F5; color: #842029; }
 
+    /* ─── LA MAIN DE L'HOTE SUR UNE NUIT (arbitrage A bis, 22 sept. 2026) ──
+       Sur un bien pilote, le prix se modifie SUR LA LIGNE : le conseil YieldFlow
+       reste affiche A COTE de la saisie, et « votre prix » se distingue par un
+       liseré et un mot. */
+    .yp-editer { margin-left: 6px; background: none; border: 0.5px solid var(--border);
+                 border-radius: 4px; font-size: 10px; color: var(--text3); cursor: pointer;
+                 padding: 1px 5px; }
+    .yp-editer:hover { color: var(--text); border-color: var(--text2); }
+    .yp-hote { font-size: 10px; text-transform: uppercase; letter-spacing: .03em;
+               color: #5A3E8A; margin-left: 6px; font-weight: 600; }
+    .yp-hote-conseil { font-size: 11px; color: var(--text3); margin-left: 6px; }
+    .yp-hote-x { margin-left: 4px; background: none; border: none; color: var(--text3);
+                 cursor: pointer; font-size: 12px; }
+    .yp-hote-x:hover { color: #B02A37; }
+    .yp-saisie { width: 64px; padding: 3px 5px; border: 0.5px solid var(--text2);
+                 border-radius: 4px; font-size: 13px; font-weight: 600;
+                 font-variant-numeric: tabular-nums; }
+    .yp-table tr.prix-hote td:first-child { box-shadow: inset 3px 0 0 #5A3E8A; }
+
+    /* ─── LA POP-UP DES ÉVÉNEMENTS : un calendrier en tableau ─────────────
+       Les cases portent la teinte du NIVEAU de la nuit (les memes cinq
+       teintes que les lignes) ; un evenement est un CONTOUR unifie sur ses
+       cases — deux teintes dedans (semaine / week-end) restent un seul
+       evenement. Semaine et week-end ne sont jamais des evenements. */
+    .yp-ov { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none;
+             align-items: flex-start; justify-content: center; z-index: 60; padding: 24px 12px; overflow-y: auto; }
+    .yp-ov.visible { display: flex; }
+    .yp-pop { background: var(--bg); border-radius: var(--radius-lg); width: 100%; max-width: 760px;
+              box-shadow: 0 12px 40px rgba(0,0,0,.25); padding: 16px 18px 18px; }
+    .yp-pop-tete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .yp-pop-tete h2 { font-size: 15px; margin: 0; }
+    .yp-pop-tete .yp-nav { margin-left: auto; }
+    .yp-pop-fermer { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text3); }
+    .yp-cal { width: 100%; border-collapse: separate; border-spacing: 3px; table-layout: fixed; }
+    .yp-cal th { font-size: 10px; text-transform: uppercase; color: var(--text3); font-weight: 600; padding: 2px 0; }
+    .yp-cal td { height: 54px; vertical-align: top; border-radius: 6px; padding: 3px 4px; font-size: 11px;
+                 background: var(--bg2); position: relative; border: 2px solid transparent; }
+    .yp-cal td.vide { background: transparent; }
+    .yp-cal td .j { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .yp-cal td .p { font-size: 10.5px; color: var(--text2); display: block; margin-top: 2px; }
+    .yp-cal td .n { font-size: 9px; text-transform: uppercase; color: var(--text3); display: block; }
+    .yp-cal td.n-base, .yp-cal td.n-moyen, .yp-cal td.n-haut, .yp-cal td.n-tres-haut, .yp-cal td.n-exceptionnel { box-shadow: none; }
+    /* Le contour d'un evenement : bordures haut/bas sur toutes ses cases,
+       gauche sur la premiere, droite sur la derniere ; en rejoignant les
+       cases voisines (espacement negatif), il se lit d'un seul trait. */
+    .yp-cal td.ev { border-top-color: var(--ev); border-bottom-color: var(--ev); border-radius: 0; }
+    .yp-cal td.ev.ev-g { border-left-color: var(--ev); border-radius: 6px 0 0 6px; }
+    .yp-cal td.ev.ev-d { border-right-color: var(--ev); border-radius: 0 6px 6px 0; }
+    .yp-cal td.ev.ev-g.ev-d { border-radius: 6px; }
+    .yp-cal td .ev-nom { position: absolute; left: 4px; bottom: 2px; right: 2px; font-size: 9px; font-weight: 600;
+                         color: var(--ev); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .yp-ev-liste { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .yp-ev-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px;
+               padding: 6px 8px; border-radius: var(--radius); background: var(--bg2); border-left: 4px solid var(--ev); }
+    .yp-ev-l .o { font-size: 9.5px; text-transform: uppercase; color: var(--text3); }
+    .yp-ev-l select { font-size: 11.5px; padding: 2px 4px; border: 0.5px solid var(--border); border-radius: 4px; background: var(--bg); }
+    .yp-ev-l button { font-size: 11px; background: none; border: 0.5px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--text3); padding: 2px 7px; }
+    .yp-ev-l button:hover { color: #B02A37; border-color: #F5C2C7; }
+    .yp-ev-form { margin-top: 14px; padding-top: 12px; border-top: 0.5px solid var(--border);
+                  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; align-items: end; }
+    .yp-ev-form label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--text3); }
+    .yp-ev-form input, .yp-ev-form select { padding: 6px 8px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 12.5px; background: var(--bg); color: var(--text); }
+    .yp-ev-form button { padding: 7px 12px; border: none; border-radius: var(--radius); background: var(--text); color: var(--bg); cursor: pointer; font-size: 12.5px; }
+    .yp-ev-msg { grid-column: 1 / -1; font-size: 12px; }
+    .yp-ev-msg.ko { color: #B02A37; } .yp-ev-msg.ok { color: #1F6F45; }
+    .yp-btn-ev { padding: 6px 10px; border: 0.5px solid var(--border); border-radius: var(--radius);
+                 background: var(--bg); cursor: pointer; font-size: 12.5px; color: var(--text); }
+    .yp-btn-ev:hover { background: var(--bg2); }
+
     @media (max-width: 640px) {
       .yp-chiffres { gap: 16px; }
       .yp-chiffre .v { font-size: 17px; }
@@ -339,6 +408,13 @@
       <span id="yp-mois"></span>
       <button id="yp-suiv" aria-label="Mois suivant">›</button>
     </div>
+    <button class="yp-btn-ev" id="yp-ouvrir-ev" title="Le calendrier du mois, avec ce qui pilote vos prix : vacances, fériés, dates commerciales, vos événements.">Événements</button>
+  </div>
+
+  <!-- LA POP-UP DES ÉVÉNEMENTS (remplace l'ancienne page « Ce qui pilote vos
+       prix », decision de Thierry du 22 septembre 2026). Rendue par le JS. -->
+  <div class="yp-ov" id="yp-ov-ev" role="dialog" aria-modal="true" aria-label="Événements">
+    <div class="yp-pop" id="yp-pop-ev"></div>
   </div>
 
   <!-- ⚠ LE SELECTEUR EST EXCLUSIF : deux modes, jamais les deux. Il est rendu
@@ -382,12 +458,16 @@
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { motif, nomSegment, refus } from '/shared/yield-motifs.js'
+  import { api as apiClient } from '/shared/api-client.js'
 
   initErrorHandler()
 
   let session = null
   let mois = null
   let enCours = 0
+  let donnees = null          // la derniere reponse de /api/yield-prix
+  let evenements = null       // la derniere reponse de /api/yield-evenements (par bien)
+  let popupOuverte = false
   const el = id => document.getElementById(id)
   // JJ/MM/AAAA depuis un jour ISO, sans passer par Date : un jour ISO reste
   // un jour ISO, aucun fuseau n'entre en jeu.
@@ -418,6 +498,10 @@
     el('yp-bien').addEventListener('change', () => { chargerPilote(); charger() })
     el('yp-prec').addEventListener('click', () => { mois = decalerMois(mois, -1); charger() })
     el('yp-suiv').addEventListener('click', () => { mois = decalerMois(mois, 1); charger() })
+    el('yp-ouvrir-ev').addEventListener('click', ouvrirPopup)
+    el('yp-ov-ev').addEventListener('click', e => { if (e.target === el('yp-ov-ev')) fermerPopup() })
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && popupOuverte) fermerPopup() })
+    if (new URLSearchParams(location.search).get('evenements') === '1') setTimeout(ouvrirPopup, 300)
     if (ok && el('yp-bien').value) { chargerPilote(); charger() }
   }
 
@@ -620,8 +704,10 @@
     }
     if (jeton !== enCours) return
     if (!r.ok) { etat(refus(data?.error), true); return }
+    donnees = data
     el('yp-contenu').innerHTML = vue(data)
     brancher()
+    if (popupOuverte) rendrePopup()
   }
 
   // ─── La vue : action, tableau, pied ───────────────────────────────────────
@@ -994,6 +1080,7 @@
     const j = new Date(`${n.date}T00:00:00Z`).getUTCDay()
     const we = j === 0 || j === 6
     const passe = n.delai_jours < 0
+    const pilote = !!(donnees && donnees.bien && donnees.bien.pilote === 'yieldflow')
 
     // ⚠ AUCUN MOT D'ÉTAT DANS LA LIGNE. L'état est une classe, donc une
     // couleur, et la légende en tête l'explique une fois pour le mois entier.
@@ -1029,6 +1116,14 @@
       // du serveur (lib/pilote-tarifaire.js), l'écran ne la recalcule pas.
       const q = n.ouverture_prevue ? dateFr(n.ouverture_prevue) : null
       prix = `<span class="yp-attente" title="${ech(`Cette nuit est au-delà de la fenêtre de vente de ce logement, pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour, et cette nuit s’ouvrira seule${q ? ` le ${q}` : ''}, avec son prix déjà prêt.`)}">pas encore ouverte${q ? ` · s’ouvrira le ${q}` : ''}</span>`
+    } else if (n.prix_hote != null && pilote) {
+      // ⚠ LA MAIN DE L'HOTE : son prix est le prix retenu, le conseil de
+      // YieldFlow reste a cote, et un geste le retire (le moteur reprend la
+      // nuit a son passage suivant).
+      prix = `<span class="yp-prix">${euros(n.prix_hote)}</span><span class="yp-hote" title="Ce prix est le vôtre : YieldFlow ne le modifie pas. Il tient jusqu’à la nuit, ou jusqu’à ce que vous le retiriez.">votre prix</span>
+        ${n.suggestion != null ? `<span class="yp-hote-conseil" title="Ce que YieldFlow proposerait pour cette nuit.">YieldFlow : ${euros(n.suggestion)}</span>` : ''}
+        <button class="yp-editer" data-editer="${n.date}" title="Modifier votre prix">✎</button>
+        <button class="yp-hote-x" data-retirer="${n.date}" title="Retirer votre prix : YieldFlow reprend cette nuit à son prochain passage.">×</button>`
     } else if (n.suggestion != null) {
       const sens = n.prix_actuel == null ? ''
         : (n.suggestion > n.prix_actuel ? 'hausse' : (n.suggestion < n.prix_actuel ? 'baisse' : ''))
@@ -1038,7 +1133,8 @@
         <span class="yp-niveau ${sens}" title="${ech(n.etiquette_corrigee
           ? `Niveau ${n.niveau} de votre grille, corrigé parce que les ${n.jour_semaine}s se vendent différemment sur ce type de période. C’est pourquoi le prix ne tombe pas exactement sur le niveau.`
           : `Niveau ${n.niveau} de votre grille.`)}">${ech(n.etiquette || n.niveau)}</span>
-        ${n.cumul ? '<span class="yp-plus" title="Deux signaux vont dans le même sens : c’est l’écart le plus marqué du mois.">++</span>' : ''}`
+        ${n.cumul ? '<span class="yp-plus" title="Deux signaux vont dans le même sens : c’est l’écart le plus marqué du mois.">++</span>' : ''}
+        ${pilote && n.ouverte === true ? `<button class="yp-editer" data-editer="${n.date}" title="Fixer vous-même le prix de cette nuit : YieldFlow ne l’écrasera pas.">✎</button>` : ''}`
     } else if (passe) {
       // Éteinte, et muette : le mois passé n'a rien à décider.
       prix = n.prix_actuel != null
@@ -1076,7 +1172,12 @@
       reel = `<span class="yp-vide" title="La nuit comparable retenue n’a pas été vendue l’an dernier.">—</span>`
     }
 
-    return `<tr class="${we ? 'we' : ''} ${etat} ${passe ? 'passe' : ''} cliquable"
+    // ⚠ LA COULEUR DU NIVEAU SUR TOUTE LA LIGNE — demande de Thierry (recette
+    // du 22 septembre 2026, « comme la maquette Excel »). Les cinq teintes
+    // existaient (CLASSES) mais ne coloraient que les badges. Une nuit a
+    // vendre porte son niveau ; vendue, fermee, passee gardent leur etat.
+    const niveau = !passe && !n.vendue && n.ouverte === true && n.suggestion != null ? (CLASSES[n.niveau] || '') : ''
+    return `<tr class="${we ? 'we' : ''} ${etat} ${niveau} ${n.prix_hote != null ? 'prix-hote' : ''} ${passe ? 'passe' : ''} cliquable"
       data-jour="${n.date}" aria-expanded="false" tabindex="0" role="button">
       <td class="yp-jour ${we ? 'we' : ''}">${Number(n.date.slice(8))}<small>${JOURS[j]}</small>
         ${n.segment === 'pont'
@@ -1212,12 +1313,207 @@
       tr.setAttribute('aria-expanded', ouvrir ? 'true' : 'false')
       tr.classList.toggle('ouverte-d', ouvrir)
     }
+    // La main de l'hote : editer / retirer, sans deplier la ligne.
+    for (const b of document.querySelectorAll('[data-editer]')) {
+      b.addEventListener('click', e => { e.stopPropagation(); editerPrix(b.dataset.editer, b) })
+    }
+    for (const b of document.querySelectorAll('[data-retirer]')) {
+      b.addEventListener('click', e => { e.stopPropagation(); retirerPrix(b.dataset.retirer) })
+    }
     for (const tr of document.querySelectorAll('tr.cliquable')) {
       tr.addEventListener('click', () => basculer(tr))
       tr.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); basculer(tr) }
       })
     }
+  }
+
+  // ─── LA MAIN DE L'HOTE (arbitrage A bis) ──────────────────────────────────
+  // La saisie remplace le prix sur la ligne, le conseil YieldFlow reste a cote.
+  // Elle part par la porte du calendrier avec `prix_hote: true` : memorisee
+  // dans `prix_hote`, ecrite origine 'host', jamais ecrasee par le moteur.
+  function editerPrix (date, bouton) {
+    const n = (donnees && donnees.nuits || []).find(x => x.date === date); if (!n) return
+    const cellule = bouton.closest('td'); if (!cellule) return
+    const conseil = n.suggestion != null ? euros(n.suggestion) : null
+    const initial = n.prix_hote != null ? n.prix_hote : (n.suggestion != null ? n.suggestion : (n.prix_actuel || ''))
+    cellule.innerHTML = `<input class="yp-saisie" type="number" min="1" step="1" value="${ech(initial)}" aria-label="Votre prix pour le ${dateFr(date)}"> €
+      ${conseil ? `<span class="yp-hote-conseil">YieldFlow : ${conseil}</span>` : ''}
+      <button class="yp-editer" data-valider="1">OK</button><button class="yp-editer" data-annuler="1">annuler</button>`
+    const input = cellule.querySelector('input')
+    input.focus(); input.select()
+    cellule.addEventListener('click', e => e.stopPropagation())
+    const annuler = () => charger()
+    const valider = async () => {
+      const v = Number(input.value)
+      if (!(v > 0)) { input.focus(); return }
+      cellule.innerHTML = '<span class="yp-attente">Enregistrement…</span>'
+      try {
+        const bien = el('yp-bien').value
+        await apiClient.calendar.save(bien, [{ date_from: date, date_to: date, rate: v }], { prix_hote: true })
+      } catch (e) {
+        cellule.innerHTML = `<span class="yp-rien">${ech(e.message || 'Refusé.')}</span>`
+        return
+      }
+      charger()
+    }
+    cellule.querySelector('[data-valider]').addEventListener('click', valider)
+    cellule.querySelector('[data-annuler]').addEventListener('click', annuler)
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); valider() } else if (e.key === 'Escape') annuler() })
+  }
+  async function retirerPrix (date) {
+    if (!window.confirm(`Retirer votre prix du ${dateFr(date)} ? YieldFlow reprendra cette nuit à son prochain passage.`)) return
+    try { await apiClient.calendar.retirerPrixHote(el('yp-bien').value, [date]) }
+    catch (e) { window.alert(e.message || 'Refusé.'); return }
+    charger()
+  }
+
+  // ─── LA POP-UP DES ÉVÉNEMENTS ─────────────────────────────────────────────
+  // Un calendrier en tableau du mois affiche : la teinte des cases est le
+  // NIVEAU de la nuit (les memes cinq teintes que les lignes), les evenements
+  // sont des CONTOURS unifies, « Ajouter un evenement » declare le votre.
+  const EV_COULEUR = { officiel: '#2A5E86', calendrier: '#7A3E9A', declare: '#1F6F45' }
+  const EV_NOM = { officiel: 'officiel', calendrier: 'date commerciale', declare: 'déclaré' }
+  const RECURRENCE_NOM = { unique: 'une seule fois', annuelle: 'chaque année, mêmes dates', annuelle_mobile: 'chaque année, dates à confirmer' }
+  const apiEv = async (methode, corps = null, params = {}) => {
+    const q = new URLSearchParams({ property_id: el('yp-bien').value, ...params })
+    const r = await fetch(`/api/yield-evenements?${q}`, {
+      method: methode,
+      headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte(), ...(corps ? { 'Content-Type': 'application/json' } : {}) },
+      ...(corps ? { body: JSON.stringify({ property_id: el('yp-bien').value, ...corps }) } : {})
+    })
+    return { ok: r.ok, data: await r.json() }
+  }
+  async function ouvrirPopup () {
+    popupOuverte = true
+    el('yp-ov-ev').classList.add('visible')
+    el('yp-pop-ev').innerHTML = '<p class="yp-attente">Lecture des événements…</p>'
+    try {
+      const r = await apiEv('GET')
+      if (!r.ok) throw new Error(refus(r.data && r.data.error) || 'Lecture impossible.')
+      evenements = r.data
+    } catch (e) { el('yp-pop-ev').innerHTML = `<p class="yp-rien">${ech(e.message)}</p>`; return }
+    rendrePopup()
+  }
+  function fermerPopup () { popupOuverte = false; el('yp-ov-ev').classList.remove('visible') }
+  function rendrePopup (message = '') {
+    if (!popupOuverte || !donnees) return
+    const d = donnees, ev = evenements || {}
+    const [a, m] = mois.split('-').map(Number)
+    const premier = new Date(Date.UTC(a, m - 1, 1)), nbJours = new Date(Date.UTC(a, m, 0)).getUTCDate()
+    const decalage = (premier.getUTCDay() + 6) % 7   // lundi = 0
+    const debutMois = `${mois}-01`, finMois = `${mois}-${String(nbJours).padStart(2, '0')}`
+    const parDate = new Map((d.nuits || []).map(n => [n.date, n]))
+    // Les evenements qui touchent le mois, dans l'ordre du calendrier ; la
+    // semaine et le week-end n'y sont pas : ce sont des couches, pas des periodes.
+    const entrees = (ev.calendrier || []).filter(e => e.debut <= finMois && e.fin >= debutMois)
+    const parJour = new Map()
+    entrees.forEach((e, i) => {
+      for (let j = e.debut < debutMois ? debutMois : e.debut; j <= (e.fin > finMois ? finMois : e.fin); j = decalerJour(j, 1)) parJour.set(j, i)
+    })
+    let cases = ''
+    for (let k = 0; k < decalage; k++) cases += '<td class="vide"></td>'
+    for (let jour = 1; jour <= nbJours; jour++) {
+      const iso = `${mois}-${String(jour).padStart(2, '0')}`
+      const n = parDate.get(iso)
+      const niveau = n && n.suggestion != null && n.ouverte === true && !n.vendue ? (CLASSES[n.niveau] || '') : ''
+      const i = parJour.get(iso)
+      const e = i != null ? entrees[i] : null
+      const premierDuEv = e && (iso === e.debut || iso === debutMois)
+      const dernierDuEv = e && (iso === e.fin || iso === finMois)
+      const prix = n ? (n.prix_hote != null ? n.prix_hote : (n.suggestion != null ? n.suggestion : n.prix_actuel)) : null
+      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', e ? e.nom : ''].filter(Boolean).join(' · '))}">
+        <span class="j">${jour}</span>
+        ${prix != null ? `<span class="p">${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
+        ${n && n.etiquette ? `<span class="n">${ech(n.etiquette)}</span>` : ''}
+        ${e && (premierDuEv || (premier.getUTCDay() + 6 + jour - 1) % 7 === 0) ? `<span class="ev-nom">${ech(e.nom)}</span>` : ''}
+      </td>`
+      if ((decalage + jour) % 7 === 0 && jour < nbJours) cases += '</tr><tr>'
+    }
+    const reste = (decalage + nbJours) % 7
+    if (reste) for (let k = reste; k < 7; k++) cases += '<td class="vide"></td>'
+    const lecture = ev.droits_ecriture === false
+    const crans = v => v == null ? '—' : (v === 0 ? 'sans effet' : `${v > 0 ? '+' : ''}${v} cran${Math.abs(v) > 1 ? 's' : ''}`)
+    const liste = entrees.map((e, i) => `<div class="yp-ev-l" style="--ev:${EV_COULEUR[e.origine] || '#555'}">
+        <strong>${ech(e.nom)}</strong>
+        <span>${dateFr(e.debut)}${e.fin !== e.debut ? ` → ${dateFr(e.fin)}` : ''}</span>
+        <span class="o">${ech(EV_NOM[e.origine] || e.origine)}</span>
+        ${lecture ? `<span class="o">${ech(crans(e.crans))}</span>`
+          : `<select data-ev-reglage="${ech(e.cle)}" title="De combien de crans cette période pousse vos prix. Semaine et week-end montent du même cran.">
+              <option value="">${ech(e.crans_mesures != null ? `laisser mesurer (${crans(e.crans_mesures)})` : 'à mesurer')}</option>
+              ${Array.from({ length: (ev.crans_max || 4) * 2 + 1 }, (_, k) => k - (ev.crans_max || 4)).map(v => `<option value="${v}" ${v === e.crans_ajustes ? 'selected' : ''}>${ech(crans(v))}</option>`).join('')}
+            </select>`}
+        ${!lecture && e.droits && e.droits.desactivable ? `<button data-ev-actif="${ech(e.cle)}" data-vers="${e.actif === false ? '1' : '0'}">${e.actif === false ? 'réactiver' : 'couper'}</button>` : ''}
+        ${!lecture && e.droits && e.droits.supprimable && e.id ? `<button data-ev-sup="${ech(e.id)}" data-nom="${ech(e.nom)}">supprimer</button>` : ''}
+      </div>`).join('')
+    const formulaire = lecture ? '' : `<div class="yp-ev-form" id="yp-ev-form">
+        <label style="grid-column: span 2">Nom<input id="ev-nom" maxlength="${ev.limites ? ev.limites.nom_max : 80}" placeholder="Festival, salon, saison…"></label>
+        <label>Du<input id="ev-debut" type="date" value="${debutMois}"></label>
+        <label>Au (inclus)<input id="ev-fin" type="date" value="${debutMois}"></label>
+        <label>Revient-il ?<select id="ev-rec">${(ev.recurrences || []).map(r => `<option value="${ech(r)}">${ech(RECURRENCE_NOM[r] || r)}</option>`).join('')}</select></label>
+        <label>Se comporte comme<select id="ev-parent"><option value="">— à déterminer —</option>${(ev.parents || []).map(p => `<option value="${ech(p)}">${ech(p)}</option>`).join('')}</select></label>
+        <button id="ev-ajouter">Ajouter un événement</button>
+        ${message ? `<div class="yp-ev-msg ${message.startsWith('✓') ? 'ok' : 'ko'}">${ech(message)}</div>` : ''}
+      </div>`
+    // ⚠ LES RECONDUCTIONS RESTENT (elles vivaient sur l'ancienne page) : un
+    // evenement recurrent dont l'edition approche est PROPOSE, jamais
+    // enregistre sans confirmation, dates corrigeables.
+    const reconductions = (ev.reconductions || []).map((r, i) => r.debut
+      ? `<div class="yp-ev-l" style="--ev:#2A5E86"><strong>${ech(r.nom)}</strong><span class="o">à reconduire — l’an dernier du ${dateFr(r.depuis.debut)} au ${dateFr(r.depuis.fin)}</span>
+          <input type="date" id="rd-${i}" value="${ech(r.debut)}" aria-label="Début proposé"><input type="date" id="rf-${i}" value="${ech(r.fin)}" aria-label="Fin proposée">
+          <button data-reconduire="${i}">Confirmer</button></div>`
+      : `<div class="yp-ev-l" style="--ev:#B8860B"><strong>${ech(r.nom)}</strong><span class="o">à reconduire — ${r.non_calculable === 'date_absente_l_annee_suivante' ? 'cette date n’existe pas l’an prochain' : 'cette position n’existe pas l’an prochain'} : saisissez les dates ci-dessous.</span></div>`).join('')
+    el('yp-pop-ev').innerHTML = `<div class="yp-pop-tete">
+        <h2>Événements — ${ech(nomMois(mois))}</h2>
+        <div class="yp-nav"><button id="ev-prec" aria-label="Mois précédent">‹</button><button id="ev-suiv" aria-label="Mois suivant">›</button></div>
+        <button class="yp-pop-fermer" id="ev-fermer" aria-label="Fermer">×</button>
+      </div>
+      <table class="yp-cal"><thead><tr>${['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].map(j => `<th>${j}</th>`).join('')}</tr></thead>
+        <tbody><tr>${cases}</tr></tbody></table>
+      <div class="yp-ev-liste">${reconductions}${liste || '<div class="yp-ev-l" style="--ev:#ccc">Aucun événement ce mois-ci.</div>'}</div>
+      ${formulaire}`
+    el('ev-fermer').addEventListener('click', fermerPopup)
+    el('ev-prec').addEventListener('click', () => { mois = decalerMois(mois, -1); charger() })
+    el('ev-suiv').addEventListener('click', () => { mois = decalerMois(mois, 1); charger() })
+    const aj = el('ev-ajouter'); if (aj) aj.addEventListener('click', ajouterEvenement)
+    for (const b of document.querySelectorAll('[data-ev-sup]')) b.addEventListener('click', () => supprimerEvenement(b.dataset.evSup, b.dataset.nom))
+    for (const b of document.querySelectorAll('[data-reconduire]')) b.addEventListener('click', () => reconduireEvenement(Number(b.dataset.reconduire)))
+    for (const sel of document.querySelectorAll('[data-ev-reglage]')) sel.addEventListener('change', () => reglerEvenement(sel.dataset.evReglage, { crans: sel.value === '' ? null : Number(sel.value) }))
+    for (const b of document.querySelectorAll('[data-ev-actif]')) b.addEventListener('click', () => reglerEvenement(b.dataset.evActif, { actif: b.dataset.vers === '1' }))
+  }
+  function decalerJour (iso, n) { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+  async function rechargerEvenements (message) {
+    try { const r = await apiEv('GET'); if (r.ok) evenements = r.data } catch (e) {}
+    await charger()
+    rendrePopup(message)
+  }
+  async function ajouterEvenement () {
+    const corps = { nom: el('ev-nom').value.trim(), debut: el('ev-debut').value, fin: el('ev-fin').value, recurrence: el('ev-rec').value, parent_segment: el('ev-parent').value || null }
+    if (!corps.nom || !corps.debut || !corps.fin) return rendrePopup('Il manque le nom ou les dates.')
+    let r
+    try { r = await apiEv('POST', corps) } catch (e) { return rendrePopup(`Échec : ${e.message}`) }
+    if (!r.ok) return rendrePopup(refus(r.data && r.data.error) || (r.data && (r.data.detail || r.data.error)) || 'Refusé.')
+    rechargerEvenements(`✓ « ${corps.nom} » ajouté.`)
+  }
+  async function reconduireEvenement (i) {
+    const r = evenements && evenements.reconductions ? evenements.reconductions[i] : null
+    if (!r) return
+    const corps = { nom: r.nom, debut: el(`rd-${i}`).value, fin: el(`rf-${i}`).value, recurrence: r.recurrence, parent_segment: r.parent_segment, reconduit_de: r.depuis.id }
+    let x
+    try { x = await apiEv('POST', corps) } catch (e) { return rendrePopup(`Échec : ${e.message}`) }
+    if (!x.ok) return rendrePopup(refus(x.data && x.data.error) || (x.data && (x.data.detail || x.data.error)) || 'Refusé.')
+    rechargerEvenements(`✓ « ${r.nom} » reconduit.`)
+  }
+  async function supprimerEvenement (id, nom) {
+    if (!window.confirm(`Supprimer « ${nom} » ?\n\nCes nuits redeviendront des nuits ordinaires pour le moteur, et les prix changeront.`)) return
+    let r
+    try { r = await apiEv('DELETE', null, { id }) } catch (e) { return rendrePopup(`Échec : ${e.message}`) }
+    rechargerEvenements(r.ok ? `✓ « ${nom} » supprimé.` : (refus(r.data && r.data.error) || 'Refusé.'))
+  }
+  async function reglerEvenement (segment, champs) {
+    let r
+    try { r = await apiEv('PATCH', { segment, ...champs }) } catch (e) { return rendrePopup(`Échec : ${e.message}`) }
+    rechargerEvenements(r.ok ? '✓ Réglage enregistré.' : (refus(r.data && r.data.error) || 'Refusé.'))
   }
 
   function etat (msg, erreur = false) {

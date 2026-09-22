@@ -61,7 +61,9 @@ const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/cale
 // `snapshots` : lignes bookings_snapshot { user_id, booking_id, property_id, snapshot }
 function preparer ({ user = MEMBRE, profil = null, permissions = null,
                      snapshots = [], messages = [], fetchStub = null, erreurSnapshot = null,
-                     erreurUpdateProperties = null, fermetures = [], erreurFermetures = null, erreurInventaire = null } = {}) {
+                     erreurUpdateProperties = null, fermetures = [], erreurFermetures = null, erreurInventaire = null, biens = null } = {}) {
+  // `biens` : une liste de biens PROPRE au test (ex. un bien pilote) ; sinon la liste commune.
+  const lesBiens = biens || BIENS
   const etat = { ecritures: [], filtresIn: [], appels: [] }
 
   const client = {
@@ -85,6 +87,8 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         delete () {
           const d = { _f: {} }
           d.eq = (c, v) => { d._f[c] = v; return d }
+          d.in = (c, v) => { d._f[c] = v; return d }
+          d.lt = (c, v) => { d._f[c] = v; return d }
           d.select = () => d
           d.then = (ok, ko) => {
             etat.ecritures.push({ table: nom, op: 'delete', f: { ...d._f } })
@@ -131,7 +135,7 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
             const ref = avecId ? avecId[1] : sansId[1]
             const propId = avecId ? avecId[2] : sansId[1]
             const cible = avecId ? avecId[3] : sansId[2]
-            const b = BIENS.find(x => x.id === ref || x.provider_property_id === propId
+            const b = lesBiens.find(x => x.id === ref || x.provider_property_id === propId
               || (x.migration_target_property_id && x.migration_target_property_id === cible)) || null
             // ⚠ La branche TEXTE de la garde lit une LISTE (elle refuse
             // explicitement l'ambiguite au lieu d'un `.maybeSingle()` qui
@@ -144,7 +148,7 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
           // ⚠ Le double doit honorer `.in()` sur N'IMPORTE QUELLE colonne. Ne le
           // traiter que pour `id` faisait renvoyer tous les biens a la requete
           // par provider_property_id — un bien etranger serait passe inapercu.
-          const cands = BIENS.filter(b =>
+          const cands = lesBiens.filter(b =>
             (q._f.id == null || b.id === q._f.id) &&
             (q._f.provider_property_id == null || b.provider_property_id === q._f.provider_property_id) &&
             (q._f.user_id == null || b.user_id === q._f.user_id) &&
@@ -183,6 +187,7 @@ function preparer ({ user = MEMBRE, profil = null, permissions = null,
         // filtres eq, comme la vraie table. `delete` les retire de la liste
         // servie, pour que la scission se lise dans `etat.ecritures` ET dans ce
         // que la lecture suivante rend.
+        if (nom === 'prix_hote') return { data: tableau ? [] : null, error: null }
         if (nom === 'fermetures') {
           if (erreurFermetures) return { data: null, error: { message: erreurFermetures } }
           const rows = fermetures.filter(f =>
@@ -1345,4 +1350,43 @@ test('modifier_fermeture : si le writer refuse, l objet REVIENT a son etat d ava
   const maj = etat.ecritures.filter(e => e.table === 'fermetures' && e.row)
   assert.strictEqual(maj.length, 2, 'un update aller, un update retour')
   assert.deepStrictEqual([maj[1].row.date_debut, maj[1].row.date_fin], ['2026-10-12', '2026-10-20'], 'l etat d avant est restaure')
+})
+
+// ─── calendar : LA MAIN DE L'HOTE sur un bien pilote (arbitrage A bis) ────────
+test('LE TEST QUI COMPTE : un tarif sur un bien pilote reste REFUSE sans le drapeau, et PASSE avec `prix_hote: true` — memorise AVANT le writer, origine host', async () => {
+  const pilote = { ...BIEN_CHANNEX, pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 60 }
+  let etat = preparer({ user: PROD, biens: [pilote] })
+  let res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: pilote.id, segments: [{ date_from: '2026-10-15', date_to: '2026-10-16', rate: 130 }]
+  } }), res)
+  assert.strictEqual(res.code, 409, 'sans drapeau : le refus du 4.5, inchange')
+  assert.deepStrictEqual(etat.ecritures, [])
+  etat = preparer({ user: PROD, biens: [pilote] })
+  res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: {
+    action: 'save', property_id: pilote.id, prix_hote: true, segments: [{ date_from: '2026-10-15', date_to: '2026-10-16', rate: 130 }]
+  } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const main = etat.ecritures.find(e => e.table === 'prix_hote')
+  assert.ok(main, 'la main est memorisee')
+  assert.deepStrictEqual(main.row.map(r => [r.stay_date, r.rate_cents, r.user_id]), [['2026-10-15', 13000, PROD], ['2026-10-16', 13000, PROD]])
+  const iMain = etat.ecritures.indexOf(main), iInv = etat.ecritures.findIndex(e => e.table === 'calendar_inventory')
+  assert.ok(iMain < iInv, 'AVANT le writer')
+  const lignes = [].concat(...etat.ecritures.filter(e => e.table === 'calendar_inventory').map(e => e.row))
+  assert.deepStrictEqual(lignes.map(l => [l.date, l.rate]).sort(), [['2026-10-15', 130], ['2026-10-16', 130]])
+})
+
+test('retirer_prix_hote : le compte et le bien sont dans le WHERE, et un membre en lecture ne peut pas', async () => {
+  const pilote = { ...BIEN_CHANNEX, pilote_tarifaire: 'yieldflow' }
+  let etat = preparer({ user: PROD, biens: [pilote] })
+  let res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: { action: 'retirer_prix_hote', property_id: pilote.id, dates: ['2026-10-15'] } }), res)
+  assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+  const del = etat.ecritures.find(e => e.table === 'prix_hote' && e.op === 'delete')
+  assert.ok(del); assert.strictEqual(del.f.user_id, PROD); assert.strictEqual(del.f.property_id, pilote.id)
+  etat = preparer({ profil: profilActif(), permissions: perms({ reservations: 'read' }) })
+  res = reponse()
+  await require('../api/calendar')(req({ method: 'POST', body: { action: 'retirer_prix_hote', property_id: BIEN_A.id, dates: ['2026-10-15'] } }), res)
+  assert.strictEqual(res.code, 403); assert.deepStrictEqual(etat.ecritures, [])
 })
