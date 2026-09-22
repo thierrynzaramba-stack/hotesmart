@@ -187,4 +187,11 @@ test('l ecran s appelle « Prédiction de prix », l etat est un bouton activé 
   // le bloc est cache en mode calendrier, une raison ajoutee apres etait invisible).
   assert.ok(PAGE.includes("const zone = el('yp-act-etat') || el('yp-des-etat')") && PAGE.includes('zone.textContent = message'), 'le refus s affiche la ou l hote regarde')
   assert.ok(PAGE.includes('<span class="etat" id="yp-des-etat"></span>'), 'la desactivation a sa zone de message')
+  // La confirmation s'ouvre SOUS LE BOUTON (#yp-confirm, sous la barre) ; la
+  // fenetre d'ouverture, elle, est en bas de page (#yp-pilote apres #yp-contenu).
+  assert.ok(brut.indexOf('id="yp-confirm"') < brut.indexOf('id="yp-contenu"') && brut.indexOf('id="yp-contenu"') < brut.indexOf('id="yp-pilote"'), 'confirmation en haut, fenetre en bas')
+  const conf = PAGE.slice(PAGE.indexOf('function confirmerBascule'), PAGE.indexOf('const libelleFenetre'))
+  assert.ok(conf.includes("const bloc = el('yp-confirm')"), 'la desactivation se confirme sous la barre')
+  const dem = PAGE.slice(PAGE.indexOf('function demanderFenetre'), PAGE.indexOf('async function basculerPilote'))
+  assert.ok(dem.includes("const bloc = el('yp-confirm')"), 'l activation aussi')
 })

@@ -451,12 +451,16 @@
     <div class="yp-pop" id="yp-pop-ev"></div>
   </div>
 
-  <!-- ⚠ LE SELECTEUR EST EXCLUSIF : deux modes, jamais les deux. Il est rendu
-       par le JS parce que son etat — et surtout son REFUS — vient du serveur.
-       Un bloc ecrit en dur ici afficherait « possible » avant de savoir. -->
-  <div class="yp-pilote" id="yp-pilote" hidden></div>
+  <!-- LA CONFIRMATION D'UN CHANGEMENT D'ETAT s'ouvre ICI, sous le bouton que
+       l'hote vient de cliquer — jamais en bas de page. -->
+  <div class="yp-pilote" id="yp-confirm" hidden></div>
 
   <div id="yp-contenu"></div>
+
+  <!-- LA FENETRE D'OUVERTURE ET LE DERNIER PASSAGE, en bas de page pour le
+       moment (demande de Thierry, 22 septembre 2026). Rendu par le JS parce
+       que son etat vient du serveur. -->
+  <div class="yp-pilote" id="yp-pilote" hidden></div>
 </div><!-- .content -->
 </div>
 
@@ -570,6 +574,8 @@
     const bien = el('yp-bien').value
     const bloc = el('yp-pilote')
     const etat = el('yp-etat')
+    const confirm = el('yp-confirm')
+    confirm.hidden = true; confirm.innerHTML = ''
     // Pendant la lecture, le bouton ne repond pas : il porte encore l'etat du
     // bien precedent (releve en relecture).
     etat.disabled = true
@@ -631,7 +637,7 @@
   // s'arrete, les prix en place restent, l'hote reprend la main.
   function confirmerBascule (voulu) {
     if (voulu === 'yieldflow') { demanderFenetre(); return }
-    const bloc = el('yp-pilote')
+    const bloc = el('yp-confirm')
     bloc.hidden = false
     bloc.innerHTML = '<div class="yp-fenetre" id="yp-desactivation">'
       + '<p class="avertir"><b>Désactiver la prédiction de prix ?</b> YieldFlow n’ouvrira plus de dates et ne modifiera plus vos tarifs. '
@@ -698,7 +704,7 @@
   // le mode ET jusqu'ou il ouvre. On la demande AVANT d'ecrire, dans le bloc
   // meme ; le serveur la valide (validerFenetre) et refuse sans elle.
   function demanderFenetre () {
-    const bloc = el('yp-pilote')
+    const bloc = el('yp-confirm')
     if (el('yp-fenetre-activation')) return
     bloc.hidden = false
     bloc.innerHTML = ''
@@ -719,9 +725,9 @@
 
   async function basculerPilote (voulu, fenetre) {
     const bien = el('yp-bien').value
-    const bloc = el('yp-pilote')
+    const bloc = el('yp-confirm')
     if (voulu === 'yieldflow' && !fenetre) { demanderFenetre(); return }
-    for (const i of bloc.querySelectorAll('input, button')) i.disabled = true
+    for (const i of document.querySelectorAll('#yp-confirm input, #yp-confirm button, #yp-pilote input, #yp-pilote button')) i.disabled = true
     el('yp-etat').disabled = true
     try {
       const r = await fetch('/api/yield-pilote', {
@@ -743,7 +749,7 @@
         if (zone) {
           zone.textContent = message
           zone.classList.add('raison')
-          for (const i of bloc.querySelectorAll('input, button')) i.disabled = false
+          for (const i of document.querySelectorAll('#yp-confirm input, #yp-confirm button, #yp-pilote input, #yp-pilote button')) i.disabled = false
           el('yp-etat').disabled = false
           return
         }
