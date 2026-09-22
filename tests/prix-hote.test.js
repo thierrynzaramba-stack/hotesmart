@@ -170,3 +170,21 @@ test('chaque tuile du radar porte le CA vendu a ce jour et le N-1 au meme delai 
   assert.ok(/\.yp-rm \.ca \{/.test(PAGE), 'et la classe a un style')
   assert.ok(rad.includes("ca && ca.fiable === false ? ' — sur les ventes datées seulement"), 'un CA sous-compte le dit au survol')
 })
+
+test('l ecran s appelle « Prédiction de prix », l etat est un bouton activé / désactivé a cote du logement, et changer d etat se confirme dans les deux sens', () => {
+  const brut = lire('apps/yield/prix.html')
+  assert.ok(brut.includes('<h1>Prédiction de prix</h1>') && brut.includes('<title>HôteSmart — Prédiction de prix</title>'))
+  assert.ok(!brut.includes('Ce qu’il y a à changer aujourd’hui'), 'le sous-titre est parti')
+  assert.ok(brut.includes('<button id="yp-etat" class="yp-etat" hidden></button>'), 'le bouton d etat, dans la barre')
+  assert.ok(!/name="yp-pilote-choix"/.test(brut), 'les deux cartes radio n existent plus')
+  assert.ok(PAGE.includes("etat.textContent = yf ? 'activé' : 'désactivé'"), 'le mot vient de l etat serveur')
+  assert.ok(PAGE.includes("etat.onclick = () => confirmerBascule(yf ? 'calendrier' : 'yieldflow')"), 'le clic ouvre une confirmation, jamais la bascule')
+  assert.ok(PAGE.includes("L’IA de prédiction des prix va modifier vos tarifs.") && PAGE.includes('avant d’enclencher'), 'activer : l avertissement demande')
+  assert.ok(PAGE.includes('Désactiver la prédiction de prix ?') && PAGE.includes("el('yp-des-valider').addEventListener('click', () => basculerPilote('calendrier'))"), 'desactiver : confirme aussi')
+  assert.ok(PAGE.includes("etat.disabled = bloque"), 'un logement qui ne peut pas activer a un bouton inerte, et la raison au survol')
+  assert.ok(lire('components/sidebar.js').includes('Prédiction de prix'), 'la sidebar suit')
+  // Le refus du serveur se lit dans le panneau, qui reste en place (relecture :
+  // le bloc est cache en mode calendrier, une raison ajoutee apres etait invisible).
+  assert.ok(PAGE.includes("const zone = el('yp-act-etat') || el('yp-des-etat')") && PAGE.includes('zone.textContent = message'), 'le refus s affiche la ou l hote regarde')
+  assert.ok(PAGE.includes('<span class="etat" id="yp-des-etat"></span>'), 'la desactivation a sa zone de message')
+})

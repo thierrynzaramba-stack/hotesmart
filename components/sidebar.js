@@ -297,7 +297,7 @@ function renderApps(activePage) {
       // contexte pour atteindre la seule ligne sur laquelle on agit.
       subMenu = `
         <a class="nav-sub ${activePage === 'yield-prix' ? 'connected' : ''}" href="/apps/yield/prix">
-          <div class="sub-dot ${activePage === 'yield-prix' ? 'green' : 'gray'}"></div>Prix jour par jour
+          <div class="sub-dot ${activePage === 'yield-prix' ? 'green' : 'gray'}"></div>Prédiction de prix
         </a>
         <a class="nav-sub ${activePage === 'yield-evenements' ? 'connected' : ''}" href="/apps/yield/prix?evenements=1">
           <div class="sub-dot ${activePage === 'yield-evenements' ? 'green' : 'gray'}"></div>Vos événements

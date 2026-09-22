@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HôteSmart — Prix jour par jour</title>
+  <title>HôteSmart — Prédiction de prix</title>
   <link rel="stylesheet" href="/public/style.css">
   <style>
     [hidden] { display: none !important; }
@@ -32,18 +32,21 @@
        pas ? Non. */
     .yp-pilote { border: 0.5px solid var(--border); border-radius: var(--radius);
                  padding: 10px 12px; margin-bottom: 14px; background: var(--bg); }
-    .yp-pilote h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
-    .yp-choix { display: flex; gap: 8px; flex-wrap: wrap; }
-    .yp-choix label { display: flex; gap: 7px; align-items: flex-start; cursor: pointer;
-                      border: 0.5px solid var(--border); border-radius: var(--radius);
-                      padding: 8px 10px; flex: 1 1 210px; font-size: 12.5px; }
-    .yp-choix label:hover { background: var(--bg2); }
-    .yp-choix label[aria-checked="true"] { border-color: var(--text2); background: var(--bg2); }
-    .yp-choix input { margin-top: 2px; }
-    .yp-choix b { display: block; font-weight: 600; margin-bottom: 1px; }
-    .yp-choix span { color: var(--text3); }
-    .yp-choix input:disabled + span b { color: var(--text3); }
+    /* L'ETAT DU PILOTE EST UN BOUTON A COTE DU LOGEMENT : « activé » ou
+       « désactivé » (demande de Thierry, 22 septembre 2026, a la place des deux
+       cartes de choix). Le clic ouvre une confirmation, jamais la bascule. */
+    .yp-etat { border: 0.5px solid var(--border); border-radius: 999px; padding: 5px 11px 5px 9px;
+               font-size: 12.5px; font-family: inherit; cursor: pointer; background: var(--bg);
+               color: var(--text2); display: inline-flex; align-items: center; gap: 6px; }
+    .yp-etat::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #C9C9C9; }
+    .yp-etat.on { border-color: #0F7B3E; color: #0F7B3E; background: #EAF6EE; }
+    .yp-etat.on::before { background: #0F7B3E; }
+    .yp-etat:hover { background: var(--bg2); }
+    .yp-etat.on:hover { background: #DDF0E3; }
+    .yp-etat:disabled { cursor: not-allowed; opacity: .7; }
     .yp-pilote .raison { font-size: 12px; color: #B02A37; margin: 8px 0 0; }
+    .yp-pilote .avertir { font-size: 13px; color: var(--text); margin: 0; flex-basis: 100%; }
+    .yp-pilote .avertir b { color: #B02A37; }
     .yp-pilote .dit { font-size: 12px; color: var(--text3); margin: 8px 0 0; }
     /* LA FENETRE D'OUVERTURE (lot 4.6.3) : jusqu'ou YieldFlow ouvre les dates. */
     .yp-fenetre { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px;
@@ -424,12 +427,15 @@
      rail de la sidebar. -->
 <div class="content">
   <div class="header">
-    <h1>Prix jour par jour</h1>
-    <p class="subtitle">Ce qu’il y a à changer aujourd’hui</p>
+    <h1>Prédiction de prix</h1>
   </div>
 
   <div class="yp-barre">
     <select id="yp-bien"></select>
+    <!-- ACTIVÉ / DÉSACTIVÉ, à côté du logement (demande de Thierry, 22 septembre
+         2026) : l'état vient du serveur, le bouton est rendu par le JS. Le clic
+         ne bascule jamais directement : il ouvre une confirmation. -->
+    <button id="yp-etat" class="yp-etat" hidden></button>
     <div class="yp-nav">
       <button id="yp-prec" aria-label="Mois précédent">‹</button>
       <span id="yp-mois"></span>
@@ -563,7 +569,11 @@
     const jeton = ++enCoursPilote
     const bien = el('yp-bien').value
     const bloc = el('yp-pilote')
-    if (!bien) { bloc.hidden = true; return }
+    const etat = el('yp-etat')
+    // Pendant la lecture, le bouton ne repond pas : il porte encore l'etat du
+    // bien precedent (releve en relecture).
+    etat.disabled = true
+    if (!bien) { bloc.hidden = true; etat.hidden = true; return }
     let d
     try {
       const r = await fetch(`/api/yield-pilote?bien=${encodeURIComponent(bien)}`, {
@@ -577,42 +587,61 @@
       // ⚠ UN REGLAGE QU'ON NE SAIT PAS LIRE NE S'AFFICHE PAS « calendrier ».
       // Le montrer dans un etat invente ferait croire a l'hote qu'il sait ou
       // il en est, et un clic ecrirait par-dessus une valeur jamais lue.
-      bloc.hidden = false
-      bloc.innerHTML = '<h3>Qui décide les prix de ce logement ?</h3>'
-        + '<p class="raison">Réglage illisible pour le moment. Rechargez la page.</p>'
+      etat.hidden = false; etat.disabled = true; etat.className = 'yp-etat'
+      etat.textContent = 'réglage illisible'
+      etat.removeAttribute('aria-pressed'); etat.onclick = null
+      etat.title = 'Réglage illisible pour le moment. Rechargez la page.'
+      bloc.hidden = true
       return
     }
     const yf = d.pilote === 'yieldflow'
     const bloque = !d.peut_basculer && !yf
-    const ligne = (val, titre, texte, coche, desactive) =>
-      `<label aria-checked="${coche}">`
-      + `<input type="radio" name="yp-pilote-choix" value="${val}"`
-      + `${coche ? ' checked' : ''}${desactive ? ' disabled' : ''}>`
-      + `<span><b>${titre}</b>${texte}</span></label>`
+    // ⚠ L'ETAT EST UN MOT A COTE DU LOGEMENT, et le survol dit ce que le mode
+    // fait AUJOURD'HUI : en yieldflow, YieldFlow ouvre les dates de la fenêtre et
+    // entretient leurs prix chaque jour ; vos indisponibilités ne sont jamais
+    // touchées. Desactive, vous saisissez vos prix a la main dans le calendrier.
+    etat.hidden = false
+    etat.disabled = bloque
+    etat.className = `yp-etat ${yf ? 'on' : ''}`
+    etat.textContent = yf ? 'activé' : 'désactivé'
+    etat.setAttribute('aria-pressed', yf ? 'true' : 'false')
+    etat.title = bloque
+      ? (d.raison || 'Activation impossible pour ce logement.')
+      : (yf
+        ? 'Prédiction de prix activée : YieldFlow ouvre les dates de la fenêtre et entretient leurs prix chaque jour. Vos indisponibilités ne sont jamais touchées. Cliquez pour désactiver.'
+        : 'Prédiction de prix désactivée : vous saisissez vos prix à la main dans le calendrier. Cliquez pour activer.')
+    etat.onclick = () => confirmerBascule(yf ? 'calendrier' : 'yieldflow')
+    if (!yf) { bloc.hidden = true; bloc.innerHTML = ''; return }
     bloc.hidden = false
-    bloc.innerHTML = '<h3>Qui décide les prix de ce logement ?</h3>'
-      + '<div class="yp-choix">'
-      + ligne('calendrier', 'Le calendrier',
-        'Vous saisissez vos prix à la main, comme aujourd’hui.', !yf, false)
-      + ligne('yieldflow', 'YieldFlow',
-        'Les prix ne se saisissent plus dans le calendrier : YieldFlow ouvre les '
-        + 'dates de la fenêtre et entretient leurs prix chaque jour, par la règle '
-        + 'de cette page. Vos indisponibilités ne sont jamais touchées.', yf, bloque)
+    // ⚠ CE QUE LE MODE N'EMPORTE PAS SE DIT AUSSI. Sans cette phrase, l'hote
+    // qui active croit son calendrier mort et n'ose plus fermer une nuit.
+    bloc.innerHTML = '<p class="dit">Les prix de ce logement sont tenus par YieldFlow : ils ne se '
+      + 'saisissent plus dans le calendrier. La disponibilité et la fermeture à la vente, elles, '
+      + 'se règlent toujours dans le calendrier.</p>'
+      // LA FENETRE D'OUVERTURE (lot 4.6.3) : la fenetre reglee, la derniere
+      // ouverture du moteur, et le moyen de la changer. Le moteur tourne par le
+      // cron (toutes les 5 minutes) ; cet ecran ne l'appelle pas.
+      + fenetreHtml(d)
+    brancherFenetre(d)
+  }
+
+  // ⚠ CHANGER D'ETAT SE CONFIRME, DANS LES DEUX SENS — demande de Thierry
+  // (22 septembre 2026). Activer : l'IA va modifier les tarifs, l'hote verifie
+  // d'abord la configuration et les prix proposes. Desactiver : YieldFlow
+  // s'arrete, les prix en place restent, l'hote reprend la main.
+  function confirmerBascule (voulu) {
+    if (voulu === 'yieldflow') { demanderFenetre(); return }
+    const bloc = el('yp-pilote')
+    bloc.hidden = false
+    bloc.innerHTML = '<div class="yp-fenetre" id="yp-desactivation">'
+      + '<p class="avertir"><b>Désactiver la prédiction de prix ?</b> YieldFlow n’ouvrira plus de dates et ne modifiera plus vos tarifs. '
+      + 'Les prix en place restent au calendrier ; vous les saisissez à nouveau vous-même.</p>'
+      + '<button type="button" id="yp-des-valider">Désactiver</button>'
+      + '<button type="button" class="secondaire" id="yp-des-annuler">Annuler</button>'
+      + '<span class="etat" id="yp-des-etat"></span>'
       + '</div>'
-      + (bloque ? `<p class="raison">${ech(d.raison || '')}</p>` : '')
-      // ⚠ CE QUE LE MODE N'EMPORTE PAS SE DIT AUSSI. Sans cette phrase, l'hote
-      // qui bascule croit son calendrier mort et n'ose plus fermer une nuit.
-      + (yf ? '<p class="dit">Les prix de ce logement sont tenus par YieldFlow : ils ne se '
-        + 'saisissent plus dans le calendrier. La disponibilité et la fermeture à la vente, elles, '
-        + 'se règlent toujours dans le calendrier.</p>' : '')
-      // LA FENETRE D'OUVERTURE (lot 4.6.3). En yieldflow : la fenetre reglee, la
-      // derniere ouverture du moteur, et le moyen de la changer. Le moteur
-      // tourne par le cron (toutes les 5 minutes) ; cet ecran ne l'appelle pas.
-      + (yf ? fenetreHtml(d) : '')
-    for (const input of bloc.querySelectorAll('input[name="yp-pilote-choix"]')) {
-      input.addEventListener('change', () => basculerPilote(input.value))
-    }
-    if (yf) brancherFenetre(d)
+    el('yp-des-annuler').addEventListener('click', () => chargerPilote())
+    el('yp-des-valider').addEventListener('click', () => basculerPilote('calendrier'))
   }
 
   // ─── LA FENETRE D'OUVERTURE ────────────────────────────────────────────
@@ -671,12 +700,16 @@
   function demanderFenetre () {
     const bloc = el('yp-pilote')
     if (el('yp-fenetre-activation')) return
+    bloc.hidden = false
+    bloc.innerHTML = ''
     bloc.insertAdjacentHTML('beforeend', '<div class="yp-fenetre" id="yp-fenetre-activation">'
+      + '<p class="avertir"><b>L’IA de prédiction des prix va modifier vos tarifs.</b> '
+      + 'Vérifiez la configuration et les tarifs proposés sur cette page avant d’enclencher.</p>'
       + '<span><b>Jusqu’où YieldFlow ouvre-t-il vos dates ?</b></span>'
       + '<label>ouvrir <input type="number" id="yp-act-valeur" min="1" max="500" value="120"></label>'
       + '<select id="yp-act-type"><option value="jours" selected>jours</option><option value="mois">mois</option></select>'
       + ' <span>à l’avance</span>'
-      + '<button type="button" id="yp-act-valider">Activer YieldFlow</button>'
+      + '<button type="button" id="yp-act-valider">Activer</button>'
       + '<button type="button" class="secondaire" id="yp-act-annuler">Annuler</button>'
       + '<span class="etat" id="yp-act-etat">Les dates de cette fenêtre s’ouvriront à la vente dans les 5 minutes, avec leur prix actuel (ou le prix de base). Vos indisponibilités ne sont jamais touchées. La fenêtre glisse ensuite chaque jour.</span>'
       + '</div>')
@@ -689,6 +722,7 @@
     const bloc = el('yp-pilote')
     if (voulu === 'yieldflow' && !fenetre) { demanderFenetre(); return }
     for (const i of bloc.querySelectorAll('input, button')) i.disabled = true
+    el('yp-etat').disabled = true
     try {
       const r = await fetch('/api/yield-pilote', {
         method: 'POST',
@@ -700,10 +734,24 @@
       // ⚠ LE REFUS DU SERVEUR S'AFFICHE TEL QUEL. C'est lui qui porte la regle
       // et le message en francais ; le reecrire ici ferait deux verites.
       if (!r.ok) {
+        // ⚠ LE REFUS SE LIT DANS LE PANNEAU DE CONFIRMATION, QUI RESTE EN PLACE
+        // — releve en relecture : en mode calendrier, `chargerPilote` cache le
+        // bloc, donc une raison ajoutee apres etait invisible et l'hote ne
+        // savait jamais pourquoi l'activation avait ete refusee.
+        const zone = el('yp-act-etat') || el('yp-des-etat')
+        const message = d && d.error ? d.error : 'Changement refusé.'
+        if (zone) {
+          zone.textContent = message
+          zone.classList.add('raison')
+          for (const i of bloc.querySelectorAll('input, button')) i.disabled = false
+          el('yp-etat').disabled = false
+          return
+        }
         await chargerPilote()
+        bloc.hidden = false
         const p = document.createElement('p')
         p.className = 'raison'
-        p.textContent = d && d.error ? d.error : 'Changement refusé.'
+        p.textContent = message
         bloc.appendChild(p)
         return
       }
