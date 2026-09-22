@@ -516,9 +516,16 @@ calculables ») qui le dit.
    comme si elle était ouverte, avec son niveau, et « s'ouvrira le … » ou « si
    vous l'ouvrez ». La ligne garde la couleur de son état, le radar ne la
    compte pas « à monter » (pas de prix actuel). Une nuit fermée par l'hôte
-   garde son refus : c'est sa décision. La règle « je ne sais pas n'est pas
-   oui » du moteur tient : c'est l'écran qui demande la projection, en le
-   disant.
+   garde son refus : c'est sa décision (une fermeture écrit une ligne
+   `stop_sell`, donc la nuit n'est jamais « hors fenêtre »). La règle « je ne
+   sais pas n'est pas oui » du moteur tient : c'est l'écran qui demande la
+   projection, et il le dit PARTOUT où elle s'affiche — la ligne (« s'ouvrira
+   le … » / « si vous l'ouvrez »), le dépliant « pourquoi », et la case de la
+   pop-up Événements (« ~ » devant le prix, « pas encore en vente : prix
+   prévu » au survol). Contre-épreuve staging, Loft fenêtre 4 mois : octobre
+   2026 = 31 ouvertes, 0 projetée ; mars 2027 = 24 projetées avec prix et
+   niveau, ouverture prévue 4 mois avant, 7 nuits ouvertes à la main restent
+   ouvertes. Commits 7069731 et 9a80bd7.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
