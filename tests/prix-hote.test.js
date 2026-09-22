@@ -81,13 +81,15 @@ test('la purge ne touche que le PASSE du bien', async () => {
 // ─── L'ECRAN ────────────────────────────────────────────────────────────────
 const PAGE = lire('apps/yield/prix.html').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
 
-test('LE TEST QUI COMPTE : chaque ligne a vendre porte la couleur de son NIVEAU sur toute la ligne', () => {
-  // Les cinq teintes existaient (CLASSES) mais ne coloraient que les badges :
-  // demande de Thierry, recette du 22 septembre 2026, « comme la maquette Excel ».
+test('LE TEST QUI COMPTE : la couleur du niveau est une BULLE sur le badge, jamais sur toute la ligne', () => {
+  // Premier retour : « comme la maquette Excel » (toute la ligne). Second
+  // retour, le meme jour : « toute la ligne coloree n est pas agreable — une
+  // bulle seulement au niveau de la grille ecrite ». La ligne garde son ETAT.
   const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
-  assert.match(ligne, /const niveau = !passe && !n\.vendue && n\.ouverte === true && n\.suggestion != null \? \(CLASSES\[n\.niveau\] \|\| ''\) : ''/)
-  assert.match(ligne, /<tr class="\$\{we \? 'we' : ''\} \$\{etat\} \$\{niveau\}/, 'la classe de niveau est SUR le tr')
-  for (const c of ['n-base', 'n-moyen', 'n-haut', 'n-tres-haut', 'n-exceptionnel']) assert.match(PAGE, new RegExp(`\\.${c}\\s*\\{ background:`), `la teinte ${c} existe`)
+  assert.ok(!/\$\{niveau\}/.test(ligne), 'plus de classe de niveau sur le tr')
+  assert.match(ligne, /<tr class="\$\{we \? 'we' : ''\} \$\{etat\} /, 'la ligne porte son etat')
+  assert.match(ligne, /class="yp-niveau yp-niv-badge \$\{CLASSES\[n\.niveau\] \|\| ''\}/, 'la bulle est sur le mot du niveau')
+  for (const c of ['n-base', 'n-moyen', 'n-haut', 'n-tres-haut', 'n-exceptionnel']) assert.match(PAGE, new RegExp(`\\.yp-niv-badge\\.${c} \\{ background:`), `la pastille ${c} existe`)
 })
 
 test('LE TEST QUI COMPTE : sur un bien pilote, le prix se modifie sur la ligne, le conseil YieldFlow reste a cote, et la main part avec `prix_hote: true`', () => {
