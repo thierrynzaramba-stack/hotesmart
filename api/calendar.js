@@ -11,6 +11,7 @@ const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED 
 const { ecrireCalendrier, expandDays } = require('../lib/calendrier-writer')
 const { fermeturesDesBiens, fermeturesDuBien, nuitsFermees, creerFermeture, modifierFermeture, supprimerFermeture } = require('../lib/fermetures')
 const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
+const { poserPrixHote, retirerPrixHote } = require('../lib/prix-hote')
 
 // ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
 // review. `pilote_tarifaire` est desormais dans les deux selects de biens. Si
@@ -570,6 +571,16 @@ module.exports = async function handler(req, res) {
         local_only: r.localOnly, push_failed: r.pushFailed, warnings: [...(r.warnings || []), ...warnings] })
     }
 
+    // ===== RETIRER LA MAIN DE L'HOTE : le moteur reprend ces nuits au passage suivant =====
+    if (action === 'retirer_prix_hote') {
+      const { dates } = req.body || {}
+      const owned = await loadOwnedProperties([bienId], compte)
+      if (!owned[0]) return res.status(403).json({ error: 'Bien non autorise' })
+      const r = await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: Array.isArray(dates) ? dates : [dates] })
+      if (!r.ok) return res.status(r.raison === 'nuit_invalide' ? 400 : 503).json({ error: r.message, code: r.raison })
+      return res.status(200).json({ retirees: r.retirees, message: 'YieldFlow reprendra ces nuits à son prochain passage.' })
+    }
+
     if (action !== 'save') return res.status(400).json({ error: 'Action inconnue' })
     if (!property_id || !Array.isArray(segments) || !segments.length) {
       return res.status(400).json({ error: 'property_id et segments requis' })
@@ -647,9 +658,10 @@ module.exports = async function handler(req, res) {
     // ⚠ PLACE ICI, ET PAS PLUS BAS. Le bloc suivant ecrit `propUpdates` dans
     // `properties` : refuser apres lui laisserait passer une ecriture. On
     // refuse AVANT toute ecriture, comme le prix plancher, et rien ne bouge.
+    let nuitsPrixHote = []
     if (pilotParYield(bien)) {
       const tarifees = datesTarifees(dateSegments, expandDays)
-      if (tarifees.length) {
+      if (tarifees.length && req.body.prix_hote !== true) {
         console.log(`[calendar] REFUS pilote yieldflow : ${tarifees.length} date(s) tarifees`)
         // Le message lisible va dans `error` : `shared/api-client.js` construit
         // son exception avec `data.error`, jamais avec `data.message`.
@@ -657,6 +669,18 @@ module.exports = async function handler(req, res) {
           ...refusEcritureTarifaire(tarifees.length),
           dates: tarifees.slice(0, 20)
         })
+      }
+      // ⚠ ARBITRAGE A BIS (22 sept. 2026) : `prix_hote: true` = LA MAIN DE
+      // L'HOTE, memorisee dans `prix_hote` avant le writer (le moteur ne
+      // l'ecrase jamais), ecrite origine 'host'. Aucune porte de service :
+      // rien de plus que ce que l'hote a deja sur un bien non pilote, sous ses
+      // propres droits.
+      if (tarifees.length) {
+        for (const seg of dateSegments) {
+          if (seg.rate == null) continue
+          const cents = Math.round(Number(seg.rate) * 100)
+          for (const d of expandDays(seg.date_from, seg.date_to, seg.days)) nuitsPrixHote.push({ date: d, cents })
+        }
       }
     }
 
@@ -722,9 +746,27 @@ module.exports = async function handler(req, res) {
     // lib/calendrier-writer.js, et le canal interne du moteur appelle LA MEME
     // fonction. Cette porte n'a fait que ce qui lui revient : les droits, le
     // tri des segments, la garde du pilote tarifaire, la configuration du bien.
-    const r = await ecrireCalendrier({
-      supabase, bien, compte, dateSegments, origine: 'host', appel: channelCall
-    })
+    // ⚠ LA MAIN SE POSE ICI, APRES TOUS LES REFUS (releve en review : posee
+    // plus haut, un 409 « nuit couverte par une fermeture » la laissait
+    // orpheline, et le moteur sautait la nuit pour toujours sans qu'un prix de
+    // l'hote ait jamais ete ecrit). Et si le writer refuse ou leve, on la retire.
+    if (nuitsPrixHote.length) {
+      const pose = await poserPrixHote(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote })
+      if (!pose.ok) return res.status(pose.raison === 'nuit_invalide' ? 400 : 503).json({ error: pose.message, code: pose.raison })
+      console.log(`[calendar] prix de l'hote sur ${nuitsPrixHote.length} nuit(s) d'un bien pilote`)
+    }
+    let r
+    try {
+      r = await ecrireCalendrier({
+        supabase, bien, compte, dateSegments, origine: 'host', appel: channelCall
+      })
+    } catch (e) {
+      if (nuitsPrixHote.length) await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: nuitsPrixHote.map(n => n.date) })
+      throw e
+    }
+    if (r.refus && nuitsPrixHote.length) {
+      await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: nuitsPrixHote.map(n => n.date) })
+    }
     if (r.refus) return res.status(r.refus.status).json(r.refus.body)
     const { saved: rowsSaved, pushed, localOnly, pushFailed: pousseeRefusee, warnings: pushWarnings, taskIds: taskIdsSave } = r
 

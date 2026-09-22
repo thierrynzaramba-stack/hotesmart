@@ -37,7 +37,14 @@ test('LE TEST QUI COMPTE : jamais sur une indisponibilite, une nuit fermee, une 
   const r = calculerPrix({ aujourdHui: AUJ, fin: FIN, lignes, fermetures, prix })
   assert.deepEqual(r.changements.map(c => c.date), ['2026-10-01'], 'une seule nuit tarifable')
   assert.deepEqual(r.comptes, { calculees: 1, changees: 1, inchangees: 0, non_calculables: 0, sous_plancher: 0,
-    fermees: 2, fermees_par_l_hote: 1, vendues: 1, sans_ligne: 2, ouverture_inconnue: 0 })
+    fermees: 2, fermees_par_l_hote: 1, vendues: 1, sans_ligne: 2, ouverture_inconnue: 0, prix_hote: 0 })
+})
+
+test('LE TEST QUI COMPTE : la MAIN DE L HOTE n est jamais recalculee ni ecrasee (arbitrage A bis)', () => {
+  const lignes = [ouverte('2026-10-01', 80), ouverte('2026-10-02', 80)]
+  const r = calculerPrix({ aujourdHui: AUJ, fin: '2026-10-02', lignes, fermetures: [], prix: regle({}), prixHote: new Map([['2026-10-02', 8000]]) })
+  assert.deepEqual(r.changements.map(c => c.date), ['2026-10-01'], 'le 02 est a l hote : pas meme calcule')
+  assert.equal(r.comptes.prix_hote, 1)
 })
 
 test('LE TEST QUI COMPTE : l ouverture se lit PAR LA CAPACITE, comme l ecran — une ligne sans intention ni prix n est pas tarifee', () => {

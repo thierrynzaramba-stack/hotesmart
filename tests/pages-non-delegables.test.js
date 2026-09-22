@@ -82,11 +82,9 @@ const DELEGABLES = [
   // Même garde que l'écran de synthèse : `/api/yield-prix` garde `reservations`
   // en lecture, et la délégation passe par le BIEN.
   'apps/yield/prix.html',
-  // ⚠ CET ECRAN ECRIT, et c'est justement pour ça qu'il est ici : la ressource
-  // designee est le BIEN, donc `requirePermission` tranche le compte a partir
-  // de lui. Ajouter `compteDelegue` serait un parametre inutile sur un endpoint
-  // dont la ressource decide deja — et une seconde source de verite.
-  'apps/yield/evenements.html'
+  // ⚠ `apps/yield/evenements.html` n'est plus un ecran (22 septembre 2026) :
+  // une redirection vers la pop-up « Evenements » de prix.html, qui porte la
+  // garde. La ressource designee reste le BIEN, `requirePermission` tranche.
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────
@@ -148,6 +146,7 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'pages/airbnb-retour.html', 'pages/guide.html', 'pages/invitation.html',
     'pages/diagnostic.html', 'pages/channels-test.html',
     'apps/menages/public.html',  // PWA prestataire : jeton, pas de session
+    'apps/yield/evenements.html', // redirection vers la pop-up de prix.html (22 sept. 2026), aucune session
     'pages/book.html'            // moteur de reservation : page VOYAGEUR,
                                  // jeton dans l'URL, aucune session, aucune
                                  // donnee de compte. Marque blanche : elle ne

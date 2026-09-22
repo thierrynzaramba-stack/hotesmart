@@ -98,6 +98,16 @@ prix qui changent. Le **pilote quotidien** (`lib/pilote-quotidien.js`, lot
 4.6.5) les enchaîne une fois par jour et par bien. Détail :
 docs/specs/spec-yieldflow-v1.md §2 ter « 4.6.3 » à « 4.6.5 livré ».
 
+## Cas tranché : `prix_hote` (arbitrage A bis, 22 septembre 2026)
+
+La main de l'hôte sur un bien piloté par YieldFlow : une table dédiée, un seul
+writer (`lib/prix-hote.js`), qui dit QUELLES nuits l'hôte a tarifées lui-même
+et à quel prix. **Pas une seconde mémoire du prix** : le prix affiché vit dans
+`calendar_inventory`, écrit par le writer du calendrier (origine `host`) via
+`api/calendar.js` avec `prix_hote: true`. Le moteur saute ces nuits ; l'écran
+montre « votre prix » à côté de ce que YieldFlow proposait. Détail : spec
+§2 ter, « recette du 22 septembre 2026 ».
+
 ## La fiche du bien : `property_snapshots` (étape 1B)
 
 Même forme que `bookings_snapshot`, et c'est délibéré : un payload provider

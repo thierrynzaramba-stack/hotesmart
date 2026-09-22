@@ -275,6 +275,11 @@ sont ouverts au prix de la règle (sinon au prix de base — le seed n'a pas
 d'historique, la grille n'y est pas fiable), et une indisponibilité posée sur
 Loft reste fermée. Les alarmes partent au fondateur comme en prod.
 
+**La main de l'hôte (22 septembre 2026)** : la table `prix_hote`
+(`migrations/2026-09-22-prix-hote.sql`) est à coller sur staging avant la
+recette ; sans elle, le moteur ignore la main (table absente = aucune) et la
+saisie d'un prix sur un bien piloté répond « Enregistrement impossible ».
+
 **L'historique de recette (22 septembre 2026)** : le seed ne crée aucune
 réservation passée, donc la grille du moteur de prix n'y est jamais fiable.
 `scripts/seed-staging-historique.js --bien=<uuid> --go` pose deux ans de

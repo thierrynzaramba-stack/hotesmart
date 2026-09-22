@@ -474,6 +474,41 @@ d'autres, une indisponibilité, une nuit fermée à la main. C'est le bilan à
 l'écran (« dernier passage : 24 nuits ouvertes, 3 prix modifiés, 2 non
 calculables ») qui le dit.
 
+### ✅ Recette du 22 septembre 2026 — quatre retours de Thierry, livrés
+
+1. **La couleur du niveau sur toute la ligne** (Prix jour par jour) : une nuit
+   à vendre porte la teinte de son niveau (Base → Exceptionnel, les cinq
+   teintes de la grille) sur la ligne entière ; vendue, fermée, passée gardent
+   leur état.
+2. **La main de l'hôte sur un bien piloté — arbitrage A bis.** Sur la ligne
+   d'une nuit ouverte, l'hôte modifie le prix ; le conseil YieldFlow reste
+   affiché à côté de la saisie. Son prix devient le prix retenu, écrit par le
+   writer du calendrier avec l'origine `host` (journal `source = 'host'`), et
+   **le moteur ne l'écrase jamais** : la nuit est mémorisée dans la table
+   `prix_hote` (`migrations/2026-09-22-prix-hote.sql`, writer
+   `lib/prix-hote.js`), que les deux moteurs sautent (à l'ouverture, elle donne
+   son prix ; à l'entretien, elle n'est pas recalculée). **Jusqu'à quand** :
+   jusqu'à ce que la nuit soit passée (purge quotidienne) ou que l'hôte retire
+   son prix (« × » sur la ligne : YieldFlow reprend la nuit à son passage
+   suivant). Il n'expire jamais seul. Le chemin : la porte du calendrier
+   (`api/calendar.js`, `save` avec `prix_hote: true`, refus 409 inchangé sans
+   ce drapeau) — aucune porte de service, rien de plus que ce que l'hôte a déjà
+   sur un bien non piloté, sous ses propres droits. La règle A tient : un seul
+   décideur par nuit, et sur ces nuits-là c'est l'hôte.
+3. **Une fenêtre réglée « et rien ne se passe »** : staging n'a pas de cron ;
+   le passage manuel a ouvert 92 nuits. Aucun défaut.
+4. **Les événements en pop-up** depuis Prix jour par jour : un calendrier en
+   tableau du mois, les cases à la teinte du niveau de la nuit (prix et niveau
+   dedans), chaque événement en **contour unifié** (haut et bas sur toutes ses
+   cases, gauche sur la première, droite sur la dernière) — deux teintes dedans
+   (semaine, week-end) restent un seul événement ; **la semaine et le week-end
+   ne sont jamais des événements** (ce sont des couches, pas des segments).
+   « Ajouter un événement », réglage des crans, couper, supprimer, reconduire :
+   tout ce que l'ancienne page savait faire. L'ancienne URL redirige. Deux
+   événements qui se chevauchent : le contour est celui du plus long, et une
+   barre par événement au bas de la case montre les autres ; l'horizon du
+   calendrier scolaire se dit quand le mois le dépasse.
+
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 
 **A. La fermeture est une TABLE DÉDIÉE, pas un statut de réservation.**
