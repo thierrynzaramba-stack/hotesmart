@@ -41,8 +41,9 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 - Mac : repo /Users/thierry/Desktop/hotesmart, zsh, here-docs OK.
 - PC : repo ~/hotesmart, Git Bash (here-docs cassent), PowerShell `;` pas `&&`. WSL2 si dispo.
 - **Aucune branche dont le nom contient « staging »**, sauf la branche `staging`
-  elle-même (cible du projet Vercel staging, qui ne porte aucun code propre et
-  suit main). Une preview du projet de PRODUCTION porte le nom de branche dans
+  elle-même (cible du projet Vercel staging : elle reçoit la branche d'un lot
+  AVANT main, pour la recette, puis main après le merge ; aucun commit n'y est
+  fait directement). Une preview du projet de PRODUCTION porte le nom de branche dans
   son hostname : `hotesmart-git-<branche>-<equipe>.vercel.app`. Une branche
   `staging-xxx` y produit un hostname qui parle de staging alors que les
   fonctions `/api` tournent sur la prod. Le résolveur de `shared/config.js`

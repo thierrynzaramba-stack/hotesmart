@@ -42,8 +42,8 @@ const { requirePermission } = require('../lib/require-permission')
 const {
   MODES, piloteDuBien, peutPasserEnYieldflow, fenetreDuBien, validerFenetre
 } = require('../lib/pilote-tarifaire')
-const { effacerMarqueur, lireMarqueur } = require('../lib/ouverture-marqueur')
-const { viderPrixHote } = require('../lib/prix-hote')
+const { effacerMarqueur, lireMarqueur, jourParis } = require('../lib/ouverture-marqueur')
+const { recalerPrixHote, compterPrixHote } = require('../lib/prix-hote')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -101,6 +101,9 @@ module.exports = async (req, res) => {
     // La derniere ouverture du moteur, pour que l'ecran dise « ouvert jusqu'au
     // … le … » plutot que de laisser l'hote deviner si le cron est passe.
     const marqueur = await lireMarqueur(supabase, bien.id)
+    // Les nuits a venir qui portent la main de l'hote : les deux confirmations
+    // l'annoncent (dette 22). `null` = illisible, l'ecran se tait.
+    const nuitsPrixHote = await compterPrixHote(supabase, { userId: compte, propertyId: bien.id, aujourdHui: jourParis(new Date()) })
     return res.status(200).json({
       bien: bien.id,
       pilote: piloteDuBien(bien),
@@ -108,7 +111,8 @@ module.exports = async (req, res) => {
       peut_basculer: possible.ok,
       raison: possible.ok ? null : possible.error,
       fenetre: fenetreDuBien(bien),
-      ouverture: { derniere: marqueur ? marqueur.derniere : null, bilan: marqueur ? marqueur.bilan : null }
+      ouverture: { derniere: marqueur ? marqueur.derniere : null, bilan: marqueur ? marqueur.bilan : null },
+      prix_hote: { nuits: nuitsPrixHote }
     })
   }
 
@@ -161,6 +165,32 @@ module.exports = async (req, res) => {
     }
   }
 
+  // ⚠ DESACTIVER N'EFFACE PLUS LA MAIN DE L'HOTE (dette 22, decision (a) de
+  // Thierry, 23 septembre 2026). Le premier dessin la vidait au retour en
+  // calendrier : a la reactivation, le moteur ecrasait des prix que l'hote
+  // croyait encore les siens — vecu en recette. Desactiver n'est pas un geste
+  // sur les prix : les marques survivent, inertes (seul le pilote quotidien
+  // les lit, et il ne passe pas sur un bien en calendrier).
+  //
+  // A LA REACTIVATION, chaque marque reprend le prix affiche au calendrier
+  // (l'hote a pu le changer entre-temps a la main) — et CELA SE FAIT AVANT LA
+  // BASCULE (releve en review). Apres, un tick du cron glisse entre la
+  // bascule et le recalage pouvait ouvrir une nuit marquee a l'ANCIEN montant
+  // de la marque, l'ecrire au calendrier, et le recalage relisait ensuite ce
+  // montant : le prix saisi pendant la desactivation etait perdu sans trace.
+  // Avant la bascule, les marques sont inertes : recaler est sans risque. Un
+  // echec REFUSE l'activation — la confirmation promet « le prix affiche au
+  // calendrier » ; on ne l'enclenche pas sans pouvoir le tenir.
+  let prixHote = null
+  if (voulu === 'yieldflow' && actuel !== 'yieldflow') {
+    const rc = await recalerPrixHote(supabase, { userId: compte, propertyId: bien.id, aujourdHui: jourParis(new Date()) })
+    if (!rc.ok) {
+      console.error('[yield-pilote] recalage des prix de l hote impossible, activation refusee', bien.id, rc.message)
+      return res.status(503).json({ error: 'Vos prix fixés n’ont pas pu être relus : l’activation est refusée pour ne pas les modifier. Réessayez.', code: 'prix_hote_illisibles' })
+    }
+    prixHote = { nuits: rc.nuits, recalees: rc.recalees }
+  }
+
   // ⚠ LE COMPTE DANS LE `WHERE`, PAS SEULEMENT DANS LA GARDE. La garde a deja
   // tranche, mais une requete qui ne porte pas son cloisonnement finit par
   // etre recopiee dans un contexte qui n'en a plus.
@@ -195,10 +225,8 @@ module.exports = async (req, res) => {
     const { error: eM } = await effacerMarqueur(supabase, bien.id)
     if (eM) console.error('[yield-pilote] marqueur non efface', bien.id, eM.message)
   }
-  // Retour en calendrier : la main de l'hote n'a plus d'objet — ses prix vivent
-  // dans le calendrier, qu'il tient lui-meme.
-  if (voulu === 'calendrier' && actuel === 'yieldflow') await viderPrixHote(supabase, { userId: compte, propertyId: bien.id })
-  console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}${fenetre ? ` (fenetre ${fenetre.valeur} ${fenetre.type})` : ''}`)
+  console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}${fenetre ? ` (fenetre ${fenetre.valeur} ${fenetre.type})` : ''}${prixHote ? ` — prix de l hote : ${prixHote.nuits} nuit(s), ${prixHote.recalees} recalee(s)` : ''}`)
   return res.status(200).json({ bien: bien.id, pilote: voulu, fenetre: voulu === 'yieldflow' ? (fenetre || fenetreDuBien(bien)) : null, change: true,
-    ouverture: voulu === 'yieldflow' ? 'Les dates s\'ouvriront automatiquement dans les 5 minutes, puis chaque jour.' : null })
+    ouverture: voulu === 'yieldflow' ? 'Les dates s\'ouvriront automatiquement dans les 5 minutes, puis chaque jour.' : null,
+    prix_hote: prixHote })
 }

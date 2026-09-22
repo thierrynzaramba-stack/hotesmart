@@ -13,15 +13,20 @@ d'interface et le schéma restent à faire — §5 et §6.
 | | Production | Staging |
 |---|---|---|
 | Projet Vercel | `hotesmart` | `hotesmart-staging` |
-| Branche servie | `main` | `staging` (suit main, aucun code propre) |
+| Branche servie | `main` | `staging` (le lot en recette, puis main) |
 | Projet Supabase | `cjmrizpdyhrcurmgyrhs` | `ortyofzzdsthlhqmzsnq` |
 | Compte Channex | `app.channex.io` (payant) | `staging.channex.io` |
 | Stripe | test | test |
 | Cron | Vercel natif `*/5` | AUCUN planifié — manuel seulement |
 
-La branche `staging` ne porte jamais de correctif propre : elle suit `main`.
-Un chantier se fait sur sa branche, part en review, merge dans `main`, et
-`staging` est avancée dessus.
+La branche `staging` ne porte jamais de commit propre, mais elle ne suit pas
+`main` : elle la PRÉCÈDE. Un chantier se fait sur sa branche, part en review,
+puis est **mergé dans `staging` pour la recette** (Thierry joue les pièces sur
+l'URL staging) ; ce n'est qu'une fois la recette validée qu'il merge dans
+`main`, et `staging` reçoit alors `main` à son tour. Un correctif trouvé en
+recette se fait sur la branche du lot, jamais sur `staging`. Conséquence : à
+un instant donné, `staging` peut porter du code qui n'est pas en production —
+c'est son rôle, pas une dérive.
 
 ---
 

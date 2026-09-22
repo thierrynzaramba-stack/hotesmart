@@ -11,7 +11,7 @@ const { canPushRates, RATE_PUSH_BLOCKED, estRelieAuCanal, CHANNEL_NOT_CONNECTED 
 const { ecrireCalendrier, expandDays } = require('../lib/calendrier-writer')
 const { fermeturesDesBiens, fermeturesDuBien, nuitsFermees, creerFermeture, modifierFermeture, supprimerFermeture } = require('../lib/fermetures')
 const { pilotParYield, refusEcritureTarifaire, datesTarifees } = require('../lib/pilote-tarifaire')
-const { poserPrixHote, retirerPrixHote } = require('../lib/prix-hote')
+const { poserPrixHote, annulerPose, retirerPrixHote } = require('../lib/prix-hote')
 
 // ⚠ LA COLONNE DU LOT 4.5 NE DOIT PAS POUVOIR TUER LE CALENDRIER — releve en
 // review. `pilote_tarifaire` est desormais dans les deux selects de biens. Si
@@ -749,9 +749,13 @@ module.exports = async function handler(req, res) {
     // ⚠ LA MAIN SE POSE ICI, APRES TOUS LES REFUS (releve en review : posee
     // plus haut, un 409 « nuit couverte par une fermeture » la laissait
     // orpheline, et le moteur sautait la nuit pour toujours sans qu'un prix de
-    // l'hote ait jamais ete ecrit). Et si le writer refuse ou leve, on la retire.
+    // l'hote ait jamais ete ecrit). Et si le writer refuse ou leve, on la DEFAIT.
+    // ⚠ DEFAIRE, PAS RETIRER (dette 22) : retirer supprimait aussi la marque
+    // d'avant — un prix trop bas saisi sur une nuit deja « votre prix » (refus
+    // du plancher) faisait perdre ce prix-la, que l'hote n'avait pas touche.
+    let pose = null
     if (nuitsPrixHote.length) {
-      const pose = await poserPrixHote(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote })
+      pose = await poserPrixHote(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote })
       if (!pose.ok) return res.status(pose.raison === 'nuit_invalide' ? 400 : 503).json({ error: pose.message, code: pose.raison })
       console.log(`[calendar] prix de l'hote sur ${nuitsPrixHote.length} nuit(s) d'un bien pilote`)
     }
@@ -761,11 +765,19 @@ module.exports = async function handler(req, res) {
         supabase, bien, compte, dateSegments, origine: 'host', appel: channelCall
       })
     } catch (e) {
-      if (nuitsPrixHote.length) await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: nuitsPrixHote.map(n => n.date) })
+      // ⚠ UNE EXCEPTION NE DIT PAS SI LE PRIX EST DEJA ECRIT (releve en review :
+      // le writer peut lever APRES l'upsert, a la poussee). Defaire ici laissait
+      // un prix de l'hote au calendrier SANS marque, que le moteur ecrasait au
+      // passage suivant. On GARDE la marque : une marque en trop se voit a
+      // l'ecran (« ⚠ fixé à »), une marque perdue ne se voit pas.
+      if (pose) console.error(`[calendar] exception du writer apres pose du prix de l hote (${nuitsPrixHote.length} nuit(s)) : marque conservee`, e.message)
       throw e
     }
-    if (r.refus && nuitsPrixHote.length) {
-      await retirerPrixHote(supabase, { userId: compte, propertyId: bienId, dates: nuitsPrixHote.map(n => n.date) })
+    // Un REFUS, lui, tombe toujours avant toute ecriture (plancher, relecture,
+    // upsert en echec) : la pose se defait.
+    if (r.refus && pose) {
+      const a = await annulerPose(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote, avant: pose.avant })
+      if (!a.ok) console.error('[calendar] ANNULATION INCOMPLETE du prix de l hote apres refus', bienId, (a.echecs || []).join(','))
     }
     if (r.refus) return res.status(r.refus.status).json(r.refus.body)
     const { saved: rowsSaved, pushed, localOnly, pushFailed: pousseeRefusee, warnings: pushWarnings, taskIds: taskIdsSave } = r

@@ -108,6 +108,13 @@ et à quel prix. **Pas une seconde mémoire du prix** : le prix affiché vit dan
 montre « votre prix » à côté de ce que YieldFlow proposait. Détail : spec
 §2 ter, « recette du 22 septembre 2026 ».
 
+**Une marque survit à la désactivation du pilote** (dette 22, 23 septembre
+2026) et se recale sur le calendrier à la réactivation. **Sa vie se trace** dans
+`prix_hote_journal`, append-only, même writer : chaque événement (posée,
+remplacée, retirée, annulée, recalée, purgée) avec son geste et ses deux prix.
+Leçon : une table qui ne garde que l'état courant ne sait pas dire pourquoi une
+ligne a disparu — le 22 septembre, la cause n'a été établie que par déduction.
+
 ## La fiche du bien : `property_snapshots` (étape 1B)
 
 Même forme que `bookings_snapshot`, et c'est délibéré : un payload provider

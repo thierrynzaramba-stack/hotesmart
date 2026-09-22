@@ -557,6 +557,9 @@
   // bascule par `api/yield-pilote.js`. Ce qui est ici EXPLIQUE ; ça ne protege
   // pas. Une restriction d'UI n'est pas une restriction.
   let enCoursPilote = 0
+  let nuitsPrixHote = null
+  // « 3 nuits gardent votre prix » — la phrase de la decision (a), une fois.
+  const phrasePrixHote = n => `${n} nuit${n > 1 ? 's' : ''} garde${n > 1 ? 'nt' : ''} votre prix`
   async function chargerPilote () {
     // ⚠ LE MEME JETON QUE `charger()` — releve en review. Sans lui, deux
     // changements de logement rapides peuvent peindre le pilote du bien A
@@ -569,6 +572,8 @@
     const etat = el('yp-etat')
     const confirm = el('yp-confirm')
     confirm.hidden = true; confirm.innerHTML = ''
+    // Jamais le compte du logement precedent dans la confirmation de celui-ci.
+    nuitsPrixHote = null
     // Pendant la lecture, le bouton ne repond pas : il porte encore l'etat du
     // bien precedent (releve en relecture).
     etat.disabled = true
@@ -595,6 +600,9 @@
     }
     const yf = d.pilote === 'yieldflow'
     const bloque = !d.peut_basculer && !yf
+    // Les nuits a venir qui gardent le prix de l'hote (dette 22) : les deux
+    // confirmations les annoncent. `null` = illisible, on se tait.
+    nuitsPrixHote = d.prix_hote && Number.isInteger(d.prix_hote.nuits) ? d.prix_hote.nuits : null
     // ⚠ L'ETAT EST UN MOT A COTE DU LOGEMENT, et le survol dit ce que le mode
     // fait AUJOURD'HUI : en yieldflow, YieldFlow ouvre les dates de la fenêtre et
     // entretient leurs prix chaque jour ; vos indisponibilités ne sont jamais
@@ -635,6 +643,9 @@
     bloc.innerHTML = '<div class="yp-fenetre" id="yp-desactivation">'
       + '<p class="avertir"><b>Désactiver la prédiction de prix ?</b> YieldFlow n’ouvrira plus de dates et ne modifiera plus vos tarifs. '
       + 'Les prix en place restent au calendrier ; vous les saisissez à nouveau vous-même.</p>'
+      // ⚠ DESACTIVER N'EFFACE PAS LA MAIN DE L'HOTE (dette 22) : on le dit,
+      // pour que l'hote sache ce qu'il retrouvera en reactivant.
+      + (nuitsPrixHote ? `<p class="dit">${phrasePrixHote(nuitsPrixHote)} : à la réactivation, YieldFlow ne ${nuitsPrixHote > 1 ? 'les' : 'la'} modifiera pas. C’est le prix affiché au calendrier à ce moment-là qui sera retenu.</p>` : '')
       + '<button type="button" id="yp-des-valider">Désactiver</button>'
       + '<button type="button" class="secondaire" id="yp-des-annuler">Annuler</button>'
       + '<span class="etat" id="yp-des-etat"></span>'
@@ -704,6 +715,9 @@
     bloc.insertAdjacentHTML('beforeend', '<div class="yp-fenetre" id="yp-fenetre-activation">'
       + '<p class="avertir"><b>L’IA de prédiction des prix va modifier vos tarifs.</b> '
       + 'Vérifiez la configuration et les tarifs proposés sur cette page avant d’enclencher.</p>'
+      // ⚠ LA DECISION (a) SE DIT A LA REACTIVATION (dette 22) : les nuits dont
+      // l'hote a fixe le prix restent a lui, au prix affiche au calendrier.
+      + (nuitsPrixHote ? `<p class="dit"><b>${phrasePrixHote(nuitsPrixHote)}.</b> YieldFlow ne ${nuitsPrixHote > 1 ? 'les' : 'la'} modifiera pas : c’est le prix affiché au calendrier qui est retenu. Pour ${nuitsPrixHote > 1 ? 'les' : 'la'} lui confier, retirez votre prix sur ${nuitsPrixHote > 1 ? 'leur' : 'sa'} ligne.</p>` : '')
       + '<span><b>Jusqu’où YieldFlow ouvre-t-il vos dates ?</b></span>'
       + '<label>ouvrir <input type="number" id="yp-act-valeur" min="1" max="500" value="120"></label>'
       + '<select id="yp-act-type"><option value="jours" selected>jours</option><option value="mois">mois</option></select>'
