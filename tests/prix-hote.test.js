@@ -154,3 +154,17 @@ test('le bandeau du mois porte le CA vendu a ce jour et le N-1 au meme delai, lu
   assert.ok(fn.includes('p.a_date_n1 && p.a_date_n1.ca != null && !(cmp && cmp.non_calculable)'), 'le N-1 seulement s il existe et n est pas disqualifie')
   assert.ok(!/fetch\(/.test(fn), 'aucune requete de plus')
 })
+
+test('chaque tuile du radar porte le CA vendu a ce jour et le N-1 au meme delai (mois passe : mois entier contre mois entier), venus de pickup', () => {
+  const src = lire('api/yield-prix.js')
+  assert.match(src, /ca_a_date: pk\.a_date && pk\.a_date\.ca != null \? pk\.a_date\.ca : null/, 'le CA a ce jour, meme sans N-1')
+  assert.match(src, /ca_a_date_n1: pk\.a_date_n1 && pk\.a_date_n1\.ca != null \? pk\.a_date_n1\.ca : null/)
+  const tuile = src.slice(src.indexOf('const radar = moisRadar.map'), src.indexOf('alertes: {'))
+  assert.ok(tuile.includes("ca: prM && prM.ca_a_date != null"), 'la tuile porte `ca`, null sans chiffre — jamais 0')
+  assert.ok(tuile.includes('non_calculable: prM.ca_non_calculable'), 'et la disqualification du N-1 voyage avec')
+  const rad = PAGE.slice(PAGE.indexOf('function radar (d)'), PAGE.indexOf('function pointsDuMois') > 0 ? PAGE.indexOf('function pointsDuMois') : PAGE.indexOf('function radar (d)') + 6000)
+  assert.ok(rad.includes('const caN1 = ca && ca.n1 != null && !ca.non_calculable ? ca.n1 : null'), 'un N-1 disqualifie ne s affiche pas')
+  assert.ok(rad.includes('<span class="ca"><b>${euros(ca.a_date)}</b>'), 'le montant sur la tuile')
+  assert.ok(rad.includes('CA du mois') && rad.includes('CA vendu à ce jour'), 'mois passe / mois a venir se disent differemment')
+  assert.ok(/\.yp-rm \.ca \{/.test(PAGE), 'et la classe a un style')
+})
