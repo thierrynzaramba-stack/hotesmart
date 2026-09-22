@@ -745,7 +745,8 @@
     const moisParis = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date()).slice(0, 7)
     const periode = p.periode || mois
     const quand = periode < moisParis ? 'mois terminé'
-      : (periode === moisParis ? 'mois en cours' : `${p.delai_jours} jour(s) avant le début du mois`)
+      : (periode === moisParis ? 'mois en cours'
+        : (p.delai_jours != null ? `${p.delai_jours} jour(s) avant le début du mois` : 'mois à venir'))
     let n1 = ''
     const cmp = p.vs_n1 && p.vs_n1.ca ? p.vs_n1.ca : null
     if (p.a_date_n1 && p.a_date_n1.ca != null && !(cmp && cmp.non_calculable)) {
