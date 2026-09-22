@@ -509,6 +509,16 @@ calculables ») qui le dit.
    événements qui se chevauchent : le contour est celui du plus long, et une
    barre par événement au bas de la case montre les autres ; l'horizon du
    calendrier scolaire se dit quand le mois le dépasse.
+5. **Une nuit non ouverte montre les mêmes informations qu'une nuit ouverte**
+   (retour suivant, le même jour : « pour que l'utilisateur puisse
+   anticiper »). Pas encore ouverte (au-delà de la fenêtre) ou non renseignée
+   (aucune ligne), elle reçoit une **projection** : la suggestion calculée
+   comme si elle était ouverte, avec son niveau, et « s'ouvrira le … » ou « si
+   vous l'ouvrez ». La ligne garde la couleur de son état, le radar ne la
+   compte pas « à monter » (pas de prix actuel). Une nuit fermée par l'hôte
+   garde son refus : c'est sa décision. La règle « je ne sais pas n'est pas
+   oui » du moteur tient : c'est l'écran qui demande la projection, en le
+   disant.
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 

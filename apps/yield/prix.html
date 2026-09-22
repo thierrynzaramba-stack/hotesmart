@@ -1118,10 +1118,22 @@
             ? 'Part de cette nuit dans le prix payé par le voyageur (répartition uniforme sur les nuits du séjour).'
             : 'Prix affiché au calendrier pour cette nuit.')}">${euros(p)}</span>`
         : `<span class="yp-vide" title="Cette nuit est vendue, mais son prix n’est pas exploitable — souvent une réservation recréée lors d’une migration de canal.">—</span>`
+    } else if (!passe && n.projection && n.suggestion != null) {
+      // ⚠ UNE NUIT NON OUVERTE MONTRE LES MEMES INFORMATIONS QU'UNE NUIT
+      // OUVERTE — demande de Thierry (22 septembre 2026) : le prix auquel elle
+      // s'ouvrira (ou que YieldFlow proposerait), son niveau, et QUAND. La
+      // ligne garde la couleur de son etat : on anticipe, on ne confond pas.
+      const q = n.ouverture_prevue ? dateFr(n.ouverture_prevue) : null
+      const quand = n.hors_fenetre
+        ? `s’ouvrira${q ? ` le ${q}` : ' seule'}`
+        : 'non renseignée · si vous l’ouvrez'
+      prix = `<span class="yp-prix">${euros(n.suggestion)}</span>
+        <span class="yp-niveau yp-niv-badge ${CLASSES[n.niveau] || ''}" title="${ech(`Niveau ${n.niveau} de votre grille.`)}">${ech(n.etiquette || n.niveau)}</span>
+        <span class="yp-attente" title="${ech(n.hors_fenetre
+          ? `Cette nuit est au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour, et cette nuit s’ouvrira seule${q ? ` le ${q}` : ''}, à ce prix.`
+          : 'Votre calendrier ne va pas jusqu’à cette nuit. Si vous l’ouvrez, voici ce que YieldFlow proposerait.')}">${quand}</span>`
     } else if (!passe && n.hors_fenetre) {
-      // ⚠ LA DATE, PAS SEULEMENT LE MOT. « Pas encore ouverte » sans « quand »
-      // se lit comme une panne sur huit mois de calendrier vide. La date vient
-      // du serveur (lib/pilote-tarifaire.js), l'écran ne la recalcule pas.
+      // Sans projection calculable (grille non fiable) : au moins la date.
       const q = n.ouverture_prevue ? dateFr(n.ouverture_prevue) : null
       prix = `<span class="yp-attente" title="${ech(`Cette nuit est au-delà de la fenêtre de vente de ce logement, pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour, et cette nuit s’ouvrira seule${q ? ` le ${q}` : ''}, avec son prix déjà prêt.`)}">pas encore ouverte${q ? ` · s’ouvrira le ${q}` : ''}</span>`
     } else if (n.prix_hote != null && pilote) {
@@ -1444,7 +1456,7 @@
     for (let jour = 1; jour <= nbJours; jour++) {
       const iso = `${mois}-${String(jour).padStart(2, '0')}`
       const n = parDate.get(iso)
-      const niveau = n && n.suggestion != null && n.ouverte === true && !n.vendue ? (CLASSES[n.niveau] || '') : ''
+      const niveau = n && n.suggestion != null && (n.ouverte === true || n.projection) && !n.vendue ? (CLASSES[n.niveau] || '') : ''
       const ids = parJour.get(iso) || []
       const cadre = ids.length ? entrees[ids.slice().sort((x, y) => duree(entrees[y]) - duree(entrees[x]))[0]] : null
       const e = cadre

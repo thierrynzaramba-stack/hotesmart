@@ -419,8 +419,22 @@ module.exports = async (req, res) => {
         (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${auj}T00:00:00Z`)) / 86400000)
       const seg = R.segmenterJour(date, contexte)
       const pr = pressionParMois.get(date.slice(0, 7)) || null
+      // ⚠ UNE NUIT NON OUVERTE MONTRE LES MEMES INFORMATIONS QU'UNE NUIT
+      // OUVERTE — demande de Thierry (recette du 22 septembre 2026) : « pour
+      // que l'utilisateur puisse anticiper ». Pas encore ouverte (au-dela de la
+      // fenetre) ou non renseignee (aucune ligne), la nuit recoit une
+      // PROJECTION : la suggestion calculee comme si elle etait ouverte — le
+      // prix auquel elle s'ouvrira, ou celui que YieldFlow proposerait. Le
+      // drapeau `projection` voyage avec, l'ecran le dit, et le radar ne compte
+      // pas ces nuits « a monter » (elles n'ont pas de prix actuel). Une nuit
+      // FERMEE par l'hote, elle, garde son refus : c'est sa decision.
+      // ⚠ Sans ligne, seulement si l'ouverture est CONNUE : quand la capacite
+      // n'est pas calculable, « non renseignee » serait une affirmation de
+      // plus la ou l'on ne sait rien (releve en relecture).
+      const projection = !vendue && delai >= 0 && ouverte !== false &&
+        (horsFenetre.has(date) || (ouvertureConnue && !parDate.has(date)))
       const s = S.suggerer({
-        date, grille, contexte, ouverte, vendue, delaiJours: delai,
+        date, grille, contexte, ouverte: projection ? true : ouverte, vendue, delaiJours: delai,
         pression: pr && pr.ecart != null
           ? { ecart: pr.ecart, fiable: pr.fiable !== false,
             motif_non_fiable: pr.motif_non_fiable || null }
@@ -470,6 +484,7 @@ module.exports = async (req, res) => {
         // calendrier vide sur huit mois se lit comme une panne. La regle et
         // la date viennent de lib/pilote-tarifaire.js, en un seul endroit.
         hors_fenetre: horsFenetre.has(date),
+        projection,
         prix_hote: prixHote.has(date) ? prixHote.get(date) / 100 : null,
         ouverture_prevue: horsFenetre.has(date) ? dateOuverture(bien, date, auj) : null,
         // ⚠ LE PRIX DE BASE N'EST PAS « LE PRIX AFFICHE » — releve en review.

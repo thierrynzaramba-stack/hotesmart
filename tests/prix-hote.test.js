@@ -107,7 +107,7 @@ test('LE TEST QUI COMPTE : la pop-up Evenements — un calendrier en tableau, la
   assert.match(PAGE, /id="yp-ouvrir-ev"/); assert.match(PAGE, /id="yp-ov-ev" role="dialog"/)
   const pop = PAGE.slice(PAGE.indexOf('function rendrePopup (message = \'\')'), PAGE.indexOf('function decalerJour (iso, n)'))
   assert.ok(pop.includes('<table class="yp-cal">'), 'un tableau')
-  assert.ok(pop.includes("const niveau = n && n.suggestion != null && n.ouverte === true && !n.vendue ? (CLASSES[n.niveau] || '') : ''"), 'la case porte le niveau')
+  assert.ok(pop.includes("const niveau = n && n.suggestion != null && (n.ouverte === true || n.projection) && !n.vendue ? (CLASSES[n.niveau] || '') : ''"), 'la case porte le niveau — aussi pour une nuit projetee')
   assert.ok(pop.includes("(ev.calendrier || []).filter(e => e.debut <= finMois && e.fin >= debutMois)"), 'les evenements viennent du calendrier de pilotage (segments), pas des couches jour de semaine')
   assert.ok(pop.includes("premierDuEv ? 'ev-g' : ''") && pop.includes("dernierDuEv ? 'ev-d' : ''"), 'contour : premiere et derniere case')
   assert.match(PAGE, /\.yp-cal td\.ev \{ border-top-color: var\(--ev\); border-bottom-color: var\(--ev\)/, 'haut et bas sur toutes les cases : un seul trait')
@@ -130,4 +130,16 @@ test('correctifs de review : prix REEL affiche et ecart marque, clavier sans pro
   assert.ok(pop.includes('sv.incertain_apres'), 'l horizon du calendrier scolaire se dit')
   assert.match(lire('api/yield-pilote.js'), /if \(voulu === 'calendrier' && actuel === 'yieldflow'\) await viderPrixHote/)
   assert.match(lire('scripts/piloter-yieldflow.js'), /prixHote = await prixHoteDuBien\(sb, bien\.id, auj, fin\)/, 'le dry-run voit la main')
+})
+
+test('une nuit NON OUVERTE montre les memes informations qu une nuit ouverte : la projection (prix, niveau, quand)', () => {
+  const src = lire('api/yield-prix.js')
+  assert.match(src, /const projection = !vendue && delai >= 0 && ouverte !== false &&\n\s+\(horsFenetre\.has\(date\) \|\| \(ouvertureConnue && !parDate\.has\(date\)\)\)/, 'hors fenetre ou sans ligne (ouverture connue), a venir, non vendue, jamais fermee')
+  assert.match(src, /ouverte: projection \? true : ouverte/, 'la suggestion est calculee comme si la nuit etait ouverte')
+  assert.match(src, /\n\s+projection,\n/, 'et le drapeau voyage')
+  const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
+  assert.ok(ligne.includes('} else if (!passe && n.projection && n.suggestion != null) {'), 'la ligne montre la projection')
+  assert.ok(ligne.includes('s’ouvrira') && ligne.includes('si vous l’ouvrez'), 'et dit quand, ou a quelle condition')
+  // Une nuit fermee par l'hote n'est PAS projetee : c'est sa decision.
+  assert.ok(!/ouverte === false[^\n]*projection/.test(src))
 })
