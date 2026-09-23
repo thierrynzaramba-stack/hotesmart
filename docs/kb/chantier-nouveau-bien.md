@@ -304,6 +304,14 @@ vraies ventes à mesure qu'elles arrivent.
     Limite juste à côté : §10, point 6. Décision : arbitrage B.
 15. **Les années anciennes du marché servent à la FORME saisonnière, pas au
     NIVEAU** (§3 ter, constat 3) : l'offre et la couverture ont changé.
+16. **Un prix ne bouge jamais sous les pieds de l'hôte sans qu'il sache
+    pourquoi.** À chaque rafraîchissement du marché qui déplace un niveau de sa
+    grille (arbitrage 6), comme à chaque bascule vers le réel (arbitrage 3),
+    l'hôte est prévenu : QUEL niveau, DE COMBIEN, et POURQUOI (« vos
+    comparables se sont vendus plus cher cet hiver »). Jamais silencieux.
+17. **Sur la sélection, on MONTRE, on n'exclut pas.** Un comparable au niveau
+    instable, un gestionnaire qui pèse lourd : l'écran le dit avec les
+    chiffres, le propriétaire décide. C'est lui qui choisit ses comparables.
 
 ---
 
@@ -312,26 +320,45 @@ vraies ventes à mesure qu'elles arrivent.
 Propositions argumentées faites le 23 septembre ; ce qui est tranché l'est
 par Thierry.
 
-1. **Seuil de fiabilité** — *version finale proposée, non tranchée* : la
-   grille marché est fiable si, sur la fenêtre retenue par A (les **12 derniers
-   mois complets**), il y a **au moins 3 comparables** retenus, **au moins
-   200 nuits Airbnb vendues** au total — comptées APRÈS l'écart des mois à
-   moins de 5 nuits (arbitrage 2) — et **aucun comparable** (ni aucun
-   gestionnaire, si l'API le donne) **au-delà de 40 % du poids**. Sous le
-   seuil : « référence amincie », avec les comptes réels (arbitrage 5).
-   *Ce qu'A change* : le seuil se lit sur 12 mois, plus sur 26 ; 3 comparables
-   à ~60 % d'occupation Airbnb en donnent ~650, la marge est large. *Ce que la
-   règle 11 impose* : ce sont des nuits AIRBNB — le seuil se dit « 200 nuits
-   Airbnb », jamais « 200 nuits vendues » tout court. Un comparable marqué
-   « niveau instable » (contrôle de stabilité, ci-dessous) compte comme les
-   autres s'il est gardé par le propriétaire.
+1. **Seuil de fiabilité** — *corrigé par Thierry le 23 septembre 2026, à
+   confirmer* : la première version (plafond de 40 % par comparable ET par
+   gestionnaire) **rejetait la seule sélection prouvée** — les 3 jacuzzis qui
+   ont reconstruit la grille réelle de La bulle à 5 € près. Version corrigée,
+   sur les **12 derniers mois complets** (A) :
+   - **au moins 3 comparables** retenus ;
+   - **au moins 200 nuits Airbnb** au total, comptées APRÈS l'écart des mois à
+     moins de 5 nuits (arbitrage 2 ; règle 11 : « nuits Airbnb », jamais
+     « nuits vendues » tout court) ;
+   - **aucun comparable au-delà de 50 % du poids ; à partir de 5 comparables,
+     au-delà de 40 %.** Le plafond dépend du nombre : avec 3 comparables, la
+     part minimale atteignable est déjà 33,3 %, exiger moins de 40 % imposerait
+     un équilibre que le réel ne donne presque jamais ;
+   - **le poids d'un GESTIONNAIRE n'est pas un seuil, c'est un
+     AVERTISSEMENT** (règle 17). Un marché de niche est souvent tenu par un
+     seul professionnel — un fait du marché, pas un défaut de la sélection, et
+     précisément le cas des biens qui ont le plus besoin de la V2. L'écran
+     affiche « 2 de vos 3 comparables appartiennent au même gestionnaire (91 %
+     du poids) — leurs prix suivent une même politique commerciale », et le
+     propriétaire décide. Le gestionnaire se lit par `host_info.host_id` (et
+     `cohost_ids`) ; **jamais par `professional_management`**, qui vaut
+     `false` pour Instant Pyrénées, gestionnaire d'au moins quatre annonces du
+     fichier de La bulle.
+   Sous le seuil : « référence amincie », avec les comptes réels
+   (arbitrage 5). Un comparable marqué « niveau instable » compte comme les
+   autres s'il est gardé.
+   **Pièce, recalculée depuis `comps-labulle.json` (`ttm_days_reserved`)** :
+   Cozy nest (Stephen) 285 nuits = 47,6 % ; The 4th (Stephen) 258 = 43,1 % ;
+   Romantic Duo (Carole) 56 = 9,3 % ; total 599 nuits. Première version :
+   rejetée (47,6 % > 40 %, Stephen 90,7 % > 40 %). Version corrigée : fiable
+   (3 comparables, 599 nuits, plus lourd 47,6 % ≤ 50 %) + avertissement
+   gestionnaire (Stephen, 90,7 %).
 2. **Pondération** — **TRANCHÉ** : par nuits vendues, pas par chiffre
    d'affaires (qui compterait le prix deux fois) ; les mois où un comparable a
    vendu moins de 5 nuits sont écartés, pas le comparable. **Réserve gravée** :
    ce sont des nuits AIRBNB (règle 11). Un comparable qui vend beaucoup sur
    Booking est sous-pondéré, et c'est indétectable depuis l'API. On le sait, on
    ne fait pas comme si le biais n'existait pas.
-3. **Bascule vers le réel** — *version finale proposée, non tranchée* :
+3. **Bascule vers le réel** — **TRANCHÉ (Thierry, 23 septembre 2026)** :
    nette, étage par étage, jamais de mélange dans un même prix.
    - Positions segment × jour : l'emprunt marché (issu du pacing, phase 1)
      s'insère dans la cascade juste sous la mesure réelle (8 nuits /
@@ -347,6 +374,8 @@ par Thierry.
      du bien sont sur la même base (règle 12, ménage). Tant que la règle 12
      n'est pas tranchée, la bascule d'un bien qui facture un ménage ferait un
      saut de prix — **la règle 12 est un préalable de la bascule**.
+   - La bascule se DIT à l'hôte : quels niveaux passent au réel, de combien ils
+     bougent (règle 16).
 4. **Contre-poids au propriétaire qui se surestime** — **TRANCHÉ, reformulé
    sur le prix** : à la sélection, « vos 3 choix se vendent en moyenne 135 € la
    nuit, l'ensemble des 25 se vend 72 € » — un fait, pas un reproche. La
@@ -357,7 +386,7 @@ par Thierry.
    réellement obtenus par l'hôte aux ADR de ses comparables, jamais les
    occupations. *Ce qu'A change* : les prix affichés sont ceux des 12 derniers
    mois — les mêmes que ceux qui feront la grille.
-5. **Zéro comparable pertinent** — *version finale proposée, non tranchée* :
+5. **Zéro comparable pertinent** — **TRANCHÉ (Thierry, 23 septembre 2026)** :
    un seul élargissement (rayon, capacité ±1), refait par le propriétaire
    lui-même ; puis « référence amincie, N comparables ». Le QUAND reste
    disponible (le pacing est celui du marché entier) ; le COMBIEN vient d'une
@@ -367,7 +396,7 @@ par Thierry.
    aucune dérive appliquée à la grille déclarée non plus. *Ajout* : un
    comparable marqué « niveau instable » n'est pas retiré pour atteindre ou
    manquer le seuil — c'est le propriétaire qui garde ou retire.
-6. **Qui paie les appels** — *version finale proposée, non tranchée* :
+6. **Qui paie les appels** — **TRANCHÉ (Thierry, 23 septembre 2026)** :
    HôteSmart. Étude initiale ≈ 1,80 $ par bien, une fois. *Ce qu'A change* :
    une grille glissante sur 12 mois vieillit, il faut la RAFRAÎCHIR — les
    métriques des comparables retenus tous les 90 jours (5 × 0,10 $), partagées
@@ -377,6 +406,14 @@ par Thierry.
    après l'étude, moins quand plusieurs biens partagent un marché. Garde-fous :
    aucun appel sans coordonnées ni plancher ; un plafond d'appels par compte ;
    un budget mensuel global avec alarme au fondateur.
+   **Conséquence du rafraîchissement (règle 16)** : une grille glissante bouge.
+   À chaque rafraîchissement qui déplace un niveau — la grille est arrondie à
+   5 €, tout déplacement est donc d'au moins 5 € —, l'hôte est prévenu : quel
+   niveau, de combien, et pourquoi, lu dans les données (les mois entrés dans
+   la fenêtre contre les mois sortis : « vos comparables se sont vendus plus
+   cher cet hiver »). Un rafraîchissement qui ne déplace aucun niveau ne dit
+   rien. Le canal (écran « Prédiction de prix », notification) se décide au
+   découpage, le même que pour la bascule.
 7. **A — Profondeur retenue pour le NIVEAU** — **TRANCHÉ (Thierry, 23 septembre
    2026) : les 12 derniers mois complets, sans correction de dérive.**
    - Un cycle saisonnier entier, chaque mois une fois : 26 mois pèsent juillet
