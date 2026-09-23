@@ -149,7 +149,11 @@ function appelerEcran (bien, mois) {
     compareesTotal += comparees
     divergencesTotal += divergences.length
     if (!comparees) { console.error(`ECHEC : aucune nuit comparee pour ${bien.name} — ce bien n'a rien prouve.`); echec = true }
-    console.log(`nuits lues a l'ecran ${nuitsEcran.size} · comparees (ouvertes ou projetees) ${comparees} · divergences ${divergences.length} · grilles divergentes ${grillesDivergentes} / ${mois.length + moisExtra.length} mois`)
+    // ⚠ LA PLAGE SE DIT (regle 18) : une nuit projetee (fermee, hors fenetre,
+    // non renseignee) est calculee « comme ouverte » des deux cotes — le pilote
+    // ne la tarife jamais. Le compte rendu separe les deux.
+    const projetees = [...nuitsEcran.values()].filter(n => n.projection === true && n.ouverte !== true).length
+    console.log(`nuits lues a l'ecran ${nuitsEcran.size} · comparees ${comparees} (dont ${projetees} projetees : fermees, hors fenetre ou non renseignees, jamais tarifees par le pilote) · divergences ${divergences.length} · grilles divergentes ${grillesDivergentes} / ${mois.length + moisExtra.length} mois`)
     if (divergences.length) {
       console.log('par cause :', JSON.stringify(parCause))
       const ecarts = divergences.filter(d => d.ecran != null && d.moteur != null).map(d => d.moteur - d.ecran)

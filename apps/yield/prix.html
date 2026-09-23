@@ -954,7 +954,7 @@
         },
         ferme: {
           court: `${a.fermees} fermée${a.fermees > 1 ? 's' : ''}`,
-          long: `${a.fermees} nuit(s) fermée(s) à la vente : aucun prix ne peut s’y vendre. C’est un manque à gagner, pas un mois calme — ouvrez-les au calendrier et les suggestions apparaîtront.`
+          long: `${a.fermees} nuit(s) fermée(s) à la vente : aucun prix ne peut s’y vendre. C’est un manque à gagner, pas un mois calme. Leur prix prévu, quand il est calculable, est affiché dans le mois — ouvrez-les au calendrier (ou libérez l’indisponibilité) pour les vendre.`
         },
         incertain: {
           court: 'incertain',
@@ -1025,7 +1025,7 @@
     return `<div class="yp-legende">
       ${c('#E8F2EC', 'vendue', 'Cette nuit est vendue : son prix ne se change plus.')}
       ${c('#EDF4EE', 'à vendre', 'Ouverte à la vente : la teinte de la ligne est le niveau suggéré, repris de votre grille ci-dessus.')}
-      ${c('#FBF1DA', 'fermée', 'Fermée à la vente. Aucun prix ne s’y vend — ouvrez-la au calendrier.')}
+      ${c('#FBF1DA', 'fermée', 'Fermée à la vente : aucun prix ne s’y vend. Le prix affiché est celui que YieldFlow proposerait si vous l’ouvriez — rien n’est envoyé.')}
       ${c('#FFFFFF', 'non renseignée', 'Votre calendrier ne va pas jusqu’à cette nuit.')}
       ${a ? b('#B5C9DA', 'pas encore ouverte', 'Au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour et la nuit s’ouvrira seule, avec son prix déjà prêt.') : ''}
       ${p ? c('#FAFAFA', 'passée, restée vide', 'Nuit écoulée sans être vendue. Elle ne compte plus dans les actions, mais elle reste sous vos yeux.') : ''}
@@ -1217,6 +1217,27 @@
     </div>`
   }
 
+  // ⚠ UNE NUIT PROJETEE DIT LA BONNE CONDITION — une table, lue par la ligne,
+  // le depliant et la pop-up. Une indisponibilite de l'hote ne se « rouvre »
+  // pas au calendrier (refuse) : elle se leve dans l'indisponibilite elle-meme
+  // (review du 23 septembre 2026). Rien n'est jamais envoye.
+  const TEXTES_PROJECTION = {
+    fenetre: { ligne: 's’ouvrira seule', case: 'pas encore en vente : prix prévu',
+      survol: '', detail: 'Cette nuit n’est pas encore en vente : voici le prix auquel YieldFlow l’ouvrira.' },
+    fermee: { ligne: 'fermée · si vous l’ouvrez', case: 'fermée : prix prévu si vous l’ouvrez',
+      survol: 'Cette nuit est fermée à la vente. Voici le prix que YieldFlow proposerait si vous l’ouvriez au calendrier — rien n’est envoyé, et YieldFlow ne rouvre jamais une nuit que vous avez fermée.',
+      detail: 'Cette nuit est fermée à la vente : voici ce que YieldFlow proposerait si vous l’ouvriez. Rien n’est envoyé.' },
+    fermeture: { ligne: 'indisponible · si vous la libérez', case: 'indisponible : prix prévu si vous la libérez',
+      survol: 'Cette nuit est couverte par une indisponibilité que vous avez posée. Voici le prix que YieldFlow proposerait si vous la libériez — en modifiant ou en supprimant l’indisponibilité dans le calendrier. Rien n’est envoyé.',
+      detail: 'Cette nuit est couverte par une indisponibilité que vous avez posée : voici ce que YieldFlow proposerait si vous la libériez (dans l’indisponibilité elle-même). Rien n’est envoyé.' },
+    fermee_inconnu: { ligne: 'fermée · prix prévu', case: 'fermée : prix prévu',
+      survol: 'Cette nuit n’est pas en vente. Voici le prix que YieldFlow proposerait si elle l’était — rien n’est envoyé.',
+      detail: 'Cette nuit n’est pas en vente : voici ce que YieldFlow proposerait si elle l’était. Rien n’est envoyé.' },
+    non_renseignee: { ligne: 'non renseignée · si vous l’ouvrez', case: 'non renseignée : prix prévu si vous l’ouvrez',
+      survol: 'Votre calendrier ne va pas jusqu’à cette nuit. Si vous l’ouvrez, voici ce que YieldFlow proposerait.',
+      detail: 'Cette nuit n’est pas au calendrier : voici ce que YieldFlow proposerait si vous l’ouvriez.' }
+  }
+
   // ─── L'APPARIEMENT N-1, EN CLAIR ──────────────────────────────────────────
   // ⚠ L'HÔTE DOIT POUVOIR VÉRIFIER CHAQUE APPARIEMENT. Sans la date exacte et
   // l'étage qui l'a choisie, la colonne « l'an dernier » est une affirmation
@@ -1318,15 +1339,14 @@
       // s'ouvrira (ou que YieldFlow proposerait), son niveau, et QUAND. La
       // ligne garde la couleur de son etat : on anticipe, on ne confond pas.
       const q = n.ouverture_prevue ? dateFr(n.ouverture_prevue) : null
-      const quand = n.hors_fenetre
-        ? `s’ouvrira${q ? ` le ${q}` : ' seule'}`
-        : 'non renseignée · si vous l’ouvrez'
+      const P = TEXTES_PROJECTION[n.projection_motif] || TEXTES_PROJECTION.non_renseignee
+      const quand = n.projection_motif === 'fenetre' ? `s’ouvrira${q ? ` le ${q}` : ' seule'}` : P.ligne
       prix = `<span class="yp-prix">${euros(n.suggestion)}</span>
         <span class="yp-niveau yp-niv-badge ${CLASSES[n.niveau] || ''}" title="${ech(`Niveau ${n.niveau} de votre grille.`)}">${ech(n.etiquette || n.niveau)}</span>
         ${preuveLigne(n)}
-        <span class="yp-attente" title="${ech(n.hors_fenetre
+        <span class="yp-attente" title="${ech(n.projection_motif === 'fenetre'
           ? `Cette nuit est au-delà de la fenêtre de vente pilotée par YieldFlow. Ce n’est pas une fermeture : la fenêtre glisse chaque jour, et cette nuit s’ouvrira seule${q ? ` le ${q}` : ''}, à ce prix.`
-          : 'Votre calendrier ne va pas jusqu’à cette nuit. Si vous l’ouvrez, voici ce que YieldFlow proposerait.')}">${quand}</span>`
+          : P.survol)}">${quand}</span>`
     } else if (!passe && n.hors_fenetre) {
       // Sans projection calculable (grille non fiable) : au moins la date.
       const q = n.ouverture_prevue ? dateFr(n.ouverture_prevue) : null
@@ -1339,7 +1359,7 @@
       // la main : si les deux divergent (poussee refusee, course avec le moteur),
       // l'ecart se voit — releve en review.
       const ecart = n.prix_actuel != null && Math.round(n.prix_actuel * 100) !== Math.round(n.prix_hote * 100)
-      prix = `<span class="yp-prix">${euros(n.prix_actuel != null ? n.prix_actuel : n.prix_hote)}</span><span class="yp-hote" title="Ce prix est le vôtre : YieldFlow ne le modifie pas. Il tient jusqu’à la nuit, ou jusqu’à ce que vous le retiriez.">votre prix</span>
+      prix = `<span class="yp-prix">${euros(n.prix_actuel != null ? n.prix_actuel : n.prix_hote)}</span><span class="yp-hote" title="Ce prix est le vôtre : YieldFlow ne le modifie pas. Il tient jusqu’à la nuit, ou jusqu’à ce que vous le retiriez.">votre prix</span>${n.ouverte === false ? '<span class="yp-attente" title="Cette nuit est fermée à la vente : votre prix sera celui retenu quand elle rouvrira.">fermée</span>' : ''}
         ${ecart ? `<span class="yp-rien" title="Vous aviez fixé ${euros(n.prix_hote)}, mais le calendrier affiche ${euros(n.prix_actuel)} : la dernière écriture n’a pas abouti. Ressaisissez votre prix, ou retirez-le.">⚠ fixé à ${euros(n.prix_hote)}</span>` : ''}
         ${n.suggestion != null ? `<span class="yp-hote-conseil" title="Ce que YieldFlow proposerait pour cette nuit.">YieldFlow : ${euros(n.suggestion)}</span>` : ''}
         <button class="yp-editer" data-editer="${n.date}" title="Modifier votre prix">✎</button>
@@ -1448,7 +1468,7 @@
     // La projection se dit aussi ici (relecture) : « mêmes informations », mais
     // l'hôte sait qu'il lit une nuit qui n'est pas encore en vente.
     const proj = n.projection && n.ouverte !== true
-      ? `<p class="yp-raisons"><em>${n.hors_fenetre ? 'Cette nuit n’est pas encore en vente : voici le prix auquel YieldFlow l’ouvrira.' : 'Cette nuit n’est pas au calendrier : voici ce que YieldFlow proposerait si vous l’ouvriez.'}</em></p>`
+      ? `<p class="yp-raisons"><em>${(TEXTES_PROJECTION[n.projection_motif] || TEXTES_PROJECTION.non_renseignee).detail}</em></p>`
       : ''
     return `${proj}${dites}
       <div class="yp-apparie">${appariement(n.n1)}</div>
@@ -1664,10 +1684,13 @@
       const e = cadre
       const premierDuEv = e && (iso === e.debut || iso === debutMois)
       const dernierDuEv = e && (iso === e.fin || iso === finMois)
-      const prix = n ? (n.prix_actuel != null ? n.prix_actuel : n.suggestion) : null
-      const projete = !!(n && n.projection && n.prix_actuel == null && n.suggestion != null)
+      // ⚠ UNE NUIT PROJETEE MONTRE SON PRIX PREVU, avec « ~ », meme si elle
+      // garde un prix au calendrier (une nuit fermee le garde souvent) —
+      // review : la case montrait l'ancien prix teinte du niveau prevu.
+      const projete = !!(n && n.projection && n.suggestion != null)
+      const prix = n ? (projete ? n.suggestion : (n.prix_actuel != null ? n.prix_actuel : n.suggestion)) : null
       const barres = ids.map(k => { const x = entrees[k]; return `<i class="ev-barre ${iso === x.debut ? 'g' : ''} ${iso === x.fin ? 'd' : ''}" style="background:${EV_COULEUR[x.origine] || '#555'}" title="${ech(x.nom)}"></i>` }).join('')
-      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', n && (n.prime_exceptionnel || n.releve_n1) ? (n.prime_exceptionnel || n.releve_n1).resume : '', projete ? 'pas encore en vente : prix prévu' : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
+      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', n && (n.prime_exceptionnel || n.releve_n1) ? (n.prime_exceptionnel || n.releve_n1).resume : '', projete ? (TEXTES_PROJECTION[n.projection_motif] || TEXTES_PROJECTION.fenetre).case : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
         <span class="j">${jour}</span>
         ${prix != null ? `<span class="p">${projete ? '~' : ''}${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
         ${n && n.etiquette ? `<span class="n">${ech(n.etiquette)}</span>` : ''}
