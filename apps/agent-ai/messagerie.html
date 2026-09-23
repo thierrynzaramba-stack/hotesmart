@@ -40,6 +40,19 @@
     .flag-dot.info_unknown { background:#F59E0B; }
     .flag-dot.pending_validation { background:#378ADD; }
     .pin-mark { font-size:11px; flex-shrink:0; }
+    /* Arrivées : le jour même en tête et distingué, le lendemain juste après */
+    .conv-group { padding:6px 16px 4px; font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); background:var(--bg2); border-bottom:0.5px solid var(--border); position:sticky; top:0; z-index:1; }
+    .conv-group.today { color:#085041; background:#E1F5EE; }
+    /* Fond seulement : la bordure gauche reste au code couleur des tâches. */
+    .conv-item.arrive-today { background:#F3FBF7; }
+    .conv-item.arrive-today:hover { background:#E9F7F0; }
+    .conv-item.arrive-today.active { background:#E1F5EE; }
+    .badge-arrival { font-size:9px; padding:1px 6px; border-radius:10px; font-weight:600; white-space:nowrap; }
+    .badge-arrival.today { background:var(--green); color:#fff; }
+    .badge-arrival.tomorrow { background:#E1F5EE; color:#085041; }
+    .conv-phone { color:var(--text2); text-decoration:none; white-space:nowrap; }
+    .conv-phone:hover { color:var(--green); text-decoration:underline; }
+    .btn-mini.btn-phone { color:var(--green); border-color:#9FE1CB; text-decoration:none; }
     .unread-dot { width:7px; height:7px; border-radius:50%; background:var(--green); flex-shrink:0; }
 
     /* Vue conversation */
@@ -478,6 +491,7 @@
           propertyId: t.property_id ? String(t.property_id) : '',
           provider: '', ota: 'Direct', platform: 'direct', displayLabel: 'Direct',
           guestName: t.guest_name || 'Voyageur',
+          guestPhone: t.guest_phone || null,
           firstNight: t.arrival || null, lastNight: t.departure || null, status: null,
           lastTime: t.created_at,
           messages: (t.source_thread || []).map(m => ({
@@ -487,6 +501,7 @@
         })
       })
 
+      marquerArrivees()
       conversations.sort(sortConversations)
 
       const pendingTasks = allTasks.filter(t => ['pending','pending_validation'].includes(t.status)).length
@@ -504,14 +519,58 @@
     }
   }
 
-  // Tri : épinglées d'abord (action manuelle), puis chronologique.
+  // Tri : épinglées d'abord (action manuelle), puis les ARRIVÉES DU JOUR, puis
+  // celles du LENDEMAIN, puis le reste en chronologique. Demande de Thierry
+  // (23 septembre 2026) : le jour de l'arrivée, c'est ce fil-là qu'on cherche,
+  // et il était noyé sous les conversations plus bavardes.
   // Les conversations avec tâche gardent leur code couleur pour être repérables,
   // mais ne sont plus forcées en tête (l'épingle sert à ça).
+  // Le jour du BIEN, pas celui du navigateur : les biens sont à Paris, et le
+  // reste du produit (apps/menages/public.html) date ses journées ainsi. Un hôte
+  // qui regarde depuis un autre fuseau voit les mêmes « arrivées du jour ».
+  function jourParis(decalage = 0) {
+    const d = new Date(Date.now() + decalage * 86400000)
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(d)
+  }
+  // Un statut qui n'est PAS une arrivée : annulé, démappé, simple demande,
+  // blocage propriétaire. Et sans statut connu (conversation « tâche seule »,
+  // snapshot absent), on ne promeut pas : on ne fait pas appeler un voyageur
+  // dont on ignore s'il vient.
+  const STATUTS_SANS_ARRIVEE = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
+  function calculerGroupe(conv, aujourdHui, demain) {
+    // 0 = arrive aujourd'hui, 1 = arrive demain, 2 = le reste.
+    const st = String(conv.status || '').toLowerCase()
+    if (!conv.firstNight || !st || STATUTS_SANS_ARRIVEE.has(st)) return 2
+    const arr = String(conv.firstNight).slice(0, 10)
+    return arr === aujourdHui ? 0 : arr === demain ? 1 : 2
+  }
+  // Calculé UNE fois par chargement et posé sur la conversation : le tri et le
+  // rendu lisent la même valeur, même si la page reste ouverte passé minuit
+  // (le prochain rechargement remet tout d'aplomb, pas un clic isolé).
+  function marquerArrivees() {
+    const aujourdHui = jourParis(0), demain = jourParis(1)
+    conversations.forEach(c => { c._arrivee = calculerGroupe(c, aujourdHui, demain) })
+  }
+  function arrivalGroup(conv) { return conv._arrivee == null ? 2 : conv._arrivee }
   function sortConversations(a, b) {
     const pa = pinnedSet.has(a.bookId) ? 0 : 1
     const pb = pinnedSet.has(b.bookId) ? 0 : 1
     if (pa !== pb) return pa - pb
+    const ga = arrivalGroup(a), gb = arrivalGroup(b)
+    if (ga !== gb) return ga - gb
     return new Date(b.lastTime || 0) - new Date(a.lastTime || 0)
+  }
+  // Un numéro tel que le snapshot le porte devient un lien d'appel. `tel:`
+  // n'accepte que chiffres et « + » : on retire espaces, points et tirets.
+  function phoneLink(phone, cls, label) {
+    if (!phone) return ''
+    // Un champ peut porter deux numéros (« +33 6… / +34 600… ») : on compose
+    // le premier, on affiche le champ tel quel.
+    const brut = String(phone).trim()
+    const premier = brut.split(/[\/,;]|\s+ou\s+/)[0].trim()
+    const num = premier.replace(/[^\d+]/g, '')
+    if (num.replace(/\D/g, '').length < 6) return ''
+    return `<a class="${cls}" href="tel:${escAttr(num)}" onclick="event.stopPropagation()" title="Appeler ${escAttr(brut)}">📞 ${escHtml(label || brut)}</a>`
   }
 
   function renderConvList() {
@@ -533,8 +592,20 @@
       return
     }
 
+    let groupeCourant = null
+    const aDesArrivees = conversations.some(c => !pinnedSet.has(c.bookId) && arrivalGroup(c) < 2)
     html += conversations.map(conv => {
       const isActive = conv.bookId === currentConvId
+      // Intercalaire quand on change de groupe d'arrivée (hors épinglées, qui
+      // gardent la tête quel que soit leur séjour).
+      const groupe = pinnedSet.has(conv.bookId) ? 'pin' : arrivalGroup(conv)
+      let entete = ''
+      if (groupe !== groupeCourant) {
+        groupeCourant = groupe
+        if (groupe === 0) entete = '<div class="conv-group today">Arrivées du jour</div>'
+        else if (groupe === 1) entete = '<div class="conv-group">Arrivées de demain</div>'
+        else if (groupe === 2 && aDesArrivees) entete = '<div class="conv-group">Autres conversations</div>'
+      }
       let preview, hasUnread, platformLabel
       if (conv.messages) {
         // V2 : depuis la table messages unifiee
@@ -562,17 +633,25 @@
       const previewText = flag
         ? `${flag.label}${flag.summary ? ' — ' + flag.summary : ''}`
         : preview
+      const arrivee = arrivalGroup(conv)
+      const badgeArrivee = arrivee === 0 ? '<span class="badge-arrival today">Arrive aujourd’hui</span>'
+        : arrivee === 1 ? '<span class="badge-arrival tomorrow">Arrive demain</span>' : ''
+      // Le numéro dans la liste, seulement pour les arrivées proches : c'est là
+      // qu'on appelle. Ailleurs, il reste dans l'en-tête du fil.
+      const tel = arrivee < 2 ? phoneLink(conv.guestPhone, 'conv-phone') : ''
 
       return `
-        <div class="conv-item ${isActive ? 'active' : ''} ${flagClass} ${isCancelled ? 'cancelled' : ''}"${titleAttr} onclick="selectConv('${conv.bookId}')">
+        ${entete}
+        <div class="conv-item ${isActive ? 'active' : ''} ${flagClass} ${isCancelled ? 'cancelled' : ''} ${arrivee === 0 ? 'arrive-today' : ''}"${titleAttr} onclick="selectConv('${conv.bookId}')">
           <div class="conv-item-name">
             ${isPinned ? '<span class="pin-mark">📌</span>' : ''}
             ${flag ? `<span class="flag-dot ${flag.type}"></span>` : (hasUnread ? '<span class="unread-dot"></span>' : '')}
             ${escHtml(conv.guestName)}
             <span class="platform-badge platform-${conv.platform}">${platformLabel}</span>
+            ${badgeArrivee}
             ${isCancelled ? '<span class="badge-cancelled">Annulé</span>' : ''}
           </div>
-          ${date ? `<div class="conv-item-meta">${date}</div>` : ''}
+          ${date || tel ? `<div class="conv-item-meta">${date}${date && tel ? ' · ' : ''}${tel}</div>` : ''}
           <div class="conv-item-preview"${flag ? ` style="color:var(--text);font-weight:500"` : ''}>${escHtml(previewText)}</div>
         </div>`
     }).join('')
@@ -663,6 +742,7 @@
           <div class="conv-view-meta">${platformLabel} · #${bookId}${conv.firstNight ? ` · ${formatDateShort(conv.firstNight)} → ${formatDateShort(conv.lastNight)}` : ''}</div>
         </div>
         <div class="conv-view-actions">
+          ${phoneLink(conv.guestPhone, 'btn-mini btn-phone')}
           ${peutEcrire('messages') ? `<button class="btn-mini ${isPinned ? 'active' : ''}" onclick="togglePin('${bookId}')">${isPinned ? '📌 Épinglé' : '📌 Épingler'}</button>` : ''}
         </div>
       </div>
