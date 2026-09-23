@@ -213,6 +213,10 @@ module.exports = async function handler(req, res) {
         firstNight:   snap.arrival   || null,
         lastNight:    snap.departure || null,
         status:       snap.status    || null,
+        // Le telephone du voyageur, tel que le snapshot le porte (Channex comme
+        // Beds24 le nomment `guestPhone`). L'ecran messagerie en fait un lien
+        // d'appel : le jour de l'arrivee, c'est souvent le seul canal qui reste.
+        guestPhone:   snap.guestPhone || null,
         lastTime,
         messages:     conv.messages
       }

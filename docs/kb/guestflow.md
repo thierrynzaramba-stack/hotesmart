@@ -643,3 +643,19 @@ fait déjà — `api/channel-webhook.js` déduplique encore sur l'écho, et l'é
   le laisser répondre seul. Retour en auto par Thierry lui-même.
 
 Test : `tests/garde-echo-conversation.test.js`.
+
+## Messagerie — ordre de la liste et téléphone (23 septembre 2026)
+Demande de Thierry : le jour de l'arrivée, le fil du voyageur était noyé sous les
+conversations plus bavardes. `apps/agent-ai/messagerie.html` trie désormais : épinglées,
+puis **arrivées du jour** (fond vert pâle, badge « Arrive aujourd'hui », intercalaire
+« Arrivées du jour »), puis **arrivées de demain** (badge « Arrive demain »), puis le reste en
+chronologique. Un séjour annulé, démappé, en simple demande ou bloqué ne compte pas comme une
+arrivée, ni une conversation sans statut connu (« tâche seule »). Le jour est celui de **Paris**
+(`Intl.DateTimeFormat` avec `timeZone: 'Europe/Paris'`, comme l'app ménage), calculé une fois au
+chargement et posé sur chaque conversation ; passé minuit, c'est le rechargement qui remet l'ordre.
+Le fond vert pâle distingue les arrivées du jour, la bordure gauche reste au code couleur des tâches.
+
+Téléphone : `/api/messages` renvoie `guestPhone` (le `snapshot.guestPhone`, Channex comme
+Beds24), les conversations « tâche seule » prennent `agent_tasks.guest_phone`. Lien `tel:` dans
+l'en-tête du fil (bouton portant le numéro) et, dans la liste, pour les seules arrivées du jour et du
+lendemain. Si le champ porte deux numéros, on compose le premier ; le champ s'affiche tel quel.
