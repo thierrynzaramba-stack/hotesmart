@@ -84,10 +84,11 @@ test('arrondi au pas SUPERIEUR, et seuil de deux pas (le meme que le plancher N-
     'une nuit vendue moins cher n est pas « un petit ecart » (vu sur apercu reel)')
 })
 
-test('LE TEST QUI COMPTE : le plafond borne le cliquet', () => {
+test('LE TEST QUI COMPTE : aucune prime au-dessus du plafond', () => {
   const s = nuit({ preuveN1: preuve(400) })
   assert.equal(s.prix, 295)
   assert.equal(s.prime_exceptionnel.plafonne, true)
+  assert.match(s.prime_exceptionnel.resume, /^Plafonné à 295 €.*Vous pouvez poser un prix plus haut à la main/)
 })
 
 test('une preuve d un autre segment, hors reference ou non vendue ne prouve rien', () => {
@@ -205,12 +206,63 @@ test('LE TEST QUI COMPTE : l invariant — chaque prix est le niveau, ou une pre
   }
 })
 
-test('le plafond de la grille : le prix le plus eleve obtenu, arrondi VERS LE BAS ; null sans place', () => {
-  const g = S.grilleDeBase([...Array(40).fill(100), ...Array(40).fill(150), 297], { reservations: 30 })
-  assert.equal(g.plafond, 295, 'jamais un euro au-dessus du vendu')
-  const plat = S.grilleDeBase(Array(40).fill(100), { reservations: 30 })
-  assert.equal(plat.plafond, null, 'pas de place au-dessus du dernier niveau : pas de fourchette')
+test('LE TEST QUI COMPTE : le plafond est le prix atteint par au moins DEUX reservations', () => {
+  // ⚠ CE TEST A CHANGE DE VERDICT LE 23 SEPTEMBRE 2026, ET C'EST VOULU (regle 17) :
+  // il exigeait « le prix le plus eleve obtenu ». Arbitrage de Thierry (option b) :
+  // une seule reservation ne fixe pas ce que la machine pose seule.
+  const prix = [...Array(40).fill(100), ...Array(40).fill(150), 257, 295]
+  const g = S.grilleDeBase(prix, { reservations: 30, prixParReservation: [100, 150, 257, 295] })
+  assert.equal(g.plafond_brut, 257, 'la 2e reservation la plus chere')
+  assert.equal(g.plafond, 255, 'arrondi VERS LE BAS : jamais au-dessus de ce que deux reservations ont paye')
+  // La vente aberrante isolee est neutralisee — parce qu'elle est seule.
+  const aberrant = S.grilleDeBase([...Array(40).fill(100), ...Array(40).fill(150), 190, 900],
+    { reservations: 30, prixParReservation: [100, 150, 190, 900] })
+  assert.ok(aberrant.niveaux[4].prix < 190, 'jeu d essai : il y a de la place au-dessus du niveau')
+  assert.equal(aberrant.plafond, 190)
+  // Moins de deux reservations, ou pas de place au-dessus du niveau : pas de fourchette.
+  assert.equal(S.grilleDeBase(Array(40).fill(100), { reservations: 30, prixParReservation: [300] }).plafond, null)
+  assert.equal(S.grilleDeBase(Array(40).fill(100), { reservations: 30, prixParReservation: [100, 100] }).plafond, null)
   assert.equal(nuit({ g: { plafond: null }, preuveN1: preuve(195) }).prix, 165)
+})
+
+test('LE TEST QUI COMPTE : le plafond est une DONNEE VIVANTE — construireGrille le recalcule depuis les reservations', () => {
+  const ecl = (d, prix, id, extra = {}) => ({ compte: true, booking_id: id, ...extra, nuits: [{ date: d, prix, hors_reference: false }] })
+  const base = []
+  for (let i = 0; i < 40; i++) base.push(ecl(`2025-0${1 + (i % 9)}-${String(10 + (i % 18)).padStart(2, '0')}`, 100 + (i % 4) * 20, `B${i}`))
+  const g1 = S.construireGrille([...base, ecl('2025-02-14', 295, 'V')], { contexte: CTX, debut: '2025-01-01', fin: '2025-12-31' })
+  const g2 = S.construireGrille([...base, ecl('2025-02-14', 295, 'V'), ecl('2025-12-31', 280, 'R')], { contexte: CTX, debut: '2025-01-01', fin: '2025-12-31' })
+  assert.ok(g2.base.plafond > g1.base.plafond, `une 2e reservation plus chere fait monter le plafond (${g1.base.plafond} → ${g2.base.plafond})`)
+  assert.equal(g2.base.plafond, 280)
+  // ⚠ MEME ENSEMBLE FILTRE QUE LA PREUVE : un long sejour ou une nuit hors
+  // reference ne fixe pas le plafond (et `ventesParDateDe` les marque).
+  const g3 = S.construireGrille([...base, ecl('2025-02-14', 295, 'V'),
+    ecl('2025-03-01', 400, 'L', { long_sejour: true }),
+    { compte: true, booking_id: 'H', nuits: [{ date: '2025-04-01', prix: 400, hors_reference: true }] },
+    { compte: false, booking_id: 'A', nuits: [{ date: '2025-05-01', prix: 400, hors_reference: false }] }],
+  { contexte: CTX, debut: '2025-01-01', fin: '2025-12-31' })
+  assert.equal(g3.base.plafond, g1.base.plafond, 'long sejour, hors reference et annulee ne fixent pas le plafond')
+  const { ventesParDateDe } = require('../lib/yield/contexte-du-bien')
+  const v = ventesParDateDe([ecl('2025-03-01', 400, 'L', { long_sejour: true }),
+    { compte: false, booking_id: 'A', nuits: [{ date: '2025-05-01', prix: 400 }] }])
+  assert.equal(v.get('2025-03-01')[0].hors_reference, true, 'et ne prouvent rien')
+  assert.equal(v.get('2025-05-01'), undefined)
+})
+
+test('LE TEST QUI COMPTE : une nuit plafonnee le DIT, et dit la sortie', () => {
+  const f = S.primeExceptionnel({ niveau: { prix: 165 }, plafond: 255, plafondBrut: 257,
+    preuve: { date: '2026-02-14', prix: 295, ventes: 1, meme_segment: true } })
+  assert.equal(f.prix, 255)
+  assert.equal(f.plafonne, true)
+  assert.equal(f.resume, 'Plafonné à 255 € — le 14/02/2026 s’est vendu 295 €, mais une seule réservation a atteint ce prix. Vous pouvez poser un prix plus haut à la main (✎).')
+  // Coupee par l'arrondi seulement : pas « une seule fois » (ce serait faux).
+  const r = S.primeExceptionnel({ niveau: { prix: 165 }, plafond: 255, plafondBrut: 257,
+    preuve: { date: '2025-12-31', prix: 257, ventes: 1, meme_segment: true } })
+  assert.equal(r.prix, 255)
+  assert.doesNotMatch(r.resume, /une seule réservation/)
+  assert.match(r.resume, /^Plafonné à 255 € — le prix rond sous les 257 € atteints par deux réservations/)
+  // Sous le plafond : pas de mention.
+  assert.equal(S.primeExceptionnel({ niveau: { prix: 165 }, plafond: 255, plafondBrut: 257,
+    preuve: { date: '2026-02-28', prix: 195, ventes: 1, meme_segment: true } }).plafonne, false)
 })
 
 test('preuveN1 du contexte : la vente la plus basse du jour, hors reference ecartee', () => {

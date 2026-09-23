@@ -363,18 +363,35 @@ s'étaient vendues plus cher, jusqu'à 295 € : une nuit dont la comparable de
 l'an dernier s'était vendue 195 € ne pouvait pas y revenir.
 
 **Règle (arbitrages de Thierry).**
-- **Bas** = prix du niveau (165 €). **Haut = plafond** = le prix le plus élevé
-  déjà obtenu sur le bien, arrondi vers le bas au pas (`base.plafond`, 295 €).
-  C'est une **borne, pas un objectif**. **Ne pas la retirer par
-  simplification.** `null` quand il n'y a pas de place au-dessus du niveau.
-  ⚠ **Ce qu'elle ne fait PAS (review du 23 septembre 2026)** : la preuve vient
-  du même historique, donc une preuve passée est toujours ≤ au plafond — il ne
-  rogne que l'arrondi. Il ne protège pas d'une **vente aberrante** (sonde :
-  850 nuits entre 100 et 190 € plus une vente à 900 € → grille « 160–900 € »,
-  la nuit comparable reposée à 900 €). Le « cliquet » n'escalade pas non plus
-  (195 prouvés redonnent 195). **Décision en attente** : définition d'un
-  plafond robuste (La bulle : max 295 ; 2e réservation la plus chère 257 ;
-  P99 195 — Cœur de vie 23 : max 276, 2e réservation 268, P99 276).
+- **Bas** = prix du niveau (165 €). **Haut = plafond = le prix atteint par au
+  moins DEUX réservations distinctes** (la 2e réservation la plus chère, chacune
+  comptée à sa nuit la plus chère), arrondi vers le bas au pas
+  (`base.plafond`, `base.plafond_brut`). Arbitrage de Thierry (option b,
+  23 septembre 2026) : une seule réservation ne fixe pas ce que la MACHINE pose
+  seule — deux réservations est une barre plus BASSE que les 8 nuits et
+  3 réservations du reste du moteur. Au-delà, l'hôte pose lui-même (✎,
+  prioritaire) : 280 € posés à la main sur le 14 février 2027 restent.
+  Prod : La bulle **255 €** (max 295 € le 14/02/2026, 2e réservation 257,30 €),
+  Cœur de vie 23 **265 €** (max 276 € — un séjour de 10 nuits —, 2e 268 €).
+  `null` sans deux réservations ou sans place au-dessus du niveau.
+  - ⚠ **Ce n'est PAS une garantie contre une vente aberrante** : il la
+    neutralise seulement parce qu'elle est SEULE. Deux réservations aberrantes
+    au même prix passeraient. Limite connue, pas une garantie.
+  - ⚠ **Donnée VIVANTE, pas une constante** : recalculée à chaque lecture de la
+    grille, elle monte seule dès qu'une deuxième réservation atteint un prix
+    plus haut. Ne jamais la figer dans une constante ni un réglage.
+  - **Même ensemble filtré que la preuve** : réservations qui comptent, hors
+    référence et longs séjours (> 24 nuits) écartés, prix > 0 —
+    `construireGrille` pour l'un, `ventesParDateDe` pour l'autre, un test les
+    tient d'accord. Vérifié le 23 septembre : c'était déjà le cas ; le séjour de
+    10 nuits de Cœur de vie 23 n'est pas un long séjour (le prorata vaut pour
+    tout séjour, `eclatement-yield.md`) — il ne fixe plus le plafond parce qu'il
+    ne compte que pour UNE réservation.
+  - **Une nuit plafonnée le dit, et dit la sortie** : « Plafonné à 255 € — le
+    14/02/2026 s'est vendu 295 €, mais une seule réservation a atteint ce prix.
+    Vous pouvez poser un prix plus haut à la main (✎). » ; coupée par le seul
+    arrondi : « Plafonné à 255 € — le prix rond sous les 257 € atteints par deux
+    réservations ». Sur la ligne : « prouvé le … · plafonné ».
 - **Dans la fourchette, le prix ne vient QUE de la preuve** : le prix obtenu
   l'an dernier sur la nuit comparable (la cascade N-1 de l'écran,
   `preuveN1` dans `contexte-du-bien.js`), **arrondi au pas supérieur** (arrondir
@@ -407,10 +424,12 @@ l'an dernier s'était vendue 195 € ne pouvait pas y revenir.
   sur cette nuit : jamais deux « l'an dernier » différents sur une ligne.
 - La preuve n'est calculée que pour les nuits au niveau Exceptionnel.
 
-**Écran** (`apps/yield/prix.html`) : la grille affiche « 165–295 € » et une
-note sur le plafond (« le prix le plus élevé déjà obtenu sur ce logement : une
-borne de sécurité, pas un prix visé ») ; une nuit posée dans la fourchette
-affiche SON prix et « prouvé le JJ/MM/AAAA » (· « 1 vente » si amincie) ; une
+**Écran** (`apps/yield/prix.html`) : la grille affiche « 165–255 € » et une
+note sur le plafond (« le prix le plus élevé atteint par au moins deux
+réservations : une borne, pas un prix visé ; il monte seul… ; au-delà, c'est
+vous qui posez le prix (✎) ») ; une nuit posée dans la fourchette
+affiche SON prix et « prouvé le JJ/MM/AAAA » (· « 1 vente » si amincie sur un
+logement à plusieurs unités ; · « plafonné » si plafonnée) ; une
 prime retirée se lit sur la ligne ; les autres absences de prime au détail de
 la nuit. Pas d'aperçu PDF sur cet écran. Vérifié sur aperçu réel (données prod
 de La bulle, rendu Chromium) le 23 septembre 2026, bureau et mobile.

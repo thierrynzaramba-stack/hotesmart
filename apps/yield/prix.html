@@ -1131,7 +1131,7 @@
         ? '<div class="yp-grille-note"><sup>*</sup> niveau étiré pour garder 5 % d’écart — il reste dans vos prix pratiqués.</div>'
         : ''}
       ${b.plafond != null
-        ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé déjà obtenu sur ce logement : une borne de sécurité, pas un prix visé.${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
+        ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé atteint par au moins deux réservations : une borne, pas un prix visé. Il monte seul dès qu’une deuxième réservation atteint un prix plus haut ; au-delà, c’est vous qui posez le prix (✎).${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
         : ''}
     </div>`
   }
@@ -1139,7 +1139,7 @@
   // ⚠ LA FOURCHETTE EXCEPTIONNEL (lot V2.0.7) : seulement le dernier niveau, et
   // seulement quand le plafond depasse son prix (le moteur rend `null` sinon).
   const fourchette = (b, i) => !!(b && b.plafond != null && i === b.niveaux.length - 1)
-  const phraseFourchette = b => `Fourchette ${b.niveaux[b.niveaux.length - 1].prix}–${b.plafond} € : sans preuve, la nuit reste à ${b.niveaux[b.niveaux.length - 1].prix} € ; elle ne monte que si sa nuit comparable de l’an dernier s’est vendue plus cher. Plafond ${b.plafond} € : le prix le plus élevé déjà obtenu sur ce logement — une borne de sécurité, pas un objectif.`
+  const phraseFourchette = b => `Fourchette ${b.niveaux[b.niveaux.length - 1].prix}–${b.plafond} € : sans preuve, la nuit reste à ${b.niveaux[b.niveaux.length - 1].prix} € ; elle ne monte que si sa nuit comparable de l’an dernier s’est vendue plus cher. Plafond ${b.plafond} € : le prix le plus élevé atteint par au moins deux réservations — une borne, pas un objectif ; au-delà, c’est vous qui posez le prix (✎).`
   // La preuve (ou le retrait de la prime) SUR LA LIGNE : une nuit posee dans la
   // fourchette affiche SON prix et d'ou il vient ; une prime retiree se dit —
   // jamais un prix qui chute sans phrase. Les autres absences de prime se
@@ -1148,7 +1148,7 @@
     const p = n.prime_exceptionnel
     if (!p) return ''
     if (p.prix != null) {
-      return `<span class="yp-preuve" title="${ech(p.resume + (n.fourchette_exceptionnel ? `. Fourchette ${n.fourchette_exceptionnel.bas}–${n.fourchette_exceptionnel.plafond} € ; le plafond est le prix le plus élevé déjà obtenu sur ce logement, une borne de sécurité.` : ''))}">prouvé le <b>${ech(dateFr(p.preuve_date))}</b>${p.reference_amincie && !p.amincie_systematique ? ' · 1 vente' : ''}</span>`
+      return `<span class="yp-preuve" title="${ech(p.resume + (n.fourchette_exceptionnel && !p.plafonne ? ` Fourchette ${n.fourchette_exceptionnel.bas}–${n.fourchette_exceptionnel.plafond} € ; le plafond est le prix atteint par au moins deux réservations.` : ''))}">prouvé le <b>${ech(dateFr(p.preuve_date))}</b>${p.reference_amincie && !p.amincie_systematique ? ' · 1 vente' : ''}${p.plafonne ? ' · <b>plafonné</b>' : ''}</span>`
     }
     if (p.motif_sans_prime === 'prime_retiree_par_la_pression') {
       return `<span class="yp-rien" title="${ech(p.resume)}">prime retirée${p.ecart_pression != null ? ` −${Math.abs(Math.round(p.ecart_pression * 100))} %` : ''}</span>`
