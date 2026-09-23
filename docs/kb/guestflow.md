@@ -660,8 +660,9 @@ tâche ; l'extrait du dernier message a disparu (demande de Thierry). L'en-tête
 Sur les arrivées du jour et du lendemain, deux marques. **🧹 Ménage** : `etatMenage` (lib/cron-arrival-code)
 rend le motif de la règle du cron — `fait`, `a_faire`, `premier_sejour`, `sans_suivi`, `inconnu` — et
 `isMenageValidated` n'en est plus que la lecture booléenne (rien ne bloque = fait, premier séjour ou sans
-suivi ; inconnu bloque, comme avant). L'écran distingue « fait » de « premier séjour » et « non suivi »
-(gris) : un logement que personne n'a nettoyé ne s'affiche pas « fait ». **🔑 Code transmis / créé, pas
+suivi ; inconnu bloque, comme avant). L'écran n'affiche que **« Ménage fait »** et **« Code transmis »** :
+rien pour « à faire », « premier séjour », « non suivi » ou « pas de code » — un hôte qui n'utilise ni le
+ménage ni les codes ne voit aucune pastille, et l'absence se lit « pas encore » (Thierry, 23 septembre). **🔑 Code transmis / créé, pas
 envoyé / pas de code** : « transmis » se prouve par un message sortant, postérieur à la création du code,
 qui contient le code entier (borné par des non-chiffres) ; ni `access_codes.status` ni `message_sent_log`
 ne le disent, tous deux écrits aussi en Mode Test. Lecture d'`access_codes` sans les lignes `deleted`, la

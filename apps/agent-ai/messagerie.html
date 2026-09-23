@@ -38,8 +38,6 @@
     .conv-item-etats { display:flex; gap:6px; flex-wrap:wrap; margin-top:5px; }
     .etat { font-size:10px; padding:2px 7px; border-radius:10px; font-weight:600; white-space:nowrap; border:0.5px solid transparent; }
     .etat.ok { background:#E1F5EE; color:#085041; border-color:#9FE1CB; }
-    .etat.attente { background:#FAEEDA; color:#633806; border-color:#FAC775; }
-    .etat.aucun { background:var(--bg2); color:var(--text2); border-color:var(--border); }
     .platform-badge { font-size:9px; padding:1px 6px; border-radius:10px; font-weight:500; }
     .platform-airbnb  { background:#FF5A5F22; color:#FF5A5F; }
     .platform-booking { background:#003B9522; color:#003B95; }
@@ -656,18 +654,15 @@
       // qu'on appelle. Ailleurs, il reste dans l'en-tête du fil.
       const tel = arrivee < 2 ? phoneLink(conv.guestPhone, 'conv-phone') : ''
       // Ménage fait ? code transmis ? — l'API ne les calcule que pour les
-      // arrivées du jour et du lendemain ; sans donnée, pas de marque.
+      // arrivées du jour et du lendemain. On n'affiche que ce qui EST fait :
+      // un hôte qui n'utilise ni le ménage ni les codes ne voit rien (Thierry,
+      // 23 septembre 2026), et l'absence de pastille se lit « pas encore ».
       let etats = ''
       if (arrivee < 2 && conv.arrivee) {
         const e = conv.arrivee
-        const menage = e.menage === 'fait' ? '<span class="etat ok">🧹 Ménage fait</span>'
-          : e.menage === 'a_faire' ? '<span class="etat attente">🧹 Ménage à faire</span>'
-          : e.menage === 'premier_sejour' ? '<span class="etat aucun">🧹 Premier séjour</span>'
-          : e.menage === 'sans_suivi' ? '<span class="etat aucun">🧹 Ménage non suivi</span>' : ''
-        const code = e.codeEtat === 'transmis' ? '<span class="etat ok">🔑 Code transmis</span>'
-          : e.codeEtat === 'cree' ? '<span class="etat attente">🔑 Code créé, pas envoyé</span>'
-          : '<span class="etat aucun">🔑 Pas de code</span>'
-        etats = `<div class="conv-item-etats">${menage}${code}</div>`
+        const menage = e.menage === 'fait' ? '<span class="etat ok">🧹 Ménage fait</span>' : ''
+        const code = e.codeEtat === 'transmis' ? '<span class="etat ok">🔑 Code transmis</span>' : ''
+        if (menage || code) etats = `<div class="conv-item-etats">${menage}${code}</div>`
       }
 
       const bien = nomDuBien(conv.propertyId)
