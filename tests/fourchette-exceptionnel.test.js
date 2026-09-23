@@ -186,13 +186,18 @@ test('LE TEST QUI COMPTE : pression −1 et delai +1 laissent Exceptionnel — l
   assert.equal(descendue.fourchette_exceptionnel, undefined)
 })
 
-test('hors du niveau Exceptionnel : aucune fourchette, et la preuve n est meme pas calculee', () => {
+test('hors du niveau Exceptionnel : aucune fourchette ; la preuve d un SAMEDI ne releve pas un mardi', () => {
+  // ⚠ CE TEST A CHANGE LE 23 SEPTEMBRE 2026 (regle 17) : il exigeait que la
+  // preuve ne soit jamais calculee hors d'Exceptionnel. Le point B (plancher
+  // N-1 a tous les niveaux) la lit desormais partout — une fois par nuit.
   let appels = 0
   const s = S.suggerer({ date: MARDI, grille: grille(), contexte: CTX, ouverte: true, delaiJours: 30,
-    bien: { prix_minimum: 1 }, preuveN1: () => { appels++; return preuve(250) } })
-  assert.notEqual(s.niveau, 'Exceptionnel')
+    bien: { prix_minimum: 1 }, preuveN1: () => { appels++; return preuve(250) } })   // preuve : un samedi
+  assert.equal(s.niveau, 'Base')
   assert.equal(s.fourchette_exceptionnel, undefined)
-  assert.equal(appels, 0)
+  assert.equal(appels, 1)
+  assert.equal(s.prix, 115, 'samedi (Exceptionnel chez ce bien) et mardi (Base) : autre type de nuit')
+  assert.equal(s.releve_n1, undefined, 'rien ne bouge : B reste muet')
 })
 
 test('LE TEST QUI COMPTE : l invariant — chaque prix est le niveau, ou une preuve arrondie, jamais au-dela du plafond', () => {

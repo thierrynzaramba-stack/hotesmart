@@ -140,6 +140,7 @@ function appelerEcran (bien, mois) {
       // motif sans prime doivent etre les memes aussi (regle 18 : dire sur quoi
       // la mesure rassure — les prix seuls ne le disaient pas).
       else if (JSON.stringify(pick(n.prime_exceptionnel)) !== JSON.stringify(pick(m && m.prime_exceptionnel))) cause = 'meme prix, preuve ou motif de prime different'
+      else if (JSON.stringify(pick(n.releve_n1)) !== JSON.stringify(pick(m && m.releve_n1))) cause = 'meme prix, releve N-1 (preuve, retrait ou plafond) different'
       if (cause) {
         parCause[cause] = (parCause[cause] || 0) + 1
         divergences.push({ date, cause, ecran: pE, moteur: pM, niveau_ecran: nE, niveau_moteur: nM, motifs_ecran: mE, motifs_moteur: mM })

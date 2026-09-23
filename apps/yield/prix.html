@@ -1131,7 +1131,7 @@
         ? '<div class="yp-grille-note"><sup>*</sup> niveau étiré pour garder 5 % d’écart — il reste dans vos prix pratiqués.</div>'
         : ''}
       ${b.plafond != null
-        ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé atteint par au moins deux réservations : une borne, pas un prix visé. Il monte seul dès qu’une deuxième réservation atteint un prix plus haut ; au-delà, c’est vous qui posez le prix (✎).${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
+        ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé atteint par au moins deux réservations : une borne, pas un prix visé. Il monte seul dès qu’une deuxième réservation atteint un prix plus haut ; au-delà, c’est vous qui posez le prix (✎). Les autres niveaux peuvent aussi monter, jusqu’à ce plafond, quand la nuit comparable de l’an dernier s’est vendue plus cher : la nuit affiche alors son prix et « prouvé le … ».${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
         : ''}
     </div>`
   }
@@ -1145,13 +1145,23 @@
   // jamais un prix qui chute sans phrase. Les autres absences de prime se
   // lisent au detail de la nuit.
   function preuveLigne (n) {
-    const p = n.prime_exceptionnel
+    // La fourchette (A) ou le plancher N-1 (B) : la meme preuve, la meme ligne.
+    const p = n.prime_exceptionnel || n.releve_n1
     if (!p) return ''
     if (p.prix != null) {
-      return `<span class="yp-preuve" title="${ech(p.resume + (n.fourchette_exceptionnel && !p.plafonne ? ` Fourchette ${n.fourchette_exceptionnel.bas}–${n.fourchette_exceptionnel.plafond} € ; le plafond est le prix atteint par au moins deux réservations.` : ''))}">prouvé le <b>${ech(dateFr(p.preuve_date))}</b>${p.reference_amincie && !p.amincie_systematique ? ' · 1 vente' : ''}${p.plafonne ? ' · <b>plafonné</b>' : ''}</span>`
+      return `<span class="yp-preuve" title="${ech(p.resume + (n.fourchette_exceptionnel && !p.plafonne ? ` Fourchette ${n.fourchette_exceptionnel.bas}–${n.fourchette_exceptionnel.plafond} € ; le plafond est le prix atteint par au moins deux réservations.` : ''))}">prouvé le ${p.preuve_autre_jour ? `${ech(p.preuve_autre_jour.jour_preuve)} ` : ''}<b>${ech(dateFr(p.preuve_date))}</b>${p.preuve_autre_jour && p.preuve_autre_jour.prudent ? ' · minimum prudent' : ''}${p.reference_amincie && !p.amincie_systematique ? ' · 1 vente' : ''}${p.plafonne ? ' · <b>plafonné</b>' : ''}</span>`
     }
+    const quoi = p === n.releve_n1 ? 'relèvement retiré' : 'prime retirée'
     if (p.motif_sans_prime === 'prime_retiree_par_la_pression') {
-      return `<span class="yp-rien" title="${ech(p.resume)}">prime retirée${p.ecart_pression != null ? ` −${Math.abs(Math.round(p.ecart_pression * 100))} %` : ''}</span>`
+      return `<span class="yp-rien" title="${ech(p.resume)}">${quoi}${p.ecart_pression != null ? ` −${Math.abs(Math.round(p.ecart_pression * 100))} %` : ''}</span>`
+    }
+    // Le delai et le reglage de l'hote retirent aussi : la ligne le dit, le
+    // survol et le detail disent pourquoi (arbitrages de Thierry).
+    if (p.motif_sans_prime === 'releve_retire_par_le_delai') {
+      return `<span class="yp-rien" title="${ech(p.resume)}">${quoi} · la nuit approche</span>`
+    }
+    if (p.motif_sans_prime === 'releve_non_repris_reglage_de_l_hote') {
+      return `<span class="yp-preuve" title="${ech(p.resume)}">N-1 non repris · votre réglage</span>`
     }
     return ''
   }
@@ -1451,7 +1461,7 @@
     socle: 'Point de départ', pression: 'Portefeuille du mois', delai: 'Délai',
     jour_de_semaine: 'Jour de la semaine', cumul: 'Signaux cumulés',
     neutralisation: 'Sans effet', position: 'Position', anomalie: 'À vérifier',
-    fourchette: 'Fourchette Exceptionnel'
+    fourchette: 'Fourchette Exceptionnel', releve_n1: 'Prix de l’an dernier'
   }
   const nomCouche = c => NOMS_COUCHE[c] || c
 
@@ -1657,7 +1667,7 @@
       const prix = n ? (n.prix_actuel != null ? n.prix_actuel : n.suggestion) : null
       const projete = !!(n && n.projection && n.prix_actuel == null && n.suggestion != null)
       const barres = ids.map(k => { const x = entrees[k]; return `<i class="ev-barre ${iso === x.debut ? 'g' : ''} ${iso === x.fin ? 'd' : ''}" style="background:${EV_COULEUR[x.origine] || '#555'}" title="${ech(x.nom)}"></i>` }).join('')
-      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', n && n.prime_exceptionnel ? n.prime_exceptionnel.resume : '', projete ? 'pas encore en vente : prix prévu' : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
+      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', n && (n.prime_exceptionnel || n.releve_n1) ? (n.prime_exceptionnel || n.releve_n1).resume : '', projete ? 'pas encore en vente : prix prévu' : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
         <span class="j">${jour}</span>
         ${prix != null ? `<span class="p">${projete ? '~' : ''}${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
         ${n && n.etiquette ? `<span class="n">${ech(n.etiquette)}</span>` : ''}

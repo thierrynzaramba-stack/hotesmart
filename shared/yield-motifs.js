@@ -339,6 +339,10 @@ export const MOTIFS = {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La nuit comparable de l’an dernier était d’une autre nature (férié, date commerciale…) : son prix ne prouve rien pour celle-ci.'
   },
+  nuit_comparable_d_un_autre_type_de_jour: {
+    titre: 'Pas de preuve',
+    quoi: 'La nuit comparable de l’an dernier tombait un autre jour, qui ne se vend pas au même niveau chez vous hors vacances (un samedi pour un dimanche, par exemple) : son prix ne prouve rien pour cette nuit.'
+  },
   nuit_comparable_hors_reference: {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La vente de la nuit comparable est écartée de votre historique (exception, fermeture ou long séjour) : elle ne sert pas de preuve.'
@@ -350,6 +354,14 @@ export const MOTIFS = {
   preuve_a_moins_de_deux_pas: {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La nuit comparable s’est vendue moins de 10 € au-dessus de ce niveau : le prix ne bouge pas pour si peu.'
+  },
+  releve_retire_par_le_delai: {
+    titre: 'Relèvement retiré',
+    quoi: 'La nuit approche (14 jours ou moins) : le prix de l’an dernier a été obtenu à un délai inconnu, peut-être des mois à l’avance — il ne dit rien de ce que la nuit vaut aujourd’hui.'
+  },
+  releve_non_repris_reglage_de_l_hote: {
+    titre: 'Prix de l’an dernier non repris',
+    quoi: 'Vous avez baissé ce type de période : votre réglage prime sur la preuve de l’an dernier, comme votre prix posé à la main. Le prix de l’an dernier reste affiché pour que vous décidiez en connaissance de cause.'
   },
   prime_retiree_par_la_pression: {
     titre: 'Prime retirée',

@@ -95,7 +95,11 @@ function motifsDuMoteur () {
     // Noms de TABLES : une fenetre de contexte large les attrape quand une
     // lecture voisine un motif. Ce ne sont pas des motifs.
     'calendar_inventory', 'bookings_snapshot', 'price_display_log',
-    'yield_exceptions', 'school_holidays'])
+    'yield_exceptions', 'school_holidays',
+    // Noms de COUCHES du pipeline (`couches[].nom`) : l'ecran les nomme par
+    // NOMS_COUCHE, ce ne sont pas des motifs. Les autres (position, pression,
+    // fourchette…) n'ont pas de tiret bas et echappent deja au balayage.
+    'releve_n1'])
   for (const nom of MODULES) {
     const src = fs.readFileSync(path.join(RACINE, 'lib/yield', `${nom}.js`), 'utf8')
     // Les chaines litterales du fichier, hors commentaires.
