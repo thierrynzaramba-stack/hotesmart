@@ -29,6 +29,8 @@ const { nuitComparable } = require('../lib/yield/comparable')
 const SJ = require('../lib/yield/sejours')
 const { readStatus, STATUS } = require('../lib/bookings-snapshot-status')
 const { preparerContexte, prixDeLaNuit } = require('../lib/yield/contexte-du-bien')
+const { estProjection, motifProjection } = require('../lib/yield/projection')
+const { fermeturesDuBien, nuitsFermees } = require('../lib/fermetures')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -258,6 +260,16 @@ module.exports = async (req, res) => {
       catch (e) { console.error('[yield-prix] prix_hote illisibles', e.message) }
     }
 
+    // ⚠ LES INDISPONIBILITES DE L'HOTE (table `fermetures`), pour que l'ecran
+    // dise la BONNE condition d'une nuit projetee : une nuit couverte ne se
+    // rouvre pas au calendrier (refuse), elle se libere dans la fermeture
+    // (review du 23 septembre 2026). Illisible = on ne sait pas laquelle des
+    // deux fermetures c'est : texte neutre, jamais « rouvrez-la ».
+    let fermeesHote = new Set()
+    let fermeturesLisibles = true
+    try { fermeesHote = nuitsFermees(await fermeturesDuBien(supabase, bien.id, debutCal, finCal), debutCal, finCal) }
+    catch (e) { fermeturesLisibles = false; console.error('[yield-prix] fermetures illisibles', e.message) }
+
     // ⚠ UNE NUIT VENDUE N'A PLUS DE PRIX A CHANGER. Le montrer comme
     // « tarifiable » ferait perdre du temps a l'hote sur la seule ligne ou il
     // ne peut rien faire.
@@ -325,13 +337,21 @@ module.exports = async (req, res) => {
       // PROJECTION : la suggestion calculee comme si elle etait ouverte — le
       // prix auquel elle s'ouvrira, ou celui que YieldFlow proposerait. Le
       // drapeau `projection` voyage avec, l'ecran le dit, et le radar ne compte
-      // pas ces nuits « a monter » (elles n'ont pas de prix actuel). Une nuit
-      // FERMEE par l'hote, elle, garde son refus : c'est sa decision.
+      // pas ces nuits « a monter ».
+      // ⚠ LA NUIT FERMEE AUSSI (demande de Thierry, 23 septembre 2026) — elle
+      // gardait son refus (« c'est sa decision »). Mais un bien desactive ou
+      // ferme a la vente (Coeur de vie 23 pendant la bascule) ne montrait alors
+      // AUCUN prix : impossible de verifier les predictions avant d'ouvrir plus
+      // large. La nuit fermee recoit donc sa projection, DITE comme telle
+      // (« fermée · si vous l'ouvrez ») ; rien n'est envoye, le pilote ne
+      // l'ouvre jamais (il ne lit pas cette projection) et la decision de
+      // l'hote reste intacte.
       // ⚠ Sans ligne, seulement si l'ouverture est CONNUE : quand la capacite
       // n'est pas calculable, « non renseignee » serait une affirmation de
       // plus la ou l'on ne sait rien (releve en relecture).
-      const projection = !vendue && delai >= 0 && ouverte !== false &&
-        (horsFenetre.has(date) || (ouvertureConnue && !parDate.has(date)))
+      // La regle vit dans `lib/yield/projection.js`, avec sa table de verite.
+      const projection = estProjection({ vendue, delai, ouverte, horsFenetre: horsFenetre.has(date),
+        ouvertureConnue, aUneLigne: parDate.has(date), prixHote: prixHote.has(date) ? prixHote.get(date) : null })
       // ⚠ LA REGLE DU MOTEUR, PAR LA PORTE DU MOTEUR (dette 17) : le prix que
       // l'ecran suggere EST celui que le pilote poserait — meme matiere, meme
       // fonction. Pression, reglage le plus fin (« ferie:toussaint » avant
@@ -377,6 +397,9 @@ module.exports = async (req, res) => {
         // calendrier vide sur huit mois se lit comme une panne. La regle et
         // la date viennent de lib/pilote-tarifaire.js, en un seul endroit.
         hors_fenetre: horsFenetre.has(date),
+        fermee_par_l_hote: fermeesHote.has(date),
+        projection_motif: projection ? motifProjection({ ouverte, horsFenetre: horsFenetre.has(date),
+          fermeeParLHote: fermeesHote.has(date), fermeturesLisibles }) : null,
         projection,
         prix_hote: prixHote.has(date) ? prixHote.get(date) / 100 : null,
         ouverture_prevue: horsFenetre.has(date) ? dateOuverture(bien, date, auj) : null,
@@ -513,7 +536,9 @@ module.exports = async (req, res) => {
       const joursM = joursDeLaPeriode(debutM, finM) || []
       const nuitsM = cle === cleAffichee ? nuits : joursM.map(construireNuit)
       const aVenir = nuitsM.filter(n => n.delai_jours >= 0)
-      const avec = aVenir.filter(n => n.suggestion != null && n.prix_actuel != null)
+      // ⚠ JAMAIS UNE PROJECTION : une nuit fermee garde souvent un prix au
+      // calendrier ; sa projection n'est pas « a monter », elle n'est pas en vente.
+      const avec = aVenir.filter(n => n.suggestion != null && n.prix_actuel != null && !n.projection)
       const monter = avec.filter(n => n.suggestion > n.prix_actuel)
       const baisser = avec.filter(n => n.suggestion < n.prix_actuel)
       const gain = avec.reduce((t, n) => t + (n.suggestion - n.prix_actuel), 0)
