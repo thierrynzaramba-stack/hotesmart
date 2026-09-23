@@ -47,6 +47,11 @@ function motifsDuMoteur () {
   for (const v of Object.values(pickup.MOTIFS_ECART)) noter(v, 'pickup.MOTIFS_ECART')
   const suggestion = require('../lib/yield/suggestion')
   for (const v of Object.values(suggestion.MOTIFS)) noter(v, 'suggestion')
+  // La fourchette Exceptionnel (V2.0.7) : pourquoi une nuit n'a pas de prime.
+  // Lue dans la constante exportee — le balayage par fenetre de texte (3.)
+  // l'attrapait par la proximite du mot MOTIFS, donc la perdait des que la
+  // liste s'allongeait (vu le jour meme).
+  for (const v of Object.values(suggestion.MOTIFS_SANS_PRIME)) noter(v, 'suggestion.MOTIFS_SANS_PRIME')
   // ⚠ L'ALIGNEMENT N-1 PARLE A L'HOTE : « pas de comparable » et sa raison
   // s'affichent dans la colonne « l'an dernier ». Les deux listes sont
   // DERIVEES du module, jamais recopiees.
@@ -90,7 +95,11 @@ function motifsDuMoteur () {
     // Noms de TABLES : une fenetre de contexte large les attrape quand une
     // lecture voisine un motif. Ce ne sont pas des motifs.
     'calendar_inventory', 'bookings_snapshot', 'price_display_log',
-    'yield_exceptions', 'school_holidays'])
+    'yield_exceptions', 'school_holidays',
+    // Noms de COUCHES du pipeline (`couches[].nom`) : l'ecran les nomme par
+    // NOMS_COUCHE, ce ne sont pas des motifs. Les autres (position, pression,
+    // fourchette…) n'ont pas de tiret bas et echappent deja au balayage.
+    'releve_n1'])
   for (const nom of MODULES) {
     const src = fs.readFileSync(path.join(RACINE, 'lib/yield', `${nom}.js`), 'utf8')
     // Les chaines litterales du fichier, hors commentaires.

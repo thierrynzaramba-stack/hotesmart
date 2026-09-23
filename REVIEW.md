@@ -510,6 +510,123 @@ fausse que le code qu'on teste.
 
 ---
 
+## 17. Un test peut figer un bug comme un comportement attendu
+
+**La règle, en une phrase :**
+
+> Quand un correctif fait rougir un test ancien, c'est peut-être le test qui
+> avait tort.
+
+C'est le pendant de la règle 16 : un vérificateur qui valide l'état d'avant, et
+un test qui exige l'état d'avant. Un test ne prouve pas que le comportement est
+juste, il prouve que le comportement n'a pas changé — y compris quand ce
+comportement est le défaut.
+
+**Cas vécu, 23 septembre 2026 (review du lot V2.0.1).**
+`tests/reference-yield.test.js` exigeait que `pontsEntre` sur une fenêtre de
+plus de 2000 jours rende… `size === 0`. Il était né d'une review légitime (la
+fonction levait un `TypeError` sur `null`) et avait figé le repli choisi alors :
+« un ensemble vide ». Ce vide était le bug : l'écran des prix, au-delà de 2000
+jours de contexte, bâtissait sa grille SANS aucun pont, différente de celle du
+moteur. Le test passait au vert PARCE QUE le défaut était là. Le correctif
+(`parTranches`) l'a fait rougir — et la bonne réponse était de corriger le test :
+il exige désormais les mêmes ponts qu'année par année.
+
+**Ce qu'on fait devant un test ancien qui rougit sous un correctif :**
+1. **Lire ce qu'il exige, pas seulement qu'il échoue.** Une assertion du type
+   « rend vide », « rend 0 », « ne lève pas » sur un cas limite est suspecte :
+   elle décrit souvent un repli, pas une vérité.
+2. **Se demander si l'état exigé est celui qu'on vient de déclarer faux.** Si
+   oui, le test est un témoin du bug — on le corrige, et on écrit pourquoi dans
+   le test lui-même.
+3. **Ne jamais « réparer » un correctif pour rendre un vieux test vert** sans
+   avoir fait les deux points précédents.
+
+---
+
+## 18. Une mesure qui rassure dit SUR QUELLE PLAGE elle rassure
+
+**La règle, en une phrase :**
+
+> Une mesure sans sa plage rassure à tort.
+
+**Cas vécu, 23 septembre 2026 (lot V2.0.0).** `scripts/verifier-parite-prix.js`
+a annoncé « 0 divergence sur 152 nuits » entre l'écran et le moteur. La mesure
+était juste — et hors sujet : elle ne portait que sur les 120 à 365 prochains
+jours, et la divergence vivait dans les mois LOINTAINS (au-delà de ~30 mois, ou
+passés), là où la fenêtre de contexte de l'écran dépassait 2000 jours (règle 17).
+Elle rassurait sur la plage où le défaut n'était pas.
+
+**Ce qu'on exige d'une mesure ou d'un vérificateur :**
+1. **Le compte rendu dit la plage** : quelles dates, quels biens, quels cas ont
+   été couverts — et lesquels non.
+2. **La plage couvre les cas limites connus**, pas seulement le cas du jour.
+   Le script de parité interroge désormais des mois lointains
+   (`--mois-extra=`) et compare aussi la GRILLE, pas seulement les prix.
+3. **« 0 défaut » n'est pas une conclusion générale** : c'est « 0 défaut sur
+   cette plage ». La phrase qu'on écrit à Thierry porte la plage.
+
+---
+
+## 19. Tout nouveau test rougit contre le code D'AVANT — sinon il ne teste rien
+
+**La règle, en une phrase (obligation posée par Thierry, 23 septembre 2026) :**
+
+> Un test neuf se passe contre le code d'avant le correctif. S'il ne rougit
+> pas, il ne teste rien.
+
+Un test écrit en même temps que son correctif est vert dès sa naissance : ce
+vert ne dit pas qu'il sait voir le défaut. Seule la contre-épreuve le dit.
+
+**Trois tests défaillants le même jour (23 septembre 2026) — ce n'est plus un
+accident :**
+1. **Le test qui figeait le bug** (règle 17) : `pontsEntre` exigé vide au-delà
+   de 2000 jours — vert PARCE QUE le défaut était là.
+2. **Le test qui se comparait à lui-même** (review du V2.0.6) : l'invariant
+   « jamais sous la nuit ordinaire » bâtissait les DEUX côtés avec la même
+   fonction `contexteSansEvenements` que le code testé. Si elle retirait trop,
+   les deux côtés se trompaient ensemble, et le test restait vert.
+3. **Le jeu d'essai faux** (même lot) : la « saison thermale » englobait les
+   mardis et samedis de référence, donc devenait fiable ; le test ne pouvait
+   pas exercer le cas qu'il annonçait.
+
+**Ce qu'on fait, à chaque nouveau test, avant le commit :**
+1. **Lancer le test neuf contre le code d'avant, HORS de l'arbre de travail** :
+   ```
+   git archive <commit-d-avant> lib shared api | tar -x -C <scratchpad>/avant
+   mkdir -p <scratchpad>/avant/tests && cp tests/<test-neuf> <scratchpad>/avant/tests/
+   cd <scratchpad>/avant && NODE_PATH=<depot>/node_modules node --test tests/<test-neuf>
+   ```
+   et **constater le rouge**. `<commit-d-avant>` est `HEAD` tant que le
+   correctif n'est pas commité, `HEAD~1` (ou `<sha>^`) après.
+   ⚠ **Jamais** `git show HEAD:<f> > <f>` dans l'arbre (première version de
+   cette règle, relevée en review le jour même) : cela ÉCRASE le correctif non
+   commité, et une autre session qui lit ou teste le fichier au même moment
+   voit le code d'avant — CLAUDE.md, clone partagé, et règle 14. Jamais
+   `git checkout` ni `stash` non plus.
+   ⚠ **Un rouge par `undefined` ne prouve rien** : si le test rougit parce
+   qu'une constante ou une fonction n'existe pas encore, compléter l'ancien
+   code de ces seuls noms et relancer — il doit rougir sur le COMPORTEMENT.
+2. **S'il reste vert** : soit il teste une chose qui était déjà juste (un
+   test de non-régression — on l'écrit en tête du test), soit il ne teste rien.
+   Dans le premier cas, on le passe contre la **version fautive plausible** du
+   correctif (la version naïve) et on constate qu'il y rougit — c'est la
+   régression qu'il garde, et le test le dit.
+3. **Le compte rendu donne le résultat** : « N sur M rougissent contre le code
+   d'avant ; le M-ième garde telle régression, vérifié contre telle version ».
+4. **Le jeu d'essai se vérifie par assertion**, pas par intention : un test
+   qui annonce « 12 nuits sous le seuil » asserte qu'il y a 12 nuits et que le
+   seuil n'est pas atteint, AVANT d'asserter le comportement.
+
+**Cas appliqué (lot V2.0.6 bis, correctif N-1 des dates commerciales).** Trois
+des quatre nouveaux tests rougissent contre le code d'avant. Le quatrième
+(« date désactivée : comparée par sa nature ») y restait vert par accident —
+la Saint-Valentin n'avait alors aucun comparable. Passé contre la version
+naïve (dates lues dans la liste source sans regarder l'activation), il rougit :
+c'est la régression qu'il garde, écrit en tête du test.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

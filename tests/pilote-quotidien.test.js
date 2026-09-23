@@ -177,3 +177,22 @@ test('LE TEST QUI COMPTE : la main de l hote est sautee par les DEUX moteurs —
   assert.ok(!demandesPrix.some(d => d.nuits.some(n => n.date === '2026-10-02')), 'le 02 a 200 EUR n est jamais redemande a 120')
   assert.equal(b.prix_changes, 0)
 })
+
+test('LE TEST QUI COMPTE (dette 25) : capacite non calculable — AUCUN prix demande au calendrier, et le bilan le dit', async () => {
+  // Avant : le pilote passait `ouverts: null` explicitement ; `entretenirLesPrix`
+  // ne refusait que sur `undefined`, tarifait TOUTES les nuits (null = « pas de
+  // filtre » pour calculerPrix), les demandait au calendrier — puis le bilan
+  // etait reecrit en « aucun prix pose ». Des prix partis, un bilan qui ment.
+  // Un bien Beds24 : sa capacite FUTURE n'est pas calculable (raison PROVIDER).
+  const sb = fausseBase({ biens: [bien({ provider: 'beds24' })],
+    lignes: [{ date: AUJ, rate: 100, stop_sell: false, avail: 1 }] })
+  const canal = canalQuiEcrit(sb)
+  const b = await avecRegle({}, (prix) => piloterLesBiens(sb, { aujourdHui: AUJ, maintenant: () => Date.parse('2026-10-01T10:00:00Z'),
+    demander: canal, preparer: preparerFactice(), prix, alerter: async () => {} }))
+  const demandesDePrix = canal.appels.filter(a => a.nuits.some(n => !n.ouvrir && n.prix_centimes != null))
+  assert.equal(demandesDePrix.length, 0, 'aucune nuit ouverte n est retarifee quand l ouverture est inconnue')
+  assert.ok(sb.lignes.find(x => x.date === AUJ).rate === 100, 'le prix en place n a pas bouge')
+  const m = sb.marqueurs[PREFIXE_MARQUEUR + ID]
+  const prix = m ? m.errors[0].prix : (b.erreurs && b.erreurs[0])
+  assert.ok(JSON.stringify(b).includes('ouverture_inconnue') || (prix && prix.refus === 'ouverture_inconnue'), 'le bilan dit pourquoi : ouverture inconnue')
+})

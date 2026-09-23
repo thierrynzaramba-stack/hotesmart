@@ -34,6 +34,15 @@ enregistre. Ce n'est pas une derive de quelques lignes : le ratio est
 rigoureusement constant (22,85 % sur les deux biens migres), donc systematique
 et non aleatoire.
 
+> ⚠ **UN SEUL PRELEVEMENT, DEUX FACONS DE L'ECRIRE** (23 septembre 2026).
+> « +22,85 % » est ecrit RELATIVEMENT AU NET : brut = net × 1,2285. Le meme
+> prelevement ecrit relativement au BRUT vaut **−18,6 %** (1 − 1/1,2285) ;
+> mesure sur La bulle, Airbnb seul, 365 jours : 136,70 € brut contre 111,58 €
+> net, soit **18,4 % du brut** (tres probablement 15 % de commission hote +
+> 20 % de TVA). Les « 18 % de mediane » Beds24 ci-dessous sont donc le MEME
+> ordre de grandeur, pas une autre commission. Detail : chantier-nouveau-bien.md
+> §3 bis (l'ADR d'AirROI est un BRUT avant commission).
+
 Cote Beds24 la meme retenue Airbnb se lit a **18 % de mediane** sur 867 lignes
 (le meme prelevement, exprime en part du brut au lieu du net : 18,6/100 contre
 18,79/82,21). Les deux providers voient la meme realite commerciale ; ils n'en
