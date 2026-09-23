@@ -174,8 +174,11 @@ recopiées.
    logement passe du haut du marché au milieu selon la durée.
    **`single_fee_structure` ne sert à rien ici — hypothèse NON RETENUE.**
    Croisé avec le ménage sur les 50 comparables des deux fichiers : `true` +
-   ménage 25, `true` sans ménage 13, `false` + ménage 11, `false` sans ménage
-   0, `null` + ménage 1. `false` n'apparaît jamais sans ménage, `true` avec et
+   ménage 25, `true` sans ménage 13, `false` + ménage **12**, `false` sans
+   ménage 0 — les 12 sont 11 `false` au sens strict et 1 `null` (« The
+   Twenties », ménage 41 €), que le fichier porte à `null` et que certains
+   outils lisent `false` ; 50 annonces uniques, les deux fichiers ne se
+   recoupent pas. `false` n'apparaît jamais sans ménage, `true` avec et
    sans : une relation à sens unique sur les COMPOSANTS de frais, pas sur le
    modèle de commission. Ne pas l'utiliser.
    **Le modèle de commission, d'après la documentation d'AirROI** : le modèle
