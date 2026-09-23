@@ -69,8 +69,9 @@ Tests manuels contre l'API AirROI, à la main, pour un coût total d'environ
    concurrent direct. La validation est moins indépendante qu'elle en a l'air.
 4. **L'ADR n'est pas une grille.** C'est une moyenne annuelle qui mélange haute et
    basse saison. En prendre les quantiles confond l'écart saisonnier et l'écart
-   de qualité. La vraie version lit 36 à 60 mois d'ADR **mensuel** par
-   comparable ; c'est elle qu'il faudra juger, pas le test de ce soir.
+   de qualité. La vraie version lit l'ADR **mensuel** de chaque comparable —
+   **26 mois au plus** (§3 ter, constat 1) ; c'est elle qu'il faudra juger, pas
+   le test de ce soir.
 
 ### 3 bis. Ce qu'est l'ADR d'AirROI — tests du 23 septembre 2026
 
@@ -116,6 +117,49 @@ dans le cœur : `rateDescription` Beds24 (« Base Price », « Cleaning »,
 274 réservations Airbnb sur 276. Identifiant d'annonce Airbnb connu du cœur :
 `697908942876699669` (`meta.listing_id` des réservations Channex de 2026).
 
+### 3 ter. Profondeur et dérive du marché — mesures du 23 septembre 2026
+
+Recalculées depuis les fichiers source (`markets/metrics/all` Bagnères,
+`num_months=60` ; `listings/metrics/all` sur La bulle et Cœur de vie 23), pas
+recopiées.
+
+1. **Asymétrie de profondeur.** Le MARCHÉ a 60 mois pleins (sept. 2021 →
+   août 2026). Une ANNONCE en a **26** (juil. 2024 → août 2026), quel que soit
+   le `num_months` demandé — vérifié sur les deux biens, dont La bulle, jamais
+   recréée. La phase 1 garde sa profondeur ; la phase 2 tombe à 26 mois.
+   ⚠ 26 mois ne sont pas deux cycles : juillet et août y sont TROIS fois, les
+   autres mois deux — un nuage de 26 mois pèse l'été une fois de trop.
+2. **Couverture inégale selon le champ (marché).** Occupation, ADR, RevPAR,
+   revenus : 60/60 mois. Durée de séjour : 36/60 (depuis sept. 2023). Délai de
+   réservation : 35/60 (depuis oct. 2023). Nuits minimum : 21/60 (depuis
+   déc. 2024). Avant ces dates le champ vaut 0 — absent, pas nul.
+3. **L'offre a crû.** Annonces actives : moyenne annuelle 713 (2022) → 892
+   (2025), soit **+7,7 %/an**. Le point de départ de sept. 2021 (432, puis 486,
+   528, 598… 771 en juin 2022, +40 % entre les moyennes 2021 et 2022) monte
+   trop vite pour être de l'offre seule : probablement la montée en couverture
+   d'AirROI. 432 → 998 (mars 2026) vaut +20,5 %/an et ne décrit pas la même
+   chose. Comparer 2021 à 2026 compare deux marchés, et deux couvertures.
+4. **Le marché dérive vers le haut, pas uniformément.** ADR, moyennes
+   annuelles 2022 → 2025, taux composé :
+
+   | quantile | 2022 | 2023 | 2024 | 2025 | par an |
+   |---|---|---|---|---|---|
+   | p25 | 47,0 | 47,7 | 51,2 | 55,9 | **+5,9 %** |
+   | p50 | 65,5 | 67,0 | 70,3 | 75,2 | **+4,7 %** |
+   | p75 | 95,5 | 98,9 | 100,8 | 106,2 | **+3,6 %** |
+   | p90 | 151,6 | 152,6 | 148,6 | 154,0 | **+0,5 %** |
+   | moyenne | 84,4 | 85,4 | 85,6 | 91,5 | +2,7 % |
+
+   Le bas monte, le haut est à l'arrêt depuis quatre ans : le marché se
+   comprime. En glissement annuel mois par mois (48 mois) : médiane p50
+   **+6,1 %/an**, 9 mois sur 48 en baisse, écart-type **6,3 %** — presque
+   autant que la moyenne ; p90 : +1,1 %, 21 mois sur 48 en baisse, écart-type
+   10,6 % (bruit plus que tendance) ; moyenne du marché : +4,7 %, écart-type
+   9,0 %.
+   Pièce : La bulle, ADR AirROI 137,4 € sur 12 mois, entre le p75 (109,8 €) et
+   le p90 (156,8 €) du marché, plus près du p90 : son segment n'a pas bougé
+   depuis 2022. Lui appliquer +6 %/an serait une erreur.
+
 ---
 
 ## 4. Le flux, en quatre temps
@@ -139,8 +183,9 @@ biens, il n'estime pas une catégorie abstraite.
 Produit un calendrier de segments. **Aucun prix.**
 
 Sources :
-- `markets/metrics/all` — 36 mois d'ADR et d'occupation mensuels du marché, pour
-  la forme générale et la comparaison d'une année sur l'autre ;
+- `markets/metrics/all` — jusqu'à **60 mois** d'ADR et d'occupation mensuels du
+  marché (`num_months=60`), pour la forme générale et la comparaison d'une année
+  sur l'autre — la FORME, pas le NIVEAU (§3 ter, constats 2 à 4) ;
 - `markets/metrics/future/pacing` — un point **par jour** sur 365 jours :
   nuits réservées, nuits disponibles, ADR des unes et des autres, taux de
   remplissage. C'est la source fine ;
@@ -182,8 +227,8 @@ Le propriétaire les voit **en photo**, rangés par gamme, et coche ceux qui
 ressemblent vraiment au sien. Ce geste unique vaut deux choses : il **désigne les
 comparables** et il **déclare le positionnement**.
 
-Pour chaque bien retenu, `listings/metrics/all` donne jusqu'à 60 mois d'ADR et
-d'occupation mensuels. Le nuage de ces valeurs donne les cinq niveaux par
+Pour chaque bien retenu, `listings/metrics/all` donne **26 mois** d'ADR et
+d'occupation mensuels, quel que soit `num_months` (§3 ter, constat 1). Le nuage de ces valeurs donne les cinq niveaux par
 quantiles — mêmes noms, mêmes règles que la V1 : Base / Moyen (la médiane, le
 socle) / Haut / Très haut / Exceptionnel, prix ronds, écart minimal d'environ
 5 %, grille monotone, plancher toujours armé.
@@ -194,7 +239,7 @@ d'usage, pas d'implémentation.**
 
 ### Phase 3 — l'historique marché de substitution
 
-Les 36 à 60 mois des comparables retenus forment un historique d'emprunt.
+Les 26 mois des comparables retenus forment un historique d'emprunt.
 YieldFlow le traite comme un bien avec historique et le met en concurrence avec
 l'année en cours, exactement comme pour un bien réel.
 
@@ -249,6 +294,12 @@ vraies ventes à mesure qu'elles arrivent.
 13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
     (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
     hôte qu'il sous-performe quand il fait mieux (règle 11).
+14. **La dérive du marché se prolonge PAR QUANTILE, au quantile où le bien se
+    situe, jamais par un taux global, et sur un taux ANNUEL, jamais mensuel.**
+    Pièce : La bulle, entre p75 et p90, segment plat depuis 2022 (§3 ter,
+    constat 4). Limite juste à côté : §10, point 6.
+15. **Les années anciennes du marché servent à la FORME saisonnière, pas au
+    NIVEAU** (§3 ter, constat 3) : l'offre et la couverture ont changé.
 
 ---
 
@@ -292,6 +343,39 @@ par Thierry.
    une étude au plus tous les 90 jours par bien, un plafond par compte, un
    budget mensuel avec alarme au fondateur.
 
+7. **A — Profondeur retenue pour le NIVEAU** — *proposé, non tranché* :
+   **les 12 derniers mois complets, sans correction de dérive.**
+   - Un cycle saisonnier entier, chaque mois une fois : 26 mois pèsent juillet
+     et août trois fois (§3 ter, constat 1) ; il faudrait couper à 24.
+   - 12 mois, c'est déjà le niveau COURANT : aucun modèle de dérive à
+     appliquer, donc rien qui dépende d'un taux contaminé par la composition
+     (§10, point 6). Le calcul reste ce que la V1 promet : déterministe,
+     auditable, sans extrapolation.
+   - L'erreur évitée est petite de toute façon : corriger 14 mois vieux d'un an
+     au quantile d'un bien haut de gamme, c'est +0,5 à +3,6 % sur la moitié du
+     nuage — sous le pas d'arrondi de 5 € de la grille pour un bien à 135 €.
+   - Volume : 3 comparables × 12 mois à ~60 % d'occupation Airbnb ≈ 650 nuits,
+     au-dessus du seuil proposé (200 nuits, arbitrage 1).
+   - Les 14 mois plus anciens ne sont pas jetés : ils servent au contrôle de
+     stabilité (un comparable dont le niveau a sauté entre les deux années se
+     signale) et, avec le marché à 60 mois, à la FORME.
+8. **B — Appliquer la dérive à la grille marché d'un nouveau bien ?** —
+   *proposé, non tranché* : **non.**
+   - Avec A, la grille est déjà au niveau des 12 derniers mois ; la dérive ne
+     concernerait que l'écart entre « l'an passé » et les nuits à vendre, au
+     plus une année — de +0,5 % (haut de gamme) à +5,9 % (bas du marché).
+   - La part de composition est inconnue (§10, point 6) : appliquer le taux,
+     c'est ajouter une hausse peut-être fictive, et surtout au bas du marché, là
+     où l'hôte est le plus sensible au prix.
+   - La V1 n'applique aucune dérive à ses trois ans de ventes réelles : la V2
+     ne doit pas être plus audacieuse sur une donnée d'emprunt que la V1 sur la
+     sienne.
+   - Le rattrapage se fait par construction : le cache se rafraîchit (au plus
+     tous les 90 jours, arbitrage 6) et les ventes réelles prennent la main
+     (arbitrage 3). La dérive par quantile reste une INFORMATION affichée
+     (« le bas de votre marché monte de 6 % par an, le haut est stable »),
+     jamais un coefficient.
+
 ### Préalables découverts à la confrontation au code (23 septembre)
 
 - **Dette 17** (deux assemblées de la matière, `api/yield-prix.js` et
@@ -301,8 +385,9 @@ par Thierry.
   `grilleDuBien` → `construireGrille` → `suggerer`. La grille marché doit en
   avoir la FORME (niveaux + `positions` + `positions_jour`), les niveaux venant
   des comparables (phase 2), les positions du pacing (phase 1).
-- **Fenêtre de 3 ans** (`ANS_REFERENCE`) : 60 mois d'AirROI seraient tronqués
-  en silence.
+- **Fenêtre de 3 ans** (`ANS_REFERENCE`) : sans objet pour les comparables
+  (26 mois, §3 ter) ; à surveiller si l'historique MARCHÉ (60 mois) entrait un
+  jour dans la grille — il n'y est pas destiné (phase 1 = la forme).
 - **`suggerer` écrit « de vos nuits »** (`lib/yield/suggestion.js:620`) :
   contraire à la règle 2 si on branche sans corriger ; `source_du_niveau`
   s'étend de `'marche'`.
@@ -323,10 +408,10 @@ crédits sans expiration, dépôt minimum 10 $, 1 000 requêtes par minute.
 | Endpoint | Usage | Coût |
 |---|---|---|
 | `GET /markets/lookup` | trouver le marché par coordonnées | 0,01 $ |
-| `POST /markets/metrics/all` | 36 mois marché, avec percentiles p25/p50/p75/p90 | 0,50 $ |
+| `POST /markets/metrics/all` | jusqu'à 60 mois marché, avec percentiles p25/p50/p75/p90 | 0,50 $ |
 | `POST /markets/metrics/future/pacing` | 365 points **par jour** | 0,20 $ |
 | `GET /listings/comparables` | jusqu'à 25 biens, fiches complètes | 0,10 $ |
-| `GET /listings/metrics/all` | jusqu'à 60 mois par bien | 0,10 $ |
+| `GET /listings/metrics/all` | **26 mois** par bien, quel que soit `num_months` | 0,10 $ |
 | `GET /listings/live/calendar` | prix nuit par nuit sur 12 mois | ~0,10 $ |
 
 **Coût d'un nouveau bien** : environ **1,80 $**, une seule fois, avec cinq
@@ -399,6 +484,15 @@ comparables. Négligeable face à un abonnement AirDNA.
 3. **Ménage** — en cours de test (§3 bis, règle 12).
 4. **ADR ≠ CA ÷ nuits chez AirROI** (§3 bis) : le détail mensuel dira quelle
    moyenne il sert.
+5. **Profondeur par champ** (§3 ter, constats 1-2) : 26 mois par annonce ; au
+   niveau marché, le **délai de réservation** — un des quatre piliers de
+   YieldFlow — n'a que 35 mois (depuis oct. 2023), la durée de séjour 36, les
+   nuits minimum 21. Pas de comparaison sur plus de trois ans pour ces champs.
+6. **Dérive ou composition ?** Avec une offre en croissance de 7,7 %/an, une
+   partie de la dérive mesurée peut être un changement de COMPOSITION du marché
+   (des annonces nouvelles, moins chères, qui entrent dans le bas) et non une
+   hausse réelle des prix. Le motif p25 qui monte / p90 plat penche pour une
+   compression véritable, mais la donnée ne tranche pas.
 
 ---
 
