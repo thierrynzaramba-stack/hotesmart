@@ -549,7 +549,15 @@ test('pontsEntre sur une fenetre trop large ne plante pas', () => {
   // et `for (const j of null)` levait un TypeError — sur l'appel le plus
   // plausible, couvrir historique ET horizon d'un seul coup.
   assert.doesNotThrow(() => R.pontsEntre('2010-01-01', '2030-12-31'))
-  assert.equal(R.pontsEntre('2010-01-01', '2030-12-31').size, 0)
+  // ⚠ ET ELLE NE REND PLUS UN ENSEMBLE VIDE (review du lot V2.0.1). Ce test
+  // exigeait `size === 0` : il figeait le defaut — l'ecran des prix, au-dela de
+  // 2000 jours de contexte, batissait sa grille sans aucun pont. La fenetre
+  // longue se decoupe (`parTranches`) : memes ponts qu'annee par annee.
+  const large = R.pontsEntre('2010-01-01', '2030-12-31')
+  const parAn = new Map()
+  for (let a = 2010; a <= 2030; a++) for (const [j, v] of R.pontsEntre(`${a}-01-01`, `${a}-12-31`)) parAn.set(j, v)
+  assert.ok(large.size > 0, 'des ponts, pas un silence')
+  assert.deepEqual([...large].sort(), [...parAn].sort(), 'les memes ponts qu annee par annee')
 })
 
 test('le module est PUR : ni base, ni reseau, ni horloge', () => {

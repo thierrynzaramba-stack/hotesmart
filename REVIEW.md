@@ -510,6 +510,64 @@ fausse que le code qu'on teste.
 
 ---
 
+## 17. Un test peut figer un bug comme un comportement attendu
+
+**La règle, en une phrase :**
+
+> Quand un correctif fait rougir un test ancien, c'est peut-être le test qui
+> avait tort.
+
+C'est le pendant de la règle 16 : un vérificateur qui valide l'état d'avant, et
+un test qui exige l'état d'avant. Un test ne prouve pas que le comportement est
+juste, il prouve que le comportement n'a pas changé — y compris quand ce
+comportement est le défaut.
+
+**Cas vécu, 23 septembre 2026 (review du lot V2.0.1).**
+`tests/reference-yield.test.js` exigeait que `pontsEntre` sur une fenêtre de
+plus de 2000 jours rende… `size === 0`. Il était né d'une review légitime (la
+fonction levait un `TypeError` sur `null`) et avait figé le repli choisi alors :
+« un ensemble vide ». Ce vide était le bug : l'écran des prix, au-delà de 2000
+jours de contexte, bâtissait sa grille SANS aucun pont, différente de celle du
+moteur. Le test passait au vert PARCE QUE le défaut était là. Le correctif
+(`parTranches`) l'a fait rougir — et la bonne réponse était de corriger le test :
+il exige désormais les mêmes ponts qu'année par année.
+
+**Ce qu'on fait devant un test ancien qui rougit sous un correctif :**
+1. **Lire ce qu'il exige, pas seulement qu'il échoue.** Une assertion du type
+   « rend vide », « rend 0 », « ne lève pas » sur un cas limite est suspecte :
+   elle décrit souvent un repli, pas une vérité.
+2. **Se demander si l'état exigé est celui qu'on vient de déclarer faux.** Si
+   oui, le test est un témoin du bug — on le corrige, et on écrit pourquoi dans
+   le test lui-même.
+3. **Ne jamais « réparer » un correctif pour rendre un vieux test vert** sans
+   avoir fait les deux points précédents.
+
+---
+
+## 18. Une mesure qui rassure dit SUR QUELLE PLAGE elle rassure
+
+**La règle, en une phrase :**
+
+> Une mesure sans sa plage rassure à tort.
+
+**Cas vécu, 23 septembre 2026 (lot V2.0.0).** `scripts/verifier-parite-prix.js`
+a annoncé « 0 divergence sur 152 nuits » entre l'écran et le moteur. La mesure
+était juste — et hors sujet : elle ne portait que sur les 120 à 365 prochains
+jours, et la divergence vivait dans les mois LOINTAINS (au-delà de ~30 mois, ou
+passés), là où la fenêtre de contexte de l'écran dépassait 2000 jours (règle 17).
+Elle rassurait sur la plage où le défaut n'était pas.
+
+**Ce qu'on exige d'une mesure ou d'un vérificateur :**
+1. **Le compte rendu dit la plage** : quelles dates, quels biens, quels cas ont
+   été couverts — et lesquels non.
+2. **La plage couvre les cas limites connus**, pas seulement le cas du jour.
+   Le script de parité interroge désormais des mois lointains
+   (`--mois-extra=`) et compare aussi la GRILLE, pas seulement les prix.
+3. **« 0 défaut » n'est pas une conclusion générale** : c'est « 0 défaut sur
+   cette plage ». La phrase qu'on écrit à Thierry porte la plage.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).
