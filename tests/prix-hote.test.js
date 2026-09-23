@@ -134,12 +134,17 @@ test('correctifs de review : prix REEL affiche et ecart marque, clavier sans pro
 
 test('une nuit NON OUVERTE montre les memes informations qu une nuit ouverte : la projection (prix, niveau, quand)', () => {
   const src = lire('api/yield-prix.js')
-  assert.match(src, /const projection = !vendue && delai >= 0 && ouverte !== false &&\n\s+\(horsFenetre\.has\(date\) \|\| \(ouvertureConnue && !parDate\.has\(date\)\)\)/, 'hors fenetre ou sans ligne (ouverture connue), a venir, non vendue, jamais fermee')
+  // ⚠ CE TEST A CHANGE LE 23 SEPTEMBRE 2026 (regle 17) : il exigeait « jamais
+  // fermee ». Demande de Thierry : une nuit FERMEE montre aussi sa projection,
+  // sinon un bien ferme a la vente ne montre aucun prix a verifier.
+  assert.match(src, /const projection = !vendue && delai >= 0 &&\n\s+\(ouverte === false \|\| horsFenetre\.has\(date\) \|\| \(ouvertureConnue && !parDate\.has\(date\)\)\)/, 'fermee, hors fenetre ou sans ligne (ouverture connue), a venir, non vendue')
+  assert.match(src, /n\.prix_actuel != null && !n\.projection\)/, 'et le radar ne compte jamais une projection « a monter »')
   assert.match(src, /ouverte: projection \? true : ouverte/, 'la suggestion est calculee comme si la nuit etait ouverte')
   assert.match(src, /\n\s+projection,\n/, 'et le drapeau voyage')
   const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
   assert.ok(ligne.includes('} else if (!passe && n.projection && n.suggestion != null) {'), 'la ligne montre la projection')
   assert.ok(ligne.includes('s’ouvrira') && ligne.includes('si vous l’ouvrez'), 'et dit quand, ou a quelle condition')
+  assert.ok(ligne.includes("'fermée · si vous l’ouvrez'"), 'une nuit fermee dit qu elle est fermee')
   // La projection se DIT partout ou elle s'affiche : ligne, depliant, pop-up.
   assert.ok(PAGE.includes("const proj = n.projection && n.ouverte !== true"), 'le depliant « pourquoi » la dit')
   assert.ok(PAGE.includes("projete ? 'pas encore en vente : prix prévu' : ''"), 'la case de la pop-up la dit')
