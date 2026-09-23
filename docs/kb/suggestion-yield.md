@@ -356,6 +356,55 @@ Exceptionnel doivent pouvoir voir. Règle 13 : la liste s'importe de sa source.
 - Aucune autre liste recopiée de dates commerciales dans `lib/`, `api/`,
   `apps/`, `shared/`, `pages/`, `scripts/` (vérifié par recherche, 23 septembre).
 
+## 3 ter. Exceptionnel est une FOURCHETTE — la prime vient de la preuve (V2.0.7, 23 septembre 2026)
+
+**Constat, La bulle.** Exceptionnel (P92) valait 165 € quand 54 nuits sur 856
+s'étaient vendues plus cher, jusqu'à 295 € : une nuit dont la comparable de
+l'an dernier s'était vendue 195 € ne pouvait pas y revenir.
+
+**Règle (arbitrages de Thierry).**
+- **Bas** = prix du niveau (165 €). **Haut = plafond** = le prix le plus élevé
+  déjà obtenu sur le bien, arrondi vers le bas au pas (`base.plafond`, 295 €).
+  C'est une **borne de sécurité, pas un objectif** : elle borne le cliquet N-1
+  (un prix prouvé devient le plancher de l'année suivante — une année
+  exceptionnelle se transmettrait indéfiniment sans elle). **Ne pas la retirer
+  par simplification.** `null` quand il n'y a pas de place au-dessus du niveau.
+- **Dans la fourchette, le prix ne vient QUE de la preuve** : le prix obtenu
+  l'an dernier sur la nuit comparable (la cascade N-1 de l'écran,
+  `preuveN1` dans `contexte-du-bien.js`), **arrondi au pas supérieur** (arrondir
+  vers le bas mettrait le plancher sous le prix prouvé). Sans preuve : pas de
+  prime, **jamais le plafond par défaut**. Preuve écartée si la nuit comparable
+  est d'un autre segment, hors référence (exception, fermeture, long séjour) ou
+  non vendue. Plusieurs ventes le même jour : la plus basse.
+- **Même seuil que le plancher N-1 (point B)** : sous deux pas (10 €), on ne
+  bouge pas — c'est le même geste. 168 € prouvés laissent 165 €.
+- **La pression décide, elle n'ajoute aucun euro.** Un mois à −25 % ou pire
+  (seuil de la couche pression, `SEUIL_PRESSION`) retire la prime ; un
+  portefeuille N-1 non fiable ne décide rien. **Réserve écrite** : c'est une
+  falaise (−24 % garde toute la prime, −26 % la perd — 30 € sur le 13/02),
+  acceptable parce que la nuit retombe sur un niveau lui aussi prouvé, à
+  condition de le **dire** : « Prime retirée — ce mois se vend 26 % moins bien
+  que l'an dernier : 165 € au lieu de 195 € ». Jamais un prix qui chute sans
+  phrase.
+- **« Référence amincie »** quand la prime repose sur une seule vente : ailleurs
+  une mesure devient fiable à 8 nuits et 3 réservations ; ici le prix d'UNE nuit
+  devient un plancher. Défendable (la preuve la plus spécifique qui existe), dit.
+- La preuve n'est calculée que pour les nuits au niveau Exceptionnel.
+
+**Écran** (`apps/yield/prix.html`) : la grille affiche « 165–295 € » et une
+note sur le plafond (« le prix le plus élevé déjà obtenu sur ce logement : une
+borne de sécurité, pas un prix visé ») ; une nuit posée dans la fourchette
+affiche SON prix et « prouvé le JJ/MM/AAAA » (· « 1 vente » si amincie) ; une
+prime retirée se lit sur la ligne ; les autres absences de prime au détail de
+la nuit. Pas d'aperçu PDF sur cet écran. Vérifié sur aperçu réel (données prod
+de La bulle, rendu Chromium) le 23 septembre 2026, bureau et mobile.
+
+**Effet mesuré (prod, 12 mois)** : grille identique ; La bulle 6 nuits
+(19/12 180 €, 02/01 200 €, 06/02 180 €, 13/02, 20/02, 03/04 195 €), Cœur de
+vie 23 5 nuits (25/12 et 26/12 190 €, 01/01 185 €, 06/02 180 €, 13/02 210 €) ;
+aucune prime retirée aujourd'hui ; parité écran/moteur 0 divergence sur 440
+nuits (+ deux mois lointains). Tests : `tests/fourchette-exceptionnel.test.js`.
+
 ## 4. Le plancher refuse, il ne rabote pas
 
 Règle du KB `prix-plancher.md` : *on ferme la date, on ne remonte jamais le prix

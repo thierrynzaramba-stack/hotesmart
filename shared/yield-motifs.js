@@ -318,6 +318,35 @@ export const MOTIFS = {
     titre: 'Nuit déjà passée',
     quoi: 'Cette nuit est derrière nous : un prix n’y changerait rien.'
   },
+  // ─── La fourchette Exceptionnel : pourquoi une nuit n'a pas de prime (V2.0.7)
+  pas_de_nuit_comparable: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'Aucune nuit comparable l’an dernier : sans preuve, la nuit reste au bas de la fourchette Exceptionnel. Le moteur ne vise jamais le plafond par défaut.'
+  },
+  nuit_comparable_non_vendue: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable de l’an dernier n’a pas été vendue : elle ne prouve aucun prix.'
+  },
+  nuit_comparable_d_un_autre_segment: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable de l’an dernier était d’une autre nature (férié, date commerciale…) : son prix ne prouve rien pour celle-ci.'
+  },
+  nuit_comparable_hors_reference: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La vente de la nuit comparable est écartée de votre historique (exception, fermeture ou long séjour) : elle ne sert pas de preuve.'
+  },
+  nuit_comparable_pas_plus_chere: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'L’an dernier, la nuit comparable ne s’est pas vendue plus cher que ce niveau : rien à reprendre.'
+  },
+  preuve_a_moins_de_deux_pas: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable s’est vendue moins de 10 € au-dessus de ce niveau : le prix ne bouge pas pour si peu.'
+  },
+  prime_retiree_par_la_pression: {
+    titre: 'Prime retirée',
+    quoi: 'Ce mois se vend nettement moins bien que l’an dernier au même moment : la demande de cette année contredit la preuve de l’an dernier, la nuit reste au bas de la fourchette.'
+  },
   deplacement_sans_effet_sur_le_prix: {
     titre: 'Ajustement sans effet',
     quoi: 'Les signaux justifiaient de monter ou de descendre, mais vos prix passés sur ce type de nuit sont trop resserrés pour que cela change un euro. Le prix proposé est le prix de référence.'

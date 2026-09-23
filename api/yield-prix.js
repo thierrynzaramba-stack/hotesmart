@@ -419,6 +419,11 @@ module.exports = async (req, res) => {
         reference_empruntee: s.reference_empruntee || null,
         couches: s.couches,
         fourchette: s.fourchette || null,
+        // ⚠ LA FOURCHETTE EXCEPTIONNEL (lot V2.0.7) : la prime et sa preuve, ou
+        // la raison de son absence. L'ecran affiche le PRIX de la nuit et sa
+        // preuve, jamais la fourchette seule ; « prime retiree » se dit.
+        fourchette_exceptionnel: s.fourchette_exceptionnel || null,
+        prime_exceptionnel: s.prime_exceptionnel || null,
         // ⚠ L'ETENDUE DE LA GRILLE (Prudent → Haut), pas le min-max des prix
         // observes — demande de Thierry : « le 35 € brade fait peur pour rien ».
         // Un extreme unique n'est pas une borne de decision, c'est un accident.
