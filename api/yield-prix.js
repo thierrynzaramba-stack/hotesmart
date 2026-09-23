@@ -419,6 +419,11 @@ module.exports = async (req, res) => {
         reference_empruntee: s.reference_empruntee || null,
         couches: s.couches,
         fourchette: s.fourchette || null,
+        // ⚠ LA FOURCHETTE EXCEPTIONNEL (lot V2.0.7) : la prime et sa preuve, ou
+        // la raison de son absence. L'ecran affiche le PRIX de la nuit et sa
+        // preuve, jamais la fourchette seule ; « prime retiree » se dit.
+        fourchette_exceptionnel: s.fourchette_exceptionnel || null,
+        prime_exceptionnel: s.prime_exceptionnel || null,
         // ⚠ L'ETENDUE DE LA GRILLE (Prudent → Haut), pas le min-max des prix
         // observes — demande de Thierry : « le 35 € brade fait peur pour rien ».
         // Un extreme unique n'est pas une borne de decision, c'est un accident.
@@ -475,7 +480,13 @@ module.exports = async (req, res) => {
           rang: cmp ? cmp.rang : null,
           rang_n1: cmp ? cmp.rang_n1 : null,
           ecart_jours: cmp ? cmp.ecart_jours : null,
-          prix_vendu: rn1 ? rn1.prix : null,
+          // ⚠ LE MEME CHIFFRE QUE LA PREUVE DE LA PRIME quand elle porte sur
+          // cette nuit (review V2.0.7) : deux « l'an dernier » differents sur
+          // la meme ligne (derniere vente contre plus basse) se contrediraient.
+          prix_vendu: s.prime_exceptionnel && s.prime_exceptionnel.preuve_date === dateN1 &&
+            s.prime_exceptionnel.preuve_prix != null
+            ? Math.round(s.prime_exceptionnel.preuve_prix * 100) / 100
+            : (rn1 ? rn1.prix : null),
           date_vente: rn1 ? rn1.date_vente : null,
           vendue_a_ce_delai: venduePlusTotN1,
           hors_reference: rn1 ? rn1.hors_reference : false
@@ -688,7 +699,8 @@ module.exports = async (req, res) => {
         
         id: bien.id, name: bien.name, provider: bien.provider,
         capacity: bien.capacity ?? null, zone_scolaire: bien.zone_scolaire ?? null,
-        prix_minimum: bien.prix_minimum ?? null, base_price: bien.base_price ?? null
+        prix_minimum: bien.prix_minimum ?? null, base_price: bien.base_price ?? null,
+        inventory_units: bien.inventory_units ?? null
       },
       fenetre: { debut, fin, aujourdhui: auj, jours: jours.length },
       // ⚠ LA FENETRE ANNONCEE EST CELLE REELLEMENT UTILISEE. Elle affirmait

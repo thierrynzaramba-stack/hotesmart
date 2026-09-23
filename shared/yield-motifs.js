@@ -100,9 +100,17 @@ export const MOTIFS = {
     titre: 'Même jour férié, même date',
     quoi: 'Ce jour férié tombe à la même date chaque année : la comparaison se fait date à date, même si le jour de la semaine a changé.'
   },
-  meme_date_reveillon: {
-    titre: 'Même réveillon',
-    quoi: 'Le 24 et le 31 décembre sont les deux nuits de l’année où la date fait le prix, pas le jour de la semaine : elles se comparent date à date.'
+  meme_date_commerciale: {
+    titre: 'Même date, l’an dernier',
+    quoi: 'Réveillons et Saint-Valentin : c’est la date qui fait le prix, pas le jour de la semaine. La nuit se compare à la même date l’an dernier.'
+  },
+  meme_samedi_rattache: {
+    titre: 'Même samedi de Saint-Valentin',
+    quoi: 'La Saint-Valentin tombe en semaine : elle se fête aussi le samedi le plus proche. Ce samedi se compare à celui de l’an dernier.'
+  },
+  samedi_rattache_vers_la_date: {
+    titre: 'Saint-Valentin de l’an dernier',
+    quoi: 'L’an dernier, la Saint-Valentin tombait un week-end et n’avait pas de samedi rattaché : ce samedi se compare à la nuit du 14 février, qui était alors la nuit fêtée.'
   },
   meme_ferie_mobile: {
     titre: 'Même jour férié',
@@ -309,6 +317,43 @@ export const MOTIFS = {
   nuit_deja_passee: {
     titre: 'Nuit déjà passée',
     quoi: 'Cette nuit est derrière nous : un prix n’y changerait rien.'
+  },
+  // ─── La fourchette Exceptionnel : pourquoi une nuit n'a pas de prime (V2.0.7)
+  pas_de_nuit_comparable: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'Aucune nuit comparable l’an dernier : sans preuve, la nuit reste au bas de la fourchette Exceptionnel. Le moteur ne vise jamais le plafond par défaut.'
+  },
+  nuit_comparable_pas_encore_passee: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable n’est pas encore passée : aucun prix n’est encore obtenu, donc rien n’est prouvé.'
+  },
+  nuit_comparable_vendue_prix_inconnu: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable a été vendue, mais son prix n’est pas exploitable (souvent une réservation recréée lors d’une migration de canal) : elle ne sert pas de preuve.'
+  },
+  nuit_comparable_non_vendue: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable de l’an dernier n’a pas été vendue : elle ne prouve aucun prix.'
+  },
+  nuit_comparable_d_un_autre_segment: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable de l’an dernier était d’une autre nature (férié, date commerciale…) : son prix ne prouve rien pour celle-ci.'
+  },
+  nuit_comparable_hors_reference: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La vente de la nuit comparable est écartée de votre historique (exception, fermeture ou long séjour) : elle ne sert pas de preuve.'
+  },
+  nuit_comparable_pas_plus_chere: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'L’an dernier, la nuit comparable ne s’est pas vendue plus cher que ce niveau : rien à reprendre.'
+  },
+  preuve_a_moins_de_deux_pas: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable s’est vendue moins de 10 € au-dessus de ce niveau : le prix ne bouge pas pour si peu.'
+  },
+  prime_retiree_par_la_pression: {
+    titre: 'Prime retirée',
+    quoi: 'Ce mois se vend nettement moins bien que l’an dernier au même moment : la demande de cette année contredit la preuve de l’an dernier, la nuit reste au bas de la fourchette.'
   },
   deplacement_sans_effet_sur_le_prix: {
     titre: 'Ajustement sans effet',
