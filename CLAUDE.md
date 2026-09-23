@@ -225,15 +225,49 @@ ont déjà un prix au calendrier ») ; les prix posés par le ✎ (`prix_hote`) 
 sont jamais touchés, survivent à la désactivation (dette 22) et leur vie se
 trace dans `prix_hote_journal`. Règle de saut du moteur, une seule :
 `lib/nuits-du-moteur.js`. Migrations `pilote-fenetre`, `prix-hote`,
-`prix-hote-journal` appliquées staging et prod. Aucun bien réel n'est encore
-activé : lire les deux nombres de la confirmation avant la première
-activation. Aussi en prod : UI calendrier et fonctions Vercel en région Paris
-(`docs/kb/performance.md`). Restent au registre : dettes 20 (le calendrier dit
-« fermée » une nuit pas encore ouverte), 21 (nuit rouverte à la main sans
-prix — vérifier sur un bien relié ce que Channex en fait), 24 (agrandir la
-fenêtre ne prévient pas), 25 (capacité non calculable : prix posés puis
-« aucun prix posé »). Spec : docs/specs/spec-yieldflow-v1.md §2 ter. Dettes :
-docs/kb/dettes-v1.md.
+`prix-hote-journal` appliquées staging et prod (et `fermetures`, absente en
+prod jusqu'au 23 septembre). **La bulle est ACTIVÉE (pilote YieldFlow) depuis
+le 23 septembre 2026** ; son reliquat de bascule (476 nuits) a été réparé par
+`scripts/defaire-fermeture-bascule.js`. Cœur de vie 23 porte le même reliquat
+(786 nuits, lot 2026-09-10T17:17) : NON touché, sur go de Thierry seulement.
+Aussi en prod : UI calendrier et fonctions Vercel en région Paris
+(`docs/kb/performance.md`). Spec : docs/specs/spec-yieldflow-v1.md §2 ter.
+
+**Lot V2.0 EN PROD le 23 septembre 2026 (c67eaca)** — durcissement de la V1 et
+les demandes de Thierry sur le prix. Tout est au KB `suggestion-yield.md`
+§3 bis à §3 quater et `evenements-yield.md` §8 :
+- **dette 17 soldée** : l'écran et le moteur passent par la même assemblée
+  (`preparerContexte` / `prixDeLaNuit`) ; `scripts/verifier-parite-prix.js`
+  compare prix, grille, prime et relèvement (0 divergence sur 440 nuits) ;
+  dette 25 soldée (capacité non calculable : le pilote ne tarife rien et le dit).
+- **Dates commerciales** : sans historique, une date commerciale garde le
+  niveau de sa nuit SOUS-JACENTE (le réveillon 2026 était à 125 € entre deux
+  nuits de Noël à 155 €) ; la date passe avant le pont, jamais avant le férié ;
+  garde-fou `sous_la_nuit_ordinaire`.
+- **Comparable N-1** : les dates commerciales viennent de leur source (plus de
+  liste recopiée) ; une nuit de vacances ne se compare jamais à une date
+  commerciale N-1.
+- **Fourchette Exceptionnel** : bas = prix du niveau, plafond = prix atteint
+  par au moins DEUX réservations (La bulle 255 €, Cœur de vie 23 265 €) —
+  donnée vivante, borne du cliquet, pas une garantie contre deux ventes
+  aberrantes. La prime vient uniquement de la PREUVE (prix obtenu l'an dernier
+  sur la nuit comparable), arrondie au pas supérieur ; la pression la retire
+  (≤ −25 %) sans jamais ajouter d'euro.
+- **Plancher N-1 à tous les niveaux** : même décision que la fourchette ;
+  type de nuit b′ (le jour de la preuve se vend au même niveau ou moins bien
+  dans la structure hors vacances — « le plancher est un plancher ») ; un jour
+  non mesuré refuse ; le délai −1 (14 jours) retire (le prix N-1 a été obtenu
+  à un délai inconnu) ; le réglage de l'hôte qui baisse prime ; le niveau
+  affiché suit le prix ; 10 € d'écart minimum.
+- **REVIEW.md règles 17, 18, 19** : un test peut figer un bug ; une mesure dit
+  sa plage ; tout test neuf rougit contre le code d'avant (contre-épreuve par
+  `git archive` hors de l'arbre, jamais `git show > fichier`).
+Restent au registre (docs/kb/dettes-v1.md) : 20 (le calendrier dit « fermée »
+une nuit pas encore ouverte), 21 (nuit rouverte à la main sans prix), 24
+(agrandir la fenêtre ne prévient pas), 26 (référence en prix voyageur total,
+ménage compris), 27 (le full sync journalise des nuits sans ligne), **28** (le
+délai affiné par le « vendu à date » N-1). V2 « nouveau bien sans historique »
+cadrée (`docs/kb/chantier-nouveau-bien.md`), V2.1 et suivants non commencés.
 
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
