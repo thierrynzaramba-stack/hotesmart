@@ -44,6 +44,17 @@
 // ⚠ `--simuler-pilote` : ce que le premier passage du pilote ferait si le lot
 // etait supprime (calcul en memoire, lecture seule) — par mois, par niveau,
 // minimum, maximum, et les prix qui ne collent a AUCUN niveau de la grille.
+// C'est une APPROCHE fidele, pas une copie : meme `nuitsAOuvrir`, meme
+// `prixDeLaNuit`, memes fermetures et prix de l'hote ; mais les ventes viennent
+// de `nuitsVendues`, sans l'etape des prix ni les filtres du canal, et a la date
+// du jour (un passage le lendemain ouvre une nuit de plus).
+//
+// ⚠ APRES UNE VERIFICATION VERTE, LE REPERE DU PILOTE EST EFFACE (review du
+// script, 23 septembre 2026) : sinon, le pilote etant deja passe ce jour-la, les
+// nuits resteraient « sans ligne » jusqu'au lendemain — fermees chez Channex
+// (rien n'y part), mais lues « vendables au prix de base » par la page de
+// reservation directe si le bien en a un. Le pilote passe au tick suivant
+// (5 minutes), comme a une activation.
 
 const { createClient } = require('@supabase/supabase-js')
 const { finDeFenetre, pilotParYield } = require('../lib/pilote-tarifaire')
@@ -93,7 +104,10 @@ const fermee = l => l.stop_sell === true || l.avail === 0
     lignes.push(...(data || []))
     if (!data || data.length < 1000) break
   }
-  const dansLeLot = l => String(l.updated_at || '').slice(0, 16) === lot && l.stop_sell === true && l.avail === 0 && sansPrix(l)
+  // ⚠ `rate == null`, pas « sans prix » au sens large : c'est EXACTEMENT ce que
+  // le DELETE exige (`is('rate', null)`). Une ligne a `rate = 0` n'est pas dans
+  // le lot — l'ecart se voit au passage a blanc, pas au milieu d'une suppression.
+  const dansLeLot = l => String(l.updated_at || '').slice(0, 16) === lot && l.stop_sell === true && l.avail === 0 && l.rate == null
   const leLot = lignes.filter(dansLeLot)
   const horsLot = lignes.filter(l => fermee(l) && !dansLeLot(l))
 
@@ -138,6 +152,7 @@ const fermee = l => l.stop_sell === true || l.avail === 0
   if (refus.length) { console.error(`\nREFUS du --go : ${refus.join(' ; ')}.`); process.exit(1) }
 
   // ── L'INCIDENT, AVANT D'ECRIRE (regle « une ecriture de masse s'annonce »).
+  const t0 = new Date(Date.now() - 1000).toISOString()
   const { reportIncident } = require('../lib/founder-notify')
   await reportIncident('ecriture_de_masse_annoncee', {
     userId: bien.user_id, propertyId: bien.id, propertyName: bien.name,
@@ -149,27 +164,56 @@ const fermee = l => l.stop_sell === true || l.avail === 0
       second_ecrivain: 'Ce script est un SECOND ECRIVAIN de calendar_inventory, dont le writer unique est lib/calendrier-writer.js. Exception ASSUMEE pour une reparation de donnees, decidee par Thierry le 23 septembre 2026 : les nuits auraient du etre « pas encore ouvertes » (sans ligne) ; la regle « writer unique » reste la regle.'
     }
   })
-  console.log('\nIncident pose (ecriture_de_masse_annoncee), avec la mention « second ecrivain ».')
+  // ⚠ RELIRE L'INCIDENT : `reportIncident` ne verifie pas l'erreur de son
+  // insert. Sans trace en base, on ne supprime pas.
+  const { data: trace, error: eT } = await sb.from('automation_incidents').select('id')
+    .eq('type', 'ecriture_de_masse_annoncee').eq('property_id', bien.id).gte('created_at', t0)
+  if (eT || !(trace || []).length) { console.error('REFUS : l incident n est pas en base —', eT ? eT.message : 'aucune ligne', '— rien n a ete supprime.'); process.exit(1) }
+  console.log(`\nIncident pose et relu (ecriture_de_masse_annoncee, ${trace[0].id}), avec la mention « second ecrivain ».`)
 
   // ── LA SUPPRESSION, CONDITIONNELLE, PAR PAQUETS.
   let supprimees = 0
   const ids = leLot.map(l => l.id)
-  for (let i = 0; i < ids.length; i += 200) {
-    const paquet = ids.slice(i, i + 200)
+  // La minute du lot, en bornes : une ligne REECRITE depuis la lecture (meme
+  // fermee, meme sans prix) porte un `updated_at` neuf — c'est un vrai geste,
+  // elle n'est pas emportee.
+  const debutMinute = `${lot}:00Z`
+  const finMinute = new Date(Date.parse(debutMinute) + 60000).toISOString()
+  for (let i = 0; i < ids.length; i += 100) {
+    const paquet = ids.slice(i, i + 100)
     const { data, error } = await sb.from('calendar_inventory').delete()
       .in('id', paquet).eq('property_id', bien.id).eq('stop_sell', true).eq('avail', 0).is('rate', null)
+      .gte('updated_at', debutMinute).lt('updated_at', finMinute)
       .select('id')
-    if (error) { console.error(`ECHEC au paquet ${i / 200 + 1} :`, error.message, `— ${supprimees} supprimee(s) avant l echec.`); process.exit(1) }
+    if (error) { console.error(`ECHEC au paquet ${i / 100 + 1} :`, error.message, `— ${supprimees} supprimee(s) avant l echec.`); process.exit(1) }
     supprimees += (data || []).length
   }
   console.log(`Supprimees : ${supprimees} / ${leLot.length}`)
 
-  // ── LA VERIFICATION, APRES.
-  const { data: restent, error: eR } = await sb.from('calendar_inventory').select('id').in('id', ids.slice(0, 1000))
-  const { data: horsApres } = await sb.from('calendar_inventory').select('id').in('id', horsLot.map(l => l.id))
-  if (eR) { console.error('VERIFICATION IMPOSSIBLE :', eR.message); process.exit(1) }
-  console.log(`Verification : lignes du lot restantes ${(restent || []).length} (attendu 0) · nuits hors lot toujours la ${(horsApres || []).length} / ${horsLot.length}`)
-  process.exit((restent || []).length === 0 && (horsApres || []).length === horsLot.length && supprimees === leLot.length ? 0 : 1)
+  // ── LA VERIFICATION, APRES : on RELIT comme a la lecture initiale (paginee
+  // par bien et par date) — pas un `.in` geant dans l'URL, qui echouerait en
+  // 414 et crierait « impossible » apres une suppression reussie.
+  const apres = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from('calendar_inventory').select('id, date, rate, avail, stop_sell, updated_at')
+      .eq('property_id', bien.id).gte('date', auj).order('date').range(from, from + 999)
+    if (error) { console.error('VERIFICATION IMPOSSIBLE :', error.message, `— ${supprimees} ligne(s) supprimee(s).`); process.exit(1) }
+    apres.push(...(data || []))
+    if (!data || data.length < 1000) break
+  }
+  const restent = apres.filter(dansLeLot).length
+  const horsIntacts = horsLot.filter(h => apres.some(a => a.id === h.id && a.updated_at === h.updated_at && a.rate === h.rate && a.stop_sell === h.stop_sell && a.avail === h.avail)).length
+  console.log(`Verification : lignes du lot restantes ${restent} (attendu 0) · nuits hors lot intactes ${horsIntacts} / ${horsLot.length}${horsLot.length ? ' (' + horsLot.map(h => h.date).join(', ') + ')' : ''}`)
+  const vert = restent === 0 && horsIntacts === horsLot.length && supprimees === leLot.length
+  if (!vert) { console.error('VERIFICATION ROUGE : le repere du pilote n est PAS efface.'); process.exit(1) }
+
+  // ── LE REPERE DU PILOTE, EFFACE : les nuits s'ouvrent au tick suivant.
+  const { effacerMarqueur } = require('../lib/ouverture-marqueur')
+  const { error: eM } = await effacerMarqueur(sb, bien.id)
+  if (eM) { console.error('Repere du pilote NON efface :', eM.message, '— les nuits s ouvriront au passage de demain.'); process.exit(1) }
+  console.log('Repere du pilote efface : le prochain passage du cron (5 minutes au plus) ouvre les nuits de la fenetre AVEC leur prix.')
+  console.log(`A surveiller : le repere « ouverture:${bien.id} » revient avec « ouvertes ≈ ${leLot.filter(l => l.date <= (finDeFenetre(bien, auj) || '')).length} ».`)
+  process.exit(0)
 })().catch(e => { console.error('ECHEC :', e.message); process.exit(1) })
 
 // Ce que le premier passage du pilote ferait si le lot etait supprime.
