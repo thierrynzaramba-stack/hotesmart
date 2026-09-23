@@ -391,7 +391,8 @@
 
       conversations = Object.values(convMap)
         .filter(c => c.hasMessages || c.aiReplies.length > 0 || convFlag(c.bookId))
-        .sort(sortConversations)
+      marquerArrivees()
+      conversations.sort(sortConversations)
 
       const pendingTasks = allTasks.filter(t => ['pending','pending_validation'].includes(t.status)).length
       document.getElementById('topStatus').textContent =
