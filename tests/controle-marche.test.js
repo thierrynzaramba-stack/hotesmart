@@ -45,6 +45,13 @@ test('LE TEST QUI COMPTE : Coeur de vie 23 attend la dette 26 — aucun ecart ca
   assert.equal(r.ecarts, null)
 })
 
+test('LE TEST QUI COMPTE : marche fiable mais ventes du bien trop minces = mesure insuffisante, pas reference amincie', () => {
+  const r = construireReleve({ bien: BULLE, marche: marche(), mesure12: { niveaux: null, nuits: 12 }, grille3ans, motif: 'mensuel', releveLe: '2026-10-01T00:00:00Z' })
+  assert.equal(r.statut, 'mesure_insuffisante')
+  assert.equal(r.ecarts, null)
+  assert.match(r.avertissements.find(a => a.type === 'mesure_insuffisante').phrase, /Vos ventes sur la même période \(12 nuits\)/)
+})
+
 test('reference amincie : releve ecrit avec les nombres, sans ecart', () => {
   const r = construireReleve({ bien: BULLE, marche: marche('reference_amincie'), mesure12, grille3ans, motif: 'rafraichissement', releveLe: '2026-10-01T00:00:00Z' })
   assert.equal(r.statut, 'reference_amincie')
@@ -57,9 +64,11 @@ test('la mesuree 12 mois vient de la V1, bornee a la fenetre du marche', () => {
   const ecl = (d, prix, id) => ({ compte: true, booking_id: id, nuits: [{ date: d, prix, hors_reference: false }] })
   const lignes = []
   for (let i = 0; i < 40; i++) lignes.push(ecl(`2025-${String(10 + (i % 3)).padStart(2, '0')}-${String(1 + i % 28).padStart(2, '0')}`, 100 + (i % 5) * 10, `A${i}`))
-  lignes.push(ecl('2024-12-15', 900, 'VIEUX'))   // hors fenetre : ne compte pas
+  lignes.push(ecl('2024-12-15', 900, 'VIEUX'))   // avant la fenetre : ne compte pas
+  lignes.push(ecl('2026-09-05', 900, 'APRES'))   // APRES la fenetre : ne compte pas non plus
   const m = grilleMesureeDouzeMois({ eclatements: lignes, contexte: ctx, fenetre: { debut: '2025-09', fin: '2026-08' } })
-  assert.equal(m.nuits, 40, 'la vente de decembre 2024 est hors de la fenetre')
+  assert.equal(m.nuits, 40, 'les ventes hors de la fenetre, des deux cotes, ne comptent pas')
+  assert.ok(m.niveaux.every(n => 'prix_mesure' in n && 'etire' in n), 'les drapeaux de construction voyagent')
 })
 
 test('LE TEST QUI COMPTE : le verrou de la regle 19 — aucun niveau ni ecart ne sort tant que le critere n est pas fixe', async () => {
@@ -81,10 +90,13 @@ test('LE TEST QUI COMPTE : le verrou de la regle 19 — aucun niveau ni ecart ne
   require.cache[cheminSb].exports = { ...vraiSb, createClient: () => ({ from: () => q }) }
   delete require.cache[require.resolve(path.join(racine, 'api', 'yield-marche'))]
   const api = require(path.join(racine, 'api', 'yield-marche'))
-  const corps = await new Promise(resolve => {
-    const res = { status () { return res }, setHeader () {}, json: resolve }
-    api({ method: 'GET', query: { property_id: BULLE.id }, headers: {} }, res)
-  })
+  const corps = await Promise.race([
+    new Promise(resolve => {
+      const res = { status () { return res }, setHeader () {}, json: resolve }
+      api({ method: 'GET', query: { property_id: BULLE.id }, headers: {} }, res)
+    }),
+    new Promise((resolve, reject) => setTimeout(() => reject(new Error('l API n a pas repondu')), 5000))
+  ])
   require.cache[cheminGarde].exports = vraie
   require.cache[cheminSb].exports = vraiSb
   assert.equal(corps.etat, 'releve')
@@ -93,4 +105,6 @@ test('LE TEST QUI COMPTE : le verrou de la regle 19 — aucun niveau ni ecart ne
     assert.ok(!(cle in corps), `${cle} ne sort pas avant le critere`)
   }
   assert.ok(!JSON.stringify(corps).includes('"prix"'), 'aucun prix, nulle part dans la reponse')
+  // La liste EXACTE des cles : un niveau ne peut pas fuir sous un autre nom.
+  assert.deepEqual(Object.keys(corps).sort(), ['etat', 'fenetre', 'fraicheur_marche', 'lisible', 'nb_comparables', 'releve_le', 'source', 'statut'])
 })

@@ -29,7 +29,8 @@ if (!bienId) { console.error('Usage : --bien=<uuid> [--go]'); process.exit(1) }
 ;(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   const { count } = await sb.from('properties').select('id', { count: 'exact', head: true })
-  console.log(`Projet ${String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]} · biens = ${count} · ${go ? 'ECRITURE' : 'lecture seule'}`)
+  if (!Number.isInteger(count)) throw new Error('empreinte illisible (nombre de biens)')
+  console.log(`Projet ${String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]} · biens = ${count} · ${go ? 'ECRITURE du releve' : 'sans --go : appels AirROI (payants hors cache) mais AUCUNE ecriture du releve'}`)
   const { data: bien, error } = await sb.from('properties').select('*').eq('id', bienId).maybeSingle()
   if (error || !bien) throw new Error(`bien ${bienId} illisible`)
   const client = creerClient({ depot: depotSupabase(sb) })

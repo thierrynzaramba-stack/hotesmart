@@ -94,8 +94,10 @@ create table if not exists public.airroi_appels (
   property_id uuid
     references public.properties(id)
     on delete set null,
+  -- 'parti' : reserve AVANT le reseau, puis termine en
+  -- 'ok' ou 'erreur'. Un appel interrompu reste compte.
   statut text not null check (statut in (
-    'ok', 'erreur')),
+    'parti', 'ok', 'erreur')),
   http integer,
   created_at timestamptz not null default now()
 );
@@ -141,9 +143,12 @@ create table if not exists public.grille_controle (
     'rafraichissement', 'mensuel', 'manuel')),
   source text not null default 'marche'
     check (source = 'marche'),
+  -- mesure_insuffisante : le marche est fiable, mais les
+  -- ventes du bien sur la meme fenetre ne font pas une
+  -- grille (ce n'est pas une reference amincie).
   statut text not null check (statut in (
     'fiable', 'reference_amincie',
-    'attente_dette_26')),
+    'mesure_insuffisante', 'attente_dette_26')),
   fenetre_debut date not null,
   fenetre_fin date not null,
   niveaux_mesure_3ans jsonb,
@@ -177,7 +182,7 @@ revoke all on table public.airroi_cache
 revoke all on table public.airroi_appels
   from anon, authenticated;
 
--- Comparables et controle : l'hote lit les siens.
+-- Comparables : l'hote lit les siens.
 alter table public.comparables_retenus
   enable row level security;
 drop policy if exists comparables_retenus_select
@@ -190,16 +195,16 @@ revoke insert, update, delete
   on table public.comparables_retenus
   from anon, authenticated;
 
+-- Controle : SERVEUR SEULEMENT, comme le cache. Regle 19 :
+-- tant que le critere de l'interrupteur n'est pas fixe,
+-- personne ne lit les ecarts — pas meme le proprietaire
+-- depuis la console du navigateur. L'ecran passe par
+-- api/yield-marche.js (cle service, verrou).
 alter table public.grille_controle
   enable row level security;
 drop policy if exists grille_controle_select
   on public.grille_controle;
-create policy grille_controle_select
-  on public.grille_controle
-  for select to authenticated
-  using (user_id = auth.uid());
-revoke insert, update, delete
-  on table public.grille_controle
+revoke all on table public.grille_controle
   from anon, authenticated;
 
 -- ─── Verification (a coller aussi) ──────────────────────
@@ -209,19 +214,42 @@ select
   (select count(*) from public.properties)
     as biens,
   (select count(*) from information_schema.columns
-     where table_name = 'properties'
+     where table_schema = 'public'
+     and table_name = 'properties'
      and column_name in ('latitude', 'longitude',
        'coords_source', 'airbnb_listing_id'))
     as colonnes_bien,
-  (select count(*) from pg_class
-     where relname in ('airroi_cache',
+  (select count(*) from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+     and c.relname in ('airroi_cache',
        'airroi_appels', 'comparables_retenus',
        'grille_controle')
-     and relrowsecurity)
+     and c.relrowsecurity)
     as tables_rls,
   (select count(*) from pg_policies
-     where tablename in ('comparables_retenus',
-       'grille_controle'))
-    as policies;
+     where schemaname = 'public'
+     and tablename = 'comparables_retenus')
+    as policy_comparables,
+  (select count(*) from pg_policies
+     where schemaname = 'public'
+     and tablename in ('airroi_cache',
+       'airroi_appels', 'grille_controle'))
+    as policies_serveur,
+  (has_table_privilege('anon',
+     'public.airroi_cache', 'select')
+   or has_table_privilege('authenticated',
+     'public.airroi_cache', 'select')
+   or has_table_privilege('anon',
+     'public.airroi_appels', 'select')
+   or has_table_privilege('authenticated',
+     'public.airroi_appels', 'select')
+   or has_table_privilege('anon',
+     'public.grille_controle', 'select')
+   or has_table_privilege('authenticated',
+     'public.grille_controle', 'select'))
+    as lecture_client;
 -- Attendu : biens 5 (prod) ou 3 (staging),
--- colonnes_bien 4, tables_rls 4, policies 2.
+-- colonnes_bien 4, tables_rls 4,
+-- policy_comparables 1, policies_serveur 0,
+-- lecture_client false.

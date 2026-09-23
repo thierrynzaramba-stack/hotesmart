@@ -34,17 +34,19 @@ const FIX = path.join(__dirname, '..', 'tests', 'fixtures', 'airroi')
   const moi = lireJson(fs.readFileSync(path.join(FIX, 'moi.json'), 'utf8'))
   const id = moi.listing_info.listing_id
   const { latitude, longitude } = moi.location_info
+  if (!(Number.isFinite(budget) && budget > 0)) { console.error('ECHEC : --budget doit etre un nombre positif'); process.exit(1) }
   const client = creerClient({ depot: depotFichier(dossier), gardes: { budgetMensuelUsd: budget } })
+  const ctx = { horsCompte: true }
   console.log(`Cache : ${dossier} · budget du script : ${budget} $`)
   const etapes = []
   const noter = (nom, r) => { etapes.push({ nom, cout: r.cout, cache: r.depuisCache }); return r }
 
-  const m = noter('GET /markets/lookup', await client.trouverMarche(latitude, longitude))
+  const m = noter('GET /markets/lookup', await client.trouverMarche(latitude, longitude, ctx))
   console.log(`1. marche : ${JSON.stringify(m.donnees).slice(0, 160)}`)
-  const f = noter('GET /listings', await client.annonce(id))
+  const f = noter('GET /listings', await client.annonce(id, ctx))
   const idRendu = f.donnees && f.donnees.listing_info ? String(f.donnees.listing_info.listing_id) : null
   console.log(`2. annonce : identifiant envoye ${id}, rendu ${idRendu} — ${idRendu === String(id) ? 'INTACT' : 'DIFFERENT'}`)
-  const mm = noter('GET /listings/metrics/all', await client.metriquesAnnonce(id))
+  const mm = noter('GET /listings/metrics/all', await client.metriquesAnnonce(id, ctx))
   const res = (mm.donnees && mm.donnees.results) || []
   const fixture = lireJson(fs.readFileSync(path.join(FIX, 'labulle-60.json'), 'utf8')).results
   const parMois = new Map(fixture.map(x => [x.date, x]))
@@ -57,6 +59,7 @@ const FIX = path.join(__dirname, '..', 'tests', 'fixtures', 'airroi')
   console.log('\nDepense de cette execution, endpoint par endpoint :')
   for (const e of etapes) console.log(`  ${e.nom} : ${e.cache ? 'cache, 0 $' : `${e.cout.toFixed(2)} $`}`)
   console.log(`  TOTAL : ${total.toFixed(2)} $${total === 0 ? ' (tout vient du cache)' : ''}`)
-  const ok = idRendu === String(id) && res.length > 0
+  // Un verificateur qui n'a rien compare doit echouer.
+  const ok = idRendu === String(id) && res.length > 0 && communs.length > 0 && egaux.length === communs.length
   process.exit(ok ? 0 : 3)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })

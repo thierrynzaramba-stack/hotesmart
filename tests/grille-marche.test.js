@@ -178,3 +178,71 @@ test('le plancher reste arme : un niveau dessous est marque et dit', () => {
   assert.ok(g.niveaux.some(n => n.sous_plancher))
   assert.match(g.avertissements.find(a => a.type === 'sous_plancher').phrase, /sous votre prix plancher \(100 €\) : on ne descend pas/)
 })
+
+// ─── Ajouts de la review du 24 septembre 2026 ───────────────────────────────
+
+test('LE TEST QUI COMPTE : la fenetre suit les DONNEES, pas le calendrier — un cache ancien ne perd aucun mois', () => {
+  // Le cache arrete a aout (fixture La bulle) ; releve le 15 novembre.
+  const m = lire('labulle-60.json').results
+  const g = grilleMarche({ comparables: [{ listing_id: '1', nom: 'x', mensuel: m }], aujourdHui: '2026-11-15' })
+  assert.deepEqual(g.fenetre, { debut: '2025-09', fin: '2026-08' }, 'les 12 mois qui finissent au dernier mois connu')
+  assert.equal(g.nuits, 223, 'aucun mois perdu (la premiere version en perdait 2 ici, sans bruit)')
+  assert.match(g.avertissements.find(a => a.type === 'donnees_anciennes').phrase, /s’arrêtent 2 mois avant/)
+  // Plusieurs comparables : la fin est le dernier mois present chez TOUS.
+  const court = m.filter(x => x.date <= '2026-06')
+  const g2 = grilleMarche({ comparables: [{ listing_id: '1', mensuel: m }, { listing_id: '2', mensuel: court }], aujourdHui: '2026-09-24' })
+  assert.equal(g2.fenetre.fin, '2026-06')
+})
+
+test('un comparable a qui il manque des mois sur la periode : montre, jamais exclu', () => {
+  const g = grilleMarche({ aujourdHui: AUJ, comparables: [
+    { listing_id: '1', nom: 'troue', host_id: '1', mensuel: mensuel(() => 100, () => 20).filter(l => l.date !== '2026-03') },
+    { listing_id: '2', host_id: '2', mensuel: mensuel(() => 100, () => 20) },
+    { listing_id: '3', host_id: '3', mensuel: mensuel(() => 100, () => 20) }] })
+  assert.match(g.avertissements.find(a => a.type === 'donnees_incompletes').phrase, /« troue » : 1 mois sans donnée/)
+  assert.ok(g.comparables.find(c => c.nom === 'troue').nuits > 0)
+})
+
+test('les nuits du seuil sont comptees APRES l ecart des mois a moins de 5 nuits', () => {
+  // 3 comparables, mois alternes 4 et 30 nuits : 6 x 30 = 180 retenues chacun,
+  // mais les 6 mois a 4 nuits ne comptent pas.
+  const g = grilleMarche({ aujourdHui: AUJ, comparables: [1, 2, 3].map(i =>
+    ({ listing_id: String(i), host_id: String(i), mensuel: mensuel(() => 100, (m, k) => (k % 2 ? 4 : 30)) })) })
+  assert.equal(g.nuits, 540)
+  const peu = grilleMarche({ aujourdHui: AUJ, comparables: [1, 2, 3].map(i =>
+    ({ listing_id: String(i), host_id: String(i), mensuel: mensuel(() => 100, (m, k) => (k % 2 ? 4 : 11)) })) })
+  assert.equal(peu.nuits, 198, '3 x 6 x 11 : les mois a 4 nuits (72) ne portent pas le total a 270')
+  assert.equal(peu.statut, 'reference_amincie')
+})
+
+test('le poids BRUT juge le seuil : 40,05 % ne passe pas pour 40 % une fois arrondi', () => {
+  // 5 comparables (seuil 40 %). Le lourd : 28 nuits x 12 = 336 ; les quatre
+  // autres : 126, 126, 126, 125 -> total 839, 336/839 = 40,05 %. Arrondi au
+  // millieme (premiere version), il valait 0,400 et passait.
+  const autre = (i, extra) => ({ listing_id: String(i), host_id: String(i), mensuel: mensuel(() => 100, (m, k) => (k === 14 ? 10 + extra : 10)) })
+  const cinq = lourd => grilleMarche({ aujourdHui: AUJ, comparables: [
+    { listing_id: '1', nom: 'lourd', host_id: '1', mensuel: mensuel(() => 100, () => lourd) },
+    autre(2, 6), autre(3, 6), autre(4, 6), autre(5, 5)] })
+  const g = cinq(28)
+  assert.equal(g.nuits, 839)
+  assert.equal(g.statut, 'reference_amincie')
+  assert.ok(g.motifs.some(m => /« lourd » pèse 40,0 %/.test(m)), 'le motif montre une decimale')
+  // Temoin : un lourd a 27 nuits (324/827 = 39,2 %) passe.
+  assert.equal(cinq(27).statut, 'fiable')
+})
+
+test('le plancher : la liste EXACTE des niveaux marques', () => {
+  const g = grilleMarche({ aujourdHui: AUJ, prixMinimum: 100, comparables: [1, 2, 3].map(i =>
+    ({ listing_id: String(i), host_id: String(i), mensuel: mensuel((m, k) => 80 + (k % 12) * 5, () => 20) })) })
+  const sous = g.niveaux.filter(n => n.sous_plancher).map(n => n.nom)
+  assert.deepEqual(sous, g.niveaux.filter(n => n.prix < 100).map(n => n.nom))
+  assert.ok(sous.length >= 1 && sous.length < 5)
+})
+
+test('les drapeaux de construction voyagent (etire, confondu)', () => {
+  // Des prix tres serres : la V1 etire les niveaux.
+  const g = grilleMarche({ aujourdHui: AUJ, comparables: [1, 2, 3].map(i =>
+    ({ listing_id: String(i), host_id: String(i), mensuel: mensuel((m, k) => 100 + (k % 3), () => 20) })) })
+  assert.ok(g.niveaux.some(n => n.etire || n.confondu_avec), 'au moins un niveau etire ou confondu')
+  for (const n of g.niveaux) assert.ok('prix_mesure' in n && 'etire' in n && 'confondu_avec' in n)
+})

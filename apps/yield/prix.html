@@ -1571,7 +1571,8 @@
   }
   const STATUT_MARCHE = {
     fiable: 'fiable', reference_amincie: 'référence amincie',
-    attente_dette_26: 'en attente : votre historique contient du ménage facturé (dette 26)'
+    mesure_insuffisante: 'vos ventes sur la même période ne suffisent pas',
+    attente_dette_26: 'en attente : votre historique contient des frais de ménage facturés à part, pas encore séparés du prix de la nuit'
   }
   function rendreMarche (d) {
     const source = '<p class="dit">Source : <b>marché</b> — des annonces Airbnb comparables à la vôtre, pas vos ventes.</p>'
@@ -1592,12 +1593,13 @@
     return `${source}${tete}
       ${niv.length ? `<table><thead><tr><th>Niveau</th><th>Vos ventes, 3 ans</th><th>Vos ventes, 12 mois</th><th>Marché, 12 mois</th><th>Écart (marché − 12 mois)</th></tr></thead><tbody>${lignes}</tbody></table>` : ''}
       ${av ? `<ul class="dit">${av}</ul>` : ''}
-      <p class="dit">Tarif par nuit, hors frais de ménage. Nuits Airbnb seulement : le marché ne voit ni Booking ni le direct.</p>`
+      <p class="dit">Marché : tarif par nuit, hors frais de ménage, nuits Airbnb seulement (le marché ne voit ni Booking ni le direct). Vos ventes : prix payé par le voyageur, tous canaux.</p>`
   }
 
   function brancher () {
     const m = el('yp-marche')
-    if (m) m.addEventListener('toggle', () => { if (m.open) chargerMarche() }, { once: true })
+    // Relu a chaque ouverture : apres « Lecture impossible », rouvrir reessaie.
+    if (m) m.addEventListener('toggle', () => { if (m.open) chargerMarche() })
     // ⚠ LE CLIC OUVRE LE MOIS, sans second aller-retour pour la bande : la
     // reponse suivante la reconstruit avec le meme appel.
     for (const b of document.querySelectorAll('.yp-rm')) {

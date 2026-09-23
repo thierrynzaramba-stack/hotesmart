@@ -828,3 +828,49 @@ données réelles cette nuit ; aucun écart n'a été lu.
     90 jours)** plutôt que par la liste de `listings/comparables` : un
     comparable retenu peut ne pas figurer parmi les 25 d'un appel.
     *Alternative* : lire d'abord la liste en cache, ne payer que les absents.
+
+### Reviews du 24 septembre — ce qu'elles ont trouvé et ce qui est corrigé
+
+Review V2.1 (client AirROI) :
+
+- **S1 SÉCURITÉ** : un message d'erreur réseau pouvait porter la clé (URL ou
+  en-tête cités par la pile). Corrigé : `masquer()` passe sur TOUT texte venu
+  de l'extérieur ; une clé mal formée est refusée sans être citée. Test
+  « SÉCURITÉ ». **Une re-review, limitée à ce correctif.**
+- Journal **réservé AVANT le réseau** (`statut 'parti'`, puis `ok`/`erreur`) et
+  délai de 30 s : un appel interrompu reste compté.
+- Dix appels identiques simultanés ne paient qu'une fois (dans une même
+  instance). Alarme par défaut au fondateur (`reportIncident`), aussi au refus
+  pour budget. Garde-fou invalide (`NaN`) = refus. Appel sans compte ni bien
+  = refus. Paramètres validés, forme de la réponse vérifiée : une réponse
+  illisible est comptée, jamais mise en cache.
+- Vérification SQL : privilèges `anon`/`authenticated` sondés.
+
+Review V2.5 (grille marché, contrôle) :
+
+- **La fenêtre suit les DONNÉES** (`fenetreDesDonnees`) : elle finit au dernier
+  mois présent chez TOUS les comparables, au plus tard le dernier mois
+  complet. La première version prenait les 12 derniers mois du calendrier et
+  perdait sans bruit les mois que le cache n'avait pas encore.
+- **Règle 19 contournable par la console du navigateur** : `grille_controle`
+  avait une policy de lecture pour le propriétaire. Retirée : table serveur
+  seulement, lue par l'API qui tient le verrou.
+- Statut `mesure_insuffisante` (marché fiable, ventes du bien trop minces) —
+  distinct de « référence amincie ». Poids jugé BRUT (40,05 % ne passe plus pour
+  40 %). Étude chiffrée avant le premier appel (`etude_trop_chere`).
+- Tests ajoutés, chacun rejoué contre le code d'avant (règle 19) : les six
+  échouent sur une valeur, aucun sur un `undefined`.
+
+### Dettes et questions ouvertes par les reviews
+
+- **Dette** : la déduplication des appels simultanés vaut dans UNE instance
+  Vercel ; deux invocations parallèles peuvent payer deux fois le même appel
+  (au pire 0,50 $, borné par les garde-fous). Un verrou en base le fermerait.
+- **Question (Cœur de vie 23)** : la mise en attente repose sur la dette 26
+  (ménage dans l'historique), mais la fenêtre de 12 mois du contrôle peut être
+  propre. Tenu tel que demandé ; à trancher par Thierry.
+- **Question avant le critère** : la « mesurée 12 mois » compte TOUS les
+  canaux au prix voyageur, le marché les seules nuits Airbnb hors ménage.
+  Faut-il la restreindre aux nuits Airbnb pour comparer des choses égales ?
+- **Question** : les UUID de `EN_ATTENTE_DETTE_26` sont ceux de la production ;
+  en staging, Cœur de vie 23 porte un autre UUID et n'est pas mis en attente.

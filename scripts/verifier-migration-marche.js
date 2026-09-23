@@ -17,7 +17,7 @@ const { createClient } = require('@supabase/supabase-js')
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   const projet = String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]
   const { count, error } = await sb.from('properties').select('id', { count: 'exact', head: true })
-  if (error) { console.error(`ECHEC : ${error.message}`); process.exit(1) }
+  if (error || !Number.isInteger(count)) { console.error(`ECHEC : empreinte illisible ${error ? error.message : ''}`); process.exit(1) }
   console.log(`Projet ${projet} · biens = ${count} (5 = production, 3 = staging)`)
   const manques = []
   const c = await sb.from('properties').select('latitude, longitude, coords_source, airbnb_listing_id').limit(1)
@@ -33,6 +33,17 @@ const { createClient } = require('@supabase/supabase-js')
     console.log(`${t} : ${ok ? `presente, ${r.count} ligne(s)` : `ABSENTE (${r.error ? r.error.message : 'compte illisible'})`}`)
     if (!ok) manques.push(t)
   }
-  console.log(manques.length ? `MANQUE : ${manques.join(', ')}` : 'OK : migration presente (RLS et policies : la requete de verification du SQL).')
+  // La lecture COTE CLIENT doit echouer : la cle service contourne la RLS et ne
+  // peut pas le voir (review). Sonde avec la cle anon, si elle est connue.
+  if (process.env.SUPABASE_ANON_KEY) {
+    const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
+    for (const t of ['airroi_cache', 'airroi_appels', 'grille_controle']) {
+      const r = await anon.from(t).select('*').limit(1)
+      const ferme = !!r.error || !(r.data || []).length
+      console.log(`${t} vu du navigateur (anon) : ${r.error ? `refuse (${r.error.code || r.error.message})` : `${(r.data || []).length} ligne(s)`}`)
+      if (!ferme) manques.push(`${t} lisible cote client`)
+    }
+  } else console.log('Cle anon absente : lecture cote client non sondee (voir la requete SQL, colonne lecture_client).')
+  console.log(manques.length ? `MANQUE : ${manques.join(', ')}` : 'OK : migration presente (RLS et droits : la requete de verification du SQL).')
   process.exit(manques.length ? 3 : 0)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })
