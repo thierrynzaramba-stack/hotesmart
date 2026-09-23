@@ -208,19 +208,32 @@ docs/kb/reservation-directe.md.
 Bloquants pré-lancement : (a) ~~/settings 404~~ **fait** + onboarding 2 parcours ;
 (b) wiring Stripe ; (c) activation features payantes ; (d) user_id dans INSERT serrures.
 
-**Chantier YIELDFLOW 4.5-4.6 EN COURS.** Livrés en prod : 4.5 pilote
-tarifaire par bien (53c06eb), 4.6.0 fenêtre glissante et trois états d'une nuit
-(3d2e8f2), 4.6.1 canal interne (e7cd289), **4.6.2 fermetures de l'hôte
-(95619a5, 22 septembre 2026)** — une fermeture se manipule comme une
-réservation : créée par « nouvelle réservation » type « Indisponible », barre
-foncée, modifiée à la main par l'hôte seul, jamais par une app ; rouvrir une
-nuit couverte est refusé. Migration `fermetures` appliquée staging et prod.
-Aussi en prod : UI calendrier (bande de jours unique, colonnes partagées,
-survol de colonne) et fonctions Vercel en région Paris (`docs/kb/performance.md`,
-appels API trois à quatre fois plus rapides). Restent 4.6.3 moteur
-d'ouverture (**migration `2026-09-20-pilote-fenetre.sql` à coller en prod
-AVANT**), 4.6.4 moteur de prix, 4.6.5 rythme et alarmes. Spec :
-docs/specs/spec-yieldflow-v1.md §2 ter. Dettes : docs/kb/dettes-v1.md.
+**Chantier YIELDFLOW 4.5-4.6 LIVRÉ EN PROD.** 4.5 pilote tarifaire par bien
+(53c06eb), 4.6.0 fenêtre glissante et trois états d'une nuit (3d2e8f2), 4.6.1
+canal interne (e7cd289), 4.6.2 fermetures de l'hôte (95619a5) — une fermeture
+se manipule comme une réservation, modifiée à la main par l'hôte seul, jamais
+par une app ; rouvrir une nuit couverte est refusé. **4.6.3 à 4.6.5 en prod le
+23 septembre 2026 (3897cb0)** : moteur d'ouverture, moteur de prix, pilote
+quotidien et alarmes ; écran « Prédiction de prix » (bouton activé /
+désactivé confirmé dans les deux sens), CA sur le bandeau et les tuiles.
+Recette du 22 septembre en huit pièces, toutes conformes : une nuit ouverte,
+pas encore ouverte, fermée ; une fermeture de l'hôte n'est jamais rouverte par
+Yield ; seul l'hôte rouvre ; la fenêtre glisse d'une nuit par jour.
+**Deux origines de prix, deux traitements** : les prix du calendrier sont
+remplacés par les prédictions à l'activation (la confirmation dit « N nuits
+ont déjà un prix au calendrier ») ; les prix posés par le ✎ (`prix_hote`) ne
+sont jamais touchés, survivent à la désactivation (dette 22) et leur vie se
+trace dans `prix_hote_journal`. Règle de saut du moteur, une seule :
+`lib/nuits-du-moteur.js`. Migrations `pilote-fenetre`, `prix-hote`,
+`prix-hote-journal` appliquées staging et prod. Aucun bien réel n'est encore
+activé : lire les deux nombres de la confirmation avant la première
+activation. Aussi en prod : UI calendrier et fonctions Vercel en région Paris
+(`docs/kb/performance.md`). Restent au registre : dettes 20 (le calendrier dit
+« fermée » une nuit pas encore ouverte), 21 (nuit rouverte à la main sans
+prix — vérifier sur un bien relié ce que Channex en fait), 24 (agrandir la
+fenêtre ne prévient pas), 25 (capacité non calculable : prix posés puis
+« aucun prix posé »). Spec : docs/specs/spec-yieldflow-v1.md §2 ter. Dettes :
+docs/kb/dettes-v1.md.
 
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
