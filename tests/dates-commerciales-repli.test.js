@@ -98,6 +98,51 @@ test('le reglage de l hote sur la nuit sous-jacente vaut pour le reveillon qui s
   assert.equal(avec.niveau, sans.niveau)
   assert.equal(avec.ajuste_par_l_hote, true)
   assert.equal(avec.cle_reglage, 'vacances_zone_du_bien')
+  // ⚠ RELEVE EN REVIEW : le resume attribuait le cran au reveillon
+  // (« Réveillon : +3 crans — c'est vous qui l'avez posé »), et `crans`
+  // l'exposait comme l'influence du reveillon.
+  const r = avec.couches.find(c => c.nom === 'position').resume
+  assert.match(r, /garde le niveau qu’elle aurait sans cette date, Vacances de Noël un jeudi \(\+3 crans, votre réglage\)/)
+  assert.equal(avec.crans, null, 'l influence du reveillon reste inconnue')
+  assert.equal(avec.crans_mesures, null)
+  assert.equal(avec.crans_sous_jacents, 3)
+})
+
+test('LE TEST QUI COMPTE : un reveillon dans un evenement de l hote regle s arrete sur cet evenement', () => {
+  // Releve en review : la boucle sautait la « Semaine du Nouvel An » (non
+  // mesuree) jusqu'aux vacances de Noel, ignorait son +4, et posait le 31 sous
+  // le 30.
+  const ev = [{ nom: 'Semaine du Nouvel An', segment: 'evenement:semaine_na', date_debut: '2026-12-29',
+    date_fin: '2027-01-02', parent_segment: null, origine: 'declare' }]
+  const ctx = ctxAvec([...COMMERCIALES, ...ev])
+  const g = S.construireGrille(LIGNES, { contexte: ctx, debut: DEBUT, fin: '2025-12-31' })
+  const reglageDe = t => t.segment === 'evenement:semaine_na' ? { crans: 4, cle: 'evenement:semaine_na' } : null
+  const nuit = d => S.suggerer({ date: d, grille: g, contexte: ctx, ouverte: true, delaiJours: 30, bien,
+    reglage: reglageDe(R.segmenterJour(d, ctx)), reglageDe })
+  const veille = nuit('2026-12-30')
+  const reveillon = nuit('2026-12-31')
+  assert.equal(reveillon.position_sous_jacente, 'evenement:semaine_na')
+  assert.equal(reveillon.cle_reglage, 'evenement:semaine_na')
+  assert.equal(reveillon.niveau_de_depart, veille.niveau_de_depart,
+    `reveillon ${reveillon.niveau_de_depart} ne doit pas passer sous la veille ${veille.niveau_de_depart}`)
+})
+
+test('un evenement de l hote replie dit « sans cet evenement » et la contrainte qui manque vraiment', () => {
+  // 12 nuits en 2 reservations : le seuil manque par les RESERVATIONS.
+  // Deux occurrences, hors des mardis et samedis de reference (fin octobre
+  // 2025) : sinon ils entrent dans la saison et la rendent fiable.
+  const ev = ['2025-12-01|2025-12-13', '2026-11-16|2026-11-20'].map(p => ({ nom: 'Saison thermale',
+    segment: 'evenement:thermes', date_debut: p.split('|')[0], date_fin: p.split('|')[1],
+    parent_segment: null, origine: 'declare' }))
+  const ctx = ctxAvec([...COMMERCIALES, ...ev])
+  const g = S.construireGrille([...LIGNES, ecl(['2025-12-01', '2025-12-02', '2025-12-03', '2025-12-04',
+    '2025-12-05', '2025-12-06'], 130, 'T1'), ecl(['2025-12-08', '2025-12-09', '2025-12-10', '2025-12-11',
+    '2025-12-12', '2025-12-13'], 130, 'T2')], { contexte: ctx, debut: DEBUT, fin: '2025-12-31' })
+  assert.equal(g.positions.get('evenement:thermes').echantillon, 12)
+  const s = S.suggerer({ date: '2026-11-19', grille: g, contexte: ctx, ouverte: true, delaiJours: 30, bien })
+  const r = s.couches.find(c => c.nom === 'position').resume
+  assert.match(r, /12 nuits mais 2 réservation\(s\), il en faut 3/)
+  assert.match(r, /sans cet événement/)
 })
 
 test('un cran pose par l hote SUR la date commerciale reste prioritaire', () => {
@@ -129,7 +174,10 @@ test('LE TEST QUI COMPTE : sur sept annees, aucune date commerciale sans mesure 
     const d = e.date_debut
     if (d < '2026-01-01') continue
     const avec = prix(d)
-    const sans = prix(d, R.contexteSansEvenements(CTX, [e.segment]))
+    // ⚠ LE CONTEXTE « SANS » EST BATI INDEPENDAMMENT du code teste — releve
+    // en review : passer par `contexteSansEvenements` rendait le test vrai
+    // par construction.
+    const sans = prix(d, ctxAvec(COMMERCIALES.filter(x => x.segment !== e.segment)))
     if (avec.prix == null || sans.prix == null) continue
     vues++
     assert.ok(idx(avec.niveau_de_depart) >= idx(sans.niveau_de_depart),
@@ -137,6 +185,24 @@ test('LE TEST QUI COMPTE : sur sept annees, aucune date commerciale sans mesure 
     assert.equal(avec.sous_la_nuit_ordinaire, undefined, `${d} : aucun marqueur attendu`)
   }
   assert.ok(vues >= 20, `invariant verifie sur ${vues} nuits seulement`)
+})
+
+test('LE TEST QUI COMPTE : le reveillon n est jamais sous la nuit de vacances voisine (le defaut de prod)', () => {
+  // Ce qu'on a vu en prod : le 31 decembre sous le 30. On compare aux nuits
+  // VOISINES de vacances, pas a une construction du moteur.
+  for (const [d, veille] of [['2026-12-31', '2026-12-30'], ['2026-12-24', '2026-12-23']]) {
+    const a = prix(d), b = prix(veille)
+    assert.equal(R.segmenterJour(veille, CTX).segment, 'vacances_zone_du_bien')
+    assert.ok(a.prix >= b.prix, `${d} a ${a.prix} € sous la veille ${veille} a ${b.prix} €`)
+  }
+})
+
+test('une date commerciale desactivee par l hote : le pont revient, et aucun repli', () => {
+  const ctx = ctxAvec(datesCommerciales(DEBUT, FIN, { desactivees: ['reveillon_nouvel_an'] }))
+  assert.equal(R.segmenterJour('2024-12-31', ctx).segment, 'pont')
+  const s = S.suggerer({ date: '2026-12-31', grille: G, contexte: ctx, ouverte: true, delaiJours: 30, bien })
+  assert.equal(s.segment, 'vacances_zone_du_bien')
+  assert.equal(s.position_sous_jacente, undefined)
 })
 
 test('LE TEST QUI COMPTE : une position EMPRUNTEE sous la nuit ordinaire se marque, et se voit', () => {

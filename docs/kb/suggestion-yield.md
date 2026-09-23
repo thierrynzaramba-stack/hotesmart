@@ -280,6 +280,32 @@ réponse porte `sous_la_nuit_ordinaire` et une couche « anomalie » visible
 que lorsque la mesure du couple est fiable (≥ 8 nuits) — un réveillon n'en a
 pas. Il ne compare pas une nuit à ses voisines. Et l'écran ne l'affichait pas.
 
+**Portée : aussi les événements de l'hôte sans parent.** Le repli ne regarde
+pas l'origine : un événement déclaré sans parent et sans historique, tombé en
+vacances, se replie désormais sur les vacances (avant : sur le hors-vacances).
+La phrase dit « sans cet événement » et nomme la contrainte qui manque vraiment
+(« 12 nuits mais 2 réservations, il en faut 3 »).
+
+**Review du 23 septembre 2026 — trois défauts corrigés avant push :**
+- un réglage de l'hôte sur la nuit sous-jacente s'affichait comme un cran du
+  réveillon (« Réveillon : +3 crans — c'est vous qui l'avez posé ») et `crans`
+  l'exposait comme son influence. Désormais : « … Vacances de Noël un jeudi
+  (+3 crans, votre réglage) », `crans` à `null`, `crans_sous_jacents` à 3 ;
+- la boucle de repli sautait un événement de l'hôte **réglé** (« Semaine du
+  Nouvel An, +4 ») jusqu'aux vacances : le 31 sortait sous le 30. Elle s'arrête
+  désormais sur tout segment où l'hôte a posé un cran ;
+- le test « sept années » comparait le code à lui-même (même fonction des deux
+  côtés) ; il bâtit maintenant son contexte indépendamment, et un test compare
+  le réveillon à la **veille** de vacances — la forme du défaut vu en prod.
+
+**Effets de bord connus.** La date commerciale avant le pont retire ces nuits de
+l'échantillon « pont » : sur un bien à peu de ponts, le pont peut passer de
+mesuré à emprunté (non mesuré hors La bulle et Cœur de vie 23, 12 mois). Côté
+N-1, le pont du 2 janvier 2026 ne s'apparie plus au 31 décembre 2024 (réveillon)
+mais au 30 : la colonne « l'an dernier » change sur ces nuits. **Dette** : quand
+la nuit se replie sur un événement dont la position est EMPRUNTÉE, le garde-fou
+ne contrôle pas cet emprunt (il n'agit que sur la nuit non repliée) — cas rare.
+
 **Effet mesuré (prod, 23 septembre 2026, 12 mois)** : 3 nuits changées par bien,
 grille identique, parité écran/moteur 0 divergence sur 440 nuits.
 
