@@ -137,7 +137,12 @@ module.exports = async (req, res) => {
     // repartait « a vendre » et recevait une suggestion, et les douze tuiles
     // annonçaient « 0 vendue » en comptant ces nuits dans le gain.
     const cleAffichee = debut.slice(0, 7)
-    if (!moisRadar.includes(cleAffichee)) moisRadar.push(cleAffichee)
+    // ⚠ TOUS LES MOIS DE [debut, fin], pas seulement celui de `debut` (review
+    // du lot V2.0.1) : en `?debut=&fin=`, un mois de la fenetre hors radar
+    // n'avait ni calendrier, ni ventes, ni pression.
+    for (let c = debut.slice(0, 7); c <= fin.slice(0, 7); c = decaler(`${c}-01`, 32).slice(0, 7)) {
+      if (!moisRadar.includes(c)) moisRadar.push(c)
+    }
     moisRadar.sort()
     const finDeMois = c => {
       const [a, m] = c.split('-').map(Number)
@@ -193,10 +198,10 @@ module.exports = async (req, res) => {
       })
     } catch (e) {
       if (e.message === 'historique_trop_volumineux') return res.status(413).json({ error: 'historique_trop_volumineux' })
-      if (/historique invalide/.test(e.message)) return res.status(400).json({ error: 'periode_invalide' })
+      if (/^\[contexte\] historique invalide/.test(e.message)) return res.status(400).json({ error: 'periode_invalide' })
       throw e
     }
-    const { grille, contexte, evenements, reglages, eclatements, duBien,
+    const { grille, contexte, evenements, eclatements, duBien,
       pressionParMois, capacitesMois, debutHistorique, finRef, debutContexte, finContexte } = ctx
 
     // ⚠ JUSQU'OU LE CALENDRIER SCOLAIRE EST-IL PUBLIE ? Au-dela, une nuit de

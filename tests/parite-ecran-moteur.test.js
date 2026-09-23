@@ -59,6 +59,32 @@ test('LE TEST QUI COMPTE : la segmentation d une nuit ne depend pas de la borne 
   }
 })
 
+test('LE TEST QUI COMPTE : un contexte de PLUS DE 2000 JOURS garde ses ponts et ses week-ends prolonges', () => {
+  // Review du lot V2.0.1 : `joursDeLaPeriode` rend null au-dela de 2000 jours,
+  // et ponts / week-ends prolonges rendaient alors un ensemble VIDE, sans un
+  // mot. L'ecran consultant un mois a plus de ~30 mois (ou ancien) batissait
+  // sa grille sans ponts : une autre grille que celle du moteur.
+  const R = require('../lib/yield/reference')
+  const seg = (d, debut, fin) => {
+    const s = R.segmenterJour(d, R.construireContexte({ zoneBien: 'C', vacances: [], evenements: [], debut, fin }))
+    return s && s.segment
+  }
+  assert.equal(seg('2024-05-10', '2023-09-23', '2026-09-30'), 'pont', 'le pont de l Ascension 2024, contexte court')
+  assert.equal(seg('2024-05-10', '2023-09-23', '2029-03-31'), 'pont', 'le meme pont, contexte de 2016 jours (?mois=2029-03)')
+  assert.equal(seg('2027-03-27', '2022-01-21', '2029-12-31'), 'week_end_prolonge', 'Paques 2027, contexte de 2900 jours')
+  // Et le compte des nuits speciales ne depend pas de la longueur du contexte.
+  const compter = (debut, fin) => {
+    const ctx = R.construireContexte({ zoneBien: 'C', vacances: [], evenements: [], debut, fin })
+    let n = 0
+    for (let d = new Date('2023-09-23T00:00:00Z'); d.toISOString().slice(0, 10) <= '2026-09-22'; d.setUTCDate(d.getUTCDate() + 1)) {
+      const s = R.segmenterJour(d.toISOString().slice(0, 10), ctx)
+      if (s && (s.segment === 'pont' || s.segment === 'week_end_prolonge')) n++
+    }
+    return n
+  }
+  assert.equal(compter('2023-09-23', '2029-03-31'), compter('2023-09-23', '2026-09-30'))
+})
+
 // Une base qui rend du vide partout, et compte ce qu'on lui demande.
 function baseVide () {
   const appels = {}

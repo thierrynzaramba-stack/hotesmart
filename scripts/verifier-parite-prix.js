@@ -26,9 +26,18 @@
 // une nuit ouverte (ouverte ou projetee). Une nuit fermee, l'ecran la refuse
 // et le moteur ne la tarife pas — pas de prix des deux cotes.
 //
+// ⚠ DEPUIS LE LOT V2.0.1, les deux chemins appellent la MEME assemblee
+// (`preparerContexte`) et la MEME regle (`prixDeLaNuit`) : la comparaison des
+// prix ne mesure plus que l'ecart de leurs FENETRES (contexte, mois de
+// pression). C'est voulu : c'est la seule chose qui peut encore diverger. Le
+// script compare en plus la GRILLE que l'ecran annonce a celle du moteur, et
+// `--mois-extra=YYYY-MM,...` l'interroge sur des mois lointains (passes, ou a
+// plus de 30 mois), la ou la fenetre de contexte de l'ecran est la plus longue
+// — c'est la que la review du V2.0.1 a trouve des ponts disparus.
+//
 // ⚠ UN VERIFICATEUR QUI N'A RIEN LU DOIT LE DIRE. Code de sortie : 0 = zero
-// divergence sur au moins une nuit comparee ; 3 = divergences ; 1 = lecture
-// impossible ou rien de compare.
+// divergence, et au moins une nuit comparee POUR CHAQUE BIEN ; 3 =
+// divergences ; 1 = lecture impossible, ou un bien sans aucune nuit comparee.
 
 const path = require('path')
 const URL = process.env.SUPABASE_URL
@@ -39,6 +48,7 @@ const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
 const args = process.argv.slice(2)
 const biens = args.filter(a => a.startsWith('--bien=')).map(a => a.slice(7)).filter(Boolean)
 const jours = Number((args.find(a => a.startsWith('--jours=')) || '--jours=365').slice(8))
+const moisExtra = ((args.find(a => a.startsWith('--mois-extra=')) || '').slice(13)).split(',').filter(m => /^\d{4}-\d{2}$/.test(m))
 if (!biens.length || !Number.isInteger(jours) || jours < 1 || jours > 730) {
   console.error('Usage : --bien=<uuid> [--bien=<uuid>] [--jours=1..730]'); process.exit(1)
 }
@@ -91,11 +101,22 @@ function appelerEcran (bien, mois) {
     const mois = []
     for (let m = auj.slice(0, 7); m <= fin.slice(0, 7); m = decaler(`${m}-01`, 32).slice(0, 7)) mois.push(m)
     const nuitsEcran = new Map()
-    for (const m of mois) {
+    // La grille du moteur, telle qu'un ecran doit l'annoncer.
+    const empreinteGrille = g => JSON.stringify({ niveaux: (g.base && g.base.niveaux || []).map(n => n.prix),
+      positions: [...(g.positions instanceof Map ? g.positions : new Map(Object.entries(g.positions || {})))].map(([k, v]) => [k, v && v.indice]).sort() })
+    const grilleMoteur = empreinteGrille(ctx.grille)
+    let grillesDivergentes = 0
+    for (const m of [...mois, ...moisExtra]) {
       const r = await appelerEcran(id, m)
       if (r.statut !== 200) { console.error(`ECHEC : ecran ${m} → HTTP ${r.statut} ${JSON.stringify(r.corps).slice(0, 200)}`); echec = true; continue }
+      if (empreinteGrille(r.corps.grille || {}) !== grilleMoteur) {
+        grillesDivergentes++
+        console.log(`  ✖ grille de l'ecran (${m}) ≠ grille du moteur`)
+      }
+      if (moisExtra.includes(m) && !mois.includes(m)) continue
       for (const n of r.corps.nuits || []) if (n.date >= auj && n.date <= fin) nuitsEcran.set(n.date, n)
     }
+    divergencesTotal += grillesDivergentes
 
     let comparees = 0
     const divergences = []
@@ -121,7 +142,8 @@ function appelerEcran (bien, mois) {
     }
     compareesTotal += comparees
     divergencesTotal += divergences.length
-    console.log(`nuits lues a l'ecran ${nuitsEcran.size} · comparees (ouvertes ou projetees) ${comparees} · divergences ${divergences.length}`)
+    if (!comparees) { console.error(`ECHEC : aucune nuit comparee pour ${bien.name} — ce bien n'a rien prouve.`); echec = true }
+    console.log(`nuits lues a l'ecran ${nuitsEcran.size} · comparees (ouvertes ou projetees) ${comparees} · divergences ${divergences.length} · grilles divergentes ${grillesDivergentes} / ${mois.length + moisExtra.length} mois`)
     if (divergences.length) {
       console.log('par cause :', JSON.stringify(parCause))
       const ecarts = divergences.filter(d => d.ecran != null && d.moteur != null).map(d => d.moteur - d.ecran)
