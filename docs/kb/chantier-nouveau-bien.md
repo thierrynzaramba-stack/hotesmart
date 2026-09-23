@@ -172,10 +172,18 @@ recopiées.
    ménage 151 € : 1 nuit → 216,9 €/nuit payés (×3,3) ; 2 nuits → 141,4 €
    (×2,1) ; 5 nuits → 96,1 € (×1,5) ; 14 nuits → 76,7 € (×1,2). Le même
    logement passe du haut du marché au milieu selon la durée.
-   ⚠ Cocon Thermal a `single_fee_structure = true` avec 151 € de ménage : ce
-   drapeau ne veut PAS dire « pas de ménage ». Hypothèse, à vérifier dans la
-   documentation : il désigne le modèle de frais Airbnb « hôte seul » — ce que
-   la limite 2 (§10) croyait illisible.
+   **`single_fee_structure` ne sert à rien ici — hypothèse NON RETENUE.**
+   Croisé avec le ménage sur les 50 comparables des deux fichiers : `true` +
+   ménage 25, `true` sans ménage 13, `false` + ménage 11, `false` sans ménage
+   0, `null` + ménage 1. `false` n'apparaît jamais sans ménage, `true` avec et
+   sans : une relation à sens unique sur les COMPOSANTS de frais, pas sur le
+   modèle de commission. Ne pas l'utiliser.
+   **Le modèle de commission, d'après la documentation d'AirROI** : le modèle
+   « host-only » (l'hôte paie toute la commission, le voyageur ne voit aucun
+   frais) est réservé aux hôtes connectés via un logiciel de gestion. C'est
+   pour cela que les biens de Thierry y sont, via Channex, et que l'écart
+   brut / net y vaut 18,4 % (§3 bis). Le modèle se DEVINE par le
+   professionnalisme de l'hôte, jamais par un champ de l'API.
 
 ---
 
@@ -308,9 +316,12 @@ vraies ventes à mesure qu'elles arrivent.
     - La grille estimée est un tarif nuitée hors frais de ménage : c'est l'unité
       que le moteur écrit au calendrier, et exactement celle d'AirROI. Les deux
       bases coïncident côté MARCHÉ, rien à corriger.
-    - Les frais de service de plateforme ne sont pas un problème : uniformes
-      sur un marché, ils ne déplacent personne dans le classement. Traités
-      comme intégrés au marché ; on n'en parle pas à l'hôte.
+    - Les frais de service de plateforme se neutralisent POUR LA GRILLE, où
+      l'on compare des tarifs affichés entre eux : ils ne déplacent personne
+      dans le classement. On n'en parle pas à l'hôte. Pour le PRIX RÉELLEMENT
+      PAYÉ, en revanche, ils ajoutent une inconnue d'environ 14 % à côté du
+      ménage, sur les comparables en modèle partagé — non mesurable (le modèle
+      ne se lit pas dans l'API) : limite connue (§10, point 2), pas correctif.
     - Le MÉNAGE déforme la comparaison (0 à 151 € selon l'annonce). L'écran
       avertit : « Cette estimation est un tarif par nuit, hors frais de
       ménage. Si vous en facturez un, le prix réellement payé par le voyageur
@@ -333,10 +344,15 @@ vraies ventes à mesure qu'elles arrivent.
       plus depuis : une valeur saisie à l'onboarding serait fausse un an plus
       tard. On la relit à chaque rafraîchissement.
     - **La durée de séjour du calcul ne se demande pas** : `markets/metrics/all`
-      donne celle du marché (depuis sept. 2023, 36 mois sur 60). ⚠ La MOYENNE
-      du marché (4,6 à 6,6 nuits sur les 12 derniers mois à Bagnères) est tirée
-      par les longs séjours ; la MÉDIANE est de 3 à 4 nuits. Proposition : la
-      médiane comme durée centrale, encadrée par 1 nuit et 7 nuits.
+      donne celle du marché (depuis sept. 2023, 36 mois sur 60). **Durée
+      centrale : la MÉDIANE, encadrée par 1 nuit et 7 nuits** — TRANCHÉ
+      (Thierry, 23 septembre 2026), pour une raison MATHÉMATIQUE : le ménage
+      par nuit vaut C/n, une fonction convexe ; la moyenne des C/n sur les
+      réservations est donc toujours supérieure à C divisé par la durée
+      moyenne (inégalité de Jensen). Utiliser la moyenne sous-estime
+      systématiquement la charge réelle. Chiffré sur Bagnères, 12 derniers
+      mois, ménage de 151 € : médiane 3,5 nuits → 43,1 €/nuit ; moyenne
+      5,38 nuits → 28,0 €/nuit — la moyenne minore de 35 %.
     - **Côté BIEN, les bases ne coïncident pas encore** : la référence V1 est
       le prix voyageur TOTAL, ménage compris (dette 26, docs/kb/dettes-v1.md).
 18. **Deux usages, deux grandeurs.** Performance, chiffre d'affaires, RevPAR,
@@ -371,8 +387,8 @@ vraies ventes à mesure qu'elles arrivent.
 Propositions argumentées faites le 23 septembre ; ce qui est tranché l'est
 par Thierry.
 
-1. **Seuil de fiabilité** — *corrigé par Thierry le 23 septembre 2026, à
-   confirmer* : la première version (plafond de 40 % par comparable ET par
+1. **Seuil de fiabilité** — **TRANCHÉ, version corrigée par Thierry
+   (23 septembre 2026)** : la première version (plafond de 40 % par comparable ET par
    gestionnaire) **rejetait la seule sélection prouvée** — les 3 jacuzzis qui
    ont reconstruit la grille réelle de La bulle à 5 € près. Version corrigée,
    sur les **12 derniers mois complets** (A) :
@@ -611,12 +627,14 @@ comparables. Négligeable face à un abonnement AirDNA.
    ni le direct (règle 11). Indétectable depuis l'API ; sous-pondère un
    comparable fort sur Booking (arbitrage 2).
 2. **Frais de service de plateforme.** Quand Airbnb fait payer ses frais au
-   voyageur (modèle partagé, ≈ 14 %) au lieu de l'hôte (modèle hôte seul), le
-   prix réellement payé diffère du tarif affiché. Décision (règle 12) : ces
-   frais sont uniformes sur un marché et ne déplacent personne ; ils sont
-   traités comme intégrés au marché, et on n'en parle pas à l'hôte. Le drapeau
-   `single_fee_structure` pourrait dire quel modèle une annonce applique
-   (§3 ter, point 5) — hypothèse non vérifiée, et sans usage prévu.
+   voyageur (modèle partagé, ≈ 14 %) au lieu de l'hôte (modèle « host-only »,
+   réservé aux hôtes connectés via un logiciel de gestion), le prix réellement
+   payé diffère du tarif affiché. Pour la GRILLE, ils se neutralisent (on
+   compare des tarifs affichés) ; pour le PRIX PAYÉ, c'est une inconnue
+   d'environ 14 % sur les comparables en modèle partagé. Le modèle ne se lit
+   dans aucun champ de l'API (`single_fee_structure` testé et écarté, §3 ter,
+   point 5) : il se devine par le professionnalisme de l'hôte. Limite connue,
+   pas correctif.
 3. **Ménage** — TRANCHÉ (règle 12) : hors de la grille, dit à l'hôte avec le
    calcul. Reste la base du BIEN : dette 26.
 4. **ADR ≠ CA ÷ nuits chez AirROI** (§3 bis) : le détail mensuel dira quelle
