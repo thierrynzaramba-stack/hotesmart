@@ -564,6 +564,30 @@ calculables ») qui le dit.
    Les tuiles du radar portent ces comptes mois par mois, le tableau les
    détaille. Seule reste la tendance du mois, dans son bloc, et seulement
    quand elle agit.
+9. **Deux origines de prix, deux traitements** (changement de dessin du
+   23 septembre 2026, décisions A1 / B1 / C1 de Thierry).
+   - Les prix **du calendrier** (posés en mode calendrier, ou avant
+     l'activation) sont **remplacés** par les prédictions à l'activation. Ils
+     n'entrent jamais dans `prix_hote` : seul le ✎ de *Prédiction de prix* y
+     écrit (c'était déjà le cas — la porte du calendrier refuse un prix sans
+     `prix_hote: true` sur un bien piloté).
+   - Les prix **YieldFlow** (✎) restent : le moteur ne les touche jamais, la
+     croix les rend au moteur, ils survivent à la désactivation (dette 22).
+   - La confirmation d'activation annonce les deux : « **N nuits ont déjà un
+     prix au calendrier.** YieldFlow va les remplacer par ses prédictions.
+     Continuer ? » et « **M nuits gardent votre prix YieldFlow.** » N est
+     compté pour la fenêtre **saisie**, par la règle même du moteur
+     (`lib/nuits-du-moteur.js`, `sautDuMoteur`, partagée avec `calculerPrix`).
+   - **A1** : on ne dit pas « que vous avez définis » — `calendar_inventory`
+     ne porte pas l'origine d'un prix, et un prix posé par YieldFlow avant une
+     désactivation y reste, indiscernable. **B1** : on compte les prix en
+     place, pas ceux qui changeront (simuler la matière coûterait des
+     secondes à chaque ouverture de la confirmation). **C1** : une nuit ✎ dont
+     le prix a été changé au calendrier pendant la désactivation garde ce
+     dernier prix à la réactivation.
+   - Non traité, noté : **agrandir la fenêtre** d'un bien déjà piloté remplace
+     aussi les prix du calendrier des nuits qui y entrent, sans confirmation
+     (dette 24).
 
 ### 7. Les trois arbitrages, TRANCHÉS le 19 septembre 2026
 

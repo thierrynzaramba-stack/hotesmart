@@ -191,7 +191,7 @@ test('le compte des nuits a venir : table absente = 0, panne = null (« je ne sa
 
 test('l ecran annonce « N nuits gardent votre prix » dans les deux confirmations, et l API ne montre la main que sur un bien pilote', () => {
   const page = sansCommentaires(lire('apps/yield/prix.html'))
-  assert.ok(page.includes("const phrasePrixHote = n => `${n} nuit${n > 1 ? 's' : ''} garde${n > 1 ? 'nt' : ''} votre prix`"), 'la phrase de la decision (a)')
+  assert.ok(page.includes("const phrasePrixHote = n => `${n} nuit${n > 1 ? 's' : ''} garde${n > 1 ? 'nt' : ''} votre prix YieldFlow`"), 'la phrase de la decision (a)')
   const conf = page.slice(page.indexOf('function confirmerBascule'), page.indexOf('const libelleFenetre'))
   const dem = page.slice(page.indexOf('function demanderFenetre'), page.indexOf('async function basculerPilote'))
   assert.ok(conf.includes('phrasePrixHote(nuitsPrixHote)'), 'desactiver le dit')

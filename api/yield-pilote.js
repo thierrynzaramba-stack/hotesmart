@@ -3,7 +3,8 @@
 // Spec : docs/specs/spec-yieldflow-v1.md §2 bis
 // Regle : lib/pilote-tarifaire.js — DOC : docs/kb/coeur-de-donnees.md
 //
-// GET  ?bien=<uuid>  -> { pilote, peut_basculer, raison, fenetre, ouverture }
+// GET  ?bien=<uuid>  -> { pilote, peut_basculer, raison, fenetre, ouverture, prix_hote }
+// GET  ?bien=<uuid>&fenetre_type=&fenetre_valeur=  -> + prix_calendrier (confirmation)
 // POST { bien, pilote: 'calendrier' | 'yieldflow', fenetre?: { type, valeur } }
 // POST { bien, fenetre: { type, valeur } }   (changer la fenetre, bien pilote)
 //
@@ -44,6 +45,14 @@ const {
 } = require('../lib/pilote-tarifaire')
 const { effacerMarqueur, lireMarqueur, jourParis } = require('../lib/ouverture-marqueur')
 const { recalerPrixHote, compterPrixHote } = require('../lib/prix-hote')
+const { prixCalendrierARemplacer } = require('../lib/nuits-du-moteur')
+
+// DEUX ORIGINES, DEUX TRAITEMENTS (changement de dessin du 23 septembre 2026,
+// decisions A1 / B1 de Thierry). Les prix du CALENDRIER sont remplaces par les
+// predictions a l'activation ; les prix poses depuis YieldFlow (✎, table
+// `prix_hote`) ne le sont jamais. La confirmation annonce les deux nombres ;
+// le compte des premiers (`prixCalendrierARemplacer`) suit la regle du moteur,
+// dans lib/nuits-du-moteur.js.
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -84,7 +93,7 @@ module.exports = async (req, res) => {
   // garde qui juge sur une colonne non selectionnee est une garde ouverte ».
   // Elle vaut aussi pour une garde qui juge sur une colonne ABSENTE.
   const { data: bien, error: eBien } = await supabase.from('properties')
-    .select('id, name, rate_sync_mode, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')
+    .select('id, user_id, name, provider_property_id, inventory_units, rate_sync_mode, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')
     .eq('id', bienGarde.id).eq('user_id', compte).maybeSingle()
   if (eBien) {
     console.error('[yield-pilote] lecture bien', eBien.message)
@@ -103,7 +112,17 @@ module.exports = async (req, res) => {
     const marqueur = await lireMarqueur(supabase, bien.id)
     // Les nuits a venir qui portent la main de l'hote : les deux confirmations
     // l'annoncent (dette 22). `null` = illisible, l'ecran se tait.
-    const nuitsPrixHote = await compterPrixHote(supabase, { userId: compte, propertyId: bien.id, aujourdHui: jourParis(new Date()) })
+    const aujourdHui = jourParis(new Date())
+    const nuitsPrixHote = await compterPrixHote(supabase, { userId: compte, propertyId: bien.id, aujourdHui })
+    // Le compte des prix du calendrier ne se fait QUE sur demande, pour la
+    // fenetre saisie dans la confirmation (`fenetre_type`, `fenetre_valeur`) :
+    // la lecture d'etat ordinaire n'a pas a relire deux ans de calendrier.
+    let prixCalendrier
+    if (req.query.fenetre_type != null || req.query.fenetre_valeur != null) {
+      const v = validerFenetre({ type: req.query.fenetre_type, valeur: req.query.fenetre_valeur })
+      if (!v.ok) return res.status(400).json({ error: v.error, code: v.code })
+      prixCalendrier = await prixCalendrierARemplacer(supabase, bien, v.fenetre, aujourdHui)
+    }
     return res.status(200).json({
       bien: bien.id,
       pilote: piloteDuBien(bien),
@@ -112,7 +131,8 @@ module.exports = async (req, res) => {
       raison: possible.ok ? null : possible.error,
       fenetre: fenetreDuBien(bien),
       ouverture: { derniere: marqueur ? marqueur.derniere : null, bilan: marqueur ? marqueur.bilan : null },
-      prix_hote: { nuits: nuitsPrixHote }
+      prix_hote: { nuits: nuitsPrixHote },
+      ...(prixCalendrier !== undefined ? { prix_calendrier: prixCalendrier } : {})
     })
   }
 
