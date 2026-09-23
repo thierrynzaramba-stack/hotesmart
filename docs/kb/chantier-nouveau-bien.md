@@ -741,3 +741,90 @@ laisser une grille marché piloter le bien d'un inconnu.
   écart maximal, et leur évolution depuis le premier relevé.
 - **Le critère de l'interrupteur** : règle 19.
 - **La base de validation est mince** : §10, point 7.
+
+---
+
+## 12. V2.1 et V2.5 — état au 24 septembre 2026 (nuit du 23 au 24)
+
+Branche `lot-v2-1-marche` (worktree `/home/thierry/hotesmart-v21`), commits
+locaux, **rien de poussé, rien en production**. Aucun appel AirROI réel : la
+clé `AIRROI_KEY` n'était visible dans aucun shell de la session (ni `-c`, ni
+`-lc`, ni `-ic`) — 0 $ dépensés. Tout est prouvé sur les fixtures réelles du
+22-23 septembre (`tests/fixtures/airroi/`, six fichiers, vérifiés sans clé).
+
+### Ce qui existe
+
+- **Migration** `migrations/2026-09-24-marche-airroi.sql` (à coller, staging
+  puis prod ; lignes < 60 caractères ; requête de vérification à empreinte) :
+  `properties.latitude/longitude/coords_source/airbnb_listing_id` ; tables
+  `airroi_cache`, `airroi_appels`, `comparables_retenus`, `grille_controle`,
+  RLS actives. Preuve contre la base visée : `scripts/verifier-migration-marche.js`
+  (empreinte biens = 5 prod / 3 staging).
+- **Client AirROI** `lib/airroi/` : `client.js` (seul point de contact, serveur
+  seulement, cache d'abord, garde-fous avant le réseau, clé lue au moment de
+  l'appel, jamais écrite), `cout.js` (tarifs, fraîcheurs, garde-fous),
+  `depot.js` (Supabase en prod ; dossier local pour les scripts, pour que le
+  cache marche DÈS LE PREMIER APPEL même avant la migration), `json.js`.
+- **Grille marché** `lib/marche/grille-marche.js` (pure) ; **étude**
+  `lib/marche/etude.js` ; **contrôle** `lib/marche/controle.js` (seul writer de
+  `grille_controle`) ; **verrou de la règle 19** `lib/marche/critere.js`.
+- **Écran** : bloc replié « Grille du marché — à titre d'information, n'agit
+  pas sur vos prix » sous le pied du mois (`apps/yield/prix.html`), lu à
+  l'ouverture par `api/yield-marche.js` (GET, lecture seule, aucun appel AirROI).
+- **Scripts** : `verifier-airroi.js` (0,21 $ au plus, puis 0 $ à la relance),
+  `releve-controle-marche.js` (un relevé ; n'affiche JAMAIS niveau ni écart).
+
+### Pièges trouvés cette nuit
+
+- **Les identifiants Airbnb dépassent 2^53** : `JSON.parse` lit l'annonce de La
+  bulle `992723390568420450` comme `992723390568420500` — une AUTRE annonce.
+  `lib/airroi/json.js` lit tout entier de 16 chiffres ou plus en texte ; le
+  cache garde la réponse en TEXTE brut (un jsonb relu en JavaScript arrondirait
+  de nouveau) ; `airbnb_listing_id` et `comparables_retenus.listing_id` sont
+  des `text`.
+- **Faux vert du vérificateur** : une requête `head` de comptage sur une table
+  ABSENTE rend un compte `null` sans erreur — la première version annonçait
+  « présentes » quatre tables inexistantes, contre la production. Corrigé :
+  lecture réelle et compte entier exigés.
+- **Nuits mensuelles** : AirROI ne les rend pas ; `occupancy × jours du mois`
+  les reconstitue (La bulle : 223 nuits sur 12 mois, le chiffre d'AirROI).
+
+### Règle 19 — tenue par construction
+
+`CRITERE_INTERRUPTEUR = null` (`lib/marche/critere.js`) : tant qu'il n'est pas
+gravé (texte + date, ici ET dans le code, même commit), l'API ne rend ni écart
+ni niveau marché (qui donnerait l'écart par soustraction), et le bloc dit
+« les grilles ne s'affichent pas encore ». Aucun relevé n'a été calculé sur
+données réelles cette nuit ; aucun écart n'a été lu.
+
+### Décisions prises seules — à confirmer ou renverser
+
+1. **Garde-fous** : budget mensuel global 10 $ (alarme fondateur à 80 %),
+   plafond 4 $ par compte sur 30 jours, 3 $ par bien sur 90 jours
+   (`lib/airroi/cout.js`, `GARDES`). *Alternative* : tout autre montant.
+2. **Une erreur HTTP est comptée à coût plein** au journal (on ne sait pas si
+   AirROI facture un 4xx). *Alternative* : 0 $ — plus juste si AirROI ne
+   facture pas, moins prudente.
+3. **`GET /listings` estimé à 0,10 $** (non relevé). *Alternative* : relever
+   sur la facture au premier appel.
+4. **Nuits = occupation × jours du mois**. *Alternative* : revenu ÷ ADR (§3 bis
+   dit l'ADR non cohérent à l'année).
+5. **Stabilité mesurée sur les mois avec AU MOINS UNE nuit** (le niveau, lui,
+   écarte les mois < 5 nuits). *Alternative* : les mêmes mois que le niveau.
+6. **Gestionnaire** : deux comparables partagent un gestionnaire s'ils ont un
+   hôte OU un co-hôte en commun ; l'avertissement tombe dès 2 comparables d'un
+   même gestionnaire. *Alternative* : seuil de poids avant d'avertir.
+7. **Sous le seuil : aucun niveau affiché**, seulement les nombres (règle 8).
+   *Alternative* : montrer les niveaux marqués « amincie ».
+8. **Cœur de vie 23 en attente de la dette 26** par une liste explicite d'UUID
+   (`EN_ATTENTE_DETTE_26`), à retirer quand la dette sera soldée.
+   *Alternative* : détecter le ménage dans les payloads (une seconde règle).
+9. **Le relevé mensuel et le relevé au rafraîchissement ne sont PAS branchés
+   au cron** : `api/cron.js` se régénère en fichier complet (règle dure) ; un
+   script et la fonction existent. *Alternative* : brancher au lot suivant.
+10. **Aucun déclenchement d'étude depuis l'écran** (un appel payant à
+    l'ouverture d'une page) : études par script, puis par le rafraîchissement.
+11. **La fiche de chaque comparable passe par `GET /listings` (0,10 $, cache
+    90 jours)** plutôt que par la liste de `listings/comparables` : un
+    comparable retenu peut ne pas figurer parmi les 25 d'un appel.
+    *Alternative* : lire d'abord la liste en cache, ne payer que les absents.

@@ -317,6 +317,17 @@
     .yp-totaux tbody th { border-top: 0.5px solid var(--border); }
     .yp-totaux small { display: block; color: var(--text3); font-size: 10px; }
 
+    /* ─── LE BLOC MARCHE (lot V2.5) : REPLIE, A TITRE D'INFORMATION ─────────
+       Il s'AJOUTE sous le pied du mois ; il ne remplace rien et n'agit sur
+       aucun prix. Donnee d'emprunt : « source : marché » dit partout. */
+    .yp-marche { margin-top: 14px; background: var(--bg); border: 0.5px solid var(--border);
+                 border-radius: var(--radius-lg); padding: 10px 14px; }
+    .yp-marche summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--text2); }
+    .yp-marche .dit { font-size: 12px; color: var(--text2); margin: 8px 0 0; line-height: 1.6; }
+    .yp-marche table { border-collapse: collapse; font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+    .yp-marche th, .yp-marche td { padding: 4px 10px; border-bottom: 0.5px solid var(--border); text-align: right; }
+    .yp-marche th:first-child, .yp-marche td:first-child { text-align: left; }
+    .yp-marche .avert { color: #8A6D3B; }
     .yp-etat-page { padding: 20px; border: 0.5px solid var(--border);
                     border-radius: var(--radius-lg); background: var(--bg);
                     color: var(--text2); font-size: 13px; }
@@ -899,7 +910,7 @@
 
   // ─── La vue : action, tableau, pied ───────────────────────────────────────
   function vue (d) {
-    return radar(d) + tendanceDuMois(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d)
+    return radar(d) + tendanceDuMois(d) + grilleDuBien(d) + legende(d) + tableau(d) + pied(d) + blocMarche()
   }
 
   const ABREV = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.',
@@ -1538,7 +1549,55 @@
     </div>`
   }
 
+  // ─── LA GRILLE DU MARCHE (lot V2.5) — REPLIEE, A TITRE D'INFORMATION ─────
+  // ⚠ LUE A L'OUVERTURE DU BLOC SEULEMENT (une requete de plus pour qui la
+  // demande), jamais un appel AirROI : l'endpoint lit le dernier releve.
+  // ⚠ REGLE 19 : tant que le critere de l'interrupteur n'est pas grave,
+  // l'endpoint ne rend ni ecart ni niveau — le bloc le dit.
+  function blocMarche () {
+    return `<details class="yp-marche" id="yp-marche"><summary>Grille du marché — à titre d’information, n’agit pas sur vos prix</summary>
+      <div id="yp-marche-corps"><p class="dit">Lecture…</p></div></details>`
+  }
+  async function chargerMarche () {
+    const corps = el('yp-marche-corps'); if (!corps) return
+    let d
+    try {
+      const r = await fetch(`/api/yield-marche?property_id=${encodeURIComponent(el('yp-bien').value)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
+      d = await r.json()
+      if (!r.ok) throw new Error(d && d.error)
+    } catch (e) { corps.innerHTML = '<p class="dit">Lecture impossible pour le moment.</p>'; return }
+    corps.innerHTML = rendreMarche(d)
+  }
+  const STATUT_MARCHE = {
+    fiable: 'fiable', reference_amincie: 'référence amincie',
+    attente_dette_26: 'en attente : votre historique contient du ménage facturé (dette 26)'
+  }
+  function rendreMarche (d) {
+    const source = '<p class="dit">Source : <b>marché</b> — des annonces Airbnb comparables à la vôtre, pas vos ventes.</p>'
+    if (d.etat !== 'releve') return `${source}<p class="dit">Aucun relevé du marché pour ce logement.</p>`
+    const tete = `<p class="dit">Relevé du ${ech(dateFr(String(d.releve_le).slice(0, 10)))} · ${ech(STATUT_MARCHE[d.statut] || d.statut)} · ${d.nb_comparables} comparable(s) · données du marché du ${ech(dateFr(String(d.fraicheur_marche || '').slice(0, 10)) || '—')}.</p>`
+    if (!d.lisible) {
+      return `${source}${tete}<p class="dit">Les grilles ne s’affichent pas encore : le critère qui dira un jour si la grille du marché peut guider un prix doit être fixé <b>avant</b> la première lecture.</p>`
+    }
+    const niv = d.niveaux_marche || []
+    const ecarts = new Map((d.ecarts || []).map(e => [e.nom, e]))
+    const lignes = niv.map((n, i) => {
+      const m12 = d.niveaux_mesure_12m ? d.niveaux_mesure_12m[i] : null
+      const m3 = d.niveaux_mesure_3ans ? d.niveaux_mesure_3ans[i] : null
+      const e = ecarts.get(n.nom)
+      return `<tr><td>${ech(n.nom)}</td><td>${m3 ? euros(m3.prix) : '—'}</td><td>${m12 ? euros(m12.prix) : '—'}</td><td>${euros(n.prix)}</td><td>${e ? `${e.ecart_eur >= 0 ? '+' : ''}${e.ecart_eur} € (${e.ecart_pct >= 0 ? '+' : ''}${String(e.ecart_pct).replace('.', ',')} %)` : '—'}</td></tr>`
+    }).join('')
+    const av = (d.avertissements || []).map(a => `<li class="avert">${ech(a.phrase)}</li>`).join('')
+    return `${source}${tete}
+      ${niv.length ? `<table><thead><tr><th>Niveau</th><th>Vos ventes, 3 ans</th><th>Vos ventes, 12 mois</th><th>Marché, 12 mois</th><th>Écart (marché − 12 mois)</th></tr></thead><tbody>${lignes}</tbody></table>` : ''}
+      ${av ? `<ul class="dit">${av}</ul>` : ''}
+      <p class="dit">Tarif par nuit, hors frais de ménage. Nuits Airbnb seulement : le marché ne voit ni Booking ni le direct.</p>`
+  }
+
   function brancher () {
+    const m = el('yp-marche')
+    if (m) m.addEventListener('toggle', () => { if (m.open) chargerMarche() }, { once: true })
     // ⚠ LE CLIC OUVRE LE MOIS, sans second aller-retour pour la bande : la
     // reponse suivante la reconstruit avec le meme appel.
     for (const b of document.querySelectorAll('.yp-rm')) {
