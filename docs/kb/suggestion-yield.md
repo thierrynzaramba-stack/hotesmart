@@ -491,6 +491,22 @@ fourchette comme pour le plancher.
   pousse semaine et week-end du même cran » (§2), mais non vérifié. À mesurer
   quand les couples (vacances, jour de semaine) auront assez de nuits.
 
+**Deux retraits (arbitrages de Thierry, après la review, options a).**
+- **Le délai retire le relèvement et la prime** (14 jours ou moins) : « Relèvement
+  retiré — la nuit approche : 125 € au lieu de 150 € (prix obtenu le …, à un
+  délai inconnu) ». L'argument décisif n'est pas « il faut vendre » : **le prix
+  de l'an dernier a été obtenu à un délai inconnu** — vendu six mois à l'avance,
+  il ne prouve rien sur ce que la nuit vaut à 9 jours ; le délai porte une
+  information que le prix N-1 ne porte pas. Raffinement daté : dette 28
+  (`dettes-v1.md`) — ne retirer que si la comparable était déjà vendue à ce
+  délai.
+- **Un réglage de l'hôte qui BAISSE n'est pas défait** : « Prix de l'an dernier :
+  190 € le … — non repris : votre réglage (−2 crans sur « hors vacances ») fixe
+  ce niveau ». Même traitement que le ✎ : la main de l'hôte prime, le détail
+  montre le prix non repris pour qu'il change d'avis en connaissance de cause.
+  Un réglage qui MONTE n'est jamais écrasé : **le plancher est un minimum,
+  jamais un maximum** (il ne relève que si la preuve dépasse le prix du niveau).
+
 **Effet mesuré (prod, 12 mois, par rapport à la fourchette seule)** : grille
 identique ; **La bulle 8 nuits** (02/10 150 €, 08/11 et 15/11 140 €, 24/12
 200 €, 27/12 165 €, 31/12 255 € plafonné, 07/02 160 €, 26/02 180 €) ;

@@ -28,6 +28,10 @@
 //   - contre le code d'avant le point B (fourchette seule) : les tests de
 //     relevement rougissent.
 // Chaque test rougit donc contre au moins une version fautive plausible.
+// Arbitrages d'apres la review : « delai » et « reglage qui BAISSE » rougissent
+// contre 487aef0 ; « reglage qui MONTE » decrit un comportement deja juste (point
+// de verification de Thierry) et rougit contre un plancher NAIF qui pose la
+// preuve meme plus basse.
 
 const test = require('node:test')
 const assert = require('node:assert')
@@ -154,4 +158,43 @@ test('la fourchette suit la meme regle de jour : samedi vers dimanche refuse a E
   assert.equal(s.prix, 165)
   assert.equal(s.prime_exceptionnel.motif_sans_prime, S.MOTIFS_SANS_PRIME.AUTRE_TYPE_DE_NUIT)
   assert.match(s.prime_exceptionnel.resume, /était un samedi, qui se vend Exceptionnel chez vous, contre Base pour un dimanche : son prix surestimerait cette nuit/)
+})
+
+// ─── Arbitrages de Thierry apres la review du point B (23 septembre 2026) ───
+
+test('LE TEST QUI COMPTE : a 14 jours ou moins, le delai retire le relevement — le prix N-1 a ete obtenu a un delai inconnu', () => {
+  // Le cas reel : La bulle, vendredi 02/10/2026 a 9 jours, Haut −1 = Moyen
+  // 125 €, preuve 150 € (le vendredi 03/10/2025).
+  const s = nuit(JOUR.vendredi, { delaiJours: 9, preuveN1: { date: '2025-11-21', prix: 150, ventes: 1, meme_segment: true } })
+  assert.equal(s.niveau, 'Moyen', 'le delai descend la nuit d un niveau')
+  assert.equal(s.prix, 125, 'et le relevement ne la remonte pas')
+  assert.equal(s.releve_n1.motif_sans_prime, S.MOTIFS_SANS_PRIME.RETIREE_DELAI)
+  assert.equal(s.releve_n1.resume, 'Relèvement retiré — la nuit approche : 125 € au lieu de 150 € (prix obtenu le 21/11/2025, à un délai inconnu)')
+  // Et a 15 jours, le relevement s'applique.
+  assert.equal(nuit(JOUR.vendredi, { delaiJours: 15, preuveN1: { date: '2025-11-21', prix: 150, ventes: 1, meme_segment: true } }).prix, 150)
+  // La fourchette suit la meme regle : un samedi Exceptionnel, delai −1 mais
+  // pression +1, reste Exceptionnel — et n'a pas de prime.
+  const a = nuit('2026-11-21', { delaiJours: 9, pression: { ecart: 0.4, fiable: true }, preuveN1: preuve('samedi', 200) })
+  assert.equal(a.niveau, 'Exceptionnel')
+  assert.equal(a.prix, 165)
+  assert.match(a.prime_exceptionnel.resume, /^Prime retirée — la nuit approche : 165 € au lieu de 200 €/)
+})
+
+test('LE TEST QUI COMPTE : un reglage de l hote qui BAISSE n est pas defait — le detail montre le prix N-1 non repris', () => {
+  const s = nuit(JOUR.vendredi, { reglage: { crans: -2, cle: 'hors_vacances' }, preuveN1: preuve('jeudi', 190) })
+  assert.equal(s.niveau, 'Base', 'vendredi Haut, −2 crans de l hote : Base')
+  assert.equal(s.prix, 115, 'la main de l hote prime')
+  assert.equal(s.releve_n1.motif_sans_prime, S.MOTIFS_SANS_PRIME.REGLAGE_HOTE)
+  assert.equal(s.releve_n1.resume, 'Prix de l’an dernier : 190 € le 20/11/2025 — non repris : votre réglage (-2 crans sur « hors_vacances ») fixe ce niveau')
+})
+
+test('LE TEST QUI COMPTE : un reglage de l hote qui MONTE n est jamais ecrase — le plancher est un minimum, jamais un maximum', () => {
+  // Jeudi Base, +4 crans : Exceptionnel 165 € ; preuve un jeudi a 140 €.
+  const s = nuit(JOUR.jeudi, { reglage: { crans: 4, cle: 'hors_vacances' }, preuveN1: preuve('jeudi', 140) })
+  assert.equal(s.niveau, 'Exceptionnel')
+  assert.equal(s.prix, 165, 'la preuve plus basse ne descend pas le prix')
+  // Et a Tres haut (+3), une preuve plus basse ne bouge rien non plus.
+  const t = nuit(JOUR.jeudi, { reglage: { crans: 3, cle: 'hors_vacances' }, preuveN1: preuve('jeudi', 130) })
+  assert.equal(t.prix, 155)
+  assert.equal(t.releve_n1, undefined)
 })

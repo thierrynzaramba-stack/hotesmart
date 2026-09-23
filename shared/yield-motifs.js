@@ -355,6 +355,14 @@ export const MOTIFS = {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La nuit comparable s’est vendue moins de 10 € au-dessus de ce niveau : le prix ne bouge pas pour si peu.'
   },
+  releve_retire_par_le_delai: {
+    titre: 'Relèvement retiré',
+    quoi: 'La nuit approche (14 jours ou moins) : le prix de l’an dernier a été obtenu à un délai inconnu, peut-être des mois à l’avance — il ne dit rien de ce que la nuit vaut aujourd’hui.'
+  },
+  releve_non_repris_reglage_de_l_hote: {
+    titre: 'Prix de l’an dernier non repris',
+    quoi: 'Vous avez baissé ce type de période : votre réglage prime sur la preuve de l’an dernier, comme votre prix posé à la main. Le prix de l’an dernier reste affiché pour que vous décidiez en connaissance de cause.'
+  },
   prime_retiree_par_la_pression: {
     titre: 'Prime retirée',
     quoi: 'Ce mois se vend nettement moins bien que l’an dernier au même moment : la demande de cette année contredit la preuve de l’an dernier, la nuit reste au bas de la fourchette.'

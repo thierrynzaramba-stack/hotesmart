@@ -1151,8 +1151,17 @@
     if (p.prix != null) {
       return `<span class="yp-preuve" title="${ech(p.resume + (n.fourchette_exceptionnel && !p.plafonne ? ` Fourchette ${n.fourchette_exceptionnel.bas}–${n.fourchette_exceptionnel.plafond} € ; le plafond est le prix atteint par au moins deux réservations.` : ''))}">prouvé le ${p.preuve_autre_jour ? `${ech(p.preuve_autre_jour.jour_preuve)} ` : ''}<b>${ech(dateFr(p.preuve_date))}</b>${p.preuve_autre_jour && p.preuve_autre_jour.prudent ? ' · minimum prudent' : ''}${p.reference_amincie && !p.amincie_systematique ? ' · 1 vente' : ''}${p.plafonne ? ' · <b>plafonné</b>' : ''}</span>`
     }
+    const quoi = p === n.releve_n1 ? 'relèvement retiré' : 'prime retirée'
     if (p.motif_sans_prime === 'prime_retiree_par_la_pression') {
-      return `<span class="yp-rien" title="${ech(p.resume)}">${p === n.releve_n1 ? 'relèvement retiré' : 'prime retirée'}${p.ecart_pression != null ? ` −${Math.abs(Math.round(p.ecart_pression * 100))} %` : ''}</span>`
+      return `<span class="yp-rien" title="${ech(p.resume)}">${quoi}${p.ecart_pression != null ? ` −${Math.abs(Math.round(p.ecart_pression * 100))} %` : ''}</span>`
+    }
+    // Le delai et le reglage de l'hote retirent aussi : la ligne le dit, le
+    // survol et le detail disent pourquoi (arbitrages de Thierry).
+    if (p.motif_sans_prime === 'releve_retire_par_le_delai') {
+      return `<span class="yp-rien" title="${ech(p.resume)}">${quoi} · la nuit approche</span>`
+    }
+    if (p.motif_sans_prime === 'releve_non_repris_reglage_de_l_hote') {
+      return `<span class="yp-preuve" title="${ech(p.resume)}">N-1 non repris · votre réglage</span>`
     }
     return ''
   }
