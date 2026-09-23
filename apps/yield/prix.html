@@ -1131,7 +1131,7 @@
         ? '<div class="yp-grille-note"><sup>*</sup> niveau étiré pour garder 5 % d’écart — il reste dans vos prix pratiqués.</div>'
         : ''}
       ${b.plafond != null
-        ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé atteint par au moins deux réservations : une borne, pas un prix visé. Il monte seul dès qu’une deuxième réservation atteint un prix plus haut ; au-delà, c’est vous qui posez le prix (✎).${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
+        ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé atteint par au moins deux réservations : une borne, pas un prix visé. Il monte seul dès qu’une deuxième réservation atteint un prix plus haut ; au-delà, c’est vous qui posez le prix (✎). Les autres niveaux peuvent aussi monter, jusqu’à ce plafond, quand la nuit comparable de l’an dernier s’est vendue plus cher : la nuit affiche alors son prix et « prouvé le … ».${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
         : ''}
     </div>`
   }

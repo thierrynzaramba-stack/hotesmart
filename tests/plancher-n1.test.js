@@ -15,15 +15,19 @@
 //   3. le plafond BORNE le cliquet ; sans plafond, le haut de la grille ;
 //   4. le niveau affiche suit le prix ; la preuve d'un autre jour se DIT.
 //
-// CONTRE-EPREUVE (REVIEW.md regle 19), faite le 23 septembre 2026 :
-//   - contre la version (b) STRICTE (meme niveau exige, avant b′) : 3 rouges —
-//     jeudi → vendredi, meme niveau, et la phrase de refus de la fourchette ;
-//   - contre le code d'avant le point B (fourchette seule) : 7 rouges sur 8 ;
-//     le 8e (samedi → dimanche refuse) y passait par accident, rien n'etant
-//     releve ;
-//   - contre une version SANS condition de jour (option a) : 4 rouges, dont
-//     samedi → dimanche. Chaque test rougit donc contre au moins une version
-//     fautive plausible.
+// CONTRE-EPREUVE (REVIEW.md regle 19) — refaite en review, chiffres corriges :
+//   - contre la version (b) STRICTE (egalite exigee) : 1 rouge, « jeudi →
+//     vendredi » — c'est la seule difference entre b et b′ (l'egalite est
+//     acceptee par les deux) ;
+//   - contre une version « meme jour de semaine exige » : « jeudi → vendredi »
+//     et « meme niveau » rougissent ;
+//   - contre une version SANS condition de jour (option a) : les refus
+//     rougissent (samedi → dimanche, fourchette, jour non mesure) ;
+//   - contre le repli global fautif (avant la review) : « jour non mesure »
+//     rougit ;
+//   - contre le code d'avant le point B (fourchette seule) : les tests de
+//     relevement rougissent.
+// Chaque test rougit donc contre au moins une version fautive plausible.
 
 const test = require('node:test')
 const assert = require('node:assert')
@@ -31,17 +35,27 @@ const S = require('../lib/yield/suggestion')
 const R = require('../lib/yield/reference')
 
 const NIVEAUX = [115, 125, 140, 155, 165]
-// Structure hors vacances du bien de test : dimanche-jeudi Base, vendredi
-// Haut, samedi Exceptionnel (lue par `positions_jour`, comme en production).
-function grille ({ plafond = 255, plafondBrut = 257 } = {}) {
+// Structure hors vacances du bien de test : dimanche, mercredi, jeudi Base,
+// vendredi Haut, samedi Exceptionnel — CHAQUE jour avec sa position PROPRE dans
+// `positions_jour`. ⚠ La premiere version n'en posait que deux (vendredi,
+// samedi) et annoncait les autres « lus par positions_jour » : ils passaient par
+// le repli global, que la review a trouve fautif — le jeu d'essai figeait le
+// defaut (regle 17). Le mardi, lui, n'a PAS de position propre : jour non mesure.
+function grille ({ plafond = 255, plafondBrut = 257, jours = null } = {}) {
   const niveaux = S.NIVEAUX.map((n, i) => ({ ...n, prix: NIVEAUX[i], prix_mesure: NIVEAUX[i], etire: false }))
   const pos = indice => ({ fiable: true, indice, niveau: niveaux[indice].nom, crans: 0, echantillon: 40, reservations: 20, mediane: NIVEAUX[indice] })
   return {
     base: { fiable: true, echantillon: 854, reservations: 400, niveaux, min: 35, max: 295, plafond, plafond_brut: plafondBrut },
     positions: new Map([['hors_vacances', { ...pos(0), crans: 0 }]]),
-    positions_jour: new Map([['hors_vacances|samedi', pos(4)], ['hors_vacances|vendredi', pos(2)]])
+    positions_jour: new Map(Object.entries(jours || { dimanche: 0, mercredi: 0, jeudi: 0, vendredi: 2, samedi: 4 })
+      .map(([j, i]) => [`hors_vacances|${j}`, pos(i)]))
   }
 }
+// Le jeu d'essai se verifie par assertion (regle 19, point 4).
+for (const j of ['dimanche', 'mercredi', 'jeudi', 'vendredi', 'samedi']) {
+  assert.ok(grille().positions_jour.get(`hors_vacances|${j}`).fiable, `jeu d essai : ${j} mesure`)
+}
+assert.equal(grille().positions_jour.get('hors_vacances|mardi'), undefined, 'jeu d essai : mardi NON mesure')
 const CTX = R.construireContexte({ zoneBien: 'C', vacances: [], debut: '2025-01-01', fin: '2027-12-31' })
 const JOUR = { dimanche: '2026-11-22', mercredi: '2026-11-18', jeudi: '2026-11-19', vendredi: '2026-11-20' }
 for (const [j, d] of Object.entries(JOUR)) {
@@ -65,7 +79,10 @@ test('LE TEST QUI COMPTE : samedi vers dimanche — REFUSE (la preuve surestimer
 test('LE TEST QUI COMPTE : jeudi vers vendredi — ACCEPTE, et dit « minimum prudent »', () => {
   const s = nuit(JOUR.vendredi, { preuveN1: preuve('jeudi', 190) })
   assert.equal(s.prix, 190, 'un jeudi (Base) vendu 190 € prouve au moins 190 € pour un vendredi (Haut)')
-  assert.equal(s.niveau, 'Exceptionnel', 'le niveau affiche suit le prix')
+  assert.equal(s.niveau_effectif, 'Exceptionnel', 'le niveau affiche suit le prix')
+  assert.equal(s.niveau, 'Haut', 'le niveau du pipeline reste le sien (niveau_choisi)')
+  assert.equal(s.deplacement_effectif, 2, 'le deplacement effectif suit le prix (Haut → Exceptionnel)')
+  assert.ok(s.fourchette.max >= s.prix, 'le contrat fourchette.max ne ment pas')
   assert.equal(s.releve_n1.niveau_avant, 'Haut')
   assert.equal(s.releve_n1.resume, 'Relevé à 190 € — prix obtenu le jeudi 20/11/2025 sur la nuit comparable'
     + ' (Haut → Exceptionnel) ; un jeudi se vend au niveau Base, un vendredi au niveau Haut : ce prix est donc un minimum prudent')
@@ -77,6 +94,20 @@ test('LE TEST QUI COMPTE : meme niveau — ACCEPTE (deux jours au meme niveau se
   assert.equal(s.prix, 150)
   assert.match(s.releve_n1.resume, /; jeudi et mercredi se vendent au même niveau chez vous \(Base\)$/)
   assert.equal(s.releve_n1.preuve_autre_jour.prudent, false)
+})
+
+test('LE TEST QUI COMPTE : un jour NON MESURE refuse la preuve — « je ne sais pas » n est pas « oui »', () => {
+  // Review du point B : sans position propre, deux jours recevaient la meme
+  // position globale et « samedi et dimanche se vendent au meme niveau »
+  // s'affirmait sans mesure. Ici : preuve un mardi (non mesure) pour un jeudi.
+  const s = nuit(JOUR.jeudi, { preuveN1: { date: PREUVE.mardi, prix: 200, ventes: 1, meme_segment: true } })
+  assert.equal(s.prix, 115)
+  assert.equal(s.releve_n1, undefined)
+  // Et un bien SANS aucune mesure par jour : samedi → dimanche refuse aussi.
+  const maigre = nuit(JOUR.dimanche, { g: { jours: {} }, preuveN1: preuve('samedi', 250) })
+  assert.equal(maigre.prix, 115, 'bien maigre : la b′ ne redevient pas l option a')
+  // Meme jour de semaine : pas besoin de mesure, la preuve vaut.
+  assert.equal(nuit(JOUR.jeudi, { g: { jours: {} }, preuveN1: preuve('jeudi', 150) }).prix, 150)
 })
 
 test('meme jour de semaine : aucune mention d un autre jour', () => {
