@@ -657,6 +657,16 @@ Le fond vert pâle distingue les arrivées du jour, la bordure gauche reste au c
 La carte dit qui (voyageur, plateforme), où (le bien, ligne 🏠), quand (dates), et quoi faire s'il y a une
 tâche ; l'extrait du dernier message a disparu (demande de Thierry). L'en-tête du fil porte aussi le bien.
 
+Sur les arrivées du jour et du lendemain, deux marques. **🧹 Ménage** : `etatMenage` (lib/cron-arrival-code)
+rend le motif de la règle du cron — `fait`, `a_faire`, `premier_sejour`, `sans_suivi`, `inconnu` — et
+`isMenageValidated` n'en est plus que la lecture booléenne (rien ne bloque = fait, premier séjour ou sans
+suivi ; inconnu bloque, comme avant). L'écran distingue « fait » de « premier séjour » et « non suivi »
+(gris) : un logement que personne n'a nettoyé ne s'affiche pas « fait ». **🔑 Code transmis / créé, pas
+envoyé / pas de code** : « transmis » se prouve par un message sortant, postérieur à la création du code,
+qui contient le code entier (borné par des non-chiffres) ; ni `access_codes.status` ni `message_sent_log`
+ne le disent, tous deux écrits aussi en Mode Test. Lecture d'`access_codes` sans les lignes `deleted`, la
+plus récente d'abord, sur la clé composite bien + réservation (un identifiant Beds24 n'est unique que par bien).
+
 Téléphone : `/api/messages` renvoie `guestPhone` (le `snapshot.guestPhone`, Channex comme
 Beds24), les conversations « tâche seule » prennent `agent_tasks.guest_phone`. Lien `tel:` dans
 l'en-tête du fil (bouton portant le numéro) et, dans la liste, pour les seules arrivées du jour et du

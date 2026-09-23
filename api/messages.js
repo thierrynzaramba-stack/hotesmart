@@ -9,6 +9,66 @@ const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
+// La MEME regle que le cron des codes d'arrivee : le menage est « fait » quand
+// le dernier menage du bien est posterieur au depart precedent. Ne pas la
+// recopier, elle a deja ete corrigee deux fois.
+const { etatMenage } = require('../lib/cron-arrival-code')
+
+// Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
+const jourParis = (decalage = 0) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(Date.now() + decalage * 86400000))
+const STATUTS_SANS_ARRIVEE = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
+
+// ─── Etat d'arrivee : menage fait ? code transmis ? ────────────────────────
+// Demande de Thierry (23 septembre 2026) : sur les arrivees du jour et du
+// lendemain, la messagerie dit d'un coup d'oeil si le logement est pret et si
+// le voyageur a son code. Calcule ICI, sur le compte du proprietaire (service
+// role), pour les seules arrivees proches : quelques lignes par jour.
+//
+// « Code transmis » se PROUVE : un message sortant du fil contient le code.
+// Ni `access_codes.status` (qui passe a 'active' meme en Mode Test, quand le
+// message n'est qu'une tache a valider), ni `message_sent_log` (ecrit aussi
+// en Mode Test) ne disent que le voyageur l'a recu.
+async function etatsDArrivee(userId, conversations, snapByBooking) {
+  const aujourdHui = jourParis(0), demain = jourParis(1)
+  const proches = conversations.filter(c => {
+    const st = String(c.status || '').toLowerCase()
+    const arr = String(c.firstNight || '').slice(0, 10)
+    return arr && st && !STATUTS_SANS_ARRIVEE.has(st) && (arr === aujourdHui || arr === demain)
+  })
+  if (!proches.length) return
+  // Comme tous les lecteurs d'access_codes (cron-arrival-code, cron-access) :
+  // jamais une ligne 'deleted' (elle garde son code), et la plus recente d'abord
+  // — une reservation en a souvent plusieurs apres un changement de serrure.
+  const { data: codes, error } = await supabase
+    .from('access_codes')
+    .select('booking_id, property_id, code, status, created_at')
+    .in('booking_id', proches.map(c => c.bookId))
+    .neq('status', 'deleted')
+    .order('created_at', { ascending: false })
+  if (error) console.error('[messages] lecture access_codes echec', error.message)
+  // ⚠ Cle composite : un identifiant Beds24 n'est unique que par bien. La
+  // premiere ligne rencontree est la plus recente : on la garde.
+  const codeParBooking = {}
+  for (const r of codes || []) { const k = `${r.property_id}|${r.booking_id}`; if (!codeParBooking[k]) codeParBooking[k] = r }
+  for (const c of proches) {
+    const snap = snapByBooking[c.bookId] || {}
+    let menage = 'inconnu'
+    try {
+      menage = await etatMenage(userId, c.propertyId, { arrival: c.firstNight, id: c.bookId }, snap.provider || c.provider || 'beds24')
+    } catch (e) { console.error('[messages] etatMenage echec', c.bookId, e.message) }
+    const row = codeParBooking[`${c.propertyId}|${c.bookId}`]
+    const code = row && row.code ? String(row.code).replace(/\D/g, '') : ''
+    // Preuve stricte : le code, ENTIER (borne par des non-chiffres), dans un
+    // message sortant POSTERIEUR a la creation de ce code. Un numero de
+    // telephone qui le contient, ou un prix, ne vaut pas un code envoye.
+    const motif = code ? new RegExp(`(^|\\D)${code}(\\D|$)`) : null
+    const depuis = row && row.created_at ? new Date(row.created_at).getTime() : 0
+    const transmis = !!motif && c.messages.some(m => m.direction === 'outbound'
+      && new Date(m.sent_at).getTime() >= depuis && motif.test(String(m.body || '')))
+    c.arrivee = { menage, codeEtat: transmis ? 'transmis' : row ? 'cree' : 'aucun' }
+  }
+}
 
 // ─── Normalisation OTA (marque blanche) ──────────────────────────────────────
 // Valeur brute heterogene (Beds24 'airbnb' / Channex 'Airbnb.com' / ...) -> cle CSS.
@@ -224,6 +284,11 @@ module.exports = async function handler(req, res) {
 
     // Tri conversations par lastTime desc (plus recentes d'abord).
     conversations.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
+
+    // Menage fait ? code transmis ? — pour les arrivees du jour et de demain.
+    // Un echec ici ne prive personne de sa messagerie : les marques manquent, c'est tout.
+    try { await etatsDArrivee(userId, conversations, snapByBooking) }
+    catch (e) { console.error('[messages] etats d\'arrivee echec', e.message) }
 
     return res.status(200).json({ conversations })
 
