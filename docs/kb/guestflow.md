@@ -654,6 +654,8 @@ arrivée, ni une conversation sans statut connu (« tâche seule »). Le jour es
 (`Intl.DateTimeFormat` avec `timeZone: 'Europe/Paris'`, comme l'app ménage), calculé une fois au
 chargement et posé sur chaque conversation ; passé minuit, c'est le rechargement qui remet l'ordre.
 Le fond vert pâle distingue les arrivées du jour, la bordure gauche reste au code couleur des tâches.
+La carte dit qui (voyageur, plateforme), où (le bien, ligne 🏠), quand (dates), et quoi faire s'il y a une
+tâche ; l'extrait du dernier message a disparu (demande de Thierry). L'en-tête du fil porte aussi le bien.
 
 Téléphone : `/api/messages` renvoie `guestPhone` (le `snapshot.guestPhone`, Channex comme
 Beds24), les conversations « tâche seule » prennent `agent_tasks.guest_phone`. Lien `tel:` dans
