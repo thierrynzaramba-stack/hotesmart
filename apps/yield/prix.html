@@ -734,14 +734,19 @@
       + ' <span>à l’avance</span>'
       + '<button type="button" id="yp-act-valider">Activer</button>'
       + '<button type="button" class="secondaire" id="yp-act-annuler">Annuler</button>'
-      + '<span class="etat" id="yp-act-etat">Les dates de cette fenêtre s’ouvriront à la vente dans les 5 minutes, au prix prédit par YieldFlow. Vos indisponibilités ne sont jamais touchées. La fenêtre glisse ensuite chaque jour.</span>'
+      + '<span class="etat" id="yp-act-etat">Les dates de cette fenêtre s’ouvriront à la vente dans les 5 minutes, au prix prédit par YieldFlow (à défaut, à leur prix actuel ou au prix de base). Vos indisponibilités ne sont jamais touchées. La fenêtre glisse ensuite chaque jour.</span>'
       + '</div>')
     el('yp-act-annuler').addEventListener('click', () => chargerPilote())
     el('yp-act-valider').addEventListener('click', () => basculerPilote('yieldflow', { type: el('yp-act-type').value, valeur: el('yp-act-valeur').value }))
     // Le compte suit la fenetre saisie : relu a chaque changement, apres une
     // courte pause (on ne relit pas deux ans de calendrier a chaque chiffre).
+    // ⚠ LE JETON AVANCE A LA FRAPPE, PAS A LA FIN DE LA PAUSE (releve en
+    // review) : sinon une reponse pour l'ancienne fenetre, arrivee pendant la
+    // pause, s'affichait comme le compte de la nouvelle ; et « Activer » reste
+    // inerte tant que le compte de la fenetre saisie n'est pas arrive — la
+    // question « Continuer ? » se lit AVANT de pouvoir repondre.
     let attente = null
-    const relire = () => { clearTimeout(attente); attente = setTimeout(compterPrixCalendrier, 400) }
+    const relire = () => { clearTimeout(attente); attendreCompte(); attente = setTimeout(compterPrixCalendrier, 400) }
     el('yp-act-valeur').addEventListener('input', relire)
     el('yp-act-type').addEventListener('change', relire)
     compterPrixCalendrier()
@@ -751,12 +756,18 @@
   // comme `chargerPilote` — une reponse lente pour 120 jours ne doit pas
   // s'afficher par-dessus celle de 6 mois.
   let enCoursCompte = 0
+  function attendreCompte () {
+    ++enCoursCompte
+    const zone = el('yp-act-compte'); if (zone) zone.textContent = 'Comptage des prix du calendrier…'
+    const valider = el('yp-act-valider'); if (valider) valider.disabled = true
+  }
   async function compterPrixCalendrier () {
     const zone = el('yp-act-compte'); if (!zone) return
-    const jeton = ++enCoursCompte
+    attendreCompte()
+    const jeton = enCoursCompte
     const bien = el('yp-bien').value
     const type = el('yp-act-type').value, valeur = el('yp-act-valeur').value
-    zone.textContent = 'Comptage des prix du calendrier…'
+    const liberer = () => { const v = el('yp-act-valider'); if (v) v.disabled = false }
     let d = null
     try {
       const r = await fetch(`/api/yield-pilote?bien=${encodeURIComponent(bien)}&fenetre_type=${encodeURIComponent(type)}&fenetre_valeur=${encodeURIComponent(valeur)}`, {
@@ -765,18 +776,22 @@
       d = await r.json()
       if (jeton !== enCoursCompte || !el('yp-act-compte')) return
       // Une fenetre invalide : le serveur dit pourquoi, le bouton le redira.
-      if (!r.ok) { zone.textContent = d && d.error ? d.error : 'Fenêtre invalide.'; return }
+      if (!r.ok) { zone.textContent = d && d.error ? d.error : 'Fenêtre invalide.'; liberer(); return }
     } catch (e) {
       if (jeton !== enCoursCompte || !el('yp-act-compte')) return
       d = null
     }
     const n = d && d.prix_calendrier && Number.isInteger(d.prix_calendrier.nuits) ? d.prix_calendrier.nuits : null
     // ⚠ « JE NE SAIS PAS » N'EST PAS « AUCUN » : illisible se dit, jamais 0.
+    // ⚠ « PAR SES PREDICTIONS » QUAND IL SAIT LES FAIRE (releve en review) :
+    // une nuit non calculable ou sous le plancher garde son prix, et un bien a
+    // l'historique mince peut n'en calculer aucune. La phrase le dit.
     zone.innerHTML = n == null
-      ? 'Impossible de compter vos prix du calendrier pour le moment : ceux de cette fenêtre seront recalculés par YieldFlow.'
+      ? 'Impossible de compter vos prix du calendrier pour le moment : YieldFlow recalculera ceux de cette fenêtre qu’il sait prédire.'
       : n === 0
         ? 'Aucune nuit de cette fenêtre n’a de prix au calendrier à remplacer.'
-        : `<b>${phrasePrixCalendrier(n)}.</b> YieldFlow va ${n > 1 ? 'les' : 'le'} remplacer par ses prédictions. Continuer ?`
+        : `<b>${phrasePrixCalendrier(n)}.</b> YieldFlow va ${n > 1 ? 'les' : 'le'} remplacer par ses prédictions ; une nuit qu’il ne sait pas encore prédire garde son prix. Continuer ?`
+    liberer()
   }
 
   async function basculerPilote (voulu, fenetre) {

@@ -289,7 +289,7 @@ test('LE TEST QUI COMPTE : l endpoint de bascule RELIT le bien', () => {
   const perm = lire('lib/require-permission.js')
   assert.ok(!/select\('id, user_id, name, provider, provider_property_id, migration_target_property_id, pilote/.test(perm),
     'la garde ne charge toujours pas le pilote : la relecture reste donc necessaire')
-  const iRelecture = src.indexOf("select('id, name, rate_sync_mode, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')")
+  const iRelecture = src.indexOf("select('id, user_id, name, provider_property_id, inventory_units, rate_sync_mode, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')")
   assert.ok(iRelecture > 0, 'l endpoint relit le bien avec les colonnes qu il juge')
   const iDecision = src.indexOf('peutPasserEnYieldflow(bien)')
   assert.ok(iRelecture < iDecision, 'AVANT de decider')
