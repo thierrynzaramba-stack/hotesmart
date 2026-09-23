@@ -558,8 +558,14 @@
   // pas. Une restriction d'UI n'est pas une restriction.
   let enCoursPilote = 0
   let nuitsPrixHote = null
-  // « 3 nuits gardent votre prix » — la phrase de la decision (a), une fois.
-  const phrasePrixHote = n => `${n} nuit${n > 1 ? 's' : ''} garde${n > 1 ? 'nt' : ''} votre prix`
+  // « 3 nuits gardent votre prix YieldFlow » — la phrase de la decision (a),
+  // une fois. « YieldFlow » : ce sont les prix poses par le ✎ de cette page,
+  // pas ceux du calendrier (changement de dessin du 23 septembre 2026).
+  const phrasePrixHote = n => `${n} nuit${n > 1 ? 's' : ''} garde${n > 1 ? 'nt' : ''} votre prix YieldFlow`
+  // « 12 nuits ont déjà un prix au calendrier » — decision A1 : la base ne sait
+  // pas QUI a pose un prix du calendrier, on ne dit donc pas « que vous avez
+  // definis ».
+  const phrasePrixCalendrier = n => `${n} nuit${n > 1 ? 's ont' : ' a'} déjà un prix au calendrier`
   async function chargerPilote () {
     // ⚠ LE MEME JETON QUE `charger()` — releve en review. Sans lui, deux
     // changements de logement rapides peuvent peindre le pilote du bien A
@@ -717,6 +723,10 @@
       + 'Vérifiez la configuration et les tarifs proposés sur cette page avant d’enclencher.</p>'
       // ⚠ LA DECISION (a) SE DIT A LA REACTIVATION (dette 22) : les nuits dont
       // l'hote a fixe le prix restent a lui, au prix affiche au calendrier.
+      // DEUX ORIGINES, DEUX TRAITEMENTS (23 septembre 2026) : les prix du
+      // calendrier de la fenetre seront REMPLACES (le compte vient du serveur,
+      // pour la fenetre saisie) ; les prix YieldFlow (✎) sont GARDES.
+      + '<p class="dit" id="yp-act-compte">Comptage des prix du calendrier…</p>'
       + (nuitsPrixHote ? `<p class="dit"><b>${phrasePrixHote(nuitsPrixHote)}.</b> YieldFlow ne ${nuitsPrixHote > 1 ? 'les' : 'la'} modifiera pas : c’est le prix affiché au calendrier qui est retenu. Pour ${nuitsPrixHote > 1 ? 'les' : 'la'} lui confier, retirez votre prix sur ${nuitsPrixHote > 1 ? 'leur' : 'sa'} ligne.</p>` : '')
       + '<span><b>Jusqu’où YieldFlow ouvre-t-il vos dates ?</b></span>'
       + '<label>ouvrir <input type="number" id="yp-act-valeur" min="1" max="500" value="120"></label>'
@@ -724,10 +734,49 @@
       + ' <span>à l’avance</span>'
       + '<button type="button" id="yp-act-valider">Activer</button>'
       + '<button type="button" class="secondaire" id="yp-act-annuler">Annuler</button>'
-      + '<span class="etat" id="yp-act-etat">Les dates de cette fenêtre s’ouvriront à la vente dans les 5 minutes, avec leur prix actuel (ou le prix de base). Vos indisponibilités ne sont jamais touchées. La fenêtre glisse ensuite chaque jour.</span>'
+      + '<span class="etat" id="yp-act-etat">Les dates de cette fenêtre s’ouvriront à la vente dans les 5 minutes, au prix prédit par YieldFlow. Vos indisponibilités ne sont jamais touchées. La fenêtre glisse ensuite chaque jour.</span>'
       + '</div>')
     el('yp-act-annuler').addEventListener('click', () => chargerPilote())
     el('yp-act-valider').addEventListener('click', () => basculerPilote('yieldflow', { type: el('yp-act-type').value, valeur: el('yp-act-valeur').value }))
+    // Le compte suit la fenetre saisie : relu a chaque changement, apres une
+    // courte pause (on ne relit pas deux ans de calendrier a chaque chiffre).
+    let attente = null
+    const relire = () => { clearTimeout(attente); attente = setTimeout(compterPrixCalendrier, 400) }
+    el('yp-act-valeur').addEventListener('input', relire)
+    el('yp-act-type').addEventListener('change', relire)
+    compterPrixCalendrier()
+  }
+
+  // ⚠ UN SEUL COMPTE A L'ECRAN, CELUI DE LA DERNIERE FENETRE SAISIE : un jeton,
+  // comme `chargerPilote` — une reponse lente pour 120 jours ne doit pas
+  // s'afficher par-dessus celle de 6 mois.
+  let enCoursCompte = 0
+  async function compterPrixCalendrier () {
+    const zone = el('yp-act-compte'); if (!zone) return
+    const jeton = ++enCoursCompte
+    const bien = el('yp-bien').value
+    const type = el('yp-act-type').value, valeur = el('yp-act-valeur').value
+    zone.textContent = 'Comptage des prix du calendrier…'
+    let d = null
+    try {
+      const r = await fetch(`/api/yield-pilote?bien=${encodeURIComponent(bien)}&fenetre_type=${encodeURIComponent(type)}&fenetre_valeur=${encodeURIComponent(valeur)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() }
+      })
+      d = await r.json()
+      if (jeton !== enCoursCompte || !el('yp-act-compte')) return
+      // Une fenetre invalide : le serveur dit pourquoi, le bouton le redira.
+      if (!r.ok) { zone.textContent = d && d.error ? d.error : 'Fenêtre invalide.'; return }
+    } catch (e) {
+      if (jeton !== enCoursCompte || !el('yp-act-compte')) return
+      d = null
+    }
+    const n = d && d.prix_calendrier && Number.isInteger(d.prix_calendrier.nuits) ? d.prix_calendrier.nuits : null
+    // ⚠ « JE NE SAIS PAS » N'EST PAS « AUCUN » : illisible se dit, jamais 0.
+    zone.innerHTML = n == null
+      ? 'Impossible de compter vos prix du calendrier pour le moment : ceux de cette fenêtre seront recalculés par YieldFlow.'
+      : n === 0
+        ? 'Aucune nuit de cette fenêtre n’a de prix au calendrier à remplacer.'
+        : `<b>${phrasePrixCalendrier(n)}.</b> YieldFlow va ${n > 1 ? 'les' : 'le'} remplacer par ses prédictions. Continuer ?`
   }
 
   async function basculerPilote (voulu, fenetre) {
