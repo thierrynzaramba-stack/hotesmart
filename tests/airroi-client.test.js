@@ -285,3 +285,11 @@ test('lireJson : echappements, negatifs, et la frontiere des 16 chiffres', () =>
   assert.deepEqual(lireJson('{"a":"x\\"1234567890123456789","b":-1234567890123456789,"c":123456789012345,"d":1234567890123456}'),
     { a: 'x"1234567890123456789', b: '-1234567890123456789', c: 123456789012345, d: '1234567890123456' })
 })
+
+test('SECURITE : masquer couvre les formes encodees de la cle (URL, JSON)', () => {
+  const { masquer } = require('../lib/airroi/client')
+  const cle = 'ab+c/d="e'
+  const t = masquer(`brut ${cle} url ${encodeURIComponent(cle)} json ${JSON.stringify(cle)}`, cle)
+  assert.ok(!t.includes(cle) && !t.includes(encodeURIComponent(cle)) && !t.includes(JSON.stringify(cle).slice(1, -1)), t)
+  assert.equal(masquer('rien', ''), 'rien')
+})
