@@ -234,6 +234,65 @@ d'appliquer. Le drapeau `cumul` le porte.
 | segment trop mince | `segment_sous_le_seuil` | 8 nuits **et** 3 réservations |
 | sous le plancher | `suggestion_sous_le_plancher` | voir §4 |
 
+## 3 bis. Un événement sans historique garde sa nuit SOUS-JACENTE (V2.0.6, 23 septembre 2026)
+
+**Constat, La bulle.** Le réveillon 2026 (un jeudi des vacances de Noël) sortait
+à **125 € (Moyen)** quand le 30 décembre voisin est à 155 € (Très haut) ; la
+Saint-Valentin 2027 (un dimanche des vacances d'hiver de la zone) à 125 € entre
+des nuits à 155 €. Même défaut sur Cœur de vie 23 (105 € au lieu de 145 €).
+
+**Cause.** Une date commerciale compte une ou deux nuits par an : le seuil de
+8 nuits **et** 3 réservations demande quatre à huit ans d'historique. Le repli
+est donc son **régime permanent**, pas un cas limite. Or il retombait sur la
+structure d'un jour ORDINAIRE hors vacances (+0 cran), alors que
+`dates-commerciales.js` promettait « le niveau que sa nuit aurait sans elle ».
+
+**Règle.** Un événement (date commerciale, ou événement de l'hôte sans parent)
+dont la position propre n'est pas fiable se positionne sur le segment que la
+nuit aurait **sans lui** — `segmenterSansEvenements`, qui re-segmente avec un
+contexte privé de cet événement (et de ceux qui, dessous, n'ont pas plus
+d'historique). Jour de semaine compris. L'étiquette reste l'événement ; la
+couche « position » le dit toujours (« pas encore d'influence mesurée (1 nuit
+vendue, il en faut 8) — cette nuit garde le niveau qu'elle aurait sans cette
+date »). Le réglage de l'hôte sur la nuit sous-jacente s'applique (`reglageDe`) ;
+un cran posé **sur l'événement lui-même** reste prioritaire.
+
+- **`crans` reste `null`** sur un événement replié : ce sont les crans de la
+  nuit sous-jacente qui l'ont placé (`crans_sous_jacents`). Les annoncer comme
+  ceux du réveillon ferait passer une ignorance pour une mesure.
+- **La prime au-delà de la nuit ordinaire vient de la preuve**, jamais d'un
+  segment décrété : le prix obtenu l'an dernier sur la nuit comparable (lot
+  suivant, plancher N-1). Sans preuve, pas de prime.
+
+**Priorité.** La date commerciale **principale** passe avant le **pont**,
+jamais avant le **férié** : le mardi 31 décembre 2024 sortait en « pont », et sa
+vente à 177 € manquait à l'historique du réveillon (2 → 3 nuits). Le samedi
+rattaché à la Saint-Valentin ne prend pas le pas sur un pont.
+
+**Garde-fou.** Un événement n'est jamais posé sous sa nuit ordinaire, sauf
+mesure propre fiable ou réglage de l'hôte. Le repli l'égale par construction ;
+ce qui reste surveillé est la position **empruntée** à un parent (un événement
+de l'hôte dont le parent se vend moins bien que la période où il tombe) : la
+réponse porte `sous_la_nuit_ordinaire` et une couche « anomalie » visible
+(« À vérifier : … »).
+
+**Pourquoi le marqueur « modèle contre mesure » ne l'a pas vu.** Il ne compare
+que lorsque la mesure du couple est fiable (≥ 8 nuits) — un réveillon n'en a
+pas. Il ne compare pas une nuit à ses voisines. Et l'écran ne l'affichait pas.
+
+**Effet mesuré (prod, 23 septembre 2026, 12 mois)** : 3 nuits changées par bien,
+grille identique, parité écran/moteur 0 divergence sur 440 nuits.
+
+| bien | nuit | avant | après |
+|---|---|---|---|
+| La bulle | 24/12/2026 | 125 € Moyen | 155 € Très haut |
+| La bulle | 31/12/2026 | 125 € Moyen | 155 € Très haut |
+| La bulle | 14/02/2027 | 125 € Moyen | 140 € Haut |
+| Cœur de vie 23 | 24/12, 31/12/2026, 14/02/2027 | 105 € Moyen | 145 € Très haut |
+
+Tests : `tests/dates-commerciales-repli.test.js` (5 sur 6 échouent sur le code
+d'avant — le 6e défend la priorité d'un cran de l'hôte, qui existait).
+
 ## 4. Le plancher refuse, il ne rabote pas
 
 Règle du KB `prix-plancher.md` : *on ferme la date, on ne remonte jamais le prix

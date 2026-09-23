@@ -109,3 +109,16 @@ par les chiffres, pas supposé.
 France **métropolitaine**. L'Alsace-Moselle (Vendredi saint, 26 décembre) et les
 DOM (abolition de l'esclavage, dates variables) ont des jours supplémentaires :
 non couverts, et c'est dit plutôt que deviné.
+
+## 8. Dates commerciales : le repli et la priorité (V2.0.6, 23 septembre 2026)
+
+Réveillon du Nouvel An, réveillon de Noël et Saint-Valentin sont **calculés**
+(`lib/yield/dates-commerciales.js`), actifs par défaut, désactivables par bien.
+
+- **Priorité** : férié > **date commerciale principale** > pont > événement de
+  l'hôte > vacances > week-end prolongé > hors vacances. La date commerciale ne
+  passe avant le pont que pour sa date elle-même, jamais pour le samedi rattaché.
+- **Sans historique** (le cas normal : une nuit par an, il en faut 8), la nuit
+  garde le niveau qu'elle aurait **sans** la date — vacances de Noël, vacances
+  d'hiver — et non celui d'un jour ordinaire. Détail et mesures :
+  `suggestion-yield.md` §3 bis.
