@@ -191,6 +191,14 @@ recopiées.
    pour cela que les biens de Thierry y sont, via Channex, et que l'écart
    brut / net y vaut 18,4 % (§3 bis). Le modèle se DEVINE par le
    professionnalisme de l'hôte, jamais par un champ de l'API.
+6. **Observation datée (23 septembre 2026) — pas une preuve.** La grille
+   MESURÉE de La bulle a bougé depuis le 13 septembre : le niveau Haut est
+   passé de 145 à 140 €. Grille mesurée du 23 septembre : 115 / 125 / 140 /
+   155 / 165 (854 nuits, 678 réservations) ; grille marché des trois jacuzzis
+   (22 septembre au soir) : 115 / 125 / 135 / 150 / 160. Écarts : 0, 0, 5, 5,
+   5 € — les cinq niveaux tiennent dans un pas d'arrondi. Un bien de niche,
+   une mesure ponctuelle (§10, point 7) : c'est ce que le contrôle permanent
+   (V2.5) devra dire dans la durée, sur un critère fixé AVANT (règle 19).
 
 ---
 
