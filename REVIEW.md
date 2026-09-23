@@ -591,9 +591,22 @@ accident :**
    pas exercer le cas qu'il annonçait.
 
 **Ce qu'on fait, à chaque nouveau test, avant le commit :**
-1. **Remettre le code d'avant** (`git show HEAD:<fichier> > <fichier>`, jamais
-   `git checkout` ni `stash` dans un clone partagé), lancer le test, **constater
-   le rouge**, restaurer, vérifier `git diff --stat`.
+1. **Lancer le test neuf contre le code d'avant, HORS de l'arbre de travail** :
+   ```
+   git archive <commit-d-avant> lib shared api | tar -x -C <scratchpad>/avant
+   mkdir -p <scratchpad>/avant/tests && cp tests/<test-neuf> <scratchpad>/avant/tests/
+   cd <scratchpad>/avant && NODE_PATH=<depot>/node_modules node --test tests/<test-neuf>
+   ```
+   et **constater le rouge**. `<commit-d-avant>` est `HEAD` tant que le
+   correctif n'est pas commité, `HEAD~1` (ou `<sha>^`) après.
+   ⚠ **Jamais** `git show HEAD:<f> > <f>` dans l'arbre (première version de
+   cette règle, relevée en review le jour même) : cela ÉCRASE le correctif non
+   commité, et une autre session qui lit ou teste le fichier au même moment
+   voit le code d'avant — CLAUDE.md, clone partagé, et règle 14. Jamais
+   `git checkout` ni `stash` non plus.
+   ⚠ **Un rouge par `undefined` ne prouve rien** : si le test rougit parce
+   qu'une constante ou une fonction n'existe pas encore, compléter l'ancien
+   code de ces seuls noms et relancer — il doit rougir sur le COMPORTEMENT.
 2. **S'il reste vert** : soit il teste une chose qui était déjà juste (un
    test de non-régression — on l'écrit en tête du test), soit il ne teste rien.
    Dans le premier cas, on le passe contre la **version fautive plausible** du

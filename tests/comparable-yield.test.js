@@ -445,7 +445,39 @@ test('le samedi rattache se compare au samedi rattache N-1, ou a la date quand i
 // l'activation — et il y rougit : c'est la regression qu'il garde (REVIEW.md
 // regle 19).
 test('une date commerciale DESACTIVEE par l hote se compare par sa nature, pas par sa date', () => {
+  // ⚠ ASSERTION POSITIVE — releve en review : des `notStrictEqual` seuls
+  // restaient verts sur « pas de comparable » comme sur un ferie.
+  // Dimanche 14 fevrier 2027 hors vacances = 2e dimanche hors vacances de
+  // fevrier ; en 2026 : 1, 8, 15, 22 -> le 8.
   const r = nuitComparable('2027-02-14', { contexte: ctxCommercial([], ['saint_valentin']) })
-  assert.notStrictEqual(r.alignement, ALIGNEMENTS.DATE_COMMERCIALE)
+  assert.strictEqual(r.date, '2026-02-08')
+  assert.strictEqual(r.alignement, ALIGNEMENTS.RANG_DANS_LE_MOIS)
+  assert.strictEqual(r.meme_segment, true)
+})
+
+test('LE TEST QUI COMPTE : un samedi de vacances ne se compare JAMAIS a la Saint-Valentin N-1', () => {
+  // Releve en review : 2e samedi des vacances 2027 (le 13) ↔ 2e samedi des
+  // vacances 2026… qui etait le 14 fevrier, vendu 295 € sur La bulle. Les
+  // dates commerciales ont leur comparaison date a date ; elles ne sont pas
+  // une position dans les vacances.
+  const hiver = [
+    { zone: 'C', nom: 'Vacances d\'hiver', date_debut: '2026-02-07', date_fin: '2026-02-22' },
+    { zone: 'C', nom: 'Vacances d\'hiver', date_debut: '2027-02-06', date_fin: '2027-02-21' }
+  ]
+  const r = nuitComparable('2027-02-13', { contexte: ctxCommercial(hiver) })
+  assert.strictEqual(r.etage, ETAGES.EVENEMENT_MOBILE)
   assert.notStrictEqual(r.date, '2026-02-14')
+  assert.strictEqual(r.date, '2026-02-21', 'le 2e samedi de vacances qui n est pas une date commerciale')
+  assert.strictEqual(r.meme_segment, true)
+})
+
+// ⚠ NON-REGRESSION (REVIEW.md regle 19) : vert contre le code d'avant ce lot
+// comme contre celui-ci. Il rougit contre le code d'avant 27da0fb, ou le
+// mardi 31 decembre 2024 etait segmente « pont » : c'est ce qu'il garde.
+test('le reveillon 2025 se compare au 31 decembre 2024, un mardi qui etait un pont', () => {
+  const r = nuitComparable('2025-12-31', { contexte: ctxCommercial() })
+  assert.strictEqual(r.date, '2024-12-31')
+  assert.strictEqual(r.alignement, ALIGNEMENTS.DATE_COMMERCIALE)
+  assert.strictEqual(r.meme_segment, true)
+  assert.strictEqual(r.segment, 'commercial:reveillon_nouvel_an')
 })

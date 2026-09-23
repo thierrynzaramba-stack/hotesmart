@@ -335,6 +335,24 @@ Exceptionnel doivent pouvoir voir. Règle 13 : la liste s'importe de sa source.
 - Date elle-même ↔ même date N-1 (`meme_date_commerciale`). Samedi rattaché ↔
   samedi rattaché N-1 (`meme_samedi_rattache`) ; s'il n'y en avait pas (le 14
   tombait un week-end), ↔ la nuit du 14 N-1 (`samedi_rattache_vers_la_date`).
+- **Review, même jour.** À l'étage b (position dans les vacances), la nuit
+  N-1 retenue n'est jamais une date commerciale : un samedi de vacances pouvait
+  se comparer à la Saint-Valentin N-1 (295 €). Les rangs se comptent toujours
+  sur toutes les nuits (les retirer du compte décalait les autres nuits : essai
+  mesuré puis abandonné) ; seule la nuit retenue est remplacée par la plus
+  proche du même jour de semaine dans les mêmes vacances
+  (`meme_jour_de_semaine_dans_les_vacances`). Effet prod, 12 mois, La bulle et
+  Cœur de vie 23 : les 23 et 30 décembre 2026 passent de « 24/31 décembre 2025
+  » (des réveillons, 200 € et 257 €) à « pas de comparable » — Noël 2025
+  n'avait aucun mercredi ordinaire. Les **fériés** restent candidats (arbitrage : la
+  Toussaint un samedi de vacances est bien le samedi comparable, signalé
+  `meme_segment: false`). Conséquence : un réveillon DÉSACTIVÉ peut se comparer
+  au 25 décembre ou au 1er janvier N-1 (férié, `meme_segment: false`) — dit à
+  l'écran, et le futur plancher N-1 (même segment exigé) l'écarte.
+- **À trancher avant le plancher N-1** : deux nuits peuvent viser la même nuit
+  N-1 (le lundi 14/02/2028 et son samedi rattaché visent tous deux le
+  14/02/2027), et un 14 février en semaine se compare date à date à un
+  14 février N-1 tombé un samedi.
 - Aucune autre liste recopiée de dates commerciales dans `lib/`, `api/`,
   `apps/`, `shared/`, `pages/`, `scripts/` (vérifié par recherche, 23 septembre).
 
