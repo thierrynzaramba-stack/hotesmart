@@ -365,10 +365,16 @@ l'an dernier s'était vendue 195 € ne pouvait pas y revenir.
 **Règle (arbitrages de Thierry).**
 - **Bas** = prix du niveau (165 €). **Haut = plafond** = le prix le plus élevé
   déjà obtenu sur le bien, arrondi vers le bas au pas (`base.plafond`, 295 €).
-  C'est une **borne de sécurité, pas un objectif** : elle borne le cliquet N-1
-  (un prix prouvé devient le plancher de l'année suivante — une année
-  exceptionnelle se transmettrait indéfiniment sans elle). **Ne pas la retirer
-  par simplification.** `null` quand il n'y a pas de place au-dessus du niveau.
+  C'est une **borne, pas un objectif**. **Ne pas la retirer par
+  simplification.** `null` quand il n'y a pas de place au-dessus du niveau.
+  ⚠ **Ce qu'elle ne fait PAS (review du 23 septembre 2026)** : la preuve vient
+  du même historique, donc une preuve passée est toujours ≤ au plafond — il ne
+  rogne que l'arrondi. Il ne protège pas d'une **vente aberrante** (sonde :
+  850 nuits entre 100 et 190 € plus une vente à 900 € → grille « 160–900 € »,
+  la nuit comparable reposée à 900 €). Le « cliquet » n'escalade pas non plus
+  (195 prouvés redonnent 195). **Décision en attente** : définition d'un
+  plafond robuste (La bulle : max 295 ; 2e réservation la plus chère 257 ;
+  P99 195 — Cœur de vie 23 : max 276, 2e réservation 268, P99 276).
 - **Dans la fourchette, le prix ne vient QUE de la preuve** : le prix obtenu
   l'an dernier sur la nuit comparable (la cascade N-1 de l'écran,
   `preuveN1` dans `contexte-du-bien.js`), **arrondi au pas supérieur** (arrondir
@@ -389,6 +395,16 @@ l'an dernier s'était vendue 195 € ne pouvait pas y revenir.
 - **« Référence amincie »** quand la prime repose sur une seule vente : ailleurs
   une mesure devient fiable à 8 nuits et 3 réservations ; ici le prix d'UNE nuit
   devient un plancher. Défendable (la preuve la plus spécifique qui existe), dit.
+  Sur un logement à **une seule unité**, c'est toujours vrai : dit **une fois**
+  dans la note de la grille, pas sur chaque ligne (drapeau systématique →
+  légende, restitution-yield).
+- **« Je ne sais pas » n'est pas « non »** (review) : une nuit comparable encore
+  à venir (fenêtre au-delà d'un an) ne prouve rien, même réservée — son prix
+  est peut-être celui que YieldFlow vient de poser (`nuit_comparable_pas_encore_passee`) ;
+  une nuit vendue sans prix exploitable n'est pas « non vendue »
+  (`nuit_comparable_vendue_prix_inconnu`).
+- La colonne « l'an dernier » affiche le prix de la preuve quand la prime porte
+  sur cette nuit : jamais deux « l'an dernier » différents sur une ligne.
 - La preuve n'est calculée que pour les nuits au niveau Exceptionnel.
 
 **Écran** (`apps/yield/prix.html`) : la grille affiche « 165–295 € » et une

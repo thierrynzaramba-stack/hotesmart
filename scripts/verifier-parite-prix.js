@@ -67,6 +67,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { preparerContexte, prixDeLaNuit } = require('../lib/yield/contexte-du-bien')
 const sb = createClient(URL, KEY)
 
+const pick = p => p ? { prix: p.prix, motif: p.motif_sans_prime, date: p.preuve_date } : null
 const jourParis = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(d)
 const decaler = (j, n) => { const d = new Date(`${j}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
 
@@ -135,6 +136,10 @@ function appelerEcran (bien, mois) {
       else if (pE != null && Math.round(pE * 100) !== Math.round(pM * 100)) cause = 'prix different'
       else if (pE != null && nE !== nM) cause = 'meme prix, niveau different'
       else if (pE == null && mE !== mM) cause = 'sans prix des deux cotes, motifs differents'
+      // La fourchette Exceptionnel (V2.0.7) : meme prix, mais la PREUVE et le
+      // motif sans prime doivent etre les memes aussi (regle 18 : dire sur quoi
+      // la mesure rassure — les prix seuls ne le disaient pas).
+      else if (JSON.stringify(pick(n.prime_exceptionnel)) !== JSON.stringify(pick(m && m.prime_exceptionnel))) cause = 'meme prix, preuve ou motif de prime different'
       if (cause) {
         parCause[cause] = (parCause[cause] || 0) + 1
         divergences.push({ date, cause, ecran: pE, moteur: pM, niveau_ecran: nE, niveau_moteur: nM, motifs_ecran: mE, motifs_moteur: mM })

@@ -22,6 +22,12 @@
 // accident — l'ancien code ne primait jamais ; ils rougissent contre une
 // version NAIVE (prime sur toute preuve, sans seuil, sans conditions, sans
 // plafond, preuve calculee pour toutes les nuits) : c'est ce qu'ils gardent.
+// ⚠ 4 des 8 rouges contre le code d'avant sont des rouges par `undefined`
+// (fonctions absentes), qui ne prouvent rien seuls : ils ont ete passes en
+// review contre des mutations du code neuf (pas de retrait par la pression,
+// amincie jamais vraie, max au lieu de min, segment ignore, hors reference
+// ignore, plafond arrondi vers le haut, pression non fiable qui retire) —
+// chacune fait rougir un test.
 
 const test = require('node:test')
 const assert = require('node:assert')
@@ -108,11 +114,75 @@ test('LE TEST QUI COMPTE : la pression DECIDE, n ajoute rien, et le retrait se d
   assert.equal(S.primeExceptionnel({ niveau: { prix: 165 }, plafond: 295, preuve: preuve(195), pression: { ecart: 0.8, fiable: true } }).prix, 195)
 })
 
-test('une prime sur une seule vente est une « référence amincie »', () => {
+test('une prime sur une seule vente est une « référence amincie » — dite sur la ligne seulement si elle distingue', () => {
+  // Bien a plusieurs unites : une vente sur deux possibles, ca se dit.
+  const multi = nuit({ preuveN1: preuve(195), bien: { prix_minimum: 1, inventory_units: 2 } })
+  assert.equal(multi.prime_exceptionnel.reference_amincie, true)
+  assert.equal(multi.prime_exceptionnel.amincie_systematique, false)
+  assert.match(multi.prime_exceptionnel.resume, /référence amincie : une seule vente/)
+  assert.equal(nuit({ preuveN1: preuve(195, { ventes: 2 }), bien: { prix_minimum: 1, inventory_units: 2 } })
+    .prime_exceptionnel.reference_amincie, false)
+  // ⚠ Bien a une unite : TOUJOURS une seule vente — un drapeau systematique ne
+  // dit rien sur la ligne, il passe en legende (review V2.0.7).
   const une = nuit({ preuveN1: preuve(195) })
   assert.equal(une.prime_exceptionnel.reference_amincie, true)
-  assert.match(une.prime_exceptionnel.resume, /référence amincie : une seule vente/)
-  assert.equal(nuit({ preuveN1: preuve(195, { ventes: 2 }) }).prime_exceptionnel.reference_amincie, false)
+  assert.equal(une.prime_exceptionnel.amincie_systematique, true)
+  assert.doesNotMatch(une.prime_exceptionnel.resume, /amincie/)
+})
+
+test('LE TEST QUI COMPTE : « je ne sais pas » n est pas « non vendue »', () => {
+  const avenir = nuit({ preuveN1: { date: '2026-11-14', prix: null, pas_encore_passee: true, meme_segment: true } })
+  assert.equal(avenir.prix, 165)
+  assert.equal(avenir.prime_exceptionnel.motif_sans_prime, S.MOTIFS_SANS_PRIME.PAS_ENCORE_PASSEE)
+  assert.doesNotMatch(avenir.prime_exceptionnel.resume, /n’a pas été vendue/)
+  const inconnu = nuit({ preuveN1: { date: '2025-11-15', prix: null, prix_inconnu: true, meme_segment: true } })
+  assert.equal(inconnu.prime_exceptionnel.motif_sans_prime, S.MOTIFS_SANS_PRIME.PRIX_INCONNU)
+  assert.match(inconnu.prime_exceptionnel.resume, /a été vendue, mais son prix n’est pas exploitable/)
+})
+
+test('preuveN1 : une nuit comparable a venir ne prouve rien, meme reservee', () => {
+  const { preuveN1 } = require('../lib/yield/contexte-du-bien')
+  const { nuitComparable } = require('../lib/yield/comparable')
+  const loin = '2027-11-20'   // samedi, a plus d'un an
+  const cible = nuitComparable(loin, { contexte: CTX }).date
+  assert.ok(cible > '2026-09-22', `comparable ${cible} a venir`)
+  const p = preuveN1({ contexte: CTX, auj: '2026-09-23', finRef: '2026-09-22',
+    ventesParDate: new Map([[cible, [{ prix: 250, hors_reference: false }]]]) }, loin)
+  assert.equal(p.pas_encore_passee, true)
+  assert.equal(p.prix, null, 'un prix pose par YieldFlow sur une reservation a venir n est pas un prix obtenu')
+})
+
+test('ventesParDateDe : annulee exclue, long sejour et prix nul marques, jamais perdus', () => {
+  const { ventesParDateDe } = require('../lib/yield/contexte-du-bien')
+  const v = ventesParDateDe([
+    { compte: false, nuits: [{ date: '2025-11-15', prix: 400 }] },                    // annulee
+    { compte: true, long_sejour: true, nuits: [{ date: '2025-11-15', prix: 90 }] },   // degressif
+    { compte: true, nuits: [{ date: '2025-11-15', prix: 190 }] },
+    { compte: true, nuits: [{ date: '2025-11-16', prix: null }, { date: '2025-11-17', prix: 0 }] }
+  ])
+  assert.deepEqual(v.get('2025-11-15'), [{ prix: 90, hors_reference: true }, { prix: 190, hors_reference: false }])
+  assert.deepEqual(v.get('2025-11-16'), [{ prix: null, hors_reference: false }], 'vendue sans prix : gardee')
+  assert.deepEqual(v.get('2025-11-17'), [{ prix: null, hors_reference: false }])
+  const { preuveN1 } = require('../lib/yield/contexte-du-bien')
+  const { nuitComparable } = require('../lib/yield/comparable')
+  const cible = nuitComparable(SAMEDI, { contexte: CTX }).date
+  const seule = preuveN1({ contexte: CTX, finRef: '2026-09-22', ventesParDate: new Map([[cible, [{ prix: null, hors_reference: false }]]]) }, SAMEDI)
+  assert.equal(seule.prix_inconnu, true)
+})
+
+test('LE TEST QUI COMPTE : pression −1 et delai +1 laissent Exceptionnel — la prime est retiree PAR suggerer', () => {
+  const s = nuit({ delaiJours: 90, preuveN1: preuve(195), pression: { ecart: -0.26, fiable: true } })
+  assert.equal(s.niveau, 'Exceptionnel', 'depart Exceptionnel, −1 +1')
+  assert.equal(s.prix, 165)
+  assert.equal(s.prime_exceptionnel.motif_sans_prime, S.MOTIFS_SANS_PRIME.PRIME_RETIREE)
+  assert.match(s.couches.find(c => c.nom === 'fourchette').resume, /^Prime retirée — ce mois se vend 26 % moins bien/)
+  // ⚠ ET LA PRIME SE JUGE SUR LE NIVEAU FINAL, PAS SUR LE DEPART (mutation
+  // non detectee en review) : parti d'Exceptionnel, descendu a Tres haut par
+  // la pression, la nuit n'a pas de fourchette du tout.
+  const descendue = nuit({ delaiJours: 30, preuveN1: preuve(195), pression: { ecart: -0.26, fiable: true } })
+  assert.equal(descendue.niveau, 'Très haut')
+  assert.equal(descendue.prix, 155)
+  assert.equal(descendue.fourchette_exceptionnel, undefined)
 })
 
 test('hors du niveau Exceptionnel : aucune fourchette, et la preuve n est meme pas calculee', () => {

@@ -323,6 +323,14 @@ export const MOTIFS = {
     titre: 'Exceptionnel, sans prime',
     quoi: 'Aucune nuit comparable l’an dernier : sans preuve, la nuit reste au bas de la fourchette Exceptionnel. Le moteur ne vise jamais le plafond par défaut.'
   },
+  nuit_comparable_pas_encore_passee: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable n’est pas encore passée : aucun prix n’est encore obtenu, donc rien n’est prouvé.'
+  },
+  nuit_comparable_vendue_prix_inconnu: {
+    titre: 'Exceptionnel, sans prime',
+    quoi: 'La nuit comparable a été vendue, mais son prix n’est pas exploitable (souvent une réservation recréée lors d’une migration de canal) : elle ne sert pas de preuve.'
+  },
   nuit_comparable_non_vendue: {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La nuit comparable de l’an dernier n’a pas été vendue : elle ne prouve aucun prix.'
