@@ -150,8 +150,9 @@ recopiées.
    | p90 | 151,6 | 152,6 | 148,6 | 154,0 | **+0,5 %** |
    | moyenne | 84,4 | 85,4 | 85,6 | 91,5 | +2,7 % |
 
-   Le bas monte, le haut est à l'arrêt depuis quatre ans : le marché se
-   comprime. En glissement annuel mois par mois (48 mois) : médiane p50
+   Le bas monte ; en haut, AUCUNE TENDANCE DÉTECTABLE (p90 : 21 mois sur 48
+   en baisse, écart-type 10,6 % — une absence de tendance, pas une stagnation
+   mesurée) : le marché se comprime. En glissement annuel mois par mois (48 mois) : médiane p50
    **+6,1 %/an**, 9 mois sur 48 en baisse, écart-type **6,3 %** — presque
    autant que la moyenne ; p90 : +1,1 %, 21 mois sur 48 en baisse, écart-type
    10,6 % (bruit plus que tendance) ; moyenne du marché : +4,7 %, écart-type
@@ -294,10 +295,13 @@ vraies ventes à mesure qu'elles arrivent.
 13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
     (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
     hôte qu'il sous-performe quand il fait mieux (règle 11).
-14. **La dérive du marché se prolonge PAR QUANTILE, au quantile où le bien se
-    situe, jamais par un taux global, et sur un taux ANNUEL, jamais mensuel.**
-    Pièce : La bulle, entre p75 et p90, segment plat depuis 2022 (§3 ter,
-    constat 4). Limite juste à côté : §10, point 6.
+14. **La dérive du marché est MESURÉE et AFFICHÉE à l'hôte, jamais appliquée
+    comme coefficient.** Si elle devait l'être un jour, ce serait par
+    quantile, au quantile du bien, sur un taux annuel — jamais par un taux
+    global. Pièce, qui justifie le « par quantile » : La bulle, entre p75 et
+    p90, dans une zone où aucune tendance n'est détectable depuis 2022 (§3 ter,
+    constat 4) — lui appliquer le +6 %/an de la médiane serait une erreur.
+    Limite juste à côté : §10, point 6. Décision : arbitrage B.
 15. **Les années anciennes du marché servent à la FORME saisonnière, pas au
     NIVEAU** (§3 ter, constat 3) : l'offre et la couverture ont changé.
 
@@ -308,21 +312,41 @@ vraies ventes à mesure qu'elles arrivent.
 Propositions argumentées faites le 23 septembre ; ce qui est tranché l'est
 par Thierry.
 
-1. **Seuil de fiabilité** — *proposé, non tranché* : grille marché fiable si
-   au moins 3 comparables retenus ET au moins 200 nuits vendues cumulées ET
-   aucun comparable (ni aucun gestionnaire, si l'API le donne) au-delà de 40 %
-   du poids. Sous le seuil : « référence amincie » avec les comptes réels.
+1. **Seuil de fiabilité** — *version finale proposée, non tranchée* : la
+   grille marché est fiable si, sur la fenêtre retenue par A (les **12 derniers
+   mois complets**), il y a **au moins 3 comparables** retenus, **au moins
+   200 nuits Airbnb vendues** au total — comptées APRÈS l'écart des mois à
+   moins de 5 nuits (arbitrage 2) — et **aucun comparable** (ni aucun
+   gestionnaire, si l'API le donne) **au-delà de 40 % du poids**. Sous le
+   seuil : « référence amincie », avec les comptes réels (arbitrage 5).
+   *Ce qu'A change* : le seuil se lit sur 12 mois, plus sur 26 ; 3 comparables
+   à ~60 % d'occupation Airbnb en donnent ~650, la marge est large. *Ce que la
+   règle 11 impose* : ce sont des nuits AIRBNB — le seuil se dit « 200 nuits
+   Airbnb », jamais « 200 nuits vendues » tout court. Un comparable marqué
+   « niveau instable » (contrôle de stabilité, ci-dessous) compte comme les
+   autres s'il est gardé par le propriétaire.
 2. **Pondération** — **TRANCHÉ** : par nuits vendues, pas par chiffre
    d'affaires (qui compterait le prix deux fois) ; les mois où un comparable a
    vendu moins de 5 nuits sont écartés, pas le comparable. **Réserve gravée** :
    ce sont des nuits AIRBNB (règle 11). Un comparable qui vend beaucoup sur
    Booking est sous-pondéré, et c'est indétectable depuis l'API. On le sait, on
    ne fait pas comme si le biais n'existait pas.
-3. **Bascule vers le réel** — *proposé, non tranché* : nette, étage par étage,
-   jamais de mélange dans un même prix. Positions segment × jour : l'emprunt
-   marché s'insère dans la cascade juste sous la mesure réelle (8 nuits /
-   3 résas), chaque segment bascule seul. Les cinq niveaux : marché tant que la
-   grille réelle n'a pas 60 nuits ET 10 réservations, puis bascule d'un bloc.
+3. **Bascule vers le réel** — *version finale proposée, non tranchée* :
+   nette, étage par étage, jamais de mélange dans un même prix.
+   - Positions segment × jour : l'emprunt marché (issu du pacing, phase 1)
+     s'insère dans la cascade juste sous la mesure réelle (8 nuits /
+     3 réservations) ; chaque segment bascule seul.
+   - Les cinq niveaux : marché tant que la grille réelle n'a pas 60 nuits ET
+     10 réservations, puis bascule d'un bloc.
+   - *Ce qu'A change* : la grille marché n'est pas figée à l'activation, c'est
+     une fenêtre glissante de 12 mois, rafraîchie avec le cache (arbitrage 6) ;
+     jusqu'à la bascule, elle suit le marché.
+   - *Ce que B change* : aucun coefficient de dérive à retirer au moment de la
+     bascule, donc pas de marche artificielle.
+   - *Condition* : la bascule n'est franche que si grille marché et référence
+     du bien sont sur la même base (règle 12, ménage). Tant que la règle 12
+     n'est pas tranchée, la bascule d'un bien qui facture un ménage ferait un
+     saut de prix — **la règle 12 est un préalable de la bascule**.
 4. **Contre-poids au propriétaire qui se surestime** — **TRANCHÉ, reformulé
    sur le prix** : à la sélection, « vos 3 choix se vendent en moyenne 135 € la
    nuit, l'ensemble des 25 se vend 72 € » — un fait, pas un reproche. La
@@ -331,50 +355,69 @@ par Thierry.
    60 jours : **supprimés** (règle 13). Aucun signal à 60 jours tant qu'il n'a
    pas de base honnête ; piste si on le rouvre : comparer les PRIX Airbnb
    réellement obtenus par l'hôte aux ADR de ses comparables, jamais les
-   occupations.
-5. **Zéro comparable pertinent** — *proposé, non tranché* : un seul
-   élargissement (rayon, capacité ±1), refait par le propriétaire lui-même ;
-   puis « référence amincie, N comparables ». Le QUAND reste disponible (le
-   pacing est celui du marché entier) ; le COMBIEN vient d'une grille DÉCLARÉE
-   — cinq niveaux entre plancher et plafond du propriétaire, prix de base au
-   niveau Moyen, marquée « déclaré » partout.
-6. **Qui paie les appels** — *proposé, non tranché* : HôteSmart (≈ 1,80 $ par
-   bien, une fois), avec garde-fous — aucun appel sans coordonnées ni plancher,
-   une étude au plus tous les 90 jours par bien, un plafond par compte, un
-   budget mensuel avec alarme au fondateur.
-
-7. **A — Profondeur retenue pour le NIVEAU** — *proposé, non tranché* :
-   **les 12 derniers mois complets, sans correction de dérive.**
+   occupations. *Ce qu'A change* : les prix affichés sont ceux des 12 derniers
+   mois — les mêmes que ceux qui feront la grille.
+5. **Zéro comparable pertinent** — *version finale proposée, non tranchée* :
+   un seul élargissement (rayon, capacité ±1), refait par le propriétaire
+   lui-même ; puis « référence amincie, N comparables ». Le QUAND reste
+   disponible (le pacing est celui du marché entier) ; le COMBIEN vient d'une
+   grille DÉCLARÉE — cinq niveaux entre plancher et plafond du propriétaire,
+   prix de base au niveau Moyen, marquée « déclaré » partout.
+   *Ce qu'A change* : le seuil manqué se compte sur 12 mois. *Ce que B change* :
+   aucune dérive appliquée à la grille déclarée non plus. *Ajout* : un
+   comparable marqué « niveau instable » n'est pas retiré pour atteindre ou
+   manquer le seuil — c'est le propriétaire qui garde ou retire.
+6. **Qui paie les appels** — *version finale proposée, non tranchée* :
+   HôteSmart. Étude initiale ≈ 1,80 $ par bien, une fois. *Ce qu'A change* :
+   une grille glissante sur 12 mois vieillit, il faut la RAFRAÎCHIR — les
+   métriques des comparables retenus tous les 90 jours (5 × 0,10 $), partagées
+   entre biens qui retiennent le même comparable ; le pacing (phase 1) tous
+   les 30 jours et le marché à 60 mois une fois par an, **par marché** et non
+   par bien (cache par zone). Ordre de grandeur : ≈ 2 à 3 $ par bien et par an
+   après l'étude, moins quand plusieurs biens partagent un marché. Garde-fous :
+   aucun appel sans coordonnées ni plancher ; un plafond d'appels par compte ;
+   un budget mensuel global avec alarme au fondateur.
+7. **A — Profondeur retenue pour le NIVEAU** — **TRANCHÉ (Thierry, 23 septembre
+   2026) : les 12 derniers mois complets, sans correction de dérive.**
    - Un cycle saisonnier entier, chaque mois une fois : 26 mois pèsent juillet
-     et août trois fois (§3 ter, constat 1) ; il faudrait couper à 24.
+     et août trois fois (§3 ter, constat 1).
    - 12 mois, c'est déjà le niveau COURANT : aucun modèle de dérive à
      appliquer, donc rien qui dépende d'un taux contaminé par la composition
-     (§10, point 6). Le calcul reste ce que la V1 promet : déterministe,
-     auditable, sans extrapolation.
-   - L'erreur évitée est petite de toute façon : corriger 14 mois vieux d'un an
-     au quantile d'un bien haut de gamme, c'est +0,5 à +3,6 % sur la moitié du
-     nuage — sous le pas d'arrondi de 5 € de la grille pour un bien à 135 €.
-   - Volume : 3 comparables × 12 mois à ~60 % d'occupation Airbnb ≈ 650 nuits,
-     au-dessus du seuil proposé (200 nuits, arbitrage 1).
-   - Les 14 mois plus anciens ne sont pas jetés : ils servent au contrôle de
-     stabilité (un comparable dont le niveau a sauté entre les deux années se
-     signale) et, avec le marché à 60 mois, à la FORME.
+     ou par une couverture partielle (§10, point 6).
+   - Volume : 3 comparables × 12 mois à ~60 % d'occupation Airbnb ≈ 650 nuits.
+   - **Le constat 4 n'a pas servi à rien** : c'est lui qui a montré qu'une
+     moyenne sur 26 mois aurait été fausse (un marché qui dérive de +0,5 à
+     +5,9 %/an selon le quantile), et c'est POUR CELA qu'on retient 12 mois. Il
+     a servi de JUSTIFICATION, pas de coefficient.
+   - **Contrôle de stabilité** — les mois plus anciens servent à ça, et à rien
+     d'autre au niveau :
+     - mesure : l'ADR pondéré par nuits des 12 derniers mois comparé à celui
+       des 12 mois précédents (sur 26 mois : 2024-09 → 2025-08 contre
+       2025-09 → 2026-08 ; juillet-août 2024 non utilisés) ;
+     - seuil : un écart de plus de **20 %** en un an, dans un sens ou dans
+       l'autre (≈ deux fois l'écart-type annuel mesuré au p90, §3 ter) ;
+     - non mesurable si l'une des deux années a moins de 6 mois avec des
+       ventes : on l'écrit, on ne conclut pas ;
+     - conséquence : le comparable est **MONTRÉ avec sa marque** (« niveau
+       instable : +27 % en un an », ou « stabilité non mesurable »), **jamais
+       exclu d'office**. Le propriétaire décide de le garder ou non — c'est lui
+       qui choisit ses comparables, on ne choisit pas à sa place.
+   - Les années anciennes du MARCHÉ (60 mois) servent à la FORME saisonnière
+     (règle 15), pas au niveau.
 8. **B — Appliquer la dérive à la grille marché d'un nouveau bien ?** —
-   *proposé, non tranché* : **non.**
+   **TRANCHÉ (Thierry, 23 septembre 2026) : non.** Gravé en règle 14.
    - Avec A, la grille est déjà au niveau des 12 derniers mois ; la dérive ne
-     concernerait que l'écart entre « l'an passé » et les nuits à vendre, au
-     plus une année — de +0,5 % (haut de gamme) à +5,9 % (bas du marché).
-   - La part de composition est inconnue (§10, point 6) : appliquer le taux,
-     c'est ajouter une hausse peut-être fictive, et surtout au bas du marché, là
-     où l'hôte est le plus sensible au prix.
+     concernerait qu'une année au plus — de +0,5 % à +5,9 % selon le quantile.
+   - La part de composition et de couverture est inconnue (§10, point 6) :
+     appliquer le taux, c'est ajouter une hausse peut-être fictive, surtout au
+     bas du marché, là où l'hôte est le plus sensible au prix.
    - La V1 n'applique aucune dérive à ses trois ans de ventes réelles : la V2
-     ne doit pas être plus audacieuse sur une donnée d'emprunt que la V1 sur la
-     sienne.
-   - Le rattrapage se fait par construction : le cache se rafraîchit (au plus
-     tous les 90 jours, arbitrage 6) et les ventes réelles prennent la main
-     (arbitrage 3). La dérive par quantile reste une INFORMATION affichée
-     (« le bas de votre marché monte de 6 % par an, le haut est stable »),
-     jamais un coefficient.
+     n'est pas plus audacieuse sur une donnée d'emprunt que la V1 sur la sienne.
+   - Le rattrapage se fait par construction : le cache se rafraîchit
+     (arbitrage 6) et les ventes réelles prennent la main (arbitrage 3). La
+     dérive par quantile est une INFORMATION affichée (« le bas de votre marché
+     monte d'environ 6 % par an ; en haut, aucune tendance nette »), jamais un
+     coefficient.
 
 ### Préalables découverts à la confrontation au code (23 septembre)
 
@@ -491,8 +534,13 @@ comparables. Négligeable face à un abonnement AirDNA.
 6. **Dérive ou composition ?** Avec une offre en croissance de 7,7 %/an, une
    partie de la dérive mesurée peut être un changement de COMPOSITION du marché
    (des annonces nouvelles, moins chères, qui entrent dans le bas) et non une
-   hausse réelle des prix. Le motif p25 qui monte / p90 plat penche pour une
-   compression véritable, mais la donnée ne tranche pas.
+   hausse réelle des prix. Le motif p25 qui monte / p90 sans tendance
+   détectable penche pour une compression véritable, mais la donnée ne tranche
+   pas. **Et les vieilles années sont moins bien MESURÉES, pas seulement un
+   autre marché** : si la couverture d'AirROI se mettait en place en 2021-2022
+   (432 → 771 annonces en neuf mois, §3 ter, constat 3), les PERCENTILES de ces
+   années sont calculés sur un échantillon partiel. Raison de plus de préférer
+   le récent — elle consolide les arbitrages A et B.
 
 ---
 
