@@ -440,6 +440,66 @@ vie 23 5 nuits (25/12 et 26/12 190 €, 01/01 185 €, 06/02 180 €, 13/02 210 
 aucune prime retirée aujourd'hui ; parité écran/moteur 0 divergence sur 440
 nuits (+ deux mois lointains). Tests : `tests/fourchette-exceptionnel.test.js`.
 
+## 3 quater. Le plancher N-1 : au moins le prix de l'an dernier (V2.0.8, point B, 23 septembre 2026)
+
+**Constat, La bulle.** 51 nuits des 12 mois affichées sous le prix que leur
+nuit comparable avait obtenu l'an dernier ; le réveillon 2026 à 155 € quand le
+31/12/2025 s'était vendu 257 €. Demande de Thierry : « il faut au moins
+reprendre les prix ».
+
+**Règle.** À TOUS les niveaux, le prix est au moins le prix prouvé l'an dernier
+sur la nuit comparable — **la même décision que la fourchette Exceptionnel**
+(`primeExceptionnel`, une seule fonction) : même segment, nuit passée, hors
+référence et long séjour écartés, deux pas d'écart au moins (10 €), arrondi au
+pas supérieur, retrait par la pression (« Relèvement retiré — ce mois se vend
+26 % moins bien… »). Sur une nuit sans preuve, B est **muet** (pas de couche) ;
+la fourchette, elle, dit toujours pourquoi — c'est son niveau.
+- **C'est un cliquet, et le plafond le borne** (réserve écrite par Thierry) :
+  il ne peut que monter ; sans borne, une année exceptionnelle se
+  transmettrait indéfiniment. Borne = le plafond à deux réservations (§3 ter) ;
+  sans plafond, le prix du niveau le plus haut. **Ne pas la retirer.**
+- **Le niveau affiché suit le prix** (« le niveau annoncé ne peut plus
+  mentir ») : une nuit Haut relevée à 195 € s'affiche Exceptionnel, et la
+  couche `releve_n1` dit « (Haut → Exceptionnel) ».
+- **Le ✎ de l'hôte reste prioritaire** (le moteur saute ses nuits).
+
+**Le type de nuit — option b′ (arbitrage de Thierry).** « Le plancher est un
+PLANCHER. » La preuve compte si le jour de semaine de la nuit comparable se vend
+au **même niveau ou moins bien** que celui de cette nuit, dans la **structure
+hors vacances du bien** (le niveau de chaque jour de semaine chez cet hôte) :
+une preuve venue d'un jour qui se vend moins bien est prudente — elle
+sous-estime, sans danger ; venue d'un jour qui se vend mieux, elle est fausse —
+elle surestime. **Égal accepté, strictement supérieur refusé.** Ce n'est pas un
+assouplissement du « même type de nuit », c'est sa forme correcte. Vaut pour la
+fourchette comme pour le plancher.
+- La bulle (dim-jeu Base, ven Haut, sam Très haut) : le jeudi 31/12/2026 se
+  prouve par le mercredi 31/12/2025 ; le dimanche 14/02/2027 ne se prouve pas
+  par le samedi 14/02/2026 (295 €), ni le dimanche 15/08/2027 par le samedi
+  15/08/2026. Cœur de vie 23 (jeu Base, ven Moyen) : Noël et le jour de l'an
+  2026, des vendredis, se prouvent par les jeudis 2025 (190 €, 185 €) — la
+  version stricte (b) les faisait retomber à 160 €, c'est ce qui a fait
+  corriger la règle.
+- **L'écran dit que la preuve vient d'un autre jour** : « prix obtenu le jeudi
+  25/12/2025 … ; un jeudi se vend au niveau Base, un vendredi au niveau Moyen :
+  ce prix est donc un minimum prudent » ; à niveau égal : « mercredi et jeudi se
+  vendent au même niveau chez vous (Base) ». Sur la ligne : « prouvé le jeudi
+  JJ/MM/AAAA · minimum prudent ».
+- ⚠ **HYPOTHÈSE, à vérifier quand l'historique le permettra** : l'ordre des
+  jours vient de la structure HORS vacances, et il est appliqué à des nuits DE
+  vacances (Noël, jour de l'an). On suppose que le relief semaine / week-end
+  garde son ordre pendant les vacances — cohérent avec la règle « un contexte
+  pousse semaine et week-end du même cran » (§2), mais non vérifié. À mesurer
+  quand les couples (vacances, jour de semaine) auront assez de nuits.
+
+**Effet mesuré (prod, 12 mois, par rapport à la fourchette seule)** : grille
+identique ; **La bulle 8 nuits** (02/10 150 €, 08/11 et 15/11 140 €, 24/12
+200 €, 27/12 165 €, 31/12 255 € plafonné, 07/02 160 €, 26/02 180 €) ;
+**Cœur de vie 23 26 nuits** (fermé à la vente aujourd'hui : l'écran ne les
+montre pas, le moteur les tarifera à la réouverture) ; parité écran/moteur
+0 divergence sur 440 nuits. Tests : `tests/plancher-n1.test.js` (contre-épreuve
+contre (b) strict, contre la fourchette seule et contre l'option a, décrite en
+tête du fichier).
+
 ## 4. Le plancher refuse, il ne rabote pas
 
 Règle du KB `prix-plancher.md` : *on ferme la date, on ne remonte jamais le prix

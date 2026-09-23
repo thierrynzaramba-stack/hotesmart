@@ -339,6 +339,10 @@ export const MOTIFS = {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La nuit comparable de l’an dernier était d’une autre nature (férié, date commerciale…) : son prix ne prouve rien pour celle-ci.'
   },
+  nuit_comparable_d_un_autre_type_de_jour: {
+    titre: 'Pas de preuve',
+    quoi: 'La nuit comparable de l’an dernier tombait un autre jour, qui ne se vend pas au même niveau chez vous hors vacances (un samedi pour un dimanche, par exemple) : son prix ne prouve rien pour cette nuit.'
+  },
   nuit_comparable_hors_reference: {
     titre: 'Exceptionnel, sans prime',
     quoi: 'La vente de la nuit comparable est écartée de votre historique (exception, fermeture ou long séjour) : elle ne sert pas de preuve.'

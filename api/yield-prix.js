@@ -424,6 +424,9 @@ module.exports = async (req, res) => {
         // preuve, jamais la fourchette seule ; « prime retiree » se dit.
         fourchette_exceptionnel: s.fourchette_exceptionnel || null,
         prime_exceptionnel: s.prime_exceptionnel || null,
+        // ⚠ LE PLANCHER N-1 (point B) : le relevement et sa preuve, ou son
+        // retrait par la pression. Absent quand rien ne bouge.
+        releve_n1: s.releve_n1 || null,
         // ⚠ L'ETENDUE DE LA GRILLE (Prudent → Haut), pas le min-max des prix
         // observes — demande de Thierry : « le 35 € brade fait peur pour rien ».
         // Un extreme unique n'est pas une borne de decision, c'est un accident.
@@ -483,10 +486,11 @@ module.exports = async (req, res) => {
           // ⚠ LE MEME CHIFFRE QUE LA PREUVE DE LA PRIME quand elle porte sur
           // cette nuit (review V2.0.7) : deux « l'an dernier » differents sur
           // la meme ligne (derniere vente contre plus basse) se contrediraient.
-          prix_vendu: s.prime_exceptionnel && s.prime_exceptionnel.preuve_date === dateN1 &&
-            s.prime_exceptionnel.preuve_prix != null
-            ? Math.round(s.prime_exceptionnel.preuve_prix * 100) / 100
-            : (rn1 ? rn1.prix : null),
+          prix_vendu: (() => {
+            const pv = s.prime_exceptionnel || s.releve_n1
+            return pv && pv.preuve_date === dateN1 && pv.preuve_prix != null
+              ? Math.round(pv.preuve_prix * 100) / 100 : (rn1 ? rn1.prix : null)
+          })(),
           date_vente: rn1 ? rn1.date_vente : null,
           vendue_a_ce_delai: venduePlusTotN1,
           hors_reference: rn1 ? rn1.hors_reference : false
