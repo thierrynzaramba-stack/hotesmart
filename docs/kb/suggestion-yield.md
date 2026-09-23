@@ -109,6 +109,28 @@ niveaux affichés auraient été une promesse que les données ne tiennent pas.
 
 ## 2. Le jour de semaine est une COUCHE, pas un axe de la grille
 
+> ⚠ **CE QUI SUIT (§2 et la ligne 4 du §3) DÉCRIT L'ANCIEN MODÈLE — corrigé le
+> 23 septembre 2026 (lot V2.0.4, relevé à la cartographie du chantier nouveau
+> bien).** Le code n'applique plus AUCUN multiplicateur : le jour de semaine
+> DÉPLACE le niveau, comme tout le reste, et le prix final est toujours celui
+> d'un niveau de la grille, rond. Voir « Le modèle actuel » ci-dessous et
+> l'en-tête de `suggerer` (`lib/yield/suggestion.js` : « Le jour de semaine ne
+> multiplie plus »).
+>
+> **Le modèle actuel.** Le niveau d'une nuit = la **structure** du bien pour ce
+> jour de semaine + les **crans** de son segment. La structure, c'est
+> `grille.positions_jour` pour `hors_vacances|<jour>` : la médiane des nuits
+> de ce jour de semaine, ramenée au niveau le plus proche (repli : la position
+> du segment). Les crans viennent, dans l'ordre : du réglage de l'hôte
+> (borné), de la mesure du couple (segment, jour) quand elle passe le seuil,
+> sinon du modèle en crans (§6 quinquies de la spec). Pression et délai
+> déplacent ensuite d'au plus un niveau chacun. Le relief semaine / week-end
+> vient donc de la différence de prix entre séjours de semaine et de
+> week-end, répartie uniformément sur les nuits (KB eclatement-yield) — pas
+> d'un coefficient.
+>
+> Le texte d'origine est gardé comme trace de la décision et de ses raisons.
+
 La spec exige « correction jour-de-semaine en dernier », et ce n'est pas un
 détail d'ordre.
 
@@ -135,12 +157,15 @@ dépassement est dit (`borne_par_etendue`).
 ## 3. Le pipeline, en quatre couches nommées et chiffrées
 
 ```
-1. socle            la médiane du segment
+1. socle            structure du jour de semaine + crans du segment   (un niveau)
 2. pression         le portefeuille à date contre le même délai N-1   (± 1 niveau)
 3. delai            le temps qui reste avant la nuit                  (± 1 niveau)
-4. jour_de_semaine  EN DERNIER, ratio mesuré                          (× ratio)
 puis le plancher, qui REFUSE et ne rabote jamais.
 ```
+
+> Jusqu'à la correction du modèle, une 4e couche `jour_de_semaine` appliquait
+> un ratio multiplicatif en dernier (§2, texte d'origine). Elle n'existe plus :
+> le prix servi est toujours celui d'un niveau de la grille.
 
 **100 % déterministe** : mêmes entrées, même sortie. Un moteur de prix qui varie
 d'un appel à l'autre est indéfendable — l'hôte ne peut pas vérifier ce qu'on lui
