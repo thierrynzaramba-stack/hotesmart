@@ -18,6 +18,10 @@ couches bougent après un mois de pilotage réel, une V2 construite avant serait
 **Aucun code avant validation du cadrage par Thierry**, puis découpage en
 sous-lots proposé et validé — même règle que le 4.6.
 
+> **Mise à jour du 23 septembre 2026** : ce préalable ne protège plus que
+> **V2.6 (l'interrupteur)**. La V2 étant une information parallèle (§11), V2.0
+> à V2.5 ne poussent aucun prix et ont le GO. Cadrage et découpage validés.
+
 ---
 
 ## 2. Le problème
@@ -362,6 +366,13 @@ vraies ventes à mesure qu'elles arrivent.
     pickup → **PRIX VOYAGEUR TOTAL** (la gravure existante tient,
     docs/kb/prix-voyageur.md). Grille tarifaire et prix poussés → **TARIF
     NUITÉE hors frais ponctuels** (ménage, linge).
+19. **Le critère qui autorise l'interrupteur (V2.6) s'écrit AVANT la première
+    mesure, pas après.** Dès que la table `grille_controle` existe (V2.5) et
+    AVANT son premier affichage, Thierry fixe le critère et il est gravé ici
+    avec sa date. Sinon on justifiera après coup ce qu'on aura trouvé. Le
+    critère n'est pas figé aujourd'hui : on ne connaît pas encore la
+    distribution des écarts. Exemple de forme, non retenu : « trois mois de
+    suite avec un écart ≤ un pas d'arrondi (5 €) sur Moyen et Haut ».
 13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
     (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
     hôte qu'il sous-performe quand il fait mieux (règle 11).
@@ -656,23 +667,69 @@ comparables. Négligeable face à un abonnement AirDNA.
    (432 → 771 annonces en neuf mois, §3 ter, constat 3), les PERCENTILES de ces
    années sont calculés sur un échantillon partiel. Raison de plus de préférer
    le récent — elle consolide les arbitrages A et B.
+7. **La base de validation est MINCE.** Le contrôle (V2.5) ne porte que sur
+   deux logements, tous deux à Bagnères, tous deux à Thierry, et l'un des deux
+   est une niche jacuzzi. Il prouvera la méthode sur les appartements de
+   Bagnères, PAS en général. Ofuro Futari ajoutera un second marché
+   (Toulouse) quand il aura de l'historique. C'est exactement l'erreur commise
+   le 22 septembre en surinterprétant un test sur trois comparables : qu'elle
+   soit écrite pour qu'on ne la refasse pas.
 
 ---
 
-## 11. Découpage proposé en sous-lots — EN ATTENTE du préalable §1
+## 11. Découpage — VALIDÉ le 23 septembre 2026 (V2 = information parallèle)
 
-Proposé le 23 septembre 2026, **non validé**. Le préalable du §1 (25 tests
-rouges soldés, un premier mois réel de La bulle sous pilote) n'est pas levé :
-ce découpage attend son tour. Chaque sous-lot : review avant push, migrations
-staging puis prod, recette en pièces sur staging, comme le 4.6.
+**Correction de cadrage de Thierry (23 septembre 2026) : la V2 est une
+INFORMATION PARALLÈLE.** De V2.0 à V2.5, la grille marché se calcule, se stocke
+et s'affiche À CÔTÉ de la grille mesurée, marquée `source = 'marche'`. Elle
+n'écrit rien au calendrier, ne pousse aucun prix, ne remplace rien : elle ne
+peut rien casser. **Le préalable du §1 tombe pour V2.0 à V2.5** ; il ne
+protège plus que V2.6.
+
+**L'interrupteur est une décision à part.** Le moment où la grille marché a le
+droit de DÉPLACER un prix n'est jamais une conséquence de l'avoir construite :
+c'est V2.6, un geste explicite de Thierry, bien par bien.
+
+Chaque sous-lot : review avant push, migrations staging puis prod, recette en
+pièces sur staging, vérification en lecture seule sur la prod, comme le 4.6.
 
 | Lot | Contenu | Dépend de |
 |---|---|---|
-| **V2.0 Préalables** | Dette 17 soldée (une seule assemblée de la matière, moteur et écran) ; KB suggestion-yield corrigée ; **dette 26 soldée** (référence du bien en tarif nuitée hors ménage — préalable de la bascule V2.6, et de tout hôte externe qui facture un ménage) | — |
+| **V2.0 Durcissement de la V1** | Traité comme un durcissement de la V1, AVANT la mise sous pilote de La bulle. **V2.0.0** : mesurer la divergence écran / moteur en lecture seule sur la prod (La bulle, Cœur de vie 23, 365 nuits) — script qui sert ensuite de non-régression. **V2.0.1** : dette 17 — `api/yield-prix.js` prend sa matière dans `preparerContexte` et sa suggestion dans `prixDeLaNuit` (fenêtre de contexte élargie au radar, lignes fournies, projection passée en `ouverte: true`) ; test de parité ; 0 divergence au script. **V2.0.2** : dette 26 — `tarifNuitee` à côté de `prixVoyageur`, drapeau « tarif mesuré / tarif déduit », grille et référence en tarif nuitée, indicateurs en prix voyageur (règle 18) ; après 17. **V2.0.3** : dette 25 — capacité non calculable : aucun prix posé, et c'est dit. **V2.0.4** : KB suggestion-yield corrigée. | — |
 | **V2.1 Le cœur marché** | Client AirROI serveur (`AIRROI_API_KEY`, jamais au navigateur) ; tables de cache au cœur (marché, comparables, métriques mensuelles, pacing) avec date de fraîcheur, un writer ; coordonnées du bien ; garde-fous de coût (arbitrage 6). Aucune app ne lit AirROI. | V2.0 |
-| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; plafond armé dans `suggerer` comme le plancher ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app) | V2.0 |
-| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu proposé comme événement hôte (mécanisme V1, validé par l'hôte) ; écart semaine / week-end du marché → `positions` / `positions_jour` marché. Aucun prix. | V2.1 |
+| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app). Le plafond n'agit sur aucun prix avant V2.6. | V2.0 |
+| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu proposé comme événement hôte (mécanisme V1, validé par l'hôte) ; écart semaine / week-end du marché → positions marché STOCKÉES, pas branchées. Aucun prix. | V2.1 |
 | **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) ; marques « niveau instable » et avertissement gestionnaire (règle 17) ; avertissement ménage et calcul du prix effectif (règle 12) | V2.1 |
-| **V2.5 La grille marché** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2), même base ménage (règle 12) ; `source_du_niveau = 'marche'`, phrases et traductions (`shared/yield-motifs.js`) ; greffe unique grâce à V2.0 | V2.3, V2.4 |
-| **V2.6 Bascule et repli** | Bascule vers le réel (arbitrage 3, préalable : dette 26) ; « référence amincie » et grille déclarée (arbitrage 5) ; l'hôte prévenu à chaque rafraîchissement qui déplace un niveau et à la bascule (règle 16) | V2.5 |
-| **V2.7 Recette sur un bien réel sans historique** | Premier bien externe, suivi du coût réel des appels | V2.6 |
+| **V2.5 La grille marché, EN PARALLÈLE, et le contrôle** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2) ; calculée et STOCKÉE, `source = 'marche'`, **aucune greffe dans le moteur**. **Le contrôle permanent** (ci-dessous) : table `grille_controle`, bloc « Grille du marché — à titre d'information, n'agit pas sur vos prix » dans *Prédiction de prix*, ligne de contrôle au bilan fondateur. **Avant le premier affichage de la table : critère de l'interrupteur fixé par Thierry et gravé avec sa date (règle 19).** | V2.3, V2.4 |
+| **V2.6 L'INTERRUPTEUR** | Le seul lot où la grille marché peut DÉPLACER un prix : greffe dans le moteur (`contexte-du-bien`), bascule vers le réel (arbitrage 3), « référence amincie » et grille déclarée (arbitrage 5), l'hôte prévenu à chaque déplacement (règle 16). **Geste explicite de Thierry, bien par bien.** Préalables : un mois réel de La bulle sous pilote (§1) ; dette 26 soldée ; critère de la règle 19 atteint. | V2.5 |
+| **V2.7 Recette sur un bien réel sans historique** | Premier bien externe, derrière l'interrupteur ; suivi du coût réel des appels | V2.6 |
+
+### Le contrôle permanent (V2.5)
+
+La bulle et Cœur de vie 23 ont les deux grilles : mesurée sur les ventes,
+empruntée au marché. Les garder côte à côte dans le temps est une mesure
+PERMANENTE de la justesse de la méthode — et la preuve qu'il faudra avant de
+laisser une grille marché piloter le bien d'un inconnu.
+
+- **Table `grille_controle`** (cœur, un seul writer : le calcul marché), un
+  relevé à chaque rafraîchissement du marché et le 1er de chaque mois, par
+  bien qui a les deux grilles. **Trois jeux de niveaux** :
+  1. **mesurée 3 ans** — celle du moteur, en tarif nuitée (dette 26) ;
+  2. **mesurée 12 mois** — calculée POUR LE CONTRÔLE SEULEMENT ;
+  3. **marché** — 12 mois glissants (arbitrage A).
+  Plus, pour chaque niveau, l'écart en euros et en pourcentage, les nuits de
+  chaque côté, la date.
+- **L'écart qui juge la méthode est marché contre MESURÉE 12 MOIS**, jamais
+  contre mesurée 3 ans. Raison : les deux fenêtres n'ont pas le même centre de
+  gravité (≈ un an d'écart) et le marché dérive ; l'écart contre la grille
+  3 ans contiendrait une part qui vient de la FENÊTRE, pas de la méthode.
+  Ordre de grandeur, dérive par quantile (§3 ter) : Cœur de vie 23, au p75 du
+  marché (110,6 € contre 109,8 €), ≈ 3,6 % — près du pas d'arrondi ; La bulle,
+  entre p75 et p90, entre ≈ 0,5 et 3,6 %. La grille mesurée 3 ans reste celle
+  du moteur : on n'y touche pas.
+- **Affichage** : dans *Prédiction de prix*, un bloc replié « Grille du
+  marché — à titre d'information, n'agit pas sur vos prix », les grilles côte
+  à côte et l'écart ; au bilan fondateur, une ligne par bien — écart médian,
+  écart maximal, et leur évolution depuis le premier relevé.
+- **Le critère de l'interrupteur** : règle 19.
+- **La base de validation est mince** : §10, point 7.
