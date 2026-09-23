@@ -100,7 +100,8 @@ fournisseur. Voir règle 11.
 135,5 €. L'ADR d'AirROI n'est pas son CA divisé par ses nuits (moyenne des ADR
 mensuels ?). À lire dans la comparaison mois par mois.
 
-**Le ménage — test EN COURS, sur Cœur de vie 23.** AirROI expose
+**Le ménage — TRANCHÉ par la documentation d'AirROI (§3 ter, point 5) ; le
+test sur Cœur de vie 23 est ANNULÉ.** Ce qui suit reste comme trace. AirROI expose
 `cleaning_fee` SÉPARÉMENT de `ttm_avg_rate` (`pricing_info`, drapeau
 `single_fee_structure`) : son ADR est très probablement le tarif nuitée HORS
 ménage. La bulle ne pouvait pas le montrer (`cleaning_fee = 0`). Sur les
@@ -110,7 +111,7 @@ pas un coefficient constant, pas corrigeable en bloc.
 
 Cœur de vie 23 ne facture **plus** de ménage séparé depuis mars 2024 (Airbnb :
 37 réservations sur 43 avec ménage en 2023, 5 sur 80 en 2024, 0 en 2025-2026).
-La période qui départage est donc **septembre 2022 → février 2024** : prix
+La période qui aurait départagé était **septembre 2022 → février 2024** : prix
 voyageur et hébergement seul y diffèrent de 10 à 36 % selon le mois. Sources
 dans le cœur : `rateDescription` Beds24 (« Base Price », « Cleaning »,
 « Linen fee ») ; contrôle prix voyageur = hébergement + ménage + linge tenu sur
@@ -160,6 +161,21 @@ recopiées.
    Pièce : La bulle, ADR AirROI 137,4 € sur 12 mois, entre le p75 (109,8 €) et
    le p90 (156,8 €) du marché, plus près du p90 : son segment n'a pas bougé
    depuis 2022. Lui appliquer +6 %/an serait une erreur.
+5. **Le ménage est HORS de l'ADR d'AirROI — par la documentation, pas par un
+   test.** Glossaire AirROI, page *cleaning-fee* : « The cleaning fee is
+   excluded from ADR and RevPAR calculations on most analytics platforms,
+   including AirROI — those metrics reflect only nightly rate revenue. » Page
+   *nightly-rate* : le tarif nuitée est distinct du ménage, des frais de
+   service de plateforme et des taxes. L'ADR d'AirROI est donc un **tarif
+   nuitée brut, hors ménage, hors frais de service, hors taxes**. Règle 12.
+   Pièce, recalculée depuis `comps-cdv23.json` — Cocon Thermal, tarif 65,9 €,
+   ménage 151 € : 1 nuit → 216,9 €/nuit payés (×3,3) ; 2 nuits → 141,4 €
+   (×2,1) ; 5 nuits → 96,1 € (×1,5) ; 14 nuits → 76,7 € (×1,2). Le même
+   logement passe du haut du marché au milieu selon la durée.
+   ⚠ Cocon Thermal a `single_fee_structure = true` avec 151 € de ménage : ce
+   drapeau ne veut PAS dire « pas de ménage ». Hypothèse, à vérifier dans la
+   documentation : il désigne le modèle de frais Airbnb « hôte seul » — ce que
+   la limite 2 (§10) croyait illisible.
 
 ---
 
@@ -286,12 +302,47 @@ vraies ventes à mesure qu'elles arrivent.
     Utilisables en RELATIF, d'un comparable à l'autre, jamais en ABSOLU, et
     jamais contre une mesure du cœur. Pièce : La bulle, 223 nuits et 61,1 %
     chez AirROI, 278 nuits et 76,2 % dans le cœur (23 septembre 2026).
-12. **Grille marché et référence du bien sur la MÊME base.** Soit on ajoute à
-    l'ADR d'un comparable son ménage amorti (`cleaning_fee /
-    ttm_avg_length_of_stay`, par comparable — l'impact dépend de sa durée de
-    séjour), soit on retire le ménage du prix voyageur du bien. **À trancher
-    quand le test de Cœur de vie 23 aura dit si l'ADR d'AirROI est hors
-    ménage** (§3 bis).
+12. **La grille est un TARIF NUITÉE HORS MÉNAGE — aucune correction, on le
+    DIT.** TRANCHÉ par Thierry le 23 septembre 2026, sur la documentation
+    d'AirROI (§3 ter, point 5).
+    - La grille estimée est un tarif nuitée hors frais de ménage : c'est l'unité
+      que le moteur écrit au calendrier, et exactement celle d'AirROI. Les deux
+      bases coïncident côté MARCHÉ, rien à corriger.
+    - Les frais de service de plateforme ne sont pas un problème : uniformes
+      sur un marché, ils ne déplacent personne dans le classement. Traités
+      comme intégrés au marché ; on n'en parle pas à l'hôte.
+    - Le MÉNAGE déforme la comparaison (0 à 151 € selon l'annonce). L'écran
+      avertit : « Cette estimation est un tarif par nuit, hors frais de
+      ménage. Si vous en facturez un, le prix réellement payé par le voyageur
+      sera plus élevé, et d'autant plus que le séjour est court. »
+    - Et il MONTRE LE CALCUL, avec SON ménage et une durée de séjour : le prix
+      effectif par nuit à la durée du marché, encadrée d'une durée courte et
+      d'une longue (pièce Cocon Thermal, §3 ter, point 5). Un outil de
+      décision, pas un avertissement de forme.
+    - Cas à garder : La bulle, 1,5 nuit de séjour moyen, aucun ménage. Un
+      ménage de 60 € y ajouterait 40 €/nuit, soit +30 % (29,5 % de 135,5 €).
+      Sur un marché de courts séjours, le ménage est une décision de
+      positionnement, pas une ligne de frais.
+    - **Le montant du ménage ne se demande qu'en dernier recours** : bien déjà
+      sur Airbnb → `pricing_info.cleaning_fee` de `GET /listings` (l'appel est
+      déjà fait, la donnée est gratuite) ; bien déjà dans HôteSmart → la valeur
+      RÉELLEMENT FACTURÉE sur ses réservations, lue au cœur ; bien pas encore
+      en ligne → seulement là, demandé à l'étape 0. Il ne BLOQUE jamais l'étude
+      (sans montant : l'avertissement sans le chiffre) et ne se STOCKE pas
+      comme un réglage — Cœur de vie 23 en facturait un jusqu'en mars 2024 et
+      plus depuis : une valeur saisie à l'onboarding serait fausse un an plus
+      tard. On la relit à chaque rafraîchissement.
+    - **La durée de séjour du calcul ne se demande pas** : `markets/metrics/all`
+      donne celle du marché (depuis sept. 2023, 36 mois sur 60). ⚠ La MOYENNE
+      du marché (4,6 à 6,6 nuits sur les 12 derniers mois à Bagnères) est tirée
+      par les longs séjours ; la MÉDIANE est de 3 à 4 nuits. Proposition : la
+      médiane comme durée centrale, encadrée par 1 nuit et 7 nuits.
+    - **Côté BIEN, les bases ne coïncident pas encore** : la référence V1 est
+      le prix voyageur TOTAL, ménage compris (dette 26, docs/kb/dettes-v1.md).
+18. **Deux usages, deux grandeurs.** Performance, chiffre d'affaires, RevPAR,
+    pickup → **PRIX VOYAGEUR TOTAL** (la gravure existante tient,
+    docs/kb/prix-voyageur.md). Grille tarifaire et prix poussés → **TARIF
+    NUITÉE hors frais ponctuels** (ménage, linge).
 13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
     (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
     hôte qu'il sous-performe quand il fait mieux (règle 11).
@@ -371,9 +422,11 @@ par Thierry.
    - *Ce que B change* : aucun coefficient de dérive à retirer au moment de la
      bascule, donc pas de marche artificielle.
    - *Condition* : la bascule n'est franche que si grille marché et référence
-     du bien sont sur la même base (règle 12, ménage). Tant que la règle 12
-     n'est pas tranchée, la bascule d'un bien qui facture un ménage ferait un
-     saut de prix — **la règle 12 est un préalable de la bascule**.
+     du bien sont sur la même base. La règle 12 est tranchée côté marché (tarif
+     nuitée hors ménage) ; côté BIEN, la référence V1 est encore le prix
+     voyageur total, ménage compris. Tant que la **dette 26** (référence en
+     tarif nuitée) n'est pas soldée, la bascule d'un bien qui facture un ménage
+     ferait un saut de prix — **la dette 26 est un préalable de la bascule**.
    - La bascule se DIT à l'hôte : quels niveaux passent au réel, de combien ils
      bougent (règle 16).
 4. **Contre-poids au propriétaire qui se surestime** — **TRANCHÉ, reformulé
@@ -557,11 +610,15 @@ comparables. Négligeable face à un abonnement AirDNA.
 1. **Airbnb seul.** Nuits vendues et occupation d'AirROI ne voient ni Booking
    ni le direct (règle 11). Indétectable depuis l'API ; sous-pondère un
    comparable fort sur Booking (arbitrage 2).
-2. **Frais de service voyageur.** Quand Airbnb fait payer ses frais au
+2. **Frais de service de plateforme.** Quand Airbnb fait payer ses frais au
    voyageur (modèle partagé, ≈ 14 %) au lieu de l'hôte (modèle hôte seul), le
-   prix réellement payé diffère du tarif affiché. Rien dans l'API ne dit quel
-   modèle une annonce applique. Noté, on ne cherche pas à le lever.
-3. **Ménage** — en cours de test (§3 bis, règle 12).
+   prix réellement payé diffère du tarif affiché. Décision (règle 12) : ces
+   frais sont uniformes sur un marché et ne déplacent personne ; ils sont
+   traités comme intégrés au marché, et on n'en parle pas à l'hôte. Le drapeau
+   `single_fee_structure` pourrait dire quel modèle une annonce applique
+   (§3 ter, point 5) — hypothèse non vérifiée, et sans usage prévu.
+3. **Ménage** — TRANCHÉ (règle 12) : hors de la grille, dit à l'hôte avec le
+   calcul. Reste la base du BIEN : dette 26.
 4. **ADR ≠ CA ÷ nuits chez AirROI** (§3 bis) : le détail mensuel dira quelle
    moyenne il sert.
 5. **Profondeur par champ** (§3 ter, constats 1-2) : 26 mois par annonce ; au
@@ -590,11 +647,11 @@ staging puis prod, recette en pièces sur staging, comme le 4.6.
 
 | Lot | Contenu | Dépend de |
 |---|---|---|
-| **V2.0 Préalables** | Dette 17 soldée (une seule assemblée de la matière, moteur et écran) ; KB suggestion-yield corrigée ; test du ménage tranché et règle 12 choisie | — |
+| **V2.0 Préalables** | Dette 17 soldée (une seule assemblée de la matière, moteur et écran) ; KB suggestion-yield corrigée ; **dette 26 soldée** (référence du bien en tarif nuitée hors ménage — préalable de la bascule V2.6, et de tout hôte externe qui facture un ménage) | — |
 | **V2.1 Le cœur marché** | Client AirROI serveur (`AIRROI_API_KEY`, jamais au navigateur) ; tables de cache au cœur (marché, comparables, métriques mensuelles, pacing) avec date de fraîcheur, un writer ; coordonnées du bien ; garde-fous de coût (arbitrage 6). Aucune app ne lit AirROI. | V2.0 |
-| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; plafond armé dans `suggerer` comme le plancher ; écran dans `apps/yield/` (config d'app) | V2.0 |
+| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; plafond armé dans `suggerer` comme le plancher ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app) | V2.0 |
 | **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu proposé comme événement hôte (mécanisme V1, validé par l'hôte) ; écart semaine / week-end du marché → `positions` / `positions_jour` marché. Aucun prix. | V2.1 |
-| **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) | V2.1 |
+| **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) ; marques « niveau instable » et avertissement gestionnaire (règle 17) ; avertissement ménage et calcul du prix effectif (règle 12) | V2.1 |
 | **V2.5 La grille marché** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2), même base ménage (règle 12) ; `source_du_niveau = 'marche'`, phrases et traductions (`shared/yield-motifs.js`) ; greffe unique grâce à V2.0 | V2.3, V2.4 |
-| **V2.6 Bascule et repli** | Bascule vers le réel (arbitrage 3) ; « référence amincie » et grille déclarée (arbitrage 5) | V2.5 |
+| **V2.6 Bascule et repli** | Bascule vers le réel (arbitrage 3, préalable : dette 26) ; « référence amincie » et grille déclarée (arbitrage 5) ; l'hôte prévenu à chaque rafraîchissement qui déplace un niveau et à la bascule (règle 16) | V2.5 |
 | **V2.7 Recette sur un bien réel sans historique** | Premier bien externe, suivi du coût réel des appels | V2.6 |
