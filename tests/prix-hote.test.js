@@ -157,8 +157,11 @@ test('le bandeau du mois porte le CA vendu a ce jour et le N-1 au meme delai, lu
 
 test('chaque tuile du radar porte le CA vendu a ce jour et le N-1 au meme delai (mois passe : mois entier contre mois entier), venus de pickup', () => {
   const src = lire('api/yield-prix.js')
-  assert.match(src, /ca_a_date: pk\.a_date && pk\.a_date\.ca != null \? pk\.a_date\.ca : null/, 'le CA a ce jour, meme sans N-1')
-  assert.match(src, /ca_a_date_n1: pk\.a_date_n1 && pk\.a_date_n1\.ca != null \? pk\.a_date_n1\.ca : null/)
+  // Lot V2.0.1 (dette 17) : la pression — et son CA a date — se calcule dans
+  // l'assemblee unique du moteur ; l'ecran la lit dans `ctx.pressionParMois`.
+  const matiere = lire('lib/yield/contexte-du-bien.js')
+  assert.match(matiere, /ca_a_date: pk\.a_date && pk\.a_date\.ca != null \? pk\.a_date\.ca : null/, 'le CA a ce jour, meme sans N-1')
+  assert.match(matiere, /ca_a_date_n1: pk\.a_date_n1 && pk\.a_date_n1\.ca != null \? pk\.a_date_n1\.ca : null/)
   const tuile = src.slice(src.indexOf('const radar = moisRadar.map'), src.indexOf('alertes: {'))
   assert.ok(tuile.includes("ca: prM && prM.ca_a_date != null"), 'la tuile porte `ca`, null sans chiffre — jamais 0')
   assert.ok(tuile.includes('non_calculable: prM.ca_non_calculable'), 'et la disqualification du N-1 voyage avec')

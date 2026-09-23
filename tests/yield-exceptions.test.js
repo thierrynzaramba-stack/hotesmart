@@ -454,11 +454,18 @@ test('LE TEST QUI COMPTE : les trois chemins de prod passent par joursExclus —
   // `joursExclus`, que personne n'appelait. Les fermetures ne sortaient donc
   // jamais du denominateur.
   const fs = require('node:fs'), path = require('node:path')
-  for (const f of ['api/yield.js', 'api/yield-prix.js', 'lib/yield/grille-du-bien.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+  const lireSrc = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+  for (const f of ['api/yield.js', 'lib/yield/grille-du-bien.js']) {
+    const src = lireSrc(f)
     assert.match(src, /await joursExclus\(supabase, bien\.id, [^)]*\{ exceptions \}\)/, `${f} : joursExclus avec les exceptions deja lues`)
     assert.ok(!/for \(const p of exceptions\) \{/.test(src), `${f} : plus de Set maison`)
   }
+  // Lot V2.0.1 (dette 17) : l'ecran des prix n'assemble plus sa matiere, il
+  // passe par `preparerContexte` → `grilleDuBien` → `joursExclus`, marques
+  // posees sur toute la fenetre de son contexte.
+  const prix = lireSrc('api/yield-prix.js')
+  assert.ok(!/joursExclus|exceptionsDuBien/.test(prix), 'api/yield-prix.js : plus de lecture maison des exclusions')
+  assert.match(lireSrc('lib/yield/contexte-du-bien.js'), /exclus: \{ debut: debutContexte, fin: finContexte \}/, 'preparerContexte marque sur la fenetre du contexte')
 })
 
 test('joursExclus ACCEPTE la fenetre de contexte du radar (plus de 2000 jours) : la fenetre est un filtre, pas une enumeration', async () => {

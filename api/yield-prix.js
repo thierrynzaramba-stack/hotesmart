@@ -18,22 +18,17 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { peutEcrire } = require('../lib/permissions')
-const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const { dateOuverture, piloteDuBien } = require('../lib/pilote-tarifaire')
 const { prixHoteDuBien } = require('../lib/prix-hote')
 const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
-const { exceptionsDuBien, joursExclus } = require('../lib/yield/exceptions')
-const { evenementsDuBien } = require('../lib/yield/evenements')
-const { datesCommerciales } = require('../lib/yield/dates-commerciales')
-const { reglagesDuBien, reglagePour } = require('../lib/yield/reglages-segment')
-const { lireVacances, etendueSource } = require('../lib/yield/vacances')
-const { pickup, DRAPEAUX } = require('../lib/yield/pickup')
+const { etendueSource } = require('../lib/yield/vacances')
+const { pickup } = require('../lib/yield/pickup')
 const { nuitsOccupees } = require('../lib/nuits-occupees')
 const R = require('../lib/yield/reference')
-const S = require('../lib/yield/suggestion')
 const { nuitComparable } = require('../lib/yield/comparable')
 const SJ = require('../lib/yield/sejours')
 const { readStatus, STATUS } = require('../lib/bookings-snapshot-status')
+const { preparerContexte, prixDeLaNuit } = require('../lib/yield/contexte-du-bien')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -45,7 +40,6 @@ const RADAR_MOIS = 12
 const JOURS_DEFAUT = 60
 const JOURS_MAX = 120
 const ANS_REFERENCE = 3
-const RESERVATIONS_MAX = 20000
 
 function jourLocal (d) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(d)
@@ -54,13 +48,6 @@ function decaler (iso, n) {
   const d = new Date(`${iso}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
-}
-function reculerAns (iso, n) {
-  const [a, m, j] = iso.split('-')
-  const c = `${Number(a) - n}-${m}-${j}`
-  if (estJourISO(c)) return c
-  const repli = `${Number(a) - n}-${m}-28`
-  return estJourISO(repli) ? repli : null
 }
 
 module.exports = async (req, res) => {
@@ -181,71 +168,37 @@ module.exports = async (req, res) => {
       if (!data || data.length < 1000) break
     }
 
-    // ⚠ LA FENETRE D'HISTORIQUE EST UNE PROPRIETE DU BIEN, PAS DU MOIS REGARDE.
-    // Releve en review, 13 septembre 2026. Elle etait ancree sur le MOIS
-    // demande (`reculerAns(debut, 3)`) alors que sa borne haute suivait
-    // aujourd'hui : la grille retrecissait d'un mois a chaque clic sur « mois
-    // suivant ». Mesure au 13 septembre 2026 :
-    //   septembre 2026 -> 3,03 ans   septembre 2027 -> 2,03 ans
-    //   septembre 2028 -> 1,03 an    octobre 2029   -> FENETRE VIDE
-    // Au-dela de trois ans d'horizon, chaque nuit portait « echantillon sous le
-    // seuil » — un motif qui accuse la donnee de l'hote alors que c'est la
-    // fenetre qui etait fausse. Et `historique: { ans: 3 }` l'affirmait quand
-    // meme. Symetriquement, un mois passe elargissait la fenetre a 5,7 ans.
-    const debutHistorique = reculerAns(auj, ANS_REFERENCE)
-    const finRef = decaler(auj, -1)
-    if (!debutHistorique) return res.status(400).json({ error: 'periode_invalide' })
-    // ⚠ LE CONTEXTE, LUI, DOIT COUVRIR TOUT CE QU'ON SEGMENTE : l'historique,
-    // le mois affiche, ET les nuits comparables N-1 (que la cascade va chercher
-    // jusqu'a cinq semaines autour du decalage de 52 semaines). Un jour hors de
-    // cette fenetre rend « hors_fenetre_du_contexte » — un silence, pas un
-    // plantage, donc invisible sans ce calcul explicite.
-    const debutContexte = [debutHistorique, decaler(debut, -364 - 40)]
-      .sort()[0]
-    // ⚠ ET LA BORNE HAUTE DOIT COUVRIR LA GRILLE, PAS SEULEMENT LE MOIS AFFICHE.
-    // Releve en review. Le contexte finissait a `fin` — la fin du mois
-    // consulte — alors que la grille court jusqu'a HIER. Sur un mois passe
-    // (autorise par `?mois=`), toutes les nuits posterieures a ce mois
-    // sortaient en « hors fenetre du contexte » et disparaissaient des
-    // segments : l'echantillon de `hors_vacances` tombait de 51 a 32 nuits
-    // pour la MEME grille, selon le mois qu'on regardait.
-    // Consequence nouvelle : l'ecran des evenements, qui lit la grille par
-    // `grille-du-bien.js` (sans ce defaut), annonçait des crans differents de
-    // ceux de la page des prix. Deux ecrans, deux verites.
-    // ⚠ ET IL DOIT COUVRIR LE RADAR, PAS SEULEMENT LE MOIS AFFICHE.
-    // Trouve en l'executant : le contexte s'arretait a la fin du mois
-    // consulte, donc TOUS les mois suivants du radar tombaient
-    // « hors_fenetre_du_contexte ». La tuile de decembre annonçait
-    // « 7 segments incertains » alors que le calendrier scolaire couvre
-    // jusqu'en juillet 2027 — un faux signal, sur le champ meme qui doit
-    // alerter l'hote.
-    const finContexte = [fin, auj, finCal].sort()[2]
-
-    // ─── Le coeur ───────────────────────────────────────────────────────────
-    let lignes = []
-    for (let from = 0; ; from += 1000) {
-      const { data, error } = await supabase
-        .from('bookings_snapshot')
-        .select('user_id, booking_id, property_id, snapshot, raw')
-        .eq('user_id', compte).order('booking_id').range(from, from + 999)
-      if (error) throw new Error(`bookings_snapshot : ${error.message}`)
-      lignes = lignes.concat(data || [])
-      if (!data || data.length < 1000) break
-      if (lignes.length > RESERVATIONS_MAX) {
-        return res.status(413).json({ error: 'historique_trop_volumineux' })
-      }
+    // ─── LA MATIERE DU PRIX : UNE SEULE ASSEMBLEE (dette 17, lot V2.0.1) ────
+    // L'historique (ancre sur aujourd'hui, jamais sur le mois regarde), le
+    // contexte (vacances, feries, evenements de l'hote, dates commerciales
+    // moins celles qu'il a coupees), la grille, la pression par mois : tout
+    // vient de `preparerContexte`, le MEME appel que le moteur. Les lecons
+    // gravees ici au fil des reviews (fenetre d'historique du 13 septembre,
+    // contexte couvrant la grille, le radar et les comparables N-1, evenements
+    // lus sur la meme fenetre, dates commerciales coupees AVANT la
+    // segmentation) y vivent desormais — un seul endroit a tenir.
+    // ⚠ L'ecran demande en plus : un contexte etendu a son radar
+    // (`finContexte`), la pression de ses douze mois (`mois`), et il fournit ce
+    // qu'il a deja lu (calendrier, nuits vendues) pour ne rien relire.
+    // ⚠ UNE NUIT VENDUE N'A PLUS DE PRIX A CHANGER — et le radar en a besoin
+    // sur douze mois : une seule lecture, sur la fenetre du radar.
+    const venduesRadar = await nuitsOccupees(supabase, bien.provider_property_id,
+      debutCal, finCal, { userId: compte })
+    const vendues = venduesRadar
+    let ctx
+    try {
+      ctx = await preparerContexte(supabase, bien, compte, {
+        aujourdHui: auj, debut, fin, finContexte: finCal, mois: moisRadar,
+        lignesCal, vendues: venduesRadar
+      })
+    } catch (e) {
+      if (e.message === 'historique_trop_volumineux') return res.status(413).json({ error: 'historique_trop_volumineux' })
+      if (/historique invalide/.test(e.message)) return res.status(400).json({ error: 'periode_invalide' })
+      throw e
     }
-    const { pont } = construirePontDemapped(lignes, bien.provider)
-    const duBien = lignes.filter(l => l.property_id === bien.provider_property_id)
-    const exceptions = await exceptionsDuBien(supabase, bien.id, debutContexte, finContexte)
-    // ⚠ PAR `joursExclus` : exceptions ∪ FERMETURES de l'hote (lot 4.6.2).
-    const exclus = await joursExclus(supabase, bien.id, debutContexte, finContexte, { exceptions })
-    const eclatements = duBien.map(l => eclater(l, {
-      pont, joursExclus: exclus, defaultProvider: bien.provider
-    }))
+    const { grille, contexte, evenements, reglages, eclatements, duBien,
+      pressionParMois, capacitesMois, debutHistorique, finRef, debutContexte, finContexte } = ctx
 
-    // ─── La grille, sur l'historique ────────────────────────────────────────
-    const vacances = await lireVacances(supabase, debutContexte, finContexte)
     // ⚠ JUSQU'OU LE CALENDRIER SCOLAIRE EST-IL PUBLIE ? Au-dela, une nuit de
     // vacances part silencieusement en « hors vacances » : `lireVacances` ne
     // rend AUCUN motif pour les jours qu'elle ne couvre pas. C'est ce risque
@@ -253,36 +206,6 @@ module.exports = async (req, res) => {
     const etendue = await etendueSource(supabase)
     const couvertureVacances = (etendue || [])
       .find(e => e.zone === bien.zone_scolaire) || null
-    // ⚠ LES EVENEMENTS DE L'HOTE ENTRENT DANS LE CONTEXTE, comme les vacances.
-    // Sans cette lecture, tout le mecanisme restait inerte : une nuit de saison
-    // thermale etait segmentee « hors vacances », tarifee au niveau de la basse
-    // saison, sans un mot. C'est le defaut exact que l'en-tete d'`evenements.js`
-    // annonce vouloir empecher — et il a vecu deux commits.
-    //
-    // ⚠ MEME FENETRE QUE LE RESTE DU CONTEXTE. Un evenement lu sur une fenetre
-    // plus etroite que l'historique ferait diverger la grille (qui compterait
-    // ses nuits en « hors vacances ») de la segmentation du mois affiche.
-    const declares = await evenementsDuBien(supabase, bien.id, debutContexte, finContexte)
-    // ⚠ CE QUE L'HOTE DECIDE DES CONTEXTES : ajustements de niveau et
-    // desactivations. Lu AVANT le contexte, parce qu'une date commerciale
-    // coupee ne doit pas entrer dans la segmentation du tout — la couper plus
-    // tard l'aurait laissee compter dans la grille.
-    const reglages = await reglagesDuBien(supabase, bien.id)
-    const coupees = new Set()
-    for (const [cle, r] of reglages) if (r.actif === false) coupees.add(cle)
-    // ⚠ LES TROIS FAMILLES ENTRENT PAR LA MEME PORTE. Vacances et feries sont
-    // deja dans le contexte ; les dates commerciales et les evenements de
-    // l'hote partagent la meme forme, donc la meme branche de `segmenterJour`.
-    // Deux portes auraient fait deux regles a tenir d'accord.
-    const commerciales = datesCommerciales(debutContexte, finContexte, { desactivees: coupees })
-    const evenements = [...declares, ...commerciales]
-    const contexte = R.construireContexte({
-      zoneBien: bien.zone_scolaire, vacances, evenements,
-      debut: debutContexte, fin: finContexte
-    })
-    const grille = S.construireGrille(eclatements, {
-      contexte, debut: debutHistorique, fin: finRef
-    })
 
     // ─── L'etat du calendrier, jour par jour ────────────────────────────────
     const capacite = await joursOuverts(supabase, bien, debut, fin,
@@ -336,49 +259,11 @@ module.exports = async (req, res) => {
     // ⚠ UNE SEULE LECTURE, SUR LA FENETRE DU RADAR. Elle servait le mois
     // affiche ; le radar en a besoin sur douze. Elargir la fenetre coute la
     // meme requete — la decouper par mois en aurait coute douze.
-    const venduesRadar = await nuitsOccupees(supabase, bien.provider_property_id,
-      debutCal, finCal, { userId: compte })
-    const vendues = venduesRadar
 
-    // ─── La pression, par mois ──────────────────────────────────────────────
-    const capacitesMois = new Map()
-    for (const c of triCap) {
-      capacitesMois.set(c, await joursOuverts(supabase, bien, `${c}-01`, finDeMois(c),
-        { aujourdHui: auj, estimerLePasse: true, lignes: lignesCal }))
-    }
-    const pressionParMois = new Map()
-    for (const cle of moisRadar) {
-      const pk = pickup(eclatements, { periode: cle, pivot: auj, granularite: 'mois',
-        capacites: capacitesMois, capacitePersonnes: bien.capacity })
-      const c = pk.vs_n1 && pk.vs_n1.ca ? pk.vs_n1.ca : null
-      // ⚠ UN ECART CALCULE SUR UN DENOMINATEUR PARTIEL NE DEPLACE PAS UN PRIX.
-      // Releve en review, 13 septembre 2026 — et le defaut agissait DEJA sur
-      // La bulle, dont le portefeuille N-1 porte `portefeuille_n1_reconstruit`.
-      //
-      // Ces deux drapeaux ne disqualifient pas le N-1 au sens de `pickup`
-      // (`DISQUALIFIENT_LE_N1`) : le chiffre reste montrable, il est seulement
-      // SOUS-COMPTE par construction — annulations invisibles, dates de vente
-      // perdues a la migration. Le montrer est honnete ; en tirer « +40 %, on
-      // monte d'un niveau » ne l'est pas : le biais est systematiquement
-      // positif, donc la hausse serait automatique et fausse.
-      //
-      // On garde donc le chiffre pour l'ecran, et on retire au moteur le droit
-      // de bouger dessus. `fiable: false` voyage avec, et la couche le DIT.
-      const degrade = (pk.drapeaux || []).find(x =>
-        x === DRAPEAUX.PORTEFEUILLE_RECONSTRUIT || x === DRAPEAUX.DATES_INCOMPLETES_N1)
-      pressionParMois.set(cle, {
-        ecart: c && c.variation != null ? c.variation : null,
-        ca: c ? c.valeur : null, ca_n1: c ? c.n1 : null,
-        // Le CA vendu A CE JOUR sur le mois, meme sans N-1 comparable : la
-        // tuile du radar le montre (demande de Thierry, 22 septembre 2026).
-        ca_a_date: pk.a_date && pk.a_date.ca != null ? pk.a_date.ca : null,
-        ca_a_date_n1: pk.a_date_n1 && pk.a_date_n1.ca != null ? pk.a_date_n1.ca : null,
-        ca_non_calculable: c && c.non_calculable ? c.non_calculable : null,
-        fiable: !degrade,
-        motif_non_fiable: degrade || null,
-        drapeaux: pk.drapeaux || []
-      })
-    }
+    // ─── La pression, par mois : `ctx.pressionParMois` (preparerContexte) ───
+    // Calculee pour les douze mois du radar ; ce qui fait le prix (`ecart`,
+    // `fiable`) et ce que l'ecran montre (CA a date, N-1) sortent du meme
+    // `pickup`, au meme endroit que pour le moteur.
 
     // ─── LE REEL DE L'AN DERNIER, NUIT PAR NUIT ────────────────────────────
     // ⚠ LE PRIX VENDU, PAS LA REFERENCE. Arbitrage de Thierry : « la
@@ -428,7 +313,6 @@ module.exports = async (req, res) => {
       const delai = Math.round(
         (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${auj}T00:00:00Z`)) / 86400000)
       const seg = R.segmenterJour(date, contexte)
-      const pr = pressionParMois.get(date.slice(0, 7)) || null
       // ⚠ UNE NUIT NON OUVERTE MONTRE LES MEMES INFORMATIONS QU'UNE NUIT
       // OUVERTE — demande de Thierry (recette du 22 septembre 2026) : « pour
       // que l'utilisateur puisse anticiper ». Pas encore ouverte (au-dela de la
@@ -443,17 +327,11 @@ module.exports = async (req, res) => {
       // plus la ou l'on ne sait rien (releve en relecture).
       const projection = !vendue && delai >= 0 && ouverte !== false &&
         (horsFenetre.has(date) || (ouvertureConnue && !parDate.has(date)))
-      const s = S.suggerer({
-        date, grille, contexte, ouverte: projection ? true : ouverte, vendue, delaiJours: delai,
-        pression: pr && pr.ecart != null
-          ? { ecart: pr.ecart, fiable: pr.fiable !== false,
-            motif_non_fiable: pr.motif_non_fiable || null }
-          : null,
-        // ⚠ LE REGLAGE LE PLUS FIN QUI EXISTE : « ferie:toussaint » avant
-        // « ferie ». L'hote ajuste une periode precise, pas toute une famille.
-        reglage: reglagePour(reglages, seg),
-        bien
-      })
+      // ⚠ LA REGLE DU MOTEUR, PAR LA PORTE DU MOTEUR (dette 17) : le prix que
+      // l'ecran suggere EST celui que le pilote poserait — meme matiere, meme
+      // fonction. Pression, reglage le plus fin (« ferie:toussaint » avant
+      // « ferie »), delai : tout est dans `prixDeLaNuit`.
+      const s = prixDeLaNuit(ctx, date, { ouverte: projection ? true : ouverte, vendue })
       // ⚠ NI LA DATE CALENDAIRE, NI 52 SEMAINES : LA CASCADE D'ALIGNEMENT.
       // Arbitrage de Thierry (13 septembre 2026), quatre etages, premier qui
       // trouve : (a) evenement a date fixe, (b) position dans l'evenement
