@@ -138,7 +138,10 @@ test('un evenement de l hote replie dit « sans cet evenement » et la contraint
   const g = S.construireGrille([...LIGNES, ecl(['2025-12-01', '2025-12-02', '2025-12-03', '2025-12-04',
     '2025-12-05', '2025-12-06'], 130, 'T1'), ecl(['2025-12-08', '2025-12-09', '2025-12-10', '2025-12-11',
     '2025-12-12', '2025-12-13'], 130, 'T2')], { contexte: ctx, debut: DEBUT, fin: '2025-12-31' })
+  // Le jeu d'essai se verifie par assertion (REVIEW.md regle 19, point 4).
   assert.equal(g.positions.get('evenement:thermes').echantillon, 12)
+  assert.equal(g.positions.get('evenement:thermes').reservations, 2)
+  assert.equal(g.positions.get('evenement:thermes').fiable, false)
   const s = S.suggerer({ date: '2026-11-19', grille: g, contexte: ctx, ouverte: true, delaiJours: 30, bien })
   const r = s.couches.find(c => c.nom === 'position').resume
   assert.match(r, /12 nuits mais 2 réservation\(s\), il en faut 3/)

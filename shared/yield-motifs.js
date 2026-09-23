@@ -100,9 +100,17 @@ export const MOTIFS = {
     titre: 'Même jour férié, même date',
     quoi: 'Ce jour férié tombe à la même date chaque année : la comparaison se fait date à date, même si le jour de la semaine a changé.'
   },
-  meme_date_reveillon: {
-    titre: 'Même réveillon',
-    quoi: 'Le 24 et le 31 décembre sont les deux nuits de l’année où la date fait le prix, pas le jour de la semaine : elles se comparent date à date.'
+  meme_date_commerciale: {
+    titre: 'Même date, l’an dernier',
+    quoi: 'Réveillons et Saint-Valentin : c’est la date qui fait le prix, pas le jour de la semaine. La nuit se compare à la même date l’an dernier.'
+  },
+  meme_samedi_rattache: {
+    titre: 'Même samedi de Saint-Valentin',
+    quoi: 'La Saint-Valentin tombe en semaine : elle se fête aussi le samedi le plus proche. Ce samedi se compare à celui de l’an dernier.'
+  },
+  samedi_rattache_vers_la_date: {
+    titre: 'Saint-Valentin de l’an dernier',
+    quoi: 'L’an dernier, la Saint-Valentin tombait un week-end et n’avait pas de samedi rattaché : ce samedi se compare à la nuit du 14 février, qui était alors la nuit fêtée.'
   },
   meme_ferie_mobile: {
     titre: 'Même jour férié',

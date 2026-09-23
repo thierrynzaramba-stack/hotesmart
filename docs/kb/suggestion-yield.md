@@ -319,6 +319,25 @@ grille identique, parité écran/moteur 0 divergence sur 440 nuits.
 Tests : `tests/dates-commerciales-repli.test.js` (5 sur 6 échouent sur le code
 d'avant — le 6e défend la priorité d'un cran de l'hôte, qui existait).
 
+### Le comparable N-1 des dates commerciales vient de leur source (V2.0.6 bis)
+
+La cascade N-1 (`comparable.js`, étage a) comparait date à date une liste
+**recopiée** : « 12-24 », « 12-31 ». La Saint-Valentin 2027 (un dimanche)
+cherchait donc « le 2e dimanche de février » N-1 et rendait **« pas de
+comparable »**, alors que le 14 février 2026 s'était vendu **295 €** — la nuit
+la plus chère de La bulle, celle que le plancher N-1 et la fourchette
+Exceptionnel doivent pouvoir voir. Règle 13 : la liste s'importe de sa source.
+
+- La source est `dates-commerciales.js`, lue **à travers le contexte** : une
+  date désactivée par l'hôte n'y figure pas et se compare par sa nature — sinon
+  « 295 € l'an dernier » remonterait sur un dimanche qu'il dit ordinaire.
+  Conséquence assumée : un réveillon désactivé ne se compare plus date à date.
+- Date elle-même ↔ même date N-1 (`meme_date_commerciale`). Samedi rattaché ↔
+  samedi rattaché N-1 (`meme_samedi_rattache`) ; s'il n'y en avait pas (le 14
+  tombait un week-end), ↔ la nuit du 14 N-1 (`samedi_rattache_vers_la_date`).
+- Aucune autre liste recopiée de dates commerciales dans `lib/`, `api/`,
+  `apps/`, `shared/`, `pages/`, `scripts/` (vérifié par recherche, 23 septembre).
+
 ## 4. Le plancher refuse, il ne rabote pas
 
 Règle du KB `prix-plancher.md` : *on ferme la date, on ne remonte jamais le prix

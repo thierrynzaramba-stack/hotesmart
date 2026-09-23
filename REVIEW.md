@@ -568,6 +568,52 @@ Elle rassurait sur la plage où le défaut n'était pas.
 
 ---
 
+## 19. Tout nouveau test rougit contre le code D'AVANT — sinon il ne teste rien
+
+**La règle, en une phrase (obligation posée par Thierry, 23 septembre 2026) :**
+
+> Un test neuf se passe contre le code d'avant le correctif. S'il ne rougit
+> pas, il ne teste rien.
+
+Un test écrit en même temps que son correctif est vert dès sa naissance : ce
+vert ne dit pas qu'il sait voir le défaut. Seule la contre-épreuve le dit.
+
+**Trois tests défaillants le même jour (23 septembre 2026) — ce n'est plus un
+accident :**
+1. **Le test qui figeait le bug** (règle 17) : `pontsEntre` exigé vide au-delà
+   de 2000 jours — vert PARCE QUE le défaut était là.
+2. **Le test qui se comparait à lui-même** (review du V2.0.6) : l'invariant
+   « jamais sous la nuit ordinaire » bâtissait les DEUX côtés avec la même
+   fonction `contexteSansEvenements` que le code testé. Si elle retirait trop,
+   les deux côtés se trompaient ensemble, et le test restait vert.
+3. **Le jeu d'essai faux** (même lot) : la « saison thermale » englobait les
+   mardis et samedis de référence, donc devenait fiable ; le test ne pouvait
+   pas exercer le cas qu'il annonçait.
+
+**Ce qu'on fait, à chaque nouveau test, avant le commit :**
+1. **Remettre le code d'avant** (`git show HEAD:<fichier> > <fichier>`, jamais
+   `git checkout` ni `stash` dans un clone partagé), lancer le test, **constater
+   le rouge**, restaurer, vérifier `git diff --stat`.
+2. **S'il reste vert** : soit il teste une chose qui était déjà juste (un
+   test de non-régression — on l'écrit en tête du test), soit il ne teste rien.
+   Dans le premier cas, on le passe contre la **version fautive plausible** du
+   correctif (la version naïve) et on constate qu'il y rougit — c'est la
+   régression qu'il garde, et le test le dit.
+3. **Le compte rendu donne le résultat** : « N sur M rougissent contre le code
+   d'avant ; le M-ième garde telle régression, vérifié contre telle version ».
+4. **Le jeu d'essai se vérifie par assertion**, pas par intention : un test
+   qui annonce « 12 nuits sous le seuil » asserte qu'il y a 12 nuits et que le
+   seuil n'est pas atteint, AVANT d'asserter le comportement.
+
+**Cas appliqué (lot V2.0.6 bis, correctif N-1 des dates commerciales).** Trois
+des quatre nouveaux tests rougissent contre le code d'avant. Le quatrième
+(« date désactivée : comparée par sa nature ») y restait vert par accident —
+la Saint-Valentin n'avait alors aucun comparable. Passé contre la version
+naïve (dates lues dans la liste source sans regarder l'activation), il rougit :
+c'est la régression qu'il garde, écrit en tête du test.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).
