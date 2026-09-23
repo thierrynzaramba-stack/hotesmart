@@ -72,6 +72,50 @@ Tests manuels contre l'API AirROI, à la main, pour un coût total d'environ
    de qualité. La vraie version lit 36 à 60 mois d'ADR **mensuel** par
    comparable ; c'est elle qu'il faudra juger, pas le test de ce soir.
 
+### 3 bis. Ce qu'est l'ADR d'AirROI — tests du 23 septembre 2026
+
+Tests en lecture seule, cœur de production contre AirROI, par les fonctions du
+moteur (`eclater`, `prixVoyageur`), sans recopie de règle.
+
+**Verdict établi : AirROI donne le tarif BRUT, avant commission hôte.**
+Chaîne sur La bulle (Airbnb seul, 365 jours glissants) : tarif affiché
+136,70 € > ADR AirROI 135,5 € > versement net 111,58 €. Le CA d'AirROI
+(30 950 €) est à +2 % de notre prix voyageur Airbnb (31 578 €) et à +20 % de
+notre net hôte (25 775 €) : ce n'est pas du net.
+
+**Équivalence à ne pas confondre.** L'écart brut / net est la commission
+Airbnb : **18,4 % du brut** mesuré sur La bulle (très probablement 15 % de
+commission hôte + 20 % de TVA). Le « +22,85 % » gravé dans
+docs/kb/prix-voyageur.md est le MÊME prélèvement écrit relativement au NET :
++22,85 % du net ≡ −18,6 % du brut. Deux chiffres, une seule commission.
+
+**AirROI ne voit qu'Airbnb.** La bulle : 223 nuits et 61,1 % d'occupation chez
+AirROI ; 278 nuits et 76,2 % dans le cœur, dont 231 nuits Airbnb. Les nuits
+Booking (28) et directes (15) lui échappent. Décision de Thierry : on
+l'accepte, on ne corrige pas — la donnée multicanale n'existe chez aucun
+fournisseur. Voir règle 11.
+
+**Incohérence interne relevée** : 30 950 € ÷ 223 nuits = 138,79 €, pas
+135,5 €. L'ADR d'AirROI n'est pas son CA divisé par ses nuits (moyenne des ADR
+mensuels ?). À lire dans la comparaison mois par mois.
+
+**Le ménage — test EN COURS, sur Cœur de vie 23.** AirROI expose
+`cleaning_fee` SÉPARÉMENT de `ttm_avg_rate` (`pricing_info`, drapeau
+`single_fee_structure`) : son ADR est très probablement le tarif nuitée HORS
+ménage. La bulle ne pouvait pas le montrer (`cleaning_fee = 0`). Sur les
+comparables : 19 sur 25 (La bulle) et 18 sur 25 (Cœur de vie 23) facturent un
+ménage, jusqu'à 151 €, soit +5 % à +44 % par nuit selon la durée de séjour —
+pas un coefficient constant, pas corrigeable en bloc.
+
+Cœur de vie 23 ne facture **plus** de ménage séparé depuis mars 2024 (Airbnb :
+37 réservations sur 43 avec ménage en 2023, 5 sur 80 en 2024, 0 en 2025-2026).
+La période qui départage est donc **septembre 2022 → février 2024** : prix
+voyageur et hébergement seul y diffèrent de 10 à 36 % selon le mois. Sources
+dans le cœur : `rateDescription` Beds24 (« Base Price », « Cleaning »,
+« Linen fee ») ; contrôle prix voyageur = hébergement + ménage + linge tenu sur
+274 réservations Airbnb sur 276. Identifiant d'annonce Airbnb connu du cœur :
+`697908942876699669` (`meta.listing_id` des réservations Channex de 2026).
+
 ---
 
 ## 4. Le flux, en quatre temps
@@ -192,26 +236,82 @@ vraies ventes à mesure qu'elles arrivent.
 10. **Aucun appel payant sans cache.** Le marché d'une commune change lentement :
     un cache par zone, avec date de fraîcheur affichée. La conception d'origine
     prévoyait déjà « AirROI pay-per-call, cache par zone ».
+11. **L'occupation et les nuits vendues d'AirROI sont Airbnb seul.**
+    Utilisables en RELATIF, d'un comparable à l'autre, jamais en ABSOLU, et
+    jamais contre une mesure du cœur. Pièce : La bulle, 223 nuits et 61,1 %
+    chez AirROI, 278 nuits et 76,2 % dans le cœur (23 septembre 2026).
+12. **Grille marché et référence du bien sur la MÊME base.** Soit on ajoute à
+    l'ADR d'un comparable son ménage amorti (`cleaning_fee /
+    ttm_avg_length_of_stay`, par comparable — l'impact dépend de sa durée de
+    séjour), soit on retire le ménage du prix voyageur du bien. **À trancher
+    quand le test de Cœur de vie 23 aura dit si l'ADR d'AirROI est hors
+    ménage** (§3 bis).
+13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
+    (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
+    hôte qu'il sous-performe quand il fait mieux (règle 11).
 
 ---
 
-## 6. Arbitrages à trancher avant tout code
+## 6. Arbitrages — état au 23 septembre 2026
 
-1. **Seuil de fiabilité** — combien de comparables au minimum avant de proposer
-   une grille ? La V1 utilise 8 nuits / 3 réservations pour un couple
-   segment × jour ; il faut l'équivalent ici.
-2. **Pondération** — par nuits vendues, par chiffre d'affaires, ou écrêtage des
-   comparables sous un seuil d'occupation ?
-3. **Bascule vers le réel** — après combien de ventes propres l'historique marché
-   perd-il son poids ? Dix réservations ? Une saison complète ? Progressif ou net ?
-4. **Contre-poids au propriétaire qui se surestime** — s'il ne coche que les biens
-   les plus chers, lui montrer la **conséquence** de son choix (leur occupation,
-   leur chiffre d'affaires réel) plutôt que de signaler une incohérence. À
-   dessiner.
-5. **Zéro comparable pertinent** — cas réel pour un bien atypique. Que fait-on :
-   élargir le rayon, relâcher les critères, ou dire honnêtement qu'on ne sait pas
-   et s'en tenir au positionnement déclaré ?
-6. **Qui paie les appels** — coût porté par HôteSmart à l'onboarding, ou refacturé ?
+Propositions argumentées faites le 23 septembre ; ce qui est tranché l'est
+par Thierry.
+
+1. **Seuil de fiabilité** — *proposé, non tranché* : grille marché fiable si
+   au moins 3 comparables retenus ET au moins 200 nuits vendues cumulées ET
+   aucun comparable (ni aucun gestionnaire, si l'API le donne) au-delà de 40 %
+   du poids. Sous le seuil : « référence amincie » avec les comptes réels.
+2. **Pondération** — **TRANCHÉ** : par nuits vendues, pas par chiffre
+   d'affaires (qui compterait le prix deux fois) ; les mois où un comparable a
+   vendu moins de 5 nuits sont écartés, pas le comparable. **Réserve gravée** :
+   ce sont des nuits AIRBNB (règle 11). Un comparable qui vend beaucoup sur
+   Booking est sous-pondéré, et c'est indétectable depuis l'API. On le sait, on
+   ne fait pas comme si le biais n'existait pas.
+3. **Bascule vers le réel** — *proposé, non tranché* : nette, étage par étage,
+   jamais de mélange dans un même prix. Positions segment × jour : l'emprunt
+   marché s'insère dans la cascade juste sous la mesure réelle (8 nuits /
+   3 résas), chaque segment bascule seul. Les cinq niveaux : marché tant que la
+   grille réelle n'a pas 60 nuits ET 10 réservations, puis bascule d'un bloc.
+4. **Contre-poids au propriétaire qui se surestime** — **TRANCHÉ, reformulé
+   sur le prix** : à la sélection, « vos 3 choix se vendent en moyenne 135 € la
+   nuit, l'ensemble des 25 se vend 72 € » — un fait, pas un reproche. La
+   première version opposait des occupations (Airbnb seul contre tous canaux)
+   et le signal « occupation réelle < moitié de celle des comparables » à
+   60 jours : **supprimés** (règle 13). Aucun signal à 60 jours tant qu'il n'a
+   pas de base honnête ; piste si on le rouvre : comparer les PRIX Airbnb
+   réellement obtenus par l'hôte aux ADR de ses comparables, jamais les
+   occupations.
+5. **Zéro comparable pertinent** — *proposé, non tranché* : un seul
+   élargissement (rayon, capacité ±1), refait par le propriétaire lui-même ;
+   puis « référence amincie, N comparables ». Le QUAND reste disponible (le
+   pacing est celui du marché entier) ; le COMBIEN vient d'une grille DÉCLARÉE
+   — cinq niveaux entre plancher et plafond du propriétaire, prix de base au
+   niveau Moyen, marquée « déclaré » partout.
+6. **Qui paie les appels** — *proposé, non tranché* : HôteSmart (≈ 1,80 $ par
+   bien, une fois), avec garde-fous — aucun appel sans coordonnées ni plancher,
+   une étude au plus tous les 90 jours par bien, un plafond par compte, un
+   budget mensuel avec alarme au fondateur.
+
+### Préalables découverts à la confrontation au code (23 septembre)
+
+- **Dette 17** (deux assemblées de la matière, `api/yield-prix.js` et
+  `lib/yield/contexte-du-bien.js`) : à solder AVANT, sinon la grille marché
+  greffée dans l'une fait diverger l'écran et le moteur.
+- **La grille n'est que le point de greffe** : le moteur ne lit que
+  `grilleDuBien` → `construireGrille` → `suggerer`. La grille marché doit en
+  avoir la FORME (niveaux + `positions` + `positions_jour`), les niveaux venant
+  des comparables (phase 2), les positions du pacing (phase 1).
+- **Fenêtre de 3 ans** (`ANS_REFERENCE`) : 60 mois d'AirROI seraient tronqués
+  en silence.
+- **`suggerer` écrit « de vos nuits »** (`lib/yield/suggestion.js:620`) :
+  contraire à la règle 2 si on branche sans corriger ; `source_du_niveau`
+  s'étend de `'marche'`.
+- **Aucune coordonnée dans `properties`** : `markets/lookup` et
+  `comparables` en ont besoin.
+- **Pickup et N-1 exigent des dates de vente** : un historique marché mensuel
+  ne les alimente pas (couche déjà neutralisée en pratique).
+- **KB périmée** : docs/kb/suggestion-yield.md §2-3 décrit un ratio
+  multiplicatif du jour de semaine que le code n'applique plus.
 
 ---
 
@@ -283,3 +383,39 @@ comparables. Négligeable face à un abonnement AirDNA.
 - Filtrer l'échantillon par le prix que le propriétaire annonce.
 - Refondre un écran V1 existant pour y loger la V2 — leçon gravée :
   jamais de refonte totale d'écran, des passes validées sur aperçu.
+- Opposer une occupation AirROI (Airbnb seul) à une occupation du cœur.
+
+---
+
+## 10. Limites connues — acceptées, pas levées
+
+1. **Airbnb seul.** Nuits vendues et occupation d'AirROI ne voient ni Booking
+   ni le direct (règle 11). Indétectable depuis l'API ; sous-pondère un
+   comparable fort sur Booking (arbitrage 2).
+2. **Frais de service voyageur.** Quand Airbnb fait payer ses frais au
+   voyageur (modèle partagé, ≈ 14 %) au lieu de l'hôte (modèle hôte seul), le
+   prix réellement payé diffère du tarif affiché. Rien dans l'API ne dit quel
+   modèle une annonce applique. Noté, on ne cherche pas à le lever.
+3. **Ménage** — en cours de test (§3 bis, règle 12).
+4. **ADR ≠ CA ÷ nuits chez AirROI** (§3 bis) : le détail mensuel dira quelle
+   moyenne il sert.
+
+---
+
+## 11. Découpage proposé en sous-lots — EN ATTENTE du préalable §1
+
+Proposé le 23 septembre 2026, **non validé**. Le préalable du §1 (25 tests
+rouges soldés, un premier mois réel de La bulle sous pilote) n'est pas levé :
+ce découpage attend son tour. Chaque sous-lot : review avant push, migrations
+staging puis prod, recette en pièces sur staging, comme le 4.6.
+
+| Lot | Contenu | Dépend de |
+|---|---|---|
+| **V2.0 Préalables** | Dette 17 soldée (une seule assemblée de la matière, moteur et écran) ; KB suggestion-yield corrigée ; test du ménage tranché et règle 12 choisie | — |
+| **V2.1 Le cœur marché** | Client AirROI serveur (`AIRROI_API_KEY`, jamais au navigateur) ; tables de cache au cœur (marché, comparables, métriques mensuelles, pacing) avec date de fraîcheur, un writer ; coordonnées du bien ; garde-fous de coût (arbitrage 6). Aucune app ne lit AirROI. | V2.0 |
+| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; plafond armé dans `suggerer` comme le plancher ; écran dans `apps/yield/` (config d'app) | V2.0 |
+| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu proposé comme événement hôte (mécanisme V1, validé par l'hôte) ; écart semaine / week-end du marché → `positions` / `positions_jour` marché. Aucun prix. | V2.1 |
+| **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) | V2.1 |
+| **V2.5 La grille marché** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2), même base ménage (règle 12) ; `source_du_niveau = 'marche'`, phrases et traductions (`shared/yield-motifs.js`) ; greffe unique grâce à V2.0 | V2.3, V2.4 |
+| **V2.6 Bascule et repli** | Bascule vers le réel (arbitrage 3) ; « référence amincie » et grille déclarée (arbitrage 5) | V2.5 |
+| **V2.7 Recette sur un bien réel sans historique** | Premier bien externe, suivi du coût réel des appels | V2.6 |
