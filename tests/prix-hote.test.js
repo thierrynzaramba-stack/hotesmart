@@ -137,17 +137,21 @@ test('une nuit NON OUVERTE montre les memes informations qu une nuit ouverte : l
   // ⚠ CE TEST A CHANGE LE 23 SEPTEMBRE 2026 (regle 17) : il exigeait « jamais
   // fermee ». Demande de Thierry : une nuit FERMEE montre aussi sa projection,
   // sinon un bien ferme a la vente ne montre aucun prix a verifier.
-  assert.match(src, /const projection = !vendue && delai >= 0 &&\n\s+\(ouverte === false \|\| horsFenetre\.has\(date\) \|\| \(ouvertureConnue && !parDate\.has\(date\)\)\)/, 'fermee, hors fenetre ou sans ligne (ouverture connue), a venir, non vendue')
+  // La decision vit dans lib/yield/projection.js (table de verite :
+  // tests/projection-ecran.test.js) ; l'endpoint l'appelle.
+  assert.match(src, /const projection = estProjection\(\{ vendue, delai, ouverte, horsFenetre: horsFenetre\.has\(date\),/, 'la regle de projection, par sa fonction')
   assert.match(src, /n\.prix_actuel != null && !n\.projection\)/, 'et le radar ne compte jamais une projection « a monter »')
   assert.match(src, /ouverte: projection \? true : ouverte/, 'la suggestion est calculee comme si la nuit etait ouverte')
   assert.match(src, /\n\s+projection,\n/, 'et le drapeau voyage')
   const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
   assert.ok(ligne.includes('} else if (!passe && n.projection && n.suggestion != null) {'), 'la ligne montre la projection')
-  assert.ok(ligne.includes('s’ouvrira') && ligne.includes('si vous l’ouvrez'), 'et dit quand, ou a quelle condition')
-  assert.ok(ligne.includes("'fermée · si vous l’ouvrez'"), 'une nuit fermee dit qu elle est fermee')
+  assert.ok(ligne.includes('s’ouvrira') && ligne.includes('TEXTES_PROJECTION[n.projection_motif]'), 'et dit quand, ou a quelle condition (table des textes)')
+  assert.ok(PAGE.includes("ligne: 'fermée · si vous l’ouvrez'") && PAGE.includes("ligne: 'indisponible · si vous la libérez'"), 'fermee et indisponible disent chacune leur condition')
+  assert.ok(ligne.includes("${n.ouverte === false ? '<span class=\"yp-attente\""), 'une nuit fermee qui porte votre prix le dit')
   // La projection se DIT partout ou elle s'affiche : ligne, depliant, pop-up.
   assert.ok(PAGE.includes("const proj = n.projection && n.ouverte !== true"), 'le depliant « pourquoi » la dit')
-  assert.ok(PAGE.includes("projete ? 'pas encore en vente : prix prévu' : ''"), 'la case de la pop-up la dit')
+  assert.ok(PAGE.includes('const projete = !!(n && n.projection && n.suggestion != null)'), 'la case de la pop-up montre le prix prevu, meme avec un prix au calendrier')
+  assert.ok(PAGE.includes("projete ? (TEXTES_PROJECTION[n.projection_motif] || TEXTES_PROJECTION.fenetre).case : ''"), 'et le dit')
 })
 
 test('le bandeau du mois porte le CA vendu a ce jour et le N-1 au meme delai, lus dans le pied — sans requete de plus', () => {

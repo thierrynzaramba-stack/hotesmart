@@ -530,9 +530,20 @@ calculables ») qui le dit.
    (aucune ligne), elle reçoit une **projection** : la suggestion calculée
    comme si elle était ouverte, avec son niveau, et « s'ouvrira le … » ou « si
    vous l'ouvrez ». La ligne garde la couleur de son état, le radar ne la
-   compte pas « à monter » (pas de prix actuel). Une nuit fermée par l'hôte
-   garde son refus : c'est sa décision (une fermeture écrit une ligne
-   `stop_sell`, donc la nuit n'est jamais « hors fenêtre »). La règle « je ne
+   compte pas « à monter » (pas de prix actuel). ~~Une nuit fermée par l'hôte
+   garde son refus~~ — **levé le 23 septembre 2026 (demande de Thierry)** : un
+   bien fermé à la vente (Cœur de vie 23 pendant la bascule) ne montrait aucun
+   prix, impossible de vérifier avant d'ouvrir plus large. Une nuit **fermée**
+   est désormais projetée elle aussi, et dit SA condition
+   (`lib/yield/projection.js`, table de vérité) : « fermée · si vous
+   l'ouvrez » (stop_sell, se rouvre au calendrier) ; « indisponible · si vous
+   la libérez » (indisponibilité de l'hôte, table `fermetures` : le calendrier
+   refuse de la rouvrir, elle se libère dans l'indisponibilité) ; texte neutre
+   si les fermetures sont illisibles. Sauf si l'hôte y a posé son prix (✎) :
+   la ligne garde « votre prix » (+ « fermée »), c'est lui qui sera retenu. Le
+   radar ne compte JAMAIS une projection « à monter / à baisser » (une nuit
+   fermée garde souvent un prix au calendrier). Rien n'est envoyé : le pilote
+   ne lit pas la projection et ne rouvre jamais une nuit fermée. La règle « je ne
    sais pas n'est pas oui » du moteur tient : c'est l'écran qui demande la
    projection, et il le dit PARTOUT où elle s'affiche — la ligne (« s'ouvrira
    le … » / « si vous l'ouvrez »), le dépliant « pourquoi », et la case de la
