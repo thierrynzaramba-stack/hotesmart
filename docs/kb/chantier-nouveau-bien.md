@@ -1497,3 +1497,39 @@ périmètre, ou non délégable.
 **Aperçu sur données réelles** : la ligne STOCKÉE en staging (id 2, ancienne
 méthode) ; la ligne nouvelle méthode calculée EN MÉMOIRE — en aveugle, et
 avec les vacances lues en production en lecture seule — jamais écrite.
+
+### V2.3.4 — review : faille de sécurité corrigée (24 septembre 2026)
+
+**Constat (sécurité)** : la vue `?vue=calendrier` gardait SANS logement.
+Sans bien ni délégation, la garde traite l'appelant comme titulaire : elle ne
+vérifiait que la SESSION. Tout compte connecté lisait les calendriers de TOUS
+les marchés — donc la commune des autres clients —, et la page affichait le
+premier venu sous « le marché de votre commune ».
+
+**Correction** :
+- **Un lien LOGEMENT → MARCHÉ**, table V2 neuve `marche_biens` (migration
+  `2026-09-24-marche-biens.sql`, additive, sans clé étrangère, serveur seul,
+  vérification à empreinte ET à forme) ; writer unique
+  `scripts/lier-bien-marche.js` (saisie du fondateur, aucun appel AirROI,
+  `--go --biens=N`, ajout seul). Troisième table V2 lue par l'écran ; aucun
+  contact de plus avec l'existant.
+- **La vue exige un logement**, sous la garde habituelle du logement (lecture
+  des réservations, bien requis : le bien désigne le compte), et ne rend QUE
+  le calendrier du marché relié à ce logement. Pas de lien : « marché
+  inconnu », jamais un autre marché. La page choisit un logement du compte
+  (comme *Prédiction de prix*).
+- Test : rouge contre la vue d'avant (200 au lieu de 400) ; quatre versions
+  fautives rougissent (sans filtre de marché, sans tri, garde sans logement,
+  repli sur un autre marché). Le simulacre applique vraiment `eq`, `order` et
+  `limit` (l'ancien ignorait le tri : faux vert).
+
+**Autres points de la review, corrigés** : sens d'une rupture affiché
+seulement s'il est connu (il devenait « baisse ») ; une ligne sans régimes le
+dit ; forme mensuelle absente dite « non calculable » (au lieu de « aucun
+mois ») ; zone de dernière minute NON MESURÉE portée par `limites` et
+affichée ; phrase d'horizon seulement si l'horizon précède la fin ; saisons
+passées par une liste blanche avant tout attribut `class` ; nombres formatés
+sans planter ; échelle nommée dans le tableau des pics ; une rupture sans
+force reste une rupture à l'écran. Test « aucun écran modifié » par diff git
+RETIRÉ (fragile, lisait l'arbre partagé) ; minuterie des tests annulée,
+modules restaurés en `finally` (5,3 s → 0,3 s).

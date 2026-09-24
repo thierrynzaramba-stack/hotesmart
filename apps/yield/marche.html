@@ -90,7 +90,8 @@
     votre calendrier ne changent pas.
   </div>
 
-  <div id="mc-choix" hidden></div>
+  <div id="mc-choix"><label class="motif">Logement
+    <select id="mc-bien"></select></label></div>
   <div class="mc-meta" id="mc-meta"></div>
   <div id="mc-corps"><p class="motif">Lecture du marché…</p></div>
 </div>
@@ -106,7 +107,8 @@
   // ⚠ TOUT CE QUI N'EST PAS CALCULABLE LE DIT, avec sa raison.
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-  import { enteteCompte } from '/shared/compte-courant.js'
+  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
 
   initErrorHandler()
@@ -122,29 +124,48 @@
   // Les phrases du calcul portent des dates ISO : elles se lisent en francais.
   const phrase = t => ech(String(t || '').replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (_, d) => jourFr(d)))
   const NOM = { basse: 'Basse', moyenne: 'Moyenne', forte: 'Forte', tres_forte: 'Très forte' }
+  // Une saison n'entre dans un attribut `class` que si elle est connue
+  // (liste blanche — review) ; sinon, dite telle quelle, echappee.
+  const classe = x => (Object.hasOwn(NOM, x) ? x : 'inconnue')
+  const nomDe = x => (Object.hasOwn(NOM, x) ? NOM[x] : `saison inconnue (${ech(x)})`)
+  const nombre = x => (typeof x === 'number' && Number.isFinite(x) ? virgule(x) : '—')
 
-  let marches = []
+  let session = null
 
   async function init () {
-    const session = await requireAuth()
+    session = await requireAuth()
     if (!session) return
     renderSidebar('yield-marche').catch(e => console.error('[yield-marche] sidebar', e))
+    // ⚠ UN LOGEMENT, SON MARCHE (securite, review du 24 septembre) : la vue
+    // ne rend que le marche relie au logement choisi, sous sa garde.
+    const compte = compteCourant()
+    let q = supabase.from('properties').select('id, name').order('name')
+    if (compte) q = q.eq('user_id', compte)
+    const { data, error } = await q
+    if (error) return corps('<p class="non-calc">Impossible de lire la liste des logements.</p>')
+    if (!data || !data.length) return corps('<p class="non-calc">Aucun logement accessible sur ce compte.</p>')
+    el('mc-bien').innerHTML = data.map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
+    el('mc-bien').addEventListener('change', charger)
+    charger()
+  }
+
+  let jeton = 0
+  async function charger () {
+    const j = ++jeton
+    corps('<p class="motif">Lecture du marché…</p>')
+    el('mc-meta').innerHTML = ''
     let r
     try {
-      r = await fetch('/api/yield-marche?vue=calendrier', {
+      r = await fetch(`/api/yield-marche?vue=calendrier&property_id=${encodeURIComponent(el('mc-bien').value)}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
-    } catch (e) { return corps(`<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>`) }
+    } catch (e) { return corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>') }
+    if (j !== jeton) return
     if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
     const d = await r.json()
-    marches = d.marches || []
-    if (!marches.length) return corps('<p class="non-calc">Aucune étude du marché n’est encore enregistrée : rien à montrer.</p>')
-    if (marches.length > 1) {
-      el('mc-choix').hidden = false
-      el('mc-choix').innerHTML = `<label class="motif">Marché
-        <select id="mc-sel">${marches.map((m, i) => `<option value="${i}">${ech(m.localite)}</option>`).join('')}</select></label>`
-      el('mc-sel').addEventListener('change', e => rendre(marches[Number(e.target.value)]))
-    }
-    rendre(marches[0])
+    if (j !== jeton) return
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif || 'lien absent')}.</p>`)
+    if (d.etat !== 'calendrier') return corps(`<p class="non-calc">Aucune étude du marché ${d.marche ? `de ${ech(d.marche.localite)} ` : ''}n’est encore enregistrée : rien à montrer.</p>`)
+    rendre(d.calendrier)
   }
 
   function corps (html) { el('mc-corps').innerHTML = html }
@@ -156,15 +177,21 @@
     // dit, sans inventer « nuits absentes ».
     if (!('force' in f) && !('depuis_zero' in f)) {
       return estRupture
-        ? `<span class="front f1"><i></i><b>rupture</b> · force non enregistrée par cette méthode${f.rapport != null ? ` (rapport ×${virgule(f.rapport)})` : ''}${f.sens ? ` · ${f.sens}` : ''}</span>`
+        ? `<span class="front f1"><i></i><b>rupture</b> · force non enregistrée par cette méthode${f.rapport != null ? ` (rapport ×${nombre(f.rapport)})` : ''}${f.sens === 'hausse' || f.sens === 'baisse' ? ` · ${f.sens}` : ''}</span>`
         : '<span class="front tr"><i></i>frontière · force non enregistrée par cette méthode</span>'
     }
-    if (f.force == null && !f.depuis_zero) return '<span class="front tr"><i></i>force non mesurable (nuits absentes des deux côtés)</span>'
+    if (f.force == null && !f.depuis_zero) {
+      // Une rupture sans force mesuree reste une rupture a l'ecran, comme sur la frise.
+      return estRupture ? '<span class="front f1"><i></i><b>rupture</b> · force non mesurable</span>'
+        : '<span class="front tr"><i></i>transition · force non mesurable</span>'
+    }
     if (!estRupture) return `<span class="front tr"><i></i>transition ×${virgule(f.force)} — pas une rupture</span>`
     const cls = f.depuis_zero || f.force >= 2 ? 'f2' : f.force >= 1.5 ? 'f1' : 'f0'
-    const libelle = f.depuis_zero ? 'depuis zéro nuit' : `×${virgule(f.force)}`
+    const libelle = f.depuis_zero ? 'depuis zéro nuit' : `×${nombre(f.force)}`
     const mot = cls === 'f2' ? 'rupture forte' : cls === 'f1' ? 'rupture' : 'rupture faible'
-    return `<span class="front ${cls}"><i></i><b>${mot}</b> ${libelle} · ${f.sens === 'hausse' ? 'hausse' : 'baisse'}</span>`
+    // Le sens n'est dit que s'il est CONNU (review : un sens absent devenait « baisse »).
+    const sens = f.sens === 'hausse' || f.sens === 'baisse' ? ` · ${f.sens}` : ''
+    return `<span class="front ${cls}"><i></i><b>${mot}</b> ${libelle}${sens}</span>`
   }
 
   function rendre (m) {
@@ -174,7 +201,11 @@
       return corps(`<div class="mc-carte"><h2>Saisons non calculables</h2>
         <p class="non-calc">${ech(m.motif || 'motif non précisé')}</p></div>`)
     }
-    const regimes = m.regimes || []
+    // Une ligne sans regimes (methode anterieure a V2.3.1) : on le DIT.
+    if (!Array.isArray(m.regimes) || !m.regimes.length) {
+      return corps('<div class="mc-carte"><h2>Saisons non affichables</h2><p class="non-calc">Cette étude ne porte pas ses régimes (méthode antérieure) : aucune saison n’est montrée plutôt qu’une lecture inventée.</p></div>')
+    }
+    const regimes = m.regimes
     const saisons = m.saisons || []
     const ruptures = m.ruptures || []
     const parDate = new Map(ruptures.map(r => [r.date, r]))
@@ -202,18 +233,18 @@
         const frise = saisons.map((s, k) => {
           const e = entree(s, k)
           const cls = !e ? '' : e.rupture ? ((e.f.force >= 2 || e.f.depuis_zero) ? 'rupt forte' : 'rupt') : 'trans'
-          return `<div class="p-${s.saison} ${cls}" style="flex:${nbJours(s.debut, s.fin) / total}" title="${ech(NOM[s.saison])} · ${jourFr(s.debut)} → ${jourFr(s.fin)}"></div>`
+          return `<div class="p-${classe(s.saison)} ${cls}" style="flex:${nbJours(s.debut, s.fin) / total}" title="${nomDe(s.saison)} · ${jourFr(s.debut)} → ${jourFr(s.fin)}"></div>`
         }).join('')
         const lignes = saisons.map((s, k) => {
           const e = entree(s, k)
           return `<tr><td>${jourFr(s.debut)} → ${jourFr(s.fin)}</td>
-            <td><span class="pastille p-${s.saison}"></span>${NOM[s.saison]}</td>
+            <td><span class="pastille p-${classe(s.saison)}"></span>${nomDe(s.saison)}</td>
             <td>${e ? front(e.f, e.rupture) : front(null)}</td></tr>`
         }).join('')
         return `<div class="mc-carte">
           <span class="mc-echelle pacing">Échelle du pacing</span>
           <h2>Réservations déjà prises · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
-          <p class="sous">${ech(g.phrase || '')} Au-delà du ${jourFr(m.horizon_fin)}, trop peu de réservations pour conclure.</p>
+          <p class="sous">${ech(g.phrase || '')}${m.horizon_fin && m.fenetre_fin && m.horizon_fin < m.fenetre_fin ? ` Au-delà du ${jourFr(m.horizon_fin)}, trop peu de réservations pour conclure.` : ''}</p>
           <div class="mc-frise">${frise}</div>
           <div class="mc-bornes"><span>${jourFr(saisons[0] && saisons[0].debut)}</span><span>${jourFr(saisons.length && saisons[saisons.length - 1].fin)}</span></div>
           <table class="mc"><thead><tr><th>Période</th><th>Saison (échelle du pacing)</th><th>Comment elle commence</th></tr></thead>
@@ -221,10 +252,16 @@
         </div>`
       }
       if (g.regime === 'forme_mensuelle') {
-        const mois = (m.au_dela || [])
-        const lignes = mois.map(x => `<tr><td>${moisFr(x.mois)}</td>
-          <td>${x.saison ? `<span class="pastille m-${x.saison}"></span>${NOM[x.saison]}` : `<span class="non-calc">non calculable : ${ech(x.motif || 'sans motif')}</span>`}</td>
-          <td class="motif">${x.indice != null ? `indice ${virgule(x.indice)} · ${x.annees} an${x.annees > 1 ? 's' : ''}` : ''}</td></tr>`).join('')
+        // `au_dela` absent : la forme mensuelle n'a pas ete calculee — dit, jamais « aucun mois ».
+        if (!Array.isArray(m.au_dela)) {
+          return `<div class="mc-carte"><span class="mc-echelle mensuel">Échelle mensuelle</span>
+            <h2>Forme des trois dernières années · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
+            <p class="non-calc">Forme mensuelle non calculable : l’historique du marché n’a pas été fourni à cette étude.</p></div>`
+        }
+        const mois = m.au_dela
+        const lignes = mois.map(x => `<tr><td>${/^\d{4}-\d{2}$/.test(String(x.mois || '')) ? moisFr(x.mois) : '—'}</td>
+          <td>${x.saison ? `<span class="pastille m-${classe(x.saison)}"></span>${nomDe(x.saison)}` : `<span class="non-calc">non calculable : ${ech(x.motif || 'sans motif')}</span>`}</td>
+          <td class="motif">${x.indice != null ? `indice ${nombre(x.indice)} · ${nombre(x.annees)} an${x.annees > 1 ? 's' : ''}` : ''}</td></tr>`).join('')
         return `<div class="mc-carte">
           <span class="mc-echelle mensuel">Échelle mensuelle — ne se compare pas à celle du pacing</span>
           <h2>Forme des trois dernières années · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
@@ -235,7 +272,9 @@
       }
       return ''
     }).join('')
-    corps(blocs + explication(m))
+    // Les limites de la ligne (zone non mesuree, etc.) se disent.
+    const limites = (m.limites || []).filter(l => /non mesurée/.test(String(l)))
+    corps(blocs + (limites.length ? `<div class="mc-carte"><p class="non-calc">${limites.map(ech).join('<br>')}</p></div>` : '') + explication(m))
   }
 
   function explication (m) {
@@ -244,16 +283,16 @@
       return `<div class="mc-carte">${titre}<p class="non-calc">${ech((m.limites || [])[0] || 'Explication non calculable.')}</p></div>`
     }
     const pics = m.pics.map(p => `<tr><td>${jourFr(p.debut)} → ${jourFr(p.fin)}</td>
-      <td><span class="pastille p-${p.saison}"></span>${NOM[p.saison]}</td>
+      <td><span class="pastille p-${classe(p.saison)}"></span>${nomDe(p.saison)}</td>
       <td>${phrase(p.phrase)}</td></tr>`).join('')
     const aLire = (m.evenements_possibles || []).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
       || '<p class="motif">Rien à signaler : chaque pic a une cause dans le calendrier français.</p>'
     const ecarts = (m.ecart_semaine_week_end || []).map(x => `<tr><td>${jourFr(x.debut)} → ${jourFr(x.fin)}</td>
-      <td>${x.ecart_prix_pct != null ? `<b>${x.ecart_prix_pct > 0 ? '+' : ''}${virgule(x.ecart_prix_pct)} %</b> le week-end`
+      <td>${x.ecart_prix_pct != null ? `<b>${x.ecart_prix_pct > 0 ? '+' : ''}${nombre(x.ecart_prix_pct)} %</b> le week-end`
         : `<span class="non-calc">${ech(x.motif || 'non calculable, motif non précisé')}</span>`}</td>
-      <td class="motif">${x.ecart_prix_pct != null ? `remplissage ${virgule(Math.round(x.remplissage_semaine * 1000) / 10)} % en semaine, ${virgule(Math.round(x.remplissage_week_end * 1000) / 10)} % le week-end` : `${x.nuits_reservees_semaine ?? 0} / ${x.nuits_reservees_week_end ?? 0} nuits réservées`}</td></tr>`).join('')
+      <td class="motif">${x.ecart_prix_pct != null ? `remplissage ${nombre(Math.round(x.remplissage_semaine * 1000) / 10)} % en semaine, ${nombre(Math.round(x.remplissage_week_end * 1000) / 10)} % le week-end` : `${nombre(x.nuits_reservees_semaine ?? 0)} / ${nombre(x.nuits_reservees_week_end ?? 0)} nuits réservées`}</td></tr>`).join('')
     return `<div class="mc-carte">${titre}
-      <table class="mc"><thead><tr><th>Pic</th><th>Saison</th><th>Cause lue dans le calendrier</th></tr></thead><tbody>${pics}</tbody></table>
+      <table class="mc"><thead><tr><th>Pic</th><th>Saison (échelle du pacing)</th><th>Cause lue dans le calendrier</th></tr></thead><tbody>${pics}</tbody></table>
       <h2 style="margin-top:16px">À lire : sans cause calendaire française connue</h2>
       <p class="sous">Rien n’est enregistré. Si vous en retenez une, saisissez-la vous-même dans vos événements.</p>
       ${aLire}

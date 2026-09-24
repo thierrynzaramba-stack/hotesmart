@@ -2,11 +2,9 @@
 // « Prediction de prix ». Lot V2.5. Cadrage : docs/kb/chantier-nouveau-bien.md.
 //
 //   GET ?property_id=  ->  le dernier releve du controle, s'il est lisible.
-//   GET ?vue=calendrier ->  le dernier calendrier de chaque MARCHE (V2.3.4,
-//                           page apps/yield/marche.html). Un marche n'est pas
-//                           un logement : la garde exige le droit de LECTURE
-//                           des reservations, sans bien. Aucun prix : la table
-//                           n'en contient pas.
+//   GET ?vue=calendrier&property_id= -> le dernier calendrier du MARCHE de
+//                           ce logement (V2.3.4, apps/yield/marche.html), sous
+//                           la garde du logement. Aucun prix.
 //
 // ⚠ INFORMATION PARALLELE, LECTURE SEULE : rien ici n'appelle AirROI (les
 // appels payants passent par les scripts et le rafraichissement, jamais par
@@ -63,31 +61,38 @@ module.exports = async (req, res) => {
   }
 }
 
-// ─── V2.3.4 : le calendrier de segments du MARCHE, en lecture seule ─────────
-// Le dernier calcul de chaque marche (capture la plus recente, puis methode la
-// plus recente). Table absente : « pas encore », comme le bloc du controle.
+// ─── V2.3.4 : le calendrier de segments du MARCHE D'UN LOGEMENT ─────────────
+// ⚠ SECURITE (review du 24 septembre 2026) : la premiere version rendait les
+// calendriers de TOUS les marches a toute session — la commune des autres
+// clients. La vue exige desormais un LOGEMENT, sous la garde habituelle du
+// logement (`requirePermission`, lecture des reservations, bien requis : le
+// bien designe le compte, un membre sans droit est refuse), et ne rend QUE le
+// marche lie a ce logement (`marche_biens`). Pas de lien : « marche inconnu »,
+// jamais un autre marche.
 async function calendriersDuMarche (req, res) {
-  const garde = await requirePermission(req, res, { domaine: 'reservations', niveau: 'read' })
+  const brut = v => (Array.isArray(v) ? v[0] : v)
+  const propertyId = String(brut(req.query.property_id) || '').trim()
+  if (!propertyId) return res.status(400).json({ error: 'bien_requis' })
+  const garde = await requirePermission(req, res, { domaine: 'reservations', niveau: 'read', bien: propertyId, bienRequis: true })
   if (!garde.ok) return
+  const absente = (error, t) => error && new RegExp(t).test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')
   try {
+    const lien = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', garde.bien.id).limit(1)
+    if (absente(lien.error, 'marche_biens')) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'le lien entre logements et marches n existe pas encore' })
+    if (lien.error) throw new Error(`marche_biens : ${lien.error.message}`)
+    const m = (lien.data || [])[0]
+    if (!m) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'aucun marche relie a ce logement' })
     const { data, error } = await supabase.from('marche_calendrier')
       .select('pays, region, localite, capture_le, calcule_le, source, statut, motif, fenetre_debut, fenetre_fin, horizon_fin, regimes, saisons, ruptures, au_dela, pics, evenements_possibles, ecart_semaine_week_end, couverture_calendrier, limites, methode')
-      .order('capture_le', { ascending: false }).order('calcule_le', { ascending: false }).limit(50)
-    if (error && /marche_calendrier/.test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')) {
-      return res.status(200).json({ source: 'marche', etat: 'pas_de_calendrier', marches: [] })
-    }
+      .eq('pays', m.pays).eq('region', m.region).eq('localite', m.localite)
+      .order('capture_le', { ascending: false }).order('calcule_le', { ascending: false }).limit(1)
+    if (absente(error, 'marche_calendrier')) return res.status(200).json({ source: 'marche', etat: 'pas_de_calendrier', marche: m })
     if (error) throw new Error(`marche_calendrier : ${error.message}`)
-    const vus = new Set()
-    const marches = (data || []).filter(l => {
-      const cle = `${l.pays}|${l.region}|${l.localite}`
-      if (vus.has(cle)) return false
-      vus.add(cle)
-      return true
-    })
-    return res.status(200).json({ source: 'marche', etat: marches.length ? 'calendrier' : 'pas_de_calendrier', marches })
+    const ligne = (data || [])[0]
+    if (!ligne) return res.status(200).json({ source: 'marche', etat: 'pas_de_calendrier', marche: m })
+    return res.status(200).json({ source: 'marche', etat: 'calendrier', marche: m, calendrier: ligne })
   } catch (e) {
     console.error('[yield-marche] calendrier', e.message)
     return res.status(500).json({ error: 'lecture_impossible' })
   }
 }
-
