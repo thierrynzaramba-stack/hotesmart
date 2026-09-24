@@ -767,10 +767,12 @@ raccordement au moteur viendra après, et ce sera une décision à part.
   *Prédiction de prix* (branche `lot-v2-1-marche`, non poussé), qui dit « pas
   de relevé » si sa table disparaît. L'étape 1 n'en ajoute aucun : son écran
   est une page NEUVE.
-- **Question ouverte, à trancher AVANT V2.2 (relevée en review le
-  24 septembre)** : l'étape 0 saisit le plafond et la résidence principale.
-  Si elles vont dans `properties`, c'est un TROISIÈME contact avec
-  l'existant ; dans une table V2 à elle, la garantie tient d'elle-même.
+- **Étape 0 (V2.2) — TRANCHÉ par Thierry le 24 septembre 2026** : le plafond
+  et la résidence principale vont dans une **table V2 à part, jamais dans
+  `properties`**. La garantie de suppression est l'INVARIANT : on ne passe pas
+  de deux à trois contacts avec l'existant pour économiser une jointure. Même
+  régime que les autres tables V2 : RLS active, `revoke all ... from anon,
+  authenticated`, lecture serveur uniquement.
 
 ### L'ordre des étapes — corrigé le 24 septembre 2026
 
@@ -793,7 +795,7 @@ pièces sur staging, vérification en lecture seule sur la prod, comme le 4.6.
 |---|---|---|
 | **V2.0 Durcissement de la V1** | Traité comme un durcissement de la V1, AVANT la mise sous pilote de La bulle. **V2.0.0** : mesurer la divergence écran / moteur en lecture seule sur la prod (La bulle, Cœur de vie 23, 365 nuits) — script qui sert ensuite de non-régression. **V2.0.1** : dette 17 — `api/yield-prix.js` prend sa matière dans `preparerContexte` et sa suggestion dans `prixDeLaNuit` (fenêtre de contexte élargie au radar, lignes fournies, projection passée en `ouverte: true`) ; test de parité ; 0 divergence au script. **V2.0.2** : dette 26 — `tarifNuitee` à côté de `prixVoyageur`, drapeau « tarif mesuré / tarif déduit », grille et référence en tarif nuitée, indicateurs en prix voyageur (règle 18) ; après 17. **V2.0.3** : dette 25 — capacité non calculable : aucun prix posé, et c'est dit. **V2.0.4** : KB suggestion-yield corrigée. | — |
 | **V2.1 Le cœur marché** | Client AirROI serveur (`AIRROI_API_KEY`, jamais au navigateur) ; tables de cache au cœur (marché, comparables, métriques mensuelles, pacing) avec date de fraîcheur, un writer ; coordonnées du bien ; garde-fous de coût (arbitrage 6). Aucune app ne lit AirROI. | V2.0 |
-| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app). Le plafond n'agit sur aucun prix avant V2.6. | V2.0 |
+| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) — dans une TABLE V2 à part, jamais dans `properties`, serveur seulement (tranché le 24 septembre 2026, frontière) ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app). Le plafond n'agit sur aucun prix avant V2.6. | V2.0 |
 | **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu présenté comme une LISTE D'ÉVÉNEMENTS LOCAUX POSSIBLES, à lire dans l'espace V2 — rien n'est créé dans `yield_events` (corrigé le 24 septembre 2026) ; écart semaine / week-end du marché → calendrier de segments du marché STOCKÉ dans une table V2, pas branché. Aucun prix. | V2.1 |
 | **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) ; marques « niveau instable » et avertissement gestionnaire (règle 17) ; avertissement ménage et calcul du prix effectif (règle 12) | V2.1 |
 | **V2.5 La grille marché, EN PARALLÈLE, et le contrôle** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2) ; calculée et STOCKÉE, `source = 'marche'`, **aucune greffe dans le moteur**. **Le contrôle permanent** (ci-dessous) : table `grille_controle`, bloc « Grille du marché — à titre d'information, n'agit pas sur vos prix » dans *Prédiction de prix*, ligne de contrôle au bilan fondateur. **Avant le premier affichage de la table : critère de l'interrupteur fixé par Thierry et gravé avec sa date (règle 19).** | V2.3, V2.4 |
