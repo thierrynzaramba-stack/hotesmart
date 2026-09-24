@@ -1217,10 +1217,13 @@ n'a pas de jours).
   **24 → 30 sept.** (marqué : touche la date de l'étude, où se mêlent les
   réservations de dernière minute).
 - **Écart semaine / week-end** (vendredi-samedi contre dimanche-jeudi, hors
-  vacances et fériés, prix moyen des nuits réservées, chaque jour pesant
-  autant, remplissage à côté) : **+7,5 % en octobre, +6,5 % de novembre à
-  mi-décembre** ; **−3,2 % en janvier, −6,5 % en mars** (à 4 et 6 mois, sur
-  4 à 6 nuits de week-end déjà réservées). Les saisons hautes sont des
+  vacances, fériés, ponts, week-ends prolongés et dates commerciales ; prix
+  moyen des nuits réservées, chaque jour pesant autant, remplissage à côté) :
+  **+7,5 % en octobre, +8,5 % de fin octobre à mi-décembre** ; **−3,2 % en
+  janvier, −3,7 % en mars** (à 4 et 6 mois, sur 4 à 5 nuits de week-end déjà
+  réservées). ⚠ La nuit de week-end est celle du VENDREDI et du SAMEDI (on
+  dort le vendredi soir) ; la V1, elle, appelle week-end les JOURS samedi et
+  dimanche — deux conventions, dites. Les saisons hautes sont des
   vacances : aucune nuit hors vacances, écart « non calculable », et dit —
   la haute saison de Bagnères ne permet pas de « revérifier » l'écart hors
   vacances.
@@ -1241,6 +1244,18 @@ n'a pas de jours).
    *Alternative* : ne garder que les périodes à moins de 90 jours.
 4. **Proximité** : un événement possible qui commence à moins de **7 jours**
    de la capture le dit. *Alternative* : l'écarter.
+
+**Review du V2.3.2 (aucun constat de sécurité), corrigé** : la part d'une
+période de vacances est l'UNION des jours de ses zones (la sortie disait
+« vacances d'hiver, 16 jours, 76 % » pour des zones décalées qui couvrent les
+21 jours du pic — contradictoire avec `part_expliquee` à 1) ; l'écart exclut
+aussi ponts, week-ends prolongés et dates commerciales ; le surcroît exige
+des voisins sans cause, des deux côtés ; un événement se coupe au changement
+de pic (deux pics contigus faisaient un événement rattaché à rien — cas trouvé
+sur un marché synthétique) ; les pics s'arrêtent à l'horizon ; un pacing
+absent est « non calculable ». Garde de frontière renforcée : les modules
+purs (`saisons`, `explication`, `grille-marche`) n'ont aucun `.from(`, `.rpc(`
+ni client ; les autres ne nomment en toutes lettres que des tables V2.
 
 **Limites, écrites** : le prix moyen des nuits réservées est teinté par ce qui
 part (en basse saison, les moins chères) ; le rapport tient à l'intérieur
