@@ -1119,6 +1119,31 @@ trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
   partout ailleurs on raisonne en quantiles. Test : un juillet triplé ne
   déplace pas la forme.
 
+**RÈGLE — DEUX ÉCHELLES, JAMAIS UNE (Thierry, 24 septembre 2026).** Les
+saisons du PACING (relief, quatre classes au plus) et celles de la FORME
+MENSUELLE (occupation historique, seuils propres) ne désignent pas la même
+intensité : un « forte » d'août et un « forte » de février ne se comparent
+pas. **Aucun classement, aucun tri, aucune comparaison ne peut mettre en
+regard une saison du pacing et une saison de la forme mensuelle.** Chaque
+saison porte son régime dans la sortie ; les deux ensembles ne sont jamais
+présentés comme une seule échelle ordonnée. Tenue par le code : le seul
+chemin pour ordonner ou comparer des saisons (`ordonnerSaisons`,
+`comparerSaisons`, `rangDansSonRegime`, `lib/marche/saisons.js`) lève
+`RegimesMelanges` sur un mélange, ou sur une saison sans régime. Test : un
+ordre global demandé sur les deux régimes mêlés échoue ; une version qui trie
+tout sur une seule échelle le fait rougir.
+*Alternative écartée pour l'instant* : recalibrer les deux régimes sur une
+échelle commune. Elle suppose que le relief du pacing et l'occupation
+historique mesurent la même chose à un facteur près, et rien ne le prouve.
+À rouvrir si l'affichage l'exige, avec une mesure à l'appui.
+
+**Review de la validation (aucun bloquant), corrigé** : les noms de saisons
+se fixent APRÈS toutes les fusions (plancher et tronçons courts) ; toute
+réponse porte son régime, trous et mois absents compris ; pas d'« au-delà »
+quand l'horizon couvre toute la fenêtre ; test du plancher exact (basse et
+forte), avec un cas à deux fusions en chaîne ; test de la médiane sur le
+juillet le plus BAS (la médiane ne tient que par le rang).
+
 **Décisions prises seules (état après la validation)** :
 1. **Le RELIEF, pas le remplissage brut.** RETENU par Thierry. Un pacing se remplit d'autant moins
    que la date est loin (−20 % par 30 jours mesuré ici). Brut, octobre (0,16,

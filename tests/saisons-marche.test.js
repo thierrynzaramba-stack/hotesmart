@@ -17,7 +17,7 @@ const test = require('node:test')
 const assert = require('node:assert')
 const fs = require('fs')
 const path = require('path')
-const { calendrierDuMarche, saisonDuJour, formeMensuelle, lirePacing, lisser } = require('../lib/marche/saisons')
+const { calendrierDuMarche, saisonDuJour, formeMensuelle, lirePacing, lisser, ordonnerSaisons, comparerSaisons, rangDansSonRegime, RegimesMelanges } = require('../lib/marche/saisons')
 
 const FIX = path.join(__dirname, 'fixtures', 'airroi')
 const PACING = JSON.parse(fs.readFileSync(path.join(FIX, 'pacing-bagneres-2026-09-24.json'), 'utf8'))
@@ -74,7 +74,8 @@ test('LE TEST QUI COMPTE : un trou dans le pacing est une absence — Noel reste
   const c = calculer(sans(trou))
   assert.deepEqual(c.fenetre.trous, trou)
   assert.equal(c.fenetre.jours, 339)
-  for (const d of trou) assert.deepEqual(saisonDuJour(c, d), { jour: d, saison: null, motif: 'absent_du_pacing' })
+  // Le regime aussi, comme toute reponse (review) : un trou avant l'horizon est du pacing.
+  for (const d of trou) assert.deepEqual(saisonDuJour(c, d), { jour: d, saison: null, motif: 'absent_du_pacing', regime: 'pacing' })
   assert.equal(saisonDuJour(c, '2026-12-30').saison, 'tres_forte', 'le lissage ne compte pas les jours absents comme des zeros')
   // La valeur lissee elle-meme : la moyenne des SEULS jours presents autour du
   // 30 decembre (27-29 absents) — 283, 295, 274, 148 nuits : 250. Des zeros a
@@ -181,11 +182,11 @@ test('une date impossible ou aberrante n entre pas dans la fenetre', () => {
 
 // Un pacing SYNTHETIQUE : l'eloignement de Bagneres (−0,75 %/jour) et des
 // blocs de 20 jours a des niveaux choisis.
-function synthetique (niveaux) {
+function synthetique (niveaux, bloc = 20) {
   const results = []
   for (let i = 0; i < 200; i++) {
     const d = new Date(Date.UTC(2026, 8, 24 + i)).toISOString().slice(0, 10)
-    const r = Math.round(300 * Math.exp(-0.0075 * i) * niveaux[Math.floor(i / 20) % niveaux.length])
+    const r = Math.round(300 * Math.exp(-0.0075 * i) * niveaux[Math.floor(i / bloc) % niveaux.length])
     results.push({ date: d, booked_count: r, available_count: 1000 - r })
   }
   return { results }
@@ -196,9 +197,13 @@ test('LE TEST QUI COMPTE : plancher d amplitude — un marche mollement contrast
   // feraient quatre classes.
   const c = calendrierDuMarche({ pacing: synthetique([1.0, 1.1, 1.0, 1.35]) })
   assert.equal(c.statut, 'calcule')
-  const vues = [...new Set(c.saisons.map(s => s.saison))]
-  assert.ok(vues.length >= 2 && vues.length <= 3, `saisons : ${vues.join(', ')}`)
-  assert.ok(!vues.includes('tres_forte'), 'aucune « tres forte » sans l amplitude pour la porter')
+  // Exactement deux saisons (review : « 2 ou 3 » laissait passer une version
+  // qui ne fusionne qu'une fois).
+  assert.deepEqual([...new Set(c.saisons.map(s => s.saison))].sort(), ['basse', 'forte'])
+  assert.equal(saisonDuJour(c, '2026-12-03').saison, 'forte', 'les blocs a ×1,35 (jours 60 a 79) sont la saison haute')
+  // Deux fusions EN CHAINE : 1,00 / 1,08 / 1,16 sont une seule saison, ×1,6 l'autre.
+  const chaine = calendrierDuMarche({ pacing: synthetique([1.0, 1.08, 1.16, 1.6], 40) })
+  assert.deepEqual([...new Set(chaine.saisons.map(s => s.saison))].sort(), ['basse', 'forte'])
   // Bagneres, lui, garde ses quatre saisons (×1,60, ×1,38, ×1,95).
   assert.equal(new Set(calculer().saisons.map(s => s.saison)).size, 4)
 })
@@ -216,9 +221,26 @@ test('LE TEST QUI COMPTE : deux regimes, dits periode par periode — pacing jus
 
 test('LE TEST QUI COMPTE : la forme mensuelle se lit sur la MEDIANE des mois homologues — une valeur aberrante ne la deplace pas', () => {
   const base = formeMensuelle(MARCHE60, { apres: '2027-04-11', jusqua: '2027-08-31' })
-  // Le juillet le plus haut des trois ans, triple : une saison exceptionnelle.
+  // Le juillet le plus BAS des trois ans, triple : une saison exceptionnelle.
+  // (Review : tripler le plus haut laissait la mediane tenir par egalite de
+  // deux valeurs ; le plus bas ne la laisse tenir que par le RANG.)
   const juillets = MARCHE60.results.filter(l => l.date.slice(5, 7) === '07' && l.date >= '2023-09')
-  const haut = juillets.reduce((m, l) => (l.occupancy.avg > m.occupancy.avg ? l : m))
+  const haut = juillets.reduce((m, l) => (l.occupancy.avg < m.occupancy.avg ? l : m))
   const aberrant = { results: MARCHE60.results.map(l => (l === haut ? { ...l, occupancy: { ...l.occupancy, avg: l.occupancy.avg * 3 } } : l)) }
   assert.deepEqual(formeMensuelle(aberrant, { apres: '2027-04-11', jusqua: '2027-08-31' }), base)
+})
+
+test('LE TEST QUI COMPTE : deux echelles, jamais une — aucun ordre, aucune comparaison entre une saison du pacing et une de la forme mensuelle', () => {
+  const c = calculer()
+  const melange = [...c.saisons, ...c.au_dela]
+  assert.throws(() => ordonnerSaisons(melange), RegimesMelanges)
+  const fevrier = c.saisons.find(s => s.debut === '2027-02-13')
+  const aout = c.au_dela.find(m => m.mois === '2027-08')
+  assert.throws(() => comparerSaisons(fevrier, aout), RegimesMelanges)
+  assert.throws(() => comparerSaisons({ saison: 'forte' }, fevrier), RegimesMelanges, 'une saison sans regime n a pas de rang')
+  assert.throws(() => rangDansSonRegime({ saison: 'forte' }), RegimesMelanges)
+  assert.equal(rangDansSonRegime(fevrier), 3)
+  // Dans un meme regime, l'ordre existe.
+  assert.equal(ordonnerSaisons(c.saisons).pop().saison, 'tres_forte')
+  assert.equal(ordonnerSaisons(c.au_dela).pop().mois, '2027-08')
 })
