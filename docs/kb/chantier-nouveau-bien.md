@@ -911,3 +911,26 @@ Review V2.5 (grille marché, contrôle) :
   (au pire 0,50 $, borné par les garde-fous). Un verrou en base le fermerait.
 - ~~Questions Cœur de vie 23, Airbnb seul, UUID de staging~~ : tranchées le
   24 septembre (Q1 à Q3 ci-dessus).
+
+### Review du commit b3e63f7 (24 septembre) — aucun constat de sécurité
+
+Corrigé sans nouvelle review (règle : deux reviews sans constat de sécurité) :
+
+- **L'étude se juge contre la MARGE**, pas le plafond brut : `client.marge(ctx)`
+  rend le plus petit reste des trois garde-fous (bien 90 jours, compte
+  30 jours, budget du mois), lu dans le MÊME journal que `jugerAppel`. Sans
+  elle, un compte qui avait déjà dépensé passait l'estimation, puis
+  `plafond_compte` tombait au milieu des mois, après paiement.
+- **Reliquat accepté et écrit** : le premier jugement ne connaît pas les
+  absents de la liste. S'ils sont trop nombreux, l'étude refuse APRÈS la fiche
+  du bien et la liste (0,20 $ au plus, une fois : à la relance, les deux
+  viennent du cache), jamais au milieu des mois. Compter d'emblée toutes les
+  fiches refuserait les études de 15 comparables présents — le cas normal.
+- **Taille de l'annonce illisible = pas de liste** : `Number(null)` valait 0 et
+  lançait une recherche « 0 chambre » en silence. Chambres et salles de bain
+  doivent être des nombres (un studio a 0 chambre), voyageurs ≥ 1 ; sinon les
+  fiches se lisent une par une.
+- **Ménage** : une ligne de facture de type autre que « charge » ne compte pas ;
+  « Ménage N EUR » se lit ; un montant négatif (remise) ne se lit pas.
+- **Ventes trop minces sous un marché aminci** : l'avertissement
+  `mesure_insuffisante` est émis aussi (le statut n'en porte qu'un).

@@ -16,6 +16,7 @@ const { etudierBien } = require('../lib/marche/etude')
 function espion ({ estime = 0, liste = null } = {}) {
   const c = { appels: [],
     estimer: async () => estime,
+    marge: async () => 3,
     comparables: async (p) => { c.appels.push(['liste', p]); return { donnees: liste || { listings: [] }, recupereLe: '2026-09-22T00:00:00Z' } },
     annonce: async (id) => { c.appels.push(['fiche', id]); return { donnees: { listing_info: { listing_name: `n${id}` }, host_info: { host_id: 1, cohost_ids: [] }, property_details: { bedrooms: 1, baths: 1, guests: 2 } }, recupereLe: '2026-09-24T00:00:00Z' } },
     metriquesAnnonce: async (id) => { c.appels.push(['mois', id]); return { donnees: { results: [] }, recupereLe: '2026-09-20T00:00:00Z' } } }
@@ -67,4 +68,64 @@ test('LE TEST QUI COMPTE : les fiches viennent de la liste des comparables — o
   assert.equal(r.comparables[0].nom, liste.listings[0].listing_info.listing_name)
   assert.equal(r.comparables[0].host_id, String(liste.listings[0].host_info.host_id))
   assert.equal(r.comparables[3].nom, 'n1234')
+})
+
+// ─── Review du 24 septembre (b3e63f7) : le cout jugé pour de vrai ───────────
+// Un espion dont `estimer` SOMME les tarifs des appels hors cache, et dont la
+// marge est reglable : la regle « jamais d'arret au milieu des mois » y est
+// exercee, et non une constante.
+const { TARIFS } = require('../lib/airroi/cout')
+function espionCout ({ marge = 3, cache = new Set(), liste = { listings: [] }, taille = { bedrooms: 1, baths: 1, guests: 2 } } = {}) {
+  const cle = (e, p) => `${e} ${p.listing_id || JSON.stringify(p)}`
+  const c = { appels: [],
+    marge: async () => marge,
+    estimer: async (appels) => appels.reduce((t, a) => t + (cache.has(cle(a.endpoint, a.params)) ? 0 : TARIFS[a.endpoint]), 0),
+    comparables: async (p) => { c.appels.push(['liste', p]); return { donnees: liste, recupereLe: 'x' } },
+    annonce: async (id) => { c.appels.push(['fiche', id]); return { donnees: { listing_info: { listing_name: `n${id}` }, host_info: { host_id: 1 }, property_details: taille }, recupereLe: 'x' } },
+    metriquesAnnonce: async (id) => { c.appels.push(['mois', id]); return { donnees: { results: [] }, recupereLe: 'x' } } }
+  return c
+}
+const AVEC_ANNONCE = { ...BIEN, airbnb_listing_id: '992723390568420450' }
+
+test('LE TEST QUI COMPTE : l etude se juge contre la MARGE restante, pas contre le plafond brut', async () => {
+  // 10 comparables absents de la liste : 0,10 + 0,10 + 10 x 0,20 = 2,20 $.
+  const ids = Array.from({ length: 10 }, (_, i) => String(i + 1))
+  const riche = espionCout({ marge: 3 })
+  assert.equal((await etudierBien({ client: riche, bien: AVEC_ANNONCE, listingIds: ids })).refus, undefined)
+  // Le compte a deja depense : il ne reste que 1,00 $. Refus AVANT tout appel
+  // (le pire cas connu, 0,10 + 0,10 + 10 x 0,10 = 1,20 $, depasse deja).
+  const pauvre = espionCout({ marge: 1 })
+  const r = await etudierBien({ client: pauvre, bien: AVEC_ANNONCE, listingIds: ids })
+  assert.equal(r.refus, 'etude_trop_chere')
+  assert.equal(pauvre.appels.length, 0)
+  assert.match(r.message, /ce qui reste disponible \(1\.00 \$/)
+})
+
+test('LE TEST QUI COMPTE : la liste revele trop d absents — refus APRES la liste, AVANT le premier mois', async () => {
+  // Marge 2 $ : le pire cas connu (1,20 $) passe ; apres la liste, 10 absents
+  // portent le total a 2,20 $ : refus, et aucun mois paye.
+  const c = espionCout({ marge: 2 })
+  const r = await etudierBien({ client: c, bien: AVEC_ANNONCE, listingIds: Array.from({ length: 10 }, (_, i) => String(i + 1)) })
+  assert.equal(r.refus, 'etude_trop_chere')
+  assert.deepEqual(c.appels.map(a => a[0]), ['fiche', 'liste'], 'le reliquat accepte : fiche du bien et liste, 0,20 $ — aucun mois')
+  // A la relance, fiche et liste viennent du cache : rien de plus n'est paye
+  // avant le meme refus.
+  const cache = new Set([`GET /listings 992723390568420450`, `GET /listings/comparables ${JSON.stringify({ latitude: 43.06, longitude: 0.14, bedrooms: 1, baths: 1, guests: 2, currency: 'native' })}`])
+  const c2 = espionCout({ marge: 2, cache })
+  const r2 = await etudierBien({ client: c2, bien: AVEC_ANNONCE, listingIds: Array.from({ length: 10 }, (_, i) => String(i + 1)) })
+  assert.equal(r2.refus, 'etude_trop_chere')
+})
+
+test('LE TEST QUI COMPTE : taille de l annonce illisible — aucune recherche « 0 chambre », on lit les fiches', async () => {
+  for (const taille of [{}, { bedrooms: null, baths: 1, guests: 2 }, { bedrooms: 1, baths: 1, guests: 0 }]) {
+    const c = espionCout({ taille })
+    const r = await etudierBien({ client: c, bien: AVEC_ANNONCE, listingIds: ['7', '8'] })
+    assert.equal(r.refus, undefined)
+    assert.ok(!c.appels.some(a => a[0] === 'liste'), `pas de liste pour ${JSON.stringify(taille)}`)
+    assert.deepEqual(c.appels.filter(a => a[0] === 'fiche').map(a => a[1]), ['992723390568420450', '7', '8'])
+  }
+  // Un studio (0 chambre) est une taille LISIBLE : la liste part.
+  const studio = espionCout({ taille: { bedrooms: 0, baths: 1, guests: 2 } })
+  await etudierBien({ client: studio, bien: AVEC_ANNONCE, listingIds: ['7'] })
+  assert.equal(studio.appels.find(a => a[0] === 'liste')[1].bedrooms, 0)
 })

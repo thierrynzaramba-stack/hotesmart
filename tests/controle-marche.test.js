@@ -67,6 +67,12 @@ test('LE TEST QUI COMPTE : le menage se lit dans les trois formes vues en produc
   assert.equal(menageFacture({ invoiceItems: [{ description: 'frais de ménage', lineTotal: 0 }] }), false)
   assert.equal(menageFacture({ rateDescription: 'Base Price 480 EUR' }), false)
   assert.equal(menageFacture(null), false)
+  // Review du 24 septembre : une ligne de PAIEMENT n'est pas un frais ;
+  // « Ménage 45 EUR » se lit ; « Cleaning -45 » (remise) ne se lit pas.
+  assert.equal(menageFacture({ invoiceItems: [{ description: 'ménage', type: 'payment', lineTotal: 45 }] }), false)
+  assert.equal(menageFacture({ invoiceItems: [{ description: 'ménage', lineTotal: 45 }] }), true, 'type absent : garde')
+  assert.equal(menageFacture({ rateDescription: 'Ménage 45 EUR' }), true)
+  assert.equal(menageFacture({ rateDescription: 'Cleaning -45 EUR' }), false)
   // Par fenetre : seuls les sejours COMPTES ayant une nuit dedans.
   const lignes = [{ raw: { rateDescription: 'Cleaning 45 EUR' } }, { raw: { rateDescription: 'Cleaning 45 EUR' } }, { raw: { rateDescription: 'Cleaning 45 EUR' } }]
   const ecl = [{ compte: true, nuits: [{ date: '2024-02-10' }] }, { compte: false, nuits: [] }, { compte: true, nuits: [{ date: '2026-01-10' }] }]
@@ -110,6 +116,11 @@ test('reference amincie : releve ecrit avec les niveaux ET l ecart, marques par 
   assert.equal(Array.isArray(r.ecarts), true, 'l ecart existe des que les deux grilles existent')
   assert.equal(r.ecarts[0].ecart_eur, 5)
   assert.ok(r.avertissements.some(a => a.type === 'reference_amincie'))
+  // Marche amincie ET ventes trop minces : le statut dit l'un, l'avertissement
+  // dit l'autre (review).
+  const deuxFois = construireReleve({ bien: BULLE, marche: amincie, mesure12: { niveaux: null, nuits: 9 }, grille3ans, motif: 'rafraichissement', releveLe: '2026-10-01T00:00:00Z' })
+  assert.equal(deuxFois.statut, 'reference_amincie')
+  assert.ok(deuxFois.avertissements.some(x => x.type === 'mesure_insuffisante'))
   // Sans niveau du tout (trop peu de nuits pour un quantile) : pas d'ecart.
   const vide = construireReleve({ bien: BULLE, marche: marche('reference_amincie'), mesure12, grille3ans, motif: 'rafraichissement', releveLe: '2026-10-01T00:00:00Z' })
   assert.equal(vide.ecarts, null)

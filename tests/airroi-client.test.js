@@ -293,3 +293,17 @@ test('SECURITE : masquer couvre les formes encodees de la cle (URL, JSON)', () =
   assert.ok(!t.includes(cle) && !t.includes(encodeURIComponent(cle)) && !t.includes(JSON.stringify(cle).slice(1, -1)), t)
   assert.equal(masquer('rien', ''), 'rien')
 })
+
+test('LE TEST QUI COMPTE : la marge est le plus petit reste des trois garde-fous', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'airroi-marge-'))
+  const depot = depotFichier(d)
+  const jour = new Date('2026-09-24T12:00:00Z')
+  const client = creerClient({ alerter: null, depot, fetch: async () => { throw new Error('aucun reseau') }, maintenant: () => jour,
+    gardes: { budgetMensuelUsd: 10, plafondCompte30jUsd: 4, plafondBien90jUsd: 3 } })
+  assert.equal(typeof client.marge, 'function', 'le client dit ce qui reste a depenser')
+  assert.equal(await client.marge({ userId: 'u', propertyId: 'b' }), 3, 'rien depense : le plafond du bien')
+  const id = await depot.reserver({ endpoint: 'GET /listings', cle: 'k1', cout: 2.6, userId: 'u', propertyId: 'autre', le: jour.toISOString() })
+  await depot.terminer(id, { statut: 'ok', http: 200 })
+  assert.equal(await client.marge({ userId: 'u', propertyId: 'b' }), 1.4, 'le compte a depense 2,60 $ sur un autre bien : il reste 1,40 $')
+  assert.equal(await client.marge({ userId: 'v', propertyId: 'c' }), 3, 'un autre compte n en paie rien')
+})
