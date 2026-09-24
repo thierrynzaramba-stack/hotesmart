@@ -1387,3 +1387,58 @@ L'écart lointain repose sur peu de nuits de week-end.
   **id 2**, Bagnères-de-Bigorre, capture 2026-09-24, 11 saisons, 10 ruptures,
   deux régimes, explication `null` avec sa limite. Relue en base. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
   commandes, jamais une.
+
+### V2.3 — zone de dernière minute et force des ruptures (24 septembre 2026)
+
+**Constat de Thierry** : deux anomalies au même endroit — une saison « Forte »
+du 24 au 30 septembre et une rupture à ×1,01 le 1er octobre — toutes deux
+dans les jours collés à la capture, où le pacing est déjà presque rempli. La
+correction de l'éloignement est une pente régulière : elle ne reproduit pas la
+remontée des tout derniers jours et sur-relève cette zone.
+
+1. **Zone de dernière minute, MESURÉE** (`zoneDerniereMinute`,
+   `lib/marche/saisons.js`). Pour chaque jour, le rapport nuits réservées du
+   jour / même jour de semaine sept jours plus tard. Référence : les jours 7 à
+   27 (semaines 2 à 4) ; seuil = médiane + 3 écarts absolus médians ; zone =
+   les jours consécutifs depuis la capture au-dessus du seuil. **Bagnères :
+   médiane ×1,10, dispersion 0,047, seuil ×1,24 ; jours 0-2 à ×1,25 / ×1,33 /
+   ×1,47, jour 3 à ×1,16, jours 4-23 entre ×0,97 et ×1,18 → 3 jours, du 24 au
+   26 septembre.** Ces jours ne portent ni saison, ni rupture, ni pic, ni
+   surcroît : « zone de dernière minute, non interprétable », un régime à part
+   (`derniere_minute`). *Règle choisie seule* ; *sensibilité dite* : avec les
+   jours 4-31 ou 7-34 comme référence, 2 jours ou 1 (la chute du 25 octobre,
+   vue depuis la semaine d'avant, gonfle la dispersion). *Alternative* : une
+   durée fixe (3 jours, la mesure de Bagnères), plus simple, non adaptée à un
+   autre marché.
+2. **La pente s'estime sans la zone.** −19,4 % par 30 jours (−20,2 % avec).
+   **Ce qui bouge ailleurs** (le vrai enjeu) : début octobre seulement —
+   Moyenne 27 sept. → 1er oct., **Forte 2 → 11 oct.**, Moyenne 12 → 25 oct. ;
+   les frontières du 25 oct. et du 29 janv. glissent d'un jour (26 oct.,
+   30 janv.). Noël, janvier, février, mars : identiques. Conséquences :
+   - le 24-30 septembre n'est plus un pic ; un pic **« Forte » faible** apparaît
+     du 2 au 11 octobre, sans cause calendaire française, borné seulement par
+     deux TRANSITIONS (×1,06 et ×1,13) — il entre dans la liste à lire ;
+   - le pic de fin janvier (30 janv. → 12 fév.) est expliqué à **50 %** (7 jours
+     sur 14, zone C) : il passe TOUT JUSTE le seuil d'explication (50 %) ;
+   - l'écart semaine / week-end d'octobre devient **+7,1 %** (2 → 11 oct.,
+     734 nuits de week-end) ; le 12 → 25 oct. n'a plus qu'une date de week-end
+     hors Toussaint : non calculable.
+3. **Chaque frontière porte sa FORCE** (rapport des nuits réservées trois jours
+   après / trois jours avant, lu dans le sens du plus fort : ×0,36 → 2,78).
+   **Sous ×1,2, ce n'est pas une rupture, c'est une TRANSITION** (la saison
+   change sans saut franc des réservations) : listée à part, jamais affichée
+   comme une rupture. Chaque saison dit son entrée (`debut`, `rupture`,
+   `transition`) et sa force — la table ne prend aucune colonne neuve.
+   *Seuil choisi seul*, le même que le plancher d'amplitude (20 %).
+   *Alternative* : un seuil relatif au bruit jour à jour du marché. Bagnères :
+   neuf ruptures (19 déc. 2,54 ; 2 janv. 2,78 ; 6 mars 2,71 ; 13 fév. 1,74 ;
+   26 déc. 1,65 ; 26 oct. 1,39 ; 28 mars 1,38 ; 30 janv. 1,32 ; 22 janv.
+   1,29), deux transitions (2 oct. 1,06 ; 12 oct. 1,13). Le 1er octobre (×1,01)
+   a disparu.
+
+**Version de méthode** : `v2.3-2026-09-24-b`. La ligne aveugle de staging
+(id 2) est en `v2.3-2026-09-24` : elle ne se confond pas avec la nouvelle.
+
+**Question ouverte pour Thierry** : un pic borné seulement par des transitions
+(2 → 11 oct.) doit-il entrer dans la liste à lire ? Tel quel, oui — aucune
+règle ne l'en écarte.

@@ -39,29 +39,35 @@ test('LE TEST QUI COMPTE : chaque pic lu dans le calendrier — Noel et fevrier 
   // couvre les 21 jours du pic — pas les 16 de la seule zone A (review).
   assert.deepEqual(fevrier.causes.find(c => c.type === 'vacances'), { type: 'vacances', nom: "Vacances d'Hiver", zones: ['A', 'B', 'C'], jours: 21, part: 1 })
   assert.ok(fevrier.causes.some(c => c.type === 'date_commerciale' && c.nom === 'Saint-Valentin'))
-  // 29 janvier - 12 fevrier : la zone C ne part que le 6 fevrier.
-  const fin = pic('2027-01-29')
-  assert.equal(fin.explique, false)
-  assert.equal(fin.part_expliquee, 0.47)
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : zone de derniere minute
+  // (24-26 sept.) exclue de la pente et du classement (Thierry). Le pic de fin janvier commence le 30 (et
+  // non plus le 29) : 7 jours sur 14 couverts par la zone C, 50 % — il passe
+  // TOUT JUSTE le seuil d'explication. La zone C ne part que le 6 fevrier.
+  const fin = pic('2027-01-30')
+  assert.equal(fin.part_expliquee, 0.5)
+  assert.equal(fin.explique, true)
   assert.deepEqual(fin.causes.map(c => [c.nom, c.zones.join('')]), [["Vacances d'Hiver", 'C']])
-  assert.match(fin.phrase, /le calendrier n'explique que 47 % de ces jours/)
 })
 
 test('LE TEST QUI COMPTE : le calendrier vient de la BASE, pas d un texte recopie — sans les vacances d hiver de la zone C, la fin janvier perd sa seule cause', () => {
   const sansC = VACANCES.filter(v => !(v.zone === 'C' && /Hiver/.test(v.nom)))
-  const fin = expliquer(sansC).pics.find(p => p.debut === '2027-01-29')
+  const fin = expliquer(sansC).pics.find(p => p.debut === '2027-01-30')
   assert.equal(fin.part_expliquee, 0)
   assert.deepEqual(fin.causes, [])
   // Et un jour de vacances inventees devient explique.
   const invente = [...VACANCES, { zone: 'B', nom: 'Vacances inventees', date_debut: '2027-01-29', date_fin: '2027-02-05' }]
-  assert.equal(expliquer(invente).pics.find(p => p.debut === '2027-01-29').explique, true)
+  assert.equal(expliquer(invente).pics.find(p => p.debut === '2027-01-30').part_expliquee, 1)
 })
 
 test('LE TEST QUI COMPTE : les jours sans cause calendaire francaise connue — une LISTE A LIRE, datee, rien d enregistre', () => {
   const e = expliquer()
   assert.ok(e.evenements_possibles.length > 0, 'une boucle vide ne prouverait rien')
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : zone de derniere minute
+  // (24-26 sept.) exclue de la pente et du classement (Thierry). Le 24-30 septembre n'est plus un pic ;
+  // un pic « forte » faible (borne par deux TRANSITIONS, ×1,06 et ×1,13)
+  // apparait du 2 au 11 octobre, sans cause calendaire francaise.
   assert.deepEqual(e.evenements_possibles.map(x => [x.debut, x.fin, x.proche_de_la_capture]),
-    [['2026-09-24', '2026-09-30', true], ['2027-01-29', '2027-02-05', false]])
+    [['2026-10-02', '2026-10-11', false], ['2027-01-30', '2027-02-05', false]])
   for (const x of e.evenements_possibles) {
     assert.equal(x.a_lire, true)
     assert.equal(x.regime, 'pacing')
@@ -72,24 +78,26 @@ test('LE TEST QUI COMPTE : les jours sans cause calendaire francaise connue — 
       assert.deepEqual(causesDuJour(d, cal), [], `${d} a une cause calendaire`)
     }
   }
-  assert.match(e.evenements_possibles[0].phrase, /touchent la date de l’étude/)
   assert.equal(e.evenements_possibles[1].dans_un_pic.saison, 'forte')
 })
 
 test('LE TEST QUI COMPTE : l ecart semaine / week-end, periode par periode, hors vacances et feries — jamais un resume par nom de saison', () => {
   const e = expliquer()
   const periode = d => e.ecart_semaine_week_end.find(x => x.debut === d)
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : zone de derniere minute
+  // (24-26 sept.) exclue de la pente et du classement (Thierry). Periodes : 2-11 oct. et 26 oct. - 18 dec.
   // Pres de la capture : le week-end se vend plus cher.
-  assert.deepEqual([periode('2026-10-01').ecart_prix_pct, periode('2026-10-25').ecart_prix_pct], [7.5, 8.5])
+  assert.deepEqual([periode('2026-10-02').ecart_prix_pct, periode('2026-10-26').ecart_prix_pct], [7.1, 8.5])
   // Les ponts et week-ends prolonges de l'Armistice (7-15 nov.) sont ecartes
   // comme les vacances et les feries (review) : 28 nuits de semaine et 10 de
   // week-end de fin octobre a mi-decembre, pas 33 et 13.
-  assert.deepEqual([periode('2026-10-25').nuits_semaine, periode('2026-10-25').nuits_week_end], [28, 10])
-  assert.equal(periode('2026-10-01').distance_capture_jours, 7)
-  // La Toussaint (17 oct - 1er nov, trois zones) est ecartee : 11 nuits de
-  // semaine et 5 de week-end en octobre, pas 16 et 8.
-  assert.deepEqual([periode('2026-10-01').nuits_semaine, periode('2026-10-01').nuits_week_end], [11, 5])
-  assert.ok(periode('2026-10-01').remplissage_week_end > 0, 'le remplissage est montre a cote')
+  assert.deepEqual([periode('2026-10-26').nuits_semaine, periode('2026-10-26').nuits_week_end], [28, 10])
+  assert.equal(periode('2026-10-02').distance_capture_jours, 8)
+  // La Toussaint (17 oct - 1er nov) est ecartee : la periode du 12 au 25
+  // octobre n'a plus qu'une date de week-end, et aucun chiffre.
+  assert.equal(periode('2026-10-12').nuits_week_end, 1)
+  assert.equal(periode('2026-10-12').ecart_prix_pct, null)
+  assert.ok(periode('2026-10-02').remplissage_week_end > 0, 'le remplissage est montre a cote')
   // Les pics sont des vacances : aucune nuit hors vacances, et c'est dit.
   const noel = periode('2026-12-26')
   assert.equal(noel.ecart_prix_pct, null)
@@ -179,9 +187,10 @@ test('LE TEST QUI COMPTE : une periode a faible effectif ne produit AUCUN chiffr
     assert.equal(p.remplissage_week_end, undefined, 'aucun chiffre du tout')
     assert.match(p.motif, /moins de 400 nuits réservées/)
   }
-  // Octobre et novembre-decembre (895 et 610 nuits de week-end) : le chiffre reste.
-  assert.deepEqual([periode('2026-10-01').ecart_prix_pct, periode('2026-10-25').ecart_prix_pct], [7.5, 8.5])
-  assert.deepEqual([periode('2026-10-01').nuits_reservees_week_end, periode('2026-10-25').nuits_reservees_week_end], [895, 610])
+  // Octobre et novembre-decembre (734 et 610 nuits de week-end) : le chiffre
+  // reste (periodes redecoupees par la zone de derniere minute, 24 septembre).
+  assert.deepEqual([periode('2026-10-02').ecart_prix_pct, periode('2026-10-26').ecart_prix_pct], [7.1, 8.5])
+  assert.deepEqual([periode('2026-10-02').nuits_reservees_week_end, periode('2026-10-26').nuits_reservees_week_end], [734, 610])
   // Aucun ecart negatif ne sort sur cette capture : ceux qui sortaient etaient du bruit.
   assert.ok(e.ecart_semaine_week_end.every(x => x.ecart_prix_pct == null || x.ecart_prix_pct > 0))
 })
@@ -193,7 +202,7 @@ test('LE TEST QUI COMPTE : sans cause calendaire FRANCAISE connue — jamais « 
     assert.match(x.phrase, /vacances d’un pays voisin/)
     assert.equal(x.limite, 'calendrier_francais_seulement')
   }
-  assert.match(e.pics.find(p => p.debut === '2026-09-24').phrase, /calendrier français connu/)
+  assert.match(e.pics.find(p => p.debut === '2026-10-02').phrase, /calendrier français connu/)
 })
 
 test('le seuil de l ecart a la limite : 400 nuits reservees calculent, 399 non — de chaque cote', () => {

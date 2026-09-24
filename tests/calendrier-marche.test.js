@@ -32,7 +32,11 @@ test('LE TEST QUI COMPTE : une ligne par MARCHE et par capture — aucun logemen
   for (const interdit of ['"prix"', 'booked_rate_avg', 'available_rate_avg', 'average_daily_rate', '€']) assert.ok(!texte.includes(interdit), `${interdit} dans la ligne`)
   // Le contenu : celui des etapes V2.3.1 et V2.3.2, tel quel.
   assert.deepEqual(l.ruptures.filter(r => ['2026-12-19', '2027-01-02', '2027-03-06'].includes(r.date)).map(r => r.date), ['2026-12-19', '2027-01-02', '2027-03-06'])
-  assert.deepEqual(l.regimes.map(r => r.regime), ['pacing', 'forme_mensuelle'])
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : la zone de derniere minute
+  // est une periode a part dans les regimes (Thierry).
+  assert.deepEqual(l.regimes.map(r => r.regime), ['derniere_minute', 'pacing', 'forme_mensuelle'])
+  // Chaque saison dit comment elle commence ; aucune colonne neuve n'est requise.
+  assert.ok(l.saisons.every(s => ['debut', 'rupture', 'transition'].includes(s.entree)))
   assert.ok(l.evenements_possibles.every(e => e.a_lire === true))
 })
 

@@ -40,8 +40,13 @@ test('LE TEST D OR : les ruptures du 22 septembre — 19 decembre, 2 janvier, 6 
   for (const d of fortes) assert.equal(parDate.get(d).datee_au_jour, true)
   // La liste ENTIERE, figee sur la fixture : aucune rupture parasite ne
   // s'ajoute sans que ce test le dise (review).
-  assert.deepEqual(c.ruptures.map(r => r.date), ['2026-10-01', '2026-10-25', '2026-12-19', '2026-12-26', '2027-01-02',
-    '2027-01-22', '2027-01-29', '2027-02-13', '2027-03-06', '2027-03-28'])
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : zone de derniere minute
+  // (24-26 sept.) exclue de la pente et du classement (Thierry). Neuf ruptures (force >= 1,2) ; le 1er
+  // octobre (×1,01) a disparu avec la zone ; 25 oct. et 29 janv. glissent d'un
+  // jour ; deux TRANSITIONS faibles en octobre (×1,06 et ×1,13).
+  assert.deepEqual(c.ruptures.map(r => r.date), ['2026-10-26', '2026-12-19', '2026-12-26', '2027-01-02',
+    '2027-01-22', '2027-01-30', '2027-02-13', '2027-03-06', '2027-03-28'])
+  assert.deepEqual(c.transitions.map(r => [r.date, r.force]), [['2026-10-02', 1.06], ['2026-10-12', 1.13]])
   // Aucune saison sous 5 jours, recalage compris.
   for (const x of c.saisons) assert.ok((Date.parse(x.fin) - Date.parse(x.debut)) / 86400000 + 1 >= 5, `${x.debut} → ${x.fin}`)
   // Les saisons qu'elles bornent : Noel et fevrier en tete, le creux d'avant Noel en bas.
@@ -156,8 +161,11 @@ test('un trou SUR une rupture : aucune rupture ni borne de saison datee sur un j
   }
   const trou = ['2026-12-18', '2026-12-19', '2026-12-20']
   const c = calculer(sans(trou))
-  // La montee de Noel reste vue, juste apres le trou.
-  assert.ok(c.ruptures.some(r => r.sens === 'hausse' && r.date > '2026-12-20' && r.date <= '2026-12-26'))
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : zone de derniere minute
+  // (24-26 sept.) exclue de la pente et du classement (Thierry). Le saut de Noel tombe DANS le trou : la
+  // montee reste vue juste apres, mais sa force mesuree sur les seuls jours
+  // presents peut rester sous 1,2 — rupture ou transition, jamais sur un trou.
+  assert.ok([...c.ruptures, ...c.transitions].some(r => r.sens === 'hausse' && r.date > '2026-12-20' && r.date <= '2026-12-26'))
   assert.equal(c.ruptures.find(r => r.date === '2027-01-02').sens, 'baisse')
 })
 
@@ -210,13 +218,18 @@ test('LE TEST QUI COMPTE : plancher d amplitude — un marche mollement contrast
 
 test('LE TEST QUI COMPTE : deux regimes, dits periode par periode — pacing jusqu a l horizon, forme mensuelle au-dela', () => {
   const c = calculer()
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : la zone de derniere minute
+  // est une periode a part dans les regimes (Thierry).
   assert.deepEqual(c.regimes.map(r => [r.debut, r.fin, r.regime]),
-    [['2026-09-24', '2027-04-11', 'pacing'], ['2027-04-12', '2027-08-31', 'forme_mensuelle']])
+    [['2026-09-24', '2026-09-26', 'derniere_minute'], ['2026-09-27', '2027-04-11', 'pacing'], ['2027-04-12', '2027-08-31', 'forme_mensuelle']])
+  // Les saisons disent leur entree : la premiere apres la zone, puis ruptures et transitions.
+  assert.deepEqual(c.saisons.slice(0, 4).map(s => [s.debut, s.entree, s.force_entree]),
+    [['2026-09-27', 'debut', null], ['2026-10-02', 'transition', 1.06], ['2026-10-12', 'transition', 1.13], ['2026-10-26', 'rupture', 1.39]])
   assert.ok(c.saisons.every(s => s.regime === 'pacing'))
   assert.ok(c.au_dela.every(m => m.regime === 'forme_mensuelle'))
   assert.equal(saisonDuJour(c, '2026-12-31').regime, 'pacing')
   assert.equal(saisonDuJour(c, '2027-07-14').regime, 'forme_mensuelle')
-  assert.match(c.regimes[1].phrase, /pas de la demande de cette année/)
+  assert.match(c.regimes.find(r => r.regime === 'forme_mensuelle').phrase, /pas de la demande de cette année/)
 })
 
 test('LE TEST QUI COMPTE : la forme mensuelle se lit sur la MEDIANE des mois homologues — une valeur aberrante ne la deplace pas', () => {
@@ -278,7 +291,8 @@ test('pas d « au-dela » quand l horizon couvre toute la fenetre', () => {
   const c = calendrierDuMarche({ pacing: plein, marche60: MARCHE60 })
   assert.equal(c.horizon.fin, c.fenetre.fin)
   assert.deepEqual(c.au_dela, [])
-  assert.deepEqual(c.regimes.map(r => r.regime), ['pacing'])
+  // (la zone de derniere minute, s'il y en a une, precede le pacing)
+  assert.deepEqual(c.regimes.map(r => r.regime).filter(r => r !== 'derniere_minute'), ['pacing'])
 })
 
 // ─── Regle de methode (Thierry, 24 septembre 2026) : la detection est AVEUGLE ─
@@ -294,4 +308,29 @@ test('LE TEST QUI COMPTE : les saisons se detectent sans calendrier — le modul
   // Et le module ne peut pas aller le chercher lui-meme : aucun require.
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'marche', 'saisons.js'), 'utf8')
   assert.ok(!/require\(/.test(src), 'saisons.js n importe rien — ni vacances, ni feries, ni la V1')
+})
+
+// ─── Zone de derniere minute et force des ruptures (Thierry, 24 septembre) ──
+
+test('LE TEST QUI COMPTE : la zone de derniere minute est MESUREE — 24-26 septembre, ni saison ni rupture, et la pente s estime sans elle', () => {
+  const c = calculer()
+  assert.deepEqual([c.derniere_minute.debut, c.derniere_minute.fin, c.derniere_minute.jours, c.derniere_minute.seuil], ['2026-09-24', '2026-09-26', 3, 1.24])
+  for (const d of ['2026-09-24', '2026-09-25', '2026-09-26']) {
+    assert.deepEqual(saisonDuJour(c, d), { jour: d, saison: null, motif: 'derniere_minute', regime: 'derniere_minute' })
+  }
+  assert.equal(c.saisons[0].debut, '2026-09-27', 'la premiere saison commence apres la zone')
+  assert.ok(c.ruptures.every(r => r.date > '2026-09-26') && c.transitions.every(r => r.date > '2026-09-26'))
+  assert.match(c.derniere_minute.phrase, /non interprétable/)
+  // La pente SANS la zone : −19,4 % par 30 jours (−20,2 % avec).
+  assert.equal(c.eloignement.baisse_par_30_jours, 0.194)
+})
+
+test('LE TEST QUI COMPTE : chaque frontiere porte sa force ; sous ×1,2 ce n est pas une rupture', () => {
+  const c = calculer()
+  for (const r of c.ruptures) assert.ok(r.force >= 1.2, `${r.date} force ${r.force}`)
+  for (const r of c.transitions) assert.ok(r.force < 1.2, `${r.date} force ${r.force}`)
+  assert.deepEqual(c.ruptures.filter(r => ['2026-12-19', '2027-01-02', '2027-03-06'].includes(r.date)).map(r => r.force), [2.54, 2.78, 2.71])
+  // Force = le plus fort des deux sens : une baisse ×0,36 a la force 2,78.
+  const j2 = c.ruptures.find(r => r.date === '2027-01-02')
+  assert.equal(j2.rapport, 0.36)
 })
