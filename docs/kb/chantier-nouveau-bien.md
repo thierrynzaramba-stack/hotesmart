@@ -1542,4 +1542,9 @@ staging) — le contrôle de forme l'a attrapée. Attendu corrigé ; vérificate
 étendu à `marche_biens`, OK contre staging. **Aucun lien écrit** : La bulle
 n'existe pas en staging (trois logements de recette seulement) — décision à
 Thierry.
+**Lien écrit en staging (décision de Thierry, même jour)** : « Recette — Loft
+Pilotable » (992d1ebe…) → Bagnères-de-Bigorre, lien FICTIF sur le banc de
+test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3`), relu :
+`marche_biens` id 1. La vue rendrait pour ce logement la ligne de calendrier
+id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
 
