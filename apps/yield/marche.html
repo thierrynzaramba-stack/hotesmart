@@ -285,7 +285,9 @@
     const pics = m.pics.map(p => `<tr><td>${jourFr(p.debut)} → ${jourFr(p.fin)}</td>
       <td><span class="pastille p-${classe(p.saison)}"></span>${nomDe(p.saison)}</td>
       <td>${phrase(p.phrase)}</td></tr>`).join('')
-    const aLire = (m.evenements_possibles || []).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
+    // Seuls les evenements A LIRE s'affichent : un pic faiblement marque reste
+    // dans la donnee, jamais montre par defaut (Thierry, 24 septembre 2026).
+    const aLire = (m.evenements_possibles || []).filter(e => e.a_lire !== false).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
       || '<p class="motif">Rien à signaler : chaque pic a une cause dans le calendrier français.</p>'
     const ecarts = (m.ecart_semaine_week_end || []).map(x => `<tr><td>${jourFr(x.debut)} → ${jourFr(x.fin)}</td>
       <td>${x.ecart_prix_pct != null ? `<b>${x.ecart_prix_pct > 0 ? '+' : ''}${nombre(x.ecart_prix_pct)} %</b> le week-end`

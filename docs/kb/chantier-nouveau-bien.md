@@ -1548,3 +1548,34 @@ test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3`), relu :
 `marche_biens` id 1. La vue rendrait pour ce logement la ligne de calendrier
 id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
 
+### V2.3.4 — décisions de Thierry (24 septembre 2026, soir)
+
+- **Aucun lien de menu vers la page « Le marché »** : ce serait un troisième
+  contact avec l'existant, et la page deviendrait visible pour tout
+  utilisateur qui la croise. Accès par l'adresse directe
+  (`/apps/yield/marche`) tant que la V2 ne pilote rien ; **le lien se posera
+  au raccordement**.
+- **Le pic du 2 au 11 octobre sort de la liste à lire.** Une liste à lire ne
+  contient que ce qui pourrait changer une décision — même règle que l'écart
+  week-end sur faible effectif. **Règle (choisie seule)** : un pic n'entre dans
+  la liste que si AU MOINS UNE de ses deux frontières est une rupture (force
+  ≥ ×1,2) ; sinon il reste dans la donnée stockée (`a_lire: false`, motif
+  `motif_non_affiche`), jamais affiché par défaut. *Alternative* : exiger que
+  les DEUX frontières soient des ruptures (le pic de fin janvier, ×1,32 puis
+  ×1,74, entrerait aussi).
+- **Ce pic survit-il au recalcul ? Mesure de sensibilité** (zone forcée à 0
+  … 10 jours, même fixture) : dès que la zone fait 2 jours ou plus, une
+  « Forte » apparaît juste après elle et s'arrête TOUJOURS le 11 octobre, sur
+  la même transition ×1,13 — jamais bornée par une rupture ; à 0 ou 1 jour,
+  c'est la « Forte » contaminée de fin septembre. **Lecture** : ce pic est la
+  contamination de la dernière minute qui déborde le seuil dur de la zone, pas
+  une demande. Il est donc juste qu'il ne soit pas lu. Reste de la fenêtre :
+  identique pour une zone de 2 à 4 jours ; à 5 jours et plus, la « Forte » de
+  fin janvier commence le 6 février (départ de la zone C) au lieu du 30
+  janvier ; à 10 jours, une petite « Moyenne » apparaît en novembre. Les trois
+  ruptures du test d'or sont identiques dans tous les cas (2,54 / 2,78 / 2,71).
+- **Avant / après de la pente, redonné** (demandé trois fois) : −20,2 % → −19,4 %
+  par 30 jours ; seules les trois semaines d'octobre bougent, plus deux
+  frontières d'un jour (25 → 26 oct., 29 → 30 janv.) ; tableau complet au
+  §13 « zone de dernière minute ».
+

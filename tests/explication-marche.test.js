@@ -68,8 +68,10 @@ test('LE TEST QUI COMPTE : les jours sans cause calendaire francaise connue — 
   // apparait du 2 au 11 octobre, sans cause calendaire francaise.
   assert.deepEqual(e.evenements_possibles.map(x => [x.debut, x.fin, x.proche_de_la_capture]),
     [['2026-10-02', '2026-10-11', false], ['2027-01-30', '2027-02-05', false]])
+  // ⚠ Le 2 → 11 octobre (pic faiblement marque) reste STOCKE mais n'est pas a
+  // lire (Thierry, 24 septembre 2026) : seul le 30 janv. → 5 fev. l'est.
+  assert.deepEqual(e.evenements_possibles.filter(x => x.a_lire).map(x => x.debut), ['2027-01-30'])
   for (const x of e.evenements_possibles) {
-    assert.equal(x.a_lire, true)
     assert.equal(x.regime, 'pacing')
     assert.match(x.phrase, /rien n'est enregistré/)
     // Un evenement possible n'a AUCUNE cause calendaire, jour par jour.
@@ -246,5 +248,18 @@ test('la zone de derniere minute ne sert pas de voisin au surcroit, et un evenem
   const proche = es.evenements_possibles.find(x => x.proche_de_la_capture)
   assert.ok(proche, `aucun evenement proche : ${es.evenements_possibles.map(x => x.debut).join(', ')}`)
   assert.match(proche.phrase, /touchent la date de l’étude/)
+})
+
+test('LE TEST QUI COMPTE : un pic sans aucune rupture a ses bornes sort de la liste a lire — stocke, jamais affiche', () => {
+  const e = expliquer()
+  const oct = e.evenements_possibles.find(x => x.debut === '2026-10-02')
+  assert.equal(oct.a_lire, false)
+  assert.match(oct.motif_non_affiche, /aucune de ses frontières n’est une rupture/)
+  const jan = e.evenements_possibles.find(x => x.debut === '2027-01-30')
+  assert.equal(jan.a_lire, true, 'le pic de fin janvier entre par une rupture (×1,32)')
+  assert.equal(jan.motif_non_affiche, null)
+  // La page n'affiche que les evenements a lire.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'marche.html'), 'utf8')
+  assert.match(page, /evenements_possibles \|\| \[\]\)\.filter\(e => e\.a_lire !== false\)/)
 })
 

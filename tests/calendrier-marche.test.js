@@ -37,7 +37,11 @@ test('LE TEST QUI COMPTE : une ligne par MARCHE et par capture — aucun logemen
   assert.deepEqual(l.regimes.map(r => r.regime), ['derniere_minute', 'pacing', 'forme_mensuelle'])
   // Chaque saison dit comment elle commence ; aucune colonne neuve n'est requise.
   assert.ok(l.saisons.every(s => ['debut', 'rupture', 'transition'].includes(s.entree)))
-  assert.ok(l.evenements_possibles.every(e => e.a_lire === true))
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : un pic faiblement marque est
+  // STOCKE avec `a_lire: false` (Thierry) — la donnee le garde, l'ecran ne le
+  // montre pas par defaut.
+  assert.ok(l.evenements_possibles.every(e => typeof e.a_lire === 'boolean'))
+  assert.deepEqual(l.evenements_possibles.filter(e => !e.a_lire).map(e => e.debut), ['2026-10-02'])
 })
 
 test('un marche illisible est refuse ; un pacing trop mince se stocke « non calculable » avec son motif', () => {
