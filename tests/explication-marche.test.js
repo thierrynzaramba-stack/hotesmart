@@ -221,3 +221,30 @@ test('le seuil de l ecart a la limite : 400 nuits reservees calculent, 399 non �
   // 3 dates, meme avec beaucoup de nuits : aucun chiffre.
   assert.match(jugerEcart(jours(3, 500, 100), jours(4, 500, 110)).motif, /moins de 4 dates/)
 })
+
+test('un pic borne par deux transitions le DIT : saison faiblement marquee (2 → 11 octobre)', () => {
+  const e = expliquer()
+  const oct = e.pics.find(p => p.debut === '2026-10-02')
+  assert.equal(oct.faiblement_marque, true)
+  assert.match(oct.phrase, /Saison faiblement marquée : aucune rupture franche/)
+  assert.equal(e.pics.find(p => p.debut === '2026-12-19').faiblement_marque, false)
+})
+
+test('la zone de derniere minute ne sert pas de voisin au surcroit, et un evenement proche de la capture le dit', () => {
+  const dm = CAL.derniere_minute
+  const e = expliquer()
+  for (const x of e.evenements_possibles) assert.ok(x.debut > dm.fin, `evenement dans la zone : ${x.debut}`)
+  // La branche « proche de la capture » (review : plus testee) — un pic sans
+  // cause qui commence moins de 7 jours apres la capture.
+  const results = []
+  for (let i = 0; i < 200; i++) {
+    const r = Math.round(300 * Math.exp(-0.0075 * i) * (i >= 4 && i < 16 ? 2.2 : (Math.floor(i / 20) % 2 ? 1.3 : 1)))
+    results.push({ date: new Date(Date.UTC(2026, 8, 24 + i)).toISOString().slice(0, 10), booked_count: r, available_count: 1000 - r, booked_rate_avg: 100 })
+  }
+  const cs = calendrierDuMarche({ pacing: { results } })
+  const es = expliquerMarche({ calendrier: cs, pacing: { results }, vacances: [] })
+  const proche = es.evenements_possibles.find(x => x.proche_de_la_capture)
+  assert.ok(proche, `aucun evenement proche : ${es.evenements_possibles.map(x => x.debut).join(', ')}`)
+  assert.match(proche.phrase, /touchent la date de l’étude/)
+})
+

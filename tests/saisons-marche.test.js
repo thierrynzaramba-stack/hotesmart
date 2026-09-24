@@ -161,10 +161,11 @@ test('un trou SUR une rupture : aucune rupture ni borne de saison datee sur un j
   }
   const trou = ['2026-12-18', '2026-12-19', '2026-12-20']
   const c = calculer(sans(trou))
-  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : zone de derniere minute
-  // (24-26 sept.) exclue de la pente et du classement (Thierry). Le saut de Noel tombe DANS le trou : la
-  // montee reste vue juste apres, mais sa force mesuree sur les seuls jours
-  // presents peut rester sous 1,2 — rupture ou transition, jamais sur un trou.
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) — cause : le SEUIL DE FORCE
+  // (×1,2), pas la zone de derniere minute (annotation corrigee en review).
+  // Le saut de Noel tombe DANS le trou : la montee reste vue juste apres,
+  // mais sa force, mesuree sur les seuls jours presents, reste sous 1,2 —
+  // une transition ; jamais une borne sur un jour absent.
   assert.ok([...c.ruptures, ...c.transitions].some(r => r.sens === 'hausse' && r.date > '2026-12-20' && r.date <= '2026-12-26'))
   assert.equal(c.ruptures.find(r => r.date === '2027-01-02').sens, 'baisse')
 })
@@ -333,4 +334,45 @@ test('LE TEST QUI COMPTE : chaque frontiere porte sa force ; sous ×1,2 ce n est
   // Force = le plus fort des deux sens : une baisse ×0,36 a la force 2,78.
   const j2 = c.ruptures.find(r => r.date === '2027-01-02')
   assert.equal(j2.rapport, 0.36)
+})
+
+// ─── Cas limites de la zone et de la force (review de 5b703be) ──────────────
+function pacingDe (f, n = 200) {
+  const results = []
+  for (let i = 0; i < n; i++) {
+    const r = f(i)
+    if (r == null) continue
+    results.push({ date: new Date(Date.UTC(2026, 8, 24 + i)).toISOString().slice(0, 10), booked_count: r, available_count: 1000 - r })
+  }
+  return { results }
+}
+const base = i => Math.round(300 * Math.exp(-0.0075 * i) * (Math.floor(i / 20) % 2 ? 1.6 : 1))
+
+test('zone NON MESUREE : sans reference (jours 7 a 27 absents), elle le dit — « je ne sais pas » n est pas « non »', () => {
+  const c = calendrierDuMarche({ pacing: pacingDe(i => (i >= 7 && i <= 34 ? null : base(i))) })
+  assert.equal(c.derniere_minute.statut, 'non_mesuree')
+  assert.match(c.derniere_minute.motif, /reference trop courte/)
+  // Mesuree et vide : null (Bagneres sans dernier minute simulee).
+  const plat = calendrierDuMarche({ pacing: pacingDe(base) })
+  assert.equal(plat.derniere_minute, null)
+})
+
+test('la zone est CONTIGUE : un trou le jour 1 l arrete, meme si le jour 2 est gonfle', () => {
+  const c = calendrierDuMarche({ pacing: pacingDe(i => (i === 1 ? null : i <= 2 ? base(i) * 2 : base(i))) })
+  assert.deepEqual([c.derniere_minute.debut, c.derniere_minute.fin], ['2026-09-24', '2026-09-24'])
+})
+
+test('plancher RELATIF de la dispersion : un marche sature n ouvre pas de zone pour ×1,04', () => {
+  // Reference : rapports j/j+7 tous a 1,00 (nuits constantes) ; jour 0 a ×1,04.
+  const c = calendrierDuMarche({ pacing: pacingDe(i => (i === 0 ? 312 : i < 40 ? 300 : base(i))) })
+  assert.ok(c.derniere_minute == null || c.derniere_minute.statut === 'non_mesuree' || c.derniere_minute.jours === 0,
+    `zone ouverte a tort : ${JSON.stringify(c.derniere_minute)}`)
+})
+
+test('un saut DEPUIS ou VERS zero nuit est une rupture ; sous ×1,2 une transition', () => {
+  const { estRupture } = require('../lib/marche/saisons')
+  assert.equal(estRupture({ force: null, depuis_zero: true }), true, '0 → 30 nuits : la plus forte frontiere possible')
+  assert.equal(estRupture({ force: null, depuis_zero: false }), false, 'aucune mesure : pas une rupture')
+  assert.equal(estRupture({ force: 1.2, depuis_zero: false }), true)
+  assert.equal(estRupture({ force: 1.19, depuis_zero: false }), false)
 })

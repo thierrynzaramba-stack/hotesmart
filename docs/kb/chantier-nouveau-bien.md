@@ -1439,6 +1439,25 @@ remontée des tout derniers jours et sur-relève cette zone.
 **Version de méthode** : `v2.3-2026-09-24-b`. La ligne aveugle de staging
 (id 2) est en `v2.3-2026-09-24` : elle ne se confond pas avec la nouvelle.
 
+**Review de 5b703be (aucun bloquant), corrigé** : une zone NON MESURÉE
+(référence trop courte) se dit `statut: 'non_mesuree'`, distincte d'une zone
+mesurée vide (`null`) ; plancher RELATIF de la dispersion (2 % de la médiane —
+un marché saturé ouvrait une zone pour ×1,04) ; la zone est CONTIGUË et
+s'arrête au premier jour non mesurable (dit et testé) ; un saut depuis ou vers
+zéro nuit est une rupture (`estRupture`, testée seule : le calcul complet
+l'atteint rarement, et le test à travers lui passait à vide) ; un pic borné
+par deux transitions le DIT (« saison faiblement marquée ») ; le motif « horizon
+trop court » nomme la zone quand c'est elle. Les jours de la zone ne servent
+plus de VOISINS au surcroît — correction DÉFENSIVE, **non prouvée par un
+test** : sur Bagnères elle ne change aucun résultat. Annotation fausse d'un
+test corrigée (la transition de Noël sous un trou vient du seuil de force, pas
+de la zone).
+**Dette (non traitée)** : la ligne stockée porte la zone dans `regimes`, pas
+sous la clé `derniere_minute` ; un lecteur qui passerait la ligne relue à
+`saisonDuJour` obtiendrait `hors_saison_calculee` pour ces jours au lieu de
+`derniere_minute`. Aucun lecteur ne le fait aujourd'hui ; l'écran (V2.3.4)
+devra reconstruire la zone depuis `regimes`.
+
 **Question ouverte pour Thierry** : un pic borné seulement par des transitions
 (2 → 11 oct.) doit-il entrer dans la liste à lire ? Tel quel, oui — aucune
 règle ne l'en écarte.
