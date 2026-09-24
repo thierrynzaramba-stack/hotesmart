@@ -50,11 +50,19 @@ const { createClient } = require('@supabase/supabase-js')
   const mcOk = !mc.error && Number.isInteger(mc.count)
   console.log(`marche_calendrier (calendrier-marche.sql) : ${mcOk ? `presente, ${COLONNES.length} colonnes lues par leur nom, ${mc.count} ligne(s)` : `ABSENTE ou d'une autre forme (${mc.error ? mc.error.message : 'compte illisible'})`}`)
   if (!mcOk) manques.push('marche_calendrier (2026-09-24-calendrier-marche.sql)')
+  // Quatrieme migration (2026-09-24-marche-biens) : le lien logement → marche,
+  // lu par ses 8 colonnes (le premier attendu annoncait 9 : c'est le controle
+  // de forme colle par Thierry qui l'a attrape, 24 septembre 2026).
+  const MB = ['id', 'user_id', 'property_id', 'pays', 'region', 'localite', 'lie_par', 'lie_le']
+  const mb = await sb.from('marche_biens').select(MB.join(', '), { count: 'exact' }).limit(1)
+  const mbOk = !mb.error && Number.isInteger(mb.count)
+  console.log(`marche_biens (marche-biens.sql) : ${mbOk ? `presente, ${MB.length} colonnes lues par leur nom, ${mb.count} ligne(s)` : `ABSENTE ou d'une autre forme (${mb.error ? mb.error.message : 'compte illisible'})`}`)
+  if (!mbOk) manques.push('marche_biens (2026-09-24-marche-biens.sql)')
   // La lecture COTE CLIENT doit echouer : la cle service contourne la RLS et ne
   // peut pas le voir (review). Sonde avec la cle anon, si elle est connue.
   if (process.env.SUPABASE_ANON_KEY) {
     const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
-    for (const t of ['airroi_cache', 'airroi_appels', 'grille_controle', 'marche_calendrier']) {
+    for (const t of ['airroi_cache', 'airroi_appels', 'grille_controle', 'marche_calendrier', 'marche_biens']) {
       const r = await anon.from(t).select('*').limit(1)
       const ferme = !!r.error || !(r.data || []).length
       console.log(`${t} vu du navigateur (anon) : ${r.error ? `refuse (${r.error.code || r.error.message})` : `${(r.data || []).length} ligne(s)`}`)

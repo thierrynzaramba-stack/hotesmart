@@ -1533,3 +1533,13 @@ sans planter ; échelle nommée dans le tableau des pics ; une rupture sans
 force reste une rupture à l'écran. Test « aucun écran modifié » par diff git
 RETIRÉ (fragile, lisait l'arbre partagé) ; minuterie des tests annulée,
 modules restaurés en `finally` (5,3 s → 0,3 s).
+
+**Application de `marche_biens` en staging (24 septembre 2026)** : SQL collé par
+Thierry — biens 3, rls 1, policies 0, acces_client false, cles_etrangeres 0,
+**colonnes 8**, unicite 1, lignes 0. L'attendu annonçait 9 : c'était MON
+erreur de compte (le SQL déclare 8 colonnes, toutes lues par leur nom en
+staging) — le contrôle de forme l'a attrapée. Attendu corrigé ; vérificateur
+étendu à `marche_biens`, OK contre staging. **Aucun lien écrit** : La bulle
+n'existe pas en staging (trois logements de recette seulement) — décision à
+Thierry.
+

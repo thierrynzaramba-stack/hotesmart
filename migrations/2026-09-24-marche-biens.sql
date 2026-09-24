@@ -84,5 +84,5 @@ select
     as lignes;
 -- Attendu : biens 5 (prod) ou 3 (staging), rls 1,
 -- policies 0, acces_client false,
--- cles_etrangeres 0, colonnes 9, unicite 1,
+-- cles_etrangeres 0, colonnes 8, unicite 1,
 -- lignes 0.
