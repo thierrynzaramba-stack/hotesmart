@@ -1,0 +1,199 @@
+{
+ "source": "school_holidays (lecture seule, production, empreinte biens=5)",
+ "lu_le": "2026-09-24",
+ "lecture": {
+  "debut": "2026-04-01",
+  "fin": "2027-12-31"
+ },
+ "periodes": [
+  {
+   "zone": "A",
+   "nom": "Vacances de Printemps",
+   "date_debut": "2026-04-04",
+   "date_fin": "2026-04-19",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "B",
+   "nom": "Vacances de Printemps",
+   "date_debut": "2026-04-11",
+   "date_fin": "2026-04-26",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "C",
+   "nom": "Vacances de Printemps",
+   "date_debut": "2026-04-18",
+   "date_fin": "2026-05-03",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "C",
+   "nom": "Pont de l'Ascension",
+   "date_debut": "2026-05-14",
+   "date_fin": "2026-05-17",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "B",
+   "nom": "Pont de l'Ascension",
+   "date_debut": "2026-05-14",
+   "date_fin": "2026-05-17",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "A",
+   "nom": "Pont de l'Ascension",
+   "date_debut": "2026-05-14",
+   "date_fin": "2026-05-17",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "B",
+   "nom": "Vacances d'Été",
+   "date_debut": "2026-07-04",
+   "date_fin": "2026-08-31",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "A",
+   "nom": "Vacances d'Été",
+   "date_debut": "2026-07-04",
+   "date_fin": "2026-08-31",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "C",
+   "nom": "Vacances d'Été",
+   "date_debut": "2026-07-04",
+   "date_fin": "2026-08-31",
+   "annee_scolaire": "2025-2026"
+  },
+  {
+   "zone": "C",
+   "nom": "Vacances de la Toussaint",
+   "date_debut": "2026-10-17",
+   "date_fin": "2026-11-01",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "A",
+   "nom": "Vacances de la Toussaint",
+   "date_debut": "2026-10-17",
+   "date_fin": "2026-11-01",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "B",
+   "nom": "Vacances de la Toussaint",
+   "date_debut": "2026-10-17",
+   "date_fin": "2026-11-01",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "B",
+   "nom": "Vacances de Noël",
+   "date_debut": "2026-12-19",
+   "date_fin": "2027-01-03",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "A",
+   "nom": "Vacances de Noël",
+   "date_debut": "2026-12-19",
+   "date_fin": "2027-01-03",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "C",
+   "nom": "Vacances de Noël",
+   "date_debut": "2026-12-19",
+   "date_fin": "2027-01-03",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "C",
+   "nom": "Vacances d'Hiver",
+   "date_debut": "2027-02-06",
+   "date_fin": "2027-02-21",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "A",
+   "nom": "Vacances d'Hiver",
+   "date_debut": "2027-02-13",
+   "date_fin": "2027-02-28",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "B",
+   "nom": "Vacances d'Hiver",
+   "date_debut": "2027-02-20",
+   "date_fin": "2027-03-07",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "C",
+   "nom": "Vacances de Printemps",
+   "date_debut": "2027-04-03",
+   "date_fin": "2027-04-18",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "A",
+   "nom": "Vacances de Printemps",
+   "date_debut": "2027-04-10",
+   "date_fin": "2027-04-25",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "B",
+   "nom": "Vacances de Printemps",
+   "date_debut": "2027-04-17",
+   "date_fin": "2027-05-02",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "C",
+   "nom": "Pont de l'Ascension",
+   "date_debut": "2027-05-07",
+   "date_fin": "2027-05-07",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "A",
+   "nom": "Pont de l'Ascension",
+   "date_debut": "2027-05-07",
+   "date_fin": "2027-05-07",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "B",
+   "nom": "Pont de l'Ascension",
+   "date_debut": "2027-05-07",
+   "date_fin": "2027-05-07",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "C",
+   "nom": "Début des Vacances d'Été",
+   "date_debut": "2027-07-03",
+   "date_fin": "2027-07-03",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "B",
+   "nom": "Début des Vacances d'Été",
+   "date_debut": "2027-07-03",
+   "date_fin": "2027-07-03",
+   "annee_scolaire": "2026-2027"
+  },
+  {
+   "zone": "A",
+   "nom": "Début des Vacances d'Été",
+   "date_debut": "2027-07-03",
+   "date_fin": "2027-07-03",
+   "annee_scolaire": "2026-2027"
+  }
+ ]
+}

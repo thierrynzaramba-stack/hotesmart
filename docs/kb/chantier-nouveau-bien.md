@@ -1193,3 +1193,60 @@ forte » partout ; une date impossible (30 février) ou aberrante (2099) est
   demande Airbnb du marché ;
 - la date de capture compte : le même calcul sur une capture de janvier ne
   verra plus Noël, et verra l'été.
+
+### V2.3.2 — explication, événements possibles, écart semaine / week-end (`lib/marche/explication.js`, pur)
+
+Le calendrier vient de SA SOURCE, jamais recopié : vacances des trois zones
+lues en base (fixture `tests/fixtures/calendrier/vacances-2026-09-24.json`,
+lue en production le 24 septembre 2026, empreinte 5 biens, 27 périodes du
+2026-04-04 au 2027-07-03 — couverture complète jusqu'à l'horizon), fériés,
+ponts, week-ends prolongés et dates commerciales calculés par les modules de
+la V1. Régime : pacing seulement (au-delà de l'horizon, la forme mensuelle
+n'a pas de jours).
+
+**Résultat sur Bagnères (capture du 24 septembre 2026)** :
+- **Noël** (19 déc. → 1er janv.) : expliqué à 100 % — vacances de Noël des
+  trois zones, Réveillon de Noël et du Nouvel An, Noël férié.
+- **Février** (13 fév. → 5 mars, très forte) : expliqué à 100 % — vacances
+  d'hiver des trois zones, Saint-Valentin.
+- **29 janv. → 12 fév.** (forte) : expliqué à 47 % seulement — la zone C ne
+  part que le 6 février.
+- **Événements locaux POSSIBLES, à lire** (rien n'est enregistré, aucune
+  ligne dans `yield_events`) : **29 janv. → 5 fév.** (forte sans aucune cause
+  calendaire — la « montée vers l'hiver » de la table du 22 septembre) ;
+  **24 → 30 sept.** (marqué : touche la date de l'étude, où se mêlent les
+  réservations de dernière minute).
+- **Écart semaine / week-end** (vendredi-samedi contre dimanche-jeudi, hors
+  vacances et fériés, prix moyen des nuits réservées, chaque jour pesant
+  autant, remplissage à côté) : **+7,5 % en octobre, +6,5 % de novembre à
+  mi-décembre** ; **−3,2 % en janvier, −6,5 % en mars** (à 4 et 6 mois, sur
+  4 à 6 nuits de week-end déjà réservées). Les saisons hautes sont des
+  vacances : aucune nuit hors vacances, écart « non calculable », et dit —
+  la haute saison de Bagnères ne permet pas de « revérifier » l'écart hors
+  vacances.
+
+**Décisions prises seules (à confirmer ou renverser)** :
+1. **Un pic = une saison forte ou très forte du pacing** ; il est « expliqué »
+   quand le calendrier couvre au moins **50 %** de ses jours. *Alternative* :
+   un autre seuil, ou exiger 100 %.
+2. **Événement possible** = une suite d'au moins **2 jours** sans aucune cause
+   calendaire, dans un pic, ou en surcroît (remplissage ≥ **×1,3** la médiane
+   des jours de même type — semaine ou week-end — à ±14 jours). *Alternative* :
+   ne proposer que les jours des pics.
+3. **L'écart semaine / week-end se donne PÉRIODE PAR PÉRIODE, avec sa distance
+   à la capture, jamais résumé par nom de saison** : près de la capture
+   +7 %, au loin négatif et mince ; une médiane par nom afficherait ~1 %,
+   faux. Chaque jour pèse autant (pondérer par les nuits réservées donnerait
+   tout le poids aux dates proches). Au moins **4 nuits** de chaque côté.
+   *Alternative* : ne garder que les périodes à moins de 90 jours.
+4. **Proximité** : un événement possible qui commence à moins de **7 jours**
+   de la capture le dit. *Alternative* : l'écarter.
+
+**Limites, écrites** : le prix moyen des nuits réservées est teinté par ce qui
+part (en basse saison, les moins chères) ; le rapport tient à l'intérieur
+d'une saison, le remplissage est montré à côté (Thierry, 24 septembre 2026).
+L'écart lointain repose sur peu de nuits de week-end.
+
+**Garde de frontière** : un test parcourt `lib/marche` et `lib/airroi` et
+échoue si un module V2 touche `yield_events`, `yield_segment_reglages`,
+`calendar_inventory`, `price_display_log` ou `prix_hote`.
