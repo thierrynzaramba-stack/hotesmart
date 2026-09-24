@@ -33,8 +33,17 @@ test('LE TEST D OR : les ruptures du 22 septembre — 19 decembre, 2 janvier, 6 
     assert.ok(parDate.has(d), `rupture du ${d} retrouvee (ruptures : ${c.ruptures.map(r => r.date).join(', ')})`)
     assert.equal(parDate.get(d).sens, sens)
   }
-  const fortes = [...c.ruptures].sort((a, b) => Math.abs(Math.log(b.rapport)) - Math.abs(Math.log(a.rapport))).slice(0, 3).map(r => r.date).sort()
+  // Un rapport `null` ne se classe pas « le plus fort » (log de null = -∞).
+  const fortes = c.ruptures.filter(r => r.rapport > 0)
+    .sort((a, b) => Math.abs(Math.log(b.rapport)) - Math.abs(Math.log(a.rapport))).slice(0, 3).map(r => r.date).sort()
   assert.deepEqual(fortes, ['2026-12-19', '2027-01-02', '2027-03-06'])
+  for (const d of fortes) assert.equal(parDate.get(d).datee_au_jour, true)
+  // La liste ENTIERE, figee sur la fixture : aucune rupture parasite ne
+  // s'ajoute sans que ce test le dise (review).
+  assert.deepEqual(c.ruptures.map(r => r.date), ['2026-10-01', '2026-10-25', '2026-12-19', '2026-12-26', '2027-01-02',
+    '2027-01-22', '2027-01-29', '2027-02-13', '2027-03-06', '2027-03-28'])
+  // Aucune saison sous 5 jours, recalage compris.
+  for (const x of c.saisons) assert.ok((Date.parse(x.fin) - Date.parse(x.debut)) / 86400000 + 1 >= 5, `${x.debut} → ${x.fin}`)
   // Les saisons qu'elles bornent : Noel et fevrier en tete, le creux d'avant Noel en bas.
   assert.equal(saisonDuJour(c, '2026-12-31').saison, 'tres_forte')
   assert.equal(saisonDuJour(c, '2027-02-20').saison, 'tres_forte')
@@ -123,4 +132,38 @@ test('la forme mensuelle : trois ans, et une occupation 0 est une ABSENCE (champ
   const avant = { results: MARCHE60.results.filter(l => l.date < '2025-09') }
   const g = formeMensuelle(troue, { apres: '2027-04-11', jusqua: '2027-08-31' })
   assert.deepEqual(g, formeMensuelle(avant, { apres: '2027-04-11', jusqua: '2027-08-31' }))
+})
+
+test('un trou SUR une rupture : aucune rupture ni borne de saison datee sur un jour absent', () => {
+  // Deux trous : sur la montee de Noel, et en tete de fenetre — celui-ci
+  // (trouve par balayage de tous les trous de 1 a 3 jours) faisait tomber une
+  // borne de saison sur un jour absent quand les absents entraient dans
+  // l'horizon.
+  for (const t of [['2026-12-18', '2026-12-19', '2026-12-20'], ['2026-09-25', '2026-09-26', '2026-09-27']]) {
+    const ct = calculer(sans(t))
+    for (const r of ct.ruptures) assert.ok(!t.includes(r.date), `rupture sur un jour absent : ${r.date}`)
+    for (const x of ct.saisons) assert.ok(!t.includes(x.debut) && !t.includes(x.fin), `borne sur un jour absent : ${x.debut} → ${x.fin}`)
+  }
+  const trou = ['2026-12-18', '2026-12-19', '2026-12-20']
+  const c = calculer(sans(trou))
+  // La montee de Noel reste vue, juste apres le trou.
+  assert.ok(c.ruptures.some(r => r.sens === 'hausse' && r.date > '2026-12-20' && r.date <= '2026-12-26'))
+  assert.equal(c.ruptures.find(r => r.date === '2027-01-02').sens, 'baisse')
+})
+
+test('un marche plat n a pas de saisons : non calculable, pas « tres forte » partout', () => {
+  const plat = { results: PACING.results.map(x => ({ ...x, booked_count: 300, available_count: 700 })) }
+  const c = calendrierDuMarche({ pacing: plat })
+  assert.equal(c.statut, 'non_calculable')
+  assert.match(c.motif, /marche plat/)
+})
+
+test('une date impossible ou aberrante n entre pas dans la fenetre', () => {
+  const lu = lirePacing([{ date: '2026-02-30', booked_count: 1, available_count: 9 }, { date: '2026-03-01', booked_count: 1, available_count: 9 }])
+  assert.deepEqual([...lu.jours.keys()], ['2026-03-01'])
+  assert.equal(lu.ecartes[0].motif, 'date illisible')
+  const loin = { results: [...PACING.results, { date: '2099-01-01', booked_count: 1, available_count: 9 }] }
+  const c = calendrierDuMarche({ pacing: loin })
+  assert.equal(c.statut, 'non_calculable')
+  assert.match(c.motif, /fenetre du pacing incoherente/)
 })

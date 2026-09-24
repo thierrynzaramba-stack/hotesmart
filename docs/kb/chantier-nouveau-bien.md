@@ -1066,8 +1066,8 @@ que les jours présents, et rend `null` si moins de 4 jours sur 7 le sont.
 
 | Période | Saison |
 |---|---|
-| 24 → 26 sept. 2026 | Forte |
-| 27 sept. → 24 oct. | Moyenne |
+| 24 → 30 sept. 2026 | Forte |
+| 1er oct. → 24 oct. | Moyenne |
 | 25 oct. → 18 déc. | Basse |
 | 19 → 25 déc. | Forte |
 | 26 déc. → 1er janv. 2027 | Très forte |
@@ -1105,6 +1105,15 @@ trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
 5. **Forme mensuelle au-delà de l'horizon** : occupation moyenne du marché par
    mois calendaire sur les 36 derniers mois non nuls, rapportée à la moyenne
    des mois ; mêmes quantiles. *Alternative* : les percentiles p50.
+
+**Review du V2.3.1 (aucun bloquant), corrigé** : un jour absent ne porte
+plus ni saison, ni borne, ni rupture (un trou en tête de fenêtre, trouvé par
+balayage, en faisait tomber une) ; le recalage compte en JOURS et ne
+raccourcit jamais une saison sous 5 jours (la première saison en faisait 3) ;
+chaque rupture dit si elle est `datee_au_jour` (saut franc trouvé) ou datée
+par le lissage ; un marché plat est « non calculable » au lieu d'être « très
+forte » partout ; une date impossible (30 février) ou aberrante (2099) est
+écartée. La liste entière des dix ruptures est figée en test.
 
 **Limites, écrites** :
 - le relief suppose une pente d'éloignement CONSTANTE, estimée sur la série
