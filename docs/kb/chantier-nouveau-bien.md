@@ -797,37 +797,80 @@ ni niveau marché (qui donnerait l'écart par soustraction), et le bloc dit
 « les grilles ne s'affichent pas encore ». Aucun relevé n'a été calculé sur
 données réelles cette nuit ; aucun écart n'a été lu.
 
-### Décisions prises seules — à confirmer ou renverser
+### Décisions prises seules — tranchées par Thierry le 24 septembre 2026
+
+Neuf validées, trois renversées (5, 7, 11) ; la 8 tombe avec la réponse à Q1
+et Q3. Le texte d'origine est gardé, la décision de Thierry suit.
 
 1. **Garde-fous** : budget mensuel global 10 $ (alarme fondateur à 80 %),
    plafond 4 $ par compte sur 30 jours, 3 $ par bien sur 90 jours
    (`lib/airroi/cout.js`, `GARDES`). *Alternative* : tout autre montant.
+   **Validée.**
 2. **Une erreur HTTP est comptée à coût plein** au journal (on ne sait pas si
    AirROI facture un 4xx). *Alternative* : 0 $ — plus juste si AirROI ne
-   facture pas, moins prudente.
+   facture pas, moins prudente. **Validée** : on relèvera la vérité sur la
+   première facture.
 3. **`GET /listings` estimé à 0,10 $** (non relevé). *Alternative* : relever
-   sur la facture au premier appel.
+   sur la facture au premier appel. **Validée.**
 4. **Nuits = occupation × jours du mois**. *Alternative* : revenu ÷ ADR (§3 bis
-   dit l'ADR non cohérent à l'année).
-5. **Stabilité mesurée sur les mois avec AU MOINS UNE nuit** (le niveau, lui,
-   écarte les mois < 5 nuits). *Alternative* : les mêmes mois que le niveau.
+   dit l'ADR non cohérent à l'année). **Validée** — et Thierry précise : c'est
+   une MESURE qui se prouve (223 nuits pour La bulle, le chiffre d'AirROI),
+   pas une convention.
+5. ~~Stabilité mesurée sur les mois avec AU MOINS UNE nuit~~ **RENVERSÉE** :
+   les MÊMES mois que les niveaux (mois < 5 nuits écartés). « Deux filtres
+   différents sur la même donnée produiront un jour un écart que personne ne
+   saura expliquer. » Fait : `stabilite()`, test « memes mois ».
 6. **Gestionnaire** : deux comparables partagent un gestionnaire s'ils ont un
    hôte OU un co-hôte en commun ; l'avertissement tombe dès 2 comparables d'un
    même gestionnaire. *Alternative* : seuil de poids avant d'avertir.
-7. **Sous le seuil : aucun niveau affiché**, seulement les nombres (règle 8).
-   *Alternative* : montrer les niveaux marqués « amincie ».
-8. **Cœur de vie 23 en attente de la dette 26** par une liste explicite d'UUID
-   (`EN_ATTENTE_DETTE_26`), à retirer quand la dette sera soldée.
-   *Alternative* : détecter le ménage dans les payloads (une seconde règle).
+   **Validée.**
+7. ~~Sous le seuil : aucun niveau affiché~~ **RENVERSÉE** : les niveaux
+   s'affichent, marqués « référence amincie », avec les nombres et les
+   motifs. « Ne rien montrer, c'est répondre non à une question dont la
+   réponse est je ne sais pas » (`null` n'est jamais une réponse). Fait : la
+   grille se calcule par la même règle ; le seuil V1 en réservations ne
+   s'applique pas (un comparable n'est pas une réservation), seul le seuil V1
+   en NUITS (8) reste — en dessous, « N nuits : trop peu pour calculer des
+   niveaux ». L'écart du relevé se calcule aussi, le statut le marque ; le
+   critère de la règle 19 dira quels relevés comptent.
+8. ~~Cœur de vie 23 en attente de la dette 26 par une liste d'UUID~~
+   **RETIRÉE** (Q1, Q3). La fenêtre de 12 mois du contrôle (sept. 2025 → août
+   2026) est postérieure au dernier ménage (mars 2024) : l'écart est propre.
+   La liste recopiée mentait en staging. À la place, un DRAPEAU calculé
+   depuis les données (`lib/marche/menage.js`), fenêtre par fenêtre : « la
+   grille mesurée sur 3 ans contient des frais de ménage (N séjours, dette
+   26) », et le même pour les 12 mois s'il y en a. Un drapeau, jamais un
+   blocage ; un drapeau de PRÉSENCE (un prix qui fond le ménage sans le dire
+   n'est pas vu — c'est le travail de `tarifNuitee`, dette 26). Les trois
+   formes lues en production le 24 septembre (1 490 réservations) : Beds24
+   `invoiceItems` « frais de ménage » (Cœur de vie 23, Booking, 59) ; Beds24
+   Airbnb `rateDescription` « Cleaning N EUR » (Cœur de vie 23, 54) ; Channex
+   Airbnb service « Cleaning Fee » (Colomiers, 12). Rien pour La bulle.
+   Le statut `attente_dette_26` disparaît (migration `controle-airbnb`).
 9. **Le relevé mensuel et le relevé au rafraîchissement ne sont PAS branchés
    au cron** : `api/cron.js` se régénère en fichier complet (règle dure) ; un
    script et la fonction existent. *Alternative* : brancher au lot suivant.
+   **Validée.**
 10. **Aucun déclenchement d'étude depuis l'écran** (un appel payant à
     l'ouverture d'une page) : études par script, puis par le rafraîchissement.
-11. **La fiche de chaque comparable passe par `GET /listings` (0,10 $, cache
-    90 jours)** plutôt que par la liste de `listings/comparables` : un
-    comparable retenu peut ne pas figurer parmi les 25 d'un appel.
-    *Alternative* : lire d'abord la liste en cache, ne payer que les absents.
+    **Validée.**
+11. ~~La fiche de chaque comparable par `GET /listings`~~ **RENVERSÉE** : la
+    liste de `listings/comparables` (0,10 $ l'appel) porte déjà les fiches
+    complètes des 25 voisins ; par comparable, on ne paie que ses mois
+    (`listings/metrics/all`). Fait (`lib/marche/etude.js`) : la recherche prend
+    chambres, salles de bain et voyageurs de l'annonce Airbnb DU BIEN
+    (`airbnb_listing_id`, une fiche en cache 90 jours) ; un retenu absent des
+    25 est lu par sa fiche, lui seul. Bien sans `airbnb_listing_id` : fiche par
+    comparable, comme avant. Pour 10 comparables : 1,20 $ au lieu de 2,00 $.
+
+**Q2 — la mesurée 12 mois reste TOUS CANAUX** (Thierry) : le contrôle répond à
+« la grille marché prédirait-elle la grille que le moteur utilise VRAIMENT ».
+Une variante **Airbnb seul** est calculée À CÔTÉ, comme diagnostic (si elles
+s'écartent, le mix de canaux compte ; si elles se ressemblent, le marché Airbnb
+suffit) : `niveaux_mesure_12m_airbnb`, `nuits_mesure_12m_airbnb`, et dans
+chaque écart `ecart_airbnb_eur/pct`. Migration `2026-09-24-controle-airbnb.sql`.
+Aucun ménage facturé par La bulle ni Cœur de vie 23 sur les 12 derniers mois :
+prix voyageur = tarif nuitée pour les deux aujourd'hui.
 
 ### Reviews du 24 septembre — ce qu'elles ont trouvé et ce qui est corrigé
 
@@ -866,11 +909,5 @@ Review V2.5 (grille marché, contrôle) :
 - **Dette** : la déduplication des appels simultanés vaut dans UNE instance
   Vercel ; deux invocations parallèles peuvent payer deux fois le même appel
   (au pire 0,50 $, borné par les garde-fous). Un verrou en base le fermerait.
-- **Question (Cœur de vie 23)** : la mise en attente repose sur la dette 26
-  (ménage dans l'historique), mais la fenêtre de 12 mois du contrôle peut être
-  propre. Tenu tel que demandé ; à trancher par Thierry.
-- **Question avant le critère** : la « mesurée 12 mois » compte TOUS les
-  canaux au prix voyageur, le marché les seules nuits Airbnb hors ménage.
-  Faut-il la restreindre aux nuits Airbnb pour comparer des choses égales ?
-- **Question** : les UUID de `EN_ATTENTE_DETTE_26` sont ceux de la production ;
-  en staging, Cœur de vie 23 porte un autre UUID et n'est pas mis en attente.
+- ~~Questions Cœur de vie 23, Airbnb seul, UUID de staging~~ : tranchées le
+  24 septembre (Q1 à Q3 ci-dessus).

@@ -1571,8 +1571,7 @@
   }
   const STATUT_MARCHE = {
     fiable: 'fiable', reference_amincie: 'référence amincie',
-    mesure_insuffisante: 'vos ventes sur la même période ne suffisent pas',
-    attente_dette_26: 'en attente : votre historique contient des frais de ménage facturés à part, pas encore séparés du prix de la nuit'
+    mesure_insuffisante: 'vos ventes sur la même période ne suffisent pas'
   }
   function rendreMarche (d) {
     const source = '<p class="dit">Source : <b>marché</b> — des annonces Airbnb comparables à la vôtre, pas vos ventes.</p>'
@@ -1583,17 +1582,26 @@
     }
     const niv = d.niveaux_marche || []
     const ecarts = new Map((d.ecarts || []).map(e => [e.nom, e]))
+    // Un ecart s'ecrit signe, virgule decimale ; absent = « non calculable »,
+    // jamais un tiret muet (restitution-yield.md).
+    const ecartTxt = (eur, pct) => eur == null ? 'non calculable'
+      : `${eur >= 0 ? '+' : ''}${eur} € (${pct >= 0 ? '+' : ''}${String(pct).replace('.', ',')} %)`
+    const prixOu = n => n ? euros(n.prix) : 'non calculable'
     const lignes = niv.map((n, i) => {
       const m12 = d.niveaux_mesure_12m ? d.niveaux_mesure_12m[i] : null
+      const m12a = d.niveaux_mesure_12m_airbnb ? d.niveaux_mesure_12m_airbnb[i] : null
       const m3 = d.niveaux_mesure_3ans ? d.niveaux_mesure_3ans[i] : null
-      const e = ecarts.get(n.nom)
-      return `<tr><td>${ech(n.nom)}</td><td>${m3 ? euros(m3.prix) : '—'}</td><td>${m12 ? euros(m12.prix) : '—'}</td><td>${euros(n.prix)}</td><td>${e ? `${e.ecart_eur >= 0 ? '+' : ''}${e.ecart_eur} € (${e.ecart_pct >= 0 ? '+' : ''}${String(e.ecart_pct).replace('.', ',')} %)` : '—'}</td></tr>`
+      const e = ecarts.get(n.nom) || {}
+      return `<tr><td>${ech(n.nom)}</td><td>${prixOu(m3)}</td><td>${prixOu(m12)}</td><td>${prixOu(m12a)}</td><td>${euros(n.prix)}</td><td>${ecartTxt(e.ecart_eur, e.ecart_pct)}</td><td>${ecartTxt(e.ecart_airbnb_eur, e.ecart_airbnb_pct)}</td></tr>`
     }).join('')
+    const amincie = d.statut === 'reference_amincie' && niv.length
+      ? '<p class="dit"><b>Référence amincie</b> : le marché retenu est trop mince pour être fiable (motifs ci-dessous). Les niveaux sont montrés quand même, à lire avec prudence.</p>' : ''
     const av = (d.avertissements || []).map(a => `<li class="avert">${ech(a.phrase)}</li>`).join('')
     return `${source}${tete}
-      ${niv.length ? `<table><thead><tr><th>Niveau</th><th>Vos ventes, 3 ans</th><th>Vos ventes, 12 mois</th><th>Marché, 12 mois</th><th>Écart (marché − 12 mois)</th></tr></thead><tbody>${lignes}</tbody></table>` : ''}
+      ${amincie}
+      ${niv.length ? `<table><thead><tr><th>Niveau</th><th>Vos ventes, 3 ans</th><th>Vos ventes, 12 mois</th><th>Vos ventes Airbnb, 12 mois</th><th>Marché, 12 mois</th><th>Écart (marché − 12 mois)</th><th>Écart (marché − Airbnb 12 mois)</th></tr></thead><tbody>${lignes}</tbody></table>` : ''}
       ${av ? `<ul class="dit">${av}</ul>` : ''}
-      <p class="dit">Marché : tarif par nuit, hors frais de ménage, nuits Airbnb seulement (le marché ne voit ni Booking ni le direct). Vos ventes : prix payé par le voyageur, tous canaux.</p>`
+      <p class="dit">Marché : tarif par nuit, hors frais de ménage, nuits Airbnb seulement (le marché ne voit ni Booking ni le direct). Vos ventes : prix payé par le voyageur, tous canaux ; la colonne Airbnb est un diagnostic — si elle s’écarte des ventes tous canaux, c’est le mélange des canaux qui compte.</p>`
   }
 
   function brancher () {

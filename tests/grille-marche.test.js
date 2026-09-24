@@ -115,28 +115,39 @@ test('les mois a moins de 5 nuits sont ecartes, pas le comparable', () => {
   assert.equal(c.mois_ecartes, 6)
 })
 
-test('LE TEST QUI COMPTE : sous le seuil, reference amincie — les nombres reels, AUCUN niveau', () => {
+// ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : la premiere version exigeait
+// « AUCUN niveau » sous le seuil. Thierry a renverse la decision : ne rien
+// montrer, c'est repondre « non » a une question dont la reponse est « je ne
+// sais pas ». Les niveaux se calculent par la MEME regle, le statut les marque.
+test('LE TEST QUI COMPTE : sous le seuil, reference amincie — les niveaux QUAND MEME, marques, avec les motifs', () => {
   const deux = grilleMarche({ aujourdHui: AUJ, comparables: [
     { listing_id: '1', host_id: '1', mensuel: mensuel(() => 100, () => 20) },
     { listing_id: '2', host_id: '2', mensuel: mensuel(() => 110, () => 20) }] })
   assert.equal(deux.statut, 'reference_amincie')
-  assert.equal(deux.niveaux, null, 'jamais un chiffre invente')
+  assert.equal(Array.isArray(deux.niveaux), true, 'des niveaux, pas null')
+  assert.deepEqual(deux.niveaux.map(n => n.prix_mesure), [100, 105, 110, 110, 110], 'les quantiles des prix reellement obtenus, rien d invente')
   assert.match(deux.motifs.join(' '), /2 comparable\(s\) avec des ventes sur 12 mois, il en faut 3/)
   const peu = grilleMarche({ aujourdHui: AUJ, comparables: [1, 2, 3].map(i =>
     ({ listing_id: String(i), host_id: String(i), mensuel: mensuel(() => 100, () => 5) })) })
   assert.match(peu.motifs.join(' '), /180 nuits Airbnb sur 12 mois, il en faut 200/)
-  assert.equal(peu.niveaux, null, '180 nuits : aucun niveau, meme si la V1 saurait en calculer')
+  assert.equal(peu.statut, 'reference_amincie')
+  assert.equal(peu.niveaux[0].prix, 100)
   // Un comparable a plus de 50 % (3 comparables) ; a plus de 40 % des 5.
   const lourd = grilleMarche({ aujourdHui: AUJ, comparables: [
     { listing_id: '1', nom: 'lourd', host_id: '1', mensuel: mensuel(() => 100, () => 28) },
     { listing_id: '2', host_id: '2', mensuel: mensuel(() => 100, () => 10) },
     { listing_id: '3', host_id: '3', mensuel: mensuel(() => 100, () => 10) }] })
   assert.match(lourd.motifs.join(' '), /« lourd » pèse 58,3 % du total, au-delà de 50 %/)
-  assert.equal(lourd.niveaux, null)
+  assert.equal(lourd.statut, 'reference_amincie')
+  assert.ok(Array.isArray(lourd.niveaux))
   const cinq = grilleMarche({ aujourdHui: AUJ, comparables: [
     { listing_id: '1', nom: 'lourd', host_id: '1', mensuel: mensuel(() => 100, () => 27) },
     ...[2, 3, 4, 5].map(i => ({ listing_id: String(i), host_id: String(i), mensuel: mensuel(() => 100, () => 10) }))] })
   assert.match(cinq.motifs.join(' '), /« lourd » pèse 40,3 % du total, au-delà de 40 %/, 'une decimale : jamais « 40 % au-dela de 40 % »')
+  // La seule limite gardee : trop peu de nuits pour un quantile (seuil V1, 8).
+  const vide = grilleMarche({ aujourdHui: AUJ, comparables: [{ listing_id: '1', host_id: '1', mensuel: mensuel(() => 100, () => 0) }] })
+  assert.equal(vide.niveaux, null)
+  assert.match(vide.motifs.join(' '), /0 nuits : trop peu pour calculer des niveaux/)
 })
 
 test('LE TEST QUI COMPTE : un comparable instable est MONTRE, jamais exclu', () => {
@@ -245,4 +256,14 @@ test('les drapeaux de construction voyagent (etire, confondu)', () => {
     ({ listing_id: String(i), host_id: String(i), mensuel: mensuel((m, k) => 100 + (k % 3), () => 20) })) })
   assert.ok(g.niveaux.some(n => n.etire || n.confondu_avec), 'au moins un niveau etire ou confondu')
   for (const n of g.niveaux) assert.ok('prix_mesure' in n && 'etire' in n && 'confondu_avec' in n)
+})
+
+test('LE TEST QUI COMPTE : la stabilite se mesure sur les MEMES mois que les niveaux (mois a moins de 5 nuits ecartes)', () => {
+  // L'annee precedente : 12 mois a 3 nuits, a 300 €. Ils ne font pas les
+  // niveaux ; ils ne font pas non plus la stabilite (Thierry, decision 5
+  // renversee). La premiere version les comptait et criait « +200 % ».
+  const m = mensuel((mm, k) => (k < 14 ? 300 : 100), (mm, k) => (k < 14 ? 3 : 20))
+  const g = grilleMarche({ aujourdHui: AUJ, comparables: [{ listing_id: '1', nom: 'x', host_id: '1', mensuel: m }] })
+  assert.equal(g.comparables[0].stabilite.statut, 'non_mesurable')
+  assert.match(g.avertissements.find(a => a.type === 'stabilite_non_mesurable').phrase, /0 mois d’au moins 5 nuits d’un côté, il en faut 6/)
 })

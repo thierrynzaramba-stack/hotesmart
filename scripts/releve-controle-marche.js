@@ -20,6 +20,7 @@ const { etudierBien } = require('../lib/marche/etude')
 const { grilleMarche } = require('../lib/marche/grille-marche')
 const { construireReleve, enregistrerReleve, grilleMesureeDouzeMois } = require('../lib/marche/controle')
 const { preparerContexte } = require('../lib/yield/contexte-du-bien')
+const { sejoursAvecMenage } = require('../lib/marche/menage')
 
 const args = process.argv.slice(2)
 const bienId = (args.find(a => a.startsWith('--bien=')) || '').slice(7)
@@ -40,7 +41,13 @@ if (!bienId) { console.error('Usage : --bien=<uuid> [--go]'); process.exit(1) }
   const marche = grilleMarche({ comparables: e.comparables, aujourdHui: auj, prixMinimum: e.prixMinimum })
   const ctx = await preparerContexte(sb, bien, bien.user_id, { aujourdHui: auj, debut: auj, fin: auj })
   const mesure12 = grilleMesureeDouzeMois({ eclatements: ctx.eclatements, contexte: ctx.contexte, fenetre: marche.fenetre })
-  const ligne = construireReleve({ bien, marche, mesure12, grille3ans: ctx.grille, motif: 'manuel',
+  const mesure12Airbnb = grilleMesureeDouzeMois({ eclatements: ctx.eclatements, contexte: ctx.contexte, fenetre: marche.fenetre, airbnbSeul: true })
+  // Le drapeau de menage, fenetre par fenetre, depuis les payloads (dette 26).
+  const menage = {
+    trois_ans: sejoursAvecMenage(ctx.duBien, ctx.eclatements, ctx.debutHistorique, ctx.finRef),
+    douze_mois: sejoursAvecMenage(ctx.duBien, ctx.eclatements, `${marche.fenetre.debut}-01`, `${marche.fenetre.fin}-31`)
+  }
+  const ligne = construireReleve({ bien, marche, mesure12, mesure12Airbnb, menage, grille3ans: ctx.grille, motif: 'manuel',
     releveLe: new Date().toISOString(), fraicheur: e.fraicheur })
   console.log(`${bien.name} : statut ${ligne.statut} · ${marche.comparables.length} comparable(s) · nuits marche ${ligne.nuits_marche} · nuits mesurees 12 mois ${ligne.nuits_mesure_12m} · fenetre ${ligne.fenetre_debut} → ${ligne.fenetre_fin}`)
   for (const a of ligne.avertissements.filter(a => a.type !== 'sous_plancher')) console.log(`  avertissement : ${a.phrase}`)

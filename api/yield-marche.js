@@ -47,6 +47,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ...commun,
       niveaux_marche: r.niveaux_marche, niveaux_mesure_12m: r.niveaux_mesure_12m,
       niveaux_mesure_3ans: r.niveaux_mesure_3ans, ecarts: r.ecarts,
+      niveaux_mesure_12m_airbnb: r.niveaux_mesure_12m_airbnb, nuits_mesure_12m_airbnb: r.nuits_mesure_12m_airbnb,
       nuits_marche: r.nuits_marche, nuits_mesure_12m: r.nuits_mesure_12m,
       comparables: r.comparables, avertissements: r.avertissements })
   } catch (e) {

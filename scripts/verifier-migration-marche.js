@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// scripts/verifier-migration-marche.js — LA MIGRATION 2026-09-24-marche-airroi
-// EST-ELLE APPLIQUEE SUR LA BASE VISEE ? Lecture seule.
+// scripts/verifier-migration-marche.js — LES MIGRATIONS 2026-09-24-marche-airroi
+// ET 2026-09-24-controle-airbnb SONT-ELLES APPLIQUEES SUR LA BASE VISEE ?
+// Lecture seule.
 //
 //   node --env-file=.env.local scripts/verifier-migration-marche.js     (production)
 //   node --env-file=.env.staging scripts/verifier-migration-marche.js   (staging)
@@ -33,6 +34,10 @@ const { createClient } = require('@supabase/supabase-js')
     console.log(`${t} : ${ok ? `presente, ${r.count} ligne(s)` : `ABSENTE (${r.error ? r.error.message : 'compte illisible'})`}`)
     if (!ok) manques.push(t)
   }
+  // Seconde migration (2026-09-24-controle-airbnb) : la variante Airbnb.
+  const v = await sb.from('grille_controle').select('niveaux_mesure_12m_airbnb, nuits_mesure_12m_airbnb').limit(1)
+  console.log(`grille_controle, variante Airbnb (controle-airbnb.sql) : ${v.error ? `ABSENTE (${v.error.message})` : 'presente'}`)
+  if (v.error) manques.push('colonnes Airbnb de grille_controle (2026-09-24-controle-airbnb.sql)')
   // La lecture COTE CLIENT doit echouer : la cle service contourne la RLS et ne
   // peut pas le voir (review). Sonde avec la cle anon, si elle est connue.
   if (process.env.SUPABASE_ANON_KEY) {
