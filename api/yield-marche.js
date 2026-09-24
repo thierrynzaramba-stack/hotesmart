@@ -2,6 +2,11 @@
 // « Prediction de prix ». Lot V2.5. Cadrage : docs/kb/chantier-nouveau-bien.md.
 //
 //   GET ?property_id=  ->  le dernier releve du controle, s'il est lisible.
+//   GET ?vue=calendrier ->  le dernier calendrier de chaque MARCHE (V2.3.4,
+//                           page apps/yield/marche.html). Un marche n'est pas
+//                           un logement : la garde exige le droit de LECTURE
+//                           des reservations, sans bien. Aucun prix : la table
+//                           n'en contient pas.
 //
 // ⚠ INFORMATION PARALLELE, LECTURE SEULE : rien ici n'appelle AirROI (les
 // appels payants passent par les scripts et le rafraichissement, jamais par
@@ -24,6 +29,7 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'methode_non_supportee' })
   }
   const brut = v => (Array.isArray(v) ? v[0] : v)
+  if (String(brut(req.query.vue) || '') === 'calendrier') return calendriersDuMarche(req, res)
   const propertyId = String(brut(req.query.property_id) || '').trim()
   if (!propertyId) return res.status(400).json({ error: 'bien_requis' })
   const garde = await requirePermission(req, res, {
@@ -56,3 +62,32 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'lecture_impossible' })
   }
 }
+
+// ─── V2.3.4 : le calendrier de segments du MARCHE, en lecture seule ─────────
+// Le dernier calcul de chaque marche (capture la plus recente, puis methode la
+// plus recente). Table absente : « pas encore », comme le bloc du controle.
+async function calendriersDuMarche (req, res) {
+  const garde = await requirePermission(req, res, { domaine: 'reservations', niveau: 'read' })
+  if (!garde.ok) return
+  try {
+    const { data, error } = await supabase.from('marche_calendrier')
+      .select('pays, region, localite, capture_le, calcule_le, source, statut, motif, fenetre_debut, fenetre_fin, horizon_fin, regimes, saisons, ruptures, au_dela, pics, evenements_possibles, ecart_semaine_week_end, couverture_calendrier, limites, methode')
+      .order('capture_le', { ascending: false }).order('calcule_le', { ascending: false }).limit(50)
+    if (error && /marche_calendrier/.test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')) {
+      return res.status(200).json({ source: 'marche', etat: 'pas_de_calendrier', marches: [] })
+    }
+    if (error) throw new Error(`marche_calendrier : ${error.message}`)
+    const vus = new Set()
+    const marches = (data || []).filter(l => {
+      const cle = `${l.pays}|${l.region}|${l.localite}`
+      if (vus.has(cle)) return false
+      vus.add(cle)
+      return true
+    })
+    return res.status(200).json({ source: 'marche', etat: marches.length ? 'calendrier' : 'pas_de_calendrier', marches })
+  } catch (e) {
+    console.error('[yield-marche] calendrier', e.message)
+    return res.status(500).json({ error: 'lecture_impossible' })
+  }
+}
+

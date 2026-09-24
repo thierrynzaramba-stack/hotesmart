@@ -1461,3 +1461,39 @@ devra reconstruire la zone depuis `regimes`.
 **Question ouverte pour Thierry** : un pic borné seulement par des transitions
 (2 → 11 oct.) doit-il entrer dans la liste à lire ? Tel quel, oui — aucune
 règle ne l'en écarte.
+
+### V2.3.4 — la page « Le marché » (`apps/yield/marche.html`)
+
+Page NEUVE, lecture seule : un seul `GET /api/yield-marche?vue=calendrier`
+(vue ajoutée à l'API V2 existante, aucune fonction Vercel en plus ; garde :
+droit de lecture des réservations, SANS logement — un marché n'est pas un
+bien ; seule table lue : `marche_calendrier`, la ligne la plus récente par
+marché). Aucun écran existant modifié ; la page n'est liée depuis aucun menu
+(URL directe `/apps/yield/marche`) tant que Thierry n'a pas décidé.
+
+Ce qu'elle montre (exigences de Thierry, 24 septembre 2026) :
+- **en tête, en clair** : « Une estimation du marché, pas un prix … ne pilote
+  rien » ;
+- **chaque période porte son régime**, dans sa carte : zone de dernière minute
+  (hachurée, sans saison), pacing (palette de bleus, « Échelle du pacing »),
+  forme mensuelle (palette d'ocres, « Échelle mensuelle — ne se compare pas à
+  celle du pacing ») ; aucun tri commun ;
+- **la force se voit** : rupture forte (≥ ×2, trait épais), rupture (≥ ×1,5),
+  rupture faible (≥ ×1,2, trait fin), transition (pointillé gris, « pas une
+  rupture ») — sur la frise et dans le tableau ;
+- **tout ce qui n'est pas calculable le dit, avec sa raison** : explication
+  absente (staging), écart sans assez de nuits, mois absent, ligne non
+  calculable ; une ligne d'une méthode ANTÉRIEURE (sans force) le dit
+  (« force non enregistrée par cette méthode »), sans inventer « nuits
+  absentes » ;
+- téléphone : chaque ligne de tableau devient une fiche, aucun défilement
+  horizontal (vérifié à 390 px avec la règle mobile réelle du menu).
+
+**Classée DÉLÉGABLE** (`tests/pages-non-delegables.test.js`, décision prise
+seule) : la page ne montre aucune donnée de compte ; le recensement des pages
+l'exigeait (le 26e rouge de la suite, avant classement). *Alternative* : hors
+périmètre, ou non délégable.
+
+**Aperçu sur données réelles** : la ligne STOCKÉE en staging (id 2, ancienne
+méthode) ; la ligne nouvelle méthode calculée EN MÉMOIRE — en aveugle, et
+avec les vacances lues en production en lecture seule — jamais écrite.

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Le marché</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    [hidden] { display: none !important; }
+    /* ⚠ PAGE NEUVE, LECTURE SEULE (lot V2.3.4). Elle n'ecrit rien, ne
+       pilote rien, et ne modifie aucun ecran existant. Cadrage :
+       docs/kb/chantier-nouveau-bien.md §11 (frontiere), §13. */
+    .mc-avertir { background: var(--amber-bg); border: 0.5px solid var(--amber);
+                  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px;
+                  font-size: 13.5px; line-height: 1.5; }
+    .mc-avertir b { font-weight: 600; }
+    .mc-meta { font-size: 12.5px; color: var(--text2); margin-bottom: 16px; }
+    .mc-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg);
+                padding: 14px 16px; margin-bottom: 16px; background: var(--bg); }
+    .mc-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    .mc-carte .sous { font-size: 12.5px; color: var(--text2); margin: 0 0 12px; }
+    .mc-echelle { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+                  text-transform: uppercase; padding: 2px 8px; border-radius: 999px; margin-bottom: 8px; }
+    .mc-echelle.pacing { background: #E6EEF9; color: #234E8C; }
+    .mc-echelle.mensuel { background: #F4ECDF; color: #7A5418; }
+    .mc-echelle.dm { background: var(--bg3); color: var(--text2); }
+
+    /* La frise du pacing : une bande par saison, longueur = nombre de jours. */
+    .mc-frise { display: flex; height: 34px; border-radius: 6px; overflow: hidden; margin: 6px 0 4px; }
+    .mc-frise > div { position: relative; min-width: 2px; }
+    .mc-frise .rupt { box-shadow: inset 3px 0 0 #1a1a1a; }
+    .mc-frise .rupt.forte { box-shadow: inset 5px 0 0 #1a1a1a; }
+    .mc-frise .trans { background-image: linear-gradient(#fff 50%, transparent 50%);
+                       background-size: 2px 6px; background-repeat: repeat-y; background-position: 0 0; }
+    .mc-bornes { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text3); }
+    /* Echelle du PACING : bleus. Echelle MENSUELLE : ocres. Jamais la meme. */
+    .p-basse { background: #D8E4F5; } .p-moyenne { background: #9DB9E3; }
+    .p-forte { background: #5B87C9; } .p-tres_forte { background: #234E8C; }
+    .m-basse { background: #F1E6D2; } .m-moyenne { background: #DEC49A; }
+    .m-forte { background: #B98C47; } .m-tres_forte { background: #7A5418; }
+    .dm-zone { background: repeating-linear-gradient(45deg, var(--bg3), var(--bg3) 6px, var(--bg2) 6px, var(--bg2) 12px); }
+
+    table.mc { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.mc th { text-align: left; font-weight: 600; font-size: 12px; color: var(--text2);
+                  border-bottom: 0.5px solid var(--border); padding: 6px 8px; }
+    table.mc td { padding: 7px 8px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
+    .pastille { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+
+    /* Les frontieres : la force se VOIT (Thierry). Forte : trait epais et
+       fonce ; moderee : trait moyen ; faible : trait fin ; transition :
+       pointille gris, texte gris — « pas une rupture ». */
+    .front { display: inline-flex; align-items: center; gap: 8px; }
+    .front i { display: inline-block; width: 4px; height: 18px; background: #1a1a1a; border-radius: 1px; }
+    .front.f2 i { width: 7px; } .front.f1 i { width: 4px; } .front.f0 i { width: 2px; background: #555; }
+    .front.tr i { width: 0; height: 18px; border-left: 2px dashed var(--text3); background: none; }
+    .front.tr { color: var(--text3); }
+    .front b { font-weight: 600; }
+    .non-calc { color: var(--text2); font-style: italic; }
+    .a-lire { border-left: 3px solid var(--amber); padding: 6px 10px; margin: 8px 0; background: var(--bg2);
+              font-size: 13px; line-height: 1.45; border-radius: 0 6px 6px 0; }
+    .motif { font-size: 12.5px; color: var(--text2); }
+    /* Telephone : chaque ligne de tableau devient une fiche empilee (aucun
+       defilement horizontal). */
+    @media (max-width: 640px) {
+      .content { padding-left: 12px; padding-right: 12px; }
+      .mc-carte { padding: 12px; }
+      table.mc thead { display: none; }
+      table.mc, table.mc tbody, table.mc tr, table.mc td { display: block; width: 100%; }
+      table.mc tr { border-bottom: 0.5px solid var(--border); padding: 8px 0; }
+      table.mc td { border: none; padding: 2px 0; }
+      table.mc td:first-child { font-weight: 600; }
+    }
+  </style>
+</head>
+<body>
+<!-- Contrat de mise en page commun : `.layout > .sidebar#sidebar + .main > .content`
+     (voir apps/yield/prix.html, mesure du 14 septembre 2026). -->
+<div class="layout">
+<div class="sidebar" id="sidebar"></div>
+<div class="main">
+<div class="content">
+  <div class="header">
+    <h1>Le marché</h1>
+  </div>
+
+  <div class="mc-avertir" id="mc-avertir">
+    <b>Une estimation du marché, pas un prix.</b> Cette page décrit <b>quand</b> le marché
+    de votre commune se remplit, d’après les réservations Airbnb de l’ensemble du marché.
+    Elle ne calcule aucun prix, n’en pousse aucun, et <b>ne pilote rien</b> : vos prix et
+    votre calendrier ne changent pas.
+  </div>
+
+  <div id="mc-choix" hidden></div>
+  <div class="mc-meta" id="mc-meta"></div>
+  <div id="mc-corps"><p class="motif">Lecture du marché…</p></div>
+</div>
+</div>
+</div>
+
+<script type="module">
+  // ⚠ LECTURE SEULE. La seule requete est un GET sur /api/yield-marche
+  // (vue=calendrier) ; aucune ecriture, aucun appel AirROI, aucun prix.
+  // ⚠ DEUX ECHELLES, JAMAIS UNE (regle §13) : les saisons du PACING et celles
+  // de la FORME MENSUELLE vivent dans deux cartes distinctes, deux palettes,
+  // chacune avec son libelle d'echelle. Rien ici ne les ordonne ensemble.
+  // ⚠ TOUT CE QUI N'EST PAS CALCULABLE LE DIT, avec sa raison.
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { enteteCompte } from '/shared/compte-courant.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const el = id => document.getElementById(id)
+  const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  const jourFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))
+    ? `${Number(iso.slice(8, 10))} ${MOIS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : '—'
+  const moisFr = m => `${MOIS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
+  const nbJours = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000) + 1
+  const virgule = x => String(x).replace('.', ',')
+  // Les phrases du calcul portent des dates ISO : elles se lisent en francais.
+  const phrase = t => ech(String(t || '').replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (_, d) => jourFr(d)))
+  const NOM = { basse: 'Basse', moyenne: 'Moyenne', forte: 'Forte', tres_forte: 'Très forte' }
+
+  let marches = []
+
+  async function init () {
+    const session = await requireAuth()
+    if (!session) return
+    renderSidebar('yield-marche').catch(e => console.error('[yield-marche] sidebar', e))
+    let r
+    try {
+      r = await fetch('/api/yield-marche?vue=calendrier', {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
+    } catch (e) { return corps(`<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>`) }
+    if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
+    const d = await r.json()
+    marches = d.marches || []
+    if (!marches.length) return corps('<p class="non-calc">Aucune étude du marché n’est encore enregistrée : rien à montrer.</p>')
+    if (marches.length > 1) {
+      el('mc-choix').hidden = false
+      el('mc-choix').innerHTML = `<label class="motif">Marché
+        <select id="mc-sel">${marches.map((m, i) => `<option value="${i}">${ech(m.localite)}</option>`).join('')}</select></label>`
+      el('mc-sel').addEventListener('change', e => rendre(marches[Number(e.target.value)]))
+    }
+    rendre(marches[0])
+  }
+
+  function corps (html) { el('mc-corps').innerHTML = html }
+
+  // La classe de force d'une frontiere : ce qui se VOIT.
+  function front (f, estRupture) {
+    if (!f) return '<span class="motif">début de la lecture</span>'
+    // Une ligne d'une methode ANTERIEURE n'a pas enregistre de force : on le
+    // dit, sans inventer « nuits absentes ».
+    if (!('force' in f) && !('depuis_zero' in f)) {
+      return estRupture
+        ? `<span class="front f1"><i></i><b>rupture</b> · force non enregistrée par cette méthode${f.rapport != null ? ` (rapport ×${virgule(f.rapport)})` : ''}${f.sens ? ` · ${f.sens}` : ''}</span>`
+        : '<span class="front tr"><i></i>frontière · force non enregistrée par cette méthode</span>'
+    }
+    if (f.force == null && !f.depuis_zero) return '<span class="front tr"><i></i>force non mesurable (nuits absentes des deux côtés)</span>'
+    if (!estRupture) return `<span class="front tr"><i></i>transition ×${virgule(f.force)} — pas une rupture</span>`
+    const cls = f.depuis_zero || f.force >= 2 ? 'f2' : f.force >= 1.5 ? 'f1' : 'f0'
+    const libelle = f.depuis_zero ? 'depuis zéro nuit' : `×${virgule(f.force)}`
+    const mot = cls === 'f2' ? 'rupture forte' : cls === 'f1' ? 'rupture' : 'rupture faible'
+    return `<span class="front ${cls}"><i></i><b>${mot}</b> ${libelle} · ${f.sens === 'hausse' ? 'hausse' : 'baisse'}</span>`
+  }
+
+  function rendre (m) {
+    el('mc-meta').innerHTML = `Marché : <b>${ech(m.localite)}</b> (${ech(m.region)}, ${ech(m.pays)}) ·
+      réservations lues le <b>${jourFr(m.capture_le)}</b> · méthode ${ech(m.methode)}`
+    if (m.statut !== 'calcule') {
+      return corps(`<div class="mc-carte"><h2>Saisons non calculables</h2>
+        <p class="non-calc">${ech(m.motif || 'motif non précisé')}</p></div>`)
+    }
+    const regimes = m.regimes || []
+    const saisons = m.saisons || []
+    const ruptures = m.ruptures || []
+    const parDate = new Map(ruptures.map(r => [r.date, r]))
+    // La frontiere d'entree d'une saison : rupture si elle est dans la liste
+    // des ruptures ; sinon une transition (anciennes lignes sans `entree`).
+    const entree = (s, k) => {
+      if (k === 0) return null
+      const r = parDate.get(s.debut)
+      if (r) return { f: r, rupture: true }
+      // Anciennes lignes : ni `entree` ni `force_entree` — rien a inventer.
+      if (!('entree' in s)) return { f: {}, rupture: false }
+      return { f: { force: s.force_entree ?? null, depuis_zero: false, sens: null }, rupture: s.entree === 'rupture' }
+    }
+    const blocs = regimes.map(g => {
+      if (g.regime === 'derniere_minute') {
+        return `<div class="mc-carte">
+          <span class="mc-echelle dm">Zone de dernière minute</span>
+          <h2>${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
+          <div class="mc-frise"><div class="dm-zone" style="flex:1"></div></div>
+          <p class="non-calc">${ech(g.phrase || 'Zone de dernière minute, non interprétable.')} Aucune saison, aucune rupture.</p>
+        </div>`
+      }
+      if (g.regime === 'pacing') {
+        const total = saisons.reduce((t, s) => t + nbJours(s.debut, s.fin), 0) || 1
+        const frise = saisons.map((s, k) => {
+          const e = entree(s, k)
+          const cls = !e ? '' : e.rupture ? ((e.f.force >= 2 || e.f.depuis_zero) ? 'rupt forte' : 'rupt') : 'trans'
+          return `<div class="p-${s.saison} ${cls}" style="flex:${nbJours(s.debut, s.fin) / total}" title="${ech(NOM[s.saison])} · ${jourFr(s.debut)} → ${jourFr(s.fin)}"></div>`
+        }).join('')
+        const lignes = saisons.map((s, k) => {
+          const e = entree(s, k)
+          return `<tr><td>${jourFr(s.debut)} → ${jourFr(s.fin)}</td>
+            <td><span class="pastille p-${s.saison}"></span>${NOM[s.saison]}</td>
+            <td>${e ? front(e.f, e.rupture) : front(null)}</td></tr>`
+        }).join('')
+        return `<div class="mc-carte">
+          <span class="mc-echelle pacing">Échelle du pacing</span>
+          <h2>Réservations déjà prises · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
+          <p class="sous">${ech(g.phrase || '')} Au-delà du ${jourFr(m.horizon_fin)}, trop peu de réservations pour conclure.</p>
+          <div class="mc-frise">${frise}</div>
+          <div class="mc-bornes"><span>${jourFr(saisons[0] && saisons[0].debut)}</span><span>${jourFr(saisons.length && saisons[saisons.length - 1].fin)}</span></div>
+          <table class="mc"><thead><tr><th>Période</th><th>Saison (échelle du pacing)</th><th>Comment elle commence</th></tr></thead>
+          <tbody>${lignes}</tbody></table>
+        </div>`
+      }
+      if (g.regime === 'forme_mensuelle') {
+        const mois = (m.au_dela || [])
+        const lignes = mois.map(x => `<tr><td>${moisFr(x.mois)}</td>
+          <td>${x.saison ? `<span class="pastille m-${x.saison}"></span>${NOM[x.saison]}` : `<span class="non-calc">non calculable : ${ech(x.motif || 'sans motif')}</span>`}</td>
+          <td class="motif">${x.indice != null ? `indice ${virgule(x.indice)} · ${x.annees} an${x.annees > 1 ? 's' : ''}` : ''}</td></tr>`).join('')
+        return `<div class="mc-carte">
+          <span class="mc-echelle mensuel">Échelle mensuelle — ne se compare pas à celle du pacing</span>
+          <h2>Forme des trois dernières années · ${jourFr(g.debut)} → ${jourFr(g.fin)}</h2>
+          <p class="sous">${ech(g.phrase || '')}</p>
+          ${lignes ? `<table class="mc"><thead><tr><th>Mois</th><th>Saison (échelle mensuelle)</th><th>Mesure</th></tr></thead><tbody>${lignes}</tbody></table>`
+            : '<p class="non-calc">Aucun mois au-delà de l’horizon.</p>'}
+        </div>`
+      }
+      return ''
+    }).join('')
+    corps(blocs + explication(m))
+  }
+
+  function explication (m) {
+    const titre = '<h2>Pourquoi le marché monte</h2><p class="sous">Le calendrier français (vacances des trois zones, fériés, ponts, dates commerciales) lu APRÈS coup, sur des saisons déjà établies sans lui.</p>'
+    if (!m.pics) {
+      return `<div class="mc-carte">${titre}<p class="non-calc">${ech((m.limites || [])[0] || 'Explication non calculable.')}</p></div>`
+    }
+    const pics = m.pics.map(p => `<tr><td>${jourFr(p.debut)} → ${jourFr(p.fin)}</td>
+      <td><span class="pastille p-${p.saison}"></span>${NOM[p.saison]}</td>
+      <td>${phrase(p.phrase)}</td></tr>`).join('')
+    const aLire = (m.evenements_possibles || []).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
+      || '<p class="motif">Rien à signaler : chaque pic a une cause dans le calendrier français.</p>'
+    const ecarts = (m.ecart_semaine_week_end || []).map(x => `<tr><td>${jourFr(x.debut)} → ${jourFr(x.fin)}</td>
+      <td>${x.ecart_prix_pct != null ? `<b>${x.ecart_prix_pct > 0 ? '+' : ''}${virgule(x.ecart_prix_pct)} %</b> le week-end`
+        : `<span class="non-calc">${ech(x.motif || 'non calculable, motif non précisé')}</span>`}</td>
+      <td class="motif">${x.ecart_prix_pct != null ? `remplissage ${virgule(Math.round(x.remplissage_semaine * 1000) / 10)} % en semaine, ${virgule(Math.round(x.remplissage_week_end * 1000) / 10)} % le week-end` : `${x.nuits_reservees_semaine ?? 0} / ${x.nuits_reservees_week_end ?? 0} nuits réservées`}</td></tr>`).join('')
+    return `<div class="mc-carte">${titre}
+      <table class="mc"><thead><tr><th>Pic</th><th>Saison</th><th>Cause lue dans le calendrier</th></tr></thead><tbody>${pics}</tbody></table>
+      <h2 style="margin-top:16px">À lire : sans cause calendaire française connue</h2>
+      <p class="sous">Rien n’est enregistré. Si vous en retenez une, saisissez-la vous-même dans vos événements.</p>
+      ${aLire}
+      <h2 style="margin-top:16px">Semaine / week-end</h2>
+      <p class="sous">Vendredi et samedi soir contre dimanche à jeudi, hors vacances et fériés. Un pourcentage, jamais un prix ; sous 400 nuits réservées d’un côté, pas de chiffre.</p>
+      <table class="mc"><thead><tr><th>Période</th><th>Écart</th><th>Mesure</th></tr></thead><tbody>${ecarts}</tbody></table>
+    </div>`
+  }
+
+  init()
+</script>
+</body>
+</html>

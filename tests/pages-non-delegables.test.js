@@ -85,6 +85,12 @@ const DELEGABLES = [
   // ⚠ `apps/yield/evenements.html` n'est plus un ecran (22 septembre 2026) :
   // une redirection vers la pop-up « Evenements » de prix.html, qui porte la
   // garde. La ressource designee reste le BIEN, `requirePermission` tranche.
+  // ⚠ DELEGABLE (V2.3.4, 24 septembre 2026) : la page « Le marche » ne montre
+  // AUCUNE donnee de compte — le calendrier d'un MARCHE, commun a tous. Sa
+  // vue (`/api/yield-marche?vue=calendrier`) garde `reservations` en lecture,
+  // sans logement. Le garde-fou de compte propre la rendrait inutilisable sur
+  // un compte partage sans rien proteger.
+  'apps/yield/marche.html',
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────
