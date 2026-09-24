@@ -1295,3 +1295,28 @@ L'écart lointain repose sur peu de nuits de week-end.
 **Garde de frontière** : un test parcourt `lib/marche` et `lib/airroi` et
 échoue si un module V2 touche `yield_events`, `yield_segment_reglages`,
 `calendar_inventory`, `price_display_log` ou `prix_hote`.
+
+### V2.3.3 — stockage (`marche_calendrier`)
+
+- **Migration** `migrations/2026-09-24-calendrier-marche.sql` : UNE table V2
+  neuve, par MARCHÉ (pays, région, localité) et par date de CAPTURE du pacing,
+  avec la version de méthode (`METHODE`, `lib/marche/calendrier-marche.js`) ;
+  aucune clé étrangère, aucune table existante touchée, RLS active, aucune
+  policy, `revoke all ... from anon, authenticated` — serveur seulement.
+  `drop table public.marche_calendrier` et l'app tourne comme avant. Lignes
+  < 60 caractères ; requête de vérification à empreinte (biens 5 / 3). Un test
+  vérifie tout cela dans le SQL lui-même.
+- **Writer unique** `lib/marche/calendrier-marche.js` : `construireLigne` (pure)
+  assemble saisons, ruptures, régimes, au-delà, pics, événements possibles (à
+  LIRE), écart week-end, couverture et limites — **aucun prix, aucun
+  logement** ; `enregistrerCalendrier` n'écrit QUE dans `marche_calendrier`,
+  en AJOUT SEUL : une capture déjà stockée (même marché, même date, même
+  méthode) est refusée et dite, jamais réécrite.
+- **Script** `scripts/calculer-calendrier-marche.js --pacing=… --marche60=…
+  [--go]` : aucun appel AirROI (les fichiers de la capture du 24 septembre,
+  déjà payée), vacances lues dans la base visée, empreinte en tête ; sans
+  `--go`, aucune écriture.
+- **Décision prise seule** : la ligne garde la version de méthode dans sa clé
+  d'unicité, pour qu'un recalcul après un changement de règle coexiste avec
+  l'ancien au lieu de l'écraser. *Alternative* : une seule ligne par capture,
+  remplacée.

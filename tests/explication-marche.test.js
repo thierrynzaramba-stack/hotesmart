@@ -119,7 +119,7 @@ test('FRONTIERE V2 : les modules purs ne touchent aucune base ; les autres, seul
   // Les autres : chaque `.from(` nomme en toutes lettres une table V2, et
   // aucun `.rpc(`. (Tous les fichiers de lib/marche et lib/airroi, sous-
   // dossiers compris.)
-  const V2 = new Set(['airroi_cache', 'airroi_appels', 'comparables_retenus', 'grille_controle'])
+  const V2 = new Set(['airroi_cache', 'airroi_appels', 'comparables_retenus', 'grille_controle', 'marche_calendrier'])
   const fichiers = []
   const parcourir = d => { for (const x of fs.readdirSync(path.join(racine, d), { withFileTypes: true })) { const p = `${d}/${x.name}`; if (x.isDirectory()) parcourir(p); else if (p.endsWith('.js')) fichiers.push(p) } }
   parcourir('lib/marche'); parcourir('lib/airroi')
