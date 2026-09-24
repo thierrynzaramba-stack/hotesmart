@@ -233,9 +233,13 @@ Sources :
   fériés, ponts, week-ends. Déjà en base côté V1 (177 périodes, les trois zones).
 
 Méthode : les pics du pacing s'expliquent par le calendrier. Ce qui ne s'explique
-par rien est un **événement local** — saison thermale, ouverture de La Mongie —
-à faire confirmer par le propriétaire et à créer comme événement hôte
-(mécanisme V1 existant).
+par rien est un **événement local possible** — saison thermale, ouverture de
+La Mongie — présenté dans l'espace V2 comme une **LISTE À LIRE**.
+~~à créer comme événement hôte (mécanisme V1 existant)~~ **Corrigé par Thierry
+le 24 septembre 2026 : c'était faux.** Rien n'est créé dans `yield_events`,
+aucune ligne, même « en proposition ». Si Thierry veut en retenir un, il le
+saisit lui-même par le chemin normal de l'app : le geste reste le sien, et il
+passe par l'existant, jamais par la V2 (frontière, §11).
 
 Ce que la phase 1 doit aussi produire : **l'écart semaine/week-end propre à ce
 marché**. Il ne se lit pas dans des données mensuelles. Sur Bagnères en
@@ -381,6 +385,41 @@ vraies ventes à mesure qu'elles arrivent.
     critère n'est pas figé aujourd'hui : on ne connaît pas encore la
     distribution des écarts. Exemple de forme, non retenu : « trois mois de
     suite avec un écart ≤ un pas d'arrondi (5 €) sur Moyen et Haut ».
+
+    **LE CRITÈRE, fixé par Thierry le 24 septembre 2026, gravé tel quel**
+    (même texte dans `lib/marche/critere.js`, même commit) :
+
+    > CRITÈRE DE L'INTERRUPTEUR V2.6 — fixé et daté le 24 septembre 2026,
+    > avant toute lecture d'un relevé (règle 19).
+    > La grille marché ne peut piloter les prix d'un logement sans historique
+    > que si les quatre conditions suivantes sont réunies, lues sur
+    > grille_controle en comparant la grille marché à la grille mesurée
+    > 12 mois.
+    > 1. Accord sur les niveaux qui portent le plus de nuits : Base et Moyen,
+    >    écart ≤ 1 pas d'arrondi (5 €) ; Haut, ≤ 2 pas (10 €). Très haut et
+    >    Exceptionnel non contraignants — ils reposent par nature sur peu de
+    >    ventes, et le plancher N-1 les corrige nuit par nuit.
+    > 2. Durée : quatre relevés mensuels consécutifs, tous conformes. Un seul
+    >    relevé hors critère remet le compteur à zéro.
+    > 3. Couverture : au moins deux logements conformes, et pas deux du même
+    >    type. La bulle est une niche jacuzzi, Cœur de vie 23 un T2
+    >    ordinaire : ces deux-là suffisent. Deux niches ne suffiraient pas.
+    > 4. Aucun relevé de la fenêtre marqué référence amincie ou mesure
+    >    insuffisante.
+    >
+    > Ce que ce critère ne prouve pas : il mesure la capacité de la méthode à
+    > retrouver une réponse connue, sur deux logements d'un seul marché,
+    > Bagnères. Il ne dit rien de Toulouse ni d'ailleurs.
+    >
+    > Clause qui lui donne son sens : s'il n'est pas atteint, on ne le déplace
+    > pas. On dit pourquoi, on corrige la méthode, ou on accepte que la V2.6
+    > n'ait pas lieu sur ce marché. Un critère assoupli après avoir vu les
+    > chiffres ne vaut rien.
+
+    **Verrou d'affichage** : graver le critère n'ouvre pas la lecture des
+    relevés. Un second drapeau (`ETAPE_3_EN_PLACE = false`,
+    `lib/marche/critere.js`) la tient fermée jusqu'au lot de l'étape 3, sur
+    décision de Thierry.
 13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
     (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
     hôte qu'il sous-performe quand il fait mieux (règle 11).
@@ -694,6 +733,48 @@ n'écrit rien au calendrier, ne pousse aucun prix, ne remplace rien : elle ne
 peut rien casser. **Le préalable du §1 tombe pour V2.0 à V2.5** ; il ne
 protège plus que V2.6.
 
+### La frontière V2 — gravée le 24 septembre 2026 (Thierry)
+
+**Pour l'instant la V2 ne pilote rien. Elle sort des estimations.** Le
+raccordement au moteur viendra après, et ce sera une décision à part.
+
+- **V2 LIT** : l'historique du cœur, le calendrier français déjà en base
+  (vacances, fériés, ponts, week-ends, dates commerciales — importés de leur
+  source, jamais recopiés), l'API AirROI.
+- **V2 ÉCRIT** : uniquement ses propres tables — `airroi_cache`,
+  `airroi_appels`, `comparables_retenus`, `grille_controle`, et ce que la
+  phase 1 demandera.
+- **V2 N'ÉCRIT JAMAIS** : `yield_events`, `yield_segment_reglages`,
+  `calendar_inventory`, `price_display_log`, `prix_hote`. Aucune ligne,
+  jamais, même « en proposition ».
+- **V2 NE POUSSE AUCUN PRIX.** Les cinq niveaux marché ne sont reliés à rien :
+  ni à la grille du moteur, ni à la prédiction, ni à un prix poussé. Ils
+  s'affichent, et c'est tout.
+- **Les événements détectés sont une LISTE À LIRE**, pas des lignes créées. Si
+  Thierry veut en retenir un, il le saisit lui-même par le chemin normal de
+  l'app.
+- **On ne touche pas au pilote de la V1** pendant ce chantier : ses défauts
+  entrent au registre des dettes, ils ne se corrigent pas ici.
+- **LA GARANTIE** : à tout moment, on peut supprimer les tables V2 et l'app
+  tourne exactement comme avant. Un choix de conception qui la casserait se
+  dit à Thierry au lieu de se prendre.
+- **Les deux contacts existants avec l'existant, recensés le 24 septembre** :
+  quatre colonnes ajoutées à `properties` (coordonnées, annonce Airbnb), lues
+  par aucun code existant ; le bloc replié « Grille du marché » de
+  *Prédiction de prix* (branche `lot-v2-1-marche`, non poussé), qui dit « pas
+  de relevé » si sa table disparaît. L'étape 1 n'en ajoute aucun : son écran
+  est une page NEUVE.
+
+### L'ordre des étapes — corrigé le 24 septembre 2026
+
+1. **Le marché** (V2.3) — la saisonnalité, le QUAND. Ne dépend de rien.
+2. **Le choix des comparables** (V2.4) — l'écran de sélection.
+3. **La réunification** (V2.5) — les niveaux déduits des comparables retenus,
+   placés sur le calendrier de l'étape 1, et le contrôle.
+
+La grille marché et la table de contrôle, codées en premier la nuit du 23 au
+24 septembre (§12), sont l'étape 3 : gardées, remises à leur rang.
+
 **L'interrupteur est une décision à part.** Le moment où la grille marché a le
 droit de DÉPLACER un prix n'est jamais une conséquence de l'avoir construite :
 c'est V2.6, un geste explicite de Thierry, bien par bien.
@@ -706,7 +787,7 @@ pièces sur staging, vérification en lecture seule sur la prod, comme le 4.6.
 | **V2.0 Durcissement de la V1** | Traité comme un durcissement de la V1, AVANT la mise sous pilote de La bulle. **V2.0.0** : mesurer la divergence écran / moteur en lecture seule sur la prod (La bulle, Cœur de vie 23, 365 nuits) — script qui sert ensuite de non-régression. **V2.0.1** : dette 17 — `api/yield-prix.js` prend sa matière dans `preparerContexte` et sa suggestion dans `prixDeLaNuit` (fenêtre de contexte élargie au radar, lignes fournies, projection passée en `ouverte: true`) ; test de parité ; 0 divergence au script. **V2.0.2** : dette 26 — `tarifNuitee` à côté de `prixVoyageur`, drapeau « tarif mesuré / tarif déduit », grille et référence en tarif nuitée, indicateurs en prix voyageur (règle 18) ; après 17. **V2.0.3** : dette 25 — capacité non calculable : aucun prix posé, et c'est dit. **V2.0.4** : KB suggestion-yield corrigée. | — |
 | **V2.1 Le cœur marché** | Client AirROI serveur (`AIRROI_API_KEY`, jamais au navigateur) ; tables de cache au cœur (marché, comparables, métriques mensuelles, pacing) avec date de fraîcheur, un writer ; coordonnées du bien ; garde-fous de coût (arbitrage 6). Aucune app ne lit AirROI. | V2.0 |
 | **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app). Le plafond n'agit sur aucun prix avant V2.6. | V2.0 |
-| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu proposé comme événement hôte (mécanisme V1, validé par l'hôte) ; écart semaine / week-end du marché → positions marché STOCKÉES, pas branchées. Aucun prix. | V2.1 |
+| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu présenté comme une LISTE D'ÉVÉNEMENTS LOCAUX POSSIBLES, à lire dans l'espace V2 — rien n'est créé dans `yield_events` (corrigé le 24 septembre 2026) ; écart semaine / week-end du marché → calendrier de segments du marché STOCKÉ dans une table V2, pas branché. Aucun prix. | V2.1 |
 | **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) ; marques « niveau instable » et avertissement gestionnaire (règle 17) ; avertissement ménage et calcul du prix effectif (règle 12) | V2.1 |
 | **V2.5 La grille marché, EN PARALLÈLE, et le contrôle** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2) ; calculée et STOCKÉE, `source = 'marche'`, **aucune greffe dans le moteur**. **Le contrôle permanent** (ci-dessous) : table `grille_controle`, bloc « Grille du marché — à titre d'information, n'agit pas sur vos prix » dans *Prédiction de prix*, ligne de contrôle au bilan fondateur. **Avant le premier affichage de la table : critère de l'interrupteur fixé par Thierry et gravé avec sa date (règle 19).** | V2.3, V2.4 |
 | **V2.6 L'INTERRUPTEUR** | Le seul lot où la grille marché peut DÉPLACER un prix : greffe dans le moteur (`contexte-du-bien`), bascule vers le réel (arbitrage 3), « référence amincie » et grille déclarée (arbitrage 5), l'hôte prévenu à chaque déplacement (règle 16). **Geste explicite de Thierry, bien par bien.** Préalables : un mois réel de La bulle sous pilote (§1) ; dette 26 soldée ; critère de la règle 19 atteint. | V2.5 |

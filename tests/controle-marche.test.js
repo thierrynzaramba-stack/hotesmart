@@ -19,7 +19,7 @@ const assert = require('node:assert')
 const path = require('path')
 const { construireReleve, grilleMesureeDouzeMois } = require('../lib/marche/controle')
 const { menageFacture, sejoursAvecMenage } = require('../lib/marche/menage')
-const { relevesLisibles, CRITERE_INTERRUPTEUR } = require('../lib/marche/critere')
+const { relevesLisibles, CRITERE_INTERRUPTEUR, ETAPE_3_EN_PLACE } = require('../lib/marche/critere')
 const R = require('../lib/yield/reference')
 
 const NIV = prix => ['Base', 'Moyen', 'Haut', 'Très haut', 'Exceptionnel'].map((nom, i) => ({ nom, prix: prix[i] }))
@@ -138,9 +138,16 @@ test('la mesuree 12 mois vient de la V1, bornee a la fenetre du marche', () => {
   assert.ok(m.niveaux.every(n => 'prix_mesure' in n && 'etire' in n), 'les drapeaux de construction voyagent')
 })
 
-test('LE TEST QUI COMPTE : le verrou de la regle 19 — aucun niveau ni ecart ne sort tant que le critere n est pas fixe', async () => {
-  assert.equal(CRITERE_INTERRUPTEUR, null, 'le critere n est pas encore fixe (24 septembre 2026)')
-  assert.equal(relevesLisibles(), false)
+// ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : la premiere version exigeait
+// un critere `null`. Il est desormais fixe et grave ; le verrou tient par le
+// second drapeau (l'etape 3 n'est pas en place). Le test verifie les DEUX.
+test('LE TEST QUI COMPTE : le verrou de la regle 19 — critere grave, mais aucun niveau ni ecart ne sort tant que l etape 3 n est pas en place', async () => {
+  assert.notEqual(CRITERE_INTERRUPTEUR, null, 'le critere est grave')
+  assert.equal(CRITERE_INTERRUPTEUR.fixe_le, '2026-09-24')
+  assert.match(CRITERE_INTERRUPTEUR.texte, /^CRITÈRE DE L'INTERRUPTEUR V2\.6 — fixé et daté le 24 septembre 2026/)
+  assert.match(CRITERE_INTERRUPTEUR.texte, /Un critère assoupli après avoir vu les chiffres ne vaut rien\.$/)
+  assert.equal(ETAPE_3_EN_PLACE, false, 'aucun ecart lu avant l etape 3 (Thierry, 24 septembre 2026)')
+  assert.equal(relevesLisibles(), false, 'graver le critere n ouvre pas l affichage')
   // L'endpoint, avec sa garde et sa base simulees : un releve COMPLET en base.
   // (Adresse locale factice : les modules creent leur client au chargement ;
   // aucune requete ne part, la base est remplacee ci-dessous.)
