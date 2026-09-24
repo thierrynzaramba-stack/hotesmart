@@ -233,8 +233,10 @@ Sources :
   fériés, ponts, week-ends. Déjà en base côté V1 (177 périodes, les trois zones).
 
 Méthode : les pics du pacing s'expliquent par le calendrier. Ce qui ne s'explique
-par rien est un **événement local possible** — saison thermale, ouverture de
-La Mongie — présenté dans l'espace V2 comme une **LISTE À LIRE**.
+par rien se dit **« sans cause calendaire française connue »** — un événement
+local (saison thermale, ouverture de La Mongie) ou un calendrier que HôteSmart
+ne connaît pas (vacances d'un pays voisin, §13) — présenté dans l'espace V2
+comme une **LISTE À LIRE**.
 ~~à créer comme événement hôte (mécanisme V1 existant)~~ **Corrigé par Thierry
 le 24 septembre 2026 : c'était faux.** Rien n'est créé dans `yield_events`,
 aucune ligne, même « en proposition ». Si Thierry veut en retenir un, il le

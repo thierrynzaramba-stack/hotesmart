@@ -18,7 +18,7 @@ const assert = require('node:assert')
 const fs = require('fs')
 const path = require('path')
 const { calendrierDuMarche } = require('../lib/marche/saisons')
-const { expliquerMarche, causesDuJour, calendrierFrancais } = require('../lib/marche/explication')
+const { expliquerMarche, causesDuJour, calendrierFrancais, jugerEcart } = require('../lib/marche/explication')
 
 const FIX = path.join(__dirname, 'fixtures')
 const PACING = JSON.parse(fs.readFileSync(path.join(FIX, 'airroi', 'pacing-bagneres-2026-09-24.json'), 'utf8'))
@@ -57,8 +57,9 @@ test('LE TEST QUI COMPTE : le calendrier vient de la BASE, pas d un texte recopi
   assert.equal(expliquer(invente).pics.find(p => p.debut === '2027-01-29').explique, true)
 })
 
-test('LE TEST QUI COMPTE : les evenements locaux possibles — une LISTE A LIRE, datee, rien d enregistre', () => {
+test('LE TEST QUI COMPTE : les jours sans cause calendaire francaise connue — une LISTE A LIRE, datee, rien d enregistre', () => {
   const e = expliquer()
+  assert.ok(e.evenements_possibles.length > 0, 'une boucle vide ne prouverait rien')
   assert.deepEqual(e.evenements_possibles.map(x => [x.debut, x.fin, x.proche_de_la_capture]),
     [['2026-09-24', '2026-09-30', true], ['2027-01-29', '2027-02-05', false]])
   for (const x of e.evenements_possibles) {
@@ -186,4 +187,21 @@ test('LE TEST QUI COMPTE : sans cause calendaire FRANCAISE connue — jamais « 
     assert.equal(x.limite, 'calendrier_francais_seulement')
   }
   assert.match(e.pics.find(p => p.debut === '2026-09-24').phrase, /calendrier français connu/)
+})
+
+test('le seuil de l ecart a la limite : 400 nuits reservees calculent, 399 non — de chaque cote', () => {
+  const jours = (k, n, prix) => Array.from({ length: k }, () => ({ prix, remplissage: 0.1, n }))
+  // 4 dates de 100 nuits = 400 : calcule.
+  assert.equal(jugerEcart(jours(4, 100, 100), jours(4, 100, 110)).ecart_prix_pct, 10)
+  // 399 cote week-end : aucun chiffre.
+  const we399 = [...jours(3, 100, 110), { prix: 110, remplissage: 0.1, n: 99 }]
+  assert.equal(jugerEcart(jours(4, 100, 100), we399).ecart_prix_pct, null)
+  // 399 cote SEMAINE (l'autre branche), avec 4 dates : aucun chiffre non plus.
+  const se399 = [...jours(3, 100, 100), { prix: 100, remplissage: 0.1, n: 99 }]
+  const r = jugerEcart(se399, jours(4, 100, 110))
+  assert.equal(r.ecart_prix_pct, null)
+  assert.equal(r.remplissage_semaine, undefined)
+  assert.match(r.motif, /moins de 400 nuits réservées/)
+  // 3 dates, meme avec beaucoup de nuits : aucun chiffre.
+  assert.match(jugerEcart(jours(3, 500, 100), jours(4, 500, 110)).motif, /moins de 4 dates/)
 })
