@@ -1219,9 +1219,9 @@ n'a pas de jours).
 - **Écart semaine / week-end** (vendredi-samedi contre dimanche-jeudi, hors
   vacances, fériés, ponts, week-ends prolongés et dates commerciales ; prix
   moyen des nuits réservées, chaque jour pesant autant, remplissage à côté) :
-  **+7,5 % en octobre, +8,5 % de fin octobre à mi-décembre** ; **−3,2 % en
-  janvier, −3,7 % en mars** (à 4 et 6 mois, sur 4 à 5 nuits de week-end déjà
-  réservées). ⚠ La nuit de week-end est celle du VENDREDI et du SAMEDI (on
+  **+7,5 % en octobre, +8,5 % de fin octobre à mi-décembre** ; janvier et
+  mars **non calculables** (voir le seuil ci-dessous — l'ancienne sortie,
+  −3,2 % et −3,7 %, était du bruit). ⚠ La nuit de week-end est celle du VENDREDI et du SAMEDI (on
   dort le vendredi soir) ; la V1, elle, appelle week-end les JOURS samedi et
   dimanche — deux conventions, dites. Les saisons hautes sont des
   vacances : aucune nuit hors vacances, écart « non calculable », et dit —
@@ -1256,6 +1256,34 @@ sur un marché synthétique) ; les pics s'arrêtent à l'horizon ; un pacing
 absent est « non calculable ». Garde de frontière renforcée : les modules
 purs (`saisons`, `explication`, `grille-marche`) n'ont aucun `.from(`, `.rpc(`
 ni client ; les autres ne nomment en toutes lettres que des tables V2.
+
+**Validé par Thierry le 24 septembre 2026**, avec trois points :
+
+- **Un écart négatif sur faible effectif n'est pas un résultat, c'est du
+  bruit.** Affiché à un propriétaire, −3,7 % en mars lui dirait de baisser
+  ses week-ends de mars : faux. Seuil : de CHAQUE côté, au moins **400 nuits
+  réservées sur le marché** (et 4 dates) ; en dessous, « non calculable »,
+  jamais un pourcentage ni aucun chiffre. Mesuré sur Bagnères : 895 et 610
+  nuits de week-end en octobre et novembre-décembre (chiffre gardé), 226 et
+  213 en janvier et mars (non calculables). ⚠ Précision sur un compte rendu :
+  les « 4 à 6 nuits de week-end » annoncées pour janvier et mars étaient des
+  DATES (4 à 5), portant 213 à 226 nuits réservées. *Seuil choisi seul.*
+  *Alternative* : un seuil en dates seulement (8 dates de week-end), qui
+  écarterait aussi octobre (5 dates, 895 nuits). Test : contre le code
+  d'avant, il rougissait sur −3,2 %.
+- **LIMITE CONNUE — le calendrier ne connaît que la France.** Le calendrier
+  de la V1 ne connaît que les vacances scolaires FRANÇAISES. Bagnères est à
+  une cinquantaine de kilomètres de l'Espagne, dont le calendrier scolaire est
+  une cause candidate du pic du 29 janvier → 5 février. Tant qu'il n'est pas
+  vérifié, cette semaine se dit **« sans cause calendaire française
+  connue »**, jamais « événement local ». Même prudence pour tout marché
+  frontalier : la phrase de chaque événement possible nomme les deux causes
+  possibles (un événement local, ou un calendrier inconnu — les vacances d'un
+  pays voisin) et porte `limite: 'calendrier_francais_seulement'`. **Aucune
+  donnée espagnole n'est achetée ni intégrée : c'est une limite écrite, pas
+  un chantier.**
+- **Deux conventions de week-end coexistent** — dette 30 du registre
+  (`docs/kb/dettes-v1.md`), non traitée.
 
 **Limites, écrites** : le prix moyen des nuits réservées est teinté par ce qui
 part (en basse saison, les moins chères) ; le rapport tient à l'intérieur

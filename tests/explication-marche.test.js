@@ -161,3 +161,29 @@ test('un evenement ne chevauche jamais deux pics, et un pacing absent se dit', (
   assert.equal(sans.statut, 'non_calculable')
   assert.match(sans.motif, /pacing absent/)
 })
+
+test('LE TEST QUI COMPTE : une periode a faible effectif ne produit AUCUN chiffre — janvier et mars (213 a 226 nuits de week-end reservees) sont non calculables', () => {
+  const e = expliquer()
+  const periode = d => e.ecart_semaine_week_end.find(x => x.debut === d)
+  for (const d of ['2027-01-02', '2027-03-06']) {
+    const p = periode(d)
+    assert.equal(p.ecart_prix_pct, null, `${d} : aucun pourcentage (le code d'avant sortait -3,2 % et -3,7 %)`)
+    assert.equal(p.remplissage_week_end, undefined, 'aucun chiffre du tout')
+    assert.match(p.motif, /moins de 400 nuits réservées/)
+  }
+  // Octobre et novembre-decembre (895 et 610 nuits de week-end) : le chiffre reste.
+  assert.deepEqual([periode('2026-10-01').ecart_prix_pct, periode('2026-10-25').ecart_prix_pct], [7.5, 8.5])
+  assert.deepEqual([periode('2026-10-01').nuits_reservees_week_end, periode('2026-10-25').nuits_reservees_week_end], [895, 610])
+  // Aucun ecart negatif ne sort sur cette capture : ceux qui sortaient etaient du bruit.
+  assert.ok(e.ecart_semaine_week_end.every(x => x.ecart_prix_pct == null || x.ecart_prix_pct > 0))
+})
+
+test('LE TEST QUI COMPTE : sans cause calendaire FRANCAISE connue — jamais « evenement local » affirme (marche frontalier)', () => {
+  const e = expliquer()
+  for (const x of e.evenements_possibles) {
+    assert.match(x.phrase, /sans cause calendaire française connue/)
+    assert.match(x.phrase, /vacances d’un pays voisin/)
+    assert.equal(x.limite, 'calendrier_francais_seulement')
+  }
+  assert.match(e.pics.find(p => p.debut === '2026-09-24').phrase, /calendrier français connu/)
+})
