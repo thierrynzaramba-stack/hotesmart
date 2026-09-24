@@ -1578,7 +1578,7 @@
     if (d.etat !== 'releve') return `${source}<p class="dit">Aucun relevé du marché pour ce logement.</p>`
     const tete = `<p class="dit">Relevé du ${ech(dateFr(String(d.releve_le).slice(0, 10)))} · ${ech(STATUT_MARCHE[d.statut] || d.statut)} · ${d.nb_comparables} comparable(s) · données du marché du ${ech(dateFr(String(d.fraicheur_marche || '').slice(0, 10)) || '—')}.</p>`
     if (!d.lisible) {
-      return `${source}${tete}<p class="dit">Les grilles ne s’affichent pas encore : le critère qui dira un jour si la grille du marché peut guider un prix doit être fixé <b>avant</b> la première lecture.</p>`
+      return `${source}${tete}<p class="dit">Les grilles ne s’affichent pas encore : elles s’afficheront à l’étape 3, quand les niveaux du marché seront déduits des comparables que vous aurez choisis.</p>`
     }
     const niv = d.niveaux_marche || []
     const ecarts = new Map((d.ecarts || []).map(e => [e.nom, e]))

@@ -45,7 +45,9 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   const { latitude, longitude } = moi.location_info
   const attendu = lireJson(fs.readFileSync(path.join(FIX, 'marche-60.json'), 'utf8')).market
   const depot = depotFichier(dossier)
-  const client = creerClient({ depot, gardes: { budgetMensuelUsd: budget } })
+  // `alerter: null` : un script local ne sonne pas l'alarme du fondateur (un
+  // refus de budget s'affiche ici, en clair).
+  const client = creerClient({ depot, alerter: null, gardes: { budgetMensuelUsd: budget } })
   const ctx = { horsCompte: true }
   console.log(`Cache : ${dossier} · budget du script : ${budget} $`)
   const etapes = []
@@ -75,6 +77,8 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   fs.writeFileSync(fichier, brut.reponse)
 
   // 5. Aucune trace de la cle, sous aucune forme. Rien n'est affiche d'elle.
+  // Sans cle dans l'environnement (relance servie par le cache), la
+  // verification a eu lieu a l'execution qui a paye et ecrit ce cache.
   const cle = process.env.AIRROI_API_KEY || ''
   const formes = cle ? [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)] : []
   const contenu = fs.readFileSync(fichier, 'utf8')
@@ -87,7 +91,11 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   // Ce que contient la reponse : sa forme, pas ses chiffres (ils se liront au
   // lot V2.3.1, dans les tests).
   const donnees = p.donnees || {}
-  const points = Array.isArray(donnees) ? donnees : (Object.values(donnees).find(Array.isArray) || [])
+  // Le tableau des POINTS : le premier tableau d'objets dates, pas le premier
+  // tableau venu (un `warnings: []` ferait compter zero point a tort).
+  const estPoint = x => x && typeof x === 'object' && (x.date || x.day || x.stay_date)
+  const points = Array.isArray(donnees) ? donnees
+    : (Object.values(donnees).find(v => Array.isArray(v) && v.some(estPoint)) || [])
   const premier = points[0] || {}
   const dates = points.map(x => x && (x.date || x.day || x.stay_date)).filter(Boolean).sort()
   console.log(`2. pacing : ${points.length} point(s)${dates.length ? `, du ${dates[0]} au ${dates[dates.length - 1]}` : ''}`)
@@ -99,6 +107,12 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   console.log('\nDepense de cette execution, endpoint par endpoint :')
   for (const e of etapes) console.log(`  ${e.nom} : ${e.cache ? 'cache, 0 $' : `${e.cout.toFixed(2)} $`}`)
   console.log(`  TOTAL : ${total.toFixed(2)} $${total === 0 ? ' (tout vient du cache)' : ''}`)
-  // Un script qui n'a rien capture doit echouer.
-  process.exit(points.length > 0 ? 0 : 3)
+  // Un script qui n'a rien lu doit echouer — avec un code DISTINCT de « marche
+  // different » (3) : ici le pacing est PAYE et la fixture ecrite ; c'est sa
+  // forme qui est a lire, et la relance est gratuite (cache).
+  if (!points.length) {
+    console.error('ECHEC : aucun point date reconnu dans la reponse. Fixture ecrite, forme a lire ; relance gratuite (cache).')
+    process.exit(5)
+  }
+  process.exit(0)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })

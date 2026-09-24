@@ -601,8 +601,11 @@ par Thierry.
 - **`suggerer` écrit « de vos nuits »** (`lib/yield/suggestion.js:620`) :
   contraire à la règle 2 si on branche sans corriger ; `source_du_niveau`
   s'étend de `'marche'`.
-- **Aucune coordonnée dans `properties`** : `markets/lookup` et
-  `comparables` en ont besoin.
+- ~~**Aucune coordonnée dans `properties`**~~ : `markets/lookup` et
+  `comparables` en ont besoin. **Levé le 24 septembre 2026** : quatre colonnes
+  ajoutées (`latitude`, `longitude`, `coords_source`, `airbnb_listing_id`),
+  migration appliquée staging et prod (§12) — l'un des deux contacts avec
+  l'existant recensés dans la frontière (§11).
 - **Pickup et N-1 exigent des dates de vente** : un historique marché mensuel
   ne les alimente pas (couche déjà neutralisée en pratique).
 - **KB périmée** : docs/kb/suggestion-yield.md §2-3 décrit un ratio
@@ -764,6 +767,10 @@ raccordement au moteur viendra après, et ce sera une décision à part.
   *Prédiction de prix* (branche `lot-v2-1-marche`, non poussé), qui dit « pas
   de relevé » si sa table disparaît. L'étape 1 n'en ajoute aucun : son écran
   est une page NEUVE.
+- **Question ouverte, à trancher AVANT V2.2 (relevée en review le
+  24 septembre)** : l'étape 0 saisit le plafond et la résidence principale.
+  Si elles vont dans `properties`, c'est un TROISIÈME contact avec
+  l'existant ; dans une table V2 à elle, la garantie tient d'elle-même.
 
 ### L'ordre des étapes — corrigé le 24 septembre 2026
 

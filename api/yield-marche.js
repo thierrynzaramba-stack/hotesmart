@@ -6,10 +6,11 @@
 // ⚠ INFORMATION PARALLELE, LECTURE SEULE : rien ici n'appelle AirROI (les
 // appels payants passent par les scripts et le rafraichissement, jamais par
 // l'ouverture d'une page) et rien ne touche un prix.
-// ⚠ REGLE 19 (lib/marche/critere.js) : tant que le critere de l'interrupteur
-// n'est pas grave, l'endpoint ne rend NI les ecarts NI les niveaux de la grille
-// marche — qui donneraient l'ecart par soustraction. Il dit seulement qu'un
-// releve existe, sa date et son statut.
+// ⚠ REGLE 19 (lib/marche/critere.js) : tant que les DEUX verrous ne sont pas
+// leves — le critere de l'interrupteur grave (fait le 24 septembre 2026) ET
+// l'etape 3 en place (`ETAPE_3_EN_PLACE`, ferme) — l'endpoint ne rend NI les
+// ecarts NI les niveaux de la grille marche, qui donneraient l'ecart par
+// soustraction. Il dit seulement qu'un releve existe, sa date et son statut.
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
