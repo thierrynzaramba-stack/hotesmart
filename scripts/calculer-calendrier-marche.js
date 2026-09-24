@@ -4,7 +4,11 @@
 //
 //   node --env-file=<.env de la base visee> scripts/calculer-calendrier-marche.js \
 //     --pacing=tests/fixtures/airroi/pacing-bagneres-2026-09-24.json \
-//     --marche60=tests/fixtures/airroi/marche-60.json [--go]
+//     --marche60=tests/fixtures/airroi/marche-60.json [--go --biens=<N>]
+//
+// ⚠ --go EXIGE --biens=N, et N doit etre le nombre de biens de la base
+// visee (3 staging, 5 production) : l'empreinte n'est pas qu'affichee, elle
+// arrete une ecriture sur la mauvaise base (review).
 //
 // ⚠ AUCUN APPEL AIRROI : le pacing et les 60 mois viennent de fichiers (la
 // capture du 24 septembre, deja payee). Les vacances viennent de la BASE
@@ -24,7 +28,8 @@ const go = args.includes('--go')
 const lire = f => JSON.parse(fs.readFileSync(f, 'utf8'))
 
 ;(async () => {
-  if (!val('pacing')) { console.error('Usage : --pacing=<fichier> [--marche60=<fichier>] [--go]'); process.exit(1) }
+  if (!val('pacing') || !val('marche60')) { console.error('Usage : --pacing=<fichier> --marche60=<fichier> [--go --biens=<N>]'); process.exit(1) }
+  if (go && !/^\d+$/.test(String(val('biens') || ''))) { console.error('ECHEC : --go exige --biens=<N> (3 staging, 5 production)'); process.exit(1) }
   const pacing = lire(val('pacing'))
   const marche60 = val('marche60') ? lire(val('marche60')) : null
   if (!pacing.market) throw new Error('le fichier de pacing ne porte pas son marche (cle `market`)')
@@ -33,6 +38,7 @@ const lire = f => JSON.parse(fs.readFileSync(f, 'utf8'))
   if (error || !Number.isInteger(count)) throw new Error(`empreinte illisible ${error ? error.message : ''}`)
   const projet = String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]
   console.log(`Projet ${projet} · biens = ${count} (5 = production, 3 = staging) · ${go ? 'ECRITURE dans marche_calendrier' : 'sans --go : AUCUNE ecriture'}`)
+  if (go && Number(val('biens')) !== count) { console.error(`ECHEC : --biens=${val('biens')} annonce, la base en compte ${count} — mauvaise base, rien n'est ecrit`); process.exit(3) }
 
   const dates = (pacing.results || []).map(x => x.date).filter(Boolean).sort()
   const vacances = await lireVacances(sb, dates[0], dates[dates.length - 1])

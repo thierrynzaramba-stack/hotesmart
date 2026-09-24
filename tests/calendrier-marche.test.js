@@ -39,11 +39,16 @@ test('LE TEST QUI COMPTE : une ligne par MARCHE et par capture — aucun logemen
 test('un marche illisible est refuse ; un pacing trop mince se stocke « non calculable » avec son motif', () => {
   assert.throws(() => construireLigne({ marche: { country: 'France' }, pacing: PACING }), /marche illisible/)
   const mince = { results: PACING.results.map(x => ({ ...x, booked_count: 5 })) }
-  const l = construireLigne({ marche: PACING.market, pacing: mince, calculeLe: 'x' })
+  const l = construireLigne({ marche: PACING.market, pacing: mince, marche60: MARCHE60 })
   assert.equal(l.statut, 'non_calculable')
   assert.match(l.motif, /trop peu de reservations/)
   assert.equal(l.capture_le, '2026-09-24')
   assert.equal(l.saisons, undefined)
+  // Sans date de calcul fournie : AUCUNE cle, le `default now()` de la base
+  // joue (un NULL explicite casserait l'insertion — review).
+  assert.ok(!('calcule_le' in l))
+  // Sans les 60 mois : refuse (la ligne incomplete bloquerait la bonne).
+  assert.throws(() => construireLigne({ marche: PACING.market, pacing: PACING, vacances: VACANCES }), /60 mois du marche sont requis/)
 })
 
 test('LE TEST QUI COMPTE : le writer n ecrit QUE dans marche_calendrier, en ajout seul, et une capture deja stockee se dit', async () => {
@@ -58,10 +63,21 @@ test('LE TEST QUI COMPTE : le writer n ecrit QUE dans marche_calendrier, en ajou
 test('LE TEST QUI COMPTE : la migration est additive et supprimable — aucune table existante touchee, aucune cle etrangere, serveur seulement', () => {
   const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '2026-09-24-calendrier-marche.sql'), 'utf8')
   const code = sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n').toLowerCase()
-  // Ce qu'elle cree, modifie ou supprime : marche_calendrier seulement.
-  for (const m of code.matchAll(/(create table if not exists|alter table|create index if not exists \w+\s+on|revoke all on table|drop table|comment on table)\s+(public\.)?(\w+)/g)) {
-    assert.equal(m[3], 'marche_calendrier', `la migration touche ${m[3]}`)
-  }
+  // LISTE BLANCHE (review : la liste noire laissait passer grant, trigger,
+  // function, insert, create table sans if not exists…). Chaque instruction
+  // doit correspondre a un motif autorise visant marche_calendrier, ou etre
+  // la requete de verification (un select).
+  const autorises = [
+    /^create table if not exists public\.marche_calendrier \(/,
+    /^comment on table public\.marche_calendrier is/,
+    /^alter table public\.marche_calendrier\s+enable row level security$/,
+    /^revoke all on table public\.marche_calendrier\s+from anon, authenticated$/,
+    /^revoke all on sequence\s+public\.marche_calendrier_id_seq\s+from anon, authenticated$/,
+    /^select\b/
+  ]
+  const instructions = code.split(';').map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean)
+  assert.ok(instructions.length >= 6)
+  for (const i of instructions) assert.ok(autorises.some(m => m.test(i)), `instruction non autorisee : ${i.slice(0, 80)}`)
   assert.ok(!/references\s/.test(code), 'aucune cle etrangere : la table se supprime seule')
   assert.ok(!/create policy/.test(code), 'aucune policy : serveur seulement')
   assert.match(code, /revoke all on table public\.marche_calendrier\s+from anon, authenticated/)

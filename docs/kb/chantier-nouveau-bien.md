@@ -1316,6 +1316,17 @@ L'écart lointain repose sur peu de nuits de week-end.
   [--go]` : aucun appel AirROI (les fichiers de la capture du 24 septembre,
   déjà payée), vacances lues dans la base visée, empreinte en tête ; sans
   `--go`, aucune écriture.
+- **Review du V2.3.3 (aucun constat de sécurité), corrigé** : les 60 mois
+  sont REQUIS (une ligne sans l'au-delà occuperait la clé d'unicité et
+  bloquerait le bon calcul) ; `calcule_le` n'est envoyé que s'il est fourni
+  (un NULL explicite cassait l'insertion) ; la date de capture est le premier
+  jour LISIBLE du pacing, dans les deux branches ; `--go` exige `--biens=N` et
+  s'arrête si la base visée n'en compte pas N ; la séquence de la table est
+  révoquée elle aussi ; la vérification sonde tous les droits client
+  (`acces_client`) ; l'index redondant est retiré. Le test de migration est
+  une LISTE BLANCHE, instruction par instruction (la liste noire laissait
+  passer un `grant`, un trigger, une écriture dans `properties`) ; la garde de
+  frontière couvre aussi les scripts V2.
 - **Décision prise seule** : la ligne garde la version de méthode dans sa clé
   d'unicité, pour qu'un recalcul après un changement de règle coexiste avec
   l'ancien au lieu de l'écraser. *Alternative* : une seule ligne par capture,

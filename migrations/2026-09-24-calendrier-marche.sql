@@ -55,10 +55,6 @@ create table if not exists public.marche_calendrier (
   methode text not null,
   unique (pays, region, localite, capture_le, methode)
 );
-create index if not exists marche_calendrier_marche_idx
-  on public.marche_calendrier
-  (pays, region, localite, capture_le);
-
 comment on table public.marche_calendrier is
   'V2.3 : calendrier de segments du marche. '
   'Information parallele, aucun prix, lue par '
@@ -68,6 +64,9 @@ comment on table public.marche_calendrier is
 alter table public.marche_calendrier
   enable row level security;
 revoke all on table public.marche_calendrier
+  from anon, authenticated;
+revoke all on sequence
+  public.marche_calendrier_id_seq
   from anon, authenticated;
 
 -- ─── Verification (a coller aussi) ──────────────────────
@@ -86,10 +85,12 @@ select
      and tablename = 'marche_calendrier')
     as policies,
   (has_table_privilege('anon',
-     'public.marche_calendrier', 'select')
+     'public.marche_calendrier',
+     'select,insert,update,delete')
    or has_table_privilege('authenticated',
-     'public.marche_calendrier', 'select'))
-    as lecture_client,
+     'public.marche_calendrier',
+     'select,insert,update,delete'))
+    as acces_client,
   (select count(*) from pg_constraint
      where conrelid =
        'public.marche_calendrier'::regclass
@@ -98,5 +99,5 @@ select
   (select count(*) from public.marche_calendrier)
     as lignes;
 -- Attendu : biens 5 (prod) ou 3 (staging), rls 1,
--- policies 0, lecture_client false,
+-- policies 0, acces_client false,
 -- cles_etrangeres 0, lignes 0.

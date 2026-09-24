@@ -123,6 +123,13 @@ test('FRONTIERE V2 : les modules purs ne touchent aucune base ; les autres, seul
   const fichiers = []
   const parcourir = d => { for (const x of fs.readdirSync(path.join(racine, d), { withFileTypes: true })) { const p = `${d}/${x.name}`; if (x.isDirectory()) parcourir(p); else if (p.endsWith('.js')) fichiers.push(p) } }
   parcourir('lib/marche'); parcourir('lib/airroi')
+  // Les SCRIPTS V2 aussi (review) : ils lisent l'existant (empreinte,
+  // vacances), jamais n'ecrivent dans une table interdite.
+  const interdites = ['yield_events', 'yield_segment_reglages', 'calendar_inventory', 'price_display_log', 'prix_hote']
+  for (const f of ['scripts/capturer-pacing.js', 'scripts/calculer-calendrier-marche.js', 'scripts/releve-controle-marche.js', 'scripts/verifier-airroi.js', 'scripts/verifier-migration-marche.js']) {
+    const src = lire(f)
+    for (const t of interdites) assert.ok(!src.includes(t), `${f} nomme ${t}`)
+  }
   for (const f of fichiers) {
     const src = lire(f)
     assert.ok(!/\.rpc\(/.test(src), `${f} : .rpc(`)
