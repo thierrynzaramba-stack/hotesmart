@@ -1037,3 +1037,80 @@ tables, colonnes du bien et variante Airbnb présentes ; en production, la
 lecture depuis le navigateur (clé anon) est REFUSÉE sur le cache, le journal
 et le contrôle (42501). Le code qui les lit n'est pas encore en production :
 les tables y sont vides et rien ne les écrit.
+
+---
+
+## 13. V2.3 — le marché, le QUAND (étape 1)
+
+### V2.3.0 — fixture du pacing (24 septembre 2026)
+
+Capturée par Thierry (`scripts/capturer-pacing.js`) : `markets/lookup` 0,01 $ +
+`markets/metrics/future/pacing` 0,20 $ = **0,21 $**. Fichier
+`tests/fixtures/airroi/pacing-bagneres-2026-09-24.json` : **342 jours**, du
+2026-09-24 au **2027-08-31** — pas 365. Champs par jour : `date`,
+`booked_count`, `available_count`, `booked_rate_avg`, `available_rate_avg`,
+`fill_rate` (arrondi à 2 décimales : recalculé, jamais lu). Consécutifs, sans
+trou ni doublon ; aucune trace de clé. L'offre suivie passe de 1 135 à 1 081
+logements sur la fenêtre.
+
+### V2.3.1 — saisons et ruptures (`lib/marche/saisons.js`, pur)
+
+**La fenêtre est celle des données, jamais une année supposée** : le code lit
+les dates présentes. Hors fenêtre → `hors_fenetre` ; trou dans la fenêtre →
+`absent_du_pacing` ; au-delà de l'horizon → `non_concluant` avec la forme
+mensuelle. Jamais un zéro, jamais « basse » par défaut. Le lissage ne moyenne
+que les jours présents, et rend `null` si moins de 4 jours sur 7 le sont.
+
+**Résultat sur la fixture réelle** — horizon concluant jusqu'au 2027-04-11
+(200 jours ; au-delà, moins de 20 nuits réservées par jour) :
+
+| Période | Saison |
+|---|---|
+| 24 → 26 sept. 2026 | Forte |
+| 27 sept. → 24 oct. | Moyenne |
+| 25 oct. → 18 déc. | Basse |
+| 19 → 25 déc. | Forte |
+| 26 déc. → 1er janv. 2027 | Très forte |
+| 2 → 21 janv. | Basse |
+| 22 → 28 janv. | Moyenne |
+| 29 janv. → 12 fév. | Forte |
+| 13 fév. → 5 mars | Très forte |
+| 6 → 27 mars | Moyenne |
+| 28 mars → 11 avril | Basse |
+| avril → août 2027 | non concluant ; forme mensuelle (3 ans) : avril-juin basse, juillet forte, août très forte |
+
+**Les trois ruptures du 22 septembre sont retrouvées au jour près ET sont les
+trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
+(×0,36), 6 mars (×0,37). Les autres frontières recoupent la table du
+22 septembre (§4) : 25 octobre (table : 25 oct.), 13 février (table : 13 fév.),
+29 janvier (table : 30 janv.).
+
+**Décisions prises seules (à confirmer ou renverser)** :
+1. **Le RELIEF, pas le remplissage brut.** Un pacing se remplit d'autant moins
+   que la date est loin (−20 % par 30 jours mesuré ici). Brut, octobre (0,16,
+   tout proche) passe au-dessus des vacances de février (0,14, à cinq mois),
+   et la table du 22 septembre n'est pas retrouvée. On retire la pente de
+   l'éloignement — droite de Theil-Sen (médiane des pentes, robuste aux pics)
+   sur le log du remplissage lissé, estimée sur l'horizon — et on classe le
+   résidu. *Alternative* : le remplissage brut (validé tel quel le
+   24 septembre, mais il classe octobre « très forte »).
+2. **Quatre saisons aux quantiles 40 / 70 / 85 % du relief** sur l'horizon.
+   *Alternative* : des seuils fixes en valeur de relief.
+3. **Horizon : 20 nuits réservées par jour** (lissées sur 7 jours).
+   *Alternative* : un autre seuil, ou un seuil en remplissage.
+4. **Rupture recalée au jour** sur le saut jour à jour le plus fort du
+   remplissage brut, à ±4 jours de la frontière lissée, dans le sens de la
+   frontière. Sans ce recalage, le lissage place les ruptures au 18 décembre,
+   5 janvier et 9 mars.
+5. **Forme mensuelle au-delà de l'horizon** : occupation moyenne du marché par
+   mois calendaire sur les 36 derniers mois non nuls, rapportée à la moyenne
+   des mois ; mêmes quantiles. *Alternative* : les percentiles p50.
+
+**Limites, écrites** :
+- le relief suppose une pente d'éloignement CONSTANTE, estimée sur la série
+  elle-même : une vraie tendance saisonnière sur l'horizon (l'automne qui
+  décline) en est en partie absorbée ;
+- le pacing ne voit qu'Airbnb (règle 11) : les saisons sont celles de la
+  demande Airbnb du marché ;
+- la date de capture compte : le même calcul sur une capture de janvier ne
+  verra plus Noël, et verra l'été.
