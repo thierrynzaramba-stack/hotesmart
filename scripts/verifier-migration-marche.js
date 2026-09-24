@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// scripts/verifier-migration-marche.js — LES MIGRATIONS 2026-09-24-marche-airroi
-// ET 2026-09-24-controle-airbnb SONT-ELLES APPLIQUEES SUR LA BASE VISEE ?
+// scripts/verifier-migration-marche.js — LES MIGRATIONS 2026-09-24-marche-airroi,
+// 2026-09-24-controle-airbnb ET 2026-09-24-calendrier-marche SONT-ELLES
+// APPLIQUEES SUR LA BASE VISEE ?
 // Lecture seule.
 //
 //   node --env-file=.env.local scripts/verifier-migration-marche.js     (production)
@@ -38,11 +39,22 @@ const { createClient } = require('@supabase/supabase-js')
   const v = await sb.from('grille_controle').select('niveaux_mesure_12m_airbnb, nuits_mesure_12m_airbnb').limit(1)
   console.log(`grille_controle, variante Airbnb (controle-airbnb.sql) : ${v.error ? `ABSENTE (${v.error.message})` : 'presente'}`)
   if (v.error) manques.push('colonnes Airbnb de grille_controle (2026-09-24-controle-airbnb.sql)')
+  // Troisieme migration (2026-09-24-calendrier-marche) : la table ET sa
+  // FORME. `create table if not exists` reussit en silence sur une table du
+  // meme nom deja la sous une autre forme (Thierry, 24 septembre 2026) : on
+  // lit les 22 colonnes par leur nom — une seule absente fait echouer.
+  const COLONNES = ['id', 'pays', 'region', 'localite', 'capture_le', 'calcule_le', 'source', 'statut', 'motif',
+    'fenetre_debut', 'fenetre_fin', 'horizon_fin', 'regimes', 'saisons', 'ruptures', 'au_dela', 'pics',
+    'evenements_possibles', 'ecart_semaine_week_end', 'couverture_calendrier', 'limites', 'methode']
+  const mc = await sb.from('marche_calendrier').select(COLONNES.join(', '), { count: 'exact' }).limit(1)
+  const mcOk = !mc.error && Number.isInteger(mc.count)
+  console.log(`marche_calendrier (calendrier-marche.sql) : ${mcOk ? `presente, ${COLONNES.length} colonnes lues par leur nom, ${mc.count} ligne(s)` : `ABSENTE ou d'une autre forme (${mc.error ? mc.error.message : 'compte illisible'})`}`)
+  if (!mcOk) manques.push('marche_calendrier (2026-09-24-calendrier-marche.sql)')
   // La lecture COTE CLIENT doit echouer : la cle service contourne la RLS et ne
   // peut pas le voir (review). Sonde avec la cle anon, si elle est connue.
   if (process.env.SUPABASE_ANON_KEY) {
     const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
-    for (const t of ['airroi_cache', 'airroi_appels', 'grille_controle']) {
+    for (const t of ['airroi_cache', 'airroi_appels', 'grille_controle', 'marche_calendrier']) {
       const r = await anon.from(t).select('*').limit(1)
       const ferme = !!r.error || !(r.data || []).length
       console.log(`${t} vu du navigateur (anon) : ${r.error ? `refuse (${r.error.code || r.error.message})` : `${(r.data || []).length} ligne(s)`}`)

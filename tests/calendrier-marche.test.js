@@ -84,3 +84,11 @@ test('LE TEST QUI COMPTE : la migration est additive et supprimable — aucune t
   // Collage manuel : lignes de moins de 60 caracteres.
   for (const l of sql.split('\n')) assert.ok(l.length < 60, `ligne trop longue : ${l}`)
 })
+
+test('LE TEST QUI COMPTE : sans vacances en base (staging, 24 septembre), AUCUNE ligne ne se construit — Noel ne passe pas pour « sans cause »', () => {
+  assert.throws(() => construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances: [] }),
+    /vacances scolaires incompletes sur l horizon \(aucune periode\).*rien n'est stocke/)
+  // Vacances qui s'arretent avant l'horizon : refuse aussi.
+  const court = VACANCES.filter(v => v.date_fin < '2027-01-01')
+  assert.throws(() => construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances: court }), /vacances scolaires incompletes/)
+})

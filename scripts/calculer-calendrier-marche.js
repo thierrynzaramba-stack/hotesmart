@@ -41,7 +41,12 @@ const lire = f => JSON.parse(fs.readFileSync(f, 'utf8'))
   if (go && Number(val('biens')) !== count) { console.error(`ECHEC : --biens=${val('biens')} annonce, la base en compte ${count} — mauvaise base, rien n'est ecrit`); process.exit(3) }
 
   const dates = (pacing.results || []).map(x => x.date).filter(Boolean).sort()
-  const vacances = await lireVacances(sb, dates[0], dates[dates.length - 1])
+  // ⚠ UNE MARGE AVANT LA FENETRE : la couverture se juge sur l'etendue de la
+  // source ; lue a partir du premier jour du pacing, elle croyait la source
+  // commencee aux premieres vacances DANS la fenetre (17 octobre) et refusait
+  // un calendrier pourtant complet (vecu le 24 septembre 2026).
+  const marge = new Date(Date.parse(`${dates[0]}T00:00:00Z`) - 200 * 86400000).toISOString().slice(0, 10)
+  const vacances = await lireVacances(sb, marge, dates[dates.length - 1])
   const ligne = construireLigne({ marche: pacing.market, pacing, marche60, vacances, calculeLe: new Date().toISOString() })
   console.log(`${ligne.localite} · capture du ${ligne.capture_le} · statut ${ligne.statut}${ligne.motif ? ` (${ligne.motif})` : ''} · methode ${ligne.methode}`)
   if (ligne.statut === 'calcule') {

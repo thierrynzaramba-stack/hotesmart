@@ -1331,3 +1331,32 @@ L'écart lointain repose sur peu de nuits de week-end.
   d'unicité, pour qu'un recalcul après un changement de règle coexiste avec
   l'ancien au lieu de l'écraser. *Alternative* : une seule ligne par capture,
   remplacée.
+
+### V2.3.3 — application du 24 septembre 2026 : deux cas réels
+
+- **L'empreinte a fait son travail.** Au premier essai en production, la
+  requête de vérification a rendu `biens = 3` : l'éditeur SQL pointait encore
+  sur staging. Thierry l'a rejouée dans le bon projet (`biens = 5`). C'est le
+  cas réel qui justifie la règle : un résultat sans empreinte ne dit pas de
+  quelle base il vient.
+- **Contrôles de FORME ajoutés par Thierry** : `create table if not exists`
+  réussit en silence si une table du même nom existe déjà sous une autre
+  forme. La vérification compte donc aussi `colonnes` (22) et `unicite` (1) ;
+  le vérificateur lit les 22 colonnes par leur nom. **Règle pour les
+  migrations suivantes : toute vérification prouve la forme, pas seulement
+  l'existence.** Résultats : staging et production identiques hors empreinte —
+  rls 1, policies 0, acces_client false, cles_etrangeres 0, colonnes 22,
+  unicite 1, lignes 0 ; `scripts/verifier-migration-marche.js` contre les deux
+  bases : OK ; en production, lecture anon refusée (42501).
+- **Une ligne FAUSSE écrite en staging (id 1), par ma faute.** Calcul à blanc
+  et écriture lancés dans la même commande, sans relire le résultat à blanc :
+  la table des vacances est VIDE en staging (0 ligne), et la ligne donne Noël
+  et février pour « sans cause calendaire » (5 événements possibles au lieu de
+  2). Elle porte elle-même `couverture : aucune periode`. **Corrigé dans le
+  code** : une ligne ne se construit plus quand les vacances ne couvrent pas
+  l'horizon (test rouge contre le code d'avant) ; le script lit les vacances
+  avec une marge de 200 jours avant la fenêtre (lues à partir du premier jour
+  du pacing, la couverture croyait la source commencée au 17 octobre). La
+  ligne id 1 reste en staging tant que Thierry n'a pas décidé de sa
+  suppression. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
+  commandes, jamais une.

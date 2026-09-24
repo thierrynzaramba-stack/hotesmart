@@ -71,6 +71,10 @@ revoke all on sequence
 
 -- ─── Verification (a coller aussi) ──────────────────────
 -- EMPREINTE : biens = 5 en production, 3 en staging.
+-- ⚠ `create table if not exists` REUSSIT EN SILENCE si
+-- une table du meme nom existe deja sous une autre
+-- forme : `colonnes` et `unicite` prouvent la FORME
+-- (controles ajoutes par Thierry, 24 septembre 2026).
 select
   (select count(*) from public.properties)
     as biens,
@@ -96,8 +100,18 @@ select
        'public.marche_calendrier'::regclass
      and contype = 'f')
     as cles_etrangeres,
+  (select count(*) from information_schema.columns
+     where table_schema = 'public'
+     and table_name = 'marche_calendrier')
+    as colonnes,
+  (select count(*) from pg_constraint
+     where conrelid =
+       'public.marche_calendrier'::regclass
+     and contype = 'u')
+    as unicite,
   (select count(*) from public.marche_calendrier)
     as lignes;
 -- Attendu : biens 5 (prod) ou 3 (staging), rls 1,
 -- policies 0, acces_client false,
--- cles_etrangeres 0, lignes 0.
+-- cles_etrangeres 0, colonnes 22, unicite 1,
+-- lignes 0.
