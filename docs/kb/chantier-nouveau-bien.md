@@ -1077,7 +1077,7 @@ que les jours présents, et rend `null` si moins de 4 jours sur 7 le sont.
 | 13 fév. → 5 mars | Très forte |
 | 6 → 27 mars | Moyenne |
 | 28 mars → 11 avril | Basse |
-| avril → août 2027 | non concluant ; forme mensuelle (3 ans) : avril-juin basse, juillet forte, août très forte |
+| avril → août 2027 | non concluant ; forme mensuelle (médiane, 3 ans) : avril-juin basse, juillet moyenne, août forte (la plus haute des trois saisons mensuelles, avec février) |
 
 **Les trois ruptures du 22 septembre sont retrouvées au jour près ET sont les
 trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
@@ -1085,8 +1085,42 @@ trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
 22 septembre (§4) : 25 octobre (table : 25 oct.), 13 février (table : 13 fév.),
 29 janvier (table : 30 janv.).
 
-**Décisions prises seules (à confirmer ou renverser)** :
-1. **Le RELIEF, pas le remplissage brut.** Un pacing se remplit d'autant moins
+**Validé par Thierry le 24 septembre 2026**, avec quatre points gravés :
+
+- **La méthode du relief est « validée sur UN marché, UNE capture ».** La
+  pente d'éloignement de −20 % par 30 jours est MESURÉE sur Bagnères, sur la
+  capture du 24 septembre 2026 — pas une constante. Tant qu'un second marché
+  n'a pas été vérifié, aucun texte ne la présente comme générale. (Un pacing
+  brut mesure l'AVANCEMENT des réservations, pas la demande : retirer
+  l'éloignement est le bon geste, sur ce marché.)
+- **Limite produit — deux régimes.** L'horizon concluant s'arrête au
+  11 avril 2027. L'étape 1 a donc deux régimes : le PACING jusqu'à l'horizon,
+  la FORME MENSUELLE historique au-delà. **Une étude lancée au printemps pour
+  l'été repose ENTIÈREMENT sur le second.** La sortie le dit période par
+  période : `regimes` (pacing / forme_mensuelle, avec leur phrase), `regime`
+  sur chaque saison, chaque mois au-delà et chaque réponse de
+  `saisonDuJour`.
+- **Plancher d'amplitude.** Les quantiles produisent toujours quatre classes :
+  un marché mollement contrasté recevrait une « très forte » qui n'existe pas.
+  Deux classes voisines dont les niveaux de relief s'écartent de moins de
+  **×1,20** fusionnent, sous le nom de celle du dessous. Puis les noms suivent
+  le nombre de saisons restantes : quatre → les quatre ; trois → basse,
+  moyenne, forte ; deux → basse, forte ; une → moyenne. « Très forte »
+  n'existe que si quatre niveaux sont réellement séparés. Même règle sur la
+  forme mensuelle. Mesuré sur Bagnères : ×1,60, ×1,38, ×1,95 — les quatre
+  saisons du pacing tiennent ; la forme mensuelle n'en garde que trois.
+  *Seuil choisi seul* (×1,20 : une saison doit remplir au moins 20 % de plus
+  que celle du dessous). *Alternative* : ×1,30, ou un seuil relatif à la
+  dispersion du relief. *Renommage choisi seul* ; *alternative* : garder le
+  rang d'origine (une classe jamais fusionnée resterait « très forte »).
+- **Décision 5 corrigée : la MÉDIANE des mois homologues**, pas la moyenne,
+  rapportée à la médiane des douze mois. La profondeur AirROI monte en charge
+  sur les premières années et une saison exceptionnelle tire une moyenne ;
+  partout ailleurs on raisonne en quantiles. Test : un juillet triplé ne
+  déplace pas la forme.
+
+**Décisions prises seules (état après la validation)** :
+1. **Le RELIEF, pas le remplissage brut.** RETENU par Thierry. Un pacing se remplit d'autant moins
    que la date est loin (−20 % par 30 jours mesuré ici). Brut, octobre (0,16,
    tout proche) passe au-dessus des vacances de février (0,14, à cinq mois),
    et la table du 22 septembre n'est pas retrouvée. On retire la pente de
@@ -1102,9 +1136,9 @@ trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
    remplissage brut, à ±4 jours de la frontière lissée, dans le sens de la
    frontière. Sans ce recalage, le lissage place les ruptures au 18 décembre,
    5 janvier et 9 mars.
-5. **Forme mensuelle au-delà de l'horizon** : occupation moyenne du marché par
-   mois calendaire sur les 36 derniers mois non nuls, rapportée à la moyenne
-   des mois ; mêmes quantiles. *Alternative* : les percentiles p50.
+5. ~~Forme mensuelle sur la moyenne des mois homologues~~ **CORRIGÉE par
+   Thierry** : la médiane (ci-dessus). L'occupation lue reste
+   `occupancy.avg` du marché, mois par mois ; *alternative* : son p50.
 
 **Review du V2.3.1 (aucun bloquant), corrigé** : un jour absent ne porte
 plus ni saison, ni borne, ni rupture (un trou en tête de fenêtre, trouvé par

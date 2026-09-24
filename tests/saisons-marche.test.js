@@ -125,7 +125,16 @@ test('la forme mensuelle : trois ans, et une occupation 0 est une ABSENCE (champ
   const f = formeMensuelle(MARCHE60, { apres: '2027-04-11', jusqua: '2027-08-31' })
   assert.deepEqual(f.map(m => m.mois), ['2027-04', '2027-05', '2027-06', '2027-07', '2027-08'])
   assert.ok(f.every(m => m.annees === 3 && m.source === 'mensuel'))
-  assert.equal(f.find(m => m.mois === '2027-08').saison, 'tres_forte')
+  // ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : la premiere version exigeait
+  // « tres_forte » pour aout. Avec la mediane et le plancher d'amplitude
+  // (Thierry), les douze mois ne se separent qu'en TROIS niveaux (basse
+  // 0,87-1,13 ; moyenne 1,18-1,24 ; haute : fevrier 1,75, aout 1,55) : la plus
+  // haute s'appelle « forte ». Ce qui compte : aout est dans la saison la plus
+  // haute, avec fevrier.
+  const douze = formeMensuelle(MARCHE60, { apres: '2026-09-01', jusqua: '2027-08-31' })
+  const haute = douze.reduce((m, x) => Math.max(m, ['basse', 'moyenne', 'forte', 'tres_forte'].indexOf(x.saison)), -1)
+  assert.equal(['basse', 'moyenne', 'forte', 'tres_forte'].indexOf(f.find(m => m.mois === '2027-08').saison), haute)
+  assert.equal(douze.find(m => m.mois === '2027-02').saison, f.find(m => m.mois === '2027-08').saison)
   // La derniere annee a 0 : elle sort du calcul, et la forme est EXACTEMENT
   // celle des trois annees precedentes — pas une moyenne tiree par des zeros.
   const troue = { results: MARCHE60.results.map(l => (l.date >= '2025-09' ? { ...l, occupancy: { ...l.occupancy, avg: 0 } } : l)) }
@@ -166,4 +175,50 @@ test('une date impossible ou aberrante n entre pas dans la fenetre', () => {
   const c = calendrierDuMarche({ pacing: loin })
   assert.equal(c.statut, 'non_calculable')
   assert.match(c.motif, /fenetre du pacing incoherente/)
+})
+
+// ─── Validation de Thierry du 24 septembre 2026 ─────────────────────────────
+
+// Un pacing SYNTHETIQUE : l'eloignement de Bagneres (−0,75 %/jour) et des
+// blocs de 20 jours a des niveaux choisis.
+function synthetique (niveaux) {
+  const results = []
+  for (let i = 0; i < 200; i++) {
+    const d = new Date(Date.UTC(2026, 8, 24 + i)).toISOString().slice(0, 10)
+    const r = Math.round(300 * Math.exp(-0.0075 * i) * niveaux[Math.floor(i / 20) % niveaux.length])
+    results.push({ date: d, booked_count: r, available_count: 1000 - r })
+  }
+  return { results }
+}
+
+test('LE TEST QUI COMPTE : plancher d amplitude — un marche mollement contraste sort deux ou trois saisons, jamais une « tres forte » inventee', () => {
+  // Trois niveaux seulement, dont deux proches (×1,1) : les quantiles en
+  // feraient quatre classes.
+  const c = calendrierDuMarche({ pacing: synthetique([1.0, 1.1, 1.0, 1.35]) })
+  assert.equal(c.statut, 'calcule')
+  const vues = [...new Set(c.saisons.map(s => s.saison))]
+  assert.ok(vues.length >= 2 && vues.length <= 3, `saisons : ${vues.join(', ')}`)
+  assert.ok(!vues.includes('tres_forte'), 'aucune « tres forte » sans l amplitude pour la porter')
+  // Bagneres, lui, garde ses quatre saisons (×1,60, ×1,38, ×1,95).
+  assert.equal(new Set(calculer().saisons.map(s => s.saison)).size, 4)
+})
+
+test('LE TEST QUI COMPTE : deux regimes, dits periode par periode — pacing jusqu a l horizon, forme mensuelle au-dela', () => {
+  const c = calculer()
+  assert.deepEqual(c.regimes.map(r => [r.debut, r.fin, r.regime]),
+    [['2026-09-24', '2027-04-11', 'pacing'], ['2027-04-12', '2027-08-31', 'forme_mensuelle']])
+  assert.ok(c.saisons.every(s => s.regime === 'pacing'))
+  assert.ok(c.au_dela.every(m => m.regime === 'forme_mensuelle'))
+  assert.equal(saisonDuJour(c, '2026-12-31').regime, 'pacing')
+  assert.equal(saisonDuJour(c, '2027-07-14').regime, 'forme_mensuelle')
+  assert.match(c.regimes[1].phrase, /pas de la demande de cette année/)
+})
+
+test('LE TEST QUI COMPTE : la forme mensuelle se lit sur la MEDIANE des mois homologues — une valeur aberrante ne la deplace pas', () => {
+  const base = formeMensuelle(MARCHE60, { apres: '2027-04-11', jusqua: '2027-08-31' })
+  // Le juillet le plus haut des trois ans, triple : une saison exceptionnelle.
+  const juillets = MARCHE60.results.filter(l => l.date.slice(5, 7) === '07' && l.date >= '2023-09')
+  const haut = juillets.reduce((m, l) => (l.occupancy.avg > m.occupancy.avg ? l : m))
+  const aberrant = { results: MARCHE60.results.map(l => (l === haut ? { ...l, occupancy: { ...l.occupancy, avg: l.occupancy.avg * 3 } } : l)) }
+  assert.deepEqual(formeMensuelle(aberrant, { apres: '2027-04-11', jusqua: '2027-08-31' }), base)
 })
