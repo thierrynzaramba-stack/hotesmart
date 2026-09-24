@@ -934,3 +934,16 @@ Corrigé sans nouvelle review (règle : deux reviews sans constat de sécurité)
   « Ménage N EUR » se lit ; un montant négatif (remise) ne se lit pas.
 - **Ventes trop minces sous un marché aminci** : l'avertissement
   `mesure_insuffisante` est émis aussi (le statut n'en porte qu'un).
+
+### Migrations appliquées et prouvées — 24 septembre 2026
+
+`2026-09-24-marche-airroi.sql` puis `2026-09-24-controle-airbnb.sql`, collées
+par Thierry en staging et en production. SQL à empreinte : `biens = 3` et
+`biens = 5`, `colonnes_airbnb = 2`, CHECK du statut sans `attente_dette_26`,
+`releves = 0`. **Prouvées contre chaque base** par
+`scripts/verifier-migration-marche.js` (`.env.staging` : projet
+ortyofzzdsthlhqmzsnq ; `.env.local` : projet cjmrizpdyhrcurmgyrhs) — quatre
+tables, colonnes du bien et variante Airbnb présentes ; en production, la
+lecture depuis le navigateur (clé anon) est REFUSÉE sur le cache, le journal
+et le contrôle (42501). Le code qui les lit n'est pas encore en production :
+les tables y sont vides et rien ne les écrit.
