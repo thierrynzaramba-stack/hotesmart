@@ -280,3 +280,18 @@ test('pas d « au-dela » quand l horizon couvre toute la fenetre', () => {
   assert.deepEqual(c.au_dela, [])
   assert.deepEqual(c.regimes.map(r => r.regime), ['pacing'])
 })
+
+// ─── Regle de methode (Thierry, 24 septembre 2026) : la detection est AVEUGLE ─
+
+test('LE TEST QUI COMPTE : les saisons se detectent sans calendrier — le module REFUSE toute donnee de calendrier, sous toute forme', () => {
+  // Ce qui est permis : le pacing, et les 60 mois du marche. Rien d'autre.
+  assert.equal(calculer().statut, 'calcule')
+  const vacances = [{ zone: 'C', nom: 'Vacances de Noël', date_debut: '2026-12-19', date_fin: '2027-01-03' }]
+  for (const intrus of [{ vacances }, { calendrier: {} }, { feries: new Map() }, { evenements: [] }, { contexte: {} }, { vacances: undefined }]) {
+    assert.throws(() => calendrierDuMarche({ pacing: PACING, marche60: MARCHE60, ...intrus }),
+      /le calendrier n'entre jamais dans la detection/, `accepte : ${Object.keys(intrus).join(', ')}`)
+  }
+  // Et le module ne peut pas aller le chercher lui-meme : aucun require.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'marche', 'saisons.js'), 'utf8')
+  assert.ok(!/require\(/.test(src), 'saisons.js n importe rien — ni vacances, ni feries, ni la V1')
+})

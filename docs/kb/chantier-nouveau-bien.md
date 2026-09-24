@@ -1057,6 +1057,24 @@ logements sur la fenêtre.
 
 ### V2.3.1 — saisons et ruptures (`lib/marche/saisons.js`, pur)
 
+**RÈGLE DE MÉTHODE — LA DÉTECTION EST AVEUGLE (Thierry, 24 septembre
+2026).** Les saisons et les ruptures se calculent à partir du SEUL pacing (et
+de la forme des 60 mois), sans jamais lire le calendrier. Le calendrier
+n'intervient qu'ENSUITE, pour expliquer un relief déjà établi (V2.3.2). Tant
+que cette séparation tient, le fait que les ruptures retombent sur le
+19 décembre et le 13 février est une PREUVE. Si le calendrier entrait un jour
+dans la détection, on perdrait définitivement le moyen de montrer que la
+méthode n'a pas été réglée sur le résultat attendu.
+- **Séparation STRUCTURELLE, pas d'usage** : `calendrierDuMarche` refuse toute
+  autre entrée que `pacing` et `marche60` — vacances, fériés, contexte,
+  événements, même vides, même `undefined` — et `saisons.js` n'importe aucun
+  module. Test : il échoue si on lui passe un calendrier, ou s'il en importe un.
+- **Staging reste le BANC AVEUGLE** : on n'y importe pas les vacances. L'étape
+  d'explication s'y déclare « non calculable, calendrier absent » et n'écrit
+  rien ; la ligne ne porte que saisons et ruptures. C'est le comportement
+  correct de la règle, pas un défaut à contourner. L'explication se lit en
+  lecture seule contre la production, sans rien y écrire.
+
 **La fenêtre est celle des données, jamais une année supposée** : le code lit
 les dates présentes. Hors fenêtre → `hors_fenetre` ; trou dans la fenêtre →
 `absent_du_pacing` ; au-delà de l'horizon → `non_concluant` avec la forme
@@ -1358,5 +1376,8 @@ L'écart lointain repose sur peu de nuits de week-end.
   avec une marge de 200 jours avant la fenêtre (lues à partir du premier jour
   du pacing, la couverture croyait la source commencée au 17 octobre). La
   ligne id 1 reste en staging tant que Thierry n'a pas décidé de sa
-  suppression. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
+  suppression. **Décision de Thierry, même jour** : pas d'import des vacances
+  en staging (banc aveugle, règle ci-dessus) ; la ligne id 1 est supprimée ;
+  le refus est remplacé par le mode aveugle — saisons et ruptures stockées,
+  explication « non calculable, calendrier absent », rien d'écrit pour elle. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
   commandes, jamais une.

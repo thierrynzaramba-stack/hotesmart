@@ -85,10 +85,21 @@ test('LE TEST QUI COMPTE : la migration est additive et supprimable — aucune t
   for (const l of sql.split('\n')) assert.ok(l.length < 60, `ligne trop longue : ${l}`)
 })
 
-test('LE TEST QUI COMPTE : sans vacances en base (staging, 24 septembre), AUCUNE ligne ne se construit — Noel ne passe pas pour « sans cause »', () => {
-  assert.throws(() => construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances: [] }),
-    /vacances scolaires incompletes sur l horizon \(aucune periode\).*rien n'est stocke/)
-  // Vacances qui s'arretent avant l'horizon : refuse aussi.
-  const court = VACANCES.filter(v => v.date_fin < '2027-01-01')
-  assert.throws(() => construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances: court }), /vacances scolaires incompletes/)
+// ⚠ REECRIT LE 24 SEPTEMBRE 2026 (regle 17) : la version d'avant exigeait un
+// REFUS quand les vacances manquent. Thierry a tranche autrement : staging
+// reste le banc AVEUGLE ; saisons et ruptures s'y stockent, l'explication s'y
+// declare non calculable et n'ecrit rien.
+test('LE TEST QUI COMPTE : sans vacances (banc aveugle), saisons et ruptures se stockent, l explication se declare non calculable et n ecrit RIEN', () => {
+  for (const vacances of [[], VACANCES.filter(v => v.date_fin < '2027-01-01')]) {
+    const l = construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances })
+    assert.equal(l.statut, 'calcule')
+    assert.deepEqual(l.ruptures.filter(r => ['2026-12-19', '2027-01-02', '2027-03-06'].includes(r.date)).map(r => r.date), ['2026-12-19', '2027-01-02', '2027-03-06'])
+    for (const k of ['pics', 'evenements_possibles', 'ecart_semaine_week_end', 'couverture_calendrier']) assert.equal(l[k], null, `${k} : rien d'ecrit`)
+    assert.match(l.limites[0], /Explication non calculable, calendrier absent/)
+  }
+  // Les saisons sont IDENTIQUES avec ou sans calendrier : la detection est aveugle.
+  const avec = construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances: VACANCES })
+  const sans = construireLigne({ marche: PACING.market, pacing: PACING, marche60: MARCHE60, vacances: [] })
+  assert.deepEqual(sans.saisons, avec.saisons)
+  assert.deepEqual(sans.ruptures, avec.ruptures)
 })
