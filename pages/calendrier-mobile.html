@@ -11,10 +11,30 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <title>Tarifs - HoteSmart</title>
+  <!-- ⚠ LE MENU EST CELUI DE TOUTES LES PAGES : `public/style.css` + `.layout >
+       .sidebar#sidebar + .main > .content` + `components/sidebar.js`, qui pose
+       lui-meme le bouton ☰ sur mobile. Cette page avait son propre menu
+       (quatre liens, deconnexion), pas celui des autres ecrans : uniformise le
+       24 septembre 2026 a la demande de Thierry. -->
+  <link rel="stylesheet" href="/public/style.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; -webkit-user-select: none; user-select: none; padding-bottom: env(safe-area-inset-bottom); }
-    .topbar { background: #fff; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; border-bottom: 1px solid #e5e5e7; position: sticky; top: 0; z-index: 20; }
+    /* La feuille commune definit aussi .topbar et .content : ici, la barre
+       est sur plusieurs lignes, et le contenu n'a pas le retrait de 24 px. */
+    .content { padding: 0; }
+    /* Constats de review (24 septembre 2026), propres a un ecran de telephone :
+       - 100vh est la GRANDE fenetre de Safari iOS : le bas du calendrier
+         passait sous la barre d'outils, que le document, qui ne defile plus,
+         ne replie jamais. 100dvh suit la fenetre reelle.
+       - le bouton ☰ de sidebar.js est pose a 14 px du haut, en style en
+         ligne : sous l'encoche en PWA. On le descend de la zone sure.
+       - la feuille de saisie doit passer AU-DESSUS de ce bouton (z 1000),
+         sinon il reste tapable pendant une edition. */
+    .layout { height: 100vh; height: 100dvh; }
+    #sidebar-toggle { top: calc(14px + env(safe-area-inset-top)) !important; }
+    .topbar { display: block; height: auto; background: #fff; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; border-bottom: 1px solid #e5e5e7; position: sticky; top: 0; z-index: 20; }
+    /* 44 px a gauche : la place du bouton ☰ que sidebar.js pose en position fixe. */
     .topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-left: 44px; }
     .back { color: #007aff; text-decoration: none; font-size: 15px; white-space: nowrap; }
     .undo-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 9px; width: 40px; height: 40px; font-size: 17px; cursor: pointer; }
@@ -58,7 +78,7 @@
     .cell.orphan .alert { position: absolute; top: 3px; right: 3px; font-size: 11px; }
     .loading { text-align: center; padding: 40px; color: #86868b; font-size: 14px; }
     /* Bottom sheet */
-    .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; z-index: 100; align-items: flex-end; }
+    .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; z-index: 1100; align-items: flex-end; }
     .sheet-overlay.visible { display: flex; }
     .sheet { background: #fff; border-radius: 18px 18px 0 0; width: 100%; max-height: 88vh; overflow-y: auto; padding: 8px 18px calc(18px + env(safe-area-inset-bottom)); animation: slideUp 0.25s ease; }
     @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -98,32 +118,18 @@
     .sheet-foot { position: sticky; bottom: 0; background: #fff; padding-top: 12px; display: flex; gap: 10px; }
     .btn-save { flex: 1; background: #007aff; color: #fff; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; }
     .btn-close { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 12px; padding: 15px 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
-    .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120%); background: #1d1d1f; color: #fff; padding: 13px 20px; border-radius: 12px; font-size: 14px; z-index: 200; transition: transform 0.25s; max-width: 90%; text-align: center; }
+    .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120%); background: #1d1d1f; color: #fff; padding: 13px 20px; border-radius: 12px; font-size: 14px; z-index: 1200; transition: transform 0.25s; max-width: 90%; text-align: center; }
     .toast.visible { transform: translateX(-50%) translateY(0); }
-    .menu-btn { background:#f0f0f0; border:none; border-radius:10px; width:40px; height:40px; font-size:20px; cursor:pointer; color:#1d1d1f; line-height:1; }
-    .m-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; z-index:60; }
-    .m-overlay.open { display:block; }
-    .m-menu { position:fixed; top:0; left:0; bottom:0; width:78%; max-width:300px; background:#fff; z-index:61; transform:translateX(-100%); transition:transform .22s ease; padding:calc(env(safe-area-inset-top) + 16px) 14px 16px; display:flex; flex-direction:column; gap:2px; box-shadow:2px 0 20px rgba(0,0,0,0.15); }
-    .m-menu.open { transform:translateX(0); }
-    .m-menu .m-title { font-size:13px; color:#86868b; padding:8px 12px 8px; }
-    .m-menu a, .m-menu .m-item { display:flex; align-items:center; gap:12px; padding:14px 12px; border-radius:10px; text-decoration:none; color:#1d1d1f; font-size:16px; font-weight:500; cursor:pointer; }
-    .m-menu a:active, .m-menu .m-item:active { background:#f0f0f0; }
   </style>
 </head>
 <body>
-  <div class="m-overlay" id="m-overlay"></div>
-  <nav class="m-menu" id="m-menu">
-    <div class="m-title">Menu</div>
-    <a href="/">&#8962; Accueil</a>
-    <a href="/biens">&#127968; Mes biens</a>
-    <a href="/apps/agent-ai/messagerie">&#128172; Messages</a>
-    <a href="/guide">&#128214; Guide</a>
-    <div class="m-item" id="m-signout">&#8617; D&eacute;connexion</div>
-  </nav>
+<div class="layout">
+<div class="sidebar" id="sidebar"></div>
+<div class="main">
+<div class="content">
   <div class="topbar">
     <div class="topbar-row">
       <div style="display:flex;align-items:center;gap:10px">
-        <button class="menu-btn" id="menu-btn" aria-label="Menu">&#9776;</button>
         <span style="font-weight:700;font-size:16px">Tarifs</span>
       </div>
       <button class="undo-btn" id="btn-undo" disabled>&#8634;</button>
@@ -147,6 +153,9 @@
     <div class="dow-header"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div class="we">Sam</div><div class="we">Dim</div></div>
     <div class="grid" id="grid"><div class="loading">Chargement...</div></div>
   </main>
+</div>
+</div>
+</div>
 
   <div class="sheet-overlay" id="sheet-overlay">
     <div class="sheet" id="sheet">
@@ -166,26 +175,17 @@
 
   <script type="module">
     import { requireAuth } from '/components/auth-guard.js'
-    import { signOut } from '/shared/supabase.js'
+    import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
     import { peutEcrire } from '/shared/compte-courant.js'
     import { loadCalendarData } from '/shared/calendar-core.js'
     import { renderOnboardingBanner } from '/components/onboarding-banner.js'
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifie')
+    renderSidebar('biens-calendrier').catch(() => {})
     if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('/sw.js') } catch(e){} }
     renderOnboardingBanner().catch(()=>{})
 
-    // Menu mobile (☰) : remplace la sidebar desktop (non stylee ici). Nav secondaire.
-    ;(function initMobileMenu(){
-      const btn=document.getElementById('menu-btn'), menu=document.getElementById('m-menu'), ov=document.getElementById('m-overlay')
-      if(!btn||!menu||!ov) return
-      const set=(open)=>{ menu.classList.toggle('open',open); ov.classList.toggle('open',open) }
-      btn.addEventListener('click',()=>set(!menu.classList.contains('open')))
-      ov.addEventListener('click',()=>set(false))
-      const so=document.getElementById('m-signout')
-      if(so) so.addEventListener('click',async()=>{ try{ await signOut() }catch(e){} window.location.href='/' })
-    })()
 
     const monthFull=['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']
     const toISO=(d)=>{ const z=new Date(d.getTime()-d.getTimezoneOffset()*60000); return z.toISOString().slice(0,10) }
