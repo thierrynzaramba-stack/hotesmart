@@ -233,9 +233,15 @@ Sources :
   fériés, ponts, week-ends. Déjà en base côté V1 (177 périodes, les trois zones).
 
 Méthode : les pics du pacing s'expliquent par le calendrier. Ce qui ne s'explique
-par rien est un **événement local** — saison thermale, ouverture de La Mongie —
-à faire confirmer par le propriétaire et à créer comme événement hôte
-(mécanisme V1 existant).
+par rien se dit **« sans cause calendaire française connue »** — un événement
+local (saison thermale, ouverture de La Mongie) ou un calendrier que HôteSmart
+ne connaît pas (vacances d'un pays voisin, §13) — présenté dans l'espace V2
+comme une **LISTE À LIRE**.
+~~à créer comme événement hôte (mécanisme V1 existant)~~ **Corrigé par Thierry
+le 24 septembre 2026 : c'était faux.** Rien n'est créé dans `yield_events`,
+aucune ligne, même « en proposition ». Si Thierry veut en retenir un, il le
+saisit lui-même par le chemin normal de l'app : le geste reste le sien, et il
+passe par l'existant, jamais par la V2 (frontière, §11).
 
 Ce que la phase 1 doit aussi produire : **l'écart semaine/week-end propre à ce
 marché**. Il ne se lit pas dans des données mensuelles. Sur Bagnères en
@@ -381,6 +387,41 @@ vraies ventes à mesure qu'elles arrivent.
     critère n'est pas figé aujourd'hui : on ne connaît pas encore la
     distribution des écarts. Exemple de forme, non retenu : « trois mois de
     suite avec un écart ≤ un pas d'arrondi (5 €) sur Moyen et Haut ».
+
+    **LE CRITÈRE, fixé par Thierry le 24 septembre 2026, gravé tel quel**
+    (même texte dans `lib/marche/critere.js`, même commit) :
+
+    > CRITÈRE DE L'INTERRUPTEUR V2.6 — fixé et daté le 24 septembre 2026,
+    > avant toute lecture d'un relevé (règle 19).
+    > La grille marché ne peut piloter les prix d'un logement sans historique
+    > que si les quatre conditions suivantes sont réunies, lues sur
+    > grille_controle en comparant la grille marché à la grille mesurée
+    > 12 mois.
+    > 1. Accord sur les niveaux qui portent le plus de nuits : Base et Moyen,
+    >    écart ≤ 1 pas d'arrondi (5 €) ; Haut, ≤ 2 pas (10 €). Très haut et
+    >    Exceptionnel non contraignants — ils reposent par nature sur peu de
+    >    ventes, et le plancher N-1 les corrige nuit par nuit.
+    > 2. Durée : quatre relevés mensuels consécutifs, tous conformes. Un seul
+    >    relevé hors critère remet le compteur à zéro.
+    > 3. Couverture : au moins deux logements conformes, et pas deux du même
+    >    type. La bulle est une niche jacuzzi, Cœur de vie 23 un T2
+    >    ordinaire : ces deux-là suffisent. Deux niches ne suffiraient pas.
+    > 4. Aucun relevé de la fenêtre marqué référence amincie ou mesure
+    >    insuffisante.
+    >
+    > Ce que ce critère ne prouve pas : il mesure la capacité de la méthode à
+    > retrouver une réponse connue, sur deux logements d'un seul marché,
+    > Bagnères. Il ne dit rien de Toulouse ni d'ailleurs.
+    >
+    > Clause qui lui donne son sens : s'il n'est pas atteint, on ne le déplace
+    > pas. On dit pourquoi, on corrige la méthode, ou on accepte que la V2.6
+    > n'ait pas lieu sur ce marché. Un critère assoupli après avoir vu les
+    > chiffres ne vaut rien.
+
+    **Verrou d'affichage** : graver le critère n'ouvre pas la lecture des
+    relevés. Un second drapeau (`ETAPE_3_EN_PLACE = false`,
+    `lib/marche/critere.js`) la tient fermée jusqu'au lot de l'étape 3, sur
+    décision de Thierry.
 13. **Seul le PRIX d'un comparable se compare à l'hôte.** Une occupation AirROI
     (Airbnb seul) opposée à une occupation du cœur (tous canaux) dirait à un
     hôte qu'il sous-performe quand il fait mieux (règle 11).
@@ -562,8 +603,11 @@ par Thierry.
 - **`suggerer` écrit « de vos nuits »** (`lib/yield/suggestion.js:620`) :
   contraire à la règle 2 si on branche sans corriger ; `source_du_niveau`
   s'étend de `'marche'`.
-- **Aucune coordonnée dans `properties`** : `markets/lookup` et
-  `comparables` en ont besoin.
+- ~~**Aucune coordonnée dans `properties`**~~ : `markets/lookup` et
+  `comparables` en ont besoin. **Levé le 24 septembre 2026** : quatre colonnes
+  ajoutées (`latitude`, `longitude`, `coords_source`, `airbnb_listing_id`),
+  migration appliquée staging et prod (§12) — l'un des deux contacts avec
+  l'existant recensés dans la frontière (§11).
 - **Pickup et N-1 exigent des dates de vente** : un historique marché mensuel
   ne les alimente pas (couche déjà neutralisée en pratique).
 - **KB périmée** : docs/kb/suggestion-yield.md §2-3 décrit un ratio
@@ -694,6 +738,54 @@ n'écrit rien au calendrier, ne pousse aucun prix, ne remplace rien : elle ne
 peut rien casser. **Le préalable du §1 tombe pour V2.0 à V2.5** ; il ne
 protège plus que V2.6.
 
+### La frontière V2 — gravée le 24 septembre 2026 (Thierry)
+
+**Pour l'instant la V2 ne pilote rien. Elle sort des estimations.** Le
+raccordement au moteur viendra après, et ce sera une décision à part.
+
+- **V2 LIT** : l'historique du cœur, le calendrier français déjà en base
+  (vacances, fériés, ponts, week-ends, dates commerciales — importés de leur
+  source, jamais recopiés), l'API AirROI.
+- **V2 ÉCRIT** : uniquement ses propres tables — `airroi_cache`,
+  `airroi_appels`, `comparables_retenus`, `grille_controle`, et ce que la
+  phase 1 demandera.
+- **V2 N'ÉCRIT JAMAIS** : `yield_events`, `yield_segment_reglages`,
+  `calendar_inventory`, `price_display_log`, `prix_hote`. Aucune ligne,
+  jamais, même « en proposition ».
+- **V2 NE POUSSE AUCUN PRIX.** Les cinq niveaux marché ne sont reliés à rien :
+  ni à la grille du moteur, ni à la prédiction, ni à un prix poussé. Ils
+  s'affichent, et c'est tout.
+- **Les événements détectés sont une LISTE À LIRE**, pas des lignes créées. Si
+  Thierry veut en retenir un, il le saisit lui-même par le chemin normal de
+  l'app.
+- **On ne touche pas au pilote de la V1** pendant ce chantier : ses défauts
+  entrent au registre des dettes, ils ne se corrigent pas ici.
+- **LA GARANTIE** : à tout moment, on peut supprimer les tables V2 et l'app
+  tourne exactement comme avant. Un choix de conception qui la casserait se
+  dit à Thierry au lieu de se prendre.
+- **Les deux contacts existants avec l'existant, recensés le 24 septembre** :
+  quatre colonnes ajoutées à `properties` (coordonnées, annonce Airbnb), lues
+  par aucun code existant ; le bloc replié « Grille du marché » de
+  *Prédiction de prix* (branche `lot-v2-1-marche`, non poussé), qui dit « pas
+  de relevé » si sa table disparaît. L'étape 1 n'en ajoute aucun : son écran
+  est une page NEUVE.
+- **Étape 0 (V2.2) — TRANCHÉ par Thierry le 24 septembre 2026** : le plafond
+  et la résidence principale vont dans une **table V2 à part, jamais dans
+  `properties`**. La garantie de suppression est l'INVARIANT : on ne passe pas
+  de deux à trois contacts avec l'existant pour économiser une jointure. Même
+  régime que les autres tables V2 : RLS active, `revoke all ... from anon,
+  authenticated`, lecture serveur uniquement.
+
+### L'ordre des étapes — corrigé le 24 septembre 2026
+
+1. **Le marché** (V2.3) — la saisonnalité, le QUAND. Ne dépend de rien.
+2. **Le choix des comparables** (V2.4) — l'écran de sélection.
+3. **La réunification** (V2.5) — les niveaux déduits des comparables retenus,
+   placés sur le calendrier de l'étape 1, et le contrôle.
+
+La grille marché et la table de contrôle, codées en premier la nuit du 23 au
+24 septembre (§12), sont l'étape 3 : gardées, remises à leur rang.
+
 **L'interrupteur est une décision à part.** Le moment où la grille marché a le
 droit de DÉPLACER un prix n'est jamais une conséquence de l'avoir construite :
 c'est V2.6, un geste explicite de Thierry, bien par bien.
@@ -705,8 +797,8 @@ pièces sur staging, vérification en lecture seule sur la prod, comme le 4.6.
 |---|---|---|
 | **V2.0 Durcissement de la V1** | Traité comme un durcissement de la V1, AVANT la mise sous pilote de La bulle. **V2.0.0** : mesurer la divergence écran / moteur en lecture seule sur la prod (La bulle, Cœur de vie 23, 365 nuits) — script qui sert ensuite de non-régression. **V2.0.1** : dette 17 — `api/yield-prix.js` prend sa matière dans `preparerContexte` et sa suggestion dans `prixDeLaNuit` (fenêtre de contexte élargie au radar, lignes fournies, projection passée en `ouverte: true`) ; test de parité ; 0 divergence au script. **V2.0.2** : dette 26 — `tarifNuitee` à côté de `prixVoyageur`, drapeau « tarif mesuré / tarif déduit », grille et référence en tarif nuitée, indicateurs en prix voyageur (règle 18) ; après 17. **V2.0.3** : dette 25 — capacité non calculable : aucun prix posé, et c'est dit. **V2.0.4** : KB suggestion-yield corrigée. | — |
 | **V2.1 Le cœur marché** | Client AirROI serveur (`AIRROI_API_KEY`, jamais au navigateur) ; tables de cache au cœur (marché, comparables, métriques mensuelles, pacing) avec date de fraîcheur, un writer ; coordonnées du bien ; garde-fous de coût (arbitrage 6). Aucune app ne lit AirROI. | V2.0 |
-| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app). Le plafond n'agit sur aucun prix avant V2.6. | V2.0 |
-| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu proposé comme événement hôte (mécanisme V1, validé par l'hôte) ; écart semaine / week-end du marché → positions marché STOCKÉES, pas branchées. Aucun prix. | V2.1 |
+| **V2.2 Étape 0** | Plafond et résidence principale (le plancher existe) — dans une TABLE V2 à part, jamais dans `properties`, serveur seulement (tranché le 24 septembre 2026, frontière) ; montant du ménage demandé SEULEMENT pour un bien pas encore en ligne, jamais stocké comme réglage (règle 12) ; écran dans `apps/yield/` (config d'app). Le plafond n'agit sur aucun prix avant V2.6. | V2.0 |
+| **V2.3 Phase 1 — le QUAND** | Pacing étiqueté par le calendrier V1 ; ruptures datées ; résidu présenté comme une LISTE D'ÉVÉNEMENTS LOCAUX POSSIBLES, à lire dans l'espace V2 — rien n'est créé dans `yield_events` (corrigé le 24 septembre 2026) ; écart semaine / week-end du marché → calendrier de segments du marché STOCKÉ dans une table V2, pas branché. Aucun prix. | V2.1 |
 | **V2.4 Phase 2 — l'écran des comparables** | Écran NEUF dans `apps/yield/` : photos à la volée, gammes, ouverture annuelle, filtre « ouverts toute l'année » par défaut ; sélection enregistrée au cœur ; bandeau PRIX (arbitrage 4) ; marques « niveau instable » et avertissement gestionnaire (règle 17) ; avertissement ménage et calcul du prix effectif (règle 12) | V2.1 |
 | **V2.5 La grille marché, EN PARALLÈLE, et le contrôle** | Niveaux par quantiles pondérés nuits (Airbnb), mois < 5 nuits écartés, plafond de poids (arbitrages 1-2) ; calculée et STOCKÉE, `source = 'marche'`, **aucune greffe dans le moteur**. **Le contrôle permanent** (ci-dessous) : table `grille_controle`, bloc « Grille du marché — à titre d'information, n'agit pas sur vos prix » dans *Prédiction de prix*, ligne de contrôle au bilan fondateur. **Avant le premier affichage de la table : critère de l'interrupteur fixé par Thierry et gravé avec sa date (règle 19).** | V2.3, V2.4 |
 | **V2.6 L'INTERRUPTEUR** | Le seul lot où la grille marché peut DÉPLACER un prix : greffe dans le moteur (`contexte-du-bien`), bascule vers le réel (arbitrage 3), « référence amincie » et grille déclarée (arbitrage 5), l'hôte prévenu à chaque déplacement (règle 16). **Geste explicite de Thierry, bien par bien.** Préalables : un mois réel de La bulle sous pilote (§1) ; dette 26 soldée ; critère de la règle 19 atteint. | V2.5 |
@@ -741,3 +833,756 @@ laisser une grille marché piloter le bien d'un inconnu.
   écart maximal, et leur évolution depuis le premier relevé.
 - **Le critère de l'interrupteur** : règle 19.
 - **La base de validation est mince** : §10, point 7.
+
+---
+
+## 12. V2.1 et V2.5 — état au 24 septembre 2026 (nuit du 23 au 24)
+
+Branche `lot-v2-1-marche` (worktree `/home/thierry/hotesmart-v21`), commits
+locaux, **rien de poussé, rien en production**. Aucun appel AirROI réel : la
+clé `AIRROI_KEY` n'était visible dans aucun shell de la session (ni `-c`, ni
+`-lc`, ni `-ic`) — 0 $ dépensés. Tout est prouvé sur les fixtures réelles du
+22-23 septembre (`tests/fixtures/airroi/`, six fichiers, vérifiés sans clé).
+
+### Ce qui existe
+
+- **Migration** `migrations/2026-09-24-marche-airroi.sql` (à coller, staging
+  puis prod ; lignes < 60 caractères ; requête de vérification à empreinte) :
+  `properties.latitude/longitude/coords_source/airbnb_listing_id` ; tables
+  `airroi_cache`, `airroi_appels`, `comparables_retenus`, `grille_controle`,
+  RLS actives. Preuve contre la base visée : `scripts/verifier-migration-marche.js`
+  (empreinte biens = 5 prod / 3 staging).
+- **Client AirROI** `lib/airroi/` : `client.js` (seul point de contact, serveur
+  seulement, cache d'abord, garde-fous avant le réseau, clé lue au moment de
+  l'appel, jamais écrite), `cout.js` (tarifs, fraîcheurs, garde-fous),
+  `depot.js` (Supabase en prod ; dossier local pour les scripts, pour que le
+  cache marche DÈS LE PREMIER APPEL même avant la migration), `json.js`.
+- **Grille marché** `lib/marche/grille-marche.js` (pure) ; **étude**
+  `lib/marche/etude.js` ; **contrôle** `lib/marche/controle.js` (seul writer de
+  `grille_controle`) ; **verrou de la règle 19** `lib/marche/critere.js`.
+- **Écran** : bloc replié « Grille du marché — à titre d'information, n'agit
+  pas sur vos prix » sous le pied du mois (`apps/yield/prix.html`), lu à
+  l'ouverture par `api/yield-marche.js` (GET, lecture seule, aucun appel AirROI).
+- **Scripts** : `verifier-airroi.js` (0,21 $ au plus, puis 0 $ à la relance),
+  `releve-controle-marche.js` (un relevé ; n'affiche JAMAIS niveau ni écart).
+
+### Pièges trouvés cette nuit
+
+- **Les identifiants Airbnb dépassent 2^53** : `JSON.parse` lit l'annonce de La
+  bulle `992723390568420450` comme `992723390568420500` — une AUTRE annonce.
+  `lib/airroi/json.js` lit tout entier de 16 chiffres ou plus en texte ; le
+  cache garde la réponse en TEXTE brut (un jsonb relu en JavaScript arrondirait
+  de nouveau) ; `airbnb_listing_id` et `comparables_retenus.listing_id` sont
+  des `text`.
+- **Faux vert du vérificateur** : une requête `head` de comptage sur une table
+  ABSENTE rend un compte `null` sans erreur — la première version annonçait
+  « présentes » quatre tables inexistantes, contre la production. Corrigé :
+  lecture réelle et compte entier exigés.
+- **Nuits mensuelles** : AirROI ne les rend pas ; `occupancy × jours du mois`
+  les reconstitue (La bulle : 223 nuits sur 12 mois, le chiffre d'AirROI).
+
+### Règle 19 — tenue par construction
+
+`CRITERE_INTERRUPTEUR = null` (`lib/marche/critere.js`) : tant qu'il n'est pas
+gravé (texte + date, ici ET dans le code, même commit), l'API ne rend ni écart
+ni niveau marché (qui donnerait l'écart par soustraction), et le bloc dit
+« les grilles ne s'affichent pas encore ». Aucun relevé n'a été calculé sur
+données réelles cette nuit ; aucun écart n'a été lu.
+
+### Décisions prises seules — tranchées par Thierry le 24 septembre 2026
+
+Neuf validées, trois renversées (5, 7, 11) ; la 8 tombe avec la réponse à Q1
+et Q3. Le texte d'origine est gardé, la décision de Thierry suit.
+
+1. **Garde-fous** : budget mensuel global 10 $ (alarme fondateur à 80 %),
+   plafond 4 $ par compte sur 30 jours, 3 $ par bien sur 90 jours
+   (`lib/airroi/cout.js`, `GARDES`). *Alternative* : tout autre montant.
+   **Validée.**
+2. **Une erreur HTTP est comptée à coût plein** au journal (on ne sait pas si
+   AirROI facture un 4xx). *Alternative* : 0 $ — plus juste si AirROI ne
+   facture pas, moins prudente. **Validée** : on relèvera la vérité sur la
+   première facture.
+3. **`GET /listings` estimé à 0,10 $** (non relevé). *Alternative* : relever
+   sur la facture au premier appel. **Validée.**
+4. **Nuits = occupation × jours du mois**. *Alternative* : revenu ÷ ADR (§3 bis
+   dit l'ADR non cohérent à l'année). **Validée** — et Thierry précise : c'est
+   une MESURE qui se prouve (223 nuits pour La bulle, le chiffre d'AirROI),
+   pas une convention.
+5. ~~Stabilité mesurée sur les mois avec AU MOINS UNE nuit~~ **RENVERSÉE** :
+   les MÊMES mois que les niveaux (mois < 5 nuits écartés). « Deux filtres
+   différents sur la même donnée produiront un jour un écart que personne ne
+   saura expliquer. » Fait : `stabilite()`, test « memes mois ».
+6. **Gestionnaire** : deux comparables partagent un gestionnaire s'ils ont un
+   hôte OU un co-hôte en commun ; l'avertissement tombe dès 2 comparables d'un
+   même gestionnaire. *Alternative* : seuil de poids avant d'avertir.
+   **Validée.**
+7. ~~Sous le seuil : aucun niveau affiché~~ **RENVERSÉE** : les niveaux
+   s'affichent, marqués « référence amincie », avec les nombres et les
+   motifs. « Ne rien montrer, c'est répondre non à une question dont la
+   réponse est je ne sais pas » (`null` n'est jamais une réponse). Fait : la
+   grille se calcule par la même règle ; le seuil V1 en réservations ne
+   s'applique pas (un comparable n'est pas une réservation), seul le seuil V1
+   en NUITS (8) reste — en dessous, « N nuits : trop peu pour calculer des
+   niveaux ». L'écart du relevé se calcule aussi, le statut le marque ; le
+   critère de la règle 19 dira quels relevés comptent.
+8. ~~Cœur de vie 23 en attente de la dette 26 par une liste d'UUID~~
+   **RETIRÉE** (Q1, Q3). La fenêtre de 12 mois du contrôle (sept. 2025 → août
+   2026) est postérieure au dernier ménage (mars 2024) : l'écart est propre.
+   La liste recopiée mentait en staging. À la place, un DRAPEAU calculé
+   depuis les données (`lib/marche/menage.js`), fenêtre par fenêtre : « la
+   grille mesurée sur 3 ans contient des frais de ménage (N séjours, dette
+   26) », et le même pour les 12 mois s'il y en a. Un drapeau, jamais un
+   blocage ; un drapeau de PRÉSENCE (un prix qui fond le ménage sans le dire
+   n'est pas vu — c'est le travail de `tarifNuitee`, dette 26). Les trois
+   formes lues en production le 24 septembre (1 490 réservations) : Beds24
+   `invoiceItems` « frais de ménage » (Cœur de vie 23, Booking, 59) ; Beds24
+   Airbnb `rateDescription` « Cleaning N EUR » (Cœur de vie 23, 54) ; Channex
+   Airbnb service « Cleaning Fee » (Colomiers, 12). Rien pour La bulle.
+   Le statut `attente_dette_26` disparaît (migration `controle-airbnb`).
+9. **Le relevé mensuel et le relevé au rafraîchissement ne sont PAS branchés
+   au cron** : `api/cron.js` se régénère en fichier complet (règle dure) ; un
+   script et la fonction existent. *Alternative* : brancher au lot suivant.
+   **Validée.**
+10. **Aucun déclenchement d'étude depuis l'écran** (un appel payant à
+    l'ouverture d'une page) : études par script, puis par le rafraîchissement.
+    **Validée.**
+11. ~~La fiche de chaque comparable par `GET /listings`~~ **RENVERSÉE** : la
+    liste de `listings/comparables` (0,10 $ l'appel) porte déjà les fiches
+    complètes des 25 voisins ; par comparable, on ne paie que ses mois
+    (`listings/metrics/all`). Fait (`lib/marche/etude.js`) : la recherche prend
+    chambres, salles de bain et voyageurs de l'annonce Airbnb DU BIEN
+    (`airbnb_listing_id`, une fiche en cache 90 jours) ; un retenu absent des
+    25 est lu par sa fiche, lui seul. Bien sans `airbnb_listing_id` : fiche par
+    comparable, comme avant. Pour 10 comparables : 1,20 $ au lieu de 2,00 $.
+
+**Q2 — la mesurée 12 mois reste TOUS CANAUX** (Thierry) : le contrôle répond à
+« la grille marché prédirait-elle la grille que le moteur utilise VRAIMENT ».
+Une variante **Airbnb seul** est calculée À CÔTÉ, comme diagnostic (si elles
+s'écartent, le mix de canaux compte ; si elles se ressemblent, le marché Airbnb
+suffit) : `niveaux_mesure_12m_airbnb`, `nuits_mesure_12m_airbnb`, et dans
+chaque écart `ecart_airbnb_eur/pct`. Migration `2026-09-24-controle-airbnb.sql`.
+Aucun ménage facturé par La bulle ni Cœur de vie 23 sur les 12 derniers mois :
+prix voyageur = tarif nuitée pour les deux aujourd'hui.
+
+### Reviews du 24 septembre — ce qu'elles ont trouvé et ce qui est corrigé
+
+Review V2.1 (client AirROI) :
+
+- **S1 SÉCURITÉ** : un message d'erreur réseau pouvait porter la clé (URL ou
+  en-tête cités par la pile). Corrigé : `masquer()` passe sur TOUT texte venu
+  de l'extérieur ; une clé mal formée est refusée sans être citée. Test
+  « SÉCURITÉ ». **Une re-review, limitée à ce correctif.**
+- Journal **réservé AVANT le réseau** (`statut 'parti'`, puis `ok`/`erreur`) et
+  délai de 30 s : un appel interrompu reste compté.
+- Dix appels identiques simultanés ne paient qu'une fois (dans une même
+  instance). Alarme par défaut au fondateur (`reportIncident`), aussi au refus
+  pour budget. Garde-fou invalide (`NaN`) = refus. Appel sans compte ni bien
+  = refus. Paramètres validés, forme de la réponse vérifiée : une réponse
+  illisible est comptée, jamais mise en cache.
+- Vérification SQL : privilèges `anon`/`authenticated` sondés.
+
+Review V2.5 (grille marché, contrôle) :
+
+- **La fenêtre suit les DONNÉES** (`fenetreDesDonnees`) : elle finit au dernier
+  mois présent chez TOUS les comparables, au plus tard le dernier mois
+  complet. La première version prenait les 12 derniers mois du calendrier et
+  perdait sans bruit les mois que le cache n'avait pas encore.
+- **Règle 19 contournable par la console du navigateur** : `grille_controle`
+  avait une policy de lecture pour le propriétaire. Retirée : table serveur
+  seulement, lue par l'API qui tient le verrou.
+- Statut `mesure_insuffisante` (marché fiable, ventes du bien trop minces) —
+  distinct de « référence amincie ». Poids jugé BRUT (40,05 % ne passe plus pour
+  40 %). Étude chiffrée avant le premier appel (`etude_trop_chere`).
+- Tests ajoutés, chacun rejoué contre le code d'avant (règle 19) : les six
+  échouent sur une valeur, aucun sur un `undefined`.
+
+### Dettes et questions ouvertes par les reviews
+
+- **Dette** : la déduplication des appels simultanés vaut dans UNE instance
+  Vercel ; deux invocations parallèles peuvent payer deux fois le même appel
+  (au pire 0,50 $, borné par les garde-fous). Un verrou en base le fermerait.
+- ~~Questions Cœur de vie 23, Airbnb seul, UUID de staging~~ : tranchées le
+  24 septembre (Q1 à Q3 ci-dessus).
+
+### Review du commit b3e63f7 (24 septembre) — aucun constat de sécurité
+
+Corrigé sans nouvelle review (règle : deux reviews sans constat de sécurité) :
+
+- **L'étude se juge contre la MARGE**, pas le plafond brut : `client.marge(ctx)`
+  rend le plus petit reste des trois garde-fous (bien 90 jours, compte
+  30 jours, budget du mois), lu dans le MÊME journal que `jugerAppel`. Sans
+  elle, un compte qui avait déjà dépensé passait l'estimation, puis
+  `plafond_compte` tombait au milieu des mois, après paiement.
+- **Reliquat accepté et écrit** : le premier jugement ne connaît pas les
+  absents de la liste. S'ils sont trop nombreux, l'étude refuse APRÈS la fiche
+  du bien et la liste (0,20 $ au plus, une fois : à la relance, les deux
+  viennent du cache), jamais au milieu des mois. Compter d'emblée toutes les
+  fiches refuserait les études de 15 comparables présents — le cas normal.
+- **Taille de l'annonce illisible = pas de liste** : `Number(null)` valait 0 et
+  lançait une recherche « 0 chambre » en silence. Chambres et salles de bain
+  doivent être des nombres (un studio a 0 chambre), voyageurs ≥ 1 ; sinon les
+  fiches se lisent une par une.
+- **Ménage** : une ligne de facture de type autre que « charge » ne compte pas ;
+  « Ménage N EUR » se lit ; un montant négatif (remise) ne se lit pas.
+- **Ventes trop minces sous un marché aminci** : l'avertissement
+  `mesure_insuffisante` est émis aussi (le statut n'en porte qu'un).
+
+### Migrations appliquées et prouvées — 24 septembre 2026
+
+`2026-09-24-marche-airroi.sql` puis `2026-09-24-controle-airbnb.sql`, collées
+par Thierry en staging et en production. SQL à empreinte : `biens = 3` et
+`biens = 5`, `colonnes_airbnb = 2`, CHECK du statut sans `attente_dette_26`,
+`releves = 0`. **Prouvées contre chaque base** par
+`scripts/verifier-migration-marche.js` (`.env.staging` : projet
+ortyofzzdsthlhqmzsnq ; `.env.local` : projet cjmrizpdyhrcurmgyrhs) — quatre
+tables, colonnes du bien et variante Airbnb présentes ; en production, la
+lecture depuis le navigateur (clé anon) est REFUSÉE sur le cache, le journal
+et le contrôle (42501). Le code qui les lit n'est pas encore en production :
+les tables y sont vides et rien ne les écrit.
+
+---
+
+## 13. V2.3 — le marché, le QUAND (étape 1)
+
+### V2.3.0 — fixture du pacing (24 septembre 2026)
+
+Capturée par Thierry (`scripts/capturer-pacing.js`) : `markets/lookup` 0,01 $ +
+`markets/metrics/future/pacing` 0,20 $ = **0,21 $**. Fichier
+`tests/fixtures/airroi/pacing-bagneres-2026-09-24.json` : **342 jours**, du
+2026-09-24 au **2027-08-31** — pas 365. Champs par jour : `date`,
+`booked_count`, `available_count`, `booked_rate_avg`, `available_rate_avg`,
+`fill_rate` (arrondi à 2 décimales : recalculé, jamais lu). Consécutifs, sans
+trou ni doublon ; aucune trace de clé. L'offre suivie passe de 1 135 à 1 081
+logements sur la fenêtre.
+
+### V2.3.1 — saisons et ruptures (`lib/marche/saisons.js`, pur)
+
+**RÈGLE DE MÉTHODE — LA DÉTECTION EST AVEUGLE (Thierry, 24 septembre
+2026).** Les saisons et les ruptures se calculent à partir du SEUL pacing (et
+de la forme des 60 mois), sans jamais lire le calendrier. Le calendrier
+n'intervient qu'ENSUITE, pour expliquer un relief déjà établi (V2.3.2). Tant
+que cette séparation tient, le fait que les ruptures retombent sur le
+19 décembre et le 13 février est une PREUVE. Si le calendrier entrait un jour
+dans la détection, on perdrait définitivement le moyen de montrer que la
+méthode n'a pas été réglée sur le résultat attendu.
+- **Séparation STRUCTURELLE, pas d'usage** : `calendrierDuMarche` refuse toute
+  autre entrée que `pacing` et `marche60` — vacances, fériés, contexte,
+  événements, même vides, même `undefined` — et `saisons.js` n'importe aucun
+  module. Test : il échoue si on lui passe un calendrier, ou s'il en importe un.
+- **Staging reste le BANC AVEUGLE** : on n'y importe pas les vacances. L'étape
+  d'explication s'y déclare « non calculable, calendrier absent » et n'écrit
+  rien ; la ligne ne porte que saisons et ruptures. C'est le comportement
+  correct de la règle, pas un défaut à contourner. L'explication se lit en
+  lecture seule contre la production, sans rien y écrire.
+
+**La fenêtre est celle des données, jamais une année supposée** : le code lit
+les dates présentes. Hors fenêtre → `hors_fenetre` ; trou dans la fenêtre →
+`absent_du_pacing` ; au-delà de l'horizon → `non_concluant` avec la forme
+mensuelle. Jamais un zéro, jamais « basse » par défaut. Le lissage ne moyenne
+que les jours présents, et rend `null` si moins de 4 jours sur 7 le sont.
+
+**Résultat sur la fixture réelle** — horizon concluant jusqu'au 2027-04-11
+(200 jours ; au-delà, moins de 20 nuits réservées par jour) :
+
+| Période | Saison |
+|---|---|
+| 24 → 30 sept. 2026 | Forte |
+| 1er oct. → 24 oct. | Moyenne |
+| 25 oct. → 18 déc. | Basse |
+| 19 → 25 déc. | Forte |
+| 26 déc. → 1er janv. 2027 | Très forte |
+| 2 → 21 janv. | Basse |
+| 22 → 28 janv. | Moyenne |
+| 29 janv. → 12 fév. | Forte |
+| 13 fév. → 5 mars | Très forte |
+| 6 → 27 mars | Moyenne |
+| 28 mars → 11 avril | Basse |
+| avril → août 2027 | non concluant ; forme mensuelle (médiane, 3 ans) : avril-juin basse, juillet moyenne, août forte (la plus haute des trois saisons mensuelles, avec février) |
+
+**Les trois ruptures du 22 septembre sont retrouvées au jour près ET sont les
+trois plus fortes** : 19 décembre (×2,54 en nuits réservées), 2 janvier
+(×0,36), 6 mars (×0,37). Les autres frontières recoupent la table du
+22 septembre (§4) : 25 octobre (table : 25 oct.), 13 février (table : 13 fév.),
+29 janvier (table : 30 janv.).
+
+**Validé par Thierry le 24 septembre 2026**, avec quatre points gravés :
+
+- **La méthode du relief est « validée sur UN marché, UNE capture ».** La
+  pente d'éloignement de −20 % par 30 jours est MESURÉE sur Bagnères, sur la
+  capture du 24 septembre 2026 — pas une constante. Tant qu'un second marché
+  n'a pas été vérifié, aucun texte ne la présente comme générale. (Un pacing
+  brut mesure l'AVANCEMENT des réservations, pas la demande : retirer
+  l'éloignement est le bon geste, sur ce marché.)
+- **Limite produit — deux régimes.** L'horizon concluant s'arrête au
+  11 avril 2027. L'étape 1 a donc deux régimes : le PACING jusqu'à l'horizon,
+  la FORME MENSUELLE historique au-delà. **Une étude lancée au printemps pour
+  l'été repose ENTIÈREMENT sur le second.** La sortie le dit période par
+  période : `regimes` (pacing / forme_mensuelle, avec leur phrase), `regime`
+  sur chaque saison, chaque mois au-delà et chaque réponse de
+  `saisonDuJour`.
+- **Plancher d'amplitude.** Les quantiles produisent toujours quatre classes :
+  un marché mollement contrasté recevrait une « très forte » qui n'existe pas.
+  Deux classes voisines dont les niveaux de relief s'écartent de moins de
+  **×1,20** fusionnent, sous le nom de celle du dessous. Puis les noms suivent
+  le nombre de saisons restantes : quatre → les quatre ; trois → basse,
+  moyenne, forte ; deux → basse, forte ; une → moyenne. « Très forte »
+  n'existe que si quatre niveaux sont réellement séparés. Même règle sur la
+  forme mensuelle. Mesuré sur Bagnères : ×1,60, ×1,38, ×1,95 — les quatre
+  saisons du pacing tiennent ; la forme mensuelle n'en garde que trois.
+  *Seuil choisi seul* (×1,20 : une saison doit remplir au moins 20 % de plus
+  que celle du dessous). *Alternative* : ×1,30, ou un seuil relatif à la
+  dispersion du relief. *Renommage choisi seul* ; *alternative* : garder le
+  rang d'origine (une classe jamais fusionnée resterait « très forte »).
+- **Décision 5 corrigée : la MÉDIANE des mois homologues**, pas la moyenne,
+  rapportée à la médiane des douze mois. La profondeur AirROI monte en charge
+  sur les premières années et une saison exceptionnelle tire une moyenne ;
+  partout ailleurs on raisonne en quantiles. Test : un juillet triplé ne
+  déplace pas la forme.
+
+**RÈGLE — DEUX ÉCHELLES, JAMAIS UNE (Thierry, 24 septembre 2026).** Les
+saisons du PACING (relief, quatre classes au plus) et celles de la FORME
+MENSUELLE (occupation historique, seuils propres) ne désignent pas la même
+intensité : un « forte » d'août et un « forte » de février ne se comparent
+pas. **Aucun classement, aucun tri, aucune comparaison ne peut mettre en
+regard une saison du pacing et une saison de la forme mensuelle.** Chaque
+saison porte son régime dans la sortie ; les deux ensembles ne sont jamais
+présentés comme une seule échelle ordonnée. Tenue par le code : le seul
+chemin pour ordonner ou comparer des saisons (`ordonnerSaisons`,
+`comparerSaisons`, `rangDansSonRegime`, `lib/marche/saisons.js`) lève
+`RegimesMelanges` sur un mélange, ou sur une saison sans régime. Test : un
+ordre global demandé sur les deux régimes mêlés échoue ; une version qui trie
+tout sur une seule échelle le fait rougir.
+Review de la règle (aucun bloquant), corrigé : l'ordre interne des noms
+(`SAISONS`) n'est plus exporté — sinon un appelant triait un mélange par
+`SAISONS.indexOf` sans passer par les fonctions gardées ; chaque élément est
+contrôlé, même seul dans la liste ; une saison NON CALCULÉE (mois absent) lève
+son propre motif, pas « mélange ». **Correction d'un compte rendu** : le
+message du commit 2699f6a annonçait qu'une mutation « noms fixés avant la
+fusion des tronçons » faisait rougir un test. C'était faux — la mutation
+jouée supprimait le renommage au lieu de le déplacer. Le vrai cas n'était
+couvert par aucun test ; il l'est depuis, par un marché synthétique à blocs
+courts tiré d'un générateur déterministe (graine 485988682), où la version
+fautive montre une « très forte » sur trois saisons.
+*Alternative écartée pour l'instant* : recalibrer les deux régimes sur une
+échelle commune. Elle suppose que le relief du pacing et l'occupation
+historique mesurent la même chose à un facteur près, et rien ne le prouve.
+À rouvrir si l'affichage l'exige, avec une mesure à l'appui.
+
+**Review de la validation (aucun bloquant), corrigé** : les noms de saisons
+se fixent APRÈS toutes les fusions (plancher et tronçons courts) ; toute
+réponse porte son régime, trous et mois absents compris ; pas d'« au-delà »
+quand l'horizon couvre toute la fenêtre ; test du plancher exact (basse et
+forte), avec un cas à deux fusions en chaîne ; test de la médiane sur le
+juillet le plus BAS (la médiane ne tient que par le rang).
+
+**Décisions prises seules (état après la validation)** :
+1. **Le RELIEF, pas le remplissage brut.** RETENU par Thierry. Un pacing se remplit d'autant moins
+   que la date est loin (−20 % par 30 jours mesuré ici). Brut, octobre (0,16,
+   tout proche) passe au-dessus des vacances de février (0,14, à cinq mois),
+   et la table du 22 septembre n'est pas retrouvée. On retire la pente de
+   l'éloignement — droite de Theil-Sen (médiane des pentes, robuste aux pics)
+   sur le log du remplissage lissé, estimée sur l'horizon — et on classe le
+   résidu. *Alternative* : le remplissage brut (validé tel quel le
+   24 septembre, mais il classe octobre « très forte »).
+2. **Quatre saisons aux quantiles 40 / 70 / 85 % du relief** sur l'horizon.
+   *Alternative* : des seuils fixes en valeur de relief.
+3. **Horizon : 20 nuits réservées par jour** (lissées sur 7 jours).
+   *Alternative* : un autre seuil, ou un seuil en remplissage.
+4. **Rupture recalée au jour** sur le saut jour à jour le plus fort du
+   remplissage brut, à ±4 jours de la frontière lissée, dans le sens de la
+   frontière. Sans ce recalage, le lissage place les ruptures au 18 décembre,
+   5 janvier et 9 mars.
+5. ~~Forme mensuelle sur la moyenne des mois homologues~~ **CORRIGÉE par
+   Thierry** : la médiane (ci-dessus). L'occupation lue reste
+   `occupancy.avg` du marché, mois par mois ; *alternative* : son p50.
+
+**Review du V2.3.1 (aucun bloquant), corrigé** : un jour absent ne porte
+plus ni saison, ni borne, ni rupture (un trou en tête de fenêtre, trouvé par
+balayage, en faisait tomber une) ; le recalage compte en JOURS et ne
+raccourcit jamais une saison sous 5 jours (la première saison en faisait 3) ;
+chaque rupture dit si elle est `datee_au_jour` (saut franc trouvé) ou datée
+par le lissage ; un marché plat est « non calculable » au lieu d'être « très
+forte » partout ; une date impossible (30 février) ou aberrante (2099) est
+écartée. La liste entière des dix ruptures est figée en test.
+
+**Limites, écrites** :
+- le relief suppose une pente d'éloignement CONSTANTE, estimée sur la série
+  elle-même : une vraie tendance saisonnière sur l'horizon (l'automne qui
+  décline) en est en partie absorbée ;
+- le pacing ne voit qu'Airbnb (règle 11) : les saisons sont celles de la
+  demande Airbnb du marché ;
+- la date de capture compte : le même calcul sur une capture de janvier ne
+  verra plus Noël, et verra l'été.
+
+### V2.3.2 — explication, événements possibles, écart semaine / week-end (`lib/marche/explication.js`, pur)
+
+Le calendrier vient de SA SOURCE, jamais recopié : vacances des trois zones
+lues en base (fixture `tests/fixtures/calendrier/vacances-2026-09-24.json`,
+lue en production le 24 septembre 2026, empreinte 5 biens, 27 périodes du
+2026-04-04 au 2027-07-03 — couverture complète jusqu'à l'horizon), fériés,
+ponts, week-ends prolongés et dates commerciales calculés par les modules de
+la V1. Régime : pacing seulement (au-delà de l'horizon, la forme mensuelle
+n'a pas de jours).
+
+**Résultat sur Bagnères (capture du 24 septembre 2026)** :
+- **Noël** (19 déc. → 1er janv.) : expliqué à 100 % — vacances de Noël des
+  trois zones, Réveillon de Noël et du Nouvel An, Noël férié.
+- **Février** (13 fév. → 5 mars, très forte) : expliqué à 100 % — vacances
+  d'hiver des trois zones, Saint-Valentin.
+- **29 janv. → 12 fév.** (forte) : expliqué à 47 % seulement — la zone C ne
+  part que le 6 février.
+- **Événements locaux POSSIBLES, à lire** (rien n'est enregistré, aucune
+  ligne dans `yield_events`) : **29 janv. → 5 fév.** (forte sans aucune cause
+  calendaire — la « montée vers l'hiver » de la table du 22 septembre) ;
+  **24 → 30 sept.** (marqué : touche la date de l'étude, où se mêlent les
+  réservations de dernière minute).
+- **Écart semaine / week-end** (vendredi-samedi contre dimanche-jeudi, hors
+  vacances, fériés, ponts, week-ends prolongés et dates commerciales ; prix
+  moyen des nuits réservées, chaque jour pesant autant, remplissage à côté) :
+  **+7,5 % en octobre, +8,5 % de fin octobre à mi-décembre** ; janvier et
+  mars **non calculables** (voir le seuil ci-dessous — l'ancienne sortie,
+  −3,2 % et −3,7 %, était du bruit). ⚠ La nuit de week-end est celle du VENDREDI et du SAMEDI (on
+  dort le vendredi soir) ; la V1, elle, appelle week-end les JOURS samedi et
+  dimanche — deux conventions, dites. Les saisons hautes sont des
+  vacances : aucune nuit hors vacances, écart « non calculable », et dit —
+  la haute saison de Bagnères ne permet pas de « revérifier » l'écart hors
+  vacances.
+
+**Décisions prises seules (à confirmer ou renverser)** :
+1. **Un pic = une saison forte ou très forte du pacing** ; il est « expliqué »
+   quand le calendrier couvre au moins **50 %** de ses jours. *Alternative* :
+   un autre seuil, ou exiger 100 %.
+2. **Événement possible** = une suite d'au moins **2 jours** sans aucune cause
+   calendaire, dans un pic, ou en surcroît (remplissage ≥ **×1,3** la médiane
+   des jours de même type — semaine ou week-end — à ±14 jours). *Alternative* :
+   ne proposer que les jours des pics.
+3. **L'écart semaine / week-end se donne PÉRIODE PAR PÉRIODE, avec sa distance
+   à la capture, jamais résumé par nom de saison** : près de la capture
+   +7 %, au loin négatif et mince ; une médiane par nom afficherait ~1 %,
+   faux. Chaque jour pèse autant (pondérer par les nuits réservées donnerait
+   tout le poids aux dates proches). Au moins **4 nuits** de chaque côté.
+   *Alternative* : ne garder que les périodes à moins de 90 jours.
+4. **Proximité** : un événement possible qui commence à moins de **7 jours**
+   de la capture le dit. *Alternative* : l'écarter.
+
+**Review du V2.3.2 (aucun constat de sécurité), corrigé** : la part d'une
+période de vacances est l'UNION des jours de ses zones (la sortie disait
+« vacances d'hiver, 16 jours, 76 % » pour des zones décalées qui couvrent les
+21 jours du pic — contradictoire avec `part_expliquee` à 1) ; l'écart exclut
+aussi ponts, week-ends prolongés et dates commerciales ; le surcroît exige
+des voisins sans cause, des deux côtés ; un événement se coupe au changement
+de pic (deux pics contigus faisaient un événement rattaché à rien — cas trouvé
+sur un marché synthétique) ; les pics s'arrêtent à l'horizon ; un pacing
+absent est « non calculable ». Garde de frontière renforcée : les modules
+purs (`saisons`, `explication`, `grille-marche`) n'ont aucun `.from(`, `.rpc(`
+ni client ; les autres ne nomment en toutes lettres que des tables V2.
+
+**Validé par Thierry le 24 septembre 2026**, avec trois points :
+
+- **Un écart négatif sur faible effectif n'est pas un résultat, c'est du
+  bruit.** Affiché à un propriétaire, −3,7 % en mars lui dirait de baisser
+  ses week-ends de mars : faux. Seuil : de CHAQUE côté, au moins **400 nuits
+  réservées sur le marché** (et 4 dates) ; en dessous, « non calculable »,
+  jamais un pourcentage ni aucun chiffre. Mesuré sur Bagnères : 895 et 610
+  nuits de week-end en octobre et novembre-décembre (chiffre gardé), 226 et
+  213 en janvier et mars (non calculables). ⚠ Précision sur un compte rendu :
+  les « 4 à 6 nuits de week-end » annoncées pour janvier et mars étaient des
+  DATES (4 à 5), portant 213 à 226 nuits réservées. *Seuil choisi seul.*
+  *Alternative* : un seuil en dates seulement (8 dates de week-end), qui
+  écarterait aussi octobre (5 dates, 895 nuits). Test : contre le code
+  d'avant, il rougissait sur −3,2 %.
+- **LIMITE CONNUE — le calendrier ne connaît que la France.** Le calendrier
+  de la V1 ne connaît que les vacances scolaires FRANÇAISES. Bagnères est à
+  une cinquantaine de kilomètres de l'Espagne, dont le calendrier scolaire est
+  une cause candidate du pic du 29 janvier → 5 février. Tant qu'il n'est pas
+  vérifié, cette semaine se dit **« sans cause calendaire française
+  connue »**, jamais « événement local ». Même prudence pour tout marché
+  frontalier : la phrase de chaque événement possible nomme les deux causes
+  possibles (un événement local, ou un calendrier inconnu — les vacances d'un
+  pays voisin) et porte `limite: 'calendrier_francais_seulement'`. **Aucune
+  donnée espagnole n'est achetée ni intégrée : c'est une limite écrite, pas
+  un chantier.**
+- **Deux conventions de week-end coexistent** — dette 30 du registre
+  (`docs/kb/dettes-v1.md`), non traitée.
+
+**Limites, écrites** : le prix moyen des nuits réservées est teinté par ce qui
+part (en basse saison, les moins chères) ; le rapport tient à l'intérieur
+d'une saison, le remplissage est montré à côté (Thierry, 24 septembre 2026).
+L'écart lointain repose sur peu de nuits de week-end.
+
+**Garde de frontière** : un test parcourt `lib/marche` et `lib/airroi` et
+échoue si un module V2 touche `yield_events`, `yield_segment_reglages`,
+`calendar_inventory`, `price_display_log` ou `prix_hote`.
+
+### V2.3.3 — stockage (`marche_calendrier`)
+
+- **Migration** `migrations/2026-09-24-calendrier-marche.sql` : UNE table V2
+  neuve, par MARCHÉ (pays, région, localité) et par date de CAPTURE du pacing,
+  avec la version de méthode (`METHODE`, `lib/marche/calendrier-marche.js`) ;
+  aucune clé étrangère, aucune table existante touchée, RLS active, aucune
+  policy, `revoke all ... from anon, authenticated` — serveur seulement.
+  `drop table public.marche_calendrier` et l'app tourne comme avant. Lignes
+  < 60 caractères ; requête de vérification à empreinte (biens 5 / 3). Un test
+  vérifie tout cela dans le SQL lui-même.
+- **Writer unique** `lib/marche/calendrier-marche.js` : `construireLigne` (pure)
+  assemble saisons, ruptures, régimes, au-delà, pics, événements possibles (à
+  LIRE), écart week-end, couverture et limites — **aucun prix, aucun
+  logement** ; `enregistrerCalendrier` n'écrit QUE dans `marche_calendrier`,
+  en AJOUT SEUL : une capture déjà stockée (même marché, même date, même
+  méthode) est refusée et dite, jamais réécrite.
+- **Script** `scripts/calculer-calendrier-marche.js --pacing=… --marche60=…
+  [--go]` : aucun appel AirROI (les fichiers de la capture du 24 septembre,
+  déjà payée), vacances lues dans la base visée, empreinte en tête ; sans
+  `--go`, aucune écriture.
+- **Review du V2.3.3 (aucun constat de sécurité), corrigé** : les 60 mois
+  sont REQUIS (une ligne sans l'au-delà occuperait la clé d'unicité et
+  bloquerait le bon calcul) ; `calcule_le` n'est envoyé que s'il est fourni
+  (un NULL explicite cassait l'insertion) ; la date de capture est le premier
+  jour LISIBLE du pacing, dans les deux branches ; `--go` exige `--biens=N` et
+  s'arrête si la base visée n'en compte pas N ; la séquence de la table est
+  révoquée elle aussi ; la vérification sonde tous les droits client
+  (`acces_client`) ; l'index redondant est retiré. Le test de migration est
+  une LISTE BLANCHE, instruction par instruction (la liste noire laissait
+  passer un `grant`, un trigger, une écriture dans `properties`) ; la garde de
+  frontière couvre aussi les scripts V2.
+- **Décision prise seule** : la ligne garde la version de méthode dans sa clé
+  d'unicité, pour qu'un recalcul après un changement de règle coexiste avec
+  l'ancien au lieu de l'écraser. *Alternative* : une seule ligne par capture,
+  remplacée.
+
+### V2.3.3 — application du 24 septembre 2026 : deux cas réels
+
+- **L'empreinte a fait son travail.** Au premier essai en production, la
+  requête de vérification a rendu `biens = 3` : l'éditeur SQL pointait encore
+  sur staging. Thierry l'a rejouée dans le bon projet (`biens = 5`). C'est le
+  cas réel qui justifie la règle : un résultat sans empreinte ne dit pas de
+  quelle base il vient.
+- **Contrôles de FORME ajoutés par Thierry** : `create table if not exists`
+  réussit en silence si une table du même nom existe déjà sous une autre
+  forme. La vérification compte donc aussi `colonnes` (22) et `unicite` (1) ;
+  le vérificateur lit les 22 colonnes par leur nom. **Règle pour les
+  migrations suivantes : toute vérification prouve la forme, pas seulement
+  l'existence.** Résultats : staging et production identiques hors empreinte —
+  rls 1, policies 0, acces_client false, cles_etrangeres 0, colonnes 22,
+  unicite 1, lignes 0 ; `scripts/verifier-migration-marche.js` contre les deux
+  bases : OK ; en production, lecture anon refusée (42501).
+- **Une ligne FAUSSE écrite en staging (id 1), par ma faute.** Calcul à blanc
+  et écriture lancés dans la même commande, sans relire le résultat à blanc :
+  la table des vacances est VIDE en staging (0 ligne), et la ligne donne Noël
+  et février pour « sans cause calendaire » (5 événements possibles au lieu de
+  2). Elle porte elle-même `couverture : aucune periode`. **Corrigé dans le
+  code** : une ligne ne se construit plus quand les vacances ne couvrent pas
+  l'horizon (test rouge contre le code d'avant) ; le script lit les vacances
+  avec une marge de 200 jours avant la fenêtre (lues à partir du premier jour
+  du pacing, la couverture croyait la source commencée au 17 octobre). La
+  ligne id 1 reste en staging tant que Thierry n'a pas décidé de sa
+  suppression. **Décision de Thierry, même jour** : pas d'import des vacances
+  en staging (banc aveugle, règle ci-dessus) ; la ligne id 1 est supprimée ;
+  le refus est remplacé par le mode aveugle — saisons et ruptures stockées,
+  explication « non calculable, calendrier absent », rien d'écrit pour elle.
+  **Fait le même jour** : ligne id 1 supprimée (relue avant, supprimée sous
+  empreinte `biens = 3` et sous condition de marché, date et méthode) ; calcul
+  à blanc LU (il a d'ailleurs attrapé un défaut du résumé du script, qui
+  lisait un champ vide), puis ligne aveugle écrite dans une commande séparée :
+  **id 2**, Bagnères-de-Bigorre, capture 2026-09-24, 11 saisons, 10 ruptures,
+  deux régimes, explication `null` avec sa limite. Relue en base. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
+  commandes, jamais une.
+
+### V2.3 — zone de dernière minute et force des ruptures (24 septembre 2026)
+
+**Constat de Thierry** : deux anomalies au même endroit — une saison « Forte »
+du 24 au 30 septembre et une rupture à ×1,01 le 1er octobre — toutes deux
+dans les jours collés à la capture, où le pacing est déjà presque rempli. La
+correction de l'éloignement est une pente régulière : elle ne reproduit pas la
+remontée des tout derniers jours et sur-relève cette zone.
+
+1. **Zone de dernière minute, MESURÉE** (`zoneDerniereMinute`,
+   `lib/marche/saisons.js`). Pour chaque jour, le rapport nuits réservées du
+   jour / même jour de semaine sept jours plus tard. Référence : les jours 7 à
+   27 (semaines 2 à 4) ; seuil = médiane + 3 écarts absolus médians ; zone =
+   les jours consécutifs depuis la capture au-dessus du seuil. **Bagnères :
+   médiane ×1,10, dispersion 0,047, seuil ×1,24 ; jours 0-2 à ×1,25 / ×1,33 /
+   ×1,47, jour 3 à ×1,16, jours 4-23 entre ×0,97 et ×1,18 → 3 jours, du 24 au
+   26 septembre.** Ces jours ne portent ni saison, ni rupture, ni pic, ni
+   surcroît : « zone de dernière minute, non interprétable », un régime à part
+   (`derniere_minute`). *Règle choisie seule* ; *sensibilité dite* : avec les
+   jours 4-31 ou 7-34 comme référence, 2 jours ou 1 (la chute du 25 octobre,
+   vue depuis la semaine d'avant, gonfle la dispersion). *Alternative* : une
+   durée fixe (3 jours, la mesure de Bagnères), plus simple, non adaptée à un
+   autre marché.
+2. **La pente s'estime sans la zone.** −19,4 % par 30 jours (−20,2 % avec).
+   **Ce qui bouge ailleurs** (le vrai enjeu) : début octobre seulement —
+   Moyenne 27 sept. → 1er oct., **Forte 2 → 11 oct.**, Moyenne 12 → 25 oct. ;
+   les frontières du 25 oct. et du 29 janv. glissent d'un jour (26 oct.,
+   30 janv.). Noël, janvier, février, mars : identiques. Conséquences :
+   - le 24-30 septembre n'est plus un pic ; un pic **« Forte » faible** apparaît
+     du 2 au 11 octobre, sans cause calendaire française, borné seulement par
+     deux TRANSITIONS (×1,06 et ×1,13) — il entre dans la liste à lire ;
+   - le pic de fin janvier (30 janv. → 12 fév.) est expliqué à **50 %** (7 jours
+     sur 14, zone C) : il passe TOUT JUSTE le seuil d'explication (50 %) ;
+   - l'écart semaine / week-end d'octobre devient **+7,1 %** (2 → 11 oct.,
+     734 nuits de week-end) ; le 12 → 25 oct. n'a plus qu'une date de week-end
+     hors Toussaint : non calculable.
+3. **Chaque frontière porte sa FORCE** (rapport des nuits réservées trois jours
+   après / trois jours avant, lu dans le sens du plus fort : ×0,36 → 2,78).
+   **Sous ×1,2, ce n'est pas une rupture, c'est une TRANSITION** (la saison
+   change sans saut franc des réservations) : listée à part, jamais affichée
+   comme une rupture. Chaque saison dit son entrée (`debut`, `rupture`,
+   `transition`) et sa force — la table ne prend aucune colonne neuve.
+   *Seuil choisi seul*, le même que le plancher d'amplitude (20 %).
+   *Alternative* : un seuil relatif au bruit jour à jour du marché. Bagnères :
+   neuf ruptures (19 déc. 2,54 ; 2 janv. 2,78 ; 6 mars 2,71 ; 13 fév. 1,74 ;
+   26 déc. 1,65 ; 26 oct. 1,39 ; 28 mars 1,38 ; 30 janv. 1,32 ; 22 janv.
+   1,29), deux transitions (2 oct. 1,06 ; 12 oct. 1,13). Le 1er octobre (×1,01)
+   a disparu.
+
+**Version de méthode** : `v2.3-2026-09-24-b`. La ligne aveugle de staging
+(id 2) est en `v2.3-2026-09-24` : elle ne se confond pas avec la nouvelle.
+
+**Review de 5b703be (aucun bloquant), corrigé** : une zone NON MESURÉE
+(référence trop courte) se dit `statut: 'non_mesuree'`, distincte d'une zone
+mesurée vide (`null`) ; plancher RELATIF de la dispersion (2 % de la médiane —
+un marché saturé ouvrait une zone pour ×1,04) ; la zone est CONTIGUË et
+s'arrête au premier jour non mesurable (dit et testé) ; un saut depuis ou vers
+zéro nuit est une rupture (`estRupture`, testée seule : le calcul complet
+l'atteint rarement, et le test à travers lui passait à vide) ; un pic borné
+par deux transitions le DIT (« saison faiblement marquée ») ; le motif « horizon
+trop court » nomme la zone quand c'est elle. Les jours de la zone ne servent
+plus de VOISINS au surcroît — correction DÉFENSIVE, **non prouvée par un
+test** : sur Bagnères elle ne change aucun résultat. Annotation fausse d'un
+test corrigée (la transition de Noël sous un trou vient du seuil de force, pas
+de la zone).
+**Dette (non traitée)** : la ligne stockée porte la zone dans `regimes`, pas
+sous la clé `derniere_minute` ; un lecteur qui passerait la ligne relue à
+`saisonDuJour` obtiendrait `hors_saison_calculee` pour ces jours au lieu de
+`derniere_minute`. Aucun lecteur ne le fait aujourd'hui ; l'écran (V2.3.4)
+devra reconstruire la zone depuis `regimes`.
+
+**Question ouverte pour Thierry** : un pic borné seulement par des transitions
+(2 → 11 oct.) doit-il entrer dans la liste à lire ? Tel quel, oui — aucune
+règle ne l'en écarte.
+
+### V2.3.4 — la page « Le marché » (`apps/yield/marche.html`)
+
+Page NEUVE, lecture seule : un seul `GET /api/yield-marche?vue=calendrier`
+(vue ajoutée à l'API V2 existante, aucune fonction Vercel en plus ; garde :
+droit de lecture des réservations, SANS logement — un marché n'est pas un
+bien ; seule table lue : `marche_calendrier`, la ligne la plus récente par
+marché). Aucun écran existant modifié ; la page n'est liée depuis aucun menu
+(URL directe `/apps/yield/marche`) tant que Thierry n'a pas décidé.
+
+Ce qu'elle montre (exigences de Thierry, 24 septembre 2026) :
+- **en tête, en clair** : « Une estimation du marché, pas un prix … ne pilote
+  rien » ;
+- **chaque période porte son régime**, dans sa carte : zone de dernière minute
+  (hachurée, sans saison), pacing (palette de bleus, « Échelle du pacing »),
+  forme mensuelle (palette d'ocres, « Échelle mensuelle — ne se compare pas à
+  celle du pacing ») ; aucun tri commun ;
+- **la force se voit** : rupture forte (≥ ×2, trait épais), rupture (≥ ×1,5),
+  rupture faible (≥ ×1,2, trait fin), transition (pointillé gris, « pas une
+  rupture ») — sur la frise et dans le tableau ;
+- **tout ce qui n'est pas calculable le dit, avec sa raison** : explication
+  absente (staging), écart sans assez de nuits, mois absent, ligne non
+  calculable ; une ligne d'une méthode ANTÉRIEURE (sans force) le dit
+  (« force non enregistrée par cette méthode »), sans inventer « nuits
+  absentes » ;
+- téléphone : chaque ligne de tableau devient une fiche, aucun défilement
+  horizontal (vérifié à 390 px avec la règle mobile réelle du menu).
+
+**Classée DÉLÉGABLE** (`tests/pages-non-delegables.test.js`, décision prise
+seule) : la page ne montre aucune donnée de compte ; le recensement des pages
+l'exigeait (le 26e rouge de la suite, avant classement). *Alternative* : hors
+périmètre, ou non délégable.
+
+**Aperçu sur données réelles** : la ligne STOCKÉE en staging (id 2, ancienne
+méthode) ; la ligne nouvelle méthode calculée EN MÉMOIRE — en aveugle, et
+avec les vacances lues en production en lecture seule — jamais écrite.
+
+### V2.3.4 — review : faille de sécurité corrigée (24 septembre 2026)
+
+**Constat (sécurité)** : la vue `?vue=calendrier` gardait SANS logement.
+Sans bien ni délégation, la garde traite l'appelant comme titulaire : elle ne
+vérifiait que la SESSION. Tout compte connecté lisait les calendriers de TOUS
+les marchés — donc la commune des autres clients —, et la page affichait le
+premier venu sous « le marché de votre commune ».
+
+**Correction** :
+- **Un lien LOGEMENT → MARCHÉ**, table V2 neuve `marche_biens` (migration
+  `2026-09-24-marche-biens.sql`, additive, sans clé étrangère, serveur seul,
+  vérification à empreinte ET à forme) ; writer unique
+  `scripts/lier-bien-marche.js` (saisie du fondateur, aucun appel AirROI,
+  `--go --biens=N`, ajout seul). Troisième table V2 lue par l'écran ; aucun
+  contact de plus avec l'existant.
+- **La vue exige un logement**, sous la garde habituelle du logement (lecture
+  des réservations, bien requis : le bien désigne le compte), et ne rend QUE
+  le calendrier du marché relié à ce logement. Pas de lien : « marché
+  inconnu », jamais un autre marché. La page choisit un logement du compte
+  (comme *Prédiction de prix*).
+- Test : rouge contre la vue d'avant (200 au lieu de 400) ; quatre versions
+  fautives rougissent (sans filtre de marché, sans tri, garde sans logement,
+  repli sur un autre marché). Le simulacre applique vraiment `eq`, `order` et
+  `limit` (l'ancien ignorait le tri : faux vert).
+
+**Autres points de la review, corrigés** : sens d'une rupture affiché
+seulement s'il est connu (il devenait « baisse ») ; une ligne sans régimes le
+dit ; forme mensuelle absente dite « non calculable » (au lieu de « aucun
+mois ») ; zone de dernière minute NON MESURÉE portée par `limites` et
+affichée ; phrase d'horizon seulement si l'horizon précède la fin ; saisons
+passées par une liste blanche avant tout attribut `class` ; nombres formatés
+sans planter ; échelle nommée dans le tableau des pics ; une rupture sans
+force reste une rupture à l'écran. Test « aucun écran modifié » par diff git
+RETIRÉ (fragile, lisait l'arbre partagé) ; minuterie des tests annulée,
+modules restaurés en `finally` (5,3 s → 0,3 s).
+
+**Application de `marche_biens` en staging (24 septembre 2026)** : SQL collé par
+Thierry — biens 3, rls 1, policies 0, acces_client false, cles_etrangeres 0,
+**colonnes 8**, unicite 1, lignes 0. L'attendu annonçait 9 : c'était MON
+erreur de compte (le SQL déclare 8 colonnes, toutes lues par leur nom en
+staging) — le contrôle de forme l'a attrapée. Attendu corrigé ; vérificateur
+étendu à `marche_biens`, OK contre staging. **Aucun lien écrit** : La bulle
+n'existe pas en staging (trois logements de recette seulement) — décision à
+Thierry.
+**Lien écrit en staging (décision de Thierry, même jour)** : « Recette — Loft
+Pilotable » (992d1ebe…) → Bagnères-de-Bigorre, lien FICTIF sur le banc de
+test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3`), relu :
+`marche_biens` id 1. La vue rendrait pour ce logement la ligne de calendrier
+id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
+
+### V2.3.4 — décisions de Thierry (24 septembre 2026, soir)
+
+- **Aucun lien de menu vers la page « Le marché »** : ce serait un troisième
+  contact avec l'existant, et la page deviendrait visible pour tout
+  utilisateur qui la croise. Accès par l'adresse directe
+  (`/apps/yield/marche`) tant que la V2 ne pilote rien ; **le lien se posera
+  au raccordement**.
+- **Le pic du 2 au 11 octobre sort de la liste à lire.** Une liste à lire ne
+  contient que ce qui pourrait changer une décision — même règle que l'écart
+  week-end sur faible effectif. **Règle (choisie seule)** : un pic n'entre dans
+  la liste que si AU MOINS UNE de ses deux frontières est une rupture (force
+  ≥ ×1,2) ; sinon il reste dans la donnée stockée (`a_lire: false`, motif
+  `motif_non_affiche`), jamais affiché par défaut. *Alternative* : exiger que
+  les DEUX frontières soient des ruptures (le pic de fin janvier, ×1,32 puis
+  ×1,74, entrerait aussi).
+- **Ce pic survit-il au recalcul ? Mesure de sensibilité** (zone forcée à 0
+  … 10 jours, même fixture) : dès que la zone fait 2 jours ou plus, une
+  « Forte » apparaît juste après elle et s'arrête TOUJOURS le 11 octobre, sur
+  la même transition ×1,13 — jamais bornée par une rupture ; à 0 ou 1 jour,
+  c'est la « Forte » contaminée de fin septembre. **Lecture** : ce pic est la
+  contamination de la dernière minute qui déborde le seuil dur de la zone, pas
+  une demande. Il est donc juste qu'il ne soit pas lu. Reste de la fenêtre :
+  identique pour une zone de 2 à 4 jours ; à 5 jours et plus, la « Forte » de
+  fin janvier commence le 6 février (départ de la zone C) au lieu du 30
+  janvier ; à 10 jours, une petite « Moyenne » apparaît en novembre. Les trois
+  ruptures du test d'or sont identiques dans tous les cas (2,54 / 2,78 / 2,71).
+- **Avant / après de la pente, redonné** (demandé trois fois) : −20,2 % → −19,4 %
+  par 30 jours ; seules les trois semaines d'octobre bougent, plus deux
+  frontières d'un jour (25 → 26 oct., 29 → 30 janv.) ; tableau complet au
+  §13 « zone de dernière minute ».
+- **Review de 3dfde4b (aucun bloquant), règle affinée** (`jugerALire`) : un
+  événement n'est masqué que si son pic est borné par DEUX transitions
+  MESURÉES et ne porte aucun jour en surcroît. Un bord de fenêtre n'est pas
+  mesuré — « je ne sais pas » n'est pas « non » : le pic reste à lire. Un
+  surcroît local reste à lire même dans un pic faible. La page dit combien de
+  périodes sont masquées, sans les montrer (elle affirmait « chaque pic a une
+  cause »). Bagnères : inchangé (le 2 → 11 oct. reste masqué).
+
