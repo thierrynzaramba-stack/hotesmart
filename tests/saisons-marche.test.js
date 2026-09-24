@@ -239,8 +239,44 @@ test('LE TEST QUI COMPTE : deux echelles, jamais une — aucun ordre, aucune com
   assert.throws(() => comparerSaisons(fevrier, aout), RegimesMelanges)
   assert.throws(() => comparerSaisons({ saison: 'forte' }, fevrier), RegimesMelanges, 'une saison sans regime n a pas de rang')
   assert.throws(() => rangDansSonRegime({ saison: 'forte' }), RegimesMelanges)
+  // Un seul element sans regime : refuse aussi (review — `sort` ne compare rien).
+  assert.throws(() => ordonnerSaisons([{ saison: 'forte' }]), RegimesMelanges)
+  // Une saison NON CALCULEE n'a pas de rang, et ce n'est pas un « melange ».
+  assert.throws(() => rangDansSonRegime({ saison: null, regime: 'forme_mensuelle', motif: 'mois absent de l historique' }),
+    e => !(e instanceof RegimesMelanges) && /saison non calculee \(mois absent de l historique\)/.test(e.message))
+  // L'ordre interne des noms n'est pas exporte : pas de tri par SAISONS.indexOf.
+  assert.equal(require('../lib/marche/saisons').SAISONS, undefined)
   assert.equal(rangDansSonRegime(fevrier), 3)
   // Dans un meme regime, l'ordre existe.
   assert.equal(ordonnerSaisons(c.saisons).pop().saison, 'tres_forte')
   assert.equal(ordonnerSaisons(c.au_dela).pop().mois, '2027-08')
+})
+
+test('LE TEST QUI COMPTE : les noms se fixent APRES la fusion des troncons — une classe absorbee ne laisse pas une « tres forte » sur trois saisons', () => {
+  // Marche synthetique a blocs courts (3 a 14 jours, quatre niveaux), tire
+  // par un generateur DETERMINISTE (graine trouvee par recherche : c'est le
+  // premier cas ou nommer avant la fusion des troncons donne un faux nom).
+  let graine = 485988682
+  const alea = () => { graine = (graine * 16807) % 2147483647; return graine / 2147483647 }
+  const niveaux = []
+  while (niveaux.length < 200) {
+    const long = 3 + Math.floor(alea() * 12)
+    const niveau = [1, 1.3, 1.7, 2.3][Math.floor(alea() * 4)]
+    for (let k = 0; k < long; k++) niveaux.push(niveau)
+  }
+  const results = []
+  for (let i = 0; i < 200; i++) {
+    const r = Math.round(300 * Math.exp(-0.0075 * i) * niveaux[i])
+    results.push({ date: new Date(Date.UTC(2026, 8, 24 + i)).toISOString().slice(0, 10), booked_count: r, available_count: 1000 - r })
+  }
+  const c = calendrierDuMarche({ pacing: { results } })
+  assert.deepEqual([...new Set(c.saisons.map(s => s.saison))].sort(), ['basse', 'forte', 'moyenne'])
+})
+
+test('pas d « au-dela » quand l horizon couvre toute la fenetre', () => {
+  const plein = { results: PACING.results.slice(0, 150).map(x => ({ ...x, booked_count: Math.max(x.booked_count, 40) })) }
+  const c = calendrierDuMarche({ pacing: plein, marche60: MARCHE60 })
+  assert.equal(c.horizon.fin, c.fenetre.fin)
+  assert.deepEqual(c.au_dela, [])
+  assert.deepEqual(c.regimes.map(r => r.regime), ['pacing'])
 })

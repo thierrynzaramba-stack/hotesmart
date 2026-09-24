@@ -1132,6 +1132,17 @@ chemin pour ordonner ou comparer des saisons (`ordonnerSaisons`,
 `RegimesMelanges` sur un mélange, ou sur une saison sans régime. Test : un
 ordre global demandé sur les deux régimes mêlés échoue ; une version qui trie
 tout sur une seule échelle le fait rougir.
+Review de la règle (aucun bloquant), corrigé : l'ordre interne des noms
+(`SAISONS`) n'est plus exporté — sinon un appelant triait un mélange par
+`SAISONS.indexOf` sans passer par les fonctions gardées ; chaque élément est
+contrôlé, même seul dans la liste ; une saison NON CALCULÉE (mois absent) lève
+son propre motif, pas « mélange ». **Correction d'un compte rendu** : le
+message du commit 2699f6a annonçait qu'une mutation « noms fixés avant la
+fusion des tronçons » faisait rougir un test. C'était faux — la mutation
+jouée supprimait le renommage au lieu de le déplacer. Le vrai cas n'était
+couvert par aucun test ; il l'est depuis, par un marché synthétique à blocs
+courts tiré d'un générateur déterministe (graine 485988682), où la version
+fautive montre une « très forte » sur trois saisons.
 *Alternative écartée pour l'instant* : recalibrer les deux régimes sur une
 échelle commune. Elle suppose que le relief du pacing et l'occupation
 historique mesurent la même chose à un facteur près, et rien ne le prouve.
