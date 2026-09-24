@@ -50,7 +50,12 @@ const lire = f => JSON.parse(fs.readFileSync(f, 'utf8'))
   const ligne = construireLigne({ marche: pacing.market, pacing, marche60, vacances, calculeLe: new Date().toISOString() })
   console.log(`${ligne.localite} · capture du ${ligne.capture_le} · statut ${ligne.statut}${ligne.motif ? ` (${ligne.motif})` : ''} · methode ${ligne.methode}`)
   if (ligne.statut === 'calcule') {
-    console.log(`  horizon ${ligne.horizon_fin} · ${ligne.saisons.length} saisons · ${ligne.ruptures.length} ruptures · ${ligne.evenements_possibles.length} evenement(s) possible(s), a lire · vacances lues : ${vacances.length} periode(s)`)
+    console.log(`  horizon ${ligne.horizon_fin} · ${ligne.saisons.length} saisons · ${ligne.ruptures.length} ruptures · vacances lues : ${vacances.length} periode(s)`)
+    // Banc aveugle (staging, sans vacances) : l'explication est non calculable
+    // et n'ecrit rien ; le resume le DIT au lieu de lire un champ vide.
+    console.log(ligne.evenements_possibles
+      ? `  explication : ${ligne.pics.length} pic(s), ${ligne.evenements_possibles.length} evenement(s) possible(s), a lire`
+      : `  ${ligne.limites[0]}`)
     for (const r of ligne.regimes) console.log(`  regime ${r.regime} : ${r.debut} → ${r.fin}`)
   }
   if (go) { await enregistrerCalendrier(sb, ligne); console.log('Calendrier ecrit dans marche_calendrier.') }

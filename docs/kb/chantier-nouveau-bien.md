@@ -1379,5 +1379,11 @@ L'écart lointain repose sur peu de nuits de week-end.
   suppression. **Décision de Thierry, même jour** : pas d'import des vacances
   en staging (banc aveugle, règle ci-dessus) ; la ligne id 1 est supprimée ;
   le refus est remplacé par le mode aveugle — saisons et ruptures stockées,
-  explication « non calculable, calendrier absent », rien d'écrit pour elle. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
+  explication « non calculable, calendrier absent », rien d'écrit pour elle.
+  **Fait le même jour** : ligne id 1 supprimée (relue avant, supprimée sous
+  empreinte `biens = 3` et sous condition de marché, date et méthode) ; calcul
+  à blanc LU (il a d'ailleurs attrapé un défaut du résumé du script, qui
+  lisait un champ vide), puis ligne aveugle écrite dans une commande séparée :
+  **id 2**, Bagnères-de-Bigorre, capture 2026-09-24, 11 saisons, 10 ruptures,
+  deux régimes, explication `null` avec sa limite. Relue en base. **Leçon** : un calcul à blanc se LIT avant l'écriture — deux
   commandes, jamais une.
