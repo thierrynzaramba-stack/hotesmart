@@ -287,8 +287,12 @@
       <td>${phrase(p.phrase)}</td></tr>`).join('')
     // Seuls les evenements A LIRE s'affichent : un pic faiblement marque reste
     // dans la donnee, jamais montre par defaut (Thierry, 24 septembre 2026).
-    const aLire = (m.evenements_possibles || []).filter(e => e.a_lire !== false).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
-      || '<p class="motif">Rien à signaler : chaque pic a une cause dans le calendrier français.</p>'
+    const tous = m.evenements_possibles || []
+    const masques = tous.filter(e => e.a_lire === false).length
+    // Masque ne veut pas dire explique (review) : la page le dit, sans montrer.
+    const noteMasques = masques ? `<p class="motif">${masques} période${masques > 1 ? 's' : ''} sans cause connue mais faiblement marquée${masques > 1 ? 's' : ''} (aucune rupture franche) : non affichée${masques > 1 ? 's' : ''}.</p>` : ''
+    const aLire = (tous.filter(e => e.a_lire !== false).map(e => `<div class="a-lire">${phrase(e.phrase)}</div>`).join('')
+      || (masques ? '<p class="motif">Aucune période à lire.</p>' : '<p class="motif">Rien à signaler : chaque pic a une cause dans le calendrier français.</p>')) + noteMasques
     const ecarts = (m.ecart_semaine_week_end || []).map(x => `<tr><td>${jourFr(x.debut)} → ${jourFr(x.fin)}</td>
       <td>${x.ecart_prix_pct != null ? `<b>${x.ecart_prix_pct > 0 ? '+' : ''}${nombre(x.ecart_prix_pct)} %</b> le week-end`
         : `<span class="non-calc">${ech(x.motif || 'non calculable, motif non précisé')}</span>`}</td>

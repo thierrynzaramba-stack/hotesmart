@@ -254,12 +254,17 @@ test('LE TEST QUI COMPTE : un pic sans aucune rupture a ses bornes sort de la li
   const e = expliquer()
   const oct = e.evenements_possibles.find(x => x.debut === '2026-10-02')
   assert.equal(oct.a_lire, false)
-  assert.match(oct.motif_non_affiche, /aucune de ses frontières n’est une rupture/)
+  assert.match(oct.motif_non_affiche, /ses deux frontières sont des transitions/)
   const jan = e.evenements_possibles.find(x => x.debut === '2027-01-30')
   assert.equal(jan.a_lire, true, 'le pic de fin janvier entre par une rupture (×1,32)')
   assert.equal(jan.motif_non_affiche, null)
-  // La page n'affiche que les evenements a lire.
-  const page = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'marche.html'), 'utf8')
-  assert.match(page, /evenements_possibles \|\| \[\]\)\.filter\(e => e\.a_lire !== false\)/)
+  // La regle elle-meme, cas par cas (review : bords de fenetre, surcroit local).
+  const { jugerALire } = require('../lib/marche/explication')
+  assert.equal(jugerALire({ entree: 'transition', sortie: 'transition' }, 0).a_lire, false)
+  assert.equal(jugerALire({ entree: 'transition', sortie: 'rupture' }, 0).a_lire, true)
+  assert.equal(jugerALire({ entree: 'debut', sortie: 'transition' }, 0).a_lire, true, 'un bord non mesure : je ne sais pas n est pas non')
+  assert.equal(jugerALire({ entree: 'transition', sortie: 'fin' }, 0).a_lire, true)
+  assert.equal(jugerALire({ entree: 'transition', sortie: 'transition' }, 2).a_lire, true, 'un surcroit local reste a lire')
+  assert.equal(jugerALire(null, 0).a_lire, true, 'hors pic : a lire')
 })
 

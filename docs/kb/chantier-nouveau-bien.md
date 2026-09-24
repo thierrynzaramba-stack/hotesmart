@@ -1578,4 +1578,11 @@ id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
   par 30 jours ; seules les trois semaines d'octobre bougent, plus deux
   frontières d'un jour (25 → 26 oct., 29 → 30 janv.) ; tableau complet au
   §13 « zone de dernière minute ».
+- **Review de 3dfde4b (aucun bloquant), règle affinée** (`jugerALire`) : un
+  événement n'est masqué que si son pic est borné par DEUX transitions
+  MESURÉES et ne porte aucun jour en surcroît. Un bord de fenêtre n'est pas
+  mesuré — « je ne sais pas » n'est pas « non » : le pic reste à lire. Un
+  surcroît local reste à lire même dans un pic faible. La page dit combien de
+  périodes sont masquées, sans les montrer (elle affirmait « chaque pic a une
+  cause »). Bagnères : inchangé (le 2 → 11 oct. reste masqué).
 
