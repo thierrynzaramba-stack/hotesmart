@@ -30,7 +30,9 @@
     .dow-header div.we { color: #007aff; }
     .grid { display: flex; flex-direction: column; gap: 4px; }
     .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; position: relative; }
-    .cell { aspect-ratio: 1 / 1.15; border-radius: 10px; background: #fff; border: 1px solid #ececef; padding: 4px 3px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer; position: relative; overflow: hidden; }
+    /* Plus haute que large : la barre de réservation (26 à 48 px) ne doit jamais
+       recouvrir le prix, qui reste collé en bas (Thierry, 24 septembre 2026). */
+    .cell { aspect-ratio: 1 / 1.7; border-radius: 10px; background: #fff; border: 1px solid #ececef; padding: 4px 3px 5px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer; position: relative; overflow: hidden; }
     /* barres de reservation en overlay (vue tarifs) */
     .resa-layer { position: absolute; left: 0; right: 0; top: 26px; pointer-events: none; z-index: 3; }
     .resa-bar { position: absolute; height: 22px; border-radius: 11px; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; }
@@ -55,9 +57,6 @@
     .cell.orphan { background: #fff4e5 !important; border-color: #f59e0b; box-shadow: inset 0 0 0 2px #f59e0b; }
     .cell.orphan .alert { position: absolute; top: 3px; right: 3px; font-size: 11px; }
     .loading { text-align: center; padding: 40px; color: #86868b; font-size: 14px; }
-    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; color: #6e6e73; justify-content: center; }
-    .legend span { display: inline-flex; align-items: center; gap: 5px; }
-    .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
     /* Bottom sheet */
     .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; z-index: 100; align-items: flex-end; }
     .sheet-overlay.visible { display: flex; }
@@ -147,12 +146,6 @@
   <main>
     <div class="dow-header"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div class="we">Sam</div><div class="we">Dim</div></div>
     <div class="grid" id="grid"><div class="loading">Chargement...</div></div>
-    <div class="legend">
-      <span><i style="background:#dde7f5"></i> Reserve</span>
-      <span><i style="background:#ffeced"></i> Ferme</span>
-      <span><i style="background:#f0f4fa"></i> Week-end</span>
-      <span><i style="background:#f59e0b"></i> Configure</span>
-    </div>
   </main>
 
   <div class="sheet-overlay" id="sheet-overlay">
