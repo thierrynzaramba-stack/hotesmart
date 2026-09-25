@@ -15,7 +15,7 @@
 // niveaux quel que soit le verrou, « le verrou » rougit. Rejoue le 24 septembre.
 
 const test = require('node:test')
-const assert = require('node:assert')
+const assert = require('node:assert/strict')
 const path = require('path')
 const { construireReleve, grilleMesureeDouzeMois } = require('../lib/marche/controle')
 const { menageFacture, sejoursAvecMenage } = require('../lib/marche/menage')

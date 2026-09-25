@@ -10,7 +10,7 @@
 // sans l'estimation avant le premier appel, un test rougit.
 
 const test = require('node:test')
-const assert = require('node:assert')
+const assert = require('node:assert/strict')
 const { etudierBien } = require('../lib/marche/etude')
 
 function espion ({ estime = 0, liste = null } = {}) {

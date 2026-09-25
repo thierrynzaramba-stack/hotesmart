@@ -1586,3 +1586,147 @@ id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
   périodes sont masquées, sans les montrer (elle affirmait « chaque pic a une
   cause »). Bagnères : inchangé (le 2 → 11 oct. reste masqué).
 
+---
+
+## 14. Nouvelle page « le marché global » (25 septembre 2026) — cadrage en cours
+
+**La page V2.3.4 (`apps/yield/marche.html`) est GELÉE** (Thierry) : calcul,
+tables et tests restent en l'état ; elle devient une référence, pas un
+chantier. Une page NEUVE, un lot neuf, des fichiers neufs : je choisis un
+logement → son adresse → son marché → deux indicateurs du marché global.
+Rien de la machinerie de lecture du futur (pente, plancher d'amplitude, zone
+de dernière minute, seuil de force, deux échelles) n'est repris.
+
+**Décisions de Thierry** :
+- **Indicateur 1, validé** : RevPAR mois par mois, p25 / p50 / p75 / p90, sur
+  les 60 mois du marché ; deux mentions (« pas un prix pour votre logement »,
+  « 2021-2022 : couverture en cours de mise en place ») ; plus la couverture
+  RÉELLE par mois (annonces actives), pour voir où l'historique est mince.
+- **Indicateur 2** : le prix affiché des annonces libres est REFUSÉ (août 2027
+  à 113 € contre février à 124 €, alors que l'historique donne août parmi les
+  plus forts : loin dans le futur, c'est le prix par défaut d'hôtes qui n'ont
+  pas réglé leur été). Aucune mesure quotidienne du passé n'existe : le
+  calendrier jour par jour se CONSTRUIT — niveau du mois par les 60 mois,
+  relief par le calendrier français — et se dit « niveau attendu, pas une
+  mesure ». Quatre niveaux en quartiles des jours affichés.
+- **Le marché d'un logement se déduit par SCRIPT**, jamais à l'ouverture d'une
+  page (aucun appel payant déclenché par un écran) : Base Adresse Nationale
+  (gratuite, publique) → `markets/lookup` (0,01 $ par logement, en cache) →
+  `marche_biens`. Les coordonnées vivent dans `marche_biens`, jamais dans
+  `properties` (dette 31 : ses trois colonnes de coordonnées, inutilisées).
+
+**MESURÉ, ET BLOQUANT (25 septembre 2026)** : le poids du relief ne se lit pas
+dans les 60 mois. Régression log(RevPAR p50 mensuel) = effet du mois
+calendaire + tendance + part des jours de vacances (zones-jours / 3 × jours) :
+effet des vacances **−0,01 ± 0,48** sur 60 mois (**+0,19 ± 0,59** sur les 36
+derniers) ; week-ends ±0,90, fériés ±3 : non mesurables. Raison : un même mois
+porte presque la même part de vacances chaque année (février 0,40-0,51 ; août
+toujours 1) — l'historique mensuel ne voit pas l'effet d'un jour de vacances.
+Sans relief, les quatre niveaux par mois (médiane des 5 années de RevPAR p50,
+quartiles des 365 jours : 21,5 / 31,2 / 33,3 €) : oct. Moyen, nov. Faible,
+déc. Fort, janv. Fort, fév. Très fort, mars Très fort, avr.-mai Faible, juin
+Moyen, juil.-août Très fort, sept. Moyen — et la semaine de Noël, le plus fort
+pic du pacing (×2,54), se noie dans un décembre « Fort ». **Décision demandée
+à Thierry** avant tout code.
+
+**Versé en staging (décision de Thierry)** : la fixture des 60 mois de
+Bagnères dans `airroi_cache`, par `scripts/verser-fixture-marche.js` (dépôt du
+client, aucun appel AirROI, `cout_usd` 0, journal des appels non touché),
+clé canonique `POST /markets/metrics/all` {marché de Bagnères, 60 mois, devise
+native}, `recupere_le` 2026-09-23 (date de la capture manuelle, fraîcheur
+365 jours). Calcul à blanc lu, écriture séparée, relu. ⚠ Limite : la clé
+porte le marché en trois champs (pays, région, localité) ; un appelant qui
+passerait aussi `district` calculerait une autre clé.
+
+### §14 — décisions de Thierry du 25 septembre 2026 : voie (b), réglages posés
+
+**Le relief n'est pas mesurable sur l'historique mensuel** (effet des
+vacances −0,01 ± 0,48) : il est donc POSÉ, pas déduit. La page le dit au
+lecteur. **RÉGLAGES DE THIERRY DU 25 SEPTEMBRE 2026** (multiplicateurs,
+cumul multiplicatif quand plusieurs s'appliquent) :
+- jour de vacances scolaires : **×1,25** si une zone est en vacances, **×1,35**
+  si deux, **×1,45** si les trois ;
+- jour férié ou de pont : **×1,20** ;
+- nuit du vendredi ou du samedi : **×1,10** (ordre de grandeur mesuré sur le
+  pacing proche : +7,5 % et +8,5 %) ;
+- 24, 25 et 31 décembre, 1er janvier : **×1,60**.
+
+**Le relief est À SOMME NULLE dans le mois** : le niveau mensuel contient déjà
+les vacances (février est haut PARCE QUE c'est un mois de vacances) ; un bonus
+par-dessus compterait deux fois. Les poids s'appliquent jour par jour, puis le
+mois est RENORMALISÉ pour que sa moyenne reste exactement le niveau mesuré —
+les jours forts montent, les jours ordinaires descendent d'autant. Test
+exigé : pour chaque mois, moyenne des jours après relief = niveau mensuel.
+
+**Les quatre niveaux se coupent sur la VALEUR, pas sur le nombre de jours**
+(les quartiles mettaient février, 75,9 €, et mars, 37,9 €, dans la même
+couleur). Coupe en pourcentage de la MÉDIANE ANNUELLE. **Bornes déclarées
+(choisies pour la lisibilité sur Bagnères)** : faible < 75 % ; moyen 75-110 % ;
+fort 110-140 % ; très fort ≥ 140 %. Avec 160 % comme borne haute (première
+proposition de Thierry), seul février sortait « très fort » et août (146 %),
+parmi les plus forts de l'historique, restait « fort ». Douze mois, niveau
+mensuel seul (médiane annuelle 27,85 €) : oct. 78 % moyen, nov. 62 % faible,
+déc. 112 % fort, janv. 114 % fort, fév. 273 % très fort, mars 136 % fort,
+avr. 63 % faible, mai 58 % faible, juin 77 % moyen, juil. 120 % fort, août
+146 % très fort, sept. 88 % moyen. (Le calendrier jour par jour coupera sur la
+médiane des JOURS après relief ; à montrer avant verdict.)
+
+**Ordre** : l'indicateur 1 (RevPAR en quantiles) est codé d'abord et montré ;
+le calendrier ensuite.
+
+### §14 — indicateur 1 codé (25 septembre 2026)
+
+Fichiers NEUFS : `lib/marche/marche-global.js` (pur, `revparMensuel`),
+`api/marche-global.js` (nouvelle fonction Vercel — 53 sur 100 ; l'API de la
+page gelée n'est pas touchée), `apps/yield/marche-global.html` (aucun lien
+de menu), `tests/marche-global.test.js`.
+- **Vue** : garde du LOGEMENT (lecture des réservations, bien requis) ; lit
+  `marche_biens` par le bien résolu, puis `airroi_cache` sous la clé
+  canonique du client (60 mois, devise native, marché en trois champs) ;
+  aucun appel AirROI (le test fait échouer tout appel réseau). Sans lien :
+  « marché inconnu » ; sans historique : dit, avec le coût (0,50 $, par un
+  script, jamais depuis l'écran).
+- **Calcul** : les quatre quantiles du RevPAR et les annonces actives, mois
+  par mois ; une valeur 0 = ABSENCE (courbe coupée, jamais un zéro tracé) ;
+  2021-2022 marquées couverture partielle.
+- **Page** : graphique SVG sans bibliothèque (60 mois, p25 / p50 / p75 / p90,
+  fond gris sur 2021-2022), les deux mentions, la couverture réelle par mois
+  en barres ; au téléphone, le graphique défile dans sa carte, la page ne
+  déborde pas. Classée délégable (garde du logement).
+- **Aperçu** : réponse RÉELLE de la vue contre staging (Loft Pilotable →
+  Bagnères, cache versé le 25 septembre), 60 mois.
+- **Review de d0f7fa1 (aucun constat de sécurité), corrigé** : un mois ABSENT
+  de la réponse est comblé par une ligne nulle (la courbe se coupe, l'axe ne se
+  comprime pas) ; seule une valeur numérique est une mesure (`true` ou `[5]`
+  ne le sont plus) ; un cache illisible se dit au lieu d'un 500 ; le marché se
+  lit en forme NFC des deux côtés (écriture du lien, versement, lecture) — un
+  « Bagnères » décomposé ne trouve plus rien à tort ; le test de sécurité
+  passe un identifiant BRUT différent du bien résolu (il passait la même
+  valeur des deux côtés et ne prouvait rien).
+- **Trouvaille, et écart corrigé.** `assert.deepEqual` (égalité LÂCHE de Node)
+  juge `[21, 1, null]` égal à `[21, null, null]` : une mutation passait au vert.
+  Les tests du lot passent à `node:assert/strict`. En essayant le mode strict
+  sur TOUS les tests V2, j'ai modifié des fichiers de la page GELÉE et de
+  l'étape 3 — et, plus tôt, `tests/explication-marche.test.js` (garde de
+  frontière). **Écart à la consigne de gel, corrigé** : ces fichiers sont
+  remis à l'identique de leur état du gel (0da7423) ; la garde du nouveau lot
+  vit dans un fichier NEUF, `tests/marche-global-frontiere.test.js`. Résultat
+  de l'essai, avant retour : en mode strict, les 106 tests V2 passaient —
+  aucun défaut caché par l'égalité lâche dans le lot gelé. La conversion des
+  tests gelés, si Thierry la veut, sera un geste à part.
+
+### RÈGLE — ÉGALITÉ STRICTE POUR TOUS LES TESTS V2 (Thierry, 25 septembre 2026)
+
+**Tous les tests V2 utilisent `require('node:assert/strict')`. L'égalité lâche
+(`require('node:assert')`, `assert.deepEqual` / `assert.equal` non stricts)
+est INTERDITE.** Raison : elle juge `[21, 1, null]` égal à `[21, null, null]`
+— une mutation est passée au vert ainsi. C'est la quatrième fois qu'un test de
+ce chantier passait sur du faux ; un test qui ne distingue pas 1 de `null` ne
+prouve rien.
+- Le gel protège le calcul et l'affichage, pas la faiblesse des tests : les
+  huit fichiers de tests V2 (dont ceux de la page gelée) sont convertis dans
+  un commit À PART, tests uniquement (931200b). Vérifié : `saisons.js`,
+  `explication.js`, `calendrier-marche.js`, `marche.html`,
+  `api/yield-marche.js` identiques au gel 0da7423, empreintes SHA-256 égales.
+  109 tests V2 verts en égalité stricte.
+
