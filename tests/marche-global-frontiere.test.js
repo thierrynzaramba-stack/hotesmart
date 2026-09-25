@@ -19,7 +19,10 @@ const V2 = new Set(['airroi_cache', 'airroi_appels', 'comparables_retenus', 'gri
 
 test('FRONTIERE : le calcul du marche global est pur — aucune base, sous aucune forme', () => {
   const src = lire('lib/marche/marche-global.js')
-  for (const motif of [/\.from\(/, /\.rpc\(/, /createClient/, /require\([^)]*supabase/, /fetch\(/]) assert.ok(!motif.test(src), `marche-global.js : ${motif}`)
+  for (const motif of [/\.from\(/, /\.rpc\(/, /createClient/, /require\([^)]*supabase/, /fetch\(/, /Date\.now|new Date\(\)/]) assert.ok(!motif.test(src), `marche-global.js : ${motif}`)
+  // Il ne s'appuie que sur le calendrier francais CALCULE (feries, ponts,
+  // jours de semaine) : les vacances lui sont passees par la vue.
+  assert.deepEqual([...src.matchAll(/require\('([^']+)'\)/g)].map(m => m[1]), ['../yield/jours-feries', '../yield/reference'])
 })
 
 test('FRONTIERE : la vue ne lit que des tables V2, nommees en toutes lettres, et n ecrit rien', () => {
@@ -27,6 +30,10 @@ test('FRONTIERE : la vue ne lit que des tables V2, nommees en toutes lettres, et
   const tables = [...src.matchAll(/\.from\(\s*([^)]*)\)/g)].map(m => m[1].trim().replace(/^['"`]|['"`]$/g, ''))
   assert.deepEqual(tables, ['marche_biens', 'airroi_cache'])
   for (const t of tables) assert.ok(V2.has(t))
+  // Hors la garde, la seule lecture de l'existant : les vacances scolaires,
+  // par leur lecteur du coeur (calendrier public, aucune donnee de compte).
+  assert.deepEqual([...src.matchAll(/require\('([^']+)'\)/g)].map(m => m[1]),
+    ['@supabase/supabase-js', '../lib/require-permission', '../lib/airroi/client', '../lib/airroi/json', '../lib/marche/marche-global', '../lib/yield/vacances', '../lib/yield/zones-scolaires'])
   assert.ok(!/\.(insert|update|upsert|delete|rpc)\(/.test(src), 'aucune ecriture')
   assert.ok(!/creerClient|fetch\(/.test(src), 'aucun appel AirROI depuis la vue')
 })

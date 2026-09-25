@@ -1,8 +1,10 @@
 // api/marche-global.js — LE MARCHE GLOBAL D'UN LOGEMENT (lecture seule).
 // Lot « marche global » (cadrage docs/kb/chantier-nouveau-bien.md §14).
 //
-//   GET ?property_id=  ->  l'indicateur 1 (RevPAR mois par mois, quantiles,
-//                          couverture) du marche relie a ce logement.
+//   GET ?property_id=  ->  du marche relie a ce logement : l'ADR et l'occupation
+//                          medianes (bloc 1), le RevPAR en quantiles et la
+//                          couverture (bloc 2), le calendrier jour par jour
+//                          CONSTRUIT (bloc 3, niveau attendu, pas une mesure).
 //
 // ⚠ SECURITE (lecon de V2.3.4) : garde du LOGEMENT (lecture des reservations,
 // bien requis : le bien designe le compte) ; seul le marche relie a CE
@@ -11,13 +13,39 @@
 // ⚠ AUCUN APPEL AIRROI, JAMAIS DEPUIS UN ECRAN : les 60 mois se lisent dans
 // `airroi_cache`, sous la cle canonique du client. Absents : on le dit, avec
 // le cout de l'etude (0,50 $, par un script), sans rien payer.
-// ⚠ Aucune ecriture, aucune table de l'existant lue hors la garde.
+// ⚠ Aucune ecriture. Hors la garde, une seule table de l'existant est lue :
+// les vacances scolaires (`school_holidays`, par son lecteur
+// `lib/yield/vacances.js`) — le calendrier francais du coeur, sans donnee de
+// compte. Illisibles : le calendrier se dit non calculable, les blocs 1 et 2
+// restent.
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { cleCanonique } = require('../lib/airroi/client')
 const { lireJson } = require('../lib/airroi/json')
-const { revparMensuel } = require('../lib/marche/marche-global')
+const { revparMensuel, adrOccupationMensuel, calendrierAttendu } = require('../lib/marche/marche-global')
+const { lireVacances, etendueSource } = require('../lib/yield/vacances')
+const { jourLocalParis } = require('../lib/yield/zones-scolaires')
+
+// Le calendrier couvre douze mois a partir du mois en cours (heure de Paris).
+const NB_MOIS = 12
+function fenetre (maintenant) {
+  const premier = jourLocalParis(maintenant.toISOString()).slice(0, 7)
+  const [a, m] = premier.split('-').map(Number)
+  const fin = new Date(Date.UTC(a, m - 1 + NB_MOIS, 0)).toISOString().slice(0, 10)
+  return { premier, debut: `${premier}-01`, fin }
+}
+
+async function calendrier (donnees) {
+  const f = fenetre(new Date())
+  try {
+    const [vacances, etendue] = await Promise.all([lireVacances(supabase, f.debut, f.fin), etendueSource(supabase)])
+    return calendrierAttendu(donnees, vacances, etendue, f.premier, NB_MOIS)
+  } catch (e) {
+    console.error('[marche-global] vacances', e.message)
+    return { statut: 'non_calculable', motif: 'les vacances scolaires sont illisibles', mois: [] }
+  }
+}
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -57,8 +85,8 @@ module.exports = async (req, res) => {
     try { donnees = lireJson(ligne.reponse) } catch (e) {
       return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'l historique en cache est illisible' })
     }
-    const indicateur1 = revparMensuel(donnees)
-    return res.status(200).json({ source: 'marche', etat: 'calcule', marche: m, recupere_le: ligne.recupere_le, revpar: indicateur1 })
+    return res.status(200).json({ source: 'marche', etat: 'calcule', marche: m, recupere_le: ligne.recupere_le,
+      adr_occupation: adrOccupationMensuel(donnees), revpar: revparMensuel(donnees), calendrier: await calendrier(donnees) })
   } catch (e) {
     console.error('[marche-global]', e.message)
     return res.status(500).json({ error: 'lecture_impossible' })
