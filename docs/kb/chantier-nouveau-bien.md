@@ -1586,3 +1586,55 @@ id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
   périodes sont masquées, sans les montrer (elle affirmait « chaque pic a une
   cause »). Bagnères : inchangé (le 2 → 11 oct. reste masqué).
 
+---
+
+## 14. Nouvelle page « le marché global » (25 septembre 2026) — cadrage en cours
+
+**La page V2.3.4 (`apps/yield/marche.html`) est GELÉE** (Thierry) : calcul,
+tables et tests restent en l'état ; elle devient une référence, pas un
+chantier. Une page NEUVE, un lot neuf, des fichiers neufs : je choisis un
+logement → son adresse → son marché → deux indicateurs du marché global.
+Rien de la machinerie de lecture du futur (pente, plancher d'amplitude, zone
+de dernière minute, seuil de force, deux échelles) n'est repris.
+
+**Décisions de Thierry** :
+- **Indicateur 1, validé** : RevPAR mois par mois, p25 / p50 / p75 / p90, sur
+  les 60 mois du marché ; deux mentions (« pas un prix pour votre logement »,
+  « 2021-2022 : couverture en cours de mise en place ») ; plus la couverture
+  RÉELLE par mois (annonces actives), pour voir où l'historique est mince.
+- **Indicateur 2** : le prix affiché des annonces libres est REFUSÉ (août 2027
+  à 113 € contre février à 124 €, alors que l'historique donne août parmi les
+  plus forts : loin dans le futur, c'est le prix par défaut d'hôtes qui n'ont
+  pas réglé leur été). Aucune mesure quotidienne du passé n'existe : le
+  calendrier jour par jour se CONSTRUIT — niveau du mois par les 60 mois,
+  relief par le calendrier français — et se dit « niveau attendu, pas une
+  mesure ». Quatre niveaux en quartiles des jours affichés.
+- **Le marché d'un logement se déduit par SCRIPT**, jamais à l'ouverture d'une
+  page (aucun appel payant déclenché par un écran) : Base Adresse Nationale
+  (gratuite, publique) → `markets/lookup` (0,01 $ par logement, en cache) →
+  `marche_biens`. Les coordonnées vivent dans `marche_biens`, jamais dans
+  `properties` (dette 31 : ses trois colonnes de coordonnées, inutilisées).
+
+**MESURÉ, ET BLOQUANT (25 septembre 2026)** : le poids du relief ne se lit pas
+dans les 60 mois. Régression log(RevPAR p50 mensuel) = effet du mois
+calendaire + tendance + part des jours de vacances (zones-jours / 3 × jours) :
+effet des vacances **−0,01 ± 0,48** sur 60 mois (**+0,19 ± 0,59** sur les 36
+derniers) ; week-ends ±0,90, fériés ±3 : non mesurables. Raison : un même mois
+porte presque la même part de vacances chaque année (février 0,40-0,51 ; août
+toujours 1) — l'historique mensuel ne voit pas l'effet d'un jour de vacances.
+Sans relief, les quatre niveaux par mois (médiane des 5 années de RevPAR p50,
+quartiles des 365 jours : 21,5 / 31,2 / 33,3 €) : oct. Moyen, nov. Faible,
+déc. Fort, janv. Fort, fév. Très fort, mars Très fort, avr.-mai Faible, juin
+Moyen, juil.-août Très fort, sept. Moyen — et la semaine de Noël, le plus fort
+pic du pacing (×2,54), se noie dans un décembre « Fort ». **Décision demandée
+à Thierry** avant tout code.
+
+**Versé en staging (décision de Thierry)** : la fixture des 60 mois de
+Bagnères dans `airroi_cache`, par `scripts/verser-fixture-marche.js` (dépôt du
+client, aucun appel AirROI, `cout_usd` 0, journal des appels non touché),
+clé canonique `POST /markets/metrics/all` {marché de Bagnères, 60 mois, devise
+native}, `recupere_le` 2026-09-23 (date de la capture manuelle, fraîcheur
+365 jours). Calcul à blanc lu, écriture séparée, relu. ⚠ Limite : la clé
+porte le marché en trois champs (pays, région, localité) ; un appelant qui
+passerait aussi `district` calculerait une autre clé.
+
