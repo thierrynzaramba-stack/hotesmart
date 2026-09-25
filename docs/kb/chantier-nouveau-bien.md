@@ -1715,3 +1715,18 @@ de menu), `tests/marche-global.test.js`.
   aucun défaut caché par l'égalité lâche dans le lot gelé. La conversion des
   tests gelés, si Thierry la veut, sera un geste à part.
 
+### RÈGLE — ÉGALITÉ STRICTE POUR TOUS LES TESTS V2 (Thierry, 25 septembre 2026)
+
+**Tous les tests V2 utilisent `require('node:assert/strict')`. L'égalité lâche
+(`require('node:assert')`, `assert.deepEqual` / `assert.equal` non stricts)
+est INTERDITE.** Raison : elle juge `[21, 1, null]` égal à `[21, null, null]`
+— une mutation est passée au vert ainsi. C'est la quatrième fois qu'un test de
+ce chantier passait sur du faux ; un test qui ne distingue pas 1 de `null` ne
+prouve rien.
+- Le gel protège le calcul et l'affichage, pas la faiblesse des tests : les
+  huit fichiers de tests V2 (dont ceux de la page gelée) sont convertis dans
+  un commit À PART, tests uniquement (931200b). Vérifié : `saisons.js`,
+  `explication.js`, `calendrier-marche.js`, `marche.html`,
+  `api/yield-marche.js` identiques au gel 0da7423, empreintes SHA-256 égales.
+  109 tests V2 verts en égalité stricte.
+
