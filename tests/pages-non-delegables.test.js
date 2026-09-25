@@ -92,6 +92,10 @@ const DELEGABLES = [
   // ⚠ La premiere version gardait SANS bien : session seule, et les
   // communes de tous les clients lisibles (review de securite) — corrige.
   'apps/yield/marche.html',
+  // ⚠ DELEGABLE (cadrage §14, 25 septembre 2026), comme marche.html : la
+  // garde `reservations` en lecture porte sur le LOGEMENT choisi, qui designe
+  // le compte (`/api/marche-global?property_id=`).
+  'apps/yield/marche-global.html',
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────

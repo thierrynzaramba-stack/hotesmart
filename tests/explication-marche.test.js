@@ -122,7 +122,7 @@ test('FRONTIERE V2 : les modules purs ne touchent aucune base ; les autres, seul
   const lire = f => fs.readFileSync(path.join(racine, f), 'utf8')
   // Purs : aucun acces base, sous aucune forme (review : `.from(TABLE)`,
   // `.rpc(`, un client cree sur place).
-  for (const f of ['lib/marche/saisons.js', 'lib/marche/explication.js', 'lib/marche/grille-marche.js']) {
+  for (const f of ['lib/marche/saisons.js', 'lib/marche/explication.js', 'lib/marche/grille-marche.js', 'lib/marche/marche-global.js']) {
     const src = lire(f)
     for (const motif of [/\.from\(/, /\.rpc\(/, /createClient/, /require\([^)]*supabase/]) assert.ok(!motif.test(src), `${f} : ${motif}`)
   }

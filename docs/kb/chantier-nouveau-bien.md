@@ -1638,3 +1638,61 @@ native}, `recupere_le` 2026-09-23 (date de la capture manuelle, fraîcheur
 porte le marché en trois champs (pays, région, localité) ; un appelant qui
 passerait aussi `district` calculerait une autre clé.
 
+### §14 — décisions de Thierry du 25 septembre 2026 : voie (b), réglages posés
+
+**Le relief n'est pas mesurable sur l'historique mensuel** (effet des
+vacances −0,01 ± 0,48) : il est donc POSÉ, pas déduit. La page le dit au
+lecteur. **RÉGLAGES DE THIERRY DU 25 SEPTEMBRE 2026** (multiplicateurs,
+cumul multiplicatif quand plusieurs s'appliquent) :
+- jour de vacances scolaires : **×1,25** si une zone est en vacances, **×1,35**
+  si deux, **×1,45** si les trois ;
+- jour férié ou de pont : **×1,20** ;
+- nuit du vendredi ou du samedi : **×1,10** (ordre de grandeur mesuré sur le
+  pacing proche : +7,5 % et +8,5 %) ;
+- 24, 25 et 31 décembre, 1er janvier : **×1,60**.
+
+**Le relief est À SOMME NULLE dans le mois** : le niveau mensuel contient déjà
+les vacances (février est haut PARCE QUE c'est un mois de vacances) ; un bonus
+par-dessus compterait deux fois. Les poids s'appliquent jour par jour, puis le
+mois est RENORMALISÉ pour que sa moyenne reste exactement le niveau mesuré —
+les jours forts montent, les jours ordinaires descendent d'autant. Test
+exigé : pour chaque mois, moyenne des jours après relief = niveau mensuel.
+
+**Les quatre niveaux se coupent sur la VALEUR, pas sur le nombre de jours**
+(les quartiles mettaient février, 75,9 €, et mars, 37,9 €, dans la même
+couleur). Coupe en pourcentage de la MÉDIANE ANNUELLE. **Bornes déclarées
+(choisies pour la lisibilité sur Bagnères)** : faible < 75 % ; moyen 75-110 % ;
+fort 110-140 % ; très fort ≥ 140 %. Avec 160 % comme borne haute (première
+proposition de Thierry), seul février sortait « très fort » et août (146 %),
+parmi les plus forts de l'historique, restait « fort ». Douze mois, niveau
+mensuel seul (médiane annuelle 27,85 €) : oct. 78 % moyen, nov. 62 % faible,
+déc. 112 % fort, janv. 114 % fort, fév. 273 % très fort, mars 136 % fort,
+avr. 63 % faible, mai 58 % faible, juin 77 % moyen, juil. 120 % fort, août
+146 % très fort, sept. 88 % moyen. (Le calendrier jour par jour coupera sur la
+médiane des JOURS après relief ; à montrer avant verdict.)
+
+**Ordre** : l'indicateur 1 (RevPAR en quantiles) est codé d'abord et montré ;
+le calendrier ensuite.
+
+### §14 — indicateur 1 codé (25 septembre 2026)
+
+Fichiers NEUFS : `lib/marche/marche-global.js` (pur, `revparMensuel`),
+`api/marche-global.js` (nouvelle fonction Vercel — 53 sur 100 ; l'API de la
+page gelée n'est pas touchée), `apps/yield/marche-global.html` (aucun lien
+de menu), `tests/marche-global.test.js`.
+- **Vue** : garde du LOGEMENT (lecture des réservations, bien requis) ; lit
+  `marche_biens` par le bien résolu, puis `airroi_cache` sous la clé
+  canonique du client (60 mois, devise native, marché en trois champs) ;
+  aucun appel AirROI (le test fait échouer tout appel réseau). Sans lien :
+  « marché inconnu » ; sans historique : dit, avec le coût (0,50 $, par un
+  script, jamais depuis l'écran).
+- **Calcul** : les quatre quantiles du RevPAR et les annonces actives, mois
+  par mois ; une valeur 0 = ABSENCE (courbe coupée, jamais un zéro tracé) ;
+  2021-2022 marquées couverture partielle.
+- **Page** : graphique SVG sans bibliothèque (60 mois, p25 / p50 / p75 / p90,
+  fond gris sur 2021-2022), les deux mentions, la couverture réelle par mois
+  en barres ; au téléphone, le graphique défile dans sa carte, la page ne
+  déborde pas. Classée délégable (garde du logement).
+- **Aperçu** : réponse RÉELLE de la vue contre staging (Loft Pilotable →
+  Bagnères, cache versé le 25 septembre), 60 mois.
+
