@@ -29,6 +29,13 @@
     svg.mg .partiel { fill: var(--bg2); }
     /* Telephone : le graphique garde une largeur lisible et DEFILE dans sa
        carte ; la page, elle, ne deborde jamais. */
+    .mg-lecture { font-size: 13px; line-height: 1.5; margin: 10px 0 4px; }
+    .mg-annee { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px 18px; margin-top: 10px; }
+    .mg-mois h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; text-transform: capitalize; }
+    .mg-grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .mg-jsem { font-size: 10.5px; color: var(--text2); text-align: center; }
+    .mg-jour { font-size: 11px; text-align: center; padding: 4px 0; border-radius: 3px; color: #1c2b44; cursor: default; }
+    .mg-jour.fonce { color: #fff; }
     .mg-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     @media (max-width: 640px) {
       .content { padding-left: 12px; padding-right: 12px; } .mg-carte { padding: 12px; }
@@ -45,7 +52,7 @@
 
   <div class="mg-avertir">
     <b>Une estimation du marché, pas un prix.</b> Cette page montre comment le marché de votre
-    commune a vécu mois par mois, d’après les annonces Airbnb de l’ensemble du marché. Elle ne
+    commune a vécu mois par mois, et le niveau qu’on peut en attendre jour par jour, d’après les annonces Airbnb de l’ensemble du marché. Elle ne
     calcule aucun prix pour votre logement, n’en pousse aucun, et <b>ne pilote rien</b> : vos prix
     et votre calendrier ne changent pas.
   </div>
@@ -76,6 +83,12 @@
   const euros = v => (typeof v === 'number' && Number.isFinite(v) ? `${String(Math.round(v * 10) / 10).replace('.', ',')} €` : 'non mesuré')
   // Un seul bleu, du clair au fonce : p25 → p90.
   const COULEURS = { p25: '#9DB9E3', p50: '#5B87C9', p75: '#3A68AE', p90: '#1E3F73' }
+  const COULEUR_ADR = '#3A68AE'
+  const COULEUR_OCC = '#C07A2C'
+  // Quatre niveaux du calendrier : du pale au soutenu, une seule teinte.
+  const NIVEAUX_CAL = { faible: ['Faible', '#E8EEF7'], moyen: ['Moyen', '#B9CCE9'], fort: ['Fort', '#6F97D3'], tres_fort: ['Très fort', '#1E3F73'] }
+  const RAISONS = { vacances_1_zone: 'vacances (1 zone)', vacances_2_zones: 'vacances (2 zones)', vacances_3_zones: 'vacances (3 zones)',
+    ferie: 'jour férié', pont: 'pont', nuit_du_vendredi: 'nuit du vendredi', nuit_du_samedi: 'nuit du samedi', fetes: 'fêtes de fin d’année' }
 
   let session = null
   let jeton = 0
@@ -112,7 +125,65 @@
     if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
     if (d.etat === 'historique_absent') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
     el('mg-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · historique AirROI lu le ${jourFr(d.recupere_le)}`
-    corps(indicateur1(d.revpar))
+    corps(bloc1(d.adr_occupation) + indicateur1(d.revpar) + bloc3(d.calendrier))
+  }
+
+  const pourcent = v => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v * 100)} %` : 'non mesuré')
+  const MOIS_LONGS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  const liste = xs => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} et ${xs[xs.length - 1]}` : xs[0] || '')
+
+  // Un axe temporel commun aux blocs 1 et 2 (60 mois).
+  function axeMois (mois, L, H, G, D, BAS) {
+    const x = i => G + (L - G - D) * (mois.length === 1 ? 0.5 : i / (mois.length - 1))
+    const ticks = mois.map((m, i) => (m.mois.slice(5) === '01' ? `<line class="axe" x1="${x(i)}" x2="${x(i)}" y1="${H - BAS}" y2="${H - BAS + 4}"/><text x="${x(i)}" y="${H - BAS + 16}" text-anchor="middle">janv. ${m.mois.slice(0, 4)}</text>` : '')).join('')
+    return { x, ticks }
+  }
+  // Une courbe coupee aux mois non mesures (jamais un zero trace).
+  function courbe (mois, cle, x, y, couleur, epaisseur, bulle) {
+    let dd = ''; let dedans = false
+    mois.forEach((m, i) => {
+      if (m[cle] == null) { dedans = false; return }
+      dd += `${dedans ? 'L' : 'M'}${x(i).toFixed(1)},${y(m[cle]).toFixed(1)} `; dedans = true
+    })
+    const points = mois.map((m, i) => (m[cle] == null ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="6" fill="transparent"><title>${moisFr(m.mois)} · ${bulle(m[cle])}</title></circle>`)).join('')
+    return `<path d="${dd}" fill="none" stroke="${couleur}" stroke-width="${epaisseur}"${cle === 'occupation' ? ' stroke-dasharray="5 3"' : ''}/>${points}`
+  }
+
+  // ─── BLOC 1 : l'ADR median et l'occupation mediane du marche ────────────
+  // ⚠ L'occupation est celle du MARCHE : cette page ne lit, ne montre et ne
+  // compare aucune occupation de logement (regle 13 de Thierry).
+  function bloc1 (ind) {
+    const titre = '<h2>Le prix et le remplissage du marché, mois par mois</h2><p class="sous">Deux mesures médianes de l’ensemble des annonces du marché : le <b>prix moyen par nuit vendue</b> (ADR, axe de gauche, en euros) et l’<b>occupation</b> (part des nuits vendues, axe de droite, en %).</p>'
+    if (!ind || ind.statut !== 'calcule') {
+      return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((ind && ind.motif) || 'historique absent')}.</p></div>`
+    }
+    const mois = ind.mois
+    const L = 900, H = 280, G = 44, D = 44, HAUT = 14, BAS = 36
+    const { x, ticks } = axeMois(mois, L, H, G, D, BAS)
+    const plafondE = Math.ceil(Math.max(...mois.map(m => m.adr || 0)) / 20) * 20 || 20
+    const plafondO = Math.min(1, Math.ceil(Math.max(...mois.map(m => m.occupation || 0)) * 5) / 5) || 1
+    const yE = v => HAUT + (H - HAUT - BAS) * (1 - v / plafondE)
+    const yO = v => HAUT + (H - HAUT - BAS) * (1 - v / plafondO)
+    const partiels = mois.map((m, i) => (m.couverture_partielle ? i : null)).filter(i => i != null)
+    const fond = partiels.length ? `<rect class="partiel" x="${x(partiels[0]) - 4}" y="${HAUT}" width="${x(partiels[partiels.length - 1]) - x(partiels[0]) + 8}" height="${H - HAUT - BAS}"/>` : ''
+    const graduations = [0, 0.25, 0.5, 0.75, 1].map(f => `<line class="grille" x1="${G}" x2="${L - D}" y1="${yE(plafondE * f)}" y2="${yE(plafondE * f)}"/>
+      <text x="${G - 6}" y="${yE(plafondE * f) + 4}" text-anchor="end">${Math.round(plafondE * f)} €</text>
+      <text x="${L - D + 6}" y="${yO(plafondO * f) + 4}">${Math.round(plafondO * f * 100)} %</text>`).join('')
+    const graphe = `<svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="ADR médian et occupation médiane du marché, mois par mois">
+      ${fond}${graduations}<line class="axe" x1="${G}" x2="${L - D}" y1="${H - BAS}" y2="${H - BAS}"/>${ticks}
+      ${courbe(mois, 'adr', x, yE, COULEUR_ADR, 2.2, v => `ADR médian : ${euros(v)}`)}${courbe(mois, 'occupation', x, yO, COULEUR_OCC, 2.2, v => `occupation médiane : ${pourcent(v)}`)}</svg>`
+    const legende = `<div class="mg-legende"><span><i style="background:${COULEUR_ADR}"></i>ADR médian (€, gauche)</span><span><i style="background:${COULEUR_OCC}"></i>occupation médiane (%, droite, pointillés)</span>${partiels.length ? '<span><i style="background:var(--bg2);height:10px;vertical-align:-1px"></i>couverture partielle</span>' : ''}</div>`
+    // La phrase de lecture, tiree du profil des douze mois (mediane des annees).
+    const noms = cle => ind.profil.filter(p => p.porte_par === cle).map(p => MOIS_LONGS[p.mois - 1])
+    const prix = noms('prix'), rempl = noms('remplissage'), deux = noms('les_deux')
+    const constats = [
+      prix.length ? `${liste(prix)} ${prix.length > 1 ? 'sont forts' : 'est fort'} <b>par le prix</b> : les nuits se vendent plus cher, sans que le marché se remplisse davantage` : '',
+      rempl.length ? `${liste(rempl)} ${rempl.length > 1 ? 'sont forts' : 'est fort'} <b>par le remplissage</b> : le marché se remplit, à un prix ordinaire` : '',
+      deux.length ? `${liste(deux)} ${deux.length > 1 ? 'sont forts' : 'est fort'} <b>des deux côtés</b>` : ''].filter(Boolean)
+    const lecture = `<p class="mg-lecture"><b>Lecture.</b> Un mois fort par le prix est un mois où les voyageurs acceptent de payer plus cher la nuit ; un mois fort par le remplissage est un mois où ils viennent plus nombreux, sans payer plus. Le premier se travaille par le prix, le second par la disponibilité.${constats.length ? ` Ici, sur la médiane des années : ${constats.join(' ; ')}.` : ''} (« Fort » : au moins 110 % de la médiane des douze mois.)</p>`
+    return `<div class="mg-carte">${titre}${legende}<div class="mg-defile">${graphe}</div>${lecture}
+      <p class="mg-mention">ADR <b>brut, avant la commission Airbnb</b> (18,4 % du brut mesurés sur un logement de HôteSmart), et <b>Airbnb seulement</b> : ne le comparez pas à ce que vous touchez net.</p>
+      <p class="mg-mention">Occupation <b>du marché</b>, comptée sur toutes ses annonces Airbnb, y compris les peu actives : elle ne se compare pas à l’occupation d’un logement.</p></div>`
   }
 
   // ─── INDICATEUR 1 : le RevPAR mois par mois, en quantiles ───────────────
@@ -171,6 +242,36 @@
       <h2 style="margin-top:16px">Couverture réelle, mois par mois</h2>
       <p class="sous">Nombre d’annonces actives mesurées par AirROI : là où la barre est basse, l’historique est mince.</p>
       <div class="mg-defile">${couverture}</div></div>`
+  }
+
+  // ─── BLOC 3 : le calendrier jour par jour, CONSTRUIT ────────────────────
+  function bloc3 (cal) {
+    const titre = '<h2>Le calendrier du marché, jour par jour</h2><p class="sous"><b>Un niveau attendu, bâti sur l’historique et le calendrier — pas une mesure.</b> Le niveau de chaque mois vient des cinq années de RevPAR médian du marché ; à l’intérieur du mois, les jours sont répartis selon le calendrier français (vacances scolaires, fériés et ponts, nuits du vendredi et du samedi, fêtes de fin d’année), avec des poids posés par HôteSmart et non mesurés. La moyenne des jours d’un mois reste celle du mois.</p>'
+    if (!cal || cal.statut !== 'calcule') {
+      return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((cal && cal.motif) || 'historique absent')}.</p></div>`
+    }
+    const legende = `<div class="mg-legende">${Object.entries(NIVEAUX_CAL).map(([, [n, c]]) => `<span><i style="background:${c};height:10px;vertical-align:-1px"></i>${n}</span>`).join('')}</div>
+      <p class="mg-mention">Niveaux en part de la médiane des douze mois : faible sous 75 %, moyen de 75 à 110 %, fort de 110 à 140 %, très fort à partir de 140 %.</p>`
+    // Aucun mois classe (base sans vacances) : une phrase, pas douze.
+    if (!cal.mois.some(m => m.statut === 'calcule')) {
+      const motifs = [...new Set(cal.mois.map(m => m.motif))]
+      return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech(motifs.join(' ; ') || 'aucun mois')}.</p></div>`
+    }
+    const entete = ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(j => `<span class="mg-jsem">${j}</span>`).join('')
+    const mois = cal.mois.map(m => {
+      const nom = `${MOIS_LONGS[Number(m.mois.slice(5, 7)) - 1]} ${m.mois.slice(0, 4)}`
+      if (m.statut !== 'calcule') return `<div class="mg-mois"><h3>${nom}</h3><p class="non-calc">Non calculable : ${ech(m.motif)}.</p></div>`
+      const decalage = (new Date(`${m.mois}-01T00:00:00Z`).getUTCDay() + 6) % 7
+      const vides = '<span></span>'.repeat(decalage)
+      const cases = m.jours.map(j => {
+        const [n, c] = NIVEAUX_CAL[j.niveau]
+        const pourquoi = j.raisons.length ? j.raisons.map(r => RAISONS[r] || r).join(', ') : 'jour ordinaire'
+        return `<span class="mg-jour${j.niveau === 'tres_fort' ? ' fonce' : ''}" style="background:${c}" title="${jourFr(j.jour)} · ${n} (${pourcent(j.pct)} de la médiane) · ${ech(pourquoi)}">${Number(j.jour.slice(8, 10))}</span>`
+      }).join('')
+      return `<div class="mg-mois"><h3>${nom}</h3><div class="mg-grille">${entete}${vides}${cases}</div></div>`
+    }).join('')
+    return `<div class="mg-carte">${titre}${legende}<div class="mg-annee">${mois}</div>
+      <p class="mg-mention">Touchez ou survolez un jour pour voir son niveau et ce qui le fait monter. Un mois dont les vacances scolaires ne sont pas encore publiées n’est pas classé.</p></div>`
   }
 
   init()

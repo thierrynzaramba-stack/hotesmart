@@ -1748,3 +1748,45 @@ migrations V2 ne portent plus de requête de vérification (retirée le
   d'unicité. Ces points reposaient sur le SELECT collé ; ils reposent
   désormais sur le fichier de migration relu et sur la sonde `anon`.
 
+
+### §14 — blocs 1 et 3 codés (25 septembre 2026)
+
+**Ordre de la page** : bloc 1 (prix et remplissage), bloc 2 (RevPAR en
+quantiles et couverture réelle — le nombre d'annonces reste ici), bloc 3
+(calendrier jour par jour).
+
+**Bloc 1 — option (ii) de Thierry.** Le CA médian par jour doublait le RevPAR
+p50 (rapport 0,986-1,019, corrélation 1,000) : remplacé par ses deux
+composantes, ADR médian (€, axe gauche) et occupation médiane (%, axe droit,
+pointillés), 60 mois. La page dit : ADR **brut, avant la commission Airbnb**
+(18,4 % du brut, §3 bis), **Airbnb seulement** ; occupation **du marché**,
+jamais mise en regard de celle d'un logement (règle 13 — la page ne lit du
+logement que son nom, test à l'appui). Phrase de lecture tirée du PROFIL des
+douze mois (médiane des années, part de la médiane des douze) : « fort par le
+prix » = ADR ≥ 110 %, occupation non ; « par le remplissage » = l'inverse.
+Bagnères : janvier et décembre par le prix, juillet et août par le
+remplissage, février et mars des deux côtés.
+
+**Bloc 3 — calendrier construit** (`calendrierAttendu`, pur, premier mois
+INJECTÉ). Niveau du mois = médiane des années du RevPAR p50 des mois
+homologues ; relief = réglages de Thierry cumulés en multiplication (le
+25 décembre 2026 : vacances 3 zones × férié × nuit du vendredi × fêtes) ; un
+pont vaut un férié sans s'y ajouter ; puis RENORMALISATION : la moyenne des
+jours de chaque mois = son niveau (test exigé, mutation « sans
+renormalisation » attrapée). Douze mois à partir du mois en cours (Paris).
+- **Choix fait, à confirmer par Thierry** : la coupe en quatre niveaux se fait
+  sur la médiane des DOUZE NIVEAUX MENSUELS (27,85 € à Bagnères, celle sur
+  laquelle les bornes 75/110/140 ont été posées), et non sur la médiane des
+  jours affichés : un mois non classé (vacances non publiées) déplacerait
+  sinon la référence de tous les autres.
+- **Un mois dont les vacances ne sont pas publiées pour les trois zones n'est
+  pas classé**, avec son motif. Production : la table s'arrête au 3 juillet
+  2027 → juillet et août 2027 non classés. **Staging : `school_holidays` est
+  vide → aucun mois classé** (une phrase, pas douze).
+- Le « Pont de l'Ascension » est une période de `school_holidays` : il compte
+  comme vacances ET, par le calcul, comme pont (cumul).
+- La vue lit une table de l'existant hors la garde : `school_holidays`, par son
+  lecteur `lib/yield/vacances.js` (calendrier public, aucune donnée de
+  compte). Illisible : calendrier non calculable, blocs 1 et 2 intacts.
+- Fixture : `tests/fixtures/vacances-2026-2027.json` (lue en production le
+  25 septembre, lecture seule).
