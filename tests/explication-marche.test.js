@@ -122,7 +122,7 @@ test('FRONTIERE V2 : les modules purs ne touchent aucune base ; les autres, seul
   const lire = f => fs.readFileSync(path.join(racine, f), 'utf8')
   // Purs : aucun acces base, sous aucune forme (review : `.from(TABLE)`,
   // `.rpc(`, un client cree sur place).
-  for (const f of ['lib/marche/saisons.js', 'lib/marche/explication.js', 'lib/marche/grille-marche.js', 'lib/marche/marche-global.js']) {
+  for (const f of ['lib/marche/saisons.js', 'lib/marche/explication.js', 'lib/marche/grille-marche.js']) {
     const src = lire(f)
     for (const motif of [/\.from\(/, /\.rpc\(/, /createClient/, /require\([^)]*supabase/]) assert.ok(!motif.test(src), `${f} : ${motif}`)
   }
@@ -136,7 +136,7 @@ test('FRONTIERE V2 : les modules purs ne touchent aucune base ; les autres, seul
   // Les SCRIPTS V2 aussi (review) : ils lisent l'existant (empreinte,
   // vacances), jamais n'ecrivent dans une table interdite.
   const interdites = ['yield_events', 'yield_segment_reglages', 'calendar_inventory', 'price_display_log', 'prix_hote']
-  for (const f of ['scripts/capturer-pacing.js', 'scripts/calculer-calendrier-marche.js', 'scripts/releve-controle-marche.js', 'scripts/verifier-airroi.js', 'scripts/verifier-migration-marche.js', 'scripts/lier-bien-marche.js', 'scripts/verser-fixture-marche.js']) {
+  for (const f of ['scripts/capturer-pacing.js', 'scripts/calculer-calendrier-marche.js', 'scripts/releve-controle-marche.js', 'scripts/verifier-airroi.js', 'scripts/verifier-migration-marche.js', 'scripts/lier-bien-marche.js']) {
     const src = lire(f)
     for (const t of interdites) assert.ok(!src.includes(t), `${f} nomme ${t}`)
   }

@@ -1695,4 +1695,23 @@ de menu), `tests/marche-global.test.js`.
   déborde pas. Classée délégable (garde du logement).
 - **Aperçu** : réponse RÉELLE de la vue contre staging (Loft Pilotable →
   Bagnères, cache versé le 25 septembre), 60 mois.
+- **Review de d0f7fa1 (aucun constat de sécurité), corrigé** : un mois ABSENT
+  de la réponse est comblé par une ligne nulle (la courbe se coupe, l'axe ne se
+  comprime pas) ; seule une valeur numérique est une mesure (`true` ou `[5]`
+  ne le sont plus) ; un cache illisible se dit au lieu d'un 500 ; le marché se
+  lit en forme NFC des deux côtés (écriture du lien, versement, lecture) — un
+  « Bagnères » décomposé ne trouve plus rien à tort ; le test de sécurité
+  passe un identifiant BRUT différent du bien résolu (il passait la même
+  valeur des deux côtés et ne prouvait rien).
+- **Trouvaille, et écart corrigé.** `assert.deepEqual` (égalité LÂCHE de Node)
+  juge `[21, 1, null]` égal à `[21, null, null]` : une mutation passait au vert.
+  Les tests du lot passent à `node:assert/strict`. En essayant le mode strict
+  sur TOUS les tests V2, j'ai modifié des fichiers de la page GELÉE et de
+  l'étape 3 — et, plus tôt, `tests/explication-marche.test.js` (garde de
+  frontière). **Écart à la consigne de gel, corrigé** : ces fichiers sont
+  remis à l'identique de leur état du gel (0da7423) ; la garde du nouveau lot
+  vit dans un fichier NEUF, `tests/marche-global-frontiere.test.js`. Résultat
+  de l'essai, avant retour : en mode strict, les 106 tests V2 passaient —
+  aucun défaut caché par l'égalité lâche dans le lot gelé. La conversion des
+  tests gelés, si Thierry la veut, sera un geste à part.
 

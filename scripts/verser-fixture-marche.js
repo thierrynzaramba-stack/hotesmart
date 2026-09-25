@@ -38,7 +38,8 @@ const go = args.includes('--go')
   if (!m || !m.country || !m.region || !m.locality || !Array.isArray(donnees.results) || !donnees.results.length) {
     throw new Error('le fichier n est pas une reponse de markets/metrics/all (market + results)')
   }
-  const params = { market: { country: m.country, region: m.region, locality: m.locality }, num_months: 60, currency: 'native' }
+  const nfc = v => String(v).normalize('NFC')
+  const params = { market: { country: nfc(m.country), region: nfc(m.region), locality: nfc(m.locality) }, num_months: 60, currency: 'native' }
   const endpoint = 'POST /markets/metrics/all'
   const cle = cleCanonique(endpoint, params)
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)

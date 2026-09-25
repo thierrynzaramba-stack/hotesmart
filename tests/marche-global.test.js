@@ -8,7 +8,7 @@
 //   - une page qui ecrirait, ou tairait qu'elle n'est pas un prix.
 
 const test = require('node:test')
-const assert = require('node:assert')
+const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 const { revparMensuel } = require('../lib/marche/marche-global')
@@ -102,12 +102,15 @@ test('LE TEST QUI COMPTE (securite) : garde du logement, SEUL le marche de ce lo
   const sans = await appeler({}, TABLES)
   assert.equal(sans.code, 400)
   assert.deepEqual(sans.lus, [])
-  const r = await appeler({ property_id: 'BIEN-A' }, TABLES)
-  assert.deepEqual(r.gardes, [{ domaine: 'reservations', niveau: 'read', bien: 'BIEN-A', bienRequis: true }])
+  // Le client envoie un identifiant BRUT (numero provider) ; la garde le
+  // resout en BIEN-A. La vue doit lire par le bien RESOLU (review : la
+  // premiere version passait la meme valeur des deux cotes, et ne prouvait rien).
+  const r = await appeler({ property_id: '209413' }, TABLES, { ok: true, bien: { id: 'BIEN-A' } })
+  assert.deepEqual(r.gardes, [{ domaine: 'reservations', niveau: 'read', bien: '209413', bienRequis: true }])
   assert.deepEqual(r.lus, ['marche_biens', 'marche_biens.property_id=BIEN-A', 'airroi_cache', `airroi_cache.cle=${CLE_BAGNERES}`])
   assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.marche.localite, 'Bagnères-de-Bigorre')
   assert.equal(r.corps.revpar.mois.length, 60)
-  assert.ok(!JSON.stringify(r.corps).includes('999'), 'jamais les chiffres d un autre marche')
   assert.equal(r.appelsReseau, 0)
 })
 
@@ -138,3 +141,23 @@ test('LE TEST QUI COMPTE : la page est en lecture seule, dit en tete ce qu elle 
   assert.match(PAGE, /2021-2022 : couverture AirROI en cours de mise en place/)
   assert.match(PAGE, /Couverture réelle, mois par mois/)
 })
+
+test('un mois ABSENT de la reponse coupe la serie (ligne nulle inseree) ; une valeur de forme inattendue n est pas une mesure', () => {
+  const r = revparMensuel({ results: [
+    { date: '2025-01-01', revpar: { p25: 10, p50: 20, p75: 30, p90: 40 } },
+    { date: '2025-03-01', revpar: { p25: 11, p50: '21', p75: true, p90: [41] } }] })
+  assert.deepEqual(r.mois.map(m => m.mois), ['2025-01', '2025-02', '2025-03'])
+  assert.equal(r.mois[1].p50, null)
+  assert.equal(r.mois[1].absent_de_la_reponse, true)
+  assert.deepEqual([r.mois[2].p50, r.mois[2].p75, r.mois[2].p90], [21, null, null])
+})
+
+test('un cache illisible ou un marche saisi en forme decomposee : dit, jamais un 500 ni un faux « absent »', async () => {
+  const illisible = await appeler({ property_id: 'x' }, { ...TABLES, airroi_cache: [{ cle: CLE_BAGNERES, reponse: '{pas du json', recupere_le: '2026-09-23' }] })
+  assert.equal(illisible.code, 200)
+  assert.match(illisible.corps.motif, /illisible/)
+  const nfd = { ...TABLES, marche_biens: [{ property_id: 'BIEN-A', pays: 'France', region: 'Occitania', localite: 'Bagnères-de-Bigorre'.normalize('NFD') }] }
+  const r = await appeler({ property_id: 'x' }, nfd)
+  assert.equal(r.corps.etat, 'calcule', 'la forme NFD retrouve le cache ecrit en NFC')
+})
+

@@ -20,7 +20,8 @@ const val = n => { const a = args.find(x => x.startsWith(`--${n}=`)); return a ?
 const go = args.includes('--go')
 
 ;(async () => {
-  const [bien, pays, region, localite] = ['bien', 'pays', 'region', 'localite'].map(val)
+  // Forme NFC : la cle du cache depend des octets (« Bagnères »).
+  const [bien, pays, region, localite] = ['bien', 'pays', 'region', 'localite'].map(val).map(v => (v == null ? v : v.normalize('NFC')))
   if (!bien || !pays || !region || !localite) { console.error('Usage : --bien=<uuid> --pays= --region= --localite= [--go --biens=<N>]'); process.exit(1) }
   if (go && !/^\d+$/.test(String(val('biens') || ''))) { console.error('ECHEC : --go exige --biens=<N> (3 staging, 5 production)'); process.exit(1) }
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
