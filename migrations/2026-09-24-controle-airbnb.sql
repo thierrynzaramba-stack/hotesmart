@@ -29,24 +29,6 @@ alter table public.grille_controle
   check (statut in ('fiable',
     'reference_amincie', 'mesure_insuffisante'));
 
--- ─── Verification (a coller aussi) ──────────────────────
--- EMPREINTE : biens = 5 en production, 3 en staging.
-select
-  (select count(*) from public.properties)
-    as biens,
-  (select count(*) from information_schema.columns
-     where table_schema = 'public'
-     and table_name = 'grille_controle'
-     and column_name in (
-       'niveaux_mesure_12m_airbnb',
-       'nuits_mesure_12m_airbnb'))
-    as colonnes_airbnb,
-  (select pg_get_constraintdef(oid)
-     from pg_constraint
-     where conname = 'grille_controle_statut_check')
-    as statut_check,
-  (select count(*) from public.grille_controle)
-    as releves;
--- Attendu : biens 5 (prod) ou 3 (staging),
--- colonnes_airbnb 2, statut_check sans
--- attente_dette_26, releves 0.
+-- Verification : PAS dans l'editeur (regle du
+-- 25/09/2026). Seul le script la fait, empreinte
+-- en tete : scripts/verifier-migration-marche.js

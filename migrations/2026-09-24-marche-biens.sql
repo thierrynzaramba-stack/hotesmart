@@ -42,47 +42,6 @@ revoke all on sequence
   public.marche_biens_id_seq
   from anon, authenticated;
 
--- ─── Verification (a coller aussi) ──────────────────────
--- EMPREINTE : biens = 5 en production, 3 en staging.
--- FORME : colonnes et unicite (create table if not
--- exists reussit en silence sur une autre forme).
-select
-  (select count(*) from public.properties)
-    as biens,
-  (select count(*) from pg_class c
-     join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname = 'public'
-     and c.relname = 'marche_biens'
-     and c.relrowsecurity)
-    as rls,
-  (select count(*) from pg_policies
-     where schemaname = 'public'
-     and tablename = 'marche_biens')
-    as policies,
-  (has_table_privilege('anon',
-     'public.marche_biens',
-     'select,insert,update,delete')
-   or has_table_privilege('authenticated',
-     'public.marche_biens',
-     'select,insert,update,delete'))
-    as acces_client,
-  (select count(*) from pg_constraint
-     where conrelid =
-       'public.marche_biens'::regclass
-     and contype = 'f')
-    as cles_etrangeres,
-  (select count(*) from information_schema.columns
-     where table_schema = 'public'
-     and table_name = 'marche_biens')
-    as colonnes,
-  (select count(*) from pg_constraint
-     where conrelid =
-       'public.marche_biens'::regclass
-     and contype = 'u')
-    as unicite,
-  (select count(*) from public.marche_biens)
-    as lignes;
--- Attendu : biens 5 (prod) ou 3 (staging), rls 1,
--- policies 0, acces_client false,
--- cles_etrangeres 0, colonnes 8, unicite 1,
--- lignes 0.
+-- Verification : PAS dans l'editeur (regle du
+-- 25/09/2026). Seul le script la fait, empreinte
+-- en tete : scripts/verifier-migration-marche.js

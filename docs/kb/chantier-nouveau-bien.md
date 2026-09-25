@@ -1730,3 +1730,21 @@ prouve rien.
   `api/yield-marche.js` identiques au gel 0da7423, empreintes SHA-256 égales.
   109 tests V2 verts en égalité stricte.
 
+### RÈGLE — JAMAIS DE SELECT DE VÉRIFICATION DANS L'ÉDITEUR SUPABASE (Thierry, 25 septembre 2026)
+
+**On ne colle que la migration.** La vérification passe UNIQUEMENT par le
+script (`scripts/verifier-migration-marche.js`), qui affiche l'empreinte en
+tête : projet et nombre de biens (`ortyofzzdsthlhqmzsnq · biens = 3` =
+staging ; `cjmrizpdyhrcurmgyrhs · biens = 5` = production). Les quatre
+migrations V2 ne portent plus de requête de vérification (retirée le
+25 septembre ; lignes toutes < 60 caractères). Le test de la migration de
+`marche_calendrier` refuse désormais tout `select` dans le fichier collé.
+- **Ce que le script prouve** : l'empreinte ; chaque table présente, avec
+  ses colonnes lues PAR LEUR NOM (la forme) ; la lecture depuis le navigateur
+  refusée (sonde avec la clé publique `anon`, quand le fichier d'environnement
+  la porte — c'est le cas de `.env.local`, pas de `.env.staging`).
+- **Ce qu'il ne prouve pas** (l'API ne montre pas le catalogue Postgres) :
+  le nombre de policies, l'absence de clé étrangère, les contraintes
+  d'unicité. Ces points reposaient sur le SELECT collé ; ils reposent
+  désormais sur le fichier de migration relu et sur la sonde `anon`.
+

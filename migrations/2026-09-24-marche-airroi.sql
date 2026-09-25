@@ -207,49 +207,6 @@ drop policy if exists grille_controle_select
 revoke all on table public.grille_controle
   from anon, authenticated;
 
--- ─── Verification (a coller aussi) ──────────────────────
--- EMPREINTE : biens = 5 en production, 3 en staging.
--- Un resultat sans elle ne prouve rien.
-select
-  (select count(*) from public.properties)
-    as biens,
-  (select count(*) from information_schema.columns
-     where table_schema = 'public'
-     and table_name = 'properties'
-     and column_name in ('latitude', 'longitude',
-       'coords_source', 'airbnb_listing_id'))
-    as colonnes_bien,
-  (select count(*) from pg_class c
-     join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname = 'public'
-     and c.relname in ('airroi_cache',
-       'airroi_appels', 'comparables_retenus',
-       'grille_controle')
-     and c.relrowsecurity)
-    as tables_rls,
-  (select count(*) from pg_policies
-     where schemaname = 'public'
-     and tablename = 'comparables_retenus')
-    as policy_comparables,
-  (select count(*) from pg_policies
-     where schemaname = 'public'
-     and tablename in ('airroi_cache',
-       'airroi_appels', 'grille_controle'))
-    as policies_serveur,
-  (has_table_privilege('anon',
-     'public.airroi_cache', 'select')
-   or has_table_privilege('authenticated',
-     'public.airroi_cache', 'select')
-   or has_table_privilege('anon',
-     'public.airroi_appels', 'select')
-   or has_table_privilege('authenticated',
-     'public.airroi_appels', 'select')
-   or has_table_privilege('anon',
-     'public.grille_controle', 'select')
-   or has_table_privilege('authenticated',
-     'public.grille_controle', 'select'))
-    as lecture_client;
--- Attendu : biens 5 (prod) ou 3 (staging),
--- colonnes_bien 4, tables_rls 4,
--- policy_comparables 1, policies_serveur 0,
--- lecture_client false.
+-- Verification : PAS dans l'editeur (regle du
+-- 25/09/2026). Seul le script la fait, empreinte
+-- en tete : scripts/verifier-migration-marche.js

@@ -80,11 +80,14 @@ test('LE TEST QUI COMPTE : la migration est additive et supprimable — aucune t
     /^comment on table public\.marche_calendrier is/,
     /^alter table public\.marche_calendrier\s+enable row level security$/,
     /^revoke all on table public\.marche_calendrier\s+from anon, authenticated$/,
-    /^revoke all on sequence\s+public\.marche_calendrier_id_seq\s+from anon, authenticated$/,
-    /^select\b/
+    /^revoke all on sequence\s+public\.marche_calendrier_id_seq\s+from anon, authenticated$/
   ]
   const instructions = code.split(';').map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean)
-  assert.ok(instructions.length >= 6)
+  // ⚠ REECRIT LE 25 SEPTEMBRE 2026 (regle 17, regle de Thierry) : AUCUNE
+  // requete de verification dans le fichier colle — seul le script verifie.
+  // La liste blanche n'admet donc plus de `select`.
+  assert.ok(instructions.length >= 5)
+  assert.ok(!instructions.some(i => /^select\b/.test(i)), 'aucun select de verification dans la migration')
   for (const i of instructions) assert.ok(autorises.some(m => m.test(i)), `instruction non autorisee : ${i.slice(0, 80)}`)
   assert.ok(!/references\s/.test(code), 'aucune cle etrangere : la table se supprime seule')
   assert.ok(!/create policy/.test(code), 'aucune policy : serveur seulement')
