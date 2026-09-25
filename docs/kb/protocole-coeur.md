@@ -100,7 +100,42 @@ indisponible : les apps peuvent écrire leur bouton avant que le cœur ne livre.
   fautif, puis exige zéro écart. Exemption explicite à la règle 19 : vert sur
   le code d'aujourd'hui par construction.
 
+## Côté serveur — le journal d'événements du cœur
+
+Le pendant serveur du bus : `core_events` (migration
+`2026-09-25-core-events.sql`, lot 2). Le cœur y inscrit ce qui s'est passé ; les
+consommateurs (archivage de la messagerie, notifications) le lisent. Même
+vocabulaire que le bus : `type` vaut `domaine.evenement`, contraint par un CHECK.
+
+| Colonne | Rôle |
+|---|---|
+| `user_id` | le compte **propriétaire** de l'événement, jamais l'appelant (règle 11) |
+| `type` | `domaine.evenement`, ex. `avis.evaluation_publiee` |
+| `subject_type` / `subject_id` | ce que l'événement désigne (texte : un sejour, un bien, un ménage) |
+| `payload` | le contenu, versionné par ce contrat |
+| `processed_at` / `processing_errors` | le contrat du dispatcher |
+
+Les gardes sont celles de `booking_change_events`, reprises telles quelles —
+elles ont été payées cher (79 350 faux `menage_events`) :
+
+- `processed_at` est posé **même si un consommateur échoue** ; l'échec va dans
+  `processing_errors` ;
+- **jamais de rejeu automatique** : un rejeu se fait à la main, `processed_at`
+  remis à `null` ;
+- lots bornés et budget mur côté dispatcher.
+
+`booking_change_events` reste **intouchée** : c'est le journal des réservations,
+avec son CHECK fermé et ses trois consommateurs. Deux journaux, deux contrats
+(décision de Thierry, 25 septembre 2026).
+
+Écriture : sous clé de service uniquement, par le writer du cœur. La RLS donne
+au client une **lecture** de son compte, aucune écriture — un front capable
+d'inscrire un événement déclencherait des conséquences métier (archivage,
+notifications) sans passer par aucune garde.
+
 ## Historique
 
 - v1, 24 septembre 2026 (lot 1) : bus, manifeste `avis` (quatre actions à
   venir, un événement), recensement. Aucune fonctionnalité métier.
+- v1.1, 25 septembre 2026 (lot 2) : le journal serveur `core_events` et son
+  contrat. Aucun changement au bus ni aux actions déclarées.
