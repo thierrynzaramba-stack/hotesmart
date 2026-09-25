@@ -246,7 +246,7 @@
 
   // ─── BLOC 3 : le calendrier jour par jour, CONSTRUIT ────────────────────
   function bloc3 (cal) {
-    const titre = '<h2>Le calendrier du marché, jour par jour</h2><p class="sous"><b>Un niveau attendu, bâti sur l’historique et le calendrier — pas une mesure.</b> Le niveau de chaque mois vient des cinq années de RevPAR médian du marché ; à l’intérieur du mois, les jours sont répartis selon le calendrier français (vacances scolaires, fériés et ponts, nuits du vendredi et du samedi, fêtes de fin d’année), avec des poids posés par HôteSmart et non mesurés. La moyenne des jours d’un mois reste celle du mois.</p>'
+    const titre = '<h2>Le calendrier du marché, jour par jour</h2><p class="sous"><b>Un niveau attendu, bâti sur l’historique et le calendrier — pas une mesure.</b> Le niveau de chaque mois vient des cinq années de RevPAR médian du marché ; à l’intérieur du mois, les jours sont répartis selon le calendrier français (vacances scolaires, fériés et ponts, nuits du vendredi et du samedi, fêtes de fin d’année), avec des poids posés par HôteSmart et non mesurés. La moyenne des jours d’un mois reste celle du mois. Les niveaux mensuels incluent 2021-2022, années à couverture partielle (voir la couverture réelle plus haut).</p>'
     if (!cal || cal.statut !== 'calcule') {
       return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((cal && cal.motif) || 'historique absent')}.</p></div>`
     }

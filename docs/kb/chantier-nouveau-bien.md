@@ -1783,8 +1783,18 @@ renormalisation » attrapée). Douze mois à partir du mois en cours (Paris).
   pas classé**, avec son motif. Production : la table s'arrête au 3 juillet
   2027 → juillet et août 2027 non classés. **Staging : `school_holidays` est
   vide → aucun mois classé** (une phrase, pas douze).
-- Le « Pont de l'Ascension » est une période de `school_holidays` : il compte
-  comme vacances ET, par le calcul, comme pont (cumul).
+- **Review de 069ecec (aucun constat de sécurité), corrigé sans re-review** :
+  le « Pont de l'Ascension » de `school_holidays` n'est plus compté en
+  vacances (il l'était en plus du pont calculé : le 7 mai 2027 pesait 1,6 fois
+  le férié qui le crée) ; le MARQUEUR ponctuel « Début des Vacances d'Été »
+  n'est plus un jour de vacances, et tant que l'été d'une zone n'a que ce
+  marqueur, les mois du marqueur au 31 août ne sont pas classés (sinon, dès
+  l'import de 2027-2028 : un pic d'un jour au 3 juillet et un été « hors
+  vacances ») ; le motif du bloc 1 nomme la mesure absente ; la page dit que
+  les niveaux mensuels incluent 2021-2022.
+- **À trancher par Thierry** (review) : un férié pèse sur SA nuit (convention
+  « date = nuit », comme vendredi et samedi) : la nuit du 1er novembre 2026,
+  un dimanche, veille de rentrée, est à ×1,20.
 - La vue lit une table de l'existant hors la garde : `school_holidays`, par son
   lecteur `lib/yield/vacances.js` (calendrier public, aucune donnée de
   compte). Illisible : calendrier non calculable, blocs 1 et 2 intacts.

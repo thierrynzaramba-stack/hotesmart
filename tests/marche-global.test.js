@@ -192,7 +192,8 @@ test('bloc 1 : 0 et une occupation au-dela de 1 ne sont pas des mesures ; sans a
     { date: '2025-01-01', revpar: { p50: 10 }, average_daily_rate: { p50: 0 }, occupancy: { p50: 1.2 } },
     { date: '2025-02-01', revpar: { p50: 10 }, average_daily_rate: { p50: 60 }, occupancy: { p50: 1 } }] })
   assert.deepEqual(r.mois.map(m => [m.adr, m.occupation]), [[null, null], [60, 1]])
-  assert.equal(adrOccupationMensuel({ results: [{ date: '2025-01-01', revpar: { p50: 10 } }] }).statut, 'non_calculable')
+  assert.equal(adrOccupationMensuel({ results: [{ date: '2025-01-01', revpar: { p50: 10 } }] }).motif, 'ADR et occupation absents de l historique')
+  assert.equal(adrOccupationMensuel({ results: [{ date: '2025-01-01', revpar: { p50: 10 }, average_daily_rate: { p50: 60 } }] }).motif, 'occupation absent de l historique')
 })
 
 // ─── Bloc 3 : le calendrier construit ───────────────────────────────────────
@@ -272,4 +273,35 @@ test('la vue rend les trois blocs ; des vacances illisibles laissent les blocs 1
   assert.equal(r2.code, 200)
   assert.equal(r2.corps.adr_occupation.statut, 'calcule')
   assert.deepEqual(r2.corps.calendrier, { statut: 'non_calculable', motif: 'les vacances scolaires sont illisibles', mois: [] })
+})
+
+test('LE TEST QUI COMPTE (review de 069ecec) : le « Pont de l Ascension » de la base n est pas des vacances — le pont ne pese que comme un ferie', () => {
+  const c = calendrierAttendu(MARCHE60, VAC.vacances, VAC.etendue, '2027-05', 1)
+  const mai = c.mois[0].jours
+  const j = iso => mai.find(x => x.jour === iso)
+  assert.deepEqual(j('2027-05-07').raisons, ['pont', 'nuit_du_vendredi'])
+  assert.deepEqual(j('2027-05-06').raisons, ['ferie'])
+  assert.ok(Math.abs(j('2027-05-07').valeur / j('2027-05-06').valeur - 1.10) < 1e-12)
+})
+
+test('LE TEST QUI COMPTE (review de 069ecec) : un ete publie par son seul marqueur de debut n est pas classe — ni pic d un jour, ni ete « hors vacances »', () => {
+  // L'etendue deborde l'ete (comme apres l'import de 2027-2028) ; l'ete 2027
+  // n'a que son marqueur.
+  const etendue = ['A', 'B', 'C'].map(zone => ({ zone, date_debut: '2017-10-21', date_fin: '2028-07-01' }))
+  const c = calendrierAttendu(MARCHE60, VAC.vacances, etendue, '2027-06', 4)
+  assert.deepEqual(c.mois.map(m => [m.mois, m.statut]), [['2027-06', 'calcule'], ['2027-07', 'non_calculable'], ['2027-08', 'non_calculable'], ['2027-09', 'calcule']])
+  assert.equal(c.mois[1].motif, 'fin des vacances d’été non publiée dans la base pour les zones A, B, C')
+  // La periode d'ete publiee : juillet se classe, le 3 juillet n'est pas un pic isole.
+  const ete = ['A', 'B', 'C'].map(zone => ({ zone, nom: 'Vacances d\'Été', date_debut: '2027-07-03', date_fin: '2027-08-31' }))
+  const c2 = calendrierAttendu(MARCHE60, [...VAC.vacances, ...ete], etendue, '2027-07', 1)
+  assert.equal(c2.mois[0].statut, 'calcule')
+  assert.deepEqual(c2.mois[0].jours.find(x => x.jour === '2027-07-05').raisons, ['vacances_3_zones'])
+})
+
+test('la vue classe des jours quand la base porte les vacances (review : la vue n avait jamais produit un jour classe)', async () => {
+  const toutes = ['A', 'B', 'C'].map(zone => ({ zone, nom: 'Periode longue de test', date_debut: '2000-01-01', date_fin: '2100-12-31', annee_scolaire: 'test' }))
+  const r = await appeler({ property_id: 'x' }, { ...TABLES, school_holidays: toutes })
+  assert.equal(r.corps.calendrier.mois.length, 12)
+  assert.ok(r.corps.calendrier.mois.every(m => m.statut === 'calcule'))
+  assert.ok(r.corps.calendrier.mois.every(m => m.jours.every(j => j.raisons.includes('vacances_3_zones'))))
 })
