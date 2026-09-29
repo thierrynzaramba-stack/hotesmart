@@ -1800,3 +1800,19 @@ renormalisation » attrapée). Douze mois à partir du mois en cours (Paris).
   compte). Illisible : calendrier non calculable, blocs 1 et 2 intacts.
 - Fixture : `tests/fixtures/vacances-2026-2027.json` (lue en production le
   25 septembre, lecture seule).
+
+### §14 — lecture du RevPAR améliorée (Thierry, 29 septembre 2026)
+
+- **Trois ans au lieu de cinq** : le graphique du RevPAR n'affiche que les
+  36 derniers mois (`MOIS_AFFICHES`) et le dit (« le graphique montre les
+  3 dernières années ») ; la donnée garde ses 60 mois (la vue les rend, le
+  calendrier s'en sert). Effet : 2021-2022 sortent de l'écran, le fond gris et
+  la mention « couverture en cours de mise en place » sont retirés. La
+  couverture réelle suit la même fenêtre (même axe).
+- **Repères verticaux** : un trait léger par mois avec son initiale, un trait
+  plus marqué au changement d'année avec l'année écrite.
+- Plafond de l'axe : multiple de 40 avec 5 % de marge au-dessus du pic
+  (200 € à Bagnères, graduations de 50 €) — sur 36 mois l'ancien arrondi
+  donnait 44 / 88 / 131 €, et le pic touchait le cadre.
+- Inchangés : les quatre quantiles, la couverture mois par mois, la mention
+  « pas un prix pour votre logement », et le bloc prix et remplissage (60 mois).
