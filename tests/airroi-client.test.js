@@ -169,6 +169,36 @@ test('on prend a AirROI sa donnee, jamais ses prix : price-recommendation est re
   await assert.rejects(c.appeler('POST /price-recommendation/base-price', {}), /endpoint refuse/)
 })
 
+test('LE TEST QUI COMPTE (30 septembre 2026) : calendar-prices, SEULE exception — base 100 imposee, 0,10 $, servi par le cache au deuxieme appel', async () => {
+  await avecCle(async () => {
+    const f = faux(JSON.stringify({ recommendations: [{ date: '2026-12-25', price: 160 }] }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const p = { latitude: 43.06, longitude: 0.15, debut: '2026-09-30', fin: '2028-09-28' }
+    const r = await c.reliefCalendrier(p, H)
+    assert.deepEqual([r.depuisCache, r.cout], [false, 0.10])
+    assert.equal(f.appels[0].url, 'https://api.airroi.com/price-recommendation/calendar-prices')
+    assert.deepEqual(JSON.parse(f.appels[0].init.body),
+      { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-09-30', end_date: '2028-09-28' })
+    assert.equal((await c.reliefCalendrier(p, H)).depuisCache, true)
+    assert.equal(f.appels.length, 1)
+  })
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : jamais le prix d un logement — une autre base, un champ de plus ou base-price sont refuses AVANT le reseau', async () => {
+  await avecCle(async () => {
+    const f = faux('{}')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-09-30', end_date: '2028-09-28' }
+    const E = 'POST /price-recommendation/calendar-prices'
+    await assert.rejects(c.appeler(E, { ...ok, base_price: 135 }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, base_price: '100' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, pricing_rules: {} }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, start_date: '2029-01-01' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler('POST /price-recommendation/base-price', { ...ok }, H), /endpoint refuse/)
+    assert.equal(f.appels.length, 0)
+  })
+})
+
 // ─── Ajouts de la review du 24 septembre 2026 ───────────────────────────────
 
 test('LE TEST QUI COMPTE (SECURITE) : une erreur reseau qui RECOPIE la cle ne la laisse pas sortir', async () => {

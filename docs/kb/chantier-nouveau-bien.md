@@ -671,6 +671,12 @@ comparables. Négligeable face à un abonnement AirDNA.
   concurrent direct de YieldFlow. **On lui prend sa donnée, jamais ses prix.** Le
   calcul reste déterministe et auditable côté HôteSmart, conformément à la
   décision produit gravée.
+  ⚠ **UNE EXCEPTION, ÉTROITE (Thierry, 30 septembre 2026)** :
+  `price-recommendation/calendar-prices`, pour la DÉCOMPOSITION jour par jour
+  de son modèle, et seulement avec `base_price` = 100 (imposé par le client :
+  toute autre base est refusée avant le réseau). Voir §14, « le relief
+  d'AirROI ». `base-price` et le reste de `price-recommendation/*` restent
+  refusés.
 
 ---
 
@@ -1850,3 +1856,43 @@ l'import : rien ne le relance.
 
 **Constat en passant, porté au registre (dette 33)** : la source publie
 2027-2028, la base de PRODUCTION s'arrête au 3 juillet 2027.
+
+### §14 — le relief jour par jour d'AirROI (Thierry, 30 septembre 2026)
+
+**Trouvé par Thierry** : `POST /price-recommendation/calendar-prices` rend,
+pour chaque date (jusqu'à deux ans), le prix décomposé en quatre lignes avec
+leur `adjustment_percent` : `seasonality`, `day_of_week`,
+`known_holiday_event`, `market_demand`. Avec `base_price` = 100, ces
+pourcentages sont directement des facteurs journaliers : ils remplaceraient
+les poids posés du 25 septembre (×1,10, ×1,25, ×1,45…).
+
+**Coût, vérifié avant tout appel** (airroi.com/api/pricing, 30 septembre
+2026) : **0,10 $ par requête réussie**, facturée une fois pour tout le
+calendrier rendu, pas par nuit. Budget du test : 1 $. UN appel (Bagnères,
+coordonnées de La bulle, base 100, devise native = euro), en cache dès le
+premier appel, par `scripts/capturer-relief-airroi.js` (lancé par Thierry, la
+clé ne passant que par l'environnement).
+
+**PRÉCAUTION 1 — c'est le MODÈLE d'AirROI, pas une mesure brute.** On importe
+leur saisonnalité, décomposée et DÉCLARÉE comme telle. La page devra le dire
+(« relief du modèle AirROI », avec ses composantes), comme elle dit déjà
+« niveau attendu, pas une mesure ». La base 100 garantit qu'aucun prix de
+logement n'est demandé ni affiché : on prend les facteurs, pas le prix (§8).
+
+**PRÉCAUTION 2 — `market_demand` est tourné vers l'avant et dépend de la date
+de l'appel.** Il se traite À PART des trois autres (`seasonality`,
+`day_of_week`, `known_holiday_event`), qui décrivent la forme de l'année.
+Proposition, à trancher par Thierry : **ne PAS l'inclure dans le relief**.
+Trois raisons : (1) le calendrier doit être le même quel que soit le jour où
+on l'a lu — `market_demand` le ferait bouger à chaque capture, sans que le
+marché ait changé de forme ; (2) c'est ce que le pacing mesure déjà (réservé à
+date, vers l'avant) : l'inclure le compterait une deuxième fois ; (3) le
+niveau du mois vient de l'historique — mélanger un signal de l'instant dans un
+niveau historique brouillerait ce qu'on affiche. Il est conservé tel quel dans
+la fixture, lu et montré séparément si un jour il sert.
+
+**Et la renormalisation reste** : le niveau de chaque mois vient des 60 mois ;
+les facteurs d'AirROI sont renormalisés DANS le mois. Leur `seasonality` ne
+contribue donc que par sa forme à l'intérieur du mois (la semaine de Noël
+contre le début de décembre), jamais par le niveau du mois — sinon la
+saisonnalité compterait deux fois.
