@@ -1869,7 +1869,7 @@ les poids posés du 25 septembre (×1,10, ×1,25, ×1,45…).
 **Coût, vérifié avant tout appel** (airroi.com/api/pricing, 30 septembre
 2026) : **0,10 $ par requête réussie**, facturée une fois pour tout le
 calendrier rendu, pas par nuit. Budget du test : 1 $. UN appel (Bagnères,
-coordonnées de La bulle, base 100, devise native = euro), en cache dès le
+coordonnées de La bulle, base 100, devise **EUR** — cet endpoint refuse `native`, contrairement aux endpoints de marché : HTTP 422 le 30 septembre, non facturé ; le client vérifie désormais le code ISO en majuscules AVANT l'envoi), en cache dès le
 premier appel, par `scripts/capturer-relief-airroi.js` (lancé par Thierry, la
 clé ne passant que par l'environnement).
 - **Review de f13526c (aucun constat sur la clé), corrigé** : le calendrier

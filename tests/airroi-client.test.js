@@ -178,7 +178,7 @@ test('LE TEST QUI COMPTE (30 septembre 2026) : calendar-prices, SEULE exception 
     assert.deepEqual([r.depuisCache, r.cout], [false, 0.10])
     assert.equal(f.appels[0].url, 'https://api.airroi.com/price-recommendation/calendar-prices')
     assert.deepEqual(JSON.parse(f.appels[0].init.body),
-      { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' })
+      { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' })
     assert.equal((await c.reliefCalendrier(p, H)).depuisCache, true)
     assert.equal(f.appels.length, 1)
   })
@@ -188,7 +188,7 @@ test('LE TEST QUI COMPTE (30 septembre 2026) : jamais le prix d un logement — 
   await avecCle(async () => {
     const f = faux('{}')
     const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
-    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' }
+    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' }
     const E = 'POST /price-recommendation/calendar-prices'
     await assert.rejects(c.appeler(E, { ...ok, base_price: 135 }, H), /parametres invalides/)
     await assert.rejects(c.appeler(E, { ...ok, base_price: '100' }, H), /parametres invalides/)
@@ -359,4 +359,20 @@ test('LE TEST QUI COMPTE : la marge est le plus petit reste des trois garde-fous
   await depot.terminer(id, { statut: 'ok', http: 200 })
   assert.equal(await client.marge({ userId: 'u', propertyId: 'b' }), 1.4, 'le compte a depense 2,60 $ sur un autre bien : il reste 1,40 $')
   assert.equal(await client.marge({ userId: 'v', propertyId: 'c' }), 3, 'un autre compte n en paie rien')
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026, HTTP 422) : la devise se verifie AVANT l envoi — EUR part, minuscules et « native » ne partent pas', async () => {
+  await avecCle(async () => {
+    const f = faux('{}')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' }
+    const E = 'POST /price-recommendation/calendar-prices'
+    for (const devise of ['native', 'eur', 'Eur', 'EURO', 'EU', ' EUR', '', null, ['EUR']]) {
+      await assert.rejects(c.appeler(E, { ...ok, currency: devise }, H), /parametres invalides/, String(devise))
+    }
+    assert.equal(f.appels.length, 0, 'aucune devise mal formee n a atteint le serveur')
+    await c.appeler(E, ok, H).catch(() => {})
+    assert.equal(f.appels.length, 1)
+    assert.equal(JSON.parse(f.appels[0].init.body).currency, 'EUR')
+  })
 })

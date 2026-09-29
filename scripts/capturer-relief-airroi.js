@@ -16,7 +16,7 @@
 // Ce qu'il fait, sur Bagneres-de-Bigorre (coordonnees de La bulle lues dans la
 // fixture moi.json, AUCUNE base touchee) :
 //   1. POST /price-recommendation/calendar-prices, base_price = 100, devise
-//      native (l'euro a Bagneres), du 1er du mois SUIVANT (heure de Paris :
+//      EUR (cet endpoint refuse `native` : code ISO en majuscules), du 1er du mois SUIVANT (heure de Paris :
 //      jamais une date passee) a +729 jours ;
 //   2. il verifie que la reponse ne contient la cle sous AUCUNE forme — sinon
 //      il n'ecrit RIEN dans le depot et echoue ;
@@ -59,7 +59,7 @@ const JOURS = 730
   console.log(`Cache : ${dossier} · budget du script : ${budget} $ · ${debut} → ${fin} (${JOURS} jours)`)
 
   const E = 'POST /price-recommendation/calendar-prices'
-  const params = { location: { latitude, longitude }, currency: 'native', base_price: 100, start_date: debut, end_date: fin }
+  const params = { location: { latitude, longitude }, currency: 'EUR', base_price: 100, start_date: debut, end_date: fin }
   // Le cout AVANT tout appel (review de f13526c : une relance un autre mois
   // payait sans prevenir).
   const cout = await client.estimer([{ endpoint: E, params }])
