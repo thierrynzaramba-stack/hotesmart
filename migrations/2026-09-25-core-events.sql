@@ -92,43 +92,39 @@ comment on table public.core_events is
   'du front. Le dispatcher pose processed_at MEME en cas '
   'd''echec (erreurs dans processing_errors) et ne '
   'rejoue JAMAIS tout seul : un rejeu se fait a la main, '
-  'processed_at remis a null. booking_change_events '
-  'reste le journal des RESERVATIONS, intouche.';
+  'processed_at remis a null. AUCUN ACCES CLIENT : le '
+  'dispatcher le lit sous la cle de service. '
+  'booking_change_events reste le journal des '
+  'RESERVATIONS, intouche.';
 comment on column public.core_events.subject_id is
   'Texte volontairement : un sujet peut etre un '
   'booking_uid, un UUID de bien, un identifiant '
   'provider. Le journal ne connait pas ses sujets.';
 
 -- ─── RLS ────────────────────────────────────────────────
--- Lecture seule pour le client, sur son compte. Aucune
--- ecriture : seul le writer sous cle de service inscrit
--- un evenement. Un front qui pourrait ecrire ici
--- declencherait des consequences metier (archivage,
--- notifications) sans passer par aucune garde.
+-- ⚠ AUCUN ACCES CLIENT, NI LECTURE NI ECRITURE.
+-- Constat de Thierry (29 septembre 2026) : une policy de
+-- lecture filtree par domaine seul laissait un membre
+-- restreint a un bien lire les evenements de TOUS les
+-- biens du compte, `payload` compris — et un payload
+-- d'evaluation porte le texte de l'avis, la note privee,
+-- le nom du voyageur.
 --
--- ⚠ PAS `user_id = auth.uid()` : CA IGNORERAIT LA
--- DELEGATION. Un membre s'authentifie avec SON uid,
--- pendant que la ligne porte celui du proprietaire :
--- la comparaison directe lui cacherait tout. C'est le
--- piege que `2026-09-02-ota-reviews.sql` documente
--- explicitement.
+-- Filtrer par bien serait une rustine : un journal
+-- generique n'a pas de colonne `property_id`, son sujet
+-- est volontairement libre. La vraie reponse est que
+-- personne ne le lit depuis un navigateur. Il est
+-- consomme par le dispatcher, sous la cle de service,
+-- exactement comme `booking_change_events`, qui n'a
+-- jamais eu de policy.
 --
--- Le domaine se LIT DANS LE TYPE (« avis.publiee » ->
--- « avis ») : un journal generique n'a pas de domaine a
--- lui, chaque evenement porte le sien. Un domaine
--- inconnu de `perm_level` rend « none », donc false :
--- un type mal nomme ne donne acces a rien.
+-- RLS active SANS policy : la table ne rend rien. Le
+-- REVOKE SELECT rend en plus le refus NET (42501), au
+-- lieu d'une liste vide qu'on prendrait pour « aucun
+-- evenement ».
 alter table public.core_events
   enable row level security;
-drop policy if exists core_events_select
-  on public.core_events;
-create policy core_events_select
-  on public.core_events
-  for select to authenticated
-  using (
-    can_read(user_id, split_part(type, '.', 1))
-  );
-revoke insert, update, delete
+revoke select, insert, update, delete
   on table public.core_events
   from anon, authenticated;
 
