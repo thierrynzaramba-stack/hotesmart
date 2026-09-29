@@ -204,6 +204,11 @@
     // restreint — ce qui sort aussi 2021-2022, annees ou la couverture AirROI
     // montait encore en charge.
     const mois = ind.mois.slice(-MOIS_AFFICHES)
+    // Mesure sur 60 mois, mais rien sur les 36 affiches : on le dit, jamais un
+    // graphique vide (review de ce55488).
+    if (!mois.some(m => ['p25', 'p50', 'p75', 'p90'].some(q => m[q] != null))) {
+      return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : aucun RevPAR mesuré sur les 3 dernières années.</p></div>`
+    }
     const L = 900, H = 300, G = 44, D = 12, HAUT = 14, BAS = 38
     const max = Math.max(...mois.flatMap(m => ['p25', 'p50', 'p75', 'p90'].map(q => m[q] || 0)))
     // Un plafond multiple de 40, avec 5 % de marge au-dessus du pic (le pic
@@ -215,16 +220,16 @@
       const v = plafond * f
       return `<line class="grille" x1="${G}" x2="${L - D}" y1="${y(v)}" y2="${y(v)}"/><text x="${G - 6}" y="${y(v) + 4}" text-anchor="end">${Math.round(v)} €</text>`
     }).join('')
-    // Une etiquette par mois de janvier (lisible sur 60 mois).
     // Reperes verticaux : un trait leger par mois et son initiale ; au
     // changement d'annee, un trait plus marque et l'annee ecrite. On pose
-    // l'oeil sur fevrier sans compter les points.
+    // l'oeil sur fevrier sans compter les points. Le premier mois porte aussi
+    // son annee : la fenetre commence rarement en janvier.
     const abscisse = mois.map((m, i) => {
       const janvier = m.mois.slice(5) === '01'
       const initiale = INITIALES[Number(m.mois.slice(5, 7)) - 1]
       return `<line class="${janvier ? 'repere-annee' : 'repere-mois'}" x1="${x(i)}" x2="${x(i)}" y1="${HAUT}" y2="${H - BAS}"/>` +
         `<text class="initiale" x="${x(i)}" y="${H - BAS + 12}" text-anchor="middle">${initiale}</text>` +
-        (janvier ? `<text class="annee" x="${x(i)}" y="${H - BAS + 27}" text-anchor="middle">${m.mois.slice(0, 4)}</text>` : '')
+        (janvier || i === 0 ? `<text class="annee" x="${x(i)}" y="${H - BAS + 27}" text-anchor="middle">${m.mois.slice(0, 4)}</text>` : '')
     }).join('')
     // Une courbe par quantile ; un mois non mesure COUPE la courbe (jamais 0).
     const courbes = ['p25', 'p50', 'p75', 'p90'].map(q => {

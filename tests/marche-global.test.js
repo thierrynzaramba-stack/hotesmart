@@ -316,3 +316,46 @@ test('LE TEST QUI COMPTE (29 septembre 2026) : le RevPAR montre les 36 derniers 
   assert.ok(!/class="partiel"|>couverture partielle</.test(corpsInd), 'plus de fond gris ni de legende « couverture partielle » sur le RevPAR')
   assert.equal(revparMensuel(MARCHE60).mois.length, 60)
 })
+
+// Rend REELLEMENT `indicateur1` de la page (review de ce55488 : un test qui
+// cherche du texte dans le source passerait sur des initiales dans le
+// desordre ou des barres calculees sur 60 mois).
+function rendreIndicateur1 (ind) {
+  const debut = PAGE.indexOf('  function indicateur1 (ind) {')
+  const fin = PAGE.indexOf('  // ─── BLOC 3')
+  assert.ok(debut > 0 && fin > debut)
+  const cst = n => { const m = new RegExp(`const ${n} = ([^\\n]+)\\n`).exec(PAGE); assert.ok(m, n); return m[1] }
+  // eslint-disable-next-line no-new-func
+  return new Function('ind', `
+    const ech = s => String(s ?? '').replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';')
+    const MOIS = ${cst('MOIS')}
+    const moisFr = ${cst('moisFr')}
+    const euros = v => String(v)
+    const COULEURS = ${cst('COULEURS')}
+    const MOIS_AFFICHES = ${cst('MOIS_AFFICHES')}
+    const INITIALES = ${cst('INITIALES')}
+    ${PAGE.slice(debut, fin)}
+    return indicateur1(ind)`)(ind)
+}
+
+test('LE TEST QUI COMPTE (rendu) : 36 mois dans l ordre, une initiale et une barre par mois, alignees ; l annee au premier mois et a chaque janvier', () => {
+  const html = rendreIndicateur1(revparMensuel(MARCHE60))
+  const initiales = [...html.matchAll(/<text class="initiale" x="([\d.]+)"[^>]*>(\w)<\/text>/g)]
+  assert.equal(initiales.map(m => m[2]).join(''), 'SONDJFMAMJJASONDJFMAMJJASONDJFMAMJJA')
+  assert.deepEqual([...html.matchAll(/<text class="annee"[^>]*>(\d{4})<\/text>/g)].map(m => m[1]), ['2023', '2024', '2025', '2026'])
+  assert.equal([...html.matchAll(/class="repere-annee"/g)].length, 3)
+  assert.equal([...html.matchAll(/class="repere-mois"/g)].length, 33)
+  const barres = [...html.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="10"[^>]*><title>([^<]+)<\/title>/g)]
+  assert.equal(barres.length, 36)
+  barres.forEach((b, i) => assert.ok(Math.abs(Number(b[1]) + 5 - Number(initiales[i][1])) < 0.1, `barre ${i} decalee`))
+  assert.match(barres[0][2], /^sept\. 2023 : 737 annonces actives$/)
+  assert.ok(!/class="partiel"/.test(html))
+})
+
+test('rendu : rien de mesure sur les 36 derniers mois — un message, jamais un graphique vide ; le bloc prix et remplissage garde ses 60 mois', () => {
+  const ind = revparMensuel(MARCHE60)
+  const vide = { ...ind, mois: ind.mois.map((m, i) => (i < 24 ? m : { ...m, p25: null, p50: null, p75: null, p90: null })) }
+  assert.match(rendreIndicateur1(vide), /Non calculable : aucun RevPAR mesuré sur les 3 dernières années\./)
+  const bloc1 = PAGE.slice(PAGE.indexOf('  function bloc1 (ind) {'), PAGE.indexOf('  function indicateur1 (ind) {'))
+  assert.match(bloc1, /const mois = ind\.mois\n/)
+})
