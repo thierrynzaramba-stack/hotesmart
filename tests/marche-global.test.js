@@ -151,7 +151,8 @@ test('LE TEST QUI COMPTE : la page est en lecture seule, dit en tete ce qu elle 
   assert.match(PAGE, /Une estimation du marché, pas un prix/)
   assert.match(PAGE, /ne pilote rien/)
   assert.match(PAGE, /pas un prix pour votre logement/)
-  assert.match(PAGE, /2021-2022 : couverture AirROI en cours de mise en place/)
+  // 29 septembre 2026 : le RevPAR montre 36 mois, la mention 2021-2022 est retiree.
+  assert.ok(!/2021-2022 : couverture AirROI en cours de mise en place/.test(PAGE))
   assert.match(PAGE, /Couverture réelle, mois par mois/)
 })
 
@@ -304,4 +305,14 @@ test('la vue classe des jours quand la base porte les vacances (review : la vue 
   assert.equal(r.corps.calendrier.mois.length, 12)
   assert.ok(r.corps.calendrier.mois.every(m => m.statut === 'calcule'))
   assert.ok(r.corps.calendrier.mois.every(m => m.jours.every(j => j.raisons.includes('vacances_3_zones'))))
+})
+
+test('LE TEST QUI COMPTE (29 septembre 2026) : le RevPAR montre les 36 derniers mois, le dit, et porte un repere par mois et par annee ; la donnee garde 60 mois', () => {
+  assert.match(PAGE, /const MOIS_AFFICHES = 36\n/)
+  const corpsInd = PAGE.slice(PAGE.indexOf('function indicateur1'), PAGE.indexOf('function bloc3'))
+  assert.match(corpsInd, /const mois = ind\.mois\.slice\(-MOIS_AFFICHES\)/)
+  assert.match(corpsInd, /<b>Le graphique montre les 3 dernières années \(36 mois\)\.<\/b>/)
+  assert.match(corpsInd, /class="\$\{janvier \? 'repere-annee' : 'repere-mois'\}"/)
+  assert.ok(!/class="partiel"|>couverture partielle</.test(corpsInd), 'plus de fond gris ni de legende « couverture partielle » sur le RevPAR')
+  assert.equal(revparMensuel(MARCHE60).mois.length, 60)
 })
