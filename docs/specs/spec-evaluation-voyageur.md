@@ -176,6 +176,12 @@ Principes :
 - Double clic / double appel publier → une seule publication.
 - Échec réseau après envoi → pas de rejeu, alarme, vérification chez le provider.
 - Prestataire sur un bien hors périmètre ou d'un autre compte → refus.
+- **Lot 4, sur la vraie base** : le compte de test, passé en membre restreint à un
+  seul bien, voit la configuration de niveau compte (`property_id` nul) et celle de
+  son bien, jamais celle d'un autre bien. Reporté ici depuis le lot 2 : la preuve y
+  a été faite sur staging (`scripts/prouver-rls-avis.js`), mais pas en production —
+  elle exige d'écrire un décor de test, et la garde du script l'interdit ailleurs que
+  sur staging (décision de Thierry, 30 septembre 2026).
 - Note privée absente du texte public ; nom de la prestataire absent.
 - Délai dépassé → `expiree`, bouton désactivé.
 - Protocole : action inconnue ou droit absent → « indisponible », bouton masqué ; aucune app n'importe un fichier du cœur ni n'appelle `api/avis.js` directement (test de recensement).
