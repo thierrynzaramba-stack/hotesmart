@@ -110,13 +110,16 @@ test('LE TEST QUI COMPTE : la cle ne s ecrit nulle part — cache, journal, erre
   })
 })
 
-test('une erreur HTTP est journalisee a cout plein et n entre pas au cache', async () => {
+// ⚠ REECRIT LE 30 SEPTEMBRE 2026 (REVIEW.md regle 17) : la version du
+// 24 septembre exigeait le cout PLEIN pour une erreur HTTP — elle figeait le
+// defaut releve par Thierry (un 422 non facture vidait le budget).
+test('une erreur HTTP est journalisee a cout NUL (non facturee) et n entre pas au cache', async () => {
   await avecCle(async () => {
     const d = dossier()
     const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: faux('non', 403) })
     await assert.rejects(c.metriquesAnnonce('33549601', H), /HTTP 403/)
     const j = fs.readFileSync(path.join(d, 'appels.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
-    assert.deepEqual(j.map(x => [x.statut, x.cout_usd, x.http]), [['erreur', 0.1, 403]], 'reservee avant le reseau, terminee en erreur')
+    assert.deepEqual(j.map(x => [x.statut, x.cout_usd, x.http]), [['erreur', 0, 403]], 'reservee avant le reseau, liberee au refus du serveur')
     const f = faux(lire('labulle-60.json'))
     await creerClient({ alerter: null, depot: depotFichier(d), fetch: f }).metriquesAnnonce('33549601', H)
     assert.equal(f.appels.length, 1, 'rien en cache : l appel repart')
@@ -374,5 +377,24 @@ test('LE TEST QUI COMPTE (30 septembre 2026, HTTP 422) : la devise se verifie AV
     await c.appeler(E, ok, H).catch(() => {})
     assert.equal(f.appels.length, 1)
     assert.equal(JSON.parse(f.appels[0].init.body).currency, 'EUR')
+  })
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : une requete REFUSEE par le serveur libere sa reservation — le budget ne se vide pas sur des appels qui n ont pas eu lieu', async () => {
+  await avecCle(async () => {
+    const d = dossier()
+    const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: faux('{"detail":"currency must be ISO"}', 422) })
+    const p = { latitude: 43.06, longitude: 0.15, debut: '2026-10-01', fin: '2028-09-29' }
+    await assert.rejects(c.reliefCalendrier(p, H), /HTTP 422/)
+    const journal = fs.readFileSync(path.join(d, 'appels.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+    assert.deepEqual(journal.map(l => [l.statut, l.http, l.cout_usd]), [['erreur', 422, 0]])
+    assert.equal(await c.estimer([{ endpoint: 'POST /price-recommendation/calendar-prices', params: { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' } }]), 0.1)
+    // Une coupure RESEAU, elle, reste comptee (facturation inconnue).
+    const d2 = dossier()
+    const coupe = async () => { throw new Error('ECONNRESET') }
+    const c2 = creerClient({ alerter: null, depot: depotFichier(d2), fetch: coupe })
+    await assert.rejects(c2.reliefCalendrier(p, H), /reseau/)
+    const j2 = fs.readFileSync(path.join(d2, 'appels.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+    assert.deepEqual(j2.map(l => [l.statut, l.cout_usd]), [['erreur', 0.1]])
   })
 })

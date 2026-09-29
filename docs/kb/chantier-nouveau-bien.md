@@ -1908,3 +1908,44 @@ les facteurs d'AirROI sont renormalisés DANS le mois. Leur `seasonality` ne
 contribue donc que par sa forme à l'intérieur du mois (la semaine de Noël
 contre le début de décembre), jamais par le niveau du mois — sinon la
 saisonnalité compterait deux fois.
+
+### §14 — relief AirROI : ce que dit la fixture (30 septembre 2026, lu sans recoder)
+
+Fixture `tests/fixtures/airroi/relief-bagneres-2026-09-30.json` : 0,10 $, un
+appel, devise EUR, `calculation_date` 2026-09-30, **729 jours** du 2026-10-01
+au 2028-09-28. Demandé : jusqu'au 2028-09-29 (730 jours bornes comprises) ;
+AirROI rend `coverage.end_date` = 2028-09-28 — le dernier jour est retiré par
+le serveur (fin exclusive ou plafond), pas perdu par notre calcul.
+- **Forme** : prix = 100 × (1+s) × (1+j) × (1+f) × (1+d), MULTIPLICATIF
+  (vérifié sur les 729 jours, écart ≤ 0,06). s = `seasonality`,
+  j = `day_of_week`, f = `known_holiday_event`, d = `market_demand`.
+- **`day_of_week` est une constante par jour de semaine**, identique sur les
+  deux ans : lun −1,97 · mar −1,53 · mer −0,73 · jeu +0,72 · ven +2,64 ·
+  sam +2,82 · dim −1,82 (%). Samedi / mardi = 1,0282 / 0,9847 = **+4,4 %**
+  (poids posé de Thierry : ×1,10, soit +10 %).
+- **Décembre 2026, sans `market_demand`, rapporté au mercredi 2** : 19 déc.
+  ×1,10 · 24 déc. ×1,10 · 25 déc. ×1,12 · 26 déc. ×1,12 · 31 déc. ×1,07 ·
+  1er janv. ×1,07. Poids posés : 24 déc. ×2,32 (vacances 3 zones ×1,45 ×
+  fêtes ×1,60), 25 déc. ×3,06. `known_holiday_event` culmine à +1,14 %
+  (31 déc.). Le pacing mesurait ×2,54 sur la semaine de Noël.
+- **Février 2027** : `seasonality` moyenne **−1,06 %** (de −6,28 le 1er à
+  +1,06 le 16). L'historique met février à 273 % de la médiane annuelle
+  (RevPAR p50 75,9 € contre 27,85 €) : **le modèle ne retrouve pas le pic.**
+- **`seasonality` varie JOUR PAR JOUR** (pas moyen 0,14 point), en courbe
+  lisse, avec des SAUTS aux bornes des vacances (21 déc. +2,67 ; 6 janv.
+  −3,31 ; 8 févr. +2,88 ; 9 mars −2,61 ; 6 avr. +2,35 ; 5 mai −2,20 ;
+  6 juil. +2,80 ; 2 sept. −2,67), identiques en 2027 et 2028 : un GABARIT
+  annuel, pas une mesure de l'année. Amplitude sur l'année : **−9,6 % à
+  +10,3 %**, contre 58 % à 273 % pour le niveau mensuel de l'historique.
+- **`market_demand`** : 38 jours non nuls, le dernier le 1er mai 2027 ; nul
+  au-delà.
+- **Lecture** : ce sont des ajustements de PRIX (ce qu'il faut demander), pas
+  de RevPAR (prix × remplissage). Le niveau mensuel de la page est un RevPAR,
+  dont l'essentiel de l'amplitude vient du remplissage. D'où l'écart d'un
+  ordre de grandeur. `seasonality` ne peut pas remplacer le niveau du mois ;
+  au plus, sa forme DANS le mois. Décision à Thierry.
+- **Journal** : une requête REFUSÉE par le serveur (HTTP non 2xx) libère
+  désormais sa réservation (coût 0) ; une coupure réseau reste comptée. Le
+  test du 24 septembre qui exigeait le coût plein est réécrit (règle 17). La
+  ligne du 422 dans le journal local de Thierry (`~/.hotesmart-airroi-cache`)
+  garde ses 0,10 $ : écrite avant le correctif, non modifiée.
