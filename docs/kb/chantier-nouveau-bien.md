@@ -1074,6 +1074,8 @@ méthode n'a pas été réglée sur le résultat attendu.
   rien ; la ligne ne porte que saisons et ruptures. C'est le comportement
   correct de la règle, pas un défaut à contourner. L'explication se lit en
   lecture seule contre la production, sans rien y écrire.
+  ⚠ **RETOURNÉ LE 29 SEPTEMBRE 2026 — voir §14, « staging n'est plus
+  aveugle ».** Les vacances sont importées en staging.
 
 **La fenêtre est celle des données, jamais une année supposée** : le code lit
 les dates présentes. Hors fenêtre → `hors_fenetre` ; trou dans la fenêtre →
@@ -1816,3 +1818,35 @@ renormalisation » attrapée). Douze mois à partir du mois en cours (Paris).
   donnait 44 / 88 / 131 €, et le pic touchait le cadre.
 - Inchangés : les quatre quantiles, la couverture mois par mois, la mention
   « pas un prix pour votre logement », et le bloc prix et remplissage (60 mois).
+
+### §14 — STAGING N'EST PLUS AVEUGLE : retournement assumé (Thierry, 29 septembre 2026)
+
+**Décision** : les vacances scolaires sont importées en staging (195 périodes,
+zones A, B, C, 2017-2018 → 2027-2028, par `scripts/importer-vacances-scolaires.js`,
+le writer existant de `school_holidays` ; aucun logement de staging n'a reçu de
+zone, faute de code postal). **C'est un RETOURNEMENT ASSUMÉ de la décision du
+24 septembre (« staging reste le banc aveugle »), pas un oubli.**
+
+**Pourquoi la décision du 24 existait** : elle protégeait la DÉTECTION des
+saisons dans la donnée. Si le calendrier avait pu entrer dans la détection, on
+aurait perdu le moyen de prouver que la méthode n'avait pas été réglée sur le
+résultat attendu (ruptures retombant sur le 19 décembre et le 13 février).
+
+**Pourquoi elle ne tient plus** : la page « marché global » ne DÉTECTE rien.
+Le niveau de chaque mois vient de l'historique (60 mois) ; le relief vient du
+calendrier, avec des poids POSÉS par Thierry. Il n'y a plus d'aveuglement à
+préserver : le calendrier y est une ENTRÉE NÉCESSAIRE, pas un biais. Sans
+lui, le calendrier jour par jour ne peut simplement pas se construire.
+
+**Ce que ça ne change pas** : la page V2.3.4, gelée, garde sa séparation
+STRUCTURELLE (`calendrierDuMarche` refuse toute entrée de calendrier ; test
+inchangé). Son calendrier stocké (`marche_calendrier`) n'est pas recalculé par
+l'import : rien ne le relance.
+
+**Relu en base** : `ortyofzzdsthlhqmzsnq · biens = 3 · school_holidays = 195` ;
+étendue par zone 2017-10-21 → 2028-07-04 ; l'été 2027 est publié en entier
+(3 juillet → 1er septembre) : les DOUZE mois du calendrier sont classés
+(septembre 2026 → août 2027), vue réelle contre staging.
+
+**Constat en passant, porté au registre (dette 33)** : la source publie
+2027-2028, la base de PRODUCTION s'arrête au 3 juillet 2027.
