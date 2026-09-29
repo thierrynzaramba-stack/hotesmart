@@ -2,7 +2,12 @@
 -- Correctif du lot 2, avant la production.
 -- Spec : docs/specs/spec-evaluation-voyageur.md §2 bis.
 -- Verification :
---   node scripts/verifier-avis-evaluation.js
+--   node scripts/prouver-rls-avis.js
+-- (et non verifier-avis-evaluation.js : celui-la lit
+--  core_events sous la CLE DE SERVICE et ne tente que
+--  des INSERT — il reste vert que le revoke select soit
+--  passe ou non. Seul prouver-rls-avis.js lit la table
+--  sous une session cliente, donc le prouve.)
 --
 -- ⚠ LIGNES COURTES VOLONTAIRES (editeur Supabase).
 --

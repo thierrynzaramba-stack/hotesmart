@@ -104,7 +104,8 @@ indisponible : les apps peuvent écrire leur bouton avant que le cœur ne livre.
 
 Le pendant serveur du bus : `core_events` (migration
 `2026-09-25-core-events.sql`, lot 2). Le cœur y inscrit ce qui s'est passé ; les
-consommateurs (archivage de la messagerie, notifications) le lisent. Même
+consommateurs **côté serveur** (archivage de la messagerie, notifications) le
+lisent sous clé de service. Aucun navigateur ne le lit (voir plus bas). Même
 vocabulaire que le bus : `type` vaut `domaine.evenement`, contraint par un CHECK.
 
 | Colonne | Rôle |
@@ -128,10 +129,22 @@ elles ont été payées cher (79 350 faux `menage_events`) :
 avec son CHECK fermé et ses trois consommateurs. Deux journaux, deux contrats
 (décision de Thierry, 25 septembre 2026).
 
-Écriture : sous clé de service uniquement, par le writer du cœur. La RLS donne
-au client une **lecture** de son compte, aucune écriture — un front capable
-d'inscrire un événement déclencherait des conséquences métier (archivage,
-notifications) sans passer par aucune garde.
+**Aucun accès client, ni lecture ni écriture.** Le journal vit entièrement côté
+serveur : le writer du cœur l'écrit sous clé de service, le dispatcher le lit de
+même. RLS active, aucune policy, les quatre droits révoqués pour `anon` et
+`authenticated` — comme `booking_change_events`, qui n'en a jamais eu.
+
+Pourquoi pas une lecture filtrée : une policy par domaine seul laissait un membre
+restreint à un bien lire les événements de **tous** les biens du compte, `payload`
+compris, et un payload d'évaluation porte le texte de l'avis, la note privée, le
+nom du voyageur. Filtrer par bien serait une rustine — un journal générique n'a
+pas de colonne `property_id`, son sujet est volontairement libre. Le `revoke
+select` est posé en plus du retrait de la policy : sans lui, la table rend une
+**liste vide**, qu'on prendrait pour « aucun événement », au lieu d'un refus net
+(42501). Constat de Thierry, 29 septembre 2026.
+
+Une app qui a besoin de réagir à un événement passe par le **bus** du front
+(`hsBus.ecouter`), jamais par la table.
 
 ## Historique
 
@@ -139,3 +152,6 @@ notifications) sans passer par aucune garde.
   venir, un événement), recensement. Aucune fonctionnalité métier.
 - v1.1, 25 septembre 2026 (lot 2) : le journal serveur `core_events` et son
   contrat. Aucun changement au bus ni aux actions déclarées.
+- v1.2, 29 septembre 2026 : `core_events` n'a **aucun accès client**, ni lecture
+  ni écriture. Une app réagit à un événement par `hsBus.ecouter`, jamais en
+  lisant la table.

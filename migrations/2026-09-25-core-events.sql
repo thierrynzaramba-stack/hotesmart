@@ -124,6 +124,15 @@ comment on column public.core_events.subject_id is
 -- evenement ».
 alter table public.core_events
   enable row level security;
+-- ⚠ LE `drop policy` RESTE, MEME SI CE FICHIER N'EN CREE
+-- PLUS. Une base qui a deja recu la version du 25 porte
+-- `core_events_select` ; rejouer ce fichier sans ce drop
+-- l'y laisserait. Elle est inerte tant que SELECT est
+-- revoque — mais c'est exactement le raisonnement qui
+-- fait revoquer les QUATRE droits : on ne laisse pas une
+-- porte fermee a cle dans un mur qu'on vient d'abattre.
+drop policy if exists core_events_select
+  on public.core_events;
 revoke select, insert, update, delete
   on table public.core_events
   from anon, authenticated;
