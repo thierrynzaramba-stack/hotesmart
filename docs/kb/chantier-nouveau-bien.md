@@ -1872,6 +1872,18 @@ calendrier rendu, pas par nuit. Budget du test : 1 $. UN appel (Bagnères,
 coordonnées de La bulle, base 100, devise native = euro), en cache dès le
 premier appel, par `scripts/capturer-relief-airroi.js` (lancé par Thierry, la
 clé ne passant que par l'environnement).
+- **Review de f13526c (aucun constat sur la clé), corrigé** : le calendrier
+  part du **1er du mois suivant** (heure de Paris) pour 730 jours — la clé de
+  cache ne change qu'une fois par mois (sinon chaque jour payait un nouvel
+  appel, la fraîcheur de 30 jours ne servant jamais) et aucune date passée
+  n'est demandée ; le corps est figé à tous les niveaux (`location` à deux
+  champs), dates réelles, 730 jours au plus ; un 200 sans aucun jour daté
+  n'entre plus au cache ; le script annonce le coût et ne paie qu'avec
+  `--confirmer` ; la clé est cherchée dans la réponse AVANT toute écriture
+  dans le dépôt ; la fixture porte le jour de capture à l'heure de Paris.
+- Hors journal de la base : un appel par script ne passe que par le journal
+  fichier (`~/.hotesmart-airroi-cache`) ; le budget mensuel de production
+  (`airroi_appels`) ne le voit pas.
 
 **PRÉCAUTION 1 — c'est le MODÈLE d'AirROI, pas une mesure brute.** On importe
 leur saisonnalité, décomposée et DÉCLARÉE comme telle. La page devra le dire

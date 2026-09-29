@@ -173,12 +173,12 @@ test('LE TEST QUI COMPTE (30 septembre 2026) : calendar-prices, SEULE exception 
   await avecCle(async () => {
     const f = faux(JSON.stringify({ recommendations: [{ date: '2026-12-25', price: 160 }] }))
     const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
-    const p = { latitude: 43.06, longitude: 0.15, debut: '2026-09-30', fin: '2028-09-28' }
+    const p = { latitude: 43.06, longitude: 0.15, debut: '2026-10-01', fin: '2028-09-29' }
     const r = await c.reliefCalendrier(p, H)
     assert.deepEqual([r.depuisCache, r.cout], [false, 0.10])
     assert.equal(f.appels[0].url, 'https://api.airroi.com/price-recommendation/calendar-prices')
     assert.deepEqual(JSON.parse(f.appels[0].init.body),
-      { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-09-30', end_date: '2028-09-28' })
+      { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' })
     assert.equal((await c.reliefCalendrier(p, H)).depuisCache, true)
     assert.equal(f.appels.length, 1)
   })
@@ -188,14 +188,37 @@ test('LE TEST QUI COMPTE (30 septembre 2026) : jamais le prix d un logement — 
   await avecCle(async () => {
     const f = faux('{}')
     const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
-    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-09-30', end_date: '2028-09-28' }
+    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'native', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' }
     const E = 'POST /price-recommendation/calendar-prices'
     await assert.rejects(c.appeler(E, { ...ok, base_price: 135 }, H), /parametres invalides/)
     await assert.rejects(c.appeler(E, { ...ok, base_price: '100' }, H), /parametres invalides/)
     await assert.rejects(c.appeler(E, { ...ok, pricing_rules: {} }, H), /parametres invalides/)
     await assert.rejects(c.appeler(E, { ...ok, start_date: '2029-01-01' }, H), /parametres invalides/)
     await assert.rejects(c.appeler('POST /price-recommendation/base-price', { ...ok }, H), /endpoint refuse/)
+    // Review de f13526c : corps fige a TOUS les niveaux, dates reelles,
+    // depart au 1er d'un mois, 730 jours au plus.
+    await assert.rejects(c.appeler(E, { ...ok, location: { ...ok.location, base_price: 135 } }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, end_date: '2026-99-99' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, start_date: '2026-02-30' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, start_date: '2026-10-02' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, end_date: '2028-09-30' }, H), /parametres invalides/)
     assert.equal(f.appels.length, 0)
+    await c.appeler(E, ok, H).catch(() => {})
+    assert.equal(f.appels.length, 1, 'le corps de reference, lui, part (730 jours pile)')
+  })
+})
+
+test('LE TEST QUI COMPTE (review de f13526c) : un 200 sans aucun jour date n entre PAS au cache — ni « quota », ni liste vide', async () => {
+  await avecCle(async () => {
+    for (const corps of ['{"message":"quota"}', '{"recommendations":[]}']) {
+      const f = faux(corps)
+      const d = dossier()
+      const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: f })
+      const p = { latitude: 43.06, longitude: 0.15, debut: '2026-10-01', fin: '2028-09-29' }
+      await assert.rejects(c.reliefCalendrier(p, H))
+      await assert.rejects(c.reliefCalendrier(p, H))
+      assert.equal(f.appels.length, 2, `${corps} : rien n a ete range, le second appel repart`)
+    }
   })
 })
 
