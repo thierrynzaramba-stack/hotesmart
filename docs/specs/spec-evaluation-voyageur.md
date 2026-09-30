@@ -290,6 +290,32 @@ Principes :
 6. **Notifications & relances**.
 7. **Dette E1** puis **archivage des conversations** (§9).
 
+## 11 bis. Décisions prises pendant le lot 3 (30 septembre 2026)
+
+Trois choix de produit sont sortis des revues du lot 3. Ils sont ici pour être
+contredits si Thierry le veut, pas enterrés dans un commentaire.
+
+1. **Un avis négatif dans une langue que la relecture ne couvre pas n'est pas
+   rédigé par l'IA.** Le garde-fou « l'IA ne contredit pas les boutons » compare
+   le texte à une liste d'éloges interdits, et cette liste est en français et en
+   anglais. Or le texte s'écrit dans la langue du voyageur : « Alles war
+   einwandfrei » passait sur un logement rendu sale. On ne peut pas dresser la
+   liste des éloges de toutes les langues ; on refuse donc de promettre ce qu'on
+   ne sait pas lire, et l'hôte rédige lui-même. Les avis **positifs** restent
+   rédigés dans toutes les langues : le garde-fou ne sert que sur un négatif.
+   Alternative si ce refus gêne : faire relire le texte par un second appel au
+   modèle, ce qui coûte un appel et déplace la confiance.
+2. **La prestataire ne voit ni le texte public, ni la note privée, ni les
+   réponses de l'hôte, ni l'identifiant du séjour.** Elle voit son formulaire et
+   ses propres réponses. Même principe que la messagerie des prestataires
+   (`spec-prestataires-menage.md` §6 : l'extrait seul, jamais le nom du
+   voyageur).
+3. **Un membre délégué, même gestionnaire, est traité comme une prestataire.**
+   L'hôte est le titulaire du compte, et lui seul. Un membre a donc `eval_power`
+   à `soumettre` par défaut : il remplit, l'hôte publie. C'est le sens prudent,
+   mais il faut le dire à l'écran, sans quoi un gestionnaire verra quatre actions
+   ouvertes par ses droits et refusées une par une.
+
 ## 12. Tests (règle 8 : cas dangereux avec données réelles)
 
 - Prestataire `valider` + avis négatif → **ne publie pas**, passe `a_valider`.
@@ -309,7 +335,15 @@ Principes :
   refusait déjà ce cas — la base était la plus permissive des deux, l'inverse exact de
   ce que §7 bis promet. Toute contrainte écrite ici s'écrit donc avec son `is not
   null` explicite.
-- Double clic / double appel publier → une seule publication.
+- Double clic / double appel publier → une seule publication. **Prouvé** par le
+  verrou d'unicité `write_locks.key` réclamé avant l'appel provider, et testé
+  (`tests/avis-endpoint-evaluation.test.js`). La vérification de statut seule ne
+  suffisait pas : deux requêtes peuvent lire `a_valider` avant que l'une n'écrive.
+- **La clé qui part chez le provider** est `ota_reviews.external_review_id`,
+  jamais `guest_evaluations.ota_review_id` — qui est notre clé primaire interne.
+  Un test l'affirme sur l'URL réellement appelée.
+- **« Le provider ne dit pas »** doit arrêter la publication comme « c'est déjà
+  parti ». Ne pas savoir n'est pas savoir que non.
 - Échec réseau après envoi → pas de rejeu, alarme, vérification chez le provider.
 - Prestataire sur un bien hors périmètre ou d'un autre compte → refus.
 - **Lot 4, sur la vraie base** : le compte de test, passé en membre restreint à un
