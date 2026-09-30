@@ -218,7 +218,7 @@
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
     import { peutEcrire } from '/shared/compte-courant.js'
-    import { loadCalendarData } from '/shared/calendar-core.js'
+    import { loadCalendarData, curSym } from '/shared/calendar-core.js'
     import { renderOnboardingBanner } from '/components/onboarding-banner.js'
     // Les reservations : la MEME regle que l'ordinateur (chantier calendrier
     // mobile, 30 septembre 2026). La couleur etait tiree au sort ici.
@@ -584,6 +584,7 @@
       document.getElementById('sheet-title').textContent='Configurer'
       document.getElementById('sheet-sub').textContent='Date : '+iso
       document.getElementById('r-start').value=iso; document.getElementById('r-end').value=iso
+      document.getElementById('btn-ajout-dates').style.display=iso<todayISO?'none':''
       renderAccordions(); overlay.classList.add('visible')
     }
     function closeSheet(){ overlay.classList.remove('visible') }
@@ -735,6 +736,9 @@
     let ficheCourante=null   // { type: 'resa'|'fermeture'|'ajout', ... }
     const ecriture=()=>peutEcrire('reservations')
     const ligne=(label,val)=> (val===null||val===undefined||val==='') ? '' : '<div class="fiche-ligne"><span>'+ech(label)+'</span><span>'+ech(String(val))+'</span></div>'
+    // La devise en SYMBOLE, comme l'ordinateur (`curSym`). `curSym` rend une
+    // entite HTML (« &euro; ») : on la decode, car la fiche echappe ses valeurs.
+    const symbole=c=>{ const t=document.createElement('textarea'); t.innerHTML=curSym(c); return t.value.trim() }
     const champ=(id,label,type,val,extra)=>'<label class="fiche-lbl" for="'+id+'">'+label+'</label><input class="fld" id="'+id+'" type="'+type+'" value="'+ech(val)+'" '+(extra||'')+'/>'
     function ouvrirFiche(titre, sousTitre, corps, note, boutons){
       document.getElementById('fiche-titre').textContent=titre
@@ -763,7 +767,7 @@
       const droits=droitsResa(bien, resa, ecriture())
       const nuits=Math.max(1, nuitsEntre(resa.startISO, resa.checkout))
       const voyageurs=[resa.numAdult?resa.numAdult+' adulte'+(resa.numAdult>1?'s':''):null, resa.numChild?resa.numChild+' enfant'+(resa.numChild>1?'s':''):null].filter(Boolean).join(', ')
-      const devise=resa.currency||'EUR'
+      const devise=symbole(resa.currency)
       const conv='<button class="btn-conv" id="fiche-conv" disabled>&#128172; Écrire au voyageur</button><div class="fiche-note" id="fiche-conv-note" style="margin-top:2px">Recherche du fil…</div>'
       let corps=conv
       if(droits.modifiable){
@@ -814,7 +818,7 @@
       const a=document.getElementById('fm-arrivee').value, d=document.getElementById('fm-depart').value
       const n=nuitsEntre(a,d), prix=parseFloat(document.getElementById('fm-prix').value)
       const adultes=parseInt(document.getElementById('fm-adultes').value,10)||0, enfants=parseInt(document.getElementById('fm-enfants').value,10)||0
-      const z=document.getElementById('fm-total'), dev=resa.currency||'EUR'
+      const z=document.getElementById('fm-total'), dev=symbole(resa.currency)
       if(!(n>0)) z.innerHTML='<span style="color:#c0392b">Le départ doit suivre l\'arrivée.</span>'
       else if(!(prix>0)){
         // Champ vide : le serveur garde le montant exact si la DUREE n'a pas
@@ -914,7 +918,7 @@
       const prix0=rateFor(arrivee)
       const corps='<div class="ajout-type"><button id="aj-type-resa"'+(channex?' class="on"':' disabled')+'>Réservation</button><button id="aj-type-indispo"'+(channex?'':' class="on"')+'>Indisponible</button></div>'
         +(channex?'':'<div class="fiche-note">Réservation directe indisponible sur ce bien (synchronisé hors HôteSmart) : seule l\'indisponibilité est possible.</div>')
-        +'<div class="fiche-2"><div>'+champ('aj-arrivee','Arrivée','date',arrivee)+'</div><div>'+champ('aj-depart','Départ','date',depart)+'</div></div>'
+        +'<div class="fiche-2"><div>'+champ('aj-arrivee','Arrivée','date',arrivee,'min="'+todayISO+'"')+'</div><div>'+champ('aj-depart','Départ','date',depart)+'</div></div>'
         +'<div id="aj-indispo" style="display:none">'+champ('aj-raison','Raison (affichée au calendrier)','text','','maxlength="200" placeholder="ex. travaux, séjour personnel"')+'</div>'
         +'<div id="aj-resa">'
           +'<div class="fiche-2"><div>'+champ('aj-prenom','Prénom','text','','autocomplete="off"')+'</div><div>'+champ('aj-nom','Nom','text','','autocomplete="off"')+'</div></div>'
@@ -949,7 +953,7 @@
       const prix=parseFloat(document.getElementById('aj-prix').value), z=document.getElementById('aj-total')
       if(!(n>0)) z.innerHTML='<span style="color:#c0392b">Le départ doit suivre l\'arrivée.</span>'
       else if(!(prix>0)) z.textContent='—'
-      else z.innerHTML='<strong>Total du séjour : '+(prix*n).toFixed(2)+' '+ech(currentBien.currency||'EUR')+'</strong> <span style="color:#86868b">('+prix.toFixed(2)+' × '+n+' nuit'+(n>1?'s':'')+')</span>'
+      else z.innerHTML='<strong>Total du séjour : '+(prix*n).toFixed(2)+' '+ech(symbole(currentBien.currency))+'</strong> <span style="color:#86868b">('+prix.toFixed(2)+' × '+n+' nuit'+(n>1?'s':'')+')</span>'
       document.getElementById('aj-alerte').textContent=messageCapacite(parseInt(document.getElementById('aj-adultes').value,10)||0, parseInt(document.getElementById('aj-enfants').value,10)||0, currentBien.capacity||1)||''
     }
     async function validerAjoutM(){
@@ -957,6 +961,11 @@
       const arrivee=document.getElementById('aj-arrivee').value, depart=document.getElementById('aj-depart').value
       const n=nuitsEntre(arrivee, depart)
       if(!arrivee||!depart||!(n>0)){ etat.textContent='Le départ doit suivre l\'arrivée.'; return }
+      // ⚠ PAS DE SAISIE DANS LE PASSE (review) : l'ordinateur ne laisse pas
+      // selectionner un jour passe ; le telephone, qui saisit les dates, refuse
+      // ici — sinon une reservation « Offline » partait au canal pour des nuits
+      // deja ecoulees, avec menage et messages derriere.
+      if(arrivee<todayISO){ etat.textContent='L\'arrivée ne peut pas être dans le passé.'; return }
       if(ficheCourante&&ficheCourante.indispo){
         const raison=document.getElementById('aj-raison').value.trim()
         if(!raison){ etat.textContent='Dites pourquoi : c\'est ce que le calendrier affichera.'; return }
@@ -994,6 +1003,8 @@
     })
     document.getElementById('btn-ajout-dates').addEventListener('click', ()=>{
       const a=document.getElementById('r-start').value, fin=document.getElementById('r-end').value||a
+      if(!a){ showToast('Choisissez une date'); return }
+      if(a<todayISO){ showToast('L\'arrivée ne peut pas être dans le passé'); return }
       // La feuille du jour parle en NUITS (du … au … inclus) : le depart est le
       // lendemain de la derniere nuit.
       const d=new Date(fin+'T00:00:00'); d.setDate(d.getDate()+1)

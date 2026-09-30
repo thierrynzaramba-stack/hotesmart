@@ -451,7 +451,7 @@
     // Les reservations : UNE regle pour l'ordinateur et le telephone (chantier
     // calendrier mobile, 30 septembre 2026) — famille de source, transformation,
     // droit de modifier, messagerie. Voir shared/calendrier-resa.js.
-    import { familleSource, estOffline, mapResa, libelleCanal, droitsResa, sansMessagerieOta, TEXTE_SANS_EMAIL, urlConversation } from '/shared/calendrier-resa.js'
+    import { familleSource, estOffline, mapResa, libelleCanal, droitsResa, sansMessagerieOta, TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre } from '/shared/calendrier-resa.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -1234,11 +1234,9 @@
       const bien = BIENS.find(x=>x.id===sel.bienId); if(!bien) return null
       const a = parseInt(document.getElementById('ajout-adultes').value, 10) || 0
       const e = parseInt(document.getElementById('ajout-enfants').value, 10) || 0
-      if(a < 1) return 'Il faut au moins un adulte.'
-      const total = a + e
-      return total > bien.capacity
-        ? 'Ce bien accueille ' + bien.capacity + ' personne' + (bien.capacity>1?'s':'') + ' au maximum — vous en avez saisi ' + total + '.'
-        : null
+      // Le plafond vit dans le module commun (review du lot mobile) : une seule
+      // regle pour les deux ecrans.
+      return messageCapacite(a, e, bien.capacity)
     }
 
     function verifierCapaciteAffichee(){
@@ -1522,7 +1520,7 @@
       resaCourante = { bien, resa }
       fermetureCourante = null
 
-      const nuits = Math.max(1, Math.round((new Date(resa.checkout+'T00:00:00') - new Date(resa.startISO+'T00:00:00'))/86400000))
+      const nuits = Math.max(1, nuitsEntre(resa.startISO, resa.checkout))
       const voyageurs = [resa.numAdult?resa.numAdult+' adulte'+(resa.numAdult>1?'s':''):null,
                          resa.numChild?resa.numChild+' enfant'+(resa.numChild>1?'s':''):null].filter(Boolean).join(', ')
       const montant = resa.amount!=null ? (resa.amount+' '+(resa.currency||'EUR')) : null
@@ -1703,7 +1701,7 @@
       const a = document.getElementById('fiche-arrivee'), d = document.getElementById('fiche-depart')
       const zone = document.getElementById('fiche-total'), alerte = document.getElementById('fiche-alerte')
       if(!a||!d||!zone) return
-      const n = Math.round((new Date(d.value+'T00:00:00') - new Date(a.value+'T00:00:00'))/86400000)
+      const n = nuitsEntre(a.value, d.value)
       const prix = parseFloat(document.getElementById('fiche-prix').value)
       const adultes = parseInt(document.getElementById('fiche-adultes').value,10)||0
       const enfants = parseInt(document.getElementById('fiche-enfants').value,10)||0
@@ -1717,8 +1715,7 @@
         // allongeait un sejour de 3 nuits — pendant que 500 € partaient chez
         // Channex et seraient factures au voyageur.
         const montant = Number(resaCourante.resa.amount)
-        const nOrig = Math.round((new Date(resaCourante.resa.checkout+'T00:00:00')
-                                - new Date(resaCourante.resa.startISO+'T00:00:00'))/86400000)
+        const nOrig = nuitsEntre(resaCourante.resa.startISO, resaCourante.resa.checkout)
         if(!(montant>0) || !(nOrig>0)) zone.textContent = '—'
         else if(n===nOrig) zone.innerHTML = '<strong>Total du séjour : '+montant.toFixed(2)+' '+sym+'</strong>'
                           + ' <span style="color:#86868b">(inchangé, '+n+' nuit'+(n>1?'s':'')+')</span>'
@@ -1731,13 +1728,7 @@
       }
       else zone.innerHTML = '<strong>Total du séjour : '+(Math.round(prix*n*100)/100).toFixed(2)+' '+sym+'</strong>'
                           + ' <span style="color:#86868b">('+n+' nuit'+(n>1?'s':'')+')</span>'
-      if(alerte){
-        const personnes = adultes+enfants
-        alerte.textContent = adultes<1 ? 'Il faut au moins un adulte.'
-          : (personnes>bien.capacity
-              ? 'Ce bien accueille '+bien.capacity+' personne'+(bien.capacity>1?'s':'')+' au maximum — vous en avez saisi '+personnes+'.'
-              : '')
-      }
+      if(alerte) alerte.textContent = messageCapacite(adultes, enfants, bien.capacity) || ''
     }
 
     async function annulerResaCourante(){
@@ -1776,12 +1767,10 @@
       const prix    = parseFloat(document.getElementById('fiche-prix').value)
       const adultes = parseInt(document.getElementById('fiche-adultes').value,10)||0
       const enfants = parseInt(document.getElementById('fiche-enfants').value,10)||0
-      const n = Math.round((new Date(depart+'T00:00:00') - new Date(arrivee+'T00:00:00'))/86400000)
+      const n = nuitsEntre(arrivee, depart)
       if(!(n>0))    { showToast('Le départ doit suivre l\'arrivée', 4000); return }
-      if(adultes<1) { showToast('Il faut au moins un adulte', 4000); return }
-      if(adultes+enfants>bien.capacity){
-        showToast('Ce bien accueille '+bien.capacity+' personne'+(bien.capacity>1?'s':'')+' au maximum', 5000); return
-      }
+      const pbCap = messageCapacite(adultes, enfants, bien.capacity)
+      if(pbCap){ showToast(pbCap, 5000); return }
       // ⚠ CHAMP VIDE = PRIX INCHANGE, ET ON NE L'ENVOIE PAS.
       // Envoyer un prix « reconstitue » (montant du cœur / nuits, arrondi au
       // centime) rejouait l'arrondi a chaque enregistrement : 100,00 sur 3 nuits

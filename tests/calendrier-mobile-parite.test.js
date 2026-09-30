@@ -106,3 +106,27 @@ test('LE TEST QUI COMPTE : le telephone porte la fiche, « Écrire au voyageur �
   assert.match(m, /pointer-events: auto/, 'les bulles se touchent')
   assert.match(m, /if\(!peutEcrire\('reservations'\)\)\{ document\.getElementById\('btn-ajout'\)\.style\.display='none'/, 'lecture seule : pas de +')
 })
+
+test('LE TEST QUI COMPTE : les appels du telephone portent les BONS identifiants (review du 1er octobre 2026)', () => {
+  // Le nom d'un appel ne suffit pas : `propertyId: bien.id` (l'UUID) a la place
+  // du numero provider donnait 400 sur 100 % des reservations directes — c'est
+  // l'incident documente au-dessus de `mapBien` sur l'ordinateur.
+  const m = sansCommentaires(lire('pages/calendrier-mobile.html'))
+  assert.strictEqual((m.match(/propertyId: bien\.provider_property_id/g) || []).length, 3,
+    'creer, modifier, annuler : le numero provider')
+  assert.ok(!/propertyId: bien\.id\b/.test(m), 'jamais l UUID pour la reservation directe')
+  for (const appel of ['fermer', 'modifierFermeture', 'rouvrirFermeture']) {
+    assert.match(m, new RegExp('api\\.calendar\\.' + appel + '\\((currentBien|bien)\\.id,'), `${appel} : l UUID du bien`)
+  }
+})
+
+test('LE TEST QUI COMPTE : le telephone ne cree rien dans le passe (review du 1er octobre 2026)', () => {
+  // L'ordinateur ne laisse pas selectionner un jour passe ; le telephone saisit
+  // ses dates, il doit donc les refuser lui-meme.
+  const m = sansCommentaires(lire('pages/calendrier-mobile.html'))
+  const valider = m.slice(m.indexOf('async function validerAjoutM'), m.indexOf('document.getElementById(\'btn-ajout\')'))
+  assert.match(valider, /if\(arrivee<todayISO\)/, 'refus a la validation')
+  assert.ok(valider.indexOf('arrivee<todayISO') < valider.indexOf('api.calendar.fermer('), 'avant l indisponibilite aussi')
+  assert.match(m, /champ\('aj-arrivee','Arrivée','date',arrivee,'min="'\+todayISO/, 'le selecteur de date borne')
+  assert.match(m, /btn-ajout-dates'\)\.style\.display=iso<todayISO\?'none'/, 'pas de bouton sur un jour passe')
+})

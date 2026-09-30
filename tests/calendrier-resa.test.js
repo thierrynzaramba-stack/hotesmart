@@ -232,8 +232,12 @@ test('formulaire : le TOTAL du sejour est affiche avant validation', () => {
 
 test('formulaire : les voyageurs sont plafonnes a la CAPACITE du bien', () => {
   assert.match(PAGE, /function depassementCapacite/)
-  assert.match(PAGE, /bien\.capacity/)
-  assert.match(PAGE, /au maximum/)
+  // Le plafond et son message vivent dans le module commun depuis la review du
+  // lot mobile (1er octobre 2026) : la page l'appelle avec la capacite du bien,
+  // aux TROIS endroits (saisie, fiche, enregistrement).
+  assert.strictEqual((PAGE.match(/messageCapacite\([^)]*bien\.capacity\)/g) || []).length, 3)
+  assert.ok(!/au maximum — vous en avez saisi/.test(PAGE), 'plus de copie du message dans la page')
+  assert.match(MODULE, /au maximum/)
 })
 
 test('endpoint : le plafond de capacite est REVERIFIE cote serveur', () => {
