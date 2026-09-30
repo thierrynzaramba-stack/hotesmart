@@ -2022,3 +2022,54 @@ réponse est vide ou mensuelle, **la question est définitivement close**.
   `--mois=0` et nomme la fixture `…-mois0.json` (la capture des 60 mois n'est
   pas écrasée). Une réponse sans aucun point daté (vide) est payée mais pas
   rangée : le message d'erreur en montre le début — ce qui suffit à clore.
+
+### §14 — RÈGLE : le prix ne monte que là où le marché sature (Thierry, 30 septembre 2026)
+
+> **Le prix ne monte que là où le marché sature, jamais là où le RevPAR est
+> simplement élevé.**
+
+**Raisonnement (Thierry)** : un marché qui se remplit sans monter ses prix est
+un marché d'hôtes amateurs, qui laissent de l'argent sur la table ; mais on ne
+peut monter un prix que là où la demande bute sur l'offre. À 62 %
+d'occupation moyenne en février, il reste près de 40 % de nuits libres :
+monter le prix ferait perdre des nuits. Si le p90 frôle 100 %, la demande
+dépasse l'offre et le prix peut monter.
+
+**Mesure sur Bagnères** (occupation AirROI, capture du 30 septembre, N-2 =
+sept. 2024 → août 2025, N-1 = sept. 2025 → août 2026 ; moy / p50 / p75 / p90
+en % ; « > 90 % » = part des annonces au-dessus de 90 % d'occupation,
+BORNÉE par les quantiles — la donnée ne donne pas la part exacte) :
+
+| mois | N-2 moy · p50 · p75 · p90 | > 90 % | N-1 moy · p50 · p75 · p90 | > 90 % |
+|---|---|---|---|---|
+| sept. | 42 · 36 · 69 · 86 | < 10 % | 40 · 33 · 68 · 86 | < 10 % |
+| oct. | 35 · 31 · 56 · 79 | < 10 % | 33 · 23 · 54 · 77 | < 10 % |
+| nov. | 32 · 26 · 45 · 71 | < 10 % | 31 · 25 · 46 · 72 | < 10 % |
+| déc. | 36 · 34 · 43 · 64 | < 10 % | 35 · 34 · 44 · 64 | < 10 % |
+| janv. | 38 · 33 · 54 · 75 | < 10 % | 35 · 30 · 51 · 73 | < 10 % |
+| **févr.** | **64 · 75 · 86 · 93** | **10-25 %** | **62 · 74 · 84 · 96** | **10-25 %** |
+| mars | 46 · 44 · 64 · 81 | < 10 % | 38 · 32 · 57 · 75 | < 10 % |
+| avr. | 33 · 26 · 49 · 73 | < 10 % | 28 · 18 · 38 · 69 | < 10 % |
+| mai | 31 · 24 · 45 · 75 | < 10 % | 30 · 24 · 44 · 66 | < 10 % |
+| juin | 31 · 22 · 45 · 74 | < 10 % | 34 · 27 · 53 · 76 | < 10 % |
+| juil. | 44 · 42 · 69 · 85 | < 10 % | 42 · 35 · 70 · 87 | < 10 % |
+| août | 55 · 61 · 80 · 90 | 10-25 % | 49 · 50 · 73 · 87 | < 10 % |
+
+**Verdict mois par mois** : **février est le seul mois saturé**, les deux
+années (p90 93 et 96 %, une annonce sur dix à une sur quatre au-dessus de
+90 %). **Août frôle la saturation en N-2** (p90 90 %) et **ne l'atteint plus
+en N-1** (87 %). Tous les autres mois ont un p90 de 64 à 87 % : de la place
+partout, y compris décembre et janvier, pourtant forts par le prix (ADR p50
+≈ 95 €) — ils sont forts par le PRIX, pas saturés.
+
+**Trois limites, écrites pour qu'on ne lise pas plus que la donnée** :
+1. **Le mois noie la semaine.** Une semaine saturée (Noël, le 15 août) ne se
+   voit pas dans une occupation MENSUELLE : décembre à p90 64 % ne dit pas
+   que la semaine de Noël ne sature pas — le pacing la mesurait à ×2,54. La
+   saturation est un fait de JOURS ; seul le pacing (quotidien, vers l'avant,
+   `fill_rate`) peut la voir, et seulement pour l'avenir.
+2. **L'occupation AirROI se rapporte aux nuits OUVERTES de chaque annonce**
+   (Airbnb seul) : une annonce ouverte cinq nuits et louée cinq fois compte
+   100 %. Un p90 élevé peut venir d'annonces peu ouvertes.
+3. **La part au-dessus de 90 % n'est qu'une fourchette** tirée des quantiles
+   (p90 ≥ 90 % → au moins 10 % des annonces ; p75 < 90 % → moins de 25 %).
