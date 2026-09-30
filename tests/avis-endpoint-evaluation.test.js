@@ -164,11 +164,22 @@ const req = (query = {}, body = null, method = 'POST') =>
 const reqMembre = (query = {}, body = null, method = 'POST') =>
   ({ method, query, body, headers: { authorization: 'Bearer jeton', 'x-compte': PROD } })
 
+// ⚠ DEUX SORTES DE PROFILS, ET LA DIFFERENCE EST `access_mode`.
+// Decision de Thierry du 30 septembre 2026 : un MEMBRE du compte (access_mode
+// « compte ») agit comme l'hote sur son perimetre, validation des negatifs
+// comprise. Les regles prestataire ne valent que pour l'acces par LIEN.
 const MEMBRE_A = {
   profil: { id: 'p-membre', account_user_id: PROD, member_user_id: MEMBRE, active: true,
-            accepted_at: '2026-01-01T00:00:00Z', is_owner: false, first_name: 'Amelie' },
+            accepted_at: '2026-01-01T00:00:00Z', is_owner: false, first_name: 'Amelie',
+            access_mode: 'compte' },
   permissions: { avis: 'write', property_scope: 'selected', property_ids: [BIEN_A.id] },
 }
+const PRESTA_A = (pouvoir = 'soumettre') => ({
+  profil: { id: 'p-presta', account_user_id: PROD, member_user_id: MEMBRE, active: true,
+            accepted_at: '2026-01-01T00:00:00Z', is_owner: false, first_name: 'Regina',
+            access_mode: 'lien', eval_scope: 'selon_grille', eval_power: pouvoir },
+  permissions: { avis: 'write', property_scope: 'selected', property_ids: [BIEN_A.id] },
+})
 
 // ─── LE PERIMETRE PAR BIEN (constat critique 1) ─────────────────────────────
 test('LE TEST QUI COMPTE : un membre limite au bien A ne publie PAS une evaluation du bien B', async () => {
@@ -183,16 +194,49 @@ test('LE TEST QUI COMPTE : un membre limite au bien A ne publie PAS une evaluati
   assert.strictEqual(etat.provider.appels.length, 0, 'rien ne part chez le provider')
 })
 
-test('le meme membre publie bien sur SON bien', async () => {
-  const etat = preparer({ user: MEMBRE, ...MEMBRE_A, evaluations: [evalA({ filled_by_profile: 'p-membre' })] })
+test('LE TEST QUI COMPTE : un MEMBRE avis=write publie sur son bien, comme l’hote', async () => {
+  // Decision de Thierry : un membre du compte n'est pas une prestataire. Le
+  // choix precedent le traitait comme telle, avec le pouvoir « soumettre » par
+  // defaut : les quatre actions etaient ouvertes par ses droits puis refusees
+  // une par une.
+  const etat = preparer({ user: MEMBRE, ...MEMBRE_A, evaluations: [evalA()] })
   const handler = require('../api/avis')
   const res = reponse()
   await handler(reqMembre({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
-  // Le pouvoir par defaut est `soumettre` : le refus attendu porte sur le
-  // POUVOIR, pas sur le perimetre. C'est la preuve que la garde de bien a
-  // laisse passer.
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.status, 'publiee')
+})
+
+test('et il valide lui-meme un avis NEGATIF, le garde-fou ne visant que les prestataires', async () => {
+  const negatif = evalA({ answers_host: { etat: 'sale', degats: 'aucun', poubelles: 'fait',
+                                          communication: 'excellente', regles: 'oui', recommande: 'oui' } })
+  preparer({ user: MEMBRE, ...MEMBRE_A, evaluations: [negatif] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: negatif.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 200)
+})
+
+test('une PRESTATAIRE « soumettre », elle, ne publie pas', async () => {
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [evalA()] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
   assert.strictEqual(res.code, 409)
   assert.strictEqual(res.body.motif, 'pouvoir_insuffisant')
+  assert.strictEqual(etat.provider.appels.length, 0)
+})
+
+test('LE TEST QUI COMPTE : une prestataire « valider » ne publie PAS un avis negatif', async () => {
+  const negatif = evalA({ answers_host: { etat: 'sale', degats: 'aucun', poubelles: 'fait',
+                                          communication: 'excellente', regles: 'oui', recommande: 'oui' } })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [negatif] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: negatif.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'negatif_a_valider')
+  assert.strictEqual(etat.provider.appels.length, 0)
 })
 
 test('un membre limite au bien A ne LIT pas une evaluation du bien B', async () => {
@@ -246,9 +290,9 @@ test('le verrou est bien reclame AVANT l’appel au provider', async () => {
 })
 
 // ─── CE QUE VOIT UN MEMBRE (constat moyen 4) ────────────────────────────────
-test('LE TEST QUI COMPTE : un membre ne recoit ni le texte public, ni la note privee, ni le sejour', async () => {
+test('LE TEST QUI COMPTE : une prestataire « soumettre » ne recoit ni texte, ni note privee, ni sejour', async () => {
   const evaluation = evalA({ private_note: 'A laisse la cuisine sale.', status: 'a_remplir' })
-  preparer({ user: MEMBRE, ...MEMBRE_A, evaluations: [evaluation] })
+  preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [evaluation] })
   const handler = require('../api/avis')
   const res = reponse()
   await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
@@ -258,6 +302,29 @@ test('LE TEST QUI COMPTE : un membre ne recoit ni le texte public, ni la note pr
   assert.strictEqual(res.body.evaluation.public_text, undefined)
   assert.strictEqual(res.body.evaluation.answers_host, undefined)
   assert.strictEqual(res.body.evaluation.booking_uid, undefined)
+})
+
+test('LE TEST QUI COMPTE : une prestataire « valider » VOIT le texte qu’elle va publier', async () => {
+  // Decision de Thierry : elle ne publie jamais un texte qu'elle n'a pas lu.
+  const evaluation = evalA({ private_note: 'A laisse la cuisine sale.' })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
+  assert.strictEqual(res.body.role, 'prestataire')
+  assert.strictEqual(res.body.evaluation.public_text, 'Merci pour votre sejour.')
+  assert.strictEqual(res.body.evaluation.private_note, undefined, 'la note privee lui reste fermee')
+  assert.strictEqual(res.body.evaluation.booking_uid, undefined)
+})
+
+test('un MEMBRE du compte, lui, voit ce que voit l’hote', async () => {
+  const evaluation = evalA({ private_note: 'Note privee.' })
+  preparer({ user: MEMBRE, ...MEMBRE_A, evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
+  assert.strictEqual(res.body.role, 'hote')
+  assert.strictEqual(res.body.evaluation.private_note, 'Note privee.')
 })
 
 test('le titulaire, lui, recoit tout ce qu’il lui faut pour valider', async () => {

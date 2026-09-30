@@ -470,28 +470,32 @@ async function chargerEvaluation (req, res, garde, ecriture = false) {
 // Le role de l'appelant dans l'evaluation. L'hote est celui qui n'a pas de
 // reglage prestataire : eval_scope / eval_power vivent sur `profiles`.
 function roleEtReglages (garde) {
-  // ⚠ L'HOTE EST LE TITULAIRE, ET LUI SEUL. Pas de profil = titulaire :
-  // lib/require-permission.js ne charge un profil que pour les MEMBRES d'un
-  // compte, et lib/avis/publication.js pose la meme regle (« parProfil vaut
-  // null quand c'est l'HOTE »).
+  // ⚠ « PRESTATAIRE » VEUT DIRE `access_mode = 'lien'`, PAS « a un profil ».
+  // Decision de Thierry du 30 septembre 2026, qui renverse le choix precedent :
+  // un MEMBRE du compte avec `avis: write` agit comme l'hote sur son perimetre,
+  // validation des avis negatifs comprise. Les regles prestataire — perimetre
+  // de questions, pouvoir `soumettre`, garde-fou du negatif — ne s'appliquent
+  // qu'aux profils d'acces par LIEN.
   //
-  // Un membre gestionnaire tombe donc du cote « prestataire », avec
-  // `eval_power` a `soumettre` par defaut : il remplit, l'hote publie. C'est
-  // le sens prudent. Deviner le rôle depuis la presence de `eval_scope`
-  // faisait l'inverse — un membre sans reglage devenait hote et publiait.
+  // Le choix d'avant traitait tout membre en prestataire : un gestionnaire
+  // voyait quatre actions ouvertes par ses droits et refusees une par une.
+  //
+  // `access_mode = 'lien'` est la convention du depot, deja exigee par
+  // lib/cleaning/notifier-prestataire.js, api/menages-public.js, api/garde.js
+  // et api/disponibilites.js. On ne devine pas le role, on le lit.
   const p = garde.contexte?.profil || null
-  const estPrestataire = Boolean(p)
+  const estPrestataire = Boolean(p && p.access_mode === 'lien')
   return {
     role: estPrestataire ? 'prestataire' : 'hote',
-    evalScope: (p && p.eval_scope) || 'selon_grille',
-    evalPower: (p && p.eval_power) || 'soumettre',
+    evalScope: (estPrestataire && p.eval_scope) || 'selon_grille',
+    evalPower: (estPrestataire && p.eval_power) || 'soumettre',
     profilId: (p && p.id) || null,
-    // ⚠ `parProfil` EST L'OBJET, PAS L'ID, et il vaut NULL pour l'hote.
-    // lib/avis/publication.js s'en sert pour deux choses : savoir si le
-    // declencheur est une prestataire (donc soumise au garde-fou du negatif),
-    // et lire son `eval_power`. Un id passe a sa place ferait croire que
-    // l'hote est une prestataire sans pouvoir : il ne publierait plus rien.
-    parProfil: p,
+    // ⚠ `parProfil` N'EST RENSEIGNE QUE POUR UNE PRESTATAIRE, et c'est l'OBJET,
+    // pas l'id. lib/avis/publication.js s'en sert pour deux choses : savoir si
+    // le declencheur est soumis au garde-fou du negatif, et lire son
+    // `eval_power`. Un membre passe donc `null`, comme le titulaire : il
+    // valide les negatifs, conformement a la decision ci-dessus.
+    parProfil: estPrestataire ? p : null,
   }
 }
 
@@ -500,7 +504,7 @@ function roleEtReglages (garde) {
 async function evaluationLire (req, res, garde) {
   const e = await chargerEvaluation(req, res, garde)
   if (!e) return
-  const { role, evalScope } = roleEtReglages(garde)
+  const { role, evalScope, evalPower } = roleEtReglages(garde)
 
   // La grille FIGEE si elle existe : une evaluation deja commencee ne change
   // pas de questions en cours de route (§4.4).
@@ -526,6 +530,11 @@ async function evaluationLire (req, res, garde) {
     id: e.id, status: e.status, ota: e.ota,
     language: e.language, deadline_at: e.deadline_at,
   }
+  // ⚠ ET UNE PRESTATAIRE QUI PEUT PUBLIER DOIT AVOIR LU CE QU'ELLE PUBLIE.
+  // Decision de Thierry du 30 septembre 2026 : avec le pouvoir `valider`, elle
+  // voit le TEXTE PUBLIC avant publication — elle ne publie jamais un texte
+  // qu'elle n'a pas lu. La NOTE PRIVEE lui reste fermee dans tous les cas :
+  // elle ne part pas dans l'avis public, et elle ne la concerne pas.
   const vue = role === 'hote'
     ? {
         ...commun,
@@ -534,7 +543,11 @@ async function evaluationLire (req, res, garde) {
         answers_cleaner: e.answers_cleaner, answers_host: e.answers_host,
         published_at: e.published_at,
       }
-    : { ...commun, answers_cleaner: e.answers_cleaner }
+    : {
+        ...commun,
+        answers_cleaner: e.answers_cleaner,
+        ...(evalPower === 'valider' ? { public_text: e.public_text } : {}),
+      }
 
   return res.status(200).json({
     evaluation: vue,

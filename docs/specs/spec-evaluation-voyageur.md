@@ -305,16 +305,27 @@ contredits si Thierry le veut, pas enterrés dans un commentaire.
    rédigés dans toutes les langues : le garde-fou ne sert que sur un négatif.
    Alternative si ce refus gêne : faire relire le texte par un second appel au
    modèle, ce qui coûte un appel et déplace la confiance.
-2. **La prestataire ne voit ni le texte public, ni la note privée, ni les
-   réponses de l'hôte, ni l'identifiant du séjour.** Elle voit son formulaire et
-   ses propres réponses. Même principe que la messagerie des prestataires
-   (`spec-prestataires-menage.md` §6 : l'extrait seul, jamais le nom du
-   voyageur).
-3. **Un membre délégué, même gestionnaire, est traité comme une prestataire.**
-   L'hôte est le titulaire du compte, et lui seul. Un membre a donc `eval_power`
-   à `soumettre` par défaut : il remplit, l'hôte publie. C'est le sens prudent,
-   mais il faut le dire à l'écran, sans quoi un gestionnaire verra quatre actions
-   ouvertes par ses droits et refusées une par une.
+2. **La prestataire voit le texte qu'elle va publier, si elle peut le publier.**
+   Avec le pouvoir `valider`, elle reçoit le **texte public** avant publication :
+   elle ne publie jamais un texte qu'elle n'a pas lu. Avec le pouvoir
+   `soumettre`, elle ne voit ni le texte, ni la note privée, ni les réponses de
+   l'hôte, ni l'identifiant du séjour — son formulaire et ses propres réponses,
+   rien d'autre. La **note privée** lui reste fermée dans les deux cas : elle ne
+   part pas dans l'avis public et ne la concerne pas.
+   Conséquence à tenir au lot 4 : elle ne **rédige** pas. Si personne n'a encore
+   rédigé, la publication s'arrête sur `texte_absent`, ce qui est juste mais doit
+   être dit à l'écran.
+3. **Un membre du compte n'est pas une prestataire.** Un profil avec
+   `avis: write` agit comme l'hôte sur son périmètre, **validation des avis
+   négatifs comprise**. Les règles prestataire — périmètre de questions,
+   `eval_power`, garde-fou du négatif — ne s'appliquent qu'aux profils d'**accès
+   par lien** (`access_mode = 'lien'`), c'est-à-dire aux prestataires de ménage.
+   Le périmètre par bien continue de s'appliquer à tous.
+   C'est le renversement d'un premier choix qui traitait tout membre en
+   prestataire : un gestionnaire voyait quatre actions ouvertes par ses droits et
+   refusées une par une. `access_mode = 'lien'` est déjà la convention du dépôt,
+   exigée par la notification des prestataires, la page ménage publique, la garde
+   et les disponibilités.
 
 ## 12. Tests (règle 8 : cas dangereux avec données réelles)
 

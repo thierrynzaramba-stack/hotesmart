@@ -114,6 +114,27 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
     const { error: eNeg } = await sb.from('avis_criteres_niveaux')
       .insert({ critere_id: crit.id, categorie: 'cleanliness', cle: 'pire', libelle: 'Pire', rang: 2, note: 1, negatif: true })
     eNeg ? ko(`une note 1 AVEC drapeau est refusee : ${eNeg.message}`) : ok('une note 1 avec son drapeau passe')
+
+    // ─── Le declencheur `updated_at` ────────────────────────────────────────
+    // ⚠ LE SEUL ENDROIT OU CE CONTROLE PEUT VIVRE. PostgREST n'expose pas
+    // pg_catalog : le verificateur en lecture annonce lui-meme qu'il ne voit
+    // pas les declencheurs. On le prouve donc par son EFFET — une mise a jour
+    // doit deplacer `updated_at`. Sans declencheur, une grille modifiee trois
+    // fois annonce n'avoir jamais change, et personne ne s'en apercoit.
+    const { data: avant } = await sb.from('avis_criteres')
+      .select('updated_at').eq('id', crit.id).single()
+    await new Promise(r => setTimeout(r, 1100))
+    const { error: eTouch } = await sb.from('avis_criteres')
+      .update({ libelle: 'PREUVE — proprete (modifiee)' }).eq('id', crit.id)
+    if (eTouch) {
+      ko(`mise a jour du critere impossible : ${eTouch.message}`)
+    } else {
+      const { data: apres } = await sb.from('avis_criteres')
+        .select('updated_at').eq('id', crit.id).single()
+      if (!avant || !apres) ko('updated_at illisible : le declencheur reste non prouve')
+      else if (apres.updated_at === avant.updated_at) ko('`updated_at` N A PAS BOUGE apres une mise a jour — le declencheur avis_criteres_touch_trg manque')
+      else ok(`updated_at suit les mises a jour (declencheur en place)`)
+    }
   } finally {
     let reste = 0
     for (const id of aNettoyer) {
