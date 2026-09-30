@@ -115,6 +115,33 @@ remplacée, retirée, annulée, recalée, purgée) avec son geste et ses deux pr
 Leçon : une table qui ne garde que l'état courant ne sait pas dire pourquoi une
 ligne a disparu — le 22 septembre, la cause n'a été établie que par déduction.
 
+**Le prix recommandé au moment du ✎** (lot 4.6.7, 30 septembre 2026) :
+`prix_hote.recommended_rate_cents`, le prix que YieldFlow affichait sur la nuit
+quand l'hôte a posé le sien. La porte (`api/calendar.js`) le lit dans
+`calendar_inventory` AVANT d'écrire, et le passe au writer — qui ne touche que
+ses tables. Une nuit déjà « votre prix » garde le recommandé d'ORIGINE.
+
+## Cas tranché : `grille_hote` (lot 4.6.7, 30 septembre 2026)
+
+La grille fixée par l'hôte, **niveau par niveau** : une ligne par bien et par
+niveau (Base … Exceptionnel), le montant fixé, **le montant que YieldFlow
+calculait au moment du geste** (`recommended_rate_cents`), un journal
+append-only (`grille_hote_journal`). Un seul writer : `lib/yield/grille-hote.js`.
+
+**Ce n'est pas `prix_hote`**, et la différence est la raison d'être de la table :
+`prix_hote` fige une NUIT (le moteur la saute, sans plancher ni prime) ; un
+niveau fixé ne fige AUCUNE nuit — il remplace un montant de la grille, et tous
+les ajustements (jour de semaine, événements, plancher N-1, primes, fourchette)
+s'appliquent par-dessus. Ranger un niveau dans `prix_hote` aurait figé des
+centaines de nuits, sans date propre à un niveau, mêlées aux vrais ✎.
+
+**Un seul point d'application** : `preparerContexte` (lib/yield/contexte-du-
+bien.js), APRÈS le positionnement des contextes (ils gardent leur niveau), AVANT
+tout prix. L'écran et le moteur passent par là : la parité tient. Bornes
+(grille strictement croissante, rien sous le prix minimum) et confirmation
+(« N nuits vont changer de prix », comptées par la règle même du moteur,
+grille actuelle contre grille proposée) : `api/yield-grille.js`.
+
 ## La fiche du bien : `property_snapshots` (étape 1B)
 
 Même forme que `bookings_snapshot`, et c'est délibéré : un payload provider
