@@ -53,7 +53,10 @@
     .yp-niv-fixe { font-size: 10.5px; color: var(--text2); margin-top: 2px; }
     .yp-niv-x { background: none; border: none; cursor: pointer; color: #B02A37; font-size: 13px; padding: 0 2px; }
     .yp-grille-geste { margin-top: 8px; font-size: 13px; line-height: 1.6; }
-    .yp-grille-geste input { width: 80px; }
+    .yp-grille-geste input { width: 80px; padding: 5px 6px; border: 0.5px solid var(--border); border-radius: 6px; font-size: 12.5px; }
+    .yp-grille-geste button { padding: 5px 10px; border: none; border-radius: 6px; background: var(--text2, #1d1d1f); color: #fff; font-size: 12.5px; cursor: pointer; margin: 4px 4px 0 0; }
+    .yp-grille-geste button.secondaire { background: transparent; color: var(--text3); }
+    .yp-grille-geste button:disabled { opacity: .5; cursor: default; }
     .yp-grille-geste .avertir { color: #B02A37; }
     .yp-pilote .avertir b { color: #B02A37; }
     .yp-pilote .dit { font-size: 12px; color: var(--text3); margin: 8px 0 0; }
@@ -1257,7 +1260,7 @@
     const effet = !c.pilote
       ? 'Ce logement n’est pas piloté : aucun prix du calendrier ne change, seules les suggestions de cette page suivent la grille.'
       : (c.nuits
-        ? `<b>${c.nuits} nuit${c.nuits > 1 ? 's' : ''} ${c.nuits > 1 ? 'vont' : 'va'} changer de prix</b>, du ${ech(dateFr(c.du))} au ${ech(dateFr(c.au))} (de ${euros(c.min)} à ${euros(c.max)}). YieldFlow les enverra aux plateformes dans les 5 minutes.`
+        ? `<b>${c.nuits} nuit${c.nuits > 1 ? 's' : ''} ${c.nuits > 1 ? 'vont' : 'va'} changer de prix</b>, du ${ech(dateFr(c.du))} au ${ech(dateFr(c.au))} (${c.min === c.max ? `${c.nuits > 1 ? 'toutes' : ''} à ${euros(c.min)}`.trim() : `de ${euros(c.min)} à ${euros(c.max)}`}). YieldFlow les enverra aux plateformes dans les 5 minutes.`
         : 'Aucune nuit ouverte ne change de prix.')
     z.innerHTML = `${quoi} ? ${effet}
       <button type="button" id="yp-geste-appliquer">Appliquer</button>
