@@ -671,6 +671,12 @@ comparables. Négligeable face à un abonnement AirDNA.
   concurrent direct de YieldFlow. **On lui prend sa donnée, jamais ses prix.** Le
   calcul reste déterministe et auditable côté HôteSmart, conformément à la
   décision produit gravée.
+  ⚠ **UNE EXCEPTION, ÉTROITE (Thierry, 30 septembre 2026)** :
+  `price-recommendation/calendar-prices`, pour la DÉCOMPOSITION jour par jour
+  de son modèle, et seulement avec `base_price` = 100 (imposé par le client :
+  toute autre base est refusée avant le réseau). Voir §14, « le relief
+  d'AirROI ». `base-price` et le reste de `price-recommendation/*` restent
+  refusés.
 
 ---
 
@@ -1074,6 +1080,8 @@ méthode n'a pas été réglée sur le résultat attendu.
   rien ; la ligne ne porte que saisons et ruptures. C'est le comportement
   correct de la règle, pas un défaut à contourner. L'explication se lit en
   lecture seule contre la production, sans rien y écrire.
+  ⚠ **RETOURNÉ LE 29 SEPTEMBRE 2026 — voir §14, « staging n'est plus
+  aveugle ».** Les vacances sont importées en staging.
 
 **La fenêtre est celle des données, jamais une année supposée** : le code lit
 les dates présentes. Hors fenêtre → `hors_fenetre` ; trou dans la fenêtre →
@@ -1816,3 +1824,257 @@ renormalisation » attrapée). Douze mois à partir du mois en cours (Paris).
   donnait 44 / 88 / 131 €, et le pic touchait le cadre.
 - Inchangés : les quatre quantiles, la couverture mois par mois, la mention
   « pas un prix pour votre logement », et le bloc prix et remplissage (60 mois).
+
+### §14 — STAGING N'EST PLUS AVEUGLE : retournement assumé (Thierry, 29 septembre 2026)
+
+**Décision** : les vacances scolaires sont importées en staging (195 périodes,
+zones A, B, C, 2017-2018 → 2027-2028, par `scripts/importer-vacances-scolaires.js`,
+le writer existant de `school_holidays` ; aucun logement de staging n'a reçu de
+zone, faute de code postal). **C'est un RETOURNEMENT ASSUMÉ de la décision du
+24 septembre (« staging reste le banc aveugle »), pas un oubli.**
+
+**Pourquoi la décision du 24 existait** : elle protégeait la DÉTECTION des
+saisons dans la donnée. Si le calendrier avait pu entrer dans la détection, on
+aurait perdu le moyen de prouver que la méthode n'avait pas été réglée sur le
+résultat attendu (ruptures retombant sur le 19 décembre et le 13 février).
+
+**Pourquoi elle ne tient plus** : la page « marché global » ne DÉTECTE rien.
+Le niveau de chaque mois vient de l'historique (60 mois) ; le relief vient du
+calendrier, avec des poids POSÉS par Thierry. Il n'y a plus d'aveuglement à
+préserver : le calendrier y est une ENTRÉE NÉCESSAIRE, pas un biais. Sans
+lui, le calendrier jour par jour ne peut simplement pas se construire.
+
+**Ce que ça ne change pas** : la page V2.3.4, gelée, garde sa séparation
+STRUCTURELLE (`calendrierDuMarche` refuse toute entrée de calendrier ; test
+inchangé). Son calendrier stocké (`marche_calendrier`) n'est pas recalculé par
+l'import : rien ne le relance.
+
+**Relu en base** : `ortyofzzdsthlhqmzsnq · biens = 3 · school_holidays = 195` ;
+étendue par zone 2017-10-21 → 2028-07-04 ; l'été 2027 est publié en entier
+(3 juillet → 1er septembre) : les DOUZE mois du calendrier sont classés
+(septembre 2026 → août 2027), vue réelle contre staging.
+
+**Constat en passant, porté au registre (dette 33)** : la source publie
+2027-2028, la base de PRODUCTION s'arrête au 3 juillet 2027.
+
+### §14 — le relief jour par jour d'AirROI (Thierry, 30 septembre 2026)
+
+**Trouvé par Thierry** : `POST /price-recommendation/calendar-prices` rend,
+pour chaque date (jusqu'à deux ans), le prix décomposé en quatre lignes avec
+leur `adjustment_percent` : `seasonality`, `day_of_week`,
+`known_holiday_event`, `market_demand`. Avec `base_price` = 100, ces
+pourcentages sont directement des facteurs journaliers : ils remplaceraient
+les poids posés du 25 septembre (×1,10, ×1,25, ×1,45…).
+
+**Coût, vérifié avant tout appel** (airroi.com/api/pricing, 30 septembre
+2026) : **0,10 $ par requête réussie**, facturée une fois pour tout le
+calendrier rendu, pas par nuit. Budget du test : 1 $. UN appel (Bagnères,
+coordonnées de La bulle, base 100, devise **EUR** — cet endpoint refuse `native`, contrairement aux endpoints de marché : HTTP 422 le 30 septembre, non facturé ; le client vérifie désormais le code ISO en majuscules AVANT l'envoi), en cache dès le
+premier appel, par `scripts/capturer-relief-airroi.js` (lancé par Thierry, la
+clé ne passant que par l'environnement).
+- **Review de f13526c (aucun constat sur la clé), corrigé** : le calendrier
+  part du **1er du mois suivant** (heure de Paris) pour 730 jours — la clé de
+  cache ne change qu'une fois par mois (sinon chaque jour payait un nouvel
+  appel, la fraîcheur de 30 jours ne servant jamais) et aucune date passée
+  n'est demandée ; le corps est figé à tous les niveaux (`location` à deux
+  champs), dates réelles, 730 jours au plus ; un 200 sans aucun jour daté
+  n'entre plus au cache ; le script annonce le coût et ne paie qu'avec
+  `--confirmer` ; la clé est cherchée dans la réponse AVANT toute écriture
+  dans le dépôt ; la fixture porte le jour de capture à l'heure de Paris.
+- Hors journal de la base : un appel par script ne passe que par le journal
+  fichier (`~/.hotesmart-airroi-cache`) ; le budget mensuel de production
+  (`airroi_appels`) ne le voit pas.
+
+**PRÉCAUTION 1 — c'est le MODÈLE d'AirROI, pas une mesure brute.** On importe
+leur saisonnalité, décomposée et DÉCLARÉE comme telle. La page devra le dire
+(« relief du modèle AirROI », avec ses composantes), comme elle dit déjà
+« niveau attendu, pas une mesure ». La base 100 garantit qu'aucun prix de
+logement n'est demandé ni affiché : on prend les facteurs, pas le prix (§8).
+
+**PRÉCAUTION 2 — `market_demand` est tourné vers l'avant et dépend de la date
+de l'appel.** Il se traite À PART des trois autres (`seasonality`,
+`day_of_week`, `known_holiday_event`), qui décrivent la forme de l'année.
+Proposition, à trancher par Thierry : **ne PAS l'inclure dans le relief**.
+Trois raisons : (1) le calendrier doit être le même quel que soit le jour où
+on l'a lu — `market_demand` le ferait bouger à chaque capture, sans que le
+marché ait changé de forme ; (2) c'est ce que le pacing mesure déjà (réservé à
+date, vers l'avant) : l'inclure le compterait une deuxième fois ; (3) le
+niveau du mois vient de l'historique — mélanger un signal de l'instant dans un
+niveau historique brouillerait ce qu'on affiche. Il est conservé tel quel dans
+la fixture, lu et montré séparément si un jour il sert.
+
+**Et la renormalisation reste** : le niveau de chaque mois vient des 60 mois ;
+les facteurs d'AirROI sont renormalisés DANS le mois. Leur `seasonality` ne
+contribue donc que par sa forme à l'intérieur du mois (la semaine de Noël
+contre le début de décembre), jamais par le niveau du mois — sinon la
+saisonnalité compterait deux fois.
+
+### §14 — relief AirROI : ce que dit la fixture (30 septembre 2026, lu sans recoder)
+
+Fixture `tests/fixtures/airroi/relief-bagneres-2026-09-30.json` : 0,10 $, un
+appel, devise EUR, `calculation_date` 2026-09-30, **729 jours** du 2026-10-01
+au 2028-09-28. Demandé : jusqu'au 2028-09-29 (730 jours bornes comprises) ;
+AirROI rend `coverage.end_date` = 2028-09-28 — le dernier jour est retiré par
+le serveur (fin exclusive ou plafond), pas perdu par notre calcul.
+- **Forme** : prix = 100 × (1+s) × (1+j) × (1+f) × (1+d), MULTIPLICATIF
+  (vérifié sur les 729 jours, écart ≤ 0,06). s = `seasonality`,
+  j = `day_of_week`, f = `known_holiday_event`, d = `market_demand`.
+- **`day_of_week` est une constante par jour de semaine**, identique sur les
+  deux ans : lun −1,97 · mar −1,53 · mer −0,73 · jeu +0,72 · ven +2,64 ·
+  sam +2,82 · dim −1,82 (%). Samedi / mardi = 1,0282 / 0,9847 = **+4,4 %**
+  (poids posé de Thierry : ×1,10, soit +10 %).
+- **Décembre 2026, sans `market_demand`, rapporté au mercredi 2** : 19 déc.
+  ×1,10 · 24 déc. ×1,10 · 25 déc. ×1,12 · 26 déc. ×1,12 · 31 déc. ×1,07 ·
+  1er janv. ×1,07. Poids posés : 24 déc. ×2,32 (vacances 3 zones ×1,45 ×
+  fêtes ×1,60), 25 déc. ×3,06. `known_holiday_event` culmine à +1,14 %
+  (31 déc.). Le pacing mesurait ×2,54 sur la semaine de Noël.
+- **Février 2027** : `seasonality` moyenne **−1,06 %** (de −6,28 le 1er à
+  +1,06 le 16). L'historique met février à 273 % de la médiane annuelle
+  (RevPAR p50 75,9 € contre 27,85 €) : **le modèle ne retrouve pas le pic.**
+- **`seasonality` varie JOUR PAR JOUR** (pas moyen 0,14 point), en courbe
+  lisse, avec des SAUTS aux bornes des vacances (21 déc. +2,67 ; 6 janv.
+  −3,31 ; 8 févr. +2,88 ; 9 mars −2,61 ; 6 avr. +2,35 ; 5 mai −2,20 ;
+  6 juil. +2,80 ; 2 sept. −2,67), identiques en 2027 et 2028 : un GABARIT
+  annuel, pas une mesure de l'année. Amplitude sur l'année : **−9,6 % à
+  +10,3 %**, contre 58 % à 273 % pour le niveau mensuel de l'historique.
+- **`market_demand`** : 38 jours non nuls, le dernier le 1er mai 2027 ; nul
+  au-delà.
+- **Lecture** : ce sont des ajustements de PRIX (ce qu'il faut demander), pas
+  de RevPAR (prix × remplissage). Le niveau mensuel de la page est un RevPAR,
+  dont l'essentiel de l'amplitude vient du remplissage. D'où l'écart d'un
+  ordre de grandeur. `seasonality` ne peut pas remplacer le niveau du mois ;
+  au plus, sa forme DANS le mois. Décision à Thierry.
+- **Journal** : une requête REFUSÉE par le serveur (HTTP non 2xx) libère
+  désormais sa réservation (coût 0) ; une coupure réseau reste comptée. Le
+  test du 24 septembre qui exigeait le coût plein est réécrit (règle 17). La
+  ligne du 422 dans le journal local de Thierry (`~/.hotesmart-airroi-cache`)
+  garde ses 0,10 $ : écrite avant le correctif, non modifiée.
+
+### §14 — deux vérifications demandées par Thierry (30 septembre 2026)
+
+**1. `/markets/metrics/occupancy`** — la description dit « Returns daily,
+monthly, and aggregated occupancy data », l'exemple de réponse est mensuel.
+Coût relevé sur airroi.com/api/pricing : **0,10 $** (« Get Market
+Occupancy » ; la page écrit GET, la documentation POST — POST retenu, comme
+`metrics/all` qui fonctionne). Script `scripts/capturer-occupation-airroi.js`
+(marché de Bagnères de `marche-60.json`, 60 mois, devise native, corps figé,
+coût annoncé, `--confirmer` pour payer, clé cherchée avant écriture) : il
+affiche la forme exacte (clés de premier niveau, dates des premiers points).
+Budget : 0,60 $.
+
+**2. Les cartes thermiques du site public** (« What Did Last Year's Demand
+Look Like? » / « What Does This Year's Demand Look Like? », l'orange = la
+projection). Lu dans le code public du site (`/assets/atlas-spa-*.js`,
+`/assets/app-shell-*.js`, `/assets/airbnbListingsActions-*.js`), SANS aucun
+appel à l'API interne :
+- elles sont alimentées par **`GET https://bristleback.airroi.com/bristleback/airbnb_listings`**,
+  paramètres `country_code`, `state`, `city` (ou `neighborhood`,
+  `subdivision`, ou une zone `ne_lat/ne_lng/sw_lat/sw_lng`, ou `polygon`),
+  `filters` (JSON, dont une `dateRange` en millisecondes), `sortOrder`,
+  `currency` ;
+- la réponse porte un champ **`daily_data`**, JOUR PAR JOUR : `date`,
+  `booked`, `available`, `occupancy`, `booked_rate_average` / `25th` / `75th`,
+  `demand`, `available_rate_average` / `25th` / `75th`, `booking_trend`,
+  `pace_otb_occupancy`, `pace_last_year_otb`, **`pace_last_year_final`**,
+  `min_nights*`, `lead_time*` ;
+- **c'est une API INTERNE, non documentée** : hôte `bristleback.airroi.com`,
+  jeton obtenu par un défi anti-robot (Cloudflare Turnstile,
+  `/bristleback/token`), réponses possiblement brouillées
+  (`fetchOkJsonMaybeObfuscated`, marqueur `bristleback.xor.v1.2026-01-17`).
+  **Non utilisée**, et elle ne doit pas l'être sans décision de Thierry :
+  contourner un défi anti-robot n'est pas un usage de l'API payante.
+- À comparer : le pacing DOCUMENTÉ (0,20 $, fixture du 24 septembre) ne rend
+  que l'avant (`booked_count`, `available_count`, `booked_rate_avg`,
+  `available_rate_avg`, `fill_rate`), sans l'année passée.
+- **Sécurité des fixtures (reviews de f40ee9e et 9b47690)** : les trois
+  scripts de capture (pacing, relief, occupation) écrivaient une fixture sans
+  vérifier la clé quand elle manquait de l'environnement (relance servie par
+  le cache) ; le pacing écrivait même avant de vérifier. Un seul contrôle,
+  `lib/airroi/fixture-sure.js` : vérification EN MÉMOIRE (brute, URL, JSON,
+  base64), puis écriture ; clé absente ou mal formée = refus (code 6), rien
+  d'écrit. `--fixtures=<dossier>` isole l'écriture (les tests ne salissent
+  jamais le dépôt). Constat de sécurité re-reviewé une fois (règle).
+
+### §14 — `/markets/metrics/occupancy` n'a PAS de série quotidienne (Thierry, 30 septembre 2026)
+
+**La raison forte n'est pas notre appel, c'est le contrat.** La documentation
+(anglaise comme française) annonce « données d'occupation quotidiennes,
+mensuelles et agrégées », mais son propre contrat la dément : le corps
+n'accepte que `market`, `filter`, `currency` et `num_months` (0 à 60, défaut
+12). **Aucun paramètre de granularité n'existe : rien ne permet de DEMANDER du
+quotidien.** Ce n'est pas seulement que la réponse est mensuelle — on ne peut
+rien demander d'autre.
+
+**Et l'appel le confirme** (0,10 $, 30 septembre, fixture
+`occupation-bagneres-2026-09-30.json`) : `market` + `results`, 60 points
+MENSUELS du 2021-09-01 au 2026-08-01, champs `date`, `avg`, `p25`, `p50`,
+`p75`, `p90` — la même série que l'occupation de `metrics/all`.
+
+**Dernier essai, décidé par Thierry, et c'est le dernier** : `num_months: 0`
+(zéro mois d'historique n'a aucun sens pour une série mensuelle ; s'il
+existait une granularité cachée, c'est là qu'elle se montrerait). Si la
+réponse est vide ou mensuelle, **la question est définitivement close**.
+- Plafond : le journal local compte 0,51 $ en septembre (dont 0,10 $ pour le
+  422 du 29, non facturé, journalisé avant le correctif) ; 0,51 + 0,10 >
+  0,60 $ → refus AVANT l'envoi, vérifié. **L'essai se fait le 1er octobre**
+  (mois civil UTC, soit à partir de 2 h à Paris).
+- Préparé : le client admet `num_months` de 0 à 60 ; le script prend
+  `--mois=0` et nomme la fixture `…-mois0.json` (la capture des 60 mois n'est
+  pas écrasée). Une réponse sans aucun point daté (vide) est payée mais pas
+  rangée : le message d'erreur en montre le début — ce qui suffit à clore.
+
+### §14 — RÈGLE : le prix ne monte que là où le marché sature (Thierry, 30 septembre 2026)
+
+> **Le prix ne monte que là où le marché sature, jamais là où le RevPAR est
+> simplement élevé.**
+
+**Raisonnement (Thierry)** : un marché qui se remplit sans monter ses prix est
+un marché d'hôtes amateurs, qui laissent de l'argent sur la table ; mais on ne
+peut monter un prix que là où la demande bute sur l'offre. À 62 %
+d'occupation moyenne en février, il reste près de 40 % de nuits libres :
+monter le prix ferait perdre des nuits. Si le p90 frôle 100 %, la demande
+dépasse l'offre et le prix peut monter.
+
+**Mesure sur Bagnères** (occupation AirROI, capture du 30 septembre, N-2 =
+sept. 2024 → août 2025, N-1 = sept. 2025 → août 2026 ; moy / p50 / p75 / p90
+en % ; « > 90 % » = part des annonces au-dessus de 90 % d'occupation,
+BORNÉE par les quantiles — la donnée ne donne pas la part exacte) :
+
+| mois | N-2 moy · p50 · p75 · p90 | > 90 % | N-1 moy · p50 · p75 · p90 | > 90 % |
+|---|---|---|---|---|
+| sept. | 42 · 36 · 69 · 86 | < 10 % | 40 · 33 · 68 · 86 | < 10 % |
+| oct. | 35 · 31 · 56 · 79 | < 10 % | 33 · 23 · 54 · 77 | < 10 % |
+| nov. | 32 · 26 · 45 · 71 | < 10 % | 31 · 25 · 46 · 72 | < 10 % |
+| déc. | 36 · 34 · 43 · 64 | < 10 % | 35 · 34 · 44 · 64 | < 10 % |
+| janv. | 38 · 33 · 54 · 75 | < 10 % | 35 · 30 · 51 · 73 | < 10 % |
+| **févr.** | **64 · 75 · 86 · 93** | **10-25 %** | **62 · 74 · 84 · 96** | **10-25 %** |
+| mars | 46 · 44 · 64 · 81 | < 10 % | 38 · 32 · 57 · 75 | < 10 % |
+| avr. | 33 · 26 · 49 · 73 | < 10 % | 28 · 18 · 38 · 69 | < 10 % |
+| mai | 31 · 24 · 45 · 75 | < 10 % | 30 · 24 · 44 · 66 | < 10 % |
+| juin | 31 · 22 · 45 · 74 | < 10 % | 34 · 27 · 53 · 76 | < 10 % |
+| juil. | 44 · 42 · 69 · 85 | < 10 % | 42 · 35 · 70 · 87 | < 10 % |
+| août | 55 · 61 · 80 · 90 | 10-25 % | 49 · 50 · 73 · 87 | < 10 % |
+
+**Verdict mois par mois** : **février est le seul mois saturé**, les deux
+années (p90 93 et 96 %, une annonce sur dix à une sur quatre au-dessus de
+90 %). **Août frôle la saturation en N-2** (p90 90 %) et **ne l'atteint plus
+en N-1** (87 %). Tous les autres mois ont un p90 de 64 à 87 % : de la place
+partout, y compris décembre et janvier, pourtant forts par le prix (ADR p50
+≈ 95 €) — ils sont forts par le PRIX, pas saturés.
+
+**Trois limites, écrites pour qu'on ne lise pas plus que la donnée** :
+1. **Le mois noie la semaine.** Une semaine saturée (Noël, le 15 août) ne se
+   voit pas dans une occupation MENSUELLE : décembre à p90 64 % ne dit pas
+   que la semaine de Noël ne sature pas — le pacing la mesurait à ×2,54. La
+   saturation est un fait de JOURS ; seul le pacing (quotidien, vers l'avant,
+   `fill_rate`) peut la voir, et seulement pour l'avenir.
+2. **L'occupation AirROI se rapporte aux nuits OUVERTES de chaque annonce**
+   (Airbnb seul) : une annonce ouverte cinq nuits et louée cinq fois compte
+   100 %. Un p90 élevé peut venir d'annonces peu ouvertes.
+3. **La part au-dessus de 90 % n'est qu'une fourchette** tirée des quantiles
+   (p90 ≥ 90 % → au moins 10 % des annonces ; p75 < 90 % → moins de 25 %).
+
+**Question posée à AirROI par Thierry (mail du 30 septembre 2026)** pour une
+réponse définitive sur l'existence d'une série quotidienne. En attente. Sa
+réponse tranche avant l'essai `num_months: 0` : si elle est claire, l'essai
+n'a plus lieu d'être.

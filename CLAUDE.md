@@ -228,8 +228,11 @@ trace dans `prix_hote_journal`. Règle de saut du moteur, une seule :
 `prix-hote-journal` appliquées staging et prod (et `fermetures`, absente en
 prod jusqu'au 23 septembre). **La bulle est ACTIVÉE (pilote YieldFlow) depuis
 le 23 septembre 2026** ; son reliquat de bascule (476 nuits) a été réparé par
-`scripts/defaire-fermeture-bascule.js`. Cœur de vie 23 porte le même reliquat
-(786 nuits, lot 2026-09-10T17:17) : NON touché, sur go de Thierry seulement.
+`scripts/defaire-fermeture-bascule.js`. Cœur de vie 23 portait le même reliquat
+(786 nuits, lot 2026-09-10T17:17, du 8 déc. 2026 au 31 janv. 2029) : **réparé
+le 30 septembre 2026 sur go de Thierry** (même script, incident 16387) ; le
+pilote a rouvert 232 nuits avec leur prix jusqu'au 27 juillet 2027 (fenêtre
+300 jours). Symptôme vu par Thierry : « il s'ouvre seulement jusqu'à décembre ».
 Aussi en prod : UI calendrier et fonctions Vercel en région Paris
 (`docs/kb/performance.md`). Spec : docs/specs/spec-yieldflow-v1.md §2 ter.
 

@@ -110,13 +110,16 @@ test('LE TEST QUI COMPTE : la cle ne s ecrit nulle part — cache, journal, erre
   })
 })
 
-test('une erreur HTTP est journalisee a cout plein et n entre pas au cache', async () => {
+// ⚠ REECRIT LE 30 SEPTEMBRE 2026 (REVIEW.md regle 17) : la version du
+// 24 septembre exigeait le cout PLEIN pour une erreur HTTP — elle figeait le
+// defaut releve par Thierry (un 422 non facture vidait le budget).
+test('une erreur HTTP est journalisee a cout NUL (non facturee) et n entre pas au cache', async () => {
   await avecCle(async () => {
     const d = dossier()
     const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: faux('non', 403) })
     await assert.rejects(c.metriquesAnnonce('33549601', H), /HTTP 403/)
     const j = fs.readFileSync(path.join(d, 'appels.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
-    assert.deepEqual(j.map(x => [x.statut, x.cout_usd, x.http]), [['erreur', 0.1, 403]], 'reservee avant le reseau, terminee en erreur')
+    assert.deepEqual(j.map(x => [x.statut, x.cout_usd, x.http]), [['erreur', 0, 403]], 'reservee avant le reseau, liberee au refus du serveur')
     const f = faux(lire('labulle-60.json'))
     await creerClient({ alerter: null, depot: depotFichier(d), fetch: f }).metriquesAnnonce('33549601', H)
     assert.equal(f.appels.length, 1, 'rien en cache : l appel repart')
@@ -167,6 +170,59 @@ test('un cache perime repart ; la cle de cache ignore l ordre des parametres', a
 test('on prend a AirROI sa donnee, jamais ses prix : price-recommendation est refuse', async () => {
   const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: faux('{}') })
   await assert.rejects(c.appeler('POST /price-recommendation/base-price', {}), /endpoint refuse/)
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : calendar-prices, SEULE exception — base 100 imposee, 0,10 $, servi par le cache au deuxieme appel', async () => {
+  await avecCle(async () => {
+    const f = faux(JSON.stringify({ recommendations: [{ date: '2026-12-25', price: 160 }] }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const p = { latitude: 43.06, longitude: 0.15, debut: '2026-10-01', fin: '2028-09-29' }
+    const r = await c.reliefCalendrier(p, H)
+    assert.deepEqual([r.depuisCache, r.cout], [false, 0.10])
+    assert.equal(f.appels[0].url, 'https://api.airroi.com/price-recommendation/calendar-prices')
+    assert.deepEqual(JSON.parse(f.appels[0].init.body),
+      { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' })
+    assert.equal((await c.reliefCalendrier(p, H)).depuisCache, true)
+    assert.equal(f.appels.length, 1)
+  })
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : jamais le prix d un logement — une autre base, un champ de plus ou base-price sont refuses AVANT le reseau', async () => {
+  await avecCle(async () => {
+    const f = faux('{}')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' }
+    const E = 'POST /price-recommendation/calendar-prices'
+    await assert.rejects(c.appeler(E, { ...ok, base_price: 135 }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, base_price: '100' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, pricing_rules: {} }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, start_date: '2029-01-01' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler('POST /price-recommendation/base-price', { ...ok }, H), /endpoint refuse/)
+    // Review de f13526c : corps fige a TOUS les niveaux, dates reelles,
+    // depart au 1er d'un mois, 730 jours au plus.
+    await assert.rejects(c.appeler(E, { ...ok, location: { ...ok.location, base_price: 135 } }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, end_date: '2026-99-99' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, start_date: '2026-02-30' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, start_date: '2026-10-02' }, H), /parametres invalides/)
+    await assert.rejects(c.appeler(E, { ...ok, end_date: '2028-09-30' }, H), /parametres invalides/)
+    assert.equal(f.appels.length, 0)
+    await c.appeler(E, ok, H).catch(() => {})
+    assert.equal(f.appels.length, 1, 'le corps de reference, lui, part (730 jours pile)')
+  })
+})
+
+test('LE TEST QUI COMPTE (review de f13526c) : un 200 sans aucun jour date n entre PAS au cache — ni « quota », ni liste vide', async () => {
+  await avecCle(async () => {
+    for (const corps of ['{"message":"quota"}', '{"recommendations":[]}']) {
+      const f = faux(corps)
+      const d = dossier()
+      const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: f })
+      const p = { latitude: 43.06, longitude: 0.15, debut: '2026-10-01', fin: '2028-09-29' }
+      await assert.rejects(c.reliefCalendrier(p, H))
+      await assert.rejects(c.reliefCalendrier(p, H))
+      assert.equal(f.appels.length, 2, `${corps} : rien n a ete range, le second appel repart`)
+    }
+  })
 })
 
 // ─── Ajouts de la review du 24 septembre 2026 ───────────────────────────────
@@ -306,4 +362,163 @@ test('LE TEST QUI COMPTE : la marge est le plus petit reste des trois garde-fous
   await depot.terminer(id, { statut: 'ok', http: 200 })
   assert.equal(await client.marge({ userId: 'u', propertyId: 'b' }), 1.4, 'le compte a depense 2,60 $ sur un autre bien : il reste 1,40 $')
   assert.equal(await client.marge({ userId: 'v', propertyId: 'c' }), 3, 'un autre compte n en paie rien')
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026, HTTP 422) : la devise se verifie AVANT l envoi — EUR part, minuscules et « native » ne partent pas', async () => {
+  await avecCle(async () => {
+    const f = faux('{}')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const ok = { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' }
+    const E = 'POST /price-recommendation/calendar-prices'
+    for (const devise of ['native', 'eur', 'Eur', 'EURO', 'EU', ' EUR', '', null, ['EUR']]) {
+      await assert.rejects(c.appeler(E, { ...ok, currency: devise }, H), /parametres invalides/, String(devise))
+    }
+    assert.equal(f.appels.length, 0, 'aucune devise mal formee n a atteint le serveur')
+    await c.appeler(E, ok, H).catch(() => {})
+    assert.equal(f.appels.length, 1)
+    assert.equal(JSON.parse(f.appels[0].init.body).currency, 'EUR')
+  })
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : une requete REFUSEE par le serveur libere sa reservation — le budget ne se vide pas sur des appels qui n ont pas eu lieu', async () => {
+  await avecCle(async () => {
+    const d = dossier()
+    const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: faux('{"detail":"currency must be ISO"}', 422) })
+    const p = { latitude: 43.06, longitude: 0.15, debut: '2026-10-01', fin: '2028-09-29' }
+    await assert.rejects(c.reliefCalendrier(p, H), /HTTP 422/)
+    const journal = fs.readFileSync(path.join(d, 'appels.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+    assert.deepEqual(journal.map(l => [l.statut, l.http, l.cout_usd]), [['erreur', 422, 0]])
+    assert.equal(await c.estimer([{ endpoint: 'POST /price-recommendation/calendar-prices', params: { location: { latitude: 43.06, longitude: 0.15 }, currency: 'EUR', base_price: 100, start_date: '2026-10-01', end_date: '2028-09-29' } }]), 0.1)
+    // Une coupure RESEAU, elle, reste comptee (facturation inconnue).
+    const d2 = dossier()
+    const coupe = async () => { throw new Error('ECONNRESET') }
+    const c2 = creerClient({ alerter: null, depot: depotFichier(d2), fetch: coupe })
+    await assert.rejects(c2.reliefCalendrier(p, H), /reseau/)
+    const j2 = fs.readFileSync(path.join(d2, 'appels.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+    assert.deepEqual(j2.map(l => [l.statut, l.cout_usd]), [['erreur', 0.1]])
+  })
+})
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : occupancy — corps fige (marche, mois, native), 0,10 $, cache au deuxieme appel ; tout ecart refuse AVANT le reseau', async () => {
+  await avecCle(async () => {
+    const f = faux(JSON.stringify({ results: [{ date: '2026-08-01', occupancy: { p50: 0.5 } }] }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    const r = await c.occupationMarche(market, 60, H)
+    assert.deepEqual([r.depuisCache, r.cout], [false, 0.10])
+    assert.equal(f.appels[0].url, 'https://api.airroi.com/markets/metrics/occupancy')
+    assert.deepEqual(JSON.parse(f.appels[0].init.body), { market, num_months: 60, currency: 'native' })
+    assert.equal((await c.occupationMarche(market, 60, H)).depuisCache, true)
+    const E = 'POST /markets/metrics/occupancy'
+    for (const p of [{ market, num_months: 61, currency: 'native' }, { market, num_months: -1, currency: 'native' }, { market, num_months: 0.5, currency: 'native' }, { market, num_months: 60, currency: 'EUR' },
+      { market, num_months: 60, currency: 'native', filter: {} }, { market: { country: 'France' }, num_months: 60, currency: 'native' },
+      { market: { ...market, district: null }, num_months: 60, currency: 'native' }]) {
+      await assert.rejects(c.appeler(E, p, H), /parametres invalides/)
+    }
+    assert.equal(f.appels.length, 1)
+  })
+})
+
+test('occupancy : un 200 sans aucun tableau non vide n entre pas au cache', async () => {
+  await avecCle(async () => {
+    const f = faux('{"results":[]}')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    await assert.rejects(c.occupationMarche(market, 60, H))
+    await assert.rejects(c.occupationMarche(market, 60, H))
+    assert.equal(f.appels.length, 2)
+  })
+})
+
+test('LE TEST QUI COMPTE (review de f40ee9e) : occupancy — un 200 d erreur ou sans point date n entre PAS au cache', async () => {
+  await avecCle(async () => {
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    for (const corps of ['{"errors":["quota exceeded"]}', '{"results":[{}]}', '[[1]]', '{"error":"x","results":[{"date":"2026-01-01"}]}']) {
+      const d = dossier()
+      const f = faux(corps)
+      const c = creerClient({ alerter: null, depot: depotFichier(d), fetch: f })
+      await assert.rejects(c.occupationMarche(market, 60, H))
+      await assert.rejects(c.occupationMarche(market, 60, H))
+      assert.equal(f.appels.length, 2, `${corps} : rien n a ete range`)
+    }
+    // Un point date un niveau plus bas (forme « daily / monthly ») est accepte.
+    const f = faux(JSON.stringify({ daily: { results: [{ date: '2026-01-01', occupancy: 0.4 }] } }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    assert.equal((await c.occupationMarche(market, 60, H)).depuisCache, false)
+    assert.equal((await c.occupationMarche(market, 60, H)).depuisCache, true)
+  })
+})
+
+test('LE TEST QUI COMPTE (SECURITE, review de f40ee9e) : sans cle dans l environnement, les scripts de capture n ecrivent AUCUNE fixture, meme servis par le cache', async () => {
+  const { execFileSync } = require('child_process')
+  const racine = path.join(__dirname, '..')
+  const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+  const cas = [
+    { script: 'scripts/capturer-occupation-airroi.js', prefixe: 'occupation-bagneres-', endpoint: 'POST /markets/metrics/occupancy',
+      params: { market, num_months: 60, currency: 'native' }, reponse: '{"results":[{"date":"2026-01-01"}]}' }
+  ]
+  // Le relief : meme fenetre que le script (1er du mois suivant, 730 jours).
+  const { jourLocalParis } = require('../lib/yield/zones-scolaires')
+  const [an, mo] = jourLocalParis(new Date().toISOString()).slice(0, 7).split('-').map(Number)
+  const debut = new Date(Date.UTC(an, mo, 1)).toISOString().slice(0, 10)
+  const fin = new Date(Date.parse(`${debut}T00:00:00Z`) + 729 * 86400000).toISOString().slice(0, 10)
+  const moi = lireJson(lire('moi.json')).location_info
+  cas.push({ script: 'scripts/capturer-relief-airroi.js', prefixe: 'relief-bagneres-', endpoint: 'POST /price-recommendation/calendar-prices',
+    params: { location: { latitude: moi.latitude, longitude: moi.longitude }, currency: 'EUR', base_price: 100, start_date: debut, end_date: fin },
+    reponse: '{"recommendations":[{"date":"2026-10-01","price":100}]}' })
+  // Le pacing (script du 24 septembre, meme defaut — re-review de 9b47690) :
+  // un lookup puis le pacing, tous deux servis par le cache.
+  const moiLoc = lireJson(lire('moi.json')).location_info
+  const marche60 = lireJson(lire('marche-60.json')).market
+  const marcheP = { country: marche60.country, region: marche60.region, locality: marche60.locality }
+  cas.push({ script: 'scripts/capturer-pacing.js', prefixe: 'pacing-bagneres-', endpoint: 'POST /markets/metrics/future/pacing',
+    params: { market: marcheP, currency: 'native' }, reponse: '{"market":{},"results":[{"date":"2026-10-01"}]}',
+    avant: { endpoint: 'GET /markets/lookup', params: { lat: moiLoc.latitude, lng: moiLoc.longitude }, reponse: JSON.stringify(marcheP) } })
+  // Liste ET date de modification : une fixture du jour reecrite ne changerait
+  // pas la liste.
+  const etat = prefixe => fs.readdirSync(FIX).filter(f => f.startsWith(prefixe)).map(f => [f, fs.statSync(path.join(FIX, f)).mtimeMs])
+  for (const c of cas) {
+    const d = dossier()
+    const sortie = dossier()
+    for (const e of [c.avant, c].filter(Boolean)) {
+      await depotFichier(d).ecrireCache({ cle: cleCanonique(e.endpoint, e.params), endpoint: e.endpoint, parametres: e.params,
+        reponse: e.reponse, cout: 0.1, recupereLe: new Date().toISOString() })
+    }
+    const avant = etat(c.prefixe)
+    const env = { ...process.env }
+    delete env.AIRROI_API_KEY
+    let code = 0
+    // `--fixtures` isole l'ECRITURE : meme si le script regresse, le depot
+    // n'est pas sali (re-review de 9b47690).
+    try { execFileSync(process.execPath, [path.join(racine, c.script), `--cache=${d}`, `--fixtures=${sortie}`], { env, stdio: 'pipe' }) } catch (e) { code = e.status }
+    assert.equal(code, 6, `${c.script} : refus attendu (code 6)`)
+    assert.deepEqual(fs.readdirSync(sortie), [], `${c.script} : rien d ecrit dans le dossier de sortie`)
+    assert.deepEqual(etat(c.prefixe), avant, `${c.script} : aucune fixture ecrite ni reecrite`)
+  }
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : ecrireFixtureSansCle — verifie en memoire, puis ecrit ; cle absente ou mal formee = refus', () => {
+  const { ecrireFixtureSansCle } = require('../lib/airroi/fixture-sure')
+  const d = dossier()
+  const f = path.join(d, 'x.json')
+  const cle = `factice-${crypto.randomUUID()}`
+  const code = fn => { try { fn(); return 0 } catch (e) { return e.code } }
+  assert.equal(code(() => ecrireFixtureSansCle('{}', f, '')), 6)
+  assert.equal(code(() => ecrireFixtureSansCle('{}', f, `${cle}\n`)), 6, 'une cle avec un blanc final rendrait le controle vide')
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${cle}"}`, f, cle)), 4)
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${encodeURIComponent(cle)}"}`, f, cle)), 4)
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${Buffer.from(cle).toString('base64')}"}`, f, cle)), 4)
+  assert.deepEqual(fs.readdirSync(d), [], 'aucun refus n a ecrit')
+  assert.equal(code(() => ecrireFixtureSansCle('{"ok":1}', f, cle)), 0)
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"ok":1}')
+})
+
+test('occupancy : num_months = 0 est admis (contrat de l API : 0 a 60) — essai du 30 septembre 2026', async () => {
+  await avecCle(async () => {
+    const f = faux(JSON.stringify({ results: [{ date: '2026-08-01', p50: 0.5 }] }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    await c.occupationMarche(market, 0, H)
+    assert.deepEqual(JSON.parse(f.appels[0].init.body), { market, num_months: 0, currency: 'native' })
+  })
 })

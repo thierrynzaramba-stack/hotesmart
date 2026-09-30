@@ -31,12 +31,16 @@ const fs = require('fs')
 const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotFichier } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
+const { ecrireFixtureSansCle, RefusFixture } = require('../lib/airroi/fixture-sure')
 
 const args = process.argv.slice(2)
 const val = (n, d) => { const a = args.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : d }
 const dossier = val('cache', path.join(require('os').homedir(), '.hotesmart-airroi-cache'))
 const budget = Number(val('budget', '0.5'))
+// Les fixtures de LECTURE (moi.json, marche-60.json) viennent toujours du
+// depot ; `--fixtures` ne deplace que l'ECRITURE (les tests l'isolent).
 const FIX = path.join(__dirname, '..', 'tests', 'fixtures', 'airroi')
+const SORTIE = val('fixtures', FIX)
 const CHAMPS_MARCHE = ['country', 'region', 'locality']
 
 ;(async () => {
@@ -73,20 +77,12 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   const brut = await depot.lireCache(cleCanonique('POST /markets/metrics/future/pacing', { market: marche, currency: 'native' }))
   if (!brut || typeof brut.reponse !== 'string') throw new Error('reponse du pacing introuvable dans le cache')
   const jour = String(brut.recupere_le || new Date().toISOString()).slice(0, 10)
-  const fichier = path.join(FIX, `pacing-bagneres-${jour}.json`)
-  fs.writeFileSync(fichier, brut.reponse)
-
-  // 5. Aucune trace de la cle, sous aucune forme. Rien n'est affiche d'elle.
-  // Sans cle dans l'environnement (relance servie par le cache), la
-  // verification a eu lieu a l'execution qui a paye et ecrit ce cache.
-  const cle = process.env.AIRROI_API_KEY || ''
-  const formes = cle ? [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)] : []
-  const contenu = fs.readFileSync(fichier, 'utf8')
-  if (formes.some(f => f && contenu.includes(f))) {
-    fs.unlinkSync(fichier)
-    console.error('ECHEC : la fixture contenait la cle — fichier SUPPRIME, rien a commiter.')
-    process.exit(4)
-  }
+  const fichier = path.join(SORTIE, `pacing-bagneres-${jour}.json`)
+  // 5. Aucune trace de la cle, verifiee EN MEMOIRE avant d'ecrire ; sans cle
+  // dans l'environnement, refus (review de 9b47690, SECURITE : la version
+  // precedente ecrivait puis ne verifiait rien sans cle).
+  ecrireFixtureSansCle(brut.reponse, fichier, process.env.AIRROI_API_KEY || '')
+  const contenu = brut.reponse
 
   // Ce que contient la reponse : sa forme, pas ses chiffres (ils se liront au
   // lot V2.3.1, dans les tests).
@@ -115,4 +111,4 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
     process.exit(5)
   }
   process.exit(0)
-})().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })
+})().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(e instanceof RefusFixture ? e.code : 1) })
