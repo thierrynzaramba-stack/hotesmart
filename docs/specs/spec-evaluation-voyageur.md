@@ -207,7 +207,7 @@ deux tables, pas un jsonb dans `avis_config`. L'argument est dans §7 bis.
 **`guest_evaluations.grille_figee`** (jsonb) : la copie de la grille au premier
 remplissage (§4.4).
 
-**Réglages prestataire** : `eval_scope` (`aucun`|`proprete`|`complet`, défaut `proprete`) et `eval_power` (`soumettre`|`valider`, défaut `soumettre`). Emplacement à trancher en étape 0 : profil prestataire (`profiles`) ou liaison bien-prestataire (`property_cleaning_providers`). Préférence : le profil (réglage de la personne, pas du bien).
+**Réglages prestataire** : `eval_scope` (`aucun`|`selon_grille`, défaut `selon_grille` — voir §4.6 ; `proprete` et `complet` sont les valeurs retirées, converties par la migration du 30 septembre 2026) et `eval_power` (`soumettre`|`valider`, défaut `soumettre`). Emplacement à trancher en étape 0 : profil prestataire (`profiles`) ou liaison bien-prestataire (`property_cleaning_providers`). Préférence : le profil (réglage de la personne, pas du bien).
 
 RLS : `can_read`/`can_write` sur le domaine `avis` ; PWA prestataire via token, limitée à ses propres ménages et à son périmètre de questions.
 

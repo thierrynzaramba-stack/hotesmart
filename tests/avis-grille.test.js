@@ -164,3 +164,15 @@ test('les criteres de la grille par defaut gardent leurs tags', () => {
   assert.ok(t.includes('host_review_guest_positive_neat_and_tidy'))
   assert.ok(!t.some(x => x.includes('negative')))
 })
+
+// ⚠ Ce test est le jumeau, cote code, d'un trou trouve EN BASE par
+// scripts/prouver-grille-avis.js : la contrainte disait « note between 1 and
+// 5 », qui vaut NULL — donc passe — quand la note est nulle. La base
+// acceptait un critere note sans note ; le module, lui, le refusait deja.
+// Le test fige ce refus pour qu'il ne se perde pas.
+test('un critere note SANS note est refuse', () => {
+  const sansNote = { criteres: [{ cle: 'x', categorie: 'cleanliness', rang: 1, niveaux: [
+    { cle: 'a', libelle: 'A', rang: 1, note: null, negatif: false },
+  ] }] }
+  assert.throws(() => validerGrille(sansNote), /note invalide/)
+})

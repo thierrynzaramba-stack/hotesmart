@@ -2,9 +2,13 @@
 -- Amendement du 30 septembre 2026 : la grille d'evaluation
 -- devient configurable par l'hote.
 -- Spec : docs/specs/spec-evaluation-voyageur.md §4, §7 bis.
--- Writer : api/avis.js (lot 3), seul writer.
+-- Writer : api/avis.js, action « grille », A VENIR au
+-- lot 3. Tant qu'elle n'existe pas, ces tables sont
+-- inecrivables par tout chemin — la RLS revoque
+-- l'ecriture cliente et aucun code serveur n'y touche.
+-- C'est voulu : la migration part avant le code.
 -- Verification :
---   node scripts/verifier-avis-grille.js
+--   node scripts/verifier-avis-evaluation.js
 --
 -- ⚠ LIGNES COURTES VOLONTAIRES (editeur Supabase).
 --
@@ -64,7 +68,14 @@ create table if not exists public.avis_criteres (
   constraint avis_criteres_libelle_non_vide
     check (length(btrim(libelle)) > 0),
   constraint avis_criteres_rang_check
-    check (rang >= 1)
+    check (rang >= 1),
+
+  -- ⚠ PAS REDONDANT AVEC LA CLE PRIMAIRE : c'est la CIBLE
+  -- de la cle etrangere composite des niveaux. Elle rend
+  -- la categorie d'un niveau inseparable de celle de son
+  -- critere.
+  constraint avis_criteres_id_categorie
+    unique (id, categorie)
 );
 
 create index if not exists avis_criteres_grille_idx
@@ -105,10 +116,40 @@ create table if not exists public.avis_criteres_niveaux (
   -- Pour « recommandation » : ce niveau recommande-t-il ?
   recommande boolean,
 
+  -- ⚠ LA CATEGORIE, RECOPIEE ICI, ET C'EST VOULU.
+  -- Constat de review (30 septembre 2026) : §7 bis
+  -- justifie deux tables « pour que les regles tiennent
+  -- EN BASE » — or un CHECK ne voit que sa propre ligne.
+  -- La categorie vivait sur le critere : aucune
+  -- contrainte ne pouvait dire « une note est obligatoire
+  -- SAUF pour recommandation ». L'argument de §7 bis
+  -- exigeait cette colonne.
+  --
+  -- Elle ne peut pas diverger : la cle etrangere
+  -- COMPOSITE ci-dessous la lie a celle du critere, et
+  -- une mise a jour du critere la propage.
+  categorie text not null,
+
   created_at timestamptz not null default now(),
 
-  constraint avis_niveaux_note_check
-    check (note is null or note between 1 and 5),
+  constraint avis_niveaux_categorie_fk
+    foreign key (critere_id, categorie)
+    references public.avis_criteres(id, categorie)
+    on delete cascade on update cascade,
+
+  -- ⚠ CE QUE CHAQUE CATEGORIE EXIGE, ET CE QU'ELLE
+  -- INTERDIT. Sans cela, un niveau d'une categorie NOTEE
+  -- pouvait porter `note is null` : `noter()` envoyait
+  -- alors a Airbnb un score « rating: null ».
+  constraint avis_niveaux_forme_par_categorie
+    check (
+      case when categorie = 'recommandation'
+        then note is null and recommande is not null
+        else note is not null
+          and note between 1 and 5
+          and recommande is null
+      end
+    ),
 
   -- ⚠ LES DEUX REGLES QUE L'HOTE NE PEUT PAS DEFAIRE
   -- (§4.2). Ici, pas dans l'ecran : sinon un autre chemin
@@ -257,4 +298,5 @@ revoke insert, update, delete
 -- ─── Verification ──────────────────────────────────────
 -- ⚠ AUCUN SELECT ICI (regle gravee) : la preuve se fait
 -- par script, hors de l'editeur.
---   node --env-file=<env> scripts/verifier-avis-grille.js
+--   node --env-file=<env> \
+--     scripts/verifier-avis-evaluation.js

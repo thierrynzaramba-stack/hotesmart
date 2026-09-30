@@ -117,6 +117,11 @@ async function colonnes (nom, liste) {
   if (cProf.toutes) {
     // Les defauts de la spec : proprete / soumettre. Sur les profils existants,
     // la valeur par defaut a ete appliquee par le ALTER.
+    // ⚠ LES VALEURS ATTENDUES SUIVENT LA MIGRATION DU 30 SEPTEMBRE : `proprete`
+    // et `complet` deviennent `selon_grille`. Constat de review — sans cette
+    // ligne, le script rendait KO sur une base CORRECTEMENT migree, ce qui
+    // aurait envoye chercher une panne inexistante.
+    //
     // ⚠ PAS DE `.limit()` MUETTE. La premiere version lisait 200 profils et
     // annoncait « valeurs conformes » : au-dela, les lignes n'etaient jamais
     // regardees, et la ligne se lisait comme un succes. On compte la base
@@ -125,11 +130,31 @@ async function colonnes (nom, liste) {
       .select('*', { count: 'exact', head: true })
     const { count: hors, error: eH } = await sb.from('profiles')
       .select('*', { count: 'exact', head: true })
-      .or('eval_scope.not.in.(aucun,proprete,complet),eval_power.not.in.(soumettre,valider)')
+      .or('eval_scope.not.in.(aucun,selon_grille,proprete,complet),eval_power.not.in.(soumettre,valider)')
     if (eT || eH) ko(`profiles : comptage impossible — ${(eT || eH).message}`)
     else if (hors) ko(`profiles : ${hors} profil(s) sur ${total} hors valeurs autorisees`)
     else ok(`profiles : ${total} profil(s) au total, tous conformes`)
   }
+
+  console.log('\nGrille configurable (30 septembre 2026)')
+  for (const nom of ['avis_criteres', 'avis_criteres_niveaux']) {
+    const t = await table(nom)
+    if (t.absente) ko(`table \`${nom}\` ABSENTE — migration de la grille non appliquee`)
+    else if (t.erreur) ko(`table \`${nom}\` illisible : ${t.erreur}`)
+    else ok(`table \`${nom}\` presente (${t.lignes} ligne(s) — 0 attendu : la grille par defaut vit dans le code)`)
+  }
+  const cCrit = await colonnes('avis_criteres', ['user_id', 'property_id', 'libelle', 'categorie', 'rempli_par', 'rang', 'actif'])
+  cCrit.toutes ? ok('avis_criteres : les colonnes attendues')
+               : ko(`avis_criteres : colonne manquante — ${cCrit.manquante}`)
+  // ⚠ `categorie` SUR LES NIVEAUX : c'est elle qui rend les regles verifiables
+  // par la base (spec §7 bis). Son absence signale la version d'avant le
+  // correctif du 30 septembre.
+  const cNiv = await colonnes('avis_criteres_niveaux', ['critere_id', 'cle', 'libelle', 'rang', 'note', 'negatif', 'recommande', 'categorie'])
+  cNiv.toutes ? ok('avis_criteres_niveaux : les colonnes attendues, `categorie` comprise')
+              : ko(`avis_criteres_niveaux : colonne manquante — ${cNiv.manquante}`)
+  const cGf = await colonnes('guest_evaluations', ['grille_figee'])
+  cGf.toutes ? ok('guest_evaluations : grille_figee posee')
+             : ko(`guest_evaluations : grille_figee manquante — ${cGf.manquante}`)
 
   console.log('\nMigration 2 — core_events')
   const ce = await table('core_events')

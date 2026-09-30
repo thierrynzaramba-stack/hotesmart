@@ -169,3 +169,51 @@ test('coupure en cours de POST : issue INCERTAINE, statut echec, pas de second e
   assert.strictEqual(r.incertain, true, 'l’appel est parti : on ignore s’il a abouti')
   assert.strictEqual(p.appels.filter(a => a.type === 'post').length, 1)
 })
+
+// ─── La grille figee (amendement du 30 septembre 2026) ──────────────────────
+const GRILLE_HOTE = {
+  criteres: [{
+    cle: 'couvre_feu', libelle: 'Respect du couvre-feu',
+    categorie: 'respect_house_rules', rempli_par: 'hote', rang: 1,
+    niveaux: [
+      { cle: 'oui', libelle: 'Oui', rang: 1, note: 5, negatif: false },
+      { cle: 'non', libelle: 'Non', rang: 2, note: 1, negatif: true },
+    ],
+  }],
+}
+
+test('LE TEST QUI COMPTE : on publie sur la grille FIGEE, pas sur celle du code', async () => {
+  const p = provider()
+  await publier({ evaluation: evaluation({ grille_figee: GRILLE_HOTE, answers_host: { couvre_feu: 'oui' } }), provider: p })
+  const r = p.appels.find(a => a.type === 'post').charge.review
+  assert.deepStrictEqual(r.scores, [{ category: 'respect_house_rules', rating: 5 }])
+  // Aucun critere de recommandation dans cette grille : le champ est ABSENT,
+  // pas `undefined` — l'OTA lirait un champ vide comme un refus.
+  assert.ok(!('is_reviewee_recommended' in r))
+  assert.deepStrictEqual(r.tags, [], 'un critere invente par l’hote ne porte aucun tag')
+})
+
+test('LE TEST QUI COMPTE : des reponses qui ne collent pas a la grille sont un REFUS, pas un 500', async () => {
+  const p = provider()
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ grille_figee: GRILLE_HOTE, answers_host: { etat: 'impeccable' } }), provider: p }),
+    (e) => e instanceof RefusPublication && e.motif === 'reponses_hors_grille')
+  assert.deepStrictEqual(p.appels, [], 'rien ne part')
+})
+
+test('le garde-fou du negatif suit la grille figee, pas la liste d’origine', async () => {
+  const p = provider()
+  await assert.rejects(
+    () => publier({
+      evaluation: evaluation({ grille_figee: GRILLE_HOTE, answers_host: { couvre_feu: 'non' } }),
+      parProfil: { eval_power: 'valider' }, provider: p }),
+    (e) => e.motif === 'negatif_a_valider')
+  assert.deepStrictEqual(p.appels, [])
+})
+
+test('sans grille figee, la grille par defaut s’applique — les evaluations d’avant restent publiables', async () => {
+  const p = provider()
+  const r = await publier({ evaluation: evaluation({ grille_figee: null }), provider: p })
+  assert.strictEqual(r.statut, 'publiee')
+  assert.strictEqual(p.appels.find(a => a.type === 'post').charge.review.scores.length, 3)
+})
