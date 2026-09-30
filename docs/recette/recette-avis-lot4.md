@@ -5,21 +5,28 @@
 
 ## Avant de commencer
 
-**Une variable à poser sur le projet Vercel `hotesmart-staging`** :
+**Rien à poser.** Depuis le 30 septembre 2026, la publication d'un avis est
+**simulée partout sauf sur la base de production**, reconnue positivement par sa
+référence. Une base inconnue simule, une variable absente simule, une
+configuration à moitié faite simule. On échoue fermé.
 
-```
-AVIS_PUBLICATION_SIMULEE = 1
-```
+C'est le renversement d'un premier choix qui demandait une variable pour simuler.
+Il a été mesuré et il était faux : la variable avait été posée, et l'avis est
+**parti quand même** — un déploiement déjà construit ne relit pas ses variables.
+Le provider a refusé pour une autre raison, et c'est la seule chose qui a évité
+l'envoi. Un garde ouvert par défaut est un accident qui attend une occasion.
 
-Sans elle, l'étape « Publier » tentera un vrai appel chez Channex. Il échouerait
-en 404 — la référence de l'évaluation de recette n'existe pas chez eux — mais tu
-verrais un échec de publication au lieu du parcours complet. Après l'avoir
-ajoutée, redéploie (Vercel → Deployments → Redeploy), sinon elle n'est pas lue.
+`AVIS_PUBLICATION_REELLE=1` ouvre la porte hors production, si un jour on veut
+éprouver le vrai chemin contre le Channex de test. Il faut alors le demander.
 
-**Le verrou.** La simulation exige **deux** conditions : la variable, **et** une
-base qui n'est pas celle de production. Posée par erreur sur la production, elle
-est ignorée et l'incident est crié dans les journaux. L'inverse — « actif sauf en
-production » — aurait rendu un oubli de configuration dangereux.
+**En production, une variable de recette égarée est ignorée**, et l'incident est
+crié dans les journaux : elle aurait arrêté toutes les publications.
+
+**Ce qui rend l'inversion sans danger.** Si la production changeait de base, les
+avis cesseraient de partir — mais pas en silence : chaque publication simulée
+écrit dans les journaux d'**erreur**, la réponse porte `simulation: true`, et
+l'écran affiche « publié EN SIMULATION ». Le défaut inverse, lui, ne se voyait
+nulle part.
 
 ## Étape 0 — Vérifier que le verrou tient, avant tout le reste
 
@@ -38,15 +45,34 @@ vérifier. Rien n'est publié dans ce cas : la référence du décor n'existe pa
 le provider, et c'est cette ceinture qui tient — mais une ceinture ne remplace pas
 le verrou.
 
-**Mesuré le 30 septembre 2026** : au premier essai, la variable venait d'être
-posée et la simulation était **inactive** — l'appel est parti chez Channex, qui a
-répondu « 422 id is invalid ». Poser la variable et la voir lue sont deux choses
-différentes : un déploiement déjà construit ne relit pas les variables.
+**Pourquoi cette étape existe, et elle a servi.** Le 30 septembre 2026, au premier
+essai, la simulation était **inactive** : l'appel est parti chez Channex, qui a
+répondu « 422 id is invalid ». Poser une variable et la voir lue sont deux choses
+différentes. C'est cette mesure qui a fait inverser le verrou.
 
-**Une question à trancher aussi** : sur quel Channex pointe `CHANNEL_BASE_URL` du
-projet staging ? Si c'est `staging.channex.io`, aucune publication depuis staging
-ne peut atteindre Airbnb, et le verrou n'est qu'une seconde ligne. Si c'est
-l'API de production de Channex, il est la seule.
+Vérifié le même jour, après inversion : **OK**, la réponse porte
+`simulation: true` et rien ne part.
+
+**La configuration du canal se lit sans rien écrire** :
+
+```bash
+node --env-file=/home/thierry/hotesmart/.env.staging -e "
+const { createClient } = require('@supabase/supabase-js')
+;(async () => {
+  const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+  const { data } = await c.auth.signInWithPassword({ email: process.env.MEMBRE_TEST_EMAIL, password: process.env.MEMBRE_TEST_PASSWORD })
+  const r = await fetch('https://hotesmart-staging.vercel.app/api/diagnostic?check=channel', { headers: { Authorization: 'Bearer ' + data.session.access_token } })
+  console.log(JSON.stringify(await r.json(), null, 2)); await c.auth.signOut()
+})()"
+```
+
+Elle rend la **forme** de `CHANNEL_BASE_URL`, jamais son contenu utile, et
+`property_total` — le seul moyen de savoir à quel compte appartient la clé sans
+révéler le bien de personne. Le compte de canal est global en marque blanche.
+
+Valeurs attendues : `https://staging.channex.io/api/v1` pour le projet staging,
+`https://app.channex.io/api/v1` en production. Le chemin `/api/v1` fait partie de
+la valeur ; sans lui, et sans le schéma, tout appel échoue en `ERR_INVALID_URL`.
 
 ## URL et comptes
 
