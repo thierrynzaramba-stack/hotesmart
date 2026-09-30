@@ -116,8 +116,20 @@ test('LE TEST QUI COMPTE : aucun endpoint n expose le canal interne', () => {
       assert.ok(PEUT_APPELER_LE_CANAL.has(f), `${f} n a pas a connaitre le canal interne`)
     }
     if (/calendrier-writer/.test(src)) {
-      assert.equal(f, 'calendar.js', `${f} : seule la porte HTTP du calendrier appelle le writer`)
-      assert.ok(/origine: 'host'/.test(src), 'et elle dit qui elle est')
+      // ⚠ UNE EXCEPTION, ETROITE (lot 4.6.6, 30 septembre 2026) : un handler
+      // peut importer du writer `retirerDeLaVente` SEUL — le retrait des nuits
+      // sorties de la fenetre. Il ne sait QUE fermer (ni prix, ni ouverture ;
+      // tests/retrait-fenetre.test.js le prouve) : la garde du §2 bis, qui
+      // interdit a l'hote de TARIFER un bien pilote, n'a pas de porte ici.
+      const RETRAIT_SEUL = new Set(['yield-pilote.js'])
+      if (f !== 'calendar.js') {
+        assert.ok(RETRAIT_SEUL.has(f), `${f} : seule la porte HTTP du calendrier appelle le writer`)
+        const imports = [...src.matchAll(/const\s*\{([^}]*)\}\s*=\s*require\('\.\.\/lib\/calendrier-writer'\)/g)].map(m => m[1].split(',').map(x => x.trim()).filter(Boolean))
+        assert.deepEqual(imports, [['retirerDeLaVente']], `${f} : du writer, retirerDeLaVente et rien d autre`)
+        assert.ok(!/ecrireCalendrier/.test(src), `${f} n appelle jamais ecrireCalendrier`)
+      } else {
+        assert.ok(/origine: 'host'/.test(src), 'et elle dit qui elle est')
+      }
     }
     assert.ok(!/origine:\s*\(?\s*(req|body|query)\b/.test(src), `${f} : l origine ne vient JAMAIS de la requete`)
   }
