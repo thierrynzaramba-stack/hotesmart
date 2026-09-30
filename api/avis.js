@@ -421,6 +421,66 @@ async function requalifier (req, res, garde) {
 
 // ─── Routage ────────────────────────────────────────────────────────────────
 
+// GET evaluations — la liste du perimetre, pour la page /avis.
+//
+// ⚠ BORNEE ET INDEXEE, JAMAIS UN BALAYAGE. Objectif de 30 000 comptes (spec
+// §3) : la requete part de `user_id`, filtre le perimetre par bien en SQL, et
+// plafonne. L'index `guest_evaluations_compte_idx` la sert.
+async function evaluationsLister (req, res, garde) {
+  const userId = garde.accountUserId
+  const refs = refsDuPerimetre(garde.contexte)
+  const filtre = filtrePerimetreSql(refs, 'property_id_ref')
+
+  // ⚠ UN PERIMETRE VIDE N'EST PAS UNE ERREUR, et ce n'est pas « tout ». Sans ce
+  // retour, `filtre === ''` laissait la requete sans clause de perimetre : un
+  // membre sans aucun bien aurait vu TOUTES les evaluations du compte.
+  if (filtre === '') return res.status(200).json({ evaluations: [], biens: [], etats: ETATS_LISTE })
+
+  const etat = String(req.query?.etat || '').trim()
+  if (etat && !ETATS_LISTE.includes(etat)) return res.status(400).json({ error: 'Etat inconnu' })
+
+  // ⚠ TROIS VALEURS, PAS DEUX. `filtrePerimetreSql` rend `null` pour « tout le
+  // compte » (titulaire, ou membre au perimetre complet), `''` pour « aucun
+  // bien », et une expression sinon. Les confondre donnerait soit `.or(null)`
+  // — qui casse — soit une requete SANS clause de perimetre pour un membre qui
+  // n'a droit a rien.
+  let requete = supabase.from('guest_evaluations')
+    .select('id, booking_uid, property_id, property_id_ref, ota, status, language, '
+      + 'deadline_at, published_at, public_text, created_at, updated_at')
+    .eq('user_id', userId)
+  if (filtre !== null) requete = requete.or(filtre)
+  requete = requete.order('created_at', { ascending: false }).limit(MAX_LIGNES)
+  if (etat) requete = requete.eq('status', etat)
+
+  const { data, error } = await requete
+  if (error) return res.status(503).json({ error: 'Evaluations illisibles', detail: error.message })
+
+  // Les noms de biens, pour que l'ecran n'affiche pas des references provider.
+  const { data: biens, error: eBiens } = await supabase.from('properties')
+    .select('id, name, provider_property_id').eq('user_id', userId)
+  if (eBiens) return res.status(503).json({ error: 'Biens illisibles', detail: eBiens.message })
+  const nomDe = new Map((biens || []).map(b => [b.id, b.name]))
+
+  return res.status(200).json({
+    // ⚠ LE TEXTE PUBLIC N'EST PAS SERVI DANS UNE LISTE. Il n'y sert a rien, et
+    // une liste est ce qui fuite le plus facilement dans une capture d'ecran.
+    // Il se lit sur l'evaluation elle-meme, par `action=evaluation`.
+    evaluations: (data || []).map(e => ({
+      id: e.id, booking_uid: e.booking_uid, ota: e.ota, status: e.status,
+      property_id: e.property_id, bien: nomDe.get(e.property_id) || null,
+      langue: e.language, echeance: e.deadline_at, publie_le: e.published_at,
+      a_un_texte: Boolean(String(e.public_text || '').trim()),
+      creee_le: e.created_at,
+    })),
+    biens: (biens || []).filter(b => refs === null || refs.includes(String(b.provider_property_id)))
+      .map(b => ({ id: b.id, nom: b.name })),
+    etats: ETATS_LISTE,
+  })
+}
+
+const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
+                     'echec_publication', 'expiree', 'abandonnee']
+
 // ─── La configuration de redaction (mots-cles, ton, signature) ──────────────
 // Spec §4.7 : elle vit dans /settings, onglet « Avis ». Deux niveaux, comme la
 // grille : le compte, et un bien qui le surcharge.
@@ -1290,6 +1350,7 @@ async function router (req, res) {
 
   if (action === 'evaluation') return await evaluationLire(req, res, garde)
   if (action === 'grille') return await grilleLire(req, res, garde)
+  if (action === 'evaluations') return await evaluationsLister(req, res, garde)
   if (action === 'config') return await configLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })

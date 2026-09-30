@@ -271,6 +271,30 @@ configuration enregistre en bloc, ce n'est pas un chemin chaud.
 6. **PWA prestataire** (app ménage) : écran questions du cœur affiché juste après « Ménage fait » — via le protocole.
 7. **Fiche prestataire** (app ménage, `prestataires.html`) : les deux réglages §2.5 — via le protocole.
 
+## 8 bis. Ce que le lot 4 a livré (30 septembre 2026)
+
+| Pièce | Fichier | Ce qu'elle tient |
+|---|---|---|
+| Fenêtre d'évaluation | `core/avis/fenetre-evaluation.js` | coche, enregistre, rédige, publie, abandonne. Confirmation explicite avant un négatif. |
+| État d'un séjour | `core/avis/statut.js` | `avis.statut` par le bus. Ne lève jamais : `absente` et `hors_perimetre` sont des états. |
+| Réglages de la grille | `core/avis/ecran-reglages.js` | onglet « Avis » de `/settings` (§4.7). |
+| Liste des évaluations | `core/avis/liste-evaluations.js` | en tête de `/avis`. Trie par urgence, pas par date. |
+| Appel authentifié | `core/avis/appel.js` | jeton relu à chaque appel, en-tête de compte délégué. |
+
+**L'ordre de la liste dit l'urgence.** Un échec de publication passe devant tout :
+c'est la seule chose qu'un humain doit regarder tout de suite, l'avis étant
+peut-être parti. Puis `a_valider`, `soumise_prestataire`, `a_remplir`, et à statut
+égal ce qui expire le plus tôt. Une évaluation **sans échéance** n'est pas urgente :
+on ne sait pas quand elle expire, donc elle attend.
+
+**Un délai passé n'affiche aucun compte à rebours.** Ni un nombre négatif, qui se
+lit comme un bug, ni « dernier jour », qui serait faux. Et l'urgence se dit **en
+mots** autant qu'en couleur, pour une page lue en niveaux de gris.
+
+**La liste ne sert pas le texte public.** Il n'y sert à rien, et une liste est ce
+qui fuit le plus facilement dans une capture d'écran. Il se lit sur l'évaluation
+elle-même.
+
 ## 9. Archivage automatique des conversations (messagerie)
 
 **Prérequis bloquant : dette E1** — la messagerie doit lire la vraie table `messages`, sinon le compteur d'inactivité est faux.

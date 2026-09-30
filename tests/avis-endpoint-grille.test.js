@@ -297,3 +297,58 @@ test('la categorie du niveau est posee par le serveur, jamais crue du client', a
   const ins = etat.insertions.find(i => i.table === 'avis_criteres_niveaux')
   assert.ok(ins.row.every(l => l.categorie === 'respect_house_rules'))
 })
+
+// ─── La liste des evaluations (page /avis) ──────────────────────────────────
+test('evaluations : le titulaire voit la liste, et la requete ne porte PAS de clause de perimetre', async () => {
+  // `filtrePerimetreSql` rend `null` pour un acces total : appliquer `.or(null)`
+  // casserait la requete.
+  const etat = preparer({})
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'evaluations' }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(Array.isArray(res.body.evaluations))
+  const q = etat.requetes.find(x => x.table === 'guest_evaluations')
+  assert.strictEqual(q._or, undefined, 'aucune clause de perimetre pour le titulaire')
+})
+
+test('LE TEST QUI COMPTE : un membre SANS aucun bien recoit une liste vide, pas toutes les evaluations', async () => {
+  // `filtrePerimetreSql` rend '' : sans ce retour anticipe, la requete partait
+  // sans clause de perimetre.
+  const etat = preparer({ user: MEMBRE, profil: { ...MEMBRE_B.profil }, permissions: { avis: 'read', property_scope: 'selected', property_ids: [] } })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluations' }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.evaluations, [])
+  assert.strictEqual(etat.requetes.find(x => x.table === 'guest_evaluations'), undefined,
+    'aucune requete ne doit meme partir')
+})
+
+test('un membre limite a un bien voit une clause de perimetre sur sa reference', async () => {
+  const etat = preparer({ user: MEMBRE, ...MEMBRE_B })
+  const handler = require('../api/avis')
+  await handler(reqMembre({ action: 'evaluations' }, null, 'GET'), reponse())
+  const q = etat.requetes.find(x => x.table === 'guest_evaluations')
+  assert.ok(q._or, 'une clause de perimetre doit etre posee')
+  assert.match(q._or, /property_id_ref\.in\./)
+})
+
+test('un etat inconnu est refuse, plutot que silencieusement ignore', async () => {
+  preparer({})
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'evaluations', etat: 'peut_etre' }, null, 'GET'), res)
+  assert.strictEqual(res.code, 400)
+})
+
+test('LE TEST QUI COMPTE : la liste ne sert PAS le texte public', async () => {
+  // Il n y sert a rien, et une liste est ce qui fuite le plus facilement dans
+  // une capture d ecran.
+  preparer({})
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'evaluations' }, null, 'GET'), res)
+  const q = JSON.stringify(res.body)
+  assert.ok(!q.includes('public_text'))
+})
