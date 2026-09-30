@@ -57,8 +57,11 @@ test('la source reste lisible dans la FICHE', () => {
   assert.match(PAGE, /ligneFiche\('Canal', canal\)/)
 })
 
-test('DESKTOP SEUL : la grille mobile garde sa pastille', () => {
-  assert.ok(MOBILE.includes('platformLogo'), 'le mobile n\'affiche pas le meme contenu')
+// ⚠ CE TEST FIGEAIT L'INVERSE (« la grille mobile garde sa pastille ») jusqu'au
+// chantier calendrier mobile du 30 septembre 2026 : Thierry a demande les memes
+// bulles sur le telephone, « sans logo ». Regle 17 : un test peut figer un bug.
+test('MOBILE RATTRAPE : la bulle du telephone perd aussi sa pastille', () => {
+  assert.ok(!/platformLogo/.test(MOBILE), 'plus de logo dans la bulle mobile')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

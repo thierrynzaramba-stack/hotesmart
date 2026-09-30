@@ -29,6 +29,11 @@ const PAGE_BRUTE = lire('pages', 'biens-calendrier.html')
 const sansCommentaires = (s) => s.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
 const PAGE = sansCommentaires(PAGE_BRUTE)
 const MOBILE = lire('pages', 'calendrier-mobile.html')
+// Depuis le chantier calendrier mobile (30 septembre 2026), la regle
+// « modifiable », sa note et l'adresse de la conversation vivent dans le module
+// commun aux deux ecrans : les tests la cherchent la, et verifient que la page
+// l'appelle.
+const MODULE = lire('shared', 'calendrier-resa.js')
 const CORE = lire('shared', 'calendar-core.js')
 // Meme raison que pour PAGE : les commentaires de `api/calendar.js` expliquent
 // ce qui a ete RETIRE (« un `.in('booking_id', tousLesIds)` »), et chercher ces
@@ -279,7 +284,8 @@ test('bulles : colonne elargie et ligne plus haute, de facon coherente', () => {
 test('conversation : le bouton existe et vise la messagerie par booking_id', () => {
   assert.match(PAGE, /id="resa-conversation"/)
   assert.match(PAGE, /Ouvrir la conversation/)
-  assert.match(PAGE, /messagerie\?conv=' \+ encodeURIComponent\(resa\.id\)/)
+  assert.match(MODULE, /messagerie\?conv=' \+ encodeURIComponent\(resa\.id\)/)
+  assert.match(PAGE, /urlConversation\(bien, resa\)/)
 })
 
 test('conversation : le bouton nait DESACTIVE et se resout a l\'ouverture', () => {
@@ -352,10 +358,10 @@ test('messagerie : `?bien=` n\'est applique que si le bien existe', () => {
 
 test('fiche : l\'edition exige Offline + Channex + droit + pas lecture seule', () => {
   const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFicheResa'), PAGE.indexOf('function blocConversation'))
-  assert.ok(bloc.includes('resa.offline'), 'reserve aux reservations directes')
-  assert.ok(bloc.includes('channex'), 'reserve aux biens Channex')
-  assert.ok(bloc.includes("peutEcrire('reservations')"), 'exige le droit')
-  assert.ok(bloc.includes('LECTURE_SEULE'), 'exclut la lecture seule')
+  const regle = MODULE.slice(MODULE.indexOf('export function droitsResa'), MODULE.indexOf('export function sansMessagerieOta'))
+  assert.ok(regle.includes('resa.offline && channex'), 'reserve aux reservations directes des biens Channex')
+  assert.ok(bloc.includes("droitsResa(bien, resa, peutEcrire('reservations') && !LECTURE_SEULE)"),
+    'la page passe le droit ET la lecture seule a la regle commune')
   assert.ok(bloc.includes('champsModifiables'), 'les champs ne sortent que dans ce cas')
 })
 
@@ -365,8 +371,10 @@ test('fiche : une vente du MOTEUR PUBLIC n\'est pas modifiable depuis le plannin
   // le voyageur. En deplacer dates ou prix depuis le planning ne declencherait ni
   // remboursement ni complement, et ne toucherait pas la ligne de vente.
   const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFicheResa'), PAGE.indexOf('function blocConversation'))
-  assert.ok(bloc.includes("resa.metaSource === 'hotesmart-engine'"), 'la sous-origine est lue')
-  assert.ok(bloc.includes('!venteEnLigne'), 'et elle ferme l\'edition')
+  const regle = MODULE.slice(MODULE.indexOf('export function droitsResa'), MODULE.indexOf('export function sansMessagerieOta'))
+  assert.ok(regle.includes("resa.metaSource === 'hotesmart-engine'"), 'la sous-origine est lue')
+  assert.ok(regle.includes('!venteEnLigne'), 'et elle ferme l\'edition')
+  assert.ok(bloc.includes('droitsResa('), 'et la page passe par cette regle')
   // Garde SERVEUR, la seule qui compte : une garde d'interface n'est pas une garde.
   const put = API.slice(API.indexOf("if (req.method === 'PUT')"))
   assert.match(put, /sousOrigine === 'hotesmart-engine'/)
@@ -438,7 +446,8 @@ test('PRIX : ne pas toucher au prix ne doit PAS repricer le sejour', () => {
 test('fiche : une resa OTA garde une fiche en CONSULTATION seule', () => {
   const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFicheResa'), PAGE.indexOf('function blocConversation'))
   assert.ok(bloc.includes('ligneFiche(\'Arrivée\''), 'les dates restent du texte hors Offline')
-  assert.match(PAGE, /modifiable uniquement chez/)
+  assert.match(MODULE, /modifiable uniquement chez/)
+  assert.match(bloc, /note\.textContent = droits\.note/)
 })
 
 test('fiche : les trois champs demandes sont editables', () => {
@@ -612,10 +621,15 @@ test('week-ends : le marquage est pose par UN seul helper, pour les trois lignes
 // 7. DESKTOP SEUL
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('DESKTOP SEUL : le mobile n\'a recu aucune de ces nouveautes', () => {
-  // Contrainte du chantier, et prolongement de la decision « desktop d'abord ».
+// ⚠ CE TEST FIGEAIT « le mobile n'a recu aucune de ces nouveautes » jusqu'au
+// chantier calendrier mobile du 30 septembre 2026 : le telephone porte
+// desormais la fiche, la modification et la saisie (`reservationDirecte`,
+// `ouvrirFicheResa`), par le module commun. Restent propres a l'ordinateur la
+// grille en barres, la fermeture a la vente d'un jour et ses identifiants de
+// champs. Regle 17 : un test peut figer ce qu'on a decide de changer.
+test('DESKTOP SEUL : ce que le telephone n\'a pas repris de la grille de l\'ordinateur', () => {
   for (const marqueur of ['barresResa', 'jour-ferme', 'btn-stop-sell', 'fiche-arrivee',
-                          'resa-conversation', 'reservationDirecte', 'ouvrirFicheResa']) {
+                          'resa-conversation']) {
     assert.ok(!MOBILE.includes(marqueur), `${marqueur} ne doit pas exister sur mobile`)
   }
 })

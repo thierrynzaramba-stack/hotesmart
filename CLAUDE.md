@@ -76,6 +76,18 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 - Corollaire pratique : une nouvelle donnée provider se traite dans cet ordre —
   table du cœur, writer dans `lib/`, puis lecture par l'app. Jamais l'inverse.
 
+## RÈGLE — LE MOBILE SUIT L'ORDINATEUR
+- **Toute spec livrée sur la version ordinateur d'un écran est reportée sur sa
+  version mobile — ou le report est PROPOSÉ à Thierry en fin de chantier.**
+  Jamais un chantier desktop clos sans que la question du mobile ait été posée.
+- **Une règle partagée par les deux versions vit dans un module commun**
+  (`shared/…`), jamais recopiée dans chaque page : deux copies divergent.
+- Vécu (30 septembre 2026) : la couleur des réservations était tirée au sort
+  (`SRC[idx % 3]`) sur les deux calendriers ; l'ordinateur avait été corrigé,
+  le téléphone jamais — une réservation Booking s'y affichait en rouge Airbnb.
+  Le mobile n'avait ni fiche, ni ajout, ni messagerie. Rattrapé par
+  `shared/calendrier-resa.js` (docs/kb/reservation-directe.md §12).
+
 ## ARCHITECTURE — CONFIG D'APP vs CONFIG GÉNÉRALE
 - **La configuration d'une APP vit DANS l'app.** Prestataires de ménage et leurs
   biens → `apps/menages/prestataires.html`. Modèles de messages → l'app
