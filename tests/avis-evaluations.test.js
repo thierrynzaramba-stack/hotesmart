@@ -27,12 +27,12 @@ const { GRILLE_DEFAUT } = require('../lib/avis/notes-evaluation')
 // Ce qui EST prouve ici : les fonctions pures (`deciderStatut`, `criteresPour`)
 // et l'enchainement des decisions.
 function faussebase ({ criteres = null, erreurLecture = null, majRendue = null, erreurMaj = null } = {}) {
-  const vu = { maj: null, insere: null, filtres: [] }
+  const vu = { maj: null, insere: null, filtres: [], requetes: [] }
   const api = {
     vu,
     from (table) {
       const chaine = {
-        select: () => chaine,
+        select: (c) => { vu.requetes.push({ table, colonnes: String(c || '') }); return chaine },
         eq: (col, val) => { vu.filtres.push([col, val]); return chaine },
         or: () => chaine,
         update: (m) => { vu.maj = m; return chaine },
@@ -138,14 +138,34 @@ test('LE TEST QUI COMPTE : une base illisible ne se confond pas avec une grille 
 })
 
 test('les criteres du bien l’emportent sur ceux du compte', async () => {
+  // ⚠ LA CLE D'UN CRITERE EST SON `id`. La table n'a pas de colonne `cle` — la
+  // spec §4.1 ne lui en donne pas — et la requete en demandait une : PostgREST
+  // rendait « column avis_criteres.cle does not exist », traduit en « grille
+  // illisible ». Aucune grille d'hote ne se chargeait. Trouve par
+  // scripts/prouver-parcours-avis.js sur la base staging, invisible d'ici : ce
+  // double n'execute pas de SQL.
   const sb = faussebase({ criteres: [
-    { cle: 'du_compte', libelle: 'Compte', categorie: 'cleanliness', rempli_par: 'hote', rang: 1, property_id: null,
+    { id: 'id-compte', libelle: 'Compte', categorie: 'cleanliness', rempli_par: 'hote', rang: 1, property_id: null,
       avis_criteres_niveaux: [{ cle: 'a', libelle: 'A', rang: 1, note: 5, negatif: false }] },
-    { cle: 'du_bien', libelle: 'Bien', categorie: 'cleanliness', rempli_par: 'hote', rang: 1, property_id: PROP,
+    { id: 'id-bien', libelle: 'Bien', categorie: 'cleanliness', rempli_par: 'hote', rang: 1, property_id: PROP,
       avis_criteres_niveaux: [{ cle: 'b', libelle: 'B', rang: 1, note: 5, negatif: false }] },
   ] })
   const g = await chargerGrille(sb, { userId: 'u-1', propertyId: PROP })
-  assert.deepStrictEqual(g.criteres.map(c => c.cle), ['du_bien'])
+  assert.deepStrictEqual(g.criteres.map(c => c.cle), ['id-bien'])
+})
+
+test('la requete NOMME la relation vers les niveaux, faute de quoi PostgREST refuse de choisir', async () => {
+  // Deux cles etrangeres relient les niveaux aux criteres : la simple sur
+  // `critere_id` et la composite `(critere_id, categorie)`. Sans nom explicite,
+  // PostgREST rend « more than one relationship was found ». Ce test garde la
+  // desambiguisation, que le double ne peut pas eprouver autrement.
+  const sb = faussebase({ criteres: [] })
+  await chargerGrille(sb, { userId: 'u-1', propertyId: PROP })
+  const req = sb.vu.requetes.find(q => q.table === 'avis_criteres')
+  assert.ok(req, 'la table des criteres doit etre interrogee')
+  assert.match(req.colonnes, /avis_criteres_niveaux!avis_niveaux_categorie_fk\(/)
+  assert.ok(!/(^|[ ,])cle([ ,]|$)/.test(req.colonnes.split('avis_criteres_niveaux')[0]),
+    'aucune colonne `cle` ne doit etre demandee sur avis_criteres')
 })
 
 // ─── L'enregistrement ───────────────────────────────────────────────────────

@@ -374,6 +374,26 @@ contredits si Thierry le veut, pas enterrés dans un commentaire.
   parti ». Ne pas savoir n'est pas savoir que non.
 - Échec réseau après envoi → pas de rejeu, alarme, vérification chez le provider.
 - Prestataire sur un bien hors périmètre ou d'un autre compte → refus.
+- **Lot 4 — la preuve du périmètre `avis_config` avec le compte test** :
+  `scripts/prouver-rls-avis.js` passe le compte test en membre restreint à un seul
+  bien, mesure ce qu'il voit, puis **restaure son profil et ses droits à
+  l'identique** et le relit pour le prouver. **Bloqué au 30 septembre 2026** : le
+  seul compte de l'auth de staging est le **titulaire**, qui voit tout par
+  construction. Le script refuse de tourner et dit son remède — un second compte,
+  dans `MEMBRE_TEST_EMAIL` / `MEMBRE_TEST_PASSWORD`. Il ne le crée pas de
+  lui-même : créer un compte dans une base réelle est une décision de Thierry.
+- **Lot 4 — le parcours complet sur staging** :
+  `scripts/prouver-parcours-avis.js` crée une vraie grille d'hôte en base, une
+  vraie évaluation, un profil prestataire d'accès par lien, puis enchaîne
+  prestataire → hôte → publication → refus du second envoi. **Rien n'est envoyé à
+  Airbnb** : le provider est un double local, et le script ne fait aucun appel
+  réseau.
+  Il a trouvé deux défauts que les 3690 tests unitaires ne pouvaient pas voir,
+  leur double de base n'exécutant pas de SQL : une **relation ambiguë** entre
+  critères et niveaux (deux clés étrangères, PostgREST refusait de choisir) et une
+  colonne **`cle` demandée qui n'existe pas** — la clé d'un critère est son `id`.
+  Dans les deux cas, aucune grille d'hôte ne se chargeait, et l'erreur sortait en
+  « grille indisponible ».
 - **Lot 4, sur la vraie base** : le compte de test, passé en membre restreint à un
   seul bien, voit la configuration de niveau compte (`property_id` nul) et celle de
   son bien, jamais celle d'un autre bien. Reporté ici depuis le lot 2 : la preuve y

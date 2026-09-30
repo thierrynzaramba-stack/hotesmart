@@ -23,8 +23,23 @@ const { createClient } = require('@supabase/supabase-js')
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 const ANON = process.env.SUPABASE_ANON_KEY
+// ⚠ DEUX JEUX D'IDENTIFIANTS POSSIBLES, ET L'ORDRE COMPTE.
+// `MEMBRE_TEST_EMAIL` d'abord : sur staging, TEST_EMAIL se trouve etre le
+// TITULAIRE du compte, qui voit tout par construction — la preuve du perimetre
+// exige un compte DISTINCT. Mesure du 30 septembre 2026 : l'auth de staging ne
+// contient qu'un seul compte, celui du titulaire.
+const TEST_EMAIL = process.env.MEMBRE_TEST_EMAIL || process.env.TEST_EMAIL
+const TEST_PASSWORD = process.env.MEMBRE_TEST_PASSWORD || process.env.TEST_PASSWORD
 if (!URL || !KEY || !ANON) {
   console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY requis.')
+  process.exit(1)
+}
+// ⚠ SANS LE COMPTE TEST, LE SCRIPT NE TOURNE PAS — il ne se rabat pas sur un
+// membre fabrique. Un repli silencieux ferait croire que la preuve demandee a
+// eu lieu alors qu'on aurait prouve autre chose.
+if (!TEST_EMAIL || !TEST_PASSWORD) {
+  console.error('TEST_EMAIL / TEST_PASSWORD requis : la preuve porte sur LE COMPTE TEST,')
+  console.error('passe membre restreint, pas sur un membre fabrique pour l occasion.')
   process.exit(1)
 }
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
@@ -45,8 +60,11 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
 class Abandon extends Error {}
 const abandon = (m) => { ko(m); throw new Abandon(m) }
 
-const MEMBRE_EMAIL = `rls-preuve-${Date.now()}@hotesmart.test`
-const MOT_DE_PASSE = 'preuve-' + Math.random().toString(36).slice(2) + 'A1!'
+// ⚠ PLUS DE MEMBRE FABRIQUE. La preuve porte sur LE COMPTE TEST (TEST_EMAIL),
+// passe membre restreint le temps du controle puis remis dans son etat. Les deux
+// constantes d'avant creaient un compte jetable : elles ont disparu, et avec
+// elles le filtre `rls-preuve-` du controle de nettoyage, qui ne cherchait plus
+// rien.
 
 ;(async () => {
   // ─── Garde d'environnement ───────────────────────────────────────────────
@@ -58,7 +76,7 @@ const MOT_DE_PASSE = 'preuve-' + Math.random().toString(36).slice(2) + 'A1!'
     process.exit(1)
   }
 
-  const aNettoyer = { userId: null, profileId: null, configs: [] }
+  const aNettoyer = { userId: null, profileId: null, configs: [], restaurer: null, permissionsCreees: null }
   try {
     // ─── Le decor : deux biens du compte ──────────────────────────────────
     const { data: props } = await sb.from('properties')
@@ -68,29 +86,85 @@ const MOT_DE_PASSE = 'preuve-' + Math.random().toString(36).slice(2) + 'A1!'
     const compte = bienA.user_id
     console.log(`Compte : ${String(compte).slice(0, 8)} · bien A « ${bienA.name} » · bien B « ${bienB.name} »\n`)
 
-    // ─── Le membre restreint au bien A, droit `avis` en lecture ───────────
-    const { data: cree, error: eUser } = await sb.auth.admin.createUser({
-      email: MEMBRE_EMAIL, password: MOT_DE_PASSE, email_confirm: true,
-    })
-    if (eUser) abandon(`creation du membre impossible : ${eUser.message}`)
-    aNettoyer.userId = cree.user.id
+    // ─── LE COMPTE TEST, passe membre restreint au bien A ─────────────────
+    // ⚠ LE COMPTE TEST, PAS UN MEMBRE JETABLE. Decision de Thierry du
+    // 30 septembre 2026 pour le lot 4 : « preuve reelle du perimetre
+    // avis_config avec le compte test en membre restreint ». Un membre fabrique
+    // de toutes pieces a, par construction, un profil parfait — celui que le
+    // script vient d'ecrire. Le compte test, lui, est celui qui existe
+    // vraiment, avec l'etat que les autres essais lui ont laisse.
+    //
+    // ⚠ ET ON LE REMET EXACTEMENT COMME ON L'A TROUVE. Son profil et ses
+    // permissions sont sauvegardes ligne par ligne avant d'etre remplaces, et
+    // restaures dans le `finally`. Un compte de test abime est un compte de test
+    // qu'on ne croit plus.
+    const identifiant = createClient(URL, ANON, { auth: { persistSession: false } })
+    const { data: session, error: eSession } = await identifiant.auth
+      .signInWithPassword({ email: TEST_EMAIL, password: TEST_PASSWORD })
+    if (eSession) abandon(`le compte test ne se connecte pas : ${eSession.message}`)
+    const membreUserId = session.user.id
+    await identifiant.auth.signOut()
 
-    const { data: profil, error: eProfil } = await sb.from('profiles').insert({
-      account_user_id: compte, member_user_id: cree.user.id,
-      first_name: 'Preuve', last_name: 'RLS', email: MEMBRE_EMAIL,
-      access_mode: 'compte', active: true, accepted_at: new Date().toISOString(),
-    }).select().single()
-    if (eProfil) abandon(`creation du profil impossible : ${eProfil.message}`)
-    aNettoyer.profileId = profil.id
+    // ⚠ S'IL EST LE TITULAIRE, LA PREUVE EST IMPOSSIBLE, ET ON LE DIT.
+    // Le titulaire voit tout par construction (`can_read` rend true des que
+    // userId === accountUserId) : lui faire passer ce test rendrait trois « ok »
+    // qui ne prouveraient rien du perimetre.
+    if (membreUserId === compte) {
+      abandon([
+        'le compte test EST le titulaire du compte staging.',
+        '',
+        '        Le titulaire voit tout par construction : `can_read` rend true des que',
+        '        userId === accountUserId. Faire passer ce controle a ce compte rendrait',
+        '        trois « ok » qui ne prouveraient rien du perimetre — le faux vert que ce',
+        '        script existe pour empecher.',
+        '',
+        '        REMEDE : un SECOND compte dans l auth de staging, distinct du titulaire,',
+        '        et ses identifiants dans MEMBRE_TEST_EMAIL / MEMBRE_TEST_PASSWORD.',
+        '        Ce script ne le cree pas de lui-meme : creer un compte dans une base',
+        '        reelle est une decision de Thierry, pas la mienne.',
+      ].join('\n'))
+    }
 
-    const { error: ePerm } = await sb.from('profile_permissions').insert({
+    const { data: profilExistant, error: eLectureProfil } = await sb.from('profiles')
+      .select('*').eq('account_user_id', compte).eq('member_user_id', membreUserId).maybeSingle()
+    if (eLectureProfil) abandon(`lecture du profil du compte test : ${eLectureProfil.message}`)
+
+    let profil
+    if (profilExistant) {
+      const { data: permsAvant, error: ePA } = await sb.from('profile_permissions')
+        .select('*').eq('profile_id', profilExistant.id).maybeSingle()
+      if (ePA) abandon(`lecture des droits du compte test : ${ePA.message}`)
+      aNettoyer.restaurer = { profil: profilExistant, permissions: permsAvant || null }
+      profil = profilExistant
+
+      const { error: eMaj } = await sb.from('profiles')
+        .update({ access_mode: 'compte', active: true, accepted_at: profilExistant.accepted_at || new Date().toISOString() })
+        .eq('id', profil.id)
+      if (eMaj) abandon(`mise a jour du profil du compte test : ${eMaj.message}`)
+      ok(`compte test deja membre de ce compte : etat sauvegarde pour restauration`)
+    } else {
+      const { data: cree, error: eProfil } = await sb.from('profiles').insert({
+        account_user_id: compte, member_user_id: membreUserId,
+        first_name: 'Compte', last_name: 'Test', email: TEST_EMAIL,
+        access_mode: 'compte', active: true, accepted_at: new Date().toISOString(),
+      }).select().single()
+      if (eProfil) abandon(`creation du profil du compte test impossible : ${eProfil.message}`)
+      profil = cree
+      aNettoyer.profileId = cree.id
+      ok('compte test rattache au compte staging comme membre (profil temporaire)')
+    }
+
+    const droits = {
       profile_id: profil.id, account_user_id: compte,
       property_scope: 'selected', property_ids: [bienA.id],
       property_refs: [String(bienA.provider_property_id)],
       avis: 'read',
-    })
+    }
+    const { error: ePerm } = await sb.from('profile_permissions')
+      .upsert(droits, { onConflict: 'profile_id' })
     if (ePerm) abandon(`permissions impossibles : ${ePerm.message}`)
-    ok(`membre cree : droit avis=read, perimetre = le seul bien A`)
+    if (!aNettoyer.restaurer) aNettoyer.permissionsCreees = profil.id
+    ok('compte test : droit avis=read, perimetre = le seul bien A')
 
     // ─── Trois configurations : compte, bien A, bien B ────────────────────
     // ⚠ LA LIGNE DE NIVEAU COMPTE EXISTE PEUT-ETRE DEJA : `avis_config_compte_uniq`
@@ -113,7 +187,7 @@ const MOT_DE_PASSE = 'preuve-' + Math.random().toString(36).slice(2) + 'A1!'
 
     // ─── Ce que le membre VOIT, sous sa propre session ────────────────────
     const client = createClient(URL, ANON, { auth: { persistSession: false } })
-    const { error: eAuth } = await client.auth.signInWithPassword({ email: MEMBRE_EMAIL, password: MOT_DE_PASSE })
+    const { error: eAuth } = await client.auth.signInWithPassword({ email: TEST_EMAIL, password: TEST_PASSWORD })
     if (eAuth) abandon(`session du membre impossible : ${eAuth.message}`)
 
     const { data: vues, error: eLect } = await client.from('avis_config').select('id, property_id, keywords')
@@ -152,11 +226,44 @@ const MOT_DE_PASSE = 'preuve-' + Math.random().toString(36).slice(2) + 'A1!'
       const { error } = await sb.from('avis_config').delete().eq('id', id)
       if (error) reste++
     }
-    if (aNettoyer.profileId) {
+    // ⚠ RESTAURER, PAS SUPPRIMER, quand le profil du compte test PREEXISTAIT.
+    // Le supprimer retirerait au compte test un rattachement qu'on n'a pas cree
+    // — et les autres essais qui s'en servent tomberaient sans qu'on comprenne
+    // pourquoi.
+    if (aNettoyer.restaurer) {
+      const { profil: avant, permissions: permsAvant } = aNettoyer.restaurer
+      const { error: eR } = await sb.from('profiles')
+        .update({ access_mode: avant.access_mode, active: avant.active, accepted_at: avant.accepted_at })
+        .eq('id', avant.id)
+      if (eR) { console.error('  restauration du profil impossible :', eR.message); reste++ }
+      if (permsAvant) {
+        const { error: eRP } = await sb.from('profile_permissions')
+          .upsert(permsAvant, { onConflict: 'profile_id' })
+        if (eRP) { console.error('  restauration des droits impossible :', eRP.message); reste++ }
+      } else {
+        const { error: eDP } = await sb.from('profile_permissions').delete().eq('profile_id', avant.id)
+        if (eDP) { console.error('  retrait des droits temporaires impossible :', eDP.message); reste++ }
+      }
+      // ⚠ CONTRE-PREUVE DE LA RESTAURATION : on RELIT, on ne suppose pas.
+      const { data: apres } = await sb.from('profiles').select('access_mode, active').eq('id', avant.id).maybeSingle()
+      if (!apres || apres.access_mode !== avant.access_mode || apres.active !== avant.active) {
+        console.error('  le profil du compte test N EST PAS revenu a son etat d origine')
+        reste++
+      }
+      if (permsAvant) {
+        const { data: permsApres } = await sb.from('profile_permissions')
+          .select('avis, property_scope').eq('profile_id', avant.id).maybeSingle()
+        if (!permsApres || permsApres.avis !== permsAvant.avis || permsApres.property_scope !== permsAvant.property_scope) {
+          console.error('  les droits du compte test NE SONT PAS revenus a leur etat d origine')
+          reste++
+        }
+      }
+    } else if (aNettoyer.profileId) {
       await sb.from('profile_permissions').delete().eq('profile_id', aNettoyer.profileId)
       const { error } = await sb.from('profiles').delete().eq('id', aNettoyer.profileId)
       if (error) reste++
     }
+    // ⚠ LE COMPTE TEST N'EST JAMAIS SUPPRIME. Il ne nous appartient pas.
     if (aNettoyer.userId) {
       const { error } = await sb.auth.admin.deleteUser(aNettoyer.userId)
       if (error) reste++
@@ -174,10 +281,14 @@ const MOT_DE_PASSE = 'preuve-' + Math.random().toString(36).slice(2) + 'A1!'
       if (error) { console.error('  relecture du nettoyage impossible :', error.message); configsRestantes = aNettoyer.configs.length }
       else configsRestantes = count || 0
     }
-    const { data: users } = await sb.auth.admin.listUsers({ page: 1, perPage: 200 })
-    const membresRestants = (users?.users || []).filter(u => /rls-preuve-/.test(u.email || '')).length
-    console.log(`\nNettoyage : ${reste} erreur(s) · ${configsRestantes} config(s) de preuve restante(s) · ${membresRestants} compte(s) de preuve restant(s)`)
-    if (reste || membresRestants || configsRestantes) {
+    // ⚠ ON VERIFIE QU'AUCUN COMPTE JETABLE N'EST RESTE d'une version
+    // precedente de ce script, qui en creait un par execution.
+    const { data: users, error: eUsers } = await sb.auth.admin.listUsers({ page: 1, perPage: 200 })
+    let membresRestants = 0
+    if (eUsers) { console.error('  relecture des comptes impossible :', eUsers.message); membresRestants = -1 }
+    else membresRestants = (users?.users || []).filter(u => /rls-preuve-/.test(u.email || '')).length
+    console.log(`\nNettoyage : ${reste} erreur(s) · ${configsRestantes} config(s) de preuve restante(s) · ${membresRestants} compte(s) jetable(s) d une ancienne version`)
+    if (reste || membresRestants !== 0 || configsRestantes) {
       console.error('ECHEC : le decor de test n a pas ete entierement retire.')
       process.exitCode = 1
     }
