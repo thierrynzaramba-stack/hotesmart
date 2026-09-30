@@ -12,7 +12,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
+const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { chargerGrille, criteresPour, enregistrerReponses, abandonner, journaliser } = require('../lib/avis/evaluations')
@@ -429,7 +429,7 @@ async function requalifier (req, res, garde) {
 
 // Charge l'evaluation du perimetre, ou repond a la place de l'appelant.
 // Rend null quand elle a deja repondu — l'appelant s'arrete alors.
-async function chargerEvaluation (req, res, garde) {
+async function chargerEvaluation (req, res, garde, ecriture = false) {
   const userId = garde.accountUserId
   const id = String(req.body?.id || req.query?.id || '').trim()
   if (!UUID_RE.test(id)) { res.status(400).json({ error: 'Identifiant invalide' }); return null }
@@ -445,7 +445,23 @@ async function chargerEvaluation (req, res, garde) {
 
   // ⚠ LE PERIMETRE PAR BIEN, APRES la lecture du compte. Sans lui, un membre
   // limite a un bien evaluerait les voyageurs d'un autre en passant son id.
-  if (!peutLire(garde.contexte, 'avis', data.property_id_ref)) {
+  //
+  // ⚠ ET IL SE PASSE UN OBJET { id, ref }, PAS UNE CHAINE. `dansPerimetre`
+  // commence par « if (!bien || (bien.id == null && bien.ref == null)) return
+  // true » : sur une chaine, `.id` et `.ref` valent undefined, donc la fonction
+  // rendait TRUE inconditionnellement. La garde etait un no-op, et c'est la
+  // SEULE garde par bien du chantier — le routeur appelle requirePermission
+  // sans `bien`. Un membre limite a un bien publiait un avis Airbnb sur le bien
+  // d'a cote. Constat de review.
+  //
+  // ⚠ ET C'EST `peutEcrire` QUAND L'ACTION ECRIT. Un membre `avis: read` est
+  // deja arrete par le routeur, mais lire le perimetre pour autoriser une
+  // ecriture dit le contraire de ce qui se passe.
+  const cible = { id: data.property_id, ref: data.property_id_ref }
+  const autorise = ecriture
+    ? peutEcrire(garde.contexte, 'avis', cible)
+    : peutLire(garde.contexte, 'avis', cible)
+  if (!autorise) {
     res.status(403).json({ error: 'Ce bien n est pas dans votre perimetre' }); return null
   }
   return data
@@ -500,14 +516,28 @@ async function evaluationLire (req, res, garde) {
     }
   }
 
+  // ⚠ CE QU'ELLE PEUT REMPLIR N'EST PAS CE QU'ELLE PEUT VOIR. `criteresPour`
+  // restreignait le formulaire, et la reponse servait quand meme le texte
+  // public, la note privee, les reponses de l'hote et l'identifiant du sejour a
+  // tout membre. La decision est deja gravee pour la messagerie des
+  // prestataires (docs/specs/spec-prestataires-menage.md §6 : l'extrait seul,
+  // jamais le nom du voyageur) ; elle vaut ici. Constat de review.
+  const commun = {
+    id: e.id, status: e.status, ota: e.ota,
+    language: e.language, deadline_at: e.deadline_at,
+  }
+  const vue = role === 'hote'
+    ? {
+        ...commun,
+        booking_uid: e.booking_uid,
+        public_text: e.public_text, private_note: e.private_note,
+        answers_cleaner: e.answers_cleaner, answers_host: e.answers_host,
+        published_at: e.published_at,
+      }
+    : { ...commun, answers_cleaner: e.answers_cleaner }
+
   return res.status(200).json({
-    evaluation: {
-      id: e.id, status: e.status, booking_uid: e.booking_uid, ota: e.ota,
-      language: e.language, deadline_at: e.deadline_at,
-      public_text: e.public_text, private_note: e.private_note,
-      answers_cleaner: e.answers_cleaner, answers_host: e.answers_host,
-      published_at: e.published_at,
-    },
+    evaluation: vue,
     role,
     criteres: criteresPour(grille, role, evalScope),
     grille_figee: Boolean(e.grille_figee),
@@ -516,7 +546,7 @@ async function evaluationLire (req, res, garde) {
 
 // POST eval-reponses — enregistre, puis dit ou l'evaluation en est.
 async function evaluationRepondre (req, res, garde) {
-  const e = await chargerEvaluation(req, res, garde)
+  const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   const { role, evalScope, evalPower, profilId } = roleEtReglages(garde)
   const reponses = req.body?.reponses
@@ -541,30 +571,60 @@ async function evaluationRepondre (req, res, garde) {
 // POST eval-texte — l'IA redige. Elle ne decide de rien, et son texte reste
 // modifiable : on l'enregistre en brouillon, la publication lira le champ.
 async function evaluationTexte (req, res, garde) {
-  const e = await chargerEvaluation(req, res, garde)
+  const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   if (e.status === 'publiee') return res.status(409).json({ error: 'Evaluation deja publiee' })
 
   const { role } = roleEtReglages(garde)
   if (role !== 'hote') return res.status(403).json({ error: 'La redaction revient a l hote' })
 
-  const [{ data: config }, { data: bien }] = await Promise.all([
+  // ⚠ LES ERREURS DE LECTURE SE LISENT. Constat de review : un `Promise.all`
+  // destructure sans `error` faisait disparaitre EN SILENCE les mots-cles, le
+  // ton et la signature de l'hote — le texte partait avec les reglages par
+  // defaut, et l'hote constatait un ton qui n'est pas le sien sans jamais
+  // savoir pourquoi. La meme regle vaut ici que pour la grille.
+  const [rConfig, rPresta] = await Promise.all([
     supabase.from('avis_config').select('keywords, tone, signature, property_id')
       .eq('user_id', e.user_id).or(`property_id.eq.${e.property_id},property_id.is.null`),
-    supabase.from('properties').select('name').eq('id', e.property_id).maybeSingle(),
+    // ⚠ LE NOM DE LA PRESTATAIRE VIENT DE LA BASE, PAS DU CORPS DE LA REQUETE.
+    // Le garde-fou « son nom n'apparait jamais dans l'avis » (spec §3) ne
+    // s'executait pas du tout quand le client omettait le champ : un oubli du
+    // front, un autre client ou un appel direct desarmait la garde.
+    e.filled_by_profile
+      ? supabase.from('profiles').select('first_name').eq('id', e.filled_by_profile).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ])
+  if (rConfig.error) {
+    return res.status(503).json({ error: 'Reglages de redaction illisibles', detail: rConfig.error.message })
+  }
+  if (rPresta.error) {
+    return res.status(503).json({ error: 'Profil du remplisseur illisible', detail: rPresta.error.message })
+  }
+
   // Le bien surcharge le compte.
-  const liste = config || []
+  const liste = rConfig.data || []
   const fusion = { ...(liste.find(c => !c.property_id) || {}), ...(liste.find(c => c.property_id) || {}) }
+
+  // ⚠ LA GRILLE FIGEE SI ELLE EXISTE, SINON CELLE DU COMPTE — jamais un repli
+  // muet sur la grille par defaut. Sans cela, des reponses a une grille
+  // personnalisee sortaient en « reponses_hors_grille », un motif qui accuse
+  // les reponses alors que c'est la grille qui manquait.
+  let grille = e.grille_figee && e.grille_figee.criteres && e.grille_figee.criteres.length
+    ? e.grille_figee
+    : null
+  if (!grille) {
+    try { grille = await chargerGrille(supabase, { userId: e.user_id, propertyId: e.property_id }) }
+    catch (err) { return res.status(503).json({ error: 'Grille indisponible', detail: err.message }) }
+  }
 
   const r = await redigerAvis({
     reponses: { ...(e.answers_cleaner || {}), ...(e.answers_host || {}) },
     remarque: req.body?.remarque ? String(req.body.remarque).slice(0, MAX_TEXTE) : null,
     prenom: req.body?.prenom ? String(req.body.prenom).slice(0, 80) : null,
     langue: e.language || 'en',
-    prestataire: req.body?.prestataire ? String(req.body.prestataire).slice(0, 80) : null,
+    prestataire: rPresta.data?.first_name || null,
     config: fusion,
-    grille: e.grille_figee || null,
+    grille,
   })
 
   // ⚠ UN REFUS DE GARDE-FOU SE DIT. Il ne se deguise pas en texte vide : sans
@@ -573,26 +633,108 @@ async function evaluationTexte (req, res, garde) {
     return res.status(422).json({ error: 'Texte non genere', motif: r.motif, detail: r.detail || null, bien: bien?.name || null })
   }
 
-  await supabase.from('guest_evaluations')
+  // ⚠ UNE ECRITURE PERDUE NE REND PAS 200. Constat de review : sans cette
+  // lecture, l'ecran affichait un texte que la base n'avait pas, l'hote
+  // cliquait « Publier » et recevait « un avis sans texte public ne se publie
+  // pas » — avec un appel au modele paye a chaque nouvelle tentative.
+  const { error: eTexte } = await supabase.from('guest_evaluations')
     .update({ public_text: r.public_text, private_note: r.private_note })
     .eq('id', e.id).eq('user_id', e.user_id)
+  if (eTexte) {
+    return res.status(503).json({ error: 'Texte genere mais non enregistre', detail: eTexte.message })
+  }
 
   return res.status(200).json({ ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif })
 }
 
 // POST eval-publier — le seul chemin vers l'OTA.
+//
+// ⚠ TROIS PROTECTIONS SE SUPERPOSENT ICI, ET AUCUNE NE SUFFIT SEULE :
+//   1. le verrou d'unicite, qui empeche deux envois simultanes ;
+//   2. la verification de statut dans lib/avis/publication.js ;
+//   3. la relecture chez le provider avant toute seconde tentative.
+// Chez Airbnb, un avis publie ne se reprend pas.
+const VERROU_TTL_MS = 3 * 60 * 1000
+const PG_UNICITE = '23505'
+
 async function evaluationPublier (req, res, garde) {
-  const e = await chargerEvaluation(req, res, garde)
+  const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   const { parProfil, profilId } = roleEtReglages(garde)
 
+  // ⚠ LA REFERENCE DU PROVIDER SE RESOUT ICI. `ota_review_id` est NOTRE cle
+  // primaire dans ota_reviews ; le provider ne connait que
+  // `external_review_id`. Envoyer la premiere faisait un 404 a chaque essai.
+  if (!e.ota_review_id) {
+    return res.status(409).json({ error: 'L OTA n a pas encore cree l objet review de ce sejour', motif: 'sans_objet_ota' })
+  }
+  const { data: objetOta, error: eOta } = await supabase
+    .from('ota_reviews').select('external_review_id')
+    .eq('id', e.ota_review_id).eq('user_id', e.user_id).maybeSingle()
+  if (eOta) return res.status(503).json({ error: 'Reference OTA illisible', detail: eOta.message })
+  if (!objetOta?.external_review_id) {
+    return res.status(409).json({ error: 'La reference de l avis chez le provider est introuvable', motif: 'reference_ota_absente' })
+  }
+
   // Le texte modifie par l'hote arrive ici : c'est LUI qui part, pas celui de
   // l'IA. La spec veut que la version publiee soit stockee telle quelle.
-  const evaluation = req.body?.public_text
-    ? { ...e, public_text: String(req.body.public_text).slice(0, MAX_TEXTE) }
-    : e
+  const evaluation = {
+    ...e,
+    ota_review_ref: objetOta.external_review_id,
+    ...(req.body?.public_text ? { public_text: String(req.body.public_text).slice(0, MAX_TEXTE) } : {}),
+  }
 
-  const { channex } = require('../lib/channels')
+  // ⚠ ON RESERVE LA LIGNE AVANT LE POST, PAR L'UNICITE DE `write_locks.key`.
+  // Constat de review : la verification de statut se faisait EN MEMOIRE et le
+  // statut n'etait ecrit qu'APRES le retour du provider. Deux onglets, un
+  // double clic ou un retour de requete rejoue lisaient tous « a_valider »,
+  // franchissaient la porte, et DEUX avis partaient chez Airbnb. L'unicite
+  // `(user_id, booking_uid)` protege contre deux lignes, jamais contre deux
+  // envois. Meme mecanisme que lib/moteur-creation.js pour le POST CRS.
+  const cle = `avis-publier:${e.id}`
+  const maintenant = Date.now()
+  await supabase.from('write_locks').delete().eq('key', cle)
+    .lt('expire_at', new Date(maintenant).toISOString())
+  const { error: eVerrou } = await supabase.from('write_locks').insert({
+    key: cle, token: String(e.id),
+    expire_at: new Date(maintenant + VERROU_TTL_MS).toISOString(),
+  })
+  if (eVerrou) {
+    if (eVerrou.code === PG_UNICITE) {
+      return res.status(409).json({ error: 'Une publication est deja en cours pour cette evaluation', motif: 'deja_en_cours' })
+    }
+    return res.status(503).json({ error: 'Verrou de publication indisponible', detail: eVerrou.message })
+  }
+  // ⚠ LE VERROU NE SE RELACHE PAS APRES UN SUCCES. Il expire de lui-meme, et
+  // d'ici la le statut `publiee` est ecrit. Le relacher tout de suite rouvrirait
+  // la fenetre entre le POST abouti et l'ecriture du statut.
+  const relacher = async () => {
+    try { await supabase.from('write_locks').delete().eq('key', cle) }
+    catch (err) { console.error('[avis] verrou non relache', cle, err.message) }
+  }
+
+  // ⚠ PAR `getProvider`, JAMAIS UN CANAL EN DUR. Regle technique du depot, et
+  // la ligne porte deja son `provider`. V1 = Airbnb via Channex uniquement,
+  // donc aucun bug aujourd'hui ; la regle existe pour le jour ou ce ne sera
+  // plus vrai. Constat de review.
+  const { getProvider } = require('../lib/channels')
+  let canal
+  try {
+    canal = getProvider(e.provider)
+  } catch (err) {
+    await relacher()
+    return res.status(409).json({ error: `Provider inconnu pour ce sejour : ${e.provider}`, motif: 'provider_inconnu' })
+  }
+  // ⚠ ET IL DOIT SAVOIR PUBLIER UN AVIS. Beds24 n'expose pas l'evaluation du
+  // voyageur : un canal sans ces deux methodes doit se dire, pas echouer en
+  // « provider.publierAvisVoyageur n est pas une fonction » au milieu du POST.
+  if (typeof canal.publierAvisVoyageur !== 'function' || typeof canal.lireAvis !== 'function') {
+    await relacher()
+    return res.status(409).json({
+      error: `Le canal ${e.provider} ne publie pas d evaluation du voyageur`,
+      motif: 'canal_sans_evaluation',
+    })
+  }
 
   // ⚠ DEUX ISSUES, ET ELLES NE PASSENT PAS PAR LE MEME CHEMIN.
   // `publier` LEVE un RefusPublication quand rien n'est parti, et RETOURNE un
@@ -600,10 +742,20 @@ async function evaluationPublier (req, res, garde) {
   // deux ecrirait `status: undefined` sur la ligne.
   let r
   try {
-    r = await publier({ evaluation, parProfil, provider: channex })
+    r = await publier({ evaluation, parProfil, provider: canal })
   } catch (err) {
+    await relacher()
     if (err instanceof RefusPublication) {
-      // Rien n'est parti chez l'OTA. Le statut ne bouge pas, le motif est dit.
+      // Rien n'est parti chez l'OTA.
+      //
+      // ⚠ SAUF POUR LE DELAI : un avis hors delai ne redeviendra jamais
+      // publiable, et le laisser dans son statut d'avant le ferait relancer
+      // indefiniment par la file (status, deadline_at). Spec §6.
+      if (err.motif === 'expiree') {
+        const { error: eExp } = await supabase.from('guest_evaluations')
+          .update({ status: 'expiree' }).eq('id', e.id).eq('user_id', e.user_id)
+        if (eExp) console.error('[avis] statut expiree non ecrit', e.id, eExp.message)
+      }
       return res.status(409).json({ error: err.message, motif: err.motif })
     }
     throw err
@@ -617,7 +769,13 @@ async function evaluationPublier (req, res, garde) {
   }
   if (r.statut === 'publiee') {
     maj.published_at = r.publie_le
-    maj.scores = r.scores || null
+    // ⚠ LES DEUX JUGEMENTS, PAS SEULEMENT LES NOTES. La recommandation est le
+    // plus lourd des deux (elle pese sur les reservations futures du voyageur)
+    // et elle ne survivait nulle part apres publication. Constat de review.
+    maj.scores = {
+      categories: r.scores || [],
+      ...(r.is_reviewee_recommended === undefined ? {} : { is_reviewee_recommended: r.is_reviewee_recommended }),
+    }
   }
   const { error: eMaj } = await supabase.from('guest_evaluations')
     .update(maj).eq('id', e.id).eq('user_id', e.user_id)
@@ -627,6 +785,10 @@ async function evaluationPublier (req, res, garde) {
   if (eMaj) console.error('[avis] PUBLIE CHEZ L OTA MAIS STATUT NON ECRIT', e.id, eMaj.message)
 
   if (r.statut !== 'publiee') {
+    // ⚠ ON NE RELACHE LE VERROU QUE SI L'ISSUE EST CERTAINE. Quand l'appel est
+    // parti sans qu'on sache s'il a abouti, le relacher inviterait a rejouer
+    // exactement ce qu'on ignore.
+    if (!r.incertain) await relacher()
     return res.status(502).json({
       ok: false, status: r.statut, motif: r.motif,
       // `incertain` veut dire : l'appel est parti, on ignore s'il a abouti.
@@ -648,7 +810,7 @@ async function evaluationPublier (req, res, garde) {
 
 // POST eval-abandon — l'hote choisit de ne pas evaluer.
 async function evaluationAbandonner (req, res, garde) {
-  const e = await chargerEvaluation(req, res, garde)
+  const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   const { role, profilId } = roleEtReglages(garde)
   if (role !== 'hote') return res.status(403).json({ error: 'Seul l hote abandonne une evaluation' })

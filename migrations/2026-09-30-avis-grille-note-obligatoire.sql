@@ -64,3 +64,24 @@ drop trigger if exists avis_criteres_touch_trg
 create trigger avis_criteres_touch_trg
   before update on public.avis_criteres
   for each row execute function public.set_updated_at();
+
+-- ─── Un commentaire de colonne qui induisait en erreur ──
+--
+-- ⚠ `ota_review_id` N'EST PAS LA CLE DU POST. La colonne
+-- porte une cle etrangere vers `ota_reviews(id)`, donc
+-- NOTRE cle primaire, tiree au sort par Postgres. Le
+-- provider, lui, ne connait que
+-- `ota_reviews.external_review_id`.
+--
+-- Le commentaire disait « la cle du POST de publication »,
+-- et le code avait suivi le commentaire : chaque
+-- publication partait sur « POST /reviews/<uuid-a-nous>/
+-- guest_review », soit un 404 a tous les coups, puis un
+-- refus definitif au second essai. Constat de review.
+comment on column public.guest_evaluations.ota_review_id is
+  'Lien vers NOTRE ligne ota_reviews (cle primaire '
+  'interne). ⚠ CE N''EST PAS l''identifiant du provider : '
+  'le POST de publication se fait sur '
+  'ota_reviews.external_review_id, que api/avis.js resout '
+  'avant l''appel. Cree par l''OTA le jour du depart, '
+  'cache et vide.';

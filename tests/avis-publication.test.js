@@ -23,7 +23,7 @@ const NEGATIF = { ...REPONSES, recommande: 'non' }
 // Une evaluation prete a partir, dans l'etat attendu par `publier`.
 const evaluation = (a = {}) => ({
   id: 'ev-1', user_id: 'u1', property_id_ref: 'p1', booking_uid: 'b1',
-  ota_review_id: 'rev-1', status: 'a_valider',
+  ota_review_id: 'rev-1', ota_review_ref: 'channex-abc-123', status: 'a_valider',
   answers_host: REPONSES, public_text: 'Merci pour votre sejour.',
   private_note: null, deadline_at: new Date(Date.now() + 86400000).toISOString(),
   ...a,
@@ -282,3 +282,60 @@ test('une grille figee ABSENTE reste le cas normal : la grille par defaut s’ap
 // ceinture pour le jour ou CATEGORIES accueillera une categorie sans jugement.
 // Ecrire un test qui le force aujourd'hui demanderait de falsifier la grille au
 // point de ne plus rien prouver.
+
+// ─── La cle qui part chez le provider ───────────────────────────────────────
+test('LE TEST QUI COMPTE : c’est la reference du PROVIDER qui part, pas notre UUID', async () => {
+  // `ota_review_id` est notre cle primaire dans ota_reviews. L'envoyer
+  // construisait « POST /reviews/<uuid-a-nous>/guest_review » : 404 a chaque
+  // fois. Constat de review.
+  const p = provider()
+  await publier({ evaluation: evaluation(), provider: p })
+  assert.strictEqual(p.appels.find(a => a.type === 'post').reviewId, 'channex-abc-123')
+})
+
+test('sans reference provider resolue, on ne publie PAS sur un identifiant devine', async () => {
+  const p = provider()
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ ota_review_ref: null }), provider: p }),
+    (e) => e instanceof RefusPublication && e.motif === 'reference_ota_absente')
+  assert.strictEqual(p.appels.length, 0)
+})
+
+test('la relecture de controle vise elle aussi la reference du provider', async () => {
+  const p = provider({ etat: { ok: true, is_replied: false } })
+  await publier({ evaluation: evaluation({ status: 'echec_publication' }), provider: p })
+  assert.strictEqual(p.appels.find(a => a.type === 'get').reviewId, 'channex-abc-123')
+})
+
+test('LE TEST QUI COMPTE : une coupure reseau rend « incertain », pas « echec sur »', async () => {
+  // lib/channels ne leve jamais : il rend { ok: false, status: 0 }. La branche
+  // qui posait `incertain` etait donc inatteignable en production.
+  const p = provider({ post: { ok: false, status: 0, json: { errors: { code: 'network_error' } } } })
+  const r = await publier({ evaluation: evaluation(), provider: p })
+  assert.strictEqual(r.statut, 'echec_publication')
+  assert.strictEqual(r.incertain, true)
+})
+
+test('un refus franc du provider reste un echec CERTAIN', async () => {
+  const p = provider({ post: { ok: false, status: 422, json: { errors: { title: 'invalid' } } } })
+  const r = await publier({ evaluation: evaluation(), provider: p })
+  assert.strictEqual(r.incertain, false)
+})
+
+test('LE TEST QUI COMPTE : « le provider ne dit pas » arrete tout, il ne vaut pas « non »', async () => {
+  // Constat de review : lireAvis rendait Boolean(...), donc TOUJOURS un
+  // booleen. Cette garde etait inatteignable sur toute reponse 200, et un
+  // champ renomme chez Channex aurait fait partir un second avis.
+  const p = provider({ etat: { ok: true, is_replied: undefined } })
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ status: 'echec_publication' }), provider: p }),
+    (e) => e instanceof RefusPublication && e.motif === 'etat_provider_inconnu')
+  assert.ok(!p.appels.some(a => a.type === 'post'), 'aucun second envoi')
+})
+
+test('« deja parti » arrete tout aussi, et le dit autrement', async () => {
+  const p = provider({ etat: { ok: true, is_replied: true } })
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ status: 'echec_publication' }), provider: p }),
+    (e) => e instanceof RefusPublication && e.motif === 'deja_chez_le_provider')
+})

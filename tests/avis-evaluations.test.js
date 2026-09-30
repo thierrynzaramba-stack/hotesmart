@@ -13,6 +13,19 @@ const {
 const { GRILLE_DEFAUT } = require('../lib/avis/notes-evaluation')
 
 // ─── Un faux Supabase, juste assez pour ce module ───────────────────────────
+//
+// ⚠ CE QU'IL NE PROUVE PAS, ET QU'AUCUN TEST D'ICI NE PROUVE. Constat de
+// review. Ce double n'execute pas de SQL : `.or()` ne filtre rien, `.eq()` se
+// contente d'enregistrer ce qu'on lui a demande, et `single()` rend le payload
+// d'UPDATE, pas une ligne de base. Donc :
+//   - « les criteres du bien l'emportent » passe parce que `grilleDe` trie EN
+//     JS ; une faute dans la chaine PostgREST `property_id.eq.…` ne serait pas
+//     vue ici ;
+//   - « l'ecriture porte le user_id » verifie qu'on a APPELE `.eq('user_id')`,
+//     pas qu'il cloisonne. Le cloisonnement reel (regle 11) se prouve sur la
+//     base, par scripts/prouver-rls-avis.js, pas par cette suite.
+// Ce qui EST prouve ici : les fonctions pures (`deciderStatut`, `criteresPour`)
+// et l'enchainement des decisions.
 function faussebase ({ criteres = null, erreurLecture = null, majRendue = null, erreurMaj = null } = {}) {
   const vu = { maj: null, insere: null, filtres: [] }
   const api = {
@@ -47,32 +60,49 @@ const NIV_SALE = critProprete.niveaux.find(n => n.negatif).cle
 
 // ─── La transition de statut, la regle la plus lourde du chantier ───────────
 test('un formulaire incomplet reste a remplir', () => {
-  const d = deciderStatut({ role: 'prestataire', complet: false })
+  const d = deciderStatut({ role: 'prestataire', completRole: false, completTotal: false })
   assert.strictEqual(d.statut, 'a_remplir')
   assert.strictEqual(d.peutPublier, false)
 })
 
-test('la prestataire qui « soumet » passe la main a l’hote', () => {
-  const d = deciderStatut({ role: 'prestataire', evalPower: 'soumettre', negatif: false, complet: true })
+test('LE TEST QUI COMPTE : la prestataire qui a fini SA part passe la main, meme si l’hote n’a pas rempli la sienne', () => {
+  // Constat de review : `complet` etait calcule sur TOUS les criteres, donc une
+  // prestataire qui cochait tout ce qu'elle a le droit de cocher retombait en
+  // `a_remplir`. Le statut `soumise_prestataire` etait inatteignable.
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'soumettre', negatif: false, completRole: true, completTotal: false })
   assert.strictEqual(d.statut, 'soumise_prestataire')
   assert.strictEqual(d.peutPublier, false)
 })
 
-test('la prestataire qui « valide » publie, si rien n’est negatif', () => {
-  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, complet: true })
+test('la prestataire qui « valide » publie, si rien n’est negatif ET que tout est rempli', () => {
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: true })
   assert.strictEqual(d.peutPublier, true)
 })
 
+test('le pouvoir « valider » ne publie pas une evaluation dont l’hote n’a pas rempli sa part', () => {
+  // Publier sur la seule part de la prestataire enverrait a Airbnb un avis dont
+  // l'hote n'a pas vu la moitie.
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: false })
+  assert.strictEqual(d.peutPublier, false)
+  assert.strictEqual(d.statut, 'soumise_prestataire')
+})
+
 test('LE TEST QUI COMPTE : le pouvoir « valider » ne publie PAS un avis negatif', () => {
-  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: true, complet: true })
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: true, completRole: true, completTotal: true })
   assert.strictEqual(d.statut, 'a_valider')
   assert.strictEqual(d.peutPublier, false)
   assert.match(d.motif, /negatif/)
 })
 
 test('l’hote qui remplit lui-meme peut publier', () => {
-  const d = deciderStatut({ role: 'hote', negatif: true, complet: true })
+  const d = deciderStatut({ role: 'hote', negatif: true, completRole: true, completTotal: true })
   assert.strictEqual(d.peutPublier, true, 'l hote decide, meme sur un negatif')
+})
+
+test('l’hote ne publie pas un formulaire incomplet', () => {
+  const d = deciderStatut({ role: 'hote', negatif: false, completRole: true, completTotal: false })
+  assert.strictEqual(d.statut, 'a_remplir')
+  assert.strictEqual(d.peutPublier, false)
 })
 
 // ─── Qui repond a quoi ──────────────────────────────────────────────────────
@@ -148,11 +178,44 @@ test('un critere ferme au role est refuse, pas ignore', async () => {
     /n est pas ouvert a ce role/)
 })
 
-test('un avis negatif rempli par une prestataire « valider » passe a_valider', async () => {
+// ⚠ Un test portait ici le nom « un avis negatif rempli par une prestataire
+// valider passe a_valider » et passait `role: 'hote'`. Son assertion etait vraie
+// pour une raison sans rapport avec le garde-fou : `deciderStatut` rend
+// `a_valider` pour l'hote quel que soit le negatif. Contre-epreuve de la review :
+// en supprimant la ligne du garde-fou, ce test restait VERT. Il est remplace par
+// les deux qui suivent, qui empruntent le vrai chemin de la prestataire.
+
+test('le garde-fou du negatif s’applique des la saisie de la prestataire, avant que l’hote ait rempli', async () => {
+  const sb = faussebase({ criteres: [] })
+  const partPresta = Object.fromEntries(
+    GRILLE_DEFAUT.criteres.filter(c => c.rempli_par === 'prestataire').map(c => [c.cle, meilleur(c)]))
+  const r = await enregistrerReponses(sb, {
+    evaluation: base,
+    reponses: { ...partPresta, [critProprete.cle]: NIV_SALE },
+    role: 'prestataire', evalScope: 'selon_grille', evalPower: 'valider',
+  })
+  assert.strictEqual(r.negatif, true, 'le negatif se juge sur ce qui est repondu')
+  assert.strictEqual(r.completRole, true, 'sa part est finie')
+  assert.strictEqual(r.complet, false, 'celle de l hote non')
+  assert.strictEqual(sb.vu.maj.status, 'a_valider')
+  assert.strictEqual(r.decision.peutPublier, false)
+})
+
+test('une prestataire sans point negatif atteint bien « soumise_prestataire »', async () => {
+  const sb = faussebase({ criteres: [] })
+  const partPresta = Object.fromEntries(
+    GRILLE_DEFAUT.criteres.filter(c => c.rempli_par === 'prestataire').map(c => [c.cle, meilleur(c)]))
+  const r = await enregistrerReponses(sb, {
+    evaluation: base, reponses: partPresta, role: 'prestataire', evalScope: 'selon_grille',
+  })
+  assert.strictEqual(sb.vu.maj.status, 'soumise_prestataire')
+  assert.strictEqual(r.completRole, true)
+})
+
+test('un avis negatif rempli par l’hote lui revient a valider', async () => {
   const sb = faussebase({ criteres: [] })
   const r = await enregistrerReponses(sb, {
-    evaluation: base, reponses: { ...TOUT_BON, [critProprete.cle]: NIV_SALE },
-    role: 'hote', evalPower: 'valider',
+    evaluation: base, reponses: { ...TOUT_BON, [critProprete.cle]: NIV_SALE }, role: 'hote',
   })
   assert.strictEqual(r.negatif, true)
   assert.strictEqual(sb.vu.maj.status, 'a_valider')

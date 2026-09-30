@@ -129,7 +129,7 @@ test('LE TEST QUI COMPTE : deux textes hors gardes ne publient rien, et le disen
   const c = client(json('Séjour impeccable !'))
   const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_SALE }) }, { anthropic: c })
   assert.strictEqual(r.public_text, null)
-  assert.strictEqual(r.motif, 'ia_hors_gardes')
+  assert.strictEqual(r.motif, 'ia_contredit_les_boutons')
   assert.strictEqual(c.appels.length, 2)
 })
 
@@ -138,7 +138,7 @@ test('le prenom de la prestataire fait refuser le texte', async () => {
   const r = await redigerAvis(
     { reponses: avec({ [PROPRETE]: NIV_BIEN }), prestataire: 'Amélie' },
     { anthropic: c })
-  assert.strictEqual(r.motif, 'ia_hors_gardes')
+  assert.strictEqual(r.motif, 'ia_cite_la_prestataire')
 })
 
 test('la remarque privee de l’hote recopiee fait refuser le texte', async () => {
@@ -147,7 +147,7 @@ test('la remarque privee de l’hote recopiee fait refuser le texte', async () =
   const r = await redigerAvis(
     { reponses: avec({ [PROPRETE]: NIV_BIEN }), remarque },
     { anthropic: c })
-  assert.strictEqual(r.motif, 'ia_hors_gardes')
+  assert.strictEqual(r.motif, 'ia_recopie_le_prive')
 })
 
 test('une panne du fournisseur est nommee, pas confondue avec un refus', async () => {
@@ -168,7 +168,10 @@ test('le prompt donne les libelles coches, jamais les notes', async () => {
 test('la langue du voyageur est demandee explicitement', async () => {
   const c = client(json('ok'))
   await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }), langue: 'es' }, { anthropic: c })
-  assert.match(c.appels[0], /es/)
+  // ⚠ L'ancienne assertion etait /es/, qui se trouve dans « les », « REGLES »,
+  // « Ce que l'hote a coche »… Elle serait restee verte si la consigne de
+  // langue disparaissait du prompt. Constat de review.
+  assert.match(c.appels[0], /Langue du texte public : es/)
 })
 
 test('une grille figee ancienne sert de reference si on la passe', async () => {
@@ -196,4 +199,43 @@ test('une reponse qui ne correspond a aucun niveau est refusee de la meme facon'
   const r = await redigerAvis({ reponses: avec({ [PROPRETE]: 'niveau_invente' }) }, { anthropic: c })
   assert.strictEqual(r.motif, 'reponses_hors_grille')
   assert.strictEqual(c.appels.length, 0)
+})
+
+// ─── Les garde-fous qui doivent pouvoir dire « je ne sais pas » ─────────────
+test('LE TEST QUI COMPTE : une note privee COURTE recopiee est vue', () => {
+  // Le plancher de 40 caracteres laissait passer les notes les plus seches.
+  const prive = 'A fume dans le salon.'
+  assert.strictEqual(recopieLaNotePrivee(`Bonjour. ${prive} Merci.`, prive), true)
+})
+
+test('« merci pour tout » ne declenche toujours pas l’alarme', () => {
+  assert.strictEqual(recopieLaNotePrivee('Merci pour tout, bon voyage', 'Merci pour tout'), false)
+})
+
+test('une suite faite QUE de liaisons ne compte pas pour une recopie', () => {
+  assert.strictEqual(recopieLaNotePrivee('il etait dans la maison avec le chien', 'dans la avec le et'), false)
+})
+
+test('LE TEST QUI COMPTE : un avis NEGATIF dans une langue non verifiable n’est pas redige', async () => {
+  // « Alles war einwandfrei » passait les trois garde-fous sur un sejour ou la
+  // proprete est cochee « sale ». On ne promet pas ce qu'on ne sait pas lire.
+  const c = client(json('Alles war einwandfrei.'))
+  const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_SALE }), langue: 'de' }, { anthropic: c })
+  assert.strictEqual(r.public_text, null)
+  assert.strictEqual(r.motif, 'langue_non_verifiable')
+  assert.strictEqual(c.appels.length, 0, 'aucun appel paye pour un texte qu on ne pourra pas relire')
+})
+
+test('un sejour NON negatif dans la meme langue se redige normalement', async () => {
+  // Le garde-fou des eloges ne sert que sur un negatif : rien ne justifie de
+  // bloquer un avis positif en allemand.
+  const c = client(json('Sehr angenehme Gäste.'))
+  const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }), langue: 'de' }, { anthropic: c })
+  assert.strictEqual(r.motif, null)
+})
+
+test('deux reponses de charabia se distinguent d’un garde-fou viole', async () => {
+  const c = client('Bien sur ! Voici votre avis.')
+  const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }) }, { anthropic: c })
+  assert.strictEqual(r.motif, 'ia_illisible')
 })
