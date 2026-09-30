@@ -114,9 +114,24 @@ export async function monter (conteneur, options = {}) {
 
 export function rendre (etat, maintenant = Date.now()) {
   const liste = trier(etat.evaluations, maintenant)
-  const aFaire = liste.filter(e => A_FAIRE.has(e.status))
+  // ⚠ CE QUI EST HORS DELAI N'ATTEND PLUS PERSONNE. Le compter dans « n
+  // evaluations vous attendent » enverrait chercher une action impossible.
+  const aFaire = liste.filter(e => {
+    if (!A_FAIRE.has(e.status)) return false
+    const j = joursRestants(e.echeance, maintenant)
+    return j === null || j >= 0
+  })
+  const horsDelai = liste.filter(e => {
+    if (!A_FAIRE.has(e.status)) return false
+    const j = joursRestants(e.echeance, maintenant)
+    return j !== null && j < 0
+  }).length
 
-  const filtres = ['', 'a_remplir', 'a_valider', 'publiee', 'echec_publication', 'expiree']
+  // ⚠ TOUS LES ETATS QUE LE SERVEUR ACCEPTE. Constat de review : le filtre en
+  // omettait deux (`soumise_prestataire`, `abandonnee`), donc on ne pouvait pas
+  // demander a les voir seuls.
+  const filtres = ['', 'a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
+                   'echec_publication', 'expiree', 'abandonnee']
     .map(v => `<option value="${v}"${etat.filtre === v ? ' selected' : ''}>`
       + (v === '' ? 'Toutes' : echapper(ETAT_LISIBLE[v] || v)) + '</option>').join('')
 
@@ -128,6 +143,7 @@ export function rendre (etat, maintenant = Date.now()) {
     + (aFaire.length
       ? `${aFaire.length} evaluation(s) vous attendent.`
       : liste.length ? 'Rien ne vous attend.' : 'Aucune evaluation pour le moment.')
+    + (horsDelai ? ` ${horsDelai} hors delai, plus publiable(s).` : '')
     + `</p>`
 
   if (!liste.length) {
@@ -138,15 +154,25 @@ export function rendre (etat, maintenant = Date.now()) {
 
   const lignes = liste.map(e => {
     const j = joursRestants(e.echeance, maintenant)
-    // ⚠ UNE ECHEANCE DEPASSEE NE S'AFFICHE PAS EN « -3 jours ». Le statut le dit
-    // deja, et un nombre negatif se lit comme un bug.
-    const delai = e.status === 'publiee' || e.status === 'expiree' || e.status === 'abandonnee'
-      ? ''
+    // ⚠ LE DELAI SE JUGE SUR LA DATE, PAS SUR LE STATUT. Constat de review :
+    // le garde ne portait que sur les statuts terminaux, et RIEN ne bascule une
+    // evaluation en `expiree` tout seul — la seule ecriture de ce statut vient
+    // d'une tentative de publication. Une evaluation que personne n'a touchee
+    // reste donc `a_remplir` indefiniment, et affichait « dernier jour » trois
+    // semaines apres l'echeance. C'est le mensonge exact que ce garde existe
+    // pour eviter.
+    const termine = ['publiee', 'expiree', 'abandonnee'].includes(e.status)
+    const depasse = j !== null && j < 0
+    const delai = termine ? ''
       : j === null ? ''
-        : j <= 0 ? `<span class="hs-eval-urgent">dernier jour</span>`
-          : j <= 3 ? `<span class="hs-eval-urgent">${j} jour${j > 1 ? 's' : ''}</span>`
-            : `<span class="hs-eval-delai">${j} jours</span>`
-    const bouton = A_FAIRE.has(e.status)
+        : depasse ? `<span class="hs-eval-urgent">delai depasse</span>`
+          : j === 0 ? `<span class="hs-eval-urgent">dernier jour</span>`
+            : j <= 3 ? `<span class="hs-eval-urgent">${j} jour${j > 1 ? 's' : ''}</span>`
+              : `<span class="hs-eval-delai">${j} jours</span>`
+    // ⚠ ET LE BOUTON DISPARAIT QUAND LE DELAI EST PASSE (spec §6 : « au-dela,
+    // bouton desactive »). Le proposer enverrait l'hote remplir un formulaire
+    // dont la publication sera refusee.
+    const bouton = A_FAIRE.has(e.status) && !depasse
       ? `<button type="button" data-evaluer="${echapper(e.booking_uid)}">Ouvrir</button>`
       : ''
     return `<li class="hs-eval-ligne${A_FAIRE.has(e.status) ? ' hs-eval-a-faire' : ''}">`

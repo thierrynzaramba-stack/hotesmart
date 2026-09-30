@@ -273,10 +273,16 @@
       import('/shared/hs-bus.js'),
     ])
     const zone = document.getElementById('zone-evaluations')
-    const r = await monter(zone, { bus: hsBus })
-    // ⚠ On n'affiche la section que si elle a quelque chose a dire. Une carte
-    // vide en haut de page repousserait les avis sans rien apporter.
-    zone.style.display = r && r.charge ? '' : 'none'
+    // ⚠ LA SECTION S'AFFICHE, QUOI QU'IL ARRIVE. Constat de review : la masquer
+    // quand `charge` valait false annulait la garantie du module — il vient
+    // d'ecrire « evaluations illisibles » dans ce conteneur, et la page le
+    // cachait aussitot. L'hote retombait sur une section vide, c'est-a-dire
+    // exactement sur l'idee qu'il n'a rien a evaluer.
+    //
+    // Une liste vide n'est pas une carte vide non plus : le module explique
+    // quand les evaluations apparaissent.
+    await monter(zone, { bus: hsBus })
+    zone.style.display = ''
   } catch (e) {
     console.error('[avis] evaluations du voyageur', e)
   }

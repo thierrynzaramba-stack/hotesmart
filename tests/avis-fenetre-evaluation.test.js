@@ -266,3 +266,66 @@ test('LE TEST QUI COMPTE : un libelle de critere ne peut pas injecter de balise'
   assert.strictEqual(conteneur.querySelectorAll('img').length, 0)
   assert.match(conteneur.textContent, /<img src=x/)
 })
+
+// ─── Les correctifs de la revue du lot 4 ────────────────────────────────────
+test('LE TEST QUI COMPTE : une prestataire « valider » voit son bouton Publier DES L’OUVERTURE', async () => {
+  // Constat de review : `peut_publier` n'arrivait que par la reponse a
+  // `eval-reponses`. Elle devait donc re-enregistrer ses reponses pour faire
+  // apparaitre le bouton, alors que la spec dit « elle relit, puis elle publie ».
+  const document = dom()
+  const conteneur = document.getElementById('c')
+  const a = faussAppel({ 'action=evaluation': {
+    evaluation: { ...EVALUATION, status: 'a_valider', public_text: 'Texte pret' },
+    role: 'prestataire', criteres: [CRITERES[0]], peut_publier: true, negatif: false,
+  } })
+  await ouvrir({ conteneur, params: { booking_uid: 'BK-1' }, fermer: () => {}, deps: { appel: a.fn, confirmer: () => true } })
+  assert.ok(conteneur.querySelector('[data-avis="publier"]'), 'le bouton doit etre la sans rien cliquer')
+})
+
+test('LE TEST QUI COMPTE : decocher un niveau EFFACE la reponse au lieu de la laisser en base', async () => {
+  // Constat de review : la valeur devenait `null` et l'envoi ignorait les `null`,
+  // donc la reponse survivait a son decochage. L'hote croyait avoir retire son
+  // jugement.
+  const { conteneur, appels, document } = await monter({ evaluation: { answers_host: { etat: 'sale' } } })
+  const sel = conteneur.querySelector('[data-avis-critere="etat"]')
+  sel.value = ''
+  sel.dispatchEvent(new document.defaultView.Event('change'))
+  conteneur.querySelector('[data-avis="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 0))
+  const envoi = appels.find(x => x.chemin.includes('eval-reponses'))
+  assert.strictEqual(envoi.corps.reponses.etat, null, 'l effacement doit partir')
+})
+
+test('un texte modifie annonce qu’il n’est pas encore enregistre', async () => {
+  const { conteneur, document } = await monter({ evaluation: { public_text: 'Texte' } })
+  const t = conteneur.querySelector('[data-avis="texte"]')
+  t.value = 'Texte modifie'
+  t.dispatchEvent(new document.defaultView.Event('input'))
+  assert.match(conteneur.textContent, /ne sera enregistre qu a la publication/)
+})
+
+test('LE TEST QUI COMPTE : « je ne sais pas » sur la recommandation compte comme negatif a l’ecran aussi', () => {
+  // La quatrieme regle de lib/avis/notes-evaluation.js manquait ici : une grille
+  // figee anterieure aux contraintes declenchait le garde-fou serveur sans que la
+  // fenetre demande confirmation.
+  const etat = {
+    criteres: [{ cle: 'reco', categorie: 'recommandation', niveaux: [{ cle: 'non', libelle: 'Non' }] }],
+    reponses: { reco: 'non' },
+  }
+  assert.strictEqual(estNegatifAffiche(etat), true)
+})
+
+test('une grille indisponible n’empeche pas de savoir OU EN EST l’evaluation', async () => {
+  // Constat de review : `avis.statut` passe par cette action. Une grille illisible
+  // faisait repondre « indisponible » au bus, et l'app masquait son bouton pour
+  // une raison sans rapport avec le sejour.
+  const document = dom()
+  const conteneur = document.getElementById('c')
+  const a = faussAppel({ 'action=evaluation': {
+    evaluation: { ...EVALUATION, status: 'a_valider' }, role: 'hote', criteres: [],
+    grille_indisponible: true,
+  } })
+  const r = await ouvrir({ conteneur, params: { booking_uid: 'BK-1' }, fermer: () => {}, deps: { appel: a.fn } })
+  assert.strictEqual(r.charge, true)
+  assert.strictEqual(r.statut, 'a_valider')
+})

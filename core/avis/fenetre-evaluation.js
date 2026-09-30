@@ -86,6 +86,12 @@ export async function ouvrir (ctx = {}) {
     etat.evaluation = data.evaluation || {}
     etat.criteres = data.criteres || []
     etat.role = data.role || 'hote'
+    // ⚠ DES L'OUVERTURE, pas seulement apres un enregistrement. Une prestataire
+    // « valider » qui reouvre une evaluation deja complete doit voir son bouton
+    // de publication tout de suite : la spec §11 bis dit « elle relit, puis elle
+    // publie ». Constat de review.
+    etat.peutPublier = data.peut_publier === true
+    etat.negatif = data.negatif === true
     // Les reponses deja enregistrees pre-cochent le formulaire : la prestataire
     // a peut-etre deja rempli sa part.
     etat.reponses = { ...(etat.evaluation.answers_cleaner || {}), ...(etat.evaluation.answers_host || {}) }
@@ -116,8 +122,13 @@ export async function ouvrir (ctx = {}) {
     // ⚠ ON N'ENVOIE QUE LES CRITERES OUVERTS A CE ROLE. Le serveur refuse les
     // autres par une erreur nommee ; les envoyer quand meme ferait echouer une
     // saisie valide parce que le formulaire a pre-coche la part de l'autre.
+    // ⚠ ON ENVOIE AUSSI LES EFFACEMENTS. Une cle a `null` dit « je retire ma
+    // reponse » ; l'omettre laissait l'ancienne en base.
     const miennes = {}
-    for (const c of etat.criteres) if (etat.reponses[c.cle] != null) miennes[c.cle] = etat.reponses[c.cle]
+    for (const c of etat.criteres) {
+      if (etat.reponses[c.cle] != null) miennes[c.cle] = etat.reponses[c.cle]
+      else if (c.cle in etat.reponses) miennes[c.cle] = null
+    }
     try {
       const r = await appel('avis?action=eval-reponses', {
         methode: 'POST',
@@ -190,7 +201,12 @@ export async function ouvrir (ctx = {}) {
   function brancher () {
     conteneur.querySelectorAll('[data-avis-critere]').forEach(el => {
       el.addEventListener('change', () => {
+        // ⚠ REVENIR A « — choisir — » EFFACE LA REPONSE, il ne la laisse pas en
+        // base. Constat de review : la valeur devenait `null` et l'envoi ignorait
+        // les `null`, donc la reponse deja enregistree survivait a son
+        // decochage — l'hote croyait avoir retire son jugement.
         etat.reponses[el.dataset.avisCritere] = el.value || null
+        etat.aEfface = etat.aEfface || !el.value
         // On ne redessine pas tout : le focus se perdrait au milieu du
         // formulaire. Seul le bloc d'etat change.
         const b = conteneur.querySelector('[data-avis="compte-rendu"]')
@@ -198,7 +214,13 @@ export async function ouvrir (ctx = {}) {
       })
     })
     const t = conteneur.querySelector('[data-avis="texte"]')
-    if (t) t.addEventListener('input', () => { etat.evaluation.public_text = t.value })
+    if (t) t.addEventListener('input', () => {
+      etat.evaluation.public_text = t.value
+      // ⚠ UN TEXTE MODIFIE N'EST EN BASE QU'A LA PUBLICATION. Le dire, plutot que
+      // de le laisser perdre en silence a la fermeture de la fenetre.
+      const avis = conteneur.querySelector('[data-avis="texte-non-enregistre"]')
+      if (avis) avis.textContent = 'Ce texte ne sera enregistre qu a la publication.'
+    })
     const r = conteneur.querySelector('[data-avis="remarque"]')
     if (r) r.addEventListener('input', () => { etat.remarque = r.value })
     const brancherBouton = (nom, fn) => {
@@ -227,7 +249,15 @@ function estNegatifAffiche (etat) {
     const choisi = (etat.reponses || {})[c.cle]
     if (!choisi) continue
     const niv = (c.niveaux || []).find(n => n.cle === choisi)
-    if (niv && (niv.negatif || niv.note === 1 || niv.recommande === false)) return true
+    if (!niv) continue
+    if (niv.negatif || niv.note === 1 || niv.recommande === false) return true
+    // ⚠ LA QUATRIEME REGLE, celle de lib/avis/notes-evaluation.js : un critere de
+    // recommandation dont le niveau coche ne porte pas de booleen vaut NEGATIF —
+    // « je ne sais pas » n'est pas « oui ». Elle manquait ici, donc une grille
+    // figee anterieure aux contraintes declenchait le garde-fou serveur sans que
+    // la fenetre demande confirmation. Deux definitions du negatif finissent par
+    // diverger davantage. Constat de review.
+    if (c.categorie === 'recommandation' && typeof niv.recommande !== 'boolean') return true
   }
   return false
 }
@@ -286,7 +316,8 @@ function rendre (etat) {
   // prestataire qui doit le relire avant de publier.
   const texte = (e.public_text != null || peutRediger)
     ? `<label class="hs-avis-texte"><span>Texte public${etat.role === 'hote' ? '' : ' (relisez-le avant de publier)'}</span>`
-      + `<textarea data-avis="texte" rows="5"${etat.role === 'hote' && !fige ? '' : ' readonly'}>${echapper(e.public_text || '')}</textarea></label>`
+      + `<textarea data-avis="texte" rows="5"${etat.role === 'hote' && !fige ? '' : ' readonly'}>${echapper(e.public_text || '')}</textarea>`
+      + `<small data-avis="texte-non-enregistre" class="hs-avis-note"></small></label>`
     : ''
 
   const boutons = [

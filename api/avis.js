@@ -15,8 +15,8 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
-const { chargerGrille, criteresPour, enregistrerReponses, abandonner, journaliser } = require('../lib/avis/evaluations')
-const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille } = require('../lib/avis/notes-evaluation')
+const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser } = require('../lib/avis/evaluations')
+const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
 
@@ -513,6 +513,12 @@ async function configEcrire (req, res, garde) {
   const bien = req.body?.property_id ? String(req.body.property_id).trim() : null
   if (bien && !UUID_RE.test(bien)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
   if (bien && !(await bienAutorise(req, res, garde, bien, true))) return
+  if (!bien && !peutEcrireAuNiveauCompte(garde)) {
+    return res.status(403).json({
+      error: 'Les reglages de tout le compte se modifient depuis un perimetre complet. Reglez ceux d un bien de votre perimetre.',
+      motif: 'perimetre_partiel',
+    })
+  }
 
   const ton = String(req.body?.tone || 'chaleureux').trim()
   if (!TONS.has(ton)) return res.status(400).json({ error: `Ton inconnu : « ${ton} » (attendu : ${[...TONS].join(' | ')})` })
@@ -557,6 +563,21 @@ async function bienAutorise (req, res, garde, bienId, ecriture) {
 
 // ═══ LA GRILLE D'EVALUATION, REGLEE PAR L'HOTE (spec §4.7) ══════════════════
 
+// ⚠ ECRIRE AU NIVEAU COMPTE EXIGE LE PERIMETRE ENTIER.
+// Constat de review : la garde de perimetre etait conditionnee par
+// `if (bienDemande)`. Sans `property_id`, on ecrivait donc la ligne de NIVEAU
+// COMPTE — celle qui sert a TOUS les biens sans grille propre — sans qu'aucun
+// controle de perimetre ne soit fait. Un membre limite a un bien reglait ainsi
+// les notes envoyees a Airbnb pour les biens de l'hote, et « criteres: [] »
+// suffisait a effacer sa grille.
+//
+// `refsDuPerimetre` rend `null` quand l'appelant voit tout le compte (titulaire,
+// ou membre au perimetre complet). C'est la seule situation ou « le compte » est
+// dans son perimetre.
+function peutEcrireAuNiveauCompte (garde) {
+  return refsDuPerimetre(garde.contexte) === null
+}
+
 // GET grille — les criteres du compte et, si un bien est demande, les siens.
 async function grilleLire (req, res, garde) {
   const userId = garde.accountUserId
@@ -585,7 +606,18 @@ async function grilleLire (req, res, garde) {
   })).sort((a, b) => (a.rang || 0) - (b.rang || 0))
 
   const tout = ranger(data)
+
+  // ⚠ COMBIEN DE BIENS ONT LEUR PROPRE GRILLE. L'ecran des reglages ne regle que
+  // le niveau compte : sans ce compte, il affirmait « votre grille remplace la
+  // grille par defaut sur tous vos biens », ce qui est faux des qu'un bien a la
+  // sienne — `grilleDe` fait primer le bien. Constat de review.
+  const { data: parBien, error: eParBien } = await supabase.from('avis_criteres')
+    .select('property_id').eq('user_id', userId).not('property_id', 'is', null).eq('actif', true)
+  if (eParBien) return res.status(503).json({ error: 'Grille illisible', detail: eParBien.message })
+  const biensAvecGrille = new Set((parBien || []).map(c => c.property_id)).size
+
   return res.status(200).json({
+    biens_avec_grille: biensAvecGrille,
     compte: tout.filter(c => !c.property_id),
     bien: bienDemande ? tout.filter(c => c.property_id === bienDemande) : [],
     // ⚠ LA GRILLE PAR DEFAUT EST UNE CONSTANTE DU CODE, jamais pre-inseree
@@ -618,9 +650,20 @@ async function grilleEcrire (req, res, garde) {
   const bienDemande = req.body?.property_id ? String(req.body.property_id).trim() : null
   if (!Array.isArray(brut)) return res.status(400).json({ error: 'La grille attendue est une liste de criteres' })
   if (brut.length > 40) return res.status(400).json({ error: 'Une grille de plus de 40 criteres n est pas raisonnable' })
+  // ⚠ LES NIVEAUX SE BORNENT AUSSI. Constat de review : seuls les criteres
+  // l'etaient, donc un seul critere pouvait demander une insertion de taille
+  // arbitraire dans `avis_criteres_niveaux`.
+  const trop = brut.findIndex(c => Array.isArray(c?.niveaux) && c.niveaux.length > 12)
+  if (trop >= 0) return res.status(400).json({ error: `Le critere n°${trop + 1} a plus de 12 niveaux : une question a niveaux n en demande pas tant` })
   if (bienDemande && !UUID_RE.test(bienDemande)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
 
   if (bienDemande && !(await bienAutorise(req, res, garde, bienDemande, true))) return
+  if (!bienDemande && !peutEcrireAuNiveauCompte(garde)) {
+    return res.status(403).json({
+      error: 'La grille de tout le compte se regle depuis un perimetre complet. Reglez la grille d un bien de votre perimetre.',
+      motif: 'perimetre_partiel',
+    })
+  }
 
   // ⚠ ON VALIDE AVANT D'ECRIRE, avec le MEME module que la publication.
   // Les contraintes de la base refuseraient aussi, mais avec un message
@@ -676,31 +719,82 @@ async function grilleEcrire (req, res, garde) {
     }
   }
 
-  // ─── 2. Les anciens s'en vont ───────────────────────────────────────────
-  const ancien = supabase.from('avis_criteres').delete().eq('user_id', userId)
-  const { error: eSuppr } = crees.length
-    ? await (bienDemande ? ancien.eq('property_id', bienDemande) : ancien.is('property_id', null)).not('id', 'in', `(${crees.join(',')})`)
-    : await (bienDemande ? ancien.eq('property_id', bienDemande) : ancien.is('property_id', null))
-  if (eSuppr) {
-    // ⚠ ON NE LAISSE PAS DEUX GRILLES COHABITER. Les nouveaux sont encore
-    // inactifs : les retirer remet l'ancienne grille, intacte.
+  // ─── 2. Les anciens sont DESACTIVES, pas supprimes ──────────────────────
+  // ⚠ ON NE SUPPRIME PLUS AVANT D'ACTIVER. Constat de review : l'ordre
+  // « supprimer les anciens, puis activer les nouveaux » laissait, si
+  // l'activation echouait, un niveau SANS AUCUN critere actif. Or `grilleDe`
+  // distingue « aucune ligne » de « toutes eteintes » : des lignes inactives
+  // rendent une grille VIDE, pas la grille par defaut. Toutes les evaluations du
+  // compte se bloquaient alors sur « une grille sans critere ne publie rien », et
+  // la fenetre affichait « aucune question ne vous est ouverte » — une phrase
+  // fausse. Le commentaire promettait l'inverse.
+  //
+  // Desactiver est REVERSIBLE : si l'activation echoue, on rallume les anciens.
+  const ciblerAnciens = () => {
+    const q = supabase.from('avis_criteres').update({ actif: false }).eq('user_id', userId)
+    const parNiveau = bienDemande ? q.eq('property_id', bienDemande) : q.is('property_id', null)
+    return crees.length ? parNiveau.not('id', 'in', `(${crees.join(',')})`) : parNiveau
+  }
+  const { data: anciens, error: eLectureAnciens } = await (() => {
+    const q = supabase.from('avis_criteres').select('id').eq('user_id', userId).eq('actif', true)
+    const parNiveau = bienDemande ? q.eq('property_id', bienDemande) : q.is('property_id', null)
+    return crees.length ? parNiveau.not('id', 'in', `(${crees.join(',')})`) : parNiveau
+  })()
+  if (eLectureAnciens) {
     await nettoyerCriteres(crees)
-    return res.status(503).json({ error: 'L ancienne grille n a pas pu etre retiree', detail: eSuppr.message })
+    return res.status(503).json({ error: 'L ancienne grille n a pas pu etre lue', detail: eLectureAnciens.message })
+  }
+  const idsAnciens = (anciens || []).map(a => a.id)
+
+  const { error: eEteindre } = await ciblerAnciens()
+  if (eEteindre) {
+    // Rien n'a bouge pour l'hote : les nouveaux sont inactifs, on les retire.
+    await nettoyerCriteres(crees)
+    return res.status(503).json({ error: 'L ancienne grille n a pas pu etre retiree', detail: eEteindre.message })
   }
 
   // ─── 3. Les nouveaux entrent en service ─────────────────────────────────
   if (crees.length) {
-    const { error: eActif } = await supabase.from('avis_criteres')
-      .update({ actif: true }).in('id', crees).eq('user_id', userId)
-    if (eActif) {
-      // Les criteres existent, inactifs : `grilleDe` les ecarte, donc l'hote
-      // retombe sur la grille du niveau superieur. C'est visible et reparable,
-      // et cela ne fausse aucune evaluation.
+    // ⚠ `.select()` POUR COMPTER. Constat de review : un `update` sans `select`
+    // ne dit pas combien de lignes il a touchees. Deux enregistrements
+    // simultanes pouvaient donc s'effacer l'un l'autre et rendre deux « ok »
+    // pendant que le niveau se vidait.
+    const { data: actives, error: eActif } = await supabase.from('avis_criteres')
+      .update({ actif: true }).in('id', crees).eq('user_id', userId).select('id')
+    const compte = (actives || []).length
+
+    if (eActif || compte !== crees.length) {
+      // ⚠ RATTRAPAGE : ON RALLUME LES ANCIENS. C'est tout l'interet de les avoir
+      // eteints plutot que supprimes. Sans cela, le niveau resterait vide et
+      // bloquerait chaque evaluation du compte.
+      let rattrape = true
+      if (idsAnciens.length) {
+        const { error: eRallumer } = await supabase.from('avis_criteres')
+          .update({ actif: true }).in('id', idsAnciens).eq('user_id', userId)
+        if (eRallumer) {
+          rattrape = false
+          console.error('[avis] GRILLE VIDE : nouveaux non actives ET anciens non rallumes', userId, eRallumer.message)
+        }
+      }
+      await nettoyerCriteres(crees)
       return res.status(503).json({
-        error: 'La nouvelle grille est enregistree mais pas activee : relancez l enregistrement',
-        detail: eActif.message, motif: 'grille_inactive',
+        error: rattrape
+          ? 'La nouvelle grille n a pas pu etre activee : l ancienne a ete remise en service. Reessayez.'
+          : 'La nouvelle grille n a pas pu etre activee ET l ancienne n a pas pu etre remise : contactez le support.',
+        detail: eActif ? eActif.message : `${compte} critere(s) actives sur ${crees.length}`,
+        motif: rattrape ? 'activation_echouee' : 'grille_vide',
       })
     }
+  }
+
+  // ─── 4. Les anciens, devenus inutiles, s'en vont ─────────────────────────
+  // ⚠ UN ECHEC ICI EST SANS CONSEQUENCE : ils sont INACTIFS, donc `grilleDe` les
+  // ecarte deja. On le journalise sans faire echouer l'enregistrement, qui a
+  // reussi.
+  if (idsAnciens.length) {
+    const { error: eSuppr } = await supabase.from('avis_criteres')
+      .delete().in('id', idsAnciens).eq('user_id', userId)
+    if (eSuppr) console.error('[avis] anciens criteres inactifs non supprimes', idsAnciens.join(','), eSuppr.message)
   }
 
   return res.status(200).json({ ok: true, criteres: crees.length, niveau: bienDemande ? 'bien' : 'compte' })
@@ -815,8 +909,25 @@ async function evaluationLire (req, res, garde) {
     try {
       grille = await chargerGrille(supabase, { userId: e.user_id, propertyId: e.property_id })
     } catch (err) {
-      // Une grille illisible n'est pas une grille vide : on le dit.
-      return res.status(503).json({ error: 'Grille indisponible', detail: err.message })
+      // ⚠ UNE GRILLE ILLISIBLE N'EST PAS UNE GRILLE VIDE — mais elle n'empeche
+      // pas de dire OU EN EST l'evaluation. Constat de review : `avis.statut`
+      // passe par cette action, donc une grille illisible faisait repondre
+      // « indisponible » au bus, et une app masquait son bouton pour une raison
+      // sans rapport avec le sejour. On rend donc l'etat, en disant que les
+      // questions manquent.
+      return res.status(200).json({
+        evaluation: {
+          id: e.id, status: e.status, ota: e.ota, language: e.language,
+          deadline_at: e.deadline_at, published_at: e.published_at,
+          ...(roleEtReglages(garde).role === 'hote' ? { booking_uid: e.booking_uid } : {}),
+        },
+        role: roleEtReglages(garde).role,
+        criteres: [],
+        peut_publier: false,
+        grille_figee: Boolean(e.grille_figee),
+        grille_indisponible: true,
+        detail: err.message,
+      })
     }
   }
 
@@ -849,10 +960,29 @@ async function evaluationLire (req, res, garde) {
         ...(evalPower === 'valider' ? { public_text: e.public_text } : {}),
       }
 
+  // ⚠ `peut_publier` SE REND DES L'OUVERTURE. Constat de review : la fenetre ne
+  // l'apprenait que par la reponse a `eval-reponses`. Une prestataire « valider »
+  // qui reouvrait une evaluation deja complete et deja redigee n'avait donc aucun
+  // bouton de publication : il fallait qu'elle re-enregistre ses reponses pour le
+  // faire apparaitre. La spec §11 bis dit « elle relit, puis elle publie ».
+  const reponsesToutes = { ...(e.answers_cleaner || {}), ...(e.answers_host || {}) }
+  const repondu = (c) => reponsesToutes[c.cle] !== undefined && reponsesToutes[c.cle] !== null && reponsesToutes[c.cle] !== ''
+  const ouverts = criteresPour(grille, role, evalScope)
+  let negatif = false
+  const remplis = (grille.criteres || []).filter(repondu)
+  if (remplis.length) { try { negatif = estNegatif(reponsesToutes, { criteres: remplis }) } catch { negatif = true } }
+  const decision = deciderStatut({
+    role, evalPower, negatif,
+    completRole: ouverts.length > 0 && ouverts.every(repondu),
+    completTotal: (grille.criteres || []).length > 0 && (grille.criteres || []).every(repondu),
+  })
+
   return res.status(200).json({
     evaluation: vue,
     role,
-    criteres: criteresPour(grille, role, evalScope),
+    criteres: ouverts,
+    peut_publier: decision.peutPublier,
+    negatif,
     grille_figee: Boolean(e.grille_figee),
   })
 }

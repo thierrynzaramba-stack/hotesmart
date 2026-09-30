@@ -55,7 +55,7 @@ const evalB = (a = {}) => evalA({ id: 'e2e2e2e2-2222-4222-8222-222222222222',
 function preparer ({
   user = PROD, profil = null, permissions = null,
   evaluations = [], otaReviews = [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123' }],
-  verrous = [], erreurMaj = null, criteres = [],
+  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null,
   texteIA = JSON.stringify({ public: 'Voyageur soigneux, logement rendu nickel.', prive: '' }),
 } = {}) {
   const etat = { ecritures: [], insertions: [], requetes: [] }
@@ -134,7 +134,7 @@ function preparer ({
             (q._f.id == null || o.id === q._f.id))
           return Promise.resolve({ data: c, error: null })
         }
-        if (nom === 'avis_criteres') return Promise.resolve({ data: criteres, error: null })
+        if (nom === 'avis_criteres') return Promise.resolve({ data: erreurLectureCriteres ? null : criteres, error: erreurLectureCriteres })
         if (nom === 'avis_config') return Promise.resolve({ data: [], error: null })
         if (nom === 'profiles') {
           if (q._f.id != null) {
@@ -568,4 +568,42 @@ test('une panne du modele ne fait pas passer l’evaluation a l’hote', async (
   assert.match(res.body.redaction.motif, /indisponible/)
   assert.ok(!etat.insertions.some(i => i.table === 'core_events'),
     'une panne n est pas un refus de redaction')
+})
+
+// ─── Les correctifs de la revue du lot 4 ────────────────────────────────────
+test('LE TEST QUI COMPTE : `action=evaluation` rend `peut_publier` des l’ouverture', async () => {
+  // Sans lui, une prestataire « valider » devait re-enregistrer ses reponses pour
+  // faire apparaitre son bouton de publication.
+  const complete = evalA({ status: 'a_valider' })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [complete] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: complete.id }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.peut_publier, true)
+})
+
+test('et il vaut false quand la grille n’est pas entierement couverte par son role', async () => {
+  const partielle = evalA({ status: 'a_remplir', answers_host: null,
+    answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' } })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [partielle] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: partielle.id }, null, 'GET'), res)
+  assert.strictEqual(res.body.peut_publier, false)
+})
+
+test('LE TEST QUI COMPTE : une grille illisible rend quand meme l’ETAT du sejour', async () => {
+  // Constat de review : `avis.statut` passe par cette action, donc un 503 faisait
+  // repondre « indisponible » au bus et masquait le bouton d'une app pour une
+  // raison sans rapport avec le sejour.
+  const etat = preparer({ evaluations: [evalA({ status: 'a_valider' })], erreurLectureCriteres: { message: 'timeout' } })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'evaluation', id: evalA().id }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.evaluation.status, 'a_valider')
+  assert.strictEqual(res.body.grille_indisponible, true)
+  assert.deepStrictEqual(res.body.criteres, [])
+  assert.strictEqual(res.body.peut_publier, false)
 })

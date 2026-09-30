@@ -32,7 +32,7 @@ const DEFAUT = [
   ] },
 ]
 
-function faussAppel ({ grilleCompte = [], config = null, erreurs = {} } = {}) {
+function faussAppel ({ grilleCompte = [], config = null, erreurs = {}, biensAvecGrille = 0 } = {}) {
   const appels = []
   return {
     appels,
@@ -40,7 +40,7 @@ function faussAppel ({ grilleCompte = [], config = null, erreurs = {} } = {}) {
       appels.push({ chemin, ...opts })
       for (const [motif, err] of Object.entries(erreurs)) if (chemin.includes(motif)) throw err
       if (chemin.includes('action=grille&') || chemin.endsWith('action=grille')) {
-        return { compte: grilleCompte, bien: [], defaut: DEFAUT, categories: ['cleanliness', 'communication', 'respect_house_rules', 'recommandation'], rempli_par: ['prestataire', 'hote', 'les_deux'] }
+        return { compte: grilleCompte, bien: [], defaut: DEFAUT, biens_avec_grille: biensAvecGrille, categories: ['cleanliness', 'communication', 'respect_house_rules', 'recommandation'], rempli_par: ['prestataire', 'hote', 'les_deux'] }
       }
       if (chemin.includes('action=config')) return { compte: config, bien: null, tons: ['chaleureux', 'sobre'] }
       return { ok: true }
@@ -228,4 +228,33 @@ test('LE TEST QUI COMPTE : un libelle de critere ne peut pas injecter de balise'
 test('une signature ne peut pas injecter de balise non plus', () => {
   const html = rendre({ criteres: [], config: { keywords: [], tone: 'sobre', signature: '"><script>x</script>' }, tons: ['sobre'] })
   assert.ok(!html.includes('<script>x'))
+})
+
+// ─── Les correctifs de la revue du lot 4 ────────────────────────────────────
+test('LE TEST QUI COMPTE : une grille enregistree mais NON ACTIVE se dit, et en premier', async () => {
+  // Constat de review : `actif` etait jete a la lecture, donc un hote dont
+  // l'activation avait echoue revoyait sa grille comme si elle s'appliquait —
+  // alors qu'aucune evaluation ne pouvait se remplir.
+  const inactive = [{ id: 'c1', libelle: 'Couvre-feu', categorie: 'respect_house_rules', rempli_par: 'hote', rang: 1, actif: false,
+                      niveaux: [{ cle: 'ok', libelle: 'Respecte', rang: 1, note: 5, negatif: false }] }]
+  const { conteneur } = await ouvrirEcran({ grilleCompte: inactive })
+  assert.match(conteneur.textContent, /N EST PAS ACTIVE/)
+  assert.match(conteneur.textContent, /aucune evaluation ne peut etre remplie/)
+})
+
+test('une grille active ne porte pas cet avertissement', async () => {
+  const active = [{ id: 'c1', libelle: 'Couvre-feu', categorie: 'respect_house_rules', rempli_par: 'hote', rang: 1, actif: true,
+                    niveaux: [{ cle: 'ok', libelle: 'Respecte', rang: 1, note: 5, negatif: false }] }]
+  const { conteneur } = await ouvrirEcran({ grilleCompte: active })
+  assert.ok(!conteneur.textContent.includes('N EST PAS ACTIVE'))
+})
+
+test('LE TEST QUI COMPTE : l’ecran ne dit plus « sur tous vos biens » quand un bien a sa propre grille', async () => {
+  // `grilleDe` fait primer le bien : la phrase etait fausse, et disait a l'hote
+  // l'inverse de ce qui s'applique.
+  const mienne = [{ id: 'c1', libelle: 'Couvre-feu', categorie: 'respect_house_rules', rempli_par: 'hote', rang: 1, actif: true,
+                    niveaux: [{ cle: 'ok', libelle: 'Respecte', rang: 1, note: 5, negatif: false }] }]
+  const { conteneur } = await ouvrirEcran({ grilleCompte: mienne, biensAvecGrille: 2 })
+  assert.match(conteneur.textContent, /sauf sur 2 bien\(s\) qui ont la leur/)
+  assert.ok(!conteneur.textContent.includes('sur tous vos biens'))
 })

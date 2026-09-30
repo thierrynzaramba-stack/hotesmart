@@ -60,6 +60,13 @@ export async function monter (conteneur, options = {}) {
       ? (grille.compte || []).map(depuisServeur)
       : (grille.defaut || []).map(depuisDefaut)
     etat.surDefaut = !(grille.compte || []).length
+    // Des criteres en base mais AUCUN actif : une activation a echoue, et la
+    // grille du compte est vide — donc aucune evaluation ne peut se remplir.
+    etat.inactifs = (grille.compte || []).length > 0 && !(grille.compte || []).some(c => c.actif !== false)
+    // ⚠ ET ON DIT SI UN BIEN A SA PROPRE GRILLE. Cet ecran ne regle que le
+    // niveau COMPTE ; une grille de bien le surcharge et rendrait la phrase
+    // « sur tous vos biens » fausse.
+    etat.biensAvecGrille = grille.biens_avec_grille || 0
   } catch (err) {
     conteneur.innerHTML = `<p class="hs-avis-erreur">${echapper(err.message || 'Reglages illisibles')}</p>`
     return { charge: false }
@@ -174,8 +181,11 @@ export async function monter (conteneur, options = {}) {
 }
 
 // ─── Conversions ────────────────────────────────────────────────────────────
+// ⚠ `actif` SE GARDE. Constat de review : il etait jete, donc un hote dont
+// l'activation avait echoue revoyait sa grille comme si elle s'appliquait. La
+// promesse « c'est visible et reparable » n'etait tenue que sur « reparable ».
 const depuisServeur = (c) => ({
-  libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par, rang: c.rang,
+  libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par, rang: c.rang, actif: c.actif,
   niveaux: (c.niveaux || []).map(n => ({ cle: n.cle, libelle: n.libelle, rang: n.rang, note: n.note, recommande: n.recommande, negatif: n.negatif })),
 })
 const depuisDefaut = (c) => ({
@@ -226,10 +236,20 @@ export function rendre (etat) {
   const criteres = (etat.criteres || []).map((c, i) => rendreCritere(c, i)).join('')
 
   const entete = `<div class="card"><div class="card-title">Votre grille d evaluation</div>`
+    // ⚠ UNE GRILLE INACTIVE SE DIT, ET EN PREMIER. C'est le seul cas ou aucune
+    // evaluation ne peut se remplir, et il ne se voyait nulle part.
+    + (etat.inactifs
+      ? `<div class="card-sub hs-avis-erreur">Votre grille est enregistree mais N EST PAS ACTIVE : `
+        + `aucune evaluation ne peut etre remplie. Enregistrez-la de nouveau pour la remettre en service.</div>`
+      : '')
     + `<div class="card-sub">`
     + (etat.surDefaut
       ? 'Vous utilisez la grille par defaut. Modifiez-la et enregistrez pour en faire la votre.'
-      : 'Votre grille remplace la grille par defaut sur tous vos biens.')
+      : etat.biensAvecGrille
+        // ⚠ La phrase d'avant disait « sur tous vos biens », ce qui est FAUX des
+        // qu'un bien a sa propre grille : `grilleDe` fait primer le bien.
+        ? `Votre grille remplace la grille par defaut, sauf sur ${etat.biensAvecGrille} bien(s) qui ont la leur.`
+        : 'Votre grille remplace la grille par defaut sur vos biens.')
     + ` Deux regles ne se defont pas : une note 1 est toujours negative, et un refus de recommander aussi. `
     + `Un avis negatif repasse toujours par vous.</div></div>`
 

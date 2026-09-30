@@ -150,7 +150,11 @@
 
   <div class="tabs">
     <button class="tab active" id="tab-equipe">Équipe et droits</button>
-    <button class="tab" id="tab-avis">Avis</button>
+    <!-- ⚠ Masque par defaut : il n'apparait que si le droit `avis` est accorde.
+         Sans cela, un membre `avis: none` cliquait et recevait « Droits
+         insuffisants » brut — le depot masque par droit partout ailleurs
+         (docs/kb/profils-et-droits.md). -->
+    <button class="tab" id="tab-avis" hidden>Avis</button>
     <a class="tab" href="/connexions">Connexions <span class="ext">↗</span></a>
     <a class="tab" href="/abonnement">Abonnement <span class="ext">↗</span></a>
     <a class="tab" href="/pages/compte.html">Mon compte <span class="ext">↗</span></a>
@@ -248,7 +252,7 @@
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
   // s'ouvrait par URL directe en mode basculé et affichait un contresens.
-  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  import { exigerCompteProprePage, peutEcrire } from '/shared/compte-courant.js'
   await exigerCompteProprePage({ nomPage: 'Les réglages' })
 
   // Le menu. `renderSidebar` crie si son point de montage manque — c'est ce
@@ -312,6 +316,15 @@ async function charger () {
       $('zone-equipe').style.display = 'none'
       return
     }
+    // ⚠ MEME SUR UN ECHEC NON PREVU, LES DRAPEAUX SE POSENT. Constat de review :
+    // sans eux, un aller-retour par l'onglet Avis laissait la page entierement
+    // vide, les deux zones restant a `display:none` sans que rien ne le dise.
+    $('zone-refus').dataset.visible = 'oui'
+    $('zone-equipe').dataset.visible = 'non'
+    $('zone-refus').style.display = 'block'
+    $('zone-refus').querySelector('.card-title').textContent = 'Chargement impossible'
+    $('zone-refus').querySelector('.card-sub').textContent =
+      'La liste des profils n’a pas pu être chargée. Rechargez la page.'
     message(e.message)
   }
 }
@@ -651,6 +664,18 @@ function basculer (onglet) {
 }
 $('tab-equipe').onclick = () => basculer('equipe')
 $('tab-avis').onclick = () => basculer('avis')
+
+// ⚠ L'ONGLET N'APPARAIT QUE SI LE DROIT D'ECRITURE EXISTE. C'est un EDITEUR :
+// l'ouvrir a un membre `avis: read` lui montrerait un bouton « Enregistrer » qui
+// ne peut qu'echouer. `peutEcrire` est SYNCHRONE et lit les droits deja charges
+// par `exigerCompteProprePage` ; le serveur reste seul juge.
+try {
+  if (peutEcrire('avis')) $('tab-avis').hidden = false
+} catch (e) {
+  // Des droits illisibles laissent l'onglet cache : le refus serveur reste la
+  // vraie barriere, et une page entiere ne doit pas tomber pour cela.
+  console.warn('[settings] droits avis', e && e.message)
+}
 
 const { data: { session } } = await supabase.auth.getSession()
 if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings')

@@ -183,11 +183,33 @@ demande par la page. Trois choses qu'il fait et qui ne sont pas décoratives :
   Laisser les anciens champs proposerait une grille que la base refusera.
 
 **L'écriture sans transaction.** PostgREST n'en offre pas, et la sûreté vient de
-l'**ordre** : les nouveaux critères naissent **inactifs** avec leurs niveaux, les
-anciens ne partent qu'ensuite, l'activation vient en dernier. Un échec à n'importe
-quelle étape laisse l'**ancienne** grille intacte et, au pire, des critères
-inactifs — que `grilleDe` écarte. L'inverse aurait pu laisser une grille à moitié
-écrite servir de référence à une vraie évaluation.
+l'**ordre** : insérer les nouveaux **inactifs** avec leurs niveaux, **éteindre** les
+anciens, **activer** les nouveaux, puis supprimer les anciens devenus inutiles.
+
+Éteindre, et non supprimer : c'est ce qui rend l'échec **réversible**. Une première
+version supprimait les anciens avant d'activer, et un échec d'activation laissait
+le niveau sans aucun critère actif. Or `grilleDe` distingue « aucune ligne » de
+« toutes éteintes » : des lignes inactives rendent une grille **vide**, pas la
+grille par défaut. Toutes les évaluations du compte se bloquaient alors sur « une
+grille sans critère ne publie rien », et la fenêtre affichait « aucune question ne
+vous est ouverte » — une phrase fausse. Si l'activation échoue, les anciens sont
+donc **rallumés** ; si ce rattrapage échoue aussi, le message le dit sans détour.
+
+L'activation compte les lignes touchées (`.select()`). Sans cela, deux
+enregistrements simultanés pouvaient s'effacer l'un l'autre en rendant deux « ok »
+pendant que le niveau se vidait.
+
+**Écrire au niveau compte exige le périmètre entier.** La grille et la
+configuration de niveau compte servent à **tous** les biens sans grille propre :
+un membre limité à un bien qui les écrirait réglerait les notes envoyées à Airbnb
+pour les autres, et une liste vide suffirait à effacer la grille de l'hôte. Le
+périmètre partiel reçoit donc un refus nommé, et règle la grille d'un de ses biens.
+
+**Ce que l'écran ne fait pas encore** : la surcharge **par bien** (§4.4). Il ne lit
+et n'écrit que le niveau compte. L'endpoint, lui, la gère, et l'écran **dit** combien
+de biens ont leur propre grille — sans quoi sa phrase « votre grille remplace la
+grille par défaut sur tous vos biens » serait fausse, `grilleDe` faisant primer le
+bien.
 
 ## 5. Rédaction IA
 
@@ -287,9 +309,14 @@ peut-être parti. Puis `a_valider`, `soumise_prestataire`, `a_remplir`, et à st
 égal ce qui expire le plus tôt. Une évaluation **sans échéance** n'est pas urgente :
 on ne sait pas quand elle expire, donc elle attend.
 
-**Un délai passé n'affiche aucun compte à rebours.** Ni un nombre négatif, qui se
-lit comme un bug, ni « dernier jour », qui serait faux. Et l'urgence se dit **en
-mots** autant qu'en couleur, pour une page lue en niveaux de gris.
+**Un délai passé se juge sur la DATE, pas sur le statut.** Rien ne bascule une
+évaluation en `expiree` tout seul : la seule écriture de ce statut vient d'une
+tentative de publication. Une évaluation que personne n'a touchée reste
+`a_remplir` indéfiniment, et affichait « dernier jour » trois semaines après
+l'échéance. Elle dit maintenant « délai dépassé », **perd son bouton** (§6 :
+« au-delà, bouton désactivé ») et ne compte plus dans « n évaluations vous
+attendent ». L'urgence se dit **en mots** autant qu'en couleur, pour une page lue
+en niveaux de gris.
 
 **La liste ne sert pas le texte public.** Il n'y sert à rien, et une liste est ce
 qui fuit le plus facilement dans une capture d'écran. Il se lit sur l'évaluation

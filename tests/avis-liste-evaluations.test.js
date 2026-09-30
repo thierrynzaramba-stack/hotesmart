@@ -96,6 +96,43 @@ test('une liste vide explique QUAND les evaluations apparaissent', async () => {
   assert.match(conteneur.textContent, /Airbnb seulement/)
 })
 
+test('LE TEST QUI COMPTE : un delai passe sur un statut NON terminal dit « delai depasse », pas « dernier jour »', async () => {
+  // Constat de review : rien ne bascule une evaluation en `expiree` tout seul.
+  // Une evaluation que personne n'a touchee reste `a_remplir` indefiniment, et
+  // affichait « dernier jour » trois semaines apres l'echeance.
+  const { conteneur } = await ouvrirListe([EVAL({ status: 'a_remplir', echeance: jour(-21) })])
+  assert.match(conteneur.textContent, /delai depasse/)
+  assert.ok(!/dernier jour/.test(conteneur.textContent), conteneur.textContent)
+})
+
+test('LE TEST QUI COMPTE : et son bouton « Ouvrir » disparait (spec §6)', async () => {
+  const { conteneur } = await ouvrirListe([EVAL({ status: 'a_valider', echeance: jour(-2) })])
+  assert.strictEqual(conteneur.querySelector('[data-evaluer]'), null)
+})
+
+test('une evaluation hors delai ne compte pas dans « n vous attendent »', async () => {
+  const { conteneur } = await ouvrirListe([
+    EVAL({ id: 'a', status: 'a_remplir', echeance: jour(-2) }),
+    EVAL({ id: 'b', status: 'a_valider', echeance: jour(4) }),
+  ])
+  assert.match(conteneur.textContent, /1 evaluation\(s\) vous attendent/)
+  assert.match(conteneur.textContent, /1 hors delai/)
+})
+
+test('le dernier jour, lui, reste « dernier jour » et garde son bouton', async () => {
+  const { conteneur } = await ouvrirListe([EVAL({ status: 'a_valider', echeance: jour(0) })])
+  assert.match(conteneur.textContent, /dernier jour/)
+  assert.ok(conteneur.querySelector('[data-evaluer]'))
+})
+
+test('le filtre propose TOUS les etats que le serveur accepte', async () => {
+  const { conteneur } = await ouvrirListe([EVAL({})])
+  const valeurs = [...conteneur.querySelectorAll('[data-filtre] option')].map(o => o.value)
+  for (const e of ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee', 'echec_publication', 'expiree', 'abandonnee']) {
+    assert.ok(valeurs.includes(e), `${e} doit pouvoir etre demande seul`)
+  }
+})
+
 test('LE TEST QUI COMPTE : une evaluation dont le delai est passe n’affiche AUCUN compte a rebours', async () => {
   // Ni « -3 jours », qui se lit comme un bug, ni « dernier jour », qui serait un
   // mensonge : le delai est passe, le statut le dit, et rien d'autre ne doit
