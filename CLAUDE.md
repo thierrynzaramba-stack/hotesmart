@@ -76,6 +76,18 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 - Corollaire pratique : une nouvelle donnée provider se traite dans cet ordre —
   table du cœur, writer dans `lib/`, puis lecture par l'app. Jamais l'inverse.
 
+## RÈGLE — LE MOBILE SUIT L'ORDINATEUR
+- **Toute spec livrée sur la version ordinateur d'un écran est reportée sur sa
+  version mobile — ou le report est PROPOSÉ à Thierry en fin de chantier.**
+  Jamais un chantier desktop clos sans que la question du mobile ait été posée.
+- **Une règle partagée par les deux versions vit dans un module commun**
+  (`shared/…`), jamais recopiée dans chaque page : deux copies divergent.
+- Vécu (30 septembre 2026) : la couleur des réservations était tirée au sort
+  (`SRC[idx % 3]`) sur les deux calendriers ; l'ordinateur avait été corrigé,
+  le téléphone jamais — une réservation Booking s'y affichait en rouge Airbnb.
+  Le mobile n'avait ni fiche, ni ajout, ni messagerie. Rattrapé par
+  `shared/calendrier-resa.js` (docs/kb/reservation-directe.md §12).
+
 ## ARCHITECTURE — CONFIG D'APP vs CONFIG GÉNÉRALE
 - **La configuration d'une APP vit DANS l'app.** Prestataires de ménage et leurs
   biens → `apps/menages/prestataires.html`. Modèles de messages → l'app
@@ -363,6 +375,7 @@ vert, sans toucher une ligne de production.
 | 2 | `tests/avis-endpoint.test.js` | **6** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir ; le 29 septembre, trois de plus (« un avis NON analyse… », « un membre limite a un bien… », « une detection en attente… ») — contre-epreuve +1 mois : 5 des 6 au vert, le 6e casse par le decalage lui-meme (la date invalide 02-30 devient valide) |
 | 3 | `tests/messages-classify.test.js` | **10** | meme fenetre : le message du 20 aout est ecarte AVANT la garde de panne DB, donc la garde n'est jamais appelee — elle mord toujours |
 | 4 | `tests/menages-public-filtre-presta.test.js` | **4** | fenetre glissante de 14 jours du fil d'actualites (`api/menages-public.js`, « on remonte aussi les 14 derniers jours ») : le menage `b1` du 6 septembre en est sorti le 21 (constate le 21 septembre 2026, contre-epreuve +1 mois : 20/20) |
+| 5 | `tests/pwa-mes-jours-dom.test.js` | **2**, du 1er au 3 de chaque mois | « la marque ⏭ ne dépend PAS du filtre de biens » et « la FICHE d'un ménage obsolète… » : dates RELATIVES (`dans(-3)`), mais la grille n'affiche que le mois courant — les trois premiers jours du mois, la case du 3e jour avant n'existe pas (`taperJour` → `null`). Constaté le 1er octobre 2026 ; contre-épreuve horloge +10 jours (Node ET fenêtre jsdom) : 132/132. Guérit seul le 4, revient le 1er du mois suivant |
 
 Les familles 2 et 3 franchissent une FENETRE DE LECTURE, pas une garde
 d'anciennete — c'est ce qui les rend penibles : elles se declenchent a des
@@ -376,7 +389,8 @@ garde-fou : l'actualiser n'est qu'un sursis.
 Le nombre attendu est **28, et exactement 28** (8 + 6 + 10 + 4, au 29 septembre
 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28). Avant tout push : lire le compte,
 pas la couleur. **29 rouges = une regression, on ne pousse pas** tant qu'on ne
-l'a pas nommee ; 27 rouges = une dette s'est refermee, on met ce nombre a jour
+l'a pas nommee — sauf du 1er au 3 du mois, ou 30 est attendu (famille 5, les deux
+tests nommes) ; 27 rouges = une dette s'est refermee, on met ce nombre a jour
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
 se contre-eprouve avant d'etre pris pour une regression : decaler les fixtures
 d'un mois, relancer, restaurer l'arbre — si tout repasse au vert, c'est le

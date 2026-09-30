@@ -448,6 +448,10 @@
     import { api } from '/shared/api-client.js'
     import { peutEcrire } from '/shared/compte-courant.js'
     import { PARAMS, ROW_DEFAULTS, CELL_W, LABEL_W, dayNames, dowOrder, dowLabels, monthShort, monthFull, toISO, fmtShort, curSym, computeDays, buildStateFromInventory, configuredRowParams, loadCalendarData } from '/shared/calendar-core.js'
+    // Les reservations : UNE regle pour l'ordinateur et le telephone (chantier
+    // calendrier mobile, 30 septembre 2026) — famille de source, transformation,
+    // droit de modifier, messagerie. Voir shared/calendrier-resa.js.
+    import { familleSource, estOffline, mapResa, libelleCanal, droitsResa, sansMessagerieOta, TEXTE_SANS_EMAIL, urlConversation } from '/shared/calendrier-resa.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -1511,8 +1515,6 @@
         + '<span style="font-size:13px;font-weight:500;text-align:right">'+escapeHtmlLocal(String(valeur))+'</span></div>'
     }
 
-    const LIBELLE_CANAL = { airbnb:'Airbnb', booking:'Booking.com', direct:'Direct' }
-
     function ouvrirFicheResa(bienId, resaId){
       const bien = BIENS.find(x=>x.id===bienId)
       const resa = (bien&&bien.resa||[]).find(r=>String(r.id)===String(resaId))
@@ -1526,22 +1528,13 @@
       const montant = resa.amount!=null ? (resa.amount+' '+(resa.currency||'EUR')) : null
       // `sourceBrute` est la verite du provider (« Offline », « AirBNB »…) ;
       // le libelle n'est qu'un habillage.
-      const canal = resa.offline ? 'Direct (saisie HôteSmart)'
-                                 : (LIBELLE_CANAL[resa.source] || resa.sourceBrute || resa.source)
+      const canal = libelleCanal(resa)
 
-      const channex = (bien.provider==='channex'||bien.provider==='channel')
-      // ⚠ MODIFIABLE = LES MEMES QUATRE CONDITIONS QUE L'ANNULATION. Une resa OTA
-      // reste en consultation seule : Airbnb et Booking sont maitres de leurs
-      // reservations, et le CRS ne sert qu'a nos propres ecritures.
-      // ⚠ « Offline » NE VEUT PAS DIRE « saisie par l'hote ». Le moteur de
-      // reservation public cree lui aussi des sejours `ota_name: "Offline"`, mais
-      // PAYES par le voyageur : en deplacer dates ou prix depuis le planning ne
-      // declencherait ni remboursement ni complement. Le serveur les refuse (409
-      // `reservation_moteur`) ; on ne propose donc pas les champs.
-      const venteEnLigne = resa.metaSource === 'hotesmart-engine'
-      const modifiable = !!(resa.offline && channex && !venteEnLigne
-                            && peutEcrire('reservations') && !LECTURE_SEULE)
-
+      // ⚠ MODIFIABLE = LES MEMES QUATRE CONDITIONS QUE L'ANNULATION, et la note
+      // qui dit pourquoi il n'y a pas de bouton : shared/calendrier-resa.js
+      // (`droitsResa`), la meme regle que le telephone.
+      const droits = droitsResa(bien, resa, peutEcrire('reservations') && !LECTURE_SEULE)
+      const { channex, venteEnLigne, modifiable } = droits
       document.getElementById('resa-titre').textContent = resa.name
       document.getElementById('resa-sous-titre').textContent = bien.name
       document.getElementById('resa-corps').innerHTML =
@@ -1566,18 +1559,9 @@
         actions.insertAdjacentHTML('afterbegin',
           '<button class="btn-cancel" id="resa-annuler" style="color:#c0392b">Annuler la réservation</button>'
           + '<button class="btn-apply" id="resa-enregistrer">Enregistrer</button>')
-        note.textContent = 'Réservation directe : modifiable depuis HôteSmart.'
-      } else if(venteEnLigne && channex){
-        note.textContent = 'Vendue par votre moteur de réservation et payée en ligne : '
-                         + 'toute modification passe par un remboursement ou un complément.'
-      } else if(resa.offline && channex){
-        note.textContent = 'Réservation directe — vous n\'avez pas le droit de la modifier.'
-      } else {
-        // On DIT pourquoi il n'y a pas de bouton, plutot que de laisser un vide.
-        note.textContent = channex
-          ? 'Réservation venue de ' + canal + ' : modifiable uniquement chez ' + canal + '.'
-          : 'Bien synchronisé hors HôteSmart : consultation seule.'
       }
+      // On DIT pourquoi il n'y a pas de bouton, plutot que de laisser un vide.
+      note.textContent = droits.note
       document.getElementById('resa-fermer').addEventListener('click', fermerFiche)
       const btnAnn = document.getElementById('resa-annuler')
       if(btnAnn) btnAnn.addEventListener('click', annulerResaCourante)
@@ -1614,20 +1598,12 @@
     // Direct » sans le moindre avertissement. L'hôte découvrait le silence le jour
     // de l'arrivée — le scénario même que ce badge existe pour empêcher.
     // Constat de review.
-    function sansMessagerieOta(resa){
-      if(resa.offline) return true
-      const src = String(resa.sourceBrute || resa.source || '').trim().toLowerCase()
-      return src === '' || src === 'direct'
-    }
-
     function badgeSansEmail(resa){
       if(!sansMessagerieOta(resa) || resa.aEmail) return ''
       return '<div style="margin:10px 0;padding:10px 12px;border-radius:8px;'
         + 'background:#fdf3e7;border:1px solid #e8c9a0;font-size:12px;line-height:1.55;color:#7a4b12">'
         + '<strong>Pas d\'e-mail — messages non envoyés.</strong><br>'
-        + 'Cette réservation directe n\'a pas d\'adresse : ni confirmation, ni consignes '
-        + 'd\'arrivée, ni code d\'accès ne peuvent partir. Transmettez-les vous-même, '
-        + 'ou saisissez l\'adresse à la création pour les prochaines.'
+        + TEXTE_SANS_EMAIL
         + '</div>'
     }
 
@@ -1685,9 +1661,7 @@
     function ouvrirConversation(bien, resa){
       // `bien` accompagne `conv` : sans lui, un filtre de bien deja actif dans la
       // messagerie peut masquer la conversation visee.
-      const url = '/apps/agent-ai/messagerie?conv=' + encodeURIComponent(resa.id)
-        + (bien.provider_property_id ? '&bien=' + encodeURIComponent(bien.provider_property_id) : '')
-      window.location.href = url
+      window.location.href = urlConversation(bien, resa)
     }
 
     // ─── Champs modifiables (reservations « Offline » uniquement) ────────────
@@ -1853,7 +1827,6 @@
 
     function showToast(m,ms){const t=document.getElementById('toast');t.textContent=m;t.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('visible'),ms||1800)}
 
-    const COLORS_BY_SOURCE = { airbnb:'red', booking:'blue', direct:'green' }
     function rangeISO(){ return { start: toISO(days[0]), end: toISO(days[days.length-1]) } }
 
     function mapBien(p){
@@ -1878,46 +1851,7 @@
     //
     // `id` : indispensable a la fiche de consultation. Sans lui, le bandeau
     // n'est qu'un rectangle et rien ne peut etre ouvert au clic.
-    function familleSource(src){
-      const v=String(src||'').toLowerCase()
-      if(v.includes('airbnb')||v.includes('abb')) return 'airbnb'
-      if(v.includes('booking')||v.includes('bdc')) return 'booking'
-      // « Offline » = reservation directe creee par nous (spec reservation
-      // manuelle). Elle partage la couleur du direct : c'en est une.
-      if(v==='offline'||v.includes('direct')) return 'direct'
-      return 'direct'
-    }
-    function estOffline(src){ return String(src||'').toLowerCase()==='offline' }
-
-    function mapResa(list){
-      // ⚠ `demapped` EST MASQUE COMME `cancelled` : un sejour neutralise par un
-      // demappage n'occupe plus rien cote coeur (ses nuits repartent en vente).
-      // Le montrer comme une reservation aurait fait lire a l'hote une
-      // occupation sur des nuits disponibles.
-      return (list||[]).filter(function(b){var st=String(b.status||'').toLowerCase();return st!=='cancelled'&&st!=='demapped'}).map(b=>{
-        const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
-        const span=Math.max(1, Math.round((co-ci)/86400000))
-        const src=familleSource(b.source)
-        return {
-          id: b.booking_id || null,
-          startISO:b.checkin, checkout:b.checkout, span,
-          name:b.guest_name||'Reservation',
-          source:src, sourceBrute:b.source||null, offline:estOffline(b.source),
-          color:COLORS_BY_SOURCE[src]||'green',
-          amount:b.amount ?? null, currency:b.currency||null,
-          commission:b.commission ?? null,
-          numAdult:b.numAdult ?? null, numChild:b.numChild ?? null,
-          otaCode:b.otaReservationCode||null, arrivalHour:b.arrivalHour||null,
-          statut:b.status||null,
-          // Sous-origine : distingue une saisie de l'hote d'une vente du moteur
-          // public, toutes deux `ota_name: "Offline"`. Voir `estModifiable`.
-          metaSource: b.metaSource || null,
-          // Le cœur porte-t-il une adresse pour ce voyageur ? Booléen : le
-          // serveur ne sert pas l'adresse elle-même pour un badge.
-          aEmail: b.aEmail === true
-        }
-      })
-    }
+    // `familleSource`, `estOffline` et `mapResa` vivent dans shared/calendrier-resa.js.
     // `platformLogo` a ete SUPPRIMEE de cette page : la pastille OTA n'apportait
     // aucune information que la couleur de la bulle ne donnait deja, et mangeait
     // la place du nom du voyageur — sur une bulle d'une nuit, elle le faisait

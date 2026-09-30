@@ -19,6 +19,12 @@ const PAGE_BRUTE = fs.readFileSync(path.join(__dirname, '..', 'pages', 'biens-ca
 const PAGE = PAGE_BRUTE.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
 const MOBILE = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier-mobile.html'), 'utf8')
 const CAL = fs.readFileSync(path.join(__dirname, '..', 'api', 'calendar.js'), 'utf8')
+// Chantier calendrier mobile (30 septembre 2026) : la regle des reservations vit
+// dans un module COMMUN aux deux ecrans. Les tests qui la cherchaient dans la
+// page ordinateur la cherchent la ou elle est, et verifient que la page
+// l'importe (REVIEW.md regle 17 : le test suit la regle, pas son emplacement).
+const MODULE = fs.readFileSync(path.join(__dirname, '..', 'shared', 'calendrier-resa.js'), 'utf8')
+const MOBILE_CODE = MOBILE.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
 
 // ─── L'endpoint sert ce qu'il faut a la fiche ───────────────────────────────
 
@@ -67,15 +73,19 @@ test('calendrier : la source vient du cœur, pas d\'un index', () => {
   // ⚠ REGRESSION HISTORIQUE. mapResa faisait `SRC[idx % 3]` : airbnb, booking et
   // direct en rotation par index. Les pastilles de canal etaient donc fausses —
   // une reservation Airbnb pouvait s'afficher « direct ».
-  assert.ok(!/SRC\[idx\s*%\s*3\]/.test(PAGE), 'la source ne doit plus dependre de l\'index')
-  assert.ok(!/const SRC\s*=\s*\[/.test(PAGE), 'le tableau de sources factices a disparu')
-  assert.match(PAGE, /function familleSource/)
-  assert.match(PAGE, /sourceBrute/)
+  // ⚠ ET SUR LE TELEPHONE, qui l'avait garde jusqu'au 30 septembre 2026.
+  for (const code of [PAGE, MOBILE_CODE]) {
+    assert.ok(!/SRC\[idx\s*%\s*3\]/.test(code), 'la source ne doit plus dependre de l\'index')
+    assert.ok(!/const SRC\s*=\s*\[/.test(code), 'le tableau de sources factices a disparu')
+    assert.match(code, /from '\/shared\/calendrier-resa\.js'/)
+  }
+  assert.match(MODULE, /export function familleSource/)
+  assert.match(MODULE, /sourceBrute/)
 })
 
 test('calendrier : « Offline » est reconnu comme une reservation directe', () => {
-  assert.match(PAGE, /function estOffline/)
-  assert.match(PAGE, /'offline'/)
+  assert.match(MODULE, /export function estOffline/)
+  assert.match(MODULE, /'offline'/)
 })
 
 // ─── Aucun bouton qui promet un pouvoir qu'on n'a pas ───────────────────────
@@ -90,7 +100,8 @@ test('fiche : les actions exigent Offline + Channex + droit + pas lecture seule'
 
 test('fiche : une reservation OTA explique POURQUOI elle n\'est pas modifiable', () => {
   // Un vide laisserait croire a un bug ; on dit ou aller.
-  assert.match(PAGE, /modifiable uniquement chez/)
+  assert.match(MODULE, /modifiable uniquement chez/)
+  assert.match(PAGE, /note\.textContent = droits\.note/)
 })
 
 test('ajout : le bouton reste cache hors Channex, sans droit ou en lecture seule', () => {
@@ -129,11 +140,16 @@ test('ajout : confirmation en DEUX temps, sans affirmer ce qui n\'est pas vrai',
 
 // ─── Desktop d'abord ────────────────────────────────────────────────────────
 
-test('DESKTOP D\'ABORD : le mobile reste en consultation pure', () => {
-  // Decision gravee au §5. Le mobile ne doit porter ni fiche ni formulaire.
-  assert.ok(!MOBILE.includes('ouvrirFicheResa'), 'pas de fiche sur mobile')
-  assert.ok(!MOBILE.includes('btn-ajouter-resa'), 'pas de bouton d\'ajout sur mobile')
-  assert.ok(!MOBILE.includes('reservationDirecte'), 'pas d\'ecriture CRS sur mobile')
+// ⚠ REECRIT LE 30 SEPTEMBRE 2026 (REVIEW.md regle 17). La version d'origine
+// figeait « DESKTOP D'ABORD : le mobile reste en consultation pure » (spec §5),
+// qui prevoyait le chemin mobile « sur besoin reel constate ». Le besoin est
+// venu (Thierry, chantier calendrier mobile) : le mobile porte la fiche,
+// l'ajout et la modification — par la MEME regle et les MEMES appels que
+// l'ordinateur (tests/calendrier-mobile-parite.test.js).
+test('MOBILE RATTRAPE (30 septembre 2026) : fiche et ajout sur telephone, par la regle commune', () => {
+  assert.ok(MOBILE_CODE.includes('ouvrirFicheResa'), 'la fiche existe sur mobile')
+  assert.ok(MOBILE_CODE.includes('api.reservationDirecte.creer('), 'l ajout existe sur mobile')
+  assert.match(MOBILE_CODE, /droitsResa\(bien, resa, ecriture\(\)\)/, 'le droit de modifier : la regle commune')
 })
 
 // ─── L'endpoint d'ecriture ──────────────────────────────────────────────────

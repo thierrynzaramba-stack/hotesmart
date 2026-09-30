@@ -18,6 +18,10 @@ const path = require('node:path')
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'pages/biens-calendrier.html'), 'utf8')
 const api  = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
+// Depuis le chantier calendrier mobile (30 septembre 2026), la transformation
+// des reservations, la regle « sans messagerie OTA » et le texte du badge vivent
+// dans le module commun aux deux ecrans.
+const module_ = fs.readFileSync(path.join(__dirname, '..', 'shared/calendrier-resa.js'), 'utf8')
 
 test('LE TEST QUI COMPTE : le serveur envoie un BOOLEEN, jamais l\'adresse', () => {
   // La fiche a besoin de savoir si les messages peuvent partir — c'est tout.
@@ -31,7 +35,7 @@ test('LE TEST QUI COMPTE : le serveur envoie un BOOLEEN, jamais l\'adresse', () 
 })
 
 test('le front transporte le booleen tel quel', () => {
-  assert.ok(/aEmail: b\.aEmail === true/.test(html),
+  assert.ok(/aEmail: b\.aEmail === true/.test(module_),
     'strictement booleen : `undefined` ne doit pas passer pour « adresse presente »')
 })
 
@@ -49,7 +53,7 @@ test('LE TEST QUI COMPTE : la saisie directe Beds24 porte le badge, elle aussi',
   // saisie directe Beds24 arrive avec `source: 'direct'`, n'a pas davantage de
   // fil (`canal-voyageur` la classe `sans_canal`), ne recoit rien — et la fiche
   // affichait « Canal : Direct » sans le moindre avertissement.
-  const fn = html.split('function sansMessagerieOta(resa){')[1].split('\n    }')[0]
+  const fn = module_.split('export function sansMessagerieOta (resa) {')[1].split('\n}')[0]
   assert.ok(/resa\.offline/.test(fn), 'le cas Channex CRS')
   assert.ok(/=== 'direct'/.test(fn), 'et la saisie directe Beds24')
   assert.ok(/src === ''/.test(fn), 'et une source vide, qui ne dit rien non plus')
@@ -65,9 +69,11 @@ test('LE TEST QUI COMPTE : la saisie directe Beds24 porte le badge, elle aussi',
 test('le badge dit la consequence, pas seulement le constat', () => {
   const fn = html.split('function badgeSansEmail(resa){')[1].split('\n    }')[0]
   assert.ok(/messages non envoyés/.test(fn), 'le constat')
-  assert.ok(/confirmation/.test(fn) && /code d\\'accès/.test(fn),
+  assert.ok(/\+ TEXTE_SANS_EMAIL/.test(fn), 'la suite vient du module commun')
+  const texte = module_.split('export const TEXTE_SANS_EMAIL = ')[1].split('\n')[0]
+  assert.ok(/confirmation/.test(texte) && /code d\\'accès/.test(texte),
     'ce qui ne partira pas, nommement')
-  assert.ok(/Transmettez-les vous-même/.test(fn), 'et ce que l\'hote peut faire')
+  assert.ok(/Transmettez-les vous-même/.test(texte), 'et ce que l\'hote peut faire')
 })
 
 test('le badge est pose dans la fiche, pas seulement defini', () => {
