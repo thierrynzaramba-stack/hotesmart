@@ -21,6 +21,33 @@ base qui n'est pas celle de production. Posée par erreur sur la production, ell
 est ignorée et l'incident est crié dans les journaux. L'inverse — « actif sauf en
 production » — aurait rendu un oubli de configuration dangereux.
 
+## Étape 0 — Vérifier que le verrou tient, avant tout le reste
+
+```bash
+cd ~/hotesmart-avis
+node --env-file=/home/thierry/hotesmart/.env.staging scripts/prouver-simulation-avis.js
+```
+
+Ce script publie une évaluation **jetable** de bout en bout, par HTTP, avec une
+vraie session, et exige que la réponse porte `simulation: true`. Il nettoie
+derrière lui.
+
+**Ne commence la recette que s'il dit « OK ».** S'il dit que la simulation est
+inactive, il nomme les trois causes possibles dans l'ordre où il faut les
+vérifier. Rien n'est publié dans ce cas : la référence du décor n'existe pas chez
+le provider, et c'est cette ceinture qui tient — mais une ceinture ne remplace pas
+le verrou.
+
+**Mesuré le 30 septembre 2026** : au premier essai, la variable venait d'être
+posée et la simulation était **inactive** — l'appel est parti chez Channex, qui a
+répondu « 422 id is invalid ». Poser la variable et la voir lue sont deux choses
+différentes : un déploiement déjà construit ne relit pas les variables.
+
+**Une question à trancher aussi** : sur quel Channex pointe `CHANNEL_BASE_URL` du
+projet staging ? Si c'est `staging.channex.io`, aucune publication depuis staging
+ne peut atteindre Airbnb, et le verrou n'est qu'une seconde ligne. Si c'est
+l'API de production de Channex, il est la seule.
+
 ## URL et comptes
 
 | Rôle | URL | Compte |
