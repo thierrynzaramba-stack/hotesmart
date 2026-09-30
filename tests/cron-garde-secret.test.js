@@ -110,22 +110,71 @@ for (const endpoint of ENDPOINTS) {
   })
 }
 
-// ⚠ LE CONTROLE QUI EMPECHE LA RECHUTE. Le defaut n'etait pas une faute de
-// frappe : c'etait une comparaison ecrite sans son garde. Un futur endpoint
-// ecrit sur le meme moule le reintroduirait, et aucun test ne le verrait.
-test('LE TEST QUI COMPTE : tout endpoint qui compare a CRON_SECRET verifie d abord sa presence', () => {
+// ⚠ LE CONTROLE QUI EMPECHE LA RECHUTE — PAR LE COMPORTEMENT, PAS PAR LA FORME.
+//
+// Premiere version : une expression reguliere cherchait `if (!process.env.
+// CRON_SECRET` dans le texte des fichiers. Une review l'a eprouvee par sept
+// mutations, et elle se trompait DANS LES DEUX SENS :
+//
+//   garde correcte hoistee (`const S = process.env.CRON_SECRET; if (!S)`)  -> ROUGE a tort
+//   garde correcte avec une espace (`if (! process.env.CRON_SECRET)`)      -> ROUGE a tort
+//   garde presente mais EN COMMENTAIRE                                     -> vert a tort
+//   garde presente mais MORTE (pas de `return`)                            -> vert a tort
+//   garde placee APRES la comparaison, donc inutile                        -> vert a tort
+//
+// Le premier faux positif etait le plus couteux : `const SECRET = process.env.X`
+// puis `if (!SECRET || ...)` est l'idiome DOMINANT du depot pour ce genre de
+// garde — les deux webhooks l'ecrivent ainsi. Un garde-fou qui rougit sur
+// l'ecriture usuelle pousse a de-hoister du code juste pour le faire taire.
+//
+// On ne cherche donc plus la FORME du garde : on APPELLE chaque endpoint qui
+// lit `CRON_SECRET`, sans la variable, et on exige qu'il refuse. Un garde en
+// commentaire, mort, ou place trop tard ne refuse pas — et se voit.
+test('LE TEST QUI COMPTE : tout endpoint qui lit CRON_SECRET REFUSE quand il est absent', async () => {
   const fs = require('node:fs')
   const dossier = path.join(__dirname, '..', 'api')
+  const concernes = fs.readdirSync(dossier)
+    .filter(f => f.endsWith('.js'))
+    .filter(f => /process\.env\.CRON_SECRET/.test(fs.readFileSync(path.join(dossier, f), 'utf8')))
+
+  // ⚠ SI LA LISTE SE VIDE, LE TEST NE PROUVE PLUS RIEN. Un renommage de la
+  // variable, un deplacement des endpoints : le balayage rendrait « aucun
+  // fautif » sur zero fichier examine, et passerait au vert pour de bon.
+  assert.ok(concernes.length >= 2,
+    `au moins deux endpoints devraient lire CRON_SECRET, ${concernes.length} trouve(s) : `
+    + `la variable a-t-elle ete renommee, ou les endpoints deplaces ?`)
+
   const fautifs = []
-  for (const f of fs.readdirSync(dossier).filter(x => x.endsWith('.js'))) {
-    const src = fs.readFileSync(path.join(dossier, f), 'utf8')
-    if (!/process\.env\.CRON_SECRET/.test(src)) continue
-    // Le garde peut s'ecrire de deux facons, toutes deux acceptables :
-    //   if (!process.env.CRON_SECRET) { ... }
-    //   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET)
-    const garde = /if\s*\(\s*!process\.env\.CRON_SECRET/.test(src)
-    if (!garde) fautifs.push(f)
+  for (const f of concernes) {
+    const chemin = `../api/${f.replace(/\.js$/, '')}`
+    const avant = process.env.CRON_SECRET
+    delete process.env.CRON_SECRET
+    preparer()
+    try {
+      const handler = require(chemin)
+      if (typeof handler !== 'function') continue   // pas un endpoint HTTP
+      const res = reponse()
+      // ⚠ LES DEUX FORMES D'AUTORISATION QU'ON A VUES DANS CE DEPOT : l'en-tete
+      // (les crons) et la query (`api/backfill-beds24-host.js`). On envoie les
+      // deux, chacune avec la valeur qu'un attaquant deduirait d'une variable
+      // absente.
+      await handler({
+        method: 'POST', body: {}, query: { secret: 'undefined' },
+        headers: { authorization: 'Bearer undefined' },
+      }, res)
+      // Refuser, c'est 4xx ou 5xx. Tout le reste — 200, ou pas de reponse du
+      // tout — veut dire que la porte s'est ouverte.
+      if (!(res.code >= 400)) fautifs.push(`${f} (rendu : ${res.code === null ? 'aucune reponse' : res.code})`)
+    } catch (e) {
+      // Une exception au chargement n'est pas une porte ouverte, mais elle
+      // empeche de conclure : on le DIT plutot que de compter le fichier comme
+      // sain.
+      fautifs.push(`${f} (inexaminable : ${String(e.message).slice(0, 60)})`)
+    } finally {
+      if (avant === undefined) delete process.env.CRON_SECRET
+      else process.env.CRON_SECRET = avant
+    }
   }
   assert.deepStrictEqual(fautifs, [],
-    `ces endpoints comparent a CRON_SECRET sans verifier qu il existe : ${fautifs.join(', ')}`)
+    `ces endpoints ne refusent pas quand CRON_SECRET est absent : ${fautifs.join(' | ')}`)
 })
