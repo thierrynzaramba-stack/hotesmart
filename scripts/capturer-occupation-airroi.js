@@ -42,7 +42,7 @@ const MOIS = 60
   const client = creerClient({ depot, alerter: null, gardes: { budgetMensuelUsd: budget } })
   const E = 'POST /markets/metrics/occupancy'
   const params = { market, num_months: MOIS, currency: 'native' }
-  console.log(`Cache : ${dossier} · budget du script : ${budget} $ · ${market.locality} (${market.region}, ${market.country}) · ${MOIS} mois`)
+  console.log(`Cache : ${dossier} · plafond du MOIS civil sur ce journal local : ${budget} $ · ${market.locality} (${market.region}, ${market.country}) · ${MOIS} mois`)
   const cout = await client.estimer([{ endpoint: E, params }])
   console.log(`Cout de cet appel : ${cout === 0 ? '0 $ (servi par le cache)' : `${cout.toFixed(2)} $`}`)
   if (cout > 0 && !confirmer) { console.log('Rien n est paye : relancer avec --confirmer pour payer.'); process.exit(0) }
@@ -50,8 +50,15 @@ const MOIS = 60
   const r = await client.occupationMarche(market, MOIS, { horsCompte: true })
   const brut = await depot.lireCache(cleCanonique(E, params))
   if (!brut || typeof brut.reponse !== 'string') throw new Error('reponse introuvable dans le cache')
+  // ⚠ SANS CLE DANS L'ENVIRONNEMENT, LE CONTROLE NE PROUVE RIEN (review de
+  // f40ee9e, SECURITE) : une relance servie par le cache depuis un autre shell
+  // ecrivait la fixture en affirmant « aucune trace de la cle ». Refus.
   const cle = process.env.AIRROI_API_KEY || ''
-  const formes = cle ? [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)] : []
+  if (!cle) {
+    console.error('ECHEC : AIRROI_API_KEY absente — impossible de verifier que la reponse ne contient pas la cle. RIEN n est ecrit dans le depot.')
+    process.exit(6)
+  }
+  const formes = [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)]
   if (formes.some(f => f && brut.reponse.includes(f))) {
     console.error(`ECHEC : la reponse contient la cle — RIEN n'est ecrit dans le depot. Purger aussi le cache local (${dossier}).`)
     process.exit(4)
@@ -64,7 +71,8 @@ const MOIS = 60
   // sa longueur, les champs de son premier point et ses premieres dates.
   const d = r.donnees || {}
   console.log(`1. occupancy : ${r.depuisCache ? 'cache, 0 $' : `${r.cout.toFixed(2)} $`}`)
-  console.log(`   cles de premier niveau : ${Object.keys(d).join(', ')}`)
+  const premiers = Object.keys(d)
+  console.log(`   cles de premier niveau (${premiers.length}) : ${premiers.slice(0, 20).join(', ')}${premiers.length > 20 ? ', …' : ''}`)
   const decrire = (nom, v, prof = 0) => {
     if (Array.isArray(v)) {
       const p = v[0]
@@ -72,11 +80,13 @@ const MOIS = 60
       console.log(`   ${'  '.repeat(prof)}${nom} : tableau de ${v.length}${p && typeof p === 'object' ? ` · champs ${Object.keys(p).join(', ')}` : ''}`)
       if (dates.length) console.log(`   ${'  '.repeat(prof)}  premieres dates : ${dates.slice(0, 5).join(', ')} … derniere ${dates[dates.length - 1]}`)
     } else if (v && typeof v === 'object' && prof < 2) {
-      console.log(`   ${'  '.repeat(prof)}${nom} : objet · ${Object.keys(v).join(', ')}`)
-      for (const [k, x] of Object.entries(v)) if (x && typeof x === 'object') decrire(`${nom}.${k}`, x, prof + 1)
+      // Borne : un dictionnaire indexe par date ferait des milliers de lignes.
+      const cles = Object.keys(v)
+      console.log(`   ${'  '.repeat(prof)}${nom} : objet de ${cles.length} cle(s) · ${cles.slice(0, 20).join(', ')}${cles.length > 20 ? ', …' : ''}`)
+      for (const k of cles.slice(0, 5)) if (v[k] && typeof v[k] === 'object') decrire(`${nom}.${k}`, v[k], prof + 1)
     }
   }
-  for (const [k, v] of Object.entries(d)) decrire(k, v)
+  for (const [k, v] of Object.entries(d).slice(0, 20)) decrire(k, v)
   console.log(`2. fixture ecrite : ${path.relative(path.join(__dirname, '..'), fichier)} (${brut.reponse.length} octets) — aucune trace de la cle.`)
   process.exit(0)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })

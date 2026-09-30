@@ -56,7 +56,7 @@ const JOURS = 730
   const fin = new Date(Date.parse(`${debut}T00:00:00Z`) + (JOURS - 1) * 86400000).toISOString().slice(0, 10)
   const depot = depotFichier(dossier)
   const client = creerClient({ depot, alerter: null, gardes: { budgetMensuelUsd: budget } })
-  console.log(`Cache : ${dossier} · budget du script : ${budget} $ · ${debut} → ${fin} (${JOURS} jours)`)
+  console.log(`Cache : ${dossier} · plafond du MOIS civil sur ce journal local : ${budget} $ · ${debut} → ${fin} (${JOURS} jours)`)
 
   const E = 'POST /price-recommendation/calendar-prices'
   const params = { location: { latitude, longitude }, currency: 'EUR', base_price: 100, start_date: debut, end_date: fin }
@@ -77,8 +77,15 @@ const JOURS = 730
 
   // Aucune trace de la cle, verifiee AVANT d'ecrire dans le depot (review :
   // un processus tue entre l'ecriture et le controle laissait le fichier).
+  // ⚠ SANS CLE DANS L'ENVIRONNEMENT, LE CONTROLE NE PROUVE RIEN (review de
+  // f40ee9e, SECURITE) : une relance servie par le cache depuis un autre shell
+  // ecrivait la fixture en affirmant « aucune trace de la cle ». Refus.
   const cle = process.env.AIRROI_API_KEY || ''
-  const formes = cle ? [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)] : []
+  if (!cle) {
+    console.error('ECHEC : AIRROI_API_KEY absente — impossible de verifier que la reponse ne contient pas la cle. RIEN n est ecrit dans le depot.')
+    process.exit(6)
+  }
+  const formes = [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)]
   if (formes.some(f => f && brut.reponse.includes(f))) {
     console.error(`ECHEC : la reponse contient la cle — RIEN n'est ecrit dans le depot. Purger aussi le cache local (${dossier}).`)
     process.exit(4)
