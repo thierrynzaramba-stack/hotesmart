@@ -1994,3 +1994,31 @@ appel à l'API interne :
   base64), puis écriture ; clé absente ou mal formée = refus (code 6), rien
   d'écrit. `--fixtures=<dossier>` isole l'écriture (les tests ne salissent
   jamais le dépôt). Constat de sécurité re-reviewé une fois (règle).
+
+### §14 — `/markets/metrics/occupancy` n'a PAS de série quotidienne (Thierry, 30 septembre 2026)
+
+**La raison forte n'est pas notre appel, c'est le contrat.** La documentation
+(anglaise comme française) annonce « données d'occupation quotidiennes,
+mensuelles et agrégées », mais son propre contrat la dément : le corps
+n'accepte que `market`, `filter`, `currency` et `num_months` (0 à 60, défaut
+12). **Aucun paramètre de granularité n'existe : rien ne permet de DEMANDER du
+quotidien.** Ce n'est pas seulement que la réponse est mensuelle — on ne peut
+rien demander d'autre.
+
+**Et l'appel le confirme** (0,10 $, 30 septembre, fixture
+`occupation-bagneres-2026-09-30.json`) : `market` + `results`, 60 points
+MENSUELS du 2021-09-01 au 2026-08-01, champs `date`, `avg`, `p25`, `p50`,
+`p75`, `p90` — la même série que l'occupation de `metrics/all`.
+
+**Dernier essai, décidé par Thierry, et c'est le dernier** : `num_months: 0`
+(zéro mois d'historique n'a aucun sens pour une série mensuelle ; s'il
+existait une granularité cachée, c'est là qu'elle se montrerait). Si la
+réponse est vide ou mensuelle, **la question est définitivement close**.
+- Plafond : le journal local compte 0,51 $ en septembre (dont 0,10 $ pour le
+  422 du 29, non facturé, journalisé avant le correctif) ; 0,51 + 0,10 >
+  0,60 $ → refus AVANT l'envoi, vérifié. **L'essai se fait le 1er octobre**
+  (mois civil UTC, soit à partir de 2 h à Paris).
+- Préparé : le client admet `num_months` de 0 à 60 ; le script prend
+  `--mois=0` et nomme la fixture `…-mois0.json` (la capture des 60 mois n'est
+  pas écrasée). Une réponse sans aucun point daté (vide) est payée mais pas
+  rangée : le message d'erreur en montre le début — ce qui suffit à clore.

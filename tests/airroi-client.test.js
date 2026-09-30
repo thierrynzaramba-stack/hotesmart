@@ -410,7 +410,7 @@ test('LE TEST QUI COMPTE (30 septembre 2026) : occupancy — corps fige (marche,
     assert.deepEqual(JSON.parse(f.appels[0].init.body), { market, num_months: 60, currency: 'native' })
     assert.equal((await c.occupationMarche(market, 60, H)).depuisCache, true)
     const E = 'POST /markets/metrics/occupancy'
-    for (const p of [{ market, num_months: 61, currency: 'native' }, { market, num_months: 60, currency: 'EUR' },
+    for (const p of [{ market, num_months: 61, currency: 'native' }, { market, num_months: -1, currency: 'native' }, { market, num_months: 0.5, currency: 'native' }, { market, num_months: 60, currency: 'EUR' },
       { market, num_months: 60, currency: 'native', filter: {} }, { market: { country: 'France' }, num_months: 60, currency: 'native' },
       { market: { ...market, district: null }, num_months: 60, currency: 'native' }]) {
       await assert.rejects(c.appeler(E, p, H), /parametres invalides/)
@@ -511,4 +511,14 @@ test('LE TEST QUI COMPTE (SECURITE) : ecrireFixtureSansCle — verifie en memoir
   assert.deepEqual(fs.readdirSync(d), [], 'aucun refus n a ecrit')
   assert.equal(code(() => ecrireFixtureSansCle('{"ok":1}', f, cle)), 0)
   assert.equal(fs.readFileSync(f, 'utf8'), '{"ok":1}')
+})
+
+test('occupancy : num_months = 0 est admis (contrat de l API : 0 a 60) — essai du 30 septembre 2026', async () => {
+  await avecCle(async () => {
+    const f = faux(JSON.stringify({ results: [{ date: '2026-08-01', p50: 0.5 }] }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    await c.occupationMarche(market, 0, H)
+    assert.deepEqual(JSON.parse(f.appels[0].init.body), { market, num_months: 0, currency: 'native' })
+  })
 })

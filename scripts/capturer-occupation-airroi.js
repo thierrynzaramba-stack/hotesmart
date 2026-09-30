@@ -36,10 +36,12 @@ const confirmer = args.includes('--confirmer')
 // depot ; `--fixtures` ne deplace que l'ECRITURE (les tests l'isolent).
 const FIX = path.join(__dirname, '..', 'tests', 'fixtures', 'airroi')
 const SORTIE = val('fixtures', FIX)
-const MOIS = 60
+// `--mois` : 0 a 60 (contrat de l'API). 60 par defaut.
+const MOIS = Number(val('mois', '60'))
 
 ;(async () => {
   if (!(Number.isFinite(budget) && budget > 0)) { console.error('ECHEC : --budget doit etre un nombre positif'); process.exit(1) }
+  if (!(Number.isInteger(MOIS) && MOIS >= 0 && MOIS <= 60)) { console.error('ECHEC : --mois doit etre un entier de 0 a 60'); process.exit(1) }
   const m = lireJson(fs.readFileSync(path.join(FIX, 'marche-60.json'), 'utf8')).market
   const market = { country: m.country.normalize('NFC'), region: m.region.normalize('NFC'), locality: m.locality.normalize('NFC') }
   const depot = depotFichier(dossier)
@@ -56,7 +58,9 @@ const MOIS = 60
   if (!brut || typeof brut.reponse !== 'string') throw new Error('reponse introuvable dans le cache')
   // Le jour de CAPTURE, a l'heure de Paris.
   const jour = jourLocalParis(String(brut.recupere_le || new Date().toISOString()))
-  const fichier = path.join(SORTIE, `occupation-bagneres-${jour}.json`)
+  // Le nombre de mois dans le nom quand il n'est pas 60 : l'essai a 0 mois
+  // n'ecrase pas la capture des 60 mois du meme jour.
+  const fichier = path.join(SORTIE, `occupation-bagneres-${jour}${MOIS === 60 ? '' : `-mois${MOIS}`}.json`)
   // Cle verifiee EN MEMOIRE avant toute ecriture ; sans cle, refus (code 6).
   ecrireFixtureSansCle(brut.reponse, fichier, process.env.AIRROI_API_KEY || '')
 
