@@ -1949,3 +1949,40 @@ le serveur (fin exclusive ou plafond), pas perdu par notre calcul.
   test du 24 septembre qui exigeait le coût plein est réécrit (règle 17). La
   ligne du 422 dans le journal local de Thierry (`~/.hotesmart-airroi-cache`)
   garde ses 0,10 $ : écrite avant le correctif, non modifiée.
+
+### §14 — deux vérifications demandées par Thierry (30 septembre 2026)
+
+**1. `/markets/metrics/occupancy`** — la description dit « Returns daily,
+monthly, and aggregated occupancy data », l'exemple de réponse est mensuel.
+Coût relevé sur airroi.com/api/pricing : **0,10 $** (« Get Market
+Occupancy » ; la page écrit GET, la documentation POST — POST retenu, comme
+`metrics/all` qui fonctionne). Script `scripts/capturer-occupation-airroi.js`
+(marché de Bagnères de `marche-60.json`, 60 mois, devise native, corps figé,
+coût annoncé, `--confirmer` pour payer, clé cherchée avant écriture) : il
+affiche la forme exacte (clés de premier niveau, dates des premiers points).
+Budget : 0,60 $.
+
+**2. Les cartes thermiques du site public** (« What Did Last Year's Demand
+Look Like? » / « What Does This Year's Demand Look Like? », l'orange = la
+projection). Lu dans le code public du site (`/assets/atlas-spa-*.js`,
+`/assets/app-shell-*.js`, `/assets/airbnbListingsActions-*.js`), SANS aucun
+appel à l'API interne :
+- elles sont alimentées par **`GET https://bristleback.airroi.com/bristleback/airbnb_listings`**,
+  paramètres `country_code`, `state`, `city` (ou `neighborhood`,
+  `subdivision`, ou une zone `ne_lat/ne_lng/sw_lat/sw_lng`, ou `polygon`),
+  `filters` (JSON, dont une `dateRange` en millisecondes), `sortOrder`,
+  `currency` ;
+- la réponse porte un champ **`daily_data`**, JOUR PAR JOUR : `date`,
+  `booked`, `available`, `occupancy`, `booked_rate_average` / `25th` / `75th`,
+  `demand`, `available_rate_average` / `25th` / `75th`, `booking_trend`,
+  `pace_otb_occupancy`, `pace_last_year_otb`, **`pace_last_year_final`**,
+  `min_nights*`, `lead_time*` ;
+- **c'est une API INTERNE, non documentée** : hôte `bristleback.airroi.com`,
+  jeton obtenu par un défi anti-robot (Cloudflare Turnstile,
+  `/bristleback/token`), réponses possiblement brouillées
+  (`fetchOkJsonMaybeObfuscated`, marqueur `bristleback.xor.v1.2026-01-17`).
+  **Non utilisée**, et elle ne doit pas l'être sans décision de Thierry :
+  contourner un défi anti-robot n'est pas un usage de l'API payante.
+- À comparer : le pacing DOCUMENTÉ (0,20 $, fixture du 24 septembre) ne rend
+  que l'avant (`booked_count`, `available_count`, `booked_rate_avg`,
+  `available_rate_avg`, `fill_rate`), sans l'année passée.

@@ -398,3 +398,33 @@ test('LE TEST QUI COMPTE (30 septembre 2026) : une requete REFUSEE par le serveu
     assert.deepEqual(j2.map(l => [l.statut, l.cout_usd]), [['erreur', 0.1]])
   })
 })
+
+test('LE TEST QUI COMPTE (30 septembre 2026) : occupancy — corps fige (marche, mois, native), 0,10 $, cache au deuxieme appel ; tout ecart refuse AVANT le reseau', async () => {
+  await avecCle(async () => {
+    const f = faux(JSON.stringify({ results: [{ date: '2026-08-01', occupancy: { p50: 0.5 } }] }))
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    const r = await c.occupationMarche(market, 60, H)
+    assert.deepEqual([r.depuisCache, r.cout], [false, 0.10])
+    assert.equal(f.appels[0].url, 'https://api.airroi.com/markets/metrics/occupancy')
+    assert.deepEqual(JSON.parse(f.appels[0].init.body), { market, num_months: 60, currency: 'native' })
+    assert.equal((await c.occupationMarche(market, 60, H)).depuisCache, true)
+    const E = 'POST /markets/metrics/occupancy'
+    for (const p of [{ market, num_months: 61, currency: 'native' }, { market, num_months: 60, currency: 'EUR' },
+      { market, num_months: 60, currency: 'native', filter: {} }, { market: { country: 'France' }, num_months: 60, currency: 'native' }]) {
+      await assert.rejects(c.appeler(E, p, H), /parametres invalides/)
+    }
+    assert.equal(f.appels.length, 1)
+  })
+})
+
+test('occupancy : un 200 sans aucun tableau non vide n entre pas au cache', async () => {
+  await avecCle(async () => {
+    const f = faux('{"results":[]}')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: f })
+    const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
+    await assert.rejects(c.occupationMarche(market, 60, H))
+    await assert.rejects(c.occupationMarche(market, 60, H))
+    assert.equal(f.appels.length, 2)
+  })
+})
