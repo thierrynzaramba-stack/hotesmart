@@ -312,9 +312,26 @@ contredits si Thierry le veut, pas enterrés dans un commentaire.
    l'hôte, ni l'identifiant du séjour — son formulaire et ses propres réponses,
    rien d'autre. La **note privée** lui reste fermée dans les deux cas : elle ne
    part pas dans l'avis public et ne la concerne pas.
-   Conséquence à tenir au lot 4 : elle ne **rédige** pas. Si personne n'a encore
-   rédigé, la publication s'arrête sur `texte_absent`, ce qui est juste mais doit
-   être dit à l'écran.
+   **Elle ne tombe jamais sur « texte absent »** (décision du 30 septembre 2026) :
+   quand elle termine son formulaire et que rien n'a encore été rédigé, le
+   serveur déclenche la rédaction, elle relit, puis elle publie. Un texte déjà
+   écrit par l'hôte n'est pas remplacé.
+   Si l'IA refuse, l'évaluation passe à `a_valider` et la raison est écrite dans
+   `core_events` (`avis.redaction_refusee`) : l'écran de l'hôte doit pouvoir dire
+   pourquoi elle lui revient, y compris le lendemain.
+   **Deux précisions sur le périmètre de ce refus**, mesurées en écrivant les
+   tests. Un avis **négatif** n'atteint jamais l'IA : le garde-fou passe avant la
+   rédaction, l'évaluation part à l'hôte sans qu'un appel soit payé. Et la
+   vérification de langue ne se déclenchant que sur un négatif, elle non plus
+   n'intervient pas ici. Les refus réellement possibles sont : le modèle cite la
+   prestataire, il rend du charabia deux fois, ou il recopie la remarque privée.
+   Une **panne** du modèle n'est pas un refus : l'évaluation ne bouge pas, rien
+   n'est écrit au journal, un nouvel essai reprend.
+   **Elle publie dès que SA part est finie**, sans attendre l'hôte (§6). Les
+   critères réservés à l'hôte restent alors vides et `scores[]` part partiel, ce
+   qu'Airbnb accepte. `lib/avis/publication.js` ne tolère cette absence **que**
+   pour une prestataire : l'hôte, lui, reste tenu au formulaire complet, sans quoi
+   une case qu'il oublie deviendrait muette.
 3. **Un membre du compte n'est pas une prestataire.** Un profil avec
    `avis: write` agit comme l'hôte sur son périmètre, **validation des avis
    négatifs comprise**. Les règles prestataire — périmètre de questions,

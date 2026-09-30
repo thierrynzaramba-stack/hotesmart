@@ -56,6 +56,7 @@ function preparer ({
   user = PROD, profil = null, permissions = null,
   evaluations = [], otaReviews = [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123' }],
   verrous = [], erreurMaj = null, criteres = [],
+  texteIA = JSON.stringify({ public: 'Voyageur soigneux, logement rendu nickel.', prive: '' }),
 } = {}) {
   const etat = { ecritures: [], insertions: [], requetes: [] }
 
@@ -85,7 +86,27 @@ function preparer ({
           }
           return Promise.resolve({ error: null })
         },
-        update (row) { etat.ecritures.push({ table: nom, row, filtres: q._f }); return Object.assign({}, chain, { then: (ok) => ok({ error: erreurMaj }) }) },
+        // ⚠ UN UPDATE SUIVI DE `.select().single()` REND LA LIGNE A JOUR, comme
+        // PostgREST. Le double rendait la ligne D'AVANT : la redaction
+        // automatique repartait donc sur une evaluation sans reponses et
+        // refusait « aucun critere rempli » juste apres les avoir enregistrees.
+        // Un double qui ne modelise pas ce retour rend le test menteur dans les
+        // deux sens.
+        update (row) {
+          etat.ecritures.push({ table: nom, row, filtres: q._f })
+          q._maj = row
+          return Object.assign({}, chain, {
+            then: (ok) => ok({ error: erreurMaj }),
+            select: () => Object.assign({}, chain, {
+              single: async () => {
+                if (erreurMaj) return { data: null, error: erreurMaj }
+                const r = await rep()
+                const cible = Array.isArray(r.data) ? (r.data[0] || null) : r.data
+                return { data: cible ? { ...cible, ...row } : null, error: null }
+              },
+            }),
+          })
+        },
         delete () { q._delete = true; return Object.assign({}, chain, { then: (ok) => ok({ error: null }) }) },
         maybeSingle: async () => { const r = await rep(); return { data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error } },
         single: async () => { const r = await rep(); return { data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error } },
@@ -136,10 +157,31 @@ function preparer ({
     },
   }
 
+  // ⚠ LE MODELE EST UN DOUBLE, ET IL EST INJECTE PAR LE CACHE DE MODULES.
+  // lib/avis/redaction.js prend son client dans lib/cron-shared.js, en require
+  // PARESSEUX. On remplace donc cron-shared avant que redaction ne le charge.
+  const absShared = require.resolve(path.join(__dirname, '..', 'lib/cron-shared'))
+  const mShared = new Module(absShared)
+  etat.ia = { appels: [] }
+  mShared.exports = {
+    supabase: client,
+    anthropic: {
+      messages: {
+        create: async (r) => {
+          etat.ia.appels.push(r.messages[0].content)
+          if (texteIA instanceof Error) throw texteIA
+          return { content: [{ text: texteIA }] }
+        },
+      },
+    },
+  }
+  mShared.loaded = true
+
   const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
   for (const mod of MODULES) { try { delete require.cache[require.resolve(mod)] } catch {} }
+  require.cache[absShared] = mShared
 
   // Le provider : on enregistre ce qu'il recoit, c'est tout l'objet du test C2.
   etat.provider = { appels: [] }
@@ -374,4 +416,125 @@ test('l’ecriture du statut qui echoue ne passe pas pour un succes silencieux',
   // peut pas assertionner sur console.error sans le capturer ; ce qui compte
   // ici est qu'aucune exception ne remonte et que la reponse reste coherente.
   assert.strictEqual(res.code, 200)
+})
+
+// ─── La prestataire « valider » ne doit jamais buter sur « texte absent » ───
+// Decision de Thierry du 30 septembre 2026 : quand elle termine son formulaire,
+// le serveur redige ; elle relit le texte public, puis publie.
+const PART_PRESTA = { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' }
+
+test('LE TEST QUI COMPTE : elle termine son formulaire, le serveur redige, elle relit', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.peut_publier, true)
+  assert.strictEqual(res.body.redaction.ok, true)
+  assert.match(res.body.redaction.public_text, /nickel/)
+  assert.strictEqual(etat.ia.appels.length, 1, 'le modele est appele une fois')
+})
+
+test('et elle ne recoit JAMAIS la note privee, meme generee', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge],
+             texteIA: JSON.stringify({ public: 'Tres bien.', prive: 'A laisse du vaisselle sale.' }) })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.body.redaction.private_note, undefined)
+  assert.strictEqual(res.body.redaction.public_text, 'Tres bien.')
+})
+
+// ⚠ UN AVIS NEGATIF N'ARRIVE JAMAIS JUSQU'A L'IA, ICI. Le garde-fou du negatif
+// passe AVANT la redaction : `deciderStatut` rend `peutPublier: false`, donc le
+// serveur ne redige pas, et l'evaluation part a l'hote sans qu'un seul appel
+// soit paye. La consigne parlait de « l'IA refuse (negatif, langue non
+// couverte) » : ces deux cas sont deja couverts en amont, la verification de
+// langue ne se declenchant elle-meme que sur un negatif. Ce qui reste vraiment
+// possible est teste ici : le modele cite la prestataire, rend du charabia, ou
+// tombe.
+test('LE TEST QUI COMPTE : un avis NEGATIF part a l\u2019hote sans passer par l\u2019IA', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: { ...PART_PRESTA, etat: 'sale' } }), res)
+  assert.strictEqual(res.body.status, 'a_valider')
+  assert.strictEqual(res.body.peut_publier, false)
+  assert.match(res.body.motif, /negatif/)
+  assert.strictEqual(etat.ia.appels.length, 0, 'aucun appel paye')
+})
+
+test('LE TEST QUI COMPTE : si l\u2019IA cite la prestataire, l\u2019evaluation passe a l\u2019hote AVEC la raison', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null,
+                         public_text: null, filled_by_profile: 'p-presta' })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge],
+             texteIA: JSON.stringify({ public: 'Regina a tout remis en ordre.', prive: '' }) })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.status, 'a_valider')
+  assert.strictEqual(res.body.peut_publier, false)
+  assert.strictEqual(res.body.redaction.ok, false)
+  assert.strictEqual(res.body.redaction.motif, 'ia_cite_la_prestataire')
+})
+
+test('la raison survit a la requete : elle part au journal du coeur', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge],
+                          texteIA: 'Bien sur ! Voici votre avis.' })
+  const handler = require('../api/avis')
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), reponse())
+  const ev = etat.insertions.find(i => i.table === 'core_events')
+  assert.ok(ev, 'l evenement doit etre journalise')
+  assert.strictEqual(ev.row.type, 'avis.redaction_refusee')
+  assert.strictEqual(ev.row.payload.motif, 'ia_illisible')
+})
+
+test('un texte deja ecrit par l’hote n’est pas remplace par un second', async () => {
+  const avecTexte = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null,
+                            public_text: 'Texte ecrit par l hote.' })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [avecTexte] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: avecTexte.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(etat.ia.appels.length, 0, 'aucun appel au modele')
+  assert.strictEqual(res.body.redaction, undefined)
+  assert.strictEqual(res.body.peut_publier, true)
+})
+
+test('une prestataire « soumettre » ne declenche aucune redaction', async () => {
+  // Elle ne publie pas, donc elle n'a rien a relire.
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.body.status, 'soumise_prestataire')
+  assert.strictEqual(etat.ia.appels.length, 0)
+})
+
+test('une panne du modele ne fait pas passer l’evaluation a l’hote', async () => {
+  // Les reponses SONT enregistrees ; une panne temporaire n'est pas un refus.
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge],
+                          texteIA: new Error('503 upstream') })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.body.redaction.ok, false)
+  assert.match(res.body.redaction.motif, /indisponible/)
+  assert.ok(!etat.insertions.some(i => i.table === 'core_events'),
+    'une panne n est pas un refus de redaction')
 })

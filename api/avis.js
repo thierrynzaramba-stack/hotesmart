@@ -567,30 +567,110 @@ async function evaluationRepondre (req, res, garde) {
     return res.status(400).json({ error: 'Reponses manquantes' })
   }
 
+  let r
   try {
-    const r = await enregistrerReponses(supabase, {
+    r = await enregistrerReponses(supabase, {
       evaluation: e, reponses, role, evalScope, evalPower, parProfil: profilId,
-    })
-    return res.status(200).json({
-      ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier,
-      motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
     })
   } catch (err) {
     // Une saisie refusee est un 400 nomme, pas un 500 muet.
     return res.status(400).json({ error: err.message })
   }
+
+  const reponse = {
+    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier,
+    motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
+  }
+
+  // ⚠ UNE PRESTATAIRE « VALIDER » NE DOIT JAMAIS TOMBER SUR « TEXTE ABSENT ».
+  // Decision de Thierry du 30 septembre 2026. Elle relit le texte public puis
+  // publie ; il faut donc qu'il existe au moment ou elle termine. Sans cela,
+  // elle finissait son formulaire, voyait un bouton « Publier » actif, et
+  // s'entendait dire qu'il n'y avait rien a publier — sans pouvoir rien y faire,
+  // la redaction revenant a l'hote.
+  //
+  // Le serveur redige donc pour elle, ici, une seule fois : si un texte existe
+  // deja (l'hote l'a ecrit, ou un passage precedent l'a genere), on n'en fabrique
+  // pas un second.
+  const aDejaUnTexte = Boolean(String(e.public_text || '').trim())
+  if (role === 'prestataire' && r.decision.peutPublier && !aDejaUnTexte) {
+    // ⚠ ON NE DEPEND PAS DE CE QUE L'ECRITURE RENVOIE. `enregistrerReponses`
+    // rend la ligne relue, mais si ce retour arrivait vide ou partiel on
+    // redigerait sur l'evaluation D'AVANT — donc sans les reponses qu'on vient
+    // d'enregistrer, et le refus dirait « aucun critere rempli » juste apres
+    // les avoir remplis. On reconstruit donc l'etat attendu, et le retour de la
+    // base ne sert qu'a completer.
+    const aJour = {
+      ...e,
+      ...(r.evaluation || {}),
+      answers_cleaner: { ...(e.answers_cleaner || {}), ...(role === 'hote' ? {} : reponses) },
+      answers_host: { ...(e.answers_host || {}), ...(role === 'hote' ? reponses : {}) },
+      grille_figee: (r.evaluation && r.evaluation.grille_figee) || e.grille_figee || r.grille,
+    }
+    const redige = await redigerEtEnregistrer(aJour)
+
+    if (redige.panne) {
+      // Une panne de lecture n'est pas un refus de l'IA : les reponses SONT
+      // enregistrees, et le statut ecrit. On le dit sans effacer ce qui a eu
+      // lieu, et on ne passe pas l'evaluation a l'hote pour une panne
+      // temporaire — un nouvel appel reprendra.
+      return res.status(redige.panne.code).json({
+        ...redige.panne.body, reponses_enregistrees: true, status: r.decision.statut,
+      })
+    }
+
+    if (!redige.ok && redige.transitoire) {
+      // Une panne du modele : les reponses sont enregistrees, le statut aussi,
+      // et l'evaluation reste ou elle est. Un nouvel appel reprendra.
+      return res.status(200).json({
+        ...reponse,
+        redaction: { ok: false, motif: redige.motif, detail: redige.detail, transitoire: true },
+      })
+    }
+
+    if (!redige.ok) {
+      // ⚠ L'IA REFUSE : L'EVALUATION PASSE A L'HOTE, AVEC LA RAISON.
+      // Les deux cas prevus : un avis negatif que les garde-fous ne laissent
+      // pas rediger, et une langue que la relecture ne couvre pas. Dans les
+      // deux, c'est un jugement humain qu'il faut, pas un second essai.
+      const { error: eStatut } = await supabase.from('guest_evaluations')
+        .update({ status: 'a_valider' }).eq('id', e.id).eq('user_id', e.user_id)
+      if (eStatut) console.error('[avis] passage a_valider non ecrit', e.id, eStatut.message)
+
+      // ⚠ ET LA RAISON SURVIT A LA REQUETE. L'ecran de l'hote doit pouvoir dire
+      // POURQUOI cette evaluation lui revient, y compris s'il la decouvre le
+      // lendemain. Aucune colonne ne porte ce motif : il va au journal du coeur.
+      const j = await journaliser(supabase, {
+        userId: e.user_id, type: 'avis.redaction_refusee', sujet: e.id,
+        charge: { motif: redige.motif, detail: redige.detail, par_profil: profilId, booking_uid: e.booking_uid },
+      })
+      if (!j.ok) console.error('[avis] refus de redaction non journalise:', j.erreur)
+
+      return res.status(200).json({
+        ...reponse,
+        status: 'a_valider', peut_publier: false,
+        motif: `redaction refusee : ${redige.motif}`,
+        redaction: { ok: false, motif: redige.motif, detail: redige.detail },
+      })
+    }
+
+    // ⚠ ELLE RELIT LE TEXTE PUBLIC, JAMAIS LA NOTE PRIVEE. Decision de Thierry :
+    // la note privee ne part pas dans l'avis public et ne la concerne pas.
+    reponse.redaction = { ok: true, public_text: redige.public_text }
+  }
+
+  return res.status(200).json(reponse)
 }
 
-// POST eval-texte — l'IA redige. Elle ne decide de rien, et son texte reste
-// modifiable : on l'enregistre en brouillon, la publication lira le champ.
-async function evaluationTexte (req, res, garde) {
-  const e = await chargerEvaluation(req, res, garde, true)
-  if (!e) return
-  if (e.status === 'publiee') return res.status(409).json({ error: 'Evaluation deja publiee' })
-
-  const { role } = roleEtReglages(garde)
-  if (role !== 'hote') return res.status(403).json({ error: 'La redaction revient a l hote' })
-
+// ─── La redaction, partagee ─────────────────────────────────────────────────
+// Appelee par `eval-texte` (l'hote demande un texte) ET par `eval-reponses`
+// quand une prestataire « valider » vient de terminer : elle doit relire avant
+// de publier, donc le texte doit exister a ce moment-la.
+//
+// Rend { ok: true, public_text, private_note, negatif }
+//   ou { ok: false, motif, detail }            — l'IA refuse, la raison est dite
+//   ou { ok: false, panne: { code, body } }    — une lecture a echoue
+async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {}) {
   // ⚠ LES ERREURS DE LECTURE SE LISENT. Constat de review : un `Promise.all`
   // destructure sans `error` faisait disparaitre EN SILENCE les mots-cles, le
   // ton et la signature de l'hote — le texte partait avec les reglages par
@@ -608,10 +688,10 @@ async function evaluationTexte (req, res, garde) {
       : Promise.resolve({ data: null, error: null }),
   ])
   if (rConfig.error) {
-    return res.status(503).json({ error: 'Reglages de redaction illisibles', detail: rConfig.error.message })
+    return { ok: false, panne: { code: 503, body: { error: 'Reglages de redaction illisibles', detail: rConfig.error.message } } }
   }
   if (rPresta.error) {
-    return res.status(503).json({ error: 'Profil du remplisseur illisible', detail: rPresta.error.message })
+    return { ok: false, panne: { code: 503, body: { error: 'Profil du remplisseur illisible', detail: rPresta.error.message } } }
   }
 
   // Le bien surcharge le compte.
@@ -627,35 +707,77 @@ async function evaluationTexte (req, res, garde) {
     : null
   if (!grille) {
     try { grille = await chargerGrille(supabase, { userId: e.user_id, propertyId: e.property_id }) }
-    catch (err) { return res.status(503).json({ error: 'Grille indisponible', detail: err.message }) }
+    catch (err) { return { ok: false, panne: { code: 503, body: { error: 'Grille indisponible', detail: err.message } } } }
+  }
+
+  // ⚠ ON REDIGE SUR CE QUI EST COCHE, PAS SUR LA GRILLE ENTIERE. Une
+  // prestataire « valider » publie sa part sans attendre l'hote : les criteres
+  // reserves a l'hote sont alors vides, et `redigerAvis` — qui exige toutes les
+  // reponses de la grille qu'on lui donne — aurait refuse de rediger en
+  // accusant les reponses. La sous-grille des criteres REPONDUS dit exactement
+  // ce qu'il y a a raconter.
+  const reponses = { ...(e.answers_cleaner || {}), ...(e.answers_host || {}) }
+  const repondus = (grille.criteres || []).filter(c => {
+    const v = reponses[c.cle]
+    return v !== undefined && v !== null && v !== ''
+  })
+  if (!repondus.length) {
+    return { ok: false, motif: 'aucune_reponse', detail: 'aucun critere rempli : il n y a rien a rediger' }
   }
 
   const r = await redigerAvis({
-    reponses: { ...(e.answers_cleaner || {}), ...(e.answers_host || {}) },
-    remarque: req.body?.remarque ? String(req.body.remarque).slice(0, MAX_TEXTE) : null,
-    prenom: req.body?.prenom ? String(req.body.prenom).slice(0, 80) : null,
+    reponses,
+    remarque: remarque ? String(remarque).slice(0, MAX_TEXTE) : null,
+    prenom: prenom ? String(prenom).slice(0, 80) : null,
     langue: e.language || 'en',
     prestataire: rPresta.data?.first_name || null,
     config: fusion,
-    grille,
+    grille: { ...grille, criteres: repondus },
   })
 
-  // ⚠ UN REFUS DE GARDE-FOU SE DIT. Il ne se deguise pas en texte vide : sans
-  // ce motif, l'hote verrait un champ blanc sans savoir pourquoi.
+  // ⚠ UN REFUS DE GARDE-FOU SE DIT. Il ne se deguise pas en texte vide.
+  //
+  // ⚠ ET UNE PANNE DU MODELE N'EST PAS UN REFUS. Credit Anthropic epuise,
+  // fournisseur en vrac : un nouvel essai suffira. La marquer `transitoire`
+  // evite de passer l'evaluation a l'hote avec « redaction refusee » pour une
+  // indisponibilite de trente secondes — et evite d'ecrire au journal du coeur
+  // un refus qui n'en est pas un.
   if (!r.public_text) {
-    return res.status(422).json({ error: 'Texte non genere', motif: r.motif, detail: r.detail || null, bien: bien?.name || null })
+    return {
+      ok: false, motif: r.motif, detail: r.detail || null, negatif: r.negatif,
+      transitoire: r.motif === 'ia_indisponible',
+    }
   }
 
   // ⚠ UNE ECRITURE PERDUE NE REND PAS 200. Constat de review : sans cette
-  // lecture, l'ecran affichait un texte que la base n'avait pas, l'hote
-  // cliquait « Publier » et recevait « un avis sans texte public ne se publie
-  // pas » — avec un appel au modele paye a chaque nouvelle tentative.
+  // lecture, l'ecran affichait un texte que la base n'avait pas, on cliquait
+  // « Publier » et on s'entendait dire qu'il n'y avait pas de texte — avec un
+  // appel au modele paye a chaque nouvelle tentative.
   const { error: eTexte } = await supabase.from('guest_evaluations')
     .update({ public_text: r.public_text, private_note: r.private_note })
     .eq('id', e.id).eq('user_id', e.user_id)
   if (eTexte) {
-    return res.status(503).json({ error: 'Texte genere mais non enregistre', detail: eTexte.message })
+    return { ok: false, panne: { code: 503, body: { error: 'Texte genere mais non enregistre', detail: eTexte.message } } }
   }
+
+  return { ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif }
+}
+
+// POST eval-texte — l'IA redige. Elle ne decide de rien, et son texte reste
+// modifiable : on l'enregistre en brouillon, la publication lira le champ.
+async function evaluationTexte (req, res, garde) {
+  const e = await chargerEvaluation(req, res, garde, true)
+  if (!e) return
+  if (e.status === 'publiee') return res.status(409).json({ error: 'Evaluation deja publiee' })
+
+  const { role } = roleEtReglages(garde)
+  // Une prestataire RELIT, elle ne redige pas : le serveur redige pour elle au
+  // moment ou elle termine son formulaire (voir `eval-reponses`).
+  if (role !== 'hote') return res.status(403).json({ error: 'La redaction revient a l hote' })
+
+  const r = await redigerEtEnregistrer(e, { remarque: req.body?.remarque, prenom: req.body?.prenom })
+  if (r.panne) return res.status(r.panne.code).json(r.panne.body)
+  if (!r.ok) return res.status(422).json({ error: 'Texte non genere', motif: r.motif, detail: r.detail })
 
   return res.status(200).json({ ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif })
 }

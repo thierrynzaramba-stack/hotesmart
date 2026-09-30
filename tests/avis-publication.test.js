@@ -339,3 +339,43 @@ test('« deja parti » arrete tout aussi, et le dit autrement', async () => {
     () => publier({ evaluation: evaluation({ status: 'echec_publication' }), provider: p }),
     (e) => e instanceof RefusPublication && e.motif === 'deja_chez_le_provider')
 })
+
+// ─── Publier une part, pas un avis ampute par accident ──────────────────────
+const PART_PRESTA = { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' }
+const PROFIL_VALIDER = { id: 'p-presta', eval_power: 'valider' }
+
+test('LE TEST QUI COMPTE : une prestataire « valider » publie sa part, scores partiels', async () => {
+  const p = provider()
+  const r = await publier({
+    evaluation: evaluation({ answers_host: null, answers_cleaner: PART_PRESTA }),
+    parProfil: PROFIL_VALIDER, provider: p,
+  })
+  assert.strictEqual(r.statut, 'publiee')
+  const envoye = p.appels.find(a => a.type === 'post').charge.review
+  assert.deepStrictEqual(envoye.scores.map(s => s.category), ['cleanliness'])
+  assert.strictEqual('is_reviewee_recommended' in envoye, false,
+    'sans critere de recommandation rempli, on ne se prononce pas')
+})
+
+test('LE TEST QUI COMPTE : l’HOTE, lui, reste tenu au formulaire complet', async () => {
+  // Une case qu'il a oubliee doit se voir. Tolerer les absents pour tout le
+  // monde l'aurait rendue muette.
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ answers_host: PART_PRESTA }), provider: provider() }),
+    (e) => e instanceof RefusPublication && e.motif === 'reponses_hors_grille')
+})
+
+test('une reponse PRESENTE mais hors grille leve meme en mode partiel', async () => {
+  await assert.rejects(
+    () => publier({
+      evaluation: evaluation({ answers_host: null, answers_cleaner: { ...PART_PRESTA, etat: 'inconnu' } }),
+      parProfil: PROFIL_VALIDER, provider: provider(),
+    }),
+    (e) => e instanceof RefusPublication && e.motif === 'reponses_hors_grille')
+})
+
+test('une prestataire qui n’a rien rempli ne publie pas un avis vide', async () => {
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ answers_host: null, answers_cleaner: {} }), parProfil: PROFIL_VALIDER, provider: provider() }),
+    (e) => e instanceof RefusPublication && e.motif === 'sans_reponses')
+})

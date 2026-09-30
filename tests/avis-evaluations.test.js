@@ -79,12 +79,14 @@ test('la prestataire qui « valide » publie, si rien n’est negatif ET que tou
   assert.strictEqual(d.peutPublier, true)
 })
 
-test('le pouvoir « valider » ne publie pas une evaluation dont l’hote n’a pas rempli sa part', () => {
-  // Publier sur la seule part de la prestataire enverrait a Airbnb un avis dont
-  // l'hote n'a pas vu la moitie.
+test('LE TEST QUI COMPTE : le pouvoir « valider » publie des que SA part est finie', () => {
+  // Spec §6 et decision de Thierry du 30 septembre 2026. J'avais resserre cela a
+  // un formulaire entierement rempli apres une revue qui objectait qu'un avis
+  // partiel prive l'hote de la moitie du jugement ; l'arbitrage produit est de
+  // publier, et `publier()` ne tolere l'absence QUE pour une prestataire.
   const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: false })
-  assert.strictEqual(d.peutPublier, false)
-  assert.strictEqual(d.statut, 'soumise_prestataire')
+  assert.strictEqual(d.peutPublier, true)
+  assert.match(d.motif, /criteres de l hote restent vides/)
 })
 
 test('LE TEST QUI COMPTE : le pouvoir « valider » ne publie PAS un avis negatif', () => {
