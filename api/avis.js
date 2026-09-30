@@ -1221,6 +1221,53 @@ async function evaluationTexte (req, res, garde) {
   return res.status(200).json({ ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif })
 }
 
+// ─── Le mode RECETTE : publier sans rien envoyer a l'OTA ────────────────────
+//
+// ⚠ POURQUOI IL EXISTE. Une recette humaine doit pouvoir aller jusqu'au bout du
+// parcours — remplir, valider, PUBLIER — et voir le resultat. Sans ce mode, le
+// seul moyen de tester la publication serait de l'envoyer pour de vrai. Chez
+// Airbnb, un avis publie ne se reprend pas : un avis de recette sur un vrai
+// voyageur serait irreparable.
+//
+// ⚠ DEUX VERROUS, ET ILS DOIVENT TOUS LES DEUX CEDER. Le drapeau
+// `AVIS_PUBLICATION_SIMULEE` ne suffit pas : une variable posee par erreur sur le
+// projet de production desactiverait silencieusement toute publication reelle, et
+// personne ne le verrait — les avis cesseraient simplement de partir. On exige
+// donc AUSSI que la base ne soit pas celle de production.
+//
+// Le reflexe habituel serait l'inverse — « actif sauf en production » — et c'est
+// precisement ce qu'il ne faut pas : un oubli de configuration rendrait alors la
+// simulation active en prod.
+const PROJET_PRODUCTION = 'cjmrizpdyhrcurmgyrhs'
+
+function simulationActive () {
+  if (process.env.AVIS_PUBLICATION_SIMULEE !== '1') return false
+  const projet = String(process.env.SUPABASE_URL || '').replace(/^https?:\/\//, '').split('.')[0]
+  if (projet === PROJET_PRODUCTION) {
+    // ⚠ ON CRIE. Un drapeau de recette pose sur la production est une erreur de
+    // configuration grave : il aurait arrete toutes les publications.
+    console.error('[avis] AVIS_PUBLICATION_SIMULEE est pose sur la base de PRODUCTION : ignore. Retirez cette variable.')
+    return false
+  }
+  return true
+}
+
+// Le double de provider. Aucun acces reseau : c'est tout son objet. Il rend la
+// meme forme que lib/channels/channex.js, et journalise pour qu'une publication
+// de recette laisse une trace lisible.
+function providerSimule () {
+  return {
+    async publierAvisVoyageur (reviewId, charge) {
+      console.log('[avis] SIMULATION — POST /reviews/%s/guest_review %s', reviewId, JSON.stringify(charge).slice(0, 400))
+      return { ok: true, status: 200, json: { data: { id: reviewId, simulation: true } } }
+    },
+    async lireAvis (reviewId) {
+      console.log('[avis] SIMULATION — GET /reviews/%s', reviewId)
+      return { ok: true, status: 200, is_replied: false, json: { simulation: true } }
+    },
+  }
+}
+
 // POST eval-publier — le seul chemin vers l'OTA.
 //
 // ⚠ TROIS PROTECTIONS SE SUPERPOSENT ICI, ET AUCUNE NE SUFFIT SEULE :
@@ -1294,7 +1341,7 @@ async function evaluationPublier (req, res, garde) {
   const { getProvider } = require('../lib/channels')
   let canal
   try {
-    canal = getProvider(e.provider)
+    canal = simulationActive() ? providerSimule() : getProvider(e.provider)
   } catch (err) {
     await relacher()
     return res.status(409).json({ error: `Provider inconnu pour ce sejour : ${e.provider}`, motif: 'provider_inconnu' })
@@ -1379,7 +1426,12 @@ async function evaluationPublier (req, res, garde) {
   })
   if (!j.ok) console.error('[avis] evenement non journalise:', j.erreur)
 
-  return res.status(200).json({ ok: true, status: r.statut, published_at: r.publie_le })
+  // ⚠ LA RECETTE DOIT SAVOIR QUE RIEN N'EST PARTI. Un « Avis publie » identique
+  // dans les deux modes ferait croire a un envoi reel.
+  return res.status(200).json({
+    ok: true, status: r.statut, published_at: r.publie_le,
+    ...(simulationActive() ? { simulation: true } : {}),
+  })
 }
 
 // POST eval-abandon — l'hote choisit de ne pas evaluer.

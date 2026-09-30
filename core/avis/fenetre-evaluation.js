@@ -182,7 +182,11 @@ export async function ouvrir (ctx = {}) {
       })
       etat.evaluation.status = r.status
       etat.evaluation.published_at = r.published_at
-      etat.message = 'Avis publie.'
+      // ⚠ LA SIMULATION SE DIT. Un « Avis publie » identique dans les deux modes
+      // ferait croire a une recette qu'elle vient d'envoyer un avis reel.
+      etat.message = r.simulation
+        ? 'Avis « publie » EN SIMULATION : rien n a ete envoye a l OTA.'
+        : 'Avis publie.'
     } catch (err) { etat.erreur = messageDErreur(err) }
   })
 

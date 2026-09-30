@@ -607,3 +607,52 @@ test('LE TEST QUI COMPTE : une grille illisible rend quand meme l’ETAT du sejo
   assert.deepStrictEqual(res.body.criteres, [])
   assert.strictEqual(res.body.peut_publier, false)
 })
+
+// ─── Le mode recette : publier sans rien envoyer a l'OTA ────────────────────
+test('LE TEST QUI COMPTE : avec le drapeau de simulation, AUCUN appel reseau ne part', async () => {
+  const avant = process.env.AVIS_PUBLICATION_SIMULEE
+  process.env.AVIS_PUBLICATION_SIMULEE = '1'
+  try {
+    const etat = preparer({ evaluations: [evalA()] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+    assert.strictEqual(res.code, 200)
+    assert.strictEqual(res.body.status, 'publiee')
+    assert.strictEqual(res.body.simulation, true, 'la recette doit savoir que rien n est parti')
+    assert.strictEqual(etat.provider.appels.length, 0, 'aucun appel reseau')
+  } finally {
+    if (avant === undefined) delete process.env.AVIS_PUBLICATION_SIMULEE
+    else process.env.AVIS_PUBLICATION_SIMULEE = avant
+  }
+})
+
+test('LE TEST QUI COMPTE : le drapeau est IGNORE si la base est celle de production', async () => {
+  // Un drapeau de recette pose par erreur sur la production aurait arrete toutes
+  // les publications, en silence. Deux verrous, et ils doivent tous les deux ceder.
+  const avantDrapeau = process.env.AVIS_PUBLICATION_SIMULEE
+  const avantUrl = process.env.SUPABASE_URL
+  process.env.AVIS_PUBLICATION_SIMULEE = '1'
+  process.env.SUPABASE_URL = 'https://cjmrizpdyhrcurmgyrhs.supabase.co'
+  try {
+    const etat = preparer({ evaluations: [evalA()] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+    assert.strictEqual(res.body.simulation, undefined, 'aucune simulation sur la production')
+    assert.ok(etat.provider.appels.some(a => a.methode === 'POST'), 'le vrai canal est appele')
+  } finally {
+    if (avantDrapeau === undefined) delete process.env.AVIS_PUBLICATION_SIMULEE
+    else process.env.AVIS_PUBLICATION_SIMULEE = avantDrapeau
+    process.env.SUPABASE_URL = avantUrl
+  }
+})
+
+test('sans le drapeau, le vrai canal est utilise', async () => {
+  const etat = preparer({ evaluations: [evalA()] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.body.simulation, undefined)
+  assert.ok(etat.provider.appels.some(a => a.methode === 'POST'))
+})
