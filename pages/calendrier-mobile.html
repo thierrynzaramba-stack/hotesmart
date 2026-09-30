@@ -40,7 +40,7 @@
     .undo-btn { background: #f0f0f0; border: 1px solid #e5e5e7; border-radius: 9px; width: 40px; height: 40px; font-size: 17px; cursor: pointer; }
     .undo-btn:disabled { opacity: 0.35; }
     .selectors { display: flex; gap: 8px; margin-top: 10px; }
-    .selectors select { flex: 1; padding: 9px 12px; border: 1px solid #d2d2d7; border-radius: 10px; font-size: 14px; background: #fff; font-family: inherit; }
+    .selectors select { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid #d2d2d7; border-radius: 10px; font-size: 14px; background: #fff; font-family: inherit; }
     .month-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
     .month-nav button { background: #f0f0f0; border: none; border-radius: 10px; width: 40px; height: 40px; font-size: 18px; cursor: pointer; color: #1d1d1f; }
     .month-nav .month-label { font-size: 17px; font-weight: 700; text-transform: capitalize; }
@@ -55,10 +55,13 @@
     .cell { aspect-ratio: 1 / 1.7; border-radius: 10px; background: #fff; border: 1px solid #ececef; padding: 4px 3px 5px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer; position: relative; overflow: hidden; }
     /* barres de reservation en overlay (vue tarifs) */
     .resa-layer { position: absolute; left: 0; right: 0; top: 26px; pointer-events: none; z-index: 3; }
-    .resa-bar { position: absolute; height: 22px; border-radius: 11px; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; }
-    .resa-bar .ava { width: 17px; height: 17px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .resa-bar .ava svg { width: 11px; height: 11px; }
+    /* Les bulles se touchent (fiche), la couche non : un tap hors bulle ouvre
+       toujours la case. Couleurs et contenu = ceux de l'ordinateur
+       (shared/calendrier-resa.js) : la couleur dit le canal, pas de logo. */
+    .resa-bar { position: absolute; height: 22px; border-radius: 11px; display: flex; align-items: center; padding: 0 7px; font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; cursor: pointer; }
     .resa-bar.airbnb { background: #d52a44; } .resa-bar.booking { background: #0d4ea6; } .resa-bar.direct { background: #1f6f23; }
+    .resa-bar.fermeture { background: #3a3a3c; color: #f5f5f7; font-weight: 500; font-style: italic; border-radius: 6px; }
+    .resa-bar.passee { opacity: 0.45; }
     .resa-bar.cont-left { border-top-left-radius: 0; border-bottom-left-radius: 0; padding-left: 8px; }
     .resa-bar.cont-right { border-top-right-radius: 0; border-bottom-right-radius: 0; }
     .cell.empty { background: transparent; border: none; cursor: default; }
@@ -118,7 +121,27 @@
     .sheet-foot { position: sticky; bottom: 0; background: #fff; padding-top: 12px; display: flex; gap: 10px; }
     .btn-save { flex: 1; background: #007aff; color: #fff; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; }
     .btn-close { background: #f0f0f0; color: #1d1d1f; border: none; border-radius: 12px; padding: 15px 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    /* La fiche (reservation, indisponibilite, ajout) : la meme feuille. */
+    .fiche-ligne { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid #f0f0f2; font-size: 14px; }
+    .fiche-ligne span:first-child { color: #86868b; }
+    .fiche-ligne span:last-child { font-weight: 500; text-align: right; }
+    .fiche-note { font-size: 12.5px; color: #6e6e73; margin: 12px 0 4px; line-height: 1.45; }
+    .fiche-alerte { font-size: 13px; color: #c0392b; margin: 4px 0 8px; }
+    .fiche-badge { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: #fdf3e7; border: 1px solid #e8c9a0; font-size: 12.5px; line-height: 1.5; color: #7a4b12; }
+    .fiche-total { background: #f5f5f7; border-radius: 10px; padding: 11px 12px; margin: 6px 0 12px; font-size: 14px; }
+    .fiche-lbl { font-size: 13px; color: #86868b; display: block; margin: 8px 0 2px; }
+    .fiche-2 { display: flex; gap: 10px; } .fiche-2 > div { flex: 1; min-width: 0; }
+    .btn-conv { width: 100%; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 600; background: #e8e8ed; color: #86868b; margin-bottom: 4px; }
+    .btn-conv.actif { background: #1f6f23; color: #fff; cursor: pointer; }
+    .btn-danger { background: #fff; color: #c0392b; border: 1px solid #f1c1bb; border-radius: 12px; padding: 15px 14px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .ajout-type { display: flex; gap: 8px; margin-bottom: 12px; }
+    .ajout-type button { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #d2d2d7; background: #fff; font-size: 14px; font-weight: 600; color: #6e6e73; }
+    .ajout-type button.on { background: #007aff; border-color: #007aff; color: #fff; }
+    .ajout-type button:disabled { opacity: .4; }
+    .btn-plus { background: #1f6f23; color: #fff; border: none; border-radius: 9px; width: 40px; height: 40px; font-size: 22px; line-height: 1; cursor: pointer; }
+    .btn-dates-resa { width: 100%; background: #fff; color: #1f6f23; border: 1px solid #b7dcb9; border-radius: 10px; padding: 11px; font-size: 14px; font-weight: 600; margin-bottom: 14px; cursor: pointer; }
     .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(120%); background: #1d1d1f; color: #fff; padding: 13px 20px; border-radius: 12px; font-size: 14px; z-index: 1200; transition: transform 0.25s; max-width: 90%; text-align: center; }
+    .toast:not(.visible) { opacity: 0; pointer-events: none; }
     .toast.visible { transform: translateX(-50%) translateY(0); }
   </style>
 </head>
@@ -132,7 +155,10 @@
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-weight:700;font-size:16px">Tarifs</span>
       </div>
-      <button class="undo-btn" id="btn-undo" disabled>&#8634;</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-plus" id="btn-ajout" title="Nouvelle réservation" aria-label="Nouvelle réservation">+</button>
+        <button class="undo-btn" id="btn-undo" disabled>&#8634;</button>
+      </div>
     </div>
     <div class="selectors">
       <select id="bien-select"></select>
@@ -163,11 +189,25 @@
       <h3 id="sheet-title">Configurer</h3>
       <div class="sub" id="sheet-sub">-</div>
       <div class="sheet-range"><span>Du</span><input type="date" id="r-start" /><span>au</span><input type="date" id="r-end" /></div>
+      <button class="btn-dates-resa" id="btn-ajout-dates">+ Nouvelle réservation sur ces dates</button>
       <div id="acc-list"></div>
       <div class="sheet-foot">
         <button class="btn-close" id="btn-close">Fermer</button>
         <button class="btn-save" id="btn-save">Enregistrer</button>
       </div>
+    </div>
+  </div>
+
+  <!-- La fiche : une reservation, une indisponibilite, ou le formulaire
+       « Nouvelle réservation ». Meme contenu que l'ordinateur. -->
+  <div class="sheet-overlay" id="fiche-overlay">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h3 id="fiche-titre">Réservation</h3>
+      <div class="sub" id="fiche-sous-titre"></div>
+      <div id="fiche-corps"></div>
+      <div class="fiche-note" id="fiche-note"></div>
+      <div class="sheet-foot" id="fiche-actions"></div>
     </div>
   </div>
 
@@ -178,8 +218,11 @@
     import { renderSidebar } from '/components/sidebar.js'
     import { api } from '/shared/api-client.js'
     import { peutEcrire } from '/shared/compte-courant.js'
-    import { loadCalendarData } from '/shared/calendar-core.js'
+    import { loadCalendarData, curSym } from '/shared/calendar-core.js'
     import { renderOnboardingBanner } from '/components/onboarding-banner.js'
+    // Les reservations : la MEME regle que l'ordinateur (chantier calendrier
+    // mobile, 30 septembre 2026). La couleur etait tiree au sort ici.
+    import { mapResa, droitsResa, libelleCanal, badgeSansEmailVisible, TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, libelleStatut } from '/shared/calendrier-resa.js'
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifie')
     renderSidebar('biens-calendrier').catch(() => {})
@@ -224,7 +267,7 @@
 
     let BIENS=[], currentBien=null
     let viewYear, viewMonth
-    let inv={}, resaSet=new Set(), resaList=[], ppConfig={included:1,extraFee:0}
+    let inv={}, resaSet=new Set(), resaList=[], fermList=[], ppConfig={included:1,extraFee:0}
     const undoStack=[]
 
     function showToast(m,ms){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('visible'); clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('visible'),ms||1900) }
@@ -304,9 +347,10 @@
     async function loadMonth(){
       if(!currentBien)return
       document.getElementById('month-label').textContent=monthFull[viewMonth]+' '+viewYear
-      const {start,end}=monthBounds(); inv={}; resaSet=new Set(); resaList=[]
+      const {start,end}=monthBounds(); inv={}; resaSet=new Set(); resaList=[]; fermList=[]
       try{
-        const {inv:invMap,rawProps,bookings:bkMap}=await loadCalendarData([currentBien.id], start, end)
+        const {inv:invMap,rawProps,bookings:bkMap,fermetures}=await loadCalendarData([currentBien.id], start, end)
+        fermList=(fermetures&&fermetures[currentBien.id])||[]
         inv=invMap[currentBien.id]||{}
         const p=rawProps[currentBien.id]
         if(p){ ppConfig={included:p.included_guests||p.capacity||1, extraFee:Number(p.extra_guest_fee)||0}; currentBien.base_price=Number(p.base_price)||currentBien.base_price; currentBien.capacity=p.capacity||currentBien.capacity
@@ -314,19 +358,13 @@
           orphanAutoFix=!!p.orphan_autofix
           currentBien.orphanPrice={ enabled:!!p.orphan_price_enabled, mode:p.orphan_price_mode||'set', unit:p.orphan_price_unit||'eur', value:(p.orphan_price_value!=null?String(p.orphan_price_value):'') }
         }
-        const bk=(bkMap&&bkMap[currentBien.id])||[]
-        const SRC=['airbnb','booking','direct']
-        // ⚠ `demapped` SE MASQUE COMME `cancelled` : un sejour neutralise par un
-        // demappage n'occupe plus rien cote coeur, et ses nuits sont poussees en
-        // vente. L'afficher comme une reservation aurait montre a l'hote 15
-        // barres d'occupation sur des nuits a vendre.
-        bk.forEach((b,idx)=>{ const st=String(b.status||'').toLowerCase(); if(st==='cancelled'||st==='demapped')return;
-          const ci=new Date(b.checkin+'T00:00:00'), co=new Date(b.checkout+'T00:00:00')
-          for(let d=new Date(ci); d<co; d.setDate(d.getDate()+1)) resaSet.add(toISO(d))
-          // source variee pour la demo (en attendant la vraie source via webhooks)
-          const src = SRC[idx % 3]
-          resaList.push({ checkin:b.checkin, checkout:b.checkout, name:(b.guest_name||'Reservation'), source:src })
-        })
+        // ⚠ LA SOURCE EST CELLE DU CŒUR (shared/calendrier-resa.js), plus une
+        // couleur tiree au sort : l'ancienne version faisait `SRC[idx % 3]`, et
+        // une reservation Booking s'affichait en rouge Airbnb. `mapResa` masque
+        // aussi `cancelled` et `demapped`, comme l'ordinateur.
+        resaList=mapResa((bkMap&&bkMap[currentBien.id])||[])
+        resaList.forEach(rz=>{ const ci=new Date(rz.startISO+'T00:00:00'), co=new Date(rz.checkout+'T00:00:00')
+          for(let d=new Date(ci); d<co; d.setDate(d.getDate()+1)) resaSet.add(toISO(d)) })
       }catch(e){ showToast('Erreur chargement') }
       renderGrid()
     }
@@ -418,12 +456,8 @@
       return ''
     }
 
-    // logos plateforme (SVG inline, white-label safe)
-    function platformLogo(src){
-      if(src==='airbnb') return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2c-1.1 0-2 .7-2.5 1.8C8 6.5 4 15 4 18a4 4 0 0 0 7 2.6A4 4 0 0 0 18 18c0-3-4-11.5-5.5-14.2C12 2.7 11.1 2 12 2zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>'
-      if(src==='booking') return '<svg viewBox="0 0 24 24" fill="#fff"><text x="12" y="17" font-size="15" font-weight="700" text-anchor="middle">B</text></svg>'
-      return '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3l9 7v11h-6v-6H9v6H3V10z"/></svg>'
-    }
+    // Pas de logo de plateforme dans la bulle (comme l'ordinateur) : il
+    // n'apportait rien que la couleur ne dise deja, et mangeait le nom.
 
     function renderGrid(){
       // ⚠ `<main>` est remplace dans l'etat vide : #grid disparait, alors que
@@ -473,10 +507,24 @@
           const weekStartISO=slice.find(c=>c.iso)?slice[slice.findIndex(c=>c.iso)].iso:null
           // dates de la semaine (index 0..6 -> iso)
           const isoByCol=slice.map(c=>c.iso)
+          // LES INDISPONIBILITES D'ABORD, sous les reservations : de la premiere
+          // a la derniere nuit, cases entieres, avec leur raison.
+          fermList.forEach(f=>{
+            let a=-1, z=-1
+            for(let col=0; col<7; col++){ const iso=isoByCol[col]; if(!iso)continue; if(iso>=f.date_debut && iso<=f.date_fin){ if(a<0)a=col; z=col } }
+            if(a<0) return
+            const debutIci=isoByCol[a]===f.date_debut, finIci=isoByCol[z]===f.date_fin
+            const bar=document.createElement('div')
+            bar.className='resa-bar fermeture'+(debutIci?'':' cont-left')+(finIci?'':' cont-right')
+            bar.style.left='calc('+(a*100/7)+'% + 2px)'; bar.style.width='calc('+((z+1-a)*100/7)+'% - 4px)'; bar.style.zIndex='1'
+            bar.textContent=debutIci?f.raison:''
+            bar.addEventListener('click', e=>{ e.stopPropagation(); ouvrirFicheFermeture(f.id) })
+            layer.appendChild(bar)
+          })
           resaList.forEach(rz=>{
             // intersection de [checkin, checkout] avec cette semaine, en demi-journees
             // la barre couvre de la moitie du jour d'arrivee a la moitie du jour de depart
-            const ci=rz.checkin, co=rz.checkout
+            const ci=rz.startISO, co=rz.checkout
             // jours occupes "visuellement" : de checkin a checkout inclus (le depart = demi-journee)
             let segStart=-1, segEnd=-1
             for(let col=0; col<7; col++){
@@ -495,11 +543,14 @@
             const leftPct=leftCol*colW
             const widthPct=(rightCol-leftCol)*colW
             const bar=document.createElement('div')
-            bar.className='resa-bar '+rz.source+(contLeft?' cont-left':'')+(contRight?' cont-right':'')
+            // ⚠ GRISEE, PAS MASQUEE : un sejour termine reste consultable au tap.
+            const passee = rz.checkout <= todayISO
+            bar.className='resa-bar '+rz.source+(contLeft?' cont-left':'')+(contRight?' cont-right':'')+(passee?' passee':'')
             bar.style.left='calc('+leftPct+'% + 2px)'
             bar.style.width='calc('+widthPct+'% - 4px)'
-            const nameShort = rz.name.length>14?rz.name.slice(0,13)+'.':rz.name
-            bar.innerHTML='<span class="ava">'+platformLogo(rz.source)+'</span>'+(contLeft?'':nameShort)
+            bar.style.zIndex='2'
+            bar.textContent=contLeft?'':rz.name
+            if(rz.id) bar.addEventListener('click', e=>{ e.stopPropagation(); ouvrirFicheResa(rz.id) })
             layer.appendChild(bar)
           })
           week.appendChild(layer)
@@ -533,6 +584,7 @@
       document.getElementById('sheet-title').textContent='Configurer'
       document.getElementById('sheet-sub').textContent='Date : '+iso
       document.getElementById('r-start').value=iso; document.getElementById('r-end').value=iso
+      document.getElementById('btn-ajout-dates').style.display=iso<todayISO?'none':''
       renderAccordions(); overlay.classList.add('visible')
     }
     function closeSheet(){ overlay.classList.remove('visible') }
@@ -673,6 +725,292 @@
       try{ const resp=await api.calendar.save(currentBien.id, segments); if(resp&&resp.config_saved===false){showToast('Erreur: '+resp.warnings.join(' · '),6500)}else if(resp&&resp.push_failed){showToast('NON PUBLIE — '+resp.warnings.join(' · '),12000)}else if(resp&&resp.local_only){showToast(resp.warnings.join(' · '),6500)}else{showToast(resp&&resp.warnings&&resp.warnings.length?'Enregistre — '+resp.warnings.join(' · '):'Enregistre',6500)} closeSheet(); await loadMonth() }
       catch(err){ showToast('Erreur: '+(err.message||'sauvegarde'),8000); await loadMonth() }
     })
+
+    // ═══ LA FICHE D'UNE RESERVATION, D'UNE INDISPONIBILITE, ET L'AJOUT ═══════
+    // Meme contenu et memes gestes que l'ordinateur (pages/biens-calendrier.html),
+    // memes regles (shared/calendrier-resa.js), memes appels serveur — aucune
+    // route nouvelle. Chantier calendrier mobile, 30 septembre 2026.
+    const ech=t=>String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+    const jourFr=iso=>{ const [y,m,d]=String(iso||'').split('-'); return d&&m&&y ? d+'/'+m+'/'+y : '' }
+    const ficheOverlay=document.getElementById('fiche-overlay')
+    let ficheCourante=null   // { type: 'resa'|'fermeture'|'ajout', ... }
+    const ecriture=()=>peutEcrire('reservations')
+    const ligne=(label,val)=> (val===null||val===undefined||val==='') ? '' : '<div class="fiche-ligne"><span>'+ech(label)+'</span><span>'+ech(String(val))+'</span></div>'
+    // La devise en SYMBOLE, comme l'ordinateur (`curSym`). `curSym` rend une
+    // entite HTML (« &euro; ») : on la decode, car la fiche echappe ses valeurs.
+    const symbole=c=>{ const t=document.createElement('textarea'); t.innerHTML=curSym(c); return t.value.trim() }
+    const champ=(id,label,type,val,extra)=>'<label class="fiche-lbl" for="'+id+'">'+label+'</label><input class="fld" id="'+id+'" type="'+type+'" value="'+ech(val)+'" '+(extra||'')+'/>'
+    function ouvrirFiche(titre, sousTitre, corps, note, boutons){
+      document.getElementById('fiche-titre').textContent=titre
+      document.getElementById('fiche-sous-titre').textContent=sousTitre||''
+      document.getElementById('fiche-corps').innerHTML=corps
+      document.getElementById('fiche-note').textContent=note||''
+      document.getElementById('fiche-actions').innerHTML='<button class="btn-close" id="fiche-fermer">Fermer</button>'+(boutons||'')
+      document.getElementById('fiche-fermer').addEventListener('click', fermerFicheM)
+      ficheOverlay.classList.add('visible')
+    }
+    function fermerFicheM(){ ficheOverlay.classList.remove('visible'); ficheCourante=null }
+    ficheOverlay.addEventListener('click', e=>{ if(e.target===ficheOverlay) fermerFicheM() })
+    function verdict(resp, sinon){
+      if(resp&&resp.config_saved===false) showToast('Erreur: '+resp.warnings.join(' · '),6500)
+      else if(resp&&resp.push_failed) showToast('NON PUBLIE — '+resp.warnings.join(' · '),12000)
+      else if(resp&&resp.local_only) showToast(resp.warnings.join(' · '),6500)
+      else if(resp&&resp.warnings&&resp.warnings.length) showToast('Enregistre — '+resp.warnings.join(' · '),6500)
+      else showToast(sinon,4000)
+    }
+
+    // ─── Une reservation ────────────────────────────────────────────────────
+    function ouvrirFicheResa(id){
+      const resa=resaList.find(r=>String(r.id)===String(id))
+      if(!resa||!currentBien){ showToast('Réservation introuvable'); return }
+      const bien=currentBien
+      const droits=droitsResa(bien, resa, ecriture())
+      const nuits=Math.max(1, nuitsEntre(resa.startISO, resa.checkout))
+      const voyageurs=[resa.numAdult?resa.numAdult+' adulte'+(resa.numAdult>1?'s':''):null, resa.numChild?resa.numChild+' enfant'+(resa.numChild>1?'s':''):null].filter(Boolean).join(', ')
+      const devise=symbole(resa.currency)
+      const conv='<button class="btn-conv" id="fiche-conv" disabled>&#128172; Écrire au voyageur</button><div class="fiche-note" id="fiche-conv-note" style="margin-top:2px">Recherche du fil…</div>'
+      let corps=conv
+      if(droits.modifiable){
+        // ⚠ PRIX INCONNU : champ VIDE, jamais le prix de base (il partirait
+        // comme prix de vente et repricerait le sejour chez Channex).
+        const connu=Number(resa.amount)>0
+        const parNuit=connu?Math.round(Number(resa.amount)/nuits*100)/100:''
+        corps+='<div class="fiche-2"><div>'+champ('fm-arrivee','Arrivée','date',resa.startISO)+'</div><div>'+champ('fm-depart','Départ','date',resa.checkout)+'</div></div>'
+          +'<div class="fiche-2"><div>'+champ('fm-adultes','Adultes','number',resa.numAdult||1,'min="1" inputmode="numeric"')+'</div><div>'+champ('fm-enfants','Enfants','number',resa.numChild||0,'min="0" inputmode="numeric"')+'</div></div>'
+          +'<div class="fiche-alerte" id="fm-alerte"></div>'
+          +champ('fm-prix','Prix par nuit','number',parNuit,'step="0.01" min="0.01" inputmode="decimal" placeholder="inchangé"')
+          +'<div class="fiche-total" id="fm-total"></div>'
+      } else {
+        corps+=ligne('Arrivée', jourFr(resa.startISO)+(resa.arrivalHour?' à '+resa.arrivalHour:''))+ligne('Départ', jourFr(resa.checkout))+ligne('Nuits', nuits)
+          +ligne('Voyageurs', voyageurs)+ligne('Montant', resa.amount!=null?resa.amount+' '+devise:null)
+      }
+      corps+=ligne('Canal', libelleCanal(resa))+ligne('Statut', libelleStatut(resa.statut))
+        +(badgeSansEmailVisible(resa)?'<div class="fiche-badge"><strong>Pas d\'e-mail — messages non envoyés.</strong><br>'+ech(TEXTE_SANS_EMAIL)+'</div>':'')
+        +ligne('Commission', resa.commission!=null?resa.commission+' '+devise:null)+ligne('Référence OTA', resa.otaCode)+ligne('Identifiant', resa.id)
+      ficheCourante={ type:'resa', bien, resa }
+      ouvrirFiche(resa.name, bien.name, corps, droits.note,
+        droits.modifiable ? '<button class="btn-danger" id="fm-annuler">Annuler la résa</button><button class="btn-save" id="fm-enregistrer">Enregistrer</button>' : '')
+      if(droits.modifiable){
+        ;['fm-arrivee','fm-depart','fm-prix','fm-adultes','fm-enfants'].forEach(i=>document.getElementById(i).addEventListener('input', totalModif))
+        totalModif()
+        document.getElementById('fm-annuler').addEventListener('click', annulerResaM)
+        document.getElementById('fm-enregistrer').addEventListener('click', enregistrerResaM)
+      }
+      resoudreConv(bien, resa)
+    }
+    // Le bouton nait eteint et s'allume s'il y a un fil — un bouton actif vers
+    // une messagerie vide ferait croire a une panne.
+    async function resoudreConv(bien, resa){
+      const btn=document.getElementById('fiche-conv'), note=document.getElementById('fiche-conv-note')
+      if(!btn||!note) return
+      if(!resa.id){ note.textContent='Réservation sans identifiant : aucune conversation rattachable.'; return }
+      let r
+      try{ r=await api.messages.aUneConversation(resa.id) }catch(e){ note.textContent='Fil indisponible pour le moment — réessayez.'; return }
+      if(!ficheCourante||ficheCourante.type!=='resa'||String(ficheCourante.resa.id)!==String(resa.id)) return
+      if(r&&r.has_conversation){
+        btn.disabled=false; btn.classList.add('actif'); note.textContent=''
+        btn.addEventListener('click', ()=>{ window.location.href=urlConversation(bien, resa) })
+      } else note.textContent=resa.offline ? 'Aucun message : cette réservation directe n\'a pas de fil voyageur.' : 'Aucun message reçu pour cette réservation.'
+    }
+    function totalModif(){
+      if(!ficheCourante||ficheCourante.type!=='resa') return
+      const { bien, resa }=ficheCourante
+      const a=document.getElementById('fm-arrivee').value, d=document.getElementById('fm-depart').value
+      const n=nuitsEntre(a,d), prix=parseFloat(document.getElementById('fm-prix').value)
+      const adultes=parseInt(document.getElementById('fm-adultes').value,10)||0, enfants=parseInt(document.getElementById('fm-enfants').value,10)||0
+      const z=document.getElementById('fm-total'), dev=symbole(resa.currency)
+      if(!(n>0)) z.innerHTML='<span style="color:#c0392b">Le départ doit suivre l\'arrivée.</span>'
+      else if(!(prix>0)){
+        // Champ vide : le serveur garde le montant exact si la DUREE n'a pas
+        // bouge, sinon il repart du prix par nuit actuel — on affiche cela.
+        const m=Number(resa.amount), n0=nuitsEntre(resa.startISO, resa.checkout)
+        if(!(m>0)||!(n0>0)) z.textContent='—'
+        else if(n===n0) z.innerHTML='<strong>Total : '+m.toFixed(2)+' '+ech(dev)+'</strong> <span style="color:#86868b">(inchangé, '+n+' nuit'+(n>1?'s':'')+')</span>'
+        else z.innerHTML='<strong>Total : '+(Math.round(m/n0*n*100)/100).toFixed(2)+' '+ech(dev)+'</strong> <span style="color:#86868b">('+n+' nuits au tarif actuel)</span>'
+      } else z.innerHTML='<strong>Total : '+(Math.round(prix*n*100)/100).toFixed(2)+' '+ech(dev)+'</strong> <span style="color:#86868b">('+n+' nuit'+(n>1?'s':'')+')</span>'
+      document.getElementById('fm-alerte').textContent=messageCapacite(adultes, enfants, bien.capacity||1)||''
+    }
+    async function annulerResaM(){
+      const { bien, resa }=ficheCourante||{}
+      if(!resa) return
+      if(!confirm('Annuler la réservation de '+resa.name+' du '+jourFr(resa.startISO)+' au '+jourFr(resa.checkout)+' ?\n\nLes dates seront rouvertes à la vente.')) return
+      const btn=document.getElementById('fm-annuler'); btn.disabled=true; btn.textContent='Annulation…'
+      try{
+        await api.reservationDirecte.annuler({ propertyId: bien.provider_property_id, bookingId: resa.id })
+        fermerFicheM()
+        // On ne retire pas la bulle : elle disparaitra quand le cœur l'aura apprise.
+        showToast('Annulation envoyée — visible au prochain rafraîchissement', 6000)
+        setTimeout(()=>{ loadMonth().catch(()=>{}) }, 8000)
+      }catch(e){ btn.disabled=false; btn.textContent='Annuler la résa'; showToast('Erreur : '+(e.message||'annulation'), 6000) }
+    }
+    async function enregistrerResaM(){
+      const { bien, resa }=ficheCourante||{}
+      if(!resa) return
+      const arrivee=document.getElementById('fm-arrivee').value, depart=document.getElementById('fm-depart').value
+      const prixBrut=document.getElementById('fm-prix').value.trim(), prix=parseFloat(prixBrut)
+      const adultes=parseInt(document.getElementById('fm-adultes').value,10)||0, enfants=parseInt(document.getElementById('fm-enfants').value,10)||0
+      const n=nuitsEntre(arrivee, depart)
+      if(!(n>0)){ showToast('Le départ doit suivre l\'arrivée', 4000); return }
+      const cap=messageCapacite(adultes, enfants, bien.capacity||1); if(cap){ showToast(cap, 5000); return }
+      if(prixBrut!=='' && !(prix>0)){ showToast('Prix par nuit invalide', 4000); return }
+      const memePrix = prixBrut==='' || (Number(resa.amount)>0 && Math.abs(prix*n-Number(resa.amount))<0.005)
+      if(arrivee===resa.startISO && depart===resa.checkout && (resa.numAdult||1)===adultes && (resa.numChild||0)===enfants && memePrix){ showToast('Aucune modification'); return }
+      const btn=document.getElementById('fm-enregistrer'); btn.disabled=true; btn.textContent='Envoi…'
+      try{
+        const charge={ propertyId: bien.provider_property_id, bookingId: resa.id, arrival: arrivee, departure: depart, occupancy: { adults: adultes, children: enfants } }
+        // Prix ABSENT si l'hote n'y a pas touche : le serveur garde le montant exact.
+        if(prixBrut!=='') charge.prixParNuit=prix
+        await api.reservationDirecte.modifier(charge)
+        fermerFicheM()
+        showToast('Modification envoyée — visible au prochain rafraîchissement', 6000)
+        setTimeout(()=>{ loadMonth().catch(()=>{}) }, 8000)
+      }catch(e){ btn.disabled=false; btn.textContent='Enregistrer'; showToast(e.status===409 ? (e.message||'Ces dates ne sont plus disponibles.') : ('Erreur : '+(e.message||'modification')), 7000) }
+    }
+
+    // ─── Une indisponibilite ────────────────────────────────────────────────
+    function ouvrirFicheFermeture(id){
+      const f=fermList.find(x=>x.id===id)
+      if(!f||!currentBien){ showToast('Indisponibilité introuvable'); return }
+      const modifiable=ecriture()
+      const nuits=nuitsEntre(f.date_debut, f.date_fin)+1
+      const dis=modifiable?'':' disabled'
+      const corps='<div class="fiche-2"><div>'+champ('ff-debut','Première nuit','date',f.date_debut,dis)+'</div><div>'+champ('ff-fin','Dernière nuit','date',f.date_fin,dis)+'</div></div>'
+        +champ('ff-raison','Raison','text',f.raison,'maxlength="200"'+dis)
+        +'<div class="fiche-note">Fermé à la vente sur toutes les plateformes. Seul vous pouvez modifier ou supprimer cette indisponibilité : aucun automatisme n\'y touche jamais.</div>'
+        +'<div class="fiche-alerte" id="ff-etat"></div>'
+      ficheCourante={ type:'fermeture', f }
+      ouvrirFiche('Indisponible — '+f.raison, currentBien.name+' · '+nuits+' nuit'+(nuits>1?'s':''), corps,
+        modifiable ? 'Modifiable et supprimable depuis HôteSmart.' : 'Vous n\'avez pas le droit de modifier la vente.',
+        modifiable ? '<button class="btn-danger" id="ff-supprimer">Supprimer</button><button class="btn-save" id="ff-enregistrer">Enregistrer</button>' : '')
+      if(modifiable){
+        document.getElementById('ff-supprimer').addEventListener('click', supprimerFermetureM)
+        document.getElementById('ff-enregistrer').addEventListener('click', enregistrerFermetureM)
+      }
+    }
+    async function enregistrerFermetureM(){
+      const { f }=ficheCourante||{}; if(!f) return
+      const debut=document.getElementById('ff-debut').value, fin=document.getElementById('ff-fin').value, raison=document.getElementById('ff-raison').value.trim()
+      const etat=document.getElementById('ff-etat')
+      if(!debut||!fin||fin<debut){ etat.textContent='La dernière nuit doit être le même jour que la première, ou après.'; return }
+      if(!raison){ etat.textContent='La raison est obligatoire.'; return }
+      if(debut===f.date_debut && fin===f.date_fin && raison===f.raison){ etat.textContent='Aucune modification.'; return }
+      const btn=document.getElementById('ff-enregistrer'); btn.disabled=true; btn.textContent='Enregistrement…'
+      try{ const resp=await api.calendar.modifierFermeture(currentBien.id, f.id, debut, fin, raison); fermerFicheM(); verdict(resp,'Indisponibilité modifiée'); await loadMonth() }
+      catch(e){ etat.textContent=e.message||'Erreur'; btn.disabled=false; btn.textContent='Enregistrer' }
+    }
+    async function supprimerFermetureM(){
+      const { f }=ficheCourante||{}; if(!f) return
+      if(!confirm('Supprimer cette indisponibilité rouvre à la vente toute la période du '+jourFr(f.date_debut)+' au '+jourFr(f.date_fin)+'. Continuer ?')) return
+      const btn=document.getElementById('ff-supprimer'); btn.disabled=true
+      try{ const resp=await api.calendar.rouvrirFermeture(currentBien.id, f.id); fermerFicheM(); verdict(resp,'Indisponibilité supprimée — période rouverte'); await loadMonth() }
+      catch(e){ document.getElementById('ff-etat').textContent=e.message||'Erreur'; btn.disabled=false }
+    }
+
+    // ─── Nouvelle reservation (Réservation / Indisponible) ──────────────────
+    // Le meme formulaire que l'ordinateur. Sur ordinateur, les dates viennent
+    // de la selection ; ici, elles se saisissent (pre-remplies).
+    function ouvrirAjout(arrivee, depart){
+      if(!currentBien) return
+      if(!ecriture()){ showToast('Vous n\'avez pas le droit de créer une réservation'); return }
+      const bien=currentBien
+      // La reservation directe est Channex seulement ; l'indisponibilite vaut pour tout bien.
+      const channex=bien.provider==='channex'||bien.provider==='channel'
+      const prix0=rateFor(arrivee)
+      const corps='<div class="ajout-type"><button id="aj-type-resa"'+(channex?' class="on"':' disabled')+'>Réservation</button><button id="aj-type-indispo"'+(channex?'':' class="on"')+'>Indisponible</button></div>'
+        +(channex?'':'<div class="fiche-note">Réservation directe indisponible sur ce bien (synchronisé hors HôteSmart) : seule l\'indisponibilité est possible.</div>')
+        +'<div class="fiche-2"><div>'+champ('aj-arrivee','Arrivée','date',arrivee,'min="'+todayISO+'"')+'</div><div>'+champ('aj-depart','Départ','date',depart)+'</div></div>'
+        +'<div id="aj-indispo" style="display:none">'+champ('aj-raison','Raison (affichée au calendrier)','text','','maxlength="200" placeholder="ex. travaux, séjour personnel"')+'</div>'
+        +'<div id="aj-resa">'
+          +'<div class="fiche-2"><div>'+champ('aj-prenom','Prénom','text','','autocomplete="off"')+'</div><div>'+champ('aj-nom','Nom','text','','autocomplete="off"')+'</div></div>'
+          +champ('aj-email','E-mail','email','','placeholder="facultatif" inputmode="email"')
+          +champ('aj-tel','Téléphone','tel','','placeholder="facultatif"')
+          +'<div class="fiche-2"><div>'+champ('aj-adultes','Adultes','number',2,'min="1" inputmode="numeric"')+'</div><div>'+champ('aj-enfants','Enfants','number',0,'min="0" inputmode="numeric"')+'</div></div>'
+          +'<div class="fiche-note" style="margin:4px 0 0">Capacité du bien : '+(bien.capacity||1)+' personne'+((bien.capacity||1)>1?'s':'')+'</div>'
+          +'<div class="fiche-alerte" id="aj-alerte"></div>'
+          +champ('aj-prix','Prix par nuit','number',prix0==null?'':prix0,'step="0.01" min="0.01" inputmode="decimal"')
+          +'<div class="fiche-total" id="aj-total"></div>'
+          +champ('aj-ref','Référence','text','','placeholder="facultatif — visible de vous seul"')
+        +'</div>'
+        +'<div class="fiche-alerte" id="aj-etat"></div>'
+      ficheCourante={ type:'ajout', indispo: !channex }
+      ouvrirFiche('Nouvelle réservation', bien.name, corps, '', '<button class="btn-save" id="aj-valider">'+(channex?'Créer la réservation':'Créer l\'indisponibilité')+'</button>')
+      const choisir=indispo=>{
+        ficheCourante.indispo=indispo
+        document.getElementById('aj-type-resa').classList.toggle('on', !indispo); document.getElementById('aj-type-indispo').classList.toggle('on', indispo)
+        document.getElementById('aj-resa').style.display=indispo?'none':''; document.getElementById('aj-indispo').style.display=indispo?'':'none'
+        document.getElementById('aj-valider').textContent=indispo?'Créer l\'indisponibilité':'Créer la réservation'
+        document.getElementById('aj-etat').textContent=''
+      }
+      document.getElementById('aj-type-resa').addEventListener('click', ()=>{ if(channex) choisir(false) })
+      document.getElementById('aj-type-indispo').addEventListener('click', ()=>choisir(true))
+      choisir(!channex)
+      ;['aj-arrivee','aj-depart','aj-prix','aj-adultes','aj-enfants'].forEach(i=>document.getElementById(i).addEventListener('input', totalAjout))
+      totalAjout()
+      document.getElementById('aj-valider').addEventListener('click', validerAjoutM)
+    }
+    function totalAjout(){
+      const a=document.getElementById('aj-arrivee').value, d=document.getElementById('aj-depart').value, n=nuitsEntre(a,d)
+      const prix=parseFloat(document.getElementById('aj-prix').value), z=document.getElementById('aj-total')
+      if(!(n>0)) z.innerHTML='<span style="color:#c0392b">Le départ doit suivre l\'arrivée.</span>'
+      else if(!(prix>0)) z.textContent='—'
+      else z.innerHTML='<strong>Total du séjour : '+(prix*n).toFixed(2)+' '+ech(symbole(currentBien.currency))+'</strong> <span style="color:#86868b">('+prix.toFixed(2)+' × '+n+' nuit'+(n>1?'s':'')+')</span>'
+      document.getElementById('aj-alerte').textContent=messageCapacite(parseInt(document.getElementById('aj-adultes').value,10)||0, parseInt(document.getElementById('aj-enfants').value,10)||0, currentBien.capacity||1)||''
+    }
+    async function validerAjoutM(){
+      const bien=currentBien, etat=document.getElementById('aj-etat'), btn=document.getElementById('aj-valider')
+      const arrivee=document.getElementById('aj-arrivee').value, depart=document.getElementById('aj-depart').value
+      const n=nuitsEntre(arrivee, depart)
+      if(!arrivee||!depart||!(n>0)){ etat.textContent='Le départ doit suivre l\'arrivée.'; return }
+      // ⚠ PAS DE SAISIE DANS LE PASSE (review) : l'ordinateur ne laisse pas
+      // selectionner un jour passe ; le telephone, qui saisit les dates, refuse
+      // ici — sinon une reservation « Offline » partait au canal pour des nuits
+      // deja ecoulees, avec menage et messages derriere.
+      if(arrivee<todayISO){ etat.textContent='L\'arrivée ne peut pas être dans le passé.'; return }
+      if(ficheCourante&&ficheCourante.indispo){
+        const raison=document.getElementById('aj-raison').value.trim()
+        if(!raison){ etat.textContent='Dites pourquoi : c\'est ce que le calendrier affichera.'; return }
+        // La derniere nuit fermee est la veille du depart.
+        const d=new Date(depart+'T00:00:00'); d.setDate(d.getDate()-1); const derniereNuit=toISO(d)
+        btn.disabled=true; btn.textContent='Enregistrement…'
+        try{ const resp=await api.calendar.fermer(bien.id, arrivee, derniereNuit, raison); fermerFicheM(); verdict(resp,'Indisponible du '+jourFr(arrivee)+' au '+jourFr(derniereNuit)+' — '+raison); await loadMonth() }
+        catch(e){ etat.textContent=e.status===409 ? (e.message||'Ces dates croisent une indisponibilité.') : ('Erreur : '+(e.message||'enregistrement')); btn.disabled=false; btn.textContent='Créer l\'indisponibilité' }
+        return
+      }
+      const prenom=document.getElementById('aj-prenom').value.trim(), nom=document.getElementById('aj-nom').value.trim()
+      if(!prenom||!nom){ etat.textContent='Prénom et nom sont obligatoires.'; return }
+      const prix=parseFloat(document.getElementById('aj-prix').value)
+      if(!(prix>0)){ etat.textContent='Prix par nuit invalide.'; return }
+      const adultes=parseInt(document.getElementById('aj-adultes').value,10)||0, enfants=parseInt(document.getElementById('aj-enfants').value,10)||0
+      const cap=messageCapacite(adultes, enfants, bien.capacity||1); if(cap){ document.getElementById('aj-alerte').textContent=cap; return }
+      btn.disabled=true; btn.textContent='Envoi…'; etat.textContent='Envoi au canal…'
+      try{
+        await api.reservationDirecte.creer({ propertyId: bien.provider_property_id, arrival: arrivee, departure: depart, prixParNuit: prix,
+          customer: { name: prenom, surname: nom, mail: document.getElementById('aj-email').value.trim()||null, phone: document.getElementById('aj-tel').value.trim()||null },
+          occupancy: { adults: adultes||1, children: enfants }, reference: document.getElementById('aj-ref').value.trim()||null })
+        fermerFicheM()
+        // Confirmation en deux temps : le canal a accepte ; la reservation
+        // n'existe dans HôteSmart qu'apres le passage du feed.
+        showToast('Envoyée au canal ✓ — visible au prochain rafraîchissement', 7000)
+        setTimeout(()=>{ loadMonth().catch(()=>{}) }, 8000)
+      }catch(e){ etat.textContent=e.status===409 ? (e.message||'Ces dates ne sont plus disponibles.') : ('Erreur : '+(e.message||'envoi')); btn.disabled=false; btn.textContent='Créer la réservation' }
+    }
+    // Les deux portes : le + de la barre (aujourd'hui → demain, ou le mois
+    // affiche) et « Nouvelle réservation sur ces dates » dans la feuille d'un jour.
+    document.getElementById('btn-ajout').addEventListener('click', ()=>{
+      const { start }=monthBounds(); const a=start>todayISO?start:todayISO
+      const d=new Date(a+'T00:00:00'); d.setDate(d.getDate()+1)
+      ouvrirAjout(a, toISO(d))
+    })
+    document.getElementById('btn-ajout-dates').addEventListener('click', ()=>{
+      const a=document.getElementById('r-start').value, fin=document.getElementById('r-end').value||a
+      if(!a){ showToast('Choisissez une date'); return }
+      if(a<todayISO){ showToast('L\'arrivée ne peut pas être dans le passé'); return }
+      // La feuille du jour parle en NUITS (du … au … inclus) : le depart est le
+      // lendemain de la derniere nuit.
+      const d=new Date(fin+'T00:00:00'); d.setDate(d.getDate()+1)
+      closeSheet(); ouvrirAjout(a, toISO(d))
+    })
+    if(!peutEcrire('reservations')){ document.getElementById('btn-ajout').style.display='none'; document.getElementById('btn-ajout-dates').style.display='none' }
 
     await loadBiens()
   </script>
