@@ -363,7 +363,6 @@ vert, sans toucher une ligne de production.
 | 2 | `tests/avis-endpoint.test.js` | **6** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir ; le 29 septembre, trois de plus (« un avis NON analyse… », « un membre limite a un bien… », « une detection en attente… ») — contre-epreuve +1 mois : 5 des 6 au vert, le 6e casse par le decalage lui-meme (la date invalide 02-30 devient valide) |
 | 3 | `tests/messages-classify.test.js` | **10** | meme fenetre : le message du 20 aout est ecarte AVANT la garde de panne DB, donc la garde n'est jamais appelee — elle mord toujours |
 | 4 | `tests/menages-public-filtre-presta.test.js` | **4** | fenetre glissante de 14 jours du fil d'actualites (`api/menages-public.js`, « on remonte aussi les 14 derniers jours ») : le menage `b1` du 6 septembre en est sorti le 21 (constate le 21 septembre 2026, contre-epreuve +1 mois : 20/20) |
-| 5 | `tests/pwa-mes-jours-dom.test.js` | **2**, les 1er/2/3 du mois SEULEMENT | les deux seuls tests du fichier qui tapent `dans(-3)` : le calendrier de disponibilites n'affiche que le mois COURANT et le suivant (`dispo-prec` desactive a `mois === 0`), donc la case de J-3 n'existe pas quand J-3 tombe dans le mois precedent. Constate le 1er octobre 2026. DEUX preuves concordantes. Arithmetique : 2 tests utilisent `dans(-3)`, et ce sont exactement les 2 qui rougissent. Calendaire : `JOURS=10 node --require ./tests/outils/horloge-decalee.js --test tests/pwa-mes-jours-dom.test.js` rend **132/132**. ⚠ Deux methodes de decalage plus naives avaient donne 8 et 10 rouges — elles fabriquent leurs propres echecs, voir l'en-tete de l'outil |
 
 Les familles 2 et 3 franchissent une FENETRE DE LECTURE, pas une garde
 d'anciennete — c'est ce qui les rend penibles : elles se declenchent a des
@@ -374,10 +373,14 @@ V1.** Un chiffre qui bouge tout seul avec le calendrier est un mauvais
 garde-fou : l'actualiser n'est qu'un sursis.
 
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
-⚠ **LE NOMBRE N'EST PLUS CONSTANT DEPUIS LE 1er OCTOBRE 2026.** La famille 5
-rougit les **1er, 2 et 3 de chaque mois**, et elle seule : le compte attendu est
-donc **30 ces trois jours-la, 28 les autres**. Lire la DATE avant de crier a la
-regression — c'est le premier reflexe, pas le dernier.
+⚠ **UNE CINQUIEME FAMILLE A EXISTE LE 1er OCTOBRE 2026, ET ELLE A ETE REFERMEE
+LE JOUR MEME** — deux tests de `tests/pwa-mes-jours-dom.test.js` qui tapaient
+`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte est
+redevenu **28, et exactement 28**. Ce qu'il faut en retenir : un compte a
+geometrie variable est une barriere affaiblie. Le jour ou une vraie regression
+apporte deux rouges un 2 du mois, un compte attendu de « 30 ces jours-la » ne
+fait arreter personne. **Documenter un rouge calendaire est le dernier recours ;
+ancrer le test dans sa fenetre est le premier.**
 
 ⚠ **ET LA CONTRE-EPREUVE CALENDAIRE A UN OUTIL**, parce que la faire a la main
 donne de faux resultats : `tests/outils/horloge-decalee.js`, a PRECHARGER
