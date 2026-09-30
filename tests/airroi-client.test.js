@@ -466,19 +466,49 @@ test('LE TEST QUI COMPTE (SECURITE, review de f40ee9e) : sans cle dans l environ
   cas.push({ script: 'scripts/capturer-relief-airroi.js', prefixe: 'relief-bagneres-', endpoint: 'POST /price-recommendation/calendar-prices',
     params: { location: { latitude: moi.latitude, longitude: moi.longitude }, currency: 'EUR', base_price: 100, start_date: debut, end_date: fin },
     reponse: '{"recommendations":[{"date":"2026-10-01","price":100}]}' })
+  // Le pacing (script du 24 septembre, meme defaut — re-review de 9b47690) :
+  // un lookup puis le pacing, tous deux servis par le cache.
+  const moiLoc = lireJson(lire('moi.json')).location_info
+  const marche60 = lireJson(lire('marche-60.json')).market
+  const marcheP = { country: marche60.country, region: marche60.region, locality: marche60.locality }
+  cas.push({ script: 'scripts/capturer-pacing.js', prefixe: 'pacing-bagneres-', endpoint: 'POST /markets/metrics/future/pacing',
+    params: { market: marcheP, currency: 'native' }, reponse: '{"market":{},"results":[{"date":"2026-10-01"}]}',
+    avant: { endpoint: 'GET /markets/lookup', params: { lat: moiLoc.latitude, lng: moiLoc.longitude }, reponse: JSON.stringify(marcheP) } })
   // Liste ET date de modification : une fixture du jour reecrite ne changerait
   // pas la liste.
   const etat = prefixe => fs.readdirSync(FIX).filter(f => f.startsWith(prefixe)).map(f => [f, fs.statSync(path.join(FIX, f)).mtimeMs])
   for (const c of cas) {
     const d = dossier()
-    await depotFichier(d).ecrireCache({ cle: cleCanonique(c.endpoint, c.params), endpoint: c.endpoint, parametres: c.params,
-      reponse: c.reponse, cout: 0.1, recupereLe: new Date().toISOString() })
+    const sortie = dossier()
+    for (const e of [c.avant, c].filter(Boolean)) {
+      await depotFichier(d).ecrireCache({ cle: cleCanonique(e.endpoint, e.params), endpoint: e.endpoint, parametres: e.params,
+        reponse: e.reponse, cout: 0.1, recupereLe: new Date().toISOString() })
+    }
     const avant = etat(c.prefixe)
     const env = { ...process.env }
     delete env.AIRROI_API_KEY
     let code = 0
-    try { execFileSync(process.execPath, [path.join(racine, c.script), `--cache=${d}`], { env, stdio: 'pipe' }) } catch (e) { code = e.status }
+    // `--fixtures` isole l'ECRITURE : meme si le script regresse, le depot
+    // n'est pas sali (re-review de 9b47690).
+    try { execFileSync(process.execPath, [path.join(racine, c.script), `--cache=${d}`, `--fixtures=${sortie}`], { env, stdio: 'pipe' }) } catch (e) { code = e.status }
     assert.equal(code, 6, `${c.script} : refus attendu (code 6)`)
+    assert.deepEqual(fs.readdirSync(sortie), [], `${c.script} : rien d ecrit dans le dossier de sortie`)
     assert.deepEqual(etat(c.prefixe), avant, `${c.script} : aucune fixture ecrite ni reecrite`)
   }
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : ecrireFixtureSansCle — verifie en memoire, puis ecrit ; cle absente ou mal formee = refus', () => {
+  const { ecrireFixtureSansCle } = require('../lib/airroi/fixture-sure')
+  const d = dossier()
+  const f = path.join(d, 'x.json')
+  const cle = `factice-${crypto.randomUUID()}`
+  const code = fn => { try { fn(); return 0 } catch (e) { return e.code } }
+  assert.equal(code(() => ecrireFixtureSansCle('{}', f, '')), 6)
+  assert.equal(code(() => ecrireFixtureSansCle('{}', f, `${cle}\n`)), 6, 'une cle avec un blanc final rendrait le controle vide')
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${cle}"}`, f, cle)), 4)
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${encodeURIComponent(cle)}"}`, f, cle)), 4)
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${Buffer.from(cle).toString('base64')}"}`, f, cle)), 4)
+  assert.deepEqual(fs.readdirSync(d), [], 'aucun refus n a ecrit')
+  assert.equal(code(() => ecrireFixtureSansCle('{"ok":1}', f, cle)), 0)
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"ok":1}')
 })

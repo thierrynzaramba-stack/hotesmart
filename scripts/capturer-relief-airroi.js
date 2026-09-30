@@ -37,6 +37,7 @@ const fs = require('fs')
 const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotFichier } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
+const { ecrireFixtureSansCle, RefusFixture } = require('../lib/airroi/fixture-sure')
 const { jourLocalParis } = require('../lib/yield/zones-scolaires')
 
 const args = process.argv.slice(2)
@@ -44,7 +45,10 @@ const val = (n, d) => { const a = args.find(x => x.startsWith(`--${n}=`)); retur
 const dossier = val('cache', path.join(require('os').homedir(), '.hotesmart-airroi-cache'))
 const budget = Number(val('budget', '1'))
 const confirmer = args.includes('--confirmer')
+// Les fixtures de LECTURE (moi.json, marche-60.json) viennent toujours du
+// depot ; `--fixtures` ne deplace que l'ECRITURE (les tests l'isolent).
 const FIX = path.join(__dirname, '..', 'tests', 'fixtures', 'airroi')
+const SORTIE = val('fixtures', FIX)
 const JOURS = 730
 
 ;(async () => {
@@ -75,25 +79,11 @@ const JOURS = 730
   const brut = await depot.lireCache(cleCanonique(E, params))
   if (!brut || typeof brut.reponse !== 'string') throw new Error('reponse introuvable dans le cache')
 
-  // Aucune trace de la cle, verifiee AVANT d'ecrire dans le depot (review :
-  // un processus tue entre l'ecriture et le controle laissait le fichier).
-  // ⚠ SANS CLE DANS L'ENVIRONNEMENT, LE CONTROLE NE PROUVE RIEN (review de
-  // f40ee9e, SECURITE) : une relance servie par le cache depuis un autre shell
-  // ecrivait la fixture en affirmant « aucune trace de la cle ». Refus.
-  const cle = process.env.AIRROI_API_KEY || ''
-  if (!cle) {
-    console.error('ECHEC : AIRROI_API_KEY absente — impossible de verifier que la reponse ne contient pas la cle. RIEN n est ecrit dans le depot.')
-    process.exit(6)
-  }
-  const formes = [cle, encodeURIComponent(cle), JSON.stringify(cle).slice(1, -1)]
-  if (formes.some(f => f && brut.reponse.includes(f))) {
-    console.error(`ECHEC : la reponse contient la cle — RIEN n'est ecrit dans le depot. Purger aussi le cache local (${dossier}).`)
-    process.exit(4)
-  }
-  // Le jour de CAPTURE, a l'heure de Paris (`market_demand` en depend).
+  // Le jour de CAPTURE, a l'heure de Paris.
   const jour = jourLocalParis(String(brut.recupere_le || new Date().toISOString()))
-  const fichier = path.join(FIX, `relief-bagneres-${jour}.json`)
-  fs.writeFileSync(fichier, brut.reponse)
+  const fichier = path.join(SORTIE, `relief-bagneres-${jour}.json`)
+  // Cle verifiee EN MEMOIRE avant toute ecriture ; sans cle, refus (code 6).
+  ecrireFixtureSansCle(brut.reponse, fichier, process.env.AIRROI_API_KEY || '')
   const contenu = brut.reponse
 
   // Sa FORME, pas ses chiffres (ils se liront dans les tests).
@@ -110,4 +100,4 @@ const JOURS = 730
     process.exit(5)
   }
   process.exit(0)
-})().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })
+})().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(e instanceof RefusFixture ? e.code : 1) })

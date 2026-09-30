@@ -1986,3 +1986,11 @@ appel à l'API interne :
 - À comparer : le pacing DOCUMENTÉ (0,20 $, fixture du 24 septembre) ne rend
   que l'avant (`booked_count`, `available_count`, `booked_rate_avg`,
   `available_rate_avg`, `fill_rate`), sans l'année passée.
+- **Sécurité des fixtures (reviews de f40ee9e et 9b47690)** : les trois
+  scripts de capture (pacing, relief, occupation) écrivaient une fixture sans
+  vérifier la clé quand elle manquait de l'environnement (relance servie par
+  le cache) ; le pacing écrivait même avant de vérifier. Un seul contrôle,
+  `lib/airroi/fixture-sure.js` : vérification EN MÉMOIRE (brute, URL, JSON,
+  base64), puis écriture ; clé absente ou mal formée = refus (code 6), rien
+  d'écrit. `--fixtures=<dossier>` isole l'écriture (les tests ne salissent
+  jamais le dépôt). Constat de sécurité re-reviewé une fois (règle).
