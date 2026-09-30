@@ -14,6 +14,8 @@
 //      efface ; et `prix_hote` garde le prix recommande au ✎.
 
 const test = require('node:test')
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 const assert = require('node:assert/strict')
 const Module = require('node:module')
 const S = require('../lib/yield/suggestion')
@@ -131,7 +133,7 @@ test('ecrivain : niveau inconnu, montant nul ou compte absent refuses sans ecrit
 })
 
 // ─── L'endpoint ─────────────────────────────────────────────────────────────
-function chargerEndpoint ({ sim, fixesActuels = new Map(), bien = {} }) {
+function chargerEndpoint ({ sim, fixesActuels = new Map(), bien = {}, lireFixes = null }) {
   const gestes = []
   const ligneBien = { id: BIEN, user_id: COMPTE, prix_minimum: 8500, pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'mois', pilote_fenetre_valeur: 3, rate_sync_mode: 'managed', ...bien }
   const sb = { from () { const q = {}; q.select = () => q; q.eq = (c, v) => { gestes.push(['lecture', c, v]); return q }; q.maybeSingle = async () => ({ data: ligneBien, error: null }); return q } }
@@ -146,7 +148,7 @@ function chargerEndpoint ({ sim, fixesActuels = new Map(), bien = {} }) {
     for (const [k, v] of Object.entries(stubs)) if (d === k || d.endsWith(k)) return v
     if (/\/grille-hote$/.test(d)) {
       const vrai = avant.apply(this, [d, ...reste])
-      return { ...vrai, grilleHoteDuBien: async () => fixesActuels,
+      return { ...vrai, grilleHoteDuBien: lireFixes || (async () => fixesActuels),
         fixerNiveau: async (s, o) => { gestes.push(['fixer', o.niveau, o.cents, o.recommandeCents]); return { ok: true } },
         remettreAuCalcul: async (s, o) => { gestes.push(['au_calcul', o.niveau]); return { ok: true } } }
     }
@@ -269,4 +271,95 @@ test('LE TEST QUI COMPTE : preparerContexte — le point unique — applique les
   assert.deepEqual([ctx.grille.base.niveaux[1].prix, ctx.grille.base.niveaux[1].fixe_par_hote, ctx.grilleCalculee.base.niveaux[1].prix], [130, true, 125])
   const sim = await preparerContexte(base(), B, COMPTE, { aujourdHui: '2026-09-23', debut: '2026-10-01', fin: '2026-10-31', grilleHote: new Map() })
   assert.equal(sim.grille.base.niveaux[1].prix, 125, 'une Map vide en option : la grille calculee, sans lire la base')
+})
+
+// ─── Review du lot 4.6.7 ────────────────────────────────────────────────────
+test('LE TEST QUI COMPTE (review, decision 2) : l ordre TIENT a chaque application — un calcule qui glisse s ecarte d un pas, un fixe ne bouge jamais', () => {
+  // Base fixee a 100 € ; le Moyen calcule est retombe a 95 €.
+  const g = grille(); g.base.niveaux[1].prix = 95
+  const a = G.appliquerGrilleHote(g, fixes({ Base: 100 }))
+  assert.deepEqual(a.base.niveaux.map(n => [n.nom, n.prix, !!n.fixe_par_hote, !!n.ajuste_pour_ordre]),
+    [['Base', 100, true, false], ['Moyen', 105, false, true], ['Haut', 140, false, false], ['Très haut', 155, false, false], ['Exceptionnel', 165, false, false]])
+  // Haut fixe a 120 € sous un Moyen calcule a 125 € : Moyen recule, pas Haut.
+  const b = G.appliquerGrilleHote(grille(), fixes({ Haut: 120 }))
+  assert.deepEqual(b.base.niveaux.map(n => n.prix), [110, 115, 120, 155, 165], 'Moyen 125 -> 115, et Base 115 -> 110 pour rester dessous')
+  assert.equal(b.base.ordre_rompu, undefined)
+  // Deux FIXES dans le desordre (gestes concurrents) : dit, jamais repare en silence.
+  const c = G.appliquerGrilleHote(grille(), fixes({ Moyen: 140, Haut: 130 }))
+  assert.deepEqual(c.base.ordre_rompu, ['Moyen/Haut'])
+  assert.deepEqual([c.base.niveaux[1].prix, c.base.niveaux[2].prix], [140, 130])
+})
+
+test('LE TEST QUI COMPTE (review, decision 3) : un Exceptionnel fixe PLUS BAS rouvre la fourchette depuis sa mesure brute — la prime prouvee reste', () => {
+  const g = grille({ plafond: null }); g.base.plafond_brut = 262
+  const a = G.appliquerGrilleHote(g, fixes({ Exceptionnel: 220 }))
+  assert.equal(a.base.plafond, 260, 'plafond brut 262 arrondi au pas inferieur')
+  const s = nuit(a, SAMEDI, { preuveN1: { date: '2025-11-22', prix: 250, ventes: 1, meme_segment: true, hors_reference: false } })
+  assert.equal(s.prix, 250, 'la preuve de l an dernier monte au-dessus du montant fixe')
+})
+
+test('LE TEST QUI COMPTE (review, decision 2) : le geste seul est juge — « au calcul » jamais refuse, une paire non touchee ne bloque rien, place sous le minimum', () => {
+  const niv = (prix, fixesNoms = []) => S.NIVEAUX.map((n, i) => ({ nom: n.nom, prix: prix[i], prix_calcule: prix[i], fixe_par_hote: fixesNoms.includes(n.nom) }))
+  // Haut et Tres haut calcules CONFONDUS (150/150) : fixer Base n est pas bloque.
+  assert.deepEqual(G.validerGeste(niv([95, 105, 150, 150, 165]), { niveau: 'Base', cents: 9500 }, 8500), { ok: true })
+  assert.deepEqual(G.validerGeste(niv([95, 105, 150, 150, 165]), { niveau: 'Très haut', cents: null }, 8500), { ok: true })
+  // Face a un voisin FIXE : son montant fixe ; face a un voisin calcule : son calcul.
+  assert.equal(G.validerGeste(niv([100, 110, 120, 130, 140], ['Moyen']), { niveau: 'Base', cents: 11000 }, 8500).code, 'ordre')
+  assert.equal(G.validerGeste(niv([100, 110, 120, 130, 140]), { niveau: 'Moyen', cents: 12000 }, 8500).code, 'ordre')
+  // Place sous le minimum : Moyen doit laisser Base au-dessus de 85 € (donc >= 90 €).
+  assert.equal(G.validerGeste(niv([100, 110, 120, 130, 140]), { niveau: 'Moyen', cents: 8900 }, 8500).code, 'sous_prix_minimum')
+  assert.deepEqual(G.validerGeste(niv([80, 110, 120, 130, 140]), { niveau: 'Moyen', cents: 9000 }, 8500), { ok: true })
+})
+
+test('LE TEST QUI COMPTE (review) : la simulation ne compte QUE les nuits que le geste change — ni le rattrapage du jour, ni les nuits ✎, fermees ou inconnues', async () => {
+  const calculee = grille({ plafond: null })
+  const niveauDe = { '2026-10-02': 1, '2026-10-03': 1, '2026-10-04': 1, '2026-10-05': 2, '2026-10-06': 1, '2026-10-07': 2 }
+  const lignes = [
+    { date: '2026-10-02', rate: 125, avail: 1, stop_sell: false },   // Moyen, a jour : 125 -> 130
+    { date: '2026-10-03', rate: 125, avail: 1, stop_sell: false },   // Moyen, prix de l'hote (✎) : saute
+    { date: '2026-10-04', rate: 125, avail: 0, stop_sell: true },    // Moyen, fermee : sautee
+    { date: '2026-10-05', rate: 140, avail: 1, stop_sell: false },   // Haut : inchangee dans les deux grilles
+    { date: '2026-10-06', rate: 90, avail: 1, stop_sell: false },    // Moyen, prix perime : 125 (jour) puis 130 (geste)
+    { date: '2026-10-07', rate: 100, avail: 1, stop_sell: false }]   // Haut, prix perime : 140 dans les deux — PAS le geste
+  const ctx = { grilleCalculee: calculee, ouvertureConnue: true, ouverts: new Set(lignes.map(l => l.date)), parDate: new Map(lignes.map(l => [l.date, l])) }
+  const avant = Module._load
+  Module._load = function (d, ...reste) {
+    if (/\/contexte-du-bien$/.test(d)) return { preparerContexte: async () => ctx, prixDeLaNuit: (c, date) => ({ prix: c.grille.base.niveaux[niveauDe[date] ?? 0].prix, non_calculable: [] }) }
+    if (/\/fermetures$/.test(d)) return { fermeturesDuBien: async () => [], nuitsFermees: () => new Set() }
+    if (/\/prix-hote$/.test(d)) return { prixHoteDuBien: async () => new Map([['2026-10-03', 15000]]) }
+    return avant.apply(this, [d, ...reste])
+  }
+  delete require.cache[require.resolve('../lib/yield/simuler-grille')]
+  delete require.cache[require.resolve('../lib/moteur-prix')]
+  const { simulerGrille } = require('../lib/yield/simuler-grille')
+  Module._load = avant
+  delete require.cache[require.resolve('../lib/yield/simuler-grille')]
+  delete require.cache[require.resolve('../lib/moteur-prix')]
+  const B = { id: BIEN, user_id: COMPTE, pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 6, rate_sync_mode: 'managed' }
+  const r = await simulerGrille({}, B, new Map(), fixes({ Moyen: 130 }), '2026-10-01')
+  assert.deepEqual([r.pilote, r.nuits, r.du, r.au, r.min, r.max], [true, 2, '2026-10-02', '2026-10-06', 130, 130])
+  ctx.ouvertureConnue = false
+  const inc = await simulerGrille({}, B, new Map(), fixes({ Moyen: 130 }), '2026-10-01')
+  assert.deepEqual([inc.ouverture_inconnue, inc.nuits], [true, 0], 'ouverture inconnue : le moteur ne tarifera rien, on n annonce rien')
+})
+
+test('LE TEST QUI COMPTE (review, endpoint) : « au calcul » passe meme sur une grille non calculable ; deux gestes concurrents — le perdant est DEFAIT (409)', async () => {
+  const nonCalc = chargerEndpoint({ sim: () => ({ pilote: true, nuits: 0, du: null, au: null, min: null, max: null, grille: null }), fixesActuels: new Map([['Moyen', { rate_cents: 11000 }]]) })
+  const r = await nonCalc.appeler('POST', { niveau: 'Moyen', retirer: true, confirme: { nuits: 0 } })
+  assert.equal(r.code, 200)
+  assert.deepEqual(nonCalc.gestes.find(x => x[0] === 'au_calcul'), ['au_calcul', 'Moyen'])
+  // Course : apres l'ecriture de Moyen 110, la relecture trouve Haut fixe a 100.
+  let lectures = 0
+  const course = chargerEndpoint({ sim: SIM, lireFixes: async () => (++lectures === 1 ? new Map() : new Map([['Moyen', { rate_cents: 11000 }], ['Haut', { rate_cents: 10000 }]])) })
+  const reel = course.gestes
+  const rep = await course.appeler('POST', { niveau: 'Moyen', prix_centimes: 11000, confirme: { nuits: 12 } })
+  assert.deepEqual([rep.code, rep.corps.code], [409, 'grille_modifiee'])
+  assert.deepEqual(reel.filter(x => x[0] === 'fixer' || x[0] === 'au_calcul').map(x => x.slice(0, 3)), [['fixer', 'Moyen', 11000], ['au_calcul', 'Moyen']], 'ecrit puis DEFAIT (il n y avait rien avant)')
+})
+
+test('ecrivain (review) : une ligne existante d un AUTRE compte n est pas reecrite', async () => {
+  const sb = fausseBase([{ niveau: 'Moyen', rate_cents: 12000, user_id: 'c9c9c9c9-0000-4000-8000-000000000009' }])
+  const r = await G.fixerNiveau(sb, { userId: COMPTE, propertyId: BIEN, niveau: 'Moyen', cents: 11000 })
+  assert.deepEqual([r.ok, r.raison], [false, 'conflit_compte'])
+  assert.equal(sb.journal.some(j => j.op === 'upsert'), false)
 })

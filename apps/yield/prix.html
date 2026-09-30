@@ -1185,7 +1185,7 @@
         ${b.niveaux.map((n, i) => {
           const f = fourchette(b, i)
           return `<div class="yp-niv ${CLASSES[n.nom] || ''} ${i === 1 ? 'socle' : ''}"
-          title="${ech(`${n.nom} — ${n.etire
+          title="${ech(n.fixe_par_hote ? `${n.nom} — fixé par vous à ${n.prix} € ; le calcul donnerait ${n.prix_calcule} €. Les ajustements (jour de semaine, événements, plancher, primes) s’appliquent par-dessus.` : n.ajuste_pour_ordre ? `${n.nom} — calculé à ${n.prix_calcule} €, décalé à ${n.prix} € pour rester dans l’ordre de vos niveaux fixés.` : `${n.nom} — ${n.etire
             ? `mesuré à ${n.prix_mesure} €, étiré à ${n.prix} € pour garder au moins 5 % d’écart avec le niveau précédent (deux niveaux trop proches ne sont pas deux niveaux).`
             : `mesuré à ${n.prix_mesure} €, arrondi à ${n.prix} €.`}${
             n.confondu_avec ? ` Se confond avec ${n.confondu_avec} : au-delà, ce serait un prix jamais obtenu.` : ''}${
@@ -1194,11 +1194,12 @@
           <div class="p">${f ? `${n.prix}–<span class="haut">${euros(b.plafond)}</span>` : euros(n.prix)}</div>
           ${n.fixe_par_hote
             ? `<div class="yp-niv-fixe">fixé · calcul ${euros(n.prix_calcule)} <button type="button" class="yp-niv-x" data-niveau="${ech(n.nom)}" title="Remettre ${ech(n.nom)} au calcul (${euros(n.prix_calcule)})">×</button></div>`
-            : ''}
+            : (n.ajuste_pour_ordre ? `<div class="yp-niv-fixe">ajusté · calcul ${euros(n.prix_calcule)}</div>` : '')}
           <button type="button" class="yp-niv-edit" data-niveau="${ech(n.nom)}" data-prix="${n.prix}" title="Fixer vous-même le montant de ${ech(n.nom)}">✎</button>
         </div>`
         }).join('')}
       </div>
+      ${Array.isArray(b.ordre_rompu) && b.ordre_rompu.length ? `<div class="yp-grille-note avertir">⚠ Vos niveaux fixés ne sont plus dans l’ordre (${ech(b.ordre_rompu.join(', '))}) : corrigez l’un d’eux.</div>` : ''}
       <div class="yp-grille-geste" id="yp-grille-geste" hidden></div>
       ${b.niveaux.some(n => n.etire)
         ? '<div class="yp-grille-note"><sup>*</sup> niveau étiré pour garder 5 % d’écart — il reste dans vos prix pratiqués.</div>'
@@ -1259,6 +1260,8 @@
     const c = d.confirmation || {}
     const effet = !c.pilote
       ? 'Ce logement n’est pas piloté : aucun prix du calendrier ne change, seules les suggestions de cette page suivent la grille.'
+      : c.ouverture_inconnue
+      ? 'L’ouverture de votre calendrier n’est pas lisible aujourd’hui : YieldFlow ne modifiera aucun prix tant qu’elle ne l’est pas.'
       : (c.nuits
         ? `<b>${c.nuits} nuit${c.nuits > 1 ? 's' : ''} ${c.nuits > 1 ? 'vont' : 'va'} changer de prix</b>, du ${ech(dateFr(c.du))} au ${ech(dateFr(c.au))} (${c.min === c.max ? `${c.nuits > 1 ? 'toutes' : ''} à ${euros(c.min)}`.trim() : `de ${euros(c.min)} à ${euros(c.max)}`}). YieldFlow les enverra aux plateformes dans les 5 minutes.`
         : 'Aucune nuit ouverte ne change de prix.')
@@ -1283,6 +1286,12 @@
     // Le compte a change entre l'annonce et le clic : on redemande.
     if (r.status === 409 && d && d.confirmation) { confirmerGeste(geste, { valide: true, confirmation: d.confirmation }); return }
     if (!r.ok) { if (et) et.textContent = d && d.error ? d.error : 'Enregistrement refusé.'; if (b) b.disabled = false; return }
+    // Le repere du moteur n'a pas pu etre efface : on ne promet pas 5 minutes.
+    if (d && d.envoi === 'passage_quotidien') {
+      const z = zoneGeste(); if (z) z.textContent = 'Enregistré. Les nouveaux prix partiront au prochain passage quotidien de YieldFlow, pas dans les 5 minutes.'
+      setTimeout(() => { fermerGeste(); charger() }, 5000)
+      return
+    }
     fermerGeste()
     charger()
   }
