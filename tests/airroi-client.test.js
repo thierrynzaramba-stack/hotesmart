@@ -507,7 +507,7 @@ test('LE TEST QUI COMPTE (SECURITE) : ecrireFixtureSansCle — verifie en memoir
   assert.equal(code(() => ecrireFixtureSansCle('{}', f, `${cle}\n`)), 6, 'une cle avec un blanc final rendrait le controle vide')
   assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${cle}"}`, f, cle)), 4)
   assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${encodeURIComponent(cle)}"}`, f, cle)), 4)
-  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${Buffer.from(cle).toString('base64')}"}`, f, cle)), 4)
+  assert.equal(code(() => ecrireFixtureSansCle(`{"k":"${btoa(cle)}"}`, f, cle)), 4)
   assert.deepEqual(fs.readdirSync(d), [], 'aucun refus n a ecrit')
   assert.equal(code(() => ecrireFixtureSansCle('{"ok":1}', f, cle)), 0)
   assert.equal(fs.readFileSync(f, 'utf8'), '{"ok":1}')
