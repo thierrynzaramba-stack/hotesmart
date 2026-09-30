@@ -27,10 +27,34 @@
 -- de confort : c'est ce qui rend la regle verifiable par
 -- la base.
 --
--- ⚠ LA PRODUCTION NE COLLE PAS CE FICHIER. Elle recoit
--- `2026-09-30-avis-grille-configurable.sql`, qui pose
--- l'etat final d'emblee. Ce correctif n'existe que pour
--- amener staging au meme point.
+-- ⚠ CE FICHIER EST COLLE EN STAGING LE 30 SEPTEMBRE
+-- 2026, ET IL CONTIENT LUI-MEME UN DEFAUT. Il est laisse
+-- TEL QU'IL A ETE APPLIQUE : le corriger apres coup
+-- effacerait la seule trace de l'etat reel de staging, et
+-- le journal ne doit pas mentir.
+--
+-- Le defaut : `else note between 1 and 5` ne vaut pas
+-- FAUX quand la note est nulle — il vaut NULL, et un
+-- CHECK qui vaut NULL est ACCEPTE par Postgres. La
+-- contrainte laissait donc passer exactement ce que
+-- l'en-tete ci-dessus dit avoir ferme. Trouve par
+-- scripts/prouver-grille-avis.js, qui ecrit des grilles
+-- invalides et exige que la base les refuse.
+--
+-- LE CORRECTIF EST DANS UN FICHIER A PART :
+-- `2026-09-30-avis-grille-note-obligatoire.sql`, a coller
+-- APRES celui-ci.
+--
+-- ⚠ LA PRODUCTION NE COLLE PAS CE FICHIER, SAUF SI ELLE A
+-- DEJA RECU UNE VERSION ANTERIEURE DES DEUX TABLES.
+-- `2026-09-30-avis-grille-configurable.sql` pose l'etat
+-- final d'emblee SUR UNE BASE VIERGE seulement : ses
+-- `create table if not exists` ne rattrapent ni la
+-- colonne `categorie`, ni la cle composite, ni la
+-- suppression de l'ancien `avis_niveaux_note_check`. Sur
+-- une base qui a deja recu la premiere version, il faut
+-- ce fichier PUIS le correctif. Le verificateur tranche :
+-- node scripts/verifier-avis-evaluation.js
 --
 -- Les deux tables sont VIDES (aucune grille n'est
 -- pre-inseree) : `add column ... not null` passe sans
@@ -76,9 +100,8 @@ begin
       check (
         case when categorie = 'recommandation'
           then note is null and recommande is not null
-          else note is not null
-            and note between 1 and 5
-            and recommande is null
+          -- ⚠ CETTE LIGNE EST FAUSSE, ET ELLE RESTE. Voir l'en-tete.
+          else note between 1 and 5 and recommande is null
         end
       );
   end if;

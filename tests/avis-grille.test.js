@@ -176,3 +176,99 @@ test('un critere note SANS note est refuse', () => {
   ] }] }
   assert.throws(() => validerGrille(sansNote), /note invalide/)
 })
+
+// ⚠ Symetrique du trou de la note : un niveau de recommandation sans booleen.
+// Constat de review. Une grille FIGEE d'avant les contraintes peut en porter.
+test('LE TEST QUI COMPTE : un « Non » sans drapeau ne devient pas un « Oui » chez Airbnb', () => {
+  const vieille = { criteres: [
+    { cle: 'etat', categorie: 'cleanliness', rang: 1, niveaux: [{ cle: 'ok', libelle: 'OK', rang: 1, note: 5, negatif: false }] },
+    { cle: 'reco', categorie: 'recommandation', rang: 2, niveaux: [
+      { cle: 'non', libelle: 'Non', rang: 1, note: null, negatif: false },
+    ] },
+  ] }
+  assert.throws(() => noter({ etat: 'ok', reco: 'non' }, vieille), /ne dit pas s il recommande/)
+})
+
+test('et le garde-fou du negatif s’allume AVANT le calcul, pour que l’hote tranche', () => {
+  const vieille = { criteres: [
+    { cle: 'reco', categorie: 'recommandation', rang: 1, niveaux: [
+      { cle: 'non', libelle: 'Non', rang: 1, note: null, negatif: false },
+    ] },
+  ] }
+  assert.strictEqual(estNegatif({ reco: 'non' }, vieille), true)
+})
+
+// ─── Les tags suivent le SENS, pas seulement la cle ─────────────────────────
+test('LE TEST QUI COMPTE : une cle du defaut retournee par l’hote n’emet plus son tag', () => {
+  // L'hote garde la cle « impeccable » mais en fait son pire niveau. Le tag
+  // « propre et bien range » partait quand meme. Constat de review.
+  const critDefaut = GRILLE_DEFAUT.criteres.find(c => TAGS_PAR_REPONSE_A_DES_TAGS(c))
+  const retournee = { criteres: [{
+    cle: critDefaut.cle, categorie: critDefaut.categorie, rang: 1,
+    niveaux: [{ ...critDefaut.niveaux.find(n => n.note === 5), note: 1, negatif: true }],
+  }] }
+  const niveau = retournee.criteres[0].niveaux[0].cle
+  assert.deepStrictEqual(tagsDe({ [critDefaut.cle]: niveau }, retournee), [])
+})
+
+test('le meme critere, inchange, garde bien ses tags', () => {
+  const critDefaut = GRILLE_DEFAUT.criteres.find(c => TAGS_PAR_REPONSE_A_DES_TAGS(c))
+  const copie = { criteres: [{ ...critDefaut }] }
+  const meilleur = [...critDefaut.niveaux].sort((a, b) => b.note - a.note)[0]
+  assert.ok(tagsDe({ [critDefaut.cle]: meilleur.cle }, copie).length > 0)
+})
+
+// Un critere du defaut qui porte au moins un tag positif sur son meilleur niveau.
+function TAGS_PAR_REPONSE_A_DES_TAGS (c) {
+  if (c.categorie === 'recommandation') return false
+  const meilleur = [...c.niveaux].sort((a, b) => b.note - a.note)[0]
+  return tagsDe({ [c.cle]: meilleur.cle }, { criteres: [c] }).length > 0
+}
+
+test('LE TEST QUI COMPTE : un compte qui eteint TOUS ses criteres ne recupere pas la grille par defaut', () => {
+  // Il a decide quelque chose, et ce n'est pas « remettez les votres ».
+  const eteints = [{ cle: 'x', categorie: 'cleanliness', rang: 1, actif: false, niveaux: [] }]
+  const g = grilleDe({ duBien: [], duCompte: eteints })
+  assert.strictEqual(g.defaut, false)
+  assert.deepStrictEqual(g.criteres, [])
+  assert.throws(() => validerGrille(g), /sans critere/)
+})
+
+test('un compte qui n’a JAMAIS rien cree garde bien la grille par defaut', () => {
+  assert.strictEqual(grilleDe({ duBien: [], duCompte: [] }).defaut, true)
+  assert.strictEqual(grilleDe({}).defaut, true)
+})
+
+test('un BIEN entierement eteint retombe sur la grille du compte', () => {
+  // Desactiver tous les criteres d'un bien, c'est ne rien surcharger.
+  const duCompte = [{ cle: 'c', categorie: 'cleanliness', rang: 1,
+    niveaux: [{ cle: 'a', libelle: 'A', rang: 1, note: 5, negatif: false }] }]
+  const g = grilleDe({ duBien: [{ cle: 'b', categorie: 'cleanliness', rang: 1, actif: false, niveaux: [] }], duCompte })
+  assert.deepStrictEqual(g.criteres.map(c => c.cle), ['c'])
+})
+
+// ─── Les correctifs que rien ne testait ─────────────────────────────────────
+// Constat de review : six correctifs du commit precedent n'avaient aucun test.
+test('la grille par defaut est gelee EN PROFONDEUR', () => {
+  // Un gel de surface laissait modifier une note a travers un niveau. En
+  // CommonJS non strict, la mutation echoue EN SILENCE : la seule facon de le
+  // voir est de relire.
+  const avant = JSON.stringify(GRILLE_DEFAUT)
+  try { GRILLE_DEFAUT.criteres[0].niveaux[0].note = 1 } catch { /* strict */ }
+  try { GRILLE_DEFAUT.criteres.push({ cle: 'intrus' }) } catch { /* strict */ }
+  assert.strictEqual(JSON.stringify(GRILLE_DEFAUT), avant)
+})
+
+test('« recommande » hors de la categorie recommandation est refuse', () => {
+  const g = { criteres: [{ cle: 'x', categorie: 'cleanliness', rang: 1, niveaux: [
+    { cle: 'a', libelle: 'A', rang: 1, note: 5, recommande: true, negatif: false },
+  ] }] }
+  assert.throws(() => validerGrille(g), /n appartient qu a la categorie recommandation/)
+})
+
+test('noter refuse une note inutilisable, parce que c’est elle qui atteint l’OTA', () => {
+  const g = { criteres: [{ cle: 'x', categorie: 'cleanliness', rang: 1, niveaux: [
+    { cle: 'a', libelle: 'A', rang: 1, note: null, negatif: false },
+  ] }] }
+  assert.throws(() => noter({ x: 'a' }, g), /n a pas de note utilisable/)
+})

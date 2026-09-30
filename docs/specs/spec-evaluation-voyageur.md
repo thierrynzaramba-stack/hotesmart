@@ -298,6 +298,17 @@ Principes :
   grille modifiée après le remplissage ne change ni les notes ni les libellés d'une
   évaluation déjà remplie (`grille_figee`). Un critère `recommandation` ne produit pas
   de note dans `scores[]`.
+- **La preuve que §7 bis dit vrai** : `scripts/prouver-grille-avis.js` écrit sept
+  grilles invalides sur staging et exige que la base les refuse, avec le bon code
+  d'erreur — une insertion recalée parce qu'une colonne manque ne prouve rien sur la
+  contrainte visée. Il vérifie aussi qu'un niveau valide passe : une base qui refuse
+  tout protégerait autant qu'un mur, et servirait à rien.
+  Ce script a trouvé le 30 septembre 2026 qu'un critère noté pouvait n'avoir **aucune
+  note** : `note between 1 and 5` ne vaut pas faux sur une note nulle, il vaut NULL,
+  et un CHECK qui vaut NULL est accepté par Postgres. Le module JavaScript, lui,
+  refusait déjà ce cas — la base était la plus permissive des deux, l'inverse exact de
+  ce que §7 bis promet. Toute contrainte écrite ici s'écrit donc avec son `is not
+  null` explicite.
 - Double clic / double appel publier → une seule publication.
 - Échec réseau après envoi → pas de rejeu, alarme, vérification chez le provider.
 - Prestataire sur un bien hors périmètre ou d'un autre compte → refus.

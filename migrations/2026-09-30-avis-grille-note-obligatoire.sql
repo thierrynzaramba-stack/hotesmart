@@ -1,6 +1,8 @@
 -- migrations/2026-09-30-avis-grille-note-obligatoire.sql
 --
--- CORRECTIF : une categorie notee pouvait n'avoir AUCUNE note.
+-- DEUX CORRECTIFS, TROUVES PAR LA MEME REVUE :
+--   1. une categorie notee pouvait n'avoir AUCUNE note ;
+--   2. `avis_criteres.updated_at` n'avait pas de declencheur.
 --
 -- La contrainte avis_niveaux_forme_par_categorie disait, pour toute
 -- categorie autre que « recommandation » :
@@ -44,3 +46,21 @@ comment on column public.avis_criteres_niveaux.note is
   'avis_niveaux_forme_par_categorie qui le tient, et elle '
   'exige `note is not null` explicitement — « between » '
   'seul vaut NULL sur une note nulle, donc passe.';
+
+-- ─── Le declencheur qui tient `updated_at` ──────────────
+--
+-- ⚠ `updated_at` SE MAINTIENT, SINON IL MENT. Regle posee
+-- par la migration du 25 septembre 2026, qui cree le meme
+-- declencheur sur guest_evaluations et avis_config. La
+-- table des criteres portait la colonne SANS le
+-- declencheur : une grille modifiee trois fois aurait
+-- annonce n'avoir jamais change. Constat de review.
+--
+-- Et personne ne l'aurait vu : le verificateur annonce
+-- lui-meme qu'il ne voit pas les declencheurs, PostgREST
+-- n'exposant pas pg_catalog.
+drop trigger if exists avis_criteres_touch_trg
+  on public.avis_criteres;
+create trigger avis_criteres_touch_trg
+  before update on public.avis_criteres
+  for each row execute function public.set_updated_at();

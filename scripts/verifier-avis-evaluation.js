@@ -131,9 +131,22 @@ async function colonnes (nom, liste) {
     const { count: hors, error: eH } = await sb.from('profiles')
       .select('*', { count: 'exact', head: true })
       .or('eval_scope.not.in.(aucun,selon_grille,proprete,complet),eval_power.not.in.(soumettre,valider)')
-    if (eT || eH) ko(`profiles : comptage impossible — ${(eT || eH).message}`)
+
+    // ⚠ ACCEPTER LES QUATRE VALEURS COUTAIT LE SEUL CONTROLE DE LA CONVERSION.
+    // Constat de review : plus rien ne distinguait une base ou la migration du
+    // 30 septembre a tourne d'une base ou elle n'a pas tourne. `proprete` et
+    // `complet` sont des valeurs RETIREES (spec §4.6) : la base les tolere
+    // encore, le temps de la bascule, mais un profil qui en porte une n'est
+    // PAS converti — et il ouvrirait a la prestataire un perimetre qui ne veut
+    // plus rien dire. On les compte a part.
+    const { count: anciennes, error: eA } = await sb.from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .in('eval_scope', ['proprete', 'complet'])
+
+    if (eT || eH || eA) ko(`profiles : comptage impossible — ${(eT || eH || eA).message}`)
     else if (hors) ko(`profiles : ${hors} profil(s) sur ${total} hors valeurs autorisees`)
-    else ok(`profiles : ${total} profil(s) au total, tous conformes`)
+    else if (anciennes) ko(`profiles : ${anciennes} profil(s) sur ${total} portent encore \`proprete\` ou \`complet\` — la conversion du 30 septembre n a pas tourne sur cette base`)
+    else ok(`profiles : ${total} profil(s) au total, tous conformes et convertis`)
   }
 
   console.log('\nGrille configurable (30 septembre 2026)')
@@ -220,14 +233,36 @@ async function colonnes (nom, liste) {
     },
     avis_config: { user_id: '00000000-0000-0000-0000-000000000000' },
     core_events: { user_id: '00000000-0000-0000-0000-000000000000', type: 'garde.test' },
+    // ⚠ LES DEUX TABLES DE LA GRILLE ETAIENT ABSENTES DE CE DICTIONNAIRE.
+    // Constat de review. La migration fait pourtant de la RLS son argument de
+    // surete (« tant que l'action d'ecriture n'existe pas, ces tables sont
+    // inecrivables par tout chemin »), et la policy des NIVEAUX est la plus
+    // delicate du chantier : les niveaux n'ont pas de `user_id`, leur lecture
+    // passe par un `exists` imbrique sur le critere. Un `using (true)` oublie
+    // ouvrirait la grille de tous les comptes, et rien ne l'aurait dit.
+    avis_criteres: {
+      user_id: '00000000-0000-0000-0000-000000000000',
+      libelle: 'garde-test', categorie: 'cleanliness', rempli_par: 'hote', rang: 1,
+    },
+    avis_criteres_niveaux: {
+      critere_id: '00000000-0000-0000-0000-000000000000',
+      categorie: 'cleanliness', cle: 'garde-test', libelle: 'garde-test',
+      rang: 1, note: 5, negatif: false,
+    },
   }
-  const REFUS = new Set(['42501', 'PGRST301', 'PGRST204'])
+  // ⚠ `PGRST204` N'EST PAS UN REFUS DE DROIT. C'est « colonne absente du cache
+  // de schema » : un refus de FORME. Range ici, il faisait passer une faute de
+  // frappe dans ce dictionnaire pour une garde fermee, alors que le REVOKE
+  // pouvait avoir saute. Constat de review : il sort de l'ensemble et devient
+  // un echec nomme, comme PGRST205.
+  const REFUS = new Set(['42501', 'PGRST301'])
   async function garde (client, role) {
     for (const [nom, ligne] of Object.entries(LIGNES)) {
       const { error } = await client.from(nom).insert(ligne)
       if (!error) { ko(`\`${nom}\` (${role}) : UNE ECRITURE A ETE ACCEPTEE — la garde est ouverte`); continue }
       const code = String(error.code || '')
       if (code === 'PGRST205') { ko(`\`${nom}\` (${role}) : garde NON TESTEE — la table est absente`); continue }
+      if (code === 'PGRST204') { ko(`\`${nom}\` (${role}) : garde NON TESTEE — colonne absente du cache de schema, la ligne de test est fausse : ${error.message.slice(0, 60)}`); continue }
       if (REFUS.has(code)) { ok(`\`${nom}\` (${role}) : refus de droit (${code})`); continue }
       // Une contrainte violee ne prouve rien sur la garde : on le dit.
       ko(`\`${nom}\` (${role}) : refus AMBIGU (${code}) — ce n est pas un refus de droit : ${error.message.slice(0, 60)}`)

@@ -242,6 +242,24 @@ comment on column public.profiles.eval_scope is
 -- du perimetre, aucune ecriture cliente. La grille se
 -- modifie par api/avis.js, qui verifie le droit `avis` en
 -- ecriture.
+-- ─── Le declencheur qui tient `updated_at` ──────────────
+--
+-- ⚠ `updated_at` SE MAINTIENT, SINON IL MENT. Regle posee
+-- par la migration du 25 septembre 2026, qui cree le meme
+-- declencheur sur guest_evaluations et avis_config. La
+-- table des criteres portait la colonne SANS le
+-- declencheur : une grille modifiee trois fois aurait
+-- annonce n'avoir jamais change. Constat de review.
+--
+-- Et personne ne l'aurait vu : le verificateur annonce
+-- lui-meme qu'il ne voit pas les declencheurs, PostgREST
+-- n'exposant pas pg_catalog.
+drop trigger if exists avis_criteres_touch_trg
+  on public.avis_criteres;
+create trigger avis_criteres_touch_trg
+  before update on public.avis_criteres
+  for each row execute function public.set_updated_at();
+
 alter table public.avis_criteres
   enable row level security;
 drop policy if exists avis_criteres_select

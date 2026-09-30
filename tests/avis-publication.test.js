@@ -217,3 +217,68 @@ test('sans grille figee, la grille par defaut s’applique — les evaluations d
   assert.strictEqual(r.statut, 'publiee')
   assert.strictEqual(p.appels.find(a => a.type === 'post').charge.review.scores.length, 3)
 })
+
+// ─── Les deux colonnes de reponses ──────────────────────────────────────────
+test('LE TEST QUI COMPTE : les reponses des DEUX roles sont publiees ensemble', async () => {
+  // Le circuit nominal : la prestataire coche sa part, l'hote la sienne, et
+  // chaque role va dans SA colonne. Un « ou » entre les deux ne gardait que
+  // celle de l'hote et refusait une evaluation pourtant complete, en accusant
+  // la grille figee. Constat de review.
+  const p = provider()
+  const r = await publier({ evaluation: evaluation({
+    answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' },
+    answers_host: { communication: 'excellente', regles: 'oui', recommande: 'oui' },
+  }), provider: p })
+  assert.strictEqual(r.statut, 'publiee')
+  const envoye = p.appels.find(a => a.type === 'post').charge.review
+  assert.ok(envoye.scores.some(s => s.category === 'cleanliness'), 'la part de la prestataire doit partir')
+  assert.ok(envoye.scores.some(s => s.category === 'communication'), 'la part de l hote aussi')
+})
+
+test('l’hote l’emporte sur la prestataire quand les deux ont repondu a la meme question', async () => {
+  const p = provider()
+  await publier({ evaluation: evaluation({
+    answers_cleaner: { ...REPONSES, etat: 'sale' },
+    answers_host: { etat: 'impeccable' },
+  }), provider: p })
+  const scores = p.appels.find(a => a.type === 'post').charge.review.scores
+  assert.strictEqual(scores.find(s => s.category === 'cleanliness').rating, 5)
+})
+
+test('deux colonnes vides restent un refus « sans reponses »', async () => {
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ answers_host: null, answers_cleaner: null }), provider: provider() }),
+    (e) => e instanceof RefusPublication && e.motif === 'sans_reponses')
+})
+
+// ─── Une grille figee presente mais inexploitable ───────────────────────────
+test('LE TEST QUI COMPTE : une grille figee vide est un REFUS, pas un repli sur le defaut', async () => {
+  // Le piege : un hote qui part de la grille par defaut et n'en change que les
+  // notes garde les MEMES CLES. Rien ne leverait, et ses notes seraient
+  // silencieusement remplacees par les notres.
+  const p = provider()
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ grille_figee: { criteres: [] } }), provider: p }),
+    (e) => e instanceof RefusPublication && e.motif === 'grille_figee_illisible')
+  assert.strictEqual(p.appels.length, 0, 'rien ne part chez l OTA')
+})
+
+test('une grille figee rendue comme une chaine est refusee de la meme facon', async () => {
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ grille_figee: '{"criteres":[]}' }), provider: provider() }),
+    (e) => e instanceof RefusPublication && e.motif === 'grille_figee_illisible')
+})
+
+test('une grille figee ABSENTE reste le cas normal : la grille par defaut s’applique', async () => {
+  const r = await publier({ evaluation: evaluation({ grille_figee: null }), provider: provider() })
+  assert.strictEqual(r.statut, 'publiee')
+})
+
+// ⚠ `grille_sans_jugement` (publication.js) N'EST PLUS ATTEIGNABLE, et c'est
+// dit ici plutot que couvert par un test decoratif. Toute categorie de
+// CATEGORIES est soit notee, soit `recommandation` : une grille non vide
+// produit donc toujours un score ou une recommandation, et une grille vide est
+// desormais arretee plus tot par `grille_figee_illisible`. Ce refus reste comme
+// ceinture pour le jour ou CATEGORIES accueillera une categorie sans jugement.
+// Ecrire un test qui le force aujourd'hui demanderait de falsifier la grille au
+// point de ne plus rien prouver.
