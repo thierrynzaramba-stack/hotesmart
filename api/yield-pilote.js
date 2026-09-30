@@ -7,6 +7,8 @@
 // GET  ?bien=<uuid>&fenetre_type=&fenetre_valeur=  -> + prix_calendrier (confirmation)
 // POST { bien, pilote: 'calendrier' | 'yieldflow', fenetre?: { type, valeur } }
 // POST { bien, fenetre: { type, valeur } }   (changer la fenetre, bien pilote)
+//      + retrait_confirme: <nombre>  quand des nuits ouvertes sortent de la
+//        fenetre (lot 4.6.6) — le nombre annonce par le GET, sinon 409.
 //
 // ⚠ L'ACTIVATION (lot 4.6.3) = passer en yieldflow AVEC une fenetre. Sans
 // fenetre, le mode n'ouvre rien (4.6.0 : un bien yieldflow sans fenetre n'a
@@ -46,6 +48,22 @@ const {
 const { effacerMarqueur, lireMarqueur, jourParis } = require('../lib/ouverture-marqueur')
 const { recalerPrixHote, compterPrixHote } = require('../lib/prix-hote')
 const { prixCalendrierARemplacer } = require('../lib/nuits-du-moteur')
+const { nuitsQuiSortent } = require('../lib/retrait-fenetre')
+const { retirerDeLaVente } = require('../lib/calendrier-writer')
+const { channelCall } = require('../lib/channel-fullsync')
+
+// Ce que la confirmation annonce d'un retrait (lot 4.6.6). `null` = illisible :
+// l'ecran le dit, il n'annonce jamais « 0 nuit ».
+async function annonceRetrait (bien, fenetre, aujourdHui) {
+  try {
+    const q = await nuitsQuiSortent(supabase, bien, fenetre, aujourdHui)
+    return { nuits: q.dates.length, du: q.dates[0] || null, au: q.dates[q.dates.length - 1] || null,
+      vendues: q.vendues, reduction: q.reduction, fin: q.nouvelleFin, dates: q.dates }
+  } catch (e) {
+    console.error('[yield-pilote] retrait illisible', bien.id, e.message)
+    return null
+  }
+}
 
 // DEUX ORIGINES, DEUX TRAITEMENTS (changement de dessin du 23 septembre 2026,
 // decisions A1 / B1 de Thierry). Les prix du CALENDRIER sont remplaces par les
@@ -118,10 +136,16 @@ module.exports = async (req, res) => {
     // fenetre saisie dans la confirmation (`fenetre_type`, `fenetre_valeur`) :
     // la lecture d'etat ordinaire n'a pas a relire deux ans de calendrier.
     let prixCalendrier
+    let retrait
     if (req.query.fenetre_type != null || req.query.fenetre_valeur != null) {
       const v = validerFenetre({ type: req.query.fenetre_type, valeur: req.query.fenetre_valeur })
       if (!v.ok) return res.status(400).json({ error: v.error, code: v.code })
       prixCalendrier = await prixCalendrierARemplacer(supabase, bien, v.fenetre, aujourdHui)
+      // Les nuits ouvertes qui sortiraient de cette fenetre (bien deja pilote).
+      if (piloteDuBien(bien) === 'yieldflow') {
+        const a = await annonceRetrait(bien, v.fenetre, aujourdHui)
+        retrait = a ? { nuits: a.nuits, du: a.du, au: a.au, vendues: a.vendues, reduction: a.reduction, fin: a.fin } : null
+      }
     }
     return res.status(200).json({
       bien: bien.id,
@@ -132,7 +156,8 @@ module.exports = async (req, res) => {
       fenetre: fenetreDuBien(bien),
       ouverture: { derniere: marqueur ? marqueur.derniere : null, bilan: marqueur ? marqueur.bilan : null },
       prix_hote: { nuits: nuitsPrixHote },
-      ...(prixCalendrier !== undefined ? { prix_calendrier: prixCalendrier } : {})
+      ...(prixCalendrier !== undefined ? { prix_calendrier: prixCalendrier } : {}),
+      ...(retrait !== undefined ? { retrait } : {})
     })
   }
 
@@ -168,9 +193,29 @@ module.exports = async (req, res) => {
     }
   }
 
+  // ⚠ LES NUITS QUI SORTENT DE LA FENETRE (lot 4.6.6). Bien deja pilote, fenetre
+  // envoyee : toute nuit OUVERTE au-dela de la nouvelle fin sort de la vente
+  // (lib/retrait-fenetre.js) — y compris a fenetre inchangee, pour ranger un
+  // reliquat. L'hote l'a vu annonce : le nombre confirme doit etre CELUI
+  // d'aujourd'hui, sinon on redemande (une nuit vendue ou ouverte entre-temps
+  // changerait ce qu'il a accepte).
+  let retrait = null
+  if (voulu === 'yieldflow' && actuel === 'yieldflow' && fenetre) {
+    const { data: complet, error: eC } = await supabase.from('properties').select('*')
+      .eq('id', bien.id).eq('user_id', compte).maybeSingle()
+    if (eC || !complet) return res.status(503).json({ error: 'Réglage illisible pour le moment. Réessayez.' })
+    retrait = await annonceRetrait(complet, fenetre, jourParis(new Date()))
+    if (!retrait) return res.status(503).json({ error: 'Les nuits en vente au-delà de la fenêtre n’ont pas pu être lues : rien n’a changé. Réessayez.', code: 'retrait_illisible' })
+    retrait.bien = complet
+    if (retrait.nuits > 0 && Number(body.retrait_confirme) !== retrait.nuits) {
+      return res.status(409).json({ error: 'Des nuits en vente sortent de la fenêtre : confirmez leur retrait.', code: 'retrait_a_confirmer',
+        retrait: { nuits: retrait.nuits, du: retrait.du, au: retrait.au, vendues: retrait.vendues, fin: retrait.fin } })
+    }
+  }
+
   // Rien a faire n'est pas une erreur : l'ecran peut renvoyer l'etat courant.
   const memeFenetre = !fenetre || (fenetreDuBien(bien) && fenetreDuBien(bien).type === fenetre.type && fenetreDuBien(bien).valeur === fenetre.valeur)
-  if (voulu === actuel && memeFenetre) {
+  if (voulu === actuel && memeFenetre && !(retrait && retrait.nuits > 0)) {
     return res.status(200).json({ bien: bien.id, pilote: actuel, fenetre: fenetreDuBien(bien), change: false })
   }
 
@@ -234,6 +279,23 @@ module.exports = async (req, res) => {
     return res.status(503).json({ error: 'Enregistrement impossible pour le moment. Réessayez.' })
   }
 
+  // ⚠ LE RETRAIT, APRES LA FENETRE (lot 4.6.6). La fenetre est deja reduite :
+  // le pilote ne rouvrira pas ces nuits entre les deux gestes. Si le retrait
+  // echoue, la fenetre d'avant est RETABLIE — tout ou rien, comme le retrait.
+  let retirees = null
+  if (retrait && retrait.nuits > 0) {
+    const r = await retirerDeLaVente({ supabase, bien: { ...retrait.bien, ...maj }, compte, dates: retrait.dates, appel: channelCall })
+    if (!r.ok) {
+      const ancienne = fenetreDuBien(bien)
+      const { error: eR } = await supabase.from('properties')
+        .update({ pilote_fenetre_type: ancienne ? ancienne.type : null, pilote_fenetre_valeur: ancienne ? ancienne.valeur : null })
+        .eq('id', bien.id).eq('user_id', compte)
+      if (eR) console.error('[yield-pilote] fenetre non retablie apres echec du retrait', bien.id, eR.message)
+      return res.status(502).json({ error: r.message, code: `retrait_${r.raison}`, fenetre_retablie: !eR })
+    }
+    retirees = r.retirees
+  }
+
   // ⚠ BASCULER NE CHANGE AUCUN PRIX (§2 bis). Les lignes `calendar_inventory`
   // en place restent, le journal continue. C'est un changement d'ECRIVAIN, pas
   // de tarif — et rien n'est pousse ici.
@@ -247,6 +309,7 @@ module.exports = async (req, res) => {
   }
   console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}${fenetre ? ` (fenetre ${fenetre.valeur} ${fenetre.type})` : ''}${prixHote ? ` — prix de l hote : ${prixHote.nuits} nuit(s), ${prixHote.recalees} recalee(s)` : ''}`)
   return res.status(200).json({ bien: bien.id, pilote: voulu, fenetre: voulu === 'yieldflow' ? (fenetre || fenetreDuBien(bien)) : null, change: true,
+    ...(retirees != null ? { retirees } : {}),
     ouverture: voulu === 'yieldflow' ? 'Les dates s\'ouvriront automatiquement dans les 5 minutes, puis chaque jour.' : null,
     prix_hote: prixHote })
 }

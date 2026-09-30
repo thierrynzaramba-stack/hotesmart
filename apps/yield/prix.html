@@ -696,20 +696,59 @@
     const btn = el('yp-fen-enregistrer'); if (!btn) return
     btn.addEventListener('click', () => enregistrerFenetre())
   }
+  // ⚠ LES NUITS QUI SORTENT DE LA FENETRE (lot 4.6.6, decision de Thierry du
+  // 30 septembre 2026). Reduire la fenetre laissait en vente, a un prix fige,
+  // les nuits deja ouvertes au-dela. On LIT d'abord ce qui sortirait (le
+  // serveur applique la regle, lib/retrait-fenetre.js) ; s'il y en a, on le
+  // DIT et on demande confirmation ; le serveur exige le meme nombre.
+  // « 1er mars », pas « 1 mars ».
+  const jourFrLong = iso => { const d = new Date(`${iso}T00:00:00Z`); return isNaN(d) ? '' : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).replace(/^1 /, '1er ') }
   async function enregistrerFenetre () {
     const bien = el('yp-bien').value
     const type = el('yp-fen-type').value, valeur = el('yp-fen-valeur').value
     const etat = el('yp-fen-etat'); const btn = el('yp-fen-enregistrer')
-    btn.disabled = true; etat.textContent = 'Enregistrement…'
+    btn.disabled = true; etat.textContent = 'Lecture des nuits en vente au-delà de la fenêtre…'
+    let d
+    try {
+      const r = await fetch(`/api/yield-pilote?bien=${encodeURIComponent(bien)}&fenetre_type=${encodeURIComponent(type)}&fenetre_valeur=${encodeURIComponent(valeur)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
+      d = await r.json()
+      if (!r.ok) { etat.textContent = d && d.error ? d.error : 'Réglage refusé.'; btn.disabled = false; return }
+    } catch (e) { etat.textContent = 'Erreur réseau : réessayez.'; btn.disabled = false; return }
+    // Illisible : on ne dit jamais « rien a retirer » par defaut.
+    if (d.retrait === null) { etat.textContent = 'Les nuits en vente au-delà de la fenêtre n’ont pas pu être lues : rien n’a changé. Réessayez.'; btn.disabled = false; return }
+    if (d.retrait && d.retrait.nuits > 0) { confirmerRetrait({ type, valeur }, d.retrait); btn.disabled = false; return }
+    await poserFenetre({ type, valeur }, null)
+  }
+  function confirmerRetrait (fenetre, rt) {
+    const zone = el('yp-fen-etat')
+    const pl = rt.nuits > 1
+    zone.innerHTML = `<span class="avertir" id="yp-retrait"><b>${rt.nuits} nuit${pl ? 's' : ''} en vente sorte${pl ? 'nt' : ''} de la fenêtre</b>, `
+      + `du ${ech(jourFrLong(rt.du))} au ${ech(jourFrLong(rt.au))}. `
+      + `${pl ? 'Elles seront retirées' : 'Elle sera retirée'} de la vente jusqu’à ce que la fenêtre ${pl ? 'les' : 'la'} rattrape ; YieldFlow ${pl ? 'les' : 'la'} rouvrira alors avec ${pl ? 'leur' : 'son'} prix (un prix que vous avez fixé est conservé).`
+      + (rt.vendues ? ` ${rt.vendues} nuit${rt.vendues > 1 ? 's' : ''} déjà vendue${rt.vendues > 1 ? 's' : ''} au-delà ${rt.vendues > 1 ? 'restent' : 'reste'} en place.` : '')
+      + '</span> <button type="button" id="yp-retrait-valider">Retirer et enregistrer</button>'
+      + ' <button type="button" class="secondaire" id="yp-retrait-annuler">Annuler</button>'
+    el('yp-retrait-annuler').addEventListener('click', () => chargerPilote())
+    el('yp-retrait-valider').addEventListener('click', () => poserFenetre(fenetre, rt.nuits))
+  }
+  async function poserFenetre (fenetre, retraitConfirme) {
+    const bien = el('yp-bien').value
+    const etat = el('yp-fen-etat'); const btn = el('yp-fen-enregistrer')
+    const v = el('yp-retrait-valider'); if (v) v.disabled = true
+    btn.disabled = true
+    etat.textContent = retraitConfirme ? `Retrait de ${retraitConfirme} nuit${retraitConfirme > 1 ? 's' : ''} de la vente…` : 'Enregistrement…'
     try {
       const r = await fetch('/api/yield-pilote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, ...enteteCompte() },
-        body: JSON.stringify({ bien, fenetre: { type, valeur } })
+        body: JSON.stringify({ bien, fenetre, ...(retraitConfirme ? { retrait_confirme: retraitConfirme } : {}) })
       })
       const d = await r.json()
+      // Le compte a change entre l'annonce et le clic : on redemande.
+      if (r.status === 409 && d && d.code === 'retrait_a_confirmer' && d.retrait) { confirmerRetrait(fenetre, d.retrait); btn.disabled = false; return }
       // ⚠ LE REFUS DU SERVEUR S'AFFICHE TEL QUEL : la regle et son francais vivent
-      // dans lib/pilote-tarifaire.js (validerFenetre), pas ici.
+      // dans lib/pilote-tarifaire.js (validerFenetre) et lib/calendrier-writer.js.
       if (!r.ok) { etat.textContent = d && d.error ? d.error : 'Réglage refusé.'; btn.disabled = false; return }
     } catch (e) { etat.textContent = 'Erreur réseau : réessayez.'; btn.disabled = false; return }
     await chargerPilote()
