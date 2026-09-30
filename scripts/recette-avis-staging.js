@@ -107,6 +107,21 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
     const { error } = await sb.from('profiles').update(maj).eq('id', profil.id)
     if (error) { ko(`bascule impossible : ${error.message}`); process.exit(1) }
 
+    // ⚠ LA RECETTE DOIT POUVOIR REMPLIR, DONC ECRIRE. Le compte de test est cree
+    // avec `avis: read` — ce que la preuve de perimetre exige (elle mesure ce
+    // qu'un membre LIT). Mais remplir une evaluation demande `write` : sans lui,
+    // la recette s'arreterait sur un 403 qui n'apprendrait rien.
+    //
+    // ⚠ ET LE PERIMETRE RESTE RESTREINT AU BIEN A. C'est tout l'interet : la
+    // recette doit pouvoir constater que le bien B lui echappe.
+    const { error: eDroits } = await sb.from('profile_permissions')
+      .update({ avis: 'write' }).eq('profile_id', profil.id)
+    if (eDroits) { ko(`droits d ecriture impossibles : ${eDroits.message}`); process.exit(1) }
+    const { data: droits } = await sb.from('profile_permissions')
+      .select('avis, property_scope, property_ids').eq('profile_id', profil.id).maybeSingle()
+    if (!droits || droits.avis !== 'write') { ko('les droits d ecriture ne sont pas poses'); process.exit(1) }
+    ok(`droits : avis=${droits.avis}, perimetre ${droits.property_scope} (${(droits.property_ids || []).length} bien)`)
+
     const { data: relu } = await sb.from('profiles')
       .select('access_mode, eval_power, eval_scope').eq('id', profil.id).maybeSingle()
     if (!relu || relu.access_mode !== maj.access_mode) { ko('la bascule n a pas pris'); process.exit(1) }
@@ -160,13 +175,19 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
   console.log(`Bien B (hors perimetre)      : « ${bienB.name} »`)
 
   const { data: profilTest } = MEMBRE_EMAIL
-    ? await sb.from('profiles').select('access_mode, active, eval_power, eval_scope, first_name')
+    ? await sb.from('profiles').select('id, access_mode, active, eval_power, eval_scope, first_name')
         .eq('account_user_id', compte).eq('email', MEMBRE_EMAIL).maybeSingle()
     : { data: null }
   console.log(`Compte de test   : ${MEMBRE_EMAIL || '(MEMBRE_TEST_EMAIL absent)'}`)
   console.log(`  rôle actuel    : ${profilTest ? (profilTest.access_mode === 'lien' ? 'prestataire (acces lien)' : 'membre du compte') : 'aucun profil'}`)
   if (profilTest && profilTest.access_mode === 'lien') {
     console.log(`  pouvoir        : ${profilTest.eval_power} · perimetre de questions : ${profilTest.eval_scope}`)
+  }
+  if (profilTest) {
+    const { data: d } = await sb.from('profile_permissions')
+      .select('avis, property_scope, property_ids')
+      .eq('account_user_id', compte).eq('profile_id', profilTest.id).maybeSingle()
+    if (d) console.log(`  droits         : avis=${d.avis} · perimetre ${d.property_scope} (${(d.property_ids || []).length} bien)`)
   }
 
   const { data: evals } = await sb.from('guest_evaluations')
