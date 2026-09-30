@@ -19,12 +19,60 @@ const supabase = createClient(
 // Writer unique de bookings_snapshot (audit E3/E4/E5) : schema commun aux deux
 // providers, statut canonique, merge non destructif.
 const { saveBookingSnapshot, fromChannex, STATUS } = require('../lib/bookings-snapshot')
+const { requirePermission } = require('../lib/require-permission')
+
+// Retire d'une reponse du provider tout ce qui porte un secret, en gardant la
+// structure lisible : on rend les NOMS des en-tetes, jamais leurs valeurs.
+function sansSecrets (rep) {
+  if (!rep || typeof rep !== 'object') return rep
+  const nettoyer = (o) => {
+    if (!o || typeof o !== 'object') return o
+    const { headers, request_params, ...reste } = o
+    return {
+      ...reste,
+      ...(headers ? { headers: Object.keys(headers) } : {}),
+      ...(request_params ? { request_params: Object.keys(request_params) } : {}),
+    }
+  }
+  const d = rep.data
+  if (d && typeof d === 'object') {
+    return { ...rep, data: d.attributes ? { ...d, attributes: nettoyer(d.attributes) } : nettoyer(d) }
+  }
+  return nettoyer(rep)
+}
 const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 const WEBHOOK_SECRET = process.env.CHANNEL_WEBHOOK_SECRET
 const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection deploiement (Preview)
+
+// ⚠ CORRECTION DE SECURITE DU 1er OCTOBRE 2026 — L'ACTION `register` SEULE.
+// La reception des events, plus bas, n'est pas touchee : c'est elle que la
+// certification du gestionnaire de canaux eprouve, et elle ne bouge pas d'un
+// octet. `register`, elle, ne fait que CONFIGURER le webhook chez le provider.
+//
+// Ce qui etait ouvert : `callback_url` venait du CLIENT. Toute session valide —
+// un membre delegue, un compte d'essai, sans aucun droit particulier — pouvait
+// donc faire enregistrer chez le gestionnaire un webhook GLOBAL pointant chez
+// elle. Le corps envoye au provider porte en clair
+// `X-Channel-Webhook-Secret` et le bypass Vercel : l'appelant recevait les deux,
+// puis chaque reservation et chaque message de TOUT LE PARC, et pouvait ensuite
+// forger des events sur ce webhook-ci comme sur `api/channel-events.js`, qui
+// partage la meme variable.
+//
+// Le fichier voisin a deja paye ce constat DEUX fois — la premiere version y
+// validait le CHEMIN de l'URL, ce qui ne sert a rien : le chemin de
+// « https://evil.example.com/api/channel-webhook » est parfaitement valide. La
+// lecon y est ecrite : on ne valide pas une donnee client qui designe une
+// ressource, on ne l'utilise pas.
+const DOMAINES_APP = ['hotesmart.vercel.app']
+
+function urlWebhookDeCeFichier (req) {
+  const host = String(req.headers?.host || '').toLowerCase().split(':')[0]
+  const domaine = DOMAINES_APP.includes(host) ? host : DOMAINES_APP[0]
+  return `https://${domaine}/api/channel-webhook`
+}
 
 // Push availability mutualise (idempotence anti-doublon webhook+poll, cf. lib/channel-availability.js)
 const { pushAvailabilityOnce } = require('../lib/channel-availability')
@@ -272,13 +320,28 @@ module.exports = async function handler(req, res) {
   // -- Enregistrement du webhook global cote channel (appel authentifie user) --
   // POST avec body { action:'register', callback_url } -> cree un webhook is_global
   if (req.method === 'POST' && req.body?.action === 'register') {
-    const token = req.headers.authorization?.replace('Bearer ', '')
-    if (!token) return res.status(401).json({ error: 'Non autorise' })
-    const { data: u } = await supabase.auth.getUser(token)
-    if (!u?.user) return res.status(401).json({ error: 'Session invalide' })
+    // ⚠ RESERVE AU TITULAIRE. Une session valide ne suffit pas : cette action
+    // touche la configuration du compte de canal PARTAGE, donc tous les hotes a
+    // la fois. `requirePermission` avec le domaine `titulaire` exige que
+    // l'appelant soit le titulaire du compte cible, et il refuse la delegation.
+    const garde = await requirePermission(req, res, { domaine: 'titulaire' })
+    if (!garde.ok) return
 
-    const callbackUrl = req.body.callback_url
-    if (!callbackUrl) return res.status(400).json({ error: 'callback_url requis' })
+    // ⚠ LA CIBLE EST CONSTRUITE ICI, JAMAIS RECUE. Voir l'en-tete : c'est tout
+    // l'objet de ce correctif.
+    const callbackUrl = urlWebhookDeCeFichier(req)
+
+    // Le front envoie deja cette valeur. Un ecart signale un appelant qui se
+    // trompe de cible — ou qui essaie : on le DIT plutot que de l'ignorer en
+    // silence, ce qui laisserait croire a un succes.
+    const demande = req.body.callback_url
+    if (demande && String(demande) !== callbackUrl) {
+      return res.status(400).json({
+        error: 'callback_url non conforme',
+        reason: "Cet endpoint n'enregistre que son propre webhook ; la cible est determinee par le serveur.",
+        attendu: callbackUrl
+      })
+    }
 
     const reg = await channelCall('POST', '/webhooks', {
       webhook: {
@@ -296,7 +359,11 @@ module.exports = async function handler(req, res) {
         } : {}
       }
     })
-    return res.status(reg.ok ? 201 : 502).json(reg.json)
+    // ⚠ LA REPONSE DU PROVIDER PORTE LES EN-TETES DU WEBHOOK, donc le secret et
+    // le bypass. Les relayer les exposait dans la reponse HTTP : onglet reseau,
+    // historique, copier-coller d'un rapport de diagnostic. Meme constat que
+    // dans `api/channel-events.js`, qui ne rend que les NOMS des en-tetes.
+    return res.status(reg.ok ? 201 : 502).json(sansSecrets(reg.json))
   }
 
   // -- Reception d'un evenement (appel entrant du channel) --
