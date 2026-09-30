@@ -21,6 +21,29 @@
     .tab.active { color: #C97B5C; border-bottom-color: #C97B5C; font-weight: 500; }
     .tab .ext { font-size: 10px; color: var(--text2); margin-left: 4px; }
 
+    /* ─── L'onglet Avis (core/avis/ecran-reglages.js) ─────────────────────── */
+    .hs-avis-reglages .hs-critere { margin-bottom: 12px; }
+    .hs-critere-entete { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .hs-critere-entete input[type=text] { flex: 1 1 240px; min-width: 0; }
+    .hs-niveaux { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .hs-niveau { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .hs-niveau input[type=text] { flex: 1 1 180px; min-width: 0; }
+    .hs-niveau-negatif { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text2); }
+    .hs-niveau-force { font-size: 11px; color: var(--text2); }
+    .hs-reglage { display: block; margin-bottom: 10px; font-size: 13px; }
+    .hs-reglage span { display: block; margin-bottom: 4px; color: var(--text2); }
+    .hs-reglage input, .hs-reglage select { width: 100%; }
+    .hs-avis-reglages .hs-avis-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .hs-avis-erreur { color: #b3261e; font-size: 13px; }
+    .hs-avis-message { color: #1b5e20; font-size: 13px; }
+    .hs-avis-attente { color: var(--text2); font-size: 13px; }
+    /* ⚠ Sur téléphone, les lignes de niveau s'empilent : trois champs côte à
+       côte sous 420 px donnaient des sélecteurs de 40 px, inutilisables. */
+    @media (max-width: 560px) {
+      .hs-niveau, .hs-critere-entete { flex-direction: column; align-items: stretch; }
+      .hs-niveau input[type=text], .hs-critere-entete input[type=text] { flex: 1 1 auto; }
+    }
+
     .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px; }
     .card-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
     .card-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; line-height: 1.5; }
@@ -127,6 +150,7 @@
 
   <div class="tabs">
     <button class="tab active" id="tab-equipe">Équipe et droits</button>
+    <button class="tab" id="tab-avis">Avis</button>
     <a class="tab" href="/connexions">Connexions <span class="ext">↗</span></a>
     <a class="tab" href="/abonnement">Abonnement <span class="ext">↗</span></a>
     <a class="tab" href="/pages/compte.html">Mon compte <span class="ext">↗</span></a>
@@ -145,6 +169,12 @@
       <div class="card-sub">La gestion des profils et de leurs droits n’est pas déléguable. Contactez le titulaire du compte.</div>
     </div>
   </div>
+
+  <!-- ⚠ L'onglet « Avis » (spec §4.7). Son contenu vit dans un module du cœur,
+       /core/avis/ecran-reglages.js : la grille d'évaluation est du cœur, pas de
+       cette page. Test de la règle d'architecture : « ce réglage aurait-il un sens
+       si l'app n'existait pas ? » — oui. -->
+  <div id="zone-avis" style="display:none"></div>
 
   <div id="zone-equipe" style="display:none">
     <div class="card">
@@ -264,6 +294,11 @@ async function charger () {
     const d = await api.membres.list()
     profils = d.profils || []
     biens   = d.biens || []
+    // ⚠ On note CE QUI EST VISIBLE, pour que la bascule d'onglets sache quoi
+    // rallumer : un membre sans droit `equipe` voit `zone-refus`, et revenir de
+    // l'onglet Avis ne doit pas lui afficher une liste d'équipe vide.
+    $('zone-equipe').dataset.visible = 'oui'
+    $('zone-refus').dataset.visible = 'non'
     $('zone-equipe').style.display = 'block'
     $('zone-refus').style.display = 'none'
     rendreListe()
@@ -271,6 +306,8 @@ async function charger () {
     // 403 = domaine `equipe` non accordé. Ce n'est pas une erreur à afficher en
     // rouge : c'est un état normal pour un membre.
     if (/droits insuffisants/i.test(e.message)) {
+      $('zone-refus').dataset.visible = 'oui'
+      $('zone-equipe').dataset.visible = 'non'
       $('zone-refus').style.display = 'block'
       $('zone-equipe').style.display = 'none'
       return
@@ -583,6 +620,37 @@ $('liste').onclick = e => {
   const id = e.target?.dataset?.ouvrir
   if (id) ouvrir(profils.find(p => p.id === id))
 }
+
+// ─── Les onglets ────────────────────────────────────────────────────────────
+// ⚠ L'écran des avis est monté À LA DEMANDE, une seule fois. Le charger au
+// démarrage ferait deux appels serveur à toute personne qui vient régler ses
+// droits d'équipe et ne touchera jamais aux avis.
+let avisMonte = false
+function basculer (onglet) {
+  const avis = onglet === 'avis'
+  $('tab-equipe').classList.toggle('active', !avis)
+  $('tab-avis').classList.toggle('active', avis)
+  // ⚠ La zone d'équipe peut être masquée par le garde-fou de délégation
+  // (`zone-refus`) : on ne la rallume donc que si elle était visible.
+  const montrer = (id) => { $(id).style.display = (!avis && $(id).dataset.visible === 'oui') ? 'block' : 'none' }
+  montrer('zone-equipe')
+  montrer('zone-refus')
+  $('zone-avis').style.display = avis ? '' : 'none'
+  if (avis && !avisMonte) {
+    avisMonte = true
+    import('/core/avis/ecran-reglages.js')
+      .then(m => m.monter($('zone-avis'), { avertir: message }))
+      .catch(e => {
+        // ⚠ UN ÉCHEC DE CHARGEMENT SE DIT. Sans ce message, l'onglet restait
+        // vide et personne ne savait si c'était normal.
+        console.error('[settings] écran des avis', e)
+        $('zone-avis').innerHTML = '<div class="card"><div class="card-title">Réglages des avis indisponibles</div>'
+          + '<div class="card-sub">Rechargez la page. Si cela persiste, contactez le support.</div></div>'
+      })
+  }
+}
+$('tab-equipe').onclick = () => basculer('equipe')
+$('tab-avis').onclick = () => basculer('avis')
 
 const { data: { session } } = await supabase.auth.getSession()
 if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings')

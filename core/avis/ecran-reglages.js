@@ -1,0 +1,289 @@
+// core/avis/ecran-reglages.js
+// DOC : docs/specs/spec-evaluation-voyageur.md §4.7 (modif = MEME COMMIT)
+//
+// L'ONGLET « AVIS » DE /settings : la grille d'evaluation, les mots-cles, le ton
+// et la signature.
+//
+// ⚠ CET ECRAN N'EST PAS LE JUGE. Les deux regles que l'hote ne peut pas defaire
+// — une note 1 est negative, un refus de recommander est negatif — sont tenues
+// par la BASE (contraintes CHECK) et verifiees par le serveur avant ecriture.
+// Ce que l'ecran fait, c'est les rendre EVIDENTES : la case « negatif » d'une
+// note 1 est cochee et desactivee, avec la raison ecrite a cote. Un hote ne doit
+// pas decouvrir la regle par un message d'erreur.
+//
+// ⚠ ET IL NE PRE-INSERE RIEN. La grille par defaut est une constante du code
+// (decision du 30 septembre 2026 : pas de seed sur 30 000 comptes). L'ecran la
+// montre comme point de depart ; rien n'est ecrit tant que l'hote n'enregistre
+// pas.
+
+import { appel as appelParDefaut } from './appel.js'
+
+const CATEGORIE_LISIBLE = {
+  cleanliness: 'Proprete',
+  communication: 'Communication',
+  respect_house_rules: 'Respect du reglement',
+  recommandation: 'Recommandation',
+}
+const REMPLI_LISIBLE = { prestataire: 'La prestataire', hote: 'Moi', les_deux: 'Les deux' }
+
+const echapper = (t) => String(t == null ? '' : t)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+
+// Une note 1 est toujours negative, un refus de recommander aussi (spec §4.2).
+export function negatifForce (niveau, categorie) {
+  if (categorie === 'recommandation') return niveau.recommande === false
+  return Number(niveau.note) === 1
+}
+
+/**
+ * Monte l'ecran dans un conteneur.
+ * @returns {Promise<{ charge: boolean }>}
+ */
+export async function monter (conteneur, options = {}) {
+  const appel = options.appel || appelParDefaut
+  const avertir = options.avertir || (() => {})
+  if (!conteneur) throw new Error('[avis] l ecran de reglages exige un conteneur')
+
+  const etat = { criteres: [], config: null, tons: ['chaleureux', 'sobre'], defaut: [], occupe: false, message: null, erreur: null }
+
+  conteneur.innerHTML = '<p class="hs-avis-attente">Chargement des reglages…</p>'
+  try {
+    const [grille, config] = await Promise.all([appel('avis?action=grille'), appel('avis?action=config')])
+    etat.defaut = grille.defaut || []
+    etat.config = config.compte || { keywords: [], tone: 'chaleureux', signature: '' }
+    etat.tons = config.tons || etat.tons
+    // ⚠ SANS CRITERE EN BASE, ON PART DE LA GRILLE PAR DEFAUT — affichee, pas
+    // enregistree. L'hote voit ce qui s'applique aujourd'hui, et peut le
+    // modifier ; s'il n'enregistre pas, rien ne change.
+    etat.criteres = (grille.compte || []).length
+      ? (grille.compte || []).map(depuisServeur)
+      : (grille.defaut || []).map(depuisDefaut)
+    etat.surDefaut = !(grille.compte || []).length
+  } catch (err) {
+    conteneur.innerHTML = `<p class="hs-avis-erreur">${echapper(err.message || 'Reglages illisibles')}</p>`
+    return { charge: false }
+  }
+
+  const afficher = () => { conteneur.innerHTML = rendre(etat); brancher() }
+
+  function brancher () {
+    // Les champs de la configuration.
+    const lier = (nom, fn) => {
+      const el = conteneur.querySelector(`[data-reglage="${nom}"]`)
+      if (el) el.addEventListener('input', () => fn(el.value))
+    }
+    lier('mots', (v) => { etat.config.keywords = v.split(',').map(x => x.trim()).filter(Boolean) })
+    lier('signature', (v) => { etat.config.signature = v })
+    const ton = conteneur.querySelector('[data-reglage="ton"]')
+    if (ton) ton.addEventListener('change', () => { etat.config.tone = ton.value })
+
+    // Les critères.
+    conteneur.querySelectorAll('[data-critere]').forEach(el => {
+      const i = Number(el.dataset.critere)
+      const champ = el.dataset.champ
+      el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
+        etat.criteres[i][champ] = el.value
+        // ⚠ CHANGER LA CATEGORIE CHANGE CE QU'UN NIVEAU PEUT PORTER : une
+        // categorie notee exige une note et interdit « recommande », et
+        // l'inverse pour « recommandation ». On redessine, sinon l'ecran
+        // proposerait des champs que la base refusera.
+        if (champ === 'categorie') { etat.criteres[i].niveaux = etat.criteres[i].niveaux.map(n => vidangerNiveau(n, el.value)); afficher() }
+      })
+    })
+    conteneur.querySelectorAll('[data-niveau]').forEach(el => {
+      const [i, j] = el.dataset.niveau.split(':').map(Number)
+      const champ = el.dataset.champ
+      const evenement = el.type === 'checkbox' ? 'change' : (el.tagName === 'SELECT' ? 'change' : 'input')
+      el.addEventListener(evenement, () => {
+        const n = etat.criteres[i].niveaux[j]
+        if (champ === 'negatif') n.negatif = el.checked
+        else if (champ === 'note') { n.note = el.value === '' ? null : Number(el.value); afficher() }
+        else if (champ === 'recommande') { n.recommande = el.value === '' ? null : el.value === 'oui'; afficher() }
+        else n[champ] = el.value
+      })
+    })
+
+    const bouton = (nom, fn) => conteneur.querySelectorAll(`[data-action="${nom}"]`).forEach(b => b.addEventListener('click', fn))
+    bouton('ajouter-critere', () => {
+      etat.criteres.push({ libelle: '', categorie: 'cleanliness', rempli_par: 'hote', rang: etat.criteres.length + 1,
+        niveaux: [{ cle: 'bon', libelle: 'Bon', rang: 1, note: 5, negatif: false }] })
+      afficher()
+    })
+    conteneur.querySelectorAll('[data-action="retirer-critere"]').forEach(b => b.addEventListener('click', () => {
+      etat.criteres.splice(Number(b.dataset.index), 1); afficher()
+    }))
+    conteneur.querySelectorAll('[data-action="ajouter-niveau"]').forEach(b => b.addEventListener('click', () => {
+      const c = etat.criteres[Number(b.dataset.index)]
+      const n = c.niveaux.length + 1
+      c.niveaux.push(vidangerNiveau({ cle: `niveau-${n}`, libelle: '', rang: n, note: 3, negatif: false }, c.categorie))
+      afficher()
+    }))
+    conteneur.querySelectorAll('[data-action="retirer-niveau"]').forEach(b => b.addEventListener('click', () => {
+      const [i, j] = b.dataset.index.split(':').map(Number)
+      etat.criteres[i].niveaux.splice(j, 1); afficher()
+    }))
+    bouton('revenir-defaut', () => {
+      etat.criteres = (etat.defaut || []).map(depuisDefaut); etat.surDefaut = true; etat.message = null; afficher()
+    })
+    bouton('enregistrer', enregistrer)
+  }
+
+  async function enregistrer () {
+    if (etat.occupe) return
+    etat.occupe = true; etat.erreur = null; etat.message = null; afficher()
+    try {
+      // ⚠ LES CLES DE NIVEAUX SE DERIVENT DU LIBELLE, et restent uniques par
+      // critere. Un doublon ferait refuser la grille par le serveur, avec un
+      // message que l'hote ne pourrait pas relier a ce qu'il a tape.
+      const criteres = etat.criteres.map((c, i) => ({
+        libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par, rang: i + 1,
+        niveaux: c.niveaux.map((n, j) => ({
+          cle: cleDe(n, j, c.niveaux),
+          libelle: n.libelle, rang: j + 1,
+          note: c.categorie === 'recommandation' ? null : (n.note == null ? null : Number(n.note)),
+          ...(c.categorie === 'recommandation' ? { recommande: n.recommande === true } : {}),
+          // La regle forcee est appliquee ICI aussi, pour que l'hote ne puisse
+          // pas envoyer une grille que la base refusera.
+          negatif: negatifForce(n, c.categorie) ? true : Boolean(n.negatif),
+        })),
+      }))
+      await appel('avis?action=grille-maj', { methode: 'POST', corps: { action: 'grille-maj', criteres } })
+      await appel('avis?action=config-maj', {
+        methode: 'POST',
+        corps: {
+          action: 'config-maj',
+          keywords: etat.config.keywords || [],
+          tone: etat.config.tone || 'chaleureux',
+          signature: etat.config.signature || null,
+        },
+      })
+      etat.surDefaut = false
+      etat.message = 'Reglages enregistres.'
+      avertir('Réglages des avis enregistrés.', 'ok')
+    } catch (err) {
+      etat.erreur = err.message || 'Enregistrement impossible'
+      avertir(etat.erreur, 'err')
+    } finally {
+      etat.occupe = false; afficher()
+    }
+  }
+
+  afficher()
+  return { charge: true, surDefaut: etat.surDefaut }
+}
+
+// ─── Conversions ────────────────────────────────────────────────────────────
+const depuisServeur = (c) => ({
+  libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par, rang: c.rang,
+  niveaux: (c.niveaux || []).map(n => ({ cle: n.cle, libelle: n.libelle, rang: n.rang, note: n.note, recommande: n.recommande, negatif: n.negatif })),
+})
+const depuisDefaut = (c) => ({
+  libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par, rang: c.rang,
+  niveaux: (c.niveaux || []).map(n => ({ cle: n.cle, libelle: n.libelle, rang: n.rang, note: n.note, recommande: n.recommande, negatif: n.negatif })),
+})
+
+// Un niveau qui change de categorie perd ce qui n'y a plus de sens.
+export function vidangerNiveau (n, categorie) {
+  if (categorie === 'recommandation') {
+    // ⚠ LE DRAPEAU SE DEDUIT DE LA VALEUR RETENUE, pas de celle d'avant.
+    // Premiere version : `recommande` devenait `false` (parce que la valeur
+    // d'origine etait `undefined`) tandis que `negatif` restait a `false` —
+    // c'est-a-dire un refus de recommander SANS son drapeau, exactement ce que
+    // la contrainte `avis_niveaux_refus_est_negatif` refuse. L'hote aurait
+    // decouvert la regle par un message Postgres.
+    const recommande = n.recommande === true
+    return { cle: n.cle, libelle: n.libelle, rang: n.rang, note: null, recommande, negatif: recommande ? Boolean(n.negatif) : true }
+  }
+  const note = n.note == null ? 3 : Number(n.note)
+  return { cle: n.cle, libelle: n.libelle, rang: n.rang, note, negatif: note === 1 ? true : Boolean(n.negatif) }
+}
+
+// Une cle lisible, derivee du libelle, unique dans son critere.
+export function cleDe (niveau, index, freres) {
+  const base = String(niveau.libelle || niveau.cle || `niveau-${index + 1}`)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `niveau-${index + 1}`
+  const avant = (freres || []).slice(0, index)
+    .filter(f => String(f.libelle || f.cle || '').toLowerCase() === String(niveau.libelle || niveau.cle || '').toLowerCase()).length
+  return avant ? `${base}-${avant + 1}` : base
+}
+
+// ─── Rendu ──────────────────────────────────────────────────────────────────
+export function rendre (etat) {
+  const config = etat.config || {}
+  const tons = (etat.tons || []).map(t =>
+    `<option value="${echapper(t)}"${config.tone === t ? ' selected' : ''}>${t === 'sobre' ? 'Sobre et factuel' : 'Chaleureux'}</option>`).join('')
+
+  const bloquesConfig = `<div class="card"><div class="card-title">Comment l IA ecrit vos avis</div>`
+    + `<div class="card-sub">Ces reglages orientent la redaction. Ils ne changent jamais les notes, qui viennent de vos boutons.</div>`
+    + `<label class="hs-reglage"><span>Mots que vous aimez employer (separes par des virgules)</span>`
+    + `<input type="text" data-reglage="mots" value="${echapper((config.keywords || []).join(', '))}" placeholder="soigneux, discret, ponctuel"></label>`
+    + `<label class="hs-reglage"><span>Ton</span><select data-reglage="ton">${tons}</select></label>`
+    + `<label class="hs-reglage"><span>Signature en fin de texte (facultative)</span>`
+    + `<input type="text" data-reglage="signature" value="${echapper(config.signature || '')}" placeholder="Thierry"></label></div>`
+
+  const criteres = (etat.criteres || []).map((c, i) => rendreCritere(c, i)).join('')
+
+  const entete = `<div class="card"><div class="card-title">Votre grille d evaluation</div>`
+    + `<div class="card-sub">`
+    + (etat.surDefaut
+      ? 'Vous utilisez la grille par defaut. Modifiez-la et enregistrez pour en faire la votre.'
+      : 'Votre grille remplace la grille par defaut sur tous vos biens.')
+    + ` Deux regles ne se defont pas : une note 1 est toujours negative, et un refus de recommander aussi. `
+    + `Un avis negatif repasse toujours par vous.</div></div>`
+
+  return `<div class="hs-avis-reglages">`
+    + (etat.erreur ? `<p class="hs-avis-erreur">${echapper(etat.erreur)}</p>` : '')
+    + (etat.message ? `<p class="hs-avis-message">${echapper(etat.message)}</p>` : '')
+    + entete + criteres
+    + `<div class="hs-avis-actions">`
+    + `<button type="button" data-action="ajouter-critere">Ajouter un critere</button>`
+    + `<button type="button" data-action="revenir-defaut">Revenir a la grille par defaut</button>`
+    + `</div>`
+    + bloquesConfig
+    + `<div class="hs-avis-actions"><button type="button" class="hs-avis-principal" data-action="enregistrer"${etat.occupe ? ' disabled' : ''}>Enregistrer</button></div>`
+    + `</div>`
+}
+
+function rendreCritere (c, i) {
+  const categories = Object.entries(CATEGORIE_LISIBLE).map(([k, v]) =>
+    `<option value="${k}"${c.categorie === k ? ' selected' : ''}>${echapper(v)}</option>`).join('')
+  const remplis = Object.entries(REMPLI_LISIBLE).map(([k, v]) =>
+    `<option value="${k}"${c.rempli_par === k ? ' selected' : ''}>${echapper(v)}</option>`).join('')
+
+  const niveaux = (c.niveaux || []).map((n, j) => {
+    const force = negatifForce(n, c.categorie)
+    const champNote = c.categorie === 'recommandation'
+      ? `<select data-niveau="${i}:${j}" data-champ="recommande">`
+        + `<option value="oui"${n.recommande === true ? ' selected' : ''}>Je recommande</option>`
+        + `<option value="non"${n.recommande === false ? ' selected' : ''}>Je ne recommande pas</option></select>`
+      : `<select data-niveau="${i}:${j}" data-champ="note">`
+        + [5, 4, 3, 2, 1].map(v => `<option value="${v}"${Number(n.note) === v ? ' selected' : ''}>${v} / 5</option>`).join('')
+        + `</select>`
+    return `<div class="hs-niveau">`
+      + `<input type="text" data-niveau="${i}:${j}" data-champ="libelle" value="${echapper(n.libelle || '')}" placeholder="Ce que vous cochez">`
+      + champNote
+      + `<label class="hs-niveau-negatif"><input type="checkbox" data-niveau="${i}:${j}" data-champ="negatif"`
+      + `${(force || n.negatif) ? ' checked' : ''}${force ? ' disabled' : ''}> Negatif`
+      // ⚠ LA RAISON EST ECRITE A COTE DE LA CASE. Un hote ne doit pas decouvrir
+      // la regle par un refus du serveur.
+      + (force ? `<span class="hs-niveau-force"> — force : ${c.categorie === 'recommandation' ? 'un refus de recommander' : 'une note 1'} est toujours negatif</span>` : '')
+      + `</label>`
+      + `<button type="button" data-action="retirer-niveau" data-index="${i}:${j}" aria-label="Retirer ce niveau">×</button>`
+      + `</div>`
+  }).join('')
+
+  return `<div class="card hs-critere">`
+    + `<div class="hs-critere-entete">`
+    + `<input type="text" data-critere="${i}" data-champ="libelle" value="${echapper(c.libelle || '')}" placeholder="La question, telle que vous la lirez">`
+    + `<select data-critere="${i}" data-champ="categorie">${categories}</select>`
+    + `<select data-critere="${i}" data-champ="rempli_par">${remplis}</select>`
+    + `<button type="button" data-action="retirer-critere" data-index="${i}" aria-label="Retirer ce critere">Retirer</button>`
+    + `</div>`
+    + `<div class="hs-niveaux">${niveaux}</div>`
+    + `<button type="button" data-action="ajouter-niveau" data-index="${i}">Ajouter un niveau</button>`
+    + `</div>`
+}
+
+export { CATEGORIE_LISIBLE, REMPLI_LISIBLE }

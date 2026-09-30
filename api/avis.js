@@ -16,6 +16,7 @@ const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('.
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { chargerGrille, criteresPour, enregistrerReponses, abandonner, journaliser } = require('../lib/avis/evaluations')
+const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
 
@@ -419,6 +420,240 @@ async function requalifier (req, res, garde) {
 }
 
 // ─── Routage ────────────────────────────────────────────────────────────────
+
+// ─── La configuration de redaction (mots-cles, ton, signature) ──────────────
+// Spec §4.7 : elle vit dans /settings, onglet « Avis ». Deux niveaux, comme la
+// grille : le compte, et un bien qui le surcharge.
+
+const TONS = new Set(['chaleureux', 'sobre'])
+
+async function configLire (req, res, garde) {
+  const userId = garde.accountUserId
+  const bien = String(req.query?.property_id || '').trim()
+  if (bien && !UUID_RE.test(bien)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
+  if (bien && !(await bienAutorise(req, res, garde, bien, false))) return
+
+  const requete = supabase.from('avis_config')
+    .select('id, property_id, keywords, tone, signature').eq('user_id', userId)
+  const { data, error } = await (bien
+    ? requete.or(`property_id.eq.${bien},property_id.is.null`)
+    : requete.is('property_id', null))
+  if (error) return res.status(503).json({ error: 'Configuration illisible', detail: error.message })
+
+  const liste = data || []
+  return res.status(200).json({
+    compte: liste.find(c => !c.property_id) || null,
+    bien: bien ? (liste.find(c => c.property_id === bien) || null) : null,
+    tons: [...TONS],
+  })
+}
+
+async function configEcrire (req, res, garde) {
+  const userId = garde.accountUserId
+  const bien = req.body?.property_id ? String(req.body.property_id).trim() : null
+  if (bien && !UUID_RE.test(bien)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
+  if (bien && !(await bienAutorise(req, res, garde, bien, true))) return
+
+  const ton = String(req.body?.tone || 'chaleureux').trim()
+  if (!TONS.has(ton)) return res.status(400).json({ error: `Ton inconnu : « ${ton} » (attendu : ${[...TONS].join(' | ')})` })
+
+  // ⚠ LES MOTS-CLES SONT UN VOCABULAIRE, PAS UN CONTENU IMPOSE (garde-fou §3).
+  // On les borne pour qu'un copier-coller de roman ne devienne pas le prompt.
+  const brut = Array.isArray(req.body?.keywords) ? req.body.keywords : []
+  const keywords = brut.map(k => String(k || '').trim()).filter(Boolean).slice(0, 20).map(k => k.slice(0, 40))
+  const signature = req.body?.signature ? String(req.body.signature).trim().slice(0, 120) : null
+
+  // ⚠ L'UNICITE EST PARTIELLE : (user_id) quand property_id est nul,
+  // (user_id, property_id) sinon. `upsert` ne sait pas viser un index partiel,
+  // donc on lit puis on ecrit — et le conflit reste impossible, ces deux index
+  // etant les seuls.
+  const lecture = supabase.from('avis_config').select('id').eq('user_id', userId)
+  const { data: deja, error: eL } = await (bien
+    ? lecture.eq('property_id', bien).maybeSingle()
+    : lecture.is('property_id', null).maybeSingle())
+  if (eL) return res.status(503).json({ error: 'Configuration illisible', detail: eL.message })
+
+  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature }
+  const { error: eE } = deja
+    ? await supabase.from('avis_config').update(valeurs).eq('id', deja.id).eq('user_id', userId)
+    : await supabase.from('avis_config').insert(valeurs)
+  if (eE) return res.status(503).json({ error: 'Configuration non enregistree', detail: eE.message })
+
+  return res.status(200).json({ ok: true, niveau: bien ? 'bien' : 'compte', mots: keywords.length })
+}
+
+// Le bien demande appartient-il au compte, et au perimetre de l'appelant ?
+// Rend false APRES avoir repondu : l'appelant s'arrete alors.
+async function bienAutorise (req, res, garde, bienId, ecriture) {
+  const { data: bien, error } = await supabase.from('properties')
+    .select('id, provider_property_id').eq('id', bienId).eq('user_id', garde.accountUserId).maybeSingle()
+  if (error) { res.status(500).json({ error: 'Lecture du bien impossible' }); return false }
+  if (!bien) { res.status(404).json({ error: 'Bien introuvable' }); return false }
+  const cible = { id: bien.id, ref: bien.provider_property_id }
+  const ok = ecriture ? peutEcrire(garde.contexte, 'avis', cible) : peutLire(garde.contexte, 'avis', cible)
+  if (!ok) { res.status(403).json({ error: 'Ce bien n est pas dans votre perimetre' }); return false }
+  return true
+}
+
+// ═══ LA GRILLE D'EVALUATION, REGLEE PAR L'HOTE (spec §4.7) ══════════════════
+
+// GET grille — les criteres du compte et, si un bien est demande, les siens.
+async function grilleLire (req, res, garde) {
+  const userId = garde.accountUserId
+  const bienDemande = String(req.query?.property_id || '').trim()
+  if (bienDemande && !UUID_RE.test(bienDemande)) {
+    return res.status(400).json({ error: 'Identifiant de bien invalide' })
+  }
+
+  // ⚠ LE PERIMETRE S'APPLIQUE AU BIEN DEMANDE. Sans ce controle, un membre
+  // limite a un bien lirait la grille d'un autre en passant son identifiant.
+  if (bienDemande && !(await bienAutorise(req, res, garde, bienDemande, false))) return
+
+  const requete = supabase.from('avis_criteres')
+    .select('id, libelle, categorie, rempli_par, rang, actif, property_id, '
+      + 'avis_criteres_niveaux!avis_niveaux_categorie_fk(id, cle, libelle, rang, note, recommande, negatif)')
+    .eq('user_id', userId)
+  const { data, error } = await (bienDemande
+    ? requete.or(`property_id.eq.${bienDemande},property_id.is.null`)
+    : requete.is('property_id', null))
+  if (error) return res.status(503).json({ error: 'Grille illisible', detail: error.message })
+
+  const ranger = (l) => (l || []).map(c => ({
+    id: c.id, libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par,
+    rang: c.rang, actif: c.actif, property_id: c.property_id,
+    niveaux: [...(c.avis_criteres_niveaux || [])].sort((a, b) => (a.rang || 0) - (b.rang || 0)),
+  })).sort((a, b) => (a.rang || 0) - (b.rang || 0))
+
+  const tout = ranger(data)
+  return res.status(200).json({
+    compte: tout.filter(c => !c.property_id),
+    bien: bienDemande ? tout.filter(c => c.property_id === bienDemande) : [],
+    // ⚠ LA GRILLE PAR DEFAUT EST UNE CONSTANTE DU CODE, jamais pre-inseree
+    // (decision du 30 septembre 2026 : pas de seed sur 30 000 comptes). L'ecran
+    // la montre comme point de depart, et n'ecrit rien tant que l'hote ne
+    // change rien.
+    defaut: GRILLE_DEFAUT.criteres,
+    categories: CATEGORIES,
+    rempli_par: REMPLI_PAR,
+  })
+}
+
+// POST grille-maj — remplace la grille d'UN niveau (compte, ou un bien).
+//
+// ⚠ PAS DE TRANSACTION DISPONIBLE ICI. PostgREST n'en offre pas, et ajouter une
+// fonction Postgres demanderait une migration de plus. On s'en passe par
+// l'ORDRE des ecritures, pas en esperant qu'elles aboutissent toutes :
+//
+//   1. les nouveaux criteres sont crees INACTIFS, avec leurs niveaux ;
+//   2. une fois tous ecrits, les anciens sont supprimes ;
+//   3. les nouveaux sont actives, en dernier.
+//
+// Un echec a n'importe quelle etape laisse donc l'ANCIENNE grille en place et,
+// au pire, des criteres inactifs — que `grilleDe` ecarte, et qui ne changent
+// rien a ce que l'hote evalue. L'inverse (activer d'abord) aurait pu laisser
+// une grille a moitie ecrite servir de reference a une vraie evaluation.
+async function grilleEcrire (req, res, garde) {
+  const userId = garde.accountUserId
+  const brut = req.body?.criteres
+  const bienDemande = req.body?.property_id ? String(req.body.property_id).trim() : null
+  if (!Array.isArray(brut)) return res.status(400).json({ error: 'La grille attendue est une liste de criteres' })
+  if (brut.length > 40) return res.status(400).json({ error: 'Une grille de plus de 40 criteres n est pas raisonnable' })
+  if (bienDemande && !UUID_RE.test(bienDemande)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
+
+  if (bienDemande && !(await bienAutorise(req, res, garde, bienDemande, true))) return
+
+  // ⚠ ON VALIDE AVANT D'ECRIRE, avec le MEME module que la publication.
+  // Les contraintes de la base refuseraient aussi, mais avec un message
+  // Postgres : l'hote a droit a une phrase qui nomme son critere.
+  //
+  // Les cles de niveaux sont celles que l'hote (ou l'ecran) donne ; les cles de
+  // CRITERES sont leurs identifiants en base, poses par Postgres — l'ecran n'en
+  // fabrique pas.
+  const criteres = brut.map((c, i) => ({
+    libelle: String(c?.libelle || '').trim(),
+    categorie: String(c?.categorie || '').trim(),
+    rempli_par: String(c?.rempli_par || 'hote').trim(),
+    rang: Number.isInteger(c?.rang) ? c.rang : i + 1,
+    niveaux: Array.isArray(c?.niveaux) ? c.niveaux.map((n, j) => ({
+      cle: String(n?.cle || '').trim(),
+      libelle: String(n?.libelle || '').trim(),
+      rang: Number.isInteger(n?.rang) ? n.rang : j + 1,
+      note: n?.note === null || n?.note === undefined || n?.note === '' ? null : Number(n.note),
+      ...(n?.recommande === undefined || n?.recommande === null ? {} : { recommande: Boolean(n.recommande) }),
+      negatif: Boolean(n?.negatif),
+    })) : [],
+  }))
+
+  // Une grille VIDE est une demande legitime : « je reviens a la grille par
+  // defaut ». On ne la passe donc pas a `validerGrille`, qui la refuserait.
+  if (criteres.length) {
+    try {
+      validerGrille({ criteres: criteres.map((c, i) => ({ ...c, cle: `nouveau-${i}` })) })
+    } catch (err) {
+      return res.status(400).json({ error: err.message, motif: 'grille_invalide' })
+    }
+  }
+
+  // ─── 1. Les nouveaux, INACTIFS, avec leurs niveaux ──────────────────────
+  const crees = []
+  for (const c of criteres) {
+    const { data: critere, error: eC } = await supabase.from('avis_criteres').insert({
+      user_id: userId, property_id: bienDemande,
+      libelle: c.libelle, categorie: c.categorie, rempli_par: c.rempli_par,
+      rang: c.rang, actif: false,
+    }).select().single()
+    if (eC) {
+      await nettoyerCriteres(crees)
+      return res.status(400).json({ error: `« ${c.libelle} » refuse : ${eC.message}`, motif: 'critere_refuse' })
+    }
+    crees.push(critere.id)
+
+    const lignes = c.niveaux.map(n => ({ ...n, critere_id: critere.id, categorie: c.categorie }))
+    const { error: eN } = await supabase.from('avis_criteres_niveaux').insert(lignes)
+    if (eN) {
+      await nettoyerCriteres(crees)
+      return res.status(400).json({ error: `Les niveaux de « ${c.libelle} » sont refuses : ${eN.message}`, motif: 'niveaux_refuses' })
+    }
+  }
+
+  // ─── 2. Les anciens s'en vont ───────────────────────────────────────────
+  const ancien = supabase.from('avis_criteres').delete().eq('user_id', userId)
+  const { error: eSuppr } = crees.length
+    ? await (bienDemande ? ancien.eq('property_id', bienDemande) : ancien.is('property_id', null)).not('id', 'in', `(${crees.join(',')})`)
+    : await (bienDemande ? ancien.eq('property_id', bienDemande) : ancien.is('property_id', null))
+  if (eSuppr) {
+    // ⚠ ON NE LAISSE PAS DEUX GRILLES COHABITER. Les nouveaux sont encore
+    // inactifs : les retirer remet l'ancienne grille, intacte.
+    await nettoyerCriteres(crees)
+    return res.status(503).json({ error: 'L ancienne grille n a pas pu etre retiree', detail: eSuppr.message })
+  }
+
+  // ─── 3. Les nouveaux entrent en service ─────────────────────────────────
+  if (crees.length) {
+    const { error: eActif } = await supabase.from('avis_criteres')
+      .update({ actif: true }).in('id', crees).eq('user_id', userId)
+    if (eActif) {
+      // Les criteres existent, inactifs : `grilleDe` les ecarte, donc l'hote
+      // retombe sur la grille du niveau superieur. C'est visible et reparable,
+      // et cela ne fausse aucune evaluation.
+      return res.status(503).json({
+        error: 'La nouvelle grille est enregistree mais pas activee : relancez l enregistrement',
+        detail: eActif.message, motif: 'grille_inactive',
+      })
+    }
+  }
+
+  return res.status(200).json({ ok: true, criteres: crees.length, niveau: bienDemande ? 'bien' : 'compte' })
+}
+
+// Retire ce qu'on vient de creer. Les niveaux partent en cascade.
+async function nettoyerCriteres (ids) {
+  if (!ids || !ids.length) return
+  const { error } = await supabase.from('avis_criteres').delete().in('id', ids)
+  // ⚠ UN NETTOYAGE RATE NE DISPARAIT PAS. Les criteres restent INACTIFS, donc
+  // sans effet sur les evaluations, mais quelqu'un doit pouvoir le savoir.
+  if (error) console.error('[avis] criteres inactifs non nettoyes', ids.join(','), error.message)
+}
 
 // ═══ EVALUATION DU VOYAGEUR (spec evaluation-voyageur) ══════════════════════
 //
@@ -1034,6 +1269,8 @@ async function router (req, res) {
   // ─── Evaluation du voyageur ───────────────────────────────────────────────
   // Repondre, rediger, publier, abandonner : toutes des ECRITURES.
   const ECRITURES_EVAL = {
+    'grille-maj': grilleEcrire,
+    'config-maj': configEcrire,
     'eval-reponses': evaluationRepondre,
     'eval-texte': evaluationTexte,
     'eval-publier': evaluationPublier,
@@ -1052,6 +1289,8 @@ async function router (req, res) {
   if (!garde.ok) return
 
   if (action === 'evaluation') return await evaluationLire(req, res, garde)
+  if (action === 'grille') return await grilleLire(req, res, garde)
+  if (action === 'config') return await configLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }

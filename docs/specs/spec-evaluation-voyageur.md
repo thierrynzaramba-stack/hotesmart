@@ -169,6 +169,26 @@ La configuration vit dans **`/settings` → onglet « Avis »**, avec les mots-c
 ton et la signature. Test de la règle d'architecture : « ce réglage a-t-il un sens si
 l'app n'existait pas ? » — oui, c'est du cœur.
 
+**Livré au lot 4** (30 septembre 2026) : `core/avis/ecran-reglages.js`, monté à la
+demande par la page. Trois choses qu'il fait et qui ne sont pas décoratives :
+
+- **La grille par défaut est montrée, jamais pré-insérée.** L'hôte voit ce qui
+  s'applique aujourd'hui et peut le modifier ; rien n'est écrit tant qu'il
+  n'enregistre pas. Un bouton ramène à la grille par défaut, sans écrire non plus.
+- **Les deux règles qu'il ne peut pas défaire sont visibles, pas devinées.** La
+  case « négatif » d'une note 1 est cochée, désactivée, et **la raison est écrite
+  à côté**. Un hôte ne doit pas découvrir la règle par un message Postgres.
+- **Changer la catégorie d'un critère vidange ses niveaux.** Une catégorie notée
+  exige une note et interdit `recommande` ; `recommandation` fait l'inverse.
+  Laisser les anciens champs proposerait une grille que la base refusera.
+
+**L'écriture sans transaction.** PostgREST n'en offre pas, et la sûreté vient de
+l'**ordre** : les nouveaux critères naissent **inactifs** avec leurs niveaux, les
+anciens ne partent qu'ensuite, l'activation vient en dernier. Un échec à n'importe
+quelle étape laisse l'**ancienne** grille intacte et, au pire, des critères
+inactifs — que `grilleDe` écarte. L'inverse aurait pu laisser une grille à moitié
+écrite servir de référence à une vraie évaluation.
+
 ## 5. Rédaction IA
 
 - Haiku, côté serveur uniquement (`lib/avis/`).
