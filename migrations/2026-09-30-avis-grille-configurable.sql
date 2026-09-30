@@ -110,13 +110,21 @@ create table if not exists public.avis_criteres_niveaux (
   constraint avis_niveaux_note_check
     check (note is null or note between 1 and 5),
 
-  -- ⚠ LA REGLE QUE L'HOTE NE PEUT PAS DEFAIRE (§4.2).
-  -- Une note 1 est TOUJOURS negative. Ici, pas dans
-  -- l'ecran : sinon un autre chemin d'ecriture la
-  -- contournerait, et un 1/5 partirait chez Airbnb sans
-  -- que l'hote l'ait relu.
+  -- ⚠ LES DEUX REGLES QUE L'HOTE NE PEUT PAS DEFAIRE
+  -- (§4.2). Ici, pas dans l'ecran : sinon un autre chemin
+  -- d'ecriture les contournerait, et l'avis partirait
+  -- chez Airbnb sans que l'hote l'ait relu.
+  --
+  -- 1. Une note 1 est TOUJOURS negative.
   constraint avis_niveaux_un_est_negatif
     check (note is distinct from 1 or negatif),
+  -- 2. Un refus de recommander est TOUJOURS negatif.
+  -- Precision de Thierry, 30 septembre 2026 : c'est le
+  -- jugement le plus lourd qu'un hote porte sur un
+  -- voyageur — il pese sur ses reservations futures chez
+  -- d'autres hotes. Il ne part pas sans relecture.
+  constraint avis_niveaux_refus_est_negatif
+    check (recommande is distinct from false or negatif),
 
   constraint avis_niveaux_cle_non_vide
     check (length(btrim(cle)) > 0),
@@ -223,6 +231,28 @@ create policy avis_niveaux_select
 revoke insert, update, delete
   on table public.avis_criteres_niveaux
   from anon, authenticated;
+
+-- ─── Ce que cette migration N'ECRIT PAS ────────────────
+-- ⚠ AUCUNE GRILLE N'EST PRE-INSEREE. Decision de Thierry
+-- (30 septembre 2026) : la grille par defaut est une
+-- CONSTANTE DU CODE, et la base ne recoit des lignes que
+-- le jour ou un hote MODIFIE sa grille — pour son compte
+-- ou pour un bien.
+--
+-- Pourquoi c'est mieux qu'un seed :
+--   - un seed de masse ecrirait six criteres et vingt
+--     niveaux par compte, pour des comptes qui n'ouvriront
+--     peut-etre jamais cet ecran ;
+--   - faire evoluer la grille par defaut demanderait
+--     ensuite de migrer toutes ces copies, ou de vivre
+--     avec des grilles figees a la date de creation du
+--     compte ;
+--   - « aucune ligne » se lit sans ambiguite : ce compte
+--     n'a rien change. Des lignes identiques au defaut ne
+--     diraient pas si l'hote a valide ou subi.
+--
+-- Lecture : aucune ligne pour (compte, bien) puis pour
+-- (compte, null) => grille par defaut du code.
 
 -- ─── Verification ──────────────────────────────────────
 -- ⚠ AUCUN SELECT ICI (regle gravee) : la preuve se fait

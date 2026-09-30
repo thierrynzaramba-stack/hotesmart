@@ -91,7 +91,10 @@ qui ne part nulle part.
    la base le tient par contrainte — pas seulement l'écran. La note la plus punitive
    qu'Airbnb affiche sur un voyageur va de pair avec la validation obligatoire par
    l'hôte (§3) ; les découpler laisserait partir un 1/5 sans relecture.
-2. **Un avis négatif repasse toujours par l'hôte**, quel que soit `eval_power` de la
+2. **Un refus de recommander est toujours négatif**, garanti en base de la même
+   façon. C'est le jugement le plus lourd qu'un hôte porte sur un voyageur : il pèse
+   sur ses réservations futures chez d'autres hôtes. Il ne part pas sans relecture.
+3. **Un avis négatif repasse toujours par l'hôte**, quel que soit `eval_power` de la
    prestataire. Règle inchangée (§3).
 
 ### 4.3 Agrégation — le plus sévère
@@ -126,7 +129,15 @@ même esprit que le plus sévère.
 
 ### 4.5 Grille par défaut
 
-Tout compte démarre avec la grille d'origine, pré-remplie et modifiable :
+**La grille par défaut est une constante du code, jamais insérée en base.** La base
+ne reçoit des lignes que le jour où l'hôte modifie sa grille, pour son compte ou pour
+un bien. Un seed de masse écrirait six critères et vingt niveaux par compte, pour des
+comptes qui n'ouvriront peut-être jamais cet écran, et rendrait toute évolution du
+défaut impossible sans migrer ces copies. « Aucune ligne » se lit sans ambiguïté : ce
+compte n'a rien changé.
+
+Lecture : aucune ligne pour (compte, bien), puis aucune pour (compte, `null`), donc
+grille par défaut.
 
 | Critère | Catégorie | Qui remplit | Niveaux (note, négatif) |
 |---|---|---|---|

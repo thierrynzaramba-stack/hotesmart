@@ -18,9 +18,17 @@ const test = require('node:test')
 const assert = require('node:assert')
 
 const {
-  NIVEAUX, CATEGORIES, TAGS,
+  GRILLE_DEFAUT, CATEGORIES, CATEGORIES_NOTEES, TAGS,
   noter, estNegatif, tagsDe,
 } = require('../lib/avis/notes-evaluation')
+
+// ⚠ CE FICHIER TESTE LA GRILLE PAR DEFAUT. Depuis l'amendement du 30 septembre
+// 2026, les niveaux ne sont plus une constante du module : ils sont une GRILLE,
+// et l'hote peut la changer. Ce que ces tests defendent n'a pas bouge — le
+// comportement de la grille livree — mais ils le lisent desormais dans
+// GRILLE_DEFAUT. La grille configurable a son propre fichier,
+// tests/avis-grille.test.js.
+const NIVEAUX = Object.fromEntries(GRILLE_DEFAUT.criteres.map(c => [c.cle, c.niveaux.map(v => v.cle)]))
 
 // Les reponses les plus favorables, comme base de comparaison.
 const PARFAIT = {
@@ -39,7 +47,10 @@ test('les niveaux sont ceux de la spec, ni plus ni moins', () => {
 })
 
 test('les categories sont celles de l’OTA, pas les notres', () => {
-  assert.deepStrictEqual(CATEGORIES, ['cleanliness', 'communication', 'respect_house_rules'])
+  // Trois categories NOTEES, plus « recommandation » qui porte un booleen et
+  // non une note : Airbnb attend `is_reviewee_recommended`.
+  assert.deepStrictEqual(CATEGORIES_NOTEES, ['cleanliness', 'communication', 'respect_house_rules'])
+  assert.deepStrictEqual(CATEGORIES, ['cleanliness', 'communication', 'respect_house_rules', 'recommandation'])
 })
 
 // ─── Le calcul ──────────────────────────────────────────────────────────────
