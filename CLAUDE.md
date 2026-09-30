@@ -228,8 +228,11 @@ trace dans `prix_hote_journal`. Règle de saut du moteur, une seule :
 `prix-hote-journal` appliquées staging et prod (et `fermetures`, absente en
 prod jusqu'au 23 septembre). **La bulle est ACTIVÉE (pilote YieldFlow) depuis
 le 23 septembre 2026** ; son reliquat de bascule (476 nuits) a été réparé par
-`scripts/defaire-fermeture-bascule.js`. Cœur de vie 23 porte le même reliquat
-(786 nuits, lot 2026-09-10T17:17) : NON touché, sur go de Thierry seulement.
+`scripts/defaire-fermeture-bascule.js`. Cœur de vie 23 portait le même reliquat
+(786 nuits, lot 2026-09-10T17:17, du 8 déc. 2026 au 31 janv. 2029) : **réparé
+le 30 septembre 2026 sur go de Thierry** (même script, incident 16387) ; le
+pilote a rouvert 232 nuits avec leur prix. Symptôme vu par Thierry : « il
+s'ouvre seulement jusqu'à décembre ».
 Aussi en prod : UI calendrier et fonctions Vercel en région Paris
 (`docs/kb/performance.md`). Spec : docs/specs/spec-yieldflow-v1.md §2 ter.
 
@@ -267,7 +270,41 @@ une nuit pas encore ouverte), 21 (nuit rouverte à la main sans prix), 24
 (agrandir la fenêtre ne prévient pas), 26 (référence en prix voyageur total,
 ménage compris), 27 (le full sync journalise des nuits sans ligne), **28** (le
 délai affiné par le « vendu à date » N-1). V2 « nouveau bien sans historique »
-cadrée (`docs/kb/chantier-nouveau-bien.md`), V2.1 et suivants non commencés.
+cadrée (`docs/kb/chantier-nouveau-bien.md`) ; la page « marché global »
+(AirROI, calendrier jour par jour) est en STAGING seulement, branche
+`lot-v2-3-marche-quand` — rien en production.
+
+**Lots 4.6.6 et 4.6.7 EN PROD le 30 septembre 2026** (0dc6c25, d557124) :
+- **4.6.6 — réduire la fenêtre retire de la vente les nuits qui en sortent**
+  (décision de Thierry, option 1 ; dettes 29 et 34 soldées). Enregistrer la
+  fenêtre annonce les nuits OUVERTES au-delà de la nouvelle fin (non vendues,
+  ✎ et ouvertures à la main compris), exige leur nombre et leurs bornes, réduit
+  la fenêtre PUIS les retire : fermées chez le canal par l'écrivain unique
+  (`retirerDeLaVente`, lib/calendrier-writer.js), lignes supprimées seulement
+  si le canal a accepté — elles redeviennent « pas encore ouvertes » et le
+  pilote les rouvre avec leur prix quand la fenêtre les rattrape. Sinon :
+  état d'avant rétabli, fenêtre d'avant restaurée ; tout état douteux sonne au
+  fondateur avec les dates. Un bien sans plan tarifaire se retire en base
+  seulement, et le dit ; Beds24 est refusé. Le canal du moteur relit la
+  fenêtre en base avant d'ouvrir. Éprouvé en réel : Cœur de vie 23 (178 nuits
+  retirées puis rouvertes, prix Channex = base + supplément voyageurs) et La
+  bulle (24 nuits du 31 août au 23 septembre 2027, fermées chez Channex, rien
+  d'autre touché).
+- **4.6.7 — la grille fixée par l'hôte, niveau par niveau** (décisions de
+  Thierry). Table `grille_hote` (+ journal), writer unique
+  `lib/yield/grille-hote.js` — PAS `prix_hote`, qui fige une nuit que le moteur
+  saute. Point d'application unique : `preparerContexte`, APRÈS le
+  positionnement des contextes. Les ajustements (jour de semaine, événements,
+  plancher N-1, primes, fourchette) s'appliquent par-dessus ; l'ordre des
+  niveaux tient à chaque application (un calculé s'écarte d'un pas, un fixé ne
+  bouge jamais) ; « au calcul » (×) n'est jamais refusé ; confirmation « N nuits
+  vont changer de prix » comptée par la règle du moteur, grille actuelle
+  contre proposée. Le prix recommandé au moment du geste est gardé :
+  `grille_hote.recommended_rate_cents`, et `prix_hote.recommended_rate_cents`
+  pour chaque ✎. Migration `2026-09-30-grille-hote` appliquée staging et prod,
+  prouvée par `scripts/verifier-migration-grille-hote.js`.
+- **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
+  lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
@@ -276,7 +313,7 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
-## DETTE DATEE — 25 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
+## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
@@ -323,7 +360,7 @@ vert, sans toucher une ligne de production.
 | famille | fichier | rouges | ce qui se declenche |
 |---|---|---|---|
 | 1 | `tests/booking-changes.test.js` | **8** | garde d'anciennete `JOURS_DE_GRACE = 7` (sejour termine) |
-| 2 | `tests/avis-endpoint.test.js` | **3** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir |
+| 2 | `tests/avis-endpoint.test.js` | **6** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir ; le 29 septembre, trois de plus (« un avis NON analyse… », « un membre limite a un bien… », « une detection en attente… ») — contre-epreuve +1 mois : 5 des 6 au vert, le 6e casse par le decalage lui-meme (la date invalide 02-30 devient valide) |
 | 3 | `tests/messages-classify.test.js` | **10** | meme fenetre : le message du 20 aout est ecarte AVANT la garde de panne DB, donc la garde n'est jamais appelee — elle mord toujours |
 | 4 | `tests/menages-public-filtre-presta.test.js` | **4** | fenetre glissante de 14 jours du fil d'actualites (`api/menages-public.js`, « on remonte aussi les 14 derniers jours ») : le menage `b1` du 6 septembre en est sorti le 21 (constate le 21 septembre 2026, contre-epreuve +1 mois : 20/20) |
 
@@ -336,10 +373,10 @@ V1.** Un chiffre qui bouge tout seul avec le calendrier est un mauvais
 garde-fou : l'actualiser n'est qu'un sursis.
 
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
-Le nombre attendu est **25, et exactement 25** (8 + 3 + 10 + 4, au 21 septembre
-2026 — il etait 8 jusqu'au 18, 21 le 20). Avant tout push : lire le compte,
-pas la couleur. **26 rouges = une regression, on ne pousse pas** tant qu'on ne
-l'a pas nommee ; 24 rouges = une dette s'est refermee, on met ce nombre a jour
+Le nombre attendu est **28, et exactement 28** (8 + 6 + 10 + 4, au 29 septembre
+2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28). Avant tout push : lire le compte,
+pas la couleur. **29 rouges = une regression, on ne pousse pas** tant qu'on ne
+l'a pas nommee ; 27 rouges = une dette s'est refermee, on met ce nombre a jour
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
 se contre-eprouve avant d'etre pris pour une regression : decaler les fixtures
 d'un mois, relancer, restaurer l'arbre — si tout repasse au vert, c'est le
@@ -373,7 +410,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
-- docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 25 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
+- docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 28 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
 - docs/kb/prix-plancher.md (garde anti nuit a 0 : `properties.prix_minimum` par bien, repli 10 € ; on FERME la date, on ne remonte jamais le prix ; `rate: 0` n'est pas applique par Channex, il garde le prix de la grille).
 - docs/kb/evenements-yield.md (vacances scolaires importees/cachees par zone ; jours feries CALCULES, aucune table ; OpenAgenda ecarte de la V1, sur mesure).
