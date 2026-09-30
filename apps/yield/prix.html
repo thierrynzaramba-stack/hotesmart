@@ -768,10 +768,20 @@
         const zone = el('yp-fen-etat'); if (zone) zone.textContent = msg
         return
       }
+      // Ce qui a ete fait, dit tel quel : un logement sans plan tarifaire n'a
+      // rien envoye aux plateformes (meme phrase que le writer).
+      if (d && d.retirees != null) {
+        const n = d.retirees, pl = n > 1
+        bilanRetrait = d.retrait_local
+          ? `${n} nuit${pl ? 's' : ''} retirée${pl ? 's' : ''} du calendrier HôteSmart. Ce logement n’est relié à aucun plan tarifaire du canal : rien n’est envoyé aux plateformes.`
+          : `${n} nuit${pl ? 's' : ''} retirée${pl ? 's' : ''} de la vente ; YieldFlow ${pl ? 'les' : 'la'} rouvrira quand la fenêtre ${pl ? 'les' : 'la'} rattrapera.`
+      }
     } catch (e) { etat.textContent = 'Erreur réseau : réessayez.'; btn.disabled = false; return }
     await chargerPilote()
+    if (bilanRetrait) { const zone = el('yp-fen-etat'); if (zone) zone.textContent = bilanRetrait; bilanRetrait = null }
     charger()
   }
+  let bilanRetrait = null
 
   // ⚠ ENTRER EN YIELDFLOW EXIGE UNE FENETRE (lot 4.6.3) : l'activation, c'est
   // le mode ET jusqu'ou il ouvre. On la demande AVANT d'ecrire, dans le bloc
