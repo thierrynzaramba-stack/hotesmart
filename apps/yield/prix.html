@@ -46,6 +46,15 @@
     .yp-etat:disabled { cursor: not-allowed; opacity: .7; }
     .yp-pilote .raison { font-size: 12px; color: #B02A37; margin: 8px 0 0; }
     .yp-pilote .avertir { font-size: 13px; color: var(--text); margin: 0; flex-basis: 100%; }
+    /* Lot 4.6.7 : la grille fixee par l'hote. */
+    .yp-niv { position: relative; }
+    .yp-niv-edit { position: absolute; top: 2px; right: 4px; background: none; border: none; cursor: pointer; font-size: 12px; opacity: .55; padding: 0; }
+    .yp-niv-edit:hover { opacity: 1; }
+    .yp-niv-fixe { font-size: 10.5px; color: var(--text2); margin-top: 2px; }
+    .yp-niv-x { background: none; border: none; cursor: pointer; color: #B02A37; font-size: 13px; padding: 0 2px; }
+    .yp-grille-geste { margin-top: 8px; font-size: 13px; line-height: 1.6; }
+    .yp-grille-geste input { width: 80px; }
+    .yp-grille-geste .avertir { color: #B02A37; }
     .yp-pilote .avertir b { color: #B02A37; }
     .yp-pilote .dit { font-size: 12px; color: var(--text3); margin: 8px 0 0; }
     /* LA FENETRE D'OUVERTURE (lot 4.6.3) : jusqu'ou YieldFlow ouvre les dates. */
@@ -1180,9 +1189,14 @@
             f ? ` ${phraseFourchette(b)}` : ''}`)}">
           <div class="n">${ech(n.nom)}${n.etire ? '<sup>*</sup>' : ''}</div>
           <div class="p">${f ? `${n.prix}–<span class="haut">${euros(b.plafond)}</span>` : euros(n.prix)}</div>
+          ${n.fixe_par_hote
+            ? `<div class="yp-niv-fixe">fixé · calcul ${euros(n.prix_calcule)} <button type="button" class="yp-niv-x" data-niveau="${ech(n.nom)}" title="Remettre ${ech(n.nom)} au calcul (${euros(n.prix_calcule)})">×</button></div>`
+            : ''}
+          <button type="button" class="yp-niv-edit" data-niveau="${ech(n.nom)}" data-prix="${n.prix}" title="Fixer vous-même le montant de ${ech(n.nom)}">✎</button>
         </div>`
         }).join('')}
       </div>
+      <div class="yp-grille-geste" id="yp-grille-geste" hidden></div>
       ${b.niveaux.some(n => n.etire)
         ? '<div class="yp-grille-note"><sup>*</sup> niveau étiré pour garder 5 % d’écart — il reste dans vos prix pratiqués.</div>'
         : ''}
@@ -1190,6 +1204,84 @@
         ? `<div class="yp-grille-note">Exceptionnel : ${euros(b.niveaux[b.niveaux.length - 1].prix)} sans preuve. Une nuit ne monte au-delà que si sa nuit comparable de l’an dernier s’est vendue plus cher — et jamais au-dessus du <b>plafond de ${euros(b.plafond)}</b>, le prix le plus élevé atteint par au moins deux réservations : une borne, pas un prix visé. Il monte seul dès qu’une deuxième réservation atteint un prix plus haut ; au-delà, c’est vous qui posez le prix (✎). Les autres niveaux peuvent aussi monter, jusqu’à ce plafond, quand la nuit comparable de l’an dernier s’est vendue plus cher : la nuit affiche alors son prix et « prouvé le … ».${!(Number(d.bien && d.bien.inventory_units) > 1) ? ' Un seul logement : chaque nuit de l’an dernier est une vente unique, donc toute prime repose sur une seule vente (référence amincie).' : ''}</div>`
         : ''}
     </div>`
+  }
+
+  // ─── LA GRILLE FIXEE PAR L'HOTE (lot 4.6.7, decisions du 30 septembre 2026)
+  // ✎ sur un niveau : saisir un montant, VERIFIER (le serveur juge les bornes
+  // et compte les nuits qui changeraient), puis APPLIQUER. × : remettre au
+  // calcul, avec la meme confirmation. Rien ne s'enregistre sans le clic
+  // « Appliquer », et le serveur exige le nombre annonce.
+  document.addEventListener('click', e => {
+    const edit = e.target.closest && e.target.closest('.yp-niv-edit')
+    const x = e.target.closest && e.target.closest('.yp-niv-x')
+    if (edit) { e.stopPropagation(); ouvrirGeste(edit.dataset.niveau, Number(edit.dataset.prix)) }
+    else if (x) { e.stopPropagation(); verifierGeste(x.dataset.niveau, null) }
+  })
+  function zoneGeste () { const z = el('yp-grille-geste'); if (z) z.hidden = false; return z }
+  function ouvrirGeste (niveau, prix) {
+    const z = zoneGeste(); if (!z) return
+    z.innerHTML = `<b>${ech(niveau)}</b> : fixer à <input type="number" id="yp-geste-prix" min="1" step="1" value="${Number.isFinite(prix) ? prix : ''}"> €
+      <button type="button" id="yp-geste-verifier">Vérifier</button>
+      <button type="button" class="secondaire" id="yp-geste-annuler">Annuler</button>
+      <span class="etat" id="yp-geste-etat">Les ajustements (jour de semaine, événements, plancher, primes) continueront de s’appliquer par-dessus.</span>`
+    el('yp-geste-annuler').addEventListener('click', fermerGeste)
+    el('yp-geste-verifier').addEventListener('click', () => {
+      const v = Math.round(Number(el('yp-geste-prix').value) * 100)
+      verifierGeste(niveau, Number.isInteger(v) && v > 0 ? v : NaN)
+    })
+  }
+  function fermerGeste () { const z = el('yp-grille-geste'); if (z) { z.hidden = true; z.innerHTML = '' } }
+  const qs = o => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+  async function verifierGeste (niveau, cents) {
+    const z = zoneGeste(); if (!z) return
+    if (Number.isNaN(cents)) { const et = el('yp-geste-etat'); if (et) et.textContent = 'Montant invalide.'; return }
+    const bien = el('yp-bien').value
+    const geste = cents == null ? { niveau, retirer: 1 } : { niveau, prix_centimes: cents }
+    z.innerHTML = 'Calcul de ce qui changerait…'
+    let d
+    try {
+      const r = await fetch(`/api/yield-grille?${qs({ bien, ...geste })}`, { headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
+      d = await r.json()
+      if (!r.ok) { z.innerHTML = `<span class="avertir">${ech(d && d.error ? d.error : 'Calcul impossible.')}</span> <button type="button" class="secondaire" id="yp-geste-annuler">Fermer</button>`; el('yp-geste-annuler').addEventListener('click', fermerGeste); return }
+    } catch (e) { z.textContent = 'Erreur réseau : réessayez.'; return }
+    confirmerGeste(geste, d)
+  }
+  function confirmerGeste (geste, d) {
+    const z = zoneGeste(); if (!z) return
+    const quoi = geste.retirer ? `Remettre <b>${ech(geste.niveau)}</b> au calcul` : `Fixer <b>${ech(geste.niveau)}</b> à <b>${euros(geste.prix_centimes / 100)}</b>`
+    if (!d.valide) {
+      z.innerHTML = `${quoi} : <span class="avertir">${ech(d.message || 'Grille refusée.')}</span> <button type="button" class="secondaire" id="yp-geste-annuler">Fermer</button>`
+      el('yp-geste-annuler').addEventListener('click', fermerGeste); return
+    }
+    const c = d.confirmation || {}
+    const effet = !c.pilote
+      ? 'Ce logement n’est pas piloté : aucun prix du calendrier ne change, seules les suggestions de cette page suivent la grille.'
+      : (c.nuits
+        ? `<b>${c.nuits} nuit${c.nuits > 1 ? 's' : ''} ${c.nuits > 1 ? 'vont' : 'va'} changer de prix</b>, du ${ech(dateFr(c.du))} au ${ech(dateFr(c.au))} (de ${euros(c.min)} à ${euros(c.max)}). YieldFlow les enverra aux plateformes dans les 5 minutes.`
+        : 'Aucune nuit ouverte ne change de prix.')
+    z.innerHTML = `${quoi} ? ${effet}
+      <button type="button" id="yp-geste-appliquer">Appliquer</button>
+      <button type="button" class="secondaire" id="yp-geste-annuler">Annuler</button>
+      <span class="etat" id="yp-geste-etat"></span>`
+    el('yp-geste-annuler').addEventListener('click', fermerGeste)
+    el('yp-geste-appliquer').addEventListener('click', () => appliquerGeste(geste, c.nuits))
+  }
+  async function appliquerGeste (geste, nuits) {
+    const b = el('yp-geste-appliquer'); if (b) b.disabled = true
+    const et = el('yp-geste-etat'); if (et) et.textContent = 'Enregistrement…'
+    const bien = el('yp-bien').value
+    let r, d
+    try {
+      r = await fetch('/api/yield-grille', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, ...enteteCompte() },
+        body: JSON.stringify({ bien, ...geste, retirer: !!geste.retirer, confirme: { nuits } }) })
+      d = await r.json()
+    } catch (e) { if (et) et.textContent = 'Erreur réseau : réessayez.'; if (b) b.disabled = false; return }
+    // Le compte a change entre l'annonce et le clic : on redemande.
+    if (r.status === 409 && d && d.confirmation) { confirmerGeste(geste, { valide: true, confirmation: d.confirmation }); return }
+    if (!r.ok) { if (et) et.textContent = d && d.error ? d.error : 'Enregistrement refusé.'; if (b) b.disabled = false; return }
+    fermerGeste()
+    charger()
   }
 
   // ⚠ LA FOURCHETTE EXCEPTIONNEL (lot V2.0.7) : seulement le dernier niveau, et
