@@ -1221,32 +1221,53 @@ async function evaluationTexte (req, res, garde) {
   return res.status(200).json({ ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif })
 }
 
-// ─── Le mode RECETTE : publier sans rien envoyer a l'OTA ────────────────────
+// ─── PUBLIER POUR DE VRAI EST L'EXCEPTION, PAS LA REGLE ─────────────────────
 //
-// ⚠ POURQUOI IL EXISTE. Une recette humaine doit pouvoir aller jusqu'au bout du
-// parcours — remplir, valider, PUBLIER — et voir le resultat. Sans ce mode, le
-// seul moyen de tester la publication serait de l'envoyer pour de vrai. Chez
-// Airbnb, un avis publie ne se reprend pas : un avis de recette sur un vrai
-// voyageur serait irreparable.
+// ⚠ LE VERROU A ETE INVERSE LE 30 SEPTEMBRE 2026, decision de Thierry, apres
+// mesure. La premiere version demandait une variable pour SIMULER : sur staging,
+// publier envoyait donc un vrai POST tant que personne n'avait rien pose. La
+// variable a ete posee, et la publication est PARTIE quand meme — un
+// deploiement deja construit ne relit pas les variables. Le provider a refuse
+// pour une autre raison (« 422 id is invalid »), et c'est la seule chose qui a
+// evite l'envoi.
 //
-// ⚠ DEUX VERROUS, ET ILS DOIVENT TOUS LES DEUX CEDER. Le drapeau
-// `AVIS_PUBLICATION_SIMULEE` ne suffit pas : une variable posee par erreur sur le
-// projet de production desactiverait silencieusement toute publication reelle, et
-// personne ne le verrait — les avis cesseraient simplement de partir. On exige
-// donc AUSSI que la base ne soit pas celle de production.
+// Un garde ouvert par defaut est un accident qui attend une occasion.
 //
-// Le reflexe habituel serait l'inverse — « actif sauf en production » — et c'est
-// precisement ce qu'il ne faut pas : un oubli de configuration rendrait alors la
-// simulation active en prod.
+// Desormais : la publication est SIMULEE partout, SAUF sur la base de
+// production, reconnue positivement par sa reference. Une base inconnue, une
+// variable absente, une configuration a moitie faite : tout cela SIMULE. On
+// echoue ferme.
+//
+// ⚠ ET L'OBJECTION A CETTE INVERSION A UNE REPONSE. Si la production changeait
+// un jour de base Supabase, la simulation y deviendrait active et les avis
+// cesseraient de partir. Ce ne serait pas silencieux pour autant : chaque
+// publication simulee CRIE dans les journaux, la reponse porte
+// `simulation: true`, et l'ecran affiche « publie EN SIMULATION ». L'hote le
+// verrait du premier coup d'oeil. Le defaut inverse, lui, ne se voyait nulle
+// part — jusqu'a l'avis reel envoye a un vrai voyageur, qui ne se reprend pas.
+//
+// `AVIS_PUBLICATION_REELLE=1` force l'envoi hors production, pour le jour ou on
+// voudra eprouver le vrai chemin contre le Channex de test. Il faut alors le
+// demander explicitement, et c'est tout l'objet du renversement.
 const PROJET_PRODUCTION = 'cjmrizpdyhrcurmgyrhs'
 
-function simulationActive () {
-  if (process.env.AVIS_PUBLICATION_SIMULEE !== '1') return false
+function baseDeProduction () {
   const projet = String(process.env.SUPABASE_URL || '').replace(/^https?:\/\//, '').split('.')[0]
-  if (projet === PROJET_PRODUCTION) {
-    // ⚠ ON CRIE. Un drapeau de recette pose sur la production est une erreur de
-    // configuration grave : il aurait arrete toutes les publications.
-    console.error('[avis] AVIS_PUBLICATION_SIMULEE est pose sur la base de PRODUCTION : ignore. Retirez cette variable.')
+  return projet === PROJET_PRODUCTION
+}
+
+function simulationActive () {
+  if (baseDeProduction()) {
+    // ⚠ EN PRODUCTION, JAMAIS DE SIMULATION, quoi qu'on ait pose. Une variable
+    // de recette egaree sur la prod aurait arrete toutes les publications.
+    if (process.env.AVIS_PUBLICATION_SIMULEE === '1') {
+      console.error('[avis] AVIS_PUBLICATION_SIMULEE est pose sur la base de PRODUCTION : ignore. Retirez cette variable.')
+    }
+    return false
+  }
+  // Hors production : simule, sauf demande explicite du contraire.
+  if (process.env.AVIS_PUBLICATION_REELLE === '1') {
+    console.warn('[avis] AVIS_PUBLICATION_REELLE=1 hors production : les avis partiront POUR DE VRAI chez le provider.')
     return false
   }
   return true
@@ -1258,11 +1279,15 @@ function simulationActive () {
 function providerSimule () {
   return {
     async publierAvisVoyageur (reviewId, charge) {
-      console.log('[avis] SIMULATION — POST /reviews/%s/guest_review %s', reviewId, JSON.stringify(charge).slice(0, 400))
+      // ⚠ `console.error`, PAS `console.log`. C'est ce qui rend l'inversion du
+      // verrou sans danger : une simulation active la ou elle ne devrait pas
+      // l'etre se voit dans les journaux d'erreur, pas noyee dans les traces.
+      console.error('[avis] PUBLICATION SIMULEE — rien n est parti chez le provider. POST /reviews/%s/guest_review %s',
+        reviewId, JSON.stringify(charge).slice(0, 400))
       return { ok: true, status: 200, json: { data: { id: reviewId, simulation: true } } }
     },
     async lireAvis (reviewId) {
-      console.log('[avis] SIMULATION — GET /reviews/%s', reviewId)
+      console.error('[avis] LECTURE SIMULEE — GET /reviews/%s', reviewId)
       return { ok: true, status: 200, is_replied: false, json: { simulation: true } }
     },
   }

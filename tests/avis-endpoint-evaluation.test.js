@@ -13,6 +13,13 @@
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 process.env.CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'cle-test'
+// ⚠ CE FICHIER EPROUVE LE CHEMIN REEL DE PUBLICATION, donc il l'ouvre
+// explicitement. Depuis l'inversion du verrou (30 septembre 2026), la
+// publication est SIMULEE partout sauf sur la base de production : sans cette
+// ligne, les tests qui verifient ce qui part chez le provider n'auraient plus
+// rien a observer. Les tests de la simulation, eux, retirent cette variable
+// chacun pour leur compte et la remettent.
+process.env.AVIS_PUBLICATION_REELLE = '1'
 
 const test = require('node:test')
 const assert = require('node:assert')
@@ -608,51 +615,119 @@ test('LE TEST QUI COMPTE : une grille illisible rend quand meme l’ETAT du sejo
   assert.strictEqual(res.body.peut_publier, false)
 })
 
-// ─── Le mode recette : publier sans rien envoyer a l'OTA ────────────────────
-test('LE TEST QUI COMPTE : avec le drapeau de simulation, AUCUN appel reseau ne part', async () => {
-  const avant = process.env.AVIS_PUBLICATION_SIMULEE
-  process.env.AVIS_PUBLICATION_SIMULEE = '1'
+// ─── Publier pour de vrai est l'EXCEPTION, pas la regle ─────────────────────
+// Le verrou a ete inverse le 30 septembre 2026, apres mesure : la variable qui
+// devait simuler avait ete posee, et la publication est PARTIE quand meme — un
+// deploiement deja construit ne relit pas ses variables. Un garde ouvert par
+// defaut est un accident qui attend une occasion.
+
+test('LE TEST QUI COMPTE : hors production, la publication est SIMULEE sans rien poser', async () => {
+  const avantUrl = process.env.SUPABASE_URL
+  const avantS = process.env.AVIS_PUBLICATION_SIMULEE
+  const avantR = process.env.AVIS_PUBLICATION_REELLE
+  delete process.env.AVIS_PUBLICATION_SIMULEE
+  delete process.env.AVIS_PUBLICATION_REELLE
+  process.env.SUPABASE_URL = 'https://ortyofzzdsthlhqmzsnq.supabase.co'
   try {
     const etat = preparer({ evaluations: [evalA()] })
     const handler = require('../api/avis')
     const res = reponse()
     await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
     assert.strictEqual(res.code, 200)
-    assert.strictEqual(res.body.status, 'publiee')
-    assert.strictEqual(res.body.simulation, true, 'la recette doit savoir que rien n est parti')
-    assert.strictEqual(etat.provider.appels.length, 0, 'aucun appel reseau')
+    assert.strictEqual(res.body.simulation, true)
+    assert.strictEqual(etat.provider.appels.length, 0, 'aucun appel reseau, sans avoir rien pose')
   } finally {
-    if (avant === undefined) delete process.env.AVIS_PUBLICATION_SIMULEE
-    else process.env.AVIS_PUBLICATION_SIMULEE = avant
+    process.env.SUPABASE_URL = avantUrl
+    if (avantS !== undefined) process.env.AVIS_PUBLICATION_SIMULEE = avantS
+    if (avantR !== undefined) process.env.AVIS_PUBLICATION_REELLE = avantR
   }
 })
 
-test('LE TEST QUI COMPTE : le drapeau est IGNORE si la base est celle de production', async () => {
-  // Un drapeau de recette pose par erreur sur la production aurait arrete toutes
-  // les publications, en silence. Deux verrous, et ils doivent tous les deux ceder.
-  const avantDrapeau = process.env.AVIS_PUBLICATION_SIMULEE
+test('LE TEST QUI COMPTE : une base INCONNUE simule aussi — on echoue ferme', async () => {
+  // Une base de recette neuve, un projet renomme, une variable a moitie posee :
+  // rien de tout cela ne doit ouvrir la porte.
   const avantUrl = process.env.SUPABASE_URL
-  process.env.AVIS_PUBLICATION_SIMULEE = '1'
+  const avantR = process.env.AVIS_PUBLICATION_REELLE
+  delete process.env.AVIS_PUBLICATION_REELLE
+  process.env.SUPABASE_URL = 'https://une-base-jamais-vue.supabase.co'
+  try {
+    const etat = preparer({ evaluations: [evalA()] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+    assert.strictEqual(res.body.simulation, true)
+    assert.strictEqual(etat.provider.appels.length, 0)
+  } finally {
+    process.env.SUPABASE_URL = avantUrl
+    if (avantR !== undefined) process.env.AVIS_PUBLICATION_REELLE = avantR
+  }
+})
+
+test('LE TEST QUI COMPTE : SUPABASE_URL absente simule aussi', async () => {
+  const avantUrl = process.env.SUPABASE_URL
+  const avantR = process.env.AVIS_PUBLICATION_REELLE
+  delete process.env.AVIS_PUBLICATION_REELLE
+  delete process.env.SUPABASE_URL
+  try {
+    const etat = preparer({ evaluations: [evalA()] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+    assert.strictEqual(res.body.simulation, true)
+  } finally {
+    process.env.SUPABASE_URL = avantUrl
+    if (avantR !== undefined) process.env.AVIS_PUBLICATION_REELLE = avantR
+  }
+})
+
+test('LE TEST QUI COMPTE : sur la base de PRODUCTION, l’avis part pour de vrai', async () => {
+  const avantUrl = process.env.SUPABASE_URL
   process.env.SUPABASE_URL = 'https://cjmrizpdyhrcurmgyrhs.supabase.co'
   try {
     const etat = preparer({ evaluations: [evalA()] })
     const handler = require('../api/avis')
     const res = reponse()
     await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
-    assert.strictEqual(res.body.simulation, undefined, 'aucune simulation sur la production')
-    assert.ok(etat.provider.appels.some(a => a.methode === 'POST'), 'le vrai canal est appele')
+    assert.strictEqual(res.body.simulation, undefined)
+    assert.ok(etat.provider.appels.some(a => a.methode === 'POST'))
+  } finally { process.env.SUPABASE_URL = avantUrl }
+})
+
+test('LE TEST QUI COMPTE : une variable de recette egaree sur la PRODUCTION est ignoree', async () => {
+  // Elle aurait arrete toutes les publications, en silence.
+  const avantUrl = process.env.SUPABASE_URL
+  const avantS = process.env.AVIS_PUBLICATION_SIMULEE
+  process.env.SUPABASE_URL = 'https://cjmrizpdyhrcurmgyrhs.supabase.co'
+  process.env.AVIS_PUBLICATION_SIMULEE = '1'
+  try {
+    const etat = preparer({ evaluations: [evalA()] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+    assert.strictEqual(res.body.simulation, undefined)
+    assert.ok(etat.provider.appels.some(a => a.methode === 'POST'))
   } finally {
-    if (avantDrapeau === undefined) delete process.env.AVIS_PUBLICATION_SIMULEE
-    else process.env.AVIS_PUBLICATION_SIMULEE = avantDrapeau
     process.env.SUPABASE_URL = avantUrl
+    if (avantS === undefined) delete process.env.AVIS_PUBLICATION_SIMULEE
+    else process.env.AVIS_PUBLICATION_SIMULEE = avantS
   }
 })
 
-test('sans le drapeau, le vrai canal est utilise', async () => {
-  const etat = preparer({ evaluations: [evalA()] })
-  const handler = require('../api/avis')
-  const res = reponse()
-  await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
-  assert.strictEqual(res.body.simulation, undefined)
-  assert.ok(etat.provider.appels.some(a => a.methode === 'POST'))
+test('hors production, AVIS_PUBLICATION_REELLE=1 ouvre la porte — explicitement', async () => {
+  const avantUrl = process.env.SUPABASE_URL
+  const avantR = process.env.AVIS_PUBLICATION_REELLE
+  process.env.SUPABASE_URL = 'https://ortyofzzdsthlhqmzsnq.supabase.co'
+  process.env.AVIS_PUBLICATION_REELLE = '1'
+  try {
+    const etat = preparer({ evaluations: [evalA()] })
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+    assert.strictEqual(res.body.simulation, undefined)
+    assert.ok(etat.provider.appels.some(a => a.methode === 'POST'))
+  } finally {
+    process.env.SUPABASE_URL = avantUrl
+    if (avantR === undefined) delete process.env.AVIS_PUBLICATION_REELLE
+    else process.env.AVIS_PUBLICATION_REELLE = avantR
+  }
 })
