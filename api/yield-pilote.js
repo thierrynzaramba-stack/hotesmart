@@ -290,6 +290,7 @@ module.exports = async (req, res) => {
   // incertain : la fenetre RESTE reduite — le moteur ne touche pas ces nuits,
   // et l'alerte au fondateur (posee par le retrait) porte les dates.
   let retirees = null
+  let retraitLocal = false
   if (retrait && retrait.nuits > 0) {
     let r
     try {
@@ -311,6 +312,7 @@ module.exports = async (req, res) => {
       return res.status(502).json({ error: r.message, code: `retrait_${r.raison}`, etat: r.etat, fenetre_retablie: fenetreRetablie })
     }
     retirees = r.retirees
+    retraitLocal = r.local === true
   }
 
   // ⚠ BASCULER NE CHANGE AUCUN PRIX (§2 bis). Les lignes `calendar_inventory`
@@ -326,7 +328,7 @@ module.exports = async (req, res) => {
   }
   console.log(`[yield-pilote] ${bien.id} : ${actuel} -> ${voulu}${fenetre ? ` (fenetre ${fenetre.valeur} ${fenetre.type})` : ''}${prixHote ? ` — prix de l hote : ${prixHote.nuits} nuit(s), ${prixHote.recalees} recalee(s)` : ''}`)
   return res.status(200).json({ bien: bien.id, pilote: voulu, fenetre: voulu === 'yieldflow' ? (fenetre || fenetreDuBien(bien)) : null, change: true,
-    ...(retirees != null ? { retirees } : {}),
+    ...(retirees != null ? { retirees, retrait_local: retraitLocal } : {}),
     ouverture: voulu === 'yieldflow' ? 'Les dates s\'ouvriront automatiquement dans les 5 minutes, puis chaque jour.' : null,
     prix_hote: prixHote })
 }

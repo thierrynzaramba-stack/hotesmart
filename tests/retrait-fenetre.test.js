@@ -217,6 +217,7 @@ test('LE TEST QUI COMPTE (endpoint) : sans le nombre confirme, 409 et RIEN n est
   const ok = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: { nuits: 2, du: '2026-10-20', au: '2026-10-21' } })
   assert.equal(ok.code, 200)
   assert.equal(ok.corps.retirees, 2)
+  assert.equal(ok.corps.retrait_local, false)
   assert.deepEqual(e.gestes, [['update', 10], ['retrait', 2]], 'fenetre reduite AVANT le retrait')
 })
 
@@ -288,15 +289,28 @@ test('review : une exception pendant l ecriture rend « incertain » et sonne �
   assert.equal(alertes.length, 1)
 })
 
-test('review : un bien Beds24, ou Channex sans plan tarifaire, est REFUSE avant d ecrire — jamais dit « retire » sans que rien parte', async () => {
-  for (const [bien, raison] of [[{ ...BIEN, provider: 'beds24' }, 'canal_non_gere'], [{ ...BIEN, provider_rate_plan_id: null }, 'canal_incomplet']]) {
-    etat.ordre = []
-    const sb = fausseBase(OUVERTES.map(l => ({ ...l })))
-    const appel = canal(true)
-    const r = await retirerDeLaVente({ supabase: sb, bien, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel, deps: { reportIncident: annonce } })
-    assert.deepEqual([r.ok, r.etat, r.raison], [false, 'inchange', raison])
-    assert.deepEqual([sb.journal, appel.appels.length, etat.ordre], [[], 0, []])
-  }
+test('review : un bien Beds24 est REFUSE avant d ecrire — jamais dit « retire » sans que rien parte', async () => {
+  etat.ordre = []
+  const sb = fausseBase(OUVERTES.map(l => ({ ...l })))
+  const appel = canal(true)
+  const r = await retirerDeLaVente({ supabase: sb, bien: { ...BIEN, provider: 'beds24' }, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel, deps: { reportIncident: annonce } })
+  assert.deepEqual([r.ok, r.etat, r.raison], [false, 'inchange', 'canal_non_gere'])
+  assert.deepEqual([sb.journal, appel.appels.length, etat.ordre], [[], 0, []])
+})
+
+test('LE TEST QUI COMPTE (option 1, Thierry, 30 septembre 2026) : sans plan tarifaire, retrait EN BASE seulement, aucun appel au canal, et il le DIT (local)', async () => {
+  etat.ordre = []
+  const sb = fausseBase(OUVERTES.map(l => ({ ...l })))
+  const appel = canal(true)
+  // Le Loft de recette : propriete Channex, ni type de chambre ni plan tarifaire.
+  const r = await retirerDeLaVente({ supabase: sb, bien: { ...BIEN, provider_room_type_id: null, provider_rate_plan_id: null }, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel, deps: { reportIncident: annonce } })
+  assert.deepEqual(r, { ok: true, etat: 'retire', retirees: 3, demandees: 3, local: true })
+  assert.equal(appel.appels.length, 0, 'rien n est parti au canal')
+  assert.equal(sb.table.size, 0)
+  // Un bien RELIE, lui, ne porte pas ce drapeau.
+  etat.ordre = []
+  const r2 = await retirerDeLaVente({ supabase: fausseBase(OUVERTES.map(l => ({ ...l }))), bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(true), deps: { reportIncident: annonce } })
+  assert.equal('local' in r2, false)
 })
 
 test('LE TEST QUI COMPTE (review) : endpoint — nuits fermees mais lignes restantes : la fenetre RESTE reduite (on ne restaure que si rien n a change)', async () => {
