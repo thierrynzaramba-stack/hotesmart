@@ -730,14 +730,14 @@
       + '</span> <button type="button" id="yp-retrait-valider">Retirer et enregistrer</button>'
       + ' <button type="button" class="secondaire" id="yp-retrait-annuler">Annuler</button>'
     el('yp-retrait-annuler').addEventListener('click', () => chargerPilote())
-    el('yp-retrait-valider').addEventListener('click', () => poserFenetre(fenetre, rt.nuits))
+    el('yp-retrait-valider').addEventListener('click', () => poserFenetre(fenetre, { nuits: rt.nuits, du: rt.du, au: rt.au }))
   }
   async function poserFenetre (fenetre, retraitConfirme) {
     const bien = el('yp-bien').value
     const etat = el('yp-fen-etat'); const btn = el('yp-fen-enregistrer')
     const v = el('yp-retrait-valider'); if (v) v.disabled = true
     btn.disabled = true
-    etat.textContent = retraitConfirme ? `Retrait de ${retraitConfirme} nuit${retraitConfirme > 1 ? 's' : ''} de la vente…` : 'Enregistrement…'
+    etat.textContent = retraitConfirme ? `Retrait de ${retraitConfirme.nuits} nuit${retraitConfirme.nuits > 1 ? 's' : ''} de la vente…` : 'Enregistrement…'
     try {
       const r = await fetch('/api/yield-pilote', {
         method: 'POST',
@@ -749,7 +749,14 @@
       if (r.status === 409 && d && d.code === 'retrait_a_confirmer' && d.retrait) { confirmerRetrait(fenetre, d.retrait); btn.disabled = false; return }
       // ⚠ LE REFUS DU SERVEUR S'AFFICHE TEL QUEL : la regle et son francais vivent
       // dans lib/pilote-tarifaire.js (validerFenetre) et lib/calendrier-writer.js.
-      if (!r.ok) { etat.textContent = d && d.error ? d.error : 'Réglage refusé.'; btn.disabled = false; return }
+      // ⚠ APRES UN ECHEC, L'ECRAN RELIT LA FENETRE DU SERVEUR (review) : il a pu
+      // la retablir ; les champs ne doivent pas montrer celle qui n'a pas tenu.
+      if (!r.ok) {
+        const msg = d && d.error ? d.error : 'Réglage refusé.'
+        await chargerPilote()
+        const zone = el('yp-fen-etat'); if (zone) zone.textContent = msg
+        return
+      }
     } catch (e) { etat.textContent = 'Erreur réseau : réessayez.'; btn.disabled = false; return }
     await chargerPilote()
     charger()

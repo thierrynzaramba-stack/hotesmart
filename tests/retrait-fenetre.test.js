@@ -52,7 +52,8 @@ const BIEN = {
 
 // Faux client : `calendar_inventory` vivant (lecture filtree, upsert, delete
 // conditionnel) ; `automation_incidents` rend la trace si l'annonce a eu lieu.
-function fausseBase (lignes, { annonceEnregistree = true } = {}) {
+function fausseBase (lignes, { annonceEnregistree = true, echecsDelete = 0, upsertLeve = false, fenetre = null } = {}) {
+  let echecs = echecsDelete
   const table = new Map(lignes.map(l => [l.date, { property_id: ID, ...l }]))
   const journal = []
   const client = {
@@ -65,13 +66,14 @@ function fausseBase (lignes, { annonceEnregistree = true } = {}) {
       q.gt = (c, v) => { q.sup = [c, v]; return q }
       q.gte = () => q; q.lte = () => q; q.order = () => q; q.limit = () => q
       q.range = (a, b) => { q.plage = [a, b]; return q }
-      q.maybeSingle = async () => ({ data: null, error: null })
+      q.maybeSingle = async () => ({ data: nom === 'properties' ? fenetre : null, error: null })
       const filtre = () => [...table.values()].filter(l =>
         Object.entries(q.f).every(([c, v]) => l[c] === v) &&
         (!q.inn || q.inn[1].includes(l[q.inn[0]])) &&
         (!q.sup || l[q.sup[0]] > q.sup[1])).sort((a, b) => (a.date < b.date ? -1 : 1))
       q.delete = () => { q.del = true; return q }
       q.upsert = async (rows) => {
+        if (upsertLeve) throw new Error('base en panne')
         journal.push({ geste: 'upsert', dates: rows.map(r => r.date), stop_sell: [...new Set(rows.map(r => r.stop_sell))] })
         for (const r of rows) table.set(r.date, { ...table.get(r.date), ...r })
         return { error: null }
@@ -81,6 +83,7 @@ function fausseBase (lignes, { annonceEnregistree = true } = {}) {
         if (nom !== 'calendar_inventory') return Promise.resolve({ data: [], error: null }).then(res)
         const out = filtre()
         if (q.del) {
+          if (echecs > 0) { echecs--; journal.push({ geste: 'delete-echec' }); return Promise.resolve({ data: null, error: { message: 'panne' } }).then(res) }
           for (const l of out) table.delete(l.date)
           journal.push({ geste: 'delete', dates: out.map(l => l.date) })
         }
@@ -91,12 +94,15 @@ function fausseBase (lignes, { annonceEnregistree = true } = {}) {
   }
   return client
 }
+// `ok` : booleen, ou le nombre d'appels qui ECHOUENT avant que le canal accepte.
 const canal = (ok = true) => {
-  const f = async (m, chemin, corps) => { f.appels.push({ chemin, corps }); return { ok, status: ok ? 200 : 500, json: {} } }
+  let refus = ok === true ? 0 : (ok === false ? Infinity : ok)
+  const f = async (m, chemin, corps) => { f.appels.push({ chemin, corps }); const bon = refus <= 0; refus--; return { ok: bon, status: bon ? 200 : 500, json: {} } }
   f.appels = []
   return f
 }
-const annonce = async () => { etat.ordre.push('annonce'); return {} }
+const alertes = []
+const annonce = async (type, o) => { if (type === 'retrait_fenetre') etat.ordre.push('annonce'); else alertes.push({ type, ...o.detail, threshold: o.threshold }); return {} }
 const OUVERTES = ['2026-12-01', '2026-12-02', '2026-12-03'].map(date => ({ date, stop_sell: false, avail: 1, rate: 120 }))
 
 test('LE TEST QUI COMPTE : canal d accord — fermee chez le canal, PUIS lignes supprimees ; aucune ligne stop_sell ne reste', async () => {
@@ -104,7 +110,7 @@ test('LE TEST QUI COMPTE : canal d accord — fermee chez le canal, PUIS lignes 
   const sb = fausseBase(OUVERTES)
   const appel = canal(true)
   const r = await retirerDeLaVente({ supabase: sb, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel, deps: { reportIncident: annonce } })
-  assert.deepEqual(r, { ok: true, retirees: 3, demandees: 3 })
+  assert.deepEqual(r, { ok: true, etat: 'retire', retirees: 3, demandees: 3 })
   assert.deepEqual(sb.journal.map(j => j.geste), ['upsert', 'delete'])
   assert.deepEqual(sb.journal[0].stop_sell, [true])
   assert.ok(appel.appels.some(a => a.chemin === '/availability'), 'la fermeture est partie au canal')
@@ -114,9 +120,9 @@ test('LE TEST QUI COMPTE : canal d accord — fermee chez le canal, PUIS lignes 
 test('LE TEST QUI COMPTE : canal refuse — etat d avant RETABLI, rien supprime, jamais « fermee chez nous, ouverte chez le canal »', async () => {
   etat.ordre = []
   const sb = fausseBase(OUVERTES.map(l => ({ ...l })))
-  const r = await retirerDeLaVente({ supabase: sb, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(false), deps: { reportIncident: annonce } })
-  assert.equal(r.ok, false)
-  assert.equal(r.raison, 'canal_refuse')
+  // Le canal refuse la fermeture (ses deux appels), puis accepte le retour.
+  const r = await retirerDeLaVente({ supabase: sb, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(2), deps: { reportIncident: annonce } })
+  assert.deepEqual([r.ok, r.etat, r.raison], [false, 'inchange', 'canal_refuse'])
   assert.deepEqual(sb.journal.map(j => j.geste), ['upsert', 'upsert'], 'fermeture puis retablissement, aucune suppression')
   assert.deepEqual(sb.journal[1].stop_sell, [false])
   assert.deepEqual([...sb.table.values()].map(l => [l.date, l.stop_sell, l.avail]),
@@ -138,7 +144,7 @@ test('une nuit FERMEE entre la confirmation et le geste n est pas touchee', asyn
   const lignes = [...OUVERTES.map(l => ({ ...l })), { date: '2026-12-04', stop_sell: true, avail: 0, rate: 120 }]
   const sb = fausseBase(lignes)
   const r = await retirerDeLaVente({ supabase: sb, bien: BIEN, compte: COMPTE, dates: [...OUVERTES.map(l => l.date), '2026-12-04'], appel: canal(true), deps: { reportIncident: annonce } })
-  assert.deepEqual(r, { ok: true, retirees: 3, demandees: 3 })
+  assert.deepEqual(r, { ok: true, etat: 'retire', retirees: 3, demandees: 3 })
   assert.deepEqual([...sb.table.values()].map(l => l.date), ['2026-12-04'], 'la fermeture de l hote reste')
 })
 
@@ -203,17 +209,20 @@ test('LE TEST QUI COMPTE (endpoint) : sans le nombre confirme, 409 et RIEN n est
   assert.equal(sans.corps.code, 'retrait_a_confirmer')
   assert.deepEqual(sans.corps.retrait, { nuits: 2, du: '2026-10-20', au: '2026-10-21', vendues: 0, fin: '2026-10-11' })
   assert.deepEqual(e.gestes, [])
-  const faux = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: 5 })
+  const faux = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: { nuits: 5, du: '2026-10-20', au: '2026-10-21' } })
   assert.equal(faux.code, 409, 'un nombre perime redemande')
-  const ok = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: 2 })
+  const autres = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: { nuits: 2, du: '2026-10-19', au: '2026-10-21' } })
+  assert.equal(autres.code, 409, 'meme nombre, autres dates : redemande')
+  assert.equal((await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: 2 })).code, 409, 'un simple nombre ne suffit plus')
+  const ok = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: { nuits: 2, du: '2026-10-20', au: '2026-10-21' } })
   assert.equal(ok.code, 200)
   assert.equal(ok.corps.retirees, 2)
   assert.deepEqual(e.gestes, [['update', 10], ['retrait', 2]], 'fenetre reduite AVANT le retrait')
 })
 
 test('LE TEST QUI COMPTE (endpoint) : retrait refuse — la fenetre d avant est RETABLIE et l erreur dite', async () => {
-  const e = chargerEndpoint({ sortantes: ['2026-10-20'], retrait: { ok: false, raison: 'canal_refuse', message: 'Le canal a refusé.' } })
-  const r = await e.appeler({ fenetre: { type: 'jours', valeur: 5 }, retrait_confirme: 1 })
+  const e = chargerEndpoint({ sortantes: ['2026-10-20'], retrait: { ok: false, etat: 'inchange', raison: 'canal_refuse', message: 'Le canal a refusé.' } })
+  const r = await e.appeler({ fenetre: { type: 'jours', valeur: 5 }, retrait_confirme: { nuits: 1, du: '2026-10-20', au: '2026-10-20' } })
   assert.equal(r.code, 502)
   assert.equal(r.corps.code, 'retrait_canal_refuse')
   assert.equal(r.corps.fenetre_retablie, true)
@@ -222,7 +231,7 @@ test('LE TEST QUI COMPTE (endpoint) : retrait refuse — la fenetre d avant est 
 
 test('endpoint : fenetre inchangee MAIS des nuits en vente au-dela — le retrait a lieu (c est ainsi qu un reliquat se range)', async () => {
   const e = chargerEndpoint({ sortantes: ['2026-10-20'], retrait: { ok: true, retirees: 1 } })
-  const r = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: 1 })
+  const r = await e.appeler({ fenetre: { type: 'jours', valeur: 10 }, retrait_confirme: { nuits: 1, du: '2026-10-20', au: '2026-10-20' } })
   assert.equal(r.code, 200)
   assert.deepEqual(e.gestes, [['update', 10], ['retrait', 1]])
   const rien = chargerEndpoint({ sortantes: [], retrait: { ok: true, retirees: 0 } })
@@ -247,4 +256,61 @@ test('LE TEST QUI COMPTE (frontiere) : retirerDeLaVente ne sait QUE fermer — a
   const src = require('fs').readFileSync(require.resolve('../lib/calendrier-writer'), 'utf8')
   const sig = /async function retirerDeLaVente \(\{([^}]*)\}/.exec(src)[1].split(',').map(x => x.trim().split(/\s|=/)[0]).filter(Boolean)
   assert.deepEqual(sig, ['supabase', 'bien', 'compte', 'dates', 'appel', 'deps'])
+})
+
+// ─── Review de 58fc03d ──────────────────────────────────────────────────────
+test('LE TEST QUI COMPTE (review) : suppression en echec — une seconde chance ; si elle echoue aussi, etat « ferme », alerte au fondateur AVEC les dates', async () => {
+  etat.ordre = []; alertes.length = 0
+  const sb1 = fausseBase(OUVERTES.map(l => ({ ...l })), { echecsDelete: 1 })
+  const r1 = await retirerDeLaVente({ supabase: sb1, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(true), deps: { reportIncident: annonce } })
+  assert.deepEqual([r1.ok, r1.etat, r1.retirees], [true, 'retire', 3], 'la seconde chance a range')
+  assert.equal(sb1.table.size, 0)
+  etat.ordre = []
+  const sb2 = fausseBase(OUVERTES.map(l => ({ ...l })), { echecsDelete: 5 })
+  const r2 = await retirerDeLaVente({ supabase: sb2, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(true), deps: { reportIncident: annonce } })
+  assert.deepEqual([r2.ok, r2.etat, r2.raison, r2.restantes], [false, 'ferme', 'suppression', ['2026-12-01', '2026-12-02', '2026-12-03']])
+  assert.deepEqual(alertes.map(a => [a.type, a.etat, a.restantes, a.threshold]), [['retrait_fenetre_incomplet', 'ferme', ['2026-12-01', '2026-12-02', '2026-12-03'], 1]])
+})
+
+test('review : canal refuse PUIS retour a l etat d avant refuse — etat « incertain », alerte, jamais dit « rien n a change »', async () => {
+  etat.ordre = []; alertes.length = 0
+  const sb = fausseBase(OUVERTES.map(l => ({ ...l })))
+  const r = await retirerDeLaVente({ supabase: sb, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(false), deps: { reportIncident: annonce } })
+  assert.deepEqual([r.ok, r.etat, r.raison], [false, 'incertain', 'retablissement'])
+  assert.deepEqual(alertes.map(a => [a.type, a.etat]), [['retrait_fenetre_incomplet', 'incertain']])
+})
+
+test('review : une exception pendant l ecriture rend « incertain » et sonne — jamais un 500 muet', async () => {
+  etat.ordre = []; alertes.length = 0
+  const sb = fausseBase(OUVERTES.map(l => ({ ...l })), { upsertLeve: true })
+  const r = await retirerDeLaVente({ supabase: sb, bien: BIEN, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel: canal(true), deps: { reportIncident: annonce } })
+  assert.deepEqual([r.ok, r.etat, r.raison], [false, 'incertain', 'exception'])
+  assert.equal(alertes.length, 1)
+})
+
+test('review : un bien Beds24, ou Channex sans plan tarifaire, est REFUSE avant d ecrire — jamais dit « retire » sans que rien parte', async () => {
+  for (const [bien, raison] of [[{ ...BIEN, provider: 'beds24' }, 'canal_non_gere'], [{ ...BIEN, provider_rate_plan_id: null }, 'canal_incomplet']]) {
+    etat.ordre = []
+    const sb = fausseBase(OUVERTES.map(l => ({ ...l })))
+    const appel = canal(true)
+    const r = await retirerDeLaVente({ supabase: sb, bien, compte: COMPTE, dates: OUVERTES.map(l => l.date), appel, deps: { reportIncident: annonce } })
+    assert.deepEqual([r.ok, r.etat, r.raison], [false, 'inchange', raison])
+    assert.deepEqual([sb.journal, appel.appels.length, etat.ordre], [[], 0, []])
+  }
+})
+
+test('LE TEST QUI COMPTE (review) : endpoint — nuits fermees mais lignes restantes : la fenetre RESTE reduite (on ne restaure que si rien n a change)', async () => {
+  const e = chargerEndpoint({ sortantes: ['2026-10-20'], retrait: { ok: false, etat: 'ferme', raison: 'suppression', message: 'Support prévenu.' } })
+  const r = await e.appeler({ fenetre: { type: 'jours', valeur: 5 }, retrait_confirme: { nuits: 1, du: '2026-10-20', au: '2026-10-20' } })
+  assert.deepEqual([r.code, r.corps.etat, r.corps.fenetre_retablie], [502, 'ferme', false])
+  assert.deepEqual(e.gestes, [['update', 5], ['retrait', 1]], 'aucune restauration')
+})
+
+test('LE TEST QUI COMPTE (review) : le canal RELIT la fenetre en base — un passage parti avec l ancienne fenetre ne rouvre pas au-dela de la nouvelle', async () => {
+  const { demanderAuCalendrier } = require('../lib/canal-calendrier')
+  // Le passage a charge le bien avec 300 jours ; l'hote vient de passer a 10.
+  const charge = { ...BIEN, pilote_fenetre_valeur: 300 }
+  const sb = fausseBase([], { fenetre: { pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 10 } })
+  const r = await demanderAuCalendrier(sb, charge, { aujourdHui: '2026-10-01', nuits: [{ date: '2026-10-05', ouvrir: true, prix_centimes: 12000 }, { date: '2026-10-20', ouvrir: true, prix_centimes: 12000 }] }, { appel: canal(true) })
+  assert.deepEqual(r.ignorees.hors_fenetre, ['2026-10-20'])
 })

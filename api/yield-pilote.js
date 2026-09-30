@@ -7,8 +7,8 @@
 // GET  ?bien=<uuid>&fenetre_type=&fenetre_valeur=  -> + prix_calendrier (confirmation)
 // POST { bien, pilote: 'calendrier' | 'yieldflow', fenetre?: { type, valeur } }
 // POST { bien, fenetre: { type, valeur } }   (changer la fenetre, bien pilote)
-//      + retrait_confirme: <nombre>  quand des nuits ouvertes sortent de la
-//        fenetre (lot 4.6.6) — le nombre annonce par le GET, sinon 409.
+//      + retrait_confirme: { nuits, du, au }  quand des nuits ouvertes sortent
+//        de la fenetre (lot 4.6.6) — ce que le GET a annonce, sinon 409.
 //
 // ⚠ L'ACTIVATION (lot 4.6.3) = passer en yieldflow AVEC une fenetre. Sans
 // fenetre, le mode n'ouvre rien (4.6.0 : un bien yieldflow sans fenetre n'a
@@ -207,7 +207,10 @@ module.exports = async (req, res) => {
     retrait = await annonceRetrait(complet, fenetre, jourParis(new Date()))
     if (!retrait) return res.status(503).json({ error: 'Les nuits en vente au-delà de la fenêtre n’ont pas pu être lues : rien n’a changé. Réessayez.', code: 'retrait_illisible' })
     retrait.bien = complet
-    if (retrait.nuits > 0 && Number(body.retrait_confirme) !== retrait.nuits) {
+    // Le nombre ET les bornes (review : un autre ensemble de meme taille
+    // passait avec le seul nombre).
+    const c = body.retrait_confirme && typeof body.retrait_confirme === 'object' ? body.retrait_confirme : {}
+    if (retrait.nuits > 0 && !(Number(c.nuits) === retrait.nuits && c.du === retrait.du && c.au === retrait.au)) {
       return res.status(409).json({ error: 'Des nuits en vente sortent de la fenêtre : confirmez leur retrait.', code: 'retrait_a_confirmer',
         retrait: { nuits: retrait.nuits, du: retrait.du, au: retrait.au, vendues: retrait.vendues, fin: retrait.fin } })
     }
@@ -282,16 +285,30 @@ module.exports = async (req, res) => {
   // ⚠ LE RETRAIT, APRES LA FENETRE (lot 4.6.6). La fenetre est deja reduite :
   // le pilote ne rouvrira pas ces nuits entre les deux gestes. Si le retrait
   // echoue, la fenetre d'avant est RETABLIE — tout ou rien, comme le retrait.
+  // ⚠ LA FENETRE D'AVANT NE REVIENT QUE SI RIEN N'A CHANGE (review de
+  // 58fc03d). Nuits fermees chez le canal mais lignes restantes, ou etat
+  // incertain : la fenetre RESTE reduite — le moteur ne touche pas ces nuits,
+  // et l'alerte au fondateur (posee par le retrait) porte les dates.
   let retirees = null
   if (retrait && retrait.nuits > 0) {
-    const r = await retirerDeLaVente({ supabase, bien: { ...retrait.bien, ...maj }, compte, dates: retrait.dates, appel: channelCall })
+    let r
+    try {
+      r = await retirerDeLaVente({ supabase, bien: { ...retrait.bien, ...maj }, compte, dates: retrait.dates, appel: channelCall })
+    } catch (e) {
+      console.error('[yield-pilote] retrait en exception', bien.id, e.message)
+      r = { ok: false, etat: 'incertain', raison: 'exception', message: 'Le retrait a été interrompu : vérifiez ces nuits dans le calendrier.' }
+    }
     if (!r.ok) {
-      const ancienne = fenetreDuBien(bien)
-      const { error: eR } = await supabase.from('properties')
-        .update({ pilote_fenetre_type: ancienne ? ancienne.type : null, pilote_fenetre_valeur: ancienne ? ancienne.valeur : null })
-        .eq('id', bien.id).eq('user_id', compte)
-      if (eR) console.error('[yield-pilote] fenetre non retablie apres echec du retrait', bien.id, eR.message)
-      return res.status(502).json({ error: r.message, code: `retrait_${r.raison}`, fenetre_retablie: !eR })
+      let fenetreRetablie = false
+      if (r.etat === 'inchange') {
+        const ancienne = fenetreDuBien(bien)
+        const { error: eR } = await supabase.from('properties')
+          .update({ pilote_fenetre_type: ancienne ? ancienne.type : null, pilote_fenetre_valeur: ancienne ? ancienne.valeur : null })
+          .eq('id', bien.id).eq('user_id', compte)
+        if (eR) console.error('[yield-pilote] fenetre non retablie apres echec du retrait', bien.id, eR.message)
+        fenetreRetablie = !eR
+      }
+      return res.status(502).json({ error: r.message, code: `retrait_${r.raison}`, etat: r.etat, fenetre_retablie: fenetreRetablie })
     }
     retirees = r.retirees
   }
