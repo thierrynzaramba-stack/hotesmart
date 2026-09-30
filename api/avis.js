@@ -582,18 +582,27 @@ async function evaluationRepondre (req, res, garde) {
     motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
   }
 
-  // ⚠ UNE PRESTATAIRE « VALIDER » NE DOIT JAMAIS TOMBER SUR « TEXTE ABSENT ».
-  // Decision de Thierry du 30 septembre 2026. Elle relit le texte public puis
-  // publie ; il faut donc qu'il existe au moment ou elle termine. Sans cela,
-  // elle finissait son formulaire, voyait un bouton « Publier » actif, et
-  // s'entendait dire qu'il n'y avait rien a publier — sans pouvoir rien y faire,
-  // la redaction revenant a l'hote.
+  // ⚠ UNE PRESTATAIRE « VALIDER » NE DOIT JAMAIS TOMBER SUR « TEXTE ABSENT »,
+  // ET L'HOTE NON PLUS NE DOIT PAS HERITER D'UNE PAGE BLANCHE.
+  // Decision de Thierry du 30 septembre 2026. Des que la prestataire a fini SA
+  // part et que rien n'est negatif, le serveur redige. Deux suites possibles :
   //
-  // Le serveur redige donc pour elle, ici, une seule fois : si un texte existe
-  // deja (l'hote l'a ecrit, ou un passage precedent l'a genere), on n'en fabrique
-  // pas un second.
+  //   - ses criteres couvrent toute la grille : elle relit et publie ;
+  //   - des criteres de l'hote restent vides : l'evaluation passe a l'hote AVEC
+  //     LE TEXTE DEJA REDIGE, et c'est lui qui tranche. Jamais de publication
+  //     partielle chez Airbnb.
+  //
+  // La redaction porte sur ce qui est COCHE : l'hote pourra la relancer une fois
+  // sa part remplie, ou modifier le texte a la main.
+  //
+  // Un avis NEGATIF n'arrive jamais ici : `deciderStatut` l'envoie a l'hote
+  // avant, et aucun appel au modele n'est paye.
   const aDejaUnTexte = Boolean(String(e.public_text || '').trim())
-  if (role === 'prestataire' && r.decision.peutPublier && !aDejaUnTexte) {
+  // ⚠ SEUL LE POUVOIR « VALIDER » DECLENCHE LA REDACTION. Une prestataire qui
+  // ne fait que soumettre ne publiera pas : l'hote redigera quand il reprendra
+  // la main, et rediger ici paierait un appel au modele pour un texte qu'il
+  // regenererait sans doute apres avoir rempli sa part.
+  if (role === 'prestataire' && evalPower === 'valider' && r.completRole && !r.negatif && !aDejaUnTexte) {
     // ⚠ ON NE DEPEND PAS DE CE QUE L'ECRITURE RENVOIE. `enregistrerReponses`
     // rend la ligne relue, mais si ce retour arrivait vide ou partiel on
     // redigerait sur l'evaluation D'AVANT — donc sans les reponses qu'on vient

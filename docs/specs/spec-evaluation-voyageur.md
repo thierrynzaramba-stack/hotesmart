@@ -327,11 +327,21 @@ contredits si Thierry le veut, pas enterrés dans un commentaire.
    prestataire, il rend du charabia deux fois, ou il recopie la remarque privée.
    Une **panne** du modèle n'est pas un refus : l'évaluation ne bouge pas, rien
    n'est écrit au journal, un nouvel essai reprend.
-   **Elle publie dès que SA part est finie**, sans attendre l'hôte (§6). Les
-   critères réservés à l'hôte restent alors vides et `scores[]` part partiel, ce
-   qu'Airbnb accepte. `lib/avis/publication.js` ne tolère cette absence **que**
-   pour une prestataire : l'hôte, lui, reste tenu au formulaire complet, sans quoi
-   une case qu'il oublie deviendrait muette.
+   **Jamais de publication partielle chez Airbnb** (décision du 30 septembre
+   2026, qui tranche un aller-retour). Le §6 promet une publication directe à une
+   prestataire `valider` ; j'en avais déduit qu'elle pouvait partir sur sa seule
+   part, et un mode « tolérer les critères absents » avait été ajouté pour cela.
+   C'est refusé, et le mode est retiré plutôt que laissé dormant. Une évaluation
+   dont des critères restent vides part à l'**hôte**, pas à l'OTA : un avis publié
+   ne se reprend pas, et un avis amputé est un avis faux.
+   Donc, sa part faite et rien de négatif : le serveur rédige, puis
+   — si ses critères couvrent **toute** la grille du bien, elle relit et publie
+   (le cas d'un hôte qui lui a confié l'évaluation entière) ;
+   — sinon l'évaluation passe à `a_valider` **avec le texte déjà rédigé**, et
+   l'hôte tranche. Il peut relancer la rédaction une fois sa part remplie.
+   La rédaction ne se déclenche que pour le pouvoir `valider` : une prestataire
+   qui ne fait que soumettre ne publiera pas, et payer un appel au modèle pour un
+   texte que l'hôte régénérera est inutile.
 3. **Un membre du compte n'est pas une prestataire.** Un profil avec
    `avis: write` agit comme l'hôte sur son périmètre, **validation des avis
    négatifs comprise**. Les règles prestataire — périmètre de questions,

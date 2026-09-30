@@ -79,14 +79,22 @@ test('la prestataire qui « valide » publie, si rien n’est negatif ET que tou
   assert.strictEqual(d.peutPublier, true)
 })
 
-test('LE TEST QUI COMPTE : le pouvoir « valider » publie des que SA part est finie', () => {
-  // Spec §6 et decision de Thierry du 30 septembre 2026. J'avais resserre cela a
-  // un formulaire entierement rempli apres une revue qui objectait qu'un avis
-  // partiel prive l'hote de la moitie du jugement ; l'arbitrage produit est de
-  // publier, et `publier()` ne tolere l'absence QUE pour une prestataire.
+test('LE TEST QUI COMPTE : le pouvoir « valider » ne publie PAS une grille incompletement couverte', () => {
+  // Decision de Thierry du 30 septembre 2026, qui tranche un aller-retour. La
+  // spec §6 promet une publication directe ; j'en avais deduit qu'elle pouvait
+  // partir sur sa seule part, et un mode « tolerer les absents » avait ete
+  // ajoute pour cela. Refuse : jamais de publication partielle chez Airbnb.
   const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: false })
+  assert.strictEqual(d.peutPublier, false)
+  assert.strictEqual(d.statut, 'a_valider')
+  assert.match(d.motif, /l hote tranche/)
+})
+
+test('elle publie quand ses criteres couvrent TOUTE la grille du bien', () => {
+  // Le cas d'un hote qui a confie toute l'evaluation a sa prestataire.
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: true })
   assert.strictEqual(d.peutPublier, true)
-  assert.match(d.motif, /criteres de l hote restent vides/)
+  assert.match(d.motif, /grille entierement couverte/)
 })
 
 test('LE TEST QUI COMPTE : le pouvoir « valider » ne publie PAS un avis negatif', () => {

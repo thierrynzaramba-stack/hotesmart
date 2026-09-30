@@ -423,7 +423,11 @@ test('l’ecriture du statut qui echoue ne passe pas pour un succes silencieux',
 // le serveur redige ; elle relit le texte public, puis publie.
 const PART_PRESTA = { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' }
 
-test('LE TEST QUI COMPTE : elle termine son formulaire, le serveur redige, elle relit', async () => {
+test('LE TEST QUI COMPTE : sa part faite, le serveur redige — et l\u2019hote tranche, la grille n\u2019etant pas couverte', async () => {
+  // Decision de Thierry du 30 septembre 2026 : jamais de publication partielle
+  // chez Airbnb. La grille par defaut reserve trois criteres a l'hote, donc
+  // l'evaluation lui revient — mais AVEC le texte deja redige, pas avec une page
+  // blanche.
   const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
   const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge] })
   const handler = require('../api/avis')
@@ -431,10 +435,35 @@ test('LE TEST QUI COMPTE : elle termine son formulaire, le serveur redige, elle 
   await handler(reqMembre({ action: 'eval-reponses' },
     { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
   assert.strictEqual(res.code, 200)
-  assert.strictEqual(res.body.peut_publier, true)
-  assert.strictEqual(res.body.redaction.ok, true)
+  assert.strictEqual(res.body.status, 'a_valider')
+  assert.strictEqual(res.body.peut_publier, false, 'elle ne publie pas un avis ampute')
+  assert.match(res.body.motif, /l hote tranche/)
+  assert.strictEqual(res.body.redaction.ok, true, 'le texte est pret pour l hote')
   assert.match(res.body.redaction.public_text, /nickel/)
-  assert.strictEqual(etat.ia.appels.length, 1, 'le modele est appele une fois')
+  assert.strictEqual(etat.ia.appels.length, 1)
+})
+
+test('LE TEST QUI COMPTE : si la grille du bien est ENTIEREMENT a elle, elle relit et publie', async () => {
+  // Le cas d'un hote qui a confie toute l'evaluation a sa prestataire : un seul
+  // critere, ouvert a la prestataire.
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const critere = {
+    id: 'c-unique', libelle: 'Etat du logement', categorie: 'cleanliness',
+    rempli_par: 'prestataire', rang: 1, property_id: BIEN_A.id,
+    avis_criteres_niveaux: [
+      { cle: 'nickel', libelle: 'Nickel', rang: 1, note: 5, negatif: false },
+      { cle: 'sale', libelle: 'Sale', rang: 2, note: 1, negatif: true },
+    ],
+  }
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge], criteres: [critere] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: vierge.id, action: 'eval-reponses', reponses: { 'c-unique': 'nickel' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.peut_publier, true)
+  assert.match(res.body.motif, /grille entierement couverte/)
+  assert.strictEqual(res.body.redaction.ok, true)
 })
 
 test('et elle ne recoit JAMAIS la note privee, meme generee', async () => {
@@ -509,11 +538,13 @@ test('un texte deja ecrit par l’hote n’est pas remplace par un second', asyn
     { id: avecTexte.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
   assert.strictEqual(etat.ia.appels.length, 0, 'aucun appel au modele')
   assert.strictEqual(res.body.redaction, undefined)
-  assert.strictEqual(res.body.peut_publier, true)
+  assert.strictEqual(res.body.status, 'a_valider')
 })
 
 test('une prestataire « soumettre » ne declenche aucune redaction', async () => {
-  // Elle ne publie pas, donc elle n'a rien a relire.
+  // Elle ne publiera pas : l'hote redigera quand il reprendra la main. Rediger
+  // ici paierait un appel pour un texte qu'il regenererait sans doute apres
+  // avoir rempli sa part.
   const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
   const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge] })
   const handler = require('../api/avis')
