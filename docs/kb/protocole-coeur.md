@@ -81,10 +81,26 @@ indisponible : les apps peuvent écrire leur bouton avant que le cœur ne livre.
 
 | Action | Type | Droit / identité | Paramètres | État |
 |---|---|---|---|---|
-| `avis.evaluer` | fenêtre | `avis: write` | `booking_uid` | à venir (lot 4) |
-| `avis.statut` | requête | `avis: read` | `booking_uid` | à venir (lot 3) |
-| `avis.questions_prestataire` | fenêtre | jeton | `menage_event_id` | à venir (lot 4) |
-| `avis.reglages_prestataire` | requête | `avis: write` | `profile_id` | à venir (lot 3) |
+| `avis.evaluer` | fenêtre | `avis: write` | `booking_uid` | **livrée** (lot 4) |
+| `avis.statut` | requête | `avis: read` | `booking_uid` | **livrée** (lot 4) |
+| `avis.questions_prestataire` | fenêtre | jeton | `menage_event_id` | à venir (lot 5) |
+| `avis.reglages_prestataire` | requête | `avis: write` | `profile_id` | à venir |
+
+**Ce que rend `avis.statut`** : `{ etat, libelle, evaluable, publie_le, echeance,
+role }`. `etat` vaut un statut de la spec §6, ou `absente` (aucune évaluation pour
+ce séjour), ou `hors_perimetre`. **Aucun de ces trois cas ne lève** : un séjour
+sans évaluation est un état, pas une panne. Lever ferait répondre `indisponible`
+au bus, et l'app masquerait son bouton en croyant le cœur cassé.
+
+**Ce que fait `avis.evaluer`** : coche les niveaux ouverts au rôle de l'appelant,
+enregistre, rédige (hôte seulement), publie, abandonne. Elle **ne décide rien** :
+les notes, le garde-fou du négatif et le périmètre par bien sont tranchés au
+serveur. Elle demande une **confirmation explicite** avant de publier un avis
+négatif (spec §3), en plus du refus serveur.
+
+Un module d'action **ne lève pas** sur un refus attendu : il l'affiche. Si un
+module lève, le bus ferme la fenêtre et répond `indisponible`, et l'utilisateur
+voit son bouton ne rien faire.
 
 Événements : `avis.evaluation_publiee` — détail `{ booking_uid, published_at }`
 (lot 3, côté serveur : journal d'événements du cœur, à créer au lot 2).

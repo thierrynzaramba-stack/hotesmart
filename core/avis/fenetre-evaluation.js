@@ -1,0 +1,316 @@
+// core/avis/fenetre-evaluation.js
+// DOC : docs/kb/protocole-coeur.md et docs/specs/spec-evaluation-voyageur.md
+//       (modif = MEME COMMIT)
+//
+// ACTION `avis.evaluer` — LA FENETRE D'EVALUATION DU VOYAGEUR.
+//
+// Le bus (shared/hs-bus.js) fournit la fenetre, ce module fournit le contenu.
+// Il recoit { conteneur, params, identite, fermer, action } et n'en sort pas :
+// aucune app ne connait ce fichier.
+//
+// ⚠ CET ECRAN NE DECIDE RIEN. Il coche des niveaux, il montre un texte, il
+// demande confirmation. Les notes sont un calcul deterministe du serveur, le
+// garde-fou du negatif s'applique au serveur, et le perimetre par bien est
+// verifie au serveur. Tout ce qui est refuse ici est refuse la-bas aussi — sans
+// quoi il suffirait d'ouvrir la console pour passer outre.
+//
+// ⚠ ET IL NE MENT PAS SUR CE QU'IL NE SAIT PAS. Un refus nomme par le serveur
+// est affiche TEL QUEL, avec son motif. Une evaluation qui revient a l'hote
+// parce que l'IA a refuse de rediger doit le DIRE : sinon il decouvre un
+// formulaire rempli sans comprendre pourquoi il l'a sur les bras.
+
+import { appel as appelParDefaut } from './appel.js'
+
+const ETAT_LISIBLE = {
+  a_remplir: 'A remplir',
+  soumise_prestataire: 'Remplie par la prestataire',
+  a_valider: 'A valider',
+  publiee: 'Publiee',
+  echec_publication: 'Echec de publication',
+  expiree: 'Delai depasse',
+  abandonnee: 'Abandonnee',
+}
+
+// Les motifs que le serveur peut rendre, en francais. Un motif inconnu est
+// AFFICHE tel quel plutot que masque : mieux vaut un mot technique qu'un silence.
+const MOTIF_LISIBLE = {
+  negatif_a_valider: 'Cet avis est negatif : seul l hote peut le publier.',
+  pouvoir_insuffisant: 'Votre profil soumet les evaluations, il ne les publie pas.',
+  texte_absent: 'Il n y a pas encore de texte a publier.',
+  deja_publiee: 'Cette evaluation est deja publiee.',
+  expiree: 'Le delai de l OTA est passe : cette evaluation ne peut plus etre publiee.',
+  deja_en_cours: 'Une publication est deja en cours pour cette evaluation.',
+  reponses_hors_grille: 'Des reponses manquent, ou ne correspondent plus a la grille.',
+  grille_figee_illisible: 'La grille enregistree avec cette evaluation est illisible : contactez le support.',
+  reference_ota_absente: 'L OTA n a pas encore ouvert d avis pour ce sejour.',
+  sans_objet_ota: 'L OTA n a pas encore ouvert d avis pour ce sejour.',
+  ia_contredit_les_boutons: 'La redaction automatique a produit un texte qui contredisait vos reponses. Ecrivez-le vous-meme.',
+  ia_cite_la_prestataire: 'La redaction automatique citait le prenom de la prestataire. Ecrivez le texte vous-meme.',
+  ia_recopie_le_prive: 'La redaction automatique recopiait la note privee dans le texte public. Ecrivez-le vous-meme.',
+  ia_illisible: 'La redaction automatique n a rien produit d exploitable. Ecrivez le texte vous-meme.',
+  ia_indisponible: 'La redaction automatique est momentanement indisponible. Reessayez, ou ecrivez le texte vous-meme.',
+  langue_non_verifiable: 'Cet avis est negatif et le texte doit etre ecrit dans une langue que nous ne savons pas relire automatiquement. Ecrivez-le vous-meme.',
+  aucune_reponse: 'Aucun critere n est rempli : il n y a rien a rediger.',
+}
+
+const echapper = (t) => String(t == null ? '' : t)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+
+const dateFr = (d) => {
+  if (!d) return ''
+  const x = new Date(d)
+  return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+/**
+ * Le point d'entree du bus.
+ * @param {Object} ctx { conteneur, params, identite, fermer, action, deps? }
+ */
+export async function ouvrir (ctx = {}) {
+  const { conteneur, params = {}, fermer = () => {} } = ctx
+  const appel = (ctx.deps && ctx.deps.appel) || appelParDefaut
+  const confirmer = (ctx.deps && ctx.deps.confirmer) || ((m) => (typeof window !== 'undefined' ? window.confirm(m) : false))
+  if (!conteneur) throw new Error('[avis] la fenetre d evaluation exige un conteneur')
+
+  // L'etat vit ici, et nulle part ailleurs : pas de variable de module, sinon
+  // deux ouvertures successives se marcheraient dessus.
+  const etat = { evaluation: null, criteres: [], role: null, reponses: {}, message: null, erreur: null, occupe: false }
+
+  const afficher = () => { conteneur.innerHTML = rendre(etat); brancher() }
+
+  // ─── Chargement ─────────────────────────────────────────────────────────
+  conteneur.innerHTML = '<p class="hs-avis-attente">Chargement de l evaluation…</p>'
+  try {
+    const data = await appel(`avis?action=evaluation&booking_uid=${encodeURIComponent(params.booking_uid)}`)
+    etat.evaluation = data.evaluation || {}
+    etat.criteres = data.criteres || []
+    etat.role = data.role || 'hote'
+    // Les reponses deja enregistrees pre-cochent le formulaire : la prestataire
+    // a peut-etre deja rempli sa part.
+    etat.reponses = { ...(etat.evaluation.answers_cleaner || {}), ...(etat.evaluation.answers_host || {}) }
+  } catch (err) {
+    // ⚠ UN ECHEC DE CHARGEMENT SE DIT DANS LA FENETRE, il ne la fait pas
+    // disparaitre. Le bus fermerait la fenetre et repondrait « indisponible »
+    // si on levait, et l'utilisateur verrait son bouton ne rien faire.
+    conteneur.innerHTML = `<div class="hs-avis"><h2>Evaluation du voyageur</h2>`
+      + `<p class="hs-avis-erreur">${echapper(err.statut === 403
+        ? 'Ce sejour n est pas dans votre perimetre.'
+        : err.statut === 404
+          ? 'Aucune evaluation n existe pour ce sejour.'
+          : err.message)}</p>`
+      + `<div class="hs-avis-actions"><button type="button" data-avis="fermer">Fermer</button></div></div>`
+    const b = conteneur.querySelector('[data-avis="fermer"]')
+    if (b) b.addEventListener('click', () => fermer())
+    return { charge: false }
+  }
+
+  // ─── Les actions ────────────────────────────────────────────────────────
+  const avecOccupe = (fn) => async (...args) => {
+    if (etat.occupe) return
+    etat.occupe = true; etat.erreur = null; etat.message = null; afficher()
+    try { await fn(...args) } finally { etat.occupe = false; afficher() }
+  }
+
+  const enregistrer = avecOccupe(async () => {
+    // ⚠ ON N'ENVOIE QUE LES CRITERES OUVERTS A CE ROLE. Le serveur refuse les
+    // autres par une erreur nommee ; les envoyer quand meme ferait echouer une
+    // saisie valide parce que le formulaire a pre-coche la part de l'autre.
+    const miennes = {}
+    for (const c of etat.criteres) if (etat.reponses[c.cle] != null) miennes[c.cle] = etat.reponses[c.cle]
+    try {
+      const r = await appel('avis?action=eval-reponses', {
+        methode: 'POST',
+        corps: { action: 'eval-reponses', booking_uid: etat.evaluation.booking_uid || params.booking_uid, reponses: miennes },
+      })
+      etat.evaluation.status = r.status
+      etat.peutPublier = r.peut_publier
+      etat.negatif = r.negatif
+      if (r.redaction && r.redaction.ok) {
+        etat.evaluation.public_text = r.redaction.public_text
+        etat.message = 'Reponses enregistrees, et le texte a ete redige.'
+      } else if (r.redaction && !r.redaction.ok) {
+        // ⚠ LE REFUS DE REDACTION SE DIT. C'est la raison pour laquelle
+        // l'evaluation revient a l'hote.
+        etat.message = 'Reponses enregistrees. ' + (MOTIF_LISIBLE[r.redaction.motif] || `Redaction refusee : ${r.redaction.motif}`)
+      } else {
+        etat.message = `Reponses enregistrees. ${r.motif || ''}`.trim()
+      }
+    } catch (err) { etat.erreur = messageDErreur(err) }
+  })
+
+  const redigerTexte = avecOccupe(async () => {
+    try {
+      const r = await appel('avis?action=eval-texte', {
+        methode: 'POST',
+        corps: { action: 'eval-texte', booking_uid: etat.evaluation.booking_uid || params.booking_uid, remarque: etat.remarque || null },
+      })
+      etat.evaluation.public_text = r.public_text
+      etat.evaluation.private_note = r.private_note
+      etat.message = 'Texte redige. Relisez-le, modifiez-le si besoin.'
+    } catch (err) { etat.erreur = messageDErreur(err) }
+  })
+
+  const publier = avecOccupe(async () => {
+    // ⚠ CONFIRMATION EXPLICITE AVANT UN AVIS NEGATIF (garde-fou §3 de la spec).
+    // Elle ne remplace pas le garde-fou serveur — qui, lui, interdit a une
+    // prestataire de publier un negatif — elle protege l'HOTE d'un clic.
+    if (etat.negatif || estNegatifAffiche(etat)) {
+      const texte = 'Cet avis est NEGATIF et sera visible par les futurs hotes de ce voyageur.\n\n'
+        + 'Chez Airbnb, un avis publie ne se reprend pas.\n\nConfirmez-vous la publication ?'
+      if (!confirmer(texte)) { etat.message = 'Publication annulee.'; return }
+    }
+    try {
+      const r = await appel('avis?action=eval-publier', {
+        methode: 'POST',
+        corps: {
+          action: 'eval-publier',
+          booking_uid: etat.evaluation.booking_uid || params.booking_uid,
+          public_text: etat.evaluation.public_text || undefined,
+        },
+      })
+      etat.evaluation.status = r.status
+      etat.evaluation.published_at = r.published_at
+      etat.message = 'Avis publie.'
+    } catch (err) { etat.erreur = messageDErreur(err) }
+  })
+
+  const abandonner = avecOccupe(async () => {
+    if (!confirmer('Abandonner cette evaluation ? Elle ne sera plus proposee.')) return
+    try {
+      const r = await appel('avis?action=eval-abandon', {
+        methode: 'POST',
+        corps: { action: 'eval-abandon', booking_uid: etat.evaluation.booking_uid || params.booking_uid },
+      })
+      etat.evaluation.status = r.status
+      etat.message = 'Evaluation abandonnee.'
+    } catch (err) { etat.erreur = messageDErreur(err) }
+  })
+
+  function brancher () {
+    conteneur.querySelectorAll('[data-avis-critere]').forEach(el => {
+      el.addEventListener('change', () => {
+        etat.reponses[el.dataset.avisCritere] = el.value || null
+        // On ne redessine pas tout : le focus se perdrait au milieu du
+        // formulaire. Seul le bloc d'etat change.
+        const b = conteneur.querySelector('[data-avis="compte-rendu"]')
+        if (b) b.textContent = compteRendu(etat)
+      })
+    })
+    const t = conteneur.querySelector('[data-avis="texte"]')
+    if (t) t.addEventListener('input', () => { etat.evaluation.public_text = t.value })
+    const r = conteneur.querySelector('[data-avis="remarque"]')
+    if (r) r.addEventListener('input', () => { etat.remarque = r.value })
+    const brancherBouton = (nom, fn) => {
+      const b = conteneur.querySelector(`[data-avis="${nom}"]`)
+      if (b) b.addEventListener('click', fn)
+    }
+    brancherBouton('enregistrer', enregistrer)
+    brancherBouton('rediger', redigerTexte)
+    brancherBouton('publier', publier)
+    brancherBouton('abandonner', abandonner)
+    brancherBouton('fermer', () => fermer())
+  }
+
+  afficher()
+  return { charge: true, role: etat.role, statut: etat.evaluation.status }
+}
+
+// ─── Rendu ──────────────────────────────────────────────────────────────────
+// Sorti de `ouvrir` pour etre lisible, et testable sur un etat donne.
+
+function estNegatifAffiche (etat) {
+  // Ce que l'ecran peut voir du negatif SANS le serveur : un niveau coche qui
+  // porte le drapeau. Ce n'est pas le juge — le serveur l'est — mais cela suffit
+  // a declencher la confirmation avant un clic.
+  for (const c of etat.criteres || []) {
+    const choisi = (etat.reponses || {})[c.cle]
+    if (!choisi) continue
+    const niv = (c.niveaux || []).find(n => n.cle === choisi)
+    if (niv && (niv.negatif || niv.note === 1 || niv.recommande === false)) return true
+  }
+  return false
+}
+
+function compteRendu (etat) {
+  const total = (etat.criteres || []).length
+  const faits = (etat.criteres || []).filter(c => (etat.reponses || {})[c.cle] != null).length
+  const reste = total - faits
+  if (!total) return 'Aucune question ne vous est ouverte sur cette evaluation.'
+  if (reste > 0) return `${faits} question(s) sur ${total} — il en reste ${reste}.`
+  return estNegatifAffiche(etat)
+    ? `${total} question(s) sur ${total}. Cet avis sera NEGATIF : l hote devra le valider.`
+    : `${total} question(s) sur ${total}. Rien de negatif.`
+}
+
+function rendre (etat) {
+  const e = etat.evaluation || {}
+  const publiee = e.status === 'publiee'
+  const fige = ['publiee', 'expiree', 'abandonnee'].includes(e.status)
+  const peutRediger = etat.role === 'hote' && !fige
+  const peutPublier = !fige && (etat.role === 'hote' || etat.peutPublier === true)
+
+  const entete = `<h2>Evaluation du voyageur</h2>`
+    + `<p class="hs-avis-etat">${echapper(ETAT_LISIBLE[e.status] || e.status || '')}`
+    + (e.published_at ? ` · publiee le ${echapper(dateFr(e.published_at))}` : '')
+    + (e.deadline_at && !publiee ? ` · a publier avant le ${echapper(dateFr(e.deadline_at))}` : '')
+    + `</p>`
+
+  const questions = (etat.criteres || []).length
+    ? `<fieldset class="hs-avis-questions"${fige ? ' disabled' : ''}><legend>Ce qui s est passe</legend>`
+      + etat.criteres.map(c => {
+        const choisi = (etat.reponses || {})[c.cle] || ''
+        const options = [`<option value="">— choisir —</option>`]
+          .concat((c.niveaux || []).map(n =>
+            `<option value="${echapper(n.cle)}"${n.cle === choisi ? ' selected' : ''}>${echapper(n.libelle || n.cle)}</option>`))
+          .join('')
+        return `<label class="hs-avis-critere"><span>${echapper(c.libelle || c.cle)}</span>`
+          + `<select data-avis-critere="${echapper(c.cle)}">${options}</select></label>`
+      }).join('')
+      + `</fieldset>`
+    : `<p class="hs-avis-vide">Aucune question ne vous est ouverte sur cette evaluation.</p>`
+
+  // ⚠ LA NOTE PRIVEE NE S'AFFICHE QUE POUR L'HOTE. Le serveur ne l'envoie pas a
+  // une prestataire ; ce test est une seconde barriere, pas la premiere.
+  const prive = etat.role === 'hote' && e.private_note
+    ? `<label class="hs-avis-prive"><span>Note privee au voyageur (jamais publique)</span>`
+      + `<textarea readonly rows="2">${echapper(e.private_note)}</textarea></label>`
+    : ''
+
+  const remarque = peutRediger
+    ? `<label class="hs-avis-remarque"><span>Remarque pour la redaction (privee, non publiee)</span>`
+      + `<textarea data-avis="remarque" rows="2" placeholder="Ce que l IA doit savoir sans le recopier">${echapper(etat.remarque || '')}</textarea></label>`
+    : ''
+
+  // Le texte public : modifiable par l'hote, en lecture seule pour une
+  // prestataire qui doit le relire avant de publier.
+  const texte = (e.public_text != null || peutRediger)
+    ? `<label class="hs-avis-texte"><span>Texte public${etat.role === 'hote' ? '' : ' (relisez-le avant de publier)'}</span>`
+      + `<textarea data-avis="texte" rows="5"${etat.role === 'hote' && !fige ? '' : ' readonly'}>${echapper(e.public_text || '')}</textarea></label>`
+    : ''
+
+  const boutons = [
+    !fige && (etat.criteres || []).length ? `<button type="button" data-avis="enregistrer"${etat.occupe ? ' disabled' : ''}>Enregistrer mes reponses</button>` : '',
+    peutRediger ? `<button type="button" data-avis="rediger"${etat.occupe ? ' disabled' : ''}>Rediger le texte</button>` : '',
+    peutPublier ? `<button type="button" data-avis="publier" class="hs-avis-principal"${etat.occupe ? ' disabled' : ''}>Publier l avis</button>` : '',
+    etat.role === 'hote' && !fige ? `<button type="button" data-avis="abandonner"${etat.occupe ? ' disabled' : ''}>Ne pas evaluer</button>` : '',
+    `<button type="button" data-avis="fermer">Fermer</button>`,
+  ].filter(Boolean).join('')
+
+  return `<div class="hs-avis">${entete}`
+    + (etat.erreur ? `<p class="hs-avis-erreur">${echapper(etat.erreur)}</p>` : '')
+    + (etat.message ? `<p class="hs-avis-message">${echapper(etat.message)}</p>` : '')
+    + questions
+    + `<p class="hs-avis-compte-rendu" data-avis="compte-rendu">${echapper(compteRendu(etat))}</p>`
+    + remarque + texte + prive
+    + `<div class="hs-avis-actions">${boutons}</div></div>`
+}
+
+function messageDErreur (err) {
+  if (err && err.motif && MOTIF_LISIBLE[err.motif]) return MOTIF_LISIBLE[err.motif]
+  if (err && err.motif) return `${err.message} (${err.motif})`
+  if (err && err.statut === 403) return 'Ce sejour n est pas dans votre perimetre.'
+  return (err && err.message) || 'Erreur inattendue'
+}
+
+export { rendre, compteRendu, estNegatifAffiche, MOTIF_LISIBLE, ETAT_LISIBLE, messageDErreur }

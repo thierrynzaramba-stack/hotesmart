@@ -5,9 +5,16 @@
 // (shared/hs-bus.js). Une app ne connait que ces noms d'actions ; le chemin
 // des modules est une affaire du coeur.
 //
-// Lot 1 (protocole) : les quatre actions sont DECLAREES et toutes « a venir ».
-// Le bus les rend « indisponible » jusqu'a ce que leur module existe (lots 3
-// et 4) : une app peut deja ecrire son bouton, il restera masque.
+// Lot 1 (protocole) : les quatre actions ont ete DECLAREES, toutes « a venir ».
+// Lot 4 (30 septembre 2026) : `avis.evaluer` et `avis.statut` sont LIVREES, leur
+// « a venir » est leve. Les deux autres restent declarees et indisponibles —
+// `avis.questions_prestataire` attend le branchement de la PWA (lot 5), et
+// `avis.reglages_prestataire` l'ecran de reglages.
+//
+// ⚠ NE PAS LEVER UN « a venir » AVANT QUE LE MODULE EXISTE. Le bus importe le
+// chemin declare : un module absent le fait repondre « indisponible », donc
+// l'app masque son bouton sans dire pourquoi. Un `etat` leve trop tot ne casse
+// rien de visible, et c'est precisement le probleme.
 export default {
   domaine: 'avis',
   version: 1,
@@ -15,13 +22,13 @@ export default {
     // La fenetre d'evaluation du voyageur, pour l'hote (droit avis: write).
     'avis.evaluer': {
       type: 'fenetre', droit: { domaine: 'avis', niveau: 'write' },
-      module: '/core/avis/fenetre-evaluation.js', etat: 'a_venir',
+      module: '/core/avis/fenetre-evaluation.js',
       params: ['booking_uid'],
     },
     // L'etat de l'evaluation d'un sejour (droit avis: read).
     'avis.statut': {
       type: 'requete', droit: { domaine: 'avis', niveau: 'read' },
-      module: '/core/avis/statut.js', etat: 'a_venir',
+      module: '/core/avis/statut.js',
       params: ['booking_uid'],
     },
     // L'ecran de questions de la prestataire, identite par jeton (PWA).

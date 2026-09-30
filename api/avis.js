@@ -432,14 +432,19 @@ async function requalifier (req, res, garde) {
 async function chargerEvaluation (req, res, garde, ecriture = false) {
   const userId = garde.accountUserId
   const id = String(req.body?.id || req.query?.id || '').trim()
-  if (!UUID_RE.test(id)) { res.status(400).json({ error: 'Identifiant invalide' }); return null }
+  // ⚠ LE BUS DESIGNE UN SEJOUR, PAS UNE EVALUATION. Le protocole du coeur
+  // (docs/kb/protocole-coeur.md) declare `booking_uid` comme seul parametre de
+  // `avis.evaluer` et `avis.statut` : une app connait la reservation qu'elle
+  // affiche, jamais l'identifiant d'une table du coeur. Les deux voies existent
+  // donc, et l'unicite (user_id, booking_uid) garantit qu'elles designent la
+  // meme ligne.
+  const sejour = String(req.body?.booking_uid || req.query?.booking_uid || '').trim()
+  if (!id && !sejour) { res.status(400).json({ error: 'Identifiant ou sejour requis' }); return null }
+  if (id && !UUID_RE.test(id)) { res.status(400).json({ error: 'Identifiant invalide' }); return null }
+  if (!id && sejour.length > 200) { res.status(400).json({ error: 'Sejour invalide' }); return null }
 
-  const { data, error } = await supabase
-    .from('guest_evaluations')
-    .select('*')
-    .eq('id', id)
-    .eq('user_id', userId)
-    .maybeSingle()
+  const requete = supabase.from('guest_evaluations').select('*').eq('user_id', userId)
+  const { data, error } = await (id ? requete.eq('id', id) : requete.eq('booking_uid', sejour)).maybeSingle()
   if (error) { res.status(500).json({ error: 'Lecture impossible' }); return null }
   if (!data) { res.status(404).json({ error: 'Evaluation introuvable' }); return null }
 
