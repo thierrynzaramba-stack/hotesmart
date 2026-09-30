@@ -62,28 +62,101 @@ Une fois l'évaluation publiée, la conversation du séjour est archivée dans l
 - Droits : toute action passe par `lib/require-permission.js`, domaine `avis` (lecture pour voir, écriture pour publier). Le compte cible se déduit de la réservation résolue en base, jamais de l'appelant (règle 11).
 - Scalabilité (objectif 30 000 comptes) : **aucun balayage global** ; tout est déclenché par événement ou par requête indexée bornée (§10).
 
-## 4. Questions à boutons
+## 4. La grille d'évaluation — configurable par l'hôte
 
-### Prestataire (PWA, après « Ménage fait »)
-| Question | Niveaux |
-|---|---|
-| État du logement | Impeccable / Correct / Sale / Très sale |
-| Dégâts | Aucun / Mineurs / Importants |
-| Poubelles & vaisselle | Fait / Partiel / Pas fait |
-| Remarque (facultatif) | texte libre court |
+> **Amendement du 30 septembre 2026** (décision produit de Thierry). Les questions
+> ne sont plus écrites dans le code : l'hôte compose sa grille. Ce qui suit remplace
+> la version d'origine, conservée comme **grille par défaut** (§4.5).
 
-Si périmètre `complet`, elle voit aussi les questions hôte ci-dessous.
+### 4.1 Ce qu'est un critère
 
-### Hôte (fenêtre d'évaluation)
-Réponses de la prestataire **pré-cochées et modifiables**, plus :
-| Question | Niveaux |
-|---|---|
-| Communication | Excellente / Correcte / Difficile |
-| Respect des règles & horaires | Oui / Partiellement / Non |
-| Recommandez-vous ce voyageur ? | Oui / Non |
+Un **critère** est une question à niveaux, créée par l'hôte :
 
-### Correspondance niveaux → notes OTA
-Table de correspondance déterministe, dans un seul module (`lib/avis/notes-evaluation.js`), testée. Valeurs exactes à fixer après l'étape 0 (échelle et catégories réelles de l'OTA).
+- un **libellé** (« État du logement », « Respect du couvre-feu »…) ;
+- une **catégorie Airbnb** parmi les quatre seules publiables : `cleanliness`,
+  `communication`, `respect_house_rules`, `recommandation` ;
+- **qui le remplit** : `prestataire`, `hote`, ou `les_deux` ;
+- ses **niveaux**, ordonnés du meilleur au pire, chacun portant un libellé, une
+  **note de 1 à 5** et un **drapeau négatif**.
+
+**La catégorie `recommandation` ne porte pas de note.** Airbnb attend un booléen
+(`is_reviewee_recommended`), pas une note sur 5. Un critère de cette catégorie a donc
+des niveaux à deux états : `recommande` vrai ou faux. Le seul cas où la note est
+ignorée, et il doit l'être explicitement à l'écran : sinon l'hôte règle une note 1–5
+qui ne part nulle part.
+
+### 4.2 Les deux règles que l'hôte ne peut pas défaire
+
+1. **Une note 1 est toujours négative.** Le drapeau est forcé, non désactivable, et
+   la base le tient par contrainte — pas seulement l'écran. La note la plus punitive
+   qu'Airbnb affiche sur un voyageur va de pair avec la validation obligatoire par
+   l'hôte (§3) ; les découpler laisserait partir un 1/5 sans relecture.
+2. **Un avis négatif repasse toujours par l'hôte**, quel que soit `eval_power` de la
+   prestataire. Règle inchangée (§3).
+
+### 4.3 Agrégation — le plus sévère
+
+La note d'une catégorie est **la plus basse** des notes de ses critères. Règle
+reconduite, et argumentée : une moyenne noierait un dégât important sous deux
+réponses parfaites — (5 + 1 + 5) / 3 arrondi à 4, soit « plutôt bien » pour un
+logement abîmé.
+
+Une catégorie sans aucun critère n'est **pas publiée** : Airbnb accepte un `scores[]`
+partiel. Publier un 5 par défaut dirait quelque chose que l'hôte n'a pas dit.
+
+Pour `recommandation` : un seul critère attendu. Si l'hôte en crée plusieurs, le
+résultat est le **ET** logique — un seul « non » suffit à ne pas recommander, dans le
+même esprit que le plus sévère.
+
+### 4.4 Portée, versionnage, tags
+
+- **Grille au niveau compte, surchargeable par bien**, comme `avis_config` : une
+  grille de bien remplace entièrement celle du compte, elle ne s'y ajoute pas. Une
+  fusion ligne à ligne rendrait illisible ce que l'hôte voit à l'écran.
+- **Chaque évaluation fige sa grille.** Au premier remplissage, la grille en vigueur
+  est copiée dans `guest_evaluations.grille_figee` (jsonb). Modifier la grille ne
+  change **jamais** une évaluation passée, ni son texte, ni ses notes. Sans cela, une
+  évaluation publiée et relue six mois plus tard afficherait des libellés qui
+  n'étaient pas ceux qu'on avait cochés.
+- **Les tags Airbnb restent dérivés, non configurables** (v1). La liste est fermée
+  par l'OTA et chaque tag appartient à une catégorie ; laisser l'hôte les associer
+  librement permettrait de cocher « took care of garbage » sur un critère qui dit le
+  contraire. Ils se déduisent des critères de la grille par défaut ; un critère créé
+  par l'hôte n'en porte aucun. C'est une limite, elle est assumée et écrite.
+
+### 4.5 Grille par défaut
+
+Tout compte démarre avec la grille d'origine, pré-remplie et modifiable :
+
+| Critère | Catégorie | Qui remplit | Niveaux (note, négatif) |
+|---|---|---|---|
+| État du logement | `cleanliness` | prestataire | Impeccable (5) · Correct (4) · Sale (2, négatif) · Très sale (1, négatif) |
+| Dégâts | `cleanliness` | prestataire | Aucun (5) · Mineurs (3) · Importants (1, négatif) |
+| Poubelles & vaisselle | `cleanliness` | prestataire | Fait (5) · Partiel (4) · Pas fait (3) |
+| Communication | `communication` | hôte | Excellente (5) · Correcte (4) · Difficile (2) |
+| Respect des règles & horaires | `respect_house_rules` | hôte | Oui (5) · Partiellement (3) · Non (1, négatif) |
+| Recommandez-vous ce voyageur ? | `recommandation` | hôte | Oui · Non (négatif) |
+
+La **remarque libre** de la prestataire n'est pas un critère : elle ne porte pas de
+note, n'entre dans aucune catégorie, et sert à la rédaction (§5).
+
+### 4.6 Ce que devient `eval_scope`
+
+`eval_scope` portait `aucun | proprete | complet`. Le « qui remplit » de chaque
+critère dit désormais **quoi** ; `eval_scope` ne garde que le **si** :
+
+- `aucun` — la prestataire ne participe à aucune évaluation ;
+- `selon_grille` — elle voit les critères marqués `prestataire` ou `les_deux`.
+
+`proprete` et `complet` deviennent `selon_grille` à la migration. On ne supprime pas
+la colonne : couper entièrement la participation d'une personne reste un réglage
+utile, et il n'est porté par aucun critère.
+
+### 4.7 Écran
+
+La configuration vit dans **`/settings` → onglet « Avis »**, avec les mots-clés, le
+ton et la signature. Test de la règle d'architecture : « ce réglage a-t-il un sens si
+l'app n'existait pas ? » — oui, c'est du cœur.
 
 ## 5. Rédaction IA
 
@@ -117,15 +190,51 @@ Clé des nouvelles tables : `properties.id` (UUID), décision E6.
 
 **`avis_config`** : `user_id`, `property_id` (nullable = niveau compte), `keywords` text[], `tone` (`chaleureux`|`sobre`), `signature`.
 
+**`avis_criteres`** et **`avis_criteres_niveaux`** (amendement du 30 septembre 2026) —
+deux tables, pas un jsonb dans `avis_config`. L'argument est dans §7 bis.
+
+**`guest_evaluations.grille_figee`** (jsonb) : la copie de la grille au premier
+remplissage (§4.4).
+
 **Réglages prestataire** : `eval_scope` (`aucun`|`proprete`|`complet`, défaut `proprete`) et `eval_power` (`soumettre`|`valider`, défaut `soumettre`). Emplacement à trancher en étape 0 : profil prestataire (`profiles`) ou liaison bien-prestataire (`property_cleaning_providers`). Préférence : le profil (réglage de la personne, pas du bien).
 
 RLS : `can_read`/`can_write` sur le domaine `avis` ; PWA prestataire via token, limitée à ses propres ménages et à son périmètre de questions.
+
+## 7 bis. Pourquoi deux tables, et pas un jsonb
+
+La grille aurait pu tenir dans une colonne `jsonb` d'`avis_config` : un document, lu
+en bloc, écrit en bloc, jamais requêté par morceaux. C'est l'option la plus simple, et
+elle a été écartée pour une seule raison, décisive.
+
+**Les deux règles de §4.2 doivent tenir en base, pas dans l'écran.** « Une note 1 est
+toujours négative » et « une note est entre 1 et 5 » deviennent des contraintes
+`CHECK` sur des colonnes — donc vraies même si un bug applicatif, un import, ou un lot
+futur écrit directement. En `jsonb`, ces règles ne vivraient que dans le code qui
+valide avant d'écrire : le jour où un autre chemin écrit, elles ne sont plus là. Une
+note fausse ne se rattrape pas : elle part chez Airbnb.
+
+Deux conséquences assumées :
+
+- **le versionnage reste en `jsonb`**, dans `guest_evaluations.grille_figee`. Une
+  copie figée n'a pas besoin d'intégrité : elle est un témoin, pas une source. La
+  garder en tables imposerait de dupliquer des lignes à chaque évaluation, et de
+  distinguer partout les grilles vivantes des grilles mortes ;
+- **le volume est négligeable** : une dizaine de critères et une quarantaine de
+  niveaux par grille, quelques grilles par compte.
+
+Ce qu'on perd : écrire la grille demande plusieurs requêtes au lieu d'une. L'écran de
+configuration enregistre en bloc, ce n'est pas un chemin chaud.
 
 ## 8. Écrans
 
 1. **Fenêtre d'évaluation** (cœur, `core/avis/`) — ouverte partout par `hsBus.ouvrir('avis.evaluer', { booking_uid })` ; disponible seulement si droit `avis = write`. Desktop et mobile.
 2. **Page Avis du cœur** (`/avis`, entrée dans la sidebar) : file « À évaluer (n) » triée par délai restant, historique des évaluations publiées, avis reçus.
-3. **`/settings` → onglet « Avis »** : mots-clés, ton, signature ; par compte + surcharge par bien.
+3. **`/settings` → onglet « Avis »** : mots-clés, ton, signature, **et la grille
+   d'évaluation** (§4) ; par compte + surcharge par bien. L'écran de la grille montre,
+   pour chaque critère, sa catégorie Airbnb, qui le remplit, et ses niveaux avec leur
+   note. Le drapeau « négatif » d'une note 1 s'affiche **coché et verrouillé**, avec sa
+   raison : un réglage qu'on ne peut pas changer doit dire pourquoi, sinon il passe
+   pour une panne.
 4. **Messagerie** (app) : bandeau dans le fil après le départ (« Évaluer ce voyageur → » / « Évaluation publiée ✓ ») — via le protocole.
 5. **Planning / calendrier** (app) : clic sur un séjour terminé → bouton « Évaluer » — via le protocole.
 6. **PWA prestataire** (app ménage) : écran questions du cœur affiché juste après « Ménage fait » — via le protocole.
@@ -173,6 +282,11 @@ Principes :
 ## 12. Tests (règle 8 : cas dangereux avec données réelles)
 
 - Prestataire `valider` + avis négatif → **ne publie pas**, passe `a_valider`.
+- **Grille (§4)** : une note 1 dont le drapeau négatif serait retiré est refusée par la
+  base, pas seulement par l'écran. Une catégorie sans critère n'est pas publiée. Une
+  grille modifiée après le remplissage ne change ni les notes ni les libellés d'une
+  évaluation déjà remplie (`grille_figee`). Un critère `recommandation` ne produit pas
+  de note dans `scores[]`.
 - Double clic / double appel publier → une seule publication.
 - Échec réseau après envoi → pas de rejeu, alarme, vérification chez le provider.
 - Prestataire sur un bien hors périmètre ou d'un autre compte → refus.
