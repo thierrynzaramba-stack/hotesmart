@@ -51,7 +51,9 @@
     .yp-niv-edit { position: absolute; top: 2px; right: 4px; background: none; border: none; cursor: pointer; font-size: 12px; opacity: .55; padding: 0; }
     .yp-niv-edit:hover { opacity: 1; }
     .yp-niv-fixe { font-size: 10.5px; color: var(--text2); margin-top: 2px; }
-    .yp-niv-x { background: none; border: none; cursor: pointer; color: #B02A37; font-size: 13px; padding: 0 2px; }
+    .yp-niv-x { background: none; border: none; cursor: pointer; color: #B02A37; font-size: 13px; padding: 0 0 0 2px; }
+    /* Le montant et son × restent sur une ligne, meme sur telephone. */
+    .yp-niv .p { white-space: nowrap; }
     .yp-grille-geste { margin-top: 8px; font-size: 13px; line-height: 1.6; }
     .yp-grille-geste input { width: 80px; padding: 5px 6px; border: 0.5px solid var(--border); border-radius: 6px; font-size: 12.5px; }
     .yp-grille-geste button { padding: 5px 10px; border: none; border-radius: 6px; background: var(--text2, #1d1d1f); color: #fff; font-size: 12.5px; cursor: pointer; margin: 4px 4px 0 0; }
@@ -1202,9 +1204,11 @@
             n.confondu_avec ? ` Se confond avec ${n.confondu_avec} : au-delà, ce serait un prix jamais obtenu.` : ''}${
             f ? ` ${phraseFourchette(b)}` : ''}`)}">
           <div class="n">${ech(n.nom)}${n.etire ? '<sup>*</sup>' : ''}</div>
-          <div class="p">${f ? `${n.prix}–<span class="haut">${euros(b.plafond)}</span>` : euros(n.prix)}</div>
+          <div class="p">${f ? `${n.prix}–<span class="haut">${euros(b.plafond)}</span>` : euros(n.prix)}${n.fixe_par_hote
+            // Le × a cote de VOTRE montant : il le supprime (retour au calcul).
+            ? ` <button type="button" class="yp-niv-x" data-niveau="${ech(n.nom)}" title="Supprimer votre montant : ${ech(n.nom)} revient au calcul (${euros(n.prix_calcule)})">×</button>` : ''}</div>
           ${n.fixe_par_hote
-            ? `<div class="yp-niv-fixe">fixé · calcul ${euros(n.prix_calcule)} <button type="button" class="yp-niv-x" data-niveau="${ech(n.nom)}" title="Remettre ${ech(n.nom)} au calcul (${euros(n.prix_calcule)})">×</button></div>`
+            ? `<div class="yp-niv-fixe">fixé · calcul ${euros(n.prix_calcule)}</div>`
             : (n.ajuste_pour_ordre ? `<div class="yp-niv-fixe">ajusté · calcul ${euros(n.prix_calcule)}</div>` : '')}
           <button type="button" class="yp-niv-edit" data-niveau="${ech(n.nom)}" data-prix="${n.prix}" title="Fixer vous-même le montant de ${ech(n.nom)}">✎</button>
         </div>`
