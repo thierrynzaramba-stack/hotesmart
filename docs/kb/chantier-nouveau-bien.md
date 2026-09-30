@@ -2073,3 +2073,8 @@ partout, y compris décembre et janvier, pourtant forts par le prix (ADR p50
    100 %. Un p90 élevé peut venir d'annonces peu ouvertes.
 3. **La part au-dessus de 90 % n'est qu'une fourchette** tirée des quantiles
    (p90 ≥ 90 % → au moins 10 % des annonces ; p75 < 90 % → moins de 25 %).
+
+**Question posée à AirROI par Thierry (mail du 30 septembre 2026)** pour une
+réponse définitive sur l'existence d'une série quotidienne. En attente. Sa
+réponse tranche avant l'essai `num_months: 0` : si elle est claire, l'essai
+n'a plus lieu d'être.
