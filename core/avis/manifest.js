@@ -7,9 +7,10 @@
 //
 // Lot 1 (protocole) : les quatre actions ont ete DECLAREES, toutes « a venir ».
 // Lot 4 (30 septembre 2026) : `avis.evaluer` et `avis.statut` sont LIVREES, leur
-// « a venir » est leve. Les deux autres restent declarees et indisponibles —
-// `avis.questions_prestataire` attend le branchement de la PWA (lot 5), et
-// `avis.reglages_prestataire` l'ecran de reglages.
+// « a venir » est leve.
+// Lot 5 (2 octobre 2026) : `avis.reglages_prestataire` est LIVREE (fiche
+// prestataire de l'app menage). `avis.questions_prestataire` attend encore le
+// branchement de la PWA.
 //
 // ⚠ NE PAS LEVER UN « a venir » AVANT QUE LE MODULE EXISTE. Le bus importe le
 // chemin declare : un module absent le fait repondre « indisponible », donc
@@ -41,7 +42,7 @@ export default {
     // l'app menage (droit avis: write).
     'avis.reglages_prestataire': {
       type: 'requete', droit: { domaine: 'avis', niveau: 'write' },
-      module: '/core/avis/reglages-prestataire.js', etat: 'a_venir',
+      module: '/core/avis/reglages-prestataire.js',
       params: ['profile_id'],
     },
   },

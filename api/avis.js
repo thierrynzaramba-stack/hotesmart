@@ -586,6 +586,102 @@ function peutEcrireAuNiveauCompte (garde) {
   return refsDuPerimetre(garde.contexte) === null
 }
 
+// ─── Les reglages d'une prestataire (action `avis.reglages_prestataire`) ────
+// Lot 5, 2 octobre 2026. La fiche prestataire de l'app menage lit et ecrit,
+// PAR LE BUS, les deux reglages que la spec §2.5 lui donne :
+//   - `eval_scope` : participe-t-elle aux evaluations ? (`aucun` | `selon_grille`)
+//     — « seulement si l'hote l'y autorise » (decision D1) ;
+//   - `eval_power` : soumet-elle a l'hote, ou publie-t-elle (`soumettre` | `valider`) ?
+//     Un avis negatif repasse TOUJOURS par l'hote, quel que soit ce pouvoir (§3).
+//
+// ⚠ TROIS GARDES, toutes avant la moindre lecture :
+//   1. l'appelant n'est pas une prestataire — sinon une prestataire munie d'une
+//      session s'accorderait elle-meme le pouvoir de publier ;
+//   2. il voit TOUT le compte (meme regle que la grille de niveau compte) : une
+//      prestataire travaille sur plusieurs biens, son pouvoir les engage tous ;
+//   3. le profil vise appartient au compte de la GARDE, et c'est une prestataire
+//      (`access_mode = 'lien'`). Un profil d'un autre compte et un profil
+//      inexistant rendent le meme 404 : on n'apprend pas qu'il existe ailleurs.
+const EVAL_SCOPES = new Set(['aucun', 'selon_grille'])
+const EVAL_POWERS = new Set(['soumettre', 'valider'])
+
+function refusReglagesPrestataire (res, garde) {
+  if (roleEtReglages(garde).role === 'prestataire') {
+    res.status(403).json({ error: 'Une prestataire ne règle pas ses propres pouvoirs.', motif: 'prestataire_appelante' })
+    return true
+  }
+  if (!peutEcrireAuNiveauCompte(garde)) {
+    res.status(403).json({
+      error: 'Les réglages d’une prestataire engagent tous les biens : ils se modifient depuis un périmètre complet.',
+      motif: 'perimetre_partiel',
+    })
+    return true
+  }
+  return false
+}
+
+async function profilPrestataire (res, garde, profileId) {
+  if (!UUID_RE.test(String(profileId || ''))) {
+    res.status(400).json({ error: 'Identifiant de prestataire invalide' }); return null
+  }
+  const { data, error } = await supabase.from('profiles')
+    .select('id, first_name, access_mode, eval_scope, eval_power')
+    .eq('id', profileId).eq('account_user_id', garde.accountUserId).maybeSingle()
+  if (error) { res.status(503).json({ error: 'Profil illisible', detail: error.message }); return null }
+  if (!data) { res.status(404).json({ error: 'Prestataire introuvable' }); return null }
+  if (data.access_mode !== 'lien') {
+    res.status(409).json({
+      error: 'Ce profil n’est pas une prestataire : ses droits se règlent dans Équipe et droits.',
+      motif: 'pas_une_prestataire',
+    })
+    return null
+  }
+  return data
+}
+
+const vueReglages = (p) => ({
+  profile_id: p.id,
+  // Une valeur absente se lit comme le serveur la juge : `aucun`, `soumettre`.
+  eval_scope: EVAL_SCOPES.has(p.eval_scope) ? p.eval_scope : 'aucun',
+  eval_power: EVAL_POWERS.has(p.eval_power) ? p.eval_power : 'soumettre',
+})
+
+// GET prestataire-reglages
+async function prestataireReglagesLire (req, res, garde) {
+  if (refusReglagesPrestataire(res, garde)) return
+  const p = await profilPrestataire(res, garde, req.query?.profile_id)
+  if (!p) return
+  return res.status(200).json({ ok: true, ...vueReglages(p) })
+}
+
+// POST prestataire-reglages-maj { profile_id, eval_scope?, eval_power? }
+async function prestataireReglagesEcrire (req, res, garde) {
+  if (refusReglagesPrestataire(res, garde)) return
+  const corps = req.body || {}
+  const maj = {}
+  if (corps.eval_scope !== undefined) {
+    if (!EVAL_SCOPES.has(corps.eval_scope)) return res.status(400).json({ error: `Participation inconnue : « ${corps.eval_scope} »` })
+    maj.eval_scope = corps.eval_scope
+  }
+  if (corps.eval_power !== undefined) {
+    if (!EVAL_POWERS.has(corps.eval_power)) return res.status(400).json({ error: `Pouvoir inconnu : « ${corps.eval_power} »` })
+    maj.eval_power = corps.eval_power
+  }
+  if (!Object.keys(maj).length) return res.status(400).json({ error: 'Aucun réglage à modifier' })
+
+  const p = await profilPrestataire(res, garde, corps.profile_id)
+  if (!p) return
+  // ⚠ LES MEMES CONDITIONS DANS L'UPDATE que dans la lecture : compte de la
+  // garde et acces par lien. Entre les deux requetes, le profil ne peut pas
+  // changer de compte ni devenir un membre sans que l'ecriture echoue.
+  const { data, error } = await supabase.from('profiles').update(maj)
+    .eq('id', p.id).eq('account_user_id', garde.accountUserId).eq('access_mode', 'lien')
+    .select('id, eval_scope, eval_power')
+  if (error) return res.status(503).json({ error: 'Réglages non enregistrés', detail: error.message })
+  if (!Array.isArray(data) || data.length !== 1) return res.status(409).json({ error: 'Le profil a changé pendant l’enregistrement : rechargez la fiche.' })
+  return res.status(200).json({ ok: true, ...vueReglages(data[0]) })
+}
+
 // GET grille — les criteres du compte et, si un bien est demande, les siens.
 async function grilleLire (req, res, garde) {
   const userId = garde.accountUserId
@@ -1553,6 +1649,7 @@ async function router (req, res) {
     'eval-texte': evaluationTexte,
     'eval-publier': evaluationPublier,
     'eval-abandon': evaluationAbandonner,
+    'prestataire-reglages-maj': prestataireReglagesEcrire,
   }
   if (ECRITURES_EVAL[action]) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
@@ -1560,6 +1657,15 @@ async function router (req, res) {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
     if (!g.ok) return
     return await ECRITURES_EVAL[action](req, res, g)
+  }
+
+  // Lire les reglages d'une prestataire exige l'ECRITURE, comme l'action du
+  // manifeste : seul celui qui peut les changer a besoin de les voir.
+  if (action === 'prestataire-reglages') {
+    const g = await requirePermission(req, res, {
+      domaine: 'avis', niveau: 'write', compteDelegue: true })
+    if (!g.ok) return
+    return await prestataireReglagesLire(req, res, g)
   }
 
   const garde = await requirePermission(req, res, {
