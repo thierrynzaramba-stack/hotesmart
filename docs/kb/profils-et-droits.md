@@ -664,9 +664,32 @@ production le 1er septembre 2026 (`4c207a7`).
 | 3 — prix, dispos, messages | `channel-rateplan`, `calendar`, `channel-import-messages`, `messages`, `beds24` |
 | 4 — final | `grok`, `serrures`, `stripe`, `property-automation`, `simulate`, `extract-kb`, `menages` |
 
-**Hors périmètre, à dessein** : `cron` (Bearer `CRON_SECRET`), `channel-webhook` et
-`channel-events` (secret partagé), `menages-public` (jeton public), `manifest`,
-`backfill-beds24-host`. Aucun n'agit au nom d'un utilisateur connecté.
+**Hors périmètre, à dessein** : `cron` (Bearer `CRON_SECRET`), `menages-public`
+(jeton public), `manifest`. `backfill-beds24-host` a été **supprimé** le
+1er octobre 2026 (il passait `CRON_SECRET` en query string).
+
+⚠ **`channel-webhook` ET `channel-events` NE SONT PLUS EXEMPTÉS.** Leur exemption
+tenait au « secret partagé » de la réception des événements — mais les deux
+fichiers portent **aussi** une action `register`, qui n'agit **que** sur session
+utilisateur. Un fichier se juge action par action, pas par son nom : les deux
+entrent au balayage, et la réception reste hors périmètre pour ce qu'elle est.
+L'action `register` de `channel-webhook` est éprouvée par
+`tests/channel-webhook-register.test.js`, qui nomme aussi ce qui reste ouvert
+(tout utilisateur connecté franchit sa garde `titulaire`).
+
+⚠ **CETTE PHRASE DISAIT « Aucun n'agit au nom d'un utilisateur connecté », ET
+C'ÉTAIT FAUX.** `api/channel-webhook.js` porte une action `register` qui n'agit
+QUE sur session utilisateur, et c'est précisément ce qui l'a mise hors du
+balayage : elle a laissé n'importe quel compte connecté faire livrer
+`CHANNEL_WEBHOOK_SECRET` et le bypass de déploiement à l'URL de son choix,
+jusqu'au 1er octobre 2026. Une exemption fondée sur une affirmation non vérifiée
+vaut moins que pas d'exemption du tout.
+
+Ce qui reste vrai après correction : la **réception** des webhooks n'agit au nom
+de personne — elle s'authentifie par un secret partagé, sans session. C'est
+l'action d'enregistrement qui faisait exception, et elle est maintenant dans le
+périmètre. `backfill-beds24-host` a été **supprimé** le même jour : il faisait
+passer `CRON_SECRET` en query string.
 
 ### Les 10 fuites
 

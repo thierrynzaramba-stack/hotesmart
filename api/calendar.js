@@ -755,6 +755,14 @@ module.exports = async function handler(req, res) {
     // du plancher) faisait perdre ce prix-la, que l'hote n'avait pas touche.
     let pose = null
     if (nuitsPrixHote.length) {
+      // Le prix que YieldFlow affichait sur ces nuits, lu AVANT l'ecriture de
+      // l'hote (lot 4.6.7) : c'est la recommandation au moment du geste. Une
+      // lecture en echec n'empeche pas le geste — la trace sera vide.
+      const { data: avantCal, error: eAv } = await supabase.from('calendar_inventory').select('date, rate')
+        .eq('property_id', bienId).in('date', [...new Set(nuitsPrixHote.map(n => n.date))])
+      if (eAv) console.error('[calendar] prix recommande illisible (trace vide)', eAv.message)
+      const recommande = new Map((avantCal || []).map(l => [l.date, l.rate == null ? null : Math.round(Number(l.rate) * 100)]))
+      for (const n of nuitsPrixHote) n.recommande_cents = recommande.get(n.date) ?? null
       pose = await poserPrixHote(supabase, { userId: compte, propertyId: bienId, nuits: nuitsPrixHote })
       if (!pose.ok) return res.status(pose.raison === 'nuit_invalide' ? 400 : 503).json({ error: pose.message, code: pose.raison })
       console.log(`[calendar] prix de l'hote sur ${nuitsPrixHote.length} nuit(s) d'un bien pilote`)

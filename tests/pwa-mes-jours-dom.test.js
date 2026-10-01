@@ -2943,11 +2943,11 @@ test('la marque ⏭ ne dépend PAS du filtre de biens — une règle ne lit pas 
   // `activeProps` : décocher une case d'AFFICHAGE effaçait la marque « la
   // réservation a changé ». La feuille est sans filtre partout, ses règles
   // aussi.
-  const jTot = dans(-3), jTard = dans(-1)
+  const jTot = dans(1), jTard = dans(3)
   const { w, t } = monter({
     bookings: [
-      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-6) },
-      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(-4) }
+      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-2) },
+      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(2) }
     ],
     done: [{ booking_id: 'b2', departure_date: jTard }]
   })
@@ -3010,11 +3010,11 @@ test('la FICHE d\'un ménage obsolète le reste quand un bien est décoché', as
   // ⚠ CONSTAT DE REVIEW. La ligne de la feuille avait été convertie sur la liste
   // non filtrée ; son SEUL consommateur, la fiche, ne l'avait pas été. Le même
   // écran marquait le ménage ⏭ et proposait « ✓ Marquer fait ».
-  const jTot = dans(-3), jTard = dans(-1)
+  const jTot = dans(1), jTard = dans(3)
   const { w, t } = monter({
     bookings: [
-      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-6) },
-      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(-4) }
+      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-2) },
+      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(2) }
     ],
     done: [{ booking_id: 'b2', departure_date: jTard }]
   })

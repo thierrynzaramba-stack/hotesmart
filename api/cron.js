@@ -137,6 +137,24 @@ module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
   // Authorization: Bearer <CRON_SECRET> (variable definie cote Vercel).
   // Plus d'exception GET (l'ancien declencheur externe est abandonne).
+  //
+  // ⚠ UN SECRET ABSENT NE DOIT PAS OUVRIR LA PORTE. Sans la premiere ligne, un
+  // deploiement ou la variable manque compare au litteral `Bearer undefined` —
+  // qu'il suffit d'envoyer. N'importe qui sur Internet declencherait alors le
+  // cycle COMPLET : poussee de disponibilites chez le gestionnaire de canaux,
+  // pilote tarifaire, messages automatiques au voyageur, creation de codes de
+  // serrure, facturation Stripe, alertes hote et fondateur.
+  //
+  // La parade existait deja dans le depot a deux fichiers d'ici
+  // (`api/cron-messages.js`, `api/backfill-beds24-host.js`), et le commentaire
+  // de `cron-messages` disait explicitement que CE fichier ne l'avait pas. Il
+  // le disait depuis le 21 septembre 2026 ; il a fallu un audit du 1er octobre
+  // pour que quelqu'un le lise. Un defaut connu et note n'est pas un defaut
+  // corrige.
+  if (!process.env.CRON_SECRET) {
+    console.error('[Cron] CRON_SECRET absent : endpoint ferme')
+    return res.status(503).json({ error: 'Service non configuré' })
+  }
   const authHeader = req.headers.authorization
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Non autorisé' })
