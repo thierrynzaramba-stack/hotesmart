@@ -1437,7 +1437,11 @@ async function evaluationPublier (req, res, garde) {
   const evaluation = {
     ...e,
     ota_review_ref: objetOta.external_review_id,
-    ...(req.body?.public_text ? { public_text: String(req.body.public_text).slice(0, MAX_TEXTE) } : {}),
+    // ⚠ SEUL L'HOTE REMPLACE LE TEXTE. Constat de re-revue : n'importe quel role
+    // pouvait envoyer le sien, donc une prestataire `valider` publiait un texte
+    // libre au lieu de celui qu'elle a relu.
+    ...(req.body?.public_text && roleEtReglages(garde).role === 'hote'
+      ? { public_text: String(req.body.public_text).slice(0, MAX_TEXTE) } : {}),
   }
 
   // ⚠ ON RESERVE LA LIGNE AVANT LE POST, PAR L'UNICITE DE `write_locks.key`.

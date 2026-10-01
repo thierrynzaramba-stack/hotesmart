@@ -795,6 +795,40 @@ test('une prestataire sans autorisation ne peut pas non plus REPONDRE (400 nomme
   const res = reponse()
   await handler(reqMembre({ action: 'eval-reponses' }, { id: evaluation.id, action: 'eval-reponses', reponses: { etat: 'impeccable' } }), res)
   assert.strictEqual(res.code, 400)
-  assert.match(res.body.error, /n’est pas ouvert à ce rôle/)
+  assert.match(res.body.error, /n’est pas autorisée à participer/)
   assert.strictEqual(etat.ecritures.filter(e => e.table === 'guest_evaluations').length, 0)
+})
+
+// ─── Constats de la re-revue de 5c99890 (2 octobre 2026) ────────────────────
+test('LE TEST QUI COMPTE : des reponses VIDES d’une prestataire non autorisee ne font pas regresser l’evaluation', async () => {
+  const prete = evalA({ status: 'a_valider' })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_NON_AUTORISEE(), evaluations: [prete] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: prete.id, action: 'eval-reponses', reponses: {} }), res)
+  assert.strictEqual(res.code, 400)
+  assert.strictEqual(etat.ecritures.filter(e => e.table === 'guest_evaluations').length, 0, 'ni statut, ni filled_by_profile, ni grille figee')
+})
+
+test('une valeur HERITEE (`proprete`) n’ouvre aucune question : seule `selon_grille` autorise', async () => {
+  const evaluation = evalA({ status: 'a_remplir' })
+  const presta = PRESTA_A('valider')
+  presta.profil.eval_scope = 'proprete'
+  preparer({ user: MEMBRE, ...presta, evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
+  assert.deepStrictEqual(res.body.criteres, [])
+  assert.strictEqual(res.body.evaluation.public_text, undefined)
+})
+
+test('LE TEST QUI COMPTE : une prestataire « valider » ne publie pas un texte LIBRE, seulement celui qu’elle a relu', async () => {
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evalA()] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier', public_text: 'Texte invente par la prestataire.' }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.filter(e => e.table === 'guest_evaluations' && e.row.public_text !== undefined)
+  assert.ok(maj.every(e => e.row.public_text !== 'Texte invente par la prestataire.'), 'le texte libre n est jamais enregistre')
+  assert.ok(!JSON.stringify(etat.provider.appels).includes('invente'), 'ni envoye')
 })

@@ -26,9 +26,11 @@
 
 do $$
 begin
-  if (select column_default from information_schema.columns
+  -- ⚠ `coalesce` : une colonne sans defaut rendrait NULL, et un `if NULL`
+  -- sauterait le bloc EN SILENCE — autorisations laissees ouvertes.
+  if coalesce((select column_default from information_schema.columns
         where table_schema = 'public' and table_name = 'profiles'
-          and column_name = 'eval_scope') not like '%aucun%' then
+          and column_name = 'eval_scope'), '') not like '%aucun%' then
     update public.profiles
       set eval_scope = 'aucun'
       where eval_scope is distinct from 'aucun';
