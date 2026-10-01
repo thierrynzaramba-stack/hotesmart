@@ -3077,7 +3077,7 @@ false`. C'est exactement ce qu'elle obtenait déjà en réglant ses jours
 habituels, donc pas d'élévation de droit ; la seule différence est que
 `reglerMesJours` prévient l'hôte (`alertReglesModifiees`) et que l'exception
 d'un jour est **silencieuse** — comme l'étaient déjà ses absences. Prévenir
-l'hôte d'une exception : question ouverte, posée à Thierry.
+l'hôte d'une exception : **tranché le 2 octobre 2026, oui** (section suivante).
 
 **La règle, désormais, des deux côtés** : une exception sur un jour précis prime
 toujours sur la récurrence, dans les deux sens.
@@ -3179,3 +3179,57 @@ seulement ; le sens du premier jour ; congé, absence de l'hôte, jour à ménag
 offre intouchés ; arrêt au premier échec ; tape courte inchangée. Cinq rouges
 contre le code d'avant (`git archive`), verts aux dates décalées de 27 à 30 jours
 (`tests/outils/horloge-decalee.js`).
+
+## L'hôte est prévenu de chaque exception qu'elle pose (2 octobre 2026)
+
+**Décision de Thierry** : quand une prestataire pose ou retire elle-même une
+exception d'un jour depuis sa PWA, l'hôte le sait — **un message à chaque
+changement, dans les deux sens** (absente un jour habituel, disponible un jour
+de repos, et les retraits). Il avait le choix d'un message par heure ou de la
+seule tâche ; il a retenu un message par changement, en sachant qu'**un glisser
+de 10 jours envoie 10 messages**.
+
+**Le canal est celui de ses jours habituels** (`alertReglesModifiees`, avec
+`rassurer: false` — la phrase « les ménages acceptés ne sont pas touchés » est
+hors sujet pour une exception) : la **tâche du jour** de cette prestataire
+cumule tout, jours habituels et exceptions ensemble, et **reste** ; l'envoi
+SMS/e-mail configuré part à chaque changement et peut se rater. Le texte est
+en jours : « **Lena s'est déclarée absente le samedi 10 octobre 2026, depuis son
+application.** » — « disponible le », « a retiré son absence du », « a retiré sa
+disponibilité exceptionnelle du ».
+
+- ⚠️ **Le retrait dit CE QUI a été retiré** : la suppression rend désormais
+  `available`. « Elle a retiré une exception » ne dit pas à l'hôte s'il gagne ou
+  perd quelqu'un ce jour-là.
+- ⚠️ **On se tait quand rien n'a changé** : la ligne d'avant est lue ; une double
+  tape qui repose le même sens n'envoie rien. Une lecture en panne ne bloque
+  pas l'écriture — au pire on annonce une fois de trop, jamais une de moins.
+- ⚠️ **Un refus n'annonce rien** (ligne de l'hôte, valeur invalide, passé).
+- **Best-effort** : l'exception est enregistrée avant l'annonce ; une panne
+  d'alerte ne fait pas croire à la prestataire que son geste a échoué.
+- Le bien sert au **routage** de l'envoi (configuration d'alerte par bien) :
+  n'importe laquelle de ses liaisons actives. Sans liaison, la tâche est posée
+  mais rien ne part (limite connue de `envoyerSiPossible`).
+
+**Ce que la review a trouvé** (aucun constat de sécurité) — deux défauts qui
+faisaient dire FAUX à l'hôte, corrigés dans `alertReglesModifiees` et donc
+aussi pour les jours habituels :
+- ⚠️ **Le SMS répétait le premier changement de la journée.** Il coupe le résumé
+  à 100 caractères, et on renvoyait le CUMUL : un glisser de dix jours envoyait
+  dix SMS ne parlant que du premier. Chaque envoi porte désormais **ce
+  changement-ci** ; la tâche garde le cumul en entier.
+- ⚠️ **Un aller-retour finissait sur le mauvais état.** `deja.includes(texte)`
+  écartait tout texte déjà vu dans la journée : absente → disponible → absente,
+  et la tâche finissait sur « disponible ». Seule la **répétition immédiate**
+  (le cumul se termine déjà par ce changement) est un doublon.
+- Le bien de routage est **ordonné** (`unBienDElle`, exportée et réutilisée au
+  lieu d'être recopiée) : sans `order`, le message partait ou non selon l'ordre
+  de la base, quand l'hôte n'a configuré ses alertes que sur un de ses biens.
+- Coût assumé : l'annonce est **attendue** avant la réponse (une fonction
+  serverless peut être coupée après) ; un glisser attend chaque envoi.
+
+Tests : `tests/menages-public-disponibilites.test.js`, section « L'HÔTE EST
+PRÉVENU » — cinq rouges contre le code d'avant (`git archive`), les tests de
+silence verts des deux côtés ; `tests/alert-regles-modifiees.test.js` — le SMS
+réellement envoyé (doubles de `sendSms` / `sendPlatformEmail`), trois rouges
+contre le premier jet.
