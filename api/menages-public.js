@@ -2311,35 +2311,23 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
 }
 
 // ⚠ LA FIN D'UN GLISSER : UN SEUL SMS QUI RESUME LA PLAGE (decision de Thierry,
-// 2 octobre 2026). Les jours ont ete ecrits un par un, avec leur detail dans la
-// tache du jour et sans envoi. La PWA annonce ici ce qu'elle a REELLEMENT fait :
-// premier et dernier jour enregistres, nombre de jours, sens.
-// ⚠ MEME DOUBLE GARDE que l'ecriture (jeton + `self_availability: 'write'`), et
-// `alertPlageModifiee` n'envoie que si sa tache du jour vient de bouger : un
-// appel forge ne transforme pas la PWA en porte-voix vers l'hote.
+// 2 octobre 2026). Les jours ont ete ecrits un par un dans la tache de l'hote,
+// marques « (glisser) », sans envoi.
+// ⚠ LE CORPS DE LA REQUETE EST IGNORE (constat de securite de la review) : le
+// resume est construit par le serveur depuis ce qu'il a lui-meme ecrit, et la
+// fenetre se consomme (`alertPlageModifiee`). Un appel forge ne peut ni dicter
+// le contenu du SMS, ni en envoyer deux pour un meme glisser.
+// ⚠ MEME DOUBLE GARDE que l'ecriture (jeton + `self_availability: 'write'`).
 async function annoncerMaPlage (req, res, token) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
   if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
-
-  const { du, au, jours, available } = req.body || {}
-  const d = jourValide(du), a = jourValide(au)
-  if (!d || !a || d > a) return res.status(400).json({ error: 'Plage invalide' })
-  if (!Number.isInteger(jours) || jours < 1 || jours > 400) return res.status(400).json({ error: 'Plage invalide' })
-  if (typeof available !== 'boolean') return res.status(400).json({ error: 'Disponibilité invalide' })
-
   let envoye = false
   try {
     const bien = await unBienDElle(qui.userId, qui.profil.id)
-    const prenom = qui.profil.first_name || 'La prestataire'
-    const jm = j => `${j.slice(8, 10)}/${j.slice(5, 7)}`
-    const quand = d === a ? `le ${jm(d)}`
-      : (d.slice(0, 7) === a.slice(0, 7) ? `du ${Number(d.slice(8, 10))} au ${jm(a)}` : `du ${jm(d)} au ${jm(a)}`)
-    envoye = await alertPlageModifiee({
-      userId: qui.userId, providerId: qui.profil.id, propertyId: bien,
-      texte: `${prenom} ${available ? 'dispo' : 'absente'} ${quand} (${jours} jour${jours > 1 ? 's' : ''}), depuis son application.`
-    })
+    envoye = await alertPlageModifiee({ userId: qui.userId, providerId: qui.profil.id,
+                                        propertyId: bien, prenom: qui.profil.first_name })
   } catch (e) {
     console.error('[menages-public] annonce plage echec:', e.message)
   }
@@ -2365,7 +2353,9 @@ async function annoncerException (qui, jour, verbe, { envoyer = true } = {}) {
     const prenom = qui.profil.first_name || 'La prestataire'
     await alertReglesModifiees({
       userId: qui.userId, providerId: qui.profil.id, propertyId: bien, prenom,
-      texte: `${prenom} ${verbe} ${quand}, depuis son application.`,
+      // « (glisser) » : la marque que `alertPlageModifiee` relit pour resumer
+      // la plage. Le serveur ne se fie qu'a ce qu'il a lui-meme ecrit.
+      texte: `${prenom} ${verbe} ${quand}, depuis son application${envoyer ? '' : ' (glisser)'}.`,
       rassurer: false, envoyer
     })
   } catch (e) {
