@@ -90,3 +90,30 @@ test('l’ordinateur ET le téléphone branchent la même fonction, chacun dans 
   assert.doesNotMatch(pc, /import \{ hsBus \}/)
   assert.doesNotMatch(tel, /import \{ hsBus \}/)
 })
+
+// ─── Constats de la revue de 2a3a7bf ────────────────────────────────────────
+test('une réservation sans identifiant ne déclenche aucun appel', async () => {
+  const b = bus({ statut: { ok: true, data: {} } })
+  assert.strictEqual(await brancherEvaluation({ resa: { id: null, checkout: '2026-10-01' }, cible: zone(), bus: b, aujourdhui: AUJ }), 'rien')
+  assert.strictEqual(b.appels.length, 0)
+})
+
+test('publiée pendant que la fiche est ouverte : la fiche le dit tout de suite', async () => {
+  const ecouteurs = []
+  const b = { ...bus({ statut: { ok: true, data: { etat: 'a_remplir', evaluable: true } } }),
+    ecouter (nom, fn) { ecouteurs.push({ nom, fn }); return () => { ecouteurs.length = 0 } } }
+  const z = zone()
+  await brancherEvaluation({ resa: RESA, cible: z, bus: b, aujourdhui: AUJ })
+  assert.strictEqual(ecouteurs[0].nom, 'avis.evaluation_publiee')
+  ecouteurs[0].fn({ booking_uid: 'AUTRE' })
+  assert.ok(z.querySelector('button'), 'un autre séjour ne change rien')
+  ecouteurs[0].fn({ booking_uid: 'BK-9' })
+  assert.match(z.textContent, /Évaluation publiée ✓/)
+  assert.strictEqual(ecouteurs.length, 0, 'l’écoute s’arrête')
+})
+
+test('le bouton fait 44 px de haut au moins', async () => {
+  const z = zone()
+  await brancherEvaluation({ resa: RESA, cible: z, bus: bus({ statut: { ok: true, data: { etat: 'a_remplir', evaluable: true } } }), aujourdhui: AUJ })
+  assert.match(z.querySelector('button').getAttribute('style'), /min-height:44px/)
+})

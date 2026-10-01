@@ -138,6 +138,8 @@ function aujourdhuiLocal () {
 export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => true, bus = undefined, aujourdhui = aujourdhuiLocal() } = {}) {
   if (!resa || !cible) return 'rien'
   cible.innerHTML = ''
+  // Une réservation sans identifiant n'a pas d'évaluation : pas d'appel inutile.
+  if (resa.id == null || resa.id === '') return 'rien'
   const depart = String(resa.checkout || '').slice(0, 10)
   if (!depart || depart > aujourdhui) return 'avant_depart'
   let b = bus
@@ -148,13 +150,23 @@ export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => 
   const bookingUid = String(resa.id)
   const r = await b.demander('avis.statut', { booking_uid: bookingUid })
   if (!encoreAffichee() || !r || !r.ok || !r.data) return 'rien'
-  if (r.data.etat === 'publiee') {
+  const peindrePubliee = () => {
     cible.innerHTML = '<div style="margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#eef8f0;color:#1E7B34;font-size:13px">⭐ Évaluation publiée ✓</div>'
-    return 'publiee'
   }
+  if (r.data.etat === 'publiee') { peindrePubliee(); return 'publiee' }
   if (!r.data.evaluable) return 'rien'
   if (!(await b.disponible('avis.evaluer')) || !encoreAffichee()) return 'sans_droit'
-  cible.innerHTML = '<button type="button" style="width:100%;margin:0 0 12px;padding:9px 12px;border:0;border-radius:8px;background:#fff8e6;color:#7a5200;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit">⭐ Évaluer ce voyageur</button>'
+  // 44 px de haut au moins : la cible tactile d'un doigt, dans la feuille du téléphone.
+  cible.innerHTML = '<button type="button" style="width:100%;min-height:44px;margin:0 0 12px;padding:12px;border:0;border-radius:8px;background:#fff8e6;color:#7a5200;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit">⭐ Évaluer ce voyageur</button>'
   cible.querySelector('button').addEventListener('click', () => b.ouvrir('avis.evaluer', { booking_uid: bookingUid }))
+  // ⚠ PUBLIÉE PENDANT QUE LA FICHE EST OUVERTE : elle le dit tout de suite,
+  // au lieu de garder un bouton qui mènerait à « déjà publiée ».
+  if (typeof b.ecouter === 'function') {
+    const stop = b.ecouter('avis.evaluation_publiee', (d) => {
+      if (!d || String(d.booking_uid) !== bookingUid) return
+      if (encoreAffichee()) peindrePubliee()
+      if (typeof stop === 'function') stop()
+    })
+  }
   return 'bouton'
 }
