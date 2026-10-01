@@ -487,6 +487,31 @@ module.exports = async function handler(req, res) {
       })
     }
     const tous = Array.isArray(liste.json?.data) ? liste.json.data : []
+
+    // ⚠ UNE LISTE TRONQUEE N'EST PAS UNE LISTE COMPLETE, et c'est LE constat qui
+    // decide ici. Le gestionnaire pagine : son `meta` annonce `total` et `limit`
+    // (10 par defaut). Au-dela de dix webhooks sur le compte, `data` n'en porte
+    // que dix — et le notre peut n'y etre pas, ce qui ferait CREER un doublon
+    // alors qu'il existe deja.
+    //
+    // ⚠ ET LE PARAMETRE `page` N'EST PAS HONORE PAR CE POINT D'APPEL. Mesure du
+    // 1er octobre 2026 : `/webhooks?page=2` rend exactement la meme chose que
+    // `/webhooks`. Boucler sur les pages ne reparerait donc RIEN — c'est l'erreur
+    // que j'ai faite en relevant le compte, ou j'ai additionne la meme page vingt
+    // fois et annonce quarante webhooks la ou il y en a deux. On ne pagine pas :
+    // on REFUSE quand la liste est incomplete, parce qu'on ne peut pas conclure.
+    const total = Number(liste.json?.meta?.total)
+    if (Number.isFinite(total) && total > tous.length) {
+      console.error(`[channel-webhook] liste tronquee : ${tous.length} rendu(s) sur ${total} — on ne cree rien`)
+      return res.status(200).json({
+        ok: false, registered: false, updated: false,
+        reason: `Le gestionnaire annonce ${total} webhooks mais n'en rend que ${tous.length} :`
+          + " la liste est tronquee et le parametre « page » n'est pas honore par ce point d'appel."
+          + ' Inscription refusee pour ne pas creer un doublon de ce qui existe peut-etre deja.',
+        annonces: total, rendus: tous.length,
+      })
+    }
+
     const surCetteUrl = tous.filter(w => (w.attributes?.callback_url || w.callback_url) === callbackUrl)
     const trouve = surCetteUrl[0]
     const existant = trouve ? (trouve.id || trouve.attributes?.id) : null
@@ -494,9 +519,14 @@ module.exports = async function handler(req, res) {
     // ⚠ LES DOUBLONS DEJA PRESENTS SE COMPTENT ET SE DISENT. Constat de review :
     // `find` ne rend que le premier, donc une mise a jour laissait les autres
     // vivre — chacun livrant ses propres evenements, et gardant l'ANCIEN secret
-    // apres une rotation, donc bouclant en 401. L'etat probable de la production
-    // EST celui-la : l'ancien code creait un webhook a chaque appel, et le bouton
-    // de la page de diagnostic etait ouvert a tout compte connecte.
+    // apres une rotation, donc bouclant en 401.
+    //
+    // ⚠ J'AI ECRIT « L'ETAT PROBABLE DE LA PRODUCTION EST CELUI-LA », PUIS JE L'AI
+    // MESURE, ET C'ETAIT FAUX : le compte ne porte que DEUX webhooks, un par URL,
+    // aucun doublon (releve en lecture seule du 1er octobre 2026). Le raisonnement
+    // — l'ancien code creait a chaque appel, donc il doit y en avoir beaucoup —
+    // etait plausible et faux. Le garde-fou reste, parce qu'il coute deux lignes
+    // et qu'il parle de l'avenir ; sa justification, non.
     //
     // On ne les supprime pas — ce serait une ecriture non demandee sur le compte
     // partage — mais on refuse de continuer en silence. Les retirer se fait a la

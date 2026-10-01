@@ -45,7 +45,7 @@ const MODULES = ['../api/channel-webhook', '../lib/require-permission', '../lib/
                  '../lib/billing', '../lib/channel-availability', '../lib/record-message']
 
 function preparer ({ user = TITULAIRE, profil = null, permissions = null,
-                     webhooks = [], listeOk = true } = {}) {
+                     webhooks = [], listeOk = true, metaTotal = null } = {}) {
   const etat = { appels: [] }
 
   const client = {
@@ -91,7 +91,12 @@ function preparer ({ user = TITULAIRE, profil = null, permissions = null,
     // elle, aucun test ne pourrait distinguer une creation d'une mise a jour.
     if (String(url).endsWith('/webhooks') && methode === 'GET') {
       return { ok: listeOk, status: listeOk ? 200 : 500, headers: { get: () => null },
-               text: async () => JSON.stringify(listeOk ? { data: webhooks } : { errors: { title: 'panne' } }) }
+               text: async () => JSON.stringify(listeOk
+                 // `metaTotal` reproduit la pagination du gestionnaire : il annonce
+                 // le TOTAL du compte, et ne rend que `limit` lignes (10 par defaut).
+                 ? { data: webhooks, meta: { total: metaTotal === null
+                       ? (Array.isArray(webhooks) ? webhooks.length : 0) : metaTotal, limit: 10 } }
+                 : { errors: { title: 'panne' } }) }
     }
     return {
       ok: true, status: 201,
@@ -741,4 +746,41 @@ test('le succes porte `ok` et `registered`, comme le fichier voisin', async () =
   assert.strictEqual(res.body.ok, true)
   assert.strictEqual(res.body.registered, true)
   assert.strictEqual(res.body.updated, false, 'une creation n est pas une mise a jour')
+})
+
+test('LE TEST QUI COMPTE : une liste TRONQUEE ne declenche aucune creation', async () => {
+  // Le gestionnaire pagine par dix et annonce le total dans `meta`. Au-dela de
+  // dix webhooks, le notre peut n'etre pas dans `data` : creer serait doubler ce
+  // qui existe deja. Et `?page=2` n'est PAS honore par ce point d'appel (mesure
+  // du 1er octobre 2026), donc paginer ne reparerait rien — on refuse.
+  const etat = preparer({
+    webhooks: [{ id: 'un-autre', attributes: { callback_url: 'https://ailleurs.example/x', event_mask: 'booking' } }],
+    metaTotal: 14,
+  })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.strictEqual(res.body.ok, false)
+  assert.strictEqual(res.body.annonces, 14)
+  assert.strictEqual(res.body.rendus, 1)
+  assert.match(res.body.reason, /tronquee/)
+  assert.strictEqual(etat.appels.filter(a => a.methode !== 'GET').length, 0,
+    'ni creation ni mise a jour sur une liste tronquee')
+})
+
+test('CONTRE-EPREUVE : une liste COMPLETE passe, meme avec un meta.total egal', async () => {
+  // Sans elle, un garde-fou qui refuse TOUJOURS passerait aussi le test du
+  // dessus — et plus personne ne pourrait enregistrer quoi que ce soit.
+  const etat = preparer({
+    webhooks: [{ id: 'w-1', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } }],
+    metaTotal: 1,
+  })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.strictEqual(res.body.ok, true)
+  assert.strictEqual(res.body.updated, true)
+  assert.ok(etat.appels.find(a => a.methode === 'PUT'), 'la mise a jour a bien lieu')
 })

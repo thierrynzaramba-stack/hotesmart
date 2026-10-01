@@ -29,8 +29,7 @@ secret.
    cette livraison** — sinon l'étape 5 se fait à la main dans l'interface.
 
    ⚠ **ET L'ÉTAPE 6 PEUT PASSER AU VERT POUR RIEN.** Si d'autres webhooks portent
-   le même masque d'événements — ce qui est l'état probable de la production,
-   l'ancien code en créant un à chaque appel — un événement peut arriver et être
+   le même masque d'événements — un événement peut arriver et être
    accepté **par celui qu'on vient de mettre à jour** pendant que les autres
    bouclent en 401. L'étape 5 lit donc la réponse de l'action : si elle nomme
    `doublons_sur_cette_url` ou `autres_webhooks_du_meme_masque`, la fenêtre
@@ -69,6 +68,44 @@ valeur — que tu dois donc **garder sous la main jusqu'à l'étape 4 réussie**
 ---
 
 ## Rotation 2 — `CHANNEL_WEBHOOK_SECRET`
+
+### Étape 0, faite le 1er octobre 2026 à 15 h (lecture seule)
+
+Relevé du compte Channex de production, **deux webhooks, aucun doublon** :
+
+| id | URL | masque | `request_params` |
+|---|---|---|---|
+| `53e5b611-…ef6b85` | `/api/channel-events` | `new_channel;updated_channel;activate_channel;updated_review` | `{}` |
+| `70b857c3-…37d8a500` | `/api/channel-webhook` | `booking;message` | `{}` |
+
+Les deux sont `is_global: true` et portent un en-tête
+`X-Channel-Webhook-Secret` de 48 caractères. **Je n'ai pas pu vérifier par la
+valeur** que cet en-tête porte bien `CHANNEL_WEBHOOK_SECRET` : la variable est
+absente de `.env.local`, elle ne vit que sur Vercel. La longueur concorde, ce qui
+n'est pas une preuve.
+
+**Ce que ce relevé change :**
+
+1. **Aucun doublon à retirer.** J'avais écrit que l'état probable de la production
+   était « plusieurs webhooks par URL », l'ancien code en créant un à chaque
+   appel. C'était plausible et **faux**. L'avertissement sur les doublons reste
+   dans le code — il parle de l'avenir — mais il n'y a rien à nettoyer avant la
+   rotation.
+2. **`request_params` est vide des deux côtés** : le jeton de bypass n'est pas
+   chez le gestionnaire. Le défaut grave trouvé en review était un risque latent,
+   pas une fuite en cours.
+3. **La pagination n'est pas honorée par ce point d'appel.** `/webhooks?page=2`
+   rend exactement la même chose que `/webhooks` ; `meta` annonce `total` et
+   `limit: 10`. Paginer ne réparerait donc rien — le code **refuse** désormais
+   quand `meta.total` dépasse ce que `data` contient.
+
+⚠ **ET J'AI RATÉ CE RELEVÉ À MON PREMIER ESSAI.** Ma boucle additionnait
+`?page=1..20` sans dédupliquer par identifiant : elle a compté **40 webhooks là
+où il y en a 2**, et j'ai annoncé des doublons qui n'existent pas. La leçon est
+celle de la règle 20 appliquée à une mesure : une boucle de pagination qui ne
+vérifie pas que la pagination est honorée ne mesure rien, elle recopie.
+
+---
 
 ### Ce qui rend celle-ci délicate
 
