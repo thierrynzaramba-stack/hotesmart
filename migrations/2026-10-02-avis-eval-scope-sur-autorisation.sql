@@ -14,15 +14,28 @@
 -- Le serveur lit deja une valeur absente comme `aucun` (api/avis.js,
 -- `roleEtReglages`) : cette migration aligne la base sur le code.
 --
--- Idempotente : rejouee, elle ne change rien de plus.
+-- ⚠ VRAIMENT IDEMPOTENTE, et c'est un constat de revue. Une premiere version
+-- remettait TOUS les profils a `aucun` a chaque collage : rejouee apres le
+-- lot 5, elle aurait retire en silence toutes les autorisations donnees depuis
+-- les fiches prestataires. La remise a `aucun` ne se fait donc QU'UNE FOIS :
+-- tant que le defaut de la colonne n'est pas encore `aucun` (il a valu
+-- `proprete` le 25 septembre, puis `selon_grille` le 30). Le
+-- defaut change dans le meme bloc ; un second collage ne touche plus aucune
+-- ligne.
 -- Ordre : APRES 2026-09-30-avis-grille-configurable.sql.
 
-alter table public.profiles
-  alter column eval_scope set default 'aucun';
-
-update public.profiles
-  set eval_scope = 'aucun'
-  where eval_scope is distinct from 'aucun';
+do $$
+begin
+  if (select column_default from information_schema.columns
+        where table_schema = 'public' and table_name = 'profiles'
+          and column_name = 'eval_scope') not like '%aucun%' then
+    update public.profiles
+      set eval_scope = 'aucun'
+      where eval_scope is distinct from 'aucun';
+    alter table public.profiles
+      alter column eval_scope set default 'aucun';
+  end if;
+end $$;
 
 comment on column public.profiles.eval_scope is
   'Participation de la prestataire aux evaluations du voyageur : aucun | selon_grille. '

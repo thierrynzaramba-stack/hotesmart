@@ -756,3 +756,45 @@ test('et une prestataire AUTORISEE (selon_grille) voit les siennes', async () =>
   await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
   assert.ok(res.body.criteres.length > 0, 'l autorisation ouvre ses criteres')
 })
+
+// ─── Constat de securite S1 (revue de D1, 2 octobre 2026) ───────────────────
+// `eval_scope = aucun` coupait le formulaire, pas le reste : un profil
+// « aucun + valider » lisait le texte public et publiait l'evaluation que
+// l'hote avait remplie. La migration D1 cree justement ce profil.
+const PRESTA_NON_AUTORISEE = () => {
+  const p = PRESTA_A('valider')
+  p.profil.eval_scope = 'aucun'
+  return p
+}
+
+test('LE TEST QUI COMPTE : une prestataire « aucun + valider » ne LIT pas le texte public', async () => {
+  const evaluation = evalA({ status: 'a_valider' })
+  preparer({ user: MEMBRE, ...PRESTA_NON_AUTORISEE(), evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.evaluation.public_text, undefined)
+  assert.strictEqual(res.body.peut_publier, false)
+})
+
+test('LE TEST QUI COMPTE : une prestataire « aucun + valider » ne PUBLIE pas l’evaluation de l’hote', async () => {
+  const etat = preparer({ user: MEMBRE, ...PRESTA_NON_AUTORISEE(), evaluations: [evalA()] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'prestataire_non_autorisee')
+  assert.strictEqual(etat.provider.appels.length, 0, 'rien ne part chez le provider')
+})
+
+test('une prestataire sans autorisation ne peut pas non plus REPONDRE (400 nomme)', async () => {
+  const evaluation = evalA({ status: 'a_remplir', answers_host: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_NON_AUTORISEE(), evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: evaluation.id, action: 'eval-reponses', reponses: { etat: 'impeccable' } }), res)
+  assert.strictEqual(res.code, 400)
+  assert.match(res.body.error, /n’est pas ouvert à ce rôle/)
+  assert.strictEqual(etat.ecritures.filter(e => e.table === 'guest_evaluations').length, 0)
+})

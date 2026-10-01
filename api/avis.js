@@ -1064,7 +1064,10 @@ async function evaluationLire (req, res, garde) {
     : {
         ...commun,
         answers_cleaner: e.answers_cleaner,
-        ...(evalPower === 'valider' ? { public_text: e.public_text } : {}),
+        // ⚠ ET SEULEMENT SI L'HOTE L'A AUTORISEE : une prestataire `aucun` ne
+        // participe a rien, elle ne lit donc pas le texte (constat de securite
+        // du 2 octobre 2026, avec la garde de lib/avis/publication.js).
+        ...(evalPower === 'valider' && evalScope === 'selon_grille' ? { public_text: e.public_text } : {}),
       }
 
   // ⚠ `peut_publier` SE REND DES L'OUVERTURE. Constat de review : la fenetre ne

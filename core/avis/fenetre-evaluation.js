@@ -58,6 +58,7 @@ const MOTIF_LISIBLE = {
   deja_chez_le_provider: 'L’avis était déjà parti chez la plateforme : il est maintenant marqué publié.',
   grille_sans_jugement: 'La grille ne produit ni note ni recommandation : complétez-la dans Réglages.',
   provider_inconnu: 'La plateforme de ce séjour est inconnue : contactez le support.',
+  prestataire_non_autorisee: 'L’hôte ne vous a pas autorisée à participer aux évaluations.',
 }
 
 const echapper = (t) => String(t == null ? '' : t)

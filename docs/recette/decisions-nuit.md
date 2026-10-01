@@ -17,8 +17,17 @@ La valeur par défaut passe de `selon_grille` à **`aucun`**, et le serveur lit 
 valeur absente comme `aucun`. **Les profils existants passent aussi à `aucun`** :
 c'est l'option la plus prudente, et elle ne retire rien à personne en production,
 où aucune évaluation n'a jamais été remplie (le chantier n'y est pas). L'hôte
-autorise chaque prestataire depuis sa fiche (lot 5). Défaire : remettre le défaut
-à `selon_grille` dans la migration, sans toucher aux lignes.
+autorise chaque prestataire depuis sa fiche (lot 5). **Défaire** : remettre la
+valeur par défaut à `selon_grille` à **trois** endroits — la migration (sans son
+`update`), `api/avis.js` (`roleEtReglages`) et `lib/avis/evaluations.js`
+(`enregistrerReponses`).
+
+**Conséquence de sécurité trouvée en revue, et fermée.** `aucun` coupait le
+formulaire, pas la publication : un profil « aucun + valider » — que la
+migration crée justement à partir de « selon_grille + valider » — lisait le
+texte public et publiait l'évaluation remplie par l'hôte. La publication
+(`lib/avis/publication.js`) et la lecture (`evaluationLire`) exigent désormais
+`selon_grille`.
 
 ### D2 — Quand une évaluation NAÎT (pièce manquante trouvée cette nuit)
 

@@ -43,7 +43,7 @@ function provider ({ post = { ok: true, status: 200, json: { success: true } }, 
 test('LE TEST QUI COMPTE : un avis negatif ne part pas sur le pouvoir de la prestataire', async () => {
   const p = provider()
   await assert.rejects(
-    () => publier({ evaluation: evaluation({ answers_host: NEGATIF, status: 'a_valider' }), parProfil: { eval_power: 'valider' }, provider: p }),
+    () => publier({ evaluation: evaluation({ answers_host: NEGATIF, status: 'a_valider' }), parProfil: { eval_power: 'valider', eval_scope: 'selon_grille' }, provider: p }),
     (e) => e instanceof RefusPublication && e.motif === 'negatif_a_valider')
   assert.deepStrictEqual(p.appels, [], 'aucun appel provider')
 })
@@ -57,14 +57,14 @@ test('un avis negatif part quand c’est l’HOTE qui valide', async () => {
 
 test('un avis NON negatif part sur le pouvoir de la prestataire', async () => {
   const p = provider()
-  const r = await publier({ evaluation: evaluation(), parProfil: { eval_power: 'valider' }, provider: p })
+  const r = await publier({ evaluation: evaluation(), parProfil: { eval_power: 'valider', eval_scope: 'selon_grille' }, provider: p })
   assert.strictEqual(r.statut, 'publiee')
 })
 
 test('la prestataire sans pouvoir ne publie pas, meme un avis flatteur', async () => {
   const p = provider()
   await assert.rejects(
-    () => publier({ evaluation: evaluation(), parProfil: { eval_power: 'soumettre' }, provider: p }),
+    () => publier({ evaluation: evaluation(), parProfil: { eval_power: 'soumettre', eval_scope: 'selon_grille' }, provider: p }),
     (e) => e.motif === 'pouvoir_insuffisant')
   assert.deepStrictEqual(p.appels, [])
 })
@@ -206,7 +206,7 @@ test('le garde-fou du negatif suit la grille figee, pas la liste d’origine', a
   await assert.rejects(
     () => publier({
       evaluation: evaluation({ grille_figee: GRILLE_HOTE, answers_host: { couvre_feu: 'non' } }),
-      parProfil: { eval_power: 'valider' }, provider: p }),
+      parProfil: { eval_power: 'valider', eval_scope: 'selon_grille' }, provider: p }),
     (e) => e.motif === 'negatif_a_valider')
   assert.deepStrictEqual(p.appels, [])
 })
@@ -378,3 +378,16 @@ test('une prestataire qui n’a rien rempli ne publie pas un avis vide', async (
     () => publier({ evaluation: evaluation({ answers_host: null, answers_cleaner: {} }), parProfil: PROFIL_VALIDER, provider: provider() }),
     (e) => e instanceof RefusPublication && e.motif === 'sans_reponses')
 })
+
+// ─── Une prestataire NON AUTORISEE ne publie rien (securite, 2 octobre 2026) ─
+// `eval_scope = aucun` coupait le formulaire, pas la publication : un profil
+// « aucun + valider » publiait l'evaluation que l'hote avait remplie.
+for (const evalScope of ['aucun', undefined, null]) {
+  test(`LE TEST QUI COMPTE : une prestataire « valider » sans autorisation (${evalScope}) ne publie pas`, async () => {
+    const p = provider()
+    await assert.rejects(
+      () => publier({ evaluation: evaluation(), parProfil: { eval_power: 'valider', eval_scope: evalScope }, provider: p }),
+      (e) => e.motif === 'prestataire_non_autorisee')
+    assert.deepStrictEqual(p.appels, [], 'rien ne part chez le provider')
+  })
+}
