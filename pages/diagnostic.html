@@ -305,11 +305,20 @@
       const res = await fetch('/api/channel-webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
-        body: JSON.stringify({ action: 'register', callback_url: 'https://hotesmart.vercel.app/api/channel-webhook' })
+        // ⚠ PLUS DE callback_url ICI. Le serveur construit sa cible lui-meme et
+        // refuse une destination fournie par l'appelant. L'envoyer ne servait
+        // qu'a se faire refuser le jour ou le domaine de prod change.
+        body: JSON.stringify({ action: 'register' })
       })
       const body = await res.json().catch(() => ({}))
       setOut(4, { http: res.status, body })
-      return res.ok
+      // ⚠ PAS DE VERT SUR LE SEUL CODE HTTP. Les refus de cette action
+      // repondent 200 avec `ok:false` (hote non applicatif, liste illisible) :
+      // lire `res.ok` seul peignait le badge en vert sur un refus. Et des
+      // doublons restants ne sont pas un succes — ils garderont l'ANCIEN secret
+      // apres une rotation.
+      return res.ok && body.ok !== false && body.registered !== false
+        && !body.doublons_sur_cette_url && !body.autres_webhooks_du_meme_masque
     },
     // 5. API canaux prod
     async '5'() {

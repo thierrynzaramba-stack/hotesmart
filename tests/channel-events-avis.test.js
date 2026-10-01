@@ -299,7 +299,7 @@ function preparerRegister ({ webhooks = webhooksExistants(), listeOk = true } = 
 }
 
 function requeteRegister (callbackUrl) {
-  return { method: 'POST', headers: { authorization: 'Bearer jeton' },
+  return { method: 'POST', headers: { authorization: 'Bearer jeton', host: 'hotesmart.vercel.app' },
            body: { action: 'register', callback_url: callbackUrl } }
 }
 
@@ -438,7 +438,7 @@ test('register : sans callback_url, le serveur détermine la cible et enregistre
   const etat = preparerRegister({})
   const handler = require('../api/channel-events')
   const res = reponse()
-  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton' },
+  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton', host: 'hotesmart.vercel.app' },
                   body: { action: 'register' } }, res)
 
   assert.strictEqual(res.code, 200)
@@ -527,3 +527,150 @@ test('register : à la création aussi, la réponse est nettoyée', async () => 
   assert.strictEqual(res.code, 201)
   assert.ok(!JSON.stringify(res.body).includes(SECRET))
 })
+
+// ─── Le jeton de bypass ne part jamais vers un domaine de production ────────
+// Constat du 1er octobre 2026 : `VERCEL_BYPASS_TOKEN` existe sur le projet de
+// production, et ce fichier l'envoyait au gestionnaire des que la variable
+// existait. La cible est toujours un domaine de production, qui n'est pas
+// derriere le mur : le jeton n'y servait a rien, et il ouvre toutes les
+// previews. L'etape 4 de la rotation 2 l'aurait depose chez le gestionnaire.
+// La variable est lue au CHARGEMENT du module : elle se pose avant `require`.
+
+for (const [chemin, webhooks, methode] of [
+  ['mise a jour', webhooksExistants(), 'PUT'],
+  ['creation', { data: [] }, 'POST']
+]) {
+  test(`register (${chemin}) : jeton de bypass present, request_params reste vide`, async () => {
+    const avant = process.env.VERCEL_BYPASS_TOKEN
+    process.env.VERCEL_BYPASS_TOKEN = 'jeton-bypass-de-test'
+    try {
+      let corps = null
+      preparer({ fetchStub: async (url, opts) => {
+        const m = opts?.method || 'GET'
+        if (url.endsWith('/webhooks') && m === 'GET') {
+          return { ok: true, status: 200, text: async () => JSON.stringify(webhooks) }
+        }
+        if (m === methode) {
+          corps = JSON.parse(opts.body)
+          return { ok: true, status: m === 'POST' ? 201 : 200, text: async () => '{"data":{"id":"x"}}' }
+        }
+        return null
+      } })
+      const handler = require('../api/channel-events')
+      const res = reponse()
+      await handler(requeteRegister(URL_MOI), res)
+
+      assert.ok(corps, `le ${methode} doit etre parti`)
+      assert.deepStrictEqual(corps.webhook.request_params, {},
+        'aucun parametre de bypass vers un domaine de production')
+      assert.ok(!JSON.stringify(corps).includes('jeton-bypass-de-test'),
+        'le jeton ne doit figurer nulle part dans le corps envoye')
+      // Le secret partage, lui, doit toujours partir : sans lui, 401 en boucle.
+      assert.ok(corps.webhook.headers['X-Channel-Webhook-Secret'])
+    } finally {
+      if (avant === undefined) delete process.env.VERCEL_BYPASS_TOKEN
+      else process.env.VERCEL_BYPASS_TOKEN = avant
+    }
+  })
+}
+
+// ─── Un echec du gestionnaire ne fait pas sortir le secret ──────────────────
+// Revue de 6b7f011 : `detail` recopiait la reponse d'echec telle quelle. Si le
+// gestionnaire recopie le corps envoye dans son message, le secret partage —
+// a l'etape 4 de la rotation, le NOUVEAU — sortait dans la reponse HTTP.
+
+for (const [chemin, webhooks, methode] of [
+  ['mise a jour', webhooksExistants(), 'PUT'],
+  ['creation', { data: [] }, 'POST']
+]) {
+  test(`register (${chemin}) : un refus qui recopie le corps ne laisse pas sortir le secret`, async () => {
+    const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+    preparer({ fetchStub: async (url, opts) => {
+      const m = opts?.method || 'GET'
+      if (url.endsWith('/webhooks') && m === 'GET') {
+        return { ok: true, status: 200, text: async () => JSON.stringify(webhooks) }
+      }
+      if (m === methode) {
+        // Refus qui recopie le corps recu, secret enchasse dans une chaine.
+        return { ok: false, status: 422, text: async () => JSON.stringify({ errors: {
+          title: 'invalide', details: `corps recu : ${opts.body}` } }) }
+      }
+      return null
+    } })
+    const handler = require('../api/channel-events')
+    const res = reponse()
+    await handler(requeteRegister(URL_MOI), res)
+
+    assert.strictEqual(res.body.ok, false)
+    assert.ok(res.body.detail, 'le detail du refus reste lisible')
+    assert.ok(!JSON.stringify(res.body).includes(SECRET), 'le secret ne doit pas sortir')
+  })
+}
+
+// ─── L'action refuse de tourner hors des domaines applicatifs ───────────────
+// Lancee depuis staging, elle posait dans le compte de canal de staging un
+// webhook pointant sur la PRODUCTION avec le secret de STAGING : 401 en boucle,
+// et une etape 8 de rotation qui semblait reussie. Meme regle que
+// channel-webhook.js. Le webhook de staging s'enregistre a la main.
+
+for (const hote of ['hotesmart-staging.vercel.app', 'hotesmart-git-x-equipe.vercel.app', '']) {
+  test(`register : refuse depuis « ${hote || '(sans hote)'} », et rien ne part`, async () => {
+    const etat = preparerRegister({})
+    const handler = require('../api/channel-events')
+    const res = reponse()
+    await handler({ method: 'POST', headers: { authorization: 'Bearer jeton', host: hote },
+                    body: { action: 'register' } }, res)
+
+    assert.strictEqual(res.code, 409)
+    assert.strictEqual(res.body.ok, false)
+    assert.strictEqual(etat.appels.length, 0, 'aucun appel ne doit partir vers le gestionnaire')
+  })
+}
+
+test('register : depuis la production, avec un port, l action passe', async () => {
+  // Contre-epreuve : sans elle, une garde qui refuse TOUT passerait les tests
+  // du dessus, et plus personne ne pourrait enregistrer le webhook.
+  const etat = preparerRegister({})
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton', host: 'hotesmart.vercel.app:443' },
+                  body: { action: 'register' } }, res)
+
+  assert.strictEqual(res.code, 200)
+  assert.ok(etat.appels.find(a => a.method === 'PUT'))
+})
+
+// ─── Un SUCCES de forme inattendue ne fait pas sortir le secret ─────────────
+// `webhookSansSecrets` masque par CLE, au premier niveau `attributes` : une
+// enveloppe differente, ou un corps non JSON (`{ raw }`), passait intact.
+
+const FORMES_DE_SUCCES = {
+  'enveloppe webhook': (s) => JSON.stringify({ webhook: { headers: { 'X-Channel-Webhook-Secret': s } } }),
+  'corps non JSON': (s) => `ok secret=${s}`,
+  'secret dans un message': (s) => JSON.stringify({ data: { id: 'w', attributes: { note: `entete ${s}` } } })
+}
+
+for (const [forme, corps] of Object.entries(FORMES_DE_SUCCES)) {
+  for (const [chemin, webhooks, methode] of [
+    ['mise a jour', webhooksExistants(), 'PUT'],
+    ['creation', { data: [] }, 'POST']
+  ]) {
+    test(`register (${chemin}) : succes « ${forme} », le secret ne sort pas`, async () => {
+      const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+      preparer({ fetchStub: async (url, opts) => {
+        const m = opts?.method || 'GET'
+        if (url.endsWith('/webhooks') && m === 'GET') {
+          return { ok: true, status: 200, text: async () => JSON.stringify(webhooks) }
+        }
+        if (m === methode) return { ok: true, status: m === 'POST' ? 201 : 200, text: async () => corps(SECRET) }
+        return null
+      } })
+      const handler = require('../api/channel-events')
+      const res = reponse()
+      await handler(requeteRegister(URL_MOI), res)
+
+      assert.strictEqual(res.body.ok, true)
+      assert.ok(!JSON.stringify(res.body).includes(SECRET), 'le secret ne doit pas sortir')
+    })
+  }
+}

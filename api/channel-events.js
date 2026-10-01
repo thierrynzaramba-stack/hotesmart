@@ -73,10 +73,53 @@ function webhookSansSecrets (w) {
     : nettoyer(w)
 }
 
+// ⚠ LES ECHECS DU GESTIONNAIRE SORTAIENT TELS QUELS (revue de 6b7f011, 1er
+// octobre 2026) : `detail` et les journaux d'erreur recopiaient sa reponse. S'il
+// recopie le corps envoye dans son message d'erreur, le secret partage sortait
+// dans la reponse HTTP — a l'etape 4 de la rotation, le NOUVEAU. Meme balayage
+// par valeur que `channel-webhook.js`, chaines comprises : le secret peut etre
+// enchasse dans un message.
+function sansSecrets (rep) {
+  const secrets = [WEBHOOK_SECRET, VERCEL_BYPASS].filter(v => typeof v === 'string' && v.length >= 8)
+  if (!secrets.length) return rep
+  const nettoyer = (v) => {
+    if (typeof v === 'string') {
+      let r = v
+      for (const s of secrets) if (r.includes(s)) r = r.split(s).join('***RETIRE***')
+      return r
+    }
+    if (Array.isArray(v)) return v.map(nettoyer)
+    if (v && typeof v === 'object') {
+      const out = {}
+      for (const [k, x] of Object.entries(v)) out[k] = nettoyer(x)
+      return out
+    }
+    return v
+  }
+  return nettoyer(rep)
+}
+
 function urlWebhookDeCeFichier (req) {
   const host = String(req.headers?.host || '').toLowerCase().split(':')[0]
   const domaine = DOMAINES_APP.includes(host) ? host : DOMAINES_APP[0]
   return `https://${domaine}/api/channel-events`
+}
+
+// ⚠ LE JETON DE BYPASS SUIT LA CIBLE, JAMAIS L'ENVIRONNEMENT D'EXECUTION.
+// Il etait envoye des que `VERCEL_BYPASS_TOKEN` existait. Or la variable existe
+// sur le projet de production (constat du 1er octobre 2026), et la cible est
+// TOUJOURS un domaine de production, qui n'est pas derriere le mur : chaque
+// enregistrement deposait donc chez le gestionnaire un jeton qui ouvre toutes
+// les previews, sans aucun usage. Le releve du meme jour montrait `{}` chez lui ;
+// l'etape 4 de la rotation l'aurait rempli. Meme regle que `channel-webhook.js`.
+function parametresDeRequete (cible) {
+  const hote = (() => { try { return new URL(cible).host } catch { return '' } })()
+  // Un domaine applicatif n'est pas protege par le mur : aucun parametre.
+  if (DOMAINES_APP.includes(hote)) return {}
+  // Tout autre hote serait une preview. Inatteignable aujourd'hui —
+  // `urlWebhookDeCeFichier` ne rend qu'un domaine de DOMAINES_APP — mais si la
+  // liste s'ouvre un jour, le bypass suivra la cible, pas l'appelant.
+  return VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
 }
 
 // Events canal ecoutes par ce 2e webhook.
@@ -299,6 +342,27 @@ module.exports = async function handler(req, res) {
     const { data: u } = await supabase.auth.getUser(token)
     if (!u?.user) return res.status(401).json({ error: 'Session invalide' })
 
+    // ⚠ L'ACTION REFUSE DE TOURNER HORS DES DOMAINES APPLICATIFS. Meme regle
+    // que `channel-webhook.js`, portee le 1er octobre 2026 avant la rotation 2.
+    // `urlWebhookDeCeFichier` ne rend que l'URL de production : lancee depuis le
+    // projet STAGING, l'action posait, dans le compte de canal de staging, un
+    // webhook global pointant sur la PRODUCTION et portant le secret de STAGING.
+    // La production refusait chaque livraison en 401, le gestionnaire retentait
+    // en boucle, et l'etape 8 de la rotation semblait reussie. Le webhook de
+    // staging s'enregistre a la main, dans l'interface du compte de staging.
+    const hoteAppelant = String(req.headers?.host || '').toLowerCase().split(':')[0]
+    if (!DOMAINES_APP.includes(hoteAppelant)) {
+      console.error(`[channel-events] register refuse depuis « ${hoteAppelant} » : hors DOMAINES_APP`)
+      return res.status(409).json({
+        ok: false, registered: false, updated: false,
+        error: 'Cette action ne s execute que depuis un domaine applicatif',
+        reason: `Appele depuis « ${hoteAppelant} ». La cible du webhook est toujours ${DOMAINES_APP[0]} :`
+          + ` lance d ailleurs, cet appel enregistrerait un webhook pointant sur la production`
+          + ` avec le secret de l environnement appelant. Relancez depuis la production.`,
+        attendu: DOMAINES_APP,
+      })
+    }
+
     // ⚠ GARDE 1 — la cible est construite cote serveur, pas recue.
     // Une premiere version validait le `callback_url` du client par son chemin.
     // Insuffisant : le chemin de "https://evil.example.com/api/channel-events"
@@ -330,7 +394,7 @@ module.exports = async function handler(req, res) {
       // On ne cree PAS a l'aveugle : sans la liste, impossible de savoir si le
       // webhook existe deja, et un POST produirait un doublon — donc double
       // livraison de chaque event et double execution de runPostMapping.
-      console.error('[channel-events] lecture des webhooks impossible', liste.status, JSON.stringify(liste.json))
+      console.error('[channel-events] lecture des webhooks impossible', liste.status, JSON.stringify(sansSecrets(liste.json)))
       return res.status(200).json({
         ok: false, registered: false, updated: false,
         channel_status: liste.status,
@@ -379,26 +443,26 @@ module.exports = async function handler(req, res) {
           is_active: true,
           send_data: true,
           headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
-          request_params: VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+          request_params: parametresDeRequete(callbackUrl)
         }
       })
       // Meme reserve que pour la creation : un refus doit etre lisible, pas un
       // crash. Sans cette mise a jour, `updated_review` n'arrive jamais et le
       // poll quotidien reste seul — degrade, pas casse.
       if (!maj.ok) {
-        console.error('[channel-events] mise a jour du masque refusee', maj.status, JSON.stringify(maj.json))
+        console.error('[channel-events] mise a jour du masque refusee', maj.status, JSON.stringify(sansSecrets(maj.json)))
         return res.status(200).json({
           ok: false,
           registered: false,
           updated: false,
           channel_status: maj.status,
           reason: "Le gestionnaire de canaux a refuse la mise a jour du masque d'events (ajout de updated_review). Les avis continueront d'arriver par le poll quotidien.",
-          detail: maj.json?.errors || maj.json
+          detail: sansSecrets(maj.json?.errors || maj.json)
         })
       }
       return res.status(200).json({
         ok: true, registered: true, updated: true,
-        event_mask: CHANNEL_EVENTS, webhook: webhookSansSecrets(maj.json?.data || maj.json)
+        event_mask: CHANNEL_EVENTS, webhook: sansSecrets(webhookSansSecrets(maj.json?.data || maj.json))
       })
     }
 
@@ -411,23 +475,23 @@ module.exports = async function handler(req, res) {
         is_active: true,
         send_data: true,
         headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
-        request_params: VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+        request_params: parametresDeRequete(callbackUrl)
       }
     })
 
     // Reserve "plusieurs webhooks autorises ?" : si Channex refuse un 2e webhook,
     // message clair, pas de crash (200 + registered:false).
     if (!reg.ok) {
-      console.error('[channel-events] register 2e webhook refuse', reg.status, JSON.stringify(reg.json))
+      console.error('[channel-events] register 2e webhook refuse', reg.status, JSON.stringify(sansSecrets(reg.json)))
       return res.status(200).json({
         ok: false,
         registered: false,
         channel_status: reg.status,
         reason: "Le gestionnaire de canaux a refuse l'enregistrement du 2e webhook (events canal). Verifier s'il autorise plusieurs webhooks par compte.",
-        detail: reg.json?.errors || reg.json
+        detail: sansSecrets(reg.json?.errors || reg.json)
       })
     }
-    return res.status(201).json({ ok: true, registered: true, event_mask: CHANNEL_EVENTS, webhook: webhookSansSecrets(reg.json?.data || reg.json) })
+    return res.status(201).json({ ok: true, registered: true, event_mask: CHANNEL_EVENTS, webhook: sansSecrets(webhookSansSecrets(reg.json?.data || reg.json)) })
   }
 
   // ===== RECEPTION d'un event canal =====

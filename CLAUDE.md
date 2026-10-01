@@ -375,7 +375,6 @@ vert, sans toucher une ligne de production.
 | 2 | `tests/avis-endpoint.test.js` | **6** | fenetre glissante de 30 jours de `api/avis.js` (`periodeNormalisee` → `borneDepuis`) : AVIS_B du 20 aout vient d'en sortir ; le 29 septembre, trois de plus (« un avis NON analyse… », « un membre limite a un bien… », « une detection en attente… ») — contre-epreuve +1 mois : 5 des 6 au vert, le 6e casse par le decalage lui-meme (la date invalide 02-30 devient valide) |
 | 3 | `tests/messages-classify.test.js` | **10** | meme fenetre : le message du 20 aout est ecarte AVANT la garde de panne DB, donc la garde n'est jamais appelee — elle mord toujours |
 | 4 | `tests/menages-public-filtre-presta.test.js` | **4** | fenetre glissante de 14 jours du fil d'actualites (`api/menages-public.js`, « on remonte aussi les 14 derniers jours ») : le menage `b1` du 6 septembre en est sorti le 21 (constate le 21 septembre 2026, contre-epreuve +1 mois : 20/20) |
-| 5 | `tests/pwa-mes-jours-dom.test.js` | **2**, du 1er au 3 de chaque mois | « la marque ⏭ ne dépend PAS du filtre de biens » et « la FICHE d'un ménage obsolète… » : dates RELATIVES (`dans(-3)`), mais la grille n'affiche que le mois courant — les trois premiers jours du mois, la case du 3e jour avant n'existe pas (`taperJour` → `null`). Constaté le 1er octobre 2026 ; contre-épreuve horloge +10 jours (Node ET fenêtre jsdom) : 132/132. Guérit seul le 4, revient le 1er du mois suivant |
 
 Les familles 2 et 3 franchissent une FENETRE DE LECTURE, pas une garde
 d'anciennete — c'est ce qui les rend penibles : elles se declenchent a des
@@ -386,11 +385,28 @@ V1.** Un chiffre qui bouge tout seul avec le calendrier est un mauvais
 garde-fou : l'actualiser n'est qu'un sursis.
 
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
+⚠ **UNE CINQUIEME FAMILLE A EXISTE LE 1er OCTOBRE 2026, ET ELLE A ETE REFERMEE
+LE JOUR MEME** — deux tests de `tests/pwa-mes-jours-dom.test.js` qui tapaient
+`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte est
+redevenu **28, et exactement 28**. Ce qu'il faut en retenir : un compte a
+geometrie variable est une barriere affaiblie. Le jour ou une vraie regression
+apporte deux rouges un 2 du mois, un compte attendu de « 30 ces jours-la » ne
+fait arreter personne. **Documenter un rouge calendaire est le dernier recours ;
+ancrer le test dans sa fenetre est le premier.**
+
+⚠ **ET LA CONTRE-EPREUVE CALENDAIRE A UN OUTIL**, parce que la faire a la main
+donne de faux resultats : `tests/outils/horloge-decalee.js`, a PRECHARGER
+(`JOURS=10 node --require ./tests/outils/horloge-decalee.js --test <fichier>`). Il
+decale l'horloge de Node **et celle de la fenetre jsdom**, qui vit dans un autre
+realm. Decaler les fixtures seules, ou le seul global de Node, fabrique des
+echecs qui n'ont rien a voir avec le calendrier : mesure du 1er octobre 2026,
+8 et 10 rouges contre 132/132 par l'outil. Il a fallu deux sessions comparant
+leurs mesures pour le voir.
+
 Le nombre attendu est **28, et exactement 28** (8 + 6 + 10 + 4, au 29 septembre
 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28). Avant tout push : lire le compte,
 pas la couleur. **29 rouges = une regression, on ne pousse pas** tant qu'on ne
-l'a pas nommee — sauf du 1er au 3 du mois, ou 30 est attendu (famille 5, les deux
-tests nommes) ; 27 rouges = une dette s'est refermee, on met ce nombre a jour
+l'a pas nommee ; 27 rouges = une dette s'est refermee, on met ce nombre a jour
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
 se contre-eprouve avant d'etre pris pour une regression : decaler les fixtures
 d'un mois, relancer, restaurer l'arbre — si tout repasse au vert, c'est le
@@ -438,6 +454,8 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/kb/reference-yield.md (un jour = UN segment par priorite ; cascade de repli a 4 niveaux, plancher = jour de semaine ; deux seuils, 8 nuits ET 3 resas ; `part_vendue` est une part de VENTES, on extrapole le final, on ne multiplie jamais la capacite).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).
 - docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
+- docs/specs/rotation-deroule.md (**LE DÉROULÉ QUI FAIT FOI pendant une rotation de secret** : `CRON_SECRET` puis `CHANNEL_WEBHOOK_SECRET`, geste par geste, avec la vérification que je fais à chaque pas et la fenêtre de refus d'une minute).
+- docs/specs/rotation-secret-webhook.md (le POURQUOI de la rotation du secret de webhook, et l'historique du piège : une version de ce document a affirmé le contraire du code. **En cas de divergence, le déroulé ci-dessus gagne, et celui-ci se corrige dans le même mouvement.**)
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.
