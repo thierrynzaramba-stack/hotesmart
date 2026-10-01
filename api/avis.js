@@ -19,6 +19,8 @@ const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandon
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
+// Naissance 1 : la prestataire ouvre ses questions apres « Menage fait » (decision D2).
+const { assurerEvaluation } = require('../lib/avis/naissance')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -680,6 +682,152 @@ async function prestataireReglagesEcrire (req, res, garde) {
   if (error) return res.status(503).json({ error: 'Réglages non enregistrés', detail: error.message })
   if (!Array.isArray(data) || data.length !== 1) return res.status(409).json({ error: 'Le profil a changé pendant l’enregistrement : rechargez la fiche.' })
   return res.status(200).json({ ok: true, ...vueReglages(data[0]) })
+}
+
+// ─── La PWA prestataire : identite par JETON (`avis.questions_prestataire`) ─
+// Lot 5, 2 octobre 2026. Une prestataire n'a pas de compte : elle entre par le
+// lien de sa PWA. Le jeton ne vaut rien par lui-meme — il DESIGNE une personne,
+// et c'est elle qui porte le droit (meme regle que api/menages-public.js).
+//
+// Cinq gardes, toutes avant la moindre ecriture, puis les MEMES fonctions que
+// la session (lecture, reponses, publication) avec une garde BORNEE :
+//   1. le jeton designe un profil ACTIF en acces par lien, sur le compte de la
+//      ligne `public_tokens` ;
+//   2. le menage (bien, reservation, date de depart) est LE SIEN —
+//      `menages.provider_id` est elle. Pas de repli « dans le perimetre du
+//      lien » : evaluer un sejour engage plus qu'un menage marque fait ;
+//   3. le menage est MARQUE FAIT (`menage_done`) : les questions viennent
+//      apres, jamais avant (spec §8.6) ;
+//   4. le sejour est Airbnb par Channex, le seul evaluable en V1 ;
+//   5. l'hote l'a AUTORISEE (`eval_scope = selon_grille`, decision D1). Sans
+//      autorisation, rien ne nait : une evaluation qu'elle ne pourrait pas
+//      remplir n'a rien a faire en base.
+//
+// ⚠ UNE PANNE COUPE EN 503, ELLE NE SE FAIT PAS PASSER POUR UN LIEN INVALIDE —
+// comme dans api/menages-public.js.
+const JOUR_RE = /^\d{4}-\d{2}-\d{2}$/
+
+async function porteurDuJeton (token) {
+  const { data: pt, error } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  if (error) return { statut: 503 }
+  if (!pt) return { statut: 401 }
+  const { data: profil, error: eP } = await supabase.from('profiles')
+    .select('id, first_name, active, accepted_at, eval_scope, eval_power')
+    .eq('account_user_id', pt.user_id).eq('pwa_token', token)
+    .eq('access_mode', 'lien').maybeSingle()
+  if (eP) return { statut: 503 }
+  if (!profil || profil.active === false) return { statut: 401 }
+  return { userId: pt.user_id, profil }
+}
+
+// Le sejour de CE menage, s'il est a elle, fait, et evaluable.
+async function sejourDuMenage (userId, profil, { propertyRef, bookingId, departureDate }) {
+  const { data: menage, error } = await supabase.from('menages')
+    .select('provider_id').eq('user_id', userId).eq('property_id', propertyRef)
+    .eq('booking_id', bookingId).eq('departure_date', departureDate).maybeSingle()
+  if (error) return { statut: 503 }
+  if (!menage || menage.provider_id !== profil.id) {
+    return { statut: 403, corps: { error: 'Ce ménage ne vous est pas attribué', motif: 'menage_pas_a_elle' } }
+  }
+  const { data: fait, error: eF } = await supabase.from('menage_done')
+    .select('booking_id').eq('user_id', userId).eq('property_id', propertyRef)
+    .eq('booking_id', bookingId).eq('departure_date', departureDate).maybeSingle()
+  if (eF) return { statut: 503 }
+  if (!fait) return { statut: 409, corps: { error: 'Marquez d’abord le ménage comme fait.', motif: 'menage_pas_fait' } }
+
+  const { data: biens, error: eB } = await supabase.from('properties')
+    .select('id, provider_property_id').eq('user_id', userId).eq('provider_property_id', propertyRef)
+  if (eB) return { statut: 503 }
+  if (!Array.isArray(biens) || biens.length !== 1) {
+    return { statut: 409, corps: { error: 'Bien introuvable ou ambigu : contactez votre hôte.', motif: 'bien_ambigu' } }
+  }
+  const { data: snap, error: eS } = await supabase.from('bookings_snapshot')
+    .select('booking_id, snapshot').eq('user_id', userId).eq('property_id', propertyRef)
+    .eq('booking_id', bookingId).maybeSingle()
+  if (eS) return { statut: 503 }
+  const sp = (snap && snap.snapshot) || {}
+  const provider = String(sp.provider || '').toLowerCase()
+  const ota = /airbnb/i.test(String(sp.source || '')) ? 'airbnb' : String(sp.source || '').toLowerCase()
+  if (!snap || provider !== 'channex' || ota !== 'airbnb') {
+    return { statut: 409, corps: { error: 'Ce séjour ne s’évalue pas ici : seuls les séjours Airbnb le sont.', motif: 'non_evaluable' } }
+  }
+  return { bien: { id: biens[0].id, ref: String(propertyRef) }, bookingUid: String(snap.booking_id), provider, ota }
+}
+
+// La garde d'une prestataire entrée par son lien : role prestataire, `avis:
+// write` sur CE SEUL bien. Elle a la forme d'une garde de session pour que la
+// lecture, les reponses et la publication s'appliquent sans copie — avec leurs
+// gardes (negatif, pouvoir, couverture de la grille, autorisation).
+function gardeDuJeton (userId, profil, bien) {
+  const pseudo = 'jeton:' + profil.id
+  const p = {
+    ...profil, access_mode: 'lien', active: true,
+    accepted_at: profil.accepted_at || 'lien',
+    member_user_id: pseudo, account_user_id: userId,
+  }
+  return {
+    ok: true, accountUserId: userId, userId: pseudo,
+    contexte: {
+      userId: pseudo, accountUserId: userId, profil: p,
+      permissions: { avis: 'write', property_scope: 'selected', property_ids: [bien.id], property_refs: [bien.ref] },
+    },
+  }
+}
+
+async function routePwa (req, res, action) {
+  const attendue = action === 'pwa-evaluation' ? 'GET' : 'POST'
+  if (req.method !== attendue) return res.status(405).json({ error: 'Méthode non autorisée' })
+  const src = attendue === 'GET' ? (req.query || {}) : (req.body || {})
+  const token = String((req.query && req.query.token) || src.token || '')
+  if (!token || token.length > 200) return res.status(401).json({ error: 'Lien invalide' })
+
+  const propertyRef = String(src.property_id || '').trim()
+  const bookingId = String(src.booking_id || '').trim()
+  const departureDate = String(src.departure_date || '').trim()
+  if (!propertyRef || !bookingId || propertyRef.length > 100 || bookingId.length > 200 || !JOUR_RE.test(departureDate)) {
+    return res.status(400).json({ error: 'Ménage non identifié (bien, réservation, date de départ)' })
+  }
+
+  const porteur = await porteurDuJeton(token)
+  if (porteur.statut === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
+  if (porteur.statut) return res.status(401).json({ error: 'Lien invalide' })
+  const { userId, profil } = porteur
+
+  if (profil.eval_scope !== 'selon_grille') {
+    return res.status(403).json({ error: 'L’hôte ne vous a pas autorisée à participer aux évaluations.', motif: 'prestataire_non_autorisee' })
+  }
+
+  const sejour = await sejourDuMenage(userId, profil, { propertyRef, bookingId, departureDate })
+  if (sejour.statut === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
+  if (sejour.statut) return res.status(sejour.statut).json(sejour.corps)
+
+  // ⚠ LA NAISSANCE N'A LIEU QU'A L'OUVERTURE. Repondre ou publier suppose une
+  // evaluation deja nee : on ne la cree pas sur un POST.
+  if (action === 'pwa-evaluation') {
+    const n = await assurerEvaluation(supabase, {
+      userId, propertyId: sejour.bien.id, propertyRef: sejour.bien.ref,
+      bookingUid: sejour.bookingUid, provider: sejour.provider, ota: sejour.ota,
+    })
+    if (n.erreur) return res.status(503).json({ error: 'Évaluation indisponible', detail: n.erreur })
+  }
+
+  const { data: ev, error } = await supabase.from('guest_evaluations')
+    .select('id').eq('user_id', userId).eq('booking_uid', sejour.bookingUid).maybeSingle()
+  if (error) return res.status(503).json({ error: 'Évaluation illisible' })
+  if (!ev) return res.status(404).json({ error: 'Évaluation introuvable' })
+
+  const garde = gardeDuJeton(userId, profil, sejour.bien)
+  // ⚠ L'IDENTIFIANT DE L'EVALUATION VIENT DU SERVEUR, jamais du client : on
+  // ecrase tout `id` ou `booking_uid` que la requete porterait.
+  const requete = {
+    ...req,
+    query: { ...(req.query || {}), id: ev.id, booking_uid: undefined },
+    body: { ...(req.body || {}), id: ev.id, booking_uid: undefined },
+  }
+  if (action === 'pwa-evaluation') return await evaluationLire(requete, res, garde)
+  if (action === 'pwa-reponses') return await evaluationRepondre(requete, res, garde)
+  return await evaluationPublier(requete, res, garde)
 }
 
 // GET grille — les criteres du compte et, si un bien est demande, les siens.
@@ -1602,6 +1750,12 @@ module.exports = async function handler (req, res) {
 
 async function router (req, res) {
   const action = String(req.query?.action || req.body?.action || 'list')
+
+  // La PWA prestataire n'a pas de session : son identite est son jeton, valide
+  // par `routePwa` et jamais crue sur parole. Avant toute garde de session.
+  if (action === 'pwa-evaluation' || action === 'pwa-reponses' || action === 'pwa-publier') {
+    return await routePwa(req, res, action)
+  }
 
   // `requalifier` corrige un verdict de proprete : ecriture.
   if (action === 'requalifier') {

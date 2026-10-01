@@ -755,6 +755,8 @@ if ("serviceWorker" in navigator) {
 }
 
   import { initErrorHandler } from '/shared/error-handler.js'
+  // Le cœur parle aux apps par le bus, et par lui seul (docs/kb/protocole-coeur.md).
+  import { hsBus } from '/shared/hs-bus.js'
   initErrorHandler()
 
 
@@ -2157,7 +2159,10 @@ if ("serviceWorker" in navigator) {
       saveServerDoneSet()
       rebuildDoneSet()
       showModalSuccess('Menage marque comme fait')
-      setTimeout(() => { closeModal(); routeRender(); renderSyncBanner() }, 800)
+      setTimeout(() => {
+        closeModal(); routeRender(); renderSyncBanner()
+        proposerQuestionsAvis(action)
+      }, 800)
 
     } catch (err) {
       // Erreur reseau : on enqueue pour envoi differe
@@ -2166,6 +2171,29 @@ if ("serviceWorker" in navigator) {
       rebuildDoneSet()
       showModalWarning('Hors ligne : action enregistree, sera envoyee au retour de la connexion.')
       setTimeout(() => { closeModal(); routeRender(); renderSyncBanner() }, 1200)
+    }
+  }
+
+  // ─── Après « Ménage fait » : les questions de l'évaluation du voyageur ─────
+  // Lot 5 du chantier avis. L'écran est celui du CŒUR, ouvert PAR LE BUS avec
+  // le jeton de la PWA comme identité : la PWA ne connaît ni ses fichiers ni
+  // ses endpoints. Le cœur se tait s'il n'y a rien à faire (non autorisée par
+  // l'hôte, séjour non évaluable) : la fenêtre se referme sans rien dire.
+  // ⚠ SEULEMENT APRÈS UN SUCCÈS EN LIGNE. Hors ligne, le ménage n'est pas
+  // encore fait côté serveur, et le cœur refuserait (« marquez d'abord le
+  // ménage comme fait ») ; la question attendra le prochain passage.
+  async function proposerQuestionsAvis (action) {
+    if (typeof hsBus === 'undefined' || !hsBus || !currentToken) return
+    try {
+      await hsBus.ouvrir('avis.questions_prestataire', {
+        property_id: action.property_id,
+        booking_id: action.booking_id,
+        departure_date: action.departure_date,
+      }, { identite: { jeton: currentToken } })
+    } catch (e) {
+      // Le bus ne lève pas ; si quelque chose lève quand même, le ménage, lui,
+      // est fait — l'évaluation n'est pas une raison de le faire douter.
+      console.warn('[avis] questions prestataire indisponibles', e)
     }
   }
 

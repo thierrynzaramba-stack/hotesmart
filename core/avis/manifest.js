@@ -8,9 +8,8 @@
 // Lot 1 (protocole) : les quatre actions ont ete DECLAREES, toutes « a venir ».
 // Lot 4 (30 septembre 2026) : `avis.evaluer` et `avis.statut` sont LIVREES, leur
 // « a venir » est leve.
-// Lot 5 (2 octobre 2026) : `avis.reglages_prestataire` est LIVREE (fiche
-// prestataire de l'app menage). `avis.questions_prestataire` attend encore le
-// branchement de la PWA.
+// Lot 5 (2 octobre 2026) : `avis.reglages_prestataire` (fiche prestataire) et
+// `avis.questions_prestataire` (PWA, apres « Menage fait ») sont LIVREES.
 //
 // ⚠ NE PAS LEVER UN « a venir » AVANT QUE LE MODULE EXISTE. Le bus importe le
 // chemin declare : un module absent le fait repondre « indisponible », donc
@@ -33,10 +32,13 @@ export default {
       params: ['booking_uid'],
     },
     // L'ecran de questions de la prestataire, identite par jeton (PWA).
+    // ⚠ PARAMETRES CHANGES AU LOT 5 (2 octobre 2026) : la PWA ne connait pas
+    // `menage_event_id` au moment de « Menage fait » ; elle connait le triplet
+    // du menage, le meme que `markDone`. Contrat : docs/kb/protocole-coeur.md.
     'avis.questions_prestataire': {
       type: 'fenetre', identite: 'jeton',
-      module: '/core/avis/questions-prestataire.js', etat: 'a_venir',
-      params: ['menage_event_id'],
+      module: '/core/avis/questions-prestataire.js',
+      params: ['property_id', 'booking_id', 'departure_date'],
     },
     // Les reglages d'une prestataire (perimetre, pouvoir), lus et ecrits par
     // l'app menage (droit avis: write).
