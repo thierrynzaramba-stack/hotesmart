@@ -33,6 +33,11 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      congeSupprime = [{ id: 'c1' }], congeExistant = null, congeJumeau = null,
                      erreurDroits = null, supprime = [{ id: 'e1', available: false }],
                      ligneDisponible = false,
+                     // L'ENVOI REEL d'une alerte (2 octobre 2026) : la liaison qui
+                     // route le message, la configuration d'alerte de l'hote, et
+                     // la tache du jour. Par defaut rien : aucun SMS ne part,
+                     // comme avant ce lot.
+                     liaisons = [], alertesConfigurees = false, tacheDuJour = null,
                      // ⚠ CE QUE LE DOUBLE DOIT SAVOIR DES REGLES, depuis que la
                      // PWA les ecrit (15 septembre 2026). `nbReglesActives` est
                      // le COMPTE que lit la garde de plafond ; `regleRetiree`
@@ -53,7 +58,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
                      ligneExistante = null } = {}) {
-  const etat = { ecritures: [], lectures: [] }
+  const etat = { ecritures: [], lectures: [], sms: [] }
   const client = {
     from (table) {
       const a = { table, f: {} }
@@ -111,7 +116,24 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             }
             return Promise.resolve({ data: conges, error: null })
           }
+          if (table === 'property_cleaning_providers') {
+            return Promise.resolve({ data: liaisons, error: null })
+          }
+          if (table === 'agent_tasks') {
+            return Promise.resolve({ data: tacheDuJour ? [tacheDuJour] : [], error: null })
+          }
           return Promise.resolve({ data: [], error: null })
+        },
+        single () {
+          // La configuration d'alerte n'existe QUE pour ce compte.
+          if (table === 'agent_alert_config' && alertesConfigurees && a.f.user_id === U) {
+            const config = {}
+            for (const l of liaisons) {
+              config[String(l.property_id)] = { intervention: { sms_enabled: true, sms_lines: '+33600000000' } }
+            }
+            return Promise.resolve({ data: { config }, error: null })
+          }
+          return Promise.resolve({ data: null, error: { message: 'aucune' } })
         },
         upsert (row, opts) {
           etat.ecritures.push({ table, op: 'upsert', row, opts })
@@ -139,6 +161,11 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         update (row) {
           const q = { table, op: 'update', row, f: {} }
           const c2 = {
+            // ⚠ UNE MISE A JOUR ATTENDUE SANS `.select()` (la tache du jour de
+            // l'hote) s'enregistre aussi : sans ce `then`, elle passait inapercue
+            // et le detail jour par jour etait invisible au test.
+            then (res, rej) { etat.ecritures.push(q)
+              return Promise.resolve({ data: null, error: null }).then(res, rej) },
             eq (c, v) { q.f[c] = v; return c2 },
             in (c, v) {
               q.f[c + '_in'] = v
@@ -213,6 +240,13 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
   const abs = require.resolve(path.join(__dirname, '..', 'node_modules/@supabase/supabase-js'))
   const m = new Module(abs); m.exports = { createClient: () => client }; m.loaded = true
   require.cache[abs] = m
+  // ⚠ LES ENVOIS REELS SONT REMPLACES : on lit le SMS qui PART, sans rien envoyer.
+  for (const [rel, exp] of [['api/sms', { sendSms: async (to, msg) => { etat.sms.push(msg); return { ok: true } } }],
+                            ['lib/platform-notify', { sendPlatformEmail: async () => ({ ok: true }) }]]) {
+    const absM = require.resolve(path.join(__dirname, '..', rel))
+    const mm = new Module(absM); mm.exports = exp; mm.loaded = true
+    require.cache[absM] = mm
+  }
   // ⚠ TOUT MODULE QUI CONSTRUIT SON PROPRE CLIENT DOIT ETRE PURGE ICI, sinon il
   // garde le VRAI client de son premier chargement — et le test tape sur la
   // production. `apres-changement-regles` en fait partie depuis le lot
@@ -1050,4 +1084,73 @@ test('un RETRAIT refusé (absence de l\'hôte) ou sans objet n\'annonce rien', a
                     body: { action: 'retirerIndisponibilite', date: DEMAIN } }, reponse())
     assert.ok(!tache(etat), 'aucune tâche : rien n\'a été retiré par elle')
   }
+})
+
+// ─── UN GLISSER = UN SEUL SMS QUI RÉSUME LA PLAGE (2 octobre 2026) ──────────
+//
+// Décision de Thierry : un glisser sur plusieurs jours produit UN SMS qui résume
+// la plage (« Tiphaine dispo du 12 au 21/10 »), pas un par jour ; la tâche garde
+// le détail jour par jour. Chaque jour du glisser arrive avec `plage: true`
+// (détail dans la tâche, pas de SMS), puis la PWA envoie `annoncerPlage`.
+
+const jourDans = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
+const recente = () => ({ id: 't1', summary: 'Marie s\'est déclarée disponible le …', updated_at: new Date().toISOString() })
+const annoncer = body => ({ method: 'POST', query: { token: TOKEN }, headers: {},
+                            body: { action: 'annoncerPlage', ...body } })
+
+test('un glisser sur 10 jours donne UN SMS, qui résume la plage', async () => {
+  const jours = Array.from({ length: 10 }, (_, i) => jourDans(i + 2))
+  const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true,
+                                        tacheDuJour: recente() })
+  for (const j of jours) {
+    const res = reponse()
+    await handler(ecrire({ date: j, available: true, plage: true }), res)
+    assert.strictEqual(res.code, 200, j)
+  }
+  const res = reponse()
+  await handler(annoncer({ du: jours[0], au: jours[9], jours: 10, available: true }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.sms.length, 1, 'un seul SMS pour dix jours')
+  assert.match(etat.sms[0], /Marie dispo du \d{1,2}(\/\d{2})? au \d{1,2}\/\d{2}/)
+  assert.match(etat.sms[0], /10 jours/)
+  const detail = etat.ecritures.filter(x => x.table === 'agent_tasks' && (x.op === 'update' || x.op === 'insert'))
+  assert.strictEqual(detail.length, 10, 'la tâche reçoit le détail jour par jour')
+})
+
+test('une exception d\'UN jour hors glisser envoie toujours son SMS', async () => {
+  const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true })
+  await handler(ecrire({ date: DEMAIN, available: false }), reponse())
+  assert.strictEqual(etat.sms.length, 1)
+  assert.match(etat.sms[0], /absente le/)
+})
+
+test('annoncerPlage SANS activité récente de sa part n\'envoie rien — pas un porte-voix', async () => {
+  for (const tache of [null, { id: 't1', summary: 'x', updated_at: new Date(Date.now() - 3600000).toISOString() }]) {
+    const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true,
+                                          tacheDuJour: tache })
+    const res = reponse()
+    await handler(annoncer({ du: jourDans(2), au: jourDans(4), jours: 3, available: true }), res)
+    assert.strictEqual(res.code, 200)
+    assert.strictEqual(etat.sms.length, 0)
+  }
+})
+
+test('annoncerPlage refuse des bornes ou un sens invalides (400), et passe par la double garde', async () => {
+  for (const body of [{ du: 'x', au: jourDans(3), jours: 2, available: true },
+                      { du: jourDans(5), au: jourDans(3), jours: 2, available: true },
+                      { du: jourDans(2), au: jourDans(3), jours: 0, available: true },
+                      { du: jourDans(2), au: jourDans(3), jours: 2, available: 'oui' }]) {
+    const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true,
+                                          tacheDuJour: recente() })
+    const res = reponse()
+    await handler(annoncer(body), res)
+    assert.strictEqual(res.code, 400, JSON.stringify(body))
+    assert.strictEqual(etat.sms.length, 0)
+  }
+  const { handler, etat } = preparer({ droits: { self_availability: 'read' }, liaisons: [{ property_id: 'B1' }],
+                                        alertesConfigurees: true, tacheDuJour: recente() })
+  const res = reponse()
+  await handler(annoncer({ du: jourDans(2), au: jourDans(3), jours: 2, available: true }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.sms.length, 0)
 })

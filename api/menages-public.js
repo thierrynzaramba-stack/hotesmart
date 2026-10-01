@@ -5,7 +5,7 @@ const { markReady } = require('../lib/cron-property-status')
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
-const { alertMenageRefuse, alertReglesModifiees } = require('../lib/alert-notify')
+const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
@@ -240,6 +240,10 @@ module.exports = async function handler(req, res) {
     // retire au client la possibilite d'etre interrompu au milieu.
     if (action === 'reglerMesJours') {
       return await reglerMesJours(req, res, token)
+    }
+
+    if (action === 'annoncerPlage') {
+      return await annoncerMaPlage(req, res, token)
     }
 
     if (action === 'declarerIndisponibilite' || action === 'retirerIndisponibilite') {
@@ -2199,6 +2203,9 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
     return res.status(400).json({ error: 'Disponibilité invalide' })
   }
   const available = brut === true
+  // Un jour d'un GLISSER : detail dans la tache, pas de SMS — la plage entiere
+  // sera annoncee une fois (`annoncerPlage`).
+  const envoyer = (req.body || {}).plage !== true
 
   // ⚠ PAS DE DECLARATION DANS LE PASSE. Se retirer d'un jour deja passe ne veut
   // rien dire — le menage a eu lieu ou non — et cela reecrirait l'historique sur
@@ -2242,7 +2249,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       return res.status(409).json({ error: 'Cette absence a été posée par votre employeur' })
     }
     await annoncerException(qui, jour, data[0].available === true
-      ? 'a retiré sa disponibilité exceptionnelle du' : 'a retiré son absence du')
+      ? 'a retiré sa disponibilité exceptionnelle du' : 'a retiré son absence du', { envoyer })
     return res.status(200).json({ success: true, date: jour, retiree: true })
   }
 
@@ -2283,7 +2290,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   // ⚠ Un double tap sur un telephone est le cas NORMAL, pas une erreur : la
   // ligne etait deja la, on rend un succes.
   if (maj && maj.length) {
-    if (!inchange) await annoncerException(qui, jour, annonce)
+    if (!inchange) await annoncerException(qui, jour, annonce, { envoyer })
     return res.status(200).json({ success: true, exception: maj[0] })
   }
 
@@ -2299,8 +2306,44 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
     console.error('[menages-public] declaration indisponibilite echec:', error.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-  await annoncerException(qui, jour, annonce)
+  await annoncerException(qui, jour, annonce, { envoyer })
   return res.status(200).json({ success: true, exception: data })
+}
+
+// ⚠ LA FIN D'UN GLISSER : UN SEUL SMS QUI RESUME LA PLAGE (decision de Thierry,
+// 2 octobre 2026). Les jours ont ete ecrits un par un, avec leur detail dans la
+// tache du jour et sans envoi. La PWA annonce ici ce qu'elle a REELLEMENT fait :
+// premier et dernier jour enregistres, nombre de jours, sens.
+// ⚠ MEME DOUBLE GARDE que l'ecriture (jeton + `self_availability: 'write'`), et
+// `alertPlageModifiee` n'envoie que si sa tache du jour vient de bouger : un
+// appel forge ne transforme pas la PWA en porte-voix vers l'hote.
+async function annoncerMaPlage (req, res, token) {
+  const qui = await celleQuiDeclare(token, { ecriture: true })
+  if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
+  if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+  if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+
+  const { du, au, jours, available } = req.body || {}
+  const d = jourValide(du), a = jourValide(au)
+  if (!d || !a || d > a) return res.status(400).json({ error: 'Plage invalide' })
+  if (!Number.isInteger(jours) || jours < 1 || jours > 400) return res.status(400).json({ error: 'Plage invalide' })
+  if (typeof available !== 'boolean') return res.status(400).json({ error: 'Disponibilité invalide' })
+
+  let envoye = false
+  try {
+    const bien = await unBienDElle(qui.userId, qui.profil.id)
+    const prenom = qui.profil.first_name || 'La prestataire'
+    const jm = j => `${j.slice(8, 10)}/${j.slice(5, 7)}`
+    const quand = d === a ? `le ${jm(d)}`
+      : (d.slice(0, 7) === a.slice(0, 7) ? `du ${Number(d.slice(8, 10))} au ${jm(a)}` : `du ${jm(d)} au ${jm(a)}`)
+    envoye = await alertPlageModifiee({
+      userId: qui.userId, providerId: qui.profil.id, propertyId: bien,
+      texte: `${prenom} ${available ? 'dispo' : 'absente'} ${quand} (${jours} jour${jours > 1 ? 's' : ''}), depuis son application.`
+    })
+  } catch (e) {
+    console.error('[menages-public] annonce plage echec:', e.message)
+  }
+  return res.status(200).json({ success: true, envoye: !!envoye })
 }
 
 // ⚠ L'HOTE APPREND CHAQUE EXCEPTION QU'ELLE POSE OU RETIRE (decision de Thierry,
@@ -2312,7 +2355,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
 // ⚠ ATTENDUE AVANT LA REPONSE, et c'est un cout assume : une fonction
 // serverless peut etre coupee apres la reponse, et l'annonce perdue en
 // silence. Le glisser enchaine les jours : chacun attend son envoi.
-async function annoncerException (qui, jour, verbe) {
+async function annoncerException (qui, jour, verbe, { envoyer = true } = {}) {
   try {
     // Le bien sert au ROUTAGE de l'envoi (configuration d'alerte par bien),
     // pas au sens. Meme fonction que pour ses jours habituels, pas une copie.
@@ -2323,7 +2366,7 @@ async function annoncerException (qui, jour, verbe) {
     await alertReglesModifiees({
       userId: qui.userId, providerId: qui.profil.id, propertyId: bien, prenom,
       texte: `${prenom} ${verbe} ${quand}, depuis son application.`,
-      rassurer: false
+      rassurer: false, envoyer
     })
   } catch (e) {
     console.error('[menages-public] annonce exception echec:', e.message)

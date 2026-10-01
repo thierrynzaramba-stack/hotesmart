@@ -3649,9 +3649,12 @@ if ("serviceWorker" in navigator) {
     try {
       // ⚠ LE SENS PART EN TOUTES LETTRES (`available`), absence comprise : le
       // serveur ecrit ce qu'on lui demande ou refuse, il ne devine plus.
+      // `plage` : un jour d'un glisser. Le serveur l'ecrit dans la tache de
+      // l'hote SANS SMS ; la plage entiere est annoncee une fois a la fin.
+      const lot = plage ? { plage: true } : {}
       const { ok, data } = await envoyer(cible === null
-        ? { action: 'retirerIndisponibilite', date: j }
-        : { action: 'declarerIndisponibilite', date: j, available: cible })
+        ? { action: 'retirerIndisponibilite', date: j, ...lot }
+        : { action: 'declarerIndisponibilite', date: j, available: cible, ...lot })
       enVolParJour.delete(j)
       // Le serveur a REPONDU non : l'issue est connue, on peut l'affirmer.
       if (!ok) { rattraperCeJour((data && data.error) || 'Pas enregistré. Votre journée n\'a pas changé.'); return false }
@@ -3753,6 +3756,7 @@ if ("serviceWorker" in navigator) {
     }
     if (!jours.length) { dire(msg, 'Rien à changer sur ces jours.'); return }
     let faits = 0
+    const faitsJours = []
     plageEnCours = true
     try {
       for (const j of jours) {
@@ -3764,12 +3768,27 @@ if ("serviceWorker" in navigator) {
           const deja = faits ? `${faits} jour${faits > 1 ? 's' : ''} enregistré${faits > 1 ? 's' : ''}, puis ` : ''
           dire(msg, `⚠️ ${deja}arrêt au ${jourLisible(j)}` +
                     (msg.textContent ? ` : ${msg.textContent}` : ' : pas enregistré.'))
+          await annoncerLaPlage(faitsJours, voulu)
           return
         }
         faits++
+        faitsJours.push(j)
       }
     } finally { plageEnCours = false }
     dire(msg, `✓ ${faits} jour${faits > 1 ? 's' : ''} ${voulu ? 'ouvert' : 'fermé'}${faits > 1 ? 's' : ''}.`)
+    await annoncerLaPlage(faitsJours, voulu)
+  }
+
+  // ⚠ UN GLISSER = UN SEUL SMS A L'HOTE (decision de Thierry, 2 octobre 2026),
+  // qui resume ce qui a ete REELLEMENT enregistre — y compris quand la plage
+  // s'arrete en route. Best-effort : la tache de l'hote porte deja le detail
+  // jour par jour ; un echec ici ne change rien a ce qu'elle voit.
+  async function annoncerLaPlage (faitsJours, voulu) {
+    if (!faitsJours.length) return
+    try {
+      await envoyer({ action: 'annoncerPlage', du: faitsJours[0], au: faitsJours[faitsJours.length - 1],
+                      jours: faitsJours.length, available: voulu })
+    } catch (_) { /* la tache garde le detail */ }
   }
 
   // Pose ou retire l'absence d'UN jour dans l'etat courant. Un seul endroit
