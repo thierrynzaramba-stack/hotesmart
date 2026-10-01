@@ -3254,8 +3254,10 @@ de 10 minutes — un appel forgé pouvait faire dire à l'hôte « absente du 1e
 facturés). Désormais **le corps de la requête est ignoré** (le serveur ne se
 fie qu'à ce qu'il a lui-même écrit) et **la fenêtre se consomme** (le résumé
 inscrit à la fin de la tâche ; un second appel ne trouve plus rien de neuf). Le
-résumé est inscrit **avant** l'envoi : un appel concurrent trouve la fenêtre
-déjà soldée.
+résumé est inscrit **avant** l'envoi, et **sous condition** (`.eq('summary', …)`, lignes
+touchées comptées) : deux annonces simultanées lisaient le même résumé sans
+marque et envoyaient chacune (constat de la re-review, durcissement) — désormais
+une seule passe, l'autre ne touche aucune ligne et n'envoie rien.
 
 **Formats** (tranchés seul) : jours contigus d'un même sens → « Tiphaine dispo
 du 12 au 21/10 (10 jours) », « du 28/10 au 03/11 », « le 12/10 (1 jour) » ; jours

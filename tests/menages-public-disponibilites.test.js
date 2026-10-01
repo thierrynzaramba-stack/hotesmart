@@ -188,6 +188,14 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             },
             select () {
               etat.ecritures.push(q)
+              // La tache du jour, mise a jour SOUS CONDITION (`.eq('summary')`) :
+              // elle ne touche la ligne que si le resume n'a pas bouge.
+              if (table === 'agent_tasks') {
+                const ok = etat.tache && q.f.id === etat.tache.id &&
+                           (q.f.summary === undefined || q.f.summary === etat.tache.summary)
+                if (ok) etat.tache = { ...etat.tache, ...row }
+                return Promise.resolve({ data: ok ? [{ id: etat.tache.id }] : [], error: null })
+              }
               // La desactivation d'une REGLE : a-t-elle touche une ligne ?
               if (table === 'provider_availability_rules') {
                 return Promise.resolve({ data: regleRetiree, error: null })
@@ -1194,4 +1202,11 @@ test('annoncerPlage passe par la double garde (droit `read` = 403, rien ne part)
   await handler(annoncer(), res)
   assert.strictEqual(res.code, 403)
   assert.strictEqual(etat.sms.length, 0)
+})
+
+test('deux annonces SIMULTANÉES n\'envoient qu\'un SMS (écriture conditionnelle du résumé)', async () => {
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await glisserServeur(handler, [jourDans(2), jourDans(3)])
+  await Promise.all([handler(annoncer(), reponse()), handler(annoncer(), reponse()), handler(annoncer(), reponse())])
+  assert.strictEqual(etat.sms.length, 1)
 })
