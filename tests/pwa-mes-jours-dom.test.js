@@ -83,7 +83,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    // sa date d'expiration : sans elles, aucun test ne pouvait
                    // parler d'une proposition a confirmer. `done` est la verite
                    // serveur des menages faits, que `isMenageObsolete` consulte.
-                   menages = [], done = [],
+                   menages = [], done = [], autrui = undefined,
                    coupureEcriture = false, echecReglage = null,
                    // ⚠ UN REFUS SERVEUR SUR N'IMPORTE QUELLE ECRITURE, applique
                    // APRES la suspension. `coupureEcriture` leve tout de suite,
@@ -117,7 +117,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   src = src.replace(AVANT_BOOT, 'globalThis.__pret = chargerDisponibilites().catch(')
 
   const appels = []
-  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events, comments, menages, done }
+  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events, comments, menages, done, autrui }
   // ⚠ SUSPENSION DETERMINISTE, PLUTOT QU'UNE TEMPORISATION.
   // Tester « l'ecran a bascule AVANT la reponse » avec un `setTimeout` de 120 ms
   // et un `souffler(10)` marche sur un poste au repos et lache sur une machine
@@ -259,7 +259,8 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       // Les servir ici fait passer le test par le vrai chemin de chargement.
       bookings: etat.bookings, a_prendre: etat.aPrendre,
       label: 'Regina', property_ids: [], visibility_days: 30,
-      comments: etat.comments, events: etat.events, done: etat.done, menages: etat.menages }) }
+      comments: etat.comments, events: etat.events, done: etat.done, menages: etat.menages,
+      ...(etat.autrui !== undefined ? { autrui: etat.autrui } : {}) }) }
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
@@ -3618,4 +3619,74 @@ test('une tape sur UN jour (hors glisser) n\'est pas marquée `plage` : son SMS 
   assert.strictEqual(d.length, 1)
   assert.ok(!d[0].corps.plage)
   assert.strictEqual(t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage').length, 0)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES MÉNAGES PRIS PAR D'AUTRES (spec visibilité, 2 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Une liste à part (`autrui`) que le serveur ne remplit que si l'hôte l'a
+// autorisé. Une pastille BLANCHE au calendrier, une section en lecture seule
+// dans la feuille. JAMAIS « à moi » : ni le vert, ni la pastille verte, ni les
+// jours travaillés, ni « Votre ménage », ni le résumé de la feuille.
+
+const prisParLola = (j, heure = '11:00') => ({ bien: 'Ofuro Futari', date: j, heure, prestataire: 'Lola Dupont' })
+
+test('un ménage pris par une autre ne compte JAMAIS comme « à moi », et ne rallume pas un jour de repos', async () => {
+  let j = dans(3)
+  while (new Date(j + 'T12:00:00Z').getUTCDay() === 1) j = dans(4)
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])], autrui: [prisParLola(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(!el.classList.contains('a-moi'), 'pas le vert de « à moi »')
+  assert.ok(el.classList.contains('off'), 'le jour de repos reste éteint : elle ne travaille pas')
+  assert.ok(!el.querySelector('.dispo-compte:not(.autrui)'), 'pas de pastille verte')
+  assert.ok(!el.querySelector('.dispo-bulle'), 'pas la bulle : rien à prendre')
+  const blanc = el.querySelector('.dispo-compte.autrui')
+  assert.ok(blanc, 'une pastille blanche')
+  assert.strictEqual(blanc.textContent, '1')
+  assert.doesNotMatch(el.getAttribute('title'), /à moi/)
+  assert.match(el.getAttribute('title'), /1 ménage pris par une autre/)
+})
+
+test('au toucher, le DÉTAIL : bien, heure, prestataire — en lecture seule, jamais « Votre ménage »', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ autrui: [prisParLola(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /Pris par une autre/)
+  assert.match(feuille(w), /Ofuro Futari/)
+  assert.match(feuille(w), /11:00/)
+  assert.match(feuille(w), /Lola Dupont/)
+  assert.doesNotMatch(feuille(w), /Votre ménage/)
+  assert.doesNotMatch(w.document.getElementById('modal-sub').textContent, /à vous/)
+  const section = [...w.document.querySelectorAll('#modal-body .jsect')]
+    .find(s => /Pris par une autre/.test(s.textContent))
+  assert.strictEqual(section.querySelectorAll('button, a, [data-mien], [data-offre]').length, 0,
+    'aucun geste possible sur le ménage d\'une autre')
+})
+
+test('heure inconnue : « heure non précisée »', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ autrui: [prisParLola(j, null)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /heure non précisée/)
+})
+
+test('sans autorisation (liste vide ou absente), rien de blanc n\'apparaît', async () => {
+  for (const autrui of [[], undefined]) {
+    const j = dans(3)
+    const { w, t } = monter({ autrui })
+    t.seed()
+    await t.charger()
+    await t.chargerDisponibilites()
+    assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-compte.autrui').length, 0)
+  }
 })

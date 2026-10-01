@@ -1098,3 +1098,14 @@ self_availability none · self_view_reviews false
 
 Vérifié le 2 septembre 2026 : les trois endpoints délégables ne renvoient que la
 clé `209413`, et Colomiers répond 403 en lecture comme en écriture.
+
+## La visibilité des ménages d'autrui relève du domaine `prestataires` (2 octobre 2026)
+
+Le réglage « ce qu'elle voit des ménages des autres » (spec
+`docs/specs/spec-visibilite-menages-autrui.md`) s'écrit par `api/disponibilites.js`,
+garde `requirePermission({ domaine: 'prestataires', niveau: 'write',
+compteDelegue: true })` — **un membre délégué avec `prestataires: write` le règle
+comme l'hôte** (exigence de Thierry), un membre en lecture reçoit 403. Il ne passe
+**pas** par `/api/membres` (domaine `equipe`) : il vit dans sa propre table,
+`menage_visibilite`, writer unique, et `profile_permissions` garde le sien. Chaque
+prestataire désignée est vérifiée (profil `lien` de ce compte).
