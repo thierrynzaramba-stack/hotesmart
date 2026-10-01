@@ -176,7 +176,8 @@ test('LE TEST QUI COMPTE : une conversation épinglée ne s’archive pas (409),
 test('LE TEST QUI COMPTE : un membre limité au bien A n’archive pas un fil du bien B', async () => {
   const etat = preparer({ messages: [MSG('BK-B', RECENT, 'ref-b')], appelant: true, permissions: { messages: 'write', property_scope: 'selected', property_refs: ['ref-a'], property_ids: [] } })
   const res = await appeler(poster({ action: 'archiver', booking_id: 'BK-B' }, { 'x-compte': PROD }))
-  assert.strictEqual(res.code, 403)
+  // 404 et non 403 : on n'apprend pas a un membre qu'un fil existe ailleurs.
+  assert.strictEqual(res.code, 404)
   assert.strictEqual(etat.upserts.length, 0)
 })
 
@@ -207,4 +208,9 @@ test('la messagerie : onglets, recherche, bouton, et l’épingle ne supprime pl
   // ⚠ Désépingler supprimait la ligne — et avec elle l'état d'archivage.
   assert.doesNotMatch(page, /from\('conversation_flags'\)\.delete\(\)/)
   assert.match(page, /from\('conversation_flags'\)\.update\(\{ pinned: false \}\)/)
+})
+
+test('la lecture des épingles est BORNÉE aux fils lus (pas de troncature à 1000 lignes)', () => {
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'messages.js'), 'utf8')
+  assert.match(api, /\.in\('book_id', ids\.slice\(i, i \+ 100\)\)/)
 })

@@ -114,10 +114,22 @@ function displayLabel(provider, raw) {
 // regles automatiques, elles, ne se stockent pas — elles se calculent a la
 // lecture (lib/archivage-conversations.js), sans cron ni writer de plus.
 async function appliquerArchivage(userId, conversations, depuis) {
-  const { data: flags, error } = await supabase
-    .from('conversation_flags')
-    .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
-    .eq('user_id', userId)
+  // ⚠ BORNEE AUX FILS LUS, PAR PAQUETS (constat de revue) : la table grossit
+  // desormais (desepingler met a jour, archiver cree une ligne), et au-dela de
+  // 1000 lignes PostgREST tronque SANS ERREUR — des epingles et des archivages
+  // auraient ete ignores. Meme famille que la troncature de bookings_snapshot.
+  const ids = conversations.map(c => String(c.bookId))
+  const flags = []
+  let error = null
+  for (let i = 0; i < ids.length && !error; i += 100) {
+    const r = await supabase
+      .from('conversation_flags')
+      .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
+      .eq('user_id', userId)
+      .in('book_id', ids.slice(i, i + 100))
+    if (r.error) error = r.error
+    else flags.push(...(r.data || []))
+  }
   if (error) {
     // Colonnes absentes (migration du 25 septembre non appliquee) : pas
     // d'archivage, et l'ecran le sait — il ne montre ni l'onglet ni les boutons.
@@ -141,7 +153,7 @@ async function appliquerArchivage(userId, conversations, depuis) {
     const b = ev && ev.payload && ev.payload.booking_uid
     if (b && !publiee.has(String(b))) publiee.set(String(b), ev.created_at)
   }
-  const parFil = new Map((flags || []).map(f => [String(f.book_id), f]))
+  const parFil = new Map(flags.map(f => [String(f.book_id), f]))
   const maintenant = Date.now()
   for (const c of conversations) {
     const f = parFil.get(String(c.bookId)) || {}
@@ -180,8 +192,11 @@ async function archiverFil(req, res) {
   const bien = (m.data && m.data[0] && m.data[0].property_id) || (sn.data && sn.data[0] && sn.data[0].property_id) || null
   if (bien == null) return res.status(404).json({ error: 'Conversation introuvable' })
   const refs = refsDuPerimetre(garde.contexte)
+  // ⚠ 404, PAS 403 (constat de revue) : un 403 apprenait a un membre limite au
+  // bien A qu'un fil existe sur le bien B — ce que le GET d'existence, plus
+  // haut, s'interdit deja.
   if (refs !== null && !refs.map(String).includes(String(bien))) {
-    return res.status(403).json({ error: 'Cette conversation n’est pas dans votre périmètre' })
+    return res.status(404).json({ error: 'Conversation introuvable' })
   }
   const { data: flag, error: eF } = await supabase.from('conversation_flags')
     .select('pinned').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
