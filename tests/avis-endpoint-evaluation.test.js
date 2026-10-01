@@ -731,3 +731,28 @@ test('hors production, AVIS_PUBLICATION_REELLE=1 ouvre la porte — explicitemen
     else process.env.AVIS_PUBLICATION_REELLE = avantR
   }
 })
+
+// ─── eval_scope : SEULEMENT SI L'HOTE L'AUTORISE (decision D1, 2 octobre 2026) ─
+// La regle etait « sauf interdiction » : une valeur absente valait
+// `selon_grille`. Elle vaut desormais `aucun`.
+test('LE TEST QUI COMPTE : une prestataire SANS eval_scope ne voit aucune question', async () => {
+  const evaluation = evalA({ status: 'a_remplir' })
+  const presta = PRESTA_A('valider')
+  delete presta.profil.eval_scope
+  preparer({ user: MEMBRE, ...presta, evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.role, 'prestataire')
+  assert.deepStrictEqual(res.body.criteres, [], 'aucune question sans autorisation explicite')
+})
+
+test('et une prestataire AUTORISEE (selon_grille) voit les siennes', async () => {
+  const evaluation = evalA({ status: 'a_remplir' })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evaluation] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: evaluation.id }, null, 'GET'), res)
+  assert.ok(res.body.criteres.length > 0, 'l autorisation ouvre ses criteres')
+})

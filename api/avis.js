@@ -889,7 +889,10 @@ function roleEtReglages (garde) {
   const estPrestataire = Boolean(p && p.access_mode === 'lien')
   return {
     role: estPrestataire ? 'prestataire' : 'hote',
-    evalScope: (estPrestataire && p.eval_scope) || 'selon_grille',
+    // ⚠ UNE VALEUR ABSENTE VAUT `aucun` : une prestataire ne remplit que si
+    // l'hote l'y autorise (decision D1 du 2 octobre 2026, migration
+    // 2026-10-02-avis-eval-scope-sur-autorisation.sql).
+    evalScope: (estPrestataire && p.eval_scope) || 'aucun',
     evalPower: (estPrestataire && p.eval_power) || 'soumettre',
     profilId: (p && p.id) || null,
     // ⚠ `parProfil` N'EST RENSEIGNE QUE POUR UNE PRESTATAIRE, et c'est l'OBJET,
