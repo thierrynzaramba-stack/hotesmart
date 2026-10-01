@@ -3233,3 +3233,40 @@ PRÉVENU » — cinq rouges contre le code d'avant (`git archive`), les tests de
 silence verts des deux côtés ; `tests/alert-regles-modifiees.test.js` — le SMS
 réellement envoyé (doubles de `sendSms` / `sendPlatformEmail`), trois rouges
 contre le premier jet.
+
+### Un glisser = un seul SMS qui résume la plage (2 octobre 2026)
+
+**Décision de Thierry** : un glisser sur plusieurs jours produit **un seul SMS**
+qui résume la plage (« **Tiphaine dispo du 12 au 21/10 (10 jours)** »), pas un
+par jour ; la **tâche garde le détail jour par jour**. Une tape sur un seul jour
+garde son SMS, comme avant.
+
+**Comment** : chaque jour du glisser part avec `plage: true` — le serveur l'écrit
+dans la tâche du jour **sans envoi** (`alertReglesModifiees({ envoyer: false })`).
+À la fin, la PWA appelle **`annoncerPlage`** avec ce qui a été **réellement**
+enregistré (premier et dernier jour, nombre, sens) — y compris quand la plage
+s'arrête en route ; rien n'est annoncé si rien n'a été fait. Format :
+« le 12/10 », « du 12 au 21/10 », « du 28/10 au 03/11 ».
+
+⚠️ **`annoncerPlage` n'est pas un porte-voix** (choix tranché seul, cette nuit) :
+appelé par la PWA, il pourrait sinon envoyer des SMS à l'hôte sans qu'elle ait
+rien changé. Il passe par la **même double garde** que l'écriture (jeton +
+`self_availability: 'write'`), refuse des bornes ou un sens invalides (400), et
+**n'envoie que si la tâche du jour de cette prestataire a bougé dans les
+10 dernières minutes** (`alertPlageModifiee`).
+
+⚠️ **Limite connue, assumée** : `plage: true` est fourni par le client. Une
+prestataire qui forgerait ses appels pourrait poser des exceptions sans SMS —
+**mais jamais sans trace** : la tâche de l'hôte reçoit le détail dans tous les
+cas, avec le jour en clair. Le SMS est une commodité de plus, pas la garde.
+
+**Le harnais** sait maintenant faire partir un vrai SMS (doubles de `sendSms` /
+`sendPlatformEmail`, liaison de routage, configuration d'alerte) et enregistre
+une mise à jour attendue sans `.select()` — sans quoi le détail jour par jour
+était invisible au test.
+
+Tests : « un glisser sur 10 jours donne UN SMS » (rouge contre le code d'avant :
+dix SMS), une tape seule garde son SMS, `annoncerPlage` sans activité récente
+n'envoie rien, bornes invalides = 400, droit `read` = 403 ; côté PWA, chaque
+jour part en `plage` et une seule annonce suit, rien n'est annoncé si rien n'a
+été fait.
