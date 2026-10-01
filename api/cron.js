@@ -77,6 +77,12 @@
 //   de la regle, les PRIX des nuits ouvertes (seuls les changements partent :
 //   delta ARI par construction), le marqueur avec le bilan, les ALARMES au
 //   fondateur (poussee refusee, nuits sans prix, regle muette, retard > 36 h).
+// Session #39 (lot 6 du chantier avis) : LES RELANCES DE L'EVALUATION DU
+//   VOYAGEUR (lib/avis/notifications.js, spec §10). J-5 et J-1 avant l'echeance
+//   de l'OTA, pour ce qui attend encore l'hote : une tache dans sa liste et
+//   l'envoi qu'il a configure, une seule fois par evaluation et par palier
+//   (marqueur de tache). ⚠ Pas de balayage : `guest_evaluations` est lue par
+//   (status, deadline_at) dans une fenetre de cinq jours, plafonnee a 200.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -104,6 +110,7 @@ const { purgerSiDue } = require('../lib/cron-purge-tentatives')
 const { rattraperBloquees } = require('../lib/moteur-creation')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
 const { channelCall } = require('../lib/channel-fullsync')
+const { relancerEvaluations } = require('../lib/avis/notifications')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -182,6 +189,7 @@ module.exports = async function handler(req, res) {
     totalTentativesBloquees: 0,
     totalNuitsOuvertes: 0,
     totalPrixChanges: 0,
+    totalAvisRelances: 0,
     circuitBreakerTriggered: 0,
     errors: []
   }
@@ -472,6 +480,22 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur pilote YieldFlow:', err.message)
       results.errors.push({ context: 'pilote_yieldflow', error: err.message })
+    }
+
+    // 4quaterdecies. RELANCES DE L'ÉVALUATION DU VOYAGEUR (lot 6 avis, spec §10).
+    // J-5 et J-1 avant l'échéance de l'OTA. Une tâche et un envoi par évaluation
+    // et par palier, jamais deux : le marqueur de la tâche fait foi, lu en UNE
+    // requête pour tout le lot. ⚠ Requête bornée sur (status, deadline_at),
+    // plafonnée à 200 — pas de balayage. Placée AVANT le dispatch, comme les
+    // autres tâches légères : elle ne coûte que deux ou trois requêtes.
+    try {
+      const bilanRelances = await chrono.mesure('relances_avis', () => relancerEvaluations(supabase))
+      results.totalAvisRelances = bilanRelances?.relancees || 0
+      if (bilanRelances?.erreurs) results.errors.push({ context: 'relances_avis', error: bilanRelances.erreurs + ' erreur(s)' })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur relances avis:', err.message)
+      results.errors.push({ context: 'relances_avis', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

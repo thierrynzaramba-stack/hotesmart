@@ -846,3 +846,27 @@ test('LE TEST QUI COMPTE : renvoyer les MEMES reponses ne relance pas un appel p
   assert.strictEqual(res.code, 200)
   assert.strictEqual(etat.ia.appels.length, 0, 'aucun appel au modele pour des reponses inchangees')
 })
+
+// ─── Lot 6 : l'hôte est prévenu quand la prestataire a fini ─────────────────
+test('LE TEST QUI COMPTE : la prestataire a fini sa part — l’hôte reçoit UNE tâche', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.code, 200)
+  const taches = etat.insertions.filter(i => i.table === 'agent_tasks')
+  assert.strictEqual(taches.length, 1)
+  assert.strictEqual(taches[0].row.guest_message, '[AUTO: avis rempli BK-1]')
+  assert.match(taches[0].row.summary, /Regina a rempli sa part/)
+})
+
+test('l’hôte qui répond lui-même ne se notifie pas', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ evaluations: [vierge] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: { etat: 'impeccable' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.insertions.filter(i => i.table === 'agent_tasks').length, 0)
+})

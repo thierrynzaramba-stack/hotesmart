@@ -21,6 +21,8 @@ const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
 // Naissance 1 : la prestataire ouvre ses questions apres « Menage fait » (decision D2).
 const { assurerEvaluation } = require('../lib/avis/naissance')
+// Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
+const { prevenirHote } = require('../lib/avis/notifications')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -1281,6 +1283,22 @@ async function evaluationRepondre (req, res, garde) {
     motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
   }
 
+  // ⚠ L'HOTE EST PREVENU QUAND LA PRESTATAIRE A FINI SA PART et que
+  // l'evaluation lui revient (spec §10, lot 6). Une seule fois par sejour : le
+  // marqueur de la tache le garantit. Jamais quand elle publie elle-meme — il
+  // n'y a alors rien a lui demander. Ne leve jamais.
+  const avertirHote = async () => {
+    if (role !== 'prestataire') return
+    const { data: bien } = await supabase.from('properties').select('name')
+      .eq('id', e.property_id).eq('user_id', e.user_id).maybeSingle()
+    await prevenirHote(supabase, {
+      evaluation: e,
+      prenomPrestataire: garde.contexte?.profil?.first_name || null,
+      nomBien: bien?.name || null,
+    })
+  }
+  if (role === 'prestataire' && r.completRole && !r.decision.peutPublier) await avertirHote()
+
   // ⚠ UNE PRESTATAIRE « VALIDER » NE DOIT JAMAIS TOMBER SUR « TEXTE ABSENT »,
   // ET L'HOTE NON PLUS NE DOIT PAS HERITER D'UNE PAGE BLANCHE.
   // Decision de Thierry du 30 septembre 2026. Des que la prestataire a fini SA
@@ -1360,6 +1378,8 @@ async function evaluationRepondre (req, res, garde) {
         charge: { motif: redige.motif, detail: redige.detail, par_profil: profilId, booking_uid: e.booking_uid },
       })
       if (!j.ok) console.error('[avis] refus de redaction non journalise:', j.erreur)
+      // L'evaluation revient a l'hote : il est prevenu (idempotent).
+      await avertirHote()
 
       return res.status(200).json({
         ...reponse,
