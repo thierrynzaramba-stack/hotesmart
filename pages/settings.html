@@ -683,9 +683,14 @@ try {
   console.warn('[settings] droits avis', e && e.message)
 }
 
+// ⚠ `?onglet=avis` OUVRE L'ONGLET AVIS — c'est la cible du lien « Configuration »
+// de la page Avis. La bascule vient APRÈS `charger()`, qui rallume la zone
+// d'équipe en fin de chargement : basculer avant aurait laissé les deux zones
+// affichées. Onglet caché (pas de droit d'écriture) = on reste sur l'équipe.
+const ongletDemande = new URLSearchParams(location.search).get('onglet')
 const { data: { session } } = await supabase.auth.getSession()
-if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings')
-else charger()
+if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings' + location.search)
+else charger().finally(() => { if (ongletDemande === 'avis' && !$('tab-avis').hidden) basculer('avis') })
 </script>
 </body>
 </html>

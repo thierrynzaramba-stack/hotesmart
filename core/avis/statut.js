@@ -21,13 +21,13 @@ import { appel as appelParDefaut } from './appel.js'
 
 // Ce que l'app peut afficher sans rien connaitre du coeur.
 const LISIBLE = {
-  a_remplir: 'A evaluer',
+  a_remplir: 'À évaluer',
   soumise_prestataire: 'Remplie par la prestataire',
-  a_valider: 'A valider',
-  publiee: 'Publiee',
-  echec_publication: 'Echec de publication',
-  expiree: 'Delai depasse',
-  abandonnee: 'Abandonnee',
+  a_valider: 'À valider',
+  publiee: 'Publiée',
+  echec_publication: 'Échec de publication',
+  expiree: 'Délai dépassé',
+  abandonnee: 'Abandonnée',
 }
 
 export async function demander ({ booking_uid } = {}, ctx = {}) {
@@ -37,7 +37,7 @@ export async function demander ({ booking_uid } = {}, ctx = {}) {
     const e = data.evaluation || {}
     return {
       etat: e.status || 'absente',
-      libelle: LISIBLE[e.status] || 'Etat inconnu',
+      libelle: LISIBLE[e.status] || 'État inconnu',
       // ⚠ `evaluable` dit a l'app si le bouton a un sens MAINTENANT. Une
       // evaluation publiee, expiree ou abandonnee ne se rouvre pas.
       evaluable: ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'].includes(e.status),
@@ -47,7 +47,7 @@ export async function demander ({ booking_uid } = {}, ctx = {}) {
     }
   } catch (err) {
     // 404 : ce sejour n'a pas d'evaluation. C'est un etat, pas une panne.
-    if (err.statut === 404) return { etat: 'absente', libelle: 'Pas d evaluation', evaluable: false, publie_le: null, echeance: null, role: null }
+    if (err.statut === 404) return { etat: 'absente', libelle: 'Pas d’évaluation', evaluable: false, publie_le: null, echeance: null, role: null }
     // 403 : hors perimetre. L'app ne doit pas proposer le bouton, et elle n'a
     // pas a savoir pourquoi.
     if (err.statut === 403) return { etat: 'hors_perimetre', libelle: '', evaluable: false, publie_le: null, echeance: null, role: null }

@@ -50,7 +50,7 @@ test('LE TEST QUI COMPTE : une note 1 sans drapeau negatif est REFUSEE', () => {
     { cle: 'oui', libelle: 'Oui', rang: 1, note: 5, negatif: false },
     { cle: 'non', libelle: 'Non', rang: 2, note: 1, negatif: false },  // ⚠
   ] }] }
-  assert.throws(() => validerGrille(g), /negati/i)
+  assert.throws(() => validerGrille(g), /négati/i)
 })
 
 test('LE TEST QUI COMPTE : un refus de recommander sans drapeau negatif est REFUSE', () => {
@@ -71,7 +71,7 @@ test('la grille par defaut respecte ses propres regles', () => {
 
 test('une categorie inconnue d’Airbnb est refusee', () => {
   const g = { criteres: [{ ...GRILLE_HOTE.criteres[0], categorie: 'ambiance' }] }
-  assert.throws(() => validerGrille(g), /categorie/i)
+  assert.throws(() => validerGrille(g), /catégorie/i)
 })
 
 test('une note hors 1-5 est refusee, et « recommandation » n’en porte pas', () => {
@@ -186,7 +186,7 @@ test('LE TEST QUI COMPTE : un « Non » sans drapeau ne devient pas un « Oui »
       { cle: 'non', libelle: 'Non', rang: 1, note: null, negatif: false },
     ] },
   ] }
-  assert.throws(() => noter({ etat: 'ok', reco: 'non' }, vieille), /ne dit pas s il recommande/)
+  assert.throws(() => noter({ etat: 'ok', reco: 'non' }, vieille), /ne dit pas s’il recommande/)
 })
 
 test('et le garde-fou du negatif s’allume AVANT le calcul, pour que l’hote tranche', () => {
@@ -231,7 +231,7 @@ test('LE TEST QUI COMPTE : un compte qui eteint TOUS ses criteres ne recupere pa
   const g = grilleDe({ duBien: [], duCompte: eteints })
   assert.strictEqual(g.defaut, false)
   assert.deepStrictEqual(g.criteres, [])
-  assert.throws(() => validerGrille(g), /sans critere/)
+  assert.throws(() => validerGrille(g), /sans critère/)
 })
 
 test('un compte qui n’a JAMAIS rien cree garde bien la grille par defaut', () => {
@@ -263,12 +263,12 @@ test('« recommande » hors de la categorie recommandation est refuse', () => {
   const g = { criteres: [{ cle: 'x', categorie: 'cleanliness', rang: 1, niveaux: [
     { cle: 'a', libelle: 'A', rang: 1, note: 5, recommande: true, negatif: false },
   ] }] }
-  assert.throws(() => validerGrille(g), /n appartient qu a la categorie recommandation/)
+  assert.throws(() => validerGrille(g), /n’appartient qu’à la catégorie recommandation/)
 })
 
 test('noter refuse une note inutilisable, parce que c’est elle qui atteint l’OTA', () => {
   const g = { criteres: [{ cle: 'x', categorie: 'cleanliness', rang: 1, niveaux: [
     { cle: 'a', libelle: 'A', rang: 1, note: null, negatif: false },
   ] }] }
-  assert.throws(() => noter({ x: 'a' }, g), /n a pas de note utilisable/)
+  assert.throws(() => noter({ x: 'a' }, g), /n’a pas de note utilisable/)
 })

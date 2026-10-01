@@ -205,7 +205,7 @@ test('un critere ferme au role est refuse, pas ignore', async () => {
       evaluation: base, reponses: { [critHote.cle]: meilleur(critHote) },
       role: 'prestataire', evalScope: 'selon_grille',
     }),
-    /n est pas ouvert a ce role/)
+    /n’est pas ouvert à ce rôle/)
 })
 
 // ⚠ Un test portait ici le nom « un avis negatif rempli par une prestataire
@@ -255,14 +255,14 @@ test('une evaluation deja publiee ne se remplit plus', async () => {
   await assert.rejects(
     () => enregistrerReponses(faussebase({ criteres: [] }), {
       evaluation: { ...base, status: 'publiee' }, reponses: TOUT_BON, role: 'hote' }),
-    /deja publiee/)
+    /déjà publiée/)
 })
 
 test('une evaluation expiree ne se remplit plus', async () => {
   await assert.rejects(
     () => enregistrerReponses(faussebase({ criteres: [] }), {
       evaluation: { ...base, status: 'expiree' }, reponses: TOUT_BON, role: 'hote' }),
-    /delai de l OTA/)
+    /délai de la plateforme/)
 })
 
 test('l’ecriture porte TOUJOURS le user_id, pas seulement l’id', async () => {
@@ -276,7 +276,7 @@ test('l’ecriture porte TOUJOURS le user_id, pas seulement l’id', async () =>
 test('une evaluation publiee ne s’abandonne pas', async () => {
   await assert.rejects(
     () => abandonner(faussebase({}), { evaluation: { ...base, status: 'publiee' } }),
-    /ne s abandonne pas/)
+    /ne s’abandonne pas/)
 })
 
 // ─── L'evenement ────────────────────────────────────────────────────────────

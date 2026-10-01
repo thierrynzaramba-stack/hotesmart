@@ -132,7 +132,12 @@
         <div class="page-title">⭐ Avis voyageurs</div>
         <div class="page-sub" id="sous-titre">Chargement…</div>
       </div>
-      <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <!-- ⚠ Réglages refuse un compte délégué : le lien n'apparaît qu'au
+             titulaire qui a le droit d'écriture sur les avis (voir initAvis). -->
+        <a class="btn" id="lien-configuration" href="/settings?onglet=avis" style="text-decoration:none" hidden>⚙ Configuration</a>
+        <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
+      </div>
     </div>
     <div class="content">
       <!-- ⚠ CE QUI ATTEND L'HOTE PASSE AVANT CE QU'IL A RECU. Les avis des
@@ -204,7 +209,7 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-  import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
+  import { peutEcrire, enteteCompte, estTitulaire } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
 
   // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
@@ -223,6 +228,7 @@
   // motif de apps/agent-ai/messagerie.html : fetch direct, jeton de session et
   // `enteteCompte()` pour la delegation de compte.
   window.peutEcrire = peutEcrire
+  window.estTitulaire = estTitulaire
   window.enteteCompte = enteteCompte
   window._supabase = supabase
 
@@ -634,6 +640,10 @@
     // Le serveur le revalide : ce masquage est un confort, pas la garde.
     const peut = window.peutEcrire ? window.peutEcrire('avis') : false
     $('btn-saisir').hidden = !peut
+    // Le lien « Configuration » mène à Réglages, qui refuse un compte délégué :
+    // il faut le droit d'écriture ET travailler sur son propre compte. Sinon un
+    // membre délégué cliquerait vers une page qui le renvoie.
+    $('lien-configuration').hidden = !(peut && window.estTitulaire && window.estTitulaire())
 
     $('s-date').value = new Date().toISOString().slice(0, 10)
 
