@@ -265,19 +265,32 @@ test('centimesValides refuse ce qui casserait l INSERT en silence', () => {
 
 const { rouvrirApresAnnulation } = require('../lib/price-log')
 
+// ⚠ DATES RELATIVES, PAS FIGEES (2 octobre 2026). La reouverture IGNORE les
+// nuits passees (test « PASSEES » plus bas) : ces tests lisent donc l'horloge.
+// Leurs nuits etaient figees au 1er-3 octobre 2026 ; le 2 octobre a minuit, six
+// d'entre eux sont devenus rouges sans qu'une ligne de code ait change
+// (contre-epreuve : `JOURS=-1 node --require ./tests/outils/horloge-decalee.js`
+// les remettait au vert). Regle du depot : dates relatives si le test lit
+// l'horloge. Calculees comme le code (`lib/price-log.js`) : en date LOCALE.
+const jourLocal = n => {
+  const d = new Date(); d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const N1 = jourLocal(1), N2 = jourLocal(2), N3 = jourLocal(3)
+
 test('ANNULATION — la ligne vendue n est JAMAIS rouverte, une nouvelle s ouvre', async () => {
   const sb = fausseBase()
   sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
   // Une nuit SANS ligne de calendrier est fermee (runFullSync pousse
   // availability: 0) : les fixtures portent donc explicitement l'etat ouvert.
-  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: 95, stop_sell: false, avail: 1 })
-  sb.inventaire.push({ property_id: BIEN, date: '2026-10-02', rate: null, stop_sell: false, avail: 1 })
+  sb.inventaire.push({ property_id: BIEN, date: N1, rate: 95, stop_sell: false, avail: 1 })
+  sb.inventaire.push({ property_id: BIEN, date: N2, rate: null, stop_sell: false, avail: 1 })
 
   await enregistrerPrixPousses(sb, {
-    userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000, '2026-10-02': 12000 }
+    userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000, [N2]: 12000 }
   })
   await cloturerVente(sb, {
-    propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-03', bookingUid: 'BK-7'
+    propertyId: BIEN, arrival: N1, departure: N3, bookingUid: 'BK-7'
   })
   assert.equal(sb.lignes.filter(l => l.sold_at != null).length, 2)
 
@@ -296,16 +309,16 @@ test('ANNULATION — la ligne vendue n est JAMAIS rouverte, une nouvelle s ouvre
   const cour = courantes(sb)
   assert.equal(cour.length, 2)
   const parDate = Object.fromEntries(cour.map(l => [l.stay_date, l.rate]))
-  assert.equal(parDate['2026-10-01'], 9500, 'prix du calendrier (95 EUR) pour la nuit tarifee')
-  assert.equal(parDate['2026-10-02'], 10000, 'repli sur le prix de base (100 EUR) sinon')
+  assert.equal(parDate[N1], 9500, 'prix du calendrier (95 EUR) pour la nuit tarifee')
+  assert.equal(parDate[N2], 10000, 'repli sur le prix de base (100 EUR) sinon')
 })
 
 test('ANNULATION — idempotent : rejouer l evenement n ouvre pas de doublon', async () => {
   const sb = fausseBase()
   sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
-  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: null, stop_sell: false, avail: 1 })
-  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
-  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-8' })
+  sb.inventaire.push({ property_id: BIEN, date: N1, rate: null, stop_sell: false, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: N1, departure: N2, bookingUid: 'BK-8' })
 
   const un = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-8', basePriceEur: 100 })
   const deux = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-8', basePriceEur: 100 })
@@ -321,9 +334,9 @@ test('ANNULATION — un full sync passe entre-temps a la priorite', async () => 
   // verite affichee : on n ecrase pas.
   const sb = fausseBase()
   sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
-  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
-  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-9' })
-  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 8000 } })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: N1, departure: N2, bookingUid: 'BK-9' })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 8000 } })
 
   const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-9', basePriceEur: 100 })
   assert.equal(bilan.rouvertes, 0)
@@ -336,9 +349,9 @@ test('ANNULATION — une nuit sans aucun prix connu n est pas inventee', async (
   const sb = fausseBase()
   sb.biens.push({ id: BIEN, user_id: HOTE, base_price: null, provider: 'channex', rate_sync_mode: 'managed' })
   // Nuit OUVERTE mais sans tarif, et pas de prix de base : rien a afficher.
-  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: null, stop_sell: false, avail: 1 })
-  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
-  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-A' })
+  sb.inventaire.push({ property_id: BIEN, date: N1, rate: null, stop_sell: false, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: N1, departure: N2, bookingUid: 'BK-A' })
 
   const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-A', basePriceEur: null })
   assert.equal(bilan.rouvertes, 0)
@@ -378,9 +391,9 @@ test('ANNULATION — une nuit FERMEE n est pas rouverte', async () => {
   // peut reserver serait exactement le mensonge que ce module interdit.
   const sb = fausseBase()
   sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
-  sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: 95, stop_sell: true, avail: 1 })
-  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
-  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-F' })
+  sb.inventaire.push({ property_id: BIEN, date: N1, rate: 95, stop_sell: true, avail: 1 })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: N1, departure: N2, bookingUid: 'BK-F' })
 
   const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-F', basePriceEur: 100 })
   assert.equal(bilan.rouvertes, 0)
@@ -393,8 +406,8 @@ test('ANNULATION — une nuit SANS ligne de calendrier est fermee, pas au prix d
   // sur `base_price` ouvrirait une ligne pour une nuit invendable.
   const sb = fausseBase()
   sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, provider: 'channex', rate_sync_mode: 'managed' })
-  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
-  await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-G' })
+  await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000 } })
+  await cloturerVente(sb, { propertyId: BIEN, arrival: N1, departure: N2, bookingUid: 'BK-G' })
 
   const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-G', basePriceEur: 100 })
   assert.equal(bilan.rouvertes, 0)
@@ -410,9 +423,9 @@ test('ANNULATION — un bien dont HoteSmart ne pousse pas les prix n est pas jou
   ]) {
     const sb = fausseBase()
     sb.biens.push({ id: BIEN, user_id: HOTE, base_price: 100, ...bienNonPoussable })
-    sb.inventaire.push({ property_id: BIEN, date: '2026-10-01', rate: 95, stop_sell: false, avail: 1 })
-    await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { '2026-10-01': 12000 } })
-    await cloturerVente(sb, { propertyId: BIEN, arrival: '2026-10-01', departure: '2026-10-02', bookingUid: 'BK-H' })
+    sb.inventaire.push({ property_id: BIEN, date: N1, rate: 95, stop_sell: false, avail: 1 })
+    await enregistrerPrixPousses(sb, { userId: HOTE, propertyId: BIEN, nuits: { [N1]: 12000 } })
+    await cloturerVente(sb, { propertyId: BIEN, arrival: N1, departure: N2, bookingUid: 'BK-H' })
 
     const bilan = await rouvrirApresAnnulation(sb, { propertyId: BIEN, bookingUid: 'BK-H', basePriceEur: 100 })
     assert.equal(bilan.rouvertes, 0, JSON.stringify(bienNonPoussable))

@@ -335,3 +335,18 @@ l'etape 3 qui reconnait une vente par `sold_at is not null and replaced_at is
 null` la perdrait — en silence. L'ecart entre lignes visees et lignes fermees
 est journalise : c'est un cas normal, mais un ecart muet serait indiscernable
 d'un bug.
+
+## Les tests d'annulation lisent l'horloge (2 octobre 2026)
+
+`rouvrirApresAnnulation` ignore les nuits passées, en date **locale**. Les six
+tests « ANNULATION » de `tests/price-log.test.js` avaient des nuits **figées** au
+1er-3 octobre 2026 : le 2 octobre à minuit, ils sont devenus rouges sans qu'une
+ligne ait changé (suite à 34 au lieu de 28). Preuve : rejoués avec l'horloge
+reculée au 1er octobre (`JOURS=-1 node --require ./tests/outils/horloge-decalee.js`),
+44/44.
+
+Correctif : nuits **relatives** (`jourLocal(1..3)`, calculées comme le code), et
+rien d'autre — assertions inchangées. Preuve qu'ils n'ont pas été affaiblis : sur
+deux mutations du code (garde du passé neutralisée ; nuit fermée rouverte), les
+nouveaux tests rougissent **exactement** comme les anciens rejoués au 1er octobre
+(6 rouges, puis 1). Verts de −1 à +364 jours.
