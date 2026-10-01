@@ -263,6 +263,12 @@
 import { supabase } from '/shared/supabase.js'
 import { api } from '/shared/api-client.js'
 
+// ⚠ L'ONGLET AVIS LIT SA SESSION ICI. `core/avis/appel.js` prend le jeton dans
+// `window._supabase` : sans cette ligne, chaque appel partait sans jeton et
+// l'onglet affichait « Non autorisé » (recette du 1er octobre 2026). Même pose
+// que pages/avis.html. Pas d'`enteteCompte` : cette page n'est pas délégable.
+window._supabase = supabase
+
 const DOMAINES = [
   ['reservations', 'Réservations', 'Calendrier, tarifs et disponibilités des biens du périmètre. « Modifier » publie vers les plateformes.'],
   ['menages',      'Ménages',      'Planning des ménages et répartition entre prestataires.'],
