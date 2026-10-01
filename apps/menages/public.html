@@ -1590,20 +1590,16 @@ if ("serviceWorker" in navigator) {
     // la garde « refusez-le d'abord » — un bouton qui echoue, ce que cet ecran
     // s'interdit. C'est le refus, dans la fiche, qui la libere.
     if (!miensTous.length && !aConfirmer.length && !passe && mesJours && mesJours.modifiable) {
-      // ⚠ FIGE AUSSI SUR UN JOUR DE REPOS, et c'est une limite ASSUMEE.
-      // La maquette ouvrait le segment sur un jour habituellement chome : se
-      // rendre disponible « pour ce jour-la » y etait une exception positive.
-      // Le serveur ne l'accepte pas aujourd'hui — `declarerIndisponibilite` ne
-      // sait poser que des ABSENCES. Ouvrir le segment promettrait donc un geste
-      // qui echouerait, ce qui est exactement ce que cet ecran s'interdit.
-      // Ses jours habituels se reglent dans la carte « Mes jours » ; la feuille
-      // le dit plutot que de faire semblant.
-      const repos = !c && !e && !jourTravaille(j)
+      // ⚠ PLUS FIGE SUR UN JOUR DE REPOS (bug du 1er octobre 2026). C'etait une
+      // « limite assumee » : le serveur ne savait poser que des absences, et
+      // ouvrir le segment aurait promis un geste qui echoue. Le serveur accepte
+      // desormais les deux sens — se rendre disponible POUR CE JOUR-LA est
+      // exactement l'exception positive que la maquette prevoyait.
       // ⚠ ET PENDANT L'ENVOI. `basculerMonJour` sort sur `enVolParJour.has(j)`
       // sans un mot : elle touchait la seconde face, rien ne bougeait, et le
       // « ✓ » du geste precedent restait affiche.
       const enVol = enVolParJour.has(j)
-      const fige = !!(c || repos || enVol || (e && e.source !== 'prestataire'))
+      const fige = !!(c || enVol || (e && e.source !== 'prestataire'))
       html += '<div class="jsect"><div class="jsect-t">Disponibilité</div>' +
         '<div class="jseg">' +
         `<button data-dispo="1" aria-pressed="${dispo ? 'true' : 'false'}"${fige ? ' disabled' : ''}>` +
@@ -1611,9 +1607,7 @@ if ("serviceWorker" in navigator) {
         `<button class="non" data-dispo="0" aria-pressed="${dispo ? 'false' : 'true'}"${fige ? ' disabled' : ''}>` +
         'Je ne suis pas disponible</button></div>' +
         (c ? '<div class="jsect-vide" style="padding-top:8px">Vous êtes en congé — réglez-le dans la carte « Mes jours ».</div>'
-           : repos
-             ? '<div class="jsect-vide" style="padding-top:8px">Ce jour n’est pas dans vos jours habituels — réglez-les dans la carte « Mes jours ».</div>'
-             : (e && e.source !== 'prestataire'
+           : (e && e.source !== 'prestataire'
                 // ⚠ DEUX SENS, DEUX PHRASES. L'hote peut poser « pas ce samedi »
                 // (`available: false`) MAIS AUSSI « viens exceptionnellement »
                 // (`available: true`). Un libelle unique annoncait une absence a
@@ -2327,7 +2321,8 @@ if ("serviceWorker" in navigator) {
 
   // ─── MES ABSENCES (lot 3.5) ──────────────────────────────────────────────
   //
-  // ⚠ ELLE DECLARE UNE ABSENCE, JAMAIS UNE PRESENCE, et jamais ses JOURS
+  // ⚠ ELLE DECLARE UNE EXCEPTION D'UN JOUR, DANS LES DEUX SENS (depuis le
+  // 1er octobre 2026), mais jamais ses JOURS
   // ATTITRES : ceux-la sont une decision de son employeur. Pouvoir s'en retirer
   // elle-meme lui permettrait de quitter un bien sans qu'il l'apprenne, alors
   // qu'il compte sur elle pour le preparer.
@@ -2344,11 +2339,17 @@ if ("serviceWorker" in navigator) {
   // meme raison : un reglage qu'on ne voit pas se verifie mal. Elle voit ses
   // jours habituels, ses absences et ses conges dans UNE seule vue.
   //
-  // ⚠ ELLE DECLARE UNE ABSENCE, JAMAIS UNE PRESENCE. Se rendre disponible un
-  // jour que son employeur ne lui a pas confie n'aurait aucun effet — ses jours
-  // attitres sont sa decision a lui — et lui ferait croire le contraire. Une
-  // tape sur un jour vert le rend rouge ; une tape sur un jour QU'ELLE a rendu
-  // rouge l'annule. Un jour rouge par la recurrence ne bouge pas.
+  // ⚠ UNE EXCEPTION PRIME SUR LA RECURRENCE, DANS LES DEUX SENS (bug du
+  // 1er octobre 2026 — l'ancienne regle « elle declare une absence, jamais une
+  // presence » est tombee). Un jour habituel se rend indisponible, un jour de
+  // repos se rend disponible POUR CE JOUR-LA ; revenir au sens de la recurrence
+  // retire l'exception. Ses jours ATTITRES (`weekdays`, sur la liaison) restent
+  // la decision de l'hote, et ce chemin n'y touche pas. ⚠ Nuance (review) :
+  // `weekdays` VIDE veut dire « attitree tous les jours » — alors une
+  // disponibilite exceptionnelle la rend bien candidate ce jour-la, et d'office
+  // si elle n'a rien a confirmer. Exactement ce qu'elle obtenait deja en
+  // reglant ses jours habituels ; la difference est que l'hote n'en est pas
+  // prevenu (pas plus que pour une absence).
   const JOURS_SEM = [{ n: 1, c: 'L' }, { n: 2, c: 'M' }, { n: 3, c: 'M' }, { n: 4, c: 'J' },
                      { n: 5, c: 'V' }, { n: 6, c: 'S' }, { n: 0, c: 'D' }]
   const DISPO_MOIS = 12
@@ -2490,6 +2491,12 @@ if ("serviceWorker" in navigator) {
     if (congeDuJour(j)) return false
     const e = exceptionDuJour(j)
     if (e) return e.available === true
+    return jourParSesRegles(j)
+  }
+
+  // Ce que dit SA RECURRENCE seule, sans menage, conge ni exception : c'est la
+  // reference qui decide si une exception est utile ou redondante.
+  function jourParSesRegles (j) {
     const act = reglesLues()
     // Une regle qu'on ne sait pas relire ne vaut pas « aucune regle » : on
     // montre le cas le plus prudent plutot qu'un calendrier tout vert.
@@ -3518,10 +3525,21 @@ if ("serviceWorker" in navigator) {
       direIci('On vous propose un ménage ce jour-là. Pour vous libérer, refusez-le d’abord.')
       return
     }
-    if (!exc && !jourTravaille(j)) {
-      direIci('Vous ne travaillez déjà pas ce jour-là.')
-      return
-    }
+    // ⚠ PLUS DE GARDE « VOUS NE TRAVAILLEZ DEJA PAS CE JOUR-LA » (bug du
+    // 1er octobre 2026). Un jour de repos se rend disponible POUR CE JOUR-LA :
+    // une exception prime sur la recurrence dans les deux sens, comme cote hote.
+    // Le SENS est l'inverse de ce que la journee dit maintenant ; la CIBLE est
+    // ce qu'il faut en base pour l'obtenir :
+    //   - la recurrence dit deja le sens voulu -> aucune exception (on retire la
+    //     sienne : empiler une exception redondante laisserait, le jour ou ses
+    //     jours habituels changent, un jour fige que plus rien n'explique) ;
+    //   - sinon -> une exception portant le sens voulu.
+    const voulu = exc ? exc.available !== true : !jourParSesRegles(j)
+    const cible = voulu === jourParSesRegles(j) ? null : voulu
+    // Rien a faire : pas d'exception, et la recurrence dit deja le sens voulu.
+    // (Ne se produit pas depuis le segment, qui ne bascule que vers l'autre
+    // face — mais un appel direct ne doit rien envoyer pour rien.)
+    if (!exc && cible === null) return
     // ─── RENDU OPTIMISTE ────────────────────────────────────────────────
     // ⚠ C'EST LE REPROCHE N° 1 DES UTILISATRICES, ET IL ETAIT MERITE.
     // L'ancien chemin attendait DEUX allers-retours reseau avant de changer
@@ -3578,16 +3596,18 @@ if ("serviceWorker" in navigator) {
     // `enVolParJour.has(j)` sans un mot.
     // Meme lecon qu'au lot 1 : un verrou qui protege une ecriture se pose AVANT
     // la mutation qu'il garde — ici, avant le rendu qui s'en sert.
-    enVolParJour.set(j, !exc)
+    enVolParJour.set(j, cible)
 
-    appliquerJour(j, !exc)
+    appliquerJour(j, cible)
     peindreMesJours()
     // ⚠ ET LA FEUILLE SE REDESSINE, si le geste vient d'elle. Sans cela, le
     // segment resterait sur la face qu'on vient de quitter : le calendrier
     // derriere aurait bascule, la feuille par-dessus dirait le contraire, et
     // c'est celle-ci qu'elle regarde.
     if (depuisFeuille && feuilleOuverteSur(j)) ouvrirJour(j)
-    direIci(exc ? '✓ Absence annulée.' : '✓ Absence enregistrée.', 'ok')
+    direIci(voulu
+      ? (cible === null ? '✓ Absence annulée.' : '✓ Vous êtes disponible ce jour-là.')
+      : (cible === null ? '✓ Ce jour redevient un jour de repos.' : '✓ Absence enregistrée.'), 'ok')
 
     // (La valeur VOULUE est retenue le temps du vol, plus haut : si un
     // rechargement tombe au milieu, `reappliquerEnVol` la remet par-dessus
@@ -3613,8 +3633,11 @@ if ("serviceWorker" in navigator) {
     }
 
     try {
-      const { ok, data } = await envoyer({
-        action: exc ? 'retirerIndisponibilite' : 'declarerIndisponibilite', date: j })
+      // ⚠ LE SENS PART EN TOUTES LETTRES (`available`), absence comprise : le
+      // serveur ecrit ce qu'on lui demande ou refuse, il ne devine plus.
+      const { ok, data } = await envoyer(cible === null
+        ? { action: 'retirerIndisponibilite', date: j }
+        : { action: 'declarerIndisponibilite', date: j, available: cible })
       enVolParJour.delete(j)
       // Le serveur a REPONDU non : l'issue est connue, on peut l'affirmer.
       if (!ok) rattraperCeJour((data && data.error) || 'Pas enregistré. Votre journée n\'a pas changé.')
@@ -3638,14 +3661,16 @@ if ("serviceWorker" in navigator) {
   // Pose ou retire l'absence d'UN jour dans l'etat courant. Un seul endroit
   // ecrit cette ligne : la bascule, le rattrapage et la reapplication apres
   // rechargement diraient sinon trois fois la meme chose, de trois facons.
-  function appliquerJour (j, absente) {
+  // `cible` : `null` = plus d'exception ce jour-la (la recurrence decide),
+  // `true` / `false` = une exception de ce sens.
+  function appliquerJour (j, cible) {
     const reste = (mesJours.exceptions || []).filter(e => String(e.date).slice(0, 10) !== j)
     // Pas d'`id` : le serveur le donnera. Les deux ecritures se font PAR DATE
     // (`declarer`/`retirerIndisponibilite`), et le rendu ne lit que `date`,
     // `available` et `source` — la ligne locale porte donc tout ce qu'il faut.
-    mesJours.exceptions = absente
-      ? reste.concat([{ date: j, available: false, source: 'prestataire' }])
-      : reste
+    mesJours.exceptions = cible === null || cible === undefined
+      ? reste
+      : reste.concat([{ date: j, available: cible === true, source: 'prestataire' }])
   }
 
   // ⚠ UN RECHARGEMENT NE DOIT PAS DEFAIRE CE QUI EST ENCORE EN VOL.
@@ -3662,7 +3687,7 @@ if ("serviceWorker" in navigator) {
     // restait affiche au-dessus.
     if (enVolRegles) appliquerRegles(enVolRegles.lots, enVolRegles.alt)
     if (!enVolParJour.size) return
-    enVolParJour.forEach((absente, j) => appliquerJour(j, absente))
+    enVolParJour.forEach((cible, j) => appliquerJour(j, cible))
   }
 
   // Relecture SANS panneau d'erreur : sert au rattrapage, ou afficher « vos

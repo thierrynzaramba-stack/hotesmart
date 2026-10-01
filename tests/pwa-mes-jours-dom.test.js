@@ -232,8 +232,12 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
         .map((l, i) => regle('neuve' + i, 'réglée', l.jours, cad, l.depuis))
     }
     if (corps && corps.action === 'declarerIndisponibilite') {
-      etat.exceptions = etat.exceptions.concat([
-        { id: 'e' + appels.length, date: corps.date, available: false, source: 'prestataire' }])
+      // ⚠ LE DOUBLE SUIT LE SERVEUR DU 1er OCTOBRE 2026 : il écrit le sens
+      // demandé (absent = absence, pour la PWA d'avant) et UNE ligne par jour.
+      // Il écrivait toujours `false` — l'imitation fidèle du défaut corrigé.
+      etat.exceptions = etat.exceptions.filter(e => e.date !== corps.date).concat([
+        { id: 'e' + appels.length, date: corps.date,
+          available: corps.available === undefined ? false : corps.available, source: 'prestataire' }])
     }
     if (corps && corps.action === 'retirerIndisponibilite') {
       etat.exceptions = etat.exceptions.filter(e => e.date !== corps.date)
@@ -814,24 +818,82 @@ test('un jour de CONGÉ ne bouge pas à la tape', async () => {
   assert.match(feuille(w), /congé/i)
 })
 
-test('un jour où elle ne travaille déjà pas n\'appelle pas le serveur', async () => {
-  // Elle déclare une ABSENCE, jamais une PRÉSENCE : se rendre disponible un jour
-  // que son employeur ne lui a pas confié n'aurait aucun effet, et lui ferait
-  // croire le contraire.
+// ⚠ BUG DU 1er OCTOBRE 2026 — LE TEST QUI SE TROUVAIT ICI FIGEAIT LE DÉFAUT.
+// « Un jour où elle ne travaille déjà pas n'appelle pas le serveur » : le segment
+// était figé sur un jour de repos, et l'écran disait « réglez vos jours
+// habituels ». Tiphaine, absente le mercredi par récurrence, ne pouvait donc pas
+// se rendre disponible UN mercredi. Une exception prime sur la récurrence dans
+// les deux sens.
+
+// Un jour futur que la règle « lundis » ne couvre pas, et un qu'elle couvre.
+const jourDeRepos = () => { let n = 1; while (new Date(dans(n) + 'T12:00:00Z').getUTCDay() === 1) n++; return dans(n) }
+const unLundi = () => { let n = 1; while (new Date(dans(n) + 'T12:00:00Z').getUTCDay() !== 1) n++; return dans(n) }
+const declarations = t => t.appels.filter(a => a.corps && /Indisponibilite$/.test(a.corps.action || ''))
+
+test('un jour de REPOS se rend disponible pour ce jour-là : l\'exception part avec `available: true`', async () => {
+  const j = jourDeRepos()
   const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
   t.seed()
   await t.chargerDisponibilites()
-  const rouge = [...w.document.querySelectorAll('#dispo-months .dispo-case.off')]
-    .find(e => e.dataset.jour >= dans(1))
-  assert.ok(rouge, 'il existe bien un jour non travaillé')
-  rouge.dispatchEvent(new w.Event('click', { bubbles: true }))
-  await souffler(50)
-  assert.strictEqual(ecritures(t).length, 0, 'aucun appel')
-  // ⚠ LE REFUS A CHANGE DE CANAL, PAS DE SENS (lot B). Il se disait dans le
-  // bandeau ; il se dit maintenant DANS la feuille, avec le segment figé — donc
-  // avant même qu'elle touche quoi que ce soit, au lieu d'après.
-  assert.match(feuille(w), /jours habituels/)
-  assert.ok(segments(w).every(b => b.disabled), 'le segment est figé')
+  assert.ok(caseDu(w, j).classList.contains('off'), 'au départ, un jour de repos')
+  taperJour(w, j)
+  assert.ok(segments(w).some(b => !b.disabled), 'le segment n\'est plus figé')
+  assert.doesNotMatch(feuille(w), /pas dans vos jours habituels/)
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'declarerIndisponibilite')
+  assert.strictEqual(d[0].corps.date, j)
+  assert.strictEqual(d[0].corps.available, true, 'le sens demandé part en toutes lettres')
+  assert.ok(!caseDu(w, j).classList.contains('off'), 'et le jour s\'allume')
+})
+
+test('un jour TRAVAILLÉ déclaré absent envoie `available: false` en toutes lettres', async () => {
+  const j = unLundi()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(!caseDu(w, j).classList.contains('off'))
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.available, false)
+  assert.ok(caseDu(w, j).classList.contains('off'))
+})
+
+test('revenir sur une disponibilité exceptionnelle RETIRE l\'exception — le jour rend la main à la récurrence', async () => {
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    exceptions: [{ id: 'e1', date: j, available: true, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(!caseDu(w, j).classList.contains('off'), 'allumé par l\'exception')
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'retirerIndisponibilite', 'on n\'empile pas une absence redondante')
+  assert.ok(caseDu(w, j).classList.contains('off'))
+})
+
+test('une ABSENCE posée par elle sur un jour de repos se retourne en disponibilité, pas en retrait', async () => {
+  // Les absences de Tiphaine en prod tombent aussi sur des jours que sa
+  // récurrence ne couvre plus. Retirer l'exception laisserait le jour éteint :
+  // c'est l'inverse de ce qu'elle demande. On pose le sens demandé.
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'declarerIndisponibilite')
+  assert.strictEqual(d[0].corps.available, true)
+  assert.ok(!caseDu(w, j).classList.contains('off'))
 })
 
 test('le passé ne se modifie pas', async () => {
@@ -3229,4 +3291,33 @@ test('une proposition sur un jour de repos ne l\'allume pas : bulle au calendrie
   assert.ok(item, 'la ligne des 30 jours existe et ouvre la fiche')
   assert.match(item.textContent, /À CONFIRMER/, 'et dit qu\'il faut répondre')
   assert.ok(!item.classList.contains('a-confirmer'), 'sans couleur propre')
+})
+
+test('jour TRAVAILLÉ portant une disponibilité redondante à elle : « pas disponible » pose une absence', async () => {
+  // Cas relevé en review : l'exception « disponible » ne change rien à un lundi
+  // déjà travaillé ; la retirer laisserait le jour allumé. On pose le sens demandé.
+  const j = unLundi()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    exceptions: [{ id: 'e1', date: j, available: true, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'declarerIndisponibilite')
+  assert.strictEqual(d[0].corps.available, false)
+  assert.ok(caseDu(w, j).classList.contains('off'))
+})
+
+test('un ÉCHEC en se rendant disponible rend le jour à son état d\'avant, et le dit', async () => {
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    echecEcriture: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(80)
+  assert.ok(caseDu(w, j).classList.contains('off'), 'le jour de repos est rétabli')
+  assert.match(message(w), /indisponible|Pas enregistré/)
 })

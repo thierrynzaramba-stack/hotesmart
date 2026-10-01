@@ -425,9 +425,10 @@ jusqu'au 15 septembre 2026) :
   de droits absente n'ouvre donc pas l'écriture. **Mais un profil `lien` naît à `write`**
   (`api/membres.js`) — sans quoi l'onglet n'existait pour personne et le lot était inatteignable ;
   la fiche porte la case qui le coupe ;
-- ⚠️ **elle déclare une ABSENCE, jamais une présence** : `available` n'est pas un paramètre.
-  Se rendre disponible un jour que l'hôte ne lui a pas confié n'aurait aucun effet et lui ferait
-  croire le contraire ;
+- ~~elle déclare une ABSENCE, jamais une présence~~ — **RÈGLE TOMBÉE LE 1er OCTOBRE 2026**
+  (voir « Une exception prime sur la récurrence, dans les deux sens », en fin de fichier). Une
+  exception d'un jour se pose dans les deux sens ; `available` est un booléen, absent = absence,
+  toute autre valeur = 400 ;
 - ⚠️ **elle ne touche jamais ses jours attitrés** — décision de l'hôte (§12.9d) : pouvoir s'en
   retirer lui permettrait de quitter un bien sans qu'il l'apprenne ;
 - ⚠️ **« rien à supprimer » n'est pas « ce n'est pas à vous »** : un double tap sur « Annuler »
@@ -962,8 +963,9 @@ humain), mais l'écran ne l'explique pas encore.
   Cibles tactiles de 44 px minimum.
 - ⚠️ **Elle ne défait que ce qu'elle a déclaré.** Une absence de `source: 'hote'` ne se retire
   pas : l'écran refuse le geste et **dit pourquoi** plutôt que de partir chercher un 409. Un jour
-  de congé est verrouillé (`tabindex="-1"`), et un jour qu'elle ne travaille déjà pas n'appelle
-  personne — elle déclare une **absence**, jamais une présence.
+  de congé est verrouillé (`tabindex="-1"`). ~~Un jour qu'elle ne travaille déjà pas n'appelle
+  personne~~ — **tombé le 1er octobre 2026** : un jour de repos se rend disponible pour ce
+  jour-là (fin de fichier).
 - ⚠️ **Hors ligne, rien ne part, et l'écran le dit.** Le planning a une file d'attente ; une
   absence, non. La rejouer plus tard porterait sur un planning qui a bougé, et on ne peut pas
   annoncer « c'est enregistré » quand rien n'est parti.
@@ -3041,3 +3043,68 @@ Tests : `tests/pwa-mes-jours-dom.test.js`, section « UNE PROPOSITION N'EST PAS
 UN MÉNAGE PRIS » — six tests. Contre-épreuve par `git archive` : quatre rouges
 contre le code d'avant le correctif, deux rouges contre son premier jet ; la
 contre-épreuve `porteur` est verte partout.
+
+## Une exception prime sur la récurrence, dans les deux sens (1er octobre 2026)
+
+**Le constat.** Tiphaine a des jours d'absence réglés en récurrence (une semaine
+sur deux). La rendre disponible exceptionnellement sur UN jour ne marchait pas.
+En prod, ses 14 exceptions étaient **toutes des absences** : aucune
+disponibilité exceptionnelle n'avait jamais été enregistrée.
+
+**Où ça cassait : l'exception n'était pas enregistrée, et seulement par la PWA.**
+Reproduit sur staging : depuis la fiche hôte (`api/disponibilites.js`) les deux
+sens s'enregistrent et le moteur les applique (`estDisponible` : congé >
+exception > règle). Depuis la PWA :
+- l'écran **figeait** le segment sur un jour de repos (« Ce jour n'est pas dans
+  vos jours habituels ») et la tape disait « Vous ne travaillez déjà pas ce
+  jour-là » ;
+- ⚠️ **et le serveur répondait 200 à `available: true` en écrivant `false`.** Un
+  succès sur l'inverse de la demande. Un test l'épinglait comme une règle
+  (« elle déclare une ABSENCE, jamais une présence ») : REVIEW.md règle 17, un
+  test peut figer un bug.
+
+**Pourquoi la raison du lot 2b tombe.** Elle disait : se rendre disponible un
+jour que l'hôte ne lui a pas confié la rendrait candidate sans son accord. Mais
+**depuis le 15 septembre elle règle elle-même ses jours habituels**
+(`reglerMesJours`) : elle pouvait se rendre disponible *tous* les mercredis, pas
+*un* mercredi. La garde n'empêchait rien ; elle obligeait à toucher la récurrence
+pour un seul jour. Et ce que l'hôte lui **confie** vit ailleurs : ses jours
+attitrés (`weekdays`, sur la liaison) filtrent toujours la garde.
+⚠️ **Nuance trouvée en review** : `weekdays` **vide = attitrée tous les jours**
+(cas de Tiphaine). Là, une disponibilité exceptionnelle la rend bien
+**candidate** ce jour-là — et **d'office** si sa liaison est `requires_ack =
+false`. C'est exactement ce qu'elle obtenait déjà en réglant ses jours
+habituels, donc pas d'élévation de droit ; la seule différence est que
+`reglerMesJours` prévient l'hôte (`alertReglesModifiees`) et que l'exception
+d'un jour est **silencieuse** — comme l'étaient déjà ses absences. Prévenir
+l'hôte d'une exception : question ouverte, posée à Thierry.
+
+**La règle, désormais, des deux côtés** : une exception sur un jour précis prime
+toujours sur la récurrence, dans les deux sens.
+
+**Le correctif :**
+- `api/menages-public.js` (`declarerIndisponibilite`) : `available` booléen ;
+  **absent = absence** (la PWA déjà installée sur un téléphone n'envoie que la
+  date) ; **toute autre valeur = 400**, rien n'est écrit. La mise à jour de SA
+  ligne porte le sens demandé ; une ligne de l'hôte n'est jamais écrasée (409,
+  inchangé).
+- `apps/menages/public.html` : `basculerMonJour` calcule le SENS (l'inverse de ce
+  que dit la journée) et la CIBLE (`jourParSesRegles`, la récurrence seule) :
+  si la récurrence dit déjà le sens voulu, on **retire** son exception plutôt
+  que d'en empiler une redondante ; sinon on pose l'exception du sens voulu,
+  en toutes lettres (`available`). Le segment n'est plus figé sur un jour de
+  repos.
+- ⚠️ **Une absence posée par elle sur un jour que sa récurrence ne couvre plus
+  se RETOURNE en disponibilité**, elle ne se retire pas : la retirer laisserait
+  le jour éteint, l'inverse de la demande. C'est le cas réel de Tiphaine, dont
+  les absences de septembre tombent sur des jours que sa récurrence d'octobre
+  ne couvre plus.
+
+**Tests** : `tests/menages-public-disponibilites.test.js` (les deux sens, la
+mise à jour du sens, absent = absence, **400 sur valeur invalide** — `'true'`,
+`1`, `null`, `{}`… — et la ligne de l'hôte jamais appropriée) ;
+`tests/pwa-mes-jours-dom.test.js` (jour de repos rendu disponible, jour
+travaillé déclaré absent en toutes lettres, retour à la récurrence, absence
+retournée). Six rouges contre le code d'avant (`git archive`). Le double du
+harnais écrivait lui aussi toujours `false` : il imitait fidèlement le défaut,
+il suit maintenant le serveur.
