@@ -454,6 +454,8 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/kb/reference-yield.md (un jour = UN segment par priorite ; cascade de repli a 4 niveaux, plancher = jour de semaine ; deux seuils, 8 nuits ET 3 resas ; `part_vendue` est une part de VENTES, on extrapole le final, on ne multiplie jamais la capacite).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).
 - docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
+- docs/specs/rotation-deroule.md (**LE DÉROULÉ QUI FAIT FOI pendant une rotation de secret** : `CRON_SECRET` puis `CHANNEL_WEBHOOK_SECRET`, geste par geste, avec la vérification que je fais à chaque pas et la fenêtre de refus d'une minute).
+- docs/specs/rotation-secret-webhook.md (le POURQUOI de la rotation du secret de webhook, et l'historique du piège : une version de ce document a affirmé le contraire du code. **En cas de divergence, le déroulé ci-dessus gagne, et celui-ci se corrige dans le même mouvement.**)
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.

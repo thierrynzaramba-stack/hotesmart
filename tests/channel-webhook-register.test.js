@@ -44,7 +44,8 @@ const MODULES = ['../api/channel-webhook', '../lib/require-permission', '../lib/
                  '../lib/cron-shared', '../lib/channels', '../lib/bookings-snapshot',
                  '../lib/billing', '../lib/channel-availability', '../lib/record-message']
 
-function preparer ({ user = TITULAIRE, profil = null, permissions = null } = {}) {
+function preparer ({ user = TITULAIRE, profil = null, permissions = null,
+                     webhooks = [], listeOk = true } = {}) {
   const etat = { appels: [] }
 
   const client = {
@@ -84,7 +85,14 @@ function preparer ({ user = TITULAIRE, profil = null, permissions = null } = {})
   globalThis.fetch = async (url, opts = {}) => {
     let corps = null
     try { corps = opts.body ? JSON.parse(opts.body) : null } catch { corps = opts.body }
-    etat.appels.push({ url: String(url), methode: opts.method || 'GET', corps })
+    const methode = opts.method || 'GET'
+    etat.appels.push({ url: String(url), methode, corps })
+    // ⚠ LA LISTE DES WEBHOOKS EXISTANTS, que le code lit avant de creer. Sans
+    // elle, aucun test ne pourrait distinguer une creation d'une mise a jour.
+    if (String(url).endsWith('/webhooks') && methode === 'GET') {
+      return { ok: listeOk, status: listeOk ? 200 : 500, headers: { get: () => null },
+               text: async () => JSON.stringify(listeOk ? { data: webhooks } : { errors: { title: 'panne' } }) }
+    }
     return {
       ok: true, status: 201,
       headers: { get: () => null },
@@ -172,14 +180,42 @@ test('la cible conforme envoyee par le front est acceptee', async () => {
   assert.strictEqual(res.code, 201)
 })
 
-test('LE TEST QUI COMPTE : un hote inconnu ne choisit pas la cible non plus', async () => {
-  // La cible se construit depuis une liste blanche, pas depuis l'en-tete `Host`.
-  // Sans cela, un appel avec `Host: chez-moi.example` deplacerait le webhook.
+test('LE TEST QUI COMPTE : un hote inconnu fait REFUSER l’action, il ne la detourne pas', async () => {
+  // ⚠ CE TEST A CHANGE DE SENS, et c'est un constat CRITIQUE de review.
+  // Il verifiait que la cible restait celle du serveur malgre un `Host` etranger.
+  // Vrai, mais insuffisant : lancee depuis le projet STAGING, l'action creait dans
+  // le compte de canal de staging un webhook pointant sur la PRODUCTION, portant
+  // le secret de staging — 401 a chaque livraison, retries en boucle, et le secret
+  // de staging jamais rote.
+  //
+  // Pire : le corps du PUT lisait `VERCEL_BYPASS_TOKEN` de l'environnement
+  // d'EXECUTION. Lance depuis une preview, il ecrasait le `request_params {}` du
+  // webhook de production par le jeton de bypass, que le gestionnaire aurait
+  // ensuite ajoute en QUERY STRING a chaque livraison — donc dans les journaux
+  // d'acces de production, en permanence. C'est la classe de fuite exacte que
+  // cette livraison supprime par ailleurs.
   const etat = preparer({})
   const handler = require('../api/channel-webhook')
-  await handler(requete({}, { host: 'chez-moi.example' }), reponse())
-  const post = etat.appels.find(a => a.methode === 'POST')
-  assert.strictEqual(post.corps.webhook.callback_url, URL_ATTENDUE)
+  const res = reponse()
+  await handler(requete({}, { host: 'chez-moi.example' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.match(res.body.reason, /Relancez depuis la production/)
+  assert.strictEqual(etat.appels.length, 0, 'rien ne part chez le gestionnaire')
+})
+
+test('LE TEST QUI COMPTE : le bypass Vercel ne part JAMAIS dans la cible de production', async () => {
+  // Il depend desormais de la CIBLE, pas de l'environnement d'execution. La cible
+  // etant un domaine applicatif, qui n'est pas derriere le mur Vercel, les
+  // parametres de requete sont vides — ce que le webhook de production porte
+  // aujourd'hui.
+  const etat = preparer({ webhooks: WEBHOOK_EXISTANT })
+  const handler = require('../api/channel-webhook')
+  await handler(requete({}), reponse())
+  const put = etat.appels.find(a => a.methode === 'PUT')
+  assert.deepStrictEqual(put.corps.webhook.request_params, {},
+    'aucun parametre de requete sur une cible de production')
+  assert.ok(!JSON.stringify(put.corps).includes(process.env.VERCEL_BYPASS_TOKEN),
+    'le jeton de bypass ne doit pas partir')
 })
 
 // ─── Ce que la garde `titulaire` protege, et ce qu'elle NE protege pas ──────
@@ -195,16 +231,15 @@ test('LE TEST QUI COMPTE : un hote inconnu ne choisit pas la cible non plus', as
 //
 // CE QUE CELA CHANGE, ET CE QUE CELA NE CHANGE PAS. La faille grave est fermee :
 // l'URL etant construite par le serveur, le secret ne peut plus etre livre
-// ailleurs, et c'est prouve plus haut. Ce qui reste ouvert est plus etroit :
-// tout utilisateur connecte peut declencher un enregistrement vers LA BONNE
-// cible — donc, au pire, creer un DOUBLON de webhook global, ce qui fait livrer
-// chaque event deux fois et executer deux fois le mapping.
+// ailleurs, et c'est prouve plus haut. Le DOUBLON l'est aussi depuis la
+// livraison 3, qui a donne a ce fichier la recherche-puis-`PUT` de son voisin.
 //
-// Le fichier voisin a ferme ce cas en cherchant l'existant pour le mettre a jour
-// (PUT) plutot qu'en creant a l'aveugle. Ce n'est PAS fait ici : la consigne
-// etait une correction MINIMALE de l'action `register`. C'est une decision qui
-// revient a Thierry, et elle est nommee plutot que subie.
-test('CE QUI RESTE OUVERT, ET C’EST MESURE : tout utilisateur connecte passe la garde', async () => {
+// CE QUI RESTE OUVERT est donc plus etroit encore : tout utilisateur connecte
+// franchit la garde et declenche une MISE A JOUR de la bonne cible avec le
+// secret courant — sans fuite et sans doublon, mais sans droit particulier non
+// plus. La garde centrale d'environnement est le chantier qui le fermera ; d'ici
+// la, c'est nomme plutot que subi.
+test('CE QUI RESTE OUVERT, ET C’EST MESURE : tout utilisateur connecte declenche l action', async () => {
   // ⚠ `domaine: 'titulaire'` NE PROTEGE PAS UNE RESSOURCE GLOBALE, et il a fallu
   // ecrire ce test pour s'en apercevoir. Deux raisons qui se cumulent :
   //
@@ -217,26 +252,36 @@ test('CE QUI RESTE OUVERT, ET C’EST MESURE : tout utilisateur connecte passe l
   // « aucune ressource d'un compte client n'est designee, donc tout utilisateur
   // authentifie est titulaire du compte cible (le sien) et passerait ».
   //
-  // CE QUE LE CORRECTIF FERME QUAND MEME, et c'est l'essentiel : la cible etant
-  // construite par le serveur, le secret ne peut plus etre livre ailleurs — les
-  // deux tests du haut le prouvent. CE QUI RESTE : un utilisateur connecte peut
-  // declencher un enregistrement vers la BONNE cible, donc au pire creer un
-  // DOUBLON de webhook global, ce qui fait livrer chaque event deux fois et
-  // executer deux fois le mapping.
+  // ⚠ CE TEST A ETE DESARME UNE FOIS, et le constat vaut d'etre garde : sa
+  // premiere version affirmait « le doublon reste ouvert, la consigne etait une
+  // correction MINIMALE », et elle le prouvait par un `201`. La livraison 3 a
+  // pris la decision inverse — recherche-puis-`PUT` — et le test est reste VERT,
+  // parce que le double du provider rend une liste VIDE par defaut : il mesurait
+  // une creation dans un monde sans webhook existant, c'est-a-dire jamais la
+  // production. Un piege a loup qui se referme sur du vide ne dit rien.
   //
-  // Le fichier voisin a ferme ce cas en cherchant l'existant pour le mettre a
-  // jour (PUT) au lieu de creer a l'aveugle. Ce n'est pas fait ici : la consigne
-  // etait une correction MINIMALE. Ce test rougira le jour ou la decision sera
-  // prise, au lieu de laisser le cas passer inapercu.
-  const etat = preparer({ user: MEMBRE })
+  // Il part donc maintenant de l'etat REEL de la production — un webhook deja
+  // enregistre — et mesure les deux choses separement.
+  const etat = preparer({ user: MEMBRE, webhooks: [
+    { id: 'w-prod', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } },
+  ] })
   const handler = require('../api/channel-webhook')
   const res = reponse()
   await handler(requete({}), res)
 
-  assert.strictEqual(res.code, 201, 'aujourd hui il passe — a changer si Thierry tranche')
-  const post = etat.appels.find(a => a.methode === 'POST')
-  assert.strictEqual(post.corps.webhook.callback_url, URL_ATTENDUE,
-    'mais la cible reste celle du serveur : le secret ne sort pas')
+  // CE QUI RESTE OUVERT : un simple membre franchit la garde et declenche
+  // l'action. C'est nomme, pas subi — la garde centrale d'environnement est le
+  // chantier qui le fermera.
+  assert.strictEqual(res.code, 200, 'aujourd hui il passe — a changer le jour ou la garde se resserre')
+
+  // CE QUI EST FERME, ET QUI EST L'ESSENTIEL : il ne cree pas de doublon, et la
+  // cible reste celle du serveur, donc le secret ne sort pas.
+  assert.strictEqual(etat.appels.filter(a => a.methode === 'POST').length, 0,
+    'plus aucune creation a l aveugle : la livraison 3 cherche puis met a jour')
+  const put = etat.appels.find(a => a.methode === 'PUT')
+  assert.ok(put, 'c est une mise a jour de l existant')
+  assert.match(put.url, /w-prod$/)
+  assert.strictEqual(put.corps.webhook.callback_url, URL_ATTENDUE)
 })
 
 test('sans session, rien ne part', async () => {
@@ -411,4 +456,289 @@ test('LE TEST QUI COMPTE : un event booking atteint la recherche du bien sans Re
     assert.notStrictEqual(res.code, 401, 'le bon secret ne doit pas etre refuse')
     assert.notStrictEqual(res.code, 500, 'un identifiant manquant sortirait en 500 par le filet global')
   } finally { globalThis.fetch = vraiFetch }
+})
+
+// ─── Le doublon, ferme ──────────────────────────────────────────────────────
+// ⚠ POURQUOI CE BLOC EXISTE. Un POST aveugle creait un webhook de plus a chaque
+// appel, et rien ne limitait le nombre : chaque event declenchait alors autant de
+// balayages COMPLETS du feed — jusqu'a dix pages et un acquittement par revision,
+// en concurrence sur les memes lignes. Et c'est ce qui rendait la rotation du
+// secret impossible par le code.
+const WEBHOOK_EXISTANT = [{
+  id: 'wh-certifie',
+  attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' },
+}]
+
+test('LE TEST QUI COMPTE : un webhook existant est MIS A JOUR, pas double', async () => {
+  const etat = preparer({ webhooks: WEBHOOK_EXISTANT })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.strictEqual(res.code, 200, 'une mise a jour rend 200, une creation 201')
+  assert.strictEqual(res.body.mis_a_jour, true)
+  assert.strictEqual(res.body.cree, false)
+  const put = etat.appels.find(a => a.methode === 'PUT')
+  assert.ok(put, 'un PUT doit partir')
+  assert.match(put.url, /\/webhooks\/wh-certifie$/)
+  assert.ok(!etat.appels.some(a => a.methode === 'POST'), 'aucune creation')
+})
+
+test('LE TEST QUI COMPTE : la mise a jour renvoie le secret, sinon on le perdrait', async () => {
+  // Si le gestionnaire REMPLACE l'objet au lieu de le fusionner, omettre
+  // `headers` ferait perdre le secret partage — et toutes les livraisons
+  // suivantes seraient rejetees en 401 par notre propre garde.
+  const etat = preparer({ webhooks: WEBHOOK_EXISTANT })
+  const handler = require('../api/channel-webhook')
+  await handler(requete({}), reponse())
+  const put = etat.appels.find(a => a.methode === 'PUT')
+  assert.strictEqual(put.corps.webhook.headers['X-Channel-Webhook-Secret'], process.env.CHANNEL_WEBHOOK_SECRET)
+  assert.strictEqual(put.corps.webhook.event_mask, 'booking;message', 'le masque ne doit pas se perdre')
+})
+
+test('sans webhook existant, on cree — et on le dit', async () => {
+  const etat = preparer({ webhooks: [] })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+  assert.strictEqual(res.code, 201)
+  assert.strictEqual(res.body.cree, true)
+  assert.ok(etat.appels.some(a => a.methode === 'POST'))
+})
+
+test('LE TEST QUI COMPTE : liste illisible, on ne cree RIEN a l’aveugle', async () => {
+  const etat = preparer({ listeOk: false })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+  assert.strictEqual(res.body.ok, false)
+  assert.match(res.body.reason, /aveugle/)
+  assert.ok(!etat.appels.some(a => a.methode === 'POST' || a.methode === 'PUT'),
+    'ni creation ni mise a jour sans savoir ce qui existe')
+})
+
+test('un webhook trouve SANS identifiant ne tombe pas sur la creation', async () => {
+  // Il tomberait sinon sur le POST, donc sur le doublon qu'on vient de fermer.
+  const etat = preparer({ webhooks: [{ attributes: { callback_url: URL_ATTENDUE } }] })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+  assert.strictEqual(res.body.ok, false)
+  assert.match(res.body.reason, /identifiant est illisible/)
+  assert.ok(!etat.appels.some(a => a.methode === 'POST'))
+})
+
+test('LE TEST QUI COMPTE : appele dix fois, il ne cree jamais un second webhook', async () => {
+  // La mesure qui compte vraiment : le nombre n'est plus choisi par l'appelant.
+  const webhooks = []
+  const etat = preparer({ webhooks })
+  const handler = require('../api/channel-webhook')
+  for (let i = 0; i < 10; i++) {
+    const res = reponse()
+    await handler(requete({}), res)
+    // Le double simule le gestionnaire : une creation ajoute le webhook a la liste.
+    if (res.body && res.body.cree && !webhooks.length) {
+      webhooks.push({ id: 'wh-1', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } })
+    }
+  }
+  const creations = etat.appels.filter(a => a.methode === 'POST').length
+  assert.strictEqual(creations, 1, `une seule creation attendue, ${creations} observee(s)`)
+  assert.strictEqual(etat.appels.filter(a => a.methode === 'PUT').length, 9)
+})
+
+// ─── L'endpoint de rattrapage est parti ─────────────────────────────────────
+// ⚠ CE BALAYAGE A D'ABORD ETE ECRIT PAR FORME, et c'etait la troisieme fois
+// dans la journee qu'un balayage par forme se trompait. Il cherchait une
+// variable issue de `req.query` comparee a `process.env.*` : il attrapait
+// l'endpoint supprime et RIEN D'AUTRE. Onze ecritures du meme defaut lui
+// echappaient — comparaison en ligne sans variable intermediaire,
+// destructuration (`const { secret } = req.query`), passage par une fonction,
+// `includes`, `startsWith`, comparaison a une valeur derivee du secret.
+//
+// La propriete qui compte n'est pas une forme, c'est un COMPORTEMENT : la
+// valeur d'un parametre de query ne doit JAMAIS changer le sort d'une requete
+// en portant un secret d'environnement. On appelle donc chaque endpoint DEUX
+// fois — une fois avec le secret, une fois avec une valeur fausse — et on exige
+// que les deux issues soient IDENTIQUES.
+//
+// Ce qui rend ce balayage juste la ou le precedent se trompait :
+//   - `api/book-public.js` et `api/manifest.js` lisent bien un `token` de query,
+//     mais il EST le droit d'acces, comme un lien de partage, et il ne vaut pas
+//     le secret d'environnement : les deux appels echouent pareil, donc verts —
+//     sans aucune liste d'exceptions a maintenir.
+//   - un endpoint qui compare, de quelque maniere que ce soit, rend deux issues
+//     differentes, et se voit.
+const SENTINELLE = 'valeur-sentinelle-du-balayage-query-0123456789'
+const CLES_DE_QUERY = ['secret', 'token', 'key', 'cron_secret', 'cle', 'auth', 'password']
+
+async function issueAvec (fichier, valeur) {
+  const chemin = `../api/${fichier.replace(/\.js$/, '')}`
+  preparer({})
+  const handler = require(chemin)
+  if (typeof handler !== 'function') return 'pas-un-endpoint'
+  const res = reponse()
+  const query = {}
+  for (const k of CLES_DE_QUERY) query[k] = valeur
+  // Aucun en-tete d'autorisation : si l'issue change, elle ne peut venir que de
+  // la query.
+  await handler({ method: 'GET', body: {}, query, headers: { host: HOTE_APP } }, res)
+  return res.code === null ? 'aucune-reponse' : String(res.code)
+}
+
+test('LE TEST QUI COMPTE : aucune valeur de query ne vaut un secret d\'ENVIRONNEMENT', async () => {
+  const fs = require('node:fs')
+  const dossier = path.join(__dirname, '..', 'api')
+  const fichiers = fs.readdirSync(dossier).filter(f => f.endsWith('.js'))
+
+  // ⚠ SI LA LISTE SE VIDE, LE TEST NE PROUVE PLUS RIEN.
+  assert.ok(fichiers.length >= 10,
+    `le dossier api/ devrait porter au moins dix endpoints, ${fichiers.length} trouve(s) : `
+    + 'ont-ils ete deplaces ?')
+
+  const avant = process.env.CRON_SECRET
+  process.env.CRON_SECRET = SENTINELLE
+  const fautifs = []
+  try {
+    for (const f of fichiers) {
+      try {
+        const avecSecret = await issueAvec(f, SENTINELLE)
+        const avecFaux = await issueAvec(f, 'valeur-manifestement-fausse')
+        if (avecSecret !== avecFaux) {
+          fautifs.push(`${f} (avec le secret : ${avecSecret}, avec une valeur fausse : ${avecFaux})`)
+        }
+      } catch (e) {
+        // Inexaminable n'est pas sain : on le DIT.
+        fautifs.push(`${f} (inexaminable : ${String(e.message).slice(0, 60)})`)
+      }
+    }
+  } finally {
+    if (avant === undefined) delete process.env.CRON_SECRET
+    else process.env.CRON_SECRET = avant
+  }
+  assert.deepStrictEqual(fautifs, [],
+    'chez ces endpoints, une valeur de query portant le secret d environnement change '
+    + `l issue de la requete : ${fautifs.join(' | ')}`)
+})
+
+test('et la contre-epreuve : le balayage rougit sur l endpoint supprime, reecrit', async () => {
+  // Sans elle, on ne saurait pas si le test ci-dessus passe parce que le defaut
+  // est parti ou parce que la mesure ne distingue rien. On REMET le defaut, dans
+  // une ecriture que l'ancien balayage par forme ne voyait PAS (destructuration
+  // et comparaison en ligne), et on exige que celui-ci le voie.
+  const fs = require('node:fs')
+  const dossier = path.join(__dirname, '..', 'api')
+  const temoin = '_temoin-balayage-query.js'
+  const chemin = path.join(dossier, temoin)
+  fs.writeFileSync(chemin, `
+    module.exports = async function (req, res) {
+      const { secret } = req.query || {}
+      if (secret !== process.env.CRON_SECRET) return res.status(403).json({ error: 'Interdit' })
+      return res.status(200).json({ ok: true })
+    }
+  `)
+  const avant = process.env.CRON_SECRET
+  process.env.CRON_SECRET = SENTINELLE
+  try {
+    const avecSecret = await issueAvec(temoin, SENTINELLE)
+    const avecFaux = await issueAvec(temoin, 'valeur-manifestement-fausse')
+    assert.strictEqual(avecSecret, '200')
+    assert.strictEqual(avecFaux, '403')
+    assert.notStrictEqual(avecSecret, avecFaux, 'le balayage doit voir cet ecart')
+  } finally {
+    if (avant === undefined) delete process.env.CRON_SECRET
+    else process.env.CRON_SECRET = avant
+    fs.unlinkSync(chemin)
+  }
+})
+
+// ─── Ce que la rotation du secret exige de cette action ─────────────────────
+// Constats de review du 1er octobre 2026. Ces trois-la ne mordent pas sur la
+// faille fermee plus haut : ils mordent sur le GESTE SUIVANT, la rotation du
+// secret, ou cette action est l'etape 5 du deroule.
+
+test('LE TEST QUI COMPTE POUR LA ROTATION : les doublons restants sont COMPTES et DITS', async () => {
+  // Pourquoi il compte : l'ancien code creait un webhook a CHAQUE appel, et son
+  // bouton etait ouvert a tout compte connecte — l'etat probable de la prod est
+  // donc plusieurs webhooks sur la meme URL. Mettre a jour le premier et se
+  // taire ferait croire la rotation terminee, pendant que les autres livrent
+  // les memes evenements avec l'ANCIEN secret, donc en 401 permanents.
+  const etat = preparer({ webhooks: [
+    { id: 'w-1', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } },
+    { id: 'w-2', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } },
+    { id: 'w-3', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } },
+  ] })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  // La mise a jour porte sur le PREMIER, et les autres sont nommes.
+  const put = etat.appels.find(a => a.methode === 'PUT')
+  assert.ok(put, 'une mise a jour doit partir sur l existant')
+  assert.match(put.url, /w-1$/)
+  assert.deepStrictEqual(res.body.doublons_sur_cette_url, ['w-2', 'w-3'])
+  assert.match(res.body.avertissement, /ANCIEN secret/)
+})
+
+test('un webhook du meme masque sous une AUTRE url est signale aussi', async () => {
+  // La contre-epreuve du filet : une barre finale, un domaine propre, une URL de
+  // recette suffisent a faire manquer l'egalite stricte. Celui-la garde l'ancien
+  // secret sans apparaitre dans les doublons.
+  const etat = preparer({ webhooks: [
+    { id: 'w-1', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } },
+    { id: 'w-vieux', attributes: { callback_url: URL_ATTENDUE + '/', event_mask: 'booking;message' } },
+  ] })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.deepStrictEqual(res.body.autres_webhooks_du_meme_masque,
+    [{ id: 'w-vieux', url: URL_ATTENDUE + '/' }])
+  assert.ok(!res.body.doublons_sur_cette_url, 'il n est pas sur la meme URL')
+  assert.ok(etat.appels.find(a => a.methode === 'PUT'), 'la mise a jour a bien eu lieu')
+})
+
+test('CONTRE-EPREUVE : sans aucun autre webhook, la reponse ne porte AUCUN avertissement', async () => {
+  // Sans ce cas, les deux tests du dessus passeraient aussi avec un code qui
+  // crie au doublon tout le temps — et l'ecran de diagnostic resterait rouge
+  // pour toujours.
+  preparer({ webhooks: [{ id: 'w-1', attributes: { callback_url: URL_ATTENDUE, event_mask: 'booking;message' } }] })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.strictEqual(res.body.doublons_sur_cette_url, undefined)
+  assert.strictEqual(res.body.autres_webhooks_du_meme_masque, undefined)
+  assert.strictEqual(res.body.avertissement, undefined)
+  assert.strictEqual(res.body.ok, true)
+  assert.strictEqual(res.body.updated, true)
+})
+
+test('une forme inattendue de liste ne declenche AUCUNE creation', async () => {
+  // Constat de review : `data` non-tableau rendait `tous = []`, donc une
+  // creation — exactement ce que la garde sur la liste illisible interdit.
+  const etat = preparer({ webhooks: { id: 'w-1' } })
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.strictEqual(res.body.ok, false)
+  assert.match(res.body.reason, /forme attendue/)
+  assert.strictEqual(etat.appels.filter(a => a.methode === 'POST').length, 0,
+    'aucune creation sur une liste illisible')
+})
+
+test('le succes porte `ok` et `registered`, comme le fichier voisin', async () => {
+  // Pourquoi : `pages/diagnostic.html` lisait `res.ok` seul, donc peignait son
+  // badge en vert sur les refus qui repondent 200 avec `ok:false`. Un contrat
+  // asymetrique — `ok` dans l'echec, absent du succes — rend l'ecran incapable
+  // de distinguer les deux.
+  preparer({})
+  const handler = require('../api/channel-webhook')
+  const res = reponse()
+  await handler(requete({}), res)
+
+  assert.strictEqual(res.code, 201)
+  assert.strictEqual(res.body.ok, true)
+  assert.strictEqual(res.body.registered, true)
+  assert.strictEqual(res.body.updated, false, 'une creation n est pas une mise a jour')
 })

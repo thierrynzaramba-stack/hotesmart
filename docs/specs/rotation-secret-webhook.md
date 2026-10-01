@@ -101,11 +101,14 @@ permanente.
    pas de la même façon :
    - le **second** webhook (`api/channel-events.js`) : par son action `register`,
      qui cherche l'existant et fait un `PUT` dessus ;
-   - le **certifié** (`api/channel-webhook.js`) : **à la main, dans l'interface
-     du gestionnaire.** Son action `register` fait un `POST` aveugle, donc elle
-     créerait un **second** webhook `booking;message` au lieu de corriger
-     l'existant — ou serait refusée si le provider plafonne, et la fenêtre ne se
-     refermerait **jamais**.
+   - le **certifié** (`api/channel-webhook.js`) : **par son action `register`
+     aussi, depuis la livraison 3 du 1er octobre 2026**, qui lui a donné la
+     recherche-puis-`PUT` de son voisin. Deux conditions : l'appel se lance
+     **depuis un domaine de production** (l'action refuse en 409 ailleurs, pour
+     ne pas créer un webhook pointant la prod avec le secret de la recette), et
+     la réponse se **lit** — si elle nomme `doublons_sur_cette_url` ou
+     `autres_webhooks_du_meme_masque`, **la fenêtre n'est pas refermée** : ces
+     webhooks-là gardent l'ancien secret et doivent être retirés à la main.
 
    ⚠ **Une version précédente de ce document affirmait le contraire** : que
    `register` ferait un `PUT` « après son correctif ». C'était faux, et le piège
@@ -115,9 +118,17 @@ permanente.
    refus sans aucun moyen de corriger l'existant depuis le code. Constat de
    review.
 
-   **Ce qui lèverait la réserve** : donner à `channel-webhook.js` la
-   recherche-puis-`PUT` de son voisin. C'est la même addition qui fermerait le
-   doublon décrit plus haut, donc les deux se traitent ensemble ou pas du tout.
+   **La réserve est levée** par la livraison 3, qui a fait exactement cette
+   addition. Ce paragraphe reste parce que l'avertissement vaut pour tout
+   déploiement **antérieur** à cette livraison : vérifier que le code déployé la
+   porte avant de suivre l'étape 5, et non la supposer.
+
+> ⚠ **CE DOCUMENT DIT POURQUOI ; LE GESTE SE SUIT AILLEURS.**
+> `docs/specs/rotation-deroule.md` porte le déroulé numéroté des deux rotations,
+> qui fait foi pendant l'opération : qui fait quoi, dans quel ordre, et ce que je
+> vérifie à chaque pas. Une divergence entre les deux se tranche en faveur du
+> déroulé, et se corrige **ici** dans le même mouvement — c'est la contradiction
+> qui a produit le piège décrit juste au-dessus.
 6. **Vérifier qu'un événement passe.** Pas « attendre et supposer » : provoquer
    un événement observable, ou lire les journaux jusqu'à un `200` sur chacun des
    deux chemins.

@@ -627,6 +627,66 @@ c'est la régression qu'il garde, écrit en tête du test.
 
 ---
 
+## 20. Un contrôle de sécurité vérifie un COMPORTEMENT, jamais une forme de code
+
+**Demande de Thierry, 1er octobre 2026**, après que le même défaut s'est produit
+**trois fois dans la même journée**. Un contrôle de sécurité, un balayage de
+recensement, une détection de régression : tous s'écrivent en **appelant** le code
+et en **mesurant** ce qu'il fait. Jamais en cherchant un motif dans son texte.
+
+### Les trois mesures qui ont produit cette règle
+
+| Ce que le contrôle cherchait | Ce qu'il a fait |
+|---|---|
+| `if (!process.env.CRON_SECRET` par expression régulière | **rouge** sur l'écriture usuelle du dépôt (`const S = process.env.X; if (!S)`), **vert** sur une garde en commentaire, une garde morte sans `return`, une garde placée après la comparaison |
+| les imports manquants, par expression régulière | **dix-neuf faux positifs**, des mots pris dans les **commentaires** du fichier |
+| tout `req.query.token` interdit | **rouge** sur deux pages dont le jeton **est** le droit d'accès, pas un secret |
+
+Chacun promettait d'attraper « le prochain écrit sur le même moule ». Les trois
+auraient laissé passer le vrai défaut et gêné le correctif suivant : un garde-fou
+qui rougit sur du code correct pousse à déformer ce code pour le faire taire.
+
+### Ce que la règle exige
+
+1. **Appeler, pas lire.** Le contrôle charge l'endpoint ou la fonction, lui donne
+   l'entrée qui doit échouer, et exige le refus. Un garde en commentaire, mort, ou
+   placé trop tard **ne refuse pas** — et se voit.
+2. **Porter sa contre-épreuve**, c'est-à-dire **un cas fautif qui doit rougir**,
+   dans le test lui-même. Sans elle, on ne sait pas si le contrôle passe parce que
+   le défaut est parti ou parce qu'il ne reconnaît plus rien. C'est l'extension de
+   la règle 19 au contrôle lui-même : lui aussi doit rougir contre le code
+   d'avant.
+3. **Échouer quand il n'a rien examiné.** Un balayage qui ne trouve aucun fichier
+   à contrôler rend « aucun fautif » et passe au vert pour de bon. Un renommage de
+   variable suffit. Le contrôle doit donc vérifier qu'il a bien vu ce qu'il devait
+   voir, et échouer sinon.
+4. **Compter un fichier inexaminable comme un fautif**, avec sa raison. Une
+   exception au chargement n'est pas une porte ouverte, mais elle empêche de
+   conclure.
+
+### S'il n'y a vraiment pas d'autre moyen
+
+Un motif textuel reste admissible **en dernier recours**, à trois conditions : il
+est resserré sur ce qui est **réellement** interdit et non sur une ressemblance, il
+porte sa contre-épreuve sur un cas fautif **écrit dans le test**, et son commentaire
+nomme ce qu'il **ne** voit **pas**. Un motif qui ne sait pas dire sa limite la
+cachera.
+
+**Et on ne compte pas deux tests quand c'est la même garde prouvée deux fois.**
+Constat de review du même jour : deux tests étiquetés « LE TEST QUI COMPTE »
+reposaient sur le même court-circuit — un refus en amont — et aucun n'observait la
+cible d'un appel réellement parti. Le message de commit annonçait « prouvé par deux
+tests ». C'était une garde prouvée deux fois, pas deux gardes. La question à se
+poser : **si je supprime cette garde-ci, lequel de mes tests rougit ?** Deux tests
+qui rougissent ensemble sur la même mutation n'en valent qu'un.
+
+**Et ceci vaut aussi pour les tests de non-fuite.** Ne cherchez pas la *forme* d'une
+réponse pour masquer un secret : cherchez la **valeur**. Un masqueur écrit contre la
+forme produite par son propre double de test est vert par construction — mesuré le
+même jour, cinq formes de réponse sur huit faisaient fuir le secret.
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

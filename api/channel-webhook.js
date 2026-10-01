@@ -95,6 +95,34 @@ const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection depl
 // ressource, on ne l'utilise pas.
 const DOMAINES_APP = ['hotesmart.vercel.app']
 
+// ⚠ LE MASQUE DU WEBHOOK CERTIFIE, NOMME. Il etait un litteral en deux endroits
+// possibles ; `scripts/check-webhooks.js` en porte un troisieme, en dur lui
+// aussi. Une divergence entre eux ne serait vue par personne. Constat de review.
+const MASQUE_CERTIFIE = 'booking;message'
+
+// ⚠ CE QUE `request_params` DOIT PORTER DEPEND DE LA CIBLE, PAS DE L'ENDROIT
+// D'OU ON APPELLE. Constat CRITIQUE de review, et c'etait la classe de fuite
+// exacte que cette livraison supprime : le corps du PUT lisait
+// `VERCEL_BYPASS_TOKEN` de l'environnement d'EXECUTION. Lance depuis une preview
+// — ce que mon propre commentaire prescrivait — il ecrasait le `request_params
+// {}` du webhook de PRODUCTION par le jeton de bypass. Le gestionnaire l'aurait
+// alors ajoute en QUERY STRING a chaque reservation et chaque message entrants,
+// donc dans les journaux d'acces de production, en permanence.
+//
+// `docs/CHANNEL_TECH.md` est explicite : ce jeton est « Preview UNIQUEMENT », et
+// « JAMAIS en prod (pas de mur) ». Le bypass n'a de sens que si la CIBLE est
+// derriere le mur Vercel. Comme la cible est toujours un domaine de
+// `DOMAINES_APP`, qui n'en est pas, elle vaut `{}`.
+function parametresDeRequete (cible) {
+  const hote = (() => { try { return new URL(cible).host } catch { return '' } })()
+  // Un domaine applicatif n'est pas protege par le mur : aucun parametre.
+  if (DOMAINES_APP.includes(hote)) return {}
+  // Tout autre hote serait une preview, donc derriere le mur. Ce cas n'existe
+  // pas aujourd'hui — l'action refuse de tourner hors de DOMAINES_APP — mais si
+  // la liste s'ouvre un jour, le bypass suivra la cible, pas l'appelant.
+  return VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+}
+
 // ⚠ ELLE REND L'URL DE PRODUCTION, Y COMPRIS APPELEE DE STAGING, ET ELLE LE DIT.
 // `DOMAINES_APP` n'a qu'une entree : tout hote inconnu — le projet staging, une
 // preview `hotesmart-git-<branche>-…` — retombe donc sur la production. Lance de
@@ -384,6 +412,30 @@ module.exports = async function handler(req, res) {
     const garde = await requirePermission(req, res, { domaine: 'titulaire' })
     if (!garde.ok) return
 
+    // ⚠ L'ACTION REFUSE DE TOURNER HORS DES DOMAINES APPLICATIFS. Constat HAUT de
+    // review. `urlWebhookDeCeFichier` ne peut rendre que l'URL de production :
+    // lancee depuis le projet STAGING, l'action creait donc, dans le compte de
+    // canal de staging, un webhook global pointant sur la PRODUCTION et portant le
+    // secret de STAGING. La production aurait refuse chaque livraison en 401, le
+    // gestionnaire aurait retente en boucle, et le secret de staging n'aurait
+    // jamais ete rote. Le seul signal etait un avertissement dans les journaux.
+    //
+    // Mon commentaire prescrivait pourtant de lancer l'etape 5 de la rotation
+    // « depuis une preview » : c'etait une supposition de ma part, pas une
+    // contrainte. Elle se lance depuis la PRODUCTION, et le runbook le dit.
+    const hoteAppelant = String(req.headers?.host || '').toLowerCase().split(':')[0]
+    if (!DOMAINES_APP.includes(hoteAppelant)) {
+      console.error(`[channel-webhook] register refuse depuis « ${hoteAppelant} » : hors DOMAINES_APP`)
+      return res.status(409).json({
+        ok: false, registered: false, updated: false,
+        error: 'Cette action ne s execute que depuis un domaine applicatif',
+        reason: `Appele depuis « ${hoteAppelant} ». La cible du webhook est toujours ${DOMAINES_APP[0]} :`
+          + ` lance d ailleurs, cet appel enregistrerait un webhook pointant sur la production`
+          + ` avec le secret de l environnement appelant. Relancez depuis la production.`,
+        attendu: DOMAINES_APP,
+      })
+    }
+
     // ⚠ LA CIBLE EST CONSTRUITE ICI, JAMAIS RECUE. Voir l'en-tete : c'est tout
     // l'objet de ce correctif.
     const callbackUrl = urlWebhookDeCeFichier(req)
@@ -400,10 +452,84 @@ module.exports = async function handler(req, res) {
       })
     }
 
-    const reg = await channelCall('POST', '/webhooks', {
+    // ⚠ ON CHERCHE L'EXISTANT AVANT DE CREER. Constat de review, et il ne s'agit
+    // pas d'un doublon isole : sans limite de debit ni idempotence, le NOMBRE de
+    // webhooks globaux etait choisi par l'appelant. Chaque event declenchait alors
+    // autant de balayages COMPLETS du feed — jusqu'a dix pages de revisions et un
+    // acquittement par revision, chacun en concurrence avec les autres sur les
+    // memes lignes.
+    //
+    // Meme mecanique que `api/channel-events.js`, et pour la meme raison : un POST
+    // aveugle cree un doublon ou se fait refuser, et dans les deux cas le webhook
+    // existant garde son ancien en-tete. C'est ce qui rendait la rotation du
+    // secret impossible par le code — l'etape 5 du runbook devait passer par
+    // l'interface du gestionnaire.
+    const liste = await channelCall('GET', '/webhooks')
+    if (!liste.ok) {
+      // ⚠ ON NE CREE PAS A L'AVEUGLE. Sans la liste, impossible de savoir si le
+      // webhook existe : un POST produirait le doublon qu'on vient de fermer.
+      console.error('[channel-webhook] lecture des webhooks impossible', liste.status)
+      return res.status(200).json({
+        ok: false, registered: false, updated: false,
+        channel_status: liste.status,
+        reason: "Impossible de lire les webhooks existants : on n'en cree pas a l'aveugle (risque de doublon et de double livraison). Reessayer plus tard.",
+        detail: sansSecrets(liste.json?.errors || liste.json),
+      })
+    }
+    // ⚠ UNE FORME INATTENDUE N'EST PAS UNE LISTE VIDE. Constat de review : un
+    // `data` objet au lieu d'un tableau rendait `tous = []`, donc une CREATION —
+    // exactement ce que la garde du dessus interdit quand la liste est illisible.
+    if (liste.json && liste.json.data !== undefined && !Array.isArray(liste.json.data)) {
+      console.error('[channel-webhook] /webhooks rend une forme inattendue : on ne cree rien')
+      return res.status(200).json({
+        ok: false, registered: false, updated: false,
+        reason: "La liste des webhooks n'a pas la forme attendue (data n'est pas un tableau) : creation refusee pour ne pas produire de doublon.",
+      })
+    }
+    const tous = Array.isArray(liste.json?.data) ? liste.json.data : []
+    const surCetteUrl = tous.filter(w => (w.attributes?.callback_url || w.callback_url) === callbackUrl)
+    const trouve = surCetteUrl[0]
+    const existant = trouve ? (trouve.id || trouve.attributes?.id) : null
+
+    // ⚠ LES DOUBLONS DEJA PRESENTS SE COMPTENT ET SE DISENT. Constat de review :
+    // `find` ne rend que le premier, donc une mise a jour laissait les autres
+    // vivre — chacun livrant ses propres evenements, et gardant l'ANCIEN secret
+    // apres une rotation, donc bouclant en 401. L'etat probable de la production
+    // EST celui-la : l'ancien code creait un webhook a chaque appel, et le bouton
+    // de la page de diagnostic etait ouvert a tout compte connecte.
+    //
+    // On ne les supprime pas — ce serait une ecriture non demandee sur le compte
+    // partage — mais on refuse de continuer en silence. Les retirer se fait a la
+    // main, et la reponse dit lesquels.
+    const autres = surCetteUrl.slice(1).map(w => w.id || w.attributes?.id).filter(Boolean)
+    // ⚠ ET LES WEBHOOKS GLOBAUX QUI PORTENT LE MEME MASQUE SOUS UNE AUTRE URL.
+    // Le filet que le fichier voisin a et que celui-ci n'avait pas : une barre
+    // finale, un domaine propre, une URL de staging suffisent a faire manquer
+    // l'egalite stricte, et un second webhook `booking;message` se cree.
+    const ailleurs = tous.filter(w => {
+      const url = w.attributes?.callback_url || w.callback_url
+      const masque = String(w.attributes?.event_mask || w.event_mask || '')
+      return url !== callbackUrl && /\bbooking\b|\bmessage\b/i.test(masque)
+    }).map(w => ({ id: w.id || w.attributes?.id, url: w.attributes?.callback_url || w.callback_url }))
+
+    // Une entree trouvee SANS identifiant exploitable tomberait sur la creation,
+    // donc sur le doublon. On s'arrete plutot que de continuer.
+    if (trouve && !existant) {
+      console.error('[channel-webhook] webhook trouve sans identifiant exploitable')
+      return res.status(200).json({
+        ok: false, registered: false, updated: false,
+        reason: "Un webhook existe deja sur cette URL mais son identifiant est illisible : creation refusee pour ne pas produire de doublon.",
+      })
+    }
+
+    // ⚠ LE CORPS EST LE MEME DANS LES DEUX CAS, en-tetes comprises. Si le
+    // gestionnaire REMPLACE l'objet au lieu de le fusionner, omettre `headers`
+    // ferait perdre le secret partage — et toutes les livraisons suivantes
+    // seraient rejetees en 401 par notre propre garde, plus bas dans ce fichier.
+    const corpsWebhook = {
       webhook: {
         callback_url: callbackUrl,
-        event_mask: 'booking;message',
+        event_mask: MASQUE_CERTIFIE,
         property_id: null,
         is_global: true,
         is_active: true,
@@ -411,18 +537,43 @@ module.exports = async function handler(req, res) {
         headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
         // Bypass protection deploiement Vercel (Preview) : Channex ajoute ces
         // parametres GET a chaque appel pour passer le mur d'authentification.
-        request_params: VERCEL_BYPASS ? {
-          'x-vercel-protection-bypass': VERCEL_BYPASS,
-        } : {}
+        request_params: parametresDeRequete(callbackUrl)
       }
-    })
+    }
+
+    const reg = existant
+      ? await channelCall('PUT', `/webhooks/${existant}`, corpsWebhook)
+      : await channelCall('POST', '/webhooks', corpsWebhook)
     // ⚠ LA REPONSE DU PROVIDER PORTE LES EN-TETES DU WEBHOOK, donc le secret et
     // le bypass. Les relayer les exposait dans la reponse HTTP : onglet reseau,
     // historique, copier-coller d'un rapport de diagnostic. Meme constat que
     // dans `api/channel-events.js`, qui ne rend que les NOMS des en-tetes.
     // La cible effective part dans la reponse : c'est elle qui permet de voir, a
     // la lecture, qu'un appel depuis staging a enregistre un webhook de prod.
-    return res.status(reg.ok ? 201 : 502).json({ cible: callbackUrl, ...sansSecrets(reg.json) })
+    // ⚠ MISE A JOUR ET CREATION NE RENDENT PAS LE MEME CODE. Un operateur en
+    // rotation doit savoir s'il a corrige l'existant ou en cree un second.
+    // ⚠ `ok` ET `registered` DANS LE SUCCES AUSSI. Constat de review : le succes
+    // ne les portait pas, les echecs si. `pages/diagnostic.html` ne pouvait donc
+    // pas distinguer un succes d'un echec a 200 — il peignait son badge en vert
+    // sur le seul code HTTP, et l'operateur fermait la fenetre de rotation sur un
+    // faux vert. Meme contrat que `api/channel-events.js`.
+    return res.status(reg.ok ? (existant ? 200 : 201) : 502).json({
+      ok: Boolean(reg.ok),
+      registered: Boolean(reg.ok),
+      updated: Boolean(existant && reg.ok),
+      cible: callbackUrl,
+      mis_a_jour: Boolean(existant && reg.ok),
+      cree: Boolean(!existant && reg.ok),
+      // ⚠ CE QUI RESTE A NETTOYER A LA MAIN, nomme. Un silence ici laisserait
+      // croire la rotation terminee alors que d'autres webhooks gardent l'ancien
+      // secret.
+      ...(autres.length ? { doublons_sur_cette_url: autres } : {}),
+      ...(ailleurs.length ? { autres_webhooks_du_meme_masque: ailleurs } : {}),
+      ...(autres.length || ailleurs.length
+        ? { avertissement: "D'autres webhooks portent ce masque d'evenements. Ils continuent de livrer, et garderont l'ANCIEN secret apres une rotation : retirez-les a la main dans l'interface du gestionnaire." }
+        : {}),
+      ...sansSecrets(reg.json),
+    })
   }
 
   // -- Reception d'un evenement (appel entrant du channel) --
