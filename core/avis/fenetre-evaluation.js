@@ -51,6 +51,13 @@ const MOTIF_LISIBLE = {
   ia_indisponible: 'La rédaction automatique est momentanément indisponible. Réessayez, ou écrivez le texte vous-même.',
   langue_non_verifiable: 'Cet avis est négatif et le texte doit être écrit dans une langue que nous ne savons pas relire automatiquement. Écrivez-le vous-même.',
   aucune_reponse: 'Aucun critère n’est rempli : il n’y a rien à rédiger.',
+  abandonnee: 'Cette évaluation a été abandonnée : elle ne se publie plus.',
+  statut_incompatible: 'Cette évaluation n’est pas dans un état qui permet de la publier.',
+  sans_reponses: 'Aucune réponse n’est enregistrée : il n’y a rien à publier.',
+  etat_provider_inconnu: 'La plateforme ne dit pas si l’avis est déjà parti. Réessayez dans quelques minutes.',
+  deja_chez_le_provider: 'L’avis était déjà parti chez la plateforme : il est maintenant marqué publié.',
+  grille_sans_jugement: 'La grille ne produit ni note ni recommandation : complétez-la dans Réglages.',
+  provider_inconnu: 'La plateforme de ce séjour est inconnue : contactez le support.',
 }
 
 const echapper = (t) => String(t == null ? '' : t)

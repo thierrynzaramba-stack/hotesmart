@@ -27,6 +27,14 @@ const supabase = createClient(
 
 const MAX_LIGNES  = 500
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// ⚠ UN MESSAGE DE `lib/avis` QUI REMONTE A L'ECRAN perd son prefixe « [avis] »,
+// fait pour les journaux, et prend une majuscule. Les ecrans affichent `error`
+// tel quel (recette du 1er octobre 2026).
+function pourLEcran (message) {
+  const m = String(message || '').replace(/^\[avis\]\s*/, '')
+  return m ? m.charAt(0).toUpperCase() + m.slice(1) : 'Erreur inattendue'
+}
 const SOURCES     = new Set(['sms', 'email', 'oral'])
 const MAX_TEXTE   = 5000
 
@@ -693,7 +701,7 @@ async function grilleEcrire (req, res, garde) {
     try {
       validerGrille({ criteres: criteres.map((c, i) => ({ ...c, cle: `nouveau-${i}` })) })
     } catch (err) {
-      return res.status(400).json({ error: err.message, motif: 'grille_invalide' })
+      return res.status(400).json({ error: pourLEcran(err.message), motif: 'grille_invalide' })
     }
   }
 
@@ -779,8 +787,8 @@ async function grilleEcrire (req, res, garde) {
       await nettoyerCriteres(crees)
       return res.status(503).json({
         error: rattrape
-          ? 'La nouvelle grille n a pas pu etre activee : l ancienne a ete remise en service. Reessayez.'
-          : 'La nouvelle grille n a pas pu etre activee ET l ancienne n a pas pu etre remise : contactez le support.',
+          ? 'La nouvelle grille n’a pas pu être activée : l’ancienne a été remise en service. Réessayez.'
+          : 'La nouvelle grille n’a pas pu être activée ET l’ancienne n’a pas pu être remise : contactez le support.',
         detail: eActif ? eActif.message : `${compte} critere(s) actives sur ${crees.length}`,
         motif: rattrape ? 'activation_echouee' : 'grille_vide',
       })
@@ -1004,7 +1012,7 @@ async function evaluationRepondre (req, res, garde) {
     })
   } catch (err) {
     // Une saisie refusee est un 400 nomme, pas un 500 muet.
-    return res.status(400).json({ error: err.message })
+    return res.status(400).json({ error: pourLEcran(err.message) })
   }
 
   const reponse = {
@@ -1402,7 +1410,7 @@ async function evaluationPublier (req, res, garde) {
           .update({ status: 'expiree' }).eq('id', e.id).eq('user_id', e.user_id)
         if (eExp) console.error('[avis] statut expiree non ecrit', e.id, eExp.message)
       }
-      return res.status(409).json({ error: err.message, motif: err.motif })
+      return res.status(409).json({ error: pourLEcran(err.message), motif: err.motif })
     }
     throw err
   }
@@ -1469,7 +1477,7 @@ async function evaluationAbandonner (req, res, garde) {
     const d = await abandonner(supabase, { evaluation: e, parProfil: profilId })
     return res.status(200).json({ ok: true, status: d.status })
   } catch (err) {
-    return res.status(409).json({ error: err.message })
+    return res.status(409).json({ error: pourLEcran(err.message) })
   }
 }
 

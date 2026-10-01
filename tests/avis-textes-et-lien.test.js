@@ -94,3 +94,22 @@ test('Réglages ouvre l’onglet Avis quand l’adresse le demande, après le ch
   // La bascule vient APRÈS charger() : charger rallume la zone d'équipe.
   assert.match(page, /charger\(\)\.finally\(\(\) => \{ if \(ongletDemande === 'avis' && !\$\('tab-avis'\)\.hidden\) basculer\('avis'\) \}\)/)
 })
+
+test('chaque motif de refus de publication a sa phrase à l’écran', async () => {
+  // Sans traduction, l'écran affichait le message brut du serveur suivi du code
+  // entre parenthèses (« statut a_remplir (statut_incompatible) »).
+  const { MOTIF_LISIBLE } = await import('../core/avis/fenetre-evaluation.js')
+  const source = lire('lib/avis/publication.js') + lire('api/avis.js')
+  const motifs = new Set([...source.matchAll(/new RefusPublication\(\s*'([a-z_]+)'/g)].map(m => m[1]))
+  for (const m of source.matchAll(/motif: '([a-z_]+)'/g)) if (/ota|provider|deja|cours/.test(m[1])) motifs.add(m[1])
+  assert.ok(motifs.size >= 12, `recensement trop court (${motifs.size}) : il ne mesure rien`)
+  const manquants = [...motifs].filter(m => !MOTIF_LISIBLE[m])
+  assert.deepStrictEqual(manquants, [], `motifs sans phrase à l’écran : ${manquants.join(', ')}`)
+})
+
+test('un message de lib/avis perd son préfixe « [avis] » avant d’atteindre l’écran', () => {
+  const api = lire('api/avis.js')
+  // Aucune réponse ne relaie un err.message brut.
+  assert.ok(!/json\(\{ error: err\.message/.test(api), 'un err.message part encore brut vers l’écran')
+  assert.match(api, /function pourLEcran \(message\)/)
+})

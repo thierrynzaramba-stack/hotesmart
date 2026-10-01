@@ -310,7 +310,7 @@ test('LE TEST QUI COMPTE : une note 1 sans drapeau negatif est refusee AVANT tou
   }] }), res)
   assert.strictEqual(res.code, 400)
   assert.strictEqual(res.body.motif, 'grille_invalide')
-  assert.match(res.body.error, /negatif/)
+  assert.match(res.body.error, /négatif/)
   assert.strictEqual(etat.insertions.length, 0, 'rien n a ete ecrit')
 })
 
