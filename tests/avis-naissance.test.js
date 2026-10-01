@@ -45,6 +45,11 @@ function base ({ evaluations = [], objets = [], panne = null } = {}) {
         etat.evaluations.push(nee)
         return { data: [{ id: nee.id }], error: null }
       }
+      if (table === 'guest_evaluations' && !q.op) {
+        const [, uids] = q.dans || [null, []]
+        const uid = (q.filtres.find(([c]) => c === 'user_id') || [])[1]
+        return { data: etat.evaluations.filter(e => e.user_id === uid && uids.includes(e.booking_uid)), error: null }
+      }
       if (q.op === 'update') {
         const cibles = etat.evaluations.filter(e =>
           q.filtres.every(([c, v]) => e[c] === v) && (!q.estNul || e[q.estNul[0]] == null))
@@ -78,7 +83,8 @@ test('un objet est ouvert seulement s il a une echeance future et pas d evaluati
   assert.strictEqual(objetOuvert({ expired_at: DANS(1) }, MAINTENANT), true)
   assert.strictEqual(objetOuvert({ expired_at: DANS(-1) }, MAINTENANT), false, 'delai depasse')
   assert.strictEqual(objetOuvert({ expired_at: null }, MAINTENANT), false, 'on n invente pas d echeance')
-  assert.strictEqual(objetOuvert({ expired_at: DANS(5), is_replied: true }, MAINTENANT), false, 'deja evalue')
+  assert.strictEqual(objetOuvert({ expired_at: DANS(5), raw: { attributes: { guest_review: { public_review: 'x' } } } }, MAINTENANT), false, 'evaluation deja partie')
+  assert.strictEqual(objetOuvert({ expired_at: DANS(5), raw: { attributes: { guest_review_submitted_at: '2026-10-01' } } }, MAINTENANT), false)
   assert.strictEqual(objetOuvert({ expired_at: 'pas une date' }, MAINTENANT), false)
 })
 
@@ -156,7 +162,7 @@ test('LE TEST QUI COMPTE : les objets historiques ne font RIEN naitre (premier p
   const historiques = [
     ligneAvis({ external_review_id: 'a', booking_uid: 'r-a', expired_at: '2022-10-06T00:00:00Z' }),
     ligneAvis({ external_review_id: 'b', booking_uid: 'r-b', expired_at: DANS(-1) }),
-    ligneAvis({ external_review_id: 'c', booking_uid: 'r-c', is_replied: true }),
+    ligneAvis({ external_review_id: 'c', booking_uid: 'r-c', raw: { attributes: { guest_review_submitted_at: '2026-09-30T10:00:00' } } }),
     ligneAvis({ external_review_id: 'd', booking_uid: null }),               // non resolu
     ligneAvis({ external_review_id: 'e', booking_uid: 'r-e', ota: 'booking' }),
     ligneAvis({ external_review_id: 'f', booking_uid: 'r-f', expired_at: null }),
@@ -178,6 +184,40 @@ test('le poll et le webhook passent tous deux par la naissance', () => {
   const path = require('node:path')
   const poll = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-channel-reviews.js'), 'utf8')
   const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-events.js'), 'utf8')
-  assert.match(poll, /await rattacherObjetsRecus\(sb, lot\)/)
+  assert.match(poll, /await rattacherObjetsRecus\(sb, lot, /)
   assert.match(webhook, /await rattacherObjetsRecus\(supabase, prep\.ligne\)/)
+})
+
+// ─── Constats de la revue de fb703f6 ────────────────────────────────────────
+test('LE TEST QUI COMPTE : une REPONSE de l hote a l avis du voyageur n empeche pas la naissance', async () => {
+  // `ota_reviews.is_replied` veut dire « l'hote a repondu a l'avis du voyageur »,
+  // pas « l'evaluation du voyageur est partie ». Le lire ici perdait des
+  // evaluations encore publiables.
+  const { etat, sb } = base({ objets: [{ id: 'objet-1', external_review_id: 'rev-1', expired_at: DANS(10) }] })
+  const bilan = await rattacherObjetsRecus(sb, [ligneAvis({ is_replied: true })], { maintenant: MAINTENANT })
+  assert.strictEqual(bilan.crees, 1)
+  assert.strictEqual(etat.evaluations.length, 1)
+})
+
+test('un objet deja rattache ne coute AUCUNE ecriture au passage suivant', async () => {
+  const { etat, sb } = base({
+    evaluations: [{ id: 'ev-1', user_id: 'compte-1', booking_uid: 'resa-1', status: 'a_remplir', ota_review_id: 'objet-1', deadline_at: DANS(10) }],
+    objets: [{ id: 'objet-1', external_review_id: 'rev-1', expired_at: DANS(10) }],
+  })
+  const bilan = await rattacherObjetsRecus(sb, [ligneAvis()], { maintenant: MAINTENANT })
+  assert.deepStrictEqual(bilan, { candidats: 1, crees: 0, rattaches: 0, erreurs: 0 })
+  assert.strictEqual(etat.ecritures.length, 0, 'ni upsert ignore ni update sans cible')
+})
+
+test('une echeance Channex sans fuseau est lue en UTC', () => {
+  const { instantUTC } = require('../lib/avis/naissance')
+  assert.strictEqual(new Date(instantUTC('2026-09-29T18:29:33.852000')).toISOString(), '2026-09-29T18:29:33.852Z')
+  assert.strictEqual(new Date(instantUTC('2026-09-29T20:29:33+02:00')).toISOString(), '2026-09-29T18:29:33.000Z')
+})
+
+test('le poll passe son horloge a la naissance', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const poll = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-channel-reviews.js'), 'utf8')
+  assert.match(poll, /rattacherObjetsRecus\(sb, lot, \{ maintenant: maintenant\(\) \}\)/)
 })
