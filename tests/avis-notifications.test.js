@@ -126,10 +126,10 @@ test('la requête est BORNÉE : statuts en attente, fenêtre de cinq jours, plaf
   const { etat, sb } = base()
   await relancerEvaluations(sb, { maintenant: MAINTENANT })
   const q = etat.requetes.find(r => r.table === 'guest_evaluations')
-  assert.deepStrictEqual(q.dans.status, ['a_remplir', 'soumise_prestataire', 'a_valider'])
+  assert.deepStrictEqual(q.dans.status, ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
   assert.strictEqual(q.gt, new Date(MAINTENANT).toISOString(), 'pas d’échéance passée')
   assert.strictEqual(q.lte, new Date(MAINTENANT + 5 * JOUR).toISOString())
-  assert.strictEqual(q.limite, 200)
+  assert.strictEqual(q.limite, 20, 'un passage du cron ne doit pas manger son budget en SMS')
 })
 
 test('une panne de lecture est comptée, pas levée', async () => {
@@ -158,4 +158,21 @@ test('le lien direct `/avis?evaluer=` ouvre la fenêtre par le bus', () => {
   const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'avis.html'), 'utf8')
   assert.match(page, /get\('evaluer'\)/)
   assert.match(page, /await hsBus\.ouvrir\('avis\.evaluer', \{ booking_uid: aEvaluer \}\)/)
+})
+
+test('LE TEST QUI COMPTE : la tâche ne s’affiche JAMAIS comme une réponse à envoyer au voyageur', async () => {
+  // `pending_validation` = « Réponse générée — à valider » + « Valider et envoyer »
+  // dans la conversation du voyageur. `pending` = le résumé, « Ignorer / Traité ».
+  const { etat, sb } = base({ evaluations: [{ ...EVAL, status: 'a_remplir' }] })
+  await prevenirHote(sb, { evaluation: EVAL, deps: { envoyer: async () => {} } })
+  await relancerEvaluations(sb, { maintenant: MAINTENANT, deps: { envoyer: async () => {} } })
+  assert.ok(etat.inserts.length >= 2)
+  for (const t of etat.inserts) assert.strictEqual(t.status, 'pending')
+})
+
+test('le J-1 donne l’heure : une échéance à 2 h ferme le jour même', async () => {
+  const deadline = new Date(MAINTENANT + 0.5 * JOUR).toISOString()
+  const { etat, sb } = base({ evaluations: [{ ...EVAL, status: 'a_valider', deadline_at: deadline }] })
+  await relancerEvaluations(sb, { maintenant: MAINTENANT, deps: { envoyer: async () => {} } })
+  assert.match(etat.inserts[0].summary, /avant le .* à \d\d h \d\d/)
 })

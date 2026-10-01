@@ -43,11 +43,12 @@ comment on column public.profiles.eval_scope is
   'Participation de la prestataire aux evaluations du voyageur : aucun | selon_grille. '
   'Defaut aucun depuis le 2 octobre 2026 : seulement si l hote l y autorise.';
 
--- Controle (a lire apres le collage) : la colonne a le bon defaut et plus
--- aucune ligne n'est a `selon_grille` sans autorisation explicite.
-select
-  (select column_default from information_schema.columns
-    where table_schema = 'public' and table_name = 'profiles'
-      and column_name = 'eval_scope') as defaut,
-  (select count(*) from public.profiles
-    where eval_scope = 'selon_grille') as autorisees;
+-- ─── Verification ──────────────────────────────────────
+-- ⚠ AUCUN SELECT DE VERIFICATION ICI. Regle gravee par
+-- Thierry (25 septembre 2026) : on ne colle QUE des
+-- migrations dans l'editeur Supabase. Ce qui a ete applique
+-- se prouve par le script, hors de l'editeur :
+--
+--   node --env-file=<env> scripts/verifier-eval-scope.js
+--
+-- (defaut de la colonne et nombre de profils autorises).
