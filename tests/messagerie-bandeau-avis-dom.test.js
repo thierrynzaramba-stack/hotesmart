@@ -27,24 +27,31 @@ function monter ({ statut, ecriture = true, lent = null }) {
   const dom = new JSDOM('<div id="bandeau-avis"></div>', { runScripts: 'outside-only' })
   const w = dom.window
   const appels = []
-  w.hsBus = {
+  w.__bus = {
     async demander (action, params) { appels.push({ action, params }); if (lent) await lent; return statut },
     async disponible (action) { appels.push({ action }); return ecriture },
     async ouvrir (action, params) { appels.push({ action, params }); return { ok: true } },
   }
+  // Le VRAI `escHtml` de la page, pas un double plus prudent qu'elle (constat de revue).
+  const m = /function escHtml\([^)]*\) \{[^\n]*\}/.exec(PAGE)
+  assert.ok(m, 'escHtml introuvable dans la page')
   vm.runInContext(`
     var currentConvId = null
     var conversations = []
-    function escHtml (t) { return String(t).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';') }
+    ${m[0]}
     ${bloc}
+    busAvis = globalThis.__bus   // le bus se charge a la demande : on l'injecte
     globalThis.__t = { peindreBandeauAvis, departPasse, set (id, convs) { currentConvId = id; conversations = convs } }
   `, dom.getInternalVMContext())
   return { w, t: w.__t, appels, zone: () => w.document.getElementById('bandeau-avis') }
 }
 
-const HIER = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-const DEMAIN = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-const conv = (over = {}) => ({ bookId: 'BK-1', lastNight: HIER, ...over })
+// Dates LOCALES, comme le code. `messages` present = conversation V2, ou
+// `lastNight` est la date de DEPART.
+const jour = (decalage) => { const d = new Date(); d.setDate(d.getDate() + decalage); const p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) }
+const HIER = jour(-1)
+const DEMAIN = jour(1)
+const conv = (over = {}) => ({ bookId: 'BK-1', lastNight: HIER, messages: [], ...over })
 const pause = () => new Promise(r => setTimeout(r, 5))
 
 test('avant le départ : aucun appel au cœur, aucun bandeau', async () => {
@@ -64,8 +71,10 @@ test('après le départ, évaluable et droit d’écriture : le bouton ouvre la 
   const bouton = zone().querySelector('button.bandeau-avis')
   assert.ok(bouton, 'le bouton est là')
   assert.match(bouton.textContent, /Évaluer ce voyageur/)
-  await w.evaluerVoyageur('BK-1')
+  bouton.click()
+  await pause()
   assert.strictEqual(JSON.stringify(appels.at(-1)), JSON.stringify({ action: 'avis.evaluer', params: { booking_uid: 'BK-1' } }))
+  assert.strictEqual(bouton.getAttribute('onclick'), null, 'pas de onclick construit a la main')
 })
 
 test('publiée : le bandeau le dit, sans bouton', async () => {
@@ -103,11 +112,21 @@ test('LE TEST QUI COMPTE : une réponse tardive ne peint pas la conversation sui
   assert.strictEqual(zone().innerHTML, '', 'le bandeau de BK-1 ne s’affiche pas sur BK-2')
 })
 
-test('la page importe le bus, l’expose au script classique, et écoute la publication', () => {
-  assert.match(PAGE, /import \{ hsBus \}\s+from '\/shared\/hs-bus\.js'/)
-  assert.match(PAGE, /window\.hsBus\s+= hsBus/)
-  assert.match(PAGE, /hsBus\.ecouter\('avis\.evaluation_publiee'/)
+test('la page charge le bus A LA DEMANDE et écoute la publication', () => {
+  // Un import statique ferait tomber la messagerie entière s'il échouait.
+  assert.doesNotMatch(PAGE, /^\s*import \{ hsBus \}/m)
+  assert.match(PAGE, /await import\('\/shared\/hs-bus\.js'\)/)
+  assert.match(PAGE, /busAvis\.ecouter\('avis\.evaluation_publiee'/)
   assert.match(PAGE, /<div id="bandeau-avis"><\/div>/)
+})
+
+test('LE TEST QUI COMPTE : le jour même du départ, le bandeau est là (V2 : lastNight = départ)', () => {
+  const { t } = monter({ statut: { ok: true, data: {} } })
+  assert.strictEqual(t.departPasse(conv({ lastNight: jour(0) })), true, 'V2, jour du depart')
+  assert.strictEqual(t.departPasse(conv({ lastNight: DEMAIN })), false)
+  // Legacy : `lastNight` est la derniere nuit, le depart est le lendemain.
+  assert.strictEqual(t.departPasse({ bookId: 'x', lastNight: jour(0) }), false, 'legacy : derniere nuit ce soir')
+  assert.strictEqual(t.departPasse({ bookId: 'x', lastNight: HIER }), true, 'legacy : depart aujourd hui')
 })
 
 test('la fenêtre du cœur émet `avis.evaluation_publiee` après une publication réussie', () => {
