@@ -322,6 +322,26 @@ en niveaux de gris.
 qui fuit le plus facilement dans une capture d'écran. Il se lit sur l'évaluation
 elle-même.
 
+## 8 ter. Ce que les lots 5 à 7 ont livré (nuit du 2 octobre 2026)
+
+Les décisions prises en route sont dans `docs/recette/decisions-nuit.md` (D1 à
+D4), à contredire si besoin.
+
+| Pièce | Fichier | Ce qu'elle tient |
+|---|---|---|
+| Naissance d'une évaluation | `lib/avis/naissance.js` | **Pièce qui manquait** : rien ne créait d'évaluation. Deux naissances, aucune date inventée (D2) : à l'ouverture des questions dans la PWA, et à l'arrivée de l'objet review Channex (poll et webhook) — objets ouverts seulement. |
+| Réglages d'une prestataire | `core/avis/reglages-prestataire.js`, `api/avis.js` | `avis.reglages_prestataire` : participation (`eval_scope`, **seulement si autorisée**, D1) et pouvoir. Refusé à une prestataire, et à un membre au périmètre partiel. |
+| Fiche prestataire | `apps/menages/prestataires.html` | Section « Évaluation des voyageurs », par le bus. |
+| Questions de la prestataire | `core/avis/questions-prestataire.js`, `api/avis.js` (`pwa-*`) | `avis.questions_prestataire` : la fenêtre de l'hôte, transportée par le **jeton** de la PWA. Ménage à elle, fait, séjour Airbnb, autorisée, départ de moins de 30 jours (D3). Se tait s'il n'y a rien à faire. |
+| PWA | `apps/menages/public.html` | Les questions s'ouvrent après un « Ménage fait » réussi en ligne. |
+| Messagerie | `apps/agent-ai/messagerie.html` | Bandeau « Évaluer ce voyageur → » / « Évaluation publiée ✓ » dès le jour du départ. |
+| Planning | `shared/calendrier-resa.js` | Le même bouton sur la fiche de réservation, ordinateur et téléphone, par une seule fonction. |
+| Notifications | `lib/avis/notifications.js` | L'hôte prévenu quand la prestataire a fini ; relances J-5 et J-1 (cron, étape `relances_avis`). Une tâche `pending` + l'envoi configuré, une fois. |
+| Lien direct | `pages/avis.html` | `/avis?evaluer=<séjour>` ouvre la fenêtre. |
+| Archivage | `lib/archivage-conversations.js`, `api/messages.js` | §9 ci-dessous : calculé à la lecture (D4), le seul writer de l'archivage manuel, onglet « Archivées » et recherche. |
+
+Preuve sur la base réelle de staging : `scripts/prouver-lots-5-7-avis.js`.
+
 ## 9. Archivage automatique des conversations (messagerie)
 
 **Prérequis bloquant : dette E1** — la messagerie doit lire la vraie table `messages`, sinon le compteur d'inactivité est faux.

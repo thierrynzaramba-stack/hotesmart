@@ -133,3 +133,36 @@ l'éditeur). Les deux fichiers neufs sont prêts, dans l'ordre :
   `tests/price-log.test.js` (nuits figées du 1er au 3 octobre 2026). Contre-épreuve
   `JOURS=-1` : 44/44. Compte attendu cette nuit : **34**. Non traité ici — hors
   chantier avis, et la décision est demandée à Thierry par l'autre session.
+
+## Journal de la nuit — ce qui est fait, et comment c'est prouvé
+
+**Recette automatisable (avant tout code)** : les quatre preuves existantes sur
+staging, toutes `OK` — migrations appliquées et refus d'écriture client, règles
+de la grille en base, parcours prestataire → hôte → publication, périmètre du
+membre.
+
+**18 commits sur `lot-avis-1-protocole`**, chacun revu par un agent qui ne l'a
+pas écrit, chaque constat de sécurité re-revu une fois, chaque test neuf rouge
+sur le code d'avant (contre-épreuve par `git archive`, ou mutation pour un module
+neuf). Compte constant : 34 rouges sur la branche (les 28 + 6 de `price-log`,
+famille calendaire refermée par la session `fix-menage` sur `dce776f`) ; **28**
+sur l'arbre fusionné avec staging.
+
+| Lot | Commits | Ce que la revue a trouvé et que la nuit a fermé |
+|---|---|---|
+| D2 naissance | `fb703f6`, `7e21bd7` | `is_replied` ne dit pas « déjà évalué » ; deux requêtes payées pour rien par objet et par jour |
+| D1 autorisation | `915ab2e`, `5c99890`, `2ae820f` | **sécurité** : une prestataire « aucun + valider » lisait et publiait ; réponses vides qui faisaient régresser l'évaluation ; texte libre publié par une prestataire |
+| Lot 5 réglages + fiche | `09dd47e`, `d6c47e7`, `aba612c` | un double échec laissait une valeur fausse à l'écran ; réponse tardive repeinte sur une autre ouverture |
+| Lot 5 PWA (jeton) | `f43e04e`, `a1c6b74` | aucun bloquant ; bornes posées : 30 jours, pas d'IA rejouée, rien de brut, bus chargé à la demande |
+| Lot 5 messagerie, planning | `7e8d89f`, `9955ddb`, `2a3a7bf`, `708c3db` | bandeau un jour trop tard (UTC, `lastNight` = départ) ; `onclick` construit à la main ; bouton trop petit pour le doigt |
+| Lot 6 notifications | `2ac8d39`, `1094f93` | **la tâche de l'hôte s'affichait comme une réponse à envoyer au voyageur** (`pending_validation`) ; 200 relances SMS dans un cycle de 60 s |
+| Lot 7 archivage | `78e6201`, `e96c9a4` | 403 qui avouait un fil hors périmètre ; lecture des épingles tronquée à 1000 lignes |
+
+**La preuve sur la base réelle** : `scripts/prouver-lots-5-7-avis.js`, les vrais
+handlers appelés en local contre la base de staging — 14 vérifications `OK`,
+nettoyage complet.
+
+**Pour le matin** : `recette-avis-complete.md` (tous les rôles, tous les écrans),
+`mise-en-prod-avis.md` (publication staging, jeu SQL vérifié contre la
+production, plan pas à pas). Décor de la PWA déjà posé sur staging
+(`--decor-pwa`), lien dans `~/recette-avis-lien-pwa.txt`.
