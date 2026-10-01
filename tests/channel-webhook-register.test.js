@@ -262,9 +262,13 @@ test('LE TEST QUI COMPTE : la reponse rend les NOMS des en-tetes, jamais leurs v
   const rendu = JSON.stringify(res.body)
   assert.ok(!rendu.includes(process.env.CHANNEL_WEBHOOK_SECRET), 'le secret ne sort pas')
   assert.ok(!rendu.includes(process.env.VERCEL_BYPASS_TOKEN), 'le bypass ne sort pas')
-  // Mais la structure reste lisible : on doit pouvoir verifier qu'un en-tete est
-  // bien pose, sans en voir la valeur.
-  assert.deepStrictEqual(res.body.data.attributes.headers, ['X-Channel-Webhook-Secret'])
+  // ⚠ LA STRUCTURE RESTE, LA VALEUR PART. Le masqueur balaie desormais par
+  // VALEUR : on garde donc le NOM de l'en-tete a sa place, ce qui permet de
+  // verifier qu'il est bien pose, et sa valeur est remplacee. L'ancienne version
+  // rendait un tableau de noms — plus court a lire, mais elle ne savait traiter
+  // qu'une seule forme de reponse (voir le bloc des huit formes, plus bas).
+  assert.deepStrictEqual(Object.keys(res.body.data.attributes.headers), ['X-Channel-Webhook-Secret'])
+  assert.strictEqual(res.body.data.attributes.headers['X-Channel-Webhook-Secret'], '***RETIRE***')
 })
 
 // ─── La reception, intouchee ────────────────────────────────────────────────
@@ -292,4 +296,119 @@ test('et elle accepte le bon secret sans exiger de session', async () => {
     body: { event: 'inconnu', payload: {} },
   }, res)
   assert.notStrictEqual(res.code, 401, 'un secret valide ne doit pas etre refuse')
+})
+
+// ─── Le masqueur, sur toutes les formes que le provider peut rendre ──────────
+// ⚠ POURQUOI CE BLOC EXISTE. La premiere version du masqueur etait PLATE : elle
+// retirait `headers` et `request_params` a deux endroits precis. Une review l'a
+// eprouvee sur huit formes plausibles — CINQ fuyaient. Et le test ne pouvait pas
+// le voir : son double du provider produisait precisement la seule forme que le
+// masqueur savait traiter. Vert par construction.
+//
+// Deux de ces formes ne sont pas speculatives : `{ raw }` est fabriquee par ce
+// fichier des que le provider ne rend pas du JSON, et `{ data: [ … ] }` est la
+// forme documentee de `/webhooks`, que `scripts/check-webhooks.js` attend deja.
+const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+const BYPASS = process.env.VERCEL_BYPASS_TOKEN
+
+const FORMES = {
+  'attributs (la forme du premier test)': { data: { id: 'w', attributes: { headers: { 'X-Channel-Webhook-Secret': SECRET }, request_params: { 'x-vercel-protection-bypass': BYPASS } } } },
+  'a plat sous data': { data: { id: 'w', headers: { 'X-Channel-Webhook-Secret': SECRET } } },
+  'une COLLECTION': { data: [{ id: 'w', attributes: { headers: { 'X-Channel-Webhook-Secret': SECRET } } }] },
+  'une erreur qui recopie le corps': { errors: { detail: { webhook: { headers: { 'X-Channel-Webhook-Secret': SECRET } } } } },
+  'un corps NON-JSON': { raw: `<html>erreur du proxy, en-tete recu : ${SECRET}</html>` },
+  'un secret a la racine': { data: { id: 'w' }, headers: { 'X-Channel-Webhook-Secret': SECRET } },
+  'un niveau de plus': { data: { attributes: { webhook: { headers: { 'X-Channel-Webhook-Secret': SECRET } } } } },
+  'un document inclus': { data: { id: 'w' }, included: [{ attributes: { headers: { 'X-Channel-Webhook-Secret': SECRET } } }] },
+}
+
+for (const [nom, forme] of Object.entries(FORMES)) {
+  test(`LE TEST QUI COMPTE : aucun secret ne sort, forme « ${nom} »`, async () => {
+    const etat = preparer({})
+    // On remplace la reponse du provider par la forme a eprouver.
+    const vraiFetch = globalThis.fetch
+    globalThis.fetch = async (url, opts = {}) => {
+      etat.appels.push({ url: String(url), methode: opts.method || 'GET' })
+      return { ok: true, status: 201, headers: { get: () => null }, text: async () => JSON.stringify(forme) }
+    }
+    try {
+      const handler = require('../api/channel-webhook')
+      const res = reponse()
+      await handler(requete({}), res)
+      const rendu = JSON.stringify(res.body)
+      assert.ok(!rendu.includes(SECRET), `le secret sort dans la forme « ${nom} » : ${rendu.slice(0, 200)}`)
+      assert.ok(!rendu.includes(BYPASS), `le bypass sort dans la forme « ${nom} »`)
+    } finally { globalThis.fetch = vraiFetch }
+  })
+}
+
+test('et un tableau reste un TABLEAU apres masquage', async () => {
+  // L'ancien masqueur destructurait un tableau : `{...reste}` en rendait un objet
+  // a cles numeriques. La structure comptait autant que le secret.
+  const etat = preparer({})
+  const vraiFetch = globalThis.fetch
+  globalThis.fetch = async (url, opts = {}) => {
+    etat.appels.push({ url: String(url) })
+    return { ok: true, status: 201, headers: { get: () => null },
+             text: async () => JSON.stringify({ data: [{ id: 'un' }, { id: 'deux' }] }) }
+  }
+  try {
+    const handler = require('../api/channel-webhook')
+    const res = reponse()
+    await handler(requete({}), res)
+    assert.ok(Array.isArray(res.body.data), `data devrait rester un tableau : ${JSON.stringify(res.body.data)}`)
+    assert.strictEqual(res.body.data.length, 2)
+  } finally { globalThis.fetch = vraiFetch }
+})
+
+// ─── La reception traverse son chemin, ou on le sait ────────────────────────
+test('LE TEST QUI COMPTE : un event booking atteint la recherche du bien sans ReferenceError', async () => {
+  // ⚠ CE TEST EXISTE PARCE QUE J'AI CASSE LA RECEPTION EN LA CORRIGEANT. Un
+  // remplacement de bloc a emporte `require('../lib/bien-du-provider')`, dont la
+  // reception se sert : une `ReferenceError` a la premiere reservation recue —
+  // c'est-a-dire tout ce que le correctif pretendait ne pas toucher. Le fichier
+  // se chargeait sans erreur : rien ne l'aurait dit avant la production.
+  //
+  // ⚠ DEUX VERSIONS DE CE TEST ONT ECHOUE A L'ATTRAPER, et c'est la lecon.
+  //   1. Chercher les imports par expression reguliere : dix-neuf faux positifs,
+  //      des mots pris dans les COMMENTAIRES. Exactement le piege que la review
+  //      venait de me reprocher sur le balayage du cron.
+  //   2. Envoyer un event booking avec un feed VIDE : le code sort avant
+  //      d'atteindre la fonction, et la mutation passait au vert.
+  // Il faut donc un feed qui porte UNE REVISION, pour que le chemin aille
+  // jusqu'au bout. Verifie par mutation : sans l'import, ce test rougit.
+  const etat = preparer({})
+  const vraiFetch = globalThis.fetch
+  let feedServi = false
+  globalThis.fetch = async (url, opts = {}) => {
+    etat.appels.push({ url: String(url), methode: opts.method || 'GET' })
+    if (String(url).includes('/booking_revisions/feed')) {
+      // Une seule revision, puis une page vide : le code s'arrete de lui-meme.
+      const corps = feedServi ? { data: [] } : {
+        data: [{ id: 'rev-1', attributes: { id: 'rev-1', property_id: 'ref-provider-1', status: 'new' } }],
+        meta: { limit: 50 },
+      }
+      feedServi = true
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(corps) }
+    }
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: {} }) }
+  }
+  try {
+    const handler = require('../api/channel-webhook')
+    const res = reponse()
+    await handler({
+      method: 'POST', query: {},
+      headers: { 'x-channel-webhook-secret': process.env.CHANNEL_WEBHOOK_SECRET, host: HOTE_APP },
+      body: { event: 'booking', payload: { booking_id: 'BK-TEST' } },
+    }, res)
+
+    // Le chemin doit avoir ETE PARCOURU : le feed lu, donc la revision traitee,
+    // donc la recherche du bien tentee. Sans cette assertion, un feed ignore
+    // laisserait le test vert comme sa version precedente.
+    assert.ok(etat.appels.some(a => a.url.includes('/booking_revisions/feed')),
+      'le feed doit avoir ete lu')
+    assert.ok(res.code !== null, 'la reception doit rendre une reponse, pas lever')
+    assert.notStrictEqual(res.code, 401, 'le bon secret ne doit pas etre refuse')
+    assert.notStrictEqual(res.code, 500, 'un identifiant manquant sortirait en 500 par le filet global')
+  } finally { globalThis.fetch = vraiFetch }
 })

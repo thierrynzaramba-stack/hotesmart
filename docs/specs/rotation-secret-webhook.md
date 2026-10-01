@@ -97,10 +97,27 @@ permanente.
    événements entrants portent l'ancien secret et sont refusés : **la fenêtre est
    ouverte.**
 5. **Mettre à jour les deux webhooks** chez le gestionnaire avec le nouveau
-   secret, par les actions `register` des deux fichiers — celle de
-   `channel-events.js` fait déjà un `PUT` sur le webhook existant, et celle de
-   `channel-webhook.js` le fera après son correctif. **La fenêtre se referme au
-   second des deux.**
+   secret. **La fenêtre se referme au second des deux**, et les deux ne se font
+   pas de la même façon :
+   - le **second** webhook (`api/channel-events.js`) : par son action `register`,
+     qui cherche l'existant et fait un `PUT` dessus ;
+   - le **certifié** (`api/channel-webhook.js`) : **à la main, dans l'interface
+     du gestionnaire.** Son action `register` fait un `POST` aveugle, donc elle
+     créerait un **second** webhook `booking;message` au lieu de corriger
+     l'existant — ou serait refusée si le provider plafonne, et la fenêtre ne se
+     refermerait **jamais**.
+
+   ⚠ **Une version précédente de ce document affirmait le contraire** : que
+   `register` ferait un `PUT` « après son correctif ». C'était faux, et le piège
+   est sérieux — un opérateur suivant le runbook pendant une rotation d'urgence,
+   fenêtre déjà ouverte, obtiendrait soit un doublon certifié dont l'ancien garde
+   l'ancien secret (401 permanents, chaque événement livré deux fois), soit un
+   refus sans aucun moyen de corriger l'existant depuis le code. Constat de
+   review.
+
+   **Ce qui lèverait la réserve** : donner à `channel-webhook.js` la
+   recherche-puis-`PUT` de son voisin. C'est la même addition qui fermerait le
+   doublon décrit plus haut, donc les deux se traitent ensemble ou pas du tout.
 6. **Vérifier qu'un événement passe.** Pas « attendre et supposer » : provoquer
    un événement observable, ou lire les journaux jusqu'à un `200` sur chacun des
    deux chemins.

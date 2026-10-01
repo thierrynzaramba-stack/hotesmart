@@ -20,27 +20,54 @@ const supabase = createClient(
 // providers, statut canonique, merge non destructif.
 const { saveBookingSnapshot, fromChannex, STATUS } = require('../lib/bookings-snapshot')
 const { requirePermission } = require('../lib/require-permission')
+// ⚠ CET IMPORT AVAIT DISPARU, et la reception l'utilise (ligne ~148). Mon
+// remplacement de bloc l'a emporte avec le masqueur qu'il remplacait : une
+// `ReferenceError` a la premiere reservation recue, c'est-a-dire tout ce que le
+// correctif pretendait ne pas toucher. Trouve en comparant les lignes SUPPRIMEES
+// du diff une par une, parce que le compte ne tombait pas juste.
+const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 
-// Retire d'une reponse du provider tout ce qui porte un secret, en gardant la
-// structure lisible : on rend les NOMS des en-tetes, jamais leurs valeurs.
+// ⚠ ON NE PARIE PLUS SUR LA FORME DE LA REPONSE, ON CHERCHE LA VALEUR.
+// Premiere version : un masqueur PLAT qui retirait `headers` et `request_params`
+// a deux endroits precis. Une review l'a eprouve sur huit formes de reponse
+// plausibles — CINQ fuyaient. Dont deux qui ne sont pas speculatives :
+//
+//   `{ raw: "<texte>" }`  — fabrique par `channelCall` de CE fichier des que le
+//                           provider ne rend pas du JSON (page d'un WAF, 413…) ;
+//   `{ data: [ … ] }`     — la forme documentee de `/webhooks`, que
+//                           `scripts/check-webhooks.js` attend deja. Le masqueur
+//                           y destructurait un TABLEAU, rendant un objet a cles
+//                           numeriques, secrets imbriques intacts.
+//
+// Et le test ne pouvait pas le voir : son double du provider produisait
+// PRECISEMENT la seule forme que le masqueur savait traiter. Vert par
+// construction.
+//
+// On balaie donc par VALEUR, recursivement, chaines comprises — c'est la regle 11
+// appliquee a la SORTIE : on ne valide pas une forme, on retire ce qu'on ne veut
+// pas voir sortir. Et c'est plus court que ce qu'on remplace.
 function sansSecrets (rep) {
-  if (!rep || typeof rep !== 'object') return rep
-  const nettoyer = (o) => {
-    if (!o || typeof o !== 'object') return o
-    const { headers, request_params, ...reste } = o
-    return {
-      ...reste,
-      ...(headers ? { headers: Object.keys(headers) } : {}),
-      ...(request_params ? { request_params: Object.keys(request_params) } : {}),
+  const secrets = [WEBHOOK_SECRET, VERCEL_BYPASS].filter(v => typeof v === 'string' && v.length >= 8)
+  if (!secrets.length) return rep
+  const nettoyer = (v) => {
+    // ⚠ `split/join` ET PAS une egalite : le secret peut etre ENCHASSE dans une
+    // chaine — un message d'erreur qui recopie le corps envoye, un `raw` de page
+    // HTML. Une egalite stricte l'aurait laisse passer.
+    if (typeof v === 'string') {
+      let r = v
+      for (const s of secrets) if (r.includes(s)) r = r.split(s).join('***RETIRE***')
+      return r
     }
-  }
-  const d = rep.data
-  if (d && typeof d === 'object') {
-    return { ...rep, data: d.attributes ? { ...d, attributes: nettoyer(d.attributes) } : nettoyer(d) }
+    if (Array.isArray(v)) return v.map(nettoyer)          // le tableau reste un tableau
+    if (v && typeof v === 'object') {
+      const out = {}
+      for (const [k, x] of Object.entries(v)) out[k] = nettoyer(x)
+      return out
+    }
+    return v
   }
   return nettoyer(rep)
 }
-const { trouverBienParIdProvider } = require('../lib/bien-du-provider')
 
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
@@ -68,8 +95,24 @@ const VERCEL_BYPASS = process.env.VERCEL_BYPASS_TOKEN  // bypass protection depl
 // ressource, on ne l'utilise pas.
 const DOMAINES_APP = ['hotesmart.vercel.app']
 
+// ⚠ ELLE REND L'URL DE PRODUCTION, Y COMPRIS APPELEE DE STAGING, ET ELLE LE DIT.
+// `DOMAINES_APP` n'a qu'une entree : tout hote inconnu — le projet staging, une
+// preview `hotesmart-git-<branche>-…` — retombe donc sur la production. Lance de
+// la, `register` enregistrerait chez le provider un webhook pointant sur la PROD
+// en y mettant le secret de STAGING : la production refuserait chaque livraison
+// en 401, et le gestionnaire retenterait en boucle.
+//
+// Le repli est GARDE volontairement — l'etape 5 de la rotation s'execute depuis
+// une preview, et echouer ferme bloquerait la rotation — mais il CRIE desormais,
+// et la cible effective part dans la reponse. Constat de review : un envoi qui se
+// trompe de cible en silence est exactement ce que
+// `docs/specs/spec-garde-environnement.md` interdit dans le meme commit.
 function urlWebhookDeCeFichier (req) {
   const host = String(req.headers?.host || '').toLowerCase().split(':')[0]
+  if (host && !DOMAINES_APP.includes(host)) {
+    console.warn(`[channel-webhook] register appele depuis « ${host} », hors de DOMAINES_APP :`
+      + ` la cible reste ${DOMAINES_APP[0]}. Si vous attendiez un webhook pour CET hote, il n'en sera pas cree.`)
+  }
   const domaine = DOMAINES_APP.includes(host) ? host : DOMAINES_APP[0]
   return `https://${domaine}/api/channel-webhook`
 }
@@ -320,10 +363,24 @@ module.exports = async function handler(req, res) {
   // -- Enregistrement du webhook global cote channel (appel authentifie user) --
   // POST avec body { action:'register', callback_url } -> cree un webhook is_global
   if (req.method === 'POST' && req.body?.action === 'register') {
-    // ⚠ RESERVE AU TITULAIRE. Une session valide ne suffit pas : cette action
-    // touche la configuration du compte de canal PARTAGE, donc tous les hotes a
-    // la fois. `requirePermission` avec le domaine `titulaire` exige que
-    // l'appelant soit le titulaire du compte cible, et il refuse la delegation.
+    // ⚠ CETTE GARDE NE FILTRE PRESQUE RIEN, ET IL FAUT LE LIRE ICI.
+    // `domaine: 'titulaire'` exige que l'appelant soit titulaire du COMPTE
+    // CIBLE. Sans l'option `compteDelegue`, le compte cible est le SIEN : tout
+    // utilisateur connecte est donc titulaire, et passe. `lib/require-permission.js`
+    // le dit noir sur blanc — « ne pas l'utiliser pour proteger une ressource
+    // GLOBALE » — et `api/diagnostic.js` repete le meme avertissement.
+    //
+    // Ce qu'elle apporte quand meme : elle refuse la DELEGATION, donc un membre
+    // agissant au nom d'un autre compte. Ce qu'elle n'apporte pas : empecher un
+    // utilisateur quelconque de declencher un enregistrement. Il ne peut plus
+    // choisir la cible — c'est l'objet du correctif — mais il peut en creer
+    // autant qu'il veut (voir le test « CE QUI RESTE OUVERT »).
+    //
+    // ⚠ UNE VERSION PRECEDENTE DE CE COMMENTAIRE DISAIT « RESERVE AU TITULAIRE,
+    // une session valide ne suffit pas ». C'etait faux, et c'est exactement le
+    // mecanisme du trou que ce fichier vient de payer : `profils-et-droits.md`
+    // l'avait mis « hors perimetre » du balayage des droits sur la foi d'une
+    // affirmation fausse. Constat de review.
     const garde = await requirePermission(req, res, { domaine: 'titulaire' })
     if (!garde.ok) return
 
@@ -363,7 +420,9 @@ module.exports = async function handler(req, res) {
     // le bypass. Les relayer les exposait dans la reponse HTTP : onglet reseau,
     // historique, copier-coller d'un rapport de diagnostic. Meme constat que
     // dans `api/channel-events.js`, qui ne rend que les NOMS des en-tetes.
-    return res.status(reg.ok ? 201 : 502).json(sansSecrets(reg.json))
+    // La cible effective part dans la reponse : c'est elle qui permet de voir, a
+    // la lecture, qu'un appel depuis staging a enregistre un webhook de prod.
+    return res.status(reg.ok ? 201 : 502).json({ cible: callbackUrl, ...sansSecrets(reg.json) })
   }
 
   // -- Reception d'un evenement (appel entrant du channel) --
