@@ -299,7 +299,7 @@ function preparerRegister ({ webhooks = webhooksExistants(), listeOk = true } = 
 }
 
 function requeteRegister (callbackUrl) {
-  return { method: 'POST', headers: { authorization: 'Bearer jeton' },
+  return { method: 'POST', headers: { authorization: 'Bearer jeton', host: 'hotesmart.vercel.app' },
            body: { action: 'register', callback_url: callbackUrl } }
 }
 
@@ -438,7 +438,7 @@ test('register : sans callback_url, le serveur détermine la cible et enregistre
   const etat = preparerRegister({})
   const handler = require('../api/channel-events')
   const res = reponse()
-  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton' },
+  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton', host: 'hotesmart.vercel.app' },
                   body: { action: 'register' } }, res)
 
   assert.strictEqual(res.code, 200)
@@ -605,4 +605,72 @@ for (const [chemin, webhooks, methode] of [
     assert.ok(res.body.detail, 'le detail du refus reste lisible')
     assert.ok(!JSON.stringify(res.body).includes(SECRET), 'le secret ne doit pas sortir')
   })
+}
+
+// ─── L'action refuse de tourner hors des domaines applicatifs ───────────────
+// Lancee depuis staging, elle posait dans le compte de canal de staging un
+// webhook pointant sur la PRODUCTION avec le secret de STAGING : 401 en boucle,
+// et une etape 8 de rotation qui semblait reussie. Meme regle que
+// channel-webhook.js. Le webhook de staging s'enregistre a la main.
+
+for (const hote of ['hotesmart-staging.vercel.app', 'hotesmart-git-x-equipe.vercel.app', '']) {
+  test(`register : refuse depuis « ${hote || '(sans hote)'} », et rien ne part`, async () => {
+    const etat = preparerRegister({})
+    const handler = require('../api/channel-events')
+    const res = reponse()
+    await handler({ method: 'POST', headers: { authorization: 'Bearer jeton', host: hote },
+                    body: { action: 'register' } }, res)
+
+    assert.strictEqual(res.code, 409)
+    assert.strictEqual(res.body.ok, false)
+    assert.strictEqual(etat.appels.length, 0, 'aucun appel ne doit partir vers le gestionnaire')
+  })
+}
+
+test('register : depuis la production, avec un port, l action passe', async () => {
+  // Contre-epreuve : sans elle, une garde qui refuse TOUT passerait les tests
+  // du dessus, et plus personne ne pourrait enregistrer le webhook.
+  const etat = preparerRegister({})
+  const handler = require('../api/channel-events')
+  const res = reponse()
+  await handler({ method: 'POST', headers: { authorization: 'Bearer jeton', host: 'hotesmart.vercel.app:443' },
+                  body: { action: 'register' } }, res)
+
+  assert.strictEqual(res.code, 200)
+  assert.ok(etat.appels.find(a => a.method === 'PUT'))
+})
+
+// ─── Un SUCCES de forme inattendue ne fait pas sortir le secret ─────────────
+// `webhookSansSecrets` masque par CLE, au premier niveau `attributes` : une
+// enveloppe differente, ou un corps non JSON (`{ raw }`), passait intact.
+
+const FORMES_DE_SUCCES = {
+  'enveloppe webhook': (s) => JSON.stringify({ webhook: { headers: { 'X-Channel-Webhook-Secret': s } } }),
+  'corps non JSON': (s) => `ok secret=${s}`,
+  'secret dans un message': (s) => JSON.stringify({ data: { id: 'w', attributes: { note: `entete ${s}` } } })
+}
+
+for (const [forme, corps] of Object.entries(FORMES_DE_SUCCES)) {
+  for (const [chemin, webhooks, methode] of [
+    ['mise a jour', webhooksExistants(), 'PUT'],
+    ['creation', { data: [] }, 'POST']
+  ]) {
+    test(`register (${chemin}) : succes « ${forme} », le secret ne sort pas`, async () => {
+      const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+      preparer({ fetchStub: async (url, opts) => {
+        const m = opts?.method || 'GET'
+        if (url.endsWith('/webhooks') && m === 'GET') {
+          return { ok: true, status: 200, text: async () => JSON.stringify(webhooks) }
+        }
+        if (m === methode) return { ok: true, status: m === 'POST' ? 201 : 200, text: async () => corps(SECRET) }
+        return null
+      } })
+      const handler = require('../api/channel-events')
+      const res = reponse()
+      await handler(requeteRegister(URL_MOI), res)
+
+      assert.strictEqual(res.body.ok, true)
+      assert.ok(!JSON.stringify(res.body).includes(SECRET), 'le secret ne doit pas sortir')
+    })
+  }
 }

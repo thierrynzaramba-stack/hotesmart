@@ -342,6 +342,27 @@ module.exports = async function handler(req, res) {
     const { data: u } = await supabase.auth.getUser(token)
     if (!u?.user) return res.status(401).json({ error: 'Session invalide' })
 
+    // ⚠ L'ACTION REFUSE DE TOURNER HORS DES DOMAINES APPLICATIFS. Meme regle
+    // que `channel-webhook.js`, portee le 1er octobre 2026 avant la rotation 2.
+    // `urlWebhookDeCeFichier` ne rend que l'URL de production : lancee depuis le
+    // projet STAGING, l'action posait, dans le compte de canal de staging, un
+    // webhook global pointant sur la PRODUCTION et portant le secret de STAGING.
+    // La production refusait chaque livraison en 401, le gestionnaire retentait
+    // en boucle, et l'etape 8 de la rotation semblait reussie. Le webhook de
+    // staging s'enregistre a la main, dans l'interface du compte de staging.
+    const hoteAppelant = String(req.headers?.host || '').toLowerCase().split(':')[0]
+    if (!DOMAINES_APP.includes(hoteAppelant)) {
+      console.error(`[channel-events] register refuse depuis « ${hoteAppelant} » : hors DOMAINES_APP`)
+      return res.status(409).json({
+        ok: false, registered: false, updated: false,
+        error: 'Cette action ne s execute que depuis un domaine applicatif',
+        reason: `Appele depuis « ${hoteAppelant} ». La cible du webhook est toujours ${DOMAINES_APP[0]} :`
+          + ` lance d ailleurs, cet appel enregistrerait un webhook pointant sur la production`
+          + ` avec le secret de l environnement appelant. Relancez depuis la production.`,
+        attendu: DOMAINES_APP,
+      })
+    }
+
     // ⚠ GARDE 1 — la cible est construite cote serveur, pas recue.
     // Une premiere version validait le `callback_url` du client par son chemin.
     // Insuffisant : le chemin de "https://evil.example.com/api/channel-events"
@@ -441,7 +462,7 @@ module.exports = async function handler(req, res) {
       }
       return res.status(200).json({
         ok: true, registered: true, updated: true,
-        event_mask: CHANNEL_EVENTS, webhook: webhookSansSecrets(maj.json?.data || maj.json)
+        event_mask: CHANNEL_EVENTS, webhook: sansSecrets(webhookSansSecrets(maj.json?.data || maj.json))
       })
     }
 
@@ -470,7 +491,7 @@ module.exports = async function handler(req, res) {
         detail: sansSecrets(reg.json?.errors || reg.json)
       })
     }
-    return res.status(201).json({ ok: true, registered: true, event_mask: CHANNEL_EVENTS, webhook: webhookSansSecrets(reg.json?.data || reg.json) })
+    return res.status(201).json({ ok: true, registered: true, event_mask: CHANNEL_EVENTS, webhook: sansSecrets(webhookSansSecrets(reg.json?.data || reg.json)) })
   }
 
   // ===== RECEPTION d'un event canal =====

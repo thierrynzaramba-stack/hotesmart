@@ -148,11 +148,11 @@ pas un jour d'arrivées nombreuses, et pas en fin de journée.
 | 1 | Générer la valeur | rien : je ne dois pas la voir |
 | 2 | La poser sur le projet de production | rien encore |
 | 3 | **Redéployer** | **la fenêtre s'ouvre** quand le déploiement se termine : les événements entrants portent l'ancien secret et sont refusés |
-| 4 | Mettre à jour le **second** webhook par son action d'enregistrement, qui fait une mise à jour sur l'existant | je vérifie que l'appel a répondu, et que le webhook porte toujours son masque d'événements |
+| 4 | Mettre à jour le **second** webhook par son action d'enregistrement, qui fait une mise à jour sur l'existant — **depuis un domaine de production**, l'action refuse ailleurs depuis le 1er octobre 2026, comme celle du webhook certifié | je vérifie que l'appel a répondu, et que le webhook porte toujours son masque d'événements |
 | 5 | Mettre à jour le **webhook certifié** par son action, comme le précédent (livraison 3, en ligne depuis le 1er octobre 2026) — **depuis un domaine de production**, l'action refuse ailleurs | **la fenêtre se referme ici, mais seulement si la réponse ne nomme aucun autre webhook du même masque** : je lis `doublons_sur_cette_url` et `autres_webhooks_du_meme_masque`, et je le dis |
 | 6 | — | **la vérification qui compte** : un événement doit arriver et être accepté. ⚠ Elle ne vaut que si l'étape 5 n'a laissé **aucun** autre webhook du même masque : sinon le vert vient du seul webhook mis à jour, et les autres refusent en silence. Je ne me contente pas d'attendre — je guette une écriture dans `bookings_snapshot` ou `messages`, et je dis ce que je vois |
 | 7 | — | je lance un cycle de poll pour rattraper ce que la fenêtre a refusé, et je mesure ce qu'il a repris |
-| 8 | Refaire sur **staging**, valeur **différente** | les deux projets ne doivent jamais partager ce secret : c'est ce qui permettrait à un déploiement de recette de forger des événements en production |
+| 8 | Refaire sur **staging**, valeur **différente** — **à la main, dans l'interface du compte `staging.channex.io`** : les deux actions d'enregistrement refusent hors du domaine de production, parce qu'elles ne savent viser que l'URL de production. Ordre : relever d'abord, en lecture seule, les webhooks du compte de staging (URL et masque) ; poser la valeur sur le projet Vercel staging et redéployer ; puis remplacer l'en-tête `X-Channel-Webhook-Secret` de chaque webhook du compte de staging par la même valeur | les deux projets ne doivent jamais partager ce secret : c'est ce qui permettrait à un déploiement de recette de forger des événements en production |
 
 ### Après, et ce n'est pas dans les gestes
 
