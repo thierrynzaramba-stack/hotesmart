@@ -56,33 +56,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
-// ─── QUI PORTE CE LIEN — GARDE UNIQUE DE TOUT L'ENDPOINT ────────────────────
-//
-// ⚠ LA GARDE PAR PROFIL PRIME, ELLE NE COEXISTE PLUS AVEC CELLE PAR BIEN.
-// Jusqu'ici, un jeton sans profil gardait l'ANCIEN comportement — filtrage par
-// `public_tokens.property_ids` — sous le nom de « pont de convergence ». Le pont
-// etait une porte : audit du 14 septembre 2026, le lien de Tiphaine (profil
-// INACTIF, sans `pwa_token`, « identite historique SANS ACCES ») rendait 200
-// avec 11 reservations d'Ofuro Futari, noms et prenoms des voyageurs compris.
-// La ligne `public_tokens` d'avant la convergence lui survivait, et elle suffit
-// a ouvrir le planning : le filtre par personne ne s'appliquait justement pas,
-// faute de personne.
-//
-// La regle est desormais sans exception : PAS DE PROFIL ACTIF, PAS D'ACCES.
-// Un jeton ne vaut plus par lui-meme — il ne fait que DESIGNER quelqu'un, et
-// c'est cette personne qui porte le droit. Une ligne `public_tokens` orpheline
-// n'ouvre donc plus rien, quelle que soit sa presence en base.
-//
-// ⚠ `access_mode = 'lien'` EST EXIGE, comme dans lib/cleaning/notifier-prestataire.js.
-// Un profil de type `compte` n'a pas de `pwa_token` aujourd'hui, mais la garde
-// ne doit pas dependre de cet etat de fait : un jeton pose par erreur sur un
-// profil titulaire ouvrirait sinon la PWA a un compte entier.
-//
-// ⚠ UNE PANNE COUPE EN 503, ELLE NE SE FAIT PAS PASSER POUR UN LIEN INVALIDE.
-// Le front supprime une action de sa file d'attente sur tout 4xx : rendre 401
-// sur un timeout PostgREST detruirait un « menage fait » en attente de renvoi.
-//
-// Rend { statut } a rendre tel quel, ou { profil } utilisable.
 // ─── CE QU'ELLE VOIT DES MENAGES DES AUTRES ───────────────────────────────
 // Spec : docs/specs/spec-visibilite-menages-autrui.md. Deux portees CUMULEES :
 //   - `par_bien`    : les biens dont elle recoit les propositions = ses liaisons
@@ -130,12 +103,19 @@ async function menagesDAutrui ({ userId, profilId, properties, dateFrom, dateTo,
     .neq('provider_id', profilId)
     .gte('departure_date', dateFrom)
     .lte('departure_date', dateTo)
+  // Les deux portees se lisent EN PARALLELE (constat de review : en serie, elles
+  // retardaient tout le planning). Triees, et une troncature se DIT : au-dela du
+  // plafond, les lignes rendues seraient sinon arbitraires, sans un mot.
+  const requetes = [biensParBien.length ? lecture().in('property_id', biensParBien) : null,
+                    profils.length ? lecture().in('provider_id', profils).in('property_id', perimetre) : null]
+    .filter(Boolean)
+    .map(q => q.order('departure_date', { ascending: true }).limit(PLAFOND_AUTRUI))
   const lus = []
-  for (const q of [biensParBien.length ? lecture().in('property_id', biensParBien) : null,
-                   profils.length ? lecture().in('provider_id', profils).in('property_id', perimetre) : null]) {
-    if (!q) continue
-    const { data, error: eM } = await q.limit(PLAFOND_AUTRUI)
+  for (const { data, error: eM } of await Promise.all(requetes)) {
     if (eM) { console.error('[menages-public] lecture menages d autrui echec:', eM.message); return { erreur: true } }
+    if ((data || []).length >= PLAFOND_AUTRUI) {
+      console.warn(`[menages-public] menages d autrui au plafond de ${PLAFOND_AUTRUI} : liste tronquee`)
+    }
     lus.push(...(data || []))
   }
 
@@ -168,6 +148,34 @@ async function menagesDAutrui ({ userId, profilId, properties, dateFrom, dateTo,
   return { lignes }
 }
 
+
+// ─── QUI PORTE CE LIEN — GARDE UNIQUE DE TOUT L'ENDPOINT ────────────────────
+//
+// ⚠ LA GARDE PAR PROFIL PRIME, ELLE NE COEXISTE PLUS AVEC CELLE PAR BIEN.
+// Jusqu'ici, un jeton sans profil gardait l'ANCIEN comportement — filtrage par
+// `public_tokens.property_ids` — sous le nom de « pont de convergence ». Le pont
+// etait une porte : audit du 14 septembre 2026, le lien de Tiphaine (profil
+// INACTIF, sans `pwa_token`, « identite historique SANS ACCES ») rendait 200
+// avec 11 reservations d'Ofuro Futari, noms et prenoms des voyageurs compris.
+// La ligne `public_tokens` d'avant la convergence lui survivait, et elle suffit
+// a ouvrir le planning : le filtre par personne ne s'appliquait justement pas,
+// faute de personne.
+//
+// La regle est desormais sans exception : PAS DE PROFIL ACTIF, PAS D'ACCES.
+// Un jeton ne vaut plus par lui-meme — il ne fait que DESIGNER quelqu'un, et
+// c'est cette personne qui porte le droit. Une ligne `public_tokens` orpheline
+// n'ouvre donc plus rien, quelle que soit sa presence en base.
+//
+// ⚠ `access_mode = 'lien'` EST EXIGE, comme dans lib/cleaning/notifier-prestataire.js.
+// Un profil de type `compte` n'a pas de `pwa_token` aujourd'hui, mais la garde
+// ne doit pas dependre de cet etat de fait : un jeton pose par erreur sur un
+// profil titulaire ouvrirait sinon la PWA a un compte entier.
+//
+// ⚠ UNE PANNE COUPE EN 503, ELLE NE SE FAIT PAS PASSER POUR UN LIEN INVALIDE.
+// Le front supprime une action de sa file d'attente sur tout 4xx : rendre 401
+// sur un timeout PostgREST detruirait un « menage fait » en attente de renvoi.
+//
+// Rend { statut } a rendre tel quel, ou { profil } utilisable.
 async function profilActifDuJeton (userId, token) {
   const { data: profil, error } = await supabase.from('profiles')
     .select('id, first_name, active')
@@ -823,16 +831,16 @@ module.exports = async function handler(req, res) {
     // vient d'accelerer : un aller-retour de plus, EN SERIE, pour une valeur qui
     // ne sert qu'a griser un bouton, le rallongeait pour tout le monde. La
     // promesse part avant la lecture des menages faits et se recupere apres.
+    const promesseDelai = delaiDeRetrait(userId)
+
     // ─── LES MENAGES PRIS PAR D'AUTRES (spec visibilite, 2 octobre 2026) ───
     // Rien sans autorisation explicite de l'hote sur sa fiche ; le reglage est
     // relu a CHAQUE lecture, ici, cote serveur. Une panne coupe (503) : une vue
     // vide ferait croire qu'aucune collegue ne travaille, une vue pleine
     // montrerait ce qu'on n'a pas autorise.
-    const autrui = await menagesDAutrui({ userId, profilId: profilPresta.id, properties,
-                                          dateFrom, dateTo, siens })
-    if (autrui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
-
-    const promesseDelai = delaiDeRetrait(userId)
+    // ⚠ LANCEE EN PROMESSE, comme le delai : attendue juste avant la reponse.
+    const promesseAutrui = menagesDAutrui({ userId, profilId: profilPresta.id, properties,
+                                            dateFrom, dateTo, siens })
 
     const propIdsForDone = (allowedIds.length ? allowedIds : properties.map(p => String(p.id)))
     let doneList = []
@@ -855,6 +863,8 @@ module.exports = async function handler(req, res) {
     // ne pas connaitre le delai grise un bouton de retrait, ce qui est prudent.
     // Faire tomber tout l'ecran pour cela cacherait ses menages du jour.
     const lu = await promesseDelai
+    const autrui = await promesseAutrui
+    if (autrui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
     const delaiRetrait = lu.erreur ? null : lu.heures
 
     return res.json({

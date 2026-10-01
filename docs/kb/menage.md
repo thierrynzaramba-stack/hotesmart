@@ -3352,3 +3352,39 @@ délégué `write`, délégué `read` = 403, autre compte / membre à compte / e
 / plus de 20 / mal formé = 400, lecture et panne), DOM PWA (jamais « à moi »,
 détail en lecture seule, heure non précisée, rien sans autorisation) et DOM fiche
 (défaut, liste, désactivée cochée, écriture immédiate, refus, règles mobiles).
+
+**Ce que la review a trouvé** (aucun constat de sécurité ; les quatre garde-fous
+de la spec — champs sensibles, aucune action, filtrage serveur, délégation et
+cloisonnement — vérifiés un par un et tenus). Corrigé sans seconde review :
+- les lectures d'autrui partent **en promesse** et en **parallèle** (en série,
+  elles rallongeaient tout le planning — ce que `f90874f` avait retiré) ; triées,
+  et une troncature au plafond **se dit** dans les journaux ;
+- la migration est **rejouable** (`drop policy if exists`) et ne donne plus au
+  client que la **lecture** : le writer unique écrit en clé de service, aucune
+  autre voie d'écriture n'existe ;
+- le vérificateur **dit** qu'une table vide ne prouve pas la RLS (règle 16) ;
+- tests ajoutés : un ménage d'un **autre compte** sur le même identifiant de bien
+  ne sort jamais ; **aucune action** (prise, fait, défait, retrait) sur le ménage
+  d'une autre, même avec ses identifiants devinés — avec un contrôle positif sur
+  son propre ménage, sans lequel le test pourrait passer à vide ;
+- sous « par bien », les biens concernés sont rappelés.
+
+**Écarts restants, notés et non traités** (à trancher par Thierry) :
+- ✓ **« Réglé le … par [nom] »** (décision de Thierry, 2 octobre) : le GET
+  rend `regle_par`, résolu par le profil de ce compte dont `member_user_id` est
+  `updated_by` — le titulaire a un tel profil comme le délégué. Une panne de
+  cette lecture ne coupe rien : la date reste, sans le nom ;
+- ✓ **deux mêmes prénoms** se distinguent par l'**initiale du nom**
+  (« Marie D. », « Marie P. ») ; un prénom unique reste seul. Le nom vient de
+  `/api/menages?contacts=1`, déjà appelé par la fiche ;
+- ⚠️ **un délégué n'atteint PAS cette carte** : toute la page Prestataires est
+  « non délégable » (`exigerCompteProprePage`, posée parce qu'en mode basculé
+  elle montrait les données de la mauvaise personne). Le serveur accepte déjà le
+  délégué `prestataires: write` ; l'écran, non. **Décision de Thierry
+  (2 octobre)** : la visibilité part en recette ainsi, et l'ouverture de la page
+  aux délégués — avec cases grisées « lecture seule » pour qui n'a que la
+  lecture — est un **lot séparé** (**dette 47**) ;
+- ⚠️ **ORDRE DE DÉPLOIEMENT** : migration appliquée et prouvée
+  (`scripts/verifier-migration-menage-visibilite.js` + `select pg_policies`)
+  **avant** toute fusion vers staging ou main, sinon la PWA de toutes les
+  prestataires répond 503.

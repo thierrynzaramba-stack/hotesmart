@@ -349,7 +349,8 @@
               <div id="vis-carte">
                 <div style="font-size:12px;margin:16px 0 6px">Ce qu'elle voit des autres</div>
                 <label class="vis-ligne"><input type="checkbox" id="vis-par-bien">
-                  <span>Les ménages pris par d'autres sur les biens dont elle reçoit les propositions</span></label>
+                  <span>Les ménages pris par d'autres sur les biens dont elle reçoit les propositions
+                    <span class="dispo-hint" id="vis-biens"></span></span></label>
                 <div class="vis-sous">Les ménages pris par :</div>
                 <div class="vis-profils" id="vis-profils"></div>
                 <p class="dispo-hint" id="vis-etat"></p>
@@ -1839,22 +1840,37 @@
     const v = (dispo && dispo.visibilite) || { par_bien: false, profils_vus: [], regle_le: null }
     const vus = new Set((v.profils_vus || []).map(String))
     document.getElementById('vis-par-bien').checked = v.par_bien === true
+    // La spec rappelle les biens concernes sous la case (constat de review) :
+    // ses liaisons ACTIVES, celles dont elle recoit les propositions.
+    const sesBiens = (liaisons || [])
+      .filter(l => String(l.provider_id) === String(dispo.profilId) && l.active !== false)
+      .map(l => ((properties || []).find(p => String(p.id) === String(l.property_id)) || {}).name)
+      .filter(Boolean)
+    document.getElementById('vis-biens').textContent = sesBiens.length
+      ? ` — aujourd'hui : ${sesBiens.join(', ')}` : ' — elle ne reçoit aujourd\'hui les propositions d\'aucun bien'
     const autres = (prestatairesProfils || [])
       .filter(p => String(p.id) !== String(dispo.profilId) && (p.actif !== false || vus.has(String(p.id))))
+    // ⚠ DEUX MEMES PRENOMS SE DISTINGUENT (demande de Thierry) : prenom + initiale
+    // du nom, seulement quand le prenom est partage — sinon le prenom seul.
+    const parPrenom = new Map()
+    for (const p of autres) parPrenom.set(p.prenom || '', (parPrenom.get(p.prenom || '') || 0) + 1)
+    const nomAffiche = p => (parPrenom.get(p.prenom || '') > 1 && p.nom)
+      ? `${p.prenom || '—'} ${String(p.nom).trim().charAt(0).toUpperCase()}.` : (p.prenom || '—')
     document.getElementById('vis-profils').innerHTML = autres.length
       ? autres.map(p => `<label class="vis-ligne"><input type="checkbox" data-vis="${echapper(p.id)}"` +
-          `${vus.has(String(p.id)) ? ' checked' : ''}><span>${echapper(p.prenom || '—')}` +
+          `${vus.has(String(p.id)) ? ' checked' : ''}><span>${echapper(nomAffiche(p))}` +
           `${p.actif === false ? ' (désactivée)' : ''}</span></label>`).join('')
       : '<div class="dispo-vide">Aucune autre prestataire sur ce compte.</div>'
     // ⚠ L'ETAT PAR DEFAUT EST DIT EN CLAIR : sans phrase, un bloc tout decoche
     // ne dit pas si c'est voulu ou si rien n'a encore ete regle.
-    const noms = autres.filter(p => vus.has(String(p.id))).map(p => p.prenom || '—')
+    const noms = autres.filter(p => vus.has(String(p.id))).map(nomAffiche)
     const parts = []
     if (v.par_bien === true) parts.push('les ménages de ses biens')
     if (noms.length) parts.push('ceux de ' + noms.join(', '))
     let etat = parts.length ? 'Elle voit aussi ' + parts.join(', et ') + ' — le bien, la date, l\'heure et le nom, rien d\'autre.'
                             : 'Elle ne voit que ses propres ménages.'
-    if (v.regle_le) etat += ` Réglé le ${new Date(v.regle_le).toLocaleDateString('fr-FR')}.`
+    if (v.regle_le) etat += ` Réglé le ${new Date(v.regle_le).toLocaleDateString('fr-FR')}` +
+                           (v.regle_par ? ` par ${v.regle_par}.` : '.')
     document.getElementById('vis-etat').textContent = etat
   }
 

@@ -26,17 +26,21 @@ create table if not exists public.menage_visibilite (
 alter table public.menage_visibilite
   enable row level security;
 
+-- Rejouable : la table est en `if not exists`,
+-- les policies aussi doivent l'etre.
+drop policy if exists menage_visibilite_select
+  on public.menage_visibilite;
+drop policy if exists menage_visibilite_write
+  on public.menage_visibilite;
+
+-- LECTURE SEULE cote client. Le writer unique
+-- (api/disponibilites.js) ecrit en cle de service :
+-- aucune policy d'ecriture, donc aucune autre
+-- voie d'ecriture que l'endpoint et ses gardes.
 create policy menage_visibilite_select
   on public.menage_visibilite
   for select to authenticated
   using (can_read(user_id, 'prestataires'));
-
-create policy menage_visibilite_write
-  on public.menage_visibilite
-  for all to authenticated
-  using (can_write(user_id, 'prestataires'))
-  with check (
-    can_write(user_id, 'prestataires'));
 
 -- Preuve (a lancer apres) :
 select column_name, data_type,
