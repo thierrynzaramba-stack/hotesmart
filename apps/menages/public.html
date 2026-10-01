@@ -148,17 +148,10 @@
                     background: var(--green); color: #fff; font-size: 10.5px;
                     font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
     .dispo-case.a-moi { background: var(--green-bg); border-color: transparent; }
-    /* ⚠ UNE PROPOSITION N'EST PAS UN MENAGE PRIS (bug du 1er octobre 2026).
-       Le menage qu'on lui propose s'affichait en vert, comme un menage acquis :
-       Lena Lou voyait « a moi » un 4 octobre qu'elle n'avait pas accepte. Ambre,
-       la couleur de « a confirmer » partout ailleurs (`badge-offre`). Le vert,
-       s'il y a aussi un menage acquis ce jour-la, l'emporte sur le fond — la
-       pastille ambre reste. */
-    .dispo-case.a-confirmer:not(.a-moi) { background: var(--amber-bg); }
-    /* ⚠ Le pointille du conge reste : sans ce `:not`, la proposition effacait
-       la seule marque qui dit « conge » en plus du ✕ (constat de review). */
-    .dispo-case.a-confirmer:not(.a-moi):not(.conge) { border-color: transparent; }
-    .dispo-compte.confirmer { background: var(--amber); }
+    /* ⚠ UNE PROPOSITION QU'ON LUI FAIT VA DANS LA BULLE, PAS DANS UNE COULEUR
+       (decision de Thierry, 1er octobre 2026). Le premier correctif la peignait
+       en ambre « a confirmer » ; ce qui n'est porte par personne se dit par la
+       bulle, comme tout menage non attribue. Aucune regle de couleur pour elle. */
     /* ⚠ SEULEMENT QUAND LE JOUR N'EST PAS ETEINT. Declaree apres le bloc du
        numero barre a specificite egale, cette regle le rallumait en plein noir
        gras sur les cases `conge.a-moi` et `a-moi.passe` — celles qui portent
@@ -303,8 +296,6 @@
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
     .agenda-item.offre { border: 1px dashed var(--primary); }
-    /* Une proposition faite A ELLE : ni « a prendre », ni acquise. */
-    .agenda-item.a-confirmer { border-color: var(--amber); background: var(--amber-bg); }
     .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
        c'est justement la qu'on va lire ce qui a change (meme regle que
@@ -2825,7 +2816,7 @@ if ("serviceWorker" in navigator) {
         // personne ne fait (la bulle).
         const miens = mesMenagesDu(j)
         // ⚠ CE QU'ON LUI PROPOSE, A PART : ni vert, ni « a moi » (bug du
-        // 1er octobre 2026). Ambre, comme le badge « A CONFIRMER » de la fiche.
+        // 1er octobre 2026). Il rejoint la bulle des menages non attribues.
         const aConfirmer = mesOffresDu(j)
         const libres = aPrendreDu(j)
         // ⚠ LE CONGE AUSSI CEDE AU MENAGE (decision 1, 18 septembre). La branche
@@ -2838,9 +2829,8 @@ if ("serviceWorker" in navigator) {
         const cls = 'dispo-case' + (congeVisible ? ' conge' : (libre ? '' : ' off')) +
                     (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') +
                     (miens.length ? ' a-moi' : '') +
-                    (aConfirmer.length ? ' a-confirmer' : '') +
                     (exc && exc.source === 'prestataire' ? ' manuel' : '') +
-                    (libres.length ? ' a-prendre' : '')
+                    (libres.length || aConfirmer.length ? ' a-prendre' : '')
         const titre = [
           congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
             : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
@@ -2852,15 +2842,17 @@ if ("serviceWorker" in navigator) {
         // une offre reste saisissable un jour ou elle s'est dite absente — la
         // prendre vaut « je me rends disponible pour celui-la ». Le jour recule,
         // pas l'offre.
-        const bulle = libres.length
-          ? `<span class="dispo-bulle">${libres.length}</span>` : ''
+        // ⚠ LA BULLE COMPTE AUSSI CE QU'ON LUI PROPOSE A ELLE : non attribue,
+        // donc dans la bulle comme le reste (decision du 1er octobre 2026). La
+        // feuille du jour, elle, les separe (« A confirmer » / « A prendre »).
+        const enAttente = libres.length + aConfirmer.length
+        const bulle = enAttente
+          ? `<span class="dispo-bulle">${enAttente}</span>` : ''
         // ⚠ UNE PASTILLE CHIFFREE, PLUS DES POINTS (lot A). Le chiffre porte la
         // charge du jour — « 2 menages mardi » se lit sans reflechir, la ou des
         // points se recomptent des trois.
-        const points = (miens.length
-          ? `<span class="dispo-compte">${miens.length}</span>` : '') +
-          (aConfirmer.length
-            ? `<span class="dispo-compte confirmer">${aConfirmer.length}</span>` : '')
+        const points = miens.length
+          ? `<span class="dispo-compte">${miens.length}</span>` : ''
         // ⚠ UNE CASE QUI PORTE UNE OFFRE RESTE TOUCHABLE MEME PASSEE... non :
         // un menage passe n'est pas recuperable (decision du 17 septembre), et
         // le serveur le refuse. On ne l'ouvre donc pas non plus ici.
@@ -3013,7 +3005,6 @@ if ("serviceWorker" in navigator) {
                // Deux fiches du meme menage finiraient par dire deux choses
                // differentes.
                ? `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
-                 `${estUneOffre(l.menage) ? ' a-confirmer' : ''}` +
                  `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                  '<span class="agenda-marques">' +

@@ -2994,10 +2994,15 @@ juste (« proposé à »).
 - `offreAMoi(b)` lit le rôle ; `mesMenagesDu` / `mesMenagesTousBiens` ne rendent
   plus que ce qu'elle porte, `mesOffresDu` / `mesOffresTousBiens` ce qu'on lui
   propose.
-- La case porte `.a-confirmer` : fond **ambre** (la couleur du badge « À
-  CONFIRMER »), pastille ambre, infobulle « N ménage(s) à confirmer ». Si un
-  ménage acquis tombe le même jour, le vert garde le fond et la pastille ambre
-  s'ajoute.
+- ⚠️ **Une proposition va dans la BULLE, sans couleur propre** (décision de
+  Thierry, 1er octobre 2026, le soir même). Le premier correctif, mis en prod,
+  la peignait en **ambre** « à confirmer » ; Thierry l'a vu sur le 4 octobre de
+  Lena Lou et a tranché : **ce que personne ne porte se dit par la bulle**,
+  comme les ménages non attribués (le 13 et le 15 à Ofuro Futari). La règle de
+  couleur est supprimée. La bulle compte les ménages à prendre **et** ce qu'on
+  lui propose à elle ; l'infobulle dit « N ménage(s) à confirmer ». **Tant
+  qu'elle n'a pas accepté, bulle ; à l'acceptation, le ménage devient le sien
+  et passe au vert.**
 - La feuille du jour range la proposition sous **« À confirmer »**, jamais sous
   « Votre ménage » ; la ligne ouvre la fiche, où elle accepte ou refuse. Le
   résumé dit « 1 à confirmer ».
@@ -3026,9 +3031,8 @@ sans seconde review selon la règle) :
   disponible » réapparaissait et tombait sur la garde « refusez-le d'abord ».
   Elle est maintenant masquée aussi sous `aConfirmer`. **Règle : changer ce
   qu'une liste contient, c'est relire tout ce que sa longueur gardait.**
-- La liste des 30 jours marque la ligne `.a-confirmer` (ambre) : elle était la
-  seule surface que le premier jet n'avait pas séparée.
-- Sur un congé, le fond ambre n'efface plus la bordure pointillée du congé.
+- La liste des 30 jours : la ligne garde le badge « À CONFIRMER » (et plus de
+  couleur propre depuis la décision de la bulle).
 - ✓ Effet voulu et désormais testé : une proposition sur un jour de repos ne
   l'allume pas (`.off` reste) — elle n'a rien accepté — et la liste peut donc
   dire « vous êtes absente » au-dessus d'une proposition.

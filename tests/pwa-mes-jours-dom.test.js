@@ -3136,7 +3136,11 @@ const propositionAMoi = (j, id = 'b1') =>
   ({ property_id: 'p1', booking_id: id, departure_date: j, role: 'propose', propose: true,
      status: 'offered', expire_le: new Date(Date.now() + 2 * 86400000).toISOString() })
 
-test('un ménage qu\'on lui PROPOSE n\'est pas vert : la case dit « à confirmer », en ambre', async () => {
+// ⚠ DÉCISION DE THIERRY, 1er OCTOBRE 2026 (le soir même) : pas de couleur pour
+// une proposition. Ce que personne ne porte va dans la BULLE, comme les ménages
+// non attribués (le 13 et le 15 à Ofuro Futari). Le premier jet la peignait en
+// ambre « à confirmer » ; la règle de couleur est supprimée.
+test('un ménage qu\'on lui PROPOSE n\'est pas vert : il va dans la bulle, sans couleur', async () => {
   const j = dans(3)
   const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
   t.seed()
@@ -3144,10 +3148,14 @@ test('un ménage qu\'on lui PROPOSE n\'est pas vert : la case dit « à confirme
   await t.chargerDisponibilites()
   const el = caseDu(w, j)
   assert.ok(!el.classList.contains('a-moi'), 'une proposition ne prend pas le fond vert du ménage acquis')
-  assert.ok(el.classList.contains('a-confirmer'), 'elle porte sa propre marque')
+  assert.ok(!el.classList.contains('a-confirmer'), 'aucune classe de couleur propre')
+  assert.ok(!el.querySelector('.dispo-compte'), 'pas de pastille de ménage acquis')
+  const b = el.querySelector('.dispo-bulle')
+  assert.ok(b, 'la proposition est dans la bulle, comme un ménage non attribué')
+  assert.ok(el.classList.contains('a-prendre'), 'la case passe devant ses voisines, sinon la bulle disparaît dessous')
+  assert.strictEqual(b.textContent, '1')
   assert.doesNotMatch(el.getAttribute('title'), /à moi/, 'l\'infobulle ne dit pas qu\'il est à elle')
   assert.match(el.getAttribute('title'), /1 ménage à confirmer/)
-  assert.ok(el.querySelector('.dispo-compte.confirmer'), 'la pastille est celle de la proposition')
 })
 
 test('le ménage qu\'elle PORTE reste vert, même quand il est proposé à quelqu\'un d\'autre', async () => {
@@ -3164,7 +3172,7 @@ test('le ménage qu\'elle PORTE reste vert, même quand il est proposé à quelq
   await t.chargerDisponibilites()
   const el = caseDu(w, j)
   assert.ok(el.classList.contains('a-moi'))
-  assert.ok(!el.classList.contains('a-confirmer'))
+  assert.ok(!el.querySelector('.dispo-bulle'), 'le sien ne va pas dans la bulle')
 })
 
 test('la feuille du jour range la proposition sous « À confirmer », pas sous « Votre ménage »', async () => {
@@ -3205,9 +3213,9 @@ test('la garde d\'absence tient sous une proposition, avec la phrase juste et sa
   assert.strictEqual(ecritures(t).length, 0, 'aucune absence n\'est partie')
 })
 
-test('une proposition sur un jour de repos ne l\'allume pas, et la liste la marque « à confirmer »', async () => {
+test('une proposition sur un jour de repos ne l\'allume pas : bulle au calendrier, « À CONFIRMER » dans la liste', async () => {
   // Elle travaille le lundi seulement ; on lui propose un ménage un autre jour.
-  // Elle n'a rien accepté : le jour reste éteint, la proposition se voit en ambre.
+  // Elle n'a rien accepté : le jour reste éteint, la proposition va dans la bulle.
   let j = dans(3)
   while (new Date(j + 'T12:00:00Z').getUTCDay() === 1) j = dans(4)
   const { w, t } = monter({ regles: [regle('r1', 'Tous les lundis', [1])],
@@ -3216,7 +3224,9 @@ test('une proposition sur un jour de repos ne l\'allume pas, et la liste la marq
   await t.charger()
   await t.chargerDisponibilites()
   assert.ok(caseDu(w, j).classList.contains('off'), 'le jour reste éteint')
-  assert.ok(caseDu(w, j).classList.contains('a-confirmer'))
+  assert.ok(caseDu(w, j).querySelector('.dispo-bulle'), 'la proposition est dans la bulle')
   const item = agenda(w).querySelector('.agenda-item[data-mien]')
-  assert.ok(item && item.classList.contains('a-confirmer'), 'la ligne des 30 jours est marquée')
+  assert.ok(item, 'la ligne des 30 jours existe et ouvre la fiche')
+  assert.match(item.textContent, /À CONFIRMER/, 'et dit qu\'il faut répondre')
+  assert.ok(!item.classList.contains('a-confirmer'), 'sans couleur propre')
 })
