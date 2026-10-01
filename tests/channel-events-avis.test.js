@@ -573,3 +573,36 @@ for (const [chemin, webhooks, methode] of [
     }
   })
 }
+
+// ─── Un echec du gestionnaire ne fait pas sortir le secret ──────────────────
+// Revue de 6b7f011 : `detail` recopiait la reponse d'echec telle quelle. Si le
+// gestionnaire recopie le corps envoye dans son message, le secret partage —
+// a l'etape 4 de la rotation, le NOUVEAU — sortait dans la reponse HTTP.
+
+for (const [chemin, webhooks, methode] of [
+  ['mise a jour', webhooksExistants(), 'PUT'],
+  ['creation', { data: [] }, 'POST']
+]) {
+  test(`register (${chemin}) : un refus qui recopie le corps ne laisse pas sortir le secret`, async () => {
+    const SECRET = process.env.CHANNEL_WEBHOOK_SECRET
+    preparer({ fetchStub: async (url, opts) => {
+      const m = opts?.method || 'GET'
+      if (url.endsWith('/webhooks') && m === 'GET') {
+        return { ok: true, status: 200, text: async () => JSON.stringify(webhooks) }
+      }
+      if (m === methode) {
+        // Refus qui recopie le corps recu, secret enchasse dans une chaine.
+        return { ok: false, status: 422, text: async () => JSON.stringify({ errors: {
+          title: 'invalide', details: `corps recu : ${opts.body}` } }) }
+      }
+      return null
+    } })
+    const handler = require('../api/channel-events')
+    const res = reponse()
+    await handler(requeteRegister(URL_MOI), res)
+
+    assert.strictEqual(res.body.ok, false)
+    assert.ok(res.body.detail, 'le detail du refus reste lisible')
+    assert.ok(!JSON.stringify(res.body).includes(SECRET), 'le secret ne doit pas sortir')
+  })
+}
