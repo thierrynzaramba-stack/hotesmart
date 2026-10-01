@@ -1,6 +1,6 @@
 # Spec — Voir les ménages pris par d'autres (app ménage)
 
-**Statut : PROPOSÉE, en attente du go de Thierry. Aucun code avant.**
+**Statut : PROPOSÉE — quatre questions tranchées par Thierry le 1er octobre 2026 ; go code après sa relecture. Aucun code avant.**
 Rédigée le 1er octobre 2026. Branche `spec-visibilite-menages`. Le code viendra
 sur une branche et un commit séparés.
 
@@ -30,10 +30,10 @@ compte » : une liaison retirée coupe la vue sur ce bien au cycle suivant.
 son périmètre de lien**. Désigner une collègue ne lui ouvre pas un bien qu'elle
 ne voit pas déjà.
 
-> **Question 1** — Les deux portées sont-elles **exclusives** (l'une OU
-> l'autre) ou **cumulables** (par bien ET par personne) ? Proposition :
-> **cumulables**, la vue étant l'union des deux. Le cas « voir tout le bien X,
-> plus Marie partout » se règle alors sans contorsion.
+**Décision 1 (Thierry, 1er octobre 2026) : les portées se CUMULENT.** Elle voit
+l'**union** des deux : tous les ménages pris par d'autres sur ses biens (si
+« par bien » est coché) **plus** ceux des prestataires désignées (sur son
+périmètre de lien).
 
 ## 3. Stockage du réglage
 
@@ -112,10 +112,10 @@ construite champ par champ, jamais un `select('*')` filtré après coup) :
 `booking_id`, identifiants internes, commentaires de l'hôte
 (`menage_comments`), photos, statut « fait », retards, avis.
 
-> **Question 2** — « L'heure du ménage » n'existe pas aujourd'hui dans la PWA.
-> La seule heure en base est `properties.checkout_time` (l'heure de départ du
-> bien, texte, souvent vide). Proposition : afficher l'heure de départ du bien
-> quand elle est renseignée, « heure non précisée » sinon.
+**Décision 2 (Thierry) : l'heure est l'heure de départ du bien**
+(`properties.checkout_time`) quand elle est renseignée ; sinon `heure: null`,
+que l'écran affiche « heure non précisée ». Il n'existe pas d'autre heure de
+ménage en base.
 
 **Aucune action** : les actions d'écriture existantes (`prendreMenage`,
 `markDone`, `retirerMonMenage`, commentaires…) gardent leurs gardes actuelles,
@@ -134,19 +134,12 @@ d'identifiant venant de `autrui` (il n'en porte pas).
 - **Au toucher**, la feuille du jour montre une section « Pris par une
   autre » : par ligne, le **bien**, la **date** et l'**heure**, et le **nom de
   la prestataire**. Rien de plus — pas de bouton, pas de lien vers une fiche.
-- **Légende complète** : vert = mes ménages ; [à confirmer] ; blanc = pris par
-  une autre.
-
-> **Question 3 — contradiction à trancher.** La demande dit « ambre pour ceux à
-> confirmer ». Or ce soir même, au vu du 4 octobre de Lena Lou, tu as décidé
-> l'inverse : **pas de couleur pour une proposition, elle va dans la bulle**
-> (`9e7b28c`, en prod). Proposition : la légende dit « vert = mes ménages ;
-> bulle = à prendre ou à confirmer ; blanc = pris par une autre », et on ne
-> ramène pas l'ambre.
->
-> **Note** : la légende de la PWA a été **retirée** le 18 septembre
-> (`d559ea4`, « chaque case dit déjà ce qu'elle est quand on la touche »). La
-> réintroduire est une décision consciente, à graver dans `menage.md`.
+- **Décision 3 (Thierry) : PAS DE LÉGENDE.** Le code visuel est : **vert** =
+  mes ménages ; **bulle** = à prendre ou à confirmer ; **blanc** = pris par une
+  autre. Aucune légende n'est ajoutée à la PWA — la décision du 18 septembre
+  (`d559ea4`, « chaque case dit déjà ce qu'elle est quand on la touche ») tient :
+  le détail affiché au toucher suffit à comprendre le blanc. Pas d'ambre
+  (décision du 1er octobre, `9e7b28c` : une proposition va dans la bulle).
 
 ## 6. Écran hôte — la fiche de la prestataire (`apps/menages/prestataires.html`)
 
@@ -174,10 +167,10 @@ sur un téléphone. Pour cette carte :
 - cases et lignes de 44 px minimum, liste des prestataires en colonne ;
 - testée à 375 px de large (pas de défilement horizontal).
 
-> **Question 4** — Le portage mobile se limite-t-il à **cette carte**, ou on en
-> profite pour rendre **toute la fiche prestataire** lisible sur téléphone ?
-> Proposition : cette carte seulement dans ce lot ; la fiche entière notée au
-> registre des dettes.
+**Décision 4 (Thierry) : cette carte seulement.** La fiche prestataire
+entière sur téléphone est **notée en dette** au registre
+(`docs/kb/dettes-v1.md`), dans le commit du code — en prévenant la session qui
+écrit ce registre, pour ne pas se marcher sur la fin du tableau.
 
 ## 8. Tests — chacun doit rougir contre le code actuel
 
@@ -207,8 +200,9 @@ Le compte des rouges de la suite reste **28** avant tout push.
 
 ## 9. Documentation
 
-- `docs/kb/menage.md` : nouvelle section (portées, stockage, liste blanche, la
-  légende réintroduite et pourquoi), dans le même commit que le code.
+- `docs/kb/menage.md` : nouvelle section (portées cumulées, stockage, liste
+  blanche, le blanc sans légende et pourquoi), dans le même commit que le code.
+- `docs/kb/dettes-v1.md` : la fiche prestataire entière sur téléphone.
 - `docs/kb/profils-et-droits.md` : le réglage relève du domaine
   `prestataires`, accessible au délégué.
 - `pages/guide.html` : un paragraphe pour l'hôte.
