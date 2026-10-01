@@ -5,7 +5,7 @@ const { markReady } = require('../lib/cron-property-status')
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
-const { alertMenageRefuse } = require('../lib/alert-notify')
+const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
@@ -29,7 +29,7 @@ const { cleJour, lireRrule } = require('../lib/cleaning/availability')
 const { validerRegle } = require('../lib/cleaning/regles')
 // ⚠ LE PENDANT DE LA DECISION DU 15 SEPTEMBRE : elle regle ses jours, l'hote
 // l'apprend, et les menages PROPOSES des jours retires reviennent au moteur.
-const { apresChangementDeRegles } = require('../lib/cleaning/apres-changement-regles')
+const { apresChangementDeRegles, unBienDElle } = require('../lib/cleaning/apres-changement-regles')
 // ⚠ LE MEME PLAFOND QUE `api/disponibilites.js`, et pour la meme raison : l'ecran
 // regle jusqu'a un an devant. Une plage au-dela n'est pas un conge, c'est une
 // saisie qui a derape — et surtout une ligne que l'ecran ne montrera jamais,
@@ -240,6 +240,10 @@ module.exports = async function handler(req, res) {
     // retire au client la possibilite d'etre interrompu au milieu.
     if (action === 'reglerMesJours') {
       return await reglerMesJours(req, res, token)
+    }
+
+    if (action === 'annoncerPlage') {
+      return await annoncerMaPlage(req, res, token)
     }
 
     if (action === 'declarerIndisponibilite' || action === 'retirerIndisponibilite') {
@@ -2199,6 +2203,9 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
     return res.status(400).json({ error: 'Disponibilité invalide' })
   }
   const available = brut === true
+  // Un jour d'un GLISSER : detail dans la tache, pas de SMS — la plage entiere
+  // sera annoncee une fois (`annoncerPlage`).
+  const envoyer = (req.body || {}).plage !== true
 
   // ⚠ PAS DE DECLARATION DANS LE PASSE. Se retirer d'un jour deja passe ne veut
   // rien dire — le menage a eu lieu ou non — et cela reecrirait l'historique sur
@@ -2216,7 +2223,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       .delete()
       .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
       .eq('date', jour).eq('source', 'prestataire')
-      .select('id')
+      .select('id, available')
     if (error) {
       console.error('[menages-public] retrait indisponibilite echec:', error.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -2241,6 +2248,8 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       if (!reste) return res.status(200).json({ success: true, date: jour, retiree: true })
       return res.status(409).json({ error: 'Cette absence a été posée par votre employeur' })
     }
+    await annoncerException(qui, jour, data[0].available === true
+      ? 'a retiré sa disponibilité exceptionnelle du' : 'a retiré son absence du', { envoyer })
     return res.status(200).json({ success: true, date: jour, retiree: true })
   }
 
@@ -2258,6 +2267,17 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   const ligne = { user_id: qui.userId, provider_id: qui.profil.id, date: jour,
                   available, source: 'prestataire' }
 
+  // ⚠ CE QUI ETAIT LA AVANT, pour ne pas annoncer un non-changement : une double
+  // tape reposant le meme sens ne doit pas renvoyer un message a l'hote. Une
+  // lecture en panne ne bloque pas l'ecriture — au pire, on annonce une fois de
+  // trop, jamais une fois de moins.
+  const { data: avant } = await supabase.from('provider_availability_exceptions')
+    .select('id, available, source')
+    .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .eq('date', jour).maybeSingle()
+  const inchange = !!(avant && avant.source === 'prestataire' && avant.available === available)
+  const annonce = available ? "s'est déclarée disponible le" : "s'est déclarée absente le"
+
   const { data: maj, error: errMaj } = await supabase.from('provider_availability_exceptions')
     .update({ available })
     .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
@@ -2269,7 +2289,10 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   }
   // ⚠ Un double tap sur un telephone est le cas NORMAL, pas une erreur : la
   // ligne etait deja la, on rend un succes.
-  if (maj && maj.length) return res.status(200).json({ success: true, exception: maj[0] })
+  if (maj && maj.length) {
+    if (!inchange) await annoncerException(qui, jour, annonce, { envoyer })
+    return res.status(200).json({ success: true, exception: maj[0] })
+  }
 
   const { data, error } = await supabase.from('provider_availability_exceptions')
     .insert(ligne).select('id, date, available, source').maybeSingle()
@@ -2283,7 +2306,61 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
     console.error('[menages-public] declaration indisponibilite echec:', error.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
+  await annoncerException(qui, jour, annonce, { envoyer })
   return res.status(200).json({ success: true, exception: data })
+}
+
+// ⚠ LA FIN D'UN GLISSER : UN SEUL SMS QUI RESUME LA PLAGE (decision de Thierry,
+// 2 octobre 2026). Les jours ont ete ecrits un par un dans la tache de l'hote,
+// marques « (glisser) », sans envoi.
+// ⚠ LE CORPS DE LA REQUETE EST IGNORE (constat de securite de la review) : le
+// resume est construit par le serveur depuis ce qu'il a lui-meme ecrit, et la
+// fenetre se consomme (`alertPlageModifiee`). Un appel forge ne peut ni dicter
+// le contenu du SMS, ni en envoyer deux pour un meme glisser.
+// ⚠ MEME DOUBLE GARDE que l'ecriture (jeton + `self_availability: 'write'`).
+async function annoncerMaPlage (req, res, token) {
+  const qui = await celleQuiDeclare(token, { ecriture: true })
+  if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
+  if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+  if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
+  let envoye = false
+  try {
+    const bien = await unBienDElle(qui.userId, qui.profil.id)
+    envoye = await alertPlageModifiee({ userId: qui.userId, providerId: qui.profil.id,
+                                        propertyId: bien, prenom: qui.profil.first_name })
+  } catch (e) {
+    console.error('[menages-public] annonce plage echec:', e.message)
+  }
+  return res.status(200).json({ success: true, envoye: !!envoye })
+}
+
+// ⚠ L'HOTE APPREND CHAQUE EXCEPTION QU'ELLE POSE OU RETIRE (decision de Thierry,
+// 2 octobre 2026) : un message a CHAQUE changement, dans les DEUX sens. Meme
+// canal que ses jours habituels (`alertReglesModifiees`) : la tache du jour
+// cumule et RESTE, l'envoi configure peut se rater.
+// ⚠ BEST-EFFORT : l'exception est deja enregistree ; une panne d'alerte ne doit
+// pas faire croire a la prestataire que son geste a echoue.
+// ⚠ ATTENDUE AVANT LA REPONSE, et c'est un cout assume : une fonction
+// serverless peut etre coupee apres la reponse, et l'annonce perdue en
+// silence. Le glisser enchaine les jours : chacun attend son envoi.
+async function annoncerException (qui, jour, verbe, { envoyer = true } = {}) {
+  try {
+    // Le bien sert au ROUTAGE de l'envoi (configuration d'alerte par bien),
+    // pas au sens. Meme fonction que pour ses jours habituels, pas une copie.
+    const bien = await unBienDElle(qui.userId, qui.profil.id)
+    const quand = new Date(jour + 'T12:00:00Z').toLocaleDateString('fr-FR',
+      { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+    const prenom = qui.profil.first_name || 'La prestataire'
+    await alertReglesModifiees({
+      userId: qui.userId, providerId: qui.profil.id, propertyId: bien, prenom,
+      // « (glisser) » : la marque que `alertPlageModifiee` relit pour resumer
+      // la plage. Le serveur ne se fie qu'a ce qu'il a lui-meme ecrit.
+      texte: `${prenom} ${verbe} ${quand}, depuis son application${envoyer ? '' : ' (glisser)'}.`,
+      rassurer: false, envoyer
+    })
+  } catch (e) {
+    console.error('[menages-public] annonce exception echec:', e.message)
+  }
 }
 
 // Une date de calendrier, et rien d'autre. ⚠ Pas de `new Date()` sur une chaine

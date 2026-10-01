@@ -3576,3 +3576,46 @@ test('une PROPOSITION qu\'on lui fait, dans la plage, n\'est pas touchée', asyn
   await glisser(w, a, c)
   assert.deepStrictEqual(declarations(t).map(x => x.corps.date).sort(), [a, c])
 })
+
+// ─── UN GLISSER = UN SEUL SMS (2 octobre 2026) ──────────────────────────────
+
+test('un glisser envoie chaque jour en `plage`, puis UNE annonce qui résume ce qui a été fait', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  await souffler(80)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 3)
+  assert.ok(d.every(x => x.corps.plage === true), 'aucun jour n\'envoie son propre SMS')
+  const ann = t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage')
+  assert.strictEqual(ann.length, 1, 'une seule annonce pour la plage')
+  // ⚠ ELLE NE DICTE RIEN : le serveur resume ce qu'il a lui-meme enregistre
+  // (constat de securite de la review du 2 octobre 2026).
+  assert.deepStrictEqual(ann[0].corps, { action: 'annoncerPlage' })
+})
+
+test('une plage ARRÊTÉE en route n\'annonce rien si rien n\'a été fait', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    echecEcriture: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  await souffler(80)
+  assert.strictEqual(t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage').length, 0)
+})
+
+test('une tape sur UN jour (hors glisser) n\'est pas marquée `plage` : son SMS part comme avant', async () => {
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.ok(!d[0].corps.plage)
+  assert.strictEqual(t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage').length, 0)
+})
