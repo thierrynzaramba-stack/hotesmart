@@ -3,13 +3,15 @@
 //
 // ⚠ CE QUI EST EN JEU. Cet écran retire quelqu'un du planning : une garde trop
 // faible laisse n'importe quel porteur de lien du compte mettre une autre
-// personne en congé, et une garde absente sur le SENS de l'exception lui permet
-// de se rendre candidate un jour que l'hôte ne lui a pas confié.
+// personne en congé, et une garde absente sur le SENS de l'exception écrirait
+// autre chose que ce qu'elle demande.
 //
 // Trois règles, et elles se tiennent :
 //   1. DOUBLE GARDE : le token identifie la personne, `self_availability` dit si
 //      elle gère ses absences. Jamais l'une sans l'autre ;
-//   2. elle déclare une ABSENCE, jamais une présence, jamais ses jours attitrés ;
+//   2. une exception d'un jour, DANS LES DEUX SENS (depuis le 1er octobre 2026 —
+//      « jamais une présence » est tombée), le sens écrit étant toujours celui
+//      demandé ; jamais ses jours attitrés ;
 //   3. elle ne défait que ce QU'ELLE a déclaré — pas ce que l'hôte a posé.
 
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
@@ -153,7 +155,12 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                 return Promise.resolve({ data: regleRetiree, error: null })
               }
               // Elle ne met à jour QUE sa propre ligne (`source = 'prestataire'`).
-              const sienne = ligneExistante === 'prestataire' && q.f.source === 'prestataire'
+              // ⚠ FIDELE A LA BASE (constat de review) : sans filtre `source`,
+              // la vraie mise a jour toucherait la ligne de l'HOTE. Le double
+              // rendait `[]` dans ce cas — le test « ne s'approprie pas » serait
+              // reste vert si le filtre disparaissait.
+              const sienne = (ligneExistante === 'prestataire' && q.f.source === 'prestataire') ||
+                             (ligneExistante === 'hote' && q.f.source === undefined)
               return Promise.resolve({ data: sienne ? [{ id: 'e1', ...row }] : [], error: null })
             }
           }
@@ -304,19 +311,77 @@ test('une PANNE de lecture des droits COUPE, elle n\'ouvre pas', async () => {
 
 // ─── Ce qu'elle déclare, et ce qu'elle ne peut pas déclarer ────────────────
 
-test('elle déclare une ABSENCE, jamais une présence', async () => {
-  // ⚠ `available` n'est PAS un paramètre : se rendre disponible un jour que
-  // l'hôte ne lui a pas confié n'aurait aucun effet (ses jours attitrés sont sa
-  // décision à lui) et lui ferait croire le contraire.
+// ⚠ BUG DU 1er OCTOBRE 2026 — LE TEST QUI SE TROUVAIT ICI FIGEAIT LE DÉFAUT.
+// Il s'intitulait « elle déclare une ABSENCE, jamais une présence » et vérifiait
+// qu'un `available: true` envoyé était répondu 200… en écrivant `false`. Le
+// serveur affirmait un succès en enregistrant l'inverse de la demande : Tiphaine,
+// absente le mercredi par récurrence, ne pouvait pas se rendre disponible un
+// mercredi précis. Règle désormais : une exception sur un jour prime sur la
+// récurrence DANS LES DEUX SENS, et le serveur écrit ce qu'on lui demande ou
+// refuse — jamais un succès sur autre chose.
+
+test('elle se déclare DISPONIBLE un jour précis : la ligne porte `available: true`', async () => {
   const { handler, etat } = preparer({})
   const res = reponse()
   await handler(ecrire({ date: DEMAIN, available: true }), res)
   assert.strictEqual(res.code, 200)
   const e = etat.ecritures.find(x => x.op === 'insert')
-  assert.strictEqual(e.row.available, false, 'toujours une absence')
+  assert.strictEqual(e.row.available, true, 'ce qui est demandé, et rien d\'autre')
   assert.strictEqual(e.row.source, 'prestataire')
   assert.strictEqual(e.row.provider_id, MARIE)
   assert.strictEqual(e.row.user_id, U)
+  assert.strictEqual(res.body.exception.available, true, 'la réponse dit ce qui a été écrit')
+})
+
+test('elle déclare une ABSENCE un jour précis : `available: false` explicite', async () => {
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ date: DEMAIN, available: false }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.ecritures.find(x => x.op === 'insert').row.available, false)
+})
+
+test('sans `available`, c\'est une absence — la PWA déjà installée continue de marcher', async () => {
+  // Un téléphone garde la page en cache : l'ancienne PWA n'envoie que la date.
+  const { handler, etat } = preparer({})
+  const res = reponse()
+  await handler(ecrire({ date: DEMAIN }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.ecritures.find(x => x.op === 'insert').row.available, false)
+})
+
+test('elle CHANGE le sens de SA propre exception : la mise à jour porte le nouveau sens', async () => {
+  // Elle s'était dite absente ; elle se rend finalement disponible ce jour-là.
+  // ⚠ L'ancien `update({ available: false })` codé en dur aurait répondu 200
+  // en laissant l'absence en place.
+  const { handler, etat } = preparer({ ligneExistante: 'prestataire' })
+  const res = reponse()
+  await handler(ecrire({ date: DEMAIN, available: true }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(x => x.op === 'update')
+  assert.strictEqual(maj.row.available, true)
+  assert.strictEqual(maj.f.source, 'prestataire', 'toujours SA ligne seulement')
+  assert.ok(!etat.ecritures.some(x => x.op === 'insert'))
+})
+
+test('une valeur INVALIDE de `available` : 400, et rien n\'est écrit', async () => {
+  // Ni chaîne, ni nombre, ni null : un booléen ou rien. Deviner le sens d'une
+  // valeur ambiguë, c'est risquer d'écrire l'inverse de la demande.
+  for (const v of ['true', 'false', 1, 0, null, 'oui', {}, []]) {
+    const { handler, etat } = preparer({})
+    const res = reponse()
+    await handler(ecrire({ date: DEMAIN, available: v }), res)
+    assert.strictEqual(res.code, 400, `available = ${JSON.stringify(v)}`)
+    assert.strictEqual(etat.ecritures.length, 0, `rien d'écrit pour ${JSON.stringify(v)}`)
+  }
+})
+
+test('se déclarer disponible ne s\'APPROPRIE PAS non plus une ligne posée par l\'hôte', async () => {
+  const { handler, etat } = preparer({ ligneExistante: 'hote' })
+  const res = reponse()
+  await handler(ecrire({ date: DEMAIN, available: true }), res)
+  assert.strictEqual(res.code, 409)
+  assert.ok(!etat.ecritures.some(x => x.op === 'upsert'))
 })
 
 test('elle ne touche jamais à ses JOURS ATTITRÉS', async () => {
