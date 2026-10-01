@@ -66,6 +66,12 @@
     /* Vue conversation */
     .conv-view { display:flex; flex-direction:column; overflow:hidden; }
     .conv-view-header { padding:14px 18px; border-bottom:0.5px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:8px; }
+    /* L'archivage des fils (lot 7 du chantier avis). */
+    .conv-vues { display:flex; gap:4px; width:100%; }
+    .conv-vues[hidden] { display:none; }
+    .conv-vue { flex:1; font-size:12px; padding:5px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text2); cursor:pointer; font-family:inherit; }
+    .conv-vue.active { background:var(--text); color:var(--bg); }
+    .conv-recherche { width:100%; font-size:12px; padding:5px 8px; border:0.5px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); font-family:inherit; }
     /* Le bandeau de l'évaluation du voyageur, sous l'en-tête du fil. */
     #bandeau-avis:empty { display:none; }
     .bandeau-avis { display:block; width:100%; text-align:left; padding:10px 18px; border:0; border-bottom:0.5px solid var(--border); background:#fff8e6; color:#7a5200; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
@@ -167,6 +173,14 @@
             <label class="sim-toggle" title="Afficher une conversation de test où vous écrivez en voyageur et l'IA répond">
               <input type="checkbox" id="sim-toggle-input"> 🧪 Simulateur
             </label>
+            <!-- ⚠ L'ARCHIVAGE (lot 7 du chantier avis, spec §9). Les onglets
+                 n'apparaissent que si le serveur dit l'archivage disponible :
+                 sans lui, tous les fils restent en boîte principale. -->
+            <div class="conv-vues" id="conv-vues" hidden>
+              <button type="button" class="conv-vue active" data-vue="boite">Boîte de réception</button>
+              <button type="button" class="conv-vue" data-vue="archives">Archivées <span id="nb-archives"></span></button>
+            </div>
+            <input type="search" id="conv-recherche" class="conv-recherche" placeholder="Rechercher un voyageur, un bien, un message…" aria-label="Rechercher une conversation">
           </div>
           <div class="conv-items" id="conv-items">
             <div class="loading">Chargement…</div>
@@ -251,6 +265,10 @@
   let conversations = []
   let allTasks = []
   let pinnedSet = new Set()
+  // L'archivage (lot 7) : disponible si le serveur le dit, la vue courante, la recherche.
+  let archivageDispo = false
+  let vueArchivees = false
+  let recherche = ''
   let currentConvId = null
   let simEnabled = false
   let simMessages = []   // tchat inversé : { type:'guest'|'ai'|'auto', content, label, time }
@@ -490,6 +508,7 @@
       ])
 
       conversations = msgRes.conversations || []
+      archivageDispo = msgRes.archivage === true
       allTasks  = taskRes.data || []
       pinnedSet = new Set((pinRes.data || []).map(p => String(p.book_id)))
 
@@ -591,6 +610,49 @@
     return `<a class="${cls}" href="tel:${escAttr(num)}" onclick="event.stopPropagation()" title="Appeler ${escAttr(brut)}">📞 ${escHtml(label || brut)}</a>`
   }
 
+  // ─── L'archivage des fils (lot 7 du chantier avis) ─────────────────────
+  const normaliser = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  function filtrerConversations (liste) {
+    const q = normaliser(recherche).trim()
+    return liste.filter(c => {
+      if (archivageDispo && (vueArchivees ? !c.archivee : c.archivee)) return false
+      if (!q) return true
+      const champs = [c.guestName, c.bookId, nomDuBien(c.propertyId)].concat((c.messages || []).map(m => m.body))
+      return champs.some(v => normaliser(v).includes(q))
+    })
+  }
+  function peindreVues () {
+    const zone = document.getElementById('conv-vues')
+    if (!zone) return
+    zone.hidden = !archivageDispo
+    if (!archivageDispo) vueArchivees = false
+    zone.querySelectorAll('[data-vue]').forEach(b => b.classList.toggle('active', (b.dataset.vue === 'archives') === vueArchivees))
+    const nb = conversations.filter(c => c.archivee).length
+    const n = document.getElementById('nb-archives')
+    if (n) n.textContent = nb ? '(' + nb + ')' : ''
+  }
+  document.querySelectorAll('#conv-vues [data-vue]').forEach(b => b.addEventListener('click', () => {
+    vueArchivees = b.dataset.vue === 'archives'
+    renderConvList()
+  }))
+  const champRecherche = document.getElementById('conv-recherche')
+  if (champRecherche) champRecherche.addEventListener('input', () => { recherche = champRecherche.value; renderConvList() })
+
+  // Archiver / désarchiver : le serveur est le SEUL writer de l'archivage, et
+  // c'est lui qui recalcule l'état — on relit, on ne devine pas.
+  async function basculerArchive (bookId, archiver) {
+    const r = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
+      body: JSON.stringify({ action: archiver ? 'archiver' : 'desarchiver', booking_id: String(bookId) }),
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) { alert(d.error || 'L’archivage n’a pas pu être enregistré.'); return }
+    vueArchivees = archiver
+    await window.loadConversations()
+    if (currentConvId === bookId) selectConv(bookId)
+  }
+
   function renderConvList() {
     const items = document.getElementById('conv-items')
     let html = ''
@@ -605,14 +667,19 @@
         </div>`
     }
 
-    if (!conversations.length && !simEnabled) {
-      items.innerHTML = '<div class="loading">Aucune conversation récente</div>'
+    // ⚠ UN SEUL FILTRE pour l'onglet et la recherche : la liste affichée est
+    // `visibles`, jamais `conversations` directement.
+    peindreVues()
+    const visibles = filtrerConversations(conversations)
+    if (!visibles.length && !simEnabled) {
+      items.innerHTML = '<div class="loading">' + (recherche ? 'Aucune conversation ne correspond'
+        : vueArchivees ? 'Aucune conversation archivée' : 'Aucune conversation récente') + '</div>'
       return
     }
 
     let groupeCourant = null
-    const aDesArrivees = conversations.some(c => !pinnedSet.has(c.bookId) && arrivalGroup(c) < 2)
-    html += conversations.map(conv => {
+    const aDesArrivees = visibles.some(c => !pinnedSet.has(c.bookId) && arrivalGroup(c) < 2)
+    html += visibles.map(conv => {
       const isActive = conv.bookId === currentConvId
       // Intercalaire quand on change de groupe d'arrivée (hors épinglées, qui
       // gardent la tête quel que soit leur séjour).
@@ -693,6 +760,9 @@
 
   window.selectConv = (bookId) => {
     currentConvId = bookId
+    // Un fil archivé s'ouvre dans l'onglet « Archivées » (lien `?conv=` compris).
+    const cible = conversations.find(c => c.bookId === bookId)
+    if (archivageDispo && cible && Boolean(cible.archivee) !== vueArchivees) vueArchivees = Boolean(cible.archivee)
     renderConvList()
     if (bookId === SIM_ID) renderSimView()
     else renderConvView(bookId)
@@ -776,6 +846,7 @@
         <div class="conv-view-actions">
           ${phoneLink(conv.guestPhone, 'btn-mini btn-phone')}
           ${peutEcrire('messages') ? `<button class="btn-mini ${isPinned ? 'active' : ''}" onclick="togglePin('${bookId}')">${isPinned ? '📌 Épinglé' : '📌 Épingler'}</button>` : ''}
+          ${archivageDispo && peutEcrire('messages') && (conv.archivee || !isPinned) ? `<button class="btn-mini" id="btn-archive" type="button">${conv.archivee ? '↩ Désarchiver' : '🗄 Archiver'}</button>` : ''}
         </div>
       </div>
       <div id="bandeau-avis"></div>
@@ -801,6 +872,8 @@
     `
     const mc = document.getElementById('conv-messages')
     if (mc) mc.scrollTop = mc.scrollHeight
+    const btnArchive = document.getElementById('btn-archive')
+    if (btnArchive) btnArchive.addEventListener('click', () => basculerArchive(String(conv.bookId), !conv.archivee))
     peindreBandeauAvis(conv)
   }
 
@@ -1024,7 +1097,9 @@
     const wasPinned = pinnedSet.has(bookId)
     if (wasPinned) {
       pinnedSet.delete(bookId)
-      await window._supabase.from('conversation_flags').delete()
+      // ⚠ UNE MISE À JOUR, PLUS UNE SUPPRESSION (lot 7) : la ligne porte aussi
+      // l'état d'archivage du fil, que supprimer effacerait.
+      await window._supabase.from('conversation_flags').update({ pinned: false })
         .eq('user_id', compteCourant()).eq('book_id', String(bookId))
     } else {
       pinnedSet.add(bookId)

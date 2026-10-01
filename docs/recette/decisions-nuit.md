@@ -77,9 +77,54 @@ bien, elle relit et publie ») ; le jeton la rend simplement possible hors
 session. Option plus prudente si besoin : une évaluation où l'hôte a répondu
 revient toujours à l'hôte.
 
+### D4 — Lot 7 : la dette E1, et l'archivage calculé à la lecture
+
+**E1.** Depuis « l'étape 4c », la messagerie lit **déjà le cœur** par défaut
+(`/api/messages`, table `messages`). Il ne reste à lire Beds24 en direct que le
+**filet de repli** `?legacy=1`. Le supprimer retirerait la roue de secours d'un
+écran critique en production, en pleine nuit : **gardé**, sa suppression est à
+ta main. L'archivage n'en dépend pas — il se calcule sur la table `messages`.
+
+**L'archivage (spec §9)** s'appuie sur les colonnes déjà posées le 25 septembre
+(`conversation_flags` : `archived_manual`, `archive_after`,
+`unarchived_manual_at`, `archived_reason`, `property_id_ref`) — **aucune
+migration neuve**. Option la plus prudente retenue : l'état automatique
+(évaluation publiée, dix jours d'inactivité) se **calcule à la lecture**
+(`lib/archivage-conversations.js`), au lieu de stocker `archive_after` à chaque
+événement — ce qui aurait ajouté un writer dans le chemin d'ingestion des
+messages, le plus sensible du produit. `api/messages.js` reste le seul writer de
+l'archivage **manuel**. La publication arrive par le journal du cœur
+(`core_events`), jamais par les tables des avis.
+
+**Non fait, et noté :** le renommage `book_id` → `booking_uid` prévu « au lot 7 »
+par la migration du 25 septembre. Il casse l'épinglage dans la fenêtre entre le
+collage et le déploiement ; il mérite un lot à lui, avec toi.
+
+**Ce que ça coûte** : à 30 000 comptes, calculer l'état à chaque lecture est plus
+cher qu'un filtre indexé sur `archive_after`. Aujourd'hui, la lecture est déjà
+bornée à six mois et 2 000 messages par compte : négligeable.
+
 ## Arrêts — ce que je n'ai pas fait, et pourquoi
 
-*(rempli au fil de la nuit)*
+### A1 — Rien n'est poussé depuis `a93273c`, et staging n'a pas reçu les lots 5 à 7
+
+Vers 3 h, la commande qui poussait la branche vers GitHub et la fusionnait dans
+`staging` a été **refusée par le mode automatique** (« publication hors de
+place »). Je n'ai pas cherché à contourner ce refus : cette nuit, plus aucun
+`push`, et le worktree `hotesmart-staging` n'a pas été touché (propre, sur
+`86adf93`, l'état laissé par la session `fix-menage`).
+
+**Conséquence.** Tout le travail des lots 5 à 7 est **commité en local** sur
+`lot-avis-1-protocole`, revu et testé, mais **pas déployé** : la recette du matin
+commence par la publication sur staging, par toi — les commandes exactes sont
+dans le plan de mise en production.
+
+### A2 — Les migrations de la nuit ne sont appliquées nulle part
+
+Aucun accès SQL à staging cette nuit (les migrations se collent à la main dans
+l'éditeur). Les deux fichiers neufs sont prêts, dans l'ordre :
+`2026-10-02-avis-eval-scope-sur-autorisation.sql`,
+`2026-10-02-avis-index-relances.sql`.
 
 ## Constats hors chantier
 
