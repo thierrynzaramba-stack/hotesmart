@@ -360,7 +360,7 @@
                   <option value="valider">Elle publie elle-même — sauf un avis négatif, qui vous revient toujours</option>
                 </select>
               </label>
-              <div class="jours-aide" id="eval-etat" style="padding-left:0;margin-top:6px"></div>
+              <div class="jours-aide" id="eval-etat" aria-live="polite" style="padding-left:0;margin-top:6px"></div>
             </div>
           </div>
 
@@ -1070,7 +1070,11 @@
   // ⚠ UNE RÉPONSE TARDIVE NE PEINT PAS LA FICHE SUIVANTE. Même garde que les
   // disponibilités : ouvrir la fiche A puis vite la fiche B faisait revenir la
   // réponse de A après celle de B.
-  let reglagesAvis = null   // { profilId }
+  // ⚠ L'OUVERTURE ELLE-MÊME SERT DE JETON, pas le seul identifiant : ouvrir A,
+  // fermer, rouvrir A laissait la première lecture, en retard, repeindre la
+  // seconde ouverture (constat de revue). `etat` garde la dernière valeur que
+  // le SERVEUR a confirmée.
+  let reglagesAvis = null   // { profilId, etat }
 
   function peindreReglagesAvis (d, message, ton) {
     const participe = document.getElementById('eval-participe')
@@ -1079,6 +1083,7 @@
     if (d) {
       participe.checked = d.eval_scope === 'selon_grille'
       pouvoir.value = d.eval_power === 'valider' ? 'valider' : 'soumettre'
+      if (reglagesAvis) reglagesAvis.etat = { eval_scope: d.eval_scope, eval_power: d.eval_power }
     }
     // Un pouvoir sans participation ne veut rien dire : on le grise.
     pouvoir.disabled = !participe.checked || participe.disabled
@@ -1097,9 +1102,10 @@
     // au milieu de l'ouverture de la fiche.
     if (!profil || typeof hsBus === 'undefined' || !hsBus) return
     const demande = profil.id
-    reglagesAvis = { profilId: demande }
+    const jeton = { profilId: demande, etat: null }
+    reglagesAvis = jeton
     const r = await hsBus.demander('avis.reglages_prestataire', { profile_id: demande })
-    if (!reglagesAvis || reglagesAvis.profilId !== demande) return   // une autre fiche a pris la main
+    if (reglagesAvis !== jeton) return   // une autre ouverture a pris la main
     // « Indisponible » : pas de droit d'écriture sur les avis, ou cœur injoignable.
     // La section reste cachée, comme le bus le demande aux apps.
     if (!r.ok) return
@@ -1118,22 +1124,29 @@
   }
 
   async function ecrireReglageAvis (champ, valeur) {
-    if (!reglagesAvis) return
-    const demande = reglagesAvis.profilId
+    const jeton = reglagesAvis
+    if (!jeton) return
+    const demande = jeton.profilId
     const participe = document.getElementById('eval-participe')
     const pouvoir = document.getElementById('eval-pouvoir')
+    // ⚠ GRISÉES JUSQU'À LA FIN, relecture comprise : une case cliquable pendant
+    // la relecture lançait une seconde écriture en parallèle.
     participe.disabled = true; pouvoir.disabled = true
     const r = await hsBus.demander('avis.reglages_prestataire', { profile_id: demande, [champ]: valeur })
-    if (!reglagesAvis || reglagesAvis.profilId !== demande) return
-    participe.disabled = false
+    if (reglagesAvis !== jeton) return
     if (!r.ok || !r.data || r.data.ok === false) {
-      // ⚠ L'ÉCRAN NE GARDE PAS UNE VALEUR QUE LE SERVEUR N'A PAS PRISE : on relit.
+      // ⚠ L'ÉCRAN NE GARDE PAS UNE VALEUR QUE LE SERVEUR N'A PAS PRISE : on relit,
+      // et si la relecture échoue aussi, on revient à la dernière valeur que le
+      // serveur a confirmée.
       const raison = (r.data && r.data.erreur) || 'Le réglage n’a pas pu être enregistré.'
       const relu = await hsBus.demander('avis.reglages_prestataire', { profile_id: demande })
-      if (!reglagesAvis || reglagesAvis.profilId !== demande) return
-      peindreReglagesAvis(relu.ok && relu.data && relu.data.ok !== false ? relu.data : null, raison, 'erreur')
+      if (reglagesAvis !== jeton) return
+      const connu = relu.ok && relu.data && relu.data.ok !== false ? relu.data : jeton.etat
+      participe.disabled = !connu
+      peindreReglagesAvis(connu, raison, 'erreur')
       return
     }
+    participe.disabled = false
     peindreReglagesAvis(r.data, 'Enregistré.')
   }
 

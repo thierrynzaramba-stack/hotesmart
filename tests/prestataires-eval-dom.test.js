@@ -134,3 +134,48 @@ test('fermer la fiche cache la section', async () => {
   t.resetForm()
   assert.strictEqual($('eval-section').style.display, 'none')
 })
+
+// ─── Constats de la revue de d6c47e7 ────────────────────────────────────────
+test('LE TEST QUI COMPTE : écriture ET relecture en échec — la case revient à la dernière valeur confirmée', async () => {
+  const { t, $ } = monterPage([
+    LU('aucun', 'soumettre'),
+    { ok: false, raison: 'indisponible' },
+    { ok: false, raison: 'indisponible' },
+  ])
+  t.seed(); t.editPrestataire(LIGNE.id); await attendre()
+  $('eval-participe').checked = true
+  changer($('eval-participe'))
+  await attendre()
+  assert.strictEqual($('eval-participe').checked, false, 'le serveur n’a rien pris')
+  assert.strictEqual($('eval-participe').disabled, false)
+  assert.match($('eval-etat').textContent, /n’a pas pu être enregistré/)
+})
+
+test('pendant la relecture, la case reste grisée', async () => {
+  let relache
+  const { t, $ } = monterPage([
+    LU('aucun', 'soumettre'),
+    { ok: true, data: { ok: false, statut: 503, erreur: 'non' } },
+    () => new Promise(r => { relache = () => r(LU('aucun', 'soumettre')) }),
+  ])
+  t.seed(); t.editPrestataire(LIGNE.id); await attendre()
+  $('eval-participe').checked = true
+  changer($('eval-participe'))
+  await attendre()
+  assert.strictEqual($('eval-participe').disabled, true, 'pas de seconde écriture possible pendant la relecture')
+  relache(); await attendre()
+  assert.strictEqual($('eval-participe').disabled, false)
+})
+
+test('une lecture en retard d’une ouverture précédente ne repeint pas la nouvelle ouverture', async () => {
+  let premiere
+  const { t, $ } = monterPage([
+    () => new Promise(r => { premiere = () => r(LU('selon_grille', 'valider')) }),
+    LU('aucun', 'soumettre'),
+  ])
+  t.seed(); t.editPrestataire(LIGNE.id)          // ouverture 1 : lecture lente
+  t.resetForm()
+  t.editPrestataire(LIGNE.id); await attendre()   // ouverture 2 : répond vite
+  premiere(); await attendre()                      // la 1 arrive en retard
+  assert.strictEqual($('eval-participe').checked, false, 'c’est la seconde ouverture qui fait foi')
+})
