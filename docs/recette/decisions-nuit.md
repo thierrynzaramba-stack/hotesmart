@@ -55,6 +55,28 @@ n'écrira jamais d'avis.
 l'avis du voyageur reçu. **Défaire** : ajouter une naissance au départ dans le
 dispatcher de réservations.
 
+### D3 — Le jeton de la PWA : ce qu'il ouvre, et ses bornes
+
+La prestataire évalue **depuis sa PWA, par son jeton**, sans compte. Cinq gardes
+avant toute écriture (profil actif par lien, ménage **à elle**, ménage **fait**,
+séjour Airbnb par Channex, **autorisée** par l'hôte), puis les mêmes règles que
+la session. Bornes prudentes ajoutées en revue :
+
+- **départ de moins de 30 jours** (la fenêtre de Channex) — un ménage ancien ne
+  fait plus naître d'évaluation ;
+- **pas de nouvel appel payant à l'IA** si ses réponses n'ont pas changé ;
+- **aucun message brut de la base** renvoyé à un porteur de lien ;
+- le bus est chargé **à la demande** dans la PWA : un échec ne peut pas faire
+  tomber « Ménage fait ».
+
+**À confirmer par Thierry (S2 de la revue).** Une prestataire « publie
+elle-même » (`valider`) dont **toute** la grille est à elle peut publier une
+évaluation que l'hôte a complétée de son côté, avant qu'il ne la valide. C'est la
+règle déjà gravée le 30 septembre (« si ses critères couvrent toute la grille du
+bien, elle relit et publie ») ; le jeton la rend simplement possible hors
+session. Option plus prudente si besoin : une évaluation où l'hôte a répondu
+revient toujours à l'hôte.
+
 ## Arrêts — ce que je n'ai pas fait, et pourquoi
 
 *(rempli au fil de la nuit)*

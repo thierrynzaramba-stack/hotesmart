@@ -194,7 +194,7 @@ export async function ouvrir (ctx = {}) {
       // ⚠ L'EVENEMENT DU COEUR, pour que l'app qui a ouvert la fenetre se mette
       // a jour (le bandeau de la messagerie, la fiche du calendrier). Sans bus
       // (tests, page sans lui), rien ne part : ce n'est pas une erreur.
-      if (r.status === 'publiee' && hsBus) {
+      if (r.status === 'publiee' && hsBus && (etat.evaluation.booking_uid || params.booking_uid)) {
         try { hsBus.emettre('avis.evaluation_publiee', { booking_uid: etat.evaluation.booking_uid || params.booking_uid, published_at: r.published_at }) } catch { /* sans auditeur, sans effet */ }
       }
       // ⚠ LA SIMULATION SE DIT. Un « Avis publie » identique dans les deux modes

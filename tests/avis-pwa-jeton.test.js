@@ -23,7 +23,10 @@ const JETON = 'jeton-regina'
 const REF = 'ref-studio'
 const BIEN = { id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900', user_id: COMPTE, provider_property_id: REF }
 const REGINA = { id: 'p1p1p1p1-1111-4111-8111-111111111111', account_user_id: COMPTE, pwa_token: JETON, access_mode: 'lien', active: true, accepted_at: null, first_name: 'Regina', eval_scope: 'selon_grille', eval_power: 'soumettre' }
-const MENAGE = { property_id: REF, booking_id: 'BK-1', departure_date: '2026-10-01' }
+// ⚠ DATE RELATIVE : le serveur lit l'horloge (fenetre de 30 jours). Une date
+// figee rougirait toute seule un mois plus tard — la regle du depot.
+const HIER = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+const MENAGE = { property_id: REF, booking_id: 'BK-1', departure_date: HIER }
 
 const MODULES = ['../api/avis', '../lib/require-permission', '../lib/permissions', '../lib/cron-shared',
                  '../lib/avis/evaluations', '../lib/avis/publication', '../lib/avis/redaction', '../lib/avis/naissance']
@@ -259,7 +262,9 @@ test('sans jeton, le module refuse (le bus dira « indisponible »)', async () =
 test('la PWA ouvre les questions par le bus, avec son jeton, apres un « Menage fait » reussi', () => {
   const fs = require('node:fs')
   const page = fs.readFileSync(path.join(__dirname, '..', 'apps', 'menages', 'public.html'), 'utf8')
-  assert.match(page, /import \{ hsBus \} from '\/shared\/hs-bus\.js'/)
+  // Le bus se charge A LA DEMANDE : un import statique ferait tomber toute la PWA s'il echouait.
+  assert.doesNotMatch(page, /^\s*import \{ hsBus \} from '\/shared\/hs-bus\.js'/m)
+  assert.match(page, /const \{ hsBus \} = await import\('\/shared\/hs-bus\.js'\)/)
   assert.match(page, /hsBus\.ouvrir\('avis\.questions_prestataire', \{\s*property_id: action\.property_id,\s*booking_id: action\.booking_id,\s*departure_date: action\.departure_date,\s*\}, \{ identite: \{ jeton: currentToken \} \}\)/)
   // Appelee dans le chemin de SUCCES de doMarkDone, pas dans le chemin hors ligne.
   const succes = page.slice(page.indexOf("showModalSuccess('Menage marque comme fait')"), page.indexOf('// Erreur reseau : on enqueue'))
@@ -292,4 +297,35 @@ test('LE TEST QUI COMPTE : par son jeton, une prestataire « soumettre » ne pub
   assert.strictEqual(res.body.motif, 'pouvoir_insuffisant')
   assert.strictEqual(prete.status, 'a_valider')
   assert.ok(!etat.ecritures.some(e => e.row && e.row.public_text === 'texte libre'))
+})
+
+// ─── Durcissements de la revue de f43e04e ───────────────────────────────────
+test('LE TEST QUI COMPTE : un menage ANCIEN ne fait plus naitre d’evaluation (fenetre de 30 jours)', async () => {
+  const ancien = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10)
+  const tables = base({
+    menages: [{ user_id: COMPTE, ...MENAGE, departure_date: ancien, provider_id: REGINA.id }],
+    menage_done: [{ user_id: COMPTE, ...MENAGE, departure_date: ancien }],
+  })
+  const etat = preparer(tables)
+  const res = await appeler(lire({ departure_date: ancien }))
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'non_evaluable')
+  assert.strictEqual(ecrituresEval(etat).length, 0)
+})
+
+test('une panne de naissance ne renvoie pas le message de la base au porteur du lien', async () => {
+  const tables = base()
+  const etat = preparer(tables)
+  // La base refuse l'ecriture : le double rend une erreur sur l'upsert.
+  const from = require('../lib/cron-shared').supabase.from
+  require('../lib/cron-shared').supabase.from = (nom) => {
+    const c = from(nom)
+    if (nom === 'guest_evaluations') c.upsert = () => ({ select: async () => ({ data: null, error: { message: 'duplicate key value violates unique constraint "x"' } }) })
+    return c
+  }
+  const res = await appeler(lire())
+  assert.strictEqual(res.code, 503)
+  assert.strictEqual(res.body.detail, undefined)
+  assert.ok(!JSON.stringify(res.body).includes('constraint'))
+  void etat
 })

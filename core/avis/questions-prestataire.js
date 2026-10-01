@@ -102,8 +102,10 @@ export async function ouvrir (ctx = {}) {
 
   return ouvrirFenetre({
     ...ctx,
-    // `booking_uid` n'est jamais envoye : le serveur trouve le sejour par le menage.
-    params: { booking_uid: 'menage' },
+    // `booking_uid` n'est jamais envoye : le serveur trouve le sejour par le
+    // menage. Vide, il ne designe rien — ni dans une URL, ni dans l'evenement
+    // `avis.evaluation_publiee` (aucune app n'a de conversation a cette cle).
+    params: { booking_uid: '' },
     deps: { ...(ctx.deps || {}), appel: traduire(appelJeton, premiere) },
   })
 }

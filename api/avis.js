@@ -706,6 +706,7 @@ async function prestataireReglagesEcrire (req, res, garde) {
 // ⚠ UNE PANNE COUPE EN 503, ELLE NE SE FAIT PAS PASSER POUR UN LIEN INVALIDE —
 // comme dans api/menages-public.js.
 const JOUR_RE = /^\d{4}-\d{2}-\d{2}$/
+const JOURS_EVALUABLES = 30
 
 async function porteurDuJeton (token) {
   const { data: pt, error } = await supabase.from('public_tokens')
@@ -788,6 +789,14 @@ async function routePwa (req, res, action) {
   if (!propertyRef || !bookingId || propertyRef.length > 100 || bookingId.length > 200 || !JOUR_RE.test(departureDate)) {
     return res.status(400).json({ error: 'Ménage non identifié (bien, réservation, date de départ)' })
   }
+  // ⚠ UN DEPART RECENT SEULEMENT. Constat de revue : un menage ancien, a elle et
+  // fait, faisait naitre une evaluation sans echeance qui restait pour toujours
+  // dans la liste de l'hote. La fenetre est celle de Channex (`expired_at =
+  // received_at + 30 jours`, mesure du 24 septembre 2026).
+  const ageJours = (Date.now() - Date.parse(departureDate + 'T00:00:00Z')) / 86400000
+  if (!(ageJours >= -1 && ageJours <= JOURS_EVALUABLES)) {
+    return res.status(409).json({ error: 'Ce séjour n’est plus évaluable.', motif: 'non_evaluable' })
+  }
 
   const porteur = await porteurDuJeton(token)
   if (porteur.statut === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -809,7 +818,8 @@ async function routePwa (req, res, action) {
       userId, propertyId: sejour.bien.id, propertyRef: sejour.bien.ref,
       bookingUid: sejour.bookingUid, provider: sejour.provider, ota: sejour.ota,
     })
-    if (n.erreur) return res.status(503).json({ error: 'Évaluation indisponible', detail: n.erreur })
+    // Le message de la base reste dans les journaux : un porteur de lien n'a pas a le lire.
+    if (n.erreur) { console.error('[avis] pwa : naissance echouee', n.erreur); return res.status(503).json({ error: 'Évaluation indisponible' }) }
   }
 
   const { data: ev, error } = await supabase.from('guest_evaluations')
@@ -1181,7 +1191,8 @@ async function evaluationLire (req, res, garde) {
         peut_publier: false,
         grille_figee: Boolean(e.grille_figee),
         grille_indisponible: true,
-        detail: err.message,
+        // Le detail technique pour l'hote seulement (constat de revue du lot 5).
+        ...(roleEtReglages(garde).role === 'hote' ? { detail: err.message } : {}),
       })
     }
   }
@@ -1290,7 +1301,14 @@ async function evaluationRepondre (req, res, garde) {
   // ne fait que soumettre ne publiera pas : l'hote redigera quand il reprendra
   // la main, et rediger ici paierait un appel au modele pour un texte qu'il
   // regenererait sans doute apres avoir rempli sa part.
-  if (role === 'prestataire' && evalPower === 'valider' && r.completRole && !r.negatif && !aDejaUnTexte) {
+  // ⚠ ET SEULEMENT SI SES REPONSES ONT CHANGE. Constat de revue : une
+  // redaction refusee (langue non couverte, modele indisponible) laisse
+  // l'evaluation sans texte ; chaque nouvel envoi des MEMES reponses relancait
+  // un appel paye — rejouable par quiconque porte le lien de la PWA.
+  const avant = e.answers_cleaner || {}
+  const apres = { ...avant, ...reponses }
+  const reponsesChangees = Object.keys(apres).some(k => apres[k] !== avant[k])
+  if (role === 'prestataire' && evalPower === 'valider' && r.completRole && !r.negatif && !aDejaUnTexte && reponsesChangees) {
     // ⚠ ON NE DEPEND PAS DE CE QUE L'ECRITURE RENVOIE. `enregistrerReponses`
     // rend la ligne relue, mais si ce retour arrivait vide ou partiel on
     // redigerait sur l'evaluation D'AVANT — donc sans les reponses qu'on vient

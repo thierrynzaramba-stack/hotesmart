@@ -832,3 +832,17 @@ test('LE TEST QUI COMPTE : une prestataire « valider » ne publie pas un texte 
   assert.ok(maj.every(e => e.row.public_text !== 'Texte invente par la prestataire.'), 'le texte libre n est jamais enregistre')
   assert.ok(!JSON.stringify(etat.provider.appels).includes('invente'), 'ni envoye')
 })
+
+test('LE TEST QUI COMPTE : renvoyer les MEMES reponses ne relance pas un appel paye a l’IA', async () => {
+  // Constat de la revue du lot 5 : une redaction refusee laisse l'evaluation sans
+  // texte ; chaque nouvel envoi des memes reponses relancait le modele —
+  // rejouable par quiconque porte le lien de la PWA.
+  const deja = evalA({ status: 'a_valider', answers_host: null, answers_cleaner: { ...PART_PRESTA }, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [deja] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-reponses' },
+    { id: deja.id, action: 'eval-reponses', reponses: { ...PART_PRESTA } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.ia.appels.length, 0, 'aucun appel au modele pour des reponses inchangees')
+})

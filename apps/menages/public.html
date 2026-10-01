@@ -755,8 +755,6 @@ if ("serviceWorker" in navigator) {
 }
 
   import { initErrorHandler } from '/shared/error-handler.js'
-  // Le cœur parle aux apps par le bus, et par lui seul (docs/kb/protocole-coeur.md).
-  import { hsBus } from '/shared/hs-bus.js'
   initErrorHandler()
 
 
@@ -2182,9 +2180,14 @@ if ("serviceWorker" in navigator) {
   // ⚠ SEULEMENT APRÈS UN SUCCÈS EN LIGNE. Hors ligne, le ménage n'est pas
   // encore fait côté serveur, et le cœur refuserait (« marquez d'abord le
   // ménage comme fait ») ; la question attendra le prochain passage.
+  // ⚠ LE BUS SE CHARGE À LA DEMANDE, pas par un import statique (constat de
+  // revue) : si son module échouait au chargement, tout le script de la PWA
+  // tomberait avec lui — « Ménage fait » compris. Ici, l'échec reste local.
   async function proposerQuestionsAvis (action) {
-    if (typeof hsBus === 'undefined' || !hsBus || !currentToken) return
+    if (!currentToken) return
     try {
+      const { hsBus } = await import('/shared/hs-bus.js')
+      if (!hsBus) return
       await hsBus.ouvrir('avis.questions_prestataire', {
         property_id: action.property_id,
         booking_id: action.booking_id,
