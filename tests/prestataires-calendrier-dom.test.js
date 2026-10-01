@@ -29,7 +29,8 @@ const AUJ = new Date(Date.UTC(auj.getUTCFullYear(), auj.getUTCMonth(), auj.getUT
 const iso = d => d.toISOString().slice(0, 10)
 const dans = n => iso(new Date(AUJ.getTime() + n * 86400000))
 
-function monterPage ({ regles = [], exceptions = [], conges = [] } = {}) {
+function monterPage ({ regles = [], exceptions = [], conges = [], visibilite = null, profils = [],
+                      refusVisibilite = null } = {}) {
   const html = fs.readFileSync(FICHIER, 'utf8')
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
   assert.ok(m, 'le script module de la page est introuvable')
@@ -41,13 +42,14 @@ function monterPage ({ regles = [], exceptions = [], conges = [] } = {}) {
     .replace(/^\s*init\(\)\s*$/gm, '')
 
   const appels = []
-  const etat = { regles, exceptions, conges }
+  const etat = { regles, exceptions, conges, visibilite }
 
   src += `
     globalThis.__c = {
       appels,
       seed () { currentSession = { access_token: 'jwt', user: { id: 'compte-1' } } },
       chargerDisponibilites, rechargerDispo, estLibre, congeDe, peindreMois,
+      poserProfils (l) { prestatairesProfils = l },
       etatDispo: () => dispo
     }
   `
@@ -85,8 +87,16 @@ function monterPage ({ regles = [], exceptions = [], conges = [] } = {}) {
         etat.regles = etat.regles.concat([{ id: 'r' + appels.length, label: 'règle', active: true,
           jours: corps.jours, cadence: corps.toutes_les_n_semaines, ancre: corps.depuis }])
       }
+      if (corps && corps.action === 'reglerVisibilite') {
+        if (refusVisibilite) {
+          return { ok: false, status: refusVisibilite.status, json: async () => ({ error: refusVisibilite.error }) }
+        }
+        etat.visibilite = { par_bien: corps.par_bien, profils_vus: corps.profils_vus, regle_le: '2026-10-02T03:00:00Z' }
+        return { ok: true, status: 200, json: async () => ({ success: true, visibilite: etat.visibilite }) }
+      }
       return { ok: true, status: 200, json: async () => ({
         regles: etat.regles, exceptions: etat.exceptions, conges: etat.conges,
+        ...(etat.visibilite ? { visibilite: etat.visibilite } : {}),
         success: true }) }
     }
     return { ok: true, status: 200, json: async () => ({ properties: [], liaisons: [], prestataires: [] }) }
@@ -577,4 +587,76 @@ test('les dates du congé se vident après la pose', async () => {
   await souffler(60)
   assert.strictEqual(w.document.getElementById('conge-du').value, '')
   assert.strictEqual(w.document.getElementById('conge-au').value, '')
+})
+
+// ─── CE QU'ELLE VOIT DES AUTRES (spec visibilité, 2 octobre 2026) ──────────
+
+const PROFILS_COMPTE = [
+  { id: PROFIL, prenom: 'Régina', actif: true },
+  { id: 'p-lola', prenom: 'Lola', actif: true },
+  { id: 'p-marc', prenom: 'Marc', actif: false },
+  { id: 'p-zoe', prenom: 'Zoé', actif: true }
+]
+async function ficheVisibilite (opts = {}) {
+  const { w, t, etat } = monterPage({ profils: PROFILS_COMPTE, ...opts })
+  t.seed()
+  t.poserProfils(PROFILS_COMPTE)
+  await t.chargerDisponibilites(PROFIL)
+  await souffler()
+  return { w, t, etat }
+}
+const casesVis = w => [...w.document.querySelectorAll('#vis-profils input[data-vis]')]
+
+test('par défaut, RIEN : tout est décoché, et l\'écran le dit en clair', async () => {
+  const { w } = await ficheVisibilite()
+  assert.strictEqual(w.document.getElementById('vis-par-bien').checked, false)
+  assert.ok(casesVis(w).every(c => !c.checked))
+  assert.match(w.document.getElementById('vis-etat').textContent, /ne voit que ses propres ménages/)
+})
+
+test('la liste propose les AUTRES prestataires actives — pas elle-même, pas une désactivée non cochée', async () => {
+  const { w } = await ficheVisibilite()
+  assert.deepStrictEqual(casesVis(w).map(c => c.dataset.vis), ['p-lola', 'p-zoe'])
+})
+
+test('une désactivée DÉJÀ désignée reste visible, pour pouvoir la décocher', async () => {
+  const { w } = await ficheVisibilite({ visibilite: { par_bien: false, profils_vus: ['p-marc'], regle_le: null } })
+  const marc = casesVis(w).find(c => c.dataset.vis === 'p-marc')
+  assert.ok(marc && marc.checked)
+  assert.match(w.document.getElementById('vis-profils').textContent, /désactivée/)
+})
+
+test('cocher écrit TOUT DE SUITE le réglage complet (les deux portées), puis le dit', async () => {
+  const { w, t } = await ficheVisibilite()
+  const lola = casesVis(w).find(c => c.dataset.vis === 'p-lola')
+  lola.checked = true
+  lola.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(60)
+  const par = w.document.getElementById('vis-par-bien')
+  par.checked = true
+  par.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(60)
+  const envois = t.appels.filter(a => a.corps && a.corps.action === 'reglerVisibilite')
+  assert.strictEqual(envois.length, 2)
+  assert.deepStrictEqual(envois[1].corps, { provider_id: PROFIL, action: 'reglerVisibilite',
+                                            par_bien: true, profils_vus: ['p-lola'] })
+  assert.match(w.document.getElementById('vis-etat').textContent, /les ménages de ses biens, et ceux de Lola/)
+  assert.match(w.document.getElementById('vis-etat').textContent, /Réglé le/)
+})
+
+test('un REFUS du serveur remet les cases dans l\'état connu — elles ne mentent pas', async () => {
+  const { w } = await ficheVisibilite({ refusVisibilite: { status: 403, error: 'Droits insuffisants' } })
+  const par = w.document.getElementById('vis-par-bien')
+  par.checked = true
+  par.dispatchEvent(new w.Event('change', { bubbles: true }))
+  await souffler(60)
+  assert.strictEqual(par.checked, false, 'la case revient à ce que le serveur sait')
+})
+
+test('MOBILE : la carte a ses règles à 600 px (44 px par ligne, prestataires en colonne)', () => {
+  const html = fs.readFileSync(FICHIER, 'utf8')
+  const media = html.slice(html.indexOf('@media (max-width: 600px)'))
+  assert.ok(html.includes('@media (max-width: 600px)'), 'un bloc mobile existe')
+  assert.match(media.slice(0, 400), /\.vis-ligne \{ min-height: 44px/)
+  assert.match(media.slice(0, 400), /\.vis-profils \{ flex-direction: column/)
 })

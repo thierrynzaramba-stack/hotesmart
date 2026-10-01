@@ -102,7 +102,7 @@ module.exports = async function handler (req, res) {
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
   if (lecture) return await lire(res, userId, providerId)
-  return await ecrire(req, res, userId, providerId)
+  return await ecrire(req, res, userId, providerId, appelant)
 }
 
 // ─── LECTURE ────────────────────────────────────────────────────────────────
@@ -188,10 +188,25 @@ async function lire (res, userId, providerId) {
     }
   })
 
+  // ⚠ CE QU'ELLE VOIT DES AUTRES (2 octobre 2026, spec visibilite). Absence de
+  // ligne = rien, comme avant. Une panne de lecture coupe (503) : afficher
+  // « elle ne voit rien » sur une panne ferait croire a l'hote qu'il peut
+  // cocher une case deja cochee — ou l'inverse.
+  const { data: vis, error: errV } = await supabase.from('menage_visibilite')
+    .select('par_bien, profils_vus, updated_at')
+    .eq('user_id', userId).eq('profile_id', providerId).maybeSingle()
+  if (errV) {
+    console.error('[disponibilites] lecture visibilite echec', errV.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
   return res.status(200).json({
     regles: reglesLisibles,
     exceptions: exceptions || [],
     conges: conges || [],
+    visibilite: vis
+      ? { par_bien: vis.par_bien === true, profils_vus: vis.profils_vus || [], regle_le: vis.updated_at }
+      : { par_bien: false, profils_vus: [], regle_le: null },
     // ⚠ Le compte se voit a l'ecran : c'est ce qui permet a l'hote de comprendre
     // « aucune regle = disponible » sans avoir a le deviner.
     aucune_regle: !reglesLisibles.some(r => r.active !== false)
@@ -199,9 +214,10 @@ async function lire (res, userId, providerId) {
 }
 
 // ─── ECRITURE ───────────────────────────────────────────────────────────────
-async function ecrire (req, res, userId, providerId) {
+async function ecrire (req, res, userId, providerId, appelant) {
   const { action } = req.body || {}
 
+  if (action === 'reglerVisibilite') return await reglerVisibilite(req, res, userId, providerId, appelant)
   if (action === 'poserRegle')      return await poserRegle(req, res, userId, providerId)
   if (action === 'retirerRegle')    return await retirerRegle(req, res, userId, providerId)
   if (action === 'poserException')  return await poserException(req, res, userId, providerId)
@@ -209,6 +225,58 @@ async function ecrire (req, res, userId, providerId) {
   if (action === 'poserConge')      return await poserConge(req, res, userId, providerId)
   if (action === 'retirerConge')    return await retirerConge(req, res, userId, providerId)
   return res.status(400).json({ error: 'Action inconnue' })
+}
+
+// ─── CE QU'ELLE VOIT DES MENAGES DES AUTRES (2 octobre 2026) ───────────────
+// Spec : docs/specs/spec-visibilite-menages-autrui.md. Deux portees qui se
+// CUMULENT : `par_bien` (les biens dont elle recoit les propositions) et
+// `profils_vus` (les prestataires designees). Rien sans ligne.
+//
+// ⚠ WRITER UNIQUE DE `menage_visibilite`, ET C'EST ICI, PAS DANS /api/membres.
+// Un membre DELEGUE avec les droits menage doit pouvoir regler cette
+// visibilite comme l'hote : la garde de ce fichier est le domaine
+// `prestataires` (`compteDelegue: true`). `/api/membres` exige `equipe`.
+//
+// ⚠ REVIEW.md regle 11 : chaque profil designe se VERIFIE (profil `lien` de CE
+// compte) — un identifiant venu du client ne s'utilise pas tel quel, sinon un
+// hote ferait voir a sa prestataire les menages d'une personne d'un autre compte.
+const PLAFOND_PROFILS_VUS = 20
+async function reglerVisibilite (req, res, userId, providerId, appelant) {
+  const { par_bien: parBien, profils_vus: brut } = req.body || {}
+  if (typeof parBien !== 'boolean') return res.status(400).json({ error: 'Réglage invalide' })
+  if (!Array.isArray(brut)) return res.status(400).json({ error: 'Réglage invalide' })
+  const profils = [...new Set(brut.map(String))]
+  if (profils.length > PLAFOND_PROFILS_VUS) return res.status(400).json({ error: 'Trop de prestataires désignées' })
+  if (profils.some(id => !UUID_RE.test(id))) return res.status(400).json({ error: 'Prestataire inconnue' })
+  if (profils.includes(String(providerId))) return res.status(400).json({ error: 'Elle voit déjà ses propres ménages' })
+
+  if (profils.length) {
+    const { data: connus, error: errP } = await supabase.from('profiles')
+      .select('id')
+      .in('id', profils)
+      .eq('account_user_id', userId)
+      .eq('access_mode', 'lien')
+    if (errP) {
+      console.error('[disponibilites] verification profils vus echec', errP.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    if ((connus || []).length !== profils.length) return res.status(400).json({ error: 'Prestataire inconnue' })
+  }
+
+  const { data, error } = await supabase.from('menage_visibilite')
+    .upsert({ user_id: userId, profile_id: providerId, par_bien: parBien, profils_vus: profils,
+              updated_at: new Date().toISOString(), updated_by: appelant || null },
+            { onConflict: 'user_id,profile_id' })
+    .select('par_bien, profils_vus, updated_at')
+    .maybeSingle()
+  if (error) {
+    console.error('[disponibilites] reglage visibilite echec', error.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  return res.status(200).json({ success: true,
+    visibilite: { par_bien: data ? data.par_bien === true : parBien,
+                  profils_vus: data ? data.profils_vus || [] : profils,
+                  regle_le: data ? data.updated_at : null } })
 }
 
 // Une regle de RECURRENCE : « le week-end, une semaine sur deux ».
