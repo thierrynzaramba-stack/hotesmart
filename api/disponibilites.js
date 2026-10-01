@@ -193,11 +193,22 @@ async function lire (res, userId, providerId) {
   // « elle ne voit rien » sur une panne ferait croire a l'hote qu'il peut
   // cocher une case deja cochee — ou l'inverse.
   const { data: vis, error: errV } = await supabase.from('menage_visibilite')
-    .select('par_bien, profils_vus, updated_at')
+    .select('par_bien, profils_vus, updated_at, updated_by')
     .eq('user_id', userId).eq('profile_id', providerId).maybeSingle()
   if (errV) {
     console.error('[disponibilites] lecture visibilite echec', errV.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // QUI a regle (demande de Thierry, 2 octobre 2026) : « Reglé le … par [nom] ».
+  // Le titulaire comme le delegue ont un profil de CE compte dont
+  // `member_user_id` est leur identifiant de session. Une panne ici ne coupe
+  // rien : on dit la date sans le nom.
+  let reglePar = null
+  if (vis && vis.updated_by) {
+    const { data: qui } = await supabase.from('profiles')
+      .select('first_name, last_name')
+      .eq('account_user_id', userId).eq('member_user_id', String(vis.updated_by)).maybeSingle()
+    if (qui) reglePar = [qui.first_name, qui.last_name].filter(Boolean).join(' ').trim() || null
   }
 
   return res.status(200).json({
@@ -205,8 +216,9 @@ async function lire (res, userId, providerId) {
     exceptions: exceptions || [],
     conges: conges || [],
     visibilite: vis
-      ? { par_bien: vis.par_bien === true, profils_vus: vis.profils_vus || [], regle_le: vis.updated_at }
-      : { par_bien: false, profils_vus: [], regle_le: null },
+      ? { par_bien: vis.par_bien === true, profils_vus: vis.profils_vus || [], regle_le: vis.updated_at,
+          regle_par: reglePar }
+      : { par_bien: false, profils_vus: [], regle_le: null, regle_par: null },
     // ⚠ Le compte se voit a l'ecran : c'est ce qui permet a l'hote de comprendre
     // « aucune regle = disponible » sans avoir a le deviner.
     aucune_regle: !reglesLisibles.some(r => r.active !== false)

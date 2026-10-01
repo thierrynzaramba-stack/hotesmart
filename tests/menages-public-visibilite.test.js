@@ -59,8 +59,12 @@ const MENAGES = [
   M('bk-lola-5', B3, LOLA, 6),                                    // hors périmètre du lien
   M('bk-vieille-6', B1, VIEILLE, 7),                              // personne désactivée
   M('bk-lena-7', B1, LENA, 8),                                    // le sien
+  M('bk-lena-7', B1, LENA, -1),                                   // le sien, passé (marquable fait)
   M('bk-lola-8', B1, LOLA, 9, { offered_to: LENA }),              // porté par Lola, proposé à Lena
-  M('bk-annule-9', B1, LOLA, 10, { status: 'cancelled' })
+  M('bk-annule-9', B1, LOLA, 10, { status: 'cancelled' }),
+  // UN AUTRE COMPTE, sur le MEME identifiant de bien (cle provider TEXT) et
+  // avec une prestataire de ce compte-la : ne doit jamais sortir.
+  M('bk-etranger-10', B1, ETRANGERE, 3, { user_id: AUTRE_COMPTE })
 ]
 const SNAP = (booking, bien, n, prenom, nom) => ({
   user_id: U, booking_id: booking, property_id: bien,
@@ -91,6 +95,7 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
     menage_visibilite: visibilite ? [{ user_id: U, profile_id: LENA, ...visibilite }] : []
   }
   const journal = []
+  const ecritures = []
   const client = {
     from (table) {
       const conds = []
@@ -118,7 +123,12 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
         }
         return true
       }))
-      const rep = () => erreurs[table] ? { data: null, error: erreurs[table] } : { data: filtrer(), error: null }
+      const rep = () => {
+        if (erreurs[table]) return { data: null, error: erreurs[table] }
+        const d = filtrer()
+        if (a.ecriture) a.ecriture.touchees = d
+        return { data: d, error: null }
+      }
       const chain = {
         select () { return chain },
         eq (col, val) { conds.push({ op: 'eq', col, val }); return chain },
@@ -129,6 +139,13 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
         gte (col, val) { conds.push({ op: 'gte', col, val }); return chain },
         lte (col, val) { conds.push({ op: 'lte', col, val }); return chain },
         or (val) { conds.push({ op: 'or', val }); return chain },
+        // Une ECRITURE se trace avec les lignes qu'elle toucherait (filtres
+        // appliques) : c'est ce qui prouve qu'aucune action n'atteint un menage
+        // d'autrui. Rien n'est modifie dans le jeu d'essai.
+        update (row) { const e = { table, op: 'update', row, conds }; ecritures.push(e); a.ecriture = e; return chain },
+        delete () { const e = { table, op: 'delete', conds }; ecritures.push(e); a.ecriture = e; return chain },
+        insert (row) { const e = { table, op: 'insert', row, conds }; ecritures.push(e); a.ecriture = e; return chain },
+        upsert (row) { const e = { table, op: 'upsert', row, conds }; ecritures.push(e); a.ecriture = e; return chain },
         order () { return chain },
         limit () { return Promise.resolve(rep()) },
         maybeSingle () { const r = rep(); return Promise.resolve({ data: r.data ? r.data[0] || null : null, error: r.error }) },
@@ -146,7 +163,7 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
                      '../lib/cleaning/apres-changement-regles']) {
     try { delete require.cache[require.resolve(mod)] } catch {}
   }
-  return { handler: require('../api/menages-public'), journal }
+  return { handler: require('../api/menages-public'), journal, ecritures }
 }
 
 function reponse () {
@@ -241,4 +258,34 @@ test('le réglage est relu À CHAQUE lecture, filtré sur CE compte et CETTE pre
   assert.strictEqual(v.length, 1)
   const eq = Object.fromEntries(v[0].conds.filter(c => c.op === 'eq').map(c => [c.col, c.val]))
   assert.deepStrictEqual(eq, { user_id: U, profile_id: LENA })
+})
+
+test('un ménage d\'un AUTRE compte, sur le même identifiant de bien, ne sort jamais — même désignée', async () => {
+  const { res } = await lirePlanning({ visibilite: { par_bien: true, profils_vus: [ETRANGERE, LOLA] } })
+  assert.ok(!JSON.stringify(res.body).includes('Autre Compte'))
+  assert.deepStrictEqual(res.body.autrui.filter(l => l.date === jour(3)).map(l => l.prestataire), ['Lola Dupont'],
+    'le 3, seule Lola (de CE compte) sort')
+})
+
+test('AUCUNE ACTION sur le ménage d\'une autre : ni prise, ni « fait », ni retrait — même avec ses identifiants', async () => {
+  // L'identifiant ne sort jamais dans `autrui` ; on suppose ici le pire : elle
+  // l'a deviné (Beds24 numérote en séquence).
+  for (const action of ['prendreMenage', 'markDone', 'markUndone', 'retirerMonMenage']) {
+    const { handler, ecritures } = preparer({ visibilite: { par_bien: true, profils_vus: [LOLA] } })
+    const res = reponse()
+    await handler({ method: 'POST', query: { token: TOKEN }, headers: {},
+                    body: { action, booking_id: 'bk-lola-1', property_id: B1, departure_date: jour(3) } }, res)
+    assert.ok(res.code >= 400, `${action} refusé (${res.code})`)
+    const touchees = ecritures.filter(e => e.table === 'menages' || e.table === 'menage_done')
+      .flatMap(e => e.touchees || [])
+      .filter(l => l.booking_id === 'bk-lola-1')
+    assert.strictEqual(touchees.length, 0, `${action} n'a touché aucune ligne du ménage de Lola`)
+  }
+  // CONTRÔLE POSITIF : sur SON ménage, « fait » passe. Sans lui, un harnais qui
+  // refuserait tout rendrait ce test vert pour rien.
+  const { handler } = preparer({ visibilite: { par_bien: true, profils_vus: [LOLA] } })
+  const res = reponse()
+  await handler({ method: 'POST', query: { token: TOKEN }, headers: {},
+                  body: { action: 'markDone', booking_id: 'bk-lena-7', property_id: B1, departure_date: jour(-1) } }, res)
+  assert.ok(res.code === null || res.code < 400, `son propre ménage, lui, se marque fait (${res.code} ${JSON.stringify(res.body)})`)
 })

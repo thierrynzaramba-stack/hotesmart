@@ -50,6 +50,7 @@ function monterPage ({ regles = [], exceptions = [], conges = [], visibilite = n
       seed () { currentSession = { access_token: 'jwt', user: { id: 'compte-1' } } },
       chargerDisponibilites, rechargerDispo, estLibre, congeDe, peindreMois,
       poserProfils (l) { prestatairesProfils = l },
+      poserBiens (props, liens) { properties = props; liaisons = liens },
       etatDispo: () => dispo
     }
   `
@@ -91,7 +92,8 @@ function monterPage ({ regles = [], exceptions = [], conges = [], visibilite = n
         if (refusVisibilite) {
           return { ok: false, status: refusVisibilite.status, json: async () => ({ error: refusVisibilite.error }) }
         }
-        etat.visibilite = { par_bien: corps.par_bien, profils_vus: corps.profils_vus, regle_le: '2026-10-02T03:00:00Z' }
+        etat.visibilite = { par_bien: corps.par_bien, profils_vus: corps.profils_vus, regle_le: '2026-10-02T03:00:00Z',
+                            regle_par: 'Thierry Nzaramba' }
         return { ok: true, status: 200, json: async () => ({ success: true, visibilite: etat.visibilite }) }
       }
       return { ok: true, status: 200, json: async () => ({
@@ -659,4 +661,38 @@ test('MOBILE : la carte a ses règles à 600 px (44 px par ligne, prestataires e
   assert.ok(html.includes('@media (max-width: 600px)'), 'un bloc mobile existe')
   assert.match(media.slice(0, 400), /\.vis-ligne \{ min-height: 44px/)
   assert.match(media.slice(0, 400), /\.vis-profils \{ flex-direction: column/)
+})
+
+test('sous « par bien », les biens dont elle reçoit les propositions sont rappelés', async () => {
+  const { w, t } = monterPage({ profils: PROFILS_COMPTE })
+  t.seed()
+  t.poserProfils(PROFILS_COMPTE)
+  t.poserBiens([{ id: '204cef81', name: 'Ofuro Futari' }, { id: '209413', name: 'La bulle' }],
+               [{ property_id: '204cef81', provider_id: PROFIL, active: true },
+                { property_id: '209413', provider_id: PROFIL, active: false }])
+  await t.chargerDisponibilites(PROFIL)
+  await souffler()
+  const txt = w.document.getElementById('vis-biens').textContent
+  assert.match(txt, /Ofuro Futari/)
+  assert.doesNotMatch(txt, /La bulle/, 'une liaison inactive n\'est pas un bien dont elle reçoit les propositions')
+})
+
+test('« Réglé le … par [nom] » s\'affiche sur la fiche', async () => {
+  const { w } = await ficheVisibilite({ visibilite: { par_bien: true, profils_vus: [], regle_le: '2026-10-02T03:00:00Z',
+                                                      regle_par: 'Thierry Nzaramba' } })
+  assert.match(w.document.getElementById('vis-etat').textContent, /Réglé le .* par Thierry Nzaramba\./)
+})
+
+test('deux prestataires au MÊME prénom se distinguent par l\'initiale du nom — les autres gardent leur prénom', async () => {
+  const profils = [{ id: PROFIL, prenom: 'Régina', nom: 'X', actif: true },
+                   { id: 'p-marie-1', prenom: 'Marie', nom: 'Durand', actif: true },
+                   { id: 'p-marie-2', prenom: 'Marie', nom: 'Petit', actif: true },
+                   { id: 'p-lola', prenom: 'Lola', nom: 'Dupont', actif: true }]
+  const { w, t } = monterPage({ profils })
+  t.seed()
+  t.poserProfils(profils)
+  await t.chargerDisponibilites(PROFIL)
+  await souffler()
+  const libelles = [...w.document.querySelectorAll('#vis-profils .vis-ligne span')].map(e => e.textContent.trim())
+  assert.deepStrictEqual(libelles, ['Marie D.', 'Marie P.', 'Lola'])
 })

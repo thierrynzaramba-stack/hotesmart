@@ -31,9 +31,12 @@ const PROFILS = [
   { id: ETRANGERE, account_user_id: 'autre-compte', access_mode: 'lien', first_name: 'Autre', active: true },
   // Un membre AVEC compte n'est pas une prestataire : on ne voit pas « ses ménages ».
   { id: EMPLOYE, account_user_id: COMPTE, access_mode: 'compte', first_name: 'Paul', active: true },
+  // Le titulaire a lui aussi un profil, dont `member_user_id` est son compte.
+  { id: 'profil-titulaire', account_user_id: COMPTE, member_user_id: COMPTE, access_mode: 'compte',
+    is_owner: true, active: true, first_name: 'Thierry', last_name: 'Nzaramba' },
   // Le délégué lui-même, membre du compte.
   { id: 'profil-membre', account_user_id: COMPTE, member_user_id: MEMBRE, access_mode: 'compte',
-    active: true, accepted_at: '2026-09-01T00:00:00Z', first_name: 'Délégué' }
+    active: true, accepted_at: '2026-09-01T00:00:00Z', first_name: 'Délégué', last_name: 'Ménage' }
 ]
 
 function preparer ({ appelant = COMPTE, droitsMembre = 'write', visibilite = null, erreurs = {} } = {}) {
@@ -157,14 +160,24 @@ test('la fiche relit le réglage : rien par défaut, la ligne sinon', async () =
   let r = reponse()
   await preparer().handler(lire(), r)
   assert.strictEqual(r.code, 200)
-  assert.deepStrictEqual(r.body.visibilite, { par_bien: false, profils_vus: [], regle_le: null })
+  assert.deepStrictEqual(r.body.visibilite, { par_bien: false, profils_vus: [], regle_le: null, regle_par: null })
   r = reponse()
   await preparer({ visibilite: { par_bien: true, profils_vus: [LOLA], updated_at: '2026-10-02T01:00:00Z' } }).handler(lire(), r)
-  assert.deepStrictEqual(r.body.visibilite, { par_bien: true, profils_vus: [LOLA], regle_le: '2026-10-02T01:00:00Z' })
+  assert.deepStrictEqual(r.body.visibilite, { par_bien: true, profils_vus: [LOLA], regle_le: '2026-10-02T01:00:00Z',
+                                              regle_par: null })
 })
 
 test('une PANNE de lecture du réglage coupe la fiche (503) — on ne montre pas un faux « rien »', async () => {
   const r = reponse()
   await preparer({ erreurs: { menage_visibilite: { message: 'timeout' } } }).handler(lire(), r)
   assert.strictEqual(r.code, 503)
+})
+
+test('« Réglé le … PAR [nom] » : le titulaire comme le délégué sont nommés', async () => {
+  for (const [qui, attendu] of [[COMPTE, 'Thierry Nzaramba'], [MEMBRE, 'Délégué Ménage']]) {
+    const r = reponse()
+    await preparer({ visibilite: { par_bien: true, profils_vus: [], updated_at: '2026-10-02T01:00:00Z', updated_by: qui } })
+      .handler(lire(), r)
+    assert.strictEqual(r.body.visibilite.regle_par, attendu)
+  }
 })
