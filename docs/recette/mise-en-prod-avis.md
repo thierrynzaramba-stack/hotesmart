@@ -24,7 +24,8 @@ archivage), planning, notifications et relances. Détail : spec §8 bis et §8 t
 - au premier poll quotidien des avis : **24 évaluations naissent**, toutes sur ton
   compte, des avis Airbnb encore ouverts (échéances du 4 au 31 octobre) ;
 - dans les cycles suivants, **les relances** de celles dont l'échéance tombe dans
-  les cinq jours : quelques-unes, **20 par passage au plus**, chacune = une tâche
+  les cinq jours : quelques-unes, **20 envois par passage au plus** (comptés
+  après avoir écarté les déjà relancées), chacune = une tâche
   + les SMS / e-mails de ta configuration d'alertes. Avant d'activer :
   `node --env-file=/home/thierry/hotesmart/.env.local scripts/relances-avis-a-blanc.js`.
 
@@ -51,8 +52,9 @@ si elle tourne) :
 ! git -C /home/thierry/hotesmart-staging push origin staging
 ```
 
-Ensuite : les deux migrations du 2 octobre sur staging, puis la recette
-(`recette-avis-complete.md`).
+⚠ **Les deux migrations du 2 octobre se collent sur staging AVANT ces commandes**,
+comme en production (sinon, une courte fenêtre où les prestataires de staging
+sont autorisées par défaut). Puis la recette (`recette-avis-complete.md`).
 
 ## 2. Le jeu de migrations de production — vérifié contre la production
 
@@ -108,9 +110,15 @@ s'il tourne contre la production.
 3. **Fusion dans `main`** — `main` n'a pas bougé depuis `b6edc9c`, fusion simulée
    sans conflit :
    Le clone principal `/home/thierry/hotesmart` est **déjà sur `main`** : aucun
-   `checkout` (clone partagé). Vérifie seulement `git status --short` avant :
+   `checkout` (clone partagé). Son `main` local est en retard (`7c97acf`) : le
+   `pull` fait avancer l'arbre commun **sous les autres sessions** — préviens-les.
+   D'abord, seul, et **lis-le** (rien ne doit apparaître hors `node_modules`) :
    ```
-   ! cd /home/thierry/hotesmart && git status --short && git pull origin main && git merge --no-ff origin/lot-avis-1-protocole && npm test 2>&1 | grep -E "^ℹ (pass|fail)"
+   ! git -C /home/thierry/hotesmart status --short
+   ```
+   Puis :
+   ```
+   ! cd /home/thierry/hotesmart && git pull origin main && git merge --no-ff origin/lot-avis-1-protocole && npm test 2>&1 | grep -E "^ℹ (pass|fail)"
    ```
    Lire le compte (28 attendus si `dce776f` est sur `main`, 34 sinon), puis :
    ```
@@ -123,9 +131,11 @@ s'il tourne contre la production.
      calendrier, une fiche prestataire — en lecture ;
    - le lendemain matin, après le poll quotidien : les **24 naissances** (compte en
      lecture seule), puis `relances-avis-a-blanc.js`.
-6. **Retour arrière** si besoin : `git revert -m 1 <merge>` sur `main`. Les
-   migrations sont additives et peuvent rester ; `eval_scope = aucun` ne coupe
-   que la participation des prestataires.
+6. **Retour arrière** si besoin : `git revert -m 1 <merge>` sur `main`. Pour
+   re-fusionner plus tard, il faudra « revert le revert ». Les migrations sont
+   additives et peuvent rester ; `eval_scope = aucun` ne coupe que la
+   participation des prestataires. Les évaluations déjà nées et les tâches
+   créées restent en base.
 
 ## 4. Ce qui reste en suspens, hors de ce plan
 

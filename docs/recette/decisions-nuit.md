@@ -132,7 +132,9 @@ l'éditeur). Les deux fichiers neufs sont prêts, dans l'ordre :
   `fix-menage` le 2 octobre 2026 à minuit : 6 tests « ANNULATION » de
   `tests/price-log.test.js` (nuits figées du 1er au 3 octobre 2026). Contre-épreuve
   `JOURS=-1` : 44/44. Compte attendu cette nuit : **34**. Non traité ici — hors
-  chantier avis, et la décision est demandée à Thierry par l'autre session.
+  chantier avis. **Refermé ensuite par la même session** (`dce776f`, branche
+  `fix-price-log-dates`), présent sur `staging`, **pas encore sur `main`** : 28
+  sur l'arbre fusionné avec staging, 34 sur `main` tant qu'il n'y est pas.
 
 ## Journal de la nuit — ce qui est fait, et comment c'est prouvé
 
@@ -145,7 +147,8 @@ membre.
 pas écrit, chaque constat de sécurité re-revu une fois, chaque test neuf rouge
 sur le code d'avant (contre-épreuve par `git archive`, ou mutation pour un module
 neuf). Compte constant : 34 rouges sur la branche (les 28 + 6 de `price-log`,
-famille calendaire refermée par la session `fix-menage` sur `dce776f`) ; **28**
+famille calendaire refermée par la session `fix-menage` sur `dce776f`, branche
+`fix-price-log-dates`, déjà sur staging, pas sur `main`) ; **28**
 sur l'arbre fusionné avec staging.
 
 | Lot | Commits | Ce que la revue a trouvé et que la nuit a fermé |

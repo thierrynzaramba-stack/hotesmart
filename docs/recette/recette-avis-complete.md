@@ -8,13 +8,14 @@
 
 ## Avant de commencer — trois gestes, dans l'ordre
 
-1. **Publier la branche sur staging** : section 1 de `mise-en-prod-avis.md`.
-   Rien n'a pu être poussé cette nuit (arrêt A1).
-2. **Coller sur staging** les deux migrations du 2 octobre, dans l'ordre :
+1. **Coller sur staging** — AVANT de publier le code, comme en production — les
+   deux migrations du 2 octobre, dans l'ordre :
    `2026-10-02-avis-eval-scope-sur-autorisation.sql`, puis
    `2026-10-02-avis-index-relances.sql`. Puis :
    `node --env-file=/home/thierry/hotesmart/.env.staging scripts/verifier-eval-scope.js`
    → `OK`, et **0 prestataire autorisée** (la migration remet tout le monde à `aucun`).
+2. **Publier la branche sur staging** : section 1 de `mise-en-prod-avis.md`.
+   Rien n'a pu être poussé cette nuit (arrêt A1).
 3. **Les preuves automatiques**, sur staging (toutes doivent dire `OK`) :
 
 ```bash
@@ -27,9 +28,10 @@ node --env-file=$E scripts/prouver-rls-avis.js           # le membre ne voit que
 node --env-file=$E scripts/prouver-lots-5-7-avis.js      # PWA, notifications, relances, archivage
 ```
 
-`prouver-lots-5-7-avis.js` a déjà passé cette nuit (14 vérifications, appelées
-en local sur la base de staging) ; relancé **après** la publication, il prouve la
-même chose avec le code réellement déployé.
+`prouver-lots-5-7-avis.js` a déjà passé cette nuit (14 vérifications). ⚠ Il
+appelle les handlers **en local**, branchés sur la base de staging : il prouve le
+code et la base, **pas le déploiement**. Le déploiement, c'est la recette humaine
+ci-dessous qui le prouve.
 
 ## Les rôles
 
@@ -61,7 +63,8 @@ clair, lien « Configuration ». **Reste à faire :**
 
 ## B. Page Avis (hôte)
 
-1. En haut, **« Évaluations du voyageur »**, « 1 évaluation(s) vous attendent. »,
+1. En haut, **« Évaluations du voyageur »**, « n évaluation(s) vous attendent. »
+   (1 avant la PWA, 2 après la section D),
    une ligne « À remplir », un délai, « Ouvrir ».
 2. En haut à droite, **« ⚙ Configuration »** → Réglages, onglet Avis directement.
 3. **Le lien direct** : ouvre `https://hotesmart-staging.vercel.app/avis?evaluer=` suivi
@@ -91,19 +94,23 @@ Ouvre le lien de `~/recette-avis-lien-pwa.txt` (idéalement sur le téléphone).
 1. Le ménage d'**hier**, « Recette — Studio Centre », est là, à elle.
 2. Ouvre-le, **« Ménage fait »**. Le message de succès, la fiche se ferme, puis
    **une fenêtre s'ouvre** : « Évaluation du voyageur », avec **seulement ses
-   questions** (Propreté au départ, Dégâts, Poubelles, Respect du couvre-feu) —
+   questions** (Propreté au départ, Dégâts, Poubelles & vaisselle, Respect du
+   couvre-feu) —
    **ni** communication, **ni** recommandation, **ni** texte public, **ni**
    numéro de séjour.
 3. Réponds à tout, **« Enregistrer mes réponses »** → « Réponses enregistrées. »
 4. **Le test qui compte.** Retourne en hôte, fiche « Recette PWA », **décoche**
-   la case. Dans la PWA, refais « Ménage fait » sur un autre ménage s'il y en a
-   un, ou recharge et rouvre : **aucune fenêtre** ne s'ouvre — elle n'est plus
-   autorisée, et le cœur se tait au lieu d'afficher un refus.
+   la case. Dans la PWA, ouvre le ménage, **annule** « Ménage fait », puis
+   **refais** « Ménage fait » : le ménage est bien marqué, et **aucune fenêtre**
+   ne s'ouvre — elle n'est plus autorisée, et le cœur se tait au lieu
+   d'afficher un refus. (Recharger ne prouve rien : les questions ne s'ouvrent
+   qu'après un « Ménage fait ».) Recoche la case ensuite.
 
 ## E. L'hôte est prévenu — lot 6
 
-En hôte, **Messagerie** → la conversation du séjour de recette (« Voyageur
-Recette »).
+En hôte, **Messagerie**. Le décor n'a pas de messages : la tâche apparaît dans
+un fil à elle, intitulé **« Évaluation du voyageur »**, étiqueté « Direct » (et
+sans bandeau d'évaluation — un fil sans dates n'en a pas).
 
 1. Une tâche : **« Recette a rempli sa part de l'évaluation du voyageur
    (Recette — Studio Centre). Ouvrez la page Avis pour la compléter et la

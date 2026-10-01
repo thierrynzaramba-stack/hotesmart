@@ -66,6 +66,8 @@ async function appeler (handler, req) { const res = reponse(); await handler(req
   const BK = `PREUVE-L57-${suffixe}`
   const JETON = `preuve-l57-${suffixe}-${Math.random().toString(36).slice(2, 10)}`
   const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  // Une nuit au moins : un sejour de zero nuit ne se dessine pas au calendrier.
+  const avantHier = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)
   const nettoyer = { profil: null, token: false, snapshot: false, menage: false, fait: false }
   let compte = null
 
@@ -89,7 +91,7 @@ async function appeler (handler, req) { const res = reponse(); await handler(req
     nettoyer.token = true
     const { error: eS } = await sb.from('bookings_snapshot').insert({
       user_id: compte, booking_id: BK, property_id: REF,
-      snapshot: { provider: 'channex', source: 'AirBNB', arrival: hier, departure: hier, firstName: 'Voyageur', lastName: 'Preuve', status: 'confirmed' },
+      snapshot: { provider: 'channex', source: 'AirBNB', arrival: avantHier, departure: hier, firstName: 'Voyageur', lastName: 'Preuve', status: 'confirmed' },
     })
     if (eS) abandon(`reservation : ${eS.message}`)
     nettoyer.snapshot = true
@@ -144,8 +146,10 @@ async function appeler (handler, req) { const res = reponse(); await handler(req
     // Les relances : on rapproche l'echeance (la fenetre est de cinq jours).
     await sb.from('guest_evaluations').update({ deadline_at: new Date(Date.now() + 3 * 86400000).toISOString() }).eq('id', nee.id)
     const { relancerEvaluations } = require('../lib/avis/notifications')
-    const b1 = await relancerEvaluations(sb)
-    const b2 = await relancerEvaluations(sb)
+    // ⚠ BORNEE AU DECOR (constat de revue) : sans `seulement`, la relance lisait
+    // TOUT staging et relancait aussi les vraies evaluations de la fenetre.
+    const b1 = await relancerEvaluations(sb, { seulement: [BK] })
+    const b2 = await relancerEvaluations(sb, { seulement: [BK] })
     const t5 = await taches(`[AUTO: avis relance J-5 ${BK}]`)
     if (t5.length !== 1) ko(`relances J-5 : ${t5.length} (1 attendue) — bilans ${JSON.stringify(b1)} ${JSON.stringify(b2)}`)
     else ok(`LOT 6 — une relance J-5, et un second passage n en ajoute pas (bilans ${b1.relancees} puis ${b2.relancees})`)
@@ -202,7 +206,7 @@ async function appeler (handler, req) { const res = reponse(); await handler(req
       if (nettoyer.token) await supprimer('public_tokens', { token: JETON })
       if (nettoyer.profil) await supprimer('profiles', { id: nettoyer.profil })
       const restes = []
-      for (const [t, c, v] of [['agent_tasks', 'book_id', BK], ['guest_evaluations', 'booking_uid', BK], ['conversation_flags', 'book_id', BK], ['menages', 'booking_id', BK], ['bookings_snapshot', 'booking_id', BK], ['public_tokens', 'token', JETON]]) {
+      for (const [t, c, v] of [['agent_tasks', 'book_id', BK], ['guest_evaluations', 'booking_uid', BK], ['conversation_flags', 'book_id', BK], ['menages', 'booking_id', BK], ['menage_done', 'booking_id', BK], ['bookings_snapshot', 'booking_id', BK], ['public_tokens', 'token', JETON], ['profiles', 'pwa_token', JETON]]) {
         const { count } = await sb.from(t).select('*', { count: 'exact', head: true }).eq(c, v)
         if (count) restes.push(`${t}: ${count}`)
       }

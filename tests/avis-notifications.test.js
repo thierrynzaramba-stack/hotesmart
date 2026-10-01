@@ -129,7 +129,7 @@ test('la requête est BORNÉE : statuts en attente, fenêtre de cinq jours, plaf
   assert.deepStrictEqual(q.dans.status, ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
   assert.strictEqual(q.gt, new Date(MAINTENANT).toISOString(), 'pas d’échéance passée')
   assert.strictEqual(q.lte, new Date(MAINTENANT + 5 * JOUR).toISOString())
-  assert.strictEqual(q.limite, 20, 'un passage du cron ne doit pas manger son budget en SMS')
+  assert.strictEqual(q.limite, 500, 'la lecture est bornee')
 })
 
 test('une panne de lecture est comptée, pas levée', async () => {
@@ -175,4 +175,31 @@ test('le J-1 donne l’heure : une échéance à 2 h ferme le jour même', async
   const { etat, sb } = base({ evaluations: [{ ...EVAL, status: 'a_valider', deadline_at: deadline }] })
   await relancerEvaluations(sb, { maintenant: MAINTENANT, deps: { envoyer: async () => {} } })
   assert.match(etat.inserts[0].summary, /avant le .* à \d\d h \d\d/)
+})
+
+test('LE TEST QUI COMPTE : 20 ENVOIS par passage, comptés APRÈS avoir écarté les déjà relancées', async () => {
+  // Vingt évaluations déjà relancées bouchaient la fenêtre : la 21e n'était jamais relancée.
+  const evaluations = Array.from({ length: 25 }, (_, i) => ({ ...EVAL, booking_uid: 'BK-' + i, status: 'a_remplir',
+    deadline_at: new Date(MAINTENANT + (2 + i / 100) * JOUR).toISOString() }))
+  const taches = evaluations.slice(0, 20).map(e => ({ user_id: 'compte-1', guest_message: marqueurRelance('J-5', e.booking_uid), book_id: e.booking_uid }))
+  const { etat, sb } = base({ evaluations, taches })
+  const b1 = await relancerEvaluations(sb, { maintenant: MAINTENANT, deps: { envoyer: async () => {} } })
+  assert.strictEqual(b1.relancees, 5, 'les cinq restantes partent, malgré les vingt déjà faites')
+  const sb2 = base({ evaluations: Array.from({ length: 30 }, (_, i) => ({ ...EVAL, booking_uid: 'N-' + i, status: 'a_remplir' })) }).sb
+  const b2 = await relancerEvaluations(sb2, { maintenant: MAINTENANT, deps: { envoyer: async () => {} } })
+  assert.strictEqual(b2.relancees, 20, 'jamais plus de vingt envois par passage')
+  void etat
+})
+
+test('`seulement` borne la relance à des séjours donnés (scripts de preuve)', async () => {
+  const { etat, sb } = base()
+  await relancerEvaluations(sb, { maintenant: MAINTENANT, seulement: ['BK-X'] })
+  const q = etat.requetes.find(r => r.table === 'guest_evaluations')
+  assert.deepStrictEqual(q.dans.booking_uid, ['BK-X'])
+})
+
+test('la tâche de l’hôte porte un titre neutre, pas le prénom de la prestataire', async () => {
+  const { etat, sb } = base()
+  await prevenirHote(sb, { evaluation: EVAL, prenomPrestataire: 'Regina', deps: { envoyer: async () => {} } })
+  assert.strictEqual(etat.inserts[0].guest_name, 'Évaluation du voyageur')
 })
